@@ -391,8 +391,8 @@ async fn schema_0021_data_upgrades_without_bulk_receipts_and_new_writers_are_fen
          UNION ALL SELECT 'model_capabilities', surface FROM model_capabilities \
          UNION ALL SELECT 'prices', provider_kind FROM prices \
          UNION ALL SELECT 'requests', surface FROM requests \
-         UNION ALL SELECT 'usage_facts', surface FROM usage_facts \
-         UNION ALL SELECT 'usage_hourly', surface FROM usage_hourly WHERE surface <> 'unknown' \
+         UNION ALL SELECT 'attempt_usage_facts', surface FROM attempt_usage_facts \
+         UNION ALL SELECT 'attempt_usage_hourly', surface FROM attempt_usage_hourly WHERE surface <> 'unknown' \
          UNION ALL SELECT 'async_media_jobs', surface FROM async_media_jobs \
          UNION ALL SELECT 'provider_revisions', kind FROM provider_revisions \
          UNION ALL SELECT 'provider_revision_capabilities', surface \
@@ -408,7 +408,7 @@ async fn schema_0021_data_upgrades_without_bulk_receipts_and_new_writers_are_fen
         assert_eq!(value, "openai", "{dimension} retained a legacy value");
     }
     let unknown_surfaces: i64 =
-        sqlx::query_scalar("SELECT count(*) FROM usage_hourly WHERE surface = 'unknown'")
+        sqlx::query_scalar("SELECT count(*) FROM attempt_usage_hourly WHERE surface = 'unknown'")
             .fetch_one(store.pool())
             .await
             .unwrap();
@@ -425,14 +425,13 @@ async fn schema_0021_data_upgrades_without_bulk_receipts_and_new_writers_are_fen
 
     let naming_constraints: Vec<String> = sqlx::query_scalar(
         "SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conname IN ( \
-           'prices_provider_kind_check', 'usage_facts_surface_check', \
-           'usage_hourly_surface_check', 'async_media_jobs_surface_check') \
+           'prices_provider_kind_check', 'async_media_jobs_surface_check') \
          ORDER BY conname",
     )
     .fetch_all(store.pool())
     .await
     .unwrap();
-    assert_eq!(naming_constraints.len(), 4);
+    assert_eq!(naming_constraints.len(), 2);
     assert!(naming_constraints.iter().all(|definition| {
         definition.contains("'openai'") && !definition.contains("'open_ai'")
     }));
@@ -516,44 +515,6 @@ async fn schema_0021_data_upgrades_without_bulk_receipts_and_new_writers_are_fen
             .unwrap();
     assert_eq!(retained_attempt_rollups, 5);
 
-    sqlx::query("DELETE FROM usage_facts WHERE id = $1")
-        .bind(fact_id)
-        .execute(store.pool())
-        .await
-        .unwrap();
-    let preserved_status: String = sqlx::query_scalar(
-        "SELECT status::text FROM request_metadata_event_receipts WHERE event_id = $1",
-    )
-    .bind(fact_id)
-    .fetch_one(store.pool())
-    .await
-    .unwrap();
-    assert_eq!(preserved_status, "fact_persisted");
-
-    let legacy_rollup_error =
-        sqlx::query("UPDATE usage_hourly SET request_count = 1 WHERE route_slug = 'retained'")
-            .execute(store.pool())
-            .await
-            .unwrap_err();
-    assert_eq!(
-        legacy_rollup_error
-            .as_database_error()
-            .and_then(sqlx::error::DatabaseError::code)
-            .as_deref(),
-        Some("55000")
-    );
-    let empty_legacy_rollup_error =
-        sqlx::query("UPDATE usage_hourly SET request_count = 1 WHERE false")
-            .execute(store.pool())
-            .await
-            .unwrap_err();
-    assert_eq!(
-        empty_legacy_rollup_error
-            .as_database_error()
-            .and_then(sqlx::error::DatabaseError::code)
-            .as_deref(),
-        Some("55000")
-    );
     let empty_legacy_gap_rollup_error =
         sqlx::query("UPDATE request_metadata_gap_hourly SET event_count = event_count WHERE false")
             .execute(store.pool())

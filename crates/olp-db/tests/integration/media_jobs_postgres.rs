@@ -1,8 +1,9 @@
 use chrono::{Duration, Utc};
 use olp_db::{
-    configuration::Error, identity::InstallationSetupInput, media_jobs::MediaJobError,
-    media_jobs::MediaJobFilters, media_jobs::MediaJobLifecycle, media_jobs::MediaJobOrder,
-    media_jobs::MediaJobState, media_jobs::MediaJobUpdate, media_jobs::NewMediaJobReservation,
+    configuration::Error, idempotency::Replayable, idempotency::Response, idempotency::fingerprint,
+    identity::InstallationSetupInput, media_jobs::MediaJobError, media_jobs::MediaJobFilters,
+    media_jobs::MediaJobLifecycle, media_jobs::MediaJobOrder, media_jobs::MediaJobState,
+    media_jobs::MediaJobUpdate, media_jobs::NewMediaJobReservation, security::envelope::MasterKey,
     security::password::hash,
 };
 use uuid::Uuid;
@@ -411,6 +412,7 @@ async fn media_job_lifecycle_is_paginated_metadata_only_and_transition_checked()
     assert!(summary.stale >= 1);
     assert!(summary.failed >= 1);
     assert_eq!(summary.unbound, 1);
+    let master_key = MasterKey::new(1, [42; 32]);
     assert!(matches!(
         store
             .disable_provider(
@@ -418,6 +420,11 @@ async fn media_job_lifecycle_is_paginated_metadata_only_and_transition_checked()
                 provider_etag,
                 owner.user_id,
                 "media-provider-disable-01",
+                Replayable::new(
+                    fingerprint(&"media-provider-disable-01").unwrap(),
+                    &master_key
+                ),
+                |_| Response::new(200, None, None, Vec::new()),
             )
             .await,
         Err(Error::InUse)

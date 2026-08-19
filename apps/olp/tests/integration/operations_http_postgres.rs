@@ -491,13 +491,16 @@ async fn operations_http_contract_is_authorized_paginated_exact_and_metadata_onl
         .await
         .unwrap();
     sqlx::query(
-        "INSERT INTO usage_hourly (
+        "INSERT INTO attempt_usage_hourly (
             bucket, route_slug, provider_id, upstream_model, operation, surface, api_key_id,
-            request_count, input_tokens, output_tokens, cached_input_tokens, media_units,
-            estimated_cost, unpriced_count, incomplete_count, currency
+            request_count, provider_request_count, model_request_count, target_request_count,
+            input_tokens, output_tokens, cached_input_tokens, media_units,
+            estimated_cost, request_unpriced_count, provider_unpriced_count, model_unpriced_count,
+            target_unpriced_count, request_incomplete_count, provider_incomplete_count,
+            model_incomplete_count, target_incomplete_count, currency
          ) VALUES (
             $1, 'archived-http', $2, 'mock-model', 'generation', 'openai', $3,
-            4, 40, 20, 5, 0, 0.000080000000, 0, 0, 'USD'
+            4, 4, 4, 4, 40, 20, 5, 0, 0.000080000000, 0, 0, 0, 0, 0, 0, 0, 0, 'USD'
          )",
     )
     .bind(archived_bucket)

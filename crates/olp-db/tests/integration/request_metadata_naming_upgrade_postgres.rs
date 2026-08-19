@@ -175,23 +175,12 @@ async fn request_metadata_schema_rename_preserves_legacy_rows() {
     .unwrap();
     assert_eq!(old_constraints, 0);
 
-    let renamed_functions: i64 = sqlx::query_scalar(
-        "SELECT count(*) FROM pg_proc \
-         WHERE proname IN ('enforce_request_metadata_fact_receipt', \
-                           'preserve_request_metadata_fact_receipt')",
-    )
-    .fetch_one(store.pool())
-    .await
-    .unwrap();
-    assert_eq!(renamed_functions, 2);
     let renamed_triggers: i64 = sqlx::query_scalar(
         "SELECT count(*) FROM pg_trigger \
-         WHERE tgname IN ('usage_facts_request_metadata_receipt_guard', \
-                          'usage_facts_preserve_request_metadata_receipt', \
-                          'request_metadata_gap_hourly_writer_guard')",
+         WHERE tgname = 'request_metadata_gap_hourly_writer_guard'",
     )
     .fetch_one(store.pool())
     .await
     .unwrap();
-    assert_eq!(renamed_triggers, 3);
+    assert_eq!(renamed_triggers, 1);
 }

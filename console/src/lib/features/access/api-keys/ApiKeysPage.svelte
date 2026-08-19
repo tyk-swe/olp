@@ -10,6 +10,7 @@
     type ApiKey,
     type ApiKeySecret
   } from '$lib/api/management/api-keys';
+  import { LogicalOperation } from '$lib/forms/operationState';
   import ApiKeyInventory from './ApiKeyInventory.svelte';
   import ApiKeyPolicyForm from './ApiKeyPolicyForm.svelte';
   import ApiKeySecretDialog from './ApiKeySecretDialog.svelte';
@@ -25,6 +26,9 @@
   } = $props();
 
   const queryClient = useQueryClient();
+  const createOperation = new LogicalOperation<ApiKeyPolicyInput, ApiKeySecret>(
+    (input, idempotencyKey) => createApiKey(input, idempotencyKey)
+  );
   let editing = $state<ApiKey | null>(null);
   let busy = $state('');
   let errorMessage = $state('');
@@ -36,15 +40,18 @@
 
   onDestroy(() => {
     secret = null;
+    createOperation.abandon();
   });
 
   function edit(key: ApiKey) {
     editing = key;
+    createOperation.abandon();
     errorMessage = notice = '';
   }
 
   function cancelEdit() {
     editing = null;
+    createOperation.abandon();
     errorMessage = '';
   }
 
@@ -58,7 +65,7 @@
         editing = null;
         notice = `${keyName} policy updated. Gateways will converge on the new runtime generation.`;
       } else {
-        secret = await createApiKey(input);
+        secret = await createOperation.execute(input);
         secretContext = 'created';
         preferredRoute = route;
       }
@@ -67,7 +74,7 @@
         queryClient.invalidateQueries({ queryKey: ['api-key-page'] })
       ]);
     } catch (error) {
-      errorMessage = message(error);
+      errorMessage = editing ? message(error) : createOperation.errorMessage;
     } finally {
       busy = '';
     }

@@ -193,3 +193,7 @@ fn sanitize(value: &str, max_len: usize) -> String {
     }
     cleaned
 }
+
+pub fn test_master_key() -> crate::security::envelope::MasterKey {
+    crate::security::envelope::MasterKey::new(1, [42; 32])
+}

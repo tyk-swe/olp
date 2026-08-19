@@ -25,7 +25,7 @@ use crate::management::{
     idempotency::{idempotency_http_response, require_idempotency_key},
     json_payload::json_payload,
     permissions::require_provider_manager,
-    preconditions::{if_match, with_etag},
+    preconditions::if_match,
     response_policy::RuntimeGenerationResponse,
     secrets::WriteOnlySecret,
     sessions::require_mutation_session,
@@ -38,6 +38,7 @@ use crate::{
 };
 
 #[derive(Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct CreateProviderRequest {
     pub name: String,
     /// `openai` uses the official endpoint; `openai_compatible` requires an
@@ -321,6 +322,12 @@ pub(crate) async fn create_provider(
     idempotency_http_response(created)
 }
 
+#[derive(Serialize)]
+struct ActivateProviderFingerprint {
+    provider_id: Uuid,
+    expected_etag: Uuid,
+}
+
 #[utoipa::path(
     post,
     path = "/api/v1/providers/{provider_id}/activate",
@@ -333,9 +340,14 @@ pub(crate) async fn create_provider(
     responses(
         (status = 200, description = "Provider activated", body = ProviderActivationResponse),
         (status = 400, description = "Required header is missing or invalid", body = Problem),
-        (status = 409, description = "Idempotency-Key was already used", body = Problem),
+        (status = 401, description = "Authentication required", body = Problem),
+        (status = 403, description = "Insufficient permissions, CSRF, or origin failure", body = Problem),
+        (status = 404, description = "Provider not found", body = Problem),
+        (status = 409, description = "Idempotency conflict or operation in progress", body = Problem),
         (status = 412, description = "ETag mismatch", body = Problem),
-        (status = 422, description = "Provider is incomplete", body = Problem)
+        (status = 422, description = "Provider is incomplete", body = Problem),
+        (status = 428, description = "If-Match header is required", body = Problem),
+        (status = 503, description = "Master key or database unavailable", body = Problem)
     )
 )]
 pub(crate) async fn activate_provider(
@@ -347,6 +359,15 @@ pub(crate) async fn activate_provider(
     require_provider_manager(&principal)?;
     let expected_etag = if_match(&headers)?;
     let idempotency_key = require_idempotency_key(&headers)?;
+    let request_fingerprint = fingerprint(&ActivateProviderFingerprint {
+        provider_id,
+        expected_etag,
+    })
+    .map_err(map_persistence)?;
+    let master_key = state
+        .master_key
+        .as_deref()
+        .ok_or_else(|| Problem::service_unavailable("master_key_not_configured"))?;
     let activated = state
         .store()
         .activate_provider(
@@ -354,21 +375,23 @@ pub(crate) async fn activate_provider(
             expected_etag,
             principal.user_id,
             idempotency_key,
+            Replayable::new(request_fingerprint, master_key),
+            |activated| {
+                IdempotencyResponse::json(
+                    StatusCode::OK.as_u16(),
+                    &ProviderActivationResponse {
+                        id: provider_id,
+                        state: "active".to_owned(),
+                        etag: activated.etag,
+                        runtime_generation: (&activated.release).into(),
+                    },
+                    Some(format!("\"{}\"", activated.etag)),
+                )
+            },
         )
         .await
         .map_err(map_configuration)?;
-    with_etag(
-        (
-            StatusCode::OK,
-            Json(ProviderActivationResponse {
-                id: provider_id,
-                state: "active".to_owned(),
-                etag: activated.etag,
-                runtime_generation: (&activated.release).into(),
-            }),
-        ),
-        activated.etag,
-    )
+    idempotency_http_response(activated)
 }
 
 #[derive(Debug, Serialize, ToSchema)]

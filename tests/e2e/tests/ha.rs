@@ -290,7 +290,7 @@ async fn await_metadata_recovery(
         let (usage_facts, recovered, pending, lag): (i64, i64, Option<i64>, Option<i64>) =
             sqlx::query_as(
                 "SELECT \
-                   (SELECT count(*)::bigint FROM usage_facts WHERE api_key_id = $1::uuid), \
+                   (SELECT count(*)::bigint FROM attempt_usage_facts WHERE api_key_id = $1::uuid), \
                    request_metadata_recovered_total, \
                    (SELECT pending_events FROM request_metadata_consumer_health WHERE singleton), \
                    (SELECT lag_events FROM request_metadata_consumer_health WHERE singleton) \
@@ -369,11 +369,13 @@ async fn usage_facts_for_key(database_url: &str, api_key_id: &str) -> Result<i64
     let mut database = sqlx::PgConnection::connect(database_url)
         .await
         .map_err(|error| format!("failed to connect for usage assertion: {error}"))?;
-    sqlx::query_scalar("SELECT count(*)::bigint FROM usage_facts WHERE api_key_id = $1::uuid")
-        .bind(api_key_id)
-        .fetch_one(&mut database)
-        .await
-        .map_err(|error| format!("failed to count logical usage facts: {error}"))
+    sqlx::query_scalar(
+        "SELECT count(*)::bigint FROM attempt_usage_facts WHERE api_key_id = $1::uuid",
+    )
+    .bind(api_key_id)
+    .fetch_one(&mut database)
+    .await
+    .map_err(|error| format!("failed to count logical usage facts: {error}"))
 }
 
 async fn prove_shared_valkey_isolation(
@@ -551,7 +553,11 @@ async fn metadata_processed(database_url: &str) -> Result<i64, String> {
 }
 
 async fn usage_fact_count(database_url: &str) -> Result<i64, String> {
-    database_scalar(database_url, "SELECT count(*)::bigint FROM usage_facts").await
+    database_scalar(
+        database_url,
+        "SELECT count(*)::bigint FROM attempt_usage_facts",
+    )
+    .await
 }
 
 async fn database_scalar(database_url: &str, query: &'static str) -> Result<i64, String> {

@@ -5,8 +5,8 @@ use uuid::Uuid;
 use crate::{
     error::Error as PersistenceError,
     idempotency::{
-        Outcome, Replayable, ReplayableIdempotencyClaim, Response, claim_idempotency,
-        claim_replayable_idempotency, complete_idempotency, complete_replayable_idempotency,
+        Outcome, Replayable, ReplayableIdempotencyClaim, Response, claim_replayable_idempotency,
+        complete_replayable_idempotency,
     },
     runtime::compiler::{compile_and_publish_runtime_in_transaction, lock_runtime_publication},
     store::Store,
@@ -213,13 +213,18 @@ impl Store {
         Ok((etag, slug))
     }
 
-    pub async fn activate_route_draft(
+    pub async fn activate_route_draft<F>(
         &self,
         draft_id: Uuid,
         expected_etag: Uuid,
         actor: Uuid,
         idempotency_key: &str,
-    ) -> Result<RouteActivated, Error> {
+        replay: Replayable<'_>,
+        build_response: F,
+    ) -> Result<Outcome<RouteActivated>, Error>
+    where
+        F: FnOnce(&RouteActivated) -> Result<Response, PersistenceError>,
+    {
         let mut transaction = self
             .pool()
             .begin_with("BEGIN ISOLATION LEVEL READ COMMITTED")
@@ -230,8 +235,29 @@ impl Store {
         // With the publication lock held, READ COMMITTED observes the exact
         // active revisions that won the lock immediately before this draft.
         lock_runtime_publication(&mut transaction).await?;
-        if !claim_idempotency(&mut transaction, actor, "route.activate", idempotency_key).await? {
-            return Err(Error::IdempotencyConflict);
+        match claim_replayable_idempotency(
+            &mut transaction,
+            actor,
+            "route.activate",
+            idempotency_key,
+            replay.request_fingerprint(),
+            replay.master_key(),
+        )
+        .await?
+        {
+            ReplayableIdempotencyClaim::Execute => {}
+            ReplayableIdempotencyClaim::Replay(response) => {
+                transaction.rollback().await?;
+                return Ok(Outcome::Replayed(response));
+            }
+            ReplayableIdempotencyClaim::Conflict => {
+                transaction.rollback().await?;
+                return Err(Error::IdempotencyConflict);
+            }
+            ReplayableIdempotencyClaim::InProgress => {
+                transaction.rollback().await?;
+                return Err(Error::IdempotencyInProgress);
+            }
         }
         sqlx::query!(
             "SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0))",
@@ -332,21 +358,28 @@ impl Store {
         )
         .execute(&mut *transaction)
         .await?;
-        complete_idempotency(
-            &mut transaction,
-            actor,
-            "route.activate",
-            idempotency_key,
-            &route_id.to_string(),
-        )
-        .await?;
         let release = compile_and_publish_runtime_in_transaction(&mut transaction, actor).await?;
-        transaction.commit().await?;
-        Ok(RouteActivated {
+        let activated = RouteActivated {
             route_id,
             revision_id,
             revision,
             release,
+        };
+        let response = build_response(&activated)?;
+        complete_replayable_idempotency(
+            &mut transaction,
+            actor,
+            "route.activate",
+            idempotency_key,
+            replay.request_fingerprint(),
+            replay.master_key(),
+            &response,
+        )
+        .await?;
+        transaction.commit().await?;
+        Ok(Outcome::Executed {
+            value: activated,
+            response,
         })
     }
 }

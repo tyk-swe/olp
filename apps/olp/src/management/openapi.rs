@@ -94,6 +94,15 @@ fn complete_contract(document: utoipa::openapi::OpenApi) -> serde_json::Value {
                             == Some("If-Match")
                     })
                 });
+            let has_idempotency_key = operation
+                .get("parameters")
+                .and_then(serde_json::Value::as_array)
+                .is_some_and(|parameters| {
+                    parameters.iter().any(|parameter| {
+                        parameter.get("name").and_then(serde_json::Value::as_str)
+                            == Some("Idempotency-Key")
+                    })
+                });
             if let Some(responses) = operation
                 .get_mut("responses")
                 .and_then(serde_json::Value::as_object_mut)
@@ -116,6 +125,25 @@ fn complete_contract(document: utoipa::openapi::OpenApi) -> serde_json::Value {
                                 }),
                             );
                     }
+                }
+                if has_if_match {
+                    responses
+                        .entry("412")
+                        .or_insert_with(|| problem_response("Precondition failed: ETag mismatch."));
+                    responses
+                        .entry("428")
+                        .or_insert_with(|| problem_response("If-Match header is required."));
+                }
+                if has_idempotency_key {
+                    responses.entry("400").or_insert_with(|| {
+                        problem_response("Idempotency-Key header is missing or malformed.")
+                    });
+                    responses.entry("409").or_insert_with(|| {
+                        problem_response("Idempotency conflict or operation in progress.")
+                    });
+                    responses
+                        .entry("503")
+                        .or_insert_with(|| problem_response("Master key or database unavailable."));
                 }
                 if !is_public {
                     responses

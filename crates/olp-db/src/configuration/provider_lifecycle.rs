@@ -8,8 +8,8 @@ use uuid::Uuid;
 use crate::{
     error::Error as PersistenceError,
     idempotency::{
-        Outcome, Replayable, ReplayableIdempotencyClaim, Response, claim_idempotency,
-        claim_replayable_idempotency, complete_idempotency, complete_replayable_idempotency,
+        Outcome, Replayable, ReplayableIdempotencyClaim, Response, claim_replayable_idempotency,
+        complete_replayable_idempotency,
     },
     runtime::compiler::{compile_and_publish_runtime_in_transaction, prepare_runtime_mutation},
     security::envelope::EncryptedSecret,
@@ -197,28 +197,48 @@ impl Store {
         })
     }
 
-    pub async fn activate_provider(
+    pub async fn activate_provider<F>(
         &self,
         provider_id: Uuid,
         expected_etag: Uuid,
         actor: Uuid,
         idempotency_key: &str,
-    ) -> Result<ProviderActivated, Error> {
+        replay: Replayable<'_>,
+        build_response: F,
+    ) -> Result<Outcome<ProviderActivated>, Error>
+    where
+        F: FnOnce(&ProviderActivated) -> Result<Response, PersistenceError>,
+    {
         let new_etag = Uuid::now_v7();
         let mut transaction = self
             .pool()
             .begin_with("BEGIN ISOLATION LEVEL READ COMMITTED")
             .await?;
-        prepare_runtime_mutation(&mut transaction).await?;
-        if !claim_idempotency(
+        match claim_replayable_idempotency(
             &mut transaction,
             actor,
             "provider.activate",
             idempotency_key,
+            replay.request_fingerprint(),
+            replay.master_key(),
         )
         .await?
         {
-            return Err(Error::IdempotencyConflict);
+            ReplayableIdempotencyClaim::Execute => {
+                prepare_runtime_mutation(&mut transaction).await?;
+            }
+            ReplayableIdempotencyClaim::Replay(response) => {
+                transaction.rollback().await?;
+                return Ok(Outcome::Replayed(response));
+            }
+            ReplayableIdempotencyClaim::Conflict => {
+                transaction.rollback().await?;
+                return Err(Error::IdempotencyConflict);
+            }
+            ReplayableIdempotencyClaim::InProgress => {
+                transaction.rollback().await?;
+                return Err(Error::IdempotencyInProgress);
+            }
         }
         let provider = sqlx::query!(
             "SELECT p.name, p.kind, p.state::text AS \"state!\", p.endpoint, p.cloud_region, \
@@ -430,19 +450,26 @@ impl Store {
         )
         .execute(&mut *transaction)
         .await?;
-        complete_idempotency(
+        let release = compile_and_publish_runtime_in_transaction(&mut transaction, actor).await?;
+        let activated = ProviderActivated {
+            etag: new_etag,
+            release,
+        };
+        let response = build_response(&activated)?;
+        complete_replayable_idempotency(
             &mut transaction,
             actor,
             "provider.activate",
             idempotency_key,
-            &provider_id.to_string(),
+            replay.request_fingerprint(),
+            replay.master_key(),
+            &response,
         )
         .await?;
-        let release = compile_and_publish_runtime_in_transaction(&mut transaction, actor).await?;
         transaction.commit().await?;
-        Ok(ProviderActivated {
-            etag: new_etag,
-            release,
+        Ok(Outcome::Executed {
+            value: activated,
+            response,
         })
     }
 }

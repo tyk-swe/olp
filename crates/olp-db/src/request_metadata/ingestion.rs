@@ -58,16 +58,6 @@ impl AttemptChargeStatus {
     }
 }
 
-struct PersistedAttemptFact<'a> {
-    attempt: &'a RequestAttemptMetadata,
-    usage: ValidatedAttemptUsage,
-    charge_status: AttemptChargeStatus,
-    estimated_cost: Option<Decimal>,
-    unpriced: bool,
-    pricing_revision_id: Option<Uuid>,
-    currency: Option<String>,
-}
-
 struct ValidatedRequestMetadata<'a> {
     has_attempts: bool,
     status_code: Option<i32>,
@@ -291,13 +281,10 @@ impl Store {
             return Ok(Outcome::Persisted);
         }
 
-        let persisted_facts =
-            insert_attempt_usage_facts(&mut transaction, event, &validated.attempts).await?;
+        insert_attempt_usage_facts(&mut transaction, event, &validated.attempts).await?;
 
         recompute_attempt_fact_markers(&mut transaction, event.request_id).await?;
 
-        insert_compatibility_usage_fact_if_representable(&mut transaction, event, &persisted_facts)
-            .await?;
         mark_request_metadata_receipt_persisted(&mut transaction, event.event_id, event.request_id)
             .await?;
         transaction.commit().await?;
@@ -360,11 +347,11 @@ async fn insert_request_metadata_rows(
     Ok(())
 }
 
-async fn insert_attempt_usage_facts<'a>(
+async fn insert_attempt_usage_facts(
     transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    event: &'a Event,
-    attempts: &[ValidatedAttempt<'a>],
-) -> Result<Vec<PersistedAttemptFact<'a>>, Error> {
+    event: &Event,
+    attempts: &[ValidatedAttempt<'_>],
+) -> Result<(), Error> {
     sqlx::query!(
         "INSERT INTO usage_request_anchors (request_id, request_started_at) \
          VALUES ($1, $2) ON CONFLICT DO NOTHING",
@@ -374,7 +361,6 @@ async fn insert_attempt_usage_facts<'a>(
     .execute(&mut **transaction)
     .await?;
 
-    let mut persisted_facts = Vec::with_capacity(attempts.len());
     for attempt in attempts {
         let charge_status = if attempt.usage.billing_uncertain {
             AttemptChargeStatus::BillingUncertain
@@ -491,17 +477,8 @@ async fn insert_attempt_usage_facts<'a>(
         )
         .execute(&mut **transaction)
         .await?;
-        persisted_facts.push(PersistedAttemptFact {
-            attempt: attempt.event,
-            usage: attempt.usage.clone(),
-            charge_status,
-            estimated_cost,
-            unpriced,
-            pricing_revision_id,
-            currency,
-        });
     }
-    Ok(persisted_facts)
+    Ok(())
 }
 
 async fn recompute_attempt_fact_markers(
@@ -571,8 +548,6 @@ async fn admit_request_metadata_receipt(
          SELECT $1, $2, $3, 'pending'::request_metadata_event_receipt_status, $4 \
          WHERE $4 >= now() - make_interval(days => $5) \
            AND $4 <= now() + make_interval(mins => $6) \
-           AND NOT EXISTS (SELECT 1 FROM usage_facts \
-                           WHERE id = $1 OR request_id = $2) \
            AND NOT EXISTS (SELECT 1 FROM attempt_usage_facts \
                            WHERE event_id = $1 OR request_id = $2) \
          ON CONFLICT DO NOTHING RETURNING event_id",
@@ -595,8 +570,6 @@ async fn admit_request_metadata_receipt(
                    WHERE event_id = $1 AND request_id = $2) AS \"receipt_exists!\", \
            (SELECT event_sha256 FROM request_metadata_event_receipts \
             WHERE event_id = $1 AND request_id = $2) AS event_sha256, \
-           EXISTS (SELECT 1 FROM usage_facts \
-                   WHERE id = $1 AND request_id = $2) AS \"fact_exists!\", \
            EXISTS (SELECT 1 FROM attempt_usage_facts \
                    WHERE event_id = $1 AND request_id = $2) AS \"attempt_fact_exists!\", \
            ($3 < now() - make_interval(days => $4) \
@@ -613,7 +586,7 @@ async fn admit_request_metadata_receipt(
         && existing
             .event_sha256
             .is_none_or(|stored| stored.as_slice() == event_sha256.as_slice());
-    if exact_receipt || existing.fact_exists || existing.attempt_fact_exists {
+    if exact_receipt || existing.attempt_fact_exists {
         return Ok(ReceiptAdmission::Duplicate);
     }
     if !existing.outside_window {
@@ -624,9 +597,7 @@ async fn admit_request_metadata_receipt(
         "INSERT INTO request_metadata_event_receipts \
          (event_id, request_id, event_sha256, status, observed_at) \
          SELECT $1, $2, $3, 'rejected'::request_metadata_event_receipt_status, $4 \
-         WHERE NOT EXISTS (SELECT 1 FROM usage_facts \
-                           WHERE id = $1 OR request_id = $2) \
-           AND NOT EXISTS (SELECT 1 FROM attempt_usage_facts \
+         WHERE NOT EXISTS (SELECT 1 FROM attempt_usage_facts \
                            WHERE event_id = $1 OR request_id = $2) \
          ON CONFLICT DO NOTHING RETURNING event_id",
         event.event_id,
@@ -656,8 +627,6 @@ async fn admit_request_metadata_receipt(
            SELECT 1 FROM request_metadata_event_receipts \
            WHERE event_id = $1 AND request_id = $2 \
              AND (event_sha256 IS NULL OR event_sha256 = $3) \
-           UNION ALL \
-           SELECT 1 FROM usage_facts WHERE id = $1 AND request_id = $2 \
            UNION ALL \
            SELECT 1 FROM attempt_usage_facts \
             WHERE event_id = $1 AND request_id = $2 \
@@ -691,134 +660,6 @@ async fn mark_request_metadata_receipt_persisted(
     .execute(&mut **transaction)
     .await?;
     Ok(())
-}
-
-async fn insert_compatibility_usage_fact_if_representable(
-    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    event: &Event,
-    facts: &[PersistedAttemptFact<'_>],
-) -> Result<(), Error> {
-    // Keep a truthful request-level aggregate for older readers only when
-    // every potentially billable attempt has the same provider/model.
-    // Authoritative reads always use attempt_usage_facts.
-    if let Some(first) = facts
-        .iter()
-        .find(|fact| fact.charge_status != AttemptChargeStatus::NotBillable)
-        && facts
-            .iter()
-            .filter(|fact| fact.charge_status != AttemptChargeStatus::NotBillable)
-            .all(|fact| {
-                fact.attempt.provider_id == first.attempt.provider_id
-                    && fact.attempt.upstream_model == first.attempt.upstream_model
-            })
-    {
-        insert_compatibility_usage_fact(transaction, event, first, facts).await?;
-    }
-    Ok(())
-}
-
-async fn insert_compatibility_usage_fact(
-    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    event: &Event,
-    attribution: &PersistedAttemptFact<'_>,
-    facts: &[PersistedAttemptFact<'_>],
-) -> Result<(), Error> {
-    let billable = facts
-        .iter()
-        .filter(|fact| fact.charge_status != AttemptChargeStatus::NotBillable)
-        .collect::<Vec<_>>();
-    let usage_complete = billable.iter().all(|fact| fact.usage.complete);
-    let unpriced = billable.iter().any(|fact| fact.unpriced);
-    let input_tokens = checked_optional_i64_sum(&billable, |fact| fact.usage.input_tokens)?;
-    let output_tokens = checked_optional_i64_sum(&billable, |fact| fact.usage.output_tokens)?;
-    let cached_input_tokens =
-        checked_optional_i64_sum(&billable, |fact| fact.usage.cached_input_tokens)?;
-    let media_units = checked_optional_decimal_sum(&billable, |fact| fact.usage.media_units)?;
-    let estimated_cost = if usage_complete && !unpriced {
-        checked_optional_decimal_sum(&billable, |fact| fact.estimated_cost)?
-    } else {
-        None
-    };
-    let pricing_revision_id = billable
-        .first()
-        .map(|fact| fact.pricing_revision_id)
-        .filter(|revision| {
-            billable
-                .iter()
-                .all(|fact| fact.pricing_revision_id == *revision)
-        })
-        .flatten();
-    let currency = billable
-        .first()
-        .and_then(|fact| fact.currency.as_deref())
-        .filter(|currency| {
-            billable
-                .iter()
-                .all(|fact| fact.currency.as_deref() == Some(*currency))
-        });
-
-    sqlx::query!(
-        "INSERT INTO usage_facts \
-         (id, request_id, request_started_at, api_key_id, provider_id, route_slug, \
-          upstream_model, operation, surface, observed_at, input_tokens, output_tokens, \
-          cached_input_tokens, media_units, estimated_cost, unpriced, usage_complete, \
-          pricing_revision_id, currency) \
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, \
-                 $15::numeric, $16, $17, $18, $19) \
-         ON CONFLICT (request_id) DO NOTHING",
-        event.event_id,
-        event.request_id,
-        event.request_started_at,
-        event.api_key_id,
-        attribution.attempt.provider_id,
-        &event.route_slug,
-        &attribution.attempt.upstream_model,
-        event.operation.as_str(),
-        event.surface.as_str(),
-        event.observed_at,
-        input_tokens,
-        output_tokens,
-        cached_input_tokens,
-        media_units,
-        estimated_cost,
-        unpriced,
-        usage_complete,
-        pricing_revision_id,
-        currency
-    )
-    .execute(&mut **transaction)
-    .await?;
-    Ok(())
-}
-
-fn checked_optional_i64_sum<T>(
-    values: &[&T],
-    select: impl Fn(&T) -> Option<i64>,
-) -> Result<Option<i64>, Error> {
-    values.iter().try_fold(None, |sum, value| {
-        let Some(value) = select(value) else {
-            return Ok(sum);
-        };
-        sum.unwrap_or(0_i64)
-            .checked_add(value)
-            .map(Some)
-            .ok_or(Error::InvalidRequestMetadataEvent)
-    })
-}
-
-fn checked_optional_decimal_sum<T>(
-    values: &[&T],
-    select: impl Fn(&T) -> Option<Decimal>,
-) -> Result<Option<Decimal>, Error> {
-    values.iter().try_fold(None, |sum, value| {
-        let Some(value) = select(value) else {
-            return Ok(sum);
-        };
-        sum.unwrap_or(Decimal::ZERO)
-            .checked_add(value)
-            .map(Some)
-            .ok_or(Error::InvalidRequestMetadataEvent)
-    })
 }
 
 #[cfg(test)]
@@ -1051,37 +892,12 @@ mod tests {
     }
 
     #[test]
-    fn charge_status_and_optional_sums_cover_closed_boundaries() {
+    fn charge_status_covers_closed_boundaries() {
         assert_eq!(AttemptChargeStatus::NotBillable.as_str(), "not_billable");
         assert_eq!(AttemptChargeStatus::Billable.as_str(), "billable");
         assert_eq!(
             AttemptChargeStatus::BillingUncertain.as_str(),
             "billing_uncertain"
-        );
-
-        let integers = [None, Some(2_i64), None, Some(3)];
-        let integer_refs = integers.iter().collect::<Vec<_>>();
-        assert_eq!(
-            checked_optional_i64_sum(&integer_refs, |value| *value).unwrap(),
-            Some(5)
-        );
-        assert_eq!(
-            checked_optional_i64_sum(&[&None::<i64>], |value| *value).unwrap(),
-            None
-        );
-        assert!(checked_optional_i64_sum(&[&Some(i64::MAX), &Some(1)], |value| *value).is_err());
-
-        let decimals = [None, Some(Decimal::ONE), Some(Decimal::new(25, 1))];
-        let decimal_refs = decimals.iter().collect::<Vec<_>>();
-        assert_eq!(
-            checked_optional_decimal_sum(&decimal_refs, |value| *value).unwrap(),
-            Some(Decimal::new(35, 1))
-        );
-        assert!(
-            checked_optional_decimal_sum(&[&Some(Decimal::MAX), &Some(Decimal::ONE)], |value| {
-                *value
-            })
-            .is_err()
         );
     }
 }

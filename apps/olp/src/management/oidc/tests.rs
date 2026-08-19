@@ -448,3 +448,47 @@ fn test_configuration() -> OidcConfiguration {
         updated_at: Utc::now(),
     }
 }
+
+#[test]
+fn oidc_mutation_request_dtos_reject_unknown_fields() {
+    use super::{
+        authorization::{OidcLoginRequest, OidcReauthenticationRequest},
+        configuration::{OidcConfigurationRequest, OidcRoleMappingRequest},
+    };
+    use serde_json::json;
+
+    assert!(
+        serde_json::from_value::<OidcConfigurationRequest>(json!({
+            "discovery_url": "https://idp.example.com/.well-known/openid-configuration",
+            "issuer": "https://idp.example.com",
+            "client_id": "client-id",
+            "unknown_extra_field": "disallowed"
+        }))
+        .is_err()
+    );
+
+    assert!(
+        serde_json::from_value::<OidcRoleMappingRequest>(json!({
+            "claim_value": "engineering",
+            "role": "admin",
+            "unknown_nested_field": "disallowed"
+        }))
+        .is_err()
+    );
+
+    assert!(
+        serde_json::from_value::<OidcLoginRequest>(json!({
+            "return_to": "/dashboard",
+            "unknown_extra_field": "disallowed"
+        }))
+        .is_err()
+    );
+
+    assert!(
+        serde_json::from_value::<OidcReauthenticationRequest>(json!({
+            "purpose": "credential_rotation",
+            "unknown_extra_field": "disallowed"
+        }))
+        .is_err()
+    );
+}

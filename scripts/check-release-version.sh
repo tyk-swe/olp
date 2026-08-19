@@ -19,7 +19,8 @@ for required_directory in "$root/console" "$root/deploy" "$root/deploy/helm"; do
 done
 for required_file in \
   "$root/Cargo.toml" "$root/console/package.json" \
-  "$root/deploy/helm/Chart.yaml" "$root/deploy/Dockerfile"; do
+  "$root/deploy/helm/Chart.yaml" "$root/deploy/Dockerfile" \
+  "$root/release-metadata.env"; do
   validation_require_file "$required_file"
 done
 
@@ -80,4 +81,93 @@ if (( version_mismatches_matched )); then
   exit 1
 fi
 
-echo "release metadata is consistent at $workspace_version"
+metadata_file="$root/release-metadata.env"
+prev_version=''
+prev_migration=''
+prev_commit=''
+prev_image_digest=''
+metadata_assignments=0
+
+while IFS= read -r line || [[ -n $line ]]; do
+  [[ $line =~ ^[[:space:]]*($|#) ]] && continue
+  if [[ $line =~ ^OLP_PREVIOUS_RELEASED_VERSION=(.+)$ ]]; then
+    [[ -z $prev_version ]] || {
+      echo "duplicate OLP_PREVIOUS_RELEASED_VERSION assignment in $metadata_file" >&2
+      exit 1
+    }
+    prev_version=${BASH_REMATCH[1]}
+    ((metadata_assignments += 1))
+    continue
+  fi
+  if [[ $line =~ ^OLP_PREVIOUS_RELEASED_SCHEMA_MIGRATION=(.+)$ ]]; then
+    [[ -z $prev_migration ]] || {
+      echo "duplicate OLP_PREVIOUS_RELEASED_SCHEMA_MIGRATION assignment in $metadata_file" >&2
+      exit 1
+    }
+    prev_migration=${BASH_REMATCH[1]}
+    ((metadata_assignments += 1))
+    continue
+  fi
+  if [[ $line =~ ^OLP_PREVIOUS_RELEASED_COMMIT=(.+)$ ]]; then
+    [[ -z $prev_commit ]] || {
+      echo "duplicate OLP_PREVIOUS_RELEASED_COMMIT assignment in $metadata_file" >&2
+      exit 1
+    }
+    prev_commit=${BASH_REMATCH[1]}
+    ((metadata_assignments += 1))
+    continue
+  fi
+  if [[ $line =~ ^OLP_PREVIOUS_RELEASED_IMAGE_DIGEST=(.+)$ ]]; then
+    [[ -z $prev_image_digest ]] || {
+      echo "duplicate OLP_PREVIOUS_RELEASED_IMAGE_DIGEST assignment in $metadata_file" >&2
+      exit 1
+    }
+    prev_image_digest=${BASH_REMATCH[1]}
+    ((metadata_assignments += 1))
+    continue
+  fi
+  echo "release metadata contains an unsupported line: $line" >&2
+  exit 1
+done <"$metadata_file"
+
+(( metadata_assignments == 4 )) || {
+  echo "release metadata must contain all 4 required assignments (OLP_PREVIOUS_RELEASED_VERSION, OLP_PREVIOUS_RELEASED_SCHEMA_MIGRATION, OLP_PREVIOUS_RELEASED_COMMIT, OLP_PREVIOUS_RELEASED_IMAGE_DIGEST)" >&2
+  exit 1
+}
+
+[[ $prev_version =~ $semver ]] || {
+  echo "previous released version is not semantic: $prev_version" >&2
+  exit 1
+}
+
+[[ $prev_version != "$workspace_version" ]] || {
+  echo "previous released version $prev_version cannot match candidate workspace version $workspace_version" >&2
+  exit 1
+}
+
+[[ $prev_migration =~ ^[0-9]{4}$ ]] || {
+  echo "previous released schema migration must be 4 digits: $prev_migration" >&2
+  exit 1
+}
+
+[[ $prev_commit =~ ^[0-9a-f]{40}$ ]] || {
+  echo "previous released commit must be a 40-character hex SHA: $prev_commit" >&2
+  exit 1
+}
+
+[[ $prev_image_digest =~ ^sha256:[0-9a-f]{64}$ ]] || {
+  echo "previous released image digest must be sha256:<64-hex>: $prev_image_digest" >&2
+  exit 1
+}
+
+if [[ -d "$root/crates/olp-db/migrations" ]]; then
+  shopt -s nullglob
+  matching_migrations=("$root/crates/olp-db/migrations/${prev_migration}_"*.sql)
+  shopt -u nullglob
+  (( ${#matching_migrations[@]} == 1 )) || {
+    echo "previous released schema migration $prev_migration does not match a unique tracked migration file" >&2
+    exit 1
+  }
+fi
+
+echo "release metadata is consistent at $workspace_version (previous release: $prev_version, schema migration: $prev_migration)"

@@ -38,6 +38,7 @@ const DISCOVERY_LIMIT: usize = 128 * 1024;
 pub(super) const JWKS_LIMIT: usize = 512 * 1024;
 
 #[derive(Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
 pub(super) struct OidcConfigurationRequest {
     pub(super) discovery_url: String,
     /// Issuer identifier configured out-of-band with the identity provider.
@@ -82,6 +83,7 @@ impl fmt::Debug for OidcConfigurationRequest {
 }
 
 #[derive(Debug, Clone, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
 pub(super) struct OidcRoleMappingRequest {
     pub(super) claim_value: String,
     pub(super) role: String,

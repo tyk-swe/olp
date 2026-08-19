@@ -95,6 +95,7 @@ pub(super) async fn get_setting(
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
 pub(super) struct UpdateSettingRequest {
     value: String,
 }

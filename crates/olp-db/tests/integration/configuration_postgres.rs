@@ -4,7 +4,7 @@ use olp_db::{
     configuration::NewRouteDraft, configuration::NewRouteTarget,
     configuration::resources::CapabilityCertificationOutcome,
     configuration::resources::CapabilityRecord, configuration::resources::DiscoveredModelInput,
-    configuration::resources::ProviderModelRecord,
+    configuration::resources::PatchValue, configuration::resources::ProviderModelRecord,
     configuration::resources::ReplaceRouteDraftInput, configuration::resources::RotateApiKeyInput,
     configuration::resources::RotateCredentialInput, configuration::resources::UpdateApiKeyInput,
     configuration::resources::UpdateProvider, error::Error as PersistenceError,
@@ -43,6 +43,10 @@ fn test_replay<'a>(master_key: &'a MasterKey, seed: &str) -> Replayable<'a> {
 
 fn empty_created_response<T>(_: &T) -> Result<Response, PersistenceError> {
     Response::new(201, None, None, Vec::new())
+}
+
+fn empty_ok_response<T>(_: &T) -> Result<Response, PersistenceError> {
+    Response::new(200, None, None, Vec::new())
 }
 
 async fn provider_models(store: &Store, provider_id: Uuid) -> Vec<ProviderModelRecord> {

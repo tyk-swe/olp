@@ -6,10 +6,15 @@ use axum::{
 };
 use chrono::{DateTime, Utc};
 use olp_db::{
-    configuration::resources::ReplaceRouteDraftInput, configuration::resources::RouteDraftRecord,
-    configuration::resources::RouteRecord, configuration::resources::RouteRevisionDiff,
-    configuration::resources::RouteRevisionRecord, configuration::resources::RouteSimulation,
-    configuration::resources::RouteSimulationTarget, configuration::resources::RouteTargetRecord,
+    configuration::resources::ReplaceRouteDraftInput,
+    configuration::resources::RouteDraftRecord,
+    configuration::resources::RouteRecord,
+    configuration::resources::RouteRevisionDiff,
+    configuration::resources::RouteRevisionRecord,
+    configuration::resources::RouteSimulation,
+    configuration::resources::RouteSimulationTarget,
+    configuration::resources::RouteTargetRecord,
+    idempotency::{Replayable, Response as IdempotencyResponse, fingerprint},
 };
 use olp_engine::domain::auth::Permission;
 use serde::{Deserialize, Serialize};
@@ -20,7 +25,7 @@ use crate::{
     bootstrap::mode_dependencies::ManagementState,
     management::{
         error_mapping::map_configuration,
-        idempotency::require_idempotency_key,
+        idempotency::{idempotency_http_response, require_idempotency_key},
         json_payload::json_payload,
         pagination::{DiffQuery, PageQuery, page},
         permissions::require_permission,
@@ -153,6 +158,7 @@ pub(crate) async fn get_route_draft(
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct ReplaceRouteTargetRequest {
     pub provider_model_id: Uuid,
     pub priority: i32,
@@ -161,6 +167,7 @@ pub(crate) struct ReplaceRouteTargetRequest {
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct ReplaceRouteDraftRequest {
     pub slug: String,
     pub operations: Vec<String>,
@@ -254,6 +261,7 @@ pub(crate) async fn delete_route_draft(
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct SimulateRouteRequest {
     pub operation: String,
     pub surface: String,
@@ -589,12 +597,30 @@ pub(crate) async fn diff_route_revisions(
     ))
 }
 
+#[derive(Serialize)]
+struct RestoreRouteRevisionFingerprint {
+    route_id: Uuid,
+    revision_id: Uuid,
+}
+
 #[utoipa::path(
     post,
     path = "/api/v1/routes/{route_id}/revisions/{revision_id}/restore-as-draft",
     tag = "routes",
-    params(("route_id" = Uuid, Path), ("revision_id" = Uuid, Path), ("Idempotency-Key" = String, Header)),
-    responses((status = 201, body = RouteDraftDetailResponse), (status = 409, body = Problem))
+    params(
+        ("route_id" = Uuid, Path, description = "Route ID"),
+        ("revision_id" = Uuid, Path, description = "Route Revision ID"),
+        ("Idempotency-Key" = String, Header, description = "Unique restore key")
+    ),
+    responses(
+        (status = 201, description = "Route revision restored as a new route draft", body = RouteDraftDetailResponse),
+        (status = 400, description = "Idempotency-Key header is missing or malformed", body = Problem),
+        (status = 401, description = "Authentication required", body = Problem),
+        (status = 403, description = "Insufficient permissions, CSRF, or origin failure", body = Problem),
+        (status = 404, description = "Route or revision not found", body = Problem),
+        (status = 409, description = "Idempotency conflict or operation in progress", body = Problem),
+        (status = 503, description = "Master key or database unavailable", body = Problem)
+    )
 )]
 pub(crate) async fn restore_route_revision(
     State(state): State<ManagementState>,
@@ -603,16 +629,34 @@ pub(crate) async fn restore_route_revision(
 ) -> Result<Response, Problem> {
     let principal = require_mutation_session(&state, &headers).await?;
     require_permission(&principal, Permission::ManageRoutes)?;
-    let draft: RouteDraftDetailResponse = state
+    let idempotency_key = require_idempotency_key(&headers)?;
+    let request_fingerprint = fingerprint(&RestoreRouteRevisionFingerprint {
+        route_id,
+        revision_id,
+    })
+    .map_err(crate::management::error_mapping::map_persistence)?;
+    let master_key = state
+        .master_key
+        .as_deref()
+        .ok_or_else(|| Problem::service_unavailable("master_key_not_configured"))?;
+    let outcome = state
         .store()
         .restore_route_revision_as_draft(
             route_id,
             revision_id,
             principal.user_id,
-            require_idempotency_key(&headers)?,
+            idempotency_key,
+            Replayable::new(request_fingerprint, master_key),
+            |draft| {
+                let response = RouteDraftDetailResponse::from(draft.clone());
+                IdempotencyResponse::json(
+                    StatusCode::CREATED.as_u16(),
+                    &response,
+                    Some(format!("\"{}\"", response.etag)),
+                )
+            },
         )
         .await
-        .map_err(map_configuration)?
-        .into();
-    with_etag((StatusCode::CREATED, Json(draft.clone())), draft.etag)
+        .map_err(map_configuration)?;
+    idempotency_http_response(outcome)
 }

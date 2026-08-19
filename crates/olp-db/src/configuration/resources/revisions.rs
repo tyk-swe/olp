@@ -307,25 +307,45 @@ impl Store {
     /// Restores only non-secret provider configuration and declared capability
     /// tuples. The provider's currently selected, non-revoked credential is
     /// preserved; the historical revision credential is never selected.
-    pub async fn restore_provider_revision_as_draft(
+    #[allow(clippy::too_many_arguments)]
+    pub async fn restore_provider_revision_as_draft<F>(
         &self,
         provider_id: Uuid,
         revision_id: Uuid,
         expected_etag: Uuid,
         actor: Uuid,
         idempotency_key: &str,
-    ) -> Result<ProviderRecord, Error> {
+        replay: Replayable<'_>,
+        build_response: F,
+    ) -> Result<Outcome<ProviderRecord>, Error>
+    where
+        F: FnOnce(&ProviderRecord) -> Result<Response, PersistenceError>,
+    {
         let revision = self.get_provider_revision(provider_id, revision_id).await?;
         let mut transaction = self.pool().begin().await?;
-        if !claim_idempotency(
+        match claim_replayable_idempotency(
             &mut transaction,
             actor,
             "provider_revision.restore_as_draft",
             idempotency_key,
+            replay.request_fingerprint(),
+            replay.master_key(),
         )
         .await?
         {
-            return Err(Error::IdempotencyConflict);
+            ReplayableIdempotencyClaim::Execute => {}
+            ReplayableIdempotencyClaim::Replay(response) => {
+                transaction.rollback().await?;
+                return Ok(Outcome::Replayed(response));
+            }
+            ReplayableIdempotencyClaim::Conflict => {
+                transaction.rollback().await?;
+                return Err(Error::IdempotencyConflict);
+            }
+            ReplayableIdempotencyClaim::InProgress => {
+                transaction.rollback().await?;
+                return Err(Error::IdempotencyInProgress);
+            }
         }
         let provider = sqlx::query!(
             "SELECT etag, kind, active_credential_version_id \
@@ -425,18 +445,25 @@ impl Store {
             "success",
         )
         .await?;
-        complete_idempotency(
+        let restored =
+            super::providers::fetch_provider_record(&mut transaction, provider_id).await?;
+        debug_assert_eq!(restored.etag, etag);
+        let response = build_response(&restored)?;
+        complete_replayable_idempotency(
             &mut transaction,
             actor,
             "provider_revision.restore_as_draft",
             idempotency_key,
-            &provider_id.to_string(),
+            replay.request_fingerprint(),
+            replay.master_key(),
+            &response,
         )
         .await?;
         transaction.commit().await?;
-        let restored = self.get_provider(provider_id).await?;
-        debug_assert_eq!(restored.etag, etag);
-        Ok(restored)
+        Ok(Outcome::Executed {
+            value: restored,
+            response,
+        })
     }
 }
 

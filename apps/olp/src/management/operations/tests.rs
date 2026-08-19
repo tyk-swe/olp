@@ -137,3 +137,40 @@ fn request_metadata_gateway_epochs_have_their_own_api_namespace() {
             .is_none()
     );
 }
+
+#[test]
+fn operations_mutation_request_dtos_reject_unknown_fields() {
+    use super::{
+        pricing::{PriceRequest, PricingRevisionRequest},
+        settings::UpdateSettingRequest,
+    };
+    use serde_json::json;
+
+    assert!(
+        serde_json::from_value::<UpdateSettingRequest>(json!({
+            "value": "123",
+            "unknown_extra_field": "disallowed"
+        }))
+        .is_err()
+    );
+
+    assert!(
+        serde_json::from_value::<PriceRequest>(json!({
+            "provider_kind": "openai",
+            "model": "gpt-4o",
+            "operation": "generation",
+            "currency": "USD",
+            "unknown_nested_field": "disallowed"
+        }))
+        .is_err()
+    );
+
+    assert!(
+        serde_json::from_value::<PricingRevisionRequest>(json!({
+            "effective_at": "2026-01-01T00:00:00Z",
+            "prices": [],
+            "unknown_extra_field": "disallowed"
+        }))
+        .is_err()
+    );
+}

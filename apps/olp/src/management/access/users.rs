@@ -117,6 +117,7 @@ pub(in crate::management) async fn get_user(
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
 pub(in crate::management) struct UpdateUserRoleRequest {
     pub role: Option<String>,
     pub active: Option<bool>,

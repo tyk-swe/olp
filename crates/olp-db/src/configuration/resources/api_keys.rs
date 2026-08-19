@@ -60,94 +60,189 @@ impl Store {
         input: &UpdateApiKeyInput,
         actor: Uuid,
     ) -> Result<ApiKeyMutationResult, Error> {
-        let name = input.name.trim();
-        if name.is_empty() || name.chars().count() > 100 {
-            return Err(Error::Invalid(
-                "API-key name must contain 1-100 characters".to_owned(),
-            ));
-        }
-        if input.scopes.is_empty() {
-            return Err(Error::Invalid(
-                "at least one API-key scope is required".to_owned(),
-            ));
-        }
-        let scopes = input
-            .scopes
-            .iter()
-            .map(String::as_str)
-            .collect::<BTreeSet<_>>();
-        if scopes.len() != input.scopes.len()
-            || !scopes
-                .iter()
-                .all(|scope| matches!(*scope, "inference" | "models_read"))
-        {
-            return Err(Error::Invalid(
-                "API-key scopes must be unique inference or models_read values".to_owned(),
-            ));
-        }
-        let allowed_routes = input
-            .allowed_routes
-            .iter()
-            .map(|route| {
-                RouteSlug::parse(route.clone())
-                    .map_err(|error| Error::Invalid(format!("invalid allowlisted route: {error}")))
-            })
-            .collect::<Result<BTreeSet<_>, _>>()?;
-        if allowed_routes.len() != input.allowed_routes.len() {
-            return Err(Error::Invalid(
-                "allowlisted routes must be unique".to_owned(),
-            ));
-        }
-        if input
-            .expires_at
-            .is_some_and(|expiration| expiration <= Utc::now())
-        {
-            return Err(Error::Invalid(
-                "API-key expiration must be in the future".to_owned(),
-            ));
-        }
-        let requests_per_minute = input
-            .requests_per_minute
-            .map(i32::try_from)
-            .transpose()
-            .map_err(|_| Error::Invalid("RPM limit is too large".to_owned()))?;
-        let tokens_per_minute = input
-            .tokens_per_minute
-            .map(i64::try_from)
-            .transpose()
-            .map_err(|_| Error::Invalid("TPM limit is too large".to_owned()))?;
-        let max_concurrency = input
-            .max_concurrency
-            .map(i32::try_from)
-            .transpose()
-            .map_err(|_| Error::Invalid("concurrency limit is too large".to_owned()))?;
-        if requests_per_minute == Some(0)
-            || tokens_per_minute == Some(0)
-            || max_concurrency == Some(0)
-        {
-            return Err(Error::Invalid(
-                "hard limits must be positive when configured".to_owned(),
-            ));
-        }
-
         let mut transaction = self
             .pool()
             .begin_with("BEGIN ISOLATION LEVEL READ COMMITTED")
             .await?;
         prepare_runtime_mutation(&mut transaction).await?;
-        for route in &allowed_routes {
-            let exists: bool = sqlx::query_scalar!(
-                "SELECT EXISTS (SELECT 1 FROM routes WHERE slug = $1) AS \"value!\"",
-                route.as_str()
-            )
-            .fetch_one(&mut *transaction)
-            .await?;
-            if !exists {
-                return Err(Error::Invalid(format!(
-                    "allowlisted route {route} is not active"
-                )));
+
+        let current = sqlx::query!(
+            "SELECT k.id, k.lookup_id, k.name, k.created_by, u.email AS created_by_email, \
+                    k.requests_per_minute, k.tokens_per_minute, k.max_concurrency, k.expires_at, \
+                    k.revoked_at, k.rotated_at, k.etag, k.created_at \
+             FROM api_keys k \
+             JOIN users u ON u.id = k.created_by \
+             WHERE k.id = $1",
+            id
+        )
+        .fetch_optional(&mut *transaction)
+        .await?
+        .ok_or(Error::NotFound)?;
+
+        if current.etag != expected_etag {
+            return Err(Error::PreconditionFailed);
+        }
+        if current.revoked_at.is_some()
+            || current
+                .expires_at
+                .is_some_and(|expiration| expiration <= Utc::now())
+        {
+            return Err(Error::Invalid(
+                "revoked or expired keys cannot be updated".to_owned(),
+            ));
+        }
+
+        let name = match &input.name {
+            Some(name) => {
+                let trimmed = name.trim();
+                if trimmed.is_empty() || trimmed.chars().count() > 100 {
+                    return Err(Error::Invalid(
+                        "API-key name must contain 1-100 characters".to_owned(),
+                    ));
+                }
+                trimmed
+            }
+            None => &current.name,
+        };
+
+        let requests_per_minute = match input.requests_per_minute {
+            PatchValue::Preserve => current.requests_per_minute,
+            PatchValue::Clear => None,
+            PatchValue::Set(limit) => {
+                if limit == 0 {
+                    return Err(Error::Invalid(
+                        "hard limits must be positive when configured".to_owned(),
+                    ));
+                }
+                Some(
+                    i32::try_from(limit)
+                        .map_err(|_| Error::Invalid("RPM limit is too large".to_owned()))?,
+                )
+            }
+        };
+
+        let tokens_per_minute = match input.tokens_per_minute {
+            PatchValue::Preserve => current.tokens_per_minute,
+            PatchValue::Clear => None,
+            PatchValue::Set(limit) => {
+                if limit == 0 {
+                    return Err(Error::Invalid(
+                        "hard limits must be positive when configured".to_owned(),
+                    ));
+                }
+                Some(
+                    i64::try_from(limit)
+                        .map_err(|_| Error::Invalid("TPM limit is too large".to_owned()))?,
+                )
+            }
+        };
+
+        let max_concurrency = match input.max_concurrency {
+            PatchValue::Preserve => current.max_concurrency,
+            PatchValue::Clear => None,
+            PatchValue::Set(limit) => {
+                if limit == 0 {
+                    return Err(Error::Invalid(
+                        "hard limits must be positive when configured".to_owned(),
+                    ));
+                }
+                Some(
+                    i32::try_from(limit)
+                        .map_err(|_| Error::Invalid("concurrency limit is too large".to_owned()))?,
+                )
+            }
+        };
+
+        let expires_at = match input.expires_at {
+            PatchValue::Preserve => current.expires_at,
+            PatchValue::Clear => None,
+            PatchValue::Set(expiration) => {
+                if expiration <= Utc::now() {
+                    return Err(Error::Invalid(
+                        "API-key expiration must be in the future".to_owned(),
+                    ));
+                }
+                Some(expiration)
+            }
+        };
+
+        if let Some(new_scopes) = &input.scopes {
+            if new_scopes.is_empty() {
+                return Err(Error::Invalid(
+                    "at least one API-key scope is required".to_owned(),
+                ));
+            }
+            let scopes = new_scopes
+                .iter()
+                .map(String::as_str)
+                .collect::<BTreeSet<_>>();
+            if scopes.len() != new_scopes.len()
+                || !scopes
+                    .iter()
+                    .all(|scope| matches!(*scope, "inference" | "models_read"))
+            {
+                return Err(Error::Invalid(
+                    "API-key scopes must be unique inference or models_read values".to_owned(),
+                ));
+            }
+            sqlx::query!("DELETE FROM api_key_scopes WHERE api_key_id = $1", id)
+                .execute(&mut *transaction)
+                .await?;
+            for scope in scopes {
+                sqlx::query!(
+                    "INSERT INTO api_key_scopes (api_key_id, scope) VALUES ($1, $2)",
+                    id,
+                    scope
+                )
+                .execute(&mut *transaction)
+                .await?;
             }
         }
+
+        if let Some(new_routes) = &input.allowed_routes {
+            let allowed_routes = new_routes
+                .iter()
+                .map(|route| {
+                    RouteSlug::parse(route.clone()).map_err(|error| {
+                        Error::Invalid(format!("invalid allowlisted route: {error}"))
+                    })
+                })
+                .collect::<Result<BTreeSet<_>, _>>()?;
+            if allowed_routes.len() != new_routes.len() {
+                return Err(Error::Invalid(
+                    "allowlisted routes must be unique".to_owned(),
+                ));
+            }
+            for route in &allowed_routes {
+                let exists: bool = sqlx::query_scalar!(
+                    "SELECT EXISTS (SELECT 1 FROM routes WHERE slug = $1) AS \"value!\"",
+                    route.as_str()
+                )
+                .fetch_one(&mut *transaction)
+                .await?;
+                if !exists {
+                    return Err(Error::Invalid(format!(
+                        "allowlisted route {route} is not active"
+                    )));
+                }
+            }
+            sqlx::query!(
+                "DELETE FROM api_key_route_allowlist WHERE api_key_id = $1",
+                id
+            )
+            .execute(&mut *transaction)
+            .await?;
+            for route in allowed_routes {
+                sqlx::query!(
+                    "INSERT INTO api_key_route_allowlist (api_key_id, route_slug) VALUES ($1, $2)",
+                    id,
+                    route.as_str()
+                )
+                .execute(&mut *transaction)
+                .await?;
+            }
+        }
+
         let etag = Uuid::now_v7();
         let updated = sqlx::query!(
             "UPDATE api_keys SET name = $1, requests_per_minute = $2, tokens_per_minute = $3, \
@@ -158,7 +253,7 @@ impl Store {
             requests_per_minute,
             tokens_per_minute,
             max_concurrency,
-            input.expires_at,
+            expires_at,
             etag,
             id,
             expected_etag
@@ -180,33 +275,7 @@ impl Store {
                 "revoked or expired keys cannot be updated".to_owned(),
             ));
         }
-        sqlx::query!("DELETE FROM api_key_scopes WHERE api_key_id = $1", id)
-            .execute(&mut *transaction)
-            .await?;
-        for scope in scopes {
-            sqlx::query!(
-                "INSERT INTO api_key_scopes (api_key_id, scope) VALUES ($1, $2)",
-                id,
-                scope
-            )
-            .execute(&mut *transaction)
-            .await?;
-        }
-        sqlx::query!(
-            "DELETE FROM api_key_route_allowlist WHERE api_key_id = $1",
-            id
-        )
-        .execute(&mut *transaction)
-        .await?;
-        for route in allowed_routes {
-            sqlx::query!(
-                "INSERT INTO api_key_route_allowlist (api_key_id, route_slug) VALUES ($1, $2)",
-                id,
-                route.as_str()
-            )
-            .execute(&mut *transaction)
-            .await?;
-        }
+
         audit_in_transaction(
             &mut transaction,
             actor,

@@ -150,10 +150,11 @@ export async function getProvider(
 }
 
 export async function createProvider(
-  input: CreateProviderInput
+  input: CreateProviderInput,
+  idempotencyKey: string
 ): Promise<string> {
   const response = await apiClient.POST('/api/v1/providers', {
-    params: { header: { 'Idempotency-Key': crypto.randomUUID() } },
+    params: { header: { 'Idempotency-Key': idempotencyKey } },
     body: input
   });
   return requireResponseData(response.data, response.error, response.response)
@@ -279,7 +280,10 @@ export async function certifyProviderModel(
   return requireResponseData(response.data, response.error, response.response);
 }
 
-export async function activateProvider(provider: Provider): Promise<number> {
+export async function activateProvider(
+  provider: Provider,
+  idempotencyKey: string
+): Promise<number> {
   const response = await apiClient.POST(
     '/api/v1/providers/{provider_id}/activate',
     {
@@ -287,7 +291,7 @@ export async function activateProvider(provider: Provider): Promise<number> {
         path: { provider_id: provider.id },
         header: {
           'If-Match': provider.etag,
-          'Idempotency-Key': crypto.randomUUID()
+          'Idempotency-Key': idempotencyKey
         }
       }
     }
@@ -337,7 +341,8 @@ export async function diffProviderRevisions(
 
 export async function restoreProviderRevision(
   provider: Provider,
-  revisionId: string
+  revisionId: string,
+  idempotencyKey: string
 ): Promise<Provider> {
   const response = await apiClient.POST(
     '/api/v1/providers/{provider_id}/revisions/{revision_id}/restore-as-draft',
@@ -346,7 +351,7 @@ export async function restoreProviderRevision(
         path: { provider_id: provider.id, revision_id: revisionId },
         header: {
           'If-Match': provider.etag,
-          'Idempotency-Key': crypto.randomUUID()
+          'Idempotency-Key': idempotencyKey
         }
       }
     }
@@ -386,7 +391,8 @@ async function listProviderCredentialPage(
 
 export async function rotateProviderCredential(
   provider: Provider,
-  secret: string
+  secret: string,
+  idempotencyKey: string
 ): Promise<void> {
   const response = await apiClient.POST(
     '/api/v1/providers/{provider_id}/credentials',
@@ -395,7 +401,7 @@ export async function rotateProviderCredential(
         path: { provider_id: provider.id },
         header: {
           'If-Match': provider.etag,
-          'Idempotency-Key': crypto.randomUUID()
+          'Idempotency-Key': idempotencyKey
         }
       },
       body: { credential: secret }
@@ -406,7 +412,8 @@ export async function rotateProviderCredential(
 
 export async function revokeProviderCredential(
   provider: Provider,
-  credentialId: string
+  credentialId: string,
+  idempotencyKey: string
 ): Promise<void> {
   const response = await apiClient.POST(
     '/api/v1/providers/{provider_id}/credentials/{credential_id}/revoke',
@@ -415,7 +422,7 @@ export async function revokeProviderCredential(
         path: { provider_id: provider.id, credential_id: credentialId },
         header: {
           'If-Match': provider.etag,
-          'Idempotency-Key': crypto.randomUUID()
+          'Idempotency-Key': idempotencyKey
         }
       }
     }

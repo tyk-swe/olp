@@ -11,8 +11,8 @@ use uuid::Uuid;
 use crate::{
     error::Error as PersistenceError,
     idempotency::{
-        Outcome, Replayable, ReplayableIdempotencyClaim, Response, claim_idempotency,
-        claim_replayable_idempotency, complete_idempotency, complete_replayable_idempotency,
+        Outcome, Replayable, ReplayableIdempotencyClaim, Response, claim_replayable_idempotency,
+        complete_replayable_idempotency,
     },
     runtime::{
         PublishedRuntimeRelease,
@@ -243,20 +243,47 @@ impl Store {
         })
     }
 
-    pub async fn revoke_api_key_record(
+    pub async fn revoke_api_key_record<F>(
         &self,
         id: Uuid,
         expected_etag: Uuid,
         actor: Uuid,
         idempotency_key: &str,
-    ) -> Result<ApiKeyRevoked, Error> {
+        replay: Replayable<'_>,
+        build_response: F,
+    ) -> Result<Outcome<ApiKeyRevoked>, Error>
+    where
+        F: FnOnce(&ApiKeyRevoked) -> Result<Response, PersistenceError>,
+    {
         let mut transaction = self
             .pool()
             .begin_with("BEGIN ISOLATION LEVEL READ COMMITTED")
             .await?;
-        prepare_runtime_mutation(&mut transaction).await?;
-        if !claim_idempotency(&mut transaction, actor, "api_key.revoke", idempotency_key).await? {
-            return Err(Error::IdempotencyConflict);
+        match claim_replayable_idempotency(
+            &mut transaction,
+            actor,
+            "api_key.revoke",
+            idempotency_key,
+            replay.request_fingerprint(),
+            replay.master_key(),
+        )
+        .await?
+        {
+            ReplayableIdempotencyClaim::Execute => {
+                prepare_runtime_mutation(&mut transaction).await?;
+            }
+            ReplayableIdempotencyClaim::Replay(response) => {
+                transaction.rollback().await?;
+                return Ok(Outcome::Replayed(response));
+            }
+            ReplayableIdempotencyClaim::Conflict => {
+                transaction.rollback().await?;
+                return Err(Error::IdempotencyConflict);
+            }
+            ReplayableIdempotencyClaim::InProgress => {
+                transaction.rollback().await?;
+                return Err(Error::IdempotencyInProgress);
+            }
         }
         let result = sqlx::query!(
             "UPDATE api_keys SET revoked_at = now(), etag = uuidv7() \
@@ -276,14 +303,6 @@ impl Store {
                 Error::NotFound
             });
         };
-        complete_idempotency(
-            &mut transaction,
-            actor,
-            "api_key.revoke",
-            idempotency_key,
-            &id.to_string(),
-        )
-        .await?;
         sqlx::query!(
             "INSERT INTO audit_events \
              (id, actor_user_id, action, resource_type, resource_id, outcome) \
@@ -295,10 +314,25 @@ impl Store {
         .execute(&mut *transaction)
         .await?;
         let release = compile_and_publish_runtime_in_transaction(&mut transaction, actor).await?;
-        transaction.commit().await?;
-        Ok(ApiKeyRevoked {
+        let revoked = ApiKeyRevoked {
             etag: result.etag,
             release,
+        };
+        let response = build_response(&revoked)?;
+        complete_replayable_idempotency(
+            &mut transaction,
+            actor,
+            "api_key.revoke",
+            idempotency_key,
+            replay.request_fingerprint(),
+            replay.master_key(),
+            &response,
+        )
+        .await?;
+        transaction.commit().await?;
+        Ok(Outcome::Executed {
+            value: revoked,
+            response,
         })
     }
 }

@@ -1,0 +1,33 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO request_metadata_event_receipts (event_id, request_id, event_sha256, status, observed_at) SELECT $1, $2, $3, 'pending'::request_metadata_event_receipt_status, $4 WHERE $4 >= now() - make_interval(days => $5) AND $4 <= now() + make_interval(mins => $6) AND NOT EXISTS (SELECT 1 FROM attempt_usage_facts WHERE event_id = $1 OR request_id = $2) ON CONFLICT DO NOTHING RETURNING event_id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "event_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "request_metadata_event_receipts",
+            "name": "event_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Bytea",
+        "Timestamptz",
+        "Int4",
+        "Int4"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "9a922f44f943bb33f3e9cff829fe141dd6a48a3b300d283a040e2ed840bcceff"
+}

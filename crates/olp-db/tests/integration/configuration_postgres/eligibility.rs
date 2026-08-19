@@ -47,6 +47,8 @@ pub(super) async fn exercise(
                 adc_provider.etag,
                 actor,
                 "provider-activate-vertex-adc-without-probe-01",
+                test_replay(master_key, "provider-activate-vertex-adc-without-probe-01"),
+                empty_ok_response,
             )
             .await,
         Err(Error::ProviderIncomplete)
@@ -68,9 +70,12 @@ pub(super) async fn exercise(
             adc_provider.etag,
             actor,
             "provider-activate-vertex-adc-01",
+            test_replay(master_key, "provider-activate-vertex-adc-01"),
+            empty_ok_response,
         )
         .await
-        .unwrap();
+        .unwrap()
+        .expect_executed();
     let adc_runtime: Snapshot = serde_json::from_slice(&adc_activated.release.payload).unwrap();
     let active = store
         .runtime_provider_configurations(&adc_runtime)
@@ -96,6 +101,8 @@ pub(super) async fn exercise(
                 revoked_etag,
                 actor,
                 "provider-disable-while-referenced-01",
+                test_replay(master_key, "provider-disable-while-referenced-01"),
+                empty_ok_response,
             )
             .await,
         Err(Error::InUse)
@@ -134,9 +141,15 @@ pub(super) async fn exercise(
             replacement_validated,
             actor,
             "route-replace-provider-reference-activate-01",
+            test_replay(
+                master_key,
+                "route-replace-provider-reference-activate-01",
+            ),
+            empty_ok_response,
         )
         .await
-        .unwrap();
+        .unwrap()
+        .expect_executed();
 
     let disabled = store
         .disable_provider(
@@ -144,9 +157,15 @@ pub(super) async fn exercise(
             revoked_etag,
             actor,
             "provider-disable-after-route-replacement-01",
+            test_replay(
+                master_key,
+                "provider-disable-after-route-replacement-01",
+            ),
+            empty_ok_response,
         )
         .await
-        .unwrap();
+        .unwrap()
+        .expect_executed();
     let disabled_release = disabled.release.as_ref().unwrap();
     let disabled_runtime: Snapshot = serde_json::from_slice(&disabled_release.payload).unwrap();
     assert!(
@@ -164,15 +183,19 @@ pub(super) async fn exercise(
         olp_engine::domain::provider::ProviderState::Disabled
     );
 
-    let restored_provider_etag = store
+    let restored_provider = store
         .restore_provider_as_draft(
             provider_id,
             disabled.etag,
             actor,
             "provider-restore-as-draft-01",
+            test_replay(master_key, "provider-restore-as-draft-01"),
+            empty_ok_response,
         )
         .await
-        .unwrap();
+        .unwrap()
+        .expect_executed();
+    let restored_provider_etag = restored_provider.etag;
     let restored_provider = store.get_provider(provider_id).await.unwrap();
     assert_eq!(
         restored_provider.state,
@@ -198,6 +221,11 @@ pub(super) async fn exercise(
                 restored_provider_etag,
                 actor,
                 "provider-activate-restored-without-probe-01",
+                test_replay(
+                    master_key,
+                    "provider-activate-restored-without-probe-01"
+                ),
+                empty_ok_response,
             )
             .await,
         Err(Error::ProviderIncomplete)
@@ -219,9 +247,12 @@ pub(super) async fn exercise(
             restored_provider_etag,
             actor,
             "provider-activate-restored-01",
+            test_replay(master_key, "provider-activate-restored-01"),
+            empty_ok_response,
         )
         .await
-        .unwrap();
+        .unwrap()
+        .expect_executed();
 
     // Keep the workload-identity activation token live for the ETag assertion
     // below; probe evidence itself must not mutate it.
@@ -275,6 +306,11 @@ pub(super) async fn exercise(
                 compatible.etag,
                 actor,
                 "provider-compatible-activate-declared-01",
+                test_replay(
+                    master_key,
+                    "provider-compatible-activate-declared-01"
+                ),
+                empty_ok_response,
             )
             .await
             .is_err()
@@ -325,6 +361,11 @@ pub(super) async fn exercise(
                 partial.etag,
                 actor,
                 "provider-compatible-activate-partial-01",
+                test_replay(
+                    master_key,
+                    "provider-compatible-activate-partial-01"
+                ),
+                empty_ok_response,
             )
             .await
             .is_err()
@@ -395,6 +436,11 @@ pub(super) async fn exercise(
                 edited_etag,
                 actor,
                 "provider-compatible-activate-edited-01",
+                test_replay(
+                    master_key,
+                    "provider-compatible-activate-edited-01"
+                ),
+                empty_ok_response,
             )
             .await
             .is_err()
@@ -481,6 +527,11 @@ pub(super) async fn exercise(
                 patched_etag,
                 actor,
                 "provider-compatible-activate-after-patch-01",
+                test_replay(
+                    master_key,
+                    "provider-compatible-activate-after-patch-01"
+                ),
+                empty_ok_response,
             )
             .await,
         Err(Error::ProviderIncomplete)
@@ -516,6 +567,11 @@ pub(super) async fn exercise(
                 post_patch_certified.etag,
                 actor,
                 "provider-compatible-activate-without-fresh-probe-01",
+                test_replay(
+                    master_key,
+                    "provider-compatible-activate-without-fresh-probe-01"
+                ),
+                empty_ok_response,
             )
             .await,
         Err(Error::ProviderIncomplete)
@@ -537,6 +593,11 @@ pub(super) async fn exercise(
                 post_patch_certified.etag,
                 actor,
                 "provider-compatible-activate-after-failed-probe-01",
+                test_replay(
+                    master_key,
+                    "provider-compatible-activate-after-failed-probe-01"
+                ),
+                empty_ok_response,
             )
             .await,
         Err(Error::ProviderIncomplete)
@@ -557,9 +618,15 @@ pub(super) async fn exercise(
             post_patch_certified.etag,
             actor,
             "provider-compatible-activate-certified-01",
+            test_replay(
+                master_key,
+                "provider-compatible-activate-certified-01",
+            ),
+            empty_ok_response,
         )
         .await
-        .unwrap();
+        .unwrap()
+        .expect_executed();
     let certification_audits: i64 = sqlx::query_scalar(
         "SELECT count(*) FROM audit_events WHERE action = 'provider.model.certify' \
          AND resource_id = $1",

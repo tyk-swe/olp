@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { onDestroy } from 'svelte';
   import { useQueryClient } from '@tanstack/svelte-query';
   import {
     activateProvider,
@@ -6,6 +7,7 @@
     probeProvider,
     type Provider
   } from '$lib/api/management/providers';
+  import { LogicalOperation } from '$lib/forms/operationState';
   import {
     activationReady,
     capabilitiesCertified,
@@ -38,6 +40,16 @@
   } = $props();
 
   const queryClient = useQueryClient();
+  const activateOperation = new LogicalOperation<
+    { provider: Provider },
+    number
+  >(({ provider }, idempotencyKey) =>
+    activateProvider(provider, idempotencyKey)
+  );
+
+  onDestroy(() => {
+    activateOperation.abandon();
+  });
 
   async function testDraft() {
     await run('detail-probe', async () => {
@@ -51,7 +63,7 @@
 
   async function activate() {
     await run('detail-activate', async () => {
-      const generation = await activateProvider(current);
+      const generation = await activateOperation.execute({ provider: current });
       const refreshed = await onRefetchProvider();
       await Promise.all([
         invalidateProviderSummaries(queryClient),

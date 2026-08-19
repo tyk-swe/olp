@@ -24,30 +24,10 @@ impl Store {
     }
 
     pub async fn get_route_draft(&self, draft_id: Uuid) -> Result<RouteDraftRecord, Error> {
-        let row = sqlx::query!(
-            "SELECT id, routing_id, slug, state::text AS \"state!\", overall_timeout_ms, max_attempts, etag, \
-                    based_on_revision_id, created_at, updated_at FROM route_drafts WHERE id = $1",
-        draft_id)
-        .fetch_optional(self.pool())
-        .await?
-        .ok_or(Error::NotFound)?;
-        Ok(RouteDraftRecord {
-            id: row.id,
-            routing_id: row.routing_id,
-            slug: row.slug,
-            state: row
-                .state
-                .parse()
-                .map_err(|_| PersistenceError::InvalidStoredValue("route draft state"))?,
-            overall_timeout_ms: row.overall_timeout_ms,
-            max_attempts: row.max_attempts,
-            etag: row.etag,
-            based_on_revision_id: row.based_on_revision_id,
-            operations: draft_operations(self.pool(), draft_id).await?,
-            targets: draft_targets(self.pool(), draft_id).await?,
-            created_at: row.created_at,
-            updated_at: row.updated_at,
-        })
+        let mut transaction = self.pool().begin().await?;
+        let draft = fetch_route_draft(&mut transaction, draft_id).await?;
+        transaction.commit().await?;
+        Ok(draft)
     }
 
     pub async fn replace_route_draft(
@@ -515,24 +495,43 @@ impl Store {
         })
     }
 
-    pub async fn restore_route_revision_as_draft(
+    pub async fn restore_route_revision_as_draft<F>(
         &self,
         route_id: Uuid,
         revision_id: Uuid,
         actor: Uuid,
         idempotency_key: &str,
-    ) -> Result<RouteDraftRecord, Error> {
+        replay: Replayable<'_>,
+        build_response: F,
+    ) -> Result<Outcome<RouteDraftRecord>, Error>
+    where
+        F: FnOnce(&RouteDraftRecord) -> Result<Response, PersistenceError>,
+    {
         let revision = self.get_route_revision(route_id, revision_id).await?;
         let mut transaction = self.pool().begin().await?;
-        if !claim_idempotency(
+        match claim_replayable_idempotency(
             &mut transaction,
             actor,
             "route.restore_as_draft",
             idempotency_key,
+            replay.request_fingerprint(),
+            replay.master_key(),
         )
         .await?
         {
-            return Err(Error::IdempotencyConflict);
+            ReplayableIdempotencyClaim::Execute => {}
+            ReplayableIdempotencyClaim::Replay(response) => {
+                transaction.rollback().await?;
+                return Ok(Outcome::Replayed(response));
+            }
+            ReplayableIdempotencyClaim::Conflict => {
+                transaction.rollback().await?;
+                return Err(Error::IdempotencyConflict);
+            }
+            ReplayableIdempotencyClaim::InProgress => {
+                transaction.rollback().await?;
+                return Err(Error::IdempotencyInProgress);
+            }
         }
         let id = Uuid::now_v7();
         let etag = Uuid::now_v7();
@@ -568,25 +567,43 @@ impl Store {
             "success",
         )
         .await?;
-        complete_idempotency(
+        let draft = fetch_route_draft(&mut transaction, id).await?;
+        let response = build_response(&draft)?;
+        complete_replayable_idempotency(
             &mut transaction,
             actor,
             "route.restore_as_draft",
             idempotency_key,
-            &id.to_string(),
+            replay.request_fingerprint(),
+            replay.master_key(),
+            &response,
         )
         .await?;
         transaction.commit().await?;
-        self.get_route_draft(id).await
+        Ok(Outcome::Executed {
+            value: draft,
+            response,
+        })
     }
 }
 
-async fn draft_operations(pool: &sqlx::PgPool, id: Uuid) -> Result<Vec<OperationKind>, Error> {
-    sqlx::query_scalar!(
-        "SELECT operation FROM route_draft_operations WHERE route_draft_id = $1 ORDER BY operation",
-        id
+async fn fetch_route_draft(
+    transaction: &mut Transaction<'_, Postgres>,
+    draft_id: Uuid,
+) -> Result<RouteDraftRecord, Error> {
+    let row = sqlx::query!(
+        "SELECT id, routing_id, slug, state::text AS \"state!\", overall_timeout_ms, max_attempts, etag, \
+                based_on_revision_id, created_at, updated_at FROM route_drafts WHERE id = $1",
+        draft_id
     )
-    .fetch_all(pool)
+    .fetch_optional(&mut **transaction)
+    .await?
+    .ok_or(Error::NotFound)?;
+    let operations = sqlx::query_scalar!(
+        "SELECT operation FROM route_draft_operations WHERE route_draft_id = $1 ORDER BY operation",
+        draft_id
+    )
+    .fetch_all(&mut **transaction)
     .await?
     .into_iter()
     .map(|value: String| {
@@ -594,18 +611,8 @@ async fn draft_operations(pool: &sqlx::PgPool, id: Uuid) -> Result<Vec<Operation
             .parse()
             .map_err(|_| PersistenceError::InvalidStoredValue("route draft operation").into())
     })
-    .collect()
-}
-
-async fn revision_operations(pool: &sqlx::PgPool, id: Uuid) -> Result<Vec<OperationKind>, Error> {
-    sqlx::query_scalar!("SELECT operation FROM route_revision_operations WHERE route_revision_id = $1 ORDER BY operation", id).fetch_all(pool).await?
-        .into_iter()
-        .map(|value: String| value.parse().map_err(|_| PersistenceError::InvalidStoredValue("route revision operation").into()))
-        .collect()
-}
-
-async fn draft_targets(pool: &sqlx::PgPool, id: Uuid) -> Result<Vec<RouteTargetRecord>, Error> {
-    Ok(target_rows(
+    .collect::<Result<Vec<OperationKind>, Error>>()?;
+    let targets = target_rows(
         sqlx::query_as!(
             RouteTargetRow,
             "SELECT rdt.id, rdt.routing_id, rdt.provider_model_id, p.id AS provider_id, pr.name AS provider_name, \
@@ -617,8 +624,35 @@ async fn draft_targets(pool: &sqlx::PgPool, id: Uuid) -> Result<Vec<RouteTargetR
              JOIN provider_revision_models prm ON prm.provider_revision_id = pr.id \
                AND prm.source_provider_model_id = pm.id \
              WHERE rdt.route_draft_id = $1 ORDER BY rdt.position",
-        id).fetch_all(pool).await?
-    ))
+            draft_id
+        )
+        .fetch_all(&mut **transaction)
+        .await?,
+    );
+    Ok(RouteDraftRecord {
+        id: row.id,
+        routing_id: row.routing_id,
+        slug: row.slug,
+        state: row
+            .state
+            .parse()
+            .map_err(|_| PersistenceError::InvalidStoredValue("route draft state"))?,
+        overall_timeout_ms: row.overall_timeout_ms,
+        max_attempts: row.max_attempts,
+        etag: row.etag,
+        based_on_revision_id: row.based_on_revision_id,
+        operations,
+        targets,
+        created_at: row.created_at,
+        updated_at: row.updated_at,
+    })
+}
+
+async fn revision_operations(pool: &sqlx::PgPool, id: Uuid) -> Result<Vec<OperationKind>, Error> {
+    sqlx::query_scalar!("SELECT operation FROM route_revision_operations WHERE route_revision_id = $1 ORDER BY operation", id).fetch_all(pool).await?
+        .into_iter()
+        .map(|value: String| value.parse().map_err(|_| PersistenceError::InvalidStoredValue("route revision operation").into()))
+        .collect()
 }
 
 async fn revision_targets(pool: &sqlx::PgPool, id: Uuid) -> Result<Vec<RouteTargetRecord>, Error> {

@@ -55,7 +55,8 @@ pub(crate) fn router() -> Router<ManagementState> {
 pub(crate) struct PlaygroundApiDoc;
 
 #[derive(Deserialize, ToSchema)]
-struct PlaygroundRequest {
+#[serde(deny_unknown_fields)]
+pub(super) struct PlaygroundRequest {
     model: String,
     input: String,
     #[serde(default = "default_surface")]
@@ -72,15 +73,16 @@ fn default_surface() -> String {
 }
 
 #[derive(Deserialize, ToSchema)]
-struct PlaygroundToolRequest {
+#[serde(deny_unknown_fields)]
+pub(super) struct PlaygroundToolRequest {
     name: String,
     description: Option<String>,
     input_schema: Value,
 }
 
 #[derive(Clone, Deserialize, ToSchema)]
-#[serde(tag = "type", rename_all = "snake_case")]
-enum PlaygroundResponseFormat {
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+pub(super) enum PlaygroundResponseFormat {
     Text,
     JsonObject,
     JsonSchema {

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { onDestroy } from 'svelte';
   import { goto } from '$app/navigation';
   import { resolve } from '$app/paths';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
@@ -7,12 +8,18 @@
     diffRouteRevisions,
     listRouteRevisions,
     restoreRouteRevision,
+    type RouteDraft,
     type RouteRevision,
     type RouteRevisionDiff
   } from '$lib/api/management/routes';
+  import { KeyedLogicalOperations } from '$lib/forms/operationState';
 
   let { routeId }: { routeId: string } = $props();
   const queryClient = useQueryClient();
+  const restoreOperations = new KeyedLogicalOperations<string, { routeId: string; revisionId: string }, RouteDraft>(
+    () => ({ routeId: rId, revisionId: revId }, idempotencyKey) =>
+      restoreRouteRevision(rId, revId, idempotencyKey)
+  );
   const revisions = createQuery(() => ({
     queryKey: ['route-revisions', routeId],
     queryFn: () => listRouteRevisions(routeId)
@@ -23,6 +30,10 @@
   let fromRevision = $state('');
   let toRevision = $state('');
   let revisionDiff = $state<RouteRevisionDiff | null>(null);
+
+  onDestroy(() => {
+    restoreOperations.clear();
+  });
 
   $effect(() => {
     const items = revisions.data ?? [];
@@ -47,12 +58,19 @@
   }
 
   async function restore(revision: RouteRevision) {
-    await run(`restore-${revision.id}`, async () => {
-      const restored = await restoreRouteRevision(routeId, revision.id);
+    busy = `restore-${revision.id}`;
+    errorMessage = '';
+    const op = restoreOperations.get(revision.id);
+    try {
+      const restored = await op.execute({ routeId, revisionId: revision.id });
       await queryClient.invalidateQueries({ queryKey: ['route-drafts'] });
       await queryClient.invalidateQueries({ queryKey: ['route-draft-page'] });
       await goto(resolve(`/routes/${restored.id}`));
-    });
+    } catch {
+      errorMessage = op.errorMessage;
+    } finally {
+      busy = '';
+    }
   }
 </script>
 

@@ -591,4 +591,76 @@ test('API key secrets are shown once and the lifecycle converges against the rea
 
   expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
 });
+
+test('API key creation with post-commit transport fault recovers one-time secret upon retry and creates exactly one key', async ({
+  page
+}) => {
+  await signInAsOwner(page);
+
+  let postCount = 0;
+  let firstKeyHeader: string | null = null;
+  let secondKeyHeader: string | null = null;
+
+  await page.route('**/api/v1/api-keys', async (route) => {
+    if (route.request().method() === 'POST') {
+      postCount += 1;
+      const keyHeader = route.request().headers()['idempotency-key'];
+      if (postCount === 1) {
+        firstKeyHeader = keyHeader ?? null;
+        // Forward the request to the real backend server so DB commits the key and writes idempotency replay record
+        await route.fetch();
+        // Abort the transport connection back to the browser so browser gets network failure
+        await route.abort('failed');
+        return;
+      }
+      secondKeyHeader = keyHeader ?? null;
+    }
+    await route.continue();
+  });
+
+  const keyName = `resilient key ${Date.now()}`;
+  await page.goto('/api-keys/new');
+  await page.getByLabel('Key name').fill(keyName);
+  await page.getByLabel('Requests per minute').fill('60');
+  await page.getByLabel('Concurrent requests').fill('4');
+  await page.getByRole('button', { name: /Create and show key/ }).click();
+
+  // Indeterminate outcome UI message
+  await expect(page.getByRole('alert')).toContainText('Outcome unknown');
+  await expect(page.getByRole('alert')).toContainText('Retry safely');
+
+  // Retry with unchanged inputs
+  await page.getByRole('button', { name: /Create and show key/ }).click();
+
+  // Dialog appears with replayed one-time secret
+  const dialog = page.getByRole('dialog', { name: 'Copy this secret now.' });
+  await expect(dialog).toBeVisible();
+  const recoveredSecret = await takeSecret(dialog);
+  expect(recoveredSecret).toMatch(/^olp_/);
+  await dialog.getByRole('button', { name: 'I have saved the key' }).click();
+
+  // Navigate to list and verify exactly 1 key exists in the database
+  await expect(page).toHaveURL(/\/api-keys$/);
+  const rows = page.getByRole('row').filter({ hasText: keyName });
+  await expect(rows).toHaveCount(1);
+
+  // Both attempts used the exact same idempotency key
+  expect(postCount).toBe(2);
+  expect(firstKeyHeader).toBeTruthy();
+  expect(firstKeyHeader).toBe(secondKeyHeader);
+
+  // Verify storage has no leaks
+  const storage = await page.evaluate(() => {
+    const filterFramework = (store: Storage) =>
+      Object.fromEntries(
+        Object.entries(store).filter(([k]) => !k.startsWith('sveltekit:'))
+      );
+    return {
+      local: filterFramework(localStorage),
+      session: filterFramework(sessionStorage)
+    };
+  });
+  expect(storage.local).toEqual({});
+  expect(storage.session).toEqual({});
+});
 });

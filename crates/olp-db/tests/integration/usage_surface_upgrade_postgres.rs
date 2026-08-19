@@ -174,40 +174,42 @@ async fn pre_0010_usage_surfaces_survive_upgrade_and_rollup() {
     MIGRATOR.run(store.pool()).await.unwrap();
 
     let anthropic_surface: String =
-        sqlx::query_scalar("SELECT surface FROM usage_facts WHERE request_id = $1")
+        sqlx::query_scalar("SELECT surface FROM attempt_usage_facts WHERE request_id = $1")
             .bind(anthropic_request_id)
             .fetch_one(store.pool())
             .await
             .unwrap();
     let gemini_surface: String =
-        sqlx::query_scalar("SELECT surface FROM usage_facts WHERE request_id = $1")
+        sqlx::query_scalar("SELECT surface FROM attempt_usage_facts WHERE request_id = $1")
             .bind(gemini_request_id)
             .fetch_one(store.pool())
             .await
             .unwrap();
-    let orphan: (String, bool) =
-        sqlx::query_as("SELECT surface, usage_complete FROM usage_facts WHERE request_id = $1")
-            .bind(orphan_request_id)
-            .fetch_one(store.pool())
-            .await
-            .unwrap();
+    let orphan: (String, bool) = sqlx::query_as(
+        "SELECT surface, usage_complete FROM attempt_usage_facts WHERE request_id = $1",
+    )
+    .bind(orphan_request_id)
+    .fetch_one(store.pool())
+    .await
+    .unwrap();
     assert_eq!(anthropic_surface, "anthropic");
     assert_eq!(gemini_surface, "gemini");
     assert_eq!(orphan, ("unknown".to_owned(), false));
 
     let overlapping_count: i64 =
-        sqlx::query_scalar("SELECT count(*) FROM usage_hourly WHERE bucket = $1")
+        sqlx::query_scalar("SELECT count(*) FROM attempt_usage_hourly WHERE bucket = $1")
             .bind(bucket)
             .fetch_one(store.pool())
             .await
             .unwrap();
     assert_eq!(overlapping_count, 0);
-    let cold: (String, i64) =
-        sqlx::query_as("SELECT surface, incomplete_count FROM usage_hourly WHERE bucket = $1")
-            .bind(cold_bucket)
-            .fetch_one(store.pool())
-            .await
-            .unwrap();
+    let cold: (String, i64) = sqlx::query_as(
+        "SELECT surface, request_incomplete_count FROM attempt_usage_hourly WHERE bucket = $1",
+    )
+    .bind(cold_bucket)
+    .fetch_one(store.pool())
+    .await
+    .unwrap();
     assert_eq!(cold, ("unknown".to_owned(), 4));
 
     sqlx::query(
@@ -220,15 +222,15 @@ async fn pre_0010_usage_surfaces_survive_upgrade_and_rollup() {
     .unwrap();
     let report = store.run_maintenance(now).await.unwrap();
     assert_eq!(report.rollup_rows, 3);
-    let remaining_facts: i64 = sqlx::query_scalar("SELECT count(*) FROM usage_facts")
+    let remaining_facts: i64 = sqlx::query_scalar("SELECT count(*) FROM attempt_usage_facts")
         .fetch_one(store.pool())
         .await
         .unwrap();
     assert_eq!(remaining_facts, 0);
 
     let rows: Vec<(String, i64, i64)> = sqlx::query_as(
-        "SELECT surface, sum(request_count)::bigint, sum(incomplete_count)::bigint \
-         FROM usage_hourly GROUP BY surface ORDER BY surface",
+        "SELECT surface, sum(request_count)::bigint, sum(request_incomplete_count)::bigint \
+         FROM attempt_usage_hourly GROUP BY surface ORDER BY surface",
     )
     .fetch_all(store.pool())
     .await

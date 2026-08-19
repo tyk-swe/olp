@@ -10,6 +10,7 @@
     type ApiKey,
     type ApiKeySecret
   } from '$lib/api/management/api-keys';
+  import { KeyedLogicalOperations } from '$lib/forms/operationState';
   import CursorPagination from '$lib/components/CursorPagination.svelte';
   import NavIcon from '$lib/components/NavIcon.svelte';
   import type { ApiKeyListState } from './apiKeyListState';
@@ -30,6 +31,12 @@
 
   let busy = $state('');
   let mutationError = $state('');
+  const rotateOps = new KeyedLogicalOperations<string, ApiKey, ApiKeySecret>(
+    () => (key, idempotencyKey) => rotateApiKey(key, idempotencyKey)
+  );
+  const revokeOps = new KeyedLogicalOperations<string, ApiKey, void>(
+    () => (key, idempotencyKey) => revokeApiKey(key, idempotencyKey)
+  );
   const keys = createQuery(() => ({
     queryKey: ['api-key-page', listState.cursor ?? 'first'],
     queryFn: () => listApiKeyPage(listState.cursor)
@@ -44,11 +51,13 @@
       return;
     busy = `rotate-${key.id}`;
     mutationError = '';
+    const op = rotateOps.get(key.id);
     try {
-      onSecret(await rotateApiKey(key), key.allowed_routes[0]);
+      const secret = await op.execute(key);
+      onSecret(secret, key.allowed_routes[0]);
       await keys.refetch();
-    } catch (error) {
-      mutationError = message(error);
+    } catch {
+      mutationError = op.errorMessage;
     } finally {
       busy = '';
     }
@@ -58,11 +67,12 @@
     if (!confirm(`Revoke “${key.name}”? This cannot be undone.`)) return;
     busy = `revoke-${key.id}`;
     mutationError = '';
+    const op = revokeOps.get(key.id);
     try {
-      await revokeApiKey(key);
+      await op.execute(key);
       await keys.refetch();
-    } catch (error) {
-      mutationError = message(error);
+    } catch {
+      mutationError = op.errorMessage;
     } finally {
       busy = '';
     }

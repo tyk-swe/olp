@@ -246,24 +246,44 @@ impl Store {
         })
     }
 
-    pub async fn revoke_provider_credential(
+    #[allow(clippy::too_many_arguments)]
+    pub async fn revoke_provider_credential<F>(
         &self,
         provider_id: Uuid,
         credential_id: Uuid,
         expected_etag: Uuid,
         actor: Uuid,
         idempotency_key: &str,
-    ) -> Result<Uuid, Error> {
+        replay: Replayable<'_>,
+        build_response: F,
+    ) -> Result<Outcome<Uuid>, Error>
+    where
+        F: FnOnce(&Uuid) -> Result<Response, PersistenceError>,
+    {
         let mut transaction = self.pool().begin().await?;
-        if !claim_idempotency(
+        match claim_replayable_idempotency(
             &mut transaction,
             actor,
             "provider.revoke_credential",
             idempotency_key,
+            replay.request_fingerprint(),
+            replay.master_key(),
         )
         .await?
         {
-            return Err(Error::IdempotencyConflict);
+            ReplayableIdempotencyClaim::Execute => {}
+            ReplayableIdempotencyClaim::Replay(response) => {
+                transaction.rollback().await?;
+                return Ok(Outcome::Replayed(response));
+            }
+            ReplayableIdempotencyClaim::Conflict => {
+                transaction.rollback().await?;
+                return Err(Error::IdempotencyConflict);
+            }
+            ReplayableIdempotencyClaim::InProgress => {
+                transaction.rollback().await?;
+                return Err(Error::IdempotencyInProgress);
+            }
         }
         let provider = sqlx::query!(
             "SELECT p.etag, p.active_credential_version_id, \
@@ -329,15 +349,21 @@ impl Store {
             "success",
         )
         .await?;
-        complete_idempotency(
+        let response = build_response(&etag)?;
+        complete_replayable_idempotency(
             &mut transaction,
             actor,
             "provider.revoke_credential",
             idempotency_key,
-            &credential_id.to_string(),
+            replay.request_fingerprint(),
+            replay.master_key(),
+            &response,
         )
         .await?;
         transaction.commit().await?;
-        Ok(etag)
+        Ok(Outcome::Executed {
+            value: etag,
+            response,
+        })
     }
 }

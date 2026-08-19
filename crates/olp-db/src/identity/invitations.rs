@@ -6,8 +6,8 @@ use crate::{
     authentication::insert_versioned_session,
     error::Error as PersistenceError,
     idempotency::{
-        Outcome, Replayable, ReplayableIdempotencyClaim, Response, claim_idempotency,
-        claim_replayable_idempotency, complete_idempotency, complete_replayable_idempotency,
+        Outcome, Replayable, ReplayableIdempotencyClaim, Response, claim_replayable_idempotency,
+        complete_replayable_idempotency,
     },
     security::session_material::{InvitationMaterial, SessionMaterial},
     split_page,
@@ -162,22 +162,41 @@ impl Store {
         Ok((invitations, next_cursor))
     }
 
-    pub async fn revoke_invitation(
+    pub async fn revoke_invitation<F>(
         &self,
         id: Uuid,
         actor: Uuid,
         idempotency_key: &str,
-    ) -> Result<InvitationRecord, Error> {
+        replay: Replayable<'_>,
+        build_response: F,
+    ) -> Result<Outcome<InvitationRecord>, Error>
+    where
+        F: FnOnce(&InvitationRecord) -> Result<Response, PersistenceError>,
+    {
         let mut transaction = self.pool().begin().await?;
-        if !claim_idempotency(
+        match claim_replayable_idempotency(
             &mut transaction,
             actor,
             "invitation.revoke",
             idempotency_key,
+            replay.request_fingerprint(),
+            replay.master_key(),
         )
         .await?
         {
-            return Err(Error::IdempotencyConflict);
+            ReplayableIdempotencyClaim::Execute => {}
+            ReplayableIdempotencyClaim::Replay(response) => {
+                transaction.rollback().await?;
+                return Ok(Outcome::Replayed(response));
+            }
+            ReplayableIdempotencyClaim::Conflict => {
+                transaction.rollback().await?;
+                return Err(Error::IdempotencyConflict);
+            }
+            ReplayableIdempotencyClaim::InProgress => {
+                transaction.rollback().await?;
+                return Err(Error::IdempotencyInProgress);
+            }
         }
         let row = sqlx::query_as!(
             InvitationRow,
@@ -196,16 +215,23 @@ impl Store {
             &id.to_string(),
         )
         .await?;
-        complete_idempotency(
+        let record = invitation_from_row(row)?;
+        let response = build_response(&record)?;
+        complete_replayable_idempotency(
             &mut transaction,
             actor,
             "invitation.revoke",
             idempotency_key,
-            &id.to_string(),
+            replay.request_fingerprint(),
+            replay.master_key(),
+            &response,
         )
         .await?;
         transaction.commit().await?;
-        invitation_from_row(row)
+        Ok(Outcome::Executed {
+            value: record,
+            response,
+        })
     }
 
     pub async fn accept_invitation(

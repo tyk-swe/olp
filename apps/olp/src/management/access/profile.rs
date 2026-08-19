@@ -63,6 +63,7 @@ pub(in crate::management) async fn profile(
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
 pub(in crate::management) struct UpdateProfileRequest {
     pub display_name: String,
 }
@@ -217,6 +218,7 @@ pub(in crate::management) async fn recent_authentication(
 }
 
 #[derive(Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
 pub(in crate::management) struct ChangePasswordRequest {
     #[schema(value_type = String, write_only)]
     current_password: WriteOnlySecret,

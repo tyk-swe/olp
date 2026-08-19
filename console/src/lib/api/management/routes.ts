@@ -58,9 +58,12 @@ export async function getRouteDraft(id: string, signal?: AbortSignal): Promise<R
   return requireResponseData(response.data, response.error, response.response);
 }
 
-export async function createRouteDraft(input: CreateRouteDraftInput): Promise<string> {
+export async function createRouteDraft(
+  input: CreateRouteDraftInput,
+  idempotencyKey: string
+): Promise<string> {
   const response = await apiClient.POST('/api/v1/route-drafts', {
-    params: { header: { 'Idempotency-Key': crypto.randomUUID() } },
+    params: { header: { 'Idempotency-Key': idempotencyKey } },
     body: input
   });
   return requireResponseData(response.data, response.error, response.response).id;
@@ -99,11 +102,14 @@ export async function validateRoute(draft: RouteDraft): Promise<RouteDraftValida
   return requireResponseData(response.data, response.error, response.response);
 }
 
-export async function activateRoute(draft: RouteDraft): Promise<RouteActivation> {
+export async function activateRoute(
+  draft: RouteDraft,
+  idempotencyKey: string
+): Promise<RouteActivation> {
   const response = await apiClient.POST('/api/v1/route-drafts/{draft_id}/activate', {
     params: {
       path: { draft_id: draft.id },
-      header: { 'If-Match': draft.etag, 'Idempotency-Key': crypto.randomUUID() }
+      header: { 'If-Match': draft.etag, 'Idempotency-Key': idempotencyKey }
     }
   });
   return requireResponseData(response.data, response.error, response.response);
@@ -142,11 +148,15 @@ export async function diffRouteRevisions(
   return requireResponseData(response.data, response.error, response.response);
 }
 
-export async function restoreRouteRevision(routeId: string, revisionId: string): Promise<RouteDraft> {
+export async function restoreRouteRevision(
+  routeId: string,
+  revisionId: string,
+  idempotencyKey: string
+): Promise<RouteDraft> {
   const response = await apiClient.POST('/api/v1/routes/{route_id}/revisions/{revision_id}/restore-as-draft', {
     params: {
       path: { route_id: routeId, revision_id: revisionId },
-      header: { 'Idempotency-Key': crypto.randomUUID() }
+      header: { 'Idempotency-Key': idempotencyKey }
     }
   });
   return requireResponseData(response.data, response.error, response.response);

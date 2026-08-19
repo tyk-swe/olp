@@ -48,6 +48,7 @@ pub(super) struct OidcAuthorizationResponse {
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
 pub(super) struct OidcLoginRequest {
     /// Same-origin absolute-path destination used only after a successful callback.
     pub(super) return_to: Option<String>,
@@ -59,6 +60,7 @@ pub(super) struct OidcLoginQuery {
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
 pub(super) struct OidcReauthenticationRequest {
     /// Exact durable security operation that the resulting one-time grant may authorize.
     pub(super) purpose: String,
@@ -210,9 +212,10 @@ pub(super) async fn begin_link(
 pub(super) async fn begin_reauthentication(
     State(state): State<ManagementState>,
     headers: HeaderMap,
-    Json(request): Json<OidcReauthenticationRequest>,
+    payload: Result<Json<OidcReauthenticationRequest>, JsonRejection>,
 ) -> Result<Response, Problem> {
     let principal = require_mutation_session(&state, &headers).await?;
+    let request = json_payload(payload)?;
     let purpose = RecentAuthPurpose::parse(&request.purpose).ok_or_else(|| {
         Problem::bad_request(
             "invalid_reauthentication_purpose",

@@ -25,6 +25,7 @@ use crate::management::{
 use crate::{bootstrap::mode_dependencies::ManagementState, public_http::problem::Problem};
 
 #[derive(Debug, Deserialize, Serialize, ToSchema)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct CreateRouteDraftRequest {
     pub slug: String,
     #[serde(default = "default_route_operations")]
@@ -39,6 +40,7 @@ fn default_route_operations() -> Vec<String> {
 }
 
 #[derive(Debug, Deserialize, Serialize, ToSchema)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct RouteTargetRequest {
     #[schema(value_type = String, format = Uuid)]
     pub provider_id: Uuid,
@@ -193,6 +195,12 @@ pub(crate) async fn validate_route_draft(
     )
 }
 
+#[derive(Serialize)]
+struct ActivateRouteDraftFingerprint {
+    draft_id: Uuid,
+    expected_etag: Uuid,
+}
+
 #[utoipa::path(
     post,
     path = "/api/v1/route-drafts/{draft_id}/activate",
@@ -204,8 +212,14 @@ pub(crate) async fn validate_route_draft(
     ),
     responses(
         (status = 200, description = "Route activated and runtime published", body = RouteActivationResponse),
-        (status = 409, description = "Draft has not been validated", body = Problem),
-        (status = 412, description = "ETag mismatch", body = Problem)
+        (status = 400, description = "Idempotency-Key header is missing or malformed", body = Problem),
+        (status = 401, description = "Authentication required", body = Problem),
+        (status = 403, description = "Insufficient permissions, CSRF, or origin failure", body = Problem),
+        (status = 404, description = "Route draft not found", body = Problem),
+        (status = 409, description = "Draft has not been validated or idempotency conflict", body = Problem),
+        (status = 412, description = "ETag mismatch", body = Problem),
+        (status = 428, description = "If-Match header is required", body = Problem),
+        (status = 503, description = "Master key or database unavailable", body = Problem)
     )
 )]
 pub(crate) async fn activate_route_draft(
@@ -215,20 +229,39 @@ pub(crate) async fn activate_route_draft(
 ) -> Result<Response, Problem> {
     let principal = require_mutation_session(&state, &headers).await?;
     require_route_manager(&principal)?;
-    let idempotency_key = require_idempotency_key(&headers)?;
     let expected_etag = if_match(&headers)?;
-    let activated = state
+    let idempotency_key = require_idempotency_key(&headers)?;
+    let request_fingerprint = fingerprint(&ActivateRouteDraftFingerprint {
+        draft_id,
+        expected_etag,
+    })
+    .map_err(map_persistence)?;
+    let master_key = state
+        .master_key
+        .as_deref()
+        .ok_or_else(|| Problem::service_unavailable("master_key_not_configured"))?;
+    let outcome = state
         .store()
-        .activate_route_draft(draft_id, expected_etag, principal.user_id, idempotency_key)
+        .activate_route_draft(
+            draft_id,
+            expected_etag,
+            principal.user_id,
+            idempotency_key,
+            Replayable::new(request_fingerprint, master_key),
+            |activated| {
+                IdempotencyResponse::json(
+                    StatusCode::OK.as_u16(),
+                    &RouteActivationResponse {
+                        route_id: activated.route_id,
+                        revision_id: activated.revision_id,
+                        revision: activated.revision,
+                        runtime_generation: (&activated.release).into(),
+                    },
+                    Some(format!("\"{expected_etag}\"")),
+                )
+            },
+        )
         .await
         .map_err(map_configuration)?;
-    with_etag(
-        Json(RouteActivationResponse {
-            route_id: activated.route_id,
-            revision_id: activated.revision_id,
-            revision: activated.revision,
-            runtime_generation: (&activated.release).into(),
-        }),
-        expected_etag,
-    )
+    idempotency_http_response(outcome)
 }

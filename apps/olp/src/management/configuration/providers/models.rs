@@ -402,6 +402,7 @@ pub(crate) async fn list_provider_models(
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, ToSchema)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct CapabilityInput {
     pub operation: String,
     pub surface: String,
@@ -425,12 +426,14 @@ fn capability_record(input: CapabilityInput) -> Result<CapabilityRecord, Problem
 }
 
 #[derive(Clone, Debug, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct DiscoveredModelRequest {
     pub upstream_model: String,
     pub display_name: String,
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct DiscoverModelsRequest {
     /// Omit or pass an empty array to query the upstream model-list API.
     /// Manual identifiers are a fallback for upstreams without a list API.
@@ -493,6 +496,7 @@ pub(crate) async fn discover_provider_models(
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct SetModelRequest {
     pub enabled: bool,
     /// Explicit operator-reviewed capability tuples. Their provenance is

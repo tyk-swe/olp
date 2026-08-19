@@ -187,62 +187,6 @@ impl Store {
         let rollups = checked_count(attempt_usage_rollup.rollup_rows, "usage rollup")?;
         let usage_rows = checked_count(attempt_usage_rollup.usage_rows, "usage")?;
 
-        // Retain the request-level compatibility aggregate for older readers.
-        // It is never used for provider/model attribution by current code.
-        let _hourly_mirror_setting =
-            sqlx::query!("SELECT set_config('olp.attempt_usage_hourly_mirror', 'off', true)")
-                .fetch_one(&mut *transaction)
-                .await?;
-        let _legacy_archive_setting =
-            sqlx::query!("SELECT set_config('olp.attempt_usage_legacy_archive', 'off', true)")
-                .fetch_one(&mut *transaction)
-                .await?;
-        let _compatibility_usage_rollup = sqlx::query!(
-            "WITH expired AS ( \
-               DELETE FROM usage_facts \
-               WHERE observed_at < date_trunc('hour', $1::timestamptz) \
-               RETURNING route_slug, provider_id, upstream_model, operation, surface, \
-                         api_key_id, observed_at, input_tokens, output_tokens, \
-                         cached_input_tokens, media_units, estimated_cost, unpriced, \
-                         usage_complete, currency \
-             ), rolled AS ( \
-             INSERT INTO usage_hourly \
-             (bucket, route_slug, provider_id, upstream_model, operation, surface, api_key_id, \
-              request_count, input_tokens, output_tokens, cached_input_tokens, media_units, \
-              estimated_cost, unpriced_count, incomplete_count, currency) \
-             SELECT date_trunc('hour', observed_at), route_slug, provider_id, upstream_model, \
-                    operation, surface, api_key_id, \
-                    COUNT(*), COALESCE(SUM(input_tokens), 0), COALESCE(SUM(output_tokens), 0), \
-                    COALESCE(SUM(cached_input_tokens), 0), COALESCE(SUM(media_units), 0), \
-                    SUM(estimated_cost), COUNT(*) FILTER (WHERE unpriced), \
-                    COUNT(*) FILTER (WHERE NOT usage_complete), MAX(currency) \
-             FROM expired \
-             GROUP BY date_trunc('hour', observed_at), route_slug, provider_id, upstream_model, \
-                      operation, surface, api_key_id \
-             ON CONFLICT ON CONSTRAINT usage_hourly_dimensions_key DO UPDATE SET \
-               request_count = usage_hourly.request_count + EXCLUDED.request_count, \
-               input_tokens = usage_hourly.input_tokens + EXCLUDED.input_tokens, \
-               output_tokens = usage_hourly.output_tokens + EXCLUDED.output_tokens, \
-               estimated_cost = CASE \
-                 WHEN usage_hourly.estimated_cost IS NULL AND EXCLUDED.estimated_cost IS NULL \
-                 THEN NULL \
-                 ELSE COALESCE(usage_hourly.estimated_cost, 0) \
-                      + COALESCE(EXCLUDED.estimated_cost, 0) END, \
-               cached_input_tokens = usage_hourly.cached_input_tokens \
-                                     + EXCLUDED.cached_input_tokens, \
-               media_units = usage_hourly.media_units + EXCLUDED.media_units, \
-               unpriced_count = usage_hourly.unpriced_count + EXCLUDED.unpriced_count, \
-               incomplete_count = usage_hourly.incomplete_count + EXCLUDED.incomplete_count, \
-               currency = COALESCE(usage_hourly.currency, EXCLUDED.currency) \
-             RETURNING 1 \
-             ) \
-             SELECT (SELECT count(*) FROM rolled) AS \"rollup_rows!\", \
-                    (SELECT count(*) FROM expired) AS \"usage_rows!\"",
-            usage_cutoff
-        )
-        .fetch_one(&mut *transaction)
-        .await?;
-
         // Lock candidates before deleting them. A concurrent fact insert holds
         // KEY SHARE on its anchor, so SKIP LOCKED leaves that anchor for the
         // next pass instead of cascading a child invisible to this snapshot.
@@ -251,10 +195,6 @@ impl Store {
                SELECT anchor.request_id, anchor.request_started_at \
                FROM usage_request_anchors anchor \
                WHERE anchor.request_started_at < $1 AND NOT EXISTS ( \
-                 SELECT 1 FROM usage_facts fact \
-                 WHERE fact.request_id = anchor.request_id \
-                   AND fact.request_started_at = anchor.request_started_at \
-               ) AND NOT EXISTS ( \
                  SELECT 1 FROM attempt_usage_facts fact \
                  WHERE fact.request_id = anchor.request_id \
                    AND fact.request_started_at = anchor.request_started_at \

@@ -2,8 +2,9 @@ use crate::support::route_fixtures::{
     DraftFixture, LIFECYCLE_OPERATIONS, ProviderFixture, insert_provider, insert_provider_revision,
 };
 use olp_db::{
-    configuration::Error, identity::InstallationSetupInput, runtime::compiler::RuntimeCompileError,
-    security::session_material::SessionMaterial,
+    configuration::Error, idempotency::Replayable, idempotency::Response, idempotency::fingerprint,
+    identity::InstallationSetupInput, runtime::compiler::RuntimeCompileError,
+    security::envelope::MasterKey, security::session_material::SessionMaterial,
 };
 use sqlx::{PgPool, Row};
 use uuid::Uuid;
@@ -43,12 +44,18 @@ async fn activation_revalidates_current_revisions_and_preserves_live_media_targe
         .await
         .unwrap();
     let media_job_id = insert_media_job(store.pool(), actor, first, route_id).await;
+    let master_key = MasterKey::new(1, [42; 32]);
     let error = store
         .activate_route_draft(
             missing_target.id,
             missing_target_etag,
             actor,
             "route-revalidate-missing-target",
+            Replayable::new(
+                fingerprint(&"route-revalidate-missing-target").unwrap(),
+                &master_key,
+            ),
+            |_| Response::new(200, None, None, Vec::new()),
         )
         .await
         .unwrap_err();
@@ -93,12 +100,18 @@ async fn activation_revalidates_current_revisions_and_preserves_live_media_targe
         .unwrap();
     let activation_store = store.clone();
     let activation = tokio::spawn(async move {
+        let spawn_key = MasterKey::new(1, [42; 32]);
         activation_store
             .activate_route_draft(
                 stale_capability.id,
                 stale_capability_etag,
                 actor,
                 "route-revalidate-stale-capability",
+                Replayable::new(
+                    fingerprint(&"route-revalidate-stale-capability").unwrap(),
+                    &spawn_key,
+                ),
+                |_| Response::new(200, None, None, Vec::new()),
             )
             .await
     });

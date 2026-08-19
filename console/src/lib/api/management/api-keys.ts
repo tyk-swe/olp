@@ -32,19 +32,25 @@ export async function listApiKeyPage(
   return { items: page.items, nextCursor: page.next_cursor ?? null };
 }
 
-export async function createApiKey(input: CreateApiKeyInput): Promise<ApiKeySecret> {
+export async function createApiKey(
+  input: CreateApiKeyInput,
+  idempotencyKey: string
+): Promise<ApiKeySecret> {
   const response = await apiClient.POST('/api/v1/api-keys', {
-    params: { header: { 'Idempotency-Key': crypto.randomUUID() } },
+    params: { header: { 'Idempotency-Key': idempotencyKey } },
     body: input
   });
   return requireResponseData(response.data, response.error, response.response);
 }
 
-export async function rotateApiKey(key: ApiKey): Promise<ApiKeySecret> {
+export async function rotateApiKey(
+  key: ApiKey,
+  idempotencyKey: string
+): Promise<ApiKeySecret> {
   const response = await apiClient.POST('/api/v1/api-keys/{api_key_id}/rotate', {
     params: {
       path: { api_key_id: key.id },
-      header: { 'If-Match': key.etag, 'Idempotency-Key': crypto.randomUUID() }
+      header: { 'If-Match': key.etag, 'Idempotency-Key': idempotencyKey }
     }
   });
   return requireResponseData(response.data, response.error, response.response);
@@ -61,11 +67,14 @@ export async function updateApiKey(key: ApiKey, input: UpdateApiKeyInput): Promi
   return requireResponseData(response.data, response.error, response.response);
 }
 
-export async function revokeApiKey(key: ApiKey): Promise<void> {
+export async function revokeApiKey(
+  key: ApiKey,
+  idempotencyKey: string
+): Promise<void> {
   const response = await apiClient.POST('/api/v1/api-keys/{api_key_id}/revoke', {
     params: {
       path: { api_key_id: key.id },
-      header: { 'If-Match': key.etag, 'Idempotency-Key': crypto.randomUUID() }
+      header: { 'If-Match': key.etag, 'Idempotency-Key': idempotencyKey }
     }
   });
   requireResponseData(response.data, response.error, response.response);

@@ -64,51 +64,10 @@ impl Store {
     }
 
     pub async fn get_provider(&self, provider_id: Uuid) -> Result<ProviderRecord, Error> {
-        let row = sqlx::query_as!(
-            ProviderRow,
-            "SELECT p.id, p.name, p.kind, p.state::text AS \"state!\", p.endpoint, p.cloud_region, \
-                    p.cloud_project, p.deployment, p.api_version, p.auth_mode, p.connector_ready, \
-                    p.etag, ar.revision AS \"active_revision?\", \
-                    (p.state = 'draft'::provider_state AND p.active_revision_id IS NOT NULL) \
-                      AS \"pending_activation!\", \
-                    p.active_credential_version_id AS draft_credential_id, \
-                    draft_cv.version AS \"draft_credential_version?\", \
-                    ar.credential_version_id AS \"runtime_credential_id?\", \
-                    runtime_cv.version AS \"runtime_credential_version?\", \
-                    p.last_probe_at, p.last_probe_status, \
-                    p.last_probe_detail, p.created_at, p.updated_at, \
-                    stats.model_count AS \"model_count!\", \
-                    stats.enabled_model_count AS \"enabled_model_count!\", \
-                    stats.capability_count AS \"capability_count!\", \
-                    stats.certified_capability_count AS \"certified_capability_count!\", \
-                    probe.upstream_model AS \"probe_model?\" \
-             FROM providers p LEFT JOIN provider_credential_versions draft_cv \
-               ON draft_cv.id = p.active_credential_version_id \
-             LEFT JOIN provider_revisions ar ON ar.id = p.active_revision_id \
-             LEFT JOIN provider_credential_versions runtime_cv \
-               ON runtime_cv.id = ar.credential_version_id \
-             LEFT JOIN LATERAL ( \
-                 SELECT COUNT(DISTINCT pm.id)::bigint AS model_count, \
-                        COUNT(DISTINCT pm.id) FILTER (WHERE pm.enabled)::bigint \
-                          AS enabled_model_count, \
-                        COUNT(mc.provider_model_id)::bigint AS capability_count, \
-                        COUNT(mc.provider_model_id) FILTER (WHERE mc.source = 'certified')::bigint \
-                          AS certified_capability_count \
-                 FROM provider_models pm \
-                 LEFT JOIN model_capabilities mc ON mc.provider_model_id = pm.id \
-                 WHERE pm.provider_id = p.id \
-             ) stats ON true \
-             LEFT JOIN LATERAL ( \
-                 SELECT pm.upstream_model FROM provider_models pm \
-                 WHERE pm.provider_id = p.id ORDER BY pm.id LIMIT 1 \
-             ) probe ON true \
-             WHERE p.id = $1",
-            provider_id
-        )
-        .fetch_optional(self.pool())
-        .await?
-        .ok_or(Error::NotFound)?;
-        provider_from_row(row)
+        let mut transaction = self.pool().begin().await?;
+        let record = fetch_provider_record(&mut transaction, provider_id).await?;
+        transaction.commit().await?;
+        Ok(record)
     }
 
     pub async fn update_provider(
@@ -178,20 +137,47 @@ impl Store {
         Ok(etag)
     }
 
-    pub async fn disable_provider(
+    pub async fn disable_provider<F>(
         &self,
         provider_id: Uuid,
         expected_etag: Uuid,
         actor: Uuid,
         idempotency_key: &str,
-    ) -> Result<ProviderMutationResult, Error> {
+        replay: Replayable<'_>,
+        build_response: F,
+    ) -> Result<Outcome<ProviderMutationResult>, Error>
+    where
+        F: FnOnce(&ProviderMutationResult) -> Result<Response, PersistenceError>,
+    {
         let mut transaction = self
             .pool()
             .begin_with("BEGIN ISOLATION LEVEL READ COMMITTED")
             .await?;
-        prepare_runtime_mutation(&mut transaction).await?;
-        if !claim_idempotency(&mut transaction, actor, "provider.disable", idempotency_key).await? {
-            return Err(Error::IdempotencyConflict);
+        match claim_replayable_idempotency(
+            &mut transaction,
+            actor,
+            "provider.disable",
+            idempotency_key,
+            replay.request_fingerprint(),
+            replay.master_key(),
+        )
+        .await?
+        {
+            ReplayableIdempotencyClaim::Execute => {
+                prepare_runtime_mutation(&mut transaction).await?;
+            }
+            ReplayableIdempotencyClaim::Replay(response) => {
+                transaction.rollback().await?;
+                return Ok(Outcome::Replayed(response));
+            }
+            ReplayableIdempotencyClaim::Conflict => {
+                transaction.rollback().await?;
+                return Err(Error::IdempotencyConflict);
+            }
+            ReplayableIdempotencyClaim::InProgress => {
+                transaction.rollback().await?;
+                return Err(Error::IdempotencyInProgress);
+            }
         }
         // Serialize against the short reservation INSERT so the decision and
         // runtime publication cannot race a newly committed upstream job.
@@ -256,39 +242,65 @@ impl Store {
             "success",
         )
         .await?;
-        complete_idempotency(
+        let release = compile_and_publish_runtime_in_transaction(&mut transaction, actor).await?;
+        let result = ProviderMutationResult {
+            etag,
+            release: Some(release),
+        };
+        let response = build_response(&result)?;
+        complete_replayable_idempotency(
             &mut transaction,
             actor,
             "provider.disable",
             idempotency_key,
-            &provider_id.to_string(),
+            replay.request_fingerprint(),
+            replay.master_key(),
+            &response,
         )
         .await?;
-        let release = compile_and_publish_runtime_in_transaction(&mut transaction, actor).await?;
         transaction.commit().await?;
-        Ok(ProviderMutationResult {
-            etag,
-            release: Some(release),
+        Ok(Outcome::Executed {
+            value: result,
+            response,
         })
     }
 
-    pub async fn restore_provider_as_draft(
+    pub async fn restore_provider_as_draft<F>(
         &self,
         provider_id: Uuid,
         expected_etag: Uuid,
         actor: Uuid,
         idempotency_key: &str,
-    ) -> Result<Uuid, Error> {
+        replay: Replayable<'_>,
+        build_response: F,
+    ) -> Result<Outcome<ProviderRecord>, Error>
+    where
+        F: FnOnce(&ProviderRecord) -> Result<Response, PersistenceError>,
+    {
         let mut transaction = self.pool().begin().await?;
-        if !claim_idempotency(
+        match claim_replayable_idempotency(
             &mut transaction,
             actor,
             "provider.restore_as_draft",
             idempotency_key,
+            replay.request_fingerprint(),
+            replay.master_key(),
         )
         .await?
         {
-            return Err(Error::IdempotencyConflict);
+            ReplayableIdempotencyClaim::Execute => {}
+            ReplayableIdempotencyClaim::Replay(response) => {
+                transaction.rollback().await?;
+                return Ok(Outcome::Replayed(response));
+            }
+            ReplayableIdempotencyClaim::Conflict => {
+                transaction.rollback().await?;
+                return Err(Error::IdempotencyConflict);
+            }
+            ReplayableIdempotencyClaim::InProgress => {
+                transaction.rollback().await?;
+                return Err(Error::IdempotencyInProgress);
+            }
         }
         let etag = Uuid::now_v7();
         let updated = sqlx::query!(
@@ -328,16 +340,23 @@ impl Store {
             "success",
         )
         .await?;
-        complete_idempotency(
+        let provider = fetch_provider_record(&mut transaction, provider_id).await?;
+        let response = build_response(&provider)?;
+        complete_replayable_idempotency(
             &mut transaction,
             actor,
             "provider.restore_as_draft",
             idempotency_key,
-            &provider_id.to_string(),
+            replay.request_fingerprint(),
+            replay.master_key(),
+            &response,
         )
         .await?;
         transaction.commit().await?;
-        Ok(etag)
+        Ok(Outcome::Executed {
+            value: provider,
+            response,
+        })
     }
 
     pub async fn record_provider_probe(
@@ -475,4 +494,55 @@ fn provider_from_row(row: ProviderRow) -> Result<ProviderRecord, Error> {
         )?,
         probe_model: row.probe_model,
     })
+}
+
+pub(super) async fn fetch_provider_record(
+    transaction: &mut Transaction<'_, Postgres>,
+    provider_id: Uuid,
+) -> Result<ProviderRecord, Error> {
+    let row = sqlx::query_as!(
+        ProviderRow,
+        "SELECT p.id, p.name, p.kind, p.state::text AS \"state!\", p.endpoint, p.cloud_region, \
+                p.cloud_project, p.deployment, p.api_version, p.auth_mode, p.connector_ready, \
+                p.etag, ar.revision AS \"active_revision?\", \
+                (p.state = 'draft'::provider_state AND p.active_revision_id IS NOT NULL) \
+                  AS \"pending_activation!\", \
+                p.active_credential_version_id AS draft_credential_id, \
+                draft_cv.version AS \"draft_credential_version?\", \
+                ar.credential_version_id AS \"runtime_credential_id?\", \
+                runtime_cv.version AS \"runtime_credential_version?\", \
+                p.last_probe_at, p.last_probe_status, \
+                p.last_probe_detail, p.created_at, p.updated_at, \
+                stats.model_count AS \"model_count!\", \
+                stats.enabled_model_count AS \"enabled_model_count!\", \
+                stats.capability_count AS \"capability_count!\", \
+                stats.certified_capability_count AS \"certified_capability_count!\", \
+                probe.upstream_model AS \"probe_model?\" \
+         FROM providers p LEFT JOIN provider_credential_versions draft_cv \
+           ON draft_cv.id = p.active_credential_version_id \
+         LEFT JOIN provider_revisions ar ON ar.id = p.active_revision_id \
+         LEFT JOIN provider_credential_versions runtime_cv \
+           ON runtime_cv.id = ar.credential_version_id \
+         LEFT JOIN LATERAL ( \
+             SELECT COUNT(DISTINCT pm.id)::bigint AS model_count, \
+                    COUNT(DISTINCT pm.id) FILTER (WHERE pm.enabled)::bigint \
+                      AS enabled_model_count, \
+                    COUNT(mc.provider_model_id)::bigint AS capability_count, \
+                    COUNT(mc.provider_model_id) FILTER (WHERE mc.source = 'certified')::bigint \
+                      AS certified_capability_count \
+             FROM provider_models pm \
+             LEFT JOIN model_capabilities mc ON mc.provider_model_id = pm.id \
+             WHERE pm.provider_id = p.id \
+         ) stats ON true \
+         LEFT JOIN LATERAL ( \
+             SELECT pm.upstream_model FROM provider_models pm \
+             WHERE pm.provider_id = p.id ORDER BY pm.id LIMIT 1 \
+         ) probe ON true \
+         WHERE p.id = $1",
+        provider_id
+    )
+    .fetch_optional(&mut **transaction)
+    .await?
+    .ok_or(Error::NotFound)?;
+    provider_from_row(row)
 }

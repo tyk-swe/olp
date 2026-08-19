@@ -1,13 +1,14 @@
 use axum::{
     Json,
     extract::{Path, Query, State, rejection::JsonRejection},
-    http::HeaderMap,
+    http::{HeaderMap, StatusCode},
     response::Response,
 };
 use chrono::{DateTime, Utc};
 use olp_db::{
     configuration::resources::ProviderRecord, configuration::resources::UpdateProvider,
-    store::Store,
+    idempotency::Replayable, idempotency::Response as IdempotencyResponse,
+    idempotency::fingerprint, store::Store,
 };
 use olp_engine::domain::{
     auth::Permission,
@@ -23,8 +24,8 @@ use crate::{
     bootstrap::mode_dependencies::ManagementState,
     bootstrap::provider_adapter::{ProviderConfigFields, provider_config, provider_connector},
     management::{
-        error_mapping::map_configuration,
-        idempotency::require_idempotency_key,
+        error_mapping::{map_configuration, map_persistence},
+        idempotency::{idempotency_http_response, require_idempotency_key},
         json_payload::json_payload,
         pagination::{PageQuery, page},
         permissions::require_permission,
@@ -214,6 +215,7 @@ pub(crate) async fn get_provider(
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct UpdateProviderRequest {
     pub name: String,
     pub endpoint: Option<String>,
@@ -268,19 +270,37 @@ pub(crate) async fn update_provider(
     with_etag(Json(provider), etag)
 }
 
+#[derive(Serialize)]
+struct DisableProviderFingerprint {
+    provider_id: Uuid,
+    expected_etag: Uuid,
+}
+
+#[derive(Serialize)]
+struct RestoreProviderAsDraftFingerprint {
+    provider_id: Uuid,
+    expected_etag: Uuid,
+}
+
 #[utoipa::path(
     post,
     path = "/api/v1/providers/{provider_id}/disable",
     tag = "providers",
     params(
-        ("provider_id" = Uuid, Path),
-        ("If-Match" = String, Header),
-        ("Idempotency-Key" = String, Header)
+        ("provider_id" = Uuid, Path, description = "Provider ID"),
+        ("If-Match" = String, Header, description = "Current provider ETag"),
+        ("Idempotency-Key" = String, Header, description = "Unique disable key")
     ),
     responses(
-        (status = 200, body = ProviderMutationResponse),
-        (status = 409, description = "Provider is still referenced by an active route", body = Problem),
-        (status = 412, body = Problem)
+        (status = 200, description = "Provider disabled", body = ProviderMutationResponse),
+        (status = 400, description = "Idempotency-Key header is missing or malformed", body = Problem),
+        (status = 401, description = "Authentication required", body = Problem),
+        (status = 403, description = "Insufficient permissions, CSRF, or origin failure", body = Problem),
+        (status = 404, description = "Provider not found", body = Problem),
+        (status = 409, description = "Provider is still referenced by an active route or idempotency conflict", body = Problem),
+        (status = 412, description = "ETag mismatch", body = Problem),
+        (status = 428, description = "If-Match header is required", body = Problem),
+        (status = 503, description = "Master key or database unavailable", body = Problem)
     )
 )]
 pub(crate) async fn disable_provider(
@@ -290,26 +310,42 @@ pub(crate) async fn disable_provider(
 ) -> Result<Response, Problem> {
     let principal = require_mutation_session(&state, &headers).await?;
     require_permission(&principal, Permission::ManageProviders)?;
+    let expected_etag = if_match(&headers)?;
+    let idempotency_key = require_idempotency_key(&headers)?;
+    let request_fingerprint = fingerprint(&DisableProviderFingerprint {
+        provider_id,
+        expected_etag,
+    })
+    .map_err(map_persistence)?;
+    let master_key = state
+        .master_key
+        .as_deref()
+        .ok_or_else(|| Problem::service_unavailable("master_key_not_configured"))?;
     let result = state
         .store()
         .disable_provider(
             provider_id,
-            if_match(&headers)?,
+            expected_etag,
             principal.user_id,
-            require_idempotency_key(&headers)?,
+            idempotency_key,
+            Replayable::new(request_fingerprint, master_key),
+            |result| {
+                IdempotencyResponse::json(
+                    StatusCode::OK.as_u16(),
+                    &ProviderMutationResponse {
+                        provider_id,
+                        etag: result.etag,
+                        credential_id: None,
+                        credential_version: None,
+                        runtime_generation: result.release.as_ref().map(Into::into),
+                    },
+                    Some(format!("\"{}\"", result.etag)),
+                )
+            },
         )
         .await
         .map_err(map_configuration)?;
-    with_etag(
-        Json(ProviderMutationResponse {
-            provider_id,
-            etag: result.etag,
-            credential_id: None,
-            credential_version: None,
-            runtime_generation: result.release.as_ref().map(Into::into),
-        }),
-        result.etag,
-    )
+    idempotency_http_response(result)
 }
 
 #[utoipa::path(
@@ -317,11 +353,21 @@ pub(crate) async fn disable_provider(
     path = "/api/v1/providers/{provider_id}/restore-as-draft",
     tag = "providers",
     params(
-        ("provider_id" = Uuid, Path),
-        ("If-Match" = String, Header),
-        ("Idempotency-Key" = String, Header)
+        ("provider_id" = Uuid, Path, description = "Provider ID"),
+        ("If-Match" = String, Header, description = "Current provider ETag"),
+        ("Idempotency-Key" = String, Header, description = "Unique restore key")
     ),
-    responses((status = 200, body = ProviderDetailResponse), (status = 412, body = Problem))
+    responses(
+        (status = 200, description = "Provider restored as draft", body = ProviderDetailResponse),
+        (status = 400, description = "Idempotency-Key header is missing or malformed", body = Problem),
+        (status = 401, description = "Authentication required", body = Problem),
+        (status = 403, description = "Insufficient permissions, CSRF, or origin failure", body = Problem),
+        (status = 404, description = "Provider not found", body = Problem),
+        (status = 409, description = "Idempotency conflict or provider not in disabled state", body = Problem),
+        (status = 412, description = "ETag mismatch", body = Problem),
+        (status = 428, description = "If-Match header is required", body = Problem),
+        (status = 503, description = "Master key or database unavailable", body = Problem)
+    )
 )]
 pub(crate) async fn restore_provider_as_draft(
     State(state): State<ManagementState>,
@@ -330,18 +376,36 @@ pub(crate) async fn restore_provider_as_draft(
 ) -> Result<Response, Problem> {
     let principal = require_mutation_session(&state, &headers).await?;
     require_permission(&principal, Permission::ManageProviders)?;
-    let store = state.store();
-    let etag = store
+    let expected_etag = if_match(&headers)?;
+    let idempotency_key = require_idempotency_key(&headers)?;
+    let request_fingerprint = fingerprint(&RestoreProviderAsDraftFingerprint {
+        provider_id,
+        expected_etag,
+    })
+    .map_err(map_persistence)?;
+    let master_key = state
+        .master_key
+        .as_deref()
+        .ok_or_else(|| Problem::service_unavailable("master_key_not_configured"))?;
+    let result = state
+        .store()
         .restore_provider_as_draft(
             provider_id,
-            if_match(&headers)?,
+            expected_etag,
             principal.user_id,
-            require_idempotency_key(&headers)?,
+            idempotency_key,
+            Replayable::new(request_fingerprint, master_key),
+            |provider| {
+                IdempotencyResponse::json(
+                    StatusCode::OK.as_u16(),
+                    &ProviderDetailResponse::from(provider.clone()),
+                    Some(format!("\"{}\"", provider.etag)),
+                )
+            },
         )
         .await
         .map_err(map_configuration)?;
-    let provider = load_provider_detail(store, provider_id).await?;
-    with_etag(Json(provider), etag)
+    idempotency_http_response(result)
 }
 
 fn validate_provider_update(

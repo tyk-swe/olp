@@ -214,3 +214,158 @@ fn provider_revision_diff_contract_documents_hard_response_ceilings() {
         ["provider revision diff supports at most 2000 models per revision"]
     );
 }
+
+#[test]
+fn configuration_mutation_request_dtos_reject_unknown_fields() {
+    use super::{
+        api_keys::{create::CreateApiKeyRequest, manage::UpdateApiKeyRequest},
+        providers::{
+            create::CreateProviderRequest,
+            credentials::RotateCredentialRequest,
+            manage::UpdateProviderRequest,
+            models::{
+                CapabilityInput, DiscoverModelsRequest, DiscoveredModelRequest, SetModelRequest,
+            },
+        },
+        routes::{
+            create::{CreateRouteDraftRequest, RouteTargetRequest},
+            manage::{ReplaceRouteDraftRequest, ReplaceRouteTargetRequest, SimulateRouteRequest},
+        },
+    };
+    use serde_json::json;
+
+    assert!(
+        serde_json::from_value::<CreateApiKeyRequest>(json!({
+            "name": "API Key",
+            "unknown_extra_field": "disallowed"
+        }))
+        .is_err()
+    );
+
+    assert!(
+        serde_json::from_value::<UpdateApiKeyRequest>(json!({
+            "name": "API Key",
+            "unknown_extra_field": "disallowed"
+        }))
+        .is_err()
+    );
+
+    assert!(
+        serde_json::from_value::<CreateProviderRequest>(json!({
+            "name": "OpenAI Provider",
+            "kind": "openai",
+            "unknown_extra_field": "disallowed"
+        }))
+        .is_err()
+    );
+
+    assert!(
+        serde_json::from_value::<UpdateProviderRequest>(json!({
+            "name": "Updated Provider",
+            "auth_mode": "header",
+            "unknown_extra_field": "disallowed"
+        }))
+        .is_err()
+    );
+
+    assert!(
+        serde_json::from_value::<RotateCredentialRequest>(json!({
+            "credential": "new-credential",
+            "unknown_extra_field": "disallowed"
+        }))
+        .is_err()
+    );
+
+    assert!(
+        serde_json::from_value::<DiscoverModelsRequest>(json!({
+            "models": [],
+            "unknown_extra_field": "disallowed"
+        }))
+        .is_err()
+    );
+
+    assert!(
+        serde_json::from_value::<DiscoveredModelRequest>(json!({
+            "upstream_model": "gpt-4o",
+            "display_name": "GPT-4o",
+            "unknown_nested_field": "disallowed"
+        }))
+        .is_err()
+    );
+
+    assert!(
+        serde_json::from_value::<SetModelRequest>(json!({
+            "enabled": true,
+            "capabilities": [],
+            "unknown_extra_field": "disallowed"
+        }))
+        .is_err()
+    );
+
+    assert!(
+        serde_json::from_value::<CapabilityInput>(json!({
+            "operation": "generation",
+            "surface": "openai",
+            "mode": "unary",
+            "unknown_nested_field": "disallowed"
+        }))
+        .is_err()
+    );
+
+    assert!(
+        serde_json::from_value::<CreateRouteDraftRequest>(json!({
+            "slug": "test-route",
+            "overall_timeout_ms": 5000,
+            "max_attempts": 3,
+            "targets": [],
+            "unknown_extra_field": "disallowed"
+        }))
+        .is_err()
+    );
+
+    assert!(
+        serde_json::from_value::<RouteTargetRequest>(json!({
+            "provider_id": "018f3a5e-7b1c-7d9a-8e2b-4c5d6e7f8a9b",
+            "provider_model": "gpt-4o",
+            "priority": 1,
+            "weight": 100,
+            "timeout_ms": 5000,
+            "unknown_nested_field": "disallowed"
+        }))
+        .is_err()
+    );
+
+    assert!(
+        serde_json::from_value::<ReplaceRouteDraftRequest>(json!({
+            "slug": "test-route",
+            "operations": ["generation"],
+            "overall_timeout_ms": 5000,
+            "max_attempts": 3,
+            "targets": [],
+            "unknown_extra_field": "disallowed"
+        }))
+        .is_err()
+    );
+
+    assert!(
+        serde_json::from_value::<ReplaceRouteTargetRequest>(json!({
+            "provider_model_id": "018f3a5e-7b1c-7d9a-8e2b-4c5d6e7f8a9b",
+            "priority": 1,
+            "weight": 100,
+            "timeout_ms": 5000,
+            "unknown_nested_field": "disallowed"
+        }))
+        .is_err()
+    );
+
+    assert!(
+        serde_json::from_value::<SimulateRouteRequest>(json!({
+            "operation": "generation",
+            "surface": "openai",
+            "mode": "unary",
+            "seed": "abc",
+            "unknown_extra_field": "disallowed"
+        }))
+        .is_err()
+    );
+}

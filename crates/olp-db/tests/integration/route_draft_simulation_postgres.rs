@@ -1,6 +1,9 @@
 use crate::support::route_fixtures::{DraftFixture, insert_provider};
 use olp_db::{
-    configuration::resources::ReplaceRouteDraftInput, identity::InstallationSetupInput,
+    configuration::resources::ReplaceRouteDraftInput,
+    idempotency::{Replayable, Response, fingerprint},
+    identity::InstallationSetupInput,
+    security::envelope::MasterKey,
     security::session_material::SessionMaterial,
 };
 use olp_engine::domain::{
@@ -140,10 +143,22 @@ async fn route_draft_simulation_matches_activated_runtime_attempts() {
         .validate_route_draft(draft.id, replacement_etag, actor)
         .await
         .unwrap();
+    let master_key = MasterKey::new(1, [42; 32]);
     let first_activation = store
-        .activate_route_draft(draft.id, validated_etag, actor, "route-simulation-activate")
+        .activate_route_draft(
+            draft.id,
+            validated_etag,
+            actor,
+            "route-simulation-activate",
+            Replayable::new(
+                fingerprint(&"route-simulation-activate").unwrap(),
+                &master_key,
+            ),
+            |_| Response::new(200, None, None, Vec::new()),
+        )
         .await
-        .unwrap();
+        .unwrap()
+        .unwrap_value();
     assert_eq!(first_activation.route_id, conflicting_route_id);
     assert_ne!(first_activation.route_id, draft.id);
     let second_activation = store
@@ -152,9 +167,15 @@ async fn route_draft_simulation_matches_activated_runtime_attempts() {
             validated_etag,
             actor,
             "route-simulation-activate-repeat",
+            Replayable::new(
+                fingerprint(&"route-simulation-activate-repeat").unwrap(),
+                &master_key,
+            ),
+            |_| Response::new(200, None, None, Vec::new()),
         )
         .await
-        .unwrap();
+        .unwrap()
+        .unwrap_value();
     assert_eq!(second_activation.route_id, first_activation.route_id);
     assert_ne!(second_activation.revision_id, first_activation.revision_id);
 

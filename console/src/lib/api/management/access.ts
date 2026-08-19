@@ -50,17 +50,24 @@ export async function listInvitationPage(
   return { items: page.data, nextCursor: page.next_cursor ?? null };
 }
 
-export async function createInvitation(email: string, role: string): Promise<InvitationSecret> {
+export async function createInvitation(
+  email: string,
+  role: string,
+  idempotencyKey: string
+): Promise<InvitationSecret> {
   const response = await apiClient.POST('/api/v1/invitations', {
-    params: { header: { 'Idempotency-Key': crypto.randomUUID() } },
+    params: { header: { 'Idempotency-Key': idempotencyKey } },
     body: { email, role }
   });
   return requireResponseData(response.data, response.error, response.response);
 }
 
-export async function revokeInvitation(id: string): Promise<void> {
+export async function revokeInvitation(
+  id: string,
+  idempotencyKey: string
+): Promise<void> {
   const response = await apiClient.DELETE('/api/v1/invitations/{invitation_id}', {
-    params: { path: { invitation_id: id }, header: { 'Idempotency-Key': crypto.randomUUID() } }
+    params: { path: { invitation_id: id }, header: { 'Idempotency-Key': idempotencyKey } }
   });
   requireResponseData(response.data, response.error, response.response);
 }

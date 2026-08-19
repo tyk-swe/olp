@@ -509,8 +509,8 @@ fn test_store() -> Store {
             let _runtime_guard = runtime.enter();
             let pool = sqlx::postgres::PgPoolOptions::new()
                 .max_connections(1)
-                .acquire_timeout(std::time::Duration::from_millis(10))
-                .connect_lazy("postgres://olp:olp@127.0.0.1/olp")
+                .acquire_timeout(std::time::Duration::from_millis(500))
+                .connect_lazy("postgres://olp:olp@127.0.0.1:5432/olp")
                 .expect("test PostgreSQL URL is valid");
             Store::from_pool(pool)
         })

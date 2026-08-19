@@ -267,17 +267,6 @@ pub(super) async fn exercise(
     assert_eq!(facts[6].0, cancelled_request_id);
     assert_eq!(facts[6].4, "billing_uncertain");
 
-    let compatibility_rows: i64 =
-        sqlx::query_scalar("SELECT count(*) FROM usage_facts WHERE request_id = $1")
-            .bind(uncertain_request_id)
-            .fetch_one(store.pool())
-            .await
-            .unwrap();
-    assert_eq!(
-        compatibility_rows, 0,
-        "two potentially billable targets cannot be represented by one compatibility attribution"
-    );
-
     let filters = Filters {
         observed_after: observed_at - Duration::seconds(1),
         observed_before: observed_at + Duration::minutes(1),
@@ -347,148 +336,40 @@ pub(super) async fn exercise(
         "provider and model filters must match the same attempt"
     );
 
-    assert_legacy_fact_mirrors_all_attempts(
-        store,
-        generation_id,
-        api_key_id,
-        first_provider_id,
-        second_provider_id,
-    )
-    .await;
+    assert_canonical_attempt_accounting(store).await;
 }
 
-async fn assert_legacy_fact_mirrors_all_attempts(
-    store: &Store,
-    generation_id: Uuid,
-    api_key_id: Uuid,
-    first_provider_id: Uuid,
-    second_provider_id: Uuid,
-) {
-    let request_id = Uuid::now_v7();
-    let event_id = Uuid::now_v7();
-    let first_attempt_id = Uuid::now_v7();
-    let second_attempt_id = Uuid::now_v7();
-    let started_at = Utc::now() - Duration::minutes(10);
-    let observed_at = started_at + Duration::milliseconds(20);
-
-    sqlx::query(
-        "INSERT INTO requests
-         (id, runtime_generation_id, api_key_id, route_slug, operation, surface,
-          started_at, completed_at, status_code, total_latency_ms, first_byte_ms,
-          attempt_count)
-         VALUES ($1, $2, $3, 'legacy-attempt-mirror', 'generation', 'openai',
-                 $4, $5, 200, 20, 12, 2)",
+async fn assert_canonical_attempt_accounting(store: &Store) {
+    let legacy_facts_exists: bool = sqlx::query_scalar(
+        "SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'usage_facts')",
     )
-    .bind(request_id)
-    .bind(generation_id)
-    .bind(api_key_id)
-    .bind(started_at)
-    .bind(observed_at)
-    .execute(store.pool())
+    .fetch_one(store.pool())
     .await
     .unwrap();
-    sqlx::query(
-        "INSERT INTO attempts
-         (id, request_id, request_started_at, ordinal, provider_id, upstream_model,
-          started_at, completed_at, status_code, error_class, committed, latency_ms)
-         VALUES
-         ($1, $2, $3, 1, $4, 'legacy-first-model', $3, $3 + interval '5 milliseconds',
-          504, 'timeout', false, 5),
-         ($5, $2, $3, 2, $6, 'legacy-final-model', $3 + interval '10 milliseconds',
-          $3 + interval '15 milliseconds', 200, NULL, true, 5)",
-    )
-    .bind(first_attempt_id)
-    .bind(request_id)
-    .bind(started_at)
-    .bind(first_provider_id)
-    .bind(second_attempt_id)
-    .bind(second_provider_id)
-    .execute(store.pool())
-    .await
-    .unwrap();
-    sqlx::query(
-        "INSERT INTO usage_request_anchors (request_id, request_started_at) VALUES ($1, $2)",
-    )
-    .bind(request_id)
-    .bind(started_at)
-    .execute(store.pool())
-    .await
-    .unwrap();
-    sqlx::query(
-        "INSERT INTO usage_facts
-         (id, request_id, request_started_at, api_key_id, provider_id, route_slug,
-          upstream_model, operation, surface, observed_at, input_tokens, output_tokens,
-          unpriced, usage_complete)
-         VALUES ($1, $2, $3, $4, $5, 'legacy-attempt-mirror', 'legacy-final-model',
-                 'generation', 'openai', $6, 3, 1, true, true)",
-    )
-    .bind(event_id)
-    .bind(request_id)
-    .bind(started_at)
-    .bind(api_key_id)
-    .bind(second_provider_id)
-    .bind(observed_at)
-    .execute(store.pool())
-    .await
-    .unwrap();
-
-    let mirrored: Vec<(i16, Uuid, String, bool)> = sqlx::query_as(
-        "SELECT attempt_ordinal, provider_id, charge_status::text, usage_observed
-           FROM attempt_usage_facts WHERE request_id = $1 ORDER BY attempt_ordinal",
-    )
-    .bind(request_id)
-    .fetch_all(store.pool())
-    .await
-    .unwrap();
-    assert_eq!(
-        mirrored,
-        vec![
-            (1, first_provider_id, "billing_uncertain".to_owned(), false),
-            (2, second_provider_id, "billable".to_owned(), true),
-        ],
-        "an N-1 request-level fact must reconstruct every retained attempt"
+    assert!(
+        !legacy_facts_exists,
+        "legacy usage_facts table must be dropped"
     );
 
-    let mut transaction = store.pool().begin().await.unwrap();
-    sqlx::query("SELECT set_config('olp.usage_rollup_writer', 'additive-v2', true)")
-        .execute(&mut *transaction)
+    let legacy_hourly_exists: bool = sqlx::query_scalar(
+        "SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'usage_hourly')",
+    )
+    .fetch_one(store.pool())
+    .await
+    .unwrap();
+    assert!(
+        !legacy_hourly_exists,
+        "legacy usage_hourly table must be dropped"
+    );
+
+    let attempt_facts_count: i64 = sqlx::query_scalar("SELECT count(*) FROM attempt_usage_facts")
+        .fetch_one(store.pool())
         .await
         .unwrap();
-    sqlx::query(
-        "WITH expired AS (
-             DELETE FROM usage_facts WHERE id = $1 RETURNING *
-         )
-         INSERT INTO usage_hourly
-         (bucket, route_slug, provider_id, upstream_model, operation, surface, api_key_id,
-          request_count, input_tokens, output_tokens, cached_input_tokens, media_units,
-          estimated_cost, unpriced_count, incomplete_count, currency)
-         SELECT date_trunc('hour', observed_at), route_slug, provider_id, upstream_model,
-                operation, surface, api_key_id, 1, COALESCE(input_tokens, 0),
-                COALESCE(output_tokens, 0), COALESCE(cached_input_tokens, 0),
-                COALESCE(media_units, 0), estimated_cost, unpriced::int,
-                (NOT usage_complete)::int, currency
-           FROM expired",
-    )
-    .bind(event_id)
-    .execute(&mut *transaction)
-    .await
-    .unwrap();
-
-    let archived: (i64, i64, String) = sqlx::query_as(
-        "SELECT COALESCE(sum(request_count), 0)::bigint,
-                COALESCE(sum(provider_request_count), 0)::bigint,
-                COALESCE(sum(input_tokens), 0)::text
-           FROM attempt_usage_hourly WHERE route_slug = 'legacy-attempt-mirror'",
-    )
-    .fetch_one(&mut *transaction)
-    .await
-    .unwrap();
-    assert_eq!(
-        archived,
-        (1, 2, "3".to_owned()),
-        "N-1 retention must archive attempt facts once without collapsing providers"
+    assert!(
+        attempt_facts_count >= 7,
+        "attempt_usage_facts must contain canonical facts"
     );
-    transaction.rollback().await.unwrap();
 }
 
 #[allow(clippy::too_many_arguments)]

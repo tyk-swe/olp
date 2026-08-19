@@ -41,7 +41,7 @@ fn certification_accepts_a_provider_whose_probe_is_current() {
             .expect(
                 reqwest::Method::POST,
                 &format!("/api/v1/providers/{provider_id}/discovery"),
-                Some(json!({"mode": "live"})),
+                Some(json!({})),
                 None,
                 Some(&etag),
                 200,

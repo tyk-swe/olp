@@ -174,15 +174,38 @@ async fn remaining_management_mutations_exactly_replay_without_double_execution(
         )
         .await
         .unwrap();
+    let activate_fingerprint = fingerprint(&json!({
+        "provider_id": provider_id,
+        "expected_etag": created_provider.etag,
+    }))
+    .unwrap();
     let activated_provider = store
         .activate_provider(
             provider_id,
             created_provider.etag,
             actor,
             "provider-replay-activate-001",
+            Replayable::new(activate_fingerprint, &master_key),
+            |result| {
+                Response::json(
+                    200,
+                    &json!({
+                        "provider_id": provider_id,
+                        "etag": result.etag,
+                        "credential_id": null,
+                        "credential_version": null,
+                        "runtime_generation": {
+                            "id": result.release.generation_id,
+                            "sequence": result.release.sequence
+                        }
+                    }),
+                    Some(format!("\"{}\"", result.etag)),
+                )
+            },
         )
         .await
-        .unwrap();
+        .unwrap()
+        .unwrap_value();
 
     let route_key = "route-replay-001";
     let route_fingerprint = fingerprint(&json!({

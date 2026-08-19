@@ -344,7 +344,7 @@ async fn stale_observability_snapshots_force_unready_metrics_and_readiness() {
 
 #[tokio::test]
 async fn stale_metrics_do_not_change_the_readiness_contract() {
-    let (state, _) = inference_state(false);
+    let (state, _) = inference_state(true);
     let state = state.observability_state_for_test();
     refresh_observability_cache(&state).await;
     state.observability.record_metrics_failure();

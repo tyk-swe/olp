@@ -20,16 +20,17 @@ use crate::management::{
     idempotency::{idempotency_http_response, require_idempotency_key},
     json_payload::json_payload,
     permissions::require_key_manager,
-    preconditions::{if_match, with_etag},
+    preconditions::if_match,
     response_policy::RuntimeGenerationResponse,
     secrets::WriteOnlySecret,
     sessions::require_mutation_session,
 };
 use crate::{bootstrap::mode_dependencies::ManagementState, public_http::problem::Problem};
 
-use super::policy::{ExpirationValidation, RawApiKeyPolicy, normalize_api_key_policy};
+use super::policy::{RawApiKeyPolicy, normalize_api_key_policy};
 
 #[derive(Debug, Deserialize, Serialize, ToSchema)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct CreateApiKeyRequest {
     pub name: String,
     #[serde(default = "default_key_scopes")]
@@ -77,6 +78,7 @@ impl fmt::Debug for CreateApiKeyResponse {
     params(("Idempotency-Key" = String, Header, description = "Unique creation key")),
     responses(
         (status = 201, description = "API key created; secret is shown once", body = CreateApiKeyResponse),
+        (status = 400, description = "Idempotency-Key header is missing or malformed", body = Problem),
         (status = 403, description = "Insufficient role, CSRF, or origin failure", body = Problem),
         (status = 409, description = "Idempotency conflict or operation in progress", body = Problem),
         (status = 422, description = "Validation failed", body = Problem),
@@ -93,10 +95,7 @@ pub(crate) async fn create_api_key(
     let idempotency_key = require_idempotency_key(&headers)?.to_owned();
     let request = json_payload(payload)?;
     let request_fingerprint = fingerprint(&request).map_err(map_persistence)?;
-    let policy = normalize_api_key_policy(
-        RawApiKeyPolicy::from(&request),
-        ExpirationValidation::DeferredToStorage,
-    )?;
+    let policy = normalize_api_key_policy(RawApiKeyPolicy::from(&request))?;
     let master_key = state
         .master_key
         .as_deref()
@@ -137,6 +136,12 @@ pub(crate) async fn create_api_key(
     idempotency_http_response(created)
 }
 
+#[derive(Serialize)]
+struct RevokeApiKeyFingerprint {
+    api_key_id: Uuid,
+    expected_etag: Uuid,
+}
+
 #[utoipa::path(
     post,
     path = "/api/v1/api-keys/{api_key_id}/revoke",
@@ -148,8 +153,14 @@ pub(crate) async fn create_api_key(
     ),
     responses(
         (status = 200, description = "API key revoked and new runtime published", body = RuntimeGenerationResponse),
+        (status = 400, description = "Idempotency-Key header is missing or malformed", body = Problem),
+        (status = 401, description = "Authentication required", body = Problem),
+        (status = 403, description = "Insufficient permissions, CSRF, or origin failure", body = Problem),
         (status = 404, description = "API key not found", body = Problem),
-        (status = 412, description = "ETag mismatch", body = Problem)
+        (status = 409, description = "Idempotency conflict or operation in progress", body = Problem),
+        (status = 412, description = "ETag mismatch", body = Problem),
+        (status = 428, description = "If-Match header is required", body = Problem),
+        (status = 503, description = "Master key or database unavailable", body = Problem)
     )
 )]
 pub(crate) async fn revoke_api_key(
@@ -159,19 +170,34 @@ pub(crate) async fn revoke_api_key(
 ) -> Result<Response, Problem> {
     let principal = require_mutation_session(&state, &headers).await?;
     require_key_manager(&principal)?;
+    let expected_etag = if_match(&headers)?;
     let idempotency_key = require_idempotency_key(&headers)?;
+    let request_fingerprint = fingerprint(&RevokeApiKeyFingerprint {
+        api_key_id,
+        expected_etag,
+    })
+    .map_err(map_persistence)?;
+    let master_key = state
+        .master_key
+        .as_deref()
+        .ok_or_else(|| Problem::service_unavailable("master_key_not_configured"))?;
     let revoked = state
         .store()
         .revoke_api_key_record(
             api_key_id,
-            if_match(&headers)?,
+            expected_etag,
             principal.user_id,
             idempotency_key,
+            Replayable::new(request_fingerprint, master_key),
+            |revoked| {
+                IdempotencyResponse::json(
+                    StatusCode::OK.as_u16(),
+                    &RuntimeGenerationResponse::from(&revoked.release),
+                    Some(format!("\"{}\"", revoked.etag)),
+                )
+            },
         )
         .await
         .map_err(map_access)?;
-    with_etag(
-        Json(RuntimeGenerationResponse::from(&revoked.release)),
-        revoked.etag,
-    )
+    idempotency_http_response(revoked)
 }

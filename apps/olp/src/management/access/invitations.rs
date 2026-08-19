@@ -90,6 +90,7 @@ pub(in crate::management) struct InvitationListResponse {
 }
 
 #[derive(Debug, Deserialize, Serialize, ToSchema)]
+#[serde(deny_unknown_fields)]
 pub(in crate::management) struct CreateInvitationRequest {
     pub email: String,
     pub role: String,
@@ -143,6 +144,7 @@ pub(in crate::management) async fn list_invitations(
     request_body = CreateInvitationRequest,
     responses(
         (status = 201, description = "Invitation created; token is displayed once", body = CreateInvitationResponse),
+        (status = 400, description = "Idempotency-Key header is missing or malformed", body = Problem),
         (status = 409, description = "Member, pending invitation, or idempotency conflict", body = Problem),
         (status = 422, description = "Invitation is invalid", body = Problem),
         (status = 503, description = "Master key or database unavailable", body = Problem)
@@ -210,29 +212,49 @@ pub(in crate::management) async fn create_invitation(
     ),
     responses(
         (status = 200, description = "Invitation revoked", body = InvitationResponse),
-        (status = 409, description = "Invitation is already accepted or revoked", body = Problem)
+        (status = 400, description = "Idempotency-Key header is missing or malformed", body = Problem),
+        (status = 401, description = "Authentication required", body = Problem),
+        (status = 403, description = "Insufficient permissions, CSRF, or origin failure", body = Problem),
+        (status = 404, description = "Invitation not found", body = Problem),
+        (status = 409, description = "Invitation is already accepted or revoked or idempotency conflict", body = Problem),
+        (status = 503, description = "Master key or database unavailable", body = Problem)
     )
 )]
 pub(in crate::management) async fn revoke_invitation(
     State(state): State<ManagementState>,
     Path(invitation_id): Path<Uuid>,
     headers: HeaderMap,
-) -> Result<Json<InvitationResponse>, Problem> {
+) -> Result<Response, Problem> {
     let principal = require_mutation_session(&state, &headers).await?;
     require_permission(&principal, Permission::ManageAccess)?;
+    let idempotency_key = require_idempotency_key(&headers)?.to_owned();
+    let request_fingerprint = fingerprint(&invitation_id).map_err(map_persistence)?;
+    let master_key = state
+        .master_key
+        .as_deref()
+        .ok_or_else(|| Problem::service_unavailable("master_key_not_configured"))?;
     let invitation = state
         .store()
         .revoke_invitation(
             invitation_id,
             principal.user_id,
-            require_idempotency_key(&headers)?,
+            &idempotency_key,
+            Replayable::new(request_fingerprint, master_key),
+            |invitation| {
+                IdempotencyResponse::json(
+                    StatusCode::OK.as_u16(),
+                    &InvitationResponse::from(invitation.clone()),
+                    None,
+                )
+            },
         )
         .await
         .map_err(map_identity)?;
-    Ok(Json(invitation.into()))
+    idempotency_http_response(invitation)
 }
 
 #[derive(Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
 pub(in crate::management) struct AcceptInvitationRequest {
     #[schema(value_type = String, write_only)]
     pub(in crate::management) token: WriteOnlySecret,

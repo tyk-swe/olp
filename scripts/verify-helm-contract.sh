@@ -16,16 +16,19 @@ bootstrap_compose_file="$(dirname "$chart")/compose.bootstrap.yaml"
 dockerfile="$(dirname "$chart")/Dockerfile"
 compose_secret_helper="$(dirname "$chart")/../scripts/prepare-compose-secrets.sh"
 compose_bootstrap_retirement_helper="$(dirname "$chart")/../scripts/retire-compose-bootstrap-secret.sh"
+monitoring_rules_helper="$(dirname "$chart")/../scripts/test-helm-monitoring-rules.sh"
 
 dashboard="$(dirname "$chart")/monitoring/grafana-dashboard.json"
 validation_require_directory "$chart"
 for required_file in \
   "$dashboard" "$compose_file" "$bootstrap_compose_file" "$dockerfile" \
-  "$compose_secret_helper" "$compose_bootstrap_retirement_helper"; do
+  "$compose_secret_helper" "$compose_bootstrap_retirement_helper" \
+  "$monitoring_rules_helper"; do
   validation_require_file "$required_file"
 done
 for required_helper in \
-  "$compose_secret_helper" "$compose_bootstrap_retirement_helper"; do
+  "$compose_secret_helper" "$compose_bootstrap_retirement_helper" \
+  "$monitoring_rules_helper"; do
   if [[ ! -x $required_helper ]]; then
     printf '%s: preflight failed: required helper is not executable: %s\n' \
       "$(validation_script_name)" "$required_helper" >&2
@@ -398,4 +401,6 @@ jq -e '
   exit 1
 }
 
-echo "Helm contract verified: digest, drain, spread, private observability, exact media capacity, same-origin edge, monitoring, dashboard, package"
+"$monitoring_rules_helper" "$chart"
+
+echo "Helm contract verified: digest, drain, spread, private observability, exact media capacity, same-origin edge, monitoring, dashboard, package, promtool rule matrix"

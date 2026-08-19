@@ -444,7 +444,7 @@ pub(super) async fn exercise(
     assert_eq!(pre_attempt.request.attempt_count, 0);
     assert!(pre_attempt.attempts.is_empty());
     let pre_attempt_usage: i64 =
-        sqlx::query_scalar("SELECT count(*) FROM usage_facts WHERE request_id = $1")
+        sqlx::query_scalar("SELECT count(*) FROM attempt_usage_facts WHERE request_id = $1")
             .bind(pre_attempt_request_id)
             .fetch_one(store.pool())
             .await

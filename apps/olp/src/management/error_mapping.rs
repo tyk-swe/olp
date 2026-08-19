@@ -187,6 +187,10 @@ pub(crate) fn map_persistence(error: PersistenceError) -> Problem {
         PersistenceError::SessionUnavailable => {
             Problem::unauthorized("The session is missing, expired, or no longer current.")
         }
+        PersistenceError::IdempotencyReplayUnavailable => Problem::conflict(
+            "replay_unavailable",
+            "The original response for this Idempotency-Key is not available for replay.",
+        ),
         PersistenceError::InvalidSessionTtl | PersistenceError::InvalidRecentAuthentication => {
             error!(%error, "invalid server authentication configuration");
             Problem::internal()

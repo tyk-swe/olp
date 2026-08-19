@@ -99,6 +99,23 @@ pub enum Outcome<T> {
     Replayed(Response),
 }
 
+impl<T> Outcome<T> {
+    #[must_use]
+    pub fn into_value(self) -> Option<T> {
+        match self {
+            Self::Executed { value, .. } => Some(value),
+            Self::Replayed(_) => None,
+        }
+    }
+
+    pub fn unwrap_value(self) -> T {
+        match self {
+            Self::Executed { value, .. } => value,
+            Self::Replayed(_) => panic!("expected Outcome::Executed, got Outcome::Replayed"),
+        }
+    }
+}
+
 #[derive(Clone, Copy)]
 pub struct Replayable<'a> {
     request_fingerprint: [u8; 32],
@@ -216,16 +233,26 @@ pub(crate) async fn claim_replayable_idempotency(
     .fetch_optional(&mut **transaction)
     .await?;
     if let Some(row) = existing {
-        let stored_fingerprint: Option<Vec<u8>> = row.request_fingerprint;
-        if stored_fingerprint.as_deref() != Some(request_fingerprint.as_slice()) {
-            return Ok(ReplayableIdempotencyClaim::Conflict);
-        }
         let state: String = row.state;
         if state == "in_progress" {
+            if row
+                .request_fingerprint
+                .as_deref()
+                .is_some_and(|f| f != request_fingerprint.as_slice())
+            {
+                return Ok(ReplayableIdempotencyClaim::Conflict);
+            }
             return Ok(ReplayableIdempotencyClaim::InProgress);
         }
         if state != "completed" {
             return Err(Error::IdempotencyReplayUnavailable);
+        }
+        let stored_fingerprint: Option<Vec<u8>> = row.request_fingerprint;
+        let Some(stored_fingerprint) = stored_fingerprint else {
+            return Err(Error::IdempotencyReplayUnavailable);
+        };
+        if stored_fingerprint.as_slice() != request_fingerprint.as_slice() {
+            return Ok(ReplayableIdempotencyClaim::Conflict);
         }
         let ciphertext: Option<Vec<u8>> = row.replay_ciphertext;
         let nonce: Option<Vec<u8>> = row.replay_nonce;
@@ -323,60 +350,6 @@ fn valid_replay_header(value: &str) -> bool {
         && value
             .bytes()
             .all(|byte| (0x20..=0x7e).contains(&byte) && byte != b'\r' && byte != b'\n')
-}
-
-pub(crate) async fn claim_idempotency(
-    transaction: &mut Transaction<'_, Postgres>,
-    actor: Uuid,
-    operation: &str,
-    key: &str,
-) -> Result<bool, sqlx::Error> {
-    // Expired claims must not permanently reserve a key. Keeping cleanup in
-    // the caller's transaction also serializes a retry with any concurrent
-    // attempt using the same actor/operation/key tuple.
-    sqlx::query!(
-        "DELETE FROM idempotency_records \
-         WHERE actor_user_id = $1 AND operation = $2 AND idempotency_key = $3 \
-           AND expires_at <= now()",
-        actor,
-        operation,
-        key
-    )
-    .execute(&mut **transaction)
-    .await?;
-    let result = sqlx::query!(
-        "INSERT INTO idempotency_records \
-         (id, actor_user_id, operation, idempotency_key, state, expires_at) \
-         VALUES ($1, $2, $3, $4, 'in_progress', now() + interval '24 hours') \
-         ON CONFLICT (actor_user_id, operation, idempotency_key) DO NOTHING",
-        Uuid::now_v7(),
-        actor,
-        operation,
-        key
-    )
-    .execute(&mut **transaction)
-    .await?;
-    Ok(result.rows_affected() == 1)
-}
-
-pub(crate) async fn complete_idempotency(
-    transaction: &mut Transaction<'_, Postgres>,
-    actor: Uuid,
-    operation: &str,
-    key: &str,
-    resource_id: &str,
-) -> Result<(), sqlx::Error> {
-    sqlx::query!(
-        "UPDATE idempotency_records SET state = 'completed', resource_id = $1 \
-         WHERE actor_user_id = $2 AND operation = $3 AND idempotency_key = $4",
-        resource_id,
-        actor,
-        operation,
-        key
-    )
-    .execute(&mut **transaction)
-    .await?;
-    Ok(())
 }
 
 #[cfg(test)]

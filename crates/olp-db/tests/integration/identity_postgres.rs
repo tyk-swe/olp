@@ -193,9 +193,12 @@ async fn local_identity_lifecycle_is_transactional_and_audited() {
             viewer_invitation.invitation.id,
             owner.user_id,
             "revoke-viewer-0001",
+            Replayable::new(fingerprint(&"revoke-viewer-0001").unwrap(), &master_key),
+            |_| Response::new(200, None, None, Vec::new()),
         )
         .await
-        .unwrap();
+        .unwrap()
+        .unwrap_value();
     assert!(revoked.revoked_at.is_some());
     assert!(
         store

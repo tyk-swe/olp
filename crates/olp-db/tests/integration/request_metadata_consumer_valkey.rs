@@ -279,7 +279,7 @@ async fn wait_for_usage_facts(store: &Store, expected: i64) {
         let mut interval = tokio::time::interval(Duration::from_millis(10));
         loop {
             interval.tick().await;
-            let count: i64 = sqlx::query_scalar("SELECT count(*) FROM usage_facts")
+            let count: i64 = sqlx::query_scalar("SELECT count(*) FROM attempt_usage_facts")
                 .fetch_one(store.pool())
                 .await
                 .unwrap();
@@ -685,7 +685,7 @@ async fn commit_before_ack_replays_as_duplicate_under_two_concurrent_claimants()
     );
     let counts: (i64, i64, i64) = sqlx::query_as(
         "SELECT (SELECT count(*) FROM requests), \
-                (SELECT count(*) FROM usage_facts), \
+                (SELECT count(*) FROM attempt_usage_facts), \
                 (SELECT count(*) FROM request_metadata_event_receipts)",
     )
     .fetch_one(store.pool())
@@ -768,7 +768,7 @@ async fn slow_active_entry_is_not_stolen_below_idle_threshold() {
             .as_deref(),
         Some("slow-active")
     );
-    let fact_count: i64 = sqlx::query_scalar("SELECT count(*) FROM usage_facts")
+    let fact_count: i64 = sqlx::query_scalar("SELECT count(*) FROM attempt_usage_facts")
         .fetch_one(store.pool())
         .await
         .unwrap();

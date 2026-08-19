@@ -1,8 +1,10 @@
 <script lang="ts">
+  import { onDestroy } from 'svelte';
   import { goto } from '$app/navigation';
   import { resolve } from '$app/paths';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { errorMessage as message, isEtagMismatch } from '$lib/api/http';
+  import { LogicalOperation } from '$lib/forms/operationState';
   import ConflictNotice from '$lib/components/ConflictNotice.svelte';
   import {
     beginReload,
@@ -38,13 +40,29 @@
     surfacesFor,
     toRouteModelOptions,
     validateRouteEditor,
-    type EditableTarget
+    type EditableTarget,
+    type RouteModelOption
   } from './routeEditor';
 
   let { routeId }: { routeId?: string } = $props();
   const resourceId = $derived(routeId ?? '');
   const isNew = $derived(!resourceId);
   const queryClient = useQueryClient();
+
+  const createOperation = new LogicalOperation<
+    { editorValues: { slug: string; operations: string[]; overallTimeoutMs: number; maxAttempts: number; targets: EditableTarget[] }; modelOptions: RouteModelOption[] },
+    string
+  >(({ editorValues: ev, modelOptions: mo }, idempotencyKey) =>
+    createRouteDraft(buildCreateRouteDraftInput(ev, mo), idempotencyKey)
+  );
+  const activateOperation = new LogicalOperation<{ draft: RouteDraft }, RouteActivation>(
+    ({ draft: currentDraft }, idempotencyKey) => activateRoute(currentDraft, idempotencyKey)
+  );
+
+  onDestroy(() => {
+    createOperation.abandon();
+    activateOperation.abandon();
+  });
 
   const draft = createQuery(() => ({
     queryKey: ['route-draft', resourceId],
@@ -157,12 +175,19 @@
     event.preventDefault();
     const issue = validateRouteEditor(editorValues);
     if (issue) { errorMessage = issue; return; }
-    await run('save', async () => {
-      const id = await createRouteDraft(buildCreateRouteDraftInput(editorValues, modelOptions));
+    busy = 'save';
+    errorMessage = '';
+    notice = '';
+    try {
+      const id = await createOperation.execute({ editorValues, modelOptions });
       await queryClient.invalidateQueries({ queryKey: ['route-drafts'] });
       await queryClient.invalidateQueries({ queryKey: ['route-draft-page'] });
       await goto(resolve(`/routes/${id}`));
-    });
+    } catch {
+      errorMessage = createOperation.errorMessage;
+    } finally {
+      busy = '';
+    }
   }
 
   async function save(current: RouteDraft) {
@@ -209,8 +234,11 @@
   }
 
   async function activate(current: RouteDraft) {
-    await run('activate', async () => {
-      activation = await activateRoute(current);
+    busy = 'activate';
+    errorMessage = '';
+    notice = '';
+    try {
+      activation = await activateOperation.execute({ draft: current });
       notice = `Route activated as revision ${activation.revision} in runtime generation ${activation.runtime_generation.sequence}.`;
       await Promise.all([
         draft.refetch(),
@@ -219,7 +247,11 @@
         queryClient.invalidateQueries({ queryKey: ['routes'] }),
         queryClient.invalidateQueries({ queryKey: ['route-page'] })
       ]);
-    });
+    } catch {
+      errorMessage = activateOperation.errorMessage;
+    } finally {
+      busy = '';
+    }
   }
 
   async function remove(current: RouteDraft) {

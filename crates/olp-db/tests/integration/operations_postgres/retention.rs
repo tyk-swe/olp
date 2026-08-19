@@ -172,11 +172,18 @@ pub(super) async fn exercise(
     .unwrap();
     let mut concurrent_usage = store.pool().begin().await.unwrap();
     sqlx::query(
-        "INSERT INTO usage_facts \
-         (id, request_id, request_started_at, api_key_id, provider_id, route_slug, \
-          upstream_model, operation, surface, observed_at, unpriced, usage_complete) \
-         VALUES ($1, $2, $3, $4, $5, 'retention-race', 'mock-model', 'generation', \
-                 'gemini', $3, true, true)",
+        "INSERT INTO attempt_usage_facts \
+         (attempt_id, event_id, request_id, request_started_at, attempt_ordinal, \
+          api_key_id, provider_id, route_slug, upstream_model, operation, surface, \
+          attempt_started_at, attempt_completed_at, observed_at, charge_status, \
+          usage_observed, usage_complete, unpriced, request_counted, provider_request_counted, \
+          model_request_counted, target_request_counted, request_unpriced_counted, \
+          provider_unpriced_counted, model_unpriced_counted, target_unpriced_counted, \
+          request_incomplete_counted, provider_incomplete_counted, \
+          model_incomplete_counted, target_incomplete_counted) \
+         VALUES ($1, $1, $2, $3, 1, $4, $5, 'retention-race', 'mock-model', 'generation', \
+                 'gemini', $3, $3, $3, 'billable', true, true, true, true, true, \
+                 true, true, true, true, true, true, false, false, false, false)",
     )
     .bind(concurrent_event_id)
     .bind(concurrent_request_id)
@@ -199,7 +206,7 @@ pub(super) async fn exercise(
     let concurrent_retained: (i64, i64) = sqlx::query_as(
         "SELECT \
            (SELECT count(*) FROM usage_request_anchors WHERE request_id = $1), \
-           (SELECT count(*) FROM usage_facts WHERE request_id = $1)",
+           (SELECT count(*) FROM attempt_usage_facts WHERE request_id = $1)",
     )
     .bind(concurrent_request_id)
     .fetch_one(store.pool())
@@ -226,13 +233,13 @@ pub(super) async fn exercise(
     .await
     .unwrap();
     assert!(!future_skew_receipt_retained);
-    let rollup_count: i64 = sqlx::query_scalar("SELECT count(*) FROM usage_hourly")
+    let rollup_count: i64 = sqlx::query_scalar("SELECT count(*) FROM attempt_usage_hourly")
         .fetch_one(store.pool())
         .await
         .unwrap();
     assert_eq!(rollup_count, 1);
     let legacy_rollup_error = sqlx::query(
-        "UPDATE usage_hourly SET request_count = request_count \
+        "UPDATE attempt_usage_hourly SET request_count = request_count \
          WHERE bucket = date_trunc('hour', $1::timestamptz)",
     )
     .bind(archived_observed_at)
@@ -247,7 +254,7 @@ pub(super) async fn exercise(
         Some("55000")
     );
     let archived_fact_count: i64 =
-        sqlx::query_scalar("SELECT count(*) FROM usage_facts WHERE request_id = $1")
+        sqlx::query_scalar("SELECT count(*) FROM attempt_usage_facts WHERE request_id = $1")
             .bind(archived_request_id)
             .fetch_one(store.pool())
             .await
@@ -417,7 +424,7 @@ pub(super) async fn exercise(
     assert_eq!(late_maintenance.request_metadata_gap_rows, 1);
     let additive_usage: (i64, String, String) = sqlx::query_as(
         "SELECT request_count, input_tokens::text, output_tokens::text \
-         FROM usage_hourly \
+         FROM attempt_usage_hourly \
          WHERE bucket = $1 AND route_slug = 'default' AND provider_id = $2 \
            AND upstream_model = 'mock-model' AND operation = 'generation' \
            AND surface = 'gemini' AND api_key_id = $3",
@@ -440,26 +447,6 @@ pub(super) async fn exercise(
     .unwrap();
     assert_eq!(additive_gap, 6);
 
-    // Simulate an N-1 worker that knows nothing about receipts. The database
-    // trigger must suppress its replay after the raw fact was retained.
-    let legacy_replay = sqlx::query(
-        "INSERT INTO usage_facts \
-         (id, request_id, request_started_at, api_key_id, provider_id, route_slug, \
-          upstream_model, operation, surface, observed_at, unpriced, usage_complete) \
-         VALUES ($1, $2, $3, $4, $5, 'default', 'mock-model', 'generation', \
-                 'gemini', $6, true, true)",
-    )
-    .bind(late_event.event_id)
-    .bind(late_event.request_id)
-    .bind(late_event.request_started_at)
-    .bind(late_event.api_key_id)
-    .bind(provider_id)
-    .bind(late_event.observed_at)
-    .execute(store.pool())
-    .await
-    .unwrap();
-    assert_eq!(legacy_replay.rows_affected(), 0);
-
     store
         .persist_request_metadata_event(&late_event)
         .await
@@ -469,7 +456,7 @@ pub(super) async fn exercise(
     assert_eq!(replay_maintenance.rollup_rows, 0);
     let replayed_usage: (i64, String, String) = sqlx::query_as(
         "SELECT request_count, input_tokens::text, output_tokens::text \
-         FROM usage_hourly \
+         FROM attempt_usage_hourly \
          WHERE bucket = $1 AND route_slug = 'default' AND provider_id = $2 \
            AND upstream_model = 'mock-model' AND operation = 'generation' \
            AND surface = 'gemini' AND api_key_id = $3",
@@ -537,7 +524,7 @@ pub(super) async fn exercise(
         .unwrap();
     let media_cost: (String, String, bool) = sqlx::query_as(
         "SELECT media_units::text, estimated_cost::text, unpriced \
-         FROM usage_facts WHERE request_id = $1",
+         FROM attempt_usage_facts WHERE request_id = $1",
     )
     .bind(media_request_id)
     .fetch_one(store.pool())
@@ -548,8 +535,7 @@ pub(super) async fn exercise(
     assert!(!media_cost.2);
 
     // Delivery is intentionally bounded: a first event outside the seven-day
-    // window is rejected by new code. The database applies the same fence to
-    // an N-1 writer and records exactly one visible gap for repeated delivery.
+    // window is rejected by new code.
     let outside_window_observed_at = Utc::now() - Duration::days(8);
     let mut outside_window_event = late_event.clone();
     outside_window_event.event_id = Uuid::now_v7();
@@ -585,39 +571,6 @@ pub(super) async fn exercise(
     .await
     .unwrap();
     assert_eq!(application_gap, (1, 0, "lower_bound".to_owned()));
-
-    let mut legacy_outside_window_event = outside_window_event.clone();
-    legacy_outside_window_event.event_id = Uuid::now_v7();
-    legacy_outside_window_event.request_id = Uuid::now_v7();
-
-    for _ in 0..2 {
-        let legacy_outside_window = sqlx::query(
-            "INSERT INTO usage_facts \
-             (id, request_id, request_started_at, api_key_id, provider_id, route_slug, \
-              upstream_model, operation, surface, observed_at, unpriced, usage_complete) \
-             VALUES ($1, $2, $3, $4, $5, 'default', 'mock-model', 'generation', \
-                     'gemini', $6, true, true)",
-        )
-        .bind(legacy_outside_window_event.event_id)
-        .bind(legacy_outside_window_event.request_id)
-        .bind(legacy_outside_window_event.request_started_at)
-        .bind(legacy_outside_window_event.api_key_id)
-        .bind(provider_id)
-        .bind(legacy_outside_window_event.observed_at)
-        .execute(store.pool())
-        .await
-        .unwrap();
-        assert_eq!(legacy_outside_window.rows_affected(), 0);
-    }
-    let outside_window_gaps: i64 = sqlx::query_scalar(
-        "SELECT count(*) FROM request_metadata_ingestion_gaps \
-         WHERE gateway_instance = 'database-fence' \
-           AND reason = 'request_metadata_event_outside_replay_window'",
-    )
-    .fetch_one(store.pool())
-    .await
-    .unwrap();
-    assert_eq!(outside_window_gaps, 1);
 
     let poison_detected_at = Utc::now();
     let poison_gap = || Gap {

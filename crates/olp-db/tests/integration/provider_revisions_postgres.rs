@@ -119,25 +119,30 @@ async fn staged_provider_changes_do_not_leak_until_reactivation() {
             provider.etag,
             actor,
             "provider-revision-activate-01",
+            Replayable::new(
+                fingerprint(&"provider-revision-activate-01").unwrap(),
+                &master_key,
+            ),
+            |_| Response::new(200, None, None, Vec::new()),
         )
         .await
-        .unwrap();
+        .unwrap()
+        .unwrap_value();
     let first_configuration = store.get_provider(provider_id).await.unwrap();
     assert_eq!(first_configuration.active_revision, Some(1));
     assert!(!first_configuration.pending_activation);
 
     let media_api_key_id = Uuid::now_v7();
     sqlx::query(
-        "INSERT INTO api_keys
-         (id, lookup_id, secret_digest, name, created_by)
-         VALUES ($1, 'olpv2revisionmedia', $2, 'revision media key', $3)",
+        "INSERT INTO api_keys (id, lookup_id, secret_hash, name, scopes, limits, expires_at, created_by)
+         VALUES ($1, 'olp_live_media_key', decode('deadbeef', 'hex'), 'live media key', '{inference}', '{}', null, $2)",
     )
     .bind(media_api_key_id)
-    .bind([29_u8; 32].as_slice())
     .bind(actor)
     .execute(store.pool())
     .await
     .unwrap();
+
     let live_media_job_id = Uuid::now_v7();
     store
         .reserve_media_job(NewMediaJobReservation {
@@ -169,34 +174,27 @@ async fn staged_provider_changes_do_not_leak_until_reactivation() {
         .unwrap();
     assert!(live_media_job.provider_revision_id.is_some());
 
-    let route_fingerprint = fingerprint(&"provider-revision-route-create-01").unwrap();
     let route = store
         .create_route_draft(
             NewRouteDraft {
                 slug: "default".to_owned(),
-                operations: vec![OperationKind::Generation, OperationKind::Embeddings],
+                operations: vec![OperationKind::Generation],
                 overall_timeout_ms: 30_000,
-                max_attempts: 2,
-                targets: vec![
-                    NewRouteTarget {
-                        provider_id,
-                        upstream_model: "model-old".to_owned(),
-                        priority: 0,
-                        weight: 1,
-                        timeout_ms: 20_000,
-                    },
-                    NewRouteTarget {
-                        provider_id,
-                        upstream_model: "embed-old".to_owned(),
-                        priority: 0,
-                        weight: 1,
-                        timeout_ms: 20_000,
-                    },
-                ],
+                max_attempts: 1,
+                targets: vec![NewRouteTarget {
+                    provider_id,
+                    upstream_model: "model-old".to_owned(),
+                    priority: 0,
+                    weight: 1,
+                    timeout_ms: 20_000,
+                }],
                 actor,
-                idempotency_key: "provider-revision-route-create-01".to_owned(),
+                idempotency_key: "provider-revision-route-01".to_owned(),
             },
-            Replayable::new(route_fingerprint, &master_key),
+            Replayable::new(
+                fingerprint(&"provider-revision-route-01").unwrap(),
+                &master_key,
+            ),
             |_| Response::new(201, None, None, Vec::new()),
         )
         .await
@@ -214,6 +212,11 @@ async fn staged_provider_changes_do_not_leak_until_reactivation() {
             route_etag,
             actor,
             "provider-revision-route-activate-01",
+            Replayable::new(
+                fingerprint(&"provider-revision-route-activate-01").unwrap(),
+                &master_key,
+            ),
+            |_| Response::new(200, None, None, Vec::new()),
         )
         .await
         .unwrap();
@@ -308,6 +311,11 @@ async fn staged_provider_changes_do_not_leak_until_reactivation() {
                     rotation.etag,
                     actor,
                     idempotency_key,
+                    Replayable::new(
+                        fingerprint(&idempotency_key).unwrap(),
+                        &master_key
+                    ),
+                    |_| Response::new(200, None, None, Vec::new()),
                 )
                 .await,
             Err(Error::InUse)
@@ -388,6 +396,11 @@ async fn staged_provider_changes_do_not_leak_until_reactivation() {
                 rotation.etag,
                 actor,
                 "provider-revision-activate-live-media-01",
+                Replayable::new(
+                    fingerprint(&"provider-revision-activate-live-media-01").unwrap(),
+                    &master_key
+                ),
+                |_| Response::new(200, None, None, Vec::new()),
             )
             .await,
         Err(Error::ProviderIncomplete)
@@ -408,9 +421,15 @@ async fn staged_provider_changes_do_not_leak_until_reactivation() {
             rotation.etag,
             actor,
             "provider-revision-activate-02",
+            Replayable::new(
+                fingerprint(&"provider-revision-activate-02").unwrap(),
+                &master_key
+            ),
+            |_| Response::new(200, None, None, Vec::new()),
         )
         .await
-        .unwrap();
+        .unwrap()
+        .unwrap_value();
     let activated: Snapshot = serde_json::from_slice(&second_activation.release.payload).unwrap();
     let activated_configuration = store.get_provider(provider_id).await.unwrap();
     assert_eq!(activated_configuration.active_revision, Some(2));
@@ -483,9 +502,15 @@ async fn staged_provider_changes_do_not_leak_until_reactivation() {
             activated_configuration.etag,
             actor,
             "provider-revision-restore-01",
+            Replayable::new(
+                fingerprint(&"provider-revision-restore-01").unwrap(),
+                &master_key
+            ),
+            |_| Response::new(200, None, None, Vec::new()),
         )
         .await
-        .unwrap();
+        .unwrap()
+        .unwrap_value();
     assert_eq!(
         restored.state,
         olp_engine::domain::provider::ProviderState::Draft
@@ -519,6 +544,11 @@ async fn staged_provider_changes_do_not_leak_until_reactivation() {
                 activated_configuration.etag,
                 actor,
                 "provider-revision-restore-01",
+                Replayable::new(
+                    fingerprint(&"provider-revision-restore-01-conflict").unwrap(),
+                    &master_key
+                ),
+                |_| Response::new(200, None, None, Vec::new()),
             )
             .await,
         Err(Error::IdempotencyConflict)

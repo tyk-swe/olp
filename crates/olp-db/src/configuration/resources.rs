@@ -16,8 +16,8 @@ use uuid::Uuid;
 use crate::{
     error::Error as PersistenceError,
     idempotency::{
-        Outcome, Replayable, ReplayableIdempotencyClaim, Response, claim_idempotency,
-        claim_replayable_idempotency, complete_idempotency, complete_replayable_idempotency,
+        Outcome, Replayable, ReplayableIdempotencyClaim, Response, claim_replayable_idempotency,
+        complete_replayable_idempotency,
     },
     runtime::{
         PublishedRuntimeRelease,
@@ -364,15 +364,23 @@ pub struct ApiKeyMutationResult {
     pub release: PublishedRuntimeRelease,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum PatchValue<T> {
+    #[default]
+    Preserve,
+    Clear,
+    Set(T),
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct UpdateApiKeyInput {
-    pub name: String,
-    pub scopes: Vec<String>,
-    pub allowed_routes: Vec<String>,
-    pub requests_per_minute: Option<u32>,
-    pub tokens_per_minute: Option<u64>,
-    pub max_concurrency: Option<u32>,
-    pub expires_at: Option<DateTime<Utc>>,
+    pub name: Option<String>,
+    pub scopes: Option<Vec<String>>,
+    pub allowed_routes: Option<Vec<String>>,
+    pub requests_per_minute: PatchValue<u32>,
+    pub tokens_per_minute: PatchValue<u64>,
+    pub max_concurrency: PatchValue<u32>,
+    pub expires_at: PatchValue<DateTime<Utc>>,
 }
 
 #[derive(Debug)]

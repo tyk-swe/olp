@@ -73,6 +73,7 @@ impl From<PriceOperation> for OperationKind {
 }
 
 #[derive(Debug, Deserialize, Serialize, ToSchema)]
+#[serde(deny_unknown_fields)]
 pub(super) struct PriceRequest {
     provider_kind: ProviderKind,
     #[schema(value_type = Option<String>, format = Uuid)]
@@ -101,6 +102,7 @@ impl From<PriceRequest> for PriceInput {
 }
 
 #[derive(Debug, Deserialize, Serialize, ToSchema)]
+#[serde(deny_unknown_fields)]
 pub(super) struct PricingRevisionRequest {
     effective_at: DateTime<Utc>,
     prices: Vec<PriceRequest>,
@@ -204,6 +206,7 @@ pub(super) async fn list_pricing_revisions(
     request_body = PricingRevisionRequest,
     responses(
         (status = 201, description = "Pricing revision created", body = PricingRevisionResponse),
+        (status = 400, description = "Idempotency-Key header is missing or malformed", body = Problem),
         (status = 409, description = "Idempotency key reused or request in progress", body = Problem),
         (status = 422, description = "Invalid pricing revision", body = Problem),
         (status = 503, description = "Master key or database unavailable", body = Problem)

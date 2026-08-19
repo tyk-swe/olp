@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { onDestroy } from 'svelte';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { errorMessage as providerDetailError } from '$lib/api/http';
   import {
@@ -13,6 +14,7 @@
     type Provider,
     type ProviderRevisionDiff
   } from '$lib/api/management/providers';
+  import { KeyedLogicalOperations } from '$lib/forms/operationState';
   import { invalidateProviderSummaries } from './providerCache';
   import {
     installProviderWithModels,
@@ -36,6 +38,15 @@
   } = $props();
 
   const queryClient = useQueryClient();
+  const restoreOperations = new KeyedLogicalOperations<
+    string,
+    { provider: Provider; revisionId: string },
+    Provider
+  >(
+    () =>
+      ({ provider, revisionId }, idempotencyKey) =>
+        restoreProviderRevision(provider, revisionId, idempotencyKey)
+  );
   const pagination = $state(emptyCursorHistory());
   let revisionFrom = $state('');
   let revisionTo = $state('');
@@ -45,6 +56,10 @@
     queryFn: ({ signal }) =>
       listProviderRevisionPage(current.id, pagination.cursor, signal)
   }));
+
+  onDestroy(() => {
+    restoreOperations.clear();
+  });
 
   $effect(() => {
     const items = revisions.data?.items ?? [];
@@ -71,7 +86,8 @@
     )
       return;
     await run('revision-restore', async () => {
-      const restored = await restoreProviderRevision(current, revisionId);
+      const op = restoreOperations.get(revisionId);
+      const restored = await op.execute({ provider: current, revisionId });
       revisionDiff = null;
       await installProviderWithModels(
         queryClient,

@@ -2,6 +2,7 @@
   "components": {
     "schemas": {
       "AcceptInvitationRequest": {
+        "additionalProperties": false,
         "properties": {
           "display_name": {
             "type": "string"
@@ -403,6 +404,7 @@
         "type": "object"
       },
       "CapabilityInput": {
+        "additionalProperties": false,
         "properties": {
           "mode": {
             "type": "string"
@@ -452,6 +454,7 @@
         "type": "object"
       },
       "ChangePasswordRequest": {
+        "additionalProperties": false,
         "properties": {
           "current_password": {
             "type": "string",
@@ -469,6 +472,7 @@
         "type": "object"
       },
       "CreateApiKeyRequest": {
+        "additionalProperties": false,
         "properties": {
           "allowed_routes": {
             "items": {
@@ -548,6 +552,7 @@
         "type": "object"
       },
       "CreateInvitationRequest": {
+        "additionalProperties": false,
         "properties": {
           "email": {
             "type": "string"
@@ -589,6 +594,7 @@
         "type": "object"
       },
       "CreateProviderRequest": {
+        "additionalProperties": false,
         "properties": {
           "api_version": {
             "type": [
@@ -662,6 +668,7 @@
         "type": "object"
       },
       "CreateRouteDraftRequest": {
+        "additionalProperties": false,
         "properties": {
           "max_attempts": {
             "format": "int32",
@@ -764,6 +771,7 @@
         "type": "object"
       },
       "DiscoverModelsRequest": {
+        "additionalProperties": false,
         "properties": {
           "models": {
             "description": "Omit or pass an empty array to query the upstream model-list API.\nManual identifiers are a fallback for upstreams without a list API.\nAll discovered models start disabled and without capability claims until\nthe explicit review operation is completed.",
@@ -776,6 +784,7 @@
         "type": "object"
       },
       "DiscoveredModelRequest": {
+        "additionalProperties": false,
         "properties": {
           "display_name": {
             "type": "string"
@@ -1154,6 +1163,7 @@
         "type": "object"
       },
       "LoginRequest": {
+        "additionalProperties": false,
         "properties": {
           "email": {
             "type": "string"
@@ -1322,6 +1332,7 @@
         "type": "object"
       },
       "OidcConfigurationRequest": {
+        "additionalProperties": false,
         "properties": {
           "client_id": {
             "type": "string"
@@ -1514,6 +1525,7 @@
         "type": "object"
       },
       "OidcLoginRequest": {
+        "additionalProperties": false,
         "properties": {
           "return_to": {
             "description": "Same-origin absolute-path destination used only after a successful callback.",
@@ -1526,6 +1538,7 @@
         "type": "object"
       },
       "OidcReauthenticationRequest": {
+        "additionalProperties": false,
         "properties": {
           "purpose": {
             "description": "Exact durable security operation that the resulting one-time grant may authorize.",
@@ -1546,6 +1559,7 @@
         "type": "object"
       },
       "OidcRoleMappingRequest": {
+        "additionalProperties": false,
         "properties": {
           "claim_value": {
             "type": "string"
@@ -1595,6 +1609,7 @@
         "type": "object"
       },
       "PlaygroundRequest": {
+        "additionalProperties": false,
         "properties": {
           "input": {
             "type": "string"
@@ -1789,6 +1804,7 @@
         "type": "object"
       },
       "PlaygroundToolRequest": {
+        "additionalProperties": false,
         "properties": {
           "description": {
             "type": [
@@ -1870,6 +1886,7 @@
         "type": "string"
       },
       "PriceRequest": {
+        "additionalProperties": false,
         "properties": {
           "currency": {
             "type": "string"
@@ -1966,6 +1983,7 @@
         "type": "object"
       },
       "PricingRevisionRequest": {
+        "additionalProperties": false,
         "properties": {
           "effective_at": {
             "format": "date-time",
@@ -3236,6 +3254,7 @@
         "type": "object"
       },
       "ReplaceRouteDraftRequest": {
+        "additionalProperties": false,
         "properties": {
           "max_attempts": {
             "format": "int32",
@@ -3271,6 +3290,7 @@
         "type": "object"
       },
       "ReplaceRouteTargetRequest": {
+        "additionalProperties": false,
         "properties": {
           "priority": {
             "format": "int32",
@@ -3688,6 +3708,7 @@
         "type": "object"
       },
       "RotateCredentialRequest": {
+        "additionalProperties": false,
         "properties": {
           "credential": {
             "type": "string",
@@ -4114,6 +4135,7 @@
         "type": "object"
       },
       "RouteTargetRequest": {
+        "additionalProperties": false,
         "properties": {
           "priority": {
             "format": "int32",
@@ -4342,6 +4364,7 @@
         "type": "object"
       },
       "SetModelRequest": {
+        "additionalProperties": false,
         "properties": {
           "capabilities": {
             "description": "Explicit operator-reviewed capability tuples. Their provenance is\nrecorded as `declared`; certification/probe jobs may promote provenance\nseparately and cannot be forged by the browser.",
@@ -4404,6 +4427,7 @@
         "type": "object"
       },
       "SetupRequest": {
+        "additionalProperties": false,
         "properties": {
           "display_name": {
             "type": "string"
@@ -4438,6 +4462,7 @@
         "type": "object"
       },
       "SimulateRouteRequest": {
+        "additionalProperties": false,
         "properties": {
           "mode": {
             "type": "string"
@@ -4461,12 +4486,16 @@
         "type": "object"
       },
       "UpdateApiKeyRequest": {
+        "additionalProperties": false,
         "properties": {
           "allowed_routes": {
             "items": {
               "type": "string"
             },
-            "type": "array"
+            "type": [
+              "array",
+              "null"
+            ]
           },
           "expires_at": {
             "format": "date-time",
@@ -4484,7 +4513,10 @@
             ]
           },
           "name": {
-            "type": "string"
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "requests_per_minute": {
             "format": "int32",
@@ -4498,7 +4530,10 @@
             "items": {
               "type": "string"
             },
-            "type": "array"
+            "type": [
+              "array",
+              "null"
+            ]
           },
           "tokens_per_minute": {
             "format": "int64",
@@ -4509,13 +4544,10 @@
             ]
           }
         },
-        "required": [
-          "name",
-          "scopes"
-        ],
         "type": "object"
       },
       "UpdateProfileRequest": {
+        "additionalProperties": false,
         "properties": {
           "display_name": {
             "type": "string"
@@ -4527,6 +4559,7 @@
         "type": "object"
       },
       "UpdateProviderRequest": {
+        "additionalProperties": false,
         "properties": {
           "api_version": {
             "type": [
@@ -4572,6 +4605,7 @@
         "type": "object"
       },
       "UpdateSettingRequest": {
+        "additionalProperties": false,
         "properties": {
           "value": {
             "type": "string"
@@ -4583,6 +4617,7 @@
         "type": "object"
       },
       "UpdateUserRoleRequest": {
+        "additionalProperties": false,
         "properties": {
           "active": {
             "type": [
@@ -5145,6 +5180,16 @@
             },
             "description": "API key created; secret is shown once"
           },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Idempotency-Key header is missing or malformed"
+          },
           "401": {
             "content": {
               "application/problem+json": {
@@ -5393,6 +5438,16 @@
             },
             "description": ""
           },
+          "428": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "If-Match header is required."
+          },
           "500": {
             "content": {
               "application/problem+json": {
@@ -5467,6 +5522,16 @@
               }
             }
           },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Idempotency-Key header is missing or malformed"
+          },
           "401": {
             "content": {
               "application/problem+json": {
@@ -5475,7 +5540,7 @@
                 }
               }
             },
-            "description": "Authentication required."
+            "description": "Authentication required"
           },
           "403": {
             "content": {
@@ -5485,7 +5550,7 @@
                 }
               }
             },
-            "description": "The session lacks permission or mutation CSRF/origin checks failed."
+            "description": "Insufficient permissions, CSRF, or origin failure"
           },
           "404": {
             "content": {
@@ -5497,6 +5562,16 @@
             },
             "description": "API key not found"
           },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Idempotency conflict or operation in progress"
+          },
           "412": {
             "content": {
               "application/problem+json": {
@@ -5507,6 +5582,16 @@
             },
             "description": "ETag mismatch"
           },
+          "428": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "If-Match header is required"
+          },
           "500": {
             "content": {
               "application/problem+json": {
@@ -5516,6 +5601,16 @@
               }
             },
             "description": "The request could not be completed."
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Master key or database unavailable"
           }
         },
         "security": [
@@ -5568,7 +5663,7 @@
                 }
               }
             },
-            "description": "",
+            "description": "API key rotated and new secret returned once",
             "headers": {
               "ETag": {
                 "description": "Current strong entity tag.",
@@ -5577,6 +5672,16 @@
                 }
               }
             }
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Idempotency-Key header is missing or malformed"
           },
           "401": {
             "content": {
@@ -5606,7 +5711,7 @@
                 }
               }
             },
-            "description": ""
+            "description": "Idempotency conflict or operation in progress"
           },
           "412": {
             "content": {
@@ -5616,7 +5721,17 @@
                 }
               }
             },
-            "description": ""
+            "description": "ETag mismatch"
+          },
+          "428": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "If-Match header is required"
           },
           "500": {
             "content": {
@@ -5941,6 +6056,16 @@
             },
             "description": "Invitation created; token is displayed once"
           },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Idempotency-Key header is missing or malformed"
+          },
           "401": {
             "content": {
               "application/problem+json": {
@@ -6129,6 +6254,16 @@
             },
             "description": "Invitation revoked"
           },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Idempotency-Key header is missing or malformed"
+          },
           "401": {
             "content": {
               "application/problem+json": {
@@ -6137,7 +6272,7 @@
                 }
               }
             },
-            "description": "Authentication required."
+            "description": "Authentication required"
           },
           "403": {
             "content": {
@@ -6147,7 +6282,17 @@
                 }
               }
             },
-            "description": "The session lacks permission or mutation CSRF/origin checks failed."
+            "description": "Insufficient permissions, CSRF, or origin failure"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Invitation not found"
           },
           "409": {
             "content": {
@@ -6157,7 +6302,7 @@
                 }
               }
             },
-            "description": "Invitation is already accepted or revoked"
+            "description": "Invitation is already accepted or revoked or idempotency conflict"
           },
           "500": {
             "content": {
@@ -6168,6 +6313,16 @@
               }
             },
             "description": "The request could not be completed."
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Master key or database unavailable"
           }
         },
         "security": [
@@ -6662,6 +6817,16 @@
               }
             },
             "description": "Discovery or configuration validation failed"
+          },
+          "428": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "If-Match header is required."
           },
           "500": {
             "content": {
@@ -7369,6 +7534,16 @@
             },
             "description": "Pricing revision created"
           },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Idempotency-Key header is missing or malformed"
+          },
           "401": {
             "content": {
               "application/problem+json": {
@@ -7577,6 +7752,16 @@
             },
             "description": "Display name is invalid"
           },
+          "428": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "If-Match header is required."
+          },
           "500": {
             "content": {
               "application/problem+json": {
@@ -7681,6 +7866,16 @@
               }
             },
             "description": "New password is invalid"
+          },
+          "428": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "If-Match header is required."
           },
           "429": {
             "content": {
@@ -8590,6 +8785,16 @@
             },
             "description": ""
           },
+          "428": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "If-Match header is required."
+          },
           "500": {
             "content": {
               "application/problem+json": {
@@ -8682,7 +8887,7 @@
                 }
               }
             },
-            "description": "Authentication required."
+            "description": "Authentication required"
           },
           "403": {
             "content": {
@@ -8692,7 +8897,17 @@
                 }
               }
             },
-            "description": "The session lacks permission or mutation CSRF/origin checks failed."
+            "description": "Insufficient permissions, CSRF, or origin failure"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Provider not found"
           },
           "409": {
             "content": {
@@ -8702,7 +8917,7 @@
                 }
               }
             },
-            "description": "Idempotency-Key was already used"
+            "description": "Idempotency conflict or operation in progress"
           },
           "412": {
             "content": {
@@ -8724,6 +8939,16 @@
             },
             "description": "Provider is incomplete"
           },
+          "428": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "If-Match header is required"
+          },
           "500": {
             "content": {
               "application/problem+json": {
@@ -8733,6 +8958,16 @@
               }
             },
             "description": "The request could not be completed."
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Master key or database unavailable"
           }
         },
         "security": [
@@ -8888,7 +9123,7 @@
                 }
               }
             },
-            "description": "",
+            "description": "Provider credential rotated",
             "headers": {
               "ETag": {
                 "description": "Current strong entity tag.",
@@ -8897,6 +9132,16 @@
                 }
               }
             }
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Idempotency-Key header is missing or malformed"
           },
           "401": {
             "content": {
@@ -8936,7 +9181,17 @@
                 }
               }
             },
-            "description": ""
+            "description": "ETag mismatch"
+          },
+          "428": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "If-Match header is required"
           },
           "500": {
             "content": {
@@ -8975,6 +9230,7 @@
         "operationId": "revoke_provider_credential",
         "parameters": [
           {
+            "description": "Provider ID",
             "in": "path",
             "name": "provider_id",
             "required": true,
@@ -8984,6 +9240,7 @@
             }
           },
           {
+            "description": "Credential ID",
             "in": "path",
             "name": "credential_id",
             "required": true,
@@ -8993,6 +9250,7 @@
             }
           },
           {
+            "description": "Current provider ETag",
             "in": "header",
             "name": "If-Match",
             "required": true,
@@ -9001,6 +9259,7 @@
             }
           },
           {
+            "description": "Unique revocation key",
             "in": "header",
             "name": "Idempotency-Key",
             "required": true,
@@ -9018,7 +9277,7 @@
                 }
               }
             },
-            "description": "",
+            "description": "Provider credential revoked",
             "headers": {
               "ETag": {
                 "description": "Current strong entity tag.",
@@ -9028,6 +9287,16 @@
               }
             }
           },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Idempotency-Key header is missing or malformed"
+          },
           "401": {
             "content": {
               "application/problem+json": {
@@ -9036,7 +9305,7 @@
                 }
               }
             },
-            "description": "Authentication required."
+            "description": "Authentication required"
           },
           "403": {
             "content": {
@@ -9046,7 +9315,17 @@
                 }
               }
             },
-            "description": "The session lacks permission or mutation CSRF/origin checks failed."
+            "description": "Insufficient permissions, CSRF, or origin failure"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Provider or credential not found"
           },
           "409": {
             "content": {
@@ -9056,7 +9335,7 @@
                 }
               }
             },
-            "description": ""
+            "description": "Credential in use or idempotency conflict"
           },
           "412": {
             "content": {
@@ -9066,7 +9345,17 @@
                 }
               }
             },
-            "description": ""
+            "description": "ETag mismatch"
+          },
+          "428": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "If-Match header is required"
           },
           "500": {
             "content": {
@@ -9077,6 +9366,16 @@
               }
             },
             "description": "The request could not be completed."
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Master key or database unavailable"
           }
         },
         "security": [
@@ -9095,6 +9394,7 @@
         "operationId": "disable_provider",
         "parameters": [
           {
+            "description": "Provider ID",
             "in": "path",
             "name": "provider_id",
             "required": true,
@@ -9104,6 +9404,7 @@
             }
           },
           {
+            "description": "Current provider ETag",
             "in": "header",
             "name": "If-Match",
             "required": true,
@@ -9112,6 +9413,7 @@
             }
           },
           {
+            "description": "Unique disable key",
             "in": "header",
             "name": "Idempotency-Key",
             "required": true,
@@ -9129,7 +9431,7 @@
                 }
               }
             },
-            "description": "",
+            "description": "Provider disabled",
             "headers": {
               "ETag": {
                 "description": "Current strong entity tag.",
@@ -9139,6 +9441,16 @@
               }
             }
           },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Idempotency-Key header is missing or malformed"
+          },
           "401": {
             "content": {
               "application/problem+json": {
@@ -9147,7 +9459,7 @@
                 }
               }
             },
-            "description": "Authentication required."
+            "description": "Authentication required"
           },
           "403": {
             "content": {
@@ -9157,7 +9469,17 @@
                 }
               }
             },
-            "description": "The session lacks permission or mutation CSRF/origin checks failed."
+            "description": "Insufficient permissions, CSRF, or origin failure"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Provider not found"
           },
           "409": {
             "content": {
@@ -9167,7 +9489,7 @@
                 }
               }
             },
-            "description": "Provider is still referenced by an active route"
+            "description": "Provider is still referenced by an active route or idempotency conflict"
           },
           "412": {
             "content": {
@@ -9177,7 +9499,17 @@
                 }
               }
             },
-            "description": ""
+            "description": "ETag mismatch"
+          },
+          "428": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "If-Match header is required"
           },
           "500": {
             "content": {
@@ -9188,6 +9520,16 @@
               }
             },
             "description": "The request could not be completed."
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Master key or database unavailable"
           }
         },
         "security": [
@@ -9291,6 +9633,16 @@
               }
             },
             "description": ""
+          },
+          "428": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "If-Match header is required."
           },
           "500": {
             "content": {
@@ -9499,6 +9851,16 @@
             },
             "description": ""
           },
+          "428": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "If-Match header is required."
+          },
           "500": {
             "content": {
               "application/problem+json": {
@@ -9622,6 +9984,16 @@
             },
             "description": "Provider or capability set cannot be certified"
           },
+          "428": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "If-Match header is required."
+          },
           "500": {
             "content": {
               "application/problem+json": {
@@ -9726,6 +10098,16 @@
             },
             "description": ""
           },
+          "428": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "If-Match header is required."
+          },
           "500": {
             "content": {
               "application/problem+json": {
@@ -9753,6 +10135,7 @@
         "operationId": "restore_provider_as_draft",
         "parameters": [
           {
+            "description": "Provider ID",
             "in": "path",
             "name": "provider_id",
             "required": true,
@@ -9762,6 +10145,7 @@
             }
           },
           {
+            "description": "Current provider ETag",
             "in": "header",
             "name": "If-Match",
             "required": true,
@@ -9770,6 +10154,7 @@
             }
           },
           {
+            "description": "Unique restore key",
             "in": "header",
             "name": "Idempotency-Key",
             "required": true,
@@ -9787,7 +10172,7 @@
                 }
               }
             },
-            "description": "",
+            "description": "Provider restored as draft",
             "headers": {
               "ETag": {
                 "description": "Current strong entity tag.",
@@ -9797,6 +10182,16 @@
               }
             }
           },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Idempotency-Key header is missing or malformed"
+          },
           "401": {
             "content": {
               "application/problem+json": {
@@ -9805,7 +10200,7 @@
                 }
               }
             },
-            "description": "Authentication required."
+            "description": "Authentication required"
           },
           "403": {
             "content": {
@@ -9815,7 +10210,27 @@
                 }
               }
             },
-            "description": "The session lacks permission or mutation CSRF/origin checks failed."
+            "description": "Insufficient permissions, CSRF, or origin failure"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Provider not found"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Idempotency conflict or provider not in disabled state"
           },
           "412": {
             "content": {
@@ -9825,7 +10240,17 @@
                 }
               }
             },
-            "description": ""
+            "description": "ETag mismatch"
+          },
+          "428": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "If-Match header is required"
           },
           "500": {
             "content": {
@@ -9836,6 +10261,16 @@
               }
             },
             "description": "The request could not be completed."
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Master key or database unavailable"
           }
         },
         "security": [
@@ -10243,6 +10678,7 @@
         "operationId": "restore_provider_revision",
         "parameters": [
           {
+            "description": "Provider ID",
             "in": "path",
             "name": "provider_id",
             "required": true,
@@ -10252,6 +10688,7 @@
             }
           },
           {
+            "description": "Provider Revision ID",
             "in": "path",
             "name": "revision_id",
             "required": true,
@@ -10270,6 +10707,7 @@
             }
           },
           {
+            "description": "Unique restore key",
             "in": "header",
             "name": "Idempotency-Key",
             "required": true,
@@ -10297,6 +10735,16 @@
               }
             }
           },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Idempotency-Key header is missing or malformed"
+          },
           "401": {
             "content": {
               "application/problem+json": {
@@ -10305,7 +10753,7 @@
                 }
               }
             },
-            "description": "Authentication required."
+            "description": "Authentication required"
           },
           "403": {
             "content": {
@@ -10315,7 +10763,17 @@
                 }
               }
             },
-            "description": "The session lacks permission or mutation CSRF/origin checks failed."
+            "description": "Insufficient permissions, CSRF, or origin failure"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Provider or revision not found"
           },
           "409": {
             "content": {
@@ -10325,7 +10783,7 @@
                 }
               }
             },
-            "description": "Idempotency-Key was already used"
+            "description": "Idempotency conflict or operation in progress"
           },
           "412": {
             "content": {
@@ -10335,7 +10793,7 @@
                 }
               }
             },
-            "description": ""
+            "description": "ETag mismatch"
           },
           "422": {
             "content": {
@@ -10345,7 +10803,17 @@
                 }
               }
             },
-            "description": ""
+            "description": "Invalid revision data"
+          },
+          "428": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "If-Match header is required"
           },
           "500": {
             "content": {
@@ -10356,6 +10824,16 @@
               }
             },
             "description": "The request could not be completed."
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Master key or database unavailable"
           }
         },
         "security": [
@@ -11045,6 +11523,16 @@
             },
             "description": ""
           },
+          "428": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "If-Match header is required."
+          },
           "500": {
             "content": {
               "application/problem+json": {
@@ -11230,6 +11718,16 @@
             },
             "description": ""
           },
+          "428": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "If-Match header is required."
+          },
           "500": {
             "content": {
               "application/problem+json": {
@@ -11304,6 +11802,16 @@
               }
             }
           },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Idempotency-Key header is missing or malformed"
+          },
           "401": {
             "content": {
               "application/problem+json": {
@@ -11312,7 +11820,7 @@
                 }
               }
             },
-            "description": "Authentication required."
+            "description": "Authentication required"
           },
           "403": {
             "content": {
@@ -11322,7 +11830,17 @@
                 }
               }
             },
-            "description": "The session lacks permission or mutation CSRF/origin checks failed."
+            "description": "Insufficient permissions, CSRF, or origin failure"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Route draft not found"
           },
           "409": {
             "content": {
@@ -11332,7 +11850,7 @@
                 }
               }
             },
-            "description": "Draft has not been validated"
+            "description": "Draft has not been validated or idempotency conflict"
           },
           "412": {
             "content": {
@@ -11344,6 +11862,16 @@
             },
             "description": "ETag mismatch"
           },
+          "428": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "If-Match header is required"
+          },
           "500": {
             "content": {
               "application/problem+json": {
@@ -11353,6 +11881,16 @@
               }
             },
             "description": "The request could not be completed."
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Master key or database unavailable"
           }
         },
         "security": [
@@ -11535,6 +12073,16 @@
               }
             },
             "description": "Eligibility validation failed"
+          },
+          "428": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "If-Match header is required."
           },
           "500": {
             "content": {
@@ -11989,6 +12537,7 @@
         "operationId": "restore_route_revision",
         "parameters": [
           {
+            "description": "Route ID",
             "in": "path",
             "name": "route_id",
             "required": true,
@@ -11998,6 +12547,7 @@
             }
           },
           {
+            "description": "Route Revision ID",
             "in": "path",
             "name": "revision_id",
             "required": true,
@@ -12007,6 +12557,7 @@
             }
           },
           {
+            "description": "Unique restore key",
             "in": "header",
             "name": "Idempotency-Key",
             "required": true,
@@ -12024,7 +12575,17 @@
                 }
               }
             },
-            "description": ""
+            "description": "Route revision restored as a new route draft"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Idempotency-Key header is missing or malformed"
           },
           "401": {
             "content": {
@@ -12034,7 +12595,7 @@
                 }
               }
             },
-            "description": "Authentication required."
+            "description": "Authentication required"
           },
           "403": {
             "content": {
@@ -12044,7 +12605,17 @@
                 }
               }
             },
-            "description": "The session lacks permission or mutation CSRF/origin checks failed."
+            "description": "Insufficient permissions, CSRF, or origin failure"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Route or revision not found"
           },
           "409": {
             "content": {
@@ -12054,7 +12625,7 @@
                 }
               }
             },
-            "description": ""
+            "description": "Idempotency conflict or operation in progress"
           },
           "500": {
             "content": {
@@ -12065,6 +12636,16 @@
               }
             },
             "description": "The request could not be completed."
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Master key or database unavailable"
           }
         },
         "security": [
@@ -12702,6 +13283,16 @@
               }
             },
             "description": "ETag mismatch"
+          },
+          "428": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "If-Match header is required."
           },
           "500": {
             "content": {
@@ -13614,6 +14205,16 @@
               }
             },
             "description": "Role is invalid"
+          },
+          "428": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "If-Match header is required."
           },
           "500": {
             "content": {

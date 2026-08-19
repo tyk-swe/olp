@@ -721,7 +721,7 @@ async fn configure_provider(
         .expect(
             reqwest::Method::POST,
             &format!("/api/v1/providers/{provider_id}/discovery"),
-            Some(json!({"mode": "live"})),
+            Some(json!({})),
             None,
             Some(&etag),
             200,

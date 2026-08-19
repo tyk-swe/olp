@@ -1,13 +1,14 @@
 use axum::{
     Json,
     extract::{Path, Query, State},
-    http::HeaderMap,
+    http::{HeaderMap, StatusCode},
     response::Response,
 };
 use chrono::{DateTime, Utc};
 use olp_db::{
     configuration::resources::ProviderRevisionDiff,
     configuration::resources::ProviderRevisionRecord,
+    idempotency::{Replayable, Response as IdempotencyResponse, fingerprint},
 };
 use olp_engine::domain::{
     auth::Permission, provider::ProviderAuthMode, routing::provider::ProviderKind,
@@ -19,11 +20,11 @@ use uuid::Uuid;
 use crate::{
     bootstrap::mode_dependencies::ManagementState,
     management::{
-        error_mapping::map_configuration,
-        idempotency::require_idempotency_key,
+        error_mapping::{map_configuration, map_persistence},
+        idempotency::{idempotency_http_response, require_idempotency_key},
         pagination::{DiffQuery, PageQuery, page},
         permissions::require_permission,
-        preconditions::{if_match, with_etag},
+        preconditions::if_match,
         sessions::{require_mutation_session, require_read_session},
     },
     public_http::problem::Problem,
@@ -304,21 +305,34 @@ pub(crate) async fn diff_provider_revisions(
     ))
 }
 
+#[derive(Serialize)]
+struct RestoreProviderRevisionFingerprint {
+    provider_id: Uuid,
+    revision_id: Uuid,
+    expected_etag: Uuid,
+}
+
 #[utoipa::path(
     post,
     path = "/api/v1/providers/{provider_id}/revisions/{revision_id}/restore-as-draft",
     tag = "providers",
     params(
-        ("provider_id" = Uuid, Path),
-        ("revision_id" = Uuid, Path),
+        ("provider_id" = Uuid, Path, description = "Provider ID"),
+        ("revision_id" = Uuid, Path, description = "Provider Revision ID"),
         ("If-Match" = String, Header, description = "Current provider draft ETag"),
-        ("Idempotency-Key" = String, Header)
+        ("Idempotency-Key" = String, Header, description = "Unique restore key")
     ),
     responses(
         (status = 200, description = "Historical non-secret configuration restored as a draft; current credential selection is preserved", body = ProviderRevisionRestoreResponse),
-        (status = 409, description = "Idempotency-Key was already used", body = Problem),
-        (status = 412, body = Problem),
-        (status = 422, body = Problem)
+        (status = 400, description = "Idempotency-Key header is missing or malformed", body = Problem),
+        (status = 401, description = "Authentication required", body = Problem),
+        (status = 403, description = "Insufficient permissions, CSRF, or origin failure", body = Problem),
+        (status = 404, description = "Provider or revision not found", body = Problem),
+        (status = 409, description = "Idempotency conflict or operation in progress", body = Problem),
+        (status = 412, description = "ETag mismatch", body = Problem),
+        (status = 422, description = "Invalid revision data", body = Problem),
+        (status = 428, description = "If-Match header is required", body = Problem),
+        (status = 503, description = "Master key or database unavailable", body = Problem)
     )
 )]
 pub(crate) async fn restore_provider_revision(
@@ -328,23 +342,40 @@ pub(crate) async fn restore_provider_revision(
 ) -> Result<Response, Problem> {
     let principal = require_mutation_session(&state, &headers).await?;
     require_permission(&principal, Permission::ManageProviders)?;
-    let restored = state
+    let expected_etag = if_match(&headers)?;
+    let idempotency_key = require_idempotency_key(&headers)?;
+    let request_fingerprint = fingerprint(&RestoreProviderRevisionFingerprint {
+        provider_id,
+        revision_id,
+        expected_etag,
+    })
+    .map_err(map_persistence)?;
+    let master_key = state
+        .master_key
+        .as_deref()
+        .ok_or_else(|| Problem::service_unavailable("master_key_not_configured"))?;
+    let outcome = state
         .store()
         .restore_provider_revision_as_draft(
             provider_id,
             revision_id,
-            if_match(&headers)?,
+            expected_etag,
             principal.user_id,
-            require_idempotency_key(&headers)?,
+            idempotency_key,
+            Replayable::new(request_fingerprint, master_key),
+            |restored| {
+                let etag = restored.etag;
+                IdempotencyResponse::json(
+                    StatusCode::OK.as_u16(),
+                    &ProviderRevisionRestoreResponse {
+                        provider: restored.clone().into(),
+                        credential_restored: false,
+                    },
+                    Some(format!("\"{etag}\"")),
+                )
+            },
         )
         .await
         .map_err(map_configuration)?;
-    let etag = restored.etag;
-    with_etag(
-        Json(ProviderRevisionRestoreResponse {
-            provider: restored.into(),
-            credential_restored: false,
-        }),
-        etag,
-    )
+    idempotency_http_response(outcome)
 }

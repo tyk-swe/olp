@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { onDestroy } from 'svelte';
   import { resolve } from '$app/paths';
   import { createQuery } from '@tanstack/svelte-query';
   import CursorPagination from '$lib/components/CursorPagination.svelte';
@@ -15,6 +16,7 @@
     type PriceDraft,
     type Setting
   } from '$lib/api/operations';
+  import { LogicalOperation } from '$lib/forms/operationState';
   import { dateTimeLocalValue, formatDate } from '$lib/format';
   import {
     listProviderKinds,
@@ -26,6 +28,17 @@
   let savingKey = $state('');
   let status = $state('');
   let error = $state('');
+
+  const pricingOperation = new LogicalOperation<
+    { effectiveAt: string; prices: PriceDraft[] },
+    unknown
+  >(({ effectiveAt: eff, prices: p }, idempotencyKey) =>
+    createPricingRevision(eff, p, idempotencyKey)
+  );
+
+  onDestroy(() => {
+    pricingOperation.abandon();
+  });
 
   const operationOptions = [
     'generation', 'embeddings', 'token_count', 'image_generation', 'image_edit',
@@ -112,14 +125,17 @@
         currency: currency.trim().toUpperCase()
       };
       if (!price.input_per_million && !price.output_per_million && !price.unit_price) throw new Error('Enter at least one price.');
-      await createPricingRevision(new Date(effectiveAt).toISOString(), [price]);
+      await pricingOperation.execute({
+        effectiveAt: new Date(effectiveAt).toISOString(),
+        prices: [price]
+      });
       status = 'Pricing revision created. New usage will use the effective revision.';
       model = inputPrice = outputPrice = unitPrice = providerId = '';
       effectiveAt = dateTimeLocalValue(new Date());
       resetCursor(pricingPagination);
       await pricing.refetch();
-    } catch (cause) {
-      error = cause instanceof Error ? cause.message : 'The pricing revision could not be created.';
+    } catch {
+      error = pricingOperation.errorMessage;
     } finally {
       savingPrice = false;
     }

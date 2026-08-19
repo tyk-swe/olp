@@ -276,3 +276,82 @@ test('API key policy updates, rotation, and revocation converge in the list', as
   await page.getByRole('button', { name: 'Revoke' }).click();
   await expect(page.getByText('revoked', { exact: true })).toBeVisible();
 });
+
+test('API key creation with transport failure retains key and payload, recovering secret on retry without storage leaks', async ({
+  page
+}) => {
+  await mockSession(page, sessionOptions);
+  let postCount = 0;
+  let firstKey: string | null = null;
+  let secondKey: string | null = null;
+
+  await page.route('**/api/v1/routes**', async (route) => {
+    await route.fulfill({
+      json: { items: [], next_cursor: null }
+    });
+  });
+
+  await page.route('**/api/v1/api-keys**', async (route) => {
+    const request = route.request();
+    if (request.method() === 'POST') {
+      postCount += 1;
+      const key = request.headers()['idempotency-key'];
+      if (postCount === 1) {
+        firstKey = key;
+        await route.abort('failed');
+        return;
+      }
+      secondKey = key;
+      await route.fulfill({
+        status: 201,
+        json: {
+          id: ids.key,
+          lookup_id: 'olp_live_retry',
+          secret: 'olp_secret_recovered_on_retry',
+          runtime_generation: { id: ids.generation, sequence: 7 }
+        }
+      });
+      return;
+    }
+    await route.fulfill({ json: { items: [], next_cursor: null } });
+  });
+
+  await page.goto('/api-keys/new');
+  await page.getByLabel('Key name').fill('retryable-app');
+  await page.getByLabel('Requests per minute').fill('100');
+  await page.getByLabel('Concurrent requests').fill('5');
+  await page.getByRole('button', { name: /Create and show key/ }).click();
+
+  // Indeterminate outcome shows error guidance
+  await expect(page.getByRole('alert')).toContainText('Outcome unknown');
+  await expect(page.getByRole('alert')).toContainText('Retry safely');
+
+  // Retrying dispatches the mutation again
+  await page.getByRole('button', { name: /Create and show key/ }).click();
+
+  // Secret is displayed seamlessly in the dialog
+  const dialog = page.getByRole('dialog', { name: 'Copy this secret now.' });
+  await expect(dialog).toBeVisible();
+  await expect(
+    dialog.getByText('olp_secret_recovered_on_retry', { exact: true })
+  ).toBeVisible();
+
+  // Verify same idempotency key was sent across attempts
+  expect(postCount).toBe(2);
+  expect(firstKey).toBeTruthy();
+  expect(firstKey).toBe(secondKey);
+
+  // Verify storage is clean
+  const storage = await page.evaluate(() => {
+    const filterFramework = (store: Storage) =>
+      Object.fromEntries(
+        Object.entries(store).filter(([k]) => !k.startsWith('sveltekit:'))
+      );
+    return {
+      local: filterFramework(localStorage),
+      session: filterFramework(sessionStorage)
+    };
+  });
+  expect(storage.local).toEqual({});
+  expect(storage.session).toEqual({});
+});

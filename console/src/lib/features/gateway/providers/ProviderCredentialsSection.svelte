@@ -10,6 +10,10 @@
     type ProviderCredential,
     type ProviderKindCapability
   } from '$lib/api/management/providers';
+  import {
+    LogicalOperation,
+    KeyedLogicalOperations
+  } from '$lib/forms/operationState';
   import { requiresCredential } from './providerEditor';
   import { invalidateProviderSummaries } from './providerCache';
   import {
@@ -36,6 +40,21 @@
   } = $props();
 
   const queryClient = useQueryClient();
+  const rotateOperation = new LogicalOperation<
+    { provider: Provider; secret: string },
+    void
+  >(({ provider, secret }, idempotencyKey) =>
+    rotateProviderCredential(provider, secret, idempotencyKey)
+  );
+  const revokeOperations = new KeyedLogicalOperations<
+    string,
+    { provider: Provider; credentialId: string },
+    void
+  >(
+    () =>
+      ({ provider, credentialId }, idempotencyKey) =>
+        revokeProviderCredential(provider, credentialId, idempotencyKey)
+  );
   const credentials = createQuery(() => ({
     queryKey: ['provider-credentials', current.id],
     queryFn: ({ signal }) => listProviderCredentials(current.id, signal)
@@ -44,13 +63,18 @@
 
   onDestroy(() => {
     credentialValue = '';
+    rotateOperation.abandon();
+    revokeOperations.clear();
   });
 
   async function rotate(event: SubmitEvent) {
     event.preventDefault();
     if (!credentialValue) return;
     await run('rotate-credential', async () => {
-      await rotateProviderCredential(current, credentialValue);
+      await rotateOperation.execute({
+        provider: current,
+        secret: credentialValue
+      });
       credentialValue = '';
       const [updated] = await Promise.all([
         getProvider(current.id),
@@ -73,7 +97,8 @@
   async function revoke(credential: ProviderCredential) {
     if (!confirm(`Revoke credential version ${credential.version}?`)) return;
     await run(`revoke-${credential.id}`, async () => {
-      await revokeProviderCredential(current, credential.id);
+      const op = revokeOperations.get(credential.id);
+      await op.execute({ provider: current, credentialId: credential.id });
       const [updated] = await Promise.all([
         getProvider(current.id),
         credentials.refetch()

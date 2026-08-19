@@ -25,7 +25,7 @@ use crate::{
         json_payload::json_payload,
         pagination::{PageQuery, page},
         permissions::require_permission,
-        preconditions::{if_match, with_etag},
+        preconditions::if_match,
         response_policy::RuntimeGenerationResponse,
         secrets::WriteOnlySecret,
         sessions::{require_mutation_session, require_read_session},
@@ -97,6 +97,7 @@ pub(crate) async fn list_provider_credentials(
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct RotateCredentialRequest {
     #[schema(value_type = String, write_only)]
     credential: WriteOnlySecret,
@@ -129,9 +130,11 @@ pub(crate) struct ProviderMutationResponse {
     ),
     request_body = RotateCredentialRequest,
     responses(
-        (status = 201, body = ProviderMutationResponse),
+        (status = 201, description = "Provider credential rotated", body = ProviderMutationResponse),
+        (status = 400, description = "Idempotency-Key header is missing or malformed", body = Problem),
         (status = 409, description = "Idempotency-Key was reused or is in progress", body = Problem),
-        (status = 412, body = Problem),
+        (status = 412, description = "ETag mismatch", body = Problem),
+        (status = 428, description = "If-Match header is required", body = Problem),
         (status = 503, description = "Master key or database unavailable", body = Problem)
     )
 )]
@@ -221,17 +224,34 @@ fn validate_rotated_credential(provider: &ProviderRecord, credential: &str) -> R
     Factory::validate_credential(&config, &credential).map_err(|error| error.to_string())
 }
 
+#[derive(Serialize)]
+struct RevokeProviderCredentialFingerprint {
+    provider_id: Uuid,
+    credential_id: Uuid,
+    expected_etag: Uuid,
+}
+
 #[utoipa::path(
     post,
     path = "/api/v1/providers/{provider_id}/credentials/{credential_id}/revoke",
     tag = "providers",
     params(
-        ("provider_id" = Uuid, Path),
-        ("credential_id" = Uuid, Path),
-        ("If-Match" = String, Header),
-        ("Idempotency-Key" = String, Header)
+        ("provider_id" = Uuid, Path, description = "Provider ID"),
+        ("credential_id" = Uuid, Path, description = "Credential ID"),
+        ("If-Match" = String, Header, description = "Current provider ETag"),
+        ("Idempotency-Key" = String, Header, description = "Unique revocation key")
     ),
-    responses((status = 200, body = ProviderMutationResponse), (status = 409, body = Problem), (status = 412, body = Problem))
+    responses(
+        (status = 200, description = "Provider credential revoked", body = ProviderMutationResponse),
+        (status = 400, description = "Idempotency-Key header is missing or malformed", body = Problem),
+        (status = 401, description = "Authentication required", body = Problem),
+        (status = 403, description = "Insufficient permissions, CSRF, or origin failure", body = Problem),
+        (status = 404, description = "Provider or credential not found", body = Problem),
+        (status = 409, description = "Credential in use or idempotency conflict", body = Problem),
+        (status = 412, description = "ETag mismatch", body = Problem),
+        (status = 428, description = "If-Match header is required", body = Problem),
+        (status = 503, description = "Master key or database unavailable", body = Problem)
+    )
 )]
 pub(crate) async fn revoke_provider_credential(
     State(state): State<ManagementState>,
@@ -240,25 +260,42 @@ pub(crate) async fn revoke_provider_credential(
 ) -> Result<Response, Problem> {
     let principal = require_mutation_session(&state, &headers).await?;
     require_permission(&principal, Permission::ManageProviders)?;
-    let etag = state
+    let expected_etag = if_match(&headers)?;
+    let idempotency_key = require_idempotency_key(&headers)?;
+    let request_fingerprint = fingerprint(&RevokeProviderCredentialFingerprint {
+        provider_id,
+        credential_id,
+        expected_etag,
+    })
+    .map_err(crate::management::error_mapping::map_persistence)?;
+    let master_key = state
+        .master_key
+        .as_deref()
+        .ok_or_else(|| Problem::service_unavailable("master_key_not_configured"))?;
+    let result = state
         .store()
         .revoke_provider_credential(
             provider_id,
             credential_id,
-            if_match(&headers)?,
+            expected_etag,
             principal.user_id,
-            require_idempotency_key(&headers)?,
+            idempotency_key,
+            Replayable::new(request_fingerprint, master_key),
+            |etag| {
+                olp_db::idempotency::Response::json(
+                    StatusCode::OK.as_u16(),
+                    &ProviderMutationResponse {
+                        provider_id,
+                        etag: *etag,
+                        credential_id: Some(credential_id),
+                        credential_version: None,
+                        runtime_generation: None,
+                    },
+                    Some(format!("\"{etag}\"")),
+                )
+            },
         )
         .await
         .map_err(map_configuration)?;
-    with_etag(
-        Json(ProviderMutationResponse {
-            provider_id,
-            etag,
-            credential_id: Some(credential_id),
-            credential_version: None,
-            runtime_generation: None,
-        }),
-        etag,
-    )
+    idempotency_http_response(result)
 }

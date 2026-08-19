@@ -2467,15 +2467,15 @@ export interface components {
             surface: string;
         };
         UpdateApiKeyRequest: {
-            allowed_routes?: string[];
+            allowed_routes?: string[] | null;
             /** Format: date-time */
             expires_at?: string | null;
             /** Format: int32 */
             max_concurrency?: number | null;
-            name: string;
+            name?: string | null;
             /** Format: int32 */
             requests_per_minute?: number | null;
-            scopes: string[];
+            scopes?: string[] | null;
             /** Format: int64 */
             tokens_per_minute?: number | null;
         };
@@ -2698,6 +2698,15 @@ export interface operations {
                     "application/json": components["schemas"]["CreateApiKeyResponse"];
                 };
             };
+            /** @description Idempotency-Key header is missing or malformed */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
             /** @description Authentication required. */
             401: {
                 headers: {
@@ -2881,6 +2890,15 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
+            /** @description If-Match header is required. */
+            428: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
             /** @description The request could not be completed. */
             500: {
                 headers: {
@@ -2920,7 +2938,16 @@ export interface operations {
                     "application/json": components["schemas"]["RuntimeGenerationResponse"];
                 };
             };
-            /** @description Authentication required. */
+            /** @description Idempotency-Key header is missing or malformed */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Authentication required */
             401: {
                 headers: {
                     [name: string]: unknown;
@@ -2929,7 +2956,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
-            /** @description The session lacks permission or mutation CSRF/origin checks failed. */
+            /** @description Insufficient permissions, CSRF, or origin failure */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -2947,6 +2974,15 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
+            /** @description Idempotency conflict or operation in progress */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
             /** @description ETag mismatch */
             412: {
                 headers: {
@@ -2956,8 +2992,26 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
+            /** @description If-Match header is required */
+            428: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
             /** @description The request could not be completed. */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Master key or database unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -2981,6 +3035,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description API key rotated and new secret returned once */
             200: {
                 headers: {
                     /** @description Current strong entity tag. */
@@ -2989,6 +3044,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RotateApiKeyResponse"];
+                };
+            };
+            /** @description Idempotency-Key header is missing or malformed */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
                 };
             };
             /** @description Authentication required. */
@@ -3009,6 +3073,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
+            /** @description Idempotency conflict or operation in progress */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -3017,7 +3082,17 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
+            /** @description ETag mismatch */
             412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description If-Match header is required */
+            428: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -3266,6 +3341,15 @@ export interface operations {
                     "application/json": components["schemas"]["CreateInvitationResponse"];
                 };
             };
+            /** @description Idempotency-Key header is missing or malformed */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
             /** @description Authentication required. */
             401: {
                 headers: {
@@ -3415,7 +3499,16 @@ export interface operations {
                     "application/json": components["schemas"]["InvitationResponse"];
                 };
             };
-            /** @description Authentication required. */
+            /** @description Idempotency-Key header is missing or malformed */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Authentication required */
             401: {
                 headers: {
                     [name: string]: unknown;
@@ -3424,7 +3517,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
-            /** @description The session lacks permission or mutation CSRF/origin checks failed. */
+            /** @description Insufficient permissions, CSRF, or origin failure */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -3433,7 +3526,16 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
-            /** @description Invitation is already accepted or revoked */
+            /** @description Invitation not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Invitation is already accepted or revoked or idempotency conflict */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -3444,6 +3546,15 @@ export interface operations {
             };
             /** @description The request could not be completed. */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Master key or database unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -3771,6 +3882,15 @@ export interface operations {
             };
             /** @description Discovery or configuration validation failed */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description If-Match header is required. */
+            428: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -4353,6 +4473,15 @@ export interface operations {
                     "application/json": components["schemas"]["PricingRevisionResponse"];
                 };
             };
+            /** @description Idempotency-Key header is missing or malformed */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
             /** @description Authentication required. */
             401: {
                 headers: {
@@ -4519,6 +4648,15 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
+            /** @description If-Match header is required. */
+            428: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
             /** @description The request could not be completed. */
             500: {
                 headers: {
@@ -4586,6 +4724,15 @@ export interface operations {
             };
             /** @description New password is invalid */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description If-Match header is required. */
+            428: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -5237,6 +5384,15 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
+            /** @description If-Match header is required. */
+            428: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
             /** @description The request could not be completed. */
             500: {
                 headers: {
@@ -5285,7 +5441,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
-            /** @description Authentication required. */
+            /** @description Authentication required */
             401: {
                 headers: {
                     [name: string]: unknown;
@@ -5294,7 +5450,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
-            /** @description The session lacks permission or mutation CSRF/origin checks failed. */
+            /** @description Insufficient permissions, CSRF, or origin failure */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -5303,7 +5459,16 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
-            /** @description Idempotency-Key was already used */
+            /** @description Provider not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Idempotency conflict or operation in progress */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -5330,8 +5495,26 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
+            /** @description If-Match header is required */
+            428: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
             /** @description The request could not be completed. */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Master key or database unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -5418,6 +5601,7 @@ export interface operations {
             };
         };
         responses: {
+            /** @description Provider credential rotated */
             201: {
                 headers: {
                     /** @description Current strong entity tag. */
@@ -5426,6 +5610,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProviderMutationResponse"];
+                };
+            };
+            /** @description Idempotency-Key header is missing or malformed */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
                 };
             };
             /** @description Authentication required. */
@@ -5455,7 +5648,17 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
+            /** @description ETag mismatch */
             412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description If-Match header is required */
+            428: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -5487,17 +5690,22 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
+                /** @description Current provider ETag */
                 "If-Match": string;
+                /** @description Unique revocation key */
                 "Idempotency-Key": string;
             };
             path: {
+                /** @description Provider ID */
                 provider_id: string;
+                /** @description Credential ID */
                 credential_id: string;
             };
             cookie?: never;
         };
         requestBody?: never;
         responses: {
+            /** @description Provider credential revoked */
             200: {
                 headers: {
                     /** @description Current strong entity tag. */
@@ -5508,7 +5716,16 @@ export interface operations {
                     "application/json": components["schemas"]["ProviderMutationResponse"];
                 };
             };
-            /** @description Authentication required. */
+            /** @description Idempotency-Key header is missing or malformed */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Authentication required */
             401: {
                 headers: {
                     [name: string]: unknown;
@@ -5517,7 +5734,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
-            /** @description The session lacks permission or mutation CSRF/origin checks failed. */
+            /** @description Insufficient permissions, CSRF, or origin failure */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -5526,6 +5743,16 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
+            /** @description Provider or credential not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Credential in use or idempotency conflict */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -5534,7 +5761,17 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
+            /** @description ETag mismatch */
             412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description If-Match header is required */
+            428: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -5544,6 +5781,15 @@ export interface operations {
             };
             /** @description The request could not be completed. */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Master key or database unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -5557,16 +5803,20 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
+                /** @description Current provider ETag */
                 "If-Match": string;
+                /** @description Unique disable key */
                 "Idempotency-Key": string;
             };
             path: {
+                /** @description Provider ID */
                 provider_id: string;
             };
             cookie?: never;
         };
         requestBody?: never;
         responses: {
+            /** @description Provider disabled */
             200: {
                 headers: {
                     /** @description Current strong entity tag. */
@@ -5577,7 +5827,16 @@ export interface operations {
                     "application/json": components["schemas"]["ProviderMutationResponse"];
                 };
             };
-            /** @description Authentication required. */
+            /** @description Idempotency-Key header is missing or malformed */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Authentication required */
             401: {
                 headers: {
                     [name: string]: unknown;
@@ -5586,7 +5845,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
-            /** @description The session lacks permission or mutation CSRF/origin checks failed. */
+            /** @description Insufficient permissions, CSRF, or origin failure */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -5595,7 +5854,16 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
-            /** @description Provider is still referenced by an active route */
+            /** @description Provider not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Provider is still referenced by an active route or idempotency conflict */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -5604,7 +5872,17 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
+            /** @description ETag mismatch */
             412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description If-Match header is required */
+            428: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -5614,6 +5892,15 @@ export interface operations {
             };
             /** @description The request could not be completed. */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Master key or database unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -5677,6 +5964,15 @@ export interface operations {
                 };
             };
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description If-Match header is required. */
+            428: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -5809,6 +6105,15 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
+            /** @description If-Match header is required. */
+            428: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
             /** @description The request could not be completed. */
             500: {
                 headers: {
@@ -5891,6 +6196,15 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
+            /** @description If-Match header is required. */
+            428: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
             /** @description The request could not be completed. */
             500: {
                 headers: {
@@ -5961,6 +6275,15 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
+            /** @description If-Match header is required. */
+            428: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
             /** @description The request could not be completed. */
             500: {
                 headers: {
@@ -5976,16 +6299,20 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
+                /** @description Current provider ETag */
                 "If-Match": string;
+                /** @description Unique restore key */
                 "Idempotency-Key": string;
             };
             path: {
+                /** @description Provider ID */
                 provider_id: string;
             };
             cookie?: never;
         };
         requestBody?: never;
         responses: {
+            /** @description Provider restored as draft */
             200: {
                 headers: {
                     /** @description Current strong entity tag. */
@@ -5996,7 +6323,16 @@ export interface operations {
                     "application/json": components["schemas"]["ProviderDetailResponse"];
                 };
             };
-            /** @description Authentication required. */
+            /** @description Idempotency-Key header is missing or malformed */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Authentication required */
             401: {
                 headers: {
                     [name: string]: unknown;
@@ -6005,7 +6341,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
-            /** @description The session lacks permission or mutation CSRF/origin checks failed. */
+            /** @description Insufficient permissions, CSRF, or origin failure */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -6014,7 +6350,35 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
+            /** @description Provider not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Idempotency conflict or provider not in disabled state */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description ETag mismatch */
             412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description If-Match header is required */
+            428: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -6024,6 +6388,15 @@ export interface operations {
             };
             /** @description The request could not be completed. */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Master key or database unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -6284,10 +6657,13 @@ export interface operations {
             header: {
                 /** @description Current provider draft ETag */
                 "If-Match": string;
+                /** @description Unique restore key */
                 "Idempotency-Key": string;
             };
             path: {
+                /** @description Provider ID */
                 provider_id: string;
+                /** @description Provider Revision ID */
                 revision_id: string;
             };
             cookie?: never;
@@ -6305,7 +6681,16 @@ export interface operations {
                     "application/json": components["schemas"]["ProviderRevisionRestoreResponse"];
                 };
             };
-            /** @description Authentication required. */
+            /** @description Idempotency-Key header is missing or malformed */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Authentication required */
             401: {
                 headers: {
                     [name: string]: unknown;
@@ -6314,7 +6699,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
-            /** @description The session lacks permission or mutation CSRF/origin checks failed. */
+            /** @description Insufficient permissions, CSRF, or origin failure */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -6323,7 +6708,16 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
-            /** @description Idempotency-Key was already used */
+            /** @description Provider or revision not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Idempotency conflict or operation in progress */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -6332,6 +6726,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
+            /** @description ETag mismatch */
             412: {
                 headers: {
                     [name: string]: unknown;
@@ -6340,7 +6735,17 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
+            /** @description Invalid revision data */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description If-Match header is required */
+            428: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -6350,6 +6755,15 @@ export interface operations {
             };
             /** @description The request could not be completed. */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Master key or database unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -6861,6 +7275,15 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
+            /** @description If-Match header is required. */
+            428: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
             /** @description The request could not be completed. */
             500: {
                 headers: {
@@ -6927,6 +7350,15 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
+            /** @description If-Match header is required. */
+            428: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
             /** @description The request could not be completed. */
             500: {
                 headers: {
@@ -6966,7 +7398,16 @@ export interface operations {
                     "application/json": components["schemas"]["RouteActivationResponse"];
                 };
             };
-            /** @description Authentication required. */
+            /** @description Idempotency-Key header is missing or malformed */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Authentication required */
             401: {
                 headers: {
                     [name: string]: unknown;
@@ -6975,7 +7416,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
-            /** @description The session lacks permission or mutation CSRF/origin checks failed. */
+            /** @description Insufficient permissions, CSRF, or origin failure */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -6984,7 +7425,16 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
-            /** @description Draft has not been validated */
+            /** @description Route draft not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Draft has not been validated or idempotency conflict */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -7002,8 +7452,26 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
+            /** @description If-Match header is required */
+            428: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
             /** @description The request could not be completed. */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Master key or database unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -7128,6 +7596,15 @@ export interface operations {
             };
             /** @description Eligibility validation failed */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description If-Match header is required. */
+            428: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -7428,16 +7905,20 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
+                /** @description Unique restore key */
                 "Idempotency-Key": string;
             };
             path: {
+                /** @description Route ID */
                 route_id: string;
+                /** @description Route Revision ID */
                 revision_id: string;
             };
             cookie?: never;
         };
         requestBody?: never;
         responses: {
+            /** @description Route revision restored as a new route draft */
             201: {
                 headers: {
                     [name: string]: unknown;
@@ -7446,7 +7927,16 @@ export interface operations {
                     "application/json": components["schemas"]["RouteDraftDetailResponse"];
                 };
             };
-            /** @description Authentication required. */
+            /** @description Idempotency-Key header is missing or malformed */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Authentication required */
             401: {
                 headers: {
                     [name: string]: unknown;
@@ -7455,7 +7945,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
-            /** @description The session lacks permission or mutation CSRF/origin checks failed. */
+            /** @description Insufficient permissions, CSRF, or origin failure */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -7464,6 +7954,16 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
+            /** @description Route or revision not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Idempotency conflict or operation in progress */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -7474,6 +7974,15 @@ export interface operations {
             };
             /** @description The request could not be completed. */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Master key or database unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -7961,6 +8470,15 @@ export interface operations {
             };
             /** @description ETag mismatch */
             412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description If-Match header is required. */
+            428: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -8494,6 +9012,15 @@ export interface operations {
             };
             /** @description Role is invalid */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description If-Match header is required. */
+            428: {
                 headers: {
                     [name: string]: unknown;
                 };

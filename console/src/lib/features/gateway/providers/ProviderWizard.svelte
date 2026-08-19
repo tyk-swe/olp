@@ -32,8 +32,10 @@
     type CapabilityDeclaration,
     type CapabilityCertification,
     type Provider,
+    type ProviderKindCapability,
     type ProviderProbe
   } from '$lib/api/management/providers';
+  import { LogicalOperation } from '$lib/forms/operationState';
   import {
     activationReady,
     authOptionsFor,
@@ -49,6 +51,18 @@
   } from './providerEditor';
 
   const queryClient = useQueryClient();
+  const createDraftOperation = new LogicalOperation<
+    { current: ProviderDraft; spec: ProviderKindCapability },
+    string
+  >(({ current, spec }, idempotencyKey) =>
+    createProvider(buildCreateProviderInput(current, spec), idempotencyKey)
+  );
+  const activateOperation = new LogicalOperation<
+    { provider: Provider },
+    number
+  >(({ provider }, idempotencyKey) =>
+    activateProvider(provider, idempotencyKey)
+  );
   const providerKinds = createQuery(() => ({
     queryKey: ['provider-kinds'],
     queryFn: ({ signal }) => listProviderKinds(signal)
@@ -113,6 +127,8 @@
 
   onDestroy(() => {
     if (draft) draft.credential = '';
+    createDraftOperation.abandon();
+    activateOperation.abandon();
   });
 
   async function run(
@@ -174,8 +190,11 @@
       errorMessage = issue;
       return;
     }
-    await run('create', async () => {
-      const id = await createProvider(buildCreateProviderInput(current, spec));
+    busy = 'create';
+    errorMessage = '';
+    notice = '';
+    try {
+      const id = await createDraftOperation.execute({ current, spec });
       current.credential = '';
       wizardProvider = await getProvider(id);
       wizardStep = 2;
@@ -183,7 +202,11 @@
         invalidateProviderSummaries(queryClient),
         invalidateProviderModelConsumers(queryClient)
       ]);
-    });
+    } catch {
+      errorMessage = createDraftOperation.errorMessage;
+    } finally {
+      busy = '';
+    }
   }
 
   async function testWizardProvider() {
@@ -292,16 +315,25 @@
 
   async function activateWizardProvider() {
     if (!wizardProvider) return;
-    await run('activate', async () => {
-      const generation = await activateProvider(wizardProvider!);
-      wizardProvider = await getProvider(wizardProvider!.id);
+    busy = 'activate';
+    errorMessage = '';
+    notice = '';
+    try {
+      const generation = await activateOperation.execute({
+        provider: wizardProvider
+      });
+      wizardProvider = await getProvider(wizardProvider.id);
       wizardStep = 5;
       notice = `Provider activated in runtime generation ${generation}.`;
       await Promise.all([
         invalidateProviderSummaries(queryClient),
         invalidateProviderModelConsumers(queryClient)
       ]);
-    });
+    } catch {
+      errorMessage = activateOperation.errorMessage;
+    } finally {
+      busy = '';
+    }
   }
 </script>
 

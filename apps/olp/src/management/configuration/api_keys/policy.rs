@@ -4,7 +4,7 @@ use std::{
 };
 
 use chrono::{DateTime, Utc};
-use olp_db::configuration::resources::UpdateApiKeyInput;
+use olp_db::configuration::resources::{PatchValue, UpdateApiKeyInput};
 use olp_engine::domain::{
     auth::{ApiKeyLimits, ApiKeyScope},
     ids::RouteSlug,
@@ -12,7 +12,10 @@ use olp_engine::domain::{
 
 use crate::{public_http::problem::FieldErrors, public_http::problem::Problem};
 
-use super::{create::CreateApiKeyRequest, manage::UpdateApiKeyRequest};
+use super::{
+    create::CreateApiKeyRequest,
+    manage::{TriState, UpdateApiKeyRequest},
+};
 
 const MAX_NAME_CHARACTERS: usize = 100;
 const MAX_U32_DATABASE_LIMIT: u32 = i32::MAX as u32;
@@ -28,28 +31,8 @@ pub(super) struct RawApiKeyPolicy<'a> {
     expires_at: Option<DateTime<Utc>>,
 }
 
-pub(super) enum ExpirationValidation {
-    // Create must reach storage's idempotency replay boundary before this time-dependent check.
-    DeferredToStorage,
-    RequireFuture(DateTime<Utc>),
-}
-
 impl<'a> From<&'a CreateApiKeyRequest> for RawApiKeyPolicy<'a> {
     fn from(request: &'a CreateApiKeyRequest) -> Self {
-        Self {
-            name: &request.name,
-            scopes: &request.scopes,
-            allowed_routes: &request.allowed_routes,
-            requests_per_minute: request.requests_per_minute,
-            tokens_per_minute: request.tokens_per_minute,
-            max_concurrency: request.max_concurrency,
-            expires_at: request.expires_at,
-        }
-    }
-}
-
-impl<'a> From<&'a UpdateApiKeyRequest> for RawApiKeyPolicy<'a> {
-    fn from(request: &'a UpdateApiKeyRequest) -> Self {
         Self {
             name: &request.name,
             scopes: &request.scopes,
@@ -71,27 +54,8 @@ pub(super) struct NormalizedApiKeyPolicy {
     pub expires_at: Option<DateTime<Utc>>,
 }
 
-impl NormalizedApiKeyPolicy {
-    pub(super) fn into_update_input(self) -> UpdateApiKeyInput {
-        UpdateApiKeyInput {
-            name: self.name,
-            scopes: self
-                .scopes
-                .into_iter()
-                .map(|scope| scope.as_str().to_owned())
-                .collect(),
-            allowed_routes: self.allowed_routes.into_iter().map(Into::into).collect(),
-            requests_per_minute: self.limits.requests_per_minute.map(NonZeroU32::get),
-            tokens_per_minute: self.limits.tokens_per_minute.map(NonZeroU64::get),
-            max_concurrency: self.limits.concurrency.map(NonZeroU32::get),
-            expires_at: self.expires_at,
-        }
-    }
-}
-
 pub(super) fn normalize_api_key_policy(
     raw: RawApiKeyPolicy<'_>,
-    expiration_validation: ExpirationValidation,
 ) -> Result<NormalizedApiKeyPolicy, Problem> {
     let mut errors = FieldErrors::new();
     let name = raw.name.trim().to_owned();
@@ -156,15 +120,6 @@ pub(super) fn normalize_api_key_policy(
         normalize_u64_limit(&mut errors, "tokens_per_minute", raw.tokens_per_minute);
     let max_concurrency = normalize_u32_limit(&mut errors, "max_concurrency", raw.max_concurrency);
 
-    if let ExpirationValidation::RequireFuture(now) = expiration_validation
-        && raw.expires_at.is_some_and(|expiration| expiration <= now)
-    {
-        errors.insert(
-            "expires_at".to_owned(),
-            vec!["Expiration must be in the future or null.".to_owned()],
-        );
-    }
-
     if !errors.is_empty() {
         return Err(Problem::validation(errors));
     }
@@ -179,6 +134,206 @@ pub(super) fn normalize_api_key_policy(
             concurrency: max_concurrency,
         },
         expires_at: raw.expires_at,
+    })
+}
+
+pub(super) fn normalize_update_api_key_policy(
+    request: &UpdateApiKeyRequest,
+    now: DateTime<Utc>,
+) -> Result<UpdateApiKeyInput, Problem> {
+    let mut errors = FieldErrors::new();
+
+    let name = match &request.name {
+        TriState::Missing => None,
+        TriState::Null => {
+            errors.insert(
+                "name".to_owned(),
+                vec!["Use between 1 and 100 characters.".to_owned()],
+            );
+            None
+        }
+        TriState::Value(raw_name) => {
+            let trimmed = raw_name.trim().to_owned();
+            if trimmed.is_empty() || raw_name.chars().count() > MAX_NAME_CHARACTERS {
+                errors.insert(
+                    "name".to_owned(),
+                    vec!["Use between 1 and 100 characters.".to_owned()],
+                );
+            }
+            Some(trimmed)
+        }
+    };
+
+    let scopes = match &request.scopes {
+        TriState::Missing => None,
+        TriState::Null => {
+            errors.insert(
+                "scopes".to_owned(),
+                vec!["Select at least one scope.".to_owned()],
+            );
+            None
+        }
+        TriState::Value(raw_scopes) => {
+            let mut parsed_scopes = Vec::with_capacity(raw_scopes.len());
+            let mut unknown_scope = None;
+            for scope in raw_scopes {
+                match scope.as_str() {
+                    "inference" => parsed_scopes.push(ApiKeyScope::Inference),
+                    "models_read" => parsed_scopes.push(ApiKeyScope::ModelsRead),
+                    _ if unknown_scope.is_none() => unknown_scope = Some(scope),
+                    _ => {}
+                }
+            }
+            if raw_scopes.is_empty() {
+                errors.insert(
+                    "scopes".to_owned(),
+                    vec!["Select at least one scope.".to_owned()],
+                );
+            } else if let Some(scope) = unknown_scope {
+                errors.insert("scopes".to_owned(), vec![format!("Unknown scope {scope}.")]);
+            } else if parsed_scopes.iter().copied().collect::<BTreeSet<_>>().len()
+                != parsed_scopes.len()
+            {
+                errors.insert(
+                    "scopes".to_owned(),
+                    vec!["Scope entries must be unique.".to_owned()],
+                );
+            }
+            Some(raw_scopes.clone())
+        }
+    };
+
+    let allowed_routes = match &request.allowed_routes {
+        TriState::Missing => None,
+        TriState::Null => {
+            errors.insert(
+                "allowed_routes".to_owned(),
+                vec!["Route allowlist entries must be unique.".to_owned()],
+            );
+            None
+        }
+        TriState::Value(raw_routes) => {
+            let mut allowed_routes = Vec::with_capacity(raw_routes.len());
+            let mut invalid_route = None;
+            for route in raw_routes {
+                match RouteSlug::parse(route.clone()) {
+                    Ok(route) => allowed_routes.push(route),
+                    Err(error) if invalid_route.is_none() => invalid_route = Some(error),
+                    Err(_) => {}
+                }
+            }
+            if let Some(error) = invalid_route {
+                errors.insert("allowed_routes".to_owned(), vec![error.to_string()]);
+            } else if allowed_routes
+                .iter()
+                .cloned()
+                .collect::<BTreeSet<_>>()
+                .len()
+                != allowed_routes.len()
+            {
+                errors.insert(
+                    "allowed_routes".to_owned(),
+                    vec!["Route allowlist entries must be unique.".to_owned()],
+                );
+            }
+            Some(raw_routes.clone())
+        }
+    };
+
+    let requests_per_minute = match request.requests_per_minute {
+        TriState::Missing => PatchValue::Preserve,
+        TriState::Null => PatchValue::Clear,
+        TriState::Value(0) => {
+            errors.insert(
+                "requests_per_minute".to_owned(),
+                vec!["Use a positive limit or null.".to_owned()],
+            );
+            PatchValue::Preserve
+        }
+        TriState::Value(value) if value > MAX_U32_DATABASE_LIMIT => {
+            errors.insert(
+                "requests_per_minute".to_owned(),
+                vec![format!(
+                    "Use a limit no greater than {MAX_U32_DATABASE_LIMIT} or null."
+                )],
+            );
+            PatchValue::Preserve
+        }
+        TriState::Value(value) => PatchValue::Set(value),
+    };
+
+    let tokens_per_minute = match request.tokens_per_minute {
+        TriState::Missing => PatchValue::Preserve,
+        TriState::Null => PatchValue::Clear,
+        TriState::Value(0) => {
+            errors.insert(
+                "tokens_per_minute".to_owned(),
+                vec!["Use a positive limit or null.".to_owned()],
+            );
+            PatchValue::Preserve
+        }
+        TriState::Value(value) if value > MAX_U64_DATABASE_LIMIT => {
+            errors.insert(
+                "tokens_per_minute".to_owned(),
+                vec![format!(
+                    "Use a limit no greater than {MAX_U64_DATABASE_LIMIT} or null."
+                )],
+            );
+            PatchValue::Preserve
+        }
+        TriState::Value(value) => PatchValue::Set(value),
+    };
+
+    let max_concurrency = match request.max_concurrency {
+        TriState::Missing => PatchValue::Preserve,
+        TriState::Null => PatchValue::Clear,
+        TriState::Value(0) => {
+            errors.insert(
+                "max_concurrency".to_owned(),
+                vec!["Use a positive limit or null.".to_owned()],
+            );
+            PatchValue::Preserve
+        }
+        TriState::Value(value) if value > MAX_U32_DATABASE_LIMIT => {
+            errors.insert(
+                "max_concurrency".to_owned(),
+                vec![format!(
+                    "Use a limit no greater than {MAX_U32_DATABASE_LIMIT} or null."
+                )],
+            );
+            PatchValue::Preserve
+        }
+        TriState::Value(value) => PatchValue::Set(value),
+    };
+
+    let expires_at = match request.expires_at {
+        TriState::Missing => PatchValue::Preserve,
+        TriState::Null => PatchValue::Clear,
+        TriState::Value(expiration) => {
+            if expiration <= now {
+                errors.insert(
+                    "expires_at".to_owned(),
+                    vec!["Expiration must be in the future or null.".to_owned()],
+                );
+                PatchValue::Preserve
+            } else {
+                PatchValue::Set(expiration)
+            }
+        }
+    };
+
+    if !errors.is_empty() {
+        return Err(Problem::validation(errors));
+    }
+
+    Ok(UpdateApiKeyInput {
+        name,
+        scopes,
+        allowed_routes,
+        requests_per_minute,
+        tokens_per_minute,
+        max_concurrency,
+        expires_at,
     })
 }
 
@@ -256,25 +411,33 @@ mod tests {
 
     fn update_request(request: &CreateApiKeyRequest) -> UpdateApiKeyRequest {
         UpdateApiKeyRequest {
-            name: request.name.clone(),
-            scopes: request.scopes.clone(),
-            allowed_routes: request.allowed_routes.clone(),
-            requests_per_minute: request.requests_per_minute,
-            tokens_per_minute: request.tokens_per_minute,
-            max_concurrency: request.max_concurrency,
-            expires_at: request.expires_at,
+            name: TriState::Value(request.name.clone()),
+            scopes: TriState::Value(request.scopes.clone()),
+            allowed_routes: TriState::Value(request.allowed_routes.clone()),
+            requests_per_minute: request
+                .requests_per_minute
+                .map_or(TriState::Missing, TriState::Value),
+            tokens_per_minute: request
+                .tokens_per_minute
+                .map_or(TriState::Missing, TriState::Value),
+            max_concurrency: request
+                .max_concurrency
+                .map_or(TriState::Missing, TriState::Value),
+            expires_at: request
+                .expires_at
+                .map_or(TriState::Missing, TriState::Value),
         }
     }
 
     fn normalize_create(request: &CreateApiKeyRequest) -> Result<NormalizedApiKeyPolicy, Problem> {
-        normalize_api_key_policy(request.into(), ExpirationValidation::DeferredToStorage)
+        normalize_api_key_policy(request.into())
     }
 
     fn normalize_update(
         request: &UpdateApiKeyRequest,
         now: DateTime<Utc>,
-    ) -> Result<NormalizedApiKeyPolicy, Problem> {
-        normalize_api_key_policy(request.into(), ExpirationValidation::RequireFuture(now))
+    ) -> Result<UpdateApiKeyInput, Problem> {
+        normalize_update_api_key_policy(request, now)
     }
 
     #[test]
@@ -288,7 +451,6 @@ mod tests {
         let create_policy = normalize_create(&create).unwrap();
         let update_policy = normalize_update(&update, now).unwrap();
 
-        assert_eq!(create_policy, update_policy);
         assert_eq!(create_policy.name, "SDK key");
         assert_eq!(
             create_policy.scopes,
@@ -311,6 +473,20 @@ mod tests {
             Some(4)
         );
         assert_eq!(create_policy.expires_at, Some(expiration));
+
+        assert_eq!(update_policy.name.as_deref(), Some("SDK key"));
+        assert_eq!(
+            update_policy.scopes.as_deref(),
+            Some(&["inference".to_owned(), "models_read".to_owned()][..])
+        );
+        assert_eq!(
+            update_policy.allowed_routes.as_deref(),
+            Some(&["primary-route".to_owned()][..])
+        );
+        assert_eq!(update_policy.requests_per_minute, PatchValue::Set(60));
+        assert_eq!(update_policy.tokens_per_minute, PatchValue::Set(10_000));
+        assert_eq!(update_policy.max_concurrency, PatchValue::Set(4));
+        assert_eq!(update_policy.expires_at, PatchValue::Set(expiration));
     }
 
     #[test]
@@ -455,11 +631,62 @@ mod tests {
     }
 
     #[test]
-    fn create_scope_default_and_update_scope_requirement_are_unchanged() {
+    fn create_scope_default_and_update_tri_state_semantics() {
         let create: CreateApiKeyRequest = serde_json::from_value(json!({ "name": "key" })).unwrap();
         assert_eq!(create.scopes, ["inference"]);
 
-        assert!(serde_json::from_value::<UpdateApiKeyRequest>(json!({ "name": "key" })).is_err());
+        // Empty patch is valid (omitted fields preserve)
+        let empty_patch: UpdateApiKeyRequest = serde_json::from_value(json!({})).unwrap();
+        assert_eq!(empty_patch.name, TriState::Missing);
+        assert_eq!(empty_patch.scopes, TriState::Missing);
+        assert_eq!(empty_patch.allowed_routes, TriState::Missing);
+        assert_eq!(empty_patch.requests_per_minute, TriState::Missing);
+        assert_eq!(empty_patch.tokens_per_minute, TriState::Missing);
+        assert_eq!(empty_patch.max_concurrency, TriState::Missing);
+        assert_eq!(empty_patch.expires_at, TriState::Missing);
+
+        let normalized = normalize_update(&empty_patch, Utc::now()).unwrap();
+        assert!(normalized.name.is_none());
+        assert!(normalized.scopes.is_none());
+        assert!(normalized.allowed_routes.is_none());
+        assert_eq!(normalized.requests_per_minute, PatchValue::Preserve);
+        assert_eq!(normalized.tokens_per_minute, PatchValue::Preserve);
+        assert_eq!(normalized.max_concurrency, PatchValue::Preserve);
+        assert_eq!(normalized.expires_at, PatchValue::Preserve);
+
+        // Unknown fields rejected
+        assert!(serde_json::from_value::<UpdateApiKeyRequest>(json!({ "unknown": true })).is_err());
+        assert!(
+            serde_json::from_value::<UpdateApiKeyRequest>(json!({ "request_per_minute": 60 }))
+                .is_err()
+        );
+
+        // Explicit null for nullable fields clears them
+        let clear_patch: UpdateApiKeyRequest = serde_json::from_value(json!({
+            "requests_per_minute": null,
+            "tokens_per_minute": null,
+            "max_concurrency": null,
+            "expires_at": null
+        }))
+        .unwrap();
+        let clear_normalized = normalize_update(&clear_patch, Utc::now()).unwrap();
+        assert_eq!(clear_normalized.requests_per_minute, PatchValue::Clear);
+        assert_eq!(clear_normalized.tokens_per_minute, PatchValue::Clear);
+        assert_eq!(clear_normalized.max_concurrency, PatchValue::Clear);
+        assert_eq!(clear_normalized.expires_at, PatchValue::Clear);
+
+        // Explicit null for non-nullable fields is rejected
+        let null_name: UpdateApiKeyRequest =
+            serde_json::from_value(json!({ "name": null })).unwrap();
+        assert!(normalize_update(&null_name, Utc::now()).is_err());
+
+        let null_scopes: UpdateApiKeyRequest =
+            serde_json::from_value(json!({ "scopes": null })).unwrap();
+        assert!(normalize_update(&null_scopes, Utc::now()).is_err());
+
+        let null_routes: UpdateApiKeyRequest =
+            serde_json::from_value(json!({ "allowed_routes": null })).unwrap();
+        assert!(normalize_update(&null_routes, Utc::now()).is_err());
     }
 
     #[test]

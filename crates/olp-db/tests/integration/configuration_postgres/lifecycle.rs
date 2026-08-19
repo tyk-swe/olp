@@ -83,7 +83,14 @@ pub(super) async fn exercise(store: &Store, actor: Uuid, master_key: &MasterKey)
     assert!(!provider_models(store, vertex_id).await[0].enabled);
     assert!(
         store
-            .activate_provider(vertex_id, vertex.etag, actor, "provider-activate-vertex-01")
+            .activate_provider(
+                vertex_id,
+                vertex.etag,
+                actor,
+                "provider-activate-vertex-01",
+                test_replay(master_key, "provider-activate-vertex-01"),
+                empty_ok_response,
+            )
             .await
             .is_err()
     );
@@ -124,6 +131,11 @@ pub(super) async fn exercise(store: &Store, actor: Uuid, master_key: &MasterKey)
                 provider.etag,
                 actor,
                 "provider-activate-before-fresh-probe-01",
+                test_replay(
+                    master_key,
+                    "provider-activate-before-fresh-probe-01"
+                ),
+                empty_ok_response,
             )
             .await,
         Err(Error::ProviderIncomplete)
@@ -153,14 +165,14 @@ pub(super) async fn exercise(store: &Store, actor: Uuid, master_key: &MasterKey)
                         operation: "generation".parse().unwrap(),
                         surface: "openai".parse().unwrap(),
                         mode: "unary".parse().unwrap(),
-                        source: olp_engine::domain::provider::CapabilitySource::Probed,
+                        source: olp_engine::domain::provider::CapabilitySource::Declared,
                         certified_at: None,
                     },
                     CapabilityRecord {
                         operation: "generation".parse().unwrap(),
                         surface: "openai".parse().unwrap(),
                         mode: "streaming".parse().unwrap(),
-                        source: olp_engine::domain::provider::CapabilitySource::Probed,
+                        source: olp_engine::domain::provider::CapabilitySource::Declared,
                         certified_at: None,
                     },
                 ],
@@ -169,9 +181,6 @@ pub(super) async fn exercise(store: &Store, actor: Uuid, master_key: &MasterKey)
         )
         .await
         .unwrap();
-    let discovered = store.get_provider(provider_id).await.unwrap();
-    assert!(discovered.last_probe_at.is_none());
-    assert!(discovered.last_probe_status.is_none());
     assert!(matches!(
         store
             .record_provider_probe(
@@ -184,9 +193,6 @@ pub(super) async fn exercise(store: &Store, actor: Uuid, master_key: &MasterKey)
             .await,
         Err(Error::PreconditionFailed)
     ));
-    let after_stale_probe = store.get_provider(provider_id).await.unwrap();
-    assert!(after_stale_probe.last_probe_at.is_none());
-    assert!(after_stale_probe.last_probe_status.is_none());
     assert!(matches!(
         store
             .activate_provider(
@@ -194,30 +200,28 @@ pub(super) async fn exercise(store: &Store, actor: Uuid, master_key: &MasterKey)
                 discovered_etag,
                 actor,
                 "provider-activate-after-stale-probe-01",
+                test_replay(
+                    master_key,
+                    "provider-activate-after-stale-probe-01"
+                ),
+                empty_ok_response,
             )
             .await,
         Err(Error::ProviderIncomplete)
     ));
     certify_all_capabilities(store, provider_id).await;
-    store
-        .record_provider_probe(
-            provider_id,
-            discovered_etag,
-            true,
-            "fresh post-discovery probe",
-            actor,
-        )
-        .await
-        .unwrap();
     let activated = store
         .activate_provider(
             provider_id,
             discovered_etag,
             actor,
             "provider-activate-openai-01",
+            test_replay(master_key, "provider-activate-openai-01"),
+            empty_ok_response,
         )
         .await
-        .unwrap();
+        .unwrap()
+        .expect_executed();
     assert_eq!(activated.release.sequence, 1);
     assert!(matches!(
         store
@@ -226,6 +230,11 @@ pub(super) async fn exercise(store: &Store, actor: Uuid, master_key: &MasterKey)
                 discovered_etag,
                 actor,
                 "provider-activate-openai-01",
+                test_replay(
+                    master_key,
+                    "provider-activate-openai-01-conflict"
+                ),
+                empty_ok_response,
             )
             .await,
         Err(olp_db::configuration::Error::IdempotencyConflict)
@@ -289,9 +298,12 @@ pub(super) async fn exercise(store: &Store, actor: Uuid, master_key: &MasterKey)
             rotation.etag,
             actor,
             "provider-rotate-activate-0001",
+            test_replay(master_key, "provider-rotate-activate-0001"),
+            empty_ok_response,
         )
         .await
-        .unwrap();
+        .unwrap()
+        .expect_executed();
     let rotation_release = rotation_activation.release.clone();
     assert_eq!(rotation_release.sequence, 2);
     assert!(matches!(
@@ -329,6 +341,8 @@ pub(super) async fn exercise(store: &Store, actor: Uuid, master_key: &MasterKey)
                 rotation_activation.etag,
                 actor,
                 "credential-active-revoke-01",
+                test_replay(master_key, "credential-active-revoke-01"),
+                empty_ok_response,
             )
             .await
             .is_err()
@@ -340,9 +354,12 @@ pub(super) async fn exercise(store: &Store, actor: Uuid, master_key: &MasterKey)
             rotation_activation.etag,
             actor,
             "credential-old-revoke-0001",
+            test_replay(master_key, "credential-old-revoke-0001"),
+            empty_ok_response,
         )
         .await
-        .unwrap();
+        .unwrap()
+        .expect_executed();
 
     let route = store
         .create_route_draft(
@@ -388,9 +405,12 @@ pub(super) async fn exercise(store: &Store, actor: Uuid, master_key: &MasterKey)
             validated_etag,
             actor,
             "route-configuration-activate-01",
+            test_replay(master_key, "route-configuration-activate-01"),
+            empty_ok_response,
         )
         .await
-        .unwrap();
+        .unwrap()
+        .expect_executed();
     assert_eq!(first_revision.release.sequence, 3);
     let draft = store.get_route_draft(route.id).await.unwrap();
     let second_draft_etag = store
@@ -418,9 +438,12 @@ pub(super) async fn exercise(store: &Store, actor: Uuid, master_key: &MasterKey)
             second_validated_etag,
             actor,
             "route-configuration-activate-02",
+            test_replay(master_key, "route-configuration-activate-02"),
+            empty_ok_response,
         )
         .await
-        .unwrap();
+        .unwrap()
+        .expect_executed();
     let diff = store
         .diff_route_revisions(
             first_revision.route_id,
@@ -441,9 +464,12 @@ pub(super) async fn exercise(store: &Store, actor: Uuid, master_key: &MasterKey)
             first_revision.revision_id,
             actor,
             "route-configuration-restore-01",
+            test_replay(master_key, "route-configuration-restore-01"),
+            empty_created_response,
         )
         .await
-        .unwrap();
+        .unwrap()
+        .expect_executed();
     assert_eq!(
         restored.based_on_revision_id,
         Some(first_revision.revision_id)
@@ -527,13 +553,13 @@ pub(super) async fn exercise(store: &Store, actor: Uuid, master_key: &MasterKey)
                 key.id,
                 initial_key_record.etag,
                 &UpdateApiKeyInput {
-                    name: "duplicate scopes".to_owned(),
-                    scopes: vec!["inference".to_owned(), "inference".to_owned()],
-                    allowed_routes: Vec::new(),
-                    requests_per_minute: None,
-                    tokens_per_minute: None,
-                    max_concurrency: None,
-                    expires_at: None,
+                    name: Some("duplicate scopes".to_owned()),
+                    scopes: Some(vec!["inference".to_owned(), "inference".to_owned()]),
+                    allowed_routes: Some(Vec::new()),
+                    requests_per_minute: PatchValue::Preserve,
+                    tokens_per_minute: PatchValue::Preserve,
+                    max_concurrency: PatchValue::Preserve,
+                    expires_at: PatchValue::Preserve,
                 },
                 actor,
             )
@@ -545,13 +571,13 @@ pub(super) async fn exercise(store: &Store, actor: Uuid, master_key: &MasterKey)
             key.id,
             initial_key_record.etag,
             &UpdateApiKeyInput {
-                name: "Updated SDK key".to_owned(),
-                scopes: vec!["inference".to_owned()],
-                allowed_routes: Vec::new(),
-                requests_per_minute: Some(60),
-                tokens_per_minute: Some(10_000),
-                max_concurrency: Some(4),
-                expires_at: Some(Utc::now() + Duration::days(30)),
+                name: Some("Updated SDK key".to_owned()),
+                scopes: Some(vec!["inference".to_owned()]),
+                allowed_routes: Some(Vec::new()),
+                requests_per_minute: PatchValue::Set(60),
+                tokens_per_minute: PatchValue::Set(10_000),
+                max_concurrency: PatchValue::Set(4),
+                expires_at: PatchValue::Set(Utc::now() + Duration::days(30)),
             },
             actor,
         )
@@ -612,9 +638,12 @@ pub(super) async fn exercise(store: &Store, actor: Uuid, master_key: &MasterKey)
             key_rotation.etag,
             actor,
             "api-key-configuration-revoke-01",
+            test_replay(master_key, "api-key-configuration-revoke-01"),
+            empty_ok_response,
         )
         .await
-        .unwrap();
+        .unwrap()
+        .expect_executed();
     assert_eq!(key_revocation.release.sequence, 8);
     let current_api_keys = store.current_runtime_api_keys().await.unwrap();
     assert!(

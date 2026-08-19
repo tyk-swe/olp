@@ -32,7 +32,7 @@ use crate::{
     public_http::problem::Problem,
 };
 
-use super::policy::{ExpirationValidation, RawApiKeyPolicy, normalize_api_key_policy};
+use super::policy::normalize_update_api_key_policy;
 
 #[derive(Clone, Debug, Serialize, ToSchema)]
 pub(crate) struct ApiKeyDetailResponse {
@@ -132,16 +132,50 @@ pub(crate) async fn get_api_key(
     with_etag(Json(key), etag)
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum TriState<T> {
+    #[default]
+    Missing,
+    Null,
+    Value(T),
+}
+
+impl<'de, T: Deserialize<'de>> Deserialize<'de> for TriState<T> {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        Option::<T>::deserialize(deserializer).map(|opt| match opt {
+            Some(val) => TriState::Value(val),
+            None => TriState::Null,
+        })
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct UpdateApiKeyRequest {
-    pub name: String,
-    pub scopes: Vec<String>,
+    #[schema(value_type = Option<String>)]
     #[serde(default)]
-    pub allowed_routes: Vec<String>,
-    pub requests_per_minute: Option<u32>,
-    pub tokens_per_minute: Option<u64>,
-    pub max_concurrency: Option<u32>,
-    pub expires_at: Option<DateTime<Utc>>,
+    pub name: TriState<String>,
+    #[schema(value_type = Option<Vec<String>>)]
+    #[serde(default)]
+    pub scopes: TriState<Vec<String>>,
+    #[schema(value_type = Option<Vec<String>>)]
+    #[serde(default)]
+    pub allowed_routes: TriState<Vec<String>>,
+    #[schema(value_type = Option<Option<u32>>)]
+    #[serde(default)]
+    pub requests_per_minute: TriState<u32>,
+    #[schema(value_type = Option<Option<u64>>)]
+    #[serde(default)]
+    pub tokens_per_minute: TriState<u64>,
+    #[schema(value_type = Option<Option<u32>>)]
+    #[serde(default)]
+    pub max_concurrency: TriState<u32>,
+    #[schema(value_type = Option<Option<DateTime<Utc>>>)]
+    #[serde(default)]
+    pub expires_at: TriState<DateTime<Utc>>,
 }
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -175,11 +209,7 @@ pub(crate) async fn update_api_key(
     let principal = require_mutation_session(&state, &headers).await?;
     require_permission(&principal, Permission::ManageApiKeys)?;
     let request = json_payload(payload)?;
-    let input = normalize_api_key_policy(
-        RawApiKeyPolicy::from(&request),
-        ExpirationValidation::RequireFuture(Utc::now()),
-    )?
-    .into_update_input();
+    let input = normalize_update_api_key_policy(&request, Utc::now())?;
     let result = state
         .store()
         .update_api_key(api_key_id, if_match(&headers)?, &input, principal.user_id)
@@ -229,9 +259,11 @@ impl fmt::Debug for RotateApiKeyResponse {
     tag = "api-keys",
     params(("api_key_id" = Uuid, Path), ("If-Match" = String, Header), ("Idempotency-Key" = String, Header)),
     responses(
-        (status = 200, body = RotateApiKeyResponse),
-        (status = 409, body = Problem),
-        (status = 412, body = Problem),
+        (status = 200, description = "API key rotated and new secret returned once", body = RotateApiKeyResponse),
+        (status = 400, description = "Idempotency-Key header is missing or malformed", body = Problem),
+        (status = 409, description = "Idempotency conflict or operation in progress", body = Problem),
+        (status = 412, description = "ETag mismatch", body = Problem),
+        (status = 428, description = "If-Match header is required", body = Problem),
         (status = 503, description = "Master key, authentication HMAC key, or database unavailable", body = Problem)
     )
 )]

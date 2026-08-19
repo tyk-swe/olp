@@ -525,3 +525,212 @@ fn management_dto_debug_output_redacts_plaintext_secrets() {
     assert!(!output.contains("sensitive-invitation-token"));
     assert!(!output.contains("sensitive-local-password"));
 }
+
+#[test]
+fn mutation_request_dtos_reject_unknown_top_level_fields() {
+    use super::{
+        access::{
+            invitations::{AcceptInvitationRequest, CreateInvitationRequest},
+            profile::{ChangePasswordRequest, UpdateProfileRequest},
+            users::UpdateUserRoleRequest,
+        },
+        auth::{LoginRequest, SetupRequest},
+        playground::{PlaygroundRequest, PlaygroundResponseFormat, PlaygroundToolRequest},
+    };
+    use serde_json::json;
+
+    assert!(
+        serde_json::from_value::<SetupRequest>(json!({
+            "email": "test@example.com",
+            "password": "secretpassword123",
+            "display_name": "Test User",
+            "installation_name": "OpenLLMProxy",
+            "unknown_extra_field": "disallowed"
+        }))
+        .is_err()
+    );
+
+    assert!(
+        serde_json::from_value::<LoginRequest>(json!({
+            "email": "test@example.com",
+            "password": "secretpassword123",
+            "unknown_extra_field": "disallowed"
+        }))
+        .is_err()
+    );
+
+    assert!(
+        serde_json::from_value::<UpdateProfileRequest>(json!({
+            "display_name": "New Name",
+            "unknown_extra_field": "disallowed"
+        }))
+        .is_err()
+    );
+
+    assert!(
+        serde_json::from_value::<ChangePasswordRequest>(json!({
+            "current_password": "oldpassword123",
+            "new_password": "newpassword123",
+            "unknown_extra_field": "disallowed"
+        }))
+        .is_err()
+    );
+
+    assert!(
+        serde_json::from_value::<UpdateUserRoleRequest>(json!({
+            "role": "admin",
+            "active": true,
+            "unknown_extra_field": "disallowed"
+        }))
+        .is_err()
+    );
+
+    assert!(
+        serde_json::from_value::<CreateInvitationRequest>(json!({
+            "email": "invited@example.com",
+            "role": "admin",
+            "unknown_extra_field": "disallowed"
+        }))
+        .is_err()
+    );
+
+    assert!(
+        serde_json::from_value::<AcceptInvitationRequest>(json!({
+            "token": "token123",
+            "display_name": "Invited User",
+            "password": "password123",
+            "unknown_extra_field": "disallowed"
+        }))
+        .is_err()
+    );
+
+    assert!(
+        serde_json::from_value::<PlaygroundRequest>(json!({
+            "model": "gpt-4o",
+            "input": "hello",
+            "unknown_extra_field": "disallowed"
+        }))
+        .is_err()
+    );
+
+    assert!(
+        serde_json::from_value::<PlaygroundToolRequest>(json!({
+            "name": "search",
+            "input_schema": { "type": "object" },
+            "unknown_nested_field": "disallowed"
+        }))
+        .is_err()
+    );
+
+    // Valid PlaygroundToolRequest allows arbitrary JSON in input_schema
+    assert!(
+        serde_json::from_value::<PlaygroundToolRequest>(json!({
+            "name": "search",
+            "input_schema": { "arbitrary": { "nested": [1, 2, 3] } }
+        }))
+        .is_ok()
+    );
+
+    assert!(
+        serde_json::from_value::<PlaygroundResponseFormat>(json!({
+            "type": "json_schema",
+            "name": "schema_name",
+            "schema": { "type": "object" },
+            "unknown_nested_field": "disallowed"
+        }))
+        .is_err()
+    );
+
+    // Valid PlaygroundResponseFormat allows arbitrary JSON schema
+    assert!(
+        serde_json::from_value::<PlaygroundResponseFormat>(json!({
+            "type": "json_schema",
+            "name": "schema_name",
+            "schema": { "arbitrary_schema_key": true }
+        }))
+        .is_ok()
+    );
+}
+
+#[test]
+fn idempotency_replay_unavailable_maps_to_conflict_problem() {
+    let response = map_configuration(Error::Persistence(
+        olp_db::error::Error::IdempotencyReplayUnavailable,
+    ))
+    .into_response();
+    assert_eq!(response.status(), StatusCode::CONFLICT);
+    assert_eq!(
+        response.headers().get(header::CONTENT_TYPE).unwrap(),
+        "application/problem+json"
+    );
+}
+
+#[test]
+fn all_idempotent_mutation_endpoints_document_standard_error_contracts() {
+    let document = document();
+    let paths = document["paths"].as_object().unwrap();
+    let mut idempotent_count = 0;
+    for (_path, methods) in paths {
+        for (_method, operation) in methods.as_object().unwrap() {
+            let Some(parameters) = operation.get("parameters").and_then(|p| p.as_array()) else {
+                continue;
+            };
+            let has_idempotency_key = parameters
+                .iter()
+                .any(|param| param["name"] == "Idempotency-Key" && param["in"] == "header");
+            if has_idempotency_key {
+                idempotent_count += 1;
+                let responses = operation["responses"].as_object().unwrap();
+                assert!(
+                    responses.contains_key("400"),
+                    "operation missing 400 response: {operation:?}"
+                );
+                assert!(
+                    responses.contains_key("409"),
+                    "operation missing 409 response: {operation:?}"
+                );
+                assert!(
+                    responses.contains_key("503"),
+                    "operation missing 503 response: {operation:?}"
+                );
+            }
+        }
+    }
+    assert!(
+        idempotent_count >= 10,
+        "expected at least 10 idempotent operations, found {idempotent_count}"
+    );
+}
+
+#[test]
+fn all_if_match_endpoints_document_precondition_contracts() {
+    let document = document();
+    let paths = document["paths"].as_object().unwrap();
+    let mut if_match_count = 0;
+    for (_path, methods) in paths {
+        for (_method, operation) in methods.as_object().unwrap() {
+            let Some(parameters) = operation.get("parameters").and_then(|p| p.as_array()) else {
+                continue;
+            };
+            let has_if_match = parameters.iter().any(|param| {
+                param["name"] == "If-Match" && param["in"] == "header" && param["required"] == true
+            });
+            if has_if_match {
+                if_match_count += 1;
+                let responses = operation["responses"].as_object().unwrap();
+                assert!(
+                    responses.contains_key("412"),
+                    "operation missing 412 response: {operation:?}"
+                );
+                assert!(
+                    responses.contains_key("428"),
+                    "operation missing 428 response: {operation:?}"
+                );
+            }
+        }
+    }
+    assert!(
+        if_match_count >= 8,
+        "expected at least 8 If-Match operations, found {if_match_count}"
+    );
+}

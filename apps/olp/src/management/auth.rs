@@ -107,6 +107,7 @@ pub(super) async fn setup_status(
 }
 
 #[derive(Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
 pub(super) struct SetupRequest {
     pub email: String,
     #[schema(value_type = String, write_only)]
@@ -230,6 +231,7 @@ pub(super) async fn setup(
 }
 
 #[derive(Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
 pub(super) struct LoginRequest {
     pub email: String,
     #[schema(value_type = String, write_only)]

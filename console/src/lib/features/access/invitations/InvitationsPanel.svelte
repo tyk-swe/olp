@@ -7,6 +7,10 @@
     revokeInvitation,
     type InvitationSecret
   } from '$lib/api/management/access';
+  import {
+    LogicalOperation,
+    KeyedLogicalOperations
+  } from '$lib/forms/operationState';
   import { copyText } from '$lib/clipboard';
   import { errorMessage as accessErrorMessage } from '$lib/api/http';
   import {
@@ -27,6 +31,17 @@
   let copied = $state(false);
   let copyError = $state('');
 
+  const inviteOperation = new LogicalOperation<
+    { email: string; role: string },
+    InvitationSecret
+  >(({ email: targetEmail, role: targetRole }, idempotencyKey) =>
+    createInvitation(targetEmail, targetRole, idempotencyKey)
+  );
+  const revokeOperations = new KeyedLogicalOperations<string, string, void>(
+    () => (invitationId, idempotencyKey) =>
+      revokeInvitation(invitationId, idempotencyKey)
+  );
+
   const invitations = createQuery(() => ({
     queryKey: ['invitation-page', pagination.cursor ?? 'first'],
     queryFn: () => listInvitationPage(pagination.cursor)
@@ -34,19 +49,8 @@
 
   onDestroy(() => {
     invitationSecret = null;
+    inviteOperation.abandon();
   });
-
-  async function run(label: string, action: () => Promise<void>) {
-    busy = label;
-    error = notice = '';
-    try {
-      await action();
-    } catch (cause) {
-      error = accessErrorMessage(cause);
-    } finally {
-      busy = '';
-    }
-  }
 
   async function invite(event: SubmitEvent) {
     event.preventDefault();
@@ -54,20 +58,36 @@
       error = 'Enter a valid email address.';
       return;
     }
-    await run('invite', async () => {
-      invitationSecret = await createInvitation(email.trim(), role);
+    busy = 'invite';
+    error = notice = '';
+    try {
+      invitationSecret = await inviteOperation.execute({
+        email: email.trim(),
+        role
+      });
       email = '';
       await invitations.refetch();
-    });
+    } catch {
+      error = inviteOperation.errorMessage;
+    } finally {
+      busy = '';
+    }
   }
 
   async function removeInvitation(id: string, invitationEmail: string) {
     if (!confirm(`Revoke the invitation for ${invitationEmail}?`)) return;
-    await run(`invitation-${id}`, async () => {
-      await revokeInvitation(id);
+    busy = `invitation-${id}`;
+    error = notice = '';
+    const op = revokeOperations.get(id);
+    try {
+      await op.execute(id);
       await invitations.refetch();
       notice = 'Invitation revoked.';
-    });
+    } catch {
+      error = op.errorMessage;
+    } finally {
+      busy = '';
+    }
   }
 
   function invitationLink() {
