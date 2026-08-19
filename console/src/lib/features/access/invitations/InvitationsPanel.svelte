@@ -117,6 +117,9 @@
           data-autofocus
           onclick={close}>I have shared it</button
         >
+        <span class="sr-only" aria-live="polite">
+          {copied ? 'Invitation link copied to clipboard.' : ''}
+        </span>
       </div>
     {/snippet}
   </SecretDialog>
