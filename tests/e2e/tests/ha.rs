@@ -418,7 +418,8 @@ async fn prove_shared_valkey_isolation(
     while let Ok(Some(_)) = tokio::time::timeout(Duration::from_millis(100), hints.next()).await {}
 
     let b_generation_before = latest_runtime_generation(&installation_b.database_url).await?;
-    let b_processed_before = metadata_processed(&installation_b.database_url).await?;
+    let b_processed_before =
+        await_metadata_quiescence(installation_b, Duration::from_secs(30)).await?;
     let key_a = installation_a
         .issue_key("shared Valkey isolation mutation", json!({}))
         .await?;
@@ -464,9 +465,11 @@ async fn prove_shared_valkey_isolation(
         latest_runtime_generation(&installation_b.database_url).await? == b_generation_before,
         "installation A mutation changed installation B runtime state"
     );
+    let b_processed_after = metadata_processed(&installation_b.database_url).await?;
     require!(
-        metadata_processed(&installation_b.database_url).await? == b_processed_before,
-        "installation B consumed or acknowledged installation A request metadata"
+        b_processed_after == b_processed_before,
+        "installation B consumed or acknowledged installation A request metadata \
+         (processed {b_processed_before} -> {b_processed_after})"
     );
     require!(
         usage_fact_count(&installation_b.database_url).await? == 0,
@@ -540,6 +543,53 @@ async fn latest_runtime_generation(database_url: &str) -> Result<i64, String> {
         .await
         .map_err(|error| format!("failed to read runtime generation: {error}"))?
         .ok_or_else(|| "installation has no runtime generation".to_owned())
+}
+
+/// Blocks until `world` has drained the request metadata its own bootstrap
+/// produced, and returns the settled processed count.
+///
+/// Bootstrap emits request metadata of its own, and the worker consumes it
+/// asynchronously. Sampling the counter before that settles compares a
+/// half-drained backlog against a fully drained one, so the isolation
+/// assertion reports installation B's own catch-up as installation A's
+/// traffic. Waiting for the consumer to report an empty stream makes the
+/// later comparison a statement about installation A.
+///
+/// The processed counter is flushed after the acknowledgement that empties the
+/// stream (`report_processing_activity` in `olp-db`), so an empty stream alone
+/// does not prove the counter has caught up; require one repeat observation.
+async fn await_metadata_quiescence(world: &World, timeout: Duration) -> Result<i64, String> {
+    let deadline = Instant::now() + timeout;
+    let mut database = sqlx::PgConnection::connect(&world.database_url)
+        .await
+        .map_err(|error| format!("failed to inspect metadata quiescence: {error}"))?;
+    let mut settled: Option<i64> = None;
+    loop {
+        let (processed, pending, lag): (i64, Option<i64>, Option<i64>) = sqlx::query_as(
+            "SELECT request_metadata_processed_total, \
+               (SELECT pending_events FROM request_metadata_consumer_health WHERE singleton), \
+               (SELECT lag_events FROM request_metadata_consumer_health WHERE singleton) \
+             FROM async_worker_counters WHERE singleton",
+        )
+        .fetch_one(&mut database)
+        .await
+        .map_err(|error| format!("failed to read metadata consumer health: {error}"))?;
+        if pending == Some(0) && lag == Some(0) {
+            if settled == Some(processed) {
+                return Ok(processed);
+            }
+            settled = Some(processed);
+        } else {
+            settled = None;
+        }
+        if Instant::now() >= deadline {
+            return Err(format!(
+                "installation did not drain its own request metadata: \
+                 processed={processed}, pending={pending:?}, lag={lag:?}"
+            ));
+        }
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
 }
 
 async fn metadata_processed(database_url: &str) -> Result<i64, String> {
