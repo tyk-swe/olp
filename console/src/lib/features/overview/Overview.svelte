@@ -15,14 +15,23 @@
   let copied = $state(false);
   let copyError = $state('');
   let copyTimer: ReturnType<typeof setTimeout> | undefined;
-  const providers = createQuery(() => ({ queryKey: ['providers'], queryFn: listProviders }));
-  const routes = createQuery(() => ({ queryKey: ['routes'], queryFn: listRoutes }));
+  const providers = createQuery(() => ({
+    queryKey: ['providers'],
+    queryFn: listProviders
+  }));
+  const routes = createQuery(() => ({
+    queryKey: ['routes'],
+    queryFn: listRoutes
+  }));
   const recentRequests = createQuery(() => ({
     queryKey: ['requests', 'overview'],
     queryFn: () => listRequests({ limit: 5 }),
     enabled: controlConnected
   }));
-  const activeProviders = $derived(providers.data?.filter((provider) => provider.active_revision != null).length ?? 0);
+  const activeProviders = $derived(
+    providers.data?.filter((provider) => provider.active_revision != null)
+      .length ?? 0
+  );
   const readyRoutes = $derived(routes.data?.length ?? 0);
 
   onMount(() => {
@@ -48,24 +57,67 @@
     <p class="eyebrow">Overview</p>
     <h1 class="page-title">Bring your first model route online.</h1>
     <p class="page-description">
-      Connect an upstream, certify its models, then publish one stable slug for your clients.
+      Connect an upstream, certify its models, then publish one stable slug for
+      your clients.
     </p>
   </div>
-  <a class="button button-primary" href={resolve('/providers/new')}>Continue setup <NavIcon name="arrow" /></a>
+  <a class="button button-primary" href={resolve('/providers/new')}
+    >Continue setup <NavIcon name="arrow" /></a
+  >
 </div>
 
 <section class="status-grid" aria-label="Gateway readiness">
   <article class="card status-card">
-    <span class:ready={activeProviders > 0} class:neutral={activeProviders === 0} class="status-icon" aria-hidden="true"><NavIcon name="provider" /></span>
-    <div><p>Providers</p><strong>{providers.isPending ? 'Checking…' : activeProviders ? `${activeProviders} active` : 'Not configured'}</strong></div>
+    <span
+      class:ready={activeProviders > 0}
+      class:neutral={activeProviders === 0}
+      class="status-icon"
+      aria-hidden="true"><NavIcon name="provider" /></span
+    >
+    <div>
+      <p>Providers</p>
+      <strong
+        >{providers.isPending
+          ? 'Checking…'
+          : activeProviders
+            ? `${activeProviders} active`
+            : 'Not configured'}</strong
+      >
+    </div>
   </article>
   <article class="card status-card">
-    <span class:ready={readyRoutes > 0} class:neutral={readyRoutes === 0} class="status-icon" aria-hidden="true"><NavIcon name="route" /></span>
-    <div><p>Active routes</p><strong>{routes.isPending ? 'Checking…' : readyRoutes ? `${readyRoutes} active` : 'Awaiting activation'}</strong></div>
+    <span
+      class:ready={readyRoutes > 0}
+      class:neutral={readyRoutes === 0}
+      class="status-icon"
+      aria-hidden="true"><NavIcon name="route" /></span
+    >
+    <div>
+      <p>Active routes</p>
+      <strong
+        >{routes.isPending
+          ? 'Checking…'
+          : readyRoutes
+            ? `${readyRoutes} active`
+            : 'Awaiting activation'}</strong
+      >
+    </div>
   </article>
   <article class="card status-card">
-    <span class:ready={controlConnected} class:neutral={!controlConnected} class="status-icon" aria-hidden="true"><NavIcon name="health" /></span>
-    <div><p>Control API</p><strong>{controlConnected ? 'Console connected' : 'Connection unavailable'}</strong></div>
+    <span
+      class:ready={controlConnected}
+      class:neutral={!controlConnected}
+      class="status-icon"
+      aria-hidden="true"><NavIcon name="health" /></span
+    >
+    <div>
+      <p>Control API</p>
+      <strong
+        >{controlConnected
+          ? 'Console connected'
+          : 'Connection unavailable'}</strong
+      >
+    </div>
   </article>
 </section>
 
@@ -76,22 +128,39 @@
     <section class="card endpoint-card" aria-labelledby="endpoint-title">
       <p class="eyebrow">Client endpoint</p>
       <h2 id="endpoint-title">Same host, familiar SDKs</h2>
-      <p>Use your route slug as the model after activation. Direct provider/model addressing is intentionally unavailable.</p>
+      <p>
+        Use your route slug as the model after activation. Direct provider/model
+        addressing is intentionally unavailable.
+      </p>
       <div class="endpoint-row">
         <code>{endpoint}</code>
-        <button type="button" onclick={copyEndpoint} aria-label="Copy OpenAI-compatible base URL">
+        <button
+          type="button"
+          onclick={copyEndpoint}
+          aria-label="Copy OpenAI-compatible base URL"
+        >
           {copied ? 'Copied' : 'Copy'}
         </button>
+        <span class="sr-only" aria-live="polite">
+          {copied ? 'Client endpoint URL copied to clipboard.' : ''}
+        </span>
       </div>
       {#if copyError}<p class="inline-problem" role="alert">{copyError}</p>{/if}
-      <a href={resolve('/playground')}>Open the playground <NavIcon name="arrow" size={17} /></a>
+      <a href={resolve('/playground')}
+        >Open the playground <NavIcon name="arrow" size={17} /></a
+      >
     </section>
 
     <section class="card privacy-card" aria-labelledby="privacy-title">
-      <div class="privacy-mark" aria-hidden="true"><NavIcon name="audit" /></div>
+      <div class="privacy-mark" aria-hidden="true">
+        <NavIcon name="audit" />
+      </div>
       <div>
         <h2 id="privacy-title">Content stays out of history</h2>
-        <p>Requests, usage, and attempts store operational metadata only—never prompts, outputs, tool data, or uploaded files.</p>
+        <p>
+          Requests, usage, and attempts store operational metadata only—never
+          prompts, outputs, tool data, or uploaded files.
+        </p>
       </div>
     </section>
   </div>
@@ -103,32 +172,67 @@
       <p class="eyebrow">Operations</p>
       <h2 id="activity-title">Recent requests</h2>
     </div>
-    <a href={resolve('/requests')}>Explore requests <NavIcon name="arrow" size={17} /></a>
+    <a href={resolve('/requests')}
+      >Explore requests <NavIcon name="arrow" size={17} /></a
+    >
   </div>
   {#if recentRequests.isPending}
-    <div class="loading-state" role="status">Loading recent request metadata…</div>
+    <div class="loading-state" role="status">
+      Loading recent request metadata…
+    </div>
   {:else if recentRequests.isError}
-    <div class="inline-problem" role="alert">Recent request metadata is unavailable. <button class="text-button" type="button" onclick={() => recentRequests.refetch()}>Try again</button></div>
+    <div class="inline-problem" role="alert">
+      Recent request metadata is unavailable. <button
+        class="text-button"
+        type="button"
+        onclick={() => recentRequests.refetch()}>Try again</button
+      >
+    </div>
   {:else if !recentRequests.data?.data.length}
     <div class="empty-state">
       <span aria-hidden="true"><NavIcon name="request" size={24} /></span>
       <strong>No request metadata yet</strong>
-      <p>Successful and failed attempts will appear here after a route is active.</p>
+      <p>
+        Successful and failed attempts will appear here after a route is active.
+      </p>
     </div>
   {:else}
     <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
-    <div class="table-shell recent-table" tabindex="0" role="region" aria-label="Five most recent requests">
+    <div
+      class="table-shell recent-table"
+      tabindex="0"
+      role="region"
+      aria-label="Five most recent requests"
+    >
       <table class="data-table">
-        <thead><tr><th>Started</th><th>Route</th><th>Operation</th><th>Status</th><th>Latency</th><th><span class="sr-only">Details</span></th></tr></thead>
+        <thead
+          ><tr
+            ><th>Started</th><th>Route</th><th>Operation</th><th>Status</th><th
+              >Latency</th
+            ><th><span class="sr-only">Details</span></th></tr
+          ></thead
+        >
         <tbody>
           {#each recentRequests.data.data as request (request.id)}
             <tr>
               <td>{formatDate(request.started_at)}</td>
               <td><code>{request.route}</code></td>
               <td>{request.operation} · {request.surface}</td>
-              <td><span class="badge {statusTone(request.status_code, request.error_class)}">{statusLabel(request.status_code, request.error_class)}</span></td>
+              <td
+                ><span
+                  class="badge {statusTone(
+                    request.status_code,
+                    request.error_class
+                  )}"
+                  >{statusLabel(request.status_code, request.error_class)}</span
+                ></td
+              >
               <td>{request.total_latency_ms ?? '—'} ms</td>
-              <td><a class="row-link" href={resolve(`/requests/${request.id}`)}>View timeline</a></td>
+              <td
+                ><a class="row-link" href={resolve(`/requests/${request.id}`)}
+                  >View timeline</a
+                ></td
+              >
             </tr>
           {/each}
         </tbody>
