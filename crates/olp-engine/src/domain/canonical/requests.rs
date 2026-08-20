@@ -67,6 +67,14 @@ impl Operation {
             Self::Models(operation) => Some(operation.extensions()),
         }
     }
+
+    #[must_use]
+    pub fn into_generation(self) -> Option<GenerationRequest> {
+        match self {
+            Self::Generation(request) => Some(request),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]

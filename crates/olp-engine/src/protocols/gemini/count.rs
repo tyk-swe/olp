@@ -57,9 +57,9 @@ pub fn decode_count_tokens_request(
         },
     };
     // The generateContent decoder's public contract always produces generation.
-    let Operation::Generation(generation) = decode_request(route_model, generation, false)? else {
-        unreachable!("Gemini generation decoding always returns generation")
-    };
+    let generation = decode_request(route_model, generation, false)?
+        .into_generation()
+        .expect("Gemini generation decoding always returns generation");
     let input = generation
         .messages
         .into_iter()
