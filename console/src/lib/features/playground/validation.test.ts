@@ -14,4 +14,27 @@ describe('playground JSON fields', () => {
       strict: true
     });
   });
+
+  it('handles response schema error paths and empty inputs', () => {
+    expect(parseResponseSchema('')).toBeUndefined();
+    expect(parseResponseSchema('   ')).toBeUndefined();
+
+    expect(() => parseResponseSchema('[]')).toThrow(
+      'The response schema must be a JSON object.'
+    );
+    expect(() => parseResponseSchema('null')).toThrow(
+      'The response schema must be a JSON object.'
+    );
+    expect(() => parseResponseSchema('"string"')).toThrow(
+      'The response schema must be a JSON object.'
+    );
+    expect(() => parseResponseSchema('123')).toThrow(
+      'The response schema must be a JSON object.'
+    );
+    expect(() => parseResponseSchema('true')).toThrow(
+      'The response schema must be a JSON object.'
+    );
+
+    expect(() => parseResponseSchema('{invalid}')).toThrow('Enter valid JSON.');
+  });
 });
