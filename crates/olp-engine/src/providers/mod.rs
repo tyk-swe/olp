@@ -2,9 +2,7 @@
 //! OIDC HTTP, and the shared outbound-network security policy.
 
 pub mod anthropic;
-#[cfg_attr(not(any(test, feature = "test-util")), allow(dead_code))]
 mod azure_openai;
-#[cfg_attr(not(any(test, feature = "test-util")), allow(dead_code))]
 pub mod bedrock;
 pub mod connector;
 pub mod endpoint;
@@ -17,7 +15,6 @@ pub mod oidc;
 pub mod openai;
 mod transport_common;
 mod transport_io;
-#[cfg_attr(not(any(test, feature = "test-util")), allow(dead_code))]
 mod vertex;
 
 #[cfg(any(test, feature = "test-util"))]
