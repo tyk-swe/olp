@@ -378,9 +378,11 @@ impl Store {
         .fetch_all(self.pool())
         .await?;
         let (ids, next_cursor) = split_page(ids, limit as usize, |id| *id);
+        let mut revisions_map = self.get_route_revisions(&ids).await?;
         let mut revisions = Vec::with_capacity(ids.len());
         for id in ids {
-            revisions.push(self.get_route_revision(route_id, id).await?);
+            let rev = revisions_map.remove(&id).ok_or(Error::NotFound)?;
+            revisions.push(rev);
         }
         Ok(ConfigurationPage {
             items: revisions,
@@ -404,39 +406,150 @@ impl Store {
         .await?;
         let (rows, next_cursor) = split_page(rows, limit as usize, |row| row.id);
         let ids = rows.into_iter().map(|row| row.id).collect::<Vec<_>>();
-        let mut items = Vec::with_capacity(ids.len());
-        for id in ids {
-            items.push(self.get_route(id).await?);
-        }
+        let items = self.get_routes(&ids).await?;
         Ok(ConfigurationPage { items, next_cursor })
     }
 
-    pub async fn get_route(&self, id: Uuid) -> Result<RouteRecord, Error> {
-        let row = sqlx::query!(
+    pub async fn get_routes(&self, ids: &[Uuid]) -> Result<Vec<RouteRecord>, Error> {
+        if ids.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let route_rows = sqlx::query!(
             "SELECT r.id, r.slug, r.created_at,
                     (SELECT rr.id FROM route_revisions rr WHERE rr.route_id = r.id
                      ORDER BY rr.revision DESC LIMIT 1) AS latest_revision_id,
                     (SELECT count(*) FROM route_revisions rr WHERE rr.route_id = r.id)::bigint
                       AS \"revision_count!\"
-             FROM routes r WHERE r.id = $1",
-            id
+             FROM routes r WHERE r.id = ANY($1::uuid[])",
+            ids
         )
-        .fetch_optional(self.pool())
-        .await?
-        .ok_or(Error::NotFound)?;
-        let latest_revision_id: Option<Uuid> = row.latest_revision_id;
-        let latest_revision_id = latest_revision_id.ok_or_else(|| {
-            Error::Invalid("activated route has no immutable revision".to_owned())
-        })?;
-        let revision_count = u64::try_from(row.revision_count)
-            .map_err(|_| Error::Invalid("route revision count is invalid".to_owned()))?;
-        Ok(RouteRecord {
-            id: row.id,
-            slug: row.slug,
-            created_at: row.created_at,
-            revision_count,
-            latest_revision: self.get_route_revision(id, latest_revision_id).await?,
-        })
+        .fetch_all(self.pool())
+        .await?;
+
+        let mut route_map = BTreeMap::new();
+        let mut revision_ids = Vec::new();
+        for row in route_rows {
+            let latest_revision_id = row.latest_revision_id.ok_or_else(|| {
+                Error::Invalid("activated route has no immutable revision".to_owned())
+            })?;
+            let revision_count = u64::try_from(row.revision_count)
+                .map_err(|_| Error::Invalid("route revision count is invalid".to_owned()))?;
+            revision_ids.push(latest_revision_id);
+            route_map.insert(
+                row.id,
+                (row.slug, row.created_at, revision_count, latest_revision_id),
+            );
+        }
+
+        let mut revisions_map = self.get_route_revisions(&revision_ids).await?;
+
+        let mut items = Vec::with_capacity(ids.len());
+        for id in ids {
+            let (slug, created_at, revision_count, latest_revision_id) =
+                route_map.remove(id).ok_or(Error::NotFound)?;
+            let latest_revision = revisions_map
+                .remove(&latest_revision_id)
+                .ok_or(Error::NotFound)?;
+            items.push(RouteRecord {
+                id: *id,
+                slug,
+                created_at,
+                revision_count,
+                latest_revision,
+            });
+        }
+        Ok(items)
+    }
+
+    pub async fn get_route(&self, id: Uuid) -> Result<RouteRecord, Error> {
+        self.get_routes(&[id])
+            .await?
+            .into_iter()
+            .next()
+            .ok_or(Error::NotFound)
+    }
+
+    pub async fn get_route_revisions(
+        &self,
+        revision_ids: &[Uuid],
+    ) -> Result<BTreeMap<Uuid, RouteRevisionRecord>, Error> {
+        if revision_ids.is_empty() {
+            return Ok(BTreeMap::new());
+        }
+
+        let revision_rows = sqlx::query!(
+            "SELECT id, routing_id, route_id, revision, slug, overall_timeout_ms, max_attempts, source_draft_id, \
+                    activated_by, activated_at FROM route_revisions WHERE id = ANY($1::uuid[])",
+            revision_ids
+        )
+        .fetch_all(self.pool())
+        .await?;
+
+        let operation_rows = sqlx::query!(
+            "SELECT route_revision_id, operation FROM route_revision_operations \
+             WHERE route_revision_id = ANY($1::uuid[]) ORDER BY route_revision_id, operation",
+            revision_ids
+        )
+        .fetch_all(self.pool())
+        .await?;
+
+        let mut operations_map = BTreeMap::<Uuid, Vec<OperationKind>>::new();
+        for row in operation_rows {
+            let op = row
+                .operation
+                .parse()
+                .map_err(|_| PersistenceError::InvalidStoredValue("route revision operation"))?;
+            operations_map
+                .entry(row.route_revision_id)
+                .or_default()
+                .push(op);
+        }
+
+        let target_rows_raw = sqlx::query_as!(
+            RouteRevisionTargetRow,
+            "SELECT rrt.route_revision_id, rrt.id, rrt.routing_id, rrt.provider_model_id, p.id AS provider_id, pr.name AS provider_name, \
+                    prm.upstream_model AS provider_model, rrt.priority, rrt.weight, rrt.timeout_ms, rrt.position \
+             FROM route_revision_targets rrt \
+             JOIN provider_models pm ON pm.id = rrt.provider_model_id \
+             JOIN providers p ON p.id = pm.provider_id \
+             JOIN provider_revisions pr ON pr.id = p.active_revision_id \
+             JOIN provider_revision_models prm ON prm.provider_revision_id = pr.id \
+               AND prm.source_provider_model_id = pm.id \
+             WHERE rrt.route_revision_id = ANY($1::uuid[]) ORDER BY rrt.route_revision_id, rrt.position",
+            revision_ids
+        )
+        .fetch_all(self.pool())
+        .await?;
+
+        let mut targets_map = BTreeMap::<Uuid, Vec<RouteTargetRecord>>::new();
+        for row in target_rows_raw {
+            let (revision_id, target) = row.split();
+            targets_map.entry(revision_id).or_default().push(target);
+        }
+
+        let mut revisions = BTreeMap::new();
+        for row in revision_rows {
+            let rev_id = row.id;
+            revisions.insert(
+                rev_id,
+                RouteRevisionRecord {
+                    id: rev_id,
+                    routing_id: row.routing_id,
+                    route_id: row.route_id,
+                    revision: row.revision,
+                    slug: row.slug,
+                    overall_timeout_ms: row.overall_timeout_ms,
+                    max_attempts: row.max_attempts,
+                    source_draft_id: row.source_draft_id,
+                    activated_by: row.activated_by,
+                    activated_at: row.activated_at,
+                    operations: operations_map.remove(&rev_id).unwrap_or_default(),
+                    targets: targets_map.remove(&rev_id).unwrap_or_default(),
+                },
+            );
+        }
+        Ok(revisions)
     }
 
     pub async fn get_route_revision(
@@ -444,27 +557,15 @@ impl Store {
         route_id: Uuid,
         revision_id: Uuid,
     ) -> Result<RouteRevisionRecord, Error> {
-        let row = sqlx::query!(
-            "SELECT id, routing_id, route_id, revision, slug, overall_timeout_ms, max_attempts, source_draft_id, \
-                    activated_by, activated_at FROM route_revisions WHERE route_id = $1 AND id = $2",
-        route_id, revision_id)
-        .fetch_optional(self.pool())
-        .await?
-        .ok_or(Error::NotFound)?;
-        Ok(RouteRevisionRecord {
-            id: row.id,
-            routing_id: row.routing_id,
-            route_id: row.route_id,
-            revision: row.revision,
-            slug: row.slug,
-            overall_timeout_ms: row.overall_timeout_ms,
-            max_attempts: row.max_attempts,
-            source_draft_id: row.source_draft_id,
-            activated_by: row.activated_by,
-            activated_at: row.activated_at,
-            operations: revision_operations(self.pool(), revision_id).await?,
-            targets: revision_targets(self.pool(), revision_id).await?,
-        })
+        let rev = self
+            .get_route_revisions(&[revision_id])
+            .await?
+            .remove(&revision_id)
+            .ok_or(Error::NotFound)?;
+        if rev.route_id != route_id {
+            return Err(Error::NotFound);
+        }
+        Ok(rev)
     }
 
     pub async fn diff_route_revisions(
@@ -597,13 +698,6 @@ async fn draft_operations(pool: &sqlx::PgPool, id: Uuid) -> Result<Vec<Operation
     .collect()
 }
 
-async fn revision_operations(pool: &sqlx::PgPool, id: Uuid) -> Result<Vec<OperationKind>, Error> {
-    sqlx::query_scalar!("SELECT operation FROM route_revision_operations WHERE route_revision_id = $1 ORDER BY operation", id).fetch_all(pool).await?
-        .into_iter()
-        .map(|value: String| value.parse().map_err(|_| PersistenceError::InvalidStoredValue("route revision operation").into()))
-        .collect()
-}
-
 async fn draft_targets(pool: &sqlx::PgPool, id: Uuid) -> Result<Vec<RouteTargetRecord>, Error> {
     Ok(target_rows(
         sqlx::query_as!(
@@ -621,23 +715,6 @@ async fn draft_targets(pool: &sqlx::PgPool, id: Uuid) -> Result<Vec<RouteTargetR
     ))
 }
 
-async fn revision_targets(pool: &sqlx::PgPool, id: Uuid) -> Result<Vec<RouteTargetRecord>, Error> {
-    Ok(target_rows(
-        sqlx::query_as!(
-            RouteTargetRow,
-            "SELECT rrt.id, rrt.routing_id, rrt.provider_model_id, p.id AS provider_id, pr.name AS provider_name, \
-                    prm.upstream_model AS provider_model, rrt.priority, rrt.weight, rrt.timeout_ms, rrt.position \
-             FROM route_revision_targets rrt \
-             JOIN provider_models pm ON pm.id = rrt.provider_model_id \
-             JOIN providers p ON p.id = pm.provider_id \
-             JOIN provider_revisions pr ON pr.id = p.active_revision_id \
-             JOIN provider_revision_models prm ON prm.provider_revision_id = pr.id \
-               AND prm.source_provider_model_id = pm.id \
-             WHERE rrt.route_revision_id = $1 ORDER BY rrt.position",
-        id).fetch_all(pool).await?
-    ))
-}
-
 #[derive(Debug, sqlx::FromRow)]
 struct RouteTargetRow {
     id: Uuid,
@@ -650,6 +727,41 @@ struct RouteTargetRow {
     weight: i32,
     timeout_ms: i32,
     position: i32,
+}
+
+#[derive(Debug, sqlx::FromRow)]
+struct RouteRevisionTargetRow {
+    route_revision_id: Uuid,
+    id: Uuid,
+    routing_id: Uuid,
+    provider_model_id: Uuid,
+    provider_id: Uuid,
+    provider_name: String,
+    provider_model: String,
+    priority: i32,
+    weight: i32,
+    timeout_ms: i32,
+    position: i32,
+}
+
+impl RouteRevisionTargetRow {
+    fn split(self) -> (Uuid, RouteTargetRecord) {
+        (
+            self.route_revision_id,
+            RouteTargetRecord {
+                id: self.id,
+                routing_id: self.routing_id,
+                provider_model_id: self.provider_model_id,
+                provider_id: self.provider_id,
+                provider_name: self.provider_name,
+                upstream_model: self.provider_model,
+                priority: self.priority,
+                weight: self.weight,
+                timeout_ms: self.timeout_ms,
+                position: self.position,
+            },
+        )
+    }
 }
 
 fn target_rows(rows: Vec<RouteTargetRow>) -> Vec<RouteTargetRecord> {
