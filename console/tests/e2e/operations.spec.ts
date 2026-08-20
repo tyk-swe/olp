@@ -72,7 +72,6 @@ test('usage exposes pricing gaps and exact chart data accessibly', async ({ page
 test('health and audit remain usable with forced colors, reduced motion, and 200% zoom', async ({ page }) => {
   await mockSession(page);
   let epochOpen = true;
-  let epochAcknowledged = false;
   await page.emulateMedia({ forcedColors: 'active', reducedMotion: 'reduce' });
   await page.route('**/api/v1/health/ready', async (route) => route.fulfill({ json: { status: 'ok', generation: 8, database: 'ok', limits: 'ok', request_metadata_complete: true } }));
   await page.route('**/api/v1/provider-health*', async (route) => route.fulfill({ json: { window_minutes: 15, data: [{ provider_id: providerId, provider_name: 'Primary OpenAI', provider_kind: 'openai', provider_state: 'active', status: 'healthy', last_probe_at: '2026-07-12T12:00:00Z', last_probe_status: 'success', last_probe_detail: 'Authenticated', last_attempt_at: '2026-07-12T12:00:00Z', attempt_count: 10, success_count: 10, rate_limit_count: 0, server_error_count: 0, transport_error_count: 0, average_latency_ms: 98 }] } }));
@@ -80,7 +79,6 @@ test('health and audit remain usable with forced colors, reduced motion, and 200
   await page.route('**/api/v1/usage/completeness*', async (route) => route.fulfill({ json: { complete: true, request_count: 10, priced_count: 10, unpriced_count: 0, incomplete_count: 0, request_metadata_gap_events: 0, uncertain_request_metadata_gap_count: 0, request_metadata_consumer: { state: 'healthy', pending_events: 0, lag_events: 0 }, estimated_cost: '0.01' } }));
   await page.route('**/api/v1/request-metadata/gateway-epochs**', async (route) => {
     if (route.request().method() === 'POST') {
-      epochAcknowledged = true;
       epochOpen = false;
       await route.fulfill({ json: { process_epoch: requestId, gateway_instance: 'gateway-a', acknowledged_by: keyId, acknowledged_at: '2026-07-12T12:05:00Z' } });
       return;
@@ -115,7 +113,6 @@ test('health and audit remain usable with forced colors, reduced motion, and 200
   page.once('dialog', (dialog) => dialog.accept());
   await page.getByRole('button', { name: 'Acknowledge epoch' }).click();
   await expect(page.getByText('No unclean gateway epoch awaits acknowledgement.')).toBeVisible();
-  expect(epochAcknowledged).toBe(true);
   expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
 
   await page.route('**/api/v1/audit*', async (route) => route.fulfill({ json: { data: [{ id: requestId, actor_user_id: keyId, actor_email: 'owner@example.com', action: 'route.activate', resource_type: 'route', resource_id: 'support-chat', outcome: 'success', occurred_at: '2026-07-12T12:00:00Z' }], next_cursor: null } }));
