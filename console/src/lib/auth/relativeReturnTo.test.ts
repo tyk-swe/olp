@@ -46,4 +46,11 @@ describe('relativeReturnTo', () => {
   it('rejects destinations that exceed the cookie-safe bound', () => {
     expect(relativeReturnTo(`/${'a'.repeat(2_048)}`, ORIGIN)).toBe('/');
   });
+
+  it('handles exceptions in try block safely by returning root path', () => {
+    // Malformed UTF-8 sequence that passes INVALID_PERCENT_ENCODING regex but throws URIError in decodeURIComponent
+    expect(relativeReturnTo('/%E0%A0', ORIGIN)).toBe('/');
+    // Invalid origin that causes new URL(origin) to throw TypeError
+    expect(relativeReturnTo('/settings', 'invalid-url')).toBe('/');
+  });
 });
