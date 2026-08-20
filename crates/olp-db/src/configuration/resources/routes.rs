@@ -367,8 +367,10 @@ impl Store {
             ),
             None => None,
         };
-        let ids: Vec<Uuid> = sqlx::query_scalar!(
-            "SELECT id FROM route_revisions WHERE route_id = $1 \
+        let rows = sqlx::query_as!(
+            RouteRevisionRow,
+            "SELECT id, routing_id, route_id, revision, slug, overall_timeout_ms, max_attempts, source_draft_id, \
+                    activated_by, activated_at FROM route_revisions WHERE route_id = $1 \
              AND ($2::int IS NULL OR revision < $2) \
              ORDER BY revision DESC LIMIT $3",
             route_id,
@@ -377,15 +379,9 @@ impl Store {
         )
         .fetch_all(self.pool())
         .await?;
-        let (ids, next_cursor) = split_page(ids, limit as usize, |id| *id);
-        let mut revisions = Vec::with_capacity(ids.len());
-        for id in ids {
-            revisions.push(self.get_route_revision(route_id, id).await?);
-        }
-        Ok(ConfigurationPage {
-            items: revisions,
-            next_cursor,
-        })
+        let (rows, next_cursor) = split_page(rows, limit as usize, |row| row.id);
+        let items = self.route_revisions_from_rows(rows).await?;
+        Ok(ConfigurationPage { items, next_cursor })
     }
 
     pub async fn list_routes(
@@ -515,6 +511,87 @@ impl Store {
         })
     }
 
+    async fn route_revisions_from_rows(
+        &self,
+        rows: Vec<RouteRevisionRow>,
+    ) -> Result<Vec<RouteRevisionRecord>, Error> {
+        let revision_ids = rows.iter().map(|row| row.id).collect::<Vec<_>>();
+        let (operation_rows, target_rows) = if revision_ids.is_empty() {
+            (Vec::new(), Vec::new())
+        } else {
+            let operations = sqlx::query_as!(
+                RevisionOperationRow,
+                "SELECT route_revision_id, operation FROM route_revision_operations \
+                 WHERE route_revision_id = ANY($1::uuid[]) \
+                 ORDER BY route_revision_id, operation",
+                &revision_ids
+            )
+            .fetch_all(self.pool())
+            .await?;
+            let targets = sqlx::query_as!(
+                BatchRouteTargetRow,
+                "SELECT rrt.route_revision_id, rrt.id, rrt.routing_id, rrt.provider_model_id, \
+                        p.id AS provider_id, pr.name AS provider_name, \
+                        prm.upstream_model AS provider_model, rrt.priority, rrt.weight, \
+                        rrt.timeout_ms, rrt.position \
+                 FROM route_revision_targets rrt \
+                 JOIN provider_models pm ON pm.id = rrt.provider_model_id \
+                 JOIN providers p ON p.id = pm.provider_id \
+                 JOIN provider_revisions pr ON pr.id = p.active_revision_id \
+                 JOIN provider_revision_models prm ON prm.provider_revision_id = pr.id \
+                   AND prm.source_provider_model_id = pm.id \
+                 WHERE rrt.route_revision_id = ANY($1::uuid[]) \
+                 ORDER BY rrt.route_revision_id, rrt.position",
+                &revision_ids
+            )
+            .fetch_all(self.pool())
+            .await?;
+            (operations, targets)
+        };
+
+        let mut operations_map = BTreeMap::<Uuid, Vec<OperationKind>>::new();
+        for row in operation_rows {
+            let op = row
+                .operation
+                .parse()
+                .map_err(|_| PersistenceError::InvalidStoredValue("route revision operation"))?;
+            operations_map
+                .entry(row.route_revision_id)
+                .or_default()
+                .push(op);
+        }
+
+        let mut targets_map = BTreeMap::<Uuid, Vec<RouteTargetRecord>>::new();
+        for row in target_rows {
+            let rev_id = row.route_revision_id;
+            targets_map
+                .entry(rev_id)
+                .or_default()
+                .push(row.into_record());
+        }
+
+        Ok(rows
+            .into_iter()
+            .map(|row| {
+                let id = row.id;
+                RouteRevisionRecord {
+                    id,
+                    routing_id: row.routing_id,
+                    route_id: row.route_id,
+                    revision: row.revision,
+                    slug: row.slug,
+                    overall_timeout_ms: row.overall_timeout_ms,
+                    max_attempts: row.max_attempts,
+                    source_draft_id: row.source_draft_id,
+                    activated_by: row.activated_by,
+                    activated_at: row.activated_at,
+                    operations: operations_map.remove(&id).unwrap_or_default(),
+                    targets: targets_map.remove(&id).unwrap_or_default(),
+                }
+            })
+            .collect())
+    }
+
     pub async fn restore_route_revision_as_draft(
         &self,
         route_id: Uuid,
@@ -639,6 +716,26 @@ async fn revision_targets(pool: &sqlx::PgPool, id: Uuid) -> Result<Vec<RouteTarg
 }
 
 #[derive(Debug, sqlx::FromRow)]
+struct RouteRevisionRow {
+    id: Uuid,
+    routing_id: Uuid,
+    route_id: Uuid,
+    revision: i32,
+    slug: String,
+    overall_timeout_ms: i32,
+    max_attempts: i16,
+    source_draft_id: Uuid,
+    activated_by: Uuid,
+    activated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, sqlx::FromRow)]
+struct RevisionOperationRow {
+    route_revision_id: Uuid,
+    operation: String,
+}
+
+#[derive(Debug, sqlx::FromRow)]
 struct RouteTargetRow {
     id: Uuid,
     routing_id: Uuid,
@@ -650,6 +747,38 @@ struct RouteTargetRow {
     weight: i32,
     timeout_ms: i32,
     position: i32,
+}
+
+#[derive(Debug, sqlx::FromRow)]
+struct BatchRouteTargetRow {
+    route_revision_id: Uuid,
+    id: Uuid,
+    routing_id: Uuid,
+    provider_model_id: Uuid,
+    provider_id: Uuid,
+    provider_name: String,
+    provider_model: String,
+    priority: i32,
+    weight: i32,
+    timeout_ms: i32,
+    position: i32,
+}
+
+impl BatchRouteTargetRow {
+    fn into_record(self) -> RouteTargetRecord {
+        RouteTargetRecord {
+            id: self.id,
+            routing_id: self.routing_id,
+            provider_model_id: self.provider_model_id,
+            provider_id: self.provider_id,
+            provider_name: self.provider_name,
+            upstream_model: self.provider_model,
+            priority: self.priority,
+            weight: self.weight,
+            timeout_ms: self.timeout_ms,
+            position: self.position,
+        }
+    }
 }
 
 fn target_rows(rows: Vec<RouteTargetRow>) -> Vec<RouteTargetRecord> {
