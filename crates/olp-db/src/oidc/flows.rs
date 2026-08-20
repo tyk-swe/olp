@@ -123,7 +123,11 @@ impl Store {
                     return Err(OidcError::SessionUnavailable);
                 }
             }
-            OidcFlowPurpose::Login => unreachable!(),
+            OidcFlowPurpose::Login => {
+                return Err(OidcError::Invalid(
+                    "new OIDC login flows are stateless and cannot be persisted".to_owned(),
+                ));
+            }
         }
 
         sqlx::query!(
