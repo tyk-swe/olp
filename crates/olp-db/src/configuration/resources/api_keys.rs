@@ -16,10 +16,85 @@ impl Store {
         .await?;
         let (rows, next_cursor) = split_page(rows, limit as usize, |row| row.id);
         let ids: Vec<Uuid> = rows.into_iter().map(|row| row.id).collect();
-        let mut items = Vec::with_capacity(ids.len());
-        for id in ids {
-            items.push(self.get_api_key(id).await?);
+        if ids.is_empty() {
+            return Ok(ConfigurationPage {
+                items: Vec::new(),
+                next_cursor,
+            });
         }
+
+        let key_rows = sqlx::query!(
+            "SELECT k.id, k.lookup_id, k.name, k.created_by, u.email AS created_by_email, \
+                    k.requests_per_minute, k.tokens_per_minute, k.max_concurrency, k.expires_at, \
+                    k.revoked_at, k.rotated_at, k.etag, k.created_at \
+             FROM api_keys k JOIN users u ON u.id = k.created_by \
+             WHERE k.id = ANY($1::uuid[]) \
+             ORDER BY k.id",
+            &ids
+        )
+        .fetch_all(self.pool())
+        .await?;
+
+        let scope_rows = sqlx::query!(
+            "SELECT api_key_id, scope FROM api_key_scopes WHERE api_key_id = ANY($1::uuid[]) ORDER BY api_key_id, scope",
+            &ids
+        )
+        .fetch_all(self.pool())
+        .await?;
+
+        let mut scopes_by_id = BTreeMap::<Uuid, Vec<String>>::new();
+        for row in scope_rows {
+            scopes_by_id
+                .entry(row.api_key_id)
+                .or_default()
+                .push(row.scope);
+        }
+
+        let route_rows = sqlx::query!(
+            "SELECT api_key_id, route_slug FROM api_key_route_allowlist WHERE api_key_id = ANY($1::uuid[]) ORDER BY api_key_id, route_slug",
+            &ids
+        )
+        .fetch_all(self.pool())
+        .await?;
+
+        let mut routes_by_id = BTreeMap::<Uuid, Vec<String>>::new();
+        for row in route_rows {
+            routes_by_id
+                .entry(row.api_key_id)
+                .or_default()
+                .push(row.route_slug);
+        }
+
+        let mut key_map = key_rows
+            .into_iter()
+            .map(|row| {
+                let id = row.id;
+                let record = ApiKeyRecord {
+                    id,
+                    lookup_id: row.lookup_id,
+                    name: row.name,
+                    created_by: row.created_by,
+                    created_by_email: row.created_by_email,
+                    scopes: scopes_by_id.remove(&id).unwrap_or_default(),
+                    allowed_routes: routes_by_id.remove(&id).unwrap_or_default(),
+                    requests_per_minute: row.requests_per_minute,
+                    tokens_per_minute: row.tokens_per_minute,
+                    max_concurrency: row.max_concurrency,
+                    expires_at: row.expires_at,
+                    revoked_at: row.revoked_at,
+                    rotated_at: row.rotated_at,
+                    etag: row.etag,
+                    created_at: row.created_at,
+                };
+                (id, record)
+            })
+            .collect::<BTreeMap<_, _>>();
+
+        let items = ids
+            .into_iter()
+            .filter_map(|id| key_map.remove(&id))
+            .collect();
+
         Ok(ConfigurationPage { items, next_cursor })
     }
 
