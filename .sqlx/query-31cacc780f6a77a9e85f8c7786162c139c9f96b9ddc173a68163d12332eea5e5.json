@@ -1,0 +1,40 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT route_revision_id, operation FROM route_revision_operations WHERE route_revision_id = ANY($1::uuid[]) ORDER BY route_revision_id, operation",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "route_revision_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "route_revision_operations",
+            "name": "route_revision_id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "operation",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "route_revision_operations",
+            "name": "operation"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "UuidArray"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "31cacc780f6a77a9e85f8c7786162c139c9f96b9ddc173a68163d12332eea5e5"
+}
