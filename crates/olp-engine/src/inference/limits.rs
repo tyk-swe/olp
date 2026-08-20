@@ -734,40 +734,25 @@ mod tests {
         .await
     }
 
-    #[test]
-    fn limit_requests_validate_every_backend_invariant() {
-        let valid = LimitRequest {
-            lookup_id: "lookup_01",
+    fn base_limit_request<'a>() -> LimitRequest<'a> {
+        LimitRequest {
+            lookup_id: "lookup_01234567",
             requests_per_minute: Some(10),
             tokens_per_minute: Some(100),
             max_concurrency: Some(2),
             requested_tokens: 20,
             lease_ttl: Duration::from_secs(30),
-        };
-        assert!(valid.has_hard_limits());
-        assert!(valid.validate().is_ok());
-
-        type Mutator = for<'a> fn(&mut LimitRequest<'a>);
-        let cases: [(&str, Mutator); 7] = [
-            ("API key lookup ID", |r| r.lookup_id = "short"),
-            ("requests_per_minute", |r| r.requests_per_minute = Some(0)),
-            ("tokens_per_minute", |r| r.tokens_per_minute = Some(-1)),
-            ("max_concurrency", |r| r.max_concurrency = Some(0)),
-            ("non-negative", |r| r.requested_tokens = -1),
-            ("positive when", |r| r.requested_tokens = 0),
-            ("lease TTL", |r| r.lease_ttl = Duration::ZERO),
-        ];
-        for (expected, mutate) in cases {
-            let mut request = valid.clone();
-            mutate(&mut request);
-            assert!(matches!(
-                request.validate(),
-                Err(LimitError::InvalidRequest(message)) if message.contains(expected)
-            ));
         }
+    }
+
+    #[test]
+    fn validate_accepts_valid_requests_and_identifies_hard_limits() {
+        let req = base_limit_request();
+        assert!(req.has_hard_limits());
+        assert!(req.validate().is_ok());
 
         let unlimited = LimitRequest {
-            lookup_id: "lookup_01",
+            lookup_id: "lookup_01234567",
             requests_per_minute: None,
             tokens_per_minute: None,
             max_concurrency: None,
@@ -776,6 +761,73 @@ mod tests {
         };
         assert!(!unlimited.has_hard_limits());
         assert!(unlimited.validate().is_ok());
+    }
+
+    #[test]
+    fn validate_rejects_invalid_lookup_ids() {
+        let mut req = base_limit_request();
+
+        req.lookup_id = "1234567"; // 7 chars
+        assert!(matches!(req.validate(), Err(LimitError::InvalidRequest(msg)) if msg.contains("API key lookup ID")));
+
+        req.lookup_id = "12345678"; // 8 chars (valid min)
+        assert!(req.validate().is_ok());
+
+        let len40 = "a".repeat(40);
+        req.lookup_id = &len40;
+        assert!(req.validate().is_ok());
+
+        let len41 = "a".repeat(41);
+        req.lookup_id = &len41;
+        assert!(matches!(req.validate(), Err(LimitError::InvalidRequest(msg)) if msg.contains("API key lookup ID")));
+
+        for invalid_id in ["lookup-12345", "lookup 12345", "lookup.12345", "lookup_12345!", "lookup_12345_å"] {
+            req.lookup_id = invalid_id;
+            assert!(matches!(req.validate(), Err(LimitError::InvalidRequest(msg)) if msg.contains("API key lookup ID")));
+        }
+    }
+
+    #[test]
+    fn validate_rejects_non_positive_rate_and_concurrency_limits() {
+        let mut req = base_limit_request();
+
+        req.requests_per_minute = Some(0);
+        assert!(matches!(req.validate(), Err(LimitError::InvalidRequest(msg)) if msg.contains("requests_per_minute must be positive")));
+        req.requests_per_minute = Some(-1);
+        assert!(matches!(req.validate(), Err(LimitError::InvalidRequest(msg)) if msg.contains("requests_per_minute must be positive")));
+        req.requests_per_minute = Some(10);
+
+        req.tokens_per_minute = Some(0);
+        assert!(matches!(req.validate(), Err(LimitError::InvalidRequest(msg)) if msg.contains("tokens_per_minute must be positive")));
+        req.tokens_per_minute = Some(-5);
+        assert!(matches!(req.validate(), Err(LimitError::InvalidRequest(msg)) if msg.contains("tokens_per_minute must be positive")));
+        req.tokens_per_minute = Some(100);
+
+        req.max_concurrency = Some(0);
+        assert!(matches!(req.validate(), Err(LimitError::InvalidRequest(msg)) if msg.contains("max_concurrency must be positive")));
+        req.max_concurrency = Some(-2);
+        assert!(matches!(req.validate(), Err(LimitError::InvalidRequest(msg)) if msg.contains("max_concurrency must be positive")));
+    }
+
+    #[test]
+    fn validate_enforces_requested_tokens_and_lease_ttl_rules() {
+        let mut req = base_limit_request();
+
+        req.requested_tokens = -1;
+        assert!(matches!(req.validate(), Err(LimitError::InvalidRequest(msg)) if msg.contains("requested_tokens must be non-negative")));
+
+        req.requested_tokens = 0;
+        req.tokens_per_minute = Some(100);
+        assert!(matches!(req.validate(), Err(LimitError::InvalidRequest(msg)) if msg.contains("requested_tokens must be positive when a token limit is configured")));
+
+        req.tokens_per_minute = None;
+        assert!(req.validate().is_ok());
+
+        req.lease_ttl = Duration::ZERO;
+        assert!(matches!(req.validate(), Err(LimitError::InvalidRequest(msg)) if msg.contains("concurrency lease TTL must be greater than zero")));
+
+        req.lease_ttl = Duration::from_nanos(1);
+        assert!(req.validate().is_ok());
     }
 
     #[tokio::test]
