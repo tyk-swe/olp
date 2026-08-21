@@ -23,9 +23,17 @@ use olp_engine::{
 };
 
 use crate::{
-    bootstrap::mode_dependencies::RequestBoundaryState, bootstrap::state::MAX_JSON_BODY_BYTES,
-    gateway, management, public_http::problem::Problem, public_http::proxy::public_auth_source,
-    public_http::public_auth_routes::PublicAuthRoute, public_http::router::REQUEST_BODY_TIMEOUT,
+    bootstrap::mode_dependencies::RequestBoundaryState,
+    bootstrap::state::MAX_JSON_BODY_BYTES,
+    gateway::{
+        self,
+        endpoint_policy::classification::{InferenceEndpoint, TokenEstimate},
+    },
+    management,
+    public_http::problem::Problem,
+    public_http::proxy::public_auth_source,
+    public_http::public_auth_routes::PublicAuthRoute,
+    public_http::router::REQUEST_BODY_TIMEOUT,
 };
 
 pub(crate) mod limits;
@@ -151,11 +159,8 @@ pub(crate) async fn enforce_request_limits(
     request: Request<axum::body::Body>,
     next: middleware::Next,
 ) -> Response {
-    let endpoint = gateway::endpoint_policy::InferenceEndpoint::classify(
-        request.method(),
-        request.uri().path(),
-    );
-    let surface = endpoint.map(gateway::endpoint_policy::InferenceEndpoint::surface);
+    let endpoint = InferenceEndpoint::classify(request.method(), request.uri().path());
+    let surface = endpoint.map(InferenceEndpoint::surface);
     match enforce_request_limits_inner(&state, request, next, endpoint).await {
         Ok(response) => response,
         Err(RequestLimitRejection::Problem(problem)) => match surface {
@@ -250,10 +255,10 @@ async fn enforce_request_limits_inner(
     state: &RequestBoundaryState,
     request: Request<axum::body::Body>,
     next: middleware::Next,
-    endpoint: Option<gateway::endpoint_policy::InferenceEndpoint>,
+    endpoint: Option<InferenceEndpoint>,
 ) -> Result<Response, RequestLimitRejection> {
     let request_started_at = chrono::Utc::now();
-    let metadata_policy = endpoint.and_then(gateway::endpoint_policy::InferenceEndpoint::metadata);
+    let metadata_policy = endpoint.and_then(InferenceEndpoint::metadata);
     validate_target_and_headers(&request)?;
     enforce_public_auth_source(state, &request)?;
     let mut request = request;
@@ -267,8 +272,7 @@ async fn enforce_request_limits_inner(
         ..
     } = body_admission;
 
-    let endpoint_capability =
-        endpoint.and_then(gateway::endpoint_policy::InferenceEndpoint::capability);
+    let endpoint_capability = endpoint.and_then(InferenceEndpoint::capability);
     let principal = endpoint
         .map(|endpoint| {
             authenticate_inference_headers(
@@ -294,8 +298,7 @@ async fn enforce_request_limits_inner(
             always_emit: metadata.always_emit,
         })
     });
-    let multipart_policy =
-        endpoint.and_then(gateway::endpoint_policy::InferenceEndpoint::multipart);
+    let multipart_policy = endpoint.and_then(InferenceEndpoint::multipart);
     if multipart_policy.is_some() && multipart_content_type.is_none() {
         if let Some(metadata) = local_metadata {
             metadata.emit(axum::http::StatusCode::BAD_REQUEST);
@@ -333,8 +336,8 @@ async fn enforce_request_limits_inner(
         });
         let requested_tokens = estimate_http_json_request_tokens(
             endpoint
-                .map(gateway::endpoint_policy::InferenceEndpoint::token_estimate)
-                .unwrap_or(gateway::endpoint_policy::TokenEstimate::Default),
+                .map(InferenceEndpoint::token_estimate)
+                .unwrap_or(TokenEstimate::Default),
             &bytes,
         );
         // Protocol-shaped misses remain authenticated, but capability-free
@@ -366,8 +369,8 @@ async fn enforce_request_limits_inner(
 
     let requested_tokens = estimate_http_non_json_request_tokens(
         endpoint
-            .map(gateway::endpoint_policy::InferenceEndpoint::token_estimate)
-            .unwrap_or(gateway::endpoint_policy::TokenEstimate::Default),
+            .map(InferenceEndpoint::token_estimate)
+            .unwrap_or(TokenEstimate::Default),
     );
     let reservation = if let (Some(principal), Some(_)) = (&principal, endpoint_capability) {
         match reserve_http_inference_limits(state, principal, requested_tokens).await {

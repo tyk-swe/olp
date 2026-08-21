@@ -20,7 +20,10 @@ use olp_engine::inference::{
 use olp_engine::protocols::openai::embeddings::EmbeddingWireInput;
 use serde::Deserialize;
 
-use crate::{bootstrap::mode_dependencies::RequestBoundaryState, gateway};
+use crate::{
+    bootstrap::mode_dependencies::RequestBoundaryState,
+    gateway::{self, endpoint_policy::classification::TokenEstimate},
+};
 
 const LITELLM_API_KEY_HEADER: &str = "x-litellm-api-key";
 
@@ -209,12 +212,9 @@ pub(super) async fn reserve_http_inference_limits(
     }
 }
 
-pub(crate) fn estimate_http_json_request_tokens(
-    category: gateway::endpoint_policy::TokenEstimate,
-    body: &[u8],
-) -> i64 {
+pub(crate) fn estimate_http_json_request_tokens(category: TokenEstimate, body: &[u8]) -> i64 {
     let encoded_body = body.len().saturating_add(3) / 4;
-    let baseline = if category == gateway::endpoint_policy::TokenEstimate::Generation {
+    let baseline = if category == TokenEstimate::Generation {
         let value = serde_json::from_slice::<serde_json::Value>(body).ok();
         let output = value
             .as_ref()
@@ -249,7 +249,7 @@ pub(crate) fn estimate_http_json_request_tokens(
     let byte_estimate = encoded_body.saturating_add(baseline).max(1);
     // Generation paths and embeddings are mutually exclusive, so the body is
     // parsed at most once per request, and only for paths that consume it.
-    let embedding_token_floor = if category == gateway::endpoint_policy::TokenEstimate::Embeddings {
+    let embedding_token_floor = if category == TokenEstimate::Embeddings {
         serde_json::from_slice::<EmbeddingTokenProbe>(body)
             .ok()
             .map(|probe| embedding_token_count(probe.input))
@@ -276,15 +276,12 @@ fn embedding_token_count(input: EmbeddingWireInput) -> usize {
     }
 }
 
-pub(super) const fn estimate_http_non_json_request_tokens(
-    category: gateway::endpoint_policy::TokenEstimate,
-) -> i64 {
+pub(super) const fn estimate_http_non_json_request_tokens(category: TokenEstimate) -> i64 {
     match category {
-        gateway::endpoint_policy::TokenEstimate::Generation => 4_096,
-        gateway::endpoint_policy::TokenEstimate::Transcription => 1_500,
-        gateway::endpoint_policy::TokenEstimate::Media => 2_000,
-        gateway::endpoint_policy::TokenEstimate::Default
-        | gateway::endpoint_policy::TokenEstimate::Embeddings => 1,
+        TokenEstimate::Generation => 4_096,
+        TokenEstimate::Transcription => 1_500,
+        TokenEstimate::Media => 2_000,
+        TokenEstimate::Default | TokenEstimate::Embeddings => 1,
     }
 }
 
@@ -386,14 +383,11 @@ mod tests {
     #[test]
     fn non_json_estimates_are_conservative_by_operation_cost() {
         for (category, expected) in [
-            (gateway::endpoint_policy::TokenEstimate::Generation, 4_096),
-            (
-                gateway::endpoint_policy::TokenEstimate::Transcription,
-                1_500,
-            ),
-            (gateway::endpoint_policy::TokenEstimate::Media, 2_000),
-            (gateway::endpoint_policy::TokenEstimate::Default, 1),
-            (gateway::endpoint_policy::TokenEstimate::Embeddings, 1),
+            (TokenEstimate::Generation, 4_096),
+            (TokenEstimate::Transcription, 1_500),
+            (TokenEstimate::Media, 2_000),
+            (TokenEstimate::Default, 1),
+            (TokenEstimate::Embeddings, 1),
         ] {
             assert_eq!(estimate_http_non_json_request_tokens(category), expected);
         }

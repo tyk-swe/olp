@@ -7,7 +7,8 @@ use axum::{
 
 use crate::{
     bootstrap::state::MAX_HTTP_HEADER_BYTES, bootstrap::state::MAX_HTTP_HEADER_COUNT,
-    bootstrap::state::MAX_JSON_BODY_BYTES, gateway, public_http::problem::Problem,
+    bootstrap::state::MAX_JSON_BODY_BYTES,
+    gateway::endpoint_policy::classification::InferenceEndpoint, public_http::problem::Problem,
 };
 
 const MAX_HEADER_VALUE_BYTES: usize = 8 * 1024;
@@ -102,10 +103,7 @@ pub(super) struct BodyAdmission {
 }
 
 impl BodyAdmission {
-    pub(super) fn classify(
-        request: &Request<Body>,
-        endpoint: Option<gateway::endpoint_policy::InferenceEndpoint>,
-    ) -> Self {
+    pub(super) fn classify(request: &Request<Body>, endpoint: Option<InferenceEndpoint>) -> Self {
         let content_type = request
             .headers()
             .get(axum::http::header::CONTENT_TYPE)
@@ -355,11 +353,8 @@ mod tests {
         assert!(json.multipart_content_type.is_none());
         assert_eq!(json.maximum, MAX_JSON_BODY_BYTES);
 
-        let endpoint = gateway::endpoint_policy::InferenceEndpoint::classify(
-            &Method::POST,
-            "/openai/v1/audio/transcriptions",
-        )
-        .unwrap();
+        let endpoint =
+            InferenceEndpoint::classify(&Method::POST, "/openai/v1/audio/transcriptions").unwrap();
         let endpoint_maximum = endpoint.body_limit("multipart/form-data; boundary=olp");
         let mut multipart = empty_request("/");
         multipart.headers_mut().insert(

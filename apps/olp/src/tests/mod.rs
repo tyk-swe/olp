@@ -42,7 +42,7 @@ use super::*;
 use super::{
     bootstrap::mode_dependencies::GatewayState,
     bootstrap::state::{ApiMode, MAX_JSON_BODY_BYTES, ProcessComposition},
-    gateway::endpoint_policy::{InferenceEndpoint, TokenEstimate},
+    gateway::endpoint_policy::classification::{InferenceEndpoint, TokenEstimate},
     observability::{
         OBSERVABILITY_SNAPSHOT_STALE_AFTER, prometheus_label, refresh_observability_cache,
         router as observability_router,

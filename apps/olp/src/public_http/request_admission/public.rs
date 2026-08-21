@@ -17,7 +17,10 @@ use axum::{
 use http_body::{Frame, SizeHint};
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 
-use crate::{gateway, public_http::problem::Problem};
+use crate::{
+    gateway::{self, endpoint_policy::classification::InferenceEndpoint},
+    public_http::problem::Problem,
+};
 
 pub(crate) const DEFAULT_MAX_IN_FLIGHT_INFERENCE_REQUESTS: usize = 256;
 pub(crate) const DEFAULT_MAX_IN_FLIGHT_MANAGEMENT_REQUESTS: usize = 32;
@@ -231,12 +234,7 @@ pub(crate) async fn admit_public_request(
 ) -> Response {
     let endpoint = state
         .inference_enabled
-        .then(|| {
-            gateway::endpoint_policy::InferenceEndpoint::classify(
-                request.method(),
-                request.uri().path(),
-            )
-        })
+        .then(|| InferenceEndpoint::classify(request.method(), request.uri().path()))
         .flatten();
     let surface = if endpoint.is_some() {
         AdmissionSurface::Inference
@@ -255,7 +253,7 @@ pub(crate) async fn admit_public_request(
 
 fn overload_response(
     admission_surface: AdmissionSurface,
-    endpoint: Option<gateway::endpoint_policy::InferenceEndpoint>,
+    endpoint: Option<InferenceEndpoint>,
     uri: &axum::http::Uri,
 ) -> Response {
     let mut response = match (admission_surface, endpoint) {
