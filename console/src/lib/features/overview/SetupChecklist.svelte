@@ -12,9 +12,9 @@
     href: string;
   };
 
-  const providers = createQuery(() => ({ queryKey: ['providers'], queryFn: listProviders }));
-  const routes = createQuery(() => ({ queryKey: ['routes'], queryFn: listRoutes }));
-  const keys = createQuery(() => ({ queryKey: ['api-keys'], queryFn: listApiKeys }));
+  const providers = createQuery(() => ({ queryKey: ['providers'], queryFn: ({ signal }) => listProviders(signal) }));
+  const routes = createQuery(() => ({ queryKey: ['routes'], queryFn: ({ signal }) => listRoutes(signal) }));
+  const keys = createQuery(() => ({ queryKey: ['api-keys'], queryFn: ({ signal }) => listApiKeys(signal) }));
 
   const completed = $derived([
     true,

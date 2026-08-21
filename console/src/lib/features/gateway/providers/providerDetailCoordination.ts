@@ -4,7 +4,7 @@ import {
   type Provider,
   type ProviderModel
 } from '$lib/api/management/providers';
-import type { CursorPage } from '$lib/api/management/shared';
+import type { CursorPage } from '$lib/api/pagination';
 import { invalidateProviderModelConsumers } from './providerCache';
 
 export type CoordinatedModelPage = {

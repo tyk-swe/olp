@@ -1,12 +1,7 @@
 import type { components } from '../schema';
 import { apiClient } from '../client';
-import {
-  collectCursorPages,
-  getAbortSignal,
-  requireResponseData,
-  type CursorPage,
-  type ReadSignal
-} from './shared';
+import { result } from '../http';
+import { collectCursorPages, type CursorPage } from '../pagination';
 
 type Schemas = components['schemas'];
 
@@ -16,8 +11,8 @@ export type UpdateApiKeyInput = Schemas['UpdateApiKeyRequest'];
 export type ApiKeyMutation = Schemas['ApiKeyMutationResponse'];
 export type ApiKeySecret = Schemas['CreateApiKeyResponse'] | Schemas['RotateApiKeyResponse'];
 
-export async function listApiKeys(signal?: ReadSignal): Promise<ApiKey[]> {
-  return collectCursorPages((cursor) => listApiKeyPage(cursor, getAbortSignal(signal)));
+export async function listApiKeys(signal?: AbortSignal): Promise<ApiKey[]> {
+  return collectCursorPages((cursor) => listApiKeyPage(cursor, signal));
 }
 
 export async function listApiKeyPage(
@@ -28,7 +23,7 @@ export async function listApiKeyPage(
     params: { query: { limit: 50, cursor } },
     signal
   });
-  const page = requireResponseData(response.data, response.error, response.response);
+  const page = result(response.data, response.error, response.response);
   return { items: page.items, nextCursor: page.next_cursor ?? null };
 }
 
@@ -37,7 +32,7 @@ export async function createApiKey(input: CreateApiKeyInput): Promise<ApiKeySecr
     params: { header: { 'Idempotency-Key': crypto.randomUUID() } },
     body: input
   });
-  return requireResponseData(response.data, response.error, response.response);
+  return result(response.data, response.error, response.response);
 }
 
 export async function rotateApiKey(key: ApiKey): Promise<ApiKeySecret> {
@@ -47,7 +42,7 @@ export async function rotateApiKey(key: ApiKey): Promise<ApiKeySecret> {
       header: { 'If-Match': key.etag, 'Idempotency-Key': crypto.randomUUID() }
     }
   });
-  return requireResponseData(response.data, response.error, response.response);
+  return result(response.data, response.error, response.response);
 }
 
 export async function updateApiKey(key: ApiKey, input: UpdateApiKeyInput): Promise<ApiKeyMutation> {
@@ -58,7 +53,7 @@ export async function updateApiKey(key: ApiKey, input: UpdateApiKeyInput): Promi
     },
     body: input
   });
-  return requireResponseData(response.data, response.error, response.response);
+  return result(response.data, response.error, response.response);
 }
 
 export async function revokeApiKey(key: ApiKey): Promise<void> {
@@ -68,5 +63,5 @@ export async function revokeApiKey(key: ApiKey): Promise<void> {
       header: { 'If-Match': key.etag, 'Idempotency-Key': crypto.randomUUID() }
     }
   });
-  requireResponseData(response.data, response.error, response.response);
+  result(response.data, response.error, response.response);
 }

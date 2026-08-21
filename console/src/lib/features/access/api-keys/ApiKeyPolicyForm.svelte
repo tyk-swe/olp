@@ -39,7 +39,7 @@
   let initialized = $state(false);
   const routes = createQuery(() => ({
     queryKey: ['routes'],
-    queryFn: listRoutes
+    queryFn: ({ signal }) => listRoutes(signal)
   }));
 
   $effect(() => {

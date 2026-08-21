@@ -1,18 +1,18 @@
 import type { components } from '../schema';
 import { apiClient } from '../client';
-import { getAbortSignal, requireResponseData, type ReadSignal } from './shared';
+import { result } from '../http';
 
 type Schemas = components['schemas'];
 
 export type OidcConfiguration = Schemas['OidcConfigurationResponse'];
 export type OidcConfigurationInput = Schemas['OidcConfigurationRequest'];
 
-export async function getOidcConfiguration(signal?: ReadSignal): Promise<OidcConfiguration | null> {
+export async function getOidcConfiguration(signal?: AbortSignal): Promise<OidcConfiguration | null> {
   const response = await apiClient.GET('/api/v1/oidc/configuration', {
-    signal: getAbortSignal(signal)
+    signal
   });
   if (response.response.status === 404) return null;
-  return requireResponseData(response.data, response.error, response.response);
+  return result(response.data, response.error, response.response);
 }
 
 export async function putOidcConfiguration(
@@ -23,10 +23,10 @@ export async function putOidcConfiguration(
     params: { header: { 'If-Match': etag ?? null } },
     body: input
   });
-  return requireResponseData(response.data, response.error, response.response);
+  return result(response.data, response.error, response.response);
 }
 
 export async function beginOidcLink(): Promise<string> {
   const response = await apiClient.POST('/api/v1/oidc/link');
-  return requireResponseData(response.data, response.error, response.response).authorization_url;
+  return result(response.data, response.error, response.response).authorization_url;
 }

@@ -30,7 +30,7 @@
   const queryClient = useQueryClient();
   const oidc = createQuery(() => ({
     queryKey: ['oidc-configuration'],
-    queryFn: getOidcConfiguration,
+    queryFn: ({ signal }) => getOidcConfiguration(signal),
     retry: false
   }));
 

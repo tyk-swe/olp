@@ -33,7 +33,7 @@
   let testMessage = $state('');
   const routes = createQuery(() => ({
     queryKey: ['routes'],
-    queryFn: listRoutes
+    queryFn: ({ signal }) => listRoutes(signal)
   }));
   const routeSlug = $derived(
     preferredRoute ?? routes.data?.[0]?.slug ?? 'default'

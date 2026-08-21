@@ -17,11 +17,11 @@
   let copyTimer: ReturnType<typeof setTimeout> | undefined;
   const providers = createQuery(() => ({
     queryKey: ['providers'],
-    queryFn: listProviders
+    queryFn: ({ signal }) => listProviders(signal)
   }));
   const routes = createQuery(() => ({
     queryKey: ['routes'],
-    queryFn: listRoutes
+    queryFn: ({ signal }) => listRoutes(signal)
   }));
   const recentRequests = createQuery(() => ({
     queryKey: ['requests', 'overview'],

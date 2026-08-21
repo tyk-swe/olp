@@ -5,7 +5,7 @@ import { listApiKeyPage } from './api-keys';
 import { getOidcConfiguration } from './oidc';
 import { listProviderPage, listProviders } from './providers';
 import { listRouteDraftPage } from './routes';
-import { collectCursorPages } from './shared';
+import { collectCursorPages } from '../pagination';
 import { captureRequests, jsonResponse } from '../test/requestCapture';
 
 afterEach(() => {
@@ -72,7 +72,7 @@ describe('management resources', () => {
       )
     );
 
-    await expect(listProviders({ signal: controller.signal })).resolves.toEqual([
+    await expect(listProviders(controller.signal)).resolves.toEqual([
       'provider-1',
       'provider-2'
     ]);
