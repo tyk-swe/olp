@@ -7,7 +7,7 @@
   import { copyText } from '$lib/clipboard';
   import { listProviders } from '$lib/api/management/providers';
   import { listRoutes } from '$lib/api/management/routes';
-  import { listRequests } from '$lib/api/operations';
+  import { listRequests } from '$lib/api/requests';
   import { formatDate, statusLabel, statusTone } from '$lib/format';
 
   let { controlConnected = true }: { controlConnected?: boolean } = $props();

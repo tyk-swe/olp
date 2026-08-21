@@ -1,6 +1,6 @@
 <script lang="ts">
   import { createMutation } from '@tanstack/svelte-query';
-  import { runPlayground } from '$lib/api/operations';
+  import { runPlayground } from '$lib/api/playground';
   import SegmentedRadioGroup from '$lib/components/SegmentedRadioGroup.svelte';
   import { parseResponseSchema, parseTools } from './validation';
 

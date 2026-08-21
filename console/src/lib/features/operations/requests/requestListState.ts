@@ -1,5 +1,5 @@
 import { createContext } from 'svelte';
-import type { RequestFilters } from '$lib/api/operations';
+import type { RequestFilters } from '$lib/api/requests';
 import { emptyCursorHistory, type CursorHistory } from '$lib/api/pagination';
 
 export type RequestListState = CursorHistory & {

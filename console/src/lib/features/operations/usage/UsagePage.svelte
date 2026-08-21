@@ -6,7 +6,7 @@
     usageSeries,
     usageSummary,
     type UsageFilters
-  } from '$lib/api/operations';
+  } from '$lib/api/usage';
   import UsageChart from './UsageChart.svelte';
   import UsageCompletenessStatus from './UsageCompletenessStatus.svelte';
   import { dateTimeLocalValue, formatCompact, formatCost } from '$lib/format';

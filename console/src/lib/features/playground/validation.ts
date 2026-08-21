@@ -1,4 +1,4 @@
-import type { PlaygroundRequest } from '$lib/api/operations';
+import type { PlaygroundRequest } from '$lib/api/playground';
 
 type PlaygroundTool = NonNullable<PlaygroundRequest['tools']>[number];
 

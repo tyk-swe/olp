@@ -1,6 +1,6 @@
 <script lang="ts">
   import { createQuery } from '@tanstack/svelte-query';
-  import { listAudit } from '$lib/api/operations';
+  import { listAudit } from '$lib/api/audit';
   import {
     cursorPaginationProps,
     emptyCursorHistory

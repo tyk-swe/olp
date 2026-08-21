@@ -12,7 +12,7 @@
     beginOidcReauthentication,
     listOidcIdentities,
     reauthenticateWithPassword
-  } from '$lib/api/operations';
+  } from '$lib/api/profile';
   import { FIXED_ROLES } from '$lib/auth/authorization';
   import ConflictNotice from '$lib/components/ConflictNotice.svelte';
   import {

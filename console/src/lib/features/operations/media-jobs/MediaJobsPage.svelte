@@ -5,7 +5,7 @@
   import {
     getMediaJob,
     listMediaJobs
-  } from '$lib/api/operations';
+  } from '$lib/api/media-jobs';
   import { cursorPaginationProps, resetCursor } from '$lib/api/pagination';
   import { formatDate } from '$lib/format';
   import { emptyMediaJobListState, type MediaJobListState } from './mediaJobListState';

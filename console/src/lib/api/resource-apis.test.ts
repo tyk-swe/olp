@@ -1,15 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { listAudit } from './audit';
+import { listProviderHealth, listRequestMetadataGatewayEpochs } from './health';
 import { ApiProblem } from './http';
-import {
-  listAudit,
-  listMediaJobs,
-  listPricing,
-  listProviderHealth,
-  listRequestMetadataGatewayEpochs,
-  listRequests,
-  listRuntimeGenerations,
-  operationsTesting
-} from './operations';
+import { listMediaJobs } from './media-jobs';
+import { listPricing } from './pricing';
+import { listRequests } from './requests';
+import { listRuntimeGenerations } from './runtime';
 import { captureRequests, jsonResponse } from './test/requestCapture';
 
 afterEach(() => {
@@ -31,21 +27,27 @@ function providerHealth(providerId: string) {
   };
 }
 
-describe('operations query serialization', () => {
-  it('removes empty filters while retaining zero and false values', () => {
-    expect(
-      operationsTesting.compact({
-        status: 0,
-        enabled: false,
-        route: '',
-        cursor: undefined,
-        provider: null
-      })
-    ).toEqual({ status: 0, enabled: false });
+describe('request query serialization', () => {
+  it('omits empty filters while retaining numeric zero', async () => {
+    const requests = captureRequests(() =>
+      jsonResponse({ data: [], next_cursor: null })
+    );
+
+    await listRequests({
+      limit: 25,
+      route: '',
+      provider_id: undefined,
+      status_code: 0
+    });
+
+    expect(Object.fromEntries(new URL(requests[0]!.url).searchParams)).toEqual({
+      limit: '25',
+      status_code: '0'
+    });
   });
 });
 
-describe('operations cursor pages', () => {
+describe('resource API cursor pages', () => {
   it('normalizes every paginated response at the API boundary', async () => {
     captureRequests((_request, index) =>
       jsonResponse({
@@ -78,8 +80,16 @@ describe('provider-health pagination', () => {
     const second = providerHealth('provider-2');
     const requests = captureRequests((_request, index) =>
       index === 0
-        ? jsonResponse({ window_minutes: 30, data: [first], next_cursor: 'page-2' })
-        : jsonResponse({ window_minutes: 30, data: [second], next_cursor: null })
+        ? jsonResponse({
+            window_minutes: 30,
+            data: [first],
+            next_cursor: 'page-2'
+          })
+        : jsonResponse({
+            window_minutes: 30,
+            data: [second],
+            next_cursor: null
+          })
     );
 
     await expect(listProviderHealth(30)).resolves.toEqual({
@@ -135,7 +145,7 @@ describe('provider-health pagination', () => {
   });
 });
 
-describe('operations API errors', () => {
+describe('resource API errors', () => {
   it('preserves structured problem details', async () => {
     captureRequests(() =>
       jsonResponse(
@@ -165,8 +175,9 @@ describe('operations API errors', () => {
   });
 
   it('fails closed when a successful response omits its required JSON body', async () => {
-    captureRequests(() =>
-      new Response(null, { status: 200, headers: { 'content-length': '0' } })
+    captureRequests(
+      () =>
+        new Response(null, { status: 200, headers: { 'content-length': '0' } })
     );
 
     const error = await listRequests({}).catch((value: unknown) => value);

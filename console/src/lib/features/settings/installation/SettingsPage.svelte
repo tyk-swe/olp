@@ -10,11 +10,9 @@
   import {
     createPricingRevision,
     listPricing,
-    listSettings,
-    updateSetting,
-    type PriceDraft,
-    type Setting
-  } from '$lib/api/operations';
+    type PriceDraft
+  } from '$lib/api/pricing';
+  import { listSettings, updateSetting, type Setting } from '$lib/api/settings';
   import { dateTimeLocalValue, formatDate } from '$lib/format';
   import {
     listProviderKinds,

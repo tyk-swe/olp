@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { UsagePoint } from '$lib/api/operations';
+  import type { UsagePoint } from '$lib/api/usage';
   import { formatCompact, formatCost, formatDate } from '$lib/format';
 
   let { points, title = 'Requests over time' }: { points: UsagePoint[]; title?: string } = $props();

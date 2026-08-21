@@ -4,7 +4,7 @@
   import {
     getRequest,
     listRequests
-  } from '$lib/api/operations';
+  } from '$lib/api/requests';
   import { cursorPaginationProps, resetCursor } from '$lib/api/pagination';
   import { formatCompact, formatCost, formatDate, statusLabel, statusTone } from '$lib/format';
   import { emptyRequestListState, type RequestListState } from './requestListState';

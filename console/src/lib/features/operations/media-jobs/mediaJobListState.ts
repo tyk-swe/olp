@@ -1,5 +1,5 @@
 import { createContext } from 'svelte';
-import type { MediaJobFilters } from '$lib/api/operations';
+import type { MediaJobFilters } from '$lib/api/media-jobs';
 import { emptyCursorHistory, type CursorHistory } from '$lib/api/pagination';
 
 export type MediaJobListState = CursorHistory & {

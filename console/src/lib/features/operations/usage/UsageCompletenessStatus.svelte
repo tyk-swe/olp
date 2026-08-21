@@ -1,6 +1,6 @@
 <script lang="ts">
   import { resolve } from '$app/paths';
-  import type { UsageCompleteness } from '$lib/api/operations';
+  import type { UsageCompleteness } from '$lib/api/usage';
   import { presentUsageCompleteness } from './completenessPresentation';
 
   let { completeness }: { completeness: UsageCompleteness } = $props();

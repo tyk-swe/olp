@@ -25,7 +25,7 @@
     reauthenticateWithPassword,
     unlinkOidcIdentity,
     updateProfile
-  } from '$lib/api/operations';
+  } from '$lib/api/profile';
   import ActiveSessionsPanel from './ActiveSessionsPanel.svelte';
   import LocalPasswordPanel from './LocalPasswordPanel.svelte';
   import OidcIdentitiesPanel from './OidcIdentitiesPanel.svelte';

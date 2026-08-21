@@ -9,10 +9,10 @@
     acknowledgeRequestMetadataGatewayEpoch,
     getReadiness,
     listProviderHealth,
-    listRuntimeGenerations,
-    listRequestMetadataGatewayEpochs,
-    usageCompleteness
-  } from '$lib/api/operations';
+    listRequestMetadataGatewayEpochs
+  } from '$lib/api/health';
+  import { listRuntimeGenerations } from '$lib/api/runtime';
+  import { usageCompleteness } from '$lib/api/usage';
   import { formatDate } from '$lib/format';
 
   const generationPagination = $state(emptyCursorHistory());
