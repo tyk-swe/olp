@@ -35,10 +35,11 @@ make sdk-smoke
 ## End-to-end and HA
 
 `make e2e` drives the real `olp` binary against PostgreSQL, Valkey, and a
-loopback mock provider. `make worker-ha` adds two gateways, three workers, and
-Toxiproxy partitions; it runs in the full CI tier. The suites assert public
-paths, routing/capability policy, generation pinning, usage completeness,
-data-safety, recovery, and distributed limits.
+loopback mock provider. `make worker-ha` verifies shared-Valkey installation
+isolation and three-worker crash recovery. The full CI tier separately runs a
+two-gateway HA job through PostgreSQL and Valkey Toxiproxy partitions. The
+suites assert public paths, routing/capability policy, generation pinning,
+usage completeness, data-safety, recovery, and distributed limits.
 
 ## Fuzzing
 
