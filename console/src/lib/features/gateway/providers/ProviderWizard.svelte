@@ -2,21 +2,17 @@
   import { resolve } from '$app/paths';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { onDestroy } from 'svelte';
-  import NavIcon from '$lib/components/NavIcon.svelte';
-  import CursorPagination from '$lib/components/CursorPagination.svelte';
   import ConflictNotice from '$lib/components/ConflictNotice.svelte';
-  import CapabilityReview from './CapabilityReview.svelte';
+  import ProviderActivationStage from './ProviderActivationStage.svelte';
+  import ProviderCapabilityReviewStage from './ProviderCapabilityReviewStage.svelte';
   import ProviderConnectorForm from './ProviderConnectorForm.svelte';
+  import ProviderDiscoveryStage from './ProviderDiscoveryStage.svelte';
   import {
     invalidateProviderModelConsumers,
     invalidateProviderSummaries
   } from './providerCache';
   import { errorMessage as message, isEtagMismatch } from '$lib/api/http';
-  import {
-    cursorPaginationProps,
-    emptyCursorHistory,
-    resetCursor
-  } from '$lib/api/pagination';
+  import { emptyCursorHistory, resetCursor } from '$lib/api/pagination';
   import {
     activateProvider,
     certifyProviderModel,
@@ -35,14 +31,11 @@
     type ProviderProbe
   } from '$lib/api/management/providers';
   import {
-    activationReady,
     authOptionsFor,
     buildCreateProviderInput,
-    capabilitiesCertified,
     certificationPrerequisiteReady,
     createProviderDraft,
     parseManualModelNames,
-    probeReady,
     requiresCredential,
     validateProviderDraft,
     type ProviderDraft
@@ -385,175 +378,45 @@
     >
   </section>
 {:else if wizardStep === 3}
-  <section class="card stage" aria-labelledby="discovery-heading">
-    <p class="eyebrow">Probe passed</p>
-    <h2 id="discovery-heading">Discover upstream models</h2>
-    {#if probe}<p class="success-line">✓ {probe.detail}</p>{/if}
-    <p>
-      The connector will call the upstream model-list API with the stored
-      identity. Discovered models begin disabled until their capabilities are
-      certified and reviewed.
-    </p>
-    <button
-      class="button button-primary"
-      type="button"
-      onclick={discoverWizardProvider}
-      disabled={Boolean(busy)}
-      >{busy === 'discover'
-        ? 'Discovering…'
-        : 'Discover upstream models'}</button
-    >
-    {#if wizardProvider?.kind === 'openai_compatible'}<details
-        class="manual-fallback"
-      >
-        <summary>Endpoint has no model-list API?</summary>
-        <p>
-          Declare identifiers manually. They remain disabled and
-          capability-empty until you complete the same review.
-        </p>
-        <div class="form-field">
-          <label for="manual-models-wizard">Upstream model identifiers</label
-          ><textarea
-            id="manual-models-wizard"
-            bind:value={manualModelNames}
-            placeholder="model-a&#10;model-b"></textarea>
-        </div>
-        <button
-          class="button button-secondary"
-          type="button"
-          onclick={declareWizardModels}
-          disabled={Boolean(busy)}
-          >{busy === 'declare-models'
-            ? 'Adding…'
-            : 'Add identifiers for review'}</button
-        >
-      </details>{/if}
-  </section>
+  <ProviderDiscoveryStage
+    provider={wizardProvider}
+    {probe}
+    bind:manualModelNames
+    {busy}
+    onDiscover={discoverWizardProvider}
+    onDeclareModels={declareWizardModels}
+  />
 {:else if wizardStep === 4 && wizardProvider}
   <section class="card stage wide" aria-labelledby="capability-heading">
-    <p class="eyebrow">Capability review</p>
-    <h2 id="capability-heading">Review model capabilities</h2>
-    <p>
-      Operator review is recorded as <code>declared</code>. Every native and
-      compatible capability tuple must receive server-owned certification for
-      this exact draft.
-    </p>
-    <div class="table-shell">
-      <table class="data-table">
-        <thead><tr><th>Model</th><th>Explicit capability review</th></tr></thead
-        ><tbody>
-          {#each wizardModels.data?.items ?? [] as model (model.id)}
-            <tr
-              ><td
-                ><strong>{model.display_name}</strong><br /><code
-                  >{model.upstream_model}</code
-                ></td
-              ><td
-                ><CapabilityReview
-                  {model}
-                  providerEtag={wizardProvider.etag}
-                  options={capabilityOptions.data?.capabilities ?? []}
-                  optionsPending={capabilityOptions.isPending}
-                  optionsError={capabilityOptions.isError}
-                  disabled={Boolean(busy)}
-                  reloadVersion={wizardModelReloadVersion}
-                  onSave={(enabled, capabilities, providerEtag) =>
-                    reviewWizardModel(
-                      model.id,
-                      enabled,
-                      capabilities,
-                      providerEtag
-                    )}
-                />
-                <div class="certification-action">
-                  <button
-                    class="button button-secondary"
-                    type="button"
-                    onclick={() => certifyWizardModel(model.id)}
-                    disabled={Boolean(busy) || !model.capabilities.length}
-                    >{busy === `certify-${model.id}`
-                      ? 'Server-certifying…'
-                      : 'Server-certify capabilities'}</button
-                  >{#if certificationResults[model.id]}{@const result =
-                      certificationResults[model.id]}<span
-                      class:success={result.status === 'succeeded'}
-                      class:warning={result.status !== 'succeeded'}
-                      >{result.certified_count}/{result.attempted_count} certified</span
-                    >{/if}
-                </div></td
-              ></tr
-            >
-          {/each}
-        </tbody>
-      </table>
-    </div>
-    <CursorPagination
-      {...cursorPaginationProps(
-        wizardModelPagination,
-        wizardModels.data?.nextCursor
-      )}
-      label="Provider wizard model pages"
+    <ProviderCapabilityReviewStage
+      provider={wizardProvider}
+      models={wizardModels.data?.items ?? []}
+      capabilityOptions={capabilityOptions.data?.capabilities ?? []}
+      optionsPending={capabilityOptions.isPending}
+      optionsError={capabilityOptions.isError}
+      {busy}
+      reloadVersion={wizardModelReloadVersion}
+      {certificationResults}
+      pagination={wizardModelPagination}
+      nextCursor={wizardModels.data?.nextCursor}
+      onSave={reviewWizardModel}
+      onCertify={certifyWizardModel}
     />
-    <ol
-      class="activation-checklist"
-      aria-label="Provider activation requirements"
-    >
-      <li class:complete={capabilitiesCertified(wizardProvider)}>
-        {capabilitiesCertified(wizardProvider) ? '✓' : '1'} Every enabled capability
-        is server-certified
-      </li>
-      <li class:complete={probeReady(wizardProvider)}>
-        {probeReady(wizardProvider) ? '✓' : '2'} Completed draft passed an ETag-bound
-        connection test
-      </li>
-    </ol>
-    <div class="form-actions">
-      <button
-        class="button button-secondary"
-        type="button"
-        onclick={testWizardDraftForActivation}
-        disabled={Boolean(busy) || !capabilitiesCertified(wizardProvider)}
-        >{busy === 'final-probe'
-          ? 'Testing completed draft…'
-          : 'Test completed draft'}</button
-      ><button
-        class="button button-primary"
-        type="button"
-        onclick={activateWizardProvider}
-        disabled={Boolean(busy) || !activationReady(wizardProvider)}
-        >{busy === 'activate' ? 'Activating…' : 'Activate provider'}</button
-      >
-    </div>
-    {#if wizardProvider && !activationReady(wizardProvider)}<p
-        class="audit-note"
-      >
-        Activation stays disabled until every tuple has server-owned
-        certification and the completed draft passes a fresh connection test.
-        Any configuration, credential, discovery, or capability change
-        invalidates that evidence.
-      </p>{/if}
+    <ProviderActivationStage
+      provider={wizardProvider}
+      {busy}
+      onTest={testWizardDraftForActivation}
+      onActivate={activateWizardProvider}
+    />
   </section>
 {:else}
-  <section
-    class="card stage complete-panel"
-    aria-labelledby="activated-heading"
-  >
-    <span class="complete-mark" aria-hidden="true">✓</span>
-    <p class="eyebrow">Provider active</p>
-    <h2 id="activated-heading">Now build a stable route slug.</h2>
-    <p>
-      {wizardProvider?.name} is eligible for new route drafts. Activation published
-      an immutable runtime generation.
-    </p>
-    <div class="form-actions">
-      <a class="button button-primary" href={resolve('/routes/new')}
-        >Build default route <NavIcon name="arrow" /></a
-      ><a
-        class="button button-secondary"
-        href={resolve(`/providers/${wizardProvider?.id}`)}>View provider</a
-      >
-    </div>
-  </section>
+  <ProviderActivationStage
+    provider={wizardProvider}
+    activated
+    {busy}
+    onTest={testWizardDraftForActivation}
+    onActivate={activateWizardProvider}
+  />
 {/if}
 
 <style>
@@ -613,15 +476,8 @@
     font-weight: 750;
     letter-spacing: -0.025em;
   }
-  .audit-note,
   .stage > p {
     color: var(--foreground-muted);
-  }
-  .form-actions {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.65rem;
-    margin-top: 1.35rem;
   }
   .success-banner {
     margin: 1rem 0;
@@ -630,10 +486,6 @@
     border-radius: 0.375rem;
     background: var(--success-soft);
     color: var(--success);
-  }
-  .success-line {
-    color: var(--success) !important;
-    font-weight: 700;
   }
   dl {
     display: grid;
@@ -653,73 +505,6 @@
   dd {
     margin: 0.15rem 0 0;
     font-weight: 700;
-  }
-  .complete-panel {
-    text-align: center;
-  }
-  .complete-mark {
-    display: grid;
-    width: 3rem;
-    height: 3rem;
-    place-items: center;
-    margin: 0 auto 1rem;
-    border-radius: 50%;
-    background: var(--success-soft);
-    color: var(--success);
-    font-size: 1.4rem;
-    font-weight: 800;
-  }
-  .complete-panel .form-actions {
-    justify-content: center;
-  }
-  .certification-action {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 0.6rem;
-    margin-top: 0.75rem;
-    padding-top: 0.75rem;
-    border-top: 1px solid var(--border);
-    color: var(--foreground-muted);
-    font-size: 0.75rem;
-  }
-  .activation-checklist {
-    display: grid;
-    gap: 0.4rem;
-    margin: 1rem 0 0;
-    padding: 0;
-    list-style: none;
-    color: var(--foreground-muted);
-    font-size: 0.8rem;
-  }
-  .activation-checklist li {
-    min-height: 1.5rem;
-  }
-  .activation-checklist li.complete {
-    color: var(--success);
-    font-weight: 700;
-  }
-  .manual-fallback {
-    margin-top: 1rem;
-    padding: 0.75rem;
-    border: 1px solid var(--border);
-    border-radius: 0.375rem;
-  }
-  .manual-fallback summary {
-    min-height: 2.75rem;
-    font-weight: 720;
-  }
-  .manual-fallback p {
-    color: var(--foreground-muted);
-    font-size: 0.78rem;
-  }
-  .manual-fallback textarea {
-    min-height: 5rem;
-  }
-  code {
-    font:
-      0.75rem 'JetBrains Mono Variable',
-      monospace;
   }
   @media (max-width: 42rem) {
     .steps {
