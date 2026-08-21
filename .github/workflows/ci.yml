@@ -100,6 +100,8 @@ jobs:
           sudo apt-get install --yes --no-install-recommends ripgrep
       - name: Enforce crate boundaries
         run: ./scripts/check-boundaries.sh
+      - name: Enforce production source-file size
+        run: make source-size
       - name: Enforce typed storage access
         run: ./scripts/check-storage-sqlx.sh
       - name: Check Rust formatting
