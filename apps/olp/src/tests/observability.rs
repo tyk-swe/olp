@@ -19,7 +19,7 @@ fn replicated_worker_metrics_declare_types_and_render_durable_values() {
         },
     };
 
-    use crate::observability::append_async_worker_metrics;
+    use crate::observability::metrics::append_async_worker_metrics;
 
     let now = chrono::DateTime::parse_from_rfc3339("2026-08-08T12:00:00Z")
         .unwrap()

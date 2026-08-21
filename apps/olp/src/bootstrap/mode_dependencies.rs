@@ -25,8 +25,10 @@ use crate::{
     bootstrap::state::ApiMode,
     bootstrap::state::ProcessComposition,
     bootstrap::state::TransportRegistry,
-    observability::HealthResponse,
-    observability::{ObservabilityCache, cached_readiness_from_snapshot},
+    observability::{
+        cache::ObservabilityCache,
+        readiness::{HealthResponse, cached_readiness_from_snapshot},
+    },
     public_http::problem::Problem,
     public_http::proxy::TrustedProxyCidr,
     public_http::public_origin::PublicOrigin,

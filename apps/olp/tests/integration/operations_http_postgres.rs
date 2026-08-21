@@ -9,7 +9,7 @@ use chrono::{Duration, SecondsFormat, Timelike, Utc};
 use http_body_util::BodyExt as _;
 use olp::{
     bootstrap::state::{ApiMode, ProcessComposition},
-    observability::{refresh_observability_cache, router as observability_router},
+    observability::{cache::refresh_observability_cache, router as observability_router},
     public_http::router::for_state,
 };
 use olp_db::{

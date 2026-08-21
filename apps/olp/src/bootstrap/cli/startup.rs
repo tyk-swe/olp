@@ -250,7 +250,7 @@ pub(super) async fn serve(
             background_shutdown_receiver.clone(),
         )));
     }
-    background_tasks.push(crate::observability::spawn_observability_cache(
+    background_tasks.push(crate::observability::cache::spawn_observability_cache(
         observability_state.clone(),
         background_shutdown_receiver.clone(),
     ));

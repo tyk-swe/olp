@@ -44,7 +44,8 @@ use super::{
     bootstrap::state::{ApiMode, MAX_JSON_BODY_BYTES, ProcessComposition},
     gateway::endpoint_policy::classification::{InferenceEndpoint, TokenEstimate},
     observability::{
-        OBSERVABILITY_SNAPSHOT_STALE_AFTER, prometheus_label, refresh_observability_cache,
+        cache::{OBSERVABILITY_SNAPSHOT_STALE_AFTER, refresh_observability_cache},
+        metrics::prometheus_label,
         router as observability_router,
     },
     public_http::problem::Problem,

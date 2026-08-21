@@ -21,7 +21,7 @@ use tokio::sync::RwLock as AsyncRwLock;
 use zeroize::Zeroizing;
 
 use crate::{
-    observability::ObservabilityCache,
+    observability::cache::ObservabilityCache,
     public_http::proxy::TrustedProxyCidr,
     public_http::public_origin::PublicOrigin,
     public_http::request_admission::{self, multipart::MultipartAdmissionState},

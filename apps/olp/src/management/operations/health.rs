@@ -14,7 +14,7 @@ use super::helpers::{map_operations, page_limit};
 use crate::{
     bootstrap::mode_dependencies::ManagementState,
     management::{permissions::require_permission, sessions::require_read_session},
-    observability::HealthResponse,
+    observability::readiness::HealthResponse,
     public_http::problem::Problem,
 };
 

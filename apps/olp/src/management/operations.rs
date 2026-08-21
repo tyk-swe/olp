@@ -2,7 +2,7 @@ use axum::{Router, routing::get};
 use utoipa::OpenApi;
 
 use crate::{
-    bootstrap::mode_dependencies::ManagementState, observability::HealthResponse,
+    bootstrap::mode_dependencies::ManagementState, observability::readiness::HealthResponse,
     public_http::problem::Problem,
 };
 
