@@ -1,6 +1,7 @@
 pub mod delivery_health;
 pub mod ingestion;
 pub mod reconciliation;
+mod validation;
 pub mod writer;
 
 pub(crate) const REQUEST_METADATA_EVENT_REPLAY_HORIZON_DAYS: i32 = 7;
