@@ -4,7 +4,7 @@ use chrono::{Duration, Utc};
 use olp_db::{error::Error, request_metadata::delivery_health::ConsumerState};
 
 #[tokio::test]
-#[ignore = "requires an empty PostgreSQL 18 database in OLP_TEST_DATABASE_URL"]
+#[ignore = "requires OLP_TEST_DATABASE_ADMIN_URL and OLP_TEST_DATABASE_URL_PREFIX"]
 async fn request_metadata_consumer_backlog_is_durable_and_strictly_validated() {
     let db =
         olp_db::test_support::TestDb::create_migrated("request_metadata_consumer_health").await;
@@ -89,7 +89,7 @@ async fn request_metadata_consumer_backlog_is_durable_and_strictly_validated() {
 }
 
 #[tokio::test]
-#[ignore = "requires an empty PostgreSQL 18 database in OLP_TEST_DATABASE_URL"]
+#[ignore = "requires OLP_TEST_DATABASE_ADMIN_URL and OLP_TEST_DATABASE_URL_PREFIX"]
 async fn request_metadata_consumer_health_preserves_newer_sample() {
     let db = olp_db::test_support::TestDb::create_migrated("request_metadata_health_sample").await;
     let store = db.store(3).await;
@@ -146,7 +146,7 @@ async fn request_metadata_consumer_health_preserves_newer_sample() {
 }
 
 #[tokio::test]
-#[ignore = "requires an empty PostgreSQL 18 database in OLP_TEST_DATABASE_URL"]
+#[ignore = "requires OLP_TEST_DATABASE_ADMIN_URL and OLP_TEST_DATABASE_URL_PREFIX"]
 async fn future_skewed_consumer_sample_does_not_block_current_sample() {
     let db = olp_db::test_support::TestDb::create_migrated("request_metadata_future_sample").await;
     let store = db.store(3).await;

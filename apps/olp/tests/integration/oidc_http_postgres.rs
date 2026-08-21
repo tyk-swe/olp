@@ -71,7 +71,7 @@ struct MockIdp {
 }
 
 #[tokio::test]
-#[ignore = "requires an empty PostgreSQL 18 database in OLP_TEST_DATABASE_URL"]
+#[ignore = "requires OLP_TEST_DATABASE_ADMIN_URL and OLP_TEST_DATABASE_URL_PREFIX"]
 async fn oidc_code_flow_is_bound_validated_mapped_linked_and_session_backed() {
     let db = olp_db::test_support::TestDb::create_migrated("oidc_http").await;
     let store = db.store(8).await;

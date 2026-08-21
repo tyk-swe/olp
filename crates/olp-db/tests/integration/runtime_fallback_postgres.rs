@@ -6,7 +6,7 @@ use olp_engine::domain::{auth::ApiKeyScope, routing::snapshot::Snapshot};
 use uuid::Uuid;
 
 #[tokio::test]
-#[ignore = "requires an empty PostgreSQL 18 database in OLP_TEST_DATABASE_URL"]
+#[ignore = "requires OLP_TEST_DATABASE_ADMIN_URL and OLP_TEST_DATABASE_URL_PREFIX"]
 async fn fallback_uses_current_keys_and_release_exact_provider_transport_config() {
     let db = olp_db::test_support::TestDb::create_migrated("runtime_fallback").await;
     let store = db.store(5).await;

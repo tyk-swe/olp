@@ -9,7 +9,7 @@ use sqlx::{PgPool, Row};
 use uuid::Uuid;
 
 #[tokio::test]
-#[ignore = "requires an empty PostgreSQL 18 database in OLP_TEST_DATABASE_URL"]
+#[ignore = "requires OLP_TEST_DATABASE_ADMIN_URL and OLP_TEST_DATABASE_URL_PREFIX"]
 async fn activation_revalidates_current_revisions_and_preserves_live_media_targets() {
     let db = olp_db::test_support::TestDb::create_migrated("route_activation_revalidation").await;
     let store = db.store(5).await;

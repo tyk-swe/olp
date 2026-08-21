@@ -12,7 +12,7 @@ use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 #[tokio::test]
-#[ignore = "requires an empty PostgreSQL 18 database in OLP_TEST_DATABASE_URL"]
+#[ignore = "requires OLP_TEST_DATABASE_ADMIN_URL and OLP_TEST_DATABASE_URL_PREFIX"]
 async fn oidc_flow_creation_is_bound_to_the_exact_enabled_configuration() {
     let db = olp_db::test_support::TestDb::create_migrated("oidc_flow").await;
     let store = db.store(5).await;

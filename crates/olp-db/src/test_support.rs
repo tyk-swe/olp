@@ -26,7 +26,7 @@ pub struct TestDb {
 }
 
 impl TestDb {
-    /// Creates `olp_test_{label}_{uuid}` and applies every migration.
+    /// Creates `olp_test_{run}_{label}_{uuid}` and applies every migration.
     pub async fn create_migrated(label: &str) -> Self {
         let db = Self::create_empty(label).await;
         let mut connection = db.connect().await;

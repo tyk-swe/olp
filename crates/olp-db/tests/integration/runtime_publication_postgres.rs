@@ -14,7 +14,7 @@ use uuid::Uuid;
 const PUBLICATION_LOCK_ID: i64 = 0x4f4c_505f_5254;
 
 #[tokio::test]
-#[ignore = "requires an empty PostgreSQL 18 database in OLP_TEST_DATABASE_URL"]
+#[ignore = "requires OLP_TEST_DATABASE_ADMIN_URL and OLP_TEST_DATABASE_URL_PREFIX"]
 async fn replayable_key_creation_takes_its_snapshot_after_the_publication_lock() {
     let db = olp_db::test_support::TestDb::create_migrated("runtime_publication").await;
     let store = db.store(5).await;

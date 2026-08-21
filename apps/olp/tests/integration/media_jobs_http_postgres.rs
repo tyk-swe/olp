@@ -158,7 +158,7 @@ fn video_job(id: &str, status: VideoStatus) -> VideoJobResult {
 }
 
 #[tokio::test]
-#[ignore = "requires an empty PostgreSQL 18 database in OLP_TEST_DATABASE_URL"]
+#[ignore = "requires OLP_TEST_DATABASE_ADMIN_URL and OLP_TEST_DATABASE_URL_PREFIX"]
 async fn media_job_management_views_are_session_authorized_and_metadata_only() {
     let db = olp_db::test_support::TestDb::create_migrated("media_jobs_http").await;
     let store = db.store(5).await;

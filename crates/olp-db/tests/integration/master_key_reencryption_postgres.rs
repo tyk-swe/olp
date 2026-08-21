@@ -11,7 +11,7 @@ use sqlx::Row;
 use uuid::Uuid;
 
 #[tokio::test]
-#[ignore = "requires an empty PostgreSQL 18 database in OLP_TEST_DATABASE_URL"]
+#[ignore = "requires OLP_TEST_DATABASE_ADMIN_URL and OLP_TEST_DATABASE_URL_PREFIX"]
 async fn master_key_reencryption_is_authenticated_resumable_and_retirement_safe() {
     let db = olp_db::test_support::TestDb::create_migrated("master_key_reencryption").await;
     let store = db.store(5).await;

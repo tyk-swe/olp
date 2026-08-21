@@ -2,7 +2,7 @@ use olp_db::MIGRATOR;
 use uuid::Uuid;
 
 #[tokio::test]
-#[ignore = "requires an empty PostgreSQL 18 database in OLP_TEST_DATABASE_URL"]
+#[ignore = "requires OLP_TEST_DATABASE_ADMIN_URL and OLP_TEST_DATABASE_URL_PREFIX"]
 async fn request_metadata_schema_rename_preserves_legacy_rows() {
     let db = olp_db::test_support::TestDb::create_empty("request_metadata_naming_upgrade").await;
     let store = db.store(3).await;

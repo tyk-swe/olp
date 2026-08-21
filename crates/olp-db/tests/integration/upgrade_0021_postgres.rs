@@ -3,7 +3,7 @@ use olp_db::MIGRATOR;
 use uuid::Uuid;
 
 #[tokio::test]
-#[ignore = "requires an empty PostgreSQL 18 database in OLP_TEST_DATABASE_URL"]
+#[ignore = "requires OLP_TEST_DATABASE_ADMIN_URL and OLP_TEST_DATABASE_URL_PREFIX"]
 async fn schema_0021_data_upgrades_without_bulk_receipts_and_new_writers_are_fenced() {
     let db = olp_db::test_support::TestDb::create_empty("upgrade_0021").await;
     let store = db.store(3).await;

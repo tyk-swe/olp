@@ -19,7 +19,7 @@ use serde_json::{Value, json};
 use sqlx::Executor as _;
 
 #[tokio::test]
-#[ignore = "requires an empty PostgreSQL 18 database in OLP_TEST_DATABASE_URL"]
+#[ignore = "requires OLP_TEST_DATABASE_ADMIN_URL and OLP_TEST_DATABASE_URL_PREFIX"]
 async fn encrypted_idempotency_replays_one_time_secrets_after_a_lost_response() {
     let db = olp_db::test_support::TestDb::create_migrated("idempotency_replay").await;
     let store = db.store(8).await;

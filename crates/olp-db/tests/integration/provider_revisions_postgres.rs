@@ -16,7 +16,7 @@ use olp_engine::domain::{
 use uuid::Uuid;
 
 #[tokio::test]
-#[ignore = "requires an empty PostgreSQL 18 database in OLP_TEST_DATABASE_URL"]
+#[ignore = "requires OLP_TEST_DATABASE_ADMIN_URL and OLP_TEST_DATABASE_URL_PREFIX"]
 async fn staged_provider_changes_do_not_leak_until_reactivation() {
     let db = olp_db::test_support::TestDb::create_migrated("provider_revisions").await;
     let store = db.store(5).await;

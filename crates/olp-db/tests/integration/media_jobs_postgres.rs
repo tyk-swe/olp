@@ -8,7 +8,7 @@ use olp_db::{
 use uuid::Uuid;
 
 #[tokio::test]
-#[ignore = "requires an empty PostgreSQL 18 database in OLP_TEST_DATABASE_URL"]
+#[ignore = "requires OLP_TEST_DATABASE_ADMIN_URL and OLP_TEST_DATABASE_URL_PREFIX"]
 async fn media_job_lifecycle_is_paginated_metadata_only_and_transition_checked() {
     let db = olp_db::test_support::TestDb::create_migrated("media_jobs").await;
     let store = db.store(5).await;
