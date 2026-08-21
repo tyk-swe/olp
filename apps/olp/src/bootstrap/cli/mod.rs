@@ -1,14 +1,17 @@
-#[cfg(feature = "test-util")]
-pub mod commands;
-#[cfg(not(feature = "test-util"))]
-pub(crate) mod commands;
 mod config;
+mod doctor;
 mod health_probe;
 mod lifecycle;
+mod master_key;
+mod migrate;
 mod runtime_activation;
 mod service_supervisors;
 mod startup;
 pub(crate) mod validation;
+#[cfg(feature = "test-util")]
+pub mod worker;
+#[cfg(not(feature = "test-util"))]
+pub(crate) mod worker;
 
 use std::{error::Error, time::Duration};
 
@@ -17,10 +20,14 @@ use clap::Parser;
 use tracing_subscriber::EnvFilter;
 
 use self::{
-    commands::{doctor, internal_pre_stop, master_key_command, migrate, run_worker},
     config::{Cli, Command},
+    doctor::doctor,
     health_probe::health_probe,
+    lifecycle::internal_pre_stop,
+    master_key::master_key_command,
+    migrate::migrate,
     startup::serve,
+    worker::run_worker,
 };
 
 pub(crate) type AppError = Box<dyn Error + Send + Sync>;

@@ -18,10 +18,6 @@ use crate::{
 
 use super::{
     AppResult, BACKGROUND_SHUTDOWN_TIMEOUT,
-    commands::{
-        maintenance_supervisor, outbox_supervisor, request_metadata_consumer_name,
-        request_metadata_consumer_supervisor, request_metadata_epoch_supervisor,
-    },
     config::ServeArgs,
     lifecycle::{
         coordinate_shutdown, resolve_request_metadata_writer_error, shutdown_reason,
@@ -36,6 +32,10 @@ use super::{
     validation::{
         check_secret_permissions, connect_store, load_auth_hmac_key, load_bootstrap_token_digest,
         load_master_key,
+    },
+    worker::{
+        maintenance_supervisor, outbox_supervisor, request_metadata_consumer_name,
+        request_metadata_consumer_supervisor, request_metadata_epoch_supervisor,
     },
 };
 

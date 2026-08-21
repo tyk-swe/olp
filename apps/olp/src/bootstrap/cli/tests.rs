@@ -16,18 +16,16 @@ use tempfile::NamedTempFile;
 use tokio::{sync::watch, task::JoinSet};
 
 use super::{
-    commands::{
-        legacy_request_metadata_stream_claim_token, request_metadata_consumer_name_from,
-        stop_worker_tasks,
-    },
     config::{Cli, Command, MasterKeyAction, MasterKeyArgs},
     lifecycle::{
         coordinate_shutdown, resolve_request_metadata_writer_error, shutdown_reason,
         stop_background_tasks, wait_for_shutdown,
     },
+    migrate::legacy_request_metadata_stream_claim_token,
     validation::{
         check_secret_permissions, ensure_keyring_covers_references, load_bootstrap_token_digest,
     },
+    worker::{request_metadata_consumer_name_from, stop_worker_tasks},
 };
 
 #[test]

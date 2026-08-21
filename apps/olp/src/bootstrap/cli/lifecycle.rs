@@ -7,7 +7,12 @@ use tokio::{
 };
 use tracing::{error, warn};
 
-use super::{AppError, AppResult};
+use super::{AppError, AppResult, config::InternalPreStopArgs};
+
+pub(super) async fn internal_pre_stop(args: InternalPreStopArgs) -> AppResult<()> {
+    tokio::time::sleep(Duration::from_secs(args.seconds)).await;
+    Ok(())
+}
 
 pub(super) async fn shutdown_reason<Signal>(
     signal: Signal,

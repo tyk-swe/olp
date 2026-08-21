@@ -5,7 +5,7 @@ use std::{
 };
 
 use chrono::{TimeDelta, Utc};
-use olp::bootstrap::cli::commands::{
+use olp::bootstrap::cli::worker::{
     OUTBOX_BATCH_SIZE, OutboxBatchOutcome, RuntimeHintPublication, publish_outbox_batch,
 };
 use olp_db::{
