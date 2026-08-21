@@ -22,10 +22,7 @@ pub(crate) mod protocol_error;
 mod responses;
 mod videos;
 
-use execution::{
-    authorize_model_access, execute_event_operation_for_surface, execute_routed_result_for_surface,
-    release_model_limits, reserve_model_limits,
-};
+use execution::{authorize_model_access, release_model_limits, reserve_model_limits};
 pub fn router() -> Router<GatewayState> {
     endpoint_policy::router()
 }

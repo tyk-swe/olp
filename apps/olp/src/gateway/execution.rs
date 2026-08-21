@@ -54,16 +54,7 @@ pub(super) fn incompatible_result(operation: &'static str) -> InferenceError {
     )
 }
 
-pub(super) async fn execute_event_operation(
-    state: &GatewayState,
-    principal: &Principal,
-    operation: Operation,
-    mode: TransportMode,
-) -> Result<RoutedEvents, InferenceError> {
-    execute_event_operation_for_surface(state, principal, operation, mode).await
-}
-
-pub(crate) async fn execute_event_operation_for_surface(
+pub(crate) async fn execute_event_operation(
     state: &GatewayState,
     principal: &Principal,
     operation: Operation,
@@ -77,7 +68,7 @@ pub(crate) async fn execute_event_operation_for_surface(
 }
 
 #[cfg(test)]
-pub(super) async fn execute_event_operation_for_surface_inner(
+pub(super) async fn execute_event_operation_without_admission(
     state: &GatewayState,
     principal: &Principal,
     operation: Operation,
@@ -105,16 +96,6 @@ pub(super) async fn execute_routed_result(
     mode: TransportMode,
     required_target: Option<RequiredTarget>,
 ) -> Result<RoutedUnaryResult, InferenceError> {
-    execute_routed_result_for_surface(state, principal, operation, mode, required_target).await
-}
-
-pub(crate) async fn execute_routed_result_for_surface(
-    state: &GatewayState,
-    principal: &Principal,
-    operation: Operation,
-    mode: TransportMode,
-    required_target: Option<RequiredTarget>,
-) -> Result<RoutedUnaryResult, InferenceError> {
     state
         .inference()
         .execute_result(
@@ -129,7 +110,7 @@ pub(crate) async fn execute_routed_result_for_surface(
 }
 
 #[cfg(test)]
-pub(super) async fn execute_routed_result_for_surface_inner(
+pub(super) async fn execute_routed_result_without_admission(
     state: &GatewayState,
     principal: &Principal,
     operation: Operation,

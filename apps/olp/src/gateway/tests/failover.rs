@@ -329,7 +329,7 @@ async fn direct_executor_reserves_hard_limits_before_route_selection() {
     .unwrap();
     let operation = decode_chat_completion(request).unwrap();
     let principal = test_principal(&state, Surface::OpenAi);
-    let error = match execute_event_operation_for_surface_inner(
+    let error = match execute_event_operation_without_admission(
         &state,
         &principal,
         operation,
@@ -366,7 +366,7 @@ async fn required_target_unavailability_is_normalized_by_shared_execution_kernel
     let operation = decode_response_input_tokens(request).unwrap();
     let principal = test_principal(&state, Surface::OpenAi);
 
-    let error = match execute_routed_result_for_surface_inner(
+    let error = match execute_routed_result_without_admission(
         &state,
         &principal,
         operation,

@@ -64,7 +64,8 @@ use super::*;
 use super::{
     error::InferenceError,
     execution::{
-        execute_event_operation_for_surface_inner, execute_routed_result_for_surface_inner,
+        execute_event_operation, execute_event_operation_without_admission,
+        execute_routed_result_without_admission,
     },
     multipart::MultipartFormData,
 };

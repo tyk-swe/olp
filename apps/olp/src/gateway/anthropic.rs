@@ -36,7 +36,7 @@ use crate::{
 use super::{
     authorize_model_access,
     error::InferenceError,
-    execute_event_operation_for_surface, execute_routed_result_for_surface,
+    execution::{execute_event_operation, execute_routed_result},
     native_models::{after_cursor_start, before_cursor_end, visible_route, visible_routes},
     protocol_error::{ProtocolError, anthropic_error_kind, valid_json},
     release_model_limits, reserve_model_limits,
@@ -67,7 +67,7 @@ pub(super) async fn messages(
     } else {
         TransportMode::Unary
     };
-    let execution = execute_event_operation_for_surface(&state, &principal, operation, mode)
+    let execution = execute_event_operation(&state, &principal, operation, mode)
         .await
         .map_err(ProtocolError::anthropic)?;
     if streaming {
@@ -120,15 +120,10 @@ pub(super) async fn count_tokens(
             ));
         }
     };
-    let mut executed = execute_routed_result_for_surface(
-        &state,
-        &principal,
-        operation,
-        TransportMode::Unary,
-        None,
-    )
-    .await
-    .map_err(ProtocolError::anthropic)?;
+    let mut executed =
+        execute_routed_result(&state, &principal, operation, TransportMode::Unary, None)
+            .await
+            .map_err(ProtocolError::anthropic)?;
     let CanonicalResult::TokenCount(result) = executed.result.as_ref() else {
         executed.mark_provider_protocol_failure();
         return Err(ProtocolError::upstream(

@@ -197,13 +197,7 @@ async fn dropping_blocked_upstream_request_cleans_owned_media_handles() {
     let principal = test_principal(&state, Surface::OpenAi);
     let state_for_task = state.clone();
     let task = tokio::spawn(async move {
-        execute_event_operation_for_surface(
-            &state_for_task,
-            &principal,
-            operation,
-            TransportMode::Unary,
-        )
-        .await
+        execute_event_operation(&state_for_task, &principal, operation, TransportMode::Unary).await
     });
     tokio::time::sleep(Duration::from_millis(20)).await;
     task.abort();
@@ -457,7 +451,7 @@ async fn dropping_completed_unary_result_records_client_cancellation() {
     .unwrap();
     let operation = decode_response_input_tokens(request).unwrap();
     let principal = test_principal(&state, Surface::OpenAi);
-    let result = execute_routed_result_for_surface_inner(
+    let result = execute_routed_result_without_admission(
         &state,
         &principal,
         operation,
