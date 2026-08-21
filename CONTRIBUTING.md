@@ -18,7 +18,7 @@ The normal local gate needs `cargo-nextest`:
 ```sh
 cargo install --locked cargo-nextest@0.9.140
 make console-install       # first run only
-make check-local            # make check is an alias
+make check
 ```
 
 Additional targets need the matching tools pinned by CI: `cargo-llvm-cov`
@@ -84,7 +84,7 @@ Do not hand-edit generated artifacts: use `make openapi` for
 Run the broad gate before review:
 
 ```sh
-make check-local
+make check
 ```
 
 It runs boundary and SQLx checks, Rust formatting, locked Clippy, the locked
