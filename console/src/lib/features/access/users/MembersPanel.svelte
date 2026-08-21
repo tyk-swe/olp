@@ -12,8 +12,8 @@
     cursorPaginationProps,
     emptyCursorHistory
   } from '$lib/api/pagination';
+  import { FIXED_ROLES } from '$lib/auth/authorization';
   import CursorPagination from '$lib/components/CursorPagination.svelte';
-  import { FIXED_ROLES } from '../shared';
 
   const queryClient = useQueryClient();
   const pagination = $state(emptyCursorHistory());

@@ -1,4 +1,4 @@
-import { FIXED_ROLES } from '../shared';
+import { isFixedRole } from '$lib/auth/authorization';
 
 export function parseRoleMappings(value: string) {
   return value
@@ -11,7 +11,7 @@ export function parseRoleMappings(value: string) {
         throw new Error(`Mapping “${line}” must use claim-value=role.`);
       const claim_value = line.slice(0, separator).trim();
       const role = line.slice(separator + 1).trim();
-      if (!FIXED_ROLES.some((fixedRole) => fixedRole === role)) {
+      if (!isFixedRole(role)) {
         throw new Error(`Mapping “${line}” has an invalid fixed role.`);
       }
       return { claim_value, role };

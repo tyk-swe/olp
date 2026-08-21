@@ -1,5 +1,10 @@
-const FIXED_ROLE_VALUES = ['owner', 'operator', 'developer', 'viewer'] as const;
-export type FixedRole = (typeof FIXED_ROLE_VALUES)[number];
+export const FIXED_ROLES = [
+  'owner',
+  'operator',
+  'developer',
+  'viewer'
+] as const;
+export type FixedRole = (typeof FIXED_ROLES)[number];
 
 const CAPABILITY_VALUES = [
   'configuration.read',
@@ -18,7 +23,7 @@ const CAPABILITY_VALUES = [
 ] as const;
 export type Capability = (typeof CAPABILITY_VALUES)[number];
 
-const FIXED_ROLES = new Set<string>(FIXED_ROLE_VALUES);
+const FIXED_ROLE_SET = new Set<string>(FIXED_ROLES);
 const ALL_CAPABILITIES = new Set<Capability>(CAPABILITY_VALUES);
 const ROLE_CAPABILITIES: Record<FixedRole, ReadonlySet<Capability>> = {
   owner: ALL_CAPABILITIES,
@@ -52,7 +57,7 @@ const ROLE_CAPABILITIES: Record<FixedRole, ReadonlySet<Capability>> = {
 };
 
 export function isFixedRole(value: unknown): value is FixedRole {
-  return typeof value === 'string' && FIXED_ROLES.has(value);
+  return typeof value === 'string' && FIXED_ROLE_SET.has(value);
 }
 
 export function can(

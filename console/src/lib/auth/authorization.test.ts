@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  FIXED_ROLES,
   can,
   isFixedRole,
   type Capability,
@@ -55,6 +56,10 @@ const EXPECTED_CAPABILITIES: Record<FixedRole, readonly Capability[]> = {
 };
 
 describe('fixed-role authorization', () => {
+  it('exposes the canonical fixed-role inventory', () => {
+    expect(FIXED_ROLES).toEqual(['owner', 'operator', 'developer', 'viewer']);
+  });
+
   it.each(
     Object.entries(EXPECTED_CAPABILITIES) as [
       FixedRole,

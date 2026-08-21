@@ -13,6 +13,7 @@
     listOidcIdentities,
     reauthenticateWithPassword
   } from '$lib/api/operations';
+  import { FIXED_ROLES } from '$lib/auth/authorization';
   import ConflictNotice from '$lib/components/ConflictNotice.svelte';
   import {
     beginReload,
@@ -24,7 +25,6 @@
     reconcile
   } from '$lib/forms/concurrentEdit';
   import { errorMessage as accessErrorMessage } from '$lib/api/http';
-  import { FIXED_ROLES } from '../shared';
   import { parseRoleMappings } from './mappings';
 
   const queryClient = useQueryClient();

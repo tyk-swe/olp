@@ -13,9 +13,9 @@
     cursorPaginationProps,
     emptyCursorHistory
   } from '$lib/api/pagination';
+  import { FIXED_ROLES } from '$lib/auth/authorization';
   import CursorPagination from '$lib/components/CursorPagination.svelte';
   import SecretDialog from '$lib/components/SecretDialog.svelte';
-  import { FIXED_ROLES } from '../shared';
 
   const pagination = $state(emptyCursorHistory());
   let busy = $state('');
