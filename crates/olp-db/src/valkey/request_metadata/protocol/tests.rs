@@ -1,3 +1,5 @@
+use redis::Value;
+
 use super::*;
 
 fn bulk(value: &str) -> Value {
