@@ -65,12 +65,8 @@ jobs:
           failure-threshold: warning
       - name: Shellcheck every tracked shell script
         run: make shellcheck
-      - name: Verify backup manifest contract
-        run: scripts/test-backup-manifest.sh
-      - name: Verify repository validation helper contract
-        run: scripts/test-repository-validation.sh
-      - name: Verify request metadata loss recorder contract
-        run: scripts/test-record-request-metadata-stream-loss.sh
+      - name: Run script self-tests
+        run: make script-selftest
       - name: Require consistent release metadata
         run: scripts/check-release-version.sh
       - name: Require immutable supply-chain references
