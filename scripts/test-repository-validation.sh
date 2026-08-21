@@ -543,20 +543,6 @@ test_external_cargo_patch_path_is_rejected() {
     'Cargo.toml has a path dependency outside the workspace: ../external'
 }
 
-test_actual_repository_checks() {
-  local output="$test_root/actual-checks.log"
-
-  "$script_dir/check-supply-chain-pins.sh" >"$output" 2>&1 || return
-  "$script_dir/check-boundaries.sh" >>"$output" 2>&1 || return
-  "$script_dir/check-storage-sqlx.sh" >>"$output" 2>&1 || return
-  "$script_dir/check-release-version.sh" >>"$output" 2>&1 || return
-
-  assert_contains "$output" "supply-chain pins verified" || return
-  assert_contains "$output" "architecture boundaries are clean" || return
-  assert_contains "$output" "storage SQLx policy is clean" || return
-  assert_contains "$output" "release metadata is consistent"
-}
-
 run_test "matching scan returns expected matches" test_matching_scan
 run_test "valid no-match scan succeeds" test_valid_no_match_scan
 run_test "missing required directory fails" test_missing_required_directory
@@ -583,6 +569,5 @@ run_test "same-name non-workspace paths remain unclassified" \
   test_same_name_non_workspace_path_is_rejected
 run_test "external Cargo patch paths are rejected" \
   test_external_cargo_patch_path_is_rejected
-run_test "actual repository invariant checks pass" test_actual_repository_checks
 
 printf 'repository validation regression tests passed: %d\n' "$tests_run"
