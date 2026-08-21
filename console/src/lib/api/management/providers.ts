@@ -33,9 +33,7 @@ export type ProviderRevisionDiff = Schemas['ProviderRevisionDiffResponse'];
 export async function listProviders(
   signal?: AbortSignal
 ): Promise<ProviderSummary[]> {
-  return collectCursorPages((cursor) =>
-    listProviderPage(cursor, signal)
-  );
+  return collectCursorPages((cursor) => listProviderPage(cursor, signal));
 }
 
 export async function getProviderCapabilityOptions(
@@ -60,8 +58,7 @@ export async function listProviderKinds(
   signal?: AbortSignal
 ): Promise<ProviderKindCapability[]> {
   const response = await apiClient.GET('/api/v1/provider-kinds', { signal });
-  return result(response.data, response.error, response.response)
-    .items;
+  return result(response.data, response.error, response.response).items;
 }
 
 export async function listProviderPage(
@@ -72,11 +69,7 @@ export async function listProviderPage(
     params: { query: { limit: 50, cursor } },
     signal
   });
-  const page = result(
-    response.data,
-    response.error,
-    response.response
-  );
+  const page = result(response.data, response.error, response.response);
   return { items: page.items, nextCursor: page.next_cursor ?? null };
 }
 
@@ -95,11 +88,7 @@ export async function listProviderModelPage(
       signal
     }
   );
-  const page = result(
-    response.data,
-    response.error,
-    response.response
-  );
+  const page = result(response.data, response.error, response.response);
   return { items: page.items, nextCursor: page.next_cursor ?? null };
 }
 
@@ -112,11 +101,7 @@ export async function listProviderModelInventoryPage(
     params: { query: { limit: 50, cursor, enabled } },
     signal
   });
-  const page = result(
-    response.data,
-    response.error,
-    response.response
-  );
+  const page = result(response.data, response.error, response.response);
   return { items: page.items, nextCursor: page.next_cursor ?? null };
 }
 
@@ -137,11 +122,7 @@ export async function getProvider(
     params: { path: { provider_id: id } },
     signal
   });
-  return result(
-    response.data,
-    response.error,
-    response.response
-  ) as Provider;
+  return result(response.data, response.error, response.response) as Provider;
 }
 
 export async function createProvider(
@@ -151,8 +132,7 @@ export async function createProvider(
     params: { header: { 'Idempotency-Key': crypto.randomUUID() } },
     body: input
   });
-  return result(response.data, response.error, response.response)
-    .id;
+  return result(response.data, response.error, response.response).id;
 }
 
 export async function updateProvider(
@@ -164,11 +144,7 @@ export async function updateProvider(
     params: { path: { provider_id: id }, header: { 'If-Match': etag } },
     body: input
   });
-  return result(
-    response.data,
-    response.error,
-    response.response
-  ) as Provider;
+  return result(response.data, response.error, response.response) as Provider;
 }
 
 export async function probeProvider(
@@ -199,11 +175,7 @@ export async function discoverProviderModels(
       body: { models: [] }
     }
   );
-  return result(
-    response.data,
-    response.error,
-    response.response
-  ) as Provider;
+  return result(response.data, response.error, response.response) as Provider;
 }
 
 /** Manual inventory fallback for compatible endpoints without a model-list API. */
@@ -228,11 +200,7 @@ export async function declareProviderModels(
       }
     }
   );
-  return result(
-    response.data,
-    response.error,
-    response.response
-  ) as Provider;
+  return result(response.data, response.error, response.response) as Provider;
 }
 
 export async function setProviderModel(
@@ -251,11 +219,7 @@ export async function setProviderModel(
       body: { enabled, capabilities }
     }
   );
-  return result(
-    response.data,
-    response.error,
-    response.response
-  ) as Provider;
+  return result(response.data, response.error, response.response) as Provider;
 }
 
 export async function certifyProviderModel(
@@ -306,11 +270,7 @@ export async function listProviderRevisionPage(
       signal
     }
   );
-  const page = result(
-    response.data,
-    response.error,
-    response.response
-  );
+  const page = result(response.data, response.error, response.response);
   return { items: page.items, nextCursor: page.next_cursor ?? null };
 }
 
@@ -371,11 +331,7 @@ async function listProviderCredentialPage(
       signal
     }
   );
-  const page = result(
-    response.data,
-    response.error,
-    response.response
-  );
+  const page = result(response.data, response.error, response.response);
   return { items: page.items, nextCursor: page.next_cursor ?? null };
 }
 
