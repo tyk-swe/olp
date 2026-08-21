@@ -183,7 +183,7 @@ async fn dropping_blocked_upstream_request_cleans_owned_media_handles() {
         "model":"default","messages":[{"role":"user","content":"hello"}]
     }))
     .unwrap();
-    let mut operation = decode_chat_completion(request).unwrap();
+    let mut operation = decode::chat_completion(request).unwrap();
     let Operation::Generation(generation) = &mut operation else {
         unreachable!()
     };

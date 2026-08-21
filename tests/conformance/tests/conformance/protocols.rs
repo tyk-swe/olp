@@ -12,7 +12,7 @@ use olp_engine::protocols::{
         dto::GenerateContentRequest,
         translate::{decode::request as decode_gemini, encode::request as encode_gemini},
     },
-    openai::chat::{CompletionRequest, decode_chat_completion, encode_chat_completion},
+    openai::chat::{CompletionRequest, decode, encode},
 };
 use serde::Deserialize;
 use serde_json::Value;
@@ -51,7 +51,7 @@ fn assert_expected(request: &GenerationRequest, expected: &ExpectedCanonical) {
 fn openai_request_fixture_translates_and_round_trips_extensions() {
     let wire: CompletionRequest = read_json("protocols/openai-chat-request.json");
     let expected: ExpectedCanonical = read_json("protocols/openai-chat-request.expected.json");
-    let request = generation(decode_chat_completion(wire).expect("OpenAI fixture must decode"));
+    let request = generation(decode::chat_completion(wire).expect("OpenAI fixture must decode"));
     assert_expected(&request, &expected);
 
     let upstream_model = expected
@@ -59,7 +59,7 @@ fn openai_request_fixture_translates_and_round_trips_extensions() {
         .as_deref()
         .expect("model is required");
     let encoded = serde_json::to_value(
-        encode_chat_completion(&request, upstream_model).expect("OpenAI fixture must encode"),
+        encode::chat_completion(&request, upstream_model).expect("OpenAI fixture must encode"),
     )
     .expect("OpenAI DTO must serialize");
     assert_eq!(encoded["model"], upstream_model);

@@ -460,7 +460,7 @@ mod tests {
             dto::GenerateContentRequest, translate::decode::request as decode_gemini_request,
         },
         openai::{
-            chat::{CompletionRequest, decode_chat_completion},
+            chat::{CompletionRequest, decode},
             responses::{
                 request::{Create, decode_response_create},
                 token_count::{
@@ -552,7 +552,7 @@ mod tests {
         }))
         .unwrap();
         let handles = admit_openai_chat(&state, &mut chat).await.unwrap();
-        let Operation::Generation(generation) = decode_chat_completion(chat).unwrap() else {
+        let Operation::Generation(generation) = decode::chat_completion(chat).unwrap() else {
             panic!("expected generation")
         };
         assert!(matches!(

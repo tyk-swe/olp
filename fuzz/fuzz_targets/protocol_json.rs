@@ -47,11 +47,11 @@ fuzz_target!(|data: &[u8]| {
     roundtrip(
         data,
         "openai::chat_completion",
-        |request| match chat::decode_chat_completion(request) {
+        |request| match chat::decode::chat_completion(request) {
             Ok(Operation::Generation(canonical)) => Some(canonical),
             _ => None,
         },
-        |canonical| chat::encode_chat_completion(canonical, UPSTREAM_MODEL),
+        |canonical| chat::encode::chat_completion(canonical, UPSTREAM_MODEL),
     );
     roundtrip(
         data,

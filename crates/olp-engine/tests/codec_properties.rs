@@ -13,7 +13,7 @@ use olp_engine::protocols::{
             decode::request as decode_gemini_request, encode::request as encode_gemini_request,
         },
     },
-    openai::chat::{CompletionRequest, decode_chat_completion, encode_chat_completion},
+    openai::chat::{CompletionRequest, decode, encode},
 };
 use proptest::prelude::*;
 use serde_json::{Map, Value, json};
@@ -59,10 +59,10 @@ proptest! {
             "messages": [{"role": "user", "content": "hello"}]
         }), &name, value.clone());
         let request: CompletionRequest = serde_json::from_value(request).unwrap();
-        let Operation::Generation(canonical) = decode_chat_completion(request).unwrap() else {
+        let Operation::Generation(canonical) = decode::chat_completion(request).unwrap() else {
             unreachable!("chat decoding always creates generation")
         };
-        let encoded = encode_chat_completion(&canonical, "provider-model").unwrap();
+        let encoded = encode::chat_completion(&canonical, "provider-model").unwrap();
         let encoded = object(encoded);
         prop_assert_eq!(encoded.get(&name), Some(&value));
     }

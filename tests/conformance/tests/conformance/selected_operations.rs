@@ -92,7 +92,7 @@ fn every_selected_operation_family_has_a_decoding_and_encoding_golden_case() {
 fn decode(fixture: &OperationFixture) -> Operation {
     let wire = fixture.wire.clone();
     match fixture.codec.as_str() {
-        "openai_chat" => chat::decode_chat_completion(from_wire(wire)).unwrap(),
+        "openai_chat" => chat::decode::chat_completion(from_wire(wire)).unwrap(),
         "openai_responses" => response_request::decode_response_create(from_wire(wire)).unwrap(),
         "openai_response_input_tokens" => {
             response_token_count::decode_response_input_tokens(from_wire(wire)).unwrap()
@@ -138,7 +138,7 @@ fn decode(fixture: &OperationFixture) -> Operation {
 fn assert_encodes(codec: &str, operation: &Operation) {
     match (codec, operation) {
         ("openai_chat", Operation::Generation(request)) => {
-            chat::encode_chat_completion(request, "provider-model").unwrap();
+            chat::encode::chat_completion(request, "provider-model").unwrap();
         }
         ("openai_responses", Operation::Generation(request)) => {
             response_request::encode_response_create(request, "provider-model").unwrap();

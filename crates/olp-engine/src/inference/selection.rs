@@ -154,7 +154,7 @@ fn validate_openai(operation: &Operation, upstream_model: &str) -> Result<(), St
                     .map(|_| ())
                     .map_err(|error| error.to_string())
             } else {
-                openai::chat::encode_chat_completion(&request, upstream_model)
+                openai::chat::encode::chat_completion(&request, upstream_model)
                     .map(|_| ())
                     .map_err(|error| error.to_string())
             }

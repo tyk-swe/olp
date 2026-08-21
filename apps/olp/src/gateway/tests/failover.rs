@@ -131,7 +131,7 @@ fn streaming_generation_operation() -> Operation {
         "stream": true
     }))
     .unwrap();
-    decode_chat_completion(request).unwrap()
+    decode::chat_completion(request).unwrap()
 }
 
 fn streaming_image_generation_operation() -> Operation {
@@ -327,7 +327,7 @@ async fn direct_executor_reserves_hard_limits_before_route_selection() {
         "messages": [{"role": "user", "content": "hello"}]
     }))
     .unwrap();
-    let operation = decode_chat_completion(request).unwrap();
+    let operation = decode::chat_completion(request).unwrap();
     let principal = test_principal(&state, Surface::OpenAi);
     let error = match execute_event_operation_without_admission(
         &state,
@@ -393,7 +393,7 @@ async fn http_pre_reservation_marker_reuses_the_full_reservation() {
     let snapshot = state.runtime().pin();
     let api_key = snapshot.api_keys.values().next().unwrap();
     let lookup = state.auth_hmac_key().as_ref().lookup_id(&key).unwrap();
-    let operation = decode_chat_completion(
+    let operation = decode::chat_completion(
         serde_json::from_value(json!({
             "model": "default",
             "messages": [{"role": "user", "content": "hello"}]

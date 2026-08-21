@@ -10,7 +10,7 @@ use olp_engine::domain::canonical::{events::Kind, identity::TransportMode};
 use olp_engine::inference::{
     accounting::RequestOutcome, execution::RoutedEvents, principal::Principal,
 };
-use olp_engine::protocols::openai::chat::{CompletionRequest, decode_chat_completion};
+use olp_engine::protocols::openai::chat::{CompletionRequest, decode};
 
 use crate::{
     bootstrap::mode_dependencies::GatewayState,
@@ -40,7 +40,7 @@ pub(super) async fn chat_completions(
     };
     let admitted = admit_openai_chat(&state, &mut wire_request).await?;
     let streaming = wire_request.stream;
-    let operation = match decode_chat_completion(wire_request) {
+    let operation = match decode::chat_completion(wire_request) {
         Ok(operation) => operation,
         Err(error) => {
             cleanup_admitted(&state, admitted).await;

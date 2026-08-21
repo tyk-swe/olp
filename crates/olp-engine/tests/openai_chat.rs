@@ -4,7 +4,7 @@ use olp_engine::domain::canonical::{
     requests::{ContentPart, Operation},
 };
 use olp_engine::protocols::openai::{
-    chat::{CompletionRequest, decode_chat_completion, encode_chat_completion},
+    chat::{CompletionRequest, decode, encode},
     response::{Completion, Decoder, OpenAiStreamError, decode},
 };
 use serde_json::{Value, json};
@@ -52,7 +52,7 @@ fn chat_request_translation_preserves_source_scoped_fields_and_semantics() {
         "service_tier": "priority"
     });
     let dto: CompletionRequest = serde_json::from_value(wire).unwrap();
-    let Operation::Generation(canonical) = decode_chat_completion(dto).unwrap() else {
+    let Operation::Generation(canonical) = decode::chat_completion(dto).unwrap() else {
         panic!("chat request translated to the wrong operation");
     };
 
@@ -87,7 +87,7 @@ fn chat_request_translation_preserves_source_scoped_fields_and_semantics() {
         json!(true)
     );
 
-    let reencoded = encode_chat_completion(&canonical, "gpt-upstream").unwrap();
+    let reencoded = encode::chat_completion(&canonical, "gpt-upstream").unwrap();
     let reencoded = serde_json::to_value(reencoded).unwrap();
     assert_eq!(reencoded["model"], "gpt-upstream");
     assert_eq!(reencoded["service_tier"], "priority");
@@ -116,14 +116,14 @@ fn chat_request_rejects_ambiguous_or_invalid_parameters() {
         "max_completion_tokens": 20
     });
     let request: CompletionRequest = serde_json::from_value(both_limits).unwrap();
-    assert!(decode_chat_completion(request).is_err());
+    assert!(decode::chat_completion(request).is_err());
 
     let invalid_route = json!({
         "model": "provider/model",
         "messages": [{"role": "user", "content": "hello"}]
     });
     let request: CompletionRequest = serde_json::from_value(invalid_route).unwrap();
-    assert!(decode_chat_completion(request).is_err());
+    assert!(decode::chat_completion(request).is_err());
 }
 
 #[test]

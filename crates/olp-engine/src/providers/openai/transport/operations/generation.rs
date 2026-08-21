@@ -6,7 +6,7 @@ use crate::domain::{
     ports::{AttemptFailureClass, ProviderOutput, ProviderRequest, TransportError, TransportPhase},
 };
 use crate::protocols::openai::{
-    chat::{CompletionRequest, encode_chat_completion},
+    chat::{CompletionRequest, encode},
     responses::request::encode_response_create,
 };
 use http::{HeaderMap, HeaderValue, header};
@@ -49,7 +49,7 @@ pub(super) async fn execute(
         hydrate_responses_media(&mut wire.input, request.media.as_ref()).await?;
         serialize_wire("Responses", &wire)?
     } else {
-        let mut wire = encode_chat_completion(&generation, &request.attempt.upstream_model)
+        let mut wire = encode::chat_completion(&generation, &request.attempt.upstream_model)
             .map_err(|error| protocol_encode_error("chat", error))?;
         if streaming {
             require_stream_usage(&mut wire)?;

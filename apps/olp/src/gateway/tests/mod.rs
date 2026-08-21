@@ -54,7 +54,7 @@ use olp_engine::inference::{
     runtime::{Bundle, Manager},
 };
 use olp_engine::protocols::openai::{
-    chat::{CompletionRequest, decode_chat_completion},
+    chat::{CompletionRequest, decode},
     responses::token_count::{ResponseInputTokensRequest, decode_response_input_tokens},
 };
 use serde_json::{Value, json};
