@@ -14,7 +14,7 @@ use axum::{
     routing::{MethodFilter, MethodRouter, on},
 };
 use olp_engine::domain::{
-    auth::GatewayCapability,
+    auth::{GatewayCapability, gateway_capability_for_operation},
     canonical::identity::{OperationKind, Surface},
     ids::RouteSlug,
 };
@@ -51,12 +51,6 @@ enum BodyAdmission {
     Standard,
     Media,
     Multipart { reservation_bytes: u64 },
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum AuthorizationPolicy {
-    Fixed(GatewayCapability),
-    GeminiAction,
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
@@ -199,7 +193,6 @@ pub(crate) struct EndpointSpec {
     matcher: PathMatcher,
     aliases: &'static [EndpointAlias],
     surface: Surface,
-    authorization: AuthorizationPolicy,
     policy: Policy,
     body_admission: BodyAdmission,
     route_extraction: RouteExtraction,
@@ -215,7 +208,6 @@ macro_rules! fixed_endpoint {
         matcher: $matcher:expr,
         aliases: $aliases:expr,
         surface: $surface:expr,
-        capability: $capability:expr,
         operation: $operation:expr,
         fallback_route: $fallback_route:expr,
         always_emit: $always_emit:expr,
@@ -232,7 +224,6 @@ macro_rules! fixed_endpoint {
             matcher: $matcher,
             aliases: $aliases,
             surface: $surface,
-            authorization: AuthorizationPolicy::Fixed($capability),
             policy: Policy::Fixed {
                 operation: $operation,
                 fallback_route: $fallback_route,
@@ -255,14 +246,9 @@ struct GeminiEndpoint {
     handler: Handler,
 }
 
-const fn gemini_fixed(
-    endpoint: GeminiEndpoint,
-    capability: GatewayCapability,
-    operation: OperationKind,
-) -> EndpointSpec {
+const fn gemini_fixed(endpoint: GeminiEndpoint, operation: OperationKind) -> EndpointSpec {
     gemini_endpoint(
         endpoint,
-        AuthorizationPolicy::Fixed(capability),
         Policy::Fixed {
             operation,
             fallback_route: "models",
@@ -273,18 +259,10 @@ const fn gemini_fixed(
 }
 
 const fn gemini_action_endpoint(endpoint: GeminiEndpoint) -> EndpointSpec {
-    gemini_endpoint(
-        endpoint,
-        AuthorizationPolicy::GeminiAction,
-        Policy::GeminiAction,
-    )
+    gemini_endpoint(endpoint, Policy::GeminiAction)
 }
 
-const fn gemini_endpoint(
-    endpoint: GeminiEndpoint,
-    authorization: AuthorizationPolicy,
-    policy: Policy,
-) -> EndpointSpec {
+const fn gemini_endpoint(endpoint: GeminiEndpoint, policy: Policy) -> EndpointSpec {
     let GeminiEndpoint {
         id,
         method,
@@ -299,7 +277,6 @@ const fn gemini_endpoint(
         matcher,
         aliases: &[],
         surface: Surface::Gemini,
-        authorization,
         policy,
         body_admission: BodyAdmission::Standard,
         route_extraction: if matches!(handler, Handler::GeminiModelList) {
@@ -326,7 +303,6 @@ pub(crate) static ENDPOINTS: &[EndpointSpec] = &[
             matcher: EXACT,
         }],
         surface: Surface::OpenAi,
-        capability: GatewayCapability::Inference,
         operation: OperationKind::Generation,
         fallback_route: INVALID_ROUTE,
         always_emit: false,
@@ -346,7 +322,6 @@ pub(crate) static ENDPOINTS: &[EndpointSpec] = &[
             matcher: EXACT,
         }],
         surface: Surface::OpenAi,
-        capability: GatewayCapability::Inference,
         operation: OperationKind::Generation,
         fallback_route: INVALID_ROUTE,
         always_emit: false,
@@ -366,7 +341,6 @@ pub(crate) static ENDPOINTS: &[EndpointSpec] = &[
             matcher: EXACT,
         }],
         surface: Surface::OpenAi,
-        capability: GatewayCapability::Inference,
         operation: OperationKind::TokenCount,
         fallback_route: INVALID_ROUTE,
         always_emit: false,
@@ -386,7 +360,6 @@ pub(crate) static ENDPOINTS: &[EndpointSpec] = &[
             matcher: EXACT,
         }],
         surface: Surface::OpenAi,
-        capability: GatewayCapability::Inference,
         operation: OperationKind::Embeddings,
         fallback_route: INVALID_ROUTE,
         always_emit: false,
@@ -406,7 +379,6 @@ pub(crate) static ENDPOINTS: &[EndpointSpec] = &[
             matcher: EXACT,
         }],
         surface: Surface::OpenAi,
-        capability: GatewayCapability::Inference,
         operation: OperationKind::Moderation,
         fallback_route: INVALID_ROUTE,
         always_emit: false,
@@ -426,7 +398,6 @@ pub(crate) static ENDPOINTS: &[EndpointSpec] = &[
             matcher: EXACT,
         }],
         surface: Surface::OpenAi,
-        capability: GatewayCapability::Inference,
         operation: OperationKind::ImageGeneration,
         fallback_route: INVALID_ROUTE,
         always_emit: false,
@@ -446,7 +417,6 @@ pub(crate) static ENDPOINTS: &[EndpointSpec] = &[
             matcher: EXACT,
         }],
         surface: Surface::OpenAi,
-        capability: GatewayCapability::Inference,
         operation: OperationKind::ImageEdit,
         fallback_route: INVALID_ROUTE,
         always_emit: false,
@@ -468,7 +438,6 @@ pub(crate) static ENDPOINTS: &[EndpointSpec] = &[
             matcher: EXACT,
         }],
         surface: Surface::OpenAi,
-        capability: GatewayCapability::Inference,
         operation: OperationKind::ImageVariation,
         fallback_route: INVALID_ROUTE,
         always_emit: false,
@@ -490,7 +459,6 @@ pub(crate) static ENDPOINTS: &[EndpointSpec] = &[
             matcher: EXACT,
         }],
         surface: Surface::OpenAi,
-        capability: GatewayCapability::Inference,
         operation: OperationKind::Speech,
         fallback_route: INVALID_ROUTE,
         always_emit: false,
@@ -510,7 +478,6 @@ pub(crate) static ENDPOINTS: &[EndpointSpec] = &[
             matcher: EXACT,
         }],
         surface: Surface::OpenAi,
-        capability: GatewayCapability::Inference,
         operation: OperationKind::Transcription,
         fallback_route: INVALID_ROUTE,
         always_emit: false,
@@ -532,7 +499,6 @@ pub(crate) static ENDPOINTS: &[EndpointSpec] = &[
             matcher: EXACT,
         }],
         surface: Surface::OpenAi,
-        capability: GatewayCapability::Inference,
         operation: OperationKind::VideoCreate,
         fallback_route: INVALID_ROUTE,
         always_emit: false,
@@ -554,7 +520,6 @@ pub(crate) static ENDPOINTS: &[EndpointSpec] = &[
             matcher: EXACT,
         }],
         surface: Surface::OpenAi,
-        capability: GatewayCapability::Inference,
         operation: OperationKind::VideoList,
         fallback_route: "videos",
         always_emit: true,
@@ -580,7 +545,6 @@ pub(crate) static ENDPOINTS: &[EndpointSpec] = &[
             },
         }],
         surface: Surface::OpenAi,
-        capability: GatewayCapability::Inference,
         operation: OperationKind::VideoGet,
         fallback_route: INVALID_ROUTE,
         always_emit: false,
@@ -606,7 +570,6 @@ pub(crate) static ENDPOINTS: &[EndpointSpec] = &[
             },
         }],
         surface: Surface::OpenAi,
-        capability: GatewayCapability::Inference,
         operation: OperationKind::VideoDelete,
         fallback_route: INVALID_ROUTE,
         always_emit: false,
@@ -632,7 +595,6 @@ pub(crate) static ENDPOINTS: &[EndpointSpec] = &[
             },
         }],
         surface: Surface::OpenAi,
-        capability: GatewayCapability::Inference,
         operation: OperationKind::VideoContent,
         fallback_route: INVALID_ROUTE,
         always_emit: false,
@@ -652,7 +614,6 @@ pub(crate) static ENDPOINTS: &[EndpointSpec] = &[
             matcher: EXACT,
         }],
         surface: Surface::OpenAi,
-        capability: GatewayCapability::ModelsRead,
         operation: OperationKind::ModelList,
         fallback_route: "models",
         always_emit: true,
@@ -678,7 +639,6 @@ pub(crate) static ENDPOINTS: &[EndpointSpec] = &[
             },
         }],
         surface: Surface::OpenAi,
-        capability: GatewayCapability::ModelsRead,
         operation: OperationKind::ModelGet,
         fallback_route: "models",
         always_emit: true,
@@ -695,7 +655,6 @@ pub(crate) static ENDPOINTS: &[EndpointSpec] = &[
         matcher: EXACT,
         aliases: &[],
         surface: Surface::Anthropic,
-        capability: GatewayCapability::Inference,
         operation: OperationKind::Generation,
         fallback_route: INVALID_ROUTE,
         always_emit: false,
@@ -712,7 +671,6 @@ pub(crate) static ENDPOINTS: &[EndpointSpec] = &[
         matcher: EXACT,
         aliases: &[],
         surface: Surface::Anthropic,
-        capability: GatewayCapability::Inference,
         operation: OperationKind::TokenCount,
         fallback_route: INVALID_ROUTE,
         always_emit: false,
@@ -729,7 +687,6 @@ pub(crate) static ENDPOINTS: &[EndpointSpec] = &[
         matcher: EXACT,
         aliases: &[],
         surface: Surface::Anthropic,
-        capability: GatewayCapability::ModelsRead,
         operation: OperationKind::ModelList,
         fallback_route: "models",
         always_emit: true,
@@ -749,7 +706,6 @@ pub(crate) static ENDPOINTS: &[EndpointSpec] = &[
         },
         aliases: &[],
         surface: Surface::Anthropic,
-        capability: GatewayCapability::ModelsRead,
         operation: OperationKind::ModelGet,
         fallback_route: "models",
         always_emit: true,
@@ -767,7 +723,6 @@ pub(crate) static ENDPOINTS: &[EndpointSpec] = &[
             matcher: EXACT,
             handler: Handler::GeminiModelList,
         },
-        GatewayCapability::ModelsRead,
         OperationKind::ModelList,
     ),
     gemini_fixed(
@@ -780,7 +735,6 @@ pub(crate) static ENDPOINTS: &[EndpointSpec] = &[
             },
             handler: Handler::GeminiModelGet,
         },
-        GatewayCapability::ModelsRead,
         OperationKind::ModelGet,
     ),
     gemini_action_endpoint(GeminiEndpoint {
@@ -800,7 +754,6 @@ pub(crate) static ENDPOINTS: &[EndpointSpec] = &[
             matcher: EXACT,
             handler: Handler::GeminiModelList,
         },
-        GatewayCapability::ModelsRead,
         OperationKind::ModelList,
     ),
     gemini_fixed(
@@ -813,7 +766,6 @@ pub(crate) static ENDPOINTS: &[EndpointSpec] = &[
             },
             handler: Handler::GeminiModelGet,
         },
-        GatewayCapability::ModelsRead,
         OperationKind::ModelGet,
     ),
     gemini_action_endpoint(GeminiEndpoint {
@@ -881,23 +833,13 @@ impl InferenceEndpoint {
         }
     }
 
-    /// Resolves the capability declared by the registered endpoint action.
+    /// Resolves the capability from the registered endpoint's operation.
     /// Unsupported dynamic actions and unknown endpoints are deliberately
     /// capability-free and therefore cannot pass a later authorization check.
     pub(crate) const fn capability(self) -> Option<GatewayCapability> {
-        let Self::Registered { spec, action } = self else {
-            return None;
-        };
-        match spec.authorization {
-            AuthorizationPolicy::Fixed(capability) => Some(capability),
-            AuthorizationPolicy::GeminiAction => match action {
-                Some(
-                    GeminiAction::Generate
-                    | GeminiAction::StreamGenerate
-                    | GeminiAction::CountTokens,
-                ) => Some(GatewayCapability::Inference),
-                Some(GeminiAction::Unsupported) | None => None,
-            },
+        match self.metadata() {
+            Some(metadata) => Some(gateway_capability_for_operation(metadata.operation)),
+            None => None,
         }
     }
 
@@ -1352,32 +1294,33 @@ mod tests {
             let metadata = endpoint
                 .metadata()
                 .expect("registered endpoint has routing policy");
-            let capability = endpoint
-                .capability()
-                .expect("registered endpoint has authorization policy");
+            let expected_capability = match metadata.operation {
+                OperationKind::ModelList | OperationKind::ModelGet => GatewayCapability::ModelsRead,
+                _ => GatewayCapability::Inference,
+            };
             assert_eq!(
-                capability,
-                olp_engine::domain::auth::gateway_capability_for_operation(metadata.operation),
-                "authorization and routing policy diverged for {:?}",
+                endpoint.capability(),
+                Some(expected_capability),
+                "operation did not resolve the expected capability for {:?}",
                 spec.id
             );
         }
     }
 
     #[test]
-    fn every_supported_gemini_action_resolves_authorization_policy() {
+    fn every_supported_gemini_action_resolves_metadata_and_capability() {
         for version in ["v1", "v1beta"] {
-            for action in ["generateContent", "streamGenerateContent", "countTokens"] {
+            for (action, operation) in [
+                ("generateContent", OperationKind::Generation),
+                ("streamGenerateContent", OperationKind::Generation),
+                ("countTokens", OperationKind::TokenCount),
+            ] {
                 for delimiter in [":", "%3A", "%3a"] {
                     let path = format!("/gemini/{version}/models/route-1{delimiter}{action}");
                     let endpoint = InferenceEndpoint::classify(&Method::POST, &path).unwrap();
                     let metadata = endpoint.metadata().expect("supported action has metadata");
-                    assert_eq!(
-                        endpoint.capability(),
-                        Some(olp_engine::domain::auth::gateway_capability_for_operation(
-                            metadata.operation
-                        ))
-                    );
+                    assert_eq!(metadata.operation, operation);
+                    assert_eq!(endpoint.capability(), Some(GatewayCapability::Inference));
                     assert_eq!(
                         endpoint.route_from_json(&path, b"{}"),
                         Some("route-1".to_owned())
