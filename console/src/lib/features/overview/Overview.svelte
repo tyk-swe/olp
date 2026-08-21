@@ -188,7 +188,7 @@
         onclick={() => recentRequests.refetch()}>Try again</button
       >
     </div>
-  {:else if !recentRequests.data?.data.length}
+  {:else if !recentRequests.data?.items.length}
     <div class="empty-state">
       <span aria-hidden="true"><NavIcon name="request" size={24} /></span>
       <strong>No request metadata yet</strong>
@@ -213,7 +213,7 @@
           ></thead
         >
         <tbody>
-          {#each recentRequests.data.data as request (request.id)}
+          {#each recentRequests.data.items as request (request.id)}
             <tr>
               <td>{formatDate(request.started_at)}</td>
               <td><code>{request.route}</code></td>

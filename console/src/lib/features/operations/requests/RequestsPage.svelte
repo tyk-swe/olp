@@ -150,7 +150,7 @@
   </form>
 
   <div class="toolbar">
-    <p class="result-note" aria-live="polite">{requests.data?.data.length ?? 0} requests on this page</p>
+    <p class="result-note" aria-live="polite">{requests.data?.items.length ?? 0} requests on this page</p>
     <button class="text-button" type="button" onclick={() => requests.refetch()} disabled={requests.isFetching}>Refresh</button>
   </div>
 
@@ -158,7 +158,7 @@
     <div class="loading-state" role="status">Loading request metadata…</div>
   {:else if requests.isError}
     <div class="inline-problem" role="alert">Request metadata is unavailable. <button class="text-button" onclick={() => requests.refetch()}>Try again</button></div>
-  {:else if requests.data?.data.length === 0}
+  {:else if requests.data?.items.length === 0}
     <div class="card empty-state"><div><strong>No matching requests</strong><p>Adjust the filters or send traffic through an active route.</p></div></div>
   {:else}
     <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
@@ -167,7 +167,7 @@
         <caption class="sr-only">Request metadata, newest first</caption>
         <thead><tr><th scope="col">Started</th><th scope="col">Route / operation</th><th scope="col">Status</th><th scope="col">Attempts</th><th scope="col">TTFT / latency</th><th scope="col">Tokens</th><th scope="col">Cost</th><th scope="col"><span class="sr-only">Details</span></th></tr></thead>
         <tbody>
-          {#each requests.data?.data ?? [] as request (request.id)}
+          {#each requests.data?.items ?? [] as request (request.id)}
             <tr>
               <td>{formatDate(request.started_at)}</td>
               <td><strong>{request.route}</strong><small>{request.operation} · {request.surface}</small></td>
@@ -183,7 +183,7 @@
       </table>
     </div>
     <ul class="mobile-results" aria-label="Request results">
-      {#each requests.data?.data ?? [] as request (request.id)}
+      {#each requests.data?.items ?? [] as request (request.id)}
         <li class="card">
           <div class="mobile-result-heading"><div><strong>{request.route}</strong><small>{request.operation} · {request.surface}</small></div><span class="badge {statusTone(request.status_code, request.error_class)}">{statusLabel(request.status_code, request.error_class)}</span></div>
           <dl><div><dt>Started</dt><dd>{formatDate(request.started_at)}</dd></div><div><dt>TTFT / latency</dt><dd>{request.first_byte_ms ?? '—'} / {request.total_latency_ms ?? '—'} ms</dd></div><div><dt>Tokens</dt><dd>{formatCompact(request.input_tokens)} in · {formatCompact(request.output_tokens)} out</dd></div><div><dt>Cost</dt><dd class:unpriced={request.unpriced}>{formatCost(request.estimated_cost, request.currency ?? 'USD')}</dd></div></dl>
@@ -191,7 +191,7 @@
         </li>
       {/each}
     </ul>
-    {@const pagination = cursorPaginationProps(listState, requests.data?.next_cursor)}
+    {@const pagination = cursorPaginationProps(listState, requests.data?.nextCursor)}
     <nav class="pagination" aria-label="Request pages">
       <button class="button button-secondary" type="button" onclick={pagination.onPrevious} disabled={!pagination.hasPrevious}>Previous</button>
       <span>Page {pagination.page}</span>

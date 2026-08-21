@@ -157,10 +157,10 @@
   </form>
 
   {#if pricing.isPending}<div class="loading-state" role="status">Loading revisions…</div>
-  {:else if pricing.data?.data.length === 0 && pricingPagination.history.length === 0}<div class="card empty-state">No pricing revisions. Usage cost will be marked unpriced.</div>
+  {:else if pricing.data?.items.length === 0 && pricingPagination.history.length === 0}<div class="card empty-state">No pricing revisions. Usage cost will be marked unpriced.</div>
   {:else}
     <div class="revision-list">
-      {#each pricing.data?.data ?? [] as revision (revision.id)}
+      {#each pricing.data?.items ?? [] as revision (revision.id)}
         <details class="card">
           <summary><span><strong>Revision {revision.revision}</strong><small>Effective {formatDate(revision.effective_at)}</small></span><span class="badge">{revision.prices.length} entries</span></summary>
           <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
@@ -174,7 +174,7 @@
         </details>
       {/each}
     </div>
-    <CursorPagination {...cursorPaginationProps(pricingPagination, pricing.data?.next_cursor)} label="Pricing revision pages" />
+    <CursorPagination {...cursorPaginationProps(pricingPagination, pricing.data?.nextCursor)} label="Pricing revision pages" />
   {/if}
 </section>
 

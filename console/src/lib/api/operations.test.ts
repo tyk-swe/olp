@@ -1,6 +1,15 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ApiProblem } from './http';
-import { listProviderHealth, listRequests, operationsTesting } from './operations';
+import {
+  listAudit,
+  listMediaJobs,
+  listPricing,
+  listProviderHealth,
+  listRequestMetadataGatewayEpochs,
+  listRequests,
+  listRuntimeGenerations,
+  operationsTesting
+} from './operations';
 import { captureRequests, jsonResponse } from './test/requestCapture';
 
 afterEach(() => {
@@ -33,6 +42,33 @@ describe('operations query serialization', () => {
         provider: null
       })
     ).toEqual({ status: 0, enabled: false });
+  });
+});
+
+describe('operations cursor pages', () => {
+  it('normalizes every paginated response at the API boundary', async () => {
+    captureRequests((_request, index) =>
+      jsonResponse({
+        data: [{ index }],
+        next_cursor: index === 5 ? null : `page-${index + 2}`
+      })
+    );
+
+    const pages = [
+      await listRequests({}),
+      await listMediaJobs({}),
+      await listRequestMetadataGatewayEpochs('unresolved'),
+      await listAudit(),
+      await listRuntimeGenerations(),
+      await listPricing()
+    ];
+
+    pages.forEach((page, index) => {
+      expect(page).toEqual({
+        items: [{ index }],
+        nextCursor: index === 5 ? null : `page-${index + 2}`
+      });
+    });
   });
 });
 

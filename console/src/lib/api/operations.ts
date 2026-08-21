@@ -1,7 +1,7 @@
 import type { components } from './schema';
 import { apiClient } from './client';
 import { ensureSuccess, result } from './http';
-import { collectCursorPages } from './pagination';
+import { collectCursorPages, type CursorPage } from './pagination';
 
 export type RequestSummary = components['schemas']['RequestSummary'];
 export type RequestDetail = components['schemas']['RequestDetailResponse'];
@@ -18,8 +18,6 @@ export type RequestMetadataEpochAcknowledgement =
 export type UserProfile = components['schemas']['UserDetailResponse'];
 export type OidcIdentityList = components['schemas']['OidcIdentityListResponse'];
 export type Readiness = components['schemas']['HealthResponse'];
-
-export type CursorPage<T> = { data: T[]; next_cursor?: string | null };
 
 export type RequestFilters = {
   cursor?: string;
@@ -95,7 +93,8 @@ export async function listRequests(filters: RequestFilters): Promise<CursorPage<
   const { data, error, response } = await apiClient.GET('/api/v1/requests', {
     params: { query: compact(filters) }
   });
-  return result(data, error, response);
+  const page = result(data, error, response);
+  return { items: page.data, nextCursor: page.next_cursor ?? null };
 }
 
 export async function getRequest(requestId: string): Promise<RequestDetail> {
@@ -109,7 +108,8 @@ export async function listMediaJobs(filters: MediaJobFilters): Promise<CursorPag
   const { data, error, response } = await apiClient.GET('/api/v1/media-jobs', {
     params: { query: compact(filters) }
   });
-  return result(data, error, response);
+  const page = result(data, error, response);
+  return { items: page.data, nextCursor: page.next_cursor ?? null };
 }
 
 export async function getMediaJob(jobId: string): Promise<MediaJob> {
@@ -134,7 +134,8 @@ export async function listRequestMetadataGatewayEpochs(
     '/api/v1/request-metadata/gateway-epochs',
     { params: { query: { state, cursor, limit: 25 } } }
   );
-  return result(data, error, response);
+  const page = result(data, error, response);
+  return { items: page.data, nextCursor: page.next_cursor ?? null };
 }
 
 export async function acknowledgeRequestMetadataGatewayEpoch(
@@ -178,7 +179,8 @@ export async function listAudit(cursor?: string): Promise<CursorPage<AuditEvent>
   const { data, error, response } = await apiClient.GET('/api/v1/audit', {
     params: { query: compact({ cursor, limit: 50 }) }
   });
-  return result(data, error, response);
+  const page = result(data, error, response);
+  return { items: page.data, nextCursor: page.next_cursor ?? null };
 }
 
 export async function getReadiness(): Promise<Readiness> {
@@ -206,7 +208,8 @@ export async function listRuntimeGenerations(cursor?: string): Promise<CursorPag
   const { data, error, response } = await apiClient.GET('/api/v1/runtime-generations', {
     params: { query: compact({ cursor, limit: 25 }) }
   });
-  return result(data, error, response);
+  const page = result(data, error, response);
+  return { items: page.data, nextCursor: page.next_cursor ?? null };
 }
 
 export async function listSettings(): Promise<Setting[]> {
@@ -229,7 +232,8 @@ export async function listPricing(cursor?: string): Promise<CursorPage<PricingRe
   const { data, error, response } = await apiClient.GET('/api/v1/pricing/revisions', {
     params: { query: compact({ cursor, limit: 25 }) }
   });
-  return result(data, error, response);
+  const page = result(data, error, response);
+  return { items: page.data, nextCursor: page.next_cursor ?? null };
 }
 
 export async function createPricingRevision(
