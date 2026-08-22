@@ -49,14 +49,8 @@ fn method_name(method: EndpointMethod) -> &'static str {
 
 #[test]
 fn registry_identities_and_routes_are_unique() {
-    let mut identities = BTreeSet::new();
     let mut routes = BTreeSet::new();
     for spec in ENDPOINTS {
-        assert!(
-            identities.insert(spec.id),
-            "duplicate identity: {:?}",
-            spec.id
-        );
         assert!(
             routes.insert((spec.method as u8, spec.route_path)),
             "duplicate route: {:?} {}",
@@ -84,25 +78,25 @@ fn openai_aliases_reuse_the_canonical_endpoint_spec() {
                 .expect("canonical route is classified");
             let aliased = InferenceEndpoint::classify(&method(spec), &alias_path)
                 .expect("alias route is classified");
-            assert_eq!(canonical, aliased, "alias differs for {:?}", spec.id);
+            assert_eq!(canonical, aliased, "alias differs for {}", spec.route_path);
             assert_eq!(
                 canonical.route_from_json(&canonical_path, b"{}"),
                 aliased.route_from_json(&alias_path, b"{}"),
-                "route extraction differs for {:?}",
-                spec.id
+                "route extraction differs for {}",
+                spec.route_path
             );
             let InferenceEndpoint::Registered {
                 spec: canonical_spec,
                 ..
             } = canonical
             else {
-                panic!("canonical route classified as unknown: {:?}", spec.id);
+                panic!("canonical route classified as unknown: {}", spec.route_path);
             };
             let InferenceEndpoint::Registered {
                 spec: aliased_spec, ..
             } = aliased
             else {
-                panic!("alias classified as unknown: {:?}", spec.id);
+                panic!("alias classified as unknown: {}", spec.route_path);
             };
             assert!(std::ptr::eq(canonical_spec, aliased_spec));
         }
@@ -193,9 +187,12 @@ fn every_registry_entry_drives_classification_and_policy() {
             spec: classified, ..
         } = endpoint
         else {
-            panic!("registered endpoint classified as unknown: {:?}", spec.id);
+            panic!(
+                "registered endpoint classified as unknown: {}",
+                spec.route_path
+            );
         };
-        assert_eq!(classified.id, spec.id);
+        assert!(std::ptr::eq(classified, spec));
         assert_eq!(endpoint.surface(), spec.surface);
         let metadata = endpoint
             .metadata()
@@ -207,8 +204,8 @@ fn every_registry_entry_drives_classification_and_policy() {
         assert_eq!(
             endpoint.capability(),
             Some(expected_capability),
-            "operation did not resolve the expected capability for {:?}",
-            spec.id
+            "operation did not resolve the expected capability for {}",
+            spec.route_path
         );
     }
 }

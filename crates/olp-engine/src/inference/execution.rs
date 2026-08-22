@@ -25,7 +25,7 @@ use crate::inference::{
     error::Error as InferenceError,
     events::{MAX_COLLECTED_CANONICAL_EVENT_BYTES, collect_provider_events_with_observer},
     failover::{Context, ExecutionOutput, ExecutionSuccess, execute},
-    limits::{DistributedLimitReservation, Reservation, release, reserve},
+    limits::{Reservation, release, reserve},
     media_lifecycle::{RequestMediaGuard, operation_media_handles},
     principal::Principal,
     request_metadata::RequestAttemptMetadata,
@@ -719,7 +719,7 @@ impl Service {
         &self,
         principal: &Principal,
         admission_reserved_tokens: Option<i64>,
-    ) -> Result<Option<DistributedLimitReservation>, InferenceError> {
+    ) -> Result<Option<Reservation>, InferenceError> {
         let operation =
             Operation::Models(crate::domain::canonical::requests::ModelOperation::List {
                 extensions: crate::domain::canonical::requests::SourceExtensions::new(
@@ -738,7 +738,7 @@ impl Service {
         .await
     }
 
-    pub async fn release_model_limits(&self, lease: Option<DistributedLimitReservation>) {
+    pub async fn release_model_limits(&self, lease: Option<Reservation>) {
         release(lease, None).await;
     }
 }

@@ -154,7 +154,7 @@ async fn reserve(
     key: &ApiKey,
     operation: &Operation,
     pre_reserved: Option<i64>,
-) -> Result<Option<DistributedLimitReservation>, InferenceError> {
+) -> Result<Option<Reservation>, InferenceError> {
     super::reserve(
         limiter,
         key,
@@ -493,9 +493,9 @@ async fn issued_lease_survives_backend_replacement_and_clear() {
 
     limiter.install(backend(&second_calls, BackendBehavior::Success));
     limiter.clear();
-    DistributedLimitReservation::new(lease)
-        .cleanup(Some(13))
-        .await;
+    let reservation = Reservation::distributed(lease);
+    reservation.reconcile(13).await;
+    reservation.release().await;
 
     assert_eq!(first_calls.reserves.load(Ordering::Relaxed), 1);
     assert_eq!(first_calls.reconciles.load(Ordering::Relaxed), 1);

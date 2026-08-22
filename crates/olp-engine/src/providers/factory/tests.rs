@@ -1,9 +1,13 @@
+use std::time::Duration;
+
+use futures::{StreamExt as _, stream};
 use uuid::Uuid;
 use zeroize::Zeroizing;
 
 use crate::{
     domain::{
         canonical::{
+            events::{Event, Kind},
             identity::{OperationKind, Surface, TransportMode},
             requests::SourceExtensions,
             results::CanonicalResult,
@@ -19,10 +23,7 @@ use crate::{
                 certifiable_capabilities, execute_native_capability_probe, native_probe_operation,
                 supports,
             },
-            configuration::{
-                BorrowedCredential, Config, ConnectorSpec, Credential, CredentialKind,
-                RawCredentialKind, raw_credential_kind, validate_connector_credential,
-            },
+            configuration::{Config, Credential, CredentialKind},
             overrides::Registry,
         },
         openai::{
@@ -32,51 +33,6 @@ use crate::{
         },
     },
 };
-
-fn spec(kind: ProviderKind, auth_mode: ProviderAuthMode) -> ConnectorSpec<'static> {
-    ConnectorSpec {
-        kind,
-        endpoint: None,
-        cloud_region: None,
-        cloud_project: None,
-        deployment: None,
-        api_version: None,
-        auth_mode,
-        probe_model: None,
-    }
-}
-
-#[test]
-fn credential_kind_keeps_text_and_byte_authentication_distinct() {
-    assert_eq!(
-        raw_credential_kind(spec(ProviderKind::OpenAi, ProviderAuthMode::ApiKey)).unwrap(),
-        RawCredentialKind::Text
-    );
-    assert_eq!(
-        raw_credential_kind(spec(
-            ProviderKind::VertexAi,
-            ProviderAuthMode::ApplicationDefault,
-        ))
-        .unwrap(),
-        RawCredentialKind::None
-    );
-    assert_eq!(
-        raw_credential_kind(spec(
-            ProviderKind::VertexAi,
-            ProviderAuthMode::ServiceAccount,
-        ))
-        .unwrap(),
-        RawCredentialKind::Text
-    );
-    assert_eq!(
-        raw_credential_kind(spec(ProviderKind::Bedrock, ProviderAuthMode::DefaultChain,)).unwrap(),
-        RawCredentialKind::None
-    );
-    assert_eq!(
-        raw_credential_kind(spec(ProviderKind::Bedrock, ProviderAuthMode::Static)).unwrap(),
-        RawCredentialKind::Bytes
-    );
-}
 
 #[test]
 fn public_factory_covers_every_provider_authentication_pairing() {
@@ -244,23 +200,41 @@ fn certification_probe_override_is_available_for_native_and_compatible_providers
 
 #[test]
 fn bedrock_static_credential_validation_accepts_bytes() {
-    let mut spec = spec(ProviderKind::Bedrock, ProviderAuthMode::Static);
-    spec.cloud_region = Some("us-east-1");
-    assert!(
-        validate_connector_credential(
-            spec,
-            BorrowedCredential::Bytes(
-                br#"{"access_key_id":"ABCDEFGHIJKLMNOP","secret_access_key":"abcdefghijklmnop"}"#,
-            ),
-        )
-        .is_ok()
-    );
+    let config = Config::Bedrock {
+        region: "us-east-1".to_owned(),
+        auth_mode: ProviderAuthMode::Static,
+    };
+    let credential = Credential::AwsStatic(Zeroizing::new(
+        br#"{"access_key_id":"ABCDEFGHIJKLMNOP","secret_access_key":"abcdefghijklmnop"}"#.to_vec(),
+    ));
+    assert!(Factory::validate_credential(&config, &credential).is_ok());
 }
 
 struct ExactNativeProbeTransport {
     expected_model: &'static str,
     expected_kind: ProviderKind,
     calls: std::sync::atomic::AtomicUsize,
+}
+
+struct OpenTerminalNativeProbeTransport;
+
+impl ProviderTransport for OpenTerminalNativeProbeTransport {
+    fn execute<'a>(
+        &'a self,
+        _request: ProviderRequest,
+    ) -> crate::domain::ports::BoxFuture<
+        'a,
+        Result<ProviderOutput, crate::domain::ports::TransportError>,
+    > {
+        Box::pin(async {
+            let events = stream::iter([Ok::<_, crate::domain::ports::TransportError>(Event::new(
+                0,
+                Kind::Done,
+            ))])
+            .chain(stream::pending());
+            Ok(ProviderOutput::Events(Box::pin(events)))
+        })
+    }
 }
 
 impl ProviderTransport for ExactNativeProbeTransport {
@@ -319,6 +293,26 @@ async fn native_certification_executes_the_exact_model_and_tuple() {
         ),
         Err(CompatibleCapabilityCertificationError::Unsupported)
     ));
+}
+
+#[tokio::test]
+async fn native_streaming_certification_stops_at_terminal_event() {
+    tokio::time::timeout(
+        Duration::from_secs(1),
+        execute_native_capability_probe(
+            &OpenTerminalNativeProbeTransport,
+            ProviderKind::Anthropic,
+            "exact-model-v2",
+            CompatibleCapability {
+                operation: OperationKind::Generation,
+                surface: Surface::Anthropic,
+                mode: TransportMode::Streaming,
+            },
+        ),
+    )
+    .await
+    .unwrap()
+    .unwrap();
 }
 
 #[test]

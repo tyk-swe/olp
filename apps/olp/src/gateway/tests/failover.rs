@@ -459,7 +459,8 @@ async fn http_request_above_baseline_requires_token_delta_reservation() {
         )
         .await
         .map_err(InferenceError::from)
-        .expect_err("missing delta limiter must fail closed above the HTTP baseline");
+        .err()
+        .expect("missing delta limiter must fail closed above the HTTP baseline");
     assert_eq!(error.status(), StatusCode::SERVICE_UNAVAILABLE);
     assert_eq!(error.code(), "distributed_limits_unavailable");
 }

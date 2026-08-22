@@ -1,26 +1,20 @@
-use std::time::Duration;
-
 use crate::domain::{
     canonical::{
-        events::{EventSequenceValidator, Kind},
-        identity::{OperationKind, RequestMetadata, Surface, TransportMode},
+        identity::{OperationKind, Surface, TransportMode},
         requests::{
             ContentPart, EmbeddingInput, EmbeddingsRequest, GenerationParameters,
             GenerationRequest, Message, MessageRole, ModerationRequest, Operation,
             SourceExtensions, TokenCountRequest,
         },
-        results::CanonicalResult,
     },
-    ids::{ProviderId, RequestId, RouteId, RouteSlug, RuntimeGenerationId, TargetId},
-    ports::{
-        AttemptFailureClass, ProviderOutput, ProviderRequest, ProviderTransport, TransportPhase,
-    },
-    routing::{provider::ProviderKind, selection::AttemptPlan},
+    ids::RouteSlug,
+    ports::ProviderTransport,
+    routing::provider::ProviderKind,
 };
-use futures::StreamExt as _;
 
 use crate::providers::openai::certification::{
-    CompatibleCapability, CompatibleCapabilityCertificationError, NativeOpenAiCertificationEvidence,
+    CompatibleCapability, CompatibleCapabilityCertificationError,
+    NativeOpenAiCertificationEvidence, execute_capability_probe,
 };
 
 use super::assembly::{ConcreteConnector, Facade};
@@ -113,50 +107,19 @@ impl Facade {
                     .await
                     .map(Into::into)
             }
-            (ConcreteConnector::OpenAi(connector), ProviderKind::OpenAi) => {
+            (_, kind)
+                if matches!(
+                    kind,
+                    ProviderKind::OpenAi
+                        | ProviderKind::Anthropic
+                        | ProviderKind::Gemini
+                        | ProviderKind::VertexAi
+                        | ProviderKind::Bedrock
+                ) =>
+            {
                 execute_native_capability_probe(
-                    connector.as_ref(),
-                    ProviderKind::OpenAi,
-                    upstream_model,
-                    capability,
-                )
-                .await
-                .map(|()| CapabilityCertificationEvidence::LiveProbe)
-            }
-            (ConcreteConnector::Anthropic(connector), ProviderKind::Anthropic) => {
-                execute_native_capability_probe(
-                    connector.as_ref(),
-                    ProviderKind::Anthropic,
-                    upstream_model,
-                    capability,
-                )
-                .await
-                .map(|()| CapabilityCertificationEvidence::LiveProbe)
-            }
-            (ConcreteConnector::Gemini(connector), ProviderKind::Gemini) => {
-                execute_native_capability_probe(
-                    connector.as_ref(),
-                    ProviderKind::Gemini,
-                    upstream_model,
-                    capability,
-                )
-                .await
-                .map(|()| CapabilityCertificationEvidence::LiveProbe)
-            }
-            (ConcreteConnector::Vertex(connector), ProviderKind::VertexAi) => {
-                execute_native_capability_probe(
-                    connector.as_ref(),
-                    ProviderKind::VertexAi,
-                    upstream_model,
-                    capability,
-                )
-                .await
-                .map(|()| CapabilityCertificationEvidence::LiveProbe)
-            }
-            (ConcreteConnector::Bedrock(connector), ProviderKind::Bedrock) => {
-                execute_native_capability_probe(
-                    connector.as_ref(),
-                    ProviderKind::Bedrock,
+                    self.connector.as_transport(),
+                    kind,
                     upstream_model,
                     capability,
                 )
@@ -168,9 +131,6 @@ impl Facade {
     }
 }
 
-const NATIVE_PROBE_TIMEOUT_MS: u64 = 10_000;
-const MAX_NATIVE_PROBE_EVENTS: usize = 4_096;
-
 pub(super) async fn execute_native_capability_probe(
     transport: &dyn ProviderTransport,
     provider_kind: ProviderKind,
@@ -178,40 +138,14 @@ pub(super) async fn execute_native_capability_probe(
     capability: CompatibleCapability,
 ) -> Result<(), CompatibleCapabilityCertificationError> {
     let operation = native_probe_operation(provider_kind, capability)?;
-    let request = ProviderRequest {
-        metadata: RequestMetadata {
-            request_id: RequestId::new(),
-            operation: capability.operation,
-            surface: capability.surface,
-            mode: capability.mode,
-        },
-        attempt: AttemptPlan {
-            generation_id: RuntimeGenerationId::new(),
-            route_id: RouteId::new(),
-            target_id: TargetId::new(),
-            provider_id: ProviderId::new(),
-            provider_kind,
-            upstream_model: upstream_model.to_owned(),
-            timeout: crate::domain::ids::DurationMs::new(NATIVE_PROBE_TIMEOUT_MS),
-            priority: 0,
-        },
+    execute_capability_probe(
+        transport,
+        provider_kind,
+        upstream_model,
+        capability,
         operation,
-        media: None,
-    };
-    let output = tokio::time::timeout(
-        Duration::from_millis(NATIVE_PROBE_TIMEOUT_MS),
-        transport.execute(request),
     )
     .await
-    .map_err(|_| CompatibleCapabilityCertificationError::Transport {
-        phase: TransportPhase::FirstByte,
-        class: AttemptFailureClass::Timeout,
-    })?
-    .map_err(|error| CompatibleCapabilityCertificationError::Transport {
-        phase: error.phase,
-        class: error.class,
-    })?;
-    validate_native_probe_output(capability.operation, output).await
 }
 
 pub(super) fn native_probe_operation(
@@ -289,63 +223,5 @@ pub(super) fn native_probe_operation(
             }))
         }
         _ => Err(CompatibleCapabilityCertificationError::Unsupported),
-    }
-}
-
-async fn validate_native_probe_output(
-    operation: OperationKind,
-    output: ProviderOutput,
-) -> Result<(), CompatibleCapabilityCertificationError> {
-    match (operation, output) {
-        (OperationKind::Generation, ProviderOutput::Events(mut events)) => {
-            let mut validator = EventSequenceValidator::new();
-            let deadline =
-                tokio::time::Instant::now() + Duration::from_millis(NATIVE_PROBE_TIMEOUT_MS);
-            let mut count = 0_usize;
-            loop {
-                let event = tokio::time::timeout_at(deadline, events.next())
-                    .await
-                    .map_err(|_| CompatibleCapabilityCertificationError::Transport {
-                        phase: TransportPhase::Body,
-                        class: AttemptFailureClass::Timeout,
-                    })?;
-                let Some(event) = event else {
-                    break;
-                };
-                if count >= MAX_NATIVE_PROBE_EVENTS {
-                    return Err(CompatibleCapabilityCertificationError::InvalidResult);
-                }
-                let event =
-                    event.map_err(|error| CompatibleCapabilityCertificationError::Transport {
-                        phase: error.phase,
-                        class: error.class,
-                    })?;
-                if matches!(event.kind, Kind::Error { .. }) {
-                    return Err(CompatibleCapabilityCertificationError::InvalidResult);
-                }
-                validator
-                    .push(&event)
-                    .map_err(|_| CompatibleCapabilityCertificationError::InvalidResult)?;
-                count = count.saturating_add(1);
-                if validator.is_complete() {
-                    break;
-                }
-            }
-            validator
-                .finish()
-                .map_err(|_| CompatibleCapabilityCertificationError::InvalidResult)
-        }
-        (OperationKind::TokenCount, ProviderOutput::Result(result))
-            if matches!(&*result, CanonicalResult::TokenCount(_)) =>
-        {
-            Ok(())
-        }
-        (OperationKind::Embeddings, ProviderOutput::Result(result)) if matches!(&*result, CanonicalResult::Embeddings(value) if !value.data.is_empty() && value.data.iter().all(|item| !item.values.is_empty())) => {
-            Ok(())
-        }
-        (OperationKind::Moderation, ProviderOutput::Result(result)) if matches!(&*result, CanonicalResult::Moderation(value) if !value.results.is_empty()) => {
-            Ok(())
-        }
-        _ => Err(CompatibleCapabilityCertificationError::InvalidResult),
     }
 }

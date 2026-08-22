@@ -8,7 +8,7 @@ use axum::{
 use http_body_util::BodyExt as _;
 use olp::{
     bootstrap::state::{ApiMode, ProcessComposition},
-    public_http::router::for_state,
+    public_http::router::management_router_for_test,
 };
 use olp_db::security::envelope::MasterKey;
 use olp_engine::inference::runtime::Manager;
@@ -34,7 +34,7 @@ async fn identity_http_flow_enforces_sessions_csrf_roles_and_owner_guard() {
     );
     state.master_key = Some(Arc::new(MasterKey::new(1, [7; 32])));
     configure_bootstrap(&mut state, [8; 32]);
-    let app = for_state(state.mode_dependencies().unwrap().management().unwrap());
+    let app = management_router_for_test(state.mode_dependencies().unwrap().management().unwrap());
 
     let setup = send_json(
         &app,

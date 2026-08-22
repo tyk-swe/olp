@@ -1,7 +1,6 @@
 import { hashKey, type QueryClient } from '@tanstack/svelte-query';
 import { clearCsrfToken, getCsrfToken, setCsrfToken } from '$lib/api/session';
 import {
-  combineSignals,
   isAuthenticationEndpoint,
   isCurrentSessionDeletion,
   isMutationRequest,
@@ -288,10 +287,10 @@ export class AuthenticationLifecycle {
     if (mutation && !isCurrentSessionDeletion(request))
       await this.ensureFreshSession();
     const generation = this.authenticatedRequestGeneration;
-    const signal = combineSignals(
+    const signal = AbortSignal.any([
       request.signal,
       this.authenticatedRequestController.signal
-    );
+    ]);
     const headers = new Headers(request.headers);
     if (mutation) {
       const csrf = getCsrfToken();

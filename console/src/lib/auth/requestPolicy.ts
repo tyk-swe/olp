@@ -54,18 +54,3 @@ export function isCurrentSessionDeletion(request: Request): boolean {
 export function isMutationRequest(request: Request): boolean {
   return !SAFE_METHODS.has(request.method.toUpperCase());
 }
-
-export function combineSignals(...signals: AbortSignal[]): AbortSignal {
-  if (typeof AbortSignal.any === 'function') return AbortSignal.any(signals);
-  const controller = new AbortController();
-  for (const signal of signals) {
-    if (signal.aborted) {
-      controller.abort(signal.reason);
-      break;
-    }
-    signal.addEventListener('abort', () => controller.abort(signal.reason), {
-      once: true
-    });
-  }
-  return controller.signal;
-}

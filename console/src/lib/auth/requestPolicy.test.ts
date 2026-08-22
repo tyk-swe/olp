@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
 import {
-  combineSignals,
   isAuthenticationEndpoint,
   isCurrentSessionDeletion,
   isMutationRequest,
@@ -65,48 +64,5 @@ describe('authentication request policy', () => {
     expect(isMutationRequest(request(method, '/api/v1/profile'))).toBe(
       expected
     );
-  });
-});
-
-describe('combined cancellation signals', () => {
-  it('propagates a source cancellation reason', () => {
-    const first = new AbortController();
-    const second = new AbortController();
-    const combined = combineSignals(first.signal, second.signal);
-
-    second.abort('second request ended');
-
-    expect(combined.aborted).toBe(true);
-    expect(combined.reason).toBe('second request ended');
-  });
-
-  it('preserves cancellation semantics without AbortSignal.any', () => {
-    const descriptor = Object.getOwnPropertyDescriptor(AbortSignal, 'any');
-    Object.defineProperty(AbortSignal, 'any', {
-      configurable: true,
-      value: undefined
-    });
-
-    try {
-      const alreadyAborted = new AbortController();
-      const pending = new AbortController();
-      alreadyAborted.abort('already cancelled');
-      const combined = combineSignals(alreadyAborted.signal, pending.signal);
-
-      expect(combined.aborted).toBe(true);
-      expect(combined.reason).toBe('already cancelled');
-
-      const left = new AbortController();
-      const right = new AbortController();
-      const later = combineSignals(left.signal, right.signal);
-      right.abort('cancelled later');
-      expect(later.reason).toBe('cancelled later');
-    } finally {
-      if (descriptor) {
-        Object.defineProperty(AbortSignal, 'any', descriptor);
-      } else {
-        Reflect.deleteProperty(AbortSignal, 'any');
-      }
-    }
   });
 });

@@ -29,7 +29,7 @@ describe('generated API request boundary', () => {
 
     const request = requests[0];
     expect(request).toBeDefined();
-    expect(new URL(request.url).origin).toBe(globalThis.location.origin);
+    expect(new URL(request.url).origin).toBe('http://127.0.0.1');
     expect(request.cache).toBe('no-store');
     expect(request.credentials).toBe('same-origin');
     expect(request.redirect).toBe('error');

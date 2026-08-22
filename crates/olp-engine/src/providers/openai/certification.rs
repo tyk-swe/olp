@@ -1,8 +1,8 @@
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, time::Duration};
 
 use crate::domain::{
     canonical::{
-        events::{Kind, validate_event_sequence},
+        events::{EventSequenceValidator, Kind},
         identity::{OperationKind, RequestMetadata, Surface, TransportMode},
         requests::{
             ContentPart, EmbeddingInput, EmbeddingsRequest, GenerationParameters,
@@ -13,8 +13,7 @@ use crate::domain::{
     },
     ids::{DurationMs, ProviderId, RequestId, RouteId, RouteSlug, RuntimeGenerationId, TargetId},
     ports::{
-        AttemptFailureClass, ProviderOutput, ProviderRequest, ProviderTransport as _,
-        TransportPhase,
+        AttemptFailureClass, ProviderOutput, ProviderRequest, ProviderTransport, TransportPhase,
     },
     routing::{provider::ProviderKind, selection::AttemptPlan},
 };
@@ -134,33 +133,14 @@ impl Connector {
         operations: Vec<Operation>,
     ) -> Result<(), CompatibleCapabilityCertificationError> {
         for operation in operations {
-            let request = ProviderRequest {
-                metadata: RequestMetadata {
-                    request_id: RequestId::new(),
-                    operation: capability.operation,
-                    surface: capability.surface,
-                    mode: capability.mode,
-                },
-                attempt: AttemptPlan {
-                    generation_id: RuntimeGenerationId::new(),
-                    route_id: RouteId::new(),
-                    target_id: TargetId::new(),
-                    provider_id: ProviderId::new(),
-                    provider_kind: ProviderKind::OpenAiCompatible,
-                    upstream_model: upstream_model.to_owned(),
-                    timeout: DurationMs::new(PROBE_TIMEOUT_MS),
-                    priority: 0,
-                },
+            execute_capability_probe(
+                self,
+                ProviderKind::OpenAiCompatible,
+                upstream_model,
+                capability,
                 operation,
-                media: None,
-            };
-            let output = self.execute(request).await.map_err(|error| {
-                CompatibleCapabilityCertificationError::Transport {
-                    phase: error.phase,
-                    class: error.class,
-                }
-            })?;
-            validate_probe_output(capability.operation, output).await?;
+            )
+            .await?;
         }
         Ok(())
     }
@@ -284,15 +264,63 @@ fn probe_operations(
     }
 }
 
-async fn validate_probe_output(
-    operation: OperationKind,
-    output: ProviderOutput,
+pub(in crate::providers) async fn execute_capability_probe(
+    transport: &dyn ProviderTransport,
+    provider_kind: ProviderKind,
+    upstream_model: &str,
+    capability: CompatibleCapability,
+    operation: Operation,
 ) -> Result<(), CompatibleCapabilityCertificationError> {
-    match (operation, output) {
+    let request = ProviderRequest {
+        metadata: RequestMetadata {
+            request_id: RequestId::new(),
+            operation: capability.operation,
+            surface: capability.surface,
+            mode: capability.mode,
+        },
+        attempt: AttemptPlan {
+            generation_id: RuntimeGenerationId::new(),
+            route_id: RouteId::new(),
+            target_id: TargetId::new(),
+            provider_id: ProviderId::new(),
+            provider_kind,
+            upstream_model: upstream_model.to_owned(),
+            timeout: DurationMs::new(PROBE_TIMEOUT_MS),
+            priority: 0,
+        },
+        operation,
+        media: None,
+    };
+    let output = tokio::time::timeout(
+        Duration::from_millis(PROBE_TIMEOUT_MS),
+        transport.execute(request),
+    )
+    .await
+    .map_err(|_| CompatibleCapabilityCertificationError::Transport {
+        phase: TransportPhase::FirstByte,
+        class: AttemptFailureClass::Timeout,
+    })?
+    .map_err(|error| CompatibleCapabilityCertificationError::Transport {
+        phase: error.phase,
+        class: error.class,
+    })?;
+
+    match (capability.operation, output) {
         (OperationKind::Generation, ProviderOutput::Events(mut stream)) => {
-            let mut events = Vec::new();
-            while let Some(event) = stream.next().await {
-                if events.len() >= MAX_PROBE_EVENTS {
+            let mut validator = EventSequenceValidator::new();
+            let deadline = tokio::time::Instant::now() + Duration::from_millis(PROBE_TIMEOUT_MS);
+            let mut count = 0_usize;
+            loop {
+                let event = tokio::time::timeout_at(deadline, stream.next())
+                    .await
+                    .map_err(|_| CompatibleCapabilityCertificationError::Transport {
+                        phase: TransportPhase::Body,
+                        class: AttemptFailureClass::Timeout,
+                    })?;
+                let Some(event) = event else {
+                    break;
+                };
+                if count >= MAX_PROBE_EVENTS {
                     return Err(CompatibleCapabilityCertificationError::InvalidResult);
                 }
                 let event =
@@ -303,14 +331,17 @@ async fn validate_probe_output(
                 if matches!(event.kind, Kind::Error { .. }) {
                     return Err(CompatibleCapabilityCertificationError::InvalidResult);
                 }
-                events.push(event);
+                validator
+                    .push(&event)
+                    .map_err(|_| CompatibleCapabilityCertificationError::InvalidResult)?;
+                count = count.saturating_add(1);
+                if provider_kind != ProviderKind::OpenAiCompatible && validator.is_complete() {
+                    break;
+                }
             }
-            validate_event_sequence(&events)
-                .map_err(|_| CompatibleCapabilityCertificationError::InvalidResult)?;
-            if !matches!(events.last().map(|event| &event.kind), Some(Kind::Done)) {
-                return Err(CompatibleCapabilityCertificationError::InvalidResult);
-            }
-            Ok(())
+            validator
+                .finish()
+                .map_err(|_| CompatibleCapabilityCertificationError::InvalidResult)
         }
         (OperationKind::Embeddings, ProviderOutput::Result(result)) if matches!(&*result, CanonicalResult::Embeddings(value) if !value.data.is_empty() && value.data.iter().all(|item| !item.values.is_empty())) => {
             Ok(())

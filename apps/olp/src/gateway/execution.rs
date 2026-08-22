@@ -16,7 +16,7 @@ use olp_engine::domain::{
 };
 use olp_engine::inference::{
     execution::{RequestAdmission, RoutedUnaryFinalizer},
-    limits::DistributedLimitReservation,
+    limits::Reservation,
     runtime::Bundle,
 };
 
@@ -143,7 +143,7 @@ pub(crate) fn authorize_model_access<'a>(
 pub(crate) async fn reserve_model_limits(
     state: &GatewayState,
     principal: &Principal,
-) -> Result<Option<DistributedLimitReservation>, InferenceError> {
+) -> Result<Option<Reservation>, InferenceError> {
     state
         .inference()
         .reserve_model_limits(
@@ -154,10 +154,7 @@ pub(crate) async fn reserve_model_limits(
         .map_err(Into::into)
 }
 
-pub(crate) async fn release_model_limits(
-    state: &GatewayState,
-    lease: Option<DistributedLimitReservation>,
-) {
+pub(crate) async fn release_model_limits(state: &GatewayState, lease: Option<Reservation>) {
     state.inference().release_model_limits(lease).await;
 }
 

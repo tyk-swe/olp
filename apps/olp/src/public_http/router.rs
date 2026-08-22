@@ -41,31 +41,6 @@ pub(super) const REQUEST_BODY_TIMEOUT: Duration = Duration::from_secs(30);
 /// by [`crate::observability::router`] on a separate listener. Public-auth
 /// callers must attach [`axum::extract::ConnectInfo`] with the socket peer; the
 /// hardened application listener does so automatically.
-///
-#[cfg(any(test, feature = "test-util"))]
-pub trait IntoPublicState {
-    fn into_public(self) -> Router;
-}
-
-#[cfg(any(test, feature = "test-util"))]
-impl IntoPublicState for GatewayState {
-    fn into_public(self) -> Router {
-        compose_public_router(Some(self.clone()), None, self.request_boundary.clone())
-    }
-}
-
-#[cfg(any(test, feature = "test-util"))]
-impl IntoPublicState for ManagementState {
-    fn into_public(self) -> Router {
-        compose_public_router(None, Some(self.clone()), self.request_boundary().clone())
-    }
-}
-
-#[cfg(any(test, feature = "test-util"))]
-pub fn for_state(state: impl IntoPublicState) -> Router {
-    state.into_public()
-}
-
 pub(crate) fn validated_public_router(dependencies: ModeDependencies) -> Router {
     let (gateway_state, management_state, request_limit_state): (
         Option<GatewayState>,
@@ -95,13 +70,13 @@ pub(crate) fn validated_public_router(dependencies: ModeDependencies) -> Router 
     compose_public_router(gateway_state, management_state, request_limit_state)
 }
 
-#[cfg(test)]
-pub(crate) fn gateway_router_for_test(state: GatewayState) -> Router {
+#[cfg(any(test, feature = "test-util"))]
+pub fn gateway_router_for_test(state: GatewayState) -> Router {
     compose_public_router(Some(state.clone()), None, state.request_boundary.clone())
 }
 
-#[cfg(test)]
-pub(crate) fn management_router_for_test(state: ManagementState) -> Router {
+#[cfg(any(test, feature = "test-util"))]
+pub fn management_router_for_test(state: ManagementState) -> Router {
     compose_public_router(None, Some(state.clone()), state.request_boundary().clone())
 }
 
@@ -395,10 +370,10 @@ mod tests {
                 );
                 let router = match mode {
                     crate::bootstrap::state::ApiMode::Gateway => {
-                        for_state(state.gateway_state_for_test())
+                        gateway_router_for_test(state.gateway_state_for_test())
                     }
                     crate::bootstrap::state::ApiMode::Control => {
-                        for_state(state.management_state_for_test())
+                        management_router_for_test(state.management_state_for_test())
                     }
                     crate::bootstrap::state::ApiMode::All => {
                         unreachable!("all mode is not part of this test")
@@ -448,10 +423,10 @@ mod tests {
             state.set_public_admission_limits(1, 1);
             let router = match mode {
                 crate::bootstrap::state::ApiMode::Gateway => {
-                    for_state(state.gateway_state_for_test())
+                    gateway_router_for_test(state.gateway_state_for_test())
                 }
                 crate::bootstrap::state::ApiMode::Control => {
-                    for_state(state.management_state_for_test())
+                    management_router_for_test(state.management_state_for_test())
                 }
                 crate::bootstrap::state::ApiMode::All => {
                     unreachable!("all mode is not part of this test")

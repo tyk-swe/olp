@@ -7,7 +7,7 @@ use axum::{
 use crate::bootstrap::mode_dependencies::GatewayState;
 
 use super::super::{anthropic, chat, gemini, media, openai_models, responses, videos};
-use super::registry::{ENDPOINTS, EndpointSpec, Handler};
+use super::registry::{BodyAdmission, ENDPOINTS, EndpointSpec, Handler};
 
 pub(in crate::gateway) fn router() -> Router<GatewayState> {
     ENDPOINTS.iter().fold(Router::new(), register)
@@ -41,9 +41,14 @@ fn register(router: Router<GatewayState>, spec: &'static EndpointSpec) -> Router
         Handler::GeminiModelGet => on(filter, gemini::model),
         Handler::GeminiModelAction => on(filter, gemini::action),
     };
-    let method_router = spec.axum_body_limit.map_or(method_router.clone(), |limit| {
-        method_router.layer(DefaultBodyLimit::max(limit))
-    });
+    let method_router = match spec.body_admission {
+        BodyAdmission::Multipart { reservation_bytes } => {
+            method_router.layer(DefaultBodyLimit::max(
+                usize::try_from(reservation_bytes).expect("multipart reservation fits usize"),
+            ))
+        }
+        BodyAdmission::Standard | BodyAdmission::Media => method_router,
+    };
     let router = router.route(spec.route_path, method_router.clone());
     spec.aliases.iter().fold(router, |router, alias| {
         router.route(alias.route_path, method_router.clone())

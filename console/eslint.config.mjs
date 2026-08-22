@@ -85,7 +85,6 @@ export default [
       'build/**',
       'node_modules/**',
       'playwright-report/**',
-      'storybook-static/**',
       'test-results/**',
       'src/lib/api/schema.d.ts'
     ]

@@ -15,7 +15,7 @@ use chrono::Utc;
 use futures::stream;
 use olp::{
     bootstrap::state::{ApiMode, ProcessComposition},
-    public_http::router::for_state,
+    public_http::router::gateway_router_for_test,
 };
 use olp_db::{security::key_material::AuthHmacKey, store::Store};
 use olp_engine::domain::{
@@ -262,6 +262,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     .await?;
     eprintln!("SDK smoke fixture listening on {origin}");
 
-    axum::serve(listener, for_state(gateway_state)).await?;
+    axum::serve(listener, gateway_router_for_test(gateway_state)).await?;
     Ok(())
 }

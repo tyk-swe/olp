@@ -16,7 +16,7 @@ use http_body_util::BodyExt as _;
 use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
 use olp::{
     bootstrap::state::{ApiMode, ProcessComposition},
-    public_http::router::for_state,
+    public_http::router::management_router_for_test,
 };
 use olp_db::security::envelope::MasterKey;
 use olp_engine::inference::runtime::Manager;
@@ -87,7 +87,8 @@ async fn oidc_code_flow_is_bound_validated_mapped_linked_and_session_backed() {
     api_state.master_key = Some(Arc::new(MasterKey::new(1, [42_u8; 32])));
     configure_bootstrap(&mut api_state, [43_u8; 32]);
     api_state.oidc_allow_insecure_test_endpoints = true;
-    let app = for_state(api_state.mode_dependencies().unwrap().management().unwrap());
+    let app =
+        management_router_for_test(api_state.mode_dependencies().unwrap().management().unwrap());
 
     let setup = send_json(
         &app,
@@ -155,7 +156,7 @@ async fn oidc_code_flow_is_bound_validated_mapped_linked_and_session_backed() {
     );
     oidc_only_state.local_login_enabled = false;
     configure_bootstrap(&mut oidc_only_state, [44_u8; 32]);
-    let oidc_only_app = for_state(
+    let oidc_only_app = management_router_for_test(
         oidc_only_state
             .mode_dependencies()
             .unwrap()

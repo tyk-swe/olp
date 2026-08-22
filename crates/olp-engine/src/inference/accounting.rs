@@ -13,7 +13,7 @@ use tracing::error;
 
 use crate::inference::{
     error::Error as InferenceError,
-    limits::{DistributedLimitReservation, Reservation, release},
+    limits::{Reservation, release},
     request_metadata::{
         Event as MetadataEvent, RequestAttemptMetadata, RequestAttemptUsageMetadata,
     },
@@ -90,7 +90,7 @@ struct ActiveRequestAttempt {
 }
 
 struct LimitCleanup {
-    delta_lease: Option<DistributedLimitReservation>,
+    delta_lease: Option<Reservation>,
     admission_reservation: Option<Reservation>,
     admission_reserved_tokens: Option<i64>,
     actual_tokens: Option<i64>,
@@ -151,7 +151,7 @@ pub struct RequestAccountingGuard {
     usage: UsageCapture,
     surface: Surface,
     operation: OperationKind,
-    lease: Option<DistributedLimitReservation>,
+    lease: Option<Reservation>,
     admission_reservation: Option<Reservation>,
     admission_reserved_tokens: Option<i64>,
     active_attempt: Option<ActiveRequestAttempt>,
@@ -162,7 +162,7 @@ impl RequestAccountingGuard {
     pub(in crate::inference) fn new(
         service: Service,
         input: RequestAccountingInput,
-        lease: Option<DistributedLimitReservation>,
+        lease: Option<Reservation>,
         admission_reservation: Option<Reservation>,
         admission_reserved_tokens: Option<i64>,
     ) -> Self {
@@ -581,7 +581,7 @@ mod tests {
     };
     use crate::{
         domain::ports::BoxFuture,
-        inference::limits::{DistributedLimitReservation, LimitError, LimitLease, Reservation},
+        inference::limits::{LimitError, LimitLease, Reservation},
     };
     use chrono::Utc;
     use uuid::Uuid;
@@ -628,9 +628,7 @@ mod tests {
         let admission_reservation = Reservation::distributed(recording_lease(&admission));
         let repeated_cleanup = admission_reservation.clone();
         LimitCleanup {
-            delta_lease: Some(DistributedLimitReservation::for_test(recording_lease(
-                &delta,
-            ))),
+            delta_lease: Some(Reservation::distributed(recording_lease(&delta))),
             admission_reservation: Some(admission_reservation.clone()),
             admission_reserved_tokens: Some(100),
             actual_tokens,
@@ -724,9 +722,7 @@ mod tests {
 
         let delta = Arc::new(CleanupEffects::default());
         LimitCleanup {
-            delta_lease: Some(DistributedLimitReservation::for_test(recording_lease(
-                &delta,
-            ))),
+            delta_lease: Some(Reservation::distributed(recording_lease(&delta))),
             admission_reservation: None,
             admission_reserved_tokens: None,
             actual_tokens: Some(40),

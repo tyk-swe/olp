@@ -230,7 +230,7 @@ async fn public_router_serves_console_health_and_hides_observability_paths() {
         "https://olp.example.test",
         console_dir.clone(),
     );
-    let app = for_state(state.management_state_for_test());
+    let app = management_router_for_test(state.management_state_for_test());
 
     let health = app
         .clone()
@@ -444,7 +444,7 @@ async fn management_openapi_is_only_served_on_the_versioned_route() {
         "<!doctype html><title>OLP</title>",
     )
     .unwrap();
-    let app = for_state(
+    let app = management_router_for_test(
         ProcessComposition::new(
             ApiMode::Control,
             None,
@@ -476,7 +476,7 @@ async fn management_openapi_is_only_served_on_the_versioned_route() {
 
 #[tokio::test]
 async fn management_extractor_rejections_are_rfc9457_without_query_reflection() {
-    let app = for_state(
+    let app = management_router_for_test(
         ProcessComposition::new(
             ApiMode::Control,
             None,

@@ -1,15 +1,12 @@
 import { expect, test } from '@playwright/test';
 import {
   mockApiKeys,
-  mockPlaygroundRun,
   mockProviders,
   mockRecentRequests,
   mockRoutes,
   mockShell,
-  mockUsage,
   SCREENSHOT_NOW
 } from './fixtures';
-import { mockProviderKinds } from '../e2e/provider-capabilities';
 
 // Playwright resolves screenshot paths against the process CWD, which is the
 // console directory for `pnpm screenshots`.
@@ -65,73 +62,4 @@ test('overview dashboard', async ({ page }) => {
   await expect(page.getByText('3 active').first()).toBeVisible();
   await expect(page.getByRole('region', { name: 'Five most recent requests' })).toContainText('support-chat');
   await capture(page, 'overview');
-});
-
-test('providers list', async ({ page }) => {
-  await mockProviders(page);
-
-  await page.goto('/providers');
-  await expect(page.getByRole('heading', { name: 'Providers' })).toBeVisible();
-  await expect(page.getByRole('link', { name: 'openai-production' })).toBeVisible();
-  await expect(page.getByRole('link', { name: 'vertex-gemini' })).toBeVisible();
-  await capture(page, 'providers');
-});
-
-test('compatible-provider preset wizard', async ({ page }) => {
-  await mockProviderKinds(page);
-
-  await page.goto('/providers/new');
-  await page
-    .getByRole('radio', { name: /OpenAI-compatible/ })
-    .check();
-  await page.getByLabel('Compatible provider').selectOption('groq');
-  await page.getByLabel('Provider name').fill('groq-production');
-  await expect(page.getByLabel('Preset endpoint')).toHaveValue(
-    'https://api.groq.com/openai/v1'
-  );
-  await capture(page, 'provider-wizard');
-});
-
-test('routes list', async ({ page }) => {
-  await mockRoutes(page);
-
-  await page.goto('/routes');
-  await expect(page.getByRole('heading', { name: 'Routes', exact: true })).toBeVisible();
-  await expect(page.getByRole('cell', { name: 'support-chat' })).toBeVisible();
-  await expect(page.getByRole('cell', { name: 'vision-triage' })).toBeVisible();
-  await capture(page, 'routes');
-});
-
-test('api keys list', async ({ page }) => {
-  await mockApiKeys(page);
-
-  await page.goto('/api-keys');
-  await expect(page.getByRole('heading', { name: 'API Keys' })).toBeVisible();
-  await expect(page.getByText('production-web-app')).toBeVisible();
-  await expect(page.getByText('partner-catalog-readonly')).toBeVisible();
-  await capture(page, 'api-keys');
-});
-
-test('usage dashboard', async ({ page }) => {
-  await mockUsage(page);
-
-  await page.goto('/usage');
-  await expect(page.getByRole('heading', { name: 'Usage', exact: true })).toBeVisible();
-  await expect(page.getByText('support-chat')).toBeVisible();
-  await capture(page, 'usage');
-});
-
-test('playground with completed run', async ({ page }) => {
-  await mockPlaygroundRun(page);
-
-  await page.goto('/playground');
-  await expect(page.getByRole('heading', { name: 'Playground' })).toBeVisible();
-  await page.getByLabel('Route slug').fill('support-chat');
-  await page
-    .getByLabel('Prompt')
-    .fill('A customer asks how to return an order. Reply as the support assistant.');
-  await page.getByRole('button', { name: 'Run test' }).click();
-  await expect(page.getByRole('heading', { name: 'Result' })).toBeVisible();
-  await expect(page.getByText('Welcome back!')).toBeVisible();
-  await capture(page, 'playground');
 });

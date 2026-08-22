@@ -1,5 +1,6 @@
-use std::fmt;
+use std::{borrow::Cow, fmt};
 
+use percent_encoding::percent_decode_str;
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 use url::{Position, Url};
 
@@ -20,16 +21,15 @@ impl RelativeReturnTo {
             || value.starts_with("//")
             || value.chars().any(char::is_control)
             || value.contains('\\')
-            || !has_valid_percent_encoding(value.as_bytes())
         {
             return Err(RelativeReturnToError);
         }
 
-        let decoded_prefix = percent_decode_prefix(value.as_bytes(), 3);
-        if decoded_prefix.starts_with(b"//")
-            || decoded_prefix
-                .iter()
-                .any(|byte| *byte == b'\\' || byte.is_ascii_control())
+        let decoded_value = percent_decode(value).ok_or(RelativeReturnToError)?;
+        if decoded_value.starts_with("//")
+            || decoded_value
+                .chars()
+                .any(|character| character == '\\' || character.is_control())
         {
             return Err(RelativeReturnToError);
         }
@@ -43,18 +43,8 @@ impl RelativeReturnTo {
             return Err(RelativeReturnToError);
         }
 
-        let decoded_value = percent_decode(value.as_bytes()).ok_or(RelativeReturnToError)?;
-        let decoded_value =
-            std::str::from_utf8(&decoded_value).map_err(|_| RelativeReturnToError)?;
-        if decoded_value
-            .chars()
-            .any(|character| character == '\\' || character.is_control())
-        {
-            return Err(RelativeReturnToError);
-        }
-        let decoded_path = percent_decode(parsed.path().as_bytes()).ok_or(RelativeReturnToError)?;
-        let decoded_path = std::str::from_utf8(&decoded_path).map_err(|_| RelativeReturnToError)?;
-        let normalized_decoded_path = normalize_decoded_path(decoded_path);
+        let decoded_path = percent_decode(parsed.path()).ok_or(RelativeReturnToError)?;
+        let normalized_decoded_path = normalize_decoded_path(&decoded_path);
         if normalized_decoded_path.starts_with("//") {
             return Err(RelativeReturnToError);
         }
@@ -149,6 +139,12 @@ pub(crate) fn has_valid_percent_encoding(bytes: &[u8]) -> bool {
     true
 }
 
+pub(crate) fn percent_decode(value: &str) -> Option<Cow<'_, str>> {
+    has_valid_percent_encoding(value.as_bytes())
+        .then(|| percent_decode_str(value).decode_utf8().ok())
+        .flatten()
+}
+
 fn normalize_decoded_path(path: &str) -> String {
     let mut segments = Vec::new();
     for segment in path.strip_prefix('/').unwrap_or(path).split('/') {
@@ -161,53 +157,6 @@ fn normalize_decoded_path(path: &str) -> String {
         }
     }
     format!("/{}", segments.join("/"))
-}
-
-fn percent_decode(bytes: &[u8]) -> Option<Vec<u8>> {
-    if !has_valid_percent_encoding(bytes) {
-        return None;
-    }
-    let mut decoded = Vec::with_capacity(bytes.len());
-    let mut index = 0;
-    while index < bytes.len() {
-        if bytes[index] == b'%' {
-            let high = hex(bytes[index + 1])?;
-            let low = hex(bytes[index + 2])?;
-            decoded.push((high << 4) | low);
-            index += 3;
-        } else {
-            decoded.push(bytes[index]);
-            index += 1;
-        }
-    }
-    Some(decoded)
-}
-
-fn percent_decode_prefix(bytes: &[u8], decoded_bytes: usize) -> Vec<u8> {
-    let mut output = Vec::with_capacity(decoded_bytes);
-    let mut index = 0;
-    while index < bytes.len() && output.len() < decoded_bytes {
-        if bytes[index] == b'%'
-            && index + 2 < bytes.len()
-            && let (Some(high), Some(low)) = (hex(bytes[index + 1]), hex(bytes[index + 2]))
-        {
-            output.push((high << 4) | low);
-            index += 3;
-            continue;
-        }
-        output.push(bytes[index]);
-        index += 1;
-    }
-    output
-}
-
-fn hex(value: u8) -> Option<u8> {
-    match value {
-        b'0'..=b'9' => Some(value - b'0'),
-        b'a'..=b'f' => Some(value - b'a' + 10),
-        b'A'..=b'F' => Some(value - b'A' + 10),
-        _ => None,
-    }
 }
 
 #[cfg(test)]

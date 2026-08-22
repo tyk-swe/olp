@@ -653,7 +653,10 @@ pub(super) async fn exercise(store: &Store, actor: Uuid, master_key: &MasterKey)
     .await
     .unwrap();
     assert!(corrupt_sequence > key_revocation.release.sequence);
-    let recent_valid = store.recent_valid_runtime_releases(16).await.unwrap();
+    let recent_valid = store
+        .recent_valid_runtime_releases_after(16, None)
+        .await
+        .unwrap();
     assert_eq!(recent_valid[0].sequence, key_revocation.release.sequence);
     assert!(
         recent_valid

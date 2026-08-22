@@ -1,7 +1,7 @@
 import { defineConfig, devices } from '@playwright/test';
 
 /**
- * Captures the console screenshots published in README.md and docs/.
+ * Captures the console overview published in README.md.
  * The suite mocks the management API with deterministic seed data, so it runs
  * without a backend and can be regenerated whenever the UI evolves:
  *

@@ -126,10 +126,7 @@ impl Breaker {
     }
 
     pub fn record_success(&self, target: TargetId) {
-        self.inner
-            .lock()
-            .expect("circuit state lock poisoned")
-            .remove(&target);
+        self.record_success_for_optional_permit(target, None);
     }
 
     /// Releases a half-open probe that ended before the provider was called.
@@ -161,146 +158,7 @@ impl Breaker {
     }
 
     pub fn record_failure(&self, target: TargetId, class: AttemptFailureClass) {
-        if !counts_toward_circuit(class) {
-            return;
-        }
-        let now = Instant::now();
-        let mut states = self.inner.lock().expect("circuit state lock poisoned");
-        let next = match states.get(&target).copied() {
-            Some(CircuitState::HalfOpen { .. } | CircuitState::Open { .. }) => CircuitState::Open {
-                until: now + self.open_duration,
-            },
-            Some(CircuitState::Closed {
-                consecutive_failures,
-            }) => {
-                let failures = consecutive_failures.saturating_add(1);
-                if failures >= self.failure_threshold {
-                    CircuitState::Open {
-                        until: now + self.open_duration,
-                    }
-                } else {
-                    CircuitState::Closed {
-                        consecutive_failures: failures,
-                    }
-                }
-            }
-            None => {
-                if self.failure_threshold == 1 {
-                    CircuitState::Open {
-                        until: now + self.open_duration,
-                    }
-                } else {
-                    CircuitState::Closed {
-                        consecutive_failures: 1,
-                    }
-                }
-            }
-        };
-        states.insert(target, next);
-    }
-
-    /// Record a successful outcome only if the permit still owns the
-    /// currently observable circuit generation.
-    pub(in crate::inference) fn record_success_for_permit(
-        &self,
-        target: TargetId,
-        permit: &CircuitPermit,
-    ) {
-        let mut states = self.inner.lock().expect("circuit state lock poisoned");
-
-        match permit.probe_generation {
-            Some(generation) => {
-                if !matches!(
-                    states.get(&target),
-                    Some(CircuitState::HalfOpen {
-                        generation: current_generation,
-                        ..
-                    }) if *current_generation == generation
-                ) {
-                    return;
-                }
-            }
-            None => {
-                if matches!(
-                    states.get(&target),
-                    Some(CircuitState::Open { .. }) | Some(CircuitState::HalfOpen { .. })
-                ) {
-                    return;
-                }
-            }
-        }
-
-        states.remove(&target);
-    }
-
-    /// Record a failed outcome only if the permit still owns the
-    /// currently observable circuit generation.
-    pub(in crate::inference) fn record_failure_for_permit(
-        &self,
-        target: TargetId,
-        permit: &CircuitPermit,
-        class: AttemptFailureClass,
-    ) {
-        if !counts_toward_circuit(class) {
-            return;
-        }
-        let now = Instant::now();
-        let mut states = self.inner.lock().expect("circuit state lock poisoned");
-
-        match permit.probe_generation {
-            Some(generation) => {
-                if !matches!(
-                    states.get(&target),
-                    Some(CircuitState::HalfOpen {
-                        generation: current_generation,
-                        ..
-                    }) if *current_generation == generation
-                ) {
-                    return;
-                }
-            }
-            None => {
-                // A normal closed-state attempt must not overwrite
-                // a newer Open or HalfOpen observation.
-                if matches!(
-                    states.get(&target),
-                    Some(CircuitState::Open { .. }) | Some(CircuitState::HalfOpen { .. })
-                ) {
-                    return;
-                }
-            }
-        }
-        let next = match states.get(&target).copied() {
-            Some(CircuitState::HalfOpen { .. } | CircuitState::Open { .. }) => CircuitState::Open {
-                until: now + self.open_duration,
-            },
-            Some(CircuitState::Closed {
-                consecutive_failures,
-            }) => {
-                let failures = consecutive_failures.saturating_add(1);
-                if failures >= self.failure_threshold {
-                    CircuitState::Open {
-                        until: now + self.open_duration,
-                    }
-                } else {
-                    CircuitState::Closed {
-                        consecutive_failures: failures,
-                    }
-                }
-            }
-            None => {
-                if self.failure_threshold == 1 {
-                    CircuitState::Open {
-                        until: now + self.open_duration,
-                    }
-                } else {
-                    CircuitState::Closed {
-                        consecutive_failures: 1,
-                    }
-                }
-            }
-        };
-        states.insert(target, next);
+        self.record_failure_for_optional_permit(target, None, class);
     }
 
     pub(in crate::inference) fn record_success_for_optional_permit(
@@ -308,10 +166,9 @@ impl Breaker {
         target: TargetId,
         permit: Option<&CircuitPermit>,
     ) {
-        if let Some(permit) = permit {
-            self.record_success_for_permit(target, permit);
-        } else {
-            self.record_success(target);
+        let mut states = self.inner.lock().expect("circuit state lock poisoned");
+        if Self::permit_is_current(&states, target, permit) {
+            states.remove(&target);
         }
     }
 
@@ -321,10 +178,55 @@ impl Breaker {
         permit: Option<&CircuitPermit>,
         class: AttemptFailureClass,
     ) {
-        if let Some(permit) = permit {
-            self.record_failure_for_permit(target, permit, class);
+        if !counts_toward_circuit(class) {
+            return;
+        }
+        let now = Instant::now();
+        let mut states = self.inner.lock().expect("circuit state lock poisoned");
+        if !Self::permit_is_current(&states, target, permit) {
+            return;
+        }
+        let failures = match states.get(&target) {
+            Some(CircuitState::Closed {
+                consecutive_failures,
+            }) => consecutive_failures.saturating_add(1),
+            Some(CircuitState::Open { .. } | CircuitState::HalfOpen { .. }) => {
+                self.failure_threshold
+            }
+            None => 1,
+        };
+        let next = if failures >= self.failure_threshold {
+            CircuitState::Open {
+                until: now + self.open_duration,
+            }
         } else {
-            self.record_failure(target, class);
+            CircuitState::Closed {
+                consecutive_failures: failures,
+            }
+        };
+        states.insert(target, next);
+    }
+
+    fn permit_is_current(
+        states: &BTreeMap<TargetId, CircuitState>,
+        target: TargetId,
+        permit: Option<&CircuitPermit>,
+    ) -> bool {
+        let Some(permit) = permit else {
+            return true;
+        };
+        match permit.probe_generation {
+            Some(generation) => matches!(
+                states.get(&target),
+                Some(CircuitState::HalfOpen {
+                    generation: current,
+                    ..
+                }) if *current == generation
+            ),
+            None => !matches!(
+                states.get(&target),
+                Some(CircuitState::Open { .. } | CircuitState::HalfOpen { .. })
+            ),
         }
     }
 

@@ -124,21 +124,11 @@ impl WorkerTaskHealthSummary {
     }
 
     #[must_use]
-    pub fn current(&self) -> bool {
-        self.current_for(&WorkerTask::ALL)
-    }
-
-    #[must_use]
     pub fn current_for(&self, expected_tasks: &[WorkerTask]) -> bool {
         self.tasks
             .iter()
             .filter(|task| expected_tasks.contains(&task.task))
             .all(|task| task.state == WorkerTaskState::Healthy)
-    }
-
-    #[must_use]
-    pub fn stale_tasks(&self) -> u64 {
-        self.stale_tasks_for(&WorkerTask::ALL)
     }
 
     #[must_use]
@@ -150,11 +140,6 @@ impl WorkerTaskHealthSummary {
             .count()
             .try_into()
             .unwrap_or(u64::MAX)
-    }
-
-    #[must_use]
-    pub fn unknown_tasks(&self) -> u64 {
-        self.unknown_tasks_for(&WorkerTask::ALL)
     }
 
     #[must_use]
@@ -539,7 +524,7 @@ mod tests {
             ],
         };
 
-        assert!(!summary.current());
+        assert!(!summary.current_for(&WorkerTask::ALL));
         assert!(summary.current_for(&[WorkerTask::RuntimeOutbox]));
         assert!(!summary.current_for(&[WorkerTask::RuntimeOutbox, WorkerTask::Maintenance]));
         assert_eq!(summary.stale_tasks_for(&[WorkerTask::Maintenance]), 1);
@@ -561,9 +546,12 @@ mod tests {
         let summary = WorkerTaskHealthSummary::unknown();
 
         assert_eq!(summary.tasks.len(), WorkerTask::ALL.len());
-        assert!(!summary.current());
-        assert_eq!(summary.stale_tasks(), 0);
-        assert_eq!(summary.unknown_tasks(), WorkerTask::ALL.len() as u64);
+        assert!(!summary.current_for(&WorkerTask::ALL));
+        assert_eq!(summary.stale_tasks_for(&WorkerTask::ALL), 0);
+        assert_eq!(
+            summary.unknown_tasks_for(&WorkerTask::ALL),
+            WorkerTask::ALL.len() as u64
+        );
         assert_eq!(summary.last_progress_at(), None);
     }
 

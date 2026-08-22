@@ -17,7 +17,7 @@ FUZZ_TRIPLE = $(shell rustc -vV | sed -n 's/^host: //p')
 .DEFAULT_GOAL := help
 
 .PHONY: help check boundaries source-size storage-sqlx fmt fmt-fix clippy test \
-	coverage console-install console-verify console-e2e console-storybook \
+	coverage console-install console-verify console-e2e \
 	screenshots openapi sqlx-prepare sqlx-check db-test release-version \
 	supply-chain helm-verify script-selftest shellcheck fuzz-check \
 	fuzz-replay fuzz-campaign sdk-smoke sdk-smoke-install e2e worker-ha
@@ -29,7 +29,7 @@ help: ## List available targets
 # Every required-tier gate that needs only the standard toolchain. CI
 # additionally enforces the coverage floor (make coverage), the DB/Valkey
 # suites (make db-test), the fuzz replay (make fuzz-replay), sdk-smoke,
-# storybook/e2e browsers, image builds, helm-verify (needs helm + docker
+# e2e browsers, image builds, helm-verify (needs helm + docker
 # compose), and the actionlint/hadolint/cargo-deny quality steps.
 check: boundaries source-size storage-sqlx shellcheck script-selftest fmt clippy test console-verify release-version supply-chain ## Broad local gate; CI also runs service/tool-specific required jobs
 
@@ -72,9 +72,6 @@ console-verify: ## Console gate: api:check + vitest + svelte-check/eslint + buil
 
 console-e2e: ## Console Playwright e2e suite
 	pnpm --dir console test:e2e
-
-console-storybook: ## Storybook interaction and accessibility tests
-	pnpm --dir console test:storybook
 
 screenshots: ## Regenerate docs/assets/screenshots/*.png from console fixtures
 	pnpm --dir console screenshots

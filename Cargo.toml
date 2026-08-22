@@ -35,6 +35,7 @@ hyper-util = { version = "0.1", features = ["http1", "http2", "server", "server-
 ipnet = "2"
 jsonwebtoken = { version = "11", default-features = false, features = ["aws_lc_rs"] }
 mime = "0.3"
+percent-encoding = "2"
 proptest = "1"
 rand = "0.9"
 redis = { version = "1.4", features = ["aio", "connection-manager", "streams", "tokio-comp"] }

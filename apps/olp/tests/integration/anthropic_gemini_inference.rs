@@ -21,7 +21,7 @@ use olp::{
         mode_dependencies::GatewayState,
         state::{ApiMode, ProcessComposition},
     },
-    public_http::router::for_state,
+    public_http::router::gateway_router_for_test,
 };
 use olp_db::{security::key_material::AuthHmacKey, store::Store};
 use olp_engine::domain::{
@@ -326,7 +326,7 @@ fn post_json(path: &str, header: (&str, &str), body: Value) -> Request<Body> {
 #[tokio::test]
 async fn anthropic_unary_count_models_and_native_errors_use_the_shared_pipeline() {
     let fixture = test_gateway();
-    let app = for_state(fixture.state.clone());
+    let app = gateway_router_for_test(fixture.state.clone());
     let response = app
         .clone()
         .oneshot(post_json(
@@ -460,7 +460,7 @@ async fn anthropic_unary_count_models_and_native_errors_use_the_shared_pipeline(
 #[tokio::test]
 async fn both_gemini_versions_support_unary_sdk_sse_count_and_models() {
     let fixture = test_gateway();
-    let app = for_state(fixture.state.clone());
+    let app = gateway_router_for_test(fixture.state.clone());
     for version in ["v1", "v1beta"] {
         let response = app
             .clone()
@@ -584,7 +584,7 @@ async fn both_gemini_versions_support_unary_sdk_sse_count_and_models() {
 #[tokio::test]
 async fn inline_media_is_admitted_for_same_protocol_and_rejected_when_malformed_or_oversized() {
     let fixture = test_gateway();
-    let app = for_state(fixture.state.clone());
+    let app = gateway_router_for_test(fixture.state.clone());
     let response = app
         .clone()
         .oneshot(post_json(
@@ -689,7 +689,7 @@ async fn certified_cross_protocol_tuple_is_runtime_reachable_without_semantic_lo
             )]),
         )
         .unwrap();
-    let app = for_state(fixture.state.clone());
+    let app = gateway_router_for_test(fixture.state.clone());
 
     let response = app
         .clone()
@@ -881,7 +881,7 @@ async fn streaming_never_fails_over_after_the_first_canonical_event() {
         .runtime()
         .install(snapshot, transports)
         .unwrap();
-    let response = for_state(fixture.state)
+    let response = gateway_router_for_test(fixture.state)
         .oneshot(post_json(
             "/anthropic/v1/messages",
             ("x-api-key", &fixture.key),
@@ -996,7 +996,7 @@ async fn client_disconnect_drops_the_upstream_stream() {
             )]),
         )
         .unwrap();
-    let response = for_state(fixture.state)
+    let response = gateway_router_for_test(fixture.state)
         .oneshot(post_json(
             "/anthropic/v1/messages",
             ("x-api-key", &fixture.key),

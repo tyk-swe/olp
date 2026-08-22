@@ -4,7 +4,7 @@
 //! overrides and fixed fake credentials out of production configuration while
 //! exercising the same connector objects and factory assembly used at runtime.
 
-use std::{fmt, sync::Arc};
+use std::sync::Arc;
 
 use crate::domain::{ports::BoxFuture, routing::provider::ProviderKind};
 use zeroize::Zeroizing;
@@ -44,7 +44,7 @@ impl BearerTokenProvider for StaticToken {
 pub async fn local_provider(
     kind: ProviderKind,
     origin: &str,
-) -> Result<LocalProvider, LocalProviderError> {
+) -> Result<Facade, LocalProviderError> {
     let facade = match kind {
         ProviderKind::OpenAi => {
             factory_provider(Config::OpenAi {
@@ -112,7 +112,7 @@ pub async fn local_provider(
             )
         }
     };
-    Ok(LocalProvider(facade))
+    Ok(facade)
 }
 
 async fn factory_provider(config: Config) -> Result<Facade, LocalProviderError> {
@@ -122,26 +122,6 @@ async fn factory_provider(config: Config) -> Result<Facade, LocalProviderError> 
     )
     .await
     .map_err(|error| LocalProviderError(error.to_string()))
-}
-
-pub struct LocalProvider(Facade);
-
-impl LocalProvider {
-    #[must_use]
-    pub const fn facade(&self) -> &Facade {
-        &self.0
-    }
-
-    #[must_use]
-    pub fn into_transport(self) -> Arc<dyn crate::domain::ports::ProviderTransport> {
-        self.0.into_transport()
-    }
-}
-
-impl fmt::Debug for LocalProvider {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str("LocalProvider([REDACTED])")
-    }
 }
 
 #[derive(Debug, thiserror::Error)]

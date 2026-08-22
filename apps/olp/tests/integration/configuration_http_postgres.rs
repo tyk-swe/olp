@@ -17,7 +17,7 @@ use axum::{
 use http_body_util::BodyExt as _;
 use olp::{
     bootstrap::state::{ApiMode, ProcessComposition},
-    public_http::router::for_state,
+    public_http::router::management_router_for_test,
 };
 use olp_db::security::envelope::MasterKey;
 use olp_engine::inference::runtime::Manager;
@@ -57,7 +57,7 @@ async fn configuration_http_flow_enforces_etags_roles_idempotency_and_one_time_s
     state.master_key = Some(Arc::new(MasterKey::new(1, [7; 32])));
     configure_bootstrap(&mut state, [9; 32]);
     let configuration_state = state.clone();
-    let app = for_state(state.mode_dependencies().unwrap().management().unwrap());
+    let app = management_router_for_test(state.mode_dependencies().unwrap().management().unwrap());
     let mock_provider = MockOpenAiProvider::spawn().await;
 
     let setup = send(

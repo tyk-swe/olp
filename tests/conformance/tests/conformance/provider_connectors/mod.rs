@@ -1543,7 +1543,6 @@ async fn every_reviewed_capability_tuple_executes_its_certification_contract() {
                 MODEL
             };
             provider
-                .facade()
                 .certify_capability(upstream_model, capability)
                 .await
                 .unwrap_or_else(|error| {

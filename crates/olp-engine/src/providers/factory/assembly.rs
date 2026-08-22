@@ -34,7 +34,7 @@ pub struct Factory;
 
 impl Factory {
     pub fn validate(config: &Config) -> Result<(), Error> {
-        validate_connector_configuration(config.spec())
+        validate_connector_configuration(config)
     }
 
     pub fn credential_kind(config: &Config) -> Result<CredentialKind, Error> {
@@ -61,7 +61,7 @@ impl Factory {
 
     #[cfg(any(test, feature = "test-util"))]
     pub fn validate_with_unsafe_test_endpoints(config: &Config) -> Result<(), Error> {
-        validate_connector_configuration_with_policy(config.spec(), true)
+        validate_connector_configuration_with_policy(config, true)
     }
 
     #[cfg(any(test, feature = "test-util"))]
@@ -98,7 +98,7 @@ impl Factory {
             }
             Credential::AwsStatic(value) => BorrowedCredential::Bytes(value.as_slice()),
         };
-        build_connector(config.spec(), borrowed, allow_unsafe_test_targets).await
+        build_connector(&config, borrowed, allow_unsafe_test_targets).await
     }
 
     pub async fn transport(
@@ -118,14 +118,7 @@ pub struct Facade {
 
 impl Facade {
     pub fn into_transport(self) -> Arc<dyn ProviderTransport> {
-        match self.connector {
-            ConcreteConnector::OpenAi(connector) => connector,
-            ConcreteConnector::Anthropic(connector) => connector,
-            ConcreteConnector::Gemini(connector) => connector,
-            ConcreteConnector::Vertex(connector) => connector,
-            ConcreteConnector::Bedrock(connector) => connector,
-            ConcreteConnector::AzureOpenAi(connector) => connector,
-        }
+        self.connector.into_transport()
     }
 
     pub async fn discover_models(&self) -> Result<Vec<DiscoveredProviderModel>, String> {
@@ -166,13 +159,37 @@ pub(super) enum ConcreteConnector {
     AzureOpenAi(Arc<AzureOpenAiConnector>),
 }
 
+impl ConcreteConnector {
+    pub(super) fn as_transport(&self) -> &dyn ProviderTransport {
+        match self {
+            Self::OpenAi(connector) => connector.as_ref(),
+            Self::Anthropic(connector) => connector.as_ref(),
+            Self::Gemini(connector) => connector.as_ref(),
+            Self::Vertex(connector) => connector.as_ref(),
+            Self::Bedrock(connector) => connector.as_ref(),
+            Self::AzureOpenAi(connector) => connector.as_ref(),
+        }
+    }
+
+    fn into_transport(self) -> Arc<dyn ProviderTransport> {
+        match self {
+            Self::OpenAi(connector) => connector,
+            Self::Anthropic(connector) => connector,
+            Self::Gemini(connector) => connector,
+            Self::Vertex(connector) => connector,
+            Self::Bedrock(connector) => connector,
+            Self::AzureOpenAi(connector) => connector,
+        }
+    }
+}
+
 async fn build_connector(
-    spec: super::configuration::ConnectorSpec<'_>,
+    config: &Config,
     credential: BorrowedCredential<'_>,
     allow_unsafe_test_targets: bool,
 ) -> Result<Facade, Error> {
-    let kind = spec.kind;
-    let connector = match connector_configuration_with_policy(spec, allow_unsafe_test_targets)? {
+    let kind = config.kind();
+    let connector = match connector_configuration_with_policy(config, allow_unsafe_test_targets)? {
         ConnectorConfiguration::OpenAi(configuration) => {
             let key = OpenAiApiKey::new(
                 text_credential(credential, "OpenAI provider credential is missing")?.to_owned(),

@@ -62,8 +62,8 @@ use super::{
         validation::{JsonBodyReadError, read_json_body, validate_json_depth},
     },
     public_http::router::{
-        for_state, http_request_span, request_trace_path, sensitive_request_headers,
-        sensitive_response_headers,
+        gateway_router_for_test, http_request_span, management_router_for_test, request_trace_path,
+        sensitive_request_headers, sensitive_response_headers,
     },
 };
 

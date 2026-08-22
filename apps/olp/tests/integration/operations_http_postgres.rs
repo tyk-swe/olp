@@ -10,7 +10,7 @@ use http_body_util::BodyExt as _;
 use olp::{
     bootstrap::state::{ApiMode, ProcessComposition},
     observability::{cache::refresh_observability_cache, router as observability_router},
-    public_http::router::for_state,
+    public_http::router::management_router_for_test,
 };
 use olp_db::{
     request_metadata::reconciliation::Gap,
@@ -49,7 +49,7 @@ async fn operations_http_contract_is_authorized_paginated_exact_and_metadata_onl
     configure_bootstrap(&mut state, [32; 32]);
     let dependencies = state.mode_dependencies().unwrap();
     let observability_state = dependencies.observability();
-    let app = for_state(dependencies.management().unwrap());
+    let app = management_router_for_test(dependencies.management().unwrap());
     let observability = observability_router(observability_state.clone());
 
     let setup = send(

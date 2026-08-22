@@ -14,7 +14,7 @@ use http_body_util::BodyExt as _;
 use olp::{
     bootstrap::state::{ApiMode, ProcessComposition},
     gateway::media_jobs::reconcile_media_jobs_once,
-    public_http::router::for_state,
+    public_http::router::{gateway_router_for_test, management_router_for_test},
 };
 use olp_db::{
     media_jobs::MediaJobState, media_jobs::MediaJobUpdate, media_jobs::NewMediaJobReservation,
@@ -170,7 +170,7 @@ async fn media_job_management_views_are_session_authorized_and_metadata_only() {
         PathBuf::from("missing-console-for-media-job-test"),
     );
     configure_bootstrap(&mut state, [18; 32]);
-    let app = for_state(state.mode_dependencies().unwrap().management().unwrap());
+    let app = management_router_for_test(state.mode_dependencies().unwrap().management().unwrap());
 
     let mut setup_request = Request::post("/api/v1/setup")
         .header(header::CONTENT_TYPE, "application/json")
@@ -421,7 +421,7 @@ async fn media_job_management_views_are_session_authorized_and_metadata_only() {
         )
         .unwrap();
     let reconciliation_state = gateway_state.clone();
-    let gateway = for_state(
+    let gateway = gateway_router_for_test(
         gateway_state
             .mode_dependencies()
             .unwrap()

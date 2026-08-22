@@ -1,6 +1,5 @@
 use std::{
     error::Error as StdError,
-    fmt,
     future::Future,
     pin::Pin,
     sync::{
@@ -276,58 +275,6 @@ impl Drop for InferenceReservationInner {
     }
 }
 
-/// A distributed limit lease paired with the exact limiter connection that
-/// created it. Cleanup never consults the hot-swappable limiter slot.
-pub struct DistributedLimitReservation {
-    lease: Option<Arc<dyn LimitLease>>,
-}
-
-impl fmt::Debug for DistributedLimitReservation {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter
-            .debug_struct("DistributedLimitReservation")
-            .field("active", &self.lease.is_some())
-            .finish_non_exhaustive()
-    }
-}
-
-impl DistributedLimitReservation {
-    fn new(lease: Arc<dyn LimitLease>) -> Self {
-        Self { lease: Some(lease) }
-    }
-
-    #[cfg(test)]
-    pub(in crate::inference) fn for_test(lease: Arc<dyn LimitLease>) -> Self {
-        Self::new(lease)
-    }
-
-    async fn cleanup(mut self, actual_tokens: Option<i64>) {
-        let Some(lease) = self.lease.as_ref() else {
-            return;
-        };
-        if let Some(actual_tokens) = actual_tokens {
-            reconcile_distributed_limit(lease.as_ref(), actual_tokens).await;
-        }
-        release_distributed_limit(lease.as_ref()).await;
-        self.lease.take();
-    }
-}
-
-impl Drop for DistributedLimitReservation {
-    fn drop(&mut self) {
-        let Some(lease) = self.lease.take() else {
-            return;
-        };
-        if let Ok(runtime) = tokio::runtime::Handle::try_current() {
-            runtime.spawn(async move {
-                release_distributed_limit(lease.as_ref()).await;
-            });
-        } else {
-            warn!("could not release distributed limit lease outside a Tokio runtime");
-        }
-    }
-}
-
 /// Hot-swappable Valkey limiter connection used by inference services.
 #[derive(Clone, Default)]
 pub struct ReloadableLimiter {
@@ -374,7 +321,7 @@ pub async fn reserve(
     lookup_id: &str,
     lease_ttl: Duration,
     http_reserved_tokens: Option<i64>,
-) -> Result<Option<DistributedLimitReservation>, InferenceError> {
+) -> Result<Option<Reservation>, InferenceError> {
     if let Some(reserved_tokens) = http_reserved_tokens {
         let Some(tokens_per_minute) = key.limits.tokens_per_minute else {
             return Ok(None);
@@ -402,7 +349,7 @@ pub async fn reserve(
         .await
         .map_err(|_| InferenceError::unavailable("distributed_limits_unavailable"))?;
         return match result {
-            Ok(lease) => Ok(Some(DistributedLimitReservation::new(lease))),
+            Ok(lease) => Ok(Some(Reservation::distributed(lease))),
             Err(LimitError::Exceeded {
                 dimension,
                 retry_after,
@@ -444,7 +391,7 @@ pub async fn reserve(
     .await
     .map_err(|_| InferenceError::unavailable("distributed_limits_unavailable"))?;
     match result {
-        Ok(lease) => Ok(Some(DistributedLimitReservation::new(lease))),
+        Ok(lease) => Ok(Some(Reservation::distributed(lease))),
         Err(LimitError::Exceeded {
             dimension,
             retry_after,
@@ -558,9 +505,12 @@ fn estimated_content_tokens(parts: &[crate::domain::canonical::requests::Content
         .sum()
 }
 
-pub async fn release(reservation: Option<DistributedLimitReservation>, actual_tokens: Option<i64>) {
+pub async fn release(reservation: Option<Reservation>, actual_tokens: Option<i64>) {
     if let Some(reservation) = reservation {
-        reservation.cleanup(actual_tokens).await;
+        if let Some(actual_tokens) = actual_tokens {
+            reservation.reconcile(actual_tokens).await;
+        }
+        reservation.release().await;
     }
 }
 

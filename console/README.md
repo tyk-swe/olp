@@ -24,7 +24,6 @@ start.
 |---|---|
 | `pnpm verify` | API drift, tests, lint, types, and build |
 | `pnpm test:e2e` | Chromium, Firefox, WebKit, and mobile browser tests |
-| `pnpm test:storybook` | Component interaction and accessibility |
 | `pnpm test:integration` | Production build through the Rust server |
 | `pnpm screenshots` | Regenerate `../docs/assets/screenshots/` |
 

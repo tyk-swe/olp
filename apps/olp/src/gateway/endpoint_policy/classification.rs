@@ -1,5 +1,3 @@
-use std::borrow::Cow;
-
 use axum::http::Method;
 use olp_engine::domain::{
     auth::{GatewayCapability, gateway_capability_for_operation},
@@ -8,10 +6,9 @@ use olp_engine::domain::{
 };
 
 use crate::bootstrap::state::{MAX_JSON_BODY_BYTES, MAX_MEDIA_BODY_BYTES};
+use crate::public_http::relative_url::percent_decode;
 
-use super::registry::{
-    BodyAdmission, ENDPOINTS, EndpointSpec, INVALID_ROUTE, Policy, RouteExtraction,
-};
+use super::registry::{BodyAdmission, ENDPOINTS, EndpointSpec, INVALID_ROUTE, Policy};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum TokenEstimate {
@@ -182,13 +179,10 @@ impl InferenceEndpoint {
         {
             return Some(model.to_owned());
         }
-        let Self::Registered { spec, .. } = self else {
+        let Self::Registered { .. } = self else {
             return None;
         };
-        if spec.route_extraction != RouteExtraction::JsonModelOrPath {
-            return None;
-        }
-        let resource = path_model_resource(path).and_then(percent_decode_path_resource)?;
+        let resource = path_model_resource(path).and_then(percent_decode)?;
         let model = resource.split(':').next()?;
         RouteSlug::parse(model).is_ok().then(|| model.to_owned())
     }
@@ -212,41 +206,8 @@ fn path_model_resource(path: &str) -> Option<&str> {
         .filter(|resource| !resource.is_empty())
 }
 
-fn percent_decode_path_resource(resource: &str) -> Option<Cow<'_, str>> {
-    let bytes = resource.as_bytes();
-    let Some(first_percent) = bytes.iter().position(|byte| *byte == b'%') else {
-        return Some(Cow::Borrowed(resource));
-    };
-
-    let mut decoded = Vec::with_capacity(bytes.len());
-    decoded.extend_from_slice(&bytes[..first_percent]);
-    let mut index = first_percent;
-    while index < bytes.len() {
-        if bytes[index] == b'%' {
-            let high = hex_value(*bytes.get(index + 1)?)?;
-            let low = hex_value(*bytes.get(index + 2)?)?;
-            decoded.push((high << 4) | low);
-            index += 3;
-        } else {
-            decoded.push(bytes[index]);
-            index += 1;
-        }
-    }
-
-    String::from_utf8(decoded).ok().map(Cow::Owned)
-}
-
-fn hex_value(byte: u8) -> Option<u8> {
-    match byte {
-        b'0'..=b'9' => Some(byte - b'0'),
-        b'a'..=b'f' => Some(byte - b'a' + 10),
-        b'A'..=b'F' => Some(byte - b'A' + 10),
-        _ => None,
-    }
-}
-
 fn gemini_action(path: &str) -> GeminiAction {
-    let Some(resource) = path_model_resource(path).and_then(percent_decode_path_resource) else {
+    let Some(resource) = path_model_resource(path).and_then(percent_decode) else {
         return GeminiAction::Unsupported;
     };
     if resource.ends_with(":generateContent") {

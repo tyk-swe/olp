@@ -37,7 +37,6 @@ coverage
 fuzz/artifacts
 fuzz/artifacts/**
 console/.svelte-kit
-console/.storybook
 console/build
 console/node_modules
 console/.vite
@@ -45,10 +44,8 @@ console/.vite/**
 console/playwright.config.ts
 console/playwright.integration.config.ts
 console/playwright.screenshots.config.ts
-console/playwright.storybook.config.ts
 console/vite.console-preview.config.ts
 console/playwright-report
-console/storybook-static
 console/test-results
 console/tests
 deploy/helm

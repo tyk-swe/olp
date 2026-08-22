@@ -1,10 +1,39 @@
 import AxeBuilder from '@axe-core/playwright';
-import { emulateTwoHundredPercentZoom, expect, mockSession, test } from '../playwright';
+import { emulateTwoHundredPercentZoom, expect, mockSession, test, type Route } from '../playwright';
 
 const requestId = '01980000-0000-7000-8000-000000000101';
 const generationId = '01980000-0000-7000-8000-000000000102';
 const keyId = '01980000-0000-7000-8000-000000000103';
 const providerId = '01980000-0000-7000-8000-000000000104';
+
+test('request explorer loading state is accessible in forced colors at 200% zoom', async ({ page }) => {
+  await mockSession(page);
+  await page.emulateMedia({ forcedColors: 'active', reducedMotion: 'reduce' });
+  await emulateTwoHundredPercentZoom(page);
+  let pending: Route | undefined;
+  await page.route('**/api/v1/requests*', (route) => { pending = route; });
+
+  await page.goto('/requests');
+  await expect(page.getByRole('status')).toHaveText('Loading request metadata…');
+  expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+  await pending?.abort();
+});
+
+for (const state of ['empty', 'error'] as const) {
+  test(`request explorer ${state} state is accessible in forced colors at 200% zoom`, async ({ page }) => {
+    await mockSession(page);
+    await page.emulateMedia({ forcedColors: 'active', reducedMotion: 'reduce' });
+    await emulateTwoHundredPercentZoom(page);
+    await page.route('**/api/v1/requests*', async (route) => {
+      if (state === 'empty') await route.fulfill({ json: { data: [], next_cursor: null } });
+      else await route.fulfill({ status: 503, json: { detail: 'unavailable' } });
+    });
+
+    await page.goto('/requests');
+    await expect(page.getByText(state === 'empty' ? 'No matching requests' : 'Request metadata is unavailable.')).toBeVisible();
+    expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+  });
+}
 
 test('request explorer filters metadata and opens an accessible attempt timeline', async ({ page }, testInfo) => {
   await mockSession(page);

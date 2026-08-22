@@ -7,15 +7,6 @@ use crate::{error::Error, store::Store};
 use super::PublishedRuntimeRelease;
 
 impl Store {
-    /// Returns newest verified releases, skipping and visibly logging corrupt
-    /// envelopes so a replacement gateway can try its previous durable LKG.
-    pub async fn recent_valid_runtime_releases(
-        &self,
-        limit: u16,
-    ) -> Result<Vec<PublishedRuntimeRelease>, Error> {
-        self.recent_valid_runtime_releases_after(limit, None).await
-    }
-
     /// Returns verified releases newer than the supplied installed sequence.
     /// Pollers use this to avoid decoding unchanged immutable snapshots.
     pub async fn recent_valid_runtime_releases_after(
