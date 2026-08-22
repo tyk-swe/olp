@@ -64,11 +64,6 @@ impl Service {
     }
 
     #[must_use]
-    pub fn runtime_handle(&self) -> Arc<Manager> {
-        Arc::clone(&self.runtime)
-    }
-
-    #[must_use]
     pub const fn limiter(&self) -> &ReloadableLimiter {
         &self.limiter
     }

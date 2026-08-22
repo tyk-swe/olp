@@ -145,6 +145,11 @@ pub fn encode_speech_body(result: &SpeechResult) -> Result<BinaryMediaBody, Erro
     })
 }
 
+// ponytail: unwired in production — streamed audio flows through raw SSE
+// passthrough (raw_sse_response / is_raw_media_terminal), not this semantic
+// speech-stream codec. Kept only for the protocol_json fuzz target + unit tests.
+// Delete this codec together with its fuzz arm if a passthrough→semantic switch
+// is not on the roadmap.
 #[derive(Clone, Deserialize, PartialEq, Serialize)]
 pub struct SpeechStreamEvent {
     #[serde(rename = "type")]
@@ -513,6 +518,10 @@ pub fn encode_transcription_response(
     .map_err(Error::InvalidExtension)
 }
 
+// ponytail: unwired in production — streamed transcription flows through raw
+// SSE passthrough, not this semantic Decoder/Encoder. Kept only for the
+// sse_decoder fuzz target + unit tests. Delete with its fuzz arm if semantic
+// streaming stays unplanned.
 pub struct Decoder {
     sse: SseDecoder,
     sequence: u64,

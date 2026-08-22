@@ -59,11 +59,6 @@ impl RequestAdmission {
         }
     }
 
-    #[must_use]
-    pub const fn reserved_tokens(&self) -> Option<i64> {
-        self.reserved_tokens
-    }
-
     fn claim_metadata(&self) {
         if let Some(claimed) = &self.metadata_claimed {
             claimed.store(true, Ordering::Release);

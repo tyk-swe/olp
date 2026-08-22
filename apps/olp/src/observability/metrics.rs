@@ -86,7 +86,7 @@ pub(super) async fn collect_metrics(state: &ObservabilityState) -> String {
         state.store().prometheus_operations_summary(5),
         state.store().provider_health(15, None, 100),
         state.store().media_reconciliation_summary(now),
-        state.store().runtime_outbox_status(now),
+        state.store().runtime_outbox_status(),
         state.store().worker_task_health(now),
         state.store().worker_recovery_counters(),
     );

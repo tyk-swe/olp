@@ -1,9 +1,5 @@
 <script lang="ts">
-  let {
-    size = 32,
-    decorative = true,
-    label = 'OpenLLMProxy routing mark'
-  }: { size?: number; decorative?: boolean; label?: string } = $props();
+  let { size = 32 }: { size?: number } = $props();
 </script>
 
 <svg
@@ -11,9 +7,7 @@
   width={size}
   height={size}
   viewBox="0 0 32 32"
-  role={decorative ? undefined : 'img'}
-  aria-hidden={decorative ? 'true' : undefined}
-  aria-label={decorative ? undefined : label}
+  aria-hidden="true"
 >
   <rect width="32" height="32" rx="6" fill="currentColor"></rect>
   <path

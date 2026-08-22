@@ -412,6 +412,10 @@ pub fn encode_image_response(
     .map_err(ImageCodecError::InvalidExtension)
 }
 
+// ponytail: unwired in production — streamed image generation/edit flows through
+// raw SSE passthrough (is_raw_media_terminal), not this semantic image-stream
+// codec. Kept only for the protocol_json fuzz target + unit tests. Delete with
+// its fuzz arm if a passthrough→semantic switch is not planned.
 #[derive(Clone, Deserialize, PartialEq, Serialize)]
 pub struct OpenAiImageStreamEvent {
     #[serde(rename = "type")]

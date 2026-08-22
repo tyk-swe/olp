@@ -52,7 +52,6 @@ macro_rules! uuid_id {
 }
 
 uuid_id!(ApiKeyId);
-uuid_id!(AttemptId);
 uuid_id!(CredentialVersionId);
 uuid_id!(ProviderId);
 uuid_id!(RequestId);

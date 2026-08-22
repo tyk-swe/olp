@@ -175,11 +175,10 @@ struct OidcConfigurationRow {
 
 fn oidc_configuration_from_row(row: OidcConfigurationRow) -> Result<OidcConfiguration, OidcError> {
     let id: Uuid = row.id;
-    let discovery_url = required_string(row.discovery_url, "discovery_url")?;
-    let authorization_endpoint =
-        required_string(row.authorization_endpoint, "authorization_endpoint")?;
-    let token_endpoint = required_string(row.token_endpoint, "token_endpoint")?;
-    let jwks_uri = required_string(row.jwks_uri, "jwks_uri")?;
+    let discovery_url = required_string(row.discovery_url)?;
+    let authorization_endpoint = required_string(row.authorization_endpoint)?;
+    let token_endpoint = required_string(row.token_endpoint)?;
+    let jwks_uri = required_string(row.jwks_uri)?;
     let ciphertext: Option<Vec<u8>> = row.encrypted_client_secret;
     let nonce: Option<Vec<u8>> = row.secret_nonce;
     let key_version: Option<i32> = row.secret_key_version;

@@ -3,7 +3,7 @@ use uuid::Uuid;
 
 use super::helpers::{
     AuthenticatedUserRow, authenticated_user_from_row, checked_session_expiry, insert_audit,
-    insert_session, lock_email, lock_subject, normalize_display_name, normalize_email,
+    lock_email, lock_subject, normalize_display_name, normalize_email,
     require_current_enabled_configuration, validate_subject,
 };
 use super::types::{
@@ -13,7 +13,7 @@ use super::types::{
 use crate::{
     authentication::{
         RecentAuthPurpose, SessionSecurityContext, consume_recent_authentication,
-        install_recent_authentication, revoke_user_sessions,
+        insert_versioned_session, install_recent_authentication, revoke_user_sessions,
     },
     store::Store,
 };
@@ -156,7 +156,7 @@ impl Store {
         )
         .execute(&mut *transaction)
         .await?;
-        let session_id = insert_session(
+        let session_id = insert_versioned_session(
             &mut transaction,
             user.id,
             security_version,
@@ -300,7 +300,7 @@ impl Store {
         .fetch_one(&mut *transaction)
         .await?;
         let _revoked = revoke_user_sessions(&mut transaction, input.user_id).await?;
-        let session_id = insert_session(
+        let session_id = insert_versioned_session(
             &mut transaction,
             input.user_id,
             security_version,
@@ -535,7 +535,7 @@ impl Store {
         .fetch_one(&mut *transaction)
         .await?;
         let _revoked = revoke_user_sessions(&mut transaction, input.user_id).await?;
-        let session_id = insert_session(
+        let session_id = insert_versioned_session(
             &mut transaction,
             input.user_id,
             security_version,

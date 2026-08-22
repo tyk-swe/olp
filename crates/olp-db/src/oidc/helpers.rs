@@ -5,10 +5,7 @@ use uuid::Uuid;
 
 use super::configuration::OIDC_CONFIGURATION_LOCK_ID;
 use super::types::{OidcAuthenticatedUser, OidcError};
-use crate::{
-    authentication::insert_versioned_session,
-    security::{envelope::EncryptedSecret, session_material::SessionMaterial},
-};
+use crate::security::envelope::EncryptedSecret;
 
 pub(super) fn encrypted_from_row(
     key_version: i32,
@@ -22,7 +19,7 @@ pub(super) fn encrypted_from_row(
     })
 }
 
-pub(super) fn required_string(value: Option<String>, _name: &str) -> Result<String, OidcError> {
+pub(super) fn required_string(value: Option<String>) -> Result<String, OidcError> {
     value
         .filter(|value| !value.is_empty())
         .ok_or(OidcError::Corrupt)
@@ -107,25 +104,6 @@ pub(super) async fn lock_subject(
     .fetch_one(&mut **transaction)
     .await?;
     Ok(())
-}
-
-pub(super) async fn insert_session(
-    transaction: &mut Transaction<'_, Postgres>,
-    user_id: Uuid,
-    security_version: i64,
-    material: &SessionMaterial,
-    expires_at: DateTime<chrono::Utc>,
-    now: DateTime<chrono::Utc>,
-) -> Result<Uuid, OidcError> {
-    Ok(insert_versioned_session(
-        transaction,
-        user_id,
-        security_version,
-        material,
-        expires_at,
-        now,
-    )
-    .await?)
 }
 
 pub(super) async fn insert_audit(

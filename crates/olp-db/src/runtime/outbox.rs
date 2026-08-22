@@ -165,10 +165,7 @@ impl Store {
         Ok(())
     }
 
-    pub async fn runtime_outbox_status(
-        &self,
-        _now: DateTime<Utc>,
-    ) -> Result<RuntimeOutboxStatus, Error> {
+    pub async fn runtime_outbox_status(&self) -> Result<RuntimeOutboxStatus, Error> {
         let backlog = sqlx::query!(
             "SELECT count(*) AS \"pending_rows!\", min(created_at) AS oldest_pending_at \
              FROM transactional_outbox WHERE published_at IS NULL"

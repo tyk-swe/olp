@@ -353,7 +353,7 @@ async fn runtime_outbox_ambiguous_valkey_error_keeps_the_row_pending_for_retry()
         OutboxBatchOutcome::Retry
     );
     assert_eq!(unpublished_count(&store).await, 1);
-    let pending = store.runtime_outbox_status(Utc::now()).await.unwrap();
+    let pending = store.runtime_outbox_status().await.unwrap();
     assert_eq!(pending.state, RuntimeOutboxState::Backlogged);
     assert_eq!(pending.pending_rows, 1);
     assert_eq!(pending.claimed_rows, 0);
@@ -404,7 +404,7 @@ async fn stale_outbox_owner_failed_takeover_and_abandoned_claim_are_durable() {
             .unwrap()
             .is_none()
     );
-    let stale = store.runtime_outbox_status(Utc::now()).await.unwrap();
+    let stale = store.runtime_outbox_status().await.unwrap();
     assert_eq!(stale.state, RuntimeOutboxState::Stale);
     assert_eq!(stale.pending_rows, 1);
     assert_eq!(stale.claimed_rows, 1);
@@ -429,7 +429,7 @@ async fn stale_outbox_owner_failed_takeover_and_abandoned_claim_are_durable() {
     assert_eq!(counters.runtime_outbox_abandoned_claims, 1);
     takeover.release().await.unwrap();
 
-    let handoff = store.runtime_outbox_status(Utc::now()).await.unwrap();
+    let handoff = store.runtime_outbox_status().await.unwrap();
     assert!(!handoff.owner_active);
     assert!(!handoff.ownership_abandoned());
     let clean_owner = store

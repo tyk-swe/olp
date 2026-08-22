@@ -148,12 +148,9 @@ fn oidc_row_helpers_fail_closed_on_corrupt_storage() {
     assert!(encrypted_from_row(-1, vec![0; 12], vec![]).is_err());
     assert!(encrypted_from_row(1, vec![0; 11], vec![]).is_err());
 
-    assert_eq!(
-        required_string(Some("value".to_owned()), "field").unwrap(),
-        "value"
-    );
-    assert!(required_string(None, "field").is_err());
-    assert!(required_string(Some(String::new()), "field").is_err());
+    assert_eq!(required_string(Some("value".to_owned())).unwrap(), "value");
+    assert!(required_string(None).is_err());
+    assert!(required_string(Some(String::new())).is_err());
 
     let row = AuthenticatedUserRow {
         id: Uuid::now_v7(),

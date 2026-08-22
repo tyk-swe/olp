@@ -174,7 +174,7 @@ pub(super) async fn collect_readiness(
                 state.store().media_reconciliation_summary(now),
                 state.store().request_metadata_consumer_status(now),
                 state.store().request_metadata_gateway_epoch_health(),
-                state.store().runtime_outbox_status(now),
+                state.store().runtime_outbox_status(),
                 state.store().worker_task_health(now),
                 state.store().worker_recovery_counters(),
             );
