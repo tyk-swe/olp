@@ -3,7 +3,6 @@ use std::{fmt, time::Duration};
 use crate::domain::ports::{AttemptFailureClass, MediaSpoolError, TransportError, TransportPhase};
 use http::{HeaderValue, StatusCode};
 use tokio::time::Instant;
-use zeroize::Zeroizing;
 
 use crate::providers::transport_common::transport_error;
 use crate::providers::{
@@ -63,17 +62,7 @@ pub(super) fn map_spool_error(error: MediaSpoolError) -> TransportError {
 }
 
 pub(super) fn bearer_header(api_key: &ApiKey) -> Result<HeaderValue, TransportError> {
-    let mut value = Zeroizing::new(Vec::with_capacity(7 + api_key.expose().len()));
-    value.extend_from_slice(b"Bearer ");
-    value.extend_from_slice(api_key.expose().as_bytes());
-    HeaderValue::from_bytes(value.as_slice()).map_err(|_| {
-        transport_error(
-            TransportPhase::Connect,
-            AttemptFailureClass::Protocol,
-            false,
-            "OpenAI API key cannot be represented as an HTTP header",
-        )
-    })
+    transport_common::bearer_header(api_key.expose(), PROVIDER)
 }
 
 pub(super) fn raw_api_key_header(api_key: &ApiKey) -> Result<HeaderValue, TransportError> {

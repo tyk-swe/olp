@@ -24,7 +24,6 @@ base64 = "0.22"
 bytes = "1"
 chrono = { version = "0.4", features = ["serde"] }
 clap = { version = "4", features = ["derive", "env"] }
-encoding_rs = "0.8"
 futures = "0.3"
 hmac = "0.13"
 http = "1"
@@ -34,7 +33,6 @@ hyper = { version = "1", features = ["http1", "http2", "server"] }
 hyper-util = { version = "0.1", features = ["http1", "http2", "server", "server-auto", "service", "tokio"] }
 ipnet = "2"
 jsonwebtoken = { version = "11", default-features = false, features = ["aws_lc_rs"] }
-mime = "0.3"
 percent-encoding = "2"
 proptest = "1"
 rand = "0.9"

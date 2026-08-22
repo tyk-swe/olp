@@ -195,6 +195,7 @@ pub(crate) async fn provider_connector(
         .map_err(map_configuration)?;
     let config = provider_config((&provider).into())
         .map_err(|error| Problem::field_validation("provider", error.to_string()))?;
+    #[cfg(any(test, feature = "test-util"))]
     if let Some(connector) = state.certification_probe_connector(provider_id, config.kind()) {
         return Ok(connector);
     }

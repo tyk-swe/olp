@@ -23,6 +23,20 @@ pub(in crate::providers) fn secret_header(
     })
 }
 
+pub(in crate::providers) fn bearer_header(
+    secret: &str,
+    provider: &'static str,
+) -> Result<HeaderValue, TransportError> {
+    let mut value = Zeroizing::new(Vec::with_capacity("Bearer ".len() + secret.len()));
+    value.extend_from_slice(b"Bearer ");
+    value.extend_from_slice(secret.as_bytes());
+    HeaderValue::from_bytes(value.as_slice()).map_err(|_| {
+        protocol_error(format!(
+            "{provider} bearer credential cannot be represented as a header"
+        ))
+    })
+}
+
 pub(in crate::providers) fn safe_upstream_error_message(
     provider: &'static str,
     status: StatusCode,

@@ -1,8 +1,6 @@
 use crate::domain::ports::TransportError;
 use http::{HeaderValue, StatusCode};
-use zeroize::Zeroizing;
 
-use crate::providers::transport_common::protocol_error;
 use crate::providers::{
     gemini::{ApiKey, SecretBearerToken, endpoint::Error},
     transport_common,
@@ -17,11 +15,7 @@ pub(super) fn secret_header(api_key: &ApiKey) -> Result<HeaderValue, TransportEr
 }
 
 pub(super) fn bearer_header(token: &SecretBearerToken) -> Result<HeaderValue, TransportError> {
-    let mut value = Zeroizing::new(Vec::with_capacity(7 + token.expose().len()));
-    value.extend_from_slice(b"Bearer ");
-    value.extend_from_slice(token.expose().as_bytes());
-    HeaderValue::from_bytes(value.as_slice())
-        .map_err(|_| protocol_error("Google OAuth token cannot be represented as a header"))
+    transport_common::bearer_header(token.expose(), PROVIDER)
 }
 
 pub(super) fn safe_upstream_error_message(

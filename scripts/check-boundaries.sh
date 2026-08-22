@@ -6,7 +6,7 @@ workspace_root="$(cd "$(dirname "$0")/.." && pwd -P)"
 source "$workspace_root/scripts/lib/repository-validation.sh"
 cd "$workspace_root"
 
-for required_executable in rg find realpath cargo jq sort dirname awk; do
+for required_executable in grep find realpath cargo jq sed sort; do
   validation_require_executable "$required_executable"
 done
 for required_file in \
@@ -20,49 +20,32 @@ done
 
 violations=0
 
-report_matches() {
-  local message="$1"
-  local pattern="$2"
-  local path="$3"
-  shift 3
-  local output
-  local matched
-  checked_rg_capture output matched "$message" "$path" \
-    -n --no-heading "$pattern" "$@"
-  if (( matched )); then
-    printf '%s\n%s\n' "$message" "$output" >&2
-    violations=1
-  fi
-}
-
-architecture_role_is_known() {
-  case "$1" in
-    db|delivery|engine|test-harness) return 0 ;;
-    *) return 1 ;;
+# grep exit 1 is a clean no-match. Anything above that is a failed scan and
+# must never be read as "no violations", so it aborts instead.
+scan() {
+  local message=$1
+  shift
+  local output status
+  output=$(grep -rEnH "$@") && status=0 || status=$?
+  case $status in
+    0) printf '%s\n%s\n' "$message" "$output" >&2; violations=1 ;;
+    1) ;;
+    *)
+      printf '%s: scan failed: exit=%d check=%s\n' \
+        "$(validation_script_name)" "$status" "$message" >&2
+      exit "$status"
+      ;;
   esac
 }
 
-architecture_role_allows_dependency() {
-  local source_role=$1
-  local dependency_role=$2
-
-  # Same-role edges permit a responsibility to be decomposed into multiple
-  # crates without changing policy. Cargo remains responsible for rejecting
-  # dependency cycles between those crates. The engine defines the ports used
-  # by the database implementation, so the dependency direction stays inward.
-  case "$source_role:$dependency_role" in
-    engine:engine) return 0 ;;
-    db:engine|db:db) return 0 ;;
-    delivery:engine|delivery:db|delivery:delivery) return 0 ;;
-    test-harness:*) architecture_role_is_known "$dependency_role" ;;
-    *) return 1 ;;
-  esac
-}
-
+# A path dependency may point at another package in this repository, but never
+# escape it. `[patch]` entries live only in manifests, so this stays a text
+# scan over manifests rather than a `cargo metadata` query.
 cargo_manifest_output=
-if cargo_manifest_output=$(find . \
-  \( -path './.git' -o -path '*/target' -o -path '*/node_modules' \) -prune -o \
-  -type f -name Cargo.toml -print | sort); then
+if cargo_manifest_output=$(
+  find . \( -path './.git' -o -path '*/target' -o -path '*/node_modules' \) -prune -o \
+    -type f -name Cargo.toml -print | sed 's#^\./##' | sort
+); then
   :
 else
   status=$?
@@ -71,454 +54,256 @@ else
   exit "$status"
 fi
 cargo_manifests=()
-if [[ -n $cargo_manifest_output ]]; then
-  mapfile -t cargo_manifests <<< "$cargo_manifest_output"
-  for manifest_index in "${!cargo_manifests[@]}"; do
-    cargo_manifests[manifest_index]="${cargo_manifests[manifest_index]#./}"
-  done
+[[ -z $cargo_manifest_output ]] || mapfile -t cargo_manifests <<< "$cargo_manifest_output"
+(( ${#cargo_manifests[@]} )) || { echo "no Cargo manifests were found in the repository" >&2; exit 2; }
+path_dependency_output=
+if path_dependency_output=$(grep -rEnoH \
+  "path[[:space:]]*=[[:space:]]*(\"[^\"]+\"|'[^']+')" -- "${cargo_manifests[@]}"); then
+  :
+else
+  status=$?
+  if (( status > 1 )); then
+    printf '%s: producer failed: operation=find path dependencies exit=%d\n' \
+      "$(validation_script_name)" "$status" >&2
+    exit "$status"
+  fi
 fi
-if (( ${#cargo_manifests[@]} == 0 )); then
-  echo "no Cargo manifests were found in the repository" >&2
-  exit 2
-fi
-
-# A path dependency may point to another package in this repository, but never
-# escape it. Main-workspace path dependencies are classified by role below.
-path_dependencies=
-path_dependencies_matched=
-checked_rg_capture path_dependencies path_dependencies_matched \
-  "scan repository path dependencies" "Cargo manifests" \
-  -n --no-heading --with-filename -o \
-  "path[[:space:]]*=[[:space:]]*(\"[^\"]+\"|'[^']+')" \
-  "${cargo_manifests[@]}"
-if (( path_dependencies_matched )); then
-  while IFS= read -r match; do
-    manifest="${match%%:*}"
-    remainder="${match#*:}"
-    remainder="${remainder#*:}"
-    dependency_assignment="${remainder#*=}"
-    dependency_assignment="${dependency_assignment#"${dependency_assignment%%[![:space:]]*}"}"
-    dependency_path="${dependency_assignment:1:${#dependency_assignment}-2}"
-    resolved="$(realpath -m "$(dirname "$manifest")/$dependency_path")"
-    case "$resolved" in
+if [[ -n $path_dependency_output ]]; then
+  while IFS=: read -r manifest _ assignment; do
+    dependency_path=${assignment#*=}
+    dependency_path=${dependency_path#"${dependency_path%%[![:space:]]*}"}
+    dependency_path=${dependency_path:1:${#dependency_path}-2}
+    case "$(realpath -m "$(dirname "$manifest")/$dependency_path")" in
       "$workspace_root"|"$workspace_root"/*) ;;
       *)
         echo "$manifest has a path dependency outside the workspace: $dependency_path" >&2
         violations=1
         ;;
     esac
-  done <<< "$path_dependencies"
+  done <<< "$path_dependency_output"
 fi
 
-metadata=
-if metadata=$(cargo metadata --locked --no-deps --format-version 1); then
+metadata=$(cargo metadata --locked --no-deps --format-version 1) || {
+  printf '%s: producer failed: operation=read workspace metadata\n' "$(validation_script_name)" >&2
+  exit 1
+}
+
+package_manifest_rows=$(jq -r '.packages[] | [.name, .manifest_path] | @tsv' <<< "$metadata")
+while IFS=$'\t' read -r package manifest; do
+  [[ -n $package ]] || continue
+  resolved_manifest=$(realpath -m "$manifest")
+  case "$resolved_manifest" in
+    "$workspace_root"/*) ;;
+    *)
+      echo "$package manifest is outside the workspace: $manifest" >&2
+      violations=1
+      ;;
+  esac
+done <<< "$package_manifest_rows"
+
+# Cargo package names are deliberately not architecture policy; each workspace
+# member declares its responsibility through package.metadata.olp.role. Roles
+# constrain edges; the engine defines the ports the database implements, so the
+# dependency direction stays inward.
+role_violations=$(jq -r '
+  def role: .metadata.olp.role? // "<missing>";
+  def dir($manifest): $manifest | sub("/[^/]+$"; "");
+  ["engine","db","delivery","test-harness"] as $known
+  # Same-role edges let one responsibility span several crates; Cargo still
+  # rejects cycles between them.
+  | ["engine:engine","db:engine","db:db",
+     "delivery:engine","delivery:db","delivery:delivery"] as $allowed
+  | {sqlx:"db", redis:"db", reqwest:"engine", "google-cloud-auth":"engine",
+     axum:"delivery", tower:"delivery", "tower-http":"delivery", clap:"delivery"} as $owners
+  | (reduce .packages[] as $p ({}; .[dir($p.manifest_path)] = ($p | role))) as $role_by_dir
+  | .packages[]
+  | . as $p | ($p | role) as $role
+  | (if ($known | index($role)) == null then
+       "\($p.name) must declare a valid architecture role in \($p.manifest_path) under [package.metadata.olp]; found: \($role)"
+     else empty end),
+    (select($known | index($role))
+     | $p.dependencies[] | select(.kind != "dev")
+     | . as $dep
+     | if $dep.path != null then
+         ($role_by_dir[$dep.path] // "<unclassified>") as $dep_role
+         | if ($known | index($dep_role)) == null then
+             "\($p.name) (\($role)) has an unclassified path dependency on \($dep.name) at \($dep.path); make it a workspace package and declare [package.metadata.olp].role"
+           elif $role == "test-harness" or ($allowed | index("\($role):\($dep_role)")) then empty
+           else "\($p.name) (\($role)) must not depend on \($dep.name) (\($dep_role))"
+           end
+       else
+         ($owners[$dep.name] // (if $dep.name | startswith("aws-") then "engine" else null end)) as $owner
+         | if $role != "test-harness" and $owner != null and $owner != $role then
+             "\($dep.name) is owned by the \($owner) role, not \($p.name) (\($role))"
+           else empty end
+       end)
+' <<< "$metadata")
+if [[ -n $role_violations ]]; then
+  printf '%s\n' "$role_violations" >&2
+  violations=1
+fi
+
+# Production source roots, and the engine module roots whose inward topology is
+# enforced by path below.
+declare -a production_roots=() engine_roots=() non_engine_roots=()
+source_root_output=
+if source_root_output=$(jq -r '
+  .packages[] | select((.metadata.olp.role? // "") | IN("engine","db","delivery"))
+  | .metadata.olp.role as $role
+  | .targets[] | select(.kind | any(IN("lib","bin","proc-macro")))
+  | [$role, (.src_path | sub("/[^/]+$"; ""))] | @tsv
+' <<< "$metadata" | sort -u); then
   :
 else
   status=$?
-  printf '%s: producer failed: operation=read workspace metadata path=%s exit=%d\n' \
-    "$(validation_script_name)" "Cargo.toml" "$status" >&2
+  printf '%s: producer failed: operation=find production source roots exit=%d\n' \
+    "$(validation_script_name)" "$status" >&2
   exit "$status"
 fi
-
-# One jq pass emits every fact the checks below need as tagged TSV rows. Cargo
-# package names are deliberately not architecture policy; each workspace member
-# declares its responsibility through package.metadata.olp.role.
-metadata_rows=
-if metadata_rows=$(jq -r '
-  def architecture_role:
-    (.metadata.olp.role? // null) as $role
-    | if (($role | type) == "string" and ($role | length) > 0)
-      then $role
-      else "<missing>"
-      end;
-
-  .packages as $packages
-  | ($packages[]
-      | ["package", .name, architecture_role, .manifest_path]
-      | @tsv),
-    ($packages[] as $package
-      | $package.dependencies[]
-      | select(.path != null and .kind != "dev")
-      | [
-          "edge",
-          $package.name,
-          ($package | architecture_role),
-          .name,
-          .path
-        ]
-      | @tsv),
-    ($packages[] as $package
-      | $package.dependencies[]
-      | select(.path == null and .kind != "dev")
-      | ["dependency", $package.name, ($package | architecture_role), .name]
-      | @tsv),
-    ($packages[] as $package
-      | ($package | architecture_role) as $role
-      | select($role != "test-harness")
-      | $package.targets[]
-      | select(
-          (.kind | index("lib")) != null
-          or (.kind | index("bin")) != null
-          or (.kind | index("proc-macro")) != null
-        )
-      | [
-          "source-root",
-          $package.name,
-          $role,
-          (.src_path | sub("/[^/]+$"; ""))
-        ]
-      | @tsv),
-    ($packages[] as $package
-      | ($package | architecture_role) as $role
-      | select($role == "delivery")
-      | $package.targets[]
-      | select((.kind | index("lib")) != null)
-      | ["delivery-api", $package.name, $role, .src_path]
-      | @tsv)
-' <<< "$metadata"); then
-  :
-else
-  status=$?
-  printf '%s: producer failed: operation=classify workspace metadata path=%s exit=%d\n' \
-    "$(validation_script_name)" "cargo metadata" "$status" >&2
-  exit "$status"
-fi
-
-declare -a workspace_cargo_manifests=(Cargo.toml)
-declare -A workspace_cargo_manifest_seen=()
-declare -A workspace_role_by_directory=()
-workspace_cargo_manifest_seen[Cargo.toml]=1
-package_rows="$(awk -F'\t' '$1 == "package" { print $2 "\t" $3 "\t" $4 }' <<< "$metadata_rows")"
-if [[ -n $package_rows ]]; then
-  while IFS=$'\t' read -r package role manifest; do
-    if ! architecture_role_is_known "$role"; then
-      echo "$package must declare a valid architecture role in $manifest under [package.metadata.olp]; found: $role" >&2
-      violations=1
-    fi
-
-    resolved_manifest="$(realpath -m "$manifest")"
-    case "$resolved_manifest" in
-      "$workspace_root"/*)
-        relative_manifest="${resolved_manifest#"$workspace_root"/}"
-        workspace_role_by_directory["$(dirname "$resolved_manifest")"]=$role
-        if [[ ! ${workspace_cargo_manifest_seen[$relative_manifest]+present} ]]; then
-          workspace_cargo_manifest_seen[$relative_manifest]=1
-          workspace_cargo_manifests+=("$relative_manifest")
-        fi
-        ;;
-      *)
-        echo "$package manifest is outside the workspace: $manifest" >&2
-        violations=1
-        ;;
-    esac
-  done <<< "$package_rows"
-fi
-
-dependency_manifests=("${workspace_cargo_manifests[@]}" console/package.json)
-report_matches \
-  "main workspace manifest enables an unsupported platform dependency:" \
-  '^[[:space:]]*"?(@sveltejs/adapter-(node|cloudflare)|@cloudflare/[^"[:space:]]+|@libsql/[^"[:space:]]+|wrangler|better-sqlite3|cloudflare|cloudflare-workers|rusqlite|libsql|sqlite3?|worker)["[:space:]]*[:=]' \
-  "main workspace Cargo manifests and console/package.json" \
-  "${dependency_manifests[@]}"
-
-report_matches \
-  "PostgreSQL-only workspace enables the SQLite backend:" \
-  '^[[:space:]]*"sqlite"[[:space:]]*,?[[:space:]]*$' \
-  "main workspace Cargo manifests" \
-  "${workspace_cargo_manifests[@]}"
-
-edge_rows="$(awk -F'\t' '$1 == "edge" { print $2 "\t" $3 "\t" $4 "\t" $5 }' <<< "$metadata_rows")"
-if [[ -n $edge_rows ]]; then
-  while IFS=$'\t' read -r package role dependency dependency_path; do
-    if ! architecture_role_is_known "$role"; then
-      continue
-    fi
-    resolved_dependency_path="$(realpath -m "$dependency_path")"
-    dependency_role="${workspace_role_by_directory[$resolved_dependency_path]:-<unclassified>}"
-    if ! architecture_role_is_known "$dependency_role"; then
-      echo "$package ($role) has an unclassified path dependency on $dependency at $dependency_path; make it a workspace package and declare [package.metadata.olp].role" >&2
+while IFS=$'\t' read -r role source_root; do
+  [[ -n $role ]] || continue
+  resolved_source_root=$(realpath -m "$source_root")
+  case "$resolved_source_root" in
+    "$workspace_root") source_root=. ;;
+    "$workspace_root"/*) source_root=${resolved_source_root#"$workspace_root"/} ;;
+    *)
+      echo "a $role package has a production source root outside the workspace: $source_root" >&2
       violations=1
       continue
-    fi
-    if ! architecture_role_allows_dependency "$role" "$dependency_role"; then
-      echo "$package ($role) must not depend on $dependency ($dependency_role)" >&2
-      violations=1
-    fi
-  done <<< "$edge_rows"
-fi
+      ;;
+  esac
+  if [[ ! -d $resolved_source_root ]]; then
+    echo "a $role package has a missing production source root: $source_root" >&2
+    violations=1
+    continue
+  fi
+  production_roots+=("$source_root")
+  if [[ $role == engine ]]; then engine_roots+=("$source_root"); else non_engine_roots+=("$source_root"); fi
+done <<< "$source_root_output"
 
-dependency_rows="$(awk -F'\t' '$1 == "dependency" { print $2 "\t" $3 "\t" $4 }' <<< "$metadata_rows")"
-if [[ -n $dependency_rows ]]; then
-  while IFS=$'\t' read -r package role dependency; do
-    if [[ $role == test-harness ]] || ! architecture_role_is_known "$role"; then
-      continue
-    fi
-    case "$dependency" in
-      sqlx|redis)
-        expected_role=db
-        ;;
-      reqwest|aws-*|google-cloud-auth)
-        expected_role=engine
-        ;;
-      axum|tower|tower-http|clap)
-        expected_role=delivery
-        ;;
-      *)
-        continue
-        ;;
-    esac
-    if [[ $role != "$expected_role" ]]; then
-      echo "$dependency is owned by the $expected_role role, not $package ($role)" >&2
-      violations=1
-    fi
-  done <<< "$dependency_rows"
-fi
-
-declare -a production_source_roots=()
-declare -a non_engine_source_roots=()
-declare -a engine_source_roots=()
-declare -A production_source_root_seen=()
-declare -A non_engine_source_root_seen=()
-declare -A engine_source_root_seen=()
-source_root_rows="$(awk -F'\t' '$1 == "source-root" { print $2 "\t" $3 "\t" $4 }' <<< "$metadata_rows")"
-if [[ -n $source_root_rows ]]; then
-  while IFS=$'\t' read -r package role source_root; do
-    if ! architecture_role_is_known "$role" || [[ $role == test-harness ]]; then
-      continue
-    fi
-
-    resolved_source_root="$(realpath -m "$source_root")"
-    case "$resolved_source_root" in
-      "$workspace_root") relative_source_root=. ;;
-      "$workspace_root"/*) relative_source_root="${resolved_source_root#"$workspace_root"/}" ;;
-      *)
-        echo "$package ($role) has a production source root outside the workspace: $source_root" >&2
-        violations=1
-        continue
-        ;;
-    esac
-    if [[ ! -d $resolved_source_root ]]; then
-      echo "$package ($role) has a missing production source root: $source_root" >&2
-      violations=1
-      continue
-    fi
-
-    if [[ ! ${production_source_root_seen[$relative_source_root]+present} ]]; then
-      production_source_root_seen[$relative_source_root]=1
-      production_source_roots+=("$relative_source_root")
-    fi
-    if [[ $role != engine && ! ${non_engine_source_root_seen[$relative_source_root]+present} ]]; then
-      non_engine_source_root_seen[$relative_source_root]=1
-      non_engine_source_roots+=("$relative_source_root")
-    fi
-    if [[ $role == engine && ! ${engine_source_root_seen[$relative_source_root]+present} ]]; then
-      engine_source_root_seen[$relative_source_root]=1
-      engine_source_roots+=("$relative_source_root")
-    fi
-  done <<< "$source_root_rows"
-fi
-
-# Cargo roles constrain edges between packages. The consolidated engine keeps
-# the same inward dependency direction between its four source modules, so
-# enforce that topology by path as well.
-declare -a engine_domain_source_roots=()
-declare -a engine_protocol_source_roots=()
-declare -a engine_provider_source_roots=()
-declare -a engine_inference_source_roots=()
-declare -a non_provider_construction_roots=("${non_engine_source_roots[@]}")
-for engine_source_root in "${engine_source_roots[@]}"; do
+declare -a domain_roots=() protocol_roots=() provider_roots=() inference_roots=()
+declare -a non_provider_roots=("${non_engine_roots[@]}")
+for engine_root in "${engine_roots[@]}"; do
   for engine_module in domain protocols providers inference; do
-    engine_module_root="$engine_source_root/$engine_module"
-    if [[ ! -d $engine_module_root ]]; then
-      echo "engine source root is missing its $engine_module module: $engine_module_root" >&2
+    if [[ ! -d $engine_root/$engine_module ]]; then
+      echo "engine source root is missing its $engine_module module: $engine_root/$engine_module" >&2
       violations=1
       continue
     fi
-    case "$engine_module" in
-      domain) engine_domain_source_roots+=("$engine_module_root") ;;
-      protocols) engine_protocol_source_roots+=("$engine_module_root") ;;
-      providers) engine_provider_source_roots+=("$engine_module_root") ;;
-      inference) engine_inference_source_roots+=("$engine_module_root") ;;
+    case $engine_module in
+      domain) domain_roots+=("$engine_root/domain") ;;
+      protocols) protocol_roots+=("$engine_root/protocols") ;;
+      providers) provider_roots+=("$engine_root/providers") ;;
+      inference) inference_roots+=("$engine_root/inference") ;;
     esac
   done
-
-  # Root-level engine files are outside the providers module too. Avoid
-  # scanning the whole engine root because that would include providers.
+  # Root-level engine files sit outside the providers module too. Scanning the
+  # whole engine root instead would sweep providers back in.
   shopt -s nullglob
-  engine_root_source_files=("$engine_source_root"/*.rs)
+  non_provider_roots+=("$engine_root"/*.rs)
   shopt -u nullglob
-  non_provider_construction_roots+=("${engine_root_source_files[@]}")
 done
-non_provider_construction_roots+=(
-  "${engine_domain_source_roots[@]}"
-  "${engine_protocol_source_roots[@]}"
-  "${engine_inference_source_roots[@]}"
-)
+non_provider_roots+=("${domain_roots[@]}" "${protocol_roots[@]}" "${inference_roots[@]}")
 
-engine_infrastructure_pattern='\b(reqwest|aws_[[:alnum:]_]+|google_cloud_auth|sqlx|redis|axum|tower|tower_http|clap)::'
-if (( ${#engine_domain_source_roots[@]} )); then
-  report_matches \
-    "engine domain must not depend on sibling modules:" \
-    '\b(protocols|providers|inference)::' \
-    "engine domain modules" \
-    "${engine_domain_source_roots[@]}" \
-    --glob '*.rs'
-  report_matches \
-    "engine domain must remain infrastructure-free:" \
-    "$engine_infrastructure_pattern" \
-    "engine domain modules" \
-    "${engine_domain_source_roots[@]}" \
-    --glob '*.rs'
-fi
+infrastructure='\b(reqwest|aws_[[:alnum:]_]+|google_cloud_auth|sqlx|redis|axum|tower|tower_http|clap)::'
+(( ${#domain_roots[@]} )) && {
+  scan "engine domain must not depend on sibling modules:" \
+    --include='*.rs' -e '\b(protocols|providers|inference)::' -- "${domain_roots[@]}"
+  scan "engine domain must remain infrastructure-free:" \
+    --include='*.rs' -e "$infrastructure" -- "${domain_roots[@]}"
+}
+(( ${#protocol_roots[@]} )) && {
+  scan "engine protocols may depend only on the domain module:" \
+    --include='*.rs' -e '\b(providers|inference)::' -- "${protocol_roots[@]}"
+  scan "engine protocols must remain infrastructure-free:" \
+    --include='*.rs' -e "$infrastructure" -- "${protocol_roots[@]}"
+}
+(( ${#provider_roots[@]} )) && {
+  scan "engine providers must not depend on inference:" \
+    --include='*.rs' -e '\binference::' -- "${provider_roots[@]}"
+  scan "engine providers must not depend on database or delivery infrastructure:" \
+    --include='*.rs' -e '\b(olp_db|sqlx|redis|axum|tower|tower_http|clap)::' -- "${provider_roots[@]}"
+}
+(( ${#inference_roots[@]} )) && \
+  scan "engine inference must use provider and persistence ports instead of infrastructure:" \
+    --include='*.rs' -e '\b(olp_db|reqwest|aws_[[:alnum:]_]+|google_cloud_auth|sqlx|redis|axum|tower|tower_http|clap)::' \
+    -- "${inference_roots[@]}"
+(( ${#production_roots[@]} )) && \
+  scan "production crates must not expose wildcard re-export surfaces:" \
+    --include='*.rs' -e 'pub(\([^)]*\))?[[:space:]]+use[^;]*::\*;' -- "${production_roots[@]}"
+(( ${#non_provider_roots[@]} )) && \
+  scan "concrete provider construction escaped olp_engine::providers:" \
+    --include='*.rs' \
+    -e '(OpenAi|Anthropic|Gemini|Vertex|Bedrock|AzureOpenAi)Connector::(new|with_application_default|with_service_account_json)' \
+    -- "${non_provider_roots[@]}"
 
-if (( ${#engine_protocol_source_roots[@]} )); then
-  report_matches \
-    "engine protocols may depend only on the domain module:" \
-    '\b(providers|inference)::' \
-    "engine protocol modules" \
-    "${engine_protocol_source_roots[@]}" \
-    --glob '*.rs'
-  report_matches \
-    "engine protocols must remain infrastructure-free:" \
-    "$engine_infrastructure_pattern" \
-    "engine protocol modules" \
-    "${engine_protocol_source_roots[@]}" \
-    --glob '*.rs'
-fi
+scan "main workspace manifest enables an unsupported platform dependency:" \
+  -e '^[[:space:]]*"?(@sveltejs/adapter-(node|cloudflare)|@cloudflare/[^"[:space:]]+|@libsql/[^"[:space:]]+|wrangler|better-sqlite3|cloudflare|cloudflare-workers|rusqlite|libsql|sqlite3?|worker)["[:space:]]*[:=]' \
+  -- "${cargo_manifests[@]}" console/package.json
+scan "PostgreSQL-only workspace enables the SQLite backend:" \
+  -e '^[[:space:]]*"sqlite"[[:space:]]*,?[[:space:]]*$' -- "${cargo_manifests[@]}"
 
-if (( ${#engine_provider_source_roots[@]} )); then
-  report_matches \
-    "engine providers must not depend on inference:" \
-    '\binference::' \
-    "engine provider modules" \
-    "${engine_provider_source_roots[@]}" \
-    --glob '*.rs'
-  report_matches \
-    "engine providers must not depend on database or delivery infrastructure:" \
-    '\b(olp_db|sqlx|redis|axum|tower|tower_http|clap)::' \
-    "engine provider modules" \
-    "${engine_provider_source_roots[@]}" \
-    --glob '*.rs'
-fi
-
-if (( ${#engine_inference_source_roots[@]} )); then
-  report_matches \
-    "engine inference must use provider and persistence ports instead of infrastructure:" \
-    '\b(olp_db|reqwest|aws_[[:alnum:]_]+|google_cloud_auth|sqlx|redis|axum|tower|tower_http|clap)::' \
-    "engine inference modules" \
-    "${engine_inference_source_roots[@]}" \
-    --glob '*.rs'
-fi
-
-if (( ${#production_source_roots[@]} )); then
-  report_matches \
-    "production crates must not expose wildcard re-export surfaces:" \
-    'pub(\([^)]*\))?[[:space:]]+use[^;]*::\*;' \
-    "workspace production source roots" \
-    "${production_source_roots[@]}" \
-    --glob '*.rs'
-fi
-
-declare -a delivery_api_files=()
-declare -A delivery_api_file_seen=()
-delivery_api_rows="$(awk -F'\t' '$1 == "delivery-api" { print $2 "\t" $3 "\t" $4 }' <<< "$metadata_rows")"
-if [[ -n $delivery_api_rows ]]; then
-  while IFS=$'\t' read -r package role api_file; do
-    resolved_api_file="$(realpath -m "$api_file")"
-    case "$resolved_api_file" in
-      "$workspace_root"/*) relative_api_file="${resolved_api_file#"$workspace_root"/}" ;;
-      *)
-        echo "$package ($role) has a public API entry point outside the workspace: $api_file" >&2
-        violations=1
-        continue
-        ;;
-    esac
-    if [[ ! -f $resolved_api_file ]]; then
-      echo "$package ($role) has a missing public API entry point: $api_file" >&2
-      violations=1
-      continue
-    fi
-    if [[ ! ${delivery_api_file_seen[$relative_api_file]+present} ]]; then
-      delivery_api_file_seen[$relative_api_file]=1
-      delivery_api_files+=("$relative_api_file")
-    fi
-  done <<< "$delivery_api_rows"
-fi
-
-if (( ${#delivery_api_files[@]} )); then
-  report_matches \
-    "bootstrap composition types must not be exported from a production delivery API:" \
-    '^pub[[:space:]]+use[[:space:]]+bootstrap::(state|mode_dependencies)' \
-    "delivery library entry points" \
-    "${delivery_api_files[@]}"
-fi
-
-server_routes_output=
-if server_routes_output=$(find console/src/routes -type f \
-  \( -name '+page.server.*' -o -name '+layout.server.*' -o -name '+server.*' \) \
-  -print); then
+delivery_api_output=
+if delivery_api_output=$(jq -r '
+  .packages[] | select((.metadata.olp.role? // "") == "delivery")
+  | .targets[] | select(.kind | any(. == "lib")) | .src_path
+' <<< "$metadata" | sort -u); then
   :
 else
   status=$?
-  printf '%s: producer failed: operation=find server routes path=%s exit=%d\n' \
-    "$(validation_script_name)" "console/src/routes" "$status" >&2
+  printf '%s: producer failed: operation=find delivery API files exit=%d\n' \
+    "$(validation_script_name)" "$status" >&2
   exit "$status"
 fi
-server_routes=()
-if [[ -n $server_routes_output ]]; then
-  mapfile -t server_routes <<< "$server_routes_output"
-fi
+delivery_api_files=()
+[[ -z $delivery_api_output ]] || mapfile -t delivery_api_files <<< "$delivery_api_output"
+for delivery_api_file in "${delivery_api_files[@]}"; do
+  resolved_delivery_api_file=$(realpath -m "$delivery_api_file")
+  case "$resolved_delivery_api_file" in
+    "$workspace_root"/*) delivery_api_file=${resolved_delivery_api_file#"$workspace_root"/} ;;
+    *)
+      echo "a delivery package has a public API entry point outside the workspace: $delivery_api_file" >&2
+      violations=1
+      continue
+      ;;
+  esac
+  [[ -f $resolved_delivery_api_file ]] || {
+    echo "a delivery package has a missing public API entry point: $delivery_api_file" >&2
+    violations=1
+    continue
+  }
+  scan "bootstrap composition types must not be exported from a production delivery API:" \
+    -e '^pub[[:space:]]+use[[:space:]]+bootstrap::(state|mode_dependencies)' -- "$delivery_api_file"
+done
 
-server_modules_output=
-if server_modules_output=$(find console/src -type f \
-  \( -name 'hooks.server.*' -o -path '*/lib/server/*' \) -print); then
+# The console ships as static assets from the Rust binary; a server route or
+# server-only module would silently require a Node runtime in production.
+server_file_output=
+if server_file_output=$(find console/src -type f \
+  \( -name '+page.server.*' -o -name '+layout.server.*' -o -name '+server.*' \
+     -o -name 'hooks.server.*' -o -path '*/lib/server/*' \) -print); then
   :
 else
   status=$?
-  printf '%s: producer failed: operation=find server modules path=%s exit=%d\n' \
+  printf '%s: producer failed: operation=find console server files path=%s exit=%d\n' \
     "$(validation_script_name)" "console/src" "$status" >&2
   exit "$status"
 fi
-server_modules=()
-if [[ -n $server_modules_output ]]; then
-  mapfile -t server_modules <<< "$server_modules_output"
-fi
-if (( ${#server_routes[@]} || ${#server_modules[@]} )); then
+server_files=()
+[[ -z $server_file_output ]] || mapfile -t server_files <<< "$server_file_output"
+if (( ${#server_files[@]} )); then
   echo "console must remain a static client-only application:" >&2
-  printf '  %s\n' "${server_routes[@]}" "${server_modules[@]}" >&2
+  printf '  %s\n' "${server_files[@]}" >&2
   violations=1
 fi
-
-adapter_static_matched=
-checked_rg_match adapter_static_matched \
-  "verify static Svelte adapter" "console/svelte.config.js" \
-  -q "@sveltejs/adapter-static" console/svelte.config.js
-if (( ! adapter_static_matched )); then
+grep -Fq '@sveltejs/adapter-static' console/svelte.config.js || {
   echo "console must use @sveltejs/adapter-static" >&2
   violations=1
-fi
-
-ssr_disabled_matched=
-checked_rg_match ssr_disabled_matched \
-  "verify console SSR is disabled" "console/src/routes/+layout.ts" \
-  -q 'export[[:space:]]+const[[:space:]]+ssr[[:space:]]*=[[:space:]]*false' \
-  console/src/routes/+layout.ts
-if (( ! ssr_disabled_matched )); then
+}
+grep -Eq 'export[[:space:]]+const[[:space:]]+ssr[[:space:]]*=[[:space:]]*false' console/src/routes/+layout.ts || {
   echo "console root layout must disable server-side rendering" >&2
   violations=1
-fi
+}
 
-if (( ${#non_provider_construction_roots[@]} )); then
-  report_matches \
-    "concrete provider construction escaped olp_engine::providers:" \
-    '(OpenAiConnector|AnthropicConnector|GeminiConnector|VertexConnector|BedrockConnector|AzureOpenAiConnector)::(new|with_application_default|with_service_account_json)' \
-    "production sources outside the engine providers module" \
-    "${non_provider_construction_roots[@]}" \
-    --glob '*.rs'
-fi
-
-if (( violations )); then
-  exit 1
-fi
-
+(( violations )) && exit 1
 echo "architecture boundaries are clean"

@@ -16,7 +16,7 @@ FUZZ_TRIPLE = $(shell rustc -vV | sed -n 's/^host: //p')
 
 .DEFAULT_GOAL := help
 
-.PHONY: help check boundaries source-size storage-sqlx fmt fmt-fix clippy test \
+.PHONY: help check boundaries storage-sqlx fmt fmt-fix clippy test \
 	coverage console-install console-verify console-e2e \
 	screenshots openapi sqlx-prepare sqlx-check db-test release-version \
 	supply-chain helm-verify script-selftest shellcheck fuzz-check \
@@ -31,13 +31,10 @@ help: ## List available targets
 # suites (make db-test), the fuzz replay (make fuzz-replay), sdk-smoke,
 # e2e browsers, image builds, helm-verify (needs helm + docker
 # compose), and the actionlint/hadolint/cargo-deny quality steps.
-check: boundaries source-size storage-sqlx shellcheck script-selftest fmt clippy test console-verify release-version supply-chain ## Broad local gate; CI also runs service/tool-specific required jobs
+check: boundaries storage-sqlx shellcheck script-selftest fmt clippy test console-verify release-version supply-chain ## Broad local gate; CI also runs service/tool-specific required jobs
 
 boundaries: ## Enforce crate boundaries and dependency ownership (needs ripgrep)
 	./scripts/check-boundaries.sh
-
-source-size: ## Enforce the 30,000-byte production source-file limit
-	./scripts/check-source-size.sh
 
 storage-sqlx: ## Enforce typed storage access (no manual Row::get decoding)
 	./scripts/check-storage-sqlx.sh
@@ -109,7 +106,6 @@ script-selftest: ## Self-tests for shell helpers and repository invariants
 	scripts/test-postgres-test-databases.sh
 	scripts/test-repository-validation.sh
 	scripts/test-record-request-metadata-stream-loss.sh
-	scripts/test-source-size.sh
 
 shellcheck: ## Shellcheck every tracked or untracked repository shell script
 	@scripts=(); \

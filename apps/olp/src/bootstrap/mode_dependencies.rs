@@ -15,7 +15,9 @@ use std::{
 };
 
 use olp_db::{security::envelope::MasterKey, security::key_material::AuthHmacKey, store::Store};
-use olp_engine::domain::{ports::MediaSpool, routing::provider::ProviderKind};
+use olp_engine::domain::ports::MediaSpool;
+#[cfg(any(test, feature = "test-util"))]
+use olp_engine::domain::routing::provider::ProviderKind;
 use olp_engine::inference::{
     limits::ReloadableLimiter, request_metadata::Emitter, runtime::Manager, service::Service,
 };
@@ -196,6 +198,7 @@ pub struct ManagementState {
     request_boundary: RequestBoundaryState,
     pub(crate) transports: TransportRegistry,
     pub(crate) master_key: Option<Arc<MasterKey>>,
+    #[cfg(any(test, feature = "test-util"))]
     certification_probe_connectors: olp_engine::providers::factory::overrides::Registry,
     pub(crate) public_origin: PublicOrigin,
     pub(crate) console_dir: Arc<PathBuf>,
@@ -251,6 +254,7 @@ impl ManagementState {
         self.request_boundary.clear_bootstrap_token().await;
     }
 
+    #[cfg(any(test, feature = "test-util"))]
     pub(crate) fn certification_probe_connector(
         &self,
         provider_id: uuid::Uuid,
@@ -412,6 +416,7 @@ impl ProcessComposition {
             request_boundary: request_boundary.clone(),
             transports: self.transports.clone(),
             master_key: self.master_key.clone(),
+            #[cfg(any(test, feature = "test-util"))]
             certification_probe_connectors: self.certification_probe_connectors.clone(),
             public_origin: self.public_origin.clone(),
             console_dir: Arc::clone(&self.console_dir),

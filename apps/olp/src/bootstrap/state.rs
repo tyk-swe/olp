@@ -68,6 +68,7 @@ pub struct ProcessComposition {
     pub(crate) multipart_admission: MultipartAdmissionState,
     pub(crate) public_admission: request_admission::public::PublicAdmission,
     pub transports: TransportRegistry,
+    #[cfg(any(test, feature = "test-util"))]
     pub(crate) certification_probe_connectors: olp_engine::providers::factory::overrides::Registry,
     pub public_origin: PublicOrigin,
     pub console_dir: Arc<PathBuf>,
@@ -129,6 +130,7 @@ impl ProcessComposition {
             multipart_admission,
             public_admission: request_admission::public::PublicAdmission::default(),
             transports: TransportRegistry::default(),
+            #[cfg(any(test, feature = "test-util"))]
             certification_probe_connectors: Default::default(),
             public_origin: PublicOrigin::parse(public_origin.as_ref())
                 .expect("ProcessComposition public origin must be a valid canonical origin"),

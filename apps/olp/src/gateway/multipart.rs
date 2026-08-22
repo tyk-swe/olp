@@ -1,7 +1,6 @@
 use std::{collections::BTreeMap, sync::Arc, time::Duration};
 
 use axum::extract::Multipart;
-use encoding_rs::{Encoding, UTF_8};
 use futures::stream;
 use olp_engine::domain::{canonical::requests::MediaHandle, ports::MediaSpool};
 use olp_engine::protocols::openai::media::BoundedMediaPart;
@@ -14,6 +13,8 @@ use crate::{
 };
 
 use super::error::InferenceError;
+
+const UTF8_BOM: &[u8] = &[0xEF, 0xBB, 0xBF];
 
 pub(super) struct MultipartFormData {
     text: BTreeMap<String, Vec<String>>,
@@ -343,17 +344,9 @@ async fn parse_multipart_fields(
             .map_err(|error| InferenceError::invalid_request(error.to_string()))?;
             output.files.entry(name).or_default().push(part);
         } else {
-            // Match multer's documented `text()` behavior (charset selection,
-            // BOM sniffing, replacement of malformed sequences), but bound
-            // the raw bytes before growing an allocation.
-            let charset = field
-                .content_type()
-                .and_then(|content_type| content_type.parse::<mime::Mime>().ok())
-                .and_then(|content_type| {
-                    content_type
-                        .get_param("charset")
-                        .map(|value| value.as_str().to_owned())
-                });
+            // Text fields are UTF-8: every official SDK encodes them that way
+            // and the OpenAI multipart contract does not define another
+            // charset. Bound the raw bytes before growing an allocation.
             let mut bytes = Vec::new();
             while let Some(chunk) = field.chunk().await.map_err(|error| {
                 InferenceError::invalid_request(format!("The multipart field is invalid: {error}"))
@@ -380,11 +373,8 @@ async fn parse_multipart_fields(
                 debug_assert_eq!(bytes.len(), next_field);
                 text_bytes = next_total;
             }
-            let encoding = charset
-                .as_deref()
-                .and_then(|label| Encoding::for_label(label.as_bytes()))
-                .unwrap_or(UTF_8);
-            let text = encoding.decode(&bytes).0.into_owned();
+            let text = String::from_utf8_lossy(bytes.strip_prefix(UTF8_BOM).unwrap_or(&bytes))
+                .into_owned();
             if name == "model" {
                 match admission {
                     MultipartRouteAdmission::Expected(expected) if text != expected.as_str() => {

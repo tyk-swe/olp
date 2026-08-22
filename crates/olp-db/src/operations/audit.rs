@@ -8,7 +8,7 @@ use super::{
 };
 use crate::{split_page, store::Store};
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, FromRow)]
 pub struct Record {
     pub id: Uuid,
     pub actor_user_id: Option<Uuid>,
@@ -20,20 +20,6 @@ pub struct Record {
     pub source_ip: Option<String>,
     pub user_agent_family: Option<String>,
     pub occurred_at: DateTime<Utc>,
-}
-
-#[derive(Debug, FromRow)]
-struct AuditRow {
-    id: Uuid,
-    actor_user_id: Option<Uuid>,
-    actor_email: Option<String>,
-    action: String,
-    resource_type: String,
-    resource_id: Option<String>,
-    outcome: String,
-    source_ip: Option<String>,
-    user_agent_family: Option<String>,
-    occurred_at: DateTime<Utc>,
 }
 
 impl Store {
@@ -58,25 +44,10 @@ impl Store {
         }
         query.push(" ORDER BY a.occurred_at DESC, a.id DESC LIMIT ");
         query.push_bind(i64::from(page_size) + 1);
-        let rows = query
-            .build_query_as::<AuditRow>()
+        let items = query
+            .build_query_as::<Record>()
             .fetch_all(self.pool())
             .await?;
-        let items = rows
-            .into_iter()
-            .map(|row| Record {
-                id: row.id,
-                actor_user_id: row.actor_user_id,
-                actor_email: row.actor_email,
-                action: row.action,
-                resource_type: row.resource_type,
-                resource_id: row.resource_id,
-                outcome: row.outcome,
-                source_ip: row.source_ip,
-                user_agent_family: row.user_agent_family,
-                occurred_at: row.occurred_at,
-            })
-            .collect::<Vec<_>>();
         let (items, next_cursor) = split_page(items, usize::from(page_size), |item| {
             Timestamp {
                 at: item.occurred_at,
