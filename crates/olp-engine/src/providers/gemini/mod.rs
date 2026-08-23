@@ -13,7 +13,7 @@ use std::{fmt, sync::Arc};
 use crate::domain::ports::BoxFuture;
 use zeroize::Zeroizing;
 
-use crate::providers::connector::Timeouts;
+use crate::providers::connector::{ApiKey, Timeouts};
 use crate::providers::gemini::endpoint::Endpoint;
 
 pub const DEFAULT_MAX_RESPONSE_BYTES: usize = 16 * 1024 * 1024;
@@ -58,23 +58,6 @@ impl ConnectorConfig {
             timeouts,
             ..Self::default()
         }
-    }
-}
-
-pub struct ApiKey(Zeroizing<String>);
-
-impl ApiKey {
-    pub fn new(value: impl Into<String>) -> Result<Self, ConnectorBuildError> {
-        crate::providers::connector::visible_secret(
-            value,
-            ConnectorBuildError::EmptyApiKey,
-            ConnectorBuildError::InvalidApiKey,
-        )
-        .map(Self)
-    }
-
-    pub(in crate::providers) fn expose(&self) -> &str {
-        self.0.as_str()
     }
 }
 
@@ -123,35 +106,8 @@ impl fmt::Debug for ConnectorCredential {
     }
 }
 
-impl fmt::Debug for ApiKey {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str("ApiKey([REDACTED])")
-    }
-}
-
 #[derive(Debug, thiserror::Error)]
 pub enum ConnectorBuildError {
     #[error(transparent)]
     Endpoint(#[from] endpoint::Error),
-    #[error("Gemini API key cannot be empty")]
-    EmptyApiKey,
-    #[error("Gemini API key must contain visible ASCII characters only")]
-    InvalidApiKey,
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn key_debug_is_redacted_and_header_injection_is_rejected() {
-        let key = ApiKey::new("google-secret").unwrap();
-        let debug = format!("{key:?}");
-        assert!(debug.contains("REDACTED"));
-        assert!(!debug.contains("google-secret"));
-        assert!(matches!(
-            ApiKey::new("secret\nheader"),
-            Err(ConnectorBuildError::InvalidApiKey)
-        ));
-    }
 }

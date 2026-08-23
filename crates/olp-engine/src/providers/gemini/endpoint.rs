@@ -1,9 +1,10 @@
-use std::{fmt, time::Duration};
+use std::ops::{Deref, DerefMut};
 
-use reqwest::{Client, Url};
+use reqwest::Url;
 use thiserror::Error;
 
 use crate::providers::endpoint::{EndpointCore, Error as CommonEndpointError};
+use crate::providers::transport_common::EndpointFailure;
 
 const DEFAULT_BASE_URL: &str = "https://generativelanguage.googleapis.com/v1beta/";
 const PROVIDER: &str = "Gemini";
@@ -18,14 +19,26 @@ pub enum Error {
     CannotBeBase,
 }
 
-#[derive(Clone)]
-pub(in crate::providers) struct Endpoint {
-    core: EndpointCore,
+impl EndpointFailure for Error {
+    fn is_dns_timeout(&self) -> bool {
+        matches!(self, Self::Common(error) if error.is_dns_timeout())
+    }
 }
 
-impl fmt::Debug for Endpoint {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.core.fmt(formatter)
+#[derive(Clone, Debug)]
+pub(in crate::providers) struct Endpoint(EndpointCore);
+
+impl Deref for Endpoint {
+    type Target = EndpointCore;
+
+    fn deref(&self) -> &EndpointCore {
+        &self.0
+    }
+}
+
+impl DerefMut for Endpoint {
+    fn deref_mut(&mut self) -> &mut EndpointCore {
+        &mut self.0
     }
 }
 
@@ -37,18 +50,14 @@ impl Default for Endpoint {
 
 impl Endpoint {
     pub(in crate::providers) fn parse(value: &str) -> Result<Self, Error> {
-        Self::parse_with_policy(value, false)
-    }
-
-    fn parse_with_policy(value: &str, allow_unsafe_target: bool) -> Result<Self, Error> {
-        Ok(Self {
-            core: EndpointCore::parse(value, PROVIDER, allow_unsafe_target)?,
-        })
+        Ok(Self(EndpointCore::parse(value, PROVIDER, false)?))
     }
 
     #[cfg(any(test, feature = "test-util"))]
     pub(in crate::providers) fn for_local_test(value: &str) -> Self {
-        Self::parse_with_policy(value, true).expect("local test endpoint must be valid")
+        EndpointCore::parse(value, PROVIDER, true)
+            .map(Self)
+            .expect("local test endpoint must be valid")
     }
 
     pub(in crate::providers) fn generate_url(
@@ -76,11 +85,7 @@ impl Endpoint {
     }
 
     pub(in crate::providers) fn models_url(&self) -> Result<Url, Error> {
-        self.core.join("models").map_err(Into::into)
-    }
-
-    pub(in crate::providers) fn set_connect_timeout(&mut self, value: Duration) {
-        self.core.set_connect_timeout(value);
+        self.join("models").map_err(Into::into)
     }
 
     fn model_action_url(&self, upstream_model: &str, action: &str) -> Result<Url, Error> {
@@ -96,7 +101,7 @@ impl Endpoint {
         {
             return Err(Error::InvalidModelName);
         }
-        let mut url = self.core.url().clone();
+        let mut url = self.url().clone();
         {
             let mut path = url.path_segments_mut().map_err(|()| Error::CannotBeBase)?;
             path.pop_if_empty().push("models");
@@ -109,16 +114,6 @@ impl Endpoint {
             }
         }
         Ok(url)
-    }
-
-    pub(in crate::providers) async fn pinned_client(
-        &self,
-        connect_timeout: Duration,
-    ) -> Result<Client, Error> {
-        self.core
-            .pinned_client(connect_timeout)
-            .await
-            .map_err(Into::into)
     }
 }
 

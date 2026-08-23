@@ -25,11 +25,12 @@ use crate::providers::mock_server::{
     MockResponse, find_bytes, response, spawn_mock as spawn_http_mock, status_response,
 };
 use crate::providers::{
-    connector::Timeouts,
+    connector::{ApiKey, Timeouts},
     gemini::{
-        ApiKey, ConnectorConfig,
+        ConnectorConfig,
         transport::operations::{Connector, validate_operation},
     },
+    transport_io::ProviderResponseIo,
 };
 use bytes::Bytes;
 use futures::{StreamExt, stream};
@@ -598,7 +599,7 @@ async fn redirects_are_not_followed_and_error_messages_redact_keys() {
         .err()
         .unwrap();
     assert_eq!(error.class, AttemptFailureClass::UpstreamClient);
-    let message = safe_upstream_error_message(
+    let message = ProviderResponseIo::new("x").safe_upstream_error_message(
         StatusCode::BAD_REQUEST,
         br#"{"error":{"message":"bad upstream-secret","details":"do-not-echo"}}"#,
         "upstream-secret",

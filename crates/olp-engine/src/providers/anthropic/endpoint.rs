@@ -1,20 +1,26 @@
-use std::{fmt, time::Duration};
+use std::ops::{Deref, DerefMut};
 
-use reqwest::{Client, Url};
+use reqwest::Url;
 
 use crate::providers::endpoint::{EndpointCore, Error};
 
 const DEFAULT_BASE_URL: &str = "https://api.anthropic.com/v1/";
 const PROVIDER: &str = "Anthropic";
 
-#[derive(Clone)]
-pub(in crate::providers) struct Endpoint {
-    core: EndpointCore,
+#[derive(Clone, Debug)]
+pub(in crate::providers) struct Endpoint(EndpointCore);
+
+impl Deref for Endpoint {
+    type Target = EndpointCore;
+
+    fn deref(&self) -> &EndpointCore {
+        &self.0
+    }
 }
 
-impl fmt::Debug for Endpoint {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.core.fmt(formatter)
+impl DerefMut for Endpoint {
+    fn deref_mut(&mut self) -> &mut EndpointCore {
+        &mut self.0
     }
 }
 
@@ -26,18 +32,14 @@ impl Default for Endpoint {
 
 impl Endpoint {
     pub(in crate::providers) fn parse(value: &str) -> Result<Self, Error> {
-        Self::parse_with_policy(value, false)
-    }
-
-    fn parse_with_policy(value: &str, allow_unsafe_target: bool) -> Result<Self, Error> {
-        Ok(Self {
-            core: EndpointCore::parse(value, PROVIDER, allow_unsafe_target)?,
-        })
+        EndpointCore::parse(value, PROVIDER, false).map(Self)
     }
 
     #[cfg(any(test, feature = "test-util"))]
     pub(in crate::providers) fn for_local_test(value: &str) -> Self {
-        Self::parse_with_policy(value, true).expect("local test endpoint must be valid")
+        EndpointCore::parse(value, PROVIDER, true)
+            .map(Self)
+            .expect("local test endpoint must be valid")
     }
 
     pub(in crate::providers) fn messages_url(&self) -> Result<Url, Error> {
@@ -50,21 +52,6 @@ impl Endpoint {
 
     pub(in crate::providers) fn models_url(&self) -> Result<Url, Error> {
         self.join("models")
-    }
-
-    fn join(&self, path: &str) -> Result<Url, Error> {
-        self.core.join(path)
-    }
-
-    pub(in crate::providers) fn set_connect_timeout(&mut self, value: Duration) {
-        self.core.set_connect_timeout(value);
-    }
-
-    pub(in crate::providers) async fn pinned_client(
-        &self,
-        connect_timeout: Duration,
-    ) -> Result<Client, Error> {
-        self.core.pinned_client(connect_timeout).await
     }
 }
 

@@ -6,61 +6,7 @@ use crate::domain::{
     canonical::{identity::Surface, requests::SourceExtensions},
     ports::{AttemptFailureClass, TransportError, TransportPhase},
 };
-use http::{HeaderValue, StatusCode};
-use zeroize::Zeroizing;
-
-use crate::providers::transport_io::ProviderResponseIo;
-
-pub(in crate::providers) fn secret_header(
-    secret: &str,
-    provider: &'static str,
-) -> Result<HeaderValue, TransportError> {
-    let value = Zeroizing::new(secret.as_bytes().to_vec());
-    HeaderValue::from_bytes(value.as_slice()).map_err(|_| {
-        protocol_error(format!(
-            "{provider} API key cannot be represented as a header"
-        ))
-    })
-}
-
-pub(in crate::providers) fn bearer_header(
-    secret: &str,
-    provider: &'static str,
-) -> Result<HeaderValue, TransportError> {
-    let mut value = Zeroizing::new(Vec::with_capacity("Bearer ".len() + secret.len()));
-    value.extend_from_slice(b"Bearer ");
-    value.extend_from_slice(secret.as_bytes());
-    HeaderValue::from_bytes(value.as_slice()).map_err(|_| {
-        protocol_error(format!(
-            "{provider} bearer credential cannot be represented as a header"
-        ))
-    })
-}
-
-pub(in crate::providers) fn safe_upstream_error_message(
-    provider: &'static str,
-    status: StatusCode,
-    body: &[u8],
-    secret: &str,
-) -> String {
-    let message = serde_json::from_slice::<serde_json::Value>(body)
-        .ok()
-        .and_then(|value| value.get("error").cloned())
-        .and_then(|error| {
-            error
-                .get("message")
-                .and_then(serde_json::Value::as_str)
-                .map(str::to_owned)
-        })
-        .map(|message| message.replace(secret, "[REDACTED]"))
-        .map(|message| message.chars().take(512).collect::<String>());
-    match message {
-        Some(message) if !message.is_empty() => {
-            format!("{provider} returned HTTP {status}: {message}")
-        }
-        _ => format!("{provider} returned HTTP {status}"),
-    }
-}
+use crate::providers::endpoint::Error as EndpointError;
 
 pub(in crate::providers) fn source_extensions(
     surface: Surface,
@@ -76,44 +22,24 @@ pub(in crate::providers) fn source_extensions(
     SourceExtensions::new(surface, values)
 }
 
-pub(in crate::providers) fn map_endpoint_error(
-    error: impl fmt::Display,
-    dns_timeout: bool,
-) -> TransportError {
-    let class = if dns_timeout {
+/// Endpoint resolution/classification failures shared by every HTTP connector.
+pub(in crate::providers) trait EndpointFailure: fmt::Display {
+    fn is_dns_timeout(&self) -> bool;
+}
+
+impl EndpointFailure for EndpointError {
+    fn is_dns_timeout(&self) -> bool {
+        matches!(self, Self::DnsTimeout { .. })
+    }
+}
+
+pub(in crate::providers) fn map_endpoint_error(error: impl EndpointFailure) -> TransportError {
+    let class = if error.is_dns_timeout() {
         AttemptFailureClass::Timeout
     } else {
         AttemptFailureClass::Connect
     };
     transport_error(TransportPhase::Connect, class, false, error.to_string())
-}
-
-pub(in crate::providers) fn map_send_error(
-    provider: &'static str,
-    response_io: ProviderResponseIo,
-    error: reqwest::Error,
-) -> TransportError {
-    if error.is_connect() {
-        transport_error(
-            TransportPhase::Connect,
-            if error.is_timeout() {
-                AttemptFailureClass::Timeout
-            } else {
-                AttemptFailureClass::Connect
-            },
-            false,
-            format!("{provider} connection failed"),
-        )
-    } else if error.is_timeout() {
-        response_io.first_byte_timeout()
-    } else {
-        transport_error(
-            TransportPhase::FirstByte,
-            AttemptFailureClass::Connect,
-            false,
-            format!("{provider} request failed before response headers"),
-        )
-    }
 }
 
 pub(in crate::providers) fn protocol_error(message: impl Into<String>) -> TransportError {
@@ -207,6 +133,7 @@ mod tests {
             BoxFuture, MediaByteStream, MediaSpool, MediaSpoolError, MediaUpload, OpenedMedia,
         },
     };
+    use crate::providers::transport_io::ProviderResponseIo;
 
     #[derive(Clone)]
     struct ReadSpool {
@@ -262,28 +189,34 @@ mod tests {
         let secret = "credential-value";
         let long_detail = format!("{secret}{}", "x".repeat(600));
         let body = serde_json::to_vec(&json!({"error": {"message": long_detail}})).unwrap();
-        let message =
-            safe_upstream_error_message("provider", StatusCode::BAD_GATEWAY, &body, secret);
+        let io = ProviderResponseIo::new("provider");
+        let message = io.safe_upstream_error_message(StatusCode::BAD_GATEWAY, &body, secret);
         assert!(message.contains("[REDACTED]"));
         assert!(!message.contains(secret));
         assert!(message.len() < 600, "upstream messages must remain bounded");
 
         for body in [b"not-json".as_slice(), br#"{"error":{"message":""}}"#] {
             assert_eq!(
-                safe_upstream_error_message("provider", StatusCode::BAD_REQUEST, body, secret),
+                io.safe_upstream_error_message(StatusCode::BAD_REQUEST, body, secret),
                 "provider returned HTTP 400 Bad Request"
             );
         }
 
-        let invalid_header = secret_header("line one\nline two", "provider").unwrap_err();
+        let invalid_header = io.bearer_header("line one\nline two").unwrap_err();
         assert_eq!(invalid_header.class, AttemptFailureClass::Protocol);
         assert_eq!(invalid_header.phase, TransportPhase::Connect);
 
-        for (dns_timeout, expected) in [
-            (false, AttemptFailureClass::Connect),
-            (true, AttemptFailureClass::Timeout),
+        for (error, expected) in [
+            (
+                EndpointError::HttpsRequired { provider: "p" },
+                AttemptFailureClass::Connect,
+            ),
+            (
+                EndpointError::DnsTimeout { provider: "p" },
+                AttemptFailureClass::Timeout,
+            ),
         ] {
-            let error = map_endpoint_error("private endpoint detail", dns_timeout);
+            let error = map_endpoint_error(error);
             assert_eq!(error.class, expected);
             assert_eq!(error.phase, TransportPhase::Connect);
             assert!(!error.response_committed);

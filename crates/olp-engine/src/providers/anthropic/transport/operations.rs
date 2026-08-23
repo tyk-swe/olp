@@ -2,6 +2,7 @@ use std::{collections::BTreeMap, fmt};
 
 use crate::domain::{
     canonical::{
+        events::Event,
         identity::{Surface, TransportMode},
         requests::{ContentPart, MediaSource, Operation},
         results::{CanonicalResult, TokenCountResult},
@@ -12,6 +13,7 @@ use crate::domain::{
     },
     routing::provider::ProviderKind,
 };
+use crate::protocols::anthropic::stream::Decoder;
 use crate::protocols::anthropic::{
     count::ANTHROPIC_COUNT_REQUEST_EXTENSION,
     dto::{
@@ -26,13 +28,15 @@ use http::{HeaderMap, HeaderValue, StatusCode, header};
 use reqwest::{Response, Url};
 use tokio::time::{Instant, timeout};
 
-use super::errors::*;
 use super::media::hydrate_anthropic_messages;
-use crate::providers::anthropic::{ApiKey, ConnectorConfig};
+use crate::providers::anthropic::ConnectorConfig;
+use crate::providers::connector::ApiKey;
 use crate::providers::transport_common::{
-    protocol_body_error, protocol_error, source_extensions, transport_error,
+    map_endpoint_error, protocol_body_error, protocol_error, source_extensions, transport_error,
 };
-use crate::providers::transport_io::{ProviderResponseIo, bounded_duration};
+use crate::providers::transport_io::{
+    ProviderResponseIo, bounded_duration, event_stream::CanonicalEventDecoder,
+};
 
 const RESPONSE_IO: ProviderResponseIo = ProviderResponseIo::new("Anthropic");
 
@@ -102,7 +106,7 @@ impl Connector {
                 }
             }
             let mut headers = HeaderMap::new();
-            headers.insert("x-api-key", secret_header(&self.api_key)?);
+            headers.insert("x-api-key", RESPONSE_IO.secret_header(&self.api_key)?);
             headers.insert(
                 "anthropic-version",
                 HeaderValue::from_str(&self.config.api_version).map_err(|_| {
@@ -117,7 +121,7 @@ impl Connector {
             )
             .await
             .map_err(|_| RESPONSE_IO.first_byte_timeout())?
-            .map_err(map_send_error)?;
+            .map_err(|error| RESPONSE_IO.map_send_error(error))?;
             if !response.status().is_success() {
                 return Err(self.map_error_response(response, attempt_deadline).await);
             }
@@ -203,7 +207,7 @@ impl Connector {
 
         let first_byte_deadline = Instant::now() + self.config.timeouts.first_byte;
         let mut headers = HeaderMap::new();
-        headers.insert("x-api-key", secret_header(&self.api_key)?);
+        headers.insert("x-api-key", RESPONSE_IO.secret_header(&self.api_key)?);
         headers.insert(
             "anthropic-version",
             HeaderValue::from_str(&self.config.api_version).map_err(|_| {
@@ -237,20 +241,26 @@ impl Connector {
         )
         .await
         .map_err(|_| RESPONSE_IO.first_byte_timeout())?
-        .map_err(map_send_error)?;
+        .map_err(|error| RESPONSE_IO.map_send_error(error))?;
 
         if !response.status().is_success() {
             return Err(self.map_error_response(response, attempt_deadline).await);
         }
         if streaming {
-            self.streaming_response(
-                response,
-                first_byte_deadline,
-                attempt_deadline,
+            let decoder = Decoder::with_max_event_bytes_and_raw_passthrough(
+                self.config.max_event_bytes,
                 request.metadata.surface == Surface::Anthropic,
-            )
-            .await
-            .map(ProviderOutput::Events)
+            );
+            RESPONSE_IO
+                .decoded_event_stream(
+                    response,
+                    first_byte_deadline,
+                    attempt_deadline,
+                    self.config.timeouts.idle,
+                    decoder,
+                )
+                .await
+                .map(ProviderOutput::Events)
         } else {
             self.unary_response(
                 response,
@@ -389,7 +399,9 @@ impl Connector {
             )
             .await
         {
-            Ok(body) => safe_upstream_error_message(status, &body, self.api_key.expose()),
+            Ok(body) => {
+                RESPONSE_IO.safe_upstream_error_message(status, &body, self.api_key.expose())
+            }
             Err(_) => format!("Anthropic returned HTTP {status}"),
         };
         let class = if status == StatusCode::REQUEST_TIMEOUT {
@@ -526,4 +538,16 @@ pub(super) fn encode_count_tokens(
         tool_choice: None,
         extra: BTreeMap::new(),
     })
+}
+
+impl CanonicalEventDecoder for Decoder {
+    type Error = crate::protocols::anthropic::stream::Error;
+
+    fn push(&mut self, bytes: &[u8]) -> Result<Vec<Event>, Self::Error> {
+        Self::push(self, bytes)
+    }
+
+    fn finish(&mut self) -> Result<Vec<Event>, Self::Error> {
+        Self::finish(self)
+    }
 }

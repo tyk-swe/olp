@@ -17,6 +17,7 @@ use crate::{
         routing::provider::ProviderKind,
     },
     providers::{
+        connector::ApiKey,
         factory::{
             assembly::Factory,
             certification::{
@@ -27,7 +28,7 @@ use crate::{
             overrides::Registry,
         },
         openai::{
-            ApiKey, ConnectorConfig as OpenAiConnectorConfig,
+            ConnectorConfig as OpenAiConnectorConfig,
             certification::{CompatibleCapability, CompatibleCapabilityCertificationError},
             transport::Connector,
         },

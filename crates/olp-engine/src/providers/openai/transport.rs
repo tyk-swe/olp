@@ -6,7 +6,8 @@ use crate::domain::ports::{
 use http::{HeaderMap, HeaderValue, header};
 use tokio::time::{Instant, timeout};
 
-use crate::providers::openai::{ApiKey, ConnectorConfig};
+use crate::providers::connector::ApiKey;
+use crate::providers::openai::ConnectorConfig;
 
 mod errors;
 mod media;

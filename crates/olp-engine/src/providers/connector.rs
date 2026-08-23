@@ -1,6 +1,33 @@
-use std::time::Duration;
+use std::{fmt, time::Duration};
 
 use zeroize::Zeroizing;
+
+/// A provider API key. Zeroized on drop and never included in `Debug` output.
+pub struct ApiKey(Zeroizing<String>);
+
+impl ApiKey {
+    pub fn new(value: impl Into<String>) -> Result<Self, ApiKeyError> {
+        visible_secret(value, ApiKeyError::Empty, ApiKeyError::Invalid).map(Self)
+    }
+
+    pub(in crate::providers) fn expose(&self) -> &str {
+        self.0.as_str()
+    }
+}
+
+impl fmt::Debug for ApiKey {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("ApiKey([REDACTED])")
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, thiserror::Error)]
+pub enum ApiKeyError {
+    #[error("API key cannot be empty")]
+    Empty,
+    #[error("API key must contain visible ASCII characters only")]
+    Invalid,
+}
 
 /// Deadlines shared by every provider connector.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -35,5 +62,21 @@ pub(in crate::providers) fn visible_secret<E>(
         Ok(Zeroizing::new(value))
     } else {
         Err(invalid)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{ApiKey, ApiKeyError};
+
+    #[test]
+    fn api_key_is_debug_redacted_and_rejects_header_injection() {
+        let key = ApiKey::new("sk-super-secret").unwrap();
+        assert!(!format!("{key:?}").contains("super-secret"));
+        assert_eq!(
+            ApiKey::new("sk-key\nheader").unwrap_err(),
+            ApiKeyError::Invalid
+        );
+        assert_eq!(ApiKey::new("  ").unwrap_err(), ApiKeyError::Empty);
     }
 }

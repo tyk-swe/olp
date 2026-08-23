@@ -23,13 +23,13 @@ use crate::domain::{
         ProviderTransport, TransportError, TransportPhase,
     },
 };
+use crate::providers::connector::ApiKey;
 use crate::providers::openai::{
-    ApiKey as OpenAiApiKey, ConnectorConfig as OpenAiConnectorConfig,
+    ConnectorConfig as OpenAiConnectorConfig,
     certification::{CompatibleCapability, CompatibleCapabilityCertificationError},
     transport::Connector as OpenAiConnector,
 };
 use url::Url;
-use zeroize::Zeroizing;
 
 #[derive(Clone, Debug)]
 pub(in crate::providers) struct ConnectorConfig {
@@ -119,25 +119,6 @@ impl ConnectorConfig {
     }
 }
 
-pub(in crate::providers) struct ApiKey(Zeroizing<String>);
-
-impl ApiKey {
-    pub(in crate::providers) fn new(value: impl Into<String>) -> Result<Self, ConnectorBuildError> {
-        crate::providers::connector::visible_secret(
-            value,
-            ConnectorBuildError::EmptyApiKey,
-            ConnectorBuildError::InvalidApiKey,
-        )
-        .map(Self)
-    }
-}
-
-impl fmt::Debug for ApiKey {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str("ApiKey([REDACTED])")
-    }
-}
-
 pub(in crate::providers) struct Connector {
     resource_endpoint: Url,
     deployment: String,
@@ -148,9 +129,7 @@ pub(in crate::providers) struct Connector {
 impl Connector {
     #[must_use]
     pub(in crate::providers) fn new(config: ConnectorConfig, api_key: ApiKey) -> Self {
-        let inference_key = OpenAiApiKey::new(api_key.0.as_str().to_owned())
-            .expect("Azure key validation is at least as strict as OpenAI key validation");
-        let inner = OpenAiConnector::new_with_api_key_header(config.inner, inference_key);
+        let inner = OpenAiConnector::new_with_api_key_header(config.inner, api_key);
         Self {
             resource_endpoint: config.resource_endpoint,
             deployment: config.deployment,
@@ -377,10 +356,6 @@ pub(in crate::providers) enum ConnectorBuildError {
     InvalidEndpoint,
     #[error("Azure OpenAI deployment name is invalid")]
     InvalidDeployment,
-    #[error("Azure OpenAI API key cannot be empty")]
-    EmptyApiKey,
-    #[error("Azure OpenAI API key must contain visible ASCII characters only")]
-    InvalidApiKey,
     #[error("Azure OpenAI API version must be YYYY-MM-DD or YYYY-MM-DD-preview")]
     InvalidApiVersion,
     #[error(transparent)]

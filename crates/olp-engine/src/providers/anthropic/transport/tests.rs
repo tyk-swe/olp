@@ -27,8 +27,10 @@ use crate::providers::mock_server::{
     MockResponse, find_bytes, response, spawn_mock as spawn_http_mock,
 };
 use crate::providers::{
-    anthropic::{ApiKey, ConnectorConfig, transport::operations::Connector},
+    anthropic::{ConnectorConfig, transport::operations::Connector},
+    connector::ApiKey,
     connector::Timeouts,
+    transport_io::ProviderResponseIo,
 };
 use bytes::Bytes;
 use futures::{StreamExt, stream};
@@ -337,7 +339,7 @@ async fn redirects_are_not_followed_and_errors_redact_credentials() {
         .unwrap();
     assert_eq!(error.class, AttemptFailureClass::UpstreamClient);
 
-    let message = safe_upstream_error_message(
+    let message = ProviderResponseIo::new("x").safe_upstream_error_message(
         StatusCode::BAD_REQUEST,
         br#"{"error":{"message":"bad upstream-secret","private":"do-not-echo"}}"#,
         "upstream-secret",

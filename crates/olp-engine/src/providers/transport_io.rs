@@ -13,9 +13,12 @@ use crate::domain::ports::{
 };
 use bytes::Bytes;
 use futures::{Stream, StreamExt as _, stream};
-use http::header;
+use http::{HeaderValue, StatusCode, header};
 use reqwest::Response;
 use tokio::time::{Instant, timeout};
+use zeroize::Zeroizing;
+
+use crate::providers::{connector::ApiKey, transport_common::transport_error};
 
 pub(in crate::providers) mod event_stream;
 use self::event_stream::{CanonicalEventDecoder, DeadlineByteStream, DecodedEventStream};
@@ -50,6 +53,92 @@ impl ProviderResponseIo {
     #[must_use]
     pub(in crate::providers) const fn new(provider: &'static str) -> Self {
         Self { provider }
+    }
+
+    pub(in crate::providers) fn secret_header(
+        self,
+        api_key: &ApiKey,
+    ) -> Result<HeaderValue, TransportError> {
+        let value = Zeroizing::new(api_key.expose().as_bytes().to_vec());
+        HeaderValue::from_bytes(value.as_slice()).map_err(|_| {
+            self.protocol_error(
+                TransportPhase::Connect,
+                false,
+                format!(
+                    "{} API key cannot be represented as a header",
+                    self.provider
+                ),
+            )
+        })
+    }
+
+    pub(in crate::providers) fn bearer_header(
+        self,
+        secret: &str,
+    ) -> Result<HeaderValue, TransportError> {
+        let mut value = Zeroizing::new(Vec::with_capacity("Bearer ".len() + secret.len()));
+        value.extend_from_slice(b"Bearer ");
+        value.extend_from_slice(secret.as_bytes());
+        HeaderValue::from_bytes(value.as_slice()).map_err(|_| {
+            self.protocol_error(
+                TransportPhase::Connect,
+                false,
+                format!(
+                    "{} bearer credential cannot be represented as a header",
+                    self.provider
+                ),
+            )
+        })
+    }
+
+    /// Formats an upstream error body, redacting `secret` and bounding length.
+    pub(in crate::providers) fn safe_upstream_error_message(
+        self,
+        status: StatusCode,
+        body: &[u8],
+        secret: &str,
+    ) -> String {
+        let message = serde_json::from_slice::<serde_json::Value>(body)
+            .ok()
+            .and_then(|value| value.get("error").cloned())
+            .and_then(|error| {
+                error
+                    .get("message")
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::to_owned)
+            })
+            .map(|message| message.replace(secret, "[REDACTED]"))
+            .map(|message| message.chars().take(512).collect::<String>());
+        match message {
+            Some(message) if !message.is_empty() => {
+                format!("{} returned HTTP {status}: {message}", self.provider)
+            }
+            _ => format!("{} returned HTTP {status}", self.provider),
+        }
+    }
+
+    pub(in crate::providers) fn map_send_error(self, error: reqwest::Error) -> TransportError {
+        if error.is_connect() {
+            transport_error(
+                TransportPhase::Connect,
+                if error.is_timeout() {
+                    AttemptFailureClass::Timeout
+                } else {
+                    AttemptFailureClass::Connect
+                },
+                false,
+                format!("{} connection failed", self.provider),
+            )
+        } else if error.is_timeout() {
+            self.first_byte_timeout()
+        } else {
+            transport_error(
+                TransportPhase::FirstByte,
+                AttemptFailureClass::Connect,
+                false,
+                format!("{} request failed before response headers", self.provider),
+            )
+        }
     }
 
     pub(in crate::providers) fn require_content_type(

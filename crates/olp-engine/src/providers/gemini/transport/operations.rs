@@ -2,6 +2,7 @@ use std::{collections::BTreeMap, fmt};
 
 use crate::domain::{
     canonical::{
+        events::Event,
         identity::{Surface, TransportMode},
         requests::{ContentPart, MediaSource, Operation},
         results::{CanonicalResult, TokenCountResult},
@@ -12,6 +13,7 @@ use crate::domain::{
     },
     routing::provider::ProviderKind,
 };
+use crate::protocols::gemini::stream::Decoder;
 use crate::protocols::gemini::{
     count::GEMINI_COUNT_REQUEST_EXTENSION,
     dto::{
@@ -28,13 +30,15 @@ use http::{HeaderMap, HeaderValue, StatusCode, header};
 use reqwest::{Response, Url};
 use tokio::time::{Instant, timeout};
 
-use super::errors::*;
 use super::media::hydrate_gemini_contents;
-use crate::providers::gemini::{ApiKey, BearerTokenProvider, ConnectorConfig, ConnectorCredential};
+use crate::providers::connector::ApiKey;
+use crate::providers::gemini::{BearerTokenProvider, ConnectorConfig, ConnectorCredential};
 use crate::providers::transport_common::{
-    protocol_body_error, protocol_error, source_extensions, transport_error,
+    map_endpoint_error, protocol_body_error, protocol_error, source_extensions, transport_error,
 };
-use crate::providers::transport_io::{ProviderResponseIo, bounded_duration};
+use crate::providers::transport_io::{
+    ProviderResponseIo, bounded_duration, event_stream::CanonicalEventDecoder,
+};
 
 const RESPONSE_IO: ProviderResponseIo = ProviderResponseIo::new("Gemini");
 
@@ -133,7 +137,7 @@ impl Connector {
             )
             .await
             .map_err(|_| RESPONSE_IO.first_byte_timeout())?
-            .map_err(map_send_error)?;
+            .map_err(|error| RESPONSE_IO.map_send_error(error))?;
             if !response.status().is_success() {
                 return Err(self.map_error_response(response, attempt_deadline).await);
             }
@@ -224,7 +228,7 @@ impl Connector {
         )
         .await
         .map_err(|_| RESPONSE_IO.first_byte_timeout())?
-        .map_err(map_send_error)?;
+        .map_err(|error| RESPONSE_IO.map_send_error(error))?;
         if !response.status().is_success() {
             return Err(self.map_error_response(response, attempt_deadline).await);
         }
@@ -311,19 +315,25 @@ impl Connector {
         )
         .await
         .map_err(|_| RESPONSE_IO.first_byte_timeout())?
-        .map_err(map_send_error)?;
+        .map_err(|error| RESPONSE_IO.map_send_error(error))?;
         if !response.status().is_success() {
             return Err(self.map_error_response(response, attempt_deadline).await);
         }
         if streaming {
-            self.streaming_response(
-                response,
-                first_byte_deadline,
-                attempt_deadline,
+            let decoder = Decoder::with_max_event_bytes_and_raw_passthrough(
+                self.config.max_event_bytes,
                 request.metadata.surface == Surface::Gemini,
-            )
-            .await
-            .map(ProviderOutput::Events)
+            );
+            RESPONSE_IO
+                .decoded_event_stream(
+                    response,
+                    first_byte_deadline,
+                    attempt_deadline,
+                    self.config.timeouts.idle,
+                    decoder,
+                )
+                .await
+                .map(ProviderOutput::Events)
         } else {
             self.unary_response(
                 response,
@@ -491,7 +501,7 @@ impl Connector {
     ) -> Result<(), TransportError> {
         match &self.credential {
             ConnectorCredential::ApiKey(api_key) => {
-                headers.insert("x-goog-api-key", secret_header(api_key)?);
+                headers.insert("x-goog-api-key", RESPONSE_IO.secret_header(api_key)?);
             }
             ConnectorCredential::Bearer(provider) => {
                 let token = provider.token().await.map_err(|_| {
@@ -502,7 +512,10 @@ impl Connector {
                         "Google OAuth bearer token acquisition failed",
                     )
                 })?;
-                headers.insert(header::AUTHORIZATION, bearer_header(&token)?);
+                headers.insert(
+                    header::AUTHORIZATION,
+                    RESPONSE_IO.bearer_header(token.expose())?,
+                );
             }
         }
         Ok(())
@@ -511,7 +524,7 @@ impl Connector {
     fn safe_upstream_error_message(&self, status: StatusCode, body: &[u8]) -> String {
         match &self.credential {
             ConnectorCredential::ApiKey(api_key) => {
-                safe_upstream_error_message(status, body, api_key.expose())
+                RESPONSE_IO.safe_upstream_error_message(status, body, api_key.expose())
             }
             // OAuth tokens are deliberately not retained by the connector, so
             // do not surface an upstream body that could reflect one.
@@ -660,4 +673,16 @@ pub(super) fn encode_count_tokens(
         generate_content_request: None,
         extra: BTreeMap::new(),
     })
+}
+
+impl CanonicalEventDecoder for Decoder {
+    type Error = crate::protocols::gemini::stream::Error;
+
+    fn push(&mut self, bytes: &[u8]) -> Result<Vec<Event>, Self::Error> {
+        Self::push(self, bytes)
+    }
+
+    fn finish(&mut self) -> Result<Vec<Event>, Self::Error> {
+        Self::finish(self)
+    }
 }

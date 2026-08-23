@@ -363,8 +363,9 @@ mod tests {
     use std::time::Duration;
 
     use super::*;
+    use crate::providers::connector::ApiKey;
     use crate::providers::mock_server::{MockResponse, response, spawn_mock, spawn_sequence};
-    use crate::providers::openai::{ApiKey, ConnectorConfig, Timeouts};
+    use crate::providers::openai::{ConnectorConfig, Timeouts};
 
     #[tokio::test]
     async fn genuine_unary_generation_probe_uses_inference_codec() {

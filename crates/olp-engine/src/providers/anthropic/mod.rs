@@ -9,13 +9,9 @@
 mod endpoint;
 pub mod transport;
 
-use std::fmt;
-
-use crate::providers::endpoint::Error;
-use zeroize::Zeroizing;
-
 use crate::providers::anthropic::endpoint::Endpoint;
 use crate::providers::connector::Timeouts;
+use crate::providers::endpoint::Error;
 
 pub const DEFAULT_MAX_RESPONSE_BYTES: usize = 16 * 1024 * 1024;
 pub const DEFAULT_MAX_EVENT_BYTES: usize = 1024 * 1024;
@@ -74,37 +70,10 @@ impl ConnectorConfig {
     }
 }
 
-pub struct ApiKey(Zeroizing<String>);
-
-impl ApiKey {
-    pub fn new(value: impl Into<String>) -> Result<Self, ConnectorBuildError> {
-        crate::providers::connector::visible_secret(
-            value,
-            ConnectorBuildError::EmptyApiKey,
-            ConnectorBuildError::InvalidApiKey,
-        )
-        .map(Self)
-    }
-
-    pub(in crate::providers) fn expose(&self) -> &str {
-        self.0.as_str()
-    }
-}
-
-impl fmt::Debug for ApiKey {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str("ApiKey([REDACTED])")
-    }
-}
-
 #[derive(Debug, thiserror::Error)]
 pub enum ConnectorBuildError {
     #[error(transparent)]
     Endpoint(#[from] Error),
-    #[error("Anthropic API key cannot be empty")]
-    EmptyApiKey,
-    #[error("Anthropic API key must contain visible ASCII characters only")]
-    InvalidApiKey,
     #[error("Anthropic API version must contain visible ASCII characters only")]
     InvalidApiVersion,
 }
@@ -114,15 +83,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn secrets_are_debug_redacted_and_header_injection_is_rejected() {
-        let key = ApiKey::new("sk-ant-secret").unwrap();
-        let debug = format!("{key:?}");
-        assert!(debug.contains("REDACTED"));
-        assert!(!debug.contains("sk-ant-secret"));
-        assert!(matches!(
-            ApiKey::new("secret\nheader"),
-            Err(ConnectorBuildError::InvalidApiKey)
-        ));
+    fn header_injection_in_api_version_is_rejected() {
         assert!(matches!(
             ConnectorConfig::default().with_api_version("bad\nversion"),
             Err(ConnectorBuildError::InvalidApiVersion)

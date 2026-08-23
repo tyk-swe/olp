@@ -3,17 +3,14 @@ use std::fmt;
 use crate::domain::{provider::ProviderAuthMode, routing::provider::ProviderKind};
 use zeroize::Zeroizing;
 
-use crate::providers::anthropic::{
-    ApiKey as AnthropicApiKey, ConnectorConfig as AnthropicConnectorConfig,
-};
-use crate::providers::azure_openai::{
-    ApiKey as AzureOpenAiApiKey, ConnectorConfig as AzureOpenAiConnectorConfig,
-};
+use crate::providers::anthropic::ConnectorConfig as AnthropicConnectorConfig;
+use crate::providers::azure_openai::ConnectorConfig as AzureOpenAiConnectorConfig;
 use crate::providers::bedrock::{
     ConnectorConfig as BedrockConnectorConfig, StaticCredentials as BedrockStaticCredentials,
 };
-use crate::providers::gemini::{ApiKey as GeminiApiKey, ConnectorConfig as GeminiConnectorConfig};
-use crate::providers::openai::{ApiKey as OpenAiApiKey, ConnectorConfig as OpenAiConnectorConfig};
+use crate::providers::connector::ApiKey;
+use crate::providers::gemini::ConnectorConfig as GeminiConnectorConfig;
+use crate::providers::openai::ConnectorConfig as OpenAiConnectorConfig;
 use crate::providers::vertex::{
     Connector as VertexConnector, ConnectorConfig as VertexConnectorConfig,
 };
@@ -214,17 +211,17 @@ pub(super) fn validate_connector_credential(
     credential: BorrowedCredential<'_>,
 ) -> Result<(), Error> {
     match config {
-        Config::OpenAi { .. } | Config::OpenAiCompatible { .. } => OpenAiApiKey::new(
+        Config::OpenAi { .. } | Config::OpenAiCompatible { .. } => ApiKey::new(
             text_credential(credential, "OpenAI provider credential is missing")?.to_owned(),
         )
         .map(|_| ())
         .map_err(Error::credential),
-        Config::Anthropic { .. } => AnthropicApiKey::new(
+        Config::Anthropic { .. } => ApiKey::new(
             text_credential(credential, "Anthropic provider credential is missing")?.to_owned(),
         )
         .map(|_| ())
         .map_err(Error::credential),
-        Config::Gemini { .. } => GeminiApiKey::new(
+        Config::Gemini { .. } => ApiKey::new(
             text_credential(credential, "Gemini provider credential is missing")?.to_owned(),
         )
         .map(|_| ())
@@ -258,7 +255,7 @@ pub(super) fn validate_connector_credential(
         Config::Bedrock { .. } => Err(Error::credential(
             "default-chain providers do not accept stored credentials",
         )),
-        Config::AzureOpenAi { .. } => AzureOpenAiApiKey::new(
+        Config::AzureOpenAi { .. } => ApiKey::new(
             text_credential(credential, "Azure OpenAI credential is missing")?.to_owned(),
         )
         .map(|_| ())

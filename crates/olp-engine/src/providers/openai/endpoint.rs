@@ -1,9 +1,10 @@
-use std::{fmt, time::Duration};
+use std::ops::{Deref, DerefMut};
 
-use reqwest::{Client, Url};
+use reqwest::Url;
 use thiserror::Error;
 
 use crate::providers::endpoint::{EndpointCore, Error as CommonEndpointError};
+use crate::providers::transport_common::EndpointFailure;
 
 const DEFAULT_OPENAI_BASE_URL: &str = "https://api.openai.com/v1/";
 const PROVIDER: &str = "OpenAI";
@@ -18,15 +19,29 @@ pub enum Error {
     InvalidApiVersion,
 }
 
-#[derive(Clone)]
+impl EndpointFailure for Error {
+    fn is_dns_timeout(&self) -> bool {
+        matches!(self, Self::Common(error) if error.is_dns_timeout())
+    }
+}
+
+#[derive(Clone, Debug)]
 pub(in crate::providers) struct Endpoint {
     core: EndpointCore,
     fixed_query: Option<(String, String)>,
 }
 
-impl fmt::Debug for Endpoint {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.core.fmt(formatter)
+impl Deref for Endpoint {
+    type Target = EndpointCore;
+
+    fn deref(&self) -> &EndpointCore {
+        &self.core
+    }
+}
+
+impl DerefMut for Endpoint {
+    fn deref_mut(&mut self) -> &mut EndpointCore {
+        &mut self.core
     }
 }
 
@@ -41,11 +56,9 @@ impl Endpoint {
         Self::parse_with_policy(value, false)
     }
 
-    fn parse_with_policy(value: &str, allow_unsafe_target: bool) -> Result<Self, Error> {
-        Ok(Self {
-            core: EndpointCore::parse(value, PROVIDER, allow_unsafe_target)?,
-            fixed_query: None,
-        })
+    #[cfg(any(test, feature = "test-util"))]
+    pub(in crate::providers) fn parse_with_unsafe_test_target(value: &str) -> Result<Self, Error> {
+        Self::parse_with_policy(value, true)
     }
 
     #[cfg(any(test, feature = "test-util"))]
@@ -53,19 +66,19 @@ impl Endpoint {
         Self::parse_with_policy(value, true).expect("local test endpoint must be a valid HTTP URL")
     }
 
-    #[cfg(any(test, feature = "test-util"))]
-    pub(in crate::providers) fn parse_with_unsafe_test_target(value: &str) -> Result<Self, Error> {
-        Self::parse_with_policy(value, true)
+    fn parse_with_policy(value: &str, allow_unsafe_target: bool) -> Result<Self, Error> {
+        Ok(Self {
+            core: EndpointCore::parse(value, PROVIDER, allow_unsafe_target)?,
+            fixed_query: None,
+        })
     }
 
     pub(in crate::providers) fn resource_url(&self, path: &str) -> Result<Url, Error> {
         if path.starts_with('/') || path.contains("..") || path.contains(['\\', '?', '#']) {
             return Err(Error::InvalidResourcePath);
         }
-        let mut url = self.core.join(path)?;
-        if url.origin() != self.core.url().origin()
-            || !url.path().starts_with(self.core.url().path())
-        {
+        let mut url = self.join(path)?;
+        if url.origin() != self.url().origin() || !url.path().starts_with(self.url().path()) {
             return Err(Error::InvalidResourcePath);
         }
         if let Some((name, value)) = &self.fixed_query {
@@ -85,20 +98,6 @@ impl Endpoint {
         }
         self.fixed_query = Some(("api-version".into(), value.into()));
         Ok(())
-    }
-
-    pub(in crate::providers) fn set_connect_timeout(&mut self, value: Duration) {
-        self.core.set_connect_timeout(value);
-    }
-
-    pub(in crate::providers) async fn pinned_client(
-        &self,
-        connect_timeout: Duration,
-    ) -> Result<Client, Error> {
-        self.core
-            .pinned_client(connect_timeout)
-            .await
-            .map_err(Into::into)
     }
 }
 

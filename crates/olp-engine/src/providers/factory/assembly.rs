@@ -2,20 +2,15 @@ use std::sync::Arc;
 
 use crate::domain::ports::{DiscoveredProviderModel, ProviderTransport};
 
-use crate::providers::anthropic::{
-    ApiKey as AnthropicApiKey, transport::operations::Connector as AnthropicConnector,
-};
-use crate::providers::azure_openai::{
-    ApiKey as AzureOpenAiApiKey, Connector as AzureOpenAiConnector,
-};
+use crate::providers::anthropic::transport::operations::Connector as AnthropicConnector;
+use crate::providers::azure_openai::Connector as AzureOpenAiConnector;
 use crate::providers::bedrock::{
     Credentials, StaticCredentials as BedrockStaticCredentials,
     transport::Connector as BedrockConnector,
 };
-use crate::providers::gemini::{
-    ApiKey as GeminiApiKey, transport::operations::Connector as GeminiConnector,
-};
-use crate::providers::openai::{ApiKey as OpenAiApiKey, transport::Connector as OpenAiConnector};
+use crate::providers::connector::ApiKey;
+use crate::providers::gemini::transport::operations::Connector as GeminiConnector;
+use crate::providers::openai::transport::Connector as OpenAiConnector;
 use crate::providers::vertex::Connector as VertexConnector;
 
 #[cfg(any(test, feature = "test-util"))]
@@ -191,21 +186,21 @@ async fn build_connector(
     let kind = config.kind();
     let connector = match connector_configuration_with_policy(config, allow_unsafe_test_targets)? {
         ConnectorConfiguration::OpenAi(configuration) => {
-            let key = OpenAiApiKey::new(
+            let key = ApiKey::new(
                 text_credential(credential, "OpenAI provider credential is missing")?.to_owned(),
             )
             .map_err(Error::credential)?;
             ConcreteConnector::OpenAi(Arc::new(OpenAiConnector::new(configuration, key)))
         }
         ConnectorConfiguration::Anthropic(configuration) => {
-            let key = AnthropicApiKey::new(
+            let key = ApiKey::new(
                 text_credential(credential, "Anthropic provider credential is missing")?.to_owned(),
             )
             .map_err(Error::credential)?;
             ConcreteConnector::Anthropic(Arc::new(AnthropicConnector::new(configuration, key)))
         }
         ConnectorConfiguration::Gemini(configuration) => {
-            let key = GeminiApiKey::new(
+            let key = ApiKey::new(
                 text_credential(credential, "Gemini provider credential is missing")?.to_owned(),
             )
             .map_err(Error::credential)?;
@@ -256,7 +251,7 @@ async fn build_connector(
             ))
         }
         ConnectorConfiguration::AzureOpenAi(configuration) => {
-            let key = AzureOpenAiApiKey::new(
+            let key = ApiKey::new(
                 text_credential(credential, "Azure OpenAI credential is missing")?.to_owned(),
             )
             .map_err(Error::credential)?;

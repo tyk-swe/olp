@@ -6,9 +6,7 @@ use tokio::time::Instant;
 
 use crate::providers::transport_common::transport_error;
 use crate::providers::{
-    openai::{ApiKey, endpoint::Error},
-    transport_common,
-    transport_io::ProviderResponseIo,
+    connector::ApiKey, openai::endpoint::Error, transport_common, transport_io::ProviderResponseIo,
 };
 
 const PROVIDER: &str = "OpenAI";
@@ -62,7 +60,7 @@ pub(super) fn map_spool_error(error: MediaSpoolError) -> TransportError {
 }
 
 pub(super) fn bearer_header(api_key: &ApiKey) -> Result<HeaderValue, TransportError> {
-    transport_common::bearer_header(api_key.expose(), PROVIDER)
+    RESPONSE_IO.bearer_header(api_key.expose())
 }
 
 pub(super) fn raw_api_key_header(api_key: &ApiKey) -> Result<HeaderValue, TransportError> {
@@ -81,7 +79,7 @@ pub(super) fn safe_upstream_error_message(
     body: &[u8],
     api_key: &str,
 ) -> String {
-    transport_common::safe_upstream_error_message(PROVIDER, status, body, api_key)
+    RESPONSE_IO.safe_upstream_error_message(status, body, api_key)
 }
 
 pub(super) fn remaining(
@@ -109,16 +107,12 @@ pub(super) fn remaining_until(
         .checked_duration_since(Instant::now())
 }
 
-pub(super) fn map_endpoint_error(error: Error) -> TransportError {
-    let dns_timeout = matches!(
-        error,
-        Error::Common(crate::providers::endpoint::Error::DnsTimeout { .. })
-    );
-    transport_common::map_endpoint_error(error, dns_timeout)
+pub(super) fn map_endpoint_error(error: impl Into<Error>) -> TransportError {
+    transport_common::map_endpoint_error(error.into())
 }
 
 pub(super) fn map_send_error(error: reqwest::Error) -> TransportError {
-    transport_common::map_send_error(PROVIDER, RESPONSE_IO, error)
+    RESPONSE_IO.map_send_error(error)
 }
 
 pub(super) fn map_ambiguous_send_error(error: reqwest::Error) -> TransportError {

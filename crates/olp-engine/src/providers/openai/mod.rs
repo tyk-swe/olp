@@ -11,10 +11,6 @@ pub mod certification;
 mod endpoint;
 pub mod transport;
 
-use std::fmt;
-
-use zeroize::Zeroizing;
-
 use crate::providers::connector::Timeouts;
 use crate::providers::openai::endpoint::Endpoint;
 
@@ -79,52 +75,8 @@ impl ConnectorConfig {
     }
 }
 
-pub struct ApiKey(Zeroizing<String>);
-
-impl ApiKey {
-    pub fn new(value: impl Into<String>) -> Result<Self, ConnectorBuildError> {
-        crate::providers::connector::visible_secret(
-            value,
-            ConnectorBuildError::EmptyApiKey,
-            ConnectorBuildError::InvalidApiKey,
-        )
-        .map(Self)
-    }
-
-    pub(in crate::providers) fn expose(&self) -> &str {
-        self.0.as_str()
-    }
-}
-
-impl fmt::Debug for ApiKey {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str("ApiKey([REDACTED])")
-    }
-}
-
 #[derive(Debug, thiserror::Error)]
 pub enum ConnectorBuildError {
     #[error(transparent)]
     Endpoint(#[from] endpoint::Error),
-    #[error("OpenAI API key cannot be empty")]
-    EmptyApiKey,
-    #[error("OpenAI API key must contain visible ASCII characters only")]
-    InvalidApiKey,
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn api_key_debug_is_redacted() {
-        let key = ApiKey::new("sk-super-secret").unwrap();
-        let debug = format!("{key:?}");
-        assert!(debug.contains("REDACTED"));
-        assert!(!debug.contains("super-secret"));
-        assert!(matches!(
-            ApiKey::new("sk-key\nheader-injection"),
-            Err(ConnectorBuildError::InvalidApiKey)
-        ));
-    }
 }

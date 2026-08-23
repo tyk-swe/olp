@@ -22,8 +22,9 @@ use olp::{
 use olp_db::security::envelope::MasterKey;
 use olp_engine::inference::runtime::Manager;
 use olp_engine::providers::{
+    connector::ApiKey,
     connector::Timeouts,
-    openai::{ApiKey, ConnectorConfig, transport::Connector},
+    openai::{ConnectorConfig, transport::Connector},
 };
 use serde_json::{Value, json};
 use tokio::net::TcpListener;
