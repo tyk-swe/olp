@@ -44,17 +44,8 @@ characters, keep its RFC 3986 encoded form in
 
 Open `http://localhost:8080`, paste the value in
 `deploy/secrets/olp_bootstrap_token` into the first-run setup form, and create
-the installation owner. Then recreate the application without the bootstrap
-overlay and retire the token:
-
-```bash
-docker compose --env-file .env -f deploy/compose.yaml up -d --force-recreate olp
-./scripts/retire-compose-bootstrap-secret.sh
-```
-
-Use `deploy/compose.yaml` alone for later restarts and upgrades. See
-[`deploy/secrets/README.md`](deploy/secrets/README.md) for rotation and
-file-backed connector details.
+the installation owner. [`deploy/secrets/README.md`](deploy/secrets/README.md)
+covers retiring the bootstrap token, key rotation, and file-backed connectors.
 
 ## Interfaces
 
@@ -122,23 +113,13 @@ screenshots with `pnpm --dir console screenshots`.
 
 ## Contributing
 
-Use Rust 1.97.1, Node.js 24.15 or newer within the 24.x line (or Node.js 26+),
-pnpm 11, and ripgrep. Install the console dependencies once, then run the
-standard local gate:
-
 ```bash
 make console-install
 make check
 ```
 
-`make help` lists the locked CI-aligned targets, including coverage,
-database-backed tests, contract tests, and generated-file checks. See
-[`CONTRIBUTING.md`](CONTRIBUTING.md) before changing architecture or APIs.
-
-## Security
-
-Report vulnerabilities privately to `support@mail.tyk.sh`; see
-[`SECURITY.md`](SECURITY.md). Do not include credentials or customer data.
+See [`CONTRIBUTING.md`](CONTRIBUTING.md) for the toolchain, sources of truth,
+and the full validation matrix.
 
 ## License
 

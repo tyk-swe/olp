@@ -37,20 +37,13 @@ Keep behavior in its owning role:
 | Delivery (`apps/olp`) | HTTP surfaces, CLI, process composition, and workers |
 | Test harness | Conformance and end-to-end support that production packages never depend on |
 
-Dependencies point toward the engine: database code depends on engine-defined
-ports, the engine never depends on the database crate, and delivery composes
-both. Within the engine, dependencies point left in `domain <- protocols <-
-providers <- inference`; each module may use only itself and modules to its left.
-SQLx/Redis stay in the database crate; Reqwest, AWS, Google authentication, and
-concrete connector construction stay in `olp_engine::providers`; Axum, Tower,
-and Clap stay in delivery. The console is a client-only `adapter-static`
-application: do not add server routes, hooks, or a production Node adapter.
-
+Dependency direction, engine module ordering, and infrastructure ownership are
+defined in [`docs/architecture.md`](docs/architecture.md#component-boundaries).
 Every workspace package declares an architecture role in
-`[package.metadata.olp]`. `scripts/check-boundaries.sh` enforces package-role
-edges, the engine's internal module ordering, infrastructure ownership, and
-console feature isolation. Same-role packages are allowed; production packages
-may never depend on test harnesses.
+`[package.metadata.olp]`; `scripts/check-boundaries.sh` enforces package-role
+edges, the engine's internal module ordering, infrastructure ownership, and the
+console's static-only build. Cross-feature imports in the console are enforced
+by `no-restricted-imports` in `console/eslint.config.mjs`.
 
 ## Sources of truth and change map
 
@@ -76,7 +69,7 @@ may never depend on test harnesses.
 Do not hand-edit generated artifacts: use `make openapi` for
 `openapi/management.json` and `console/src/lib/api/schema.d.ts`,
 `make sqlx-prepare` for `.sqlx/`, and `make screenshots` for
-`docs/assets/screenshots/*.png`. When adding a workspace package, declare its
+`docs/assets/screenshots/overview.png`. When adding a workspace package, declare its
 `[package.metadata.olp]` role and update the Docker build inputs if needed.
 
 ## Validation

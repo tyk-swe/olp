@@ -86,9 +86,8 @@ undocumented_unsafe_blocks = "deny"
 
 [profile.dev]
 # Full DWARF made each integration test binary hundreds of MB and dominated
-# link time; line tables keep file:line backtraces. For debugger sessions
-# needing variable info, override in ~/.cargo/config.toml ([profile.dev]
-# debug = 2) — see CONTRIBUTING.md.
+# link time; line tables keep file:line backtraces. Override with debug = 2 in
+# ~/.cargo/config.toml for debugger sessions needing variable info.
 debug = "line-tables-only"
 split-debuginfo = "unpacked"
 

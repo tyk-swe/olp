@@ -103,7 +103,8 @@ the quiescence assertion, the manifest marks
 point. Current schemas produce v2 manifests; supported legacy producers use
 v1. `scripts/backup-manifest.sh validate BACKUP [v1|v2]` enforces versioned
 fields, checksums, and drain/checkpoint consistency. Legacy v1 manifests remain
-restorable; `convert-v2-to-v1` is only a compatibility fixture path.
+restorable; `backup.sh` emits v1 (via `convert-v2-to-v1`) while the database
+still carries the pre-2.0 `usage_consumer_health` schema.
 
 The dump contains password hashes, session/proxy-key digests, and encrypted
 provider/OIDC credentials. Back up mounted master-key and HMAC files
