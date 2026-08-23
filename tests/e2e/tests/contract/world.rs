@@ -492,21 +492,21 @@ impl World {
 /// Brings up a server, two providers, two routes and an API key, and waits
 /// until the gateway serves the key.
 pub(crate) async fn bootstrap() -> Result<World, String> {
-    bootstrap_server(Server::launch().await?).await
+    bootstrap_server(Server::launch("all", None).await?).await
 }
 
 pub(crate) async fn bootstrap_sharing_valkey(valkey_url: &str) -> Result<World, String> {
-    bootstrap_server(Server::launch_sharing_valkey(valkey_url).await?).await
+    bootstrap_server(Server::launch("all", Some(valkey_url)).await?).await
 }
 
 pub(crate) async fn bootstrap_ha() -> Result<(World, GatewayProcess), String> {
-    let mut server = Server::launch().await?;
+    let mut server = Server::launch("all", None).await?;
     let gateway = server.launch_gateway().await?;
     Ok((bootstrap_server(server).await?, gateway))
 }
 
 pub(crate) async fn bootstrap_worker_ha() -> Result<(World, [WorkerProcess; 3]), String> {
-    let mut server = Server::launch_control().await?;
+    let mut server = Server::launch("control", None).await?;
     let gateway = server.launch_gateway().await?;
     let first = server
         .launch_worker("worker-1", WorkerBoundary::RequestMetadata)

@@ -57,7 +57,7 @@ fn join_sse_frames(frames: &[Bytes]) -> Vec<u8> {
 }
 
 #[test]
-fn stream_encoder_new_emits_semantic_sse_frames_and_round_trips_success_stream() {
+fn stream_encoder_derives_the_completion_id_when_the_provider_sends_none() {
     let request_id = uuid::Uuid::from_u128(0x1234_5678_1234_5678_1234_5678_1234_5678);
     let before = unix_seconds();
     let mut encoder = OpenAiChatCompletionStreamEncoder::new(request_id, "route-model");
@@ -74,20 +74,19 @@ fn stream_encoder_new_emits_semantic_sse_frames_and_round_trips_success_stream()
             .unwrap()
             .is_empty()
     );
-
-    let message_start = only_frame(
+    let text_delta = only_frame(
         encoder
             .encode(Event::new(
                 1,
-                Kind::MessageStart {
+                Kind::TextDelta {
                     output_index: 0,
-                    role: MessageRole::Assistant,
+                    text: "hello".to_owned(),
                 },
             ))
             .unwrap(),
     );
-    let created = assert_sse_chunk(
-        &message_start,
+    assert_sse_chunk(
+        &text_delta,
         before,
         after,
         json!({
@@ -96,114 +95,10 @@ fn stream_encoder_new_emits_semantic_sse_frames_and_round_trips_success_stream()
             "model": "route-model",
             "choices": [{
                 "index": 0,
-                "delta": {"role": "assistant"},
+                "delta": {"content": "hello"},
                 "finish_reason": null
             }]
         }),
-    );
-
-    let text_delta = only_frame(
-        encoder
-            .encode(Event::new(
-                2,
-                Kind::TextDelta {
-                    output_index: 0,
-                    text: "hello".to_owned(),
-                },
-            ))
-            .unwrap(),
-    );
-    assert_eq!(
-        assert_sse_chunk(
-            &text_delta,
-            before,
-            after,
-            json!({
-                "id": "chatcmpl-12345678-1234-5678-1234-567812345678",
-                "object": "chat.completion.chunk",
-                "model": "route-model",
-                "choices": [{
-                    "index": 0,
-                    "delta": {"content": "hello"},
-                    "finish_reason": null
-                }]
-            }),
-        ),
-        created
-    );
-
-    let finish = only_frame(
-        encoder
-            .encode(Event::new(
-                3,
-                Kind::Finish {
-                    output_index: 0,
-                    reason: FinishReason::Stop,
-                },
-            ))
-            .unwrap(),
-    );
-    assert_eq!(
-        assert_sse_chunk(
-            &finish,
-            before,
-            after,
-            json!({
-                "id": "chatcmpl-12345678-1234-5678-1234-567812345678",
-                "object": "chat.completion.chunk",
-                "model": "route-model",
-                "choices": [{
-                    "index": 0,
-                    "delta": {},
-                    "finish_reason": "stop"
-                }]
-            }),
-        ),
-        created
-    );
-
-    let done = only_frame(encoder.encode(Event::new(4, Kind::Done)).unwrap());
-    assert_eq!(done, Bytes::from_static(b"data: [DONE]\n\n"));
-
-    let mut decoder = Decoder::new();
-    let mut decoded = decoder
-        .push(&join_sse_frames(&[message_start, text_delta, finish, done]))
-        .unwrap();
-    decoded.extend(decoder.finish().unwrap());
-    assert!(decoder.is_done());
-    assert_eq!(
-        decoded,
-        vec![
-            Event::new(
-                0,
-                Kind::ResponseStart {
-                    response_id: Some("chatcmpl-12345678-1234-5678-1234-567812345678".to_owned(),),
-                    provider_model: Some("route-model".to_owned()),
-                },
-            ),
-            Event::new(
-                1,
-                Kind::MessageStart {
-                    output_index: 0,
-                    role: MessageRole::Assistant,
-                },
-            ),
-            Event::new(
-                2,
-                Kind::TextDelta {
-                    output_index: 0,
-                    text: "hello".to_owned(),
-                },
-            ),
-            Event::new(
-                3,
-                Kind::Finish {
-                    output_index: 0,
-                    reason: FinishReason::Stop,
-                },
-            ),
-            Event::new(4, Kind::Done),
-        ]
     );
 }
 

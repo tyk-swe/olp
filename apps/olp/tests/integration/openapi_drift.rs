@@ -10,3 +10,14 @@ fn checked_in_management_schema_matches_generated_contract() {
         "run the OpenAPI export before committing API changes"
     );
 }
+
+#[test]
+fn the_openapi_endpoint_documents_itself() {
+    let generated = serde_json::to_value(document()).unwrap();
+    assert!(
+        generated["paths"]
+            .as_object()
+            .is_some_and(|paths| paths.contains_key("/api/v1/openapi.json")),
+        "GET /api/v1/openapi.json must be listed in the document it serves"
+    );
+}

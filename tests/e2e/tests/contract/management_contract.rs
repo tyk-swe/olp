@@ -28,28 +28,6 @@ fn served_openapi_matches_the_tracked_document() {
 
 #[test]
 #[ignore = "end-to-end; run via make e2e"]
-fn the_openapi_endpoint_documents_itself() {
-    // The OpenAPI document is the management API's published contract, so a
-    // path the server answers but the document omits is undocumented surface.
-    // apps/olp/tests/integration/openapi_drift.rs compares the generated
-    // document to the checked-in one and so cannot see this.
-    runtime().block_on(async {
-        let served = served_openapi().await;
-        let paths = served["paths"]
-            .as_object()
-            .expect("OpenAPI document has a paths object");
-
-        assert!(
-            paths.contains_key("/api/v1/openapi.json"),
-            "the server answers GET /api/v1/openapi.json, but the document does \
-             not list it among its {} paths",
-            paths.len()
-        );
-    });
-}
-
-#[test]
-#[ignore = "end-to-end; run via make e2e"]
 fn setup_cannot_be_replayed_once_an_owner_exists() {
     // README.md "Quick start": the bootstrap token is one-time and the owner is
     // created once, after which the token is retired. A second setup attempt

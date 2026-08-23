@@ -542,20 +542,19 @@ impl LaunchGuard {
 }
 
 impl Server {
-    pub(crate) async fn launch() -> Result<Self, String> {
-        Self::launch_process("all", None).await
-    }
-
-    pub(crate) async fn launch_sharing_valkey(valkey_url: &str) -> Result<Self, String> {
-        Self::launch_process("all", Some(valkey_url)).await
-    }
-
-    pub(crate) async fn launch_control() -> Result<Self, String> {
-        Self::launch_process("control", None).await
-    }
-
-    pub(crate) async fn launch_control_sharing_valkey(valkey_url: &str) -> Result<Self, String> {
-        Self::launch_process("control", Some(valkey_url)).await
+    /// Launches `olp <process>` against a fresh database, optionally sharing a
+    /// Valkey instance with another server.
+    pub(crate) async fn launch(
+        process: &str,
+        shared_valkey_url: Option<&str>,
+    ) -> Result<Self, String> {
+        Self::launch_process_with_migration_fixture(
+            process,
+            shared_valkey_url,
+            MigrationFixture::Current,
+        )
+        .await
+        .map(|(server, _)| server)
     }
 
     pub(crate) async fn launch_control_from_legacy_request_metadata_upgrade(
@@ -569,19 +568,6 @@ impl Server {
         .await?;
         let event_id = event_id.expect("legacy request metadata fixture seeds an event");
         Ok((server, event_id))
-    }
-
-    async fn launch_process(
-        process: &str,
-        shared_valkey_url: Option<&str>,
-    ) -> Result<Self, String> {
-        Self::launch_process_with_migration_fixture(
-            process,
-            shared_valkey_url,
-            MigrationFixture::Current,
-        )
-        .await
-        .map(|(server, _)| server)
     }
 
     async fn launch_process_with_migration_fixture(
