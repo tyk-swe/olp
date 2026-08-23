@@ -10,4 +10,3 @@ fuzz/Cargo.lock linguist-generated=true
 console/pnpm-lock.yaml linguist-generated=true
 tests/sdk-smoke/pnpm-lock.yaml linguist-generated=true
 docs/assets/screenshots/*.png -diff
-console/tests/e2e/*-snapshots/*.png -diff

@@ -40,7 +40,7 @@ use crate::providers::mock_server::{
 };
 use crate::providers::{
     connector::Timeouts,
-    openai::{DEFAULT_MAX_EVENT_BYTES, DEFAULT_MAX_RESPONSE_BYTES, transport::Connector},
+    openai::{DEFAULT_MAX_RESPONSE_BYTES, transport::Connector},
     transport_common::transport_error,
 };
 use bytes::Bytes;

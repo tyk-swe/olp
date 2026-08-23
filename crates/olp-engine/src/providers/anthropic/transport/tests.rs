@@ -346,15 +346,3 @@ async fn redirects_are_not_followed_and_errors_redact_credentials() {
     assert!(!message.contains("upstream-secret"));
     assert!(!message.contains("do-not-echo"));
 }
-
-#[tokio::test]
-#[ignore = "requires OLP_LIVE_ANTHROPIC_API_KEY"]
-async fn live_provider_discovers_anthropic_models() {
-    let key = std::env::var("OLP_LIVE_ANTHROPIC_API_KEY")
-        .expect("set OLP_LIVE_ANTHROPIC_API_KEY for the ignored live test");
-    let connector = Connector::new(
-        ConnectorConfig::default(),
-        ApiKey::new(key).expect("live Anthropic key must be representable"),
-    );
-    assert!(!connector.discover_models().await.unwrap().is_empty());
-}

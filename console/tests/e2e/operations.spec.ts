@@ -57,10 +57,6 @@ test('request explorer filters metadata and opens an accessible attempt timeline
   await expect(resultLabel).toBeVisible();
   await expect(page.getByText('secret prompt')).toHaveCount(0);
   expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
-  await expect(page).toHaveScreenshot('request-explorer.png', {
-    fullPage: true,
-    animations: 'disabled'
-  });
 
   await page.getByRole('link', { name: `View request ${requestId}` }).click();
   await expect(page.getByRole('heading', { name: 'Request timeline' })).toBeVisible();

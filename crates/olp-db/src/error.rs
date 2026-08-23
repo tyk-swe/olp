@@ -10,8 +10,6 @@ pub enum Error {
     AlreadySetup,
     #[error("runtime release failed integrity verification")]
     CorruptRelease,
-    #[error("runtime snapshot is invalid: {0}")]
-    InvalidRuntimeSnapshot(#[from] olp_engine::domain::routing::snapshot::Error),
     #[error("runtime release serialization failed")]
     Serialize(#[from] serde_json::Error),
     #[error("runtime outbox leadership was lost")]

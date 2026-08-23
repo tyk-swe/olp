@@ -27,12 +27,3 @@ Run the focused locked nextest filter or the full gate from the repository root:
 SQLX_OFFLINE=true cargo nextest run --locked -p olp-engine -E 'test(/bedrock/)'
 make test
 ```
-
-Ignored live tests use the default AWS credential chain:
-
-```sh
-OLP_BEDROCK_LIVE_REGION=us-east-1 \
-OLP_BEDROCK_LIVE_MODEL=amazon.nova-micro-v1:0 \
-SQLX_OFFLINE=true cargo nextest run --locked -p olp-engine \
-  -E 'test(/live_provider/)' --run-ignored all
-```

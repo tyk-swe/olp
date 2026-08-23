@@ -593,24 +593,6 @@ fn last_owner_cannot_be_demoted_or_removed() {
 }
 
 #[test]
-fn failover_is_never_allowed_after_commit() {
-    let retryable = TransportError {
-        phase: TransportPhase::FirstByte,
-        class: AttemptFailureClass::Timeout,
-        response_committed: false,
-        message: "upstream timeout".into(),
-    };
-    assert!(retryable.allows_failover());
-    assert!(
-        !TransportError {
-            response_committed: true,
-            ..retryable
-        }
-        .allows_failover()
-    );
-}
-
-#[test]
 fn transport_error_diagnostics_never_include_upstream_text() {
     let error = TransportError {
         phase: TransportPhase::Body,

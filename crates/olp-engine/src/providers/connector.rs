@@ -23,32 +23,6 @@ impl Default for Timeouts {
     }
 }
 
-impl Timeouts {
-    pub(in crate::providers) fn validate(self) -> Result<Self, &'static str> {
-        [
-            ("connect", self.connect),
-            ("first_byte", self.first_byte),
-            ("idle", self.idle),
-        ]
-        .into_iter()
-        .find_map(|(name, value)| value.is_zero().then_some(name))
-        .map_or(Ok(self), Err)
-    }
-}
-
-pub(in crate::providers) fn validate_response_limits(
-    max_response_bytes: usize,
-    max_event_bytes: usize,
-) -> Result<(), &'static str> {
-    [
-        ("max_response_bytes", max_response_bytes),
-        ("max_event_bytes", max_event_bytes),
-    ]
-    .into_iter()
-    .find_map(|(name, value)| (value == 0).then_some(name))
-    .map_or(Ok(()), Err)
-}
-
 pub(in crate::providers) fn visible_secret<E>(
     value: impl Into<String>,
     empty: E,

@@ -97,9 +97,6 @@ pub async fn local_provider(
         }
         ProviderKind::Bedrock => {
             let config = BedrockConnectorConfig::new("us-east-1")
-                .and_then(|config| {
-                    config.with_timeouts(crate::providers::connector::Timeouts::default())
-                })
                 .and_then(|config| config.with_endpoint_url(origin))
                 .map_err(|error| LocalProviderError(error.to_string()))?;
             let document = format!(

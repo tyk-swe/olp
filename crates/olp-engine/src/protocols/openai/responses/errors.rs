@@ -29,8 +29,6 @@ pub enum ResponsesCodecError {
     UnsupportedContentPart(String),
     #[error("unsupported Responses message role: {0}")]
     UnsupportedRole(String),
-    #[error("unsupported Responses tool type: {0}")]
-    UnsupportedTool(String),
     #[error("Responses function tool is missing {0}")]
     MissingToolField(&'static str),
     #[error("unsupported Responses tool choice: {0}")]
@@ -55,8 +53,6 @@ pub enum ResponsesCodecError {
     UnrepresentableCanonicalField(&'static str),
     #[error("canonical tool output is missing tool_call_id")]
     MissingCanonicalToolCallId,
-    #[error("Responses input-token counting supports only one stateless user input")]
-    TokenCountSemanticsUnsupported,
     #[error("invalid Responses response object: {0}")]
     InvalidResponse(String),
     #[error("unsupported Responses output item type: {0}")]

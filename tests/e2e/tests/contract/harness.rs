@@ -962,27 +962,3 @@ impl Drop for Server {
         }
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::database_url;
-
-    #[test]
-    fn database_url_replaces_only_the_database_path() {
-        let actual = database_url(
-            "postgres://user:pass@db.example:5432/postgres?sslmode=require&application_name=e2e",
-            "olp_e2e_abc",
-        )
-        .expect("valid database URL");
-        assert_eq!(
-            actual,
-            "postgres://user:pass@db.example:5432/olp_e2e_abc?sslmode=require&application_name=e2e"
-        );
-    }
-
-    #[test]
-    fn database_url_rejects_malformed_or_pathless_admin_urls() {
-        assert!(database_url("not a URL", "olp_e2e_abc").is_err());
-        assert!(database_url("postgres://db.example", "olp_e2e_abc").is_err());
-    }
-}

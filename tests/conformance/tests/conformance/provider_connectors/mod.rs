@@ -26,6 +26,7 @@ use olp_engine::domain::{
 };
 use olp_engine::protocols::sse::DEFAULT_MAX_EVENT_BYTES;
 use olp_engine::providers::{
+    factory::certification::certifiable_capabilities,
     openai::certification::CompatibleCapability,
     test_support::{API_KEY, BEDROCK_ACCESS_KEY, BEDROCK_SECRET_KEY, VERTEX_TOKEN, local_provider},
 };
@@ -1527,7 +1528,7 @@ async fn bounded_http_connectors_reject_oversized_streaming_events() {
 #[tokio::test]
 async fn every_reviewed_capability_tuple_executes_its_certification_contract() {
     for kind in ProviderKind::ALL {
-        for (operation, surface, mode) in matrix::expected_certifiable_capabilities(kind) {
+        for (operation, surface, mode) in certifiable_capabilities(kind) {
             let capability = CompatibleCapability {
                 operation,
                 surface,

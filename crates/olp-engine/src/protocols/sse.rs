@@ -136,7 +136,7 @@ impl Decoder {
             last_event_id: None,
             retry_ms: None,
             pending_bytes: 0,
-            max_event_bytes: max_event_bytes.max(1),
+            max_event_bytes,
             bom_checked: false,
         }
     }

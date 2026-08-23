@@ -372,9 +372,8 @@ async fn media_bounds_fail_closed_before_dispatch_and_during_response_staging() 
         chunks: vec![(Duration::ZERO, http_response("audio/mpeg", b"four"))],
     })
     .await;
-    let config = ConnectorConfig::for_local_test(&base_url, Timeouts::default())
-        .with_response_limits(3, DEFAULT_MAX_EVENT_BYTES)
-        .unwrap();
+    let mut config = ConnectorConfig::for_local_test(&base_url, Timeouts::default());
+    config.max_response_bytes = 3;
     let connector = Connector::new(config, ApiKey::new("upstream-secret").unwrap());
     let mut request = speech_request(false);
     request.media = Some(spool.clone());

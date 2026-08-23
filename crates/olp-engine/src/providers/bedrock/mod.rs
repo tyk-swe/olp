@@ -55,10 +55,9 @@ impl ConnectorConfig {
     }
 
     #[cfg(any(test, feature = "test-util"))]
-    pub fn with_timeouts(mut self, timeouts: Timeouts) -> Result<Self, ConfigError> {
-        validate_timeouts(timeouts)?;
+    pub fn with_timeouts(mut self, timeouts: Timeouts) -> Self {
         self.timeouts = timeouts;
-        Ok(self)
+        self
     }
 
     /// Overrides both Bedrock endpoints for an isolated local emulator.
@@ -175,9 +174,6 @@ pub enum ConfigError {
     #[error("AWS region is invalid")]
     InvalidRegion,
     #[cfg(any(test, feature = "test-util"))]
-    #[error("connector timeouts must all be greater than zero")]
-    ZeroTimeout,
-    #[cfg(any(test, feature = "test-util"))]
     #[error("connector endpoint override is invalid")]
     InvalidEndpoint,
 }
@@ -202,14 +198,6 @@ fn validate_region(region: &str) -> Result<(), ConfigError> {
         return Err(ConfigError::InvalidRegion);
     }
     Ok(())
-}
-
-#[cfg(any(test, feature = "test-util"))]
-fn validate_timeouts(timeouts: Timeouts) -> Result<(), ConfigError> {
-    timeouts
-        .validate()
-        .map(|_| ())
-        .map_err(|_| ConfigError::ZeroTimeout)
 }
 
 fn validate_static_component(
@@ -250,8 +238,6 @@ async fn sdk_config(config: &ConnectorConfig, credentials: Credentials) -> aws_c
 
 #[cfg(test)]
 mod tests {
-    use std::time::Duration;
-
     use super::*;
 
     #[test]
@@ -275,17 +261,8 @@ mod tests {
     }
 
     #[test]
-    fn validates_region_and_deadlines() {
+    fn validates_region() {
         assert!(ConnectorConfig::new("us-east-1").is_ok());
         assert!(ConnectorConfig::new("https://region").is_err());
-        assert!(
-            ConnectorConfig::new("us-east-1")
-                .unwrap()
-                .with_timeouts(Timeouts {
-                    connect: Duration::ZERO,
-                    ..Timeouts::default()
-                })
-                .is_err()
-        );
     }
 }

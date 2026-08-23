@@ -17,7 +17,7 @@ FUZZ_TRIPLE = $(shell rustc -vV | sed -n 's/^host: //p')
 .DEFAULT_GOAL := help
 
 .PHONY: help check boundaries storage-sqlx fmt fmt-fix clippy test \
-	coverage console-install console-verify console-e2e \
+	coverage console-install console-verify \
 	screenshots openapi sqlx-prepare sqlx-check db-test release-version \
 	supply-chain helm-verify script-selftest shellcheck fuzz-check \
 	fuzz-replay fuzz-campaign sdk-smoke sdk-smoke-install e2e worker-ha
@@ -67,9 +67,6 @@ console-install: ## Install locked console dependencies
 console-verify: ## Console gate: api:check + vitest + svelte-check/eslint + build
 	pnpm --dir console verify
 
-console-e2e: ## Console Playwright e2e suite
-	pnpm --dir console test:e2e
-
 screenshots: ## Regenerate docs/assets/screenshots/*.png from console fixtures
 	pnpm --dir console screenshots
 
@@ -105,7 +102,6 @@ script-selftest: ## Self-tests for shell helpers and repository invariants
 	scripts/test-backup-manifest.sh
 	scripts/test-postgres-test-databases.sh
 	scripts/test-repository-validation.sh
-	scripts/test-record-request-metadata-stream-loss.sh
 
 shellcheck: ## Shellcheck every tracked or untracked repository shell script
 	@scripts=(); \

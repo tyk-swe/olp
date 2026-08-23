@@ -241,7 +241,6 @@ async fn mock_connector(endpoint: &str) -> Connector {
             first_byte: Duration::from_secs(1),
             idle: Duration::from_secs(1),
         })
-        .unwrap()
         .with_endpoint_url(endpoint)
         .unwrap();
     let credentials = StaticCredentials::from_json(
@@ -430,7 +429,6 @@ async fn event_stream_idle_deadline_is_enforced_after_commit() {
             first_byte: Duration::from_secs(1),
             idle: Duration::from_millis(25),
         })
-        .unwrap()
         .with_endpoint_url(&endpoint)
         .unwrap();
     let credentials = StaticCredentials::from_json(
@@ -515,38 +513,4 @@ async fn malformed_event_stream_sequences_fail_closed_after_commit() {
         assert!(error.response_committed, "{name}");
         server.await.unwrap();
     }
-}
-
-#[tokio::test]
-#[ignore = "requires OLP_BEDROCK_LIVE_REGION and an AWS default credential chain"]
-async fn live_provider_discovers_models_with_default_chain() {
-    let region = std::env::var("OLP_BEDROCK_LIVE_REGION")
-        .expect("set OLP_BEDROCK_LIVE_REGION for the ignored live test");
-    let connector = Connector::new(
-        ConnectorConfig::new(region).unwrap(),
-        Credentials::DefaultChain,
-    )
-    .await;
-    assert!(!connector.discover_models().await.unwrap().is_empty());
-}
-
-#[tokio::test]
-#[ignore = "requires OLP_BEDROCK_LIVE_REGION, OLP_BEDROCK_LIVE_MODEL, and AWS credentials"]
-async fn live_provider_runs_converse_with_default_chain() {
-    let region = std::env::var("OLP_BEDROCK_LIVE_REGION")
-        .expect("set OLP_BEDROCK_LIVE_REGION for the ignored live test");
-    let model = std::env::var("OLP_BEDROCK_LIVE_MODEL")
-        .expect("set OLP_BEDROCK_LIVE_MODEL for the ignored live test");
-    let connector = Connector::new(
-        ConnectorConfig::new(region).unwrap(),
-        Credentials::DefaultChain,
-    )
-    .await;
-    let mut request = provider_request();
-    request.attempt.upstream_model = model;
-    let ProviderOutput::Events(events) = connector.execute(request).await.unwrap() else {
-        panic!("expected generation events");
-    };
-    let events = events.collect::<Vec<_>>().await;
-    assert!(events.iter().all(Result::is_ok));
 }

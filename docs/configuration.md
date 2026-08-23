@@ -96,8 +96,6 @@ Script and harness families are intentionally not runtime settings:
 `OLP_TEST_DATABASE_*`, optional `OLP_VALKEY_URL`, and `OLP_CONSOLE_E2E_*`
 support local suites; `OLP_E2E_*` supports the HA contract harness;
 `OLP_REHEARSAL_*`, `OLP_BACKUP_*`, `OLP_RESTORE_*`, `OLP_PG_*`, and `OLP_PSQL`
-support operations scripts; `OLP_SDK_SMOKE_*` supports SDK smoke; and
-`OLP_LIVE_*`, `OLP_VERTEX_LIVE_*`, `OLP_AZURE_OPENAI_LIVE_*`, and
-`OLP_BEDROCK_LIVE_*` opt into live-provider tests. See
+support operations scripts; and `OLP_SDK_SMOKE_*` supports SDK smoke. See
 [`CONTRIBUTING.md`](../CONTRIBUTING.md) and [`docs/operations.md`](operations.md)
 for command-specific requirements.

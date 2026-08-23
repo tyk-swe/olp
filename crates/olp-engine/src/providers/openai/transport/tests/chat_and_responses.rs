@@ -278,15 +278,3 @@ async fn executes_embeddings_as_a_typed_unary_result() {
     assert!(captured.starts_with("POST /v1/embeddings "));
     assert!(captured.contains("\"model\":\"text-embedding-3-small\""));
 }
-
-#[tokio::test]
-#[ignore = "requires OLP_LIVE_OPENAI_API_KEY"]
-async fn live_provider_discovers_openai_models() {
-    let key = std::env::var("OLP_LIVE_OPENAI_API_KEY")
-        .expect("set OLP_LIVE_OPENAI_API_KEY for the ignored live test");
-    let connector = Connector::new(
-        ConnectorConfig::default(),
-        ApiKey::new(key).expect("live OpenAI key must be representable"),
-    );
-    assert!(!connector.discover_models().await.unwrap().is_empty());
-}

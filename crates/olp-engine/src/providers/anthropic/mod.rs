@@ -62,26 +62,6 @@ impl ConnectorConfig {
         Ok(self)
     }
 
-    pub fn with_timeouts(mut self, timeouts: Timeouts) -> Result<Self, ConnectorBuildError> {
-        self.timeouts = timeouts
-            .validate()
-            .map_err(ConnectorBuildError::ZeroTimeout)?;
-        self.endpoint.set_connect_timeout(self.timeouts.connect);
-        Ok(self)
-    }
-
-    pub fn with_response_limits(
-        mut self,
-        max_response_bytes: usize,
-        max_event_bytes: usize,
-    ) -> Result<Self, ConnectorBuildError> {
-        crate::providers::connector::validate_response_limits(max_response_bytes, max_event_bytes)
-            .map_err(ConnectorBuildError::ZeroLimit)?;
-        self.max_response_bytes = max_response_bytes;
-        self.max_event_bytes = max_event_bytes;
-        Ok(self)
-    }
-
     #[cfg(any(test, feature = "test-util"))]
     pub(in crate::providers) fn for_local_test(base_url: &str, timeouts: Timeouts) -> Self {
         let mut endpoint = Endpoint::for_local_test(base_url);
@@ -127,16 +107,10 @@ pub enum ConnectorBuildError {
     InvalidApiKey,
     #[error("Anthropic API version must contain visible ASCII characters only")]
     InvalidApiVersion,
-    #[error("Anthropic connector {0} timeout must be greater than zero")]
-    ZeroTimeout(&'static str),
-    #[error("Anthropic connector {0} limit must be greater than zero")]
-    ZeroLimit(&'static str),
 }
 
 #[cfg(test)]
 mod tests {
-    use std::time::Duration;
-
     use super::*;
 
     #[test]
@@ -152,21 +126,6 @@ mod tests {
         assert!(matches!(
             ConnectorConfig::default().with_api_version("bad\nversion"),
             Err(ConnectorBuildError::InvalidApiVersion)
-        ));
-    }
-
-    #[test]
-    fn rejects_zero_deadlines_and_limits() {
-        assert!(matches!(
-            ConnectorConfig::default().with_timeouts(Timeouts {
-                idle: Duration::ZERO,
-                ..Timeouts::default()
-            }),
-            Err(ConnectorBuildError::ZeroTimeout("idle"))
-        ));
-        assert!(matches!(
-            ConnectorConfig::default().with_response_limits(1, 0),
-            Err(ConnectorBuildError::ZeroLimit("max_event_bytes"))
         ));
     }
 }

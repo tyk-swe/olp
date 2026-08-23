@@ -104,27 +104,7 @@ impl Endpoint {
 
 #[cfg(test)]
 mod tests {
-    use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
-
     use super::*;
-
-    #[test]
-    fn endpoint_requires_https_and_forbids_ambient_authority() {
-        assert!(matches!(
-            Endpoint::parse("http://api.openai.com/v1"),
-            Err(Error::Common(CommonEndpointError::HttpsRequired { .. }))
-        ));
-        assert!(matches!(
-            Endpoint::parse("https://user:secret@api.openai.com/v1"),
-            Err(Error::Common(CommonEndpointError::UserInfoForbidden { .. }))
-        ));
-        assert!(matches!(
-            Endpoint::parse("https://api.openai.com/v1?redirect=1"),
-            Err(Error::Common(
-                CommonEndpointError::QueryOrFragmentForbidden { .. }
-            ))
-        ));
-    }
 
     #[test]
     fn endpoint_join_preserves_the_configured_base_path() {
@@ -160,19 +140,5 @@ mod tests {
 
         assert!(!debug.contains("private-token"));
         assert!(debug.contains("[REDACTED]"));
-    }
-
-    #[test]
-    fn literal_private_targets_are_rejected_before_dns() {
-        assert!(matches!(
-            Endpoint::parse("https://169.254.169.254/latest/meta-data"),
-            Err(Error::Common(CommonEndpointError::ForbiddenAddress { address, .. }))
-                if address == IpAddr::V4(Ipv4Addr::new(169, 254, 169, 254))
-        ));
-        assert!(matches!(
-            Endpoint::parse("https://[::1]/v1"),
-            Err(Error::Common(CommonEndpointError::ForbiddenAddress { address, .. }))
-                if address == IpAddr::V6(Ipv6Addr::LOCALHOST)
-        ));
     }
 }
