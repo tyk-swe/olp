@@ -4,7 +4,7 @@ set -euo pipefail
 script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 helper="$script_dir/lib/repository-validation.sh"
 
-for required_executable in bash rg grep mktemp mkdir chmod cargo cp cat jq sed; do
+for required_executable in rg cargo jq; do
   command -v "$required_executable" >/dev/null || {
     echo "test-check-boundaries.sh: $required_executable is required" >&2
     exit 1

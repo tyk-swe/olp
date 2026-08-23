@@ -83,7 +83,7 @@ pub(super) async fn serve(
     // The E2E harness points providers at a loopback mock upstream. Same
     // posture as the OIDC override above: compiled out of release binaries.
     #[cfg(all(debug_assertions, feature = "test-util"))]
-    if crate::bootstrap::provider_adapter::insecure_provider_endpoints_for_tests() {
+    if crate::bootstrap::provider_adapter::allow_unsafe_provider_endpoints() {
         warn!("test-only insecure provider endpoints are enabled");
     }
     if let Some(path) = &args.auth_hmac_key_file {

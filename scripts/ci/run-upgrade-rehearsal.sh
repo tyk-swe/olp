@@ -68,12 +68,6 @@ done <"$metadata_file"
   exit 1
 }
 previous_version=$((10#$previous_migration))
-compgen -G "crates/olp-db/migrations/${previous_migration}_*.sql" >/dev/null || {
-  echo "released migration $previous_migration does not match a tracked migration filename" >&2
-  exit 1
-}
-expected_new_migrations=$(find crates/olp-db/migrations -name '[0-9][0-9][0-9][0-9]_*.sql' |
-  awk -F/ -v previous="$previous_version" '{ if (substr($NF, 1, 4) + 0 > previous) count++ } END { print count + 0 }')
 
 OLP_DATABASE_URL="$OLP_REHEARSAL_SERVER_URL/olp_previous" \
   OLP_ALLOW_PARTIAL_MIGRATIONS_FOR_TESTS=test-only \
@@ -97,7 +91,7 @@ openssl rand -base64 32 >"$doctor_root/auth-hmac-key"
 chmod 600 "$doctor_root/master-key" "$doctor_root/auth-hmac-key"
 OLP_REHEARSAL_DATABASE_URL="$OLP_REHEARSAL_SERVER_URL/olp_upgrade" \
   OLP_REHEARSAL_CONFIRM=destroy-target \
-  OLP_REHEARSAL_EXPECTED_NEW_MIGRATIONS="$expected_new_migrations" \
+  OLP_REHEARSAL_PREVIOUS_RELEASED_SCHEMA_MIGRATION="$previous_migration" \
   OLP_REHEARSAL_RUN_DOCTOR=true \
   OLP_MASTER_KEY_FILE="$doctor_root/master-key" \
   OLP_AUTH_HMAC_KEY_FILE="$doctor_root/auth-hmac-key" \

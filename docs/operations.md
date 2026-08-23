@@ -148,8 +148,10 @@ until candidate health and the rollback decision point pass.
 2. Run `scripts/upgrade-rehearsal.sh` against an isolated restored database
    and fresh Valkey. It restores/migrates twice and rejects incomplete or
    non-idempotent results. For N-1 rehearsal set
-   `OLP_REHEARSAL_EXPECTED_NEW_MIGRATIONS`; CI derives its fixture from
-   `release-metadata.env`, whose baseline is advanced only after a release.
+   `OLP_REHEARSAL_EXPECTED_NEW_MIGRATIONS` (an exact count) or
+   `OLP_REHEARSAL_PREVIOUS_RELEASED_SCHEMA_MIGRATION` (the released baseline,
+   which CI reads from `release-metadata.env`; the baseline is advanced only
+   after a release).
 3. Enter maintenance: stop edge inference admission and every control
    mutation, drain old inference workloads, and verify no active requests or
    media reconciliation writers. Leave the old worker until Stream pending and

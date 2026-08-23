@@ -4,9 +4,7 @@ use std::{sync::Arc, time::Duration};
 
 use chrono::Utc;
 use olp_db::{
-    identity::InstallationSetupInput,
     request_metadata::ingestion::Outcome,
-    security::password::hash,
     store::Store,
     valkey::request_metadata::test_support::{
         RequestMetadataConsumerTestPolicy, run_request_metadata_consumer,
@@ -57,12 +55,9 @@ async fn valkey_connection() -> MultiplexedConnection {
 
 async fn fixture(store: &Store, label: &str) -> Fixture {
     let owner = store
-        .setup_installation(InstallationSetupInput {
-            installation_name: format!("Request metadata {label}"),
-            email: format!("owner-{label}@example.test"),
-            display_name: "Owner".to_owned(),
-            password_hash: hash("correct horse battery staple").unwrap(),
-        })
+        .setup_installation(crate::support::owner_setup(&format!(
+            "request-metadata-{label}"
+        )))
         .await
         .unwrap();
     let provider_id = Uuid::now_v7();
@@ -346,6 +341,19 @@ async fn pending_owner(
     reply.ids.into_iter().next().map(|pending| pending.consumer)
 }
 
+async fn wait_for_pending_owner(
+    connection: &mut MultiplexedConnection,
+    stream: &str,
+    id: &str,
+    consumer: &str,
+) {
+    poll_until(
+        "the entry must be pending for the expected consumer",
+        async || pending_owner(connection, stream, id).await.as_deref() == Some(consumer),
+    )
+    .await;
+}
+
 async fn kill_consumer_connection(connection: &mut MultiplexedConnection, consumer: &str) {
     let clients: String = redis::cmd("CLIENT")
         .arg("LIST")
@@ -416,10 +424,9 @@ async fn three_workers_distribute_new_events_and_checkpoint_group_wide_drain() {
     for _ in 0..3 {
         add_event(&mut connection, &stream, &event(&fixture)).await;
     }
-    tokio::time::timeout(WAIT_TIMEOUT, async {
-        let mut interval = tokio::time::interval(Duration::from_millis(10));
-        loop {
-            interval.tick().await;
+    poll_until(
+        "one blocked delivery must be distributed to each live worker",
+        async || {
             let pending: StreamPendingCountReply = connection
                 .xpending_count(&stream, GROUP, "-", "+", 10)
                 .await
@@ -429,17 +436,13 @@ async fn three_workers_distribute_new_events_and_checkpoint_group_wide_drain() {
                 .into_iter()
                 .map(|pending| pending.consumer)
                 .collect::<std::collections::HashSet<_>>();
-            if owners
+            owners
                 == ["worker-a", "worker-b", "worker-c"]
                     .map(str::to_owned)
                     .into()
-            {
-                return;
-            }
-        }
-    })
-    .await
-    .expect("one blocked delivery must be distributed to each live worker");
+        },
+    )
+    .await;
     for _ in 3..24 {
         add_event(&mut connection, &stream, &event(&fixture)).await;
     }
@@ -527,21 +530,7 @@ async fn reconnect_resumes_own_pending_before_stale_idle_and_survivor_recovers_d
     wait_for_consumers(&mut connection, &stream, &["hard-killed-process"]).await;
     let third = event(&fixture);
     let (third_id, _) = add_event(&mut connection, &stream, &third).await;
-    tokio::time::timeout(WAIT_TIMEOUT, async {
-        let mut interval = tokio::time::interval(Duration::from_millis(10));
-        loop {
-            interval.tick().await;
-            if pending_owner(&mut connection, &stream, &third_id)
-                .await
-                .as_deref()
-                == Some("hard-killed-process")
-            {
-                return;
-            }
-        }
-    })
-    .await
-    .expect("the doomed worker must receive the stream entry");
+    wait_for_pending_owner(&mut connection, &stream, &third_id, "hard-killed-process").await;
     doomed.abort();
     assert!(
         tokio::time::timeout(WAIT_TIMEOUT, doomed)
@@ -584,21 +573,13 @@ async fn reconnect_resumes_own_pending_before_stale_idle_and_survivor_recovers_d
     wait_for_consumers(&mut connection, &stream, &["connection-loss-process"]).await;
     let fourth = event(&fixture);
     let (fourth_id, _) = add_event(&mut connection, &stream, &fourth).await;
-    tokio::time::timeout(WAIT_TIMEOUT, async {
-        let mut interval = tokio::time::interval(Duration::from_millis(10));
-        loop {
-            interval.tick().await;
-            if pending_owner(&mut connection, &stream, &fourth_id)
-                .await
-                .as_deref()
-                == Some("connection-loss-process")
-            {
-                return;
-            }
-        }
-    })
-    .await
-    .expect("the connection-loss worker must be processing the entry");
+    wait_for_pending_owner(
+        &mut connection,
+        &stream,
+        &fourth_id,
+        "connection-loss-process",
+    )
+    .await;
     kill_consumer_connection(&mut connection, "connection-loss-process").await;
     persistence_lock.rollback().await.unwrap();
     wait_for_usage_facts(&store, 4).await;
@@ -728,21 +709,7 @@ async fn slow_active_entry_is_not_stolen_below_idle_threshold() {
     wait_for_consumers(&mut connection, &stream, &["slow-active"]).await;
     let event = event(&fixture);
     let (id, _) = add_event(&mut connection, &stream, &event).await;
-    tokio::time::timeout(WAIT_TIMEOUT, async {
-        let mut interval = tokio::time::interval(Duration::from_millis(10));
-        loop {
-            interval.tick().await;
-            if pending_owner(&mut connection, &stream, &id)
-                .await
-                .as_deref()
-                == Some("slow-active")
-            {
-                return;
-            }
-        }
-    })
-    .await
-    .unwrap();
+    wait_for_pending_owner(&mut connection, &stream, &id, "slow-active").await;
 
     let claim: StreamAutoClaimReply = connection
         .xautoclaim_options(

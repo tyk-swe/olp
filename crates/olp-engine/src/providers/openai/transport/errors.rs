@@ -64,14 +64,7 @@ pub(super) fn bearer_header(api_key: &ApiKey) -> Result<HeaderValue, TransportEr
 }
 
 pub(super) fn raw_api_key_header(api_key: &ApiKey) -> Result<HeaderValue, TransportError> {
-    HeaderValue::from_bytes(api_key.expose().as_bytes()).map_err(|_| {
-        transport_error(
-            TransportPhase::Connect,
-            AttemptFailureClass::Protocol,
-            false,
-            "OpenAI API key cannot be represented as an HTTP header",
-        )
-    })
+    RESPONSE_IO.secret_header(api_key)
 }
 
 pub(super) fn safe_upstream_error_message(
@@ -137,10 +130,5 @@ pub(super) fn ambiguous_multipart_timeout() -> TransportError {
 }
 
 pub(super) fn first_byte_timeout() -> TransportError {
-    transport_error(
-        TransportPhase::FirstByte,
-        AttemptFailureClass::Timeout,
-        false,
-        "OpenAI first-byte deadline elapsed",
-    )
+    RESPONSE_IO.first_byte_timeout()
 }

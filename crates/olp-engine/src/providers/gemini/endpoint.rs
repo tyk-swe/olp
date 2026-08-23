@@ -1,4 +1,4 @@
-use std::ops::{Deref, DerefMut};
+use std::ops::Deref;
 
 use reqwest::Url;
 use thiserror::Error;
@@ -36,12 +36,6 @@ impl Deref for Endpoint {
     }
 }
 
-impl DerefMut for Endpoint {
-    fn deref_mut(&mut self) -> &mut EndpointCore {
-        &mut self.0
-    }
-}
-
 impl Default for Endpoint {
     fn default() -> Self {
         Self::parse(DEFAULT_BASE_URL).expect("the built-in Gemini endpoint is valid")
@@ -54,10 +48,14 @@ impl Endpoint {
     }
 
     #[cfg(any(test, feature = "test-util"))]
-    pub(in crate::providers) fn for_local_test(value: &str) -> Self {
-        EndpointCore::parse(value, PROVIDER, true)
-            .map(Self)
-            .expect("local test endpoint must be valid")
+    pub(in crate::providers) fn for_local_test(
+        value: &str,
+        connect_timeout: std::time::Duration,
+    ) -> Self {
+        let mut core =
+            EndpointCore::parse(value, PROVIDER, true).expect("local test endpoint must be valid");
+        core.set_connect_timeout(connect_timeout);
+        Self(core)
     }
 
     pub(in crate::providers) fn generate_url(

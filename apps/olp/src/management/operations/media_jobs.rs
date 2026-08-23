@@ -17,6 +17,7 @@ use utoipa::{IntoParams, ToSchema};
 use uuid::Uuid;
 
 use super::helpers::{not_found, page_limit, timestamp_cursor, validate_time_range};
+use crate::management::error_mapping::etag_mismatch;
 use crate::{
     bootstrap::mode_dependencies::ManagementState,
     management::{
@@ -227,12 +228,7 @@ fn parse_media_job_state(value: &str) -> Result<MediaJobState, Problem> {
 fn map_media_job(error: MediaJobError) -> Problem {
     match error {
         MediaJobError::NotFound => not_found(),
-        MediaJobError::PreconditionFailed => Problem::new(
-            axum::http::StatusCode::PRECONDITION_FAILED,
-            "etag_mismatch",
-            "Precondition failed",
-            "The media job changed; refresh it and retry with the current ETag.",
-        ),
+        MediaJobError::PreconditionFailed => etag_mismatch("media job"),
         MediaJobError::UpstreamIdentityConflict => Problem::conflict(
             "media_job_upstream_identity_conflict",
             "The upstream media job is already bound to different metadata.",

@@ -66,23 +66,17 @@ impl<'a> From<&'a RuntimeProvider> for ProviderConfigFields<'a> {
     }
 }
 
-/// True only when a debug binary built with `test-util` opts in via
-/// `OLP_ALLOW_INSECURE_PROVIDER_ENDPOINTS_FOR_TESTS=test-only`. The E2E
-/// harness uses this to point providers at a loopback mock upstream; the
+/// Whether provider assembly may target plain-HTTP or non-public endpoints.
+/// Only a debug binary built with `test-util` honors the
+/// `OLP_ALLOW_INSECURE_PROVIDER_ENDPOINTS_FOR_TESTS=test-only` opt-in — the
+/// E2E harness uses it to point providers at a loopback mock upstream. The
 /// branch is compiled out of release binaries, so no deployment setting can
 /// weaken the production HTTPS/SSRF endpoint policy.
-#[cfg(all(debug_assertions, feature = "test-util"))]
-pub(crate) fn insecure_provider_endpoints_for_tests() -> bool {
-    std::env::var("OLP_ALLOW_INSECURE_PROVIDER_ENDPOINTS_FOR_TESTS").as_deref() == Ok("test-only")
-}
-
-/// Whether provider assembly may target plain-HTTP or non-public endpoints.
-/// Only a debug test-util build honors the opt-in; release builds always
-/// return `false`.
 pub(crate) fn allow_unsafe_provider_endpoints() -> bool {
     #[cfg(all(debug_assertions, feature = "test-util"))]
     {
-        insecure_provider_endpoints_for_tests()
+        std::env::var("OLP_ALLOW_INSECURE_PROVIDER_ENDPOINTS_FOR_TESTS").as_deref()
+            == Ok("test-only")
     }
     #[cfg(not(all(debug_assertions, feature = "test-util")))]
     {

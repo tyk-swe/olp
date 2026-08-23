@@ -51,8 +51,7 @@ impl ConnectorConfig {
     #[cfg(any(test, feature = "test-util"))]
     #[doc(hidden)]
     pub fn for_local_test(base_url: &str, timeouts: Timeouts) -> Self {
-        let mut endpoint = Endpoint::for_local_test(base_url);
-        endpoint.set_connect_timeout(timeouts.connect);
+        let endpoint = Endpoint::for_local_test(base_url, timeouts.connect);
         Self {
             endpoint,
             timeouts,

@@ -101,11 +101,17 @@ impl From<CoreInferenceError> for InferenceError {
     }
 }
 
-impl std::ops::Deref for InferenceError {
-    type Target = CoreInferenceError;
+impl InferenceError {
+    pub(crate) fn code(&self) -> &'static str {
+        self.0.code()
+    }
 
-    fn deref(&self) -> &CoreInferenceError {
-        &self.0
+    pub(crate) fn message(&self) -> &str {
+        self.0.message()
+    }
+
+    pub(crate) fn retry_after(&self) -> Option<Duration> {
+        self.0.retry_after()
     }
 }
 

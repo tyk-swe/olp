@@ -9,7 +9,9 @@ OLP_REHEARSAL_CONFIRM=destroy-target must be set. The script restores the
 backup into that isolated database, runs the current migrator twice, and proves
 that the second run is idempotent. The target migration set is derived from the
 tracked SQL migrations. Set OLP_REHEARSAL_EXPECTED_NEW_MIGRATIONS to require
-an exact number of newly applied migrations.
+an exact number of newly applied migrations, or set
+OLP_REHEARSAL_PREVIOUS_RELEASED_SCHEMA_MIGRATION=NNNN to derive that count
+from the tracked migrations newer than the released marker.
 USAGE
 }
 
@@ -62,6 +64,28 @@ for migration_file in "${migration_files[@]}"; do
   tracked_migration_versions+=("$migration_version")
   last_tracked_version=$migration_version
 done
+previous_released=${OLP_REHEARSAL_PREVIOUS_RELEASED_SCHEMA_MIGRATION:-}
+if [[ -n $previous_released && -z $expected_new_migrations ]]; then
+  [[ $previous_released =~ ^[0-9]{4}$ ]] || {
+    echo "OLP_REHEARSAL_PREVIOUS_RELEASED_SCHEMA_MIGRATION must be a 4-digit migration version" >&2
+    exit 1
+  }
+  previous_released=$((10#$previous_released))
+  released_is_tracked=0
+  expected_new_migrations=0
+  for migration_version in "${tracked_migration_versions[@]}"; do
+    if (( migration_version == previous_released )); then
+      released_is_tracked=1
+    elif (( migration_version > previous_released )); then
+      expected_new_migrations=$((expected_new_migrations + 1))
+    fi
+  done
+  (( released_is_tracked )) || {
+    echo "released migration $previous_released does not match a tracked migration" >&2
+    exit 1
+  }
+fi
+
 if [[ ! -x $olp_bin ]]; then
   cargo build --locked --release --manifest-path "$root_dir/Cargo.toml" -p olp
 fi

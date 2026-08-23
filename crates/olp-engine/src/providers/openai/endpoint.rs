@@ -1,4 +1,4 @@
-use std::ops::{Deref, DerefMut};
+use std::ops::Deref;
 
 use reqwest::Url;
 use thiserror::Error;
@@ -39,12 +39,6 @@ impl Deref for Endpoint {
     }
 }
 
-impl DerefMut for Endpoint {
-    fn deref_mut(&mut self) -> &mut EndpointCore {
-        &mut self.core
-    }
-}
-
 impl Default for Endpoint {
     fn default() -> Self {
         Self::parse(DEFAULT_OPENAI_BASE_URL).expect("the built-in OpenAI endpoint is valid")
@@ -62,8 +56,14 @@ impl Endpoint {
     }
 
     #[cfg(any(test, feature = "test-util"))]
-    pub(in crate::providers) fn for_local_test(value: &str) -> Self {
-        Self::parse_with_policy(value, true).expect("local test endpoint must be a valid HTTP URL")
+    pub(in crate::providers) fn for_local_test(
+        value: &str,
+        connect_timeout: std::time::Duration,
+    ) -> Self {
+        let mut endpoint = Self::parse_with_policy(value, true)
+            .expect("local test endpoint must be a valid HTTP URL");
+        endpoint.core.set_connect_timeout(connect_timeout);
+        endpoint
     }
 
     fn parse_with_policy(value: &str, allow_unsafe_target: bool) -> Result<Self, Error> {

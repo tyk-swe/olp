@@ -8,7 +8,7 @@ use crate::providers::bedrock::{
     Credentials, StaticCredentials as BedrockStaticCredentials,
     transport::Connector as BedrockConnector,
 };
-use crate::providers::connector::ApiKey;
+
 use crate::providers::gemini::transport::operations::Connector as GeminiConnector;
 use crate::providers::openai::transport::Connector as OpenAiConnector;
 use crate::providers::vertex::Connector as VertexConnector;
@@ -16,8 +16,8 @@ use crate::providers::vertex::Connector as VertexConnector;
 use super::configuration::{
     BedrockAuthMode, BorrowedCredential, Config, ConnectorConfiguration, Credential,
     CredentialKind, Error, VertexAuthMode, bytes_credential, connector_configuration,
-    credential_kind, no_credential, text_credential, validate_connector_configuration,
-    validate_provider_credential,
+    credential_api_key, credential_kind, no_credential, text_credential,
+    validate_connector_configuration, validate_provider_credential,
 };
 
 /// Single assembly entrypoint for runtime transport, discovery, probes, and
@@ -27,7 +27,8 @@ pub struct Factory;
 
 impl Factory {
     /// `allow_unsafe_test_targets` accepts plain-HTTP and non-public provider
-    /// endpoints; it compiles only in test builds and is always `false` otherwise.
+    /// endpoints. The unsafe constructors compile only with `test-util`, so
+    /// release builds ignore the flag and always take the strict path.
     pub fn validate(config: &Config, allow_unsafe_test_targets: bool) -> Result<(), Error> {
         validate_connector_configuration(config, allow_unsafe_test_targets)
     }
@@ -158,24 +159,15 @@ async fn build_connector(
     let kind = config.kind();
     let connector = match connector_configuration(config, allow_unsafe_test_targets)? {
         ConnectorConfiguration::OpenAi(configuration) => {
-            let key = ApiKey::new(
-                text_credential(credential, "OpenAI provider credential is missing")?.to_owned(),
-            )
-            .map_err(Error::credential)?;
+            let key = credential_api_key(credential, "OpenAI provider credential is missing")?;
             ConcreteConnector::OpenAi(Arc::new(OpenAiConnector::new(configuration, key)))
         }
         ConnectorConfiguration::Anthropic(configuration) => {
-            let key = ApiKey::new(
-                text_credential(credential, "Anthropic provider credential is missing")?.to_owned(),
-            )
-            .map_err(Error::credential)?;
+            let key = credential_api_key(credential, "Anthropic provider credential is missing")?;
             ConcreteConnector::Anthropic(Arc::new(AnthropicConnector::new(configuration, key)))
         }
         ConnectorConfiguration::Gemini(configuration) => {
-            let key = ApiKey::new(
-                text_credential(credential, "Gemini provider credential is missing")?.to_owned(),
-            )
-            .map_err(Error::credential)?;
+            let key = credential_api_key(credential, "Gemini provider credential is missing")?;
             ConcreteConnector::Gemini(Arc::new(GeminiConnector::new(configuration, key)))
         }
         ConnectorConfiguration::Vertex {
@@ -223,10 +215,7 @@ async fn build_connector(
             ))
         }
         ConnectorConfiguration::AzureOpenAi(configuration) => {
-            let key = ApiKey::new(
-                text_credential(credential, "Azure OpenAI credential is missing")?.to_owned(),
-            )
-            .map_err(Error::credential)?;
+            let key = credential_api_key(credential, "Azure OpenAI credential is missing")?;
             ConcreteConnector::AzureOpenAi(Arc::new(AzureOpenAiConnector::new(*configuration, key)))
         }
     };

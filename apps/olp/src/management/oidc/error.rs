@@ -4,7 +4,10 @@ use olp_engine::providers::oidc::Error;
 use tracing::{error, warn};
 
 use crate::{
-    management::{error_mapping::map_persistence, sessions::reauthentication_required},
+    management::{
+        error_mapping::{etag_mismatch, map_persistence},
+        sessions::reauthentication_required,
+    },
     public_http::problem::Problem,
 };
 
@@ -61,12 +64,7 @@ pub(crate) fn map_oidc(error: OidcError) -> Problem {
             "Precondition required",
             "Supply the current OIDC configuration ETag in If-Match.",
         ),
-        OidcError::PreconditionFailed => Problem::new(
-            StatusCode::PRECONDITION_FAILED,
-            "etag_mismatch",
-            "Precondition failed",
-            "The OIDC configuration changed after it was loaded. Refresh and retry.",
-        ),
+        OidcError::PreconditionFailed => etag_mismatch("OIDC configuration"),
         OidcError::FlowUnavailable => Problem::bad_request(
             "oidc_flow_unavailable",
             "The authorization flow is invalid, expired, or already consumed.",

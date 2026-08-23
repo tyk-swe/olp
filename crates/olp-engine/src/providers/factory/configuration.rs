@@ -206,21 +206,15 @@ fn validate_connector_credential(
     credential: BorrowedCredential<'_>,
 ) -> Result<(), Error> {
     match config {
-        Config::OpenAi { .. } | Config::OpenAiCompatible { .. } => ApiKey::new(
-            text_credential(credential, "OpenAI provider credential is missing")?.to_owned(),
-        )
-        .map(|_| ())
-        .map_err(Error::credential),
-        Config::Anthropic { .. } => ApiKey::new(
-            text_credential(credential, "Anthropic provider credential is missing")?.to_owned(),
-        )
-        .map(|_| ())
-        .map_err(Error::credential),
-        Config::Gemini { .. } => ApiKey::new(
-            text_credential(credential, "Gemini provider credential is missing")?.to_owned(),
-        )
-        .map(|_| ())
-        .map_err(Error::credential),
+        Config::OpenAi { .. } | Config::OpenAiCompatible { .. } => {
+            credential_api_key(credential, "OpenAI provider credential is missing").map(|_| ())
+        }
+        Config::Anthropic { .. } => {
+            credential_api_key(credential, "Anthropic provider credential is missing").map(|_| ())
+        }
+        Config::Gemini { .. } => {
+            credential_api_key(credential, "Gemini provider credential is missing").map(|_| ())
+        }
         Config::VertexAi {
             project,
             location,
@@ -250,11 +244,9 @@ fn validate_connector_credential(
         Config::Bedrock { .. } => Err(Error::credential(
             "default-chain providers do not accept stored credentials",
         )),
-        Config::AzureOpenAi { .. } => ApiKey::new(
-            text_credential(credential, "Azure OpenAI credential is missing")?.to_owned(),
-        )
-        .map(|_| ())
-        .map_err(Error::credential),
+        Config::AzureOpenAi { .. } => {
+            credential_api_key(credential, "Azure OpenAI credential is missing").map(|_| ())
+        }
     }
 }
 
@@ -448,6 +440,13 @@ fn vertex_configuration(
     probe_model: &str,
 ) -> Result<VertexConnectorConfig, Error> {
     VertexConnectorConfig::new(project, location, probe_model).map_err(Error::configuration)
+}
+
+pub(super) fn credential_api_key(
+    credential: BorrowedCredential<'_>,
+    missing: &'static str,
+) -> Result<ApiKey, Error> {
+    ApiKey::new(text_credential(credential, missing)?.to_owned()).map_err(Error::credential)
 }
 
 pub(super) fn text_credential<'a>(

@@ -66,7 +66,7 @@ console-install: ## Install locked console dependencies
 console-verify: ## Console gate: api:check + vitest + svelte-check/eslint + build
 	pnpm --dir console verify
 
-screenshots: ## Regenerate docs/assets/screenshots/*.png from console fixtures
+screenshots: ## Regenerate docs/assets/screenshots/overview.png from console fixtures
 	pnpm --dir console screenshots
 
 openapi: ## Regenerate openapi/management.json and the console API schema

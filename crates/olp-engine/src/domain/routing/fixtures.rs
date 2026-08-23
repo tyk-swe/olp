@@ -24,7 +24,7 @@ use crate::domain::{
 };
 
 #[must_use]
-pub fn generation(ordinal: u64) -> RuntimeGeneration {
+fn generation(ordinal: u64) -> RuntimeGeneration {
     RuntimeGeneration {
         id: RuntimeGenerationId::new(),
         ordinal,
