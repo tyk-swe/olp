@@ -53,12 +53,11 @@ clippy: ## Clippy with -D warnings, offline sqlx metadata
 test: ## Workspace unit tests via nextest (postgres-backed tests stay #[ignore]d; see db-test)
 	SQLX_OFFLINE=true cargo nextest run --locked --workspace --all-features
 
-# test_support only executes under `make db-test`, which coverage never
-# runs; llvm-cov's defaults already exclude tests/ dirs and src tests.rs
-# modules from the report.
+# test_support and routing/fixtures are test-only helpers that live in src;
+# llvm-cov's defaults already exclude tests/ dirs and src tests.rs modules.
 coverage: ## CI's real Rust test gate: llvm-cov nextest with the 62% line floor
 	SQLX_OFFLINE=true cargo llvm-cov nextest --locked --workspace --all-features \
-		--ignore-filename-regex 'src/test_support\.rs' \
+		--ignore-filename-regex 'src/(test_support|routing/fixtures)\.rs' \
 		--lcov --output-path lcov.info --fail-under-lines 62
 
 console-install: ## Install locked console dependencies
