@@ -41,33 +41,13 @@ scan() {
 # A path dependency may point at another package in this repository, but never
 # escape it. `[patch]` entries live only in manifests, so this stays a text
 # scan over manifests rather than a `cargo metadata` query.
-cargo_manifest_output=
-if cargo_manifest_output=$(
+mapfile -t cargo_manifests < <(
   find . \( -path './.git' -o -path '*/target' -o -path '*/node_modules' \) -prune -o \
     -type f -name Cargo.toml -print | sed 's#^\./##' | sort
-); then
-  :
-else
-  status=$?
-  printf '%s: producer failed: operation=find Cargo manifests path=%s exit=%d\n' \
-    "$(validation_script_name)" "$workspace_root" "$status" >&2
-  exit "$status"
-fi
-cargo_manifests=()
-[[ -z $cargo_manifest_output ]] || mapfile -t cargo_manifests <<< "$cargo_manifest_output"
+)
 (( ${#cargo_manifests[@]} )) || { echo "no Cargo manifests were found in the repository" >&2; exit 2; }
-path_dependency_output=
-if path_dependency_output=$(grep -rEnoH \
-  "path[[:space:]]*=[[:space:]]*(\"[^\"]+\"|'[^']+')" -- "${cargo_manifests[@]}"); then
-  :
-else
-  status=$?
-  if (( status > 1 )); then
-    printf '%s: producer failed: operation=find path dependencies exit=%d\n' \
-      "$(validation_script_name)" "$status" >&2
-    exit "$status"
-  fi
-fi
+path_dependency_output=$(grep -rEnoH \
+  "path[[:space:]]*=[[:space:]]*(\"[^\"]+\"|'[^']+')" -- "${cargo_manifests[@]}") || (( $? == 1 ))
 if [[ -n $path_dependency_output ]]; then
   while IFS=: read -r manifest _ assignment; do
     dependency_path=${assignment#*=}
@@ -83,10 +63,7 @@ if [[ -n $path_dependency_output ]]; then
   done <<< "$path_dependency_output"
 fi
 
-metadata=$(cargo metadata --locked --no-deps --format-version 1) || {
-  printf '%s: producer failed: operation=read workspace metadata\n' "$(validation_script_name)" >&2
-  exit 1
-}
+metadata=$(cargo metadata --locked --no-deps --format-version 1)
 
 package_manifest_rows=$(jq -r '.packages[] | [.name, .manifest_path] | @tsv' <<< "$metadata")
 while IFS=$'\t' read -r package manifest; do
@@ -146,20 +123,12 @@ fi
 # Production source roots, and the engine module roots whose inward topology is
 # enforced by path below.
 declare -a production_roots=() engine_roots=() non_engine_roots=()
-source_root_output=
-if source_root_output=$(jq -r '
+source_root_output=$(jq -r '
   .packages[] | select((.metadata.olp.role? // "") | IN("engine","db","delivery"))
   | .metadata.olp.role as $role
   | .targets[] | select(.kind | any(IN("lib","bin","proc-macro")))
   | [$role, (.src_path | sub("/[^/]+$"; ""))] | @tsv
-' <<< "$metadata" | sort -u); then
-  :
-else
-  status=$?
-  printf '%s: producer failed: operation=find production source roots exit=%d\n' \
-    "$(validation_script_name)" "$status" >&2
-  exit "$status"
-fi
+' <<< "$metadata" | sort -u)
 while IFS=$'\t' read -r role source_root; do
   [[ -n $role ]] || continue
   resolved_source_root=$(realpath -m "$source_root")
@@ -243,20 +212,10 @@ scan "main workspace manifest enables an unsupported platform dependency:" \
 scan "PostgreSQL-only workspace enables the SQLite backend:" \
   -e '^[[:space:]]*"sqlite"[[:space:]]*,?[[:space:]]*$' -- "${cargo_manifests[@]}"
 
-delivery_api_output=
-if delivery_api_output=$(jq -r '
+mapfile -t delivery_api_files < <(jq -r '
   .packages[] | select((.metadata.olp.role? // "") == "delivery")
   | .targets[] | select(.kind | any(. == "lib")) | .src_path
-' <<< "$metadata" | sort -u); then
-  :
-else
-  status=$?
-  printf '%s: producer failed: operation=find delivery API files exit=%d\n' \
-    "$(validation_script_name)" "$status" >&2
-  exit "$status"
-fi
-delivery_api_files=()
-[[ -z $delivery_api_output ]] || mapfile -t delivery_api_files <<< "$delivery_api_output"
+' <<< "$metadata" | sort -u)
 for delivery_api_file in "${delivery_api_files[@]}"; do
   resolved_delivery_api_file=$(realpath -m "$delivery_api_file")
   case "$resolved_delivery_api_file" in
@@ -278,19 +237,9 @@ done
 
 # The console ships as static assets from the Rust binary; a server route or
 # server-only module would silently require a Node runtime in production.
-server_file_output=
-if server_file_output=$(find console/src -type f \
+mapfile -t server_files < <(find console/src -type f \
   \( -name '+page.server.*' -o -name '+layout.server.*' -o -name '+server.*' \
-     -o -name 'hooks.server.*' -o -path '*/lib/server/*' \) -print); then
-  :
-else
-  status=$?
-  printf '%s: producer failed: operation=find console server files path=%s exit=%d\n' \
-    "$(validation_script_name)" "console/src" "$status" >&2
-  exit "$status"
-fi
-server_files=()
-[[ -z $server_file_output ]] || mapfile -t server_files <<< "$server_file_output"
+     -o -name 'hooks.server.*' -o -path '*/lib/server/*' \) -print)
 if (( ${#server_files[@]} )); then
   echo "console must remain a static client-only application:" >&2
   printf '  %s\n' "${server_files[@]}" >&2

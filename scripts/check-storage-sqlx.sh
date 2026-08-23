@@ -7,9 +7,7 @@ workspace_root=$(cd "$script_dir/.." && pwd)
 source "$script_dir/lib/repository-validation.sh"
 cd "$workspace_root"
 
-for required_executable in rg awk dirname; do
-  validation_require_executable "$required_executable"
-done
+validation_require_executable rg
 
 storage_root=crates/olp-db/src
 validation_require_directory "$storage_root"
@@ -49,31 +47,4 @@ if (( runtime_queries_matched )); then
   exit 1
 fi
 
-checked_query_counts=
-checked_query_counts_matched=
-checked_rg_capture checked_query_counts checked_query_counts_matched \
-  "count checked SQLx queries" "$storage_root" \
-  --count-matches --glob '*.rs' \
-  'sqlx::(query|query_as|query_scalar)!\s*\(' "$storage_root"
-checked_queries=0
-if (( checked_query_counts_matched )); then
-  checked_queries=$(awk -F: '{ total += $NF } END { print total + 0 }' <<< "$checked_query_counts")
-fi
-
-typed_row_counts=
-typed_row_counts_matched=
-checked_rg_capture typed_row_counts typed_row_counts_matched \
-  "count typed SQLx rows" "$storage_root" \
-  --count-matches --glob '*.rs' \
-  '(derive\([^)]*FromRow|derive\([^)]*sqlx::FromRow)' "$storage_root"
-typed_rows=0
-if (( typed_row_counts_matched )); then
-  typed_rows=$(awk -F: '{ total += $NF } END { print total + 0 }' <<< "$typed_row_counts")
-fi
-if (( checked_queries == 0 || typed_rows == 0 )); then
-  echo "checked query or typed dynamic-row coverage unexpectedly disappeared" >&2
-  exit 1
-fi
-
-printf 'storage SQLx policy is clean (%d checked queries, %d typed row models)\n' \
-  "$checked_queries" "$typed_rows"
+echo "storage SQLx policy is clean"

@@ -9,20 +9,13 @@ OLP_REHEARSAL_CONFIRM=destroy-target must be set. The script restores the
 backup into that isolated database, runs the current migrator twice, and proves
 that the second run is idempotent. The target migration set is derived from the
 tracked SQL migrations. Set OLP_REHEARSAL_EXPECTED_NEW_MIGRATIONS to require
-an exact number of newly applied migrations, or
-OLP_REHEARSAL_PREVIOUS_RELEASED_SCHEMA_MIGRATION to derive it from a released
-migration marker.
+an exact number of newly applied migrations.
 USAGE
 }
 
 if [[ $# -ne 1 || ${1:-} == "--help" || ${1:-} == "-h" ]]; then
   usage
   [[ ${1:-} == "--help" || ${1:-} == "-h" ]] && exit 0 || exit 2
-fi
-
-if [[ -v OLP_REHEARSAL_MIN_NEW_MIGRATIONS ]]; then
-  echo "OLP_REHEARSAL_MIN_NEW_MIGRATIONS is no longer supported; set OLP_REHEARSAL_EXPECTED_NEW_MIGRATIONS to the exact migration count" >&2
-  exit 2
 fi
 
 : "${OLP_REHEARSAL_DATABASE_URL:?OLP_REHEARSAL_DATABASE_URL is required}"
@@ -69,33 +62,6 @@ for migration_file in "${migration_files[@]}"; do
   tracked_migration_versions+=("$migration_version")
   last_tracked_version=$migration_version
 done
-previous_released_migration=${OLP_REHEARSAL_PREVIOUS_RELEASED_SCHEMA_MIGRATION:-}
-if [[ -n $previous_released_migration ]]; then
-  [[ -z $expected_new_migrations ]] || {
-    echo "set either OLP_REHEARSAL_EXPECTED_NEW_MIGRATIONS or OLP_REHEARSAL_PREVIOUS_RELEASED_SCHEMA_MIGRATION, not both" >&2
-    exit 2
-  }
-  [[ $previous_released_migration =~ ^[0-9]{4}$ ]] || {
-    echo "OLP_REHEARSAL_PREVIOUS_RELEASED_SCHEMA_MIGRATION must be a four-digit migration version" >&2
-    exit 1
-  }
-  previous_released_version=$((10#$previous_released_migration))
-  previous_released_index=-1
-  for migration_index in "${!tracked_migration_versions[@]}"; do
-    if (( tracked_migration_versions[migration_index] == previous_released_version )); then
-      (( previous_released_index == -1 )) || {
-        echo "released migration $previous_released_migration matches more than one tracked migration" >&2
-        exit 1
-      }
-      previous_released_index=$migration_index
-    fi
-  done
-  (( previous_released_index >= 0 )) || {
-    echo "released migration $previous_released_migration does not match a tracked migration filename" >&2
-    exit 1
-  }
-  expected_new_migrations=$((${#tracked_migration_versions[@]} - previous_released_index - 1))
-fi
 if [[ ! -x $olp_bin ]]; then
   cargo build --locked --release --manifest-path "$root_dir/Cargo.toml" -p olp
 fi

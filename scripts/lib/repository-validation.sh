@@ -12,53 +12,27 @@ validation_script_name() {
 }
 
 validation_require_executable() {
-  local executable=$1
-
-  if ! command -v "$executable" >/dev/null 2>&1; then
+  command -v "$1" >/dev/null 2>&1 || {
     printf '%s: preflight failed: required executable %q was not found in PATH\n' \
-      "$(validation_script_name)" "$executable" >&2
+      "$(validation_script_name)" "$1" >&2
     return 127
-  fi
+  }
 }
 
 validation_require_file() {
-  local path=$1
-
-  if [[ ! -e $path ]]; then
-    printf '%s: preflight failed: required file is missing: %s\n' \
-      "$(validation_script_name)" "$path" >&2
+  [[ -f $1 && -r $1 ]] || {
+    printf '%s: preflight failed: required file is missing or unreadable: %s\n' \
+      "$(validation_script_name)" "$1" >&2
     return 2
-  fi
-  if [[ ! -f $path ]]; then
-    printf '%s: preflight failed: required file path is invalid: %s\n' \
-      "$(validation_script_name)" "$path" >&2
-    return 2
-  fi
-  if [[ ! -r $path ]]; then
-    printf '%s: preflight failed: required file is unreadable: %s\n' \
-      "$(validation_script_name)" "$path" >&2
-    return 2
-  fi
+  }
 }
 
 validation_require_directory() {
-  local path=$1
-
-  if [[ ! -e $path ]]; then
-    printf '%s: preflight failed: required directory is missing: %s\n' \
-      "$(validation_script_name)" "$path" >&2
+  [[ -d $1 && -r $1 && -x $1 ]] || {
+    printf '%s: preflight failed: required directory is missing or unreadable: %s\n' \
+      "$(validation_script_name)" "$1" >&2
     return 2
-  fi
-  if [[ ! -d $path ]]; then
-    printf '%s: preflight failed: required directory path is invalid: %s\n' \
-      "$(validation_script_name)" "$path" >&2
-    return 2
-  fi
-  if [[ ! -r $path || ! -x $path ]]; then
-    printf '%s: preflight failed: required directory is unreadable: %s\n' \
-      "$(validation_script_name)" "$path" >&2
-    return 2
-  fi
+  }
 }
 
 checked_rg_capture() {
@@ -67,14 +41,6 @@ checked_rg_capture() {
   local operation=$3
   local path=$4
   shift 4
-
-  if [[ ! $output_variable =~ ^[a-zA-Z_][a-zA-Z0-9_]*$ ||
-        ! $match_variable =~ ^[a-zA-Z_][a-zA-Z0-9_]*$ ||
-        $output_variable == "$match_variable" ]]; then
-    printf '%s: checked ripgrep invocation has invalid output variables: operation=%s path=%s\n' \
-      "$(validation_script_name)" "$operation" "$path" >&2
-    return 2
-  fi
 
   validation_require_executable rg || return $?
 

@@ -101,7 +101,8 @@ helm-verify: ## Verify Helm values, schema, and templates change together
 script-selftest: ## Self-tests for shell helpers and repository invariants
 	scripts/test-backup-manifest.sh
 	scripts/test-postgres-test-databases.sh
-	scripts/test-repository-validation.sh
+	scripts/test-check-boundaries.sh
+	scripts/test-compose-secrets.sh
 
 shellcheck: ## Shellcheck every tracked or untracked repository shell script
 	@scripts=(); \

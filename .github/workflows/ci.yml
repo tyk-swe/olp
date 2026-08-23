@@ -123,11 +123,7 @@ jobs:
           tools: "cargo-nextest@0.9.140,cargo-llvm-cov@0.8.7"
           cache-shared-key: coverage-registry
       - name: Run workspace coverage
-        # test_support only executes under db-test; see the Makefile note.
-        run: |
-          cargo llvm-cov nextest --locked --workspace --all-features \
-            --ignore-filename-regex 'src/test_support\.rs' \
-            --lcov --output-path lcov.info --fail-under-lines 62
+        run: make coverage
       - name: Upload Rust coverage
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: ${{ always() && !cancelled() }}
@@ -292,7 +288,7 @@ jobs:
           DATABASE_URL: postgres://olp:olp@localhost:5432/olp
         run: |
           cargo sqlx migrate run --source crates/olp-db/migrations
-          cargo sqlx prepare --workspace --check -- --all-targets --all-features
+          make sqlx-check
       - name: Run isolated PostgreSQL and Valkey integration suites
         run: ./scripts/run-postgres-tests.sh
 
@@ -401,10 +397,20 @@ jobs:
       - name: Run the end-to-end contract suite
         run: make e2e
 
-  production-image:
-    name: Production image / amd64
-    runs-on: ubuntu-24.04
+  image:
+    name: Image / ${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        # Pull requests build only amd64; pushes and scheduled runs add arm64.
+        arch: ${{ github.event_name == 'pull_request' && fromJSON('["amd64"]') || fromJSON('["amd64", "arm64"]') }}
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -420,37 +426,39 @@ jobs:
           file: deploy/Dockerfile
           push: false
           load: true
-          platforms: linux/amd64
-          tags: openllmproxy:ci-amd64
-          cache-from: type=gha,scope=image-amd64
-          cache-to: type=gha,mode=max,scope=image-amd64
+          platforms: linux/${{ matrix.arch }}
+          tags: openllmproxy:ci-${{ matrix.arch }}
+          cache-from: type=gha,scope=image-${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=image-${{ matrix.arch }}
       - name: Smoke production binary modes and packaged console
-        run: ./scripts/smoke-image-modes.sh openllmproxy:ci-amd64
-      - name: Generate amd64 SBOM
-        if: ${{ github.event_name == 'push' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
+        env:
+          OLP_IMAGE_PLATFORM: linux/${{ matrix.arch }}
+        run: ./scripts/smoke-image-modes.sh openllmproxy:ci-${{ matrix.arch }}
+      - name: Generate SBOM
+        if: ${{ github.event_name != 'pull_request' }}
         uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0
         with:
-          image: openllmproxy:ci-amd64
+          image: openllmproxy:ci-${{ matrix.arch }}
           syft-version: v1.46.0
           format: spdx-json
-          output-file: openllmproxy-amd64.spdx.json
+          output-file: openllmproxy-${{ matrix.arch }}.spdx.json
           upload-artifact: false
-      - name: Scan amd64 image for HIGH and CRITICAL vulnerabilities
-        if: ${{ github.event_name == 'push' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
+      - name: Scan image for HIGH and CRITICAL vulnerabilities
+        if: ${{ github.event_name != 'pull_request' }}
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25
         with:
-          image-ref: openllmproxy:ci-amd64
+          image-ref: openllmproxy:ci-${{ matrix.arch }}
           version: v0.72.0
           format: table
           exit-code: "1"
           ignore-unfixed: true
           severity: HIGH,CRITICAL
-      - name: Upload amd64 SBOM
-        if: ${{ always() && !cancelled() && (github.event_name == 'push' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') }}
+      - name: Upload SBOM
+        if: ${{ always() && !cancelled() && github.event_name != 'pull_request' }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: openllmproxy-sbom-amd64-${{ github.run_id }}-${{ github.run_attempt }}
-          path: openllmproxy-amd64.spdx.json
+          name: openllmproxy-sbom-${{ matrix.arch }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: openllmproxy-${{ matrix.arch }}.spdx.json
           if-no-files-found: ignore
           retention-days: 7
 
@@ -468,7 +476,7 @@ jobs:
       - postgres-integration
       - console-integration
       - e2e
-      - production-image
+      - image
       - advisory-audits
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -521,11 +529,13 @@ jobs:
         run: pnpm exec svelte-kit sync
       - name: Install ${{ matrix.browser }}
         run: pnpm exec playwright install --with-deps ${{ matrix.browser }}
+      # The suite asserts mocked-API behaviour, which Chromium already covers;
+      # other engines run only the @browser-tagged rendering/zoom/auth cases.
       - name: Run ${{ matrix.label }} end-to-end tests
         env:
           PLAYWRIGHT_HTML_OUTPUT_DIR: playwright-report/${{ matrix.project }}
           PLAYWRIGHT_OUTPUT_DIR: test-results/${{ matrix.project }}
-        run: pnpm exec playwright test --project=${{ matrix.project }}
+        run: pnpm exec playwright test --project=${{ matrix.project }} --grep @browser
       - name: Upload ${{ matrix.label }} Playwright diagnostics
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: failure() && !cancelled()
@@ -733,60 +743,6 @@ jobs:
       - name: Run every seeded fuzz target for two minutes
         run: make fuzz-campaign
 
-  image-arm64:
-    name: Image / arm64
-    if: ${{ github.event_name == 'push' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
-    runs-on: ubuntu-24.04-arm
-    timeout-minutes: 90
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
-        with:
-          version: v0.35.0
-          driver-opts: image=moby/buildkit@sha256:0168606be2315b7c807a03b3d8aa79beefdb31c98740cebdffdfeebf31190c9f
-      - name: Build linux/arm64 image
-        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
-        with:
-          context: .
-          file: deploy/Dockerfile
-          push: false
-          load: true
-          platforms: linux/arm64
-          tags: openllmproxy:ci-arm64
-          cache-from: type=gha,scope=image-arm64
-          cache-to: type=gha,mode=max,scope=image-arm64
-      - name: Smoke final arm64 image modes and packaged console
-        env:
-          OLP_IMAGE_PLATFORM: linux/arm64
-        run: ./scripts/smoke-image-modes.sh openllmproxy:ci-arm64
-      - name: Generate arm64 SBOM
-        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0
-        with:
-          image: openllmproxy:ci-arm64
-          syft-version: v1.46.0
-          format: spdx-json
-          output-file: openllmproxy-arm64.spdx.json
-          upload-artifact: false
-      - name: Scan arm64 image for HIGH and CRITICAL vulnerabilities
-        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25
-        with:
-          image-ref: openllmproxy:ci-arm64
-          version: v0.72.0
-          format: table
-          exit-code: "1"
-          ignore-unfixed: true
-          severity: HIGH,CRITICAL
-      - name: Upload arm64 SBOM
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        if: ${{ always() && !cancelled() }}
-        with:
-          name: openllmproxy-sbom-arm64-${{ github.run_id }}-${{ github.run_attempt }}
-          path: openllmproxy-arm64.spdx.json
-          if-no-files-found: ignore
-          retention-days: 7
-
   full:
     name: Full
     if: ${{ always() && (github.event_name == 'push' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') }}
@@ -799,7 +755,6 @@ jobs:
       - worker-ha
       - upgrade-rehearsal
       - fuzz
-      - image-arm64
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:

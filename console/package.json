@@ -17,8 +17,8 @@
     "test:integration": "pnpm build && playwright test --config playwright.integration.config.ts",
     "test:integration:prebuilt": "svelte-kit sync && playwright test --config playwright.integration.config.ts",
     "screenshots": "svelte-kit sync && playwright test --config playwright.screenshots.config.ts",
-    "format": "prettier --write prettier.config.js src/lib/auth/*.ts src/lib/api/management/providers.ts 'src/lib/features/access/**/*.{svelte,ts}' 'src/lib/features/gateway/providers/**/*.{svelte,ts}' 'src/lib/features/settings/profile/**/*.{svelte,ts}' tests/e2e/{access,api-keys,model-inventory,provider-activation,provider-conflicts,provider-endpoints,provider-inventory,provider-models,provider-probes,provider-wizard,route-revisions,routes}.spec.ts tests/e2e/gateway-access-fixtures.ts",
-    "format:check": "prettier --check prettier.config.js src/lib/auth/*.ts src/lib/api/management/providers.ts 'src/lib/features/access/**/*.{svelte,ts}' 'src/lib/features/gateway/providers/**/*.{svelte,ts}' 'src/lib/features/settings/profile/**/*.{svelte,ts}' tests/e2e/{access,api-keys,model-inventory,provider-activation,provider-conflicts,provider-endpoints,provider-inventory,provider-models,provider-probes,provider-wizard,route-revisions,routes}.spec.ts tests/e2e/gateway-access-fixtures.ts",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
     "api:generate": "openapi-typescript ../openapi/management.json -o src/lib/api/schema.d.ts",
     "api:check": "openapi-typescript ../openapi/management.json -o src/lib/api/schema.d.ts --check",
     "verify": "pnpm api:check && pnpm format:check && pnpm test && pnpm check && pnpm build"
