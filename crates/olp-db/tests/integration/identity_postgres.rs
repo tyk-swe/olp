@@ -1,8 +1,8 @@
 use chrono::{Duration, Utc};
 use olp_db::{
     idempotency::Outcome, idempotency::Replayable, idempotency::Response, idempotency::fingerprint,
-    identity::AcceptInvitation, identity::Error, identity::InstallationSetupInput,
-    identity::NewInvitation, security::envelope::MasterKey, security::password::hash,
+    identity::AcceptInvitation, identity::Error, identity::NewInvitation,
+    security::envelope::MasterKey, security::password::hash,
     security::session_material::SessionMaterial,
 };
 use olp_engine::domain::auth::Role;
@@ -17,12 +17,7 @@ async fn local_identity_lifecycle_is_transactional_and_audited() {
     let owner_session = SessionMaterial::generate();
     let (owner, owner_session_id) = store
         .setup_installation_with_session(
-            InstallationSetupInput {
-                installation_name: "Identity integration".to_owned(),
-                email: "owner@example.test".to_owned(),
-                display_name: "Owner".to_owned(),
-                password_hash: hash("correct horse battery staple").unwrap(),
-            },
+            crate::support::owner_setup("example"),
             &owner_session,
             Duration::hours(12),
         )

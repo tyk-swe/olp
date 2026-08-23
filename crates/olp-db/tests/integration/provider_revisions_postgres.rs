@@ -3,9 +3,9 @@ use olp_db::{
     configuration::NewRouteDraft, configuration::NewRouteTarget,
     configuration::resources::RotateCredentialInput, configuration::resources::UpdateProvider,
     idempotency::Outcome, idempotency::Replayable, idempotency::Response, idempotency::fingerprint,
-    identity::InstallationSetupInput, media_jobs::MediaJobState, media_jobs::MediaJobUpdate,
-    media_jobs::NewMediaJobReservation, security::aad::credential, security::envelope::MasterKey,
-    security::key_material::AuthHmacKey, security::session_material::SessionMaterial, store::Store,
+    media_jobs::MediaJobState, media_jobs::MediaJobUpdate, media_jobs::NewMediaJobReservation,
+    security::aad::credential, security::envelope::MasterKey, security::key_material::AuthHmacKey,
+    security::session_material::SessionMaterial, store::Store,
 };
 use olp_engine::domain::{
     auth::{ApiKeyLimits, ApiKeyScope},
@@ -22,12 +22,7 @@ async fn staged_provider_changes_do_not_leak_until_reactivation() {
     let store = db.store(5).await;
     let (owner, _) = store
         .setup_installation_with_session(
-            InstallationSetupInput {
-                installation_name: "Provider revisions".to_owned(),
-                email: "owner@provider-revisions.test".to_owned(),
-                display_name: "Owner".to_owned(),
-                password_hash: "test-password-hash".to_owned(),
-            },
+            crate::support::owner_setup("provider-revisions"),
             &SessionMaterial::generate(),
             chrono::Duration::hours(1),
         )

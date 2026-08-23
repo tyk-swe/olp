@@ -279,95 +279,6 @@ async fn request_near_minute_end_gets_positive_server_derived_retry() {
 
 #[tokio::test]
 #[ignore = "requires Valkey in OLP_VALKEY_URL"]
-async fn rpm_rejection_consumes_neither_tokens_nor_concurrency() {
-    let namespace = namespace("rpm_atomic");
-    let lookup_id = "lookup_01";
-    let limiter = DistributedLimiter::connect(&valkey_url(), &namespace)
-        .await
-        .unwrap();
-    let mut connection = connection().await;
-    settle_in_minute(&mut connection).await;
-    let (rate_key, concurrency_key) = keys(&namespace, lookup_id);
-
-    let lease = limiter
-        .reserve(LimitRequest {
-            requests_per_minute: Some(1),
-            tokens_per_minute: Some(100),
-            max_concurrency: Some(1),
-            ..request(lookup_id)
-        })
-        .await
-        .unwrap();
-    release_twice(&limiter, &lease).await;
-    exceeded(
-        limiter
-            .reserve(LimitRequest {
-                requests_per_minute: Some(1),
-                tokens_per_minute: Some(100),
-                max_concurrency: Some(1),
-                ..request(lookup_id)
-            })
-            .await
-            .unwrap_err(),
-        LimitDimension::Requests,
-    );
-
-    let state = rate_state(&mut connection, &rate_key).await;
-    assert_eq!(state["rpm"], 1);
-    assert_eq!(state["tpm"], 5);
-    assert_eq!(
-        connection.zcard::<_, i64>(&concurrency_key).await.unwrap(),
-        0
-    );
-}
-
-#[tokio::test]
-#[ignore = "requires Valkey in OLP_VALKEY_URL"]
-async fn tpm_rejection_consumes_neither_requests_nor_concurrency() {
-    let namespace = namespace("tpm_atomic");
-    let lookup_id = "lookup_01";
-    let limiter = DistributedLimiter::connect(&valkey_url(), &namespace)
-        .await
-        .unwrap();
-    let mut connection = connection().await;
-    settle_in_minute(&mut connection).await;
-    let (rate_key, concurrency_key) = keys(&namespace, lookup_id);
-
-    let lease = limiter
-        .reserve(LimitRequest {
-            requests_per_minute: Some(3),
-            tokens_per_minute: Some(5),
-            max_concurrency: Some(1),
-            ..request(lookup_id)
-        })
-        .await
-        .unwrap();
-    release_twice(&limiter, &lease).await;
-    exceeded(
-        limiter
-            .reserve(LimitRequest {
-                requests_per_minute: Some(3),
-                tokens_per_minute: Some(5),
-                max_concurrency: Some(1),
-                requested_tokens: 1,
-                ..request(lookup_id)
-            })
-            .await
-            .unwrap_err(),
-        LimitDimension::Tokens,
-    );
-
-    let state = rate_state(&mut connection, &rate_key).await;
-    assert_eq!(state["rpm"], 1);
-    assert_eq!(state["tpm"], 5);
-    assert_eq!(
-        connection.zcard::<_, i64>(&concurrency_key).await.unwrap(),
-        0
-    );
-}
-
-#[tokio::test]
-#[ignore = "requires Valkey in OLP_VALKEY_URL"]
 async fn token_reconciliation_matches_actual_usage_and_is_idempotent() {
     let namespace = namespace("token_refund");
     let lookup_id = "lookup_01";
@@ -451,42 +362,60 @@ async fn token_reconciliation_does_not_touch_a_new_window() {
 
 #[tokio::test]
 #[ignore = "requires Valkey in OLP_VALKEY_URL"]
-async fn concurrency_rejection_consumes_neither_requests_nor_tokens() {
-    let namespace = namespace("concurrency_atomic");
-    let lookup_id = "lookup_01";
-    let limiter = DistributedLimiter::connect(&valkey_url(), &namespace)
-        .await
-        .unwrap();
-    let mut connection = connection().await;
-    settle_in_minute(&mut connection).await;
-    let (rate_key, _) = keys(&namespace, lookup_id);
-
-    let lease = limiter
-        .reserve(LimitRequest {
-            requests_per_minute: Some(3),
-            tokens_per_minute: Some(100),
-            max_concurrency: Some(1),
-            ..request(lookup_id)
-        })
-        .await
-        .unwrap();
-    exceeded(
-        limiter
-            .reserve(LimitRequest {
-                requests_per_minute: Some(3),
-                tokens_per_minute: Some(100),
-                max_concurrency: Some(1),
-                ..request(lookup_id)
-            })
+async fn a_rejection_on_one_dimension_consumes_nothing_on_the_others() {
+    // (label, rpm limit, tpm limit, tokens on the second request, release the
+    // first lease before the second request, dimension expected to reject)
+    let cases = [
+        ("rpm_atomic", 1, 100, 5, true, LimitDimension::Requests),
+        ("tpm_atomic", 3, 5, 1, true, LimitDimension::Tokens),
+        (
+            "concurrency_atomic",
+            3,
+            100,
+            5,
+            false,
+            LimitDimension::Concurrency,
+        ),
+    ];
+    for (label, rpm, tpm, requested_tokens, release_first, dimension) in cases {
+        let namespace = namespace(label);
+        let lookup_id = "lookup_01";
+        let limiter = DistributedLimiter::connect(&valkey_url(), &namespace)
             .await
-            .unwrap_err(),
-        LimitDimension::Concurrency,
-    );
+            .unwrap();
+        let mut connection = connection().await;
+        settle_in_minute(&mut connection).await;
+        let (rate_key, concurrency_key) = keys(&namespace, lookup_id);
+        let limits = |requested_tokens| LimitRequest {
+            requests_per_minute: Some(rpm),
+            tokens_per_minute: Some(tpm),
+            max_concurrency: Some(1),
+            requested_tokens,
+            ..request(lookup_id)
+        };
 
-    let state = rate_state(&mut connection, &rate_key).await;
-    assert_eq!(state["rpm"], 1);
-    assert_eq!(state["tpm"], 5);
-    release_twice(&limiter, &lease).await;
+        let lease = limiter.reserve(limits(5)).await.unwrap();
+        if release_first {
+            release_twice(&limiter, &lease).await;
+        }
+        exceeded(
+            limiter.reserve(limits(requested_tokens)).await.unwrap_err(),
+            dimension,
+        );
+
+        let state = rate_state(&mut connection, &rate_key).await;
+        assert_eq!(state["rpm"], 1, "{label}");
+        assert_eq!(state["tpm"], 5, "{label}");
+        if release_first {
+            assert_eq!(
+                connection.zcard::<_, i64>(&concurrency_key).await.unwrap(),
+                0,
+                "{label}"
+            );
+        } else {
+            release_twice(&limiter, &lease).await;
+        }
+    }
 }
 
 #[tokio::test]

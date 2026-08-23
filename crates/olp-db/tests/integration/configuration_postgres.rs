@@ -9,8 +9,7 @@ use olp_db::{
     configuration::resources::RotateCredentialInput, configuration::resources::UpdateApiKeyInput,
     configuration::resources::UpdateProvider, error::Error as PersistenceError,
     idempotency::Outcome, idempotency::Replayable, idempotency::Response, idempotency::fingerprint,
-    identity::InstallationSetupInput, security::aad::credential, security::envelope::MasterKey,
-    security::key_material::AuthHmacKey, security::password::hash,
+    security::aad::credential, security::envelope::MasterKey, security::key_material::AuthHmacKey,
     security::session_material::SessionMaterial, store::Store,
 };
 use olp_engine::domain::{
@@ -62,12 +61,7 @@ async fn configuration_lifecycle_is_versioned_audited_and_publishes_runtime() {
     let session = SessionMaterial::generate();
     let (owner, _) = store
         .setup_installation_with_session(
-            InstallationSetupInput {
-                installation_name: "Configuration integration".to_owned(),
-                email: "owner@configuration.test".to_owned(),
-                display_name: "Owner".to_owned(),
-                password_hash: hash("correct horse battery staple").unwrap(),
-            },
+            crate::support::owner_setup("configuration"),
             &session,
             chrono::Duration::hours(12),
         )

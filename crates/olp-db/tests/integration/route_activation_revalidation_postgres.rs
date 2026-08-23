@@ -2,7 +2,7 @@ use crate::support::route_fixtures::{
     DraftFixture, LIFECYCLE_OPERATIONS, ProviderFixture, insert_provider, insert_provider_revision,
 };
 use olp_db::{
-    configuration::Error, identity::InstallationSetupInput, runtime::compiler::RuntimeCompileError,
+    configuration::Error, runtime::compiler::RuntimeCompileError,
     security::session_material::SessionMaterial,
 };
 use sqlx::{PgPool, Row};
@@ -15,12 +15,7 @@ async fn activation_revalidates_current_revisions_and_preserves_live_media_targe
     let store = db.store(5).await;
     let (owner, _) = store
         .setup_installation_with_session(
-            InstallationSetupInput {
-                installation_name: "Route revalidation".to_owned(),
-                email: "owner@route-revalidation.test".to_owned(),
-                display_name: "Owner".to_owned(),
-                password_hash: "test-password-hash".to_owned(),
-            },
+            crate::support::owner_setup("route-revalidation"),
             &SessionMaterial::generate(),
             chrono::Duration::hours(1),
         )

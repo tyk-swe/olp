@@ -1,12 +1,12 @@
 use chrono::{Duration, Timelike, Utc};
 use olp_db::{
     idempotency::Outcome as IdempotencyOutcome, idempotency::Replayable, idempotency::Response,
-    identity::InstallationSetupInput, operations::cursor::Error, operations::pricing::PriceInput,
+    operations::cursor::Error, operations::pricing::PriceInput,
     operations::requests::RequestFilters, request_metadata::delivery_health::ConsumerState,
     request_metadata::ingestion::Outcome as IngestionOutcome,
     request_metadata::reconciliation::Gap, request_metadata::reconciliation::GatewayEpochState,
-    security::envelope::MasterKey, security::password::hash, store::Store, usage::Dimension,
-    usage::Filters, usage::Granularity,
+    security::envelope::MasterKey, store::Store, usage::Dimension, usage::Filters,
+    usage::Granularity,
 };
 use olp_engine::{
     domain::canonical::identity::Surface,
@@ -27,12 +27,7 @@ async fn operations_queries_pricing_rollups_health_and_completeness_reconcile() 
     let db = olp_db::test_support::TestDb::create_migrated("operations").await;
     let store = db.store(5).await;
     let owner = store
-        .setup_installation(InstallationSetupInput {
-            installation_name: "Operations integration".to_owned(),
-            email: "owner@example.test".to_owned(),
-            display_name: "Owner".to_owned(),
-            password_hash: hash("correct horse battery staple").unwrap(),
-        })
+        .setup_installation(crate::support::owner_setup("example"))
         .await
         .unwrap();
     let provider_id = Uuid::now_v7();

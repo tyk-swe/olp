@@ -3,9 +3,8 @@ use olp_db::{
     configuration::Error as ConfigurationError, configuration::NewProviderDraft,
     configuration::NewRouteDraft, configuration::NewRouteTarget,
     configuration::resources::RotateCredentialInput, idempotency::Outcome, idempotency::Replayable,
-    idempotency::Response, idempotency::fingerprint, identity::InstallationSetupInput,
-    operations::cursor::Error as OperationsError, operations::pricing::PriceInput,
-    security::aad::credential, security::envelope::MasterKey, security::password::hash,
+    idempotency::Response, idempotency::fingerprint, operations::cursor::Error as OperationsError,
+    operations::pricing::PriceInput, security::aad::credential, security::envelope::MasterKey,
 };
 use olp_engine::domain::{canonical::identity::OperationKind, routing::provider::ProviderKind};
 use serde_json::json;
@@ -18,12 +17,7 @@ async fn remaining_management_mutations_exactly_replay_without_double_execution(
     let db = olp_db::test_support::TestDb::create_migrated("management_idempotency_replay").await;
     let store = db.store(8).await;
     let owner = store
-        .setup_installation(InstallationSetupInput {
-            installation_name: "Management replay integration".to_owned(),
-            email: "owner@management-replay.test".to_owned(),
-            display_name: "Owner".to_owned(),
-            password_hash: hash("correct horse battery staple").unwrap(),
-        })
+        .setup_installation(crate::support::owner_setup("management-replay"))
         .await
         .unwrap();
     let actor = owner.user_id;

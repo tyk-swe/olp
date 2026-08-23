@@ -1,11 +1,11 @@
 use chrono::{Duration, Utc};
 use olp_db::{
     authentication::RecentAuthPurpose, authentication::SessionSecurityContext,
-    identity::InstallationSetupInput, oidc::types::CompleteOidcLogin, oidc::types::NewOidcFlow,
-    oidc::types::OidcError, oidc::types::OidcFlowPurpose, oidc::types::UpsertOidcConfiguration,
+    oidc::types::CompleteOidcLogin, oidc::types::NewOidcFlow, oidc::types::OidcError,
+    oidc::types::OidcFlowPurpose, oidc::types::UpsertOidcConfiguration,
     security::aad::oidc_client_secret, security::aad::oidc_flow_payload,
-    security::envelope::MasterKey, security::password::hash,
-    security::session_material::RecentAuthMaterial, security::session_material::SessionMaterial,
+    security::envelope::MasterKey, security::session_material::RecentAuthMaterial,
+    security::session_material::SessionMaterial,
 };
 use olp_engine::domain::auth::Role;
 use sha2::{Digest, Sha256};
@@ -19,12 +19,7 @@ async fn oidc_flow_creation_is_bound_to_the_exact_enabled_configuration() {
     let owner_session = SessionMaterial::generate();
     let (owner, owner_session_id) = store
         .setup_installation_with_session(
-            InstallationSetupInput {
-                installation_name: "OIDC flow integration".to_owned(),
-                email: "owner@example.test".to_owned(),
-                display_name: "Owner".to_owned(),
-                password_hash: hash("correct horse battery staple").unwrap(),
-            },
+            crate::support::owner_setup("example"),
             &owner_session,
             Duration::hours(1),
         )

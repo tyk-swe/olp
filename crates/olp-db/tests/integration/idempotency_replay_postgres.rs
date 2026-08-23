@@ -8,11 +8,9 @@ use olp_db::{
     idempotency::Response,
     idempotency::fingerprint,
     identity::Error as IdentityError,
-    identity::InstallationSetupInput,
     identity::NewInvitation,
     security::envelope::MasterKey,
     security::key_material::AuthHmacKey,
-    security::password::hash,
 };
 use olp_engine::domain::auth::{ApiKeyLimits, ApiKeyScope, Role};
 use serde_json::{Value, json};
@@ -24,12 +22,7 @@ async fn encrypted_idempotency_replays_one_time_secrets_after_a_lost_response() 
     let db = olp_db::test_support::TestDb::create_migrated("idempotency_replay").await;
     let store = db.store(8).await;
     let owner = store
-        .setup_installation(InstallationSetupInput {
-            installation_name: "Idempotency replay integration".to_owned(),
-            email: "owner@idempotency.test".to_owned(),
-            display_name: "Owner".to_owned(),
-            password_hash: hash("correct horse battery staple").unwrap(),
-        })
+        .setup_installation(crate::support::owner_setup("idempotency"))
         .await
         .unwrap();
     let actor = owner.user_id;

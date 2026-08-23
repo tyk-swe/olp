@@ -42,5 +42,8 @@ tracing.workspace = true
 uuid.workspace = true
 zeroize.workspace = true
 
+[dev-dependencies]
+olp-engine = { workspace = true, features = ["test-util"] }
+
 [lints]
 workspace = true

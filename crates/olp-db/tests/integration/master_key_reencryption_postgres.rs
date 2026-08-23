@@ -1,9 +1,9 @@
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use chrono::Duration;
 use olp_db::{
-    identity::InstallationSetupInput, security::aad::credential, security::aad::idempotency_replay,
+    security::aad::credential, security::aad::idempotency_replay,
     security::aad::oidc_client_secret, security::aad::oidc_flow_payload,
-    security::envelope::EncryptedSecret, security::envelope::MasterKey, security::password::hash,
+    security::envelope::EncryptedSecret, security::envelope::MasterKey,
     security::rotation::ReencryptionError, security::session_material::SessionMaterial,
     store::Store,
 };
@@ -18,12 +18,7 @@ async fn master_key_reencryption_is_authenticated_resumable_and_retirement_safe(
     let owner_session = SessionMaterial::generate();
     let (owner, owner_session_id) = store
         .setup_installation_with_session(
-            InstallationSetupInput {
-                installation_name: "Master-key integration".to_owned(),
-                email: "owner@example.test".to_owned(),
-                display_name: "Owner".to_owned(),
-                password_hash: hash("correct horse battery staple").unwrap(),
-            },
+            crate::support::owner_setup("example"),
             &owner_session,
             Duration::hours(1),
         )

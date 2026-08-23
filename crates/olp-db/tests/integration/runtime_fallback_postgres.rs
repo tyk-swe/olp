@@ -1,7 +1,7 @@
 use std::num::NonZeroU32;
 
 use chrono::{Duration, Utc};
-use olp_db::{identity::InstallationSetupInput, security::session_material::SessionMaterial};
+use olp_db::security::session_material::SessionMaterial;
 use olp_engine::domain::{auth::ApiKeyScope, routing::snapshot::Snapshot};
 use uuid::Uuid;
 
@@ -12,12 +12,7 @@ async fn fallback_uses_current_keys_and_release_exact_provider_transport_config(
     let store = db.store(5).await;
     let (owner, _) = store
         .setup_installation_with_session(
-            InstallationSetupInput {
-                installation_name: "Fallback integrity".to_owned(),
-                email: "owner@fallback.test".to_owned(),
-                display_name: "Owner".to_owned(),
-                password_hash: "test-password-hash".to_owned(),
-            },
+            crate::support::owner_setup("fallback"),
             &SessionMaterial::generate(),
             Duration::hours(1),
         )

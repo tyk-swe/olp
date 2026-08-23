@@ -1,9 +1,8 @@
 use chrono::{Duration, Utc};
 use olp_db::{
-    configuration::Error, identity::InstallationSetupInput, media_jobs::MediaJobError,
-    media_jobs::MediaJobFilters, media_jobs::MediaJobLifecycle, media_jobs::MediaJobOrder,
-    media_jobs::MediaJobState, media_jobs::MediaJobUpdate, media_jobs::NewMediaJobReservation,
-    security::password::hash,
+    configuration::Error, media_jobs::MediaJobError, media_jobs::MediaJobFilters,
+    media_jobs::MediaJobLifecycle, media_jobs::MediaJobOrder, media_jobs::MediaJobState,
+    media_jobs::MediaJobUpdate, media_jobs::NewMediaJobReservation,
 };
 use uuid::Uuid;
 
@@ -13,12 +12,7 @@ async fn media_job_lifecycle_is_paginated_metadata_only_and_transition_checked()
     let db = olp_db::test_support::TestDb::create_migrated("media_jobs").await;
     let store = db.store(5).await;
     let owner = store
-        .setup_installation(InstallationSetupInput {
-            installation_name: "Media jobs integration".to_owned(),
-            email: "owner@example.test".to_owned(),
-            display_name: "Owner".to_owned(),
-            password_hash: hash("correct horse battery staple").unwrap(),
-        })
+        .setup_installation(crate::support::owner_setup("example"))
         .await
         .unwrap();
     let provider_id = Uuid::now_v7();

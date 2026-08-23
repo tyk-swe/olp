@@ -246,98 +246,92 @@ async fn stop_consumers(
     }
 }
 
+/// Polls `check` every 10ms until it returns true, failing with `expectation`
+/// after WAIT_TIMEOUT.
+async fn poll_until<F>(expectation: &str, mut check: F)
+where
+    F: AsyncFnMut() -> bool,
+{
+    tokio::time::timeout(WAIT_TIMEOUT, async {
+        let mut interval = tokio::time::interval(Duration::from_millis(10));
+        loop {
+            interval.tick().await;
+            if check().await {
+                return;
+            }
+        }
+    })
+    .await
+    .expect(expectation);
+}
+
 async fn wait_for_consumers(
     connection: &mut MultiplexedConnection,
     stream: &str,
     expected: &[&str],
 ) {
-    tokio::time::timeout(WAIT_TIMEOUT, async {
-        let mut interval = tokio::time::interval(Duration::from_millis(10));
-        loop {
-            interval.tick().await;
-            let Ok(reply): Result<StreamInfoConsumersReply, _> =
-                connection.xinfo_consumers(stream, GROUP).await
-            else {
-                continue;
-            };
-            if expected.iter().all(|name| {
-                reply
-                    .consumers
-                    .iter()
-                    .any(|consumer| consumer.name == *name)
-            }) {
-                return;
-            }
-        }
+    poll_until("all consumers must join the group", async || {
+        let Ok(reply): Result<StreamInfoConsumersReply, _> =
+            connection.xinfo_consumers(stream, GROUP).await
+        else {
+            return false;
+        };
+        expected.iter().all(|name| {
+            reply
+                .consumers
+                .iter()
+                .any(|consumer| consumer.name == *name)
+        })
     })
-    .await
-    .expect("all consumers must join the group");
+    .await;
 }
 
 async fn wait_for_usage_facts(store: &Store, expected: i64) {
-    tokio::time::timeout(WAIT_TIMEOUT, async {
-        let mut interval = tokio::time::interval(Duration::from_millis(10));
-        loop {
-            interval.tick().await;
-            let count: i64 = sqlx::query_scalar("SELECT count(*) FROM usage_facts")
-                .fetch_one(store.pool())
-                .await
-                .unwrap();
-            if count == expected {
-                return;
-            }
-        }
+    poll_until("expected request metadata must be persisted", async || {
+        let count: i64 = sqlx::query_scalar("SELECT count(*) FROM usage_facts")
+            .fetch_one(store.pool())
+            .await
+            .unwrap();
+        count == expected
     })
-    .await
-    .expect("expected request metadata must be persisted");
+    .await;
+}
+
+async fn group_drained(connection: &mut MultiplexedConnection, stream: &str) -> bool {
+    let groups: StreamInfoGroupsReply = connection.xinfo_groups(stream).await.unwrap();
+    let group = groups
+        .groups
+        .into_iter()
+        .find(|group| group.name == GROUP)
+        .unwrap();
+    group.pending == 0 && group.lag == Some(0)
 }
 
 async fn wait_for_group_drain(store: &Store, connection: &mut MultiplexedConnection, stream: &str) {
-    tokio::time::timeout(WAIT_TIMEOUT, async {
-        let mut interval = tokio::time::interval(Duration::from_millis(10));
-        loop {
-            interval.tick().await;
-            let groups: StreamInfoGroupsReply = connection.xinfo_groups(stream).await.unwrap();
-            let group = groups
-                .groups
-                .into_iter()
-                .find(|group| group.name == GROUP)
-                .unwrap();
-            let health = store.request_metadata_consumer_health().await.unwrap();
-            if group.pending == 0
-                && group.lag == Some(0)
-                && health.is_some_and(|health| {
-                    health.pending_events == 0
-                        && health.lag_events == 0
-                        && health.oldest_pending_at.is_none()
-                })
-            {
-                return;
-            }
-        }
-    })
-    .await
-    .expect("group pending, lag, and durable health must converge to zero");
+    poll_until(
+        "group pending, lag, and durable health must converge to zero",
+        async || {
+            group_drained(connection, stream).await
+                && store
+                    .request_metadata_consumer_health()
+                    .await
+                    .unwrap()
+                    .is_some_and(|health| {
+                        health.pending_events == 0
+                            && health.lag_events == 0
+                            && health.oldest_pending_at.is_none()
+                    })
+        },
+    )
+    .await;
 }
 
 async fn wait_for_valkey_drain(connection: &mut MultiplexedConnection, stream: &str) {
-    tokio::time::timeout(WAIT_TIMEOUT, async {
-        let mut interval = tokio::time::interval(Duration::from_millis(10));
-        loop {
-            interval.tick().await;
-            let groups: StreamInfoGroupsReply = connection.xinfo_groups(stream).await.unwrap();
-            let group = groups
-                .groups
-                .into_iter()
-                .find(|group| group.name == GROUP)
-                .unwrap();
-            if group.pending == 0 && group.lag == Some(0) {
-                return;
-            }
-        }
-    })
-    .await
-    .expect("Valkey group pending and lag must converge to zero");
+    poll_until(
+        "Valkey group pending and lag must converge to zero",
+        async || group_drained(connection, stream).await,
+    )
+    .await;
 }
 
 async fn pending_owner(

@@ -80,6 +80,7 @@ impl EndpointCore {
         })
     }
 
+    #[cfg(any(test, feature = "test-util"))]
     pub(in crate::providers) fn set_connect_timeout(&mut self, value: Duration) {
         self.client_connect_timeout = value;
     }

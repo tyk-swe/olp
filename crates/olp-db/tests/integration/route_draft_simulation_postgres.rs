@@ -1,7 +1,6 @@
 use crate::support::route_fixtures::{DraftFixture, insert_provider};
 use olp_db::{
-    configuration::resources::ReplaceRouteDraftInput, identity::InstallationSetupInput,
-    security::session_material::SessionMaterial,
+    configuration::resources::ReplaceRouteDraftInput, security::session_material::SessionMaterial,
 };
 use olp_engine::domain::{
     canonical::identity::{OperationKind, Surface, TransportMode},
@@ -18,12 +17,7 @@ async fn route_draft_simulation_matches_activated_runtime_attempts() {
     let store = db.store(5).await;
     let (owner, _) = store
         .setup_installation_with_session(
-            InstallationSetupInput {
-                installation_name: "Route simulation".to_owned(),
-                email: "owner@route-simulation.test".to_owned(),
-                display_name: "Owner".to_owned(),
-                password_hash: "test-password-hash".to_owned(),
-            },
+            crate::support::owner_setup("route-simulation"),
             &SessionMaterial::generate(),
             chrono::Duration::hours(1),
         )

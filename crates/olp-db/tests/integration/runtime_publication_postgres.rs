@@ -2,8 +2,7 @@ use std::time::Duration;
 
 use olp_db::{
     access::NewApiKeyRecord, idempotency::Outcome, idempotency::Replayable, idempotency::Response,
-    idempotency::fingerprint, identity::InstallationSetupInput, security::envelope::MasterKey,
-    security::key_material::AuthHmacKey, security::password::hash,
+    idempotency::fingerprint, security::envelope::MasterKey, security::key_material::AuthHmacKey,
 };
 use olp_engine::domain::{
     auth::{ApiKeyLimits, ApiKeyScope},
@@ -19,12 +18,7 @@ async fn replayable_key_creation_takes_its_snapshot_after_the_publication_lock()
     let db = olp_db::test_support::TestDb::create_migrated("runtime_publication").await;
     let store = db.store(5).await;
     let owner = store
-        .setup_installation(InstallationSetupInput {
-            installation_name: "Runtime publication integration".to_owned(),
-            email: "owner@example.test".to_owned(),
-            display_name: "Owner".to_owned(),
-            password_hash: hash("correct horse battery staple").unwrap(),
-        })
+        .setup_installation(crate::support::owner_setup("example"))
         .await
         .unwrap();
 
