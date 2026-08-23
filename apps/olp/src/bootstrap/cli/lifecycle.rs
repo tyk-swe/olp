@@ -129,7 +129,6 @@ pub(super) async fn shutdown_signal() {
             error!(%error, "Ctrl+C handler is unavailable");
         }
     };
-    #[cfg(unix)]
     let terminate = async {
         match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
             Ok(mut signal) => {
@@ -140,8 +139,6 @@ pub(super) async fn shutdown_signal() {
             }
         }
     };
-    #[cfg(not(unix))]
-    let terminate = std::future::pending::<()>();
     tokio::select! {
         () = ctrl_c => {},
         () = terminate => {},

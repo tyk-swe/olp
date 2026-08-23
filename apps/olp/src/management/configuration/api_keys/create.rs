@@ -15,11 +15,13 @@ use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use uuid::Uuid;
 
+use olp_engine::domain::auth::Permission;
+
 use crate::management::{
     error_mapping::{map_access, map_persistence},
     idempotency::{idempotency_http_response, require_idempotency_key},
     json_payload::json_payload,
-    permissions::require_key_manager,
+    permissions::require_permission,
     preconditions::{if_match, with_etag},
     response_policy::RuntimeGenerationResponse,
     secrets::WriteOnlySecret,
@@ -89,7 +91,7 @@ pub(crate) async fn create_api_key(
     payload: Result<Json<CreateApiKeyRequest>, JsonRejection>,
 ) -> Result<Response, Problem> {
     let principal = require_mutation_session(&state, &headers).await?;
-    require_key_manager(&principal)?;
+    require_permission(&principal, Permission::ManageApiKeys)?;
     let idempotency_key = require_idempotency_key(&headers)?.to_owned();
     let request = json_payload(payload)?;
     let request_fingerprint = fingerprint(&request).map_err(map_persistence)?;
@@ -158,7 +160,7 @@ pub(crate) async fn revoke_api_key(
     headers: HeaderMap,
 ) -> Result<Response, Problem> {
     let principal = require_mutation_session(&state, &headers).await?;
-    require_key_manager(&principal)?;
+    require_permission(&principal, Permission::ManageApiKeys)?;
     let idempotency_key = require_idempotency_key(&headers)?;
     let revoked = state
         .store()

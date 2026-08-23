@@ -20,7 +20,6 @@ use olp_engine::protocols::anthropic::{
     translate::decode::request as decode_request,
 };
 use serde::{Deserialize, Serialize};
-use serde_json::json;
 
 use olp_engine::inference::{execution::CompletedEvents, principal::Principal, runtime::Bundle};
 
@@ -38,7 +37,7 @@ use super::{
     error::InferenceError,
     execution::{execute_event_operation, execute_routed_result},
     native_models::{after_cursor_start, before_cursor_end, visible_route, visible_routes},
-    protocol_error::{ProtocolError, anthropic_error_kind, valid_json},
+    protocol_error::{ProtocolError, anthropic_error_body, valid_json},
     release_model_limits, reserve_model_limits,
 };
 
@@ -276,11 +275,7 @@ impl ProtocolStreamEncoder for AnthropicHttpStreamEncoder {
         vec![encode_server_sse_frame(
             &olp_engine::protocols::sse::Frame {
                 event: Some("error".to_owned()),
-                data: json!({
-                    "type": "error",
-                    "error": {"type": anthropic_error_kind(error), "message": error.message()}
-                })
-                .to_string(),
+                data: anthropic_error_body(error.status(), error.message()).to_string(),
                 id: None,
                 retry_ms: None,
             },

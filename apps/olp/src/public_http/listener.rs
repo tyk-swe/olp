@@ -165,13 +165,6 @@ pub(crate) async fn serve_http(
     config: HttpServerConfig,
     mut shutdown: watch::Receiver<bool>,
 ) -> io::Result<()> {
-    if config.max_connections == 0 {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "HTTP max connections must be greater than zero",
-        ));
-    }
-
     let make_service = router.into_make_service_with_connect_info::<SocketAddr>();
     let permits = Arc::new(Semaphore::new(config.max_connections));
     let mut connections = JoinSet::new();

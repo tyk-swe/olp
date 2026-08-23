@@ -27,23 +27,40 @@ pub(crate) const OBSERVABILITY_SNAPSHOT_STALE_AFTER: Duration = Duration::from_s
 /// background refresh task below.
 #[derive(Clone, Default)]
 pub(crate) struct ObservabilityCache {
-    pub(crate) readiness: Arc<RwLock<CachedReadiness>>,
-    pub(crate) metrics: Arc<RwLock<CachedMetrics>>,
+    pub(crate) readiness: Arc<RwLock<Cached<HealthResponse>>>,
+    pub(crate) metrics: Arc<RwLock<Cached<Arc<str>>>>,
 }
 
-#[derive(Clone, Default)]
-pub(crate) struct CachedReadiness {
-    pub(crate) result: Option<HealthResponse>,
+#[derive(Clone)]
+pub(crate) struct Cached<T> {
+    pub(crate) value: Option<T>,
     pub(crate) last_attempt_at: Option<Instant>,
     pub(crate) last_success_at: Option<Instant>,
 }
 
-#[derive(Clone, Default)]
-pub(crate) struct CachedMetrics {
-    pub(crate) body: Option<Arc<str>>,
-    pub(crate) last_attempt_at: Option<Instant>,
-    pub(crate) last_success_at: Option<Instant>,
+impl<T> Default for Cached<T> {
+    fn default() -> Self {
+        Self {
+            value: None,
+            last_attempt_at: None,
+            last_success_at: None,
+        }
+    }
 }
+
+impl<T> Cached<T> {
+    fn record(&mut self, value: Option<T>) {
+        let now = Instant::now();
+        self.last_attempt_at = Some(now);
+        if let Some(value) = value {
+            self.last_success_at = Some(now);
+            self.value = Some(value);
+        }
+    }
+}
+
+pub(crate) type CachedReadiness = Cached<HealthResponse>;
+pub(crate) type CachedMetrics = Cached<Arc<str>>;
 
 impl ObservabilityCache {
     pub(crate) fn readiness(&self) -> CachedReadiness {
@@ -61,34 +78,17 @@ impl ObservabilityCache {
     }
 
     fn record_readiness(&self, result: Result<HealthResponse, Problem>) {
-        let now = Instant::now();
-        let mut readiness = self
-            .readiness
+        self.readiness
             .write()
-            .expect("observability readiness cache lock poisoned");
-        readiness.last_attempt_at = Some(now);
-        if let Ok(result) = result {
-            readiness.last_success_at = Some(now);
-            readiness.result = Some(result);
-        }
+            .expect("observability readiness cache lock poisoned")
+            .record(result.ok());
     }
 
-    fn record_metrics(&self, body: String) {
-        let now = Instant::now();
-        let mut metrics = self
-            .metrics
-            .write()
-            .expect("observability metrics cache lock poisoned");
-        metrics.last_attempt_at = Some(now);
-        metrics.last_success_at = Some(now);
-        metrics.body = Some(Arc::from(body));
-    }
-
-    pub(crate) fn record_metrics_failure(&self) {
+    pub(crate) fn record_metrics(&self, body: Option<String>) {
         self.metrics
             .write()
             .expect("observability metrics cache lock poisoned")
-            .last_attempt_at = Some(Instant::now());
+            .record(body.map(Arc::from));
     }
 }
 
@@ -164,13 +164,11 @@ async fn refresh_readiness_cache(state: &ObservabilityState) {
 }
 
 async fn refresh_metrics_cache(state: &ObservabilityState) {
-    match tokio::time::timeout(OBSERVABILITY_REFRESH_TIMEOUT, collect_metrics(state)).await {
-        Ok(body) => state.observability.record_metrics(body),
-        Err(_) => {
-            tracing::warn!("observability metrics refresh timed out");
-            state.observability.record_metrics_failure();
-        }
-    }
+    let body = tokio::time::timeout(OBSERVABILITY_REFRESH_TIMEOUT, collect_metrics(state))
+        .await
+        .inspect_err(|_| tracing::warn!("observability metrics refresh timed out"))
+        .ok();
+    state.observability.record_metrics(body);
 }
 
 pub(super) fn snapshot_age_seconds(at: Option<Instant>, now: Instant) -> Option<u64> {

@@ -105,12 +105,11 @@ impl GatewayState {
             ProcessComposition::new(mode, Some(store), runtime, public_origin, console_dir);
         builder.mode = ApiMode::All;
         builder.auth_hmac_key = Some(Arc::new(AuthHmacKey::new([0xA5; 32])));
-        match builder.mode_dependencies() {
-            Ok(ModeDependencies::All { gateway, .. })
-            | Ok(ModeDependencies::Gateway { gateway, .. }) => *gateway,
-            Ok(ModeDependencies::Control { .. }) => unreachable!("test builder uses all mode"),
-            Err(error) => panic!("test state must be valid: {error}"),
-        }
+        builder
+            .mode_dependencies()
+            .unwrap_or_else(|error| panic!("test state must be valid: {error}"))
+            .gateway
+            .expect("test builder uses all mode")
     }
 
     #[must_use]
@@ -222,12 +221,11 @@ impl ManagementState {
             ProcessComposition::new(mode, Some(store), runtime, public_origin, console_dir);
         builder.mode = ApiMode::All;
         builder.auth_hmac_key = Some(Arc::new(AuthHmacKey::new([0xA5; 32])));
-        match builder.mode_dependencies() {
-            Ok(ModeDependencies::All { management, .. })
-            | Ok(ModeDependencies::Control { management, .. }) => *management,
-            Ok(ModeDependencies::Gateway { .. }) => unreachable!("test builder uses all mode"),
-            Err(error) => panic!("test state must be valid: {error}"),
-        }
+        builder
+            .mode_dependencies()
+            .unwrap_or_else(|error| panic!("test state must be valid: {error}"))
+            .management
+            .expect("test builder uses all mode")
     }
 
     #[must_use]
@@ -312,55 +310,14 @@ impl ObservabilityState {
     }
 }
 
-/// Fully validated state for one process mode.  Router composition consumes
-/// this value so the proof cannot be accidentally discarded.
+/// Fully validated state for one process mode: `gateway` and `management`
+/// are populated exactly for the surfaces that mode serves. Router composition
+/// consumes this value so the proof cannot be accidentally discarded.
 #[derive(Clone)]
-pub enum ModeDependencies {
-    All {
-        gateway: Box<GatewayState>,
-        management: Box<ManagementState>,
-        observability: ObservabilityState,
-    },
-    Gateway {
-        gateway: Box<GatewayState>,
-        observability: ObservabilityState,
-    },
-    Control {
-        management: Box<ManagementState>,
-        observability: ObservabilityState,
-    },
-}
-
-impl ModeDependencies {
-    #[must_use]
-    pub fn observability(&self) -> ObservabilityState {
-        match self {
-            Self::All { observability, .. }
-            | Self::Gateway { observability, .. }
-            | Self::Control { observability, .. } => observability.clone(),
-        }
-    }
-
-    #[must_use]
-    pub fn gateway(&self) -> Option<GatewayState> {
-        match self {
-            Self::All { gateway, .. } | Self::Gateway { gateway, .. } => {
-                Some(gateway.as_ref().clone())
-            }
-            Self::Control { .. } => None,
-        }
-    }
-
-    #[must_use]
-    #[cfg(feature = "test-util")]
-    pub fn management(&self) -> Option<ManagementState> {
-        match self {
-            Self::All { management, .. } | Self::Control { management, .. } => {
-                Some(management.as_ref().clone())
-            }
-            Self::Gateway { .. } => None,
-        }
-    }
+pub struct ModeDependencies {
+    pub gateway: Option<GatewayState>,
+    pub management: Option<ManagementState>,
+    pub observability: ObservabilityState,
 }
 
 #[derive(Clone, Debug, Error, Eq, PartialEq)]
@@ -433,54 +390,34 @@ impl ProcessComposition {
             mode: self.mode,
             observability: self.observability.clone(),
         };
-        match self.mode {
-            ApiMode::All => Ok(ModeDependencies::All {
-                gateway: Box::new(gateway),
-                management: Box::new(management),
-                observability,
-            }),
-            ApiMode::Gateway => Ok(ModeDependencies::Gateway {
-                gateway: Box::new(gateway),
-                observability,
-            }),
-            ApiMode::Control => Ok(ModeDependencies::Control {
-                management: Box::new(management),
-                observability,
-            }),
-        }
+        Ok(ModeDependencies {
+            gateway: matches!(self.mode, ApiMode::All | ApiMode::Gateway).then_some(gateway),
+            management: matches!(self.mode, ApiMode::All | ApiMode::Control).then_some(management),
+            observability,
+        })
     }
 
     #[cfg(test)]
     pub(crate) fn gateway_state_for_test(&self) -> GatewayState {
         let mut builder = self.clone();
         builder.mode = ApiMode::All;
-        test_dependencies(&builder).gateway_state_for_test()
+        test_dependencies(&builder)
+            .gateway
+            .expect("test builder uses all mode")
     }
 
     #[cfg(test)]
     pub(crate) fn management_state_for_test(&self) -> ManagementState {
         let mut builder = self.clone();
         builder.mode = ApiMode::All;
-        match test_dependencies(&builder) {
-            ModeDependencies::All { management, .. }
-            | ModeDependencies::Control { management, .. } => *management,
-            ModeDependencies::Gateway { .. } => unreachable!("test builder uses all mode"),
-        }
+        test_dependencies(&builder)
+            .management
+            .expect("test builder uses all mode")
     }
 
     #[cfg(test)]
     pub(crate) fn observability_state_for_test(&self) -> ObservabilityState {
-        test_dependencies(self).observability()
-    }
-}
-
-#[cfg(test)]
-impl ModeDependencies {
-    fn gateway_state_for_test(self) -> GatewayState {
-        match self {
-            Self::All { gateway, .. } | Self::Gateway { gateway, .. } => *gateway,
-            Self::Control { .. } => unreachable!("test builder uses all mode"),
-        }
+        test_dependencies(self).observability
     }
 }
 
@@ -567,17 +504,14 @@ mod tests {
 
     #[test]
     fn fully_composed_modes_produce_only_their_owned_surfaces() {
-        assert!(matches!(
-            state(ApiMode::All, true, true).mode_dependencies(),
-            Ok(ModeDependencies::All { .. })
-        ));
-        assert!(matches!(
-            state(ApiMode::Control, true, true).mode_dependencies(),
-            Ok(ModeDependencies::Control { .. })
-        ));
-        assert!(matches!(
-            state(ApiMode::Gateway, true, true).mode_dependencies(),
-            Ok(ModeDependencies::Gateway { .. })
-        ));
+        for (mode, gateway, management) in [
+            (ApiMode::All, true, true),
+            (ApiMode::Control, false, true),
+            (ApiMode::Gateway, true, false),
+        ] {
+            let dependencies = state(mode, true, true).mode_dependencies().unwrap();
+            assert_eq!(dependencies.gateway.is_some(), gateway, "{mode}");
+            assert_eq!(dependencies.management.is_some(), management, "{mode}");
+        }
     }
 }

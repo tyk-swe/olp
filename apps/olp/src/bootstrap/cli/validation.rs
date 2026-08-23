@@ -52,7 +52,6 @@ pub(super) fn ensure_keyring_covers_references(
     Ok(())
 }
 
-#[cfg(unix)]
 pub(crate) async fn check_secret_permissions(path: &Path) -> AppResult<()> {
     use std::os::unix::fs::PermissionsExt;
     let mode = tokio::fs::metadata(path).await?.permissions().mode() & 0o777;
@@ -63,11 +62,5 @@ pub(crate) async fn check_secret_permissions(path: &Path) -> AppResult<()> {
         ))
         .into());
     }
-    Ok(())
-}
-
-#[cfg(not(unix))]
-pub(crate) async fn check_secret_permissions(path: &Path) -> AppResult<()> {
-    tokio::fs::metadata(path).await?;
     Ok(())
 }

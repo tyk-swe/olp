@@ -56,8 +56,8 @@ impl Breaker {
         Self {
             inner: Arc::new(Mutex::new(BTreeMap::new())),
             next_probe_generation: Arc::new(AtomicU64::new(1)),
-            failure_threshold: failure_threshold.max(1),
-            open_duration: open_duration.max(Duration::from_millis(1)),
+            failure_threshold,
+            open_duration,
         }
     }
 

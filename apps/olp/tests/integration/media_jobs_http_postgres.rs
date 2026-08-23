@@ -170,7 +170,7 @@ async fn media_job_management_views_are_session_authorized_and_metadata_only() {
         PathBuf::from("missing-console-for-media-job-test"),
     );
     configure_bootstrap(&mut state, [18; 32]);
-    let app = management_router_for_test(state.mode_dependencies().unwrap().management().unwrap());
+    let app = management_router_for_test(state.mode_dependencies().unwrap().management.unwrap());
 
     let mut setup_request = Request::post("/api/v1/setup")
         .header(header::CONTENT_TYPE, "application/json")
@@ -421,13 +421,8 @@ async fn media_job_management_views_are_session_authorized_and_metadata_only() {
         )
         .unwrap();
     let reconciliation_state = gateway_state.clone();
-    let gateway = gateway_router_for_test(
-        gateway_state
-            .mode_dependencies()
-            .unwrap()
-            .gateway()
-            .unwrap(),
-    );
+    let gateway =
+        gateway_router_for_test(gateway_state.mode_dependencies().unwrap().gateway.unwrap());
     let authorization = format!("Bearer {plaintext_key}");
     let create_body = concat!(
         "--video-boundary\r\n",
@@ -717,7 +712,7 @@ async fn media_job_management_views_are_session_authorized_and_metadata_only() {
     let reconciliation_state = reconciliation_state
         .mode_dependencies()
         .unwrap()
-        .gateway()
+        .gateway
         .unwrap();
     let pass = reconcile_media_jobs_once(&reconciliation_state, 8)
         .await

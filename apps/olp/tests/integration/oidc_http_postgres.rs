@@ -88,7 +88,7 @@ async fn oidc_code_flow_is_bound_validated_mapped_linked_and_session_backed() {
     configure_bootstrap(&mut api_state, [43_u8; 32]);
     api_state.oidc_allow_insecure_test_endpoints = true;
     let app =
-        management_router_for_test(api_state.mode_dependencies().unwrap().management().unwrap());
+        management_router_for_test(api_state.mode_dependencies().unwrap().management.unwrap());
 
     let setup = send_json(
         &app,
@@ -160,7 +160,7 @@ async fn oidc_code_flow_is_bound_validated_mapped_linked_and_session_backed() {
         oidc_only_state
             .mode_dependencies()
             .unwrap()
-            .management()
+            .management
             .unwrap(),
     );
     let oidc_only_capabilities = send_empty(

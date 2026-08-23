@@ -7,11 +7,9 @@ use crate::domain::canonical::{
 };
 use thiserror::Error;
 
-use crate::protocols::extensions::insert_flat_extension;
-
 use super::{
     dto::{CountTokensRequest, CountTokensResponse, GenerateContentRequest, Part},
-    translate::{decode::request as decode_request, validation::validate_count_tokens_request},
+    translate::decode::request as decode_request,
 };
 
 /// Source-scoped exact Gemini body retained because canonical token counting
@@ -31,15 +29,7 @@ pub enum DecodeError {
     Empty,
 }
 
-#[derive(Debug, Error)]
-pub enum EncodeError {
-    #[error("countTokens response extensions came from a different protocol")]
-    CrossProtocol,
-    #[error("countTokens response contains an invalid or colliding extension path")]
-    Extension,
-    #[error("Gemini countTokens response could not be encoded")]
-    Json(#[from] serde_json::Error),
-}
+pub type EncodeError = crate::protocols::extensions::TokenCountEncodeError;
 
 pub fn decode_count_tokens_request(
     route_model: &str,
@@ -105,13 +95,16 @@ fn is_plain_text_request(request: &CountTokensRequest) -> bool {
 pub fn encode_count_tokens_result(
     result: &TokenCountResult,
 ) -> Result<CountTokensResponse, EncodeError> {
-    if !result.extensions.values.is_empty() && result.extensions.source != Some(Surface::Gemini) {
-        return Err(EncodeError::CrossProtocol);
+    crate::protocols::extensions::encode_token_count(result, Surface::Gemini, "totalTokens")
+}
+
+pub fn validate_count_tokens_request(
+    request: &CountTokensRequest,
+) -> Result<(), super::translate::errors::CountTokensError> {
+    let has_contents = !request.contents.is_empty();
+    let has_generate_request = request.generate_content_request.is_some();
+    if has_contents == has_generate_request {
+        return Err(super::translate::errors::CountTokensError::ExactlyOneInput);
     }
-    let mut value = serde_json::json!({ "totalTokens": result.input_tokens });
-    for (pointer, extension) in &result.extensions.values {
-        insert_flat_extension(&mut value, pointer, extension.clone())
-            .map_err(|_| EncodeError::Extension)?;
-    }
-    serde_json::from_value(value).map_err(EncodeError::Json)
+    Ok(())
 }

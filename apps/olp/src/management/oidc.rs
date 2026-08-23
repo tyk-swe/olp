@@ -77,9 +77,5 @@ pub(crate) fn router() -> Router<ManagementState> {
 )]
 pub(crate) struct OidcApiDoc;
 
-pub(crate) fn openapi() -> utoipa::openapi::OpenApi {
-    OidcApiDoc::openapi()
-}
-
 #[cfg(test)]
 mod tests;

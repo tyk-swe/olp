@@ -19,7 +19,6 @@ use super::super::dto::{
     SystemPrompt, ToolChoice, ToolResultBlock, ToolResultContent,
 };
 use super::errors::DecodeError;
-use super::extensions::require_kind;
 use crate::protocols::extensions::collect_extra;
 
 pub fn request(request: MessagesRequest) -> Result<Operation, DecodeError> {
@@ -439,4 +438,15 @@ fn decode_tool_choice(
         Some(canonical),
         choice.disable_parallel_tool_use.map(|disabled| !disabled),
     ))
+}
+
+pub(super) fn require_kind(actual: &str, expected: &'static str) -> Result<(), DecodeError> {
+    if actual == expected {
+        Ok(())
+    } else {
+        Err(DecodeError::UnexpectedType {
+            expected,
+            actual: actual.to_owned(),
+        })
+    }
 }

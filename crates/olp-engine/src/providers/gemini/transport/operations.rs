@@ -16,14 +16,12 @@ use crate::domain::{
 use crate::protocols::gemini::stream::Decoder;
 use crate::protocols::gemini::{
     count::GEMINI_COUNT_REQUEST_EXTENSION,
+    count::validate_count_tokens_request,
     dto::{
         Content, CountTokensRequest, CountTokensResponse, FileData, FileDataPart,
         GenerateContentResponse, Part, TextPart,
     },
-    translate::{
-        encode::request as encode_request, response::decode,
-        validation::validate_count_tokens_request,
-    },
+    translate::{encode::request as encode_request, response::decode},
 };
 use futures::stream;
 use http::{HeaderMap, HeaderValue, StatusCode, header};

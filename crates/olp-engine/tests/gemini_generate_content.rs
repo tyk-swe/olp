@@ -5,6 +5,7 @@ use olp_engine::domain::canonical::{
 };
 use olp_engine::protocols::gemini::{
     client_stream::Encoder,
+    count::validate_count_tokens_request,
     count::{decode_count_tokens_request, encode_count_tokens_result},
     dto::{
         CountTokensRequest, CountTokensResponse, GenerateContentRequest, GenerateContentResponse,
@@ -13,7 +14,6 @@ use olp_engine::protocols::gemini::{
     translate::{
         decode::request as decode_request, encode::request as encode_request,
         errors::CountTokensError, response::decode as decode_response,
-        validation::validate_count_tokens_request,
     },
 };
 use serde_json::{Value, json};

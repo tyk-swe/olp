@@ -145,7 +145,7 @@ pub(crate) fn cached_readiness_from_snapshot(
         return Err(Problem::service_unavailable("observability_snapshot_stale"));
     }
     snapshot
-        .result
+        .value
         .clone()
         .ok_or_else(|| Problem::service_unavailable("observability_snapshot_unavailable"))
 }

@@ -48,8 +48,8 @@ async fn operations_http_contract_is_authorized_paginated_exact_and_metadata_onl
     state.limiter.mark_configured();
     configure_bootstrap(&mut state, [32; 32]);
     let dependencies = state.mode_dependencies().unwrap();
-    let observability_state = dependencies.observability();
-    let app = management_router_for_test(dependencies.management().unwrap());
+    let observability_state = dependencies.observability;
+    let app = management_router_for_test(dependencies.management.unwrap());
     let observability = observability_router(observability_state.clone());
 
     let setup = send(

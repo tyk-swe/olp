@@ -54,37 +54,16 @@ pub(super) async fn action(
     payload: Result<Json<serde_json::Value>, JsonRejection>,
 ) -> Result<Response, ProtocolError> {
     let Json(value) = valid_json(payload, Surface::Gemini)?;
-    if let Some(model) = resource.strip_suffix(":generateContent") {
-        let mut request: GenerateContentRequest =
-            serde_json::from_value(value).map_err(|error| {
-                ProtocolError::invalid(Surface::Gemini, format!("Invalid JSON request: {error}"))
-            })?;
-        let admitted = admit_gemini_generate(&state, &mut request)
-            .await
-            .map_err(ProtocolError::gemini)?;
-        let operation = match decode_request(model, request, false) {
-            Ok(operation) => operation,
-            Err(error) => {
-                cleanup_admitted(&state, admitted).await;
-                return Err(ProtocolError::invalid(
-                    Surface::Gemini,
-                    format!("Invalid generateContent request: {error}"),
-                ));
-            }
-        };
-        let execution =
-            execute_event_operation(&state, &principal, operation, TransportMode::Unary)
-                .await
-                .map_err(ProtocolError::gemini)?;
-        let completed = execution
-            .collect()
-            .await
-            .map_err(InferenceError::from)
-            .map_err(ProtocolError::gemini)?;
-        return unary_response(completed);
-    }
-    if let Some(model) = resource.strip_suffix(":streamGenerateContent") {
-        if query.alt.as_deref().is_some_and(|alt| alt != "sse") {
+    let generate = resource
+        .strip_suffix(":generateContent")
+        .map(|model| (model, false))
+        .or_else(|| {
+            resource
+                .strip_suffix(":streamGenerateContent")
+                .map(|model| (model, true))
+        });
+    if let Some((model, streaming)) = generate {
+        if streaming && query.alt.as_deref().is_some_and(|alt| alt != "sse") {
             return Err(ProtocolError::invalid(
                 Surface::Gemini,
                 "streamGenerateContent supports only alt=sse.",
@@ -97,25 +76,42 @@ pub(super) async fn action(
         let admitted = admit_gemini_generate(&state, &mut request)
             .await
             .map_err(ProtocolError::gemini)?;
-        let operation = match decode_request(model, request, true) {
+        let operation = match decode_request(model, request, streaming) {
             Ok(operation) => operation,
             Err(error) => {
                 cleanup_admitted(&state, admitted).await;
+                let action = if streaming {
+                    "streamGenerateContent"
+                } else {
+                    "generateContent"
+                };
                 return Err(ProtocolError::invalid(
                     Surface::Gemini,
-                    format!("Invalid streamGenerateContent request: {error}"),
+                    format!("Invalid {action} request: {error}"),
                 ));
             }
         };
-        let execution =
-            execute_event_operation(&state, &principal, operation, TransportMode::Streaming)
-                .await
-                .map_err(ProtocolError::gemini)?;
-        let encoder = GeminiHttpStreamEncoder(Encoder::new(
-            execution.route_slug.as_str(),
-            execution.request_id.to_string(),
-        ));
-        return Ok(protocol_streaming_response(execution, encoder));
+        let mode = if streaming {
+            TransportMode::Streaming
+        } else {
+            TransportMode::Unary
+        };
+        let execution = execute_event_operation(&state, &principal, operation, mode)
+            .await
+            .map_err(ProtocolError::gemini)?;
+        if streaming {
+            let encoder = GeminiHttpStreamEncoder(Encoder::new(
+                execution.route_slug.as_str(),
+                execution.request_id.to_string(),
+            ));
+            return Ok(protocol_streaming_response(execution, encoder));
+        }
+        let completed = execution
+            .collect()
+            .await
+            .map_err(InferenceError::from)
+            .map_err(ProtocolError::gemini)?;
+        return unary_response(completed);
     }
     if let Some(model) = resource.strip_suffix(":countTokens") {
         let mut request: CountTokensRequest = serde_json::from_value(value).map_err(|error| {
@@ -351,7 +347,7 @@ impl ProtocolStreamEncoder for GeminiHttpStreamEncoder {
         vec![encode_server_sse_frame(
             &olp_engine::protocols::sse::Frame {
                 event: None,
-                data: gemini_error_body(error).to_string(),
+                data: gemini_error_body(error.status(), error.message()).to_string(),
                 id: None,
                 retry_ms: None,
             },

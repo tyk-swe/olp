@@ -246,7 +246,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut state =
         ProcessComposition::new(ApiMode::Gateway, Some(store), runtime, &origin, "console");
     state.auth_hmac_key = Some(auth_hmac_key);
-    let gateway_state = state.mode_dependencies()?.gateway().ok_or_else(|| {
+    let gateway_state = state.mode_dependencies()?.gateway.ok_or_else(|| {
         std::io::Error::other("gateway mode did not produce gateway dependencies")
     })?;
 

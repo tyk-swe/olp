@@ -347,7 +347,7 @@ async fn stale_metrics_do_not_change_the_readiness_contract() {
     let (state, _) = inference_state(false);
     let state = state.observability_state_for_test();
     refresh_observability_cache(&state).await;
-    state.observability.record_metrics_failure();
+    state.observability.record_metrics(None);
 
     let response = observability_router(state)
         .oneshot(Request::get("/metrics").body(Body::empty()).unwrap())

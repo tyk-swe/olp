@@ -1,6 +1,8 @@
 use crate::domain::ids::RouteSlugError;
 use thiserror::Error;
 
+use crate::protocols::extensions::PointerExtensionError;
+
 #[derive(Debug, Error)]
 pub enum DecodeError {
     #[error(transparent)]
@@ -87,6 +89,15 @@ pub enum EncodeError {
     InvalidExtensionPath(String),
     #[error("Gemini JSON value is invalid: {0}")]
     Json(serde_json::Error),
+}
+
+impl From<PointerExtensionError> for EncodeError {
+    fn from(error: PointerExtensionError) -> Self {
+        match error {
+            PointerExtensionError::InvalidPath(path) => Self::InvalidExtensionPath(path),
+            PointerExtensionError::Json(error) => Self::Json(error),
+        }
+    }
 }
 
 #[derive(Debug, Error)]

@@ -5,7 +5,7 @@ use utoipa::OpenApi as _;
 #[must_use]
 pub fn document() -> serde_json::Value {
     let mut document = super::ApiDoc::openapi();
-    document.merge(super::oidc::openapi());
+    document.merge(super::oidc::OidcApiDoc::openapi());
     document.merge(super::operations::OperationsApiDoc::openapi());
     document.merge(super::configuration::ConfigurationApiDoc::openapi());
     document.merge(super::playground::PlaygroundApiDoc::openapi());

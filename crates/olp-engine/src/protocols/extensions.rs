@@ -262,6 +262,34 @@ pub(in crate::protocols) fn insert_flat_extension(
     Ok(())
 }
 
+#[derive(Debug, thiserror::Error)]
+pub enum TokenCountEncodeError {
+    #[error("countTokens response extensions came from a different protocol")]
+    CrossProtocol,
+    #[error("countTokens response contains an invalid or colliding extension path")]
+    Extension,
+    #[error("countTokens response could not be encoded")]
+    Json(#[from] serde_json::Error),
+}
+
+/// Encodes a canonical token count as `{ "<count_field>": n }` plus any
+/// flat source extensions that belong to `surface`.
+pub(in crate::protocols) fn encode_token_count<T: serde::de::DeserializeOwned>(
+    result: &crate::domain::canonical::results::TokenCountResult,
+    surface: crate::domain::canonical::identity::Surface,
+    count_field: &str,
+) -> Result<T, TokenCountEncodeError> {
+    if !result.extensions.values.is_empty() && result.extensions.source != Some(surface) {
+        return Err(TokenCountEncodeError::CrossProtocol);
+    }
+    let mut value = serde_json::json!({ count_field: result.input_tokens });
+    for (pointer, extension) in &result.extensions.values {
+        insert_flat_extension(&mut value, pointer, extension.clone())
+            .map_err(|_| TokenCountEncodeError::Extension)?;
+    }
+    serde_json::from_value(value).map_err(TokenCountEncodeError::Json)
+}
+
 #[cfg(test)]
 mod tests {
     use serde::{Deserialize, Serialize};

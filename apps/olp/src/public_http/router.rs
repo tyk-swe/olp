@@ -42,32 +42,17 @@ pub(super) const REQUEST_BODY_TIMEOUT: Duration = Duration::from_secs(30);
 /// callers must attach [`axum::extract::ConnectInfo`] with the socket peer; the
 /// hardened application listener does so automatically.
 pub(crate) fn validated_public_router(dependencies: ModeDependencies) -> Router {
-    let (gateway_state, management_state, request_limit_state): (
-        Option<GatewayState>,
-        Option<ManagementState>,
-        RequestBoundaryState,
-    ) = match dependencies {
-        ModeDependencies::All {
-            gateway,
-            management,
-            ..
-        } => {
-            let gateway = *gateway;
-            let request_boundary = gateway.request_boundary.clone();
-            (Some(gateway), Some(*management), request_boundary)
-        }
-        ModeDependencies::Gateway { gateway, .. } => {
-            let gateway = *gateway;
-            let request_boundary = gateway.request_boundary.clone();
-            (Some(gateway), None, request_boundary)
-        }
-        ModeDependencies::Control { management, .. } => {
-            let management = *management;
-            let request_limit_state = management.request_boundary().clone();
-            (None, Some(management), request_limit_state)
-        }
+    let ModeDependencies {
+        gateway,
+        management,
+        ..
+    } = dependencies;
+    let request_limit_state = match (&gateway, &management) {
+        (Some(gateway), _) => gateway.request_boundary.clone(),
+        (None, Some(management)) => management.request_boundary().clone(),
+        (None, None) => unreachable!("a validated mode serves at least one surface"),
     };
-    compose_public_router(gateway_state, management_state, request_limit_state)
+    compose_public_router(gateway, management, request_limit_state)
 }
 
 #[cfg(any(test, feature = "test-util"))]

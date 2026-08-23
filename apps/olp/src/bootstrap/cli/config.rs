@@ -109,7 +109,12 @@ pub(super) struct ServeArgs {
     )]
     pub(super) observability_listen_addr: SocketAddr,
     /// Maximum simultaneously admitted TCP connections per HTTP listener.
-    #[arg(long, env = "OLP_HTTP_MAX_CONNECTIONS", default_value_t = 1024)]
+    #[arg(
+        long,
+        env = "OLP_HTTP_MAX_CONNECTIONS",
+        default_value_t = 1024,
+        value_parser = clap::builder::RangedU64ValueParser::<usize>::new().range(1..)
+    )]
     pub(super) http_max_connections: usize,
     /// Maximum inference requests admitted process-wide until response completion.
     #[arg(

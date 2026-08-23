@@ -9,7 +9,6 @@ use serde_json::Value;
 
 use super::super::dto::{ContentBlock, MessagesResponse, Role};
 use super::errors::ResponseError;
-use super::extensions::require_response_kind;
 use crate::protocols::CanonicalEventBuilder as EventBuilder;
 use crate::protocols::extensions::collect_extra;
 
@@ -119,5 +118,13 @@ pub(in crate::protocols) fn anthropic_finish_reason(reason: &str) -> FinishReaso
         "tool_use" => FinishReason::ToolCalls,
         "refusal" => FinishReason::ContentFilter,
         other => FinishReason::Other(other.to_owned()),
+    }
+}
+
+fn require_response_kind(actual: &str, expected: &'static str) -> Result<(), ResponseError> {
+    if actual == expected {
+        Ok(())
+    } else {
+        Err(ResponseError::UnexpectedType(actual.to_owned()))
     }
 }

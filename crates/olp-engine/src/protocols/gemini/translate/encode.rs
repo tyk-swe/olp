@@ -15,7 +15,7 @@ use super::super::dto::{
     GenerationConfig, InlineDataPart, Part, TextPart, Tool, ToolConfig,
 };
 use super::errors::EncodeError;
-use super::extensions::apply_extensions;
+use crate::protocols::extensions::apply_request_extensions;
 
 pub fn request(request: &GenerationRequest) -> Result<GenerateContentRequest, EncodeError> {
     request
@@ -121,7 +121,7 @@ pub fn request(request: &GenerationRequest) -> Result<GenerateContentRequest, En
         generation_config: Some(generation_config),
         extra: BTreeMap::new(),
     };
-    apply_extensions(&mut encoded, &request.extensions.values)?;
+    apply_request_extensions(&mut encoded, &request.extensions.values)?;
     Ok(encoded)
 }
 

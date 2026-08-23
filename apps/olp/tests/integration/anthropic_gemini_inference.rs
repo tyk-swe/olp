@@ -300,7 +300,7 @@ fn test_gateway() -> TestGateway {
         "console",
     );
     state.auth_hmac_key = Some(auth_hmac_key);
-    let state = state.mode_dependencies().unwrap().gateway().unwrap();
+    let state = state.mode_dependencies().unwrap().gateway.unwrap();
     TestGateway {
         state,
         key,

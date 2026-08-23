@@ -30,7 +30,7 @@ pub(super) async fn metrics(
     let readiness_fresh =
         snapshot_is_current(readiness.last_success_at, readiness.last_attempt_at, now);
     let metrics_fresh = cached_metrics_is_fresh(&metrics, now);
-    let readiness_available = readiness_fresh && readiness.result.is_some();
+    let readiness_available = readiness_fresh && readiness.value.is_some();
     let readiness_age = snapshot_age_seconds(readiness.last_success_at, now);
     let metrics_age = snapshot_age_seconds(metrics.last_success_at, now);
     let mut body = format!(
@@ -57,7 +57,7 @@ pub(super) async fn metrics(
         u8::from(readiness_fresh),
         u8::from(metrics_fresh),
     );
-    if let Some(metrics) = metrics.body {
+    if let Some(metrics) = metrics.value {
         body.push_str(&metrics);
     }
     body.push_str(&state.public_admission.metrics());

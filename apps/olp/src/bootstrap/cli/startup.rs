@@ -44,11 +44,6 @@ pub(super) async fn serve(
     args: ServeArgs,
     run_worker_in_process: bool,
 ) -> AppResult<()> {
-    if args.http_max_connections == 0 {
-        return Err(
-            std::io::Error::other("OLP_HTTP_MAX_CONNECTIONS must be greater than zero").into(),
-        );
-    }
     if args.auth_hmac_key_file.is_none() {
         return Err(std::io::Error::other(
             "OLP_AUTH_HMAC_KEY_FILE is required when serving an HTTP mode",
@@ -243,8 +238,8 @@ pub(super) async fn serve(
         )));
     }
     let dependencies = state.mode_dependencies()?;
-    let observability_state = dependencies.observability();
-    if let Some(gateway_state) = dependencies.gateway() {
+    let observability_state = dependencies.observability.clone();
+    if let Some(gateway_state) = dependencies.gateway.clone() {
         background_tasks.push(tokio::spawn(media_reconciliation_supervisor(
             gateway_state,
             background_shutdown_receiver.clone(),

@@ -14,7 +14,7 @@ use super::super::dto::{
     SystemPrompt, TextBlock, Tool, ToolChoice, ToolResultBlock, ToolResultContent, ToolUseBlock,
 };
 use super::errors::EncodeError;
-use super::extensions::apply_extensions;
+use crate::protocols::extensions::apply_request_extensions;
 
 pub fn request(
     request: &GenerationRequest,
@@ -151,7 +151,7 @@ pub fn request(
         stream: request.parameters.stream,
         extra: BTreeMap::new(),
     };
-    apply_extensions(&mut encoded, &request.extensions.values)?;
+    apply_request_extensions(&mut encoded, &request.extensions.values)?;
     Ok(encoded)
 }
 
