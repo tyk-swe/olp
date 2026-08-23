@@ -44,7 +44,7 @@ pub(crate) enum StreamSendFailure {
 
 impl StreamSendFailure {
     /// Maps a send failure into the inference failure that ends the stream.
-    pub(crate) fn into_inference_error(self) -> InferenceError {
+    fn into_inference_error(self) -> InferenceError {
         match self {
             StreamSendFailure::ClientClosed => InferenceError::client_cancelled(),
             StreamSendFailure::DeadlineElapsed => InferenceError::timeout(),

@@ -194,7 +194,7 @@ pub(in crate::protocols) fn canonical_usage(usage: &UsageMetadata) -> Usage {
     }
 }
 
-pub(in crate::protocols) fn gemini_finish_reason(reason: &str) -> FinishReason {
+fn gemini_finish_reason(reason: &str) -> FinishReason {
     match reason {
         "STOP" => FinishReason::Stop,
         "MAX_TOKENS" => FinishReason::Length,

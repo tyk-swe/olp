@@ -410,7 +410,7 @@ impl Store {
         Ok(ConfigurationPage { items, next_cursor })
     }
 
-    pub async fn get_routes(&self, ids: &[Uuid]) -> Result<Vec<RouteRecord>, Error> {
+    async fn get_routes(&self, ids: &[Uuid]) -> Result<Vec<RouteRecord>, Error> {
         if ids.is_empty() {
             return Ok(Vec::new());
         }
@@ -470,7 +470,7 @@ impl Store {
             .ok_or(Error::NotFound)
     }
 
-    pub async fn get_route_revisions(
+    async fn get_route_revisions(
         &self,
         revision_ids: &[Uuid],
     ) -> Result<BTreeMap<Uuid, RouteRevisionRecord>, Error> {

@@ -22,7 +22,7 @@ pub(super) fn invalid_callback() -> Problem {
     )
 }
 
-pub(super) fn authenticated_flow_session_changed() -> Problem {
+fn authenticated_flow_session_changed() -> Problem {
     Problem::forbidden(
         "oidc_flow_session_changed",
         "Sign in with the exact session that started this security operation.",

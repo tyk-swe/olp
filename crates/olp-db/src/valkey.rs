@@ -26,7 +26,7 @@ pub struct Keyspace {
 
 impl Keyspace {
     #[must_use]
-    pub fn from_installation_id(id: Uuid) -> Self {
+    fn from_installation_id(id: Uuid) -> Self {
         Self {
             prefix: format!("{KEYSPACE_VERSION}:{id}"),
         }

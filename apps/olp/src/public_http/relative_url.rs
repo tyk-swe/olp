@@ -121,7 +121,7 @@ impl fmt::Display for RelativeReturnToError {
 
 impl std::error::Error for RelativeReturnToError {}
 
-pub(crate) fn has_valid_percent_encoding(bytes: &[u8]) -> bool {
+fn has_valid_percent_encoding(bytes: &[u8]) -> bool {
     let mut index = 0;
     while index < bytes.len() {
         if bytes[index] == b'%' {

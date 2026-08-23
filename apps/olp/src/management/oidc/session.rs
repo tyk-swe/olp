@@ -253,7 +253,7 @@ pub(super) fn reauthenticated_redirect(
     Ok(response)
 }
 
-pub(super) fn successful_redirect(destination: &RelativeReturnTo) -> Result<Response, Problem> {
+fn successful_redirect(destination: &RelativeReturnTo) -> Result<Response, Problem> {
     let mut response = StatusCode::SEE_OTHER.into_response();
     response.headers_mut().insert(
         header::LOCATION,

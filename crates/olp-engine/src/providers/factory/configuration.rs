@@ -201,7 +201,7 @@ pub(super) fn validate_connector_configuration(
 
 /// Validates only a supplied credential. Callers retain their own encryption,
 /// decryption, and response-field mapping boundaries.
-pub(super) fn validate_connector_credential(
+fn validate_connector_credential(
     config: &Config,
     credential: BorrowedCredential<'_>,
 ) -> Result<(), Error> {
