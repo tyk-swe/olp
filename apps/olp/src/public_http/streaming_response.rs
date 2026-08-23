@@ -18,13 +18,15 @@ pub(crate) fn encode_sse_frame(frame: &Frame) -> Result<Bytes, EncodeError> {
 
 pub(crate) fn encode_protocol_sse_frames<E: Display>(
     frames: Result<Vec<Frame>, E>,
-) -> Result<Vec<Bytes>, String> {
+) -> Result<Vec<Bytes>, InferenceError> {
+    let frames = frames.map_err(|error| {
+        InferenceError::bad_gateway("provider_protocol_error", error.to_string())
+    })?;
     frames
-        .map_err(|error| error.to_string())?
         .iter()
         .map(encode_sse_frame)
         .collect::<Result<_, _>>()
-        .map_err(|error| error.to_string())
+        .map_err(|error| InferenceError::bad_gateway("provider_protocol_error", error.to_string()))
 }
 
 pub(crate) fn encode_server_sse_frame(frame: &Frame) -> Bytes {
@@ -62,14 +64,6 @@ pub(crate) struct TerminalFrames {
 }
 
 impl TerminalFrames {
-    pub(crate) fn empty() -> Self {
-        Self::default()
-    }
-
-    pub(crate) fn one(frame: Bytes) -> Self {
-        Self::new(vec![frame])
-    }
-
     pub(crate) fn new(frames: Vec<Bytes>) -> Self {
         assert!(
             frames.len() <= MAX_TERMINAL_FRAMES,
@@ -147,9 +141,9 @@ impl SseResponseWriter {
         encode_error: impl FnOnce(&InferenceError) -> TerminalFrames,
     ) {
         let terminal = terminal.unwrap_or_else(|| match failure.as_ref() {
-            Some(error) if error.code() == "client_cancelled" => TerminalFrames::empty(),
+            Some(error) if error.code() == "client_cancelled" => TerminalFrames::default(),
             Some(error) => encode_error(error),
-            None => TerminalFrames::empty(),
+            None => TerminalFrames::default(),
         });
         if matches!(self.finish(terminal), StreamFinishOutcome::ClientClosed) && failure.is_none() {
             *failure = Some(InferenceError::client_cancelled());
@@ -216,8 +210,11 @@ fn sse_stream_with_capacity(capacity: usize) -> (SseResponseWriter, Response) {
 }
 
 pub(crate) trait ProtocolStreamEncoder: Send + 'static {
-    fn push(&mut self, event: Event) -> Result<Vec<Bytes>, String>;
-    fn encode_error(&self, error: &InferenceError) -> Bytes;
+    /// Encodes one event; the frames for a terminal event (`Done`, or `Error`
+    /// when the protocol represents errors on the wire) become the stream tail.
+    fn push(&mut self, event: Event) -> Result<Vec<Bytes>, InferenceError>;
+    /// Frames that end the stream when no terminal event was sent.
+    fn encode_error(&self, error: &InferenceError) -> Vec<Bytes>;
 }
 
 pub(crate) fn protocol_streaming_response<E>(
@@ -243,21 +240,18 @@ where
                 }
             };
             accounting.usage_mut().observe(&event);
-            let is_done = matches!(event.kind, Kind::Done);
             let canonical_failure = match &event.kind {
                 Kind::Error { error } => Some(InferenceError::from_canonical(error)),
                 _ => None,
             };
-            let is_terminal = is_done || canonical_failure.is_some();
+            let is_terminal = matches!(event.kind, Kind::Done) || canonical_failure.is_some();
             match encoder.push(event) {
+                Ok(chunks) if is_terminal => {
+                    terminal = Some(TerminalFrames::new(chunks));
+                    failure = canonical_failure;
+                    break;
+                }
                 Ok(chunks) => {
-                    if is_terminal {
-                        terminal = Some(TerminalFrames::new(chunks));
-                        if let Some(canonical_failure) = canonical_failure {
-                            failure = Some(canonical_failure);
-                        }
-                        break;
-                    }
                     for chunk in chunks {
                         if let Err(error) = writer.send_or_fail(chunk, execution.deadline).await {
                             failure = Some(error);
@@ -265,12 +259,7 @@ where
                         }
                     }
                 }
-                Err(message) => {
-                    failure = Some(InferenceError::bad_gateway(
-                        "provider_protocol_error",
-                        message,
-                    ));
-                }
+                Err(error) => failure = Some(error),
             }
             if failure.is_some() {
                 break;
@@ -294,7 +283,7 @@ where
             ));
         }
         writer.finish_stream(terminal, &mut failure, |error| {
-            TerminalFrames::one(encoder.encode_error(error))
+            TerminalFrames::new(encoder.encode_error(error))
         });
         drop(events);
         let outcome = failure.as_ref().map_or_else(
@@ -363,7 +352,7 @@ mod tests {
             Ok(())
         );
         assert_eq!(
-            writer.finish(TerminalFrames::empty()),
+            writer.finish(TerminalFrames::default()),
             StreamFinishOutcome::Queued
         );
 

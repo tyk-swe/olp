@@ -268,21 +268,23 @@ impl ProtocolStreamEncoder for AnthropicHttpStreamEncoder {
     fn push(
         &mut self,
         event: olp_engine::domain::canonical::events::Event,
-    ) -> Result<Vec<bytes::Bytes>, String> {
+    ) -> Result<Vec<bytes::Bytes>, InferenceError> {
         encode_protocol_sse_frames(self.0.push(event))
     }
 
-    fn encode_error(&self, error: &InferenceError) -> bytes::Bytes {
-        encode_server_sse_frame(&olp_engine::protocols::sse::Frame {
-            event: Some("error".to_owned()),
-            data: json!({
-                "type": "error",
-                "error": {"type": anthropic_error_kind(error), "message": error.message()}
-            })
-            .to_string(),
-            id: None,
-            retry_ms: None,
-        })
+    fn encode_error(&self, error: &InferenceError) -> Vec<bytes::Bytes> {
+        vec![encode_server_sse_frame(
+            &olp_engine::protocols::sse::Frame {
+                event: Some("error".to_owned()),
+                data: json!({
+                    "type": "error",
+                    "error": {"type": anthropic_error_kind(error), "message": error.message()}
+                })
+                .to_string(),
+                id: None,
+                retry_ms: None,
+            },
+        )]
     }
 }
 

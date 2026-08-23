@@ -112,12 +112,12 @@ fn responses_streaming_response(execution: RoutedEvents) -> Response {
 struct OpenAiResponsesHttpStreamEncoder(Encoder);
 
 impl ProtocolStreamEncoder for OpenAiResponsesHttpStreamEncoder {
-    fn push(&mut self, event: Event) -> Result<Vec<Bytes>, String> {
+    fn push(&mut self, event: Event) -> Result<Vec<Bytes>, InferenceError> {
         encode_protocol_sse_frames(self.0.push(event))
     }
 
-    fn encode_error(&self, error: &InferenceError) -> Bytes {
-        responses_error_sse(error)
+    fn encode_error(&self, error: &InferenceError) -> Vec<Bytes> {
+        vec![responses_error_sse(error)]
     }
 }
 

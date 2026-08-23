@@ -5,17 +5,17 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use futures::{StreamExt, stream};
-use olp_engine::domain::canonical::{events::Kind, identity::TransportMode};
-use olp_engine::inference::{
-    accounting::RequestOutcome, execution::RoutedEvents, principal::Principal,
+use olp_engine::domain::canonical::{
+    events::{Event, Kind},
+    identity::TransportMode,
 };
+use olp_engine::inference::{execution::RoutedEvents, principal::Principal};
 use olp_engine::protocols::openai::chat::{CompletionRequest, decode};
 
 use crate::{
     bootstrap::mode_dependencies::GatewayState,
     public_http::json_media::{admit_openai_chat, cleanup_admitted},
-    public_http::streaming_response::{TerminalFrames, sse_stream},
+    public_http::streaming_response::{ProtocolStreamEncoder, protocol_streaming_response},
 };
 
 use super::{
@@ -60,87 +60,28 @@ pub(super) async fn chat_completions(
     }
 }
 
-fn streaming_response(mut execution: RoutedEvents) -> Response {
-    let (writer, response) = sse_stream();
-    tokio::spawn(async move {
-        let mut accounting = execution.take_accounting();
-        let mut events = std::mem::replace(&mut execution.events, Box::pin(stream::empty()));
-        let mut encoder = OpenAiChatCompletionStreamEncoder::new(
-            execution.request_id,
-            execution.route_slug.as_str(),
-        );
-        let mut next = Some(Ok(execution.first.clone()));
-        let mut failure = None;
-        let mut terminal = None;
-        'provider: while let Some(item) = next {
-            match item {
-                Ok(event) => {
-                    let is_done = matches!(event.kind, Kind::Done);
-                    accounting.usage_mut().observe(&event);
-                    let canonical_failure = match &event.kind {
-                        Kind::Error { error } => Some(InferenceError::from_canonical(error)),
-                        _ => None,
-                    };
-                    let is_terminal = is_done || canonical_failure.is_some();
-                    let encoded = match encoder.encode(event) {
-                        Ok(encoded) => encoded,
-                        Err(error) => {
-                            failure = Some(error);
-                            break 'provider;
-                        }
-                    };
-                    if is_terminal {
-                        let mut encoded = encoded;
-                        if let Some(canonical_failure) = canonical_failure {
-                            failure = Some(canonical_failure);
-                            encoded.push(Bytes::from_static(b"data: [DONE]\n\n"));
-                        }
-                        terminal = Some(TerminalFrames::new(encoded));
-                        break 'provider;
-                    }
-                    for bytes in encoded {
-                        if let Err(error) = writer.send_or_fail(bytes, execution.deadline).await {
-                            failure = Some(error);
-                            break 'provider;
-                        }
-                    }
-                }
-                Err(error) => {
-                    failure = Some(InferenceError::from_transport(error));
-                    break 'provider;
-                }
-            }
-            next = tokio::select! {
-                () = writer.closed() => {
-                    failure = Some(InferenceError::client_cancelled());
-                    break 'provider;
-                }
-                () = tokio::time::sleep_until(execution.deadline) => {
-                    failure = Some(InferenceError::timeout());
-                    break 'provider;
-                }
-                next = events.next() => next,
-            };
+fn streaming_response(execution: RoutedEvents) -> Response {
+    let encoder =
+        OpenAiChatCompletionStreamEncoder::new(execution.request_id, execution.route_slug.as_str());
+    protocol_streaming_response(execution, encoder)
+}
+
+impl ProtocolStreamEncoder for OpenAiChatCompletionStreamEncoder {
+    fn push(&mut self, event: Event) -> Result<Vec<Bytes>, InferenceError> {
+        let is_error = matches!(event.kind, Kind::Error { .. });
+        let mut encoded = self.encode(event)?;
+        if is_error {
+            encoded.push(Bytes::from_static(b"data: [DONE]\n\n"));
         }
-        if terminal.is_none() && failure.is_none() {
-            failure = Some(InferenceError::bad_gateway(
-                "provider_protocol_error",
-                "The provider stream ended without a terminal event.",
-            ));
-        }
-        drop(events);
-        writer.finish_stream(terminal, &mut failure, |error| {
-            TerminalFrames::new(vec![
-                openai_error_sse(error),
-                Bytes::from_static(b"data: [DONE]\n\n"),
-            ])
-        });
-        let outcome = failure
-            .as_ref()
-            .map_or_else(RequestOutcome::success, InferenceError::accounting_outcome);
-        accounting.finish(outcome).await;
-    });
-    response
+        Ok(encoded)
+    }
+
+    fn encode_error(&self, error: &InferenceError) -> Vec<Bytes> {
+        vec![
+            openai_error_sse(error),
+            Bytes::from_static(b"data: [DONE]\n\n"),
+        ]
+    }
 }
 
 async fn unary_response(execution: RoutedEvents) -> Result<Response, InferenceError> {

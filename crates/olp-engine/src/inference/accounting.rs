@@ -371,6 +371,7 @@ impl UsageCapture {
 
     pub fn observe(&mut self, event: &Event) {
         let Kind::Usage { usage } = &event.kind else {
+            self.observe_raw_sse_usage(event);
             return;
         };
         self.observed = true;
@@ -384,7 +385,7 @@ impl UsageCapture {
             && (usage.cached_input_tokens.is_none() || self.cached_input_tokens.is_some());
     }
 
-    pub fn observe_openai_media_event(&mut self, event: &Event) {
+    fn observe_raw_sse_usage(&mut self, event: &Event) {
         let Kind::SourceExtension { extensions } = &event.kind else {
             return;
         };
