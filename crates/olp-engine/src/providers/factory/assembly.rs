@@ -13,11 +13,9 @@ use crate::providers::gemini::transport::operations::Connector as GeminiConnecto
 use crate::providers::openai::transport::Connector as OpenAiConnector;
 use crate::providers::vertex::Connector as VertexConnector;
 
-#[cfg(any(test, feature = "test-util"))]
-use super::configuration::validate_connector_configuration_with_policy;
 use super::configuration::{
     BedrockAuthMode, BorrowedCredential, Config, ConnectorConfiguration, Credential,
-    CredentialKind, Error, VertexAuthMode, bytes_credential, connector_configuration_with_policy,
+    CredentialKind, Error, VertexAuthMode, bytes_credential, connector_configuration,
     credential_kind, no_credential, text_credential, validate_connector_configuration,
     validate_provider_credential,
 };
@@ -28,8 +26,10 @@ use super::configuration::{
 pub struct Factory;
 
 impl Factory {
-    pub fn validate(config: &Config) -> Result<(), Error> {
-        validate_connector_configuration(config)
+    /// `allow_unsafe_test_targets` accepts plain-HTTP and non-public provider
+    /// endpoints; it compiles only in test builds and is always `false` otherwise.
+    pub fn validate(config: &Config, allow_unsafe_test_targets: bool) -> Result<(), Error> {
+        validate_connector_configuration(config, allow_unsafe_test_targets)
     }
 
     pub fn credential_kind(config: &Config) -> Result<CredentialKind, Error> {
@@ -40,36 +40,7 @@ impl Factory {
         validate_provider_credential(config, credential)
     }
 
-    pub async fn create(config: Config, credential: Credential) -> Result<Facade, Error> {
-        Self::create_with_policy(config, credential, false).await
-    }
-
-    /// Test-build-only assembly that accepts plain-HTTP and non-public
-    /// provider endpoints. Release binaries never compile these variants.
-    #[cfg(any(test, feature = "test-util"))]
-    pub async fn create_with_unsafe_test_endpoints(
-        config: Config,
-        credential: Credential,
-    ) -> Result<Facade, Error> {
-        Self::create_with_policy(config, credential, true).await
-    }
-
-    #[cfg(any(test, feature = "test-util"))]
-    pub fn validate_with_unsafe_test_endpoints(config: &Config) -> Result<(), Error> {
-        validate_connector_configuration_with_policy(config, true)
-    }
-
-    #[cfg(any(test, feature = "test-util"))]
-    pub async fn transport_with_unsafe_test_endpoints(
-        config: Config,
-        credential: Credential,
-    ) -> Result<Arc<dyn ProviderTransport>, Error> {
-        Self::create_with_unsafe_test_endpoints(config, credential)
-            .await
-            .map(Facade::into_transport)
-    }
-
-    async fn create_with_policy(
+    pub async fn create(
         config: Config,
         credential: Credential,
         allow_unsafe_test_targets: bool,
@@ -99,8 +70,9 @@ impl Factory {
     pub async fn transport(
         config: Config,
         credential: Credential,
+        allow_unsafe_test_targets: bool,
     ) -> Result<Arc<dyn ProviderTransport>, Error> {
-        Self::create(config, credential)
+        Self::create(config, credential, allow_unsafe_test_targets)
             .await
             .map(Facade::into_transport)
     }
@@ -184,7 +156,7 @@ async fn build_connector(
     allow_unsafe_test_targets: bool,
 ) -> Result<Facade, Error> {
     let kind = config.kind();
-    let connector = match connector_configuration_with_policy(config, allow_unsafe_test_targets)? {
+    let connector = match connector_configuration(config, allow_unsafe_test_targets)? {
         ConnectorConfiguration::OpenAi(configuration) => {
             let key = ApiKey::new(
                 text_credential(credential, "OpenAI provider credential is missing")?.to_owned(),

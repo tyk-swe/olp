@@ -260,7 +260,7 @@ fn overload_response(
         (AdmissionSurface::Inference, Some(endpoint)) => {
             gateway::protocol_error::inference_error_response(
                 endpoint.surface(),
-                gateway::error::InferenceError::overloaded(),
+                olp_engine::inference::error::Error::overloaded().into(),
             )
         }
         (AdmissionSurface::Management, _) => Problem::new(

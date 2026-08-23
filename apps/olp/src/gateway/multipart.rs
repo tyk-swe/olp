@@ -239,7 +239,7 @@ pub(super) async fn parse_multipart(
         }
         Err(_) => {
             output.cleanup().await;
-            Err(InferenceError::multipart_parser_timeout())
+            Err(olp_engine::inference::error::Error::multipart_parser_timeout().into())
         }
     }
 }
@@ -413,7 +413,7 @@ pub(super) fn media_spool_error(
 ) -> InferenceError {
     match error {
         olp_engine::domain::ports::MediaSpoolError::TooLarge { .. } => {
-            InferenceError::payload_too_large("media_too_large")
+            olp_engine::inference::error::Error::payload_too_large("media_too_large").into()
         }
         olp_engine::domain::ports::MediaSpoolError::InvalidFilename
         | olp_engine::domain::ports::MediaSpoolError::InvalidHandle

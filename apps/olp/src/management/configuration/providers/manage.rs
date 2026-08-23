@@ -387,8 +387,11 @@ fn validate_provider_update(
         probe_model: provider.probe_model.as_deref(),
     })
     .map_err(|error| Problem::field_validation("provider", error.to_string()))?;
-    crate::bootstrap::provider_adapter::factory_validate(&config)
-        .map_err(|error| Problem::field_validation("provider", error.to_string()))
+    olp_engine::providers::factory::assembly::Factory::validate(
+        &config,
+        crate::bootstrap::provider_adapter::allow_unsafe_provider_endpoints(),
+    )
+    .map_err(|error| Problem::field_validation("provider", error.to_string()))
 }
 
 #[derive(Debug, Serialize, ToSchema)]

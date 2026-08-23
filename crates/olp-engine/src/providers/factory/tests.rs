@@ -321,16 +321,16 @@ fn strict_factory_rejects_loopback_endpoints_that_unsafe_test_variants_accept() 
     let compat = Config::OpenAiCompatible {
         endpoint: "http://127.0.0.1:9/v1".to_owned(),
     };
-    assert!(Factory::validate(&compat).is_err());
-    Factory::validate_with_unsafe_test_endpoints(&compat).unwrap();
+    assert!(Factory::validate(&compat, false).is_err());
+    Factory::validate(&compat, true).unwrap();
 
     let azure = Config::AzureOpenAi {
         endpoint: "http://127.0.0.1:9".to_owned(),
         deployment: "deployment".to_owned(),
         api_version: "2024-10-21".to_owned(),
     };
-    assert!(Factory::validate(&azure).is_err());
-    Factory::validate_with_unsafe_test_endpoints(&azure).unwrap();
+    assert!(Factory::validate(&azure, false).is_err());
+    Factory::validate(&azure, true).unwrap();
 }
 
 #[tokio::test]
@@ -342,23 +342,23 @@ async fn unsafe_test_variants_assemble_loopback_transports_without_network_io() 
     assert!(
         Factory::create(
             compat.clone(),
-            Credential::ApiKey(Zeroizing::new("sk-test".to_owned()))
+            Credential::ApiKey(Zeroizing::new("sk-test".to_owned())),
+            false,
         )
         .await
         .is_err()
     );
-    Factory::transport_with_unsafe_test_endpoints(compat, credential)
-        .await
-        .unwrap();
+    Factory::transport(compat, credential, true).await.unwrap();
 
     let azure = Config::AzureOpenAi {
         endpoint: "http://127.0.0.1:9".to_owned(),
         deployment: "deployment".to_owned(),
         api_version: "2024-10-21".to_owned(),
     };
-    Factory::transport_with_unsafe_test_endpoints(
+    Factory::transport(
         azure,
         Credential::ApiKey(Zeroizing::new("azure-secret".to_owned())),
+        true,
     )
     .await
     .unwrap();

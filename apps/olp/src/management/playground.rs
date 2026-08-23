@@ -199,7 +199,7 @@ async fn execute_playground(
         .execute_session_generation(operation, surface)
         .await
         .map_err(InferenceError::from)
-        .map_err(InferenceError::into_problem)?;
+        .map_err(Problem::from)?;
 
     let mut output_text = String::new();
     let mut refusal = String::new();

@@ -42,24 +42,12 @@ impl InferenceError {
         )
     }
 
-    pub(crate) fn unauthorized() -> Self {
-        CoreInferenceError::unauthorized().into()
-    }
-
     pub(crate) fn forbidden(message: impl Into<String>) -> Self {
         CoreInferenceError::forbidden(message).into()
     }
 
     pub(crate) fn invalid_request(message: impl Into<String>) -> Self {
         CoreInferenceError::invalid_request(message).into()
-    }
-
-    pub(super) fn payload_too_large(code: &'static str) -> Self {
-        CoreInferenceError::payload_too_large(code).into()
-    }
-
-    pub(crate) fn not_found(message: impl Into<String>) -> Self {
-        CoreInferenceError::not_found(message).into()
     }
 
     pub(super) fn resource_not_found(code: &'static str) -> Self {
@@ -78,14 +66,6 @@ impl InferenceError {
         CoreInferenceError::unavailable(code).into()
     }
 
-    pub(crate) fn overloaded() -> Self {
-        CoreInferenceError::overloaded().into()
-    }
-
-    pub(super) fn multipart_parser_timeout() -> Self {
-        CoreInferenceError::multipart_parser_timeout().into()
-    }
-
     pub(crate) fn timeout() -> Self {
         CoreInferenceError::timeout().into()
     }
@@ -102,24 +82,8 @@ impl InferenceError {
         presentation(self.0.kind()).0
     }
 
-    pub(crate) const fn code(&self) -> &'static str {
-        self.0.code()
-    }
-
     pub(crate) fn kind(&self) -> &'static str {
         presentation(self.0.kind()).1
-    }
-
-    pub(crate) fn message(&self) -> &str {
-        self.0.message()
-    }
-
-    pub(crate) const fn retry_after(&self) -> Option<Duration> {
-        self.0.retry_after()
-    }
-
-    pub(crate) fn into_problem(self) -> Problem {
-        self.into()
     }
 
     pub(crate) fn from_transport(error: TransportError) -> Self {
@@ -134,6 +98,14 @@ impl InferenceError {
 impl From<CoreInferenceError> for InferenceError {
     fn from(error: CoreInferenceError) -> Self {
         Self(error)
+    }
+}
+
+impl std::ops::Deref for InferenceError {
+    type Target = CoreInferenceError;
+
+    fn deref(&self) -> &CoreInferenceError {
+        &self.0
     }
 }
 

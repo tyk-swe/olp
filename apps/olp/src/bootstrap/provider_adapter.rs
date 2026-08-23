@@ -76,38 +76,18 @@ pub(crate) fn insecure_provider_endpoints_for_tests() -> bool {
     std::env::var("OLP_ALLOW_INSECURE_PROVIDER_ENDPOINTS_FOR_TESTS").as_deref() == Ok("test-only")
 }
 
-/// Factory entry points below honor the test-only insecure-endpoint opt-in.
-/// Every application call site that assembles or validates a provider from
-/// stored configuration must go through them rather than `Factory`
-/// directly.
-pub(crate) async fn factory_create(
-    config: Config,
-    credential: Credential,
-) -> Result<Facade, Error> {
+/// Whether provider assembly may target plain-HTTP or non-public endpoints.
+/// Only a debug test-util build honors the opt-in; release builds always
+/// return `false`.
+pub(crate) fn allow_unsafe_provider_endpoints() -> bool {
     #[cfg(all(debug_assertions, feature = "test-util"))]
-    if insecure_provider_endpoints_for_tests() {
-        return Factory::create_with_unsafe_test_endpoints(config, credential).await;
+    {
+        insecure_provider_endpoints_for_tests()
     }
-    Factory::create(config, credential).await
-}
-
-pub(crate) async fn factory_transport(
-    config: Config,
-    credential: Credential,
-) -> Result<std::sync::Arc<dyn olp_engine::domain::ports::ProviderTransport>, Error> {
-    #[cfg(all(debug_assertions, feature = "test-util"))]
-    if insecure_provider_endpoints_for_tests() {
-        return Factory::transport_with_unsafe_test_endpoints(config, credential).await;
+    #[cfg(not(all(debug_assertions, feature = "test-util")))]
+    {
+        false
     }
-    Factory::transport(config, credential).await
-}
-
-pub(crate) fn factory_validate(config: &Config) -> Result<(), Error> {
-    #[cfg(all(debug_assertions, feature = "test-util"))]
-    if insecure_provider_endpoints_for_tests() {
-        return Factory::validate_with_unsafe_test_endpoints(config);
-    }
-    Factory::validate(config)
 }
 
 pub(crate) fn provider_config(fields: ProviderConfigFields<'_>) -> Result<Config, Error> {
@@ -230,7 +210,7 @@ pub(crate) async fn provider_connector(
         plaintext.as_ref().map(|plaintext| plaintext.as_slice()),
     )
     .map_err(|error| Problem::field_validation("provider", error.to_string()))?;
-    factory_create(config, credential)
+    Factory::create(config, credential, allow_unsafe_provider_endpoints())
         .await
         .map_err(|error| Problem::field_validation("provider", error.to_string()))
 }
@@ -239,39 +219,10 @@ pub(crate) fn runtime_provider_config(
     provider: &RuntimeProvider,
     snapshot: &Snapshot,
 ) -> AppResult<Config> {
-    let probe_model =
-        match provider.kind {
-            ProviderKind::VertexAi => {
-                provider.cloud_project.as_deref().ok_or_else(|| {
-                    std::io::Error::other("Vertex provider cloud project is missing")
-                })?;
-                provider.cloud_region.as_deref().ok_or_else(|| {
-                    std::io::Error::other("Vertex provider cloud location is missing")
-                })?;
-                Some(runtime_provider_model(snapshot, provider.provider_id)?)
-            }
-            ProviderKind::Bedrock => {
-                provider.cloud_region.as_deref().ok_or_else(|| {
-                    std::io::Error::other("Bedrock provider AWS region is missing")
-                })?;
-                None
-            }
-            ProviderKind::AzureOpenAi => {
-                provider.endpoint.as_deref().ok_or_else(|| {
-                    std::io::Error::other("Azure OpenAI resource endpoint is missing")
-                })?;
-                provider
-                    .deployment
-                    .as_deref()
-                    .ok_or_else(|| std::io::Error::other("Azure OpenAI deployment is missing"))?;
-                provider
-                    .api_version
-                    .as_deref()
-                    .ok_or_else(|| std::io::Error::other("Azure OpenAI API version is missing"))?;
-                None
-            }
-            _ => None,
-        };
+    let probe_model = match provider.kind {
+        ProviderKind::VertexAi => Some(runtime_provider_model(snapshot, provider.provider_id)?),
+        _ => None,
+    };
     let mut fields = ProviderConfigFields::from(provider);
     fields.probe_model = probe_model.as_deref();
     Ok(provider_config(fields)?)
@@ -282,24 +233,7 @@ pub(crate) fn runtime_provider_credential(
     config: &Config,
     master_key: &MasterKey,
 ) -> AppResult<Credential> {
-    let credential_kind = match Factory::credential_kind(config) {
-        Ok(kind) => kind,
-        Err(error) => match provider.kind {
-            ProviderKind::VertexAi => {
-                return Err(std::io::Error::other(
-                    "Vertex provider authentication mode is invalid",
-                )
-                .into());
-            }
-            ProviderKind::Bedrock => {
-                return Err(std::io::Error::other(
-                    "Bedrock provider authentication mode is invalid",
-                )
-                .into());
-            }
-            _ => return Err(error.into()),
-        },
-    };
+    let credential_kind = Factory::credential_kind(config)?;
     let plaintext = match credential_kind {
         CredentialKind::ApiKey | CredentialKind::ServiceAccountJson | CredentialKind::AwsStatic => {
             Some(decrypt_provider_credential(provider, master_key)?)
@@ -653,11 +587,8 @@ mod tests {
         let mut missing_location = provider.clone();
         missing_location.cloud_region = None;
         for (invalid, message) in [
-            (missing_project, "Vertex provider cloud project is missing"),
-            (
-                missing_location,
-                "Vertex provider cloud location is missing",
-            ),
+            (missing_project, "Vertex AI requires a cloud project."),
+            (missing_location, "Vertex AI requires a cloud region."),
         ] {
             assert_eq!(
                 runtime_provider_config(&invalid, &valid_snapshot)
@@ -724,7 +655,7 @@ mod tests {
                     probe_model: "model".to_owned(),
                     auth_mode: ProviderAuthMode::ApiKey,
                 },
-                "Vertex provider authentication mode is invalid",
+                "Unsupported Vertex AI authentication mode api_key",
             ),
             (
                 ProviderKind::Bedrock,
@@ -732,7 +663,7 @@ mod tests {
                     region: "us-east-1".to_owned(),
                     auth_mode: ProviderAuthMode::ApiKey,
                 },
-                "Bedrock provider authentication mode is invalid",
+                "Unsupported Bedrock authentication mode api_key",
             ),
         ] {
             let mut invalid = provider.clone();

@@ -421,7 +421,10 @@ async fn enforce_request_limits_inner(
             finalization
                 .finish_rejection(axum::http::StatusCode::UNAUTHORIZED)
                 .await;
-            return Err(gateway::error::InferenceError::unauthorized().into());
+            return Err(gateway::error::InferenceError::from(
+                olp_engine::inference::error::Error::unauthorized(),
+            )
+            .into());
         };
         let Some(lease) = state
             .multipart_admission

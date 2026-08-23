@@ -192,16 +192,11 @@ pub(super) fn validate_provider_credential(
 
 /// Validates connector configuration without acquiring default credentials or
 /// issuing network I/O.
-pub(super) fn validate_connector_configuration(config: &Config) -> Result<(), Error> {
-    connector_configuration(config).map(|_| ())
-}
-
-#[cfg(any(test, feature = "test-util"))]
-pub(super) fn validate_connector_configuration_with_policy(
+pub(super) fn validate_connector_configuration(
     config: &Config,
     allow_unsafe_test_targets: bool,
 ) -> Result<(), Error> {
-    connector_configuration_with_policy(config, allow_unsafe_test_targets).map(|_| ())
+    connector_configuration(config, allow_unsafe_test_targets).map(|_| ())
 }
 
 /// Validates only a supplied credential. Callers retain their own encryption,
@@ -288,11 +283,7 @@ pub(super) enum BedrockAuthMode {
     Static,
 }
 
-pub(super) fn connector_configuration(config: &Config) -> Result<ConnectorConfiguration, Error> {
-    connector_configuration_with_policy(config, false)
-}
-
-pub(super) fn connector_configuration_with_policy(
+pub(super) fn connector_configuration(
     config: &Config,
     allow_unsafe_test_targets: bool,
 ) -> Result<ConnectorConfiguration, Error> {

@@ -5,7 +5,12 @@ use serde::Deserialize;
 use tracing::error;
 use utoipa::IntoParams;
 
-use crate::{management::error_mapping::map_persistence, public_http::problem::Problem};
+use crate::{
+    management::error_mapping::{
+        etag_mismatch, idempotency_in_progress, idempotency_key_reused, map_persistence,
+    },
+    public_http::problem::Problem,
+};
 
 #[derive(Debug, Deserialize, IntoParams)]
 #[into_params(parameter_in = Query)]
@@ -62,20 +67,9 @@ pub(super) fn map_operations(error: Error) -> Problem {
             Problem::bad_request("invalid_cursor", "The cursor is invalid or expired.")
         }
         Error::NotFound => not_found(),
-        Error::PreconditionFailed => Problem::new(
-            StatusCode::PRECONDITION_FAILED,
-            "etag_mismatch",
-            "Precondition failed",
-            "The resource changed; refresh it and retry with the current ETag.",
-        ),
-        Error::IdempotencyConflict => Problem::conflict(
-            "idempotency_key_reused",
-            "The Idempotency-Key has already been used for this operation.",
-        ),
-        Error::IdempotencyInProgress => Problem::conflict(
-            "idempotency_in_progress",
-            "An operation with this Idempotency-Key is still in progress.",
-        ),
+        Error::PreconditionFailed => etag_mismatch("resource"),
+        Error::IdempotencyConflict => idempotency_key_reused(),
+        Error::IdempotencyInProgress => idempotency_in_progress(),
         Error::Invalid(message) => Problem::field_validation("request", message),
         Error::Database(error) => {
             error!(%error, "operations persistence query failed");

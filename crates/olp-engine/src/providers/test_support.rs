@@ -113,9 +113,10 @@ pub async fn local_provider(
 }
 
 async fn factory_provider(config: Config) -> Result<Facade, LocalProviderError> {
-    Factory::create_with_unsafe_test_endpoints(
+    Factory::create(
         config,
         Credential::ApiKey(Zeroizing::new(API_KEY.to_owned())),
+        true,
     )
     .await
     .map_err(|error| LocalProviderError(error.to_string()))

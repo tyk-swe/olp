@@ -236,9 +236,13 @@ pub(crate) async fn create_provider(
             .map(|credential| credential.expose().as_bytes()),
     )
     .map_err(|error| provider_connector_validation(kind, error))?;
-    let transport = crate::bootstrap::provider_adapter::factory_transport(config, credential)
-        .await
-        .map_err(|error| provider_connector_validation(kind, error))?;
+    let transport = olp_engine::providers::factory::assembly::Factory::transport(
+        config,
+        credential,
+        crate::bootstrap::provider_adapter::allow_unsafe_provider_endpoints(),
+    )
+    .await
+    .map_err(|error| provider_connector_validation(kind, error))?;
     let connector_available = true;
     let provider_id = Uuid::now_v7();
     let credential_id = request.credential.as_ref().map(|_| Uuid::now_v7());

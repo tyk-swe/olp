@@ -97,6 +97,7 @@ pub(crate) async fn register_mounted_connectors(
                 endpoint: Some(provider.base_url),
             },
             Credential::ApiKey(Zeroizing::new(secret.trim().to_owned())),
+            false,
         )
         .await?;
         registry.register(ProviderId::from_uuid(provider.provider_id), transport);
@@ -111,6 +112,7 @@ pub(crate) async fn register_mounted_connectors(
                 api_version: provider.api_version,
             },
             Credential::ApiKey(Zeroizing::new(secret.trim().to_owned())),
+            false,
         )
         .await?;
         registry.register(ProviderId::from_uuid(provider.provider_id), transport);
@@ -152,6 +154,7 @@ pub(crate) async fn register_mounted_connectors(
                 auth_mode: provider.auth_mode.parse()?,
             },
             credential,
+            false,
         )
         .await?;
         registry.register(ProviderId::from_uuid(provider.provider_id), transport);
@@ -189,6 +192,7 @@ pub(crate) async fn register_mounted_connectors(
                 auth_mode: provider.auth_mode.parse()?,
             },
             credential,
+            false,
         )
         .await?;
         registry.register(ProviderId::from_uuid(provider.provider_id), transport);
@@ -205,8 +209,12 @@ pub(crate) async fn load_runtime_transports(
     for provider in store.runtime_provider_configurations(snapshot).await? {
         let config = runtime_provider_config(&provider, snapshot)?;
         let credential = runtime_provider_credential(&provider, &config, master_key)?;
-        let transport =
-            crate::bootstrap::provider_adapter::factory_transport(config, credential).await?;
+        let transport = Factory::transport(
+            config,
+            credential,
+            crate::bootstrap::provider_adapter::allow_unsafe_provider_endpoints(),
+        )
+        .await?;
         transports.insert(provider.provider_id, transport);
     }
     Ok(())

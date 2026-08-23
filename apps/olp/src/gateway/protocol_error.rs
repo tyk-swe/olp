@@ -42,7 +42,7 @@ impl ProtocolError {
     pub(super) fn not_found(surface: Surface, message: impl Into<String>) -> Self {
         Self {
             surface,
-            error: InferenceError::not_found(message.into()),
+            error: olp_engine::inference::error::Error::not_found(message).into(),
         }
     }
 

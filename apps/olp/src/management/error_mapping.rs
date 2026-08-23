@@ -9,6 +9,29 @@ use crate::public_http::problem::Problem;
 
 use super::sessions::reauthentication_required;
 
+pub(crate) fn etag_mismatch(resource: &str) -> Problem {
+    Problem::new(
+        StatusCode::PRECONDITION_FAILED,
+        "etag_mismatch",
+        "Precondition failed",
+        format!("The {resource} changed after it was loaded. Refresh and retry."),
+    )
+}
+
+pub(crate) fn idempotency_key_reused() -> Problem {
+    Problem::conflict(
+        "idempotency_key_reused",
+        "This Idempotency-Key has already been used for this operation.",
+    )
+}
+
+pub(crate) fn idempotency_in_progress() -> Problem {
+    Problem::conflict(
+        "idempotency_in_progress",
+        "An operation with this Idempotency-Key is still in progress.",
+    )
+}
+
 pub(crate) fn map_configuration(error: ConfigurationError) -> Problem {
     match error {
         ConfigurationError::ProviderNotFound => Problem::new(
@@ -21,12 +44,7 @@ pub(crate) fn map_configuration(error: ConfigurationError) -> Problem {
             "provider",
             "A credential and enabled model are required before activation; OpenAI-compatible model capabilities must also be live-certified.",
         ),
-        ConfigurationError::PreconditionFailed => Problem::new(
-            StatusCode::PRECONDITION_FAILED,
-            "etag_mismatch",
-            "Precondition failed",
-            "The provider changed after it was loaded. Refresh and retry.",
-        ),
+        ConfigurationError::PreconditionFailed => etag_mismatch("provider"),
         ConfigurationError::Persistence(error) => map_persistence(error),
         ConfigurationError::RouteNotFound => Problem::new(
             StatusCode::NOT_FOUND,
@@ -47,14 +65,8 @@ pub(crate) fn map_configuration(error: ConfigurationError) -> Problem {
             error!("stored provider credential is malformed");
             Problem::internal()
         }
-        ConfigurationError::IdempotencyConflict => Problem::conflict(
-            "idempotency_key_reused",
-            "This Idempotency-Key has already been used for this operation.",
-        ),
-        ConfigurationError::IdempotencyInProgress => Problem::conflict(
-            "idempotency_in_progress",
-            "An operation with this Idempotency-Key is still in progress.",
-        ),
+        ConfigurationError::IdempotencyConflict => idempotency_key_reused(),
+        ConfigurationError::IdempotencyInProgress => idempotency_in_progress(),
         ConfigurationError::NotFound => Problem::new(
             StatusCode::NOT_FOUND,
             "configuration_resource_not_found",
@@ -91,20 +103,9 @@ pub(crate) fn map_access(error: AccessError) -> Problem {
             "API key not found",
             "The API key does not exist.",
         ),
-        AccessError::PreconditionFailed => Problem::new(
-            StatusCode::PRECONDITION_FAILED,
-            "etag_mismatch",
-            "Precondition failed",
-            "The API key changed after it was loaded. Refresh and retry.",
-        ),
-        AccessError::IdempotencyConflict => Problem::conflict(
-            "idempotency_key_reused",
-            "This Idempotency-Key has already been used for that API key operation.",
-        ),
-        AccessError::IdempotencyInProgress => Problem::conflict(
-            "idempotency_in_progress",
-            "An operation with this Idempotency-Key is still in progress.",
-        ),
+        AccessError::PreconditionFailed => etag_mismatch("API key"),
+        AccessError::IdempotencyConflict => idempotency_key_reused(),
+        AccessError::IdempotencyInProgress => idempotency_in_progress(),
     }
 }
 
@@ -127,12 +128,7 @@ pub(crate) fn map_identity(error: IdentityError) -> Problem {
             "Identity resource not found",
             "The requested identity resource does not exist.",
         ),
-        IdentityError::PreconditionFailed => Problem::new(
-            StatusCode::PRECONDITION_FAILED,
-            "etag_mismatch",
-            "Precondition failed",
-            "The user changed after it was loaded. Refresh and retry.",
-        ),
+        IdentityError::PreconditionFailed => etag_mismatch("user"),
         IdentityError::LastOwner => Problem::conflict(
             "last_owner_required",
             "The last active owner cannot be demoted.",
@@ -159,14 +155,8 @@ pub(crate) fn map_identity(error: IdentityError) -> Problem {
             error!("stored identity data contains an unknown role");
             Problem::internal()
         }
-        IdentityError::IdempotencyConflict => Problem::conflict(
-            "idempotency_key_reused",
-            "This Idempotency-Key has already been used for this invitation operation.",
-        ),
-        IdentityError::IdempotencyInProgress => Problem::conflict(
-            "idempotency_in_progress",
-            "An operation with this Idempotency-Key is still in progress.",
-        ),
+        IdentityError::IdempotencyConflict => idempotency_key_reused(),
+        IdentityError::IdempotencyInProgress => idempotency_in_progress(),
         IdentityError::LocalPasswordUnavailable => Problem::forbidden(
             "local_password_unavailable",
             "This profile does not have a local password.",
