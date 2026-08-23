@@ -311,6 +311,42 @@ test_external_cargo_patch_path_is_rejected() {
     'Cargo.toml has a path dependency outside the workspace: ../external'
 }
 
+test_discovery_failures_abort_without_success() {
+  local system_find system_jq
+  system_find=$(command -v find)
+  system_jq=$(command -v jq)
+
+  boundary_fixture manifest-discovery-failure db engine
+  write_fake_bin "$fake_bin" find \
+    "if [[ \${1-} == . ]]; then
+  printf 'Cargo.toml\\n'
+  exit 23
+fi
+exec $(printf '%q' "$system_find") \"\$@\""
+  expect_fail 23 "$output" check_boundaries || return
+  ! assert_contains "$output" "architecture boundaries are clean" || return 1
+
+  boundary_fixture delivery-api-discovery-failure delivery engine
+  write_fake_bin "$fake_bin" jq \
+    "if [[ \${2-} == *'any(. == \"lib\")'* ]]; then
+  printf '%s\\n' $(printf '%q' "$workspace/packages/source/src/lib.rs")
+  exit 24
+fi
+exec $(printf '%q' "$system_jq") \"\$@\""
+  expect_fail 24 "$output" check_boundaries || return
+  ! assert_contains "$output" "architecture boundaries are clean" || return 1
+
+  boundary_fixture server-file-discovery-failure db engine
+  write_fake_bin "$fake_bin" find \
+    "if [[ \${1-} == console/src ]]; then
+  printf 'console/src/routes/+page.server.ts\\n'
+  exit 25
+fi
+exec $(printf '%q' "$system_find") \"\$@\""
+  expect_fail 25 "$output" check_boundaries || return
+  ! assert_contains "$output" "architecture boundaries are clean" || return 1
+}
+
 run_test "valid no-match scan succeeds" test_valid_no_match_scan
 run_test "ripgrep exit greater than one fails" test_simulated_rg_failure
 run_test "supply-chain success is suppressed after scan error" \
@@ -331,5 +367,7 @@ run_test "same-name non-workspace paths remain unclassified" \
   test_same_name_non_workspace_path_is_rejected
 run_test "external Cargo patch paths are rejected" \
   test_external_cargo_patch_path_is_rejected
+run_test "discovery failures abort without reporting success" \
+  test_discovery_failures_abort_without_success
 
 printf 'check-boundaries regression tests passed: %d\n' "$tests_run"

@@ -57,7 +57,7 @@ test: ## Workspace unit tests via nextest (postgres-backed tests stay #[ignore]d
 # llvm-cov's defaults already exclude tests/ dirs and src tests.rs modules.
 coverage: ## CI's real Rust test gate: llvm-cov nextest with the 62% line floor
 	SQLX_OFFLINE=true cargo llvm-cov nextest --locked --workspace --all-features \
-		--ignore-filename-regex 'src/(test_support|routing/fixtures)\.rs' \
+		--ignore-filename-regex 'src/(test_support|domain/routing/fixtures)\.rs' \
 		--lcov --output-path lcov.info --fail-under-lines 62
 
 console-install: ## Install locked console dependencies

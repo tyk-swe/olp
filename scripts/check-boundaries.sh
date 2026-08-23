@@ -41,11 +41,12 @@ scan() {
 # A path dependency may point at another package in this repository, but never
 # escape it. `[patch]` entries live only in manifests, so this stays a text
 # scan over manifests rather than a `cargo metadata` query.
-mapfile -t cargo_manifests < <(
+cargo_manifest_output=$(
   find . \( -path './.git' -o -path '*/target' -o -path '*/node_modules' \) -prune -o \
     -type f -name Cargo.toml -print | sed 's#^\./##' | sort
 )
-(( ${#cargo_manifests[@]} )) || { echo "no Cargo manifests were found in the repository" >&2; exit 2; }
+[[ -n $cargo_manifest_output ]] || { echo "no Cargo manifests were found in the repository" >&2; exit 2; }
+mapfile -t cargo_manifests <<< "$cargo_manifest_output"
 path_dependency_output=$(grep -rEnoH \
   "path[[:space:]]*=[[:space:]]*(\"[^\"]+\"|'[^']+')" -- "${cargo_manifests[@]}") || (( $? == 1 ))
 if [[ -n $path_dependency_output ]]; then
@@ -212,11 +213,12 @@ scan "main workspace manifest enables an unsupported platform dependency:" \
 scan "PostgreSQL-only workspace enables the SQLite backend:" \
   -e '^[[:space:]]*"sqlite"[[:space:]]*,?[[:space:]]*$' -- "${cargo_manifests[@]}"
 
-mapfile -t delivery_api_files < <(jq -r '
+delivery_api_output=$(jq -r '
   .packages[] | select((.metadata.olp.role? // "") == "delivery")
   | .targets[] | select(.kind | any(. == "lib")) | .src_path
 ' <<< "$metadata" | sort -u)
-for delivery_api_file in "${delivery_api_files[@]}"; do
+while IFS= read -r delivery_api_file; do
+  [[ -n $delivery_api_file ]] || continue
   resolved_delivery_api_file=$(realpath -m "$delivery_api_file")
   case "$resolved_delivery_api_file" in
     "$workspace_root"/*) delivery_api_file=${resolved_delivery_api_file#"$workspace_root"/} ;;
@@ -233,14 +235,15 @@ for delivery_api_file in "${delivery_api_files[@]}"; do
   }
   scan "bootstrap composition types must not be exported from a production delivery API:" \
     -e '^pub[[:space:]]+use[[:space:]]+bootstrap::(state|mode_dependencies)' -- "$delivery_api_file"
-done
+done <<< "$delivery_api_output"
 
 # The console ships as static assets from the Rust binary; a server route or
 # server-only module would silently require a Node runtime in production.
-mapfile -t server_files < <(find console/src -type f \
+server_file_output=$(find console/src -type f \
   \( -name '+page.server.*' -o -name '+layout.server.*' -o -name '+server.*' \
      -o -name 'hooks.server.*' -o -path '*/lib/server/*' \) -print)
-if (( ${#server_files[@]} )); then
+if [[ -n $server_file_output ]]; then
+  mapfile -t server_files <<< "$server_file_output"
   echo "console must remain a static client-only application:" >&2
   printf '  %s\n' "${server_files[@]}" >&2
   violations=1

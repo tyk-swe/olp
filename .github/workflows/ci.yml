@@ -399,18 +399,13 @@ jobs:
 
   image:
     name: Image / ${{ matrix.arch }}
-    runs-on: ${{ matrix.runner }}
+    runs-on: ${{ matrix.arch == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-24.04' }}
     timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:
         # Pull requests build only amd64; pushes and scheduled runs add arm64.
         arch: ${{ contains(fromJSON('["pull_request", "merge_group"]'), github.event_name) && fromJSON('["amd64"]') || fromJSON('["amd64", "arm64"]') }}
-        include:
-          - arch: amd64
-            runner: ubuntu-24.04
-          - arch: arm64
-            runner: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
