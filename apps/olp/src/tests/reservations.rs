@@ -9,16 +9,7 @@ async fn activate_runtime_inside_handler(
     state
         .runtime()
         .install(
-            Snapshot {
-                generation: RuntimeGeneration {
-                    id: RuntimeGenerationId::new(),
-                    ordinal: pinned_before_activation.generation.ordinal + 1,
-                    activated_at: chrono::Utc::now(),
-                },
-                providers: pinned_before_activation.providers.clone(),
-                routes: pinned_before_activation.routes.clone(),
-                api_keys: pinned_before_activation.api_keys.clone(),
-            },
+            fixtures::next_generation(pinned_before_activation),
             BTreeMap::new(),
         )
         .unwrap();
@@ -217,19 +208,7 @@ async fn spawned_inference_task_inherits_the_http_execution_context() {
     );
     state
         .runtime()
-        .install(
-            Snapshot {
-                generation: RuntimeGeneration {
-                    id: RuntimeGenerationId::new(),
-                    ordinal: pinned.generation.ordinal + 1,
-                    activated_at: chrono::Utc::now(),
-                },
-                providers: pinned.providers.clone(),
-                routes: pinned.routes.clone(),
-                api_keys: pinned.api_keys.clone(),
-            },
-            BTreeMap::new(),
-        )
+        .install(fixtures::next_generation(&pinned), BTreeMap::new())
         .unwrap();
     let metadata_claimed = Arc::new(AtomicBool::new(false));
     let reservation = Reservation::for_test(async {});

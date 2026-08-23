@@ -1,6 +1,5 @@
 use std::{
-    collections::{BTreeMap, BTreeSet},
-    num::{NonZeroU16, NonZeroU32},
+    collections::BTreeMap,
     path::PathBuf,
     sync::Arc,
     sync::atomic::{AtomicBool, AtomicUsize, Ordering},
@@ -21,7 +20,7 @@ use olp_db::{
     security::key_material::AuthHmacKey,
 };
 use olp_engine::domain::{
-    auth::{ApiKey, ApiKeyDigest, ApiKeyLimits, ApiKeyScope, ApiKeyStatus},
+    auth::{ApiKeyDigest, ApiKeyScope},
     canonical::{
         identity::{OperationKind, Surface, TransportMode},
         requests::{Operation, SourceExtensions, VideoOperation},
@@ -29,19 +28,12 @@ use olp_engine::domain::{
             CanonicalResult, VideoContentResult, VideoDeleteResult, VideoJobResult, VideoStatus,
         },
     },
-    ids::{
-        ApiKeyId, ApiKeyLookupId, DurationMs, ProviderId, RouteId, RouteSlug, RuntimeGenerationId,
-        TargetId,
-    },
+    ids::{ApiKeyId, ApiKeyLookupId, ProviderId},
     ports::{
         BoxFuture, MediaSpool, MediaUpload, ProviderOutput, ProviderRequest, ProviderTransport,
         TransportError,
     },
-    routing::{
-        provider::{Capability, Provider, ProviderKind},
-        route::{Route, Target},
-        snapshot::{RuntimeGeneration, Snapshot},
-    },
+    routing::{fixtures, provider::ProviderKind},
 };
 use olp_engine::inference::runtime::Manager;
 use serde_json::{Value, json};
@@ -306,46 +298,24 @@ async fn media_job_management_views_are_session_authorized_and_metadata_only() {
     let plaintext_key = material.expose_once().to_owned();
     let lookup_id = ApiKeyLookupId::parse(material.lookup_id.clone()).unwrap();
     let core_provider_id = ProviderId::from_uuid(provider_id);
-    let route_slug = RouteSlug::parse("video-default").unwrap();
-    let operations = BTreeSet::from([
+    let operations = [
         OperationKind::VideoCreate,
         OperationKind::VideoList,
         OperationKind::VideoGet,
         OperationKind::VideoContent,
         OperationKind::VideoDelete,
-    ]);
-    let capabilities = BTreeSet::from([
-        Capability::new(
-            "upstream-video-model",
-            OperationKind::VideoCreate,
-            Surface::OpenAi,
-            TransportMode::Async,
-        ),
-        Capability::new(
-            "upstream-video-model",
-            OperationKind::VideoGet,
-            Surface::OpenAi,
-            TransportMode::Unary,
-        ),
-        Capability::new(
-            "upstream-video-model",
-            OperationKind::VideoList,
-            Surface::OpenAi,
-            TransportMode::Unary,
-        ),
-        Capability::new(
-            "upstream-video-model",
-            OperationKind::VideoContent,
-            Surface::OpenAi,
-            TransportMode::Unary,
-        ),
-        Capability::new(
-            "upstream-video-model",
-            OperationKind::VideoDelete,
-            Surface::OpenAi,
-            TransportMode::Unary,
-        ),
-    ]);
+    ];
+    let capabilities = fixtures::capabilities(
+        "upstream-video-model",
+        Surface::OpenAi,
+        [
+            (OperationKind::VideoCreate, TransportMode::Async),
+            (OperationKind::VideoGet, TransportMode::Unary),
+            (OperationKind::VideoList, TransportMode::Unary),
+            (OperationKind::VideoContent, TransportMode::Unary),
+            (OperationKind::VideoDelete, TransportMode::Unary),
+        ],
+    );
     let runtime = Arc::new(Manager::empty());
     let mut gateway_state = ProcessComposition::new(
         ApiMode::Gateway,
@@ -366,56 +336,24 @@ async fn media_job_management_views_are_session_authorized_and_metadata_only() {
     });
     runtime
         .install(
-            Snapshot {
-                generation: RuntimeGeneration {
-                    id: RuntimeGenerationId::new(),
-                    ordinal: 1,
-                    activated_at: chrono::Utc::now(),
-                },
-                providers: BTreeMap::from([(
-                    core_provider_id,
-                    Provider {
-                        id: core_provider_id,
-                        name: "video-provider".into(),
-                        kind: ProviderKind::OpenAi,
-                        enabled: true,
-                        active_credential: None,
-                        capabilities,
-                    },
-                )]),
-                routes: BTreeMap::from([(
-                    route_slug.clone(),
-                    Route {
-                        id: RouteId::new(),
-                        routing_id: None,
-                        slug: route_slug.clone(),
+            {
+                let mut api_key = fixtures::api_key(
+                    lookup_id,
+                    ApiKeyDigest::new(material.digest),
+                    [ApiKeyScope::Inference],
+                );
+                api_key.id = ApiKeyId::from_uuid(api_key_id);
+                let mut provider =
+                    fixtures::provider(core_provider_id, ProviderKind::OpenAi, capabilities);
+                provider.active_credential = None;
+                fixtures::snapshot(1)
+                    .with_provider(provider)
+                    .with_route(fixtures::route(
+                        "video-default",
                         operations,
-                        overall_timeout: DurationMs::new(5_000),
-                        max_attempts: NonZeroU16::new(1).unwrap(),
-                        targets: vec![Target {
-                            id: TargetId::new(),
-                            routing_id: None,
-                            provider_id: core_provider_id,
-                            upstream_model: "upstream-video-model".into(),
-                            priority: 0,
-                            weight: NonZeroU32::new(1).unwrap(),
-                            timeout: DurationMs::new(4_000),
-                        }],
-                    },
-                )]),
-                api_keys: BTreeMap::from([(
-                    lookup_id.clone(),
-                    ApiKey {
-                        id: ApiKeyId::from_uuid(api_key_id),
-                        lookup_id,
-                        digest: ApiKeyDigest::new(material.digest),
-                        status: ApiKeyStatus::Active,
-                        expires_at: None,
-                        scopes: BTreeSet::from([ApiKeyScope::Inference]),
-                        allowed_routes: BTreeSet::new(),
-                        limits: ApiKeyLimits::default(),
-                    },
-                )]),
+                        vec![fixtures::target(core_provider_id, "upstream-video-model")],
+                    ))
+                    .with_api_key(api_key)
             },
             BTreeMap::from([(core_provider_id, transport)]),
         )
@@ -691,15 +629,10 @@ async fn media_job_management_views_are_session_authorized_and_metadata_only() {
     let current = runtime.pin();
     runtime
         .install(
-            Snapshot {
-                generation: RuntimeGeneration {
-                    id: RuntimeGenerationId::new(),
-                    ordinal: 2,
-                    activated_at: chrono::Utc::now(),
-                },
-                providers: current.providers.clone(),
-                routes: current.routes.clone(),
-                api_keys: BTreeMap::new(),
+            {
+                let mut snapshot = fixtures::next_generation(&current);
+                snapshot.api_keys.clear();
+                snapshot
             },
             BTreeMap::from([(
                 core_provider_id,

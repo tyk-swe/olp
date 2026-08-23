@@ -4,14 +4,8 @@
 //! OpenAI/Anthropic/Gemini SDKs can be
 //! exercised without PostgreSQL, Valkey, or live providers.
 
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    env,
-    num::{NonZeroU16, NonZeroU32},
-    sync::Arc,
-};
+use std::{collections::BTreeMap, env, sync::Arc};
 
-use chrono::Utc;
 use futures::stream;
 use olp::{
     bootstrap::state::{ApiMode, ProcessComposition},
@@ -19,24 +13,20 @@ use olp::{
 };
 use olp_db::{security::key_material::AuthHmacKey, store::Store};
 use olp_engine::domain::{
-    auth::{ApiKey, ApiKeyDigest, ApiKeyLimits, ApiKeyScope, ApiKeyStatus},
+    auth::{ApiKeyDigest, ApiKeyScope},
     canonical::{
         events::{Event, FinishReason, Kind, Usage},
         identity::{OperationKind, Surface, TransportMode},
         requests::MessageRole,
     },
-    ids::{
-        ApiKeyId, ApiKeyLookupId, DurationMs, ProviderId, RouteId, RouteSlug, RuntimeGenerationId,
-        TargetId,
-    },
+    ids::{ApiKeyLookupId, ProviderId, RouteSlug},
     ports::{
         AttemptFailureClass, BoxFuture, ProviderOutput, ProviderRequest, ProviderTransport,
         TransportError, TransportPhase,
     },
     routing::{
-        provider::{Capability, Provider, ProviderKind},
-        route::{Route, Target},
-        snapshot::{RuntimeGeneration, Snapshot},
+        fixtures,
+        provider::{Capability, ProviderKind},
     },
 };
 use olp_engine::inference::runtime::Manager;
@@ -126,19 +116,6 @@ fn generation_events(text: &str, upstream_model: &str) -> Vec<Event> {
     ]
 }
 
-fn fixture_api_key(lookup_id: ApiKeyLookupId, digest: ApiKeyDigest) -> ApiKey {
-    ApiKey {
-        id: ApiKeyId::new(),
-        lookup_id,
-        digest,
-        status: ApiKeyStatus::Active,
-        expires_at: None,
-        scopes: BTreeSet::from([ApiKeyScope::Inference, ApiKeyScope::ModelsRead]),
-        allowed_routes: BTreeSet::new(),
-        limits: ApiKeyLimits::default(),
-    }
-}
-
 #[derive(Serialize)]
 struct FixtureMetadata<'a> {
     origin: &'a str,
@@ -161,69 +138,32 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let conflict_plaintext_key = conflict_key_material.expose_once().to_owned();
     let conflict_lookup_id = ApiKeyLookupId::parse(conflict_key_material.lookup_id.clone())?;
     let provider_id = ProviderId::new();
-    let route_slug = RouteSlug::parse(ROUTE_SLUG)?;
-
-    let mut capabilities = BTreeSet::new();
-    for surface in [Surface::OpenAi, Surface::Anthropic, Surface::Gemini] {
-        for mode in [TransportMode::Unary, TransportMode::Streaming] {
-            capabilities.insert(Capability::new(
-                UPSTREAM_MODEL,
-                OperationKind::Generation,
-                surface,
-                mode,
-            ));
-        }
-    }
-
-    let route = Route {
-        id: RouteId::new(),
-        routing_id: None,
-        slug: route_slug.clone(),
-        operations: BTreeSet::from([OperationKind::Generation]),
-        overall_timeout: DurationMs::new(5_000),
-        max_attempts: NonZeroU16::new(1).expect("one is nonzero"),
-        targets: vec![Target {
-            id: TargetId::new(),
-            routing_id: None,
-            provider_id,
-            upstream_model: UPSTREAM_MODEL.to_owned(),
-            priority: 0,
-            weight: NonZeroU32::new(1).expect("one is nonzero"),
-            timeout: DurationMs::new(4_000),
-        }],
-    };
-    let snapshot = Snapshot {
-        generation: RuntimeGeneration {
-            id: RuntimeGenerationId::new(),
-            ordinal: 1,
-            activated_at: Utc::now(),
-        },
-        providers: BTreeMap::from([(
-            provider_id,
-            Provider {
-                id: provider_id,
-                name: "sdk-smoke-static-provider".to_owned(),
-                kind: ProviderKind::OpenAi,
-                enabled: true,
-                active_credential: None,
-                capabilities,
-            },
-        )]),
-        routes: BTreeMap::from([(route_slug, route)]),
-        api_keys: BTreeMap::from([
-            (
-                lookup_id.clone(),
-                fixture_api_key(lookup_id, ApiKeyDigest::new(key_material.digest)),
-            ),
-            (
-                conflict_lookup_id.clone(),
-                fixture_api_key(
-                    conflict_lookup_id,
-                    ApiKeyDigest::new(conflict_key_material.digest),
-                ),
-            ),
-        ]),
-    };
+    let capabilities = [Surface::OpenAi, Surface::Anthropic, Surface::Gemini]
+        .into_iter()
+        .flat_map(|surface| {
+            [TransportMode::Unary, TransportMode::Streaming].map(|mode| {
+                Capability::new(UPSTREAM_MODEL, OperationKind::Generation, surface, mode)
+            })
+        });
+    let mut provider = fixtures::provider(provider_id, ProviderKind::OpenAi, capabilities);
+    provider.active_credential = None;
+    let snapshot = fixtures::snapshot(1)
+        .with_provider(provider)
+        .with_route(fixtures::route(
+            ROUTE_SLUG,
+            [OperationKind::Generation],
+            vec![fixtures::target(provider_id, UPSTREAM_MODEL)],
+        ))
+        .with_api_key(fixtures::api_key(
+            lookup_id,
+            ApiKeyDigest::new(key_material.digest),
+            [ApiKeyScope::Inference, ApiKeyScope::ModelsRead],
+        ))
+        .with_api_key(fixtures::api_key(
+            conflict_lookup_id,
+            ApiKeyDigest::new(conflict_key_material.digest),
+            [ApiKeyScope::Inference, ApiKeyScope::ModelsRead],
+        ));
     let runtime = Arc::new(Manager::empty());
     runtime.install(
         snapshot,

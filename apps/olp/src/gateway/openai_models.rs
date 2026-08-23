@@ -174,7 +174,6 @@ impl IntoResponse for OpenAiModelError {
 mod tests {
     use std::{
         collections::{BTreeMap, BTreeSet},
-        num::{NonZeroU16, NonZeroU32},
         sync::Arc,
     };
 
@@ -187,21 +186,14 @@ mod tests {
     use http_body_util::BodyExt;
     use olp_db::security::key_material::AuthHmacKey;
     use olp_engine::domain::{
-        auth::{ApiKey, ApiKeyDigest, ApiKeyLimits, ApiKeyScope, ApiKeyStatus},
+        auth::{ApiKeyDigest, ApiKeyScope},
         canonical::identity::TransportMode,
-        ids::{
-            ApiKeyId, ApiKeyLookupId, DurationMs, ProviderId, RouteId, RuntimeGenerationId,
-            TargetId,
-        },
+        ids::{ApiKeyLookupId, ProviderId},
         ports::{
             BoxFuture, ProviderEventStream, ProviderOutput, ProviderRequest, ProviderTransport,
             TransportError,
         },
-        routing::{
-            provider::{Capability, Provider, ProviderKind},
-            route::{Route, Target},
-            snapshot::{RuntimeGeneration, Snapshot},
-        },
+        routing::{fixtures, provider::ProviderKind},
     };
     use serde_json::Value;
     use tower::ServiceExt;
@@ -233,77 +225,32 @@ mod tests {
         let lookup = ApiKeyLookupId::parse(material.lookup_id.clone()).unwrap();
         let provider_id = ProviderId::new();
         let make_route = |slug: &str, operation: OperationKind| {
-            let slug = RouteSlug::parse(slug).unwrap();
-            (
-                slug.clone(),
-                Route {
-                    id: RouteId::new(),
-                    routing_id: None,
-                    slug,
-                    operations: BTreeSet::from([operation]),
-                    overall_timeout: DurationMs::new(1_000),
-                    max_attempts: NonZeroU16::new(1).unwrap(),
-                    targets: vec![Target {
-                        id: TargetId::new(),
-                        routing_id: None,
-                        provider_id,
-                        upstream_model: "private-upstream-model".to_owned(),
-                        priority: 0,
-                        weight: NonZeroU32::new(1).unwrap(),
-                        timeout: DurationMs::new(1_000),
-                    }],
-                },
+            fixtures::route(
+                slug,
+                [operation],
+                vec![fixtures::target(provider_id, "private-upstream-model")],
             )
         };
-        let snapshot = Snapshot {
-            generation: RuntimeGeneration {
-                id: RuntimeGenerationId::new(),
-                ordinal: 7,
-                activated_at: Utc.timestamp_opt(1_700_000_000, 0).unwrap(),
-            },
-            providers: BTreeMap::from([(
+        let mut api_key = fixtures::api_key(lookup, ApiKeyDigest::new(material.digest), scopes);
+        api_key.allowed_routes = allowed_routes;
+        let mut snapshot = fixtures::snapshot(7)
+            .with_provider(fixtures::provider(
                 provider_id,
-                Provider {
-                    id: provider_id,
-                    name: "private-provider".to_owned(),
-                    kind: ProviderKind::OpenAi,
-                    enabled: true,
-                    active_credential: None,
-                    capabilities: BTreeSet::from([
-                        Capability::new(
-                            "private-upstream-model",
-                            OperationKind::Generation,
-                            Surface::OpenAi,
-                            TransportMode::Unary,
-                        ),
-                        Capability::new(
-                            "private-upstream-model",
-                            OperationKind::ImageGeneration,
-                            Surface::OpenAi,
-                            TransportMode::Streaming,
-                        ),
-                    ]),
-                },
-            )]),
-            routes: BTreeMap::from([
-                make_route("zeta", OperationKind::Generation),
-                make_route("alpha", OperationKind::Generation),
-                make_route("media-stream", OperationKind::ImageGeneration),
-            ]),
-            api_keys: BTreeMap::from([(
-                lookup.clone(),
-                ApiKey {
-                    id: ApiKeyId::new(),
-                    lookup_id: lookup,
-                    digest: ApiKeyDigest::new(material.digest),
-                    status: ApiKeyStatus::Active,
-                    expires_at: None,
-                    scopes,
-                    allowed_routes,
-                    limits: ApiKeyLimits::default(),
-                },
-            )]),
-        };
+                ProviderKind::OpenAi,
+                fixtures::capabilities(
+                    "private-upstream-model",
+                    Surface::OpenAi,
+                    [
+                        (OperationKind::Generation, TransportMode::Unary),
+                        (OperationKind::ImageGeneration, TransportMode::Streaming),
+                    ],
+                ),
+            ))
+            .with_route(make_route("zeta", OperationKind::Generation))
+            .with_route(make_route("alpha", OperationKind::Generation))
+            .with_route(make_route("media-stream", OperationKind::ImageGeneration))
+            .with_api_key(api_key);
+        snapshot.generation.activated_at = Utc.timestamp_opt(1_700_000_000, 0).unwrap();
         let runtime = Arc::new(olp_engine::inference::runtime::Manager::empty());
         let transport: Arc<dyn ProviderTransport> = Arc::new(UnusedTransport);
         runtime

@@ -175,16 +175,9 @@ fn install_event_stream(
         .get_mut(&RouteSlug::parse("default").unwrap())
         .unwrap()
         .operations = BTreeSet::from([operation]);
-    let snapshot = Snapshot {
-        generation: RuntimeGeneration {
-            id: RuntimeGenerationId::new(),
-            ordinal: pinned.generation.ordinal + 1,
-            activated_at: Utc::now(),
-        },
-        providers,
-        routes,
-        api_keys: pinned.api_keys.clone(),
-    };
+    let mut snapshot = fixtures::next_generation(&pinned);
+    snapshot.providers = providers;
+    snapshot.routes = routes;
     let transport: Arc<dyn ProviderTransport> = if finite {
         Arc::new(FiniteStaticTransport { events })
     } else {

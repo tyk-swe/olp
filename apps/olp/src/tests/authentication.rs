@@ -429,15 +429,10 @@ async fn revoked_and_expired_keys_are_rejected_by_admission() {
         state
             .runtime
             .install(
-                Snapshot {
-                    generation: RuntimeGeneration {
-                        id: RuntimeGenerationId::new(),
-                        ordinal: pinned.generation.ordinal + 1,
-                        activated_at: chrono::Utc::now(),
-                    },
-                    providers: pinned.providers.clone(),
-                    routes: pinned.routes.clone(),
-                    api_keys,
+                {
+                    let mut snapshot = fixtures::next_generation(&pinned);
+                    snapshot.api_keys = api_keys;
+                    snapshot
                 },
                 BTreeMap::new(),
             )

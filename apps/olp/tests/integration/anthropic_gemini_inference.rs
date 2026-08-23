@@ -1,6 +1,6 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
-    num::{NonZeroU16, NonZeroU32},
+    num::NonZeroU16,
     sync::{
         Arc, Mutex,
         atomic::{AtomicBool, AtomicUsize, Ordering},
@@ -13,7 +13,6 @@ use axum::{
     http::{Request, StatusCode},
 };
 use base64::{Engine as _, engine::general_purpose::STANDARD};
-use chrono::Utc;
 use futures::{Stream, stream};
 use http_body_util::BodyExt;
 use olp::{
@@ -25,25 +24,21 @@ use olp::{
 };
 use olp_db::{security::key_material::AuthHmacKey, store::Store};
 use olp_engine::domain::{
-    auth::{ApiKey, ApiKeyDigest, ApiKeyLimits, ApiKeyScope, ApiKeyStatus},
+    auth::{ApiKeyDigest, ApiKeyScope},
     canonical::{
         events::{Event, FinishReason, Kind, Usage},
         identity::{OperationKind, Surface, TransportMode},
         requests::{MessageRole, SourceExtensions},
         results::{CanonicalResult, TokenCountResult},
     },
-    ids::{
-        ApiKeyId, ApiKeyLookupId, DurationMs, ProviderId, RouteId, RouteSlug, RuntimeGenerationId,
-        TargetId,
-    },
+    ids::{ApiKeyLookupId, ProviderId},
     ports::{
         AttemptFailureClass, BoxFuture, ProviderEventStream, ProviderOutput, ProviderRequest,
         ProviderTransport, TransportError, TransportPhase,
     },
     routing::{
-        provider::{Capability, Provider, ProviderKind},
-        route::{Route, Target},
-        snapshot::{RuntimeGeneration, Snapshot},
+        fixtures,
+        provider::{Capability, ProviderKind},
     },
 };
 use olp_engine::inference::runtime::Manager;
@@ -166,103 +161,31 @@ fn test_gateway() -> TestGateway {
     let gemini_provider = ProviderId::new();
     let anthropic_model = "claude-private";
     let gemini_model = "gemini-private";
-    let operations = BTreeSet::from([OperationKind::Generation, OperationKind::TokenCount]);
-    let capabilities = |model: &str, surface: Surface| {
-        BTreeSet::from([
-            Capability::new(
-                model,
-                OperationKind::Generation,
-                surface,
-                TransportMode::Unary,
-            ),
-            Capability::new(
-                model,
-                OperationKind::Generation,
-                surface,
-                TransportMode::Streaming,
-            ),
-            Capability::new(
-                model,
-                OperationKind::TokenCount,
-                surface,
-                TransportMode::Unary,
-            ),
-        ])
-    };
-    let cross_slug = RouteSlug::parse("team-default").unwrap();
-    let cross_route = Route {
-        id: RouteId::new(),
-        routing_id: None,
-        slug: cross_slug.clone(),
-        operations: operations.clone(),
-        overall_timeout: DurationMs::new(5_000),
-        max_attempts: NonZeroU16::new(2).unwrap(),
-        targets: vec![
-            Target {
-                id: TargetId::new(),
-                routing_id: None,
-                provider_id: anthropic_provider,
-                upstream_model: anthropic_model.into(),
-                priority: 0,
-                weight: NonZeroU32::new(1).unwrap(),
-                timeout: DurationMs::new(4_000),
-            },
-            Target {
-                id: TargetId::new(),
-                routing_id: None,
-                provider_id: gemini_provider,
-                upstream_model: gemini_model.into(),
-                priority: 0,
-                weight: NonZeroU32::new(1).unwrap(),
-                timeout: DurationMs::new(4_000),
-            },
-        ],
-    };
-    let snapshot = Snapshot {
-        generation: RuntimeGeneration {
-            id: RuntimeGenerationId::new(),
-            ordinal: 9,
-            activated_at: Utc::now(),
-        },
-        providers: BTreeMap::from([
-            (
-                anthropic_provider,
-                Provider {
-                    id: anthropic_provider,
-                    name: "anthropic".into(),
-                    kind: ProviderKind::Anthropic,
-                    enabled: true,
-                    active_credential: None,
-                    capabilities: capabilities(anthropic_model, Surface::Anthropic),
-                },
-            ),
-            (
-                gemini_provider,
-                Provider {
-                    id: gemini_provider,
-                    name: "gemini".into(),
-                    kind: ProviderKind::Gemini,
-                    enabled: true,
-                    active_credential: None,
-                    capabilities: capabilities(gemini_model, Surface::Gemini),
-                },
-            ),
-        ]),
-        routes: BTreeMap::from([(cross_slug, cross_route)]),
-        api_keys: BTreeMap::from([(
-            lookup.clone(),
-            ApiKey {
-                id: ApiKeyId::new(),
-                lookup_id: lookup,
-                digest: ApiKeyDigest::new(material.digest),
-                status: ApiKeyStatus::Active,
-                expires_at: None,
-                scopes: BTreeSet::from([ApiKeyScope::Inference, ApiKeyScope::ModelsRead]),
-                allowed_routes: BTreeSet::new(),
-                limits: ApiKeyLimits::default(),
-            },
-        )]),
-    };
+    let operations = [OperationKind::Generation, OperationKind::TokenCount];
+    let snapshot = fixtures::snapshot(9)
+        .with_provider(fixtures::provider(
+            anthropic_provider,
+            ProviderKind::Anthropic,
+            fixtures::generation_capabilities(anthropic_model, Surface::Anthropic),
+        ))
+        .with_provider(fixtures::provider(
+            gemini_provider,
+            ProviderKind::Gemini,
+            fixtures::generation_capabilities(gemini_model, Surface::Gemini),
+        ))
+        .with_route(fixtures::route(
+            "team-default",
+            operations,
+            vec![
+                fixtures::target(anthropic_provider, anthropic_model),
+                fixtures::target(gemini_provider, gemini_model),
+            ],
+        ))
+        .with_api_key(fixtures::api_key(
+            lookup,
+            ApiKeyDigest::new(material.digest),
+            [ApiKeyScope::Inference, ApiKeyScope::ModelsRead],
+        ));
     let calls = Arc::new(Mutex::new(Vec::new()));
     let transports: BTreeMap<ProviderId, Arc<dyn ProviderTransport>> = BTreeMap::from([
         (
@@ -642,16 +565,7 @@ async fn inline_media_is_admitted_for_same_protocol_and_rejected_when_malformed_
 async fn certified_cross_protocol_tuple_is_runtime_reachable_without_semantic_loss() {
     let fixture = test_gateway();
     let pinned = fixture.state.runtime().pin();
-    let mut snapshot = Snapshot {
-        generation: RuntimeGeneration {
-            id: RuntimeGenerationId::new(),
-            ordinal: pinned.generation.ordinal + 1,
-            activated_at: Utc::now(),
-        },
-        providers: pinned.providers.clone(),
-        routes: pinned.routes.clone(),
-        api_keys: pinned.api_keys.clone(),
-    };
+    let mut snapshot = fixtures::next_generation(&pinned);
     snapshot
         .providers
         .retain(|provider_id, _| *provider_id == fixture.anthropic_provider);
@@ -833,17 +747,7 @@ impl ProviderTransport for NeverCalledTransport {
 #[tokio::test]
 async fn streaming_never_fails_over_after_the_first_canonical_event() {
     let fixture = test_gateway();
-    let snapshot = fixture.state.runtime().pin();
-    let mut snapshot = Snapshot {
-        generation: RuntimeGeneration {
-            id: RuntimeGenerationId::new(),
-            ordinal: snapshot.generation.ordinal + 1,
-            activated_at: Utc::now(),
-        },
-        providers: snapshot.providers.clone(),
-        routes: snapshot.routes.clone(),
-        api_keys: snapshot.api_keys.clone(),
-    };
+    let mut snapshot = fixtures::next_generation(&fixture.state.runtime().pin());
     let provider_ids = snapshot.providers.keys().copied().collect::<Vec<_>>();
     for provider in snapshot.providers.values_mut() {
         provider.kind = ProviderKind::Anthropic;
@@ -957,17 +861,7 @@ impl ProviderTransport for DropAwareTransport {
 #[tokio::test]
 async fn client_disconnect_drops_the_upstream_stream() {
     let fixture = test_gateway();
-    let snapshot = fixture.state.runtime().pin();
-    let mut snapshot = Snapshot {
-        generation: RuntimeGeneration {
-            id: RuntimeGenerationId::new(),
-            ordinal: snapshot.generation.ordinal + 1,
-            activated_at: Utc::now(),
-        },
-        providers: snapshot.providers.clone(),
-        routes: snapshot.routes.clone(),
-        api_keys: snapshot.api_keys.clone(),
-    };
+    let mut snapshot = fixtures::next_generation(&fixture.state.runtime().pin());
     let route = snapshot.routes.values_mut().next().unwrap();
     route.operations = BTreeSet::from([OperationKind::Generation]);
     route.max_attempts = NonZeroU16::new(1).unwrap();

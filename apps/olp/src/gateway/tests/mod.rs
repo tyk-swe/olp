@@ -13,12 +13,11 @@ use axum::{
     http::{Request, StatusCode, header},
     response::Response,
 };
-use chrono::Utc;
 use futures::{StreamExt, stream};
 use http_body_util::BodyExt;
 use olp_db::security::key_material::AuthHmacKey;
 use olp_engine::domain::{
-    auth::{ApiKey, ApiKeyDigest, ApiKeyLimits, ApiKeyScope, ApiKeyStatus},
+    auth::{ApiKey, ApiKeyDigest, ApiKeyScope},
     canonical::{
         events::{Error, ErrorClass, Event, EventSequenceValidator, FinishReason, Kind},
         identity::{OperationKind, RequestMetadata, Surface, TransportMode},
@@ -28,20 +27,12 @@ use olp_engine::domain::{
         },
         results::CanonicalResult,
     },
-    ids::{
-        ApiKeyId, ApiKeyLookupId, CredentialVersionId, DurationMs, ProviderId, RequestId, RouteId,
-        RouteSlug, RuntimeGenerationId, TargetId,
-    },
+    ids::{ApiKeyLookupId, DurationMs, ProviderId, RequestId, RouteSlug, TargetId},
     ports::{
         AttemptFailureClass, BoxFuture, MediaSpool, ProviderEventStream, ProviderOutput,
         ProviderRequest, ProviderTransport, TransportError,
     },
-    routing::{
-        provider::{Capability, Provider, ProviderKind},
-        route::{Route, Target},
-        selection::select_attempts,
-        snapshot::{RuntimeGeneration, Snapshot},
-    },
+    routing::{fixtures, provider::Capability, provider::ProviderKind, selection::select_attempts},
 };
 use olp_engine::inference::{
     circuit::Breaker,
@@ -136,65 +127,32 @@ fn test_state(streaming: bool) -> (GatewayState, String) {
     let material = auth_hmac_key.generate_api_key();
     let plaintext = material.expose_once().to_owned();
     let lookup = ApiKeyLookupId::parse(material.lookup_id.clone()).unwrap();
-    let route_slug = RouteSlug::parse("default").unwrap();
     let provider_id = ProviderId::new();
     let mode = if streaming {
         TransportMode::Streaming
     } else {
         TransportMode::Unary
     };
-    let provider = Provider {
-        id: provider_id,
-        name: "mock-openai".to_owned(),
-        kind: ProviderKind::OpenAi,
-        enabled: true,
-        active_credential: Some(CredentialVersionId::new()),
-        capabilities: BTreeSet::from([Capability::new(
-            "upstream-model",
-            OperationKind::Generation,
-            Surface::OpenAi,
-            mode,
-        )]),
-    };
-    let route = Route {
-        id: RouteId::new(),
-        routing_id: None,
-        slug: route_slug.clone(),
-        operations: BTreeSet::from([OperationKind::Generation]),
-        overall_timeout: DurationMs::new(5_000),
-        max_attempts: NonZeroU16::new(1).unwrap(),
-        targets: vec![Target {
-            id: TargetId::new(),
-            routing_id: None,
+    let snapshot = fixtures::snapshot(1)
+        .with_provider(fixtures::provider(
             provider_id,
-            upstream_model: "upstream-model".to_owned(),
-            priority: 0,
-            weight: NonZeroU32::new(1).unwrap(),
-            timeout: DurationMs::new(4_000),
-        }],
-    };
-    let snapshot = Snapshot {
-        generation: RuntimeGeneration {
-            id: RuntimeGenerationId::new(),
-            ordinal: 1,
-            activated_at: Utc::now(),
-        },
-        providers: BTreeMap::from([(provider_id, provider)]),
-        routes: BTreeMap::from([(route_slug, route)]),
-        api_keys: BTreeMap::from([(
-            lookup.clone(),
-            ApiKey {
-                id: ApiKeyId::new(),
-                lookup_id: lookup,
-                digest: ApiKeyDigest::new(material.digest),
-                status: ApiKeyStatus::Active,
-                expires_at: None,
-                scopes: BTreeSet::from([ApiKeyScope::Inference]),
-                allowed_routes: BTreeSet::new(),
-                limits: ApiKeyLimits::default(),
-            },
-        )]),
-    };
+            ProviderKind::OpenAi,
+            fixtures::capabilities(
+                "upstream-model",
+                Surface::OpenAi,
+                [(OperationKind::Generation, mode)],
+            ),
+        ))
+        .with_route(fixtures::route(
+            "default",
+            [OperationKind::Generation],
+            vec![fixtures::target(provider_id, "upstream-model")],
+        ))
+        .with_api_key(fixtures::api_key(
+            lookup,
+            ApiKeyDigest::new(material.digest),
+            [ApiKeyScope::Inference],
+        ));
     let runtime = Arc::new(Manager::empty());
     let transport: Arc<dyn ProviderTransport> = Arc::new(StaticTransport {
         events: vec![
@@ -259,16 +217,8 @@ fn test_principal(
 
 fn reinstall_api_keys(state: &GatewayState, api_keys: BTreeMap<ApiKeyLookupId, ApiKey>) {
     let pinned = state.runtime().pin();
-    let snapshot = Snapshot {
-        generation: RuntimeGeneration {
-            id: RuntimeGenerationId::new(),
-            ordinal: pinned.generation.ordinal + 1,
-            activated_at: Utc::now(),
-        },
-        providers: pinned.providers.clone(),
-        routes: pinned.routes.clone(),
-        api_keys,
-    };
+    let mut snapshot = fixtures::next_generation(&pinned);
+    snapshot.api_keys = api_keys;
     let transports = pinned
         .providers
         .keys()
@@ -292,16 +242,9 @@ fn install_result(state: &GatewayState, operation: OperationKind, result: Canoni
         .get_mut(&RouteSlug::parse("default").unwrap())
         .unwrap();
     route.operations = BTreeSet::from([operation]);
-    let snapshot = Snapshot {
-        generation: RuntimeGeneration {
-            id: RuntimeGenerationId::new(),
-            ordinal: pinned.generation.ordinal + 1,
-            activated_at: Utc::now(),
-        },
-        providers,
-        routes,
-        api_keys: pinned.api_keys.clone(),
-    };
+    let mut snapshot = fixtures::next_generation(&pinned);
+    snapshot.providers = providers;
+    snapshot.routes = routes;
     let transport: Arc<dyn ProviderTransport> = Arc::new(StaticResultTransport { result });
     state
         .runtime()
@@ -312,16 +255,7 @@ fn install_result(state: &GatewayState, operation: OperationKind, result: Canoni
 fn install_transport(state: &GatewayState, transport: Arc<dyn ProviderTransport>) {
     let pinned = state.runtime().pin();
     let provider_id = *pinned.providers.keys().next().unwrap();
-    let snapshot = Snapshot {
-        generation: RuntimeGeneration {
-            id: RuntimeGenerationId::new(),
-            ordinal: pinned.generation.ordinal + 1,
-            activated_at: Utc::now(),
-        },
-        providers: pinned.providers.clone(),
-        routes: pinned.routes.clone(),
-        api_keys: pinned.api_keys.clone(),
-    };
+    let snapshot = fixtures::next_generation(&pinned);
     state
         .runtime()
         .install(snapshot, BTreeMap::from([(provider_id, transport)]))

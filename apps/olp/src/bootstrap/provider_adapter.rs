@@ -292,19 +292,17 @@ fn runtime_provider_model(snapshot: &Snapshot, provider_id: ProviderId) -> AppRe
 
 #[cfg(test)]
 mod tests {
-    use std::collections::{BTreeMap, BTreeSet};
-
-    use chrono::Utc;
     use olp_db::{
         configuration::RuntimeProvider, security::aad::credential, security::envelope::MasterKey,
     };
     use olp_engine::domain::{
         canonical::identity::{OperationKind, Surface, TransportMode},
-        ids::{ProviderId, RuntimeGenerationId},
+        ids::ProviderId,
         provider::ProviderAuthMode,
         routing::{
-            provider::{Capability, Provider, ProviderKind},
-            snapshot::{RuntimeGeneration, Snapshot},
+            fixtures,
+            provider::{Capability, ProviderKind},
+            snapshot::Snapshot,
         },
     };
     use olp_engine::providers::factory::configuration::{Config, Credential};
@@ -349,37 +347,20 @@ mod tests {
     }
 
     fn snapshot(provider_id: ProviderId, models: &[&str]) -> Snapshot {
-        let capabilities = models
-            .iter()
-            .map(|model| {
+        let mut provider = fixtures::provider(
+            provider_id,
+            ProviderKind::VertexAi,
+            models.iter().map(|model| {
                 Capability::new(
                     *model,
                     OperationKind::Generation,
                     Surface::OpenAi,
                     TransportMode::Unary,
                 )
-            })
-            .collect::<BTreeSet<_>>();
-        Snapshot {
-            generation: RuntimeGeneration {
-                id: RuntimeGenerationId::new(),
-                ordinal: 1,
-                activated_at: Utc::now(),
-            },
-            providers: BTreeMap::from([(
-                provider_id,
-                Provider {
-                    id: provider_id,
-                    name: "provider".to_owned(),
-                    kind: ProviderKind::VertexAi,
-                    enabled: true,
-                    active_credential: None,
-                    capabilities,
-                },
-            )]),
-            routes: BTreeMap::new(),
-            api_keys: BTreeMap::new(),
-        }
+            }),
+        );
+        provider.active_credential = None;
+        fixtures::snapshot(1).with_provider(provider)
     }
 
     #[test]

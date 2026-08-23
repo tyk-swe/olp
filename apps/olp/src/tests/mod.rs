@@ -1,5 +1,5 @@
 use std::{
-    collections::{BTreeMap, BTreeSet},
+    collections::BTreeMap,
     convert::Infallible,
     net::SocketAddr,
     num::NonZeroU32,
@@ -25,10 +25,10 @@ use axum::{
 use base64::Engine as _;
 use http_body_util::BodyExt as _;
 use olp_engine::domain::{
-    auth::{ApiKey, ApiKeyDigest, ApiKeyLimits, ApiKeyScope, ApiKeyStatus},
+    auth::{ApiKeyDigest, ApiKeyLimits, ApiKeyScope, ApiKeyStatus},
     canonical::identity::{OperationKind, Surface},
-    ids::{ApiKeyId, ApiKeyLookupId, RuntimeGenerationId},
-    routing::snapshot::{RuntimeGeneration, Snapshot},
+    ids::ApiKeyLookupId,
+    routing::fixtures,
 };
 use olp_engine::inference::{limits::Reservation, principal::Principal, runtime::Manager};
 use tower::{ServiceBuilder, ServiceExt, service_fn};
@@ -80,31 +80,18 @@ fn inference_state(limited: bool) -> (ProcessComposition, String) {
     let runtime = Arc::new(Manager::empty());
     runtime
         .install(
-            Snapshot {
-                generation: RuntimeGeneration {
-                    id: RuntimeGenerationId::new(),
-                    ordinal: 1,
-                    activated_at: chrono::Utc::now(),
-                },
-                providers: BTreeMap::new(),
-                routes: BTreeMap::new(),
-                api_keys: BTreeMap::from([(
-                    lookup_id.clone(),
-                    ApiKey {
-                        id: ApiKeyId::new(),
-                        lookup_id,
-                        digest: ApiKeyDigest::new(material.digest),
-                        status: ApiKeyStatus::Active,
-                        expires_at: None,
-                        scopes: BTreeSet::from([ApiKeyScope::Inference, ApiKeyScope::ModelsRead]),
-                        allowed_routes: BTreeSet::new(),
-                        limits: ApiKeyLimits {
-                            requests_per_minute: limited.then(|| NonZeroU32::new(10).unwrap()),
-                            tokens_per_minute: None,
-                            concurrency: limited.then(|| NonZeroU32::new(2).unwrap()),
-                        },
-                    },
-                )]),
+            {
+                let mut api_key = fixtures::api_key(
+                    lookup_id,
+                    ApiKeyDigest::new(material.digest),
+                    [ApiKeyScope::Inference, ApiKeyScope::ModelsRead],
+                );
+                api_key.limits = ApiKeyLimits {
+                    requests_per_minute: limited.then(|| NonZeroU32::new(10).unwrap()),
+                    tokens_per_minute: None,
+                    concurrency: limited.then(|| NonZeroU32::new(2).unwrap()),
+                };
+                fixtures::snapshot(1).with_api_key(api_key)
             },
             BTreeMap::new(),
         )

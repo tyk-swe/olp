@@ -85,25 +85,13 @@ fn install_two_target_streams(
     route.operations = BTreeSet::from([operation]);
     route.max_attempts = NonZeroU16::new(2).unwrap();
     route.targets[0].timeout = DurationMs::new(20);
-    route.targets.push(Target {
-        id: TargetId::new(),
-        routing_id: None,
-        provider_id: second_provider_id,
-        upstream_model: "upstream-model".to_owned(),
-        priority: 1,
-        weight: NonZeroU32::new(1).unwrap(),
-        timeout: DurationMs::new(100),
-    });
-    let snapshot = Snapshot {
-        generation: RuntimeGeneration {
-            id: RuntimeGenerationId::new(),
-            ordinal: pinned.generation.ordinal + 1,
-            activated_at: Utc::now(),
-        },
-        providers,
-        routes,
-        api_keys: pinned.api_keys.clone(),
-    };
+    let mut failover_target = fixtures::target(second_provider_id, "upstream-model");
+    failover_target.priority = 1;
+    failover_target.timeout = DurationMs::new(100);
+    route.targets.push(failover_target);
+    let mut snapshot = fixtures::next_generation(&pinned);
+    snapshot.providers = providers;
+    snapshot.routes = routes;
     state
         .runtime()
         .install(

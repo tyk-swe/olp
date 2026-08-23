@@ -1,8 +1,5 @@
 use chrono::Utc;
-use olp_engine::domain::{
-    ids::RuntimeGenerationId,
-    routing::snapshot::{RuntimeGeneration, Snapshot},
-};
+use olp_engine::domain::routing::{fixtures, snapshot::Snapshot};
 use uuid::Uuid;
 
 use super::{
@@ -12,16 +9,7 @@ use super::{
 };
 
 fn snapshot() -> Snapshot {
-    Snapshot {
-        generation: RuntimeGeneration {
-            id: RuntimeGenerationId::new(),
-            ordinal: 7,
-            activated_at: Utc::now(),
-        },
-        providers: Default::default(),
-        routes: Default::default(),
-        api_keys: Default::default(),
-    }
+    fixtures::snapshot(7)
 }
 
 #[test]

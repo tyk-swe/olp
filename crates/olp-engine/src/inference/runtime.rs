@@ -191,7 +191,7 @@ mod tests {
         auth::{ApiKeyDigest, ApiKeyLimits, ApiKeyScope, ApiKeyStatus},
         ids::{ApiKeyId, RouteSlug},
         ports::{BoxFuture, ProviderEventStream, ProviderOutput, ProviderRequest, TransportError},
-        routing::provider::{Provider, ProviderKind},
+        routing::{fixtures, provider::ProviderKind},
     };
     use chrono::Duration;
     use futures::stream;
@@ -234,25 +234,12 @@ mod tests {
     fn pinned_generation_retains_its_own_transport_objects() {
         let manager = Manager::empty();
         let provider_id = ProviderId::new();
-        let snapshot = |ordinal| Snapshot {
-            generation: RuntimeGeneration {
-                id: RuntimeGenerationId::new(),
-                ordinal,
-                activated_at: Utc::now(),
-            },
-            providers: BTreeMap::from([(
+        let snapshot = |ordinal| {
+            fixtures::snapshot(ordinal).with_provider(fixtures::provider(
                 provider_id,
-                Provider {
-                    id: provider_id,
-                    name: "provider".into(),
-                    kind: ProviderKind::OpenAi,
-                    enabled: true,
-                    active_credential: None,
-                    capabilities: Default::default(),
-                },
-            )]),
-            routes: Default::default(),
-            api_keys: Default::default(),
+                ProviderKind::OpenAi,
+                [],
+            ))
         };
         let first: Arc<dyn ProviderTransport> = Arc::new(MarkerTransport);
         manager
@@ -276,27 +263,15 @@ mod tests {
         let manager = Manager::empty();
         let lookup_id = ApiKeyLookupId::parse("lookup_same_key").unwrap();
         let key_id = ApiKeyId::new();
-        let historical_key = ApiKey {
-            id: key_id,
-            lookup_id: lookup_id.clone(),
-            digest: ApiKeyDigest::new([1; 32]),
-            status: ApiKeyStatus::Active,
-            expires_at: None,
-            scopes: BTreeSet::from([ApiKeyScope::Inference]),
-            allowed_routes: BTreeSet::new(),
-            limits: ApiKeyLimits::default(),
-        };
-        let generation_id = RuntimeGenerationId::new();
-        let historical = Snapshot {
-            generation: RuntimeGeneration {
-                id: generation_id,
-                ordinal: 9,
-                activated_at: Utc::now() - Duration::hours(1),
-            },
-            providers: BTreeMap::new(),
-            routes: BTreeMap::new(),
-            api_keys: BTreeMap::from([(lookup_id.clone(), historical_key)]),
-        };
+        let mut historical_key = fixtures::api_key(
+            lookup_id.clone(),
+            ApiKeyDigest::new([1; 32]),
+            [ApiKeyScope::Inference],
+        );
+        historical_key.id = key_id;
+        let mut historical = fixtures::snapshot(9).with_api_key(historical_key);
+        historical.generation.activated_at = Utc::now() - Duration::hours(1);
+        let generation_id = historical.generation.id;
         let release_payload = serde_json::to_vec(&historical).unwrap();
         let release = ReleaseCandidate {
             generation_id: generation_id.as_uuid(),

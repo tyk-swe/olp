@@ -265,10 +265,7 @@ fn dummy_media_part(
 
 #[cfg(test)]
 mod tests {
-    use std::{
-        collections::{BTreeMap, BTreeSet},
-        num::{NonZeroU16, NonZeroU32},
-    };
+    use std::{collections::BTreeMap, num::NonZeroU16};
 
     use crate::domain::{
         canonical::requests::{
@@ -277,13 +274,8 @@ mod tests {
             ToolDefinition,
         },
         ids::{DurationMs, RouteId, RouteSlug, RuntimeGenerationId, TargetId},
-        routing::{
-            provider::{Capability, Provider},
-            route::{Route, Target},
-            snapshot::{RuntimeGeneration, Snapshot},
-        },
+        routing::{fixtures, snapshot::Snapshot},
     };
-    use chrono::Utc;
     use serde_json::json;
 
     use super::*;
@@ -545,77 +537,40 @@ mod tests {
         let incompatible = crate::domain::ids::ProviderId::new();
         let compatible = crate::domain::ids::ProviderId::new();
         let capability = |model: &str| {
-            BTreeSet::from([Capability::new(
+            fixtures::capabilities(
                 model,
-                crate::domain::canonical::identity::OperationKind::Generation,
                 Surface::OpenAi,
-                TransportMode::Unary,
-            )])
+                [(
+                    crate::domain::canonical::identity::OperationKind::Generation,
+                    TransportMode::Unary,
+                )],
+            )
         };
-        let route = Route {
-            id: RouteId::new(),
-            routing_id: None,
-            slug: route_slug.clone(),
-            operations: BTreeSet::from([
-                crate::domain::canonical::identity::OperationKind::Generation,
-            ]),
-            overall_timeout: DurationMs::new(2_000),
-            max_attempts: NonZeroU16::new(1).unwrap(),
-            targets: vec![
-                Target {
-                    id: TargetId::new(),
-                    routing_id: None,
-                    provider_id: incompatible,
-                    upstream_model: "claude".into(),
-                    priority: 0,
-                    weight: NonZeroU32::new(1).unwrap(),
-                    timeout: DurationMs::new(1_000),
-                },
-                Target {
-                    id: TargetId::new(),
-                    routing_id: None,
-                    provider_id: compatible,
-                    upstream_model: "gpt".into(),
-                    priority: 1,
-                    weight: NonZeroU32::new(1).unwrap(),
-                    timeout: DurationMs::new(1_000),
-                },
-            ],
-        };
+        let mut incompatible_target = fixtures::target(incompatible, "claude");
+        incompatible_target.timeout = DurationMs::new(1_000);
+        let mut compatible_target = fixtures::target(compatible, "gpt");
+        compatible_target.priority = 1;
+        compatible_target.timeout = DurationMs::new(1_000);
+        let mut route = fixtures::route(
+            route_slug.as_str(),
+            [crate::domain::canonical::identity::OperationKind::Generation],
+            vec![incompatible_target, compatible_target],
+        );
+        route.max_attempts = NonZeroU16::new(1).unwrap();
+        route.overall_timeout = DurationMs::new(2_000);
         (
-            Snapshot {
-                generation: RuntimeGeneration {
-                    id: RuntimeGenerationId::new(),
-                    ordinal: 1,
-                    activated_at: Utc::now(),
-                },
-                providers: BTreeMap::from([
-                    (
-                        incompatible,
-                        Provider {
-                            id: incompatible,
-                            name: "incompatible".into(),
-                            kind: ProviderKind::Anthropic,
-                            enabled: true,
-                            active_credential: None,
-                            capabilities: capability("claude"),
-                        },
-                    ),
-                    (
-                        compatible,
-                        Provider {
-                            id: compatible,
-                            name: "compatible".into(),
-                            kind: ProviderKind::OpenAi,
-                            enabled: true,
-                            active_credential: None,
-                            capabilities: capability("gpt"),
-                        },
-                    ),
-                ]),
-                routes: BTreeMap::from([(route_slug.clone(), route)]),
-                api_keys: BTreeMap::new(),
-            },
+            fixtures::snapshot(1)
+                .with_provider(fixtures::provider(
+                    incompatible,
+                    ProviderKind::Anthropic,
+                    capability("claude"),
+                ))
+                .with_provider(fixtures::provider(
+                    compatible,
+                    ProviderKind::OpenAi,
+                    capability("gpt"),
+                ))
+                .with_route(route),
             route_slug,
             operation,
             compatible,
