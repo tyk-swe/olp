@@ -23,7 +23,9 @@ afterEach(async () => {
 describe('generated API request boundary', () => {
   it('keeps reads same-origin, uncached, redirect-denying, and JSON-accepting', async () => {
     setCsrfToken('csrf-for-mutations-only');
-    const requests = captureRequests(() => jsonResponse({ setup_required: false }));
+    const requests = captureRequests(() =>
+      jsonResponse({ setup_required: false })
+    );
 
     await apiClient.GET('/api/v1/setup/status');
 
@@ -47,7 +49,10 @@ describe('generated API request boundary', () => {
       body: { display_name: 'Operator' }
     });
     await apiClient.PUT('/api/v1/settings/{key}', {
-      params: { path: { key: 'retention_days' }, header: { 'If-Match': `"${etag}"` } },
+      params: {
+        path: { key: 'retention_days' },
+        header: { 'If-Match': `"${etag}"` }
+      },
       body: { value: '30' }
     });
 
@@ -62,14 +67,20 @@ describe('generated API request boundary', () => {
     authLifecycle.establishSession(session);
 
     await apiClient.POST('/api/v1/sessions', {
-      body: { email: 'operator@example.com', password: 'correct horse battery staple' }
+      body: {
+        email: 'operator@example.com',
+        password: 'correct horse battery staple'
+      }
     });
     await apiClient.PATCH('/api/v1/profile', {
       params: { header: { 'If-Match': 'profile-etag' } },
       body: { display_name: 'Operator' }
     });
     await apiClient.PUT('/api/v1/settings/{key}', {
-      params: { path: { key: 'retention_days' }, header: { 'If-Match': 'setting-etag' } },
+      params: {
+        path: { key: 'retention_days' },
+        header: { 'If-Match': 'setting-etag' }
+      },
       body: { value: '30' }
     });
     await apiClient.DELETE('/api/v1/sessions/current');
@@ -90,14 +101,20 @@ describe('generated API request boundary', () => {
 
     clearCsrfToken();
     await apiClient.POST('/api/v1/sessions', {
-      body: { email: 'operator@example.com', password: 'correct horse battery staple' }
+      body: {
+        email: 'operator@example.com',
+        password: 'correct horse battery staple'
+      }
     });
     expect(requests[5]?.headers.has('x-csrf-token')).toBe(false);
   });
 
   it('routes response-side CSRF rotation through the lifecycle', async () => {
     captureRequests(() =>
-      jsonResponse({}, { headers: { 'x-csrf-token': 'csrf-rotated-by-response' } })
+      jsonResponse(
+        {},
+        { headers: { 'x-csrf-token': 'csrf-rotated-by-response' } }
+      )
     );
     authLifecycle.establishSession(session);
 

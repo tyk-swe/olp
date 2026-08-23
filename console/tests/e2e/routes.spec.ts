@@ -16,175 +16,180 @@ import {
 
 test.beforeEach(async ({ page }) => mockProviderKinds(page));
 
-test('Route Studio creates, simulates, validates, and activates deterministic routing', async ({
-  page
-}) => {
-  await page.emulateMedia({ forcedColors: 'active', reducedMotion: 'reduce' });
-  await mockSession(page, sessionOptions);
-  let routeState = 'draft';
-  let createBody: Record<string, unknown> | undefined;
-  let createHeaders: Record<string, string> = {};
-  let simulationBody: Record<string, unknown> | undefined;
-
-  const routeDraft = () => ({
-    id: ids.draft,
-    slug: 'default',
-    state: routeState,
-    overall_timeout_ms: 120000,
-    max_attempts: 1,
-    etag: '01980000-0000-7000-8000-000000000209',
-    based_on_revision_id: null,
-    operations: ['generation'],
-    targets: [
-      {
-        id: ids.target,
-        provider_model_id: ids.model,
-        provider_id: ids.provider,
-        provider_name: 'production-openai',
-        provider_model: 'gpt-5.4',
-        priority: 1,
-        weight: 100,
-        timeout_ms: 60000,
-        position: 0
-      }
-    ],
-    created_at: now,
-    updated_at: now
-  });
-
-  await page.route('**/api/v1/provider-models**', async (route) => {
-    await route.fulfill({
-      json: {
-        items: [
-          {
-            provider_id: ids.provider,
-            provider_name: 'production-openai',
-            provider_kind: 'openai',
-            model: certifiedModelRecord
-          }
-        ],
-        next_cursor: null
-      }
+test(
+  'Route Studio creates, simulates, validates, and activates deterministic routing',
+  { tag: '@browser' },
+  async ({ page }) => {
+    await page.emulateMedia({
+      forcedColors: 'active',
+      reducedMotion: 'reduce'
     });
-  });
-  await page.route('**/api/v1/route-drafts**', async (route) => {
-    const request = route.request();
-    const pathname = new URL(request.url()).pathname;
-    if (pathname === '/api/v1/route-drafts' && request.method() === 'POST') {
-      createBody = request.postDataJSON();
-      createHeaders = await request.allHeaders();
-      await route.fulfill({
-        status: 201,
-        json: {
-          id: ids.draft,
-          slug: 'default',
-          state: 'draft',
-          etag: routeDraft().etag
+    await mockSession(page, sessionOptions);
+    let routeState = 'draft';
+    let createBody: Record<string, unknown> | undefined;
+    let createHeaders: Record<string, string> = {};
+    let simulationBody: Record<string, unknown> | undefined;
+
+    const routeDraft = () => ({
+      id: ids.draft,
+      slug: 'default',
+      state: routeState,
+      overall_timeout_ms: 120000,
+      max_attempts: 1,
+      etag: '01980000-0000-7000-8000-000000000209',
+      based_on_revision_id: null,
+      operations: ['generation'],
+      targets: [
+        {
+          id: ids.target,
+          provider_model_id: ids.model,
+          provider_id: ids.provider,
+          provider_name: 'production-openai',
+          provider_model: 'gpt-5.4',
+          priority: 1,
+          weight: 100,
+          timeout_ms: 60000,
+          position: 0
         }
-      });
-      return;
-    }
-    if (
-      pathname === `/api/v1/route-drafts/${ids.draft}` &&
-      request.method() === 'GET'
-    ) {
-      await route.fulfill({ json: routeDraft() });
-      return;
-    }
-    if (pathname.endsWith('/simulate')) {
-      simulationBody = request.postDataJSON();
+      ],
+      created_at: now,
+      updated_at: now
+    });
+
+    await page.route('**/api/v1/provider-models**', async (route) => {
       await route.fulfill({
         json: {
-          deterministic_seed: 'setup-preview',
-          operation: 'generation',
-          surface: 'openai',
-          mode: 'streaming',
-          targets: [
+          items: [
             {
-              target_id: ids.target,
               provider_id: ids.provider,
               provider_name: 'production-openai',
-              provider_model: 'gpt-5.4',
-              priority: 1,
-              eligible: true,
-              reason: null,
-              attempt: 1
+              provider_kind: 'openai',
+              model: certifiedModelRecord
             }
-          ]
+          ],
+          next_cursor: null
         }
       });
-      return;
-    }
-    if (pathname.endsWith('/validate')) {
-      routeState = 'validated';
-      await route.fulfill({
-        json: {
-          id: ids.draft,
-          slug: 'default',
-          state: 'validated',
-          etag: routeDraft().etag
-        }
-      });
-      return;
-    }
-    if (pathname.endsWith('/activate')) {
-      await route.fulfill({
-        json: {
-          route_id: ids.route,
-          revision_id: ids.revision,
-          revision: 1,
-          runtime_generation: { id: ids.generation, sequence: 3 }
-        }
-      });
-      return;
-    }
-    failUnexpectedApiRequest(route);
-  });
-
-  await emulateTwoHundredPercentZoom(page);
-  await page.goto('/routes/new');
-  await expect(
-    page.getByRole('heading', { name: 'Build a route draft.' })
-  ).toBeVisible();
-  expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
-  await page.getByRole('button', { name: 'Add target' }).click();
-  await page.getByLabel('Maximum attempts').fill('1');
-  await page.getByRole('button', { name: 'Create draft' }).click();
-  await expect(page).toHaveURL(new RegExp(`/routes/${ids.draft}$`));
-  expect(createBody).toMatchObject({
-    slug: 'default',
-    max_attempts: 1,
-    targets: [
-      {
-        provider_id: ids.provider,
-        provider_model: 'gpt-5.4',
-        priority: 1,
-        weight: 100
+    });
+    await page.route('**/api/v1/route-drafts**', async (route) => {
+      const request = route.request();
+      const pathname = new URL(request.url()).pathname;
+      if (pathname === '/api/v1/route-drafts' && request.method() === 'POST') {
+        createBody = request.postDataJSON();
+        createHeaders = await request.allHeaders();
+        await route.fulfill({
+          status: 201,
+          json: {
+            id: ids.draft,
+            slug: 'default',
+            state: 'draft',
+            etag: routeDraft().etag
+          }
+        });
+        return;
       }
-    ]
-  });
-  expect(createHeaders['idempotency-key']).toMatch(/^[0-9a-f-]{36}$/);
-  expect(createHeaders['x-csrf-token']).toBe('csrf-e2e');
+      if (
+        pathname === `/api/v1/route-drafts/${ids.draft}` &&
+        request.method() === 'GET'
+      ) {
+        await route.fulfill({ json: routeDraft() });
+        return;
+      }
+      if (pathname.endsWith('/simulate')) {
+        simulationBody = request.postDataJSON();
+        await route.fulfill({
+          json: {
+            deterministic_seed: 'setup-preview',
+            operation: 'generation',
+            surface: 'openai',
+            mode: 'streaming',
+            targets: [
+              {
+                target_id: ids.target,
+                provider_id: ids.provider,
+                provider_name: 'production-openai',
+                provider_model: 'gpt-5.4',
+                priority: 1,
+                eligible: true,
+                reason: null,
+                attempt: 1
+              }
+            ]
+          }
+        });
+        return;
+      }
+      if (pathname.endsWith('/validate')) {
+        routeState = 'validated';
+        await route.fulfill({
+          json: {
+            id: ids.draft,
+            slug: 'default',
+            state: 'validated',
+            etag: routeDraft().etag
+          }
+        });
+        return;
+      }
+      if (pathname.endsWith('/activate')) {
+        await route.fulfill({
+          json: {
+            route_id: ids.route,
+            revision_id: ids.revision,
+            revision: 1,
+            runtime_generation: { id: ids.generation, sequence: 3 }
+          }
+        });
+        return;
+      }
+      failUnexpectedApiRequest(route);
+    });
 
-  await page.getByRole('button', { name: 'Simulate order' }).click();
-  await expect(
-    page.getByRole('heading', { name: 'Attempt explanation' })
-  ).toBeVisible();
-  await expect(page.getByText('Eligible in priority group 1')).toBeVisible();
-  expect(simulationBody).toEqual({
-    operation: 'generation',
-    surface: 'openai',
-    mode: 'streaming',
-    seed: 'setup-preview'
-  });
-  await page.getByRole('button', { name: 'Validate draft' }).click();
-  await expect(page.getByText('Validation passed.')).toBeVisible();
-  await page.getByRole('button', { name: 'Activate route' }).click();
-  await expect(page.getByText('Revision 1 active')).toBeVisible();
-  await expect(
-    page.getByRole('link', { name: 'View revision history' })
-  ).toHaveAttribute('href', `/routes/${ids.route}/revisions`);
-});
+    await emulateTwoHundredPercentZoom(page);
+    await page.goto('/routes/new');
+    await expect(
+      page.getByRole('heading', { name: 'Build a route draft.' })
+    ).toBeVisible();
+    expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+    await page.getByRole('button', { name: 'Add target' }).click();
+    await page.getByLabel('Maximum attempts').fill('1');
+    await page.getByRole('button', { name: 'Create draft' }).click();
+    await expect(page).toHaveURL(new RegExp(`/routes/${ids.draft}$`));
+    expect(createBody).toMatchObject({
+      slug: 'default',
+      max_attempts: 1,
+      targets: [
+        {
+          provider_id: ids.provider,
+          provider_model: 'gpt-5.4',
+          priority: 1,
+          weight: 100
+        }
+      ]
+    });
+    expect(createHeaders['idempotency-key']).toMatch(/^[0-9a-f-]{36}$/);
+    expect(createHeaders['x-csrf-token']).toBe('csrf-e2e');
+
+    await page.getByRole('button', { name: 'Simulate order' }).click();
+    await expect(
+      page.getByRole('heading', { name: 'Attempt explanation' })
+    ).toBeVisible();
+    await expect(page.getByText('Eligible in priority group 1')).toBeVisible();
+    expect(simulationBody).toEqual({
+      operation: 'generation',
+      surface: 'openai',
+      mode: 'streaming',
+      seed: 'setup-preview'
+    });
+    await page.getByRole('button', { name: 'Validate draft' }).click();
+    await expect(page.getByText('Validation passed.')).toBeVisible();
+    await page.getByRole('button', { name: 'Activate route' }).click();
+    await expect(page.getByText('Revision 1 active')).toBeVisible();
+    await expect(
+      page.getByRole('link', { name: 'View revision history' })
+    ).toHaveAttribute('href', `/routes/${ids.route}/revisions`);
+  }
+);
 
 test('failed route conflict reload preserves dirty fields until a successful reload', async ({
   page

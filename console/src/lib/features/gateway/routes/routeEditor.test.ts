@@ -140,13 +140,15 @@ describe('Route Studio model eligibility', () => {
 
   it('uses only certified capabilities selected by the route', () => {
     const operations = ['generation', 'embeddings'];
-    expect(certifiedCapabilities(target, modelOptions, operations)).toMatchObject([
-      { operation: 'generation', source: 'certified' }
-    ]);
+    expect(
+      certifiedCapabilities(target, modelOptions, operations)
+    ).toMatchObject([{ operation: 'generation', source: 'certified' }]);
     expect(eligibleTargetTuples(target, modelOptions, operations)).toEqual([
       'generation · openai · streaming'
     ]);
-    expect(missingTargetOperations(target, modelOptions, operations)).toEqual(['embeddings']);
+    expect(missingTargetOperations(target, modelOptions, operations)).toEqual([
+      'embeddings'
+    ]);
   });
 
   it('warns only when no selected target certifies an operation', () => {
@@ -164,7 +166,9 @@ describe('Route Studio model eligibility', () => {
 describe('Route Studio editor validation', () => {
   it('accepts the current valid slug, attempt, and target contract', () => {
     expect(validateRouteEditor(validEditor)).toBeNull();
-    expect(validateRouteEditor({ ...validEditor, slug: `a${'b'.repeat(62)}` })).toBeNull();
+    expect(
+      validateRouteEditor({ ...validEditor, slug: `a${'b'.repeat(62)}` })
+    ).toBeNull();
   });
 
   it.each([
@@ -177,12 +181,11 @@ describe('Route Studio editor validation', () => {
     'contains_underscore',
     'contains/slash',
     `a${'b'.repeat(63)}`
-  ])(
-    'rejects invalid route slug %j',
-    (slug) => {
-      expect(validateRouteEditor({ ...validEditor, slug })).toContain('lowercase letters');
-    }
-  );
+  ])('rejects invalid route slug %j', (slug) => {
+    expect(validateRouteEditor({ ...validEditor, slug })).toContain(
+      'lowercase letters'
+    );
+  });
 
   it('requires operations and targets before attempt validation', () => {
     expect(validateRouteEditor({ ...validEditor, operations: [] })).toBe(
@@ -193,31 +196,36 @@ describe('Route Studio editor validation', () => {
     );
   });
 
-  it.each([0, 2])('rejects maximum attempt count %s for one target', (maxAttempts) => {
-    expect(validateRouteEditor({ ...validEditor, maxAttempts })).toContain(
-      'between 1 and the number of targets'
-    );
-  });
+  it.each([0, 2])(
+    'rejects maximum attempt count %s for one target',
+    (maxAttempts) => {
+      expect(validateRouteEditor({ ...validEditor, maxAttempts })).toContain(
+        'between 1 and the number of targets'
+      );
+    }
+  );
 
-  it.each([
-    { priority: 0 },
-    { weight: 0 },
-    { timeoutMs: 99 }
-  ])('rejects an invalid target bound: %o', (override) => {
-    expect(
-      validateRouteEditor({
-        ...validEditor,
-        targets: [{ ...target, ...override }]
-      })
-    ).toBe('Every target needs a positive priority, weight, and timeout.');
-  });
+  it.each([{ priority: 0 }, { weight: 0 }, { timeoutMs: 99 }])(
+    'rejects an invalid target bound: %o',
+    (override) => {
+      expect(
+        validateRouteEditor({
+          ...validEditor,
+          targets: [{ ...target, ...override }]
+        })
+      ).toBe('Every target needs a positive priority, weight, and timeout.');
+    }
+  );
 });
 
 describe('Route Studio API payloads', () => {
   const values: RouteEditorValues = {
     ...validEditor,
     operations: ['generation', 'embeddings'],
-    targets: [target, { ...target, providerModelId: 'model-b', priority: 2, weight: 25 }],
+    targets: [
+      target,
+      { ...target, providerModelId: 'model-b', priority: 2, weight: 25 }
+    ],
     maxAttempts: 2
   };
 

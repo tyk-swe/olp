@@ -6,19 +6,29 @@ const authHmacKeyFile = process.env.OLP_CONSOLE_E2E_AUTH_HMAC_KEY_FILE;
 const bootstrapTokenFile = process.env.OLP_CONSOLE_E2E_BOOTSTRAP_TOKEN_FILE;
 const valkeyUrl = process.env.OLP_VALKEY_URL;
 if (!databaseUrl) {
-  throw new Error('OLP_CONSOLE_E2E_DATABASE_URL is required for the Rust-hosted console integration');
+  throw new Error(
+    'OLP_CONSOLE_E2E_DATABASE_URL is required for the Rust-hosted console integration'
+  );
 }
 if (!masterKeyFile) {
-  throw new Error('OLP_CONSOLE_E2E_MASTER_KEY_FILE is required for invitation integration');
+  throw new Error(
+    'OLP_CONSOLE_E2E_MASTER_KEY_FILE is required for invitation integration'
+  );
 }
 if (!authHmacKeyFile) {
-  throw new Error('OLP_CONSOLE_E2E_AUTH_HMAC_KEY_FILE is required for control-plane authentication');
+  throw new Error(
+    'OLP_CONSOLE_E2E_AUTH_HMAC_KEY_FILE is required for control-plane authentication'
+  );
 }
 if (!bootstrapTokenFile) {
-  throw new Error('OLP_CONSOLE_E2E_BOOTSTRAP_TOKEN_FILE is required for first-run setup');
+  throw new Error(
+    'OLP_CONSOLE_E2E_BOOTSTRAP_TOKEN_FILE is required for first-run setup'
+  );
 }
 if (!valkeyUrl) {
-  throw new Error('OLP_VALKEY_URL is required for the complete gateway integration');
+  throw new Error(
+    'OLP_VALKEY_URL is required for the complete gateway integration'
+  );
 }
 
 export default defineConfig({

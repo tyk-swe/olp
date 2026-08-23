@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { dateTimeLocalValue, formatCompact, formatCost, statusLabel, statusTone } from './format';
+import {
+  dateTimeLocalValue,
+  formatCompact,
+  formatCost,
+  statusLabel,
+  statusTone
+} from './format';
 
 describe('shared formatting', () => {
   it('never represents missing pricing as zero', () => {

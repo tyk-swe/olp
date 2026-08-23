@@ -67,16 +67,23 @@ export function surfacesFor(operation: string): string[] {
 export function modesFor(operation: string): string[] {
   if (operation === 'video_create') return ['async'];
   if (
-    ['generation', 'image_generation', 'image_edit', 'speech', 'transcription'].includes(
-      operation
-    )
+    [
+      'generation',
+      'image_generation',
+      'image_edit',
+      'speech',
+      'transcription'
+    ].includes(operation)
   ) {
     return ['unary', 'streaming'];
   }
   return ['unary'];
 }
 
-function providerModel(target: EditableTarget, modelOptions: RouteModelOption[]) {
+function providerModel(
+  target: EditableTarget,
+  modelOptions: RouteModelOption[]
+) {
   return modelOptions.find((option) => option.id === target.providerModelId);
 }
 
@@ -87,7 +94,8 @@ export function certifiedCapabilities(
 ) {
   return (providerModel(target, modelOptions)?.capabilities ?? []).filter(
     (capability) =>
-      capability.source === 'certified' && operations.includes(capability.operation)
+      capability.source === 'certified' &&
+      operations.includes(capability.operation)
   );
 }
 
@@ -98,7 +106,8 @@ export function missingTargetOperations(
 ): string[] {
   const capabilities = certifiedCapabilities(target, modelOptions, operations);
   return operations.filter(
-    (operation) => !capabilities.some((capability) => capability.operation === operation)
+    (operation) =>
+      !capabilities.some((capability) => capability.operation === operation)
   );
 }
 
@@ -108,7 +117,8 @@ export function eligibleTargetTuples(
   operations: string[]
 ): string[] {
   return certifiedCapabilities(target, modelOptions, operations).map(
-    (capability) => `${capability.operation} · ${capability.surface} · ${capability.mode}`
+    (capability) =>
+      `${capability.operation} · ${capability.surface} · ${capability.mode}`
   );
 }
 
@@ -134,14 +144,17 @@ export function validateRouteEditor(values: RouteEditorValues): string | null {
   if (!validSlug) {
     return 'Use 1–63 lowercase letters or numbers with single internal hyphens.';
   }
-  if (!values.operations.length) return 'Select at least one supported operation.';
-  if (!values.targets.length) return 'Add at least one eligible provider model target.';
+  if (!values.operations.length)
+    return 'Select at least one supported operation.';
+  if (!values.targets.length)
+    return 'Add at least one eligible provider model target.';
   if (values.maxAttempts < 1 || values.maxAttempts > values.targets.length) {
     return 'Maximum attempts must be between 1 and the number of targets.';
   }
   if (
     values.targets.some(
-      (target) => target.weight < 1 || target.timeoutMs < 100 || target.priority < 1
+      (target) =>
+        target.weight < 1 || target.timeoutMs < 100 || target.priority < 1
     )
   ) {
     return 'Every target needs a positive priority, weight, and timeout.';

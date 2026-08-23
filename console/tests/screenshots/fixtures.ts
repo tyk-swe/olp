@@ -306,10 +306,14 @@ const routeDraftItems = [
 
 export async function mockRoutes(page: Page) {
   await page.route('**/api/v1/routes*', async (route) => {
-    await route.fulfill({ json: { items: activeRouteItems, next_cursor: null } });
+    await route.fulfill({
+      json: { items: activeRouteItems, next_cursor: null }
+    });
   });
   await page.route('**/api/v1/route-drafts*', async (route) => {
-    await route.fulfill({ json: { items: routeDraftItems, next_cursor: null } });
+    await route.fulfill({
+      json: { items: routeDraftItems, next_cursor: null }
+    });
   });
 }
 
@@ -394,7 +398,9 @@ function requestSummary(input: {
     operation: input.operation,
     surface: input.surface,
     started_at: started,
-    completed_at: new Date(new Date(started).getTime() + input.latencyMs).toISOString(),
+    completed_at: new Date(
+      new Date(started).getTime() + input.latencyMs
+    ).toISOString(),
     status_code: input.statusCode,
     error_class: null,
     total_latency_ms: input.latencyMs,

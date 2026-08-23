@@ -34,7 +34,6 @@
   function dismissBackdrop(event: MouseEvent) {
     if (event.target === mobileNavigation) closeNavigation();
   }
-
 </script>
 
 <a class="skip-link" href="#main-content">Skip to main content</a>
@@ -54,7 +53,13 @@
 
   <div class="workspace">
     <header class="topbar">
-      <button class="menu-button" type="button" aria-label="Open navigation" aria-controls="mobile-navigation" onclick={openNavigation}>
+      <button
+        class="menu-button"
+        type="button"
+        aria-label="Open navigation"
+        aria-controls="mobile-navigation"
+        onclick={openNavigation}
+      >
         <NavIcon name="menu" />
       </button>
 
@@ -64,20 +69,31 @@
       </div>
 
       <div class="topbar-actions">
-        <span class="edition"><span aria-hidden="true"></span>Local installation</span>
+        <span class="edition"
+          ><span aria-hidden="true"></span>Local installation</span
+        >
         <ThemeToggle />
         <details class="account-menu">
           <!-- Chromium's accessibility tree does not consistently expose the native summary role. -->
           <!-- svelte-ignore a11y_no_redundant_roles -->
           <summary role="button" aria-label="Open account menu">
-            <span class="avatar" aria-hidden="true">{user?.display_name?.slice(0, 1).toUpperCase() ?? 'A'}</span>
+            <span class="avatar" aria-hidden="true"
+              >{user?.display_name?.slice(0, 1).toUpperCase() ?? 'A'}</span
+            >
             <span class="account-label">{user?.display_name ?? 'Account'}</span>
             <NavIcon name="chevron" size={16} />
           </summary>
           <div class="account-popover">
             <a href={resolve('/settings/profile')}>Personal profile</a>
-            {#if can(user.role, 'settings.read')}<a href={resolve('/settings')}>Installation settings</a>{/if}
-            <button type="button" onclick={onSignOut} disabled={signingOut} aria-busy={signingOut}>
+            {#if can(user.role, 'settings.read')}<a href={resolve('/settings')}
+                >Installation settings</a
+              >{/if}
+            <button
+              type="button"
+              onclick={onSignOut}
+              disabled={signingOut}
+              aria-busy={signingOut}
+            >
               {signingOut ? 'Signing out…' : 'Sign out'}
             </button>
           </div>
@@ -92,7 +108,11 @@
             <strong>Sign out failed</strong>
             <p>{signOutError} Your session may still be active.</p>
           </div>
-          <button class="button button-secondary" type="button" onclick={onSignOut}>Try again</button>
+          <button
+            class="button button-secondary"
+            type="button"
+            onclick={onSignOut}>Try again</button
+          >
         </div>
       {/if}
       {@render children()}
@@ -100,16 +120,35 @@
   </div>
 </div>
 
-<dialog id="mobile-navigation" class="mobile-dialog" bind:this={mobileNavigation} onclick={dismissBackdrop}>
+<dialog
+  id="mobile-navigation"
+  class="mobile-dialog"
+  bind:this={mobileNavigation}
+  onclick={dismissBackdrop}
+>
   <div class="mobile-drawer">
     <div class="drawer-heading">
-      <a class="brand" href={resolve('/')} aria-label="OpenLLMProxy overview" onclick={closeNavigation}>
+      <a
+        class="brand"
+        href={resolve('/')}
+        aria-label="OpenLLMProxy overview"
+        onclick={closeNavigation}
+      >
         <BrandMark />
         <span>OpenLLMProxy</span>
       </a>
-      <button type="button" class="close-button" aria-label="Close navigation" onclick={closeNavigation}>×</button>
+      <button
+        type="button"
+        class="close-button"
+        aria-label="Close navigation"
+        onclick={closeNavigation}>×</button
+      >
     </div>
-    <Navigation role={user.role} label="Mobile primary" onNavigate={closeNavigation} />
+    <Navigation
+      role={user.role}
+      label="Mobile primary"
+      onNavigate={closeNavigation}
+    />
   </div>
 </dialog>
 

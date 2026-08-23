@@ -10,7 +10,9 @@ export {
 
 export function failUnexpectedApiRequest(route: Route): never {
   const request = route.request();
-  throw new Error(`Unexpected API request: ${request.method()} ${new URL(request.url()).pathname}`);
+  throw new Error(
+    `Unexpected API request: ${request.method()} ${new URL(request.url()).pathname}`
+  );
 }
 
 export async function mockSession(
@@ -54,7 +56,10 @@ export async function denyClipboard(page: Page) {
       configurable: true,
       value: {
         async writeText() {
-          throw new DOMException('Clipboard permission denied', 'NotAllowedError');
+          throw new DOMException(
+            'Clipboard permission denied',
+            'NotAllowedError'
+          );
         }
       }
     });
@@ -75,11 +80,10 @@ export const test = base.extend({
     page.on('console', (message) => {
       const text = message.text();
       if (
-        (message.type() === 'error' && !text.startsWith('Failed to load resource:'))
-        || (
-          message.type() === 'warning'
-          && svelteWarningMarkers.some((marker) => text.includes(marker))
-        )
+        (message.type() === 'error' &&
+          !text.startsWith('Failed to load resource:')) ||
+        (message.type() === 'warning' &&
+          svelteWarningMarkers.some((marker) => text.includes(marker)))
       ) {
         runtimeFailures.push(`Console ${message.type()}: ${text}`);
       }
@@ -88,7 +92,9 @@ export const test = base.extend({
     await use(page);
 
     if (runtimeFailures.length > 0) {
-      throw new Error(`Browser runtime failures:\n${runtimeFailures.join('\n')}`);
+      throw new Error(
+        `Browser runtime failures:\n${runtimeFailures.join('\n')}`
+      );
     }
   }
 });

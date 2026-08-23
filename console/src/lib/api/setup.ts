@@ -9,10 +9,17 @@ export type CreateOwnerInput = Schemas['SetupRequest'];
 
 type SetupUser = Schemas['UserResponse'] & { role: 'owner' };
 
-export type CreateOwnerResponse = Omit<Schemas['SessionResponse'], 'user'> & { user: SetupUser };
+export type CreateOwnerResponse = Omit<Schemas['SessionResponse'], 'user'> & {
+  user: SetupUser;
+};
 
-export async function getSetupStatus(signal?: AbortSignal): Promise<SetupStatus> {
-  const { data, error, response } = await apiClient.GET('/api/v1/setup/status', { signal });
+export async function getSetupStatus(
+  signal?: AbortSignal
+): Promise<SetupStatus> {
+  const { data, error, response } = await apiClient.GET(
+    '/api/v1/setup/status',
+    { signal }
+  );
   const value = result(data, error, response);
   if (typeof value?.setup_required !== 'boolean') {
     throw new ApiProblem({

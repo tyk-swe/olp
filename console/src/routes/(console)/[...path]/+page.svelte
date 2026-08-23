@@ -16,8 +16,29 @@
 </section>
 
 <style>
-  .not-found { display: flex; max-width: 48rem; gap: 1rem; margin-top: 2rem; padding: 1.5rem; }
-  .not-found > span { display: grid; width: 2.75rem; height: 2.75rem; flex: none; place-items: center; border-radius: 0.375rem; background: var(--accent-soft); color: var(--accent-strong); }
-  .not-found h2 { margin: 0; font-size: 1.2rem; }
-  .not-found p { margin: 0.5rem 0 1rem; color: var(--foreground-muted); }
+  .not-found {
+    display: flex;
+    max-width: 48rem;
+    gap: 1rem;
+    margin-top: 2rem;
+    padding: 1.5rem;
+  }
+  .not-found > span {
+    display: grid;
+    width: 2.75rem;
+    height: 2.75rem;
+    flex: none;
+    place-items: center;
+    border-radius: 0.375rem;
+    background: var(--accent-soft);
+    color: var(--accent-strong);
+  }
+  .not-found h2 {
+    margin: 0;
+    font-size: 1.2rem;
+  }
+  .not-found p {
+    margin: 0.5rem 0 1rem;
+    color: var(--foreground-muted);
+  }
 </style>

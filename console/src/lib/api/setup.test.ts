@@ -45,7 +45,11 @@ describe('setup API', () => {
 
     await expect(
       createOwner(
-        { email: 'owner@example.com', password: 'long secure phrase', display_name: 'Ada Owner' },
+        {
+          email: 'owner@example.com',
+          password: 'long secure phrase',
+          display_name: 'Ada Owner'
+        },
         'bootstrap-token-value'
       )
     ).resolves.toEqual(responseBody);
@@ -61,7 +65,9 @@ describe('setup API', () => {
       })
     );
     expect(request.headers.has('idempotency-key')).toBe(false);
-    expect(request.headers.get('x-olp-setup-token')).toBe('bootstrap-token-value');
+    expect(request.headers.get('x-olp-setup-token')).toBe(
+      'bootstrap-token-value'
+    );
   });
 
   it('normalizes RFC 9457 field errors', async () => {
@@ -75,7 +81,10 @@ describe('setup API', () => {
             status: 422,
             errors: { email: ['That address is already in use.'] }
           }),
-          { status: 422, headers: { 'content-type': 'application/problem+json' } }
+          {
+            status: 422,
+            headers: { 'content-type': 'application/problem+json' }
+          }
         )
       )
     );

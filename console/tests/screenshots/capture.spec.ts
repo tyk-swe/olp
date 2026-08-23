@@ -33,7 +33,9 @@ async function capture(page: import('@playwright/test').Page, name: string) {
   });
   await waitForStableLayout(page);
   const height = await page.evaluate(() =>
-    Math.ceil(document.querySelector('.shell')?.getBoundingClientRect().height ?? 900)
+    Math.ceil(
+      document.querySelector('.shell')?.getBoundingClientRect().height ?? 900
+    )
   );
   await page.setViewportSize({ width: 1440, height: Math.max(480, height) });
   await waitForStableLayout(page);
@@ -58,8 +60,12 @@ test('overview dashboard', async ({ page }) => {
   await mockRecentRequests(page);
 
   await page.goto('/');
-  await expect(page.getByRole('heading', { name: 'Bring your first model route online.' })).toBeVisible();
+  await expect(
+    page.getByRole('heading', { name: 'Bring your first model route online.' })
+  ).toBeVisible();
   await expect(page.getByText('3 active').first()).toBeVisible();
-  await expect(page.getByRole('region', { name: 'Five most recent requests' })).toContainText('support-chat');
+  await expect(
+    page.getByRole('region', { name: 'Five most recent requests' })
+  ).toContainText('support-chat');
   await capture(page, 'overview');
 });

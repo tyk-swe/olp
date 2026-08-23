@@ -29,12 +29,17 @@
   };
 
   onMount(() => {
-    const fragment = new URLSearchParams(window.location.hash.replace(/^#/, ''));
+    const fragment = new URLSearchParams(
+      window.location.hash.replace(/^#/, '')
+    );
     token = fragment.get('token') ?? '';
     // Remove the one-time material before the invitee enters any data. The
     // token remains only in this component's memory until submission.
     view = token ? 'ready' : 'invalid';
-    const scrub = window.setTimeout(() => replaceState(resolve('/invitations/accept'), {}), 0);
+    const scrub = window.setTimeout(
+      () => replaceState(resolve('/invitations/accept'), {}),
+      0
+    );
     return () => {
       window.clearTimeout(scrub);
       token = '';
@@ -47,7 +52,9 @@
 
   function applyFieldErrors(problem: ApiProblem) {
     const next: InvitationAcceptanceErrors = {};
-    for (const [field, fieldMessages] of Object.entries(problem.problem.errors ?? {})) {
+    for (const [field, fieldMessages] of Object.entries(
+      problem.problem.errors ?? {}
+    )) {
       const local = serverFields[field];
       if (local && fieldMessages[0]) next[local] = fieldMessages[0];
     }
@@ -85,7 +92,8 @@
           message = error.problem.detail ?? error.problem.title;
         }
       } else {
-        message = 'The control API could not be reached. Check the installation and try again.';
+        message =
+          'The control API could not be reached. Check the installation and try again.';
       }
     } finally {
       busy = false;
@@ -106,14 +114,21 @@
       <p class="eyebrow">Invitation unavailable</p>
       <h1>This invitation link is incomplete.</h1>
       <p>Ask an installation owner for a fresh one-time invitation link.</p>
-      <a class="button button-secondary" href={resolve('/login')}>Go to sign in</a>
+      <a class="button button-secondary" href={resolve('/login')}
+        >Go to sign in</a
+      >
     </div>
   {:else if view === 'expired'}
     <div class="state" role="alert">
       <p class="eyebrow">Invitation unavailable</p>
       <h1>This invitation can no longer be used.</h1>
-      <p>It may be expired, revoked, or already accepted. Ask an installation owner for a new link.</p>
-      <a class="button button-secondary" href={resolve('/login')}>Go to sign in</a>
+      <p>
+        It may be expired, revoked, or already accepted. Ask an installation
+        owner for a new link.
+      </p>
+      <a class="button button-secondary" href={resolve('/login')}
+        >Go to sign in</a
+      >
     </div>
   {:else}
     <div class="heading">
@@ -126,33 +141,117 @@
 
     <form novalidate onsubmit={submit}>
       <label for="invited-display-name">Display name</label>
-      <input id="invited-display-name" autocomplete="name" maxlength="100" bind:value={values.displayName} aria-invalid={errors.displayName ? 'true' : undefined} aria-describedby={errors.displayName ? 'display-name-error' : undefined} disabled={busy} />
-      {#if errors.displayName}<small id="display-name-error" class="field-error">{errors.displayName}</small>{/if}
+      <input
+        id="invited-display-name"
+        autocomplete="name"
+        maxlength="100"
+        bind:value={values.displayName}
+        aria-invalid={errors.displayName ? 'true' : undefined}
+        aria-describedby={errors.displayName ? 'display-name-error' : undefined}
+        disabled={busy}
+      />
+      {#if errors.displayName}<small id="display-name-error" class="field-error"
+          >{errors.displayName}</small
+        >{/if}
 
       <label for="invited-password">Password</label>
-      <input id="invited-password" type="password" autocomplete="new-password" minlength="12" maxlength="1024" bind:value={values.password} aria-invalid={errors.password ? 'true' : undefined} aria-describedby={errors.password ? 'password-help password-error' : 'password-help'} disabled={busy} />
+      <input
+        id="invited-password"
+        type="password"
+        autocomplete="new-password"
+        minlength="12"
+        maxlength="1024"
+        bind:value={values.password}
+        aria-invalid={errors.password ? 'true' : undefined}
+        aria-describedby={errors.password
+          ? 'password-help password-error'
+          : 'password-help'}
+        disabled={busy}
+      />
       <small id="password-help">Use at least 12 characters.</small>
-      {#if errors.password}<small id="password-error" class="field-error">{errors.password}</small>{/if}
+      {#if errors.password}<small id="password-error" class="field-error"
+          >{errors.password}</small
+        >{/if}
 
       <label for="invited-confirm-password">Confirm password</label>
-      <input id="invited-confirm-password" type="password" autocomplete="new-password" bind:value={values.confirmPassword} aria-invalid={errors.confirmPassword ? 'true' : undefined} aria-describedby={errors.confirmPassword ? 'confirm-password-error' : undefined} disabled={busy} />
-      {#if errors.confirmPassword}<small id="confirm-password-error" class="field-error">{errors.confirmPassword}</small>{/if}
+      <input
+        id="invited-confirm-password"
+        type="password"
+        autocomplete="new-password"
+        bind:value={values.confirmPassword}
+        aria-invalid={errors.confirmPassword ? 'true' : undefined}
+        aria-describedby={errors.confirmPassword
+          ? 'confirm-password-error'
+          : undefined}
+        disabled={busy}
+      />
+      {#if errors.confirmPassword}<small
+          id="confirm-password-error"
+          class="field-error">{errors.confirmPassword}</small
+        >{/if}
 
-      <button class="button button-primary" type="submit" disabled={busy} aria-busy={busy}>{busy ? 'Creating account…' : 'Accept invitation'}</button>
+      <button
+        class="button button-primary"
+        type="submit"
+        disabled={busy}
+        aria-busy={busy}
+        >{busy ? 'Creating account…' : 'Accept invitation'}</button
+      >
     </form>
   {/if}
 </SetupFrame>
 
 <style>
-  .heading { margin-bottom: 1.5rem; }
-  h1 { margin: 0; font-size: clamp(1.7rem, 4vw, 2.1rem); letter-spacing: -.03em; line-height: 1.12; }
-  .heading > p:last-child, .state p, form small { color: var(--foreground-muted); }
-  form { display: grid; gap: .45rem; }
-  form label { margin-top: .55rem; font-weight: 700; }
-  form input { min-height: 2.5rem; padding: .5rem .7rem; border: 1px solid var(--border-strong); border-radius: .375rem; background: var(--surface); color: var(--foreground); }
-  form .button { margin-top: 1rem; }
-  .field-error { color: var(--danger); }
-  .form-alert { margin-bottom: 1rem; padding: .7rem .8rem; border: 1px solid var(--danger); border-radius: .375rem; background: var(--danger-soft); color: var(--danger); }
-  .state { display: grid; justify-items: start; gap: .8rem; }
-  .state p { margin: 0; }
+  .heading {
+    margin-bottom: 1.5rem;
+  }
+  h1 {
+    margin: 0;
+    font-size: clamp(1.7rem, 4vw, 2.1rem);
+    letter-spacing: -0.03em;
+    line-height: 1.12;
+  }
+  .heading > p:last-child,
+  .state p,
+  form small {
+    color: var(--foreground-muted);
+  }
+  form {
+    display: grid;
+    gap: 0.45rem;
+  }
+  form label {
+    margin-top: 0.55rem;
+    font-weight: 700;
+  }
+  form input {
+    min-height: 2.5rem;
+    padding: 0.5rem 0.7rem;
+    border: 1px solid var(--border-strong);
+    border-radius: 0.375rem;
+    background: var(--surface);
+    color: var(--foreground);
+  }
+  form .button {
+    margin-top: 1rem;
+  }
+  .field-error {
+    color: var(--danger);
+  }
+  .form-alert {
+    margin-bottom: 1rem;
+    padding: 0.7rem 0.8rem;
+    border: 1px solid var(--danger);
+    border-radius: 0.375rem;
+    background: var(--danger-soft);
+    color: var(--danger);
+  }
+  .state {
+    display: grid;
+    justify-items: start;
+    gap: 0.8rem;
+  }
+  .state p {
+    margin: 0;
+  }
 </style>

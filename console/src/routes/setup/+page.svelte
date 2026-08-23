@@ -24,7 +24,10 @@
       setupView = 'ready';
     } catch (error) {
       if (activeController.signal.aborted) return;
-      message = error instanceof Error ? error.message : 'The setup status could not be loaded.';
+      message =
+        error instanceof Error
+          ? error.message
+          : 'The setup status could not be loaded.';
       setupView = 'error';
     }
   }
@@ -41,7 +44,10 @@
 
 <svelte:head>
   <title>Set up OpenLLMProxy</title>
-  <meta name="description" content="Create the owner account for this OpenLLMProxy installation." />
+  <meta
+    name="description"
+    content="Create the owner account for this OpenLLMProxy installation."
+  />
 </svelte:head>
 
 <SetupFrame>
@@ -49,14 +55,19 @@
     <div class="status-card" role="status">
       <span class="spinner" aria-hidden="true"></span>
       <h2>Checking this installation</h2>
-      <p>The console is asking the local control API whether first-run setup is required.</p>
+      <p>
+        The console is asking the local control API whether first-run setup is
+        required.
+      </p>
     </div>
   {:else if setupView === 'error'}
     <div class="status-card" role="alert">
       <span class="error-symbol" aria-hidden="true">!</span>
       <h2>Setup is not reachable</h2>
       <p>{message}</p>
-      <button class="button button-primary" type="button" onclick={checkStatus}>Try again</button>
+      <button class="button button-primary" type="button" onclick={checkStatus}
+        >Try again</button
+      >
     </div>
   {:else}
     <OwnerSetup onComplete={finishSetup} />
@@ -104,6 +115,8 @@
   }
 
   @keyframes spin {
-    to { transform: rotate(360deg); }
+    to {
+      transform: rotate(360deg);
+    }
   }
 </style>

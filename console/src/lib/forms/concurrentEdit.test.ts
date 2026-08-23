@@ -65,7 +65,9 @@ describe('concurrent edit state', () => {
   });
 
   it('preserves an explicit save conflict across a later remote refresh', () => {
-    const conflicted = markConflict(markDirty(reconcile(initialConcurrentEdit(), 'v1').state));
+    const conflicted = markConflict(
+      markDirty(reconcile(initialConcurrentEdit(), 'v1').state)
+    );
     const refreshed = acceptRemote(conflicted, 'v2');
     expect(refreshed.snapshotEtag).toBe('v1');
     expect(refreshed.remoteEtag).toBe('v2');

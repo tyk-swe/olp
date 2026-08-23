@@ -20,12 +20,12 @@ start.
 
 ## Commands
 
-| Command | Purpose |
-|---|---|
-| `pnpm verify` | API drift, formatting, tests, lint, types, and build |
-| `pnpm test:e2e` | Chromium, Firefox, WebKit, and mobile browser tests |
-| `pnpm test:integration` | Production build through the Rust server |
-| `pnpm screenshots` | Regenerate `../docs/assets/screenshots/overview.png` |
+| Command                 | Purpose                                              |
+| ----------------------- | ---------------------------------------------------- |
+| `pnpm verify`           | API drift, formatting, tests, lint, types, and build |
+| `pnpm test:e2e`         | Chromium, Firefox, WebKit, and mobile browser tests  |
+| `pnpm test:integration` | Production build through the Rust server             |
+| `pnpm screenshots`      | Regenerate `../docs/assets/screenshots/overview.png` |
 
 Management requests use the generated `openapi-fetch` client. After changing
 `../openapi/management.json`, run `pnpm api:generate`; `pnpm api:check` fails

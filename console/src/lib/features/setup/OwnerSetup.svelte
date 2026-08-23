@@ -31,14 +31,18 @@
   };
 
   function describedBy(field: keyof OwnerFormValues, hint?: string) {
-    const parts = [hint, errors[field] ? `${field}-error` : undefined].filter(Boolean);
+    const parts = [hint, errors[field] ? `${field}-error` : undefined].filter(
+      Boolean
+    );
     return parts.length ? parts.join(' ') : undefined;
   }
 
   function applyServerErrors(problem: ApiProblem) {
     if (!problem.problem.errors) return false;
     const next: OwnerFormErrors = {};
-    for (const [serverField, messages] of Object.entries(problem.problem.errors)) {
+    for (const [serverField, messages] of Object.entries(
+      problem.problem.errors
+    )) {
       const formField = serverToFormField[serverField];
       if (formField && messages[0]) next[formField] = messages[0];
     }
@@ -68,9 +72,11 @@
       onComplete();
     } catch (error) {
       if (error instanceof ApiProblem) {
-        if (!applyServerErrors(error)) submissionError = error.problem.detail ?? error.problem.title;
+        if (!applyServerErrors(error))
+          submissionError = error.problem.detail ?? error.problem.title;
       } else {
-        submissionError = 'The control API could not be reached. Check the service and try again.';
+        submissionError =
+          'The control API could not be reached. Check the service and try again.';
       }
     } finally {
       submitting = false;
@@ -88,7 +94,10 @@
 <div class="heading">
   <p class="eyebrow">Installation owner</p>
   <h2>Create your account</h2>
-  <p>This first account owns the installation. You can invite operators and developers next.</p>
+  <p>
+    This first account owns the installation. You can invite operators and
+    developers next.
+  </p>
 </div>
 
 {#if submissionError}
@@ -112,7 +121,9 @@
       aria-describedby={describedBy('displayName')}
       disabled={submitting}
     />
-    {#if errors.displayName}<p class="field-error" id="displayName-error">{errors.displayName}</p>{/if}
+    {#if errors.displayName}<p class="field-error" id="displayName-error">
+        {errors.displayName}
+      </p>{/if}
   </div>
 
   <div class="field">
@@ -131,7 +142,9 @@
       aria-describedby={describedBy('email')}
       disabled={submitting}
     />
-    {#if errors.email}<p class="field-error" id="email-error">{errors.email}</p>{/if}
+    {#if errors.email}<p class="field-error" id="email-error">
+        {errors.email}
+      </p>{/if}
   </div>
 
   <div class="field">
@@ -148,8 +161,12 @@
       aria-describedby={describedBy('password', 'password-hint')}
       disabled={submitting}
     />
-    <p class="field-hint" id="password-hint">At least 12 characters. A password manager is recommended.</p>
-    {#if errors.password}<p class="field-error" id="password-error">{errors.password}</p>{/if}
+    <p class="field-hint" id="password-hint">
+      At least 12 characters. A password manager is recommended.
+    </p>
+    {#if errors.password}<p class="field-error" id="password-error">
+        {errors.password}
+      </p>{/if}
   </div>
 
   <div class="field">
@@ -164,7 +181,12 @@
       aria-describedby={describedBy('confirmPassword')}
       disabled={submitting}
     />
-    {#if errors.confirmPassword}<p class="field-error" id="confirmPassword-error">{errors.confirmPassword}</p>{/if}
+    {#if errors.confirmPassword}<p
+        class="field-error"
+        id="confirmPassword-error"
+      >
+        {errors.confirmPassword}
+      </p>{/if}
   </div>
 
   <div class="field">
@@ -180,17 +202,30 @@
       aria-describedby={describedBy('setupToken', 'setup-token-hint')}
       disabled={submitting}
     />
-    <p class="field-hint" id="setup-token-hint">Paste the one-time token supplied by your operator. It is not saved by this console.</p>
-    {#if errors.setupToken}<p class="field-error" id="setupToken-error">{errors.setupToken}</p>{/if}
+    <p class="field-hint" id="setup-token-hint">
+      Paste the one-time token supplied by your operator. It is not saved by
+      this console.
+    </p>
+    {#if errors.setupToken}<p class="field-error" id="setupToken-error">
+        {errors.setupToken}
+      </p>{/if}
   </div>
 
-  <button class="button button-primary submit" type="submit" disabled={submitting} aria-busy={submitting}>
+  <button
+    class="button button-primary submit"
+    type="submit"
+    disabled={submitting}
+    aria-busy={submitting}
+  >
     {submitting ? 'Creating owner…' : 'Create owner account'}
     {#if !submitting}<NavIcon name="arrow" />{/if}
   </button>
 </form>
 
-<p class="privacy-note">Credentials are sent only to this installation and are never written to console storage.</p>
+<p class="privacy-note">
+  Credentials are sent only to this installation and are never written to
+  console storage.
+</p>
 
 <style>
   .step-count {

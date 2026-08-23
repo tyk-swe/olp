@@ -132,25 +132,44 @@ function apiKey(id: string, name: string) {
   };
 }
 
-test('route list keeps both cursor tracks through the new-route boundary', async ({ page }) => {
+test('route list keeps both cursor tracks through the new-route boundary', async ({
+  page
+}) => {
   await mockSession(page, sessionOptions);
-  await page.route(/\/api\/v1\/(?:routes|route-drafts)(?:\?.*)?$/, async (route) => {
-    const url = new URL(route.request().url());
-    const cursor = url.searchParams.get('cursor');
-    if (url.pathname === '/api/v1/routes') {
+  await page.route(
+    /\/api\/v1\/(?:routes|route-drafts)(?:\?.*)?$/,
+    async (route) => {
+      const url = new URL(route.request().url());
+      const cursor = url.searchParams.get('cursor');
+      if (url.pathname === '/api/v1/routes') {
+        await route.fulfill({
+          json:
+            cursor === 'active-next'
+              ? {
+                  items: [activeRoute(ids.activeTwo, 'active-page-two')],
+                  next_cursor: null
+                }
+              : {
+                  items: [activeRoute(ids.activeOne, 'active-page-one')],
+                  next_cursor: 'active-next'
+                }
+        });
+        return;
+      }
       await route.fulfill({
-        json: cursor === 'active-next'
-          ? { items: [activeRoute(ids.activeTwo, 'active-page-two')], next_cursor: null }
-          : { items: [activeRoute(ids.activeOne, 'active-page-one')], next_cursor: 'active-next' }
+        json:
+          cursor === 'draft-next'
+            ? {
+                items: [routeDraft(ids.draftTwo, 'draft-page-two')],
+                next_cursor: null
+              }
+            : {
+                items: [routeDraft(ids.draftOne, 'draft-page-one')],
+                next_cursor: 'draft-next'
+              }
       });
-      return;
     }
-    await route.fulfill({
-      json: cursor === 'draft-next'
-        ? { items: [routeDraft(ids.draftTwo, 'draft-page-two')], next_cursor: null }
-        : { items: [routeDraft(ids.draftOne, 'draft-page-one')], next_cursor: 'draft-next' }
-    });
-  });
+  );
   await page.route('**/api/v1/provider-models**', async (route) => {
     await route.fulfill({ json: { items: [], next_cursor: null } });
   });
@@ -159,43 +178,71 @@ test('route list keeps both cursor tracks through the new-route boundary', async
   });
 
   await page.goto('/routes');
-  await page.getByLabel('Active route pages').getByRole('button', { name: 'Next' }).click();
-  await page.getByLabel('Route draft pages').getByRole('button', { name: 'Next' }).click();
-  await expect(page.getByText('active-page-two', { exact: true })).toBeVisible();
+  await page
+    .getByLabel('Active route pages')
+    .getByRole('button', { name: 'Next' })
+    .click();
+  await page
+    .getByLabel('Route draft pages')
+    .getByRole('button', { name: 'Next' })
+    .click();
+  await expect(
+    page.getByText('active-page-two', { exact: true })
+  ).toBeVisible();
   await expect(page.getByText('draft-page-two', { exact: true })).toBeVisible();
 
   await page.getByRole('link', { name: /New route draft/ }).click();
-  await expect(page.getByRole('heading', { name: 'Build a route draft.' })).toBeVisible();
+  await expect(
+    page.getByRole('heading', { name: 'Build a route draft.' })
+  ).toBeVisible();
   await page.getByRole('link', { name: 'Cancel' }).click();
 
   await expect(page.getByLabel('Active route pages')).toContainText('Page 2');
   await expect(page.getByLabel('Route draft pages')).toContainText('Page 2');
-  await expect(page.getByText('active-page-two', { exact: true })).toBeVisible();
+  await expect(
+    page.getByText('active-page-two', { exact: true })
+  ).toBeVisible();
   await expect(page.getByText('draft-page-two', { exact: true })).toBeVisible();
 
   await page.getByRole('link', { name: 'draft-page-two', exact: true }).click();
-  await expect(page.getByRole('heading', { name: 'draft-page-two', exact: true })).toBeVisible();
+  await expect(
+    page.getByRole('heading', { name: 'draft-page-two', exact: true })
+  ).toBeVisible();
   await page.getByRole('link', { name: 'Cancel' }).click();
   await expect(page.getByLabel('Active route pages')).toContainText('Page 2');
   await expect(page.getByLabel('Route draft pages')).toContainText('Page 2');
 });
 
-test('request filters and cursor history survive list-detail-list navigation', async ({ page }) => {
+test('request filters and cursor history survive list-detail-list navigation', async ({
+  page
+}) => {
   await mockSession(page, sessionOptions);
   const seenFilters: URLSearchParams[] = [];
-  await page.route(/\/api\/v1\/requests(?:\/[^?]+)?(?:\?.*)?$/, async (route) => {
-    const url = new URL(route.request().url());
-    if (url.pathname !== '/api/v1/requests') {
-      await route.fulfill({ json: requestDetail(ids.requestTwo, 'request-page-two') });
-      return;
+  await page.route(
+    /\/api\/v1\/requests(?:\/[^?]+)?(?:\?.*)?$/,
+    async (route) => {
+      const url = new URL(route.request().url());
+      if (url.pathname !== '/api/v1/requests') {
+        await route.fulfill({
+          json: requestDetail(ids.requestTwo, 'request-page-two')
+        });
+        return;
+      }
+      seenFilters.push(url.searchParams);
+      await route.fulfill({
+        json:
+          url.searchParams.get('cursor') === 'request-next'
+            ? {
+                data: [requestSummary(ids.requestTwo, 'request-page-two')],
+                next_cursor: null
+              }
+            : {
+                data: [requestSummary(ids.requestOne, 'request-page-one')],
+                next_cursor: 'request-next'
+              }
+      });
     }
-    seenFilters.push(url.searchParams);
-    await route.fulfill({
-      json: url.searchParams.get('cursor') === 'request-next'
-        ? { data: [requestSummary(ids.requestTwo, 'request-page-two')], next_cursor: null }
-        : { data: [requestSummary(ids.requestOne, 'request-page-one')], next_cursor: 'request-next' }
-    });
-  });
+  );
 
   await page.goto('/requests');
   await page.getByLabel('Route').fill('support-chat');
@@ -207,13 +254,23 @@ test('request filters and cursor history survive list-detail-list navigation', a
   await page.getByLabel('Error class').fill('transport');
   await page.getByLabel('Started after').fill('2026-07-12T10:00');
   await page.getByLabel('Started before').fill('2026-07-12T14:00');
-  expect(await page.getByRole('form', { name: 'Request filters' }).evaluate((form) => ({
-    valid: (form as HTMLFormElement).checkValidity(),
-    invalid: Array.from((form as HTMLFormElement).elements)
-      .filter((element) => element instanceof HTMLInputElement && !element.checkValidity())
-      .map((element) => ({ name: (element as HTMLInputElement).name, message: (element as HTMLInputElement).validationMessage })),
-    values: Object.fromEntries(new FormData(form as HTMLFormElement))
-  }))).toEqual({
+  expect(
+    await page
+      .getByRole('form', { name: 'Request filters' })
+      .evaluate((form) => ({
+        valid: (form as HTMLFormElement).checkValidity(),
+        invalid: Array.from((form as HTMLFormElement).elements)
+          .filter(
+            (element) =>
+              element instanceof HTMLInputElement && !element.checkValidity()
+          )
+          .map((element) => ({
+            name: (element as HTMLInputElement).name,
+            message: (element as HTMLInputElement).validationMessage
+          })),
+        values: Object.fromEntries(new FormData(form as HTMLFormElement))
+      }))
+  ).toEqual({
     valid: true,
     invalid: [],
     values: {
@@ -229,24 +286,36 @@ test('request filters and cursor history survive list-detail-list navigation', a
     }
   });
   await page.getByRole('button', { name: 'Apply filters' }).click();
-  await expect.poll(() => seenFilters.some((filters) =>
-    filters.get('route') === 'support-chat'
-      && filters.get('provider_id') === ids.provider
-      && filters.get('model') === 'gpt-test'
-      && filters.get('api_key_id') === ids.key
-      && filters.get('operation') === 'generation'
-      && filters.get('status_code') === '200'
-      && filters.get('error_class') === 'transport'
-      && filters.has('started_after')
-      && filters.has('started_before')
-      && !filters.has('cursor')
-  )).toBe(true);
-  await page.getByLabel('Request pages').getByRole('button', { name: 'Next' }).click();
+  await expect
+    .poll(() =>
+      seenFilters.some(
+        (filters) =>
+          filters.get('route') === 'support-chat' &&
+          filters.get('provider_id') === ids.provider &&
+          filters.get('model') === 'gpt-test' &&
+          filters.get('api_key_id') === ids.key &&
+          filters.get('operation') === 'generation' &&
+          filters.get('status_code') === '200' &&
+          filters.get('error_class') === 'transport' &&
+          filters.has('started_after') &&
+          filters.has('started_before') &&
+          !filters.has('cursor')
+      )
+    )
+    .toBe(true);
+  await page
+    .getByLabel('Request pages')
+    .getByRole('button', { name: 'Next' })
+    .click();
   await expect(
-    page.getByText('request-page-two', { exact: true }).filter({ visible: true })
+    page
+      .getByText('request-page-two', { exact: true })
+      .filter({ visible: true })
   ).toBeVisible();
 
-  await page.getByRole('link', { name: `View request ${ids.requestTwo}` }).click();
+  await page
+    .getByRole('link', { name: `View request ${ids.requestTwo}` })
+    .click();
   await page.getByRole('link', { name: 'Back to requests' }).click();
 
   await expect(page.getByLabel('Route')).toHaveValue('support-chat');
@@ -256,11 +325,17 @@ test('request filters and cursor history survive list-detail-list navigation', a
   await expect(page.getByLabel('API key ID')).toHaveValue(ids.key);
   await expect(page.getByLabel('Status code')).toHaveValue('200');
   await expect(page.getByLabel('Error class')).toHaveValue('transport');
-  await expect(page.getByLabel('Started after')).toHaveValue('2026-07-12T10:00');
-  await expect(page.getByLabel('Started before')).toHaveValue('2026-07-12T14:00');
+  await expect(page.getByLabel('Started after')).toHaveValue(
+    '2026-07-12T10:00'
+  );
+  await expect(page.getByLabel('Started before')).toHaveValue(
+    '2026-07-12T14:00'
+  );
   await expect(page.getByLabel('Request pages')).toContainText('Page 2');
   await expect(
-    page.getByText('request-page-two', { exact: true }).filter({ visible: true })
+    page
+      .getByText('request-page-two', { exact: true })
+      .filter({ visible: true })
   ).toBeVisible();
   expect(seenFilters.map((filters) => Object.fromEntries(filters))).toEqual(
     expect.arrayContaining([
@@ -280,29 +355,44 @@ test('request filters and cursor history survive list-detail-list navigation', a
   );
 });
 
-test('media-job filter drafts, applied filters, and pagination survive detail navigation', async ({ page }) => {
+test('media-job filter drafts, applied filters, and pagination survive detail navigation', async ({
+  page
+}) => {
   await mockSession(page, sessionOptions);
   const seenFilters: URLSearchParams[] = [];
-  await page.route(/\/api\/v1\/media-jobs(?:\/[^?]+)?(?:\?.*)?$/, async (route) => {
-    const url = new URL(route.request().url());
-    if (url.pathname !== '/api/v1/media-jobs') {
-      await route.fulfill({ json: mediaJob(ids.jobTwo, 'media-page-two') });
-      return;
+  await page.route(
+    /\/api\/v1\/media-jobs(?:\/[^?]+)?(?:\?.*)?$/,
+    async (route) => {
+      const url = new URL(route.request().url());
+      if (url.pathname !== '/api/v1/media-jobs') {
+        await route.fulfill({ json: mediaJob(ids.jobTwo, 'media-page-two') });
+        return;
+      }
+      seenFilters.push(url.searchParams);
+      await route.fulfill({
+        json:
+          url.searchParams.get('cursor') === 'media-next'
+            ? {
+                data: [mediaJob(ids.jobTwo, 'media-page-two')],
+                next_cursor: null
+              }
+            : {
+                data: [mediaJob(ids.jobOne, 'media-page-one')],
+                next_cursor: 'media-next'
+              }
+      });
     }
-    seenFilters.push(url.searchParams);
-    await route.fulfill({
-      json: url.searchParams.get('cursor') === 'media-next'
-        ? { data: [mediaJob(ids.jobTwo, 'media-page-two')], next_cursor: null }
-        : { data: [mediaJob(ids.jobOne, 'media-page-one')], next_cursor: 'media-next' }
-    });
-  });
+  );
 
   await page.goto('/media-jobs');
   await page.getByLabel('Route').fill('video-route');
   await page.getByLabel('State').selectOption('running');
   await page.getByLabel('Lifecycle').selectOption('active');
   await page.getByRole('button', { name: 'Apply filters' }).click();
-  await page.getByLabel('Media job pages').getByRole('button', { name: 'Next' }).click();
+  await page
+    .getByLabel('Media job pages')
+    .getByRole('button', { name: 'Next' })
+    .click();
   await page.getByRole('link', { name: 'View', exact: true }).click();
   await page.getByRole('link', { name: 'All media jobs' }).click();
 
@@ -311,22 +401,34 @@ test('media-job filter drafts, applied filters, and pagination survive detail na
   await expect(page.getByLabel('Lifecycle')).toHaveValue('active');
   await expect(page.getByLabel('Media job pages')).toContainText('Page 2');
   await expect(page.getByText('media-page-two', { exact: true })).toBeVisible();
-  expect(seenFilters.some((filters) =>
-    filters.get('route') === 'video-route'
-      && filters.get('state') === 'running'
-      && filters.get('lifecycle') === 'active'
-      && filters.get('cursor') === 'media-next'
-  )).toBe(true);
+  expect(
+    seenFilters.some(
+      (filters) =>
+        filters.get('route') === 'video-route' &&
+        filters.get('state') === 'running' &&
+        filters.get('lifecycle') === 'active' &&
+        filters.get('cursor') === 'media-next'
+    )
+  ).toBe(true);
 });
 
-test('API-key pagination survives new/cancel and resets after leaving the family', async ({ page }) => {
+test('API-key pagination survives new/cancel and resets after leaving the family', async ({
+  page
+}) => {
   await mockSession(page, sessionOptions);
   await page.route(/\/api\/v1\/api-keys(?:\?.*)?$/, async (route) => {
     const cursor = new URL(route.request().url()).searchParams.get('cursor');
     await route.fulfill({
-      json: cursor === 'key-next'
-        ? { items: [apiKey(ids.apiKeyTwo, 'key-page-two')], next_cursor: null }
-        : { items: [apiKey(ids.apiKeyOne, 'key-page-one')], next_cursor: 'key-next' }
+      json:
+        cursor === 'key-next'
+          ? {
+              items: [apiKey(ids.apiKeyTwo, 'key-page-two')],
+              next_cursor: null
+            }
+          : {
+              items: [apiKey(ids.apiKeyOne, 'key-page-one')],
+              next_cursor: 'key-next'
+            }
     });
   });
   await page.route('**/api/v1/routes**', async (route) => {
@@ -337,7 +439,10 @@ test('API-key pagination survives new/cancel and resets after leaving the family
   });
 
   await page.goto('/api-keys');
-  await page.getByLabel('API key pages').getByRole('button', { name: 'Next' }).click();
+  await page
+    .getByLabel('API key pages')
+    .getByRole('button', { name: 'Next' })
+    .click();
   await expect(page.getByText('key-page-two', { exact: true })).toBeVisible();
   await page.getByRole('link', { name: /Create key/ }).click();
   await page.getByRole('link', { name: 'Cancel' }).click();
@@ -345,10 +450,14 @@ test('API-key pagination survives new/cancel and resets after leaving the family
   await expect(page.getByLabel('API key pages')).toContainText('Page 2');
   await expect(page.getByText('key-page-two', { exact: true })).toBeVisible();
 
-  const navigationToggle = page.getByRole('button', { name: 'Open navigation' });
+  const navigationToggle = page.getByRole('button', {
+    name: 'Open navigation'
+  });
   if (await navigationToggle.isVisible()) await navigationToggle.click();
   await page.getByRole('link', { name: 'Models', exact: true }).click();
-  await expect(page.getByRole('heading', { name: 'Model inventory', exact: true })).toBeVisible();
+  await expect(
+    page.getByRole('heading', { name: 'Model inventory', exact: true })
+  ).toBeVisible();
   if (await navigationToggle.isVisible()) await navigationToggle.click();
   await page.getByRole('link', { name: 'API Keys', exact: true }).click();
   await expect(page.getByLabel('API key pages')).toContainText('Page 1');

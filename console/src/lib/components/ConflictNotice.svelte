@@ -13,13 +13,30 @@
 </script>
 
 {#if notice}
-  <div class:conflict={notice === 'conflict'} class="concurrent-notice" role={notice === 'conflict' ? 'alert' : 'status'}>
+  <div
+    class:conflict={notice === 'conflict'}
+    class="concurrent-notice"
+    role={notice === 'conflict' ? 'alert' : 'status'}
+  >
     <div>
-      <strong>{notice === 'conflict' ? 'This item changed elsewhere.' : 'A newer version is available.'}</strong>
-      <span>{notice === 'conflict' ? 'Reload the latest version before saving again.' : 'Your unsaved changes have not been overwritten.'}</span>
+      <strong
+        >{notice === 'conflict'
+          ? 'This item changed elsewhere.'
+          : 'A newer version is available.'}</strong
+      >
+      <span
+        >{notice === 'conflict'
+          ? 'Reload the latest version before saving again.'
+          : 'Your unsaved changes have not been overwritten.'}</span
+      >
       <small>Reloading discards your unsaved changes.</small>
     </div>
-    <button class="button button-secondary" type="button" onclick={onReload} {disabled}>Reload</button>
+    <button
+      class="button button-secondary"
+      type="button"
+      onclick={onReload}
+      {disabled}>Reload</button
+    >
   </div>
 {/if}
 
@@ -30,9 +47,9 @@
     justify-content: space-between;
     gap: 1rem;
     margin: 1rem 0;
-    padding: .85rem 1rem;
+    padding: 0.85rem 1rem;
     border: 1px solid color-mix(in srgb, var(--warning) 45%, var(--border));
-    border-radius: .375rem;
+    border-radius: 0.375rem;
     background: var(--warning-soft);
     color: var(--warning);
   }
@@ -41,10 +58,19 @@
     background: var(--danger-soft);
     color: var(--danger);
   }
-  .concurrent-notice div { display: grid; gap: .15rem; }
-  .concurrent-notice span, .concurrent-notice small {
-    color: var(--foreground);
-    font-size: .75rem;
+  .concurrent-notice div {
+    display: grid;
+    gap: 0.15rem;
   }
-  @media (max-width: 36rem) { .concurrent-notice { align-items: stretch; flex-direction: column; } }
+  .concurrent-notice span,
+  .concurrent-notice small {
+    color: var(--foreground);
+    font-size: 0.75rem;
+  }
+  @media (max-width: 36rem) {
+    .concurrent-notice {
+      align-items: stretch;
+      flex-direction: column;
+    }
+  }
 </style>

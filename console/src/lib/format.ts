@@ -15,13 +15,16 @@ export function dateTimeLocalValue(value: Date | string): string {
   return local.toISOString().slice(0, 16);
 }
 
-export function formatCompact(value: number | string | null | undefined): string {
+export function formatCompact(
+  value: number | string | null | undefined
+): string {
   if (value === null || value === undefined || value === '') return '—';
   const number = typeof value === 'number' ? value : Number(value);
   if (!Number.isFinite(number)) return String(value);
-  return new Intl.NumberFormat(undefined, { notation: 'compact', maximumFractionDigits: 1 }).format(
-    number
-  );
+  return new Intl.NumberFormat(undefined, {
+    notation: 'compact',
+    maximumFractionDigits: 1
+  }).format(number);
 }
 
 export function formatCost(value?: string | null, currency = 'USD'): string {
@@ -37,13 +40,22 @@ export function formatCost(value?: string | null, currency = 'USD'): string {
 }
 
 export function statusTone(status?: number | null, errorClass?: string | null) {
-  if (errorClass || (status !== null && status !== undefined && status >= 500)) return 'danger';
-  if (status === 429 || (status !== null && status !== undefined && status >= 400)) return 'warning';
-  if (status !== null && status !== undefined && status >= 200 && status < 400) return 'success';
+  if (errorClass || (status !== null && status !== undefined && status >= 500))
+    return 'danger';
+  if (
+    status === 429 ||
+    (status !== null && status !== undefined && status >= 400)
+  )
+    return 'warning';
+  if (status !== null && status !== undefined && status >= 200 && status < 400)
+    return 'success';
   return '';
 }
 
-export function statusLabel(status?: number | null, errorClass?: string | null): string {
+export function statusLabel(
+  status?: number | null,
+  errorClass?: string | null
+): string {
   if (errorClass) return errorClass;
   if (status === null || status === undefined) return 'In progress';
   return String(status);

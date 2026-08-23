@@ -33,7 +33,10 @@ describe('owner setup validation', () => {
 
   it('attaches a password mismatch to the confirmation field', () => {
     expect(
-      validateOwner({ ...validOwner, confirmPassword: 'a different secure phrase' })
+      validateOwner({
+        ...validOwner,
+        confirmPassword: 'a different secure phrase'
+      })
     ).toEqual({ confirmPassword: 'Passwords do not match.' });
   });
 });

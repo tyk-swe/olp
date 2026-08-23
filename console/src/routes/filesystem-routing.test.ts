@@ -12,5 +12,7 @@ it('uses the static SPA fallback without the eager dispatcher', () => {
   expect(config).toContain("fallback: 'index.html'");
   expect(rootLayout).toContain('export const ssr = false');
   expect(pages['./[...path]/+page.svelte']).toBeUndefined();
-  expect(pages['./(console)/[...path]/+page.svelte']).not.toContain('$lib/features/');
+  expect(pages['./(console)/[...path]/+page.svelte']).not.toContain(
+    '$lib/features/'
+  );
 });

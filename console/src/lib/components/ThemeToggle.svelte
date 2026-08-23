@@ -14,7 +14,9 @@
     } catch {
       // Storage can be blocked outright; fall back to the media query.
     }
-    return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    return window.matchMedia('(prefers-color-scheme: dark)').matches
+      ? 'dark'
+      : 'light';
   }
 
   function apply(next: Theme) {

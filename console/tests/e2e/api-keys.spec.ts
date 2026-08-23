@@ -11,160 +11,167 @@ import { ids, now, sessionOptions } from './gateway-access-fixtures';
 
 test.beforeEach(async ({ page }) => mockProviderKinds(page));
 
-test('API key creation shows a secret once with SDK snippets on mobile', async ({
-  page
-}) => {
-  await page.emulateMedia({ forcedColors: 'active', reducedMotion: 'reduce' });
-  await denyClipboard(page);
-  await mockSession(page, sessionOptions);
-  let createBody: Record<string, unknown> | undefined;
-  let createHeaders: Record<string, string> = {};
-  await page.route('**/api/v1/routes**', async (route) => {
-    await route.fulfill({
-      json: {
-        items: [
-          {
-            id: ids.route,
-            slug: 'default',
-            created_at: now,
-            revision_count: 1,
-            latest_revision: {
-              id: ids.revision,
-              route_id: ids.route,
-              revision: 1,
-              slug: 'default',
-              overall_timeout_ms: 120000,
-              max_attempts: 1,
-              source_draft_id: ids.draft,
-              activated_by: ids.user,
-              activated_at: now,
-              operations: ['generation'],
-              targets: []
-            }
-          }
-        ],
-        next_cursor: null
-      }
+test(
+  'API key creation shows a secret once with SDK snippets on mobile',
+  { tag: '@browser' },
+  async ({ page }) => {
+    await page.emulateMedia({
+      forcedColors: 'active',
+      reducedMotion: 'reduce'
     });
-  });
-  await page.route('**/api/v1/api-keys**', async (route) => {
-    const request = route.request();
-    if (request.method() === 'POST') {
-      createBody = request.postDataJSON();
-      createHeaders = await request.allHeaders();
-      await route.fulfill({
-        status: 201,
-        json: {
-          id: ids.key,
-          lookup_id: 'olp_live_abcd',
-          secret: 'olp_secret_shown_once',
-          runtime_generation: { id: ids.generation, sequence: 4 }
-        }
-      });
-      return;
-    }
-    await route.fulfill({ json: { items: [], next_cursor: null } });
-  });
-  await page.route('**/anthropic/v1/messages', async (route) => {
-    expect(route.request().headers()['x-api-key']).toBe(
-      'olp_secret_shown_once'
-    );
-    expect(route.request().postDataJSON()).toMatchObject({ model: 'default' });
-    await route.fulfill({
-      json: {
-        id: 'msg_test',
-        type: 'message',
-        role: 'assistant',
-        model: 'default',
-        content: [{ type: 'text', text: 'ok' }],
-        stop_reason: 'end_turn',
-        usage: { input_tokens: 1, output_tokens: 1 }
-      }
-    });
-  });
-  await page.route(
-    '**/gemini/v1beta/models/default:generateContent',
-    async (route) => {
-      expect(route.request().headers()['x-goog-api-key']).toBe(
-        'olp_secret_shown_once'
-      );
-      expect(route.request().postDataJSON()).toEqual({
-        contents: [{ role: 'user', parts: [{ text: 'Connection test' }] }],
-        generationConfig: { maxOutputTokens: 16 }
-      });
+    await denyClipboard(page);
+    await mockSession(page, sessionOptions);
+    let createBody: Record<string, unknown> | undefined;
+    let createHeaders: Record<string, string> = {};
+    await page.route('**/api/v1/routes**', async (route) => {
       await route.fulfill({
         json: {
-          candidates: [
+          items: [
             {
-              content: { role: 'model', parts: [{ text: 'ok' }] },
-              finishReason: 'STOP'
+              id: ids.route,
+              slug: 'default',
+              created_at: now,
+              revision_count: 1,
+              latest_revision: {
+                id: ids.revision,
+                route_id: ids.route,
+                revision: 1,
+                slug: 'default',
+                overall_timeout_ms: 120000,
+                max_attempts: 1,
+                source_draft_id: ids.draft,
+                activated_by: ids.user,
+                activated_at: now,
+                operations: ['generation'],
+                targets: []
+              }
             }
           ],
-          usageMetadata: {
-            promptTokenCount: 1,
-            candidatesTokenCount: 1,
-            totalTokenCount: 2
-          }
+          next_cursor: null
         }
       });
-    }
-  );
+    });
+    await page.route('**/api/v1/api-keys**', async (route) => {
+      const request = route.request();
+      if (request.method() === 'POST') {
+        createBody = request.postDataJSON();
+        createHeaders = await request.allHeaders();
+        await route.fulfill({
+          status: 201,
+          json: {
+            id: ids.key,
+            lookup_id: 'olp_live_abcd',
+            secret: 'olp_secret_shown_once',
+            runtime_generation: { id: ids.generation, sequence: 4 }
+          }
+        });
+        return;
+      }
+      await route.fulfill({ json: { items: [], next_cursor: null } });
+    });
+    await page.route('**/anthropic/v1/messages', async (route) => {
+      expect(route.request().headers()['x-api-key']).toBe(
+        'olp_secret_shown_once'
+      );
+      expect(route.request().postDataJSON()).toMatchObject({
+        model: 'default'
+      });
+      await route.fulfill({
+        json: {
+          id: 'msg_test',
+          type: 'message',
+          role: 'assistant',
+          model: 'default',
+          content: [{ type: 'text', text: 'ok' }],
+          stop_reason: 'end_turn',
+          usage: { input_tokens: 1, output_tokens: 1 }
+        }
+      });
+    });
+    await page.route(
+      '**/gemini/v1beta/models/default:generateContent',
+      async (route) => {
+        expect(route.request().headers()['x-goog-api-key']).toBe(
+          'olp_secret_shown_once'
+        );
+        expect(route.request().postDataJSON()).toEqual({
+          contents: [{ role: 'user', parts: [{ text: 'Connection test' }] }],
+          generationConfig: { maxOutputTokens: 16 }
+        });
+        await route.fulfill({
+          json: {
+            candidates: [
+              {
+                content: { role: 'model', parts: [{ text: 'ok' }] },
+                finishReason: 'STOP'
+              }
+            ],
+            usageMetadata: {
+              promptTokenCount: 1,
+              candidatesTokenCount: 1,
+              totalTokenCount: 2
+            }
+          }
+        });
+      }
+    );
 
-  await emulateTwoHundredPercentZoom(page);
-  await page.goto('/api-keys/new');
-  await page.getByLabel('Key name').fill('mobile-app');
-  await page.getByLabel('Requests per minute').fill('120');
-  await page.getByLabel('Concurrent requests').fill('8');
-  await page
-    .getByRole('group', { name: 'Allowed route slugs' })
-    .getByRole('checkbox', { name: 'default' })
-    .check();
-  await page.getByRole('button', { name: /Create and show key/ }).click();
+    await emulateTwoHundredPercentZoom(page);
+    await page.goto('/api-keys/new');
+    await page.getByLabel('Key name').fill('mobile-app');
+    await page.getByLabel('Requests per minute').fill('120');
+    await page.getByLabel('Concurrent requests').fill('8');
+    await page
+      .getByRole('group', { name: 'Allowed route slugs' })
+      .getByRole('checkbox', { name: 'default' })
+      .check();
+    await page.getByRole('button', { name: /Create and show key/ }).click();
 
-  const dialog = page.getByRole('dialog', { name: 'Copy this secret now.' });
-  await expect(dialog).toBeVisible();
-  await expect(
-    dialog.getByText('olp_secret_shown_once', { exact: true })
-  ).toBeVisible();
-  await expect(dialog.getByText('base_url=')).toBeVisible();
-  await dialog.getByRole('button', { name: 'Copy key' }).click();
-  await expect(dialog.getByRole('alert')).toContainText(
-    'Clipboard access is unavailable. Copy the value manually.'
-  );
-  expect(
-    (await new AxeBuilder({ page }).include('.secret-dialog').analyze())
-      .violations
-  ).toEqual([]);
-  expect(createBody).toMatchObject({
-    name: 'mobile-app',
-    allowed_routes: ['default'],
-    requests_per_minute: 120,
-    max_concurrency: 8
-  });
-  expect(createHeaders['idempotency-key']).toMatch(/^[0-9a-f-]{36}$/);
-  expect(createHeaders['x-csrf-token']).toBe('csrf-e2e');
+    const dialog = page.getByRole('dialog', { name: 'Copy this secret now.' });
+    await expect(dialog).toBeVisible();
+    await expect(
+      dialog.getByText('olp_secret_shown_once', { exact: true })
+    ).toBeVisible();
+    await expect(dialog.getByText('base_url=')).toBeVisible();
+    await dialog.getByRole('button', { name: 'Copy key' }).click();
+    await expect(dialog.getByRole('alert')).toContainText(
+      'Clipboard access is unavailable. Copy the value manually.'
+    );
+    expect(
+      (await new AxeBuilder({ page }).include('.secret-dialog').analyze())
+        .violations
+    ).toEqual([]);
+    expect(createBody).toMatchObject({
+      name: 'mobile-app',
+      allowed_routes: ['default'],
+      requests_per_minute: 120,
+      max_concurrency: 8
+    });
+    expect(createHeaders['idempotency-key']).toMatch(/^[0-9a-f-]{36}$/);
+    expect(createHeaders['x-csrf-token']).toBe('csrf-e2e');
 
-  await dialog.getByRole('tab', { name: 'Anthropic TS' }).click();
-  await expect(dialog.getByText('client.messages.create')).toBeVisible();
-  await dialog.getByRole('button', { name: 'Run connection test' }).click();
-  await expect(
-    dialog.getByText('Anthropic request succeeded through route default.')
-  ).toBeVisible();
-  await dialog.getByRole('tab', { name: 'Gemini TS' }).click();
-  await expect(dialog.getByRole('tabpanel')).toContainText(
-    'baseUrl: "http://127.0.0.1:4174/gemini"'
-  );
-  await expect(dialog.getByRole('tabpanel')).toContainText(
-    'apiVersion: "v1beta"'
-  );
-  await dialog.getByRole('button', { name: 'Run connection test' }).click();
-  await expect(
-    dialog.getByText('Gemini request succeeded through route default.')
-  ).toBeVisible();
-  await dialog.getByRole('button', { name: 'I have saved the key' }).click();
-  await expect(page).toHaveURL(/\/api-keys$/);
-  await expect(page.getByText('olp_secret_shown_once')).toHaveCount(0);
-});
+    await dialog.getByRole('tab', { name: 'Anthropic TS' }).click();
+    await expect(dialog.getByText('client.messages.create')).toBeVisible();
+    await dialog.getByRole('button', { name: 'Run connection test' }).click();
+    await expect(
+      dialog.getByText('Anthropic request succeeded through route default.')
+    ).toBeVisible();
+    await dialog.getByRole('tab', { name: 'Gemini TS' }).click();
+    await expect(dialog.getByRole('tabpanel')).toContainText(
+      'baseUrl: "http://127.0.0.1:4174/gemini"'
+    );
+    await expect(dialog.getByRole('tabpanel')).toContainText(
+      'apiVersion: "v1beta"'
+    );
+    await dialog.getByRole('button', { name: 'Run connection test' }).click();
+    await expect(
+      dialog.getByText('Gemini request succeeded through route default.')
+    ).toBeVisible();
+    await dialog.getByRole('button', { name: 'I have saved the key' }).click();
+    await expect(page).toHaveURL(/\/api-keys$/);
+    await expect(page.getByText('olp_secret_shown_once')).toHaveCount(0);
+  }
+);
 
 test('API key policy updates, rotation, and revocation converge in the list', async ({
   page
