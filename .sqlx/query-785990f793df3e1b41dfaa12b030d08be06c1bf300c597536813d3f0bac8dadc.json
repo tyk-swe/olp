@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "WITH expired AS ( SELECT id, started_at FROM requests WHERE started_at < $1 LIMIT $2 FOR UPDATE SKIP LOCKED ) DELETE FROM requests request USING expired WHERE request.id = expired.id AND request.started_at = expired.started_at",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Timestamptz",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "785990f793df3e1b41dfaa12b030d08be06c1bf300c597536813d3f0bac8dadc"
+}

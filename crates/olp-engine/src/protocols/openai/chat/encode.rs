@@ -8,7 +8,7 @@ use crate::domain::canonical::{
     requests::{
         ContentPart as CanonicalContentPart, GenerationRequest, MediaSource,
         Message as CanonicalMessage, MessageRole, ResponseFormat as CanonicalResponseFormat,
-        ToolChoice as CanonicalToolChoice, inline_media_marker,
+        ToolChoice as CanonicalToolChoice, inline_media_marker, is_delivery_only_extension,
     },
 };
 
@@ -201,7 +201,10 @@ fn apply_extensions(
     request: &mut CompletionRequest,
     extensions: &BTreeMap<String, Value>,
 ) -> Result<(), Error> {
-    for (pointer, value) in extensions {
+    for (pointer, value) in extensions
+        .iter()
+        .filter(|(pointer, _)| !is_delivery_only_extension(pointer))
+    {
         let segments = pointer
             .strip_prefix('/')
             .ok_or_else(|| Error::InvalidExtensionPath(pointer.clone()))?

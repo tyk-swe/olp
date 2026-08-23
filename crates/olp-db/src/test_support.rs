@@ -12,7 +12,7 @@
 use sqlx::{Connection as _, PgConnection};
 use uuid::Uuid;
 
-use crate::{MIGRATOR, store::Store};
+use crate::store::Store;
 
 /// A uniquely named PostgreSQL database owned by a single test.
 ///
@@ -29,15 +29,12 @@ impl TestDb {
     /// Creates `olp_test_{run}_{label}_{uuid}` and applies every migration.
     pub async fn create_migrated(label: &str) -> Self {
         let db = Self::create_empty(label).await;
-        let mut connection = db.connect().await;
-        MIGRATOR
-            .run(&mut connection)
+        let store = db.store(1).await;
+        store
+            .migrate()
             .await
             .expect("apply migrations to the per-test database");
-        connection
-            .close()
-            .await
-            .expect("close the migration connection");
+        store.pool().close().await;
         db
     }
 
@@ -101,12 +98,6 @@ impl TestDb {
     /// Opens a [`Store`] pool on this test's database.
     pub async fn store(&self, max_connections: u32) -> Store {
         Store::connect(&self.url, max_connections)
-            .await
-            .expect("connect to the per-test database")
-    }
-
-    async fn connect(&self) -> PgConnection {
-        PgConnection::connect(&self.url)
             .await
             .expect("connect to the per-test database")
     }

@@ -1,4 +1,3 @@
-use olp_db::MIGRATOR;
 use uuid::Uuid;
 
 #[tokio::test]
@@ -6,7 +5,7 @@ use uuid::Uuid;
 async fn request_metadata_schema_rename_preserves_legacy_rows() {
     let db = olp_db::test_support::TestDb::create_empty("request_metadata_naming_upgrade").await;
     let store = db.store(3).await;
-    MIGRATOR.run_to(27, store.pool()).await.unwrap();
+    store.migrate_to(27).await.unwrap();
 
     let gap_id = Uuid::now_v7();
     let process_epoch = Uuid::now_v7();
@@ -77,7 +76,7 @@ async fn request_metadata_schema_rename_preserves_legacy_rows() {
     .await
     .unwrap();
 
-    MIGRATOR.run(store.pool()).await.unwrap();
+    store.migrate().await.unwrap();
 
     let table_counts: Vec<(String, i64)> = sqlx::query_as(
         "SELECT 'request_metadata_event_receipts', count(*) FROM request_metadata_event_receipts \

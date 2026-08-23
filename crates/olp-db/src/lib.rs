@@ -43,7 +43,7 @@ fn split_page<T, C>(
 
 /// SQLx embeds and checks every migration at compile time. Migrations execute
 /// only in `migrate`/`all` mode, never implicitly in a gateway process.
-pub static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations");
+pub(crate) static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations");
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeSet;

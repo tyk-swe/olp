@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use sqlx::{PgPool, postgres::PgPoolOptions};
+use sqlx::{PgPool, migrate::Migrate as _, postgres::PgPoolOptions};
 
 use crate::error::Error;
 
@@ -34,7 +34,40 @@ impl Store {
     }
 
     pub async fn migrate(&self) -> Result<(), Error> {
-        crate::MIGRATOR.run(&self.pool).await?;
+        self.run_migrations(None).await
+    }
+
+    pub async fn migrate_to(&self, target: i64) -> Result<(), Error> {
+        self.run_migrations(Some(target)).await
+    }
+
+    async fn run_migrations(&self, target: Option<i64>) -> Result<(), Error> {
+        let mut connection = self.pool.acquire().await?;
+        connection.close_on_drop();
+
+        // Keep SQLx's reentrant migration lock held across stale-index cleanup
+        // and migration 34. Closing the session releases it on cancellation.
+        connection.lock().await?;
+        if target.is_none_or(|target| target >= 34) {
+            connection
+                .ensure_migrations_table("_sqlx_migrations")
+                .await?;
+            let applied = connection
+                .list_applied_migrations("_sqlx_migrations")
+                .await?;
+            if !applied.iter().any(|migration| migration.version == 34) {
+                sqlx::raw_sql("DROP INDEX CONCURRENTLY IF EXISTS attempt_usage_facts_event_id_idx")
+                    .execute(&mut *connection)
+                    .await?;
+            }
+        }
+
+        if let Some(target) = target {
+            crate::MIGRATOR.run_to(target, &mut *connection).await?;
+        } else {
+            crate::MIGRATOR.run(&mut *connection).await?;
+        }
+        connection.unlock().await?;
         Ok(())
     }
 

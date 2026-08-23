@@ -232,17 +232,26 @@ impl RequestAccountingGuard {
     }
 
     pub async fn release(&mut self) {
-        let Some(cleanup) = self.take_limit_cleanup() else {
+        let Some(task) = self.spawn_limit_cleanup() else {
             return;
         };
-        let task = tokio::spawn(cleanup.run());
         if let Err(error) = task.await {
             tracing::warn!(%error, "request limit cleanup task failed");
         }
     }
 
+    pub(in crate::inference) fn release_detached(&mut self) {
+        let _ = self.spawn_limit_cleanup();
+    }
+
     pub async fn finish(mut self, outcome: RequestOutcome) {
         self.release().await;
+        self.emit(&outcome, true);
+        self.armed = false;
+    }
+
+    pub(in crate::inference) fn finish_detached(mut self, outcome: RequestOutcome) {
+        self.release_detached();
         self.emit(&outcome, true);
         self.armed = false;
     }
@@ -264,6 +273,10 @@ impl RequestAccountingGuard {
             admission_reserved_tokens: self.admission_reserved_tokens,
             actual_tokens: self.usage.actual_tokens(),
         })
+    }
+
+    fn spawn_limit_cleanup(&mut self) -> Option<tokio::task::JoinHandle<()>> {
+        Some(tokio::spawn(self.take_limit_cleanup()?.run()))
     }
 
     fn emit(&self, outcome: &RequestOutcome, finalize_attempt: bool) {

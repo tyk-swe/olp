@@ -1,4 +1,5 @@
 use chrono::{DateTime, Utc};
+use sqlx::Connection as _;
 use thiserror::Error;
 
 use crate::{
@@ -9,6 +10,7 @@ use crate::{
 };
 
 pub const MAINTENANCE_LOCK_ID: i64 = 0x4f4c_505f_4d54; // "OLP_MT"
+const RETENTION_DELETE_BATCH: i64 = 50_000;
 const REQUEST_METADATA_RECEIPT_DELETE_BATCH: i64 = 250_000;
 
 #[derive(Debug, Error)]
@@ -44,26 +46,26 @@ impl Store {
     /// Rebuilds completed hourly aggregates before enforcing independent
     /// metadata, usage, and audit retention. One PostgreSQL advisory lock keeps
     /// multiple worker replicas from overlapping the same maintenance pass.
+    /// Its checked-out session closes on cancellation and spans batch commits.
     pub async fn run_maintenance(&self, now: DateTime<Utc>) -> Result<Report, Error> {
-        let mut transaction = self.pool().begin().await?;
-        sqlx::query!("SELECT set_config('olp.usage_rollup_writer', 'additive-v2', true)")
-            .fetch_one(&mut *transaction)
-            .await?;
+        let mut connection = self.pool().acquire().await?;
+        connection.close_on_drop();
         let locked: bool = sqlx::query_scalar!(
-            "SELECT pg_try_advisory_xact_lock($1) AS \"value!\"",
+            "SELECT pg_try_advisory_lock($1) AS \"value!\"",
             MAINTENANCE_LOCK_ID
         )
-        .fetch_one(&mut *transaction)
+        .fetch_one(&mut *connection)
         .await?;
         if !locked {
             return Ok(Report::default());
         }
 
+        // A read-only settings lookup needs no transaction of its own.
         let rows = sqlx::query!(
             "SELECT key, value FROM settings WHERE key IN \
              ('retention.requests_days', 'retention.usage_days', 'retention.audit_days')",
         )
-        .fetch_all(&mut *transaction)
+        .fetch_all(&mut *connection)
         .await?;
         let mut requests_days = 30_i64;
         let mut usage_days = 90_i64;
@@ -90,20 +92,48 @@ impl Store {
         // Delete request metadata before facts, matching ingestion's
         // request -> anchor -> fact lock order. Facts no longer reference the
         // request table, so this does not affect usage retention.
-        let request_rows =
-            sqlx::query!("DELETE FROM requests WHERE started_at < $1", request_cutoff)
-                .execute(&mut *transaction)
-                .await?
-                .rows_affected();
+        let mut request_rows = 0;
+        loop {
+            let mut transaction = connection.begin().await?;
+            let rows = sqlx::query!(
+                "WITH expired AS ( \
+                   SELECT id, started_at FROM requests WHERE started_at < $1 \
+                   LIMIT $2 FOR UPDATE SKIP LOCKED \
+                 ) \
+                 DELETE FROM requests request USING expired \
+                 WHERE request.id = expired.id AND request.started_at = expired.started_at",
+                request_cutoff,
+                RETENTION_DELETE_BATCH
+            )
+            .execute(&mut *transaction)
+            .await?
+            .rows_affected();
+            transaction.commit().await?;
+            request_rows += rows;
+            if rows < RETENTION_DELETE_BATCH as u64 {
+                break;
+            }
+        }
 
         // Delete and aggregate the same row set in one statement. This keeps a
         // late stream event out of the delete set until a later pass and makes
         // repeated rollups additive for hours that already contain retained
         // totals.
-        let attempt_usage_rollup = sqlx::query!(
-            "WITH expired AS ( \
-               DELETE FROM attempt_usage_facts \
+        let mut rollups = 0;
+        let mut usage_rows = 0;
+        loop {
+            let mut transaction = connection.begin().await?;
+            sqlx::query!("SELECT set_config('olp.usage_rollup_writer', 'additive-v2', true)")
+                .fetch_one(&mut *transaction)
+                .await?;
+            let attempt_usage_rollup = sqlx::query!(
+                "WITH candidates AS ( \
+               SELECT ctid FROM attempt_usage_facts \
                WHERE observed_at < date_trunc('hour', $1::timestamptz) \
+               LIMIT $2 FOR UPDATE SKIP LOCKED \
+             ), expired AS ( \
+               DELETE FROM attempt_usage_facts fact USING candidates \
+               WHERE fact.ctid = candidates.ctid \
                RETURNING route_slug, provider_id, upstream_model, operation, surface, \
                          api_key_id, observed_at, input_tokens, output_tokens, \
                          cached_input_tokens, media_units, estimated_cost, currency, \
@@ -180,27 +210,44 @@ impl Store {
              ) \
              SELECT (SELECT count(*) FROM rolled) AS \"rollup_rows!\", \
                     (SELECT count(*) FROM expired) AS \"usage_rows!\"",
-            usage_cutoff
-        )
-        .fetch_one(&mut *transaction)
-        .await?;
-        let rollups = checked_count(attempt_usage_rollup.rollup_rows, "usage rollup")?;
-        let usage_rows = checked_count(attempt_usage_rollup.usage_rows, "usage")?;
+                usage_cutoff,
+                RETENTION_DELETE_BATCH
+            )
+            .fetch_one(&mut *transaction)
+            .await?;
+            let batch_rollups = checked_count(attempt_usage_rollup.rollup_rows, "usage rollup")?;
+            let batch_usage_rows = checked_count(attempt_usage_rollup.usage_rows, "usage")?;
+            transaction.commit().await?;
+            rollups += batch_rollups;
+            usage_rows += batch_usage_rows;
+            if batch_usage_rows < RETENTION_DELETE_BATCH as u64 {
+                break;
+            }
+        }
 
         // Retain the request-level compatibility aggregate for older readers.
         // It is never used for provider/model attribution by current code.
-        let _hourly_mirror_setting =
-            sqlx::query!("SELECT set_config('olp.attempt_usage_hourly_mirror', 'off', true)")
+        loop {
+            let mut transaction = connection.begin().await?;
+            sqlx::query!("SELECT set_config('olp.usage_rollup_writer', 'additive-v2', true)")
                 .fetch_one(&mut *transaction)
                 .await?;
-        let _legacy_archive_setting =
-            sqlx::query!("SELECT set_config('olp.attempt_usage_legacy_archive', 'off', true)")
-                .fetch_one(&mut *transaction)
-                .await?;
-        let _compatibility_usage_rollup = sqlx::query!(
-            "WITH expired AS ( \
-               DELETE FROM usage_facts \
+            let _hourly_mirror_setting =
+                sqlx::query!("SELECT set_config('olp.attempt_usage_hourly_mirror', 'off', true)")
+                    .fetch_one(&mut *transaction)
+                    .await?;
+            let _legacy_archive_setting =
+                sqlx::query!("SELECT set_config('olp.attempt_usage_legacy_archive', 'off', true)")
+                    .fetch_one(&mut *transaction)
+                    .await?;
+            let compatibility_usage_rollup = sqlx::query!(
+                "WITH candidates AS ( \
+               SELECT ctid FROM usage_facts \
                WHERE observed_at < date_trunc('hour', $1::timestamptz) \
+               LIMIT $2 FOR UPDATE SKIP LOCKED \
+             ), expired AS ( \
+               DELETE FROM usage_facts fact USING candidates \
+               WHERE fact.ctid = candidates.ctid \
                RETURNING route_slug, provider_id, upstream_model, operation, surface, \
                          api_key_id, observed_at, input_tokens, output_tokens, \
                          cached_input_tokens, media_units, estimated_cost, unpriced, \
@@ -238,16 +285,26 @@ impl Store {
              ) \
              SELECT (SELECT count(*) FROM rolled) AS \"rollup_rows!\", \
                     (SELECT count(*) FROM expired) AS \"usage_rows!\"",
-            usage_cutoff
-        )
-        .fetch_one(&mut *transaction)
-        .await?;
+                usage_cutoff,
+                RETENTION_DELETE_BATCH
+            )
+            .fetch_one(&mut *transaction)
+            .await?;
+            let batch_usage_rows =
+                checked_count(compatibility_usage_rollup.usage_rows, "compatibility usage")?;
+            transaction.commit().await?;
+            if batch_usage_rows < RETENTION_DELETE_BATCH as u64 {
+                break;
+            }
+        }
 
         // Lock candidates before deleting them. A concurrent fact insert holds
         // KEY SHARE on its anchor, so SKIP LOCKED leaves that anchor for the
         // next pass instead of cascading a child invisible to this snapshot.
-        sqlx::query!(
-            "WITH orphan AS ( \
+        loop {
+            let mut transaction = connection.begin().await?;
+            let rows = sqlx::query!(
+                "WITH orphan AS ( \
                SELECT anchor.request_id, anchor.request_started_at \
                FROM usage_request_anchors anchor \
                WHERE anchor.request_started_at < $1 AND NOT EXISTS ( \
@@ -259,22 +316,50 @@ impl Store {
                  WHERE fact.request_id = anchor.request_id \
                    AND fact.request_started_at = anchor.request_started_at \
                ) \
+               LIMIT $2 \
                FOR UPDATE OF anchor SKIP LOCKED \
              ) \
              DELETE FROM usage_request_anchors anchor USING orphan \
              WHERE anchor.request_id = orphan.request_id \
                AND anchor.request_started_at = orphan.request_started_at",
-            request_cutoff
-        )
-        .execute(&mut *transaction)
-        .await?;
-        let audit_rows = sqlx::query!(
-            "DELETE FROM audit_events WHERE occurred_at < $1",
-            audit_cutoff
-        )
-        .execute(&mut *transaction)
-        .await?
-        .rows_affected();
+                request_cutoff,
+                RETENTION_DELETE_BATCH
+            )
+            .execute(&mut *transaction)
+            .await?
+            .rows_affected();
+            transaction.commit().await?;
+            if rows < RETENTION_DELETE_BATCH as u64 {
+                break;
+            }
+        }
+        let mut audit_rows = 0;
+        loop {
+            let mut transaction = connection.begin().await?;
+            let rows = sqlx::query!(
+                "WITH expired AS ( \
+                   SELECT ctid FROM audit_events WHERE occurred_at < $1 \
+                   LIMIT $2 FOR UPDATE SKIP LOCKED \
+                 ) \
+                 DELETE FROM audit_events audit USING expired \
+                 WHERE audit.ctid = expired.ctid",
+                audit_cutoff,
+                RETENTION_DELETE_BATCH
+            )
+            .execute(&mut *transaction)
+            .await?
+            .rows_affected();
+            transaction.commit().await?;
+            audit_rows += rows;
+            if rows < RETENTION_DELETE_BATCH as u64 {
+                break;
+            }
+        }
+
+        let mut transaction = connection.begin().await?;
+        sqlx::query!("SELECT set_config('olp.usage_rollup_writer', 'additive-v2', true)")
+            .fetch_one(&mut *transaction)
+            .await?;
         let request_metadata_gap_rollup = sqlx::query!(
             "WITH expired AS ( \
                DELETE FROM request_metadata_ingestion_gaps \

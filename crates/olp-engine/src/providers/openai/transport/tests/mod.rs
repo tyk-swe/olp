@@ -17,9 +17,9 @@ use crate::domain::{
             ContentPart, EmbeddingInput, EmbeddingsRequest, GenerationParameters,
             GenerationRequest, ImageEditRequest, ImageGenerationRequest, ImageOperation,
             ImageVariationRequest, MEDIA_DELETE_MISSING_IS_SUCCESS_EXTENSION, MediaHandle,
-            MediaSource, Message, MessageRole, ModerationRequest, Operation, SourceExtensions,
-            SpeechRequest, TranscriptionRequest, VideoCreateRequest, VideoJobRequest,
-            VideoOperation,
+            MediaSource, Message, MessageRole, ModerationRequest, OPENAI_ENDPOINT_EXTENSION,
+            Operation, SourceExtensions, SpeechRequest, TranscriptionRequest, VideoCreateRequest,
+            VideoJobRequest, VideoOperation,
         },
         results::{CanonicalResult, MediaArtifact, VideoStatus},
     },
@@ -278,7 +278,7 @@ fn responses_request(streaming: bool) -> ProviderRequest {
         unreachable!()
     };
     generation.extensions.values.insert(
-        "/__olp/openai_endpoint".into(),
+        OPENAI_ENDPOINT_EXTENSION.into(),
         serde_json::Value::String("responses".into()),
     );
     request

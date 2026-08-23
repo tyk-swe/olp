@@ -17,7 +17,7 @@ use olp_engine::domain::{
         identity::{OperationKind, RequestMetadata, Surface, TransportMode},
         requests::{
             ContentPart, ExtensionError, GenerationParameters, GenerationRequest, Message,
-            MessageRole, Operation, SourceExtensions,
+            MessageRole, OPENAI_ENDPOINT_EXTENSION, Operation, SourceExtensions,
         },
     },
     ids::{
@@ -418,6 +418,26 @@ fn source_extensions_are_forwardable_only_on_the_same_surface() {
     assert!(matches!(
         extensions.ensure_representable_on(Surface::Gemini),
         Err(ExtensionError::CrossProtocol { .. })
+    ));
+}
+
+#[test]
+fn delivery_only_endpoint_hint_is_not_a_cross_protocol_field() {
+    let mut extensions = SourceExtensions::new(
+        Surface::OpenAi,
+        BTreeMap::from([(OPENAI_ENDPOINT_EXTENSION.into(), json!("responses"))]),
+    );
+
+    assert_eq!(
+        extensions.ensure_representable_on(Surface::Anthropic),
+        Ok(())
+    );
+    extensions
+        .values
+        .insert("/service_tier".into(), json!("priority"));
+    assert!(matches!(
+        extensions.ensure_representable_on(Surface::Anthropic),
+        Err(ExtensionError::CrossProtocol { fields, .. }) if fields == ["/service_tier"]
     ));
 }
 

@@ -1,7 +1,7 @@
 use crate::domain::{
     canonical::{
         identity::{Surface, TransportMode},
-        requests::Operation,
+        requests::{OPENAI_ENDPOINT_EXTENSION, Operation},
     },
     ports::{AttemptFailureClass, ProviderOutput, ProviderRequest, TransportError, TransportPhase},
 };
@@ -23,12 +23,11 @@ pub(super) async fn execute(
     let Operation::Generation(generation) = &request.operation else {
         unreachable!("checked by caller")
     };
-    let mut generation = generation.clone();
     let responses_endpoint = generation
         .extensions
         .values
-        .remove("/__olp/openai_endpoint")
-        .and_then(|value| value.as_str().map(str::to_owned))
+        .get(OPENAI_ENDPOINT_EXTENSION)
+        .and_then(serde_json::Value::as_str)
         .is_some_and(|endpoint| endpoint == "responses");
     generation
         .extensions
@@ -44,12 +43,12 @@ pub(super) async fn execute(
 
     let streaming = request.metadata.mode == TransportMode::Streaming;
     let body = if responses_endpoint {
-        let mut wire = encode_response_create(&generation, &request.attempt.upstream_model)
+        let mut wire = encode_response_create(generation, &request.attempt.upstream_model)
             .map_err(|error| protocol_encode_error("Responses", error))?;
         hydrate_responses_media(&mut wire.input, request.media.as_ref()).await?;
         serialize_wire("Responses", &wire)?
     } else {
-        let mut wire = encode::chat_completion(&generation, &request.attempt.upstream_model)
+        let mut wire = encode::chat_completion(generation, &request.attempt.upstream_model)
             .map_err(|error| protocol_encode_error("chat", error))?;
         if streaming {
             require_stream_usage(&mut wire)?;

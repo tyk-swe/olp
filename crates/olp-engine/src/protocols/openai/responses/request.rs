@@ -6,7 +6,8 @@ use crate::domain::{
         requests::{
             ContentPart, GenerationParameters, GenerationRequest, MediaSource, Message,
             MessageRole, Operation, ResponseFormat, SourceExtensions, ToolCall, ToolChoice,
-            ToolDefinition, inline_media_marker, media_handle_from_inline_marker,
+            ToolDefinition, inline_media_marker, is_delivery_only_extension,
+            media_handle_from_inline_marker,
         },
     },
     ids::RouteSlug,
@@ -315,6 +316,7 @@ pub fn encode_response_create(
             extra: BTreeMap::new(),
         });
     let mut extension_values = request.extensions.values.clone();
+    extension_values.retain(|path, _| !is_delivery_only_extension(path));
     restore_raw_response_tools(&mut tools, &mut tool_choice, &mut extension_values)?;
     apply_pointer_extensions(
         Create {

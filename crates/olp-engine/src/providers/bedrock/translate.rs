@@ -5,7 +5,7 @@ use crate::domain::{
         events::{Event, FinishReason, Kind, Usage},
         requests::{
             ContentPart, GenerationRequest, Message, MessageRole, ResponseFormat,
-            TokenCountRequest, ToolChoice,
+            TokenCountRequest, ToolChoice, is_delivery_only_extension,
         },
     },
     ports::TransportError,
@@ -396,7 +396,11 @@ pub(in crate::providers) fn decode_stop_reason(reason: &StopReason) -> FinishRea
 fn reject_extensions(
     extensions: &crate::domain::canonical::requests::SourceExtensions,
 ) -> Result<(), TransportError> {
-    if extensions.is_empty() {
+    if extensions
+        .values
+        .keys()
+        .all(|path| is_delivery_only_extension(path))
+    {
         Ok(())
     } else {
         Err(protocol_error(

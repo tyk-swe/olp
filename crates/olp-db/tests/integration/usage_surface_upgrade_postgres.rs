@@ -1,5 +1,5 @@
 use chrono::{Duration, Timelike, Utc};
-use olp_db::{MIGRATOR, request_metadata::delivery_health::ConsumerState, usage::Filters};
+use olp_db::{request_metadata::delivery_health::ConsumerState, usage::Filters};
 use uuid::Uuid;
 
 #[tokio::test]
@@ -7,7 +7,7 @@ use uuid::Uuid;
 async fn pre_0010_usage_surfaces_survive_upgrade_and_rollup() {
     let db = olp_db::test_support::TestDb::create_empty("usage_surface_upgrade").await;
     let store = db.store(2).await;
-    MIGRATOR.run_to(9, store.pool()).await.unwrap();
+    store.migrate_to(9).await.unwrap();
 
     let owner_id = Uuid::now_v7();
     let provider_id = Uuid::now_v7();
@@ -171,7 +171,7 @@ async fn pre_0010_usage_surfaces_survive_upgrade_and_rollup() {
     .await
     .unwrap();
 
-    MIGRATOR.run(store.pool()).await.unwrap();
+    store.migrate().await.unwrap();
 
     let anthropic_surface: String =
         sqlx::query_scalar("SELECT surface FROM usage_facts WHERE request_id = $1")

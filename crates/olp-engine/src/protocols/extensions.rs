@@ -3,6 +3,8 @@ use std::collections::BTreeMap;
 use serde::{Serialize, de::DeserializeOwned};
 use serde_json::Value;
 
+use crate::domain::canonical::requests::is_delivery_only_extension;
+
 pub(in crate::protocols) enum PointerExtensionError {
     InvalidPath(String),
     Json(serde_json::Error),
@@ -96,22 +98,24 @@ pub(in crate::protocols) fn apply_request_extensions<T>(
 where
     T: Serialize + DeserializeOwned,
 {
-    if extensions.is_empty() {
+    let deliverable = || {
+        extensions
+            .iter()
+            .filter(|(path, _)| !is_delivery_only_extension(path))
+    };
+    if deliverable().next().is_none() {
         return Ok(());
     }
     let mut value = serde_json::to_value(&*request).map_err(PointerExtensionError::Json)?;
-    let mut insertions = extensions
-        .iter()
+    let mut insertions = deliverable()
         .filter(|(path, _)| is_array_item_path(path))
         .collect::<Vec<_>>();
     insertions.sort_by_key(|(path, _)| array_path_key(path));
     for (path, extension) in insertions {
         set_request_pointer(&mut value, path, extension.clone(), true)?;
     }
-    for (path, extension) in extensions {
-        if !is_array_item_path(path) {
-            set_request_pointer(&mut value, path, extension.clone(), false)?;
-        }
+    for (path, extension) in deliverable().filter(|(path, _)| !is_array_item_path(path)) {
+        set_request_pointer(&mut value, path, extension.clone(), false)?;
     }
     *request = serde_json::from_value(value).map_err(PointerExtensionError::Json)?;
     Ok(())

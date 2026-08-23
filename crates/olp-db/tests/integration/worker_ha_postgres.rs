@@ -12,6 +12,70 @@ use uuid::Uuid;
 
 #[tokio::test]
 #[ignore = "requires PostgreSQL via make db-test"]
+async fn migration_rebuilds_an_existing_unrecorded_attempt_usage_event_index() {
+    let db = TestDb::create_empty("migration_retry").await;
+    let store = db.store(2).await;
+    store.migrate_to(33).await.unwrap();
+    sqlx::query(
+        "CREATE INDEX CONCURRENTLY attempt_usage_facts_event_id_idx \
+         ON attempt_usage_facts(event_id)",
+    )
+    .execute(store.pool())
+    .await
+    .unwrap();
+
+    store.migrate().await.unwrap();
+
+    let (valid, applied): (bool, bool) = sqlx::query_as(
+        "SELECT index.indisvalid, EXISTS ( \
+           SELECT 1 FROM _sqlx_migrations WHERE version = 34 AND success \
+         ) \
+         FROM pg_index index \
+         WHERE index.indexrelid = 'attempt_usage_facts_event_id_idx'::regclass",
+    )
+    .fetch_one(store.pool())
+    .await
+    .unwrap();
+    assert!(valid);
+    assert!(applied);
+}
+
+#[tokio::test]
+#[ignore = "requires PostgreSQL via make db-test"]
+async fn maintenance_discards_a_session_that_does_not_acquire_the_lock() {
+    let db = TestDb::create_migrated("maintenance_lock_session").await;
+    let contender = db.store(1).await;
+    let leader = db.store(1).await;
+    let contender_pid: i32 = sqlx::query_scalar("SELECT pg_backend_pid()")
+        .fetch_one(contender.pool())
+        .await
+        .unwrap();
+    let mut leader_connection = leader.pool().acquire().await.unwrap();
+    let acquired: bool = sqlx::query_scalar("SELECT pg_try_advisory_lock($1)")
+        .bind(MAINTENANCE_LOCK_ID)
+        .fetch_one(&mut *leader_connection)
+        .await
+        .unwrap();
+    assert!(acquired);
+
+    let report = contender.run_maintenance(Utc::now()).await.unwrap();
+
+    assert!(!report.lock_acquired);
+    let replacement_pid: i32 = sqlx::query_scalar("SELECT pg_backend_pid()")
+        .fetch_one(contender.pool())
+        .await
+        .unwrap();
+    assert_ne!(replacement_pid, contender_pid);
+    let released: bool = sqlx::query_scalar("SELECT pg_advisory_unlock($1)")
+        .bind(MAINTENANCE_LOCK_ID)
+        .fetch_one(&mut *leader_connection)
+        .await
+        .unwrap();
+    assert!(released);
+}
+
+#[tokio::test]
+#[ignore = "requires PostgreSQL via make db-test"]
 async fn three_workers_add_recovery_counters_monotonically_and_stale_as_a_fleet() {
     let db = TestDb::create_migrated("worker_health_three_replicas").await;
     let store = db.store(12).await;
@@ -83,12 +147,68 @@ async fn three_workers_add_recovery_counters_monotonically_and_stale_as_a_fleet(
 
 #[tokio::test]
 #[ignore = "requires PostgreSQL via make db-test"]
+async fn maintenance_repeats_committed_retention_batches() {
+    let db = TestDb::create_migrated("maintenance_batches").await;
+    let store = db.store(2).await;
+    let expired_rows = 50_001_i64;
+    sqlx::query("CREATE TABLE maintenance_batch_transactions (transaction_id xid8 PRIMARY KEY)")
+        .execute(store.pool())
+        .await
+        .unwrap();
+    sqlx::query(
+        "CREATE FUNCTION record_maintenance_batch_transaction() RETURNS trigger AS $$ \
+         BEGIN \
+           INSERT INTO maintenance_batch_transactions VALUES (pg_current_xact_id()) \
+           ON CONFLICT DO NOTHING; \
+           RETURN NULL; \
+         END; \
+         $$ LANGUAGE plpgsql",
+    )
+    .execute(store.pool())
+    .await
+    .unwrap();
+    sqlx::query(
+        "CREATE TRIGGER record_maintenance_batch_transaction \
+         AFTER DELETE ON audit_events FOR EACH STATEMENT \
+         EXECUTE FUNCTION record_maintenance_batch_transaction()",
+    )
+    .execute(store.pool())
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO audit_events (id, action, resource_type, outcome, occurred_at) \
+         SELECT uuidv7(), 'batch-test', 'batch-test', 'succeeded', \
+                now() - interval '366 days' \
+         FROM generate_series(1, $1)",
+    )
+    .bind(expired_rows)
+    .execute(store.pool())
+    .await
+    .unwrap();
+
+    let report = store.run_maintenance(Utc::now()).await.unwrap();
+
+    assert!(report.lock_acquired);
+    assert_eq!(report.audit_rows, expired_rows as u64);
+    let (retained, transactions): (i64, i64) = sqlx::query_as(
+        "SELECT (SELECT count(*) FROM audit_events), \
+                (SELECT count(*) FROM maintenance_batch_transactions)",
+    )
+    .fetch_one(store.pool())
+    .await
+    .unwrap();
+    assert_eq!(retained, 0);
+    assert_eq!(transactions, 2);
+}
+
+#[tokio::test]
+#[ignore = "requires PostgreSQL via make db-test"]
 async fn three_maintenance_replicas_never_overlap_a_destructive_pass() {
     let db = TestDb::create_migrated("maintenance_three_replicas").await;
     let store = db.store(12).await;
 
     // Keep the elected pass blocked immediately after it acquires the
-    // transaction-level advisory lock. The other two replicas must skip
+    // session-level advisory lock. The other two replicas must skip
     // instead of queuing a second destructive transaction.
     let mut table_blocker = store.pool().begin().await.unwrap();
     sqlx::query("LOCK TABLE settings IN ACCESS EXCLUSIVE MODE")
@@ -100,21 +220,24 @@ async fn three_maintenance_replicas_never_overlap_a_destructive_pass() {
 
     tokio::time::timeout(StdDuration::from_secs(5), async {
         loop {
-            let mut connection = store.pool().acquire().await.unwrap();
-            let acquired: bool = sqlx::query_scalar("SELECT pg_try_advisory_lock($1)")
-                .bind(MAINTENANCE_LOCK_ID)
-                .fetch_one(&mut *connection)
-                .await
-                .unwrap();
-            if !acquired {
+            let held: bool = sqlx::query_scalar(
+                "SELECT EXISTS ( \
+                   SELECT 1 FROM pg_locks \
+                   WHERE locktype = 'advisory' AND granted \
+                     AND database = ( \
+                       SELECT oid FROM pg_database WHERE datname = current_database() \
+                     ) \
+                     AND ((classid::bigint << 32) | objid::bigint) = $1 \
+                     AND objsubid = 1 \
+                 )",
+            )
+            .bind(MAINTENANCE_LOCK_ID)
+            .fetch_one(store.pool())
+            .await
+            .unwrap();
+            if held {
                 return;
             }
-            let released: bool = sqlx::query_scalar("SELECT pg_advisory_unlock($1)")
-                .bind(MAINTENANCE_LOCK_ID)
-                .fetch_one(&mut *connection)
-                .await
-                .unwrap();
-            assert!(released);
             tokio::time::sleep(StdDuration::from_millis(10)).await;
         }
     })

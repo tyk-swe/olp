@@ -15,7 +15,7 @@ pub(super) async fn migrate(args: MigrateArgs) -> AppResult<()> {
             )
             .into());
         }
-        olp_db::MIGRATOR.run_to(target, store.pool()).await?;
+        store.migrate_to(target).await?;
         info!(target, "PostgreSQL migrations reached test target");
     } else {
         let legacy_stream_claim_token =

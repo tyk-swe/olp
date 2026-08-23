@@ -6,8 +6,8 @@ use crate::domain::{
         identity::{OperationKind, RequestMetadata, Surface, TransportMode},
         requests::{
             ContentPart, EmbeddingInput, EmbeddingsRequest, GenerationParameters,
-            GenerationRequest, Message, MessageRole, ModerationRequest, Operation,
-            SourceExtensions, TokenCountRequest,
+            GenerationRequest, Message, MessageRole, ModerationRequest, OPENAI_ENDPOINT_EXTENSION,
+            Operation, SourceExtensions, TokenCountRequest,
         },
         results::CanonicalResult,
     },
@@ -185,7 +185,7 @@ fn generation_probe_operation(
         SourceExtensions::new(
             Surface::OpenAi,
             BTreeMap::from([(
-                "/__olp/openai_endpoint".to_owned(),
+                OPENAI_ENDPOINT_EXTENSION.to_owned(),
                 Value::String("responses".to_owned()),
             )]),
         )

@@ -1,7 +1,9 @@
+use std::collections::BTreeMap;
+
 use crate::domain::{
     canonical::{
         identity::{Surface, TransportMode},
-        requests::{ImageOperation, Operation, VideoOperation},
+        requests::{ImageOperation, OPENAI_ENDPOINT_EXTENSION, Operation, VideoOperation},
     },
     ids::RouteSlug,
     routing::{
@@ -53,6 +55,7 @@ pub fn select_representable_attempts_filtered(
 ) -> Result<Vec<AttemptPlan>, InferenceError> {
     let mut capability_matched = false;
     let mut representable_matched = false;
+    let mut provider_representability = BTreeMap::new();
     let selected = select_attempts_filtered(
         snapshot,
         route_slug,
@@ -62,8 +65,14 @@ pub fn select_representable_attempts_filtered(
         affinity_key,
         |provider, target| {
             capability_matched = true;
-            let operation = operation_for_provider(operation, provider.kind);
-            if validate_for_provider(&operation, provider.kind, &target.upstream_model).is_err() {
+            // Keyed on both inputs the validation reads, so two targets of the
+            // same kind but different models keep independent verdicts.
+            let representable = *provider_representability
+                .entry((provider.kind, target.upstream_model.clone()))
+                .or_insert_with(|| {
+                    validate_for_provider(operation, provider.kind, &target.upstream_model).is_ok()
+                });
+            if !representable {
                 return false;
             }
             representable_matched = true;
@@ -97,7 +106,7 @@ pub fn operation_for_provider(operation: &Operation, provider_kind: ProviderKind
         ProviderKind::OpenAi | ProviderKind::AzureOpenAi | ProviderKind::OpenAiCompatible
     ) && let Operation::Generation(request) = &mut operation
     {
-        request.extensions.values.remove("/__olp/openai_endpoint");
+        request.extensions.values.remove(OPENAI_ENDPOINT_EXTENSION);
     }
     operation
 }
@@ -142,19 +151,18 @@ fn validate_openai(operation: &Operation, upstream_model: &str) -> Result<(), St
         .map_err(|error| error.to_string())?;
     match operation {
         Operation::Generation(request) => {
-            let mut request = request.clone();
             let responses = request
                 .extensions
                 .values
-                .remove("/__olp/openai_endpoint")
-                .and_then(|value| value.as_str().map(str::to_owned))
+                .get(OPENAI_ENDPOINT_EXTENSION)
+                .and_then(serde_json::Value::as_str)
                 .is_some_and(|endpoint| endpoint == "responses");
             if responses {
-                openai::responses::request::encode_response_create(&request, upstream_model)
+                openai::responses::request::encode_response_create(request, upstream_model)
                     .map(|_| ())
                     .map_err(|error| error.to_string())
             } else {
-                openai::chat::encode::chat_completion(&request, upstream_model)
+                openai::chat::encode::chat_completion(request, upstream_model)
                     .map(|_| ())
                     .map_err(|error| error.to_string())
             }
@@ -466,7 +474,7 @@ mod tests {
         request
             .extensions
             .values
-            .insert("/__olp/openai_endpoint".into(), json!("responses"));
+            .insert(OPENAI_ENDPOINT_EXTENSION.into(), json!("responses"));
         let mut attempts = vec![
             attempt(ProviderKind::OpenAi),
             attempt(ProviderKind::Anthropic),
@@ -478,7 +486,56 @@ mod tests {
     }
 
     #[test]
-    fn semantic_filter_runs_before_route_attempt_limit() {
+    fn endpoint_hint_is_ignored_for_validation_and_stripped_for_delivery() {
+        let mut operation = generation(Surface::OpenAi);
+        let Operation::Generation(request) = &mut operation else {
+            unreachable!()
+        };
+        request
+            .extensions
+            .values
+            .insert(OPENAI_ENDPOINT_EXTENSION.into(), json!("responses"));
+        let mut attempts = vec![
+            attempt(ProviderKind::OpenAi),
+            attempt(ProviderKind::Anthropic),
+            attempt(ProviderKind::Gemini),
+            attempt(ProviderKind::Bedrock),
+        ];
+
+        retain_representable_attempts(&operation, &mut attempts).unwrap();
+
+        assert_eq!(attempts.len(), 4);
+        let openai = operation_for_provider(&operation, ProviderKind::OpenAi);
+        assert!(
+            openai
+                .extensions()
+                .unwrap()
+                .values
+                .contains_key(OPENAI_ENDPOINT_EXTENSION)
+        );
+        let anthropic = operation_for_provider(&operation, ProviderKind::Anthropic);
+        assert!(
+            !anthropic
+                .extensions()
+                .unwrap()
+                .values
+                .contains_key(OPENAI_ENDPOINT_EXTENSION)
+        );
+        assert!(
+            operation
+                .extensions()
+                .unwrap()
+                .values
+                .contains_key(OPENAI_ENDPOINT_EXTENSION)
+        );
+    }
+
+    fn semantic_filter_fixture() -> (
+        Snapshot,
+        RouteSlug,
+        Operation,
+        crate::domain::ids::ProviderId,
+    ) {
         let mut operation = generation(Surface::OpenAi);
         let Operation::Generation(request) = &mut operation else {
             unreachable!()
@@ -525,39 +582,49 @@ mod tests {
                 },
             ],
         };
-        let snapshot = Snapshot {
-            generation: RuntimeGeneration {
-                id: RuntimeGenerationId::new(),
-                ordinal: 1,
-                activated_at: Utc::now(),
+        (
+            Snapshot {
+                generation: RuntimeGeneration {
+                    id: RuntimeGenerationId::new(),
+                    ordinal: 1,
+                    activated_at: Utc::now(),
+                },
+                providers: BTreeMap::from([
+                    (
+                        incompatible,
+                        Provider {
+                            id: incompatible,
+                            name: "incompatible".into(),
+                            kind: ProviderKind::Anthropic,
+                            enabled: true,
+                            active_credential: None,
+                            capabilities: capability("claude"),
+                        },
+                    ),
+                    (
+                        compatible,
+                        Provider {
+                            id: compatible,
+                            name: "compatible".into(),
+                            kind: ProviderKind::OpenAi,
+                            enabled: true,
+                            active_credential: None,
+                            capabilities: capability("gpt"),
+                        },
+                    ),
+                ]),
+                routes: BTreeMap::from([(route_slug.clone(), route)]),
+                api_keys: BTreeMap::new(),
             },
-            providers: BTreeMap::from([
-                (
-                    incompatible,
-                    Provider {
-                        id: incompatible,
-                        name: "incompatible".into(),
-                        kind: ProviderKind::Anthropic,
-                        enabled: true,
-                        active_credential: None,
-                        capabilities: capability("claude"),
-                    },
-                ),
-                (
-                    compatible,
-                    Provider {
-                        id: compatible,
-                        name: "compatible".into(),
-                        kind: ProviderKind::OpenAi,
-                        enabled: true,
-                        active_credential: None,
-                        capabilities: capability("gpt"),
-                    },
-                ),
-            ]),
-            routes: BTreeMap::from([(route_slug.clone(), route)]),
-            api_keys: BTreeMap::new(),
-        };
+            route_slug,
+            operation,
+            compatible,
+        )
+    }
+
+    #[test]
+    fn semantic_filter_runs_before_route_attempt_limit() {
+        let (snapshot, route_slug, operation, compatible) = semantic_filter_fixture();
         let attempts = select_representable_attempts(
             &snapshot,
             &route_slug,
@@ -569,5 +636,47 @@ mod tests {
         .unwrap();
         assert_eq!(attempts.len(), 1);
         assert_eq!(attempts[0].provider_id, compatible);
+    }
+
+    #[test]
+    fn semantic_filter_preserves_unavailable_and_invalid_request_classification() {
+        let (snapshot, route_slug, operation, _) = semantic_filter_fixture();
+        let unavailable = select_representable_attempts_filtered(
+            &snapshot,
+            &route_slug,
+            &operation,
+            Surface::OpenAi,
+            TransportMode::Unary,
+            b"affinity",
+            |_, _| false,
+        )
+        .unwrap_err();
+        assert_eq!(
+            unavailable.kind(),
+            crate::inference::error::Kind::Unavailable
+        );
+
+        let mut invalid_operation = operation.clone();
+        let Operation::Generation(request) = &mut invalid_operation else {
+            unreachable!()
+        };
+        request.messages[0].content = vec![ContentPart::InputFile {
+            media: MediaHandle::new("bounded-file"),
+            mime_type: "application/pdf".into(),
+            filename: "brief.pdf".into(),
+        }];
+        let invalid = select_representable_attempts(
+            &snapshot,
+            &route_slug,
+            &invalid_operation,
+            Surface::OpenAi,
+            TransportMode::Unary,
+            b"affinity",
+        )
+        .unwrap_err();
+        assert_eq!(
+            invalid.kind(),
+            crate::inference::error::Kind::InvalidRequest
+        );
     }
 }

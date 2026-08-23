@@ -134,13 +134,11 @@ impl RoutedEvents {
         let events = match events {
             Ok(events) => events,
             Err(failure) => {
-                accounting
-                    .finish(RequestOutcome::from_error(&failure))
-                    .await;
+                accounting.finish_detached(RequestOutcome::from_error(&failure));
                 return Err(failure);
             }
         };
-        accounting.release().await;
+        accounting.release_detached();
         let finalizer = accounting.into_finalizer();
         Ok(CompletedEvents {
             events,
@@ -527,7 +525,7 @@ impl Service {
             return Err(failure);
         };
         accounting.replace_usage(usage_from_result(&result));
-        accounting.release().await;
+        accounting.release_detached();
         let finalizer = accounting.into_finalizer();
         Ok(RoutedUnaryResult {
             result,
@@ -737,3 +735,6 @@ impl Service {
         release(lease, None).await;
     }
 }
+
+#[cfg(test)]
+mod tests;

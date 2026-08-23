@@ -83,6 +83,19 @@ pub struct GenerationRequest {
     pub extensions: SourceExtensions,
 }
 
+/// Internal hint choosing which OpenAI adapter endpoint delivers a generation.
+/// It is not client semantics: it must never block cross-protocol routing and
+/// never reach a protocol encoder.
+pub const OPENAI_ENDPOINT_EXTENSION: &str = "/__olp/openai_endpoint";
+
+/// Delivery-only extensions carry OLP's own routing intent rather than a field
+/// the client asked to be forwarded. Representability checks ignore them and
+/// encoders drop them, so every such marker is filtered in exactly one place.
+#[must_use]
+pub fn is_delivery_only_extension(path: &str) -> bool {
+    path == OPENAI_ENDPOINT_EXTENSION
+}
+
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
 pub struct GenerationParameters {
     pub max_output_tokens: Option<u32>,
@@ -470,20 +483,25 @@ impl SourceExtensions {
         }
     }
 
-    #[must_use]
-    pub fn is_empty(&self) -> bool {
-        self.values.is_empty()
-    }
-
     pub fn ensure_representable_on(&self, target: Surface) -> Result<(), ExtensionError> {
         if self.values.is_empty() || self.source == Some(target) {
+            return Ok(());
+        }
+
+        let fields = self
+            .values
+            .keys()
+            .filter(|field| !is_delivery_only_extension(field))
+            .cloned()
+            .collect::<Vec<_>>();
+        if fields.is_empty() {
             return Ok(());
         }
 
         Err(ExtensionError::CrossProtocol {
             source_surface: self.source,
             target,
-            fields: self.values.keys().cloned().collect(),
+            fields,
         })
     }
 }

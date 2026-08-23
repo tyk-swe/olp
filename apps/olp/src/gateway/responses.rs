@@ -8,7 +8,10 @@ use axum::{
 use olp_engine::domain::{
     auth::GatewayCapability,
     canonical::{
-        events::Event, identity::TransportMode, requests::Operation, results::CanonicalResult,
+        events::Event,
+        identity::TransportMode,
+        requests::{OPENAI_ENDPOINT_EXTENSION, Operation},
+        results::CanonicalResult,
     },
 };
 use olp_engine::inference::{execution::RoutedEvents, principal::Principal};
@@ -64,7 +67,7 @@ pub(super) async fn responses(
         unreachable!("the Responses codec always produces generation")
     };
     generation.extensions.values.insert(
-        "/__olp/openai_endpoint".into(),
+        OPENAI_ENDPOINT_EXTENSION.into(),
         Value::String("responses".into()),
     );
     let mode = if streaming {
