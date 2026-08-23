@@ -1,7 +1,11 @@
 import type { components } from '../schema';
 import { apiClient } from '../client';
 import { result } from '../http';
-import { collectCursorPages, type CursorPage } from '../pagination';
+import {
+  collectCursorPages,
+  type CursorPage,
+  toCursorPage
+} from '../pagination';
 
 type Schemas = components['schemas'];
 
@@ -24,8 +28,7 @@ export async function listApiKeyPage(
     params: { query: { limit: 50, cursor } },
     signal
   });
-  const page = result(response.data, response.error, response.response);
-  return { items: page.items, nextCursor: page.next_cursor ?? null };
+  return toCursorPage(result(response.data, response.error, response.response));
 }
 
 export async function createApiKey(

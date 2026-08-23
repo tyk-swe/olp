@@ -1,7 +1,7 @@
 import type { components } from './schema';
 import { apiClient } from './client';
 import { result } from './http';
-import type { CursorPage } from './pagination';
+import { type CursorPage, toCursorPage } from './pagination';
 import { compactQuery } from './query';
 
 export type RequestSummary = components['schemas']['RequestSummary'];
@@ -27,8 +27,7 @@ export async function listRequests(
   const { data, error, response } = await apiClient.GET('/api/v1/requests', {
     params: { query: compactQuery(filters) }
   });
-  const page = result(data, error, response);
-  return { items: page.data, nextCursor: page.next_cursor ?? null };
+  return toCursorPage(result(data, error, response));
 }
 
 export async function getRequest(requestId: string): Promise<RequestDetail> {

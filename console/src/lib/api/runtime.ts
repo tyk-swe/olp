@@ -1,7 +1,7 @@
 import type { components } from './schema';
 import { apiClient } from './client';
 import { result } from './http';
-import type { CursorPage } from './pagination';
+import { type CursorPage, toCursorPage } from './pagination';
 import { compactQuery } from './query';
 
 export type RuntimeGeneration = components['schemas']['RuntimeGenerationItem'];
@@ -13,6 +13,5 @@ export async function listRuntimeGenerations(
     '/api/v1/runtime-generations',
     { params: { query: compactQuery({ cursor, limit: 25 }) } }
   );
-  const page = result(data, error, response);
-  return { items: page.data, nextCursor: page.next_cursor ?? null };
+  return toCursorPage(result(data, error, response));
 }

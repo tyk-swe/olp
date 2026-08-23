@@ -1,7 +1,11 @@
 import type { components } from './schema';
 import { apiClient } from './client';
 import { result } from './http';
-import { collectCursorPages, type CursorPage } from './pagination';
+import {
+  collectCursorPages,
+  type CursorPage,
+  toCursorPage
+} from './pagination';
 
 export type RequestMetadataGatewayEpoch =
   components['schemas']['RequestMetadataGatewayEpochResponse'];
@@ -21,8 +25,7 @@ export async function listRequestMetadataGatewayEpochs(
     '/api/v1/request-metadata/gateway-epochs',
     { params: { query: { state, cursor, limit: 25 } } }
   );
-  const page = result(data, error, response);
-  return { items: page.data, nextCursor: page.next_cursor ?? null };
+  return toCursorPage(result(data, error, response));
 }
 
 export async function acknowledgeRequestMetadataGatewayEpoch(
@@ -51,7 +54,7 @@ export async function listProviderHealth(windowMinutes = 15): Promise<{
     });
     const page = result(response.data, response.error, response.response);
     responseWindow = page.window_minutes;
-    return { items: page.data, nextCursor: page.next_cursor ?? null };
+    return toCursorPage(page);
   });
   return { window_minutes: responseWindow, data };
 }

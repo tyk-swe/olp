@@ -1,7 +1,11 @@
 import type { components } from '../schema';
 import { apiClient } from '../client';
 import { result } from '../http';
-import { collectCursorPages, type CursorPage } from '../pagination';
+import {
+  collectCursorPages,
+  type CursorPage,
+  toCursorPage
+} from '../pagination';
 
 type Schemas = components['schemas'];
 
@@ -69,8 +73,7 @@ export async function listProviderPage(
     params: { query: { limit: 50, cursor } },
     signal
   });
-  const page = result(response.data, response.error, response.response);
-  return { items: page.items, nextCursor: page.next_cursor ?? null };
+  return toCursorPage(result(response.data, response.error, response.response));
 }
 
 export async function listProviderModelPage(
@@ -88,8 +91,7 @@ export async function listProviderModelPage(
       signal
     }
   );
-  const page = result(response.data, response.error, response.response);
-  return { items: page.items, nextCursor: page.next_cursor ?? null };
+  return toCursorPage(result(response.data, response.error, response.response));
 }
 
 export async function listProviderModelInventoryPage(
@@ -101,8 +103,7 @@ export async function listProviderModelInventoryPage(
     params: { query: { limit: 50, cursor, enabled } },
     signal
   });
-  const page = result(response.data, response.error, response.response);
-  return { items: page.items, nextCursor: page.next_cursor ?? null };
+  return toCursorPage(result(response.data, response.error, response.response));
 }
 
 export async function listProviderModelInventory(
@@ -270,8 +271,7 @@ export async function listProviderRevisionPage(
       signal
     }
   );
-  const page = result(response.data, response.error, response.response);
-  return { items: page.items, nextCursor: page.next_cursor ?? null };
+  return toCursorPage(result(response.data, response.error, response.response));
 }
 
 export async function diffProviderRevisions(
@@ -331,8 +331,7 @@ async function listProviderCredentialPage(
       signal
     }
   );
-  const page = result(response.data, response.error, response.response);
-  return { items: page.items, nextCursor: page.next_cursor ?? null };
+  return toCursorPage(result(response.data, response.error, response.response));
 }
 
 export async function rotateProviderCredential(

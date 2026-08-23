@@ -2,6 +2,19 @@ import { ApiProblem } from './http';
 
 export type CursorPage<T> = { items: T[]; nextCursor: string | null };
 
+type WirePage<T> = { next_cursor?: string | null } & (
+  { items: T[] } | { data: T[] }
+);
+
+/// Normalizes a management list response; operations endpoints use `data`
+/// and configuration endpoints use `items` for the same shape.
+export function toCursorPage<T>(page: WirePage<T>): CursorPage<T> {
+  return {
+    items: 'items' in page ? page.items : page.data,
+    nextCursor: page.next_cursor ?? null
+  };
+}
+
 /// Back/forward cursor pagination state shared by the list pages. `history`
 /// holds the cursor of every previous page (undefined = first page) so the
 /// "previous" control can pop back without a server round-trip.

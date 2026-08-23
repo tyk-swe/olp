@@ -1,7 +1,7 @@
 import type { components } from './schema';
 import { apiClient } from './client';
 import { result } from './http';
-import type { CursorPage } from './pagination';
+import { type CursorPage, toCursorPage } from './pagination';
 import { compactQuery } from './query';
 
 export type PricingRevision = components['schemas']['PricingRevisionResponse'];
@@ -14,8 +14,7 @@ export async function listPricing(
     '/api/v1/pricing/revisions',
     { params: { query: compactQuery({ cursor, limit: 25 }) } }
   );
-  const page = result(data, error, response);
-  return { items: page.data, nextCursor: page.next_cursor ?? null };
+  return toCursorPage(result(data, error, response));
 }
 
 export async function createPricingRevision(
