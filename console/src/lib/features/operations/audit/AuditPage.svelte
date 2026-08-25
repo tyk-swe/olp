@@ -11,7 +11,8 @@
   const pagination = $state(emptyCursorHistory());
   const audit = createQuery(() => ({
     queryKey: ['audit', pagination.cursor],
-    queryFn: () => listAudit(pagination.cursor)
+    queryFn: () => listAudit(pagination.cursor),
+    placeholderData: (previous) => previous
   }));
 </script>
 
@@ -23,7 +24,7 @@
   <div class="loading-state" role="status">Loading audit events…</div>
 {:else if audit.isError}
   <div class="inline-problem" role="alert">Audit events are unavailable. <button class="text-button" onclick={() => audit.refetch()}>Try again</button></div>
-{:else if audit.data?.items.length === 0}
+{:else if audit.data?.items.length === 0 && pagination.history.length === 0}
   <div class="card empty-state"><div><strong>No audit events</strong><p>Security and configuration changes will appear here.</p></div></div>
 {:else}
   <!-- svelte-ignore a11y_no_noninteractive_tabindex -->

@@ -12,10 +12,13 @@
     cursorPaginationProps,
     emptyCursorHistory
   } from '$lib/api/pagination';
-  import { FIXED_ROLES } from '$lib/auth/authorization';
+  import { FIXED_ROLES, can } from '$lib/auth/authorization';
+  import { authLifecycle } from '$lib/auth/lifecycle';
   import CursorPagination from '$lib/components/CursorPagination.svelte';
 
   const queryClient = useQueryClient();
+  const viewer = authLifecycle.snapshot().user;
+  const canManage = can(viewer?.role, 'users.manage');
   const pagination = $state(emptyCursorHistory());
   let busy = $state('');
   let error = $state('');
@@ -31,8 +34,10 @@
     error = notice = '';
     try {
       await action();
+      return true;
     } catch (cause) {
       error = accessErrorMessage(cause);
+      return false;
     } finally {
       busy = '';
     }
@@ -53,13 +58,15 @@
     );
   }
 
-  async function changeRole(user: User, role: string) {
+  async function changeRole(user: User, select: HTMLSelectElement) {
+    const role = select.value;
     if (role === user.role) return;
-    await run(`role-${user.id}`, async () => {
+    const saved = await run(`role-${user.id}`, async () => {
       const updated = await updateUserRole(user, role);
       updateCachedUser(updated);
       notice = `${updated.display_name} is now ${updated.role}. Existing sessions were revoked.`;
     });
+    if (!saved) select.value = user.role;
   }
 
   async function changeActive(user: User) {
@@ -82,6 +89,11 @@
   }
 </script>
 
+{#if !canManage}
+  <p class="read-only-note" role="note">
+    Your role can view members but not change roles or deactivate accounts.
+  </p>
+{/if}
 {#if error}<div class="inline-problem" role="alert">{error}</div>{/if}
 {#if notice}<div class="success-banner" role="status">{notice}</div>{/if}
 
@@ -135,9 +147,11 @@
                 <select
                   class="role-select"
                   value={user.role}
-                  onchange={(event) =>
-                    changeRole(user, event.currentTarget.value)}
-                  disabled={!user.active || busy === `role-${user.id}`}
+                  onchange={(event) => changeRole(user, event.currentTarget)}
+                  disabled={!canManage ||
+                    !user.active ||
+                    user.id === viewer?.id ||
+                    busy === `role-${user.id}`}
                 >
                   {#each FIXED_ROLES as role (role)}<option value={role}
                       >{role}</option
@@ -147,18 +161,19 @@
             </td>
             <td>{new Date(user.created_at).toLocaleDateString()}</td>
             <td
-              ><button
-                class="button button-secondary"
-                class:danger-button={user.active}
-                type="button"
-                onclick={() => changeActive(user)}
-                disabled={Boolean(busy)}
-                >{busy === `active-${user.id}`
-                  ? 'Saving…'
-                  : user.active
-                    ? 'Deactivate'
-                    : 'Reactivate'}</button
-              ></td
+              >{#if user.id === viewer?.id}<small>Your account</small
+                >{:else if canManage}<button
+                  class="button button-secondary"
+                  class:danger-button={user.active}
+                  type="button"
+                  onclick={() => changeActive(user)}
+                  disabled={Boolean(busy)}
+                  >{busy === `active-${user.id}`
+                    ? 'Saving…'
+                    : user.active
+                      ? 'Deactivate'
+                      : 'Reactivate'}</button
+                >{/if}</td
             >
           </tr>
         {/each}

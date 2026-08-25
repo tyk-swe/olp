@@ -190,7 +190,7 @@ test('failed route conflict reload preserves dirty fields until a successful rel
   page
 }) => {
   await mockSession(page, sessionOptions);
-  let failNextReload = false;
+  let reloadFailuresRemaining = 0;
   let current = {
     id: ids.draft,
     slug: 'default',
@@ -234,8 +234,8 @@ test('failed route conflict reload preserves dirty fields until a successful rel
   });
   await page.route(`**/api/v1/route-drafts/${ids.draft}`, async (route) => {
     const request = route.request();
-    if (request.method() === 'GET' && failNextReload) {
-      failNextReload = false;
+    if (request.method() === 'GET' && reloadFailuresRemaining > 0) {
+      reloadFailuresRemaining -= 1;
       await route.fulfill({
         status: 503,
         json: { title: 'Route reload unavailable', status: 503 }
@@ -248,7 +248,7 @@ test('failed route conflict reload preserves dirty fields until a successful rel
         slug: 'remote-route',
         etag: '01980000-0000-7000-8000-000000000212'
       };
-      failNextReload = true;
+      reloadFailuresRemaining = 2;
       await route.fulfill({
         status: 412,
         contentType: 'application/problem+json',
@@ -271,7 +271,8 @@ test('failed route conflict reload preserves dirty fields until a successful rel
   );
 
   await page.getByRole('button', { name: 'Reload' }).click();
-  await expect.poll(() => failNextReload).toBe(false);
+  await expect.poll(() => reloadFailuresRemaining).toBe(0);
+  await expect(page.getByText('Route reload unavailable')).toBeVisible();
   await expect(page.getByLabel('Public model slug')).toHaveValue('local-route');
   await page.getByRole('button', { name: 'Reload' }).click();
   await expect(page.getByLabel('Public model slug')).toHaveValue(

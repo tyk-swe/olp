@@ -24,16 +24,24 @@
   let operation = $state('');
   let dimension = $state<Dimension>('route');
   let granularity = $state<'hour' | 'day'>('hour');
-  let applied = $state<UsageFilters>({ start: yesterday.toISOString(), end: now.toISOString() });
+  let applied = $state<{
+    filters: UsageFilters;
+    dimension: Dimension;
+    granularity: 'hour' | 'day';
+  }>({
+    filters: { start: yesterday.toISOString(), end: now.toISOString() },
+    dimension: 'route',
+    granularity: 'hour'
+  });
 
   const usage = createQuery(() => ({
-    queryKey: ['usage', JSON.stringify(applied), dimension, granularity],
+    queryKey: ['usage', JSON.stringify(applied)],
     queryFn: async () => {
       const [summary, series, breakdown, completeness] = await Promise.all([
-        usageSummary(applied),
-        usageSeries(applied, granularity),
-        usageBreakdown(applied, dimension),
-        usageCompleteness(applied)
+        usageSummary(applied.filters),
+        usageSeries(applied.filters, applied.granularity),
+        usageBreakdown(applied.filters, applied.dimension),
+        usageCompleteness(applied.filters)
       ]);
       return {
         summary,
@@ -47,13 +55,17 @@
   function apply(event: SubmitEvent) {
     event.preventDefault();
     applied = {
-      start: new Date(start).toISOString(),
-      end: new Date(end).toISOString(),
-      route: route || undefined,
-      model: model || undefined,
-      provider_id: providerId || undefined,
-      api_key_id: apiKeyId || undefined,
-      operation: operation || undefined
+      filters: {
+        start: new Date(start).toISOString(),
+        end: new Date(end).toISOString(),
+        route: route || undefined,
+        model: model || undefined,
+        provider_id: providerId || undefined,
+        api_key_id: apiKeyId || undefined,
+        operation: operation || undefined
+      },
+      dimension,
+      granularity
     };
   }
 
@@ -63,7 +75,11 @@
     start = dateTimeLocalValue(resetStart);
     end = dateTimeLocalValue(resetEnd);
     route = model = providerId = apiKeyId = operation = '';
-    applied = { start: resetStart.toISOString(), end: resetEnd.toISOString() };
+    applied = {
+      filters: { start: resetStart.toISOString(), end: resetEnd.toISOString() },
+      dimension,
+      granularity
+    };
   }
 
   function titleCase(value: string) {
@@ -135,18 +151,18 @@
     <article class="card metric-card"><p>Estimated cost</p><strong class:unpriced={usage.data.summary.estimated_cost == null}>{formatCost(usage.data.summary.estimated_cost, usage.data.summary.currency ?? 'USD')}</strong></article>
   </section>
 
-  <UsageChart points={usage.data.points} />
+  <UsageChart points={usage.data.points} granularity={applied.granularity} />
 
   <section class="breakdown" aria-labelledby="breakdown-title">
-    <div class="section-heading"><div><p class="eyebrow">Breakdown</p><h2 id="breakdown-title">By {dimension.replace('_', ' ')}</h2></div><span class="badge">Top {usage.data.breakdown.length}</span></div>
+    <div class="section-heading"><div><p class="eyebrow">Breakdown</p><h2 id="breakdown-title">By {applied.dimension.replace('_', ' ')}</h2></div><span class="badge">Top {usage.data.breakdown.length}</span></div>
     {#if usage.data.breakdown.length === 0}
       <div class="card empty-state">No usage in this time range.</div>
     {:else}
       <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
       <div class="table-shell" tabindex="0" role="region" aria-label="Usage breakdown">
         <table class="data-table">
-          <caption class="sr-only">Usage breakdown by {dimension}</caption>
-          <thead><tr><th scope="col">{dimension.replace('_', ' ')}</th><th scope="col">Requests</th><th scope="col">Input tokens</th><th scope="col">Output tokens</th><th scope="col">Estimated cost</th><th scope="col">Completeness</th></tr></thead>
+          <caption class="sr-only">Usage breakdown by {applied.dimension}</caption>
+          <thead><tr><th scope="col">{applied.dimension.replace('_', ' ')}</th><th scope="col">Requests</th><th scope="col">Input tokens</th><th scope="col">Output tokens</th><th scope="col">Estimated cost</th><th scope="col">Completeness</th></tr></thead>
           <tbody>{#each usage.data.breakdown as row (row.dimension)}<tr><td><strong>{row.dimension}</strong></td><td>{formatCompact(row.request_count)}</td><td>{formatCompact(row.input_tokens)}</td><td>{formatCompact(row.output_tokens)}</td><td>{formatCost(row.estimated_cost, row.currency ?? 'USD')}</td><td>{#if row.incomplete_count > 0}<span class="badge danger">{row.incomplete_count} incomplete</span>{:else if row.unpriced_count > 0}<span class="badge warning">{row.unpriced_count} unpriced</span>{:else}<span class="badge success">Complete</span>{/if}</td></tr>{/each}</tbody>
         </table>
       </div>

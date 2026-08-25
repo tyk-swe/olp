@@ -166,20 +166,20 @@
             >
             <td
               ><div class="row-actions">
-                {#if !key.revoked_at && (!key.expires_at || new Date(key.expires_at) >= new Date())}<button
-                    class="button button-secondary"
-                    type="button"
-                    onclick={() => onEdit(key)}
-                    disabled={Boolean(busy)}>Edit</button
-                  ><button
-                    class="button button-secondary"
-                    type="button"
-                    onclick={() => rotate(key)}
-                    disabled={Boolean(busy)}
-                    >{busy === `rotate-${key.id}`
-                      ? 'Rotating…'
-                      : 'Rotate'}</button
-                  ><button
+                {#if !key.revoked_at}{#if !key.expires_at || new Date(key.expires_at) >= new Date()}<button
+                      class="button button-secondary"
+                      type="button"
+                      onclick={() => onEdit(key)}
+                      disabled={Boolean(busy)}>Edit</button
+                    ><button
+                      class="button button-secondary"
+                      type="button"
+                      onclick={() => rotate(key)}
+                      disabled={Boolean(busy)}
+                      >{busy === `rotate-${key.id}`
+                        ? 'Rotating…'
+                        : 'Rotate'}</button
+                    >{/if}<button
                     class="button button-secondary danger-button"
                     type="button"
                     onclick={() => revoke(key)}

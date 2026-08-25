@@ -21,6 +21,7 @@
   const jobs = createQuery(() => ({
     queryKey: ['media-jobs', listState.applied, listState.cursor ?? 'first'],
     queryFn: () => listMediaJobs({ ...listState.applied, cursor: listState.cursor }),
+    placeholderData: (previous) => previous,
     enabled: !jobId
   }));
   const detail = createQuery(() => ({

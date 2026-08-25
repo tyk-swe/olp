@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onDestroy } from 'svelte';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
+  import { errorMessage as providerDetailError } from '$lib/api/http';
   import {
     getProvider,
     listProviderCredentials,
@@ -117,9 +118,16 @@
         >{busy === 'rotate-credential' ? 'Staging…' : 'Stage rotation'}</button
       >
     </form>{/if}
-  {#if credentials.isPending}<p role="status">Loading versions…</p>{:else}<ul
-      class="credential-list"
-    >
+  {#if credentials.isError}<div class="inline-problem" role="alert">
+      {providerDetailError(credentials.error)}
+      <button
+        class="button button-secondary"
+        type="button"
+        onclick={() => credentials.refetch()}>Retry</button
+      >
+    </div>{:else if credentials.isPending}<p role="status">
+      Loading versions…
+    </p>{:else}<ul class="credential-list">
       {#each credentials.data ?? [] as credential (credential.id)}<li>
           <span
             ><strong>Version {credential.version}</strong><small

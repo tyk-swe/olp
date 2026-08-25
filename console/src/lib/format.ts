@@ -8,6 +8,18 @@ export function formatDate(value?: string | null): string {
   }).format(date);
 }
 
+export function formatDay(value?: string | null): string {
+  if (!value) return '—';
+  const date = new Date(value);
+  if (Number.isNaN(date.valueOf())) return '—';
+  // Daily buckets are UTC midnights. Naming them in the viewer's zone would
+  // label every bucket with the previous calendar day west of UTC.
+  return new Intl.DateTimeFormat(undefined, {
+    dateStyle: 'medium',
+    timeZone: 'UTC'
+  }).format(date);
+}
+
 export function dateTimeLocalValue(value: Date | string): string {
   const date = typeof value === 'string' ? new Date(value) : value;
   if (Number.isNaN(date.valueOf())) return '';

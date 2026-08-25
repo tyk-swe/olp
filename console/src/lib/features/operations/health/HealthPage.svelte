@@ -20,26 +20,50 @@
   let busyEpoch = $state('');
   let epochNotice = $state('');
   let epochError = $state('');
-  const health = createQuery(() => ({
-    queryKey: [
-      'operator-health',
-      generationPagination.cursor ?? 'first',
-      epochPagination.cursor ?? 'first'
-    ],
-    queryFn: async () => {
+  const refetchInterval = 15_000;
+
+  const readiness = createQuery(() => ({
+    queryKey: ['operator-health', 'readiness'],
+    queryFn: () => getReadiness(),
+    refetchInterval
+  }));
+  const providers = createQuery(() => ({
+    queryKey: ['operator-health', 'providers'],
+    queryFn: () => listProviderHealth(15),
+    refetchInterval
+  }));
+  const persistence = createQuery(() => ({
+    queryKey: ['operator-health', 'persistence'],
+    queryFn: () => {
       const end = new Date();
       const start = new Date(end.valueOf() - 24 * 60 * 60 * 1000);
-      const [readiness, providers, generations, persistence, epochs] = await Promise.all([
-        getReadiness(),
-        listProviderHealth(15),
-        listRuntimeGenerations(generationPagination.cursor),
-        usageCompleteness({ start: start.toISOString(), end: end.toISOString() }),
-        listRequestMetadataGatewayEpochs('unresolved', epochPagination.cursor)
-      ]);
-      return { readiness, providers, generations, persistence, epochs };
+      return usageCompleteness({ start: start.toISOString(), end: end.toISOString() });
     },
-    refetchInterval: 15_000
+    refetchInterval
   }));
+  const generations = createQuery(() => ({
+    queryKey: ['operator-health', 'generations', generationPagination.cursor ?? 'first'],
+    queryFn: () => listRuntimeGenerations(generationPagination.cursor),
+    placeholderData: (previous) => previous,
+    refetchInterval
+  }));
+  const epochs = createQuery(() => ({
+    queryKey: ['operator-health', 'epochs', epochPagination.cursor ?? 'first'],
+    queryFn: () => listRequestMetadataGatewayEpochs('unresolved', epochPagination.cursor),
+    placeholderData: (previous) => previous,
+    refetchInterval
+  }));
+
+  const panels = [readiness, providers, persistence, generations, epochs];
+  const fetching = $derived(panels.some((panel) => panel.isFetching));
+  const checkedAt = $derived.by(() => {
+    const stamps = panels.map((panel) => panel.dataUpdatedAt).filter((at) => at > 0);
+    return stamps.length === 0 ? 0 : Math.min(...stamps);
+  });
+
+  function refresh() {
+    for (const panel of panels) void panel.refetch();
+  }
 
   function healthTone(value: string) {
     if (['healthy', 'ok', 'active', 'passing'].includes(value.toLowerCase())) return 'success';
@@ -59,7 +83,7 @@
     try {
       await acknowledgeRequestMetadataGatewayEpoch(processEpoch);
       epochNotice = `Epoch ${processEpoch} acknowledged. Historical completeness evidence remains retained.`;
-      await health.refetch();
+      await Promise.all([epochs.refetch(), readiness.refetch()]);
     } catch (error) {
       epochError = error instanceof Error ? error.message : 'The epoch could not be acknowledged.';
     } finally {
@@ -72,48 +96,60 @@
 
 <div class="page-header">
   <div><p class="eyebrow">Operations</p><h1 class="page-title">Health</h1><p class="page-description">Gateway dependencies, provider outcomes, runtime convergence, and persistence completeness.</p></div>
-  <button class="button button-secondary" type="button" onclick={() => health.refetch()} disabled={health.isFetching}>Refresh</button>
+  <button class="button button-secondary" type="button" onclick={refresh} disabled={fetching}>Refresh</button>
 </div>
 
-<p class="refresh-note" aria-live="polite">Automatically refreshes every 15 seconds{health.dataUpdatedAt ? ` · Last checked ${new Date(health.dataUpdatedAt).toLocaleTimeString()}` : ''}.</p>
+<p class="refresh-note" aria-live="polite">Automatically refreshes every 15 seconds{checkedAt ? ` · Last checked ${new Date(checkedAt).toLocaleTimeString()}` : ''}.{fetching ? ' Checking now…' : ''}</p>
 
-{#if health.isPending}
+{#if readiness.isError}
+  <div class="inline-problem" role="alert"><strong>Control health is unavailable.</strong> The gateway may still be serving its last-known-good runtime. <button class="text-button" onclick={() => readiness.refetch()}>Try again</button></div>
+{:else if !readiness.data}
   <div class="loading-state" role="status">Checking the installation…</div>
-{:else if health.isError}
-  <div class="inline-problem" role="alert"><strong>Control health is unavailable.</strong> The gateway may still be serving its last-known-good runtime. <button class="text-button" onclick={() => health.refetch()}>Try again</button></div>
-{:else if health.data}
+{:else}
   <section class="metric-grid" aria-label="Dependency readiness">
-    <article class="card metric-card"><p>Gateway</p><strong><span class="badge {healthTone(health.data.readiness.status)}">{health.data.readiness.status}</span></strong></article>
-    <article class="card metric-card"><p>PostgreSQL</p><strong><span class="badge {healthTone(health.data.readiness.database)}">{health.data.readiness.database.replaceAll('_', ' ')}</span></strong></article>
-    <article class="card metric-card"><p>Distributed limits</p><strong><span class="badge {healthTone(health.data.readiness.limits)}">{health.data.readiness.limits.replaceAll('_', ' ')}</span></strong></article>
-    <article class="card metric-card"><p>Active generation</p><strong>#{health.data.readiness.generation ?? '—'}</strong></article>
+    <article class="card metric-card"><p>Gateway</p><strong><span class="badge {healthTone(readiness.data.status)}">{readiness.data.status}</span></strong></article>
+    <article class="card metric-card"><p>PostgreSQL</p><strong><span class="badge {healthTone(readiness.data.database)}">{readiness.data.database.replaceAll('_', ' ')}</span></strong></article>
+    <article class="card metric-card"><p>Distributed limits</p><strong><span class="badge {healthTone(readiness.data.limits)}">{readiness.data.limits.replaceAll('_', ' ')}</span></strong></article>
+    <article class="card metric-card"><p>Active generation</p><strong>#{readiness.data.generation ?? '—'}</strong></article>
   </section>
 
-  <section class="card persistence" aria-labelledby="persistence-title">
-    <div class="health-icon" class:ok={health.data.persistence.complete} aria-hidden="true">{health.data.persistence.complete ? '✓' : '!'}</div>
-    <div><p class="eyebrow">Last 24 hours</p><h2 id="persistence-title">{health.data.persistence.complete ? 'Usage accounting is complete' : 'Usage accounting needs attention'}</h2><p>{health.data.persistence.request_metadata_gap_events} request metadata gap-event lower bound · {health.data.persistence.uncertain_request_metadata_gap_count} uncertain request metadata epochs · {health.data.persistence.incomplete_count} incomplete requests · {health.data.persistence.unpriced_count} unpriced requests. Missing or uncertain metadata is reported, never silently converted to zero cost.</p></div>
-  </section>
+  {#if persistence.isError}
+    <div class="inline-problem" role="alert">Usage accounting completeness is unavailable. <button class="text-button" onclick={() => persistence.refetch()}>Try again</button></div>
+  {:else if persistence.data}
+    <section class="card persistence" aria-labelledby="persistence-title">
+      <div class="health-icon" class:ok={persistence.data.complete} aria-hidden="true">{persistence.data.complete ? '✓' : '!'}</div>
+      <div><p class="eyebrow">Last 24 hours</p><h2 id="persistence-title">{persistence.data.complete ? 'Usage accounting is complete' : 'Usage accounting needs attention'}</h2><p>{persistence.data.request_metadata_gap_events} request metadata gap-event lower bound · {persistence.data.uncertain_request_metadata_gap_count} uncertain request metadata epochs · {persistence.data.incomplete_count} incomplete requests · {persistence.data.unpriced_count} unpriced requests. Missing or uncertain metadata is reported, never silently converted to zero cost.</p></div>
+    </section>
+  {/if}
 
   <section class="section" aria-labelledby="epochs-title">
-    <div class="section-heading"><div><p class="eyebrow">Request metadata durability</p><h2 id="epochs-title">Unresolved gateway epochs</h2><p class="section-description">An unclean process epoch keeps readiness degraded until an operator investigates and acknowledges it. Acknowledgement is audited and never deletes its retained loss or uncertainty evidence.</p></div><span class:warning={health.data.epochs.items.length > 0} class:success={health.data.epochs.items.length === 0} class="badge">{health.data.epochs.items.length} on page</span></div>
+    <div class="section-heading"><div><p class="eyebrow">Request metadata durability</p><h2 id="epochs-title">Unresolved gateway epochs</h2><p class="section-description">An unclean process epoch keeps readiness degraded until an operator investigates and acknowledges it. Acknowledgement is audited and never deletes its retained loss or uncertainty evidence.</p></div>{#if epochs.data}<span class:warning={epochs.data.items.length > 0} class:success={epochs.data.items.length === 0} class="badge">{epochs.data.items.length} on page</span>{/if}</div>
     {#if epochNotice}<div class="inline-notice" role="status">{epochNotice}</div>{/if}
     {#if epochError}<div class="inline-problem" role="alert">{epochError}</div>{/if}
-    {#if health.data.epochs.items.length === 0 && epochPagination.history.length === 0}
+    {#if epochs.isError}
+      <div class="inline-problem" role="alert">Gateway epochs are unavailable. <button class="text-button" onclick={() => epochs.refetch()}>Try again</button></div>
+    {:else if !epochs.data}
+      <div class="loading-state" role="status">Loading gateway epochs…</div>
+    {:else if epochs.data.items.length === 0 && epochPagination.history.length === 0}
       <div class="card empty-state">No unclean gateway epoch awaits acknowledgement.</div>
     {:else}
       <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
-      <div class="table-shell" tabindex="0" role="region" aria-label="Unresolved request metadata gateway epochs"><table class="data-table"><caption class="sr-only">Unclean request metadata gateway process epochs awaiting operator acknowledgement</caption><thead><tr><th scope="col">Gateway</th><th scope="col">Detected</th><th scope="col">Accepted / persisted</th><th scope="col">Dropped / abandoned</th><th scope="col">Uncertain lower bound</th><th scope="col"><span class="sr-only">Action</span></th></tr></thead><tbody>{#each health.data.epochs.items as epoch (epoch.process_epoch)}<tr><td><strong>{epoch.gateway_instance}</strong><br /><code>{epoch.process_epoch}</code></td><td>{formatDate(epoch.stale_detected_at ?? epoch.updated_at)}</td><td>{epoch.accepted} / {epoch.persisted}</td><td>{epoch.dropped} / {epoch.abandoned}</td><td>{epoch.uncertain_event_lower_bound}</td><td><button class="button button-secondary" type="button" onclick={() => acknowledgeEpoch(epoch.process_epoch, epoch.gateway_instance)} disabled={Boolean(busyEpoch)}>{busyEpoch === epoch.process_epoch ? 'Acknowledging…' : 'Acknowledge epoch'}</button></td></tr>{/each}</tbody></table></div>
-      <CursorPagination {...cursorPaginationProps(epochPagination, health.data.epochs.nextCursor)} label="Unresolved gateway epoch pages" />
+      <div class="table-shell" tabindex="0" role="region" aria-label="Unresolved request metadata gateway epochs"><table class="data-table"><caption class="sr-only">Unclean request metadata gateway process epochs awaiting operator acknowledgement</caption><thead><tr><th scope="col">Gateway</th><th scope="col">Detected</th><th scope="col">Accepted / persisted</th><th scope="col">Dropped / abandoned</th><th scope="col">Uncertain lower bound</th><th scope="col"><span class="sr-only">Action</span></th></tr></thead><tbody>{#each epochs.data.items as epoch (epoch.process_epoch)}<tr><td><strong>{epoch.gateway_instance}</strong><br /><code>{epoch.process_epoch}</code></td><td>{formatDate(epoch.stale_detected_at ?? epoch.updated_at)}</td><td>{epoch.accepted} / {epoch.persisted}</td><td>{epoch.dropped} / {epoch.abandoned}</td><td>{epoch.uncertain_event_lower_bound}</td><td><button class="button button-secondary" type="button" onclick={() => acknowledgeEpoch(epoch.process_epoch, epoch.gateway_instance)} disabled={Boolean(busyEpoch)}>{busyEpoch === epoch.process_epoch ? 'Acknowledging…' : 'Acknowledge epoch'}</button></td></tr>{/each}</tbody></table></div>
+      <CursorPagination {...cursorPaginationProps(epochPagination, epochs.data.nextCursor)} label="Unresolved gateway epoch pages" />
     {/if}
   </section>
 
   <section class="section" aria-labelledby="providers-title">
-    <div class="section-heading"><div><p class="eyebrow">Rolling 15 minutes</p><h2 id="providers-title">Providers</h2></div><span class="badge">{health.data.providers.data.length} configured</span></div>
-    {#if health.data.providers.data.length === 0}
+    <div class="section-heading"><div><p class="eyebrow">Rolling 15 minutes</p><h2 id="providers-title">Providers</h2></div>{#if providers.data}<span class="badge">{providers.data.data.length} configured</span>{/if}</div>
+    {#if providers.isError}
+      <div class="inline-problem" role="alert">Provider outcomes are unavailable. <button class="text-button" onclick={() => providers.refetch()}>Try again</button></div>
+    {:else if !providers.data}
+      <div class="loading-state" role="status">Loading provider outcomes…</div>
+    {:else if providers.data.data.length === 0}
       <div class="card empty-state">No providers are configured.</div>
     {:else}
       <div class="provider-grid">
-        {#each health.data.providers.data as provider (provider.provider_id)}
+        {#each providers.data.data as provider (provider.provider_id)}
           <article class="card provider-card">
             <div class="provider-heading"><div><h3>{provider.provider_name}</h3><p>{provider.provider_kind} · {provider.provider_state}</p></div><span class="badge {healthTone(provider.status)}">{provider.status}</span></div>
             <dl><div><dt>Success rate</dt><dd>{percent(provider.success_count, provider.attempt_count)}</dd></div><div><dt>Average latency</dt><dd>{provider.average_latency_ms == null ? '—' : `${provider.average_latency_ms.toFixed(0)} ms`}</dd></div><div><dt>Rate limited</dt><dd>{provider.rate_limit_count}</dd></div><div><dt>5xx / transport</dt><dd>{provider.server_error_count} / {provider.transport_error_count}</dd></div></dl>
@@ -126,9 +162,15 @@
 
   <section class="section" aria-labelledby="runtime-title">
     <div class="section-heading"><div><p class="eyebrow">Configuration</p><h2 id="runtime-title">Runtime generations</h2></div></div>
-    <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
-    <div class="table-shell" tabindex="0" role="region" aria-label="Runtime generation history"><table class="data-table"><caption class="sr-only">Recently published immutable runtime generations</caption><thead><tr><th scope="col">Generation</th><th scope="col">Digest</th><th scope="col">Activated by</th><th scope="col">Created</th><th scope="col">Gateway state</th></tr></thead><tbody>{#each health.data.generations.items as generation (generation.id)}<tr><td><strong>#{generation.sequence}</strong></td><td class="mono">{generation.sha256.slice(0, 16)}…</td><td>{generation.created_by_email}</td><td>{formatDate(generation.created_at)}</td><td>{#if generation.sequence === health.data.readiness.generation}<span class="badge success">Loaded</span>{:else}<span class="badge">Historical</span>{/if}</td></tr>{/each}</tbody></table></div>
-    <CursorPagination {...cursorPaginationProps(generationPagination, health.data.generations.nextCursor)} label="Runtime generation pages" />
+    {#if generations.isError}
+      <div class="inline-problem" role="alert">Runtime generations are unavailable. <button class="text-button" onclick={() => generations.refetch()}>Try again</button></div>
+    {:else if !generations.data}
+      <div class="loading-state" role="status">Loading runtime generations…</div>
+    {:else}
+      <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+      <div class="table-shell" tabindex="0" role="region" aria-label="Runtime generation history"><table class="data-table"><caption class="sr-only">Recently published immutable runtime generations</caption><thead><tr><th scope="col">Generation</th><th scope="col">Digest</th><th scope="col">Activated by</th><th scope="col">Created</th><th scope="col">Gateway state</th></tr></thead><tbody>{#each generations.data.items as generation (generation.id)}<tr><td><strong>#{generation.sequence}</strong></td><td class="mono">{generation.sha256.slice(0, 16)}…</td><td>{generation.created_by_email}</td><td>{formatDate(generation.created_at)}</td><td>{#if generation.sequence === readiness.data.generation}<span class="badge success">Loaded</span>{:else}<span class="badge">Historical</span>{/if}</td></tr>{/each}</tbody></table></div>
+      <CursorPagination {...cursorPaginationProps(generationPagination, generations.data.nextCursor)} label="Runtime generation pages" />
+    {/if}
   </section>
 {/if}
 

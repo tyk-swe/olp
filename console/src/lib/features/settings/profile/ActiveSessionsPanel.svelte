@@ -21,6 +21,10 @@
   }));
 
   async function endSession(id: string, current: boolean) {
+    if (
+      !confirm(current ? 'Sign out of this session?' : 'Revoke this session?')
+    )
+      return;
     revoking = id;
     error = notice = '';
     try {

@@ -114,6 +114,7 @@ test('route revision diff and restore-as-draft remain explicit', async ({
     });
   });
 
+  page.on('dialog', (dialog) => dialog.accept());
   await page.goto(`/routes/${ids.route}/revisions`);
   await expect(
     page.getByRole('heading', { name: 'Immutable revisions' })

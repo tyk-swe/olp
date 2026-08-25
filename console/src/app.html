@@ -7,6 +7,16 @@
     <meta name="theme-color" content="#0a1930" media="(prefers-color-scheme: light)" />
     <meta name="theme-color" content="#0a1930" media="(prefers-color-scheme: dark)" />
     <link rel="icon" href="%sveltekit.assets%/favicon.svg" />
+    <script>
+      try {
+        const savedTheme = localStorage.getItem('olp.console.theme');
+        if (savedTheme === 'light' || savedTheme === 'dark') {
+          document.documentElement.dataset.theme = savedTheme;
+        }
+      } catch (error) {
+        void error;
+      }
+    </script>
     %sveltekit.head%
   </head>
   <body data-sveltekit-preload-data="hover">

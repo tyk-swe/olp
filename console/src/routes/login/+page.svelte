@@ -23,6 +23,7 @@
   });
   let message = $state('');
   const publicAuthController = new AbortController();
+  const sessionExpired = $derived(page.url.searchParams.get('reason') === 'expired');
 
   function destination() {
     return relativeReturnTo(page.url.searchParams.get('return_to'), page.url.origin);
@@ -105,6 +106,8 @@
     <p>Choose an authentication method enabled for this installation.</p>
   </div>
 
+  {#if sessionExpired}<p class="session-notice" role="status">Your session ended. Sign in to continue.</p>{/if}
+
   {#if message}<div class="form-alert" role="alert">{message}</div>{/if}
 
   {#if capabilitiesLoading}
@@ -149,6 +152,7 @@
   form .button { margin-top: 0.85rem; }
   .form-alert { margin-bottom: 1rem; padding: 0.7rem 0.8rem; border: 1px solid var(--danger); border-radius: 0.375rem; background: var(--danger-soft); color: var(--danger); }
   .capabilities-status { margin: 0; color: var(--foreground-muted); }
+  .session-notice { margin: 0 0 1rem; padding: 0.7rem 0.8rem; border: 1px solid var(--border-strong); border-radius: 0.375rem; background: var(--surface-subtle); color: var(--foreground-muted); }
   .divider { display: flex; align-items: center; gap: 0.75rem; margin: 1.25rem 0; color: var(--foreground-muted); }
   .divider::before, .divider::after { height: 1px; flex: 1; background: var(--border); content: ''; }
   .oidc { width: 100%; }

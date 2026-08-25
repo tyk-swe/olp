@@ -1,5 +1,6 @@
 <script lang="ts">
   import { goto } from '$app/navigation';
+  import { guardUnsavedChanges } from '$lib/forms/unsavedChanges';
   import { resolve } from '$app/paths';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { errorMessage as message, isEtagMismatch } from '$lib/api/http';
@@ -129,10 +130,16 @@
   }
 
   async function reload() {
+    errorMessage = '';
     const result = await draft.refetch();
-    if (result.error) return;
+    if (result.error) {
+      errorMessage = message(result.error);
+      return;
+    }
     sync = beginReload(sync);
   }
+
+  guardUnsavedChanges(() => sync.dirty);
 
   function toggleOperation(operation: string, checked: boolean) {
     operations = checked
@@ -161,6 +168,7 @@
       const id = await createRouteDraft(buildCreateRouteDraftInput(editorValues, modelOptions));
       await queryClient.invalidateQueries({ queryKey: ['route-drafts'] });
       await queryClient.invalidateQueries({ queryKey: ['route-draft-page'] });
+      sync = initialConcurrentEdit();
       await goto(resolve(`/routes/${id}`));
     });
   }
@@ -228,6 +236,7 @@
       await deleteRouteDraft(current.id, current.etag);
       await queryClient.invalidateQueries({ queryKey: ['route-drafts'] });
       await queryClient.invalidateQueries({ queryKey: ['route-draft-page'] });
+      sync = initialConcurrentEdit();
       await goto(resolve('/routes'));
     });
   }
@@ -244,7 +253,7 @@
 <ConflictNotice notice={concurrentNotice} onReload={reload} disabled={Boolean(busy)} />
 {#if (!isNew && draft.isPending) || providerModels.isPending}
   <div class="loading-state" role="status">Loading Route Studio…</div>
-{:else if (!isNew && draft.isError) || providerModels.isError}
+{:else if (!isNew && draft.isError && !draft.data) || providerModels.isError}
   <div class="inline-problem" role="alert">{message(draft.error ?? providerModels.error)} <button class="button button-secondary" type="button" onclick={() => { draft.refetch(); providerModels.refetch(); }}>Retry</button></div>
 {:else}
   <form class="studio" onsubmit={isNew ? create : (event) => { event.preventDefault(); if (draft.data) save(draft.data); }}>
@@ -278,7 +287,7 @@
       </section>
       <section class="card editor advanced" aria-labelledby="advanced-heading"><p class="eyebrow">Advanced</p><h2 id="advanced-heading">Deadline and failover</h2><div class="form-grid"><div class="form-field"><label for="overall-timeout">Overall deadline (ms)</label><input id="overall-timeout" type="number" min="100" bind:value={overallTimeoutMs} oninput={touch} /></div><div class="form-field"><label for="max-attempts">Maximum attempts</label><input id="max-attempts" type="number" min="1" bind:value={maxAttempts} oninput={touch} /></div></div><details><summary>Exactly when will OLP try another target?</summary><p>Only before response bytes are committed, and only for connection/transport failures, configured timeouts, HTTP 429, or HTTP 5xx. There are no hidden SDK retries, hedges, nested routes, or retries after bytes reach the client. Weighted rendezvous ordering is deterministic inside each priority group.</p></details></section>
     </div>
-    <aside class="card publish-panel" aria-labelledby="publish-heading"><p class="eyebrow">Draft controls</p><h2 id="publish-heading">Test before activation</h2><p>Saving changes invalidates prior validation.</p><button class="button button-secondary" type="submit" disabled={Boolean(busy)}>{busy === 'save' ? 'Saving…' : isNew ? 'Create draft' : 'Save draft'}</button>
+    <aside class="card publish-panel" aria-labelledby="publish-heading"><p class="eyebrow">Draft controls</p><h2 id="publish-heading">Test before activation</h2><p>Saving changes invalidates prior validation. Unsaved edits must be saved before you can simulate or validate them.</p><button class="button button-secondary" type="submit" disabled={Boolean(busy)}>{busy === 'save' ? 'Saving…' : isNew ? 'Create draft' : 'Save draft'}</button>
       {#if !isNew && draft.data}
         <hr />
         <label for="simulation-operation">Dry-run operation</label>
@@ -289,8 +298,8 @@
         <select id="simulation-mode" bind:value={simulationMode}>{#each modesFor(simulationOperation) as mode (mode)}<option value={mode}>{mode}</option>{/each}</select>
         <label for="simulation-seed">Dry-run seed</label>
         <input id="simulation-seed" bind:value={seed} />
-        <button class="button button-secondary" type="button" onclick={() => simulate(draft.data!)} disabled={Boolean(busy)}>{busy === 'simulate' ? 'Simulating…' : 'Simulate order'}</button>
-        <button class="button button-secondary" type="button" onclick={() => validate(draft.data!)} disabled={Boolean(busy)}>{busy === 'validate' ? 'Validating…' : 'Validate draft'}</button>
+        <button class="button button-secondary" type="button" onclick={() => simulate(draft.data!)} disabled={Boolean(busy) || sync.dirty}>{busy === 'simulate' ? 'Simulating…' : 'Simulate order'}</button>
+        <button class="button button-secondary" type="button" onclick={() => validate(draft.data!)} disabled={Boolean(busy) || sync.dirty}>{busy === 'validate' ? 'Validating…' : 'Validate draft'}</button>
         <button class="button button-primary" type="button" onclick={() => activate(draft.data!)} disabled={Boolean(busy) || !validated}>{busy === 'activate' ? 'Activating…' : 'Activate route'}</button>
       {/if}
       {#if activation}<div class="activation"><strong>Revision {activation.revision} active</strong><span>Runtime generation {activation.runtime_generation.sequence}</span><a href={resolve(`/routes/${activation.route_id}/revisions`)}>View revision history</a></div>{/if}

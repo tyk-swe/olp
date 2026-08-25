@@ -307,7 +307,9 @@
       then activate.
     </p>
   </div>
-  <a class="button button-secondary" href={resolve('/providers')}>Cancel</a>
+  <a class="button button-secondary" href={resolve('/providers')}
+    >{wizardProvider ? 'Save and exit' : 'Cancel'}</a
+  >
 </div>
 
 <ol class="steps" aria-label="Provider setup progress">
@@ -369,13 +371,20 @@
         <dd>{wizardProvider?.kind}</dd>
       </div>
     </dl>
-    <button
-      class="button button-primary"
-      type="button"
-      onclick={testWizardProvider}
-      disabled={Boolean(busy)}
-      >{busy === 'probe' ? 'Testing…' : 'Test connection'}</button
-    >
+    <div class="stage-actions">
+      <button
+        class="button button-primary"
+        type="button"
+        onclick={testWizardProvider}
+        disabled={Boolean(busy)}
+        >{busy === 'probe' ? 'Testing…' : 'Test connection'}</button
+      >
+      {#if wizardProvider}<a
+          class="button button-secondary"
+          href={resolve(`/providers/${wizardProvider.id}`)}
+          >Edit connector settings</a
+        >{/if}
+    </div>
   </section>
 {:else if wizardStep === 3}
   <ProviderDiscoveryStage
@@ -386,11 +395,18 @@
     onDiscover={discoverWizardProvider}
     onDeclareModels={declareWizardModels}
   />
+  {#if wizardProvider}<p class="stage-escape">
+      <a href={resolve(`/providers/${wizardProvider.id}`)}
+        >Edit connector settings</a
+      >
+    </p>{/if}
 {:else if wizardStep === 4 && wizardProvider}
   <section class="card stage wide" aria-labelledby="capability-heading">
     <ProviderCapabilityReviewStage
       provider={wizardProvider}
       models={wizardModels.data?.items ?? []}
+      modelsPending={wizardModels.isPending}
+      modelsError={wizardModels.isError}
       capabilityOptions={capabilityOptions.data?.capabilities ?? []}
       optionsPending={capabilityOptions.isPending}
       optionsError={capabilityOptions.isError}
@@ -401,6 +417,7 @@
       nextCursor={wizardModels.data?.nextCursor}
       onSave={reviewWizardModel}
       onCertify={certifyWizardModel}
+      onRetryModels={() => wizardModels.refetch()}
     />
     <ProviderActivationStage
       provider={wizardProvider}
@@ -469,6 +486,20 @@
   }
   .stage.wide {
     max-width: none;
+  }
+  .stage-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.65rem;
+  }
+  .stage-escape {
+    max-width: 48rem;
+    margin: 0.75rem 0 0;
+  }
+  .stage-escape a {
+    color: var(--accent-strong);
+    font-weight: 700;
   }
   h2 {
     margin: 0 0 0.85rem;

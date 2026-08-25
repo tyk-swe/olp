@@ -18,7 +18,10 @@ import {
 
 type Boundary = {
   loadSession(signal: AbortSignal): Promise<AuthenticatedSession>;
-  unauthenticatedDestination(signal: AbortSignal): Promise<string>;
+  unauthenticatedDestination(
+    signal: AbortSignal,
+    sessionExpired: boolean
+  ): Promise<string>;
   loginDestination(): string;
   navigate(destination: string): Promise<void>;
 };
@@ -403,6 +406,7 @@ export class AuthenticationLifecycle {
 
   private transitionToAnonymous(): Promise<void> {
     if (this.unauthorizedTransition) return this.unauthorizedTransition;
+    const sessionExpired = this.snapshotValue.phase === 'authenticated';
     this.unauthorizedHandled = true;
     this.gateProtectedContent('transitioning');
     this.authenticationController?.abort();
@@ -429,7 +433,8 @@ export class AuthenticationLifecycle {
         return;
       }
       const destination = await boundary.unauthenticatedDestination(
-        controller.signal
+        controller.signal,
+        sessionExpired
       );
       if (
         controller.signal.aborted ||

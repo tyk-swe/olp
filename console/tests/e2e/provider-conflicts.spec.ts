@@ -87,7 +87,9 @@ test('provider discovery advances its ETag without dropping dirty connector edit
   await page.getByLabel('Name').fill('local-provider-name');
   await page.getByLabel('Mode 1').selectOption('unary');
   await page.getByRole('button', { name: 'Run upstream discovery' }).click();
-  await expect(page.getByText('1 model reviewed.')).toBeVisible();
+  await expect(
+    page.getByText('1 model discovered. Review capabilities before activation.')
+  ).toBeVisible();
   expect(discoveryEtag).toBe('"01980000-0000-7000-8000-000000000501"');
   await expect(page.getByLabel('Name')).toHaveValue('local-provider-name');
   await expect(page.getByLabel('Mode 1')).toHaveValue('unary');

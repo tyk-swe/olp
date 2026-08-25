@@ -38,7 +38,10 @@ function boundary(
 ) {
   return {
     loadSession,
-    unauthenticatedDestination: vi.fn(async () => '/login'),
+    unauthenticatedDestination: vi.fn(
+      async (signal: AbortSignal, sessionExpired: boolean) =>
+        sessionExpired ? '/login?reason=expired' : '/login'
+    ),
     loginDestination: vi.fn(() => '/login'),
     navigate: vi.fn(async () => undefined)
   };
@@ -550,6 +553,29 @@ describe('authentication lifecycle', () => {
     expect((error as DOMException).name).toBe('InvalidStateError');
     expect(lifecycle.snapshot().phase).toBe('authenticated');
     expect(getCsrfToken()).toBeNull();
+  });
+
+  it('flags only an expired authenticated session on the login redirect', async () => {
+    const unauthorized = () =>
+      vi
+        .fn<(signal: AbortSignal) => Promise<AuthenticatedSession>>()
+        .mockRejectedValue({ problem: { status: 401 } });
+    const expiredLifecycle = new AuthenticationLifecycle();
+    const expiredBoundary = boundary(unauthorized());
+    expiredLifecycle.registerBoundary(expiredBoundary);
+    expiredLifecycle.establishSession(session());
+    const anonymousLifecycle = new AuthenticationLifecycle();
+    const anonymousBoundary = boundary(unauthorized());
+    anonymousLifecycle.registerBoundary(anonymousBoundary);
+    anonymousLifecycle.markProtectedBoundaryChecking();
+
+    await expiredLifecycle.validateSession();
+    await anonymousLifecycle.validateSession();
+
+    expect(expiredBoundary.navigate).toHaveBeenCalledWith(
+      '/login?reason=expired'
+    );
+    expect(anonymousBoundary.navigate).toHaveBeenCalledWith('/login');
   });
 
   it('reports a later validation failure after a handled 401', async () => {

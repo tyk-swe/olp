@@ -13,7 +13,8 @@
     listOidcIdentities,
     reauthenticateWithPassword
   } from '$lib/api/profile';
-  import { FIXED_ROLES } from '$lib/auth/authorization';
+  import { FIXED_ROLES, can } from '$lib/auth/authorization';
+  import { authLifecycle } from '$lib/auth/lifecycle';
   import ConflictNotice from '$lib/components/ConflictNotice.svelte';
   import {
     beginReload,
@@ -28,6 +29,7 @@
   import { parseRoleMappings } from './mappings';
 
   const queryClient = useQueryClient();
+  const canManage = can(authLifecycle.snapshot().user?.role, 'users.manage');
   const oidc = createQuery(() => ({
     queryKey: ['oidc-configuration'],
     queryFn: ({ signal }) => getOidcConfiguration(signal),
@@ -183,6 +185,11 @@
     >
   </div>
 {:else}
+  {#if !canManage}
+    <p class="read-only-note" role="note">
+      Your role can view the OIDC configuration but not change it.
+    </p>
+  {/if}
   <ConflictNotice
     notice={concurrentNotice}
     onReload={reload}
@@ -291,6 +298,11 @@
           bind:value={groupMappings}
           placeholder="platform-team=operator"></textarea>
       </div>
+      {#if !oidc.data?.enabled}
+        <p class="read-only-note">
+          Save with OIDC enabled before linking your identity.
+        </p>
+      {/if}
       <div class="oidc-actions">
         <button
           class="button button-secondary"
@@ -301,7 +313,7 @@
         ><button
           class="button button-primary"
           type="submit"
-          disabled={Boolean(busy)}
+          disabled={!canManage || Boolean(busy)}
           >{busy === 'oidc-save' ? 'Validating…' : 'Save and validate'}</button
         >
       </div>

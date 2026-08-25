@@ -47,6 +47,7 @@
   }
 
   async function restore(revision: RouteRevision) {
+    if (!confirm(`Restore route revision ${revision.revision} as a new draft? The live revision keeps serving traffic until the draft is activated.`)) return;
     await run(`restore-${revision.id}`, async () => {
       const restored = await restoreRouteRevision(routeId, revision.id);
       await queryClient.invalidateQueries({ queryKey: ['route-drafts'] });

@@ -137,9 +137,30 @@ describe('provider editor capability policy', () => {
         },
         vertexSpec
       )
-    ).toBe(
-      'Name, Vertex probe model, and the selected identity fields are required.'
-    );
+    ).toBe('Vertex AI requires cloud project, cloud location, probe model.');
+  });
+
+  it('names the missing name and credential alongside required fields', () => {
+    expect(
+      validateProviderDraft(
+        { ...apiKeyDraft, name: '  ', credential: '' },
+        openAiSpec
+      )
+    ).toBe('OpenAI requires name, credential.');
+    expect(
+      validateProviderDraft(
+        {
+          ...apiKeyDraft,
+          kind: vertexSpec.kind,
+          authMode: 'service_account',
+          credential: '',
+          cloudProject: 'demo-project',
+          cloudRegion: 'us-central1',
+          model: ''
+        },
+        vertexSpec
+      )
+    ).toBe('Vertex AI requires probe model, credential.');
   });
 
   it('resolves a preset to ordinary compatible-provider fields', () => {
