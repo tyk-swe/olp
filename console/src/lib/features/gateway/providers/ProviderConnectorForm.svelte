@@ -20,12 +20,15 @@
     providerKinds,
     selectedSpec,
     busy,
+    lockKind = false,
     onSubmit
   }: {
     draft: ProviderDraft;
     providerKinds: ProviderKindCapability[];
     selectedSpec: ProviderKindCapability;
     busy: string;
+    /** Set once the draft provider exists; its connector kind is immutable. */
+    lockKind?: boolean;
     onSubmit: (event: SubmitEvent) => void | Promise<void>;
   } = $props();
 
@@ -55,7 +58,7 @@
 </script>
 
 <form class="card editor" onsubmit={onSubmit} novalidate>
-  <fieldset>
+  <fieldset disabled={lockKind}>
     <legend>Choose a connector</legend>
     <div class="connector-grid">
       {#each providerKinds as option (option.kind)}
@@ -71,6 +74,12 @@
         </label>
       {/each}
     </div>
+    {#if lockKind}
+      <p class="connector-locked">
+        The connector kind is fixed once the provider draft exists. Delete this
+        draft and start again to use a different connector.
+      </p>
+    {/if}
   </fieldset>
   <div class="form-grid">
     <div class="form-field">
@@ -223,6 +232,12 @@
 </form>
 
 <style>
+  .connector-locked {
+    margin: 0.6rem 0 0;
+    color: var(--foreground-muted);
+    font-size: 0.78rem;
+  }
+
   .editor {
     max-width: 66rem;
     margin-top: 1.25rem;

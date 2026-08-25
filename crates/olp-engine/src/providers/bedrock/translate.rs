@@ -490,6 +490,7 @@ fn nonnegative_tokens(value: i32, label: &str) -> Result<u64, TransportError> {
 
 pub(in crate::providers) fn protocol_error(message: impl Into<String>) -> TransportError {
     TransportError {
+        upstream: Default::default(),
         phase: crate::domain::ports::TransportPhase::Connect,
         class: crate::domain::ports::AttemptFailureClass::Protocol,
         response_committed: false,
@@ -499,6 +500,7 @@ pub(in crate::providers) fn protocol_error(message: impl Into<String>) -> Transp
 
 pub(in crate::providers) fn protocol_body_error(message: impl Into<String>) -> TransportError {
     TransportError {
+        upstream: Default::default(),
         phase: crate::domain::ports::TransportPhase::Body,
         class: crate::domain::ports::AttemptFailureClass::Protocol,
         response_committed: true,

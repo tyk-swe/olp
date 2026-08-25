@@ -479,6 +479,8 @@ fn client_stream_encoder_emits_native_anthropic_sse_and_rejects_cross_surface_ex
         Kind::TextDelta { text, .. } if text == "héllo"
     )));
 
+    // A Gemini-surface extension has no Anthropic representation. The response
+    // is already in flight, so it is dropped rather than killing the stream.
     let mut encoder = Encoder::new("route", "fallback");
     assert!(
         encoder
@@ -491,7 +493,8 @@ fn client_stream_encoder_emits_native_anthropic_sse_and_rejects_cross_surface_ex
                     ),
                 },
             ))
-            .is_err()
+            .unwrap()
+            .is_empty()
     );
 }
 
@@ -562,4 +565,443 @@ fn native_anthropic_stream_losslessly_preserves_thinking_cache_and_unknown_event
     assert!(encoded.contains("thinking_delta"));
     assert!(encoded.contains("future_event"));
     assert!(encoded.contains("\"kept\":true"));
+}
+
+/// A3: a request whose only tool is a server-side (typed) tool has an empty
+/// canonical `tools`, so the encoder used to omit the key entirely and the
+/// `/tools/0` extension then had nothing to walk into.
+#[test]
+fn server_side_only_tools_survive_the_request_round_trip() {
+    let dto: MessagesRequest = serde_json::from_value(json!({
+        "model": "team-claude",
+        "max_tokens": 256,
+        "messages": [{"role": "user", "content": "search please"}],
+        "tools": [{"type": "web_search_20250305", "name": "web_search", "max_uses": 2}]
+    }))
+    .unwrap();
+    let Operation::Generation(canonical) = decode_request(dto).unwrap() else {
+        panic!("wrong operation");
+    };
+    assert!(canonical.tools.is_empty());
+    assert_eq!(
+        canonical.extensions.values["/tools/0"]["type"],
+        "web_search_20250305"
+    );
+
+    let encoded = encode_request(&canonical, "claude-upstream").unwrap();
+    let wire = serde_json::to_value(&encoded).unwrap();
+    assert_eq!(wire["tools"][0]["type"], "web_search_20250305");
+    assert_eq!(wire["tools"][0]["name"], "web_search");
+    assert_eq!(wire["tools"][0]["max_uses"], 2);
+    assert_eq!(wire["tools"].as_array().unwrap().len(), 1);
+}
+
+/// A5: Anthropic requires the signed `thinking` block to be echoed back on the
+/// next turn of an extended-thinking tool loop. Rejecting it broke turn two of
+/// every such conversation.
+#[test]
+fn thinking_and_unmodelled_assistant_blocks_round_trip_through_canonical() {
+    let dto: MessagesRequest = serde_json::from_value(json!({
+        "model": "team-claude",
+        "max_tokens": 256,
+        "messages": [
+            {"role": "user", "content": "weather?"},
+            {"role": "assistant", "content": [
+                {"type": "thinking", "thinking": "let me check", "signature": "sig-abc"},
+                {"type": "text", "text": "checking"},
+                {"type": "tool_use", "id": "toolu_1", "name": "weather", "input": {}}
+            ]},
+            {"role": "user", "content": [
+                {"type": "tool_result", "tool_use_id": "toolu_1", "content": "sunny"}
+            ]}
+        ]
+    }))
+    .unwrap();
+    let Operation::Generation(canonical) = decode_request(dto).unwrap() else {
+        panic!("wrong operation");
+    };
+    assert_eq!(
+        canonical.extensions.values["/messages/1/content/0"]["signature"],
+        "sig-abc"
+    );
+
+    let wire =
+        serde_json::to_value(encode_request(&canonical, "claude-upstream").unwrap()).unwrap();
+    let assistant = &wire["messages"][1]["content"];
+    assert_eq!(assistant[0]["type"], "thinking");
+    assert_eq!(assistant[0]["signature"], "sig-abc");
+    assert_eq!(assistant[0]["thinking"], "let me check");
+    assert_eq!(assistant[1]["type"], "text");
+    assert_eq!(assistant[1]["text"], "checking");
+    assert_eq!(assistant[2]["type"], "tool_use");
+    assert_eq!(assistant[2]["id"], "toolu_1");
+}
+
+/// A5: an assistant turn made only of a redacted thinking block still has to
+/// reach the upstream; it used to be rejected as an empty message.
+#[test]
+fn a_message_of_only_unmodelled_blocks_is_not_dropped() {
+    let dto: MessagesRequest = serde_json::from_value(json!({
+        "model": "team-claude",
+        "max_tokens": 256,
+        "messages": [
+            {"role": "user", "content": "hi"},
+            {"role": "assistant", "content": [
+                {"type": "redacted_thinking", "data": "opaque"}
+            ]},
+            {"role": "user", "content": "continue"}
+        ]
+    }))
+    .unwrap();
+    let Operation::Generation(canonical) = decode_request(dto).unwrap() else {
+        panic!("wrong operation");
+    };
+    let wire =
+        serde_json::to_value(encode_request(&canonical, "claude-upstream").unwrap()).unwrap();
+    assert_eq!(
+        wire["messages"][1]["content"][0]["type"],
+        "redacted_thinking"
+    );
+    assert_eq!(wire["messages"][1]["content"][0]["data"], "opaque");
+}
+
+/// A4: Anthropic emits `citations_delta` on a *text* block whenever citations
+/// are enabled. Erroring killed the response after partial text had shipped.
+#[test]
+fn unmodelled_deltas_on_a_text_block_do_not_kill_the_stream() {
+    let wire = [
+        sse(
+            "message_start",
+            json!({"type": "message_start", "message": {
+                "id": "msg_1", "type": "message", "role": "assistant", "content": [],
+                "model": "claude-upstream", "usage": {"input_tokens": 4, "output_tokens": 0}
+            }}),
+        ),
+        sse(
+            "content_block_start",
+            json!({"type": "content_block_start", "index": 0,
+                   "content_block": {"type": "text", "text": ""}}),
+        ),
+        sse(
+            "content_block_delta",
+            json!({"type": "content_block_delta", "index": 0,
+                   "delta": {"type": "text_delta", "text": "per the source"}}),
+        ),
+        sse(
+            "content_block_delta",
+            json!({"type": "content_block_delta", "index": 0, "delta": {
+                "type": "citations_delta",
+                "citation": {"type": "char_location", "cited_text": "source"}
+            }}),
+        ),
+        sse(
+            "content_block_stop",
+            json!({"type": "content_block_stop", "index": 0}),
+        ),
+        sse(
+            "message_delta",
+            json!({"type": "message_delta", "delta": {"stop_reason": "end_turn"},
+                   "usage": {"output_tokens": 3}}),
+        ),
+        sse("message_stop", json!({"type": "message_stop"})),
+    ]
+    .concat();
+    let mut decoder = Decoder::new();
+    let mut events = decoder.push(wire.as_bytes()).unwrap();
+    events.extend(decoder.finish().unwrap());
+    validate_event_sequence(&events).unwrap();
+
+    assert!(events.iter().any(|event| matches!(
+        &event.kind,
+        Kind::TextDelta { text, .. } if text == "per the source"
+    )));
+    assert!(events.iter().any(|event| matches!(
+        &event.kind,
+        Kind::SourceExtension { extensions }
+            if extensions.values.contains_key("/content/0/delta/citations_delta")
+    )));
+    // A `text_delta` aimed at a tool block is still a real mismatch.
+    let mismatched = [
+        sse(
+            "message_start",
+            json!({"type": "message_start", "message": {
+                "id": "msg_1", "type": "message", "role": "assistant", "content": [],
+                "model": "claude-upstream", "usage": {"input_tokens": 1, "output_tokens": 0}
+            }}),
+        ),
+        sse(
+            "content_block_start",
+            json!({"type": "content_block_start", "index": 0,
+                   "content_block": {"type": "tool_use", "id": "t1", "name": "x", "input": {}}}),
+        ),
+        sse(
+            "content_block_delta",
+            json!({"type": "content_block_delta", "index": 0,
+                   "delta": {"type": "text_delta", "text": "nope"}}),
+        ),
+    ]
+    .concat();
+    let mut decoder = Decoder::new();
+    assert!(matches!(
+        decoder.push(mismatched.as_bytes()),
+        Err(StreamError::DeltaBlockMismatch { .. })
+    ));
+}
+
+fn assistant_events(
+    usage: olp_engine::domain::canonical::events::Usage,
+    reason: FinishReason,
+    extensions: Vec<(&str, Value)>,
+) -> Vec<olp_engine::domain::canonical::events::Event> {
+    use olp_engine::domain::canonical::events::Event;
+    let mut events = vec![
+        Event::new(
+            0,
+            Kind::ResponseStart {
+                response_id: Some("msg_1".into()),
+                provider_model: Some("upstream".into()),
+            },
+        ),
+        Event::new(
+            1,
+            Kind::MessageStart {
+                output_index: 0,
+                role: MessageRole::Assistant,
+            },
+        ),
+        Event::new(
+            2,
+            Kind::TextDelta {
+                output_index: 0,
+                text: "hello".into(),
+            },
+        ),
+        Event::new(3, Kind::Usage { usage }),
+    ];
+    let mut next = 4;
+    if !extensions.is_empty() {
+        events.push(Event::new(
+            next,
+            Kind::SourceExtension {
+                extensions: olp_engine::domain::canonical::requests::SourceExtensions::new(
+                    Surface::Anthropic,
+                    extensions
+                        .into_iter()
+                        .map(|(path, value)| (path.to_owned(), value))
+                        .collect(),
+                ),
+            },
+        ));
+        next += 1;
+    }
+    events.push(Event::new(
+        next,
+        Kind::Finish {
+            output_index: 0,
+            reason,
+        },
+    ));
+    events.push(Event::new(next + 1, Kind::Done));
+    events
+}
+
+/// A6: `reasoning_tokens.is_some()` rejected the whole response. OpenAI reports
+/// `reasoning_tokens: 0` for non-reasoning models and Gemini 2.5 reports a real
+/// count on nearly every response, so both directions were broken.
+#[test]
+fn reasoning_token_reporting_never_fails_an_anthropic_response() {
+    use olp_engine::domain::canonical::events::Usage as CanonicalUsage;
+    use olp_engine::protocols::anthropic::client::encode_messages_response;
+
+    for reasoning in [Some(0), Some(97)] {
+        let events = assistant_events(
+            CanonicalUsage {
+                input_tokens: 10,
+                output_tokens: 4,
+                total_tokens: 14 + reasoning.unwrap_or(0),
+                cached_input_tokens: None,
+                reasoning_tokens: reasoning,
+            },
+            FinishReason::Stop,
+            Vec::new(),
+        );
+        let response = encode_messages_response(&events, "route", "fallback").unwrap();
+        assert_eq!(response.usage.input_tokens, 10);
+        assert_eq!(response.usage.output_tokens, 4);
+    }
+
+    // The same gap on the streaming path.
+    let mut encoder = Encoder::new("route", "fallback");
+    let mut frames = Vec::new();
+    for event in assistant_events(
+        CanonicalUsage {
+            input_tokens: 10,
+            output_tokens: 4,
+            total_tokens: 111,
+            cached_input_tokens: None,
+            reasoning_tokens: Some(97),
+        },
+        FinishReason::Stop,
+        Vec::new(),
+    ) {
+        frames.extend(encoder.push(event).unwrap());
+    }
+    assert!(
+        frames
+            .iter()
+            .any(|frame| frame.data.contains("message_delta"))
+    );
+}
+
+/// A14: canonical `input_tokens` is cache-inclusive. Subtracting only the read
+/// tier double-counted cache-creation tokens, and the streaming encoder
+/// subtracted nothing and dropped the creation count entirely.
+#[test]
+fn anthropic_usage_splits_both_cache_tiers_identically_unary_and_streamed() {
+    use olp_engine::domain::canonical::events::Usage as CanonicalUsage;
+    use olp_engine::protocols::anthropic::client::encode_messages_response;
+
+    // input 20 fresh + 100 created + 4 read == 124 canonical input tokens.
+    let usage = CanonicalUsage {
+        input_tokens: 124,
+        output_tokens: 7,
+        total_tokens: 131,
+        cached_input_tokens: Some(4),
+        reasoning_tokens: None,
+    };
+    let extensions = vec![("/usage/cache_creation_input_tokens", json!(100))];
+
+    let response = encode_messages_response(
+        &assistant_events(usage, FinishReason::Stop, extensions.clone()),
+        "route",
+        "fallback",
+    )
+    .unwrap();
+    assert_eq!(response.usage.input_tokens, 20);
+    assert_eq!(response.usage.cache_creation_input_tokens, Some(100));
+    assert_eq!(response.usage.cache_read_input_tokens, Some(4));
+
+    let mut encoder = Encoder::new("route", "fallback");
+    let mut frames = Vec::new();
+    for event in assistant_events(usage, FinishReason::Stop, extensions) {
+        frames.extend(encoder.push(event).unwrap());
+    }
+    let delta: Value = frames
+        .iter()
+        .find(|frame| frame.event.as_deref() == Some("message_delta"))
+        .map(|frame| serde_json::from_str(&frame.data).unwrap())
+        .expect("the stream must contain a message_delta");
+    assert_eq!(delta["usage"]["input_tokens"], 20);
+    assert_eq!(delta["usage"]["cache_creation_input_tokens"], 100);
+    assert_eq!(delta["usage"]["cache_read_input_tokens"], 4);
+}
+
+/// A16: Anthropic guarantees `stop_reason` and `stop_sequence` agree. The
+/// canonical fold to `Stop` re-encoded as `end_turn` next to a restored
+/// `stop_sequence`.
+#[test]
+fn a_matched_stop_sequence_reports_stop_sequence_as_the_reason() {
+    use olp_engine::domain::canonical::events::Usage as CanonicalUsage;
+    use olp_engine::protocols::anthropic::client::encode_messages_response;
+
+    let usage = CanonicalUsage::default();
+    let response = encode_messages_response(
+        &assistant_events(
+            usage,
+            FinishReason::Stop,
+            vec![("/stop_sequence", json!("END"))],
+        ),
+        "route",
+        "fallback",
+    )
+    .unwrap();
+    assert_eq!(response.stop_reason.as_deref(), Some("stop_sequence"));
+    assert_eq!(response.stop_sequence.as_deref(), Some("END"));
+
+    let mut encoder = Encoder::new("route", "fallback");
+    let mut wire = String::new();
+    for event in assistant_events(
+        usage,
+        FinishReason::Stop,
+        vec![("/delta/stop_sequence", json!("END"))],
+    ) {
+        for frame in encoder.push(event).unwrap() {
+            wire.push_str(&frame.data);
+        }
+    }
+    assert!(wire.contains("\"stop_reason\":\"stop_sequence\""));
+    assert!(wire.contains("\"stop_sequence\":\"END\""));
+}
+
+/// A11: a no-parameter tool aggregates to an empty argument string, which
+/// `serde_json` cannot parse — the whole response failed to encode.
+#[test]
+fn a_zero_argument_tool_call_encodes_as_an_empty_object() {
+    use olp_engine::domain::canonical::events::{Event, Usage as CanonicalUsage};
+    use olp_engine::protocols::anthropic::client::encode_messages_response;
+
+    let events = vec![
+        Event::new(
+            0,
+            Kind::MessageStart {
+                output_index: 0,
+                role: MessageRole::Assistant,
+            },
+        ),
+        Event::new(
+            1,
+            Kind::ToolCallDelta {
+                output_index: 0,
+                tool_index: 0,
+                id: Some("toolu_1".into()),
+                name: Some("now".into()),
+                arguments_delta: String::new(),
+            },
+        ),
+        Event::new(
+            2,
+            Kind::Usage {
+                usage: CanonicalUsage::default(),
+            },
+        ),
+        Event::new(
+            3,
+            Kind::Finish {
+                output_index: 0,
+                reason: FinishReason::ToolCalls,
+            },
+        ),
+        Event::new(4, Kind::Done),
+    ];
+    let response = encode_messages_response(&events, "route", "fallback").unwrap();
+    let wire = serde_json::to_value(&response).unwrap();
+    assert_eq!(wire["content"][0]["type"], "tool_use");
+    assert_eq!(wire["content"][0]["input"], json!({}));
+}
+
+/// A17: `pause_turn` is a real Anthropic value that server-tool loops depend
+/// on, so it passes through; a value outside the enum is clamped.
+#[test]
+fn anthropic_stop_reasons_pass_through_only_inside_the_declared_enum() {
+    use olp_engine::domain::canonical::events::Usage as CanonicalUsage;
+    use olp_engine::protocols::anthropic::client::encode_messages_response;
+
+    for (reason, expected) in [
+        (FinishReason::Other("pause_turn".to_owned()), "pause_turn"),
+        (FinishReason::Other("LANGUAGE".to_owned()), "end_turn"),
+        (FinishReason::Error, "end_turn"),
+        (FinishReason::ToolCalls, "tool_use"),
+    ] {
+        let response = encode_messages_response(
+            &assistant_events(CanonicalUsage::default(), reason.clone(), Vec::new()),
+            "route",
+            "fallback",
+        )
+        .unwrap();
+        assert_eq!(
+            response.stop_reason.as_deref(),
+            Some(expected),
+            "{reason:?} must encode as {expected}"
+        );
+    }
 }

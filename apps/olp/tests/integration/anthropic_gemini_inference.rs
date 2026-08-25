@@ -800,6 +800,7 @@ impl ProviderTransport for PostCommitFailureTransport {
                     },
                 )),
                 Err(TransportError {
+                    upstream: Default::default(),
                     phase: TransportPhase::Body,
                     class: AttemptFailureClass::UpstreamServer,
                     response_committed: true,
@@ -821,6 +822,7 @@ impl ProviderTransport for NeverCalledTransport {
         self.0.fetch_add(1, Ordering::SeqCst);
         Box::pin(async {
             Err(TransportError {
+                upstream: Default::default(),
                 phase: TransportPhase::Connect,
                 class: AttemptFailureClass::Connect,
                 response_committed: false,

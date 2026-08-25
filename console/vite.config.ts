@@ -10,7 +10,27 @@ export default defineConfig({
   plugins: [sveltekit()],
   test: {
     clearMocks: true,
-    include: ['src/**/*.test.ts'],
-    restoreMocks: true
+    restoreMocks: true,
+    projects: [
+      {
+        extends: true,
+        test: {
+          name: 'unit',
+          include: ['src/**/*.test.ts'],
+          exclude: ['src/**/*.svelte.test.ts']
+        }
+      },
+      {
+        // Runes and component lifecycles only exist in Svelte's client build,
+        // which needs both a DOM and the browser export conditions.
+        extends: true,
+        resolve: { conditions: ['browser'] },
+        test: {
+          name: 'client',
+          environment: 'jsdom',
+          include: ['src/**/*.svelte.test.ts']
+        }
+      }
+    ]
   }
 });

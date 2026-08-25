@@ -10,8 +10,34 @@ use crate::security::{
     aad::idempotency_replay_scope,
     envelope::{EncryptedSecret, MasterKey},
 };
+use crate::store::Store;
 
 use crate::error::Error;
+
+/// The operations whose mutations record a replayable HTTP response. Each
+/// name is the one the matching `Store` mutation claims through
+/// `claim_idempotency`, so the record the mutation writes is the record the
+/// replay reads.
+pub mod operations {
+    /// `Store::revoke_api_key_record`
+    pub const API_KEY_REVOKE: &str = "api_key.revoke";
+    /// `Store::revoke_invitation`
+    pub const INVITATION_REVOKE: &str = "invitation.revoke";
+    /// `Store::activate_provider`
+    pub const PROVIDER_ACTIVATE: &str = "provider.activate";
+    /// `Store::disable_provider`
+    pub const PROVIDER_DISABLE: &str = "provider.disable";
+    /// `Store::restore_provider_as_draft`
+    pub const PROVIDER_RESTORE_AS_DRAFT: &str = "provider.restore_as_draft";
+    /// `Store::revoke_provider_credential`
+    pub const PROVIDER_REVOKE_CREDENTIAL: &str = "provider.revoke_credential";
+    /// `Store::restore_provider_revision_as_draft`
+    pub const PROVIDER_REVISION_RESTORE_AS_DRAFT: &str = "provider_revision.restore_as_draft";
+    /// `Store::activate_route_draft`
+    pub const ROUTE_ACTIVATE: &str = "route.activate";
+    /// `Store::restore_route_revision_as_draft`
+    pub const ROUTE_RESTORE_AS_DRAFT: &str = "route.restore_as_draft";
+}
 
 const IDEMPOTENCY_REPLAY_VERSION: u8 = 1;
 const MAX_IDEMPOTENCY_REPLAY_BODY_BYTES: usize = 1024 * 1024;
@@ -23,6 +49,7 @@ pub struct Response {
     status: u16,
     content_type: Option<String>,
     etag: Option<String>,
+    location: Option<String>,
     body: Zeroizing<Vec<u8>>,
 }
 
@@ -37,10 +64,25 @@ impl Response {
             status,
             content_type,
             etag,
+            location: None,
             body: Zeroizing::new(body),
         };
         response.validate()?;
         Ok(response)
+    }
+
+    /// Points a 201 at the resource it created. The header has to travel with
+    /// the stored envelope: a replayed create must be byte-identical to the
+    /// original, headers included.
+    pub fn with_location(mut self, location: String) -> Result<Self, Error> {
+        self.location = Some(location);
+        self.validate()?;
+        Ok(self)
+    }
+
+    #[must_use]
+    pub fn location(&self) -> Option<&str> {
+        self.location.as_deref()
     }
 
     pub fn json<T: Serialize>(status: u16, value: &T, etag: Option<String>) -> Result<Self, Error> {
@@ -74,6 +116,10 @@ impl Response {
                 .etag
                 .as_ref()
                 .is_some_and(|value| !valid_replay_header(value))
+            || self
+                .location
+                .as_ref()
+                .is_some_and(|value| !valid_replay_header(value))
         {
             return Err(Error::IdempotencyReplayUnavailable);
         }
@@ -88,6 +134,7 @@ impl fmt::Debug for Response {
             .field("status", &self.status)
             .field("content_type", &self.content_type)
             .field("etag", &self.etag)
+            .field("location", &self.location)
             .field("body", &"[REDACTED]")
             .finish()
     }
@@ -149,6 +196,8 @@ struct StoredIdempotencyResponseRef<'a> {
     status: u16,
     content_type: &'a Option<String>,
     etag: &'a Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    location: &'a Option<String>,
     body: &'a [u8],
 }
 
@@ -159,6 +208,8 @@ struct StoredIdempotencyResponse {
     status: u16,
     content_type: Option<String>,
     etag: Option<String>,
+    #[serde(default)]
+    location: Option<String>,
     body: Vec<u8>,
 }
 
@@ -227,33 +278,15 @@ pub(crate) async fn claim_replayable_idempotency(
         if state != "completed" {
             return Err(Error::IdempotencyReplayUnavailable);
         }
-        let ciphertext: Option<Vec<u8>> = row.replay_ciphertext;
-        let nonce: Option<Vec<u8>> = row.replay_nonce;
-        let key_version: Option<i32> = row.replay_key_version;
-        let ciphertext = ciphertext.ok_or(Error::IdempotencyReplayUnavailable)?;
-        if ciphertext.len() > MAX_IDEMPOTENCY_REPLAY_CIPHERTEXT_BYTES {
-            return Err(Error::IdempotencyReplayUnavailable);
-        }
-        let nonce: [u8; 12] = nonce
-            .ok_or(Error::IdempotencyReplayUnavailable)?
-            .try_into()
-            .map_err(|_| Error::IdempotencyReplayUnavailable)?;
-        let key_version = u32::try_from(key_version.ok_or(Error::IdempotencyReplayUnavailable)?)
-            .map_err(|_| Error::IdempotencyReplayUnavailable)?;
-        let encrypted = EncryptedSecret {
-            key_version,
-            nonce,
-            ciphertext,
-        };
-        let plaintext = master_key
-            .open(&encrypted, scope.as_bytes())
-            .map_err(|_| Error::IdempotencyReplayUnavailable)?;
-        let stored: StoredIdempotencyResponse =
-            serde_json::from_slice(&plaintext).map_err(|_| Error::IdempotencyReplayUnavailable)?;
-        if stored.version != IDEMPOTENCY_REPLAY_VERSION {
-            return Err(Error::IdempotencyReplayUnavailable);
-        }
-        let response = Response::new(stored.status, stored.content_type, stored.etag, stored.body)?;
+        let response = open_stored_response(
+            master_key,
+            &scope,
+            StoredEnvelope {
+                ciphertext: row.replay_ciphertext,
+                nonce: row.replay_nonce,
+                key_version: row.replay_key_version,
+            },
+        )?;
         return Ok(ReplayableIdempotencyClaim::Replay(response));
     }
 
@@ -281,18 +314,8 @@ pub(crate) async fn complete_replayable_idempotency(
     master_key: &MasterKey,
     response: &Response,
 ) -> Result<(), Error> {
-    response.validate()?;
     let scope = idempotency_replay_scope(actor, operation, key);
-    let plaintext = Zeroizing::new(serde_json::to_vec(&StoredIdempotencyResponseRef {
-        version: IDEMPOTENCY_REPLAY_VERSION,
-        status: response.status,
-        content_type: &response.content_type,
-        etag: &response.etag,
-        body: &response.body,
-    })?);
-    let encrypted = master_key
-        .seal(&plaintext, scope.as_bytes())
-        .map_err(|_| Error::IdempotencyReplayEncryption)?;
+    let encrypted = seal_response(master_key, &scope, response)?;
     let key_version =
         i32::try_from(encrypted.key_version).map_err(|_| Error::IdempotencyReplayEncryption)?;
     let result = sqlx::query!(
@@ -315,6 +338,176 @@ pub(crate) async fn complete_replayable_idempotency(
         return Err(Error::IdempotencyReplayUnavailable);
     }
     Ok(())
+}
+
+struct StoredEnvelope {
+    ciphertext: Option<Vec<u8>>,
+    nonce: Option<Vec<u8>>,
+    key_version: Option<i32>,
+}
+
+fn open_stored_response(
+    master_key: &MasterKey,
+    scope: &str,
+    envelope: StoredEnvelope,
+) -> Result<Response, Error> {
+    let ciphertext = envelope
+        .ciphertext
+        .ok_or(Error::IdempotencyReplayUnavailable)?;
+    if ciphertext.len() > MAX_IDEMPOTENCY_REPLAY_CIPHERTEXT_BYTES {
+        return Err(Error::IdempotencyReplayUnavailable);
+    }
+    let nonce: [u8; 12] = envelope
+        .nonce
+        .ok_or(Error::IdempotencyReplayUnavailable)?
+        .try_into()
+        .map_err(|_| Error::IdempotencyReplayUnavailable)?;
+    let key_version = u32::try_from(
+        envelope
+            .key_version
+            .ok_or(Error::IdempotencyReplayUnavailable)?,
+    )
+    .map_err(|_| Error::IdempotencyReplayUnavailable)?;
+    let encrypted = EncryptedSecret {
+        key_version,
+        nonce,
+        ciphertext,
+    };
+    let plaintext = master_key
+        .open(&encrypted, scope.as_bytes())
+        .map_err(|_| Error::IdempotencyReplayUnavailable)?;
+    let stored: StoredIdempotencyResponse =
+        serde_json::from_slice(&plaintext).map_err(|_| Error::IdempotencyReplayUnavailable)?;
+    if stored.version != IDEMPOTENCY_REPLAY_VERSION {
+        return Err(Error::IdempotencyReplayUnavailable);
+    }
+    let response = Response::new(stored.status, stored.content_type, stored.etag, stored.body)?;
+    match stored.location {
+        Some(location) => response.with_location(location),
+        None => Ok(response),
+    }
+}
+
+fn seal_response(
+    master_key: &MasterKey,
+    scope: &str,
+    response: &Response,
+) -> Result<EncryptedSecret, Error> {
+    response.validate()?;
+    let plaintext = Zeroizing::new(serde_json::to_vec(&StoredIdempotencyResponseRef {
+        version: IDEMPOTENCY_REPLAY_VERSION,
+        status: response.status,
+        content_type: &response.content_type,
+        etag: &response.etag,
+        location: &response.location,
+        body: &response.body,
+    })?);
+    master_key
+        .seal(&plaintext, scope.as_bytes())
+        .map_err(|_| Error::IdempotencyReplayEncryption)
+}
+
+/// What a retry of an already-claimed management mutation should do.
+#[derive(Debug)]
+pub enum ReplayedMutation {
+    /// Nothing was recorded under this key: run the mutation.
+    Absent,
+    /// The identical request already ran; return this response again.
+    Replayed(Response),
+    /// The key was used for a different request.
+    Conflict,
+}
+
+impl Store {
+    /// Looks up the response an earlier identical request recorded under this
+    /// idempotency key. Mutations that claim their key non-replayably answer a
+    /// dropped-connection retry with a bare 409, which leaves the client
+    /// unable to tell whether the revoke or activation happened; recording the
+    /// response after the mutation commits lets the retry replay it instead.
+    pub async fn replayed_mutation(
+        &self,
+        actor: Uuid,
+        operation: &str,
+        key: &str,
+        replay: Replayable<'_>,
+    ) -> Result<ReplayedMutation, Error> {
+        let record = sqlx::query!(
+            "SELECT state, request_fingerprint, replay_ciphertext, replay_nonce, \
+                    replay_key_version \
+             FROM idempotency_records \
+             WHERE actor_user_id = $1 AND operation = $2 AND idempotency_key = $3 \
+               AND expires_at > now()",
+            actor,
+            operation,
+            key
+        )
+        .fetch_optional(self.pool())
+        .await?;
+        let Some(record) = record else {
+            return Ok(ReplayedMutation::Absent);
+        };
+        if record
+            .request_fingerprint
+            .as_deref()
+            .is_some_and(|fingerprint| fingerprint != replay.request_fingerprint().as_slice())
+        {
+            return Ok(ReplayedMutation::Conflict);
+        }
+        if record.state != "completed" || record.replay_ciphertext.is_none() {
+            // Either a concurrent attempt still holds the key, or the process
+            // died before it could record its response. The mutation's own
+            // claim decides what the retry gets.
+            return Ok(ReplayedMutation::Absent);
+        }
+        let scope = idempotency_replay_scope(actor, operation, key);
+        let response = open_stored_response(
+            replay.master_key(),
+            &scope,
+            StoredEnvelope {
+                ciphertext: record.replay_ciphertext,
+                nonce: record.replay_nonce,
+                key_version: record.replay_key_version,
+            },
+        )?;
+        Ok(ReplayedMutation::Replayed(response))
+    }
+
+    /// Attaches the response envelope to the record the mutation just
+    /// completed. The mutation is already durable, so callers treat a failure
+    /// here as "not replayable" rather than as a failed request.
+    pub async fn record_mutation_response(
+        &self,
+        actor: Uuid,
+        operation: &str,
+        key: &str,
+        replay: Replayable<'_>,
+        response: &Response,
+    ) -> Result<(), Error> {
+        let scope = idempotency_replay_scope(actor, operation, key);
+        let encrypted = seal_response(replay.master_key(), &scope, response)?;
+        let key_version =
+            i32::try_from(encrypted.key_version).map_err(|_| Error::IdempotencyReplayEncryption)?;
+        let result = sqlx::query!(
+            "UPDATE idempotency_records \
+             SET request_fingerprint = $4, replay_ciphertext = $5, replay_nonce = $6, \
+                 replay_key_version = $7 \
+             WHERE actor_user_id = $1 AND operation = $2 AND idempotency_key = $3 \
+               AND state = 'completed' AND replay_ciphertext IS NULL",
+            actor,
+            operation,
+            key,
+            replay.request_fingerprint().as_slice(),
+            encrypted.ciphertext,
+            encrypted.nonce.to_vec(),
+            key_version
+        )
+        .execute(self.pool())
+        .await?;
+        if result.rows_affected() != 1 {
+            return Err(Error::IdempotencyReplayUnavailable);
+        }
+        Ok(())
+    }
 }
 
 fn valid_replay_header(value: &str) -> bool {
@@ -383,7 +576,64 @@ pub(crate) async fn complete_idempotency(
 mod tests {
     use crate::error::Error;
 
-    use super::{MAX_IDEMPOTENCY_REPLAY_BODY_BYTES, Response, fingerprint};
+    use super::{
+        MAX_IDEMPOTENCY_REPLAY_BODY_BYTES, Response, StoredEnvelope, fingerprint,
+        open_stored_response, seal_response,
+    };
+    use crate::security::envelope::MasterKey;
+
+    #[test]
+    fn a_sealed_response_round_trips_its_location_header() {
+        let master_key = MasterKey::new(1, [7; 32]);
+        let scope = "idempotency:test";
+        let response = Response::json(201, &serde_json::json!({"id": "abc"}), None)
+            .unwrap()
+            .with_location("/api/v1/api-keys/abc".to_owned())
+            .unwrap();
+        let sealed = seal_response(&master_key, scope, &response).unwrap();
+
+        let opened = open_stored_response(
+            &master_key,
+            scope,
+            StoredEnvelope {
+                ciphertext: Some(sealed.ciphertext),
+                nonce: Some(sealed.nonce.to_vec()),
+                key_version: Some(i32::try_from(sealed.key_version).unwrap()),
+            },
+        )
+        .unwrap();
+        assert_eq!(opened.location(), Some("/api/v1/api-keys/abc"));
+        assert_eq!(opened.into_parts().0, 201);
+    }
+
+    #[test]
+    fn an_envelope_stored_before_locations_existed_still_opens() {
+        let master_key = MasterKey::new(1, [9; 32]);
+        let scope = "idempotency:test";
+        let response = Response::json(200, &serde_json::json!({"ok": true}), None).unwrap();
+        let sealed = seal_response(&master_key, scope, &response).unwrap();
+
+        let opened = open_stored_response(
+            &master_key,
+            scope,
+            StoredEnvelope {
+                ciphertext: Some(sealed.ciphertext),
+                nonce: Some(sealed.nonce.to_vec()),
+                key_version: Some(i32::try_from(sealed.key_version).unwrap()),
+            },
+        )
+        .unwrap();
+        assert_eq!(opened.location(), None);
+    }
+
+    #[test]
+    fn a_location_that_cannot_be_a_header_is_refused() {
+        let response = Response::json(201, &serde_json::json!({}), None).unwrap();
+        assert!(matches!(
+            response.with_location("/api/v1/keys\r\nX-Injected: 1".to_owned()),
+            Err(Error::IdempotencyReplayUnavailable)
+        ));
+    }
 
     #[test]
     fn replay_response_debug_output_redacts_the_body() {

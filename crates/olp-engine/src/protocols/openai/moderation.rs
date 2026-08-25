@@ -5,7 +5,7 @@ use crate::domain::{
         identity::Surface,
         requests::{
             ContentPart, MediaSource, ModerationRequest as CanonicalModerationRequest, Operation,
-            SourceExtensions,
+            SourceExtensions, mime_type_from_data_url,
         },
         results::{ModerationItem, ModerationResult},
     },
@@ -71,6 +71,7 @@ fn decode_moderation_input(
                     let url = take_string(&mut image, "url", index)?;
                     collect_object_extra(&format!("/input/{index}/image_url"), image, extensions);
                     ContentPart::Image {
+                        mime_type: mime_type_from_data_url(&url),
                         source: MediaSource::Uri(url),
                         detail: None,
                     }

@@ -200,7 +200,8 @@ pub(super) async fn put_configuration(
     let principal = require_mutation_session(&state, &headers).await?;
     require_permission(&principal, Permission::ManageAccess)?;
     let request = json_payload(payload)?;
-    validate_configuration_request(&request)?;
+    let policy = network_policy(&state);
+    validate_configuration_request(&request, policy.allow_insecure_test_endpoints)?;
     let store = state.store();
     let existing = store.oidc_configuration().await.map_err(map_oidc)?;
     let expected_etag = optional_if_match(&headers)?;
@@ -243,8 +244,6 @@ pub(super) async fn put_configuration(
         }
     };
 
-    let policy = network_policy(&state);
-    validate_issuer(request.issuer.trim(), policy.allow_insecure_test_endpoints)?;
     let discovery: DiscoveryDocument = policy
         .get_json(request.discovery_url.trim(), DISCOVERY_LIMIT)
         .await
@@ -394,22 +393,30 @@ async fn validate_discovery(policy: &Policy, discovery: &DiscoveryDocument) -> R
 }
 
 fn validate_issuer(value: &str, allow_insecure: bool) -> Result<(), Problem> {
-    let url = Url::parse(value)
-        .map_err(|_| field_problem("discovery_url", "The discovered issuer URL is invalid."))?;
-    if (!allow_insecure && url.scheme() != "https")
-        || (allow_insecure && !matches!(url.scheme(), "http" | "https"))
-        || !url.username().is_empty()
-        || url.password().is_some()
-        || url.query().is_some()
-        || url.fragment().is_some()
-        || url.host_str().is_none()
-    {
-        return Err(field_problem(
-            "discovery_url",
-            "The discovered issuer URL is invalid.",
-        ));
+    if valid_issuer_url(value, allow_insecure) {
+        return Ok(());
     }
-    Ok(())
+    Err(field_problem(
+        "discovery_url",
+        "The discovered issuer URL is invalid.",
+    ))
+}
+
+fn valid_issuer_url(value: &str, allow_insecure: bool) -> bool {
+    let Ok(url) = Url::parse(value) else {
+        return false;
+    };
+    let scheme_allowed = if allow_insecure {
+        matches!(url.scheme(), "http" | "https")
+    } else {
+        url.scheme() == "https"
+    };
+    scheme_allowed
+        && url.username().is_empty()
+        && url.password().is_none()
+        && url.query().is_none()
+        && url.fragment().is_none()
+        && url.host_str().is_some()
 }
 
 fn validate_jwks(jwks: &JwkSet) -> Result<(), Problem> {
@@ -462,11 +469,21 @@ fn choose_token_auth_method(discovery: &DiscoveryDocument) -> Result<String, Pro
     }
 }
 
-fn validate_configuration_request(request: &OidcConfigurationRequest) -> Result<(), Problem> {
+fn validate_configuration_request(
+    request: &OidcConfigurationRequest,
+    allow_insecure: bool,
+) -> Result<(), Problem> {
     if request.discovery_url.trim().len() > 2048 {
         return Err(field_problem(
             "discovery_url",
             "Use a discovery URL no longer than 2,048 characters.",
+        ));
+    }
+    let issuer = request.issuer.trim();
+    if issuer.is_empty() || issuer.len() > 2048 || !valid_issuer_url(issuer, allow_insecure) {
+        return Err(field_problem(
+            "issuer",
+            "Use an absolute https issuer URL with no credentials, query, or fragment.",
         ));
     }
     if request.client_id.trim().is_empty()

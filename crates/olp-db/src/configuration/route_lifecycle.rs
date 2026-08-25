@@ -322,6 +322,23 @@ impl Store {
             .execute(&mut *transaction)
             .await?;
         }
+        // Activation consumes the draft. Without this the same validated ETag
+        // activates again under a fresh Idempotency-Key, minting a revision
+        // identical to the one just published and republishing the runtime to
+        // every replica.
+        let draft_etag = Uuid::now_v7();
+        let consumed = sqlx::query!(
+            "UPDATE route_drafts SET state = 'draft', etag = $2, updated_at = now() \
+             WHERE id = $1 AND etag = $3",
+            draft_id,
+            draft_etag,
+            expected_etag
+        )
+        .execute(&mut *transaction)
+        .await?;
+        if consumed.rows_affected() != 1 {
+            return Err(Error::PreconditionFailed);
+        }
         sqlx::query!(
             "INSERT INTO audit_events \
              (id, actor_user_id, action, resource_type, resource_id, outcome) \
@@ -346,6 +363,7 @@ impl Store {
             route_id,
             revision_id,
             revision,
+            draft_etag,
             release,
         })
     }

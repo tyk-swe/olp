@@ -207,8 +207,40 @@ describe('provider editor capability policy', () => {
     expect(draft).toMatchObject({
       kind: 'openai_compatible',
       presetId: '',
-      endpoint: 'https://resource.openai.azure.com'
+      endpoint: ''
     });
+  });
+
+  it('resets every connector-specific field when the kind changes', () => {
+    const draft = createProviderDraft(azureSpec);
+    Object.assign(draft, {
+      name: 'azure-production',
+      endpoint: 'https://resource.openai.azure.com',
+      apiVersion: '2026-01-01',
+      cloudRegion: 'eastus',
+      cloudProject: 'analytics',
+      deployment: 'gpt-5-4',
+      model: 'gpt-5.4',
+      credential: 'azure-secret'
+    });
+
+    setProviderDraftKind(draft, compatibleSpec.kind);
+
+    expect(draft).toMatchObject({
+      kind: 'openai_compatible',
+      presetId: '',
+      endpoint: '',
+      apiVersion: '',
+      cloudRegion: '',
+      cloudProject: '',
+      deployment: '',
+      model: '',
+      // A secret typed for Azure must never be submitted as the compatible
+      // endpoint's key.
+      credential: ''
+    });
+    // The provider name is the operator's label, not connector context.
+    expect(draft.name).toBe('azure-production');
   });
 });
 

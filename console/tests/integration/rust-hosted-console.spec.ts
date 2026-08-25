@@ -223,7 +223,7 @@ test('Rust serves the console and enforces the real setup/session/management bou
   await expect(page.getByRole('heading', { name: 'No providers configured' })).toBeVisible();
 
   await page.getByRole('link', { name: 'Access', exact: true }).click();
-  await page.getByRole('link', { name: 'Invite member' }).click();
+  await page.getByRole('button', { name: 'Invite member' }).click();
   await page.getByLabel('Email address').fill('invited-integration@example.com');
   await page.getByLabel('Role').selectOption('developer');
   await page.getByRole('button', { name: 'Create invitation' }).click();

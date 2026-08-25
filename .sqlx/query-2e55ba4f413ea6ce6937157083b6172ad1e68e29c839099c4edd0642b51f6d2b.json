@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE async_media_jobs SET\n                reconciliation_claim_id = NULL,\n                reconciliation_claimed_until = NULL,\n                next_reconciliation_at = $3,\n                reconciliation_error = $4,\n                reconciliation_attempts =\n                    CASE WHEN $4::text IS NULL THEN 0 ELSE reconciliation_attempts END,\n                etag = uuidv7()\n             WHERE id = $1 AND reconciliation_claim_id = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Timestamptz",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "2e55ba4f413ea6ce6937157083b6172ad1e68e29c839099c4edd0642b51f6d2b"
+}

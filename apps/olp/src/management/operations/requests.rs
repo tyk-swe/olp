@@ -23,7 +23,10 @@ use crate::{
 #[derive(Debug, Deserialize, IntoParams)]
 #[into_params(parameter_in = Query)]
 pub(super) struct RequestQuery {
+    /// Opaque cursor returned by the previous page.
     cursor: Option<String>,
+    /// Page size, from 1 to 200. Defaults to 50.
+    #[param(minimum = 1, maximum = 200)]
     limit: Option<u16>,
     route: Option<String>,
     #[param(value_type = Option<String>, format = Uuid)]

@@ -9,6 +9,7 @@ use futures::{StreamExt as _, stream};
 use olp_db::{
     configuration::Error, configuration::resources::CapabilityCertificationOutcome,
     configuration::resources::CapabilityRecord, configuration::resources::DiscoveredModelInput,
+    configuration::resources::PROVIDER_REVISION_DIFF_MODEL_LIMIT,
     configuration::resources::ProviderModelInventoryRecord,
     configuration::resources::ProviderModelRecord,
 };
@@ -297,7 +298,7 @@ pub(crate) struct ProviderModelInventoryListResponse {
     tag = "providers",
     params(
         ("cursor" = Option<String>, Query),
-        ("limit" = Option<u16>, Query, minimum = 1, maximum = 100),
+        ("limit" = Option<u16>, Query, minimum = 1, maximum = 200, description = "Page size from 1 to 200; defaults to 50"),
         ("enabled" = Option<bool>, Query, description = "Optional enabled-state filter")
     ),
     responses(
@@ -334,7 +335,7 @@ pub(crate) async fn list_provider_model_inventory(
     params(
         ("provider_id" = Uuid, Path),
         ("cursor" = Option<String>, Query),
-        ("limit" = Option<u16>, Query, minimum = 1, maximum = 100)
+        ("limit" = Option<u16>, Query, minimum = 1, maximum = 200, description = "Page size from 1 to 200; defaults to 50")
     ),
     responses(
         (status = 200, description = "Bounded provider model and capability page", body = ProviderModelListResponse),
@@ -390,13 +391,31 @@ pub(crate) struct DiscoveredModelRequest {
     pub display_name: String,
 }
 
+/// A provider may never hold more discovered models than `revisions/diff` can
+/// load from one revision, or its revisions become impossible to compare.
+const DISCOVERY_MODEL_LIMIT: usize = PROVIDER_REVISION_DIFF_MODEL_LIMIT;
+
+fn validate_discovered_model_count(field: &'static str, count: usize) -> Result<(), Problem> {
+    if count > DISCOVERY_MODEL_LIMIT {
+        return Err(Problem::field_validation(
+            field,
+            format!(
+                "A provider holds at most {DISCOVERY_MODEL_LIMIT} discovered models; revision diffs stop working above that."
+            ),
+        ));
+    }
+    Ok(())
+}
+
 #[derive(Debug, Deserialize, ToSchema)]
 pub(crate) struct DiscoverModelsRequest {
     /// Omit or pass an empty array to query the upstream model-list API.
     /// Manual identifiers are a fallback for upstreams without a list API.
     /// All discovered models start disabled and without capability claims until
-    /// the explicit review operation is completed.
+    /// the explicit review operation is completed. At most 2,000 entries: the
+    /// revision diff cannot read a provider beyond that.
     #[serde(default)]
+    #[schema(max_items = 2000)]
     pub models: Vec<DiscoveredModelRequest>,
 }
 
@@ -417,12 +436,15 @@ pub(crate) async fn discover_provider_models(
     let principal = require_mutation_session(&state, &headers).await?;
     require_permission(&principal, Permission::ManageProviders)?;
     let request = json_payload(payload)?;
+    validate_discovered_model_count("models", request.models.len())?;
     let models: Vec<DiscoveredModelInput> = if request.models.is_empty() {
-        provider_connector(&state, provider_id)
+        let discovered = provider_connector(&state, provider_id)
             .await?
             .discover_models()
             .await
-            .map_err(|detail| Problem::field_validation("provider", detail))?
+            .map_err(|detail| Problem::field_validation("provider", detail))?;
+        validate_discovered_model_count("provider", discovered.len())?;
+        discovered
             .into_iter()
             .map(|model| DiscoveredModelInput {
                 upstream_model: model.id,
@@ -698,3 +720,27 @@ const fn transport_failure_code(
 
 #[cfg(test)]
 mod model_tests;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn discovery_imports_stay_within_the_revision_diff_ceiling() {
+        assert_eq!(DISCOVERY_MODEL_LIMIT, PROVIDER_REVISION_DIFF_MODEL_LIMIT);
+        validate_discovered_model_count("models", 0).unwrap();
+        validate_discovered_model_count("models", DISCOVERY_MODEL_LIMIT).unwrap();
+
+        let problem =
+            validate_discovered_model_count("models", DISCOVERY_MODEL_LIMIT + 1).unwrap_err();
+        assert_eq!(problem.status, 422);
+        assert!(
+            problem.errors.get("models").unwrap()[0].contains(&DISCOVERY_MODEL_LIMIT.to_string())
+        );
+
+        let upstream =
+            validate_discovered_model_count("provider", DISCOVERY_MODEL_LIMIT + 1).unwrap_err();
+        assert_eq!(upstream.status, 422);
+        assert!(upstream.errors.contains_key("provider"));
+    }
+}

@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO runtime_outbox_health (singleton, owner_active, claimed_rows, checked_at, last_progress_at) VALUES (true, true, 0, clock_timestamp(), NULL) ON CONFLICT (singleton) DO UPDATE SET owner_active = true, claimed_rows = 0, checked_at = EXCLUDED.checked_at, last_progress_at = runtime_outbox_health.last_progress_at",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "f30d86d7f677e17849f727166a9b395cc36dab076e5bd29b914e75ab695ee591"
+}

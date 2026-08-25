@@ -71,7 +71,18 @@ export function setProviderDraftKind(
 ): void {
   if (draft.kind === kind) return;
   draft.kind = kind;
+  // Connector fields are kind-specific. Carrying an Azure resource endpoint or
+  // a preset-resolved URL into the next connector silently persists a value the
+  // operator never chose for it, and a secret typed for one upstream must never
+  // be submitted as another upstream's credential.
   draft.presetId = '';
+  draft.credential = '';
+  draft.endpoint = '';
+  draft.apiVersion = '';
+  draft.cloudRegion = '';
+  draft.cloudProject = '';
+  draft.deployment = '';
+  draft.model = '';
 }
 
 export function selectProviderPreset(
@@ -145,7 +156,8 @@ export function hasApiVersion(spec: ProviderKindCapability): boolean {
 
 export function validateProviderDraft(
   draft: ProviderDraft,
-  spec: ProviderKindCapability
+  spec: ProviderKindCapability,
+  options: { credentialAlreadyStored?: boolean } = {}
 ): string | null {
   const values: Record<string, string> = {
     endpoint: draft.endpoint,
@@ -159,7 +171,13 @@ export function validateProviderDraft(
     .filter((field) => field.required && !values[field.field]?.trim())
     .map((field) => field.label.toLowerCase());
   if (!draft.name.trim()) missing.unshift('name');
-  if (requiresCredential(spec, draft.authMode) && !draft.credential.trim()) {
+  if (
+    !options.credentialAlreadyStored &&
+    requiresCredential(spec, draft.authMode) &&
+    !draft.credential.trim()
+  ) {
+    // Re-editing a saved draft keeps the stored write-only credential; only a
+    // provider that has never been created must supply one here.
     missing.push('credential');
   }
   if (!missing.length) return null;

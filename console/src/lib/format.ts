@@ -36,21 +36,36 @@ export function formatCompact(value: number | string | null | undefined): string
   );
 }
 
-export function formatCost(value?: string | null, currency = 'USD'): string {
+export function formatInteger(value: number | string | null | undefined): string {
+  if (value === null || value === undefined || value === '') return '—';
+  const number = typeof value === 'number' ? value : Number(value);
+  if (!Number.isFinite(number)) return String(value);
+  return new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 }).format(number);
+}
+
+/**
+ * A missing currency means the record was never priced in a known unit, so the
+ * amount is grouped without a symbol rather than being labelled as dollars.
+ */
+export function formatCost(value?: string | null, currency?: string | null): string {
   if (value === null || value === undefined || value === '') return 'Unpriced';
   const number = Number(value);
-  if (!Number.isFinite(number)) return `${value} ${currency}`;
+  if (!Number.isFinite(number)) return currency ? `${value} ${currency}` : String(value);
+  const fractionDigits = {
+    minimumFractionDigits: number < 0.01 ? 4 : 2,
+    maximumFractionDigits: number < 0.01 ? 6 : 2
+  };
+  if (!currency) return new Intl.NumberFormat(undefined, fractionDigits).format(number);
   return new Intl.NumberFormat(undefined, {
     style: 'currency',
     currency,
-    minimumFractionDigits: number < 0.01 ? 4 : 2,
-    maximumFractionDigits: number < 0.01 ? 6 : 2
+    ...fractionDigits
   }).format(number);
 }
 
 export function statusTone(status?: number | null, errorClass?: string | null) {
   if (errorClass || (status !== null && status !== undefined && status >= 500)) return 'danger';
-  if (status === 429 || (status !== null && status !== undefined && status >= 400)) return 'warning';
+  if (status !== null && status !== undefined && status >= 400) return 'warning';
   if (status !== null && status !== undefined && status >= 200 && status < 400) return 'success';
   return '';
 }

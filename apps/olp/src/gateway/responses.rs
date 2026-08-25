@@ -34,7 +34,7 @@ use crate::{
     },
     public_http::streaming_response::{
         ProtocolStreamEncoder, encode_protocol_sse_frames, encode_server_sse_frame,
-        protocol_streaming_response,
+        precommit_stream_failure, protocol_streaming_response,
     },
 };
 
@@ -75,8 +75,11 @@ pub(super) async fn responses(
     } else {
         TransportMode::Unary
     };
-    let execution = execute_event_operation(&state, &principal, operation, mode).await?;
+    let mut execution = execute_event_operation(&state, &principal, operation, mode).await?;
     if streaming {
+        if let Some(failure) = precommit_stream_failure(&mut execution).await {
+            return Err(failure);
+        }
         Ok(responses_streaming_response(execution))
     } else {
         responses_unary_response(execution).await
@@ -89,6 +92,7 @@ async fn responses_unary_response(execution: RoutedEvents) -> Result<Response, I
         &completed.events,
         completed.route_slug.as_str(),
         &format!("resp_{}", completed.request_id.simple()),
+        unix_seconds(),
     )
     .map_err(|error| InferenceError::bad_gateway("provider_protocol_error", error.to_string()));
     match response {

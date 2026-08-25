@@ -28,6 +28,7 @@
     type RouteSimulation
   } from '$lib/api/management/routes';
   import { listProviderModelInventory } from '$lib/api/management/providers';
+  import { useRole } from '$lib/auth/useRole.svelte';
   import {
     buildCreateRouteDraftInput,
     buildReplaceRouteDraftInput,
@@ -46,6 +47,8 @@
   const resourceId = $derived(routeId ?? '');
   const isNew = $derived(!resourceId);
   const queryClient = useQueryClient();
+  const access = useRole();
+  const canManage = $derived(access.can('routes.manage'));
 
   const draft = createQuery(() => ({
     queryKey: ['route-draft', resourceId],
@@ -162,11 +165,11 @@
 
   async function create(event: SubmitEvent) {
     event.preventDefault();
+    if (!canManage) return;
     const issue = validateRouteEditor(editorValues);
     if (issue) { errorMessage = issue; return; }
     await run('save', async () => {
       const id = await createRouteDraft(buildCreateRouteDraftInput(editorValues, modelOptions));
-      await queryClient.invalidateQueries({ queryKey: ['route-drafts'] });
       await queryClient.invalidateQueries({ queryKey: ['route-draft-page'] });
       sync = initialConcurrentEdit();
       await goto(resolve(`/routes/${id}`));
@@ -174,6 +177,7 @@
   }
 
   async function save(current: RouteDraft) {
+    if (!canManage) return;
     const issue = validateRouteEditor(editorValues);
     if (issue) { errorMessage = issue; return; }
     await run('save', async () => {
@@ -191,6 +195,7 @@
   }
 
   async function simulate(current: RouteDraft) {
+    if (!canManage) return;
     await run('simulate', async () => {
       simulation = await simulateRoute(current.id, {
         operation: simulationOperation,
@@ -203,6 +208,7 @@
   }
 
   async function validate(current: RouteDraft) {
+    if (!canManage) return;
     await run('validate', async () => {
       const validation = await validateRoute(current);
       sync = acceptRemote(sync, validation.etag);
@@ -217,12 +223,12 @@
   }
 
   async function activate(current: RouteDraft) {
+    if (!canManage) return;
     await run('activate', async () => {
       activation = await activateRoute(current);
       notice = `Route activated as revision ${activation.revision} in runtime generation ${activation.runtime_generation.sequence}.`;
       await Promise.all([
         draft.refetch(),
-        queryClient.invalidateQueries({ queryKey: ['route-drafts'] }),
         queryClient.invalidateQueries({ queryKey: ['route-draft-page'] }),
         queryClient.invalidateQueries({ queryKey: ['routes'] }),
         queryClient.invalidateQueries({ queryKey: ['route-page'] })
@@ -231,10 +237,10 @@
   }
 
   async function remove(current: RouteDraft) {
+    if (!canManage) return;
     if (!confirm(`Delete draft “${current.slug}”?`)) return;
     await run('delete', async () => {
       await deleteRouteDraft(current.id, current.etag);
-      await queryClient.invalidateQueries({ queryKey: ['route-drafts'] });
       await queryClient.invalidateQueries({ queryKey: ['route-draft-page'] });
       sync = initialConcurrentEdit();
       await goto(resolve('/routes'));
@@ -246,32 +252,40 @@
 
 <div class="page-header">
   <div><p class="eyebrow">Gateway · Route Studio</p><h1 class="page-title">{isNew ? 'Build a route draft.' : (draft.data?.slug ?? 'Route draft')}</h1><p class="page-description">Set explicit eligibility, deterministic priority and weight, and bounded failover before publishing.</p></div>
-  <div class="page-actions"><a class="button button-secondary" href={resolve('/routes')}>Cancel</a>{#if resourceId && draft.data}<button class="button button-secondary danger-button" type="button" onclick={() => remove(draft.data!)} disabled={Boolean(busy)}>Delete draft</button>{/if}</div>
+  <div class="page-actions"><a class="button button-secondary" href={resolve('/routes')}>{canManage ? 'Cancel' : 'Back to routes'}</a>{#if canManage && resourceId && draft.data}<button class="button button-secondary danger-button" type="button" onclick={() => remove(draft.data!)} disabled={Boolean(busy)}>Delete draft</button>{/if}</div>
 </div>
+{#if !canManage}<p class="read-only-note" role="note">Your role can view this route draft but not change or activate it.</p>{/if}
 {#if errorMessage}<div class="inline-problem" role="alert">{errorMessage}</div>{/if}
 {#if notice}<div class="success-banner" role="status">{notice}</div>{/if}
 <ConflictNotice notice={concurrentNotice} onReload={reload} disabled={Boolean(busy)} />
+{#if !isNew && draft.isError && !draft.data}
+  <div class="inline-problem" role="alert">{message(draft.error)} <button class="button button-secondary" type="button" onclick={() => draft.refetch()}>Retry</button></div>
+{/if}
+<!-- The draft and the enabled-model inventory are independent queries; a failure in one must not blank the other. -->
+{#if providerModels.isError}
+  <div class="inline-problem" role="alert">{message(providerModels.error)} Target selection is unavailable until the model inventory loads. <button class="button button-secondary" type="button" onclick={() => providerModels.refetch()}>Retry</button></div>
+{/if}
 {#if (!isNew && draft.isPending) || providerModels.isPending}
   <div class="loading-state" role="status">Loading Route Studio…</div>
-{:else if (!isNew && draft.isError && !draft.data) || providerModels.isError}
-  <div class="inline-problem" role="alert">{message(draft.error ?? providerModels.error)} <button class="button button-secondary" type="button" onclick={() => { draft.refetch(); providerModels.refetch(); }}>Retry</button></div>
+{:else if (!isNew && !draft.data) || providerModels.isError}
+  <!-- Nothing editable can be rendered without a draft or an inventory. -->
 {:else}
   <form class="studio" onsubmit={isNew ? create : (event) => { event.preventDefault(); if (draft.data) save(draft.data); }}>
     <div class="studio-main">
-      <section class="card editor" aria-labelledby="route-contract-heading"><p class="eyebrow">Public contract</p><h2 id="route-contract-heading">Slug and operations</h2><div class="form-grid"><div class="form-field full"><label for="route-slug">Public model slug</label><input id="route-slug" autocomplete="off" bind:value={slug} oninput={touch} /><small>Clients send this value as their model. Direct provider/model addressing is unavailable.</small></div><fieldset class="form-field full operations"><legend>Supported operations</legend>{#each operationOptions as option (option[0])}<label><input type="checkbox" checked={operations.includes(option[0])} onchange={(event) => toggleOperation(option[0], event.currentTarget.checked)} /> {option[1]}</label>{/each}</fieldset></div></section>
-      <section class="card editor" aria-labelledby="targets-heading"><div class="section-heading"><div><p class="eyebrow">Attempt order</p><h2 id="targets-heading">Eligible targets</h2></div><button class="button button-secondary" type="button" onclick={addTarget} disabled={!modelOptions.length}>Add target</button></div>
+      <section class="card editor" aria-labelledby="route-contract-heading"><p class="eyebrow">Public contract</p><h2 id="route-contract-heading">Slug and operations</h2><div class="form-grid"><div class="form-field full"><label for="route-slug">Public model slug</label><input id="route-slug" autocomplete="off" bind:value={slug} oninput={touch} disabled={!canManage} /><small>Clients send this value as their model. Direct provider/model addressing is unavailable.</small></div><fieldset class="form-field full operations"><legend>Supported operations</legend>{#each operationOptions as option (option[0])}<label><input type="checkbox" checked={operations.includes(option[0])} disabled={!canManage} onchange={(event) => toggleOperation(option[0], event.currentTarget.checked)} /> {option[1]}</label>{/each}</fieldset></div></section>
+      <section class="card editor" aria-labelledby="targets-heading"><div class="section-heading"><div><p class="eyebrow">Attempt order</p><h2 id="targets-heading">Eligible targets</h2></div><button class="button button-secondary" type="button" onclick={addTarget} disabled={!canManage || !modelOptions.length}>Add target</button></div>
         {#if !modelOptions.length}<div class="empty-state compact"><p>No enabled models are available. <a href={resolve('/models')}>Review model eligibility</a>.</p></div>{/if}
         <ol class="targets">
           {#each targets as target, index (index)}
             <li>
               <span class="target-number" aria-hidden="true">{index + 1}</span>
               <div class="target-fields">
-                <div class="form-field model-select"><label for={`target-model-${index}`}>Provider model</label><select id={`target-model-${index}`} bind:value={target.providerModelId} onchange={touch}>{#each modelOptions as option (option.id)}<option value={option.id}>{option.label}</option>{/each}</select></div>
-                <div class="form-field"><label for={`priority-${index}`}>Priority</label><input id={`priority-${index}`} type="number" min="1" max="100" bind:value={target.priority} oninput={touch} /></div>
-                <div class="form-field"><label for={`weight-${index}`}>Weight</label><input id={`weight-${index}`} type="number" min="1" max="10000" bind:value={target.weight} oninput={touch} /></div>
-                <div class="form-field"><label for={`timeout-${index}`}>Attempt timeout (ms)</label><input id={`timeout-${index}`} type="number" min="100" bind:value={target.timeoutMs} oninput={touch} /></div>
+                <div class="form-field model-select"><label for={`target-model-${index}`}>Provider model</label><select id={`target-model-${index}`} bind:value={target.providerModelId} onchange={touch} disabled={!canManage}>{#each modelOptions as option (option.id)}<option value={option.id}>{option.label}</option>{/each}</select></div>
+                <div class="form-field"><label for={`priority-${index}`}>Priority</label><input id={`priority-${index}`} type="number" min="1" max="100" bind:value={target.priority} oninput={touch} disabled={!canManage} /></div>
+                <div class="form-field"><label for={`weight-${index}`}>Weight</label><input id={`weight-${index}`} type="number" min="1" max="10000" bind:value={target.weight} oninput={touch} disabled={!canManage} /></div>
+                <div class="form-field"><label for={`timeout-${index}`}>Attempt timeout (ms)</label><input id={`timeout-${index}`} type="number" min="100" bind:value={target.timeoutMs} oninput={touch} disabled={!canManage} /></div>
               </div>
-              <button class="remove-target" type="button" aria-label={`Remove target ${index + 1}`} onclick={() => removeTarget(index)}>×</button>
+              <button class="remove-target" type="button" aria-label={`Remove target ${index + 1}`} onclick={() => removeTarget(index)} disabled={!canManage}>×</button>
               <div class:warning={missingTargetOperations(target, modelOptions, operations).length > 0} class="target-eligibility">
                 {#if eligibleTargetTuples(target, modelOptions, operations).length}
                   <span><strong>Certified tuples:</strong> {eligibleTargetTuples(target, modelOptions, operations).join(', ')}</span>
@@ -285,9 +299,9 @@
         </ol>
         {#if routeEligibilityWarnings.length}<div class="eligibility-warning" role="status"><strong>Route eligibility is incomplete.</strong><span>No selected target has a certified tuple for: {routeEligibilityWarnings.join(', ')}.</span></div>{/if}
       </section>
-      <section class="card editor advanced" aria-labelledby="advanced-heading"><p class="eyebrow">Advanced</p><h2 id="advanced-heading">Deadline and failover</h2><div class="form-grid"><div class="form-field"><label for="overall-timeout">Overall deadline (ms)</label><input id="overall-timeout" type="number" min="100" bind:value={overallTimeoutMs} oninput={touch} /></div><div class="form-field"><label for="max-attempts">Maximum attempts</label><input id="max-attempts" type="number" min="1" bind:value={maxAttempts} oninput={touch} /></div></div><details><summary>Exactly when will OLP try another target?</summary><p>Only before response bytes are committed, and only for connection/transport failures, configured timeouts, HTTP 429, or HTTP 5xx. There are no hidden SDK retries, hedges, nested routes, or retries after bytes reach the client. Weighted rendezvous ordering is deterministic inside each priority group.</p></details></section>
+      <section class="card editor advanced" aria-labelledby="advanced-heading"><p class="eyebrow">Advanced</p><h2 id="advanced-heading">Deadline and failover</h2><div class="form-grid"><div class="form-field"><label for="overall-timeout">Overall deadline (ms)</label><input id="overall-timeout" type="number" min="100" bind:value={overallTimeoutMs} oninput={touch} disabled={!canManage} /></div><div class="form-field"><label for="max-attempts">Maximum attempts</label><input id="max-attempts" type="number" min="1" bind:value={maxAttempts} oninput={touch} disabled={!canManage} /></div></div><details><summary>Exactly when will OLP try another target?</summary><p>Only before response bytes are committed, and only for connection/transport failures, configured timeouts, HTTP 429, or HTTP 5xx. There are no hidden SDK retries, hedges, nested routes, or retries after bytes reach the client. Weighted rendezvous ordering is deterministic inside each priority group.</p></details></section>
     </div>
-    <aside class="card publish-panel" aria-labelledby="publish-heading"><p class="eyebrow">Draft controls</p><h2 id="publish-heading">Test before activation</h2><p>Saving changes invalidates prior validation. Unsaved edits must be saved before you can simulate or validate them.</p><button class="button button-secondary" type="submit" disabled={Boolean(busy)}>{busy === 'save' ? 'Saving…' : isNew ? 'Create draft' : 'Save draft'}</button>
+    <aside class="card publish-panel" aria-labelledby="publish-heading"><p class="eyebrow">Draft controls</p><h2 id="publish-heading">Test before activation</h2><p>Saving changes invalidates prior validation. Unsaved edits must be saved before you can simulate or validate them.</p><button class="button button-secondary" type="submit" disabled={!canManage || Boolean(busy)}>{busy === 'save' ? 'Saving…' : isNew ? 'Create draft' : 'Save draft'}</button>
       {#if !isNew && draft.data}
         <hr />
         <label for="simulation-operation">Dry-run operation</label>
@@ -298,9 +312,9 @@
         <select id="simulation-mode" bind:value={simulationMode}>{#each modesFor(simulationOperation) as mode (mode)}<option value={mode}>{mode}</option>{/each}</select>
         <label for="simulation-seed">Dry-run seed</label>
         <input id="simulation-seed" bind:value={seed} />
-        <button class="button button-secondary" type="button" onclick={() => simulate(draft.data!)} disabled={Boolean(busy) || sync.dirty}>{busy === 'simulate' ? 'Simulating…' : 'Simulate order'}</button>
-        <button class="button button-secondary" type="button" onclick={() => validate(draft.data!)} disabled={Boolean(busy) || sync.dirty}>{busy === 'validate' ? 'Validating…' : 'Validate draft'}</button>
-        <button class="button button-primary" type="button" onclick={() => activate(draft.data!)} disabled={Boolean(busy) || !validated}>{busy === 'activate' ? 'Activating…' : 'Activate route'}</button>
+        <button class="button button-secondary" type="button" onclick={() => simulate(draft.data!)} disabled={!canManage || Boolean(busy) || sync.dirty}>{busy === 'simulate' ? 'Simulating…' : 'Simulate order'}</button>
+        <button class="button button-secondary" type="button" onclick={() => validate(draft.data!)} disabled={!canManage || Boolean(busy) || sync.dirty}>{busy === 'validate' ? 'Validating…' : 'Validate draft'}</button>
+        <button class="button button-primary" type="button" onclick={() => activate(draft.data!)} disabled={!canManage || Boolean(busy) || !validated}>{busy === 'activate' ? 'Activating…' : 'Activate route'}</button>
       {/if}
       {#if activation}<div class="activation"><strong>Revision {activation.revision} active</strong><span>Runtime generation {activation.runtime_generation.sequence}</span><a href={resolve(`/routes/${activation.route_id}/revisions`)}>View revision history</a></div>{/if}
     </aside>

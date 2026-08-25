@@ -5,6 +5,7 @@
     type ProviderModel
   } from '$lib/api/management/providers';
   import ConflictNotice from '$lib/components/ConflictNotice.svelte';
+  import { formatDate } from '$lib/format';
   import {
     beginReload,
     conflictNotice,
@@ -266,7 +267,7 @@
           >
           · {capability.source}{#if capability.certified_at}
             · <time datetime={capability.certified_at}
-              >{new Date(capability.certified_at).toLocaleString()}</time
+              >{formatDate(capability.certified_at)}</time
             >{/if}</span
         >
       {/each}

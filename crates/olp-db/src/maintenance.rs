@@ -129,7 +129,8 @@ impl Store {
             let attempt_usage_rollup = sqlx::query!(
                 "WITH candidates AS ( \
                SELECT ctid FROM attempt_usage_facts \
-               WHERE observed_at < date_trunc('hour', $1::timestamptz) \
+               WHERE observed_at \
+                     < date_trunc('hour', $1::timestamptz AT TIME ZONE 'UTC') AT TIME ZONE 'UTC' \
                LIMIT $2 FOR UPDATE SKIP LOCKED \
              ), expired AS ( \
                DELETE FROM attempt_usage_facts fact USING candidates \
@@ -151,7 +152,8 @@ impl Store {
               request_unpriced_count, provider_unpriced_count, model_unpriced_count, \
               target_unpriced_count, request_incomplete_count, provider_incomplete_count, \
               model_incomplete_count, target_incomplete_count, currency) \
-             SELECT date_trunc('hour', observed_at), route_slug, provider_id, upstream_model, \
+             SELECT date_trunc('hour', observed_at AT TIME ZONE 'UTC') AT TIME ZONE 'UTC', \
+                    route_slug, provider_id, upstream_model, \
                     operation, surface, api_key_id, \
                     COUNT(*) FILTER (WHERE request_counted), \
                     COUNT(*) FILTER (WHERE provider_request_counted), \
@@ -169,7 +171,8 @@ impl Store {
                     COUNT(*) FILTER (WHERE model_incomplete_counted), \
                     COUNT(*) FILTER (WHERE target_incomplete_counted), MAX(currency) \
              FROM expired \
-             GROUP BY date_trunc('hour', observed_at), route_slug, provider_id, upstream_model, \
+             GROUP BY date_trunc('hour', observed_at AT TIME ZONE 'UTC') AT TIME ZONE 'UTC', \
+                      route_slug, provider_id, upstream_model, \
                       operation, surface, api_key_id \
              ON CONFLICT ON CONSTRAINT attempt_usage_hourly_dimensions_key DO UPDATE SET \
                request_count = attempt_usage_hourly.request_count + EXCLUDED.request_count, \
@@ -243,7 +246,8 @@ impl Store {
             let compatibility_usage_rollup = sqlx::query!(
                 "WITH candidates AS ( \
                SELECT ctid FROM usage_facts \
-               WHERE observed_at < date_trunc('hour', $1::timestamptz) \
+               WHERE observed_at \
+                     < date_trunc('hour', $1::timestamptz AT TIME ZONE 'UTC') AT TIME ZONE 'UTC' \
                LIMIT $2 FOR UPDATE SKIP LOCKED \
              ), expired AS ( \
                DELETE FROM usage_facts fact USING candidates \
@@ -257,14 +261,16 @@ impl Store {
              (bucket, route_slug, provider_id, upstream_model, operation, surface, api_key_id, \
               request_count, input_tokens, output_tokens, cached_input_tokens, media_units, \
               estimated_cost, unpriced_count, incomplete_count, currency) \
-             SELECT date_trunc('hour', observed_at), route_slug, provider_id, upstream_model, \
+             SELECT date_trunc('hour', observed_at AT TIME ZONE 'UTC') AT TIME ZONE 'UTC', \
+                    route_slug, provider_id, upstream_model, \
                     operation, surface, api_key_id, \
                     COUNT(*), COALESCE(SUM(input_tokens), 0), COALESCE(SUM(output_tokens), 0), \
                     COALESCE(SUM(cached_input_tokens), 0), COALESCE(SUM(media_units), 0), \
                     SUM(estimated_cost), COUNT(*) FILTER (WHERE unpriced), \
                     COUNT(*) FILTER (WHERE NOT usage_complete), MAX(currency) \
              FROM expired \
-             GROUP BY date_trunc('hour', observed_at), route_slug, provider_id, upstream_model, \
+             GROUP BY date_trunc('hour', observed_at AT TIME ZONE 'UTC') AT TIME ZONE 'UTC', \
+                      route_slug, provider_id, upstream_model, \
                       operation, surface, api_key_id \
              ON CONFLICT ON CONSTRAINT usage_hourly_dimensions_key DO UPDATE SET \
                request_count = usage_hourly.request_count + EXCLUDED.request_count, \
@@ -373,12 +379,14 @@ impl Store {
              INSERT INTO request_metadata_gap_hourly \
                (bucket, gateway_instance, reason, event_count, uncertain_gap_count, \
                 first_observed_at, last_observed_at) \
-             SELECT date_trunc('hour', first_observed_at), gateway_instance, reason, \
+             SELECT date_trunc('hour', first_observed_at AT TIME ZONE 'UTC') AT TIME ZONE 'UTC', \
+                    gateway_instance, reason, \
                     SUM(event_count), \
                     COUNT(*) FILTER (WHERE certainty = 'lower_bound'::request_metadata_gap_certainty), \
                     MIN(first_observed_at), MAX(last_observed_at) \
              FROM expired \
-             GROUP BY date_trunc('hour', first_observed_at), gateway_instance, reason \
+             GROUP BY date_trunc('hour', first_observed_at AT TIME ZONE 'UTC') AT TIME ZONE 'UTC', \
+                      gateway_instance, reason \
              ON CONFLICT (bucket, gateway_instance, reason) DO UPDATE SET \
                event_count = request_metadata_gap_hourly.event_count + EXCLUDED.event_count, \
                uncertain_gap_count = request_metadata_gap_hourly.uncertain_gap_count \

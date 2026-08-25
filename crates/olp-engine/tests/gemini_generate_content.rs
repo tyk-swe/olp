@@ -190,10 +190,12 @@ fn unary_response_maps_text_tools_usage_and_preserves_thought_and_safety() {
         Kind::Usage { usage } if usage.input_tokens == 10
             && usage.output_tokens == 5 && usage.reasoning_tokens == Some(2)
     )));
+    // Gemini reports STOP alongside functionCall parts; agent loops key on
+    // tool_calls, so the decoder upgrades the reason.
     assert!(events.iter().any(|event| matches!(
         event.kind,
         Kind::Finish {
-            reason: FinishReason::Stop,
+            reason: FinishReason::ToolCalls,
             ..
         }
     )));
@@ -475,4 +477,194 @@ fn native_gemini_stream_losslessly_preserves_safety_and_grounding_metadata() {
         "NEGLIGIBLE"
     );
     assert!(output.get("promptFeedback").is_some());
+}
+
+/// A real-shaped Gemini response: every one of these fields is unmodelled and
+/// swept into a Gemini-surface extension.
+fn realistic_gemini_response() -> GenerateContentResponse {
+    serde_json::from_value(json!({
+        "responseId": "gemini-response-1",
+        "modelVersion": "gemini-2.5-flash",
+        "candidates": [{
+            "index": 0,
+            "content": {"role": "model", "parts": [{"text": "42"}]},
+            "finishReason": "STOP",
+            "avgLogprobs": -0.31,
+            "safetyRatings": [
+                {"category": "HARM_CATEGORY_HATE_SPEECH", "probability": "NEGLIGIBLE"}
+            ],
+            "groundingMetadata": {"webSearchQueries": ["meaning of life"]}
+        }],
+        "usageMetadata": {
+            "promptTokenCount": 10,
+            "candidatesTokenCount": 5,
+            "totalTokenCount": 17,
+            "thoughtsTokenCount": 2,
+            "promptTokensDetails": [{"modality": "TEXT", "tokenCount": 10}]
+        }
+    }))
+    .unwrap()
+}
+
+/// A1: `safetyRatings`, `avgLogprobs`, `groundingMetadata`, and
+/// `promptTokensDetails` are on essentially every real Gemini response, so a
+/// consumer that rejected foreign-surface extensions returned 502 to every
+/// OpenAI or Anthropic client on a Gemini route.
+#[test]
+fn a_real_gemini_response_reaches_anthropic_and_responses_clients() {
+    use olp_engine::protocols::anthropic::client::encode_messages_response;
+    use olp_engine::protocols::openai::client::encode_response_object;
+
+    let events = decode_response(realistic_gemini_response()).unwrap();
+    validate_event_sequence(&events).unwrap();
+    assert!(events.iter().any(|event| matches!(
+        &event.kind,
+        Kind::SourceExtension { extensions } if extensions.source == Some(Surface::Gemini)
+    )));
+
+    let anthropic = encode_messages_response(&events, "team-route", "fallback").unwrap();
+    assert_eq!(anthropic.model, "team-route");
+    assert_eq!(anthropic.stop_reason.as_deref(), Some("end_turn"));
+    // Gemini-only fields are dropped, not leaked onto the Anthropic wire.
+    assert!(anthropic.extra.is_empty());
+
+    let responses = encode_response_object(&events, "team-route", "resp_1", 1_800_000_000).unwrap();
+    let wire = serde_json::to_value(&responses).unwrap();
+    assert_eq!(wire["output"][0]["content"][0]["text"], "42");
+    assert!(wire.get("safetyRatings").is_none());
+}
+
+/// A15: canonical `output_tokens` excludes reasoning and `total_tokens`
+/// includes it, so the client-facing arithmetic has to close on every surface.
+#[test]
+fn gemini_thinking_tokens_keep_the_usage_arithmetic_consistent() {
+    use olp_engine::protocols::openai::client::encode_response_object;
+
+    let events = decode_response(realistic_gemini_response()).unwrap();
+    let usage = events
+        .iter()
+        .find_map(|event| match &event.kind {
+            Kind::Usage { usage } => Some(*usage),
+            _ => None,
+        })
+        .expect("usage must be decoded");
+    assert_eq!(usage.input_tokens, 10);
+    assert_eq!(usage.output_tokens, 5);
+    assert_eq!(usage.reasoning_tokens, Some(2));
+    assert_eq!(
+        usage.total_tokens,
+        usage.input_tokens + usage.output_tokens + usage.reasoning_tokens.unwrap_or(0)
+    );
+
+    // The Responses API counts reasoning inside `output_tokens`, so the wire
+    // numbers still add up for a strict client.
+    let responses = encode_response_object(&events, "team-route", "resp_1", 0).unwrap();
+    let usage = responses.usage.expect("usage must be encoded");
+    assert_eq!(usage.input_tokens, 10);
+    assert_eq!(usage.output_tokens, 7);
+    assert_eq!(usage.total_tokens, 17);
+    assert_eq!(
+        usage
+            .output_tokens_details
+            .map(|details| details.reasoning_tokens),
+        Some(2)
+    );
+}
+
+/// A17: a value Gemini never declares would fail a typed client, but a real
+/// one has to survive.
+#[test]
+fn gemini_finish_reasons_pass_through_only_inside_the_declared_enum() {
+    use olp_engine::domain::canonical::events::{Event, Usage as CanonicalUsage};
+    use olp_engine::protocols::gemini::client::encode_generate_content_response;
+
+    for (reason, expected) in [
+        (FinishReason::Other("LANGUAGE".to_owned()), "LANGUAGE"),
+        (FinishReason::Other("pause_turn".to_owned()), "OTHER"),
+        (FinishReason::Error, "OTHER"),
+        (FinishReason::ToolCalls, "STOP"),
+    ] {
+        let events = vec![
+            Event::new(
+                0,
+                Kind::MessageStart {
+                    output_index: 0,
+                    role: MessageRole::Assistant,
+                },
+            ),
+            Event::new(
+                1,
+                Kind::TextDelta {
+                    output_index: 0,
+                    text: "x".into(),
+                },
+            ),
+            Event::new(
+                2,
+                Kind::Usage {
+                    usage: CanonicalUsage::default(),
+                },
+            ),
+            Event::new(
+                3,
+                Kind::Finish {
+                    output_index: 0,
+                    reason: reason.clone(),
+                },
+            ),
+            Event::new(4, Kind::Done),
+        ];
+        let response = encode_generate_content_response(&events, "route", "fallback").unwrap();
+        assert_eq!(
+            response.candidates[0].finish_reason.as_deref(),
+            Some(expected),
+            "{reason:?} must encode as {expected}"
+        );
+    }
+}
+
+/// A26: `ContentPart::Image` had no MIME field, so `inlineData.mimeType` could
+/// only ever come from a Gemini-surface extension and no OpenAI or Anthropic
+/// vision request was representable on a Gemini target.
+#[test]
+fn a_cross_protocol_vision_request_carries_its_mime_type_to_gemini() {
+    use olp_engine::domain::canonical::requests::{
+        ContentPart, GenerationParameters, GenerationRequest, MediaSource, Message,
+        SourceExtensions,
+    };
+    use olp_engine::domain::ids::RouteSlug;
+
+    let request = GenerationRequest {
+        route: RouteSlug::parse("vision-route".to_owned()).unwrap(),
+        messages: vec![Message {
+            role: MessageRole::User,
+            content: vec![
+                ContentPart::Text {
+                    text: "what is this?".to_owned(),
+                },
+                ContentPart::Image {
+                    source: MediaSource::Uri("https://example.test/cat.png".to_owned()),
+                    detail: None,
+                    mime_type: Some("image/png".to_owned()),
+                },
+            ],
+            name: None,
+            tool_call_id: None,
+            tool_calls: Vec::new(),
+        }],
+        parameters: GenerationParameters::default(),
+        tools: Vec::new(),
+        tool_choice: None,
+        response_format: None,
+        extensions: SourceExtensions::default(),
+    };
+    let wire = serde_json::to_value(encode_request(&request).unwrap()).unwrap();
+    assert_eq!(
+        wire["contents"][0]["parts"][1]["fileData"]["mimeType"],
+        "image/png"
+    );
+    assert_eq!(
+        wire["contents"][0]["parts"][1]["fileData"]["fileUri"],
+        "https://example.test/cat.png"
+    );
 }

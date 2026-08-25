@@ -15,6 +15,7 @@ mod master_key_reencryption_postgres;
 mod media_jobs_postgres;
 mod oidc_flow_postgres;
 mod operations_postgres;
+mod persistence_correctness_postgres;
 mod provider_revisions_postgres;
 mod request_metadata_consumer_health_postgres;
 #[cfg(all(feature = "test-util", debug_assertions))]

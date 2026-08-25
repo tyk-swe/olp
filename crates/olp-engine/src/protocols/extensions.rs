@@ -121,9 +121,18 @@ where
     Ok(())
 }
 
+/// Paths that name a whole array element rather than a field inside one. These
+/// are inserted (shifting later elements) instead of overwriting, and their
+/// parent array is created when the canonical request produced none.
 fn is_array_item_path(path: &str) -> bool {
     let segments = path.trim_start_matches('/').split('/').collect::<Vec<_>>();
-    matches!(segments.as_slice(), ["tools", index] if index.parse::<usize>().is_ok())
+    match segments.as_slice() {
+        ["tools", index] => index.parse::<usize>().is_ok(),
+        ["messages", message, "content", index] | ["contents", message, "parts", index] => {
+            message.parse::<usize>().is_ok() && index.parse::<usize>().is_ok()
+        }
+        _ => false,
+    }
 }
 
 fn array_path_key(path: &str) -> (String, usize) {
@@ -165,6 +174,15 @@ fn set_request_pointer(
                 return Ok(());
             }
             Value::Object(object) => {
+                let next_is_index = segments
+                    .get(position + 1)
+                    .is_some_and(|next| next.parse::<usize>().is_ok());
+                // A request whose canonical form carried no tools at all still
+                // has to accept a `/tools/0` extension: the encoder omits the
+                // empty array, so the container is created on demand.
+                if insert_array_item && next_is_index && !object.contains_key(segment) {
+                    object.insert(segment.clone(), Value::Array(Vec::new()));
+                }
                 current = object.get_mut(segment).ok_or_else(invalid_path)?;
             }
             Value::Array(array) => {
@@ -388,6 +406,55 @@ mod tests {
             ])
         );
         assert_eq!(request["metadata"]["vendor"], "preserved");
+    }
+
+    #[test]
+    fn array_item_extensions_create_a_container_the_encoder_omitted() {
+        // A request whose only tool is a server-side one has an empty canonical
+        // `tools`, and the encoder skips serializing an empty array.
+        let mut request = json!({"model": "upstream"});
+        apply_request_extensions(
+            &mut request,
+            &BTreeMap::from([(
+                "/tools/0".to_owned(),
+                json!({"type": "web_search_20250305", "name": "web_search"}),
+            )]),
+        )
+        .ok()
+        .unwrap();
+        assert_eq!(request["tools"][0]["type"], "web_search_20250305");
+
+        // Message content items insert rather than overwrite, in index order.
+        let mut request = json!({"messages": [{"content": [{"type": "text"}]}]});
+        apply_request_extensions(
+            &mut request,
+            &BTreeMap::from([
+                (
+                    "/messages/0/content/0".to_owned(),
+                    json!({"type": "thinking"}),
+                ),
+                (
+                    "/messages/0/content/2".to_owned(),
+                    json!({"type": "trailing"}),
+                ),
+            ]),
+        )
+        .ok()
+        .unwrap();
+        assert_eq!(
+            request["messages"][0]["content"],
+            json!([{"type": "thinking"}, {"type": "text"}, {"type": "trailing"}])
+        );
+
+        // A field path into a container that does not exist still fails closed.
+        let mut request = json!({"model": "upstream"});
+        assert!(matches!(
+            apply_request_extensions(
+                &mut request,
+                &BTreeMap::from([("/tools/0/name".to_owned(), json!("web_search"))]),
+            ),
+            Err(PointerExtensionError::InvalidPath(path)) if path == "/tools/0/name"
+        ));
     }
 
     #[test]

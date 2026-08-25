@@ -282,17 +282,17 @@ impl RuntimeOutboxLeader {
             },
         )
         .await?;
+        // Taking over from a dead owner is not publishing progress. Advancing
+        // last_progress_at here would make a publisher that crash-loops before
+        // it ever publishes look continuously healthy, and no-progress alerts
+        // would never fire. Only a real publication moves that clock.
         sqlx::query!(
             "INSERT INTO runtime_outbox_health \
                (singleton, owner_active, claimed_rows, checked_at, last_progress_at) \
-             VALUES (true, true, 0, clock_timestamp(), \
-                     CASE WHEN $1 THEN clock_timestamp() ELSE NULL END) \
+             VALUES (true, true, 0, clock_timestamp(), NULL) \
              ON CONFLICT (singleton) DO UPDATE SET \
                owner_active = true, claimed_rows = 0, checked_at = EXCLUDED.checked_at, \
-               last_progress_at = CASE WHEN $1 \
-                 THEN GREATEST(runtime_outbox_health.last_progress_at, EXCLUDED.last_progress_at) \
-                 ELSE runtime_outbox_health.last_progress_at END",
-            abandoned,
+               last_progress_at = runtime_outbox_health.last_progress_at"
         )
         .execute(&mut *transaction)
         .await?;
@@ -300,7 +300,7 @@ impl RuntimeOutboxLeader {
             &mut transaction,
             WorkerTask::RuntimeOutbox,
             WorkerTaskCheckpointOutcome::Success,
-            abandoned,
+            false,
         )
         .await?;
         transaction.commit().await?;

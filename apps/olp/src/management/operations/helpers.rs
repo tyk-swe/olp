@@ -7,22 +7,17 @@ use utoipa::IntoParams;
 
 use crate::{management::error_mapping::map_persistence, public_http::problem::Problem};
 
+// One page-size contract for every management collection.
+pub(super) use crate::management::pagination::page_limit;
+
 #[derive(Debug, Deserialize, IntoParams)]
 #[into_params(parameter_in = Query)]
 pub(super) struct PageQuery {
+    /// Opaque cursor returned by the previous page.
     pub(super) cursor: Option<String>,
+    /// Page size, from 1 to 200. Defaults to 50.
+    #[param(minimum = 1, maximum = 200)]
     pub(super) limit: Option<u16>,
-}
-
-pub(super) fn page_limit(value: Option<u16>) -> Result<u16, Problem> {
-    let value = value.unwrap_or(50);
-    if (1..=200).contains(&value) {
-        return Ok(value);
-    }
-    Err(Problem::field_validation(
-        "limit",
-        "Use a page size between 1 and 200.",
-    ))
 }
 
 pub(super) fn timestamp_cursor(value: Option<&str>) -> Result<Option<Timestamp>, Problem> {

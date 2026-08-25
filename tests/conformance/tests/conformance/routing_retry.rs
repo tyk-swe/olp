@@ -98,6 +98,7 @@ fn retry_taxonomy_only_allows_precommit_transient_failures() {
     assert!(!cases.is_empty());
     for case in cases {
         let error = TransportError {
+            upstream: Default::default(),
             phase: case.phase,
             class: case.class,
             response_committed: case.response_committed,

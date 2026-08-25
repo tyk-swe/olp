@@ -38,6 +38,7 @@
   let {
     current,
     busy,
+    canManage,
     run,
     reloadVersion,
     pageState = $bindable(),
@@ -47,6 +48,7 @@
   }: {
     current: Provider;
     busy: string;
+    canManage: boolean;
     run: RunProviderAction;
     reloadVersion: number;
     pageState: CursorHistory;
@@ -105,6 +107,7 @@
   }
 
   async function discover() {
+    if (!canManage) return;
     await run('detail-discover', async () => {
       const updated = await discoverProviderModels(current);
       certificationResults = {};
@@ -117,6 +120,7 @@
   }
 
   async function declareModels() {
+    if (!canManage) return;
     const names = parseManualModelNames(manualModelNames);
     if (!names.length) {
       onError('Enter at least one upstream model identifier.');
@@ -197,13 +201,15 @@
       class="button button-secondary"
       type="button"
       onclick={discover}
-      disabled={Boolean(busy)}
+      disabled={!canManage || Boolean(busy)}
       >{busy === 'detail-discover'
         ? 'Discovering…'
         : 'Run upstream discovery'}</button
     >
   </div>
-  {#if current.kind === 'openai_compatible'}<details class="manual-fallback">
+  {#if canManage && current.kind === 'openai_compatible'}<details
+      class="manual-fallback"
+    >
       <summary>Manual model identifiers</summary>
       <p>
         Use only if this compatible endpoint has no list API. Models remain
@@ -220,7 +226,7 @@
         class="button button-secondary"
         type="button"
         onclick={declareModels}
-        disabled={Boolean(busy)}
+        disabled={!canManage || Boolean(busy)}
         >{busy === 'detail-declare'
           ? 'Adding…'
           : 'Add identifiers for review'}</button
@@ -262,7 +268,7 @@
                   options={capabilityOptions.data?.capabilities ?? []}
                   optionsPending={capabilityOptions.isPending}
                   optionsError={capabilityOptions.isError}
-                  disabled={Boolean(busy)}
+                  disabled={!canManage || Boolean(busy)}
                   {reloadVersion}
                   onSave={(enabled, capabilities, providerEtag) =>
                     reviewModel(
@@ -277,7 +283,9 @@
                     class="button button-secondary"
                     type="button"
                     onclick={() => certifyModel(modelPage.provider, model.id)}
-                    disabled={Boolean(busy) || !model.capabilities.length}
+                    disabled={!canManage ||
+                      Boolean(busy) ||
+                      !model.capabilities.length}
                     >{busy === `certify-${model.id}`
                       ? 'Server-certifying…'
                       : 'Server-certify capabilities'}</button

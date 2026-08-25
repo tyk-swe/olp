@@ -15,7 +15,7 @@ use olp_engine::protocols::openai::chat::{CompletionRequest, decode};
 use crate::{
     bootstrap::mode_dependencies::GatewayState,
     public_http::json_media::{admit_openai_chat, cleanup_admitted},
-    public_http::streaming_response::{TerminalFrames, sse_stream},
+    public_http::streaming_response::{TerminalFrames, precommit_stream_failure, sse_stream},
 };
 
 use super::{
@@ -40,6 +40,14 @@ pub(super) async fn chat_completions(
     };
     let admitted = admit_openai_chat(&state, &mut wire_request).await?;
     let streaming = wire_request.stream;
+    // OpenAI only appends the trailing usage-only chunk when the client asked
+    // for it. The upstream request always sets it so accounting stays exact.
+    let include_usage = wire_request
+        .extra
+        .get("stream_options")
+        .and_then(|options| options.get("include_usage"))
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false);
     let operation = match decode::chat_completion(wire_request) {
         Ok(operation) => operation,
         Err(error) => {
@@ -52,15 +60,18 @@ pub(super) async fn chat_completions(
     } else {
         TransportMode::Unary
     };
-    let execution = execute_event_operation(&state, &principal, operation, mode).await?;
+    let mut execution = execute_event_operation(&state, &principal, operation, mode).await?;
     if streaming {
-        Ok(streaming_response(execution))
+        if let Some(failure) = precommit_stream_failure(&mut execution).await {
+            return Err(failure);
+        }
+        Ok(streaming_response(execution, include_usage))
     } else {
         unary_response(execution).await
     }
 }
 
-fn streaming_response(mut execution: RoutedEvents) -> Response {
+fn streaming_response(mut execution: RoutedEvents, include_usage: bool) -> Response {
     let (writer, response) = sse_stream();
     tokio::spawn(async move {
         let mut accounting = execution.take_accounting();
@@ -68,6 +79,7 @@ fn streaming_response(mut execution: RoutedEvents) -> Response {
         let mut encoder = OpenAiChatCompletionStreamEncoder::new(
             execution.request_id,
             execution.route_slug.as_str(),
+            include_usage,
         );
         let mut next = Some(Ok(execution.first.clone()));
         let mut failure = None;

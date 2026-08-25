@@ -1,12 +1,12 @@
 //! Shared request metadata and error construction for native HTTP transports.
 
-use std::{collections::BTreeMap, fmt};
+use std::{collections::BTreeMap, fmt, time::Duration};
 
 use crate::domain::{
     canonical::{identity::Surface, requests::SourceExtensions},
-    ports::{AttemptFailureClass, TransportError, TransportPhase},
+    ports::{AttemptFailureClass, TransportError, TransportPhase, UpstreamSignal},
 };
-use http::{HeaderValue, StatusCode};
+use http::{HeaderMap, HeaderValue, StatusCode};
 use zeroize::Zeroizing;
 
 use crate::providers::transport_io::ProviderResponseIo;
@@ -141,11 +141,83 @@ pub(in crate::providers) fn transport_error(
     message: impl Into<String>,
 ) -> TransportError {
     TransportError {
+        upstream: Default::default(),
         phase,
         class,
         response_committed,
         message: message.into(),
     }
+}
+
+/// Classifies an upstream HTTP error response and keeps its status and
+/// `Retry-After` so the public status code and retry hint match the provider
+/// instead of collapsing to a blanket 502 with no backoff signal.
+pub(in crate::providers) fn upstream_response_error(
+    phase: TransportPhase,
+    status: StatusCode,
+    headers: &HeaderMap,
+    message: impl Into<String>,
+) -> TransportError {
+    let mut error = transport_error(phase, upstream_failure_class(status), false, message);
+    error.upstream =
+        UpstreamSignal::from_status(status.as_u16()).with_retry_after(parse_retry_after(headers));
+    error
+}
+
+pub(in crate::providers) fn upstream_failure_class(status: StatusCode) -> AttemptFailureClass {
+    if status == StatusCode::REQUEST_TIMEOUT {
+        AttemptFailureClass::Timeout
+    } else if status == StatusCode::TOO_MANY_REQUESTS {
+        AttemptFailureClass::RateLimit
+    } else if status.is_server_error() {
+        AttemptFailureClass::UpstreamServer
+    } else {
+        AttemptFailureClass::UpstreamClient
+    }
+}
+
+/// Parses RFC 9110 `Retry-After` in both of its forms. A date in the past is
+/// zero, not an error, and anything unparsable is simply absent.
+pub(in crate::providers) fn parse_retry_after(headers: &HeaderMap) -> Option<Duration> {
+    let value = headers
+        .get(http::header::RETRY_AFTER)?
+        .to_str()
+        .ok()?
+        .trim();
+    if value.is_empty() {
+        return None;
+    }
+    if let Ok(seconds) = value.parse::<u64>() {
+        return Some(Duration::from_secs(seconds));
+    }
+    let deadline = httpdate_seconds(value)?;
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()?
+        .as_secs();
+    Some(Duration::from_secs(deadline.saturating_sub(now)))
+}
+
+/// Minimal IMF-fixdate reader. Providers emit exactly this form; the obsolete
+/// RFC 850 and asctime spellings are treated as absent rather than guessed at.
+fn httpdate_seconds(value: &str) -> Option<u64> {
+    const MONTHS: [&str; 12] = [
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+    ];
+    let value = value.strip_suffix(" GMT")?;
+    let (_, rest) = value.split_once(", ")?;
+    let mut parts = rest.split(' ');
+    let day: u32 = parts.next()?.parse().ok()?;
+    let month_name = parts.next()?;
+    let month = MONTHS.iter().position(|name| *name == month_name)? + 1;
+    let year: i32 = parts.next()?.parse().ok()?;
+    let mut clock = parts.next()?.split(':');
+    let hour: u32 = clock.next()?.parse().ok()?;
+    let minute: u32 = clock.next()?.parse().ok()?;
+    let second: u32 = clock.next()?.parse().ok()?;
+    let date = chrono::NaiveDate::from_ymd_opt(year, u32::try_from(month).ok()?, day)?
+        .and_hms_opt(hour, minute, second)?;
+    u64::try_from(date.and_utc().timestamp()).ok()
 }
 
 pub(in crate::providers) const MAX_INLINE_MEDIA_BYTES: usize = 1024 * 1024;
@@ -362,5 +434,75 @@ mod tests {
             read_inline_media(&marker, Some(&spool)).await.unwrap(),
             "YWJj"
         );
+    }
+
+    fn headers_with_retry_after(value: &str) -> HeaderMap {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            http::header::RETRY_AFTER,
+            http::HeaderValue::from_str(value).unwrap(),
+        );
+        headers
+    }
+
+    #[test]
+    fn retry_after_reads_delta_seconds_and_http_dates() {
+        assert_eq!(
+            super::parse_retry_after(&headers_with_retry_after("60")),
+            Some(Duration::from_secs(60))
+        );
+        assert_eq!(
+            super::parse_retry_after(&headers_with_retry_after(" 0 ")),
+            Some(Duration::ZERO)
+        );
+        // A date already in the past means "retry now", not "unparsable".
+        assert_eq!(
+            super::parse_retry_after(&headers_with_retry_after("Wed, 21 Oct 2015 07:28:00 GMT")),
+            Some(Duration::ZERO)
+        );
+        let future =
+            super::parse_retry_after(&headers_with_retry_after("Fri, 01 Jan 2100 00:00:00 GMT"))
+                .expect("a future IMF-fixdate parses");
+        assert!(future > Duration::from_secs(60));
+
+        for unparsable in ["", "  ", "soon", "-5", "Fri, 32 Xxx 2100 00:00:00 GMT"] {
+            assert_eq!(
+                super::parse_retry_after(&headers_with_retry_after(unparsable)),
+                None,
+                "{unparsable:?}"
+            );
+        }
+        assert_eq!(super::parse_retry_after(&HeaderMap::new()), None);
+    }
+
+    #[test]
+    fn an_upstream_response_error_keeps_its_status_and_class() {
+        for (status, class) in [
+            (StatusCode::BAD_REQUEST, AttemptFailureClass::UpstreamClient),
+            (
+                StatusCode::UNAUTHORIZED,
+                AttemptFailureClass::UpstreamClient,
+            ),
+            (StatusCode::REQUEST_TIMEOUT, AttemptFailureClass::Timeout),
+            (
+                StatusCode::TOO_MANY_REQUESTS,
+                AttemptFailureClass::RateLimit,
+            ),
+            (
+                StatusCode::SERVICE_UNAVAILABLE,
+                AttemptFailureClass::UpstreamServer,
+            ),
+        ] {
+            let error = super::upstream_response_error(
+                TransportPhase::FirstByte,
+                status,
+                &headers_with_retry_after("30"),
+                "provider said no",
+            );
+            assert_eq!(error.class, class, "{status}");
+            assert_eq!(error.upstream.status, Some(status.as_u16()));
+            assert_eq!(error.upstream.retry_after, Some(Duration::from_secs(30)));
+            assert!(!error.response_committed);
+        }
     }
 }

@@ -13,7 +13,10 @@ use crate::{
     store::Store,
 };
 
-use super::{Error, PasswordSessionRotation, SessionRecord, UserRecord, insert_audit, parse_role};
+use super::{
+    Error, PasswordSessionRotation, SessionRecord, UserRecord, insert_audit,
+    invitations::retire_invitations_on_access_loss, parse_role,
+};
 
 const MAX_PAGE_SIZE: i64 = 100;
 
@@ -86,6 +89,9 @@ impl Store {
             .execute(&mut *transaction)
             .await?
             .rows_affected();
+        let retired =
+            retire_invitations_on_access_loss(&mut transaction, id, role, row.active, actor)
+                .await?;
         insert_audit(
             &mut transaction,
             actor,
@@ -94,6 +100,16 @@ impl Store {
             &id.to_string(),
         )
         .await?;
+        if retired > 0 {
+            insert_audit(
+                &mut transaction,
+                actor,
+                "invitation.revoke_for_role_change",
+                "user",
+                &id.to_string(),
+            )
+            .await?;
+        }
         if revoked > 0 {
             insert_audit(
                 &mut transaction,
@@ -150,6 +166,14 @@ impl Store {
             .execute(&mut *transaction)
             .await?
             .rows_affected();
+        let retired = retire_invitations_on_access_loss(
+            &mut transaction,
+            id,
+            parse_role(row.role.clone())?,
+            row.active,
+            actor,
+        )
+        .await?;
         insert_audit(
             &mut transaction,
             actor,
@@ -158,6 +182,16 @@ impl Store {
             &id.to_string(),
         )
         .await?;
+        if retired > 0 {
+            insert_audit(
+                &mut transaction,
+                actor,
+                "invitation.revoke_for_access_change",
+                "user",
+                &id.to_string(),
+            )
+            .await?;
+        }
         if revoked > 0 {
             insert_audit(
                 &mut transaction,

@@ -374,6 +374,15 @@ pub async fn reserve(
         .map(|value| i64::try_from(value.get()))
         .transpose()
         .map_err(|_| InferenceError::unavailable("limit_configuration_invalid"))?;
+    let requested_tokens = estimate_tokens(operation);
+    if let Some(limit) = tokens_per_minute
+        && requested_tokens > limit
+    {
+        return Err(InferenceError::request_exceeds_token_limit(
+            requested_tokens,
+            limit,
+        ));
+    }
     let result = tokio::time::timeout(
         Duration::from_secs(1),
         limiter.reserve(LimitRequest {
@@ -384,7 +393,7 @@ pub async fn reserve(
                 .map(|value| i64::from(value.get())),
             tokens_per_minute,
             max_concurrency: key.limits.concurrency.map(|value| i64::from(value.get())),
-            requested_tokens: estimate_tokens(operation),
+            requested_tokens,
             lease_ttl,
         }),
     )

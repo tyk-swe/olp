@@ -13,12 +13,14 @@
     cursorPaginationProps,
     emptyCursorHistory
   } from '$lib/api/pagination';
-  import { FIXED_ROLES, can } from '$lib/auth/authorization';
-  import { authLifecycle } from '$lib/auth/lifecycle';
+  import { FIXED_ROLES } from '$lib/auth/authorization';
+  import { useRole } from '$lib/auth/useRole.svelte';
   import CursorPagination from '$lib/components/CursorPagination.svelte';
   import SecretDialog from '$lib/components/SecretDialog.svelte';
+  import { formatDate } from '$lib/format';
 
-  const canManage = can(authLifecycle.snapshot().user?.role, 'users.manage');
+  const access = useRole();
+  const canManage = $derived(access.can('users.manage'));
   const pagination = $state(emptyCursorHistory());
   let busy = $state('');
   let error = $state('');
@@ -52,6 +54,7 @@
 
   async function invite(event: SubmitEvent) {
     event.preventDefault();
+    if (!canManage) return;
     if (!email.trim() || !email.includes('@')) {
       error = 'Enter a valid email address.';
       return;
@@ -96,7 +99,7 @@
   <SecretDialog
     eyebrow="Invitation created"
     title="Copy the invitation link now."
-    description={`The token is displayed once and expires at ${new Date(invitationSecret.invitation.expires_at).toLocaleString()}.`}
+    description={`The token is displayed once and expires at ${formatDate(invitationSecret.invitation.expires_at)}.`}
     onClose={() => {
       invitationSecret = null;
       copied = false;
@@ -142,17 +145,18 @@
     <h2 id="invite-heading">Invite by email</h2>
     <p>The acceptance token is shown once. No email service is required.</p>
   </div>
-  <form onsubmit={invite}>
+  <form onsubmit={invite} novalidate>
     <label
       ><span>Email address</span><input
         type="email"
         autocomplete="email"
         bind:value={email}
         placeholder="person@example.com"
+        disabled={!canManage}
       /></label
     >
     <label
-      ><span>Role</span><select bind:value={role}
+      ><span>Role</span><select bind:value={role} disabled={!canManage}
         >{#each FIXED_ROLES as fixedRole (fixedRole)}<option value={fixedRole}
             >{fixedRole}</option
           >{/each}</select
@@ -201,7 +205,7 @@
                 class="badge">{invitation.status}</span
               ></td
             >
-            <td>{new Date(invitation.expires_at).toLocaleString()}</td>
+            <td>{formatDate(invitation.expires_at)}</td>
             <td
               >{#if canManage && invitation.status === 'pending'}<button
                   class="button button-secondary danger-button"

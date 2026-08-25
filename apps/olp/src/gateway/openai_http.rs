@@ -16,15 +16,21 @@ pub(super) fn error_sse(error: &InferenceError) -> Bytes {
     }}))
 }
 
+/// OpenAI publishes a closed set of `error.type` values. Inventing new ones
+/// (`upstream_error`, `internal_error`, `timeout_error`, …) means every client
+/// that branches on the type falls through its own error handling, so a
+/// server-side fault is reported as OpenAI reports one and the specific cause
+/// stays in `error.code`.
 pub(super) fn error_type(class: ErrorClass) -> &'static str {
     match class {
         ErrorClass::Authentication => "authentication_error",
         ErrorClass::Authorization => "permission_error",
         ErrorClass::InvalidRequest => "invalid_request_error",
         ErrorClass::RateLimit => "rate_limit_error",
-        ErrorClass::Timeout => "timeout_error",
-        ErrorClass::Transport | ErrorClass::Upstream => "upstream_error",
-        ErrorClass::Internal => "internal_error",
+        ErrorClass::Timeout
+        | ErrorClass::Transport
+        | ErrorClass::Upstream
+        | ErrorClass::Internal => "server_error",
     }
 }
 
@@ -59,10 +65,10 @@ mod tests {
             (ErrorClass::Authorization, "permission_error"),
             (ErrorClass::InvalidRequest, "invalid_request_error"),
             (ErrorClass::RateLimit, "rate_limit_error"),
-            (ErrorClass::Timeout, "timeout_error"),
-            (ErrorClass::Transport, "upstream_error"),
-            (ErrorClass::Upstream, "upstream_error"),
-            (ErrorClass::Internal, "internal_error"),
+            (ErrorClass::Timeout, "server_error"),
+            (ErrorClass::Transport, "server_error"),
+            (ErrorClass::Upstream, "server_error"),
+            (ErrorClass::Internal, "server_error"),
         ] {
             assert_eq!(error_type(class), expected);
         }
@@ -84,7 +90,8 @@ mod tests {
         let payload = text.strip_prefix("data: ").unwrap().trim();
         let payload: Value = serde_json::from_str(payload).unwrap();
         assert_eq!(payload["error"]["message"], "The video job changed.");
-        assert_eq!(payload["error"]["type"], "conflict_error");
+        // OpenAI has no `conflict_error` type; the specific cause lives in `code`.
+        assert_eq!(payload["error"]["type"], "invalid_request_error");
         assert_eq!(payload["error"]["code"], "video_changed");
         assert!(payload["error"]["param"].is_null());
     }

@@ -508,13 +508,21 @@ impl Store {
 
         let target_rows_raw = sqlx::query_as!(
             RouteRevisionTargetRow,
-            "SELECT rrt.route_revision_id, rrt.id, rrt.routing_id, rrt.provider_model_id, p.id AS provider_id, pr.name AS provider_name, \
-                    prm.upstream_model AS provider_model, rrt.priority, rrt.weight, rrt.timeout_ms, rrt.position \
+            // Revisions are immutable history. Read the target list from the
+            // revision itself and join the provider's current revision only to
+            // decorate availability, so a target whose model left that revision
+            // is reported as unavailable instead of silently disappearing.
+            "SELECT rrt.route_revision_id, rrt.id, rrt.routing_id, rrt.provider_model_id, \
+                    p.id AS provider_id, COALESCE(pr.name, p.name) AS \"provider_name!\", \
+                    COALESCE(prm.upstream_model, pm.upstream_model) AS \"provider_model!\", \
+                    (p.state <> 'disabled'::provider_state AND prm.id IS NOT NULL \
+                     AND COALESCE(prm.enabled, false)) AS \"available!\", \
+                    rrt.priority, rrt.weight, rrt.timeout_ms, rrt.position \
              FROM route_revision_targets rrt \
              JOIN provider_models pm ON pm.id = rrt.provider_model_id \
              JOIN providers p ON p.id = pm.provider_id \
-             JOIN provider_revisions pr ON pr.id = p.active_revision_id \
-             JOIN provider_revision_models prm ON prm.provider_revision_id = pr.id \
+             LEFT JOIN provider_revisions pr ON pr.id = p.active_revision_id \
+             LEFT JOIN provider_revision_models prm ON prm.provider_revision_id = pr.id \
                AND prm.source_provider_model_id = pm.id \
              WHERE rrt.route_revision_id = ANY($1::uuid[]) ORDER BY rrt.route_revision_id, rrt.position",
             revision_ids
@@ -702,16 +710,26 @@ async fn draft_targets(pool: &sqlx::PgPool, id: Uuid) -> Result<Vec<RouteTargetR
     Ok(target_rows(
         sqlx::query_as!(
             RouteTargetRow,
-            "SELECT rdt.id, rdt.routing_id, rdt.provider_model_id, p.id AS provider_id, pr.name AS provider_name, \
-                    prm.upstream_model AS provider_model, rdt.priority, rdt.weight, rdt.timeout_ms, rdt.position \
+            // A draft read must return every stored target: the console writes
+            // back what it reads, so a target hidden by an inner join would be
+            // deleted by the next replace. Availability is decoration only.
+            "SELECT rdt.id, rdt.routing_id, rdt.provider_model_id, p.id AS provider_id, \
+                    COALESCE(pr.name, p.name) AS \"provider_name!\", \
+                    COALESCE(prm.upstream_model, pm.upstream_model) AS \"provider_model!\", \
+                    (p.state <> 'disabled'::provider_state AND prm.id IS NOT NULL \
+                     AND COALESCE(prm.enabled, false)) AS \"available!\", \
+                    rdt.priority, rdt.weight, rdt.timeout_ms, rdt.position \
              FROM route_draft_targets rdt \
              JOIN provider_models pm ON pm.id = rdt.provider_model_id \
              JOIN providers p ON p.id = pm.provider_id \
-             JOIN provider_revisions pr ON pr.id = p.active_revision_id \
-             JOIN provider_revision_models prm ON prm.provider_revision_id = pr.id \
+             LEFT JOIN provider_revisions pr ON pr.id = p.active_revision_id \
+             LEFT JOIN provider_revision_models prm ON prm.provider_revision_id = pr.id \
                AND prm.source_provider_model_id = pm.id \
              WHERE rdt.route_draft_id = $1 ORDER BY rdt.position",
-        id).fetch_all(pool).await?
+            id
+        )
+        .fetch_all(pool)
+        .await?,
     ))
 }
 
@@ -723,6 +741,7 @@ struct RouteTargetRow {
     provider_id: Uuid,
     provider_name: String,
     provider_model: String,
+    available: bool,
     priority: i32,
     weight: i32,
     timeout_ms: i32,
@@ -738,6 +757,7 @@ struct RouteRevisionTargetRow {
     provider_id: Uuid,
     provider_name: String,
     provider_model: String,
+    available: bool,
     priority: i32,
     weight: i32,
     timeout_ms: i32,
@@ -755,6 +775,7 @@ impl RouteRevisionTargetRow {
                 provider_id: self.provider_id,
                 provider_name: self.provider_name,
                 upstream_model: self.provider_model,
+                available: self.available,
                 priority: self.priority,
                 weight: self.weight,
                 timeout_ms: self.timeout_ms,
@@ -773,6 +794,7 @@ fn target_rows(rows: Vec<RouteTargetRow>) -> Vec<RouteTargetRecord> {
             provider_id: row.provider_id,
             provider_name: row.provider_name,
             upstream_model: row.provider_model,
+            available: row.available,
             priority: row.priority,
             weight: row.weight,
             timeout_ms: row.timeout_ms,

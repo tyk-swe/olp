@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { resolve } from '$app/paths';
+  import { useRole } from '$lib/auth/useRole.svelte';
   import InvitationsPanel from './invitations/InvitationsPanel.svelte';
   import OidcConfigurationPanel from './oidc/OidcConfigurationPanel.svelte';
   import SessionsPanel from './sessions/SessionsPanel.svelte';
@@ -12,6 +12,8 @@
     { id: 'sessions', label: 'Sessions' },
     { id: 'oidc', label: 'OIDC' }
   ];
+  const access = useRole();
+  const canManage = $derived(access.can('users.manage'));
   let tab = $state<Tab>('members');
 </script>
 
@@ -26,14 +28,13 @@
       linked OIDC provider.
     </p>
   </div>
-  <a
-    class="button button-primary"
-    href={resolve('/access')}
-    onclick={(event) => {
-      event.preventDefault();
-      tab = 'invitations';
-    }}>Invite member</a
-  >
+  {#if canManage}
+    <button
+      class="button button-primary"
+      type="button"
+      onclick={() => (tab = 'invitations')}>Invite member</button
+    >
+  {/if}
 </div>
 
 <nav class="tabs" aria-label="Access settings">

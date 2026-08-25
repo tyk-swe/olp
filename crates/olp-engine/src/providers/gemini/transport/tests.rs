@@ -126,6 +126,7 @@ fn attempt(
             generation_id: RuntimeGenerationId::new(),
             route_id: RouteId::new(),
             target_id: TargetId::new(),
+            routing_id: TargetId::new(),
             provider_id: ProviderId::new(),
             provider_kind: ProviderKind::Gemini,
             upstream_model: "gemini-2.5-flash".into(),
@@ -237,6 +238,7 @@ fn image(source: MediaSource, detail: Option<&str>) -> ContentPart {
     ContentPart::Image {
         source,
         detail: detail.map(str::to_owned),
+        mime_type: None,
     }
 }
 

@@ -9,7 +9,7 @@ use axum::{
 use chrono::{DateTime, Utc};
 use olp_db::{
     access::NewApiKeyRecord, idempotency::Replayable, idempotency::Response as IdempotencyResponse,
-    idempotency::fingerprint,
+    idempotency::fingerprint, idempotency::operations,
 };
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
@@ -17,10 +17,10 @@ use uuid::Uuid;
 
 use crate::management::{
     error_mapping::{map_access, map_persistence},
-    idempotency::{idempotency_http_response, require_idempotency_key},
+    idempotency::{ReplayableMutation, idempotency_http_response, require_idempotency_key},
     json_payload::json_payload,
     permissions::require_key_manager,
-    preconditions::{if_match, with_etag},
+    preconditions::if_match,
     response_policy::RuntimeGenerationResponse,
     secrets::WriteOnlySecret,
     sessions::require_mutation_session,
@@ -76,7 +76,8 @@ impl fmt::Debug for CreateApiKeyResponse {
     request_body = CreateApiKeyRequest,
     params(("Idempotency-Key" = String, Header, description = "Unique creation key")),
     responses(
-        (status = 201, description = "API key created; secret is shown once", body = CreateApiKeyResponse),
+        (status = 201, description = "API key created; secret is shown once", body = CreateApiKeyResponse, headers(("Location" = String, description = "Path of the created resource"))),
+        (status = 400, description = "Idempotency-Key is missing or invalid", body = Problem),
         (status = 403, description = "Insufficient role, CSRF, or origin failure", body = Problem),
         (status = 409, description = "Idempotency conflict or operation in progress", body = Problem),
         (status = 422, description = "Validation failed", body = Problem),
@@ -130,6 +131,9 @@ pub(crate) async fn create_api_key(
                     },
                     Some(format!("\"{}\"", created.etag)),
                 )
+                .and_then(|response| {
+                    response.with_location(format!("/api/v1/api-keys/{}", created.id))
+                })
             },
         )
         .await
@@ -147,8 +151,10 @@ pub(crate) async fn create_api_key(
         ("Idempotency-Key" = String, Header, description = "Unique revocation key")
     ),
     responses(
-        (status = 200, description = "API key revoked and new runtime published", body = RuntimeGenerationResponse),
+        (status = 200, description = "API key revoked and new runtime published; an identical retry replays this response", body = RuntimeGenerationResponse),
+        (status = 400, description = "Idempotency-Key is missing or invalid", body = Problem),
         (status = 404, description = "API key not found", body = Problem),
+        (status = 409, description = "Idempotency-Key was already used or is in progress", body = Problem),
         (status = 412, description = "ETag mismatch", body = Problem)
     )
 )]
@@ -159,19 +165,36 @@ pub(crate) async fn revoke_api_key(
 ) -> Result<Response, Problem> {
     let principal = require_mutation_session(&state, &headers).await?;
     require_key_manager(&principal)?;
-    let idempotency_key = require_idempotency_key(&headers)?;
+    let expected_etag = if_match(&headers)?;
+    let mutation = ReplayableMutation::new(
+        &state,
+        principal.user_id,
+        operations::API_KEY_REVOKE,
+        &headers,
+        &RevokeApiKeyFingerprint {
+            api_key_id,
+            expected_etag,
+        },
+    )?;
+    if let Some(replayed) = mutation.replayed().await? {
+        return Ok(replayed);
+    }
     let revoked = state
         .store()
-        .revoke_api_key_record(
-            api_key_id,
-            if_match(&headers)?,
-            principal.user_id,
-            idempotency_key,
-        )
+        .revoke_api_key_record(api_key_id, expected_etag, principal.user_id, mutation.key())
         .await
         .map_err(map_access)?;
-    with_etag(
-        Json(RuntimeGenerationResponse::from(&revoked.release)),
-        revoked.etag,
-    )
+    mutation
+        .respond(
+            StatusCode::OK,
+            &RuntimeGenerationResponse::from(&revoked.release),
+            Some(revoked.etag),
+        )
+        .await
+}
+
+#[derive(Serialize)]
+struct RevokeApiKeyFingerprint {
+    api_key_id: Uuid,
+    expected_etag: Uuid,
 }

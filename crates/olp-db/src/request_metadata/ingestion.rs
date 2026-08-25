@@ -204,6 +204,10 @@ async fn insert_attempt_usage_facts<'a>(
         {
             (None, None, true, None)
         } else {
+            // `$5` (input_tokens) is cache-inclusive, so the uncached portion
+            // is `$5 - $9`. When the revision carries no cached tier the whole
+            // input count keeps billing at the full input rate, exactly as it
+            // did before the tier existed — history stays comparable.
             let pricing = sqlx::query!(
                 "SELECT selected.pricing_revision_id AS \"pricing_revision_id?\", \
                         selected.currency AS \"currency?\", \
@@ -217,13 +221,23 @@ async fn insert_attempt_usage_facts<'a>(
                                    AND ($5::bigint IS NULL OR selected.input_per_million IS NOT NULL) \
                                    AND ($6::bigint IS NULL OR selected.output_per_million IS NOT NULL) \
                                    AND ($7::numeric IS NULL OR selected.unit_price IS NOT NULL) \
-                             THEN (COALESCE($5::numeric * selected.input_per_million / 1000000, 0) \
+                             THEN (COALESCE(( \
+                                       CASE WHEN selected.cached_input_per_million IS NULL \
+                                            THEN $5::numeric * selected.input_per_million \
+                                            ELSE GREATEST($5::numeric \
+                                                   - COALESCE($9::bigint, 0), 0) \
+                                                 * selected.input_per_million \
+                                               + LEAST(COALESCE($9::bigint, 0)::numeric, \
+                                                       $5::numeric) \
+                                                 * selected.cached_input_per_million \
+                                       END) / 1000000, 0) \
                                  + COALESCE($6::numeric * selected.output_per_million / 1000000, 0) \
                                  + COALESCE($7::numeric * selected.unit_price, 0)) \
                              ELSE NULL END AS \"estimated_cost?\" \
                  FROM providers provider \
                  LEFT JOIN LATERAL ( \
                      SELECT revision.id AS pricing_revision_id, price.input_per_million, \
+                            price.cached_input_per_million, \
                             price.output_per_million, price.unit_price, \
                             price.currency::text AS currency \
                      FROM pricing_revisions revision \
@@ -243,7 +257,8 @@ async fn insert_attempt_usage_facts<'a>(
                 attempt.usage.input_tokens,
                 attempt.usage.output_tokens,
                 attempt.usage.media_units,
-                attempt.usage.complete
+                attempt.usage.complete,
+                attempt.usage.cached_input_tokens
             )
             .fetch_one(&mut **transaction)
             .await?;

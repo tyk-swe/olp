@@ -502,18 +502,23 @@ fn finish_reason(reason: &str) -> FinishReason {
 }
 
 fn canonical_usage(usage: &ChatUsage) -> Usage {
+    let reasoning_tokens = usage
+        .completion_tokens_details
+        .as_ref()
+        .and_then(|details| details.reasoning_tokens);
     Usage {
         input_tokens: usage.prompt_tokens,
-        output_tokens: usage.completion_tokens,
+        // OpenAI's `completion_tokens` includes reasoning; canonical
+        // `output_tokens` is disjoint from it.
+        output_tokens: usage
+            .completion_tokens
+            .saturating_sub(reasoning_tokens.unwrap_or(0)),
         total_tokens: usage.total_tokens,
         cached_input_tokens: usage
             .prompt_tokens_details
             .as_ref()
             .and_then(|details| details.cached_tokens),
-        reasoning_tokens: usage
-            .completion_tokens_details
-            .as_ref()
-            .and_then(|details| details.reasoning_tokens),
+        reasoning_tokens,
     }
 }
 

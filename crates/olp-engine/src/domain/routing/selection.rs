@@ -19,6 +19,10 @@ pub struct AttemptPlan {
     pub generation_id: RuntimeGenerationId,
     pub route_id: RouteId,
     pub target_id: TargetId,
+    /// The target's revision-stable identity. `target_id` is minted fresh on
+    /// every route activation, so anything that must outlive a republish —
+    /// circuit-breaker health above all — keys on this instead.
+    pub routing_id: TargetId,
     pub provider_id: ProviderId,
     pub provider_kind: ProviderKind,
     pub upstream_model: String,
@@ -121,6 +125,7 @@ pub fn select_attempts_filtered(
                 generation_id: snapshot.generation.id,
                 route_id: route.id,
                 target_id: ranked.target.id,
+                routing_id: ranked.target.routing_id.unwrap_or(ranked.target.id),
                 provider_id: ranked.provider.id,
                 provider_kind: ranked.provider.kind,
                 upstream_model: ranked.target.upstream_model.clone(),

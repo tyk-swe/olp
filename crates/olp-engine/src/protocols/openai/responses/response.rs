@@ -83,19 +83,27 @@ pub fn decode_response_object(response: Object) -> Result<Vec<Event>, ResponsesC
     collect_extra("", &response.extra, &mut extensions);
     extensions.insert("/created_at".into(), Value::from(response.created_at));
     extensions.insert("/status".into(), Value::String(response.status.clone()));
+    let response_incomplete_reason = response
+        .incomplete_details
+        .as_ref()
+        .and_then(|details| details.get("reason"))
+        .and_then(Value::as_str)
+        .map(str::to_owned);
     if let Some(details) = response.incomplete_details {
         extensions.insert("/incomplete_details".into(), details);
     }
 
-    for (output_index, item) in response.output.into_iter().enumerate() {
-        decode_response_output_item(
-            output_index
-                .try_into()
-                .map_err(|_| ResponsesCodecError::TooManyOutputItems)?,
-            item,
-            &mut extensions,
-            &mut builder,
-        )?;
+    // Responses output items are parts of one assistant turn, not separate
+    // candidates: a parallel tool call must not become `choices[1]`, where a
+    // client reading `choices[0]` silently loses it. They all fold into
+    // canonical output 0; extension paths keep the wire item index so the
+    // encoder can rebuild the original array.
+    let mut turn = OutputTurn::default();
+    for (item_index, item) in response.output.into_iter().enumerate() {
+        let item_index: u32 = item_index
+            .try_into()
+            .map_err(|_| ResponsesCodecError::TooManyOutputItems)?;
+        decode_response_output_item(item_index, item, &mut extensions, &mut builder, &mut turn)?;
     }
     if let Some(usage) = response.usage {
         collect_response_usage_extensions(&usage, &mut extensions);
@@ -127,15 +135,59 @@ pub fn decode_response_object(response: Object) -> Result<Vec<Event>, ResponsesC
             extensions: SourceExtensions::new(Surface::OpenAi, extensions),
         });
     }
+    if turn.started {
+        builder.push(Kind::Finish {
+            output_index: CANONICAL_OUTPUT_INDEX,
+            reason: turn.finish_reason(&response.status, response_incomplete_reason.as_deref()),
+        });
+    }
     builder.push(Kind::Done);
     Ok(builder.events)
 }
 
+const CANONICAL_OUTPUT_INDEX: u32 = 0;
+
+#[derive(Default)]
+struct OutputTurn {
+    started: bool,
+    tool_index: u32,
+    saw_tool_call: bool,
+}
+
+impl OutputTurn {
+    fn start(&mut self, builder: &mut ResponsesEventBuilder, role: MessageRole) {
+        if !self.started {
+            self.started = true;
+            builder.push(Kind::MessageStart {
+                output_index: CANONICAL_OUTPUT_INDEX,
+                role,
+            });
+        }
+    }
+
+    /// The streaming decoder derives the same reasons from the same fields; the
+    /// unary path used to hardcode `Stop`, so a truncated response reached the
+    /// client indistinguishable from a completed one.
+    fn finish_reason(&self, status: &str, incomplete_reason: Option<&str>) -> FinishReason {
+        if self.saw_tool_call {
+            return FinishReason::ToolCalls;
+        }
+        if status == "incomplete" {
+            return match incomplete_reason {
+                Some("content_filter") => FinishReason::ContentFilter,
+                _ => FinishReason::Length,
+            };
+        }
+        FinishReason::Stop
+    }
+}
+
 fn decode_response_output_item(
-    output_index: u32,
+    item_index: u32,
     item: Value,
     extensions: &mut BTreeMap<String, Value>,
     builder: &mut ResponsesEventBuilder,
+    turn: &mut OutputTurn,
 ) -> Result<(), ResponsesCodecError> {
     let Value::Object(mut object) = item else {
         return Err(ResponsesCodecError::InvalidResponse(
@@ -153,7 +205,7 @@ fn decode_response_output_item(
                 .remove("content")
                 .and_then(|value| value.as_array().cloned())
                 .ok_or_else(|| ResponsesCodecError::InvalidResponse("message content".into()))?;
-            builder.push(Kind::MessageStart { output_index, role });
+            turn.start(builder, role);
             for (part_index, part) in content.into_iter().enumerate() {
                 let Value::Object(mut part) = part else {
                     return Err(ResponsesCodecError::InvalidResponse(
@@ -163,26 +215,22 @@ fn decode_response_output_item(
                 let part_kind = take_required_output_string(&mut part, "type")?;
                 match part_kind.as_str() {
                     "output_text" => builder.push(Kind::TextDelta {
-                        output_index,
+                        output_index: CANONICAL_OUTPUT_INDEX,
                         text: take_required_output_string(&mut part, "text")?,
                     }),
                     "refusal" => builder.push(Kind::RefusalDelta {
-                        output_index,
+                        output_index: CANONICAL_OUTPUT_INDEX,
                         text: take_required_output_string(&mut part, "refusal")?,
                     }),
                     _ => return Err(ResponsesCodecError::UnsupportedOutputItem(part_kind)),
                 }
                 collect_object_extra(
-                    &format!("/output/{output_index}/content/{part_index}"),
+                    &format!("/output/{item_index}/content/{part_index}"),
                     part,
                     extensions,
                 );
             }
-            collect_object_extra(&format!("/output/{output_index}"), object, extensions);
-            builder.push(Kind::Finish {
-                output_index,
-                reason: FinishReason::Stop,
-            });
+            collect_object_extra(&format!("/output/{item_index}"), object, extensions);
         }
         "function_call" => {
             let id = object
@@ -191,27 +239,25 @@ fn decode_response_output_item(
                 .and_then(|value| value.as_str().map(str::to_owned));
             let name = Some(take_required_output_string(&mut object, "name")?);
             let arguments_delta = take_required_output_string(&mut object, "arguments")?;
-            builder.push(Kind::MessageStart {
-                output_index,
-                role: MessageRole::Assistant,
-            });
+            turn.start(builder, MessageRole::Assistant);
             builder.push(Kind::ToolCallDelta {
-                output_index,
-                tool_index: 0,
+                output_index: CANONICAL_OUTPUT_INDEX,
+                tool_index: turn.tool_index,
                 id,
                 name,
                 arguments_delta,
             });
-            collect_object_extra(&format!("/output/{output_index}"), object, extensions);
-            builder.push(Kind::Finish {
-                output_index,
-                reason: FinishReason::ToolCalls,
-            });
+            turn.tool_index = turn
+                .tool_index
+                .checked_add(1)
+                .ok_or(ResponsesCodecError::TooManyOutputItems)?;
+            turn.saw_tool_call = true;
+            collect_object_extra(&format!("/output/{item_index}"), object, extensions);
         }
         _ => {
             object.insert("type".into(), Value::String(kind));
             extensions.insert(
-                format!("{OPENAI_RESPONSES_RAW_OUTPUT_PREFIX}/{output_index}"),
+                format!("{OPENAI_RESPONSES_RAW_OUTPUT_PREFIX}/{item_index}"),
                 Value::Object(object),
             );
         }
@@ -230,18 +276,23 @@ fn take_required_output_string(
 }
 
 pub(super) fn canonical_response_usage(usage: &Usage) -> CanonicalUsage {
+    let reasoning_tokens = usage
+        .output_tokens_details
+        .as_ref()
+        .map(|details| details.reasoning_tokens);
     CanonicalUsage {
         input_tokens: usage.input_tokens,
-        output_tokens: usage.output_tokens,
+        // The Responses API counts reasoning inside `output_tokens`; canonical
+        // `output_tokens` is disjoint from `reasoning_tokens`.
+        output_tokens: usage
+            .output_tokens
+            .saturating_sub(reasoning_tokens.unwrap_or(0)),
         total_tokens: usage.total_tokens,
         cached_input_tokens: usage
             .input_tokens_details
             .as_ref()
             .map(|details| details.cached_tokens),
-        reasoning_tokens: usage
-            .output_tokens_details
-            .as_ref()
-            .map(|details| details.reasoning_tokens),
+        reasoning_tokens,
     }
 }
 

@@ -24,7 +24,9 @@
     listProviderKinds,
     listProviderModelPage,
     probeProvider,
+    rotateProviderCredential,
     setProviderModel,
+    updateProvider,
     type CapabilityDeclaration,
     type CapabilityCertification,
     type Provider,
@@ -33,6 +35,7 @@
   import {
     authOptionsFor,
     buildCreateProviderInput,
+    buildUpdateProviderInput,
     certificationPrerequisiteReady,
     createProviderDraft,
     parseManualModelNames,
@@ -40,7 +43,17 @@
     validateProviderDraft,
     type ProviderDraft
   } from './providerEditor';
+  import { useRole } from '$lib/auth/useRole.svelte';
 
+  const stepLabels = [
+    'Connector',
+    'Test',
+    'Discovery',
+    'Capabilities',
+    'Activate'
+  ] as const;
+  const access = useRole();
+  const canManage = $derived(access.can('providers.manage'));
   const queryClient = useQueryClient();
   const providerKinds = createQuery(() => ({
     queryKey: ['provider-kinds'],
@@ -157,18 +170,53 @@
     }
   }
 
+  function goBack() {
+    if (wizardStep > 1) wizardStep -= 1;
+  }
+
   async function createDraft(event: SubmitEvent) {
     event.preventDefault();
     if (!draft || !selectedSpec) return;
     const current = draft;
     const spec = selectedSpec;
-    const issue = validateProviderDraft(current, spec);
+    // The connector kind is locked once the draft exists, so stepping back
+    // always edits that provider rather than orphaning it behind a second one.
+    const existing = wizardProvider;
+    const issue = validateProviderDraft(current, spec, {
+      // The first pass stored a write-only credential; the field is cleared
+      // afterwards and must not be demanded again on a re-save.
+      credentialAlreadyStored: Boolean(existing)
+    });
     if (issue) {
       errorMessage = issue;
       return;
     }
     await run('create', async () => {
-      const id = await createProvider(buildCreateProviderInput(current, spec));
+      let id: string;
+      if (existing) {
+        const updated = await updateProvider(
+          existing.id,
+          existing.etag,
+          buildUpdateProviderInput(
+            {
+              name: current.name,
+              endpoint: current.endpoint,
+              apiVersion: current.apiVersion,
+              cloudRegion: current.cloudRegion,
+              cloudProject: current.cloudProject,
+              deployment: current.deployment,
+              authMode: current.authMode
+            },
+            spec
+          )
+        );
+        if (current.credential) {
+          await rotateProviderCredential(updated, current.credential);
+        }
+        id = updated.id;
+      } else {
+        id = await createProvider(buildCreateProviderInput(current, spec));
+      }
       current.credential = '';
       wizardProvider = await getProvider(id);
       wizardStep = 2;
@@ -312,8 +360,11 @@
   >
 </div>
 
+<p class="step-progress" aria-hidden="true">
+  Step {wizardStep} of {stepLabels.length}
+</p>
 <ol class="steps" aria-label="Provider setup progress">
-  {#each ['Connector', 'Test', 'Discovery', 'Capabilities', 'Activate'] as label, index (label)}
+  {#each stepLabels as label, index (label)}
     <li
       class:current={wizardStep === index + 1}
       class:complete={wizardStep > index + 1}
@@ -324,6 +375,21 @@
   {/each}
 </ol>
 
+{#if !canManage}
+  <p class="read-only-note" role="note">
+    Your role can view providers but not connect or activate them.
+  </p>
+{/if}
+{#if canManage && wizardStep >= 2 && wizardStep <= 4}
+  <div class="wizard-back">
+    <button
+      class="button button-secondary"
+      type="button"
+      onclick={goBack}
+      disabled={Boolean(busy)}>Back</button
+    >
+  </div>
+{/if}
 {#if errorMessage}<div class="inline-problem" role="alert">
     {errorMessage}
   </div>{/if}
@@ -334,7 +400,14 @@
   disabled={Boolean(busy)}
 />
 
-{#if wizardStep === 1 && providerKinds.isPending}
+{#if !canManage}
+  <div class="card stage">
+    <p>
+      Providers are managed by owners and operators. Ask one of them to connect
+      this upstream.
+    </p>
+  </div>
+{:else if wizardStep === 1 && providerKinds.isPending}
   <div class="card stage" role="status">Loading provider capabilities…</div>
 {:else if wizardStep === 1 && providerKinds.isError}
   <div class="inline-problem" role="alert">
@@ -351,6 +424,7 @@
     providerKinds={providerKinds.data ?? []}
     {selectedSpec}
     {busy}
+    lockKind={Boolean(wizardProvider)}
     onSubmit={createDraft}
   />
 {:else if wizardStep === 2}
@@ -437,6 +511,16 @@
 {/if}
 
 <style>
+  .step-progress {
+    display: none;
+    margin: 2rem 0 0;
+    color: var(--foreground-muted);
+    font-size: 0.78rem;
+    font-weight: 700;
+  }
+  .wizard-back {
+    margin-top: 1rem;
+  }
   .steps {
     display: grid;
     grid-template-columns: repeat(5, 1fr);
@@ -538,8 +622,12 @@
     font-weight: 700;
   }
   @media (max-width: 42rem) {
+    .step-progress {
+      display: block;
+    }
     .steps {
       grid-template-columns: 1fr;
+      margin-top: 0.4rem;
     }
     .steps li:not(.current) {
       display: none;

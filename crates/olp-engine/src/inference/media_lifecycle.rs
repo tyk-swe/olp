@@ -208,10 +208,12 @@ mod tests {
                 ContentPart::Image {
                     source: MediaSource::Handle(handle("z-image")),
                     detail: None,
+                    mime_type: None,
                 },
                 ContentPart::Image {
                     source: MediaSource::Uri("https://example.test/image.png".to_owned()),
                     detail: None,
+                    mime_type: None,
                 },
                 ContentPart::InputAudio {
                     media: handle("a-audio"),

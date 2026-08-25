@@ -68,15 +68,17 @@ test('compatible preset resolves to persisted connector fields', async ({
     'OpenAI Compatibility'
   );
 
+  // Switching connector kinds must not carry either connector's endpoint into
+  // the other: the Groq preset URL is not an Azure resource, and an Azure
+  // resource is not a compatible endpoint the operator chose.
   await page.getByRole('radio', { name: /Azure OpenAI/ }).check();
+  await expect(page.getByLabel('Azure resource endpoint')).toHaveValue('');
   await page
     .getByLabel('Azure resource endpoint')
     .fill('https://resource.openai.azure.com');
   await page.getByRole('radio', { name: /OpenAI-compatible/ }).check();
   await expect(page.getByLabel('Compatible provider')).toHaveValue('');
-  await expect(page.getByLabel('Compatible endpoint')).toHaveValue(
-    'https://resource.openai.azure.com'
-  );
+  await expect(page.getByLabel('Compatible endpoint')).toHaveValue('');
   await expect(page.getByLabel('Compatible endpoint')).toBeEditable();
   await expect(page.getByText(/Verified against/)).toHaveCount(0);
 
@@ -391,4 +393,79 @@ test('provider wizard keeps the write-only secret out of subsequent steps', asyn
     '"01980000-0000-7000-8000-000000000111"',
     '"01980000-0000-7000-8000-000000000112"'
   ]);
+});
+
+test('stepping back from the wizard edits the draft instead of creating a second provider', async ({
+  page
+}) => {
+  await mockSession(page, sessionOptions);
+  let currentProvider = providerRecord('draft', [], {
+    name: 'production-openai'
+  });
+  let creations = 0;
+  let updates = 0;
+  let credentialRotations = 0;
+  let updateBody: Record<string, unknown> | undefined;
+
+  await page.route('**/api/v1/providers**', async (route) => {
+    const request = route.request();
+    const pathname = new URL(request.url()).pathname;
+    if (pathname === '/api/v1/providers' && request.method() === 'POST') {
+      creations += 1;
+      await route.fulfill({ status: 201, json: { id: ids.provider } });
+      return;
+    }
+    if (pathname === `/api/v1/providers/${ids.provider}`) {
+      if (request.method() === 'PATCH') {
+        updates += 1;
+        updateBody = request.postDataJSON();
+        currentProvider = { ...currentProvider, ...updateBody };
+        await route.fulfill({ json: currentProvider });
+        return;
+      }
+      if (request.method() === 'GET') {
+        await route.fulfill({ json: currentProvider });
+        return;
+      }
+    }
+    if (pathname.endsWith('/credentials') && request.method() === 'POST') {
+      credentialRotations += 1;
+      await route.fulfill({ status: 204 });
+      return;
+    }
+    failUnexpectedApiRequest(route);
+  });
+
+  await page.goto('/providers/new');
+  await page.getByLabel('Provider name').fill('production-openai');
+  await page.getByLabel('Credential', { exact: true }).fill('sk-secret');
+  await page.getByRole('button', { name: /Save and test connection/ }).click();
+  await expect(
+    page.getByRole('heading', { name: 'Verify upstream reachability' })
+  ).toBeVisible();
+  expect(creations).toBe(1);
+
+  await page.getByRole('button', { name: 'Back' }).click();
+
+  // The connector kind is immutable once the draft exists, so there is no path
+  // back into the create branch that would orphan the provider just created.
+  await expect(
+    page.getByRole('radio', { name: /Azure OpenAI/ })
+  ).toBeDisabled();
+  await expect(
+    page.getByText('The connector kind is fixed once the provider draft exists')
+  ).toBeVisible();
+
+  // The stored write-only credential must not be demanded a second time.
+  await expect(page.getByLabel('Credential', { exact: true })).toHaveValue('');
+  await page.getByLabel('Provider name').fill('production-openai-renamed');
+  await page.getByRole('button', { name: /Save and test connection/ }).click();
+
+  await expect(
+    page.getByRole('heading', { name: 'Verify upstream reachability' })
+  ).toBeVisible();
+  expect(creations).toBe(1);
+  expect(updates).toBe(1);
+  expect(credentialRotations).toBe(0);
+  expect(updateBody).toMatchObject({ name: 'production-openai-renamed' });
 });

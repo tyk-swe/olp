@@ -238,6 +238,7 @@ fn deployment_probe_error(
         }
     };
     TransportError {
+        upstream: Default::default(),
         phase,
         class,
         response_committed: false,
@@ -269,6 +270,7 @@ impl ProviderTransport for Connector {
         {
             return Box::pin(async {
                 Err(TransportError {
+                    upstream: Default::default(),
                     phase: TransportPhase::Connect,
                     class: AttemptFailureClass::Protocol,
                     response_committed: false,

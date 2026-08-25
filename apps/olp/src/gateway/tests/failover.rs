@@ -232,6 +232,7 @@ async fn first_event_timeout_obeys_media_ambiguity_policy() {
 #[test]
 fn post_connect_failure_obeys_media_ambiguity_policy() {
     let failure = TransportError {
+        upstream: Default::default(),
         phase: olp_engine::domain::ports::TransportPhase::FirstByte,
         class: AttemptFailureClass::Connect,
         response_committed: false,
@@ -251,6 +252,7 @@ fn post_connect_failure_obeys_media_ambiguity_policy() {
 
     let connect = reclassify_ambiguous_transport_failure(
         TransportError {
+            upstream: Default::default(),
             phase: olp_engine::domain::ports::TransportPhase::Connect,
             class: AttemptFailureClass::Connect,
             response_committed: false,

@@ -14,21 +14,44 @@ use super::extensions::apply_pointer_extensions;
 use super::responses::OPENAI_RESPONSES_RAW_OUTPUT_PREFIX;
 use super::responses::response::{ErrorBody, InputTokenDetails, Object, OutputTokenDetails, Usage};
 
+/// `created_at` is the fallback used when the canonical events did not come
+/// from a Responses upstream, so a client never sees `created_at: 0`.
 pub fn encode_response_object(
     events: &[Event],
     client_model: &str,
     fallback_id: &str,
+    created_at: i64,
 ) -> Result<Object, OpenAiClientEncodeError> {
     let mut aggregate = aggregate_generation(events, Surface::OpenAi)?;
     let raw_output = take_raw_response_output(&mut aggregate.extensions)?;
+    // Raw items are re-inserted at their original wire indices below, so the
+    // items rebuilt here have to claim the positions those leave free. Each
+    // gets its own index: two tool calls under one canonical output otherwise
+    // reused the same `/output/{n}/id` extension and shipped duplicate ids.
+    let raw_indices = raw_output
+        .iter()
+        .map(|(index, _)| *index)
+        .collect::<BTreeSet<_>>();
+    let mut next_index = 0_usize;
+    let mut claim_wire_index = move || {
+        while raw_indices.contains(&next_index) {
+            next_index += 1;
+        }
+        let index = next_index;
+        next_index += 1;
+        index
+    };
     let mut output = Vec::new();
-    for (output_index, item) in aggregate.outputs {
+    let mut finish = None;
+    for (_, item) in aggregate.outputs {
+        finish = finish.or_else(|| item.finish.clone());
         if !item.text.is_empty() || !item.refusal.is_empty() || item.tools.is_empty() {
+            let wire_index = claim_wire_index();
             let mut content = Vec::new();
             if !item.text.is_empty() {
                 let annotations = aggregate
                     .extensions
-                    .remove(&format!("/output/{output_index}/content/0/annotations"))
+                    .remove(&format!("/output/{wire_index}/content/0/annotations"))
                     .unwrap_or_else(|| json!([]));
                 content.push(json!({
                     "type": "output_text",
@@ -41,12 +64,12 @@ pub fn encode_response_object(
             }
             let id = take_string_extension(
                 &mut aggregate.extensions,
-                &format!("/output/{output_index}/id"),
+                &format!("/output/{wire_index}/id"),
             )
-            .unwrap_or_else(|| format!("msg_{output_index}"));
+            .unwrap_or_else(|| format!("msg_{wire_index}"));
             let status = take_string_extension(
                 &mut aggregate.extensions,
-                &format!("/output/{output_index}/status"),
+                &format!("/output/{wire_index}/status"),
             )
             .unwrap_or_else(|| "completed".into());
             output.push(json!({
@@ -58,6 +81,7 @@ pub fn encode_response_object(
             }));
         }
         for (_, tool) in item.tools {
+            let wire_index = claim_wire_index();
             let id = tool
                 .id
                 .ok_or(OpenAiClientEncodeError::IncompleteToolCall("id"))?;
@@ -66,12 +90,12 @@ pub fn encode_response_object(
                 .ok_or(OpenAiClientEncodeError::IncompleteToolCall("name"))?;
             let wire_id = take_string_extension(
                 &mut aggregate.extensions,
-                &format!("/output/{output_index}/id"),
+                &format!("/output/{wire_index}/id"),
             )
-            .unwrap_or_else(|| format!("fc_{output_index}"));
+            .unwrap_or_else(|| format!("fc_{wire_index}"));
             let status = take_string_extension(
                 &mut aggregate.extensions,
-                &format!("/output/{output_index}/status"),
+                &format!("/output/{wire_index}/status"),
             )
             .unwrap_or_else(|| "completed".into());
             output.push(json!({
@@ -79,7 +103,13 @@ pub fn encode_response_object(
                 "type": "function_call",
                 "call_id": id,
                 "name": name,
-                "arguments": tool.arguments,
+                // A tool invoked with no parameters aggregates to an empty
+                // string, which is not valid JSON for the client to parse.
+                "arguments": if tool.arguments.trim().is_empty() {
+                    "{}".to_owned()
+                } else {
+                    tool.arguments
+                },
                 "status": status,
             }));
         }
@@ -92,13 +122,36 @@ pub fn encode_response_object(
         }
         output.insert(index, item);
     }
-    let created_at = take_i64_extension(&mut aggregate.extensions, "/created_at").unwrap_or(0);
-    let status = take_string_extension(&mut aggregate.extensions, "/status")
-        .unwrap_or_else(|| "completed".into());
-    let incomplete_details = aggregate.extensions.remove("/incomplete_details");
+    let observed_created_at =
+        take_i64_extension(&mut aggregate.extensions, "/created_at").unwrap_or(0);
+    let created_at = if observed_created_at == 0 {
+        created_at
+    } else {
+        observed_created_at
+    };
+    let mut incomplete_details = aggregate.extensions.remove("/incomplete_details");
+    let status = take_string_extension(&mut aggregate.extensions, "/status").unwrap_or_else(|| {
+        // A non-Responses upstream reports truncation only through the finish
+        // reason, so the terminal status is derived from it rather than always
+        // claiming the response completed.
+        match finish {
+            Some(FinishReason::Length) => {
+                incomplete_details.get_or_insert_with(|| json!({"reason": "max_output_tokens"}));
+                "incomplete".to_owned()
+            }
+            Some(FinishReason::ContentFilter) => {
+                incomplete_details.get_or_insert_with(|| json!({"reason": "content_filter"}));
+                "incomplete".to_owned()
+            }
+            _ => "completed".to_owned(),
+        }
+    });
     let usage = aggregate.usage.map(|usage| Usage {
         input_tokens: usage.input_tokens,
-        output_tokens: usage.output_tokens,
+        // The Responses API reports reasoning inside `output_tokens`.
+        output_tokens: usage
+            .output_tokens
+            .saturating_add(usage.reasoning_tokens.unwrap_or(0)),
         total_tokens: usage.total_tokens,
         input_tokens_details: usage
             .cached_input_tokens
@@ -137,13 +190,28 @@ pub struct Encoder {
     fallback_id: String,
     created_at: i64,
     next_sequence: u64,
+    sequence_number: u64,
     events: Vec<Event>,
     collected_event_bytes: usize,
-    emitted_outputs: BTreeSet<u32>,
-    tool_outputs: BTreeSet<u32>,
+    outputs: BTreeMap<u32, StreamOutput>,
     done: bool,
 
     incomplete_reason: Option<&'static str>,
+}
+
+/// The lifecycle the Responses API promises per output item. Clients built on
+/// the item events (the OpenAI Agents SDK among them) read the tool name and
+/// call id off `response.output_item.added`, so the frame is held back until a
+/// delta actually carries them.
+#[derive(Default)]
+struct StreamOutput {
+    item_id: String,
+    tool: bool,
+    call_id: Option<String>,
+    name: Option<String>,
+    text: String,
+    refusal: String,
+    arguments: String,
 }
 
 impl std::fmt::Debug for Encoder {
@@ -152,7 +220,7 @@ impl std::fmt::Debug for Encoder {
             .debug_struct("Encoder")
             .field("next_sequence", &self.next_sequence)
             .field("collected_event_bytes", &self.collected_event_bytes)
-            .field("emitted_output_count", &self.emitted_outputs.len())
+            .field("emitted_output_count", &self.outputs.len())
             .field("done", &self.done)
             .finish_non_exhaustive()
     }
@@ -170,10 +238,10 @@ impl Encoder {
             fallback_id: fallback_id.into(),
             created_at,
             next_sequence: 0,
+            sequence_number: 0,
             events: Vec::new(),
             collected_event_bytes: 0,
-            emitted_outputs: BTreeSet::new(),
-            tool_outputs: BTreeSet::new(),
+            outputs: BTreeMap::new(),
             done: false,
             incomplete_reason: None,
         }
@@ -205,34 +273,51 @@ impl Encoder {
                 response_id,
                 provider_model: _,
             } => {
-                let id = response_id.as_deref().unwrap_or(&self.fallback_id);
-                frames.push(response_sse_frame(
-                    "response.created",
-                    json!({
-                        "response": {
-                            "id": id,
-                            "object": "response",
-                            "created_at": self.created_at,
-                            "status": "in_progress",
-                            "model": self.client_model,
-                            "output": []
-                        }
-                    }),
-                )?);
+                let id = response_id
+                    .clone()
+                    .unwrap_or_else(|| self.fallback_id.clone());
+                let response = json!({
+                    "id": id,
+                    "object": "response",
+                    "created_at": self.created_at,
+                    "status": "in_progress",
+                    "model": self.client_model,
+                    "output": []
+                });
+                frames.push(self.frame("response.created", json!({"response": response}))?);
+                frames.push(self.frame("response.in_progress", json!({"response": response}))?);
             }
             Kind::MessageStart { .. } => {}
             Kind::TextDelta { output_index, text } => {
-                self.ensure_stream_output(*output_index, false, &mut frames)?;
-                frames.push(response_sse_frame(
-                    "response.output_text.delta",
-                    json!({"output_index": output_index, "content_index": 0, "delta": text}),
-                )?);
+                let item_id = self.ensure_message_output(*output_index, &mut frames)?;
+                if let Some(output) = self.outputs.get_mut(output_index) {
+                    output.text.push_str(text);
+                }
+                if !text.is_empty() {
+                    frames.push(self.frame(
+                        "response.output_text.delta",
+                        json!({
+                            "item_id": item_id,
+                            "output_index": output_index,
+                            "content_index": 0,
+                            "delta": text
+                        }),
+                    )?);
+                }
             }
             Kind::RefusalDelta { output_index, text } => {
-                self.ensure_stream_output(*output_index, false, &mut frames)?;
-                frames.push(response_sse_frame(
+                let item_id = self.ensure_message_output(*output_index, &mut frames)?;
+                if let Some(output) = self.outputs.get_mut(output_index) {
+                    output.refusal.push_str(text);
+                }
+                frames.push(self.frame(
                     "response.refusal.delta",
-                    json!({"output_index": output_index, "content_index": 0, "delta": text}),
+                    json!({
+                        "item_id": item_id,
+                        "output_index": output_index,
+                        "content_index": 0,
+                        "delta": text
+                    }),
                 )?);
             }
             Kind::ToolCallDelta {
@@ -242,16 +327,27 @@ impl Encoder {
                 arguments_delta,
                 ..
             } => {
-                self.ensure_stream_output(*output_index, true, &mut frames)?;
-                frames.push(response_sse_frame(
-                    "response.function_call_arguments.delta",
-                    json!({
-                        "output_index": output_index,
-                        "item_id": id,
-                        "name": name,
-                        "delta": arguments_delta
-                    }),
-                )?);
+                let item_id = self.ensure_tool_output(
+                    *output_index,
+                    id.as_deref(),
+                    name.as_deref(),
+                    &mut frames,
+                )?;
+                if let Some(output) = self.outputs.get_mut(output_index) {
+                    output.arguments.push_str(arguments_delta);
+                }
+                // The first frame of a zero-argument call carries no
+                // arguments; real OpenAI emits no empty delta for it.
+                if !arguments_delta.is_empty() {
+                    frames.push(self.frame(
+                        "response.function_call_arguments.delta",
+                        json!({
+                            "item_id": item_id,
+                            "output_index": output_index,
+                            "delta": arguments_delta
+                        }),
+                    )?);
+                }
             }
             Kind::Finish {
                 output_index,
@@ -264,52 +360,51 @@ impl Encoder {
                 } else {
                     None
                 };
-                self.ensure_stream_output(
-                    *output_index,
-                    self.tool_outputs.contains(output_index),
-                    &mut frames,
-                )?;
-                frames.push(response_sse_frame(
-                    "response.output_item.done",
-                    json!({
-                        "output_index": output_index,
-                        "item": {"type": if self.tool_outputs.contains(output_index) {"function_call"} else {"message"}}
-                    }),
-                )?);
+                if !self.outputs.contains_key(output_index) {
+                    self.ensure_message_output(*output_index, &mut frames)?;
+                }
+                self.close_output(*output_index, &mut frames)?;
             }
             Kind::Usage { .. } => {}
             Kind::SourceExtension { extensions } => {
+                // Extensions from another surface have no Responses
+                // representation; dropping them keeps the stream alive.
                 if extensions.source != Some(Surface::OpenAi) {
-                    return Err(OpenAiClientEncodeError::CrossProtocolExtensions);
+                    self.events.push(event);
+                    return Ok(frames);
                 }
-                for (path, value) in &extensions.values {
+                for (path, value) in extensions.values.clone() {
                     if path.starts_with("/stream/") {
-                        let kind = value.get("type").and_then(Value::as_str).ok_or_else(|| {
-                            OpenAiClientEncodeError::InvalidExtension(path.clone())
-                        })?;
-                        frames.push(response_sse_frame(kind, value.clone())?);
+                        let kind = value
+                            .get("type")
+                            .and_then(Value::as_str)
+                            .ok_or_else(|| OpenAiClientEncodeError::InvalidExtension(path.clone()))?
+                            .to_owned();
+                        frames.push(self.frame(&kind, value)?);
                     }
                 }
             }
             Kind::Error { error } => {
-                frames.push(response_sse_frame(
-                    "response.failed",
-                    json!({
-                        "response": {
-                            "id": self.fallback_id,
-                            "object": "response",
-                            "status": "failed",
-                            "model": self.client_model,
-                            "error": {"code": error.provider_code, "message": error.message}
-                        }
-                    }),
-                )?);
+                let payload = json!({
+                    "response": {
+                        "id": self.fallback_id,
+                        "object": "response",
+                        "status": "failed",
+                        "model": self.client_model,
+                        "error": {"code": error.provider_code, "message": error.message}
+                    }
+                });
+                frames.push(self.frame("response.failed", payload)?);
             }
             Kind::Done => {
                 let terminal_reason = self.incomplete_reason.take();
                 let normalized = self.normalized_events_with(event.clone());
-                let mut response =
-                    encode_response_object(&normalized, &self.client_model, &self.fallback_id)?;
+                let mut response = encode_response_object(
+                    &normalized,
+                    &self.client_model,
+                    &self.fallback_id,
+                    self.created_at,
+                )?;
                 if let Some(reason) = terminal_reason {
                     response.status = "incomplete".to_owned();
                     response.incomplete_details = Some(serde_json::json!({ "reason": reason }));
@@ -319,10 +414,7 @@ impl Encoder {
                 } else {
                     "response.completed"
                 };
-                frames.push(response_sse_frame(
-                    terminal_event_type,
-                    json!({"response": response}),
-                )?);
+                frames.push(self.frame(terminal_event_type, json!({"response": response}))?);
                 self.done = true;
             }
         }
@@ -330,27 +422,189 @@ impl Encoder {
         Ok(frames)
     }
 
-    fn ensure_stream_output(
+    fn ensure_message_output(
         &mut self,
         output_index: u32,
-        tool: bool,
+        frames: &mut Vec<Frame>,
+    ) -> Result<String, OpenAiClientEncodeError> {
+        if let Some(output) = self.outputs.get(&output_index) {
+            return Ok(output.item_id.clone());
+        }
+        let item_id = format!("msg_{output_index}");
+        self.outputs.insert(
+            output_index,
+            StreamOutput {
+                item_id: item_id.clone(),
+                ..StreamOutput::default()
+            },
+        );
+        frames.push(self.frame(
+            "response.output_item.added",
+            json!({
+                "output_index": output_index,
+                "item": {
+                    "id": item_id,
+                    "type": "message",
+                    "role": "assistant",
+                    "status": "in_progress",
+                    "content": []
+                }
+            }),
+        )?);
+        frames.push(self.frame(
+            "response.content_part.added",
+            json!({
+                "item_id": item_id,
+                "output_index": output_index,
+                "content_index": 0,
+                "part": {"type": "output_text", "text": "", "annotations": []}
+            }),
+        )?);
+        Ok(item_id)
+    }
+
+    fn ensure_tool_output(
+        &mut self,
+        output_index: u32,
+        call_id: Option<&str>,
+        name: Option<&str>,
+        frames: &mut Vec<Frame>,
+    ) -> Result<String, OpenAiClientEncodeError> {
+        if let Some(output) = self.outputs.get(&output_index) {
+            return Ok(output.item_id.clone());
+        }
+        let item_id = format!("fc_{output_index}");
+        let call_id = call_id
+            .map(str::to_owned)
+            .unwrap_or_else(|| format!("call_{output_index}"));
+        let name = name.map(str::to_owned).unwrap_or_else(|| "function".into());
+        self.outputs.insert(
+            output_index,
+            StreamOutput {
+                item_id: item_id.clone(),
+                tool: true,
+                call_id: Some(call_id.clone()),
+                name: Some(name.clone()),
+                ..StreamOutput::default()
+            },
+        );
+        frames.push(self.frame(
+            "response.output_item.added",
+            json!({
+                "output_index": output_index,
+                "item": {
+                    "id": item_id,
+                    "type": "function_call",
+                    "call_id": call_id,
+                    "name": name,
+                    "arguments": "",
+                    "status": "in_progress"
+                }
+            }),
+        )?);
+        Ok(item_id)
+    }
+
+    fn close_output(
+        &mut self,
+        output_index: u32,
         frames: &mut Vec<Frame>,
     ) -> Result<(), OpenAiClientEncodeError> {
-        if tool {
-            self.tool_outputs.insert(output_index);
-        }
-        if self.emitted_outputs.insert(output_index) {
-            let item = if tool {
-                json!({"type": "function_call", "call_id": format!("call_{output_index}"), "name": "function", "arguments": ""})
-            } else {
-                json!({"type": "message", "role": "assistant", "status": "in_progress", "content": []})
-            };
-            frames.push(response_sse_frame(
-                "response.output_item.added",
+        let Some(output) = self.outputs.get(&output_index) else {
+            return Ok(());
+        };
+        let item_id = output.item_id.clone();
+        if output.tool {
+            let arguments = output.arguments.clone();
+            let item = json!({
+                "id": item_id,
+                "type": "function_call",
+                "call_id": output.call_id.clone(),
+                "name": output.name.clone(),
+                "arguments": arguments,
+                "status": "completed"
+            });
+            frames.push(self.frame(
+                "response.function_call_arguments.done",
+                json!({
+                    "item_id": item_id,
+                    "output_index": output_index,
+                    "arguments": arguments
+                }),
+            )?);
+            frames.push(self.frame(
+                "response.output_item.done",
                 json!({"output_index": output_index, "item": item}),
             )?);
+            return Ok(());
         }
+        let text = output.text.clone();
+        let refusal = output.refusal.clone();
+        let mut content = Vec::new();
+        if !text.is_empty() {
+            content.push(json!({"type": "output_text", "text": text, "annotations": []}));
+        }
+        if !refusal.is_empty() {
+            content.push(json!({"type": "refusal", "refusal": refusal}));
+        }
+        let part = if refusal.is_empty() {
+            json!({"type": "output_text", "text": text, "annotations": []})
+        } else {
+            json!({"type": "refusal", "refusal": refusal})
+        };
+        if refusal.is_empty() {
+            frames.push(self.frame(
+                "response.output_text.done",
+                json!({
+                    "item_id": item_id,
+                    "output_index": output_index,
+                    "content_index": 0,
+                    "text": text
+                }),
+            )?);
+        }
+        frames.push(self.frame(
+            "response.content_part.done",
+            json!({
+                "item_id": item_id,
+                "output_index": output_index,
+                "content_index": 0,
+                "part": part
+            }),
+        )?);
+        frames.push(self.frame(
+            "response.output_item.done",
+            json!({
+                "output_index": output_index,
+                "item": {
+                    "id": item_id,
+                    "type": "message",
+                    "role": "assistant",
+                    "status": "completed",
+                    "content": content
+                }
+            }),
+        )?);
         Ok(())
+    }
+
+    /// Every Responses stream event carries a monotonic `sequence_number`;
+    /// clients use it to detect gaps and to order reconnects.
+    fn frame(&mut self, kind: &str, mut payload: Value) -> Result<Frame, OpenAiClientEncodeError> {
+        let Value::Object(object) = &mut payload else {
+            return Err(OpenAiClientEncodeError::InvalidStreamPayload);
+        };
+        object.insert("type".into(), Value::String(kind.into()));
+        object
+            .entry("sequence_number")
+            .or_insert_with(|| Value::from(self.sequence_number));
+        self.sequence_number = self.sequence_number.saturating_add(1);
+        Ok(Frame {
+            event: Some(kind.into()),
+            data: serde_json::to_string(&payload)?,
+            id: None,
+            retry_ms: None,
+        })
     }
 
     fn normalized_events_with(&self, terminal: Event) -> Vec<Event> {
@@ -370,19 +624,6 @@ impl Encoder {
             })
             .collect()
     }
-}
-
-fn response_sse_frame(kind: &str, mut payload: Value) -> Result<Frame, OpenAiClientEncodeError> {
-    let Value::Object(object) = &mut payload else {
-        return Err(OpenAiClientEncodeError::InvalidStreamPayload);
-    };
-    object.insert("type".into(), Value::String(kind.into()));
-    Ok(Frame {
-        event: Some(kind.into()),
-        data: serde_json::to_string(&payload)?,
-        id: None,
-        retry_ms: None,
-    })
 }
 
 fn take_i64_extension(extensions: &mut BTreeMap<String, Value>, path: &str) -> Option<i64> {

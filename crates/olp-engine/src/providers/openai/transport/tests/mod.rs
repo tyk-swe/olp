@@ -229,6 +229,7 @@ fn fixture_request(streaming: bool) -> ProviderRequest {
             generation_id: RuntimeGenerationId::new(),
             route_id: RouteId::new(),
             target_id: TargetId::new(),
+            routing_id: TargetId::new(),
             provider_id: ProviderId::new(),
             provider_kind: ProviderKind::OpenAi,
             upstream_model: "gpt-4o-mini".into(),
@@ -424,6 +425,7 @@ fn moderation_request() -> ProviderRequest {
             ContentPart::Image {
                 source: MediaSource::Uri("https://images.example.test/a.png".into()),
                 detail: None,
+                mime_type: None,
             },
         ],
         extensions: SourceExtensions::new(Surface::OpenAi, BTreeMap::new()),

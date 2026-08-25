@@ -189,16 +189,24 @@ async fn run_request_metadata_consumer_with_policy(
                 policy.batch_size,
             )
             .await?;
+            // XAUTOCLAIM has already destroyed the evidence for these IDs:
+            // the server dropped them from the group PEL and will not report
+            // them again. Record the gaps before anything that can fail, and
+            // never let a purely informational counter abort the batch first.
+            report_deleted_pending_entries(store, consumer, &page.deleted_ids).await?;
             if !page.entries.is_empty() {
-                store
+                let reclaimed = u64::try_from(page.entries.len())
+                    .map_err(|_| Error::InvalidState("reclaimed entry count overflow"))?;
+                if let Err(error) = store
                     .report_request_metadata_consumer_activity(RequestMetadataConsumerActivity {
-                        reclaimed: u64::try_from(page.entries.len())
-                            .map_err(|_| Error::InvalidState("reclaimed entry count overflow"))?,
+                        reclaimed,
                         ..RequestMetadataConsumerActivity::default()
                     })
-                    .await?;
+                    .await
+                {
+                    warn!(%error, "reclaimed request metadata counter was not recorded");
+                }
             }
-            report_deleted_pending_entries(store, consumer, &page.deleted_ids).await?;
             let next_start = page.next_start;
             let summary = process_entries(
                 store,
@@ -423,18 +431,22 @@ async fn process_entry(
     entry: StreamEntry,
 ) -> Result<EntryProcessingOutcome, Error> {
     let Some(payload) = entry.payload else {
-        error!(stream_id = %entry.id, "discarding malformed request metadata stream event");
+        // The entry is still in this consumer's PEL but its payload is gone:
+        // the stream entry was deleted. That is stream loss, not a producer
+        // writing a bad event, and the XAUTOCLAIM path already files it as
+        // such. Classify both the same way so operators look in one place.
+        error!(stream_id = %entry.id, "request metadata stream event payload is missing");
         let now = Utc::now();
         let result = store
             .report_request_metadata_gap_once(
                 Gap {
                     gateway_instance: consumer.to_owned(),
                     event_count: 1,
-                    reason: "malformed_stream_event".to_owned(),
+                    reason: "missing_stream_event".to_owned(),
                     first_observed_at: now,
                     last_observed_at: now,
                 },
-                &format!("request-metadata-stream:{}:malformed", entry.id),
+                &format!("request-metadata-stream:{}:missing", entry.id),
             )
             .await;
         return finish_gap_or_retry(result, connection, stream, &entry.id).await;

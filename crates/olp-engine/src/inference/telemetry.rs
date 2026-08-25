@@ -14,17 +14,26 @@ pub(in crate::inference) const fn metadata_status_code(error: &InferenceError) -
         InferenceErrorKind::Unavailable => 503,
         InferenceErrorKind::RequestTimeout => 408,
         InferenceErrorKind::GatewayTimeout => 504,
-        InferenceErrorKind::Upstream | InferenceErrorKind::Cancelled => 502,
-        InferenceErrorKind::Canonical(class) => match class {
-            crate::domain::canonical::events::ErrorClass::RateLimit => 429,
-            crate::domain::canonical::events::ErrorClass::Timeout => 504,
-            crate::domain::canonical::events::ErrorClass::Authentication
-            | crate::domain::canonical::events::ErrorClass::Authorization
-            | crate::domain::canonical::events::ErrorClass::InvalidRequest
-            | crate::domain::canonical::events::ErrorClass::Transport
-            | crate::domain::canonical::events::ErrorClass::Upstream
-            | crate::domain::canonical::events::ErrorClass::Internal => 502,
-        },
+        InferenceErrorKind::Upstream => 502,
+        InferenceErrorKind::UpstreamRejected(status) => status,
+        InferenceErrorKind::Cancelled => 499,
+        InferenceErrorKind::Canonical(class) => canonical_status_code(class),
+    }
+}
+
+/// A canonical provider error keeps the fault's own class: an upstream
+/// authentication or validation failure is not a gateway failure.
+pub(in crate::inference) const fn canonical_status_code(
+    class: crate::domain::canonical::events::ErrorClass,
+) -> u16 {
+    use crate::domain::canonical::events::ErrorClass;
+    match class {
+        ErrorClass::Authentication => 401,
+        ErrorClass::Authorization => 403,
+        ErrorClass::InvalidRequest => 400,
+        ErrorClass::RateLimit => 429,
+        ErrorClass::Timeout => 504,
+        ErrorClass::Transport | ErrorClass::Upstream | ErrorClass::Internal => 502,
     }
 }
 
@@ -55,7 +64,8 @@ mod tests {
             (InferenceErrorKind::RequestTimeout, 408),
             (InferenceErrorKind::GatewayTimeout, 504),
             (InferenceErrorKind::Upstream, 502),
-            (InferenceErrorKind::Cancelled, 502),
+            (InferenceErrorKind::UpstreamRejected(422), 422),
+            (InferenceErrorKind::Cancelled, 499),
         ];
         for (kind, expected) in direct_cases {
             let error = InferenceError::new(kind, "test", "test", None);
@@ -69,9 +79,9 @@ mod tests {
         for (class, expected) in [
             (ErrorClass::RateLimit, 429),
             (ErrorClass::Timeout, 504),
-            (ErrorClass::Authentication, 502),
-            (ErrorClass::Authorization, 502),
-            (ErrorClass::InvalidRequest, 502),
+            (ErrorClass::Authentication, 401),
+            (ErrorClass::Authorization, 403),
+            (ErrorClass::InvalidRequest, 400),
             (ErrorClass::Transport, 502),
             (ErrorClass::Upstream, 502),
             (ErrorClass::Internal, 502),

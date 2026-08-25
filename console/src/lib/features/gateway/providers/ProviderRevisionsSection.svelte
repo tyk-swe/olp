@@ -13,6 +13,7 @@
     type Provider,
     type ProviderRevisionDiff
   } from '$lib/api/management/providers';
+  import { formatDate } from '$lib/format';
   import { invalidateProviderSummaries } from './providerCache';
   import {
     installProviderWithModels,
@@ -22,6 +23,7 @@
   let {
     current,
     busy,
+    canManage,
     run,
     onAcceptProvider,
     onResetModelPage,
@@ -29,6 +31,7 @@
   }: {
     current: Provider;
     busy: string;
+    canManage: boolean;
     run: RunProviderAction;
     onAcceptProvider: (provider: Provider) => void;
     onResetModelPage: () => void;
@@ -40,6 +43,7 @@
   let revisionFrom = $state('');
   let revisionTo = $state('');
   let revisionDiff = $state<ProviderRevisionDiff | null>(null);
+  let comparisonError = $state('');
   const revisions = createQuery(() => ({
     queryKey: ['provider-revisions', current.id, pagination.cursor ?? 'first'],
     queryFn: ({ signal }) =>
@@ -53,7 +57,11 @@
   });
 
   async function compare() {
-    if (!revisionFrom || !revisionTo || revisionFrom === revisionTo) return;
+    if (!revisionFrom || !revisionTo || revisionFrom === revisionTo) {
+      comparisonError = 'Choose two different revisions to compare.';
+      return;
+    }
+    comparisonError = '';
     await run('revision-diff', async () => {
       revisionDiff = await diffProviderRevisions(
         current.id,
@@ -64,6 +72,7 @@
   }
 
   async function restore(revisionId: string, revision: number) {
+    if (!canManage) return;
     if (
       !confirm(
         `Restore provider revision ${revision} as a new draft? The current credential remains selected.`
@@ -143,13 +152,13 @@
           class="button button-secondary"
           type="button"
           onclick={compare}
-          disabled={!revisionFrom ||
-            !revisionTo ||
-            revisionFrom === revisionTo ||
-            Boolean(busy)}
+          disabled={Boolean(busy)}
           >{busy === 'revision-diff' ? 'Comparing…' : 'Compare'}</button
         >
       </div>{/if}
+    {#if comparisonError}<p class="inline-problem" role="alert">
+        {comparisonError}
+      </p>{/if}
     {#if revisionDiff}<div
         class="revision-diff"
         role="region"
@@ -224,7 +233,7 @@
         >
           <div>
             <strong>Revision {item.revision}</strong><small
-              >Activated {new Date(item.activated_at).toLocaleString()} by
+              >Activated {formatDate(item.activated_at)} by
               <code>{item.activated_by}</code></small
             ><small
               >{item.model_count} models · credential metadata {item.historical_credential_version ==
@@ -233,15 +242,15 @@
                 : `version ${item.historical_credential_version}`}</small
             >
           </div>
-          <button
-            class="button button-secondary"
-            type="button"
-            onclick={() => restore(item.id, item.revision)}
-            disabled={Boolean(busy)}
-            >{busy === 'revision-restore'
-              ? 'Restoring…'
-              : 'Restore as draft'}</button
-          >
+          {#if canManage}<button
+              class="button button-secondary"
+              type="button"
+              onclick={() => restore(item.id, item.revision)}
+              disabled={Boolean(busy)}
+              >{busy === 'revision-restore'
+                ? 'Restoring…'
+                : 'Restore as draft'}</button
+            >{/if}
         </article>{/each}
     </div>
     <CursorPagination

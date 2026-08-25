@@ -11,6 +11,7 @@
     type ProviderCredential,
     type ProviderKindCapability
   } from '$lib/api/management/providers';
+  import { formatDate } from '$lib/format';
   import { requiresCredential } from './providerEditor';
   import { invalidateProviderSummaries } from './providerCache';
   import {
@@ -22,6 +23,7 @@
     current,
     providerSpec,
     busy,
+    canManage,
     run,
     onAcceptProvider,
     onResetModelPage,
@@ -30,6 +32,7 @@
     current: Provider;
     providerSpec: ProviderKindCapability | undefined;
     busy: string;
+    canManage: boolean;
     run: RunProviderAction;
     onAcceptProvider: (provider: Provider) => void;
     onResetModelPage: () => void;
@@ -49,7 +52,7 @@
 
   async function rotate(event: SubmitEvent) {
     event.preventDefault();
-    if (!credentialValue) return;
+    if (!credentialValue || !canManage) return;
     await run('rotate-credential', async () => {
       await rotateProviderCredential(current, credentialValue);
       credentialValue = '';
@@ -111,10 +114,14 @@
         autocomplete="new-password"
         bind:value={credentialValue}
         placeholder="New credential"
+        disabled={!canManage}
       /><button
         class="button button-secondary"
         type="submit"
-        disabled={!credentialValue || Boolean(busy) || !providerSpec}
+        disabled={!canManage ||
+          !credentialValue ||
+          Boolean(busy) ||
+          !providerSpec}
         >{busy === 'rotate-credential' ? 'Staging…' : 'Stage rotation'}</button
       >
     </form>{/if}
@@ -131,7 +138,7 @@
       {#each credentials.data ?? [] as credential (credential.id)}<li>
           <span
             ><strong>Version {credential.version}</strong><small
-              >{new Date(credential.created_at).toLocaleString()}</small
+              >{formatDate(credential.created_at)}</small
             ></span
           ><span
             class:success={credential.active}
@@ -147,7 +154,7 @@
                   : credential.draft_selected
                     ? 'pending activation'
                     : 'retired'}</span
-          >{#if !credential.active && !credential.draft_selected && !credential.revoked_at}<button
+          >{#if canManage && !credential.active && !credential.draft_selected && !credential.revoked_at}<button
               class="button button-secondary"
               type="button"
               onclick={() => revoke(credential)}

@@ -6,6 +6,7 @@
     getMediaJob,
     listMediaJobs
   } from '$lib/api/media-jobs';
+  import { errorMessage } from '$lib/api/http';
   import { cursorPaginationProps, resetCursor } from '$lib/api/pagination';
   import { formatDate } from '$lib/format';
   import { emptyMediaJobListState, type MediaJobListState } from './mediaJobListState';
@@ -57,7 +58,7 @@
 {#if jobId}
   <div class="page-header"><div><p class="eyebrow">Operations · Media job</p><h1 class="page-title">Media job detail</h1><p class="page-description">Lifecycle and reconciliation metadata only. Uploaded and generated media never appears in the console.</p></div><a class="button button-secondary" href={resolve('/media-jobs')}>All media jobs</a></div>
   {#if detail.isPending}<div class="loading-state" role="status">Loading media job…</div>
-  {:else if detail.isError}<div class="inline-problem" role="alert">The media job could not be loaded. <button class="text-button" type="button" onclick={() => detail.refetch()}>Retry</button></div>
+  {:else if detail.isError}<div class="inline-problem" role="alert">{errorMessage(detail.error, 'The media job could not be loaded.')} <button class="text-button" type="button" onclick={() => detail.refetch()}>Retry</button></div>
   {:else if detail.data}
     <section class="card job-detail" aria-labelledby="job-state-heading">
       <div class="section-heading"><div><p class="eyebrow">{detail.data.operation}</p><h2 id="job-state-heading">{detail.data.route}</h2></div><span class={`badge ${tone(detail.data.state)}`}>{detail.data.state}</span></div>
@@ -75,7 +76,7 @@
     <div class="filter-actions"><button class="button button-primary" type="submit">Apply filters</button><button class="button button-secondary" type="button" onclick={clear}>Clear</button></div>
   </form>
   {#if jobs.isPending}<div class="loading-state" role="status">Loading media jobs…</div>
-  {:else if jobs.isError}<div class="inline-problem" role="alert">Media jobs are unavailable. <button class="text-button" type="button" onclick={() => jobs.refetch()}>Retry</button></div>
+  {:else if jobs.isError}<div class="inline-problem" role="alert">{errorMessage(jobs.error, 'Media jobs are unavailable.')} <button class="text-button" type="button" onclick={() => jobs.refetch()}>Retry</button></div>
   {:else if jobs.data?.items.length === 0 && listState.history.length === 0}<section class="card empty-state"><p>No media jobs match these filters.</p></section>
   {:else}<div class="table-shell"><table class="data-table"><caption class="sr-only">Asynchronous media jobs</caption><thead><tr><th>Route / operation</th><th>Provider</th><th>State</th><th>Lifecycle</th><th>Progress</th><th>Updated</th><th><span class="sr-only">Actions</span></th></tr></thead><tbody>{#each jobs.data?.items ?? [] as job (job.id)}<tr><td><strong>{job.route}</strong><small>{job.operation}</small></td><td>{job.provider_name}<small>{job.provider_model}</small></td><td><span class={`badge ${tone(job.state)}`}>{job.state}</span></td><td>{job.lifecycle.replaceAll('_', ' ')}</td><td>{job.progress_percent == null ? '—' : `${job.progress_percent}%`}</td><td>{formatDate(job.updated_at)}</td><td><a class="button button-secondary" href={resolve(`/media-jobs/${job.id}`)}>View</a></td></tr>{/each}</tbody></table></div><CursorPagination {...cursorPaginationProps(listState, jobs.isPlaceholderData ? null : jobs.data?.nextCursor)} label="Media job pages" />{/if}
 {/if}

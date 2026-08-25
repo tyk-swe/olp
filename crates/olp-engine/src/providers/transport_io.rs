@@ -37,6 +37,21 @@ fn select_deadline(phase_deadline: Instant, attempt_deadline: Instant) -> (Insta
     }
 }
 
+/// The first-byte default is patience of last resort, never a cap.
+///
+/// For a unary completion the first byte *is* the whole generation, so a
+/// connector default that precedes the route's configured `overall_timeout`
+/// silently overrode it — every unary attempt on a 300s route died at 30s, and
+/// the resulting `Timeout` then burned each remaining target the same way. The
+/// operator's deadline governs; the idle watchdog, which detects a genuinely
+/// stalled stream, keeps its own shorter window.
+pub(in crate::providers) fn first_byte_deadline_within_attempt(
+    configured: Instant,
+    attempt_deadline: Instant,
+) -> Instant {
+    configured.max(attempt_deadline)
+}
+
 /// Provider-labelled response I/O policy.
 ///
 /// Keeping the label here preserves the connector-specific diagnostic text
@@ -108,8 +123,10 @@ impl ProviderResponseIo {
     {
         self.require_content_type(&response, "text/event-stream")?;
         let mut source: ReqwestByteStream = Box::pin(response.bytes_stream());
-        let (first_deadline, deadline_kind) =
-            select_deadline(first_byte_deadline, attempt_deadline);
+        let (first_deadline, deadline_kind) = select_deadline(
+            first_byte_deadline_within_attempt(first_byte_deadline, attempt_deadline),
+            attempt_deadline,
+        );
         let first_wait = first_deadline
             .checked_duration_since(Instant::now())
             .ok_or_else(|| self.first_byte_wait_timeout(deadline_kind))?;
@@ -246,8 +263,10 @@ impl ProviderResponseIo {
         let mut first = true;
         loop {
             let (wait, attempt_deadline_is_tighter) = if first {
-                let (deadline, deadline_kind) =
-                    select_deadline(first_byte_deadline, attempt_deadline);
+                let (deadline, deadline_kind) = select_deadline(
+                    first_byte_deadline_within_attempt(first_byte_deadline, attempt_deadline),
+                    attempt_deadline,
+                );
                 let wait = deadline
                     .checked_duration_since(Instant::now())
                     .ok_or_else(|| self.first_byte_wait_timeout(deadline_kind))?;
@@ -357,6 +376,7 @@ impl ProviderResponseIo {
         message: impl Into<String>,
     ) -> TransportError {
         TransportError {
+            upstream: Default::default(),
             phase,
             class,
             response_committed,

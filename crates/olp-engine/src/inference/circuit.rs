@@ -245,12 +245,15 @@ impl Breaker {
     }
 }
 
+/// A per-key quota is not a provider health signal. `RateLimit` is deliberately
+/// absent: one noisy API key's 429s would otherwise open the target for every
+/// other key, who then see `503 no_eligible_provider` for a provider that is
+/// perfectly healthy for them.
 const fn counts_toward_circuit(class: AttemptFailureClass) -> bool {
     matches!(
         class,
         AttemptFailureClass::Connect
             | AttemptFailureClass::Timeout
-            | AttemptFailureClass::RateLimit
             | AttemptFailureClass::UpstreamServer
     )
 }
@@ -290,6 +293,18 @@ mod tests {
             breaker.record_failure(target, class);
             assert!(breaker.try_acquire(target));
         }
+    }
+
+    #[test]
+    fn upstream_rate_limits_never_open_the_shared_target_circuit() {
+        let breaker = Breaker::new(1, Duration::from_secs(30));
+        let target = TargetId::new();
+        for _ in 0..10 {
+            breaker.record_failure(target, AttemptFailureClass::RateLimit);
+        }
+        assert!(breaker.is_selectable(target));
+        assert!(breaker.try_acquire(target));
+        assert_eq!(breaker.open_count(), 0);
     }
 
     #[test]
@@ -350,6 +365,43 @@ mod tests {
 
         assert!(!breaker.try_acquire(target));
         breaker.abandon_probe(target, current_permit);
+        assert!(breaker.try_acquire(target));
+    }
+
+    /// A streaming probe routinely outlives `open_duration`, at which point a
+    /// newer probe supersedes it. If the stale one then reported success while
+    /// dropping its permit, it closed a breaker the newer probe had just proved
+    /// is still broken.
+    #[test]
+    fn a_stale_probe_outcome_cannot_close_a_breaker_a_newer_probe_holds() {
+        let breaker = Breaker::new(1, Duration::from_millis(5));
+        let target = TargetId::new();
+        breaker
+            .inner
+            .lock()
+            .expect("circuit state lock poisoned")
+            .insert(
+                target,
+                CircuitState::Open {
+                    until: Instant::now(),
+                },
+            );
+        let stale = breaker
+            .try_acquire_permit(target)
+            .expect("expired open circuit admits a probe");
+        std::thread::sleep(Duration::from_millis(8));
+        let current = breaker
+            .try_acquire_permit(target)
+            .expect("a probe past open_duration is superseded");
+
+        breaker.record_success_for_optional_permit(target, Some(&stale));
+        assert!(
+            !breaker.try_acquire(target),
+            "the stale probe must not release the newer probe's lease"
+        );
+
+        // The permit-free call is what used to happen and would have closed it.
+        breaker.record_success_for_optional_permit(target, Some(&current));
         assert!(breaker.try_acquire(target));
     }
 

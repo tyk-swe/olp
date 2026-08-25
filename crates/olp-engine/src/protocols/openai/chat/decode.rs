@@ -11,7 +11,7 @@ use crate::domain::{
             MediaSource, Message as CanonicalMessage, MessageRole, Operation,
             ResponseFormat as CanonicalResponseFormat, SourceExtensions,
             ToolCall as CanonicalToolCall, ToolChoice as CanonicalToolChoice, ToolDefinition,
-            media_handle_from_inline_marker,
+            media_handle_from_inline_marker, mime_type_from_data_url,
         },
     },
     ids::{RouteSlug, RouteSlugError},
@@ -190,6 +190,7 @@ fn decode_content_part(
         ContentPart::ImageUrl { image_url, .. } => {
             collect_extra(&format!("{prefix}/image_url"), &image_url.extra, extensions);
             Ok(CanonicalContentPart::Image {
+                mime_type: mime_type_from_data_url(&image_url.url),
                 source: MediaSource::Uri(image_url.url),
                 detail: image_url.detail,
             })

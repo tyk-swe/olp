@@ -63,6 +63,13 @@ pub fn decode_embedding_request(
     if request.dimensions == Some(0) {
         return Err(EmbeddingCodecError::ZeroDimensions);
     }
+    // Validated before dispatch: the encoder rejects an unknown format too, but
+    // only after the provider has already been called and billed.
+    if let Some(format) = request.encoding_format.as_deref()
+        && !matches!(format, "float" | "base64")
+    {
+        return Err(EmbeddingCodecError::UnsupportedEncoding(format.to_owned()));
+    }
 
     let mut extensions = BTreeMap::new();
     collect_extra("", &request.extra, &mut extensions);

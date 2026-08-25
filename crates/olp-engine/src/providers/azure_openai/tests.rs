@@ -79,6 +79,7 @@ fn envelope(operation: Operation, mode: TransportMode) -> ProviderRequest {
             generation_id: RuntimeGenerationId::new(),
             route_id: RouteId::new(),
             target_id: TargetId::new(),
+            routing_id: TargetId::new(),
             provider_id: ProviderId::new(),
             provider_kind: ProviderKind::AzureOpenAi,
             upstream_model: "gpt-4o".to_owned(),

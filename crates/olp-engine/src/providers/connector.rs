@@ -3,13 +3,17 @@ use std::time::Duration;
 use zeroize::Zeroizing;
 
 /// Deadlines shared by every provider connector.
+///
+/// `first_byte` and `idle` are floors, not caps: whichever of them and the
+/// attempt deadline is later governs, so a route configured with a long
+/// `overall_timeout` is never cut short by a connector default.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct Timeouts {
     /// DNS, TCP, and TLS connection deadline.
     pub connect: Duration,
-    /// Deadline for receiving the first response byte.
+    /// Minimum time allowed for the first response byte.
     pub first_byte: Duration,
-    /// Resetting deadline between response events or body chunks.
+    /// Minimum resetting gap allowed between response events or body chunks.
     pub idle: Duration,
 }
 

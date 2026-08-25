@@ -1,13 +1,13 @@
 use axum::{
     Json,
     extract::{Path, Query, State, rejection::JsonRejection},
-    http::HeaderMap,
+    http::{HeaderMap, StatusCode},
     response::Response,
 };
 use chrono::{DateTime, Utc};
 use olp_db::{
     configuration::resources::ProviderRecord, configuration::resources::UpdateProvider,
-    store::Store,
+    idempotency::operations, store::Store,
 };
 use olp_engine::domain::{
     auth::Permission,
@@ -24,7 +24,7 @@ use crate::{
     bootstrap::provider_adapter::{ProviderConfigFields, provider_config, provider_connector},
     management::{
         error_mapping::map_configuration,
-        idempotency::require_idempotency_key,
+        idempotency::ReplayableMutation,
         json_payload::json_payload,
         pagination::{PageQuery, page},
         permissions::require_permission,
@@ -167,7 +167,7 @@ pub(crate) struct ProviderListResponse {
     tag = "providers",
     params(
         ("cursor" = Option<String>, Query),
-        ("limit" = Option<u16>, Query, minimum = 1, maximum = 100)
+        ("limit" = Option<u16>, Query, minimum = 1, maximum = 200, description = "Page size from 1 to 200; defaults to 50")
     ),
     responses(
         (status = 200, body = ProviderListResponse),
@@ -279,7 +279,8 @@ pub(crate) async fn update_provider(
     ),
     responses(
         (status = 200, body = ProviderMutationResponse),
-        (status = 409, description = "Provider is still referenced by an active route", body = Problem),
+        (status = 400, description = "Idempotency-Key is missing or invalid", body = Problem),
+        (status = 409, description = "Provider is still referenced by an active route, or the Idempotency-Key was already used for a different request", body = Problem),
         (status = 412, body = Problem)
     )
 )]
@@ -290,26 +291,49 @@ pub(crate) async fn disable_provider(
 ) -> Result<Response, Problem> {
     let principal = require_mutation_session(&state, &headers).await?;
     require_permission(&principal, Permission::ManageProviders)?;
+    let expected_etag = if_match(&headers)?;
+    let mutation = ReplayableMutation::new(
+        &state,
+        principal.user_id,
+        operations::PROVIDER_DISABLE,
+        &headers,
+        &ProviderMutationFingerprint {
+            provider_id,
+            expected_etag,
+        },
+    )?;
+    if let Some(replayed) = mutation.replayed().await? {
+        return Ok(replayed);
+    }
     let result = state
         .store()
         .disable_provider(
             provider_id,
-            if_match(&headers)?,
+            expected_etag,
             principal.user_id,
-            require_idempotency_key(&headers)?,
+            mutation.key(),
         )
         .await
         .map_err(map_configuration)?;
-    with_etag(
-        Json(ProviderMutationResponse {
-            provider_id,
-            etag: result.etag,
-            credential_id: None,
-            credential_version: None,
-            runtime_generation: result.release.as_ref().map(Into::into),
-        }),
-        result.etag,
-    )
+    mutation
+        .respond(
+            StatusCode::OK,
+            &ProviderMutationResponse {
+                provider_id,
+                etag: result.etag,
+                credential_id: None,
+                credential_version: None,
+                runtime_generation: result.release.as_ref().map(Into::into),
+            },
+            Some(result.etag),
+        )
+        .await
+}
+
+#[derive(Serialize)]
+pub(super) struct ProviderMutationFingerprint {
+    pub provider_id: Uuid,
+    pub expected_etag: Uuid,
 }
 
 #[utoipa::path(
@@ -321,7 +345,12 @@ pub(crate) async fn disable_provider(
         ("If-Match" = String, Header),
         ("Idempotency-Key" = String, Header)
     ),
-    responses((status = 200, body = ProviderDetailResponse), (status = 412, body = Problem))
+    responses(
+        (status = 200, body = ProviderDetailResponse),
+        (status = 400, description = "Idempotency-Key is missing or invalid", body = Problem),
+        (status = 409, description = "Idempotency-Key was already used or is in progress", body = Problem),
+        (status = 412, body = Problem)
+    )
 )]
 pub(crate) async fn restore_provider_as_draft(
     State(state): State<ManagementState>,
@@ -330,18 +359,34 @@ pub(crate) async fn restore_provider_as_draft(
 ) -> Result<Response, Problem> {
     let principal = require_mutation_session(&state, &headers).await?;
     require_permission(&principal, Permission::ManageProviders)?;
+    let expected_etag = if_match(&headers)?;
+    let mutation = ReplayableMutation::new(
+        &state,
+        principal.user_id,
+        operations::PROVIDER_RESTORE_AS_DRAFT,
+        &headers,
+        &ProviderMutationFingerprint {
+            provider_id,
+            expected_etag,
+        },
+    )?;
+    if let Some(replayed) = mutation.replayed().await? {
+        return Ok(replayed);
+    }
     let store = state.store();
     let etag = store
         .restore_provider_as_draft(
             provider_id,
-            if_match(&headers)?,
+            expected_etag,
             principal.user_id,
-            require_idempotency_key(&headers)?,
+            mutation.key(),
         )
         .await
         .map_err(map_configuration)?;
     let provider = load_provider_detail(store, provider_id).await?;
-    with_etag(Json(provider), etag)
+    mutation
+        .respond(StatusCode::OK, &provider, Some(etag))
+        .await
 }
 
 fn validate_provider_update(

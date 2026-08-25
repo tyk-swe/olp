@@ -21,6 +21,9 @@ pub enum Kind {
     RequestTimeout,
     GatewayTimeout,
     Upstream,
+    /// An upstream 4xx the gateway forwards with the provider's own status. A
+    /// permanently invalid request must not look like a retryable 502.
+    UpstreamRejected(u16),
     Cancelled,
     Canonical(ErrorClass),
 }
@@ -126,6 +129,24 @@ impl Error {
         )
     }
 
+    /// A request whose own estimate cannot fit the key's per-minute token
+    /// budget can never succeed, however long the caller waits. Reporting it as
+    /// a 429 with a `Retry-After` sends conforming clients into an endless
+    /// retry loop, so it is a client error with no retry hint.
+    #[must_use]
+    pub fn request_exceeds_token_limit(estimate: i64, tokens_per_minute: i64) -> Self {
+        Self::new(
+            Kind::InvalidRequest,
+            "request_exceeds_token_limit",
+            format!(
+                "This request needs about {estimate} tokens, which is more than the API key's \
+                 limit of {tokens_per_minute} tokens per minute. Retrying cannot succeed; \
+                 shorten the request, lower max_output_tokens, or raise the key's limit."
+            ),
+            None,
+        )
+    }
+
     #[must_use]
     pub fn unavailable(code: &'static str) -> Self {
         Self::new(
@@ -204,13 +225,28 @@ impl Error {
     #[must_use]
     pub fn from_transport(error: TransportError) -> Self {
         match error.class {
-            AttemptFailureClass::RateLimit => {
-                Self::new(Kind::RateLimit, "upstream_rate_limit", error.message, None)
-            }
+            AttemptFailureClass::RateLimit => Self::new(
+                Kind::RateLimit,
+                "upstream_rate_limit",
+                error.message,
+                error.upstream.retry_after,
+            ),
             AttemptFailureClass::Timeout => Self::timeout(),
-            AttemptFailureClass::UpstreamClient => {
-                Self::bad_gateway("upstream_rejected", error.message)
-            }
+            AttemptFailureClass::UpstreamClient => error
+                .upstream
+                .status
+                .filter(|status| forwardable_upstream_status(*status))
+                .map_or_else(
+                    || Self::bad_gateway("upstream_rejected", error.message.clone()),
+                    |status| {
+                        Self::new(
+                            Kind::UpstreamRejected(status),
+                            "upstream_rejected",
+                            error.message.clone(),
+                            None,
+                        )
+                    },
+                ),
             AttemptFailureClass::Connect | AttemptFailureClass::UpstreamServer => {
                 Self::bad_gateway("upstream_unavailable", error.message)
             }
@@ -237,13 +273,20 @@ impl Error {
     }
 }
 
+/// Upstream client-fault statuses the gateway repeats verbatim. Anything else
+/// a provider might answer with stays a 502: the caller cannot act on it, and
+/// inventing a status the provider never sent would be worse than a bad gateway.
+const fn forwardable_upstream_status(status: u16) -> bool {
+    matches!(status, 400 | 401 | 403 | 404 | 405 | 409 | 413 | 415 | 422)
+}
+
 #[cfg(test)]
 mod tests {
     use std::time::Duration;
 
     use crate::domain::{
         canonical::events::{Error as CanonicalError, ErrorClass},
-        ports::{AttemptFailureClass, TransportError, TransportPhase},
+        ports::{AttemptFailureClass, TransportError, TransportPhase, UpstreamSignal},
     };
     use crate::inference::limits::LimitDimension;
 
@@ -327,6 +370,7 @@ mod tests {
 
         for (class, kind, code, message) in cases {
             let error = Error::from_transport(TransportError {
+                upstream: Default::default(),
                 phase: TransportPhase::FirstByte,
                 class,
                 response_committed: false,
@@ -336,6 +380,65 @@ mod tests {
             assert_eq!(error.code(), code, "unexpected code for {class:?}");
             assert_eq!(error.message(), message, "unexpected message for {class:?}");
         }
+    }
+
+    #[test]
+    fn an_upstream_client_fault_keeps_the_provider_status_and_a_rate_limit_keeps_retry_after() {
+        for (status, expected) in [
+            (400, Kind::UpstreamRejected(400)),
+            (401, Kind::UpstreamRejected(401)),
+            (403, Kind::UpstreamRejected(403)),
+            (404, Kind::UpstreamRejected(404)),
+            (413, Kind::UpstreamRejected(413)),
+            (422, Kind::UpstreamRejected(422)),
+            // Not a status a caller can act on: stays a bad gateway.
+            (418, Kind::Upstream),
+            (451, Kind::Upstream),
+        ] {
+            let error = Error::from_transport(TransportError {
+                phase: TransportPhase::FirstByte,
+                class: AttemptFailureClass::UpstreamClient,
+                response_committed: false,
+                message: "context length exceeded".to_owned(),
+                upstream: UpstreamSignal::from_status(status),
+            });
+            assert_eq!(error.kind(), expected, "status {status}");
+            assert_eq!(error.code(), "upstream_rejected");
+            assert_eq!(error.message(), "context length exceeded");
+        }
+
+        let unknown = Error::from_transport(TransportError {
+            phase: TransportPhase::FirstByte,
+            class: AttemptFailureClass::UpstreamClient,
+            response_committed: false,
+            message: "no status observed".to_owned(),
+            upstream: UpstreamSignal::default(),
+        });
+        assert_eq!(unknown.kind(), Kind::Upstream);
+    }
+
+    #[test]
+    fn an_upstream_rate_limit_forwards_its_retry_after() {
+        let error = Error::from_transport(TransportError {
+            phase: TransportPhase::FirstByte,
+            class: AttemptFailureClass::RateLimit,
+            response_committed: false,
+            message: "slow down".to_owned(),
+            upstream: UpstreamSignal::from_status(429)
+                .with_retry_after(Some(Duration::from_secs(60))),
+        });
+        assert_eq!(error.kind(), Kind::RateLimit);
+        assert_eq!(error.retry_after(), Some(Duration::from_secs(60)));
+    }
+
+    #[test]
+    fn an_absurd_upstream_retry_after_is_clamped() {
+        let signal = UpstreamSignal::from_status(429)
+            .with_retry_after(Some(Duration::from_secs(24 * 60 * 60)));
+        assert_eq!(
+            signal.retry_after,
+            Some(crate::domain::ports::MAX_UPSTREAM_RETRY_AFTER)
+        );
     }
 
     #[test]

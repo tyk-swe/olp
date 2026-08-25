@@ -7,7 +7,8 @@ use axum::{
 use olp_db::{
     configuration::NewProviderDraft, idempotency::Outcome, idempotency::Replayable,
     idempotency::Response as IdempotencyResponse, idempotency::fingerprint,
-    idempotency::secret_digest, security::aad::credential as credential_aad,
+    idempotency::operations, idempotency::secret_digest,
+    security::aad::credential as credential_aad,
 };
 use olp_engine::domain::{
     provider::ProviderAuthMode,
@@ -22,10 +23,10 @@ use uuid::Uuid;
 
 use crate::management::{
     error_mapping::{map_configuration, map_persistence},
-    idempotency::{idempotency_http_response, require_idempotency_key},
+    idempotency::{ReplayableMutation, idempotency_http_response, require_idempotency_key},
     json_payload::json_payload,
     permissions::require_provider_manager,
-    preconditions::{if_match, with_etag},
+    preconditions::if_match,
     response_policy::RuntimeGenerationResponse,
     secrets::WriteOnlySecret,
     sessions::require_mutation_session,
@@ -36,6 +37,8 @@ use crate::{
     public_http::problem::FieldErrors,
     public_http::problem::Problem,
 };
+
+use super::manage::ProviderMutationFingerprint;
 
 #[derive(Deserialize, ToSchema)]
 pub(crate) struct CreateProviderRequest {
@@ -134,7 +137,7 @@ pub(crate) struct ProviderResponse {
     request_body = CreateProviderRequest,
     params(("Idempotency-Key" = String, Header, description = "Unique provider-draft creation key")),
     responses(
-        (status = 201, description = "Provider draft created", body = ProviderResponse),
+        (status = 201, description = "Provider draft created", body = ProviderResponse, headers(("Location" = String, description = "Path of the created resource"))),
         (status = 400, description = "Idempotency-Key is missing or invalid", body = Problem),
         (status = 401, description = "No active session", body = Problem),
         (status = 403, description = "Insufficient role, CSRF, or origin failure", body = Problem),
@@ -304,6 +307,9 @@ pub(crate) async fn create_provider(
                     },
                     Some(format!("\"{}\"", created.etag)),
                 )
+                .and_then(|response| {
+                    response.with_location(format!("/api/v1/providers/{}", created.provider_id))
+                })
             },
         )
         .await
@@ -346,29 +352,41 @@ pub(crate) async fn activate_provider(
     let principal = require_mutation_session(&state, &headers).await?;
     require_provider_manager(&principal)?;
     let expected_etag = if_match(&headers)?;
-    let idempotency_key = require_idempotency_key(&headers)?;
+    let mutation = ReplayableMutation::new(
+        &state,
+        principal.user_id,
+        operations::PROVIDER_ACTIVATE,
+        &headers,
+        &ProviderMutationFingerprint {
+            provider_id,
+            expected_etag,
+        },
+    )?;
+    if let Some(replayed) = mutation.replayed().await? {
+        return Ok(replayed);
+    }
     let activated = state
         .store()
         .activate_provider(
             provider_id,
             expected_etag,
             principal.user_id,
-            idempotency_key,
+            mutation.key(),
         )
         .await
         .map_err(map_configuration)?;
-    with_etag(
-        (
+    mutation
+        .respond(
             StatusCode::OK,
-            Json(ProviderActivationResponse {
+            &ProviderActivationResponse {
                 id: provider_id,
                 state: "active".to_owned(),
                 etag: activated.etag,
                 runtime_generation: (&activated.release).into(),
-            }),
-        ),
-        activated.etag,
-    )
+            },
+            Some(activated.etag),
+        )
+        .await
 }
 
 #[derive(Debug, Serialize, ToSchema)]

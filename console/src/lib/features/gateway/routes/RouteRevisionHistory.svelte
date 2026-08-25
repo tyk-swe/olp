@@ -10,9 +10,13 @@
     type RouteRevision,
     type RouteRevisionDiff
   } from '$lib/api/management/routes';
+  import { useRole } from '$lib/auth/useRole.svelte';
+  import { formatDate } from '$lib/format';
 
   let { routeId }: { routeId: string } = $props();
   const queryClient = useQueryClient();
+  const access = useRole();
+  const canManage = $derived(access.can('routes.manage'));
   const revisions = createQuery(() => ({
     queryKey: ['route-revisions', routeId],
     queryFn: () => listRouteRevisions(routeId)
@@ -47,10 +51,10 @@
   }
 
   async function restore(revision: RouteRevision) {
+    if (!canManage) return;
     if (!confirm(`Restore route revision ${revision.revision} as a new draft? The live revision keeps serving traffic until the draft is activated.`)) return;
     await run(`restore-${revision.id}`, async () => {
       const restored = await restoreRouteRevision(routeId, revision.id);
-      await queryClient.invalidateQueries({ queryKey: ['route-drafts'] });
       await queryClient.invalidateQueries({ queryKey: ['route-draft-page'] });
       await goto(resolve(`/routes/${restored.id}`));
     });
@@ -76,7 +80,7 @@
       <article class="card"><p>Target changes</p>{#if revisionDiff.targets_added.length}<strong>Added</strong><ul>{#each revisionDiff.targets_added as item (item)}<li><code>{item}</code></li>{/each}</ul>{/if}{#if revisionDiff.targets_removed.length}<strong>Removed</strong><ul>{#each revisionDiff.targets_removed as item (item)}<li><code>{item}</code></li>{/each}</ul>{/if}{#if revisionDiff.targets_changed.length}<strong>Changed</strong><ul>{#each revisionDiff.targets_changed as item (item)}<li><code>{item}</code></li>{/each}</ul>{/if}{#if !revisionDiff.targets_added.length && !revisionDiff.targets_removed.length && !revisionDiff.targets_changed.length}<strong>None</strong>{/if}</article>
     </section>
   {/if}
-  <div class="table-shell revision-table-shell"><table class="data-table revision-table"><thead><tr><th>Revision</th><th>Activated</th><th>Operations</th><th>Deadline / attempts</th><th>Targets</th><th><span class="sr-only">Actions</span></th></tr></thead><tbody>{#each revisions.data as revision (revision.id)}<tr><td data-label="Revision"><strong>Revision {revision.revision}</strong><br /><code>{revision.id}</code></td><td data-label="Activated">{new Date(revision.activated_at).toLocaleString()}</td><td data-label="Operations">{revision.operations.join(', ')}</td><td data-label="Deadline / attempts">{revision.overall_timeout_ms.toLocaleString()} ms / {revision.max_attempts}</td><td data-label="Targets">{revision.targets.length}</td><td class="revision-action"><button class="button button-secondary" type="button" onclick={() => restore(revision)} disabled={Boolean(busy)}>{busy === `restore-${revision.id}` ? 'Restoring…' : 'Restore as draft'}</button></td></tr>{/each}</tbody></table></div>
+  <div class="table-shell revision-table-shell"><table class="data-table revision-table"><thead><tr><th>Revision</th><th>Activated</th><th>Operations</th><th>Deadline / attempts</th><th>Targets</th><th><span class="sr-only">Actions</span></th></tr></thead><tbody>{#each revisions.data as revision (revision.id)}<tr><td data-label="Revision"><strong>Revision {revision.revision}</strong><br /><code>{revision.id}</code></td><td data-label="Activated">{formatDate(revision.activated_at)}</td><td data-label="Operations">{revision.operations.join(', ')}</td><td data-label="Deadline / attempts">{revision.overall_timeout_ms.toLocaleString()} ms / {revision.max_attempts}</td><td data-label="Targets">{revision.targets.length}</td><td class="revision-action">{#if canManage}<button class="button button-secondary" type="button" onclick={() => restore(revision)} disabled={Boolean(busy)}>{busy === `restore-${revision.id}` ? 'Restoring…' : 'Restore as draft'}</button>{/if}</td></tr>{/each}</tbody></table></div>
 {/if}
 
 <style>

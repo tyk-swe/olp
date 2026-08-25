@@ -15,6 +15,7 @@ use crate::{
         RecentAuthPurpose, SessionSecurityContext, consume_recent_authentication,
         insert_versioned_session, install_recent_authentication, revoke_user_sessions,
     },
+    identity::invitations::retire_invitations_on_access_loss,
     store::Store,
 };
 
@@ -69,6 +70,17 @@ impl Store {
                     .fetch_one(&mut *transaction)
                     .await?;
                     let _revoked = revoke_user_sessions(&mut transaction, user.id).await?;
+                    // A pending invitation is an out-of-band grant. The sync
+                    // revoked this user's sessions; the tokens they minted
+                    // while they still held ManageAccess must go with them.
+                    let retired = retire_invitations_on_access_loss(
+                        &mut transaction,
+                        user.id,
+                        mapped_role,
+                        true,
+                        user.id,
+                    )
+                    .await?;
                     insert_audit(
                         &mut transaction,
                         Some(user.id),
@@ -78,6 +90,17 @@ impl Store {
                         now,
                     )
                     .await?;
+                    if retired > 0 {
+                        insert_audit(
+                            &mut transaction,
+                            Some(user.id),
+                            "invitation.revoke_for_oidc_role_change",
+                            "user",
+                            &user.id.to_string(),
+                            now,
+                        )
+                        .await?;
+                    }
                     insert_audit(
                         &mut transaction,
                         Some(user.id),

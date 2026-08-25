@@ -80,11 +80,6 @@
   onDestroy(() => authLifecycle.abortAuthenticationWork());
 </script>
 
-<div class="step-count" aria-label="Setup step 1 of 6">
-  <span>Step 1 of 6</span>
-  <span class="progress" aria-hidden="true"><span></span></span>
-</div>
-
 <div class="heading">
   <p class="eyebrow">Installation owner</p>
   <h2>Create your account</h2>
@@ -193,33 +188,6 @@
 <p class="privacy-note">Credentials are sent only to this installation and are never written to console storage.</p>
 
 <style>
-  .step-count {
-    display: flex;
-    align-items: center;
-    gap: 0.75rem;
-    margin-bottom: 2.2rem;
-    color: var(--foreground-muted);
-    font-size: 0.75rem;
-    font-weight: 700;
-  }
-
-  .progress {
-    display: block;
-    width: 4.5rem;
-    height: 0.25rem;
-    overflow: hidden;
-    border-radius: 999px;
-    background: var(--surface-subtle);
-  }
-
-  .progress span {
-    display: block;
-    width: 16.667%;
-    height: 100%;
-    border-radius: inherit;
-    background: var(--accent);
-  }
-
   .heading {
     margin-bottom: 1.75rem;
   }

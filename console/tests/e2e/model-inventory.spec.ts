@@ -103,3 +103,63 @@ test('model inventory pages the global catalog and updates through provider ETag
   expect(seenCursors).toContain('opaque-next-model');
   expect(mutationEtag).toBe('"01980000-0000-7000-8000-000000000109"');
 });
+
+test('a rejected eligibility change restores the stored checkbox state', async ({
+  page
+}) => {
+  await mockSession(page, sessionOptions);
+
+  await page.route('**/api/v1/provider-models**', async (route) => {
+    await route.fulfill({
+      json: {
+        items: [
+          {
+            provider_id: ids.provider,
+            provider_name: 'production-openai',
+            provider_kind: 'openai',
+            model: certifiedModelRecord
+          }
+        ],
+        next_cursor: null
+      }
+    });
+  });
+  await page.route('**/api/v1/providers/**', async (route) => {
+    const request = route.request();
+    const pathname = new URL(request.url()).pathname;
+    if (
+      pathname === `/api/v1/providers/${ids.provider}` &&
+      request.method() === 'GET'
+    ) {
+      await route.fulfill({
+        json: providerRecord('active', [certifiedModelRecord])
+      });
+      return;
+    }
+    if (request.method() === 'PATCH') {
+      await route.fulfill({
+        status: 409,
+        json: {
+          status: 409,
+          title: 'Conflict',
+          detail: 'The provider changed since this page loaded.'
+        }
+      });
+      return;
+    }
+    failUnexpectedApiRequest(route);
+  });
+
+  await page.goto('/models');
+  const eligibility = page.getByRole('checkbox', { name: 'Enabled' });
+  await expect(eligibility).toBeChecked();
+
+  await eligibility.uncheck();
+
+  // The browser flipped the box optimistically; a rejected mutation must not
+  // leave the row claiming an eligibility the gateway never stored.
+  await expect(
+    page.getByText('The provider changed since this page loaded.')
+  ).toBeVisible();
+  await expect(page.getByRole('checkbox', { name: 'Enabled' })).toBeChecked();
+});

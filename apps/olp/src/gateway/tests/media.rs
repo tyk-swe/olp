@@ -316,8 +316,12 @@ async fn responses_scope_authorization_precedes_json_errors_and_media_staging() 
     }
 }
 
+/// OpenAI's own documented invocation is `curl -F file=@… -F model=…`, so a
+/// route-restricted key must be able to send the file first. Authorization is
+/// deferred to the `model` field wherever it appears; files stream to the
+/// bounded spool the key's reservation already covers.
 #[tokio::test]
-async fn restricted_multipart_key_rejects_file_before_model_without_spooling() {
+async fn a_route_restricted_key_may_send_the_file_before_the_model() {
     let (mut state, key) = test_state(false);
     let spool = Arc::new(CountingAdmissionSpool::default());
     state.replace_media_spool_for_test(spool.clone());
@@ -334,8 +338,49 @@ async fn restricted_multipart_key_rejects_file_before_model_without_spooling() {
     )
     .to_owned();
     let response = post_multipart(&state, &key, "/openai/v1/images/edits", body).await;
-    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-    assert_eq!(spool.puts.load(Ordering::SeqCst), 0);
+    // The spool is reached, which is the point: the request is no longer
+    // rejected on field order alone.
+    assert_eq!(spool.puts.load(Ordering::SeqCst), 1);
+    assert_ne!(
+        response.status(),
+        StatusCode::BAD_REQUEST,
+        "documented OpenAI field ordering must not be a client error"
+    );
+}
+
+#[tokio::test]
+async fn a_route_restricted_multipart_request_without_a_model_is_rejected() {
+    let (mut state, key) = test_state(false);
+    let recording = recording_spool();
+    state.replace_media_spool_for_test(recording.clone());
+    restrict_api_key_to_route(&state, RouteSlug::parse("default").unwrap());
+    for model_field in ["", "unauthorized-route"] {
+        let mut body = concat!(
+            "--olp-test-boundary\r\n",
+            "Content-Disposition: form-data; name=\"image\"; filename=\"fixture.png\"\r\n",
+            "Content-Type: image/png\r\n\r\n",
+            "staged-image\r\n",
+        )
+        .to_owned();
+        if !model_field.is_empty() {
+            body.push_str(&format!(
+                "--olp-test-boundary\r\nContent-Disposition: form-data;                  name=\"model\"\r\n\r\n{model_field}\r\n"
+            ));
+        }
+        body.push_str("--olp-test-boundary--\r\n");
+        let response = post_multipart(&state, &key, "/openai/v1/images/edits", body).await;
+        assert!(
+            response.status().is_client_error(),
+            "{model_field:?} must not be admitted"
+        );
+    }
+    // Every file staged for a rejected request is cleaned up.
+    for handle in recording.handles() {
+        assert!(matches!(
+            recording.open(&handle).await,
+            Err(olp_engine::domain::ports::MediaSpoolError::NotFound)
+        ));
+    }
 }
 
 #[tokio::test]

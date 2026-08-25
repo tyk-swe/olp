@@ -14,6 +14,7 @@
     type Provider
   } from '$lib/api/management/providers';
   import { emptyCursorHistory } from '$lib/api/pagination';
+  import { useRole } from '$lib/auth/useRole.svelte';
   import {
     acceptRemote,
     beginReload,
@@ -42,6 +43,8 @@
   let { providerId }: { providerId: string } = $props();
 
   const queryClient = useQueryClient();
+  const access = useRole();
+  const canManage = $derived(access.can('providers.manage'));
   const provider = createQuery(() => ({
     queryKey: ['provider', providerId],
     queryFn: ({ signal }) => getProvider(providerId, signal),
@@ -154,7 +157,7 @@
   }
 
   async function saveProvider(current: Provider) {
-    if (!providerSpec) return;
+    if (!providerSpec || !canManage) return;
     await run('save', async () => {
       if (!sync.snapshotEtag)
         throw new Error('Reload the provider before saving.');
@@ -236,6 +239,9 @@
   </div>
 {:else}
   {@const current = provider.data}
+  {#if !canManage}<p class="read-only-note" role="note">
+      Your role can view this provider but not change, test, or activate it.
+    </p>{/if}
   {#if current.pending_activation}<div class="pending-banner" role="status">
       <strong>Revision {current.active_revision} remains live.</strong><span
         >Draft configuration and the draft-selected credential are not serving
@@ -249,6 +255,7 @@
       {providerSpec}
       bind:editValues
       {busy}
+      {canManage}
       {run}
       onTouch={touch}
       onSave={() => saveProvider(current)}
@@ -260,6 +267,7 @@
       {current}
       {providerSpec}
       {busy}
+      {canManage}
       {run}
       onAcceptProvider={acceptProvider}
       onResetModelPage={resetModelPage}
@@ -269,6 +277,7 @@
   <ProviderModelsSection
     {current}
     {busy}
+    {canManage}
     {run}
     {reloadVersion}
     bind:pageState={modelPageState}
@@ -279,6 +288,7 @@
   <ProviderRevisionsSection
     {current}
     {busy}
+    {canManage}
     {run}
     onAcceptProvider={acceptProvider}
     onResetModelPage={resetModelPage}

@@ -199,26 +199,40 @@ async fn raw_media_delayed_headers_use_the_bounded_header_wait() {
     assert!(!failure.response_committed);
 }
 
+/// Binary media keeps a first-body deadline distinct from the header phase.
+/// The bound is the attempt deadline, not the connector's first-byte default:
+/// the operator's configured route/target timeout governs how long a response
+/// may take, and a shorter default silently overrode it.
 #[tokio::test]
 async fn binary_media_has_a_distinct_first_body_deadline_after_headers() {
     let headers = b"HTTP/1.1 200 OK\r\nContent-Type: audio/mpeg\r\nContent-Length: 9\r\nConnection: close\r\n\r\n";
-    let (base_url, _) = spawn_mock(MockResponse {
-        chunks: vec![
-            (Duration::ZERO, headers.to_vec()),
-            (Duration::from_millis(150), b"mp3-audio".to_vec()),
-        ],
-    })
-    .await;
-    let connector = test_connector(
-        &base_url,
-        Timeouts {
-            first_byte: Duration::from_millis(25),
-            idle: Duration::from_secs(1),
-            ..Timeouts::default()
-        },
-    );
+    let mock = || {
+        spawn_mock(MockResponse {
+            chunks: vec![
+                (Duration::ZERO, headers.to_vec()),
+                (Duration::from_millis(150), b"mp3-audio".to_vec()),
+            ],
+        })
+    };
+    let timeouts = Timeouts {
+        first_byte: Duration::from_millis(25),
+        idle: Duration::from_secs(1),
+        ..Timeouts::default()
+    };
+
+    // The route allows 2s, so the 150ms body still arrives.
+    let (base_url, _guard) = mock().await;
+    let connector = test_connector(&base_url, timeouts);
     let mut request = speech_request(false);
     request.media = Some(Arc::new(RecordingMediaSpool::default()));
+    assert!(connector.execute(request).await.is_ok());
+
+    // A route that really is that short still cuts the attempt off.
+    let (base_url, _guard) = mock().await;
+    let connector = test_connector(&base_url, timeouts);
+    let mut request = speech_request(false);
+    request.media = Some(Arc::new(RecordingMediaSpool::default()));
+    request.attempt.timeout = crate::domain::ids::DurationMs::new(25);
 
     let failure = connector.execute(request).await.unwrap_err();
     assert_eq!(failure.phase, TransportPhase::FirstByte);

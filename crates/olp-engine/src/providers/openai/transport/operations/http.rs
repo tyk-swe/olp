@@ -1,9 +1,10 @@
 use crate::domain::ports::{AttemptFailureClass, ProviderRequest, TransportError, TransportPhase};
-use http::{HeaderMap, HeaderValue, StatusCode, header};
+use http::{HeaderMap, HeaderValue, header};
 use reqwest::{Method, Response, multipart};
 use tokio::time::{Instant, timeout};
 
 use super::super::{Connector, errors::*, streams::*};
+use crate::providers::transport_common::upstream_response_error;
 use crate::providers::{transport_common::transport_error, transport_io::bounded_duration};
 
 impl Connector {
@@ -269,6 +270,7 @@ impl Connector {
         attempt_deadline: Instant,
     ) -> TransportError {
         let status = response.status();
+        let headers = response.headers().clone();
         let first_byte_deadline = Instant::now() + self.config.timeouts.first_byte;
         let message = match read_bounded_body(
             response,
@@ -282,15 +284,6 @@ impl Connector {
             Ok(body) => safe_upstream_error_message(status, &body, self.api_key.expose()),
             Err(_) => format!("OpenAI returned HTTP {status}"),
         };
-        let class = if status == StatusCode::REQUEST_TIMEOUT {
-            AttemptFailureClass::Timeout
-        } else if status == StatusCode::TOO_MANY_REQUESTS {
-            AttemptFailureClass::RateLimit
-        } else if status.is_server_error() {
-            AttemptFailureClass::UpstreamServer
-        } else {
-            AttemptFailureClass::UpstreamClient
-        };
-        transport_error(TransportPhase::FirstByte, class, false, message)
+        upstream_response_error(TransportPhase::FirstByte, status, &headers, message)
     }
 }

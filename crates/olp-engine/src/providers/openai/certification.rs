@@ -282,6 +282,7 @@ pub(in crate::providers) async fn execute_capability_probe(
             generation_id: RuntimeGenerationId::new(),
             route_id: RouteId::new(),
             target_id: TargetId::new(),
+            routing_id: TargetId::new(),
             provider_id: ProviderId::new(),
             provider_kind,
             upstream_model: upstream_model.to_owned(),

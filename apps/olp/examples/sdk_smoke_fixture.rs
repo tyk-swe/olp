@@ -58,6 +58,7 @@ impl ProviderTransport for StaticCanonicalTransport {
                 || request.operation.route().map(RouteSlug::as_str) != Some(ROUTE_SLUG)
             {
                 return Err(TransportError {
+                    upstream: Default::default(),
                     phase: TransportPhase::Body,
                     class: AttemptFailureClass::Protocol,
                     response_committed: false,

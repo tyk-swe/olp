@@ -29,7 +29,7 @@ use crate::{
     public_http::json_media::{admit_anthropic_messages, cleanup_admitted},
     public_http::streaming_response::{
         ProtocolStreamEncoder, encode_protocol_sse_frames, encode_server_sse_frame,
-        protocol_streaming_response,
+        precommit_stream_failure, protocol_streaming_response,
     },
 };
 
@@ -67,10 +67,13 @@ pub(super) async fn messages(
     } else {
         TransportMode::Unary
     };
-    let execution = execute_event_operation(&state, &principal, operation, mode)
+    let mut execution = execute_event_operation(&state, &principal, operation, mode)
         .await
         .map_err(ProtocolError::anthropic)?;
     if streaming {
+        if let Some(failure) = precommit_stream_failure(&mut execution).await {
+            return Err(ProtocolError::anthropic(failure));
+        }
         let encoder = AnthropicHttpStreamEncoder(Encoder::new(
             execution.route_slug.as_str(),
             format!("msg_{}", execution.request_id.simple()),

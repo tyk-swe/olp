@@ -326,14 +326,17 @@ async fn enforce_request_limits_inner(
                 return Err(request_body_timeout().into());
             }
         };
+        let requested_route =
+            endpoint.and_then(|endpoint| endpoint.route_from_json(parts.uri.path(), &bytes));
         let local_metadata = local_metadata.map(|mut metadata| {
-            if let Some(route) =
-                endpoint.and_then(|endpoint| endpoint.route_from_json(parts.uri.path(), &bytes))
-            {
+            if let Some(route) = requested_route.clone() {
                 metadata.route_slug = route;
             }
             metadata
         });
+        let requested_route = requested_route
+            .as_deref()
+            .and_then(|slug| olp_engine::domain::ids::RouteSlug::parse(slug).ok());
         let requested_tokens = estimate_http_json_request_tokens(
             endpoint
                 .map(InferenceEndpoint::token_estimate)
@@ -343,7 +346,14 @@ async fn enforce_request_limits_inner(
         // Protocol-shaped misses remain authenticated, but capability-free
         // requests must reach the router fallback without requiring a limiter.
         let reservation = if let (Some(principal), Some(_)) = (&principal, endpoint_capability) {
-            match reserve_http_inference_limits(state, principal, requested_tokens).await {
+            match reserve_http_inference_limits(
+                state,
+                principal,
+                requested_route.as_ref(),
+                requested_tokens,
+            )
+            .await
+            {
                 Ok(reservation) => reservation,
                 Err(error) => {
                     if let Some(metadata) = local_metadata.clone() {
@@ -373,7 +383,7 @@ async fn enforce_request_limits_inner(
             .unwrap_or(TokenEstimate::Default),
     );
     let reservation = if let (Some(principal), Some(_)) = (&principal, endpoint_capability) {
-        match reserve_http_inference_limits(state, principal, requested_tokens).await {
+        match reserve_http_inference_limits(state, principal, None, requested_tokens).await {
             Ok(reservation) => reservation,
             Err(error) => {
                 if let Some(metadata) = local_metadata.clone() {

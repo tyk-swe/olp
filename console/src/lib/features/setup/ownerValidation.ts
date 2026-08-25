@@ -11,7 +11,7 @@ export function validateOwner(values: OwnerFormValues): OwnerFormErrors {
   const errors: OwnerFormErrors = {};
   const displayName = values.displayName.trim();
   const email = values.email.trim();
-  if (!displayName) errors.displayName = 'Enter your name.';
+  if (!displayName) errors.displayName = 'Enter a display name.';
   else if (displayName.length > 100) errors.displayName = 'Use 100 characters or fewer.';
   if (!email) errors.email = 'Enter your email address.';
   // Client-side shape check only; the API remains the authoritative email validator.

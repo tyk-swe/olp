@@ -16,7 +16,11 @@
     setProviderModel,
     type ProviderModelInventory
   } from '$lib/api/management/providers';
+  import { errorMessage } from '$lib/api/http';
+  import { useRole } from '$lib/auth/useRole.svelte';
 
+  const access = useRole();
+  const canManage = $derived(access.can('providers.manage'));
   const queryClient = useQueryClient();
   const pagination = $state(emptyCursorHistory());
   const models = createQuery(() => ({
@@ -29,7 +33,11 @@
   let search = $state('');
   let surface = $state('all');
   let busyModel = $state('');
-  let errorMessage = $state('');
+  // Bumped whenever a toggle fails so the eligibility checkboxes are rebuilt
+  // from stored state; the browser already flipped them optimistically, and a
+  // one-way `checked` binding will not write back an unchanged value.
+  let eligibilityVersion = $state(0);
+  let mutationError = $state('');
   let notice = $state('');
 
   const inventory = $derived(models.data?.items ?? []);
@@ -46,12 +54,13 @@
   const providerCount = $derived(new Set(inventory.map((entry) => entry.provider_id)).size);
 
   function message(error: unknown) {
-    return error instanceof Error ? error.message : 'The model inventory could not be loaded.';
+    return errorMessage(error, 'The model inventory could not be loaded.');
   }
 
   async function toggle(entry: ProviderModelInventory, enabled: boolean) {
+    if (!canManage) return;
     busyModel = entry.model.id;
-    errorMessage = '';
+    mutationError = '';
     notice = '';
     try {
       const provider = await getProvider(entry.provider_id);
@@ -63,7 +72,11 @@
       ]);
       notice = `Model eligibility staged. Activate ${entry.provider_name} to apply the change.`;
     } catch (error) {
-      errorMessage = message(error);
+      mutationError = message(error);
+      eligibilityVersion += 1;
+      await queryClient.invalidateQueries({
+        queryKey: ['provider-model-inventory-page']
+      });
     } finally {
       busyModel = '';
     }
@@ -75,8 +88,9 @@
 
 <div class="page-header">
   <div><p class="eyebrow">Gateway</p><h1 class="page-title">Model inventory</h1><p class="page-description">Route eligibility comes from certified provider, model, operation, surface, and mode tuples.</p></div>
-  <a class="button button-primary" href={resolve('/providers/new')}>Discover models</a>
+  {#if canManage}<a class="button button-primary" href={resolve('/providers/new')}>Discover models</a>{/if}
 </div>
+{#if !canManage}<p class="read-only-note" role="note">Your role can view the model inventory but not change route eligibility.</p>{/if}
 
 <div class="metric-grid">
   <article class="card metric-card"><p>Models on page</p><strong>{inventory.length}</strong></article>
@@ -85,7 +99,7 @@
   <article class="card metric-card"><p>Providers on page</p><strong>{providerCount}</strong></article>
 </div>
 
-{#if errorMessage}<div class="inline-problem" role="alert">{errorMessage}</div>{/if}
+{#if mutationError}<div class="inline-problem" role="alert">{mutationError}</div>{/if}
 {#if notice}<div class="success-banner" role="status">{notice}</div>{/if}
 
 <div class="toolbar" role="search">
@@ -100,7 +114,8 @@
 {:else if inventory.length === 0}
   <section class="card empty-state"><div><h2>No models discovered</h2><p>Run a provider probe and capability review first.</p><a class="button button-primary" href={resolve('/providers')}>Open providers</a></div></section>
 {:else if filtered.length === 0}
-  <section class="card empty-state"><div><h2>No matching models</h2><p>Clear the search or select another client surface.</p><button class="button button-secondary" type="button" onclick={() => { search = ''; surface = 'all'; }}>Clear filters</button></div></section>
+  <!-- The inventory endpoint has no search or surface parameters, so filtering is per page. -->
+  <section class="card empty-state"><div><h2>No matches on this page</h2><p>Clear the filters, or use the pagination below to search another page.</p><button class="button button-secondary" type="button" onclick={() => { search = ''; surface = 'all'; }}>Clear filters</button></div></section>
 {:else}
   <div class="table-shell"><table class="data-table"><thead><tr><th>Model</th><th>Provider</th><th>Capability tuples / provenance</th><th>Route eligibility</th></tr></thead><tbody>
     {#each filtered as entry (`${entry.provider_id}-${entry.model.id}`)}
@@ -108,7 +123,7 @@
         <td><strong>{entry.model.display_name}</strong><br /><code>{entry.model.upstream_model}</code></td>
         <td><a href={resolve(`/providers/${entry.provider_id}`)}>{entry.provider_name}</a><br /><span class="badge">{entry.provider_kind.replaceAll('_', ' ')}</span></td>
         <td><div class="capabilities">{#each entry.model.capabilities as capability (`${capability.operation}-${capability.surface}-${capability.mode}`)}<span class:success={capability.source === 'certified'} class:accent={capability.source !== 'certified'} class="badge"><strong>{capability.operation}</strong> {capability.surface} · {capability.mode} · {capability.source}</span>{/each}</div></td>
-        <td><label class="eligibility"><input type="checkbox" checked={entry.model.enabled} disabled={busyModel === entry.model.id} onchange={(event) => toggle(entry, event.currentTarget.checked)} /><span>{entry.model.enabled ? 'Enabled' : 'Disabled'}</span></label></td>
+        <td><label class="eligibility">{#key `${entry.model.id}:${eligibilityVersion}`}<input type="checkbox" checked={entry.model.enabled} disabled={!canManage || Boolean(busyModel)} onchange={(event) => toggle(entry, event.currentTarget.checked)} />{/key}<span>{entry.model.enabled ? 'Enabled' : 'Disabled'}</span></label></td>
       </tr>
     {/each}
   </tbody></table></div>

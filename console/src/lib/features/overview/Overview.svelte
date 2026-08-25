@@ -4,12 +4,12 @@
   import { onMount } from 'svelte';
   import NavIcon from '$lib/components/NavIcon.svelte';
   import SetupChecklist from './SetupChecklist.svelte';
-  import { can } from '$lib/auth/authorization';
-  import { authLifecycle } from '$lib/auth/lifecycle';
+  import { useRole } from '$lib/auth/useRole.svelte';
   import { copyText } from '$lib/clipboard';
   import { listProviders } from '$lib/api/management/providers';
   import { listRoutes } from '$lib/api/management/routes';
   import { listRequests } from '$lib/api/requests';
+  import { errorMessage } from '$lib/api/http';
   import { formatDate, statusLabel, statusTone } from '$lib/format';
 
   let { controlConnected = true }: { controlConnected?: boolean } = $props();
@@ -17,10 +17,8 @@
   let copied = $state(false);
   let copyError = $state('');
   let copyTimer: ReturnType<typeof setTimeout> | undefined;
-  const playgroundAllowed = can(
-    authLifecycle.snapshot().user?.role,
-    'playground.use'
-  );
+  const access = useRole();
+  const playgroundAllowed = $derived(access.can('playground.use'));
   const providers = createQuery(() => ({
     queryKey: ['providers'],
     queryFn: ({ signal }) => listProviders(signal)
@@ -75,38 +73,52 @@
 <section class="status-grid" aria-label="Gateway readiness">
   <article class="card status-card">
     <span
-      class:ready={activeProviders > 0}
-      class:neutral={activeProviders === 0}
+      class:ready={activeProviders > 0 && !providers.isError}
+      class:neutral={activeProviders === 0 || providers.isError}
       class="status-icon"
       aria-hidden="true"><NavIcon name="provider" /></span
     >
     <div>
       <p>Providers</p>
       <strong
-        >{providers.isPending
-          ? 'Checking…'
-          : activeProviders
-            ? `${activeProviders} active`
-            : 'Not configured'}</strong
+        >{providers.isError
+          ? 'Unavailable'
+          : providers.isPending
+            ? 'Checking…'
+            : activeProviders
+              ? `${activeProviders} active`
+              : 'Not configured'}</strong
       >
+      {#if providers.isError}<button
+          class="text-button"
+          type="button"
+          onclick={() => providers.refetch()}>Try again</button
+        >{/if}
     </div>
   </article>
   <article class="card status-card">
     <span
-      class:ready={readyRoutes > 0}
-      class:neutral={readyRoutes === 0}
+      class:ready={readyRoutes > 0 && !routes.isError}
+      class:neutral={readyRoutes === 0 || routes.isError}
       class="status-icon"
       aria-hidden="true"><NavIcon name="route" /></span
     >
     <div>
       <p>Active routes</p>
       <strong
-        >{routes.isPending
-          ? 'Checking…'
-          : readyRoutes
-            ? `${readyRoutes} active`
-            : 'Awaiting activation'}</strong
+        >{routes.isError
+          ? 'Unavailable'
+          : routes.isPending
+            ? 'Checking…'
+            : readyRoutes
+              ? `${readyRoutes} active`
+              : 'Awaiting activation'}</strong
       >
+      {#if routes.isError}<button
+          class="text-button"
+          type="button"
+          onclick={() => routes.refetch()}>Try again</button
+        >{/if}
     </div>
   </article>
   <article class="card status-card">
@@ -190,7 +202,11 @@
     </div>
   {:else if recentRequests.isError}
     <div class="inline-problem" role="alert">
-      Recent request metadata is unavailable. <button
+      {errorMessage(
+        recentRequests.error,
+        'Recent request metadata is unavailable.'
+      )}
+      <button
         class="text-button"
         type="button"
         onclick={() => recentRequests.refetch()}>Try again</button
@@ -235,7 +251,11 @@
                   >{statusLabel(request.status_code, request.error_class)}</span
                 ></td
               >
-              <td>{request.total_latency_ms ?? '—'} ms</td>
+              <td
+                >{request.total_latency_ms == null
+                  ? '—'
+                  : `${request.total_latency_ms} ms`}</td
+              >
               <td
                 ><a class="row-link" href={resolve(`/requests/${request.id}`)}
                   >View timeline</a
@@ -299,6 +319,16 @@
     margin: 0 0 0.1rem;
     color: var(--foreground-muted);
     font-size: 0.72rem;
+  }
+
+  .status-card .text-button {
+    min-height: 2.2rem;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: var(--accent-strong);
+    font-size: 0.72rem;
+    font-weight: 720;
   }
 
   .status-card strong {

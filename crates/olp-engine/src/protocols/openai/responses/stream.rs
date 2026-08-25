@@ -172,10 +172,12 @@ impl Decoder {
                     Kind::ToolCallDelta {
                         output_index,
                         tool_index: 0,
-                        id: value
-                            .get("item_id")
-                            .and_then(Value::as_str)
-                            .map(str::to_owned),
+                        // `item_id` is the output item's id (`fc_…`), not the
+                        // tool call id (`call_…`) the client has to send back.
+                        // Aggregation is last-write-wins, so re-sending it here
+                        // would overwrite the real id captured by
+                        // `response.output_item.added`.
+                        id: None,
                         name: None,
                         arguments_delta: stream_string(value, "delta")?,
                     },

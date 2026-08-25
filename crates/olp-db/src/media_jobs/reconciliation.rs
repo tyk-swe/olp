@@ -122,11 +122,17 @@ impl Store {
             ));
         }
         let result = sqlx::query!(
+            // The claim increments reconciliation_attempts on every pass,
+            // successful ones included, while the consumer reads it as a
+            // consecutive-failure count for exponential backoff. Reset it on a
+            // clean finish so the first transient error backs off 5s, not 300s.
             "UPDATE async_media_jobs SET
                 reconciliation_claim_id = NULL,
                 reconciliation_claimed_until = NULL,
                 next_reconciliation_at = $3,
                 reconciliation_error = $4,
+                reconciliation_attempts =
+                    CASE WHEN $4::text IS NULL THEN 0 ELSE reconciliation_attempts END,
                 etag = uuidv7()
              WHERE id = $1 AND reconciliation_claim_id = $2",
             id,
@@ -156,7 +162,12 @@ impl Store {
                                AND next_reconciliation_at < $1::timestamptz - interval '1 minute')
                            OR (lifecycle_state = 'active'
                                AND state IN ('queued', 'running')
-                               AND next_reconciliation_at < $1::timestamptz - interval '1 minute')
+                               AND next_reconciliation_at < $1::timestamptz - interval '1 minute'
+                               -- Mirror the claim query's poll gate. A job a
+                               -- client is actively polling is deliberately not
+                               -- claimable and must not read as stale.
+                               AND (last_polled_at IS NULL
+                                    OR last_polled_at <= $1::timestamptz - interval '5 seconds'))
                     )::bigint AS \"stale!\",
                     COUNT(*) FILTER (
                         WHERE lifecycle_state <> 'deleted' AND reconciliation_error IS NOT NULL

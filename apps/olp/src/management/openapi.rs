@@ -169,3 +169,97 @@ fn problem_response(description: &str) -> serde_json::Value {
         }
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::document;
+
+    #[test]
+    fn the_rotated_secret_survives_client_generation() {
+        let document = document();
+        let secret = document
+            .pointer("/components/schemas/RotateApiKeyResponse/properties/secret")
+            .expect("the rotation response declares its secret");
+        assert!(
+            secret.get("writeOnly").is_none(),
+            "a writeOnly property is dropped from generated response models, \
+             so the once-shown secret would be unreadable"
+        );
+        assert!(
+            document
+                .pointer("/components/schemas/RotateApiKeyResponse/required")
+                .and_then(serde_json::Value::as_array)
+                .is_some_and(|required| required.iter().any(|field| field == "secret"))
+        );
+    }
+
+    /// 201s that create nothing addressable: two are authentication
+    /// exchanges, one bootstraps the installation itself, and two create
+    /// records the API exposes only through their parent collection.
+    const CREATES_WITHOUT_A_RESOURCE_URL: [&str; 5] = [
+        "/api/v1/sessions",
+        "/api/v1/setup",
+        "/api/v1/invitations/accept",
+        "/api/v1/pricing/revisions",
+        "/api/v1/providers/{provider_id}/credentials",
+    ];
+
+    #[test]
+    fn every_create_that_returns_201_points_at_what_it_created() {
+        let document = document();
+        let paths = document["paths"].as_object().unwrap();
+        let mut checked = 0;
+        for (path, methods) in paths {
+            let Some(created) = methods.pointer("/post/responses/201") else {
+                continue;
+            };
+            if CREATES_WITHOUT_A_RESOURCE_URL.contains(&path.as_str()) {
+                continue;
+            }
+            checked += 1;
+            assert!(
+                created.pointer("/headers/Location").is_some(),
+                "POST {path} returns 201 without a Location header"
+            );
+        }
+        assert!(checked >= 4, "expected the create endpoints to be found");
+    }
+
+    #[test]
+    fn every_paginated_collection_declares_the_same_page_bounds() {
+        let document = document();
+        let paths = document["paths"].as_object().unwrap();
+        let mut checked = 0;
+        for (path, methods) in paths {
+            for (method, operation) in methods.as_object().unwrap() {
+                let Some(parameters) = operation["parameters"].as_array() else {
+                    continue;
+                };
+                for parameter in parameters {
+                    if parameter["name"] != "limit" {
+                        continue;
+                    }
+                    checked += 1;
+                    assert_eq!(
+                        parameter
+                            .pointer("/schema/maximum")
+                            .and_then(serde_json::Value::as_u64),
+                        Some(200),
+                        "{method} {path} declares a different page-size ceiling"
+                    );
+                    assert_eq!(
+                        parameter
+                            .pointer("/schema/minimum")
+                            .and_then(serde_json::Value::as_u64),
+                        Some(1),
+                        "{method} {path} declares a different minimum page size"
+                    );
+                }
+            }
+        }
+        assert!(
+            checked >= 10,
+            "expected the paginated collections to be found"
+        );
+    }
+}

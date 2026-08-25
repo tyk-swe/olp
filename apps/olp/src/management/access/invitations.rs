@@ -11,6 +11,7 @@ use olp_db::{
     idempotency::Replayable,
     idempotency::Response as IdempotencyResponse,
     idempotency::fingerprint,
+    idempotency::operations,
     identity::{AcceptInvitation, InvitationRecord, NewInvitation},
     security::{password::hash, session_material::SessionMaterial},
 };
@@ -28,7 +29,7 @@ use crate::management::{
     },
     cookies::validate_session_cookie_ttl,
     error_mapping::{map_identity, map_persistence},
-    idempotency::{idempotency_http_response, require_idempotency_key},
+    idempotency::{ReplayableMutation, idempotency_http_response, require_idempotency_key},
     json_payload::json_payload,
     pagination::{PageQuery, page},
     permissions::{parse_user_role, require_permission},
@@ -60,11 +61,14 @@ pub(in crate::management) struct InvitationResponse {
 
 impl From<InvitationRecord> for InvitationResponse {
     fn from(invitation: InvitationRecord) -> Self {
+        // An invitation that merely timed out reports "expired", including
+        // after its pending-email reservation was released; only a deliberate
+        // revocation reports "revoked".
         let status = if invitation.accepted_at.is_some() {
             "accepted"
         } else if invitation.revoked_at.is_some() {
             "revoked"
-        } else if invitation.expires_at <= Utc::now() {
+        } else if invitation.expired_at.is_some() || invitation.expires_at <= Utc::now() {
             "expired"
         } else {
             "pending"
@@ -112,7 +116,7 @@ pub(in crate::management) struct CreateInvitationResponse {
     tag = "invitations",
     params(
         ("cursor" = Option<String>, Query, description = "Opaque cursor returned by the previous page"),
-        ("limit" = Option<u16>, Query, description = "Page size from 1 to 100")
+        ("limit" = Option<u16>, Query, minimum = 1, maximum = 200, description = "Page size from 1 to 200; defaults to 50")
     ),
     responses((status = 200, description = "Invitation history", body = InvitationListResponse))
 )]
@@ -142,7 +146,8 @@ pub(in crate::management) async fn list_invitations(
     params(("Idempotency-Key" = String, Header, description = "Unique invitation creation key")),
     request_body = CreateInvitationRequest,
     responses(
-        (status = 201, description = "Invitation created; token is displayed once", body = CreateInvitationResponse),
+        (status = 201, description = "Invitation created; token is displayed once", body = CreateInvitationResponse, headers(("Location" = String, description = "Path of the created resource"))),
+        (status = 400, description = "Idempotency-Key is missing or invalid", body = Problem),
         (status = 409, description = "Member, pending invitation, or idempotency conflict", body = Problem),
         (status = 422, description = "Invitation is invalid", body = Problem),
         (status = 503, description = "Master key or database unavailable", body = Problem)
@@ -193,6 +198,9 @@ pub(in crate::management) async fn create_invitation(
                     },
                     None,
                 )
+                .and_then(|response| {
+                    response.with_location(format!("/api/v1/invitations/{}", created.invitation.id))
+                })
             },
         )
         .await
@@ -209,27 +217,41 @@ pub(in crate::management) async fn create_invitation(
         ("Idempotency-Key" = String, Header, description = "Unique invitation revocation key")
     ),
     responses(
-        (status = 200, description = "Invitation revoked", body = InvitationResponse),
-        (status = 409, description = "Invitation is already accepted or revoked", body = Problem)
+        (status = 200, description = "Invitation revoked; an identical retry replays this response", body = InvitationResponse),
+        (status = 400, description = "Idempotency-Key is missing or invalid", body = Problem),
+        (status = 409, description = "Invitation is already accepted or revoked, or the Idempotency-Key was already used for a different request", body = Problem)
     )
 )]
 pub(in crate::management) async fn revoke_invitation(
     State(state): State<ManagementState>,
     Path(invitation_id): Path<Uuid>,
     headers: HeaderMap,
-) -> Result<Json<InvitationResponse>, Problem> {
+) -> Result<Response, Problem> {
     let principal = require_mutation_session(&state, &headers).await?;
     require_permission(&principal, Permission::ManageAccess)?;
+    let mutation = ReplayableMutation::new(
+        &state,
+        principal.user_id,
+        operations::INVITATION_REVOKE,
+        &headers,
+        &RevokeInvitationFingerprint { invitation_id },
+    )?;
+    if let Some(replayed) = mutation.replayed().await? {
+        return Ok(replayed);
+    }
     let invitation = state
         .store()
-        .revoke_invitation(
-            invitation_id,
-            principal.user_id,
-            require_idempotency_key(&headers)?,
-        )
+        .revoke_invitation(invitation_id, principal.user_id, mutation.key())
         .await
         .map_err(map_identity)?;
-    Ok(Json(invitation.into()))
+    mutation
+        .respond(StatusCode::OK, &InvitationResponse::from(invitation), None)
+        .await
+}
+
+#[derive(Serialize)]
+struct RevokeInvitationFingerprint {
+    invitation_id: Uuid,
 }
 
 #[derive(Deserialize, ToSchema)]

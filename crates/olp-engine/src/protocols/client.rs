@@ -129,8 +129,12 @@ pub(in crate::protocols) fn aggregate_generation(
             }
             Kind::Error { .. } => return Err(AggregateError::Upstream),
             Kind::SourceExtension { extensions } => {
+                // Response-path extensions are advisory. A provider on another
+                // surface has nothing the target wire format can carry, and the
+                // gateway cannot renegotiate mid-response, so they are dropped
+                // rather than turned into a 502. Requests still fail closed.
                 if extensions.source != Some(target) {
-                    return Err(AggregateError::CrossProtocolExtensions);
+                    continue;
                 }
                 for (path, value) in &extensions.values {
                     if aggregate

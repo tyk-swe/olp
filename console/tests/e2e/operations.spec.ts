@@ -26,11 +26,12 @@ for (const state of ['empty', 'error'] as const) {
     await emulateTwoHundredPercentZoom(page);
     await page.route('**/api/v1/requests*', async (route) => {
       if (state === 'empty') await route.fulfill({ json: { data: [], next_cursor: null } });
-      else await route.fulfill({ status: 503, json: { detail: 'unavailable' } });
+      else await route.fulfill({ status: 503, json: { status: 503, title: 'Service unavailable', detail: 'Request metadata storage is unavailable.' } });
     });
 
     await page.goto('/requests');
-    await expect(page.getByText(state === 'empty' ? 'No matching requests' : 'Request metadata is unavailable.')).toBeVisible();
+    // The server's own detail must survive to the operator, not a generic string.
+    await expect(page.getByText(state === 'empty' ? 'No matching requests' : 'Request metadata storage is unavailable.')).toBeVisible();
     expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
   });
 }

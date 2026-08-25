@@ -292,10 +292,13 @@ async fn execute_playground(
 
 fn playground_operation(request: PlaygroundRequest) -> Result<(Operation, Surface, bool), Problem> {
     let mut fields = FieldErrors::new();
-    let route = RouteSlug::parse(request.model.trim().to_owned()).map_err(|error| {
-        fields.insert("model".to_owned(), vec![error.to_string()]);
-        Problem::validation(fields.clone())
-    })?;
+    let route = match RouteSlug::parse(request.model.trim().to_owned()) {
+        Ok(route) => Some(route),
+        Err(error) => {
+            fields.insert("model".to_owned(), vec![error.to_string()]);
+            None
+        }
+    };
     if request.input.trim().is_empty() || request.input.len() > 128 * 1024 {
         fields.insert(
             "input".to_owned(),
@@ -355,6 +358,8 @@ fn playground_operation(request: PlaygroundRequest) -> Result<(Operation, Surfac
     if !fields.is_empty() {
         return Err(Problem::validation(fields));
     }
+    // Only an unparsed slug leaves the route empty, and that recorded a field error.
+    let route = route.ok_or_else(Problem::internal)?;
     let structured = matches!(
         request.response_format.as_ref(),
         Some(PlaygroundResponseFormat::JsonObject | PlaygroundResponseFormat::JsonSchema { .. })
@@ -465,5 +470,28 @@ mod tests {
         assert!(problem.errors.contains_key("tools.0"));
         assert!(problem.errors.contains_key("temperature"));
         assert!(problem.errors.contains_key("surface"));
+    }
+
+    #[test]
+    fn an_invalid_model_slug_does_not_hide_the_other_field_errors() {
+        let mut request = request();
+        request.model = "not a slug".to_owned();
+        request.surface = "unknown".to_owned();
+        request.input.clear();
+        request.tools[0].input_schema = Value::String("not-a-schema".to_owned());
+        request.temperature = Some(3.0);
+        request.max_output_tokens = Some(0);
+        let problem = playground_operation(request).unwrap_err();
+        assert_eq!(problem.status, StatusCode::UNPROCESSABLE_ENTITY.as_u16());
+        for field in [
+            "model",
+            "input",
+            "tools.0",
+            "temperature",
+            "max_output_tokens",
+            "surface",
+        ] {
+            assert!(problem.errors.contains_key(field), "missing {field}");
+        }
     }
 }

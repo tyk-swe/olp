@@ -10,6 +10,7 @@ use olp_db::{
     configuration::resources::RouteRecord, configuration::resources::RouteRevisionDiff,
     configuration::resources::RouteRevisionRecord, configuration::resources::RouteSimulation,
     configuration::resources::RouteSimulationTarget, configuration::resources::RouteTargetRecord,
+    idempotency::operations,
 };
 use olp_engine::domain::auth::Permission;
 use serde::{Deserialize, Serialize};
@@ -20,7 +21,7 @@ use crate::{
     bootstrap::mode_dependencies::ManagementState,
     management::{
         error_mapping::map_configuration,
-        idempotency::require_idempotency_key,
+        idempotency::ReplayableMutation,
         json_payload::json_payload,
         pagination::{DiffQuery, PageQuery, page},
         permissions::require_permission,
@@ -37,6 +38,9 @@ pub(crate) struct RouteTargetResponse {
     pub provider_id: Uuid,
     pub provider_name: String,
     pub provider_model: String,
+    /// False when the provider was disabled or the model left the provider's
+    /// activated revision. The target is still part of the stored route.
+    pub available: bool,
     pub priority: i32,
     pub weight: i32,
     pub timeout_ms: i32,
@@ -51,6 +55,7 @@ impl From<RouteTargetRecord> for RouteTargetResponse {
             provider_id: value.provider_id,
             provider_name: value.provider_name,
             provider_model: value.upstream_model,
+            available: value.available,
             priority: value.priority,
             weight: value.weight,
             timeout_ms: value.timeout_ms,
@@ -106,7 +111,7 @@ pub(crate) struct RouteDraftListResponse {
     get,
     path = "/api/v1/route-drafts",
     tag = "routes",
-    params(("cursor" = Option<String>, Query), ("limit" = Option<u16>, Query)),
+    params(("cursor" = Option<String>, Query), ("limit" = Option<u16>, Query, minimum = 1, maximum = 200, description = "Page size from 1 to 200; defaults to 50")),
     responses((status = 200, body = RouteDraftListResponse))
 )]
 pub(crate) async fn list_route_drafts(
@@ -418,7 +423,7 @@ pub(crate) struct RouteListResponse {
     tag = "routes",
     params(
         ("cursor" = Option<String>, Query),
-        ("limit" = Option<u16>, Query, minimum = 1, maximum = 100)
+        ("limit" = Option<u16>, Query, minimum = 1, maximum = 200, description = "Page size from 1 to 200; defaults to 50")
     ),
     responses((status = 200, body = RouteListResponse), (status = 401, body = Problem), (status = 403, body = Problem))
 )]
@@ -476,7 +481,7 @@ pub(crate) struct RouteRevisionListResponse {
     params(
         ("route_id" = Uuid, Path),
         ("cursor" = Option<String>, Query),
-        ("limit" = Option<u16>, Query, minimum = 1, maximum = 100)
+        ("limit" = Option<u16>, Query, minimum = 1, maximum = 200, description = "Page size from 1 to 200; defaults to 50")
     ),
     responses((status = 200, body = RouteRevisionListResponse), (status = 404, body = Problem))
 )]
@@ -594,7 +599,11 @@ pub(crate) async fn diff_route_revisions(
     path = "/api/v1/routes/{route_id}/revisions/{revision_id}/restore-as-draft",
     tag = "routes",
     params(("route_id" = Uuid, Path), ("revision_id" = Uuid, Path), ("Idempotency-Key" = String, Header)),
-    responses((status = 201, body = RouteDraftDetailResponse), (status = 409, body = Problem))
+    responses(
+        (status = 201, body = RouteDraftDetailResponse, headers(("Location" = String, description = "Path of the created resource"))),
+        (status = 400, description = "Idempotency-Key is missing or invalid", body = Problem),
+        (status = 409, description = "Idempotency-Key was already used or is in progress", body = Problem)
+    )
 )]
 pub(crate) async fn restore_route_revision(
     State(state): State<ManagementState>,
@@ -603,16 +612,34 @@ pub(crate) async fn restore_route_revision(
 ) -> Result<Response, Problem> {
     let principal = require_mutation_session(&state, &headers).await?;
     require_permission(&principal, Permission::ManageRoutes)?;
-    let draft: RouteDraftDetailResponse = state
-        .store()
-        .restore_route_revision_as_draft(
+    let mutation = ReplayableMutation::new(
+        &state,
+        principal.user_id,
+        operations::ROUTE_RESTORE_AS_DRAFT,
+        &headers,
+        &RestoreRouteRevisionFingerprint {
             route_id,
             revision_id,
-            principal.user_id,
-            require_idempotency_key(&headers)?,
-        )
+        },
+    )?;
+    if let Some(replayed) = mutation.replayed().await? {
+        return Ok(replayed);
+    }
+    let draft: RouteDraftDetailResponse = state
+        .store()
+        .restore_route_revision_as_draft(route_id, revision_id, principal.user_id, mutation.key())
         .await
         .map_err(map_configuration)?
         .into();
-    with_etag((StatusCode::CREATED, Json(draft.clone())), draft.etag)
+    let etag = draft.etag;
+    let location = format!("/api/v1/route-drafts/{}", draft.id);
+    mutation
+        .respond_at(StatusCode::CREATED, &draft, Some(etag), Some(location))
+        .await
+}
+
+#[derive(Serialize)]
+struct RestoreRouteRevisionFingerprint {
+    route_id: Uuid,
+    revision_id: Uuid,
 }

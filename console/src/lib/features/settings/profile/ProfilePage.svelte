@@ -3,9 +3,10 @@
   import { replaceState } from '$app/navigation';
   import { resolve } from '$app/paths';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
-  import { isEtagMismatch } from '$lib/api/http';
+  import { errorMessage, isEtagMismatch } from '$lib/api/http';
   import { beginOidcLink } from '$lib/api/management/oidc';
   import ConflictNotice from '$lib/components/ConflictNotice.svelte';
+  import ReauthenticateDialog from '$lib/components/ReauthenticateDialog.svelte';
   import {
     acceptRemote,
     beginReload,
@@ -55,6 +56,13 @@
   let identityBusy = $state('');
   let identityError = $state('');
   let pendingIdentityAction = $state<PendingIdentityAction | undefined>();
+  type ReauthenticationRequest = {
+    purpose: 'oidc_link' | 'oidc_unlink';
+    resourceId?: string;
+  };
+  let reauthenticationRequest = $state<ReauthenticationRequest | null>(null);
+  let reauthenticationBusy = $state(false);
+  let reauthenticationError = $state('');
   let enrollmentGrantReady = $state(false);
   let enrollmentGrantExpiry: ReturnType<typeof setTimeout> | undefined;
   let profileSync = $state(initialConcurrentEdit());
@@ -176,22 +184,65 @@
     }
   }
 
+  /**
+   * Recent authentication is proven either by an inline password confirmation
+   * or by an OIDC round trip. The password path opens a real form so the value
+   * is masked, cancellable, and never typed into a browser prompt.
+   */
   async function acquireRecentAuthentication(
     purpose: 'oidc_link' | 'oidc_unlink',
     resourceId?: string
-  ): Promise<boolean> {
+  ): Promise<void> {
     if (identities.data?.has_local_password) {
-      const password = window.prompt(
-        'Enter your current password to continue.'
-      );
-      if (password === null) return false;
-      await reauthenticateWithPassword(password, purpose, resourceId);
-      return true;
+      reauthenticationError = '';
+      reauthenticationRequest = { purpose, resourceId };
+      return;
     }
     window.location.assign(
       await beginOidcReauthentication(purpose, resourceId)
     );
-    return false;
+  }
+
+  function cancelReauthentication() {
+    reauthenticationRequest = null;
+    reauthenticationError = '';
+  }
+
+  async function confirmReauthentication(password: string) {
+    const request = reauthenticationRequest;
+    if (!request) return;
+    reauthenticationBusy = true;
+    reauthenticationError = '';
+    try {
+      await reauthenticateWithPassword(
+        password,
+        request.purpose,
+        request.resourceId
+      );
+      reauthenticationRequest = null;
+      identityBusy =
+        request.purpose === 'oidc_link' ? 'link' : (request.resourceId ?? '');
+      if (request.purpose === 'oidc_link') {
+        window.location.assign(await beginOidcLink());
+        return;
+      }
+      if (!request.resourceId)
+        throw new Error('The identity selected for unlinking is missing.');
+      await unlinkOidcIdentity(request.resourceId);
+      message =
+        'OIDC identity unlinked. All previous sessions were revoked and this browser was rotated.';
+      await refreshSecurityData();
+    } catch (cause) {
+      const detail = errorMessage(
+        cause,
+        'The security operation could not be completed.'
+      );
+      if (reauthenticationRequest) reauthenticationError = detail;
+      else identityError = detail;
+    } finally {
+      reauthenticationBusy = false;
+      identityBusy = '';
+    }
   }
 
   async function verifyPasswordEnrollment() {
@@ -316,8 +367,7 @@
     identityBusy = 'link';
     identityError = '';
     try {
-      if (!(await acquireRecentAuthentication('oidc_link'))) return;
-      window.location.assign(await beginOidcLink());
+      await acquireRecentAuthentication('oidc_link');
     } catch (cause) {
       identityError =
         cause instanceof Error
@@ -334,11 +384,7 @@
     identityBusy = id;
     identityError = '';
     try {
-      if (!(await acquireRecentAuthentication('oidc_unlink', id))) return;
-      await unlinkOidcIdentity(id);
-      message =
-        'OIDC identity unlinked. All previous sessions were revoked and this browser was rotated.';
-      await refreshSecurityData();
+      await acquireRecentAuthentication('oidc_unlink', id);
     } catch (cause) {
       identityError =
         cause instanceof Error
@@ -384,6 +430,18 @@
   >
 </div>
 
+{#if reauthenticationRequest}
+  <ReauthenticateDialog
+    description={reauthenticationRequest.purpose === 'oidc_link'
+      ? 'Linking an OIDC identity changes how you sign in, so confirm your current password first.'
+      : 'Unlinking an OIDC identity revokes every other session, so confirm your current password first.'}
+    busy={reauthenticationBusy}
+    error={reauthenticationError}
+    onConfirm={confirmReauthentication}
+    onCancel={cancelReauthentication}
+  />
+{/if}
+
 {#if message}<p class="success-message" role="status">{message}</p>{/if}
 <ConflictNotice
   notice={profileConcurrentNotice}
@@ -395,9 +453,9 @@
     Loading your profile…
   </div>
 {:else if profile.isError}<div class="inline-problem" role="alert">
-    Your profile is unavailable. <button
-      class="text-button"
-      onclick={() => profile.refetch()}>Try again</button
+    {errorMessage(profile.error, 'Your profile is unavailable.')}
+    <button class="text-button" onclick={() => profile.refetch()}
+      >Try again</button
     >
   </div>
 {:else if profile.data}

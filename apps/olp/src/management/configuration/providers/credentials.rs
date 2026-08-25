@@ -8,7 +8,8 @@ use chrono::{DateTime, Utc};
 use olp_db::{
     configuration::resources::CredentialVersionRecord, configuration::resources::ProviderRecord,
     configuration::resources::RotateCredentialInput, idempotency::Replayable,
-    idempotency::fingerprint, idempotency::secret_digest, security::aad::credential,
+    idempotency::fingerprint, idempotency::operations, idempotency::secret_digest,
+    security::aad::credential,
 };
 use olp_engine::{domain::auth::Permission, providers::factory::assembly::Factory};
 use serde::{Deserialize, Serialize};
@@ -21,11 +22,11 @@ use crate::{
     bootstrap::provider_adapter::{provider_config, provider_credential},
     management::{
         error_mapping::map_configuration,
-        idempotency::{idempotency_http_response, require_idempotency_key},
+        idempotency::{ReplayableMutation, idempotency_http_response, require_idempotency_key},
         json_payload::json_payload,
         pagination::{PageQuery, page},
         permissions::require_permission,
-        preconditions::{if_match, with_etag},
+        preconditions::if_match,
         response_policy::RuntimeGenerationResponse,
         secrets::WriteOnlySecret,
         sessions::{require_mutation_session, require_read_session},
@@ -71,7 +72,7 @@ pub(crate) struct CredentialListResponse {
     params(
         ("provider_id" = Uuid, Path),
         ("cursor" = Option<String>, Query),
-        ("limit" = Option<u16>, Query, minimum = 1, maximum = 100)
+        ("limit" = Option<u16>, Query, minimum = 1, maximum = 200, description = "Page size from 1 to 200; defaults to 50")
     ),
     responses((status = 200, body = CredentialListResponse), (status = 404, body = Problem))
 )]
@@ -130,6 +131,7 @@ pub(crate) struct ProviderMutationResponse {
     request_body = RotateCredentialRequest,
     responses(
         (status = 201, body = ProviderMutationResponse),
+        (status = 400, description = "Idempotency-Key is missing or invalid", body = Problem),
         (status = 409, description = "Idempotency-Key was reused or is in progress", body = Problem),
         (status = 412, body = Problem),
         (status = 503, description = "Master key or database unavailable", body = Problem)
@@ -231,7 +233,12 @@ fn validate_rotated_credential(provider: &ProviderRecord, credential: &str) -> R
         ("If-Match" = String, Header),
         ("Idempotency-Key" = String, Header)
     ),
-    responses((status = 200, body = ProviderMutationResponse), (status = 409, body = Problem), (status = 412, body = Problem))
+    responses(
+        (status = 200, body = ProviderMutationResponse),
+        (status = 400, description = "Idempotency-Key is missing or invalid", body = Problem),
+        (status = 409, description = "Idempotency-Key was already used or is in progress", body = Problem),
+        (status = 412, body = Problem)
+    )
 )]
 pub(crate) async fn revoke_provider_credential(
     State(state): State<ManagementState>,
@@ -240,25 +247,50 @@ pub(crate) async fn revoke_provider_credential(
 ) -> Result<Response, Problem> {
     let principal = require_mutation_session(&state, &headers).await?;
     require_permission(&principal, Permission::ManageProviders)?;
+    let expected_etag = if_match(&headers)?;
+    let mutation = ReplayableMutation::new(
+        &state,
+        principal.user_id,
+        operations::PROVIDER_REVOKE_CREDENTIAL,
+        &headers,
+        &RevokeCredentialFingerprint {
+            provider_id,
+            credential_id,
+            expected_etag,
+        },
+    )?;
+    if let Some(replayed) = mutation.replayed().await? {
+        return Ok(replayed);
+    }
     let etag = state
         .store()
         .revoke_provider_credential(
             provider_id,
             credential_id,
-            if_match(&headers)?,
+            expected_etag,
             principal.user_id,
-            require_idempotency_key(&headers)?,
+            mutation.key(),
         )
         .await
         .map_err(map_configuration)?;
-    with_etag(
-        Json(ProviderMutationResponse {
-            provider_id,
-            etag,
-            credential_id: Some(credential_id),
-            credential_version: None,
-            runtime_generation: None,
-        }),
-        etag,
-    )
+    mutation
+        .respond(
+            StatusCode::OK,
+            &ProviderMutationResponse {
+                provider_id,
+                etag,
+                credential_id: Some(credential_id),
+                credential_version: None,
+                runtime_generation: None,
+            },
+            Some(etag),
+        )
+        .await
+}
+
+#[derive(Serialize)]
+struct RevokeCredentialFingerprint {
+    provider_id: Uuid,
+    credential_id: Uuid,
+    expected_etag: Uuid,
 }

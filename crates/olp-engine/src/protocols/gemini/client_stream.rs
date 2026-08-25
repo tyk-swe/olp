@@ -164,8 +164,10 @@ impl Encoder {
                 });
             }
             Kind::SourceExtension { extensions } => {
+                // A stream already in flight cannot renegotiate, so extensions
+                // that this surface cannot carry are dropped, not fatal.
                 if extensions.source != Some(Surface::Gemini) {
-                    return Err(Error::Extension);
+                    return Ok(frames);
                 }
                 if let Some(value) = extensions.values.get(RAW_SSE_FRAME_EXTENSION) {
                     if extensions.values.len() != 1 {
@@ -177,7 +179,7 @@ impl Encoder {
                     self.skip_native_events = semantic_events;
                     frames.push(raw);
                 } else if !extensions.values.is_empty() {
-                    return Err(Error::Extension);
+                    return Ok(frames);
                 }
             }
             Kind::RefusalDelta { .. } => {

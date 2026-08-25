@@ -161,7 +161,7 @@ fuzz_target!(|data: &[u8]| {
         data,
         "openai::response_object",
         |response| response_object::decode_response_object(response).ok(),
-        |events| openai_client::encode_response_object(events, PUBLIC_MODEL, "fuzz-response"),
+        |events| openai_client::encode_response_object(events, PUBLIC_MODEL, "fuzz-response", 0),
     );
     roundtrip(
         data,

@@ -4,7 +4,7 @@ use std::{
 };
 
 use chrono::{DateTime, Utc};
-use olp_db::configuration::resources::UpdateApiKeyInput;
+use olp_db::configuration::resources::{ApiKeyRecord, UpdateApiKeyInput};
 use olp_engine::domain::{
     auth::{ApiKeyLimits, ApiKeyScope},
     ids::RouteSlug,
@@ -31,6 +31,10 @@ pub(super) struct RawApiKeyPolicy<'a> {
 pub(super) enum ExpirationValidation {
     // Create must reach storage's idempotency replay boundary before this time-dependent check.
     DeferredToStorage,
+    // A patch that leaves `expires_at` at its stored value must not be rejected
+    // over an expiry the caller never touched: an already-expired key would
+    // otherwise be uneditable.
+    Unchanged,
     RequireFuture(DateTime<Utc>),
 }
 
@@ -48,18 +52,80 @@ impl<'a> From<&'a CreateApiKeyRequest> for RawApiKeyPolicy<'a> {
     }
 }
 
-impl<'a> From<&'a UpdateApiKeyRequest> for RawApiKeyPolicy<'a> {
-    fn from(request: &'a UpdateApiKeyRequest) -> Self {
+/// The stored policy a `PATCH` merges into.
+#[derive(Clone, Debug, PartialEq)]
+pub(super) struct ApiKeyPolicySnapshot {
+    pub name: String,
+    pub scopes: Vec<String>,
+    pub allowed_routes: Vec<String>,
+    pub requests_per_minute: Option<u32>,
+    pub tokens_per_minute: Option<u64>,
+    pub max_concurrency: Option<u32>,
+    pub expires_at: Option<DateTime<Utc>>,
+}
+
+impl From<&ApiKeyRecord> for ApiKeyPolicySnapshot {
+    fn from(record: &ApiKeyRecord) -> Self {
         Self {
-            name: &request.name,
-            scopes: &request.scopes,
-            allowed_routes: &request.allowed_routes,
-            requests_per_minute: request.requests_per_minute,
-            tokens_per_minute: request.tokens_per_minute,
-            max_concurrency: request.max_concurrency,
-            expires_at: request.expires_at,
+            name: record.name.clone(),
+            scopes: record.scopes.clone(),
+            allowed_routes: record.allowed_routes.clone(),
+            requests_per_minute: record
+                .requests_per_minute
+                .and_then(|limit| u32::try_from(limit).ok()),
+            tokens_per_minute: record
+                .tokens_per_minute
+                .and_then(|limit| u64::try_from(limit).ok()),
+            max_concurrency: record
+                .max_concurrency
+                .and_then(|limit| u32::try_from(limit).ok()),
+            expires_at: record.expires_at,
         }
     }
+}
+
+impl<'a> From<&'a ApiKeyPolicySnapshot> for RawApiKeyPolicy<'a> {
+    fn from(policy: &'a ApiKeyPolicySnapshot) -> Self {
+        Self {
+            name: &policy.name,
+            scopes: &policy.scopes,
+            allowed_routes: &policy.allowed_routes,
+            requests_per_minute: policy.requests_per_minute,
+            tokens_per_minute: policy.tokens_per_minute,
+            max_concurrency: policy.max_concurrency,
+            expires_at: policy.expires_at,
+        }
+    }
+}
+
+/// Applies a merge patch to the stored policy. Fields the caller omitted keep
+/// their stored value; an explicit `null` clears one. The flag reports whether
+/// the caller asked for an expiry different from the stored one, which is the
+/// only case where the expiry has to be in the future.
+pub(super) fn merge_api_key_policy(
+    stored: ApiKeyPolicySnapshot,
+    request: &UpdateApiKeyRequest,
+) -> (ApiKeyPolicySnapshot, bool) {
+    let expiration_changed = request
+        .expires_at
+        .is_some_and(|expires_at| expires_at != stored.expires_at);
+    let merged = ApiKeyPolicySnapshot {
+        name: request.name.clone().unwrap_or(stored.name),
+        scopes: request.scopes.clone().unwrap_or(stored.scopes),
+        allowed_routes: request
+            .allowed_routes
+            .clone()
+            .unwrap_or(stored.allowed_routes),
+        requests_per_minute: request
+            .requests_per_minute
+            .unwrap_or(stored.requests_per_minute),
+        tokens_per_minute: request
+            .tokens_per_minute
+            .unwrap_or(stored.tokens_per_minute),
+        max_concurrency: request.max_concurrency.unwrap_or(stored.max_concurrency),
+        expires_at: request.expires_at.unwrap_or(stored.expires_at),
+    };
+    (merged, expiration_changed)
 }
 
 #[derive(Debug, PartialEq)]
@@ -256,13 +322,25 @@ mod tests {
 
     fn update_request(request: &CreateApiKeyRequest) -> UpdateApiKeyRequest {
         UpdateApiKeyRequest {
-            name: request.name.clone(),
-            scopes: request.scopes.clone(),
-            allowed_routes: request.allowed_routes.clone(),
-            requests_per_minute: request.requests_per_minute,
-            tokens_per_minute: request.tokens_per_minute,
-            max_concurrency: request.max_concurrency,
-            expires_at: request.expires_at,
+            name: Some(request.name.clone()),
+            scopes: Some(request.scopes.clone()),
+            allowed_routes: Some(request.allowed_routes.clone()),
+            requests_per_minute: Some(request.requests_per_minute),
+            tokens_per_minute: Some(request.tokens_per_minute),
+            max_concurrency: Some(request.max_concurrency),
+            expires_at: Some(request.expires_at),
+        }
+    }
+
+    fn stored_policy() -> ApiKeyPolicySnapshot {
+        ApiKeyPolicySnapshot {
+            name: "stored key".to_owned(),
+            scopes: vec!["inference".to_owned()],
+            allowed_routes: vec!["stored-route".to_owned()],
+            requests_per_minute: Some(30),
+            tokens_per_minute: Some(5_000),
+            max_concurrency: Some(2),
+            expires_at: None,
         }
     }
 
@@ -270,11 +348,25 @@ mod tests {
         normalize_api_key_policy(request.into(), ExpirationValidation::DeferredToStorage)
     }
 
+    fn normalize_patch(
+        stored: ApiKeyPolicySnapshot,
+        request: &UpdateApiKeyRequest,
+        now: DateTime<Utc>,
+    ) -> Result<NormalizedApiKeyPolicy, Problem> {
+        let (merged, expiration_changed) = merge_api_key_policy(stored, request);
+        let validation = if expiration_changed {
+            ExpirationValidation::RequireFuture(now)
+        } else {
+            ExpirationValidation::Unchanged
+        };
+        normalize_api_key_policy(RawApiKeyPolicy::from(&merged), validation)
+    }
+
     fn normalize_update(
         request: &UpdateApiKeyRequest,
         now: DateTime<Utc>,
     ) -> Result<NormalizedApiKeyPolicy, Problem> {
-        normalize_api_key_policy(request.into(), ExpirationValidation::RequireFuture(now))
+        normalize_patch(stored_policy(), request, now)
     }
 
     #[test]
@@ -455,11 +547,97 @@ mod tests {
     }
 
     #[test]
-    fn create_scope_default_and_update_scope_requirement_are_unchanged() {
+    fn create_defaults_scopes_and_a_patch_may_carry_only_the_fields_it_changes() {
         let create: CreateApiKeyRequest = serde_json::from_value(json!({ "name": "key" })).unwrap();
         assert_eq!(create.scopes, ["inference"]);
 
-        assert!(serde_json::from_value::<UpdateApiKeyRequest>(json!({ "name": "key" })).is_err());
+        let patch: UpdateApiKeyRequest =
+            serde_json::from_value(json!({ "name": "renamed", "scopes": ["inference"] })).unwrap();
+        assert_eq!(patch.name.as_deref(), Some("renamed"));
+        assert_eq!(patch.allowed_routes, None);
+        assert_eq!(patch.requests_per_minute, None);
+        assert_eq!(patch.expires_at, None);
+    }
+
+    #[test]
+    fn a_patch_never_widens_the_fields_it_omits() {
+        let request: UpdateApiKeyRequest =
+            serde_json::from_value(json!({ "name": "renamed", "scopes": ["inference"] })).unwrap();
+        let (merged, expiration_changed) = merge_api_key_policy(stored_policy(), &request);
+
+        assert!(!expiration_changed);
+        assert_eq!(merged.name, "renamed");
+        assert_eq!(merged.allowed_routes, ["stored-route"]);
+        assert_eq!(merged.requests_per_minute, Some(30));
+        assert_eq!(merged.tokens_per_minute, Some(5_000));
+        assert_eq!(merged.max_concurrency, Some(2));
+
+        let policy = normalize_patch(stored_policy(), &request, Utc::now()).unwrap();
+        assert_eq!(policy.allowed_routes[0].as_str(), "stored-route");
+        assert_eq!(
+            policy.limits.requests_per_minute.map(NonZeroU32::get),
+            Some(30)
+        );
+    }
+
+    #[test]
+    fn an_explicit_null_clears_a_limit_and_the_expiry() {
+        let stored = ApiKeyPolicySnapshot {
+            expires_at: Some(Utc::now() + Duration::hours(1)),
+            ..stored_policy()
+        };
+        let request: UpdateApiKeyRequest = serde_json::from_value(json!({
+            "requests_per_minute": null,
+            "allowed_routes": [],
+            "expires_at": null
+        }))
+        .unwrap();
+        let (merged, expiration_changed) = merge_api_key_policy(stored, &request);
+
+        assert!(expiration_changed);
+        assert_eq!(merged.name, "stored key");
+        assert_eq!(merged.requests_per_minute, None);
+        assert_eq!(merged.tokens_per_minute, Some(5_000));
+        assert!(merged.allowed_routes.is_empty());
+        assert_eq!(merged.expires_at, None);
+    }
+
+    #[test]
+    fn an_expired_key_stays_editable_until_the_expiry_itself_changes() {
+        let expired = Utc::now() - Duration::hours(1);
+        let stored = ApiKeyPolicySnapshot {
+            expires_at: Some(expired),
+            ..stored_policy()
+        };
+        let now = Utc::now();
+
+        let renamed: UpdateApiKeyRequest =
+            serde_json::from_value(json!({ "name": "renamed" })).unwrap();
+        assert_eq!(
+            normalize_patch(stored.clone(), &renamed, now).unwrap().name,
+            "renamed"
+        );
+
+        let echoed = UpdateApiKeyRequest {
+            name: Some("renamed".to_owned()),
+            expires_at: Some(Some(expired)),
+            ..UpdateApiKeyRequest::default()
+        };
+        assert_eq!(
+            normalize_patch(stored.clone(), &echoed, now)
+                .unwrap()
+                .expires_at,
+            Some(expired)
+        );
+
+        let moved = UpdateApiKeyRequest {
+            expires_at: Some(Some(expired - Duration::minutes(1))),
+            ..UpdateApiKeyRequest::default()
+        };
+        assert_eq!(
+            normalize_patch(stored, &moved, now).unwrap_err().errors["expires_at"],
+            ["Expiration must be in the future or null."]
+        );
     }
 
     #[test]

@@ -7,7 +7,7 @@
     revokeSession
   } from '$lib/api/management/access';
   import { authLifecycle } from '$lib/auth/lifecycle';
-  import { can } from '$lib/auth/authorization';
+  import { useRole } from '$lib/auth/useRole.svelte';
   import { errorMessage as accessErrorMessage } from '$lib/api/http';
   import {
     cursorPaginationProps,
@@ -15,10 +15,11 @@
     resetCursor
   } from '$lib/api/pagination';
   import CursorPagination from '$lib/components/CursorPagination.svelte';
+  import { formatDate } from '$lib/format';
 
-  const canManage = can(authLifecycle.snapshot().user?.role, 'sessions.manage');
+  const access = useRole();
+  const canManage = $derived(access.can('sessions.manage'));
   let selectedUser = $state('');
-  let previousSelectedUser = $state('');
   const pagination = $state(emptyCursorHistory());
   let busy = $state('');
   let error = $state('');
@@ -26,18 +27,22 @@
 
   const users = createQuery(() => ({
     queryKey: ['user-page', 'first'],
-    queryFn: () => listUserPage()
+    queryFn: () => listUserPage(),
+    // Only the member filter needs the roster, and only managers see it.
+    enabled: canManage
   }));
   const sessions = createQuery(() => ({
     queryKey: ['session-page', selectedUser, pagination.cursor ?? 'first'],
     queryFn: () => listSessionPage(selectedUser || undefined, pagination.cursor)
   }));
 
-  $effect(() => {
-    if (selectedUser === previousSelectedUser) return;
-    previousSelectedUser = selectedUser;
+  // Resetting inside the change handler keeps the cursor and the member in one
+  // render, so the query never fires with a cursor from the previous member.
+  function selectMember(value: string) {
+    if (value === selectedUser) return;
+    selectedUser = value;
     resetCursor(pagination);
-  });
+  }
 
   async function removeSession(id: string, current: boolean) {
     if (
@@ -72,15 +77,20 @@
     <p class="eyebrow">Active sessions</p>
     <h2>Opaque server-side sessions</h2>
   </div>
-  <label class="session-filter">
-    <span>Member</span>
-    <select bind:value={selectedUser}>
-      <option value="">My sessions</option>
-      {#each users.data?.items ?? [] as user (user.id)}<option value={user.id}
-          >{user.display_name}</option
-        >{/each}
-    </select>
-  </label>
+  {#if canManage}
+    <label class="session-filter">
+      <span>Member</span>
+      <select
+        value={selectedUser}
+        onchange={(event) => selectMember(event.currentTarget.value)}
+      >
+        <option value="">My sessions</option>
+        {#each users.data?.items ?? [] as user (user.id)}<option value={user.id}
+            >{user.display_name}</option
+          >{/each}
+      </select>
+    </label>
+  {/if}
 </div>
 
 {#if sessions.isPending}
@@ -110,9 +120,9 @@
                 >{session.current ? 'current' : 'active'}</span
               ></td
             >
-            <td>{new Date(session.created_at).toLocaleString()}</td><td
-              >{new Date(session.last_seen_at).toLocaleString()}</td
-            ><td>{new Date(session.expires_at).toLocaleString()}</td>
+            <td>{formatDate(session.created_at)}</td><td
+              >{formatDate(session.last_seen_at)}</td
+            ><td>{formatDate(session.expires_at)}</td>
             <td
               >{#if canManage || session.current}<button
                   class="button button-secondary danger-button"

@@ -16,10 +16,12 @@
     invalidateProviderSummaries
   } from './providerCache';
   import type { RunProviderAction } from './providerDetailCoordination';
+  import { formatDate } from '$lib/format';
 
   let {
     current,
     busy,
+    canManage,
     canSave,
     run,
     onSave,
@@ -29,6 +31,7 @@
   }: {
     current: Provider;
     busy: string;
+    canManage: boolean;
     canSave: boolean;
     run: RunProviderAction;
     onSave: () => void;
@@ -96,14 +99,14 @@
     class="button button-secondary"
     type="button"
     onclick={onSave}
-    disabled={Boolean(busy) || !canSave}>Save draft</button
+    disabled={!canManage || Boolean(busy) || !canSave}>Save draft</button
   >
-  {#if current.state === 'draft'}
+  {#if canManage && current.state === 'draft'}
     <button
       class="button button-secondary"
       type="button"
       onclick={testDraft}
-      disabled={Boolean(busy) || !capabilitiesCertified(current)}
+      disabled={!canManage || Boolean(busy) || !capabilitiesCertified(current)}
       >{busy === 'detail-probe'
         ? 'Testing completed draft…'
         : 'Test completed draft'}</button
@@ -112,13 +115,13 @@
       class="button button-primary"
       type="button"
       onclick={activate}
-      disabled={Boolean(busy) || !activationReady(current)}
+      disabled={!canManage || Boolean(busy) || !activationReady(current)}
       >Activate changes</button
     >
   {/if}
 </div>
 {#if current.last_probe_at}<p class="audit-note">
-    Last probe {new Date(current.last_probe_at).toLocaleString()}: {current.last_probe_status}
+    Last probe {formatDate(current.last_probe_at)}: {current.last_probe_status}
     — {current.last_probe_detail}
   </p>{/if}
 

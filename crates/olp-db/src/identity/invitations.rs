@@ -1,4 +1,5 @@
 use chrono::{DateTime, Duration, Utc};
+use olp_engine::domain::auth::Permission;
 use sqlx::FromRow;
 use uuid::Uuid;
 
@@ -85,10 +86,14 @@ impl Store {
             return Err(Error::PendingInvitationExists);
         }
         // Expired pending rows no longer reserve the partial unique index.
+        // Record the timeout in its own column: stamping revoked_at here would
+        // rewrite a passive expiry as this operator's deliberate revocation.
         sqlx::query!(
-            "UPDATE invitations SET revoked_at = now(), revoked_by = $2 \
-             WHERE email = $1 AND accepted_at IS NULL AND revoked_at IS NULL AND expires_at <= now()",
-        &email, invitation.actor)
+            "UPDATE invitations SET expired_at = now() \
+             WHERE email = $1 AND accepted_at IS NULL AND revoked_at IS NULL \
+               AND expired_at IS NULL AND expires_at <= now()",
+            &email
+        )
         .execute(&mut *transaction)
         .await?;
 
@@ -99,7 +104,7 @@ impl Store {
             "INSERT INTO invitations \
              (id, email, role, token_digest, invited_by, expires_at, created_at) \
              VALUES ($1, $2, CAST($3::text AS user_role), $4, $5, $6, $7) \
-             RETURNING id, email, role::text AS \"role!\", invited_by, expires_at, accepted_at, revoked_at, created_at",
+             RETURNING id, email, role::text AS \"role!\", invited_by, expires_at, accepted_at, revoked_at, expired_at, created_at",
         id, &email, invitation.role.as_str(), material.token_digest().to_vec(), invitation.actor, invitation.expires_at, now)
         .fetch_one(&mut *transaction)
         .await
@@ -148,7 +153,7 @@ impl Store {
         let limit = limit.clamp(1, MAX_PAGE_SIZE);
         let rows = sqlx::query_as!(
             InvitationRow,
-            "SELECT id, email, role::text AS \"role!\", invited_by, expires_at, accepted_at, revoked_at, created_at \
+            "SELECT id, email, role::text AS \"role!\", invited_by, expires_at, accepted_at, revoked_at, expired_at, created_at \
              FROM invitations WHERE ($1::uuid IS NULL OR id < $1) ORDER BY id DESC LIMIT $2",
         cursor, limit + 1)
         .fetch_all(self.pool())
@@ -182,8 +187,8 @@ impl Store {
         let row = sqlx::query_as!(
             InvitationRow,
             "UPDATE invitations SET revoked_at = now(), revoked_by = $2 \
-             WHERE id = $1 AND accepted_at IS NULL AND revoked_at IS NULL \
-             RETURNING id, email, role::text AS \"role!\", invited_by, expires_at, accepted_at, revoked_at, created_at",
+             WHERE id = $1 AND accepted_at IS NULL AND revoked_at IS NULL AND expired_at IS NULL \
+             RETURNING id, email, role::text AS \"role!\", invited_by, expires_at, accepted_at, revoked_at, expired_at, created_at",
         id, actor)
         .fetch_optional(&mut *transaction)
         .await?
@@ -235,7 +240,8 @@ impl Store {
         .ok_or(Error::InvitationUnavailable)?;
         lock_identity_email(&mut transaction, &invitation_email).await?;
         let invitation = sqlx::query!(
-            "SELECT id, email, role::text AS \"role!\", expires_at, accepted_at, revoked_at \
+            "SELECT id, email, role::text AS \"role!\", invited_by, expires_at, \
+                    accepted_at, revoked_at, expired_at \
              FROM invitations WHERE token_digest = $1 FOR UPDATE",
             digest.to_vec()
         )
@@ -245,8 +251,23 @@ impl Store {
         let expires_at: DateTime<Utc> = invitation.expires_at;
         if invitation.accepted_at.is_some()
             || invitation.revoked_at.is_some()
+            || invitation.expired_at.is_some()
             || expires_at <= Utc::now()
         {
+            return Err(Error::InvitationUnavailable);
+        }
+        // An invitation is an out-of-band grant that outlives the session it
+        // was minted from. Sessions are revoked when a user is demoted or
+        // deactivated; this token must not survive that either, or a former
+        // owner's pending invitation still redeems into a live owner.
+        let inviter = sqlx::query!(
+            "SELECT role::text AS \"role!\", active FROM users WHERE id = $1",
+            invitation.invited_by
+        )
+        .fetch_optional(&mut *transaction)
+        .await?
+        .ok_or(Error::InvitationUnavailable)?;
+        if !inviter.active || !parse_role(inviter.role)?.allows(Permission::ManageAccess) {
             return Err(Error::InvitationUnavailable);
         }
         let invitation_id: Uuid = invitation.id;
@@ -325,6 +346,32 @@ impl Store {
     }
 }
 
+/// Retires the invitations a user minted once they can no longer grant access.
+/// Sessions are revoked on demotion or deactivation; a pending invitation is an
+/// out-of-band grant that would otherwise outlive that revocation.
+pub(crate) async fn retire_invitations_on_access_loss(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    user_id: Uuid,
+    role: olp_engine::domain::auth::Role,
+    active: bool,
+    actor: Uuid,
+) -> Result<u64, sqlx::Error> {
+    if active && role.allows(Permission::ManageAccess) {
+        return Ok(0);
+    }
+    let revoked = sqlx::query!(
+        "UPDATE invitations SET revoked_at = now(), revoked_by = $2 \
+         WHERE invited_by = $1 AND accepted_at IS NULL AND revoked_at IS NULL \
+           AND expired_at IS NULL",
+        user_id,
+        actor
+    )
+    .execute(&mut **transaction)
+    .await?
+    .rows_affected();
+    Ok(revoked)
+}
+
 pub(super) fn normalize_email(email: &str) -> Result<String, Error> {
     let email = email.trim().to_lowercase();
     if email.len() > 254 || !email.contains('@') || email.starts_with('@') || email.ends_with('@') {
@@ -342,6 +389,7 @@ struct InvitationRow {
     expires_at: DateTime<Utc>,
     accepted_at: Option<DateTime<Utc>>,
     revoked_at: Option<DateTime<Utc>>,
+    expired_at: Option<DateTime<Utc>>,
     created_at: DateTime<Utc>,
 }
 
@@ -354,6 +402,7 @@ fn invitation_from_row(row: InvitationRow) -> Result<InvitationRecord, Error> {
         expires_at: row.expires_at,
         accepted_at: row.accepted_at,
         revoked_at: row.revoked_at,
+        expired_at: row.expired_at,
         created_at: row.created_at,
     })
 }

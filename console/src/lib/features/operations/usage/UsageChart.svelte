@@ -68,7 +68,7 @@
           <thead><tr><th scope="col">Bucket</th><th scope="col">Requests</th><th scope="col">Input tokens</th><th scope="col">Output tokens</th><th scope="col">Estimated cost</th><th scope="col">Status</th></tr></thead>
           <tbody>
             {#each points as point (point.bucket)}
-              <tr><td>{bucketLabel(point.bucket)}</td><td>{point.request_count}</td><td>{point.input_tokens}</td><td>{point.output_tokens}</td><td>{formatCost(point.estimated_cost, point.currency ?? 'USD')}</td><td>{point.incomplete_count > 0 ? `${point.incomplete_count} incomplete` : point.unpriced_count > 0 ? `${point.unpriced_count} unpriced` : 'Complete'}</td></tr>
+              <tr><td>{bucketLabel(point.bucket)}</td><td>{point.request_count}</td><td>{point.input_tokens}</td><td>{point.output_tokens}</td><td>{formatCost(point.estimated_cost, point.currency)}</td><td>{point.incomplete_count > 0 ? `${point.incomplete_count} incomplete` : point.unpriced_count > 0 ? `${point.unpriced_count} unpriced` : 'Complete'}</td></tr>
             {/each}
           </tbody>
         </table>

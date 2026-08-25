@@ -397,6 +397,34 @@ impl Store {
         if uncovered_route_operation.is_some() {
             return Err(Error::ProviderIncomplete);
         }
+        // Operation coverage is not enough. The runtime compiler drops any
+        // target whose model is absent or disabled in the provider's activated
+        // revision, and Route::validate then rejects max_attempts > targets.
+        // Reject here instead, naming the route and target that would vanish.
+        let orphaned_route_target = sqlx::query!(
+            "SELECT r.slug AS \"route_slug!\", \
+                    concat(p.name, '/', pm.upstream_model) AS \"target!\" \
+             FROM routes r \
+             JOIN LATERAL (SELECT id FROM route_revisions \
+                           WHERE route_id = r.id ORDER BY revision DESC LIMIT 1) rr ON true \
+             JOIN route_revision_targets rt ON rt.route_revision_id = rr.id \
+             JOIN provider_models pm ON pm.id = rt.provider_model_id \
+             JOIN providers p ON p.id = pm.provider_id \
+             LEFT JOIN provider_revision_models prm \
+               ON prm.source_provider_model_id = pm.id AND prm.provider_revision_id = $2 \
+             WHERE p.id = $1 AND (prm.id IS NULL OR NOT prm.enabled) \
+             ORDER BY r.slug, rt.position LIMIT 1",
+            provider_id,
+            revision_id
+        )
+        .fetch_optional(&mut *transaction)
+        .await?;
+        if let Some(orphaned) = orphaned_route_target {
+            return Err(Error::Invalid(format!(
+                "route {} targets {}, which this provider revision does not enable",
+                orphaned.route_slug, orphaned.target
+            )));
+        }
         sqlx::query!(
             "UPDATE providers SET state = 'active'::provider_state, active_revision_id = $1, \
                     etag = $2, updated_at = now() WHERE id = $3 AND etag = $4",

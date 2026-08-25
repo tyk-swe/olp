@@ -133,6 +133,7 @@ fn attempt(
             generation_id: RuntimeGenerationId::new(),
             route_id: RouteId::new(),
             target_id: TargetId::new(),
+            routing_id: TargetId::new(),
             provider_id: ProviderId::new(),
             provider_kind: ProviderKind::Anthropic,
             upstream_model: "claude-sonnet-4-5".into(),

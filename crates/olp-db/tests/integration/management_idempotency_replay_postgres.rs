@@ -390,6 +390,7 @@ async fn remaining_management_mutations_exactly_replay_without_double_execution(
         model: "replay-model".to_owned(),
         operation: olp_engine::domain::canonical::identity::OperationKind::Generation,
         input_per_million: Some("1.250000000000".to_owned()),
+        cached_input_per_million: None,
         output_per_million: Some("2.500000000000".to_owned()),
         unit_price: None,
         currency: "USD".to_owned(),

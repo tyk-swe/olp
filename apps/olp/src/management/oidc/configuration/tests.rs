@@ -106,22 +106,22 @@ fn scopes_are_trimmed_deduplicated_sorted_and_require_openid() {
 
 #[test]
 fn request_shape_validation_bounds_each_untrusted_collection_and_identifier() {
-    validate_configuration_request(&request()).unwrap();
+    validate_configuration_request(&request(), false).unwrap();
 
     let mut invalid = request();
     invalid.discovery_url = "x".repeat(2_049);
-    assert!(validate_configuration_request(&invalid).is_err());
+    assert!(validate_configuration_request(&invalid, false).is_err());
 
     for client_id in [String::new(), "x".repeat(513), "bad\nclient".to_owned()] {
         let mut invalid = request();
         invalid.client_id = client_id;
-        assert!(validate_configuration_request(&invalid).is_err());
+        assert!(validate_configuration_request(&invalid, false).is_err());
     }
 
     for claim in [String::new(), "contains/slash".to_owned(), "x".repeat(129)] {
         let mut invalid = request();
         invalid.email_claim = claim;
-        assert!(validate_configuration_request(&invalid).is_err());
+        assert!(validate_configuration_request(&invalid, false).is_err());
     }
 
     let mut invalid = request();
@@ -131,7 +131,36 @@ fn request_shape_validation_bounds_each_untrusted_collection_and_identifier() {
             role: "viewer".to_owned(),
         })
         .collect();
-    assert!(validate_configuration_request(&invalid).is_err());
+    assert!(validate_configuration_request(&invalid, false).is_err());
+}
+
+#[test]
+fn issuer_failures_are_reported_against_the_issuer_field() {
+    for issuer in [
+        String::new(),
+        "   ".to_owned(),
+        "idp.example".to_owned(),
+        "http://idp.example".to_owned(),
+        "https://idp.example?tenant=one".to_owned(),
+        "https://idp.example#fragment".to_owned(),
+        "https://user:secret@idp.example".to_owned(),
+        format!("https://idp.example/{}", "p".repeat(2_049)),
+    ] {
+        let mut invalid = request();
+        invalid.issuer = issuer.clone();
+        let problem = validate_configuration_request(&invalid, false).unwrap_err();
+        assert_eq!(problem.status, 422, "unexpected status for {issuer}");
+        assert!(
+            problem.errors.contains_key("issuer"),
+            "issuer error attributed elsewhere for {issuer}"
+        );
+        assert!(!problem.errors.contains_key("discovery_url"));
+    }
+
+    let mut loopback = request();
+    loopback.issuer = " http://127.0.0.1:8080 ".to_owned();
+    assert!(validate_configuration_request(&loopback, false).is_err());
+    validate_configuration_request(&loopback, true).unwrap();
 }
 
 #[test]

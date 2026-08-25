@@ -11,6 +11,7 @@
     listProviderHealth,
     listRequestMetadataGatewayEpochs
   } from '$lib/api/health';
+  import { errorMessage } from '$lib/api/http';
   import { listRuntimeGenerations } from '$lib/api/runtime';
   import { usageCompleteness } from '$lib/api/usage';
   import { formatDate } from '$lib/format';
@@ -85,7 +86,7 @@
       epochNotice = `Epoch ${processEpoch} acknowledged. Historical completeness evidence remains retained.`;
       await Promise.all([epochs.refetch(), readiness.refetch()]);
     } catch (error) {
-      epochError = error instanceof Error ? error.message : 'The epoch could not be acknowledged.';
+      epochError = errorMessage(error, 'The epoch could not be acknowledged.');
     } finally {
       busyEpoch = '';
     }
@@ -102,7 +103,7 @@
 <p class="refresh-note" aria-live="polite">Automatically refreshes every 15 seconds{checkedAt ? ` · Last checked ${new Date(checkedAt).toLocaleTimeString()}` : ''}.{fetching ? ' Checking now…' : ''}</p>
 
 {#if readiness.isError}
-  <div class="inline-problem" role="alert"><strong>Control health is unavailable.</strong> The gateway may still be serving its last-known-good runtime. <button class="text-button" onclick={() => readiness.refetch()}>Try again</button></div>
+  <div class="inline-problem" role="alert"><strong>Control health is unavailable.</strong> {errorMessage(readiness.error, 'The control API did not respond.')} The gateway may still be serving its last-known-good runtime. <button class="text-button" onclick={() => readiness.refetch()}>Try again</button></div>
 {:else if !readiness.data}
   <div class="loading-state" role="status">Checking the installation…</div>
 {:else}
@@ -110,11 +111,11 @@
     <article class="card metric-card"><p>Gateway</p><strong><span class="badge {healthTone(readiness.data.status)}">{readiness.data.status}</span></strong></article>
     <article class="card metric-card"><p>PostgreSQL</p><strong><span class="badge {healthTone(readiness.data.database)}">{readiness.data.database.replaceAll('_', ' ')}</span></strong></article>
     <article class="card metric-card"><p>Distributed limits</p><strong><span class="badge {healthTone(readiness.data.limits)}">{readiness.data.limits.replaceAll('_', ' ')}</span></strong></article>
-    <article class="card metric-card"><p>Active generation</p><strong>#{readiness.data.generation ?? '—'}</strong></article>
+    <article class="card metric-card"><p>Active generation</p><strong>{readiness.data.generation == null ? '—' : `#${readiness.data.generation}`}</strong></article>
   </section>
 
   {#if persistence.isError}
-    <div class="inline-problem" role="alert">Usage accounting completeness is unavailable. <button class="text-button" onclick={() => persistence.refetch()}>Try again</button></div>
+    <div class="inline-problem" role="alert">{errorMessage(persistence.error, 'Usage accounting completeness is unavailable.')} <button class="text-button" onclick={() => persistence.refetch()}>Try again</button></div>
   {:else if persistence.data}
     <section class="card persistence" aria-labelledby="persistence-title">
       <div class="health-icon" class:ok={persistence.data.complete} aria-hidden="true">{persistence.data.complete ? '✓' : '!'}</div>
@@ -129,7 +130,7 @@
     {#if epochNotice}<div class="inline-notice" role="status">{epochNotice}</div>{/if}
     {#if epochError}<div class="inline-problem" role="alert">{epochError}</div>{/if}
     {#if epochs.isError}
-      <div class="inline-problem" role="alert">Gateway epochs are unavailable. <button class="text-button" onclick={() => epochs.refetch()}>Try again</button></div>
+      <div class="inline-problem" role="alert">{errorMessage(epochs.error, 'Gateway epochs are unavailable.')} <button class="text-button" onclick={() => epochs.refetch()}>Try again</button></div>
     {:else if !epochs.data}
       <div class="loading-state" role="status">Loading gateway epochs…</div>
     {:else if epochs.data.items.length === 0 && epochPagination.history.length === 0}
@@ -144,7 +145,7 @@
   <section class="section" aria-labelledby="providers-title">
     <div class="section-heading"><div><p class="eyebrow">Rolling 15 minutes</p><h2 id="providers-title">Providers</h2></div>{#if providers.data}<span class="badge">{providers.data.data.length} configured</span>{/if}</div>
     {#if providers.isError}
-      <div class="inline-problem" role="alert">Provider outcomes are unavailable. <button class="text-button" onclick={() => providers.refetch()}>Try again</button></div>
+      <div class="inline-problem" role="alert">{errorMessage(providers.error, 'Provider outcomes are unavailable.')} <button class="text-button" onclick={() => providers.refetch()}>Try again</button></div>
     {:else if !providers.data}
       <div class="loading-state" role="status">Loading provider outcomes…</div>
     {:else if providers.data.data.length === 0}
@@ -165,7 +166,7 @@
   <section class="section" aria-labelledby="runtime-title">
     <div class="section-heading"><div><p class="eyebrow">Configuration</p><h2 id="runtime-title">Runtime generations</h2></div></div>
     {#if generations.isError}
-      <div class="inline-problem" role="alert">Runtime generations are unavailable. <button class="text-button" onclick={() => generations.refetch()}>Try again</button></div>
+      <div class="inline-problem" role="alert">{errorMessage(generations.error, 'Runtime generations are unavailable.')} <button class="text-button" onclick={() => generations.refetch()}>Try again</button></div>
     {:else if !generations.data}
       <div class="loading-state" role="status">Loading runtime generations…</div>
     {:else}

@@ -384,6 +384,10 @@ pub fn encode_video_list_response(
     fallback_model: &str,
 ) -> Result<OpenAiVideoListResponse, Error> {
     result.extensions.ensure_representable_on(Surface::OpenAi)?;
+    // Jobs on one page can belong to different routes, so each carries its own
+    // public model. `VideoJobResult::model` is the caller's contract here: it
+    // must already be the route slug, never a provider model id, exactly as the
+    // create and get handlers set it before calling `encode_video_object`.
     let data = result
         .jobs
         .iter()

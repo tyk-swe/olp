@@ -51,9 +51,16 @@ impl Store {
         granularity: Granularity,
     ) -> Result<Report, Error> {
         validate_usage_range(filters)?;
+        // date_trunc on a timestamptz truncates in the session TimeZone.
+        // Pool connections pin UTC, but state the boundary in SQL as well so a
+        // series bucket can never disagree with a rollup bucket.
         let bucket = match granularity {
-            Granularity::Hour => "date_trunc('hour', observed_at)",
-            Granularity::Day => "date_trunc('day', observed_at)",
+            Granularity::Hour => {
+                "date_trunc('hour', observed_at AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'"
+            }
+            Granularity::Day => {
+                "date_trunc('day', observed_at AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'"
+            }
         };
         let mut query = QueryBuilder::<Postgres>::new("");
         push_usage_rows_cte(&mut query, filters, UsageCountScope::for_filters(filters));

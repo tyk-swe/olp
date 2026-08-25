@@ -172,7 +172,12 @@ pub(super) async fn activate_latest_runtime(
         let live_targets = snapshot
             .routes
             .values()
-            .flat_map(|route| route.targets.iter().map(|target| target.id))
+            .flat_map(|route| {
+                route
+                    .targets
+                    .iter()
+                    .map(|target| target.routing_id.unwrap_or(target.id))
+            })
             .collect::<BTreeSet<_>>();
         match runtime.install(snapshot, candidate_transports) {
             Ok(installed) => {

@@ -232,7 +232,11 @@ impl RequestAccountingGuard {
     }
 
     pub async fn release(&mut self) {
-        let Some(task) = self.spawn_limit_cleanup() else {
+        self.release_failed(false).await;
+    }
+
+    async fn release_failed(&mut self, failed: bool) {
+        let Some(task) = self.spawn_limit_cleanup(failed) else {
             return;
         };
         if let Err(error) = task.await {
@@ -241,17 +245,17 @@ impl RequestAccountingGuard {
     }
 
     pub(in crate::inference) fn release_detached(&mut self) {
-        let _ = self.spawn_limit_cleanup();
+        let _ = self.spawn_limit_cleanup(false);
     }
 
     pub async fn finish(mut self, outcome: RequestOutcome) {
-        self.release().await;
+        self.release_failed(outcome.error_class.is_some()).await;
         self.emit(&outcome, true);
         self.armed = false;
     }
 
     pub(in crate::inference) fn finish_detached(mut self, outcome: RequestOutcome) {
-        self.release_detached();
+        let _ = self.spawn_limit_cleanup(outcome.error_class.is_some());
         self.emit(&outcome, true);
         self.armed = false;
     }
@@ -261,7 +265,7 @@ impl RequestAccountingGuard {
         RequestMetadataFinalizer(self)
     }
 
-    fn take_limit_cleanup(&mut self) -> Option<LimitCleanup> {
+    fn take_limit_cleanup(&mut self, failed: bool) -> Option<LimitCleanup> {
         let delta_lease = self.lease.take();
         let admission_reservation = self.admission_reservation.take();
         if delta_lease.is_none() && admission_reservation.is_none() {
@@ -271,12 +275,18 @@ impl RequestAccountingGuard {
             delta_lease,
             admission_reservation,
             admission_reserved_tokens: self.admission_reserved_tokens,
-            actual_tokens: self.usage.actual_tokens(),
+            // A request that failed consumed no tokens we can attribute, so it
+            // must give the conservative reservation back. Leaving it charged
+            // let a run of upstream 502s eat a whole minute's TPM budget and
+            // then 429 unrelated, valid traffic. A *successful* request whose
+            // provider reported nothing keeps the estimate: it really did use
+            // tokens, we just never learned how many.
+            actual_tokens: self.usage.actual_tokens().or(failed.then_some(0)),
         })
     }
 
-    fn spawn_limit_cleanup(&mut self) -> Option<tokio::task::JoinHandle<()>> {
-        Some(tokio::spawn(self.take_limit_cleanup()?.run()))
+    fn spawn_limit_cleanup(&mut self, failed: bool) -> Option<tokio::task::JoinHandle<()>> {
+        Some(tokio::spawn(self.take_limit_cleanup(failed)?.run()))
     }
 
     fn emit(&self, outcome: &RequestOutcome, finalize_attempt: bool) {
@@ -334,7 +344,7 @@ impl Drop for RequestAccountingGuard {
             return;
         }
         self.emit(&RequestOutcome::client_cancelled(), false);
-        let Some(cleanup) = self.take_limit_cleanup() else {
+        let Some(cleanup) = self.take_limit_cleanup(true) else {
             return;
         };
         if let Ok(runtime) = tokio::runtime::Handle::try_current() {
@@ -357,9 +367,14 @@ impl RequestMetadataFinalizer {
 pub struct UsageCapture {
     observed: bool,
     complete: bool,
+    /// Whether the provider stream actually reached its terminal event. A
+    /// cancelled or timed-out stream carries real numbers that are simply not
+    /// the final ones, so it must not be priced as exact.
+    settled: bool,
     input_tokens: Option<i64>,
     output_tokens: Option<i64>,
     cached_input_tokens: Option<i64>,
+    reasoning_tokens: Option<i64>,
     media_units: Option<Decimal>,
 }
 
@@ -369,7 +384,26 @@ impl UsageCapture {
         self.input_tokens?.checked_add(self.output_tokens?)
     }
 
+    #[must_use]
+    pub const fn reasoning_tokens(&self) -> Option<i64> {
+        self.reasoning_tokens
+    }
+
+    /// Marks the stream as having reached its terminal event.
+    pub const fn settle(&mut self) {
+        self.settled = true;
+    }
+
+    #[must_use]
+    pub const fn is_settled(&self) -> bool {
+        self.settled
+    }
+
     pub fn observe(&mut self, event: &Event) {
+        if matches!(event.kind, Kind::Done) {
+            self.settled = true;
+            return;
+        }
         let Kind::Usage { usage } = &event.kind else {
             return;
         };
@@ -379,6 +413,15 @@ impl UsageCapture {
         self.cached_input_tokens = usage
             .cached_input_tokens
             .and_then(|value| i64::try_from(value).ok());
+        self.reasoning_tokens = usage
+            .reasoning_tokens
+            .and_then(|value| i64::try_from(value).ok());
+        // Canonical `output_tokens` excludes `reasoning_tokens` (the two are
+        // disjoint on the wire). Providers bill and rate-limit thinking as
+        // generated output, so the stored and metered output count is the
+        // reasoning-inclusive sum; otherwise a reasoning response would be
+        // free of both charge and rate limit.
+        self.output_tokens = billable_output_tokens(self.output_tokens, self.reasoning_tokens);
         self.complete = self.input_tokens.is_some()
             && self.output_tokens.is_some()
             && (usage.cached_input_tokens.is_none() || self.cached_input_tokens.is_some());
@@ -458,7 +501,12 @@ pub(in crate::inference) fn usage_from_result(result: &CanonicalResult) -> Usage
     let (input_tokens, output_tokens, cached_input_tokens, token_complete) =
         usage.map_or((None, None, None, true), |usage| {
             let input = i64::try_from(usage.input_tokens).ok();
-            let output = i64::try_from(usage.output_tokens).ok();
+            let output = billable_output_tokens(
+                i64::try_from(usage.output_tokens).ok(),
+                usage
+                    .reasoning_tokens
+                    .and_then(|value| i64::try_from(value).ok()),
+            );
             let cached = usage
                 .cached_input_tokens
                 .and_then(|value| i64::try_from(value).ok());
@@ -470,9 +518,16 @@ pub(in crate::inference) fn usage_from_result(result: &CanonicalResult) -> Usage
     UsageCapture {
         observed: true,
         complete: token_complete,
+        // A canonical result is the whole answer; there is no stream to truncate.
+        settled: true,
         input_tokens,
         output_tokens,
         cached_input_tokens,
+        reasoning_tokens: usage.and_then(|usage| {
+            usage
+                .reasoning_tokens
+                .and_then(|value| i64::try_from(value).ok())
+        }),
         media_units,
     }
 }
@@ -513,10 +568,14 @@ fn update_final_attempt(attempt: &mut RequestAttemptMetadata, update: FinalAttem
     attempt.latency_ms = elapsed_ms(update.started.elapsed());
     attempt.first_byte_ms = update.first_byte_ms;
     if update.usage.observed {
+        // A stream that never reached its terminal event reports whatever the
+        // last usage frame said, which is not the total the provider will bill
+        // for the generation it kept producing. Record it as an estimate.
+        let settled = update.usage.settled;
         attempt.usage = Some(RequestAttemptUsageMetadata {
             observed: true,
-            complete: update.usage.complete,
-            billing_uncertain: false,
+            complete: update.usage.complete && settled,
+            billing_uncertain: !settled,
             input_tokens: update.usage.input_tokens,
             output_tokens: update.usage.output_tokens,
             cached_input_tokens: update.usage.cached_input_tokens,
@@ -572,12 +631,21 @@ fn emit_request_metadata_event(service: &Service, input: RequestMetadataInput<'_
         output_tokens: input.usage.output_tokens,
         cached_input_tokens: input.usage.cached_input_tokens,
         media_units: input.usage.media_units,
-        usage_complete: input.usage.observed && input.usage.complete,
+        usage_complete: input.usage.observed && input.usage.complete && input.usage.settled,
         unpriced: true,
         attempts,
     });
     if result.is_err() {
         error!(request_id = %input.request_id, "request metadata buffer overflowed");
+    }
+}
+
+/// Output tokens as providers meter them: canonical `output_tokens` plus the
+/// disjoint `reasoning_tokens`. `None` reasoning leaves the count untouched.
+fn billable_output_tokens(output: Option<i64>, reasoning: Option<i64>) -> Option<i64> {
+    match (output, reasoning) {
+        (Some(output), Some(reasoning)) => Some(output.saturating_add(reasoning)),
+        (output, _) => output,
     }
 }
 
@@ -590,7 +658,8 @@ mod tests {
 
     use super::{
         FinalAttemptUpdate, LimitCleanup, RequestAttemptMetadata, RequestAttemptUsageMetadata,
-        RequestOutcome, UsageCapture, split_actual_tokens, update_final_attempt,
+        RequestOutcome, UsageCapture, billable_output_tokens, split_actual_tokens,
+        update_final_attempt,
     };
     use crate::{
         domain::ports::BoxFuture,
@@ -751,9 +820,11 @@ mod tests {
         let usage = UsageCapture {
             observed: true,
             complete: true,
+            settled: true,
             input_tokens: Some(12),
             output_tokens: Some(7),
             cached_input_tokens: Some(2),
+            reasoning_tokens: None,
             media_units: None,
         };
         let no_error = None;
@@ -798,6 +869,125 @@ mod tests {
         assert!(!attempt_usage.complete);
         assert!(attempt_usage.billing_uncertain);
         assert!(attempt.committed);
+    }
+
+    #[test]
+    fn a_stream_that_never_reached_done_is_priced_as_an_estimate() {
+        let mut attempt = uncertain_attempt();
+        let error = Some("client_cancelled".to_owned());
+        let usage = UsageCapture {
+            observed: true,
+            complete: true,
+            settled: false,
+            input_tokens: Some(12),
+            output_tokens: Some(7),
+            cached_input_tokens: None,
+            reasoning_tokens: None,
+            media_units: None,
+        };
+        update_final_attempt(
+            &mut attempt,
+            FinalAttemptUpdate {
+                completed_at: Utc::now(),
+                started: tokio::time::Instant::now(),
+                first_byte_ms: Some(3),
+                status_code: None,
+                error_class: &error,
+                committed: true,
+                usage: &usage,
+            },
+        );
+        let attempt_usage = attempt.usage.unwrap();
+        assert!(attempt_usage.observed);
+        assert!(
+            attempt_usage.billing_uncertain,
+            "an aborted stream cannot be recorded as an exact charge"
+        );
+        assert!(!attempt_usage.complete);
+        assert_eq!(attempt_usage.output_tokens, Some(7));
+    }
+
+    #[test]
+    fn a_terminal_done_event_settles_the_capture() {
+        use crate::domain::canonical::events::{Event, Kind, Usage};
+
+        let mut usage = UsageCapture::default();
+        assert!(!usage.is_settled());
+        usage.observe(&Event::new(
+            0,
+            Kind::Usage {
+                usage: Usage {
+                    input_tokens: 10,
+                    output_tokens: 5,
+                    total_tokens: 15,
+                    cached_input_tokens: None,
+                    reasoning_tokens: None,
+                },
+            },
+        ));
+        assert!(!usage.is_settled());
+        usage.observe(&Event::new(1, Kind::Done));
+        assert!(usage.is_settled());
+    }
+
+    #[test]
+    fn reasoning_tokens_are_metered_as_billable_output() {
+        use crate::domain::canonical::events::{Event, Kind, Usage};
+
+        // Canonical usage keeps reasoning disjoint from output; accounting
+        // meters the provider-billed sum so thinking is neither free of
+        // charge nor of the TPM limit.
+        let mut usage = UsageCapture::default();
+        usage.observe(&Event::new(
+            0,
+            Kind::Usage {
+                usage: Usage {
+                    input_tokens: 10,
+                    output_tokens: 5,
+                    total_tokens: 135,
+                    cached_input_tokens: None,
+                    reasoning_tokens: Some(120),
+                },
+            },
+        ));
+        assert_eq!(usage.reasoning_tokens(), Some(120));
+        assert_eq!(usage.output_tokens, Some(125));
+        assert_eq!(usage.actual_tokens(), Some(135));
+
+        // No reasoning reported: the output count is used as-is.
+        let mut plain = UsageCapture::default();
+        plain.observe(&Event::new(
+            0,
+            Kind::Usage {
+                usage: Usage {
+                    input_tokens: 10,
+                    output_tokens: 5,
+                    total_tokens: 15,
+                    cached_input_tokens: None,
+                    reasoning_tokens: None,
+                },
+            },
+        ));
+        assert_eq!(plain.actual_tokens(), Some(15));
+        assert_eq!(billable_output_tokens(None, Some(3)), None);
+    }
+
+    #[tokio::test]
+    async fn a_failed_request_without_usage_refunds_its_whole_reservation() {
+        let admission = Arc::new(CleanupEffects::default());
+        let admission_reservation = Reservation::distributed(recording_lease(&admission));
+        let release = admission_reservation.clone();
+        LimitCleanup {
+            delta_lease: None,
+            admission_reservation: Some(admission_reservation),
+            admission_reserved_tokens: Some(4_096),
+            // What `take_limit_cleanup(true)` produces with nothing observed.
+            actual_tokens: Some(0),
+        }
+        .run()
+        .await;
+        assert_eq!(admission.reconciled_tokens.lock().unwrap().as_slice(), &[0]);
+        release.release().await;
     }
 
     fn uncertain_attempt() -> RequestAttemptMetadata {

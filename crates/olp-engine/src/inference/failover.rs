@@ -32,6 +32,7 @@ fn canonical_event_protocol_error(
     response_committed: bool,
 ) -> TransportError {
     TransportError {
+        upstream: Default::default(),
         phase: TransportPhase::Body,
         class: AttemptFailureClass::Protocol,
         response_committed,
@@ -181,7 +182,11 @@ impl AttemptRecord<'_> {
             self.started,
             &transport,
         ));
-        circuits.record_failure(self.plan.target_id, transport.class);
+        circuits.record_failure_for_optional_permit(
+            self.plan.routing_id,
+            Some(&self.circuit_permit),
+            transport.class,
+        );
         if terminal.is_none() && transport.allows_failover() {
             Ok(transport)
         } else {
@@ -213,7 +218,8 @@ impl AttemptRecord<'_> {
     }
 
     fn record_success(&self, traces: &mut Vec<RequestAttemptMetadata>, circuits: &Breaker) {
-        circuits.record_success(self.plan.target_id);
+        circuits
+            .record_success_for_optional_permit(self.plan.routing_id, Some(&self.circuit_permit));
         self.record_accepted_output(traces);
     }
 
@@ -232,6 +238,7 @@ impl AttemptRecord<'_> {
         circuits: &Breaker,
     ) -> ExecutionFailure {
         let timeout = TransportError {
+            upstream: Default::default(),
             phase: crate::domain::ports::TransportPhase::Connect,
             class: AttemptFailureClass::Timeout,
             response_committed: false,
@@ -244,7 +251,7 @@ impl AttemptRecord<'_> {
             self.started,
             &timeout,
         ));
-        circuits.abandon_probe(self.plan.target_id, self.circuit_permit);
+        circuits.abandon_probe(self.plan.routing_id, self.circuit_permit);
         ExecutionFailure {
             error: InferenceError::timeout(),
             attempts: std::mem::take(traces),
@@ -276,6 +283,23 @@ struct FailureHistory {
     last_canonical: Option<(usize, Error)>,
 }
 
+/// First retry waits about this long; each further retry doubles it.
+const BASE_RETRY_BACKOFF: Duration = Duration::from_millis(100);
+/// Ceiling for the computed backoff. An upstream `Retry-After` above this is
+/// still honoured — the provider knows its own recovery time better than we do.
+const MAX_RETRY_BACKOFF: Duration = Duration::from_secs(5);
+
+/// Delay before re-attempting after a retryable failure. Exponential with full
+/// jitter so a fleet does not resynchronize on a provider blip, floored at any
+/// `Retry-After` the provider sent. `jitter` is a fraction in `[0, 1]`.
+fn retry_backoff(retry_index: u32, retry_after: Option<Duration>, jitter: f64) -> Duration {
+    let exponential = BASE_RETRY_BACKOFF
+        .saturating_mul(1_u32 << retry_index.min(6))
+        .min(MAX_RETRY_BACKOFF);
+    let jittered = exponential.mul_f64(0.5 + jitter.clamp(0.0, 1.0) / 2.0);
+    jittered.max(retry_after.unwrap_or(Duration::ZERO))
+}
+
 impl FailureHistory {
     fn record_retry(
         &mut self,
@@ -287,6 +311,13 @@ impl FailureHistory {
         if let Some(canonical) = canonical {
             self.last_canonical = Some((completed_attempts, canonical));
         }
+    }
+
+    /// What the last failing provider asked us to wait, if it said anything.
+    fn retry_after(&self) -> Option<Duration> {
+        self.last_transport
+            .as_ref()
+            .and_then(|transport| transport.upstream.retry_after)
     }
 
     fn into_error(self, completed_attempts: usize) -> InferenceError {
@@ -339,9 +370,20 @@ pub async fn execute(
     let route_deadline = tokio::time::Instant::now() + overall_timeout;
     let mut failures = FailureHistory::default();
     let mut traces = Vec::with_capacity(attempts.len());
+    let attempts = with_sole_target_retry(attempts);
     let attempt_count = attempts.len();
     for (attempt_index, attempt) in attempts.into_iter().enumerate() {
-        let Some(circuit_permit) = circuits.try_acquire_permit(attempt.target_id) else {
+        if attempt_index > 0
+            && !wait_before_retry(
+                u32::try_from(attempt_index - 1).unwrap_or(u32::MAX),
+                failures.retry_after(),
+                route_deadline,
+            )
+            .await
+        {
+            break;
+        }
+        let Some(circuit_permit) = circuits.try_acquire_permit(attempt.routing_id) else {
             continue;
         };
         let ordinal = u16::try_from(traces.len() + 1).unwrap_or(u16::MAX);
@@ -398,6 +440,58 @@ pub async fn execute(
     })
 }
 
+/// A route with a single eligible target would otherwise perform zero retries:
+/// one transient 503 goes straight to the client. One extra pass over the same
+/// target is bounded, still fenced by the route deadline and the circuit, and
+/// only ever reached when the first attempt failed in a retryable way.
+fn with_sole_target_retry(mut attempts: Vec<AttemptPlan>) -> Vec<AttemptPlan> {
+    if let [only] = attempts.as_slice() {
+        let retry = only.clone();
+        attempts.push(retry);
+    }
+    attempts
+}
+
+/// Cheap decorrelating jitter in `[0, 1)`. Backoff spreading does not need a
+/// cryptographic source, only enough entropy that concurrent retries on the
+/// same host do not resynchronize.
+fn jitter_fraction() -> f64 {
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |elapsed| u64::from(elapsed.subsec_nanos()));
+    let mut value = COUNTER.fetch_add(1, Ordering::Relaxed) ^ nanos;
+    value = value.wrapping_mul(0x2545_f491_4f6c_dd1d) | 1;
+    value ^= value >> 33;
+    value = value.wrapping_mul(0xff51_afd7_ed55_8ccd);
+    value ^= value >> 33;
+    #[expect(
+        clippy::cast_precision_loss,
+        reason = "53 bits is exactly f64's mantissa"
+    )]
+    let fraction = (value >> 11) as f64 / (1_u64 << 53) as f64;
+    fraction
+}
+
+/// Sleeps the jittered backoff. Returns `false` when the route deadline leaves
+/// no room for another attempt, so the caller stops rather than sleeping into
+/// a guaranteed timeout.
+async fn wait_before_retry(
+    retry_index: u32,
+    retry_after: Option<Duration>,
+    route_deadline: tokio::time::Instant,
+) -> bool {
+    let backoff = retry_backoff(retry_index, retry_after, jitter_fraction());
+    let remaining = route_deadline.saturating_duration_since(tokio::time::Instant::now());
+    if backoff >= remaining {
+        return false;
+    }
+    tokio::time::sleep(backoff).await;
+    true
+}
+
 async fn execute_attempt(
     context: AttemptExecutionContext<'_>,
     record: &AttemptRecord<'_>,
@@ -416,6 +510,7 @@ async fn execute_attempt(
     let attempt_deadline = route_deadline.min(record.started + attempt.timeout.as_duration());
     let Some(transport) = runtime.transport(attempt.provider_id) else {
         let error = TransportError {
+            upstream: Default::default(),
             phase: crate::domain::ports::TransportPhase::Connect,
             class: AttemptFailureClass::Connect,
             response_committed: false,
@@ -448,6 +543,7 @@ async fn execute_attempt(
         Err(_) => {
             let error = reclassify_ambiguous_transport_failure(
                 TransportError {
+                    upstream: Default::default(),
                     phase: crate::domain::ports::TransportPhase::FirstByte,
                     class: AttemptFailureClass::Timeout,
                     response_committed: false,
@@ -483,6 +579,7 @@ async fn execute_attempt(
         }
         Ok(None) => {
             let error = TransportError {
+                upstream: Default::default(),
                 phase: crate::domain::ports::TransportPhase::FirstByte,
                 class: AttemptFailureClass::Protocol,
                 response_committed: false,
@@ -497,6 +594,7 @@ async fn execute_attempt(
         Err(_) => {
             let error = reclassify_ambiguous_transport_failure(
                 TransportError {
+                    upstream: Default::default(),
                     phase: crate::domain::ports::TransportPhase::FirstByte,
                     class: AttemptFailureClass::Timeout,
                     response_committed: false,
@@ -522,6 +620,7 @@ async fn execute_attempt(
             && let Some(class) = canonical_error_circuit_class(error.class)
         {
             let transport_error = TransportError {
+                upstream: Default::default(),
                 phase: crate::domain::ports::TransportPhase::FirstByte,
                 class,
                 response_committed: false,
@@ -533,20 +632,28 @@ async fn execute_attempt(
             });
         }
         if let Some(class) = canonical_error_circuit_class(error.class) {
-            circuits.record_failure(attempt.target_id, class);
+            circuits.record_failure_for_optional_permit(
+                attempt.routing_id,
+                Some(&record.circuit_permit),
+                class,
+            );
         }
         true
     } else {
         false
     };
     if matches!(first.kind, Kind::Done) && !initial_failure {
-        circuits.record_success(attempt.target_id);
+        circuits
+            .record_success_for_optional_permit(attempt.routing_id, Some(&record.circuit_permit));
     }
-    let events = circuit_accounted_event_stream(
+    // The half-open probe outlives this function: a stream is still the same
+    // probe, so it reports its outcome under the same lease.
+    let events = circuit_accounted_event_stream_with_permit(
         validated_event_stream(events, event_sequence),
         circuits.clone(),
-        attempt.target_id,
+        attempt.routing_id,
         initial_failure,
+        Some(record.circuit_permit),
     );
     record.record_accepted_output(traces);
     Ok(AttemptDisposition::Success {
@@ -690,8 +797,92 @@ mod tests {
     };
     use chrono::Utc;
 
-    use super::{AttemptRecord, FailureHistory, attempt_billing_is_uncertain};
+    use super::{
+        AttemptRecord, BASE_RETRY_BACKOFF, FailureHistory, MAX_RETRY_BACKOFF,
+        attempt_billing_is_uncertain, jitter_fraction, retry_backoff, with_sole_target_retry,
+    };
     use crate::inference::{circuit::Breaker, error::Kind as InferenceErrorKind};
+    use std::time::Duration;
+
+    fn plan(target_id: TargetId) -> AttemptPlan {
+        AttemptPlan {
+            generation_id: RuntimeGenerationId::new(),
+            route_id: RouteId::new(),
+            target_id,
+            routing_id: target_id,
+            provider_id: ProviderId::new(),
+            provider_kind: ProviderKind::OpenAi,
+            upstream_model: "backoff-test".to_owned(),
+            timeout: DurationMs::new(1_000),
+            priority: 0,
+        }
+    }
+
+    #[test]
+    fn retry_backoff_grows_with_jitter_and_is_floored_by_the_provider_hint() {
+        // Full jitter keeps the delay inside [half, whole] of the exponential.
+        for retry_index in 0..4 {
+            let exponential = BASE_RETRY_BACKOFF * (1 << retry_index);
+            let low = retry_backoff(retry_index, None, 0.0);
+            let high = retry_backoff(retry_index, None, 1.0);
+            assert_eq!(low, exponential / 2);
+            assert_eq!(high, exponential);
+        }
+        // Bounded however many attempts a route configures.
+        assert_eq!(retry_backoff(30, None, 1.0), MAX_RETRY_BACKOFF);
+        // A provider that named its own recovery time wins over our guess.
+        assert_eq!(
+            retry_backoff(0, Some(Duration::from_secs(60)), 1.0),
+            Duration::from_secs(60)
+        );
+        // ...but never shortens the computed backoff.
+        assert_eq!(
+            retry_backoff(0, Some(Duration::ZERO), 1.0),
+            BASE_RETRY_BACKOFF
+        );
+    }
+
+    #[test]
+    fn jitter_stays_in_range_and_does_not_repeat_itself() {
+        let samples = (0..64).map(|_| jitter_fraction()).collect::<Vec<_>>();
+        assert!(samples.iter().all(|value| (0.0..1.0).contains(value)));
+        assert!(
+            samples.windows(2).any(|pair| pair[0] != pair[1]),
+            "backoff jitter must decorrelate concurrent retries"
+        );
+    }
+
+    #[test]
+    fn a_sole_eligible_target_earns_one_bounded_retry() {
+        let target = TargetId::new();
+        let single = with_sole_target_retry(vec![plan(target)]);
+        assert_eq!(single.len(), 2);
+        assert_eq!(single[0].target_id, single[1].target_id);
+
+        // A route that already has somewhere else to go is left alone.
+        let pair = with_sole_target_retry(vec![plan(TargetId::new()), plan(TargetId::new())]);
+        assert_eq!(pair.len(), 2);
+        assert!(with_sole_target_retry(Vec::new()).is_empty());
+    }
+
+    #[test]
+    fn the_provider_retry_after_survives_into_the_retry_decision() {
+        let mut history = FailureHistory::default();
+        assert_eq!(history.retry_after(), None);
+        history.record_retry(
+            TransportError {
+                phase: TransportPhase::FirstByte,
+                class: AttemptFailureClass::RateLimit,
+                response_committed: false,
+                message: "throttled".to_owned(),
+                upstream: crate::domain::ports::UpstreamSignal::from_status(429)
+                    .with_retry_after(Some(Duration::from_secs(12))),
+            },
+            None,
+            1,
+        );
+        assert_eq!(history.retry_after(), Some(Duration::from_secs(12)));
+    }
 
     #[test]
     fn billing_uncertainty_starts_after_a_request_may_reach_the_provider() {
@@ -724,6 +915,7 @@ mod tests {
             generation_id: RuntimeGenerationId::new(),
             route_id: RouteId::new(),
             target_id,
+            routing_id: target_id,
             provider_id: ProviderId::new(),
             provider_kind: ProviderKind::OpenAi,
             upstream_model: "deadline-test".to_owned(),
@@ -816,6 +1008,7 @@ mod tests {
 
     fn failure(phase: TransportPhase, class: AttemptFailureClass) -> TransportError {
         TransportError {
+            upstream: Default::default(),
             phase,
             class,
             response_committed: false,

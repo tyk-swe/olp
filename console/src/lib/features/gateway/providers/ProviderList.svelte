@@ -9,9 +9,13 @@
     cursorPaginationProps,
     type CursorHistory
   } from '$lib/api/pagination';
+  import { useRole } from '$lib/auth/useRole.svelte';
+  import { formatDate } from '$lib/format';
   import { providerStatus } from './providerEditor';
 
   let { listState = $bindable() }: { listState: CursorHistory } = $props();
+  const access = useRole();
+  const canManage = $derived(access.can('providers.manage'));
   const providers = createQuery(() => ({
     queryKey: ['provider-page', listState.cursor ?? 'first'],
     queryFn: ({ signal }) => listProviderPage(listState.cursor, signal)
@@ -27,10 +31,16 @@
       certified capabilities.
     </p>
   </div>
-  <a class="button button-primary" href={resolve('/providers/new')}
-    >Add provider <NavIcon name="arrow" /></a
-  >
+  {#if canManage}<a
+      class="button button-primary"
+      href={resolve('/providers/new')}>Add provider <NavIcon name="arrow" /></a
+    >{/if}
 </div>
+{#if !canManage}
+  <p class="read-only-note" role="note">
+    Your role can view providers but not connect, edit, or activate them.
+  </p>
+{/if}
 
 {#if providers.isPending}
   <div class="loading-state" role="status">Loading providers…</div>
@@ -48,9 +58,10 @@
     <div>
       <h2>No providers configured</h2>
       <p>Connect an upstream and test it before building a route.</p>
-      <a class="button button-primary" href={resolve('/providers/new')}
-        >Connect provider</a
-      >
+      {#if canManage}<a
+          class="button button-primary"
+          href={resolve('/providers/new')}>Connect provider</a
+        >{/if}
     </div>
   </section>
 {:else}
@@ -78,12 +89,13 @@
               ></td
             ><td>{item.enabled_model_count} enabled</td><td
               >{item.last_probe_at
-                ? new Date(item.last_probe_at).toLocaleString()
+                ? formatDate(item.last_probe_at)
                 : 'Not tested'}</td
             ><td
               ><a
                 class="button button-secondary"
-                href={resolve(`/providers/${item.id}`)}>Manage</a
+                href={resolve(`/providers/${item.id}`)}
+                >{canManage ? 'Manage' : 'View'}</a
               ></td
             ></tr
           >{/each}</tbody

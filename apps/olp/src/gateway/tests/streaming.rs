@@ -65,6 +65,7 @@ async fn committed_stream_failures_trip_circuit_only_after_terminal_accounting()
         let mut validator = EventSequenceValidator::new();
         validator.push(&first).unwrap();
         let provider: EventStream = Box::pin(stream::iter([Err(TransportError {
+            upstream: Default::default(),
             phase: olp_engine::domain::ports::TransportPhase::Body,
             class: AttemptFailureClass::UpstreamServer,
             response_committed: false,
@@ -224,6 +225,8 @@ async fn chat_and_responses_stream_through_the_real_router_with_native_usage() {
         generation_stream_events("chat stream"),
         false,
     );
+    // Without `stream_options.include_usage` OpenAI sends no usage chunk, and a
+    // `chunk.choices[0].delta` loop must not hit an empty-choices chunk.
     let response = post_json(
         &state,
         &key,
@@ -239,13 +242,36 @@ async fn chat_and_responses_stream_through_the_real_router_with_native_usage() {
     let body = response_text(response).await;
     assert!(body.contains("\"object\":\"chat.completion.chunk\""));
     assert!(body.contains("chat stream"));
-    assert!(body.contains("\"prompt_tokens\":7"));
+    assert!(!body.contains("\"prompt_tokens\""));
+    assert!(!body.contains("\"choices\":[]"));
     assert!(body.ends_with("data: [DONE]\n\n"));
+    // Accounting still sees the upstream usage: it is always requested there.
     let event = request_metadata.recv_next().await.unwrap();
     assert_eq!(event.operation, OperationKind::Generation);
     assert_eq!(event.input_tokens, Some(7));
-    assert_eq!(event.output_tokens, Some(3));
+    // The fixture reports 3 output + 1 reasoning token; accounting meters the
+    // reasoning-inclusive output count providers bill for.
+    assert_eq!(event.output_tokens, Some(4));
     assert!(event.usage_complete);
+
+    install_event_stream(
+        &state,
+        OperationKind::Generation,
+        generation_stream_events("usage stream"),
+        false,
+    );
+    let response = post_json(
+        &state,
+        &key,
+        "/openai/v1/chat/completions",
+        r#"{"model":"default","messages":[{"role":"user","content":"hi"}],"stream":true,"stream_options":{"include_usage":true}}"#,
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_text(response).await;
+    assert!(body.contains("\"prompt_tokens\":7"));
+    assert!(body.ends_with("data: [DONE]\n\n"));
+    request_metadata.recv_next().await.unwrap();
 
     install_event_stream(
         &state,
@@ -273,6 +299,11 @@ async fn chat_and_responses_stream_through_the_real_router_with_native_usage() {
     assert!(event.usage_complete);
 }
 
+/// A failure the gateway knows about before writing a byte must reach the
+/// client as a real HTTP status. Committing `200 OK text/event-stream` and then
+/// describing the 429 inside the body defeated every status-driven retry in an
+/// SDK, load balancer, or proxy — while the unary path on the identical failure
+/// already answered 429.
 #[tokio::test]
 async fn canonical_stream_error_is_not_persisted_as_success() {
     let (mut state, key) = test_state(true);
@@ -306,16 +337,19 @@ async fn canonical_stream_error_is_not_persisted_as_success() {
         r#"{"model":"default","input":"hi","stream":true}"#,
     )
     .await;
-    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
+    assert_ne!(
+        response.headers()[header::CONTENT_TYPE],
+        "text/event-stream; charset=utf-8"
+    );
     let body = response_text(response).await;
     assert!(
         body.contains("error") || body.contains("failed"),
-        "stream body was {body:?}"
+        "error body was {body:?}"
     );
     let event = request_metadata.recv_next().await.unwrap();
     assert_eq!(event.status_code, Some(429));
     assert_ne!(event.error_class.as_deref(), None);
-    assert!(event.committed);
 }
 
 #[tokio::test]
@@ -516,4 +550,50 @@ async fn dropping_client_stream_drops_upstream_within_one_second() {
     })
     .await
     .expect("client cancellation must promptly drop the upstream stream");
+}
+
+/// A27: real Gemini frames `:streamGenerateContent` as a streamed JSON array
+/// unless `alt=sse` is given. Serving `text/event-stream` for the default left
+/// an official-SDK client unable to parse the body.
+#[tokio::test]
+async fn stream_generate_content_requires_alt_sse() {
+    let (state, key) = test_state(true);
+    install_event_stream(
+        &state,
+        OperationKind::Generation,
+        generation_stream_events("gemini stream"),
+        false,
+    );
+
+    let gemini = |path: &'static str| {
+        let state = state.clone();
+        let key = key.clone();
+        async move {
+            crate::public_http::router::gateway_router_for_test(state)
+                .oneshot(
+                    Request::post(path)
+                        .header("x-goog-api-key", key)
+                        .header(header::CONTENT_TYPE, "application/json")
+                        .body(Body::from(
+                            r#"{"contents":[{"role":"user","parts":[{"text":"hi"}]}]}"#,
+                        ))
+                        .unwrap(),
+                )
+                .await
+                .unwrap()
+        }
+    };
+
+    let response = gemini("/gemini/v1beta/models/default:streamGenerateContent").await;
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    assert_ne!(
+        response.headers()[header::CONTENT_TYPE],
+        "text/event-stream; charset=utf-8"
+    );
+    assert!(response_text(response).await.contains("alt=sse"));
+
+    // With `alt=sse` the handler proceeds past the framing check and the
+    // request is routed like any other.
+    let response = gemini("/gemini/v1beta/models/default:streamGenerateContent?alt=sse").await;
+    assert!(!response_text(response).await.contains("alt=sse"));
 }
