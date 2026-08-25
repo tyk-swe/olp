@@ -490,7 +490,7 @@ impl Store {
         let result = sqlx::query!(
             "UPDATE idempotency_records \
              SET request_fingerprint = $4, replay_ciphertext = $5, replay_nonce = $6, \
-                 replay_key_version = $7 \
+                 replay_key_version = $7, resource_id = NULL \
              WHERE actor_user_id = $1 AND operation = $2 AND idempotency_key = $3 \
                AND state = 'completed' AND replay_ciphertext IS NULL",
             actor,
