@@ -21,6 +21,7 @@
   const jobs = createQuery(() => ({
     queryKey: ['media-jobs', listState.applied, listState.cursor ?? 'first'],
     queryFn: () => listMediaJobs({ ...listState.applied, cursor: listState.cursor }),
+    placeholderData: (previous) => previous,
     enabled: !jobId
   }));
   const detail = createQuery(() => ({
@@ -76,7 +77,7 @@
   {#if jobs.isPending}<div class="loading-state" role="status">Loading media jobs…</div>
   {:else if jobs.isError}<div class="inline-problem" role="alert">Media jobs are unavailable. <button class="text-button" type="button" onclick={() => jobs.refetch()}>Retry</button></div>
   {:else if jobs.data?.items.length === 0 && listState.history.length === 0}<section class="card empty-state"><p>No media jobs match these filters.</p></section>
-  {:else}<div class="table-shell"><table class="data-table"><caption class="sr-only">Asynchronous media jobs</caption><thead><tr><th>Route / operation</th><th>Provider</th><th>State</th><th>Lifecycle</th><th>Progress</th><th>Updated</th><th><span class="sr-only">Actions</span></th></tr></thead><tbody>{#each jobs.data?.items ?? [] as job (job.id)}<tr><td><strong>{job.route}</strong><small>{job.operation}</small></td><td>{job.provider_name}<small>{job.provider_model}</small></td><td><span class={`badge ${tone(job.state)}`}>{job.state}</span></td><td>{job.lifecycle.replaceAll('_', ' ')}</td><td>{job.progress_percent == null ? '—' : `${job.progress_percent}%`}</td><td>{formatDate(job.updated_at)}</td><td><a class="button button-secondary" href={resolve(`/media-jobs/${job.id}`)}>View</a></td></tr>{/each}</tbody></table></div><CursorPagination {...cursorPaginationProps(listState, jobs.data?.nextCursor)} label="Media job pages" />{/if}
+  {:else}<div class="table-shell"><table class="data-table"><caption class="sr-only">Asynchronous media jobs</caption><thead><tr><th>Route / operation</th><th>Provider</th><th>State</th><th>Lifecycle</th><th>Progress</th><th>Updated</th><th><span class="sr-only">Actions</span></th></tr></thead><tbody>{#each jobs.data?.items ?? [] as job (job.id)}<tr><td><strong>{job.route}</strong><small>{job.operation}</small></td><td>{job.provider_name}<small>{job.provider_model}</small></td><td><span class={`badge ${tone(job.state)}`}>{job.state}</span></td><td>{job.lifecycle.replaceAll('_', ' ')}</td><td>{job.progress_percent == null ? '—' : `${job.progress_percent}%`}</td><td>{formatDate(job.updated_at)}</td><td><a class="button button-secondary" href={resolve(`/media-jobs/${job.id}`)}>View</a></td></tr>{/each}</tbody></table></div><CursorPagination {...cursorPaginationProps(listState, jobs.isPlaceholderData ? null : jobs.data?.nextCursor)} label="Media job pages" />{/if}
 {/if}
 
 <style>

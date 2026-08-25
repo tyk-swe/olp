@@ -16,17 +16,18 @@
   const routes = createQuery(() => ({ queryKey: ['routes'], queryFn: ({ signal }) => listRoutes(signal) }));
   const keys = createQuery(() => ({ queryKey: ['api-keys'], queryFn: ({ signal }) => listApiKeys(signal) }));
 
-  const completed = $derived([
+  const loading = $derived(providers.isPending || routes.isPending || keys.isPending);
+  const failed = $derived(providers.isError || routes.isError || keys.isError);
+  const settled = $derived(!loading && !failed);
+  const completed = $derived(settled ? [
     true,
     Boolean(providers.data?.some((provider) => provider.active_revision != null)),
     Boolean(providers.data?.some((provider) => provider.enabled_model_count > 0)),
     Boolean(routes.data?.length),
     Boolean(keys.data?.some((key) => !key.revoked_at))
-  ]);
+  ] : []);
   const completeCount = $derived(completed.filter(Boolean).length);
   const currentIndex = $derived(completed.findIndex((value) => !value));
-  const loading = $derived(providers.isPending || routes.isPending || keys.isPending);
-  const failed = $derived(providers.isError || routes.isError || keys.isError);
   const definitions = [
     ['Create the installation owner', 'Local authentication is ready.', '/settings/profile'],
     ['Connect and activate a provider', 'Add a write-only credential and verify upstream reachability.', '/providers/new'],
@@ -52,10 +53,10 @@
       <p class="eyebrow">Getting started</p>
       <h2 id="setup-checklist-title">Publish your first route</h2>
     </div>
-    <span class="completion">{loading ? 'Checking…' : `${completeCount} of 5`}</span>
+    <span class="completion">{loading ? 'Checking…' : failed ? 'Unknown' : `${completeCount} of 5`}</span>
   </div>
 
-  <div class="progress" role="progressbar" aria-label="Installation setup" aria-valuemin="0" aria-valuemax="5" aria-valuenow={completeCount}>
+  <div class="progress" role="progressbar" aria-label="Installation setup" aria-valuemin="0" aria-valuemax="5" aria-valuenow={settled ? completeCount : undefined}>
     <span class={`progress-${completeCount}`}></span>
   </div>
 

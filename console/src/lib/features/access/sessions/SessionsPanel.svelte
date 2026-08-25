@@ -7,6 +7,7 @@
     revokeSession
   } from '$lib/api/management/access';
   import { authLifecycle } from '$lib/auth/lifecycle';
+  import { can } from '$lib/auth/authorization';
   import { errorMessage as accessErrorMessage } from '$lib/api/http';
   import {
     cursorPaginationProps,
@@ -15,6 +16,7 @@
   } from '$lib/api/pagination';
   import CursorPagination from '$lib/components/CursorPagination.svelte';
 
+  const canManage = can(authLifecycle.snapshot().user?.role, 'sessions.manage');
   let selectedUser = $state('');
   let previousSelectedUser = $state('');
   const pagination = $state(emptyCursorHistory());
@@ -112,17 +114,17 @@
               >{new Date(session.last_seen_at).toLocaleString()}</td
             ><td>{new Date(session.expires_at).toLocaleString()}</td>
             <td
-              ><button
-                class="button button-secondary danger-button"
-                type="button"
-                onclick={() => removeSession(session.id, session.current)}
-                disabled={Boolean(busy)}
-                >{busy === `session-${session.id}`
-                  ? 'Revoking…'
-                  : session.current
-                    ? 'Sign out'
-                    : 'Revoke'}</button
-              ></td
+              >{#if canManage || session.current}<button
+                  class="button button-secondary danger-button"
+                  type="button"
+                  onclick={() => removeSession(session.id, session.current)}
+                  disabled={Boolean(busy)}
+                  >{busy === `session-${session.id}`
+                    ? 'Revoking…'
+                    : session.current
+                      ? 'Sign out'
+                      : 'Revoke'}</button
+                >{/if}</td
             >
           </tr>
         {/each}

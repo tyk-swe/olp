@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { dateTimeLocalValue, formatCompact, formatCost, statusLabel, statusTone } from './format';
+import { dateTimeLocalValue, formatCompact, formatCost, formatDay, statusLabel, statusTone } from './format';
 
 describe('shared formatting', () => {
   it('never represents missing pricing as zero', () => {
@@ -15,6 +15,15 @@ describe('shared formatting', () => {
 
   it('compacts large token totals', () => {
     expect(formatCompact('12000')).toMatch(/12K|12k/);
+  });
+
+  it('drops the time of day from daily bucket labels', () => {
+    const label = formatDay('2026-07-13T00:00:00Z');
+
+    expect(label).not.toMatch(/\d{1,2}:\d{2}/);
+    expect(label).toMatch(/2026/);
+    expect(formatDay(null)).toBe('—');
+    expect(formatDay('not-a-date')).toBe('—');
   });
 
   it('formats UTC instants as local wall time for datetime-local controls', () => {

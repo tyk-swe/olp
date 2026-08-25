@@ -13,10 +13,12 @@
     cursorPaginationProps,
     emptyCursorHistory
   } from '$lib/api/pagination';
-  import { FIXED_ROLES } from '$lib/auth/authorization';
+  import { FIXED_ROLES, can } from '$lib/auth/authorization';
+  import { authLifecycle } from '$lib/auth/lifecycle';
   import CursorPagination from '$lib/components/CursorPagination.svelte';
   import SecretDialog from '$lib/components/SecretDialog.svelte';
 
+  const canManage = can(authLifecycle.snapshot().user?.role, 'users.manage');
   const pagination = $state(emptyCursorHistory());
   let busy = $state('');
   let error = $state('');
@@ -102,9 +104,10 @@
     }}
   >
     {#snippet children(close)}
-      <code class="invitation-token">{invitationSecret!.token}</code>
-      {#if copyError}<div class="inline-problem" role="alert">{copyError}</div>
-        <code class="invitation-token">{invitationLink()}</code>{/if}
+      <code class="invitation-token">{invitationLink()}</code>
+      {#if copyError}<div class="inline-problem" role="alert">
+          {copyError}
+        </div>{/if}
       <div class="dialog-actions">
         <button
           class="button button-secondary"
@@ -128,6 +131,11 @@
 {#if error}<div class="inline-problem" role="alert">{error}</div>{/if}
 {#if notice}<div class="success-banner" role="status">{notice}</div>{/if}
 
+{#if !canManage}
+  <p class="read-only-note" role="note">
+    Your role can view invitations but not create or revoke them.
+  </p>
+{/if}
 <section class="card invite-panel" aria-labelledby="invite-heading">
   <div>
     <p class="eyebrow">New invitation</p>
@@ -153,7 +161,7 @@
     <button
       class="button button-primary"
       type="submit"
-      disabled={busy === 'invite'}
+      disabled={!canManage || busy === 'invite'}
       >{busy === 'invite' ? 'Creating…' : 'Create invitation'}</button
     >
   </form>
@@ -195,7 +203,7 @@
             >
             <td>{new Date(invitation.expires_at).toLocaleString()}</td>
             <td
-              >{#if invitation.status === 'pending'}<button
+              >{#if canManage && invitation.status === 'pending'}<button
                   class="button button-secondary danger-button"
                   type="button"
                   onclick={() =>

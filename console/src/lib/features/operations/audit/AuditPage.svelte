@@ -11,7 +11,8 @@
   const pagination = $state(emptyCursorHistory());
   const audit = createQuery(() => ({
     queryKey: ['audit', pagination.cursor],
-    queryFn: () => listAudit(pagination.cursor)
+    queryFn: () => listAudit(pagination.cursor),
+    placeholderData: (previous) => previous
   }));
 </script>
 
@@ -23,12 +24,12 @@
   <div class="loading-state" role="status">Loading audit events…</div>
 {:else if audit.isError}
   <div class="inline-problem" role="alert">Audit events are unavailable. <button class="text-button" onclick={() => audit.refetch()}>Try again</button></div>
-{:else if audit.data?.items.length === 0}
+{:else if audit.data?.items.length === 0 && pagination.history.length === 0}
   <div class="card empty-state"><div><strong>No audit events</strong><p>Security and configuration changes will appear here.</p></div></div>
 {:else}
   <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
   <div class="table-shell audit-table" tabindex="0" role="region" aria-label="Audit event results"><table class="data-table"><caption class="sr-only">Audit events, newest first</caption><thead><tr><th scope="col">Occurred</th><th scope="col">Actor</th><th scope="col">Action</th><th scope="col">Resource</th><th scope="col">Outcome</th></tr></thead><tbody>{#each audit.data?.items ?? [] as event (event.id)}<tr><td>{formatDate(event.occurred_at)}</td><td>{event.actor_email ?? 'System'}</td><td><code>{event.action}</code></td><td><strong>{event.resource_type}</strong>{#if event.resource_id}<small class="mono">{event.resource_id}</small>{/if}</td><td><span class="badge" class:success={event.outcome === 'success'} class:danger={event.outcome !== 'success'}>{event.outcome}</span></td></tr>{/each}</tbody></table></div>
-  <CursorPagination {...cursorPaginationProps(pagination, audit.data?.nextCursor)} label="Audit pages" />
+  <CursorPagination {...cursorPaginationProps(pagination, audit.isPlaceholderData ? null : audit.data?.nextCursor)} label="Audit pages" />
 {/if}
 
 <style>

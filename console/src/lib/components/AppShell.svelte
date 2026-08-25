@@ -22,6 +22,7 @@
     onSignOut: () => void;
   } = $props();
   let mobileNavigation = $state<HTMLDialogElement>();
+  let accountMenu = $state<HTMLDetailsElement>();
 
   function openNavigation() {
     mobileNavigation?.showModal();
@@ -35,7 +36,24 @@
     if (event.target === mobileNavigation) closeNavigation();
   }
 
+  function closeAccountMenu() {
+    if (accountMenu) accountMenu.open = false;
+  }
+
+  function dismissAccountMenu(event: PointerEvent) {
+    if (!accountMenu?.open) return;
+    if (event.target instanceof Node && accountMenu.contains(event.target)) return;
+    closeAccountMenu();
+  }
+
+  function closeAccountMenuOnEscape(event: KeyboardEvent) {
+    if (event.key !== 'Escape' || !accountMenu?.open) return;
+    closeAccountMenu();
+    accountMenu.querySelector('summary')?.focus();
+  }
 </script>
+
+<svelte:document onpointerdown={dismissAccountMenu} onkeydown={closeAccountMenuOnEscape} />
 
 <a class="skip-link" href="#main-content">Skip to main content</a>
 
@@ -66,7 +84,7 @@
       <div class="topbar-actions">
         <span class="edition"><span aria-hidden="true"></span>Local installation</span>
         <ThemeToggle />
-        <details class="account-menu">
+        <details class="account-menu" bind:this={accountMenu}>
           <!-- Chromium's accessibility tree does not consistently expose the native summary role. -->
           <!-- svelte-ignore a11y_no_redundant_roles -->
           <summary role="button" aria-label="Open account menu">
@@ -75,8 +93,8 @@
             <NavIcon name="chevron" size={16} />
           </summary>
           <div class="account-popover">
-            <a href={resolve('/settings/profile')}>Personal profile</a>
-            {#if can(user.role, 'settings.read')}<a href={resolve('/settings')}>Installation settings</a>{/if}
+            <a href={resolve('/settings/profile')} onclick={closeAccountMenu}>Personal profile</a>
+            {#if can(user.role, 'settings.read')}<a href={resolve('/settings')} onclick={closeAccountMenu}>Installation settings</a>{/if}
             <button type="button" onclick={onSignOut} disabled={signingOut} aria-busy={signingOut}>
               {signingOut ? 'Signing out…' : 'Sign out'}
             </button>

@@ -111,7 +111,7 @@
       await install(updated, true);
       await invalidateProviderSummaries(queryClient);
       onNotice(
-        `${updated.model_count} model${updated.model_count === 1 ? '' : 's'} reviewed.`
+        `${updated.model_count} model${updated.model_count === 1 ? '' : 's'} discovered. Review capabilities before activation.`
       );
     });
   }

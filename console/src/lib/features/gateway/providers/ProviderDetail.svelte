@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { guardUnsavedChanges } from '$lib/forms/unsavedChanges';
   import { resolve } from '$app/paths';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import ConflictNotice from '$lib/components/ConflictNotice.svelte';
@@ -99,6 +100,8 @@
   function touch() {
     sync = markDirty(sync);
   }
+
+  guardUnsavedChanges(() => sync.dirty);
 
   function acceptProvider(updated: Provider) {
     sync = acceptRemote(sync, updated.etag);

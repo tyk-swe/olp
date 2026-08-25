@@ -15,9 +15,10 @@
   let signOutError = $state('');
   let signingOut = $state(false);
 
-  function loginDestination() {
+  function loginDestination(sessionExpired = false) {
     const returnTo = page.url.pathname + page.url.search + page.url.hash;
-    return `${resolve('/login')}?return_to=${encodeURIComponent(returnTo)}`;
+    const expired = sessionExpired ? '&reason=expired' : '';
+    return `${resolve('/login')}?return_to=${encodeURIComponent(returnTo)}${expired}`;
   }
 
   async function signOut() {
@@ -45,9 +46,11 @@
     });
     const unregister = authLifecycle.registerBoundary({
       loadSession: currentSession,
-      async unauthenticatedDestination(signal) {
+      async unauthenticatedDestination(signal, sessionExpired) {
         const setup = await getSetupStatus(signal);
-        return setup.setup_required ? resolve('/setup') : loginDestination();
+        return setup.setup_required
+          ? resolve('/setup')
+          : loginDestination(sessionExpired);
       },
       loginDestination,
       async navigate(destination) {

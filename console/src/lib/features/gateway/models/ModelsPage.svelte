@@ -6,7 +6,10 @@
     cursorPaginationProps,
     emptyCursorHistory
   } from '$lib/api/pagination';
-  import { invalidateProviderSummaries } from '../providers/providerCache';
+  import {
+    invalidateProviderModelConsumers,
+    invalidateProviderSummaries
+  } from '../providers/providerCache';
   import {
     getProvider,
     listProviderModelInventoryPage,
@@ -27,6 +30,7 @@
   let surface = $state('all');
   let busyModel = $state('');
   let errorMessage = $state('');
+  let notice = $state('');
 
   const inventory = $derived(models.data?.items ?? []);
   const filtered = $derived(
@@ -48,14 +52,16 @@
   async function toggle(entry: ProviderModelInventory, enabled: boolean) {
     busyModel = entry.model.id;
     errorMessage = '';
+    notice = '';
     try {
       const provider = await getProvider(entry.provider_id);
       const capabilities = entry.model.capabilities.map(({ operation, surface, mode }) => ({ operation, surface, mode }));
       await setProviderModel(provider, entry.model.id, enabled, capabilities);
       await Promise.all([
-        models.refetch(),
-        invalidateProviderSummaries(queryClient)
+        invalidateProviderSummaries(queryClient),
+        invalidateProviderModelConsumers(queryClient)
       ]);
+      notice = `Model eligibility staged. Activate ${entry.provider_name} to apply the change.`;
     } catch (error) {
       errorMessage = message(error);
     } finally {
@@ -80,6 +86,7 @@
 </div>
 
 {#if errorMessage}<div class="inline-problem" role="alert">{errorMessage}</div>{/if}
+{#if notice}<div class="success-banner" role="status">{notice}</div>{/if}
 
 <div class="toolbar" role="search">
   <label class="search"><span class="sr-only">Search models</span><input class="filter-control" type="search" bind:value={search} placeholder="Search models or providers" /></label>
@@ -112,6 +119,7 @@
 <aside class="policy-note" aria-label="Capability policy"><strong>No silent semantic loss.</strong> Cross-protocol routes reject operations a target cannot faithfully represent; unknown source fields are not treated as certified support.</aside>
 
 <style>
+  .success-banner { margin: 1rem 0; padding: .85rem 1rem; border: 1px solid color-mix(in srgb, var(--success) 45%, var(--border)); border-radius: .375rem; background: var(--success-soft); color: var(--success); }
   .toolbar { gap: 1rem; }
   .search { flex: 1; } .search input { width: min(100%, 30rem); }
   .surface { display: flex; min-height: 2.75rem; align-items: center; gap: .6rem; color: var(--foreground-muted); font-size: .78rem; font-weight: 700; }

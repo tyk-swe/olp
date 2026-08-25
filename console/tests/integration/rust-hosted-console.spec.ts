@@ -228,7 +228,8 @@ test('Rust serves the console and enforces the real setup/session/management bou
   await page.getByLabel('Role').selectOption('developer');
   await page.getByRole('button', { name: 'Create invitation' }).click();
   const invitationDialog = page.getByRole('dialog', { name: 'Copy the invitation link now.' });
-  const invitationToken = (await invitationDialog.locator('.invitation-token').textContent())?.trim();
+  const invitationLink = (await invitationDialog.locator('.invitation-token').textContent())?.trim();
+  const invitationToken = decodeURIComponent(new URL(invitationLink ?? '').hash.replace('#token=', ''));
   expect(invitationToken).toBeTruthy();
   await invitationDialog.getByRole('button', { name: 'I have shared it' }).click();
 

@@ -20,9 +20,14 @@
   let dialog: HTMLDialogElement;
 
   onMount(() => {
+    const opener = document.activeElement;
     document.body.classList.add('secret-dialog-open');
     dialog.showModal();
-    return () => document.body.classList.remove('secret-dialog-open');
+    dialog.querySelector<HTMLElement>('[data-autofocus]')?.focus();
+    return () => {
+      document.body.classList.remove('secret-dialog-open');
+      if (opener instanceof HTMLElement && opener.isConnected) opener.focus();
+    };
   });
 
   function close() {

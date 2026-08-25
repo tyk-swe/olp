@@ -4,6 +4,8 @@
   import { onMount } from 'svelte';
   import NavIcon from '$lib/components/NavIcon.svelte';
   import SetupChecklist from './SetupChecklist.svelte';
+  import { can } from '$lib/auth/authorization';
+  import { authLifecycle } from '$lib/auth/lifecycle';
   import { copyText } from '$lib/clipboard';
   import { listProviders } from '$lib/api/management/providers';
   import { listRoutes } from '$lib/api/management/routes';
@@ -15,6 +17,10 @@
   let copied = $state(false);
   let copyError = $state('');
   let copyTimer: ReturnType<typeof setTimeout> | undefined;
+  const playgroundAllowed = can(
+    authLifecycle.snapshot().user?.role,
+    'playground.use'
+  );
   const providers = createQuery(() => ({
     queryKey: ['providers'],
     queryFn: ({ signal }) => listProviders(signal)
@@ -146,9 +152,11 @@
         </span>
       </div>
       {#if copyError}<p class="inline-problem" role="alert">{copyError}</p>{/if}
-      <a href={resolve('/playground')}
-        >Open the playground <NavIcon name="arrow" size={17} /></a
-      >
+      {#if playgroundAllowed}
+        <a href={resolve('/playground')}
+          >Open the playground <NavIcon name="arrow" size={17} /></a
+        >
+      {/if}
     </section>
 
     <section class="card privacy-card" aria-labelledby="privacy-title">

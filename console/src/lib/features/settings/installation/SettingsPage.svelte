@@ -1,6 +1,6 @@
 <script lang="ts">
   import { resolve } from '$app/paths';
-  import { createQuery } from '@tanstack/svelte-query';
+  import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import CursorPagination from '$lib/components/CursorPagination.svelte';
   import {
     cursorPaginationProps,
@@ -19,7 +19,14 @@
     type ProviderKind
   } from '$lib/api/management/providers';
   import { optionalDecimal } from './validation';
+  import { errorMessage } from '$lib/api/http';
+  import { can } from '$lib/auth/authorization';
+  import { authLifecycle } from '$lib/auth/lifecycle';
 
+  const queryClient = useQueryClient();
+  const role = authLifecycle.snapshot().user?.role;
+  const canEditSettings = can(role, 'settings.update');
+  const canEditPricing = can(role, 'pricing.update');
   let values = $state<Record<string, string>>({});
   let savingKey = $state('');
   let status = $state('');
@@ -44,11 +51,7 @@
 
   const settings = createQuery(() => ({
     queryKey: ['settings'],
-    queryFn: async () => {
-      const data = await listSettings();
-      values = Object.fromEntries(data.map((setting) => [setting.key, setting.value]));
-      return data;
-    }
+    queryFn: () => listSettings()
   }));
 
   const providerKinds = createQuery(() => ({
@@ -80,11 +83,14 @@
     savingKey = setting.key;
     status = error = '';
     try {
-      await updateSetting(setting, values[setting.key] ?? '');
+      const updated = await updateSetting(setting, values[setting.key] ?? setting.value);
+      queryClient.setQueryData<Setting[]>(['settings'], (current) =>
+        current?.map((item) => (item.key === updated.key ? updated : item))
+      );
+      delete values[setting.key];
       status = `${settingLabel(setting.key)} saved.`;
-      await settings.refetch();
     } catch (cause) {
-      error = cause instanceof Error ? cause.message : 'The setting could not be saved.';
+      error = errorMessage(cause);
     } finally {
       savingKey = '';
     }
@@ -92,6 +98,7 @@
 
   async function addPricing(event: SubmitEvent) {
     event.preventDefault();
+    if (!canEditPricing) return;
     error = status = '';
     if (!providerKind || !model.trim() || !operation.trim()) {
       error = 'Provider kind, model, and operation are required.';
@@ -133,28 +140,30 @@
 
 <section class="settings-section" aria-labelledby="installation-title"><div class="section-heading"><div><p class="eyebrow">Configuration</p><h2 id="installation-title">Installation defaults</h2></div></div>
   {#if settings.isPending}<div class="loading-state" role="status">Loading settings…</div>
-  {:else if settings.isError}<div class="inline-problem" role="alert">Settings are unavailable. <button class="text-button" onclick={() => settings.refetch()}>Try again</button></div>
+  {:else if settings.isError}<div class="inline-problem" role="alert">{errorMessage(settings.error)} <button class="text-button" onclick={() => settings.refetch()}>Try again</button></div>
   {:else if settings.data?.length === 0}<div class="card empty-state">No editable installation settings are registered.</div>
-  {:else}<div class="settings-list">{#each settings.data ?? [] as setting (setting.key)}<article class="card setting-row"><div><label for={`setting-${setting.key}`}>{settingLabel(setting.key)}</label><p>{settingHelp(setting.key)}</p><small>Updated {formatDate(setting.updated_at)}</small></div><div class="setting-control"><input id={`setting-${setting.key}`} value={values[setting.key] ?? setting.value} oninput={(event) => (values[setting.key] = event.currentTarget.value)} /><button class="button button-secondary" type="button" onclick={() => save(setting)} disabled={savingKey === setting.key}>{savingKey === setting.key ? 'Saving…' : 'Save'}</button></div></article>{/each}</div>{/if}
+  {:else}{#if !canEditSettings}<p class="read-only-note" role="note">Your role can view installation settings but not change them.</p>{/if}<div class="settings-list">{#each settings.data ?? [] as setting (setting.key)}<article class="card setting-row"><div><label for={`setting-${setting.key}`}>{settingLabel(setting.key)}</label><p>{settingHelp(setting.key)}</p><small>Updated {formatDate(setting.updated_at)}</small></div><div class="setting-control"><input id={`setting-${setting.key}`} value={values[setting.key] ?? setting.value} oninput={(event) => (values[setting.key] = event.currentTarget.value)} readonly={!canEditSettings} /><button class="button button-secondary" type="button" onclick={() => save(setting)} disabled={!canEditSettings || savingKey === setting.key || (values[setting.key] ?? setting.value) === setting.value}>{savingKey === setting.key ? 'Saving…' : 'Save'}</button></div></article>{/each}</div>{/if}
 </section>
 
 <section class="settings-section" aria-labelledby="pricing-title"><div class="section-heading"><div><p class="eyebrow">Cost estimates</p><h2 id="pricing-title">Pricing revisions</h2><p>Prices are exact decimals. A missing price remains visibly unpriced and is never treated as zero.</p></div></div>
+  {#if !canEditPricing}<p class="read-only-note" role="note">Your role can view pricing revisions but not create them.</p>{/if}
   <form class="card price-form" onsubmit={addPricing}>
     <div class="form-grid">
-      <div class="form-field"><label for="provider-kind">Provider kind</label><select id="provider-kind" bind:value={providerKind} disabled={providerKinds.isPending || providerKinds.isError}>{#each providerKinds.data ?? [] as option (option.kind)}<option value={option.kind}>{option.label}</option>{/each}</select>{#if providerKinds.isPending}<small>Loading provider capabilities…</small>{:else if providerKinds.isError}<small class="inline-problem">Provider capabilities are unavailable; pricing changes are disabled.</small>{/if}</div>
-      <div class="form-field"><label for="provider-id">Provider ID override</label><input id="provider-id" bind:value={providerId} class="mono" placeholder="Optional UUID" /></div>
-      <div class="form-field"><label for="price-model">Upstream model</label><input id="price-model" bind:value={model} required /></div>
-      <div class="form-field"><label for="price-operation">Operation</label><select id="price-operation" bind:value={operation}>{#each operationOptions as option (option)}<option value={option}>{option}</option>{/each}</select></div>
-      <div class="form-field"><label for="input-price">Input / million</label><input id="input-price" bind:value={inputPrice} inputmode="decimal" placeholder="2.50" /></div>
-      <div class="form-field"><label for="output-price">Output / million</label><input id="output-price" bind:value={outputPrice} inputmode="decimal" placeholder="10.00" /></div>
-      <div class="form-field"><label for="unit-price">Media unit price</label><input id="unit-price" bind:value={unitPrice} inputmode="decimal" placeholder="0.04" /></div>
-      <div class="form-field"><label for="currency">Currency</label><input id="currency" bind:value={currency} maxlength="3" required /></div>
-      <div class="form-field full"><label for="effective-at">Effective at</label><input id="effective-at" bind:value={effectiveAt} type="datetime-local" required /></div>
+      <div class="form-field"><label for="provider-kind">Provider kind</label><select id="provider-kind" bind:value={providerKind} disabled={!canEditPricing || providerKinds.isPending || providerKinds.isError}>{#each providerKinds.data ?? [] as option (option.kind)}<option value={option.kind}>{option.label}</option>{/each}</select>{#if providerKinds.isPending}<small>Loading provider capabilities…</small>{:else if providerKinds.isError}<small class="inline-problem">Provider capabilities are unavailable; pricing changes are disabled.</small>{/if}</div>
+      <div class="form-field"><label for="provider-id">Provider ID override</label><input id="provider-id" bind:value={providerId} class="mono" placeholder="Optional UUID" disabled={!canEditPricing} /></div>
+      <div class="form-field"><label for="price-model">Upstream model</label><input id="price-model" bind:value={model} required disabled={!canEditPricing} /></div>
+      <div class="form-field"><label for="price-operation">Operation</label><select id="price-operation" bind:value={operation} disabled={!canEditPricing}>{#each operationOptions as option (option)}<option value={option}>{option}</option>{/each}</select></div>
+      <div class="form-field"><label for="input-price">Input / million</label><input id="input-price" bind:value={inputPrice} inputmode="decimal" placeholder="2.50" disabled={!canEditPricing} /></div>
+      <div class="form-field"><label for="output-price">Output / million</label><input id="output-price" bind:value={outputPrice} inputmode="decimal" placeholder="10.00" disabled={!canEditPricing} /></div>
+      <div class="form-field"><label for="unit-price">Media unit price</label><input id="unit-price" bind:value={unitPrice} inputmode="decimal" placeholder="0.04" disabled={!canEditPricing} /></div>
+      <div class="form-field"><label for="currency">Currency</label><input id="currency" bind:value={currency} maxlength="3" required disabled={!canEditPricing} /></div>
+      <div class="form-field full"><label for="effective-at">Effective at</label><input id="effective-at" bind:value={effectiveAt} type="datetime-local" required disabled={!canEditPricing} /></div>
     </div>
-    <button class="button button-primary" type="submit" disabled={savingPrice || !providerKind || providerKinds.isError}>{savingPrice ? 'Creating…' : 'Create pricing revision'}</button>
+    <button class="button button-primary" type="submit" disabled={!canEditPricing || savingPrice || !providerKind || providerKinds.isError}>{savingPrice ? 'Creating…' : 'Create pricing revision'}</button>
   </form>
 
   {#if pricing.isPending}<div class="loading-state" role="status">Loading revisions…</div>
+  {:else if pricing.isError}<div class="inline-problem" role="alert">{errorMessage(pricing.error)} <button class="text-button" onclick={() => pricing.refetch()}>Try again</button></div>
   {:else if pricing.data?.items.length === 0 && pricingPagination.history.length === 0}<div class="card empty-state">No pricing revisions. Usage cost will be marked unpriced.</div>
   {:else}
     <div class="revision-list">

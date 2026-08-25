@@ -20,6 +20,7 @@
   const requests = createQuery(() => ({
     queryKey: ['requests', listState.applied, listState.cursor ?? 'first'],
     queryFn: () => listRequests({ ...listState.applied, cursor: listState.cursor }),
+    placeholderData: (previous) => previous,
     enabled: !requestId
   }));
 
@@ -158,7 +159,7 @@
     <div class="loading-state" role="status">Loading request metadata…</div>
   {:else if requests.isError}
     <div class="inline-problem" role="alert">Request metadata is unavailable. <button class="text-button" onclick={() => requests.refetch()}>Try again</button></div>
-  {:else if requests.data?.items.length === 0}
+  {:else if requests.data?.items.length === 0 && listState.history.length === 0}
     <div class="card empty-state"><div><strong>No matching requests</strong><p>Adjust the filters or send traffic through an active route.</p></div></div>
   {:else}
     <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
@@ -191,7 +192,7 @@
         </li>
       {/each}
     </ul>
-    {@const pagination = cursorPaginationProps(listState, requests.data?.nextCursor)}
+    {@const pagination = cursorPaginationProps(listState, requests.isPlaceholderData ? null : requests.data?.nextCursor)}
     <nav class="pagination" aria-label="Request pages">
       <button class="button button-secondary" type="button" onclick={pagination.onPrevious} disabled={!pagination.hasPrevious}>Previous</button>
       <span>Page {pagination.page}</span>

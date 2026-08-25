@@ -164,6 +164,13 @@
       <legend>Allowed route slugs</legend>
       <p>Leave every route unchecked to allow all current and future routes.</p>
       {#if routes.isPending}<span role="status">Loading routes…</span
+        >{:else if routes.isError}<span class="inline-problem" role="alert"
+          >Routes are unavailable, so route restrictions cannot be reviewed.
+          <button
+            class="text-button"
+            type="button"
+            onclick={() => routes.refetch()}>Retry</button
+          ></span
         >{:else}{#each routes.data ?? [] as route (route.id)}<label
             ><input
               type="checkbox"

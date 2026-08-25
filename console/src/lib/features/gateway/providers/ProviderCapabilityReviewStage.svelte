@@ -15,6 +15,8 @@
   let {
     provider,
     models,
+    modelsPending,
+    modelsError,
     capabilityOptions,
     optionsPending,
     optionsError,
@@ -24,10 +26,13 @@
     pagination,
     nextCursor,
     onSave,
-    onCertify
+    onCertify,
+    onRetryModels
   }: {
     provider: Provider;
     models: ProviderModel[];
+    modelsPending: boolean;
+    modelsError: boolean;
     capabilityOptions: CapabilityDeclaration[];
     optionsPending: boolean;
     optionsError: boolean;
@@ -43,6 +48,7 @@
       providerEtag: string
     ) => Promise<boolean>;
     onCertify: (modelId: string) => void | Promise<void>;
+    onRetryModels: () => void;
   } = $props();
 
   const disabled = $derived(Boolean(busy));
@@ -55,58 +61,77 @@
   compatible capability tuple must receive server-owned certification for this
   exact draft.
 </p>
-<div class="table-shell">
-  <table class="data-table">
-    <thead><tr><th>Model</th><th>Explicit capability review</th></tr></thead>
-    <tbody>
-      {#each models as model (model.id)}
-        <tr>
-          <td>
-            <strong>{model.display_name}</strong><br />
-            <code>{model.upstream_model}</code>
-          </td>
-          <td>
-            <CapabilityReview
-              {model}
-              providerEtag={provider.etag}
-              options={capabilityOptions}
-              {optionsPending}
-              {optionsError}
-              {disabled}
-              {reloadVersion}
-              onSave={(enabled, capabilities, providerEtag) =>
-                onSave(model.id, enabled, capabilities, providerEtag)}
-            />
-            <div class="certification-action">
-              <button
-                class="button button-secondary"
-                type="button"
-                onclick={() => onCertify(model.id)}
-                disabled={disabled || !model.capabilities.length}
-                >{busy === `certify-${model.id}`
-                  ? 'Server-certifying…'
-                  : 'Server-certify capabilities'}</button
-              >
-              {#if certificationResults[model.id]}
-                {@const certification = certificationResults[model.id]}
-                <span
-                  class:success={certification.status === 'succeeded'}
-                  class:warning={certification.status !== 'succeeded'}
-                  >{certification.certified_count}/{certification.attempted_count}
-                  certified</span
+{#if modelsError}
+  <div class="inline-problem" role="alert">
+    The discovered models could not be loaded. <button
+      class="button button-secondary"
+      type="button"
+      onclick={onRetryModels}>Retry</button
+    >
+  </div>
+{:else if modelsPending}
+  <div class="loading-state" role="status">Loading discovered models…</div>
+{:else if !models.length && pagination.history.length === 0}
+  <div class="empty-state">
+    <p>
+      No models are available for review. Run discovery again, or declare
+      upstream model identifiers.
+    </p>
+  </div>
+{:else}
+  <div class="table-shell">
+    <table class="data-table">
+      <thead><tr><th>Model</th><th>Explicit capability review</th></tr></thead>
+      <tbody>
+        {#each models as model (model.id)}
+          <tr>
+            <td>
+              <strong>{model.display_name}</strong><br />
+              <code>{model.upstream_model}</code>
+            </td>
+            <td>
+              <CapabilityReview
+                {model}
+                providerEtag={provider.etag}
+                options={capabilityOptions}
+                {optionsPending}
+                {optionsError}
+                {disabled}
+                {reloadVersion}
+                onSave={(enabled, capabilities, providerEtag) =>
+                  onSave(model.id, enabled, capabilities, providerEtag)}
+              />
+              <div class="certification-action">
+                <button
+                  class="button button-secondary"
+                  type="button"
+                  onclick={() => onCertify(model.id)}
+                  disabled={disabled || !model.capabilities.length}
+                  >{busy === `certify-${model.id}`
+                    ? 'Server-certifying…'
+                    : 'Server-certify capabilities'}</button
                 >
-              {/if}
-            </div>
-          </td>
-        </tr>
-      {/each}
-    </tbody>
-  </table>
-</div>
-<CursorPagination
-  {...cursorPaginationProps(pagination, nextCursor)}
-  label="Provider wizard model pages"
-/>
+                {#if certificationResults[model.id]}
+                  {@const certification = certificationResults[model.id]}
+                  <span
+                    class:success={certification.status === 'succeeded'}
+                    class:warning={certification.status !== 'succeeded'}
+                    >{certification.certified_count}/{certification.attempted_count}
+                    certified</span
+                  >
+                {/if}
+              </div>
+            </td>
+          </tr>
+        {/each}
+      </tbody>
+    </table>
+  </div>
+  <CursorPagination
+    {...cursorPaginationProps(pagination, nextCursor)}
+    label="Provider wizard model pages"
+  />
+{/if}
 
 <style>
   h2 {

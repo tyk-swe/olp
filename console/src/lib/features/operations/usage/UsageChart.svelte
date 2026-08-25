@@ -1,17 +1,27 @@
 <script lang="ts">
   import type { UsagePoint } from '$lib/api/usage';
-  import { formatCompact, formatCost, formatDate } from '$lib/format';
+  import { formatCompact, formatCost, formatDate, formatDay } from '$lib/format';
 
-  let { points, title = 'Requests over time' }: { points: UsagePoint[]; title?: string } = $props();
+  let {
+    points,
+    granularity = 'hour',
+    title = 'Requests over time'
+  }: { points: UsagePoint[]; granularity?: 'hour' | 'day'; title?: string } = $props();
   const bounds = { width: 640, height: 260, left: 52, right: 16, top: 12, bottom: 36 };
+  const bucketLabel = $derived(granularity === 'day' ? formatDay : formatDate);
   const chart = $derived.by(() => {
     const width = bounds.width - bounds.left - bounds.right;
     const height = bounds.height - bounds.top - bounds.bottom;
     const maximum = Math.max(1, ...points.map((point) => point.request_count));
     const step = Math.max(1, Math.ceil(maximum / 4));
     const ceiling = step * 4;
+    const times = points.map((point) => Date.parse(point.bucket));
+    const first = times[0];
+    const span = times.every(Number.isFinite) ? (times.at(-1) ?? first) - first : Number.NaN;
     const coordinates = points.map((point, index) => ({
-      x: bounds.left + (index * width) / Math.max(1, points.length - 1),
+      x: bounds.left + width * (span > 0
+        ? (times[index] - first) / span
+        : index / Math.max(1, points.length - 1)),
       y: bounds.top + height - (point.request_count * height) / ceiling
     }));
     return {
@@ -43,9 +53,9 @@
         {#each chart.coordinates as point, index (points[index].bucket)}
           <circle class="point" cx={point.x} cy={point.y} r="2.5" />
         {/each}
-        <text class="axis-label" x={bounds.left} y={bounds.height - 8}>{formatDate(points[0].bucket)}</text>
+        <text class="axis-label" x={bounds.left} y={bounds.height - 8}>{bucketLabel(points[0].bucket)}</text>
         {#if points.length > 1}
-          <text class="axis-label" x={bounds.width - bounds.right} y={bounds.height - 8} text-anchor="end">{formatDate(points.at(-1)?.bucket)}</text>
+          <text class="axis-label" x={bounds.width - bounds.right} y={bounds.height - 8} text-anchor="end">{bucketLabel(points.at(-1)?.bucket)}</text>
         {/if}
       </svg>
     </div>
@@ -58,7 +68,7 @@
           <thead><tr><th scope="col">Bucket</th><th scope="col">Requests</th><th scope="col">Input tokens</th><th scope="col">Output tokens</th><th scope="col">Estimated cost</th><th scope="col">Status</th></tr></thead>
           <tbody>
             {#each points as point (point.bucket)}
-              <tr><td>{formatDate(point.bucket)}</td><td>{point.request_count}</td><td>{point.input_tokens}</td><td>{point.output_tokens}</td><td>{formatCost(point.estimated_cost, point.currency ?? 'USD')}</td><td>{point.incomplete_count > 0 ? `${point.incomplete_count} incomplete` : point.unpriced_count > 0 ? `${point.unpriced_count} unpriced` : 'Complete'}</td></tr>
+              <tr><td>{bucketLabel(point.bucket)}</td><td>{point.request_count}</td><td>{point.input_tokens}</td><td>{point.output_tokens}</td><td>{formatCost(point.estimated_cost, point.currency ?? 'USD')}</td><td>{point.incomplete_count > 0 ? `${point.incomplete_count} incomplete` : point.unpriced_count > 0 ? `${point.unpriced_count} unpriced` : 'Complete'}</td></tr>
             {/each}
           </tbody>
         </table>

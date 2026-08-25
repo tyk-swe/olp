@@ -6,25 +6,25 @@
   const storageKey = 'olp.console.theme';
   let theme = $state<Theme>('light');
   let ready = $state(false);
+  // Blocked storage still has to remember the choice for this page view, or the
+  // control would drift back to the OS setting while the document does not.
+  let chosen = false;
 
-  function preferredTheme(): Theme {
+  function savedTheme(): Theme | null {
     try {
       const saved = window.localStorage.getItem(storageKey);
       if (saved === 'light' || saved === 'dark') return saved;
     } catch {
       // Storage can be blocked outright; fall back to the media query.
     }
-    return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
-  }
-
-  function apply(next: Theme) {
-    theme = next;
-    document.documentElement.dataset.theme = next;
+    return null;
   }
 
   function toggle() {
     const next = theme === 'dark' ? 'light' : 'dark';
-    apply(next);
+    theme = next;
+    chosen = true;
+    document.documentElement.dataset.theme = next;
     try {
       window.localStorage.setItem(storageKey, next);
     } catch {
@@ -33,8 +33,18 @@
   }
 
   onMount(() => {
-    apply(preferredTheme());
+    const saved = savedTheme();
+    const media = window.matchMedia('(prefers-color-scheme: dark)');
+    // Without a stored choice the document keeps following the OS setting.
+    if (saved) document.documentElement.dataset.theme = saved;
+    chosen = Boolean(saved);
+    theme = saved ?? (media.matches ? 'dark' : 'light');
     ready = true;
+    const follow = () => {
+      if (!chosen && !savedTheme()) theme = media.matches ? 'dark' : 'light';
+    };
+    media.addEventListener('change', follow);
+    return () => media.removeEventListener('change', follow);
   });
 </script>
 

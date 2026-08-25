@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { guardUnsavedChanges } from '$lib/forms/unsavedChanges';
   import {
     type CapabilityDeclaration,
     type ProviderModel
@@ -74,6 +75,8 @@
     sync = markDirty(sync);
   }
 
+  guardUnsavedChanges(() => sync.dirty);
+
   function surfacesFor(operation: string) {
     return [
       ...new Set(
@@ -94,9 +97,22 @@
       .map((option) => option.mode);
   }
 
+  const unusedOptions = $derived(
+    options.filter(
+      (option) =>
+        !capabilities.some(
+          (existing) =>
+            existing.operation === option.operation &&
+            existing.surface === option.surface &&
+            existing.mode === option.mode
+        )
+    )
+  );
+
   function addCapability() {
     const capability =
-      options.find((option) => option.operation === 'generation') ?? options[0];
+      unusedOptions.find((option) => option.operation === 'generation') ??
+      unusedOptions[0];
     if (!capability) return;
     capabilities = [...capabilities, capability];
     localError = '';
@@ -179,7 +195,7 @@
       class="button button-secondary"
       type="button"
       onclick={addCapability}
-      disabled={disabled || !options.length}>Add capability</button
+      disabled={disabled || !unusedOptions.length}>Add capability</button
     >
   </div>
   {#if optionsPending}<p class="empty">

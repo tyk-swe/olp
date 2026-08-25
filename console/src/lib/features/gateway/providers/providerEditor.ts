@@ -147,15 +147,6 @@ export function validateProviderDraft(
   draft: ProviderDraft,
   spec: ProviderKindCapability
 ): string | null {
-  if (
-    !draft.name.trim() ||
-    (requiresSeedModel(spec) && !draft.model.trim()) ||
-    (requiresCredential(spec, draft.authMode) && !draft.credential)
-  ) {
-    return requiresSeedModel(spec)
-      ? 'Name, Vertex probe model, and the selected identity fields are required.'
-      : 'Name and the selected identity fields are required.';
-  }
   const values: Record<string, string> = {
     endpoint: draft.endpoint,
     api_version: draft.apiVersion,
@@ -164,13 +155,15 @@ export function validateProviderDraft(
     deployment: draft.deployment,
     model: draft.model
   };
-  const missing = spec.fields.filter(
-    (field) => field.required && !values[field.field]?.trim()
-  );
-  if (missing.length) {
-    return `${spec.label} requires ${missing.map((field) => field.label.toLowerCase()).join(', ')}.`;
+  const missing = spec.fields
+    .filter((field) => field.required && !values[field.field]?.trim())
+    .map((field) => field.label.toLowerCase());
+  if (!draft.name.trim()) missing.unshift('name');
+  if (requiresCredential(spec, draft.authMode) && !draft.credential.trim()) {
+    missing.push('credential');
   }
-  return null;
+  if (!missing.length) return null;
+  return `${spec.label} requires ${missing.join(', ')}.`;
 }
 
 export function buildCreateProviderInput(
