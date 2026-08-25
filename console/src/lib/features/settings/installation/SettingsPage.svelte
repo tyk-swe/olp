@@ -98,6 +98,7 @@
 
   async function addPricing(event: SubmitEvent) {
     event.preventDefault();
+    if (!canEditPricing) return;
     error = status = '';
     if (!providerKind || !model.trim() || !operation.trim()) {
       error = 'Provider kind, model, and operation are required.';
@@ -148,15 +149,15 @@
   {#if !canEditPricing}<p class="read-only-note" role="note">Your role can view pricing revisions but not create them.</p>{/if}
   <form class="card price-form" onsubmit={addPricing}>
     <div class="form-grid">
-      <div class="form-field"><label for="provider-kind">Provider kind</label><select id="provider-kind" bind:value={providerKind} disabled={providerKinds.isPending || providerKinds.isError}>{#each providerKinds.data ?? [] as option (option.kind)}<option value={option.kind}>{option.label}</option>{/each}</select>{#if providerKinds.isPending}<small>Loading provider capabilities…</small>{:else if providerKinds.isError}<small class="inline-problem">Provider capabilities are unavailable; pricing changes are disabled.</small>{/if}</div>
-      <div class="form-field"><label for="provider-id">Provider ID override</label><input id="provider-id" bind:value={providerId} class="mono" placeholder="Optional UUID" /></div>
-      <div class="form-field"><label for="price-model">Upstream model</label><input id="price-model" bind:value={model} required /></div>
-      <div class="form-field"><label for="price-operation">Operation</label><select id="price-operation" bind:value={operation}>{#each operationOptions as option (option)}<option value={option}>{option}</option>{/each}</select></div>
-      <div class="form-field"><label for="input-price">Input / million</label><input id="input-price" bind:value={inputPrice} inputmode="decimal" placeholder="2.50" /></div>
-      <div class="form-field"><label for="output-price">Output / million</label><input id="output-price" bind:value={outputPrice} inputmode="decimal" placeholder="10.00" /></div>
-      <div class="form-field"><label for="unit-price">Media unit price</label><input id="unit-price" bind:value={unitPrice} inputmode="decimal" placeholder="0.04" /></div>
-      <div class="form-field"><label for="currency">Currency</label><input id="currency" bind:value={currency} maxlength="3" required /></div>
-      <div class="form-field full"><label for="effective-at">Effective at</label><input id="effective-at" bind:value={effectiveAt} type="datetime-local" required /></div>
+      <div class="form-field"><label for="provider-kind">Provider kind</label><select id="provider-kind" bind:value={providerKind} disabled={!canEditPricing || providerKinds.isPending || providerKinds.isError}>{#each providerKinds.data ?? [] as option (option.kind)}<option value={option.kind}>{option.label}</option>{/each}</select>{#if providerKinds.isPending}<small>Loading provider capabilities…</small>{:else if providerKinds.isError}<small class="inline-problem">Provider capabilities are unavailable; pricing changes are disabled.</small>{/if}</div>
+      <div class="form-field"><label for="provider-id">Provider ID override</label><input id="provider-id" bind:value={providerId} class="mono" placeholder="Optional UUID" disabled={!canEditPricing} /></div>
+      <div class="form-field"><label for="price-model">Upstream model</label><input id="price-model" bind:value={model} required disabled={!canEditPricing} /></div>
+      <div class="form-field"><label for="price-operation">Operation</label><select id="price-operation" bind:value={operation} disabled={!canEditPricing}>{#each operationOptions as option (option)}<option value={option}>{option}</option>{/each}</select></div>
+      <div class="form-field"><label for="input-price">Input / million</label><input id="input-price" bind:value={inputPrice} inputmode="decimal" placeholder="2.50" disabled={!canEditPricing} /></div>
+      <div class="form-field"><label for="output-price">Output / million</label><input id="output-price" bind:value={outputPrice} inputmode="decimal" placeholder="10.00" disabled={!canEditPricing} /></div>
+      <div class="form-field"><label for="unit-price">Media unit price</label><input id="unit-price" bind:value={unitPrice} inputmode="decimal" placeholder="0.04" disabled={!canEditPricing} /></div>
+      <div class="form-field"><label for="currency">Currency</label><input id="currency" bind:value={currency} maxlength="3" required disabled={!canEditPricing} /></div>
+      <div class="form-field full"><label for="effective-at">Effective at</label><input id="effective-at" bind:value={effectiveAt} type="datetime-local" required disabled={!canEditPricing} /></div>
     </div>
     <button class="button button-primary" type="submit" disabled={!canEditPricing || savingPrice || !providerKind || providerKinds.isError}>{savingPrice ? 'Creating…' : 'Create pricing revision'}</button>
   </form>

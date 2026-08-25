@@ -61,7 +61,7 @@
         invalidateProviderSummaries(queryClient),
         invalidateProviderModelConsumers(queryClient)
       ]);
-      notice = `Model eligibility staged. Activate ${entry.provider_name} to serve it.`;
+      notice = `Model eligibility staged. Activate ${entry.provider_name} to apply the change.`;
     } catch (error) {
       errorMessage = message(error);
     } finally {

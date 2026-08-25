@@ -159,7 +159,7 @@ export function validateProviderDraft(
     .filter((field) => field.required && !values[field.field]?.trim())
     .map((field) => field.label.toLowerCase());
   if (!draft.name.trim()) missing.unshift('name');
-  if (requiresCredential(spec, draft.authMode) && !draft.credential) {
+  if (requiresCredential(spec, draft.authMode) && !draft.credential.trim()) {
     missing.push('credential');
   }
   if (!missing.length) return null;

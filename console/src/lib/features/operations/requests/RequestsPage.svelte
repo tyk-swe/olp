@@ -192,7 +192,7 @@
         </li>
       {/each}
     </ul>
-    {@const pagination = cursorPaginationProps(listState, requests.data?.nextCursor)}
+    {@const pagination = cursorPaginationProps(listState, requests.isPlaceholderData ? null : requests.data?.nextCursor)}
     <nav class="pagination" aria-label="Request pages">
       <button class="button button-secondary" type="button" onclick={pagination.onPrevious} disabled={!pagination.hasPrevious}>Previous</button>
       <span>Page {pagination.page}</span>

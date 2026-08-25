@@ -120,6 +120,8 @@
       <div class="health-icon" class:ok={persistence.data.complete} aria-hidden="true">{persistence.data.complete ? '✓' : '!'}</div>
       <div><p class="eyebrow">Last 24 hours</p><h2 id="persistence-title">{persistence.data.complete ? 'Usage accounting is complete' : 'Usage accounting needs attention'}</h2><p>{persistence.data.request_metadata_gap_events} request metadata gap-event lower bound · {persistence.data.uncertain_request_metadata_gap_count} uncertain request metadata epochs · {persistence.data.incomplete_count} incomplete requests · {persistence.data.unpriced_count} unpriced requests. Missing or uncertain metadata is reported, never silently converted to zero cost.</p></div>
     </section>
+  {:else}
+    <div class="loading-state" role="status">Checking usage accounting…</div>
   {/if}
 
   <section class="section" aria-labelledby="epochs-title">
@@ -135,7 +137,7 @@
     {:else}
       <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
       <div class="table-shell" tabindex="0" role="region" aria-label="Unresolved request metadata gateway epochs"><table class="data-table"><caption class="sr-only">Unclean request metadata gateway process epochs awaiting operator acknowledgement</caption><thead><tr><th scope="col">Gateway</th><th scope="col">Detected</th><th scope="col">Accepted / persisted</th><th scope="col">Dropped / abandoned</th><th scope="col">Uncertain lower bound</th><th scope="col"><span class="sr-only">Action</span></th></tr></thead><tbody>{#each epochs.data.items as epoch (epoch.process_epoch)}<tr><td><strong>{epoch.gateway_instance}</strong><br /><code>{epoch.process_epoch}</code></td><td>{formatDate(epoch.stale_detected_at ?? epoch.updated_at)}</td><td>{epoch.accepted} / {epoch.persisted}</td><td>{epoch.dropped} / {epoch.abandoned}</td><td>{epoch.uncertain_event_lower_bound}</td><td><button class="button button-secondary" type="button" onclick={() => acknowledgeEpoch(epoch.process_epoch, epoch.gateway_instance)} disabled={Boolean(busyEpoch)}>{busyEpoch === epoch.process_epoch ? 'Acknowledging…' : 'Acknowledge epoch'}</button></td></tr>{/each}</tbody></table></div>
-      <CursorPagination {...cursorPaginationProps(epochPagination, epochs.data.nextCursor)} label="Unresolved gateway epoch pages" />
+      <CursorPagination {...cursorPaginationProps(epochPagination, epochs.isPlaceholderData ? null : epochs.data.nextCursor)} label="Unresolved gateway epoch pages" />
     {/if}
   </section>
 
@@ -169,7 +171,7 @@
     {:else}
       <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
       <div class="table-shell" tabindex="0" role="region" aria-label="Runtime generation history"><table class="data-table"><caption class="sr-only">Recently published immutable runtime generations</caption><thead><tr><th scope="col">Generation</th><th scope="col">Digest</th><th scope="col">Activated by</th><th scope="col">Created</th><th scope="col">Gateway state</th></tr></thead><tbody>{#each generations.data.items as generation (generation.id)}<tr><td><strong>#{generation.sequence}</strong></td><td class="mono">{generation.sha256.slice(0, 16)}…</td><td>{generation.created_by_email}</td><td>{formatDate(generation.created_at)}</td><td>{#if generation.sequence === readiness.data.generation}<span class="badge success">Loaded</span>{:else}<span class="badge">Historical</span>{/if}</td></tr>{/each}</tbody></table></div>
-      <CursorPagination {...cursorPaginationProps(generationPagination, generations.data.nextCursor)} label="Runtime generation pages" />
+      <CursorPagination {...cursorPaginationProps(generationPagination, generations.isPlaceholderData ? null : generations.data.nextCursor)} label="Runtime generation pages" />
     {/if}
   </section>
 {/if}
