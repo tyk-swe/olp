@@ -179,11 +179,14 @@ pub(in crate::providers) fn upstream_failure_class(status: StatusCode) -> Attemp
 /// Parses RFC 9110 `Retry-After` in both of its forms. A date in the past is
 /// zero, not an error, and anything unparsable is simply absent.
 pub(in crate::providers) fn parse_retry_after(headers: &HeaderMap) -> Option<Duration> {
-    let value = headers
-        .get(http::header::RETRY_AFTER)?
-        .to_str()
-        .ok()?
-        .trim();
+    parse_retry_after_value(headers.get(http::header::RETRY_AFTER)?.to_str().ok()?)
+}
+
+/// Parses a `Retry-After` header value: delta-seconds or an HTTP-date. Shared
+/// with connectors whose SDK exposes headers as strings rather than an
+/// `http::HeaderMap`.
+pub(in crate::providers) fn parse_retry_after_value(value: &str) -> Option<Duration> {
+    let value = value.trim();
     if value.is_empty() {
         return None;
     }

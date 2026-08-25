@@ -34,6 +34,7 @@ use crate::providers::bedrock::{
         protocol_body_error, protocol_error,
     },
 };
+use crate::providers::transport_common::parse_retry_after_value;
 
 pub(in crate::providers) struct Connector {
     runtime: aws_sdk_bedrockruntime::Client,
@@ -590,8 +591,7 @@ impl BedrockSdkRawResponse for HttpResponse {
         UpstreamSignal::from_status(self.status().as_u16()).with_retry_after(
             self.headers()
                 .get("retry-after")
-                .and_then(|value| value.trim().parse::<u64>().ok())
-                .map(std::time::Duration::from_secs),
+                .and_then(parse_retry_after_value),
         )
     }
 }
