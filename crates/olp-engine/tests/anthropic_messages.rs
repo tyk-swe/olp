@@ -1005,3 +1005,38 @@ fn anthropic_stop_reasons_pass_through_only_inside_the_declared_enum() {
         );
     }
 }
+
+#[test]
+fn thinking_block_with_tool_use_fields_round_trips_idempotently() {
+    // Found by the protocol_json fuzz target. Block classification must follow
+    // `type`; guessing from field shape turned this thinking block into a tool
+    // use on the second decode and rejected the encoder's own output.
+    let document = json!({
+        "max_tokens": 1024,
+        "model": "claude",
+        "messages": [
+            { "role": "user", "content": "weather?" },
+            { "role": "assistant", "content": [
+                { "type": "thinking", "thinking": "check the tool", "signature": "sig-abc",
+                  "id": "toolu_1", "name": "weather", "input": {} },
+                { "type": "text", "text": "checking" }
+            ] },
+            { "role": "user", "content": [
+                { "type": "tool_result", "tool_use_id": "toolu_1", "content": "sunny" }
+            ] }
+        ]
+    });
+    let request: MessagesRequest = serde_json::from_value(document).unwrap();
+    let Operation::Generation(first) = decode_request(request).unwrap() else {
+        panic!("expected a generation");
+    };
+    let encoded = serde_json::to_value(encode_request(&first, "upstream").unwrap()).unwrap();
+    let reparsed: MessagesRequest = serde_json::from_value(encoded.clone()).unwrap();
+    let Operation::Generation(second) = decode_request(reparsed).unwrap() else {
+        panic!("the encoder's own output must decode to the same operation");
+    };
+    let re_encoded = serde_json::to_value(encode_request(&second, "upstream").unwrap()).unwrap();
+    assert_eq!(encoded, re_encoded);
+    assert_eq!(encoded["messages"][1]["content"][0]["type"], "thinking");
+    assert_eq!(encoded["messages"][1]["content"][0]["id"], "toolu_1");
+}

@@ -1,0 +1,1 @@
+{"max_tokens":1024,"messages":[{"content":"weather?","role":"user"},{"content":[{"id":"toolu_1","input":{},"name":"weather","signature":"sig-abc","thinking":"check the tool","type":"thinking"},{"text":"chool]use","type":"text"}],"role":"assistant"},{"content":[{"content":"sunny","t,pe":"tseedresult","tool_use_id":"toolu_1"}],"role":"user"}],"model":"fuzz-provider-model"}
