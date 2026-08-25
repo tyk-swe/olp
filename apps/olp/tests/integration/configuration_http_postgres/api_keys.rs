@@ -229,8 +229,12 @@ pub(super) async fn exercise(
     )
     .await;
     assert_eq!(revoked_key.status(), StatusCode::OK);
-    assert!(etag(&revoked_key).starts_with('"'));
-    let duplicate_revoke = send(
+    let revoked_etag = etag(&revoked_key);
+    assert!(revoked_etag.starts_with('"'));
+    let revoked_body = response_json(revoked_key).await;
+    // A retry after a dropped connection replays the recorded response
+    // instead of being told the key was already used.
+    let replayed_revoke = send(
         app,
         Method::POST,
         &format!("/api/v1/api-keys/{api_key_id}/revoke"),
@@ -239,6 +243,21 @@ pub(super) async fn exercise(
         Some(csrf),
         Some("api-key-http-revoke-0001"),
         Some(&rotated_key_etag),
+    )
+    .await;
+    assert_eq!(replayed_revoke.status(), StatusCode::OK);
+    assert_eq!(etag(&replayed_revoke), revoked_etag);
+    assert_eq!(response_json(replayed_revoke).await, revoked_body);
+    // The same key with a different request is a reuse, not a retry.
+    let duplicate_revoke = send(
+        app,
+        Method::POST,
+        &format!("/api/v1/api-keys/{api_key_id}/revoke"),
+        None,
+        Some(cookie),
+        Some(csrf),
+        Some("api-key-http-revoke-0001"),
+        Some(&key_etag),
     )
     .await;
     assert_eq!(duplicate_revoke.status(), StatusCode::CONFLICT);

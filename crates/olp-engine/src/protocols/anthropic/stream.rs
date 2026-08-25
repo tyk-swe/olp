@@ -357,11 +357,21 @@ impl Decoder {
                     event.delta,
                 );
             }
-            _ => {
+            ("text_delta" | "input_json_delta", _) => {
                 return Err(Error::DeltaBlockMismatch {
                     index: event.index,
                     delta: delta_type.to_owned(),
                 });
+            }
+            (other, _) => {
+                // Anthropic emits `citations_delta` (and, with newer features,
+                // other deltas) on plain text blocks. Erroring here kills a
+                // response whose text has already reached the client, so the
+                // unmodelled delta round-trips as a source extension instead.
+                extensions.insert(
+                    format!("/content/{}/delta/{other}", event.index),
+                    event.delta,
+                );
             }
         }
         self.emit_extensions(events, extensions);

@@ -238,6 +238,11 @@ pub struct RouteTargetRecord {
     pub provider_id: Uuid,
     pub provider_name: String,
     pub upstream_model: String,
+    /// Whether the target's provider/model is still present and enabled in the
+    /// provider's activated revision. Stored targets are always returned; this
+    /// distinguishes a usable target from one whose provider was disabled or
+    /// whose model left the activated revision.
+    pub available: bool,
     pub priority: i32,
     pub weight: i32,
     pub timeout_ms: i32,

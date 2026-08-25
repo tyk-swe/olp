@@ -9,6 +9,7 @@
   } from '$lib/api/usage';
   import UsageChart from './UsageChart.svelte';
   import UsageCompletenessStatus from './UsageCompletenessStatus.svelte';
+  import { errorMessage } from '$lib/api/http';
   import { dateTimeLocalValue, formatCompact, formatCost } from '$lib/format';
 
   type Dimension = 'route' | 'provider' | 'model' | 'api_key' | 'operation';
@@ -112,7 +113,7 @@
 {#if usage.isPending}
   <div class="loading-state" role="status">Calculating usage…</div>
 {:else if usage.isError}
-  <div class="inline-problem" role="alert">Usage could not be loaded. <button class="text-button" onclick={() => usage.refetch()}>Try again</button></div>
+  <div class="inline-problem" role="alert">{errorMessage(usage.error, 'Usage could not be loaded.')} <button class="text-button" onclick={() => usage.refetch()}>Try again</button></div>
 {:else if usage.data}
   <UsageCompletenessStatus completeness={usage.data.completeness} />
 
@@ -120,7 +121,7 @@
     <article class="card pipeline-card">
       <p>Request metadata consumer</p>
       <strong class:danger-text={usage.data.completeness.request_metadata_consumer.state === 'stale'}>{titleCase(usage.data.completeness.request_metadata_consumer.state)}</strong>
-      <span>{usage.data.completeness.request_metadata_consumer.checked_at ? `Checkpoint ${usage.data.completeness.request_metadata_consumer.heartbeat_age_seconds ?? 0}s ago` : 'No worker checkpoint recorded'}</span>
+      <span>{!usage.data.completeness.request_metadata_consumer.checked_at ? 'No worker checkpoint recorded' : usage.data.completeness.request_metadata_consumer.heartbeat_age_seconds == null ? 'Checkpoint age unknown' : `Checkpoint ${usage.data.completeness.request_metadata_consumer.heartbeat_age_seconds}s ago`}</span>
     </article>
     <article class="card pipeline-card">
       <p>Pending acknowledgements</p>
@@ -148,7 +149,7 @@
     <article class="card metric-card"><p>Requests</p><strong>{formatCompact(usage.data.summary.request_count)}</strong></article>
     <article class="card metric-card"><p>Input / output tokens</p><strong>{formatCompact(usage.data.summary.input_tokens)} / {formatCompact(usage.data.summary.output_tokens)}</strong></article>
     <article class="card metric-card"><p>Media units</p><strong>{formatCompact(usage.data.summary.media_units)}</strong></article>
-    <article class="card metric-card"><p>Estimated cost</p><strong class:unpriced={usage.data.summary.estimated_cost == null}>{formatCost(usage.data.summary.estimated_cost, usage.data.summary.currency ?? 'USD')}</strong></article>
+    <article class="card metric-card"><p>Estimated cost</p><strong class:unpriced={usage.data.summary.estimated_cost == null}>{formatCost(usage.data.summary.estimated_cost, usage.data.summary.currency)}</strong></article>
   </section>
 
   <UsageChart points={usage.data.points} granularity={applied.granularity} />
@@ -163,7 +164,7 @@
         <table class="data-table">
           <caption class="sr-only">Usage breakdown by {applied.dimension}</caption>
           <thead><tr><th scope="col">{applied.dimension.replace('_', ' ')}</th><th scope="col">Requests</th><th scope="col">Input tokens</th><th scope="col">Output tokens</th><th scope="col">Estimated cost</th><th scope="col">Completeness</th></tr></thead>
-          <tbody>{#each usage.data.breakdown as row (row.dimension)}<tr><td><strong>{row.dimension}</strong></td><td>{formatCompact(row.request_count)}</td><td>{formatCompact(row.input_tokens)}</td><td>{formatCompact(row.output_tokens)}</td><td>{formatCost(row.estimated_cost, row.currency ?? 'USD')}</td><td>{#if row.incomplete_count > 0}<span class="badge danger">{row.incomplete_count} incomplete</span>{:else if row.unpriced_count > 0}<span class="badge warning">{row.unpriced_count} unpriced</span>{:else}<span class="badge success">Complete</span>{/if}</td></tr>{/each}</tbody>
+          <tbody>{#each usage.data.breakdown as row (row.dimension)}<tr><td><strong>{row.dimension}</strong></td><td>{formatCompact(row.request_count)}</td><td>{formatCompact(row.input_tokens)}</td><td>{formatCompact(row.output_tokens)}</td><td>{formatCost(row.estimated_cost, row.currency)}</td><td>{#if row.incomplete_count > 0}<span class="badge danger">{row.incomplete_count} incomplete</span>{:else if row.unpriced_count > 0}<span class="badge warning">{row.unpriced_count} unpriced</span>{:else}<span class="badge success">Complete</span>{/if}</td></tr>{/each}</tbody>
         </table>
       </div>
     {/if}

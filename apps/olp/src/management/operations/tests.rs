@@ -23,7 +23,7 @@ fn strong_etag_parser_rejects_wildcards_and_unquoted_values() {
 fn pagination_and_time_ranges_reject_silent_clamping_or_reversal() {
     assert_eq!(page_limit(None).unwrap(), 50);
     assert_eq!(page_limit(Some(200)).unwrap(), 200);
-    assert_eq!(page_limit(Some(0)).unwrap_err().status, 422);
+    assert_eq!(page_limit(Some(0)).unwrap_err().status, 400);
     let now = Utc::now();
     assert!(validate_time_range("start", now, "end", now).is_err());
     assert!(validate_time_range("start", now - chrono::Duration::seconds(1), "end", now).is_ok());

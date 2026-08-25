@@ -766,10 +766,11 @@
       "DiscoverModelsRequest": {
         "properties": {
           "models": {
-            "description": "Omit or pass an empty array to query the upstream model-list API.\nManual identifiers are a fallback for upstreams without a list API.\nAll discovered models start disabled and without capability claims until\nthe explicit review operation is completed.",
+            "description": "Omit or pass an empty array to query the upstream model-list API.\nManual identifiers are a fallback for upstreams without a list API.\nAll discovered models start disabled and without capability claims until\nthe explicit review operation is completed. At most 2,000 entries: the\nrevision diff cannot read a provider beyond that.",
             "items": {
               "$ref": "#/components/schemas/DiscoveredModelRequest"
             },
+            "maxItems": 2000,
             "type": "array"
           }
         },
@@ -1578,12 +1579,14 @@
       "PageQuery": {
         "properties": {
           "cursor": {
+            "description": "Opaque cursor returned by the previous page.",
             "type": [
               "string",
               "null"
             ]
           },
           "limit": {
+            "description": "Page size, from 1 to 200. Defaults to 50.",
             "format": "int32",
             "minimum": 0,
             "type": [
@@ -1871,6 +1874,13 @@
       },
       "PriceRequest": {
         "properties": {
+          "cached_input_per_million": {
+            "description": "Rate for the cached share of the input tokens. Omit to bill cached\ntokens at the full input rate.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "currency": {
             "type": "string"
           },
@@ -1919,6 +1929,13 @@
       },
       "PriceResponse": {
         "properties": {
+          "cached_input_per_million": {
+            "description": "Rate for the cached share of the input tokens. Omit to bill cached\ntokens at the full input rate.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "currency": {
             "type": "string"
           },
@@ -3674,8 +3691,7 @@
             "$ref": "#/components/schemas/RuntimeGenerationResponse"
           },
           "secret": {
-            "type": "string",
-            "writeOnly": true
+            "type": "string"
           }
         },
         "required": [
@@ -3701,6 +3717,11 @@
       },
       "RouteActivationResponse": {
         "properties": {
+          "draft_etag": {
+            "description": "The activated draft returns to `draft` under this ETag; revalidate\nbefore activating it again.",
+            "format": "uuid",
+            "type": "string"
+          },
           "revision": {
             "format": "int32",
             "type": "integer"
@@ -3721,6 +3742,7 @@
           "route_id",
           "revision_id",
           "revision",
+          "draft_etag",
           "runtime_generation"
         ],
         "type": "object"
@@ -4149,6 +4171,10 @@
       },
       "RouteTargetResponse": {
         "properties": {
+          "available": {
+            "description": "False when the provider was disabled or the model left the provider's\nactivated revision. The target is still part of the stored route.",
+            "type": "boolean"
+          },
           "id": {
             "format": "uuid",
             "type": "string"
@@ -4190,6 +4216,7 @@
           "provider_id",
           "provider_name",
           "provider_model",
+          "available",
           "priority",
           "weight",
           "timeout_ms",
@@ -4461,8 +4488,10 @@
         "type": "object"
       },
       "UpdateApiKeyRequest": {
+        "description": "A merge patch: every field is optional, an omitted field keeps the stored\nvalue, and an explicit `null` clears one. Writing absent fields through\nwould silently widen a key's privileges — a rename would drop the route\nallowlist, the rate limits, and the expiry.",
         "properties": {
           "allowed_routes": {
+            "description": "Omit to keep the stored allowlist. Send `[]` to clear it; an empty\nallowlist places no route restriction on the key.",
             "items": {
               "type": "string"
             },
@@ -4509,10 +4538,6 @@
             ]
           }
         },
-        "required": [
-          "name",
-          "scopes"
-        ],
         "type": "object"
       },
       "UpdateProfileRequest": {
@@ -5050,12 +5075,14 @@
             }
           },
           {
+            "description": "Page size from 1 to 200; defaults to 50",
             "in": "query",
             "name": "limit",
             "required": false,
             "schema": {
               "format": "int32",
-              "minimum": 0,
+              "maximum": 200,
+              "minimum": 1,
               "type": "integer"
             }
           }
@@ -5143,7 +5170,25 @@
                 }
               }
             },
-            "description": "API key created; secret is shown once"
+            "description": "API key created; secret is shown once",
+            "headers": {
+              "Location": {
+                "description": "Path of the created resource",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Idempotency-Key is missing or invalid"
           },
           "401": {
             "content": {
@@ -5457,7 +5502,7 @@
                 }
               }
             },
-            "description": "API key revoked and new runtime published",
+            "description": "API key revoked and new runtime published; an identical retry replays this response",
             "headers": {
               "ETag": {
                 "description": "Current strong entity tag.",
@@ -5466,6 +5511,16 @@
                 }
               }
             }
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Idempotency-Key is missing or invalid"
           },
           "401": {
             "content": {
@@ -5496,6 +5551,16 @@
               }
             },
             "description": "API key not found"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Idempotency-Key was already used or is in progress"
           },
           "412": {
             "content": {
@@ -5578,6 +5643,16 @@
               }
             }
           },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Idempotency-Key is missing or invalid"
+          },
           "401": {
             "content": {
               "application/problem+json": {
@@ -5606,7 +5681,7 @@
                 }
               }
             },
-            "description": ""
+            "description": "Idempotency-Key was already used or is in progress"
           },
           "412": {
             "content": {
@@ -5655,6 +5730,7 @@
         "operationId": "list_audit_events",
         "parameters": [
           {
+            "description": "Opaque cursor returned by the previous page.",
             "in": "query",
             "name": "cursor",
             "required": false,
@@ -5663,12 +5739,14 @@
             }
           },
           {
+            "description": "Page size, from 1 to 200. Defaults to 50.",
             "in": "query",
             "name": "limit",
             "required": false,
             "schema": {
               "format": "int32",
-              "minimum": 0,
+              "maximum": 200,
+              "minimum": 1,
               "type": "integer"
             }
           }
@@ -5845,13 +5923,14 @@
             }
           },
           {
-            "description": "Page size from 1 to 100",
+            "description": "Page size from 1 to 200; defaults to 50",
             "in": "query",
             "name": "limit",
             "required": false,
             "schema": {
               "format": "int32",
-              "minimum": 0,
+              "maximum": 200,
+              "minimum": 1,
               "type": "integer"
             }
           }
@@ -5939,7 +6018,25 @@
                 }
               }
             },
-            "description": "Invitation created; token is displayed once"
+            "description": "Invitation created; token is displayed once",
+            "headers": {
+              "Location": {
+                "description": "Path of the created resource",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Idempotency-Key is missing or invalid"
           },
           "401": {
             "content": {
@@ -6127,7 +6224,17 @@
                 }
               }
             },
-            "description": "Invitation revoked"
+            "description": "Invitation revoked; an identical retry replays this response"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Idempotency-Key is missing or invalid"
           },
           "401": {
             "content": {
@@ -6157,7 +6264,7 @@
                 }
               }
             },
-            "description": "Invitation is already accepted or revoked"
+            "description": "Invitation is already accepted or revoked, or the Idempotency-Key was already used for a different request"
           },
           "500": {
             "content": {
@@ -6186,6 +6293,7 @@
         "operationId": "list_media_jobs",
         "parameters": [
           {
+            "description": "Opaque cursor returned by the previous page.",
             "in": "query",
             "name": "cursor",
             "required": false,
@@ -6194,12 +6302,14 @@
             }
           },
           {
+            "description": "Page size, from 1 to 200. Defaults to 50.",
             "in": "query",
             "name": "limit",
             "required": false,
             "schema": {
               "format": "int32",
-              "minimum": 0,
+              "maximum": 200,
+              "minimum": 1,
               "type": "integer"
             }
           },
@@ -7266,6 +7376,7 @@
         "operationId": "list_pricing_revisions",
         "parameters": [
           {
+            "description": "Opaque cursor returned by the previous page.",
             "in": "query",
             "name": "cursor",
             "required": false,
@@ -7274,12 +7385,14 @@
             }
           },
           {
+            "description": "Page size, from 1 to 200. Defaults to 50.",
             "in": "query",
             "name": "limit",
             "required": false,
             "schema": {
               "format": "int32",
-              "minimum": 0,
+              "maximum": 200,
+              "minimum": 1,
               "type": "integer"
             }
           }
@@ -7368,6 +7481,16 @@
               }
             },
             "description": "Pricing revision created"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Idempotency-Key is missing or invalid"
           },
           "401": {
             "content": {
@@ -8162,12 +8285,13 @@
             }
           },
           {
+            "description": "Page size from 1 to 200; defaults to 50",
             "in": "query",
             "name": "limit",
             "required": false,
             "schema": {
               "format": "int32",
-              "maximum": 100,
+              "maximum": 200,
               "minimum": 1,
               "type": "integer"
             }
@@ -8247,12 +8371,13 @@
             }
           },
           {
+            "description": "Page size from 1 to 200; defaults to 50",
             "in": "query",
             "name": "limit",
             "required": false,
             "schema": {
               "format": "int32",
-              "maximum": 100,
+              "maximum": 200,
               "minimum": 1,
               "type": "integer"
             }
@@ -8341,7 +8466,15 @@
                 }
               }
             },
-            "description": "Provider draft created"
+            "description": "Provider draft created",
+            "headers": {
+              "Location": {
+                "description": "Path of the created resource",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
           },
           "400": {
             "content": {
@@ -8768,12 +8901,13 @@
             }
           },
           {
+            "description": "Page size from 1 to 200; defaults to 50",
             "in": "query",
             "name": "limit",
             "required": false,
             "schema": {
               "format": "int32",
-              "maximum": 100,
+              "maximum": 200,
               "minimum": 1,
               "type": "integer"
             }
@@ -8897,6 +9031,16 @@
                 }
               }
             }
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Idempotency-Key is missing or invalid"
           },
           "401": {
             "content": {
@@ -9028,6 +9172,16 @@
               }
             }
           },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Idempotency-Key is missing or invalid"
+          },
           "401": {
             "content": {
               "application/problem+json": {
@@ -9056,7 +9210,7 @@
                 }
               }
             },
-            "description": ""
+            "description": "Idempotency-Key was already used or is in progress"
           },
           "412": {
             "content": {
@@ -9139,6 +9293,16 @@
               }
             }
           },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Idempotency-Key is missing or invalid"
+          },
           "401": {
             "content": {
               "application/problem+json": {
@@ -9167,7 +9331,7 @@
                 }
               }
             },
-            "description": "Provider is still referenced by an active route"
+            "description": "Provider is still referenced by an active route, or the Idempotency-Key was already used for a different request"
           },
           "412": {
             "content": {
@@ -9336,12 +9500,13 @@
             }
           },
           {
+            "description": "Page size from 1 to 200; defaults to 50",
             "in": "query",
             "name": "limit",
             "required": false,
             "schema": {
               "format": "int32",
-              "maximum": 100,
+              "maximum": 200,
               "minimum": 1,
               "type": "integer"
             }
@@ -9797,6 +9962,16 @@
               }
             }
           },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Idempotency-Key is missing or invalid"
+          },
           "401": {
             "content": {
               "application/problem+json": {
@@ -9816,6 +9991,16 @@
               }
             },
             "description": "The session lacks permission or mutation CSRF/origin checks failed."
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Idempotency-Key was already used or is in progress"
           },
           "412": {
             "content": {
@@ -9871,12 +10056,13 @@
             }
           },
           {
+            "description": "Page size from 1 to 200; defaults to 50",
             "in": "query",
             "name": "limit",
             "required": false,
             "schema": {
               "format": "int32",
-              "maximum": 100,
+              "maximum": 200,
               "minimum": 1,
               "type": "integer"
             }
@@ -10165,12 +10351,13 @@
             }
           },
           {
+            "description": "Page size from 1 to 200; defaults to 50",
             "in": "query",
             "name": "limit",
             "required": false,
             "schema": {
               "format": "int32",
-              "maximum": 100,
+              "maximum": 200,
               "minimum": 1,
               "type": "integer"
             }
@@ -10297,6 +10484,16 @@
               }
             }
           },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Idempotency-Key is missing or invalid"
+          },
           "401": {
             "content": {
               "application/problem+json": {
@@ -10325,7 +10522,7 @@
                 }
               }
             },
-            "description": "Idempotency-Key was already used"
+            "description": "Idempotency-Key was already used for a different request or is in progress"
           },
           "412": {
             "content": {
@@ -10546,6 +10743,7 @@
         "operationId": "list_requests",
         "parameters": [
           {
+            "description": "Opaque cursor returned by the previous page.",
             "in": "query",
             "name": "cursor",
             "required": false,
@@ -10554,12 +10752,14 @@
             }
           },
           {
+            "description": "Page size, from 1 to 200. Defaults to 50.",
             "in": "query",
             "name": "limit",
             "required": false,
             "schema": {
               "format": "int32",
-              "minimum": 0,
+              "maximum": 200,
+              "minimum": 1,
               "type": "integer"
             }
           },
@@ -10794,12 +10994,14 @@
             }
           },
           {
+            "description": "Page size from 1 to 200; defaults to 50",
             "in": "query",
             "name": "limit",
             "required": false,
             "schema": {
               "format": "int32",
-              "minimum": 0,
+              "maximum": 200,
+              "minimum": 1,
               "type": "integer"
             }
           }
@@ -10887,7 +11089,15 @@
                 }
               }
             },
-            "description": "Route draft created"
+            "description": "Route draft created",
+            "headers": {
+              "Location": {
+                "description": "Path of the created resource",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
           },
           "400": {
             "content": {
@@ -11294,7 +11504,7 @@
                 }
               }
             },
-            "description": "Route activated and runtime published",
+            "description": "Route activated, runtime published, and the draft returned to `draft` under a new ETag",
             "headers": {
               "ETag": {
                 "description": "Current strong entity tag.",
@@ -11303,6 +11513,16 @@
                 }
               }
             }
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Idempotency-Key is missing or invalid"
           },
           "401": {
             "content": {
@@ -11332,7 +11552,7 @@
                 }
               }
             },
-            "description": "Draft has not been validated"
+            "description": "Draft has not been validated, or the Idempotency-Key was already used for a different request"
           },
           "412": {
             "content": {
@@ -11571,12 +11791,13 @@
             }
           },
           {
+            "description": "Page size from 1 to 200; defaults to 50",
             "in": "query",
             "name": "limit",
             "required": false,
             "schema": {
               "format": "int32",
-              "maximum": 100,
+              "maximum": 200,
               "minimum": 1,
               "type": "integer"
             }
@@ -11732,12 +11953,13 @@
             }
           },
           {
+            "description": "Page size from 1 to 200; defaults to 50",
             "in": "query",
             "name": "limit",
             "required": false,
             "schema": {
               "format": "int32",
-              "maximum": 100,
+              "maximum": 200,
               "minimum": 1,
               "type": "integer"
             }
@@ -12024,7 +12246,25 @@
                 }
               }
             },
-            "description": ""
+            "description": "",
+            "headers": {
+              "Location": {
+                "description": "Path of the created resource",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Idempotency-Key is missing or invalid"
           },
           "401": {
             "content": {
@@ -12054,7 +12294,7 @@
                 }
               }
             },
-            "description": ""
+            "description": "Idempotency-Key was already used or is in progress"
           },
           "500": {
             "content": {
@@ -12083,6 +12323,7 @@
         "operationId": "list_runtime_generations",
         "parameters": [
           {
+            "description": "Opaque cursor returned by the previous page.",
             "in": "query",
             "name": "cursor",
             "required": false,
@@ -12091,12 +12332,14 @@
             }
           },
           {
+            "description": "Page size, from 1 to 200. Defaults to 50.",
             "in": "query",
             "name": "limit",
             "required": false,
             "schema": {
               "format": "int32",
-              "minimum": 0,
+              "maximum": 200,
+              "minimum": 1,
               "type": "integer"
             }
           }
@@ -12167,13 +12410,14 @@
             }
           },
           {
-            "description": "Page size from 1 to 100",
+            "description": "Page size from 1 to 200; defaults to 50",
             "in": "query",
             "name": "limit",
             "required": false,
             "schema": {
               "format": "int32",
-              "minimum": 0,
+              "maximum": 200,
+              "minimum": 1,
               "type": "integer"
             }
           },
@@ -13374,13 +13618,14 @@
             }
           },
           {
-            "description": "Page size from 1 to 100",
+            "description": "Page size from 1 to 200; defaults to 50",
             "in": "query",
             "name": "limit",
             "required": false,
             "schema": {
               "format": "int32",
-              "minimum": 0,
+              "maximum": 200,
+              "minimum": 1,
               "type": "integer"
             }
           }
@@ -13593,7 +13838,7 @@
                 }
               }
             },
-            "description": "Last active owner cannot be demoted or deactivated"
+            "description": "Last active owner cannot be demoted or deactivated, and no user may change their own role or deactivate themselves"
           },
           "412": {
             "content": {

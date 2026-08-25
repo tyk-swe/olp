@@ -23,6 +23,7 @@
   } = $props();
   let mobileNavigation = $state<HTMLDialogElement>();
   let accountMenu = $state<HTMLDetailsElement>();
+  let accountMenuOpen = $state(false);
 
   function openNavigation() {
     mobileNavigation?.showModal();
@@ -84,10 +85,18 @@
       <div class="topbar-actions">
         <span class="edition"><span aria-hidden="true"></span>Local installation</span>
         <ThemeToggle />
-        <details class="account-menu" bind:this={accountMenu}>
+        <details
+          class="account-menu"
+          bind:this={accountMenu}
+          bind:open={accountMenuOpen}
+        >
           <!-- Chromium's accessibility tree does not consistently expose the native summary role. -->
           <!-- svelte-ignore a11y_no_redundant_roles -->
-          <summary role="button" aria-label="Open account menu">
+          <summary
+            role="button"
+            aria-label="Open account menu"
+            aria-expanded={accountMenuOpen}
+          >
             <span class="avatar" aria-hidden="true">{user?.display_name?.slice(0, 1).toUpperCase() ?? 'A'}</span>
             <span class="account-label">{user?.display_name ?? 'Account'}</span>
             <NavIcon name="chevron" size={16} />

@@ -21,7 +21,7 @@ use crate::{
     management::{
         error_mapping::map_configuration,
         idempotency::{idempotency_http_response, require_idempotency_key},
-        json_payload::json_payload,
+        json_payload::{explicit_null, json_payload},
         pagination::{PageQuery, page},
         permissions::require_permission,
         preconditions::{if_match, with_etag},
@@ -32,7 +32,10 @@ use crate::{
     public_http::problem::Problem,
 };
 
-use super::policy::{ExpirationValidation, RawApiKeyPolicy, normalize_api_key_policy};
+use super::policy::{
+    ApiKeyPolicySnapshot, ExpirationValidation, RawApiKeyPolicy, merge_api_key_policy,
+    normalize_api_key_policy,
+};
 
 #[derive(Clone, Debug, Serialize, ToSchema)]
 pub(crate) struct ApiKeyDetailResponse {
@@ -86,7 +89,7 @@ pub(crate) struct ApiKeyListResponse {
     get,
     path = "/api/v1/api-keys",
     tag = "api-keys",
-    params(("cursor" = Option<String>, Query), ("limit" = Option<u16>, Query)),
+    params(("cursor" = Option<String>, Query), ("limit" = Option<u16>, Query, minimum = 1, maximum = 200, description = "Page size from 1 to 200; defaults to 50")),
     responses((status = 200, body = ApiKeyListResponse))
 )]
 pub(crate) async fn list_api_keys(
@@ -132,16 +135,35 @@ pub(crate) async fn get_api_key(
     with_etag(Json(key), etag)
 }
 
-#[derive(Clone, Debug, Deserialize, ToSchema)]
+/// A merge patch: every field is optional, an omitted field keeps the stored
+/// value, and an explicit `null` clears one. Writing absent fields through
+/// would silently widen a key's privileges — a rename would drop the route
+/// allowlist, the rate limits, and the expiry.
+#[derive(Clone, Debug, Default, Deserialize, ToSchema)]
 pub(crate) struct UpdateApiKeyRequest {
-    pub name: String,
-    pub scopes: Vec<String>,
     #[serde(default)]
-    pub allowed_routes: Vec<String>,
-    pub requests_per_minute: Option<u32>,
-    pub tokens_per_minute: Option<u64>,
-    pub max_concurrency: Option<u32>,
-    pub expires_at: Option<DateTime<Utc>>,
+    #[schema(nullable = false)]
+    pub name: Option<String>,
+    #[serde(default)]
+    #[schema(nullable = false)]
+    pub scopes: Option<Vec<String>>,
+    /// Omit to keep the stored allowlist. Send `[]` to clear it; an empty
+    /// allowlist places no route restriction on the key.
+    #[serde(default)]
+    #[schema(nullable = false)]
+    pub allowed_routes: Option<Vec<String>>,
+    #[serde(default, deserialize_with = "explicit_null")]
+    #[schema(value_type = Option<u32>, nullable)]
+    pub requests_per_minute: Option<Option<u32>>,
+    #[serde(default, deserialize_with = "explicit_null")]
+    #[schema(value_type = Option<u64>, nullable)]
+    pub tokens_per_minute: Option<Option<u64>>,
+    #[serde(default, deserialize_with = "explicit_null")]
+    #[schema(value_type = Option<u32>, nullable)]
+    pub max_concurrency: Option<Option<u32>>,
+    #[serde(default, deserialize_with = "explicit_null")]
+    #[schema(value_type = Option<DateTime<Utc>>, nullable)]
+    pub expires_at: Option<Option<DateTime<Utc>>>,
 }
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -175,14 +197,24 @@ pub(crate) async fn update_api_key(
     let principal = require_mutation_session(&state, &headers).await?;
     require_permission(&principal, Permission::ManageApiKeys)?;
     let request = json_payload(payload)?;
-    let input = normalize_api_key_policy(
-        RawApiKeyPolicy::from(&request),
-        ExpirationValidation::RequireFuture(Utc::now()),
-    )?
-    .into_update_input();
+    let expected_etag = if_match(&headers)?;
+    let stored = state
+        .store()
+        .get_api_key(api_key_id)
+        .await
+        .map_err(map_configuration)?;
+    let (merged, expiration_changed) =
+        merge_api_key_policy(ApiKeyPolicySnapshot::from(&stored), &request);
+    let expiration_validation = if expiration_changed {
+        ExpirationValidation::RequireFuture(Utc::now())
+    } else {
+        ExpirationValidation::Unchanged
+    };
+    let input = normalize_api_key_policy(RawApiKeyPolicy::from(&merged), expiration_validation)?
+        .into_update_input();
     let result = state
         .store()
-        .update_api_key(api_key_id, if_match(&headers)?, &input, principal.user_id)
+        .update_api_key(api_key_id, expected_etag, &input, principal.user_id)
         .await
         .map_err(map_configuration)?;
     with_etag(
@@ -198,7 +230,7 @@ pub(crate) async fn update_api_key(
 pub(crate) struct RotateApiKeyResponse {
     pub id: Uuid,
     pub lookup_id: String,
-    #[schema(value_type = String, write_only)]
+    #[schema(value_type = String)]
     secret: WriteOnlySecret,
     pub etag: Uuid,
     pub runtime_generation: RuntimeGenerationResponse,
@@ -230,7 +262,8 @@ impl fmt::Debug for RotateApiKeyResponse {
     params(("api_key_id" = Uuid, Path), ("If-Match" = String, Header), ("Idempotency-Key" = String, Header)),
     responses(
         (status = 200, body = RotateApiKeyResponse),
-        (status = 409, body = Problem),
+        (status = 400, description = "Idempotency-Key is missing or invalid", body = Problem),
+        (status = 409, description = "Idempotency-Key was already used or is in progress", body = Problem),
         (status = 412, body = Problem),
         (status = 503, description = "Master key, authentication HMAC key, or database unavailable", body = Problem)
     )

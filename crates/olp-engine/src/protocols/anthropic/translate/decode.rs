@@ -7,7 +7,7 @@ use crate::domain::{
             ContentPart, GenerationParameters, GenerationRequest,
             MediaSource as CanonicalMediaSource, Message as CanonicalMessage, MessageRole,
             Operation, SourceExtensions, ToolCall, ToolChoice as CanonicalToolChoice,
-            ToolDefinition, media_handle_from_inline_marker,
+            ToolDefinition, media_handle_from_inline_marker, mime_type_from_data_url,
         },
     },
     ids::RouteSlug,
@@ -190,6 +190,7 @@ fn decode_blocks(
     let mut tool_calls = Vec::new();
     let mut content_extensions = Vec::new();
     let mut tool_extensions = Vec::new();
+    let mut raw_blocks: Vec<(usize, Value)> = Vec::new();
     let mut seen_tool_use = false;
 
     for block in blocks {
@@ -205,6 +206,7 @@ fn decode_blocks(
                     &mut tool_calls,
                     &mut content_extensions,
                     &mut tool_extensions,
+                    &mut raw_blocks,
                 );
                 segments.push(decode_tool_result(result)?);
                 seen_tool_use = false;
@@ -243,20 +245,15 @@ fn decode_blocks(
                     arguments: serde_json::to_string(&block.input).map_err(DecodeError::Json)?,
                 });
             }
-            ContentBlock::Thinking(block) => {
-                return Err(DecodeError::UnsupportedContentBlock(block.kind));
-            }
-            ContentBlock::RedactedThinking(block) => {
-                return Err(DecodeError::UnsupportedContentBlock(block.kind));
-            }
-            ContentBlock::Unknown(value) => {
-                return Err(DecodeError::UnsupportedContentBlock(
-                    value
-                        .get("type")
-                        .and_then(Value::as_str)
-                        .unwrap_or("unknown")
-                        .to_owned(),
-                ));
+            // Anthropic requires the signed `thinking` block to be echoed back
+            // on the next turn of an extended-thinking tool loop, and the same
+            // shape carries `document`, `search_result`, `server_tool_use`, and
+            // `web_search_tool_result`. None of these has a canonical form, so
+            // they round-trip verbatim as source extensions positioned where
+            // they appeared. Cross-protocol targets still fail closed on them.
+            block => {
+                let position = content.len() + raw_blocks.len();
+                raw_blocks.push((position, block.as_value()));
             }
         }
     }
@@ -267,6 +264,7 @@ fn decode_blocks(
         &mut tool_calls,
         &mut content_extensions,
         &mut tool_extensions,
+        &mut raw_blocks,
     );
     if segments.is_empty() {
         return Err(DecodeError::EmptyMessage);
@@ -284,21 +282,26 @@ fn flush_regular_segment(
     tool_calls: &mut Vec<ToolCall>,
     content_extensions: &mut Vec<(String, BTreeMap<String, Value>)>,
     tool_extensions: &mut Vec<(usize, BTreeMap<String, Value>)>,
+    raw_blocks: &mut Vec<(usize, Value)>,
 ) {
-    if content.is_empty() && tool_calls.is_empty() {
+    if content.is_empty() && tool_calls.is_empty() && raw_blocks.is_empty() {
         return;
     }
     let content_count = content.len();
+    let raw_count = raw_blocks.len();
     let mut extensions = BTreeMap::new();
     for (prefix, extra) in content_extensions.drain(..) {
         collect_extra(&prefix, &extra, &mut extensions);
     }
     for (index, extra) in tool_extensions.drain(..) {
         collect_extra(
-            &format!("/content/{}", content_count + index),
+            &format!("/content/{}", content_count + raw_count + index),
             &extra,
             &mut extensions,
         );
+    }
+    for (position, block) in raw_blocks.drain(..) {
+        extensions.insert(format!("/content/{position}"), block);
     }
     segments.push(DecodedSegment {
         message: CanonicalMessage {
@@ -332,11 +335,12 @@ fn decode_image(block: ImageBlock) -> Result<DecodedImage, DecodeError> {
         let handle = media_handle_from_inline_marker(&data)
             .ok_or(DecodeError::InlineMediaRequiresBoundedHandle)?;
         let media_type = media_type.ok_or(DecodeError::InlineMediaRequiresBoundedHandle)?;
-        source_extra.insert("media_type".into(), Value::String(media_type));
+        source_extra.insert("media_type".into(), Value::String(media_type.clone()));
         return Ok(DecodedImage {
             part: ContentPart::Image {
                 source: CanonicalMediaSource::Handle(handle),
                 detail: None,
+                mime_type: Some(media_type),
             },
             block_extra: block.extra,
             source_extra,
@@ -349,13 +353,15 @@ fn decode_image(block: ImageBlock) -> Result<DecodedImage, DecodeError> {
         return Err(DecodeError::UnsupportedMediaSource(kind));
     }
     let url = url.ok_or(DecodeError::MissingMediaUrl)?;
-    if let Some(media_type) = media_type {
+    if let Some(media_type) = media_type.clone() {
         source_extra.insert("media_type".into(), Value::String(media_type));
     }
+    let mime_type = media_type.or_else(|| mime_type_from_data_url(&url));
     Ok(DecodedImage {
         part: ContentPart::Image {
             source: CanonicalMediaSource::Uri(url),
             detail: None,
+            mime_type,
         },
         block_extra: block.extra,
         source_extra,

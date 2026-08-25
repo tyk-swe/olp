@@ -28,6 +28,9 @@ pub struct PriceInput {
     pub model: String,
     pub operation: OperationKind,
     pub input_per_million: Option<String>,
+    /// Rate for the cached share of `input_per_million`'s token count. Absent
+    /// means cached tokens bill at the full input rate.
+    pub cached_input_per_million: Option<String>,
     pub output_per_million: Option<String>,
     pub unit_price: Option<String>,
     pub currency: String,
@@ -128,6 +131,8 @@ impl Store {
         .await?;
         for price in prices {
             let input_per_million = parse_optional_decimal(price.input_per_million.as_deref())?;
+            let cached_input_per_million =
+                parse_optional_decimal(price.cached_input_per_million.as_deref())?;
             let output_per_million = parse_optional_decimal(price.output_per_million.as_deref())?;
             let unit_price = parse_optional_decimal(price.unit_price.as_deref())?;
             if let Some(provider_id) = price.provider_id {
@@ -145,14 +150,17 @@ impl Store {
             sqlx::query!(
                 "INSERT INTO prices \
                  (pricing_revision_id, provider_kind, provider_id, model, operation, \
-                  input_per_million, output_per_million, unit_price, currency) \
-                 VALUES ($1, $2, $3, $4, $5, $6::numeric, $7::numeric, $8::numeric, $9)",
+                  input_per_million, cached_input_per_million, output_per_million, \
+                  unit_price, currency) \
+                 VALUES ($1, $2, $3, $4, $5, $6::numeric, $7::numeric, $8::numeric, \
+                         $9::numeric, $10)",
                 id,
                 price.provider_kind.as_str(),
                 price.provider_id,
                 price.model.trim(),
                 price.operation.as_str(),
                 input_per_million,
+                cached_input_per_million,
                 output_per_million,
                 unit_price,
                 price.currency.trim().to_uppercase()
@@ -213,6 +221,7 @@ impl Store {
                     p.provider_kind AS \"provider_kind?\", p.provider_id AS \"provider_id?\", \
                     p.model AS \"model?\", p.operation AS \"operation?\", \
                     p.input_per_million::text AS \"input_per_million?\", \
+                    p.cached_input_per_million::text AS \"cached_input_per_million?\", \
                     p.output_per_million::text AS \"output_per_million?\", \
                     p.unit_price::text AS \"unit_price?\", p.currency::text AS \"currency?\" \
              FROM pricing_revisions r LEFT JOIN prices p ON p.pricing_revision_id = r.id \
@@ -262,6 +271,7 @@ impl Store {
                             Error::Invalid("stored pricing operation is invalid".to_owned())
                         })?,
                     input_per_million: row.input_per_million,
+                    cached_input_per_million: row.cached_input_per_million,
                     output_per_million: row.output_per_million,
                     unit_price: row.unit_price,
                     currency: row
@@ -298,6 +308,9 @@ pub(super) fn validate_prices(prices: &[PriceInput]) -> Result<(), Error> {
             || (price.input_per_million.is_none()
                 && price.output_per_million.is_none()
                 && price.unit_price.is_none())
+            // A cached rate prices a share of the input count; without an input
+            // rate there is nothing for it to discount.
+            || (price.cached_input_per_million.is_some() && price.input_per_million.is_none())
         {
             return Err(Error::Invalid(
                 "pricing entries require dimensions, ISO currency, and at least one price"
@@ -326,6 +339,7 @@ pub(super) fn validate_prices(prices: &[PriceInput]) -> Result<(), Error> {
         }
         for amount in [
             &price.input_per_million,
+            &price.cached_input_per_million,
             &price.output_per_million,
             &price.unit_price,
         ]

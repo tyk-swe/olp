@@ -28,6 +28,7 @@ pub(super) async fn exercise(
                     model: "mock-model".to_owned(),
                     operation: olp_engine::domain::canonical::identity::OperationKind::Generation,
                     input_per_million: Some("1.000000000000".to_owned()),
+                    cached_input_per_million: None,
                     output_per_million: Some("2.000000000000".to_owned()),
                     unit_price: None,
                     currency: "USD".to_owned(),
@@ -38,6 +39,7 @@ pub(super) async fn exercise(
                     model: "mock-model".to_owned(),
                     operation: olp_engine::domain::canonical::identity::OperationKind::Generation,
                     input_per_million: Some("3.000000000000".to_owned()),
+                    cached_input_per_million: Some("1.000000000000".to_owned()),
                     output_per_million: Some("4.000000000000".to_owned()),
                     unit_price: None,
                     currency: "USD".to_owned(),
@@ -49,6 +51,7 @@ pub(super) async fn exercise(
                     operation:
                         olp_engine::domain::canonical::identity::OperationKind::ImageGeneration,
                     input_per_million: None,
+                    cached_input_per_million: None,
                     output_per_million: None,
                     unit_price: Some("0.040000000000".to_owned()),
                     currency: "USD".to_owned(),
@@ -396,7 +399,10 @@ pub(super) async fn exercise(
     assert_eq!(request_page.items[0].id, request_id);
     assert_eq!(
         request_page.items[0].estimated_cost.as_deref(),
-        Some("0.000500000000")
+        // 100 input tokens of which 10 were cache reads, plus 50 output, at
+        // 3/1/4 per million: (100 - 10) * 3 + 10 * 1 + 50 * 4. Billing the
+        // cache reads at the full input rate would read 0.000500000000.
+        Some("0.000480000000")
     );
     assert_eq!(
         store
@@ -492,7 +498,7 @@ pub(super) async fn exercise(
     let summary = store.usage_summary(&filters).await.unwrap();
     assert_eq!(summary.request_count, 1);
     assert_eq!(summary.cached_input_tokens, "10");
-    assert_eq!(summary.estimated_cost.as_deref(), Some("0.000500000000"));
+    assert_eq!(summary.estimated_cost.as_deref(), Some("0.000480000000"));
     assert_eq!(summary.currency.as_deref(), Some("USD"));
     assert_eq!(series[0].currency.as_deref(), Some("USD"));
     assert_eq!(breakdown[0].currency.as_deref(), Some("USD"));

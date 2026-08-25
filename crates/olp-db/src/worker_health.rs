@@ -405,13 +405,20 @@ impl Store {
         })
     }
 
-    pub async fn worker_task_health(
-        &self,
-        now: DateTime<Utc>,
-    ) -> Result<WorkerTaskHealthSummary, Error> {
+    /// Reports per-task freshness. Ages are computed by the database against
+    /// `clock_timestamp()`, the same clock the workers stamp their checkpoints
+    /// with. Subtracting a caller's wall clock instead would turn host clock
+    /// skew between the API and worker processes into false staleness (or a
+    /// dead worker reported as freshly successful).
+    pub async fn worker_task_health(&self) -> Result<WorkerTaskHealthSummary, Error> {
         let rows = sqlx::query!(
             "SELECT task, checked_at, last_success_at, last_progress_at, \
-                    successes_total, failures_total, skipped_total \
+                    successes_total, failures_total, skipped_total, \
+                    GREATEST(0, floor(extract(epoch FROM clock_timestamp() - checked_at)))::bigint \
+                      AS \"heartbeat_age_seconds!\", \
+                    CASE WHEN last_success_at IS NULL THEN NULL ELSE \
+                      GREATEST(0, floor(extract(epoch FROM clock_timestamp() - last_success_at)))::bigint \
+                    END AS last_success_age_seconds \
              FROM worker_task_health ORDER BY task"
         )
         .fetch_all(self.pool())
@@ -435,8 +442,9 @@ impl Store {
                 continue;
             };
             WorkerTask::parse(&row.task)?;
-            let heartbeat_age_seconds = age_seconds(now, row.checked_at);
-            let last_success_age_seconds = row.last_success_at.map(|at| age_seconds(now, at));
+            let heartbeat_age_seconds = checked_age(row.heartbeat_age_seconds)?;
+            let last_success_age_seconds =
+                row.last_success_age_seconds.map(checked_age).transpose()?;
             let state = worker_task_state(task, last_success_age_seconds);
             tasks.push(WorkerTaskStatus {
                 task,
@@ -476,8 +484,8 @@ fn worker_task_state(task: WorkerTask, last_success_age_seconds: Option<u64>) ->
     }
 }
 
-fn age_seconds(now: DateTime<Utc>, at: DateTime<Utc>) -> u64 {
-    u64::try_from(now.signed_duration_since(at).num_seconds().max(0)).unwrap_or(u64::MAX)
+fn checked_age(seconds: i64) -> Result<u64, Error> {
+    u64::try_from(seconds).map_err(|_| Error::InvalidWorkerHealth)
 }
 
 #[cfg(test)]
@@ -556,11 +564,13 @@ mod tests {
     }
 
     #[test]
-    fn age_seconds_clamps_future_timestamps() {
-        let now = Utc.timestamp_opt(1_000, 0).unwrap();
-
-        assert_eq!(age_seconds(now, now - chrono::Duration::seconds(7)), 7);
-        assert_eq!(age_seconds(now, now + chrono::Duration::seconds(7)), 0);
+    fn checked_age_rejects_a_negative_database_age() {
+        // SQL clamps at zero, so a negative age means the reader and the
+        // stored checkpoint disagree about the shape of the row, not that a
+        // timestamp is in the future.
+        assert_eq!(checked_age(7).unwrap(), 7);
+        assert_eq!(checked_age(0).unwrap(), 0);
+        assert!(matches!(checked_age(-1), Err(Error::InvalidWorkerHealth)));
     }
 
     #[test]

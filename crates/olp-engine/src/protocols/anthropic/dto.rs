@@ -95,32 +95,6 @@ pub enum ContentBlock {
     Unknown(Value),
 }
 
-#[derive(Deserialize)]
-#[serde(untagged)]
-enum ContentBlockRepr {
-    Text(TextBlock),
-    Image(ImageBlock),
-    ToolUse(ToolUseBlock),
-    ToolResult(ToolResultBlock),
-    Thinking(ThinkingBlock),
-    RedactedThinking(RedactedThinkingBlock),
-    Unknown(Value),
-}
-
-impl From<ContentBlockRepr> for ContentBlock {
-    fn from(block: ContentBlockRepr) -> Self {
-        match block {
-            ContentBlockRepr::Text(block) => Self::Text(block),
-            ContentBlockRepr::Image(block) => Self::Image(block),
-            ContentBlockRepr::ToolUse(block) => Self::ToolUse(block),
-            ContentBlockRepr::ToolResult(block) => Self::ToolResult(block),
-            ContentBlockRepr::Thinking(block) => Self::Thinking(block),
-            ContentBlockRepr::RedactedThinking(block) => Self::RedactedThinking(block),
-            ContentBlockRepr::Unknown(value) => Self::Unknown(value),
-        }
-    }
-}
-
 struct ContentBlockVisitor;
 
 impl<'de> Visitor<'de> for ContentBlockVisitor {
@@ -143,9 +117,27 @@ impl<'de> Visitor<'de> for ContentBlockVisitor {
             }
         }
 
-        serde_json::from_value::<ContentBlockRepr>(Value::Object(fields))
-            .map(Into::into)
-            .map_err(A::Error::custom)
+        // Dispatch on `type` rather than on which fields happen to be
+        // present: an untagged probe would classify a `thinking` block that
+        // also carries `id`/`name`/`input` as a tool use, and the kind check
+        // downstream would then reject a document the encoder itself emits.
+        let kind = fields
+            .get("type")
+            .and_then(Value::as_str)
+            .map(str::to_owned);
+        let value = Value::Object(fields);
+        let block = match kind.as_deref() {
+            Some("text") => serde_json::from_value(value).map(ContentBlock::Text),
+            Some("image") => serde_json::from_value(value).map(ContentBlock::Image),
+            Some("tool_use") => serde_json::from_value(value).map(ContentBlock::ToolUse),
+            Some("tool_result") => serde_json::from_value(value).map(ContentBlock::ToolResult),
+            Some("thinking") => serde_json::from_value(value).map(ContentBlock::Thinking),
+            Some("redacted_thinking") => {
+                serde_json::from_value(value).map(ContentBlock::RedactedThinking)
+            }
+            _ => Ok(ContentBlock::Unknown(value)),
+        };
+        block.map_err(A::Error::custom)
     }
 }
 
@@ -324,6 +316,33 @@ pub struct Usage {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn content_blocks_are_classified_by_type_not_by_field_shape() {
+        // Found by the protocol_json fuzz target: a `thinking` block that also
+        // carries tool-use fields must stay a thinking block, or the encoder
+        // emits a document its own decoder rejects.
+        let block: ContentBlock = serde_json::from_value(serde_json::json!({
+            "type": "thinking",
+            "thinking": "check the tool",
+            "signature": "sig-abc",
+            "id": "toolu_1",
+            "name": "weather",
+            "input": {}
+        }))
+        .unwrap();
+        assert!(matches!(block, ContentBlock::Thinking(_)), "{block:?}");
+
+        let unknown: ContentBlock =
+            serde_json::from_value(serde_json::json!({ "type": "document", "text": "t" })).unwrap();
+        assert!(matches!(unknown, ContentBlock::Unknown(_)));
+
+        // A known type with a malformed body fails closed instead of being
+        // smuggled through as an opaque block.
+        assert!(
+            serde_json::from_value::<ContentBlock>(serde_json::json!({ "type": "text" })).is_err()
+        );
+    }
     use super::*;
 
     #[test]

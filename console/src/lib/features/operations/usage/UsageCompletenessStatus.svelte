@@ -11,7 +11,7 @@
   <section
     class="completeness"
     class:danger={presentation.danger}
-    role="status"
+    role={presentation.danger ? 'alert' : 'status'}
     aria-labelledby="completeness-title"
   >
     <div>

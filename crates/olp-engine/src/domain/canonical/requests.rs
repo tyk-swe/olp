@@ -139,6 +139,11 @@ pub enum ContentPart {
     Image {
         source: MediaSource,
         detail: Option<String>,
+        /// The image's media type. Gemini's `inlineData` / `fileData` require
+        /// it, so without a canonical home no OpenAI or Anthropic vision
+        /// request could be represented on a Gemini target.
+        #[serde(default)]
+        mime_type: Option<String>,
     },
     InputAudio {
         media: MediaHandle,
@@ -182,6 +187,15 @@ impl MediaHandle {
 #[must_use]
 pub fn inline_media_marker(handle: &MediaHandle) -> String {
     format!("{INLINE_MEDIA_HANDLE_PREFIX}{}", handle.as_str())
+}
+
+/// Extracts the media type from a `data:` URL so an inline image keeps the
+/// MIME the target protocol may require.
+#[must_use]
+pub fn mime_type_from_data_url(url: &str) -> Option<String> {
+    let rest = url.strip_prefix("data:")?;
+    let mime = rest.split([';', ',']).next()?;
+    (!mime.is_empty() && mime.contains('/')).then(|| mime.to_owned())
 }
 
 #[must_use]

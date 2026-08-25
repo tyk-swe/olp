@@ -17,14 +17,18 @@ pub(crate) struct OpenAiChatCompletionStreamEncoder {
     response_id: String,
     created: i64,
     model: String,
+    include_usage: bool,
+    usage: Option<Value>,
 }
 
 impl OpenAiChatCompletionStreamEncoder {
-    pub(crate) fn new(request_id: uuid::Uuid, model: &str) -> Self {
+    pub(crate) fn new(request_id: uuid::Uuid, model: &str, include_usage: bool) -> Self {
         Self {
             response_id: format!("chatcmpl-{request_id}"),
             created: unix_seconds(),
             model: model.to_owned(),
+            include_usage,
+            usage: None,
         }
     }
 
@@ -54,19 +58,32 @@ impl OpenAiChatCompletionStreamEncoder {
                 id,
                 name,
                 arguments_delta,
-            } => self.chunk(
-                vec![json!({
-                    "index": output_index,
-                    "delta": { "tool_calls": [{
-                        "index": tool_index,
-                        "id": id,
-                        "type": "function",
-                        "function": { "name": name, "arguments": arguments_delta }
-                    }]},
-                    "finish_reason": null
-                })],
-                None,
-            ),
+            } => {
+                // Real OpenAI omits `id`, `type`, and `function.name` on
+                // continuation chunks. Emitting explicit nulls clobbers the id
+                // in accumulators that assign unconditionally, and makes
+                // name-concatenating accumulators raise a TypeError.
+                let mut function = serde_json::Map::new();
+                if let Some(name) = name {
+                    function.insert("name".to_owned(), Value::String(name));
+                }
+                function.insert("arguments".to_owned(), Value::String(arguments_delta));
+                let mut call = serde_json::Map::new();
+                call.insert("index".to_owned(), Value::from(tool_index));
+                if let Some(id) = id {
+                    call.insert("id".to_owned(), Value::String(id));
+                    call.insert("type".to_owned(), Value::String("function".to_owned()));
+                }
+                call.insert("function".to_owned(), Value::Object(function));
+                self.chunk(
+                    vec![json!({
+                        "index": output_index,
+                        "delta": { "tool_calls": [Value::Object(call)] },
+                        "finish_reason": null
+                    })],
+                    None,
+                )
+            }
             Kind::Finish {
                 output_index,
                 reason,
@@ -74,22 +91,28 @@ impl OpenAiChatCompletionStreamEncoder {
                 vec![json!({ "index": output_index, "delta": {}, "finish_reason": finish_name(reason) })],
                 None,
             ),
-            Kind::Usage { usage } => self.chunk(
-                Vec::new(),
-                Some(json!({
+            // A provider may report running totals on every chunk (Gemini
+            // does). OpenAI sends exactly one usage-only chunk, immediately
+            // before `[DONE]`, so only the last total is kept and emitted
+            // there — and only when the client asked for it.
+            Kind::Usage { usage } => {
+                self.usage = Some(json!({
                     "prompt_tokens": usage.input_tokens,
-                    "completion_tokens": usage.output_tokens,
+                    "completion_tokens": usage
+                        .output_tokens
+                        .saturating_add(usage.reasoning_tokens.unwrap_or(0)),
                     "total_tokens": usage.total_tokens,
                     "prompt_tokens_details": { "cached_tokens": usage.cached_input_tokens },
                     "completion_tokens_details": { "reasoning_tokens": usage.reasoning_tokens }
-                })),
-            ),
+                }));
+                return Ok(Vec::new());
+            }
             Kind::SourceExtension { extensions } => {
+                // Extensions from another surface have no representation here.
+                // Dropping them keeps a Gemini or Anthropic upstream usable from
+                // an OpenAI client instead of failing the response mid-stream.
                 if extensions.source != Some(Surface::OpenAi) {
-                    return Err(InferenceError::bad_gateway(
-                        "provider_protocol_error",
-                        "A provider emitted extensions for a different client protocol.",
-                    ));
+                    return Ok(Vec::new());
                 }
                 let mut value = self.chunk(Vec::new(), None);
                 for (pointer, extension) in extensions.values {
@@ -112,7 +135,14 @@ impl OpenAiChatCompletionStreamEncoder {
                 }))]);
             }
             Kind::Done => {
-                return Ok(vec![Bytes::from_static(b"data: [DONE]\n\n")]);
+                let mut frames = Vec::new();
+                if let Some(usage) = self.usage.take()
+                    && self.include_usage
+                {
+                    frames.push(sse_json(&self.chunk(Vec::new(), Some(usage))));
+                }
+                frames.push(Bytes::from_static(b"data: [DONE]\n\n"));
+                return Ok(frames);
             }
         };
         Ok(vec![sse_json(&value)])
@@ -212,7 +242,9 @@ pub(crate) fn aggregate_chat_completion_response(
             Kind::Usage { usage: value } => {
                 usage = Some(json!({
                     "prompt_tokens": value.input_tokens,
-                    "completion_tokens": value.output_tokens,
+                    "completion_tokens": value
+                        .output_tokens
+                        .saturating_add(value.reasoning_tokens.unwrap_or(0)),
                     "total_tokens": value.total_tokens,
                     "prompt_tokens_details": { "cached_tokens": value.cached_input_tokens },
                     "completion_tokens_details": { "reasoning_tokens": value.reasoning_tokens }
@@ -220,10 +252,7 @@ pub(crate) fn aggregate_chat_completion_response(
             }
             Kind::SourceExtension { extensions: values } => {
                 if values.source != Some(Surface::OpenAi) {
-                    return Err(InferenceError::bad_gateway(
-                        "provider_protocol_error",
-                        "A provider emitted extensions for a different client protocol.",
-                    ));
+                    continue;
                 }
                 extensions.extend(
                     values
@@ -252,14 +281,19 @@ pub(crate) fn aggregate_chat_completion_response(
                     })
                 })
                 .collect::<Vec<_>>();
+            let mut message = json!({
+                "role": "assistant",
+                "content": (!choice.content.is_empty()).then_some(choice.content),
+                "refusal": (!choice.refusal.is_empty()).then_some(choice.refusal),
+            });
+            if !tools.is_empty()
+                && let Some(object) = message.as_object_mut()
+            {
+                object.insert("tool_calls".to_owned(), Value::from(tools));
+            }
             json!({
                 "index": index,
-                "message": {
-                    "role": "assistant",
-                    "content": choice.content,
-                    "refusal": (!choice.refusal.is_empty()).then_some(choice.refusal),
-                    "tool_calls": tools
-                },
+                "message": message,
                 "finish_reason": choice.finish_reason
             })
         })
@@ -355,14 +389,29 @@ fn role_name(role: MessageRole) -> &'static str {
     }
 }
 
+/// The `finish_reason` literals the OpenAI SDKs declare. A value outside this
+/// set (Gemini `OTHER`, Anthropic `pause_turn`) fails a strictly typed client
+/// on an otherwise successful response, so it is clamped to `stop`; the raw
+/// value still reaches same-surface clients as a source extension.
+const OPENAI_FINISH_REASONS: [&str; 5] = [
+    "stop",
+    "length",
+    "tool_calls",
+    "content_filter",
+    "function_call",
+];
+
 fn finish_name(reason: FinishReason) -> Cow<'static, str> {
     match reason {
         FinishReason::Stop => Cow::Borrowed("stop"),
         FinishReason::Length => Cow::Borrowed("length"),
         FinishReason::ToolCalls => Cow::Borrowed("tool_calls"),
         FinishReason::ContentFilter => Cow::Borrowed("content_filter"),
-        FinishReason::Error => Cow::Borrowed("error"),
-        FinishReason::Other(value) => Cow::Owned(value),
+        FinishReason::Error => Cow::Borrowed("stop"),
+        FinishReason::Other(value) if OPENAI_FINISH_REASONS.contains(&value.as_str()) => {
+            Cow::Owned(value)
+        }
+        FinishReason::Other(_) => Cow::Borrowed("stop"),
     }
 }
 

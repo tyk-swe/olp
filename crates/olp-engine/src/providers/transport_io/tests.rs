@@ -150,28 +150,54 @@ async fn deadline_stream_enforces_idle_and_attempt_deadlines() {
     assert!(attempt.next().await.is_none());
 }
 
+/// A unary completion's first byte *is* the whole generation, so the connector's
+/// first-byte default must never cut an attempt shorter than the route deadline
+/// the operator configured.
 #[tokio::test(start_paused = true)]
-async fn deadline_stream_prefers_phase_timeout_over_simultaneously_ready_bytes() {
+async fn a_route_deadline_outlasts_the_connector_first_byte_default() {
     let io = ProviderResponseIo::new("Test");
-    let phase_timeout = Duration::from_secs(1);
+    let first_byte_default = Duration::from_secs(1);
     let attempt_deadline = Instant::now() + Duration::from_secs(10);
     let late_first_byte = Box::pin(stream::once(async move {
-        sleep(phase_timeout).await;
+        sleep(Duration::from_secs(4)).await;
         Ok::<Bytes, reqwest::Error>(Bytes::from_static(b"late"))
     })) as ReqwestByteStream;
     let mut first = DeadlineByteStream::new(
         io,
         late_first_byte,
-        Some(Instant::now() + phase_timeout),
+        Some(Instant::now() + first_byte_default),
         Duration::from_secs(10),
         attempt_deadline,
     );
 
-    let first_error = first.next().await.unwrap().unwrap_err();
-    assert_eq!(first_error.phase, TransportPhase::FirstByte);
-    assert_eq!(first_error.class, AttemptFailureClass::Timeout);
-    assert_eq!(first_error.message, "Test first-byte deadline elapsed");
-    assert!(first.next().await.is_none());
+    assert_eq!(
+        first.next().await.unwrap().unwrap(),
+        Bytes::from_static(b"late")
+    );
+
+    // The attempt deadline still bounds it.
+    let never = DeadlineByteStream::new(
+        io,
+        Box::pin(stream::pending()) as ReqwestByteStream,
+        Some(Instant::now() + first_byte_default),
+        Duration::from_secs(10),
+        Instant::now() + Duration::from_secs(2),
+    );
+    let error = Box::pin(never).next().await.unwrap().unwrap_err();
+    assert_eq!(error.phase, TransportPhase::FirstByte);
+    assert_eq!(error.class, AttemptFailureClass::Timeout);
+    assert_eq!(
+        error.message,
+        "Test attempt deadline elapsed before the first response byte"
+    );
+}
+
+/// The idle watchdog keeps its own shorter window: it detects a stream that
+/// stalls part-way, which the route deadline alone cannot.
+#[tokio::test(start_paused = true)]
+async fn deadline_stream_prefers_idle_timeout_over_simultaneously_ready_bytes() {
+    let io = ProviderResponseIo::new("Test");
+    let phase_timeout = Duration::from_secs(1);
 
     let late_body = Box::pin(
         stream::iter([Ok::<Bytes, reqwest::Error>(Bytes::from_static(b"first"))]).chain(

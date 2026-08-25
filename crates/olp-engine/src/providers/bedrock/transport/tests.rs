@@ -36,6 +36,7 @@ fn provider_request() -> ProviderRequest {
             generation_id: RuntimeGenerationId::new(),
             route_id: RouteId::new(),
             target_id: TargetId::new(),
+            routing_id: TargetId::new(),
             provider_id: ProviderId::new(),
             provider_kind: ProviderKind::Bedrock,
             upstream_model: "anthropic.claude-test-v1:0".to_owned(),
@@ -160,6 +161,7 @@ fn service_error_taxonomy_is_retry_aware() {
     assert_eq!(uncoded, AttemptFailureClass::UpstreamServer);
     assert!(
         TransportError {
+            upstream: Default::default(),
             phase: TransportPhase::FirstByte,
             class: uncoded,
             response_committed: false,

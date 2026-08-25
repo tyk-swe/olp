@@ -24,7 +24,7 @@ describe('owner setup validation', () => {
         setupToken: ''
       })
     ).toEqual({
-      displayName: 'Enter your name.',
+      displayName: 'Enter a display name.',
       email: 'Enter a valid email address.',
       password: 'Use at least 12 characters.',
       setupToken: 'Enter the setup token.'

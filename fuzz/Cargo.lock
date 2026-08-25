@@ -2293,21 +2293,19 @@ dependencies = [
 
 [[package]]
 name = "olp"
-version = "2.0.0"
+version = "2.0.1"
 dependencies = [
  "axum",
  "base64",
  "bytes",
  "chrono",
  "clap",
- "encoding_rs",
  "futures",
  "http-body 1.1.0",
  "hyper",
  "hyper-util",
  "ipnet",
  "jsonwebtoken 11.0.0",
- "mime",
  "olp-db",
  "olp-engine",
  "percent-encoding",
@@ -2329,7 +2327,7 @@ dependencies = [
 
 [[package]]
 name = "olp-db"
-version = "2.0.0"
+version = "2.0.1"
 dependencies = [
  "aes-gcm",
  "argon2",
@@ -2354,7 +2352,7 @@ dependencies = [
 
 [[package]]
 name = "olp-engine"
-version = "2.0.0"
+version = "2.0.1"
 dependencies = [
  "arc-swap",
  "aws-config",

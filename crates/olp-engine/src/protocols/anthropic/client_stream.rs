@@ -21,8 +21,6 @@ pub enum Error {
     Response,
     #[error("Anthropic stream contains an incomplete or conflicting tool call")]
     Tool,
-    #[error("canonical reasoning-token usage is not representable in Anthropic usage")]
-    ReasoningUsage,
     #[error("source extensions cannot be represented in an Anthropic client stream")]
     Extension,
     #[error("Anthropic stream completed without a finish reason")]
@@ -39,6 +37,8 @@ pub struct Encoder {
     message_declared: bool,
     message_emitted: bool,
     usage: Usage,
+    cache_creation_input_tokens: Option<u64>,
+    stop_sequence: Option<String>,
     text_block: Option<u32>,
     tools: BTreeMap<u32, ToolState>,
     next_block: u32,
@@ -66,6 +66,8 @@ impl Encoder {
             message_declared: false,
             message_emitted: false,
             usage: Usage::default(),
+            cache_creation_input_tokens: None,
+            stop_sequence: None,
             text_block: None,
             tools: BTreeMap::new(),
             next_block: 0,
@@ -175,9 +177,8 @@ impl Encoder {
                 }
             }
             Kind::Usage { usage } => {
-                if usage.reasoning_tokens.is_some() {
-                    return Err(Error::ReasoningUsage);
-                }
+                // Reasoning tokens have no Anthropic field. Dropping the count
+                // is a reporting gap; failing the stream loses the response.
                 self.usage = usage;
                 if self.message_declared && !self.message_emitted {
                     self.ensure_message(&mut frames)?;
@@ -205,15 +206,31 @@ impl Encoder {
                         json!({"type": "content_block_stop", "index": block}),
                     ));
                 }
+                let usage =
+                    super::client::anthropic_usage(&self.usage, self.cache_creation_input_tokens);
+                // `stop_reason: "end_turn"` alongside a matched `stop_sequence`
+                // is self-contradictory; the sequence decides the reason.
+                let stop_reason =
+                    if matches!(reason, crate::domain::canonical::events::FinishReason::Stop)
+                        && self.stop_sequence.is_some()
+                    {
+                        "stop_sequence"
+                    } else {
+                        finish_reason(&reason)
+                    };
                 frames.push(frame(
                     "message_delta",
                     json!({
                         "type": "message_delta",
-                        "delta": {"stop_reason": finish_reason(&reason), "stop_sequence": null},
+                        "delta": {
+                            "stop_reason": stop_reason,
+                            "stop_sequence": self.stop_sequence.clone()
+                        },
                         "usage": {
-                            "input_tokens": self.usage.input_tokens,
-                            "output_tokens": self.usage.output_tokens,
-                            "cache_read_input_tokens": self.usage.cached_input_tokens
+                            "input_tokens": usage.input_tokens,
+                            "output_tokens": usage.output_tokens,
+                            "cache_creation_input_tokens": usage.cache_creation_input_tokens,
+                            "cache_read_input_tokens": usage.cache_read_input_tokens
                         }
                     }),
                 ));
@@ -230,8 +247,11 @@ impl Encoder {
                 self.finished = true;
             }
             Kind::SourceExtension { extensions } => {
+                // Anything from another surface is unrepresentable here, and the
+                // response is already in flight, so it is dropped rather than
+                // failing a stream the client is reading.
                 if extensions.source != Some(Surface::Anthropic) {
-                    return Err(Error::Extension);
+                    return Ok(frames);
                 }
                 if let Some(value) = extensions.values.get(RAW_SSE_FRAME_EXTENSION) {
                     if extensions.values.len() != 1 {
@@ -242,8 +262,24 @@ impl Encoder {
                     rewrite_anthropic_model(&mut raw, &self.public_model)?;
                     self.skip_native_events = semantic_events;
                     frames.push(raw);
-                } else if !extensions.values.is_empty() {
-                    return Err(Error::Extension);
+                } else {
+                    // Only the fields the terminal frames still have to carry
+                    // are retained; the rest were already delivered upstream.
+                    if let Some(tokens) = extensions
+                        .values
+                        .get("/message/usage/cache_creation_input_tokens")
+                        .or_else(|| extensions.values.get("/usage/cache_creation_input_tokens"))
+                        .and_then(Value::as_u64)
+                    {
+                        self.cache_creation_input_tokens = Some(tokens);
+                    }
+                    if let Some(sequence) = extensions
+                        .values
+                        .get("/delta/stop_sequence")
+                        .and_then(Value::as_str)
+                    {
+                        self.stop_sequence = Some(sequence.to_owned());
+                    }
                 }
             }
             Kind::RefusalDelta { .. } => {
@@ -269,6 +305,10 @@ impl Encoder {
         if !self.response_started || !self.message_declared {
             return Err(Error::Response);
         }
+        // Preliminary counts: message_delta corrects them once the upstream
+        // reports the final usage. They still have to split the cache tiers the
+        // same way, so the two frames never contradict each other.
+        let usage = super::client::anthropic_usage(&self.usage, self.cache_creation_input_tokens);
         frames.push(frame(
             "message_start",
             json!({
@@ -282,9 +322,10 @@ impl Encoder {
                     "stop_reason": null,
                     "stop_sequence": null,
                     "usage": {
-                        "input_tokens": self.usage.input_tokens,
+                        "input_tokens": usage.input_tokens,
                         "output_tokens": 0,
-                        "cache_read_input_tokens": self.usage.cached_input_tokens
+                        "cache_creation_input_tokens": usage.cache_creation_input_tokens,
+                        "cache_read_input_tokens": usage.cache_read_input_tokens
                     }
                 }
             }),

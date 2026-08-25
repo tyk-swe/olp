@@ -2,6 +2,7 @@
   import { createQuery } from '@tanstack/svelte-query';
   import { logout } from '$lib/api/auth';
   import { listSessionPage, revokeSession } from '$lib/api/management/access';
+  import { errorMessage } from '$lib/api/http';
   import { authLifecycle } from '$lib/auth/lifecycle';
   import {
     cursorPaginationProps,
@@ -36,10 +37,7 @@
       notice = 'Session revoked.';
       await sessions.refetch();
     } catch (cause) {
-      error =
-        cause instanceof Error
-          ? cause.message
-          : 'The session could not be revoked.';
+      error = errorMessage(cause, 'The session could not be revoked.');
     } finally {
       revoking = '';
     }
@@ -65,7 +63,14 @@
   {#if sessions.isPending}
     <div class="loading-state" role="status">Loading sessions…</div>
   {:else if sessions.isError}
-    <div class="inline-problem" role="alert">Sessions are unavailable.</div>
+    <div class="inline-problem" role="alert">
+      {errorMessage(sessions.error, 'Sessions are unavailable.')}
+      <button
+        class="text-button"
+        type="button"
+        onclick={() => sessions.refetch()}>Try again</button
+      >
+    </div>
   {:else}
     <div class="session-list">
       {#each sessions.data?.items ?? [] as session (session.id)}
@@ -153,6 +158,13 @@
     margin: 0.2rem 0 0;
     color: var(--foreground-muted);
     overflow-wrap: anywhere;
+  }
+  .text-button {
+    min-height: 2.75rem;
+    border: 0;
+    background: transparent;
+    color: var(--accent-strong);
+    font-weight: 700;
   }
   .success-message {
     margin: 0 0 1rem;

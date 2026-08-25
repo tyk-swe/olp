@@ -7,8 +7,8 @@ use crate::domain::{
         results::{CanonicalResult, TokenCountResult},
     },
     ports::{
-        AttemptFailureClass, DiscoveredProviderModel, ProviderOutput, ProviderRequest,
-        ProviderTransport, TransportError, TransportPhase,
+        DiscoveredProviderModel, ProviderOutput, ProviderRequest, ProviderTransport,
+        TransportError, TransportPhase,
     },
     routing::provider::ProviderKind,
 };
@@ -22,16 +22,15 @@ use crate::protocols::anthropic::{
     translate::{encode::request as encode_request, response::decode},
 };
 use futures::stream;
-use http::{HeaderMap, HeaderValue, StatusCode, header};
+use http::{HeaderMap, HeaderValue, header};
 use reqwest::{Response, Url};
 use tokio::time::{Instant, timeout};
 
 use super::errors::*;
 use super::media::hydrate_anthropic_messages;
 use crate::providers::anthropic::{ApiKey, ConnectorConfig};
-use crate::providers::transport_common::{
-    protocol_body_error, protocol_error, source_extensions, transport_error,
-};
+use crate::providers::transport_common::upstream_response_error;
+use crate::providers::transport_common::{protocol_body_error, protocol_error, source_extensions};
 use crate::providers::transport_io::{ProviderResponseIo, bounded_duration};
 
 const RESPONSE_IO: ProviderResponseIo = ProviderResponseIo::new("Anthropic");
@@ -378,6 +377,7 @@ impl Connector {
         attempt_deadline: Instant,
     ) -> TransportError {
         let status = response.status();
+        let headers = response.headers().clone();
         let deadline = Instant::now() + self.config.timeouts.first_byte;
         let message = match RESPONSE_IO
             .read_bounded_body(
@@ -392,16 +392,7 @@ impl Connector {
             Ok(body) => safe_upstream_error_message(status, &body, self.api_key.expose()),
             Err(_) => format!("Anthropic returned HTTP {status}"),
         };
-        let class = if status == StatusCode::REQUEST_TIMEOUT {
-            AttemptFailureClass::Timeout
-        } else if status == StatusCode::TOO_MANY_REQUESTS {
-            AttemptFailureClass::RateLimit
-        } else if status.is_server_error() {
-            AttemptFailureClass::UpstreamServer
-        } else {
-            AttemptFailureClass::UpstreamClient
-        };
-        transport_error(TransportPhase::FirstByte, class, false, message)
+        upstream_response_error(TransportPhase::FirstByte, status, &headers, message)
     }
 }
 
@@ -482,7 +473,11 @@ pub(super) fn encode_count_tokens(
                 text: text.clone(),
                 extra: BTreeMap::new(),
             })),
-            ContentPart::Image { source, detail } => {
+            ContentPart::Image {
+                source,
+                detail,
+                mime_type,
+            } => {
                 if detail.is_some() {
                     return Err(protocol_error(
                         "Anthropic token counting cannot represent image detail",
@@ -497,7 +492,7 @@ pub(super) fn encode_count_tokens(
                     kind: "image".into(),
                     source: AnthropicMediaSource {
                         kind: "url".into(),
-                        media_type: None,
+                        media_type: mime_type.clone(),
                         data: None,
                         url: Some(url.clone()),
                         extra: BTreeMap::new(),

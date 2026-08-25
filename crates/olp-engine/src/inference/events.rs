@@ -162,6 +162,7 @@ mod tests {
     #[tokio::test]
     async fn collection_normalizes_each_terminal_failure() {
         let transport_error = TransportError {
+            upstream: Default::default(),
             phase: TransportPhase::Body,
             class: AttemptFailureClass::UpstreamServer,
             response_committed: true,

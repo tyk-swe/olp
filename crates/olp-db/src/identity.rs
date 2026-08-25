@@ -9,7 +9,7 @@ use crate::{error::Error as PersistenceError, security::session_material::Invita
 
 mod accounts;
 mod auth_admission;
-mod invitations;
+pub(crate) mod invitations;
 mod setup;
 
 pub struct InstallationSetupInput {
@@ -102,6 +102,9 @@ pub struct InvitationRecord {
     pub expires_at: DateTime<Utc>,
     pub accepted_at: Option<DateTime<Utc>>,
     pub revoked_at: Option<DateTime<Utc>>,
+    /// Set when the invitation timed out and its pending-email reservation was
+    /// released. Distinct from `revoked_at`, which records operator intent.
+    pub expired_at: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
 }
 

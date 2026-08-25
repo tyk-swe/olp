@@ -398,7 +398,8 @@ impl Service {
             TransportMode::Unary,
             context.request_id.as_uuid().as_bytes(),
             |_, target| {
-                self.circuits().is_selectable(target.id)
+                self.circuits()
+                    .is_selectable(target.routing_id.unwrap_or(target.id))
                     && target.provider_id.as_uuid() == required_target.provider_id
                     && target.upstream_model == required_target.upstream_model
             },
@@ -624,7 +625,8 @@ impl Service {
             mode,
             context.request_id.as_uuid().as_bytes(),
             |_, target| {
-                self.circuits().is_selectable(target.id)
+                self.circuits()
+                    .is_selectable(target.routing_id.unwrap_or(target.id))
                     && required_target.as_ref().is_none_or(|required| {
                         target.provider_id.as_uuid() == required.provider_id
                             && target.upstream_model == required.upstream_model

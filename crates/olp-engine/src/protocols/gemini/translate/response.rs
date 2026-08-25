@@ -164,7 +164,12 @@ fn decode_candidate(
     }
     let finished = candidate.finish_reason.is_some();
     if let Some(reason) = candidate.finish_reason {
-        let canonical = gemini_finish_reason(&reason);
+        let mut canonical = gemini_finish_reason(&reason);
+        // Gemini reports `STOP` even when the candidate's parts are all
+        // functionCalls. Agent loops keyed on `tool_calls` would silently stop.
+        if tool_index > 0 && canonical == FinishReason::Stop {
+            canonical = FinishReason::ToolCalls;
+        }
         if !matches!(reason.as_str(), "STOP" | "MAX_TOKENS") {
             extensions.insert(format!("{prefix}/finishReason"), Value::String(reason));
         }

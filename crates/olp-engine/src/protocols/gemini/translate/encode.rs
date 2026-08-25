@@ -182,7 +182,11 @@ fn encode_content(
                 thought_signature: None,
                 extra: BTreeMap::new(),
             }),
-            ContentPart::Image { source, detail } => {
+            ContentPart::Image {
+                source,
+                detail,
+                mime_type,
+            } => {
                 if detail.is_some() {
                     return Err(EncodeError::ImageDetailUnsupported);
                 }
@@ -191,14 +195,21 @@ fn encode_content(
                     "/contents/{content_index}/parts/{part_index}/{}/mimeType",
                     if inline { "inlineData" } else { "fileData" }
                 );
-                let mime_type = extensions
-                    .get(&mime_path)
-                    .and_then(Value::as_str)
+                // The canonical part carries the MIME for every surface; the
+                // extension is the same-surface round-trip fallback.
+                let mime_type = mime_type
+                    .clone()
+                    .or_else(|| {
+                        extensions
+                            .get(&mime_path)
+                            .and_then(Value::as_str)
+                            .map(str::to_owned)
+                    })
                     .ok_or_else(|| EncodeError::ImageMimeTypeRequired(mime_path.clone()))?;
                 match source {
                     MediaSource::Uri(file_uri) => Part::FileData(FileDataPart {
                         file_data: FileData {
-                            mime_type: mime_type.to_owned(),
+                            mime_type: mime_type.clone(),
                             file_uri: file_uri.clone(),
                             extra: BTreeMap::new(),
                         },
@@ -206,7 +217,7 @@ fn encode_content(
                     }),
                     MediaSource::Handle(handle) => Part::InlineData(InlineDataPart {
                         inline_data: Blob {
-                            mime_type: mime_type.to_owned(),
+                            mime_type,
                             data: inline_media_marker(handle),
                             extra: BTreeMap::new(),
                         },

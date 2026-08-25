@@ -52,13 +52,16 @@ test('profile updates identity, changes password, and revokes another session', 
   await page.getByLabel('Display name').fill('Ada Operations');
   await page.getByRole('button', { name: 'Save profile' }).click();
   await expect(page.getByText('Profile updated.')).toBeVisible();
-  page.once('dialog', (dialog) => dialog.dismiss());
   await page.getByRole('button', { name: 'Link an OIDC identity' }).click();
+  const linkReauthentication = page.getByRole('dialog', { name: 'Confirm your identity' });
+  await expect(linkReauthentication).toBeVisible();
+  await linkReauthentication.getByRole('button', { name: 'Cancel' }).click();
   await expect(page.getByRole('button', { name: 'Link an OIDC identity' })).toBeEnabled();
-  page.on('dialog', (dialog) =>
-    dialog.type() === 'prompt' ? dialog.accept('old password for testing') : dialog.accept()
-  );
+  page.on('dialog', (dialog) => dialog.accept());
   await page.getByRole('button', { name: 'Unlink' }).click();
+  const unlinkReauthentication = page.getByRole('dialog', { name: 'Confirm your identity' });
+  await unlinkReauthentication.getByLabel('Current password').fill('old password for testing');
+  await unlinkReauthentication.getByRole('button', { name: 'Confirm' }).click();
   await expect(page.getByText('OIDC identity unlinked.')).toBeVisible();
   await expect(page.getByText('No OIDC identity is linked to this account.')).toBeVisible();
   await page.getByRole('button', { name: 'Revoke' }).click();

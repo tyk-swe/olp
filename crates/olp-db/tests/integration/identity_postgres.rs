@@ -293,7 +293,11 @@ async fn local_identity_lifecycle_is_transactional_and_audited() {
     .fetch_one(store.pool())
     .await
     .unwrap();
-    assert_eq!(local_login_global_attempts, 6);
+    // Five admitted, one rejected, one admitted from a fresh source. The
+    // rejection counts too: an attempt that saturated the narrow
+    // source-target bucket still consumed the wider ceilings it passed
+    // through, so a locked-out caller cannot keep a free global budget.
+    assert_eq!(local_login_global_attempts, 7);
     let opaque_rate_rows: i64 = sqlx::query_scalar(
         "SELECT count(*) FROM public_auth_rate_limits \
          WHERE octet_length(key_digest) = 32",

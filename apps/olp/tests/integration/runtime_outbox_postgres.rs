@@ -419,11 +419,21 @@ async fn stale_outbox_owner_failed_takeover_and_abandoned_claim_are_durable() {
     );
 
     drop(owner);
-    let takeover = store
-        .try_acquire_runtime_outbox_leader()
-        .await
-        .unwrap()
-        .expect("the abandoned PostgreSQL session lock must be recoverable");
+    // Dropping the leader closes its socket, but PostgreSQL releases the
+    // session advisory lock only once that backend observes the disconnect
+    // and exits. That teardown is asynchronous, so a single probe can still
+    // find the lock held; the worker's leadership loop retries on an
+    // interval and so does this test.
+    let takeover = tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            if let Some(leader) = store.try_acquire_runtime_outbox_leader().await.unwrap() {
+                break leader;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .expect("the abandoned PostgreSQL session lock must be recoverable");
     let counters = store.worker_recovery_counters().await.unwrap();
     assert_eq!(counters.runtime_outbox_abandoned_ownership, 1);
     assert_eq!(counters.runtime_outbox_abandoned_claims, 1);

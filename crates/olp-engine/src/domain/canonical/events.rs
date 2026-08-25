@@ -59,12 +59,24 @@ pub enum Kind {
     Done,
 }
 
+/// Token counts with one fixed meaning regardless of the provider that
+/// reported them. Every decoder normalises into this contract and every
+/// encoder denormalises out of it, so cost, limits, and client encoders can
+/// read the fields verbatim.
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 pub struct Usage {
+    /// Prompt tokens, **inclusive** of `cached_input_tokens` and of any
+    /// cache-creation tokens the provider bills separately.
     pub input_tokens: u64,
+    /// Generated tokens, **exclusive** of `reasoning_tokens`. The two are
+    /// disjoint so a consumer can add them without double counting.
     pub output_tokens: u64,
+    /// `input_tokens + output_tokens + reasoning_tokens`.
     pub total_tokens: u64,
+    /// The subset of `input_tokens` the provider served from its prompt cache.
     pub cached_input_tokens: Option<u64>,
+    /// Reasoning / thinking tokens, disjoint from `output_tokens`. `None` means
+    /// the provider does not report them, not that there were zero.
     pub reasoning_tokens: Option<u64>,
 }
 

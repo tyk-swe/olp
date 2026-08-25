@@ -26,6 +26,7 @@ pub fn validate_operation(operation: &Operation) -> Result<(), TransportError> {
         Operation::Generation(request) => translate::encode_generation(request).map(|_| ()),
         Operation::TokenCount(request) => translate::encode_token_count(request).map(|_| ()),
         _ => Err(crate::domain::ports::TransportError {
+            upstream: Default::default(),
             phase: crate::domain::ports::TransportPhase::Connect,
             class: crate::domain::ports::AttemptFailureClass::Protocol,
             response_committed: false,

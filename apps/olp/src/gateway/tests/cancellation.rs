@@ -275,7 +275,10 @@ async fn cancelling_unary_collection_emits_partial_usage_as_client_cancelled() {
     assert_eq!(event.input_tokens, Some(7));
     assert_eq!(event.output_tokens, Some(3));
     assert_eq!(event.cached_input_tokens, Some(2));
-    assert!(event.usage_complete);
+    // The stream never reached its terminal event, so these counts are the last
+    // ones seen and not the total the provider will bill for the generation it
+    // kept producing. Recording them as exact priced an aborted request.
+    assert!(!event.usage_complete);
     assert!(event.committed);
 }
 
@@ -426,7 +429,8 @@ async fn cancelling_shared_event_collection_preserves_partial_usage() {
     assert_eq!(event.error_class.as_deref(), Some("client_cancelled"));
     assert_eq!(event.input_tokens, Some(11));
     assert_eq!(event.output_tokens, Some(5));
-    assert!(event.usage_complete);
+    // Same reasoning as the chat path: an aborted stream's counts are partial.
+    assert!(!event.usage_complete);
     assert!(event.committed);
 }
 

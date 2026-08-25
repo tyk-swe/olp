@@ -5,6 +5,7 @@
   import { listRoutes } from '$lib/api/management/routes';
   import NavIcon from '$lib/components/NavIcon.svelte';
   import { dateTimeLocalValue } from '$lib/format';
+  import { guardUnsavedChanges } from '$lib/forms/unsavedChanges';
   import { validateApiKey } from './keyValidation';
   import type { ApiKeyPolicyInput } from './apiKeyPolicy';
 
@@ -12,6 +13,7 @@
     editing,
     busy,
     errorMessage,
+    canManage,
     onSubmit,
     onCancel,
     onClearError
@@ -19,10 +21,11 @@
     editing: ApiKey | null;
     busy: string;
     errorMessage: string;
+    canManage: boolean;
     onSubmit: (
       input: ApiKeyPolicyInput,
       preferredRoute?: string
-    ) => void | Promise<void>;
+    ) => boolean | Promise<boolean>;
     onCancel: () => void;
     onClearError: () => void;
   } = $props();
@@ -37,6 +40,7 @@
   let errors = $state<Record<string, string>>({});
   let formError = $state('');
   let initialized = $state(false);
+  let dirty = $state(false);
   const routes = createQuery(() => ({
     queryKey: ['routes'],
     queryFn: ({ signal }) => listRoutes(signal)
@@ -57,6 +61,12 @@
       : '';
   });
 
+  guardUnsavedChanges(() => dirty);
+
+  function touch() {
+    dirty = true;
+  }
+
   function toggle(list: string[], value: string, checked: boolean) {
     return checked
       ? [...new Set([...list, value])]
@@ -69,20 +79,22 @@
 
   async function submit(event: SubmitEvent) {
     event.preventDefault();
+    if (!canManage) return;
     onClearError();
     formError = '';
     errors = validateApiKey({
       name,
       requestsPerMinute: numberValue(requestsPerMinute),
       tokensPerMinute: numberValue(tokensPerMinute),
-      maxConcurrency: numberValue(maxConcurrency)
+      maxConcurrency: numberValue(maxConcurrency),
+      expiresAt
     });
     if (Object.keys(errors).length) return;
     if (!scopes.length) {
       formError = 'Select at least one scope.';
       return;
     }
-    await onSubmit(
+    const saved = await onSubmit(
       {
         name: name.trim(),
         scopes,
@@ -94,6 +106,7 @@
       },
       allowedRoutes[0]
     );
+    if (saved) dirty = false;
   }
 </script>
 
@@ -120,8 +133,19 @@
 {#if errorMessage || formError}<div class="inline-problem" role="alert">
     {errorMessage || formError}
   </div>{/if}
+{#if !canManage}
+  <p class="read-only-note" role="note">
+    Your role can view API key policies but not create or change them.
+  </p>
+{/if}
 
-<form class="card key-form" onsubmit={submit} novalidate>
+<form
+  class="card key-form"
+  onsubmit={submit}
+  oninput={touch}
+  onchange={touch}
+  novalidate
+>
   <section aria-labelledby="identity-heading">
     <p class="eyebrow">Identity</p>
     <h2 id="identity-heading">Name and expiration</h2>
@@ -130,6 +154,7 @@
         <label for="key-name">Key name</label><input
           id="key-name"
           bind:value={name}
+          disabled={!canManage}
           aria-invalid={errors.name ? 'true' : undefined}
           aria-describedby={errors.name ? 'key-name-error' : undefined}
         />{#if errors.name}<small class="field-error" id="key-name-error"
@@ -141,7 +166,12 @@
           id="key-expiry"
           type="datetime-local"
           bind:value={expiresAt}
-        />
+          disabled={!canManage}
+          aria-invalid={errors.expiresAt ? 'true' : undefined}
+          aria-describedby={errors.expiresAt ? 'key-expiry-error' : undefined}
+        />{#if errors.expiresAt}<small class="field-error" id="key-expiry-error"
+            >{errors.expiresAt}</small
+          >{/if}
       </div>
     </div>
   </section>
@@ -154,6 +184,7 @@
           ><input
             type="checkbox"
             checked={scopes.includes(scope[0])}
+            disabled={!canManage}
             onchange={(event) =>
               (scopes = toggle(scopes, scope[0], event.currentTarget.checked))}
           />
@@ -175,6 +206,7 @@
             ><input
               type="checkbox"
               checked={allowedRoutes.includes(route.slug)}
+              disabled={!canManage}
               onchange={(event) =>
                 (allowedRoutes = toggle(
                   allowedRoutes,
@@ -202,6 +234,7 @@
           min="1"
           inputmode="numeric"
           bind:value={requestsPerMinute}
+          disabled={!canManage}
           aria-invalid={errors.requestsPerMinute ? 'true' : undefined}
         />{#if errors.requestsPerMinute}<small class="field-error"
             >{errors.requestsPerMinute}</small
@@ -214,6 +247,7 @@
           min="1"
           inputmode="numeric"
           bind:value={tokensPerMinute}
+          disabled={!canManage}
           aria-invalid={errors.tokensPerMinute ? 'true' : undefined}
         />{#if errors.tokensPerMinute}<small class="field-error"
             >{errors.tokensPerMinute}</small
@@ -226,6 +260,7 @@
           min="1"
           inputmode="numeric"
           bind:value={maxConcurrency}
+          disabled={!canManage}
           aria-invalid={errors.maxConcurrency ? 'true' : undefined}
         />{#if errors.maxConcurrency}<small class="field-error"
             >{errors.maxConcurrency}</small
@@ -234,7 +269,10 @@
     </div>
   </section>
   <div class="form-actions">
-    <button class="button button-primary" type="submit" disabled={Boolean(busy)}
+    <button
+      class="button button-primary"
+      type="submit"
+      disabled={!canManage || Boolean(busy)}
       >{busy === 'create'
         ? 'Creating securely…'
         : busy === 'update'

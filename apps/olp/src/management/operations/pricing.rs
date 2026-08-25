@@ -80,6 +80,9 @@ pub(super) struct PriceRequest {
     model: String,
     operation: PriceOperation,
     input_per_million: Option<String>,
+    /// Rate for the cached share of the input tokens. Omit to bill cached
+    /// tokens at the full input rate.
+    cached_input_per_million: Option<String>,
     output_per_million: Option<String>,
     unit_price: Option<String>,
     currency: String,
@@ -93,6 +96,7 @@ impl From<PriceRequest> for PriceInput {
             model: price.model,
             operation: OperationKind::from(price.operation),
             input_per_million: price.input_per_million,
+            cached_input_per_million: price.cached_input_per_million,
             output_per_million: price.output_per_million,
             unit_price: price.unit_price,
             currency: price.currency,
@@ -114,6 +118,9 @@ pub(super) struct PriceResponse {
     model: String,
     operation: String,
     input_per_million: Option<String>,
+    /// Rate for the cached share of the input tokens. Omit to bill cached
+    /// tokens at the full input rate.
+    cached_input_per_million: Option<String>,
     output_per_million: Option<String>,
     unit_price: Option<String>,
     currency: String,
@@ -127,6 +134,7 @@ impl From<PriceInput> for PriceResponse {
             model: price.model,
             operation: price.operation.to_string(),
             input_per_million: price.input_per_million,
+            cached_input_per_million: price.cached_input_per_million,
             output_per_million: price.output_per_million,
             unit_price: price.unit_price,
             currency: price.currency,
@@ -204,6 +212,7 @@ pub(super) async fn list_pricing_revisions(
     request_body = PricingRevisionRequest,
     responses(
         (status = 201, description = "Pricing revision created", body = PricingRevisionResponse),
+        (status = 400, description = "Idempotency-Key is missing or invalid", body = Problem),
         (status = 409, description = "Idempotency key reused or request in progress", body = Problem),
         (status = 422, description = "Invalid pricing revision", body = Problem),
         (status = 503, description = "Master key or database unavailable", body = Problem)

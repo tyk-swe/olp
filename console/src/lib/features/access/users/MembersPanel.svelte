@@ -12,13 +12,15 @@
     cursorPaginationProps,
     emptyCursorHistory
   } from '$lib/api/pagination';
-  import { FIXED_ROLES, can } from '$lib/auth/authorization';
-  import { authLifecycle } from '$lib/auth/lifecycle';
+  import { FIXED_ROLES } from '$lib/auth/authorization';
+  import { useRole } from '$lib/auth/useRole.svelte';
   import CursorPagination from '$lib/components/CursorPagination.svelte';
+  import { formatDate } from '$lib/format';
 
   const queryClient = useQueryClient();
-  const viewer = authLifecycle.snapshot().user;
-  const canManage = can(viewer?.role, 'users.manage');
+  const access = useRole();
+  const viewer = $derived(access.user);
+  const canManage = $derived(access.can('users.manage'));
   const pagination = $state(emptyCursorHistory());
   let busy = $state('');
   let error = $state('');
@@ -43,6 +45,11 @@
     }
   }
 
+  /** Role changes and deactivation revoke sessions server-side. */
+  async function refreshSessionViews() {
+    await queryClient.invalidateQueries({ queryKey: ['session-page'] });
+  }
+
   function updateCachedUser(updated: User) {
     queryClient.setQueryData<CursorPage<User>>(
       ['user-page', pagination.cursor ?? 'first'],
@@ -64,6 +71,7 @@
     const saved = await run(`role-${user.id}`, async () => {
       const updated = await updateUserRole(user, role);
       updateCachedUser(updated);
+      await refreshSessionViews();
       notice = `${updated.display_name} is now ${updated.role}. Existing sessions were revoked.`;
     });
     if (!saved) select.value = user.role;
@@ -82,6 +90,7 @@
     await run(`active-${user.id}`, async () => {
       const updated = await updateUserActive(user, active);
       updateCachedUser(updated);
+      await refreshSessionViews();
       notice = active
         ? `${updated.display_name} can sign in again.`
         : `${updated.display_name} was deactivated and existing sessions were revoked. Next: review API Keys for keys attributed to this member; installation-scoped keys are not automatically revoked.`;
@@ -159,7 +168,7 @@
                 </select>
               </label>
             </td>
-            <td>{new Date(user.created_at).toLocaleDateString()}</td>
+            <td>{formatDate(user.created_at)}</td>
             <td
               >{#if user.id === viewer?.id}<small>Your account</small
                 >{:else if canManage}<button

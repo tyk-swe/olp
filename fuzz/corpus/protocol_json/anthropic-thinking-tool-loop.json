@@ -1,0 +1,1 @@
+{"model":"default","max_tokens":1024,"messages":[{"role":"user","content":"weather?"},{"role":"assistant","content":[{"type":"thinking","thinking":"check the tool","signature":"sig-abc"},{"type":"text","text":"checking"},{"type":"tool_use","id":"toolu_1","name":"weather","input":{}}]},{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_1","content":"sunny"}]}]}

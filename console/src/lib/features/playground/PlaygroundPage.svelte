@@ -64,7 +64,7 @@
   </form>
 
   <section class="card result" aria-labelledby="result-title" aria-live="polite">
-    <div class="result-heading"><div><p class="eyebrow">Ephemeral response</p><h2 id="result-title">Result</h2></div>{#if mutation.data}<span class="badge success">{mutation.data.latency_ms} ms</span>{/if}</div>
+    <div class="result-heading"><div><p class="eyebrow">Ephemeral response</p><h2 id="result-title">Result</h2></div>{#if mutation.data && !mutation.isPending}<span class="badge success">{mutation.data.latency_ms} ms</span>{/if}</div>
     {#if mutation.isPending}<div class="loading-state" role="status">Waiting for the route…</div>
     {:else if mutation.isError}<div class="inline-problem" role="alert">{mutation.error instanceof Error ? mutation.error.message : 'The playground request failed.'}</div>
     {:else if mutation.data}

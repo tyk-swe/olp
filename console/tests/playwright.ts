@@ -13,21 +13,24 @@ export function failUnexpectedApiRequest(route: Route): never {
   throw new Error(`Unexpected API request: ${request.method()} ${new URL(request.url()).pathname}`);
 }
 
+export type FixedRole = 'owner' | 'operator' | 'developer' | 'viewer';
+
 export async function mockSession(
   page: Page,
   {
     userId = '01980000-0000-7000-8000-000000000001',
-    csrfToken = 'csrf-test-token'
-  }: { userId?: string; csrfToken?: string } = {}
+    csrfToken = 'csrf-test-token',
+    role = 'owner'
+  }: { userId?: string; csrfToken?: string; role?: FixedRole } = {}
 ) {
   await page.route('**/api/v1/sessions/current', async (route) => {
     await route.fulfill({
       json: {
         user: {
           id: userId,
-          email: 'owner@example.com',
+          email: `${role}@example.com`,
           display_name: 'Ada Owner',
-          role: 'owner'
+          role
         },
         csrf_token: csrfToken
       }

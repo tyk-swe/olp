@@ -235,13 +235,15 @@ fn decode_content(
                     &part.file_data.extra,
                     &mut extensions,
                 );
+                let mime_type = part.file_data.mime_type;
                 extensions.insert(
                     format!("/parts/{index}/fileData/mimeType"),
-                    Value::String(part.file_data.mime_type),
+                    Value::String(mime_type.clone()),
                 );
                 parts.push(ContentPart::Image {
                     source: MediaSource::Uri(part.file_data.file_uri),
                     detail: None,
+                    mime_type: Some(mime_type),
                 });
             }
             Part::InlineData(part) => {
@@ -266,6 +268,7 @@ fn decode_content(
                     parts.push(ContentPart::Image {
                         source: MediaSource::Handle(handle),
                         detail: None,
+                        mime_type: Some(mime_type),
                     });
                 } else if mime_type.starts_with("audio/") {
                     parts.push(ContentPart::InputAudio {

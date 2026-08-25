@@ -33,7 +33,7 @@ use crate::{
     public_http::json_media::{admit_gemini_count, admit_gemini_generate, cleanup_admitted},
     public_http::streaming_response::{
         ProtocolStreamEncoder, encode_protocol_sse_frames, encode_server_sse_frame,
-        protocol_streaming_response,
+        precommit_stream_failure, protocol_streaming_response,
     },
 };
 
@@ -84,7 +84,10 @@ pub(super) async fn action(
         return unary_response(completed);
     }
     if let Some(model) = resource.strip_suffix(":streamGenerateContent") {
-        if query.alt.as_deref().is_some_and(|alt| alt != "sse") {
+        // Real Gemini frames the default (`alt` absent) as a streamed JSON
+        // array, not SSE. Serving `text/event-stream` there leaves an official
+        // SDK unable to parse the body, so the parameter is required.
+        if query.alt.as_deref() != Some("sse") {
             return Err(ProtocolError::invalid(
                 Surface::Gemini,
                 "streamGenerateContent supports only alt=sse.",
@@ -107,10 +110,13 @@ pub(super) async fn action(
                 ));
             }
         };
-        let execution =
+        let mut execution =
             execute_event_operation(&state, &principal, operation, TransportMode::Streaming)
                 .await
                 .map_err(ProtocolError::gemini)?;
+        if let Some(failure) = precommit_stream_failure(&mut execution).await {
+            return Err(ProtocolError::gemini(failure));
+        }
         let encoder = GeminiHttpStreamEncoder(Encoder::new(
             execution.route_slug.as_str(),
             execution.request_id.to_string(),

@@ -12,7 +12,7 @@ use crate::domain::{
     },
     ports::{
         AttemptFailureClass, DiscoveredProviderModel, ProviderEventStream, ProviderOutput,
-        ProviderRequest, ProviderTransport, TransportError, TransportPhase,
+        ProviderRequest, ProviderTransport, TransportError, TransportPhase, UpstreamSignal,
     },
     routing::provider::ProviderKind,
 };
@@ -34,6 +34,7 @@ use crate::providers::bedrock::{
         protocol_body_error, protocol_error,
     },
 };
+use crate::providers::transport_common::parse_retry_after_value;
 
 pub(in crate::providers) struct Connector {
     runtime: aws_sdk_bedrockruntime::Client,
@@ -556,6 +557,7 @@ fn remaining(
 
 fn deadline_error(phase: TransportPhase, committed: bool) -> TransportError {
     TransportError {
+        upstream: Default::default(),
         phase,
         class: AttemptFailureClass::Timeout,
         response_committed: committed,
@@ -572,11 +574,25 @@ trait BedrockSdkRawResponse {
     fn is_successful_response(&self) -> bool {
         false
     }
+
+    /// Bedrock's event-stream frames carry no HTTP envelope, so the default is
+    /// "nothing observed" and the service code supplies the status instead.
+    fn upstream_signal(&self) -> UpstreamSignal {
+        UpstreamSignal::default()
+    }
 }
 
 impl BedrockSdkRawResponse for HttpResponse {
     fn is_successful_response(&self) -> bool {
         self.status().is_success()
+    }
+
+    fn upstream_signal(&self) -> UpstreamSignal {
+        UpstreamSignal::from_status(self.status().as_u16()).with_retry_after(
+            self.headers()
+                .get("retry-after")
+                .and_then(parse_retry_after_value),
+        )
     }
 }
 
@@ -605,11 +621,41 @@ where
         SdkError::ServiceError(service) => classify_service_code(service.err().code()),
         _ => AttemptFailureClass::UpstreamServer,
     };
+    let upstream = match error {
+        SdkError::ServiceError(service) => {
+            let observed = service.raw().upstream_signal();
+            UpstreamSignal {
+                status: observed
+                    .status
+                    .filter(|status| *status >= 400)
+                    .or_else(|| service_code_status(service.err().code())),
+                retry_after: observed.retry_after,
+            }
+        }
+        _ => UpstreamSignal::default(),
+    };
     TransportError {
+        upstream,
         phase,
         class,
         response_committed: committed,
         message: "Bedrock SDK request failed".to_owned(),
+    }
+}
+
+/// Bedrock reports client faults as modeled exception codes rather than status
+/// codes, so a code the SDK surfaced without an HTTP envelope still maps to the
+/// public status the caller should see.
+fn service_code_status(code: Option<&str>) -> Option<u16> {
+    match code? {
+        "AccessDeniedException" => Some(403),
+        "UnrecognizedClientException" | "InvalidSignatureException" | "ExpiredTokenException" => {
+            Some(401)
+        }
+        "ValidationException" => Some(400),
+        "ResourceNotFoundException" => Some(404),
+        "ConflictException" => Some(409),
+        _ => None,
     }
 }
 

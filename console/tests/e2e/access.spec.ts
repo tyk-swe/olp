@@ -233,10 +233,14 @@ test('access roles, one-time invitations, sessions, and OIDC are API-backed', as
     group_role_mappings: [{ claim_value: 'platform', role: 'operator' }]
   });
   await expect(page.getByLabel('Client secret')).toHaveValue('');
-  page.once('dialog', (dialog) =>
-    dialog.accept('correct horse battery staple')
-  );
   await page.getByRole('button', { name: 'Link my identity' }).click();
+  const reauthentication = page.getByRole('dialog', {
+    name: 'Confirm your identity'
+  });
+  await reauthentication
+    .getByLabel('Current password')
+    .fill('correct horse battery staple');
+  await reauthentication.getByRole('button', { name: 'Confirm' }).click();
   await expect(page).toHaveURL(/\/oidc-test-redirect$/);
 });
 

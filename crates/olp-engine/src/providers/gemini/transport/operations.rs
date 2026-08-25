@@ -31,6 +31,7 @@ use tokio::time::{Instant, timeout};
 use super::errors::*;
 use super::media::hydrate_gemini_contents;
 use crate::providers::gemini::{ApiKey, BearerTokenProvider, ConnectorConfig, ConnectorCredential};
+use crate::providers::transport_common::upstream_response_error;
 use crate::providers::transport_common::{
     protocol_body_error, protocol_error, source_extensions, transport_error,
 };
@@ -459,6 +460,7 @@ impl Connector {
         attempt_deadline: Instant,
     ) -> TransportError {
         let status = response.status();
+        let headers = response.headers().clone();
         let deadline = Instant::now() + self.config.timeouts.first_byte;
         let message = match RESPONSE_IO
             .read_bounded_body(
@@ -473,16 +475,7 @@ impl Connector {
             Ok(body) => self.safe_upstream_error_message(status, &body),
             Err(_) => format!("Gemini returned HTTP {status}"),
         };
-        let class = if status == StatusCode::REQUEST_TIMEOUT {
-            AttemptFailureClass::Timeout
-        } else if status == StatusCode::TOO_MANY_REQUESTS {
-            AttemptFailureClass::RateLimit
-        } else if status.is_server_error() {
-            AttemptFailureClass::UpstreamServer
-        } else {
-            AttemptFailureClass::UpstreamClient
-        };
-        transport_error(TransportPhase::FirstByte, class, false, message)
+        upstream_response_error(TransportPhase::FirstByte, status, &headers, message)
     }
 
     async fn insert_authentication_header(
@@ -608,7 +601,11 @@ pub(super) fn encode_count_tokens(
                 thought_signature: None,
                 extra: BTreeMap::new(),
             })),
-            ContentPart::Image { source, detail } => {
+            ContentPart::Image {
+                source,
+                detail,
+                mime_type,
+            } => {
                 if detail.is_some() {
                     return Err(protocol_error(
                         "Gemini token counting cannot represent image detail",
@@ -620,9 +617,13 @@ pub(super) fn encode_count_tokens(
                     ));
                 };
                 let mime_path = format!("/contents/0/parts/{}/fileData/mimeType", parts.len());
-                let mime_type = remaining_extensions
-                    .remove(&mime_path)
-                    .and_then(|value| value.as_str().map(str::to_owned))
+                let mime_type = mime_type
+                    .clone()
+                    .or_else(|| {
+                        remaining_extensions
+                            .remove(&mime_path)
+                            .and_then(|value| value.as_str().map(str::to_owned))
+                    })
                     .ok_or_else(|| {
                         protocol_error(format!(
                             "Gemini image token counting requires a MIME type extension at {mime_path}"

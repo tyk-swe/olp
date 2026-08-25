@@ -87,7 +87,7 @@ pub(super) async fn collect_metrics(state: &ObservabilityState) -> String {
         state.store().provider_health(15, None, 100),
         state.store().media_reconciliation_summary(now),
         state.store().runtime_outbox_status(),
-        state.store().worker_task_health(now),
+        state.store().worker_task_health(),
         state.store().worker_recovery_counters(),
     );
     let consumer_available = consumer.is_ok();

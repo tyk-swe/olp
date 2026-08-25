@@ -1,6 +1,6 @@
 <script lang="ts">
   import { resolve } from '$app/paths';
-  import { createQuery } from '@tanstack/svelte-query';
+  import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { errorMessage as message } from '$lib/api/http';
   import { cursorPaginationProps } from '$lib/api/pagination';
   import {
@@ -12,28 +12,40 @@
   } from '$lib/api/management/api-keys';
   import CursorPagination from '$lib/components/CursorPagination.svelte';
   import NavIcon from '$lib/components/NavIcon.svelte';
+  import { formatDate } from '$lib/format';
   import type { ApiKeyListState } from './apiKeyListState';
 
   let {
     listState,
     notice,
     errorMessage,
+    canManage,
     onEdit,
     onSecret
   }: {
     listState: ApiKeyListState;
     notice: string;
     errorMessage: string;
+    canManage: boolean;
     onEdit: (key: ApiKey) => void;
     onSecret: (secret: ApiKeySecret, preferredRoute?: string) => void;
   } = $props();
 
+  const queryClient = useQueryClient();
   let busy = $state('');
   let mutationError = $state('');
   const keys = createQuery(() => ({
     queryKey: ['api-key-page', listState.cursor ?? 'first'],
     queryFn: () => listApiKeyPage(listState.cursor)
   }));
+
+  /** The overview setup checklist owns ['api-keys'] and goes stale otherwise. */
+  async function refreshKeyConsumers() {
+    await Promise.all([
+      keys.refetch(),
+      queryClient.invalidateQueries({ queryKey: ['api-keys'] })
+    ]);
+  }
 
   async function rotate(key: ApiKey) {
     if (
@@ -46,7 +58,7 @@
     mutationError = '';
     try {
       onSecret(await rotateApiKey(key), key.allowed_routes[0]);
-      await keys.refetch();
+      await refreshKeyConsumers();
     } catch (error) {
       mutationError = message(error);
     } finally {
@@ -60,7 +72,7 @@
     mutationError = '';
     try {
       await revokeApiKey(key);
-      await keys.refetch();
+      await refreshKeyConsumers();
     } catch (error) {
       mutationError = message(error);
     } finally {
@@ -78,10 +90,16 @@
       distributed hard limits.
     </p>
   </div>
-  <a class="button button-primary" href={resolve('/api-keys/new')}
-    >Create key <NavIcon name="arrow" /></a
-  >
+  {#if canManage}<a
+      class="button button-primary"
+      href={resolve('/api-keys/new')}>Create key <NavIcon name="arrow" /></a
+    >{/if}
 </div>
+{#if !canManage}
+  <p class="read-only-note" role="note">
+    Your role can view API keys but not create, edit, rotate, or revoke them.
+  </p>
+{/if}
 {#if errorMessage || mutationError}<div class="inline-problem" role="alert">
     {errorMessage || mutationError}
   </div>{/if}
@@ -103,9 +121,10 @@
     <div>
       <h2>No API keys</h2>
       <p>Create a scoped key after activating your first route.</p>
-      <a class="button button-primary" href={resolve('/api-keys/new')}
-        >Create first key</a
-      >
+      {#if canManage}<a
+          class="button button-primary"
+          href={resolve('/api-keys/new')}>Create first key</a
+        >{/if}
     </div>
   </section>
 {:else}
@@ -161,12 +180,12 @@
             >
             <td
               ><strong>{key.created_by_email}</strong><br /><small
-                >{new Date(key.created_at).toLocaleDateString()}</small
+                >{formatDate(key.created_at)}</small
               ></td
             >
             <td
               ><div class="row-actions">
-                {#if !key.revoked_at}{#if !key.expires_at || new Date(key.expires_at) >= new Date()}<button
+                {#if canManage && !key.revoked_at}{#if !key.expires_at || new Date(key.expires_at) >= new Date()}<button
                       class="button button-secondary"
                       type="button"
                       onclick={() => onEdit(key)}

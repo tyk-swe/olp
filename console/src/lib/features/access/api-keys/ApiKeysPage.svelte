@@ -4,6 +4,7 @@
   import { onDestroy } from 'svelte';
   import { useQueryClient } from '@tanstack/svelte-query';
   import { errorMessage as message } from '$lib/api/http';
+  import { useRole } from '$lib/auth/useRole.svelte';
   import {
     createApiKey,
     updateApiKey,
@@ -25,6 +26,8 @@
   } = $props();
 
   const queryClient = useQueryClient();
+  const access = useRole();
+  const canManage = $derived(access.can('api_keys.manage'));
   let editing = $state<ApiKey | null>(null);
   let busy = $state('');
   let errorMessage = $state('');
@@ -49,6 +52,7 @@
   }
 
   async function submit(input: ApiKeyPolicyInput, route?: string) {
+    if (!canManage) return false;
     busy = editing ? 'update' : 'create';
     errorMessage = notice = '';
     try {
@@ -66,8 +70,10 @@
         queryClient.invalidateQueries({ queryKey: ['api-keys'] }),
         queryClient.invalidateQueries({ queryKey: ['api-key-page'] })
       ]);
+      return true;
     } catch (error) {
       errorMessage = message(error);
+      return false;
     } finally {
       busy = '';
     }
@@ -102,6 +108,7 @@
     {editing}
     {busy}
     {errorMessage}
+    {canManage}
     onSubmit={submit}
     onCancel={cancelEdit}
     onClearError={() => (errorMessage = '')}
@@ -111,6 +118,7 @@
     {listState}
     {notice}
     {errorMessage}
+    {canManage}
     onEdit={edit}
     onSecret={showRotatedSecret}
   />

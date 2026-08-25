@@ -6,7 +6,7 @@ use axum::{
 };
 use chrono::{DateTime, Utc};
 use olp_db::identity::UserRecord;
-use olp_engine::domain::auth::Permission;
+use olp_engine::domain::auth::{Permission, Role};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use uuid::Uuid;
@@ -62,7 +62,7 @@ pub(in crate::management) struct UserListResponse {
     tag = "users",
     params(
         ("cursor" = Option<String>, Query, description = "Opaque cursor returned by the previous page"),
-        ("limit" = Option<u16>, Query, description = "Page size from 1 to 100")
+        ("limit" = Option<u16>, Query, minimum = 1, maximum = 200, description = "Page size from 1 to 200; defaults to 50")
     ),
     responses(
         (status = 200, description = "Users in the installation", body = UserListResponse),
@@ -133,7 +133,7 @@ pub(in crate::management) struct UpdateUserRoleRequest {
     request_body = UpdateUserRoleRequest,
     responses(
         (status = 200, description = "Role or active status updated; existing sessions were revoked", body = UserDetailResponse),
-        (status = 409, description = "Last active owner cannot be demoted or deactivated", body = Problem),
+        (status = 409, description = "Last active owner cannot be demoted or deactivated, and no user may change their own role or deactivate themselves", body = Problem),
         (status = 412, description = "ETag mismatch", body = Problem),
         (status = 422, description = "Role is invalid", body = Problem)
     )
@@ -160,6 +160,7 @@ pub(in crate::management) async fn update_user_role(
         ));
     }
     let role = request.role.as_deref().map(parse_user_role).transpose()?;
+    guard_self_role_change(user_id == principal.user_id, role, &principal.role)?;
     let user = state
         .store()
         .update_user_access(
@@ -173,4 +174,57 @@ pub(in crate::management) async fn update_user_role(
         .map_err(map_identity)?;
     let etag = user.etag;
     with_etag(Json(UserDetailResponse::from(user)), etag)
+}
+
+/// Storage revokes every session of the user being updated, so a caller who
+/// changes their own role loses the session that is still writing this
+/// response — and, when they demote themselves out of `ManageAccess`, the
+/// ability to undo it. Self-deactivation is refused for the same reason.
+fn guard_self_role_change(
+    is_current_user: bool,
+    requested_role: Option<Role>,
+    current_role: &str,
+) -> Result<(), Problem> {
+    let Some(requested_role) = requested_role else {
+        return Ok(());
+    };
+    if !is_current_user
+        || current_role
+            .parse::<Role>()
+            .is_ok_and(|role| role == requested_role)
+    {
+        return Ok(());
+    }
+    Err(Problem::conflict(
+        "cannot_change_current_user_role",
+        "Ask another owner to change this role; changing your own revokes every session you hold.",
+    ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Role, guard_self_role_change};
+
+    #[test]
+    fn changing_another_users_role_is_allowed() {
+        assert!(guard_self_role_change(false, Some(Role::Viewer), "owner").is_ok());
+    }
+
+    #[test]
+    fn an_owner_cannot_demote_themselves() {
+        let problem = guard_self_role_change(true, Some(Role::Viewer), "owner").unwrap_err();
+        assert_eq!(problem.status, 409);
+        assert!(problem.detail.contains("Ask another owner"));
+    }
+
+    #[test]
+    fn a_self_update_that_keeps_the_same_role_or_omits_it_passes() {
+        assert!(guard_self_role_change(true, Some(Role::Owner), "owner").is_ok());
+        assert!(guard_self_role_change(true, None, "owner").is_ok());
+    }
+
+    #[test]
+    fn an_unparseable_stored_role_is_treated_as_a_change() {
+        assert!(guard_self_role_change(true, Some(Role::Owner), "superuser").is_err());
+    }
 }

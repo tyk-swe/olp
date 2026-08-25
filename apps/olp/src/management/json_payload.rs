@@ -1,6 +1,19 @@
 use axum::{Json, extract::rejection::JsonRejection};
+use serde::{Deserialize, Deserializer};
 
 use crate::public_http::problem::Problem;
+
+/// Distinguishes an omitted JSON field from one the caller explicitly sent as
+/// `null`: an absent field deserializes to `None`, `null` to `Some(None)`.
+/// Merge-semantics patches need that difference to tell "leave this alone"
+/// from "clear this".
+pub(crate) fn explicit_null<'de, D, T>(deserializer: D) -> Result<Option<Option<T>>, D::Error>
+where
+    D: Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    Option::deserialize(deserializer).map(Some)
+}
 
 pub(crate) fn json_payload<T>(payload: Result<Json<T>, JsonRejection>) -> Result<T, Problem> {
     payload.map(|Json(value)| value).map_err(|error| {
@@ -30,6 +43,8 @@ fn json_error_location(error: &(dyn std::error::Error + 'static)) -> Option<(usi
 #[cfg(test)]
 mod tests {
     use axum::Json;
+    use serde::Deserialize;
+    use serde_json::json;
 
     #[test]
     fn error_detail_exposes_location_without_source_content() {
@@ -40,5 +55,31 @@ mod tests {
             "The JSON body is invalid at line 2, column 11."
         );
         assert!(!problem.detail.contains("secret"));
+    }
+
+    #[derive(Deserialize)]
+    struct Patch {
+        #[serde(default, deserialize_with = "super::explicit_null")]
+        limit: Option<Option<u32>>,
+    }
+
+    #[test]
+    fn an_omitted_field_is_distinguishable_from_an_explicit_null() {
+        assert_eq!(
+            serde_json::from_value::<Patch>(json!({})).unwrap().limit,
+            None
+        );
+        assert_eq!(
+            serde_json::from_value::<Patch>(json!({ "limit": null }))
+                .unwrap()
+                .limit,
+            Some(None)
+        );
+        assert_eq!(
+            serde_json::from_value::<Patch>(json!({ "limit": 7 }))
+                .unwrap()
+                .limit,
+            Some(Some(7))
+        );
     }
 }

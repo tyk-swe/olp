@@ -117,7 +117,7 @@ async fn three_workers_add_recovery_counters_monotonically_and_stale_as_a_fleet(
         .await
         .unwrap()
         .unwrap();
-    let current = store.worker_task_health(consumer.checked_at).await.unwrap();
+    let current = store.worker_task_health().await.unwrap();
     let metadata = current
         .tasks
         .iter()
@@ -132,7 +132,18 @@ async fn three_workers_add_recovery_counters_monotonically_and_stale_as_a_fleet(
         .await
         .unwrap();
     assert_eq!(stale_consumer.state, ConsumerState::Stale);
-    let stale = store.worker_task_health(stale_at).await.unwrap();
+    // Task ages come from the database clock, so age the checkpoint itself
+    // rather than handing the reader a future wall-clock reading.
+    sqlx::query(
+        "UPDATE worker_task_health \
+         SET checked_at = checked_at - interval '22 seconds', \
+             last_success_at = last_success_at - interval '22 seconds' \
+         WHERE task = 'request_metadata_consumer'",
+    )
+    .execute(store.pool())
+    .await
+    .unwrap();
+    let stale = store.worker_task_health().await.unwrap();
     assert_eq!(
         stale
             .tasks

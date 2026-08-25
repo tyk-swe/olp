@@ -360,6 +360,8 @@ fn raw_media_streaming_response(mut execution: RoutedEvents) -> Response {
                     }
                 }
                 Ok(None) => {
+                    // The terminal media frame is this stream's `Kind::Done`.
+                    accounting.usage_mut().settle();
                     terminal = Some(TerminalFrames::empty());
                     break;
                 }

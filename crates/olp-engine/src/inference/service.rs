@@ -133,7 +133,10 @@ impl Service {
             surface,
             TransportMode::Unary,
             request_id.as_uuid().as_bytes(),
-            |_, target| self.circuits.is_selectable(target.id),
+            |_, target| {
+                self.circuits
+                    .is_selectable(target.routing_id.unwrap_or(target.id))
+            },
         )?;
         let route = snapshot
             .routes

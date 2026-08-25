@@ -271,11 +271,6 @@ async fn parse_multipart_fields(
             .ok_or_else(|| InferenceError::invalid_request("A multipart field has no name."))?
             .to_owned();
         if let Some(filename) = field.file_name().map(str::to_owned) {
-            if admission.requires_model_before_file() && !authorized_model_seen {
-                return Err(InferenceError::invalid_request(
-                    "A route-restricted multipart request must send model before any file part.",
-                ));
-            }
             file_count = file_count.saturating_add(1);
             if file_count > maximum_files {
                 return Err(InferenceError::invalid_request(
@@ -382,12 +377,13 @@ async fn parse_multipart_fields(
                             "X-OLP-Route must match the multipart model field.",
                         ));
                     }
-                    MultipartRouteAdmission::RequireModelBeforeFile(allowed_routes) => {
-                        let route = olp_engine::domain::ids::RouteSlug::parse(text.as_str()).map_err(|_| {
-                            InferenceError::invalid_request(
-                                "The model field must contain a valid authorized route before file parts.",
-                            )
-                        })?;
+                    MultipartRouteAdmission::RequireAuthorizedModel(allowed_routes) => {
+                        let route = olp_engine::domain::ids::RouteSlug::parse(text.as_str())
+                            .map_err(|_| {
+                                InferenceError::invalid_request(
+                                    "The model field must contain a valid authorized route.",
+                                )
+                            })?;
                         if !allowed_routes.contains(&route) {
                             return Err(InferenceError::forbidden(
                                 "The API key is not authorized for the multipart model route."
@@ -404,6 +400,13 @@ async fn parse_multipart_fields(
             }
             output.text.entry(name).or_default().push(text);
         }
+    }
+    if admission.requires_authorized_model() && !authorized_model_seen {
+        // Every spooled file is already registered for cleanup by the caller.
+        return Err(InferenceError::invalid_request(
+            "A route-restricted multipart request must include a model field naming an \
+             authorized route.",
+        ));
     }
     Ok(())
 }

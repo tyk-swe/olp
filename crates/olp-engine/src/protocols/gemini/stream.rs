@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::domain::canonical::{
-    events::{Error as CanonicalError, ErrorClass, Event, Kind},
+    events::{Error as CanonicalError, ErrorClass, Event, FinishReason, Kind},
     identity::Surface,
     requests::SourceExtensions,
 };
@@ -159,11 +159,33 @@ impl Decoder {
                                 self.emit(&mut events, event.kind);
                             }
                         }
-                        Kind::Finish { output_index, .. } => {
+                        Kind::Finish {
+                            output_index,
+                            reason,
+                        } => {
                             if !self.finished_candidates.insert(output_index) {
                                 return Err(Error::DuplicateCandidateFinish(output_index));
                             }
-                            self.emit(&mut events, event.kind);
+                            // A tool call may have arrived in an earlier chunk
+                            // than the finishReason, so the upgrade the unary
+                            // decoder applies per chunk is repeated per stream.
+                            let reason = if reason == FinishReason::Stop
+                                && self
+                                    .next_tool_indexes
+                                    .get(&output_index)
+                                    .is_some_and(|index| *index > 0)
+                            {
+                                FinishReason::ToolCalls
+                            } else {
+                                reason
+                            };
+                            self.emit(
+                                &mut events,
+                                Kind::Finish {
+                                    output_index,
+                                    reason,
+                                },
+                            );
                         }
                         Kind::ToolCallDelta {
                             output_index,

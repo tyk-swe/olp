@@ -48,7 +48,15 @@
   oncancel={preventDismiss}
   onclose={() => onClose()}
 >
-  <p class="eyebrow">{eyebrow}</p>
+  <div class="dialog-header">
+    <p class="eyebrow">{eyebrow}</p>
+    <button
+      class="dialog-close"
+      type="button"
+      aria-label="Close"
+      onclick={close}>×</button
+    >
+  </div>
   <h2 id="secret-dialog-title" class="dialog-title">{title}</h2>
   <p id="secret-dialog-description" class="dialog-description">{description}</p>
   {@render children(close)}
@@ -85,6 +93,28 @@
   }
 
   .dialog-description { margin: .65rem 0 1rem; color: var(--foreground-muted); }
+
+  .dialog-header {
+    display: flex;
+    align-items: start;
+    justify-content: space-between;
+    gap: 1rem;
+  }
+
+  .dialog-close {
+    width: 2.75rem;
+    height: 2.75rem;
+    flex: none;
+    margin: -.5rem -.5rem 0 0;
+    border: 0;
+    border-radius: .375rem;
+    background: transparent;
+    color: var(--foreground-muted);
+    font-size: 1.4rem;
+    line-height: 1;
+  }
+
+  .dialog-close:hover { background: var(--surface-hover); color: var(--foreground); }
 
   @media (max-width: 38rem) {
     .secret-dialog { top: .75rem; max-height: calc(100dvh - 1.5rem); }

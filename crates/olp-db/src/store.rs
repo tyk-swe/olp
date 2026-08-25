@@ -18,6 +18,23 @@ impl Store {
         let pool = PgPoolOptions::new()
             .max_connections(max_connections)
             .acquire_timeout(Duration::from_secs(5))
+            // Usage buckets are UTC hours, and `date_trunc` on a timestamptz
+            // truncates in the *session* TimeZone: a server or role defaulting
+            // to a half-hour offset would write buckets the UTC-derived readers
+            // can never match. SQLx sends TimeZone=UTC in its startup packet
+            // today, but that is the driver's choice, not ours. Restate it so
+            // the invariant survives a driver default change and holds for any
+            // connection this pool hands out, whatever TZ/PGTZ the deployment
+            // sets. The SQL states UTC explicitly as well, for readers that do
+            // not come through this pool at all.
+            .after_connect(|connection, _| {
+                Box::pin(async move {
+                    sqlx::raw_sql("SET TimeZone = 'UTC'")
+                        .execute(connection)
+                        .await?;
+                    Ok(())
+                })
+            })
             .connect(database_url)
             .await?;
         Ok(Self { pool })

@@ -7,6 +7,12 @@ export default defineConfig({
   forbidOnly: Boolean(process.env.CI),
   retries: process.env.CI ? 1 : 0,
   reporter: process.env.CI ? [['github'], ['html', { open: 'never' }]] : 'list',
+  expect: {
+    // Browser point releases shift anti-aliasing on a handful of pixels
+    // (WebKit drifted by 5 px on a 1280x815 page). Layout changes still fail:
+    // a 4 px height change in mobile Chromium was ~12k differing pixels.
+    toHaveScreenshot: { maxDiffPixels: 50 }
+  },
   use: {
     baseURL: 'http://127.0.0.1:4174',
     reducedMotion: 'reduce',

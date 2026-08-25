@@ -20,13 +20,12 @@
   } from '$lib/api/management/providers';
   import { optionalDecimal } from './validation';
   import { errorMessage } from '$lib/api/http';
-  import { can } from '$lib/auth/authorization';
-  import { authLifecycle } from '$lib/auth/lifecycle';
+  import { useRole } from '$lib/auth/useRole.svelte';
 
   const queryClient = useQueryClient();
-  const role = authLifecycle.snapshot().user?.role;
-  const canEditSettings = can(role, 'settings.update');
-  const canEditPricing = can(role, 'pricing.update');
+  const access = useRole();
+  const canEditSettings = $derived(access.can('settings.update'));
+  const canEditPricing = $derived(access.can('pricing.update'));
   let values = $state<Record<string, string>>({});
   let savingKey = $state('');
   let status = $state('');
@@ -80,6 +79,7 @@
   }
 
   async function save(setting: Setting) {
+    if (!canEditSettings) return;
     savingKey = setting.key;
     status = error = '';
     try {

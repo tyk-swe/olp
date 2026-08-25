@@ -118,6 +118,7 @@ impl ProviderTransport for VideoLifecycleTransport {
                         && operation.job_id != "upstream-video-created"
                     {
                         return Err(TransportError {
+                            upstream: Default::default(),
                             phase: olp_engine::domain::ports::TransportPhase::FirstByte,
                             class: olp_engine::domain::ports::AttemptFailureClass::Ambiguous,
                             response_committed: true,

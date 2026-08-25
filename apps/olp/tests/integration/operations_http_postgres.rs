@@ -579,7 +579,8 @@ async fn operations_http_contract_is_authorized_paginated_exact_and_metadata_onl
     );
 
     let invalid_limit = get(&app, "/api/v1/requests?limit=0", &cookie).await;
-    assert_eq!(invalid_limit.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    // Page-size validation shares one contract across every collection.
+    assert_eq!(invalid_limit.status(), StatusCode::BAD_REQUEST);
     assert_eq!(
         invalid_limit.headers()[header::CONTENT_TYPE],
         "application/problem+json"

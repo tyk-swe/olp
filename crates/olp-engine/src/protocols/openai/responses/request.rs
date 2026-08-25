@@ -7,7 +7,7 @@ use crate::domain::{
             ContentPart, GenerationParameters, GenerationRequest, MediaSource, Message,
             MessageRole, Operation, ResponseFormat, SourceExtensions, ToolCall, ToolChoice,
             ToolDefinition, inline_media_marker, is_delivery_only_extension,
-            media_handle_from_inline_marker,
+            media_handle_from_inline_marker, mime_type_from_data_url,
         },
     },
     ids::RouteSlug,
@@ -402,10 +402,14 @@ fn encode_response_message(
             MessageRole::Assistant => "assistant",
             MessageRole::Tool => unreachable!("handled above"),
         };
+        // An assistant input item accepts only `output_text` / `refusal`, so a
+        // multi-turn conversation forwarded to a Responses upstream is rejected
+        // if its history is re-encoded as `input_text`.
+        let assistant = message.role == MessageRole::Assistant;
         let content = message
             .content
             .iter()
-            .map(encode_response_content_part)
+            .map(|part| encode_response_content_part_for_role(part, assistant))
             .collect::<Result<Vec<_>, _>>()?;
         items.push(serde_json::json!({
             "type": "message",
@@ -437,7 +441,17 @@ fn encode_response_message(
 pub(super) fn encode_response_content_part(
     part: &ContentPart,
 ) -> Result<Value, ResponsesCodecError> {
+    encode_response_content_part_for_role(part, false)
+}
+
+pub(super) fn encode_response_content_part_for_role(
+    part: &ContentPart,
+    assistant: bool,
+) -> Result<Value, ResponsesCodecError> {
     match part {
+        ContentPart::Text { text } if assistant => {
+            Ok(serde_json::json!({"type": "output_text", "text": text, "annotations": []}))
+        }
         ContentPart::Text { text } => Ok(serde_json::json!({"type": "input_text", "text": text})),
         ContentPart::Refusal { text } => {
             Ok(serde_json::json!({"type": "refusal", "refusal": text}))
@@ -445,6 +459,7 @@ pub(super) fn encode_response_content_part(
         ContentPart::Image {
             source: MediaSource::Uri(url),
             detail,
+            ..
         } => Ok(serde_json::json!({
             "type": "input_image",
             "image_url": url,
@@ -620,6 +635,7 @@ fn decode_response_content_part(
                 return Err(ResponsesCodecError::AmbiguousImageSource);
             }
             ContentPart::Image {
+                mime_type: mime_type_from_data_url(&image_url),
                 source: MediaSource::Uri(image_url),
                 detail: take_optional_string(&mut object, "detail", item_index)?,
             }

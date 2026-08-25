@@ -237,7 +237,11 @@ fn encode_content(content: &[ContentPart]) -> Result<Vec<ContentBlock>, EncodeEr
                 text: text.clone(),
                 extra: BTreeMap::new(),
             })),
-            ContentPart::Image { source, detail } => {
+            ContentPart::Image {
+                source,
+                detail,
+                mime_type,
+            } => {
                 if detail.is_some() {
                     return Err(EncodeError::ImageDetailUnsupported);
                 }
@@ -251,7 +255,7 @@ fn encode_content(content: &[ContentPart]) -> Result<Vec<ContentBlock>, EncodeEr
                     kind: "image".into(),
                     source: MediaSource {
                         kind: kind.into(),
-                        media_type: None,
+                        media_type: mime_type.clone(),
                         data,
                         url,
                         extra: BTreeMap::new(),

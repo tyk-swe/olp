@@ -1,13 +1,13 @@
 use axum::{
     Json,
     extract::{Path, Query, State},
-    http::HeaderMap,
+    http::{HeaderMap, StatusCode},
     response::Response,
 };
 use chrono::{DateTime, Utc};
 use olp_db::{
     configuration::resources::ProviderRevisionDiff,
-    configuration::resources::ProviderRevisionRecord,
+    configuration::resources::ProviderRevisionRecord, idempotency::operations,
 };
 use olp_engine::domain::{
     auth::Permission, provider::ProviderAuthMode, routing::provider::ProviderKind,
@@ -20,10 +20,10 @@ use crate::{
     bootstrap::mode_dependencies::ManagementState,
     management::{
         error_mapping::map_configuration,
-        idempotency::require_idempotency_key,
+        idempotency::ReplayableMutation,
         pagination::{DiffQuery, PageQuery, page},
         permissions::require_permission,
-        preconditions::{if_match, with_etag},
+        preconditions::if_match,
         sessions::{require_mutation_session, require_read_session},
     },
     public_http::problem::Problem,
@@ -185,7 +185,7 @@ pub(crate) struct ProviderRevisionRestoreResponse {
     params(
         ("provider_id" = Uuid, Path),
         ("cursor" = Option<String>, Query),
-        ("limit" = Option<u16>, Query, minimum = 1, maximum = 100)
+        ("limit" = Option<u16>, Query, minimum = 1, maximum = 200, description = "Page size from 1 to 200; defaults to 50")
     ),
     responses(
         (status = 200, body = ProviderRevisionListResponse),
@@ -247,7 +247,7 @@ pub(crate) async fn get_provider_revision(
         ("provider_id" = Uuid, Path),
         ("revision_id" = Uuid, Path),
         ("cursor" = Option<String>, Query),
-        ("limit" = Option<u16>, Query, minimum = 1, maximum = 100)
+        ("limit" = Option<u16>, Query, minimum = 1, maximum = 200, description = "Page size from 1 to 200; defaults to 50")
     ),
     responses(
         (status = 200, description = "Bounded historical provider model and capability page", body = ProviderModelListResponse),
@@ -316,7 +316,8 @@ pub(crate) async fn diff_provider_revisions(
     ),
     responses(
         (status = 200, description = "Historical non-secret configuration restored as a draft; current credential selection is preserved", body = ProviderRevisionRestoreResponse),
-        (status = 409, description = "Idempotency-Key was already used", body = Problem),
+        (status = 400, description = "Idempotency-Key is missing or invalid", body = Problem),
+        (status = 409, description = "Idempotency-Key was already used for a different request or is in progress", body = Problem),
         (status = 412, body = Problem),
         (status = 422, body = Problem)
     )
@@ -328,23 +329,48 @@ pub(crate) async fn restore_provider_revision(
 ) -> Result<Response, Problem> {
     let principal = require_mutation_session(&state, &headers).await?;
     require_permission(&principal, Permission::ManageProviders)?;
+    let expected_etag = if_match(&headers)?;
+    let mutation = ReplayableMutation::new(
+        &state,
+        principal.user_id,
+        operations::PROVIDER_REVISION_RESTORE_AS_DRAFT,
+        &headers,
+        &RestoreProviderRevisionFingerprint {
+            provider_id,
+            revision_id,
+            expected_etag,
+        },
+    )?;
+    if let Some(replayed) = mutation.replayed().await? {
+        return Ok(replayed);
+    }
     let restored = state
         .store()
         .restore_provider_revision_as_draft(
             provider_id,
             revision_id,
-            if_match(&headers)?,
+            expected_etag,
             principal.user_id,
-            require_idempotency_key(&headers)?,
+            mutation.key(),
         )
         .await
         .map_err(map_configuration)?;
     let etag = restored.etag;
-    with_etag(
-        Json(ProviderRevisionRestoreResponse {
-            provider: restored.into(),
-            credential_restored: false,
-        }),
-        etag,
-    )
+    mutation
+        .respond(
+            StatusCode::OK,
+            &ProviderRevisionRestoreResponse {
+                provider: restored.into(),
+                credential_restored: false,
+            },
+            Some(etag),
+        )
+        .await
+}
+
+#[derive(Serialize)]
+struct RestoreProviderRevisionFingerprint {
+    provider_id: Uuid,
+    revision_id: Uuid,
+    expected_etag: Uuid,
 }

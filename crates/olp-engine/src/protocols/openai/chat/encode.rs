@@ -132,7 +132,7 @@ fn encode_message(message: &CanonicalMessage, force_content_parts: bool) -> Resu
                 text: text.clone(),
                 extra: BTreeMap::new(),
             },
-            CanonicalContentPart::Image { source, detail } => {
+            CanonicalContentPart::Image { source, detail, .. } => {
                 let MediaSource::Uri(url) = source else {
                     return Err(Error::MediaHandleCannotBeEncoded);
                 };

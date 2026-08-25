@@ -366,12 +366,14 @@ async fn identity_http_flow_enforces_sessions_csrf_roles_and_owner_guard() {
         &owner_etag,
     )
     .await;
+    // A principal can never change their own role, so the sole owner is
+    // stopped before the last-owner guard ever needs to fire.
     assert_eq!(last_owner.status(), StatusCode::CONFLICT);
     assert!(
         response_json(last_owner).await["type"]
             .as_str()
             .unwrap()
-            .ends_with("/last_owner_required")
+            .ends_with("/cannot_change_current_user_role")
     );
 
     let pending = send_json(

@@ -148,6 +148,10 @@ pub struct RouteActivated {
     pub route_id: Uuid,
     pub revision_id: Uuid,
     pub revision: i32,
+    /// The draft is consumed by activation: it returns to `draft` under this
+    /// new ETag, so a second activation has to revalidate first instead of
+    /// minting a byte-identical revision.
+    pub draft_etag: Uuid,
     pub release: PublishedRuntimeRelease,
 }
 

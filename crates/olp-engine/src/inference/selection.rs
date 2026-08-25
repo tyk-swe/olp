@@ -316,6 +316,7 @@ mod tests {
             generation_id: RuntimeGenerationId::new(),
             route_id: RouteId::new(),
             target_id: TargetId::new(),
+            routing_id: TargetId::new(),
             provider_id: crate::domain::ids::ProviderId::new(),
             provider_kind: kind,
             upstream_model: "upstream-model".into(),
@@ -431,6 +432,7 @@ mod tests {
         request.messages[0].content = vec![ContentPart::Image {
             source: MediaSource::Handle(MediaHandle::new("bounded-image")),
             detail: None,
+            mime_type: None,
         }];
         request.extensions.values.insert(
             "/messages/0/content/0/source/media_type".into(),

@@ -44,7 +44,10 @@ impl DeadlineByteStream {
         idle_timeout: Duration,
         attempt_deadline: Instant,
     ) -> Self {
-        let phase_deadline = first_byte_deadline.unwrap_or_else(|| Instant::now() + idle_timeout);
+        let phase_deadline = first_byte_deadline.map_or_else(
+            || Instant::now() + idle_timeout,
+            |configured| super::first_byte_deadline_within_attempt(configured, attempt_deadline),
+        );
         let (wake, deadline_kind) = select_deadline(phase_deadline, attempt_deadline);
         Self {
             source,

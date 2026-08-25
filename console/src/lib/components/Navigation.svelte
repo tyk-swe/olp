@@ -62,9 +62,20 @@
     return !item.capability || can(role, item.capability);
   }
 
+  // Settings owns /settings but not the personal profile beneath it, which has
+  // no nav entry of its own and must not light up the installation link.
+  const excludedDescendants: Record<string, readonly string[]> = {
+    [resolve('/settings')]: [resolve('/settings/profile')]
+  };
+
   function isActive(href: string) {
     const overview = resolve('/');
-    return href === overview ? page.url.pathname === overview : page.url.pathname.startsWith(href);
+    if (href === overview) return page.url.pathname === overview;
+    const path = page.url.pathname;
+    if (path !== href && !path.startsWith(`${href}/`)) return false;
+    return !excludedDescendants[href]?.some(
+      (excluded) => path === excluded || path.startsWith(`${excluded}/`)
+    );
   }
 </script>
 

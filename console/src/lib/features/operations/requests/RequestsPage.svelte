@@ -5,8 +5,9 @@
     getRequest,
     listRequests
   } from '$lib/api/requests';
+  import { errorMessage } from '$lib/api/http';
   import { cursorPaginationProps, resetCursor } from '$lib/api/pagination';
-  import { formatCompact, formatCost, formatDate, statusLabel, statusTone } from '$lib/format';
+  import { formatCost, formatDate, formatInteger, statusLabel, statusTone } from '$lib/format';
   import { emptyRequestListState, type RequestListState } from './requestListState';
 
   let {
@@ -77,13 +78,13 @@
   {#if detail.isPending}
     <div class="loading-state" role="status">Loading request timeline…</div>
   {:else if detail.isError}
-    <div class="inline-problem" role="alert">The request timeline could not be loaded. <button class="text-button" onclick={() => detail.refetch()}>Try again</button></div>
+    <div class="inline-problem" role="alert">{errorMessage(detail.error, 'The request timeline could not be loaded.')} <button class="text-button" onclick={() => detail.refetch()}>Try again</button></div>
   {:else if detail.data}
     <section class="metric-grid" aria-label="Request summary">
       <article class="card metric-card"><p>Status</p><strong><span class="badge {statusTone(detail.data.status_code, detail.data.error_class)}">{statusLabel(detail.data.status_code, detail.data.error_class)}</span></strong></article>
-      <article class="card metric-card"><p>Total latency</p><strong>{detail.data.total_latency_ms ?? '—'} ms</strong></article>
-      <article class="card metric-card"><p>First byte (TTFT)</p><strong>{detail.data.first_byte_ms ?? '—'} ms</strong></article>
-      <article class="card metric-card"><p>Estimated cost</p><strong class:unpriced={detail.data.unpriced}>{formatCost(detail.data.estimated_cost, detail.data.currency ?? 'USD')}</strong></article>
+      <article class="card metric-card"><p>Total latency</p><strong>{detail.data.total_latency_ms == null ? '—' : `${detail.data.total_latency_ms} ms`}</strong></article>
+      <article class="card metric-card"><p>First byte (TTFT)</p><strong>{detail.data.first_byte_ms == null ? '—' : `${detail.data.first_byte_ms} ms`}</strong></article>
+      <article class="card metric-card"><p>Estimated cost</p><strong class:unpriced={detail.data.unpriced}>{formatCost(detail.data.estimated_cost, detail.data.currency)}</strong></article>
     </section>
 
     <section class="card request-facts" aria-labelledby="decision-title">
@@ -96,9 +97,9 @@
         <div><dt>Client surface</dt><dd>{detail.data.surface}</dd></div>
         <div><dt>Runtime generation</dt><dd class="mono">{detail.data.runtime_generation_id}</dd></div>
         <div><dt>API key ID</dt><dd class="mono">{detail.data.api_key_id}</dd></div>
-        <div><dt>Input tokens</dt><dd>{formatCompact(detail.data.input_tokens)}</dd></div>
-        <div><dt>Output tokens</dt><dd>{formatCompact(detail.data.output_tokens)}</dd></div>
-        <div><dt>Usage completeness</dt><dd><span class="badge" class:success={detail.data.usage_complete} class:warning={!detail.data.usage_complete}>{detail.data.usage_complete ? 'Complete' : 'Incomplete'}</span></dd></div>
+        <div><dt>Input tokens</dt><dd>{formatInteger(detail.data.input_tokens)}</dd></div>
+        <div><dt>Output tokens</dt><dd>{formatInteger(detail.data.output_tokens)}</dd></div>
+        <div><dt>Usage completeness</dt><dd><span class="badge" class:success={detail.data.usage_complete === true} class:warning={detail.data.usage_complete === false}>{detail.data.usage_complete == null ? 'Unknown' : detail.data.usage_complete ? 'Complete' : 'Incomplete'}</span></dd></div>
         <div><dt>Started</dt><dd>{formatDate(detail.data.started_at)}</dd></div>
       </dl>
     </section>
@@ -158,7 +159,7 @@
   {#if requests.isPending}
     <div class="loading-state" role="status">Loading request metadata…</div>
   {:else if requests.isError}
-    <div class="inline-problem" role="alert">Request metadata is unavailable. <button class="text-button" onclick={() => requests.refetch()}>Try again</button></div>
+    <div class="inline-problem" role="alert">{errorMessage(requests.error, 'Request metadata is unavailable.')} <button class="text-button" onclick={() => requests.refetch()}>Try again</button></div>
   {:else if requests.data?.items.length === 0 && listState.history.length === 0}
     <div class="card empty-state"><div><strong>No matching requests</strong><p>Adjust the filters or send traffic through an active route.</p></div></div>
   {:else}
@@ -174,9 +175,9 @@
               <td><strong>{request.route}</strong><small>{request.operation} · {request.surface}</small></td>
               <td><span class="badge {statusTone(request.status_code, request.error_class)}">{statusLabel(request.status_code, request.error_class)}</span></td>
               <td>{request.attempt_count}</td>
-              <td>{request.first_byte_ms ?? '—'} / {request.total_latency_ms ?? '—'} ms</td>
-              <td>{formatCompact(request.input_tokens)} in<br />{formatCompact(request.output_tokens)} out</td>
-              <td><span class:unpriced={request.unpriced}>{formatCost(request.estimated_cost, request.currency ?? 'USD')}</span>{#if request.usage_complete === false}<small class="warning-text">Incomplete usage</small>{/if}</td>
+              <td>{request.first_byte_ms == null ? '—' : `${request.first_byte_ms} ms`} / {request.total_latency_ms == null ? '—' : `${request.total_latency_ms} ms`}</td>
+              <td>{formatInteger(request.input_tokens)} in<br />{formatInteger(request.output_tokens)} out</td>
+              <td><span class:unpriced={request.unpriced}>{formatCost(request.estimated_cost, request.currency)}</span>{#if request.usage_complete === false}<small class="warning-text">Incomplete usage</small>{/if}</td>
               <td><a class="row-link" href={resolve(`/requests/${request.id}`)} aria-label={`View request ${request.id}`}>View</a></td>
             </tr>
           {/each}
@@ -187,7 +188,7 @@
       {#each requests.data?.items ?? [] as request (request.id)}
         <li class="card">
           <div class="mobile-result-heading"><div><strong>{request.route}</strong><small>{request.operation} · {request.surface}</small></div><span class="badge {statusTone(request.status_code, request.error_class)}">{statusLabel(request.status_code, request.error_class)}</span></div>
-          <dl><div><dt>Started</dt><dd>{formatDate(request.started_at)}</dd></div><div><dt>TTFT / latency</dt><dd>{request.first_byte_ms ?? '—'} / {request.total_latency_ms ?? '—'} ms</dd></div><div><dt>Tokens</dt><dd>{formatCompact(request.input_tokens)} in · {formatCompact(request.output_tokens)} out</dd></div><div><dt>Cost</dt><dd class:unpriced={request.unpriced}>{formatCost(request.estimated_cost, request.currency ?? 'USD')}</dd></div></dl>
+          <dl><div><dt>Started</dt><dd>{formatDate(request.started_at)}</dd></div><div><dt>TTFT / latency</dt><dd>{request.first_byte_ms == null ? '—' : `${request.first_byte_ms} ms`} / {request.total_latency_ms == null ? '—' : `${request.total_latency_ms} ms`}</dd></div><div><dt>Tokens</dt><dd>{formatInteger(request.input_tokens)} in · {formatInteger(request.output_tokens)} out</dd></div><div><dt>Cost</dt><dd class:unpriced={request.unpriced}>{formatCost(request.estimated_cost, request.currency)}</dd></div></dl>
           <a class="button button-secondary" href={resolve(`/requests/${request.id}`)} aria-label={`View request ${request.id}`}>View timeline</a>
         </li>
       {/each}

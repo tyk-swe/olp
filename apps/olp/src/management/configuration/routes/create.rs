@@ -7,6 +7,7 @@ use axum::{
 use olp_db::{
     configuration::NewRouteDraft, configuration::NewRouteTarget, idempotency::Replayable,
     idempotency::Response as IdempotencyResponse, idempotency::fingerprint,
+    idempotency::operations,
 };
 use olp_engine::domain::canonical::identity::OperationKind;
 use serde::{Deserialize, Serialize};
@@ -15,7 +16,7 @@ use uuid::Uuid;
 
 use crate::management::{
     error_mapping::{map_configuration, map_persistence},
-    idempotency::{idempotency_http_response, require_idempotency_key},
+    idempotency::{ReplayableMutation, idempotency_http_response, require_idempotency_key},
     json_payload::json_payload,
     permissions::require_route_manager,
     preconditions::{if_match, with_etag},
@@ -65,6 +66,10 @@ pub(crate) struct RouteActivationResponse {
     #[schema(value_type = String, format = Uuid)]
     pub revision_id: Uuid,
     pub revision: i32,
+    /// The activated draft returns to `draft` under this ETag; revalidate
+    /// before activating it again.
+    #[schema(value_type = String, format = Uuid)]
+    pub draft_etag: Uuid,
     pub runtime_generation: RuntimeGenerationResponse,
 }
 
@@ -75,7 +80,7 @@ pub(crate) struct RouteActivationResponse {
     request_body = CreateRouteDraftRequest,
     params(("Idempotency-Key" = String, Header, description = "Unique route-draft creation key")),
     responses(
-        (status = 201, description = "Route draft created", body = RouteDraftResponse),
+        (status = 201, description = "Route draft created", body = RouteDraftResponse, headers(("Location" = String, description = "Path of the created resource"))),
         (status = 400, description = "Idempotency-Key is missing or invalid", body = Problem),
         (status = 409, description = "Idempotency-Key was already used or is in progress", body = Problem),
         (status = 422, description = "Route draft is invalid", body = Problem),
@@ -146,6 +151,9 @@ pub(crate) async fn create_route_draft(
                     },
                     Some(format!("\"{}\"", created.etag)),
                 )
+                .and_then(|response| {
+                    response.with_location(format!("/api/v1/route-drafts/{}", created.id))
+                })
             },
         )
         .await
@@ -203,8 +211,9 @@ pub(crate) async fn validate_route_draft(
         ("Idempotency-Key" = String, Header, description = "Unique activation key")
     ),
     responses(
-        (status = 200, description = "Route activated and runtime published", body = RouteActivationResponse),
-        (status = 409, description = "Draft has not been validated", body = Problem),
+        (status = 200, description = "Route activated, runtime published, and the draft returned to `draft` under a new ETag", body = RouteActivationResponse),
+        (status = 400, description = "Idempotency-Key is missing or invalid", body = Problem),
+        (status = 409, description = "Draft has not been validated, or the Idempotency-Key was already used for a different request", body = Problem),
         (status = 412, description = "ETag mismatch", body = Problem)
     )
 )]
@@ -215,20 +224,42 @@ pub(crate) async fn activate_route_draft(
 ) -> Result<Response, Problem> {
     let principal = require_mutation_session(&state, &headers).await?;
     require_route_manager(&principal)?;
-    let idempotency_key = require_idempotency_key(&headers)?;
     let expected_etag = if_match(&headers)?;
+    let mutation = ReplayableMutation::new(
+        &state,
+        principal.user_id,
+        operations::ROUTE_ACTIVATE,
+        &headers,
+        &ActivateRouteDraftFingerprint {
+            draft_id,
+            expected_etag,
+        },
+    )?;
+    if let Some(replayed) = mutation.replayed().await? {
+        return Ok(replayed);
+    }
     let activated = state
         .store()
-        .activate_route_draft(draft_id, expected_etag, principal.user_id, idempotency_key)
+        .activate_route_draft(draft_id, expected_etag, principal.user_id, mutation.key())
         .await
         .map_err(map_configuration)?;
-    with_etag(
-        Json(RouteActivationResponse {
-            route_id: activated.route_id,
-            revision_id: activated.revision_id,
-            revision: activated.revision,
-            runtime_generation: (&activated.release).into(),
-        }),
-        expected_etag,
-    )
+    mutation
+        .respond(
+            StatusCode::OK,
+            &RouteActivationResponse {
+                route_id: activated.route_id,
+                revision_id: activated.revision_id,
+                revision: activated.revision,
+                draft_etag: activated.draft_etag,
+                runtime_generation: (&activated.release).into(),
+            },
+            Some(activated.draft_etag),
+        )
+        .await
+}
+
+#[derive(Serialize)]
+struct ActivateRouteDraftFingerprint {
+    draft_id: Uuid,
+    expected_etag: Uuid,
 }

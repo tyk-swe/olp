@@ -1,7 +1,7 @@
 use crate::support::route_fixtures::{DraftFixture, insert_provider};
 use olp_db::{
-    configuration::resources::ReplaceRouteDraftInput, identity::InstallationSetupInput,
-    security::session_material::SessionMaterial,
+    configuration::Error, configuration::resources::ReplaceRouteDraftInput,
+    identity::InstallationSetupInput, security::session_material::SessionMaterial,
 };
 use olp_engine::domain::{
     canonical::identity::{OperationKind, Surface, TransportMode},
@@ -146,10 +146,28 @@ async fn route_draft_simulation_matches_activated_runtime_attempts() {
         .unwrap();
     assert_eq!(first_activation.route_id, conflicting_route_id);
     assert_ne!(first_activation.route_id, draft.id);
+    // Activation consumes the draft. The ETag it was activated under is spent,
+    // and the draft has to pass validation again before it can publish a
+    // second revision.
+    assert!(matches!(
+        store
+            .activate_route_draft(
+                draft.id,
+                validated_etag,
+                actor,
+                "route-simulation-activate-stale",
+            )
+            .await,
+        Err(Error::PreconditionFailed)
+    ));
+    let (revalidated_etag, _) = store
+        .validate_route_draft(draft.id, first_activation.draft_etag, actor)
+        .await
+        .unwrap();
     let second_activation = store
         .activate_route_draft(
             draft.id,
-            validated_etag,
+            revalidated_etag,
             actor,
             "route-simulation-activate-repeat",
         )

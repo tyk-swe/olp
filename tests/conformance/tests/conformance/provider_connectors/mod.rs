@@ -328,6 +328,7 @@ fn provider_request(
             generation_id: RuntimeGenerationId::new(),
             route_id: RouteId::new(),
             target_id: TargetId::new(),
+            routing_id: TargetId::new(),
             provider_id: ProviderId::new(),
             provider_kind: kind,
             upstream_model: MODEL.to_owned(),
@@ -1416,9 +1417,12 @@ async fn all_generation_connectors_hydrate_bounded_inline_media() {
             let Operation::Generation(generation) = &mut request.operation else {
                 unreachable!()
             };
+            // The MIME extension below still has to work for a same-surface
+            // request, so the canonical field is deliberately left unset here.
             generation.messages[0].content.push(ContentPart::Image {
                 source: MediaSource::Handle(MediaHandle::new("conformance-image")),
                 detail: None,
+                mime_type: None,
             });
             let mime_path = match kind {
                 ProviderKind::Anthropic => "/messages/0/content/1/source/media_type",

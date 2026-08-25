@@ -67,9 +67,16 @@ impl Store {
         source_limit: i32,
     ) -> Result<bool, Error> {
         let mut transaction = self.pool().begin().await?;
-        // This high ceiling is resource admission, not a user-facing policy.
+        // Every bucket this attempt reached must keep its increment, and the
+        // expiry sweep must run, whatever the decision. Rolling a rejection
+        // back used to hand a caller that had saturated one narrow bucket a
+        // free, uncounted attempt against the wider source and global ceilings.
+        // This transaction therefore only ever commits; a genuine SQL error
+        // still aborts it through `?`.
+        //
+        // The global ceiling is resource admission, not a user-facing policy.
         // It bounds attacker-controlled source rows before they are inserted.
-        let resource_admitted = consume_public_auth_bucket(
+        let mut admitted = consume_public_auth_bucket(
             &mut transaction,
             action,
             "global",
@@ -77,37 +84,25 @@ impl Store {
             PUBLIC_AUTH_RESOURCE_ATTEMPTS_PER_MINUTE,
         )
         .await?;
-        if !resource_admitted {
-            transaction.commit().await?;
-            return Ok(false);
+        if admitted {
+            admitted = consume_public_auth_bucket(
+                &mut transaction,
+                action,
+                "source",
+                &source_digest,
+                source_limit,
+            )
+            .await?;
         }
-        let source_admitted = consume_public_auth_bucket(
-            &mut transaction,
-            action,
-            "source",
-            &source_digest,
-            source_limit,
-        )
-        .await?;
-        if !source_admitted {
-            transaction.rollback().await?;
-            return Ok(false);
-        }
-        let source_target_admitted = if let Some(source_target_digest) = source_target_digest {
-            consume_public_auth_bucket(
+        if let (true, Some(source_target_digest)) = (admitted, source_target_digest) {
+            admitted = consume_public_auth_bucket(
                 &mut transaction,
                 action,
                 "source_target",
                 &source_target_digest,
                 SOURCE_TARGET_ATTEMPTS_PER_MINUTE,
             )
-            .await?
-        } else {
-            true
-        };
-        if !source_target_admitted {
-            transaction.rollback().await?;
-            return Ok(false);
+            .await?;
         }
         sqlx::query!(
             "WITH expired AS ( \
@@ -122,7 +117,7 @@ impl Store {
         .execute(&mut *transaction)
         .await?;
         transaction.commit().await?;
-        Ok(true)
+        Ok(admitted)
     }
 }
 

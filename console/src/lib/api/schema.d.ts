@@ -1449,7 +1449,8 @@ export interface components {
              * @description Omit or pass an empty array to query the upstream model-list API.
              *     Manual identifiers are a fallback for upstreams without a list API.
              *     All discovered models start disabled and without capability claims until
-             *     the explicit review operation is completed.
+             *     the explicit review operation is completed. At most 2,000 entries: the
+             *     revision diff cannot read a provider beyond that.
              */
             models?: components["schemas"]["DiscoveredModelRequest"][];
         };
@@ -1676,8 +1677,12 @@ export interface components {
             role: string;
         };
         PageQuery: {
+            /** @description Opaque cursor returned by the previous page. */
             cursor?: string | null;
-            /** Format: int32 */
+            /**
+             * Format: int32
+             * @description Page size, from 1 to 200. Defaults to 50.
+             */
             limit?: number | null;
         };
         PlaygroundRequest: {
@@ -1744,6 +1749,11 @@ export interface components {
         /** @enum {string} */
         PriceOperation: "generation" | "embeddings" | "token_count" | "image_generation" | "image_edit" | "image_variation" | "speech" | "transcription" | "video_create" | "video_list" | "video_get" | "video_content" | "video_delete" | "moderation" | "model_list" | "model_get";
         PriceRequest: {
+            /**
+             * @description Rate for the cached share of the input tokens. Omit to bill cached
+             *     tokens at the full input rate.
+             */
+            cached_input_per_million?: string | null;
             currency: string;
             input_per_million?: string | null;
             model: string;
@@ -1755,6 +1765,11 @@ export interface components {
             unit_price?: string | null;
         };
         PriceResponse: {
+            /**
+             * @description Rate for the cached share of the input tokens. Omit to bill cached
+             *     tokens at the full input rate.
+             */
+            cached_input_per_million?: string | null;
             currency: string;
             input_per_million?: string | null;
             model: string;
@@ -2244,6 +2259,12 @@ export interface components {
             credential: string;
         };
         RouteActivationResponse: {
+            /**
+             * Format: uuid
+             * @description The activated draft returns to `draft` under this ETag; revalidate
+             *     before activating it again.
+             */
+            draft_etag: string;
             /** Format: int32 */
             revision: number;
             /** Format: uuid */
@@ -2369,6 +2390,11 @@ export interface components {
             weight: number;
         };
         RouteTargetResponse: {
+            /**
+             * @description False when the provider was disabled or the model left the provider's
+             *     activated revision. The target is still part of the stored route.
+             */
+            available: boolean;
             /** Format: uuid */
             id: string;
             /** Format: int32 */
@@ -2466,16 +2492,26 @@ export interface components {
             seed: string;
             surface: string;
         };
+        /**
+         * @description A merge patch: every field is optional, an omitted field keeps the stored
+         *     value, and an explicit `null` clears one. Writing absent fields through
+         *     would silently widen a key's privileges — a rename would drop the route
+         *     allowlist, the rate limits, and the expiry.
+         */
         UpdateApiKeyRequest: {
+            /**
+             * @description Omit to keep the stored allowlist. Send `[]` to clear it; an empty
+             *     allowlist places no route restriction on the key.
+             */
             allowed_routes?: string[];
             /** Format: date-time */
             expires_at?: string | null;
             /** Format: int32 */
             max_concurrency?: number | null;
-            name: string;
+            name?: string;
             /** Format: int32 */
             requests_per_minute?: number | null;
-            scopes: string[];
+            scopes?: string[];
             /** Format: int64 */
             tokens_per_minute?: number | null;
         };
@@ -2628,6 +2664,7 @@ export interface operations {
         parameters: {
             query?: {
                 cursor?: string;
+                /** @description Page size from 1 to 200; defaults to 50 */
                 limit?: number;
             };
             header?: never;
@@ -2692,10 +2729,21 @@ export interface operations {
             /** @description API key created; secret is shown once */
             201: {
                 headers: {
+                    /** @description Path of the created resource */
+                    Location?: string;
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": components["schemas"]["CreateApiKeyResponse"];
+                };
+            };
+            /** @description Idempotency-Key is missing or invalid */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
                 };
             };
             /** @description Authentication required. */
@@ -2909,7 +2957,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description API key revoked and new runtime published */
+            /** @description API key revoked and new runtime published; an identical retry replays this response */
             200: {
                 headers: {
                     /** @description Current strong entity tag. */
@@ -2918,6 +2966,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RuntimeGenerationResponse"];
+                };
+            };
+            /** @description Idempotency-Key is missing or invalid */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
                 };
             };
             /** @description Authentication required. */
@@ -2940,6 +2997,15 @@ export interface operations {
             };
             /** @description API key not found */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Idempotency-Key was already used or is in progress */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -2991,6 +3057,15 @@ export interface operations {
                     "application/json": components["schemas"]["RotateApiKeyResponse"];
                 };
             };
+            /** @description Idempotency-Key is missing or invalid */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
             /** @description Authentication required. */
             401: {
                 headers: {
@@ -3009,6 +3084,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
+            /** @description Idempotency-Key was already used or is in progress */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -3048,7 +3124,9 @@ export interface operations {
     list_audit_events: {
         parameters: {
             query?: {
+                /** @description Opaque cursor returned by the previous page. */
                 cursor?: string;
+                /** @description Page size, from 1 to 200. Defaults to 50. */
                 limit?: number;
             };
             header?: never;
@@ -3194,7 +3272,7 @@ export interface operations {
             query?: {
                 /** @description Opaque cursor returned by the previous page */
                 cursor?: string;
-                /** @description Page size from 1 to 100 */
+                /** @description Page size from 1 to 200; defaults to 50 */
                 limit?: number;
             };
             header?: never;
@@ -3260,10 +3338,21 @@ export interface operations {
             /** @description Invitation created; token is displayed once */
             201: {
                 headers: {
+                    /** @description Path of the created resource */
+                    Location?: string;
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": components["schemas"]["CreateInvitationResponse"];
+                };
+            };
+            /** @description Idempotency-Key is missing or invalid */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
                 };
             };
             /** @description Authentication required. */
@@ -3406,13 +3495,22 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Invitation revoked */
+            /** @description Invitation revoked; an identical retry replays this response */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": components["schemas"]["InvitationResponse"];
+                };
+            };
+            /** @description Idempotency-Key is missing or invalid */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
                 };
             };
             /** @description Authentication required. */
@@ -3433,7 +3531,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
-            /** @description Invitation is already accepted or revoked */
+            /** @description Invitation is already accepted or revoked, or the Idempotency-Key was already used for a different request */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -3456,7 +3554,9 @@ export interface operations {
     list_media_jobs: {
         parameters: {
             query?: {
+                /** @description Opaque cursor returned by the previous page. */
                 cursor?: string;
+                /** @description Page size, from 1 to 200. Defaults to 50. */
                 limit?: number;
                 api_key_id?: string;
                 provider_id?: string;
@@ -4281,7 +4381,9 @@ export interface operations {
     list_pricing_revisions: {
         parameters: {
             query?: {
+                /** @description Opaque cursor returned by the previous page. */
                 cursor?: string;
+                /** @description Page size, from 1 to 200. Defaults to 50. */
                 limit?: number;
             };
             header?: never;
@@ -4351,6 +4453,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PricingRevisionResponse"];
+                };
+            };
+            /** @description Idempotency-Key is missing or invalid */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
                 };
             };
             /** @description Authentication required. */
@@ -4935,6 +5046,7 @@ export interface operations {
         parameters: {
             query?: {
                 cursor?: string;
+                /** @description Page size from 1 to 200; defaults to 50 */
                 limit?: number;
                 /** @description Optional enabled-state filter */
                 enabled?: boolean;
@@ -4987,6 +5099,7 @@ export interface operations {
         parameters: {
             query?: {
                 cursor?: string;
+                /** @description Page size from 1 to 200; defaults to 50 */
                 limit?: number;
             };
             header?: never;
@@ -5049,6 +5162,8 @@ export interface operations {
             /** @description Provider draft created */
             201: {
                 headers: {
+                    /** @description Path of the created resource */
+                    Location?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -5345,6 +5460,7 @@ export interface operations {
         parameters: {
             query?: {
                 cursor?: string;
+                /** @description Page size from 1 to 200; defaults to 50 */
                 limit?: number;
             };
             header?: never;
@@ -5428,6 +5544,15 @@ export interface operations {
                     "application/json": components["schemas"]["ProviderMutationResponse"];
                 };
             };
+            /** @description Idempotency-Key is missing or invalid */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
             /** @description Authentication required. */
             401: {
                 headers: {
@@ -5508,6 +5633,15 @@ export interface operations {
                     "application/json": components["schemas"]["ProviderMutationResponse"];
                 };
             };
+            /** @description Idempotency-Key is missing or invalid */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
             /** @description Authentication required. */
             401: {
                 headers: {
@@ -5526,6 +5660,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
+            /** @description Idempotency-Key was already used or is in progress */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -5577,6 +5712,15 @@ export interface operations {
                     "application/json": components["schemas"]["ProviderMutationResponse"];
                 };
             };
+            /** @description Idempotency-Key is missing or invalid */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
             /** @description Authentication required. */
             401: {
                 headers: {
@@ -5595,7 +5739,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
-            /** @description Provider is still referenced by an active route */
+            /** @description Provider is still referenced by an active route, or the Idempotency-Key was already used for a different request */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -5699,6 +5843,7 @@ export interface operations {
         parameters: {
             query?: {
                 cursor?: string;
+                /** @description Page size from 1 to 200; defaults to 50 */
                 limit?: number;
             };
             header?: never;
@@ -5996,6 +6141,15 @@ export interface operations {
                     "application/json": components["schemas"]["ProviderDetailResponse"];
                 };
             };
+            /** @description Idempotency-Key is missing or invalid */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
             /** @description Authentication required. */
             401: {
                 headers: {
@@ -6007,6 +6161,15 @@ export interface operations {
             };
             /** @description The session lacks permission or mutation CSRF/origin checks failed. */
             403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Idempotency-Key was already used or is in progress */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -6037,6 +6200,7 @@ export interface operations {
         parameters: {
             query?: {
                 cursor?: string;
+                /** @description Page size from 1 to 200; defaults to 50 */
                 limit?: number;
             };
             header?: never;
@@ -6221,6 +6385,7 @@ export interface operations {
         parameters: {
             query?: {
                 cursor?: string;
+                /** @description Page size from 1 to 200; defaults to 50 */
                 limit?: number;
             };
             header?: never;
@@ -6305,6 +6470,15 @@ export interface operations {
                     "application/json": components["schemas"]["ProviderRevisionRestoreResponse"];
                 };
             };
+            /** @description Idempotency-Key is missing or invalid */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
             /** @description Authentication required. */
             401: {
                 headers: {
@@ -6323,7 +6497,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
-            /** @description Idempotency-Key was already used */
+            /** @description Idempotency-Key was already used for a different request or is in progress */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -6481,7 +6655,9 @@ export interface operations {
     list_requests: {
         parameters: {
             query?: {
+                /** @description Opaque cursor returned by the previous page. */
                 cursor?: string;
+                /** @description Page size, from 1 to 200. Defaults to 50. */
                 limit?: number;
                 route?: string;
                 provider_id?: string;
@@ -6609,6 +6785,7 @@ export interface operations {
         parameters: {
             query?: {
                 cursor?: string;
+                /** @description Page size from 1 to 200; defaults to 50 */
                 limit?: number;
             };
             header?: never;
@@ -6673,6 +6850,8 @@ export interface operations {
             /** @description Route draft created */
             201: {
                 headers: {
+                    /** @description Path of the created resource */
+                    Location?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -6955,7 +7134,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Route activated and runtime published */
+            /** @description Route activated, runtime published, and the draft returned to `draft` under a new ETag */
             200: {
                 headers: {
                     /** @description Current strong entity tag. */
@@ -6964,6 +7143,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RouteActivationResponse"];
+                };
+            };
+            /** @description Idempotency-Key is missing or invalid */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
                 };
             };
             /** @description Authentication required. */
@@ -6984,7 +7172,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
-            /** @description Draft has not been validated */
+            /** @description Draft has not been validated, or the Idempotency-Key was already used for a different request */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -7150,6 +7338,7 @@ export interface operations {
         parameters: {
             query?: {
                 cursor?: string;
+                /** @description Page size from 1 to 200; defaults to 50 */
                 limit?: number;
             };
             header?: never;
@@ -7253,6 +7442,7 @@ export interface operations {
         parameters: {
             query?: {
                 cursor?: string;
+                /** @description Page size from 1 to 200; defaults to 50 */
                 limit?: number;
             };
             header?: never;
@@ -7440,10 +7630,21 @@ export interface operations {
         responses: {
             201: {
                 headers: {
+                    /** @description Path of the created resource */
+                    Location?: string;
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": components["schemas"]["RouteDraftDetailResponse"];
+                };
+            };
+            /** @description Idempotency-Key is missing or invalid */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
                 };
             };
             /** @description Authentication required. */
@@ -7464,6 +7665,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
+            /** @description Idempotency-Key was already used or is in progress */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -7486,7 +7688,9 @@ export interface operations {
     list_runtime_generations: {
         parameters: {
             query?: {
+                /** @description Opaque cursor returned by the previous page. */
                 cursor?: string;
+                /** @description Page size, from 1 to 200. Defaults to 50. */
                 limit?: number;
             };
             header?: never;
@@ -7538,7 +7742,7 @@ export interface operations {
             query?: {
                 /** @description Opaque cursor returned by the previous page */
                 cursor?: string;
-                /** @description Page size from 1 to 100 */
+                /** @description Page size from 1 to 200; defaults to 50 */
                 limit?: number;
                 /** @description Owner-only user filter; defaults to the current user */
                 user_id?: string;
@@ -8320,7 +8524,7 @@ export interface operations {
             query?: {
                 /** @description Opaque cursor returned by the previous page */
                 cursor?: string;
-                /** @description Page size from 1 to 100 */
+                /** @description Page size from 1 to 200; defaults to 50 */
                 limit?: number;
             };
             header?: never;
@@ -8474,7 +8678,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
-            /** @description Last active owner cannot be demoted or deactivated */
+            /** @description Last active owner cannot be demoted or deactivated, and no user may change their own role or deactivate themselves */
             409: {
                 headers: {
                     [name: string]: unknown;

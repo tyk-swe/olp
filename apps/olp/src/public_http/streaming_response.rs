@@ -215,6 +215,26 @@ fn sse_stream_with_capacity(capacity: usize) -> (SseResponseWriter, Response) {
     )
 }
 
+/// A provider failure the gateway already knows about before a single byte is
+/// written must answer with a real HTTP status. Committing `200 OK
+/// text/event-stream` and then describing a 429 inside the body defeats every
+/// status-driven retry in an SDK, load balancer, or proxy — and the unary path
+/// on the identical failure already returns the right status. Returns the
+/// failure after closing out accounting for it.
+pub(crate) async fn precommit_stream_failure(
+    execution: &mut RoutedEvents,
+) -> Option<InferenceError> {
+    let Kind::Error { error } = &execution.first.kind else {
+        return None;
+    };
+    let failure = InferenceError::from_canonical(error);
+    let first = execution.first.clone();
+    let mut accounting = execution.take_accounting();
+    accounting.usage_mut().observe(&first);
+    accounting.finish(failure.accounting_outcome()).await;
+    Some(failure)
+}
+
 pub(crate) trait ProtocolStreamEncoder: Send + 'static {
     fn push(&mut self, event: Event) -> Result<Vec<Bytes>, String>;
     fn encode_error(&self, error: &InferenceError) -> Bytes;

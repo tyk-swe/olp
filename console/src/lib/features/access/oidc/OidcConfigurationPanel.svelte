@@ -13,9 +13,10 @@
     listOidcIdentities,
     reauthenticateWithPassword
   } from '$lib/api/profile';
-  import { FIXED_ROLES, can } from '$lib/auth/authorization';
-  import { authLifecycle } from '$lib/auth/lifecycle';
+  import { FIXED_ROLES } from '$lib/auth/authorization';
+  import { useRole } from '$lib/auth/useRole.svelte';
   import ConflictNotice from '$lib/components/ConflictNotice.svelte';
+  import ReauthenticateDialog from '$lib/components/ReauthenticateDialog.svelte';
   import {
     beginReload,
     conflictNotice,
@@ -29,7 +30,8 @@
   import { parseRoleMappings } from './mappings';
 
   const queryClient = useQueryClient();
-  const canManage = can(authLifecycle.snapshot().user?.role, 'users.manage');
+  const access = useRole();
+  const canManage = $derived(access.can('users.manage'));
   const oidc = createQuery(() => ({
     queryKey: ['oidc-configuration'],
     queryFn: ({ signal }) => getOidcConfiguration(signal),
@@ -51,6 +53,9 @@
   let busy = $state('');
   let error = $state('');
   let notice = $state('');
+  let reauthenticating = $state(false);
+  let reauthenticationBusy = $state(false);
+  let reauthenticationError = $state('');
   const concurrentNotice = $derived(conflictNotice(sync));
 
   $effect(() => {
@@ -105,6 +110,7 @@
 
   async function save(event: SubmitEvent) {
     event.preventDefault();
+    if (!canManage) return;
     error = notice = '';
     if (!discoveryUrl || !issuer || !clientId) {
       error = 'Issuer, discovery URL, and client ID are required.';
@@ -156,19 +162,39 @@
         window.location.assign(await beginOidcReauthentication('oidc_link'));
         return;
       }
-      const password = window.prompt(
-        'Enter your current password to link an OIDC identity.'
-      );
-      if (password === null) return;
-      await reauthenticateWithPassword(password, 'oidc_link');
-      window.location.assign(await beginOidcLink());
+      reauthenticationError = '';
+      reauthenticating = true;
     } catch (cause) {
       error = accessErrorMessage(cause);
     } finally {
       busy = '';
     }
   }
+
+  async function confirmLinkIdentity(password: string) {
+    reauthenticationBusy = true;
+    reauthenticationError = '';
+    try {
+      await reauthenticateWithPassword(password, 'oidc_link');
+      reauthenticating = false;
+      window.location.assign(await beginOidcLink());
+    } catch (cause) {
+      reauthenticationError = accessErrorMessage(cause);
+    } finally {
+      reauthenticationBusy = false;
+    }
+  }
 </script>
+
+{#if reauthenticating}
+  <ReauthenticateDialog
+    description="Linking an OIDC identity changes how you sign in, so confirm your current password first."
+    busy={reauthenticationBusy}
+    error={reauthenticationError}
+    onConfirm={confirmLinkIdentity}
+    onCancel={() => (reauthenticating = false)}
+  />
+{/if}
 
 {#if error}<div class="inline-problem" role="alert">{error}</div>{/if}
 {#if notice}<div class="success-banner" role="status">{notice}</div>{/if}
@@ -203,7 +229,11 @@
           <h2 id="oidc-heading">OIDC Authorization Code + PKCE</h2>
         </div>
         <label class="enabled"
-          ><input type="checkbox" bind:checked={enabled} /> Enabled</label
+          ><input
+            type="checkbox"
+            bind:checked={enabled}
+            disabled={!canManage}
+          /> Enabled</label
         >
       </div>
       <p class="muted">
@@ -218,6 +248,7 @@
             type="url"
             bind:value={issuer}
             placeholder="https://id.example.com"
+            disabled={!canManage}
             required
           />
         </div>
@@ -227,6 +258,7 @@
             type="url"
             bind:value={discoveryUrl}
             placeholder="https://id.example.com/.well-known/openid-configuration"
+            disabled={!canManage}
             required
           />
         </div>
@@ -235,6 +267,7 @@
             id="client-id"
             autocomplete="off"
             bind:value={clientId}
+            disabled={!canManage}
             required
           />
         </div>
@@ -244,6 +277,7 @@
             type="password"
             autocomplete="new-password"
             bind:value={clientSecret}
+            disabled={!canManage}
             placeholder={oidc.data?.has_client_secret
               ? 'Leave blank to keep current secret'
               : 'Write-only secret'}
@@ -253,24 +287,28 @@
           <label for="oidc-scopes">Scopes</label><input
             id="oidc-scopes"
             bind:value={scopes}
+            disabled={!canManage}
           />
         </div>
         <div class="form-field">
           <label for="email-claim">Email claim</label><input
             id="email-claim"
             bind:value={emailClaim}
+            disabled={!canManage}
           />
         </div>
         <div class="form-field">
           <label for="groups-claim">Groups claim</label><input
             id="groups-claim"
             bind:value={groupsClaim}
+            disabled={!canManage}
           />
         </div>
         <div class="form-field">
           <label for="default-role">Default role</label><select
             id="default-role"
             bind:value={defaultRole}
+            disabled={!canManage}
             ><option value="">No default (mapping required)</option
             >{#each FIXED_ROLES as role (role)}<option value={role}
                 >{role}</option
@@ -290,12 +328,14 @@
         <label for="email-mappings">Email mappings</label><textarea
           id="email-mappings"
           bind:value={emailMappings}
+          disabled={!canManage}
           placeholder="owner@example.com=owner"></textarea>
       </div>
       <div class="form-field">
         <label for="group-mappings">Group mappings</label><textarea
           id="group-mappings"
           bind:value={groupMappings}
+          disabled={!canManage}
           placeholder="platform-team=operator"></textarea>
       </div>
       {#if !oidc.data?.enabled}

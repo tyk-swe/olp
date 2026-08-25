@@ -1,0 +1,145 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT rrt.route_revision_id, rrt.id, rrt.routing_id, rrt.provider_model_id, p.id AS provider_id, COALESCE(pr.name, p.name) AS \"provider_name!\", COALESCE(prm.upstream_model, pm.upstream_model) AS \"provider_model!\", (p.state <> 'disabled'::provider_state AND prm.id IS NOT NULL AND COALESCE(prm.enabled, false)) AS \"available!\", rrt.priority, rrt.weight, rrt.timeout_ms, rrt.position FROM route_revision_targets rrt JOIN provider_models pm ON pm.id = rrt.provider_model_id JOIN providers p ON p.id = pm.provider_id LEFT JOIN provider_revisions pr ON pr.id = p.active_revision_id LEFT JOIN provider_revision_models prm ON prm.provider_revision_id = pr.id AND prm.source_provider_model_id = pm.id WHERE rrt.route_revision_id = ANY($1::uuid[]) ORDER BY rrt.route_revision_id, rrt.position",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "route_revision_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "route_revision_targets",
+            "name": "route_revision_id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "route_revision_targets",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "routing_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "route_revision_targets",
+            "name": "routing_id"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "provider_model_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "route_revision_targets",
+            "name": "provider_model_id"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "provider_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "providers",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "provider_name!",
+        "type_info": "Text",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 6,
+        "name": "provider_model!",
+        "type_info": "Text",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 7,
+        "name": "available!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 8,
+        "name": "priority",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "route_revision_targets",
+            "name": "priority"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "weight",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "route_revision_targets",
+            "name": "weight"
+          }
+        }
+      },
+      {
+        "ordinal": 10,
+        "name": "timeout_ms",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "route_revision_targets",
+            "name": "timeout_ms"
+          }
+        }
+      },
+      {
+        "ordinal": 11,
+        "name": "position",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "route_revision_targets",
+            "name": "position"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "UuidArray"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      null,
+      null,
+      null,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "f90308c6abb02d5230bc16350e302e50f02ff240300d501e973de86f87a1e36a"
+}

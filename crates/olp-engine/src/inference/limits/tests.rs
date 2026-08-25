@@ -10,6 +10,8 @@ use crate::domain::{
 };
 use serde_json::json;
 
+use crate::inference::error::Kind as InferenceErrorKind;
+
 use super::*;
 
 #[derive(Debug, Eq, PartialEq)]
@@ -289,6 +291,56 @@ async fn http_token_reservation_charges_only_a_positive_estimate_delta() {
         assert_eq!(requests[0].requested_tokens, 2);
     }
     release(reservation, None).await;
+}
+
+#[tokio::test]
+async fn a_request_larger_than_the_whole_tpm_budget_is_a_client_error_not_a_rate_limit() {
+    // A 2000 TPM key against the 4096-token default output estimate: the Lua
+    // script rejects `requested > limit` outright, so reporting it as a 429
+    // with a Retry-After pointed the caller at a minute that never arrives.
+    let key = api_key(ApiKeyLimits {
+        requests_per_minute: None,
+        tokens_per_minute: NonZeroU64::new(2_000),
+        concurrency: None,
+    });
+    let limiter = ReloadableLimiter::default();
+    let calls = Arc::new(BackendCalls::default());
+    limiter.install(backend(&calls, BackendBehavior::Success));
+
+    let generation = operation(
+        "generation",
+        json!({
+            "route": "default",
+            "messages": [{"role": "user", "content": [{"type": "text", "text": "hi"}]}],
+            "parameters": {"stream": false},
+            "tools": [],
+            "tool_choice": null,
+            "response_format": null
+        }),
+    );
+    let error = reserve(&limiter, &key, &generation, None)
+        .await
+        .err()
+        .expect("an impossible request cannot be admitted");
+    assert_eq!(error.code(), "request_exceeds_token_limit");
+    assert_eq!(error.kind(), InferenceErrorKind::InvalidRequest);
+    assert_eq!(
+        error.retry_after(),
+        None,
+        "no amount of waiting makes this request fit"
+    );
+    assert_eq!(
+        calls.reserves.load(std::sync::atomic::Ordering::Relaxed),
+        0,
+        "the limiter is never consulted for a request that cannot fit"
+    );
+
+    // A request that does fit still reaches the limiter.
+    assert!(
+        reserve(&limiter, &key, &text_count("12345678"), None)
+            .await
+            .is_ok()
+    );
 }
 
 #[tokio::test]

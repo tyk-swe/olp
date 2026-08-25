@@ -20,6 +20,7 @@
     providerSpec,
     editValues = $bindable(),
     busy,
+    canManage,
     run,
     onTouch,
     onSave,
@@ -31,6 +32,7 @@
     providerSpec: ProviderKindCapability | undefined;
     editValues: ProviderEditValues;
     busy: string;
+    canManage: boolean;
     run: RunProviderAction;
     onTouch: () => void;
     onSave: () => void;
@@ -59,6 +61,7 @@
         id="detail-name"
         bind:value={editValues.name}
         oninput={onTouch}
+        disabled={!canManage}
       />
     </div>
     <div class="form-field">
@@ -75,6 +78,7 @@
           id="detail-endpoint"
           bind:value={editValues.endpoint}
           oninput={onTouch}
+          disabled={!canManage}
         />
       </div>{/if}
     {#if providerSpec && hasApiVersion(providerSpec)}<div class="form-field">
@@ -82,6 +86,7 @@
           id="detail-version"
           bind:value={editValues.apiVersion}
           oninput={onTouch}
+          disabled={!canManage}
         />
       </div>{/if}
     {#if providerSpec && hasCloudRegion(providerSpec)}<div class="form-field">
@@ -89,6 +94,7 @@
           id="detail-region"
           bind:value={editValues.cloudRegion}
           oninput={onTouch}
+          disabled={!canManage}
         />
       </div>{/if}
     {#if providerSpec && hasCloudProject(providerSpec)}<div class="form-field">
@@ -96,6 +102,7 @@
           id="detail-project"
           bind:value={editValues.cloudProject}
           oninput={onTouch}
+          disabled={!canManage}
         />
       </div>{/if}
     {#if providerSpec && hasDeployment(providerSpec)}<div class="form-field">
@@ -103,12 +110,14 @@
           id="detail-deployment"
           bind:value={editValues.deployment}
           oninput={onTouch}
+          disabled={!canManage}
         />
       </div>{/if}
   </div>
   <ProviderActivationControls
     {current}
     {busy}
+    {canManage}
     canSave={Boolean(providerSpec)}
     {run}
     {onSave}

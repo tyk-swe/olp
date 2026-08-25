@@ -14,20 +14,25 @@ use olp_engine::domain::{
 
 use crate::{gateway, public_http::problem::Problem};
 
-/// The route information authenticated before a multipart body is read. A
-/// route-restricted key must either supply the header it was pre-authorized
-/// for, or place `model` before every file part so the parser can authorize it
-/// before creating a spool file.
+/// The route information authenticated before a multipart body is read.
+///
+/// A route-restricted key that supplies no `X-OLP-Route` header must still name
+/// an authorized route in its `model` field, but the field may appear anywhere
+/// in the body: OpenAI's own documented `curl -F file=@… -F model=…` puts the
+/// file first, and rejecting that would make the standard invocation fail.
+/// Files stream to the bounded spool under the reservation the key already
+/// holds, and the request is rejected — with every spooled file cleaned up —
+/// if the body ends without an authorized `model`.
 #[derive(Clone, Debug)]
 pub(crate) enum MultipartRouteAdmission {
     Unrestricted,
-    RequireModelBeforeFile(BTreeSet<RouteSlug>),
+    RequireAuthorizedModel(BTreeSet<RouteSlug>),
     Expected(RouteSlug),
 }
 
 impl MultipartRouteAdmission {
-    pub(crate) const fn requires_model_before_file(&self) -> bool {
-        matches!(self, Self::RequireModelBeforeFile(_))
+    pub(crate) const fn requires_authorized_model(&self) -> bool {
+        matches!(self, Self::RequireAuthorizedModel(_))
     }
 }
 
@@ -222,7 +227,7 @@ pub(super) fn preauthorize_multipart(
         Ok((MultipartRouteAdmission::Expected(route), reservation_bytes))
     } else {
         Ok((
-            MultipartRouteAdmission::RequireModelBeforeFile(key.allowed_routes.clone()),
+            MultipartRouteAdmission::RequireAuthorizedModel(key.allowed_routes.clone()),
             reservation_bytes,
         ))
     }

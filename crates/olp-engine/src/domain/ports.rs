@@ -1,4 +1,4 @@
-use std::{fmt, future::Future, pin::Pin, sync::Arc};
+use std::{fmt, future::Future, pin::Pin, sync::Arc, time::Duration};
 
 use bytes::Bytes;
 use futures::Stream;
@@ -152,6 +152,38 @@ pub struct TransportError {
     pub class: AttemptFailureClass,
     pub response_committed: bool,
     pub message: String,
+    /// What the upstream response itself said. Preserved so the public status
+    /// and the retry hint reflect the provider instead of a blanket 502.
+    pub upstream: UpstreamSignal,
+}
+
+/// Signals lifted from an upstream HTTP error response.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct UpstreamSignal {
+    /// The upstream HTTP status, when the failure came from a response.
+    pub status: Option<u16>,
+    /// The upstream `Retry-After`, parsed and clamped.
+    pub retry_after: Option<Duration>,
+}
+
+/// `Retry-After` values above this are treated as "come back much later"
+/// rather than propagated verbatim; no caller benefits from a multi-hour hint.
+pub const MAX_UPSTREAM_RETRY_AFTER: Duration = Duration::from_secs(300);
+
+impl UpstreamSignal {
+    #[must_use]
+    pub fn from_status(status: u16) -> Self {
+        Self {
+            status: Some(status),
+            retry_after: None,
+        }
+    }
+
+    #[must_use]
+    pub fn with_retry_after(mut self, retry_after: Option<Duration>) -> Self {
+        self.retry_after = retry_after.map(|value| value.min(MAX_UPSTREAM_RETRY_AFTER));
+        self
+    }
 }
 
 impl fmt::Debug for TransportError {
@@ -162,6 +194,7 @@ impl fmt::Debug for TransportError {
             .field("class", &self.class)
             .field("response_committed", &self.response_committed)
             .field("message", &"[REDACTED]")
+            .field("upstream", &self.upstream)
             .finish()
     }
 }

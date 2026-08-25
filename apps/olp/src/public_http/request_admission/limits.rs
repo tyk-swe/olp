@@ -11,10 +11,10 @@ use axum::{
 use olp_engine::domain::{
     auth::{ApiKeyStatus, GatewayCapability},
     canonical::identity::Surface,
-    ids::ApiKeyLookupId,
+    ids::{ApiKeyLookupId, RouteSlug},
 };
 use olp_engine::inference::{
-    limits::{LimitError, LimitRequest, Reservation},
+    limits::{LimitDimension, LimitError, LimitRequest, Reservation},
     principal::Principal,
 };
 use olp_engine::protocols::openai::embeddings::EmbeddingWireInput;
@@ -142,9 +142,48 @@ pub(super) fn authenticate_inference_headers(
     ))
 }
 
+const MAX_CONCURRENCY_RETRY_HINT: Duration = Duration::from_secs(5);
+
+/// A concurrency slot frees the moment any in-flight request finishes, which is
+/// nothing like a lease TTL. Handing back the oldest live lease's expiry told a
+/// client to idle for the longest route's timeout — minutes, potentially, and
+/// for requests to fast routes — over a slot usually microseconds away.
+fn retry_hint(dimension: LimitDimension, retry_after: Duration) -> Duration {
+    if dimension == LimitDimension::Concurrency {
+        retry_after.min(MAX_CONCURRENCY_RETRY_HINT)
+    } else {
+        retry_after
+    }
+}
+
+/// Sizes the crash-recovery lease from the route actually being called. Only
+/// when the route is still unknown does the widest route the key may use apply.
+fn reservation_route_timeout(
+    routes: &std::collections::BTreeMap<RouteSlug, olp_engine::domain::routing::route::Route>,
+    allowed_routes: &std::collections::BTreeSet<RouteSlug>,
+    route: Option<&RouteSlug>,
+) -> Duration {
+    route.and_then(|slug| routes.get(slug)).map_or_else(
+        || {
+            routes
+                .iter()
+                .filter(|(slug, _)| allowed_routes.is_empty() || allowed_routes.contains(*slug))
+                .map(|(_, route)| route.overall_timeout.as_duration())
+                .max()
+                .unwrap_or(DEFAULT_RESERVATION_LEASE_TIMEOUT)
+        },
+        |route| route.overall_timeout.as_duration(),
+    )
+}
+
+/// Lease TTL when the key can reach no route at all — only reachable for a
+/// request the router is about to reject anyway.
+const DEFAULT_RESERVATION_LEASE_TIMEOUT: Duration = Duration::from_secs(30);
+
 pub(super) async fn reserve_http_inference_limits(
     state: &RequestBoundaryState,
     principal: &Principal,
+    route: Option<&olp_engine::domain::ids::RouteSlug>,
     requested_tokens: i64,
 ) -> Result<Option<Reservation>, gateway::error::InferenceError> {
     if !principal.key().limits.has_hard_limits() {
@@ -160,17 +199,22 @@ pub(super) async fn reserve_http_inference_limits(
         .map(|value| i64::try_from(value.get()))
         .transpose()
         .map_err(|_| gateway::error::InferenceError::unavailable("limit_configuration_invalid"))?;
-    let route_timeout = principal
-        .runtime()
-        .routes
-        .iter()
-        .filter(|(slug, _)| {
-            principal.key().allowed_routes.is_empty()
-                || principal.key().allowed_routes.contains(*slug)
-        })
-        .map(|(_, route)| route.overall_timeout.as_duration())
-        .max()
-        .unwrap_or(Duration::from_secs(30));
+    if let Some(limit) = tokens_per_minute
+        && requested_tokens > limit
+    {
+        return Err(
+            olp_engine::inference::error::Error::request_exceeds_token_limit(
+                requested_tokens,
+                limit,
+            )
+            .into(),
+        );
+    }
+    let route_timeout = reservation_route_timeout(
+        &principal.runtime().routes,
+        &principal.key().allowed_routes,
+        route,
+    );
     let result = tokio::time::timeout(
         Duration::from_secs(1),
         limiter.reserve(LimitRequest {
@@ -201,7 +245,7 @@ pub(super) async fn reserve_http_inference_limits(
             retry_after,
         }) => Err(gateway::error::InferenceError::rate_limited(
             dimension,
-            retry_after,
+            retry_hint(dimension, retry_after),
         )),
         Err(error) => {
             tracing::error!(%error, "hard HTTP limit reservation failed closed");
@@ -391,5 +435,94 @@ mod tests {
         ] {
             assert_eq!(estimate_http_non_json_request_tokens(category), expected);
         }
+    }
+
+    use std::collections::{BTreeMap, BTreeSet};
+    use std::num::{NonZeroU16, NonZeroU32};
+
+    use olp_engine::domain::{
+        ids::{DurationMs, ProviderId, RouteId, TargetId},
+        routing::route::{Route, Target},
+    };
+
+    fn route(slug: &str, overall_timeout: Duration) -> (RouteSlug, Route) {
+        let slug = RouteSlug::parse(slug).unwrap();
+        let route = Route {
+            id: RouteId::new(),
+            routing_id: None,
+            slug: slug.clone(),
+            operations: std::collections::BTreeSet::new(),
+            overall_timeout: DurationMs::new(
+                u64::try_from(overall_timeout.as_millis()).unwrap_or(u64::MAX),
+            ),
+            max_attempts: NonZeroU16::new(1).unwrap(),
+            targets: vec![Target {
+                id: TargetId::new(),
+                routing_id: None,
+                provider_id: ProviderId::new(),
+                upstream_model: "model".to_owned(),
+                priority: 0,
+                weight: NonZeroU32::new(1).unwrap(),
+                timeout: DurationMs::new(1_000),
+            }],
+        };
+        (slug, route)
+    }
+
+    #[test]
+    fn a_concurrency_rejection_does_not_hand_back_a_lease_sized_retry_hint() {
+        // The limiter reports the oldest live lease's expiry, which is sized by
+        // the widest route's timeout plus a minute. A slot usually frees in
+        // microseconds, so a conforming client would idle for nothing.
+        assert_eq!(
+            retry_hint(LimitDimension::Concurrency, Duration::from_secs(660)),
+            MAX_CONCURRENCY_RETRY_HINT
+        );
+        assert_eq!(
+            retry_hint(LimitDimension::Concurrency, Duration::from_millis(250)),
+            Duration::from_millis(250)
+        );
+        // Fixed-window dimensions really do reset at the stated time.
+        for dimension in [LimitDimension::Requests, LimitDimension::Tokens] {
+            assert_eq!(
+                retry_hint(dimension, Duration::from_secs(47)),
+                Duration::from_secs(47)
+            );
+        }
+    }
+
+    #[test]
+    fn the_lease_is_sized_from_the_route_being_called() {
+        let routes = BTreeMap::from([
+            route("fast", Duration::from_secs(5)),
+            route("slow", Duration::from_secs(600)),
+        ]);
+        let fast = RouteSlug::parse("fast").unwrap();
+        let unrestricted = BTreeSet::new();
+
+        assert_eq!(
+            reservation_route_timeout(&routes, &unrestricted, Some(&fast)),
+            Duration::from_secs(5),
+            "one slow route configured elsewhere must not stretch a fast route's lease"
+        );
+        // With no route yet identified the widest the key may reach still applies.
+        assert_eq!(
+            reservation_route_timeout(&routes, &unrestricted, None),
+            Duration::from_secs(600)
+        );
+        assert_eq!(
+            reservation_route_timeout(&routes, &BTreeSet::from([fast.clone()]), None),
+            Duration::from_secs(5)
+        );
+        assert_eq!(
+            reservation_route_timeout(&BTreeMap::new(), &unrestricted, None),
+            DEFAULT_RESERVATION_LEASE_TIMEOUT
+        );
+        // A route the runtime does not know falls back the same way.
+        let missing = RouteSlug::parse("missing").unwrap();
+        assert_eq!(
+            reservation_route_timeout(&routes, &unrestricted, Some(&missing)),
+            Duration::from_secs(600)
+        );
     }
 }

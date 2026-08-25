@@ -137,6 +137,10 @@ impl From<CoreInferenceError> for InferenceError {
     }
 }
 
+/// The client disconnected. Nothing is delivered, but the status is recorded,
+/// so it must not read as a gateway failure the operator should page on.
+pub(super) const CLIENT_CLOSED_REQUEST: u16 = 499;
+
 fn presentation(kind: InferenceErrorKind) -> (StatusCode, &'static str) {
     match kind {
         InferenceErrorKind::Authentication => (StatusCode::UNAUTHORIZED, "authentication_error"),
@@ -146,25 +150,36 @@ fn presentation(kind: InferenceErrorKind) -> (StatusCode, &'static str) {
             (StatusCode::PAYLOAD_TOO_LARGE, "invalid_request_error")
         }
         InferenceErrorKind::NotFound => (StatusCode::NOT_FOUND, "invalid_request_error"),
-        InferenceErrorKind::Conflict => (StatusCode::CONFLICT, "conflict_error"),
+        InferenceErrorKind::Conflict => (StatusCode::CONFLICT, "invalid_request_error"),
         InferenceErrorKind::RateLimit => (StatusCode::TOO_MANY_REQUESTS, "rate_limit_error"),
-        InferenceErrorKind::Unavailable => {
-            (StatusCode::SERVICE_UNAVAILABLE, "service_unavailable_error")
+        InferenceErrorKind::Unavailable => (StatusCode::SERVICE_UNAVAILABLE, "server_error"),
+        InferenceErrorKind::RequestTimeout => {
+            (StatusCode::REQUEST_TIMEOUT, "invalid_request_error")
         }
-        InferenceErrorKind::RequestTimeout => (StatusCode::REQUEST_TIMEOUT, "timeout_error"),
-        InferenceErrorKind::GatewayTimeout => (StatusCode::GATEWAY_TIMEOUT, "timeout_error"),
-        InferenceErrorKind::Upstream => (StatusCode::BAD_GATEWAY, "upstream_error"),
-        InferenceErrorKind::Cancelled => (StatusCode::BAD_GATEWAY, "cancelled_error"),
+        InferenceErrorKind::GatewayTimeout => (StatusCode::GATEWAY_TIMEOUT, "server_error"),
+        InferenceErrorKind::Upstream => (StatusCode::BAD_GATEWAY, "server_error"),
+        InferenceErrorKind::UpstreamRejected(status) => (
+            StatusCode::from_u16(status).unwrap_or(StatusCode::BAD_GATEWAY),
+            match status {
+                401 => "authentication_error",
+                403 => "permission_error",
+                _ => "invalid_request_error",
+            },
+        ),
+        InferenceErrorKind::Cancelled => (
+            StatusCode::from_u16(CLIENT_CLOSED_REQUEST).unwrap_or(StatusCode::BAD_GATEWAY),
+            "invalid_request_error",
+        ),
         InferenceErrorKind::Canonical(class) => {
             let status = match class {
+                ErrorClass::Authentication => StatusCode::UNAUTHORIZED,
+                ErrorClass::Authorization => StatusCode::FORBIDDEN,
+                ErrorClass::InvalidRequest => StatusCode::BAD_REQUEST,
                 ErrorClass::RateLimit => StatusCode::TOO_MANY_REQUESTS,
                 ErrorClass::Timeout => StatusCode::GATEWAY_TIMEOUT,
-                ErrorClass::Authentication
-                | ErrorClass::Authorization
-                | ErrorClass::InvalidRequest
-                | ErrorClass::Transport
-                | ErrorClass::Upstream
-                | ErrorClass::Internal => StatusCode::BAD_GATEWAY,
+                ErrorClass::Transport | ErrorClass::Upstream | ErrorClass::Internal => {
+                    StatusCode::BAD_GATEWAY
+                }
             };
             (status, super::openai_http::error_type(class))
         }
@@ -303,7 +318,7 @@ mod tests {
             (
                 CoreInferenceError::new(InferenceErrorKind::Conflict, "code", "message", None),
                 StatusCode::CONFLICT,
-                "conflict_error",
+                "invalid_request_error",
             ),
             (
                 CoreInferenceError::new(InferenceErrorKind::RateLimit, "code", "message", None),
@@ -313,7 +328,7 @@ mod tests {
             (
                 CoreInferenceError::new(InferenceErrorKind::Unavailable, "code", "message", None),
                 StatusCode::SERVICE_UNAVAILABLE,
-                "service_unavailable_error",
+                "server_error",
             ),
             (
                 CoreInferenceError::new(
@@ -323,7 +338,7 @@ mod tests {
                     None,
                 ),
                 StatusCode::REQUEST_TIMEOUT,
-                "timeout_error",
+                "invalid_request_error",
             ),
             (
                 CoreInferenceError::new(
@@ -333,17 +348,37 @@ mod tests {
                     None,
                 ),
                 StatusCode::GATEWAY_TIMEOUT,
-                "timeout_error",
+                "server_error",
             ),
             (
                 CoreInferenceError::new(InferenceErrorKind::Upstream, "code", "message", None),
                 StatusCode::BAD_GATEWAY,
-                "upstream_error",
+                "server_error",
+            ),
+            (
+                CoreInferenceError::new(
+                    InferenceErrorKind::UpstreamRejected(422),
+                    "upstream_rejected",
+                    "message",
+                    None,
+                ),
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "invalid_request_error",
+            ),
+            (
+                CoreInferenceError::new(
+                    InferenceErrorKind::UpstreamRejected(401),
+                    "upstream_rejected",
+                    "message",
+                    None,
+                ),
+                StatusCode::UNAUTHORIZED,
+                "authentication_error",
             ),
             (
                 CoreInferenceError::new(InferenceErrorKind::Cancelled, "code", "message", None),
-                StatusCode::BAD_GATEWAY,
-                "cancelled_error",
+                StatusCode::from_u16(CLIENT_CLOSED_REQUEST).unwrap(),
+                "invalid_request_error",
             ),
             (
                 CoreInferenceError::new(
@@ -363,7 +398,27 @@ mod tests {
                     None,
                 ),
                 StatusCode::BAD_GATEWAY,
-                "internal_error",
+                "server_error",
+            ),
+            (
+                CoreInferenceError::new(
+                    InferenceErrorKind::Canonical(ErrorClass::InvalidRequest),
+                    "code",
+                    "message",
+                    None,
+                ),
+                StatusCode::BAD_REQUEST,
+                "invalid_request_error",
+            ),
+            (
+                CoreInferenceError::new(
+                    InferenceErrorKind::Canonical(ErrorClass::Authentication),
+                    "code",
+                    "message",
+                    None,
+                ),
+                StatusCode::UNAUTHORIZED,
+                "authentication_error",
             ),
         ];
 

@@ -87,8 +87,11 @@
     <p role="status"><span aria-hidden="true"></span>Verifying your session…</p>
   </main>
 {:else if authentication.phase !== 'authenticated' || !authentication.user}
-  <main class="session-gate">
-    {#if authentication.phase === 'unavailable'}
+  <main class="session-gate" aria-busy={authentication.phase === 'anonymous'}>
+    {#if authentication.phase === 'anonymous'}
+      <!-- Anonymous here means the redirect to login is still being resolved. -->
+      <p role="status"><span aria-hidden="true"></span>Verifying your session…</p>
+    {:else if authentication.phase === 'unavailable'}
       <div class="problem-banner" role="alert">
         <div>
           <strong>Session verification unavailable</strong>

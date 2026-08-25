@@ -355,6 +355,23 @@ pub(super) async fn exercise(
     .await;
     assert_eq!(activation.status(), StatusCode::OK);
     let active_etag = etag(&activation);
+    let activation_body = response_json(activation).await;
+    // An identical retry replays the recorded activation response.
+    let replayed_activation = send(
+        app,
+        Method::POST,
+        &format!("/api/v1/providers/{provider_id}/activate"),
+        None,
+        Some(cookie),
+        Some(csrf),
+        Some("provider-http-activate-01"),
+        Some(&certified_etag),
+    )
+    .await;
+    assert_eq!(replayed_activation.status(), StatusCode::OK);
+    assert_eq!(etag(&replayed_activation), active_etag);
+    assert_eq!(response_json(replayed_activation).await, activation_body);
+    // The same key with a different If-Match is a reuse, not a retry.
     let duplicate_activation = send(
         app,
         Method::POST,

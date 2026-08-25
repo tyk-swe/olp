@@ -238,6 +238,12 @@ fn persisted_routing_ids_drive_rendezvous_and_legacy_payloads_default_to_row_ids
             .map(|(_, target_id)| target_id)
             .collect::<Vec<_>>()
     );
+    // Without a persisted routing ID the row ID is the stable identity.
+    assert!(
+        legacy_attempts
+            .iter()
+            .all(|attempt| attempt.routing_id == attempt.target_id)
+    );
     let legacy_payload = serde_json::to_value(&runtime).unwrap();
     let legacy_route = legacy_payload["routes"]["default"].as_object().unwrap();
     assert!(!legacy_route.contains_key("routing_id"));
@@ -284,7 +290,21 @@ fn persisted_routing_ids_drive_rendezvous_and_legacy_payloads_default_to_row_ids
             .total_cmp(&left.0)
             .then_with(|| left.1.cmp(&right.1))
     });
-    let persisted_attempts = select(&runtime, affinity)
+    let selected = select(&runtime, affinity);
+    // Circuit health has to survive a route republish, which mints new row IDs
+    // for every target. The plan therefore carries the persisted routing ID
+    // alongside the revision-local one.
+    assert_eq!(
+        selected
+            .iter()
+            .map(|attempt| attempt.routing_id)
+            .collect::<Vec<_>>(),
+        expected
+            .iter()
+            .map(|(_, routing_id, _)| *routing_id)
+            .collect::<Vec<_>>()
+    );
+    let persisted_attempts = selected
         .into_iter()
         .map(|attempt| attempt.target_id)
         .collect::<Vec<_>>();
@@ -595,6 +615,7 @@ fn last_owner_cannot_be_demoted_or_removed() {
 #[test]
 fn failover_is_never_allowed_after_commit() {
     let retryable = TransportError {
+        upstream: Default::default(),
         phase: TransportPhase::FirstByte,
         class: AttemptFailureClass::Timeout,
         response_committed: false,
@@ -613,6 +634,7 @@ fn failover_is_never_allowed_after_commit() {
 #[test]
 fn transport_error_diagnostics_never_include_upstream_text() {
     let error = TransportError {
+        upstream: Default::default(),
         phase: TransportPhase::Body,
         class: AttemptFailureClass::Protocol,
         response_committed: true,

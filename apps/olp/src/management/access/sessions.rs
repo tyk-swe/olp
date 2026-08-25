@@ -49,7 +49,7 @@ pub(in crate::management) struct SessionListResponse {
     tag = "sessions",
     params(
         ("cursor" = Option<String>, Query, description = "Opaque cursor returned by the previous page"),
-        ("limit" = Option<u16>, Query, description = "Page size from 1 to 100"),
+        ("limit" = Option<u16>, Query, minimum = 1, maximum = 200, description = "Page size from 1 to 200; defaults to 50"),
         ("user_id" = Option<Uuid>, Query, description = "Owner-only user filter; defaults to the current user")
     ),
     responses(
