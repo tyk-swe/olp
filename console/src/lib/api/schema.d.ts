@@ -2499,7 +2499,10 @@ export interface components {
          *     allowlist, the rate limits, and the expiry.
          */
         UpdateApiKeyRequest: {
-            /** @description Send `[]` to clear the allowlist, which restricts the key to no route. */
+            /**
+             * @description Omit to keep the stored allowlist. Send `[]` to clear it; an empty
+             *     allowlist places no route restriction on the key.
+             */
             allowed_routes?: string[];
             /** Format: date-time */
             expires_at?: string | null;

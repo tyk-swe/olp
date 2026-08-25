@@ -4491,7 +4491,7 @@
         "description": "A merge patch: every field is optional, an omitted field keeps the stored\nvalue, and an explicit `null` clears one. Writing absent fields through\nwould silently widen a key's privileges — a rename would drop the route\nallowlist, the rate limits, and the expiry.",
         "properties": {
           "allowed_routes": {
-            "description": "Send `[]` to clear the allowlist, which restricts the key to no route.",
+            "description": "Omit to keep the stored allowlist. Send `[]` to clear it; an empty\nallowlist places no route restriction on the key.",
             "items": {
               "type": "string"
             },

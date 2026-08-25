@@ -147,7 +147,8 @@ pub(crate) struct UpdateApiKeyRequest {
     #[serde(default)]
     #[schema(nullable = false)]
     pub scopes: Option<Vec<String>>,
-    /// Send `[]` to clear the allowlist, which restricts the key to no route.
+    /// Omit to keep the stored allowlist. Send `[]` to clear it; an empty
+    /// allowlist places no route restriction on the key.
     #[serde(default)]
     #[schema(nullable = false)]
     pub allowed_routes: Option<Vec<String>>,
