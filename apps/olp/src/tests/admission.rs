@@ -131,6 +131,54 @@ fn public_auth_source_uses_forwarding_only_from_trusted_peers() {
 }
 
 #[test]
+fn audit_request_provenance_records_only_what_the_boundary_proves() {
+    let mut state = ProcessComposition::new(
+        ApiMode::Control,
+        None,
+        Arc::new(Manager::empty()),
+        "https://olp.example.test",
+        PathBuf::from("missing-console"),
+    );
+    state.set_trusted_proxy_cidrs(vec!["10.0.0.0/8".parse().unwrap()]);
+    let state = state.gateway_state_for_test();
+
+    // A trusted proxy that forwards no chain leaves no client address to
+    // record. The request is still audited, with a null source address.
+    let mut curl = HeaderMap::new();
+    curl.insert(
+        axum::http::header::USER_AGENT,
+        HeaderValue::from_static("curl/8.5.0 (x86_64-pc-linux-gnu) libcurl/8.5.0"),
+    );
+    let provenance = audit_request_provenance(
+        state.request_boundary(),
+        &curl,
+        Some("10.2.3.4:443".parse().unwrap()),
+    );
+    assert_eq!(provenance.source_ip, None);
+    assert_eq!(provenance.user_agent_family.as_deref(), Some("curl"));
+
+    // A direct client cannot claim someone else's address by sending the
+    // forwarding header itself.
+    let mut spoofed = curl.clone();
+    spoofed.insert("x-forwarded-for", HeaderValue::from_static("10.9.9.9"));
+    let provenance = audit_request_provenance(
+        state.request_boundary(),
+        &spoofed,
+        Some("203.0.113.30:443".parse().unwrap()),
+    );
+    assert_eq!(
+        provenance.source_ip,
+        Some("203.0.113.30".parse::<std::net::IpAddr>().unwrap())
+    );
+
+    // Without a connected peer there is nothing to attribute the request to,
+    // and the audit row records neither field rather than guessing.
+    let provenance = audit_request_provenance(state.request_boundary(), &HeaderMap::new(), None);
+    assert_eq!(provenance.source_ip, None);
+    assert_eq!(provenance.user_agent_family, None);
+}
+
+#[test]
 fn multipart_admission_is_post_only_and_recovers_after_a_parser_drops() {
     assert!(
         InferenceEndpoint::classify(&axum::http::Method::GET, "/openai/v1/videos")

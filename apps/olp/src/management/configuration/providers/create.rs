@@ -34,11 +34,14 @@ use crate::management::{
 use crate::{
     bootstrap::mode_dependencies::ManagementState,
     bootstrap::provider_adapter::{ProviderConfigFields, provider_config, provider_credential},
+    public_http::problem::FieldErrorCodes,
     public_http::problem::FieldErrors,
     public_http::problem::Problem,
 };
 
 use super::manage::ProviderMutationFingerprint;
+use super::record_violations;
+use crate::management::provenance::Provenance;
 
 #[derive(Deserialize, ToSchema)]
 pub(crate) struct CreateProviderRequest {
@@ -148,6 +151,7 @@ pub(crate) struct ProviderResponse {
 )]
 pub(crate) async fn create_provider(
     State(state): State<ManagementState>,
+    Provenance(provenance): Provenance,
     headers: HeaderMap,
     payload: Result<Json<CreateProviderRequest>, JsonRejection>,
 ) -> Result<Response, Problem> {
@@ -201,24 +205,24 @@ pub(crate) async fn create_provider(
     let kind = request.kind;
     let spec = provider_kind_spec(kind);
     let auth_mode = request.auth_mode.unwrap_or(spec.default_auth_mode);
-    for violation in validate(Configuration {
-        kind,
-        auth_mode,
-        endpoint: request.endpoint.as_deref(),
-        cloud_region: request.cloud_region.as_deref(),
-        cloud_project: request.cloud_project.as_deref(),
-        deployment: request.deployment.as_deref(),
-        api_version: request.api_version.as_deref(),
-        model: request.model.as_deref(),
-        credential_present: Some(request.credential.is_some()),
-    }) {
-        errors
-            .entry(violation.field.as_str().to_owned())
-            .or_default()
-            .push(violation.detail.to_owned());
-    }
+    let mut codes = FieldErrorCodes::new();
+    record_violations(
+        validate(Configuration {
+            kind,
+            auth_mode,
+            endpoint: request.endpoint.as_deref(),
+            cloud_region: request.cloud_region.as_deref(),
+            cloud_project: request.cloud_project.as_deref(),
+            deployment: request.deployment.as_deref(),
+            api_version: request.api_version.as_deref(),
+            model: request.model.as_deref(),
+            credential_present: Some(request.credential.is_some()),
+        }),
+        &mut errors,
+        &mut codes,
+    );
     if !errors.is_empty() {
-        return Err(Problem::validation(errors));
+        return Err(Problem::coded_validation(errors, codes));
     }
     let config = provider_config(ProviderConfigFields {
         kind,
@@ -266,6 +270,7 @@ pub(crate) async fn create_provider(
     let response_model = request.model.clone();
     let created = state
         .store()
+        .with_provenance(&provenance)
         .create_provider_draft(
             NewProviderDraft {
                 provider_id,
@@ -346,6 +351,7 @@ pub(crate) async fn create_provider(
 )]
 pub(crate) async fn activate_provider(
     State(state): State<ManagementState>,
+    Provenance(provenance): Provenance,
     Path(provider_id): Path<Uuid>,
     headers: HeaderMap,
 ) -> Result<Response, Problem> {
@@ -367,6 +373,7 @@ pub(crate) async fn activate_provider(
     }
     let activated = state
         .store()
+        .with_provenance(&provenance)
         .activate_provider(
             provider_id,
             expected_etag,

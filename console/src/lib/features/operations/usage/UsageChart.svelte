@@ -65,10 +65,10 @@
       <div class="table-shell" tabindex="0" role="region" aria-label="Chart data table">
         <table class="data-table">
           <caption class="sr-only">Exact usage values shown in the time-series chart</caption>
-          <thead><tr><th scope="col">Bucket</th><th scope="col">Requests</th><th scope="col">Input tokens</th><th scope="col">Output tokens</th><th scope="col">Estimated cost</th><th scope="col">Status</th></tr></thead>
+          <thead><tr><th scope="col">Bucket</th><th scope="col">Requests</th><th scope="col">Input tokens</th><th scope="col">Cached input</th><th scope="col">Output tokens</th><th scope="col">Estimated cost</th><th scope="col">Status</th></tr></thead>
           <tbody>
             {#each points as point (point.bucket)}
-              <tr><td>{bucketLabel(point.bucket)}</td><td>{point.request_count}</td><td>{point.input_tokens}</td><td>{point.output_tokens}</td><td>{formatCost(point.estimated_cost, point.currency)}</td><td>{point.incomplete_count > 0 ? `${point.incomplete_count} incomplete` : point.unpriced_count > 0 ? `${point.unpriced_count} unpriced` : 'Complete'}</td></tr>
+              <tr><td>{bucketLabel(point.bucket)}</td><td>{point.request_count}</td><td>{point.input_tokens}</td><td>{point.cached_input_tokens ?? '—'}</td><td>{point.output_tokens}</td><td>{formatCost(point.estimated_cost, point.currency)}</td><td>{point.incomplete_count > 0 ? `${point.incomplete_count} incomplete` : point.unpriced_count > 0 ? `${point.unpriced_count} unpriced` : 'Complete'}</td></tr>
             {/each}
           </tbody>
         </table>

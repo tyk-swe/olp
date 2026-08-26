@@ -31,10 +31,12 @@ use crate::{
         preconditions::{if_match, with_etag},
         sessions::{require_mutation_session, require_read_session},
     },
-    public_http::problem::{FieldErrors, Problem},
+    public_http::problem::{FieldErrorCodes, FieldErrors, Problem},
 };
 
 use super::credentials::ProviderMutationResponse;
+use super::record_violations;
+use crate::management::provenance::Provenance;
 
 #[derive(Clone, Debug, Serialize, ToSchema)]
 pub(crate) struct ProviderSummaryResponse {
@@ -54,6 +56,8 @@ pub(crate) struct ProviderSummaryResponse {
     pub enabled_model_count: u64,
     pub capability_count: u64,
     pub certified_capability_count: u64,
+    /// Email of the operator who created the provider.
+    pub created_by_email: Option<String>,
 }
 
 impl From<ProviderRecord> for ProviderSummaryResponse {
@@ -75,6 +79,7 @@ impl From<ProviderRecord> for ProviderSummaryResponse {
             enabled_model_count: value.enabled_model_count,
             capability_count: value.capability_count,
             certified_capability_count: value.certified_capability_count,
+            created_by_email: value.created_by_email,
         }
     }
 }
@@ -108,6 +113,8 @@ pub(crate) struct ProviderDetailResponse {
     pub enabled_model_count: u64,
     pub capability_count: u64,
     pub certified_capability_count: u64,
+    /// Email of the operator who created the provider.
+    pub created_by_email: Option<String>,
 }
 
 impl From<ProviderRecord> for ProviderDetailResponse {
@@ -140,6 +147,7 @@ impl From<ProviderRecord> for ProviderDetailResponse {
             enabled_model_count: value.enabled_model_count,
             capability_count: value.capability_count,
             certified_capability_count: value.certified_capability_count,
+            created_by_email: value.created_by_email,
         }
     }
 }
@@ -234,6 +242,7 @@ pub(crate) struct UpdateProviderRequest {
 )]
 pub(crate) async fn update_provider(
     State(state): State<ManagementState>,
+    Provenance(provenance): Provenance,
     Path(provider_id): Path<Uuid>,
     headers: HeaderMap,
     payload: Result<Json<UpdateProviderRequest>, JsonRejection>,
@@ -241,7 +250,7 @@ pub(crate) async fn update_provider(
     let principal = require_mutation_session(&state, &headers).await?;
     require_permission(&principal, Permission::ManageProviders)?;
     let request = json_payload(payload)?;
-    let store = state.store();
+    let store = state.store().with_provenance(&provenance);
     let current = store
         .get_provider(provider_id)
         .await
@@ -264,7 +273,7 @@ pub(crate) async fn update_provider(
         )
         .await
         .map_err(map_configuration)?;
-    let provider = load_provider_detail(store, provider_id).await?;
+    let provider = load_provider_detail(&store, provider_id).await?;
     with_etag(Json(provider), etag)
 }
 
@@ -286,6 +295,7 @@ pub(crate) async fn update_provider(
 )]
 pub(crate) async fn disable_provider(
     State(state): State<ManagementState>,
+    Provenance(provenance): Provenance,
     Path(provider_id): Path<Uuid>,
     headers: HeaderMap,
 ) -> Result<Response, Problem> {
@@ -307,6 +317,7 @@ pub(crate) async fn disable_provider(
     }
     let result = state
         .store()
+        .with_provenance(&provenance)
         .disable_provider(
             provider_id,
             expected_etag,
@@ -354,6 +365,7 @@ pub(super) struct ProviderMutationFingerprint {
 )]
 pub(crate) async fn restore_provider_as_draft(
     State(state): State<ManagementState>,
+    Provenance(provenance): Provenance,
     Path(provider_id): Path<Uuid>,
     headers: HeaderMap,
 ) -> Result<Response, Problem> {
@@ -373,7 +385,7 @@ pub(crate) async fn restore_provider_as_draft(
     if let Some(replayed) = mutation.replayed().await? {
         return Ok(replayed);
     }
-    let store = state.store();
+    let store = state.store().with_provenance(&provenance);
     let etag = store
         .restore_provider_as_draft(
             provider_id,
@@ -383,7 +395,7 @@ pub(crate) async fn restore_provider_as_draft(
         )
         .await
         .map_err(map_configuration)?;
-    let provider = load_provider_detail(store, provider_id).await?;
+    let provider = load_provider_detail(&store, provider_id).await?;
     mutation
         .respond(StatusCode::OK, &provider, Some(etag))
         .await
@@ -401,24 +413,24 @@ fn validate_provider_update(
     }
 
     let mut errors = FieldErrors::new();
-    for violation in validate(Configuration {
-        kind: provider.kind,
-        auth_mode: request.auth_mode,
-        endpoint: request.endpoint.as_deref(),
-        cloud_region: request.cloud_region.as_deref(),
-        cloud_project: request.cloud_project.as_deref(),
-        deployment: request.deployment.as_deref(),
-        api_version: request.api_version.as_deref(),
-        model: provider.probe_model.as_deref(),
-        credential_present: Some(provider.draft_credential_id.is_some()),
-    }) {
-        errors
-            .entry(violation.field.as_str().to_owned())
-            .or_default()
-            .push(violation.detail.to_owned());
-    }
+    let mut codes = FieldErrorCodes::new();
+    record_violations(
+        validate(Configuration {
+            kind: provider.kind,
+            auth_mode: request.auth_mode,
+            endpoint: request.endpoint.as_deref(),
+            cloud_region: request.cloud_region.as_deref(),
+            cloud_project: request.cloud_project.as_deref(),
+            deployment: request.deployment.as_deref(),
+            api_version: request.api_version.as_deref(),
+            model: provider.probe_model.as_deref(),
+            credential_present: Some(provider.draft_credential_id.is_some()),
+        }),
+        &mut errors,
+        &mut codes,
+    );
     if !errors.is_empty() {
-        return Err(Problem::validation(errors));
+        return Err(Problem::coded_validation(errors, codes));
     }
 
     let config = provider_config(ProviderConfigFields {
@@ -462,12 +474,13 @@ pub(crate) struct ProbeResponse {
 )]
 pub(crate) async fn probe_provider(
     State(state): State<ManagementState>,
+    Provenance(provenance): Provenance,
     Path(provider_id): Path<Uuid>,
     headers: HeaderMap,
 ) -> Result<Response, Problem> {
     let principal = require_mutation_session(&state, &headers).await?;
     require_permission(&principal, Permission::ManageProviders)?;
-    let store = state.store();
+    let store = state.store().with_provenance(&provenance);
     let expected_etag = if_match(&headers)?;
     let provider = store
         .get_provider(provider_id)

@@ -100,17 +100,25 @@ impl Store {
         .execute(&mut *transaction)
         .await?;
         let etag = Uuid::now_v7();
-        sqlx::query!(
+        // The `FOR UPDATE` read above already refused a disabled provider, and
+        // it holds the row for the rest of the transaction. The guard repeats
+        // that refusal in the write itself so no future edit can turn rotation
+        // into a path that resurrects a disabled provider as a draft, skipping
+        // the `restore_as_draft` ceremony.
+        let restored = sqlx::query!(
             "UPDATE providers SET active_credential_version_id = $1, \
                     state = 'draft'::provider_state, etag = $2, updated_at = now(), \
                     last_probe_at = NULL, last_probe_status = NULL, last_probe_detail = NULL \
-             WHERE id = $3",
+             WHERE id = $3 AND state <> 'disabled'::provider_state",
             input.credential_id,
             etag,
             provider_id
         )
         .execute(&mut *transaction)
         .await?;
+        if restored.rows_affected() != 1 {
+            return Err(Error::InUse);
+        }
         sqlx::query!(
             "UPDATE model_capabilities SET source = 'declared', certified_at = NULL \
              WHERE provider_model_id IN \
@@ -121,6 +129,7 @@ impl Store {
         .await?;
         audit_in_transaction(
             &mut transaction,
+            self.provenance(),
             input.actor,
             "provider.rotate_credential",
             "provider",
@@ -322,6 +331,7 @@ impl Store {
         .await?;
         audit_in_transaction(
             &mut transaction,
+            self.provenance(),
             actor,
             "provider.revoke_credential",
             "provider",

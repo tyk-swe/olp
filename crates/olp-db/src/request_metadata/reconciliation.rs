@@ -133,6 +133,8 @@ pub struct GatewayEpochRecord {
     pub stale_detected_at: Option<DateTime<Utc>>,
     pub acknowledged_at: Option<DateTime<Utc>>,
     pub acknowledged_by: Option<Uuid>,
+    /// Ingestion gap opened for the events this epoch could not account for.
+    pub uncertainty_gap_id: Option<Uuid>,
 }
 
 /// Gateway-local checkpoints are emitted every second. A minute without a
@@ -374,23 +376,6 @@ impl Store {
                  THEN COALESCE(request_metadata_gateway_epochs.gracefully_closed_at, $10::timestamptz) \
                  ELSE request_metadata_gateway_epochs.gracefully_closed_at END",
         gateway_instance, snapshot.process_epoch, snapshot.started_at, accepted, persisted, dropped, abandoned, snapshot.retrying, snapshot.closed, now, graceful_close)
-        .execute(&mut *transaction)
-        .await?;
-        // Preserve the historical cumulative checkpoint for diagnostics. Epoch
-        // detection uses the process-scoped rows above instead.
-        sqlx::query!(
-            "INSERT INTO request_metadata_loss_reporter_state \
-             (gateway_instance, process_epoch, dropped, abandoned, updated_at) \
-             VALUES ($1, $2, $3, $4, $5) \
-             ON CONFLICT (gateway_instance) DO UPDATE SET \
-               process_epoch = EXCLUDED.process_epoch, dropped = EXCLUDED.dropped, \
-               abandoned = EXCLUDED.abandoned, updated_at = EXCLUDED.updated_at",
-            gateway_instance,
-            snapshot.process_epoch,
-            dropped,
-            abandoned,
-            now
-        )
         .execute(&mut *transaction)
         .await?;
         transaction.commit().await?;

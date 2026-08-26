@@ -3,15 +3,22 @@
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { onDestroy } from 'svelte';
   import ConflictNotice from '$lib/components/ConflictNotice.svelte';
+  import ReadOnlyNote from '$lib/components/ReadOnlyNote.svelte';
   import ProviderActivationStage from './ProviderActivationStage.svelte';
   import ProviderCapabilityReviewStage from './ProviderCapabilityReviewStage.svelte';
   import ProviderConnectorForm from './ProviderConnectorForm.svelte';
   import ProviderDiscoveryStage from './ProviderDiscoveryStage.svelte';
+  import ProviderValidationIssues from './ProviderValidationIssues.svelte';
   import {
     invalidateProviderModelConsumers,
     invalidateProviderSummaries
   } from './providerCache';
-  import { errorMessage as message, isEtagMismatch } from '$lib/api/http';
+  import {
+    errorMessage as message,
+    fieldIssues,
+    isEtagMismatch,
+    type FieldIssue
+  } from '$lib/api/http';
   import { emptyCursorHistory, resetCursor } from '$lib/api/pagination';
   import {
     activateProvider,
@@ -39,6 +46,7 @@
     certificationPrerequisiteReady,
     createProviderDraft,
     parseManualModelNames,
+    probeSummary,
     requiresCredential,
     validateProviderDraft,
     type ProviderDraft
@@ -87,6 +95,7 @@
   let manualModelNames = $state('');
   let busy = $state('');
   let errorMessage = $state('');
+  let validationIssues = $state<FieldIssue[]>([]);
   let notice = $state('');
   let certificationResults = $state<Record<string, CapabilityCertification>>(
     {}
@@ -127,13 +136,17 @@
   ): Promise<boolean> {
     busy = label;
     errorMessage = '';
+    validationIssues = [];
     notice = '';
     try {
       await action();
       return true;
     } catch (error) {
       if (wizardProvider && isEtagMismatch(error)) wizardConflict = true;
-      else errorMessage = message(error);
+      else {
+        errorMessage = message(error);
+        validationIssues = fieldIssues(error);
+      }
       return false;
     } finally {
       busy = '';
@@ -156,6 +169,7 @@
     if (!wizardProvider) return;
     busy = 'reload';
     errorMessage = '';
+    validationIssues = [];
     notice = '';
     try {
       const reloadedProvider = await getProvider(wizardProvider.id);
@@ -189,6 +203,7 @@
     });
     if (issue) {
       errorMessage = issue;
+      validationIssues = [];
       return;
     }
     await run('create', async () => {
@@ -327,7 +342,7 @@
       probe = await probeProvider(wizardProvider!);
       if (!probe.succeeded) throw new Error(probe.detail);
       wizardProvider = await getProvider(wizardProvider!.id);
-      notice = `Final draft test passed: ${probe.detail}`;
+      notice = `Final draft test passed: ${probeSummary(probe)}`;
     });
   }
 
@@ -376,9 +391,9 @@
 </ol>
 
 {#if !canManage}
-  <p class="read-only-note" role="note">
+  <ReadOnlyNote>
     Your role can view providers but not connect or activate them.
-  </p>
+  </ReadOnlyNote>
 {/if}
 {#if canManage && wizardStep >= 2 && wizardStep <= 4}
   <div class="wizard-back">
@@ -392,6 +407,7 @@
 {/if}
 {#if errorMessage}<div class="inline-problem" role="alert">
     {errorMessage}
+    <ProviderValidationIssues issues={validationIssues} />
   </div>{/if}
 {#if notice}<div class="success-banner" role="status">{notice}</div>{/if}
 <ConflictNotice

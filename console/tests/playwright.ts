@@ -20,8 +20,14 @@ export async function mockSession(
   {
     userId = '01980000-0000-7000-8000-000000000001',
     csrfToken = 'csrf-test-token',
-    role = 'owner'
-  }: { userId?: string; csrfToken?: string; role?: FixedRole } = {}
+    role = 'owner',
+    installationName = 'Local installation'
+  }: {
+    userId?: string;
+    csrfToken?: string;
+    role?: FixedRole;
+    installationName?: string;
+  } = {}
 ) {
   await page.route('**/api/v1/sessions/current', async (route) => {
     await route.fulfill({
@@ -32,7 +38,8 @@ export async function mockSession(
           display_name: 'Ada Owner',
           role
         },
-        csrf_token: csrfToken
+        csrf_token: csrfToken,
+        installation_name: installationName
       }
     });
   });

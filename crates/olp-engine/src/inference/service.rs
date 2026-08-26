@@ -83,10 +83,12 @@ impl Service {
         &self.media_spool
     }
 
+    #[cfg(any(test, feature = "test-util"))]
     pub fn replace_request_metadata(&mut self, emitter: Option<Emitter>) {
         self.request_metadata = emitter;
     }
 
+    #[cfg(any(test, feature = "test-util"))]
     pub fn replace_media_spool(&mut self, media_spool: Arc<dyn MediaSpool>) {
         self.media_spool = media_spool;
     }

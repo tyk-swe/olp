@@ -93,6 +93,9 @@ pub struct OidcConfiguration {
     pub etag: Uuid,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+    /// Email of the operator who last saved the configuration; absent once
+    /// that user is removed.
+    pub updated_by_email: Option<String>,
 }
 
 impl fmt::Debug for OidcConfiguration {

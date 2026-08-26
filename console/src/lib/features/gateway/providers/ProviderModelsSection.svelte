@@ -3,6 +3,7 @@
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { errorMessage as providerDetailError } from '$lib/api/http';
   import CursorPagination from '$lib/components/CursorPagination.svelte';
+  import { formatDate } from '$lib/format';
   import {
     certifyProviderModel,
     declareProviderModels,
@@ -24,7 +25,9 @@
   import {
     activationReady,
     certificationPrerequisiteReady,
-    parseManualModelNames
+    DISABLED_EDIT_NOTE,
+    parseManualModelNames,
+    providerDisabled
   } from './providerEditor';
   import {
     fetchCoordinatedModelPage,
@@ -64,6 +67,9 @@
     {}
   );
   let previousProviderEtag = $state('');
+  // Discovery, manual declaration and capability review all fail with the same
+  // 409 on a disabled provider, so they stay locked until it is a draft again.
+  const editingLocked = $derived(providerDisabled(current));
 
   const capabilityOptions = createQuery(() => ({
     queryKey: ['provider-capability-options', current.kind],
@@ -107,7 +113,7 @@
   }
 
   async function discover() {
-    if (!canManage) return;
+    if (!canManage || editingLocked) return;
     await run('detail-discover', async () => {
       const updated = await discoverProviderModels(current);
       certificationResults = {};
@@ -120,7 +126,7 @@
   }
 
   async function declareModels() {
-    if (!canManage) return;
+    if (!canManage || editingLocked) return;
     const names = parseManualModelNames(manualModelNames);
     if (!names.length) {
       onError('Enter at least one upstream model identifier.');
@@ -201,13 +207,14 @@
       class="button button-secondary"
       type="button"
       onclick={discover}
-      disabled={!canManage || Boolean(busy)}
+      disabled={!canManage || Boolean(busy) || editingLocked}
       >{busy === 'detail-discover'
         ? 'Discovering…'
         : 'Run upstream discovery'}</button
     >
   </div>
-  {#if canManage && current.kind === 'openai_compatible'}<details
+  {#if editingLocked}<p class="locked-note">{DISABLED_EDIT_NOTE}</p>{/if}
+  {#if canManage && !editingLocked && current.kind === 'openai_compatible'}<details
       class="manual-fallback"
     >
       <summary>Manual model identifiers</summary>
@@ -260,7 +267,9 @@
               ><td
                 ><strong>{model.display_name}</strong><br /><code
                   >{model.upstream_model}</code
-                ></td
+                >{#if model.discovered_at}<br /><small class="discovered"
+                    >Discovered {formatDate(model.discovered_at)}</small
+                  >{/if}</td
               ><td>
                 <CapabilityReview
                   {model}
@@ -268,8 +277,9 @@
                   options={capabilityOptions.data?.capabilities ?? []}
                   optionsPending={capabilityOptions.isPending}
                   optionsError={capabilityOptions.isError}
-                  disabled={!canManage || Boolean(busy)}
+                  disabled={!canManage || Boolean(busy) || editingLocked}
                   {reloadVersion}
+                  certification={certificationResults[model.id]}
                   onSave={(enabled, capabilities, providerEtag) =>
                     reviewModel(
                       { ...modelPage.provider, etag: providerEtag },
@@ -285,6 +295,7 @@
                     onclick={() => certifyModel(modelPage.provider, model.id)}
                     disabled={!canManage ||
                       Boolean(busy) ||
+                      editingLocked ||
                       !model.capabilities.length}
                     >{busy === `certify-${model.id}`
                       ? 'Server-certifying…'
@@ -295,15 +306,7 @@
                       class:success={result.status === 'succeeded'}
                       class:warning={result.status !== 'succeeded'}
                       >{result.certified_count}/{result.attempted_count} certified</span
-                    >
-                    <ul class="certification-results">
-                      {#each result.results.filter((item) => !item.succeeded) as item (`${item.operation}-${item.surface}-${item.mode}`)}<li
-                        >
-                          <code
-                            >{item.operation}/{item.surface}/{item.mode}</code
-                          >: {item.detail}
-                        </li>{/each}
-                    </ul>{/if}
+                    >{/if}
                 </div>
               </td></tr
             >{/each}
@@ -315,7 +318,7 @@
       label="Provider model pages"
     />
   {/if}
-  {#if !activationReady(current)}<p class="audit-note">
+  {#if !editingLocked && !activationReady(current)}<p class="audit-note">
       Every native and compatible tuple requires fresh server-owned
       certification. After the last change or certification, run the
       completed-draft connection test before activation.
@@ -334,8 +337,13 @@
     letter-spacing: -0.025em;
   }
   .muted,
-  .audit-note {
+  .audit-note,
+  .locked-note {
     color: var(--foreground-muted);
+  }
+  .locked-note {
+    margin: 1rem 0 0;
+    font-size: 0.8rem;
   }
   .section-heading {
     display: flex;
@@ -359,11 +367,9 @@
     color: var(--foreground-muted);
     font-size: 0.75rem;
   }
-  .certification-results {
-    width: 100%;
-    margin: 0;
-    padding-left: 1.25rem;
-    color: var(--danger);
+  .discovered {
+    color: var(--foreground-muted);
+    font-size: 0.7rem;
   }
   .models {
     max-width: none;

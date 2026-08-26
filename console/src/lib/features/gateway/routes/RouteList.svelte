@@ -4,6 +4,7 @@
   import { errorMessage as message } from '$lib/api/http';
   import CursorPagination from '$lib/components/CursorPagination.svelte';
   import NavIcon from '$lib/components/NavIcon.svelte';
+  import ReadOnlyNote from '$lib/components/ReadOnlyNote.svelte';
   import { listRouteDraftPage, listRoutePage } from '$lib/api/management/routes';
   import { cursorPaginationProps } from '$lib/api/pagination';
   import { useRole } from '$lib/auth/useRole.svelte';
@@ -31,7 +32,7 @@
   <div><p class="eyebrow">Gateway</p><h1 class="page-title">Routes</h1><p class="page-description">Stable client-facing slugs backed by explicit, deterministic provider-model targets.</p></div>
   {#if canManage}<a class="button button-primary" href={resolve('/routes/new')}>New route draft <NavIcon name="arrow" /></a>{/if}
 </div>
-{#if !canManage}<p class="read-only-note" role="note">Your role can view routes but not create, edit, or activate them.</p>{/if}
+{#if !canManage}<ReadOnlyNote>Your role can view routes but not create, edit, or activate them.</ReadOnlyNote>{/if}
 {#if drafts.isPending && activeRoutes.isPending}
   <div class="loading-state" role="status">Loading routes and drafts…</div>
 {:else if !drafts.data?.items.length && !activeRoutes.data?.items.length && !drafts.isError && !activeRoutes.isError && listState.draft.history.length === 0 && listState.route.history.length === 0}
@@ -47,7 +48,7 @@
     {:else if !activeRoutes.data?.items.length}
       <div class="card empty-state compact"><p>No active routes on this page.</p></div>
     {:else}
-      <div class="table-shell"><table class="data-table"><thead><tr><th>Public slug</th><th>Latest revision</th><th>Operations</th><th>Targets</th><th>Activated</th><th><span class="sr-only">Actions</span></th></tr></thead><tbody>{#each activeRoutes.data.items as item (item.id)}<tr><td><strong><code>{item.slug}</code></strong></td><td>Revision {item.latest_revision.revision}<br /><small>{item.revision_count} total</small></td><td>{item.latest_revision.operations.join(', ')}</td><td>{item.latest_revision.targets.length}</td><td>{formatDate(item.latest_revision.activated_at)}</td><td><a class="button button-secondary" href={resolve(`/routes/${item.id}/revisions`)}>History & restore</a></td></tr>{/each}</tbody></table></div>
+      <div class="table-shell"><table class="data-table"><thead><tr><th>Public slug</th><th>Latest revision</th><th>Operations</th><th>Targets</th><th>Activated</th><th>Created by</th><th><span class="sr-only">Actions</span></th></tr></thead><tbody>{#each activeRoutes.data.items as item (item.id)}<tr><td><strong><code>{item.slug}</code></strong></td><td>Revision {item.latest_revision.revision}<br /><small>{item.revision_count} total</small></td><td>{item.latest_revision.operations.join(', ')}</td><td>{item.latest_revision.targets.length}</td><td>{formatDate(item.latest_revision.activated_at)}</td><td>{item.created_by_email ?? 'A removed account'}</td><td><a class="button button-secondary" href={resolve(`/routes/${item.id}/revisions`)}>History & restore</a></td></tr>{/each}</tbody></table></div>
     {/if}
     {#if !activeRoutes.isError}<CursorPagination {...cursorPaginationProps(listState.route, activeRoutes.data?.nextCursor)} label="Active route pages" />{/if}
   </section>
@@ -60,7 +61,7 @@
     {:else if !drafts.data?.items.length}
       <div class="card empty-state compact"><p>No unpublished drafts on this page.</p></div>
     {:else}
-      <div class="table-shell"><table class="data-table"><thead><tr><th>Slug</th><th>State</th><th>Operations</th><th>Targets</th><th>Deadline / attempts</th><th>Updated</th><th><span class="sr-only">Actions</span></th></tr></thead><tbody>{#each drafts.data.items as item (item.id)}<tr><td><a class="route-link" href={resolve(`/routes/${item.id}`)}>{item.slug}</a></td><td><span class:success={item.state === 'validated'} class:warning={item.state !== 'validated'} class="badge">{item.state}</span></td><td>{item.operations.join(', ')}</td><td>{item.targets.length}</td><td>{item.overall_timeout_ms.toLocaleString()} ms / {item.max_attempts}</td><td>{formatDate(item.updated_at)}</td><td><a class="button button-secondary" href={resolve(`/routes/${item.id}`)}>{canManage ? 'Open Studio' : 'View draft'}</a></td></tr>{/each}</tbody></table></div>
+      <div class="table-shell"><table class="data-table"><thead><tr><th>Slug</th><th>State</th><th>Operations</th><th>Targets</th><th>Deadline / attempts</th><th>Updated</th><th>Created by</th><th><span class="sr-only">Actions</span></th></tr></thead><tbody>{#each drafts.data.items as item (item.id)}<tr><td><a class="route-link" href={resolve(`/routes/${item.id}`)}>{item.slug}</a></td><td><span class:success={item.state === 'validated'} class:warning={item.state !== 'validated'} class="badge">{item.state}</span></td><td>{item.operations.join(', ')}</td><td>{item.targets.length}</td><td>{item.overall_timeout_ms.toLocaleString()} ms / {item.max_attempts}</td><td>{formatDate(item.updated_at)}</td><td>{item.created_by_email ?? 'A removed account'}</td><td><a class="button button-secondary" href={resolve(`/routes/${item.id}`)}>{canManage ? 'Open Studio' : 'View draft'}</a></td></tr>{/each}</tbody></table></div>
     {/if}
     {#if !drafts.isError}<CursorPagination {...cursorPaginationProps(listState.draft, drafts.data?.nextCursor)} label="Route draft pages" />{/if}
   </section>

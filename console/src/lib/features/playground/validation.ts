@@ -56,3 +56,27 @@ export function parseResponseSchema(value: string): {
     schema: schema as Record<string, unknown>
   };
 }
+
+/**
+ * Sampling bounds mirror the backend so an out-of-range value is named at the
+ * field instead of coming back as a 422 with no context.
+ */
+export function parseTemperature(value: string): number | undefined {
+  const trimmed = value.trim();
+  if (!trimmed) return undefined;
+  const temperature = Number(trimmed);
+  if (!Number.isFinite(temperature) || temperature < 0 || temperature > 2) {
+    throw new Error('Temperature must be from 0 through 2.');
+  }
+  return temperature;
+}
+
+export function parseMaxOutputTokens(value: string): number | undefined {
+  const trimmed = value.trim();
+  if (!trimmed) return undefined;
+  const tokens = Number(trimmed);
+  if (!Number.isInteger(tokens) || tokens < 1 || tokens > 1_000_000) {
+    throw new Error('Maximum output tokens must be from 1 through 1000000.');
+  }
+  return tokens;
+}

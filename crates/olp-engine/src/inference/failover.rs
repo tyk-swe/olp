@@ -70,6 +70,7 @@ pub fn validated_event_stream(
     ))
 }
 
+#[cfg(any(test, feature = "test-util"))]
 pub fn circuit_accounted_event_stream(
     events: EventStream,
     circuits: Breaker,

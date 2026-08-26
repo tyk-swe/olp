@@ -5,6 +5,7 @@
     createInvitation,
     listInvitationPage,
     revokeInvitation,
+    type Invitation,
     type InvitationSecret
   } from '$lib/api/management/access';
   import { copyText } from '$lib/clipboard';
@@ -16,8 +17,24 @@
   import { FIXED_ROLES } from '$lib/auth/authorization';
   import { useRole } from '$lib/auth/useRole.svelte';
   import CursorPagination from '$lib/components/CursorPagination.svelte';
+  import ReadOnlyNote from '$lib/components/ReadOnlyNote.svelte';
   import SecretDialog from '$lib/components/SecretDialog.svelte';
   import { formatDate } from '$lib/format';
+
+  // The API defaults to seven days and rejects anything over thirty.
+  const DEFAULT_EXPIRY_HOURS = 7 * 24;
+  const expiryChoices = [
+    { hours: 24, label: '24 hours' },
+    { hours: 3 * 24, label: '3 days' },
+    { hours: DEFAULT_EXPIRY_HOURS, label: '7 days' },
+    { hours: 14 * 24, label: '14 days' },
+    { hours: 30 * 24, label: '30 days' }
+  ];
+
+  /** The id is the fallback for an operator whose account no longer exists. */
+  function invitedBy(invitation: Invitation): string {
+    return invitation.invited_by_email ?? invitation.invited_by;
+  }
 
   const access = useRole();
   const canManage = $derived(access.can('users.manage'));
@@ -27,6 +44,7 @@
   let notice = $state('');
   let email = $state('');
   let role = $state('developer');
+  let expiresInHours = $state(DEFAULT_EXPIRY_HOURS);
   let invitationSecret = $state<InvitationSecret | null>(null);
   let copied = $state(false);
   let copyError = $state('');
@@ -60,7 +78,11 @@
       return;
     }
     await run('invite', async () => {
-      invitationSecret = await createInvitation(email.trim(), role);
+      invitationSecret = await createInvitation(
+        email.trim(),
+        role,
+        expiresInHours
+      );
       email = '';
       await invitations.refetch();
     });
@@ -135,9 +157,9 @@
 {#if notice}<div class="success-banner" role="status">{notice}</div>{/if}
 
 {#if !canManage}
-  <p class="read-only-note" role="note">
+  <ReadOnlyNote>
     Your role can view invitations but not create or revoke them.
-  </p>
+  </ReadOnlyNote>
 {/if}
 <section class="card invite-panel" aria-labelledby="invite-heading">
   <div>
@@ -159,6 +181,15 @@
       ><span>Role</span><select bind:value={role} disabled={!canManage}
         >{#each FIXED_ROLES as fixedRole (fixedRole)}<option value={fixedRole}
             >{fixedRole}</option
+          >{/each}</select
+      ></label
+    >
+    <label
+      ><span>Expires in</span><select
+        bind:value={expiresInHours}
+        disabled={!canManage}
+        >{#each expiryChoices as choice (choice.hours)}<option
+            value={choice.hours}>{choice.label}</option
           >{/each}</select
       ></label
     >
@@ -186,26 +217,42 @@
     <table class="data-table">
       <thead
         ><tr
-          ><th>Email</th><th>Role</th><th>Status</th><th>Expires</th><th
-            ><span class="sr-only">Actions</span></th
-          ></tr
+          ><th>Email / invited by</th><th>Role</th><th>Status</th><th
+            >Expires / created</th
+          ><th><span class="sr-only">Actions</span></th></tr
         ></thead
       >
       <tbody>
         {#each invitations.data?.items ?? [] as invitation (invitation.id)}
           <tr>
-            <td>{invitation.email}</td><td
-              ><span class="badge">{invitation.role}</span></td
-            >
+            <td
+              ><strong>{invitation.email}</strong><br /><small
+                >Invited by {invitedBy(invitation)}</small
+              ></td
+            ><td><span class="badge">{invitation.role}</span></td>
             <td
               ><span
                 class:success={invitation.status === 'accepted'}
                 class:warning={invitation.status === 'pending'}
                 class:danger={invitation.status === 'revoked'}
                 class="badge">{invitation.status}</span
+              >{#if invitation.accepted_at}<br /><small
+                  >Accepted {formatDate(
+                    invitation.accepted_at
+                  )}{#if invitation.accepted_by_email}
+                    by {invitation.accepted_by_email}{/if}</small
+                >{/if}{#if invitation.revoked_at}<br /><small
+                  >Revoked {formatDate(
+                    invitation.revoked_at
+                  )}{#if invitation.revoked_by_email}
+                    by {invitation.revoked_by_email}{/if}</small
+                >{/if}</td
+            >
+            <td
+              >{formatDate(invitation.expires_at)}<br /><small
+                >Created {formatDate(invitation.created_at)}</small
               ></td
             >
-            <td>{formatDate(invitation.expires_at)}</td>
             <td
               >{#if canManage && invitation.status === 'pending'}<button
                   class="button button-secondary danger-button"
@@ -275,6 +322,9 @@
   }
   .danger-button {
     color: var(--danger);
+  }
+  td small {
+    color: var(--foreground-muted);
   }
   .invitation-token {
     display: block;

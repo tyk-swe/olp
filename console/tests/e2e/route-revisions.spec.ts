@@ -122,7 +122,12 @@ test('route revision diff and restore-as-draft remain explicit', async ({
   await page.getByRole('button', { name: 'Compare' }).click();
   await expect(page.getByText('slug, deadline')).toBeVisible();
   const newestRow = page.getByRole('row', { name: /Revision 2/ });
+  await expect(newestRow).toContainText(`From draft ${ids.draft}`);
+  await expect(newestRow).toContainText(`By ${ids.user}`);
   await newestRow.getByRole('button', { name: 'Restore as draft' }).click();
   await expect(page).toHaveURL(new RegExp(`/routes/${ids.draft}$`));
+  await expect(
+    page.getByText(`Based on revision ${revisionTwoId}`)
+  ).toBeVisible();
   expect(restoreCalled).toBe(true);
 });

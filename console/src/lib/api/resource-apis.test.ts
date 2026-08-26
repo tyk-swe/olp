@@ -74,6 +74,35 @@ describe('resource API cursor pages', () => {
   });
 });
 
+describe('audit filters', () => {
+  it('sends every filled filter and omits the empty ones', async () => {
+    const requests = captureRequests(() => jsonResponse({ data: [], next_cursor: null }));
+
+    await listAudit({
+      action: 'provider.update',
+      resource_type: 'provider',
+      resource_id: '01980000-0000-7000-8000-000000000104',
+      actor_user_id: '01980000-0000-7000-8000-000000000001',
+      outcome: 'failure',
+      occurred_after: '2026-07-12T09:30:00.000Z',
+      occurred_before: undefined,
+      cursor: 'audit-next'
+    });
+
+    const query = new URL(requests[0].url).searchParams;
+    expect(Object.fromEntries(query)).toEqual({
+      limit: '50',
+      action: 'provider.update',
+      resource_type: 'provider',
+      resource_id: '01980000-0000-7000-8000-000000000104',
+      actor_user_id: '01980000-0000-7000-8000-000000000001',
+      outcome: 'failure',
+      occurred_after: '2026-07-12T09:30:00.000Z',
+      cursor: 'audit-next'
+    });
+  });
+});
+
 describe('provider-health pagination', () => {
   it('aggregates every page and sends each cursor once', async () => {
     const first = providerHealth('provider-1');

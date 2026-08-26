@@ -12,6 +12,7 @@
     hasCustomEndpoint,
     hasDeployment,
     providerStatus,
+    providerStatusTone,
     type ProviderEditValues
   } from './providerEditor';
 
@@ -48,11 +49,8 @@
       <p class="eyebrow">Configuration</p>
       <h2 id="configuration-heading">Connector context</h2>
     </div>
-    <span
-      class:success={current.active_revision != null &&
-        !current.pending_activation}
-      class:warning={current.pending_activation}
-      class="badge">{providerStatus(current)}</span
+    <span class="badge {providerStatusTone(current)}"
+      >{providerStatus(current)}</span
     >
   </div>
   <div class="form-grid">

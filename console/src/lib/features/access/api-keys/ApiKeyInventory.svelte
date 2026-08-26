@@ -12,6 +12,7 @@
   } from '$lib/api/management/api-keys';
   import CursorPagination from '$lib/components/CursorPagination.svelte';
   import NavIcon from '$lib/components/NavIcon.svelte';
+  import ReadOnlyNote from '$lib/components/ReadOnlyNote.svelte';
   import { formatDate } from '$lib/format';
   import type { ApiKeyListState } from './apiKeyListState';
 
@@ -96,9 +97,9 @@
     >{/if}
 </div>
 {#if !canManage}
-  <p class="read-only-note" role="note">
+  <ReadOnlyNote>
     Your role can view API keys but not create, edit, rotate, or revoke them.
-  </p>
+  </ReadOnlyNote>
 {/if}
 {#if errorMessage || mutationError}<div class="inline-problem" role="alert">
     {errorMessage || mutationError}
@@ -158,6 +159,14 @@
                   : key.expires_at && new Date(key.expires_at) < new Date()
                     ? 'expired'
                     : 'active'}</span
+              ><br /><small
+                >{key.expires_at
+                  ? `Expires ${formatDate(key.expires_at)}`
+                  : 'No expiry'}</small
+              ><br /><small
+                >{key.rotated_at
+                  ? `Rotated ${formatDate(key.rotated_at)}`
+                  : 'Never rotated'}</small
               ></td
             >
             <td

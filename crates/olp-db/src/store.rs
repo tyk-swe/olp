@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::{net::IpAddr, time::Duration};
 
 use sqlx::{PgPool, migrate::Migrate as _, postgres::PgPoolOptions};
 
@@ -8,9 +8,57 @@ use crate::error::Error;
 ///
 /// Feature-specific queries are implemented in their owning modules; this
 /// module owns only pool construction, access, migration, and liveness.
+/// One entry per migration that builds an index with `CREATE INDEX
+/// CONCURRENTLY`. PostgreSQL leaves such an index behind in an invalid state
+/// when the build is interrupted, and the migration is not recorded, so its
+/// retry would collide with the leftover name. Each entry drops what a previous
+/// attempt left before the migration is retried. Ordered by version; the first
+/// entry sets the version below which no cleanup is needed.
+const CONCURRENT_INDEX_CLEANUP: &[(i64, &str)] = &[
+    (
+        34,
+        "DROP INDEX CONCURRENTLY IF EXISTS attempt_usage_facts_event_id_idx",
+    ),
+    (
+        40,
+        "DROP INDEX CONCURRENTLY IF EXISTS audit_events_action_occurred_idx",
+    ),
+    (
+        41,
+        "DROP INDEX CONCURRENTLY IF EXISTS audit_events_resource_occurred_idx",
+    ),
+    (
+        42,
+        "DROP INDEX CONCURRENTLY IF EXISTS audit_events_actor_occurred_idx",
+    ),
+    (
+        43,
+        "DROP INDEX CONCURRENTLY IF EXISTS attempts_provider_started_idx",
+    ),
+];
+
+/// Boundary attribution recorded on the audit rows a request produces. The
+/// full user-agent string is never stored; only its leading product token.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct RequestProvenance {
+    pub source_ip: Option<IpAddr>,
+    pub user_agent_family: Option<String>,
+}
+
+impl RequestProvenance {
+    pub(crate) fn source_ip_text(&self) -> Option<String> {
+        self.source_ip.map(|address| address.to_string())
+    }
+
+    pub(crate) fn user_agent_family(&self) -> Option<&str> {
+        self.user_agent_family.as_deref()
+    }
+}
+
 #[derive(Clone)]
 pub struct Store {
     pool: PgPool,
+    provenance: RequestProvenance,
 }
 
 impl Store {
@@ -37,12 +85,34 @@ impl Store {
             })
             .connect(database_url)
             .await?;
-        Ok(Self { pool })
+        Ok(Self {
+            pool,
+            provenance: RequestProvenance::default(),
+        })
     }
 
     #[must_use]
     pub fn from_pool(pool: PgPool) -> Self {
-        Self { pool }
+        Self {
+            pool,
+            provenance: RequestProvenance::default(),
+        }
+    }
+
+    /// Returns a handle whose audit writes carry the request boundary's
+    /// attribution. Handles that never receive one - workers, maintenance, and
+    /// reconciliation - write audit rows without it.
+    #[must_use]
+    pub fn with_provenance(&self, provenance: &RequestProvenance) -> Self {
+        Self {
+            pool: self.pool.clone(),
+            provenance: provenance.clone(),
+        }
+    }
+
+    #[must_use]
+    pub(crate) fn provenance(&self) -> &RequestProvenance {
+        &self.provenance
     }
 
     #[must_use]
@@ -63,19 +133,28 @@ impl Store {
         connection.close_on_drop();
 
         // Keep SQLx's reentrant migration lock held across stale-index cleanup
-        // and migration 34. Closing the session releases it on cancellation.
+        // and the migrations it precedes. Closing the session releases it on
+        // cancellation.
         connection.lock().await?;
-        if target.is_none_or(|target| target >= 34) {
+        let first_concurrent = CONCURRENT_INDEX_CLEANUP
+            .first()
+            .map_or(i64::MAX, |(version, _)| *version);
+        if target.is_none_or(|target| target >= first_concurrent) {
             connection
                 .ensure_migrations_table("_sqlx_migrations")
                 .await?;
             let applied = connection
                 .list_applied_migrations("_sqlx_migrations")
                 .await?;
-            if !applied.iter().any(|migration| migration.version == 34) {
-                sqlx::raw_sql("DROP INDEX CONCURRENTLY IF EXISTS attempt_usage_facts_event_id_idx")
-                    .execute(&mut *connection)
-                    .await?;
+            for (version, cleanup) in CONCURRENT_INDEX_CLEANUP {
+                if target.is_some_and(|target| target < *version)
+                    || applied
+                        .iter()
+                        .any(|migration| migration.version == *version)
+                {
+                    continue;
+                }
+                sqlx::raw_sql(*cleanup).execute(&mut *connection).await?;
             }
         }
 

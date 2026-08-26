@@ -24,6 +24,7 @@ impl Store {
     /// Creates the one installation and its first owner as a serialized,
     /// all-or-nothing operation. The advisory lock closes the two-request setup
     /// race even when control-plane replicas receive setup concurrently.
+    #[cfg(any(test, feature = "test-util"))]
     pub async fn setup_installation(
         &self,
         input: InstallationSetupInput,
@@ -113,11 +114,15 @@ impl Store {
 
         sqlx::query!(
             "INSERT INTO audit_events \
-             (id, actor_user_id, action, resource_type, resource_id, outcome, occurred_at) \
-             VALUES ($1, $2, 'installation.setup', 'installation', 'singleton', 'success', $3)",
+             (id, actor_user_id, action, resource_type, resource_id, outcome, occurred_at, \
+              source_ip, user_agent_family) \
+             VALUES ($1, $2, 'installation.setup', 'installation', 'singleton', 'success', $3, \
+              $4::text::inet, $5)",
             Uuid::now_v7(),
             user_id,
-            now
+            now,
+            self.provenance().source_ip_text(),
+            self.provenance().user_agent_family()
         )
         .execute(&mut *transaction)
         .await?;
@@ -129,12 +134,16 @@ impl Store {
                     .await?;
             sqlx::query!(
                 "INSERT INTO audit_events \
-                 (id, actor_user_id, action, resource_type, resource_id, outcome, occurred_at) \
-                 VALUES ($1, $2, 'session.create', 'session', $3, 'success', $4)",
+                 (id, actor_user_id, action, resource_type, resource_id, outcome, occurred_at, \
+                  source_ip, user_agent_family) \
+                 VALUES ($1, $2, 'session.create', 'session', $3, 'success', $4, \
+                  $5::text::inet, $6)",
                 Uuid::now_v7(),
                 user_id,
                 session_id.to_string(),
-                now
+                now,
+                self.provenance().source_ip_text(),
+                self.provenance().user_agent_family()
             )
             .execute(&mut *transaction)
             .await?;

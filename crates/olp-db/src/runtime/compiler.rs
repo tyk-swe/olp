@@ -54,6 +54,7 @@ impl Store {
     /// transaction lock, validates it, and publishes the release plus outbox
     /// hint atomically. Concurrent key/route activations therefore cannot
     /// publish an older view after a newer one.
+    #[cfg(any(test, feature = "test-util"))]
     pub async fn compile_and_publish_runtime(
         &self,
         actor: Uuid,

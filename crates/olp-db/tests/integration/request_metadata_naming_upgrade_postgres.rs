@@ -55,6 +55,9 @@ async fn request_metadata_schema_rename_preserves_legacy_rows() {
     .execute(store.pool())
     .await
     .unwrap();
+    // The loss reporter's per-instance counters are dead weight - the crash-safe
+    // checkpoint is `request_metadata_gateway_epochs` - but the 2.0.1 binary
+    // still writes them, so the table survives the rename and this release.
     sqlx::query(
         "INSERT INTO usage_loss_reporter_state \
          (gateway_instance, process_epoch, dropped, abandoned, updated_at) \

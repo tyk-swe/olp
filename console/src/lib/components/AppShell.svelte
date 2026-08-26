@@ -11,16 +11,19 @@
   let {
     children,
     user,
+    installationName,
     signingOut = false,
     signOutError = '',
     onSignOut
   }: {
     children: Snippet;
     user: SessionUser;
+    installationName: string;
     signingOut?: boolean;
     signOutError?: string;
     onSignOut: () => void;
   } = $props();
+  const installationLabel = $derived(installationName || 'Local installation');
   let mobileNavigation = $state<HTMLDialogElement>();
   let accountMenu = $state<HTMLDetailsElement>();
   let accountMenuOpen = $state(false);
@@ -83,7 +86,7 @@
       </div>
 
       <div class="topbar-actions">
-        <span class="edition"><span aria-hidden="true"></span>Local installation</span>
+        <span class="edition" title={installationLabel}><span class="edition-dot" aria-hidden="true"></span><span class="edition-name">{installationLabel}</span></span>
         <ThemeToggle />
         <details
           class="account-menu"
@@ -192,9 +195,10 @@
   }
 
   .environment-dot,
-  .edition span {
+  .edition-dot {
     width: 0.5rem;
     height: 0.5rem;
+    flex: none;
     border-radius: 999px;
     background: var(--success);
   }
@@ -225,7 +229,13 @@
 
   .edition {
     display: inline-flex;
+    /* An operator may name the installation with up to 100 characters, and the
+       topbar is a fixed 3.5rem row: the name is truncated with its full text
+       kept in the tooltip rather than pushing the account menu off the edge. */
+    overflow: hidden;
+    max-width: 18rem;
     min-height: 1.75rem;
+    flex: 0 1 auto;
     align-items: center;
     gap: 0.45rem;
     margin-right: 0.5rem;
@@ -238,6 +248,12 @@
     font-weight: 700;
     letter-spacing: 0.045em;
     text-transform: uppercase;
+    white-space: nowrap;
+  }
+
+  .edition-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
   .account-menu {
@@ -429,7 +445,7 @@
 
   @media (forced-colors: active) {
     .environment-dot,
-    .edition span {
+    .edition-dot {
       border: 1px solid CanvasText;
       background: CanvasText;
     }

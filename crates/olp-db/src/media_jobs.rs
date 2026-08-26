@@ -63,6 +63,7 @@ impl MediaJobLifecycle {
     }
 
     #[must_use]
+    #[cfg(any(test, feature = "test-util"))]
     pub const fn needs_reconciliation(self) -> bool {
         matches!(
             self,

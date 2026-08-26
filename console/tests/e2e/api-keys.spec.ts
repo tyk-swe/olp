@@ -172,6 +172,7 @@ test('API key policy updates, rotation, and revocation converge in the list', as
   await mockSession(page, sessionOptions);
   page.on('dialog', (dialog) => dialog.accept());
   let revokedAt: string | null = null;
+  let rotatedAt: string | null = null;
   let keyName = 'production SDK';
   let requestsPerMinute = 120;
   let keyEtag = '01980000-0000-7000-8000-000000000309';
@@ -186,7 +187,7 @@ test('API key policy updates, rotation, and revocation converge in the list', as
     max_concurrency: 8,
     expires_at: null,
     revoked_at: revokedAt,
-    rotated_at: null,
+    rotated_at: rotatedAt,
     etag: keyEtag,
     created_at: now
   });
@@ -224,6 +225,7 @@ test('API key policy updates, rotation, and revocation converge in the list', as
     const request = route.request();
     const pathname = new URL(request.url()).pathname;
     if (pathname.endsWith('/rotate')) {
+      rotatedAt = now;
       await route.fulfill({
         json: {
           id: ids.key,
@@ -266,6 +268,9 @@ test('API key policy updates, rotation, and revocation converge in the list', as
   await page.getByRole('button', { name: 'Save and publish' }).click();
   await expect(page.getByText('renamed SDK', { exact: true })).toBeVisible();
   await expect(page.getByText(/240 RPM/)).toBeVisible();
+  await expect(page.getByText('Never rotated')).toBeVisible();
+  // A key with no expiry says so rather than showing an absent-value dash.
+  await expect(page.getByText('No expiry')).toBeVisible();
   await page.getByRole('button', { name: 'Rotate' }).click();
   const dialog = page.getByRole('dialog', { name: 'Copy this secret now.' });
   await expect(
@@ -273,6 +278,8 @@ test('API key policy updates, rotation, and revocation converge in the list', as
   ).toBeVisible();
   await dialog.getByRole('button', { name: 'I have saved the key' }).click();
   await expect(page.getByText('rotated-key-shown-once')).toHaveCount(0);
+  await expect(page.getByText('Never rotated')).toHaveCount(0);
+  await expect(page.getByText(/^Rotated /)).toBeVisible();
   await page.getByRole('button', { name: 'Revoke' }).click();
   await expect(page.getByText('revoked', { exact: true })).toBeVisible();
 });

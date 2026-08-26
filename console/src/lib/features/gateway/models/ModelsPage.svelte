@@ -2,6 +2,7 @@
   import { resolve } from '$app/paths';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import CursorPagination from '$lib/components/CursorPagination.svelte';
+  import ReadOnlyNote from '$lib/components/ReadOnlyNote.svelte';
   import {
     cursorPaginationProps,
     emptyCursorHistory
@@ -90,7 +91,7 @@
   <div><p class="eyebrow">Gateway</p><h1 class="page-title">Model inventory</h1><p class="page-description">Route eligibility comes from certified provider, model, operation, surface, and mode tuples.</p></div>
   {#if canManage}<a class="button button-primary" href={resolve('/providers/new')}>Discover models</a>{/if}
 </div>
-{#if !canManage}<p class="read-only-note" role="note">Your role can view the model inventory but not change route eligibility.</p>{/if}
+{#if !canManage}<ReadOnlyNote>Your role can view the model inventory but not change route eligibility.</ReadOnlyNote>{/if}
 
 <div class="metric-grid">
   <article class="card metric-card"><p>Models on page</p><strong>{inventory.length}</strong></article>

@@ -35,12 +35,14 @@ use crate::{
     management::{
         cookies::clear_recent_auth_cookie,
         json_payload::json_payload,
+        provenance::Provenance,
         sessions::{cookie, enforce_origin, reauthentication_required, require_mutation_session},
     },
     public_http::{
         problem::Problem, relative_url::RelativeReturnTo, request_cookies::RECENT_AUTH_COOKIE,
     },
 };
+use olp_db::store::RequestProvenance;
 
 #[derive(Debug, Serialize, ToSchema)]
 pub(super) struct OidcAuthorizationResponse {
@@ -90,6 +92,7 @@ struct PersistentFlowContext<'a> {
 )]
 pub(super) async fn begin_login(
     State(state): State<ManagementState>,
+    Provenance(provenance): Provenance,
     connect_info: Option<Extension<ConnectInfo<SocketAddr>>>,
     headers: HeaderMap,
     query: Result<Query<OidcLoginQuery>, QueryRejection>,
@@ -103,6 +106,7 @@ pub(super) async fn begin_login(
         .unwrap_or_default();
     begin_authorization(
         &state,
+        &provenance,
         &headers,
         OidcFlowPurpose::Login,
         None,
@@ -130,6 +134,7 @@ pub(super) async fn begin_login(
 )]
 pub(super) async fn begin_login_post(
     State(state): State<ManagementState>,
+    Provenance(provenance): Provenance,
     connect_info: Option<Extension<ConnectInfo<SocketAddr>>>,
     headers: HeaderMap,
     payload: Result<Json<OidcLoginRequest>, JsonRejection>,
@@ -144,6 +149,7 @@ pub(super) async fn begin_login_post(
         .unwrap_or_default();
     begin_authorization(
         &state,
+        &provenance,
         &headers,
         OidcFlowPurpose::Login,
         None,
@@ -167,6 +173,7 @@ pub(super) async fn begin_login_post(
 )]
 pub(super) async fn begin_link(
     State(state): State<ManagementState>,
+    Provenance(provenance): Provenance,
     headers: HeaderMap,
 ) -> Result<Response, Problem> {
     let principal = require_mutation_session(&state, &headers).await?;
@@ -181,6 +188,7 @@ pub(super) async fn begin_link(
     };
     let mut response = begin_authorization(
         &state,
+        &provenance,
         &headers,
         OidcFlowPurpose::Link,
         Some(context),
@@ -209,6 +217,7 @@ pub(super) async fn begin_link(
 )]
 pub(super) async fn begin_reauthentication(
     State(state): State<ManagementState>,
+    Provenance(provenance): Provenance,
     headers: HeaderMap,
     Json(request): Json<OidcReauthenticationRequest>,
 ) -> Result<Response, Problem> {
@@ -233,6 +242,7 @@ pub(super) async fn begin_reauthentication(
     };
     begin_authorization(
         &state,
+        &provenance,
         &headers,
         OidcFlowPurpose::Reauthenticate,
         Some(context),
@@ -276,6 +286,7 @@ async fn admit_login(
 
 async fn begin_authorization(
     state: &ManagementState,
+    provenance: &RequestProvenance,
     headers: &HeaderMap,
     purpose: OidcFlowPurpose,
     context: Option<PersistentFlowContext<'_>>,
@@ -335,6 +346,7 @@ async fn begin_authorization(
                 })?;
             state
                 .store()
+                .with_provenance(provenance)
                 .create_oidc_flow(NewOidcFlow {
                     id: flow_id.as_uuid(),
                     configuration_id: configuration.id,

@@ -24,8 +24,8 @@ use zeroize::Zeroizing;
 
 use crate::management::{
     auth::{
-        SessionResponse, UserResponse, public_auth_rate_limited, session_response,
-        spawn_password_work,
+        SessionResponse, UserResponse, installation_name, public_auth_rate_limited,
+        session_response, spawn_password_work,
     },
     cookies::validate_session_cookie_ttl,
     error_mapping::{map_identity, map_persistence},
@@ -33,6 +33,7 @@ use crate::management::{
     json_payload::json_payload,
     pagination::{PageQuery, page},
     permissions::{parse_user_role, require_permission},
+    provenance::Provenance,
     secrets::WriteOnlySecret,
     sessions::{enforce_origin, require_mutation_session, require_read_session},
 };
@@ -52,10 +53,16 @@ pub(in crate::management) struct InvitationResponse {
     pub role: String,
     #[schema(value_type = String, format = Uuid)]
     pub invited_by: Uuid,
+    /// Email of the operator who sent the invitation.
+    pub invited_by_email: Option<String>,
     pub status: String,
     pub expires_at: DateTime<Utc>,
     pub accepted_at: Option<DateTime<Utc>>,
+    /// Email of the account created by accepting the invitation.
+    pub accepted_by_email: Option<String>,
     pub revoked_at: Option<DateTime<Utc>>,
+    /// Email of the operator who revoked the invitation.
+    pub revoked_by_email: Option<String>,
     pub created_at: DateTime<Utc>,
 }
 
@@ -78,10 +85,13 @@ impl From<InvitationRecord> for InvitationResponse {
             email: invitation.email,
             role: invitation.role.to_string(),
             invited_by: invitation.invited_by,
+            invited_by_email: invitation.invited_by_email,
             status: status.to_owned(),
             expires_at: invitation.expires_at,
             accepted_at: invitation.accepted_at,
+            accepted_by_email: invitation.accepted_by_email,
             revoked_at: invitation.revoked_at,
+            revoked_by_email: invitation.revoked_by_email,
             created_at: invitation.created_at,
         }
     }
@@ -155,6 +165,7 @@ pub(in crate::management) async fn list_invitations(
 )]
 pub(in crate::management) async fn create_invitation(
     State(state): State<ManagementState>,
+    Provenance(provenance): Provenance,
     headers: HeaderMap,
     payload: Result<Json<CreateInvitationRequest>, JsonRejection>,
 ) -> Result<Response, Problem> {
@@ -180,6 +191,7 @@ pub(in crate::management) async fn create_invitation(
         .ok_or_else(Problem::internal)?;
     let created = state
         .store()
+        .with_provenance(&provenance)
         .create_invitation(
             NewInvitation {
                 email: request.email,
@@ -224,6 +236,7 @@ pub(in crate::management) async fn create_invitation(
 )]
 pub(in crate::management) async fn revoke_invitation(
     State(state): State<ManagementState>,
+    Provenance(provenance): Provenance,
     Path(invitation_id): Path<Uuid>,
     headers: HeaderMap,
 ) -> Result<Response, Problem> {
@@ -241,6 +254,7 @@ pub(in crate::management) async fn revoke_invitation(
     }
     let invitation = state
         .store()
+        .with_provenance(&provenance)
         .revoke_invitation(invitation_id, principal.user_id, mutation.key())
         .await
         .map_err(map_identity)?;
@@ -289,6 +303,7 @@ impl fmt::Debug for AcceptInvitationRequest {
 )]
 pub(in crate::management) async fn accept_invitation(
     State(state): State<ManagementState>,
+    Provenance(provenance): Provenance,
     connect_info: Option<Extension<ConnectInfo<SocketAddr>>>,
     headers: HeaderMap,
     payload: Result<Json<AcceptInvitationRequest>, JsonRejection>,
@@ -296,7 +311,7 @@ pub(in crate::management) async fn accept_invitation(
     enforce_origin(&state.public_origin, &headers)?;
     validate_session_cookie_ttl(state.session_ttl)?;
     let request = json_payload(payload)?;
-    let store = state.store();
+    let store = state.store().with_provenance(&provenance);
     let (source_digest, source_target_digest) = public_auth_source_target_digests(
         state.request_boundary(),
         &headers,
@@ -344,6 +359,7 @@ pub(in crate::management) async fn accept_invitation(
             display_name: accepted.user.display_name,
             role: accepted.user.role.to_string(),
         },
+        installation_name(&store).await?,
         state.session_ttl,
     )
 }

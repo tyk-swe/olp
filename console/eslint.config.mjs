@@ -7,6 +7,14 @@ import globals from 'globals';
 import tseslint from 'typescript-eslint';
 
 const tsFiles = ['**/*.{ts,tsx}'];
+const svelteFiles = ['src/**/*.svelte'];
+// `<script lang="ts">` blocks are held to the same recommended rules as the
+// .ts modules; without this, unused imports and locals in components are
+// invisible to the linter.
+const typeScriptRecommendedRules = tseslint.configs.recommended.reduce(
+  (rules, config) => ({ ...rules, ...config.rules }),
+  {}
+);
 
 const consoleRoot = path.dirname(fileURLToPath(import.meta.url));
 const featureRoot = path.join(consoleRoot, 'src', 'lib', 'features');
@@ -114,12 +122,19 @@ export default [
     }
   },
   {
-    files: ['src/**/*.svelte'],
+    files: svelteFiles,
+    plugins: { '@typescript-eslint': tseslint.plugin },
     languageOptions: {
       globals: globals.browser,
       parserOptions: { parser: tseslint.parser }
     },
     rules: {
+      ...js.configs.recommended.rules,
+      ...typeScriptRecommendedRules,
+      // Runes are declared with `let` even when they are never reassigned:
+      // `$props()`, `$state()`, and `$bindable()` bindings are rewritten by the
+      // compiler, so `prefer-const` would fight the framework in every file.
+      'prefer-const': 'off',
       'svelte/no-navigation-without-resolve': ['error', { ignoreLinks: true }]
     }
   },

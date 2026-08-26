@@ -7,7 +7,12 @@ export type ProblemDetails = {
   detail?: string;
   instance?: string;
   errors?: FieldErrors;
+  /** Machine-readable classification per field message, parallel to `errors`. */
+  errorCodes?: FieldErrors;
 };
+
+/** One rejected field message with the code the API classified it under. */
+export type FieldIssue = { field: string; message: string; code?: string };
 
 export class ApiProblem extends Error {
   readonly problem: ProblemDetails;
@@ -19,7 +24,7 @@ export class ApiProblem extends Error {
   }
 }
 
-export const ETAG_MISMATCH_TYPE = 'https://openllmproxy.dev/problems/etag_mismatch';
+const ETAG_MISMATCH_TYPE = 'https://openllmproxy.dev/problems/etag_mismatch';
 
 export function isEtagMismatch(error: unknown): error is ApiProblem {
   return (
@@ -59,7 +64,8 @@ function apiProblem(error: unknown, response: Response): ApiProblem {
     status,
     detail: optionalString(value.detail),
     instance: optionalString(value.instance),
-    errors: fieldErrors(value.errors)
+    errors: fieldErrors(value.errors),
+    errorCodes: fieldErrors(value.error_codes)
   });
 }
 
@@ -79,6 +85,26 @@ export function result<T>(
     title: 'The API response did not include the expected JSON body',
     status: 502
   });
+}
+
+/**
+ * Flattens a validation Problem into one entry per rejected field message.
+ * Codes line up with messages by position, and a message without one keeps
+ * `code` undefined rather than borrowing its neighbour's. The API pads
+ * `error_codes` with an empty string wherever a message is uncoded, so that
+ * placeholder is read as "no code" rather than as a classification named "".
+ */
+export function fieldIssues(error: unknown): FieldIssue[] {
+  if (!(error instanceof ApiProblem)) return [];
+  const { errors, errorCodes } = error.problem;
+  if (!errors) return [];
+  return Object.entries(errors).flatMap(([field, messages]) =>
+    messages.map((message, index) => ({
+      field,
+      message,
+      code: errorCodes?.[field]?.[index] || undefined
+    }))
+  );
 }
 
 export function errorMessage(error: unknown, fallback = 'The control API could not complete the request.'): string {

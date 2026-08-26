@@ -19,6 +19,7 @@ use crate::{
     management::{
         cookies::{append_security_transition_cookies, validate_session_cookie_ttl},
         error_mapping::map_persistence,
+        provenance::Provenance,
         sessions::{
             cookie, reauthentication_required, require_mutation_session, require_read_session,
         },
@@ -108,6 +109,7 @@ pub(super) async fn list_identities(
 )]
 pub(super) async fn unlink_identity(
     State(state): State<ManagementState>,
+    Provenance(provenance): Provenance,
     Path(identity_id): Path<Uuid>,
     headers: HeaderMap,
 ) -> Result<Response, Problem> {
@@ -119,6 +121,7 @@ pub(super) async fn unlink_identity(
     let replacement_session = SessionMaterial::generate();
     state
         .store()
+        .with_provenance(&provenance)
         .unlink_oidc_identity(UnlinkOidcIdentity {
             user_id: principal.user_id,
             identity_id,

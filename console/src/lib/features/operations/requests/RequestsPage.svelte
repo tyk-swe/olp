@@ -98,9 +98,11 @@
         <div><dt>Runtime generation</dt><dd class="mono">{detail.data.runtime_generation_id}</dd></div>
         <div><dt>API key ID</dt><dd class="mono">{detail.data.api_key_id}</dd></div>
         <div><dt>Input tokens</dt><dd>{formatInteger(detail.data.input_tokens)}</dd></div>
+        <div><dt>Cached input tokens</dt><dd>{formatInteger(detail.data.cached_input_tokens)}</dd></div>
         <div><dt>Output tokens</dt><dd>{formatInteger(detail.data.output_tokens)}</dd></div>
         <div><dt>Usage completeness</dt><dd><span class="badge" class:success={detail.data.usage_complete === true} class:warning={detail.data.usage_complete === false}>{detail.data.usage_complete == null ? 'Unknown' : detail.data.usage_complete ? 'Complete' : 'Incomplete'}</span></dd></div>
         <div><dt>Started</dt><dd>{formatDate(detail.data.started_at)}</dd></div>
+        <div><dt>Completed</dt><dd>{detail.data.completed_at ? formatDate(detail.data.completed_at) : 'Still in flight'}</dd></div>
       </dl>
     </section>
 
@@ -122,6 +124,7 @@
               </div>
               <dl>
                 <div><dt>Started</dt><dd>{formatDate(attempt.started_at)}</dd></div>
+                <div><dt>Completed</dt><dd>{attempt.completed_at ? formatDate(attempt.completed_at) : 'Still in flight'}</dd></div>
                 <div><dt>First byte</dt><dd>{attempt.first_byte_ms === null || attempt.first_byte_ms === undefined ? '—' : `${attempt.first_byte_ms} ms`}</dd></div>
                 <div><dt>Latency</dt><dd>{attempt.latency_ms === null || attempt.latency_ms === undefined ? '—' : `${attempt.latency_ms} ms`}</dd></div>
                 <div><dt>Response committed</dt><dd>{attempt.committed ? 'Yes — failover stopped' : 'No'}</dd></div>
@@ -171,12 +174,12 @@
         <tbody>
           {#each requests.data?.items ?? [] as request (request.id)}
             <tr>
-              <td>{formatDate(request.started_at)}</td>
+              <td>{formatDate(request.started_at)}<small>{request.completed_at ? `Completed ${formatDate(request.completed_at)}` : 'In flight'}</small></td>
               <td><strong>{request.route}</strong><small>{request.operation} · {request.surface}</small></td>
               <td><span class="badge {statusTone(request.status_code, request.error_class)}">{statusLabel(request.status_code, request.error_class)}</span></td>
               <td>{request.attempt_count}</td>
               <td>{request.first_byte_ms == null ? '—' : `${request.first_byte_ms} ms`} / {request.total_latency_ms == null ? '—' : `${request.total_latency_ms} ms`}</td>
-              <td>{formatInteger(request.input_tokens)} in<br />{formatInteger(request.output_tokens)} out</td>
+              <td>{formatInteger(request.input_tokens)} in<br />{formatInteger(request.output_tokens)} out<small>{formatInteger(request.cached_input_tokens)} cached</small></td>
               <td><span class:unpriced={request.unpriced}>{formatCost(request.estimated_cost, request.currency)}</span>{#if request.usage_complete === false}<small class="warning-text">Incomplete usage</small>{/if}</td>
               <td><a class="row-link" href={resolve(`/requests/${request.id}`)} aria-label={`View request ${request.id}`}>View</a></td>
             </tr>
@@ -188,7 +191,7 @@
       {#each requests.data?.items ?? [] as request (request.id)}
         <li class="card">
           <div class="mobile-result-heading"><div><strong>{request.route}</strong><small>{request.operation} · {request.surface}</small></div><span class="badge {statusTone(request.status_code, request.error_class)}">{statusLabel(request.status_code, request.error_class)}</span></div>
-          <dl><div><dt>Started</dt><dd>{formatDate(request.started_at)}</dd></div><div><dt>TTFT / latency</dt><dd>{request.first_byte_ms == null ? '—' : `${request.first_byte_ms} ms`} / {request.total_latency_ms == null ? '—' : `${request.total_latency_ms} ms`}</dd></div><div><dt>Tokens</dt><dd>{formatInteger(request.input_tokens)} in · {formatInteger(request.output_tokens)} out</dd></div><div><dt>Cost</dt><dd class:unpriced={request.unpriced}>{formatCost(request.estimated_cost, request.currency)}</dd></div></dl>
+          <dl><div><dt>Started</dt><dd>{formatDate(request.started_at)}</dd></div><div><dt>Completed</dt><dd>{request.completed_at ? formatDate(request.completed_at) : 'In flight'}</dd></div><div><dt>TTFT / latency</dt><dd>{request.first_byte_ms == null ? '—' : `${request.first_byte_ms} ms`} / {request.total_latency_ms == null ? '—' : `${request.total_latency_ms} ms`}</dd></div><div><dt>Tokens</dt><dd>{formatInteger(request.input_tokens)} in · {formatInteger(request.output_tokens)} out · {formatInteger(request.cached_input_tokens)} cached</dd></div><div><dt>Cost</dt><dd class:unpriced={request.unpriced}>{formatCost(request.estimated_cost, request.currency)}</dd></div></dl>
           <a class="button button-secondary" href={resolve(`/requests/${request.id}`)} aria-label={`View request ${request.id}`}>View timeline</a>
         </li>
       {/each}
@@ -236,7 +239,7 @@
   .timeline-marker { position: absolute; top: 0.85rem; left: -1.4rem; display: grid; width: 2rem; height: 2rem; place-items: center; border-radius: 999px; background: var(--accent); color: white; font-size: 0.75rem; font-weight: 800; }
   .attempt-heading strong, .attempt-heading .mono { display: block; }
   .attempt-heading .mono { margin-top: 0.15rem; color: var(--foreground-muted); font-size: 0.78rem; }
-  .timeline dl { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .timeline dl { grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr)); }
   @media (max-width: 72rem) { .filter-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } dl, .timeline dl { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
   @media (max-width: 44rem) { .desktop-results { display: none; } .mobile-results { display: grid; gap: 0.75rem; } }
   @media (max-width: 40rem) { .filter-grid, dl, .timeline dl { grid-template-columns: 1fr; } .mobile-results dl { grid-template-columns: repeat(2, minmax(0, 1fr)); } .filters { padding: 0.85rem; } .pagination { justify-content: space-between; } }

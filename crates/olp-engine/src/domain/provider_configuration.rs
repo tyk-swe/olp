@@ -434,6 +434,17 @@ pub enum ProviderViolationCode {
     Forbidden,
 }
 
+impl ProviderViolationCode {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::UnsupportedAuthMode => "unsupported_auth_mode",
+            Self::Required => "required",
+            Self::Forbidden => "forbidden",
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct Violation {
     pub field: ProviderViolationField,
@@ -734,6 +745,26 @@ mod tests {
                         && violation.code == expected
                 }));
             }
+        }
+    }
+
+    #[test]
+    fn violation_code_wire_strings_are_pinned() {
+        // These strings cross the API boundary as `error_codes` values, so a
+        // rename here silently breaks every client that branches on them.
+        for (code, expected) in [
+            (
+                ProviderViolationCode::UnsupportedAuthMode,
+                "unsupported_auth_mode",
+            ),
+            (ProviderViolationCode::Required, "required"),
+            (ProviderViolationCode::Forbidden, "forbidden"),
+        ] {
+            assert_eq!(code.as_str(), expected);
+            assert_eq!(
+                serde_json::to_string(&code).unwrap(),
+                format!("\"{expected}\"")
+            );
         }
     }
 }

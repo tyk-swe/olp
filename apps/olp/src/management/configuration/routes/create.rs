@@ -20,6 +20,7 @@ use crate::management::{
     json_payload::json_payload,
     permissions::require_route_manager,
     preconditions::{if_match, with_etag},
+    provenance::Provenance,
     response_policy::RuntimeGenerationResponse,
     sessions::require_mutation_session,
 };
@@ -89,6 +90,7 @@ pub(crate) struct RouteActivationResponse {
 )]
 pub(crate) async fn create_route_draft(
     State(state): State<ManagementState>,
+    Provenance(provenance): Provenance,
     headers: HeaderMap,
     payload: Result<Json<CreateRouteDraftRequest>, JsonRejection>,
 ) -> Result<Response, Problem> {
@@ -129,6 +131,7 @@ pub(crate) async fn create_route_draft(
         .collect();
     let created = state
         .store()
+        .with_provenance(&provenance)
         .create_route_draft(
             NewRouteDraft {
                 slug: request.slug,
@@ -177,6 +180,7 @@ pub(crate) async fn create_route_draft(
 )]
 pub(crate) async fn validate_route_draft(
     State(state): State<ManagementState>,
+    Provenance(provenance): Provenance,
     Path(draft_id): Path<Uuid>,
     headers: HeaderMap,
 ) -> Result<Response, Problem> {
@@ -184,6 +188,7 @@ pub(crate) async fn validate_route_draft(
     require_route_manager(&principal)?;
     let (etag, slug) = state
         .store()
+        .with_provenance(&provenance)
         .validate_route_draft(draft_id, if_match(&headers)?, principal.user_id)
         .await
         .map_err(map_configuration)?;
@@ -219,6 +224,7 @@ pub(crate) async fn validate_route_draft(
 )]
 pub(crate) async fn activate_route_draft(
     State(state): State<ManagementState>,
+    Provenance(provenance): Provenance,
     Path(draft_id): Path<Uuid>,
     headers: HeaderMap,
 ) -> Result<Response, Problem> {
@@ -240,6 +246,7 @@ pub(crate) async fn activate_route_draft(
     }
     let activated = state
         .store()
+        .with_provenance(&provenance)
         .activate_route_draft(draft_id, expected_etag, principal.user_id, mutation.key())
         .await
         .map_err(map_configuration)?;

@@ -209,11 +209,14 @@ impl Store {
         }
         sqlx::query!(
             "INSERT INTO audit_events \
-             (id, actor_user_id, action, resource_type, resource_id, outcome) \
-             VALUES ($1, $2, 'api_key.create', 'api_key', $3, 'success')",
+             (id, actor_user_id, action, resource_type, resource_id, outcome, \
+              source_ip, user_agent_family) \
+             VALUES ($1, $2, 'api_key.create', 'api_key', $3, 'success', $4::text::inet, $5)",
             Uuid::now_v7(),
             key.actor,
-            id.to_string()
+            id.to_string(),
+            self.provenance().source_ip_text(),
+            self.provenance().user_agent_family()
         )
         .execute(&mut *transaction)
         .await?;
@@ -286,11 +289,14 @@ impl Store {
         .await?;
         sqlx::query!(
             "INSERT INTO audit_events \
-             (id, actor_user_id, action, resource_type, resource_id, outcome) \
-             VALUES ($1, $2, 'api_key.revoke', 'api_key', $3, 'success')",
+             (id, actor_user_id, action, resource_type, resource_id, outcome, \
+              source_ip, user_agent_family) \
+             VALUES ($1, $2, 'api_key.revoke', 'api_key', $3, 'success', $4::text::inet, $5)",
             Uuid::now_v7(),
             actor,
-            id.to_string()
+            id.to_string(),
+            self.provenance().source_ip_text(),
+            self.provenance().user_agent_family()
         )
         .execute(&mut *transaction)
         .await?;

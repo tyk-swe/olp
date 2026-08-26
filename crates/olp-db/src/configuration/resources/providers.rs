@@ -27,8 +27,10 @@ impl Store {
                     stats.enabled_model_count AS \"enabled_model_count!\", \
                     stats.capability_count AS \"capability_count!\", \
                     stats.certified_capability_count AS \"certified_capability_count!\", \
-                    probe.upstream_model AS \"probe_model?\" \
+                    probe.upstream_model AS \"probe_model?\", \
+                    creator.email AS \"created_by_email?\" \
              FROM providers p \
+             LEFT JOIN users creator ON creator.id = p.created_by \
              LEFT JOIN provider_credential_versions draft_cv \
                ON draft_cv.id = p.active_credential_version_id \
              LEFT JOIN provider_revisions ar ON ar.id = p.active_revision_id \
@@ -81,8 +83,11 @@ impl Store {
                     stats.enabled_model_count AS \"enabled_model_count!\", \
                     stats.capability_count AS \"capability_count!\", \
                     stats.certified_capability_count AS \"certified_capability_count!\", \
-                    probe.upstream_model AS \"probe_model?\" \
-             FROM providers p LEFT JOIN provider_credential_versions draft_cv \
+                    probe.upstream_model AS \"probe_model?\", \
+                    creator.email AS \"created_by_email?\" \
+             FROM providers p \
+             LEFT JOIN users creator ON creator.id = p.created_by \
+             LEFT JOIN provider_credential_versions draft_cv \
                ON draft_cv.id = p.active_credential_version_id \
              LEFT JOIN provider_revisions ar ON ar.id = p.active_revision_id \
              LEFT JOIN provider_credential_versions runtime_cv \
@@ -167,6 +172,7 @@ impl Store {
         .await?;
         audit_in_transaction(
             &mut transaction,
+            self.provenance(),
             actor,
             "provider.update",
             "provider",
@@ -249,6 +255,7 @@ impl Store {
         }
         audit_in_transaction(
             &mut transaction,
+            self.provenance(),
             actor,
             "provider.disable",
             "provider",
@@ -321,6 +328,7 @@ impl Store {
         .await?;
         audit_in_transaction(
             &mut transaction,
+            self.provenance(),
             actor,
             "provider.restore_as_draft",
             "provider",
@@ -380,6 +388,7 @@ impl Store {
         }
         audit_in_transaction(
             &mut transaction,
+            self.provenance(),
             actor,
             "provider.probe",
             "provider",
@@ -422,6 +431,7 @@ struct ProviderRow {
     capability_count: i64,
     certified_capability_count: i64,
     probe_model: Option<String>,
+    created_by_email: Option<String>,
 }
 
 fn provider_from_row(row: ProviderRow) -> Result<ProviderRecord, Error> {
@@ -474,5 +484,6 @@ fn provider_from_row(row: ProviderRow) -> Result<ProviderRecord, Error> {
             "certified_capability_count",
         )?,
         probe_model: row.probe_model,
+        created_by_email: row.created_by_email,
     })
 }

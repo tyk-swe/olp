@@ -51,6 +51,7 @@ export function providerRecord(
     last_probe_detail: state === 'draft' ? null : 'OpenAI reachable',
     etag: '01980000-0000-7000-8000-000000000109',
     created_at: now,
+    created_by_email: 'owner@example.com',
     updated_at: now,
     model_count: models.length,
     enabled_model_count: enabledModels.length,

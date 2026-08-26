@@ -38,6 +38,61 @@ describe('presentUsageCompleteness', () => {
     ).toBe('warning');
   });
 
+  it('names the approximate range and the priced share in the detail', () => {
+    const presentation = presentUsageCompleteness(
+      incompleteUsage({
+        coverage: {
+          approximate: true,
+          excluded_partial_aggregate_boundaries: 2,
+          range_complete: false
+        },
+        priced_count: 11,
+        unpriced_count: 1
+      })
+    );
+    expect(presentation.kind).toBe('warning');
+    if (presentation.kind !== 'warning') return;
+    expect(presentation.detail).toContain('11 priced and 1 unpriced requests');
+    expect(presentation.detail).toContain(
+      'Totals are approximate: 2 partial retained-hour boundaries are excluded.'
+    );
+  });
+
+  it('uses the singular boundary wording for one excluded hour', () => {
+    const presentation = presentUsageCompleteness(
+      incompleteUsage({
+        coverage: {
+          approximate: true,
+          excluded_partial_aggregate_boundaries: 1,
+          range_complete: false
+        }
+      })
+    );
+    expect(presentation.kind === 'warning' && presentation.detail).toContain(
+      '1 partial retained-hour boundary is excluded.'
+    );
+  });
+
+  it('never claims exact totals for an approximate range', () => {
+    expect(
+      presentUsageCompleteness({
+        ...completeUsage,
+        coverage: {
+          approximate: true,
+          excluded_partial_aggregate_boundaries: 1,
+          range_complete: false
+        }
+      }).kind
+    ).toBe('warning');
+  });
+
+  it('omits the approximation note for an exact range', () => {
+    const presentation = presentUsageCompleteness(incompleteUsage());
+    expect(presentation.kind === 'warning' && presentation.detail).not.toContain(
+      'approximate'
+    );
+  });
+
   it.each<[string, UsageCompleteness, string, boolean]>([
     [
       'stale consumer before every other condition',

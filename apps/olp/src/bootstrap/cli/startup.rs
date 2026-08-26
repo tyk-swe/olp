@@ -194,6 +194,7 @@ pub(super) async fn serve(
                 store.clone(),
                 emitter,
                 gateway_instance,
+                state.request_metadata_loss.clone(),
                 background_shutdown_receiver.clone(),
             )));
             let request_metadata_writer_url = url.clone();

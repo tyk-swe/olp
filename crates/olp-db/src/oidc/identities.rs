@@ -12,7 +12,7 @@ use super::types::{
 };
 use crate::{
     authentication::{
-        RecentAuthPurpose, SessionSecurityContext, consume_recent_authentication,
+        RecentAuthGrant, RecentAuthPurpose, SessionSecurityContext, consume_recent_authentication,
         insert_versioned_session, install_recent_authentication, revoke_user_sessions,
     },
     identity::invitations::retire_invitations_on_access_loss,
@@ -83,6 +83,7 @@ impl Store {
                     .await?;
                     insert_audit(
                         &mut transaction,
+                        self.provenance(),
                         Some(user.id),
                         "user.role_sync_oidc",
                         "user",
@@ -93,6 +94,7 @@ impl Store {
                     if retired > 0 {
                         insert_audit(
                             &mut transaction,
+                            self.provenance(),
                             Some(user.id),
                             "invitation.revoke_for_oidc_role_change",
                             "user",
@@ -103,6 +105,7 @@ impl Store {
                     }
                     insert_audit(
                         &mut transaction,
+                        self.provenance(),
                         Some(user.id),
                         "session.revoke_for_oidc_role_change",
                         "user",
@@ -152,6 +155,7 @@ impl Store {
             .await?;
             insert_audit(
                 &mut transaction,
+                self.provenance(),
                 Some(user_id),
                 "user.create_oidc",
                 "user",
@@ -190,6 +194,7 @@ impl Store {
         .await?;
         insert_audit(
             &mut transaction,
+            self.provenance(),
             Some(user.id),
             "session.create",
             "session",
@@ -199,6 +204,7 @@ impl Store {
         .await?;
         insert_audit(
             &mut transaction,
+            self.provenance(),
             Some(user.id),
             "oidc.login",
             "session",
@@ -334,6 +340,7 @@ impl Store {
         .await?;
         insert_audit(
             &mut transaction,
+            self.provenance(),
             Some(input.user_id),
             "oidc.identity_link",
             "user",
@@ -343,6 +350,7 @@ impl Store {
         .await?;
         insert_audit(
             &mut transaction,
+            self.provenance(),
             Some(input.user_id),
             "user.authentication_method_change",
             "user",
@@ -352,6 +360,7 @@ impl Store {
         .await?;
         insert_audit(
             &mut transaction,
+            self.provenance(),
             Some(input.user_id),
             "session.revoke_for_oidc_link",
             "user",
@@ -361,6 +370,7 @@ impl Store {
         .await?;
         insert_audit(
             &mut transaction,
+            self.provenance(),
             Some(input.user_id),
             "session.rotate_for_oidc_link",
             "session",
@@ -436,15 +446,18 @@ impl Store {
         }
         if !install_recent_authentication(
             &mut transaction,
+            self.provenance(),
             SessionSecurityContext {
                 session_id: input.session_id,
                 user_id: input.user_id,
                 security_version: input.security_version,
             },
-            input.purpose,
-            input.resource_id,
-            input.material,
-            grant_expires_at,
+            RecentAuthGrant {
+                purpose: input.purpose,
+                resource_id: input.resource_id,
+                material: input.material,
+                expires_at: grant_expires_at,
+            },
             now,
         )
         .await?
@@ -569,6 +582,7 @@ impl Store {
         .await?;
         insert_audit(
             &mut transaction,
+            self.provenance(),
             Some(input.user_id),
             "oidc.identity_unlink",
             "oidc_identity",
@@ -578,6 +592,7 @@ impl Store {
         .await?;
         insert_audit(
             &mut transaction,
+            self.provenance(),
             Some(input.user_id),
             "user.authentication_method_change",
             "user",
@@ -587,6 +602,7 @@ impl Store {
         .await?;
         insert_audit(
             &mut transaction,
+            self.provenance(),
             Some(input.user_id),
             "session.revoke_for_oidc_unlink",
             "user",
@@ -596,6 +612,7 @@ impl Store {
         .await?;
         insert_audit(
             &mut transaction,
+            self.provenance(),
             Some(input.user_id),
             "session.rotate_for_oidc_unlink",
             "session",

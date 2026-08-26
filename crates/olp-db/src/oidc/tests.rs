@@ -59,6 +59,7 @@ fn mapping_precedence_is_exact_email_then_strongest_group_then_default() {
         etag: Uuid::now_v7(),
         created_at: Utc::now(),
         updated_at: Utc::now(),
+        updated_by_email: Some("owner@example.test".to_owned()),
     };
     assert_eq!(
         configuration.mapped_role("OWNER@example.test", &["engineering".to_owned()]),

@@ -163,10 +163,6 @@ pub fn decode_video_get(job_id: impl Into<String>) -> Operation {
     video_job_operation(job_id.into(), VideoJobKind::Get)
 }
 
-pub fn decode_video_content(job_id: impl Into<String>) -> Operation {
-    video_job_operation(job_id.into(), VideoJobKind::Content)
-}
-
 #[derive(Clone, Deserialize, PartialEq, Serialize)]
 pub struct OpenAiVideoContentQuery {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -204,7 +200,6 @@ pub fn decode_video_delete(job_id: impl Into<String>) -> Operation {
 
 enum VideoJobKind {
     Get,
-    Content,
     Delete,
 }
 
@@ -216,7 +211,6 @@ fn video_job_operation(job_id: String, kind: VideoJobKind) -> Operation {
     };
     Operation::Video(match kind {
         VideoJobKind::Get => VideoOperation::Get(request),
-        VideoJobKind::Content => VideoOperation::Content(request),
         VideoJobKind::Delete => VideoOperation::Delete(request),
     })
 }

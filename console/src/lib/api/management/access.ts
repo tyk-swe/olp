@@ -50,10 +50,16 @@ export async function listInvitationPage(
   return { items: page.data, nextCursor: page.next_cursor ?? null };
 }
 
-export async function createInvitation(email: string, role: string): Promise<InvitationSecret> {
+export async function createInvitation(
+  email: string,
+  role: string,
+  expiresInHours?: number
+): Promise<InvitationSecret> {
   const response = await apiClient.POST('/api/v1/invitations', {
     params: { header: { 'Idempotency-Key': crypto.randomUUID() } },
-    body: { email, role }
+    // Omitting the field lets the API apply its seven-day default; it caps the
+    // lifetime at thirty days (720 hours).
+    body: { email, role, ...(expiresInHours ? { expires_in_hours: expiresInHours } : {}) }
   });
   return result(response.data, response.error, response.response);
 }

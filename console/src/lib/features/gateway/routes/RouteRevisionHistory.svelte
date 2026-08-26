@@ -14,6 +14,7 @@
   import { formatDate } from '$lib/format';
 
   let { routeId }: { routeId: string } = $props();
+
   const queryClient = useQueryClient();
   const access = useRole();
   const canManage = $derived(access.can('routes.manage'));
@@ -80,12 +81,13 @@
       <article class="card"><p>Target changes</p>{#if revisionDiff.targets_added.length}<strong>Added</strong><ul>{#each revisionDiff.targets_added as item (item)}<li><code>{item}</code></li>{/each}</ul>{/if}{#if revisionDiff.targets_removed.length}<strong>Removed</strong><ul>{#each revisionDiff.targets_removed as item (item)}<li><code>{item}</code></li>{/each}</ul>{/if}{#if revisionDiff.targets_changed.length}<strong>Changed</strong><ul>{#each revisionDiff.targets_changed as item (item)}<li><code>{item}</code></li>{/each}</ul>{/if}{#if !revisionDiff.targets_added.length && !revisionDiff.targets_removed.length && !revisionDiff.targets_changed.length}<strong>None</strong>{/if}</article>
     </section>
   {/if}
-  <div class="table-shell revision-table-shell"><table class="data-table revision-table"><thead><tr><th>Revision</th><th>Activated</th><th>Operations</th><th>Deadline / attempts</th><th>Targets</th><th><span class="sr-only">Actions</span></th></tr></thead><tbody>{#each revisions.data as revision (revision.id)}<tr><td data-label="Revision"><strong>Revision {revision.revision}</strong><br /><code>{revision.id}</code></td><td data-label="Activated">{formatDate(revision.activated_at)}</td><td data-label="Operations">{revision.operations.join(', ')}</td><td data-label="Deadline / attempts">{revision.overall_timeout_ms.toLocaleString()} ms / {revision.max_attempts}</td><td data-label="Targets">{revision.targets.length}</td><td class="revision-action">{#if canManage}<button class="button button-secondary" type="button" onclick={() => restore(revision)} disabled={Boolean(busy)}>{busy === `restore-${revision.id}` ? 'Restoring…' : 'Restore as draft'}</button>{/if}</td></tr>{/each}</tbody></table></div>
+  <div class="table-shell revision-table-shell"><table class="data-table revision-table"><thead><tr><th>Revision</th><th>Activated</th><th>Operations</th><th>Deadline / attempts</th><th>Targets</th><th><span class="sr-only">Actions</span></th></tr></thead><tbody>{#each revisions.data as revision (revision.id)}<tr id={`revision-${revision.id}`}><td data-label="Revision"><strong>Revision {revision.revision}</strong><br /><code>{revision.id}</code><br /><small>From draft <code>{revision.source_draft_id}</code></small></td><td data-label="Activated">{formatDate(revision.activated_at)}<br /><small>By {revision.activated_by}</small></td><td data-label="Operations">{revision.operations.join(', ')}</td><td data-label="Deadline / attempts">{revision.overall_timeout_ms.toLocaleString()} ms / {revision.max_attempts}</td><td data-label="Targets">{revision.targets.length}</td><td class="revision-action">{#if canManage}<button class="button button-secondary" type="button" onclick={() => restore(revision)} disabled={Boolean(busy)}>{busy === `restore-${revision.id}` ? 'Restoring…' : 'Restore as draft'}</button>{/if}</td></tr>{/each}</tbody></table></div>
 {/if}
 
 <style>
   h2 { margin: 0 0 .75rem; font-size: 1.15rem; letter-spacing: -.025em; }
   code { font: .7rem 'JetBrains Mono Variable', monospace; }
+  .revision-table small { color: var(--foreground-muted); }
   .revision-compare { display: flex; align-items: end; gap: .75rem; margin: 1.5rem 0 1rem; padding: clamp(1.1rem, 2.5vw, 1.5rem); }
   .revision-compare > div { margin-right: auto; }
   .revision-compare h2 { margin: 0; }

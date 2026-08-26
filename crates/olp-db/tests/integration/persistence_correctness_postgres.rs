@@ -488,15 +488,15 @@ async fn usage_hour_buckets_stay_utc_under_a_half_hour_session_timezone() {
     sqlx::query(
         "INSERT INTO attempt_usage_facts \
          (attempt_id, event_id, request_id, request_started_at, attempt_ordinal, api_key_id, \
-          provider_id, route_slug, upstream_model, operation, surface, attempt_started_at, \
-          attempt_completed_at, observed_at, charge_status, usage_observed, usage_complete, \
+          provider_id, route_slug, upstream_model, operation, surface, \
+          observed_at, charge_status, usage_observed, usage_complete, \
           input_tokens, output_tokens, cached_input_tokens, unpriced, request_counted, \
           provider_request_counted, model_request_counted, target_request_counted, \
           request_unpriced_counted, provider_unpriced_counted, model_unpriced_counted, \
           target_unpriced_counted, request_incomplete_counted, provider_incomplete_counted, \
           model_incomplete_counted, target_incomplete_counted) \
          VALUES ($1, $2, $3, $4, 1, $5, $6, 'usage-tz', 'mock-model', 'generation', 'openai', \
-                 $4, $4, $4, 'billable', true, true, 10, 5, 0, true, \
+                 $4, 'billable', true, true, 10, 5, 0, true, \
                  true, true, true, true, true, true, true, true, false, false, false, false)",
     )
     .bind(Uuid::now_v7())

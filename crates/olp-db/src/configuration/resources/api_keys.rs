@@ -284,6 +284,7 @@ impl Store {
         }
         audit_in_transaction(
             &mut transaction,
+            self.provenance(),
             actor,
             "api_key.update",
             "api_key",
@@ -372,6 +373,7 @@ impl Store {
         }
         audit_in_transaction(
             &mut transaction,
+            self.provenance(),
             actor,
             "api_key.rotate",
             "api_key",

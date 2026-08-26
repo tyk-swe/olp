@@ -27,6 +27,7 @@ use crate::{
         pagination::{PageQuery, page},
         permissions::require_permission,
         preconditions::if_match,
+        provenance::Provenance,
         response_policy::RuntimeGenerationResponse,
         secrets::WriteOnlySecret,
         sessions::{require_mutation_session, require_read_session},
@@ -139,6 +140,7 @@ pub(crate) struct ProviderMutationResponse {
 )]
 pub(crate) async fn rotate_provider_credential(
     State(state): State<ManagementState>,
+    Provenance(provenance): Provenance,
     Path(provider_id): Path<Uuid>,
     headers: HeaderMap,
     payload: Result<Json<RotateCredentialRequest>, JsonRejection>,
@@ -160,7 +162,7 @@ pub(crate) async fn rotate_provider_credential(
             "Provide a credential no larger than 8 KiB.",
         ));
     }
-    let store = state.store();
+    let store = state.store().with_provenance(&provenance);
     let provider = store
         .get_provider(provider_id)
         .await
@@ -242,6 +244,7 @@ fn validate_rotated_credential(provider: &ProviderRecord, credential: &str) -> R
 )]
 pub(crate) async fn revoke_provider_credential(
     State(state): State<ManagementState>,
+    Provenance(provenance): Provenance,
     Path((provider_id, credential_id)): Path<(Uuid, Uuid)>,
     headers: HeaderMap,
 ) -> Result<Response, Problem> {
@@ -264,6 +267,7 @@ pub(crate) async fn revoke_provider_credential(
     }
     let etag = state
         .store()
+        .with_provenance(&provenance)
         .revoke_provider_credential(
             provider_id,
             credential_id,

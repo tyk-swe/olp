@@ -63,6 +63,7 @@ test('creates the first owner through the local setup contract', async ({ page }
   expect(accessibility.violations).toEqual([]);
 
   await page.getByLabel('Display name').fill('Ada Owner');
+  await page.getByLabel('Installation name').fill('Acme Platform');
   await page.getByLabel('Work email').fill('owner@example.com');
   await page.getByLabel('Password', { exact: true }).fill('correct horse battery staple');
   await page.getByLabel('Confirm password').fill('correct horse battery staple');
@@ -78,7 +79,8 @@ test('creates the first owner through the local setup contract', async ({ page }
   expect(submittedBody).toEqual({
     email: 'owner@example.com',
     password: 'correct horse battery staple',
-    display_name: 'Ada Owner'
+    display_name: 'Ada Owner',
+    installation_name: 'Acme Platform'
   });
   expect(submittedHeaders['idempotency-key']).toBeUndefined();
   expect(submittedHeaders['x-olp-setup-token']).toBe('test-bootstrap-token');
@@ -96,4 +98,37 @@ test('setup form validation is keyboard-visible and specific', async ({ page }) 
   await expect(page.getByText('Enter your email address.')).toBeVisible();
   await expect(page.getByText('Use at least 12 characters.')).toBeVisible();
   await expect(page.getByText('Enter the setup token.')).toBeVisible();
+});
+
+test('a blank installation name is left out so the API applies its default', async ({ page }) => {
+  let submittedBody: unknown;
+  await page.route('**/api/v1/setup/status', async (route) => {
+    await route.fulfill({ json: { setup_required: true } });
+  });
+  await page.route('**/api/v1/setup', async (route) => {
+    if (route.request().method() !== 'POST') return route.fallback();
+    submittedBody = route.request().postDataJSON();
+    // Failing the request keeps the assertion on the payload instead of the
+    // post-setup navigation, which the first test already covers.
+    await route.fulfill({
+      status: 503,
+      contentType: 'application/problem+json',
+      json: { type: 'about:blank', title: 'Setup unavailable', status: 503 }
+    });
+  });
+
+  await page.goto('/setup');
+  await page.getByLabel('Display name').fill('Ada Owner');
+  await page.getByLabel('Work email').fill('owner@example.com');
+  await page.getByLabel('Password', { exact: true }).fill('correct horse battery staple');
+  await page.getByLabel('Confirm password').fill('correct horse battery staple');
+  await page.getByLabel('Setup token').fill('test-bootstrap-token');
+  await page.getByRole('button', { name: 'Create owner account' }).click();
+
+  await expect(page.getByRole('alert')).toContainText('Setup unavailable');
+  expect(submittedBody).toEqual({
+    email: 'owner@example.com',
+    password: 'correct horse battery staple',
+    display_name: 'Ada Owner'
+  });
 });

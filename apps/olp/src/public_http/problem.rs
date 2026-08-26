@@ -9,6 +9,13 @@ use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
 pub(crate) type FieldErrors = BTreeMap<String, Vec<String>>;
+/// Machine-readable classifications for the fields in [`FieldErrors`], so a
+/// client can react to a rejection without parsing its prose. A field is
+/// present only when at least one of its messages carries a code, and the
+/// codes are positionally aligned with that field's messages: entry `i` here
+/// classifies message `i` there. A message with no code is represented by an
+/// empty string so the alignment survives.
+pub(crate) type FieldErrorCodes = BTreeMap<String, Vec<String>>;
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub(crate) struct Problem {
@@ -19,8 +26,16 @@ pub(crate) struct Problem {
     pub(crate) detail: Box<str>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) instance: Option<Box<str>>,
+    /// Human-readable validation messages, keyed by field name.
     #[serde(skip_serializing_if = "BTreeMap::is_empty", default)]
     pub(crate) errors: Box<FieldErrors>,
+    /// Machine-readable codes for the messages in `errors`, keyed by the same
+    /// field names and positionally aligned with them: `error_codes[field][i]`
+    /// classifies `errors[field][i]`. An empty string means that message
+    /// carries no code, so the two arrays for a field always have the same
+    /// length once the field appears here at all.
+    #[serde(skip_serializing_if = "BTreeMap::is_empty", default)]
+    pub(crate) error_codes: Box<FieldErrorCodes>,
 }
 
 impl Problem {
@@ -37,6 +52,7 @@ impl Problem {
             detail: detail.into().into_boxed_str(),
             instance: None,
             errors: Box::default(),
+            error_codes: Box::default(),
         }
     }
 
@@ -45,6 +61,17 @@ impl Problem {
     }
 
     pub(crate) fn validation(errors: FieldErrors) -> Self {
+        Self::coded_validation(errors, FieldErrorCodes::new())
+    }
+
+    /// Validation problem whose messages carry machine-readable codes.
+    ///
+    /// `codes` is positionally aligned with `errors`: for every field present
+    /// in both, `codes[field][i]` classifies `errors[field][i]`, and an empty
+    /// string stands in for a message that has no code. Callers that mix
+    /// hand-written messages with coded ones must pad accordingly — see
+    /// `management::configuration::providers::record_violations`.
+    pub(crate) fn coded_validation(errors: FieldErrors, codes: FieldErrorCodes) -> Self {
         let mut problem = Self::new(
             StatusCode::UNPROCESSABLE_ENTITY,
             "validation_failed",
@@ -52,6 +79,7 @@ impl Problem {
             "One or more fields are invalid.",
         );
         problem.errors = Box::new(errors);
+        problem.error_codes = Box::new(codes);
         problem
     }
 

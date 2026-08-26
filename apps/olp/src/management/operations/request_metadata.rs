@@ -21,6 +21,7 @@ use crate::{
     management::{
         error_mapping::map_persistence,
         permissions::require_permission,
+        provenance::Provenance,
         sessions::{require_mutation_session, require_read_session},
     },
     public_http::problem::Problem,
@@ -79,6 +80,9 @@ pub(in crate::management::operations) struct RequestMetadataGatewayEpochResponse
     acknowledged_at: Option<DateTime<Utc>>,
     #[schema(value_type = Option<String>, format = Uuid)]
     acknowledged_by: Option<Uuid>,
+    /// Ingestion gap opened for the events this epoch could not account for.
+    #[schema(value_type = Option<String>, format = Uuid)]
+    uncertainty_gap_id: Option<Uuid>,
 }
 
 impl From<GatewayEpochRecord> for RequestMetadataGatewayEpochResponse {
@@ -100,6 +104,7 @@ impl From<GatewayEpochRecord> for RequestMetadataGatewayEpochResponse {
             stale_detected_at: value.stale_detected_at,
             acknowledged_at: value.acknowledged_at,
             acknowledged_by: value.acknowledged_by,
+            uncertainty_gap_id: value.uncertainty_gap_id,
         }
     }
 }
@@ -190,6 +195,7 @@ impl From<EpochAcknowledgement> for RequestMetadataEpochAcknowledgementResponse 
 )]
 pub(in crate::management::operations) async fn acknowledge_request_metadata_gateway_epoch(
     State(state): State<ManagementState>,
+    Provenance(provenance): Provenance,
     headers: HeaderMap,
     Path(process_epoch): Path<Uuid>,
 ) -> Result<Json<RequestMetadataEpochAcknowledgementResponse>, Problem> {
@@ -197,6 +203,7 @@ pub(in crate::management::operations) async fn acknowledge_request_metadata_gate
     require_permission(&principal, Permission::ManageSettings)?;
     let acknowledgement = state
         .store()
+        .with_provenance(&provenance)
         .acknowledge_request_metadata_gateway_epoch(process_epoch, principal.user_id)
         .await
         .map_err(map_persistence)?

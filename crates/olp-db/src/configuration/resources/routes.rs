@@ -25,8 +25,11 @@ impl Store {
 
     pub async fn get_route_draft(&self, draft_id: Uuid) -> Result<RouteDraftRecord, Error> {
         let row = sqlx::query!(
-            "SELECT id, routing_id, slug, state::text AS \"state!\", overall_timeout_ms, max_attempts, etag, \
-                    based_on_revision_id, created_at, updated_at FROM route_drafts WHERE id = $1",
+            "SELECT rd.id, rd.routing_id, rd.slug, rd.state::text AS \"state!\", rd.overall_timeout_ms, \
+                    rd.max_attempts, rd.etag, rd.based_on_revision_id, rd.created_at, rd.updated_at, \
+                    creator.email AS \"created_by_email?\" \
+             FROM route_drafts rd LEFT JOIN users creator ON creator.id = rd.created_by \
+             WHERE rd.id = $1",
         draft_id)
         .fetch_optional(self.pool())
         .await?
@@ -47,6 +50,7 @@ impl Store {
             targets: draft_targets(self.pool(), draft_id).await?,
             created_at: row.created_at,
             updated_at: row.updated_at,
+            created_by_email: row.created_by_email,
         })
     }
 
@@ -174,6 +178,7 @@ impl Store {
         }
         audit_in_transaction(
             &mut transaction,
+            self.provenance(),
             actor,
             "route.update_draft",
             "route_draft",
@@ -223,6 +228,7 @@ impl Store {
         }
         audit_in_transaction(
             &mut transaction,
+            self.provenance(),
             actor,
             "route.delete_draft",
             "route_draft",
@@ -416,12 +422,14 @@ impl Store {
         }
 
         let route_rows = sqlx::query!(
-            "SELECT r.id, r.slug, r.created_at,
+            "SELECT r.id AS \"id!\", r.slug AS \"slug!\", r.created_at AS \"created_at!\",
+                    creator.email AS \"created_by_email?\",
                     (SELECT rr.id FROM route_revisions rr WHERE rr.route_id = r.id
                      ORDER BY rr.revision DESC LIMIT 1) AS latest_revision_id,
                     (SELECT count(*) FROM route_revisions rr WHERE rr.route_id = r.id)::bigint
                       AS \"revision_count!\"
-             FROM routes r WHERE r.id = ANY($1::uuid[])",
+             FROM routes r LEFT JOIN users creator ON creator.id = r.created_by
+             WHERE r.id = ANY($1::uuid[])",
             ids
         )
         .fetch_all(self.pool())
@@ -438,7 +446,13 @@ impl Store {
             revision_ids.push(latest_revision_id);
             route_map.insert(
                 row.id,
-                (row.slug, row.created_at, revision_count, latest_revision_id),
+                RouteHeader {
+                    slug: row.slug,
+                    created_at: row.created_at,
+                    created_by_email: row.created_by_email,
+                    revision_count,
+                    latest_revision_id,
+                },
             );
         }
 
@@ -446,16 +460,16 @@ impl Store {
 
         let mut items = Vec::with_capacity(ids.len());
         for id in ids {
-            let (slug, created_at, revision_count, latest_revision_id) =
-                route_map.remove(id).ok_or(Error::NotFound)?;
+            let header = route_map.remove(id).ok_or(Error::NotFound)?;
             let latest_revision = revisions_map
-                .remove(&latest_revision_id)
+                .remove(&header.latest_revision_id)
                 .ok_or(Error::NotFound)?;
             items.push(RouteRecord {
                 id: *id,
-                slug,
-                created_at,
-                revision_count,
+                slug: header.slug,
+                created_at: header.created_at,
+                created_by_email: header.created_by_email,
+                revision_count: header.revision_count,
                 latest_revision,
             });
         }
@@ -670,6 +684,7 @@ impl Store {
         .await?;
         audit_in_transaction(
             &mut transaction,
+            self.provenance(),
             actor,
             "route.restore_as_draft",
             "route_draft",
@@ -731,6 +746,14 @@ async fn draft_targets(pool: &sqlx::PgPool, id: Uuid) -> Result<Vec<RouteTargetR
         .fetch_all(pool)
         .await?,
     ))
+}
+
+struct RouteHeader {
+    slug: String,
+    created_at: DateTime<Utc>,
+    created_by_email: Option<String>,
+    revision_count: u64,
+    latest_revision_id: Uuid,
 }
 
 #[derive(Debug, sqlx::FromRow)]

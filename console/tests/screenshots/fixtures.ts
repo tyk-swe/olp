@@ -57,7 +57,8 @@ export async function mockShell(page: Page) {
           display_name: 'Ada Lovelace',
           role: 'owner'
         },
-        csrf_token: 'csrf-screenshots'
+        csrf_token: 'csrf-screenshots',
+        installation_name: 'Local installation'
       }
     });
   });

@@ -118,6 +118,10 @@ async fn local_identity_lifecycle_is_transactional_and_audited() {
     else {
         panic!("new invitation must execute");
     };
+    assert_eq!(
+        operator_invitation.invitation.invited_by_email.as_deref(),
+        Some("owner@example.test")
+    );
     let invited_session = SessionMaterial::generate();
     let accepted = store
         .accept_invitation(
@@ -197,6 +201,28 @@ async fn local_identity_lifecycle_is_transactional_and_audited() {
         .await
         .unwrap();
     assert!(revoked.revoked_at.is_some());
+    assert_eq!(
+        revoked.revoked_by_email.as_deref(),
+        Some("owner@example.test")
+    );
+    let (listed_invitations, _) = store.list_invitations(None, 50).await.unwrap();
+    let accepted_invitation = listed_invitations
+        .iter()
+        .find(|invitation| invitation.id == operator_invitation.invitation.id)
+        .expect("accepted invitation is listed");
+    assert_eq!(
+        accepted_invitation.invited_by_email.as_deref(),
+        Some("owner@example.test")
+    );
+    assert_eq!(
+        accepted_invitation.accepted_by_email.as_deref(),
+        Some("operator@example.test")
+    );
+    assert!(accepted_invitation.revoked_by_email.is_none());
+    assert_eq!(
+        store.installation_name().await.unwrap().as_deref(),
+        Some("Identity integration")
+    );
     assert!(
         store
             .accept_invitation(

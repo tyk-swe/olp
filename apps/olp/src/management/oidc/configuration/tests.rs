@@ -247,6 +247,7 @@ async fn configuration_response_is_redacted_uncacheable_and_versioned() {
         etag,
         created_at: now,
         updated_at: now,
+        updated_by_email: Some("owner@example.test".to_owned()),
     })
     .unwrap();
 

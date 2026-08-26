@@ -5,10 +5,14 @@ use olp_engine::domain::auth::Role;
 use thiserror::Error;
 use uuid::Uuid;
 
-use crate::{error::Error as PersistenceError, security::session_material::InvitationMaterial};
+use crate::{
+    error::Error as PersistenceError, security::session_material::InvitationMaterial,
+    store::RequestProvenance,
+};
 
 mod accounts;
 mod auth_admission;
+mod installation;
 pub(crate) mod invitations;
 mod setup;
 
@@ -106,6 +110,11 @@ pub struct InvitationRecord {
     /// released. Distinct from `revoked_at`, which records operator intent.
     pub expired_at: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
+    /// Emails of the operators behind each transition; absent once the user is
+    /// removed, or while the transition has not happened.
+    pub invited_by_email: Option<String>,
+    pub accepted_by_email: Option<String>,
+    pub revoked_by_email: Option<String>,
 }
 
 #[derive(Debug)]
@@ -143,8 +152,6 @@ impl fmt::Debug for AcceptInvitation {
 #[derive(Debug, Clone)]
 pub struct AcceptedInvitation {
     pub user: UserRecord,
-    pub invitation_id: Uuid,
-    pub session_id: Uuid,
 }
 
 #[derive(Debug, Clone)]
@@ -168,6 +175,7 @@ fn parse_role(value: String) -> Result<Role, Error> {
 
 async fn insert_audit(
     transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    provenance: &RequestProvenance,
     actor: Uuid,
     action: &str,
     resource_type: &str,
@@ -175,13 +183,16 @@ async fn insert_audit(
 ) -> Result<(), sqlx::Error> {
     sqlx::query!(
         "INSERT INTO audit_events \
-         (id, actor_user_id, action, resource_type, resource_id, outcome) \
-         VALUES ($1, $2, $3, $4, $5, 'success')",
+         (id, actor_user_id, action, resource_type, resource_id, outcome, \
+          source_ip, user_agent_family) \
+         VALUES ($1, $2, $3, $4, $5, 'success', $6::text::inet, $7)",
         Uuid::now_v7(),
         actor,
         action,
         resource_type,
-        resource_id
+        resource_id,
+        provenance.source_ip_text(),
+        provenance.user_agent_family()
     )
     .execute(&mut **transaction)
     .await?;

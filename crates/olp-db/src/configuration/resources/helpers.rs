@@ -41,6 +41,7 @@ pub(super) fn checked_configuration_count(value: i64, column: &str) -> Result<u6
 
 pub(super) async fn audit_in_transaction(
     transaction: &mut Transaction<'_, Postgres>,
+    provenance: &RequestProvenance,
     actor: Uuid,
     action: &str,
     resource_type: &str,
@@ -48,14 +49,18 @@ pub(super) async fn audit_in_transaction(
     outcome: &str,
 ) -> Result<(), Error> {
     sqlx::query!(
-        "INSERT INTO audit_events (id, actor_user_id, action, resource_type, resource_id, outcome) \
-         VALUES ($1, $2, $3, $4, $5, $6)",
+        "INSERT INTO audit_events \
+         (id, actor_user_id, action, resource_type, resource_id, outcome, \
+          source_ip, user_agent_family) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7::text::inet, $8)",
         Uuid::now_v7(),
         actor,
         action,
         resource_type,
         resource_id.to_string(),
-        outcome
+        outcome,
+        provenance.source_ip_text(),
+        provenance.user_agent_family()
     )
     .execute(&mut **transaction)
     .await?;

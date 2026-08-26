@@ -21,7 +21,7 @@ use tokio::sync::RwLock as AsyncRwLock;
 use zeroize::Zeroizing;
 
 use crate::{
-    observability::cache::ObservabilityCache,
+    observability::{cache::ObservabilityCache, metrics::RequestMetadataLossCounters},
     public_http::proxy::TrustedProxyCidr,
     public_http::public_origin::PublicOrigin,
     public_http::request_admission::{self, multipart::MultipartAdmissionState},
@@ -64,6 +64,7 @@ pub struct ProcessComposition {
     pub request_metadata: Option<Emitter>,
     pub(crate) circuits: Breaker,
     pub(crate) media_reconciliation_gaps: Arc<AtomicU64>,
+    pub(crate) request_metadata_loss: RequestMetadataLossCounters,
     pub media_spool: Arc<dyn MediaSpool>,
     pub(crate) multipart_admission: MultipartAdmissionState,
     pub(crate) public_admission: request_admission::public::PublicAdmission,
@@ -126,6 +127,7 @@ impl ProcessComposition {
             request_metadata: None,
             circuits: Breaker::default(),
             media_reconciliation_gaps: Arc::new(AtomicU64::new(0)),
+            request_metadata_loss: RequestMetadataLossCounters::default(),
             media_spool,
             multipart_admission,
             public_admission: request_admission::public::PublicAdmission::default(),

@@ -31,9 +31,11 @@ use super::session::{
 };
 use crate::{
     bootstrap::mode_dependencies::ManagementState,
+    management::provenance::Provenance,
     management::{cookies::validate_session_cookie_ttl, sessions::require_read_session},
     public_http::{problem::Problem, request_cookies::RequestCookies},
 };
+use olp_db::store::RequestProvenance;
 
 const TOKEN_RESPONSE_LIMIT: usize = 256 * 1024;
 const ID_TOKEN_LIMIT: usize = 64 * 1024;
@@ -86,6 +88,7 @@ impl fmt::Debug for CallbackQuery {
 )]
 pub(super) async fn callback(
     State(state): State<ManagementState>,
+    Provenance(provenance): Provenance,
     OriginalUri(uri): OriginalUri,
     headers: HeaderMap,
     query: Result<Query<CallbackQuery>, QueryRejection>,
@@ -97,7 +100,9 @@ pub(super) async fn callback(
         .unwrap_or_default();
     let result = match (cookies, query) {
         (Err(problem), _) => Err(problem),
-        (Ok(cookies), Ok(Query(query))) => callback_inner(&state, &headers, &cookies, query).await,
+        (Ok(cookies), Ok(Query(query))) => {
+            callback_inner(&state, &provenance, &headers, &cookies, query).await
+        }
         // Capture extractor failures so malformed query decoding still reaches
         // this handler and expires any identifiable legacy one-shot cookie.
         (Ok(_), Err(_)) => Err(invalid_callback()),
@@ -170,6 +175,7 @@ fn add_callback_state_cookie_names(
 
 async fn callback_inner(
     state: &ManagementState,
+    provenance: &RequestProvenance,
     headers: &HeaderMap,
     cookies: &RequestCookies<'_>,
     query: CallbackQuery,
@@ -204,7 +210,7 @@ async fn callback_inner(
     if code.is_empty() || code.len() > 4096 {
         return Err(invalid_callback());
     }
-    let store = state.store();
+    let store = state.store().with_provenance(provenance);
     let configuration = store.enabled_oidc_configuration().await.map_err(map_oidc)?;
     if configuration.id != flow.configuration_id {
         return Err(Problem::bad_request(

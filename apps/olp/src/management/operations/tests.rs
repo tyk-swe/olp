@@ -80,13 +80,25 @@ fn pricing_provider_kind_uses_current_wire_names_only() {
 }
 
 #[test]
-fn audit_contract_omits_unavailable_request_provenance() {
+fn audit_contract_publishes_nullable_request_provenance() {
     let document = serde_json::to_value(OperationsApiDoc::openapi()).unwrap();
     let properties = document["components"]["schemas"]["AuditEventResponse"]["properties"]
         .as_object()
         .unwrap();
-    assert!(!properties.contains_key("source_ip"));
-    assert!(!properties.contains_key("user_agent_family"));
+    // Both are recorded by the request boundary when it has them, so the
+    // contract publishes them as nullable rather than hiding the columns.
+    for provenance in ["source_ip", "user_agent_family"] {
+        assert_eq!(
+            properties[provenance]["type"],
+            serde_json::json!(["string", "null"]),
+            "{provenance} must stay nullable"
+        );
+    }
+    let required = document["components"]["schemas"]["AuditEventResponse"]["required"]
+        .as_array()
+        .unwrap();
+    assert!(!required.iter().any(|field| field == "source_ip"));
+    assert!(!required.iter().any(|field| field == "user_agent_family"));
 }
 
 #[test]

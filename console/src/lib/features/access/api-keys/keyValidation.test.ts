@@ -19,7 +19,9 @@ describe('API key validation', () => {
     expect(
       validateApiKey({
         name: 'production SDK',
-        expiresAt: '2026-07-12T11:00',
+        // A `datetime-local` value is wall time: the suite runs in
+        // America/New_York, where this is 11:00Z and so already behind `now`.
+        expiresAt: '2026-07-12T07:00',
         now
       })
     ).toMatchObject({ expiresAt: 'Choose an expiry in the future.' });

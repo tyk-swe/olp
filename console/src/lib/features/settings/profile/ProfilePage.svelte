@@ -432,6 +432,9 @@
 
 {#if reauthenticationRequest}
   <ReauthenticateDialog
+    title={reauthenticationRequest.purpose === 'oidc_link'
+      ? 'Confirm the OIDC link'
+      : 'Confirm the OIDC unlink'}
     description={reauthenticationRequest.purpose === 'oidc_link'
       ? 'Linking an OIDC identity changes how you sign in, so confirm your current password first.'
       : 'Unlinking an OIDC identity revokes every other session, so confirm your current password first.'}

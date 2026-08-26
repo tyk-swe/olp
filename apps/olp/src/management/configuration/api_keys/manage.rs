@@ -36,6 +36,7 @@ use super::policy::{
     ApiKeyPolicySnapshot, ExpirationValidation, RawApiKeyPolicy, merge_api_key_policy,
     normalize_api_key_policy,
 };
+use crate::management::provenance::Provenance;
 
 #[derive(Clone, Debug, Serialize, ToSchema)]
 pub(crate) struct ApiKeyDetailResponse {
@@ -190,6 +191,7 @@ pub(crate) struct ApiKeyMutationResponse {
 )]
 pub(crate) async fn update_api_key(
     State(state): State<ManagementState>,
+    Provenance(provenance): Provenance,
     Path(api_key_id): Path<Uuid>,
     headers: HeaderMap,
     payload: Result<Json<UpdateApiKeyRequest>, JsonRejection>,
@@ -214,6 +216,7 @@ pub(crate) async fn update_api_key(
         .into_update_input();
     let result = state
         .store()
+        .with_provenance(&provenance)
         .update_api_key(api_key_id, expected_etag, &input, principal.user_id)
         .await
         .map_err(map_configuration)?;
@@ -270,6 +273,7 @@ impl fmt::Debug for RotateApiKeyResponse {
 )]
 pub(crate) async fn rotate_api_key(
     State(state): State<ManagementState>,
+    Provenance(provenance): Provenance,
     Path(api_key_id): Path<Uuid>,
     headers: HeaderMap,
 ) -> Result<Response, Problem> {
@@ -291,6 +295,7 @@ pub(crate) async fn rotate_api_key(
     let secret = WriteOnlySecret::new(material.expose_once().to_owned());
     let result = state
         .store()
+        .with_provenance(&provenance)
         .rotate_api_key(
             RotateApiKeyInput {
                 id: api_key_id,

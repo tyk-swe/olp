@@ -57,11 +57,21 @@ counts rise.
 3. Review usage completeness and pricing coverage before exporting costs.
    Missing upstream usage is incomplete and unpriced, never zero.
 4. Review provider health, authentication, role/key changes, credential
-   rotations, and route activations in the audit stream.
+   rotations, and route activations in the audit stream. `GET /api/v1/audit`
+   narrows a page by `action`, `resource_type`, `resource_id`,
+   `actor_user_id`, `outcome`, `occurred_after`, and `occurred_before`, so
+   each category can be reviewed on its own. Session-driven actions also
+   record the client source address, resolved through the same
+   `OLP_TRUSTED_PROXY_CIDRS` rules the authentication boundary uses, and a
+   coarse user-agent family; the full user-agent string is never stored, and
+   background maintenance and reconciliation events leave both empty.
 5. Offboarding requires rotating or revoking installation-scoped keys;
    deactivating a user alone does not revoke them.
-6. Keep media-spool usage below `OLP_MEDIA_SPOOL_CAPACITY_BYTES`. The chart
-   budgets 1 GiB in a 2 GiB volume; do not use the 64 MiB general `/tmp` mount.
+6. Keep media-spool usage below `OLP_MEDIA_SPOOL_CAPACITY_BYTES`. Watch
+   `olp_media_spool_used_bytes` against `olp_media_spool_capacity_bytes`; both
+   are also on `/health/ready` as `media_spool_used_bytes` and
+   `media_spool_capacity_bytes`. The chart budgets 1 GiB in a 2 GiB volume; do
+   not use the 64 MiB general `/tmp` mount.
 7. Watch `olp_http_admission_rejections_total{surface=...}` against admitted
    requests/capacity. Default independent pools are 256 inference and 32
    management requests; permits last through streaming or cancellation.
@@ -71,7 +81,8 @@ revision on every replica before comparing request latency. A healthy gateway
 may continue serving its last complete generation while a new snapshot is
 being compiled, but it must not accept a partially indexed generation. Check
 the audit stream for activation, route-permission, credential, and key changes
-before attributing a provider error to the rollout. Keep provider probe
+before attributing a provider error to the rollout; `occurred_after` and
+`occurred_before` bound that page to the rollout window. Keep provider probe
 failures separate from gateway admission failures so an upstream outage does
 not hide a local capacity regression.
 
@@ -81,7 +92,7 @@ secrets, or master keys in tickets or diagnostic bundles.
 ### OpenAI-compatible capability certification
 
 Review at most 16 exact provider/model/operation tuples per compatible model,
-then run **Certify reviewed capabilities**. The probe uses production codecs,
+then run **Server-certify capabilities**. The probe uses production codecs,
 requests at most one generated token, and persists no prompt or response. Only
 `succeeded` tuples become eligible; `partial` and `failed` remain declared.
 Remove unsupported media, asynchronous, or cross-surface claims. Re-certify
@@ -164,7 +175,10 @@ until candidate health and the rollback decision point pass.
    admission frozen until migration succeeds and every workload uses the
    candidate digest; preserve `maxUnavailable: 0`, the 10-second pre-stop, and
    five-minute termination grace. Database guards reject N-1 publications,
-   non-additive usage rollups, and OIDC completions.
+   non-additive usage rollups, and OIDC completions. A migration that retires
+   schema only relaxes it during the release that stops using it, because the
+   N-1 binary still names those columns and tables in its own writes; the drops
+   themselves ship one release later, once no N-1 replica can be running.
 6. Resume admission and OIDC initiation. For 30 minutes verify readiness,
    zero metadata backlog, generation convergence, usage completeness, provider
    probes, error rate, and added latency.
@@ -204,6 +218,11 @@ stop admission and preserve Valkey/AOF and PostgreSQL before repair.
   incomplete cost data. Preserve Stream state, suspend retention, record the
   interval, and reconcile request/attempt/usage/gap counts. Never report a gap
   as zero cost.
+
+`olp_request_metadata_loss_reported_total{kind="events|dropped|abandoned"}`
+counts the local-buffer loss this process has durably reported as gaps. It is
+exact loss, not uncertainty, and every increment also appears as a warning in
+the log with the gateway instance.
 
 ### Unclean gateway epochs
 

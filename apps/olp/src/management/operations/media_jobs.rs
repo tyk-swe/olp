@@ -1,6 +1,6 @@
 use axum::{
     Json,
-    extract::{Path, Query, State},
+    extract::{Path, Query, State, rejection::QueryRejection},
     http::HeaderMap,
     response::Response,
 };
@@ -16,7 +16,9 @@ use tracing::error;
 use utoipa::{IntoParams, ToSchema};
 use uuid::Uuid;
 
-use super::helpers::{not_found, page_limit, timestamp_cursor, validate_time_range};
+use super::helpers::{
+    not_found, page_limit, query_parameters, timestamp_cursor, validate_time_range,
+};
 use crate::{
     bootstrap::mode_dependencies::ManagementState,
     management::{
@@ -119,18 +121,20 @@ pub(super) struct MediaJobListResponse {
     params(MediaJobQuery),
     responses(
         (status = 200, description = "Metadata-only asynchronous media job page", body = MediaJobListResponse),
-        (status = 400, description = "Invalid cursor or filter", body = Problem),
+        (status = 400, description = "Malformed query parameters, or an invalid cursor or page size", body = Problem),
         (status = 401, description = "Authentication required", body = Problem),
-        (status = 403, description = "Insufficient role", body = Problem)
+        (status = 403, description = "Insufficient role", body = Problem),
+        (status = 422, description = "Invalid filter value or time range", body = Problem)
     )
 )]
 pub(super) async fn list_media_jobs(
     State(state): State<ManagementState>,
     headers: HeaderMap,
-    Query(query): Query<MediaJobQuery>,
+    query: Result<Query<MediaJobQuery>, QueryRejection>,
 ) -> Result<Json<MediaJobListResponse>, Problem> {
     let principal = require_read_session(&state, &headers).await?;
     require_permission(&principal, Permission::ReadOperations)?;
+    let query = query_parameters(query)?;
     let cursor = timestamp_cursor(query.cursor.as_deref())?;
     let state_filter = query
         .state

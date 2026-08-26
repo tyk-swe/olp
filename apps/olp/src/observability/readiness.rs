@@ -68,6 +68,8 @@ pub(crate) struct HealthResponse {
     media_reconciliation_failed: u64,
     media_reconciliation_unbound: u64,
     media_reconciliation_gaps_total: u64,
+    media_spool_used_bytes: Option<u64>,
+    media_spool_capacity_bytes: Option<u64>,
 }
 
 pub(super) async fn live() -> axum::Json<HealthResponse> {
@@ -116,6 +118,8 @@ pub(super) async fn live() -> axum::Json<HealthResponse> {
         media_reconciliation_failed: 0,
         media_reconciliation_unbound: 0,
         media_reconciliation_gaps_total: 0,
+        media_spool_used_bytes: None,
+        media_spool_capacity_bytes: None,
     })
 }
 
@@ -353,6 +357,8 @@ pub(super) async fn collect_readiness(
             .as_ref()
             .map_or(0, |summary| summary.unbound),
         media_reconciliation_gaps_total: media_reconciliation_gaps,
+        media_spool_used_bytes: state.media_spool().used_bytes(),
+        media_spool_capacity_bytes: state.media_spool().capacity_bytes(),
     })
 }
 

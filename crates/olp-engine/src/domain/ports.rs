@@ -77,6 +77,13 @@ pub trait MediaSpool: Send + Sync {
         None
     }
 
+    /// Returns the bytes currently reserved against `capacity_bytes` when the
+    /// implementation tracks them. Observability reports this; admission must
+    /// not read it, because the value is stale the moment it is observed.
+    fn used_bytes(&self) -> Option<u64> {
+        None
+    }
+
     fn put(&self, upload: MediaUpload) -> BoxFuture<'_, Result<MediaArtifact, MediaSpoolError>>;
 
     fn open<'a>(

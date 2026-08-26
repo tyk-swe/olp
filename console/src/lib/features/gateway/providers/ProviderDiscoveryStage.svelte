@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { Provider, ProviderProbe } from '$lib/api/management/providers';
+  import { probeSummary } from './providerEditor';
 
   let {
     provider,
@@ -23,7 +24,7 @@
 <section class="card stage" aria-labelledby="discovery-heading">
   <p class="eyebrow">Probe passed</p>
   <h2 id="discovery-heading">Discover upstream models</h2>
-  {#if probe}<p class="success-line">✓ {probe.detail}</p>{/if}
+  {#if probe}<p class="success-line">✓ {probeSummary(probe)}</p>{/if}
   <p>
     The connector will call the upstream model-list API with the stored
     identity. Discovered models begin disabled until their capabilities are

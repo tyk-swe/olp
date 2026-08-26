@@ -1,5 +1,9 @@
 use super::*;
 
+/// Owner created by the suite's `setup_installation_with_session` call; every
+/// attribution join in this file resolves to it.
+const OWNER_EMAIL: &str = "owner@configuration.test";
+
 pub(super) async fn exercise(store: &Store, actor: Uuid, master_key: &MasterKey) -> (Uuid, Uuid) {
     let provider_id = Uuid::now_v7();
     let credential_id = Uuid::now_v7();
@@ -39,8 +43,14 @@ pub(super) async fn exercise(store: &Store, actor: Uuid, master_key: &MasterKey)
         .await
         .unwrap()
         .expect_executed();
-    assert_eq!(store.list_providers(None, 10).await.unwrap().items.len(), 1);
+    let listed = store.list_providers(None, 10).await.unwrap();
+    assert_eq!(listed.items.len(), 1);
+    assert_eq!(
+        listed.items[0].created_by_email.as_deref(),
+        Some(OWNER_EMAIL)
+    );
     let first = store.get_provider(provider_id).await.unwrap();
+    assert_eq!(first.created_by_email.as_deref(), Some(OWNER_EMAIL));
     assert_eq!(first.model_count, 1);
     assert_eq!(
         provider_models(store, provider_id).await[0]
@@ -153,14 +163,14 @@ pub(super) async fn exercise(store: &Store, actor: Uuid, master_key: &MasterKey)
                         operation: "generation".parse().unwrap(),
                         surface: "openai".parse().unwrap(),
                         mode: "unary".parse().unwrap(),
-                        source: olp_engine::domain::provider::CapabilitySource::Probed,
+                        source: olp_engine::domain::provider::CapabilitySource::Declared,
                         certified_at: None,
                     },
                     CapabilityRecord {
                         operation: "generation".parse().unwrap(),
                         surface: "openai".parse().unwrap(),
                         mode: "streaming".parse().unwrap(),
-                        source: olp_engine::domain::provider::CapabilitySource::Probed,
+                        source: olp_engine::domain::provider::CapabilitySource::Declared,
                         certified_at: None,
                     },
                 ],
@@ -392,7 +402,13 @@ pub(super) async fn exercise(store: &Store, actor: Uuid, master_key: &MasterKey)
         .await
         .unwrap();
     assert_eq!(first_revision.release.sequence, 3);
+    let activated_routes = store.list_routes(None, 10).await.unwrap();
+    assert_eq!(
+        activated_routes.items[0].created_by_email.as_deref(),
+        Some(OWNER_EMAIL)
+    );
     let draft = store.get_route_draft(route.id).await.unwrap();
+    assert_eq!(draft.created_by_email.as_deref(), Some(OWNER_EMAIL));
     let second_draft_etag = store
         .replace_route_draft(
             route.id,

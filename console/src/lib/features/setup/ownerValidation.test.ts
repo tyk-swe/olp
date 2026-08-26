@@ -3,6 +3,7 @@ import { validateOwner } from './ownerValidation';
 
 const validOwner = {
   displayName: 'Ada Owner',
+  installationName: '',
   email: 'owner@example.com',
   password: 'correct horse battery staple',
   confirmPassword: 'correct horse battery staple',
@@ -18,6 +19,7 @@ describe('owner setup validation', () => {
     expect(
       validateOwner({
         displayName: '   ',
+        installationName: '',
         email: 'not-an-address',
         password: 'short',
         confirmPassword: 'short',
@@ -28,6 +30,13 @@ describe('owner setup validation', () => {
       email: 'Enter a valid email address.',
       password: 'Use at least 12 characters.',
       setupToken: 'Enter the setup token.'
+    });
+  });
+
+  it('accepts a blank installation name and rejects an over-long one', () => {
+    expect(validateOwner({ ...validOwner, installationName: '  Acme Platform  ' })).toEqual({});
+    expect(validateOwner({ ...validOwner, installationName: 'n'.repeat(101) })).toEqual({
+      installationName: 'Use 100 characters or fewer.'
     });
   });
 

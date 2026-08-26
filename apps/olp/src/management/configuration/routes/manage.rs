@@ -26,6 +26,7 @@ use crate::{
         pagination::{DiffQuery, PageQuery, page},
         permissions::require_permission,
         preconditions::{if_match, with_etag},
+        provenance::Provenance,
         sessions::{require_mutation_session, require_read_session},
     },
     public_http::problem::Problem,
@@ -77,6 +78,8 @@ pub(crate) struct RouteDraftDetailResponse {
     pub targets: Vec<RouteTargetResponse>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+    /// Email of the operator who created the draft.
+    pub created_by_email: Option<String>,
 }
 
 impl From<RouteDraftRecord> for RouteDraftDetailResponse {
@@ -97,6 +100,7 @@ impl From<RouteDraftRecord> for RouteDraftDetailResponse {
             targets: value.targets.into_iter().map(Into::into).collect(),
             created_at: value.created_at,
             updated_at: value.updated_at,
+            created_by_email: value.created_by_email,
         }
     }
 }
@@ -184,6 +188,7 @@ pub(crate) struct ReplaceRouteDraftRequest {
 )]
 pub(crate) async fn replace_route_draft(
     State(state): State<ManagementState>,
+    Provenance(provenance): Provenance,
     Path(draft_id): Path<Uuid>,
     headers: HeaderMap,
     payload: Result<Json<ReplaceRouteDraftRequest>, JsonRejection>,
@@ -203,7 +208,7 @@ pub(crate) async fn replace_route_draft(
             )
         })
         .collect();
-    let store = state.store();
+    let store = state.store().with_provenance(&provenance);
     let etag = store
         .replace_route_draft(
             draft_id,
@@ -244,6 +249,7 @@ pub(crate) async fn replace_route_draft(
 )]
 pub(crate) async fn delete_route_draft(
     State(state): State<ManagementState>,
+    Provenance(provenance): Provenance,
     Path(draft_id): Path<Uuid>,
     headers: HeaderMap,
 ) -> Result<Response, Problem> {
@@ -252,6 +258,7 @@ pub(crate) async fn delete_route_draft(
     let expected_etag = if_match(&headers)?;
     state
         .store()
+        .with_provenance(&provenance)
         .delete_route_draft(draft_id, expected_etag, principal.user_id)
         .await
         .map_err(map_configuration)?;
@@ -395,6 +402,8 @@ pub(crate) struct RouteDetailResponse {
     pub id: Uuid,
     pub slug: String,
     pub created_at: DateTime<Utc>,
+    /// Email of the operator who created the route.
+    pub created_by_email: Option<String>,
     pub revision_count: u64,
     pub latest_revision: RouteRevisionResponse,
 }
@@ -405,6 +414,7 @@ impl From<RouteRecord> for RouteDetailResponse {
             id: value.id,
             slug: value.slug,
             created_at: value.created_at,
+            created_by_email: value.created_by_email,
             revision_count: value.revision_count,
             latest_revision: value.latest_revision.into(),
         }
@@ -607,6 +617,7 @@ pub(crate) async fn diff_route_revisions(
 )]
 pub(crate) async fn restore_route_revision(
     State(state): State<ManagementState>,
+    Provenance(provenance): Provenance,
     Path((route_id, revision_id)): Path<(Uuid, Uuid)>,
     headers: HeaderMap,
 ) -> Result<Response, Problem> {
@@ -627,6 +638,7 @@ pub(crate) async fn restore_route_revision(
     }
     let draft: RouteDraftDetailResponse = state
         .store()
+        .with_provenance(&provenance)
         .restore_route_revision_as_draft(route_id, revision_id, principal.user_id, mutation.key())
         .await
         .map_err(map_configuration)?

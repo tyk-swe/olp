@@ -29,6 +29,7 @@ use crate::{
     bootstrap::state::TransportRegistry,
     observability::{
         cache::ObservabilityCache,
+        metrics::RequestMetadataLossCounters,
         readiness::{HealthResponse, cached_readiness_from_snapshot},
     },
     public_http::problem::Problem,
@@ -276,6 +277,7 @@ pub struct ObservabilityState {
     inference: Arc<Service>,
     pub(crate) public_admission: PublicAdmission,
     media_reconciliation_gaps: Arc<AtomicU64>,
+    request_metadata_loss: RequestMetadataLossCounters,
     pub(crate) mode: ApiMode,
     pub(crate) observability: ObservabilityCache,
 }
@@ -309,6 +311,16 @@ impl ObservabilityState {
     #[must_use]
     pub(crate) fn media_reconciliation_gap_count(&self) -> u64 {
         self.media_reconciliation_gaps.load(Ordering::Relaxed)
+    }
+
+    #[must_use]
+    pub(crate) fn media_spool(&self) -> &Arc<dyn MediaSpool> {
+        self.inference.media_spool()
+    }
+
+    #[must_use]
+    pub(crate) const fn request_metadata_loss_counters(&self) -> &RequestMetadataLossCounters {
+        &self.request_metadata_loss
     }
 }
 
@@ -430,6 +442,7 @@ impl ProcessComposition {
             inference,
             public_admission: request_boundary.public_admission.clone(),
             media_reconciliation_gaps: Arc::clone(&self.media_reconciliation_gaps),
+            request_metadata_loss: self.request_metadata_loss.clone(),
             mode: self.mode,
             observability: self.observability.clone(),
         };

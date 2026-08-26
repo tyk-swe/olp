@@ -16,6 +16,7 @@
   import { FIXED_ROLES } from '$lib/auth/authorization';
   import { useRole } from '$lib/auth/useRole.svelte';
   import ConflictNotice from '$lib/components/ConflictNotice.svelte';
+  import ReadOnlyNote from '$lib/components/ReadOnlyNote.svelte';
   import ReauthenticateDialog from '$lib/components/ReauthenticateDialog.svelte';
   import {
     beginReload,
@@ -188,6 +189,7 @@
 
 {#if reauthenticating}
   <ReauthenticateDialog
+    title="Confirm the OIDC link"
     description="Linking an OIDC identity changes how you sign in, so confirm your current password first."
     busy={reauthenticationBusy}
     error={reauthenticationError}
@@ -212,9 +214,9 @@
   </div>
 {:else}
   {#if !canManage}
-    <p class="read-only-note" role="note">
+    <ReadOnlyNote>
       Your role can view the OIDC configuration but not change it.
-    </p>
+    </ReadOnlyNote>
   {/if}
   <ConflictNotice
     notice={concurrentNotice}
@@ -241,6 +243,9 @@
         configured with your identity provider. Every flow uses PKCE, state, and
         nonce; identities require explicit linking.
       </p>
+      {#if oidc.data}<p class="muted">
+          Updated by {oidc.data.updated_by_email ?? 'a removed account'}
+        </p>{/if}
       <div class="form-grid">
         <div class="form-field full">
           <label for="oidc-issuer">Expected issuer</label><input
@@ -339,9 +344,9 @@
           placeholder="platform-team=operator"></textarea>
       </div>
       {#if !oidc.data?.enabled}
-        <p class="read-only-note">
+        <ReadOnlyNote role={undefined}>
           Save with OIDC enabled before linking your identity.
-        </p>
+        </ReadOnlyNote>
       {/if}
       <div class="oidc-actions">
         <button

@@ -1308,6 +1308,10 @@ export interface components {
             outcome: string;
             resource_id?: string | null;
             resource_type: string;
+            /** @description Source address recorded for the request, when the boundary supplied one. */
+            source_ip?: string | null;
+            /** @description Coarse user-agent family; the full user-agent string is never stored. */
+            user_agent_family?: string | null;
         };
         AuditListResponse: {
             data: components["schemas"]["AuditEventResponse"][];
@@ -1482,6 +1486,10 @@ export interface components {
             media_reconciliation_stale: number;
             /** Format: int64 */
             media_reconciliation_unbound: number;
+            /** Format: int64 */
+            media_spool_capacity_bytes?: number | null;
+            /** Format: int64 */
+            media_spool_used_bytes?: number | null;
             request_metadata_complete: boolean;
             request_metadata_consumer: string;
             /** Format: date-time */
@@ -1546,6 +1554,8 @@ export interface components {
         InvitationResponse: {
             /** Format: date-time */
             accepted_at?: string | null;
+            /** @description Email of the account created by accepting the invitation. */
+            accepted_by_email?: string | null;
             /** Format: date-time */
             created_at: string;
             email: string;
@@ -1555,8 +1565,12 @@ export interface components {
             id: string;
             /** Format: uuid */
             invited_by: string;
+            /** @description Email of the operator who sent the invitation. */
+            invited_by_email?: string | null;
             /** Format: date-time */
             revoked_at?: string | null;
+            /** @description Email of the operator who revoked the invitation. */
+            revoked_by_email?: string | null;
             role: string;
             status: string;
         };
@@ -1638,6 +1652,8 @@ export interface components {
             id: string;
             issuer: string;
             scopes: string[];
+            /** @description Email of the operator who last saved this configuration. */
+            updated_by_email?: string | null;
         };
         OidcIdentityListResponse: {
             data: components["schemas"]["OidcIdentityResponse"][];
@@ -1814,6 +1830,15 @@ export interface components {
         };
         Problem: {
             detail: string;
+            /**
+             * @description Machine-readable codes for the messages in `errors`, keyed by the same
+             *     field names and positionally aligned with them: `error_codes[field][i]`
+             *     classifies `errors[field][i]`. An empty string means that message
+             *     carries no code, so the two arrays for a field always have the same
+             *     length once the field appears here at all.
+             */
+            error_codes?: components["schemas"]["BTreeMap"];
+            /** @description Human-readable validation messages, keyed by field name. */
             errors?: components["schemas"]["BTreeMap"];
             instance?: string | null;
             /** Format: int32 */
@@ -1860,6 +1885,8 @@ export interface components {
             connector_ready: boolean;
             /** Format: date-time */
             created_at: string;
+            /** @description Email of the operator who created the provider. */
+            created_by_email?: string | null;
             deployment?: string | null;
             /** Format: uuid */
             draft_credential_id?: string | null;
@@ -2105,6 +2132,8 @@ export interface components {
             connector_ready: boolean;
             /** Format: date-time */
             created_at: string;
+            /** @description Email of the operator who created the provider. */
+            created_by_email?: string | null;
             /** Format: int64 */
             enabled_model_count: number;
             /** Format: uuid */
@@ -2208,6 +2237,11 @@ export interface components {
             state: string;
             /** Format: int64 */
             uncertain_event_lower_bound: number;
+            /**
+             * Format: uuid
+             * @description Ingestion gap opened for the events this epoch could not account for.
+             */
+            uncertainty_gap_id?: string | null;
             /** Format: date-time */
             updated_at: string;
             writer_closed: boolean;
@@ -2276,6 +2310,8 @@ export interface components {
         RouteDetailResponse: {
             /** Format: date-time */
             created_at: string;
+            /** @description Email of the operator who created the route. */
+            created_by_email?: string | null;
             /** Format: uuid */
             id: string;
             latest_revision: components["schemas"]["RouteRevisionResponse"];
@@ -2288,6 +2324,8 @@ export interface components {
             based_on_revision_id?: string | null;
             /** Format: date-time */
             created_at: string;
+            /** @description Email of the operator who created the draft. */
+            created_by_email?: string | null;
             /** Format: uuid */
             etag: string;
             /** Format: uuid */
@@ -2453,6 +2491,7 @@ export interface components {
         };
         SessionResponse: {
             csrf_token: string;
+            installation_name: string;
             user: components["schemas"]["UserResponse"];
         };
         SetModelRequest: {
@@ -2483,6 +2522,11 @@ export interface components {
             installation_name?: string;
             password: string;
         };
+        /**
+         * @description Unauthenticated first-run probe. It deliberately carries nothing but the
+         *     boolean: the installation name is an authenticated detail the console reads
+         *     from `SessionResponse`.
+         */
         SetupStatus: {
             setup_required: boolean;
         };
@@ -3128,6 +3172,20 @@ export interface operations {
                 cursor?: string;
                 /** @description Page size, from 1 to 200. Defaults to 50. */
                 limit?: number;
+                /** @description Exact audit action, such as `provider.update`. */
+                action?: string;
+                /** @description Exact resource type, such as `provider`. */
+                resource_type?: string;
+                /** @description Exact resource identifier, as recorded on the event. */
+                resource_id?: string;
+                /** @description Identifier of the acting user. */
+                actor_user_id?: string;
+                /** @description Exact outcome, `success` or `failure`. */
+                outcome?: string;
+                /** @description Oldest event to return, inclusive. */
+                occurred_after?: string;
+                /** @description Newest event to return, inclusive. */
+                occurred_before?: string;
             };
             header?: never;
             path?: never;
@@ -3144,6 +3202,15 @@ export interface operations {
                     "application/json": components["schemas"]["AuditListResponse"];
                 };
             };
+            /** @description Malformed query parameters, or an invalid cursor or page size */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
             /** @description Authentication required. */
             401: {
                 headers: {
@@ -3155,6 +3222,15 @@ export interface operations {
             };
             /** @description The session lacks permission or mutation CSRF/origin checks failed. */
             403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Invalid time range */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -3581,7 +3657,7 @@ export interface operations {
                     "application/json": components["schemas"]["MediaJobListResponse"];
                 };
             };
-            /** @description Invalid cursor or filter */
+            /** @description Malformed query parameters, or an invalid cursor or page size */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -3601,6 +3677,15 @@ export interface operations {
             };
             /** @description Insufficient role */
             403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Invalid filter value or time range */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -5045,10 +5130,11 @@ export interface operations {
     list_provider_model_inventory: {
         parameters: {
             query?: {
+                /** @description Opaque cursor returned by the previous page. */
                 cursor?: string;
-                /** @description Page size from 1 to 200; defaults to 50 */
+                /** @description Page size, from 1 to 200. Defaults to 50. */
                 limit?: number;
-                /** @description Optional enabled-state filter */
+                /** @description Optional enabled-state filter. */
                 enabled?: boolean;
             };
             header?: never;

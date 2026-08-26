@@ -59,20 +59,23 @@ async fn oidc_flow_creation_is_bound_to_the_exact_enabled_configuration() {
         ))
         .await
         .unwrap();
+    assert_eq!(
+        current.updated_by_email.as_deref(),
+        Some("owner@example.test")
+    );
 
     // N-1 flow inserts omit the configuration ETag and must fail closed once
     // the rollout fence is present.
     let legacy_flow_error = sqlx::query(
         "INSERT INTO oidc_authorization_flows \
-         (id, configuration_id, purpose, state_digest, browser_binding_digest, client_digest, \
+         (id, configuration_id, purpose, state_digest, browser_binding_digest, \
           encrypted_payload, payload_nonce, payload_key_version, expires_at) \
-         VALUES ($1, $2, 'login', $3, $4, $5, $6, $7, 1, now() + interval '5 minutes')",
+         VALUES ($1, $2, 'login', $3, $4, $5, $6, 1, now() + interval '5 minutes')",
     )
     .bind(Uuid::now_v7())
     .bind(configuration_id)
     .bind([1_u8; 32].as_slice())
     .bind([2_u8; 32].as_slice())
-    .bind([3_u8; 32].as_slice())
     .bind([4_u8; 16].as_slice())
     .bind([5_u8; 12].as_slice())
     .execute(store.pool())

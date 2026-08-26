@@ -1,0 +1,26 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT installation_name FROM installation WHERE singleton",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "installation_name",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "installation",
+            "name": "installation_name"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "9a2b4725bf2e1f2cf09af2c2a458aee7d01de84b808b5a0760e3d8e642ef0ced"
+}

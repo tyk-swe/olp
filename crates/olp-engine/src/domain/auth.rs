@@ -91,24 +91,6 @@ impl Role {
     }
 }
 
-pub fn validate_owner_change(
-    current_role: Role,
-    new_role: Option<Role>,
-    current_owner_count: usize,
-) -> Result<(), OwnerInvariantError> {
-    let removes_owner = current_role == Role::Owner && new_role != Some(Role::Owner);
-    if removes_owner && current_owner_count <= 1 {
-        return Err(OwnerInvariantError::LastOwner);
-    }
-    Ok(())
-}
-
-#[derive(Clone, Copy, Debug, Error, Eq, PartialEq)]
-pub enum OwnerInvariantError {
-    #[error("the installation must retain at least one owner")]
-    LastOwner,
-}
-
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ApiKeyScope {
