@@ -2,10 +2,11 @@ use olp_engine::domain::{
     ids::ProviderId,
     routing::{provider::ProviderKind, snapshot::Snapshot},
 };
-use sqlx::FromRow;
+use sqlx::{FromRow, Postgres, Transaction};
 use uuid::Uuid;
 
 use crate::{
+    audit_events::{AuditEvent, record_audit_event},
     error::Error as PersistenceError,
     idempotency::{
         Outcome, Replayable, ReplayableIdempotencyClaim, Response, claim_idempotency,
@@ -161,20 +162,18 @@ impl Store {
                 .await?;
             }
         }
-        sqlx::query!(
-            "INSERT INTO audit_events \
-             (id, actor_user_id, action, resource_type, resource_id, outcome, occurred_at, \
-              source_ip, user_agent_family) \
-             VALUES ($1, $2, 'provider.create_draft', 'provider', $3, 'success', $4, \
-              $5::text::inet, $6)",
-            Uuid::now_v7(),
-            provider.actor,
-            provider.provider_id.to_string(),
-            now,
-            self.provenance().source_ip_text(),
-            self.provenance().user_agent_family()
+        record_audit_event(
+            &mut *transaction,
+            AuditEvent {
+                provenance: self.provenance(),
+                actor: Some(provider.actor),
+                action: "provider.create_draft",
+                resource_type: "provider",
+                resource_id: Some(&provider.provider_id.to_string()),
+                outcome: "success",
+                occurred_at: Some(now),
+            },
         )
-        .execute(&mut *transaction)
         .await?;
         let created = ProviderDraftCreated {
             provider_id: provider.provider_id,
@@ -224,211 +223,18 @@ impl Store {
         {
             return Err(Error::IdempotencyConflict);
         }
-        let provider = sqlx::query!(
-            "SELECT p.name, p.kind, p.state::text AS \"state!\", p.endpoint, p.cloud_region, \
-                    p.cloud_project, p.deployment, p.api_version, p.auth_mode, \
-                    p.connector_ready, p.etag, p.active_credential_version_id, \
-                    ar.credential_version_id AS \"previously_activated_credential_id?\", \
-                    (p.last_probe_status = 'succeeded' AND p.last_probe_at IS NOT NULL \
-                     AND p.last_probe_at >= p.updated_at) AS \"probe_ready!\", \
-                    ((p.auth_mode IN ('adc', 'default_chain') \
-                      AND p.active_credential_version_id IS NULL) OR EXISTS ( \
-                         SELECT 1 FROM provider_credential_versions cv \
-                         WHERE cv.id = p.active_credential_version_id \
-                           AND cv.provider_id = p.id AND cv.revoked_at IS NULL)) AS \"credential_ready!\", \
-                    EXISTS (SELECT 1 FROM provider_models pm \
-                            WHERE pm.provider_id = p.id AND pm.enabled) AS \"has_model!\", \
-                    NOT EXISTS ( \
-                      SELECT 1 FROM provider_models pm \
-                      WHERE pm.provider_id = p.id AND pm.enabled AND ( \
-                        NOT EXISTS (SELECT 1 FROM model_capabilities mc \
-                                    WHERE mc.provider_model_id = pm.id) OR \
-                        EXISTS (SELECT 1 FROM model_capabilities mc \
-                                WHERE mc.provider_model_id = pm.id \
-                                  AND mc.source <> 'certified'))) AS \"capabilities_ready!\" \
-             FROM providers p \
-             LEFT JOIN provider_revisions ar ON ar.id = p.active_revision_id \
-             WHERE p.id = $1 FOR UPDATE OF p",
-        provider_id)
-        .fetch_optional(&mut *transaction)
-        .await?
-        .ok_or(Error::ProviderNotFound)?;
-        if provider.etag != expected_etag {
-            return Err(Error::PreconditionFailed);
-        }
-        if provider.state != "draft"
-            || !provider.connector_ready
-            || !provider.probe_ready
-            || !provider.credential_ready
-            || !provider.has_model
-            || !provider.capabilities_ready
-        {
-            return Err(Error::ProviderIncomplete);
-        }
-
-        // Media reservations are short RowExclusive transactions. Holding a
-        // table SHARE lock makes this activation decision atomic with respect
-        // to new upstream jobs on every gateway replica.
-        sqlx::query!("LOCK TABLE async_media_jobs IN SHARE MODE")
-            .execute(&mut *transaction)
-            .await?;
-
-        let revision: i32 = sqlx::query_scalar!(
-            "SELECT COALESCE(max(revision), 0) + 1 AS \"value!\" FROM provider_revisions WHERE provider_id = $1",
-            provider_id
-        )
-        .fetch_one(&mut *transaction)
-        .await?;
-        let revision_id = Uuid::now_v7();
-        sqlx::query!(
-            "INSERT INTO provider_revisions \
-             (id, provider_id, revision, name, kind, endpoint, cloud_region, cloud_project, \
-              deployment, api_version, auth_mode, connector_ready, credential_version_id, \
-              source_etag, activated_by) \
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)",
-            revision_id,
+        let provider =
+            lock_activatable_provider(&mut transaction, provider_id, expected_etag).await?;
+        let revision_id = snapshot_provider_revision(
+            &mut transaction,
             provider_id,
-            revision,
-            provider.name,
-            provider.kind,
-            provider.endpoint,
-            provider.cloud_region,
-            provider.cloud_project,
-            provider.deployment,
-            provider.api_version,
-            provider.auth_mode,
-            provider.connector_ready,
-            provider.active_credential_version_id,
             expected_etag,
-            actor
+            actor,
+            &provider,
         )
-        .execute(&mut *transaction)
         .await?;
-        sqlx::query!(
-            "INSERT INTO provider_revision_models \
-             (id, provider_revision_id, source_provider_model_id, upstream_model, \
-              display_name, enabled, discovered_at) \
-             SELECT uuidv7(), $1, pm.id, pm.upstream_model, pm.display_name, pm.enabled, \
-                    pm.discovered_at FROM provider_models pm WHERE pm.provider_id = $2",
-            revision_id,
-            provider_id
-        )
-        .execute(&mut *transaction)
-        .await?;
-        sqlx::query!(
-            "INSERT INTO provider_revision_capabilities \
-             (provider_revision_model_id, operation, surface, mode, source, certified_at) \
-             SELECT prm.id, mc.operation, mc.surface, mc.mode, mc.source, mc.certified_at \
-             FROM provider_revision_models prm \
-             JOIN model_capabilities mc ON mc.provider_model_id = prm.source_provider_model_id \
-             WHERE prm.provider_revision_id = $1",
-            revision_id
-        )
-        .execute(&mut *transaction)
-        .await?;
-        let incompatible_media_job: Option<Uuid> = sqlx::query_scalar!(
-            "SELECT j.id
-             FROM async_media_jobs j
-             JOIN providers p ON p.id = j.provider_id
-             LEFT JOIN provider_revisions authority
-               ON authority.id = COALESCE(j.provider_revision_id, p.active_revision_id)
-             JOIN provider_revisions candidate ON candidate.id = $2
-             WHERE j.provider_id = $1 AND j.lifecycle_state <> 'deleted'
-               AND (
-                 authority.id IS NULL
-                 OR authority.kind IS DISTINCT FROM candidate.kind
-                 OR authority.endpoint IS DISTINCT FROM candidate.endpoint
-                 OR authority.cloud_region IS DISTINCT FROM candidate.cloud_region
-                 OR authority.cloud_project IS DISTINCT FROM candidate.cloud_project
-                 OR authority.deployment IS DISTINCT FROM candidate.deployment
-                 OR authority.api_version IS DISTINCT FROM candidate.api_version
-                 OR authority.auth_mode IS DISTINCT FROM candidate.auth_mode
-                 OR authority.credential_version_id IS DISTINCT FROM candidate.credential_version_id
-                 OR NOT EXISTS (
-                   SELECT 1 FROM provider_revision_models prm
-                   WHERE prm.provider_revision_id = candidate.id
-                     AND prm.upstream_model = j.provider_model AND prm.enabled
-                     AND NOT EXISTS (
-                       SELECT required.operation
-                       FROM (VALUES ('video_get'), ('video_content'), ('video_delete'))
-                            AS required(operation)
-                       WHERE NOT EXISTS (
-                         SELECT 1 FROM provider_revision_capabilities prc
-                         WHERE prc.provider_revision_model_id = prm.id
-                           AND prc.operation = required.operation
-                           AND prc.surface = j.surface
-                           AND prc.mode = 'unary' AND prc.source = 'certified'
-                       )
-                     )
-                 )
-               )
-             ORDER BY j.created_at, j.id LIMIT 1",
-            provider_id,
-            revision_id
-        )
-        .fetch_optional(&mut *transaction)
-        .await?;
-        if incompatible_media_job.is_some() {
-            return Err(Error::ProviderIncomplete);
-        }
-        let uncovered_route_operation: Option<String> = sqlx::query_scalar!(
-            "SELECT concat(r.slug, '/', rro.operation) AS \"value!\" \
-             FROM routes r \
-             JOIN LATERAL (SELECT id FROM route_revisions \
-                           WHERE route_id = r.id ORDER BY revision DESC LIMIT 1) rr ON true \
-             JOIN route_revision_operations rro ON rro.route_revision_id = rr.id \
-             WHERE NOT EXISTS ( \
-               SELECT 1 FROM route_revision_targets rt \
-               JOIN provider_models pm ON pm.id = rt.provider_model_id \
-               JOIN providers target_provider ON target_provider.id = pm.provider_id \
-               JOIN provider_revision_models prm \
-                 ON prm.source_provider_model_id = pm.id \
-                AND prm.provider_revision_id = CASE WHEN target_provider.id = $1 \
-                                                    THEN $2 \
-                                                    ELSE target_provider.active_revision_id END \
-                AND prm.enabled \
-               JOIN provider_revision_capabilities prc \
-                 ON prc.provider_revision_model_id = prm.id \
-                AND prc.operation = rro.operation AND prc.source = 'certified' \
-               WHERE rt.route_revision_id = rr.id \
-                 AND target_provider.state <> 'disabled'::provider_state) \
-             ORDER BY r.slug, rro.operation LIMIT 1",
-            provider_id,
-            revision_id
-        )
-        .fetch_optional(&mut *transaction)
-        .await?;
-        if uncovered_route_operation.is_some() {
-            return Err(Error::ProviderIncomplete);
-        }
-        // Operation coverage is not enough. The runtime compiler drops any
-        // target whose model is absent or disabled in the provider's activated
-        // revision, and Route::validate then rejects max_attempts > targets.
-        // Reject here instead, naming the route and target that would vanish.
-        let orphaned_route_target = sqlx::query!(
-            "SELECT r.slug AS \"route_slug!\", \
-                    concat(p.name, '/', pm.upstream_model) AS \"target!\" \
-             FROM routes r \
-             JOIN LATERAL (SELECT id FROM route_revisions \
-                           WHERE route_id = r.id ORDER BY revision DESC LIMIT 1) rr ON true \
-             JOIN route_revision_targets rt ON rt.route_revision_id = rr.id \
-             JOIN provider_models pm ON pm.id = rt.provider_model_id \
-             JOIN providers p ON p.id = pm.provider_id \
-             LEFT JOIN provider_revision_models prm \
-               ON prm.source_provider_model_id = pm.id AND prm.provider_revision_id = $2 \
-             WHERE p.id = $1 AND (prm.id IS NULL OR NOT prm.enabled) \
-             ORDER BY r.slug, rt.position LIMIT 1",
-            provider_id,
-            revision_id
-        )
-        .fetch_optional(&mut *transaction)
-        .await?;
-        if let Some(orphaned) = orphaned_route_target {
-            return Err(Error::Invalid(format!(
-                "route {} targets {}, which this provider revision does not enable",
-                orphaned.route_slug, orphaned.target
-            )));
-        }
+        reject_incompatible_media_jobs(&mut transaction, provider_id, revision_id).await?;
+        reject_unroutable_activation(&mut transaction, provider_id, revision_id).await?;
         sqlx::query!(
             "UPDATE providers SET state = 'active'::provider_state, active_revision_id = $1, \
                     etag = $2, updated_at = now() WHERE id = $3 AND etag = $4",
@@ -452,18 +258,18 @@ impl Store {
             .execute(&mut *transaction)
             .await?;
         }
-        sqlx::query!(
-            "INSERT INTO audit_events \
-             (id, actor_user_id, action, resource_type, resource_id, outcome, \
-              source_ip, user_agent_family) \
-             VALUES ($1, $2, 'provider.activate', 'provider', $3, 'success', $4::text::inet, $5)",
-            Uuid::now_v7(),
-            actor,
-            provider_id.to_string(),
-            self.provenance().source_ip_text(),
-            self.provenance().user_agent_family()
+        record_audit_event(
+            &mut *transaction,
+            AuditEvent {
+                provenance: self.provenance(),
+                actor: Some(actor),
+                action: "provider.activate",
+                resource_type: "provider",
+                resource_id: Some(&provider_id.to_string()),
+                outcome: "success",
+                occurred_at: None,
+            },
         )
-        .execute(&mut *transaction)
         .await?;
         complete_idempotency(
             &mut transaction,
@@ -480,6 +286,272 @@ impl Store {
             release,
         })
     }
+}
+
+/// The activated provider revision's connector snapshot, taken under the
+/// provider row lock that gates activation.
+struct ActivationSource {
+    name: String,
+    kind: String,
+    endpoint: Option<String>,
+    cloud_region: Option<String>,
+    cloud_project: Option<String>,
+    deployment: Option<String>,
+    api_version: Option<String>,
+    auth_mode: String,
+    connector_ready: bool,
+    active_credential_version_id: Option<Uuid>,
+    previously_activated_credential_id: Option<Uuid>,
+}
+
+async fn lock_activatable_provider(
+    transaction: &mut Transaction<'_, Postgres>,
+    provider_id: Uuid,
+    expected_etag: Uuid,
+) -> Result<ActivationSource, Error> {
+    let provider = sqlx::query!(
+        "SELECT p.name, p.kind, p.state::text AS \"state!\", p.endpoint, p.cloud_region, \
+                p.cloud_project, p.deployment, p.api_version, p.auth_mode, \
+                p.connector_ready, p.etag, p.active_credential_version_id, \
+                ar.credential_version_id AS \"previously_activated_credential_id?\", \
+                (p.last_probe_status = 'succeeded' AND p.last_probe_at IS NOT NULL \
+                 AND p.last_probe_at >= p.updated_at) AS \"probe_ready!\", \
+                ((p.auth_mode IN ('adc', 'default_chain') \
+                  AND p.active_credential_version_id IS NULL) OR EXISTS ( \
+                     SELECT 1 FROM provider_credential_versions cv \
+                     WHERE cv.id = p.active_credential_version_id \
+                       AND cv.provider_id = p.id AND cv.revoked_at IS NULL)) AS \"credential_ready!\", \
+                EXISTS (SELECT 1 FROM provider_models pm \
+                        WHERE pm.provider_id = p.id AND pm.enabled) AS \"has_model!\", \
+                NOT EXISTS ( \
+                  SELECT 1 FROM provider_models pm \
+                  WHERE pm.provider_id = p.id AND pm.enabled AND ( \
+                    NOT EXISTS (SELECT 1 FROM model_capabilities mc \
+                                WHERE mc.provider_model_id = pm.id) OR \
+                    EXISTS (SELECT 1 FROM model_capabilities mc \
+                            WHERE mc.provider_model_id = pm.id \
+                              AND mc.source <> 'certified'))) AS \"capabilities_ready!\" \
+         FROM providers p \
+         LEFT JOIN provider_revisions ar ON ar.id = p.active_revision_id \
+         WHERE p.id = $1 FOR UPDATE OF p",
+    provider_id)
+    .fetch_optional(&mut **transaction)
+    .await?
+    .ok_or(Error::ProviderNotFound)?;
+    if provider.etag != expected_etag {
+        return Err(Error::PreconditionFailed);
+    }
+    if provider.state != "draft"
+        || !provider.connector_ready
+        || !provider.probe_ready
+        || !provider.credential_ready
+        || !provider.has_model
+        || !provider.capabilities_ready
+    {
+        return Err(Error::ProviderIncomplete);
+    }
+    Ok(ActivationSource {
+        name: provider.name,
+        kind: provider.kind,
+        endpoint: provider.endpoint,
+        cloud_region: provider.cloud_region,
+        cloud_project: provider.cloud_project,
+        deployment: provider.deployment,
+        api_version: provider.api_version,
+        auth_mode: provider.auth_mode,
+        connector_ready: provider.connector_ready,
+        active_credential_version_id: provider.active_credential_version_id,
+        previously_activated_credential_id: provider.previously_activated_credential_id,
+    })
+}
+
+async fn snapshot_provider_revision(
+    transaction: &mut Transaction<'_, Postgres>,
+    provider_id: Uuid,
+    expected_etag: Uuid,
+    actor: Uuid,
+    provider: &ActivationSource,
+) -> Result<Uuid, Error> {
+    // Media reservations are short RowExclusive transactions. Holding a
+    // table SHARE lock makes this activation decision atomic with respect
+    // to new upstream jobs on every gateway replica.
+    sqlx::query!("LOCK TABLE async_media_jobs IN SHARE MODE")
+        .execute(&mut **transaction)
+        .await?;
+
+    let revision: i32 = sqlx::query_scalar!(
+        "SELECT COALESCE(max(revision), 0) + 1 AS \"value!\" FROM provider_revisions WHERE provider_id = $1",
+        provider_id
+    )
+    .fetch_one(&mut **transaction)
+    .await?;
+    let revision_id = Uuid::now_v7();
+    sqlx::query!(
+        "INSERT INTO provider_revisions \
+         (id, provider_id, revision, name, kind, endpoint, cloud_region, cloud_project, \
+          deployment, api_version, auth_mode, connector_ready, credential_version_id, \
+          source_etag, activated_by) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)",
+        revision_id,
+        provider_id,
+        revision,
+        provider.name,
+        provider.kind,
+        provider.endpoint,
+        provider.cloud_region,
+        provider.cloud_project,
+        provider.deployment,
+        provider.api_version,
+        provider.auth_mode,
+        provider.connector_ready,
+        provider.active_credential_version_id,
+        expected_etag,
+        actor
+    )
+    .execute(&mut **transaction)
+    .await?;
+    sqlx::query!(
+        "INSERT INTO provider_revision_models \
+         (id, provider_revision_id, source_provider_model_id, upstream_model, \
+          display_name, enabled, discovered_at) \
+         SELECT uuidv7(), $1, pm.id, pm.upstream_model, pm.display_name, pm.enabled, \
+                pm.discovered_at FROM provider_models pm WHERE pm.provider_id = $2",
+        revision_id,
+        provider_id
+    )
+    .execute(&mut **transaction)
+    .await?;
+    sqlx::query!(
+        "INSERT INTO provider_revision_capabilities \
+         (provider_revision_model_id, operation, surface, mode, source, certified_at) \
+         SELECT prm.id, mc.operation, mc.surface, mc.mode, mc.source, mc.certified_at \
+         FROM provider_revision_models prm \
+         JOIN model_capabilities mc ON mc.provider_model_id = prm.source_provider_model_id \
+         WHERE prm.provider_revision_id = $1",
+        revision_id
+    )
+    .execute(&mut **transaction)
+    .await?;
+    Ok(revision_id)
+}
+
+async fn reject_incompatible_media_jobs(
+    transaction: &mut Transaction<'_, Postgres>,
+    provider_id: Uuid,
+    revision_id: Uuid,
+) -> Result<(), Error> {
+    let incompatible_media_job: Option<Uuid> = sqlx::query_scalar!(
+        "SELECT j.id
+         FROM async_media_jobs j
+         JOIN providers p ON p.id = j.provider_id
+         LEFT JOIN provider_revisions authority
+           ON authority.id = COALESCE(j.provider_revision_id, p.active_revision_id)
+         JOIN provider_revisions candidate ON candidate.id = $2
+         WHERE j.provider_id = $1 AND j.lifecycle_state <> 'deleted'
+           AND (
+             authority.id IS NULL
+             OR authority.kind IS DISTINCT FROM candidate.kind
+             OR authority.endpoint IS DISTINCT FROM candidate.endpoint
+             OR authority.cloud_region IS DISTINCT FROM candidate.cloud_region
+             OR authority.cloud_project IS DISTINCT FROM candidate.cloud_project
+             OR authority.deployment IS DISTINCT FROM candidate.deployment
+             OR authority.api_version IS DISTINCT FROM candidate.api_version
+             OR authority.auth_mode IS DISTINCT FROM candidate.auth_mode
+             OR authority.credential_version_id IS DISTINCT FROM candidate.credential_version_id
+             OR NOT EXISTS (
+               SELECT 1 FROM provider_revision_models prm
+               WHERE prm.provider_revision_id = candidate.id
+                 AND prm.upstream_model = j.provider_model AND prm.enabled
+                 AND NOT EXISTS (
+                   SELECT required.operation
+                   FROM (VALUES ('video_get'), ('video_content'), ('video_delete'))
+                        AS required(operation)
+                   WHERE NOT EXISTS (
+                     SELECT 1 FROM provider_revision_capabilities prc
+                     WHERE prc.provider_revision_model_id = prm.id
+                       AND prc.operation = required.operation
+                       AND prc.surface = j.surface
+                       AND prc.mode = 'unary' AND prc.source = 'certified'
+                   )
+                 )
+             )
+           )
+         ORDER BY j.created_at, j.id LIMIT 1",
+        provider_id,
+        revision_id
+    )
+    .fetch_optional(&mut **transaction)
+    .await?;
+    if incompatible_media_job.is_some() {
+        return Err(Error::ProviderIncomplete);
+    }
+    Ok(())
+}
+
+async fn reject_unroutable_activation(
+    transaction: &mut Transaction<'_, Postgres>,
+    provider_id: Uuid,
+    revision_id: Uuid,
+) -> Result<(), Error> {
+    let uncovered_route_operation: Option<String> = sqlx::query_scalar!(
+        "SELECT concat(r.slug, '/', rro.operation) AS \"value!\" \
+         FROM routes r \
+         JOIN LATERAL (SELECT id FROM route_revisions \
+                       WHERE route_id = r.id ORDER BY revision DESC LIMIT 1) rr ON true \
+         JOIN route_revision_operations rro ON rro.route_revision_id = rr.id \
+         WHERE NOT EXISTS ( \
+           SELECT 1 FROM route_revision_targets rt \
+           JOIN provider_models pm ON pm.id = rt.provider_model_id \
+           JOIN providers target_provider ON target_provider.id = pm.provider_id \
+           JOIN provider_revision_models prm \
+             ON prm.source_provider_model_id = pm.id \
+            AND prm.provider_revision_id = CASE WHEN target_provider.id = $1 \
+                                                THEN $2 \
+                                                ELSE target_provider.active_revision_id END \
+            AND prm.enabled \
+           JOIN provider_revision_capabilities prc \
+             ON prc.provider_revision_model_id = prm.id \
+            AND prc.operation = rro.operation AND prc.source = 'certified' \
+           WHERE rt.route_revision_id = rr.id \
+             AND target_provider.state <> 'disabled'::provider_state) \
+         ORDER BY r.slug, rro.operation LIMIT 1",
+        provider_id,
+        revision_id
+    )
+    .fetch_optional(&mut **transaction)
+    .await?;
+    if uncovered_route_operation.is_some() {
+        return Err(Error::ProviderIncomplete);
+    }
+    // Operation coverage is not enough. The runtime compiler drops any
+    // target whose model is absent or disabled in the provider's activated
+    // revision, and Route::validate then rejects max_attempts > targets.
+    // Reject here instead, naming the route and target that would vanish.
+    let orphaned_route_target = sqlx::query!(
+        "SELECT r.slug AS \"route_slug!\", \
+                concat(p.name, '/', pm.upstream_model) AS \"target!\" \
+         FROM routes r \
+         JOIN LATERAL (SELECT id FROM route_revisions \
+                       WHERE route_id = r.id ORDER BY revision DESC LIMIT 1) rr ON true \
+         JOIN route_revision_targets rt ON rt.route_revision_id = rr.id \
+         JOIN provider_models pm ON pm.id = rt.provider_model_id \
+         JOIN providers p ON p.id = pm.provider_id \
+         LEFT JOIN provider_revision_models prm \
+           ON prm.source_provider_model_id = pm.id AND prm.provider_revision_id = $2 \
+         WHERE p.id = $1 AND (prm.id IS NULL OR NOT prm.enabled) \
+         ORDER BY r.slug, rt.position LIMIT 1",
+        provider_id,
+        revision_id
+    )
+    .fetch_optional(&mut **transaction)
+    .await?;
+    if let Some(orphaned) = orphaned_route_target {
+        return Err(Error::Invalid(format!(
+            "route {} targets {}, which this provider revision does not enable",
+            orphaned.route_slug, orphaned.target
+        )));
+    }
+    Ok(())
 }
 
 #[derive(Debug, FromRow)]

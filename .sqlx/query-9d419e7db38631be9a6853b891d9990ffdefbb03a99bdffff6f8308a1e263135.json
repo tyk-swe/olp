@@ -1,0 +1,52 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT COUNT(*) FILTER (\n                        WHERE lifecycle_state NOT IN ('active', 'deleted')\n                    )::bigint AS \"pending!\",\n                    COUNT(*) FILTER (\n                        WHERE (lifecycle_state = 'creating' AND updated_at < $1::timestamptz - interval '5 minutes')\n                           OR (lifecycle_state NOT IN ('creating', 'active', 'deleted')\n                               AND next_reconciliation_at < $1::timestamptz - interval '1 minute')\n                           OR (lifecycle_state = 'active'\n                               AND state IN ('queued', 'running')\n                               AND next_reconciliation_at < $1::timestamptz - interval '1 minute'\n                               -- Mirror the claim query's poll gate. A job a\n                               -- client is actively polling is deliberately not\n                               -- claimable and must not read as stale.\n                               AND (last_polled_at IS NULL\n                                    OR last_polled_at\n                                       <= $1::timestamptz - $2::int * interval '1 second'))\n                    )::bigint AS \"stale!\",\n                    COUNT(*) FILTER (\n                        WHERE lifecycle_state <> 'deleted' AND reconciliation_error IS NOT NULL\n                    )::bigint AS \"failed!\",\n                    COUNT(*) FILTER (\n                        WHERE lifecycle_state <> 'deleted'\n                          AND (runtime_generation_id IS NULL OR provider_revision_id IS NULL)\n                    )::bigint AS \"unbound!\",\n                    MIN(created_at) FILTER (\n                        WHERE lifecycle_state NOT IN ('active', 'deleted')\n                    ) AS oldest_pending_at\n             FROM async_media_jobs\n             WHERE lifecycle_state <> 'deleted'",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "pending!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 1,
+        "name": "stale!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 2,
+        "name": "failed!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 3,
+        "name": "unbound!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 4,
+        "name": "oldest_pending_at",
+        "type_info": "Timestamptz",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Timestamptz",
+        "Int4"
+      ]
+    },
+    "nullable": [
+      null,
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "9d419e7db38631be9a6853b891d9990ffdefbb03a99bdffff6f8308a1e263135"
+}

@@ -10,6 +10,7 @@ use super::{
     cursor::{Error, Page},
 };
 use crate::{
+    audit_events::{AuditEvent, record_audit_event},
     error::Error as PersistenceError,
     idempotency::{
         Outcome, Replayable, ReplayableIdempotencyClaim, Response, claim_replayable_idempotency,
@@ -168,20 +169,18 @@ impl Store {
             .execute(&mut *transaction)
             .await?;
         }
-        sqlx::query!(
-            "INSERT INTO audit_events \
-             (id, actor_user_id, action, resource_type, resource_id, outcome, occurred_at, \
-              source_ip, user_agent_family) \
-             VALUES ($1, $2, 'pricing_revision.create', 'pricing_revision', $3, 'success', $4, \
-              $5::text::inet, $6)",
-            Uuid::now_v7(),
-            actor,
-            id.to_string(),
-            now,
-            self.provenance().source_ip_text(),
-            self.provenance().user_agent_family()
+        record_audit_event(
+            &mut *transaction,
+            AuditEvent {
+                provenance: self.provenance(),
+                actor: Some(actor),
+                action: "pricing_revision.create",
+                resource_type: "pricing_revision",
+                resource_id: Some(&id.to_string()),
+                outcome: "success",
+                occurred_at: Some(now),
+            },
         )
-        .execute(&mut *transaction)
         .await?;
         let record = RevisionRecord {
             id,

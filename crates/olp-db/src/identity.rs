@@ -5,10 +5,7 @@ use olp_engine::domain::auth::Role;
 use thiserror::Error;
 use uuid::Uuid;
 
-use crate::{
-    error::Error as PersistenceError, security::session_material::InvitationMaterial,
-    store::RequestProvenance,
-};
+use crate::{error::Error as PersistenceError, security::session_material::InvitationMaterial};
 
 mod accounts;
 mod auth_admission;
@@ -171,32 +168,6 @@ pub struct SessionRecord {
 
 fn parse_role(value: String) -> Result<Role, Error> {
     value.parse().map_err(|_| Error::CorruptIdentity)
-}
-
-async fn insert_audit(
-    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    provenance: &RequestProvenance,
-    actor: Uuid,
-    action: &str,
-    resource_type: &str,
-    resource_id: &str,
-) -> Result<(), sqlx::Error> {
-    sqlx::query!(
-        "INSERT INTO audit_events \
-         (id, actor_user_id, action, resource_type, resource_id, outcome, \
-          source_ip, user_agent_family) \
-         VALUES ($1, $2, $3, $4, $5, 'success', $6::text::inet, $7)",
-        Uuid::now_v7(),
-        actor,
-        action,
-        resource_type,
-        resource_id,
-        provenance.source_ip_text(),
-        provenance.user_agent_family()
-    )
-    .execute(&mut **transaction)
-    .await?;
-    Ok(())
 }
 
 #[cfg(test)]

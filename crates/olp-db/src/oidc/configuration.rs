@@ -6,6 +6,7 @@ use uuid::Uuid;
 
 use super::helpers::{encrypted_from_row, normalize_email, required_string, valid_claim_name};
 use super::types::{OidcConfiguration, OidcError, OidcRoleMapping, UpsertOidcConfiguration};
+use crate::audit_events::{AuditEvent, record_audit_event};
 use crate::store::Store;
 
 pub(super) const OIDC_CONFIGURATION_LOCK_ID: i64 = 0x4f4c_505f_4f49; // "OLP_OI"
@@ -134,20 +135,18 @@ impl Store {
         )
         .execute(&mut *transaction)
         .await?;
-        sqlx::query!(
-            "INSERT INTO audit_events \
-             (id, actor_user_id, action, resource_type, resource_id, outcome, occurred_at, \
-              source_ip, user_agent_family) \
-             VALUES ($1, $2, 'oidc.configuration_update', 'oidc_configuration', $3, 'success', $4, \
-              $5::text::inet, $6)",
-            Uuid::now_v7(),
-            input.actor_user_id,
-            input.id.to_string(),
-            now,
-            self.provenance().source_ip_text(),
-            self.provenance().user_agent_family()
+        record_audit_event(
+            &mut *transaction,
+            AuditEvent {
+                provenance: self.provenance(),
+                actor: Some(input.actor_user_id),
+                action: "oidc.configuration_update",
+                resource_type: "oidc_configuration",
+                resource_id: Some(&input.id.to_string()),
+                outcome: "success",
+                occurred_at: Some(now),
+            },
         )
-        .execute(&mut *transaction)
         .await?;
         transaction.commit().await?;
         self.oidc_configuration().await?.ok_or(OidcError::Corrupt)

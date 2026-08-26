@@ -3,6 +3,10 @@ use olp_engine::inference::request_metadata::Snapshot;
 use rust_decimal::Decimal;
 use uuid::Uuid;
 
+use crate::{
+    audit_events::{AuditEvent, record_audit_event},
+    store::RequestProvenance,
+};
 use crate::{error::Error, store::Store};
 
 const REQUEST_METADATA_GATEWAY_EPOCH_LOCK_SEED: i64 = 0x4f4c_505f_5545;
@@ -536,13 +540,18 @@ impl Store {
         .await?;
         let acknowledged_at: DateTime<Utc> = acknowledgement.acknowledged_at;
         let acknowledged_by: Option<Uuid> = acknowledgement.acknowledged_by;
-        sqlx::query!(
-            "INSERT INTO audit_events \
-             (id, actor_user_id, action, resource_type, resource_id, outcome, occurred_at) \
-             VALUES ($1, $2, 'request_metadata.gateway_epoch_acknowledge', 'request_metadata_gateway_epoch', \
-                     $3, 'success', $4)",
-        Uuid::now_v7(), actor, process_epoch.to_string(), acknowledged_at)
-        .execute(&mut *transaction)
+        record_audit_event(
+            &mut *transaction,
+            AuditEvent {
+                provenance: &RequestProvenance::default(),
+                actor: Some(actor),
+                action: "request_metadata.gateway_epoch_acknowledge",
+                resource_type: "request_metadata_gateway_epoch",
+                resource_id: Some(&process_epoch.to_string()),
+                outcome: "success",
+                occurred_at: Some(acknowledged_at),
+            },
+        )
         .await?;
         transaction.commit().await?;
         Ok(Some(EpochAcknowledgement {

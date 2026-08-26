@@ -4,7 +4,7 @@ use uuid::Uuid;
 use crate::store::Store;
 
 use super::{
-    MediaJobError, MediaJobRecord, MediaReconciliationSummary,
+    MediaJobError, MediaJobRecord, MediaReconciliationSummary, POLL_GATE_SECONDS,
     queries::{MediaJobRow, media_job_from_row},
 };
 
@@ -67,7 +67,8 @@ impl Store {
                         AND (
                           (state IN ('queued', 'running')
                            AND (last_polled_at IS NULL
-                                OR last_polled_at <= $1 - interval '5 seconds'))
+                                OR last_polled_at
+                                   <= $1 - $4::int * interval '1 second'))
                           OR expires_at <= $1
                           OR created_at <= $1 - interval '30 days'
                         ))
@@ -101,7 +102,8 @@ impl Store {
              ORDER BY c.created_at, c.id",
             now,
             i64::from(limit.clamp(1, 32)),
-            claim_id
+            claim_id,
+            POLL_GATE_SECONDS
         )
         .fetch_all(self.pool())
         .await?;
@@ -168,7 +170,8 @@ impl Store {
                                -- client is actively polling is deliberately not
                                -- claimable and must not read as stale.
                                AND (last_polled_at IS NULL
-                                    OR last_polled_at <= $1::timestamptz - interval '5 seconds'))
+                                    OR last_polled_at
+                                       <= $1::timestamptz - $2::int * interval '1 second'))
                     )::bigint AS \"stale!\",
                     COUNT(*) FILTER (
                         WHERE lifecycle_state <> 'deleted' AND reconciliation_error IS NOT NULL
@@ -182,7 +185,8 @@ impl Store {
                     ) AS oldest_pending_at
              FROM async_media_jobs
              WHERE lifecycle_state <> 'deleted'",
-        now)
+        now,
+        POLL_GATE_SECONDS)
         .fetch_one(self.pool())
         .await?;
         Ok(MediaReconciliationSummary {

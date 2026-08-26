@@ -1,7 +1,5 @@
-use super::{
-    helpers::{audit_in_transaction, checked_configuration_count},
-    *,
-};
+use super::{helpers::checked_configuration_count, *};
+use crate::audit_events::{AuditEvent, record_audit_event};
 
 impl Store {
     pub async fn list_providers(
@@ -170,14 +168,17 @@ impl Store {
         )
         .execute(&mut *transaction)
         .await?;
-        audit_in_transaction(
-            &mut transaction,
-            self.provenance(),
-            actor,
-            "provider.update",
-            "provider",
-            provider_id,
-            "success",
+        record_audit_event(
+            &mut *transaction,
+            AuditEvent {
+                provenance: self.provenance(),
+                actor: Some(actor),
+                action: "provider.update",
+                resource_type: "provider",
+                resource_id: Some(&provider_id.to_string()),
+                outcome: "success",
+                occurred_at: None,
+            },
         )
         .await?;
         transaction.commit().await?;
@@ -253,14 +254,17 @@ impl Store {
                 Error::InUse
             });
         }
-        audit_in_transaction(
-            &mut transaction,
-            self.provenance(),
-            actor,
-            "provider.disable",
-            "provider",
-            provider_id,
-            "success",
+        record_audit_event(
+            &mut *transaction,
+            AuditEvent {
+                provenance: self.provenance(),
+                actor: Some(actor),
+                action: "provider.disable",
+                resource_type: "provider",
+                resource_id: Some(&provider_id.to_string()),
+                outcome: "success",
+                occurred_at: None,
+            },
         )
         .await?;
         complete_idempotency(
@@ -326,14 +330,17 @@ impl Store {
         )
         .execute(&mut *transaction)
         .await?;
-        audit_in_transaction(
-            &mut transaction,
-            self.provenance(),
-            actor,
-            "provider.restore_as_draft",
-            "provider",
-            provider_id,
-            "success",
+        record_audit_event(
+            &mut *transaction,
+            AuditEvent {
+                provenance: self.provenance(),
+                actor: Some(actor),
+                action: "provider.restore_as_draft",
+                resource_type: "provider",
+                resource_id: Some(&provider_id.to_string()),
+                outcome: "success",
+                occurred_at: None,
+            },
         )
         .await?;
         complete_idempotency(
@@ -386,14 +393,17 @@ impl Store {
                 Error::NotFound
             });
         }
-        audit_in_transaction(
-            &mut transaction,
-            self.provenance(),
-            actor,
-            "provider.probe",
-            "provider",
-            provider_id,
-            if succeeded { "success" } else { "failure" },
+        record_audit_event(
+            &mut *transaction,
+            AuditEvent {
+                provenance: self.provenance(),
+                actor: Some(actor),
+                action: "provider.probe",
+                resource_type: "provider",
+                resource_id: Some(&provider_id.to_string()),
+                outcome: if succeeded { "success" } else { "failure" },
+                occurred_at: None,
+            },
         )
         .await?;
         transaction.commit().await?;

@@ -1,7 +1,8 @@
 use super::{
-    helpers::{CapabilityRow, audit_in_transaction, capability_from_row},
+    helpers::{CapabilityRow, capability_from_row},
     *,
 };
+use crate::audit_events::{AuditEvent, record_audit_event};
 
 impl Store {
     pub async fn list_provider_models(
@@ -237,14 +238,17 @@ impl Store {
         if restored.rows_affected() != 1 {
             return Err(Error::InUse);
         }
-        audit_in_transaction(
-            &mut transaction,
-            self.provenance(),
-            actor,
-            "provider.discover",
-            "provider",
-            provider_id,
-            "success",
+        record_audit_event(
+            &mut *transaction,
+            AuditEvent {
+                provenance: self.provenance(),
+                actor: Some(actor),
+                action: "provider.discover",
+                resource_type: "provider",
+                resource_id: Some(&provider_id.to_string()),
+                outcome: "success",
+                occurred_at: None,
+            },
         )
         .await?;
         transaction.commit().await?;
@@ -347,14 +351,17 @@ impl Store {
         if restored.rows_affected() != 1 {
             return Err(Error::InUse);
         }
-        audit_in_transaction(
-            &mut transaction,
-            self.provenance(),
-            actor,
-            "provider.model.update",
-            "provider_model",
-            model_id,
-            "success",
+        record_audit_event(
+            &mut *transaction,
+            AuditEvent {
+                provenance: self.provenance(),
+                actor: Some(actor),
+                action: "provider.model.update",
+                resource_type: "provider_model",
+                resource_id: Some(&model_id.to_string()),
+                outcome: "success",
+                occurred_at: None,
+            },
         )
         .await?;
         transaction.commit().await?;
@@ -506,14 +513,17 @@ impl Store {
         } else {
             "partial"
         };
-        audit_in_transaction(
-            &mut transaction,
-            self.provenance(),
-            actor,
-            "provider.model.certify",
-            "provider_model",
-            model_id,
-            audit_outcome,
+        record_audit_event(
+            &mut *transaction,
+            AuditEvent {
+                provenance: self.provenance(),
+                actor: Some(actor),
+                action: "provider.model.certify",
+                resource_type: "provider_model",
+                resource_id: Some(&model_id.to_string()),
+                outcome: audit_outcome,
+                occurred_at: None,
+            },
         )
         .await?;
         transaction.commit().await?;

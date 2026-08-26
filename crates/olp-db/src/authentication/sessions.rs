@@ -2,6 +2,7 @@ use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
 use crate::{
+    audit_events::{AuditEvent, record_audit_event},
     error::Error,
     security::session_material::{CsrfMaterial, SessionMaterial},
     store::Store,
@@ -35,33 +36,31 @@ impl Store {
             now,
         )
         .await?;
-        sqlx::query!(
-            "INSERT INTO audit_events \
-             (id, actor_user_id, action, resource_type, resource_id, outcome, occurred_at, \
-              source_ip, user_agent_family) \
-             VALUES ($1, $2, 'session.create', 'session', $3, 'success', $4, $5::text::inet, $6)",
-            Uuid::now_v7(),
-            user_id,
-            id.to_string(),
-            now,
-            self.provenance().source_ip_text(),
-            self.provenance().user_agent_family()
+        record_audit_event(
+            &mut *transaction,
+            AuditEvent {
+                provenance: self.provenance(),
+                actor: Some(user_id),
+                action: "session.create",
+                resource_type: "session",
+                resource_id: Some(&id.to_string()),
+                outcome: "success",
+                occurred_at: Some(now),
+            },
         )
-        .execute(&mut *transaction)
         .await?;
-        sqlx::query!(
-            "INSERT INTO audit_events \
-             (id, actor_user_id, action, resource_type, resource_id, outcome, occurred_at, \
-              source_ip, user_agent_family) \
-             VALUES ($1, $2, 'local_auth.login', 'session', $3, 'success', $4, $5::text::inet, $6)",
-            Uuid::now_v7(),
-            user_id,
-            id.to_string(),
-            now,
-            self.provenance().source_ip_text(),
-            self.provenance().user_agent_family()
+        record_audit_event(
+            &mut *transaction,
+            AuditEvent {
+                provenance: self.provenance(),
+                actor: Some(user_id),
+                action: "local_auth.login",
+                resource_type: "session",
+                resource_id: Some(&id.to_string()),
+                outcome: "success",
+                occurred_at: Some(now),
+            },
         )
-        .execute(&mut *transaction)
         .await?;
         transaction.commit().await?;
         Ok(id)
@@ -72,19 +71,18 @@ impl Store {
     /// may be attached for operator visibility; unknown identities remain
     /// anonymous.
     pub async fn record_local_login_failure(&self, user_id: Option<Uuid>) -> Result<(), Error> {
-        sqlx::query!(
-            "INSERT INTO audit_events \
-             (id, actor_user_id, action, resource_type, resource_id, outcome, occurred_at, \
-              source_ip, user_agent_family) \
-             VALUES ($1, $2, 'local_auth.login', 'session', NULL, 'failure', $3, \
-              $4::text::inet, $5)",
-            Uuid::now_v7(),
-            user_id,
-            Utc::now(),
-            self.provenance().source_ip_text(),
-            self.provenance().user_agent_family()
+        record_audit_event(
+            self.pool(),
+            AuditEvent {
+                provenance: self.provenance(),
+                actor: user_id,
+                action: "local_auth.login",
+                resource_type: "session",
+                resource_id: None,
+                outcome: "failure",
+                occurred_at: Some(Utc::now()),
+            },
         )
-        .execute(self.pool())
         .await?;
         Ok(())
     }
@@ -187,20 +185,18 @@ impl Store {
         .await?
         .rows_affected();
         if updated == 1 {
-            sqlx::query!(
-                "INSERT INTO audit_events \
-                 (id, actor_user_id, action, resource_type, resource_id, outcome, occurred_at, \
-                  source_ip, user_agent_family) \
-                 VALUES ($1, $2, 'session.csrf_rotate', 'session', $3, 'success', $4, \
-                  $5::text::inet, $6)",
-                Uuid::now_v7(),
-                user_id,
-                session_id.to_string(),
-                now,
-                self.provenance().source_ip_text(),
-                self.provenance().user_agent_family()
+            record_audit_event(
+                &mut *transaction,
+                AuditEvent {
+                    provenance: self.provenance(),
+                    actor: Some(user_id),
+                    action: "session.csrf_rotate",
+                    resource_type: "session",
+                    resource_id: Some(&session_id.to_string()),
+                    outcome: "success",
+                    occurred_at: Some(now),
+                },
             )
-            .execute(&mut *transaction)
             .await?;
             transaction.commit().await?;
             Ok(true)
@@ -225,20 +221,18 @@ impl Store {
         if let Some(row) = deleted {
             let session_id: Uuid = row.id;
             let user_id: Uuid = row.user_id;
-            sqlx::query!(
-                "INSERT INTO audit_events \
-                 (id, actor_user_id, action, resource_type, resource_id, outcome, occurred_at, \
-                  source_ip, user_agent_family) \
-                 VALUES ($1, $2, 'session.logout', 'session', $3, 'success', $4, \
-                  $5::text::inet, $6)",
-                Uuid::now_v7(),
-                user_id,
-                session_id.to_string(),
-                now,
-                self.provenance().source_ip_text(),
-                self.provenance().user_agent_family()
+            record_audit_event(
+                &mut *transaction,
+                AuditEvent {
+                    provenance: self.provenance(),
+                    actor: Some(user_id),
+                    action: "session.logout",
+                    resource_type: "session",
+                    resource_id: Some(&session_id.to_string()),
+                    outcome: "success",
+                    occurred_at: Some(now),
+                },
             )
-            .execute(&mut *transaction)
             .await?;
         }
         transaction.commit().await?;

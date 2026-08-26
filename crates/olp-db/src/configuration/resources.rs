@@ -10,7 +10,6 @@ use olp_engine::domain::{
     provider::{CapabilitySource, ProviderAuthMode, ProviderState, RouteDraftState},
     routing::{provider::ProviderKind, selection::weighted_rendezvous_score},
 };
-use sqlx::{Postgres, Transaction};
 use uuid::Uuid;
 
 use crate::{
@@ -25,7 +24,7 @@ use crate::{
     },
     security::{envelope::EncryptedSecret, key_material::ApiKey},
     split_page,
-    store::{RequestProvenance, Store},
+    store::Store,
 };
 
 use super::{
@@ -42,6 +41,7 @@ mod helpers;
 mod models;
 mod providers;
 mod revisions;
+mod route_revisions;
 mod routes;
 
 /// Maximum number of models loaded from either immutable provider revision

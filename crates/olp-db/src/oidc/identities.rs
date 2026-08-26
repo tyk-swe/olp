@@ -2,15 +2,16 @@ use chrono::Utc;
 use uuid::Uuid;
 
 use super::helpers::{
-    AuthenticatedUserRow, authenticated_user_from_row, checked_session_expiry, insert_audit,
-    lock_email, lock_subject, normalize_display_name, normalize_email,
-    require_current_enabled_configuration, validate_subject,
+    AuthenticatedUserRow, authenticated_user_from_row, checked_session_expiry, lock_email,
+    lock_subject, normalize_display_name, normalize_email, require_current_enabled_configuration,
+    validate_subject,
 };
 use super::types::{
     CompleteOidcLink, CompleteOidcLogin, CompleteOidcReauthentication, OidcAuthenticatedUser,
     OidcError, OidcIdentityRecord, UnlinkOidcIdentity,
 };
 use crate::{
+    audit_events::{AuditEvent, record_audit_event},
     authentication::{
         RecentAuthGrant, RecentAuthPurpose, SessionSecurityContext, consume_recent_authentication,
         insert_versioned_session, install_recent_authentication, revoke_user_sessions,
@@ -48,130 +49,11 @@ impl Store {
         .await?;
 
         let (user, security_version) = if let Some(row) = linked {
-            if !row.active {
-                return Err(OidcError::InactiveUser);
-            }
-            let mut user = authenticated_user_from_row(row.authenticated())?;
-            let mut security_version: i64 = row.security_version;
-            if row.oidc_only {
-                let mapped_role = input
-                    .provisioning_role
-                    .ok_or(OidcError::ProvisioningDenied)?;
-                if user.role != mapped_role {
-                    security_version = sqlx::query_scalar!(
-                        "UPDATE users SET role = CAST($2::text AS user_role), \
-                             security_version = security_version + 1, etag = $3, updated_at = $4 \
-                         WHERE id = $1 RETURNING security_version",
-                        user.id,
-                        mapped_role.as_str(),
-                        Uuid::now_v7(),
-                        now
-                    )
-                    .fetch_one(&mut *transaction)
-                    .await?;
-                    let _revoked = revoke_user_sessions(&mut transaction, user.id).await?;
-                    // A pending invitation is an out-of-band grant. The sync
-                    // revoked this user's sessions; the tokens they minted
-                    // while they still held ManageAccess must go with them.
-                    let retired = retire_invitations_on_access_loss(
-                        &mut transaction,
-                        user.id,
-                        mapped_role,
-                        true,
-                        user.id,
-                    )
-                    .await?;
-                    insert_audit(
-                        &mut transaction,
-                        self.provenance(),
-                        Some(user.id),
-                        "user.role_sync_oidc",
-                        "user",
-                        &user.id.to_string(),
-                        now,
-                    )
-                    .await?;
-                    if retired > 0 {
-                        insert_audit(
-                            &mut transaction,
-                            self.provenance(),
-                            Some(user.id),
-                            "invitation.revoke_for_oidc_role_change",
-                            "user",
-                            &user.id.to_string(),
-                            now,
-                        )
-                        .await?;
-                    }
-                    insert_audit(
-                        &mut transaction,
-                        self.provenance(),
-                        Some(user.id),
-                        "session.revoke_for_oidc_role_change",
-                        "user",
-                        &user.id.to_string(),
-                        now,
-                    )
-                    .await?;
-                    user.role = mapped_role;
-                }
-            }
-            (user, security_version)
+            self.sync_linked_oidc_user(&mut transaction, &input, row, now)
+                .await?
         } else {
-            let role = input
-                .provisioning_role
-                .ok_or(OidcError::ProvisioningDenied)?;
-            let email = normalize_email(input.email.ok_or(OidcError::ProvisioningDenied)?)?;
-            lock_email(&mut transaction, &email).await?;
-            let collision: bool = sqlx::query_scalar!(
-                "SELECT EXISTS (SELECT 1 FROM users WHERE email = $1) AS \"value!\"",
-                &email
-            )
-            .fetch_one(&mut *transaction)
-            .await?;
-            if collision {
-                return Err(OidcError::LinkRequired);
-            }
-            let user_id = Uuid::now_v7();
-            let display_name = normalize_display_name(input.display_name, &email);
-            sqlx::query!(
-                "INSERT INTO users \
-                 (id, email, display_name, password_hash, role, active, etag, created_at, updated_at) \
-                 VALUES ($1, $2, $3, NULL, CAST($4::text AS user_role), true, $5, $6, $6)",
-            user_id, &email, &display_name, role.as_str(), Uuid::now_v7(), now)
-            .execute(&mut *transaction)
-            .await?;
-            sqlx::query!(
-                "INSERT INTO oidc_identities \
-                 (issuer, subject, user_id, email_at_link, last_login_at, created_at) \
-                 VALUES ($1, $2, $3, $4, $5, $5)",
-                input.issuer,
-                input.subject,
-                user_id,
-                &email,
-                now
-            )
-            .execute(&mut *transaction)
-            .await?;
-            insert_audit(
-                &mut transaction,
-                self.provenance(),
-                Some(user_id),
-                "user.create_oidc",
-                "user",
-                &user_id.to_string(),
-                now,
-            )
-            .await?;
-            (
-                OidcAuthenticatedUser {
-                    id: user_id,
-                    email,
-                    display_name,
-                    role,
-                },
-                1,
-            )
+            self.provision_oidc_user(&mut transaction, &input, now)
+                .await?
         };
 
         sqlx::query!(
@@ -192,28 +74,192 @@ impl Store {
             now,
         )
         .await?;
-        insert_audit(
-            &mut transaction,
-            self.provenance(),
-            Some(user.id),
-            "session.create",
-            "session",
-            &session_id.to_string(),
-            now,
+        record_audit_event(
+            &mut *transaction,
+            AuditEvent {
+                provenance: self.provenance(),
+                actor: Some(user.id),
+                action: "session.create",
+                resource_type: "session",
+                resource_id: Some(&session_id.to_string()),
+                outcome: "success",
+                occurred_at: Some(now),
+            },
         )
         .await?;
-        insert_audit(
-            &mut transaction,
-            self.provenance(),
-            Some(user.id),
-            "oidc.login",
-            "session",
-            &session_id.to_string(),
-            now,
+        record_audit_event(
+            &mut *transaction,
+            AuditEvent {
+                provenance: self.provenance(),
+                actor: Some(user.id),
+                action: "oidc.login",
+                resource_type: "session",
+                resource_id: Some(&session_id.to_string()),
+                outcome: "success",
+                occurred_at: Some(now),
+            },
         )
         .await?;
         transaction.commit().await?;
         Ok(user)
+    }
+
+    async fn sync_linked_oidc_user(
+        &self,
+        transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        input: &CompleteOidcLogin<'_>,
+        row: LinkedLoginRow,
+        now: chrono::DateTime<Utc>,
+    ) -> Result<(OidcAuthenticatedUser, i64), OidcError> {
+        if !row.active {
+            return Err(OidcError::InactiveUser);
+        }
+        let mut user = authenticated_user_from_row(row.authenticated())?;
+        let mut security_version: i64 = row.security_version;
+        if row.oidc_only {
+            let mapped_role = input
+                .provisioning_role
+                .ok_or(OidcError::ProvisioningDenied)?;
+            if user.role != mapped_role {
+                security_version = sqlx::query_scalar!(
+                    "UPDATE users SET role = CAST($2::text AS user_role), \
+                         security_version = security_version + 1, etag = $3, updated_at = $4 \
+                     WHERE id = $1 RETURNING security_version",
+                    user.id,
+                    mapped_role.as_str(),
+                    Uuid::now_v7(),
+                    now
+                )
+                .fetch_one(&mut **transaction)
+                .await?;
+                let _revoked = revoke_user_sessions(&mut *transaction, user.id).await?;
+                // A pending invitation is an out-of-band grant. The sync
+                // revoked this user's sessions; the tokens they minted
+                // while they still held ManageAccess must go with them.
+                let retired = retire_invitations_on_access_loss(
+                    &mut *transaction,
+                    user.id,
+                    mapped_role,
+                    true,
+                    user.id,
+                )
+                .await?;
+                record_audit_event(
+                    &mut **transaction,
+                    AuditEvent {
+                        provenance: self.provenance(),
+                        actor: Some(user.id),
+                        action: "user.role_sync_oidc",
+                        resource_type: "user",
+                        resource_id: Some(&user.id.to_string()),
+                        outcome: "success",
+                        occurred_at: Some(now),
+                    },
+                )
+                .await?;
+                if retired > 0 {
+                    record_audit_event(
+                        &mut **transaction,
+                        AuditEvent {
+                            provenance: self.provenance(),
+                            actor: Some(user.id),
+                            action: "invitation.revoke_for_oidc_role_change",
+                            resource_type: "user",
+                            resource_id: Some(&user.id.to_string()),
+                            outcome: "success",
+                            occurred_at: Some(now),
+                        },
+                    )
+                    .await?;
+                }
+                record_audit_event(
+                    &mut **transaction,
+                    AuditEvent {
+                        provenance: self.provenance(),
+                        actor: Some(user.id),
+                        action: "session.revoke_for_oidc_role_change",
+                        resource_type: "user",
+                        resource_id: Some(&user.id.to_string()),
+                        outcome: "success",
+                        occurred_at: Some(now),
+                    },
+                )
+                .await?;
+                user.role = mapped_role;
+            }
+        }
+        Ok((user, security_version))
+    }
+
+    async fn provision_oidc_user(
+        &self,
+        transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        input: &CompleteOidcLogin<'_>,
+        now: chrono::DateTime<Utc>,
+    ) -> Result<(OidcAuthenticatedUser, i64), OidcError> {
+        let role = input
+            .provisioning_role
+            .ok_or(OidcError::ProvisioningDenied)?;
+        let email = normalize_email(input.email.ok_or(OidcError::ProvisioningDenied)?)?;
+        lock_email(&mut *transaction, &email).await?;
+        let collision: bool = sqlx::query_scalar!(
+            "SELECT EXISTS (SELECT 1 FROM users WHERE email = $1) AS \"value!\"",
+            &email
+        )
+        .fetch_one(&mut **transaction)
+        .await?;
+        if collision {
+            return Err(OidcError::LinkRequired);
+        }
+        let user_id = Uuid::now_v7();
+        let display_name = normalize_display_name(input.display_name, &email);
+        sqlx::query!(
+            "INSERT INTO users \
+             (id, email, display_name, password_hash, role, active, etag, created_at, updated_at) \
+             VALUES ($1, $2, $3, NULL, CAST($4::text AS user_role), true, $5, $6, $6)",
+            user_id,
+            &email,
+            &display_name,
+            role.as_str(),
+            Uuid::now_v7(),
+            now
+        )
+        .execute(&mut **transaction)
+        .await?;
+        sqlx::query!(
+            "INSERT INTO oidc_identities \
+             (issuer, subject, user_id, email_at_link, last_login_at, created_at) \
+             VALUES ($1, $2, $3, $4, $5, $5)",
+            input.issuer,
+            input.subject,
+            user_id,
+            &email,
+            now
+        )
+        .execute(&mut **transaction)
+        .await?;
+        record_audit_event(
+            &mut **transaction,
+            AuditEvent {
+                provenance: self.provenance(),
+                actor: Some(user_id),
+                action: "user.create_oidc",
+                resource_type: "user",
+                resource_id: Some(&user_id.to_string()),
+                outcome: "success",
+                occurred_at: Some(now),
+            },
+        )
+        .await?;
+        Ok((
+            OidcAuthenticatedUser {
+                id: user_id,
+                email,
+                display_name,
+                role,
+            },
+            1,
+        ))
     }
 
     pub async fn complete_oidc_link(
@@ -338,44 +384,56 @@ impl Store {
             now,
         )
         .await?;
-        insert_audit(
-            &mut transaction,
-            self.provenance(),
-            Some(input.user_id),
-            "oidc.identity_link",
-            "user",
-            &input.user_id.to_string(),
-            now,
+        record_audit_event(
+            &mut *transaction,
+            AuditEvent {
+                provenance: self.provenance(),
+                actor: Some(input.user_id),
+                action: "oidc.identity_link",
+                resource_type: "user",
+                resource_id: Some(&input.user_id.to_string()),
+                outcome: "success",
+                occurred_at: Some(now),
+            },
         )
         .await?;
-        insert_audit(
-            &mut transaction,
-            self.provenance(),
-            Some(input.user_id),
-            "user.authentication_method_change",
-            "user",
-            &input.user_id.to_string(),
-            now,
+        record_audit_event(
+            &mut *transaction,
+            AuditEvent {
+                provenance: self.provenance(),
+                actor: Some(input.user_id),
+                action: "user.authentication_method_change",
+                resource_type: "user",
+                resource_id: Some(&input.user_id.to_string()),
+                outcome: "success",
+                occurred_at: Some(now),
+            },
         )
         .await?;
-        insert_audit(
-            &mut transaction,
-            self.provenance(),
-            Some(input.user_id),
-            "session.revoke_for_oidc_link",
-            "user",
-            &input.user_id.to_string(),
-            now,
+        record_audit_event(
+            &mut *transaction,
+            AuditEvent {
+                provenance: self.provenance(),
+                actor: Some(input.user_id),
+                action: "session.revoke_for_oidc_link",
+                resource_type: "user",
+                resource_id: Some(&input.user_id.to_string()),
+                outcome: "success",
+                occurred_at: Some(now),
+            },
         )
         .await?;
-        insert_audit(
-            &mut transaction,
-            self.provenance(),
-            Some(input.user_id),
-            "session.rotate_for_oidc_link",
-            "session",
-            &session_id.to_string(),
-            now,
+        record_audit_event(
+            &mut *transaction,
+            AuditEvent {
+                provenance: self.provenance(),
+                actor: Some(input.user_id),
+                action: "session.rotate_for_oidc_link",
+                resource_type: "session",
+                resource_id: Some(&session_id.to_string()),
+                outcome: "success",
+                occurred_at: Some(now),
+            },
         )
         .await?;
         transaction.commit().await?;
@@ -580,44 +638,56 @@ impl Store {
             now,
         )
         .await?;
-        insert_audit(
-            &mut transaction,
-            self.provenance(),
-            Some(input.user_id),
-            "oidc.identity_unlink",
-            "oidc_identity",
-            &input.identity_id.to_string(),
-            now,
+        record_audit_event(
+            &mut *transaction,
+            AuditEvent {
+                provenance: self.provenance(),
+                actor: Some(input.user_id),
+                action: "oidc.identity_unlink",
+                resource_type: "oidc_identity",
+                resource_id: Some(&input.identity_id.to_string()),
+                outcome: "success",
+                occurred_at: Some(now),
+            },
         )
         .await?;
-        insert_audit(
-            &mut transaction,
-            self.provenance(),
-            Some(input.user_id),
-            "user.authentication_method_change",
-            "user",
-            &input.user_id.to_string(),
-            now,
+        record_audit_event(
+            &mut *transaction,
+            AuditEvent {
+                provenance: self.provenance(),
+                actor: Some(input.user_id),
+                action: "user.authentication_method_change",
+                resource_type: "user",
+                resource_id: Some(&input.user_id.to_string()),
+                outcome: "success",
+                occurred_at: Some(now),
+            },
         )
         .await?;
-        insert_audit(
-            &mut transaction,
-            self.provenance(),
-            Some(input.user_id),
-            "session.revoke_for_oidc_unlink",
-            "user",
-            &input.user_id.to_string(),
-            now,
+        record_audit_event(
+            &mut *transaction,
+            AuditEvent {
+                provenance: self.provenance(),
+                actor: Some(input.user_id),
+                action: "session.revoke_for_oidc_unlink",
+                resource_type: "user",
+                resource_id: Some(&input.user_id.to_string()),
+                outcome: "success",
+                occurred_at: Some(now),
+            },
         )
         .await?;
-        insert_audit(
-            &mut transaction,
-            self.provenance(),
-            Some(input.user_id),
-            "session.rotate_for_oidc_unlink",
-            "session",
-            &session_id.to_string(),
-            now,
+        record_audit_event(
+            &mut *transaction,
+            AuditEvent {
+                provenance: self.provenance(),
+                actor: Some(input.user_id),
+                action: "session.rotate_for_oidc_unlink",
+                resource_type: "session",
+                resource_id: Some(&session_id.to_string()),
+                outcome: "success",
+                occurred_at: Some(now),
+            },
         )
         .await?;
         transaction.commit().await?;

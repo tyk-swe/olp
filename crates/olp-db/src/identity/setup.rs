@@ -2,6 +2,7 @@ use chrono::Utc;
 use uuid::Uuid;
 
 use crate::{
+    audit_events::{AuditEvent, record_audit_event},
     authentication::{insert_versioned_session, sessions::checked_session_expiry},
     error::Error,
     security::session_material::SessionMaterial,
@@ -112,19 +113,18 @@ impl Store {
             .await?;
         }
 
-        sqlx::query!(
-            "INSERT INTO audit_events \
-             (id, actor_user_id, action, resource_type, resource_id, outcome, occurred_at, \
-              source_ip, user_agent_family) \
-             VALUES ($1, $2, 'installation.setup', 'installation', 'singleton', 'success', $3, \
-              $4::text::inet, $5)",
-            Uuid::now_v7(),
-            user_id,
-            now,
-            self.provenance().source_ip_text(),
-            self.provenance().user_agent_family()
+        record_audit_event(
+            &mut *transaction,
+            AuditEvent {
+                provenance: self.provenance(),
+                actor: Some(user_id),
+                action: "installation.setup",
+                resource_type: "installation",
+                resource_id: Some("singleton"),
+                outcome: "success",
+                occurred_at: Some(now),
+            },
         )
-        .execute(&mut *transaction)
         .await?;
 
         let session_id = if let Some((material, ttl)) = session {
@@ -132,20 +132,18 @@ impl Store {
             let session_id =
                 insert_versioned_session(&mut transaction, user_id, 1, material, expires_at, now)
                     .await?;
-            sqlx::query!(
-                "INSERT INTO audit_events \
-                 (id, actor_user_id, action, resource_type, resource_id, outcome, occurred_at, \
-                  source_ip, user_agent_family) \
-                 VALUES ($1, $2, 'session.create', 'session', $3, 'success', $4, \
-                  $5::text::inet, $6)",
-                Uuid::now_v7(),
-                user_id,
-                session_id.to_string(),
-                now,
-                self.provenance().source_ip_text(),
-                self.provenance().user_agent_family()
+            record_audit_event(
+                &mut *transaction,
+                AuditEvent {
+                    provenance: self.provenance(),
+                    actor: Some(user_id),
+                    action: "session.create",
+                    resource_type: "session",
+                    resource_id: Some(&session_id.to_string()),
+                    outcome: "success",
+                    occurred_at: Some(now),
+                },
             )
-            .execute(&mut *transaction)
             .await?;
             Some(session_id)
         } else {

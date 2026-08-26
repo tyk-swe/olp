@@ -9,6 +9,7 @@ use thiserror::Error;
 use uuid::Uuid;
 
 use crate::{
+    audit_events::{AuditEvent, record_audit_event},
     error::Error as PersistenceError,
     idempotency::{
         Outcome, Replayable, ReplayableIdempotencyClaim, Response, claim_idempotency,
@@ -207,18 +208,18 @@ impl Store {
             .execute(&mut *transaction)
             .await?;
         }
-        sqlx::query!(
-            "INSERT INTO audit_events \
-             (id, actor_user_id, action, resource_type, resource_id, outcome, \
-              source_ip, user_agent_family) \
-             VALUES ($1, $2, 'api_key.create', 'api_key', $3, 'success', $4::text::inet, $5)",
-            Uuid::now_v7(),
-            key.actor,
-            id.to_string(),
-            self.provenance().source_ip_text(),
-            self.provenance().user_agent_family()
+        record_audit_event(
+            &mut *transaction,
+            AuditEvent {
+                provenance: self.provenance(),
+                actor: Some(key.actor),
+                action: "api_key.create",
+                resource_type: "api_key",
+                resource_id: Some(&id.to_string()),
+                outcome: "success",
+                occurred_at: None,
+            },
         )
-        .execute(&mut *transaction)
         .await?;
         let release =
             compile_and_publish_runtime_in_transaction(&mut transaction, key.actor).await?;
@@ -287,18 +288,18 @@ impl Store {
             &id.to_string(),
         )
         .await?;
-        sqlx::query!(
-            "INSERT INTO audit_events \
-             (id, actor_user_id, action, resource_type, resource_id, outcome, \
-              source_ip, user_agent_family) \
-             VALUES ($1, $2, 'api_key.revoke', 'api_key', $3, 'success', $4::text::inet, $5)",
-            Uuid::now_v7(),
-            actor,
-            id.to_string(),
-            self.provenance().source_ip_text(),
-            self.provenance().user_agent_family()
+        record_audit_event(
+            &mut *transaction,
+            AuditEvent {
+                provenance: self.provenance(),
+                actor: Some(actor),
+                action: "api_key.revoke",
+                resource_type: "api_key",
+                resource_id: Some(&id.to_string()),
+                outcome: "success",
+                occurred_at: None,
+            },
         )
-        .execute(&mut *transaction)
         .await?;
         let release = compile_and_publish_runtime_in_transaction(&mut transaction, actor).await?;
         transaction.commit().await?;

@@ -1,4 +1,5 @@
-use super::{helpers::audit_in_transaction, *};
+use super::*;
+use crate::audit_events::{AuditEvent, record_audit_event};
 
 impl Store {
     /// Returns the next candidate version without enforcing an HTTP
@@ -127,14 +128,17 @@ impl Store {
         )
         .execute(&mut *transaction)
         .await?;
-        audit_in_transaction(
-            &mut transaction,
-            self.provenance(),
-            input.actor,
-            "provider.rotate_credential",
-            "provider",
-            provider_id,
-            "success",
+        record_audit_event(
+            &mut *transaction,
+            AuditEvent {
+                provenance: self.provenance(),
+                actor: Some(input.actor),
+                action: "provider.rotate_credential",
+                resource_type: "provider",
+                resource_id: Some(&provider_id.to_string()),
+                outcome: "success",
+                occurred_at: None,
+            },
         )
         .await?;
         let result = ProviderMutationResult {
@@ -329,14 +333,17 @@ impl Store {
         )
         .execute(&mut *transaction)
         .await?;
-        audit_in_transaction(
-            &mut transaction,
-            self.provenance(),
-            actor,
-            "provider.revoke_credential",
-            "provider",
-            provider_id,
-            "success",
+        record_audit_event(
+            &mut *transaction,
+            AuditEvent {
+                provenance: self.provenance(),
+                actor: Some(actor),
+                action: "provider.revoke_credential",
+                resource_type: "provider",
+                resource_id: Some(&provider_id.to_string()),
+                outcome: "success",
+                occurred_at: None,
+            },
         )
         .await?;
         complete_idempotency(

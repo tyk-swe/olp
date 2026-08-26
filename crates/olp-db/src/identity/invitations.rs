@@ -4,6 +4,7 @@ use sqlx::FromRow;
 use uuid::Uuid;
 
 use crate::{
+    audit_events::{AuditEvent, record_audit_event},
     authentication::insert_versioned_session,
     error::Error as PersistenceError,
     idempotency::{
@@ -17,7 +18,7 @@ use crate::{
 
 use super::{
     AcceptInvitation, AcceptedInvitation, Error, InvitationCreated, InvitationRecord,
-    NewInvitation, accounts::UserRow, insert_audit, parse_role,
+    NewInvitation, accounts::UserRow, parse_role,
 };
 
 const MAX_PAGE_SIZE: i64 = 100;
@@ -129,13 +130,17 @@ impl Store {
             }
             Err(error) => return Err(error.into()),
         };
-        insert_audit(
-            &mut transaction,
-            self.provenance(),
-            invitation.actor,
-            "invitation.create",
-            "invitation",
-            &id.to_string(),
+        record_audit_event(
+            &mut *transaction,
+            AuditEvent {
+                provenance: self.provenance(),
+                actor: Some(invitation.actor),
+                action: "invitation.create",
+                resource_type: "invitation",
+                resource_id: Some(&id.to_string()),
+                outcome: "success",
+                occurred_at: None,
+            },
         )
         .await?;
         let created = InvitationCreated {
@@ -227,13 +232,17 @@ impl Store {
         .fetch_optional(&mut *transaction)
         .await?
         .ok_or(Error::InvitationUnavailable)?;
-        insert_audit(
-            &mut transaction,
-            self.provenance(),
-            actor,
-            "invitation.revoke",
-            "invitation",
-            &id.to_string(),
+        record_audit_event(
+            &mut *transaction,
+            AuditEvent {
+                provenance: self.provenance(),
+                actor: Some(actor),
+                action: "invitation.revoke",
+                resource_type: "invitation",
+                resource_id: Some(&id.to_string()),
+                outcome: "success",
+                occurred_at: None,
+            },
         )
         .await?;
         complete_idempotency(
@@ -339,22 +348,30 @@ impl Store {
         if updated.rows_affected() != 1 {
             return Err(Error::InvitationUnavailable);
         }
-        insert_audit(
-            &mut transaction,
-            self.provenance(),
-            user_id,
-            "invitation.accept",
-            "invitation",
-            &invitation_id.to_string(),
+        record_audit_event(
+            &mut *transaction,
+            AuditEvent {
+                provenance: self.provenance(),
+                actor: Some(user_id),
+                action: "invitation.accept",
+                resource_type: "invitation",
+                resource_id: Some(&invitation_id.to_string()),
+                outcome: "success",
+                occurred_at: None,
+            },
         )
         .await?;
-        insert_audit(
-            &mut transaction,
-            self.provenance(),
-            user_id,
-            "user.create",
-            "user",
-            &user_id.to_string(),
+        record_audit_event(
+            &mut *transaction,
+            AuditEvent {
+                provenance: self.provenance(),
+                actor: Some(user_id),
+                action: "user.create",
+                resource_type: "user",
+                resource_id: Some(&user_id.to_string()),
+                outcome: "success",
+                occurred_at: None,
+            },
         )
         .await?;
         let session_id = insert_versioned_session(
@@ -366,13 +383,17 @@ impl Store {
             now,
         )
         .await?;
-        insert_audit(
-            &mut transaction,
-            self.provenance(),
-            user_id,
-            "session.create",
-            "session",
-            &session_id.to_string(),
+        record_audit_event(
+            &mut *transaction,
+            AuditEvent {
+                provenance: self.provenance(),
+                actor: Some(user_id),
+                action: "session.create",
+                resource_type: "session",
+                resource_id: Some(&session_id.to_string()),
+                outcome: "success",
+                occurred_at: None,
+            },
         )
         .await?;
         transaction.commit().await?;

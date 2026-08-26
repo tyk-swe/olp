@@ -5,6 +5,7 @@ use sqlx::{Postgres, Transaction};
 use uuid::Uuid;
 
 use crate::{
+    audit_events::{AuditEvent, record_audit_event},
     error::Error,
     security::session_material::{RecentAuthMaterial, SessionMaterial},
     store::{RequestProvenance, Store},
@@ -213,14 +214,17 @@ pub(crate) async fn install_recent_authentication(
     .await?
     .rows_affected();
     if updated == 1 {
-        insert_security_audit(
-            transaction,
-            provenance,
-            context.user_id,
-            purpose.audit_action(),
-            "session",
-            &context.session_id.to_string(),
-            now,
+        record_audit_event(
+            &mut **transaction,
+            AuditEvent {
+                provenance,
+                actor: Some(context.user_id),
+                action: purpose.audit_action(),
+                resource_type: "session",
+                resource_id: Some(&context.session_id.to_string()),
+                outcome: "success",
+                occurred_at: Some(now),
+            },
         )
         .await?;
         Ok(true)
@@ -306,34 +310,6 @@ pub(crate) async fn revoke_user_sessions(
             .await?
             .rows_affected(),
     )
-}
-
-pub(crate) async fn insert_security_audit(
-    transaction: &mut Transaction<'_, Postgres>,
-    provenance: &RequestProvenance,
-    actor_user_id: Uuid,
-    action: &str,
-    resource_type: &str,
-    resource_id: &str,
-    occurred_at: DateTime<Utc>,
-) -> Result<(), sqlx::Error> {
-    sqlx::query!(
-        "INSERT INTO audit_events \
-         (id, actor_user_id, action, resource_type, resource_id, outcome, occurred_at, \
-          source_ip, user_agent_family) \
-         VALUES ($1, $2, $3, $4, $5, 'success', $6, $7::text::inet, $8)",
-        Uuid::now_v7(),
-        actor_user_id,
-        action,
-        resource_type,
-        resource_id,
-        occurred_at,
-        provenance.source_ip_text(),
-        provenance.user_agent_family()
-    )
-    .execute(&mut **transaction)
-    .await?;
-    Ok(())
 }
 
 #[cfg(test)]

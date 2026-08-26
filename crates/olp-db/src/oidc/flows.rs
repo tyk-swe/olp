@@ -4,7 +4,8 @@ use uuid::Uuid;
 use super::helpers::{encrypted_from_row, require_current_enabled_configuration};
 use super::types::{NewOidcFlow, OidcError, OidcFlowPurpose, OidcFlowRecord};
 use crate::{
-    authentication::{RecentAuthPurpose, consume_recent_authentication, insert_security_audit},
+    audit_events::{AuditEvent, record_audit_event},
+    authentication::{RecentAuthPurpose, consume_recent_authentication},
     security::session_material::token_digest,
     store::Store,
 };
@@ -93,14 +94,17 @@ impl Store {
                 {
                     return Err(OidcError::RecentAuthenticationRequired);
                 }
-                insert_security_audit(
-                    &mut transaction,
-                    self.provenance(),
-                    actor_user_id,
-                    "authentication.recent_consume_for_oidc_link",
-                    "session",
-                    &actor_session_id.to_string(),
-                    Utc::now(),
+                record_audit_event(
+                    &mut *transaction,
+                    AuditEvent {
+                        provenance: self.provenance(),
+                        actor: Some(actor_user_id),
+                        action: "authentication.recent_consume_for_oidc_link",
+                        resource_type: "session",
+                        resource_id: Some(&actor_session_id.to_string()),
+                        outcome: "success",
+                        occurred_at: Some(Utc::now()),
+                    },
                 )
                 .await?;
             }

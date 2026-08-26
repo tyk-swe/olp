@@ -4,6 +4,7 @@
 //! does not expose SQLx types through the core ports.
 
 pub mod access;
+pub(crate) mod audit_events;
 pub mod authentication;
 pub mod configuration;
 pub mod error;

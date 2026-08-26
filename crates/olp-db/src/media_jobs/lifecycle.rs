@@ -4,7 +4,7 @@ use crate::store::Store;
 
 use super::{
     MediaJobError, MediaJobLifecycle, MediaJobRecord, MediaJobState, MediaJobUpdate,
-    NewMediaJobReservation,
+    NewMediaJobReservation, POLL_GATE_SECONDS,
     queries::{MediaJobRow, media_job_from_row},
 };
 
@@ -250,12 +250,15 @@ impl Store {
                 expires_at = COALESCE($5, expires_at),
                 error_class = COALESCE($6, error_class),
                 last_polled_at = $7,
-                -- A client polling faster than the reconciler's 5s poll gate
+                -- A client polling faster than the reconciler's poll gate
                 -- keeps the job unclaimable. Carry next_reconciliation_at past
                 -- that gate too, or the job reads as reconciliation-stale while
                 -- it is in fact healthy and being watched.
                 next_reconciliation_at =
-                    GREATEST(next_reconciliation_at, $7::timestamptz + interval '5 seconds'),
+                    GREATEST(
+                        next_reconciliation_at,
+                        $7::timestamptz + $8::int * interval '1 second'
+                    ),
                 etag = uuidv7()
              WHERE id = $1",
             id,
@@ -264,7 +267,8 @@ impl Store {
             update.content_available,
             update.expires_at,
             update.error_class,
-            update.last_polled_at
+            update.last_polled_at,
+            POLL_GATE_SECONDS
         )
         .execute(&mut *transaction)
         .await?;

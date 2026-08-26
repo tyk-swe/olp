@@ -2,6 +2,7 @@ use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
 use super::cursor::Error;
+use crate::audit_events::{AuditEvent, record_audit_event};
 use crate::store::Store;
 
 #[derive(Clone, Debug)]
@@ -85,19 +86,18 @@ impl Store {
                 Error::NotFound
             });
         };
-        sqlx::query!(
-            "INSERT INTO audit_events \
-             (id, actor_user_id, action, resource_type, resource_id, outcome, occurred_at, \
-              source_ip, user_agent_family) \
-             VALUES ($1, $2, 'setting.update', 'setting', $3, 'success', $4, $5::text::inet, $6)",
-            Uuid::now_v7(),
-            actor,
-            key,
-            now,
-            self.provenance().source_ip_text(),
-            self.provenance().user_agent_family()
+        record_audit_event(
+            &mut *transaction,
+            AuditEvent {
+                provenance: self.provenance(),
+                actor: Some(actor),
+                action: "setting.update",
+                resource_type: "setting",
+                resource_id: Some(key),
+                outcome: "success",
+                occurred_at: Some(now),
+            },
         )
-        .execute(&mut *transaction)
         .await?;
         transaction.commit().await?;
         Ok(SettingRecord {

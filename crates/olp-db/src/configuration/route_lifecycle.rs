@@ -3,6 +3,7 @@ use sqlx::{Postgres, Transaction};
 use uuid::Uuid;
 
 use crate::{
+    audit_events::{AuditEvent, record_audit_event},
     error::Error as PersistenceError,
     idempotency::{
         Outcome, Replayable, ReplayableIdempotencyClaim, Response, claim_idempotency,
@@ -132,20 +133,18 @@ impl Store {
             .execute(&mut *transaction)
             .await?;
         }
-        sqlx::query!(
-            "INSERT INTO audit_events \
-             (id, actor_user_id, action, resource_type, resource_id, outcome, occurred_at, \
-              source_ip, user_agent_family) \
-             VALUES ($1, $2, 'route.create_draft', 'route_draft', $3, 'success', $4, \
-              $5::text::inet, $6)",
-            Uuid::now_v7(),
-            route.actor,
-            id.to_string(),
-            now,
-            self.provenance().source_ip_text(),
-            self.provenance().user_agent_family()
+        record_audit_event(
+            &mut *transaction,
+            AuditEvent {
+                provenance: self.provenance(),
+                actor: Some(route.actor),
+                action: "route.create_draft",
+                resource_type: "route_draft",
+                resource_id: Some(&id.to_string()),
+                outcome: "success",
+                occurred_at: Some(now),
+            },
         )
-        .execute(&mut *transaction)
         .await?;
         let created = RouteDraftCreated {
             id,
@@ -203,19 +202,18 @@ impl Store {
         }
         let slug =
             RouteSlug::parse(row.slug).map_err(|error| Error::InvalidRoute(error.to_string()))?;
-        sqlx::query!(
-            "INSERT INTO audit_events \
-             (id, actor_user_id, action, resource_type, resource_id, outcome, \
-              source_ip, user_agent_family) \
-             VALUES ($1, $2, 'route.validate_draft', 'route_draft', $3, 'success', \
-              $4::text::inet, $5)",
-            Uuid::now_v7(),
-            actor,
-            draft_id.to_string(),
-            self.provenance().source_ip_text(),
-            self.provenance().user_agent_family()
+        record_audit_event(
+            &mut *transaction,
+            AuditEvent {
+                provenance: self.provenance(),
+                actor: Some(actor),
+                action: "route.validate_draft",
+                resource_type: "route_draft",
+                resource_id: Some(&draft_id.to_string()),
+                outcome: "success",
+                occurred_at: None,
+            },
         )
-        .execute(&mut *transaction)
         .await?;
         transaction.commit().await?;
         Ok((etag, slug))
@@ -347,18 +345,18 @@ impl Store {
         if consumed.rows_affected() != 1 {
             return Err(Error::PreconditionFailed);
         }
-        sqlx::query!(
-            "INSERT INTO audit_events \
-             (id, actor_user_id, action, resource_type, resource_id, outcome, \
-              source_ip, user_agent_family) \
-             VALUES ($1, $2, 'route.activate', 'route', $3, 'success', $4::text::inet, $5)",
-            Uuid::now_v7(),
-            actor,
-            route_id.to_string(),
-            self.provenance().source_ip_text(),
-            self.provenance().user_agent_family()
+        record_audit_event(
+            &mut *transaction,
+            AuditEvent {
+                provenance: self.provenance(),
+                actor: Some(actor),
+                action: "route.activate",
+                resource_type: "route",
+                resource_id: Some(&route_id.to_string()),
+                outcome: "success",
+                occurred_at: None,
+            },
         )
-        .execute(&mut *transaction)
         .await?;
         complete_idempotency(
             &mut transaction,

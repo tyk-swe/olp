@@ -5,7 +5,7 @@ use uuid::Uuid;
 
 use super::configuration::OIDC_CONFIGURATION_LOCK_ID;
 use super::types::{OidcAuthenticatedUser, OidcError};
-use crate::{security::envelope::EncryptedSecret, store::RequestProvenance};
+use crate::security::envelope::EncryptedSecret;
 
 pub(super) fn encrypted_from_row(
     key_version: i32,
@@ -102,34 +102,6 @@ pub(super) async fn lock_subject(
         OIDC_CONFIGURATION_LOCK_ID ^ 0x5355_424a
     )
     .fetch_one(&mut **transaction)
-    .await?;
-    Ok(())
-}
-
-pub(super) async fn insert_audit(
-    transaction: &mut Transaction<'_, Postgres>,
-    provenance: &RequestProvenance,
-    actor_user_id: Option<Uuid>,
-    action: &str,
-    resource_type: &str,
-    resource_id: &str,
-    now: DateTime<chrono::Utc>,
-) -> Result<(), OidcError> {
-    sqlx::query!(
-        "INSERT INTO audit_events \
-         (id, actor_user_id, action, resource_type, resource_id, outcome, occurred_at, \
-          source_ip, user_agent_family) \
-         VALUES ($1, $2, $3, $4, $5, 'success', $6, $7::text::inet, $8)",
-        Uuid::now_v7(),
-        actor_user_id,
-        action,
-        resource_type,
-        resource_id,
-        now,
-        provenance.source_ip_text(),
-        provenance.user_agent_family()
-    )
-    .execute(&mut **transaction)
     .await?;
     Ok(())
 }
