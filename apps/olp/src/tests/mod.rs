@@ -49,7 +49,7 @@ use super::{
         router as observability_router,
     },
     public_http::problem::Problem,
-    public_http::proxy::public_auth_source,
+    public_http::proxy::{audit_request_provenance, public_auth_source},
     public_http::public_auth_routes::PublicAuthRoute,
     public_http::request_admission::{
         HTTP_INFERENCE_LIMITS_RESERVED, HTTP_INFERENCE_METADATA_CLAIMED, HTTP_INFERENCE_PRINCIPAL,

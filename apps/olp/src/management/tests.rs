@@ -30,8 +30,8 @@ use super::{
     },
     auth::{
         INVALID_LOGIN_RATE_LIMIT_TARGET, LoginRequest, SetupRequest, acquire_password_work,
-        csrf_recovery_cas_failure_response, local_login_rate_limit_target, logout,
-        password_work_concurrency, spawn_password_work, validate_setup,
+        csrf_recovery_cas_failure_response, installation_name, local_login_rate_limit_target,
+        logout, password_work_concurrency, spawn_password_work, validate_setup,
     },
     configuration::{
         api_keys::create::CreateApiKeyResponse, providers::create::CreateProviderRequest,
@@ -536,4 +536,23 @@ fn management_dto_debug_output_redacts_plaintext_secrets() {
     let output = format!("{acceptance:?}");
     assert!(!output.contains("sensitive-invitation-token"));
     assert!(!output.contains("sensitive-local-password"));
+}
+
+/// Every authenticated response carries the installation name, so the helper
+/// treats a missing installation row as a broken invariant rather than an
+/// absent optional value. Only a database can produce that state, so the arm
+/// is exercised against a migrated but unseeded schema.
+#[tokio::test]
+#[ignore = "requires OLP_TEST_DATABASE_ADMIN_URL and OLP_TEST_DATABASE_URL_PREFIX"]
+async fn installation_name_fails_when_the_installation_row_is_missing() {
+    let db = olp_db::test_support::TestDb::create_migrated("instname").await;
+    let store = db.store(1).await;
+    assert!(store.installation_name().await.unwrap().is_none());
+
+    let problem = installation_name(&store).await.unwrap_err();
+    assert_eq!(problem.status, StatusCode::INTERNAL_SERVER_ERROR.as_u16());
+    assert_eq!(
+        problem.problem_type.as_ref(),
+        "https://openllmproxy.dev/problems/internal_error"
+    );
 }

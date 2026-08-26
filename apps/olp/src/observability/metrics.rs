@@ -54,7 +54,7 @@ impl RequestMetadataLossCounters {
             .fetch_add(report.reported_abandoned, Ordering::Relaxed);
     }
 
-    fn totals(&self) -> (u64, u64, u64) {
+    pub(crate) fn totals(&self) -> (u64, u64, u64) {
         (
             self.0.events.load(Ordering::Relaxed),
             self.0.dropped.load(Ordering::Relaxed),
@@ -113,6 +113,51 @@ pub(super) async fn metrics(
         .into_response();
     attach_snapshot_freshness(&mut response, metrics_age, metrics_fresh);
     response
+}
+
+/// Renders the durably reported request metadata loss totals. All three series
+/// are always emitted, including at zero, so an absent line means the exporter
+/// itself is broken rather than that nothing was lost.
+fn append_request_metadata_loss_totals(
+    body: &mut String,
+    events: u64,
+    dropped: u64,
+    abandoned: u64,
+) {
+    body.push_str(
+        "# HELP olp_request_metadata_loss_reported_total Local buffer loss durably reported by the gateway checkpoint.\n\
+         # TYPE olp_request_metadata_loss_reported_total counter\n",
+    );
+    let _ = writeln!(
+        body,
+        "olp_request_metadata_loss_reported_total{{kind=\"events\"}} {events}\n\
+         olp_request_metadata_loss_reported_total{{kind=\"dropped\"}} {dropped}\n\
+         olp_request_metadata_loss_reported_total{{kind=\"abandoned\"}} {abandoned}"
+    );
+}
+
+/// Renders the local media spool gauges. A deployment without a spool has no
+/// capacity to report, and a missing series is deliberately different from a
+/// zero one: it says the spool is not configured at all.
+fn append_media_spool_metrics(
+    body: &mut String,
+    capacity_bytes: Option<u64>,
+    used_bytes: Option<u64>,
+) {
+    if let Some(capacity_bytes) = capacity_bytes {
+        body.push_str(
+            "# HELP olp_media_spool_capacity_bytes Configured capacity of the private local media spool.\n\
+             # TYPE olp_media_spool_capacity_bytes gauge\n",
+        );
+        let _ = writeln!(body, "olp_media_spool_capacity_bytes {capacity_bytes}");
+    }
+    if let Some(used_bytes) = used_bytes {
+        body.push_str(
+            "# HELP olp_media_spool_used_bytes Bytes currently reserved in the private local media spool.\n\
+             # TYPE olp_media_spool_used_bytes gauge\n",
+        );
+        let _ = writeln!(body, "olp_media_spool_used_bytes {used_bytes}");
+    }
 }
 
 pub(super) async fn collect_metrics(state: &ObservabilityState) -> String {
@@ -212,12 +257,7 @@ pub(super) async fn collect_metrics(state: &ObservabilityState) -> String {
          olp_media_reconciliation_unbound {}\n\
          # HELP olp_media_reconciliation_gaps_total Upstream media side effects that could not be durably recorded.\n\
          # TYPE olp_media_reconciliation_gaps_total counter\n\
-         olp_media_reconciliation_gaps_total {}\n\
-         # HELP olp_request_metadata_loss_reported_total Local buffer loss durably reported by the gateway checkpoint.\n\
-         # TYPE olp_request_metadata_loss_reported_total counter\n\
-         olp_request_metadata_loss_reported_total{{kind=\"events\"}} {}\n\
-         olp_request_metadata_loss_reported_total{{kind=\"dropped\"}} {}\n\
-         olp_request_metadata_loss_reported_total{{kind=\"abandoned\"}} {}\n",
+         olp_media_reconciliation_gaps_total {}\n",
         state.runtime().active_generation_ordinal().unwrap_or(0),
         request_metadata.map_or(0, |snapshot| snapshot.dropped),
         request_metadata.map_or(0, |snapshot| snapshot.abandoned),
@@ -251,24 +291,18 @@ pub(super) async fn collect_metrics(state: &ObservabilityState) -> String {
             .as_ref()
             .map_or(0, |value| value.unbound),
         state.media_reconciliation_gap_count(),
+    );
+    append_request_metadata_loss_totals(
+        &mut body,
         reported_loss_events,
         reported_loss_dropped,
         reported_loss_abandoned,
     );
-    if let Some(capacity_bytes) = state.media_spool().capacity_bytes() {
-        body.push_str(
-            "# HELP olp_media_spool_capacity_bytes Configured capacity of the private local media spool.\n\
-             # TYPE olp_media_spool_capacity_bytes gauge\n",
-        );
-        let _ = writeln!(body, "olp_media_spool_capacity_bytes {capacity_bytes}");
-    }
-    if let Some(used_bytes) = state.media_spool().used_bytes() {
-        body.push_str(
-            "# HELP olp_media_spool_used_bytes Bytes currently reserved in the private local media spool.\n\
-             # TYPE olp_media_spool_used_bytes gauge\n",
-        );
-        let _ = writeln!(body, "olp_media_spool_used_bytes {used_bytes}");
-    }
+    append_media_spool_metrics(
+        &mut body,
+        state.media_spool().capacity_bytes(),
+        state.media_spool().used_bytes(),
+    );
     append_async_worker_metrics(
         &mut body,
         now,
@@ -620,5 +654,35 @@ mod tests {
         });
 
         assert_eq!(counters.totals(), (7, 6, 1));
+    }
+
+    #[test]
+    fn every_loss_kind_is_rendered_even_at_zero() {
+        let mut body = String::new();
+        append_request_metadata_loss_totals(&mut body, 7, 6, 0);
+        assert!(body.contains("# TYPE olp_request_metadata_loss_reported_total counter\n"));
+        assert!(body.contains("olp_request_metadata_loss_reported_total{kind=\"events\"} 7\n"));
+        assert!(body.contains("olp_request_metadata_loss_reported_total{kind=\"dropped\"} 6\n"));
+        assert!(body.ends_with("olp_request_metadata_loss_reported_total{kind=\"abandoned\"} 0\n"));
+    }
+
+    #[test]
+    fn media_spool_gauges_appear_only_when_a_spool_is_configured() {
+        let mut configured = String::new();
+        append_media_spool_metrics(&mut configured, Some(4096), Some(1024));
+        assert!(configured.contains("# TYPE olp_media_spool_capacity_bytes gauge\n"));
+        assert!(configured.contains("olp_media_spool_capacity_bytes 4096\n"));
+        assert!(configured.contains("# TYPE olp_media_spool_used_bytes gauge\n"));
+        assert!(configured.contains("olp_media_spool_used_bytes 1024\n"));
+
+        let mut absent = String::new();
+        append_media_spool_metrics(&mut absent, None, None);
+        assert!(absent.is_empty());
+
+        // A spool that reports capacity but not usage must not fabricate a zero.
+        let mut partial = String::new();
+        append_media_spool_metrics(&mut partial, Some(4096), None);
+        assert!(partial.contains("olp_media_spool_capacity_bytes 4096\n"));
+        assert!(!partial.contains("olp_media_spool_used_bytes"));
     }
 }

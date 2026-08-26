@@ -86,11 +86,12 @@ pub(super) async fn authentication_capabilities(
     Ok(response)
 }
 
+/// Unauthenticated first-run probe. It deliberately carries nothing but the
+/// boolean: the installation name is an authenticated detail the console reads
+/// from `SessionResponse`.
 #[derive(Debug, Serialize, ToSchema)]
 pub(super) struct SetupStatus {
     pub setup_required: bool,
-    /// Name chosen during first-run setup; absent while setup is still required.
-    pub installation_name: Option<String>,
 }
 
 #[utoipa::path(
@@ -105,12 +106,12 @@ pub(super) struct SetupStatus {
 pub(super) async fn setup_status(
     State(state): State<ManagementState>,
 ) -> Result<Json<SetupStatus>, Problem> {
-    let store = state.store();
-    let installation_name = store.installation_name().await.map_err(map_persistence)?;
-    Ok(Json(SetupStatus {
-        setup_required: installation_name.is_none(),
-        installation_name,
-    }))
+    let setup_required = state
+        .store()
+        .setup_required()
+        .await
+        .map_err(map_persistence)?;
+    Ok(Json(SetupStatus { setup_required }))
 }
 
 #[derive(Deserialize, ToSchema)]

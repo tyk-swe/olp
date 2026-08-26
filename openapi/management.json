@@ -2161,10 +2161,12 @@
             "type": "string"
           },
           "error_codes": {
-            "$ref": "#/components/schemas/BTreeMap"
+            "$ref": "#/components/schemas/BTreeMap",
+            "description": "Machine-readable codes for the messages in `errors`, keyed by the same\nfield names and positionally aligned with them: `error_codes[field][i]`\nclassifies `errors[field][i]`. An empty string means that message\ncarries no code, so the two arrays for a field always have the same\nlength once the field appears here at all."
           },
           "errors": {
-            "$ref": "#/components/schemas/BTreeMap"
+            "$ref": "#/components/schemas/BTreeMap",
+            "description": "Human-readable validation messages, keyed by field name."
           },
           "instance": {
             "type": [
@@ -4555,14 +4557,8 @@
         "type": "object"
       },
       "SetupStatus": {
+        "description": "Unauthenticated first-run probe. It deliberately carries nothing but the\nboolean: the installation name is an authenticated detail the console reads\nfrom `SessionResponse`.",
         "properties": {
-          "installation_name": {
-            "description": "Name chosen during first-run setup; absent while setup is still required.",
-            "type": [
-              "string",
-              "null"
-            ]
-          },
           "setup_required": {
             "type": "boolean"
           }
@@ -5944,7 +5940,7 @@
                 }
               }
             },
-            "description": "Invalid cursor, page size, or time range"
+            "description": "Malformed query parameters, or an invalid cursor or page size"
           },
           "401": {
             "content": {
@@ -5965,6 +5961,16 @@
               }
             },
             "description": "The session lacks permission or mutation CSRF/origin checks failed."
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Invalid time range"
           },
           "500": {
             "content": {
@@ -6577,7 +6583,7 @@
                 }
               }
             },
-            "description": "Invalid cursor or filter"
+            "description": "Malformed query parameters, or an invalid cursor or page size"
           },
           "401": {
             "content": {
@@ -6598,6 +6604,16 @@
               }
             },
             "description": "Insufficient role"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Invalid filter value or time range"
           },
           "500": {
             "content": {

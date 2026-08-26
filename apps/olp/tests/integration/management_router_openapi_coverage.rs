@@ -5,7 +5,11 @@
 //! asserts a lower bound on what it recovered, because a parser that quietly
 //! matches nothing would pass forever.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    fs,
+    path::{Path, PathBuf},
+};
 
 use olp::management::openapi::document;
 
@@ -16,6 +20,21 @@ const ROUTER_SOURCES: [&str; 5] = [
     include_str!("../../src/management/operations.rs"),
     include_str!("../../src/management/playground.rs"),
 ];
+/// The same files as `ROUTER_SOURCES`, as paths, so the companion test below
+/// can compare the parsed set against what is actually on disk. The two arrays
+/// are checked against each other rather than trusted to stay in step.
+const ROUTER_SOURCE_PATHS: [&str; ROUTER_SOURCES.len()] = [
+    "src/management/mod.rs",
+    "src/management/configuration.rs",
+    "src/management/oidc.rs",
+    "src/management/operations.rs",
+    "src/management/playground.rs",
+];
+/// Comfortably below the routes the parser recovers today (well over a
+/// hundred) and far above what a broken parser would return, so the assertion
+/// catches a parser that has stopped matching without failing on every ordinary
+/// route addition or removal.
+const MINIMUM_RECOVERED_ROUTES: usize = 90;
 const PUBLIC_AUTH_ROUTES_SOURCE: &str = include_str!("../../src/public_http/public_auth_routes.rs");
 const HTTP_METHODS: [&str; 5] = ["get", "post", "put", "patch", "delete"];
 
@@ -23,7 +42,7 @@ const HTTP_METHODS: [&str; 5] = ["get", "post", "put", "patch", "delete"];
 fn every_mounted_management_route_is_documented_in_the_openapi_contract() {
     let mounted = mounted_routes();
     assert!(
-        mounted.len() >= 90,
+        mounted.len() >= MINIMUM_RECOVERED_ROUTES,
         "the router parser recovered only {} routes, so it has stopped \
          matching how the management router mounts them",
         mounted.len()
@@ -185,4 +204,67 @@ fn public_auth_route_paths() -> BTreeMap<&'static str, &'static str> {
         "no `PublicAuthRoute` paths were recovered from the source"
     );
     paths
+}
+
+/// `ROUTER_SOURCES` is a hand-maintained list, so a new management submodule
+/// that mounts its own routes would otherwise be silently excluded from the
+/// coverage assertion above — the routes would go undocumented and the test
+/// would still pass.
+#[test]
+fn every_management_source_that_mounts_routes_is_parsed() {
+    let crate_root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let mut parsed = BTreeSet::new();
+    for (relative, source) in ROUTER_SOURCE_PATHS.iter().zip(ROUTER_SOURCES) {
+        let path = crate_root.join(relative);
+        assert_eq!(
+            fs::read_to_string(&path).unwrap_or_else(|error| panic!(
+                "cannot read declared router source {}: {error}",
+                path.display()
+            )),
+            source,
+            "`ROUTER_SOURCE_PATHS` and `ROUTER_SOURCES` disagree about {relative}"
+        );
+        parsed.insert(path);
+    }
+
+    let unparsed: Vec<String> = rust_sources(&crate_root.join("src/management"))
+        .into_iter()
+        .filter(|path| !parsed.contains(path))
+        .filter(|path| {
+            fs::read_to_string(path)
+                .unwrap_or_default()
+                .contains(".route(")
+        })
+        .map(|path| {
+            path.strip_prefix(crate_root)
+                .unwrap_or(&path)
+                .display()
+                .to_string()
+        })
+        .collect();
+    assert!(
+        unparsed.is_empty(),
+        "these management sources mount routes the coverage parser never reads; \
+         add them to ROUTER_SOURCES and ROUTER_SOURCE_PATHS: {}",
+        unparsed.join(", ")
+    );
+}
+
+fn rust_sources(root: &Path) -> Vec<PathBuf> {
+    let mut pending = vec![root.to_path_buf()];
+    let mut sources = Vec::new();
+    while let Some(directory) = pending.pop() {
+        let entries = fs::read_dir(&directory)
+            .unwrap_or_else(|error| panic!("cannot walk {}: {error}", directory.display()));
+        for entry in entries {
+            let path = entry.expect("readable directory entry").path();
+            if path.is_dir() {
+                pending.push(path);
+            } else if path.extension().is_some_and(|extension| extension == "rs") {
+                sources.push(path);
+            }
+        }
+    }
+    sources.sort();
+    sources
 }

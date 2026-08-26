@@ -747,4 +747,24 @@ mod tests {
             }
         }
     }
+
+    #[test]
+    fn violation_code_wire_strings_are_pinned() {
+        // These strings cross the API boundary as `error_codes` values, so a
+        // rename here silently breaks every client that branches on them.
+        for (code, expected) in [
+            (
+                ProviderViolationCode::UnsupportedAuthMode,
+                "unsupported_auth_mode",
+            ),
+            (ProviderViolationCode::Required, "required"),
+            (ProviderViolationCode::Forbidden, "forbidden"),
+        ] {
+            assert_eq!(code.as_str(), expected);
+            assert_eq!(
+                serde_json::to_string(&code).unwrap(),
+                format!("\"{expected}\"")
+            );
+        }
+    }
 }

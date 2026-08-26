@@ -1,4 +1,7 @@
-use axum::http::StatusCode;
+use axum::{
+    extract::{Query, rejection::QueryRejection},
+    http::StatusCode,
+};
 use chrono::{DateTime, Utc};
 use olp_db::operations::cursor::{Error, Timestamp};
 use serde::Deserialize;
@@ -18,6 +21,29 @@ pub(super) struct PageQuery {
     /// Page size, from 1 to 200. Defaults to 50.
     #[param(minimum = 1, maximum = 200)]
     pub(super) limit: Option<u16>,
+}
+
+/// Turns Axum's typed-query rejection into a problem+json response so a
+/// malformed UUID, timestamp, or page size never escapes as a bare text/plain
+/// 400. The rejection's own message can quote the offending value, so the
+/// detail deliberately describes only the failure, never the input.
+pub(super) fn query_parameters<T>(query: Result<Query<T>, QueryRejection>) -> Result<T, Problem> {
+    query.map(|Query(value)| value).map_err(|_| {
+        Problem::bad_request(
+            "invalid_query_parameters",
+            "One or more query parameters are missing or malformed.",
+        )
+    })
+}
+
+/// Treats a blank or whitespace-only filter as absent. Console inputs submit an
+/// empty string when a filter is cleared, and an exact-match filter on "" would
+/// otherwise return nothing at all.
+pub(super) fn optional_filter(value: Option<&String>) -> Option<String> {
+    value
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
 }
 
 pub(super) fn timestamp_cursor(value: Option<&str>) -> Result<Option<Timestamp>, Problem> {

@@ -1830,7 +1830,15 @@ export interface components {
         };
         Problem: {
             detail: string;
+            /**
+             * @description Machine-readable codes for the messages in `errors`, keyed by the same
+             *     field names and positionally aligned with them: `error_codes[field][i]`
+             *     classifies `errors[field][i]`. An empty string means that message
+             *     carries no code, so the two arrays for a field always have the same
+             *     length once the field appears here at all.
+             */
             error_codes?: components["schemas"]["BTreeMap"];
+            /** @description Human-readable validation messages, keyed by field name. */
             errors?: components["schemas"]["BTreeMap"];
             instance?: string | null;
             /** Format: int32 */
@@ -2514,9 +2522,12 @@ export interface components {
             installation_name?: string;
             password: string;
         };
+        /**
+         * @description Unauthenticated first-run probe. It deliberately carries nothing but the
+         *     boolean: the installation name is an authenticated detail the console reads
+         *     from `SessionResponse`.
+         */
         SetupStatus: {
-            /** @description Name chosen during first-run setup; absent while setup is still required. */
-            installation_name?: string | null;
             setup_required: boolean;
         };
         SimulateRouteRequest: {
@@ -3191,7 +3202,7 @@ export interface operations {
                     "application/json": components["schemas"]["AuditListResponse"];
                 };
             };
-            /** @description Invalid cursor, page size, or time range */
+            /** @description Malformed query parameters, or an invalid cursor or page size */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -3211,6 +3222,15 @@ export interface operations {
             };
             /** @description The session lacks permission or mutation CSRF/origin checks failed. */
             403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Invalid time range */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -3637,7 +3657,7 @@ export interface operations {
                     "application/json": components["schemas"]["MediaJobListResponse"];
                 };
             };
-            /** @description Invalid cursor or filter */
+            /** @description Malformed query parameters, or an invalid cursor or page size */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -3657,6 +3677,15 @@ export interface operations {
             };
             /** @description Insufficient role */
             403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Invalid filter value or time range */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };

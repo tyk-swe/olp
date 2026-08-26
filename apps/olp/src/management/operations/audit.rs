@@ -1,6 +1,6 @@
 use axum::{
     Json,
-    extract::{Query, State},
+    extract::{Query, State, rejection::QueryRejection},
     http::HeaderMap,
 };
 use chrono::{DateTime, Utc};
@@ -10,7 +10,10 @@ use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
 use uuid::Uuid;
 
-use super::helpers::{map_operations, page_limit, timestamp_cursor};
+use super::helpers::{
+    map_operations, optional_filter, page_limit, query_parameters, timestamp_cursor,
+    validate_time_range,
+};
 use crate::{
     bootstrap::mode_dependencies::ManagementState,
     management::{permissions::require_permission, sessions::require_read_session},
@@ -79,20 +82,15 @@ pub(super) struct AuditQuery {
 
 impl AuditQuery {
     fn filters(&self) -> Result<Filters, Problem> {
-        if let (Some(after), Some(before)) = (self.occurred_after, self.occurred_before)
-            && after > before
-        {
-            return Err(Problem::bad_request(
-                "invalid_time_range",
-                "occurred_after must not be later than occurred_before.",
-            ));
+        if let (Some(after), Some(before)) = (self.occurred_after, self.occurred_before) {
+            validate_time_range("occurred_after", after, "occurred_before", before)?;
         }
         Ok(Filters {
-            action: self.action.clone(),
-            resource_type: self.resource_type.clone(),
-            resource_id: self.resource_id.clone(),
+            action: optional_filter(self.action.as_ref()),
+            resource_type: optional_filter(self.resource_type.as_ref()),
+            resource_id: optional_filter(self.resource_id.as_ref()),
             actor_user_id: self.actor_user_id,
-            outcome: self.outcome.clone(),
+            outcome: optional_filter(self.outcome.as_ref()),
             occurred_after: self.occurred_after,
             occurred_before: self.occurred_before,
         })
@@ -112,16 +110,18 @@ pub(super) struct AuditListResponse {
     params(AuditQuery),
     responses(
         (status = 200, description = "Audit page", body = AuditListResponse),
-        (status = 400, description = "Invalid cursor, page size, or time range", body = Problem)
+        (status = 400, description = "Malformed query parameters, or an invalid cursor or page size", body = Problem),
+        (status = 422, description = "Invalid time range", body = Problem)
     )
 )]
 pub(super) async fn list_audit_events(
     State(state): State<ManagementState>,
     headers: HeaderMap,
-    Query(query): Query<AuditQuery>,
+    query: Result<Query<AuditQuery>, QueryRejection>,
 ) -> Result<Json<AuditListResponse>, Problem> {
     let principal = require_read_session(&state, &headers).await?;
     require_permission(&principal, Permission::ReadOperations)?;
+    let query = query_parameters(query)?;
     let cursor = timestamp_cursor(query.cursor.as_deref())?;
     let limit = page_limit(query.limit)?;
     let filters = query.filters()?;
@@ -138,9 +138,10 @@ pub(super) async fn list_audit_events(
 
 #[cfg(test)]
 mod tests {
+    use axum::extract::Query;
     use chrono::{Duration, Utc};
 
-    use super::AuditQuery;
+    use super::{AuditQuery, query_parameters};
 
     fn query() -> AuditQuery {
         AuditQuery {
@@ -192,7 +193,7 @@ mod tests {
     }
 
     #[test]
-    fn an_inverted_time_range_is_rejected_as_a_bad_request() {
+    fn an_inverted_time_range_fails_field_validation() {
         let now = Utc::now();
         let problem = AuditQuery {
             occurred_after: Some(now),
@@ -201,23 +202,59 @@ mod tests {
         }
         .filters()
         .unwrap_err();
-        assert_eq!(problem.status, 400);
+        assert_eq!(problem.status, 422);
         assert_eq!(
-            problem.detail.as_ref(),
-            "occurred_after must not be later than occurred_before."
+            problem.errors.get("occurred_before"),
+            Some(&vec![
+                "occurred_before must be later than occurred_after.".to_owned()
+            ])
         );
     }
 
     #[test]
-    fn a_single_instant_range_is_accepted() {
+    fn a_single_instant_range_is_rejected_like_every_other_collection() {
         let now = Utc::now();
-        let filters = AuditQuery {
+        let problem = AuditQuery {
             occurred_after: Some(now),
             occurred_before: Some(now),
             ..query()
         }
         .filters()
+        .unwrap_err();
+        assert_eq!(problem.status, 422);
+    }
+
+    #[test]
+    fn blank_string_filters_are_treated_as_absent() {
+        let filters = AuditQuery {
+            action: Some(String::new()),
+            resource_type: Some("   ".to_owned()),
+            resource_id: Some("\t\n".to_owned()),
+            outcome: Some("  success  ".to_owned()),
+            ..query()
+        }
+        .filters()
         .unwrap();
-        assert_eq!(filters.occurred_after, filters.occurred_before);
+        assert!(filters.action.is_none());
+        assert!(filters.resource_type.is_none());
+        assert!(filters.resource_id.is_none());
+        assert_eq!(filters.outcome.as_deref(), Some("success"));
+    }
+
+    #[test]
+    fn a_malformed_query_parameter_becomes_a_problem() {
+        let rejection = Query::<AuditQuery>::try_from_uri(
+            &"http://olp.test/api/v1/audit?actor_user_id=not-a-uuid"
+                .parse()
+                .unwrap(),
+        )
+        .unwrap_err();
+        let problem = query_parameters::<AuditQuery>(Err(rejection)).unwrap_err();
+        assert_eq!(problem.status, 400);
+        assert_eq!(
+            problem.problem_type.as_ref(),
+            "https://openllmproxy.dev/problems/invalid_query_parameters"
+        );
+        assert!(!problem.detail.contains("not-a-uuid"));
     }
 }
