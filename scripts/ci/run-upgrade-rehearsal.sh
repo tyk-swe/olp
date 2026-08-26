@@ -73,7 +73,7 @@ OLP_DATABASE_URL="$OLP_REHEARSAL_SERVER_URL/olp_previous" \
   OLP_ALLOW_PARTIAL_MIGRATIONS_FOR_TESTS=test-only \
   "$OLP_BIN" migrate --through-version "$previous_version"
 psql "$OLP_REHEARSAL_SERVER_URL/olp_previous" -v ON_ERROR_STOP=1 \
-  -c "INSERT INTO usage_consumer_health \
+  -c "INSERT INTO request_metadata_consumer_health \
         (singleton, pending_events, lag_events, checked_at) \
       VALUES (true, 0, 0, now()) \
       ON CONFLICT (singleton) DO UPDATE SET \
@@ -81,7 +81,9 @@ psql "$OLP_REHEARSAL_SERVER_URL/olp_previous" -v ON_ERROR_STOP=1 \
 previous_backup=$(OLP_DATABASE_URL="$OLP_REHEARSAL_SERVER_URL/olp_previous" \
   OLP_BACKUP_TRAFFIC_QUIESCED=true \
   ./scripts/backup.sh "$scratch_dir/olp-previous-backups")
-./scripts/backup-manifest.sh validate "$previous_backup" v1 >/dev/null
+# Every supported N-1 release carries the post-0028 schema, so its backups
+# use the v2 manifest; a v1 manifest here means the baseline slid backwards.
+./scripts/backup-manifest.sh validate "$previous_backup" v2 >/dev/null
 
 doctor_root=$(mktemp -d)
 mkdir -p "$doctor_root/console" "$doctor_root/media"
