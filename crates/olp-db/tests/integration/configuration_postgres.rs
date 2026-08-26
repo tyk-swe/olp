@@ -21,6 +21,7 @@ use olp_engine::domain::{
 };
 use uuid::Uuid;
 
+mod disabled_guards;
 mod eligibility;
 mod lifecycle;
 

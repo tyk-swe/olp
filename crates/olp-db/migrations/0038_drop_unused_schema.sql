@@ -1,12 +1,22 @@
 -- Retire schema that no code path can reach any more.
 --
+-- Staged for a follow-up release: `oidc_authorization_flows.client_digest` is
+-- kept here. The 2.0.1 binary still names it in its flow INSERT, so a replica
+-- that is still running while this migration lands would fail closed on every
+-- authorization start. The column stays nullable and unwritten; it is dropped
+-- once no 2.0.1 replica can write it.
+--
 -- `probed` was a third capability source that nothing ever wrote: discovery and
 -- validation write `declared`, certification writes `certified`. Narrow both
 -- capability CHECK constraints to the two values that are actually stored.
+UPDATE model_capabilities SET source = 'declared' WHERE source = 'probed';
+
 ALTER TABLE model_capabilities
     DROP CONSTRAINT IF EXISTS model_capabilities_source_check,
     ADD CONSTRAINT model_capabilities_source_check
         CHECK (source IN ('declared', 'certified'));
+
+UPDATE provider_revision_capabilities SET source = 'declared' WHERE source = 'probed';
 
 ALTER TABLE provider_revision_capabilities
     DROP CONSTRAINT IF EXISTS provider_revision_capabilities_source_check,
@@ -33,14 +43,18 @@ DROP INDEX IF EXISTS transactional_outbox_pending_idx;
 
 -- The per-browser OIDC limiter is gone: login flows are no longer persisted and
 -- `client_digest` has been bound to NULL for every flow that is. Drop the
--- column, the constraints that mention it, and the indexes that served it.
+-- indexes that served the limiter and stop the security context from demanding
+-- a digest that nothing produces.
+--
+-- The column itself stays until every 2.0.1 replica is gone: 2.0.1 names it in
+-- its flow INSERT, so dropping it now would break authorization on any replica
+-- still serving during the rollout. Its length CHECK stays with it, so the
+-- digests those replicas still write are still validated.
 DROP INDEX IF EXISTS oidc_authorization_flows_login_rate_idx;
 DROP INDEX IF EXISTS oidc_authorization_flows_client_rate_idx;
 
 ALTER TABLE oidc_authorization_flows
-    DROP CONSTRAINT IF EXISTS oidc_authorization_flows_client_digest_length,
     DROP CONSTRAINT IF EXISTS oidc_authorization_flows_security_context,
-    DROP COLUMN IF EXISTS client_digest,
     ADD CONSTRAINT oidc_authorization_flows_security_context CHECK (
         (
             purpose = 'login'

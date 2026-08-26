@@ -55,6 +55,18 @@ async fn request_metadata_schema_rename_preserves_legacy_rows() {
     .execute(store.pool())
     .await
     .unwrap();
+    // The loss reporter's per-instance counters are dead weight - the crash-safe
+    // checkpoint is `request_metadata_gateway_epochs` - but the 2.0.1 binary
+    // still writes them, so the table survives the rename and this release.
+    sqlx::query(
+        "INSERT INTO usage_loss_reporter_state \
+         (gateway_instance, process_epoch, dropped, abandoned, updated_at) \
+         VALUES ('gateway-a', $1, 1, 0, now())",
+    )
+    .bind(process_epoch)
+    .execute(store.pool())
+    .await
+    .unwrap();
     sqlx::query(
         "INSERT INTO usage_gateway_epochs \
          (gateway_instance, process_epoch, started_at, accepted, persisted, dropped, \
@@ -74,7 +86,8 @@ async fn request_metadata_schema_rename_preserves_legacy_rows() {
          UNION ALL SELECT 'request_metadata_consumer_health', count(*) FROM request_metadata_consumer_health \
          UNION ALL SELECT 'request_metadata_gateway_epochs', count(*) FROM request_metadata_gateway_epochs \
          UNION ALL SELECT 'request_metadata_ingestion_gaps', count(*) FROM request_metadata_ingestion_gaps \
-         UNION ALL SELECT 'request_metadata_gap_hourly', count(*) FROM request_metadata_gap_hourly",
+         UNION ALL SELECT 'request_metadata_gap_hourly', count(*) FROM request_metadata_gap_hourly \
+         UNION ALL SELECT 'request_metadata_loss_reporter_state', count(*) FROM request_metadata_loss_reporter_state",
     )
     .fetch_all(store.pool())
     .await
@@ -156,7 +169,8 @@ async fn request_metadata_schema_rename_preserves_legacy_rows() {
              'request_metadata_consumer_health'::regclass, \
              'request_metadata_gateway_epochs'::regclass, \
              'request_metadata_ingestion_gaps'::regclass, \
-             'request_metadata_gap_hourly'::regclass)",
+             'request_metadata_gap_hourly'::regclass, \
+             'request_metadata_loss_reporter_state'::regclass)",
     )
     .fetch_one(store.pool())
     .await

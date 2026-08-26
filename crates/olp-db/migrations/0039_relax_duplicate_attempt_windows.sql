@@ -2,7 +2,11 @@
 -- meant to carry per-attempt latency attribution. Nothing ever read them: the
 -- request explorer serves the attempt window from `attempts.started_at` and
 -- `attempts.completed_at`, and the hourly rollup never carried either column.
--- Drop the duplicates.
+--
+-- Only the NOT NULL goes now. The ingestion INSERT stops naming both columns in
+-- this release, so they have to accept NULL; the 2.0.1 binary still supplies
+-- them, so they cannot be dropped until no 2.0.1 replica is left to write them.
+-- The columns themselves go in a follow-up release.
 --
 -- The rolling-upgrade mirror trigger writes them, so replace it first. Its
 -- remaining behaviour is unchanged.
@@ -136,8 +140,9 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- The `attempt_completed_at >= attempt_started_at` CHECK mentions only these
--- two columns, so PostgreSQL drops it with them.
+-- The `attempt_completed_at >= attempt_started_at` CHECK stays: it holds
+-- vacuously once either column is NULL, and still orders the windows that a
+-- 2.0.1 replica writes.
 ALTER TABLE attempt_usage_facts
-    DROP COLUMN IF EXISTS attempt_started_at,
-    DROP COLUMN IF EXISTS attempt_completed_at;
+    ALTER COLUMN attempt_started_at DROP NOT NULL,
+    ALTER COLUMN attempt_completed_at DROP NOT NULL;

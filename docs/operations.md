@@ -175,7 +175,10 @@ until candidate health and the rollback decision point pass.
    admission frozen until migration succeeds and every workload uses the
    candidate digest; preserve `maxUnavailable: 0`, the 10-second pre-stop, and
    five-minute termination grace. Database guards reject N-1 publications,
-   non-additive usage rollups, and OIDC completions.
+   non-additive usage rollups, and OIDC completions. A migration that retires
+   schema only relaxes it during the release that stops using it, because the
+   N-1 binary still names those columns and tables in its own writes; the drops
+   themselves ship one release later, once no N-1 replica can be running.
 6. Resume admission and OIDC initiation. For 30 minutes verify readiness,
    zero metadata backlog, generation convergence, usage completeness, provider
    probes, error rate, and added latency.

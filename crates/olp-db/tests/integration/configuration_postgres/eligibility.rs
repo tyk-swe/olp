@@ -164,6 +164,8 @@ pub(super) async fn exercise(
         olp_engine::domain::provider::ProviderState::Disabled
     );
 
+    super::disabled_guards::exercise(store, actor, master_key, provider_id, disabled.etag).await;
+
     let restored_provider_etag = store
         .restore_provider_as_draft(
             provider_id,
