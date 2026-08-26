@@ -10,10 +10,12 @@ use serde::Serialize;
 use utoipa::ToSchema;
 use uuid::Uuid;
 
-use super::helpers::{PageQuery, map_operations, page_limit};
+use super::helpers::{map_operations, page_limit};
 use crate::{
     bootstrap::mode_dependencies::ManagementState,
-    management::{permissions::require_permission, sessions::require_read_session},
+    management::{
+        pagination::PageQuery, permissions::require_permission, sessions::require_read_session,
+    },
     public_http::problem::Problem,
 };
 
@@ -53,7 +55,10 @@ pub(super) struct RuntimeGenerationListResponse {
     path = "/api/v1/runtime-generations",
     tag = "runtime",
     params(PageQuery),
-    responses((status = 200, description = "Runtime generations", body = RuntimeGenerationListResponse))
+    responses(
+        (status = 200, description = "Runtime generations", body = RuntimeGenerationListResponse),
+        (status = 400, description = "Malformed query parameters, or an invalid cursor or page size", body = Problem)
+    )
 )]
 pub(super) async fn list_runtime_generations(
     State(state): State<ManagementState>,

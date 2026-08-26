@@ -174,11 +174,11 @@ pub(crate) struct ProviderListResponse {
     path = "/api/v1/providers",
     tag = "providers",
     params(
-        ("cursor" = Option<String>, Query),
-        ("limit" = Option<u16>, Query, minimum = 1, maximum = 200, description = "Page size from 1 to 200; defaults to 50")
+        PageQuery,
     ),
     responses(
         (status = 200, body = ProviderListResponse),
+        (status = 400, description = "Malformed query parameters, or an invalid cursor or page size", body = Problem),
         (status = 401, body = Problem),
         (status = 403, body = Problem)
     )

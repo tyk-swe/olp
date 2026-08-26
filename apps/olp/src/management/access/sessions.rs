@@ -55,6 +55,7 @@ pub(in crate::management) struct SessionListResponse {
     ),
     responses(
         (status = 200, description = "Active and unexpired sessions", body = SessionListResponse),
+        (status = 400, description = "Malformed query parameters, or an invalid cursor or page size", body = Problem),
         (status = 403, description = "Only owners can inspect another user's sessions", body = Problem)
     )
 )]

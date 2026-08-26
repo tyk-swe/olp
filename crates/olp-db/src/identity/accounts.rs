@@ -91,7 +91,7 @@ impl Store {
             .await?
             .rows_affected();
         let retired =
-            retire_invitations_on_access_loss(&mut transaction, id, role, row.active, actor)
+            retire_invitations_on_access_loss(&mut transaction, id, role, row.active, Some(actor))
                 .await?;
         record_success(
             &mut *transaction,
@@ -175,7 +175,7 @@ impl Store {
             id,
             parse_role(row.role.clone())?,
             row.active,
-            actor,
+            Some(actor),
         )
         .await?;
         record_success(

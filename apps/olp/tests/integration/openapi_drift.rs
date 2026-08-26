@@ -46,3 +46,37 @@ fn idempotent_operations_declare_their_header_and_conflict_responses() {
         "expected the idempotent mutations to be found"
     );
 }
+
+/// Every paginated operation that accepts a `limit` query parameter can reject
+/// an out-of-range page size (400). A generated client that does not know
+/// this exists treats the rejection as a transport failure.
+#[test]
+fn paginated_operations_declare_the_invalid_page_size_response() {
+    let document = serde_json::to_value(document()).unwrap();
+    let paths = document["paths"].as_object().unwrap();
+    let mut checked = 0;
+    for (path, methods) in paths {
+        for (method, operation) in methods.as_object().unwrap() {
+            let accepts_limit = operation["parameters"]
+                .as_array()
+                .is_some_and(|parameters| {
+                    parameters
+                        .iter()
+                        .any(|parameter| parameter["in"] == "query" && parameter["name"] == "limit")
+                });
+            if !accepts_limit {
+                continue;
+            }
+            checked += 1;
+            let responses = operation["responses"].as_object().unwrap();
+            assert!(
+                responses.contains_key("400"),
+                "{method} {path} accepts limit query parameter but does not declare 400"
+            );
+        }
+    }
+    assert!(
+        checked >= 20,
+        "expected the paginated operations to be found"
+    );
+}

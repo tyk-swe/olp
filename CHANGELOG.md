@@ -5,6 +5,76 @@ All notable changes to OpenLLMProxy are recorded here. The format follows
 semantic versioning and match `Cargo.toml`, `console/package.json`,
 `deploy/helm/Chart.yaml` and `deploy/Dockerfile`.
 
+## [Unreleased]
+
+Clears the review backlog carried in `TODOS.md`. Two migrations: 0044 relaxes
+one invitation constraint, 0045 lands the drops that 0038 and 0039 staged.
+
+### Changed
+
+**Gateway (client-visible)**
+- The Anthropic surface no longer forwards an unmodelled content block just
+  because it does not recognise it. `thinking`, `redacted_thinking`,
+  `document`, `search_result`, `server_tool_use` and `web_search_tool_result`
+  round-trip as before; any other block type is now refused. A block on that
+  list carrying an inline base64 source is also refused, at any nesting depth,
+  including a `document` whose `source.type` is `content` and wraps a base64
+  image. Those payloads used to reach the provider without passing the inline
+  media limits at all, so a base64 `document` was an unmetered upload.
+- A provider 429 that carries `Retry-After` now counts toward opening the
+  target's circuit. A 429 without one still does not. The header is the only
+  evidence available where the circuit decides, so this does not cleanly
+  separate an org-wide throttle from one key's quota: a noisy key sending
+  `Retry-After` can open a target for the 30 second window.
+
+**Persistence**
+- An OIDC role sync that demotes a user records no actor on the invitations it
+  retires and on the audit rows for the demotion. Migration 0044 allows the
+  NULL, keeping the rule that an actor implies a revocation. Before this, the
+  sync stamped the demoted user as the revoker, so an identity provider's
+  decision read as the person revoking their own pending invitations.
+  Demotions performed by an operator still record that operator.
+
+**Management API**
+- Every list endpoint that takes `limit` now declares its 400 in the OpenAPI
+  contract. Seventeen were missing it, so a generated client saw
+  `invalid_page_size` as an undeclared response. This also records a break
+  that shipped unannounced in 2.0.1: the operations lists moved an invalid
+  page size from 422 to 400 to match the rest of the API. Nothing in the
+  console, the SDKs or the e2e suite reads 422 for a page size. The 422 on
+  `/audit` and `/media-jobs` is for an invalid time range and is unchanged.
+
+### Removed
+
+- Migration 0045 drops `oidc_authorization_flows.client_digest`, the
+  `request_metadata_loss_reporter_state` table, and
+  `attempt_usage_facts.attempt_started_at` / `.attempt_completed_at`. 0038 and
+  0039 stopped writing all four and deliberately left them in place, because
+  the binary one release back still named them in its own INSERTs and a drop
+  during the rollout would have broken any replica still serving.
+  `release-metadata.env` advances to 0043 to record that the release carrying
+  0038 through 0043 is now the N-1 baseline.
+- The duplicate `PageQuery` in `management/operations/helpers.rs`. It was
+  byte-identical to the one in `management/pagination.rs`; regenerating the
+  OpenAPI contract after the merge produced no diff.
+
+### Fixed
+
+- `TODOS.md` claimed the four `audit_events` insert helpers and the media-job
+  poll gate were still open. Both were closed in 2.1.1 and the file was never
+  updated.
+
+### Tests
+
+- The invitation retirement path is covered through `update_user_role`, through
+  an OIDC role-mapping demotion, and through a manual revoke, asserting the
+  actor recorded on the invitation and on the audit rows in each case. Only the
+  `update_user_access` path had a test before.
+- Bedrock's `service_code_status` mapping, which turns a modelled exception code
+  into a public status when the SDK surfaces no HTTP envelope.
+- A contract test now fails the build if a paginated operation stops declaring
+  its 400, and another asserts migration 0045's three drops landed.
+
 ## [2.1.1] - 2026-08-26
 
 Recovery release: the repository is brought back in line with its own rules
@@ -154,8 +224,7 @@ the 2.0.1 binary still writes part of it during a rolling upgrade.
   `request_metadata_loss_reporter_state` and
   `attempt_usage_facts.attempt_{started,completed}_at` are deliberately not
   dropped: the 2.0.1 binary still names all three in its own writes, so 0039
-  only drops the two columns' NOT NULL and the drops themselves ship in a
-  later release.
+  only drops the two columns' NOT NULL. Migration 0045 lands those drops.
 
 ### Changed
 - Credential rotation, model discovery and capability review carry the

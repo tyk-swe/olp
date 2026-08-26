@@ -185,11 +185,11 @@ pub(crate) struct ProviderRevisionRestoreResponse {
     tag = "providers",
     params(
         ("provider_id" = Uuid, Path),
-        ("cursor" = Option<String>, Query),
-        ("limit" = Option<u16>, Query, minimum = 1, maximum = 200, description = "Page size from 1 to 200; defaults to 50")
+        PageQuery,
     ),
     responses(
         (status = 200, body = ProviderRevisionListResponse),
+        (status = 400, description = "Malformed query parameters, or an invalid cursor or page size", body = Problem),
         (status = 404, body = Problem)
     )
 )]
@@ -247,11 +247,11 @@ pub(crate) async fn get_provider_revision(
     params(
         ("provider_id" = Uuid, Path),
         ("revision_id" = Uuid, Path),
-        ("cursor" = Option<String>, Query),
-        ("limit" = Option<u16>, Query, minimum = 1, maximum = 200, description = "Page size from 1 to 200; defaults to 50")
+        PageQuery,
     ),
     responses(
         (status = 200, description = "Bounded historical provider model and capability page", body = ProviderModelListResponse),
+        (status = 400, description = "Malformed query parameters, or an invalid cursor or page size", body = Problem),
         (status = 404, body = Problem)
     )
 )]

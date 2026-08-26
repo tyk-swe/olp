@@ -78,7 +78,7 @@ impl Store {
             record_success_at(
                 &mut *transaction,
                 self.provenance(),
-                user.id,
+                Some(user.id),
                 action,
                 "session",
                 session_id,
@@ -122,18 +122,20 @@ impl Store {
                 // A pending invitation is an out-of-band grant. The sync
                 // revoked this user's sessions; the tokens they minted
                 // while they still held ManageAccess must go with them.
+                // An identity provider's role sync has no human operator,
+                // so the actor is empty.
                 let retired = retire_invitations_on_access_loss(
                     &mut *transaction,
                     user.id,
                     mapped_role,
                     true,
-                    user.id,
+                    None,
                 )
                 .await?;
                 record_success_at(
                     &mut **transaction,
                     self.provenance(),
-                    user.id,
+                    None,
                     "user.role_sync_oidc",
                     "user",
                     user.id,
@@ -144,7 +146,7 @@ impl Store {
                     record_success_at(
                         &mut **transaction,
                         self.provenance(),
-                        user.id,
+                        None,
                         "invitation.revoke_for_oidc_role_change",
                         "user",
                         user.id,
@@ -155,7 +157,7 @@ impl Store {
                 record_success_at(
                     &mut **transaction,
                     self.provenance(),
-                    user.id,
+                    None,
                     "session.revoke_for_oidc_role_change",
                     "user",
                     user.id,
@@ -218,7 +220,7 @@ impl Store {
         record_success_at(
             &mut **transaction,
             self.provenance(),
-            user_id,
+            Some(user_id),
             "user.create_oidc",
             "user",
             user_id,
@@ -369,7 +371,7 @@ impl Store {
             record_success_at(
                 &mut *transaction,
                 self.provenance(),
-                input.user_id,
+                Some(input.user_id),
                 action,
                 resource_type,
                 resource_id,
@@ -588,7 +590,7 @@ impl Store {
             record_success_at(
                 &mut *transaction,
                 self.provenance(),
-                input.user_id,
+                Some(input.user_id),
                 action,
                 resource_type,
                 resource_id,

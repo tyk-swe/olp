@@ -1040,3 +1040,138 @@ fn thinking_block_with_tool_use_fields_round_trips_idempotently() {
     assert_eq!(encoded["messages"][1]["content"][0]["type"], "thinking");
     assert_eq!(encoded["messages"][1]["content"][0]["id"], "toolu_1");
 }
+
+#[test]
+fn document_block_with_base64_source_is_rejected_by_decoder() {
+    let dto: MessagesRequest = serde_json::from_value(json!({
+        "model": "team-claude",
+        "max_tokens": 256,
+        "messages": [
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "document",
+                        "source": {
+                            "type": "base64",
+                            "media_type": "application/pdf",
+                            "data": "JVBERi0xLjQK"
+                        }
+                    }
+                ]
+            }
+        ]
+    }))
+    .unwrap();
+    assert!(decode_request(dto).is_err());
+}
+
+#[test]
+fn document_block_with_url_source_round_trips_through_canonical() {
+    let dto: MessagesRequest = serde_json::from_value(json!({
+        "model": "team-claude",
+        "max_tokens": 256,
+        "messages": [
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "document",
+                        "source": {
+                            "type": "url",
+                            "url": "https://example.com/spec.pdf"
+                        }
+                    }
+                ]
+            }
+        ]
+    }))
+    .unwrap();
+    let Operation::Generation(canonical) = decode_request(dto).unwrap() else {
+        panic!("wrong operation");
+    };
+    let wire =
+        serde_json::to_value(encode_request(&canonical, "claude-upstream").unwrap()).unwrap();
+    let document = &wire["messages"][0]["content"][0];
+    assert_eq!(document["type"], "document");
+    assert_eq!(document["source"]["type"], "url");
+    assert_eq!(document["source"]["url"], "https://example.com/spec.pdf");
+}
+
+#[test]
+fn unrecognised_content_block_type_is_rejected() {
+    let dto: MessagesRequest = serde_json::from_value(json!({
+        "model": "team-claude",
+        "max_tokens": 256,
+        "messages": [
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "container_upload",
+                        "container_id": "cnt_123"
+                    }
+                ]
+            }
+        ]
+    }))
+    .unwrap();
+    assert!(decode_request(dto).is_err());
+}
+
+#[test]
+fn document_block_nesting_base64_content_is_rejected() {
+    let dto: MessagesRequest = serde_json::from_value(json!({
+        "model": "team-claude",
+        "max_tokens": 256,
+        "messages": [
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "document",
+                        "source": {
+                            "type": "content",
+                            "content": [
+                                {
+                                    "type": "image",
+                                    "source": {
+                                        "type": "base64",
+                                        "media_type": "image/png",
+                                        "data": "AAAA"
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                ]
+            }
+        ]
+    }))
+    .unwrap();
+    assert!(decode_request(dto).is_err());
+}
+
+#[test]
+fn count_tokens_rejects_a_base64_document_like_the_messages_surface() {
+    let dto: CountTokensRequest = serde_json::from_value(json!({
+        "model": "team-claude",
+        "messages": [
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "document",
+                        "source": {
+                            "type": "base64",
+                            "media_type": "application/pdf",
+                            "data": "JVBERi0xLjQK"
+                        }
+                    }
+                ]
+            }
+        ]
+    }))
+    .unwrap();
+    assert!(decode_count_tokens_request(dto).is_err());
+}

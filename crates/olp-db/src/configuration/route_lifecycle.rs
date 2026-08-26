@@ -136,7 +136,7 @@ impl Store {
         record_success_at(
             &mut *transaction,
             self.provenance(),
-            route.actor,
+            Some(route.actor),
             "route.create_draft",
             "route_draft",
             id,

@@ -70,7 +70,10 @@ pub(in crate::management::operations) struct UsageBreakdownResponse {
         ("dimension" = String, Query, description = "Break down by route, provider, model, api_key, or operation"),
         ("limit" = Option<u16>, Query, minimum = 1, maximum = 200, description = "Maximum number of breakdown rows")
     ),
-    responses((status = 200, description = "Usage breakdown", body = UsageBreakdownResponse))
+    responses(
+        (status = 200, description = "Usage breakdown", body = UsageBreakdownResponse),
+        (status = 400, description = "Malformed query parameters, or an invalid cursor or page size", body = Problem)
+    )
 )]
 pub(in crate::management::operations) async fn usage_breakdown(
     State(state): State<ManagementState>,

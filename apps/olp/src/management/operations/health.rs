@@ -105,6 +105,7 @@ pub(super) struct ProviderHealthResponse {
     params(ProviderHealthQuery),
     responses(
         (status = 200, description = "Probe and rolling-attempt provider health", body = ProviderHealthResponse),
+        (status = 400, description = "Malformed query parameters, or an invalid cursor or page size", body = Problem),
         (status = 401, description = "Authentication required", body = Problem),
         (status = 403, description = "Insufficient role", body = Problem)
     )

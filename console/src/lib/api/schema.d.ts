@@ -2707,8 +2707,9 @@ export interface operations {
     list_api_keys: {
         parameters: {
             query?: {
+                /** @description Opaque cursor returned by the previous page. */
                 cursor?: string;
-                /** @description Page size from 1 to 200; defaults to 50 */
+                /** @description Page size, from 1 to 200. Defaults to 50. */
                 limit?: number;
             };
             header?: never;
@@ -2723,6 +2724,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ApiKeyListResponse"];
+                };
+            };
+            /** @description Malformed query parameters, or an invalid cursor or page size */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
                 };
             };
             /** @description Authentication required. */
@@ -3346,9 +3356,9 @@ export interface operations {
     list_invitations: {
         parameters: {
             query?: {
-                /** @description Opaque cursor returned by the previous page */
+                /** @description Opaque cursor returned by the previous page. */
                 cursor?: string;
-                /** @description Page size from 1 to 200; defaults to 50 */
+                /** @description Page size, from 1 to 200. Defaults to 50. */
                 limit?: number;
             };
             header?: never;
@@ -3364,6 +3374,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["InvitationListResponse"];
+                };
+            };
+            /** @description Malformed query parameters, or an invalid cursor or page size */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
                 };
             };
             /** @description Authentication required. */
@@ -4486,6 +4505,15 @@ export interface operations {
                     "application/json": components["schemas"]["PricingRevisionsResponse"];
                 };
             };
+            /** @description Malformed query parameters, or an invalid cursor or page size */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
             /** @description Authentication required. */
             401: {
                 headers: {
@@ -4999,6 +5027,15 @@ export interface operations {
                     "application/json": components["schemas"]["ProviderHealthResponse"];
                 };
             };
+            /** @description Malformed query parameters, or an invalid cursor or page size */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
             /** @description Authentication required */
             401: {
                 headers: {
@@ -5152,6 +5189,15 @@ export interface operations {
                     "application/json": components["schemas"]["ProviderModelInventoryListResponse"];
                 };
             };
+            /** @description Malformed query parameters, or an invalid cursor or page size */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
             /** @description Authentication required. */
             401: {
                 headers: {
@@ -5184,8 +5230,9 @@ export interface operations {
     list_providers: {
         parameters: {
             query?: {
+                /** @description Opaque cursor returned by the previous page. */
                 cursor?: string;
-                /** @description Page size from 1 to 200; defaults to 50 */
+                /** @description Page size, from 1 to 200. Defaults to 50. */
                 limit?: number;
             };
             header?: never;
@@ -5200,6 +5247,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProviderListResponse"];
+                };
+            };
+            /** @description Malformed query parameters, or an invalid cursor or page size */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
                 };
             };
             401: {
@@ -5545,8 +5601,9 @@ export interface operations {
     list_provider_credentials: {
         parameters: {
             query?: {
+                /** @description Opaque cursor returned by the previous page. */
                 cursor?: string;
-                /** @description Page size from 1 to 200; defaults to 50 */
+                /** @description Page size, from 1 to 200. Defaults to 50. */
                 limit?: number;
             };
             header?: never;
@@ -5563,6 +5620,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CredentialListResponse"];
+                };
+            };
+            /** @description Malformed query parameters, or an invalid cursor or page size */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
                 };
             };
             /** @description Authentication required. */
@@ -5928,8 +5994,9 @@ export interface operations {
     list_provider_models: {
         parameters: {
             query?: {
+                /** @description Opaque cursor returned by the previous page. */
                 cursor?: string;
-                /** @description Page size from 1 to 200; defaults to 50 */
+                /** @description Page size, from 1 to 200. Defaults to 50. */
                 limit?: number;
             };
             header?: never;
@@ -5947,6 +6014,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProviderModelListResponse"];
+                };
+            };
+            /** @description Malformed query parameters, or an invalid cursor or page size */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
                 };
             };
             /** @description Authentication required. */
@@ -6285,8 +6361,9 @@ export interface operations {
     list_provider_revisions: {
         parameters: {
             query?: {
+                /** @description Opaque cursor returned by the previous page. */
                 cursor?: string;
-                /** @description Page size from 1 to 200; defaults to 50 */
+                /** @description Page size, from 1 to 200. Defaults to 50. */
                 limit?: number;
             };
             header?: never;
@@ -6303,6 +6380,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProviderRevisionListResponse"];
+                };
+            };
+            /** @description Malformed query parameters, or an invalid cursor or page size */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
                 };
             };
             /** @description Authentication required. */
@@ -6470,8 +6556,9 @@ export interface operations {
     list_provider_revision_models: {
         parameters: {
             query?: {
+                /** @description Opaque cursor returned by the previous page. */
                 cursor?: string;
-                /** @description Page size from 1 to 200; defaults to 50 */
+                /** @description Page size, from 1 to 200. Defaults to 50. */
                 limit?: number;
             };
             header?: never;
@@ -6490,6 +6577,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProviderModelListResponse"];
+                };
+            };
+            /** @description Malformed query parameters, or an invalid cursor or page size */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
                 };
             };
             /** @description Authentication required. */
@@ -6870,8 +6966,9 @@ export interface operations {
     list_route_drafts: {
         parameters: {
             query?: {
+                /** @description Opaque cursor returned by the previous page. */
                 cursor?: string;
-                /** @description Page size from 1 to 200; defaults to 50 */
+                /** @description Page size, from 1 to 200. Defaults to 50. */
                 limit?: number;
             };
             header?: never;
@@ -6886,6 +6983,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RouteDraftListResponse"];
+                };
+            };
+            /** @description Malformed query parameters, or an invalid cursor or page size */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
                 };
             };
             /** @description Authentication required. */
@@ -7423,8 +7529,9 @@ export interface operations {
     list_routes: {
         parameters: {
             query?: {
+                /** @description Opaque cursor returned by the previous page. */
                 cursor?: string;
-                /** @description Page size from 1 to 200; defaults to 50 */
+                /** @description Page size, from 1 to 200. Defaults to 50. */
                 limit?: number;
             };
             header?: never;
@@ -7439,6 +7546,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RouteListResponse"];
+                };
+            };
+            /** @description Malformed query parameters, or an invalid cursor or page size */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
                 };
             };
             401: {
@@ -7527,8 +7643,9 @@ export interface operations {
     list_route_revisions: {
         parameters: {
             query?: {
+                /** @description Opaque cursor returned by the previous page. */
                 cursor?: string;
-                /** @description Page size from 1 to 200; defaults to 50 */
+                /** @description Page size, from 1 to 200. Defaults to 50. */
                 limit?: number;
             };
             header?: never;
@@ -7545,6 +7662,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RouteRevisionListResponse"];
+                };
+            };
+            /** @description Malformed query parameters, or an invalid cursor or page size */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
                 };
             };
             /** @description Authentication required. */
@@ -7794,6 +7920,15 @@ export interface operations {
                     "application/json": components["schemas"]["RuntimeGenerationListResponse"];
                 };
             };
+            /** @description Malformed query parameters, or an invalid cursor or page size */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
             /** @description Authentication required. */
             401: {
                 headers: {
@@ -7846,6 +7981,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SessionListResponse"];
+                };
+            };
+            /** @description Malformed query parameters, or an invalid cursor or page size */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
                 };
             };
             /** @description Authentication required. */
@@ -8409,6 +8553,15 @@ export interface operations {
                     "application/json": components["schemas"]["UsageBreakdownResponse"];
                 };
             };
+            /** @description Malformed query parameters, or an invalid cursor or page size */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
             /** @description Authentication required. */
             401: {
                 headers: {
@@ -8608,9 +8761,9 @@ export interface operations {
     list_users: {
         parameters: {
             query?: {
-                /** @description Opaque cursor returned by the previous page */
+                /** @description Opaque cursor returned by the previous page. */
                 cursor?: string;
-                /** @description Page size from 1 to 200; defaults to 50 */
+                /** @description Page size, from 1 to 200. Defaults to 50. */
                 limit?: number;
             };
             header?: never;
@@ -8626,6 +8779,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["UserListResponse"];
+                };
+            };
+            /** @description Malformed query parameters, or an invalid cursor or page size */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
                 };
             };
             /** @description No active session */

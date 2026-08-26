@@ -245,15 +245,14 @@ fn decode_blocks(
                     arguments: serde_json::to_string(&block.input).map_err(DecodeError::Json)?,
                 });
             }
-            // Anthropic requires the signed `thinking` block to be echoed back
-            // on the next turn of an extended-thinking tool loop, and the same
-            // shape carries `document`, `search_result`, `server_tool_use`, and
-            // `web_search_tool_result`. None of these has a canonical form, so
-            // they round-trip verbatim as source extensions positioned where
-            // they appeared. Cross-protocol targets still fail closed on them.
+            // Anthropic requires signed `thinking` and allowlisted unmodelled
+            // blocks (document, search_result, server_tool_use, and
+            // web_search_tool_result) to round-trip verbatim as source extensions.
+            // Inline base64 media is rejected to prevent admission bypasses.
             block => {
+                let value = round_trip_block(block)?;
                 let position = content.len() + raw_blocks.len();
-                raw_blocks.push((position, block.as_value()));
+                raw_blocks.push((position, value));
             }
         }
     }
@@ -273,6 +272,42 @@ fn decode_blocks(
         first.message_extra = message_extra;
     }
     Ok(segments)
+}
+
+fn round_trip_block(block: ContentBlock) -> Result<Value, DecodeError> {
+    let value = match block {
+        ContentBlock::Thinking(_) | ContentBlock::RedactedThinking(_) => block.as_value(),
+        ContentBlock::Unknown(value)
+            if matches!(
+                value.get("type").and_then(Value::as_str),
+                Some("document" | "search_result" | "server_tool_use" | "web_search_tool_result")
+            ) =>
+        {
+            value
+        }
+        _ => {
+            return Err(DecodeError::UnsupportedContentBlock(
+                block.kind().unwrap_or("unknown").to_owned(),
+            ));
+        }
+    };
+    if carries_inline_base64(&value) {
+        return Err(DecodeError::UnsupportedMediaSource("base64".to_string()));
+    }
+    Ok(value)
+}
+
+// A `document` may nest its own content blocks under `source.type: "content"`,
+// so a top-level check would still let a base64 image through inside one.
+fn carries_inline_base64(value: &Value) -> bool {
+    match value {
+        Value::Object(fields) => fields.iter().any(|(key, value)| {
+            (key == "source" && value.get("type").and_then(Value::as_str) == Some("base64"))
+                || carries_inline_base64(value)
+        }),
+        Value::Array(items) => items.iter().any(carries_inline_base64),
+        _ => false,
+    }
 }
 
 fn flush_regular_segment(

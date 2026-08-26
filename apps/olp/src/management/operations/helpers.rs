@@ -4,24 +4,12 @@ use axum::{
 };
 use chrono::{DateTime, Utc};
 use olp_db::operations::cursor::{Error, Timestamp};
-use serde::Deserialize;
 use tracing::error;
-use utoipa::IntoParams;
 
 use crate::{management::error_mapping::map_persistence, public_http::problem::Problem};
 
 // One page-size contract for every management collection.
 pub(super) use crate::management::pagination::page_limit;
-
-#[derive(Debug, Deserialize, IntoParams)]
-#[into_params(parameter_in = Query)]
-pub(super) struct PageQuery {
-    /// Opaque cursor returned by the previous page.
-    pub(super) cursor: Option<String>,
-    /// Page size, from 1 to 200. Defaults to 50.
-    #[param(minimum = 1, maximum = 200)]
-    pub(super) limit: Option<u16>,
-}
 
 /// Turns Axum's typed-query rejection into a problem+json response so a
 /// malformed UUID, timestamp, or page size never escapes as a bare text/plain

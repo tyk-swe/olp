@@ -115,8 +115,11 @@ pub(crate) struct RouteDraftListResponse {
     get,
     path = "/api/v1/route-drafts",
     tag = "routes",
-    params(("cursor" = Option<String>, Query), ("limit" = Option<u16>, Query, minimum = 1, maximum = 200, description = "Page size from 1 to 200; defaults to 50")),
-    responses((status = 200, body = RouteDraftListResponse))
+    params(PageQuery),
+    responses(
+        (status = 200, body = RouteDraftListResponse),
+        (status = 400, description = "Malformed query parameters, or an invalid cursor or page size", body = Problem)
+    )
 )]
 pub(crate) async fn list_route_drafts(
     State(state): State<ManagementState>,
@@ -432,10 +435,14 @@ pub(crate) struct RouteListResponse {
     path = "/api/v1/routes",
     tag = "routes",
     params(
-        ("cursor" = Option<String>, Query),
-        ("limit" = Option<u16>, Query, minimum = 1, maximum = 200, description = "Page size from 1 to 200; defaults to 50")
+        PageQuery,
     ),
-    responses((status = 200, body = RouteListResponse), (status = 401, body = Problem), (status = 403, body = Problem))
+    responses(
+        (status = 200, body = RouteListResponse),
+        (status = 400, description = "Malformed query parameters, or an invalid cursor or page size", body = Problem),
+        (status = 401, body = Problem),
+        (status = 403, body = Problem)
+    )
 )]
 pub(crate) async fn list_routes(
     State(state): State<ManagementState>,
@@ -490,10 +497,13 @@ pub(crate) struct RouteRevisionListResponse {
     tag = "routes",
     params(
         ("route_id" = Uuid, Path),
-        ("cursor" = Option<String>, Query),
-        ("limit" = Option<u16>, Query, minimum = 1, maximum = 200, description = "Page size from 1 to 200; defaults to 50")
+        PageQuery,
     ),
-    responses((status = 200, body = RouteRevisionListResponse), (status = 404, body = Problem))
+    responses(
+        (status = 200, body = RouteRevisionListResponse),
+        (status = 400, description = "Malformed query parameters, or an invalid cursor or page size", body = Problem),
+        (status = 404, body = Problem)
+    )
 )]
 pub(crate) async fn list_route_revisions(
     State(state): State<ManagementState>,

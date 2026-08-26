@@ -391,7 +391,7 @@ pub(crate) async fn retire_invitations_on_access_loss(
     user_id: Uuid,
     role: olp_engine::domain::auth::Role,
     active: bool,
-    actor: Uuid,
+    actor: Option<Uuid>,
 ) -> Result<u64, sqlx::Error> {
     if active && role.allows(Permission::ManageAccess) {
         return Ok(0);

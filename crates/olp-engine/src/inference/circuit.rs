@@ -158,7 +158,7 @@ impl Breaker {
     }
 
     pub fn record_failure(&self, target: TargetId, class: AttemptFailureClass) {
-        self.record_failure_for_optional_permit(target, None, class);
+        self.record_failure_for_optional_permit(target, None, class, None);
     }
 
     pub(in crate::inference) fn record_success_for_optional_permit(
@@ -177,8 +177,9 @@ impl Breaker {
         target: TargetId,
         permit: Option<&CircuitPermit>,
         class: AttemptFailureClass,
+        retry_after: Option<Duration>,
     ) {
-        if !counts_toward_circuit(class) {
+        if !counts_toward_circuit(class, retry_after) {
             return;
         }
         let now = Instant::now();
@@ -245,17 +246,21 @@ impl Breaker {
     }
 }
 
-/// A per-key quota is not a provider health signal. `RateLimit` is deliberately
-/// absent: one noisy API key's 429s would otherwise open the target for every
-/// other key, who then see `503 no_eligible_provider` for a provider that is
-/// perfectly healthy for them.
-const fn counts_toward_circuit(class: AttemptFailureClass) -> bool {
-    matches!(
-        class,
+/// A rate limit carrying a `Retry-After` header counts toward opening the
+/// circuit, while a bare 429 does not. This accepts the tradeoff that a per-key
+/// 429 that happens to carry `Retry-After` will now count, so a single noisy
+/// key can still open a shared target for the 30s `DEFAULT_OPEN_DURATION`.
+const fn counts_toward_circuit(class: AttemptFailureClass, retry_after: Option<Duration>) -> bool {
+    match class {
         AttemptFailureClass::Connect
-            | AttemptFailureClass::Timeout
-            | AttemptFailureClass::UpstreamServer
-    )
+        | AttemptFailureClass::Timeout
+        | AttemptFailureClass::UpstreamServer => true,
+        AttemptFailureClass::RateLimit => retry_after.is_some(),
+        AttemptFailureClass::UpstreamClient
+        | AttemptFailureClass::Protocol
+        | AttemptFailureClass::Cancelled
+        | AttemptFailureClass::Ambiguous => false,
+    }
 }
 
 #[cfg(test)]
@@ -296,7 +301,7 @@ mod tests {
     }
 
     #[test]
-    fn upstream_rate_limits_never_open_the_shared_target_circuit() {
+    fn bare_upstream_rate_limits_never_open_the_shared_target_circuit() {
         let breaker = Breaker::new(1, Duration::from_secs(30));
         let target = TargetId::new();
         for _ in 0..10 {
@@ -305,6 +310,27 @@ mod tests {
         assert!(breaker.is_selectable(target));
         assert!(breaker.try_acquire(target));
         assert_eq!(breaker.open_count(), 0);
+    }
+
+    #[test]
+    fn upstream_rate_limits_with_retry_after_open_the_shared_target_circuit() {
+        let breaker = Breaker::new(2, Duration::from_secs(30));
+        let target = TargetId::new();
+        let rate_limited = |breaker: &Breaker| {
+            breaker.record_failure_for_optional_permit(
+                target,
+                None,
+                AttemptFailureClass::RateLimit,
+                Some(Duration::from_secs(1)),
+            );
+        };
+        rate_limited(&breaker);
+        assert!(breaker.is_selectable(target));
+        assert!(breaker.try_acquire(target));
+        rate_limited(&breaker);
+        assert!(!breaker.is_selectable(target));
+        assert!(!breaker.try_acquire(target));
+        assert_eq!(breaker.open_count(), 1);
     }
 
     #[test]

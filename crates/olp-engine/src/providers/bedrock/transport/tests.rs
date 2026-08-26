@@ -171,6 +171,23 @@ fn service_error_taxonomy_is_retry_aware() {
     );
 }
 
+#[test]
+fn service_code_status_maps_modeled_exceptions_to_public_statuses() {
+    for (code, expected) in [
+        ("AccessDeniedException", Some(403)),
+        ("UnrecognizedClientException", Some(401)),
+        ("InvalidSignatureException", Some(401)),
+        ("ExpiredTokenException", Some(401)),
+        ("ValidationException", Some(400)),
+        ("ResourceNotFoundException", Some(404)),
+        ("ConflictException", Some(409)),
+    ] {
+        assert_eq!(service_code_status(Some(code)), expected, "{code}");
+    }
+    assert_eq!(service_code_status(Some("UnknownException")), None);
+    assert_eq!(service_code_status(None), None);
+}
+
 fn event_frame(event_type: &str, payload: &str) -> Vec<u8> {
     let message = EventMessage::new(payload.as_bytes().to_vec())
         .add_header(Header::new(

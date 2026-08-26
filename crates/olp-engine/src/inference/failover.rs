@@ -100,6 +100,7 @@ fn circuit_accounted_event_stream_with_permit(
                                     target,
                                     permit.as_ref(),
                                     class,
+                                    None,
                                 );
                             }
                             failed = true;
@@ -120,6 +121,7 @@ fn circuit_accounted_event_stream_with_permit(
                         target,
                         permit.as_ref(),
                         error.class,
+                        error.upstream.retry_after,
                     );
                     failed = true;
                     Err(error)
@@ -187,6 +189,7 @@ impl AttemptRecord<'_> {
             self.plan.routing_id,
             Some(&self.circuit_permit),
             transport.class,
+            transport.upstream.retry_after,
         );
         if terminal.is_none() && transport.allows_failover() {
             Ok(transport)
@@ -678,6 +681,7 @@ async fn execute_attempt(
                 attempt.routing_id,
                 Some(&record.circuit_permit),
                 class,
+                None,
             );
         }
         true

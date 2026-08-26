@@ -90,8 +90,11 @@ pub(crate) struct ApiKeyListResponse {
     get,
     path = "/api/v1/api-keys",
     tag = "api-keys",
-    params(("cursor" = Option<String>, Query), ("limit" = Option<u16>, Query, minimum = 1, maximum = 200, description = "Page size from 1 to 200; defaults to 50")),
-    responses((status = 200, body = ApiKeyListResponse))
+    params(PageQuery),
+    responses(
+        (status = 200, body = ApiKeyListResponse),
+        (status = 400, description = "Malformed query parameters, or an invalid cursor or page size", body = Problem)
+    )
 )]
 pub(crate) async fn list_api_keys(
     State(state): State<ManagementState>,

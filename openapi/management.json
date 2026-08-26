@@ -5171,6 +5171,7 @@
         "operationId": "list_api_keys",
         "parameters": [
           {
+            "description": "Opaque cursor returned by the previous page.",
             "in": "query",
             "name": "cursor",
             "required": false,
@@ -5179,7 +5180,7 @@
             }
           },
           {
-            "description": "Page size from 1 to 200; defaults to 50",
+            "description": "Page size, from 1 to 200. Defaults to 50.",
             "in": "query",
             "name": "limit",
             "required": false,
@@ -5201,6 +5202,16 @@
               }
             },
             "description": ""
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Malformed query parameters, or an invalid cursor or page size"
           },
           "401": {
             "content": {
@@ -6104,7 +6115,7 @@
         "operationId": "list_invitations",
         "parameters": [
           {
-            "description": "Opaque cursor returned by the previous page",
+            "description": "Opaque cursor returned by the previous page.",
             "in": "query",
             "name": "cursor",
             "required": false,
@@ -6113,7 +6124,7 @@
             }
           },
           {
-            "description": "Page size from 1 to 200; defaults to 50",
+            "description": "Page size, from 1 to 200. Defaults to 50.",
             "in": "query",
             "name": "limit",
             "required": false,
@@ -6135,6 +6146,16 @@
               }
             },
             "description": "Invitation history"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Malformed query parameters, or an invalid cursor or page size"
           },
           "401": {
             "content": {
@@ -7608,6 +7629,16 @@
             },
             "description": "Pricing revisions"
           },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Malformed query parameters, or an invalid cursor or page size"
+          },
           "401": {
             "content": {
               "application/problem+json": {
@@ -8300,6 +8331,16 @@
             },
             "description": "Probe and rolling-attempt provider health"
           },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Malformed query parameters, or an invalid cursor or page size"
+          },
           "401": {
             "content": {
               "application/problem+json": {
@@ -8518,6 +8559,16 @@
             },
             "description": "Bounded cross-provider model and capability page"
           },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Malformed query parameters, or an invalid cursor or page size"
+          },
           "401": {
             "content": {
               "application/problem+json": {
@@ -8564,6 +8615,7 @@
         "operationId": "list_providers",
         "parameters": [
           {
+            "description": "Opaque cursor returned by the previous page.",
             "in": "query",
             "name": "cursor",
             "required": false,
@@ -8572,7 +8624,7 @@
             }
           },
           {
-            "description": "Page size from 1 to 200; defaults to 50",
+            "description": "Page size, from 1 to 200. Defaults to 50.",
             "in": "query",
             "name": "limit",
             "required": false,
@@ -8594,6 +8646,16 @@
               }
             },
             "description": ""
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Malformed query parameters, or an invalid cursor or page size"
           },
           "401": {
             "content": {
@@ -9094,6 +9156,7 @@
             }
           },
           {
+            "description": "Opaque cursor returned by the previous page.",
             "in": "query",
             "name": "cursor",
             "required": false,
@@ -9102,7 +9165,7 @@
             }
           },
           {
-            "description": "Page size from 1 to 200; defaults to 50",
+            "description": "Page size, from 1 to 200. Defaults to 50.",
             "in": "query",
             "name": "limit",
             "required": false,
@@ -9124,6 +9187,16 @@
               }
             },
             "description": ""
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Malformed query parameters, or an invalid cursor or page size"
           },
           "401": {
             "content": {
@@ -9693,6 +9766,7 @@
             }
           },
           {
+            "description": "Opaque cursor returned by the previous page.",
             "in": "query",
             "name": "cursor",
             "required": false,
@@ -9701,7 +9775,7 @@
             }
           },
           {
-            "description": "Page size from 1 to 200; defaults to 50",
+            "description": "Page size, from 1 to 200. Defaults to 50.",
             "in": "query",
             "name": "limit",
             "required": false,
@@ -9723,6 +9797,16 @@
               }
             },
             "description": "Bounded provider model and capability page"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Malformed query parameters, or an invalid cursor or page size"
           },
           "401": {
             "content": {
@@ -10249,6 +10333,7 @@
             }
           },
           {
+            "description": "Opaque cursor returned by the previous page.",
             "in": "query",
             "name": "cursor",
             "required": false,
@@ -10257,7 +10342,7 @@
             }
           },
           {
-            "description": "Page size from 1 to 200; defaults to 50",
+            "description": "Page size, from 1 to 200. Defaults to 50.",
             "in": "query",
             "name": "limit",
             "required": false,
@@ -10279,6 +10364,16 @@
               }
             },
             "description": ""
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Malformed query parameters, or an invalid cursor or page size"
           },
           "401": {
             "content": {
@@ -10544,6 +10639,7 @@
             }
           },
           {
+            "description": "Opaque cursor returned by the previous page.",
             "in": "query",
             "name": "cursor",
             "required": false,
@@ -10552,7 +10648,7 @@
             }
           },
           {
-            "description": "Page size from 1 to 200; defaults to 50",
+            "description": "Page size, from 1 to 200. Defaults to 50.",
             "in": "query",
             "name": "limit",
             "required": false,
@@ -10574,6 +10670,16 @@
               }
             },
             "description": "Bounded historical provider model and capability page"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Malformed query parameters, or an invalid cursor or page size"
           },
           "401": {
             "content": {
@@ -11187,6 +11293,7 @@
         "operationId": "list_route_drafts",
         "parameters": [
           {
+            "description": "Opaque cursor returned by the previous page.",
             "in": "query",
             "name": "cursor",
             "required": false,
@@ -11195,7 +11302,7 @@
             }
           },
           {
-            "description": "Page size from 1 to 200; defaults to 50",
+            "description": "Page size, from 1 to 200. Defaults to 50.",
             "in": "query",
             "name": "limit",
             "required": false,
@@ -11217,6 +11324,16 @@
               }
             },
             "description": ""
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Malformed query parameters, or an invalid cursor or page size"
           },
           "401": {
             "content": {
@@ -11984,6 +12101,7 @@
         "operationId": "list_routes",
         "parameters": [
           {
+            "description": "Opaque cursor returned by the previous page.",
             "in": "query",
             "name": "cursor",
             "required": false,
@@ -11992,7 +12110,7 @@
             }
           },
           {
-            "description": "Page size from 1 to 200; defaults to 50",
+            "description": "Page size, from 1 to 200. Defaults to 50.",
             "in": "query",
             "name": "limit",
             "required": false,
@@ -12014,6 +12132,16 @@
               }
             },
             "description": ""
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Malformed query parameters, or an invalid cursor or page size"
           },
           "401": {
             "content": {
@@ -12146,6 +12274,7 @@
             }
           },
           {
+            "description": "Opaque cursor returned by the previous page.",
             "in": "query",
             "name": "cursor",
             "required": false,
@@ -12154,7 +12283,7 @@
             }
           },
           {
-            "description": "Page size from 1 to 200; defaults to 50",
+            "description": "Page size, from 1 to 200. Defaults to 50.",
             "in": "query",
             "name": "limit",
             "required": false,
@@ -12176,6 +12305,16 @@
               }
             },
             "description": ""
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Malformed query parameters, or an invalid cursor or page size"
           },
           "401": {
             "content": {
@@ -12556,6 +12695,16 @@
             },
             "description": "Runtime generations"
           },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Malformed query parameters, or an invalid cursor or page size"
+          },
           "401": {
             "content": {
               "application/problem+json": {
@@ -12643,6 +12792,16 @@
               }
             },
             "description": "Active and unexpired sessions"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Malformed query parameters, or an invalid cursor or page size"
           },
           "401": {
             "content": {
@@ -13404,6 +13563,16 @@
             },
             "description": "Usage breakdown"
           },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Malformed query parameters, or an invalid cursor or page size"
+          },
           "401": {
             "content": {
               "application/problem+json": {
@@ -13810,7 +13979,7 @@
         "operationId": "list_users",
         "parameters": [
           {
-            "description": "Opaque cursor returned by the previous page",
+            "description": "Opaque cursor returned by the previous page.",
             "in": "query",
             "name": "cursor",
             "required": false,
@@ -13819,7 +13988,7 @@
             }
           },
           {
-            "description": "Page size from 1 to 200; defaults to 50",
+            "description": "Page size, from 1 to 200. Defaults to 50.",
             "in": "query",
             "name": "limit",
             "required": false,
@@ -13841,6 +14010,16 @@
               }
             },
             "description": "Users in the installation"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Malformed query parameters, or an invalid cursor or page size"
           },
           "401": {
             "content": {

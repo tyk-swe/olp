@@ -125,10 +125,12 @@ pub(in crate::management) struct CreateInvitationResponse {
     path = "/api/v1/invitations",
     tag = "invitations",
     params(
-        ("cursor" = Option<String>, Query, description = "Opaque cursor returned by the previous page"),
-        ("limit" = Option<u16>, Query, minimum = 1, maximum = 200, description = "Page size from 1 to 200; defaults to 50")
+        PageQuery,
     ),
-    responses((status = 200, description = "Invitation history", body = InvitationListResponse))
+    responses(
+        (status = 200, description = "Invitation history", body = InvitationListResponse),
+        (status = 400, description = "Malformed query parameters, or an invalid cursor or page size", body = Problem)
+    )
 )]
 pub(in crate::management) async fn list_invitations(
     State(state): State<ManagementState>,

@@ -10,6 +10,7 @@ mod configuration_postgres;
 mod distributed_limits_valkey;
 mod idempotency_replay_postgres;
 mod identity_postgres;
+mod invitation_retirement_postgres;
 mod management_idempotency_replay_postgres;
 mod master_key_reencryption_postgres;
 mod media_jobs_postgres;

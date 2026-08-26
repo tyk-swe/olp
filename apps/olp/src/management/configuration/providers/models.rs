@@ -304,7 +304,8 @@ pub(crate) struct ProviderModelInventoryListResponse {
     tag = "providers",
     params(ProviderModelInventoryQuery),
     responses(
-        (status = 200, description = "Bounded cross-provider model and capability page", body = ProviderModelInventoryListResponse)
+        (status = 200, description = "Bounded cross-provider model and capability page", body = ProviderModelInventoryListResponse),
+        (status = 400, description = "Malformed query parameters, or an invalid cursor or page size", body = Problem)
     )
 )]
 pub(crate) async fn list_provider_model_inventory(
@@ -336,11 +337,11 @@ pub(crate) async fn list_provider_model_inventory(
     tag = "providers",
     params(
         ("provider_id" = Uuid, Path),
-        ("cursor" = Option<String>, Query),
-        ("limit" = Option<u16>, Query, minimum = 1, maximum = 200, description = "Page size from 1 to 200; defaults to 50")
+        PageQuery,
     ),
     responses(
         (status = 200, description = "Bounded provider model and capability page", body = ProviderModelListResponse),
+        (status = 400, description = "Malformed query parameters, or an invalid cursor or page size", body = Problem),
         (status = 404, body = Problem)
     )
 )]

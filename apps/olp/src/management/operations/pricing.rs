@@ -15,13 +15,14 @@ use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use uuid::Uuid;
 
-use super::helpers::{PageQuery, map_operations, page_limit};
+use super::helpers::{map_operations, page_limit};
 use crate::{
     bootstrap::mode_dependencies::ManagementState,
     management::{
         error_mapping::map_persistence,
         idempotency::{idempotency_http_response, require_idempotency_key},
         json_payload::json_payload,
+        pagination::PageQuery,
         permissions::require_permission,
         provenance::Provenance,
         sessions::{require_mutation_session, require_read_session},
@@ -179,7 +180,10 @@ pub(super) struct PricingRevisionsResponse {
     path = "/api/v1/pricing/revisions",
     tag = "pricing",
     params(PageQuery),
-    responses((status = 200, description = "Pricing revisions", body = PricingRevisionsResponse))
+    responses(
+        (status = 200, description = "Pricing revisions", body = PricingRevisionsResponse),
+        (status = 400, description = "Malformed query parameters, or an invalid cursor or page size", body = Problem)
+    )
 )]
 pub(super) async fn list_pricing_revisions(
     State(state): State<ManagementState>,

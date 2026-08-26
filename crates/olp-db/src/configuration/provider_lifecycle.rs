@@ -165,7 +165,7 @@ impl Store {
         record_success_at(
             &mut *transaction,
             self.provenance(),
-            provider.actor,
+            Some(provider.actor),
             "provider.create_draft",
             "provider",
             provider.provider_id,

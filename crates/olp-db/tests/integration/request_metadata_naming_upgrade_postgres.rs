@@ -55,9 +55,8 @@ async fn request_metadata_schema_rename_preserves_legacy_rows() {
     .execute(store.pool())
     .await
     .unwrap();
-    // The loss reporter's per-instance counters are dead weight - the crash-safe
-    // checkpoint is `request_metadata_gateway_epochs` - but the 2.0.1 binary
-    // still writes them, so the table survives the rename and this release.
+    // Seed `usage_loss_reporter_state` at version 27 to prove 0045 drops it
+    // even when it holds rows.
     sqlx::query(
         "INSERT INTO usage_loss_reporter_state \
          (gateway_instance, process_epoch, dropped, abandoned, updated_at) \
@@ -86,8 +85,7 @@ async fn request_metadata_schema_rename_preserves_legacy_rows() {
          UNION ALL SELECT 'request_metadata_consumer_health', count(*) FROM request_metadata_consumer_health \
          UNION ALL SELECT 'request_metadata_gateway_epochs', count(*) FROM request_metadata_gateway_epochs \
          UNION ALL SELECT 'request_metadata_ingestion_gaps', count(*) FROM request_metadata_ingestion_gaps \
-         UNION ALL SELECT 'request_metadata_gap_hourly', count(*) FROM request_metadata_gap_hourly \
-         UNION ALL SELECT 'request_metadata_loss_reporter_state', count(*) FROM request_metadata_loss_reporter_state",
+         UNION ALL SELECT 'request_metadata_gap_hourly', count(*) FROM request_metadata_gap_hourly",
     )
     .fetch_all(store.pool())
     .await
@@ -169,8 +167,7 @@ async fn request_metadata_schema_rename_preserves_legacy_rows() {
              'request_metadata_consumer_health'::regclass, \
              'request_metadata_gateway_epochs'::regclass, \
              'request_metadata_ingestion_gaps'::regclass, \
-             'request_metadata_gap_hourly'::regclass, \
-             'request_metadata_loss_reporter_state'::regclass)",
+             'request_metadata_gap_hourly'::regclass)",
     )
     .fetch_one(store.pool())
     .await
@@ -196,4 +193,38 @@ async fn request_metadata_schema_rename_preserves_legacy_rows() {
     .await
     .unwrap();
     assert_eq!(renamed_triggers, 3);
+}
+
+#[tokio::test]
+#[ignore = "requires OLP_TEST_DATABASE_ADMIN_URL and OLP_TEST_DATABASE_URL_PREFIX"]
+async fn retired_schema_is_gone_at_head() {
+    let db = olp_db::test_support::TestDb::create_migrated("retired_schema").await;
+    let store = db.store(1).await;
+
+    let loss_reporter_state_dropped: bool =
+        sqlx::query_scalar("SELECT to_regclass('request_metadata_loss_reporter_state') IS NULL")
+            .fetch_one(store.pool())
+            .await
+            .unwrap();
+    assert!(loss_reporter_state_dropped);
+
+    let client_digest_columns: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM information_schema.columns \
+         WHERE table_name = 'oidc_authorization_flows' \
+           AND column_name = 'client_digest'",
+    )
+    .fetch_one(store.pool())
+    .await
+    .unwrap();
+    assert_eq!(client_digest_columns, 0);
+
+    let attempt_window_columns: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM information_schema.columns \
+         WHERE table_name = 'attempt_usage_facts' \
+           AND column_name IN ('attempt_started_at', 'attempt_completed_at')",
+    )
+    .fetch_one(store.pool())
+    .await
+    .unwrap();
+    assert_eq!(attempt_window_columns, 0);
 }

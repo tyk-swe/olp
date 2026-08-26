@@ -62,11 +62,11 @@ pub(in crate::management) struct UserListResponse {
     path = "/api/v1/users",
     tag = "users",
     params(
-        ("cursor" = Option<String>, Query, description = "Opaque cursor returned by the previous page"),
-        ("limit" = Option<u16>, Query, minimum = 1, maximum = 200, description = "Page size from 1 to 200; defaults to 50")
+        PageQuery,
     ),
     responses(
         (status = 200, description = "Users in the installation", body = UserListResponse),
+        (status = 400, description = "Malformed query parameters, or an invalid cursor or page size", body = Problem),
         (status = 401, description = "No active session", body = Problem),
         (status = 403, description = "Role cannot view access", body = Problem)
     )
