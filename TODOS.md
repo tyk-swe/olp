@@ -45,9 +45,19 @@ Per-key 429s should stay out, but a `Retry-After`-bearing org-wide 429 could sti
 **Where:** `crates/olp-db/src/oidc/identities.rs` (`retire_invitations_on_access_loss` call)
 Use a system actor or the `expired_at` path so the invitation does not read as revoked by the person who lost access.
 
+### Drop the staged dead schema once 2.1.0 is fully rolled out
+**Priority:** P2
+**Where:** `crates/olp-db/migrations/0038_drop_unused_schema.sql`, `0039_relax_duplicate_attempt_windows.sql`
+`oidc_authorization_flows.client_digest`, the `request_metadata_loss_reporter_state` table, and `attempt_usage_facts.attempt_started_at` / `.attempt_completed_at` are all unread and unwritten by 2.1.0, but the 2.0.1 binary still names them in its INSERTs. Dropping them during the rollout would fail closed on any N-1 replica still serving, so 2.1.0 only relaxes the constraints. Drop the column, the table, and the two columns in a migration that ships after no 2.0.1 replica can be running.
+
 ### Media-job 5-second poll gate is a literal in three SQL strings
 **Priority:** P3
 **Where:** `crates/olp-db/src/media_jobs/lifecycle.rs`, `reconciliation.rs`
+
+### Four audit_events insert helpers and ~22 inline INSERT literals
+**Priority:** P3
+**Where:** `crates/olp-db/src/authentication.rs` (`insert_security_audit`), `identity.rs` (`insert_audit`), `oidc/helpers.rs` (`insert_audit`), `configuration/resources/helpers.rs` (`audit_in_transaction`)
+Four near-identical helpers plus the inline literals scattered across the crate each spell out the same column list, so a new audit column has to be threaded through all of them. Collapse them into one writer.
 
 ## Tests
 

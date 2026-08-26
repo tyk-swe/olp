@@ -5,11 +5,12 @@ All notable changes to OpenLLMProxy are recorded here. The format follows
 semantic versioning and match `Cargo.toml`, `console/package.json`,
 `deploy/helm/Chart.yaml` and `deploy/Dockerfile`.
 
-## [Unreleased]
+## [2.1.0] - 2026-08-26
 
 Backend capability that shipped without a console, and console pages that
-fetched data they never showed, are now wired end to end. Dead code and dead
-schema found in the same audit are gone.
+fetched data they never showed, are now wired end to end. Dead code found in
+the same audit is gone; the dead schema is retired but not yet dropped, because
+the 2.0.1 binary still writes part of it during a rolling upgrade.
 
 ### Added
 
@@ -18,43 +19,67 @@ schema found in the same audit are gone.
   `actor_user_id`, `outcome`, `occurred_after`, `occurred_before`. Events now
   record `source_ip` (same trusted-proxy rules as admission) and a coarse
   `user_agent_family` for session-driven actions; worker-originated rows leave
-  both null.
-- `installation_name` on `SetupStatus` and `SessionResponse`; the setup form
-  can set it.
+  both null. Blank or whitespace-only string filters are ignored rather than
+  matched literally. A malformed parameter returns 400
+  `invalid_query_parameters`; an `occurred_after` that is not strictly earlier
+  than `occurred_before` returns 422 field validation, matching usage, requests
+  and media jobs.
+- `installation_name` on `SessionResponse`; the setup form can set it. The
+  unauthenticated `GET /api/v1/setup/status` deliberately returns only
+  `setup_required`.
 - `created_by_email` on providers, routes and route drafts;
   `invited_by_email`/`accepted_by_email`/`revoked_by_email` on invitations;
   `updated_by_email` on the OIDC configuration.
 - Provider 422 responses carry `error_codes` (`{field: [code]}`) alongside
-  `errors`.
+  `errors`, positionally aligned with them: `error_codes[field][i]` classifies
+  `errors[field][i]`, and an uncoded message is padded with an empty string
+  rather than shifting its neighbours.
 - `uncertainty_gap_id` on gateway-epoch responses.
 - Readiness reports `media_spool_used_bytes`/`media_spool_capacity_bytes`;
   metrics gain `olp_media_spool_{used,capacity}_bytes` and
   `olp_request_metadata_loss_reported_total{kind}`. Loss checkpoints are logged
   instead of discarded.
+- Migrations 0040-0043 add the indexes the new audit filters and the
+  provider-health window need: `audit_events(action, occurred_at DESC, id DESC)`,
+  `(resource_type, resource_id, occurred_at DESC, id DESC)`,
+  `(actor_user_id, occurred_at DESC, id DESC)`, and
+  `attempts(provider_id, started_at DESC)`. Each builds CONCURRENTLY in its
+  own migration.
 
 **Console**
-- Providers: disable and restore-as-draft actions (with the 409 "still routed"
-  detail inline), a `disabled` badge, per-revision viewer with the historical
-  model/capability inventory, probe type and discovered-model count,
-  credential-restored notice, certification `error_code`, `discovered_at`,
-  client-side 16-tuple cap, `connector_ready` as an activation gate.
+- Providers: disable and restore-as-draft actions (the "still routed" guidance
+  appears only for the `configuration_resource_in_use` problem, not every
+  409), a `disabled` badge that wins over a stale active-revision label,
+  editing/rotation/discovery controls hidden while disabled with a pointer to
+  Restore as draft, per-revision viewer with the historical model/capability
+  inventory, probe type and discovered-model count, a restore notice stating
+  that no historical credential is ever restored, certification `error_code`,
+  `discovered_at`, client-side 16-tuple cap, `connector_ready` as an activation
+  gate.
 - Health: asynchronous plane, worker staleness, runtime outbox, media
   reconciliation, persistence pipeline and media spool sections with ages
-  checked against the runbook thresholds; provider-health window selector;
-  full gateway-epoch acknowledgement provenance.
+  checked against the runbook thresholds (the outbox's oldest pending row is
+  held to its own 20-second bound); provider-health window selector; full
+  gateway-epoch acknowledgement provenance. Distributed limits reported as
+  `not_configured` show as a warning rather than a failure.
 - Usage/Requests/Settings: cached-input tokens everywhere the API returns them,
   `cached_input_per_million` in the pricing form, approximate-range and
   priced-count notes, `completed_at` on requests and attempts, who-updated on
   settings and pricing revisions.
-- Media jobs: api key, provider and created-at range filters; lifecycle and
-  retention timestamps; stacked layout on narrow viewports.
+- Media jobs: api key, provider and created-at range filters; Created and
+  Updated in the list, with completion, polling, retention and deletion
+  timestamps on the job detail panel; stacked layout on narrow viewports.
 - Playground: temperature and max-output-token controls; refusals,
   `finish_reason`, `provider_model` and full usage are shown (a refusal no
   longer renders as an empty result).
-- Audit page filters and origin columns; installation name in the shell;
-  invitation expiry selector and accepted/revoked/created timestamps; API key
-  `rotated_at`; route draft provenance and revision anchors; activation now
-  adopts the returned `draft_etag`.
+- Audit page filters (an end earlier than the start is refused inline before
+  any request) and origin columns; installation name in the shell, truncated
+  rather than crowding the account menu; invitation expiry selector and
+  accepted/revoked/created timestamps; API keys read "No expiry" / "Never
+  rotated" instead of a dash; route draft provenance and revision anchors;
+  activation now adopts the returned `draft_etag`.
+- Numbers, byte sizes and timestamps are formatted in a fixed locale so they
+  read the same on every operator's machine.
 - `ReadOnlyNote` component replaces 12 copies of the same markup;
   `ReauthenticateDialog` unit tests; eslint now checks `.svelte` scripts and
   `noUnusedLocals` is on.
@@ -65,13 +90,25 @@ schema found in the same audit are gone.
   `decode_video_content`, the superseded domain-level last-owner check, and
   never-read `AcceptedInvitation` fields. Test-only store/engine helpers are
   gated behind `test-util`.
-- Migrations 0038-0040: orphaned cursor indexes, the dead per-browser OIDC
-  limiter column and scope, `request_metadata_loss_reporter_state`, and the
-  duplicate `attempt_usage_facts.attempt_{started,completed}_at` columns.
+- Migrations 0038 and 0039 retire dead schema: the orphaned `(created_at, id)`
+  cursor indexes, the `usage_facts` route index, the redundant outbox pending
+  index, the per-browser OIDC limiter indexes and its security-context
+  requirement, the `client` public-auth rate-limit scope, and the `probed`
+  capability source (surviving `probed` rows are rewritten to `declared`).
+  `oidc_authorization_flows.client_digest`,
+  `request_metadata_loss_reporter_state` and
+  `attempt_usage_facts.attempt_{started,completed}_at` are deliberately not
+  dropped: the 2.0.1 binary still names all three in its own writes, so 0039
+  only drops the two columns' NOT NULL and the drops themselves ship in a
+  later release.
 
 ### Changed
+- Credential rotation, model discovery and capability review carry the
+  `state <> 'disabled'` guard in the UPDATE itself, matching the draft-save
+  path, so none of them can park a disabled provider back in `draft` without
+  `restore_as_draft`.
 - A test asserts every mounted management route appears in the OpenAPI
-  document.
+  document, and that every management source file mounting routes is parsed.
 
 ## [2.0.1] - 2026-08-25
 
