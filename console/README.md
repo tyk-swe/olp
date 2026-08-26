@@ -27,6 +27,10 @@ start.
 | `pnpm test:integration` | Production build through the Rust server |
 | `pnpm screenshots` | Regenerate `../docs/assets/screenshots/` |
 
+Unit tests run under `TZ=America/New_York`, a zone with a nonzero UTC offset
+and daylight saving, so local-time formatting is asserted against literal
+instants that a UTC-only machine cannot accidentally satisfy.
+
 Management requests use the generated `openapi-fetch` client. After changing
 `../openapi/management.json`, run `pnpm api:generate`; `pnpm api:check` fails
 when the checked-in TypeScript schema is stale. Never hand-edit
@@ -36,7 +40,11 @@ when the checked-in TypeScript schema is stale. Never hand-edit
 
 `src/lib/features/` contains independent gateway, access, operations, and
 settings slices. ESLint rejects cross-slice imports; put shared code in a
-neutral `$lib` module and keep `src/routes/(console)/` files thin. The console
+neutral `$lib` module and keep `src/routes/(console)/` files thin. The
+TypeScript recommended rules apply to `<script lang="ts">` blocks as well as
+`.ts` modules, so an unused import or local in a component fails lint;
+`prefer-const` is off there because runes declare their bindings with `let`.
+`tsconfig.json` sets `noUnusedLocals` and `noUnusedParameters`. The console
 must remain a client-only `adapter-static` application: do not add server
 routes, server hooks, `lib/server/`, or a production Node adapter.
 
