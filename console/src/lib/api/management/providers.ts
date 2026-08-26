@@ -1,6 +1,11 @@
 import type { components } from '../schema';
 import { apiClient } from '../client';
 import { ApiProblem, result } from '../http';
+import {
+  PROVIDER_CREDENTIAL_PAGE_SIZE,
+  PROVIDER_PAGE_SIZE,
+  PROVIDER_REVISION_PAGE_SIZE
+} from '../pageSizes';
 import { collectCursorPages, type CursorPage } from '../pagination';
 
 type Schemas = components['schemas'];
@@ -64,7 +69,7 @@ export async function listProviderPage(
   signal?: AbortSignal
 ): Promise<CursorPage<ProviderSummary>> {
   const response = await apiClient.GET('/api/v1/providers', {
-    params: { query: { limit: 50, cursor } },
+    params: { query: { limit: PROVIDER_PAGE_SIZE, cursor } },
     signal
   });
   const page = result(response.data, response.error, response.response);
@@ -81,7 +86,7 @@ export async function listProviderModelPage(
     {
       params: {
         path: { provider_id: providerId },
-        query: { limit: 50, cursor }
+        query: { limit: PROVIDER_PAGE_SIZE, cursor }
       },
       signal
     }
@@ -96,7 +101,7 @@ export async function listProviderModelInventoryPage(
   signal?: AbortSignal
 ): Promise<CursorPage<ProviderModelInventory>> {
   const response = await apiClient.GET('/api/v1/provider-models', {
-    params: { query: { limit: 50, cursor, enabled } },
+    params: { query: { limit: PROVIDER_PAGE_SIZE, cursor, enabled } },
     signal
   });
   const page = result(response.data, response.error, response.response);
@@ -327,7 +332,7 @@ export async function listProviderRevisionPage(
     {
       params: {
         path: { provider_id: providerId },
-        query: { cursor, limit: 25 }
+        query: { cursor, limit: PROVIDER_REVISION_PAGE_SIZE }
       },
       signal
     }
@@ -364,7 +369,7 @@ export async function listProviderRevisionModelPage(
     {
       params: {
         path: { provider_id: providerId, revision_id: revisionId },
-        query: { cursor, limit: 25 }
+        query: { cursor, limit: PROVIDER_REVISION_PAGE_SIZE }
       },
       signal
     }
@@ -429,7 +434,10 @@ async function listProviderCredentialPage(
   const response = await apiClient.GET(
     '/api/v1/providers/{provider_id}/credentials',
     {
-      params: { path: { provider_id: id }, query: { cursor, limit: 100 } },
+      params: {
+        path: { provider_id: id },
+        query: { cursor, limit: PROVIDER_CREDENTIAL_PAGE_SIZE }
+      },
       signal
     }
   );

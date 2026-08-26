@@ -1,3 +1,5 @@
+import { validatePasswordPolicy } from '$lib/passwordPolicy';
+
 export type OwnerFormValues = {
   displayName: string;
   installationName: string;
@@ -14,7 +16,8 @@ export function validateOwner(values: OwnerFormValues): OwnerFormErrors {
   const email = values.email.trim();
   const installationName = values.installationName.trim();
   if (!displayName) errors.displayName = 'Enter a display name.';
-  else if (displayName.length > 100) errors.displayName = 'Use 100 characters or fewer.';
+  else if (displayName.length > 100)
+    errors.displayName = 'Use 100 characters or fewer.';
   // An empty installation name is omitted from the request so the API applies
   // its own default; only a name the operator actually typed is length-checked.
   if (installationName.length > 100) {
@@ -25,12 +28,10 @@ export function validateOwner(values: OwnerFormValues): OwnerFormErrors {
   else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
     errors.email = 'Enter a valid email address.';
   } else if (email.length > 254) errors.email = 'Use 254 characters or fewer.';
-  const passwordValid = values.password.length >= 12 && values.password.length <= 1024;
-  if (values.password.length < 12) errors.password = 'Use at least 12 characters.';
-  else if (values.password.length > 1024) errors.password = 'Use 1,024 characters or fewer.';
-  if (passwordValid && values.password !== values.confirmPassword) {
-    errors.confirmPassword = 'Passwords do not match.';
-  }
+  Object.assign(
+    errors,
+    validatePasswordPolicy(values.password, values.confirmPassword)
+  );
   if (!values.setupToken) errors.setupToken = 'Enter the setup token.';
   return errors;
 }

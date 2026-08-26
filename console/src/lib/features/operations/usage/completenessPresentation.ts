@@ -29,9 +29,9 @@ export function presentUsageCompleteness(
   completeness: UsageCompleteness
 ): UsageCompletenessPresentation {
   if (
-    completeness.complete
-    && completeness.unpriced_count === 0
-    && !completeness.coverage.approximate
+    completeness.complete &&
+    completeness.unpriced_count === 0 &&
+    !completeness.coverage.approximate
   ) {
     return { kind: 'complete' };
   }

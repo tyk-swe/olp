@@ -8,7 +8,7 @@
   } from '$lib/api/management/access';
   import { authLifecycle } from '$lib/auth/lifecycle';
   import { useRole } from '$lib/auth/useRole.svelte';
-  import { errorMessage as accessErrorMessage } from '$lib/api/http';
+  import { errorMessage } from '$lib/api/http';
   import {
     cursorPaginationProps,
     emptyCursorHistory,
@@ -62,7 +62,7 @@
       await sessions.refetch();
       notice = 'Session revoked.';
     } catch (cause) {
-      error = accessErrorMessage(cause);
+      error = errorMessage(cause);
     } finally {
       busy = '';
     }
@@ -97,7 +97,7 @@
   <div class="loading-state" role="status">Loading sessions…</div>
 {:else if sessions.isError}
   <div class="inline-problem" role="alert">
-    {accessErrorMessage(sessions.error)}
+    {errorMessage(sessions.error)}
   </div>
 {:else if !sessions.data?.items.length && pagination.history.length === 0}
   <section class="card empty-state">

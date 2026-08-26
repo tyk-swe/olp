@@ -13,7 +13,7 @@
   let {
     editing,
     busy,
-    errorMessage,
+    submitError,
     canManage,
     onSubmit,
     onCancel,
@@ -21,7 +21,7 @@
   }: {
     editing: ApiKey | null;
     busy: string;
-    errorMessage: string;
+    submitError: string;
     canManage: boolean;
     onSubmit: (
       input: ApiKeyPolicyInput,
@@ -131,8 +131,8 @@
       >Cancel</a
     >{/if}
 </div>
-{#if errorMessage || formError}<div class="inline-problem" role="alert">
-    {errorMessage || formError}
+{#if submitError || formError}<div class="inline-problem" role="alert">
+    {submitError || formError}
   </div>{/if}
 {#if !canManage}
   <ReadOnlyNote>

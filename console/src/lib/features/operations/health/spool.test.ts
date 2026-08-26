@@ -14,6 +14,8 @@ describe('spoolUsage', () => {
   });
 
   it('states used, total, and share in binary units', () => {
-    expect(spoolUsage(536_870_912, 1_073_741_824)).toBe('512 MiB of 1.00 GiB (50.0%)');
+    expect(spoolUsage(536_870_912, 1_073_741_824)).toBe(
+      '512 MiB of 1.00 GiB (50.0%)'
+    );
   });
 });

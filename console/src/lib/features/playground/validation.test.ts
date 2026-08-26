@@ -8,7 +8,9 @@ import {
 
 describe('playground JSON fields', () => {
   it('accepts tools only as an array', () => {
-    expect(parseTools('[{"name":"weather","input_schema":{}}]')).toHaveLength(1);
+    expect(parseTools('[{"name":"weather","input_schema":{}}]')).toHaveLength(
+      1
+    );
     expect(() => parseTools('{"type":"function"}')).toThrow('array');
   });
 
@@ -58,9 +60,15 @@ describe('playground sampling fields', () => {
   });
 
   it('rejects a temperature the backend would reject', () => {
-    expect(() => parseTemperature('-0.1')).toThrow('Temperature must be from 0 through 2.');
-    expect(() => parseTemperature('2.1')).toThrow('Temperature must be from 0 through 2.');
-    expect(() => parseTemperature('warm')).toThrow('Temperature must be from 0 through 2.');
+    expect(() => parseTemperature('-0.1')).toThrow(
+      'Temperature must be from 0 through 2.'
+    );
+    expect(() => parseTemperature('2.1')).toThrow(
+      'Temperature must be from 0 through 2.'
+    );
+    expect(() => parseTemperature('warm')).toThrow(
+      'Temperature must be from 0 through 2.'
+    );
   });
 
   it('accepts the inclusive output-token bounds', () => {

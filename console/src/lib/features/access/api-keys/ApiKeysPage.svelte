@@ -3,7 +3,7 @@
   import { resolve } from '$app/paths';
   import { onDestroy } from 'svelte';
   import { useQueryClient } from '@tanstack/svelte-query';
-  import { errorMessage as message } from '$lib/api/http';
+  import { errorMessage } from '$lib/api/http';
   import { useRole } from '$lib/auth/useRole.svelte';
   import {
     createApiKey,
@@ -30,7 +30,7 @@
   const canManage = $derived(access.can('api_keys.manage'));
   let editing = $state<ApiKey | null>(null);
   let busy = $state('');
-  let errorMessage = $state('');
+  let submitError = $state('');
   let notice = $state('');
   let secret = $state<ApiKeySecret | null>(null);
   let secretContext = $state<'created' | 'rotated'>('created');
@@ -43,18 +43,18 @@
 
   function edit(key: ApiKey) {
     editing = key;
-    errorMessage = notice = '';
+    submitError = notice = '';
   }
 
   function cancelEdit() {
     editing = null;
-    errorMessage = '';
+    submitError = '';
   }
 
   async function submit(input: ApiKeyPolicyInput, route?: string) {
     if (!canManage) return false;
     busy = editing ? 'update' : 'create';
-    errorMessage = notice = '';
+    submitError = notice = '';
     try {
       if (editing) {
         const keyName = editing.name;
@@ -72,7 +72,7 @@
       ]);
       return true;
     } catch (error) {
-      errorMessage = message(error);
+      submitError = errorMessage(error);
       return false;
     } finally {
       busy = '';
@@ -107,17 +107,17 @@
   <ApiKeyPolicyForm
     {editing}
     {busy}
-    {errorMessage}
+    {submitError}
     {canManage}
     onSubmit={submit}
     onCancel={cancelEdit}
-    onClearError={() => (errorMessage = '')}
+    onClearError={() => (submitError = '')}
   />
 {:else}
   <ApiKeyInventory
     {listState}
     {notice}
-    {errorMessage}
+    {submitError}
     {canManage}
     onEdit={edit}
     onSecret={showRotatedSecret}

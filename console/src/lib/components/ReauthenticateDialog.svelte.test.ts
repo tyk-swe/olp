@@ -39,14 +39,18 @@ beforeEach(() => {
 afterEach(() => {
   host.remove();
   for (const [name, descriptor] of originalMethods) {
-    if (descriptor) Object.defineProperty(HTMLDialogElement.prototype, name, descriptor);
+    if (descriptor)
+      Object.defineProperty(HTMLDialogElement.prototype, name, descriptor);
     else delete dialogPrototype[name];
   }
   originalMethods.clear();
 });
 
 function render(accepts = correctPassword) {
-  const component = mount(ReauthenticateProbe, { target: host, props: { accepts } });
+  const component = mount(ReauthenticateProbe, {
+    target: host,
+    props: { accepts }
+  });
   flushSync();
   return component;
 }

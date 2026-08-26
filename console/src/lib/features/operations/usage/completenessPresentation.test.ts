@@ -88,9 +88,9 @@ describe('presentUsageCompleteness', () => {
 
   it('omits the approximation note for an exact range', () => {
     const presentation = presentUsageCompleteness(incompleteUsage());
-    expect(presentation.kind === 'warning' && presentation.detail).not.toContain(
-      'approximate'
-    );
+    expect(
+      presentation.kind === 'warning' && presentation.detail
+    ).not.toContain('approximate');
   });
 
   it.each<[string, UsageCompleteness, string, boolean]>([

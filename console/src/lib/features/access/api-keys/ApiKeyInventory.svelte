@@ -1,7 +1,7 @@
 <script lang="ts">
   import { resolve } from '$app/paths';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
-  import { errorMessage as message } from '$lib/api/http';
+  import { errorMessage } from '$lib/api/http';
   import { cursorPaginationProps } from '$lib/api/pagination';
   import {
     listApiKeyPage,
@@ -19,14 +19,14 @@
   let {
     listState,
     notice,
-    errorMessage,
+    submitError,
     canManage,
     onEdit,
     onSecret
   }: {
     listState: ApiKeyListState;
     notice: string;
-    errorMessage: string;
+    submitError: string;
     canManage: boolean;
     onEdit: (key: ApiKey) => void;
     onSecret: (secret: ApiKeySecret, preferredRoute?: string) => void;
@@ -61,7 +61,7 @@
       onSecret(await rotateApiKey(key), key.allowed_routes[0]);
       await refreshKeyConsumers();
     } catch (error) {
-      mutationError = message(error);
+      mutationError = errorMessage(error);
     } finally {
       busy = '';
     }
@@ -75,7 +75,7 @@
       await revokeApiKey(key);
       await refreshKeyConsumers();
     } catch (error) {
-      mutationError = message(error);
+      mutationError = errorMessage(error);
     } finally {
       busy = '';
     }
@@ -101,8 +101,8 @@
     Your role can view API keys but not create, edit, rotate, or revoke them.
   </ReadOnlyNote>
 {/if}
-{#if errorMessage || mutationError}<div class="inline-problem" role="alert">
-    {errorMessage || mutationError}
+{#if submitError || mutationError}<div class="inline-problem" role="alert">
+    {submitError || mutationError}
   </div>{/if}
 {#if notice}<div class="success-message" role="status">{notice}</div>{/if}
 
@@ -110,7 +110,7 @@
   <div class="loading-state" role="status">Loading API keys…</div>
 {:else if keys.isError}
   <div class="inline-problem" role="alert">
-    {message(keys.error)}
+    {errorMessage(keys.error)}
     <button
       class="button button-secondary"
       type="button"

@@ -34,15 +34,22 @@ describe('owner setup validation', () => {
   });
 
   it('accepts a blank installation name and rejects an over-long one', () => {
-    expect(validateOwner({ ...validOwner, installationName: '  Acme Platform  ' })).toEqual({});
-    expect(validateOwner({ ...validOwner, installationName: 'n'.repeat(101) })).toEqual({
+    expect(
+      validateOwner({ ...validOwner, installationName: '  Acme Platform  ' })
+    ).toEqual({});
+    expect(
+      validateOwner({ ...validOwner, installationName: 'n'.repeat(101) })
+    ).toEqual({
       installationName: 'Use 100 characters or fewer.'
     });
   });
 
   it('attaches a password mismatch to the confirmation field', () => {
     expect(
-      validateOwner({ ...validOwner, confirmPassword: 'a different secure phrase' })
+      validateOwner({
+        ...validOwner,
+        confirmPassword: 'a different secure phrase'
+      })
     ).toEqual({ confirmPassword: 'Passwords do not match.' });
   });
 });

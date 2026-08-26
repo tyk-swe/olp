@@ -7,7 +7,7 @@
     type User
   } from '$lib/api/management/access';
   import type { CursorPage } from '$lib/api/pagination';
-  import { errorMessage as accessErrorMessage } from '$lib/api/http';
+  import { errorMessage } from '$lib/api/http';
   import {
     cursorPaginationProps,
     emptyCursorHistory
@@ -39,7 +39,7 @@
       await action();
       return true;
     } catch (cause) {
-      error = accessErrorMessage(cause);
+      error = errorMessage(cause);
       return false;
     } finally {
       busy = '';
@@ -119,7 +119,7 @@
   <div class="loading-state" role="status">Loading members…</div>
 {:else if users.isError}
   <div class="inline-problem" role="alert">
-    {accessErrorMessage(users.error)}
+    {errorMessage(users.error)}
     <button
       class="button button-secondary"
       type="button"

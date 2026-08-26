@@ -4,6 +4,7 @@
   import { page } from '$app/state';
   import { onMount } from 'svelte';
   import { currentSession, logout } from '$lib/api/auth';
+  import { errorMessage } from '$lib/api/http';
   import { getSetupStatus } from '$lib/api/setup';
   import { authLifecycle } from '$lib/auth/lifecycle';
   import type { AuthenticationSnapshot } from '$lib/auth/state';
@@ -32,10 +33,10 @@
         resolve('/login')
       );
     } catch (error) {
-      signOutError =
-        error instanceof Error
-          ? error.message
-          : 'The sign-out request could not be completed.';
+      signOutError = errorMessage(
+        error,
+        'The sign-out request could not be completed.'
+      );
     } finally {
       signingOut = false;
     }
@@ -95,7 +96,9 @@
   <main class="session-gate" aria-busy={authentication.phase === 'anonymous'}>
     {#if authentication.phase === 'anonymous'}
       <!-- Anonymous here means the redirect to login is still being resolved. -->
-      <p role="status"><span aria-hidden="true"></span>Verifying your session…</p>
+      <p role="status">
+        <span aria-hidden="true"></span>Verifying your session…
+      </p>
     {:else if authentication.phase === 'unavailable'}
       <div class="problem-banner" role="alert">
         <div>

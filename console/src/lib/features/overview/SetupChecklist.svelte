@@ -12,35 +12,80 @@
     href: string;
   };
 
-  const providers = createQuery(() => ({ queryKey: ['providers'], queryFn: ({ signal }) => listProviders(signal) }));
-  const routes = createQuery(() => ({ queryKey: ['routes'], queryFn: ({ signal }) => listRoutes(signal) }));
-  const keys = createQuery(() => ({ queryKey: ['api-keys'], queryFn: ({ signal }) => listApiKeys(signal) }));
+  const providers = createQuery(() => ({
+    queryKey: ['providers'],
+    queryFn: ({ signal }) => listProviders(signal)
+  }));
+  const routes = createQuery(() => ({
+    queryKey: ['routes'],
+    queryFn: ({ signal }) => listRoutes(signal)
+  }));
+  const keys = createQuery(() => ({
+    queryKey: ['api-keys'],
+    queryFn: ({ signal }) => listApiKeys(signal)
+  }));
 
-  const loading = $derived(providers.isPending || routes.isPending || keys.isPending);
+  const loading = $derived(
+    providers.isPending || routes.isPending || keys.isPending
+  );
   const failed = $derived(providers.isError || routes.isError || keys.isError);
   const settled = $derived(!loading && !failed);
-  const completed = $derived(settled ? [
-    true,
-    Boolean(providers.data?.some((provider) => provider.active_revision != null)),
-    Boolean(providers.data?.some((provider) => provider.enabled_model_count > 0)),
-    Boolean(routes.data?.length),
-    Boolean(keys.data?.some((key) => !key.revoked_at))
-  ] : []);
+  const completed = $derived(
+    settled
+      ? [
+          true,
+          Boolean(
+            providers.data?.some((provider) => provider.active_revision != null)
+          ),
+          Boolean(
+            providers.data?.some((provider) => provider.enabled_model_count > 0)
+          ),
+          Boolean(routes.data?.length),
+          Boolean(keys.data?.some((key) => !key.revoked_at))
+        ]
+      : []
+  );
   const completeCount = $derived(completed.filter(Boolean).length);
   const currentIndex = $derived(completed.findIndex((value) => !value));
   const definitions = [
-    ['Create the installation owner', 'Local authentication is ready.', '/settings/profile'],
-    ['Connect and activate a provider', 'Add a write-only credential and verify upstream reachability.', '/providers/new'],
-    ['Review discovered models', 'Enable only certified model capabilities you intend to expose.', '/models'],
-    ['Build and activate a route', 'Simulate deterministic target selection before activation.', '/routes/new'],
-    ['Create your first API key', 'The full secret is shown once after creation.', '/api-keys/new']
+    [
+      'Create the installation owner',
+      'Local authentication is ready.',
+      '/settings/profile'
+    ],
+    [
+      'Connect and activate a provider',
+      'Add a write-only credential and verify upstream reachability.',
+      '/providers/new'
+    ],
+    [
+      'Review discovered models',
+      'Enable only certified model capabilities you intend to expose.',
+      '/models'
+    ],
+    [
+      'Build and activate a route',
+      'Simulate deterministic target selection before activation.',
+      '/routes/new'
+    ],
+    [
+      'Create your first API key',
+      'The full secret is shown once after creation.',
+      '/api-keys/new'
+    ]
   ] as const;
-  const steps = $derived<Step[]>(definitions.map((definition, index) => ({
-    label: definition[0],
-    description: definition[1],
-    href: definition[2],
-    status: completed[index] ? 'complete' : index === currentIndex ? 'current' : 'upcoming'
-  })));
+  const steps = $derived<Step[]>(
+    definitions.map((definition, index) => ({
+      label: definition[0],
+      description: definition[1],
+      href: definition[2],
+      status: completed[index]
+        ? 'complete'
+        : index === currentIndex
+          ? 'current'
+          : 'upcoming'
+    }))
+  );
 
   function refresh() {
     void Promise.all([providers.refetch(), routes.refetch(), keys.refetch()]);
@@ -53,27 +98,54 @@
       <p class="eyebrow">Getting started</p>
       <h2 id="setup-checklist-title">Publish your first route</h2>
     </div>
-    <span class="completion">{loading ? 'Checking…' : failed ? 'Unknown' : `${completeCount} of 5`}</span>
+    <span class="completion"
+      >{loading
+        ? 'Checking…'
+        : failed
+          ? 'Unknown'
+          : `${completeCount} of 5`}</span
+    >
   </div>
 
-  <div class="progress" role="progressbar" aria-label="Installation setup" aria-valuemin="0" aria-valuemax="5" aria-valuenow={settled ? completeCount : undefined}>
+  <div
+    class="progress"
+    role="progressbar"
+    aria-label="Installation setup"
+    aria-valuemin="0"
+    aria-valuemax="5"
+    aria-valuenow={settled ? completeCount : undefined}
+  >
     <span class={`progress-${completeCount}`}></span>
   </div>
 
   {#if failed}
-    <div class="check-error" role="alert">Setup progress could not be refreshed. <button type="button" onclick={refresh}>Try again</button></div>
+    <div class="check-error" role="alert">
+      Setup progress could not be refreshed. <button
+        type="button"
+        onclick={refresh}>Try again</button
+      >
+    </div>
   {/if}
 
   <ol>
     {#each steps as step, index (step.href)}
-      <li class:complete={step.status === 'complete'} class:current={step.status === 'current'}>
+      <li
+        class:complete={step.status === 'complete'}
+        class:current={step.status === 'current'}
+      >
         <span class="step-marker" aria-hidden="true">
           {step.status === 'complete' ? '✓' : index + 1}
         </span>
         <div>
-          <a href={step.href} aria-current={step.status === 'current' ? 'step' : undefined}>
+          <a
+            href={step.href}
+            aria-current={step.status === 'current' ? 'step' : undefined}
+          >
             {step.label}
-            {#if step.status === 'current'}<NavIcon name="arrow" size={17} />{/if}
+            {#if step.status === 'current'}<NavIcon
+                name="arrow"
+                size={17}
+              />{/if}
           </a>
           <p>{step.description}</p>
         </div>
@@ -126,20 +198,32 @@
     background: var(--accent);
   }
 
-  .progress-0 { width: 0; }
-  .progress-1 { width: 20%; }
-  .progress-2 { width: 40%; }
-  .progress-3 { width: 60%; }
-  .progress-4 { width: 80%; }
-  .progress-5 { width: 100%; }
+  .progress-0 {
+    width: 0;
+  }
+  .progress-1 {
+    width: 20%;
+  }
+  .progress-2 {
+    width: 40%;
+  }
+  .progress-3 {
+    width: 60%;
+  }
+  .progress-4 {
+    width: 80%;
+  }
+  .progress-5 {
+    width: 100%;
+  }
 
   .check-error {
-    margin-top: .75rem;
-    padding: .65rem .75rem;
-    border-radius: .375rem;
+    margin-top: 0.75rem;
+    padding: 0.65rem 0.75rem;
+    border-radius: 0.375rem;
     background: var(--danger-soft);
     color: var(--danger);
-    font-size: .75rem;
+    font-size: 0.75rem;
   }
 
   .check-error button {

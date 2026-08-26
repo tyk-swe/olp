@@ -20,12 +20,12 @@ start.
 
 ## Commands
 
-| Command | Purpose |
-|---|---|
-| `pnpm verify` | API drift, tests, lint, types, and build |
-| `pnpm test:e2e` | Chromium, Firefox, WebKit, and mobile browser tests |
-| `pnpm test:integration` | Production build through the Rust server |
-| `pnpm screenshots` | Regenerate `../docs/assets/screenshots/` |
+| Command                 | Purpose                                             |
+| ----------------------- | --------------------------------------------------- |
+| `pnpm verify`           | API drift, tests, lint, types, and build            |
+| `pnpm test:e2e`         | Chromium, Firefox, WebKit, and mobile browser tests |
+| `pnpm test:integration` | Production build through the Rust server            |
+| `pnpm screenshots`      | Regenerate `../docs/assets/screenshots/`            |
 
 Unit tests run under `TZ=America/New_York`, a zone with a nonzero UTC offset
 and daylight saving, so local-time formatting is asserted against literal

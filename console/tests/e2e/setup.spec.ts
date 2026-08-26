@@ -1,7 +1,14 @@
 import AxeBuilder from '@axe-core/playwright';
-import { denyClipboard, emulateTwoHundredPercentZoom, expect, test } from '../playwright';
+import {
+  denyClipboard,
+  emulateTwoHundredPercentZoom,
+  expect,
+  test
+} from '../playwright';
 
-test('creates the first owner through the local setup contract', async ({ page }) => {
+test('creates the first owner through the local setup contract', async ({
+  page
+}) => {
   await page.emulateMedia({ forcedColors: 'active', reducedMotion: 'reduce' });
   await denyClipboard(page);
   let setupComplete = false;
@@ -16,7 +23,11 @@ test('creates the first owner through the local setup contract', async ({ page }
       await route.fulfill({
         status: 401,
         contentType: 'application/problem+json',
-        json: { type: 'about:blank', title: 'Authentication required', status: 401 }
+        json: {
+          type: 'about:blank',
+          title: 'Authentication required',
+          status: 401
+        }
       });
       return;
     }
@@ -32,9 +43,15 @@ test('creates the first owner through the local setup contract', async ({ page }
       }
     });
   });
-  await page.route('**/api/v1/providers*', async (route) => route.fulfill({ json: { items: [], next_cursor: null } }));
-  await page.route('**/api/v1/routes*', async (route) => route.fulfill({ json: { items: [], next_cursor: null } }));
-  await page.route('**/api/v1/requests*', async (route) => route.fulfill({ json: { data: [], next_cursor: null } }));
+  await page.route('**/api/v1/providers*', async (route) =>
+    route.fulfill({ json: { items: [], next_cursor: null } })
+  );
+  await page.route('**/api/v1/routes*', async (route) =>
+    route.fulfill({ json: { items: [], next_cursor: null } })
+  );
+  await page.route('**/api/v1/requests*', async (route) =>
+    route.fulfill({ json: { data: [], next_cursor: null } })
+  );
   await page.route('**/api/v1/setup', async (route) => {
     if (route.request().method() !== 'POST') return route.fallback();
     submittedBody = route.request().postDataJSON();
@@ -57,7 +74,9 @@ test('creates the first owner through the local setup contract', async ({ page }
   await emulateTwoHundredPercentZoom(page);
   await page.goto('/');
   await expect(page).toHaveURL(/\/setup$/);
-  await expect(page.getByRole('heading', { name: 'Create your account' })).toBeVisible();
+  await expect(
+    page.getByRole('heading', { name: 'Create your account' })
+  ).toBeVisible();
 
   const accessibility = await new AxeBuilder({ page }).analyze();
   expect(accessibility.violations).toEqual([]);
@@ -65,15 +84,25 @@ test('creates the first owner through the local setup contract', async ({ page }
   await page.getByLabel('Display name').fill('Ada Owner');
   await page.getByLabel('Installation name').fill('Acme Platform');
   await page.getByLabel('Work email').fill('owner@example.com');
-  await page.getByLabel('Password', { exact: true }).fill('correct horse battery staple');
-  await page.getByLabel('Confirm password').fill('correct horse battery staple');
+  await page
+    .getByLabel('Password', { exact: true })
+    .fill('correct horse battery staple');
+  await page
+    .getByLabel('Confirm password')
+    .fill('correct horse battery staple');
   await page.getByLabel('Setup token').fill('test-bootstrap-token');
   await page.getByRole('button', { name: 'Create owner account' }).click();
 
   await expect(page).toHaveURL(/\/$/);
-  await expect(page.getByRole('heading', { name: 'Bring your first model route online.' })).toBeVisible();
-  await page.getByRole('button', { name: 'Copy OpenAI-compatible base URL' }).click();
-  await expect(page.getByRole('alert')).toContainText('Clipboard access is unavailable. Copy the URL manually.');
+  await expect(
+    page.getByRole('heading', { name: 'Bring your first model route online.' })
+  ).toBeVisible();
+  await page
+    .getByRole('button', { name: 'Copy OpenAI-compatible base URL' })
+    .click();
+  await expect(page.getByRole('alert')).toContainText(
+    'Clipboard access is unavailable. Copy the URL manually.'
+  );
   const overviewAccessibility = await new AxeBuilder({ page }).analyze();
   expect(overviewAccessibility.violations).toEqual([]);
   expect(submittedBody).toEqual({
@@ -86,7 +115,9 @@ test('creates the first owner through the local setup contract', async ({ page }
   expect(submittedHeaders['x-olp-setup-token']).toBe('test-bootstrap-token');
 });
 
-test('setup form validation is keyboard-visible and specific', async ({ page }) => {
+test('setup form validation is keyboard-visible and specific', async ({
+  page
+}) => {
   await page.route('**/api/v1/setup/status', async (route) => {
     await route.fulfill({ json: { setup_required: true } });
   });
@@ -100,7 +131,9 @@ test('setup form validation is keyboard-visible and specific', async ({ page }) 
   await expect(page.getByText('Enter the setup token.')).toBeVisible();
 });
 
-test('a blank installation name is left out so the API applies its default', async ({ page }) => {
+test('a blank installation name is left out so the API applies its default', async ({
+  page
+}) => {
   let submittedBody: unknown;
   await page.route('**/api/v1/setup/status', async (route) => {
     await route.fulfill({ json: { setup_required: true } });
@@ -120,8 +153,12 @@ test('a blank installation name is left out so the API applies its default', asy
   await page.goto('/setup');
   await page.getByLabel('Display name').fill('Ada Owner');
   await page.getByLabel('Work email').fill('owner@example.com');
-  await page.getByLabel('Password', { exact: true }).fill('correct horse battery staple');
-  await page.getByLabel('Confirm password').fill('correct horse battery staple');
+  await page
+    .getByLabel('Password', { exact: true })
+    .fill('correct horse battery staple');
+  await page
+    .getByLabel('Confirm password')
+    .fill('correct horse battery staple');
   await page.getByLabel('Setup token').fill('test-bootstrap-token');
   await page.getByRole('button', { name: 'Create owner account' }).click();
 

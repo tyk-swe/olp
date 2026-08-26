@@ -7,7 +7,9 @@ type Schemas = components['schemas'];
 export type OidcConfiguration = Schemas['OidcConfigurationResponse'];
 export type OidcConfigurationInput = Schemas['OidcConfigurationRequest'];
 
-export async function getOidcConfiguration(signal?: AbortSignal): Promise<OidcConfiguration | null> {
+export async function getOidcConfiguration(
+  signal?: AbortSignal
+): Promise<OidcConfiguration | null> {
   const response = await apiClient.GET('/api/v1/oidc/configuration', {
     signal
   });
@@ -28,5 +30,6 @@ export async function putOidcConfiguration(
 
 export async function beginOidcLink(): Promise<string> {
   const response = await apiClient.POST('/api/v1/oidc/link');
-  return result(response.data, response.error, response.response).authorization_url;
+  return result(response.data, response.error, response.response)
+    .authorization_url;
 }

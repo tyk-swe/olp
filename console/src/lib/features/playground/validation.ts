@@ -26,24 +26,30 @@ export function parseTools(value: string) {
         Object.hasOwn(tool, 'input_schema')
     )
   ) {
-    throw new Error('Tools must be an array of name, description, and input_schema objects.');
+    throw new Error(
+      'Tools must be an array of name, description, and input_schema objects.'
+    );
   }
   return parsed.map((tool) => {
     const source = tool as Record<string, unknown>;
     return {
       name: (source.name as string).trim(),
-      ...(source.description === undefined ? {} : { description: source.description as string }),
+      ...(source.description === undefined
+        ? {}
+        : { description: source.description as string }),
       input_schema: source.input_schema
     } satisfies PlaygroundTool;
   });
 }
 
-export function parseResponseSchema(value: string): {
-  type: 'json_schema';
-  name: string;
-  strict: true;
-  schema: Record<string, unknown>;
-} | undefined {
+export function parseResponseSchema(value: string):
+  | {
+      type: 'json_schema';
+      name: string;
+      strict: true;
+      schema: Record<string, unknown>;
+    }
+  | undefined {
   if (!value.trim()) return undefined;
   const schema = parseJson(value);
   if (typeof schema !== 'object' || schema === null || Array.isArray(schema)) {

@@ -1,5 +1,6 @@
 import { createContext } from 'svelte';
 import type { MediaJobFilters } from '$lib/api/media-jobs';
+import { MEDIA_JOB_PAGE_SIZE } from '$lib/api/pageSizes';
 import { emptyCursorHistory, type CursorHistory } from '$lib/api/pagination';
 import { instant } from '$lib/api/query';
 
@@ -13,9 +14,6 @@ export type MediaJobListState = CursorHistory & {
   createdBefore: string;
   applied: Omit<MediaJobFilters, 'cursor'>;
 };
-
-/** Media jobs carry more columns than requests, so a page is shorter. */
-export const MEDIA_JOB_PAGE_SIZE = 25;
 
 export const [getMediaJobListState, setMediaJobListState] =
   createContext<MediaJobListState>();

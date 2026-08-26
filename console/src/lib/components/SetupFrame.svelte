@@ -18,15 +18,19 @@
       <p class="eyebrow">Private AI gateway</p>
       <h1 id="setup-introduction">One control point for every model route.</h1>
       <p>
-        Connect providers, publish stable routes, and issue installation-scoped keys without storing
-        prompts or model output.
+        Connect providers, publish stable routes, and issue installation-scoped
+        keys without storing prompts or model output.
       </p>
     </div>
 
     <ul aria-label="Installation properties">
       <li><span aria-hidden="true">✓</span> Runs inside your infrastructure</li>
-      <li><span aria-hidden="true">✓</span> Metadata-only operational history</li>
-      <li><span aria-hidden="true">✓</span> OpenAI, Anthropic, and Gemini surfaces</li>
+      <li>
+        <span aria-hidden="true">✓</span> Metadata-only operational history
+      </li>
+      <li>
+        <span aria-hidden="true">✓</span> OpenAI, Anthropic, and Gemini surfaces
+      </li>
     </ul>
   </section>
 
@@ -50,7 +54,11 @@
     padding: clamp(2rem, 5vw, 4.5rem);
     border-right: 1px solid var(--sidebar-border);
     background:
-      radial-gradient(circle at 15% 10%, rgb(23 103 207 / 32%), transparent 34rem),
+      radial-gradient(
+        circle at 15% 10%,
+        rgb(23 103 207 / 32%),
+        transparent 34rem
+      ),
       linear-gradient(160deg, #0d2246 0%, var(--sidebar-bg) 58%);
   }
 

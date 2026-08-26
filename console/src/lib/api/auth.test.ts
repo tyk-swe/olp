@@ -1,5 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { acceptInvitation, currentSession, login, logout, type FixedRole } from './auth';
+import {
+  acceptInvitation,
+  currentSession,
+  login,
+  logout,
+  type FixedRole
+} from './auth';
 import { ApiProblem } from './http';
 import { clearCsrfToken, getCsrfToken, setCsrfToken } from './session';
 import { captureRequests, jsonResponse } from './test/requestCapture';
@@ -37,7 +43,9 @@ describe('session API', () => {
 
   it('fails closed on an unknown role without replacing CSRF state', async () => {
     setCsrfToken('known-good-token');
-    captureRequests(() => jsonResponse(sessionResponse('administrator', 'untrusted-token')));
+    captureRequests(() =>
+      jsonResponse(sessionResponse('administrator', 'untrusted-token'))
+    );
 
     const error = await currentSession().catch((value: unknown) => value);
 
@@ -78,7 +86,10 @@ describe('session API', () => {
       jsonResponse(sessionResponse('operator', 'csrf-from-login'))
     );
 
-    const session = await login('operator@example.com', 'correct horse battery staple');
+    const session = await login(
+      'operator@example.com',
+      'correct horse battery staple'
+    );
 
     expect(new URL(requests[0]!.url).pathname).toBe('/api/v1/sessions');
     expect(requests[0]!.method).toBe('POST');
@@ -103,7 +114,9 @@ describe('session API', () => {
 
     const session = await acceptInvitation(input);
 
-    expect(new URL(requests[0]!.url).pathname).toBe('/api/v1/invitations/accept');
+    expect(new URL(requests[0]!.url).pathname).toBe(
+      '/api/v1/invitations/accept'
+    );
     expect(requests[0]!.method).toBe('POST');
     expect(JSON.parse(await requests[0]!.clone().text())).toEqual(input);
     expect(requests[0]!.headers.has('x-csrf-token')).toBe(false);
@@ -111,18 +124,23 @@ describe('session API', () => {
     expect(getCsrfToken()).toBe('pre-invitation-token');
   });
 
-  it.each([204, 401])('accepts logout status %s without owning local state', async (status) => {
-    setCsrfToken('csrf-before-logout');
-    const requests = captureRequests(() =>
-      status === 204
-        ? new Response(null, { status })
-        : jsonResponse({ title: 'No active session', status }, { status })
-    );
+  it.each([204, 401])(
+    'accepts logout status %s without owning local state',
+    async (status) => {
+      setCsrfToken('csrf-before-logout');
+      const requests = captureRequests(() =>
+        status === 204
+          ? new Response(null, { status })
+          : jsonResponse({ title: 'No active session', status }, { status })
+      );
 
-    await expect(logout()).resolves.toBeUndefined();
-    expect(requests[0]!.headers.get('x-csrf-token')).toBe('csrf-before-logout');
-    expect(getCsrfToken()).toBe('csrf-before-logout');
-  });
+      await expect(logout()).resolves.toBeUndefined();
+      expect(requests[0]!.headers.get('x-csrf-token')).toBe(
+        'csrf-before-logout'
+      );
+      expect(getCsrfToken()).toBe('csrf-before-logout');
+    }
+  );
 
   it('preserves local state when the server cannot complete logout', async () => {
     setCsrfToken('csrf-before-failed-logout');

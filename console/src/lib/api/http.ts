@@ -39,12 +39,14 @@ function optionalString(value: unknown): string | undefined {
 }
 
 function fieldErrors(value: unknown): FieldErrors | undefined {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  if (!value || typeof value !== 'object' || Array.isArray(value))
+    return undefined;
   const entries = Object.entries(value);
   if (
     !entries.every(
       ([, messages]) =>
-        Array.isArray(messages) && messages.every((message) => typeof message === 'string')
+        Array.isArray(messages) &&
+        messages.every((message) => typeof message === 'string')
     )
   ) {
     return undefined;
@@ -53,7 +55,10 @@ function fieldErrors(value: unknown): FieldErrors | undefined {
 }
 
 function apiProblem(error: unknown, response: Response): ApiProblem {
-  const value = error && typeof error === 'object' ? (error as Record<string, unknown>) : {};
+  const value =
+    error && typeof error === 'object'
+      ? (error as Record<string, unknown>)
+      : {};
   const status =
     typeof value.status === 'number' && Number.isInteger(value.status)
       ? value.status
@@ -107,7 +112,10 @@ export function fieldIssues(error: unknown): FieldIssue[] {
   );
 }
 
-export function errorMessage(error: unknown, fallback = 'The control API could not complete the request.'): string {
+export function errorMessage(
+  error: unknown,
+  fallback = 'The control API could not complete the request.'
+): string {
   return error instanceof Error ? error.message : fallback;
 }
 

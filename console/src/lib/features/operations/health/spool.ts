@@ -5,12 +5,21 @@ import { formatBytes } from '$lib/format';
  * absent means the volume could not be measured at all — reported as unmeasured
  * rather than as an empty or full disk.
  */
-export function spoolUsage(used?: number | null, capacity?: number | null): string {
-  if (used === null || used === undefined || capacity === null || capacity === undefined) {
+export function spoolUsage(
+  used?: number | null,
+  capacity?: number | null
+): string {
+  if (
+    used === null ||
+    used === undefined ||
+    capacity === null ||
+    capacity === undefined
+  ) {
     return '—';
   }
   // A spool with no capacity is a configuration state, not a division to
   // attempt; the share would be Infinity or NaN.
-  const share = capacity === 0 ? 'no capacity' : `${((used / capacity) * 100).toFixed(1)}%`;
+  const share =
+    capacity === 0 ? 'no capacity' : `${((used / capacity) * 100).toFixed(1)}%`;
   return `${formatBytes(used)} of ${formatBytes(capacity)} (${share})`;
 }

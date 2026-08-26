@@ -6,3 +6,4 @@ playwright-report/
 test-results/
 src/lib/api/schema.d.ts
 static/
+pnpm-lock.yaml

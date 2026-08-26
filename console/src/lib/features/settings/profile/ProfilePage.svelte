@@ -150,10 +150,10 @@
       message =
         'Identity verified. Confirm before unlinking this OIDC identity.';
     } catch (cause) {
-      identityError =
-        cause instanceof Error
-          ? cause.message
-          : 'The security operation could not be completed.';
+      identityError = errorMessage(
+        cause,
+        'The security operation could not be completed.'
+      );
     } finally {
       identityBusy = '';
     }
@@ -175,10 +175,10 @@
         'OIDC identity unlinked. All previous sessions were revoked and this browser was rotated.';
       await refreshSecurityData();
     } catch (cause) {
-      identityError =
-        cause instanceof Error
-          ? cause.message
-          : 'The security operation could not be completed.';
+      identityError = errorMessage(
+        cause,
+        'The security operation could not be completed.'
+      );
     } finally {
       identityBusy = '';
     }
@@ -253,10 +253,10 @@
         await beginOidcReauthentication('password_enrollment')
       );
     } catch (cause) {
-      passwordError =
-        cause instanceof Error
-          ? cause.message
-          : 'Identity verification could not start.';
+      passwordError = errorMessage(
+        cause,
+        'Identity verification could not start.'
+      );
       savingPassword = false;
     }
   }
@@ -268,8 +268,7 @@
       validateDisplayName(value);
       displayNameError = '';
     } catch (cause) {
-      displayNameError =
-        cause instanceof Error ? cause.message : 'Enter a valid display name.';
+      displayNameError = errorMessage(cause, 'Enter a valid display name.');
     }
   }
 
@@ -281,8 +280,7 @@
       normalizedDisplayName = validateDisplayName(displayName);
       displayNameError = '';
     } catch (cause) {
-      displayNameError =
-        cause instanceof Error ? cause.message : 'Enter a valid display name.';
+      displayNameError = errorMessage(cause, 'Enter a valid display name.');
       return;
     }
     profileError = message = '';
@@ -300,10 +298,7 @@
     } catch (cause) {
       if (isEtagMismatch(cause)) profileSync = markConflict(profileSync);
       else
-        profileError =
-          cause instanceof Error
-            ? cause.message
-            : 'The profile could not be updated.';
+        profileError = errorMessage(cause, 'The profile could not be updated.');
     } finally {
       savingProfile = false;
     }
@@ -350,12 +345,12 @@
       if (enrollmentSubmitted) clearEnrollmentGrant();
       if (isEtagMismatch(cause)) profileSync = markConflict(profileSync);
       else {
-        passwordError =
-          cause instanceof Error
-            ? cause.message
-            : passwordEnrollmentNeeded
-              ? 'The local password could not be added.'
-              : 'The password could not be changed.';
+        passwordError = errorMessage(
+          cause,
+          passwordEnrollmentNeeded
+            ? 'The local password could not be added.'
+            : 'The password could not be changed.'
+        );
       }
     } finally {
       savingPassword = false;
@@ -369,10 +364,10 @@
     try {
       await acquireRecentAuthentication('oidc_link');
     } catch (cause) {
-      identityError =
-        cause instanceof Error
-          ? cause.message
-          : 'The OIDC link flow could not start.';
+      identityError = errorMessage(
+        cause,
+        'The OIDC link flow could not start.'
+      );
     } finally {
       identityBusy = '';
     }
@@ -386,10 +381,10 @@
     try {
       await acquireRecentAuthentication('oidc_unlink', id);
     } catch (cause) {
-      identityError =
-        cause instanceof Error
-          ? cause.message
-          : 'The OIDC identity could not be unlinked.';
+      identityError = errorMessage(
+        cause,
+        'The OIDC identity could not be unlinked.'
+      );
     } finally {
       identityBusy = '';
     }

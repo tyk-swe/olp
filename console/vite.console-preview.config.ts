@@ -9,5 +9,5 @@ import { defineConfig } from 'vite';
  *   vite preview --config vite.console-preview.config.ts
  */
 export default defineConfig({
-	build: { outDir: 'build' }
+  build: { outDir: 'build' }
 });

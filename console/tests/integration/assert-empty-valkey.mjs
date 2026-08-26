@@ -21,7 +21,7 @@ function lastQueryValue(name) {
 const unixSocket = unixProtocols.has(url.protocol);
 const databaseText = unixSocket
   ? (lastQueryValue('db') ?? '0')
-  : (url.pathname.replace(/^\/+|\/+$/g, '') || '0');
+  : url.pathname.replace(/^\/+|\/+$/g, '') || '0';
 if (!/^[+-]?\d+$/.test(databaseText)) {
   throw new Error('OLP_VALKEY_URL must select a numeric logical database');
 }
@@ -29,7 +29,9 @@ const database = BigInt(databaseText);
 const minimumI64 = -(1n << 63n);
 const maximumI64 = (1n << 63n) - 1n;
 if (database < minimumI64 || database > maximumI64) {
-  throw new Error('OLP_VALKEY_URL logical database is outside the runtime-supported range');
+  throw new Error(
+    'OLP_VALKEY_URL logical database is outside the runtime-supported range'
+  );
 }
 
 let host;
@@ -40,7 +42,9 @@ let password;
 let hasPassword;
 if (unixSocket) {
   if (url.hostname && url.hostname !== 'localhost') {
-    throw new Error('OLP_VALKEY_URL Unix socket host must be empty or localhost');
+    throw new Error(
+      'OLP_VALKEY_URL Unix socket host must be empty or localhost'
+    );
   }
   socketPath = decodeURIComponent(url.pathname);
   if (socketPath.includes('\0')) {
@@ -51,9 +55,10 @@ if (unixSocket) {
   password = passwordValue ?? '';
   hasPassword = passwordValue !== undefined;
 } else {
-  host = url.hostname.startsWith('[') && url.hostname.endsWith(']')
-    ? url.hostname.slice(1, -1)
-    : url.hostname;
+  host =
+    url.hostname.startsWith('[') && url.hostname.endsWith(']')
+      ? url.hostname.slice(1, -1)
+      : url.hostname;
   if (!host) throw new Error('OLP_VALKEY_URL must include a hostname');
   port = Number(url.port || 6379);
   username = decodeURIComponent(url.username);
@@ -79,13 +84,13 @@ const replies = await new Promise((resolve, reject) => {
   const socket = unixSocket
     ? net.createConnection({ path: socketPath })
     : secure
-    ? tls.connect({
-        host,
-        port,
-        servername: net.isIP(host) ? undefined : host,
-        rejectUnauthorized: url.hash !== '#insecure'
-      })
-    : net.createConnection({ host, port });
+      ? tls.connect({
+          host,
+          port,
+          servername: net.isIP(host) ? undefined : host,
+          rejectUnauthorized: url.hash !== '#insecure'
+        })
+      : net.createConnection({ host, port });
   let settled = false;
   let buffer = Buffer.alloc(0);
   const values = [];
@@ -99,8 +104,12 @@ const replies = await new Promise((resolve, reject) => {
   }
 
   socket.setTimeout(5_000);
-  socket.on('timeout', () => finish(new Error('Valkey isolation check timed out')));
-  socket.on('error', (error) => finish(new Error(`Valkey isolation check failed: ${error.message}`)));
+  socket.on('timeout', () =>
+    finish(new Error('Valkey isolation check timed out'))
+  );
+  socket.on('error', (error) =>
+    finish(new Error(`Valkey isolation check failed: ${error.message}`))
+  );
   socket.on(secure ? 'secureConnect' : 'connect', () => {
     socket.write(Buffer.concat(commands.map(encodeCommand)));
   });
@@ -117,7 +126,11 @@ const replies = await new Promise((resolve, reject) => {
         return;
       }
       if (prefix !== '+' && prefix !== ':') {
-        finish(new Error(`Valkey returned unsupported response type ${JSON.stringify(prefix)}`));
+        finish(
+          new Error(
+            `Valkey returned unsupported response type ${JSON.stringify(prefix)}`
+          )
+        );
         return;
       }
       values.push({ prefix, value });
@@ -136,8 +149,8 @@ if (sizeReply?.prefix !== ':' || !/^\d+$/.test(sizeReply.value)) {
 const size = BigInt(sizeReply.value);
 if (size !== 0n) {
   throw new Error(
-    `Valkey logical database ${database} contains ${size} key(s); `
-    + 'the console integration suite requires an isolated empty database'
+    `Valkey logical database ${database} contains ${size} key(s); ` +
+      'the console integration suite requires an isolated empty database'
   );
 }
 

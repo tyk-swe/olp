@@ -15,12 +15,17 @@ const dateTimeFormat = new Intl.DateTimeFormat(LOCALE, {
 });
 // Daily buckets are UTC midnights. Naming them in the viewer's zone would
 // label every bucket with the previous calendar day west of UTC.
-const dayFormat = new Intl.DateTimeFormat(LOCALE, { dateStyle: 'medium', timeZone: 'UTC' });
+const dayFormat = new Intl.DateTimeFormat(LOCALE, {
+  dateStyle: 'medium',
+  timeZone: 'UTC'
+});
 const compactFormat = new Intl.NumberFormat(LOCALE, {
   notation: 'compact',
   maximumFractionDigits: 1
 });
-const integerFormat = new Intl.NumberFormat(LOCALE, { maximumFractionDigits: 0 });
+const integerFormat = new Intl.NumberFormat(LOCALE, {
+  maximumFractionDigits: 0
+});
 const fixedFormats = [0, 1, 2].map(
   (digits) =>
     new Intl.NumberFormat(LOCALE, {
@@ -50,14 +55,18 @@ export function dateTimeLocalValue(value: Date | string): string {
   return local.toISOString().slice(0, 16);
 }
 
-export function formatCompact(value: number | string | null | undefined): string {
+export function formatCompact(
+  value: number | string | null | undefined
+): string {
   if (value === null || value === undefined || value === '') return '—';
   const number = typeof value === 'number' ? value : Number(value);
   if (!Number.isFinite(number)) return String(value);
   return compactFormat.format(number);
 }
 
-export function formatInteger(value: number | string | null | undefined): string {
+export function formatInteger(
+  value: number | string | null | undefined
+): string {
   if (value === null || value === undefined || value === '') return '—';
   const number = typeof value === 'number' ? value : Number(value);
   if (!Number.isFinite(number)) return String(value);
@@ -69,7 +78,10 @@ export function formatInteger(value: number | string | null | undefined): string
 // of rows.
 const costFormats = new Map<string, Intl.NumberFormat>();
 
-function costFormat(currency: string | null | undefined, subCent: boolean): Intl.NumberFormat {
+function costFormat(
+  currency: string | null | undefined,
+  subCent: boolean
+): Intl.NumberFormat {
   const key = `${currency ?? ''}|${subCent}`;
   const existing = costFormats.get(key);
   if (existing) return existing;
@@ -79,7 +91,9 @@ function costFormat(currency: string | null | undefined, subCent: boolean): Intl
   };
   const format = new Intl.NumberFormat(
     LOCALE,
-    currency ? { style: 'currency', currency, ...fractionDigits } : fractionDigits
+    currency
+      ? { style: 'currency', currency, ...fractionDigits }
+      : fractionDigits
   );
   costFormats.set(key, format);
   return format;
@@ -89,21 +103,31 @@ function costFormat(currency: string | null | undefined, subCent: boolean): Intl
  * A missing currency means the record was never priced in a known unit, so the
  * amount is grouped without a symbol rather than being labelled as dollars.
  */
-export function formatCost(value?: string | null, currency?: string | null): string {
+export function formatCost(
+  value?: string | null,
+  currency?: string | null
+): string {
   if (value === null || value === undefined || value === '') return 'Unpriced';
   const number = Number(value);
-  if (!Number.isFinite(number)) return currency ? `${value} ${currency}` : String(value);
+  if (!Number.isFinite(number))
+    return currency ? `${value} ${currency}` : String(value);
   return costFormat(currency, number < 0.01).format(number);
 }
 
 export function statusTone(status?: number | null, errorClass?: string | null) {
-  if (errorClass || (status !== null && status !== undefined && status >= 500)) return 'danger';
-  if (status !== null && status !== undefined && status >= 400) return 'warning';
-  if (status !== null && status !== undefined && status >= 200 && status < 400) return 'success';
+  if (errorClass || (status !== null && status !== undefined && status >= 500))
+    return 'danger';
+  if (status !== null && status !== undefined && status >= 400)
+    return 'warning';
+  if (status !== null && status !== undefined && status >= 200 && status < 400)
+    return 'success';
   return '';
 }
 
-export function statusLabel(status?: number | null, errorClass?: string | null): string {
+export function statusLabel(
+  status?: number | null,
+  errorClass?: string | null
+): string {
   if (errorClass) return errorClass;
   if (status === null || status === undefined) return 'In progress';
   return String(status);

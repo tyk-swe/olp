@@ -23,7 +23,10 @@ export function initialConcurrentEdit(): ConcurrentEditState {
   };
 }
 
-export function reconcile(state: ConcurrentEditState, incomingEtag: string): ReconcileResult {
+export function reconcile(
+  state: ConcurrentEditState,
+  incomingEtag: string
+): ReconcileResult {
   if (state.remoteEtag === incomingEtag && !state.reloadPending) {
     return { state, hydrate: false };
   }
@@ -54,7 +57,10 @@ export function markDirty(state: ConcurrentEditState): ConcurrentEditState {
 }
 
 /** A successful save replaces the whole state, so the prior one is discarded. */
-export function markSaved(_state: ConcurrentEditState, etag: string): ConcurrentEditState {
+export function markSaved(
+  _state: ConcurrentEditState,
+  etag: string
+): ConcurrentEditState {
   return {
     snapshotEtag: etag,
     remoteEtag: etag,
@@ -72,7 +78,10 @@ export function beginReload(state: ConcurrentEditState): ConcurrentEditState {
   return state.reloadPending ? state : { ...state, reloadPending: true };
 }
 
-export function acceptRemote(state: ConcurrentEditState, etag: string): ConcurrentEditState {
+export function acceptRemote(
+  state: ConcurrentEditState,
+  etag: string
+): ConcurrentEditState {
   if (state.conflict || state.remoteEtag !== state.snapshotEtag) {
     return {
       ...state,
@@ -91,5 +100,7 @@ export function acceptRemote(state: ConcurrentEditState, etag: string): Concurre
 
 export function conflictNotice(state: ConcurrentEditState): ConflictNoticeKind {
   if (state.conflict) return 'conflict';
-  return state.dirty && state.remoteEtag !== state.snapshotEtag ? 'newer' : null;
+  return state.dirty && state.remoteEtag !== state.snapshotEtag
+    ? 'newer'
+    : null;
 }

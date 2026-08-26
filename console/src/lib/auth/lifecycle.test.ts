@@ -1,8 +1,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { QueryClient } from '@tanstack/svelte-query';
+import { ApiProblem } from '$lib/api/http';
 import { clearCsrfToken, getCsrfToken } from '$lib/api/session';
 import { AuthenticationLifecycle } from './lifecycle';
 import type { AuthenticatedSession } from './state';
+
+const unauthorizedProblem = () =>
+  new ApiProblem({ title: 'Unauthorized', status: 401 });
 
 const session = (csrfToken = 'csrf-session'): AuthenticatedSession => ({
   user: {
@@ -559,7 +563,7 @@ describe('authentication lifecycle', () => {
     const unauthorized = () =>
       vi
         .fn<(signal: AbortSignal) => Promise<AuthenticatedSession>>()
-        .mockRejectedValue({ problem: { status: 401 } });
+        .mockRejectedValue(unauthorizedProblem());
     const expiredLifecycle = new AuthenticationLifecycle();
     const expiredBoundary = boundary(unauthorized());
     expiredLifecycle.registerBoundary(expiredBoundary);
@@ -582,7 +586,7 @@ describe('authentication lifecycle', () => {
     const lifecycle = new AuthenticationLifecycle();
     const loadSession = vi
       .fn<(signal: AbortSignal) => Promise<AuthenticatedSession>>()
-      .mockRejectedValueOnce({ problem: { status: 401 } })
+      .mockRejectedValueOnce(unauthorizedProblem())
       .mockRejectedValueOnce(new Error('Session service unavailable'));
     const registeredBoundary = boundary(loadSession);
     lifecycle.registerBoundary(registeredBoundary);

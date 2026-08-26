@@ -3,7 +3,9 @@ import { expect, test } from '../playwright';
 
 import { mockProviderKinds } from './provider-capabilities';
 
-test('updates retention with ETag and creates an exact-decimal pricing revision', async ({ page }) => {
+test('updates retention with ETag and creates an exact-decimal pricing revision', async ({
+  page
+}) => {
   await mockProviderKinds(page);
   const etag = '01980000-0000-7000-8000-000000000021';
   let retention = '30';
@@ -11,18 +13,67 @@ test('updates retention with ETag and creates an exact-decimal pricing revision'
   let pricingHeaders: Record<string, string> = {};
   let pricingPayload: Record<string, unknown> = {};
   let revisions: unknown[] = [];
-  await page.route('**/api/v1/sessions/current', async (route) => route.fulfill({ json: { user: { id: '01980000-0000-7000-8000-000000000001', email: 'owner@example.com', display_name: 'Ada Owner', role: 'owner' }, csrf_token: 'csrf-test-token' } }));
-  await page.route('**/api/v1/settings', async (route) => route.fulfill({ json: { data: [{ key: 'request_retention_days', value: retention, etag, updated_by: '01980000-0000-7000-8000-000000000001', updated_at: '2026-07-12T12:00:00Z' }] } }));
-  await page.route('**/api/v1/settings/request_retention_days', async (route) => {
-    settingHeaders = route.request().headers();
-    retention = (route.request().postDataJSON() as { value: string }).value;
-    await route.fulfill({ json: { key: 'request_retention_days', value: retention, etag, updated_by: '01980000-0000-7000-8000-000000000001', updated_at: '2026-07-12T12:01:00Z' } });
-  });
+  await page.route('**/api/v1/sessions/current', async (route) =>
+    route.fulfill({
+      json: {
+        user: {
+          id: '01980000-0000-7000-8000-000000000001',
+          email: 'owner@example.com',
+          display_name: 'Ada Owner',
+          role: 'owner'
+        },
+        csrf_token: 'csrf-test-token'
+      }
+    })
+  );
+  await page.route('**/api/v1/settings', async (route) =>
+    route.fulfill({
+      json: {
+        data: [
+          {
+            key: 'request_retention_days',
+            value: retention,
+            etag,
+            updated_by: '01980000-0000-7000-8000-000000000001',
+            updated_at: '2026-07-12T12:00:00Z'
+          }
+        ]
+      }
+    })
+  );
+  await page.route(
+    '**/api/v1/settings/request_retention_days',
+    async (route) => {
+      settingHeaders = route.request().headers();
+      retention = (route.request().postDataJSON() as { value: string }).value;
+      await route.fulfill({
+        json: {
+          key: 'request_retention_days',
+          value: retention,
+          etag,
+          updated_by: '01980000-0000-7000-8000-000000000001',
+          updated_at: '2026-07-12T12:01:00Z'
+        }
+      });
+    }
+  );
   await page.route('**/api/v1/pricing/revisions*', async (route) => {
     if (route.request().method() === 'POST') {
       pricingHeaders = route.request().headers();
-      pricingPayload = route.request().postDataJSON() as Record<string, unknown>;
-      revisions = [{ id: '01980000-0000-7000-8000-000000000099', revision: 1, effective_at: '2026-07-12T12:00:00Z', created_by: '01980000-0000-7000-8000-000000000001', created_at: '2026-07-12T12:00:00Z', prices: (pricingPayload.prices as unknown[]) }];
+      pricingPayload = route.request().postDataJSON() as Record<
+        string,
+        unknown
+      >;
+      revisions = [
+        {
+          id: '01980000-0000-7000-8000-000000000099',
+          revision: 1,
+          effective_at: '2026-07-12T12:00:00Z',
+          created_by: '01980000-0000-7000-8000-000000000001',
+          created_at: '2026-07-12T12:00:00Z',
+          prices: pricingPayload.prices as unknown[]
+        }
+      ];
       await route.fulfill({ status: 201, json: revisions[0] });
     } else await route.fulfill({ json: { data: revisions } });
   });
@@ -42,14 +93,31 @@ test('updates retention with ETag and creates an exact-decimal pricing revision'
   await page.getByRole('button', { name: 'Create pricing revision' }).click();
   await expect(page.getByText('Pricing revision created.')).toBeVisible();
   expect(pricingHeaders['idempotency-key']).toMatch(/^[0-9a-f-]{36}$/);
-  expect(pricingPayload).toMatchObject({ prices: [{ model: 'gpt-test', input_per_million: '2.500000', cached_input_per_million: '0.250000', output_per_million: '10.125000', unit_price: null, currency: 'USD' }] });
-  await expect(page.getByRole('columnheader', { name: 'Cached input / million' })).toHaveCount(0);
+  expect(pricingPayload).toMatchObject({
+    prices: [
+      {
+        model: 'gpt-test',
+        input_per_million: '2.500000',
+        cached_input_per_million: '0.250000',
+        output_per_million: '10.125000',
+        unit_price: null,
+        currency: 'USD'
+      }
+    ]
+  });
+  await expect(
+    page.getByRole('columnheader', { name: 'Cached input / million' })
+  ).toHaveCount(0);
   const summary = page.locator('summary').filter({ hasText: 'Revision 1' });
   // A revision names who published it, not only when it takes effect.
   await expect(summary).toContainText('01980000-0000-7000-8000-000000000001');
   await summary.click();
-  await expect(page.getByRole('columnheader', { name: 'Cached input / million' })).toBeVisible();
+  await expect(
+    page.getByRole('columnheader', { name: 'Cached input / million' })
+  ).toBeVisible();
   await expect(page.getByRole('cell', { name: '0.250000' })).toBeVisible();
-  await expect(page.locator('.setting-row').first()).toContainText('01980000-0000-7000-8000-000000000001');
+  await expect(page.locator('.setting-row').first()).toContainText(
+    '01980000-0000-7000-8000-000000000001'
+  );
   expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
 });

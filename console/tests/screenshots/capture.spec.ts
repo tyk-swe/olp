@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '../playwright';
 import {
   mockApiKeys,
   mockProviders,
@@ -12,7 +12,7 @@ import {
 // console directory for `pnpm screenshots`.
 const outputDir = '../docs/assets/screenshots';
 
-async function waitForStableLayout(page: import('@playwright/test').Page) {
+async function waitForStableLayout(page: Page) {
   await page.evaluate(async () => {
     await document.fonts.ready;
     await new Promise<void>((resolve) => {
@@ -21,7 +21,7 @@ async function waitForStableLayout(page: import('@playwright/test').Page) {
   });
 }
 
-async function capture(page: import('@playwright/test').Page, name: string) {
+async function capture(page: Page, name: string) {
   // Collapse the shell's min-height so the capture is exactly the content
   // height: short pages keep no empty canvas, and the sticky 100dvh sidebar
   // spans the full frame instead of stopping at one viewport.
@@ -33,7 +33,9 @@ async function capture(page: import('@playwright/test').Page, name: string) {
   });
   await waitForStableLayout(page);
   const height = await page.evaluate(() =>
-    Math.ceil(document.querySelector('.shell')?.getBoundingClientRect().height ?? 900)
+    Math.ceil(
+      document.querySelector('.shell')?.getBoundingClientRect().height ?? 900
+    )
   );
   await page.setViewportSize({ width: 1440, height: Math.max(480, height) });
   await waitForStableLayout(page);
@@ -58,8 +60,12 @@ test('overview dashboard', async ({ page }) => {
   await mockRecentRequests(page);
 
   await page.goto('/');
-  await expect(page.getByRole('heading', { name: 'Bring your first model route online.' })).toBeVisible();
+  await expect(
+    page.getByRole('heading', { name: 'Bring your first model route online.' })
+  ).toBeVisible();
   await expect(page.getByText('3 active').first()).toBeVisible();
-  await expect(page.getByRole('region', { name: 'Five most recent requests' })).toContainText('support-chat');
+  await expect(
+    page.getByRole('region', { name: 'Five most recent requests' })
+  ).toContainText('support-chat');
   await capture(page, 'overview');
 });

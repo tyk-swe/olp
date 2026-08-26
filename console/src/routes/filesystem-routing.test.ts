@@ -14,7 +14,7 @@ const layouts = import.meta.glob('./**/+layout.svelte', {
   query: '?raw'
 }) as Record<string, string>;
 
-const protectedPages = [
+const consolePages = [
   ['(console)/+page.svelte', 'Overview'],
   ['(console)/providers/+page.svelte', 'ProviderList'],
   ['(console)/providers/new/+page.svelte', 'ProviderWizard'],
@@ -39,11 +39,21 @@ const protectedPages = [
   ['(console)/settings/profile/+page.svelte', 'ProfilePage']
 ] as const;
 
+const publicPages = [
+  ['login/+page.svelte', 'LoginPage'],
+  ['setup/+page.svelte', 'OwnerSetup'],
+  ['invitations/accept/+page.svelte', 'InvitationAcceptance']
+] as const;
+
+const featurePages = [...consolePages, ...publicPages];
+
 describe('console filesystem routing', () => {
-  it.each(protectedPages)('%s owns %s', (route, component) => {
+  it.each(featurePages)('%s owns %s', (route, component) => {
     const source = pages[`./${route}`];
     expect(source).toContain(`import ${component} from '$lib/features/`);
-    expect(source.match(/import \w+ from '\$lib\/features\/.*\.svelte';/g)).toHaveLength(1);
+    expect(
+      source.match(/import \w+ from '\$lib\/features\/.*\.svelte';/g)
+    ).toHaveLength(1);
   });
 
   it('keeps authentication in the protected layout instead of the shell', () => {
@@ -58,6 +68,8 @@ describe('console filesystem routing', () => {
     expect(config).toContain("fallback: 'index.html'");
     expect(rootLayout).toContain('export const ssr = false');
     expect(pages['./[...path]/+page.svelte']).toBeUndefined();
-    expect(pages['./(console)/[...path]/+page.svelte']).not.toContain('$lib/features/');
+    expect(pages['./(console)/[...path]/+page.svelte']).not.toContain(
+      '$lib/features/'
+    );
   });
 });

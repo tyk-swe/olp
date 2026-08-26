@@ -40,10 +40,14 @@ function json(response, value) {
 
 createServer((request, response) => {
   const path = new URL(request.url ?? '/', issuer).pathname;
-  if (path === '/.well-known/openid-configuration') return json(response, discovery);
+  if (path === '/.well-known/openid-configuration')
+    return json(response, discovery);
   if (path === '/jwks') return json(response, jwks);
   if (path === '/authorize') {
-    response.writeHead(200, { 'content-type': 'text/plain', 'cache-control': 'no-store' });
+    response.writeHead(200, {
+      'content-type': 'text/plain',
+      'cache-control': 'no-store'
+    });
     response.end('Mock identity provider authorization boundary');
     return;
   }

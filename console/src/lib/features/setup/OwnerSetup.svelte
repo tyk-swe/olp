@@ -5,6 +5,10 @@
   import { authLifecycle } from '$lib/auth/lifecycle';
   import NavIcon from '$lib/components/NavIcon.svelte';
   import {
+    PASSWORD_MAX_LENGTH,
+    PASSWORD_MIN_LENGTH
+  } from '$lib/passwordPolicy';
+  import {
     type OwnerFormErrors,
     type OwnerFormValues,
     validateOwner
@@ -33,14 +37,18 @@
   };
 
   function describedBy(field: keyof OwnerFormValues, hint?: string) {
-    const parts = [hint, errors[field] ? `${field}-error` : undefined].filter(Boolean);
+    const parts = [hint, errors[field] ? `${field}-error` : undefined].filter(
+      Boolean
+    );
     return parts.length ? parts.join(' ') : undefined;
   }
 
   function applyServerErrors(problem: ApiProblem) {
     if (!problem.problem.errors) return false;
     const next: OwnerFormErrors = {};
-    for (const [serverField, messages] of Object.entries(problem.problem.errors)) {
+    for (const [serverField, messages] of Object.entries(
+      problem.problem.errors
+    )) {
       const formField = serverToFormField[serverField];
       if (formField && messages[0]) next[formField] = messages[0];
     }
@@ -63,7 +71,9 @@
             display_name: values.displayName.trim(),
             // Omitted rather than sent blank: the API rejects an empty name and
             // applies its own default when the field is absent.
-            ...(installationName ? { installation_name: installationName } : {}),
+            ...(installationName
+              ? { installation_name: installationName }
+              : {}),
             email: values.email.trim(),
             password: values.password
           },
@@ -74,9 +84,11 @@
       onComplete();
     } catch (error) {
       if (error instanceof ApiProblem) {
-        if (!applyServerErrors(error)) submissionError = error.problem.detail ?? error.problem.title;
+        if (!applyServerErrors(error))
+          submissionError = error.problem.detail ?? error.problem.title;
       } else {
-        submissionError = 'The control API could not be reached. Check the service and try again.';
+        submissionError =
+          'The control API could not be reached. Check the service and try again.';
       }
     } finally {
       submitting = false;
@@ -89,7 +101,10 @@
 <div class="heading">
   <p class="eyebrow">Installation owner</p>
   <h2>Create your account</h2>
-  <p>This first account owns the installation. You can invite operators and developers next.</p>
+  <p>
+    This first account owns the installation. You can invite operators and
+    developers next.
+  </p>
 </div>
 
 {#if submissionError}
@@ -113,7 +128,9 @@
       aria-describedby={describedBy('displayName')}
       disabled={submitting}
     />
-    {#if errors.displayName}<p class="field-error" id="displayName-error">{errors.displayName}</p>{/if}
+    {#if errors.displayName}<p class="field-error" id="displayName-error">
+        {errors.displayName}
+      </p>{/if}
   </div>
 
   <div class="field">
@@ -126,11 +143,21 @@
       maxlength="100"
       bind:value={values.installationName}
       aria-invalid={errors.installationName ? 'true' : undefined}
-      aria-describedby={describedBy('installationName', 'installation-name-hint')}
+      aria-describedby={describedBy(
+        'installationName',
+        'installation-name-hint'
+      )}
       disabled={submitting}
     />
-    <p class="field-hint" id="installation-name-hint">Names this deployment in the console. Leave blank to keep the default.</p>
-    {#if errors.installationName}<p class="field-error" id="installationName-error">{errors.installationName}</p>{/if}
+    <p class="field-hint" id="installation-name-hint">
+      Names this deployment in the console. Leave blank to keep the default.
+    </p>
+    {#if errors.installationName}<p
+        class="field-error"
+        id="installationName-error"
+      >
+        {errors.installationName}
+      </p>{/if}
   </div>
 
   <div class="field">
@@ -149,7 +176,9 @@
       aria-describedby={describedBy('email')}
       disabled={submitting}
     />
-    {#if errors.email}<p class="field-error" id="email-error">{errors.email}</p>{/if}
+    {#if errors.email}<p class="field-error" id="email-error">
+        {errors.email}
+      </p>{/if}
   </div>
 
   <div class="field">
@@ -159,15 +188,19 @@
       name="password"
       type="password"
       autocomplete="new-password"
-      minlength="12"
-      maxlength="1024"
+      minlength={PASSWORD_MIN_LENGTH}
+      maxlength={PASSWORD_MAX_LENGTH}
       bind:value={values.password}
       aria-invalid={errors.password ? 'true' : undefined}
       aria-describedby={describedBy('password', 'password-hint')}
       disabled={submitting}
     />
-    <p class="field-hint" id="password-hint">At least 12 characters. A password manager is recommended.</p>
-    {#if errors.password}<p class="field-error" id="password-error">{errors.password}</p>{/if}
+    <p class="field-hint" id="password-hint">
+      At least {PASSWORD_MIN_LENGTH} characters. A password manager is recommended.
+    </p>
+    {#if errors.password}<p class="field-error" id="password-error">
+        {errors.password}
+      </p>{/if}
   </div>
 
   <div class="field">
@@ -182,7 +215,12 @@
       aria-describedby={describedBy('confirmPassword')}
       disabled={submitting}
     />
-    {#if errors.confirmPassword}<p class="field-error" id="confirmPassword-error">{errors.confirmPassword}</p>{/if}
+    {#if errors.confirmPassword}<p
+        class="field-error"
+        id="confirmPassword-error"
+      >
+        {errors.confirmPassword}
+      </p>{/if}
   </div>
 
   <div class="field">
@@ -198,17 +236,30 @@
       aria-describedby={describedBy('setupToken', 'setup-token-hint')}
       disabled={submitting}
     />
-    <p class="field-hint" id="setup-token-hint">Paste the one-time token supplied by your operator. It is not saved by this console.</p>
-    {#if errors.setupToken}<p class="field-error" id="setupToken-error">{errors.setupToken}</p>{/if}
+    <p class="field-hint" id="setup-token-hint">
+      Paste the one-time token supplied by your operator. It is not saved by
+      this console.
+    </p>
+    {#if errors.setupToken}<p class="field-error" id="setupToken-error">
+        {errors.setupToken}
+      </p>{/if}
   </div>
 
-  <button class="button button-primary submit" type="submit" disabled={submitting} aria-busy={submitting}>
+  <button
+    class="button button-primary submit"
+    type="submit"
+    disabled={submitting}
+    aria-busy={submitting}
+  >
     {submitting ? 'Creating owner…' : 'Create owner account'}
     {#if !submitting}<NavIcon name="arrow" />{/if}
   </button>
 </form>
 
-<p class="privacy-note">Credentials are sent only to this installation and are never written to console storage.</p>
+<p class="privacy-note">
+  Credentials are sent only to this installation and are never written to
+  console storage.
+</p>
 
 <style>
   .heading {

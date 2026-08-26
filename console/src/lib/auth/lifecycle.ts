@@ -1,4 +1,5 @@
 import { hashKey, type QueryClient } from '@tanstack/svelte-query';
+import { ApiProblem } from '$lib/api/http';
 import { clearCsrfToken, getCsrfToken, setCsrfToken } from '$lib/api/session';
 import {
   isAuthenticationEndpoint,
@@ -36,10 +37,7 @@ type AuthenticationRequest = (
 const SESSION_FRESHNESS_MS = 60_000;
 
 function unauthorizedError(error: unknown): boolean {
-  return (
-    (error as { problem?: { status?: unknown } } | null)?.problem?.status ===
-    401
-  );
+  return error instanceof ApiProblem && error.problem.status === 401;
 }
 
 function abortError(error: unknown): boolean {

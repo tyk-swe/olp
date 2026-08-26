@@ -76,7 +76,9 @@ describe('resource API cursor pages', () => {
 
 describe('audit filters', () => {
   it('sends every filled filter and omits the empty ones', async () => {
-    const requests = captureRequests(() => jsonResponse({ data: [], next_cursor: null }));
+    const requests = captureRequests(() =>
+      jsonResponse({ data: [], next_cursor: null })
+    );
 
     await listAudit({
       action: 'provider.update',

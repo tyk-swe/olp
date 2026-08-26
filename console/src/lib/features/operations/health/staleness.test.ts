@@ -88,12 +88,18 @@ describe('oldestPendingStatus', () => {
   });
 
   it('falls back to the timestamp when no age was reported', () => {
-    expect(oldestPendingStatus('2026-07-12T11:59:00Z', null, now).seconds).toBe(60);
+    expect(oldestPendingStatus('2026-07-12T11:59:00Z', null, now).seconds).toBe(
+      60
+    );
   });
 
   it('warns once recovery should have begun', () => {
-    expect(oldestPendingStatus(null, PENDING_RECOVERY_SECONDS, now).stale).toBe(false);
-    expect(oldestPendingStatus(null, PENDING_RECOVERY_SECONDS + 1, now).stale).toBe(true);
+    expect(oldestPendingStatus(null, PENDING_RECOVERY_SECONDS, now).stale).toBe(
+      false
+    );
+    expect(
+      oldestPendingStatus(null, PENDING_RECOVERY_SECONDS + 1, now).stale
+    ).toBe(true);
   });
 
   it('holds the outbox to its own 20 second bound, not the metadata one', () => {
@@ -103,7 +109,12 @@ describe('oldestPendingStatus', () => {
     expect(row.stale).toBe(true);
     expect(oldestPendingStatus(null, 21, now).stale).toBe(false);
     expect(
-      oldestPendingStatus('2026-07-12T11:59:39Z', null, now, CHECKPOINT_STALE_SECONDS).stale
+      oldestPendingStatus(
+        '2026-07-12T11:59:39Z',
+        null,
+        now,
+        CHECKPOINT_STALE_SECONDS
+      ).stale
     ).toBe(true);
   });
 });

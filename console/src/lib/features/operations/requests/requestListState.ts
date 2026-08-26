@@ -1,5 +1,6 @@
 import { createContext } from 'svelte';
 import type { RequestFilters } from '$lib/api/requests';
+import { REQUEST_PAGE_SIZE } from '$lib/api/pageSizes';
 import { emptyCursorHistory, type CursorHistory } from '$lib/api/pagination';
 
 export type RequestListState = CursorHistory & {
@@ -30,6 +31,6 @@ export function emptyRequestListState(): RequestListState {
     errorClass: '',
     startedAfter: '',
     startedBefore: '',
-    applied: { limit: 25 }
+    applied: { limit: REQUEST_PAGE_SIZE }
   };
 }

@@ -36,9 +36,10 @@ describe('management resources', () => {
   it('forwards abort signals to resource reads', async () => {
     const controller = new AbortController();
     const requests = captureRequests((request) => {
-      const body = new URL(request.url).pathname === '/api/v1/users'
-        ? { data: [], next_cursor: null }
-        : { items: [], next_cursor: null };
+      const body =
+        new URL(request.url).pathname === '/api/v1/users'
+          ? { data: [], next_cursor: null }
+          : { items: [], next_cursor: null };
       return jsonResponse(body);
     });
 

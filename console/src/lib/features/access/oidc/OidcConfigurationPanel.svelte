@@ -27,7 +27,7 @@
     markSaved,
     reconcile
   } from '$lib/forms/concurrentEdit';
-  import { errorMessage as accessErrorMessage } from '$lib/api/http';
+  import { errorMessage } from '$lib/api/http';
   import { parseRoleMappings } from './mappings';
 
   const queryClient = useQueryClient();
@@ -146,7 +146,7 @@
         : 'OIDC configuration saved but disabled.';
     } catch (cause) {
       if (isEtagMismatch(cause)) sync = markConflict(sync);
-      else error = accessErrorMessage(cause);
+      else error = errorMessage(cause);
     } finally {
       busy = '';
     }
@@ -166,7 +166,7 @@
       reauthenticationError = '';
       reauthenticating = true;
     } catch (cause) {
-      error = accessErrorMessage(cause);
+      error = errorMessage(cause);
     } finally {
       busy = '';
     }
@@ -180,7 +180,7 @@
       reauthenticating = false;
       window.location.assign(await beginOidcLink());
     } catch (cause) {
-      reauthenticationError = accessErrorMessage(cause);
+      reauthenticationError = errorMessage(cause);
     } finally {
       reauthenticationBusy = false;
     }
@@ -205,7 +205,7 @@
   <div class="loading-state" role="status">Loading OIDC configuration…</div>
 {:else if oidc.isError}
   <div class="inline-problem" role="alert">
-    {accessErrorMessage(oidc.error)}
+    {errorMessage(oidc.error)}
     <button
       class="button button-secondary"
       type="button"

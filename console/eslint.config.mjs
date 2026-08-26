@@ -35,7 +35,9 @@ function featureForPath(filename) {
 function importedFeature(filename, specifier) {
   const featureAlias = '$lib/features/';
   if (specifier.startsWith(featureAlias)) {
-    return featureForPath(path.resolve(featureRoot, specifier.slice(featureAlias.length)));
+    return featureForPath(
+      path.resolve(featureRoot, specifier.slice(featureAlias.length))
+    );
   }
   if (specifier.startsWith('.')) {
     return featureForPath(path.resolve(path.dirname(filename), specifier));
@@ -139,7 +141,11 @@ export default [
     }
   },
   {
-    files: ['tests/e2e/**/*.ts', 'tests/integration/**/*.ts'],
+    files: [
+      'tests/e2e/**/*.ts',
+      'tests/integration/**/*.ts',
+      'tests/screenshots/**/*.ts'
+    ],
     rules: {
       'no-restricted-imports': [
         'error',
@@ -147,7 +153,8 @@ export default [
           paths: [
             {
               name: '@playwright/test',
-              message: 'Import from ../playwright so browser runtime failures fail the test.'
+              message:
+                'Import from ../playwright so browser runtime failures fail the test.'
             }
           ]
         }

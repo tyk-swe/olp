@@ -30,7 +30,10 @@ export async function updateUserRole(user: User, role: string): Promise<User> {
   return result(response.data, response.error, response.response);
 }
 
-export async function updateUserActive(user: User, active: boolean): Promise<User> {
+export async function updateUserActive(
+  user: User,
+  active: boolean
+): Promise<User> {
   const response = await apiClient.PATCH('/api/v1/users/{user_id}', {
     params: { path: { user_id: user.id }, header: { 'If-Match': user.etag } },
     body: { active }
@@ -59,15 +62,25 @@ export async function createInvitation(
     params: { header: { 'Idempotency-Key': crypto.randomUUID() } },
     // Omitting the field lets the API apply its seven-day default; it caps the
     // lifetime at thirty days (720 hours).
-    body: { email, role, ...(expiresInHours ? { expires_in_hours: expiresInHours } : {}) }
+    body: {
+      email,
+      role,
+      ...(expiresInHours ? { expires_in_hours: expiresInHours } : {})
+    }
   });
   return result(response.data, response.error, response.response);
 }
 
 export async function revokeInvitation(id: string): Promise<void> {
-  const response = await apiClient.DELETE('/api/v1/invitations/{invitation_id}', {
-    params: { path: { invitation_id: id }, header: { 'Idempotency-Key': crypto.randomUUID() } }
-  });
+  const response = await apiClient.DELETE(
+    '/api/v1/invitations/{invitation_id}',
+    {
+      params: {
+        path: { invitation_id: id },
+        header: { 'Idempotency-Key': crypto.randomUUID() }
+      }
+    }
+  );
   result(response.data, response.error, response.response);
 }
 

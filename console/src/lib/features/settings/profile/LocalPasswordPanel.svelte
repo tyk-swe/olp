@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { PASSWORD_TOO_SHORT } from '$lib/passwordPolicy';
+
   type Props = {
     identitiesPending: boolean;
     identitiesError: boolean;
@@ -89,7 +91,7 @@
           ? 'new-password-help password-error'
           : 'new-password-help'}
       />
-      <small id="new-password-help">Use at least 12 characters.</small>
+      <small id="new-password-help">{PASSWORD_TOO_SHORT}</small>
     </div>
     <div class="form-field">
       <label for="confirm-password">Confirm new password</label>

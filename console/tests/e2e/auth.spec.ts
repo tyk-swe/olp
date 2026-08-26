@@ -1,6 +1,8 @@
 import { expect, test } from '../playwright';
 
-test('protected routes never render before authentication and return after login', async ({ page }) => {
+test('protected routes never render before authentication and return after login', async ({
+  page
+}) => {
   let authenticated = false;
   let loginBody: unknown;
 
@@ -8,14 +10,20 @@ test('protected routes never render before authentication and return after login
     await route.fulfill({ json: { setup_required: false } });
   });
   await page.route('**/api/v1/auth/capabilities', async (route) => {
-    await route.fulfill({ json: { local_login_enabled: true, oidc_login_enabled: false } });
+    await route.fulfill({
+      json: { local_login_enabled: true, oidc_login_enabled: false }
+    });
   });
   await page.route('**/api/v1/sessions/current', async (route) => {
     if (!authenticated) {
       await route.fulfill({
         status: 401,
         contentType: 'application/problem+json',
-        json: { type: 'about:blank', title: 'Authentication required', status: 401 }
+        json: {
+          type: 'about:blank',
+          title: 'Authentication required',
+          status: 401
+        }
       });
       return;
     }
@@ -52,23 +60,31 @@ test('protected routes never render before authentication and return after login
   });
 
   await page.goto('/providers?view=all#overview');
-  await expect(page).toHaveURL(/\/login\?return_to=%2Fproviders%3Fview%3Dall%23overview$/);
+  await expect(page).toHaveURL(
+    /\/login\?return_to=%2Fproviders%3Fview%3Dall%23overview$/
+  );
   await expect(page.getByRole('heading', { name: 'Providers' })).toHaveCount(0);
-  await expect(page.getByRole('link', { name: 'Continue with single sign-on' })).toHaveCount(0);
+  await expect(
+    page.getByRole('link', { name: 'Continue with single sign-on' })
+  ).toHaveCount(0);
 
   await page.getByLabel('Email').fill('owner@example.com');
   await page.getByLabel('Password').fill('correct horse battery staple');
   await page.getByRole('button', { name: 'Sign in' }).click();
 
   await expect(page).toHaveURL(/\/providers\?view=all#overview$/);
-  await expect(page.getByRole('heading', { name: 'Providers', exact: true })).toBeVisible();
+  await expect(
+    page.getByRole('heading', { name: 'Providers', exact: true })
+  ).toBeVisible();
   expect(loginBody).toEqual({
     email: 'owner@example.com',
     password: 'correct horse battery staple'
   });
 });
 
-test('failed sign out does not pretend the server session ended', async ({ page }) => {
+test('failed sign out does not pretend the server session ended', async ({
+  page
+}) => {
   await page.route('**/api/v1/sessions/current', async (route) => {
     if (route.request().method() === 'DELETE') {
       await route.fulfill({
@@ -100,11 +116,17 @@ test('failed sign out does not pretend the server session ended', async ({ page 
 
   await expect(page).toHaveURL(/\/providers$/);
   await expect(page.getByRole('alert')).toContainText('Sign out failed');
-  await expect(page.getByRole('alert')).toContainText('Your session may still be active');
-  await expect(page.getByRole('heading', { name: 'Providers', exact: true })).toBeVisible();
+  await expect(page.getByRole('alert')).toContainText(
+    'Your session may still be active'
+  );
+  await expect(
+    page.getByRole('heading', { name: 'Providers', exact: true })
+  ).toBeVisible();
 });
 
-test('sign out treats an already-absent server session as complete', async ({ page }) => {
+test('sign out treats an already-absent server session as complete', async ({
+  page
+}) => {
   await page.route('**/api/v1/sessions/current', async (route) => {
     if (route.request().method() === 'DELETE') {
       await route.fulfill({
@@ -135,12 +157,18 @@ test('sign out treats an already-absent server session as complete', async ({ pa
   await page.getByRole('button', { name: 'Sign out' }).click();
 
   await expect(page).toHaveURL(/\/login$/);
-  await expect(page.getByRole('heading', { name: 'Providers', exact: true })).toHaveCount(0);
+  await expect(
+    page.getByRole('heading', { name: 'Providers', exact: true })
+  ).toHaveCount(0);
 });
 
-test('login renders only discovered authentication methods', async ({ page }) => {
+test('login renders only discovered authentication methods', async ({
+  page
+}) => {
   await page.route('**/api/v1/auth/capabilities', async (route) => {
-    await route.fulfill({ json: { local_login_enabled: false, oidc_login_enabled: true } });
+    await route.fulfill({
+      json: { local_login_enabled: false, oidc_login_enabled: true }
+    });
   });
   await page.route('**/api/v1/oidc/login', async (route) => {
     expect(route.request().method()).toBe('POST');
@@ -148,7 +176,10 @@ test('login renders only discovered authentication methods', async ({ page }) =>
       return_to: '/settings?tab=security#sessions'
     });
     await route.fulfill({
-      json: { authorization_url: new URL('/mock-idp/authorize', route.request().url()).href }
+      json: {
+        authorization_url: new URL('/mock-idp/authorize', route.request().url())
+          .href
+      }
     });
   });
   await page.route('**/mock-idp/authorize', async (route) => {
@@ -167,9 +198,13 @@ test('login renders only discovered authentication methods', async ({ page }) =>
   await expect(page).toHaveURL(/\/mock-idp\/authorize$/);
 });
 
-test('OIDC initiation failures remain a recoverable login-page problem', async ({ page }) => {
+test('OIDC initiation failures remain a recoverable login-page problem', async ({
+  page
+}) => {
   await page.route('**/api/v1/auth/capabilities', async (route) => {
-    await route.fulfill({ json: { local_login_enabled: true, oidc_login_enabled: true } });
+    await route.fulfill({
+      json: { local_login_enabled: true, oidc_login_enabled: true }
+    });
   });
   await page.route('**/api/v1/oidc/login', async (route) => {
     await route.fulfill({
@@ -185,7 +220,9 @@ test('OIDC initiation failures remain a recoverable login-page problem', async (
   });
 
   await page.goto('/login');
-  await page.getByRole('link', { name: 'Continue with single sign-on' }).click();
+  await page
+    .getByRole('link', { name: 'Continue with single sign-on' })
+    .click();
   await expect(page).toHaveURL(/\/login$/);
   await expect(page.getByRole('alert')).toContainText(
     'Single sign-on was disabled after this page loaded.'
@@ -193,7 +230,9 @@ test('OIDC initiation failures remain a recoverable login-page problem', async (
   await expect(page.getByLabel('Email')).toBeVisible();
 });
 
-test('theme controls remain usable when browser storage is unavailable', async ({ page }) => {
+test('theme controls remain usable when browser storage is unavailable', async ({
+  page
+}) => {
   await page.addInitScript(() => {
     const unavailable = () => {
       throw new DOMException('Storage is disabled', 'SecurityError');
@@ -224,6 +263,8 @@ test('theme controls remain usable when browser storage is unavailable', async (
   const theme = page.getByRole('button', { name: 'Use dark theme' });
   await expect(theme).toBeVisible();
   await theme.click();
-  await expect(page.getByRole('button', { name: 'Use light theme' })).toBeVisible();
+  await expect(
+    page.getByRole('button', { name: 'Use light theme' })
+  ).toBeVisible();
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
 });

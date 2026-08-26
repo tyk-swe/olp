@@ -1,6 +1,10 @@
 import type { components } from './schema';
 import { apiClient } from './client';
 import { result } from './http';
+import {
+  GATEWAY_EPOCH_PAGE_SIZE,
+  PROVIDER_HEALTH_PAGE_SIZE
+} from './pageSizes';
 import { collectCursorPages, type CursorPage } from './pagination';
 
 export type RequestMetadataGatewayEpoch =
@@ -19,7 +23,7 @@ export async function listRequestMetadataGatewayEpochs(
 ): Promise<CursorPage<RequestMetadataGatewayEpoch>> {
   const { data, error, response } = await apiClient.GET(
     '/api/v1/request-metadata/gateway-epochs',
-    { params: { query: { state, cursor, limit: 25 } } }
+    { params: { query: { state, cursor, limit: GATEWAY_EPOCH_PAGE_SIZE } } }
   );
   const page = result(data, error, response);
   return { items: page.data, nextCursor: page.next_cursor ?? null };
@@ -47,7 +51,13 @@ export async function listProviderHealth(windowMinutes = 15): Promise<{
   let responseWindow = windowMinutes;
   const data = await collectCursorPages(async (cursor) => {
     const response = await apiClient.GET('/api/v1/provider-health', {
-      params: { query: { window_minutes: windowMinutes, cursor, limit: 200 } }
+      params: {
+        query: {
+          window_minutes: windowMinutes,
+          cursor,
+          limit: PROVIDER_HEALTH_PAGE_SIZE
+        }
+      }
     });
     const page = result(response.data, response.error, response.response);
     responseWindow = page.window_minutes;

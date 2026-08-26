@@ -30,7 +30,9 @@ async function readJson(request) {
   for await (const chunk of request) {
     bytes += chunk.length;
     if (bytes > maxBodyBytes) {
-      const error = new Error('request body exceeded the integration-test limit');
+      const error = new Error(
+        'request body exceeded the integration-test limit'
+      );
       error.status = 413;
       throw error;
     }
@@ -101,8 +103,10 @@ function expectedTokenLimit(prompt) {
 
 function validateTokenLimit(prompt, actualLimit, label) {
   const tokenLimit = expectedTokenLimit(prompt);
-  if (tokenLimit === null) return `${label} payload contained an unexpected prompt`;
-  if (actualLimit !== tokenLimit) return `${label} payload omitted the translated token limit`;
+  if (tokenLimit === null)
+    return `${label} payload contained an unexpected prompt`;
+  if (actualLimit !== tokenLimit)
+    return `${label} payload omitted the translated token limit`;
   return null;
 }
 
@@ -119,7 +123,11 @@ function validateResponsesPayload(body) {
   ) {
     return 'Responses payload omitted the translated user input';
   }
-  return validateTokenLimit(body.input[0].content[0].text, body.max_output_tokens, 'Responses');
+  return validateTokenLimit(
+    body.input[0].content[0].text,
+    body.max_output_tokens,
+    'Responses'
+  );
 }
 
 function validateChatPayload(body) {
@@ -173,7 +181,10 @@ const server = createServer(async (request, response) => {
   };
   recorded.push(item);
 
-  if (method !== 'POST' || (url.pathname !== azureChat && url.pathname !== azureResponses)) {
+  if (
+    method !== 'POST' ||
+    (url.pathname !== azureChat && url.pathname !== azureResponses)
+  ) {
     unexpected.push(`${method} ${url.pathname}`);
     return json(response, 404, { error: 'unexpected Azure OpenAI path' });
   }
@@ -189,10 +200,18 @@ const server = createServer(async (request, response) => {
     return rejectPayload(response, item, 'expected a JSON object');
   }
   if (body.model !== deployment) {
-    return rejectPayload(response, item, 'payload omitted the configured deployment model');
+    return rejectPayload(
+      response,
+      item,
+      'payload omitted the configured deployment model'
+    );
   }
   if (body.stream !== undefined && body.stream !== false) {
-    return rejectPayload(response, item, 'this integration mock supports unary requests only');
+    return rejectPayload(
+      response,
+      item,
+      'this integration mock supports unary requests only'
+    );
   }
   const payloadError =
     url.pathname === azureResponses
@@ -202,7 +221,11 @@ const server = createServer(async (request, response) => {
     return rejectPayload(response, item, payloadError);
   }
 
-  return json(response, 200, url.pathname === azureResponses ? responsesResponse() : chatResponse());
+  return json(
+    response,
+    200,
+    url.pathname === azureResponses ? responsesResponse() : chatResponse()
+  );
 });
 
 function shutdown() {

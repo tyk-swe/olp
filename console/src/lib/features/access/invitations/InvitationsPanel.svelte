@@ -9,7 +9,7 @@
     type InvitationSecret
   } from '$lib/api/management/access';
   import { copyText } from '$lib/clipboard';
-  import { errorMessage as accessErrorMessage } from '$lib/api/http';
+  import { errorMessage } from '$lib/api/http';
   import {
     cursorPaginationProps,
     emptyCursorHistory
@@ -64,7 +64,7 @@
     try {
       await action();
     } catch (cause) {
-      error = accessErrorMessage(cause);
+      error = errorMessage(cause);
     } finally {
       busy = '';
     }
@@ -206,7 +206,7 @@
   <div class="loading-state" role="status">Loading invitation history…</div>
 {:else if invitations.isError}
   <div class="inline-problem" role="alert">
-    {accessErrorMessage(invitations.error)}
+    {errorMessage(invitations.error)}
   </div>
 {:else if !invitations.data?.items.length && pagination.history.length === 0}
   <section class="card empty-state">

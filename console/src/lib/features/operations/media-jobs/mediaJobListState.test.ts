@@ -45,7 +45,10 @@ describe('mediaJobFilters', () => {
 
   it('converts local date bounds to instants', () => {
     const filters = mediaJobFilters(
-      state({ createdAfter: '2026-07-12T09:30', createdBefore: '2026-07-12T18:00' })
+      state({
+        createdAfter: '2026-07-12T09:30',
+        createdBefore: '2026-07-12T18:00'
+      })
     );
     // The suite runs in America/New_York (UTC-4 in July), so the wall-clock
     // values the operator typed are four hours behind the instants sent.
@@ -54,7 +57,11 @@ describe('mediaJobFilters', () => {
   });
 
   it('drops a half-typed date instead of sending an invalid bound', () => {
-    expect(mediaJobFilters(state({ createdAfter: '2026-13-45T99:99' })).created_after).toBeUndefined();
-    expect(mediaJobFilters(state({ createdBefore: '   ' })).created_before).toBeUndefined();
+    expect(
+      mediaJobFilters(state({ createdAfter: '2026-13-45T99:99' })).created_after
+    ).toBeUndefined();
+    expect(
+      mediaJobFilters(state({ createdBefore: '   ' })).created_before
+    ).toBeUndefined();
   });
 });

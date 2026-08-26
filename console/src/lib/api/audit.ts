@@ -1,13 +1,11 @@
 import type { components } from './schema';
 import { apiClient } from './client';
 import { result } from './http';
+import { AUDIT_PAGE_SIZE } from './pageSizes';
 import type { CursorPage } from './pagination';
 import { compactQuery } from './query';
 
 export type AuditEvent = components['schemas']['AuditEventResponse'];
-
-/** One request fills a page; the list state and the API agree on the size. */
-export const AUDIT_PAGE_SIZE = 50;
 
 export type AuditFilters = {
   cursor?: string;

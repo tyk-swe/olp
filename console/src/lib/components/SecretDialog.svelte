@@ -63,7 +63,9 @@
 </dialog>
 
 <style>
-  :global(body.secret-dialog-open) { overflow: hidden; }
+  :global(body.secret-dialog-open) {
+    overflow: hidden;
+  }
 
   .secret-dialog::backdrop {
     background: rgb(11 17 30 / 62%);
@@ -82,17 +84,22 @@
     box-shadow: var(--shadow-md);
   }
 
-  .secret-dialog.wide { width: min(calc(100% - 2rem), 56rem); }
+  .secret-dialog.wide {
+    width: min(calc(100% - 2rem), 56rem);
+  }
 
   .dialog-title {
     margin: 0;
     font-size: clamp(1.5rem, 4vw, 2rem);
     font-weight: 730;
-    letter-spacing: -.035em;
+    letter-spacing: -0.035em;
     line-height: 1.15;
   }
 
-  .dialog-description { margin: .65rem 0 1rem; color: var(--foreground-muted); }
+  .dialog-description {
+    margin: 0.65rem 0 1rem;
+    color: var(--foreground-muted);
+  }
 
   .dialog-header {
     display: flex;
@@ -105,22 +112,31 @@
     width: 2.75rem;
     height: 2.75rem;
     flex: none;
-    margin: -.5rem -.5rem 0 0;
+    margin: -0.5rem -0.5rem 0 0;
     border: 0;
-    border-radius: .375rem;
+    border-radius: 0.375rem;
     background: transparent;
     color: var(--foreground-muted);
     font-size: 1.4rem;
     line-height: 1;
   }
 
-  .dialog-close:hover { background: var(--surface-hover); color: var(--foreground); }
+  .dialog-close:hover {
+    background: var(--surface-hover);
+    color: var(--foreground);
+  }
 
   @media (max-width: 38rem) {
-    .secret-dialog { top: .75rem; max-height: calc(100dvh - 1.5rem); }
+    .secret-dialog {
+      top: 0.75rem;
+      max-height: calc(100dvh - 1.5rem);
+    }
   }
 
   @media (forced-colors: active) {
-    .secret-dialog::backdrop { background: Canvas; opacity: .85; }
+    .secret-dialog::backdrop {
+      background: Canvas;
+      opacity: 0.85;
+    }
   }
 </style>

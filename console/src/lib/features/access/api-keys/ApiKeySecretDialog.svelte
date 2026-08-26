@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { createQuery } from '@tanstack/svelte-query';
+  import { errorMessage } from '$lib/api/http';
   import { listRoutes } from '$lib/api/management/routes';
   import type { ApiKeySecret } from '$lib/api/management/api-keys';
   import { copyText } from '$lib/clipboard';
@@ -149,10 +150,7 @@
       testMessage = `${sdkLabel(sdk)} request succeeded through route ${routeSlug}.`;
     } catch (error) {
       testState = 'failed';
-      testMessage =
-        error instanceof Error
-          ? error.message
-          : 'The generated key test failed.';
+      testMessage = errorMessage(error, 'The generated key test failed.');
     }
   }
 </script>

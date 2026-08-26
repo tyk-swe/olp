@@ -1,6 +1,7 @@
 import type { components } from './schema';
 import { apiClient } from './client';
 import { result } from './http';
+import { RUNTIME_GENERATION_PAGE_SIZE } from './pageSizes';
 import type { CursorPage } from './pagination';
 import { compactQuery } from './query';
 
@@ -11,7 +12,11 @@ export async function listRuntimeGenerations(
 ): Promise<CursorPage<RuntimeGeneration>> {
   const { data, error, response } = await apiClient.GET(
     '/api/v1/runtime-generations',
-    { params: { query: compactQuery({ cursor, limit: 25 }) } }
+    {
+      params: {
+        query: compactQuery({ cursor, limit: RUNTIME_GENERATION_PAGE_SIZE })
+      }
+    }
   );
   const page = result(data, error, response);
   return { items: page.data, nextCursor: page.next_cursor ?? null };

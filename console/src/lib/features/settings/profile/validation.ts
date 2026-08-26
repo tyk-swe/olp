@@ -1,3 +1,5 @@
+import { validatePasswordPolicy } from '$lib/passwordPolicy';
+
 export function validateDisplayName(value: string) {
   const displayName = value.trim();
   if (!displayName) throw new Error('Enter your display name.');
@@ -18,8 +20,12 @@ export function validatePassword(
 }
 
 export function validateNewPassword(next: string, confirmation: string) {
-  if (next.length < 12) throw new Error('Use at least 12 characters.');
-  if (next.length > 1024) throw new Error('Use 1,024 characters or fewer.');
-  if (next !== confirmation) throw new Error('New passwords do not match.');
+  const { password, confirmPassword } = validatePasswordPolicy(
+    next,
+    confirmation,
+    'New passwords do not match.'
+  );
+  const problem = password ?? confirmPassword;
+  if (problem) throw new Error(problem);
   return next;
 }

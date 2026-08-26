@@ -46,7 +46,8 @@
 
   function dismissAccountMenu(event: PointerEvent) {
     if (!accountMenu?.open) return;
-    if (event.target instanceof Node && accountMenu.contains(event.target)) return;
+    if (event.target instanceof Node && accountMenu.contains(event.target))
+      return;
     closeAccountMenu();
   }
 
@@ -57,7 +58,10 @@
   }
 </script>
 
-<svelte:document onpointerdown={dismissAccountMenu} onkeydown={closeAccountMenuOnEscape} />
+<svelte:document
+  onpointerdown={dismissAccountMenu}
+  onkeydown={closeAccountMenuOnEscape}
+/>
 
 <a class="skip-link" href="#main-content">Skip to main content</a>
 
@@ -76,7 +80,13 @@
 
   <div class="workspace">
     <header class="topbar">
-      <button class="menu-button" type="button" aria-label="Open navigation" aria-controls="mobile-navigation" onclick={openNavigation}>
+      <button
+        class="menu-button"
+        type="button"
+        aria-label="Open navigation"
+        aria-controls="mobile-navigation"
+        onclick={openNavigation}
+      >
         <NavIcon name="menu" />
       </button>
 
@@ -86,7 +96,11 @@
       </div>
 
       <div class="topbar-actions">
-        <span class="edition" title={installationLabel}><span class="edition-dot" aria-hidden="true"></span><span class="edition-name">{installationLabel}</span></span>
+        <span class="edition" title={installationLabel}
+          ><span class="edition-dot" aria-hidden="true"></span><span
+            class="edition-name">{installationLabel}</span
+          ></span
+        >
         <ThemeToggle />
         <details
           class="account-menu"
@@ -100,14 +114,26 @@
             aria-label="Open account menu"
             aria-expanded={accountMenuOpen}
           >
-            <span class="avatar" aria-hidden="true">{user?.display_name?.slice(0, 1).toUpperCase() ?? 'A'}</span>
+            <span class="avatar" aria-hidden="true"
+              >{user?.display_name?.slice(0, 1).toUpperCase() ?? 'A'}</span
+            >
             <span class="account-label">{user?.display_name ?? 'Account'}</span>
             <NavIcon name="chevron" size={16} />
           </summary>
           <div class="account-popover">
-            <a href={resolve('/settings/profile')} onclick={closeAccountMenu}>Personal profile</a>
-            {#if can(user.role, 'settings.read')}<a href={resolve('/settings')} onclick={closeAccountMenu}>Installation settings</a>{/if}
-            <button type="button" onclick={onSignOut} disabled={signingOut} aria-busy={signingOut}>
+            <a href={resolve('/settings/profile')} onclick={closeAccountMenu}
+              >Personal profile</a
+            >
+            {#if can(user.role, 'settings.read')}<a
+                href={resolve('/settings')}
+                onclick={closeAccountMenu}>Installation settings</a
+              >{/if}
+            <button
+              type="button"
+              onclick={onSignOut}
+              disabled={signingOut}
+              aria-busy={signingOut}
+            >
               {signingOut ? 'Signing out…' : 'Sign out'}
             </button>
           </div>
@@ -122,7 +148,11 @@
             <strong>Sign out failed</strong>
             <p>{signOutError} Your session may still be active.</p>
           </div>
-          <button class="button button-secondary" type="button" onclick={onSignOut}>Try again</button>
+          <button
+            class="button button-secondary"
+            type="button"
+            onclick={onSignOut}>Try again</button
+          >
         </div>
       {/if}
       {@render children()}
@@ -130,16 +160,35 @@
   </div>
 </div>
 
-<dialog id="mobile-navigation" class="mobile-dialog" bind:this={mobileNavigation} onclick={dismissBackdrop}>
+<dialog
+  id="mobile-navigation"
+  class="mobile-dialog"
+  bind:this={mobileNavigation}
+  onclick={dismissBackdrop}
+>
   <div class="mobile-drawer">
     <div class="drawer-heading">
-      <a class="brand" href={resolve('/')} aria-label="OpenLLMProxy overview" onclick={closeNavigation}>
+      <a
+        class="brand"
+        href={resolve('/')}
+        aria-label="OpenLLMProxy overview"
+        onclick={closeNavigation}
+      >
         <BrandMark />
         <span>OpenLLMProxy</span>
       </a>
-      <button type="button" class="close-button" aria-label="Close navigation" onclick={closeNavigation}>×</button>
+      <button
+        type="button"
+        class="close-button"
+        aria-label="Close navigation"
+        onclick={closeNavigation}>×</button
+      >
     </div>
-    <Navigation role={user.role} label="Mobile primary" onNavigate={closeNavigation} />
+    <Navigation
+      role={user.role}
+      label="Mobile primary"
+      onNavigate={closeNavigation}
+    />
   </div>
 </dialog>
 

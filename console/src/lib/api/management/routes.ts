@@ -1,6 +1,7 @@
 import type { components } from '../schema';
 import { apiClient } from '../client';
 import { ensureSuccess, result } from '../http';
+import { ROUTE_PAGE_SIZE, ROUTE_REVISION_PAGE_SIZE } from '../pageSizes';
 import { collectCursorPages, type CursorPage } from '../pagination';
 
 type Schemas = components['schemas'];
@@ -21,7 +22,7 @@ export async function listRouteDraftPage(
   signal?: AbortSignal
 ): Promise<CursorPage<RouteDraft>> {
   const response = await apiClient.GET('/api/v1/route-drafts', {
-    params: { query: { limit: 50, cursor } },
+    params: { query: { limit: ROUTE_PAGE_SIZE, cursor } },
     signal
   });
   const page = result(response.data, response.error, response.response);
@@ -37,14 +38,17 @@ export async function listRoutePage(
   signal?: AbortSignal
 ): Promise<CursorPage<ActiveRoute>> {
   const response = await apiClient.GET('/api/v1/routes', {
-    params: { query: { limit: 50, cursor } },
+    params: { query: { limit: ROUTE_PAGE_SIZE, cursor } },
     signal
   });
   const page = result(response.data, response.error, response.response);
   return { items: page.items, nextCursor: page.next_cursor ?? null };
 }
 
-export async function getRouteDraft(id: string, signal?: AbortSignal): Promise<RouteDraft> {
+export async function getRouteDraft(
+  id: string,
+  signal?: AbortSignal
+): Promise<RouteDraft> {
   const response = await apiClient.GET('/api/v1/route-drafts/{draft_id}', {
     params: { path: { draft_id: id } },
     signal
@@ -52,7 +56,9 @@ export async function getRouteDraft(id: string, signal?: AbortSignal): Promise<R
   return result(response.data, response.error, response.response);
 }
 
-export async function createRouteDraft(input: CreateRouteDraftInput): Promise<string> {
+export async function createRouteDraft(
+  input: CreateRouteDraftInput
+): Promise<string> {
   const response = await apiClient.POST('/api/v1/route-drafts', {
     params: { header: { 'Idempotency-Key': crypto.randomUUID() } },
     body: input
@@ -60,7 +66,11 @@ export async function createRouteDraft(input: CreateRouteDraftInput): Promise<st
   return result(response.data, response.error, response.response).id;
 }
 
-export async function replaceRouteDraft(id: string, etag: string, input: ReplaceRouteDraftInput): Promise<RouteDraft> {
+export async function replaceRouteDraft(
+  id: string,
+  etag: string,
+  input: ReplaceRouteDraftInput
+): Promise<RouteDraft> {
   const response = await apiClient.PUT('/api/v1/route-drafts/{draft_id}', {
     params: { path: { draft_id: id }, header: { 'If-Match': etag } },
     body: input
@@ -68,38 +78,60 @@ export async function replaceRouteDraft(id: string, etag: string, input: Replace
   return result(response.data, response.error, response.response);
 }
 
-export async function deleteRouteDraft(id: string, etag: string): Promise<void> {
+export async function deleteRouteDraft(
+  id: string,
+  etag: string
+): Promise<void> {
   const response = await apiClient.DELETE('/api/v1/route-drafts/{draft_id}', {
     params: { path: { draft_id: id }, header: { 'If-Match': etag } }
   });
   ensureSuccess(response.error, response.response);
 }
 
-export async function simulateRoute(id: string, input: RouteSimulationInput): Promise<RouteSimulation> {
-  const response = await apiClient.POST('/api/v1/route-drafts/{draft_id}/simulate', {
-    params: { path: { draft_id: id } },
-    body: input
-  });
+export async function simulateRoute(
+  id: string,
+  input: RouteSimulationInput
+): Promise<RouteSimulation> {
+  const response = await apiClient.POST(
+    '/api/v1/route-drafts/{draft_id}/simulate',
+    {
+      params: { path: { draft_id: id } },
+      body: input
+    }
+  );
   return result(response.data, response.error, response.response);
 }
 
-export async function validateRoute(draft: RouteDraft): Promise<RouteDraftValidation> {
-  const response = await apiClient.POST('/api/v1/route-drafts/{draft_id}/validate', {
-    params: {
-      path: { draft_id: draft.id },
-      header: { 'If-Match': draft.etag }
+export async function validateRoute(
+  draft: RouteDraft
+): Promise<RouteDraftValidation> {
+  const response = await apiClient.POST(
+    '/api/v1/route-drafts/{draft_id}/validate',
+    {
+      params: {
+        path: { draft_id: draft.id },
+        header: { 'If-Match': draft.etag }
+      }
     }
-  });
+  );
   return result(response.data, response.error, response.response);
 }
 
-export async function activateRoute(draft: RouteDraft): Promise<RouteActivation> {
-  const response = await apiClient.POST('/api/v1/route-drafts/{draft_id}/activate', {
-    params: {
-      path: { draft_id: draft.id },
-      header: { 'If-Match': draft.etag, 'Idempotency-Key': crypto.randomUUID() }
+export async function activateRoute(
+  draft: RouteDraft
+): Promise<RouteActivation> {
+  const response = await apiClient.POST(
+    '/api/v1/route-drafts/{draft_id}/activate',
+    {
+      params: {
+        path: { draft_id: draft.id },
+        header: {
+          'If-Match': draft.etag,
+          'Idempotency-Key': crypto.randomUUID()
+        }
+      }
     }
-  });
+  );
   return result(response.data, response.error, response.response);
 }
 
@@ -107,7 +139,9 @@ export async function listRouteRevisions(
   routeId: string,
   signal?: AbortSignal
 ): Promise<RouteRevision[]> {
-  return collectCursorPages((cursor) => listRouteRevisionPage(routeId, cursor, signal));
+  return collectCursorPages((cursor) =>
+    listRouteRevisionPage(routeId, cursor, signal)
+  );
 }
 
 async function listRouteRevisionPage(
@@ -116,7 +150,10 @@ async function listRouteRevisionPage(
   signal?: AbortSignal
 ): Promise<CursorPage<RouteRevision>> {
   const response = await apiClient.GET('/api/v1/routes/{route_id}/revisions', {
-    params: { path: { route_id: routeId }, query: { cursor, limit: 100 } },
+    params: {
+      path: { route_id: routeId },
+      query: { cursor, limit: ROUTE_REVISION_PAGE_SIZE }
+    },
     signal
   });
   const page = result(response.data, response.error, response.response);
@@ -129,19 +166,28 @@ export async function diffRouteRevisions(
   to: string,
   signal?: AbortSignal
 ): Promise<RouteRevisionDiff> {
-  const response = await apiClient.GET('/api/v1/routes/{route_id}/revisions/diff', {
-    params: { path: { route_id: routeId }, query: { from, to } },
-    signal
-  });
+  const response = await apiClient.GET(
+    '/api/v1/routes/{route_id}/revisions/diff',
+    {
+      params: { path: { route_id: routeId }, query: { from, to } },
+      signal
+    }
+  );
   return result(response.data, response.error, response.response);
 }
 
-export async function restoreRouteRevision(routeId: string, revisionId: string): Promise<RouteDraft> {
-  const response = await apiClient.POST('/api/v1/routes/{route_id}/revisions/{revision_id}/restore-as-draft', {
-    params: {
-      path: { route_id: routeId, revision_id: revisionId },
-      header: { 'Idempotency-Key': crypto.randomUUID() }
+export async function restoreRouteRevision(
+  routeId: string,
+  revisionId: string
+): Promise<RouteDraft> {
+  const response = await apiClient.POST(
+    '/api/v1/routes/{route_id}/revisions/{revision_id}/restore-as-draft',
+    {
+      params: {
+        path: { route_id: routeId, revision_id: revisionId },
+        header: { 'Idempotency-Key': crypto.randomUUID() }
+      }
     }
-  });
+  );
   return result(response.data, response.error, response.response);
 }

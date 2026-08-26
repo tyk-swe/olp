@@ -52,7 +52,11 @@ describe('fieldIssues', () => {
     });
 
     expect(fieldIssues(problem)).toEqual([
-      { field: 'endpoint', message: 'Provide a base endpoint URL.', code: 'required' },
+      {
+        field: 'endpoint',
+        message: 'Provide a base endpoint URL.',
+        code: 'required'
+      },
       {
         field: 'cloud_region',
         message: 'This connector does not accept a region.',
@@ -116,7 +120,11 @@ describe('problem parsing', () => {
 
     expect(caught).toBeInstanceOf(ApiProblem);
     expect(fieldIssues(caught)).toEqual([
-      { field: 'endpoint', message: 'Provide a base endpoint URL.', code: 'required' }
+      {
+        field: 'endpoint',
+        message: 'Provide a base endpoint URL.',
+        code: 'required'
+      }
     ]);
   });
 
@@ -138,7 +146,11 @@ describe('problem parsing', () => {
     }
 
     expect(fieldIssues(caught)).toEqual([
-      { field: 'endpoint', message: 'Provide a base endpoint URL.', code: undefined }
+      {
+        field: 'endpoint',
+        message: 'Provide a base endpoint URL.',
+        code: undefined
+      }
     ]);
   });
 });

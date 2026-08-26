@@ -1,4 +1,6 @@
-import { AUDIT_PAGE_SIZE, type AuditFilters } from '$lib/api/audit';
+import { createContext } from 'svelte';
+import type { AuditFilters } from '$lib/api/audit';
+import { AUDIT_PAGE_SIZE } from '$lib/api/pageSizes';
 import { emptyCursorHistory, type CursorHistory } from '$lib/api/pagination';
 import { instant } from '$lib/api/query';
 
@@ -12,6 +14,9 @@ export type AuditListState = CursorHistory & {
   occurredBefore: string;
   applied: Omit<AuditFilters, 'cursor'>;
 };
+
+export const [getAuditListState, setAuditListState] =
+  createContext<AuditListState>();
 
 export function emptyAuditListState(): AuditListState {
   return {

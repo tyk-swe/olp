@@ -25,10 +25,7 @@
   const queryClient = useQueryClient();
   const pagination = $state(emptyCursorHistory());
   const models = createQuery(() => ({
-    queryKey: [
-      'provider-model-inventory-page',
-      pagination.cursor ?? 'first'
-    ],
+    queryKey: ['provider-model-inventory-page', pagination.cursor ?? 'first'],
     queryFn: () => listProviderModelInventoryPage(pagination.cursor)
   }));
   let search = $state('');
@@ -45,14 +42,26 @@
   const filtered = $derived(
     inventory.filter(({ provider_name, model }) => {
       const needle = search.trim().toLowerCase();
-      const matchesText = !needle || `${provider_name} ${model.display_name} ${model.upstream_model}`.toLowerCase().includes(needle);
-      const matchesSurface = surface === 'all' || model.capabilities.some((capability) => capability.surface === surface);
+      const matchesText =
+        !needle ||
+        `${provider_name} ${model.display_name} ${model.upstream_model}`
+          .toLowerCase()
+          .includes(needle);
+      const matchesSurface =
+        surface === 'all' ||
+        model.capabilities.some((capability) => capability.surface === surface);
       return matchesText && matchesSurface;
     })
   );
-  const enabledCount = $derived(inventory.filter(({ model }) => model.enabled).length);
-  const capabilityCount = $derived(inventory.reduce((count, { model }) => count + model.capabilities.length, 0));
-  const providerCount = $derived(new Set(inventory.map((entry) => entry.provider_id)).size);
+  const enabledCount = $derived(
+    inventory.filter(({ model }) => model.enabled).length
+  );
+  const capabilityCount = $derived(
+    inventory.reduce((count, { model }) => count + model.capabilities.length, 0)
+  );
+  const providerCount = $derived(
+    new Set(inventory.map((entry) => entry.provider_id)).size
+  );
 
   function message(error: unknown) {
     return errorMessage(error, 'The model inventory could not be loaded.');
@@ -65,7 +74,9 @@
     notice = '';
     try {
       const provider = await getProvider(entry.provider_id);
-      const capabilities = entry.model.capabilities.map(({ operation, surface, mode }) => ({ operation, surface, mode }));
+      const capabilities = entry.model.capabilities.map(
+        ({ operation, surface, mode }) => ({ operation, surface, mode })
+      );
       await setProviderModel(provider, entry.model.id, enabled, capabilities);
       await Promise.all([
         invalidateProviderSummaries(queryClient),
@@ -82,71 +93,257 @@
       busyModel = '';
     }
   }
-
 </script>
 
 <svelte:head><title>Models · OpenLLMProxy</title></svelte:head>
 
 <div class="page-header">
-  <div><p class="eyebrow">Gateway</p><h1 class="page-title">Model inventory</h1><p class="page-description">Route eligibility comes from certified provider, model, operation, surface, and mode tuples.</p></div>
-  {#if canManage}<a class="button button-primary" href={resolve('/providers/new')}>Discover models</a>{/if}
+  <div>
+    <p class="eyebrow">Gateway</p>
+    <h1 class="page-title">Model inventory</h1>
+    <p class="page-description">
+      Route eligibility comes from certified provider, model, operation,
+      surface, and mode tuples.
+    </p>
+  </div>
+  {#if canManage}<a
+      class="button button-primary"
+      href={resolve('/providers/new')}>Discover models</a
+    >{/if}
 </div>
-{#if !canManage}<ReadOnlyNote>Your role can view the model inventory but not change route eligibility.</ReadOnlyNote>{/if}
+{#if !canManage}<ReadOnlyNote
+    >Your role can view the model inventory but not change route eligibility.</ReadOnlyNote
+  >{/if}
 
 <div class="metric-grid">
-  <article class="card metric-card"><p>Models on page</p><strong>{inventory.length}</strong></article>
-  <article class="card metric-card"><p>Route eligible on page</p><strong>{enabledCount}</strong></article>
-  <article class="card metric-card"><p>Capability tuples on page</p><strong>{capabilityCount}</strong></article>
-  <article class="card metric-card"><p>Providers on page</p><strong>{providerCount}</strong></article>
+  <article class="card metric-card">
+    <p>Models on page</p>
+    <strong>{inventory.length}</strong>
+  </article>
+  <article class="card metric-card">
+    <p>Route eligible on page</p>
+    <strong>{enabledCount}</strong>
+  </article>
+  <article class="card metric-card">
+    <p>Capability tuples on page</p>
+    <strong>{capabilityCount}</strong>
+  </article>
+  <article class="card metric-card">
+    <p>Providers on page</p>
+    <strong>{providerCount}</strong>
+  </article>
 </div>
 
-{#if mutationError}<div class="inline-problem" role="alert">{mutationError}</div>{/if}
+{#if mutationError}<div class="inline-problem" role="alert">
+    {mutationError}
+  </div>{/if}
 {#if notice}<div class="success-banner" role="status">{notice}</div>{/if}
 
 <div class="toolbar" role="search">
-  <label class="search"><span class="sr-only">Search models</span><input class="filter-control" type="search" bind:value={search} placeholder="Search models or providers" /></label>
-  <label class="surface"><span>Client surface</span><select class="filter-control" bind:value={surface}><option value="all">All surfaces</option><option value="openai">OpenAI</option><option value="anthropic">Anthropic</option><option value="gemini">Gemini</option></select></label>
+  <label class="search"
+    ><span class="sr-only">Search models</span><input
+      class="filter-control"
+      type="search"
+      bind:value={search}
+      placeholder="Search models or providers"
+    /></label
+  >
+  <label class="surface"
+    ><span>Client surface</span><select
+      class="filter-control"
+      bind:value={surface}
+      ><option value="all">All surfaces</option><option value="openai"
+        >OpenAI</option
+      ><option value="anthropic">Anthropic</option><option value="gemini"
+        >Gemini</option
+      ></select
+    ></label
+  >
 </div>
 
 {#if models.isPending}
   <div class="loading-state" role="status">Loading certified models…</div>
 {:else if models.isError}
-  <div class="inline-problem" role="alert">{message(models.error)} <button class="button button-secondary" type="button" onclick={() => models.refetch()}>Retry</button></div>
+  <div class="inline-problem" role="alert">
+    {message(models.error)}
+    <button
+      class="button button-secondary"
+      type="button"
+      onclick={() => models.refetch()}>Retry</button
+    >
+  </div>
 {:else if inventory.length === 0}
-  <section class="card empty-state"><div><h2>No models discovered</h2><p>Run a provider probe and capability review first.</p><a class="button button-primary" href={resolve('/providers')}>Open providers</a></div></section>
+  <section class="card empty-state">
+    <div>
+      <h2>No models discovered</h2>
+      <p>Run a provider probe and capability review first.</p>
+      <a class="button button-primary" href={resolve('/providers')}
+        >Open providers</a
+      >
+    </div>
+  </section>
 {:else if filtered.length === 0}
   <!-- The inventory endpoint has no search or surface parameters, so filtering is per page. -->
-  <section class="card empty-state"><div><h2>No matches on this page</h2><p>Clear the filters, or use the pagination below to search another page.</p><button class="button button-secondary" type="button" onclick={() => { search = ''; surface = 'all'; }}>Clear filters</button></div></section>
+  <section class="card empty-state">
+    <div>
+      <h2>No matches on this page</h2>
+      <p>
+        Clear the filters, or use the pagination below to search another page.
+      </p>
+      <button
+        class="button button-secondary"
+        type="button"
+        onclick={() => {
+          search = '';
+          surface = 'all';
+        }}>Clear filters</button
+      >
+    </div>
+  </section>
 {:else}
-  <div class="table-shell"><table class="data-table"><thead><tr><th>Model</th><th>Provider</th><th>Capability tuples / provenance</th><th>Route eligibility</th></tr></thead><tbody>
-    {#each filtered as entry (`${entry.provider_id}-${entry.model.id}`)}
-      <tr>
-        <td><strong>{entry.model.display_name}</strong><br /><code>{entry.model.upstream_model}</code></td>
-        <td><a href={resolve(`/providers/${entry.provider_id}`)}>{entry.provider_name}</a><br /><span class="badge">{entry.provider_kind.replaceAll('_', ' ')}</span></td>
-        <td><div class="capabilities">{#each entry.model.capabilities as capability (`${capability.operation}-${capability.surface}-${capability.mode}`)}<span class:success={capability.source === 'certified'} class:accent={capability.source !== 'certified'} class="badge"><strong>{capability.operation}</strong> {capability.surface} · {capability.mode} · {capability.source}</span>{/each}</div></td>
-        <td><label class="eligibility">{#key `${entry.model.id}:${eligibilityVersion}`}<input type="checkbox" checked={entry.model.enabled} disabled={!canManage || Boolean(busyModel)} onchange={(event) => toggle(entry, event.currentTarget.checked)} />{/key}<span>{entry.model.enabled ? 'Enabled' : 'Disabled'}</span></label></td>
-      </tr>
-    {/each}
-  </tbody></table></div>
+  <div class="table-shell">
+    <table class="data-table">
+      <thead
+        ><tr
+          ><th>Model</th><th>Provider</th><th>Capability tuples / provenance</th
+          ><th>Route eligibility</th></tr
+        ></thead
+      ><tbody>
+        {#each filtered as entry (`${entry.provider_id}-${entry.model.id}`)}
+          <tr>
+            <td
+              ><strong>{entry.model.display_name}</strong><br /><code
+                >{entry.model.upstream_model}</code
+              ></td
+            >
+            <td
+              ><a href={resolve(`/providers/${entry.provider_id}`)}
+                >{entry.provider_name}</a
+              ><br /><span class="badge"
+                >{entry.provider_kind.replaceAll('_', ' ')}</span
+              ></td
+            >
+            <td
+              ><div class="capabilities">
+                {#each entry.model.capabilities as capability (`${capability.operation}-${capability.surface}-${capability.mode}`)}<span
+                    class:success={capability.source === 'certified'}
+                    class:accent={capability.source !== 'certified'}
+                    class="badge"
+                    ><strong>{capability.operation}</strong>
+                    {capability.surface} · {capability.mode} · {capability.source}</span
+                  >{/each}
+              </div></td
+            >
+            <td
+              ><label class="eligibility"
+                >{#key `${entry.model.id}:${eligibilityVersion}`}<input
+                    type="checkbox"
+                    checked={entry.model.enabled}
+                    disabled={!canManage || Boolean(busyModel)}
+                    onchange={(event) =>
+                      toggle(entry, event.currentTarget.checked)}
+                  />{/key}<span
+                  >{entry.model.enabled ? 'Enabled' : 'Disabled'}</span
+                ></label
+              ></td
+            >
+          </tr>
+        {/each}
+      </tbody>
+    </table>
+  </div>
 {/if}
 
-{#if !models.isPending && !models.isError}<CursorPagination {...cursorPaginationProps(pagination, models.data?.nextCursor)} label="Model inventory pages" />{/if}
+{#if !models.isPending && !models.isError}<CursorPagination
+    {...cursorPaginationProps(pagination, models.data?.nextCursor)}
+    label="Model inventory pages"
+  />{/if}
 
-<aside class="policy-note" aria-label="Capability policy"><strong>No silent semantic loss.</strong> Cross-protocol routes reject operations a target cannot faithfully represent; unknown source fields are not treated as certified support.</aside>
+<aside class="policy-note" aria-label="Capability policy">
+  <strong>No silent semantic loss.</strong> Cross-protocol routes reject operations
+  a target cannot faithfully represent; unknown source fields are not treated as certified
+  support.
+</aside>
 
 <style>
-  .success-banner { margin: 1rem 0; padding: .85rem 1rem; border: 1px solid color-mix(in srgb, var(--success) 45%, var(--border)); border-radius: .375rem; background: var(--success-soft); color: var(--success); }
-  .toolbar { gap: 1rem; }
-  .search { flex: 1; } .search input { width: min(100%, 30rem); }
-  .surface { display: flex; min-height: 2.75rem; align-items: center; gap: .6rem; color: var(--foreground-muted); font-size: .78rem; font-weight: 700; }
-  code { font: .75rem 'JetBrains Mono Variable', monospace; }
-  td a { color: var(--accent-strong); font-weight: 720; text-underline-offset: .18rem; }
-  .capabilities { display: flex; max-width: 38rem; flex-wrap: wrap; gap: .35rem; }
-  .capabilities .badge { gap: .25rem; font-weight: 600; }
-  .eligibility { display: inline-flex; min-height: 2.75rem; align-items: center; gap: .5rem; font-weight: 700; }
-  .policy-note { margin-top: 1rem; padding: 1rem; border-left: 3px solid var(--accent); background: var(--accent-soft); color: var(--foreground-muted); }
-  .policy-note strong { color: var(--foreground); }
-  .empty-state h2 { margin: 0 0 .35rem; }
-  .empty-state p { margin: 0 0 1rem; }
-  @media (max-width: 42rem) { .toolbar { align-items: stretch; } .search input { width: 100%; } .surface { display: grid; } }
+  .success-banner {
+    margin: 1rem 0;
+    padding: 0.85rem 1rem;
+    border: 1px solid color-mix(in srgb, var(--success) 45%, var(--border));
+    border-radius: 0.375rem;
+    background: var(--success-soft);
+    color: var(--success);
+  }
+  .toolbar {
+    gap: 1rem;
+  }
+  .search {
+    flex: 1;
+  }
+  .search input {
+    width: min(100%, 30rem);
+  }
+  .surface {
+    display: flex;
+    min-height: 2.75rem;
+    align-items: center;
+    gap: 0.6rem;
+    color: var(--foreground-muted);
+    font-size: 0.78rem;
+    font-weight: 700;
+  }
+  code {
+    font:
+      0.75rem 'JetBrains Mono Variable',
+      monospace;
+  }
+  td a {
+    color: var(--accent-strong);
+    font-weight: 720;
+    text-underline-offset: 0.18rem;
+  }
+  .capabilities {
+    display: flex;
+    max-width: 38rem;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+  }
+  .capabilities .badge {
+    gap: 0.25rem;
+    font-weight: 600;
+  }
+  .eligibility {
+    display: inline-flex;
+    min-height: 2.75rem;
+    align-items: center;
+    gap: 0.5rem;
+    font-weight: 700;
+  }
+  .policy-note {
+    margin-top: 1rem;
+    padding: 1rem;
+    border-left: 3px solid var(--accent);
+    background: var(--accent-soft);
+    color: var(--foreground-muted);
+  }
+  .policy-note strong {
+    color: var(--foreground);
+  }
+  .empty-state h2 {
+    margin: 0 0 0.35rem;
+  }
+  .empty-state p {
+    margin: 0 0 1rem;
+  }
+  @media (max-width: 42rem) {
+    .toolbar {
+      align-items: stretch;
+    }
+    .search input {
+      width: 100%;
+    }
+    .surface {
+      display: grid;
+    }
+  }
 </style>
