@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { FieldIssue } from '$lib/api/http';
+  import { stateLabel } from '$lib/format';
 
   // The API rejects a provider field with prose and a machine-readable code.
   // Both are shown: the prose explains, the code is what an operator quotes in
@@ -15,7 +16,7 @@
   <ul class="field-issues">
     {#each issues as issue (`${issue.field}:${issue.message}`)}
       <li>
-        <strong>{issue.field.replaceAll('_', ' ')}</strong>
+        <strong>{stateLabel(issue.field)}</strong>
         {issue.message}{#if issue.code}<code>{issue.code}</code>{/if}
       </li>
     {/each}

@@ -3,7 +3,7 @@ use sqlx::{Postgres, Transaction};
 use uuid::Uuid;
 
 use crate::{
-    audit_events::{AuditEvent, record_audit_event},
+    audit_events::{record_success, record_success_at},
     error::Error as PersistenceError,
     idempotency::{
         Outcome, Replayable, ReplayableIdempotencyClaim, Response, claim_idempotency,
@@ -133,17 +133,14 @@ impl Store {
             .execute(&mut *transaction)
             .await?;
         }
-        record_audit_event(
+        record_success_at(
             &mut *transaction,
-            AuditEvent {
-                provenance: self.provenance(),
-                actor: Some(route.actor),
-                action: "route.create_draft",
-                resource_type: "route_draft",
-                resource_id: Some(&id.to_string()),
-                outcome: "success",
-                occurred_at: Some(now),
-            },
+            self.provenance(),
+            route.actor,
+            "route.create_draft",
+            "route_draft",
+            id,
+            now,
         )
         .await?;
         let created = RouteDraftCreated {
@@ -202,17 +199,13 @@ impl Store {
         }
         let slug =
             RouteSlug::parse(row.slug).map_err(|error| Error::InvalidRoute(error.to_string()))?;
-        record_audit_event(
+        record_success(
             &mut *transaction,
-            AuditEvent {
-                provenance: self.provenance(),
-                actor: Some(actor),
-                action: "route.validate_draft",
-                resource_type: "route_draft",
-                resource_id: Some(&draft_id.to_string()),
-                outcome: "success",
-                occurred_at: None,
-            },
+            self.provenance(),
+            actor,
+            "route.validate_draft",
+            "route_draft",
+            draft_id,
         )
         .await?;
         transaction.commit().await?;
@@ -345,17 +338,13 @@ impl Store {
         if consumed.rows_affected() != 1 {
             return Err(Error::PreconditionFailed);
         }
-        record_audit_event(
+        record_success(
             &mut *transaction,
-            AuditEvent {
-                provenance: self.provenance(),
-                actor: Some(actor),
-                action: "route.activate",
-                resource_type: "route",
-                resource_id: Some(&route_id.to_string()),
-                outcome: "success",
-                occurred_at: None,
-            },
+            self.provenance(),
+            actor,
+            "route.activate",
+            "route",
+            route_id,
         )
         .await?;
         complete_idempotency(

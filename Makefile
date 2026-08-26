@@ -20,8 +20,8 @@ FUZZ_TRIPLE = $(shell rustc -vV | sed -n 's/^host: //p')
 	coverage console-install console-verify console-e2e \
 	screenshots openapi sqlx-prepare sqlx-check db-test release-version \
 	supply-chain helm-verify script-selftest shellcheck fuzz-check \
-	fuzz-replay fuzz-campaign sdk-smoke sdk-smoke-install e2e worker-ha \
-	smoke-image-modes upgrade-rehearsal advisories deny
+	fuzz-replay fuzz-campaign sdk-smoke sdk-smoke-install sdk-smoke-run \
+	e2e worker-ha smoke-image-modes upgrade-rehearsal advisories deny
 
 help: ## List available targets
 	@grep -E '^[a-z][a-z0-9-]*:.*##' $(MAKEFILE_LIST) \
@@ -143,6 +143,11 @@ sdk-smoke-install: ## Install locked SDK smoke-test dependencies
 	pnpm --dir tests/sdk-smoke install --frozen-lockfile
 
 sdk-smoke: sdk-smoke-install ## Official OpenAI/Anthropic/Gemini SDK smoke tests against a local build
+	$(MAKE) sdk-smoke-run
+
+# CI installs these dependencies through setup-node-pnpm, so its job runs this
+# target instead of sdk-smoke and skips the second pnpm install.
+sdk-smoke-run: ## Run the SDK smoke tests against already-installed dependencies
 	./tests/sdk-smoke/run.sh
 
 IMAGE ?= openllmproxy:ci-amd64

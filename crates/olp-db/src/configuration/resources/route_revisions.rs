@@ -1,5 +1,6 @@
+use super::routes::RouteTargetRow;
 use super::*;
-use crate::audit_events::{AuditEvent, record_audit_event};
+use crate::audit_events::record_success;
 
 impl Store {
     pub async fn list_route_revisions(
@@ -254,17 +255,13 @@ impl Store {
         id, revision_id)
         .execute(&mut *transaction)
         .await?;
-        record_audit_event(
+        record_success(
             &mut *transaction,
-            AuditEvent {
-                provenance: self.provenance(),
-                actor: Some(actor),
-                action: "route.restore_as_draft",
-                resource_type: "route_draft",
-                resource_id: Some(&id.to_string()),
-                outcome: "success",
-                occurred_at: None,
-            },
+            self.provenance(),
+            actor,
+            "route.restore_as_draft",
+            "route_draft",
+            id,
         )
         .await?;
         complete_idempotency(
@@ -280,6 +277,9 @@ impl Store {
     }
 }
 
+/// `query_as!` fills fields positionally, so the revision key column that this
+/// read prepends has to sit in the struct rather than in a nested one. The
+/// remaining columns are exactly a [`RouteTargetRow`], which owns the mapping.
 #[derive(Debug, sqlx::FromRow)]
 struct RouteRevisionTargetRow {
     route_revision_id: Uuid,
@@ -298,22 +298,34 @@ struct RouteRevisionTargetRow {
 
 impl RouteRevisionTargetRow {
     fn split(self) -> (Uuid, RouteTargetRecord) {
-        (
-            self.route_revision_id,
-            RouteTargetRecord {
-                id: self.id,
-                routing_id: self.routing_id,
-                provider_model_id: self.provider_model_id,
-                provider_id: self.provider_id,
-                provider_name: self.provider_name,
-                upstream_model: self.provider_model,
-                available: self.available,
-                priority: self.priority,
-                weight: self.weight,
-                timeout_ms: self.timeout_ms,
-                position: self.position,
-            },
-        )
+        let Self {
+            route_revision_id,
+            id,
+            routing_id,
+            provider_model_id,
+            provider_id,
+            provider_name,
+            provider_model,
+            available,
+            priority,
+            weight,
+            timeout_ms,
+            position,
+        } = self;
+        let target = RouteTargetRow {
+            id,
+            routing_id,
+            provider_model_id,
+            provider_id,
+            provider_name,
+            provider_model,
+            available,
+            priority,
+            weight,
+            timeout_ms,
+            position,
+        };
+        (route_revision_id, target.into())
     }
 }
 

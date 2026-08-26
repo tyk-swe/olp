@@ -436,13 +436,6 @@
     margin: 0;
     font-size: 1.2rem;
   }
-  .text-button {
-    min-height: 2.75rem;
-    border: 0;
-    background: transparent;
-    color: var(--accent-strong);
-    font-weight: 700;
-  }
   @media (max-width: 68rem) {
     .filter-grid,
     .pipeline-grid {

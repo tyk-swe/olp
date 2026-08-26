@@ -194,7 +194,7 @@ pub(super) async fn collect_metrics(state: &ObservabilityState) -> String {
     let media_reconciliation = media.ok();
     let (reported_loss_events, reported_loss_dropped, reported_loss_abandoned) =
         state.request_metadata_loss_counters().totals();
-    let mut body = String::new();
+    let mut body = String::with_capacity(8192);
     append_runtime_and_metadata_gauges(
         &mut body,
         state,
@@ -355,6 +355,16 @@ fn append_limiter_circuit_and_media_gauges(
     );
 }
 
+/// Successful fraction of `total`, treating "nothing observed" as fully healthy
+/// so an idle window does not read as an outage.
+fn success_ratio(success: u64, total: u64) -> f64 {
+    if total == 0 {
+        1.0
+    } else {
+        success as f64 / total as f64
+    }
+}
+
 fn append_operations_metrics(
     body: &mut String,
     operations_summary: Option<PrometheusOperationsSummary>,
@@ -369,11 +379,7 @@ fn append_operations_metrics(
         u8::from(operations_summary.is_some())
     );
     if let Some(summary) = operations_summary {
-        let success_ratio = if summary.request_count == 0 {
-            1.0
-        } else {
-            summary.success_count as f64 / summary.request_count as f64
-        };
+        let success_ratio = success_ratio(summary.success_count, summary.request_count);
         body.push_str(
             "# HELP olp_requests_5m Metadata requests observed during the trailing five minutes.\n\
              # TYPE olp_requests_5m gauge\n\
@@ -419,11 +425,7 @@ fn append_provider_health_metrics(body: &mut String, provider_health: Vec<Provid
             let name = prometheus_label(&provider.provider_name);
             let kind = prometheus_label(provider.provider_kind.as_str());
             let status = prometheus_label(&provider.status);
-            let success_ratio = if provider.attempt_count == 0 {
-                1.0
-            } else {
-                provider.success_count as f64 / provider.attempt_count as f64
-            };
+            let success_ratio = success_ratio(provider.success_count, provider.attempt_count);
             let labels = format!(
                 "provider_id=\"{provider_id}\",provider_name=\"{name}\",provider_kind=\"{kind}\",status=\"{status}\""
             );

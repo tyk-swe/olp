@@ -3,7 +3,7 @@
   import { resolve } from '$app/paths';
   import { onDestroy, onMount } from 'svelte';
   import { acceptInvitation } from '$lib/api/auth';
-  import { ApiProblem } from '$lib/api/http';
+  import { ApiProblem, applyServerFieldErrors } from '$lib/api/http';
   import { authLifecycle } from '$lib/auth/lifecycle';
   import SetupFrame from '$lib/components/SetupFrame.svelte';
   import {
@@ -55,18 +55,6 @@
 
   onDestroy(() => authLifecycle.abortAuthenticationWork());
 
-  function applyFieldErrors(problem: ApiProblem) {
-    const next: InvitationAcceptanceErrors = {};
-    for (const [field, fieldMessages] of Object.entries(
-      problem.problem.errors ?? {}
-    )) {
-      const local = serverFields[field];
-      if (local && fieldMessages[0]) next[local] = fieldMessages[0];
-    }
-    errors = next;
-    return Object.keys(next).length > 0;
-  }
-
   async function submit(event: SubmitEvent) {
     event.preventDefault();
     message = '';
@@ -93,8 +81,10 @@
         if (error.problem.status === 410) {
           token = '';
           view = 'expired';
-        } else if (!applyFieldErrors(error)) {
-          message = error.problem.detail ?? error.problem.title;
+        } else {
+          errors = applyServerFieldErrors(error, serverFields);
+          if (!Object.keys(errors).length)
+            message = error.problem.detail ?? error.problem.title;
         }
       } else {
         message =

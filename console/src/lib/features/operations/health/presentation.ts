@@ -22,7 +22,3 @@ export function healthTone(value?: string | null) {
     return 'warning';
   return 'danger';
 }
-
-export function stateLabel(value?: string | null) {
-  return value ? value.replaceAll('_', ' ') : 'unknown';
-}

@@ -10,7 +10,7 @@
     MAX_REVIEWED_CAPABILITIES
   } from './providerEditor';
   import ConflictNotice from '$lib/components/ConflictNotice.svelte';
-  import { formatDate } from '$lib/format';
+  import { formatDate, stateLabel } from '$lib/format';
   import {
     beginReload,
     conflictNotice,
@@ -236,7 +236,7 @@
               update(index, 'operation', event.currentTarget.value)}
             disabled={disabled || !options.length}
             >{#each operations as operation (operation)}<option
-                value={operation}>{operation.replaceAll('_', ' ')}</option
+                value={operation}>{stateLabel(operation)}</option
               >{/each}</select
           ></label
         >

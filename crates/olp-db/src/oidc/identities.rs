@@ -11,7 +11,7 @@ use super::types::{
     OidcError, OidcIdentityRecord, UnlinkOidcIdentity,
 };
 use crate::{
-    audit_events::{AuditEvent, record_audit_event},
+    audit_events::record_success_at,
     authentication::{
         RecentAuthGrant, RecentAuthPurpose, SessionSecurityContext, consume_recent_authentication,
         insert_versioned_session, install_recent_authentication, revoke_user_sessions,
@@ -74,32 +74,18 @@ impl Store {
             now,
         )
         .await?;
-        record_audit_event(
-            &mut *transaction,
-            AuditEvent {
-                provenance: self.provenance(),
-                actor: Some(user.id),
-                action: "session.create",
-                resource_type: "session",
-                resource_id: Some(&session_id.to_string()),
-                outcome: "success",
-                occurred_at: Some(now),
-            },
-        )
-        .await?;
-        record_audit_event(
-            &mut *transaction,
-            AuditEvent {
-                provenance: self.provenance(),
-                actor: Some(user.id),
-                action: "oidc.login",
-                resource_type: "session",
-                resource_id: Some(&session_id.to_string()),
-                outcome: "success",
-                occurred_at: Some(now),
-            },
-        )
-        .await?;
+        for action in ["session.create", "oidc.login"] {
+            record_success_at(
+                &mut *transaction,
+                self.provenance(),
+                user.id,
+                action,
+                "session",
+                session_id,
+                now,
+            )
+            .await?;
+        }
         transaction.commit().await?;
         Ok(user)
     }
@@ -144,45 +130,36 @@ impl Store {
                     user.id,
                 )
                 .await?;
-                record_audit_event(
+                record_success_at(
                     &mut **transaction,
-                    AuditEvent {
-                        provenance: self.provenance(),
-                        actor: Some(user.id),
-                        action: "user.role_sync_oidc",
-                        resource_type: "user",
-                        resource_id: Some(&user.id.to_string()),
-                        outcome: "success",
-                        occurred_at: Some(now),
-                    },
+                    self.provenance(),
+                    user.id,
+                    "user.role_sync_oidc",
+                    "user",
+                    user.id,
+                    now,
                 )
                 .await?;
                 if retired > 0 {
-                    record_audit_event(
+                    record_success_at(
                         &mut **transaction,
-                        AuditEvent {
-                            provenance: self.provenance(),
-                            actor: Some(user.id),
-                            action: "invitation.revoke_for_oidc_role_change",
-                            resource_type: "user",
-                            resource_id: Some(&user.id.to_string()),
-                            outcome: "success",
-                            occurred_at: Some(now),
-                        },
+                        self.provenance(),
+                        user.id,
+                        "invitation.revoke_for_oidc_role_change",
+                        "user",
+                        user.id,
+                        now,
                     )
                     .await?;
                 }
-                record_audit_event(
+                record_success_at(
                     &mut **transaction,
-                    AuditEvent {
-                        provenance: self.provenance(),
-                        actor: Some(user.id),
-                        action: "session.revoke_for_oidc_role_change",
-                        resource_type: "user",
-                        resource_id: Some(&user.id.to_string()),
-                        outcome: "success",
-                        occurred_at: Some(now),
-                    },
+                    self.provenance(),
+                    user.id,
+                    "session.revoke_for_oidc_role_change",
+                    "user",
+                    user.id,
+                    now,
                 )
                 .await?;
                 user.role = mapped_role;
@@ -238,17 +215,14 @@ impl Store {
         )
         .execute(&mut **transaction)
         .await?;
-        record_audit_event(
+        record_success_at(
             &mut **transaction,
-            AuditEvent {
-                provenance: self.provenance(),
-                actor: Some(user_id),
-                action: "user.create_oidc",
-                resource_type: "user",
-                resource_id: Some(&user_id.to_string()),
-                outcome: "success",
-                occurred_at: Some(now),
-            },
+            self.provenance(),
+            user_id,
+            "user.create_oidc",
+            "user",
+            user_id,
+            now,
         )
         .await?;
         Ok((
@@ -384,58 +358,25 @@ impl Store {
             now,
         )
         .await?;
-        record_audit_event(
-            &mut *transaction,
-            AuditEvent {
-                provenance: self.provenance(),
-                actor: Some(input.user_id),
-                action: "oidc.identity_link",
-                resource_type: "user",
-                resource_id: Some(&input.user_id.to_string()),
-                outcome: "success",
-                occurred_at: Some(now),
-            },
-        )
-        .await?;
-        record_audit_event(
-            &mut *transaction,
-            AuditEvent {
-                provenance: self.provenance(),
-                actor: Some(input.user_id),
-                action: "user.authentication_method_change",
-                resource_type: "user",
-                resource_id: Some(&input.user_id.to_string()),
-                outcome: "success",
-                occurred_at: Some(now),
-            },
-        )
-        .await?;
-        record_audit_event(
-            &mut *transaction,
-            AuditEvent {
-                provenance: self.provenance(),
-                actor: Some(input.user_id),
-                action: "session.revoke_for_oidc_link",
-                resource_type: "user",
-                resource_id: Some(&input.user_id.to_string()),
-                outcome: "success",
-                occurred_at: Some(now),
-            },
-        )
-        .await?;
-        record_audit_event(
-            &mut *transaction,
-            AuditEvent {
-                provenance: self.provenance(),
-                actor: Some(input.user_id),
-                action: "session.rotate_for_oidc_link",
-                resource_type: "session",
-                resource_id: Some(&session_id.to_string()),
-                outcome: "success",
-                occurred_at: Some(now),
-            },
-        )
-        .await?;
+        // The link retires every credential path the old sessions rode on, so
+        // the trail has to name each one separately.
+        for (action, resource_type, resource_id) in [
+            ("oidc.identity_link", "user", input.user_id),
+            ("user.authentication_method_change", "user", input.user_id),
+            ("session.revoke_for_oidc_link", "user", input.user_id),
+            ("session.rotate_for_oidc_link", "session", session_id),
+        ] {
+            record_success_at(
+                &mut *transaction,
+                self.provenance(),
+                input.user_id,
+                action,
+                resource_type,
+                resource_id,
+                now,
+            )
+            .await?;
+        }
         transaction.commit().await?;
         authenticated_user_from_row(user_row.authenticated())
     }
@@ -638,58 +579,23 @@ impl Store {
             now,
         )
         .await?;
-        record_audit_event(
-            &mut *transaction,
-            AuditEvent {
-                provenance: self.provenance(),
-                actor: Some(input.user_id),
-                action: "oidc.identity_unlink",
-                resource_type: "oidc_identity",
-                resource_id: Some(&input.identity_id.to_string()),
-                outcome: "success",
-                occurred_at: Some(now),
-            },
-        )
-        .await?;
-        record_audit_event(
-            &mut *transaction,
-            AuditEvent {
-                provenance: self.provenance(),
-                actor: Some(input.user_id),
-                action: "user.authentication_method_change",
-                resource_type: "user",
-                resource_id: Some(&input.user_id.to_string()),
-                outcome: "success",
-                occurred_at: Some(now),
-            },
-        )
-        .await?;
-        record_audit_event(
-            &mut *transaction,
-            AuditEvent {
-                provenance: self.provenance(),
-                actor: Some(input.user_id),
-                action: "session.revoke_for_oidc_unlink",
-                resource_type: "user",
-                resource_id: Some(&input.user_id.to_string()),
-                outcome: "success",
-                occurred_at: Some(now),
-            },
-        )
-        .await?;
-        record_audit_event(
-            &mut *transaction,
-            AuditEvent {
-                provenance: self.provenance(),
-                actor: Some(input.user_id),
-                action: "session.rotate_for_oidc_unlink",
-                resource_type: "session",
-                resource_id: Some(&session_id.to_string()),
-                outcome: "success",
-                occurred_at: Some(now),
-            },
-        )
-        .await?;
+        for (action, resource_type, resource_id) in [
+            ("oidc.identity_unlink", "oidc_identity", input.identity_id),
+            ("user.authentication_method_change", "user", input.user_id),
+            ("session.revoke_for_oidc_unlink", "user", input.user_id),
+            ("session.rotate_for_oidc_unlink", "session", session_id),
+        ] {
+            record_success_at(
+                &mut *transaction,
+                self.provenance(),
+                input.user_id,
+                action,
+                resource_type,
+                resource_id,
+                now,
+            )
+            .await?;
+        }
         transaction.commit().await?;
         Ok(session_id)
     }

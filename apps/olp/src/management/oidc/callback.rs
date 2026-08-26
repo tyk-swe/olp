@@ -7,13 +7,17 @@ use axum::{
 };
 use jsonwebtoken::jwk::JwkSet;
 use olp_db::{
-    authentication::RecentAuthPurpose, authentication::SessionPrincipal,
-    oidc::types::CompleteOidcLink, oidc::types::CompleteOidcLogin,
-    oidc::types::CompleteOidcReauthentication, oidc::types::OidcConfiguration,
-    oidc::types::OidcFlowPurpose, security::aad::oidc_client_secret as client_secret_aad,
-    security::aad::oidc_flow_payload as flow_payload_aad, security::envelope::MasterKey,
-    security::session_material::RecentAuthMaterial, security::session_material::SessionMaterial,
-    store::Store,
+    authentication::{RecentAuthPurpose, SessionPrincipal},
+    oidc::types::{
+        CompleteOidcLink, CompleteOidcLogin, CompleteOidcReauthentication, OidcConfiguration,
+        OidcFlowPurpose,
+    },
+    security::{
+        aad::{oidc_client_secret as client_secret_aad, oidc_flow_payload as flow_payload_aad},
+        envelope::MasterKey,
+        session_material::{RecentAuthMaterial, SessionMaterial},
+    },
+    store::{RequestProvenance, Store},
 };
 use serde::Deserialize;
 use tracing::error;
@@ -23,8 +27,8 @@ use zeroize::{Zeroize, Zeroizing};
 use super::claims::{ValidatedIdentity, validate_id_token};
 use super::configuration::{JWKS_LIMIT, OidcSecret};
 use super::error::{
-    invalid_callback, is_authenticated_flow_session_changed, map_oidc, map_oidc_flow_completion,
-    map_token_network,
+    flow_stale, invalid_callback, is_authenticated_flow_session_changed, map_oidc,
+    map_oidc_flow_completion, map_token_network,
 };
 use super::helpers::{callback_url, network_policy, oauth_form_component, require_master_key};
 use super::session::{
@@ -40,7 +44,6 @@ use crate::{
         problem::Problem, relative_url::RelativeReturnTo, request_cookies::RequestCookies,
     },
 };
-use olp_db::store::RequestProvenance;
 
 const TOKEN_RESPONSE_LIMIT: usize = 256 * 1024;
 const ID_TOKEN_LIMIT: usize = 64 * 1024;
@@ -274,19 +277,10 @@ async fn load_flow_configuration<'a>(
     flow: &CallbackFlow,
 ) -> Result<(OidcConfiguration, &'a MasterKey), Problem> {
     let configuration = store.enabled_oidc_configuration().await.map_err(map_oidc)?;
-    if configuration.id != flow.configuration_id {
-        return Err(Problem::bad_request(
-            "oidc_flow_stale",
-            "The OIDC configuration changed. Start authorization again.",
-        ));
+    if configuration.id != flow.configuration_id || flow.configuration_etag != configuration.etag {
+        return Err(flow_stale());
     }
     let master_key = require_master_key(state)?;
-    if flow.configuration_etag != configuration.etag {
-        return Err(Problem::bad_request(
-            "oidc_flow_stale",
-            "The OIDC configuration changed. Start authorization again.",
-        ));
-    }
     Ok((configuration, master_key))
 }
 
@@ -566,12 +560,7 @@ async fn consume_callback_flow(
         error!("OIDC persisted flow payload is malformed");
         Problem::internal()
     })?;
-    let configuration_etag = secret.configuration_etag.ok_or_else(|| {
-        Problem::bad_request(
-            "oidc_flow_stale",
-            "The OIDC configuration changed. Start authorization again.",
-        )
-    })?;
+    let configuration_etag = secret.configuration_etag.ok_or_else(flow_stale)?;
     if secret.actor_session_id != Some(principal.session_id) {
         return Err(Problem::internal());
     }

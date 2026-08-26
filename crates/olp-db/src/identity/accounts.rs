@@ -4,7 +4,7 @@ use sqlx::FromRow;
 use uuid::Uuid;
 
 use crate::{
-    audit_events::{AuditEvent, record_audit_event},
+    audit_events::record_success,
     authentication::{
         RecentAuthPurpose, SessionSecurityContext, consume_recent_authentication,
         insert_versioned_session, revoke_user_sessions,
@@ -93,46 +93,34 @@ impl Store {
         let retired =
             retire_invitations_on_access_loss(&mut transaction, id, role, row.active, actor)
                 .await?;
-        record_audit_event(
+        record_success(
             &mut *transaction,
-            AuditEvent {
-                provenance: self.provenance(),
-                actor: Some(actor),
-                action: "user.role_update",
-                resource_type: "user",
-                resource_id: Some(&id.to_string()),
-                outcome: "success",
-                occurred_at: None,
-            },
+            self.provenance(),
+            actor,
+            "user.role_update",
+            "user",
+            id,
         )
         .await?;
         if retired > 0 {
-            record_audit_event(
+            record_success(
                 &mut *transaction,
-                AuditEvent {
-                    provenance: self.provenance(),
-                    actor: Some(actor),
-                    action: "invitation.revoke_for_role_change",
-                    resource_type: "user",
-                    resource_id: Some(&id.to_string()),
-                    outcome: "success",
-                    occurred_at: None,
-                },
+                self.provenance(),
+                actor,
+                "invitation.revoke_for_role_change",
+                "user",
+                id,
             )
             .await?;
         }
         if revoked > 0 {
-            record_audit_event(
+            record_success(
                 &mut *transaction,
-                AuditEvent {
-                    provenance: self.provenance(),
-                    actor: Some(actor),
-                    action: "session.revoke_for_role_change",
-                    resource_type: "user",
-                    resource_id: Some(&id.to_string()),
-                    outcome: "success",
-                    occurred_at: None,
-                },
+                self.provenance(),
+                actor,
+                "session.revoke_for_role_change",
+                "user",
+                id,
             )
             .await?;
         }
@@ -190,46 +178,34 @@ impl Store {
             actor,
         )
         .await?;
-        record_audit_event(
+        record_success(
             &mut *transaction,
-            AuditEvent {
-                provenance: self.provenance(),
-                actor: Some(actor),
-                action: "user.access_update",
-                resource_type: "user",
-                resource_id: Some(&id.to_string()),
-                outcome: "success",
-                occurred_at: None,
-            },
+            self.provenance(),
+            actor,
+            "user.access_update",
+            "user",
+            id,
         )
         .await?;
         if retired > 0 {
-            record_audit_event(
+            record_success(
                 &mut *transaction,
-                AuditEvent {
-                    provenance: self.provenance(),
-                    actor: Some(actor),
-                    action: "invitation.revoke_for_access_change",
-                    resource_type: "user",
-                    resource_id: Some(&id.to_string()),
-                    outcome: "success",
-                    occurred_at: None,
-                },
+                self.provenance(),
+                actor,
+                "invitation.revoke_for_access_change",
+                "user",
+                id,
             )
             .await?;
         }
         if revoked > 0 {
-            record_audit_event(
+            record_success(
                 &mut *transaction,
-                AuditEvent {
-                    provenance: self.provenance(),
-                    actor: Some(actor),
-                    action: "session.revoke_for_access_change",
-                    resource_type: "user",
-                    resource_id: Some(&id.to_string()),
-                    outcome: "success",
-                    occurred_at: None,
-                },
+                self.provenance(),
+                actor,
+                "session.revoke_for_access_change",
+                "user",
+                id,
             )
             .await?;
         }
@@ -276,17 +252,13 @@ impl Store {
                 Error::NotFound
             });
         };
-        record_audit_event(
+        record_success(
             &mut *transaction,
-            AuditEvent {
-                provenance: self.provenance(),
-                actor: Some(id),
-                action: "user.profile_update",
-                resource_type: "user",
-                resource_id: Some(&id.to_string()),
-                outcome: "success",
-                occurred_at: None,
-            },
+            self.provenance(),
+            id,
+            "user.profile_update",
+            "user",
+            id,
         )
         .await?;
         transaction.commit().await?;
@@ -354,43 +326,31 @@ impl Store {
             now,
         )
         .await?;
-        record_audit_event(
+        record_success(
             &mut *transaction,
-            AuditEvent {
-                provenance: self.provenance(),
-                actor: Some(id),
-                action: "user.password_update",
-                resource_type: "user",
-                resource_id: Some(&id.to_string()),
-                outcome: "success",
-                occurred_at: None,
-            },
+            self.provenance(),
+            id,
+            "user.password_update",
+            "user",
+            id,
         )
         .await?;
-        record_audit_event(
+        record_success(
             &mut *transaction,
-            AuditEvent {
-                provenance: self.provenance(),
-                actor: Some(id),
-                action: "session.revoke_for_password_change",
-                resource_type: "user",
-                resource_id: Some(&id.to_string()),
-                outcome: "success",
-                occurred_at: None,
-            },
+            self.provenance(),
+            id,
+            "session.revoke_for_password_change",
+            "user",
+            id,
         )
         .await?;
-        record_audit_event(
+        record_success(
             &mut *transaction,
-            AuditEvent {
-                provenance: self.provenance(),
-                actor: Some(id),
-                action: "session.rotate_for_password_change",
-                resource_type: "session",
-                resource_id: Some(&session_id.to_string()),
-                outcome: "success",
-                occurred_at: None,
-            },
+            self.provenance(),
+            id,
+            "session.rotate_for_password_change",
+            "session",
+            session_id,
         )
         .await?;
         transaction.commit().await?;
@@ -475,56 +435,40 @@ impl Store {
             now,
         )
         .await?;
-        record_audit_event(
+        record_success(
             &mut *transaction,
-            AuditEvent {
-                provenance: self.provenance(),
-                actor: Some(id),
-                action: "user.password_enroll",
-                resource_type: "user",
-                resource_id: Some(&id.to_string()),
-                outcome: "success",
-                occurred_at: None,
-            },
+            self.provenance(),
+            id,
+            "user.password_enroll",
+            "user",
+            id,
         )
         .await?;
-        record_audit_event(
+        record_success(
             &mut *transaction,
-            AuditEvent {
-                provenance: self.provenance(),
-                actor: Some(id),
-                action: "user.authentication_method_change",
-                resource_type: "user",
-                resource_id: Some(&id.to_string()),
-                outcome: "success",
-                occurred_at: None,
-            },
+            self.provenance(),
+            id,
+            "user.authentication_method_change",
+            "user",
+            id,
         )
         .await?;
-        record_audit_event(
+        record_success(
             &mut *transaction,
-            AuditEvent {
-                provenance: self.provenance(),
-                actor: Some(id),
-                action: "session.revoke_for_password_enrollment",
-                resource_type: "user",
-                resource_id: Some(&id.to_string()),
-                outcome: "success",
-                occurred_at: None,
-            },
+            self.provenance(),
+            id,
+            "session.revoke_for_password_enrollment",
+            "user",
+            id,
         )
         .await?;
-        record_audit_event(
+        record_success(
             &mut *transaction,
-            AuditEvent {
-                provenance: self.provenance(),
-                actor: Some(id),
-                action: "session.rotate_for_password_enrollment",
-                resource_type: "session",
-                resource_id: Some(&session_id.to_string()),
-                outcome: "success",
-                occurred_at: None,
-            },
+            self.provenance(),
+            id,
+            "session.rotate_for_password_enrollment",
+            "session",
+            session_id,
         )
         .await?;
         transaction.commit().await?;
@@ -590,17 +534,13 @@ impl Store {
         sqlx::query!("DELETE FROM sessions WHERE id = $1", session_id)
             .execute(&mut *transaction)
             .await?;
-        record_audit_event(
+        record_success(
             &mut *transaction,
-            AuditEvent {
-                provenance: self.provenance(),
-                actor: Some(actor),
-                action: "session.revoke",
-                resource_type: "session",
-                resource_id: Some(&session_id.to_string()),
-                outcome: "success",
-                occurred_at: None,
-            },
+            self.provenance(),
+            actor,
+            "session.revoke",
+            "session",
+            session_id,
         )
         .await?;
         transaction.commit().await?;

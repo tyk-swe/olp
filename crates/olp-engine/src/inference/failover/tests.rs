@@ -8,7 +8,7 @@ use chrono::Utc;
 
 use super::{
     AttemptRecord, BASE_RETRY_BACKOFF, FailureHistory, MAX_RETRY_AFTER_DELAY, MAX_RETRY_BACKOFF,
-    RetryPlan, attempt_billing_is_uncertain, jitter_fraction, plan_retry, retry_backoff,
+    attempt_billing_is_uncertain, jitter_fraction, plan_retry, retry_backoff,
     with_sole_target_retry,
 };
 use crate::inference::{circuit::Breaker, error::Kind as InferenceErrorKind};
@@ -138,12 +138,12 @@ async fn a_retry_after_hint_is_capped_and_applies_only_to_the_same_target() {
     let target = plan(TargetId::new());
 
     match plan_retry(&target, &target, 0, &throttled, far_deadline) {
-        RetryPlan::Proceed(delay) => assert_eq!(delay, MAX_RETRY_AFTER_DELAY),
-        RetryPlan::Stop => panic!("a rate-limited target may be retried"),
+        Some(delay) => assert_eq!(delay, MAX_RETRY_AFTER_DELAY),
+        None => panic!("a rate-limited target may be retried"),
     }
     match plan_retry(&target, &plan(TargetId::new()), 0, &throttled, far_deadline) {
-        RetryPlan::Proceed(delay) => assert!(delay <= BASE_RETRY_BACKOFF, "{delay:?}"),
-        RetryPlan::Stop => panic!("another target is not bound by the hint"),
+        Some(delay) => assert!(delay <= BASE_RETRY_BACKOFF, "{delay:?}"),
+        None => panic!("another target is not bound by the hint"),
     }
 
     // Billing uncertainty stops a same-target retry but not failover.
@@ -152,27 +152,21 @@ async fn a_retry_after_hint_is_capped_and_applies_only_to_the_same_target() {
         AttemptFailureClass::Timeout,
         None,
     );
-    assert!(matches!(
-        plan_retry(&target, &target, 0, &timed_out, far_deadline),
-        RetryPlan::Stop
-    ));
-    assert!(matches!(
-        plan_retry(&target, &plan(TargetId::new()), 0, &timed_out, far_deadline),
-        RetryPlan::Proceed(_)
-    ));
+    assert!(plan_retry(&target, &target, 0, &timed_out, far_deadline).is_none());
+    assert!(plan_retry(&target, &plan(TargetId::new()), 0, &timed_out, far_deadline).is_some());
 
     // No room before the deadline: stop rather than sleep into a timeout.
     let near_deadline = tokio::time::Instant::now() + Duration::from_millis(10);
-    assert!(matches!(
+    assert!(
         plan_retry(
             &target,
             &plan(TargetId::new()),
             0,
             &throttled,
             near_deadline
-        ),
-        RetryPlan::Stop
-    ));
+        )
+        .is_none()
+    );
 }
 
 #[test]

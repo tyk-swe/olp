@@ -22,6 +22,13 @@ pub(super) fn invalid_callback() -> Problem {
     )
 }
 
+pub(super) fn flow_stale() -> Problem {
+    Problem::bad_request(
+        "oidc_flow_stale",
+        "The OIDC configuration changed. Start authorization again.",
+    )
+}
+
 pub(super) fn authenticated_flow_session_changed() -> Problem {
     Problem::forbidden(
         "oidc_flow_session_changed",
@@ -122,10 +129,7 @@ pub(crate) fn map_oidc(error: OidcError) -> Problem {
 pub(super) fn map_oidc_flow_completion(error: OidcError) -> Problem {
     match error {
         OidcError::NotConfigured | OidcError::Disabled | OidcError::PreconditionFailed => {
-            Problem::bad_request(
-                "oidc_flow_stale",
-                "The OIDC configuration changed. Start authorization again.",
-            )
+            flow_stale()
         }
         other => map_oidc(other),
     }

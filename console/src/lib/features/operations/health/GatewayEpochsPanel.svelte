@@ -170,21 +170,6 @@
 </section>
 
 <style>
-  .text-button {
-    min-height: 2.75rem;
-    border: 0;
-    background: transparent;
-    color: var(--accent-strong);
-    font-weight: 700;
-  }
-  h2 {
-    margin: 0;
-    font-size: 1.2rem;
-    letter-spacing: -0.025em;
-  }
-  .section {
-    margin-top: 2rem;
-  }
   .section-description {
     max-width: 58rem;
     margin: 0.35rem 0 0;
@@ -197,13 +182,6 @@
       monospace;
     overflow-wrap: anywhere;
   }
-  .section-heading {
-    display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
-    gap: 1rem;
-    margin-bottom: 0.75rem;
-  }
   td small,
   td code {
     display: block;
@@ -211,10 +189,5 @@
     color: var(--foreground-muted);
     font-size: 0.7rem;
     font-weight: 500;
-  }
-  @media (max-width: 36rem) {
-    .section-heading {
-      display: grid;
-    }
   }
 </style>

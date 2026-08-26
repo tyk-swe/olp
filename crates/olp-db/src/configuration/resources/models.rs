@@ -2,7 +2,7 @@ use super::{
     helpers::{CapabilityRow, capability_from_row},
     *,
 };
-use crate::audit_events::{AuditEvent, record_audit_event};
+use crate::audit_events::{AuditEvent, record_audit_event, record_success};
 
 impl Store {
     pub async fn list_provider_models(
@@ -238,17 +238,13 @@ impl Store {
         if restored.rows_affected() != 1 {
             return Err(Error::InUse);
         }
-        record_audit_event(
+        record_success(
             &mut *transaction,
-            AuditEvent {
-                provenance: self.provenance(),
-                actor: Some(actor),
-                action: "provider.discover",
-                resource_type: "provider",
-                resource_id: Some(&provider_id.to_string()),
-                outcome: "success",
-                occurred_at: None,
-            },
+            self.provenance(),
+            actor,
+            "provider.discover",
+            "provider",
+            provider_id,
         )
         .await?;
         transaction.commit().await?;
@@ -351,17 +347,13 @@ impl Store {
         if restored.rows_affected() != 1 {
             return Err(Error::InUse);
         }
-        record_audit_event(
+        record_success(
             &mut *transaction,
-            AuditEvent {
-                provenance: self.provenance(),
-                actor: Some(actor),
-                action: "provider.model.update",
-                resource_type: "provider_model",
-                resource_id: Some(&model_id.to_string()),
-                outcome: "success",
-                occurred_at: None,
-            },
+            self.provenance(),
+            actor,
+            "provider.model.update",
+            "provider_model",
+            model_id,
         )
         .await?;
         transaction.commit().await?;

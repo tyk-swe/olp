@@ -11,7 +11,7 @@
     type CursorHistory
   } from '$lib/api/pagination';
   import { useRole } from '$lib/auth/useRole.svelte';
-  import { formatDate } from '$lib/format';
+  import { formatDate, stateLabel } from '$lib/format';
   import { providerStatus, providerStatusTone } from './providerEditor';
 
   let { listState = $bindable() }: { listState: CursorHistory } = $props();
@@ -80,7 +80,7 @@
               ><a class="table-link" href={resolve(`/providers/${item.id}`)}
                 >{item.name}</a
               ></td
-            ><td>{item.kind.replaceAll('_', ' ')}</td><td
+            ><td>{stateLabel(item.kind)}</td><td
               ><span class="badge {providerStatusTone(item)}"
                 >{providerStatus(item)}</span
               ></td

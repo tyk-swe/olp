@@ -196,31 +196,4 @@
     color: var(--foreground-muted);
     font-size: 0.75rem;
   }
-  .text-button {
-    min-height: 2.75rem;
-    border: 0;
-    background: transparent;
-    color: var(--accent-strong);
-    font-weight: 700;
-  }
-  h2 {
-    margin: 0;
-    font-size: 1.2rem;
-    letter-spacing: -0.025em;
-  }
-  .section {
-    margin-top: 2rem;
-  }
-  .section-heading {
-    display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
-    gap: 1rem;
-    margin-bottom: 0.75rem;
-  }
-  @media (max-width: 36rem) {
-    .section-heading {
-      display: grid;
-    }
-  }
 </style>

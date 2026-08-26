@@ -4,8 +4,8 @@
   import type { Readiness } from '$lib/api/health';
   import { errorMessage } from '$lib/api/http';
   import type { UsageCompleteness } from '$lib/api/usage';
-  import { formatDate, formatInteger } from '$lib/format';
-  import { healthTone, stateLabel } from './presentation';
+  import { formatDate, formatInteger, stateLabel } from '$lib/format';
+  import { healthTone } from './presentation';
   import { spoolUsage } from './spool';
   import {
     CHECKPOINT_STALE_SECONDS,
@@ -55,10 +55,6 @@
       )
     };
   });
-
-  function count(value?: number | null) {
-    return formatInteger(value ?? null);
-  }
 </script>
 
 <!-- Readiness fields are read by name. A field the backend adds later is
@@ -157,12 +153,12 @@
     )}
     {@render fact(
       'Stale task checkpoints',
-      count(readiness.worker_tasks_stale),
+      formatInteger(readiness.worker_tasks_stale),
       (readiness.worker_tasks_stale ?? 0) > 0
     )}
     {@render fact(
       'Tasks that never reported',
-      count(readiness.worker_tasks_unknown),
+      formatInteger(readiness.worker_tasks_unknown),
       (readiness.worker_tasks_unknown ?? 0) > 0
     )}
   </dl>
@@ -234,11 +230,11 @@
     )}
     {@render fact(
       'Pending acknowledgements',
-      count(readiness.request_metadata_consumer_pending_events)
+      formatInteger(readiness.request_metadata_consumer_pending_events)
     )}
     {@render fact(
       'Stream lag',
-      count(readiness.request_metadata_consumer_lag_events)
+      formatInteger(readiness.request_metadata_consumer_lag_events)
     )}
     {@render timedFact(
       'Oldest pending event',
@@ -254,32 +250,34 @@
     )}
     {@render fact(
       'Reclaimed events',
-      count(readiness.request_metadata_reclaimed_events_total)
+      formatInteger(readiness.request_metadata_reclaimed_events_total)
     )}
     {@render fact(
       'Recovered events',
-      count(readiness.request_metadata_recovered_events_total)
+      formatInteger(readiness.request_metadata_recovered_events_total)
     )}
     {@render fact(
       'Duplicate persistence',
-      count(readiness.request_metadata_duplicate_persistence_total)
+      formatInteger(readiness.request_metadata_duplicate_persistence_total)
     )}
     {@render fact(
       'Open gateway epochs',
-      count(readiness.request_metadata_gateway_open_epochs)
+      formatInteger(readiness.request_metadata_gateway_open_epochs)
     )}
     {@render fact(
       'Unresolved gateway epochs',
-      count(readiness.request_metadata_gateway_unresolved_epochs),
+      formatInteger(readiness.request_metadata_gateway_unresolved_epochs),
       (readiness.request_metadata_gateway_unresolved_epochs ?? 0) > 0
     )}
     {@render fact(
       'Unresolved event lower bound',
-      count(readiness.request_metadata_gateway_unresolved_event_lower_bound)
+      formatInteger(
+        readiness.request_metadata_gateway_unresolved_event_lower_bound
+      )
     )}
     {@render fact(
       'Historical uncertain gaps',
-      count(readiness.request_metadata_historical_uncertain_gaps)
+      formatInteger(readiness.request_metadata_historical_uncertain_gaps)
     )}
   </dl>
 </section>
@@ -300,8 +298,14 @@
     >
   </div>
   <dl class="card facts">
-    {@render fact('Pending rows', count(readiness.runtime_outbox_pending_rows))}
-    {@render fact('Claimed rows', count(readiness.runtime_outbox_claimed_rows))}
+    {@render fact(
+      'Pending rows',
+      formatInteger(readiness.runtime_outbox_pending_rows)
+    )}
+    {@render fact(
+      'Claimed rows',
+      formatInteger(readiness.runtime_outbox_claimed_rows)
+    )}
     {@render timedFact(
       'Oldest pending row',
       readiness.runtime_outbox_oldest_pending_at,
@@ -326,23 +330,25 @@
     )}
     {@render fact(
       'Publication attempts',
-      count(readiness.runtime_outbox_publication_attempts_total)
+      formatInteger(readiness.runtime_outbox_publication_attempts_total)
     )}
     {@render fact(
       'Publication retries',
-      count(readiness.runtime_outbox_publication_retries_total)
+      formatInteger(readiness.runtime_outbox_publication_retries_total)
     )}
     {@render fact(
       'Repeated publications',
-      count(readiness.runtime_outbox_repeated_publication_attempts_total)
+      formatInteger(
+        readiness.runtime_outbox_repeated_publication_attempts_total
+      )
     )}
     {@render fact(
       'Abandoned ownerships',
-      count(readiness.runtime_outbox_abandoned_ownership_total)
+      formatInteger(readiness.runtime_outbox_abandoned_ownership_total)
     )}
     {@render fact(
       'Failed takeovers',
-      count(readiness.runtime_outbox_failed_takeovers_total),
+      formatInteger(readiness.runtime_outbox_failed_takeovers_total),
       (readiness.runtime_outbox_failed_takeovers_total ?? 0) > 0
     )}
   </dl>
@@ -363,21 +369,27 @@
     >
   </div>
   <dl class="card facts">
-    {@render fact('Pending', count(readiness.media_reconciliation_pending))}
+    {@render fact(
+      'Pending',
+      formatInteger(readiness.media_reconciliation_pending)
+    )}
     {@render fact(
       'Stale',
-      count(readiness.media_reconciliation_stale),
+      formatInteger(readiness.media_reconciliation_stale),
       (readiness.media_reconciliation_stale ?? 0) > 0
     )}
     {@render fact(
       'Failed',
-      count(readiness.media_reconciliation_failed),
+      formatInteger(readiness.media_reconciliation_failed),
       (readiness.media_reconciliation_failed ?? 0) > 0
     )}
-    {@render fact('Unbound', count(readiness.media_reconciliation_unbound))}
+    {@render fact(
+      'Unbound',
+      formatInteger(readiness.media_reconciliation_unbound)
+    )}
     {@render fact(
       'Recorded gaps',
-      count(readiness.media_reconciliation_gaps_total),
+      formatInteger(readiness.media_reconciliation_gaps_total),
       (readiness.media_reconciliation_gaps_total ?? 0) > 0
     )}
     {@render fact(
@@ -394,13 +406,6 @@
 </section>
 
 <style>
-  .text-button {
-    min-height: 2.75rem;
-    border: 0;
-    background: transparent;
-    color: var(--accent-strong);
-    font-weight: 700;
-  }
   .persistence {
     display: flex;
     align-items: flex-start;
@@ -423,7 +428,7 @@
     background: var(--success-soft);
     color: var(--success);
   }
-  h2 {
+  .persistence h2 {
     margin: 0;
     font-size: 1.2rem;
     letter-spacing: -0.025em;
@@ -431,9 +436,6 @@
   .persistence p:last-child {
     margin: 0.35rem 0 0;
     color: var(--foreground-muted);
-  }
-  .section {
-    margin-top: 2rem;
   }
   .section-description {
     max-width: 58rem;
@@ -445,13 +447,6 @@
     margin: 0.6rem 0 0;
     color: var(--foreground-muted);
     font-size: 0.78rem;
-  }
-  .section-heading {
-    display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
-    gap: 1rem;
-    margin-bottom: 0.75rem;
   }
   .facts {
     display: grid;
@@ -485,9 +480,6 @@
   }
   @media (max-width: 36rem) {
     .persistence {
-      display: grid;
-    }
-    .section-heading {
       display: grid;
     }
   }

@@ -1,5 +1,5 @@
 use super::*;
-use crate::audit_events::{AuditEvent, record_audit_event};
+use crate::audit_events::record_success;
 
 impl Store {
     pub async fn list_api_keys(
@@ -283,17 +283,13 @@ impl Store {
             .execute(&mut *transaction)
             .await?;
         }
-        record_audit_event(
+        record_success(
             &mut *transaction,
-            AuditEvent {
-                provenance: self.provenance(),
-                actor: Some(actor),
-                action: "api_key.update",
-                resource_type: "api_key",
-                resource_id: Some(&id.to_string()),
-                outcome: "success",
-                occurred_at: None,
-            },
+            self.provenance(),
+            actor,
+            "api_key.update",
+            "api_key",
+            id,
         )
         .await?;
         let release = compile_and_publish_runtime_in_transaction(&mut transaction, actor).await?;
@@ -375,17 +371,13 @@ impl Store {
                 "revoked or expired keys cannot be rotated".to_owned(),
             ));
         }
-        record_audit_event(
+        record_success(
             &mut *transaction,
-            AuditEvent {
-                provenance: self.provenance(),
-                actor: Some(actor),
-                action: "api_key.rotate",
-                resource_type: "api_key",
-                resource_id: Some(&id.to_string()),
-                outcome: "success",
-                occurred_at: None,
-            },
+            self.provenance(),
+            actor,
+            "api_key.rotate",
+            "api_key",
+            id,
         )
         .await?;
         let release = compile_and_publish_runtime_in_transaction(&mut transaction, actor).await?;

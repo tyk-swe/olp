@@ -125,33 +125,16 @@
 </section>
 
 <style>
-  .text-button {
-    min-height: 2.75rem;
-    border: 0;
-    background: transparent;
-    color: var(--accent-strong);
-    font-weight: 700;
-  }
-  h2,
   h3 {
     margin: 0;
-    letter-spacing: -0.025em;
-  }
-  h2 {
-    font-size: 1.2rem;
-  }
-  h3 {
     font-size: 1rem;
-  }
-  .section {
-    margin-top: 2rem;
+    letter-spacing: -0.025em;
   }
   .section-link {
     margin: 0.6rem 0 0;
     color: var(--foreground-muted);
     font-size: 0.78rem;
   }
-  .section-heading,
   .provider-heading {
     display: flex;
     align-items: flex-start;
@@ -229,9 +212,6 @@
   @media (max-width: 36rem) {
     dl {
       grid-template-columns: 1fr;
-    }
-    .section-heading {
-      display: grid;
     }
   }
 </style>

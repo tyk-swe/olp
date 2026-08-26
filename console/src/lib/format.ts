@@ -133,6 +133,15 @@ export function statusLabel(
   return String(status);
 }
 
+/**
+ * Renders a snake_case enum from the API — a readiness state, a provider kind,
+ * a media job lifecycle — as spaced words. A missing value is named rather
+ * than rendered blank, because an absent state still occupies a badge.
+ */
+export function stateLabel(value?: string | null): string {
+  return value ? value.replaceAll('_', ' ') : 'unknown';
+}
+
 const BYTE_UNITS = ['B', 'KiB', 'MiB', 'GiB', 'TiB', 'PiB'];
 
 /**

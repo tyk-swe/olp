@@ -23,7 +23,7 @@
     invalidateProviderSummaries
   } from './providerCache';
   import type { RunProviderAction } from './providerDetailCoordination';
-  import { formatDate } from '$lib/format';
+  import { formatDate, stateLabel } from '$lib/format';
 
   let {
     current,
@@ -150,7 +150,7 @@
     </li>
   </ol>
   {#if !current.connector_ready}<p class="live-note">
-      This build carries no connector for {current.kind.replaceAll('_', ' ')}
+      This build carries no connector for {stateLabel(current.kind)}
       providers, so the draft cannot be activated.
     </p>{/if}
 {:else if editingLocked}

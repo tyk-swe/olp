@@ -1,10 +1,14 @@
+import { validateDisplayName as displayNameProblem } from '$lib/displayNamePolicy';
 import { validatePasswordPolicy } from '$lib/passwordPolicy';
 
+/**
+ * The profile editor surfaces a rule failure by throwing; the rule itself is
+ * shared with owner setup and invitation acceptance.
+ */
 export function validateDisplayName(value: string) {
-  const displayName = value.trim();
-  if (!displayName) throw new Error('Enter your display name.');
-  if (displayName.length > 100) throw new Error('Use 100 characters or fewer.');
-  return displayName;
+  const problem = displayNameProblem(value);
+  if (problem) throw new Error(problem);
+  return value.trim();
 }
 
 export function validatePassword(

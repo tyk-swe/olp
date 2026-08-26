@@ -247,13 +247,6 @@
     margin-top: 0.15rem;
     color: var(--foreground-muted);
   }
-  .text-button {
-    min-height: 2.75rem;
-    border: 0;
-    background: transparent;
-    color: var(--accent-strong);
-    font-weight: 700;
-  }
   @media (max-width: 72rem) {
     .filters {
       grid-template-columns: repeat(2, minmax(0, 1fr));

@@ -1,5 +1,5 @@
 use super::{helpers::checked_configuration_count, *};
-use crate::audit_events::{AuditEvent, record_audit_event};
+use crate::audit_events::{AuditEvent, record_audit_event, record_success};
 
 impl Store {
     pub async fn list_providers(
@@ -168,17 +168,13 @@ impl Store {
         )
         .execute(&mut *transaction)
         .await?;
-        record_audit_event(
+        record_success(
             &mut *transaction,
-            AuditEvent {
-                provenance: self.provenance(),
-                actor: Some(actor),
-                action: "provider.update",
-                resource_type: "provider",
-                resource_id: Some(&provider_id.to_string()),
-                outcome: "success",
-                occurred_at: None,
-            },
+            self.provenance(),
+            actor,
+            "provider.update",
+            "provider",
+            provider_id,
         )
         .await?;
         transaction.commit().await?;
@@ -254,17 +250,13 @@ impl Store {
                 Error::InUse
             });
         }
-        record_audit_event(
+        record_success(
             &mut *transaction,
-            AuditEvent {
-                provenance: self.provenance(),
-                actor: Some(actor),
-                action: "provider.disable",
-                resource_type: "provider",
-                resource_id: Some(&provider_id.to_string()),
-                outcome: "success",
-                occurred_at: None,
-            },
+            self.provenance(),
+            actor,
+            "provider.disable",
+            "provider",
+            provider_id,
         )
         .await?;
         complete_idempotency(
@@ -330,17 +322,13 @@ impl Store {
         )
         .execute(&mut *transaction)
         .await?;
-        record_audit_event(
+        record_success(
             &mut *transaction,
-            AuditEvent {
-                provenance: self.provenance(),
-                actor: Some(actor),
-                action: "provider.restore_as_draft",
-                resource_type: "provider",
-                resource_id: Some(&provider_id.to_string()),
-                outcome: "success",
-                occurred_at: None,
-            },
+            self.provenance(),
+            actor,
+            "provider.restore_as_draft",
+            "provider",
+            provider_id,
         )
         .await?;
         complete_idempotency(

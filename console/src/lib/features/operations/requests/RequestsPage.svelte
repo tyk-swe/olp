@@ -3,7 +3,6 @@
   import { createQuery } from '@tanstack/svelte-query';
   import { getRequest, listRequests } from '$lib/api/requests';
   import { errorMessage } from '$lib/api/http';
-  import { REQUEST_PAGE_SIZE } from '$lib/api/pageSizes';
   import { cursorPaginationProps, resetCursor } from '$lib/api/pagination';
   import {
     formatCost,
@@ -14,6 +13,7 @@
   } from '$lib/format';
   import {
     emptyRequestListState,
+    requestFilters,
     type RequestListState
   } from './requestListState';
 
@@ -39,29 +39,10 @@
     enabled: Boolean(requestId)
   }));
 
-  function iso(value: string) {
-    if (!value) return undefined;
-    const date = new Date(value);
-    return Number.isNaN(date.valueOf()) ? undefined : date.toISOString();
-  }
-
   function applyFilters(event: SubmitEvent) {
     event.preventDefault();
     resetCursor(listState);
-    listState.applied = {
-      limit: REQUEST_PAGE_SIZE,
-      route: listState.route || undefined,
-      provider_id: listState.providerId || undefined,
-      model: listState.model || undefined,
-      api_key_id: listState.apiKeyId || undefined,
-      operation: listState.operation || undefined,
-      status_code: listState.statusCode
-        ? Number(listState.statusCode)
-        : undefined,
-      error_class: listState.errorClass || undefined,
-      started_after: iso(listState.startedAfter),
-      started_before: iso(listState.startedBefore)
-    };
+    listState.applied = requestFilters(listState);
   }
 
   function resetFilters() {
@@ -582,12 +563,7 @@
     color: var(--foreground-muted);
   }
   .text-button {
-    min-height: 2.75rem;
     padding: 0.4rem 0.65rem;
-    border: 0;
-    background: transparent;
-    color: var(--accent-strong);
-    font-weight: 700;
   }
   .text-button:hover {
     text-decoration: underline;

@@ -1,3 +1,5 @@
+use std::{future::Future, pin::Pin};
+
 use chrono::{DateTime, Utc};
 use sqlx::{Connection as _, PgConnection, Postgres, Transaction};
 use thiserror::Error;
@@ -48,6 +50,21 @@ struct Cutoffs {
     audit: DateTime<Utc>,
 }
 
+/// The slice of [`Report`] that one transaction over the expiry-stamped tables
+/// produces. Kept separate so the report is assembled in a single place.
+struct ExpiringCounts {
+    request_metadata_gap_rollup_rows: u64,
+    request_metadata_gap_rows: u64,
+    request_metadata_epoch_rows: u64,
+    request_metadata_receipt_rows: u64,
+    session_rows: u64,
+    invitation_rows: u64,
+    idempotency_rows: u64,
+    oidc_flow_rows: u64,
+    outbox_rows: u64,
+    media_job_rows: u64,
+}
+
 impl Store {
     /// Rebuilds completed hourly aggregates before enforcing independent
     /// metadata, usage, and audit retention. One PostgreSQL advisory lock keeps
@@ -72,16 +89,24 @@ impl Store {
         roll_up_compatibility_usage(&mut connection, cutoffs.usage).await?;
         purge_orphaned_usage_anchors(&mut connection, cutoffs.request).await?;
         let audit_rows = purge_expired_audit_events(&mut connection, cutoffs.audit).await?;
-        let mut report = Report {
+        let expiring = purge_expiring_records(&mut connection, now, &cutoffs).await?;
+        Ok(Report {
             lock_acquired: true,
             rollup_rows,
+            request_metadata_gap_rollup_rows: expiring.request_metadata_gap_rollup_rows,
             request_rows,
             usage_rows,
             audit_rows,
-            ..Report::default()
-        };
-        purge_expiring_records(&mut connection, now, &cutoffs, &mut report).await?;
-        Ok(report)
+            request_metadata_gap_rows: expiring.request_metadata_gap_rows,
+            request_metadata_epoch_rows: expiring.request_metadata_epoch_rows,
+            request_metadata_receipt_rows: expiring.request_metadata_receipt_rows,
+            session_rows: expiring.session_rows,
+            invitation_rows: expiring.invitation_rows,
+            idempotency_rows: expiring.idempotency_rows,
+            oidc_flow_rows: expiring.oidc_flow_rows,
+            outbox_rows: expiring.outbox_rows,
+            media_job_rows: expiring.media_job_rows,
+        })
     }
 }
 
@@ -125,6 +150,35 @@ async fn retention_cutoffs(
     })
 }
 
+/// One batch of a [`drain_in_batches`] loop. Boxed because the bound has to
+/// promise the future is `Send` for every transaction lifetime, which the
+/// `AsyncFnMut` sugar cannot yet express.
+type BatchDelete<'t> = Pin<Box<dyn Future<Output = Result<u64, Error>> + Send + 't>>;
+
+/// Deletes in committed batches until a short batch says the backlog is gone.
+/// Every caller here narrows its candidate set with `LIMIT` and
+/// `FOR UPDATE SKIP LOCKED`, so a batch that comes back short means nothing is
+/// left that this pass can claim. Committing per batch keeps those row locks
+/// brief and lets a cancelled pass keep whatever it already reclaimed.
+async fn drain_in_batches<F>(
+    connection: &mut PgConnection,
+    mut delete_batch: F,
+) -> Result<u64, Error>
+where
+    F: for<'t, 'c> FnMut(&'t mut Transaction<'c, Postgres>) -> BatchDelete<'t>,
+{
+    let mut deleted = 0;
+    loop {
+        let mut transaction = connection.begin().await?;
+        let rows = delete_batch(&mut transaction).await?;
+        transaction.commit().await?;
+        deleted += rows;
+        if rows < RETENTION_DELETE_BATCH as u64 {
+            return Ok(deleted);
+        }
+    }
+}
+
 async fn purge_expired_requests(
     connection: &mut PgConnection,
     request_cutoff: DateTime<Utc>,
@@ -132,29 +186,24 @@ async fn purge_expired_requests(
     // Delete request metadata before facts, matching ingestion's
     // request -> anchor -> fact lock order. Facts no longer reference the
     // request table, so this does not affect usage retention.
-    let mut request_rows = 0;
-    loop {
-        let mut transaction = connection.begin().await?;
-        let rows = sqlx::query!(
-            "WITH expired AS ( \
+    drain_in_batches(connection, |transaction| {
+        Box::pin(async move {
+            Ok(sqlx::query!(
+                "WITH expired AS ( \
                SELECT id, started_at FROM requests WHERE started_at < $1 \
                LIMIT $2 FOR UPDATE SKIP LOCKED \
              ) \
              DELETE FROM requests request USING expired \
              WHERE request.id = expired.id AND request.started_at = expired.started_at",
-            request_cutoff,
-            RETENTION_DELETE_BATCH
-        )
-        .execute(&mut *transaction)
-        .await?
-        .rows_affected();
-        transaction.commit().await?;
-        request_rows += rows;
-        if rows < RETENTION_DELETE_BATCH as u64 {
-            break;
-        }
-    }
-    Ok(request_rows)
+                request_cutoff,
+                RETENTION_DELETE_BATCH
+            )
+            .execute(&mut **transaction)
+            .await?
+            .rows_affected())
+        })
+    })
+    .await
 }
 
 /// Delete and aggregate the same row set in one statement. This keeps a late
@@ -372,10 +421,10 @@ async fn purge_orphaned_usage_anchors(
     // Lock candidates before deleting them. A concurrent fact insert holds
     // KEY SHARE on its anchor, so SKIP LOCKED leaves that anchor for the
     // next pass instead of cascading a child invisible to this snapshot.
-    loop {
-        let mut transaction = connection.begin().await?;
-        let rows = sqlx::query!(
-            "WITH orphan AS ( \
+    drain_in_batches(connection, |transaction| {
+        Box::pin(async move {
+            Ok(sqlx::query!(
+                "WITH orphan AS ( \
            SELECT anchor.request_id, anchor.request_started_at \
            FROM usage_request_anchors anchor \
            WHERE anchor.request_started_at < $1 AND NOT EXISTS ( \
@@ -393,17 +442,15 @@ async fn purge_orphaned_usage_anchors(
          DELETE FROM usage_request_anchors anchor USING orphan \
          WHERE anchor.request_id = orphan.request_id \
            AND anchor.request_started_at = orphan.request_started_at",
-            request_cutoff,
-            RETENTION_DELETE_BATCH
-        )
-        .execute(&mut *transaction)
-        .await?
-        .rows_affected();
-        transaction.commit().await?;
-        if rows < RETENTION_DELETE_BATCH as u64 {
-            break;
-        }
-    }
+                request_cutoff,
+                RETENTION_DELETE_BATCH
+            )
+            .execute(&mut **transaction)
+            .await?
+            .rows_affected())
+        })
+    })
+    .await?;
     Ok(())
 }
 
@@ -411,45 +458,39 @@ async fn purge_expired_audit_events(
     connection: &mut PgConnection,
     audit_cutoff: DateTime<Utc>,
 ) -> Result<u64, Error> {
-    let mut audit_rows = 0;
-    loop {
-        let mut transaction = connection.begin().await?;
-        let rows = sqlx::query!(
-            "WITH expired AS ( \
+    drain_in_batches(connection, |transaction| {
+        Box::pin(async move {
+            Ok(sqlx::query!(
+                "WITH expired AS ( \
                SELECT ctid FROM audit_events WHERE occurred_at < $1 \
                LIMIT $2 FOR UPDATE SKIP LOCKED \
              ) \
              DELETE FROM audit_events audit USING expired \
              WHERE audit.ctid = expired.ctid",
-            audit_cutoff,
-            RETENTION_DELETE_BATCH
-        )
-        .execute(&mut *transaction)
-        .await?
-        .rows_affected();
-        transaction.commit().await?;
-        audit_rows += rows;
-        if rows < RETENTION_DELETE_BATCH as u64 {
-            break;
-        }
-    }
-    Ok(audit_rows)
+                audit_cutoff,
+                RETENTION_DELETE_BATCH
+            )
+            .execute(&mut **transaction)
+            .await?
+            .rows_affected())
+        })
+    })
+    .await
 }
 
 async fn purge_expiring_records(
     connection: &mut PgConnection,
     now: DateTime<Utc>,
     cutoffs: &Cutoffs,
-    report: &mut Report,
-) -> Result<(), Error> {
+) -> Result<ExpiringCounts, Error> {
     let mut transaction = connection.begin().await?;
     sqlx::query!("SELECT set_config('olp.usage_rollup_writer', 'additive-v2', true)")
         .fetch_one(&mut *transaction)
         .await?;
     let (rolled, expired) = request_metadata_gap_rollup(&mut transaction, cutoffs.usage).await?;
-    report.request_metadata_gap_rollup_rows = checked_count(rolled, "request metadata gap rollup")?;
-    report.request_metadata_gap_rows = checked_count(expired, "request metadata gap")?;
-    report.request_metadata_epoch_rows = sqlx::query!(
+    let request_metadata_gap_rollup_rows = checked_count(rolled, "request metadata gap rollup")?;
+    let request_metadata_gap_rows = checked_count(expired, "request metadata gap")?;
+    let request_metadata_epoch_rows = sqlx::query!(
         "DELETE FROM request_metadata_gateway_epochs \
          WHERE (gracefully_closed_at IS NOT NULL AND gracefully_closed_at < $1) \
             OR (acknowledged_at IS NOT NULL AND acknowledged_at < $1)",
@@ -458,7 +499,7 @@ async fn purge_expiring_records(
     .execute(&mut *transaction)
     .await?
     .rows_affected();
-    report.request_metadata_receipt_rows = sqlx::query!(
+    let request_metadata_receipt_rows = sqlx::query!(
         "WITH expired AS ( \
            SELECT ctid FROM request_metadata_event_receipts \
            WHERE recorded_at < now() - make_interval( \
@@ -474,25 +515,25 @@ async fn purge_expiring_records(
     .execute(&mut *transaction)
     .await?
     .rows_affected();
-    report.session_rows = sqlx::query!("DELETE FROM sessions WHERE expires_at <= $1", now)
+    let session_rows = sqlx::query!("DELETE FROM sessions WHERE expires_at <= $1", now)
         .execute(&mut *transaction)
         .await?
         .rows_affected();
-    report.invitation_rows = sqlx::query!(
+    let invitation_rows = sqlx::query!(
         "DELETE FROM invitations WHERE expires_at <= $1 AND accepted_at IS NULL",
         now
     )
     .execute(&mut *transaction)
     .await?
     .rows_affected();
-    report.idempotency_rows = sqlx::query!(
+    let idempotency_rows = sqlx::query!(
         "DELETE FROM idempotency_records WHERE expires_at <= $1",
         now
     )
     .execute(&mut *transaction)
     .await?
     .rows_affected();
-    report.oidc_flow_rows = sqlx::query!(
+    let oidc_flow_rows = sqlx::query!(
         "DELETE FROM oidc_authorization_flows WHERE expires_at <= $1",
         now
     )
@@ -506,7 +547,7 @@ async fn purge_expiring_records(
         .execute(&mut *transaction)
         .await?
         .rows_affected();
-    report.outbox_rows = sqlx::query!(
+    let outbox_rows = sqlx::query!(
         "DELETE FROM transactional_outbox \
          WHERE published_at IS NOT NULL AND published_at < $1::timestamptz - interval '7 days'",
         now
@@ -514,7 +555,7 @@ async fn purge_expiring_records(
     .execute(&mut *transaction)
     .await?
     .rows_affected();
-    report.media_job_rows = sqlx::query!(
+    let media_job_rows = sqlx::query!(
         "DELETE FROM async_media_jobs
          WHERE lifecycle_state = 'deleted' AND deleted_at < $1",
         cutoffs.request
@@ -523,7 +564,18 @@ async fn purge_expiring_records(
     .await?
     .rows_affected();
     transaction.commit().await?;
-    Ok(())
+    Ok(ExpiringCounts {
+        request_metadata_gap_rollup_rows,
+        request_metadata_gap_rows,
+        request_metadata_epoch_rows,
+        request_metadata_receipt_rows,
+        session_rows,
+        invitation_rows,
+        idempotency_rows,
+        oidc_flow_rows,
+        outbox_rows,
+        media_job_rows,
+    })
 }
 
 async fn request_metadata_gap_rollup(

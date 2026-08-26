@@ -18,6 +18,7 @@
     type ProviderModelInventory
   } from '$lib/api/management/providers';
   import { errorMessage } from '$lib/api/http';
+  import { stateLabel } from '$lib/format';
   import { useRole } from '$lib/auth/useRole.svelte';
 
   const access = useRole();
@@ -219,8 +220,7 @@
             <td
               ><a href={resolve(`/providers/${entry.provider_id}`)}
                 >{entry.provider_name}</a
-              ><br /><span class="badge"
-                >{entry.provider_kind.replaceAll('_', ' ')}</span
+              ><br /><span class="badge">{stateLabel(entry.provider_kind)}</span
               ></td
             >
             <td

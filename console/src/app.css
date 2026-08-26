@@ -294,6 +294,40 @@ body {
   color: var(--danger);
 }
 
+/* Section chrome, shared because the health page renders its sections from
+   four separate components that each need the same heading row. Both the
+   heading and the h2 are qualified by `.section`: other pages carry a bare
+   `.section-heading` with their own spacing, and a bare `h2` here would reach
+   every heading in the console. The base rule sits above the 36rem override
+   below, which stacks the heading row. */
+.section {
+  margin-top: 2rem;
+}
+
+.section .section-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 0.75rem;
+}
+
+.section h2 {
+  margin: 0;
+  font-size: 1.2rem;
+  letter-spacing: -0.025em;
+}
+
+/* A button that reads as a link: used for refresh and reveal affordances that
+   would be too loud as a filled button. */
+.text-button {
+  min-height: 2.75rem;
+  border: 0;
+  background: transparent;
+  color: var(--accent-strong);
+  font-weight: 700;
+}
+
 @media (max-width: 56rem) {
   .metric-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -301,7 +335,8 @@ body {
 }
 
 @media (max-width: 36rem) {
-  .page-header {
+  .page-header,
+  .section .section-heading {
     display: grid;
   }
   .form-grid,

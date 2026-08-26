@@ -171,13 +171,6 @@
   .danger-button {
     color: var(--danger);
   }
-  .text-button {
-    min-height: 2.75rem;
-    border: 0;
-    background: transparent;
-    color: var(--accent-strong);
-    font-weight: 700;
-  }
   @media (max-width: 40rem) {
     .panel {
       padding: 0.85rem;

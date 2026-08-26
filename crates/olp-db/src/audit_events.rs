@@ -42,3 +42,83 @@ where
     .await?;
     Ok(())
 }
+
+/// The shape almost every writer in this crate needs: a successful action by a
+/// known actor against a single UUID-keyed resource, timestamped by the
+/// database clock. Use [`record_audit_event`] directly for anything else --- a
+/// failure outcome, an anonymous actor, or a resource id that is not a UUID.
+pub(crate) async fn record_success<'e, E>(
+    executor: E,
+    provenance: &RequestProvenance,
+    actor: Uuid,
+    action: &str,
+    resource_type: &str,
+    resource_id: Uuid,
+) -> Result<(), sqlx::Error>
+where
+    E: Executor<'e, Database = Postgres>,
+{
+    record_success_inner(
+        executor,
+        provenance,
+        actor,
+        action,
+        resource_type,
+        resource_id,
+        None,
+    )
+    .await
+}
+
+/// [`record_success`] for callers that already hold the transaction's clock and
+/// want every row it writes stamped with the same instant.
+pub(crate) async fn record_success_at<'e, E>(
+    executor: E,
+    provenance: &RequestProvenance,
+    actor: Uuid,
+    action: &str,
+    resource_type: &str,
+    resource_id: Uuid,
+    occurred_at: DateTime<Utc>,
+) -> Result<(), sqlx::Error>
+where
+    E: Executor<'e, Database = Postgres>,
+{
+    record_success_inner(
+        executor,
+        provenance,
+        actor,
+        action,
+        resource_type,
+        resource_id,
+        Some(occurred_at),
+    )
+    .await
+}
+
+async fn record_success_inner<'e, E>(
+    executor: E,
+    provenance: &RequestProvenance,
+    actor: Uuid,
+    action: &str,
+    resource_type: &str,
+    resource_id: Uuid,
+    occurred_at: Option<DateTime<Utc>>,
+) -> Result<(), sqlx::Error>
+where
+    E: Executor<'e, Database = Postgres>,
+{
+    record_audit_event(
+        executor,
+        AuditEvent {
+            provenance,
+            actor: Some(actor),
+            action,
+            resource_type,
+            resource_id: Some(&resource_id.to_string()),
+            outcome: "success",
+            occurred_at,
+        },
+    )
+    .await
+}

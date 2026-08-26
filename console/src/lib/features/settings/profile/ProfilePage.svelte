@@ -513,13 +513,6 @@
     margin-top: 1.5rem;
     align-items: start;
   }
-  .text-button {
-    min-height: 2.75rem;
-    border: 0;
-    background: transparent;
-    color: var(--accent-strong);
-    font-weight: 700;
-  }
   @media (max-width: 62rem) {
     .profile-grid {
       grid-template-columns: 1fr;

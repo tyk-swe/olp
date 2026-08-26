@@ -9,7 +9,7 @@ use thiserror::Error;
 use uuid::Uuid;
 
 use crate::{
-    audit_events::{AuditEvent, record_audit_event},
+    audit_events::record_success,
     error::Error as PersistenceError,
     idempotency::{
         Outcome, Replayable, ReplayableIdempotencyClaim, Response, claim_idempotency,
@@ -208,17 +208,13 @@ impl Store {
             .execute(&mut *transaction)
             .await?;
         }
-        record_audit_event(
+        record_success(
             &mut *transaction,
-            AuditEvent {
-                provenance: self.provenance(),
-                actor: Some(key.actor),
-                action: "api_key.create",
-                resource_type: "api_key",
-                resource_id: Some(&id.to_string()),
-                outcome: "success",
-                occurred_at: None,
-            },
+            self.provenance(),
+            key.actor,
+            "api_key.create",
+            "api_key",
+            id,
         )
         .await?;
         let release =
@@ -288,17 +284,13 @@ impl Store {
             &id.to_string(),
         )
         .await?;
-        record_audit_event(
+        record_success(
             &mut *transaction,
-            AuditEvent {
-                provenance: self.provenance(),
-                actor: Some(actor),
-                action: "api_key.revoke",
-                resource_type: "api_key",
-                resource_id: Some(&id.to_string()),
-                outcome: "success",
-                occurred_at: None,
-            },
+            self.provenance(),
+            actor,
+            "api_key.revoke",
+            "api_key",
+            id,
         )
         .await?;
         let release = compile_and_publish_runtime_in_transaction(&mut transaction, actor).await?;

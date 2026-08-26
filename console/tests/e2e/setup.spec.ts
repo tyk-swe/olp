@@ -125,7 +125,7 @@ test('setup form validation is keyboard-visible and specific', async ({
   await page.goto('/setup');
   await page.getByRole('button', { name: 'Create owner account' }).click();
 
-  await expect(page.getByText('Enter a display name.')).toBeVisible();
+  await expect(page.getByText('Enter your display name.')).toBeVisible();
   await expect(page.getByText('Enter your email address.')).toBeVisible();
   await expect(page.getByText('Use at least 12 characters.')).toBeVisible();
   await expect(page.getByText('Enter the setup token.')).toBeVisible();

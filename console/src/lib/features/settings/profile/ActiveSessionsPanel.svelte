@@ -159,13 +159,6 @@
     color: var(--foreground-muted);
     overflow-wrap: anywhere;
   }
-  .text-button {
-    min-height: 2.75rem;
-    border: 0;
-    background: transparent;
-    color: var(--accent-strong);
-    font-weight: 700;
-  }
   .success-message {
     margin: 0 0 1rem;
     padding: 0.8rem 1rem;

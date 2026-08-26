@@ -16,7 +16,7 @@
     type Provider,
     type ProviderRevisionDiff
   } from '$lib/api/management/providers';
-  import { formatDate } from '$lib/format';
+  import { formatDate, stateLabel } from '$lib/format';
   import { invalidateProviderSummaries } from './providerCache';
   import {
     installProviderWithModels,
@@ -335,7 +335,7 @@
           </div>
           <div>
             <dt>Connector</dt>
-            <dd>{detail.kind.replaceAll('_', ' ')}</dd>
+            <dd>{stateLabel(detail.kind)}</dd>
           </div>
           <div>
             <dt>Authentication</dt>

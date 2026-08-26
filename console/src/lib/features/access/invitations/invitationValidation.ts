@@ -1,3 +1,4 @@
+import { validateDisplayName } from '$lib/displayNamePolicy';
 import { validatePasswordPolicy } from '$lib/passwordPolicy';
 
 export type InvitationAcceptanceValues = {
@@ -13,10 +14,8 @@ export function validateInvitationAcceptance(
   values: InvitationAcceptanceValues
 ): InvitationAcceptanceErrors {
   const errors: InvitationAcceptanceErrors = {};
-  const displayName = values.displayName.trim();
-  if (!displayName) errors.displayName = 'Enter your display name.';
-  else if (displayName.length > 100)
-    errors.displayName = 'Use 100 characters or fewer.';
+  const displayNameProblem = validateDisplayName(values.displayName);
+  if (displayNameProblem) errors.displayName = displayNameProblem;
   Object.assign(
     errors,
     validatePasswordPolicy(values.password, values.confirmPassword)

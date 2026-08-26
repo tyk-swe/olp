@@ -1,5 +1,5 @@
 use super::*;
-use crate::audit_events::{AuditEvent, record_audit_event};
+use crate::audit_events::record_success;
 
 impl Store {
     pub async fn list_route_drafts(
@@ -177,17 +177,13 @@ impl Store {
             .execute(&mut *transaction)
             .await?;
         }
-        record_audit_event(
+        record_success(
             &mut *transaction,
-            AuditEvent {
-                provenance: self.provenance(),
-                actor: Some(actor),
-                action: "route.update_draft",
-                resource_type: "route_draft",
-                resource_id: Some(&draft_id.to_string()),
-                outcome: "success",
-                occurred_at: None,
-            },
+            self.provenance(),
+            actor,
+            "route.update_draft",
+            "route_draft",
+            draft_id,
         )
         .await?;
         transaction.commit().await?;
@@ -230,17 +226,13 @@ impl Store {
                 Error::NotFound
             });
         }
-        record_audit_event(
+        record_success(
             &mut *transaction,
-            AuditEvent {
-                provenance: self.provenance(),
-                actor: Some(actor),
-                action: "route.delete_draft",
-                resource_type: "route_draft",
-                resource_id: Some(&draft_id.to_string()),
-                outcome: "success",
-                occurred_at: None,
-            },
+            self.provenance(),
+            actor,
+            "route.delete_draft",
+            "route_draft",
+            draft_id,
         )
         .await?;
         transaction.commit().await?;
@@ -455,13 +447,12 @@ async fn draft_operations(pool: &sqlx::PgPool, id: Uuid) -> Result<Vec<Operation
 }
 
 async fn draft_targets(pool: &sqlx::PgPool, id: Uuid) -> Result<Vec<RouteTargetRecord>, Error> {
-    Ok(target_rows(
-        sqlx::query_as!(
-            RouteTargetRow,
-            // A draft read must return every stored target: the console writes
-            // back what it reads, so a target hidden by an inner join would be
-            // deleted by the next replace. Availability is decoration only.
-            "SELECT rdt.id, rdt.routing_id, rdt.provider_model_id, p.id AS provider_id, \
+    Ok(sqlx::query_as!(
+        RouteTargetRow,
+        // A draft read must return every stored target: the console writes
+        // back what it reads, so a target hidden by an inner join would be
+        // deleted by the next replace. Availability is decoration only.
+        "SELECT rdt.id, rdt.routing_id, rdt.provider_model_id, p.id AS provider_id, \
                     COALESCE(pr.name, p.name) AS \"provider_name!\", \
                     COALESCE(prm.upstream_model, pm.upstream_model) AS \"provider_model!\", \
                     (p.state <> 'disabled'::provider_state AND prm.id IS NOT NULL \
@@ -474,11 +465,13 @@ async fn draft_targets(pool: &sqlx::PgPool, id: Uuid) -> Result<Vec<RouteTargetR
              LEFT JOIN provider_revision_models prm ON prm.provider_revision_id = pr.id \
                AND prm.source_provider_model_id = pm.id \
              WHERE rdt.route_draft_id = $1 ORDER BY rdt.position",
-            id
-        )
-        .fetch_all(pool)
-        .await?,
-    ))
+        id
+    )
+    .fetch_all(pool)
+    .await?
+    .into_iter()
+    .map(RouteTargetRecord::from)
+    .collect())
 }
 
 struct RouteHeader {
@@ -489,24 +482,27 @@ struct RouteHeader {
     latest_revision_id: Uuid,
 }
 
+/// The target columns every route read selects, draft or revision, under the
+/// names the SQL gives them. Revision reads prepend their own key column and
+/// hand the rest here, so the row-to-record mapping lives in one place.
 #[derive(Debug, sqlx::FromRow)]
-struct RouteTargetRow {
-    id: Uuid,
-    routing_id: Uuid,
-    provider_model_id: Uuid,
-    provider_id: Uuid,
-    provider_name: String,
-    provider_model: String,
-    available: bool,
-    priority: i32,
-    weight: i32,
-    timeout_ms: i32,
-    position: i32,
+pub(super) struct RouteTargetRow {
+    pub(super) id: Uuid,
+    pub(super) routing_id: Uuid,
+    pub(super) provider_model_id: Uuid,
+    pub(super) provider_id: Uuid,
+    pub(super) provider_name: String,
+    pub(super) provider_model: String,
+    pub(super) available: bool,
+    pub(super) priority: i32,
+    pub(super) weight: i32,
+    pub(super) timeout_ms: i32,
+    pub(super) position: i32,
 }
 
-fn target_rows(rows: Vec<RouteTargetRow>) -> Vec<RouteTargetRecord> {
-    rows.into_iter()
-        .map(|row| RouteTargetRecord {
+impl From<RouteTargetRow> for RouteTargetRecord {
+    fn from(row: RouteTargetRow) -> Self {
+        Self {
             id: row.id,
             routing_id: row.routing_id,
             provider_model_id: row.provider_model_id,
@@ -518,6 +514,6 @@ fn target_rows(rows: Vec<RouteTargetRow>) -> Vec<RouteTargetRecord> {
             weight: row.weight,
             timeout_ms: row.timeout_ms,
             position: row.position,
-        })
-        .collect()
+        }
+    }
 }

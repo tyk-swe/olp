@@ -166,22 +166,26 @@ fn presentation(kind: InferenceErrorKind) -> (StatusCode, &'static str) {
             StatusCode::from_u16(CLIENT_CLOSED_REQUEST).unwrap_or(StatusCode::BAD_GATEWAY),
             "invalid_request_error",
         ),
-        InferenceErrorKind::Canonical(class) => {
-            let status = match class {
-                ErrorClass::Authentication | ErrorClass::Authorization => StatusCode::BAD_GATEWAY,
-                ErrorClass::InvalidRequest => StatusCode::BAD_REQUEST,
-                ErrorClass::RateLimit => StatusCode::TOO_MANY_REQUESTS,
-                ErrorClass::Timeout => StatusCode::GATEWAY_TIMEOUT,
-                ErrorClass::Transport | ErrorClass::Upstream | ErrorClass::Internal => {
-                    StatusCode::BAD_GATEWAY
-                }
-            };
-            let kind = match class {
-                ErrorClass::Authentication | ErrorClass::Authorization => "server_error",
-                _ => super::openai_http::error_type(class),
-            };
-            (status, kind)
-        }
+        InferenceErrorKind::Canonical(class) => match class {
+            // Upstream credential failures are our problem, not the caller's, so
+            // they are reported as a gateway-side error rather than a 401/403.
+            ErrorClass::Authentication | ErrorClass::Authorization => {
+                (StatusCode::BAD_GATEWAY, "server_error")
+            }
+            other => {
+                let status = match other {
+                    ErrorClass::InvalidRequest => StatusCode::BAD_REQUEST,
+                    ErrorClass::RateLimit => StatusCode::TOO_MANY_REQUESTS,
+                    ErrorClass::Timeout => StatusCode::GATEWAY_TIMEOUT,
+                    ErrorClass::Authentication
+                    | ErrorClass::Authorization
+                    | ErrorClass::Transport
+                    | ErrorClass::Upstream
+                    | ErrorClass::Internal => StatusCode::BAD_GATEWAY,
+                };
+                (status, super::openai_http::error_type(other))
+            }
+        },
     }
 }
 

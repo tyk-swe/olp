@@ -6,7 +6,7 @@ use sqlx::{FromRow, Postgres, Transaction};
 use uuid::Uuid;
 
 use crate::{
-    audit_events::{AuditEvent, record_audit_event},
+    audit_events::{record_success, record_success_at},
     error::Error as PersistenceError,
     idempotency::{
         Outcome, Replayable, ReplayableIdempotencyClaim, Response, claim_idempotency,
@@ -162,17 +162,14 @@ impl Store {
                 .await?;
             }
         }
-        record_audit_event(
+        record_success_at(
             &mut *transaction,
-            AuditEvent {
-                provenance: self.provenance(),
-                actor: Some(provider.actor),
-                action: "provider.create_draft",
-                resource_type: "provider",
-                resource_id: Some(&provider.provider_id.to_string()),
-                outcome: "success",
-                occurred_at: Some(now),
-            },
+            self.provenance(),
+            provider.actor,
+            "provider.create_draft",
+            "provider",
+            provider.provider_id,
+            now,
         )
         .await?;
         let created = ProviderDraftCreated {
@@ -258,17 +255,13 @@ impl Store {
             .execute(&mut *transaction)
             .await?;
         }
-        record_audit_event(
+        record_success(
             &mut *transaction,
-            AuditEvent {
-                provenance: self.provenance(),
-                actor: Some(actor),
-                action: "provider.activate",
-                resource_type: "provider",
-                resource_id: Some(&provider_id.to_string()),
-                outcome: "success",
-                occurred_at: None,
-            },
+            self.provenance(),
+            actor,
+            "provider.activate",
+            "provider",
+            provider_id,
         )
         .await?;
         complete_idempotency(

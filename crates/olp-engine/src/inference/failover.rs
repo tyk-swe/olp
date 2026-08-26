@@ -389,25 +389,28 @@ pub async fn execute(
     let attempt_count = attempts.len();
     for attempt_index in 0..attempt_count {
         let attempt = &attempts[attempt_index];
-        let delay = match attempt_index.checked_sub(1) {
-            None => Duration::ZERO,
-            Some(previous) => match plan_retry(
+        if let Some(previous) = attempt_index.checked_sub(1) {
+            let Some(delay) = plan_retry(
                 &attempts[previous],
                 attempt,
                 u32::try_from(previous).unwrap_or(u32::MAX),
                 &failures,
                 route_deadline,
-            ) {
-                RetryPlan::Proceed(delay) => delay,
-                RetryPlan::Stop => break,
-            },
-        };
+            ) else {
+                break;
+            };
+            // Wait before claiming the circuit's exclusive half-open probe
+            // permit: holding it across the backoff would block every other
+            // caller from probing this provider for the whole delay. The cheap
+            // selection check keeps a target we are about to skip from costing
+            // a sleep first.
+            if !delay.is_zero() && circuits.is_selectable(attempt.routing_id) {
+                tokio::time::sleep(delay).await;
+            }
+        }
         let Some(circuit_permit) = circuits.try_acquire_permit(attempt.routing_id) else {
             continue;
         };
-        if !delay.is_zero() {
-            tokio::time::sleep(delay).await;
-        }
         let ordinal = u16::try_from(traces.len() + 1).unwrap_or(u16::MAX);
         let attempt_started_at = Utc::now();
         let attempt_started = tokio::time::Instant::now();
@@ -503,14 +506,9 @@ fn jitter_fraction() -> f64 {
     fraction
 }
 
-enum RetryPlan {
-    Proceed(Duration),
-    Stop,
-}
-
 /// Decides whether `next` is worth attempting after `previous` failed, and how
 /// long to wait first. A provider's `Retry-After` only applies to that same
-/// provider: it must not delay failover to an unrelated target. The plan stops
+/// provider: it must not delay failover to an unrelated target. Returns `None`
 /// when the deadline leaves no room for another attempt, and when a same-target
 /// retry could double-bill the caller.
 fn plan_retry(
@@ -519,10 +517,10 @@ fn plan_retry(
     retry_index: u32,
     failures: &FailureHistory,
     route_deadline: tokio::time::Instant,
-) -> RetryPlan {
+) -> Option<Duration> {
     let same_target = previous.routing_id == next.routing_id;
     if same_target && !failures.permits_same_target_retry() {
-        return RetryPlan::Stop;
+        return None;
     }
     let retry_after = same_target
         .then(|| failures.retry_after())
@@ -531,9 +529,9 @@ fn plan_retry(
     let backoff = retry_backoff(retry_index, retry_after, jitter_fraction());
     let remaining = route_deadline.saturating_duration_since(tokio::time::Instant::now());
     if backoff >= remaining {
-        return RetryPlan::Stop;
+        return None;
     }
-    RetryPlan::Proceed(backoff)
+    Some(backoff)
 }
 
 async fn execute_attempt(

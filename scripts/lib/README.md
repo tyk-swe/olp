@@ -11,3 +11,7 @@ greater than 1 is fatal and leaves caller variables unchanged.
 match/no-match status when output is unnecessary. Every scanned path is
 required; future optional paths must be explicitly classified at their call
 site before they may be skipped.
+
+Self-tests that report TAP source `tap.sh` instead of restating it.
+`run_test NAME COMMAND [ARGS...]` numbers each case and prints its `ok` or
+`not ok` line; `tap_plan` closes the stream with `1..N`.

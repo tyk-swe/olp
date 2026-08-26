@@ -112,6 +112,25 @@ export function fieldIssues(error: unknown): FieldIssue[] {
   );
 }
 
+/**
+ * Maps a validation Problem's snake_case field names onto a form's own keys,
+ * keeping the first message per field. A field the form does not render is
+ * dropped, so the caller can fall back to the problem's summary when nothing
+ * mapped.
+ */
+export function applyServerFieldErrors<Key extends string>(
+  error: unknown,
+  fields: Readonly<Record<string, Key>>
+): Partial<Record<Key, string>> {
+  const mapped: Partial<Record<Key, string>> = {};
+  if (!(error instanceof ApiProblem)) return mapped;
+  for (const [field, messages] of Object.entries(error.problem.errors ?? {})) {
+    const local = fields[field];
+    if (local && messages[0]) mapped[local] = messages[0];
+  }
+  return mapped;
+}
+
 export function errorMessage(
   error: unknown,
   fallback = 'The control API could not complete the request.'

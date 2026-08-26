@@ -6,19 +6,8 @@ checker="$script_dir/check-source-size.sh"
 test_root=$(mktemp -d)
 trap 'rm -rf "$test_root"' EXIT
 
-tests_run=0
-run_test() {
-  local name=$1
-  shift
-  tests_run=$((tests_run + 1))
-  if "$@"; then
-    printf 'ok %d - %s\n' "$tests_run" "$name"
-  else
-    local status=$?
-    printf 'not ok %d - %s (exit %d)\n' "$tests_run" "$name" "$status" >&2
-    return "$status"
-  fi
-}
+# shellcheck source=scripts/lib/tap.sh
+source "$script_dir/lib/tap.sh"
 
 long_fn() {
   printf 'fn %s() {\n' "$1"
@@ -63,4 +52,4 @@ rm "$fixture/apps/demo/src/big.ts"
 rm "$fixture/apps/demo/src/long.rs"
 run_test "a fixed entry left in the baseline fails" new_violation_fails
 
-echo "1..$tests_run"
+tap_plan

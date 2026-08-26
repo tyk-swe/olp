@@ -27,6 +27,18 @@ done
 
 expected=${1:-}
 
+# Fails closed when a pinned value drifts from the single source of truth it
+# must track: the workspace version for release metadata, the toolchain channel
+# for Rust pins.
+require_pin() {
+  local label=$1 value=$2 required=$3
+
+  [[ $value == "$required" ]] || {
+    echo "$label is ${value:-unset}, expected $required" >&2
+    exit 1
+  }
+}
+
 workspace_version=$(awk '
   /^\[workspace.package\]$/ { workspace = 1; next }
   /^\[/ { workspace = 0 }
@@ -52,18 +64,10 @@ semver='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?(\+[
   exit 1
 }
 
-for pair in \
-  "console/package.json:$console_version" \
-  "deploy/helm/Chart.yaml version:$chart_version" \
-  "deploy/helm/Chart.yaml appVersion:$chart_app_version" \
-  "deploy/Dockerfile OLP_VERSION:$image_version"; do
-  label=${pair%%:*}
-  value=${pair#*:}
-  [[ $value == "$workspace_version" ]] || {
-    echo "$label is $value, expected $workspace_version" >&2
-    exit 1
-  }
-done
+require_pin "console/package.json" "$console_version" "$workspace_version"
+require_pin "deploy/helm/Chart.yaml version" "$chart_version" "$workspace_version"
+require_pin "deploy/helm/Chart.yaml appVersion" "$chart_app_version" "$workspace_version"
+require_pin "deploy/Dockerfile OLP_VERSION" "$image_version" "$workspace_version"
 
 if [[ -n $expected && $workspace_version != "$expected" ]]; then
   echo "release tag version $expected does not match package version $workspace_version" >&2
@@ -100,15 +104,7 @@ image_rust=$(sed -nE 's|^FROM rust:([^-]+)-bookworm@sha256:[0-9a-f]{64}.*$|\1|p'
   echo "rust-toolchain.toml channel is not a pinned version: ${toolchain_rust:-unset}" >&2
   exit 1
 }
-for pair in \
-  ".github/actions/setup-rust toolchain:$action_rust" \
-  "deploy/Dockerfile rust base image:$image_rust"; do
-  label=${pair%%:*}
-  value=${pair#*:}
-  [[ $value == "$toolchain_rust" ]] || {
-    echo "$label is ${value:-unset}, expected $toolchain_rust" >&2
-    exit 1
-  }
-done
+require_pin ".github/actions/setup-rust toolchain" "$action_rust" "$toolchain_rust"
+require_pin "deploy/Dockerfile rust base image" "$image_rust" "$toolchain_rust"
 
 echo "release metadata is consistent at $workspace_version (Rust $toolchain_rust)"

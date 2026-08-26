@@ -68,9 +68,9 @@ jobs:
       - name: Run script self-tests
         run: make script-selftest
       - name: Require consistent release metadata
-        run: scripts/check-release-version.sh
+        run: make release-version
       - name: Require immutable supply-chain references
-        run: scripts/check-supply-chain-pins.sh
+        run: make supply-chain
       - name: Verify Helm and Compose contracts
         run: make helm-verify
       - uses: ./.github/actions/setup-rust
@@ -99,9 +99,9 @@ jobs:
           sudo apt-get update
           sudo apt-get install --yes --no-install-recommends ripgrep
       - name: Enforce crate boundaries
-        run: ./scripts/check-boundaries.sh
+        run: make boundaries
       - name: Enforce typed storage access
-        run: ./scripts/check-storage-sqlx.sh
+        run: make storage-sqlx
       - name: Enforce source size rules
         run: make source-size
       - name: Check Rust formatting
@@ -249,7 +249,9 @@ jobs:
           cache-shared-key: workspace-registry
           cache-save: "false"
       - name: Smoke official OpenAI, Anthropic, and Google GenAI SDKs
-        run: ./tests/sdk-smoke/run.sh
+        # setup-node-pnpm already installed tests/sdk-smoke; skip make sdk-smoke's
+        # install prerequisite.
+        run: make sdk-smoke-run
 
   postgres-integration:
     name: PostgreSQL integration

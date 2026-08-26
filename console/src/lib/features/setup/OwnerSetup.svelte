@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onDestroy } from 'svelte';
-  import { ApiProblem } from '$lib/api/http';
+  import { ApiProblem, applyServerFieldErrors } from '$lib/api/http';
   import { createOwner } from '$lib/api/setup';
   import { authLifecycle } from '$lib/auth/lifecycle';
   import NavIcon from '$lib/components/NavIcon.svelte';
@@ -43,19 +43,6 @@
     return parts.length ? parts.join(' ') : undefined;
   }
 
-  function applyServerErrors(problem: ApiProblem) {
-    if (!problem.problem.errors) return false;
-    const next: OwnerFormErrors = {};
-    for (const [serverField, messages] of Object.entries(
-      problem.problem.errors
-    )) {
-      const formField = serverToFormField[serverField];
-      if (formField && messages[0]) next[formField] = messages[0];
-    }
-    errors = next;
-    return Object.keys(next).length > 0;
-  }
-
   async function submit(event: SubmitEvent) {
     event.preventDefault();
     submissionError = '';
@@ -84,7 +71,8 @@
       onComplete();
     } catch (error) {
       if (error instanceof ApiProblem) {
-        if (!applyServerErrors(error))
+        errors = applyServerFieldErrors(error, serverToFormField);
+        if (!Object.keys(errors).length)
           submissionError = error.problem.detail ?? error.problem.title;
       } else {
         submissionError =

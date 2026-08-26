@@ -2,7 +2,7 @@ use super::{
     helpers::{CapabilityRow, capability_from_row, checked_configuration_count},
     *,
 };
-use crate::audit_events::{AuditEvent, record_audit_event};
+use crate::audit_events::record_success;
 
 impl Store {
     pub async fn list_provider_revisions(
@@ -415,17 +415,13 @@ impl Store {
         )
         .execute(&mut *transaction)
         .await?;
-        record_audit_event(
+        record_success(
             &mut *transaction,
-            AuditEvent {
-                provenance: self.provenance(),
-                actor: Some(actor),
-                action: "provider_revision.restore_as_draft",
-                resource_type: "provider",
-                resource_id: Some(&provider_id.to_string()),
-                outcome: "success",
-                occurred_at: None,
-            },
+            self.provenance(),
+            actor,
+            "provider_revision.restore_as_draft",
+            "provider",
+            provider_id,
         )
         .await?;
         complete_idempotency(

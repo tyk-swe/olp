@@ -175,7 +175,6 @@ struct ReadinessFlags {
     request_metadata_complete: bool,
     asynchronous_plane_current: bool,
     asynchronous_plane_drained: bool,
-    media_reconciliation_gaps: u64,
 }
 
 pub(super) async fn collect_readiness(
@@ -241,7 +240,6 @@ pub(super) async fn collect_readiness(
         request_metadata_complete,
         asynchronous_plane_current,
         asynchronous_plane_drained,
-        media_reconciliation_gaps,
     };
     Ok(readiness_response(
         state,
@@ -268,22 +266,17 @@ async fn probe_store(
                 state.store().worker_task_health(),
                 state.store().worker_recovery_counters(),
             );
+            fn unavailable<E>(_error: E) -> Problem {
+                Problem::service_unavailable("database_unavailable")
+            }
             Ok(StoreProbe {
                 database: "ok",
-                media_reconciliation: Some(
-                    media.map_err(|_| Problem::service_unavailable("database_unavailable"))?,
-                ),
-                request_metadata_consumer: consumer
-                    .map_err(|_| Problem::service_unavailable("database_unavailable"))?,
-                request_metadata_epochs: epochs
-                    .map_err(|_| Problem::service_unavailable("database_unavailable"))?,
-                runtime_outbox: outbox
-                    .map_err(|_| Problem::service_unavailable("database_unavailable"))?,
-                worker_tasks: tasks
-                    .map_err(|_| Problem::service_unavailable("database_unavailable"))?,
-                recovery_counters: Some(
-                    counters.map_err(|_| Problem::service_unavailable("database_unavailable"))?,
-                ),
+                media_reconciliation: Some(media.map_err(unavailable)?),
+                request_metadata_consumer: consumer.map_err(unavailable)?,
+                request_metadata_epochs: epochs.map_err(unavailable)?,
+                runtime_outbox: outbox.map_err(unavailable)?,
+                worker_tasks: tasks.map_err(unavailable)?,
+                recovery_counters: Some(counters.map_err(unavailable)?),
             })
         }
         Err(_) if state.mode.serves_gateway() && generation.is_some() => Ok(StoreProbe {
@@ -407,7 +400,7 @@ fn readiness_response(
         media_reconciliation_stale: media.map_or(0, |summary| summary.stale),
         media_reconciliation_failed: media.map_or(0, |summary| summary.failed),
         media_reconciliation_unbound: media.map_or(0, |summary| summary.unbound),
-        media_reconciliation_gaps_total: flags.media_reconciliation_gaps,
+        media_reconciliation_gaps_total: state.media_reconciliation_gap_count(),
         media_spool_used_bytes: state.media_spool().used_bytes(),
         media_spool_capacity_bytes: state.media_spool().capacity_bytes(),
     }

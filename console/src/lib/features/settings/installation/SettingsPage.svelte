@@ -14,7 +14,7 @@
     type PriceDraft
   } from '$lib/api/pricing';
   import { listSettings, updateSetting, type Setting } from '$lib/api/settings';
-  import { dateTimeLocalValue, formatDate } from '$lib/format';
+  import { dateTimeLocalValue, formatDate, stateLabel } from '$lib/format';
   import {
     listProviderKinds,
     type ProviderKind
@@ -84,9 +84,9 @@
   }));
 
   function settingLabel(key: string) {
-    return key
-      .replaceAll('_', ' ')
-      .replace(/\b\w/g, (character) => character.toUpperCase());
+    return stateLabel(key).replace(/\b\w/g, (character) =>
+      character.toUpperCase()
+    );
   }
 
   function settingHelp(key: string) {
@@ -554,13 +554,6 @@
   summary small,
   td small {
     color: var(--foreground-muted);
-  }
-  .text-button {
-    min-height: 2.75rem;
-    border: 0;
-    background: transparent;
-    color: var(--accent-strong);
-    font-weight: 700;
   }
   @media (max-width: 60rem) {
     .setting-row {

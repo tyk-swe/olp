@@ -7,6 +7,7 @@ import type {
   ProviderProbe,
   UpdateProviderInput
 } from '$lib/api/management/providers';
+import { stateLabel } from '$lib/format';
 
 export type ProviderDraft = {
   kind: ProviderKind;
@@ -270,10 +271,7 @@ export type ProbeSummary = Pick<
 
 /** Probe result line: the server detail, which probe ran, and models seen. */
 export function probeSummary(probe: ProbeSummary): string {
-  const parts = [
-    probe.detail,
-    `${probe.probe_type.replaceAll('_', ' ')} probe`
-  ];
+  const parts = [probe.detail, `${stateLabel(probe.probe_type)} probe`];
   if (probe.discovered_models != null) {
     parts.push(
       `${probe.discovered_models} model${probe.discovered_models === 1 ? '' : 's'} seen`

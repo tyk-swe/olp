@@ -21,23 +21,9 @@ trap 'rm -rf "$test_root"' EXIT
 
 # shellcheck source=scripts/lib/repository-validation.sh
 source "$helper"
+# shellcheck source=scripts/lib/tap.sh
+source "$script_dir/lib/tap.sh"
 VALIDATION_SCRIPT_NAME=test-repository-validation.sh
-
-tests_run=0
-
-run_test() {
-  local name=$1
-  shift
-
-  tests_run=$((tests_run + 1))
-  if "$@"; then
-    printf 'ok %d - %s\n' "$tests_run" "$name"
-  else
-    local status=$?
-    printf 'not ok %d - %s (exit %d)\n' "$tests_run" "$name" "$status" >&2
-    return "$status"
-  fi
-}
 
 assert_contains() {
   local file=$1
@@ -554,4 +540,4 @@ run_test "same-name non-workspace paths remain unclassified" \
 run_test "external Cargo patch paths are rejected" \
   test_external_cargo_patch_path_is_rejected
 
-printf 'repository validation regression tests passed: %d\n' "$tests_run"
+tap_plan

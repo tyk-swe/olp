@@ -4,7 +4,7 @@ use sqlx::FromRow;
 use uuid::Uuid;
 
 use crate::{
-    audit_events::{AuditEvent, record_audit_event},
+    audit_events::record_success,
     authentication::insert_versioned_session,
     error::Error as PersistenceError,
     idempotency::{
@@ -130,17 +130,13 @@ impl Store {
             }
             Err(error) => return Err(error.into()),
         };
-        record_audit_event(
+        record_success(
             &mut *transaction,
-            AuditEvent {
-                provenance: self.provenance(),
-                actor: Some(invitation.actor),
-                action: "invitation.create",
-                resource_type: "invitation",
-                resource_id: Some(&id.to_string()),
-                outcome: "success",
-                occurred_at: None,
-            },
+            self.provenance(),
+            invitation.actor,
+            "invitation.create",
+            "invitation",
+            id,
         )
         .await?;
         let created = InvitationCreated {
@@ -232,17 +228,13 @@ impl Store {
         .fetch_optional(&mut *transaction)
         .await?
         .ok_or(Error::InvitationUnavailable)?;
-        record_audit_event(
+        record_success(
             &mut *transaction,
-            AuditEvent {
-                provenance: self.provenance(),
-                actor: Some(actor),
-                action: "invitation.revoke",
-                resource_type: "invitation",
-                resource_id: Some(&id.to_string()),
-                outcome: "success",
-                occurred_at: None,
-            },
+            self.provenance(),
+            actor,
+            "invitation.revoke",
+            "invitation",
+            id,
         )
         .await?;
         complete_idempotency(
@@ -348,30 +340,22 @@ impl Store {
         if updated.rows_affected() != 1 {
             return Err(Error::InvitationUnavailable);
         }
-        record_audit_event(
+        record_success(
             &mut *transaction,
-            AuditEvent {
-                provenance: self.provenance(),
-                actor: Some(user_id),
-                action: "invitation.accept",
-                resource_type: "invitation",
-                resource_id: Some(&invitation_id.to_string()),
-                outcome: "success",
-                occurred_at: None,
-            },
+            self.provenance(),
+            user_id,
+            "invitation.accept",
+            "invitation",
+            invitation_id,
         )
         .await?;
-        record_audit_event(
+        record_success(
             &mut *transaction,
-            AuditEvent {
-                provenance: self.provenance(),
-                actor: Some(user_id),
-                action: "user.create",
-                resource_type: "user",
-                resource_id: Some(&user_id.to_string()),
-                outcome: "success",
-                occurred_at: None,
-            },
+            self.provenance(),
+            user_id,
+            "user.create",
+            "user",
+            user_id,
         )
         .await?;
         let session_id = insert_versioned_session(
@@ -383,17 +367,13 @@ impl Store {
             now,
         )
         .await?;
-        record_audit_event(
+        record_success(
             &mut *transaction,
-            AuditEvent {
-                provenance: self.provenance(),
-                actor: Some(user_id),
-                action: "session.create",
-                resource_type: "session",
-                resource_id: Some(&session_id.to_string()),
-                outcome: "success",
-                occurred_at: None,
-            },
+            self.provenance(),
+            user_id,
+            "session.create",
+            "session",
+            session_id,
         )
         .await?;
         transaction.commit().await?;

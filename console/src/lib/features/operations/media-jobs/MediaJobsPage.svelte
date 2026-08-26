@@ -5,7 +5,7 @@
   import { getMediaJob, listMediaJobs } from '$lib/api/media-jobs';
   import { errorMessage } from '$lib/api/http';
   import { cursorPaginationProps, resetCursor } from '$lib/api/pagination';
-  import { formatDate } from '$lib/format';
+  import { formatDate, stateLabel } from '$lib/format';
   import {
     emptyMediaJobListState,
     mediaJobFilters,
@@ -90,7 +90,7 @@
       <dl>
         <div>
           <dt>Lifecycle</dt>
-          <dd>{detail.data.lifecycle.replaceAll('_', ' ')}</dd>
+          <dd>{stateLabel(detail.data.lifecycle)}</dd>
         </div>
         <div>
           <dt>Progress</dt>
@@ -220,7 +220,7 @@
       >Lifecycle <select bind:value={listState.lifecycle}
         ><option value="">All lifecycles</option
         >{#each ['creating', 'active', 'create_ambiguous', 'create_cleanup_pending', 'delete_pending', 'deleted'] as value (value)}<option
-            {value}>{value.replaceAll('_', ' ')}</option
+            {value}>{stateLabel(value)}</option
           >{/each}</select
       ></label
     >
@@ -298,9 +298,8 @@
                 ></td
               ><td data-label="State"
                 ><span class={`badge ${tone(job.state)}`}>{job.state}</span></td
-              ><td data-label="Lifecycle"
-                >{job.lifecycle.replaceAll('_', ' ')}</td
-              ><td data-label="Progress"
+              ><td data-label="Lifecycle">{stateLabel(job.lifecycle)}</td><td
+                data-label="Progress"
                 >{job.progress_percent == null
                   ? '—'
                   : `${job.progress_percent}%`}</td
@@ -418,13 +417,6 @@
     font:
       0.72rem 'JetBrains Mono Variable',
       monospace;
-  }
-  .text-button {
-    min-height: 2.75rem;
-    border: 0;
-    background: transparent;
-    color: var(--accent-strong);
-    font-weight: 700;
   }
   /* Eight columns still cannot fit a phone. Left as a scrolling table, the row
      width also pushes mobile browsers into shrinking the whole page. */
