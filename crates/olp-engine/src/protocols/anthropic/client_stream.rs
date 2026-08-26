@@ -1,9 +1,9 @@
 use std::collections::BTreeMap;
 
 use crate::domain::canonical::{
-    events::{ErrorClass, Event, Kind, Usage},
+    events::{Error as StreamError, ErrorClass, Event, FinishReason, Kind, Usage},
     identity::Surface,
-    requests::MessageRole,
+    requests::{MessageRole, SourceExtensions},
 };
 use serde_json::{Value, json};
 use thiserror::Error;
@@ -91,49 +91,12 @@ impl Encoder {
         }
         let mut frames = Vec::new();
         match event.kind {
-            Kind::ResponseStart { response_id, .. } => {
-                if self.response_started {
-                    return Err(Error::Sequence);
-                }
-                self.response_id = response_id;
-                self.response_started = true;
-            }
+            Kind::ResponseStart { response_id, .. } => self.start_response(response_id)?,
             Kind::MessageStart { output_index, role } => {
-                require_candidate(output_index)?;
-                if role != MessageRole::Assistant || self.message_declared {
-                    return Err(Error::Candidate);
-                }
-                self.message_declared = true;
+                self.declare_message(output_index, role)?
             }
             Kind::TextDelta { output_index, text } => {
-                require_candidate(output_index)?;
-                self.ensure_message(&mut frames)?;
-                let block = match self.text_block {
-                    Some(block) => block,
-                    None => {
-                        let block = self.allocate_block()?;
-                        self.text_block = Some(block);
-                        frames.push(frame(
-                            "content_block_start",
-                            json!({
-                                "type": "content_block_start",
-                                "index": block,
-                                "content_block": {"type": "text", "text": ""}
-                            }),
-                        ));
-                        block
-                    }
-                };
-                if !text.is_empty() {
-                    frames.push(frame(
-                        "content_block_delta",
-                        json!({
-                            "type": "content_block_delta",
-                            "index": block,
-                            "delta": {"type": "text_delta", "text": text}
-                        }),
-                    ));
-                }
+                self.push_text_delta(output_index, text, &mut frames)?;
             }
             Kind::ToolCallDelta {
                 output_index,
@@ -141,161 +104,252 @@ impl Encoder {
                 id,
                 name,
                 arguments_delta,
-            } => {
-                require_candidate(output_index)?;
-                self.ensure_message(&mut frames)?;
-                if let Some(tool) = self.tools.get(&tool_index) {
-                    if id.as_ref().is_some_and(|id| id != &tool.id)
-                        || name.as_ref().is_some_and(|name| name != &tool.name)
-                    {
-                        return Err(Error::Tool);
-                    }
-                } else {
-                    let id = id.ok_or(Error::Tool)?;
-                    let name = name.ok_or(Error::Tool)?;
-                    let block = self.allocate_block()?;
-                    frames.push(frame(
-                        "content_block_start",
-                        json!({
-                            "type": "content_block_start",
-                            "index": block,
-                            "content_block": {"type": "tool_use", "id": id, "name": name, "input": {}}
-                        }),
-                    ));
-                    self.tools.insert(tool_index, ToolState { block, id, name });
-                }
-                let block = self.tools.get(&tool_index).ok_or(Error::Tool)?.block;
-                if !arguments_delta.is_empty() {
-                    frames.push(frame(
-                        "content_block_delta",
-                        json!({
-                            "type": "content_block_delta",
-                            "index": block,
-                            "delta": {"type": "input_json_delta", "partial_json": arguments_delta}
-                        }),
-                    ));
-                }
-            }
-            Kind::Usage { usage } => {
-                // Reasoning tokens have no Anthropic field. Dropping the count
-                // is a reporting gap; failing the stream loses the response.
-                self.usage = usage;
-                if self.message_declared && !self.message_emitted {
-                    self.ensure_message(&mut frames)?;
-                }
-            }
+            } => self.push_tool_call_delta(
+                output_index,
+                tool_index,
+                id,
+                name,
+                arguments_delta,
+                &mut frames,
+            )?,
+            Kind::Usage { usage } => self.record_usage(usage, &mut frames)?,
             Kind::Finish {
                 output_index,
                 reason,
-            } => {
-                require_candidate(output_index)?;
-                if self.finished {
-                    return Err(Error::Sequence);
-                }
-                self.ensure_message(&mut frames)?;
-                let mut blocks = self
-                    .tools
-                    .values()
-                    .map(|tool| tool.block)
-                    .collect::<Vec<_>>();
-                blocks.extend(self.text_block);
-                blocks.sort_unstable();
-                for block in blocks {
-                    frames.push(frame(
-                        "content_block_stop",
-                        json!({"type": "content_block_stop", "index": block}),
-                    ));
-                }
-                let usage =
-                    super::client::anthropic_usage(&self.usage, self.cache_creation_input_tokens);
-                // `stop_reason: "end_turn"` alongside a matched `stop_sequence`
-                // is self-contradictory; the sequence decides the reason.
-                let stop_reason =
-                    if matches!(reason, crate::domain::canonical::events::FinishReason::Stop)
-                        && self.stop_sequence.is_some()
-                    {
-                        "stop_sequence"
-                    } else {
-                        finish_reason(&reason)
-                    };
-                frames.push(frame(
-                    "message_delta",
-                    json!({
-                        "type": "message_delta",
-                        "delta": {
-                            "stop_reason": stop_reason,
-                            "stop_sequence": self.stop_sequence.clone()
-                        },
-                        "usage": {
-                            "input_tokens": usage.input_tokens,
-                            "output_tokens": usage.output_tokens,
-                            "cache_creation_input_tokens": usage.cache_creation_input_tokens,
-                            "cache_read_input_tokens": usage.cache_read_input_tokens
-                        }
-                    }),
-                ));
-                self.finished = true;
-            }
-            Kind::Error { error } => {
-                frames.push(frame(
-                    "error",
-                    json!({
-                        "type": "error",
-                        "error": {"type": anthropic_error_type(error.class), "message": error.message}
-                    }),
-                ));
-                self.finished = true;
-            }
+            } => self.finish_message(output_index, &reason, &mut frames)?,
+            Kind::Error { error } => self.push_error(&error, &mut frames),
             Kind::SourceExtension { extensions } => {
-                // Anything from another surface is unrepresentable here, and the
-                // response is already in flight, so it is dropped rather than
-                // failing a stream the client is reading.
-                if extensions.source != Some(Surface::Anthropic) {
-                    return Ok(frames);
-                }
-                if let Some(value) = extensions.values.get(RAW_SSE_FRAME_EXTENSION) {
-                    if extensions.values.len() != 1 {
-                        return Err(Error::Extension);
-                    }
-                    let (mut raw, semantic_events) =
-                        decode_raw_sse_frame(value).ok_or(Error::Extension)?;
-                    rewrite_anthropic_model(&mut raw, &self.public_model)?;
-                    self.skip_native_events = semantic_events;
-                    frames.push(raw);
-                } else {
-                    // Only the fields the terminal frames still have to carry
-                    // are retained; the rest were already delivered upstream.
-                    if let Some(tokens) = extensions
-                        .values
-                        .get("/message/usage/cache_creation_input_tokens")
-                        .or_else(|| extensions.values.get("/usage/cache_creation_input_tokens"))
-                        .and_then(Value::as_u64)
-                    {
-                        self.cache_creation_input_tokens = Some(tokens);
-                    }
-                    if let Some(sequence) = extensions
-                        .values
-                        .get("/delta/stop_sequence")
-                        .and_then(Value::as_str)
-                    {
-                        self.stop_sequence = Some(sequence.to_owned());
-                    }
-                }
+                self.apply_source_extension(extensions, &mut frames)?;
             }
-            Kind::RefusalDelta { .. } => {
-                return Err(Error::Candidate);
-            }
-            Kind::Done => {
-                if !self.finished {
-                    return Err(Error::MissingFinish);
-                }
-                if self.message_emitted {
-                    frames.push(frame("message_stop", json!({"type": "message_stop"})));
-                }
-                self.done = true;
-            }
+            Kind::RefusalDelta { .. } => return Err(Error::Candidate),
+            Kind::Done => self.stop_message(&mut frames)?,
         }
         Ok(frames)
+    }
+
+    fn start_response(&mut self, response_id: Option<String>) -> Result<(), Error> {
+        if self.response_started {
+            return Err(Error::Sequence);
+        }
+        self.response_id = response_id;
+        self.response_started = true;
+        Ok(())
+    }
+
+    fn declare_message(&mut self, output_index: u32, role: MessageRole) -> Result<(), Error> {
+        require_candidate(output_index)?;
+        if role != MessageRole::Assistant || self.message_declared {
+            return Err(Error::Candidate);
+        }
+        self.message_declared = true;
+        Ok(())
+    }
+
+    fn push_text_delta(
+        &mut self,
+        output_index: u32,
+        text: String,
+        frames: &mut Vec<Frame>,
+    ) -> Result<(), Error> {
+        require_candidate(output_index)?;
+        self.ensure_message(frames)?;
+        let block = match self.text_block {
+            Some(block) => block,
+            None => {
+                let block = self.allocate_block()?;
+                self.text_block = Some(block);
+                frames.push(frame(
+                    "content_block_start",
+                    json!({
+                        "type": "content_block_start",
+                        "index": block,
+                        "content_block": {"type": "text", "text": ""}
+                    }),
+                ));
+                block
+            }
+        };
+        if !text.is_empty() {
+            frames.push(frame(
+                "content_block_delta",
+                json!({
+                    "type": "content_block_delta",
+                    "index": block,
+                    "delta": {"type": "text_delta", "text": text}
+                }),
+            ));
+        }
+        Ok(())
+    }
+
+    fn push_tool_call_delta(
+        &mut self,
+        output_index: u32,
+        tool_index: u32,
+        id: Option<String>,
+        name: Option<String>,
+        arguments_delta: String,
+        frames: &mut Vec<Frame>,
+    ) -> Result<(), Error> {
+        require_candidate(output_index)?;
+        self.ensure_message(frames)?;
+        if let Some(tool) = self.tools.get(&tool_index) {
+            if id.as_ref().is_some_and(|id| id != &tool.id)
+                || name.as_ref().is_some_and(|name| name != &tool.name)
+            {
+                return Err(Error::Tool);
+            }
+        } else {
+            let id = id.ok_or(Error::Tool)?;
+            let name = name.ok_or(Error::Tool)?;
+            let block = self.allocate_block()?;
+            frames.push(frame(
+                "content_block_start",
+                json!({
+                    "type": "content_block_start",
+                    "index": block,
+                    "content_block": {"type": "tool_use", "id": id, "name": name, "input": {}}
+                }),
+            ));
+            self.tools.insert(tool_index, ToolState { block, id, name });
+        }
+        let block = self.tools.get(&tool_index).ok_or(Error::Tool)?.block;
+        if !arguments_delta.is_empty() {
+            frames.push(frame(
+                "content_block_delta",
+                json!({
+                    "type": "content_block_delta",
+                    "index": block,
+                    "delta": {"type": "input_json_delta", "partial_json": arguments_delta}
+                }),
+            ));
+        }
+        Ok(())
+    }
+
+    fn record_usage(&mut self, usage: Usage, frames: &mut Vec<Frame>) -> Result<(), Error> {
+        // Reasoning tokens have no Anthropic field. Dropping the count
+        // is a reporting gap; failing the stream loses the response.
+        self.usage = usage;
+        if self.message_declared && !self.message_emitted {
+            self.ensure_message(frames)?;
+        }
+        Ok(())
+    }
+
+    fn finish_message(
+        &mut self,
+        output_index: u32,
+        reason: &FinishReason,
+        frames: &mut Vec<Frame>,
+    ) -> Result<(), Error> {
+        require_candidate(output_index)?;
+        if self.finished {
+            return Err(Error::Sequence);
+        }
+        self.ensure_message(frames)?;
+        let mut blocks = self
+            .tools
+            .values()
+            .map(|tool| tool.block)
+            .collect::<Vec<_>>();
+        blocks.extend(self.text_block);
+        blocks.sort_unstable();
+        for block in blocks {
+            frames.push(frame(
+                "content_block_stop",
+                json!({"type": "content_block_stop", "index": block}),
+            ));
+        }
+        let usage = super::client::anthropic_usage(&self.usage, self.cache_creation_input_tokens);
+        // `stop_reason: "end_turn"` alongside a matched `stop_sequence`
+        // is self-contradictory; the sequence decides the reason.
+        let stop_reason = if matches!(reason, FinishReason::Stop) && self.stop_sequence.is_some() {
+            "stop_sequence"
+        } else {
+            finish_reason(reason)
+        };
+        frames.push(frame(
+            "message_delta",
+            json!({
+                "type": "message_delta",
+                "delta": {
+                    "stop_reason": stop_reason,
+                    "stop_sequence": self.stop_sequence.clone()
+                },
+                "usage": {
+                    "input_tokens": usage.input_tokens,
+                    "output_tokens": usage.output_tokens,
+                    "cache_creation_input_tokens": usage.cache_creation_input_tokens,
+                    "cache_read_input_tokens": usage.cache_read_input_tokens
+                }
+            }),
+        ));
+        self.finished = true;
+        Ok(())
+    }
+
+    fn push_error(&mut self, error: &StreamError, frames: &mut Vec<Frame>) {
+        frames.push(frame(
+            "error",
+            json!({
+                "type": "error",
+                "error": {"type": anthropic_error_type(error.class), "message": error.message}
+            }),
+        ));
+        self.finished = true;
+    }
+
+    fn apply_source_extension(
+        &mut self,
+        extensions: SourceExtensions,
+        frames: &mut Vec<Frame>,
+    ) -> Result<(), Error> {
+        // Anything from another surface is unrepresentable here, and the
+        // response is already in flight, so it is dropped rather than
+        // failing a stream the client is reading.
+        if extensions.source != Some(Surface::Anthropic) {
+            return Ok(());
+        }
+        if let Some(value) = extensions.values.get(RAW_SSE_FRAME_EXTENSION) {
+            if extensions.values.len() != 1 {
+                return Err(Error::Extension);
+            }
+            let (mut raw, semantic_events) = decode_raw_sse_frame(value).ok_or(Error::Extension)?;
+            rewrite_anthropic_model(&mut raw, &self.public_model)?;
+            self.skip_native_events = semantic_events;
+            frames.push(raw);
+        } else {
+            // Only the fields the terminal frames still have to carry
+            // are retained; the rest were already delivered upstream.
+            if let Some(tokens) = extensions
+                .values
+                .get("/message/usage/cache_creation_input_tokens")
+                .or_else(|| extensions.values.get("/usage/cache_creation_input_tokens"))
+                .and_then(Value::as_u64)
+            {
+                self.cache_creation_input_tokens = Some(tokens);
+            }
+            if let Some(sequence) = extensions
+                .values
+                .get("/delta/stop_sequence")
+                .and_then(Value::as_str)
+            {
+                self.stop_sequence = Some(sequence.to_owned());
+            }
+        }
+        Ok(())
+    }
+
+    fn stop_message(&mut self, frames: &mut Vec<Frame>) -> Result<(), Error> {
+        if !self.finished {
+            return Err(Error::MissingFinish);
+        }
+        if self.message_emitted {
+            frames.push(frame("message_stop", json!({"type": "message_stop"})));
+        }
+        self.done = true;
+        Ok(())
     }
 
     fn ensure_message(&mut self, frames: &mut Vec<Frame>) -> Result<(), Error> {

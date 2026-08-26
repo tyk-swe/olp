@@ -7,17 +7,20 @@ use axum::{
 };
 use jsonwebtoken::jwk::JwkSet;
 use olp_db::{
-    authentication::SessionPrincipal, oidc::types::CompleteOidcLink,
-    oidc::types::CompleteOidcLogin, oidc::types::CompleteOidcReauthentication,
+    authentication::RecentAuthPurpose, authentication::SessionPrincipal,
+    oidc::types::CompleteOidcLink, oidc::types::CompleteOidcLogin,
+    oidc::types::CompleteOidcReauthentication, oidc::types::OidcConfiguration,
     oidc::types::OidcFlowPurpose, security::aad::oidc_client_secret as client_secret_aad,
-    security::aad::oidc_flow_payload as flow_payload_aad,
+    security::aad::oidc_flow_payload as flow_payload_aad, security::envelope::MasterKey,
     security::session_material::RecentAuthMaterial, security::session_material::SessionMaterial,
+    store::Store,
 };
 use serde::Deserialize;
 use tracing::error;
+use uuid::Uuid;
 use zeroize::{Zeroize, Zeroizing};
 
-use super::claims::validate_id_token;
+use super::claims::{ValidatedIdentity, validate_id_token};
 use super::configuration::{JWKS_LIMIT, OidcSecret};
 use super::error::{
     invalid_callback, is_authenticated_flow_session_changed, map_oidc, map_oidc_flow_completion,
@@ -33,7 +36,9 @@ use crate::{
     bootstrap::mode_dependencies::ManagementState,
     management::provenance::Provenance,
     management::{cookies::validate_session_cookie_ttl, sessions::require_read_session},
-    public_http::{problem::Problem, request_cookies::RequestCookies},
+    public_http::{
+        problem::Problem, relative_url::RelativeReturnTo, request_cookies::RequestCookies,
+    },
 };
 use olp_db::store::RequestProvenance;
 
@@ -193,17 +198,7 @@ async fn callback_inner(
             "The identity provider did not authorize this request.",
         ));
     }
-    let actor = match flow.purpose {
-        OidcFlowPurpose::Login => {
-            validate_session_cookie_ttl(state.session_ttl)?;
-            None
-        }
-        OidcFlowPurpose::Link => {
-            validate_session_cookie_ttl(state.session_ttl)?;
-            Some(require_exact_actor(state, headers, &flow).await?)
-        }
-        OidcFlowPurpose::Reauthenticate => Some(require_exact_actor(state, headers, &flow).await?),
-    };
+    let actor = resolve_callback_actor(state, headers, &flow).await?;
     let code = Zeroizing::new(query.code.ok_or_else(|| {
         Problem::bad_request("oidc_code_missing", "The authorization code is missing.")
     })?);
@@ -211,20 +206,7 @@ async fn callback_inner(
         return Err(invalid_callback());
     }
     let store = state.store().with_provenance(provenance);
-    let configuration = store.enabled_oidc_configuration().await.map_err(map_oidc)?;
-    if configuration.id != flow.configuration_id {
-        return Err(Problem::bad_request(
-            "oidc_flow_stale",
-            "The OIDC configuration changed. Start authorization again.",
-        ));
-    }
-    let master_key = require_master_key(state)?;
-    if flow.configuration_etag != configuration.etag {
-        return Err(Problem::bad_request(
-            "oidc_flow_stale",
-            "The OIDC configuration changed. Start authorization again.",
-        ));
-    }
+    let (configuration, master_key) = load_flow_configuration(state, &store, &flow).await?;
     let CallbackFlow {
         purpose,
         actor_user_id: _,
@@ -244,6 +226,97 @@ async fn callback_inner(
             "The OIDC login flow is invalid or expired.",
         ));
     }
+    let token_response = exchange_authorization_code(
+        state,
+        &configuration,
+        master_key,
+        &code,
+        &flow_secret.pkce_verifier,
+    )
+    .await?;
+    let identity = fetch_validated_identity(
+        state,
+        &configuration,
+        &token_response,
+        &flow_secret.nonce,
+        purpose,
+    )
+    .await?;
+    drop(token_response);
+    drop(flow_secret);
+
+    match purpose {
+        OidcFlowPurpose::Login => {
+            complete_login(state, &store, &configuration, &identity, &return_to).await
+        }
+        OidcFlowPurpose::Link => {
+            let actor = actor.ok_or_else(Problem::internal)?;
+            complete_link(state, &store, &configuration, &identity, &actor, &return_to).await
+        }
+        OidcFlowPurpose::Reauthenticate => {
+            let actor = actor.ok_or_else(Problem::internal)?;
+            complete_reauthentication(
+                &store,
+                &configuration,
+                &identity,
+                &actor,
+                recent_auth_purpose,
+                recent_auth_resource_id,
+            )
+            .await
+        }
+    }
+}
+
+async fn load_flow_configuration<'a>(
+    state: &'a ManagementState,
+    store: &Store,
+    flow: &CallbackFlow,
+) -> Result<(OidcConfiguration, &'a MasterKey), Problem> {
+    let configuration = store.enabled_oidc_configuration().await.map_err(map_oidc)?;
+    if configuration.id != flow.configuration_id {
+        return Err(Problem::bad_request(
+            "oidc_flow_stale",
+            "The OIDC configuration changed. Start authorization again.",
+        ));
+    }
+    let master_key = require_master_key(state)?;
+    if flow.configuration_etag != configuration.etag {
+        return Err(Problem::bad_request(
+            "oidc_flow_stale",
+            "The OIDC configuration changed. Start authorization again.",
+        ));
+    }
+    Ok((configuration, master_key))
+}
+
+async fn resolve_callback_actor(
+    state: &ManagementState,
+    headers: &HeaderMap,
+    flow: &CallbackFlow,
+) -> Result<Option<SessionPrincipal>, Problem> {
+    match flow.purpose {
+        OidcFlowPurpose::Login => {
+            validate_session_cookie_ttl(state.session_ttl)?;
+            Ok(None)
+        }
+        OidcFlowPurpose::Link => {
+            validate_session_cookie_ttl(state.session_ttl)?;
+            Ok(Some(require_exact_actor(state, headers, flow).await?))
+        }
+        OidcFlowPurpose::Reauthenticate => {
+            Ok(Some(require_exact_actor(state, headers, flow).await?))
+        }
+    }
+}
+
+async fn exchange_authorization_code(
+    state: &ManagementState,
+    configuration: &OidcConfiguration,
+    master_key: &MasterKey,
+    code: &Zeroizing<String>,
+    pkce_verifier: &str,
+) -> Result<TokenResponse, Problem> {
     let redirect_uri = callback_url(state)?;
     let client_secret_bytes = master_key
         .open(
@@ -262,10 +335,7 @@ async fn callback_inner(
         ("code".to_owned(), code.to_string()),
         ("redirect_uri".to_owned(), redirect_uri),
         ("client_id".to_owned(), configuration.client_id.clone()),
-        (
-            "code_verifier".to_owned(),
-            flow_secret.pkce_verifier.clone(),
-        ),
+        ("code_verifier".to_owned(), pkce_verifier.to_owned()),
     ];
     let basic_credentials = if configuration.token_endpoint_auth_method == "client_secret_basic" {
         Some((
@@ -292,93 +362,119 @@ async fn callback_inner(
     if token_response.id_token.expose().len() > ID_TOKEN_LIMIT {
         return Err(Problem::unauthorized("The ID token is invalid."));
     }
+    Ok(token_response)
+}
+
+async fn fetch_validated_identity(
+    state: &ManagementState,
+    configuration: &OidcConfiguration,
+    token_response: &TokenResponse,
+    nonce: &str,
+    purpose: OidcFlowPurpose,
+) -> Result<ValidatedIdentity, Problem> {
     let jwks: JwkSet = network_policy(state)
         .get_json(&configuration.jwks_uri, JWKS_LIMIT)
         .await
         .map_err(map_token_network)?;
-    let identity = validate_id_token(
+    validate_id_token(
         token_response.id_token.expose(),
         &jwks,
-        &configuration,
-        &flow_secret.nonce,
+        configuration,
+        nonce,
         purpose == OidcFlowPurpose::Reauthenticate,
-    )?;
-    drop(token_response);
-    drop(flow_secret);
+    )
+}
 
-    match purpose {
-        OidcFlowPurpose::Login => {
-            let material = SessionMaterial::generate();
-            let mapped_role = if identity.email_verified {
-                identity
-                    .email
-                    .as_deref()
-                    .and_then(|email| configuration.mapped_role(email, &identity.groups))
-            } else {
-                None
-            };
-            store
-                .complete_oidc_login(CompleteOidcLogin {
-                    configuration_id: configuration.id,
-                    configuration_etag: configuration.etag,
-                    issuer: &configuration.issuer,
-                    subject: &identity.subject,
-                    email: identity.email.as_deref(),
-                    display_name: identity.display_name.as_deref(),
-                    provisioning_role: mapped_role,
-                    session: &material,
-                    session_ttl: state.session_ttl,
-                })
-                .await
-                .map_err(map_oidc_flow_completion)?;
-            authenticated_redirect(&material, &return_to, state.session_ttl)
-        }
-        OidcFlowPurpose::Link => {
-            let actor = actor.ok_or_else(Problem::internal)?;
-            let material = SessionMaterial::generate();
-            store
-                .complete_oidc_link(CompleteOidcLink {
-                    user_id: actor.user_id,
-                    session_id: actor.session_id,
-                    security_version: actor.security_version,
-                    configuration_id: configuration.id,
-                    configuration_etag: configuration.etag,
-                    issuer: &configuration.issuer,
-                    subject: &identity.subject,
-                    email: identity
-                        .email_verified
-                        .then_some(identity.email.as_deref())
-                        .flatten(),
-                    replacement_session: &material,
-                    session_ttl: state.session_ttl,
-                })
-                .await
-                .map_err(map_oidc_flow_completion)?;
-            authenticated_redirect(&material, &return_to, state.session_ttl)
-        }
-        OidcFlowPurpose::Reauthenticate => {
-            let actor = actor.ok_or_else(Problem::internal)?;
-            let purpose = recent_auth_purpose.ok_or_else(Problem::internal)?;
-            let material = RecentAuthMaterial::generate();
-            store
-                .complete_oidc_reauthentication(CompleteOidcReauthentication {
-                    user_id: actor.user_id,
-                    session_id: actor.session_id,
-                    security_version: actor.security_version,
-                    configuration_id: configuration.id,
-                    configuration_etag: configuration.etag,
-                    issuer: &configuration.issuer,
-                    subject: &identity.subject,
-                    purpose,
-                    resource_id: recent_auth_resource_id,
-                    material: &material,
-                    grant_ttl: RECENT_AUTH_TTL,
-                })
-                .await
-                .map_err(map_oidc_flow_completion)?;
-            reauthenticated_redirect(&material, purpose, recent_auth_resource_id)
-        }
-    }
+async fn complete_login(
+    state: &ManagementState,
+    store: &Store,
+    configuration: &OidcConfiguration,
+    identity: &ValidatedIdentity,
+    return_to: &RelativeReturnTo,
+) -> Result<Response, Problem> {
+    let material = SessionMaterial::generate();
+    let mapped_role = if identity.email_verified {
+        identity
+            .email
+            .as_deref()
+            .and_then(|email| configuration.mapped_role(email, &identity.groups))
+    } else {
+        None
+    };
+    store
+        .complete_oidc_login(CompleteOidcLogin {
+            configuration_id: configuration.id,
+            configuration_etag: configuration.etag,
+            issuer: &configuration.issuer,
+            subject: &identity.subject,
+            email: identity.email.as_deref(),
+            display_name: identity.display_name.as_deref(),
+            provisioning_role: mapped_role,
+            session: &material,
+            session_ttl: state.session_ttl,
+        })
+        .await
+        .map_err(map_oidc_flow_completion)?;
+    authenticated_redirect(&material, return_to, state.session_ttl)
+}
+
+async fn complete_link(
+    state: &ManagementState,
+    store: &Store,
+    configuration: &OidcConfiguration,
+    identity: &ValidatedIdentity,
+    actor: &SessionPrincipal,
+    return_to: &RelativeReturnTo,
+) -> Result<Response, Problem> {
+    let material = SessionMaterial::generate();
+    store
+        .complete_oidc_link(CompleteOidcLink {
+            user_id: actor.user_id,
+            session_id: actor.session_id,
+            security_version: actor.security_version,
+            configuration_id: configuration.id,
+            configuration_etag: configuration.etag,
+            issuer: &configuration.issuer,
+            subject: &identity.subject,
+            email: identity
+                .email_verified
+                .then_some(identity.email.as_deref())
+                .flatten(),
+            replacement_session: &material,
+            session_ttl: state.session_ttl,
+        })
+        .await
+        .map_err(map_oidc_flow_completion)?;
+    authenticated_redirect(&material, return_to, state.session_ttl)
+}
+
+async fn complete_reauthentication(
+    store: &Store,
+    configuration: &OidcConfiguration,
+    identity: &ValidatedIdentity,
+    actor: &SessionPrincipal,
+    recent_auth_purpose: Option<RecentAuthPurpose>,
+    recent_auth_resource_id: Option<Uuid>,
+) -> Result<Response, Problem> {
+    let purpose = recent_auth_purpose.ok_or_else(Problem::internal)?;
+    let material = RecentAuthMaterial::generate();
+    store
+        .complete_oidc_reauthentication(CompleteOidcReauthentication {
+            user_id: actor.user_id,
+            session_id: actor.session_id,
+            security_version: actor.security_version,
+            configuration_id: configuration.id,
+            configuration_etag: configuration.etag,
+            issuer: &configuration.issuer,
+            subject: &identity.subject,
+            purpose,
+            resource_id: recent_auth_resource_id,
+            material: &material,
+            grant_ttl: RECENT_AUTH_TTL,
+        })
+        .await
+        .map_err(map_oidc_flow_completion)?;
+    reauthenticated_redirect(&material, purpose, recent_auth_resource_id)
 }
 
 async fn require_exact_actor(

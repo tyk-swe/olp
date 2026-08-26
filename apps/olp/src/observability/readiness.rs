@@ -4,10 +4,11 @@ use std::time::{Duration, Instant};
 
 use axum::response::{IntoResponse, Response};
 use olp_db::{
+    media_jobs::MediaReconciliationSummary,
     request_metadata::delivery_health::ConsumerStatus,
     request_metadata::reconciliation::EpochHealth,
     runtime::outbox::{RuntimeOutboxState, RuntimeOutboxStatus},
-    worker_health::{WorkerTask, WorkerTaskHealthSummary},
+    worker_health::{WorkerRecoveryCounters, WorkerTask, WorkerTaskHealthSummary},
 };
 use serde::Serialize;
 use utoipa::ToSchema;
@@ -158,75 +159,34 @@ fn cached_readiness_is_fresh(snapshot: &CachedReadiness, now: Instant) -> bool {
     snapshot_is_current(snapshot.last_success_at, snapshot.last_attempt_at, now)
 }
 
+struct StoreProbe {
+    database: &'static str,
+    media_reconciliation: Option<MediaReconciliationSummary>,
+    request_metadata_consumer: ConsumerStatus,
+    request_metadata_epochs: EpochHealth,
+    runtime_outbox: RuntimeOutboxStatus,
+    worker_tasks: WorkerTaskHealthSummary,
+    recovery_counters: Option<WorkerRecoveryCounters>,
+}
+
+struct ReadinessFlags {
+    status: &'static str,
+    limits: &'static str,
+    request_metadata_complete: bool,
+    asynchronous_plane_current: bool,
+    asynchronous_plane_drained: bool,
+    media_reconciliation_gaps: u64,
+}
+
 pub(super) async fn collect_readiness(
     state: &ObservabilityState,
 ) -> Result<HealthResponse, Problem> {
     let generation = state.runtime().active_generation_ordinal();
     let now = chrono::Utc::now();
-    let unknown_consumer = ConsumerStatus::from_health(None, now);
-    let (
-        database,
-        media_reconciliation,
-        request_metadata_consumer,
-        request_metadata_epochs,
-        runtime_outbox,
-        worker_tasks,
-        recovery_counters,
-    ) = match state.store().ping().await {
-        Ok(()) => {
-            let (media, consumer, epochs, outbox, tasks, counters) = tokio::join!(
-                state.store().media_reconciliation_summary(now),
-                state.store().request_metadata_consumer_status(now),
-                state.store().request_metadata_gateway_epoch_health(),
-                state.store().runtime_outbox_status(),
-                state.store().worker_task_health(),
-                state.store().worker_recovery_counters(),
-            );
-            (
-                "ok",
-                Some(media.map_err(|_| Problem::service_unavailable("database_unavailable"))?),
-                consumer.map_err(|_| Problem::service_unavailable("database_unavailable"))?,
-                epochs.map_err(|_| Problem::service_unavailable("database_unavailable"))?,
-                outbox.map_err(|_| Problem::service_unavailable("database_unavailable"))?,
-                tasks.map_err(|_| Problem::service_unavailable("database_unavailable"))?,
-                Some(counters.map_err(|_| Problem::service_unavailable("database_unavailable"))?),
-            )
-        }
-        Err(_) if state.mode.serves_gateway() && generation.is_some() => (
-            "unavailable_lkg",
-            None,
-            unknown_consumer,
-            EpochHealth::default(),
-            RuntimeOutboxStatus::unknown(),
-            WorkerTaskHealthSummary::unknown(),
-            None,
-        ),
-        Err(_) => return Err(Problem::service_unavailable("database_unavailable")),
-    };
+    let probe = probe_store(state, now, generation).await?;
     let expected_worker_tasks = expected_worker_tasks(state);
-
-    if state.mode.serves_gateway() {
-        let snapshot = state.runtime().pin();
-        if generation.is_none() {
-            return Err(Problem::service_unavailable(
-                "runtime_generation_unavailable",
-            ));
-        }
-        if !snapshot.has_all_transports() {
-            return Err(Problem::service_unavailable(
-                "provider_transport_unavailable",
-            ));
-        }
-    }
-    let limiter = state.limiter().current();
-    let limits_healthy = if let Some(limiter) = &limiter {
-        matches!(
-            tokio::time::timeout(Duration::from_millis(500), limiter.ping()).await,
-            Ok(Ok(()))
-        )
-    } else {
-        false
-    };
+    check_gateway_runtime(state, generation)?;
+    let limits_healthy = limiter_is_healthy(state).await;
     let hard_limits_present = state
         .runtime()
         .pin()
@@ -240,7 +200,8 @@ pub(super) async fn collect_readiness(
     // traffic too.
     let degraded_limits = state.mode.serves_gateway() && hard_limits_present && !limits_healthy;
     let media_reconciliation_gaps = state.media_reconciliation_gap_count();
-    let degraded_media = media_reconciliation
+    let degraded_media = probe
+        .media_reconciliation
         .as_ref()
         .is_some_and(|summary| summary.stale > 0 || summary.failed > 0 || summary.unbound > 0)
         || media_reconciliation_gaps > 0;
@@ -252,41 +213,24 @@ pub(super) async fn collect_readiness(
     let expects_request_metadata_consumer =
         expected_worker_tasks.contains(&WorkerTask::RequestMetadataConsumer);
     let request_metadata_complete = local_request_metadata_complete
-        && (!expects_request_metadata_consumer || request_metadata_consumer.complete())
-        && request_metadata_epochs.unresolved_epochs == 0;
+        && (!expects_request_metadata_consumer || probe.request_metadata_consumer.complete())
+        && probe.request_metadata_epochs.unresolved_epochs == 0;
     let (asynchronous_plane_current, asynchronous_plane_drained) = asynchronous_plane_flags(
-        &worker_tasks,
+        &probe.worker_tasks,
         expected_worker_tasks,
-        request_metadata_consumer,
-        runtime_outbox,
+        probe.request_metadata_consumer,
+        probe.runtime_outbox,
     );
-    let asynchronous_plane_healthy = asynchronous_plane_current && asynchronous_plane_drained;
-    Ok(HealthResponse {
+    let flags = ReadinessFlags {
         status: if degraded_limits
             || degraded_media
             || !request_metadata_complete
-            || !asynchronous_plane_healthy
+            || !(asynchronous_plane_current && asynchronous_plane_drained)
         {
             "degraded"
         } else {
             "ok"
         },
-        asynchronous_plane: asynchronous_plane_state(
-            asynchronous_plane_current,
-            asynchronous_plane_drained,
-            &worker_tasks,
-            expected_worker_tasks,
-            request_metadata_consumer,
-            runtime_outbox,
-        ),
-        asynchronous_plane_current,
-        asynchronous_plane_drained,
-        asynchronous_plane_last_progress_at: worker_tasks
-            .last_progress_at_for(expected_worker_tasks),
-        worker_tasks_stale: worker_tasks.stale_tasks_for(expected_worker_tasks),
-        worker_tasks_unknown: worker_tasks.unknown_tasks_for(expected_worker_tasks),
-        generation,
-        database,
         limits: if limits_healthy {
             "ok"
         } else if state.limiter().is_configured() {
@@ -295,71 +239,178 @@ pub(super) async fn collect_readiness(
             "not_configured"
         },
         request_metadata_complete,
-        request_metadata_consumer: request_metadata_consumer.state.as_str(),
-        request_metadata_consumer_pending_events: request_metadata_consumer.pending_events,
-        request_metadata_consumer_lag_events: request_metadata_consumer.lag_events,
-        request_metadata_consumer_oldest_pending_at: request_metadata_consumer.oldest_pending_at,
+        asynchronous_plane_current,
+        asynchronous_plane_drained,
+        media_reconciliation_gaps,
+    };
+    Ok(readiness_response(
+        state,
+        now,
+        generation,
+        &probe,
+        expected_worker_tasks,
+        &flags,
+    ))
+}
+
+async fn probe_store(
+    state: &ObservabilityState,
+    now: chrono::DateTime<chrono::Utc>,
+    generation: Option<u64>,
+) -> Result<StoreProbe, Problem> {
+    match state.store().ping().await {
+        Ok(()) => {
+            let (media, consumer, epochs, outbox, tasks, counters) = tokio::join!(
+                state.store().media_reconciliation_summary(now),
+                state.store().request_metadata_consumer_status(now),
+                state.store().request_metadata_gateway_epoch_health(),
+                state.store().runtime_outbox_status(),
+                state.store().worker_task_health(),
+                state.store().worker_recovery_counters(),
+            );
+            Ok(StoreProbe {
+                database: "ok",
+                media_reconciliation: Some(
+                    media.map_err(|_| Problem::service_unavailable("database_unavailable"))?,
+                ),
+                request_metadata_consumer: consumer
+                    .map_err(|_| Problem::service_unavailable("database_unavailable"))?,
+                request_metadata_epochs: epochs
+                    .map_err(|_| Problem::service_unavailable("database_unavailable"))?,
+                runtime_outbox: outbox
+                    .map_err(|_| Problem::service_unavailable("database_unavailable"))?,
+                worker_tasks: tasks
+                    .map_err(|_| Problem::service_unavailable("database_unavailable"))?,
+                recovery_counters: Some(
+                    counters.map_err(|_| Problem::service_unavailable("database_unavailable"))?,
+                ),
+            })
+        }
+        Err(_) if state.mode.serves_gateway() && generation.is_some() => Ok(StoreProbe {
+            database: "unavailable_lkg",
+            media_reconciliation: None,
+            request_metadata_consumer: ConsumerStatus::from_health(None, now),
+            request_metadata_epochs: EpochHealth::default(),
+            runtime_outbox: RuntimeOutboxStatus::unknown(),
+            worker_tasks: WorkerTaskHealthSummary::unknown(),
+            recovery_counters: None,
+        }),
+        Err(_) => Err(Problem::service_unavailable("database_unavailable")),
+    }
+}
+
+fn check_gateway_runtime(
+    state: &ObservabilityState,
+    generation: Option<u64>,
+) -> Result<(), Problem> {
+    if !state.mode.serves_gateway() {
+        return Ok(());
+    }
+    let snapshot = state.runtime().pin();
+    if generation.is_none() {
+        return Err(Problem::service_unavailable(
+            "runtime_generation_unavailable",
+        ));
+    }
+    if !snapshot.has_all_transports() {
+        return Err(Problem::service_unavailable(
+            "provider_transport_unavailable",
+        ));
+    }
+    Ok(())
+}
+
+async fn limiter_is_healthy(state: &ObservabilityState) -> bool {
+    let limiter = state.limiter().current();
+    if let Some(limiter) = &limiter {
+        matches!(
+            tokio::time::timeout(Duration::from_millis(500), limiter.ping()).await,
+            Ok(Ok(()))
+        )
+    } else {
+        false
+    }
+}
+
+fn readiness_response(
+    state: &ObservabilityState,
+    now: chrono::DateTime<chrono::Utc>,
+    generation: Option<u64>,
+    probe: &StoreProbe,
+    expected_worker_tasks: &'static [WorkerTask],
+    flags: &ReadinessFlags,
+) -> HealthResponse {
+    let consumer = probe.request_metadata_consumer;
+    let epochs = &probe.request_metadata_epochs;
+    let outbox = probe.runtime_outbox;
+    let counters = probe.recovery_counters;
+    let media = probe.media_reconciliation.as_ref();
+    let tasks = &probe.worker_tasks;
+    HealthResponse {
+        status: flags.status,
+        asynchronous_plane: asynchronous_plane_state(
+            flags.asynchronous_plane_current,
+            flags.asynchronous_plane_drained,
+            tasks,
+            expected_worker_tasks,
+            consumer,
+            outbox,
+        ),
+        asynchronous_plane_current: flags.asynchronous_plane_current,
+        asynchronous_plane_drained: flags.asynchronous_plane_drained,
+        asynchronous_plane_last_progress_at: tasks.last_progress_at_for(expected_worker_tasks),
+        worker_tasks_stale: tasks.stale_tasks_for(expected_worker_tasks),
+        worker_tasks_unknown: tasks.unknown_tasks_for(expected_worker_tasks),
+        generation,
+        database: probe.database,
+        limits: flags.limits,
+        request_metadata_complete: flags.request_metadata_complete,
+        request_metadata_consumer: consumer.state.as_str(),
+        request_metadata_consumer_pending_events: consumer.pending_events,
+        request_metadata_consumer_lag_events: consumer.lag_events,
+        request_metadata_consumer_oldest_pending_at: consumer.oldest_pending_at,
         request_metadata_consumer_oldest_pending_age_seconds: datetime_age_seconds(
             now,
-            request_metadata_consumer.oldest_pending_at,
+            consumer.oldest_pending_at,
         ),
-        request_metadata_consumer_checked_at: request_metadata_consumer.checked_at,
-        request_metadata_consumer_heartbeat_age_seconds: request_metadata_consumer
-            .heartbeat_age_seconds,
-        request_metadata_reclaimed_events_total: recovery_counters
-            .map(|counters| counters.request_metadata_reclaimed),
-        request_metadata_recovered_events_total: recovery_counters
-            .map(|counters| counters.request_metadata_recovered),
-        request_metadata_duplicate_persistence_total: recovery_counters
-            .map(|counters| counters.request_metadata_duplicates),
-        request_metadata_gateway_open_epochs: request_metadata_epochs.open_epochs,
-        request_metadata_gateway_unresolved_epochs: request_metadata_epochs.unresolved_epochs,
-        request_metadata_historical_uncertain_gaps: request_metadata_epochs
-            .historical_uncertain_gap_count,
-        request_metadata_gateway_unresolved_event_lower_bound: request_metadata_epochs
-            .unresolved_event_lower_bound,
-        runtime_outbox: runtime_outbox.state.as_str(),
-        runtime_outbox_pending_rows: runtime_outbox.pending_rows,
-        runtime_outbox_oldest_pending_at: runtime_outbox.oldest_pending_at,
+        request_metadata_consumer_checked_at: consumer.checked_at,
+        request_metadata_consumer_heartbeat_age_seconds: consumer.heartbeat_age_seconds,
+        request_metadata_reclaimed_events_total: counters.map(|c| c.request_metadata_reclaimed),
+        request_metadata_recovered_events_total: counters.map(|c| c.request_metadata_recovered),
+        request_metadata_duplicate_persistence_total: counters
+            .map(|c| c.request_metadata_duplicates),
+        request_metadata_gateway_open_epochs: epochs.open_epochs,
+        request_metadata_gateway_unresolved_epochs: epochs.unresolved_epochs,
+        request_metadata_historical_uncertain_gaps: epochs.historical_uncertain_gap_count,
+        request_metadata_gateway_unresolved_event_lower_bound: epochs.unresolved_event_lower_bound,
+        runtime_outbox: outbox.state.as_str(),
+        runtime_outbox_pending_rows: outbox.pending_rows,
+        runtime_outbox_oldest_pending_at: outbox.oldest_pending_at,
         runtime_outbox_oldest_pending_age_seconds: datetime_age_seconds(
             now,
-            runtime_outbox.oldest_pending_at,
+            outbox.oldest_pending_at,
         ),
-        runtime_outbox_owner_active: runtime_outbox.owner_active,
-        runtime_outbox_claimed_rows: runtime_outbox.claimed_rows,
-        runtime_outbox_owner_abandoned: runtime_outbox.ownership_abandoned(),
-        runtime_outbox_heartbeat_age_seconds: runtime_outbox.heartbeat_age_seconds,
-        runtime_outbox_publication_attempts_total: recovery_counters
-            .map(|counters| counters.runtime_outbox_attempts),
-        runtime_outbox_publication_retries_total: recovery_counters
-            .map(|counters| counters.runtime_outbox_retry_scheduled),
-        runtime_outbox_repeated_publication_attempts_total: recovery_counters
-            .map(|counters| counters.runtime_outbox_repeated_attempts),
-        runtime_outbox_abandoned_ownership_total: recovery_counters
-            .map(|counters| counters.runtime_outbox_abandoned_ownership),
-        runtime_outbox_failed_takeovers_total: recovery_counters
-            .map(|counters| counters.runtime_outbox_failed_takeovers),
-        media_reconciliation: if media_reconciliation.is_some() {
-            "ok"
-        } else {
-            "unknown"
-        },
-        media_reconciliation_pending: media_reconciliation
-            .as_ref()
-            .map_or(0, |summary| summary.pending),
-        media_reconciliation_stale: media_reconciliation
-            .as_ref()
-            .map_or(0, |summary| summary.stale),
-        media_reconciliation_failed: media_reconciliation
-            .as_ref()
-            .map_or(0, |summary| summary.failed),
-        media_reconciliation_unbound: media_reconciliation
-            .as_ref()
-            .map_or(0, |summary| summary.unbound),
-        media_reconciliation_gaps_total: media_reconciliation_gaps,
+        runtime_outbox_owner_active: outbox.owner_active,
+        runtime_outbox_claimed_rows: outbox.claimed_rows,
+        runtime_outbox_owner_abandoned: outbox.ownership_abandoned(),
+        runtime_outbox_heartbeat_age_seconds: outbox.heartbeat_age_seconds,
+        runtime_outbox_publication_attempts_total: counters.map(|c| c.runtime_outbox_attempts),
+        runtime_outbox_publication_retries_total: counters
+            .map(|c| c.runtime_outbox_retry_scheduled),
+        runtime_outbox_repeated_publication_attempts_total: counters
+            .map(|c| c.runtime_outbox_repeated_attempts),
+        runtime_outbox_abandoned_ownership_total: counters
+            .map(|c| c.runtime_outbox_abandoned_ownership),
+        runtime_outbox_failed_takeovers_total: counters.map(|c| c.runtime_outbox_failed_takeovers),
+        media_reconciliation: if media.is_some() { "ok" } else { "unknown" },
+        media_reconciliation_pending: media.map_or(0, |summary| summary.pending),
+        media_reconciliation_stale: media.map_or(0, |summary| summary.stale),
+        media_reconciliation_failed: media.map_or(0, |summary| summary.failed),
+        media_reconciliation_unbound: media.map_or(0, |summary| summary.unbound),
+        media_reconciliation_gaps_total: flags.media_reconciliation_gaps,
         media_spool_used_bytes: state.media_spool().used_bytes(),
         media_spool_capacity_bytes: state.media_spool().capacity_bytes(),
-    })
+    }
 }
 
 fn request_metadata_consumer_is_current(status: ConsumerStatus) -> bool {
