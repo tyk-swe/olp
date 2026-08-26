@@ -1,7 +1,8 @@
 tests/fixtures/streams/*.sse whitespace=-blank-at-eof
 
-# Generated files: keep them out of review noise. Regeneration commands are
-# listed in AGENTS.md ("Generated files") and each has a CI drift gate.
+# Generated files: keep them out of review noise. AGENTS.md's Style section
+# names the ones that must never be hand-edited ("Never hand-edit generated
+# OpenAPI types, .sqlx/ metadata, or screenshots—use matching Make targets").
 .sqlx/*.json linguist-generated=true -diff
 openapi/management.json linguist-generated=true
 console/src/lib/api/schema.d.ts linguist-generated=true

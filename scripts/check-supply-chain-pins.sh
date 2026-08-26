@@ -6,7 +6,7 @@ root=${OLP_REPOSITORY_ROOT:-$(cd "$script_dir/.." && pwd)}
 # shellcheck source=scripts/lib/repository-validation.sh
 source "$script_dir/lib/repository-validation.sh"
 
-for required_executable in rg head grep cmp dirname; do
+for required_executable in rg head tail grep cmp dirname; do
   validation_require_executable "$required_executable"
 done
 for required_directory in "$root" "$root/.github" "$root/deploy" "$root/deploy/helm"; do
@@ -15,8 +15,10 @@ done
 
 dockerfile="$root/deploy/Dockerfile"
 dockerignore="$root/deploy/Dockerfile.dockerignore"
+root_dockerignore="$root/.dockerignore"
 for required_file in \
-  "$root/LICENSE" "$dockerfile" "$dockerignore" "$root/deploy/helm/LICENSE"; do
+  "$root/LICENSE" "$dockerfile" "$dockerignore" "$root_dockerignore" \
+  "$root/deploy/helm/LICENSE"; do
   validation_require_file "$required_file"
 done
 
@@ -122,6 +124,13 @@ checked_rg_match dockerignore_reincludes_matched \
   "scan Dockerfile context re-inclusions" "$dockerignore" -n '^!' "$dockerignore"
 if (( dockerignore_reincludes_matched )); then
   echo "Dockerfile context policy must not re-include ignored secret/generated paths" >&2
+  failed=true
+fi
+
+# The root .dockerignore declares itself a synchronized copy from line 4 on, so
+# non-BuildKit and root-context builds exclude the same paths.
+if ! tail -n +4 "$root_dockerignore" | cmp --silent - "$dockerignore"; then
+  echo "$root_dockerignore is not a synchronized copy of $dockerignore from line 4 on" >&2
   failed=true
 fi
 

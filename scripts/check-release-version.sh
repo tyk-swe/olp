@@ -11,7 +11,7 @@ root=$(cd "$script_dir/.." && pwd)
 # shellcheck source=scripts/lib/repository-validation.sh
 source "$script_dir/lib/repository-validation.sh"
 
-for required_executable in rg awk sed dirname jq; do
+for required_executable in rg awk sed sort dirname jq; do
   validation_require_executable "$required_executable"
 done
 for required_directory in "$root/console" "$root/deploy" "$root/deploy/helm"; do
@@ -20,6 +20,7 @@ done
 for required_file in \
   "$root/Cargo.toml" "$root/console/package.json" \
   "$root/deploy/helm/Chart.yaml" "$root/deploy/Dockerfile" \
+  "$root/rust-toolchain.toml" "$root/.github/actions/setup-rust/action.yml" \
   "$root/release-metadata.env"; do
   validation_require_file "$required_file"
 done
@@ -91,4 +92,23 @@ ls "$root/crates/olp-db/migrations/${released_migration}_"*.sql >/dev/null 2>&1 
   exit 1
 }
 
-echo "release metadata is consistent at $workspace_version"
+toolchain_rust=$(sed -nE 's/^channel = "([^"]+)"$/\1/p' "$root/rust-toolchain.toml")
+action_rust=$(sed -nE 's/^[[:space:]]*toolchain: "([^"]+)"$/\1/p' "$root/.github/actions/setup-rust/action.yml")
+image_rust=$(sed -nE 's|^FROM rust:([^-]+)-bookworm@sha256:[0-9a-f]{64}.*$|\1|p' "$root/deploy/Dockerfile" | sort -u)
+
+[[ $toolchain_rust =~ $semver ]] || {
+  echo "rust-toolchain.toml channel is not a pinned version: ${toolchain_rust:-unset}" >&2
+  exit 1
+}
+for pair in \
+  ".github/actions/setup-rust toolchain:$action_rust" \
+  "deploy/Dockerfile rust base image:$image_rust"; do
+  label=${pair%%:*}
+  value=${pair#*:}
+  [[ $value == "$toolchain_rust" ]] || {
+    echo "$label is ${value:-unset}, expected $toolchain_rust" >&2
+    exit 1
+  }
+done
+
+echo "release metadata is consistent at $workspace_version (Rust $toolchain_rust)"

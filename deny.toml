@@ -1,5 +1,7 @@
 [advisories]
-ignore = []
+# rkyv is present only as an inactive optional rust_decimal dependency; remove
+# this exception once rust_decimal no longer locks rkyv 0.7.x.
+ignore = ["RUSTSEC-2026-0235"]
 yanked = "deny"
 
 [bans]

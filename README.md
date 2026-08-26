@@ -124,8 +124,8 @@ screenshots with `pnpm --dir console screenshots`.
 ## Contributing
 
 Use Rust 1.97.1, Node.js 24.15 or newer within the 24.x line (or Node.js 26+),
-pnpm 11, and ripgrep. Install the console dependencies once, then run the
-standard local gate:
+pnpm 11, ripgrep, `cargo-nextest`, `shellcheck`, and `jq`. Install the console
+dependencies once, then run the standard local gate:
 
 ```bash
 make console-install

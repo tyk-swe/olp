@@ -185,6 +185,6 @@ the 2.0.1 binary still writes part of it during a rolling upgrade.
   baselines refreshed with a 50 px tolerance; line coverage lifted above the
   62% gate.
 
-## [2.0.0]
+## [2.0.0] - 2026-07-19
 
 Initial 2.0 release.

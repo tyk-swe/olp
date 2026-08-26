@@ -16,11 +16,12 @@ FUZZ_TRIPLE = $(shell rustc -vV | sed -n 's/^host: //p')
 
 .DEFAULT_GOAL := help
 
-.PHONY: help check boundaries storage-sqlx fmt fmt-fix clippy test \
+.PHONY: help check boundaries storage-sqlx source-size fmt fmt-fix clippy test \
 	coverage console-install console-verify console-e2e \
 	screenshots openapi sqlx-prepare sqlx-check db-test release-version \
 	supply-chain helm-verify script-selftest shellcheck fuzz-check \
-	fuzz-replay fuzz-campaign sdk-smoke sdk-smoke-install e2e worker-ha
+	fuzz-replay fuzz-campaign sdk-smoke sdk-smoke-install e2e worker-ha \
+	smoke-image-modes upgrade-rehearsal advisories deny
 
 help: ## List available targets
 	@grep -E '^[a-z][a-z0-9-]*:.*##' $(MAKEFILE_LIST) \
@@ -28,16 +29,24 @@ help: ## List available targets
 
 # Every required-tier gate that needs only the standard toolchain. CI
 # additionally enforces the coverage floor (make coverage), the DB/Valkey
-# suites (make db-test), the fuzz replay (make fuzz-replay), sdk-smoke,
-# e2e browsers, image builds, helm-verify (needs helm + docker
-# compose), and the actionlint/hadolint/cargo-deny quality steps.
-check: boundaries storage-sqlx shellcheck script-selftest fmt clippy test console-verify release-version supply-chain ## Broad local gate; CI also runs service/tool-specific required jobs
+# suites (make db-test) and the SQLx metadata check (make sqlx-check), the
+# fuzz replay (make fuzz-replay) and bounded campaign (make fuzz-campaign),
+# sdk-smoke, the contract suites (make e2e, make worker-ha, plus the
+# toxiproxy-backed ha job), the console Playwright and console-integration
+# jobs, the upgrade rehearsal (make upgrade-rehearsal), the amd64 and arm64
+# image builds (make smoke-image-modes), helm-verify (needs helm + docker
+# compose), the advisory audits (make deny, make advisories), and the
+# actionlint/hadolint quality steps.
+check: boundaries storage-sqlx source-size shellcheck script-selftest fmt clippy test console-verify release-version supply-chain ## Broad local gate; CI also runs service/tool-specific required jobs
 
 boundaries: ## Enforce crate boundaries and dependency ownership (needs ripgrep)
 	./scripts/check-boundaries.sh
 
 storage-sqlx: ## Enforce typed storage access (no manual Row::get decoding)
 	./scripts/check-storage-sqlx.sh
+
+source-size: ## Enforce AGENTS.md size rules (files <30 KB, fns <100 lines); baseline only shrinks
+	./scripts/check-source-size.sh
 
 fmt: ## Check Rust formatting
 	cargo fmt --all --check
@@ -57,7 +66,7 @@ test: ## Workspace unit tests via nextest (postgres-backed tests stay #[ignore]d
 # runs; llvm-cov's defaults already exclude tests/ dirs and src tests.rs
 # modules from the report.
 coverage: ## CI's real Rust test gate: llvm-cov nextest with the 62% line floor
-	SQLX_OFFLINE=true cargo llvm-cov nextest --locked --workspace --all-features \
+	SQLX_OFFLINE=true NEXTEST_PROFILE=ci cargo llvm-cov nextest --locked --workspace --all-features \
 		--ignore-filename-regex 'src/test_support\.rs' \
 		--lcov --output-path lcov.info --fail-under-lines 62
 
@@ -67,7 +76,7 @@ console-install: ## Install locked console dependencies
 console-verify: ## Console gate: api:check + vitest + svelte-check/eslint + build
 	pnpm --dir console verify
 
-console-e2e: ## Console Playwright e2e suite
+console-e2e: ## Console Playwright e2e suite: all four projects; CI splits chromium from firefox/webkit/mobile-chromium
 	pnpm --dir console test:e2e
 
 screenshots: ## Regenerate docs/assets/screenshots/*.png from console fixtures
@@ -105,6 +114,7 @@ script-selftest: ## Self-tests for shell helpers and repository invariants
 	scripts/test-backup-manifest.sh
 	scripts/test-postgres-test-databases.sh
 	scripts/test-repository-validation.sh
+	scripts/test-check-source-size.sh
 	scripts/test-record-request-metadata-stream-loss.sh
 
 shellcheck: ## Shellcheck every tracked or untracked repository shell script
@@ -134,3 +144,17 @@ sdk-smoke-install: ## Install locked SDK smoke-test dependencies
 
 sdk-smoke: sdk-smoke-install ## Official OpenAI/Anthropic/Gemini SDK smoke tests against a local build
 	./tests/sdk-smoke/run.sh
+
+IMAGE ?= openllmproxy:ci-amd64
+smoke-image-modes: ## Smoke a built image's binary modes, non-root user, and packaged console; set IMAGE and OLP_IMAGE_PLATFORM
+	./scripts/smoke-image-modes.sh $(IMAGE)
+
+upgrade-rehearsal: ## Backup/restore/upgrade rehearsal; needs OLP_REHEARSAL_SERVER_URL, OLP_DATABASE_URL, OLP_VALKEY_URL, OLP_BIN
+	./scripts/ci/run-upgrade-rehearsal.sh
+
+deny: ## Cargo advisories, bans, licenses, and sources, all configured in deny.toml
+	cargo deny check advisories bans licenses sources
+
+advisories: ## Console and SDK smoke dependency advisories (Cargo advisories run under make deny)
+	pnpm --dir console audit --audit-level high
+	pnpm --dir tests/sdk-smoke audit --prod --audit-level high

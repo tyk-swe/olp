@@ -90,9 +90,10 @@ Run the broad gate before review:
 make check
 ```
 
-It runs boundary and SQLx checks, Rust formatting, locked Clippy, the locked
-nextest workspace suite, console verification, release-version checks, and
-supply-chain pin checks. `make coverage` is the CI Rust gate: llvm-cov nextest
+It runs boundary and SQLx checks, `shellcheck` over every tracked shell script,
+the script self-tests, Rust formatting, locked Clippy, the locked nextest
+workspace suite, console verification, release-version checks, and supply-chain
+pin checks. `make coverage` is the CI Rust gate: llvm-cov nextest
 with a 62% line floor. Plain `cargo test` is not a substitute. The workspace
 has no doctests by policy; if one is added, restore a `cargo test --doc` gate.
 

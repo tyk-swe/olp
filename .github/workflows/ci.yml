@@ -72,13 +72,13 @@ jobs:
       - name: Require immutable supply-chain references
         run: scripts/check-supply-chain-pins.sh
       - name: Verify Helm and Compose contracts
-        run: scripts/verify-helm-contract.sh deploy/helm
-      - name: Enforce dependency bans, licenses, and sources
-        uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2
+        run: make helm-verify
+      - uses: ./.github/actions/setup-rust
         with:
-          manifest-path: Cargo.toml
-          command: check
-          command-arguments: bans licenses sources
+          cache: "false"
+          tools: "cargo-deny@0.20.2"
+      - name: Enforce advisories, bans, licenses, and sources
+        run: make deny
 
   lint:
     name: Rust / lint
@@ -102,10 +102,12 @@ jobs:
         run: ./scripts/check-boundaries.sh
       - name: Enforce typed storage access
         run: ./scripts/check-storage-sqlx.sh
+      - name: Enforce source size rules
+        run: make source-size
       - name: Check Rust formatting
-        run: cargo fmt --all --check
+        run: make fmt
       - name: Run Clippy
-        run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
+        run: make clippy
 
   coverage:
     name: Rust / coverage
@@ -124,10 +126,7 @@ jobs:
           cache-shared-key: coverage-registry
       - name: Run workspace coverage
         # test_support only executes under db-test; see the Makefile note.
-        run: |
-          cargo llvm-cov nextest --locked --workspace --all-features \
-            --ignore-filename-regex 'src/test_support\.rs' \
-            --lcov --output-path lcov.info --fail-under-lines 62
+        run: make coverage
       - name: Upload Rust coverage
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: ${{ always() && !cancelled() }}
@@ -180,7 +179,8 @@ jobs:
         with:
           install-dirs: console
       - name: Verify console
-        run: pnpm verify
+        working-directory: .
+        run: make console-verify
       - name: Upload the console build for downstream jobs
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -292,9 +292,9 @@ jobs:
           DATABASE_URL: postgres://olp:olp@localhost:5432/olp
         run: |
           cargo sqlx migrate run --source crates/olp-db/migrations
-          cargo sqlx prepare --workspace --check -- --all-targets --all-features
+          make sqlx-check
       - name: Run isolated PostgreSQL and Valkey integration suites
-        run: ./scripts/run-postgres-tests.sh
+        run: make db-test
 
   console-integration:
     name: Console / Rust integration
@@ -425,7 +425,7 @@ jobs:
           cache-from: type=gha,scope=image-amd64
           cache-to: type=gha,mode=max,scope=image-amd64
       - name: Smoke production binary modes and packaged console
-        run: ./scripts/smoke-image-modes.sh openllmproxy:ci-amd64
+        run: make smoke-image-modes IMAGE=openllmproxy:ci-amd64
       - name: Generate amd64 SBOM
         if: ${{ github.event_name == 'push' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
         uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0
@@ -437,7 +437,7 @@ jobs:
           upload-artifact: false
       - name: Scan amd64 image for HIGH and CRITICAL vulnerabilities
         if: ${{ github.event_name == 'push' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
-        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           image-ref: openllmproxy:ci-amd64
           version: v0.72.0
@@ -676,7 +676,7 @@ jobs:
           OLP_REHEARSAL_SCRATCH_DIR: ${{ runner.temp }}
           OLP_EXPECTED_PG_BINDIR: /usr/lib/postgresql/18/bin
           OLP_BIN: target/debug/olp
-        run: ./scripts/ci/run-upgrade-rehearsal.sh
+        run: make upgrade-rehearsal
 
   advisory-audits:
     name: Advisory audits
@@ -692,18 +692,10 @@ jobs:
             console/pnpm-lock.yaml
             tests/sdk-smoke/pnpm-lock.yaml
           install-dirs: console tests/sdk-smoke
-      - uses: ./.github/actions/setup-rust
-        with:
-          cache: "false"
-          tools: "cargo-audit@0.22.2"
-      - name: Audit Cargo advisories
-        # rkyv is present only as an inactive optional rust_decimal dependency;
-        # remove this exception once rust_decimal no longer locks rkyv 0.7.x.
-        run: cargo audit --deny warnings --ignore RUSTSEC-2026-0235
-      - name: Audit console advisories
-        run: pnpm --dir console audit --audit-level high
-      - name: Audit SDK smoke advisories
-        run: pnpm --dir tests/sdk-smoke audit --prod --audit-level high
+      - name: Audit console and SDK smoke advisories
+        # Cargo advisories are enforced by `make deny` in the quality job, which
+        # reads its RUSTSEC exceptions from deny.toml.
+        run: make advisories
 
   fuzz:
     name: Fuzz / bounded campaign
@@ -760,7 +752,7 @@ jobs:
       - name: Smoke final arm64 image modes and packaged console
         env:
           OLP_IMAGE_PLATFORM: linux/arm64
-        run: ./scripts/smoke-image-modes.sh openllmproxy:ci-arm64
+        run: make smoke-image-modes IMAGE=openllmproxy:ci-arm64
       - name: Generate arm64 SBOM
         uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0
         with:
@@ -770,7 +762,7 @@ jobs:
           output-file: openllmproxy-arm64.spdx.json
           upload-artifact: false
       - name: Scan arm64 image for HIGH and CRITICAL vulnerabilities
-        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           image-ref: openllmproxy:ci-arm64
           version: v0.72.0

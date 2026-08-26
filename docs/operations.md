@@ -134,14 +134,6 @@ redirects or provider credentials.
 
 ### Naming migration prerequisites
 
-This release accepts no aliases. Before the candidate starts, rename:
-
-| Old | New |
-|---|---|
-| `OLP_PORT` | `OLP_HOST_PORT` |
-| `OLP_KEY_HASH_KEY_FILE` | `OLP_AUTH_HMAC_KEY_FILE` |
-| `OLP_BACKUP_USAGE_CHECKPOINT_MAX_AGE_SECONDS` | `OLP_BACKUP_REQUEST_METADATA_CHECKPOINT_MAX_AGE_SECONDS` |
-
 Keep the existing HMAC bytes; replacing them invalidates API-key and bootstrap
 digests. For Compose, rename
 `deploy/secrets/olp_key_hash_key` to `deploy/secrets/olp_auth_hmac_key` and
