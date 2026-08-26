@@ -5,6 +5,61 @@ All notable changes to OpenLLMProxy are recorded here. The format follows
 semantic versioning and match `Cargo.toml`, `console/package.json`,
 `deploy/helm/Chart.yaml` and `deploy/Dockerfile`.
 
+## [2.1.1] - 2026-08-26
+
+Recovery release: the repository is brought back in line with its own rules
+(AGENTS.md size limits, Makefile/CI lockstep, an accurate N-1 baseline) and
+the gateway bugs left open by the 2.0.1 review are closed. No migrations.
+
+### Changed
+
+**Gateway (client-visible)**
+- A provider that rejects its own credential (upstream 401/403) now returns
+  502 with `error.code` `upstream_authentication_failed` or
+  `upstream_permission_denied` on the OpenAI, Anthropic and Gemini surfaces.
+  Previously the upstream status was repeated verbatim, so an expired
+  provider key looked like an invalid gateway key. 400/404/405/409/413/415/422
+  still pass through.
+- `FinishReason::Error` (Gemini `MALFORMED_FUNCTION_CALL`, Bedrock
+  `MalformedToolUse`, …) is no longer reported as a clean completion: OpenAI
+  chat emits `finish_reason: "error"`, Anthropic `stop_reason: "refusal"`,
+  and the Responses API `status: "failed"` with an `error` body.
+- A provider `Retry-After` applies only to a retry of that same target and is
+  capped at 30 seconds; it no longer delays failover to an unrelated provider,
+  and the backoff sleep now runs after the next target's circuit check.
+- The sole-target retry honours the route's `max_attempts` and is never taken
+  after a billing-uncertain failure such as a first-byte timeout.
+
+**Repository**
+- `release-metadata.env` pins migration `0037`, the last one shipped in
+  2.0.1; it had never been advanced past `0021`, so the upgrade rehearsal was
+  exercising a jump no deployment performs. `make release-version` now checks
+  the baseline names a tracked migration and that the Rust toolchain pin
+  agrees across `rust-toolchain.toml`, the CI action and the Dockerfile.
+  The rehearsal itself seeded a table renamed in 0028 and expected a v1
+  backup manifest; both now match the 0037 baseline, and the rehearsal
+  reports the real 37 → 43 upgrade.
+- `make source-size` (in `make check` and CI) enforces the 30 KB file and
+  100-line function rules against `scripts/source-size-baseline.txt`, which
+  may only shrink. The worst offenders were split: `run_maintenance`,
+  `activate_provider`, `complete_oidc_login`, `serve`, `collect_metrics`,
+  `append_async_worker_metrics`, `collect_readiness`, `callback_inner` and
+  the Anthropic stream encoder.
+- One `audit_events` writer replaces four helpers and 22 inline INSERTs.
+- CI dispatches through the Makefile; `make coverage` uses the `ci` nextest
+  profile like CI does; `cargo deny` is the single advisory policy.
+- The Helm values schema covers security-context and scheduling keys and
+  rejects unknown top-level keys.
+- Console: prettier runs on the whole tree instead of a hand-maintained
+  allowlist; login and invitation-acceptance logic lives under
+  `src/lib/features`; one `errorMessage()`, one password policy, one set of
+  page-size constants.
+
+### Removed
+- Orphaned `skills-lock.json`, `.Jules/`, Storybook ignore entries, the dead
+  2.0 environment-rename table in `docs/operations.md`, and the separate
+  `cargo audit` CI step.
+
 ## [2.1.0] - 2026-08-26
 
 Backend capability that shipped without a console, and console pages that

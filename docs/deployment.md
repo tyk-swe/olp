@@ -109,7 +109,7 @@ Install with approved values and at least a 20-minute timeout:
 
 ```console
 helm upgrade --install olp \
-  oci://ghcr.io/tyk-swe/charts/openllmproxy --version 2.1.0 \
+  oci://ghcr.io/tyk-swe/charts/openllmproxy --version 2.1.1 \
   --namespace olp --create-namespace \
   --set-string image.digest=sha256:REPLACE_WITH_APPROVED_INDEX_DIGEST \
   --values production-values.yaml --timeout 20m --wait
