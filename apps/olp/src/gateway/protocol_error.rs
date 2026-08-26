@@ -211,4 +211,43 @@ mod tests {
             );
         }
     }
+
+    #[tokio::test]
+    async fn a_rejected_provider_credential_is_a_server_fault_on_every_surface() {
+        use olp_engine::domain::ports::{
+            AttemptFailureClass, TransportError, TransportPhase, UpstreamSignal,
+        };
+        use olp_engine::inference::error::Error as CoreInferenceError;
+
+        for (surface, pointer, expected) in [
+            (Surface::OpenAi, "/error/type", "server_error"),
+            (Surface::Anthropic, "/error/type", "api_error"),
+            (Surface::Gemini, "/error/status", "INTERNAL"),
+        ] {
+            for status in [401, 403] {
+                let error = CoreInferenceError::from_transport(TransportError {
+                    phase: TransportPhase::FirstByte,
+                    class: AttemptFailureClass::UpstreamClient,
+                    response_committed: false,
+                    message: "invalid api key".to_owned(),
+                    upstream: UpstreamSignal::from_status(status),
+                });
+                let response = inference_error_response(surface, InferenceError::from(error));
+                assert_eq!(
+                    response.status(),
+                    StatusCode::BAD_GATEWAY,
+                    "surface: {surface:?} status {status}"
+                );
+                let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+                    .await
+                    .unwrap();
+                let body: serde_json::Value = serde_json::from_slice(&body).unwrap();
+                assert_eq!(
+                    body.pointer(pointer).and_then(serde_json::Value::as_str),
+                    Some(expected),
+                    "surface: {surface:?} status {status}: {body}"
+                );
+            }
+        }
+    }
 }

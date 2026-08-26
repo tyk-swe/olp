@@ -989,7 +989,7 @@ fn anthropic_stop_reasons_pass_through_only_inside_the_declared_enum() {
     for (reason, expected) in [
         (FinishReason::Other("pause_turn".to_owned()), "pause_turn"),
         (FinishReason::Other("LANGUAGE".to_owned()), "end_turn"),
-        (FinishReason::Error, "end_turn"),
+        (FinishReason::Error, "refusal"),
         (FinishReason::ToolCalls, "tool_use"),
     ] {
         let response = encode_messages_response(

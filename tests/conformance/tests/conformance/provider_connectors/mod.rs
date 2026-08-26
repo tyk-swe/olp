@@ -1025,7 +1025,7 @@ fn classified_error_response(kind: ProviderKind, status: &str, secret: &str) -> 
 }
 
 #[tokio::test]
-async fn all_connectors_redact_secrets_and_classify_retryability() {
+async fn all_connectors_redact_secrets_classify_retryability_and_keep_retry_after() {
     let cases = [
         (
             "429 Too Many Requests",
@@ -1062,6 +1062,11 @@ async fn all_connectors_redact_secrets_and_classify_retryability() {
                 .expect_err("error status must fail");
             assert_eq!(error.class, class, "{kind:?} {status}");
             assert_eq!(error.allows_failover(), retryable, "{kind:?} {status}");
+            assert_eq!(
+                error.upstream.retry_after,
+                Some(Duration::from_secs(7)),
+                "{kind:?} {status} dropped the upstream Retry-After"
+            );
             for secret in [
                 API_KEY,
                 VERTEX_TOKEN,

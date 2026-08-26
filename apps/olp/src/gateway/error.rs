@@ -160,11 +160,7 @@ fn presentation(kind: InferenceErrorKind) -> (StatusCode, &'static str) {
         InferenceErrorKind::Upstream => (StatusCode::BAD_GATEWAY, "server_error"),
         InferenceErrorKind::UpstreamRejected(status) => (
             StatusCode::from_u16(status).unwrap_or(StatusCode::BAD_GATEWAY),
-            match status {
-                401 => "authentication_error",
-                403 => "permission_error",
-                _ => "invalid_request_error",
-            },
+            "invalid_request_error",
         ),
         InferenceErrorKind::Cancelled => (
             StatusCode::from_u16(CLIENT_CLOSED_REQUEST).unwrap_or(StatusCode::BAD_GATEWAY),
@@ -172,8 +168,7 @@ fn presentation(kind: InferenceErrorKind) -> (StatusCode, &'static str) {
         ),
         InferenceErrorKind::Canonical(class) => {
             let status = match class {
-                ErrorClass::Authentication => StatusCode::UNAUTHORIZED,
-                ErrorClass::Authorization => StatusCode::FORBIDDEN,
+                ErrorClass::Authentication | ErrorClass::Authorization => StatusCode::BAD_GATEWAY,
                 ErrorClass::InvalidRequest => StatusCode::BAD_REQUEST,
                 ErrorClass::RateLimit => StatusCode::TOO_MANY_REQUESTS,
                 ErrorClass::Timeout => StatusCode::GATEWAY_TIMEOUT,
@@ -181,7 +176,11 @@ fn presentation(kind: InferenceErrorKind) -> (StatusCode, &'static str) {
                     StatusCode::BAD_GATEWAY
                 }
             };
-            (status, super::openai_http::error_type(class))
+            let kind = match class {
+                ErrorClass::Authentication | ErrorClass::Authorization => "server_error",
+                _ => super::openai_http::error_type(class),
+            };
+            (status, kind)
         }
     }
 }
@@ -367,13 +366,13 @@ mod tests {
             ),
             (
                 CoreInferenceError::new(
-                    InferenceErrorKind::UpstreamRejected(401),
+                    InferenceErrorKind::UpstreamRejected(409),
                     "upstream_rejected",
                     "message",
                     None,
                 ),
-                StatusCode::UNAUTHORIZED,
-                "authentication_error",
+                StatusCode::CONFLICT,
+                "invalid_request_error",
             ),
             (
                 CoreInferenceError::new(InferenceErrorKind::Cancelled, "code", "message", None),
@@ -417,8 +416,8 @@ mod tests {
                     "message",
                     None,
                 ),
-                StatusCode::UNAUTHORIZED,
-                "authentication_error",
+                StatusCode::BAD_GATEWAY,
+                "server_error",
             ),
         ];
 

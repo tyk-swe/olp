@@ -441,6 +441,7 @@ impl Service {
                 Context {
                     runtime: &runtime,
                     overall_timeout: route.overall_timeout.as_duration(),
+                    max_attempts: route.max_attempts,
                     media_spool: self.media_spool().clone(),
                     circuits: self.circuits(),
                     on_attempt_started: Some(&mut record_attempt_started),
@@ -672,6 +673,7 @@ impl Service {
                 Context {
                     runtime: principal.runtime(),
                     overall_timeout: route.overall_timeout.as_duration(),
+                    max_attempts: route.max_attempts,
                     media_spool: self.media_spool().clone(),
                     circuits: self.circuits(),
                     on_attempt_started: Some(&mut record_attempt_started),

@@ -407,7 +407,7 @@ fn finish_name(reason: FinishReason) -> Cow<'static, str> {
         FinishReason::Length => Cow::Borrowed("length"),
         FinishReason::ToolCalls => Cow::Borrowed("tool_calls"),
         FinishReason::ContentFilter => Cow::Borrowed("content_filter"),
-        FinishReason::Error => Cow::Borrowed("stop"),
+        FinishReason::Error => Cow::Borrowed("error"),
         FinishReason::Other(value) if OPENAI_FINISH_REASONS.contains(&value.as_str()) => {
             Cow::Owned(value)
         }

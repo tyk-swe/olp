@@ -1,7 +1,7 @@
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use olp_engine::domain::{
     canonical::{
-        events::{Kind, validate_event_sequence},
+        events::{FinishReason, Kind, validate_event_sequence},
         identity::Surface,
         requests::{
             GenerationParameters, GenerationRequest, ImageOperation, MediaHandle, MediaSource,
@@ -227,6 +227,53 @@ fn responses_unary_and_fragmented_stream_become_ordered_events() {
         &event.kind,
         Kind::TextDelta { text, .. } if text == "hé 🌍"
     )));
+}
+
+#[test]
+fn a_provider_error_finish_is_a_failed_response_not_a_completed_one() {
+    let response: Object = serde_json::from_value(json!({
+        "id": "resp_err",
+        "object": "response",
+        "created_at": 1800000000,
+        "status": "completed",
+        "model": "gpt-upstream",
+        "output": [{
+            "id": "msg_1",
+            "type": "message",
+            "role": "assistant",
+            "status": "completed",
+            "content": [{"type": "output_text", "text": "partial", "annotations": []}]
+        }]
+    }))
+    .unwrap();
+    let events = decode_response_object(response)
+        .unwrap()
+        .into_iter()
+        .map(|mut event| {
+            if let Kind::Finish { reason, .. } = &mut event.kind {
+                *reason = FinishReason::Error;
+            }
+            event
+        })
+        .collect::<Vec<_>>();
+
+    let unary = encode_response_object(&events, "team-route", "fallback", 1_800_000_000).unwrap();
+    assert_eq!(unary.status, "failed");
+    assert_eq!(
+        unary.error.as_ref().map(|error| error.code.as_str()),
+        Some("server_error")
+    );
+
+    let mut encoder = ResponseEncoder::new("team-route", "fallback", 1_800_000_000);
+    let mut frames = Vec::new();
+    for event in events {
+        frames.extend(encoder.push(event).unwrap());
+    }
+    let terminal = frames.last().unwrap();
+    assert_eq!(terminal.event.as_deref(), Some("response.failed"));
+    let payload: serde_json::Value = serde_json::from_str(&terminal.data).unwrap();
+    assert_eq!(payload["response"]["status"], "failed");
+    assert_eq!(payload["response"]["error"]["code"], "server_error");
 }
 
 #[test]
@@ -889,8 +936,6 @@ fn streamed_tool_call_keeps_the_call_id_not_the_item_id() {
 /// completion.
 #[test]
 fn a_truncated_unary_response_reports_length_not_stop() {
-    use olp_engine::domain::canonical::events::FinishReason;
-
     for (reason, expected) in [
         ("max_output_tokens", FinishReason::Length),
         ("content_filter", FinishReason::ContentFilter),

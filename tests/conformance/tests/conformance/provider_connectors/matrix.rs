@@ -204,9 +204,6 @@ pub(super) fn disposition(row: ProviderContractRow, contract: Contract) -> Dispo
         Contract::CachedInputUsage => row.cached_usage,
         Contract::StructuredOutput => row.structured_output,
         Contract::ProviderRequestIds => row.request_ids,
-        Contract::RetryAfter => Disposition::Inapplicable(
-            "TransportError does not carry upstream Retry-After metadata; retryability is the current contract",
-        ),
         Contract::MediaOrMultipart => row.media,
         Contract::OversizedResponses => row.oversized_responses,
         Contract::EndpointAndAuthentication
@@ -217,6 +214,7 @@ pub(super) fn disposition(row: ProviderContractRow, contract: Contract) -> Dispo
         | Contract::ToolCalls
         | Contract::ErrorClassification
         | Contract::Retryability
+        | Contract::RetryAfter
         | Contract::Deadlines
         | Contract::Cancellation
         | Contract::InvalidBodies

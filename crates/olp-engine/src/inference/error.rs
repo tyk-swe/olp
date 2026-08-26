@@ -232,21 +232,17 @@ impl Error {
                 error.upstream.retry_after,
             ),
             AttemptFailureClass::Timeout => Self::timeout(),
-            AttemptFailureClass::UpstreamClient => error
-                .upstream
-                .status
-                .filter(|status| forwardable_upstream_status(*status))
-                .map_or_else(
-                    || Self::bad_gateway("upstream_rejected", error.message.clone()),
-                    |status| {
-                        Self::new(
-                            Kind::UpstreamRejected(status),
-                            "upstream_rejected",
-                            error.message.clone(),
-                            None,
-                        )
-                    },
+            AttemptFailureClass::UpstreamClient => match error.upstream.status {
+                Some(401) => Self::bad_gateway("upstream_authentication_failed", error.message),
+                Some(403) => Self::bad_gateway("upstream_permission_denied", error.message),
+                Some(status) if forwardable_upstream_status(status) => Self::new(
+                    Kind::UpstreamRejected(status),
+                    "upstream_rejected",
+                    error.message,
+                    None,
                 ),
+                _ => Self::bad_gateway("upstream_rejected", error.message),
+            },
             AttemptFailureClass::Connect | AttemptFailureClass::UpstreamServer => {
                 Self::bad_gateway("upstream_unavailable", error.message)
             }
@@ -276,8 +272,11 @@ impl Error {
 /// Upstream client-fault statuses the gateway repeats verbatim. Anything else
 /// a provider might answer with stays a 502: the caller cannot act on it, and
 /// inventing a status the provider never sent would be worse than a bad gateway.
+/// 401 and 403 are deliberately absent: a rejected provider credential is the
+/// operator's fault, and repeating it would tell the caller their own gateway
+/// key is invalid.
 const fn forwardable_upstream_status(status: u16) -> bool {
-    matches!(status, 400 | 401 | 403 | 404 | 405 | 409 | 413 | 415 | 422)
+    matches!(status, 400 | 404 | 405 | 409 | 413 | 415 | 422)
 }
 
 #[cfg(test)]
@@ -386,8 +385,6 @@ mod tests {
     fn an_upstream_client_fault_keeps_the_provider_status_and_a_rate_limit_keeps_retry_after() {
         for (status, expected) in [
             (400, Kind::UpstreamRejected(400)),
-            (401, Kind::UpstreamRejected(401)),
-            (403, Kind::UpstreamRejected(403)),
             (404, Kind::UpstreamRejected(404)),
             (413, Kind::UpstreamRejected(413)),
             (422, Kind::UpstreamRejected(422)),
@@ -415,6 +412,25 @@ mod tests {
             upstream: UpstreamSignal::default(),
         });
         assert_eq!(unknown.kind(), Kind::Upstream);
+    }
+
+    #[test]
+    fn a_rejected_provider_credential_is_a_bad_gateway_not_the_callers_auth_failure() {
+        for (status, code) in [
+            (401, "upstream_authentication_failed"),
+            (403, "upstream_permission_denied"),
+        ] {
+            let error = Error::from_transport(TransportError {
+                phase: TransportPhase::FirstByte,
+                class: AttemptFailureClass::UpstreamClient,
+                response_committed: false,
+                message: "invalid api key".to_owned(),
+                upstream: UpstreamSignal::from_status(status),
+            });
+            assert_eq!(error.kind(), Kind::Upstream, "status {status}");
+            assert_eq!(error.code(), code, "status {status}");
+            assert_eq!(error.message(), "invalid api key");
+        }
     }
 
     #[test]

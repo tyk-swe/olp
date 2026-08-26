@@ -1,4 +1,4 @@
-use std::{sync::Arc, time::Duration};
+use std::{num::NonZeroU16, sync::Arc, time::Duration};
 
 use crate::domain::{
     canonical::{
@@ -267,6 +267,7 @@ pub type AttemptStartedObserver<'a> = dyn FnMut(&[RequestAttemptMetadata], &Atte
 pub struct Context<'a> {
     pub runtime: &'a Bundle,
     pub overall_timeout: Duration,
+    pub max_attempts: NonZeroU16,
     pub media_spool: Arc<dyn MediaSpool>,
     pub circuits: &'a Breaker,
     pub on_attempt_started: Option<&'a mut AttemptStartedObserver<'a>>,
@@ -286,9 +287,12 @@ struct FailureHistory {
 
 /// First retry waits about this long; each further retry doubles it.
 const BASE_RETRY_BACKOFF: Duration = Duration::from_millis(100);
-/// Ceiling for the computed backoff. An upstream `Retry-After` above this is
-/// still honoured — the provider knows its own recovery time better than we do.
+/// Ceiling for the computed backoff.
 const MAX_RETRY_BACKOFF: Duration = Duration::from_secs(5);
+/// Longest an upstream `Retry-After` may hold the caller's connection,
+/// concurrency slot and token reservation before we fall back to our own
+/// backoff. Matches the circuit's open window, so a hint never outlives it.
+const MAX_RETRY_AFTER_DELAY: Duration = Duration::from_secs(30);
 
 /// Delay before re-attempting after a retryable failure. Exponential with full
 /// jitter so a fleet does not resynchronize on a provider blip, floored at any
@@ -319,6 +323,15 @@ impl FailureHistory {
         self.last_transport
             .as_ref()
             .and_then(|transport| transport.upstream.retry_after)
+    }
+
+    /// Re-sending to the target that just failed is only safe when that
+    /// attempt certainly never reached generation; otherwise the caller could
+    /// be billed twice for one request.
+    fn permits_same_target_retry(&self) -> bool {
+        self.last_transport
+            .as_ref()
+            .is_some_and(|transport| !attempt_billing_is_uncertain(transport))
     }
 
     fn into_error(self, completed_attempts: usize) -> InferenceError {
@@ -364,6 +377,7 @@ pub async fn execute(
     let Context {
         runtime,
         overall_timeout,
+        max_attempts,
         media_spool,
         circuits,
         mut on_attempt_started,
@@ -371,36 +385,43 @@ pub async fn execute(
     let route_deadline = tokio::time::Instant::now() + overall_timeout;
     let mut failures = FailureHistory::default();
     let mut traces = Vec::with_capacity(attempts.len());
-    let attempts = with_sole_target_retry(attempts);
+    let attempts = with_sole_target_retry(attempts, max_attempts);
     let attempt_count = attempts.len();
-    for (attempt_index, attempt) in attempts.into_iter().enumerate() {
-        if attempt_index > 0
-            && !wait_before_retry(
-                u32::try_from(attempt_index - 1).unwrap_or(u32::MAX),
-                failures.retry_after(),
+    for attempt_index in 0..attempt_count {
+        let attempt = &attempts[attempt_index];
+        let delay = match attempt_index.checked_sub(1) {
+            None => Duration::ZERO,
+            Some(previous) => match plan_retry(
+                &attempts[previous],
+                attempt,
+                u32::try_from(previous).unwrap_or(u32::MAX),
+                &failures,
                 route_deadline,
-            )
-            .await
-        {
-            break;
-        }
+            ) {
+                RetryPlan::Proceed(delay) => delay,
+                RetryPlan::Stop => break,
+            },
+        };
         let Some(circuit_permit) = circuits.try_acquire_permit(attempt.routing_id) else {
             continue;
         };
+        if !delay.is_zero() {
+            tokio::time::sleep(delay).await;
+        }
         let ordinal = u16::try_from(traces.len() + 1).unwrap_or(u16::MAX);
         let attempt_started_at = Utc::now();
         let attempt_started = tokio::time::Instant::now();
         if let Some(observer) = on_attempt_started.as_mut() {
             observer(
                 &traces,
-                &attempt,
+                attempt,
                 ordinal,
                 attempt_started_at,
                 attempt_started,
             );
         }
         let record = AttemptRecord {
-            plan: &attempt,
+            plan: attempt,
             circuit_permit,
             ordinal,
             started_at: attempt_started_at,
@@ -441,12 +462,18 @@ pub async fn execute(
     })
 }
 
-/// A route with a single eligible target would otherwise perform zero retries:
-/// one transient 503 goes straight to the client. One extra pass over the same
-/// target is bounded, still fenced by the route deadline and the circuit, and
-/// only ever reached when the first attempt failed in a retryable way.
-fn with_sole_target_retry(mut attempts: Vec<AttemptPlan>) -> Vec<AttemptPlan> {
-    if let [only] = attempts.as_slice() {
+/// A route whose other targets are all unavailable would otherwise perform
+/// zero retries: one transient 503 goes straight to the client. One extra pass
+/// over the same target stays inside the route's `max_attempts`, the deadline
+/// and the circuit, and `plan_retry` still refuses it when the first attempt
+/// may already have been billed.
+fn with_sole_target_retry(
+    mut attempts: Vec<AttemptPlan>,
+    max_attempts: NonZeroU16,
+) -> Vec<AttemptPlan> {
+    if let [only] = attempts.as_slice()
+        && max_attempts.get() > 1
+    {
         let retry = only.clone();
         attempts.push(retry);
     }
@@ -476,21 +503,37 @@ fn jitter_fraction() -> f64 {
     fraction
 }
 
-/// Sleeps the jittered backoff. Returns `false` when the route deadline leaves
-/// no room for another attempt, so the caller stops rather than sleeping into
-/// a guaranteed timeout.
-async fn wait_before_retry(
+enum RetryPlan {
+    Proceed(Duration),
+    Stop,
+}
+
+/// Decides whether `next` is worth attempting after `previous` failed, and how
+/// long to wait first. A provider's `Retry-After` only applies to that same
+/// provider: it must not delay failover to an unrelated target. The plan stops
+/// when the deadline leaves no room for another attempt, and when a same-target
+/// retry could double-bill the caller.
+fn plan_retry(
+    previous: &AttemptPlan,
+    next: &AttemptPlan,
     retry_index: u32,
-    retry_after: Option<Duration>,
+    failures: &FailureHistory,
     route_deadline: tokio::time::Instant,
-) -> bool {
+) -> RetryPlan {
+    let same_target = previous.routing_id == next.routing_id;
+    if same_target && !failures.permits_same_target_retry() {
+        return RetryPlan::Stop;
+    }
+    let retry_after = same_target
+        .then(|| failures.retry_after())
+        .flatten()
+        .map(|hint| hint.min(MAX_RETRY_AFTER_DELAY));
     let backoff = retry_backoff(retry_index, retry_after, jitter_fraction());
     let remaining = route_deadline.saturating_duration_since(tokio::time::Instant::now());
     if backoff >= remaining {
-        return false;
+        return RetryPlan::Stop;
     }
-    tokio::time::sleep(backoff).await;
-    true
+    RetryPlan::Proceed(backoff)
 }
 
 async fn execute_attempt(
@@ -789,231 +832,4 @@ const fn attempt_failure_name(class: AttemptFailureClass) -> &'static str {
 }
 
 #[cfg(test)]
-mod tests {
-    use crate::domain::{
-        canonical::events::{Error, ErrorClass},
-        ids::{DurationMs, ProviderId, RouteId, RuntimeGenerationId, TargetId},
-        ports::{AttemptFailureClass, TransportError, TransportPhase},
-        routing::{provider::ProviderKind, selection::AttemptPlan},
-    };
-    use chrono::Utc;
-
-    use super::{
-        AttemptRecord, BASE_RETRY_BACKOFF, FailureHistory, MAX_RETRY_BACKOFF,
-        attempt_billing_is_uncertain, jitter_fraction, retry_backoff, with_sole_target_retry,
-    };
-    use crate::inference::{circuit::Breaker, error::Kind as InferenceErrorKind};
-    use std::time::Duration;
-
-    fn plan(target_id: TargetId) -> AttemptPlan {
-        AttemptPlan {
-            generation_id: RuntimeGenerationId::new(),
-            route_id: RouteId::new(),
-            target_id,
-            routing_id: target_id,
-            provider_id: ProviderId::new(),
-            provider_kind: ProviderKind::OpenAi,
-            upstream_model: "backoff-test".to_owned(),
-            timeout: DurationMs::new(1_000),
-            priority: 0,
-        }
-    }
-
-    #[test]
-    fn retry_backoff_grows_with_jitter_and_is_floored_by_the_provider_hint() {
-        // Full jitter keeps the delay inside [half, whole] of the exponential.
-        for retry_index in 0..4 {
-            let exponential = BASE_RETRY_BACKOFF * (1 << retry_index);
-            let low = retry_backoff(retry_index, None, 0.0);
-            let high = retry_backoff(retry_index, None, 1.0);
-            assert_eq!(low, exponential / 2);
-            assert_eq!(high, exponential);
-        }
-        // Bounded however many attempts a route configures.
-        assert_eq!(retry_backoff(30, None, 1.0), MAX_RETRY_BACKOFF);
-        // A provider that named its own recovery time wins over our guess.
-        assert_eq!(
-            retry_backoff(0, Some(Duration::from_secs(60)), 1.0),
-            Duration::from_secs(60)
-        );
-        // ...but never shortens the computed backoff.
-        assert_eq!(
-            retry_backoff(0, Some(Duration::ZERO), 1.0),
-            BASE_RETRY_BACKOFF
-        );
-    }
-
-    #[test]
-    fn jitter_stays_in_range_and_does_not_repeat_itself() {
-        let samples = (0..64).map(|_| jitter_fraction()).collect::<Vec<_>>();
-        assert!(samples.iter().all(|value| (0.0..1.0).contains(value)));
-        assert!(
-            samples.windows(2).any(|pair| pair[0] != pair[1]),
-            "backoff jitter must decorrelate concurrent retries"
-        );
-    }
-
-    #[test]
-    fn a_sole_eligible_target_earns_one_bounded_retry() {
-        let target = TargetId::new();
-        let single = with_sole_target_retry(vec![plan(target)]);
-        assert_eq!(single.len(), 2);
-        assert_eq!(single[0].target_id, single[1].target_id);
-
-        // A route that already has somewhere else to go is left alone.
-        let pair = with_sole_target_retry(vec![plan(TargetId::new()), plan(TargetId::new())]);
-        assert_eq!(pair.len(), 2);
-        assert!(with_sole_target_retry(Vec::new()).is_empty());
-    }
-
-    #[test]
-    fn the_provider_retry_after_survives_into_the_retry_decision() {
-        let mut history = FailureHistory::default();
-        assert_eq!(history.retry_after(), None);
-        history.record_retry(
-            TransportError {
-                phase: TransportPhase::FirstByte,
-                class: AttemptFailureClass::RateLimit,
-                response_committed: false,
-                message: "throttled".to_owned(),
-                upstream: crate::domain::ports::UpstreamSignal::from_status(429)
-                    .with_retry_after(Some(Duration::from_secs(12))),
-            },
-            None,
-            1,
-        );
-        assert_eq!(history.retry_after(), Some(Duration::from_secs(12)));
-    }
-
-    #[test]
-    fn billing_uncertainty_starts_after_a_request_may_reach_the_provider() {
-        assert!(!attempt_billing_is_uncertain(&failure(
-            TransportPhase::Connect,
-            AttemptFailureClass::Connect,
-        )));
-        assert!(!attempt_billing_is_uncertain(&failure(
-            TransportPhase::FirstByte,
-            AttemptFailureClass::RateLimit,
-        )));
-        assert!(attempt_billing_is_uncertain(&failure(
-            TransportPhase::FirstByte,
-            AttemptFailureClass::UpstreamServer,
-        )));
-        assert!(attempt_billing_is_uncertain(&failure(
-            TransportPhase::Body,
-            AttemptFailureClass::Protocol,
-        )));
-        assert!(attempt_billing_is_uncertain(&failure(
-            TransportPhase::FirstByte,
-            AttemptFailureClass::Timeout,
-        )));
-    }
-
-    #[test]
-    fn elapsed_deadline_records_attempt_without_penalizing_closed_circuit() {
-        let target_id = TargetId::new();
-        let attempt = AttemptPlan {
-            generation_id: RuntimeGenerationId::new(),
-            route_id: RouteId::new(),
-            target_id,
-            routing_id: target_id,
-            provider_id: ProviderId::new(),
-            provider_kind: ProviderKind::OpenAi,
-            upstream_model: "deadline-test".to_owned(),
-            timeout: DurationMs::new(1_000),
-            priority: 0,
-        };
-        let circuits = Breaker::default();
-        let record = AttemptRecord {
-            plan: &attempt,
-            circuit_permit: circuits
-                .try_acquire_permit(target_id)
-                .expect("closed circuit admits an attempt"),
-            ordinal: 1,
-            started_at: Utc::now(),
-            started: tokio::time::Instant::now(),
-        };
-
-        let mut traces = Vec::new();
-        let failure = record.record_deadline_elapsed(&mut traces, &circuits);
-
-        assert_eq!(failure.error.code(), "gateway_timeout");
-        assert_eq!(failure.attempts.len(), 1);
-        let failed_attempt = &failure.attempts[0];
-        assert_eq!(failed_attempt.ordinal, 1);
-        assert_eq!(failed_attempt.error_class.as_deref(), Some("timeout"));
-        assert_eq!(failed_attempt.status_code, Some(504));
-        assert!(!failed_attempt.committed);
-        let usage = failed_attempt
-            .usage
-            .as_ref()
-            .expect("timeout attempt records billing certainty");
-        assert!(usage.complete);
-        assert!(!usage.billing_uncertain);
-        assert_eq!(circuits.open_count(), 0);
-        for _ in 0..4 {
-            circuits.record_failure(target_id, AttemptFailureClass::Connect);
-        }
-        assert_eq!(circuits.open_count(), 0);
-        assert!(circuits.is_selectable(target_id));
-        circuits.record_failure(target_id, AttemptFailureClass::Connect);
-        assert_eq!(circuits.open_count(), 1);
-    }
-
-    #[test]
-    fn final_retryable_canonical_error_is_preserved() {
-        let mut failures = FailureHistory::default();
-        failures.record_retry(
-            failure(TransportPhase::FirstByte, AttemptFailureClass::RateLimit),
-            Some(Error {
-                class: ErrorClass::RateLimit,
-                message: "provider asked the client to retry".to_owned(),
-                provider_code: Some("busy".to_owned()),
-                retryable: true,
-            }),
-            1,
-        );
-
-        let error = failures.into_error(1);
-
-        assert_eq!(
-            error.kind(),
-            InferenceErrorKind::Canonical(ErrorClass::RateLimit)
-        );
-        assert_eq!(error.message(), "provider asked the client to retry");
-    }
-
-    #[test]
-    fn later_transport_failure_supersedes_a_canonical_error() {
-        let mut failures = FailureHistory::default();
-        failures.record_retry(
-            failure(TransportPhase::FirstByte, AttemptFailureClass::RateLimit),
-            Some(Error {
-                class: ErrorClass::RateLimit,
-                message: "first failure".to_owned(),
-                provider_code: None,
-                retryable: true,
-            }),
-            1,
-        );
-        failures.record_retry(
-            failure(TransportPhase::Connect, AttemptFailureClass::Connect),
-            None,
-            2,
-        );
-
-        let error = failures.into_error(2);
-
-        assert_eq!(error.code(), "upstream_unavailable");
-    }
-
-    fn failure(phase: TransportPhase, class: AttemptFailureClass) -> TransportError {
-        TransportError {
-            upstream: Default::default(),
-            phase,
-            class,
-            response_committed: false,
-            message: "metadata-free fixture".to_owned(),
-        }
-    }
-}
+mod tests;

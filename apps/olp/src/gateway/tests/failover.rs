@@ -174,6 +174,7 @@ async fn first_event_timeout_obeys_media_ambiguity_policy() {
         Context {
             runtime: &runtime,
             overall_timeout: Duration::from_millis(200),
+            max_attempts: std::num::NonZeroU16::new(2).unwrap(),
             media_spool: media_state.media_spool().clone(),
             circuits: &Breaker::default(),
             on_attempt_started: None,
@@ -210,6 +211,7 @@ async fn first_event_timeout_obeys_media_ambiguity_policy() {
         Context {
             runtime: &runtime,
             overall_timeout: Duration::from_millis(200),
+            max_attempts: std::num::NonZeroU16::new(2).unwrap(),
             media_spool: generation_state.media_spool().clone(),
             circuits: &Breaker::default(),
             on_attempt_started: None,
@@ -298,6 +300,7 @@ async fn retryable_first_canonical_error_fails_over_before_commit() {
         Context {
             runtime: &runtime,
             overall_timeout: Duration::from_millis(200),
+            max_attempts: std::num::NonZeroU16::new(2).unwrap(),
             media_spool: state.media_spool().clone(),
             circuits: &Breaker::default(),
             on_attempt_started: None,

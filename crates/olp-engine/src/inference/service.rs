@@ -149,6 +149,7 @@ impl Service {
             Context {
                 runtime: &snapshot,
                 overall_timeout: route.overall_timeout.as_duration(),
+                max_attempts: route.max_attempts,
                 media_spool: Arc::clone(&self.media_spool),
                 circuits: &self.circuits,
                 on_attempt_started: None,

@@ -130,21 +130,27 @@ pub fn encode_response_object(
         observed_created_at
     };
     let mut incomplete_details = aggregate.extensions.remove("/incomplete_details");
-    let status = take_string_extension(&mut aggregate.extensions, "/status").unwrap_or_else(|| {
-        // A non-Responses upstream reports truncation only through the finish
-        // reason, so the terminal status is derived from it rather than always
-        // claiming the response completed.
-        match finish {
-            Some(FinishReason::Length) => {
-                incomplete_details.get_or_insert_with(|| json!({"reason": "max_output_tokens"}));
-                "incomplete".to_owned()
-            }
-            Some(FinishReason::ContentFilter) => {
-                incomplete_details.get_or_insert_with(|| json!({"reason": "content_filter"}));
-                "incomplete".to_owned()
-            }
-            _ => "completed".to_owned(),
+    let observed_status = take_string_extension(&mut aggregate.extensions, "/status");
+    // A non-Responses upstream reports truncation only through the finish
+    // reason, so the terminal status is derived from it rather than always
+    // claiming the response completed. An error finish is never a completion,
+    // whatever status the upstream object claimed.
+    let status = match finish {
+        Some(FinishReason::Error) => "failed".to_owned(),
+        Some(FinishReason::Length) if observed_status.is_none() => {
+            incomplete_details.get_or_insert_with(|| json!({"reason": "max_output_tokens"}));
+            "incomplete".to_owned()
         }
+        Some(FinishReason::ContentFilter) if observed_status.is_none() => {
+            incomplete_details.get_or_insert_with(|| json!({"reason": "content_filter"}));
+            "incomplete".to_owned()
+        }
+        _ => observed_status.unwrap_or_else(|| "completed".to_owned()),
+    };
+    let error = (status == "failed").then(|| ErrorBody {
+        code: "server_error".to_owned(),
+        message: "the provider ended the response with an error".to_owned(),
+        extra: BTreeMap::new(),
     });
     let usage = aggregate.usage.map(|usage| Usage {
         input_tokens: usage.input_tokens,
@@ -176,7 +182,7 @@ pub fn encode_response_object(
             model: client_model.into(),
             output,
             usage,
-            error: None::<ErrorBody>,
+            error,
             incomplete_details,
             extra: BTreeMap::new(),
         },
@@ -409,10 +415,10 @@ impl Encoder {
                     response.status = "incomplete".to_owned();
                     response.incomplete_details = Some(serde_json::json!({ "reason": reason }));
                 }
-                let terminal_event_type = if response.status == "incomplete" {
-                    "response.incomplete"
-                } else {
-                    "response.completed"
+                let terminal_event_type = match response.status.as_str() {
+                    "incomplete" => "response.incomplete",
+                    "failed" => "response.failed",
+                    _ => "response.completed",
                 };
                 frames.push(self.frame(terminal_event_type, json!({"response": response}))?);
                 self.done = true;

@@ -26,8 +26,7 @@ fn finish_reason(reason: &FinishReason) -> &str {
         FinishReason::Stop => "end_turn",
         FinishReason::Length => "max_tokens",
         FinishReason::ToolCalls => "tool_use",
-        FinishReason::ContentFilter => "refusal",
-        FinishReason::Error => "end_turn",
+        FinishReason::ContentFilter | FinishReason::Error => "refusal",
         FinishReason::Other(value) if ANTHROPIC_STOP_REASONS.contains(&value.as_str()) => value,
         FinishReason::Other(_) => "end_turn",
     }
