@@ -19,7 +19,8 @@ for required_directory in "$root/console" "$root/deploy" "$root/deploy/helm"; do
 done
 for required_file in \
   "$root/Cargo.toml" "$root/console/package.json" \
-  "$root/deploy/helm/Chart.yaml" "$root/deploy/Dockerfile"; do
+  "$root/deploy/helm/Chart.yaml" "$root/deploy/Dockerfile" \
+  "$root/release-metadata.env"; do
   validation_require_file "$required_file"
 done
 
@@ -79,5 +80,15 @@ if (( version_mismatches_matched )); then
   echo "a workspace path dependency does not match $workspace_version" >&2
   exit 1
 fi
+
+released_migration=$(sed -nE 's/^OLP_PREVIOUS_RELEASED_SCHEMA_MIGRATION=([0-9]{4})$/\1/p' "$root/release-metadata.env")
+[[ -n $released_migration ]] || {
+  echo "release-metadata.env does not pin a four-digit OLP_PREVIOUS_RELEASED_SCHEMA_MIGRATION" >&2
+  exit 1
+}
+ls "$root/crates/olp-db/migrations/${released_migration}_"*.sql >/dev/null 2>&1 || {
+  echo "release-metadata.env pins migration $released_migration, which is not a tracked migration" >&2
+  exit 1
+}
 
 echo "release metadata is consistent at $workspace_version"

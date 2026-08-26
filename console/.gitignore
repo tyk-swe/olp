@@ -1,7 +1,6 @@
 .svelte-kit/
 build/
 node_modules/
-storybook-static/
 playwright-report/
 test-results/
 *.tsbuildinfo
