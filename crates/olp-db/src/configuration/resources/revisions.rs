@@ -418,6 +418,7 @@ impl Store {
         .await?;
         audit_in_transaction(
             &mut transaction,
+            self.provenance(),
             actor,
             "provider_revision.restore_as_draft",
             "provider",

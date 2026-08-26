@@ -569,7 +569,14 @@ mod tests {
     fn route_and_delete_metadata_are_applied_only_to_supported_video_operations() {
         for mut operation in [
             olp_engine::protocols::openai::video::decode_video_get("upstream".to_owned()),
-            olp_engine::protocols::openai::video::decode_video_content("upstream".to_owned()),
+            olp_engine::protocols::openai::video::decode_video_content_with_query(
+                "upstream".to_owned(),
+                olp_engine::protocols::openai::video::OpenAiVideoContentQuery {
+                    variant: None,
+                    extra: std::collections::BTreeMap::new(),
+                },
+            )
+            .unwrap(),
             olp_engine::protocols::openai::video::decode_video_delete("upstream".to_owned()),
         ] {
             set_video_route(&mut operation, "video-route").unwrap();

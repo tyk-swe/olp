@@ -18,7 +18,7 @@ test('updates retention with ETag and creates an exact-decimal pricing revision'
     retention = (route.request().postDataJSON() as { value: string }).value;
     await route.fulfill({ json: { key: 'request_retention_days', value: retention, etag, updated_by: '01980000-0000-7000-8000-000000000001', updated_at: '2026-07-12T12:01:00Z' } });
   });
-  await page.route('**/api/v1/pricing/revisions', async (route) => {
+  await page.route('**/api/v1/pricing/revisions*', async (route) => {
     if (route.request().method() === 'POST') {
       pricingHeaders = route.request().headers();
       pricingPayload = route.request().postDataJSON() as Record<string, unknown>;
@@ -36,11 +36,20 @@ test('updates retention with ETag and creates an exact-decimal pricing revision'
   expect(settingHeaders['x-csrf-token']).toBe('csrf-test-token');
 
   await page.getByLabel('Upstream model').fill('gpt-test');
-  await page.getByLabel('Input / million').fill('2.500000');
+  await page.getByLabel('Input / million', { exact: true }).fill('2.500000');
+  await page.getByLabel('Cached input / million').fill('0.250000');
   await page.getByLabel('Output / million').fill('10.125000');
   await page.getByRole('button', { name: 'Create pricing revision' }).click();
   await expect(page.getByText('Pricing revision created.')).toBeVisible();
   expect(pricingHeaders['idempotency-key']).toMatch(/^[0-9a-f-]{36}$/);
-  expect(pricingPayload).toMatchObject({ prices: [{ model: 'gpt-test', input_per_million: '2.500000', output_per_million: '10.125000', unit_price: null, currency: 'USD' }] });
+  expect(pricingPayload).toMatchObject({ prices: [{ model: 'gpt-test', input_per_million: '2.500000', cached_input_per_million: '0.250000', output_per_million: '10.125000', unit_price: null, currency: 'USD' }] });
+  await expect(page.getByRole('columnheader', { name: 'Cached input / million' })).toHaveCount(0);
+  const summary = page.locator('summary').filter({ hasText: 'Revision 1' });
+  // A revision names who published it, not only when it takes effect.
+  await expect(summary).toContainText('01980000-0000-7000-8000-000000000001');
+  await summary.click();
+  await expect(page.getByRole('columnheader', { name: 'Cached input / million' })).toBeVisible();
+  await expect(page.getByRole('cell', { name: '0.250000' })).toBeVisible();
+  await expect(page.locator('.setting-row').first()).toContainText('01980000-0000-7000-8000-000000000001');
   expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
 });

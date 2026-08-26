@@ -14,6 +14,7 @@
 
   let values = $state<OwnerFormValues>({
     displayName: '',
+    installationName: '',
     email: '',
     password: '',
     confirmPassword: '',
@@ -25,6 +26,7 @@
 
   const serverToFormField: Record<string, keyof OwnerFormValues> = {
     display_name: 'displayName',
+    installation_name: 'installationName',
     email: 'email',
     password: 'password',
     setup_token: 'setupToken'
@@ -52,12 +54,16 @@
     errors = validateOwner(values);
     if (Object.keys(errors).length) return;
 
+    const installationName = values.installationName.trim();
     submitting = true;
     try {
       await authLifecycle.authenticate((signal) =>
         createOwner(
           {
             display_name: values.displayName.trim(),
+            // Omitted rather than sent blank: the API rejects an empty name and
+            // applies its own default when the field is absent.
+            ...(installationName ? { installation_name: installationName } : {}),
             email: values.email.trim(),
             password: values.password
           },
@@ -108,6 +114,23 @@
       disabled={submitting}
     />
     {#if errors.displayName}<p class="field-error" id="displayName-error">{errors.displayName}</p>{/if}
+  </div>
+
+  <div class="field">
+    <label for="installation-name">Installation name <span class="optional">optional</span></label>
+    <input
+      id="installation-name"
+      name="installation_name"
+      type="text"
+      autocomplete="organization"
+      maxlength="100"
+      bind:value={values.installationName}
+      aria-invalid={errors.installationName ? 'true' : undefined}
+      aria-describedby={describedBy('installationName', 'installation-name-hint')}
+      disabled={submitting}
+    />
+    <p class="field-hint" id="installation-name-hint">Names this deployment in the console. Leave blank to keep the default.</p>
+    {#if errors.installationName}<p class="field-error" id="installationName-error">{errors.installationName}</p>{/if}
   </div>
 
   <div class="field">
@@ -263,6 +286,12 @@
   .field-error {
     color: var(--danger);
     font-weight: 650;
+  }
+
+  .optional {
+    color: var(--foreground-muted);
+    font-weight: 500;
+    text-transform: none;
   }
 
   .submit {

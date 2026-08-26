@@ -4,6 +4,7 @@
   import { errorMessage as message } from '$lib/api/http';
   import NavIcon from '$lib/components/NavIcon.svelte';
   import CursorPagination from '$lib/components/CursorPagination.svelte';
+  import ReadOnlyNote from '$lib/components/ReadOnlyNote.svelte';
   import { listProviderPage } from '$lib/api/management/providers';
   import {
     cursorPaginationProps,
@@ -11,7 +12,7 @@
   } from '$lib/api/pagination';
   import { useRole } from '$lib/auth/useRole.svelte';
   import { formatDate } from '$lib/format';
-  import { providerStatus } from './providerEditor';
+  import { providerStatus, providerStatusTone } from './providerEditor';
 
   let { listState = $bindable() }: { listState: CursorHistory } = $props();
   const access = useRole();
@@ -37,9 +38,9 @@
     >{/if}
 </div>
 {#if !canManage}
-  <p class="read-only-note" role="note">
+  <ReadOnlyNote>
     Your role can view providers but not connect, edit, or activate them.
-  </p>
+  </ReadOnlyNote>
 {/if}
 
 {#if providers.isPending}
@@ -80,12 +81,8 @@
                 >{item.name}</a
               ></td
             ><td>{item.kind.replaceAll('_', ' ')}</td><td
-              ><span
-                class:success={item.active_revision != null &&
-                  !item.pending_activation}
-                class:warning={item.pending_activation ||
-                  item.state === 'draft'}
-                class="badge">{providerStatus(item)}</span
+              ><span class="badge {providerStatusTone(item)}"
+                >{providerStatus(item)}</span
               ></td
             ><td>{item.enabled_model_count} enabled</td><td
               >{item.last_probe_at

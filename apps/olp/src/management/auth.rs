@@ -9,6 +9,7 @@ use axum::{
 use olp_db::{
     identity::InstallationSetupInput, security::password::hash, security::password::verify,
     security::session_material::CsrfMaterial, security::session_material::SessionMaterial,
+    store::Store,
 };
 use serde::{Deserialize, Serialize};
 use tokio::sync::{Semaphore, SemaphorePermit};
@@ -30,6 +31,7 @@ use super::{
 };
 use crate::{
     bootstrap::mode_dependencies::ManagementState,
+    management::provenance::Provenance,
     public_http::problem::FieldErrors,
     public_http::problem::Problem,
     public_http::proxy::public_auth_source_target_digests,
@@ -87,6 +89,8 @@ pub(super) async fn authentication_capabilities(
 #[derive(Debug, Serialize, ToSchema)]
 pub(super) struct SetupStatus {
     pub setup_required: bool,
+    /// Name chosen during first-run setup; absent while setup is still required.
+    pub installation_name: Option<String>,
 }
 
 #[utoipa::path(
@@ -102,8 +106,11 @@ pub(super) async fn setup_status(
     State(state): State<ManagementState>,
 ) -> Result<Json<SetupStatus>, Problem> {
     let store = state.store();
-    let setup_required = store.setup_required().await.map_err(map_persistence)?;
-    Ok(Json(SetupStatus { setup_required }))
+    let installation_name = store.installation_name().await.map_err(map_persistence)?;
+    Ok(Json(SetupStatus {
+        setup_required: installation_name.is_none(),
+        installation_name,
+    }))
 }
 
 #[derive(Deserialize, ToSchema)]
@@ -144,6 +151,7 @@ pub(super) struct UserResponse {
 #[derive(Serialize, ToSchema)]
 pub(super) struct SessionResponse {
     pub user: UserResponse,
+    pub installation_name: String,
     #[schema(value_type = String)]
     csrf_token: WriteOnlySecret,
 }
@@ -153,6 +161,7 @@ impl fmt::Debug for SessionResponse {
         formatter
             .debug_struct("SessionResponse")
             .field("user", &self.user)
+            .field("installation_name", &self.installation_name)
             .field("csrf_token", &"[REDACTED]")
             .finish()
     }
@@ -176,10 +185,11 @@ impl fmt::Debug for SessionResponse {
 )]
 pub(super) async fn setup(
     State(state): State<ManagementState>,
+    Provenance(provenance): Provenance,
     Extension(FirstOwnerSetupAuthorized): Extension<FirstOwnerSetupAuthorized>,
     payload: Result<Json<SetupRequest>, JsonRejection>,
 ) -> Result<Response, Problem> {
-    let store = state.store();
+    let store = state.store().with_provenance(&provenance);
     validate_session_cookie_ttl(state.session_ttl)?;
     let request = json_payload(payload)?;
     validate_setup(&request)?;
@@ -196,6 +206,7 @@ pub(super) async fn setup(
         })?;
 
     let material = SessionMaterial::generate();
+    let installation_name = request.installation_name.trim().to_owned();
     let (owner, _) = store
         .setup_installation_with_session(
             InstallationSetupInput {
@@ -225,6 +236,7 @@ pub(super) async fn setup(
             display_name: owner.display_name,
             role: "owner".to_owned(),
         },
+        installation_name,
         state.session_ttl,
     )
 }
@@ -261,6 +273,7 @@ impl fmt::Debug for LoginRequest {
 )]
 pub(super) async fn login(
     State(state): State<ManagementState>,
+    Provenance(provenance): Provenance,
     connect_info: Option<Extension<ConnectInfo<SocketAddr>>>,
     headers: HeaderMap,
     payload: Result<Json<LoginRequest>, JsonRejection>,
@@ -276,7 +289,7 @@ pub(super) async fn login(
     enforce_origin(&state.public_origin, &headers)?;
     let request = json_payload(payload)?;
     validate_session_cookie_ttl(state.session_ttl)?;
-    let store = state.store();
+    let store = state.store().with_provenance(&provenance);
     // Admit every syntactically decoded login attempt before the inexpensive
     // validation branch below. Otherwise an attacker can rotate oversized
     // credentials to bypass the per-source budget while creating unbounded
@@ -347,6 +360,7 @@ pub(super) async fn login(
             display_name: user.display_name,
             role: user.role,
         },
+        installation_name(&store).await?,
         state.session_ttl,
     )
 }
@@ -363,6 +377,7 @@ pub(super) async fn login(
 )]
 pub(super) async fn current_session(
     State(state): State<ManagementState>,
+    Provenance(provenance): Provenance,
     headers: HeaderMap,
 ) -> Result<Response, Problem> {
     let principal = require_read_session(&state, &headers).await?;
@@ -384,6 +399,7 @@ pub(super) async fn current_session(
     if let Some(replacement) = replacement.as_ref() {
         let rotated = state
             .store()
+            .with_provenance(&provenance)
             .rotate_session_csrf(
                 principal.session_id,
                 principal.user_id,
@@ -417,6 +433,7 @@ pub(super) async fn current_session(
             display_name: principal.display_name,
             role: principal.role,
         },
+        installation_name: installation_name(state.store()).await?,
         csrf_token: WriteOnlySecret(csrf_token),
     })
     .into_response();
@@ -456,6 +473,7 @@ pub(super) fn csrf_recovery_cas_failure_response(session_is_current: bool) -> Re
 )]
 pub(super) async fn logout(
     State(state): State<ManagementState>,
+    Provenance(provenance): Provenance,
     headers: HeaderMap,
 ) -> Result<Response, Problem> {
     enforce_origin(&state.public_origin, &headers)?;
@@ -463,7 +481,11 @@ pub(super) async fn logout(
     let mut response = match parsed_token {
         Ok(token) => {
             if let Some(token) = token
-                && let Err(error) = state.store().revoke_session_by_token(token).await
+                && let Err(error) = state
+                    .store()
+                    .with_provenance(&provenance)
+                    .revoke_session_by_token(token)
+                    .await
             {
                 // Logout is intentionally idempotent and fail-closed in the browser.
                 // A transient database failure must not prevent credential expiry.
@@ -478,16 +500,28 @@ pub(super) async fn logout(
     Ok(response)
 }
 
+/// Reads the installation name every authenticated response carries. A live
+/// session implies the installation row exists.
+pub(super) async fn installation_name(store: &Store) -> Result<String, Problem> {
+    store
+        .installation_name()
+        .await
+        .map_err(map_persistence)?
+        .ok_or_else(Problem::internal)
+}
+
 pub(super) fn session_response(
     status: StatusCode,
     material: &SessionMaterial,
     user: UserResponse,
+    installation_name: String,
     session_ttl: chrono::Duration,
 ) -> Result<Response, Problem> {
     let mut response = (
         status,
         Json(SessionResponse {
             user,
+            installation_name,
             csrf_token: WriteOnlySecret(material.csrf_token().to_owned()),
         }),
     )

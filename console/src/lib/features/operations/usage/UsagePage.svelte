@@ -135,8 +135,13 @@
     </article>
     <article class="card pipeline-card">
       <p>Range coverage</p>
-      <strong>{usage.data.completeness.coverage.range_complete ? 'Exact' : 'Incomplete'}</strong>
-      <span>{usage.data.completeness.coverage.excluded_partial_aggregate_boundaries} partial retained-hour {usage.data.completeness.coverage.excluded_partial_aggregate_boundaries === 1 ? 'boundary' : 'boundaries'} excluded</span>
+      <strong class:danger-text={usage.data.completeness.coverage.approximate}>{usage.data.completeness.coverage.range_complete ? 'Exact' : 'Incomplete'}</strong>
+      <span>{usage.data.completeness.coverage.approximate ? 'Approximate totals · ' : ''}{usage.data.completeness.coverage.excluded_partial_aggregate_boundaries} partial retained-hour {usage.data.completeness.coverage.excluded_partial_aggregate_boundaries === 1 ? 'boundary' : 'boundaries'} excluded</span>
+    </article>
+    <article class="card pipeline-card">
+      <p>Priced requests</p>
+      <strong>{formatCompact(usage.data.completeness.priced_count)}</strong>
+      <span>of {formatCompact(usage.data.completeness.request_count)} requests in range</span>
     </article>
     <article class="card pipeline-card">
       <p>Gateway epoch uncertainty</p>
@@ -148,11 +153,12 @@
   <section class="metric-grid" aria-label="Usage summary">
     <article class="card metric-card"><p>Requests</p><strong>{formatCompact(usage.data.summary.request_count)}</strong></article>
     <article class="card metric-card"><p>Input / output tokens</p><strong>{formatCompact(usage.data.summary.input_tokens)} / {formatCompact(usage.data.summary.output_tokens)}</strong></article>
+    <article class="card metric-card"><p>Cached input tokens</p><strong>{formatCompact(usage.data.summary.cached_input_tokens)}</strong></article>
     <article class="card metric-card"><p>Media units</p><strong>{formatCompact(usage.data.summary.media_units)}</strong></article>
     <article class="card metric-card"><p>Estimated cost</p><strong class:unpriced={usage.data.summary.estimated_cost == null}>{formatCost(usage.data.summary.estimated_cost, usage.data.summary.currency)}</strong></article>
   </section>
 
-  <UsageChart points={usage.data.points} granularity={applied.granularity} />
+  <UsageChart points={usage.data.points} granularity={applied.granularity} title={applied.granularity === 'day' ? 'Requests per day' : 'Requests per hour'} />
 
   <section class="breakdown" aria-labelledby="breakdown-title">
     <div class="section-heading"><div><p class="eyebrow">Breakdown</p><h2 id="breakdown-title">By {applied.dimension.replace('_', ' ')}</h2></div><span class="badge">Top {usage.data.breakdown.length}</span></div>
@@ -163,8 +169,8 @@
       <div class="table-shell" tabindex="0" role="region" aria-label="Usage breakdown">
         <table class="data-table">
           <caption class="sr-only">Usage breakdown by {applied.dimension}</caption>
-          <thead><tr><th scope="col">{applied.dimension.replace('_', ' ')}</th><th scope="col">Requests</th><th scope="col">Input tokens</th><th scope="col">Output tokens</th><th scope="col">Estimated cost</th><th scope="col">Completeness</th></tr></thead>
-          <tbody>{#each usage.data.breakdown as row (row.dimension)}<tr><td><strong>{row.dimension}</strong></td><td>{formatCompact(row.request_count)}</td><td>{formatCompact(row.input_tokens)}</td><td>{formatCompact(row.output_tokens)}</td><td>{formatCost(row.estimated_cost, row.currency)}</td><td>{#if row.incomplete_count > 0}<span class="badge danger">{row.incomplete_count} incomplete</span>{:else if row.unpriced_count > 0}<span class="badge warning">{row.unpriced_count} unpriced</span>{:else}<span class="badge success">Complete</span>{/if}</td></tr>{/each}</tbody>
+          <thead><tr><th scope="col">{applied.dimension.replace('_', ' ')}</th><th scope="col">Requests</th><th scope="col">Input tokens</th><th scope="col">Cached input</th><th scope="col">Output tokens</th><th scope="col">Estimated cost</th><th scope="col">Completeness</th></tr></thead>
+          <tbody>{#each usage.data.breakdown as row (row.dimension)}<tr><td><strong>{row.dimension}</strong></td><td>{formatCompact(row.request_count)}</td><td>{formatCompact(row.input_tokens)}</td><td>{formatCompact(row.cached_input_tokens)}</td><td>{formatCompact(row.output_tokens)}</td><td>{formatCost(row.estimated_cost, row.currency)}</td><td>{#if row.incomplete_count > 0}<span class="badge danger">{row.incomplete_count} incomplete</span>{:else if row.unpriced_count > 0}<span class="badge warning">{row.unpriced_count} unpriced</span>{:else}<span class="badge success">Complete</span>{/if}</td></tr>{/each}</tbody>
         </table>
       </div>
     {/if}
@@ -177,6 +183,7 @@
   label { display: grid; gap: 0.35rem; color: var(--foreground-muted); font-size: 0.75rem; font-weight: 700; }
   input, select { width: 100%; min-height: 2.5rem; padding: 0.5rem 0.7rem; border: 1px solid var(--border-strong); border-radius: 0.375rem; background: var(--surface); color: var(--foreground); }
   .filter-actions { display: flex; gap: 0.65rem; margin-top: 1rem; }
+  .metric-grid { grid-template-columns: repeat(auto-fit, minmax(10.5rem, 1fr)); }
   .pipeline-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr)); gap: 0.75rem; margin-top: 1rem; }
   .pipeline-card { display: grid; gap: 0.2rem; padding: 0.9rem 1rem; }
   .pipeline-card p, .pipeline-card span { margin: 0; color: var(--foreground-muted); }

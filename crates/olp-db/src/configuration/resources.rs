@@ -25,7 +25,7 @@ use crate::{
     },
     security::{envelope::EncryptedSecret, key_material::ApiKey},
     split_page,
-    store::Store,
+    store::{RequestProvenance, Store},
 };
 
 use super::{
@@ -131,6 +131,9 @@ pub struct ProviderRecord {
     pub certified_capability_count: u64,
     /// First configured model used only for connector probes that require one.
     pub probe_model: Option<String>,
+    /// Email of the operator who created the provider; absent once that user
+    /// is removed.
+    pub created_by_email: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -263,6 +266,9 @@ pub struct RouteDraftRecord {
     pub targets: Vec<RouteTargetRecord>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+    /// Email of the operator who created the draft; absent once that user is
+    /// removed.
+    pub created_by_email: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -295,6 +301,9 @@ pub struct RouteRecord {
     pub id: Uuid,
     pub slug: String,
     pub created_at: DateTime<Utc>,
+    /// Email of the operator who created the route; absent once that user is
+    /// removed.
+    pub created_by_email: Option<String>,
     pub revision_count: u64,
     pub latest_revision: RouteRevisionRecord,
 }

@@ -34,6 +34,7 @@ export type ProviderEditValues = {
 
 export type ProviderReadiness = {
   state: string;
+  connector_ready: boolean;
   enabled_model_count: number;
   capability_count: number;
   certified_capability_count: number;
@@ -46,6 +47,9 @@ export type ProviderStatusValue = Pick<ProviderReadiness, 'state'> & {
   active_revision?: number | null;
   pending_activation: boolean;
 };
+
+/** Badge class for a provider status line. */
+export type ProviderStatusTone = 'success' | 'warning' | 'danger';
 
 export function createProviderDraft(
   spec: ProviderKindCapability
@@ -257,6 +261,26 @@ export function parseManualModelNames(value: string): string[] {
     .filter(Boolean);
 }
 
+export type ProbeSummary = {
+  probe_type: string;
+  detail: string;
+  discovered_models?: number | null;
+};
+
+/** Probe result line: the server detail, which probe ran, and models seen. */
+export function probeSummary(probe: ProbeSummary): string {
+  const parts = [
+    probe.detail,
+    `${probe.probe_type.replaceAll('_', ' ')} probe`
+  ];
+  if (probe.discovered_models != null) {
+    parts.push(
+      `${probe.discovered_models} model${probe.discovered_models === 1 ? '' : 's'} seen`
+    );
+  }
+  return parts.join(' · ');
+}
+
 export function probeReady(
   current: ProviderReadiness | null | undefined
 ): boolean {
@@ -282,20 +306,47 @@ export function capabilitiesCertified(
   );
 }
 
+/**
+ * Mirrors the server's activation precondition. `connector_ready` reports
+ * whether this build carries a usable connector for the provider kind; it is
+ * not a capability signal, so it gates activation alongside the certification
+ * counts rather than replacing them.
+ */
 export function activationReady(
   current: ProviderReadiness | null | undefined
 ): boolean {
   return Boolean(
     current?.state === 'draft' &&
+    current.connector_ready &&
     capabilitiesCertified(current) &&
     probeReady(current)
   );
 }
 
 export function providerStatus(current: ProviderStatusValue): string {
-  return current.pending_activation
-    ? `revision ${current.active_revision} live · changes pending`
-    : current.active_revision != null
-      ? `revision ${current.active_revision} active`
-      : current.state;
+  if (current.pending_activation)
+    return `revision ${current.active_revision} live · changes pending`;
+  if (current.active_revision != null)
+    return `revision ${current.active_revision} active`;
+  return current.state === 'disabled'
+    ? 'disabled · not serving'
+    : current.state;
+}
+
+/**
+ * The server rejects certification for a model carrying more than 16 reviewed
+ * tuples (`docs/operations.md`, "OpenAI-compatible capability certification").
+ */
+export const MAX_REVIEWED_CAPABILITIES = 16;
+
+export function capabilityLimitReached(reviewedCount: number): boolean {
+  return reviewedCount >= MAX_REVIEWED_CAPABILITIES;
+}
+
+export function providerStatusTone(
+  current: ProviderStatusValue
+): ProviderStatusTone {
+  if (current.pending_activation) return 'warning';
+  if (current.active_revision != null) return 'success';
+  return current.state === 'disabled' ? 'danger' : 'warning';
 }

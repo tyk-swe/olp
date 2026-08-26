@@ -29,6 +29,7 @@ use crate::{
         json_payload::json_payload,
         permissions::require_permission,
         preconditions::{optional_if_match, with_etag},
+        provenance::Provenance,
         sessions::{require_mutation_session, require_read_session},
     },
     public_http::problem::Problem,
@@ -102,6 +103,8 @@ pub(super) struct OidcConfigurationResponse {
     pub(super) default_role: Option<String>,
     pub(super) email_role_mappings: Vec<OidcRoleMappingResponse>,
     pub(super) group_role_mappings: Vec<OidcRoleMappingResponse>,
+    /// Email of the operator who last saved this configuration.
+    pub(super) updated_by_email: Option<String>,
     #[schema(value_type = String, format = Uuid)]
     pub(super) etag: Uuid,
 }
@@ -194,6 +197,7 @@ pub(super) async fn get_configuration(
 )]
 pub(super) async fn put_configuration(
     State(state): State<ManagementState>,
+    Provenance(provenance): Provenance,
     headers: HeaderMap,
     payload: Result<Json<OidcConfigurationRequest>, JsonRejection>,
 ) -> Result<Response, Problem> {
@@ -202,7 +206,7 @@ pub(super) async fn put_configuration(
     let request = json_payload(payload)?;
     let policy = network_policy(&state);
     validate_configuration_request(&request, policy.allow_insecure_test_endpoints)?;
-    let store = state.store();
+    let store = state.store().with_provenance(&provenance);
     let existing = store.oidc_configuration().await.map_err(map_oidc)?;
     let expected_etag = optional_if_match(&headers)?;
     if existing.is_some() && expected_etag.is_none() {
@@ -580,6 +584,7 @@ fn configuration_response(configuration: OidcConfiguration) -> Result<Response, 
                 .into_iter()
                 .map(mapping_response)
                 .collect(),
+            updated_by_email: configuration.updated_by_email,
             etag,
         }),
         etag,

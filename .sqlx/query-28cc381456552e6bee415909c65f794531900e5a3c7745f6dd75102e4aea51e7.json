@@ -1,0 +1,18 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO audit_events (id, actor_user_id, action, resource_type, resource_id, outcome, occurred_at, source_ip, user_agent_family) VALUES ($1, $2, 'local_auth.login', 'session', NULL, 'failure', $3, $4::text::inet, $5)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Timestamptz",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "28cc381456552e6bee415909c65f794531900e5a3c7745f6dd75102e4aea51e7"
+}

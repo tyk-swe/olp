@@ -1,7 +1,8 @@
 use chrono::{Duration, Timelike, Utc};
 use olp_db::{
     idempotency::Outcome as IdempotencyOutcome, idempotency::Replayable, idempotency::Response,
-    identity::InstallationSetupInput, operations::cursor::Error, operations::pricing::PriceInput,
+    identity::InstallationSetupInput, operations::audit::Filters as AuditFilters,
+    operations::cursor::Error, operations::pricing::PriceInput,
     operations::requests::RequestFilters, request_metadata::delivery_health::ConsumerState,
     request_metadata::ingestion::Outcome as IngestionOutcome,
     request_metadata::reconciliation::Gap, request_metadata::reconciliation::GatewayEpochState,

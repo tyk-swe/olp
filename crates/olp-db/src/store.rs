@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::{net::IpAddr, time::Duration};
 
 use sqlx::{PgPool, migrate::Migrate as _, postgres::PgPoolOptions};
 
@@ -8,9 +8,28 @@ use crate::error::Error;
 ///
 /// Feature-specific queries are implemented in their owning modules; this
 /// module owns only pool construction, access, migration, and liveness.
+/// Boundary attribution recorded on the audit rows a request produces. The
+/// full user-agent string is never stored; only its leading product token.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct RequestProvenance {
+    pub source_ip: Option<IpAddr>,
+    pub user_agent_family: Option<String>,
+}
+
+impl RequestProvenance {
+    pub(crate) fn source_ip_text(&self) -> Option<String> {
+        self.source_ip.map(|address| address.to_string())
+    }
+
+    pub(crate) fn user_agent_family(&self) -> Option<&str> {
+        self.user_agent_family.as_deref()
+    }
+}
+
 #[derive(Clone)]
 pub struct Store {
     pool: PgPool,
+    provenance: RequestProvenance,
 }
 
 impl Store {
@@ -37,12 +56,34 @@ impl Store {
             })
             .connect(database_url)
             .await?;
-        Ok(Self { pool })
+        Ok(Self {
+            pool,
+            provenance: RequestProvenance::default(),
+        })
     }
 
     #[must_use]
     pub fn from_pool(pool: PgPool) -> Self {
-        Self { pool }
+        Self {
+            pool,
+            provenance: RequestProvenance::default(),
+        }
+    }
+
+    /// Returns a handle whose audit writes carry the request boundary's
+    /// attribution. Handles that never receive one - workers, maintenance, and
+    /// reconciliation - write audit rows without it.
+    #[must_use]
+    pub fn with_provenance(&self, provenance: &RequestProvenance) -> Self {
+        Self {
+            pool: self.pool.clone(),
+            provenance: provenance.clone(),
+        }
+    }
+
+    #[must_use]
+    pub(crate) fn provenance(&self) -> &RequestProvenance {
+        &self.provenance
     }
 
     #[must_use]

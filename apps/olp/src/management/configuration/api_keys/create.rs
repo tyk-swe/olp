@@ -28,6 +28,7 @@ use crate::management::{
 use crate::{bootstrap::mode_dependencies::ManagementState, public_http::problem::Problem};
 
 use super::policy::{ExpirationValidation, RawApiKeyPolicy, normalize_api_key_policy};
+use crate::management::provenance::Provenance;
 
 #[derive(Debug, Deserialize, Serialize, ToSchema)]
 pub(crate) struct CreateApiKeyRequest {
@@ -86,6 +87,7 @@ impl fmt::Debug for CreateApiKeyResponse {
 )]
 pub(crate) async fn create_api_key(
     State(state): State<ManagementState>,
+    Provenance(provenance): Provenance,
     headers: HeaderMap,
     payload: Result<Json<CreateApiKeyRequest>, JsonRejection>,
 ) -> Result<Response, Problem> {
@@ -117,6 +119,7 @@ pub(crate) async fn create_api_key(
     };
     let created = state
         .store()
+        .with_provenance(&provenance)
         .create_api_key_record(
             &record,
             Replayable::new(request_fingerprint, master_key),
@@ -160,6 +163,7 @@ pub(crate) async fn create_api_key(
 )]
 pub(crate) async fn revoke_api_key(
     State(state): State<ManagementState>,
+    Provenance(provenance): Provenance,
     Path(api_key_id): Path<Uuid>,
     headers: HeaderMap,
 ) -> Result<Response, Problem> {
@@ -181,6 +185,7 @@ pub(crate) async fn revoke_api_key(
     }
     let revoked = state
         .store()
+        .with_provenance(&provenance)
         .revoke_api_key_record(api_key_id, expected_etag, principal.user_id, mutation.key())
         .await
         .map_err(map_access)?;

@@ -61,11 +61,6 @@ Use `#[tokio::test(start_paused = true)]` with a fake transport: fail-once-then-
 **Where:** `tests/conformance/tests/conformance/provider_connectors/matrix.rs`
 Connectors now populate `UpstreamSignal.retry_after`; flip the disposition and assert against the existing `retry-after: 7` mocks.
 
-### ReauthenticateDialog has no vitest or Playwright coverage
-**Priority:** P2
-**Where:** `console/src/lib/components/ReauthenticateDialog.svelte`, `ProfilePage.svelte`
-Cover wrong password (dialog stays open with inline error) and empty password.
-
 ### retire_invitations_on_access_loss only tested via update_user_access
 **Priority:** P3
 **Where:** `crates/olp-db/tests/integration/persistence_correctness_postgres.rs`
@@ -86,14 +81,10 @@ Intentional unification; confirm no client depends on 422.
 **Priority:** P4
 **Where:** `apps/olp/src/management/pagination.rs`, `apps/olp/src/management/operations/helpers.rs`
 
-## Console
-
-### Read-only note markup copied across ~9 components
-**Priority:** P4
-Extract a `ReadOnlyNote.svelte`.
-
 ## Completed
 
 - Idempotent replay for revoke/activate/disable/restore. **Completed:** v2.0.1 (2026-08-25)
 - `allowed_routes: []` documentation matches enforcement. **Completed:** v2.0.1 (2026-08-25)
 - Bedrock shares the Retry-After parser. **Completed:** v2.0.1 (2026-08-25)
+- ReauthenticateDialog vitest coverage for the wrong-password and empty-password paths. **Completed:** 2026-08-26
+- Read-only note markup extracted into `ReadOnlyNote.svelte`. **Completed:** 2026-08-26

@@ -5,6 +5,74 @@ All notable changes to OpenLLMProxy are recorded here. The format follows
 semantic versioning and match `Cargo.toml`, `console/package.json`,
 `deploy/helm/Chart.yaml` and `deploy/Dockerfile`.
 
+## [Unreleased]
+
+Backend capability that shipped without a console, and console pages that
+fetched data they never showed, are now wired end to end. Dead code and dead
+schema found in the same audit are gone.
+
+### Added
+
+**Management API**
+- `GET /api/v1/audit` filters: `action`, `resource_type`, `resource_id`,
+  `actor_user_id`, `outcome`, `occurred_after`, `occurred_before`. Events now
+  record `source_ip` (same trusted-proxy rules as admission) and a coarse
+  `user_agent_family` for session-driven actions; worker-originated rows leave
+  both null.
+- `installation_name` on `SetupStatus` and `SessionResponse`; the setup form
+  can set it.
+- `created_by_email` on providers, routes and route drafts;
+  `invited_by_email`/`accepted_by_email`/`revoked_by_email` on invitations;
+  `updated_by_email` on the OIDC configuration.
+- Provider 422 responses carry `error_codes` (`{field: [code]}`) alongside
+  `errors`.
+- `uncertainty_gap_id` on gateway-epoch responses.
+- Readiness reports `media_spool_used_bytes`/`media_spool_capacity_bytes`;
+  metrics gain `olp_media_spool_{used,capacity}_bytes` and
+  `olp_request_metadata_loss_reported_total{kind}`. Loss checkpoints are logged
+  instead of discarded.
+
+**Console**
+- Providers: disable and restore-as-draft actions (with the 409 "still routed"
+  detail inline), a `disabled` badge, per-revision viewer with the historical
+  model/capability inventory, probe type and discovered-model count,
+  credential-restored notice, certification `error_code`, `discovered_at`,
+  client-side 16-tuple cap, `connector_ready` as an activation gate.
+- Health: asynchronous plane, worker staleness, runtime outbox, media
+  reconciliation, persistence pipeline and media spool sections with ages
+  checked against the runbook thresholds; provider-health window selector;
+  full gateway-epoch acknowledgement provenance.
+- Usage/Requests/Settings: cached-input tokens everywhere the API returns them,
+  `cached_input_per_million` in the pricing form, approximate-range and
+  priced-count notes, `completed_at` on requests and attempts, who-updated on
+  settings and pricing revisions.
+- Media jobs: api key, provider and created-at range filters; lifecycle and
+  retention timestamps; stacked layout on narrow viewports.
+- Playground: temperature and max-output-token controls; refusals,
+  `finish_reason`, `provider_model` and full usage are shown (a refusal no
+  longer renders as an empty result).
+- Audit page filters and origin columns; installation name in the shell;
+  invitation expiry selector and accepted/revoked/created timestamps; API key
+  `rotated_at`; route draft provenance and revision anchors; activation now
+  adopts the returned `draft_etag`.
+- `ReadOnlyNote` component replaces 12 copies of the same markup;
+  `ReauthenticateDialog` unit tests; eslint now checks `.svelte` scripts and
+  `noUnusedLocals` is on.
+
+### Removed
+- Unreachable `CapabilitySource::Probed`, `ResponsesCodecError::{UnsupportedTool,
+  TokenCountSemanticsUnsupported}`, `Error::InvalidRuntimeSnapshot`,
+  `decode_video_content`, the superseded domain-level last-owner check, and
+  never-read `AcceptedInvitation` fields. Test-only store/engine helpers are
+  gated behind `test-util`.
+- Migrations 0038-0040: orphaned cursor indexes, the dead per-browser OIDC
+  limiter column and scope, `request_metadata_loss_reporter_state`, and the
+  duplicate `attempt_usage_facts.attempt_{started,completed}_at` columns.
+
+### Changed
+- A test asserts every mounted management route appears in the OpenAPI
+  document.
+
 ## [2.0.1] - 2026-08-25
 
 ### Fixed

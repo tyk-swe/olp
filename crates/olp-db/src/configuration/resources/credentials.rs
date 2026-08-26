@@ -121,6 +121,7 @@ impl Store {
         .await?;
         audit_in_transaction(
             &mut transaction,
+            self.provenance(),
             input.actor,
             "provider.rotate_credential",
             "provider",
@@ -322,6 +323,7 @@ impl Store {
         .await?;
         audit_in_transaction(
             &mut transaction,
+            self.provenance(),
             actor,
             "provider.revoke_credential",
             "provider",

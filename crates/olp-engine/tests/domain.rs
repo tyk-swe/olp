@@ -7,8 +7,7 @@ use chrono::{Duration, TimeZone, Utc};
 use olp_engine::domain::{
     auth::{
         ApiKey, ApiKeyAuthorizationError, ApiKeyDigest, ApiKeyLimits, ApiKeyScope, ApiKeyStatus,
-        GatewayCapability, OwnerInvariantError, Permission, Role, authorize_api_key,
-        validate_owner_change,
+        GatewayCapability, authorize_api_key,
     },
     canonical::{
         events::{
@@ -599,17 +598,6 @@ fn key_authorization_enforces_status_expiry_scope_and_route() {
         ),
         Err(ApiKeyAuthorizationError::RouteNotAllowed { .. })
     ));
-}
-
-#[test]
-fn last_owner_cannot_be_demoted_or_removed() {
-    assert_eq!(
-        validate_owner_change(Role::Owner, Some(Role::Operator), 1),
-        Err(OwnerInvariantError::LastOwner)
-    );
-    assert_eq!(validate_owner_change(Role::Owner, None, 2), Ok(()));
-    assert!(Role::Operator.allows(Permission::ManageRoutes));
-    assert!(!Role::Viewer.allows(Permission::ManageRoutes));
 }
 
 #[test]

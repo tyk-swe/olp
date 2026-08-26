@@ -15,6 +15,7 @@
   import { FIXED_ROLES } from '$lib/auth/authorization';
   import { useRole } from '$lib/auth/useRole.svelte';
   import CursorPagination from '$lib/components/CursorPagination.svelte';
+  import ReadOnlyNote from '$lib/components/ReadOnlyNote.svelte';
   import { formatDate } from '$lib/format';
 
   const queryClient = useQueryClient();
@@ -99,9 +100,9 @@
 </script>
 
 {#if !canManage}
-  <p class="read-only-note" role="note">
+  <ReadOnlyNote>
     Your role can view members but not change roles or deactivate accounts.
-  </p>
+  </ReadOnlyNote>
 {/if}
 {#if error}<div class="inline-problem" role="alert">{error}</div>{/if}
 {#if notice}<div class="success-banner" role="status">{notice}</div>{/if}

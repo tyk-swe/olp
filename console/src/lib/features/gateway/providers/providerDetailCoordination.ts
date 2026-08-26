@@ -41,7 +41,7 @@ export async function fetchCoordinatedModelPage(
   };
 }
 
-export function cacheCoordinatedModelPage(
+function cacheCoordinatedModelPage(
   queryClient: QueryClient,
   coordinated: CoordinatedModelPage,
   cursor: string | undefined

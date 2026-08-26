@@ -279,7 +279,7 @@ fn request_metadata_gateway_epochs_query(
     let mut query = QueryBuilder::<Postgres>::new(
         "SELECT gateway_instance, process_epoch, started_at, updated_at, accepted, persisted, \
                     dropped, abandoned, retrying, writer_closed, gracefully_closed_at, \
-                    stale_detected_at, acknowledged_at, acknowledged_by, \
+                    stale_detected_at, acknowledged_at, acknowledged_by, uncertainty_gap_id, \
                     CASE WHEN stale_detected_at IS NOT NULL \
                          THEN GREATEST(accepted - persisted - abandoned, 0) ELSE 0 END \
                       AS uncertain_lower_bound \
@@ -328,6 +328,7 @@ struct RequestMetadataGatewayEpochRow {
     stale_detected_at: Option<DateTime<Utc>>,
     acknowledged_at: Option<DateTime<Utc>>,
     acknowledged_by: Option<uuid::Uuid>,
+    uncertainty_gap_id: Option<uuid::Uuid>,
     uncertain_lower_bound: i64,
 }
 
@@ -367,6 +368,7 @@ fn request_metadata_gateway_epoch_from_row(
         stale_detected_at,
         acknowledged_at,
         acknowledged_by: row.acknowledged_by,
+        uncertainty_gap_id: row.uncertainty_gap_id,
     })
 }
 
@@ -393,6 +395,7 @@ mod tests {
             stale_detected_at: None,
             acknowledged_at: None,
             acknowledged_by: Some(Uuid::now_v7()),
+            uncertainty_gap_id: Some(Uuid::now_v7()),
             uncertain_lower_bound: 1,
         }
     }

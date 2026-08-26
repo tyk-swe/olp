@@ -23,6 +23,7 @@ use crate::{
         idempotency::{idempotency_http_response, require_idempotency_key},
         json_payload::json_payload,
         permissions::require_permission,
+        provenance::Provenance,
         sessions::{require_mutation_session, require_read_session},
     },
     public_http::problem::Problem,
@@ -220,6 +221,7 @@ pub(super) async fn list_pricing_revisions(
 )]
 pub(super) async fn create_pricing_revision(
     State(state): State<ManagementState>,
+    Provenance(provenance): Provenance,
     headers: HeaderMap,
     payload: Result<Json<PricingRevisionRequest>, JsonRejection>,
 ) -> Result<Response, Problem> {
@@ -239,6 +241,7 @@ pub(super) async fn create_pricing_revision(
         .collect::<Vec<_>>();
     let revision = state
         .store()
+        .with_provenance(&provenance)
         .create_pricing_revision(
             principal.user_id,
             &idempotency_key,

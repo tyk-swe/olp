@@ -55,8 +55,14 @@ async fn identity_http_flow_enforces_sessions_csrf_roles_and_owner_guard() {
     let owner_cookie = cookie_header(&setup);
     let setup_body = response_json(setup).await;
     let owner_csrf = setup_body["csrf_token"].as_str().unwrap().to_owned();
+    assert_eq!(setup_body["installation_name"], "HTTP identity test");
     let owner_id = setup_body["user"]["id"].as_str().unwrap().to_owned();
     let owner_uuid = uuid::Uuid::parse_str(&owner_id).unwrap();
+    let status = send_empty(&app, Method::GET, "/api/v1/setup/status", None, None, None).await;
+    assert_eq!(status.status(), StatusCode::OK);
+    let status_body = response_json(status).await;
+    assert_eq!(status_body["setup_required"], false);
+    assert_eq!(status_body["installation_name"], "HTTP identity test");
     let stale_activity = chrono::Utc::now() - chrono::Duration::minutes(10);
     sqlx::query("UPDATE sessions SET last_seen_at = $1 WHERE user_id = $2")
         .bind(stale_activity)
@@ -491,7 +497,7 @@ async fn identity_http_flow_enforces_sessions_csrf_roles_and_owner_guard() {
     );
 
     let login_audits = sqlx::query(
-        "SELECT actor_user_id, outcome, resource_id, source_ip::text AS source_ip, \
+        "SELECT actor_user_id, outcome, resource_id, host(source_ip) AS source_ip, \
                 user_agent_family \
          FROM audit_events WHERE action = 'local_auth.login' ORDER BY occurred_at",
     )
@@ -513,9 +519,14 @@ async fn identity_http_flow_enforces_sessions_csrf_roles_and_owner_guard() {
             && row.get::<Option<uuid::Uuid>, _>("actor_user_id").is_none()
             && row.get::<Option<String>, _>("resource_id").is_none()
     }));
+    // No trusted proxy is configured, so the connected peer is authoritative
+    // and no forwarding header can influence it. No request carried a
+    // user-agent, so the family stays empty.
     assert!(login_audits.iter().all(|row| {
-        row.get::<Option<String>, _>("source_ip").is_none()
-            && row.get::<Option<String>, _>("user_agent_family").is_none()
+        matches!(
+            row.get::<Option<String>, _>("source_ip").as_deref(),
+            Some("198.51.100.11" | "198.51.100.200")
+        ) && row.get::<Option<String>, _>("user_agent_family").is_none()
     }));
 
     let audit = send_empty(
@@ -529,9 +540,158 @@ async fn identity_http_flow_enforces_sessions_csrf_roles_and_owner_guard() {
     .await;
     assert_eq!(audit.status(), StatusCode::OK);
     for event in response_json(audit).await["data"].as_array().unwrap() {
-        assert!(event.get("source_ip").is_none());
-        assert!(event.get("user_agent_family").is_none());
+        assert!(event["source_ip"].is_string());
+        assert!(event["user_agent_family"].is_null());
     }
+}
+
+#[tokio::test]
+#[ignore = "requires OLP_TEST_DATABASE_ADMIN_URL and OLP_TEST_DATABASE_URL_PREFIX"]
+async fn audit_provenance_follows_the_trusted_proxy_boundary() {
+    let db = olp_db::test_support::TestDb::create_migrated("audit_provenance").await;
+    let store = db.store(5).await;
+    let mut state = ProcessComposition::new(
+        ApiMode::Control,
+        Some(store.clone()),
+        Arc::new(Manager::empty()),
+        ORIGIN,
+        PathBuf::from("missing-console-for-api-test"),
+    );
+    state.master_key = Some(Arc::new(MasterKey::new(1, [7; 32])));
+    state.set_trusted_proxy_cidrs(vec!["198.51.100.0/24".parse().unwrap()]);
+    configure_bootstrap(&mut state, [8; 32]);
+    let app = management_router_for_test(state.mode_dependencies().unwrap().management().unwrap());
+
+    let setup = attributed_request(
+        &app,
+        Method::POST,
+        "/api/v1/setup",
+        Some(json!({
+            "email": "owner@example.test",
+            "password": "correct horse battery staple",
+            "display_name": "Owner",
+            "installation_name": "Audit provenance test"
+        })),
+        None,
+        None,
+        Some("203.0.113.7"),
+        Some("curl/8.5.0 (x86_64-pc-linux-gnu) libcurl/8.5.0"),
+    )
+    .await;
+    assert_eq!(setup.status(), StatusCode::CREATED);
+    let owner_cookie = cookie_header(&setup);
+    let setup_body = response_json(setup).await;
+    let owner_csrf = setup_body["csrf_token"].as_str().unwrap().to_owned();
+
+    let setup_audit = sqlx::query(
+        "SELECT host(source_ip) AS source_ip, user_agent_family FROM audit_events \
+         WHERE action = 'installation.setup'",
+    )
+    .fetch_one(store.pool())
+    .await
+    .unwrap();
+    assert_eq!(
+        setup_audit.get::<Option<String>, _>("source_ip").as_deref(),
+        Some("203.0.113.7")
+    );
+    assert_eq!(
+        setup_audit
+            .get::<Option<String>, _>("user_agent_family")
+            .as_deref(),
+        Some("curl")
+    );
+
+    let profile = attributed_request(
+        &app,
+        Method::GET,
+        "/api/v1/profile",
+        None,
+        Some(&owner_cookie),
+        None,
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(profile.status(), StatusCode::OK);
+    let profile_etag = profile.headers()[header::ETAG].to_str().unwrap().to_owned();
+
+    // A trusted proxy that omits the forwarding chain leaves no client address
+    // to record; the request is still served and the column stays null.
+    let renamed = attributed_request(
+        &app,
+        Method::PATCH,
+        "/api/v1/profile",
+        Some(json!({ "display_name": "Renamed Owner" })),
+        Some(&owner_cookie),
+        Some((&owner_csrf, &profile_etag)),
+        None,
+        Some("python-requests/2.31.0"),
+    )
+    .await;
+    assert_eq!(renamed.status(), StatusCode::OK);
+
+    let profile_audit = sqlx::query(
+        "SELECT host(source_ip) AS source_ip, user_agent_family FROM audit_events \
+         WHERE action = 'user.profile_update'",
+    )
+    .fetch_one(store.pool())
+    .await
+    .unwrap();
+    assert!(
+        profile_audit
+            .get::<Option<String>, _>("source_ip")
+            .is_none()
+    );
+    assert_eq!(
+        profile_audit
+            .get::<Option<String>, _>("user_agent_family")
+            .as_deref(),
+        Some("python-requests")
+    );
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn attributed_request(
+    app: &Router,
+    method: Method,
+    uri: &str,
+    body: Option<Value>,
+    cookie: Option<&str>,
+    csrf_and_etag: Option<(&str, &str)>,
+    forwarded_for: Option<&str>,
+    user_agent: Option<&str>,
+) -> Response<Body> {
+    let mut builder = Request::builder().method(method.clone()).uri(uri);
+    if method != Method::GET {
+        builder = builder.header(header::ORIGIN, ORIGIN);
+    }
+    if let Some(cookie) = cookie {
+        builder = builder.header(header::COOKIE, cookie);
+    }
+    if let Some((csrf, etag)) = csrf_and_etag {
+        builder = builder.header("x-csrf-token", csrf);
+        builder = builder.header(header::IF_MATCH, etag);
+    }
+    if let Some(forwarded_for) = forwarded_for {
+        builder = builder.header("x-forwarded-for", forwarded_for);
+    }
+    if let Some(user_agent) = user_agent {
+        builder = builder.header(header::USER_AGENT, user_agent);
+    }
+    if uri == "/api/v1/setup" {
+        builder = builder.header("x-olp-setup-token", BOOTSTRAP_TOKEN);
+    }
+    let body = if let Some(body) = body {
+        builder = builder.header(header::CONTENT_TYPE, "application/json");
+        Body::from(body.to_string())
+    } else {
+        Body::empty()
+    };
+    let mut request = builder.body(body).unwrap();
+    request.extensions_mut().insert(axum::extract::ConnectInfo(
+        "198.51.100.11:443".parse::<std::net::SocketAddr>().unwrap(),
+    ));
+    app.clone().oneshot(request).await.unwrap()
 }
 
 async fn send_json(

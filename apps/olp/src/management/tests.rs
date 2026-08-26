@@ -19,6 +19,10 @@ use olp_engine::inference::runtime::Manager;
 use utoipa::OpenApi;
 use uuid::Uuid;
 
+use olp_db::store::RequestProvenance;
+
+use crate::management::provenance::Provenance;
+
 use super::{
     ApiDoc,
     access::invitations::{
@@ -235,9 +239,13 @@ async fn logout_without_a_server_side_session_still_expires_every_browser_creden
         header::COOKIE,
         HeaderValue::from_static("__Host-olp_session=already-revoked"),
     );
-    let response = logout(axum::extract::State(state()), headers)
-        .await
-        .unwrap();
+    let response = logout(
+        axum::extract::State(state()),
+        Provenance(RequestProvenance::default()),
+        headers,
+    )
+    .await
+    .unwrap();
     assert_eq!(response.status(), StatusCode::NO_CONTENT);
     let cookies = response
         .headers()
@@ -279,9 +287,13 @@ async fn logout_rejects_conflicting_cookies_but_still_expires_browser_credential
         header::COOKIE,
         HeaderValue::from_static("__Host-olp_session=second"),
     );
-    let response = logout(axum::extract::State(state()), headers)
-        .await
-        .unwrap();
+    let response = logout(
+        axum::extract::State(state()),
+        Provenance(RequestProvenance::default()),
+        headers,
+    )
+    .await
+    .unwrap();
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     let expired = response
         .headers()

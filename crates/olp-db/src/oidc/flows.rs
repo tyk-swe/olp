@@ -95,6 +95,7 @@ impl Store {
                 }
                 insert_security_audit(
                     &mut transaction,
+                    self.provenance(),
                     actor_user_id,
                     "authentication.recent_consume_for_oidc_link",
                     "session",
@@ -159,9 +160,9 @@ impl Store {
             "INSERT INTO oidc_authorization_flows \
              (id, configuration_id, configuration_etag, purpose, actor_user_id, \
               actor_session_id, actor_security_version, recent_auth_purpose, \
-              recent_auth_resource_id, state_digest, browser_binding_digest, client_digest, \
+              recent_auth_resource_id, state_digest, browser_binding_digest, \
               encrypted_payload, payload_nonce, payload_key_version, expires_at, created_at) \
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NULL, \
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, \
                      $12, $13, $14, $15, now())",
             flow.id,
             flow.configuration_id,

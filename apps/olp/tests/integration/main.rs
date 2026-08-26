@@ -11,6 +11,7 @@ mod common;
 mod anthropic_gemini_inference;
 mod configuration_http_postgres;
 mod identity_http_postgres;
+mod management_router_openapi_coverage;
 mod media_jobs_http_postgres;
 mod oidc_http_postgres;
 mod openapi_drift;

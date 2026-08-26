@@ -53,13 +53,15 @@ test('profile updates identity, changes password, and revokes another session', 
   await page.getByRole('button', { name: 'Save profile' }).click();
   await expect(page.getByText('Profile updated.')).toBeVisible();
   await page.getByRole('button', { name: 'Link an OIDC identity' }).click();
-  const linkReauthentication = page.getByRole('dialog', { name: 'Confirm your identity' });
+  const linkReauthentication = page.getByRole('dialog', { name: 'Confirm the OIDC link' });
   await expect(linkReauthentication).toBeVisible();
   await linkReauthentication.getByRole('button', { name: 'Cancel' }).click();
   await expect(page.getByRole('button', { name: 'Link an OIDC identity' })).toBeEnabled();
   page.on('dialog', (dialog) => dialog.accept());
   await page.getByRole('button', { name: 'Unlink' }).click();
-  const unlinkReauthentication = page.getByRole('dialog', { name: 'Confirm your identity' });
+  const unlinkReauthentication = page.getByRole('dialog', {
+    name: 'Confirm the OIDC unlink'
+  });
   await unlinkReauthentication.getByLabel('Current password').fill('old password for testing');
   await unlinkReauthentication.getByRole('button', { name: 'Confirm' }).click();
   await expect(page.getByText('OIDC identity unlinked.')).toBeVisible();

@@ -434,6 +434,17 @@ pub enum ProviderViolationCode {
     Forbidden,
 }
 
+impl ProviderViolationCode {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::UnsupportedAuthMode => "unsupported_auth_mode",
+            Self::Required => "required",
+            Self::Forbidden => "forbidden",
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct Violation {
     pub field: ProviderViolationField,

@@ -8,6 +8,7 @@ import { mockProviderKinds } from './provider-capabilities';
 import {
   certifiedModelRecord,
   ids,
+  modelRecord,
   now,
   providerRecord,
   sessionOptions
@@ -328,4 +329,257 @@ test('provider detail resets provider-wide model mutations and retains row-local
   expect(modelCursors.slice(certificationRequests)).toEqual([
     'opaque-next-model'
   ]);
+});
+
+test('provider revision viewer shows historical configuration and paged models', async ({
+  page
+}) => {
+  await mockSession(page, sessionOptions);
+  const revision = {
+    id: ids.revision,
+    provider_id: ids.provider,
+    revision: 3,
+    name: 'production-openai',
+    kind: 'openai_compatible',
+    auth_mode: 'api_key',
+    endpoint: 'https://models.example.test/v1/',
+    cloud_region: 'westus3',
+    cloud_project: null,
+    deployment: 'gpt-5-4-prod',
+    api_version: '2026-05-01',
+    connector_ready: true,
+    model_count: 2,
+    enabled_model_count: 1,
+    capability_count: 2,
+    certified_capability_count: 2,
+    historical_credential_version: 4,
+    source_etag: '01980000-0000-7000-8000-000000000501',
+    activated_at: now,
+    activated_by: ids.user
+  };
+  const currentProvider = providerRecord('active', [certifiedModelRecord], {
+    kind: 'openai_compatible',
+    endpoint: 'https://models.example.test/v1/',
+    active_revision: 3,
+    pending_activation: false
+  });
+  const revisionModelCursors: Array<string | null> = [];
+
+  await page.route(
+    '**/api/v1/provider-kinds/openai_compatible/capabilities',
+    async (route) => {
+      await route.fulfill({
+        json: {
+          provider_kind: 'openai_compatible',
+          capabilities: [
+            { operation: 'generation', surface: 'openai', mode: 'unary' }
+          ]
+        }
+      });
+    }
+  );
+  await page.route('**/api/v1/providers**', async (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+    const pathname = url.pathname;
+    const revisionBase = `/api/v1/providers/${ids.provider}/revisions/${ids.revision}`;
+    if (pathname === `${revisionBase}/models`) {
+      const cursor = url.searchParams.get('cursor');
+      revisionModelCursors.push(cursor);
+      const firstPage = cursor !== 'opaque-revision-models';
+      await route.fulfill({
+        json: {
+          items: [
+            {
+              ...certifiedModelRecord,
+              id: firstPage
+                ? ids.model
+                : '01980000-0000-7000-8000-000000000107',
+              upstream_model: firstPage ? 'archived-one' : 'archived-two',
+              display_name: firstPage ? 'archived-one' : 'archived-two',
+              enabled: firstPage
+            }
+          ],
+          next_cursor: firstPage ? 'opaque-revision-models' : null
+        }
+      });
+      return;
+    }
+    if (pathname === revisionBase) {
+      await route.fulfill({ json: revision });
+      return;
+    }
+    if (pathname.endsWith('/revisions') && request.method() === 'GET') {
+      await route.fulfill({ json: { items: [revision], next_cursor: null } });
+      return;
+    }
+    if (
+      pathname === `/api/v1/providers/${ids.provider}/models` &&
+      request.method() === 'GET'
+    ) {
+      await route.fulfill({
+        json: { items: currentProvider.models, next_cursor: null }
+      });
+      return;
+    }
+    if (pathname.endsWith('/credentials') && request.method() === 'GET') {
+      await route.fulfill({
+        json: {
+          items: [
+            {
+              id: ids.credential,
+              version: 1,
+              active: true,
+              draft_selected: false,
+              created_at: now,
+              revoked_at: null
+            }
+          ]
+        }
+      });
+      return;
+    }
+    if (pathname === `/api/v1/providers/${ids.provider}`) {
+      await route.fulfill({ json: currentProvider });
+      return;
+    }
+    failUnexpectedApiRequest(route);
+  });
+
+  await page.goto(`/providers/${ids.provider}`);
+  await page.getByRole('button', { name: 'View revision 3' }).click();
+
+  const dialog = page.getByRole('dialog');
+  await expect(
+    dialog.getByRole('heading', { name: 'Revision 3' })
+  ).toBeVisible();
+  await expect(
+    dialog.getByText('https://models.example.test/v1/')
+  ).toBeVisible();
+  await expect(dialog.getByText('gpt-5-4-prod')).toBeVisible();
+  await expect(dialog.getByText('2026-05-01')).toBeVisible();
+  await expect(dialog.getByText('westus3')).toBeVisible();
+  await expect(dialog.getByText('2 total · 1 enabled')).toBeVisible();
+  await expect(dialog.getByText('2 total · 2 certified')).toBeVisible();
+  await expect(dialog.getByText('Version 4')).toBeVisible();
+  await expect(
+    dialog.getByText('01980000-0000-7000-8000-000000000501')
+  ).toBeVisible();
+  await expect(dialog.getByText('archived-one').first()).toBeVisible();
+  await expect(
+    dialog.getByText('generation/openai/streaming').first()
+  ).toBeVisible();
+
+  await dialog
+    .getByLabel('Revision model pages')
+    .getByRole('button', { name: 'Next' })
+    .click();
+  await expect(dialog.getByText('archived-two').first()).toBeVisible();
+  await expect(dialog.getByText('not enabled')).toBeVisible();
+  expect(revisionModelCursors).toEqual([null, 'opaque-revision-models']);
+
+  await dialog.getByRole('button', { name: 'Close revision' }).click();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+});
+
+test('failed certification tuples show the server detail and error code', async ({
+  page
+}) => {
+  await mockSession(page, sessionOptions);
+  let currentProvider = providerRecord('draft', [modelRecord], {
+    kind: 'openai_compatible',
+    endpoint: 'https://models.example.test/v1/'
+  });
+
+  await page.route(
+    '**/api/v1/provider-kinds/openai_compatible/capabilities',
+    async (route) => {
+      await route.fulfill({
+        json: {
+          provider_kind: 'openai_compatible',
+          capabilities: [
+            { operation: 'generation', surface: 'openai', mode: 'unary' },
+            { operation: 'generation', surface: 'openai', mode: 'streaming' }
+          ]
+        }
+      });
+    }
+  );
+  await page.route('**/api/v1/providers**', async (route) => {
+    const request = route.request();
+    const pathname = new URL(request.url()).pathname;
+    if (
+      pathname === `/api/v1/providers/${ids.provider}/models` &&
+      request.method() === 'GET'
+    ) {
+      await route.fulfill({
+        json: { items: currentProvider.models, next_cursor: null }
+      });
+      return;
+    }
+    if (pathname.endsWith('/credentials') && request.method() === 'GET') {
+      await route.fulfill({ json: { items: [] } });
+      return;
+    }
+    if (pathname.endsWith('/revisions') && request.method() === 'GET') {
+      await route.fulfill({ json: { items: [], next_cursor: null } });
+      return;
+    }
+    if (pathname.endsWith(`/models/${ids.model}/certify`)) {
+      currentProvider = {
+        ...currentProvider,
+        etag: '01980000-0000-7000-8000-000000000601',
+        updated_at: '2026-07-12T12:30:00Z'
+      };
+      await route.fulfill({
+        json: {
+          provider_id: ids.provider,
+          model_id: ids.model,
+          status: 'partial',
+          checked_at: '2026-07-12T12:30:00Z',
+          certified_count: 1,
+          attempted_count: 2,
+          results: [
+            {
+              operation: 'generation',
+              surface: 'openai',
+              mode: 'unary',
+              succeeded: true,
+              error_code: null,
+              detail: 'Certified by server'
+            },
+            {
+              operation: 'generation',
+              surface: 'openai',
+              mode: 'streaming',
+              succeeded: false,
+              error_code: 'upstream_unsupported_mode',
+              detail: 'The upstream rejected the streaming request.'
+            }
+          ]
+        }
+      });
+      return;
+    }
+    if (
+      pathname === `/api/v1/providers/${ids.provider}` &&
+      request.method() === 'GET'
+    ) {
+      await route.fulfill({ json: currentProvider });
+      return;
+    }
+    failUnexpectedApiRequest(route);
+  });
+
+  await page.goto(`/providers/${ids.provider}`);
+  await page
+    .getByRole('button', { name: 'Server-certify capabilities' })
+    .click();
+  await expect(page.getByText('1/2 certified', { exact: true })).toBeVisible();
+  const failures = page.getByLabel('Failed certification tuples');
+  await expect(
+    failures.getByText('The upstream rejected the streaming request.')
+  ).toBeVisible();
+  await expect(failures.getByText('upstream_unsupported_mode')).toBeVisible();
+  await expect(failures.getByText('generation/openai/unary')).toHaveCount(0);
 });

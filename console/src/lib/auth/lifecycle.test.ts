@@ -39,7 +39,7 @@ function boundary(
   return {
     loadSession,
     unauthenticatedDestination: vi.fn(
-      async (signal: AbortSignal, sessionExpired: boolean) =>
+      async (_signal: AbortSignal, sessionExpired: boolean) =>
         sessionExpired ? '/login?reason=expired' : '/login'
     ),
     loginDestination: vi.fn(() => '/login'),

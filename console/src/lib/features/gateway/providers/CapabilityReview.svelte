@@ -1,9 +1,14 @@
 <script lang="ts">
   import { guardUnsavedChanges } from '$lib/forms/unsavedChanges';
   import {
+    type CapabilityCertification,
     type CapabilityDeclaration,
     type ProviderModel
   } from '$lib/api/management/providers';
+  import {
+    capabilityLimitReached,
+    MAX_REVIEWED_CAPABILITIES
+  } from './providerEditor';
   import ConflictNotice from '$lib/components/ConflictNotice.svelte';
   import { formatDate } from '$lib/format';
   import {
@@ -23,6 +28,7 @@
     disabled = false,
     reloadVersion = 0,
     providerEtag,
+    certification = null,
     onSave
   }: {
     model: ProviderModel;
@@ -32,6 +38,7 @@
     disabled?: boolean;
     reloadVersion?: number;
     providerEtag: string;
+    certification?: CapabilityCertification | null;
     onSave: (
       enabled: boolean,
       capabilities: CapabilityDeclaration[],
@@ -98,6 +105,11 @@
       .map((option) => option.mode);
   }
 
+  const limitReached = $derived(capabilityLimitReached(capabilities.length));
+  const failedCertifications = $derived(
+    certification?.results.filter((item) => !item.succeeded) ?? []
+  );
+
   const unusedOptions = $derived(
     options.filter(
       (option) =>
@@ -111,6 +123,8 @@
   );
 
   function addCapability() {
+    // The server refuses certification above this many reviewed tuples.
+    if (limitReached) return;
     const capability =
       unusedOptions.find((option) => option.operation === 'generation') ??
       unusedOptions[0];
@@ -196,9 +210,14 @@
       class="button button-secondary"
       type="button"
       onclick={addCapability}
-      disabled={disabled || !unusedOptions.length}>Add capability</button
+      disabled={disabled || limitReached || !unusedOptions.length}
+      >Add capability</button
     >
   </div>
+  {#if limitReached}<p class="empty">
+      This model carries the maximum of {MAX_REVIEWED_CAPABILITIES} reviewed tuples.
+      Remove one before adding another.
+    </p>{/if}
   {#if optionsPending}<p class="empty">
       Loading supported capability options…
     </p>{:else if optionsError}<p class="error" role="alert">
@@ -273,6 +292,15 @@
       {/each}
     </div>
   {/if}
+  {#if failedCertifications.length}
+    <ul class="certification-results" aria-label="Failed certification tuples">
+      {#each failedCertifications as item (`${item.operation}-${item.surface}-${item.mode}`)}<li
+        >
+          <code>{item.operation}/{item.surface}/{item.mode}</code>: {item.detail}{#if item.error_code}
+            (<code>{item.error_code}</code>){/if}
+        </li>{/each}
+    </ul>
+  {/if}
   {#if localError}<p class="error" role="alert">{localError}</p>{/if}
   <ConflictNotice notice={concurrentNotice} onReload={reload} {disabled} />
   <div class="review-footer">
@@ -337,6 +365,12 @@
   .evidence span.certified {
     background: var(--success-soft);
     color: var(--success);
+  }
+  .certification-results {
+    margin: 0;
+    padding-left: 1.25rem;
+    color: var(--danger);
+    font-size: 0.72rem;
   }
   .capability-list {
     display: grid;

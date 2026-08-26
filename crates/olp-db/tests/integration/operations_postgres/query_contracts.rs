@@ -566,7 +566,82 @@ pub(super) async fn exercise(
     assert_eq!(health.items[0].attempt_count, 1);
     let generations = store.runtime_generations(None, 50).await.unwrap();
     assert_eq!(generations.items[0].id, generation_id);
-    assert!(!store.audit_events(None, 50).await.unwrap().items.is_empty());
+    assert!(
+        !store
+            .audit_events(None, 50, &AuditFilters::default())
+            .await
+            .unwrap()
+            .items
+            .is_empty()
+    );
+    let setup_audit = store
+        .audit_events(
+            None,
+            50,
+            &AuditFilters {
+                action: Some("installation.setup".to_owned()),
+                resource_type: Some("installation".to_owned()),
+                resource_id: Some("singleton".to_owned()),
+                actor_user_id: Some(owner_id),
+                outcome: Some("success".to_owned()),
+                ..AuditFilters::default()
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(setup_audit.items.len(), 1);
+    assert_eq!(
+        setup_audit.items[0].actor_email.as_deref(),
+        Some("owner@example.test")
+    );
+    let setup_at = setup_audit.items[0].occurred_at;
+    assert!(
+        store
+            .audit_events(
+                None,
+                50,
+                &AuditFilters {
+                    action: Some("installation.setup".to_owned()),
+                    outcome: Some("failure".to_owned()),
+                    ..AuditFilters::default()
+                },
+            )
+            .await
+            .unwrap()
+            .items
+            .is_empty()
+    );
+    assert!(
+        store
+            .audit_events(
+                None,
+                50,
+                &AuditFilters {
+                    occurred_before: Some(setup_at - Duration::seconds(1)),
+                    ..AuditFilters::default()
+                },
+            )
+            .await
+            .unwrap()
+            .items
+            .is_empty()
+    );
+    assert!(
+        !store
+            .audit_events(
+                None,
+                50,
+                &AuditFilters {
+                    occurred_after: Some(setup_at),
+                    occurred_before: Some(setup_at),
+                    ..AuditFilters::default()
+                },
+            )
+            .await
+            .unwrap()
+            .items
+            .is_empty()
+    );
 
     let setting = store
         .settings()

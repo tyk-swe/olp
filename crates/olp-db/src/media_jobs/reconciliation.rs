@@ -9,6 +9,7 @@ use super::{
 };
 
 impl Store {
+    #[cfg(any(test, feature = "test-util"))]
     pub async fn pending_media_reconciliation_jobs(
         &self,
         api_key_id: Uuid,

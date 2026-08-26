@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { resolve } from '$app/paths';
   import { createQuery } from '@tanstack/svelte-query';
   import CursorPagination from '$lib/components/CursorPagination.svelte';
   import {
@@ -14,7 +15,18 @@
   import { errorMessage } from '$lib/api/http';
   import { listRuntimeGenerations } from '$lib/api/runtime';
   import { usageCompleteness } from '$lib/api/usage';
-  import { formatDate } from '$lib/format';
+  import { formatBytes, formatDate, formatInteger } from '$lib/format';
+  import {
+    CHECKPOINT_STALE_SECONDS,
+    MAINTENANCE_STALE_SECONDS,
+    ageStatus,
+    oldestPendingStatus,
+    reportedAgeStatus
+  } from './staleness';
+
+  // Readiness fields are read by name. A field the backend adds later is
+  // carried by the response and simply not rendered until it is given a label
+  // here; nothing iterates the payload.
 
   const generationPagination = $state(emptyCursorHistory());
   const epochPagination = $state(emptyCursorHistory());
@@ -22,6 +34,15 @@
   let epochNotice = $state('');
   let epochError = $state('');
   const refetchInterval = 15_000;
+  // The backend accepts 1 through 1440 minutes; these are the operator-facing
+  // windows worth one click.
+  const windowOptions = [
+    { minutes: 5, label: '5 minutes' },
+    { minutes: 15, label: '15 minutes' },
+    { minutes: 60, label: '1 hour' },
+    { minutes: 1440, label: '24 hours' }
+  ];
+  let windowMinutes = $state(15);
 
   const readiness = createQuery(() => ({
     queryKey: ['operator-health', 'readiness'],
@@ -29,8 +50,9 @@
     refetchInterval
   }));
   const providers = createQuery(() => ({
-    queryKey: ['operator-health', 'providers'],
-    queryFn: () => listProviderHealth(15),
+    queryKey: ['operator-health', 'providers', windowMinutes],
+    queryFn: () => listProviderHealth(windowMinutes),
+    placeholderData: (previous) => previous,
     refetchInterval
   }));
   const persistence = createQuery(() => ({
@@ -62,14 +84,59 @@
     return stamps.length === 0 ? 0 : Math.min(...stamps);
   });
 
+  // Ages are measured against the moment the snapshot arrived, so a paused tab
+  // does not silently age every checkpoint past its threshold.
+  const ages = $derived.by(() => {
+    const data = readiness.data;
+    const now = readiness.dataUpdatedAt || Date.now();
+    return {
+      planeProgress: ageStatus(data?.asynchronous_plane_last_progress_at, now),
+      metadataCheckpoint: reportedAgeStatus(
+        data?.request_metadata_consumer_heartbeat_age_seconds
+      ),
+      metadataOldestPending: oldestPendingStatus(
+        data?.request_metadata_consumer_oldest_pending_at,
+        data?.request_metadata_consumer_oldest_pending_age_seconds,
+        now
+      ),
+      outboxHeartbeat: reportedAgeStatus(data?.runtime_outbox_heartbeat_age_seconds),
+      outboxOldestPending: oldestPendingStatus(
+        data?.runtime_outbox_oldest_pending_at,
+        data?.runtime_outbox_oldest_pending_age_seconds,
+        now
+      )
+    };
+  });
+
   function refresh() {
     for (const panel of panels) void panel.refetch();
   }
 
-  function healthTone(value: string) {
-    if (['healthy', 'ok', 'active', 'passing'].includes(value.toLowerCase())) return 'success';
-    if (['degraded', 'stale', 'unknown', 'unavailable_lkg'].includes(value.toLowerCase())) return 'warning';
+  function healthTone(value?: string | null) {
+    if (!value) return 'warning';
+    if (['healthy', 'ok', 'active', 'passing', 'drained'].includes(value.toLowerCase())) return 'success';
+    if (['degraded', 'stale', 'unknown', 'not_checked', 'backlogged', 'unavailable_lkg'].includes(value.toLowerCase())) return 'warning';
     return 'danger';
+  }
+
+  function stateLabel(value?: string | null) {
+    return value ? value.replaceAll('_', ' ') : 'unknown';
+  }
+
+  function count(value?: number | null) {
+    return formatInteger(value ?? null);
+  }
+
+  /**
+   * Both spool figures come from the same readiness read, so either one being
+   * absent means the volume could not be measured at all.
+   */
+  function spoolUsage(used?: number | null, capacity?: number | null) {
+    if (used === null || used === undefined || capacity === null || capacity === undefined) {
+      return '—';
+    }
+    const share = capacity === 0 ? 'no capacity' : `${((used / capacity) * 100).toFixed(1)}%`;
+    return `${formatBytes(used)} of ${formatBytes(capacity)} (${share})`;
   }
 
   function percent(success: number, total: number) {
@@ -93,10 +160,18 @@
   }
 </script>
 
+{#snippet fact(term: string, value: string, warn = false)}
+  <div><dt>{term}</dt><dd class:warning-text={warn}>{value}</dd></div>
+{/snippet}
+
+{#snippet timedFact(term: string, at: string | null | undefined, age: { seconds: number | null; label: string; stale: boolean }, absent: string)}
+  <div><dt>{term}</dt><dd class:warning-text={age.stale}>{age.seconds === null ? absent : age.label}{#if at}<small>{formatDate(at)}</small>{/if}</dd></div>
+{/snippet}
+
 <svelte:head><title>Health · OpenLLMProxy</title></svelte:head>
 
 <div class="page-header">
-  <div><p class="eyebrow">Operations</p><h1 class="page-title">Health</h1><p class="page-description">Gateway dependencies, provider outcomes, runtime convergence, and persistence completeness.</p></div>
+  <div><p class="eyebrow">Operations</p><h1 class="page-title">Health</h1><p class="page-description">Gateway dependencies, worker checkpoints, provider outcomes, runtime convergence, and persistence completeness.</p></div>
   <button class="button button-secondary" type="button" onclick={refresh} disabled={fetching}>Refresh</button>
 </div>
 
@@ -108,10 +183,21 @@
   <div class="loading-state" role="status">Checking the installation…</div>
 {:else}
   <section class="metric-grid" aria-label="Dependency readiness">
-    <article class="card metric-card"><p>Gateway</p><strong><span class="badge {healthTone(readiness.data.status)}">{readiness.data.status}</span></strong></article>
-    <article class="card metric-card"><p>PostgreSQL</p><strong><span class="badge {healthTone(readiness.data.database)}">{readiness.data.database.replaceAll('_', ' ')}</span></strong></article>
-    <article class="card metric-card"><p>Distributed limits</p><strong><span class="badge {healthTone(readiness.data.limits)}">{readiness.data.limits.replaceAll('_', ' ')}</span></strong></article>
+    <article class="card metric-card"><p>Gateway</p><strong><span class="badge {healthTone(readiness.data.status)}">{stateLabel(readiness.data.status)}</span></strong></article>
+    <article class="card metric-card"><p>PostgreSQL</p><strong><span class="badge {healthTone(readiness.data.database)}">{stateLabel(readiness.data.database)}</span></strong></article>
+    <article class="card metric-card"><p>Distributed limits</p><strong><span class="badge {healthTone(readiness.data.limits)}">{stateLabel(readiness.data.limits)}</span></strong></article>
     <article class="card metric-card"><p>Active generation</p><strong>{readiness.data.generation == null ? '—' : `#${readiness.data.generation}`}</strong></article>
+  </section>
+
+  <section class="section" aria-labelledby="plane-title">
+    <div class="section-heading"><div><p class="eyebrow">Replicated workers</p><h2 id="plane-title">Asynchronous plane</h2><p class="section-description">Healthy means every fixed worker task holds a current checkpoint and both the request-metadata group and the runtime outbox are drained. It does not require one specific replica. Metadata, outbox, and gateway-epoch checkpoints go stale after {CHECKPOINT_STALE_SECONDS} seconds; maintenance after {MAINTENANCE_STALE_SECONDS}.</p></div><span class="badge {healthTone(readiness.data.asynchronous_plane)}">{stateLabel(readiness.data.asynchronous_plane)}</span></div>
+    <dl class="card facts">
+      {@render fact('Checkpoints', readiness.data.asynchronous_plane_current ? 'Current' : 'Behind', !readiness.data.asynchronous_plane_current)}
+      {@render fact('Queues', readiness.data.asynchronous_plane_drained ? 'Drained' : 'Not drained', !readiness.data.asynchronous_plane_drained)}
+      {@render timedFact('Last progress', readiness.data.asynchronous_plane_last_progress_at, ages.planeProgress, 'No progress recorded')}
+      {@render fact('Stale task checkpoints', count(readiness.data.worker_tasks_stale), (readiness.data.worker_tasks_stale ?? 0) > 0)}
+      {@render fact('Tasks that never reported', count(readiness.data.worker_tasks_unknown), (readiness.data.worker_tasks_unknown ?? 0) > 0)}
+    </dl>
   </section>
 
   {#if persistence.isError}
@@ -119,11 +205,59 @@
   {:else if persistence.data}
     <section class="card persistence" aria-labelledby="persistence-title">
       <div class="health-icon" class:ok={persistence.data.complete} aria-hidden="true">{persistence.data.complete ? '✓' : '!'}</div>
-      <div><p class="eyebrow">Last 24 hours</p><h2 id="persistence-title">{persistence.data.complete ? 'Usage accounting is complete' : 'Usage accounting needs attention'}</h2><p>{persistence.data.request_metadata_gap_events} request metadata gap-event lower bound · {persistence.data.uncertain_request_metadata_gap_count} uncertain request metadata epochs · {persistence.data.incomplete_count} incomplete requests · {persistence.data.unpriced_count} unpriced requests. Missing or uncertain metadata is reported, never silently converted to zero cost.</p></div>
+      <div><p class="eyebrow">Last 24 hours</p><h2 id="persistence-title">{persistence.data.complete ? 'Usage accounting is complete' : 'Usage accounting needs attention'}</h2><p>{persistence.data.request_metadata_gap_events} request metadata gap-event lower bound · {persistence.data.uncertain_request_metadata_gap_count} uncertain request metadata epochs · {persistence.data.incomplete_count} incomplete requests · {persistence.data.unpriced_count} unpriced requests. Missing or uncertain metadata is reported, never silently converted to zero cost.</p><p><a href={resolve('/usage')}>Open usage for priced totals and range coverage</a></p></div>
     </section>
   {:else}
     <div class="loading-state" role="status">Checking usage accounting…</div>
   {/if}
+
+  <section class="section" aria-labelledby="metadata-title">
+    <div class="section-heading"><div><p class="eyebrow">Request metadata durability</p><h2 id="metadata-title">Persistence pipeline</h2><p class="section-description">Content-free counters straight from readiness. Reclaims and duplicates show recovery in progress, not necessarily an incident.</p></div><span class="badge {healthTone(readiness.data.request_metadata_consumer)}">{stateLabel(readiness.data.request_metadata_consumer)}</span></div>
+    <dl class="card facts">
+      {@render fact('Metadata completeness', readiness.data.request_metadata_complete ? 'Complete' : 'Incomplete', !readiness.data.request_metadata_complete)}
+      {@render fact('Pending acknowledgements', count(readiness.data.request_metadata_consumer_pending_events))}
+      {@render fact('Stream lag', count(readiness.data.request_metadata_consumer_lag_events))}
+      {@render timedFact('Oldest pending event', readiness.data.request_metadata_consumer_oldest_pending_at, ages.metadataOldestPending, 'None waiting')}
+      {@render timedFact('Worker checkpoint', readiness.data.request_metadata_consumer_checked_at, ages.metadataCheckpoint, 'No checkpoint')}
+      {@render fact('Reclaimed events', count(readiness.data.request_metadata_reclaimed_events_total))}
+      {@render fact('Recovered events', count(readiness.data.request_metadata_recovered_events_total))}
+      {@render fact('Duplicate persistence', count(readiness.data.request_metadata_duplicate_persistence_total))}
+      {@render fact('Open gateway epochs', count(readiness.data.request_metadata_gateway_open_epochs))}
+      {@render fact('Unresolved gateway epochs', count(readiness.data.request_metadata_gateway_unresolved_epochs), (readiness.data.request_metadata_gateway_unresolved_epochs ?? 0) > 0)}
+      {@render fact('Unresolved event lower bound', count(readiness.data.request_metadata_gateway_unresolved_event_lower_bound))}
+      {@render fact('Historical uncertain gaps', count(readiness.data.request_metadata_historical_uncertain_gaps))}
+    </dl>
+  </section>
+
+  <section class="section" aria-labelledby="outbox-title">
+    <div class="section-heading"><div><p class="eyebrow">Runtime publication</p><h2 id="outbox-title">Runtime outbox</h2><p class="section-description">A released outbox session can be replaced during the {CHECKPOINT_STALE_SECONDS}-second handoff. Inspect the PostgreSQL advisory-lock session when failed takeovers rise.</p></div><span class="badge {healthTone(readiness.data.runtime_outbox)}">{stateLabel(readiness.data.runtime_outbox)}</span></div>
+    <dl class="card facts">
+      {@render fact('Pending rows', count(readiness.data.runtime_outbox_pending_rows))}
+      {@render fact('Claimed rows', count(readiness.data.runtime_outbox_claimed_rows))}
+      {@render timedFact('Oldest pending row', readiness.data.runtime_outbox_oldest_pending_at, ages.outboxOldestPending, 'None waiting')}
+      {@render fact('Owner session', readiness.data.runtime_outbox_owner_active ? 'Active' : 'None', !readiness.data.runtime_outbox_owner_active)}
+      {@render fact('Ownership', readiness.data.runtime_outbox_owner_abandoned ? 'Abandoned' : 'Held', readiness.data.runtime_outbox_owner_abandoned)}
+      {@render timedFact('Owner heartbeat', null, ages.outboxHeartbeat, 'No heartbeat')}
+      {@render fact('Publication attempts', count(readiness.data.runtime_outbox_publication_attempts_total))}
+      {@render fact('Publication retries', count(readiness.data.runtime_outbox_publication_retries_total))}
+      {@render fact('Repeated publications', count(readiness.data.runtime_outbox_repeated_publication_attempts_total))}
+      {@render fact('Abandoned ownerships', count(readiness.data.runtime_outbox_abandoned_ownership_total))}
+      {@render fact('Failed takeovers', count(readiness.data.runtime_outbox_failed_takeovers_total), (readiness.data.runtime_outbox_failed_takeovers_total ?? 0) > 0)}
+    </dl>
+  </section>
+
+  <section class="section" aria-labelledby="media-title">
+    <div class="section-heading"><div><p class="eyebrow">Asynchronous media</p><h2 id="media-title">Media reconciliation</h2><p class="section-description">Lifecycle bookkeeping for asynchronous media jobs. A gap is a job whose upstream outcome could not be established.</p></div><span class="badge {healthTone(readiness.data.media_reconciliation)}">{stateLabel(readiness.data.media_reconciliation)}</span></div>
+    <dl class="card facts">
+      {@render fact('Pending', count(readiness.data.media_reconciliation_pending))}
+      {@render fact('Stale', count(readiness.data.media_reconciliation_stale), (readiness.data.media_reconciliation_stale ?? 0) > 0)}
+      {@render fact('Failed', count(readiness.data.media_reconciliation_failed), (readiness.data.media_reconciliation_failed ?? 0) > 0)}
+      {@render fact('Unbound', count(readiness.data.media_reconciliation_unbound))}
+      {@render fact('Recorded gaps', count(readiness.data.media_reconciliation_gaps_total), (readiness.data.media_reconciliation_gaps_total ?? 0) > 0)}
+      {@render fact('Media spool', spoolUsage(readiness.data.media_spool_used_bytes, readiness.data.media_spool_capacity_bytes))}
+    </dl>
+    <p class="section-link"><a href={resolve('/media-jobs')}>Open media jobs</a></p>
+  </section>
 
   <section class="section" aria-labelledby="epochs-title">
     <div class="section-heading"><div><p class="eyebrow">Request metadata durability</p><h2 id="epochs-title">Unresolved gateway epochs</h2><p class="section-description">An unclean process epoch keeps readiness degraded until an operator investigates and acknowledges it. Acknowledgement is audited and never deletes its retained loss or uncertainty evidence.</p></div>{#if epochs.data}<span class:warning={epochs.data.items.length > 0} class:success={epochs.data.items.length === 0} class="badge">{epochs.data.items.length} on page</span>{/if}</div>
@@ -137,13 +271,13 @@
       <div class="card empty-state">No unclean gateway epoch awaits acknowledgement.</div>
     {:else}
       <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
-      <div class="table-shell" tabindex="0" role="region" aria-label="Unresolved request metadata gateway epochs"><table class="data-table"><caption class="sr-only">Unclean request metadata gateway process epochs awaiting operator acknowledgement</caption><thead><tr><th scope="col">Gateway</th><th scope="col">Detected</th><th scope="col">Accepted / persisted</th><th scope="col">Dropped / abandoned</th><th scope="col">Uncertain lower bound</th><th scope="col"><span class="sr-only">Action</span></th></tr></thead><tbody>{#each epochs.data.items as epoch (epoch.process_epoch)}<tr><td><strong>{epoch.gateway_instance}</strong><br /><code>{epoch.process_epoch}</code></td><td>{formatDate(epoch.stale_detected_at ?? epoch.updated_at)}</td><td>{epoch.accepted} / {epoch.persisted}</td><td>{epoch.dropped} / {epoch.abandoned}</td><td>{epoch.uncertain_event_lower_bound}</td><td><button class="button button-secondary" type="button" onclick={() => acknowledgeEpoch(epoch.process_epoch, epoch.gateway_instance)} disabled={Boolean(busyEpoch)}>{busyEpoch === epoch.process_epoch ? 'Acknowledging…' : 'Acknowledge epoch'}</button></td></tr>{/each}</tbody></table></div>
+      <div class="table-shell" tabindex="0" role="region" aria-label="Unresolved request metadata gateway epochs"><table class="data-table"><caption class="sr-only">Unclean request metadata gateway process epochs awaiting operator acknowledgement</caption><thead><tr><th scope="col">Gateway</th><th scope="col">Lifecycle</th><th scope="col">Writer</th><th scope="col">Accepted / persisted</th><th scope="col">Dropped / abandoned</th><th scope="col">Uncertain lower bound</th><th scope="col">Acknowledged</th><th scope="col"><span class="sr-only">Action</span></th></tr></thead><tbody>{#each epochs.data.items as epoch (epoch.process_epoch)}<tr><td><strong>{epoch.gateway_instance}</strong><code>{epoch.process_epoch}</code></td><td>Started {formatDate(epoch.started_at)}<small>Detected {formatDate(epoch.stale_detected_at ?? epoch.updated_at)}</small><small>{epoch.gracefully_closed_at ? `Closed ${formatDate(epoch.gracefully_closed_at)}` : 'Never closed gracefully'}</small></td><td><span class="badge {epoch.retrying ? 'warning' : ''}">{epoch.retrying ? 'Retrying' : 'Not retrying'}</span><small>{epoch.writer_closed ? 'Writer closed' : 'Writer open'}</small></td><td>{epoch.accepted} / {epoch.persisted}</td><td>{epoch.dropped} / {epoch.abandoned}</td><td>{epoch.uncertain_event_lower_bound}</td><td>{epoch.acknowledged_at ? formatDate(epoch.acknowledged_at) : 'Not acknowledged'}{#if epoch.acknowledged_by}<small class="mono">{epoch.acknowledged_by}</small>{/if}</td><td><button class="button button-secondary" type="button" onclick={() => acknowledgeEpoch(epoch.process_epoch, epoch.gateway_instance)} disabled={Boolean(busyEpoch)}>{busyEpoch === epoch.process_epoch ? 'Acknowledging…' : 'Acknowledge epoch'}</button></td></tr>{/each}</tbody></table></div>
       <CursorPagination {...cursorPaginationProps(epochPagination, epochs.isPlaceholderData ? null : epochs.data.nextCursor)} label="Unresolved gateway epoch pages" />
     {/if}
   </section>
 
   <section class="section" aria-labelledby="providers-title">
-    <div class="section-heading"><div><p class="eyebrow">Rolling 15 minutes</p><h2 id="providers-title">Providers</h2></div>{#if providers.data}<span class="badge">{providers.data.data.length} configured</span>{/if}</div>
+    <div class="section-heading"><div><p class="eyebrow">Rolling window</p><h2 id="providers-title">Providers</h2></div><div class="heading-controls"><label class="window-select" for="provider-window">Window <select id="provider-window" bind:value={windowMinutes}>{#each windowOptions as option (option.minutes)}<option value={option.minutes}>{option.label}</option>{/each}</select></label>{#if providers.data}<span class="badge">{providers.data.data.length} configured</span>{/if}</div></div>
     {#if providers.isError}
       <div class="inline-problem" role="alert">{errorMessage(providers.error, 'Provider outcomes are unavailable.')} <button class="text-button" onclick={() => providers.refetch()}>Try again</button></div>
     {:else if !providers.data}
@@ -156,10 +290,11 @@
           <article class="card provider-card">
             <div class="provider-heading"><div><h3>{provider.provider_name}</h3><p>{provider.provider_kind} · {provider.provider_state}</p></div><span class="badge {healthTone(provider.status)}">{provider.status}</span></div>
             <dl><div><dt>Success rate</dt><dd>{percent(provider.success_count, provider.attempt_count)}</dd></div><div><dt>Average latency</dt><dd>{provider.average_latency_ms == null ? '—' : `${provider.average_latency_ms.toFixed(0)} ms`}</dd></div><div><dt>Rate limited</dt><dd>{provider.rate_limit_count}</dd></div><div><dt>5xx / transport</dt><dd>{provider.server_error_count} / {provider.transport_error_count}</dd></div></dl>
-            <p class="probe"><strong>Last probe:</strong> {provider.last_probe_detail ?? provider.last_probe_status ?? 'Not probed'}<br /><span>{formatDate(provider.last_probe_at)}</span></p>
+            <p class="probe"><strong>Last probe:</strong> {provider.last_probe_detail ?? provider.last_probe_status ?? 'Not probed'}<br /><span>{formatDate(provider.last_probe_at)}</span><br /><strong>Last live attempt:</strong> <span>{provider.last_attempt_at ? formatDate(provider.last_attempt_at) : 'No traffic in this window'}</span></p>
           </article>
         {/each}
       </div>
+      <p class="section-link">Counted over the last {providers.data.window_minutes} {providers.data.window_minutes === 1 ? 'minute' : 'minutes'}. Provider probe failures stay separate from gateway admission failures.</p>
     {/if}
   </section>
 
@@ -189,15 +324,23 @@
   .persistence p:last-child { margin: 0.35rem 0 0; color: var(--foreground-muted); }
   .section { margin-top: 2rem; }
   .section-description { max-width: 58rem; margin: .35rem 0 0; color: var(--foreground-muted); font-size: .8rem; }
+  .section-link { margin: .6rem 0 0; color: var(--foreground-muted); font-size: .78rem; }
   code { font: .72rem 'JetBrains Mono Variable', monospace; overflow-wrap: anywhere; }
   .section-heading, .provider-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; margin-bottom: 0.75rem; }
+  .heading-controls { display: flex; flex: none; align-items: center; gap: .6rem; }
+  .window-select { display: grid; gap: .25rem; color: var(--foreground-muted); font-size: .7rem; font-weight: 700; }
+  .window-select select { min-height: 2.5rem; padding: .35rem .6rem; border: 1px solid var(--border-strong); border-radius: .375rem; background: var(--surface); color: var(--foreground); font-weight: 600; }
+  .facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr)); gap: 1rem; margin: 0; padding: 1.1rem 1.25rem; }
+  .facts div { min-width: 0; }
   .provider-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.85rem; }
   .provider-card { padding: 1rem; }
   .provider-heading p { margin: 0.15rem 0 0; color: var(--foreground-muted); font-size: 0.75rem; }
   dl { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.75rem; margin: 1rem 0 0; }
   dt { color: var(--foreground-muted); font-size: 0.7rem; font-weight: 700; }
-  dd { margin: 0.1rem 0 0; font-weight: 700; }
+  dd { margin: 0.1rem 0 0; font-weight: 700; overflow-wrap: anywhere; }
+  dd small, td small, td code { display: block; margin-top: .15rem; color: var(--foreground-muted); font-size: .7rem; font-weight: 500; }
+  .warning-text { color: var(--warning); }
   .probe { margin: 1rem 0 0; padding-top: 0.8rem; border-top: 1px solid var(--border); color: var(--foreground-muted); font-size: 0.75rem; overflow-wrap: anywhere; }
   @media (max-width: 60rem) { .provider-grid { grid-template-columns: 1fr; } }
-  @media (max-width: 36rem) { .persistence { display: grid; } dl { grid-template-columns: 1fr; } }
+  @media (max-width: 36rem) { .persistence { display: grid; } dl { grid-template-columns: 1fr; } .section-heading { display: grid; } }
 </style>

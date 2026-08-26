@@ -27,6 +27,7 @@ use crate::management::{
     error_mapping::{map_identity, map_persistence, user_not_found},
     json_payload::json_payload,
     preconditions::{if_match, with_etag},
+    provenance::Provenance,
     response_policy::prevent_sensitive_response_caching,
     secrets::WriteOnlySecret,
     sessions::{cookie, reauthentication_required, require_mutation_session, require_read_session},
@@ -81,6 +82,7 @@ pub(in crate::management) struct UpdateProfileRequest {
 )]
 pub(in crate::management) async fn update_profile(
     State(state): State<ManagementState>,
+    Provenance(provenance): Provenance,
     headers: HeaderMap,
     payload: Result<Json<UpdateProfileRequest>, JsonRejection>,
 ) -> Result<Response, Problem> {
@@ -88,6 +90,7 @@ pub(in crate::management) async fn update_profile(
     let request = json_payload(payload)?;
     let user = state
         .store()
+        .with_provenance(&provenance)
         .update_profile(
             principal.user_id,
             &request.display_name,
@@ -136,6 +139,7 @@ impl fmt::Debug for RecentAuthenticationRequest {
 )]
 pub(in crate::management) async fn recent_authentication(
     State(state): State<ManagementState>,
+    Provenance(provenance): Provenance,
     headers: HeaderMap,
     payload: Result<Json<RecentAuthenticationRequest>, JsonRejection>,
 ) -> Result<Response, Problem> {
@@ -192,6 +196,7 @@ pub(in crate::management) async fn recent_authentication(
     let material = RecentAuthMaterial::generate();
     let installed = state
         .store()
+        .with_provenance(&provenance)
         .issue_recent_authentication(
             SessionSecurityContext {
                 session_id: principal.session_id,
@@ -260,6 +265,7 @@ fn validate_new_password(password: &WriteOnlySecret) -> Result<(), Problem> {
 )]
 pub(in crate::management) async fn change_password(
     State(state): State<ManagementState>,
+    Provenance(provenance): Provenance,
     headers: HeaderMap,
     payload: Result<Json<ChangePasswordRequest>, JsonRejection>,
 ) -> Result<Response, Problem> {
@@ -307,6 +313,7 @@ pub(in crate::management) async fn change_password(
     let replacement = SessionMaterial::generate();
     let rotation = state
         .store()
+        .with_provenance(&provenance)
         .update_local_password(
             &password_hash,
             expected_etag,
@@ -359,6 +366,7 @@ impl fmt::Debug for EnrollPasswordRequest {
 )]
 pub(in crate::management) async fn enroll_password(
     State(state): State<ManagementState>,
+    Provenance(provenance): Provenance,
     headers: HeaderMap,
     payload: Result<Json<EnrollPasswordRequest>, JsonRejection>,
 ) -> Result<Response, Problem> {
@@ -385,6 +393,7 @@ pub(in crate::management) async fn enroll_password(
     let replacement = SessionMaterial::generate();
     let rotation = state
         .store()
+        .with_provenance(&provenance)
         .enroll_local_password(
             &password_hash,
             expected_etag,

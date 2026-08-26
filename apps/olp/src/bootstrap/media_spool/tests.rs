@@ -267,3 +267,24 @@ async fn a_file_read_error_is_terminal() {
     ));
     assert!(bytes.next().await.is_none());
 }
+
+#[tokio::test]
+async fn reports_spool_accounting_through_the_media_spool_port() {
+    let spool = FileMediaSpool::create_fresh_at(&std::env::temp_dir(), 8).unwrap();
+    assert_eq!(MediaSpool::capacity_bytes(&*spool), Some(8));
+    assert_eq!(MediaSpool::used_bytes(&*spool), Some(0));
+
+    let artifact = spool
+        .put(MediaUpload {
+            filename: "usage.bin".into(),
+            content_type: None,
+            maximum_length: 4,
+            bytes: Box::pin(stream::iter([Ok(Bytes::from_static(b"data"))])),
+        })
+        .await
+        .unwrap();
+    assert_eq!(MediaSpool::used_bytes(&*spool), Some(4));
+
+    spool.remove(&artifact.handle).await.unwrap();
+    assert_eq!(MediaSpool::used_bytes(&*spool), Some(0));
+}

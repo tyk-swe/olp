@@ -18,6 +18,7 @@ use crate::{
         json_payload::json_payload,
         permissions::require_permission,
         preconditions::{if_match, with_etag},
+        provenance::Provenance,
         sessions::{require_mutation_session, require_read_session},
     },
     public_http::problem::Problem,
@@ -115,6 +116,7 @@ pub(super) struct UpdateSettingRequest {
 )]
 pub(super) async fn update_setting(
     State(state): State<ManagementState>,
+    Provenance(provenance): Provenance,
     headers: HeaderMap,
     Path(key): Path<String>,
     payload: Result<Json<UpdateSettingRequest>, JsonRejection>,
@@ -125,6 +127,7 @@ pub(super) async fn update_setting(
     let request = json_payload(payload)?;
     let setting = state
         .store()
+        .with_provenance(&provenance)
         .update_setting(&key, &request.value, etag, principal.user_id)
         .await
         .map_err(map_operations)?;

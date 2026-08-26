@@ -10,6 +10,7 @@
     type CursorHistory
   } from '$lib/api/pagination';
   import CursorPagination from '$lib/components/CursorPagination.svelte';
+  import { formatDate } from '$lib/format';
   import CapabilityReview from './CapabilityReview.svelte';
 
   let {
@@ -88,6 +89,9 @@
             <td>
               <strong>{model.display_name}</strong><br />
               <code>{model.upstream_model}</code>
+              {#if model.discovered_at}<br /><small class="discovered"
+                  >Discovered {formatDate(model.discovered_at)}</small
+                >{/if}
             </td>
             <td>
               <CapabilityReview
@@ -98,6 +102,7 @@
                 {optionsError}
                 {disabled}
                 {reloadVersion}
+                certification={certificationResults[model.id]}
                 onSave={(enabled, capabilities, providerEtag) =>
                   onSave(model.id, enabled, capabilities, providerEtag)}
               />
@@ -142,6 +147,10 @@
   }
   .description {
     color: var(--foreground-muted);
+  }
+  .discovered {
+    color: var(--foreground-muted);
+    font-size: 0.7rem;
   }
   .certification-action {
     display: flex;

@@ -134,12 +134,16 @@ impl Store {
         }
         sqlx::query!(
             "INSERT INTO audit_events \
-             (id, actor_user_id, action, resource_type, resource_id, outcome, occurred_at) \
-             VALUES ($1, $2, 'route.create_draft', 'route_draft', $3, 'success', $4)",
+             (id, actor_user_id, action, resource_type, resource_id, outcome, occurred_at, \
+              source_ip, user_agent_family) \
+             VALUES ($1, $2, 'route.create_draft', 'route_draft', $3, 'success', $4, \
+              $5::text::inet, $6)",
             Uuid::now_v7(),
             route.actor,
             id.to_string(),
-            now
+            now,
+            self.provenance().source_ip_text(),
+            self.provenance().user_agent_family()
         )
         .execute(&mut *transaction)
         .await?;
@@ -201,11 +205,15 @@ impl Store {
             RouteSlug::parse(row.slug).map_err(|error| Error::InvalidRoute(error.to_string()))?;
         sqlx::query!(
             "INSERT INTO audit_events \
-             (id, actor_user_id, action, resource_type, resource_id, outcome) \
-             VALUES ($1, $2, 'route.validate_draft', 'route_draft', $3, 'success')",
+             (id, actor_user_id, action, resource_type, resource_id, outcome, \
+              source_ip, user_agent_family) \
+             VALUES ($1, $2, 'route.validate_draft', 'route_draft', $3, 'success', \
+              $4::text::inet, $5)",
             Uuid::now_v7(),
             actor,
-            draft_id.to_string()
+            draft_id.to_string(),
+            self.provenance().source_ip_text(),
+            self.provenance().user_agent_family()
         )
         .execute(&mut *transaction)
         .await?;
@@ -341,11 +349,14 @@ impl Store {
         }
         sqlx::query!(
             "INSERT INTO audit_events \
-             (id, actor_user_id, action, resource_type, resource_id, outcome) \
-             VALUES ($1, $2, 'route.activate', 'route', $3, 'success')",
+             (id, actor_user_id, action, resource_type, resource_id, outcome, \
+              source_ip, user_agent_family) \
+             VALUES ($1, $2, 'route.activate', 'route', $3, 'success', $4::text::inet, $5)",
             Uuid::now_v7(),
             actor,
-            route_id.to_string()
+            route_id.to_string(),
+            self.provenance().source_ip_text(),
+            self.provenance().user_agent_family()
         )
         .execute(&mut *transaction)
         .await?;

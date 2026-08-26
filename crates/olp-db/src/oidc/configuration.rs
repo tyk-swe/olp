@@ -19,6 +19,8 @@ impl Store {
                     token_endpoint_auth_method, client_id, encrypted_client_secret, secret_nonce, \
                     secret_key_version, scopes, email_claim, groups_claim, default_role::text AS \"default_role?\", \
                     enabled, etag, created_at, updated_at, \
+                    (SELECT editor.email FROM users editor \
+                     WHERE editor.id = oidc_configurations.updated_by) AS \"updated_by_email?\", \
                     COALESCE((SELECT jsonb_agg(jsonb_build_object( \
                         'claim_value', mapping.email, 'role', mapping.role::text) ORDER BY mapping.email) \
                         FROM oidc_email_role_mappings mapping WHERE mapping.configuration_id = oidc_configurations.id), \
@@ -134,12 +136,16 @@ impl Store {
         .await?;
         sqlx::query!(
             "INSERT INTO audit_events \
-             (id, actor_user_id, action, resource_type, resource_id, outcome, occurred_at) \
-             VALUES ($1, $2, 'oidc.configuration_update', 'oidc_configuration', $3, 'success', $4)",
+             (id, actor_user_id, action, resource_type, resource_id, outcome, occurred_at, \
+              source_ip, user_agent_family) \
+             VALUES ($1, $2, 'oidc.configuration_update', 'oidc_configuration', $3, 'success', $4, \
+              $5::text::inet, $6)",
             Uuid::now_v7(),
             input.actor_user_id,
             input.id.to_string(),
-            now
+            now,
+            self.provenance().source_ip_text(),
+            self.provenance().user_agent_family()
         )
         .execute(&mut *transaction)
         .await?;
@@ -169,6 +175,7 @@ struct OidcConfigurationRow {
     etag: Uuid,
     created_at: DateTime<Utc>,
     updated_at: DateTime<Utc>,
+    updated_by_email: Option<String>,
     email_mappings: serde_json::Value,
     group_mappings: serde_json::Value,
 }
@@ -210,6 +217,7 @@ fn oidc_configuration_from_row(row: OidcConfigurationRow) -> Result<OidcConfigur
         etag: row.etag,
         created_at: row.created_at,
         updated_at: row.updated_at,
+        updated_by_email: row.updated_by_email,
     })
 }
 

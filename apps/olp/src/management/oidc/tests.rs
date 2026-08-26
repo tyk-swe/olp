@@ -446,5 +446,6 @@ fn test_configuration() -> OidcConfiguration {
         etag: Uuid::now_v7(),
         created_at: Utc::now(),
         updated_at: Utc::now(),
+        updated_by_email: None,
     }
 }

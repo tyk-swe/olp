@@ -33,6 +33,29 @@ test('access roles, one-time invitations, sessions, and OIDC are API-backed', as
     }
   ];
   let inviteCreated = false;
+  let invitationBody: Record<string, unknown> | undefined;
+  const acceptedInvitation = {
+    id: '01980000-0000-7000-8000-000000000406',
+    email: 'accepted@example.com',
+    role: 'operator',
+    invited_by: ids.user,
+    status: 'accepted',
+    expires_at: '2026-07-19T12:00:00Z',
+    created_at: now,
+    accepted_at: '2026-07-13T09:30:00Z',
+    revoked_at: null
+  };
+  const pendingInvitation = {
+    id: ids.invitation,
+    email: 'new@example.com',
+    role: 'developer',
+    invited_by: ids.user,
+    status: 'pending',
+    expires_at: '2026-08-11T12:00:00Z',
+    created_at: now,
+    accepted_at: null,
+    revoked_at: null
+  };
   let oidcSaved = false;
   let oidcBody: Record<string, unknown> | undefined;
 
@@ -58,21 +81,12 @@ test('access roles, one-time invitations, sessions, and OIDC are API-backed', as
   await page.route('**/api/v1/invitations**', async (route) => {
     const request = route.request();
     if (request.method() === 'POST') {
+      invitationBody = request.postDataJSON();
       inviteCreated = true;
       await route.fulfill({
         status: 201,
         json: {
-          invitation: {
-            id: ids.invitation,
-            email: 'new@example.com',
-            role: 'developer',
-            invited_by: ids.user,
-            status: 'pending',
-            expires_at: '2026-07-19T12:00:00Z',
-            created_at: now,
-            accepted_at: null,
-            revoked_at: null
-          },
+          invitation: pendingInvitation,
           token: 'invite-token-shown-once'
         }
       });
@@ -81,20 +95,8 @@ test('access roles, one-time invitations, sessions, and OIDC are API-backed', as
     await route.fulfill({
       json: {
         data: inviteCreated
-          ? [
-              {
-                id: ids.invitation,
-                email: 'new@example.com',
-                role: 'developer',
-                invited_by: ids.user,
-                status: 'pending',
-                expires_at: '2026-07-19T12:00:00Z',
-                created_at: now,
-                accepted_at: null,
-                revoked_at: null
-              }
-            ]
-          : [],
+          ? [pendingInvitation, acceptedInvitation]
+          : [acceptedInvitation],
         next_cursor: null
       }
     });
@@ -188,8 +190,17 @@ test('access roles, one-time invitations, sessions, and OIDC are API-backed', as
   ).toBeVisible();
 
   await page.getByRole('button', { name: 'Invitations' }).click();
+  await expect(
+    page.getByRole('row', { name: /accepted@example.com/ })
+  ).toContainText('Accepted');
   await page.getByPlaceholder('person@example.com').fill('new@example.com');
+  await page.getByLabel('Expires in').selectOption({ label: '30 days' });
   await page.getByRole('button', { name: 'Create invitation' }).click();
+  expect(invitationBody).toEqual({
+    email: 'new@example.com',
+    role: 'developer',
+    expires_in_hours: 720
+  });
   const invitationDialog = page.getByRole('dialog', {
     name: 'Copy the invitation link now.'
   });
@@ -211,6 +222,9 @@ test('access roles, one-time invitations, sessions, and OIDC are API-backed', as
     .getByRole('button', { name: 'I have shared it' })
     .click();
   await expect(page.getByText('invite-token-shown-once')).toHaveCount(0);
+  await expect(
+    page.getByRole('row', { name: /new@example.com/ })
+  ).toContainText(`Invited by ${ids.user}`);
 
   await page.getByRole('button', { name: 'Sessions' }).click();
   await expect(page.getByText(ids.session)).toBeVisible();
@@ -235,7 +249,7 @@ test('access roles, one-time invitations, sessions, and OIDC are API-backed', as
   await expect(page.getByLabel('Client secret')).toHaveValue('');
   await page.getByRole('button', { name: 'Link my identity' }).click();
   const reauthentication = page.getByRole('dialog', {
-    name: 'Confirm your identity'
+    name: 'Confirm the OIDC link'
   });
   await reauthentication
     .getByLabel('Current password')

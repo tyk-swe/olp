@@ -14,6 +14,7 @@ use crate::management::{
     error_mapping::map_identity,
     pagination::{PageQuery, page},
     permissions::require_permission,
+    provenance::Provenance,
     sessions::{require_mutation_session, require_read_session},
 };
 use crate::{bootstrap::mode_dependencies::ManagementState, public_http::problem::Problem};
@@ -105,6 +106,7 @@ pub(in crate::management) async fn list_sessions(
 )]
 pub(in crate::management) async fn revoke_session(
     State(state): State<ManagementState>,
+    Provenance(provenance): Provenance,
     Path(session_id): Path<Uuid>,
     headers: HeaderMap,
 ) -> Result<Response, Problem> {
@@ -112,6 +114,7 @@ pub(in crate::management) async fn revoke_session(
     let can_manage_all = require_permission(&principal, Permission::ManageSessions).is_ok();
     state
         .store()
+        .with_provenance(&provenance)
         .revoke_session(session_id, principal.user_id, can_manage_all)
         .await
         .map_err(map_identity)?;

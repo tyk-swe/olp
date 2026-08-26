@@ -5,6 +5,7 @@
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { errorMessage as message, isEtagMismatch } from '$lib/api/http';
   import ConflictNotice from '$lib/components/ConflictNotice.svelte';
+  import ReadOnlyNote from '$lib/components/ReadOnlyNote.svelte';
   import {
     beginReload,
     conflictNotice,
@@ -29,6 +30,7 @@
   } from '$lib/api/management/routes';
   import { listProviderModelInventory } from '$lib/api/management/providers';
   import { useRole } from '$lib/auth/useRole.svelte';
+  import { formatDate } from '$lib/format';
   import {
     buildCreateRouteDraftInput,
     buildReplaceRouteDraftInput,
@@ -226,6 +228,15 @@
     if (!canManage) return;
     await run('activate', async () => {
       activation = await activateRoute(current);
+      // Activation returns the draft to `draft` under a fresh ETag. Adopting it
+      // here keeps the next save from failing its If-Match precondition.
+      sync = acceptRemote(sync, activation.draft_etag);
+      queryClient.setQueryData<RouteDraft>(['route-draft', current.id], {
+        ...current,
+        state: 'draft',
+        etag: activation.draft_etag
+      });
+      validated = false;
       notice = `Route activated as revision ${activation.revision} in runtime generation ${activation.runtime_generation.sequence}.`;
       await Promise.all([
         draft.refetch(),
@@ -251,10 +262,10 @@
 <svelte:head><title>Routes · OpenLLMProxy</title></svelte:head>
 
 <div class="page-header">
-  <div><p class="eyebrow">Gateway · Route Studio</p><h1 class="page-title">{isNew ? 'Build a route draft.' : (draft.data?.slug ?? 'Route draft')}</h1><p class="page-description">Set explicit eligibility, deterministic priority and weight, and bounded failover before publishing.</p></div>
+  <div><p class="eyebrow">Gateway · Route Studio</p><h1 class="page-title">{isNew ? 'Build a route draft.' : (draft.data?.slug ?? 'Route draft')}</h1><p class="page-description">Set explicit eligibility, deterministic priority and weight, and bounded failover before publishing.</p>{#if draft.data}<p class="draft-meta">Created {formatDate(draft.data.created_at)} by {draft.data.created_by_email ?? 'a removed account'}{#if draft.data.based_on_revision_id} · Based on revision <code>{draft.data.based_on_revision_id}</code>{/if}</p>{/if}</div>
   <div class="page-actions"><a class="button button-secondary" href={resolve('/routes')}>{canManage ? 'Cancel' : 'Back to routes'}</a>{#if canManage && resourceId && draft.data}<button class="button button-secondary danger-button" type="button" onclick={() => remove(draft.data!)} disabled={Boolean(busy)}>Delete draft</button>{/if}</div>
 </div>
-{#if !canManage}<p class="read-only-note" role="note">Your role can view this route draft but not change or activate it.</p>{/if}
+{#if !canManage}<ReadOnlyNote>Your role can view this route draft but not change or activate it.</ReadOnlyNote>{/if}
 {#if errorMessage}<div class="inline-problem" role="alert">{errorMessage}</div>{/if}
 {#if notice}<div class="success-banner" role="status">{notice}</div>{/if}
 <ConflictNotice notice={concurrentNotice} onReload={reload} disabled={Boolean(busy)} />
@@ -359,6 +370,7 @@
   .compact a { color: var(--accent-strong); font-weight: 700; }
   .danger-button { color: var(--danger); }
   code { font: .7rem 'JetBrains Mono Variable', monospace; }
+  .draft-meta { margin: .4rem 0 0; color: var(--foreground-muted); font-size: .75rem; }
   @media (max-width: 76rem) { .studio { grid-template-columns: 1fr; } .publish-panel { position: static; grid-template-columns: repeat(3, 1fr); } .publish-panel > :is(.eyebrow, h2, p, hr, label, input, select, .activation) { grid-column: 1 / -1; } .target-fields { grid-template-columns: repeat(3, 1fr); } .model-select { grid-column: 1 / -1; } }
   @media (max-width: 48rem) { .operations { grid-template-columns: 1fr; } .targets li { grid-template-columns: 1fr 2.75rem; } .target-number { display: none; } .target-fields { grid-column: 1; grid-template-columns: 1fr; } .remove-target { grid-column: 2; } .target-eligibility { grid-column: 1 / -1; } .model-select { grid-column: auto; } .publish-panel { grid-template-columns: 1fr; } }
 </style>

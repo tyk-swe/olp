@@ -7,7 +7,7 @@ use uuid::Uuid;
 use crate::{
     error::Error,
     security::session_material::{RecentAuthMaterial, SessionMaterial},
-    store::Store,
+    store::{RequestProvenance, Store},
 };
 
 pub(crate) mod sessions;
@@ -135,11 +135,14 @@ impl Store {
         let mut transaction = self.pool().begin().await?;
         let installed = install_recent_authentication(
             &mut transaction,
+            self.provenance(),
             context,
-            purpose,
-            resource_id,
-            material,
-            expires_at,
+            RecentAuthGrant {
+                purpose,
+                resource_id,
+                material,
+                expires_at,
+            },
             now,
         )
         .await?;
@@ -162,15 +165,27 @@ impl Store {
     }
 }
 
+/// One recent-authentication grant awaiting installation on a session.
+pub(crate) struct RecentAuthGrant<'a> {
+    pub(crate) purpose: RecentAuthPurpose,
+    pub(crate) resource_id: Option<Uuid>,
+    pub(crate) material: &'a RecentAuthMaterial,
+    pub(crate) expires_at: DateTime<Utc>,
+}
+
 pub(crate) async fn install_recent_authentication(
     transaction: &mut Transaction<'_, Postgres>,
+    provenance: &RequestProvenance,
     context: SessionSecurityContext,
-    purpose: RecentAuthPurpose,
-    resource_id: Option<Uuid>,
-    material: &RecentAuthMaterial,
-    expires_at: DateTime<Utc>,
+    grant: RecentAuthGrant<'_>,
     now: DateTime<Utc>,
 ) -> Result<bool, sqlx::Error> {
+    let RecentAuthGrant {
+        purpose,
+        resource_id,
+        material,
+        expires_at,
+    } = grant;
     if resource_id.is_some() != purpose.requires_resource() || expires_at <= now {
         return Ok(false);
     }
@@ -200,6 +215,7 @@ pub(crate) async fn install_recent_authentication(
     if updated == 1 {
         insert_security_audit(
             transaction,
+            provenance,
             context.user_id,
             purpose.audit_action(),
             "session",
@@ -294,6 +310,7 @@ pub(crate) async fn revoke_user_sessions(
 
 pub(crate) async fn insert_security_audit(
     transaction: &mut Transaction<'_, Postgres>,
+    provenance: &RequestProvenance,
     actor_user_id: Uuid,
     action: &str,
     resource_type: &str,
@@ -302,14 +319,17 @@ pub(crate) async fn insert_security_audit(
 ) -> Result<(), sqlx::Error> {
     sqlx::query!(
         "INSERT INTO audit_events \
-         (id, actor_user_id, action, resource_type, resource_id, outcome, occurred_at) \
-         VALUES ($1, $2, $3, $4, $5, 'success', $6)",
+         (id, actor_user_id, action, resource_type, resource_id, outcome, occurred_at, \
+          source_ip, user_agent_family) \
+         VALUES ($1, $2, $3, $4, $5, 'success', $6, $7::text::inet, $8)",
         Uuid::now_v7(),
         actor_user_id,
         action,
         resource_type,
         resource_id,
-        occurred_at
+        occurred_at,
+        provenance.source_ip_text(),
+        provenance.user_agent_family()
     )
     .execute(&mut **transaction)
     .await?;

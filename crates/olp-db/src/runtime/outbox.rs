@@ -102,6 +102,7 @@ pub enum RuntimeOutboxLeadershipProbe {
 }
 
 impl Store {
+    #[cfg(any(test, feature = "test-util"))]
     pub async fn acquire_runtime_outbox_leader(&self) -> Result<RuntimeOutboxLeader, Error> {
         let mut connection = self.pool().acquire().await?.detach();
         // Contenders wait in PostgreSQL instead of opening and closing a new
@@ -118,6 +119,7 @@ impl Store {
     /// Attempts leadership without waiting. Worker replicas use this bounded
     /// probe so a live contender can durably report that a stale owner still
     /// holds the PostgreSQL advisory lock.
+    #[cfg(any(test, feature = "test-util"))]
     pub async fn try_acquire_runtime_outbox_leader(
         &self,
     ) -> Result<Option<RuntimeOutboxLeader>, Error> {

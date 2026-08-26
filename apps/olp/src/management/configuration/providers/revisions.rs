@@ -30,6 +30,7 @@ use crate::{
 };
 
 use super::{manage::ProviderDetailResponse, models::ProviderModelListResponse};
+use crate::management::provenance::Provenance;
 
 #[derive(Clone, Debug, Serialize, ToSchema)]
 pub(crate) struct ProviderRevisionResponse {
@@ -324,6 +325,7 @@ pub(crate) async fn diff_provider_revisions(
 )]
 pub(crate) async fn restore_provider_revision(
     State(state): State<ManagementState>,
+    Provenance(provenance): Provenance,
     Path((provider_id, revision_id)): Path<(Uuid, Uuid)>,
     headers: HeaderMap,
 ) -> Result<Response, Problem> {
@@ -346,6 +348,7 @@ pub(crate) async fn restore_provider_revision(
     }
     let restored = state
         .store()
+        .with_provenance(&provenance)
         .restore_provider_revision_as_draft(
             provider_id,
             revision_id,

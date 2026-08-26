@@ -9,6 +9,10 @@ use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
 pub(crate) type FieldErrors = BTreeMap<String, Vec<String>>;
+/// Machine-readable classifications for the fields in [`FieldErrors`], so a
+/// client can react to a rejection without parsing its prose. A field is
+/// present only when at least one of its messages carries a code.
+pub(crate) type FieldErrorCodes = BTreeMap<String, Vec<String>>;
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub(crate) struct Problem {
@@ -21,6 +25,8 @@ pub(crate) struct Problem {
     pub(crate) instance: Option<Box<str>>,
     #[serde(skip_serializing_if = "BTreeMap::is_empty", default)]
     pub(crate) errors: Box<FieldErrors>,
+    #[serde(skip_serializing_if = "BTreeMap::is_empty", default)]
+    pub(crate) error_codes: Box<FieldErrorCodes>,
 }
 
 impl Problem {
@@ -37,6 +43,7 @@ impl Problem {
             detail: detail.into().into_boxed_str(),
             instance: None,
             errors: Box::default(),
+            error_codes: Box::default(),
         }
     }
 
@@ -45,6 +52,11 @@ impl Problem {
     }
 
     pub(crate) fn validation(errors: FieldErrors) -> Self {
+        Self::coded_validation(errors, FieldErrorCodes::new())
+    }
+
+    /// Validation problem whose messages carry machine-readable codes.
+    pub(crate) fn coded_validation(errors: FieldErrors, codes: FieldErrorCodes) -> Self {
         let mut problem = Self::new(
             StatusCode::UNPROCESSABLE_ENTITY,
             "validation_failed",
@@ -52,6 +64,7 @@ impl Problem {
             "One or more fields are invalid.",
         );
         problem.errors = Box::new(errors);
+        problem.error_codes = Box::new(codes);
         problem
     }
 

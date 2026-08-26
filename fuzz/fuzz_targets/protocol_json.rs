@@ -299,7 +299,6 @@ fuzz_target!(|data: &[u8]| {
     }
 
     let _ = video::decode_video_get("fuzz-job");
-    let _ = video::decode_video_content("fuzz-job");
     let _ = video::decode_video_delete("fuzz-job");
 
     // Binary media bodies carry no JSON, so they are driven off the raw length

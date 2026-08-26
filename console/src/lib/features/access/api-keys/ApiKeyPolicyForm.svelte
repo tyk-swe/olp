@@ -4,6 +4,7 @@
   import type { ApiKey } from '$lib/api/management/api-keys';
   import { listRoutes } from '$lib/api/management/routes';
   import NavIcon from '$lib/components/NavIcon.svelte';
+  import ReadOnlyNote from '$lib/components/ReadOnlyNote.svelte';
   import { dateTimeLocalValue } from '$lib/format';
   import { guardUnsavedChanges } from '$lib/forms/unsavedChanges';
   import { validateApiKey } from './keyValidation';
@@ -134,9 +135,9 @@
     {errorMessage || formError}
   </div>{/if}
 {#if !canManage}
-  <p class="read-only-note" role="note">
+  <ReadOnlyNote>
     Your role can view API key policies but not create or change them.
-  </p>
+  </ReadOnlyNote>
 {/if}
 
 <form

@@ -94,6 +94,7 @@ impl Store {
                 .await?;
         insert_audit(
             &mut transaction,
+            self.provenance(),
             actor,
             "user.role_update",
             "user",
@@ -103,6 +104,7 @@ impl Store {
         if retired > 0 {
             insert_audit(
                 &mut transaction,
+                self.provenance(),
                 actor,
                 "invitation.revoke_for_role_change",
                 "user",
@@ -113,6 +115,7 @@ impl Store {
         if revoked > 0 {
             insert_audit(
                 &mut transaction,
+                self.provenance(),
                 actor,
                 "session.revoke_for_role_change",
                 "user",
@@ -176,6 +179,7 @@ impl Store {
         .await?;
         insert_audit(
             &mut transaction,
+            self.provenance(),
             actor,
             "user.access_update",
             "user",
@@ -185,6 +189,7 @@ impl Store {
         if retired > 0 {
             insert_audit(
                 &mut transaction,
+                self.provenance(),
                 actor,
                 "invitation.revoke_for_access_change",
                 "user",
@@ -195,6 +200,7 @@ impl Store {
         if revoked > 0 {
             insert_audit(
                 &mut transaction,
+                self.provenance(),
                 actor,
                 "session.revoke_for_access_change",
                 "user",
@@ -247,6 +253,7 @@ impl Store {
         };
         insert_audit(
             &mut transaction,
+            self.provenance(),
             id,
             "user.profile_update",
             "user",
@@ -320,6 +327,7 @@ impl Store {
         .await?;
         insert_audit(
             &mut transaction,
+            self.provenance(),
             id,
             "user.password_update",
             "user",
@@ -328,6 +336,7 @@ impl Store {
         .await?;
         insert_audit(
             &mut transaction,
+            self.provenance(),
             id,
             "session.revoke_for_password_change",
             "user",
@@ -336,6 +345,7 @@ impl Store {
         .await?;
         insert_audit(
             &mut transaction,
+            self.provenance(),
             id,
             "session.rotate_for_password_change",
             "session",
@@ -426,6 +436,7 @@ impl Store {
         .await?;
         insert_audit(
             &mut transaction,
+            self.provenance(),
             id,
             "user.password_enroll",
             "user",
@@ -434,6 +445,7 @@ impl Store {
         .await?;
         insert_audit(
             &mut transaction,
+            self.provenance(),
             id,
             "user.authentication_method_change",
             "user",
@@ -442,6 +454,7 @@ impl Store {
         .await?;
         insert_audit(
             &mut transaction,
+            self.provenance(),
             id,
             "session.revoke_for_password_enrollment",
             "user",
@@ -450,6 +463,7 @@ impl Store {
         .await?;
         insert_audit(
             &mut transaction,
+            self.provenance(),
             id,
             "session.rotate_for_password_enrollment",
             "session",
@@ -521,6 +535,7 @@ impl Store {
             .await?;
         insert_audit(
             &mut transaction,
+            self.provenance(),
             actor,
             "session.revoke",
             "session",
@@ -603,6 +618,10 @@ pub(super) fn user_from_row(row: UserRow) -> Result<UserRecord, Error> {
     })
 }
 
+/// The `prevent_last_owner_change` trigger installed in migration 0001 is the
+/// single enforcement point for the last-owner invariant; the domain-level
+/// check was removed so every control-plane path, present and future, is
+/// covered. This recognises the check violation the trigger raises.
 fn is_last_owner_violation(error: &sqlx::Error) -> bool {
     matches!(error, sqlx::Error::Database(database)
         if database.code().as_deref() == Some("23514")

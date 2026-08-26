@@ -17,6 +17,7 @@ use crate::management::{
     pagination::{PageQuery, page},
     permissions::{parse_user_role, require_permission},
     preconditions::{if_match, with_etag},
+    provenance::Provenance,
     sessions::{require_mutation_session, require_read_session},
 };
 use crate::{bootstrap::mode_dependencies::ManagementState, public_http::problem::Problem};
@@ -140,6 +141,7 @@ pub(in crate::management) struct UpdateUserRoleRequest {
 )]
 pub(in crate::management) async fn update_user_role(
     State(state): State<ManagementState>,
+    Provenance(provenance): Provenance,
     Path(user_id): Path<Uuid>,
     headers: HeaderMap,
     payload: Result<Json<UpdateUserRoleRequest>, JsonRejection>,
@@ -163,6 +165,7 @@ pub(in crate::management) async fn update_user_role(
     guard_self_role_change(user_id == principal.user_id, role, &principal.role)?;
     let user = state
         .store()
+        .with_provenance(&provenance)
         .update_user_access(
             user_id,
             role,

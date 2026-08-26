@@ -163,12 +163,16 @@ impl Store {
         }
         sqlx::query!(
             "INSERT INTO audit_events \
-             (id, actor_user_id, action, resource_type, resource_id, outcome, occurred_at) \
-             VALUES ($1, $2, 'provider.create_draft', 'provider', $3, 'success', $4)",
+             (id, actor_user_id, action, resource_type, resource_id, outcome, occurred_at, \
+              source_ip, user_agent_family) \
+             VALUES ($1, $2, 'provider.create_draft', 'provider', $3, 'success', $4, \
+              $5::text::inet, $6)",
             Uuid::now_v7(),
             provider.actor,
             provider.provider_id.to_string(),
-            now
+            now,
+            self.provenance().source_ip_text(),
+            self.provenance().user_agent_family()
         )
         .execute(&mut *transaction)
         .await?;
@@ -450,11 +454,14 @@ impl Store {
         }
         sqlx::query!(
             "INSERT INTO audit_events \
-             (id, actor_user_id, action, resource_type, resource_id, outcome) \
-             VALUES ($1, $2, 'provider.activate', 'provider', $3, 'success')",
+             (id, actor_user_id, action, resource_type, resource_id, outcome, \
+              source_ip, user_agent_family) \
+             VALUES ($1, $2, 'provider.activate', 'provider', $3, 'success', $4::text::inet, $5)",
             Uuid::now_v7(),
             actor,
-            provider_id.to_string()
+            provider_id.to_string(),
+            self.provenance().source_ip_text(),
+            self.provenance().user_agent_family()
         )
         .execute(&mut *transaction)
         .await?;

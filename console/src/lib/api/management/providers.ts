@@ -1,6 +1,6 @@
 import type { components } from '../schema';
 import { apiClient } from '../client';
-import { result } from '../http';
+import { ApiProblem, result } from '../http';
 import { collectCursorPages, type CursorPage } from '../pagination';
 
 type Schemas = components['schemas'];
@@ -11,12 +11,7 @@ export type Provider = Schemas['ProviderDetailResponse'];
 export type ProviderSummary = Schemas['ProviderSummaryResponse'];
 export type ProviderModel = Schemas['ProviderModelResponse'];
 export type ProviderModelInventory = Schemas['ProviderModelInventoryResponse'];
-export type ProviderCredential = Schemas['CredentialResponse'] & {
-  /** Credential used by the immutable runtime revision. */
-  active: boolean;
-  /** Credential selected only by the mutable draft. */
-  draft_selected?: boolean;
-};
+export type ProviderCredential = Schemas['CredentialResponse'];
 export type CreateProviderInput = Schemas['CreateProviderRequest'];
 export type UpdateProviderInput = Schemas['UpdateProviderRequest'];
 export type ProviderProbe = Schemas['ProbeResponse'];
@@ -29,6 +24,9 @@ export type CapabilityCertification =
   Schemas['CapabilityCertificationResponse'];
 export type ProviderRevision = Schemas['ProviderRevisionSummaryResponse'];
 export type ProviderRevisionDiff = Schemas['ProviderRevisionDiffResponse'];
+export type ProviderRevisionDetail = Schemas['ProviderRevisionResponse'];
+export type ProviderRevisionRestore =
+  Schemas['ProviderRevisionRestoreResponse'];
 
 export async function listProviders(
   signal?: AbortSignal
@@ -255,6 +253,57 @@ export async function activateProvider(provider: Provider): Promise<number> {
     .runtime_generation.sequence;
 }
 
+/**
+ * Stops the active revision from serving. The server refuses with 409 while a
+ * route still targets one of this provider's models, or an upstream media job
+ * is still live. Returns the runtime generation that no longer carries the
+ * provider.
+ */
+export async function disableProvider(
+  provider: Provider
+): Promise<number | null> {
+  const response = await apiClient.POST(
+    '/api/v1/providers/{provider_id}/disable',
+    {
+      params: {
+        path: { provider_id: provider.id },
+        header: {
+          'If-Match': provider.etag,
+          'Idempotency-Key': crypto.randomUUID()
+        }
+      }
+    }
+  );
+  return (
+    result(response.data, response.error, response.response).runtime_generation
+      ?.sequence ?? null
+  );
+}
+
+/** Moves a disabled provider back to an editable draft. */
+export async function restoreProviderAsDraft(
+  provider: Provider
+): Promise<Provider> {
+  const response = await apiClient.POST(
+    '/api/v1/providers/{provider_id}/restore-as-draft',
+    {
+      params: {
+        path: { provider_id: provider.id },
+        header: {
+          'If-Match': provider.etag,
+          'Idempotency-Key': crypto.randomUUID()
+        }
+      }
+    }
+  );
+  return result(response.data, response.error, response.response) as Provider;
+}
+
+/** True for the 409 the server returns when a resource is still referenced. */
+export function isProviderInUse(error: unknown): boolean {
+  return error instanceof ApiProblem && error.problem.status === 409;
+}
+
 export async function listProviderRevisionPage(
   providerId: string,
   cursor?: string,
@@ -265,6 +314,43 @@ export async function listProviderRevisionPage(
     {
       params: {
         path: { provider_id: providerId },
+        query: { cursor, limit: 25 }
+      },
+      signal
+    }
+  );
+  const page = result(response.data, response.error, response.response);
+  return { items: page.items, nextCursor: page.next_cursor ?? null };
+}
+
+export async function getProviderRevision(
+  providerId: string,
+  revisionId: string,
+  signal?: AbortSignal
+): Promise<ProviderRevisionDetail> {
+  const response = await apiClient.GET(
+    '/api/v1/providers/{provider_id}/revisions/{revision_id}',
+    {
+      params: {
+        path: { provider_id: providerId, revision_id: revisionId }
+      },
+      signal
+    }
+  );
+  return result(response.data, response.error, response.response);
+}
+
+export async function listProviderRevisionModelPage(
+  providerId: string,
+  revisionId: string,
+  cursor?: string,
+  signal?: AbortSignal
+): Promise<CursorPage<ProviderModel>> {
+  const response = await apiClient.GET(
+    '/api/v1/providers/{provider_id}/revisions/{revision_id}/models',
+    {
+      params: {
+        path: { provider_id: providerId, revision_id: revisionId },
         query: { cursor, limit: 25 }
       },
       signal
@@ -293,7 +379,7 @@ export async function diffProviderRevisions(
 export async function restoreProviderRevision(
   provider: Provider,
   revisionId: string
-): Promise<Provider> {
+): Promise<ProviderRevisionRestore> {
   const response = await apiClient.POST(
     '/api/v1/providers/{provider_id}/revisions/{revision_id}/restore-as-draft',
     {
@@ -306,8 +392,11 @@ export async function restoreProviderRevision(
       }
     }
   );
-  return result(response.data, response.error, response.response)
-    .provider as Provider;
+  return result(
+    response.data,
+    response.error,
+    response.response
+  ) as ProviderRevisionRestore;
 }
 
 export async function listProviderCredentials(

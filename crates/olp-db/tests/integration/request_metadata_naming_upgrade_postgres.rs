@@ -56,15 +56,6 @@ async fn request_metadata_schema_rename_preserves_legacy_rows() {
     .await
     .unwrap();
     sqlx::query(
-        "INSERT INTO usage_loss_reporter_state \
-         (gateway_instance, process_epoch, dropped, abandoned, updated_at) \
-         VALUES ('gateway-a', $1, 1, 0, now())",
-    )
-    .bind(process_epoch)
-    .execute(store.pool())
-    .await
-    .unwrap();
-    sqlx::query(
         "INSERT INTO usage_gateway_epochs \
          (gateway_instance, process_epoch, started_at, accepted, persisted, dropped, \
           abandoned, retrying, writer_closed, updated_at, uncertainty_gap_id) \
@@ -83,8 +74,7 @@ async fn request_metadata_schema_rename_preserves_legacy_rows() {
          UNION ALL SELECT 'request_metadata_consumer_health', count(*) FROM request_metadata_consumer_health \
          UNION ALL SELECT 'request_metadata_gateway_epochs', count(*) FROM request_metadata_gateway_epochs \
          UNION ALL SELECT 'request_metadata_ingestion_gaps', count(*) FROM request_metadata_ingestion_gaps \
-         UNION ALL SELECT 'request_metadata_gap_hourly', count(*) FROM request_metadata_gap_hourly \
-         UNION ALL SELECT 'request_metadata_loss_reporter_state', count(*) FROM request_metadata_loss_reporter_state",
+         UNION ALL SELECT 'request_metadata_gap_hourly', count(*) FROM request_metadata_gap_hourly",
     )
     .fetch_all(store.pool())
     .await
@@ -166,8 +156,7 @@ async fn request_metadata_schema_rename_preserves_legacy_rows() {
              'request_metadata_consumer_health'::regclass, \
              'request_metadata_gateway_epochs'::regclass, \
              'request_metadata_ingestion_gaps'::regclass, \
-             'request_metadata_gap_hourly'::regclass, \
-             'request_metadata_loss_reporter_state'::regclass)",
+             'request_metadata_gap_hourly'::regclass)",
     )
     .fetch_one(store.pool())
     .await

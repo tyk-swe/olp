@@ -11,16 +11,19 @@
   let {
     children,
     user,
+    installationName,
     signingOut = false,
     signOutError = '',
     onSignOut
   }: {
     children: Snippet;
     user: SessionUser;
+    installationName: string;
     signingOut?: boolean;
     signOutError?: string;
     onSignOut: () => void;
   } = $props();
+  const installationLabel = $derived(installationName || 'Local installation');
   let mobileNavigation = $state<HTMLDialogElement>();
   let accountMenu = $state<HTMLDetailsElement>();
   let accountMenuOpen = $state(false);
@@ -83,7 +86,7 @@
       </div>
 
       <div class="topbar-actions">
-        <span class="edition"><span aria-hidden="true"></span>Local installation</span>
+        <span class="edition"><span aria-hidden="true"></span>{installationLabel}</span>
         <ThemeToggle />
         <details
           class="account-menu"

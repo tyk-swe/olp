@@ -3,6 +3,7 @@
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { errorMessage as providerDetailError } from '$lib/api/http';
   import CursorPagination from '$lib/components/CursorPagination.svelte';
+  import { formatDate } from '$lib/format';
   import {
     certifyProviderModel,
     declareProviderModels,
@@ -260,7 +261,9 @@
               ><td
                 ><strong>{model.display_name}</strong><br /><code
                   >{model.upstream_model}</code
-                ></td
+                >{#if model.discovered_at}<br /><small class="discovered"
+                    >Discovered {formatDate(model.discovered_at)}</small
+                  >{/if}</td
               ><td>
                 <CapabilityReview
                   {model}
@@ -270,6 +273,7 @@
                   optionsError={capabilityOptions.isError}
                   disabled={!canManage || Boolean(busy)}
                   {reloadVersion}
+                  certification={certificationResults[model.id]}
                   onSave={(enabled, capabilities, providerEtag) =>
                     reviewModel(
                       { ...modelPage.provider, etag: providerEtag },
@@ -295,15 +299,7 @@
                       class:success={result.status === 'succeeded'}
                       class:warning={result.status !== 'succeeded'}
                       >{result.certified_count}/{result.attempted_count} certified</span
-                    >
-                    <ul class="certification-results">
-                      {#each result.results.filter((item) => !item.succeeded) as item (`${item.operation}-${item.surface}-${item.mode}`)}<li
-                        >
-                          <code
-                            >{item.operation}/{item.surface}/{item.mode}</code
-                          >: {item.detail}
-                        </li>{/each}
-                    </ul>{/if}
+                    >{/if}
                 </div>
               </td></tr
             >{/each}
@@ -359,11 +355,9 @@
     color: var(--foreground-muted);
     font-size: 0.75rem;
   }
-  .certification-results {
-    width: 100%;
-    margin: 0;
-    padding-left: 1.25rem;
-    color: var(--danger);
+  .discovered {
+    color: var(--foreground-muted);
+    font-size: 0.7rem;
   }
   .models {
     max-width: none;

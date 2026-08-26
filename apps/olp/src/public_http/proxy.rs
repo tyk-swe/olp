@@ -12,11 +12,12 @@ use std::{
 };
 
 use axum::http::{HeaderMap, HeaderName};
-use olp_db::security::key_material::AuthHmacKey;
+use olp_db::{security::key_material::AuthHmacKey, store::RequestProvenance};
 
 use crate::{bootstrap::mode_dependencies::RequestBoundaryState, public_http::problem::Problem};
 
 const UNCONFIGURED_PROXY_WARNING_INTERVAL_SECONDS: u64 = 60;
+const USER_AGENT_FAMILY_MAX_CHARS: usize = 64;
 static LAST_UNCONFIGURED_PROXY_WARNING: AtomicU64 = AtomicU64::new(0);
 
 /// A CIDR range whose peer addresses are allowed to provide a forwarding
@@ -80,6 +81,46 @@ pub(crate) fn public_auth_source(
     headers: &HeaderMap,
     peer: Option<SocketAddr>,
 ) -> Result<String, Problem> {
+    resolve_source_ip(state, headers, peer).map(|address| address.to_string())
+}
+
+/// Resolves the client address recorded on the audit rows a request produces.
+/// This shares the trusted-proxy admission rules above; an unresolvable source
+/// is recorded as null rather than failing the request.
+pub(crate) fn audit_request_provenance(
+    state: &RequestBoundaryState,
+    headers: &HeaderMap,
+    peer: Option<SocketAddr>,
+) -> RequestProvenance {
+    RequestProvenance {
+        source_ip: resolve_source_ip(state, headers, peer).ok(),
+        user_agent_family: user_agent_family(headers),
+    }
+}
+
+/// Keeps only the leading product token of the user-agent, so the audit stream
+/// carries a client family without retaining a fingerprintable string.
+fn user_agent_family(headers: &HeaderMap) -> Option<String> {
+    let value = headers.get(axum::http::header::USER_AGENT)?.to_str().ok()?;
+    let token = value
+        .trim_start()
+        .split(['/', ' ', '\t', '(', ';', ','])
+        .next()?;
+    let family: String = token
+        .chars()
+        .filter(|character| {
+            character.is_ascii_alphanumeric() || matches!(character, '-' | '_' | '.' | '+')
+        })
+        .take(USER_AGENT_FAMILY_MAX_CHARS)
+        .collect();
+    (!family.is_empty()).then_some(family)
+}
+
+fn resolve_source_ip(
+    state: &RequestBoundaryState,
+    headers: &HeaderMap,
+    peer: Option<SocketAddr>,
+) -> Result<IpAddr, Problem> {
     let peer = peer
         .map(|address| address.ip())
         .ok_or_else(|| Problem::service_unavailable("client_address_unavailable"))?;
@@ -89,7 +130,7 @@ pub(crate) fn public_auth_source(
         }
         // A direct client cannot influence admission by spoofing a forwarding
         // header; only its connected peer address is authoritative.
-        return Ok(peer.to_string());
+        return Ok(peer);
     }
 
     let forwarded_for = HeaderName::from_static("x-forwarded-for");
@@ -117,7 +158,6 @@ pub(crate) fn public_auth_source(
         .into_iter()
         .rev()
         .find(|address| !state.peer_is_trusted_proxy(*address))
-        .map(|address| address.to_string())
         .ok_or_else(|| {
             Problem::bad_request(
                 "forwarded_for_invalid",
@@ -196,7 +236,44 @@ pub(crate) fn public_auth_source_target_digests(
 mod tests {
     use std::sync::atomic::AtomicU64;
 
-    use super::claim_warning_slot;
+    use axum::http::{HeaderMap, HeaderValue, header};
+
+    use super::{USER_AGENT_FAMILY_MAX_CHARS, claim_warning_slot, user_agent_family};
+
+    fn family(value: &str) -> Option<String> {
+        let mut headers = HeaderMap::new();
+        headers.insert(header::USER_AGENT, HeaderValue::from_str(value).unwrap());
+        user_agent_family(&headers)
+    }
+
+    #[test]
+    fn only_the_leading_product_token_is_retained() {
+        assert_eq!(family("curl/8.5.0").as_deref(), Some("curl"));
+        assert_eq!(
+            family("Mozilla/5.0 (X11; Linux x86_64) Gecko/20100101").as_deref(),
+            Some("Mozilla")
+        );
+        assert_eq!(
+            family("python-requests/2.31.0").as_deref(),
+            Some("python-requests")
+        );
+    }
+
+    #[test]
+    fn an_unusable_user_agent_records_nothing() {
+        assert!(user_agent_family(&HeaderMap::new()).is_none());
+        assert!(family("/8.5.0").is_none());
+        assert!(family("()").is_none());
+    }
+
+    #[test]
+    fn an_oversized_product_token_is_truncated() {
+        let token = "a".repeat(200);
+        assert_eq!(
+            family(&format!("{token}/1.0")).map(|family| family.chars().count()),
+            Some(USER_AGENT_FAMILY_MAX_CHARS)
+        );
+    }
 
     #[test]
     fn unconfigured_proxy_warning_is_rate_limited() {

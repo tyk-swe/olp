@@ -6,11 +6,23 @@ import { compactQuery } from './query';
 
 export type AuditEvent = components['schemas']['AuditEventResponse'];
 
+export type AuditFilters = {
+  cursor?: string;
+  limit?: number;
+  action?: string;
+  resource_type?: string;
+  resource_id?: string;
+  actor_user_id?: string;
+  outcome?: string;
+  occurred_after?: string;
+  occurred_before?: string;
+};
+
 export async function listAudit(
-  cursor?: string
+  filters: AuditFilters = {}
 ): Promise<CursorPage<AuditEvent>> {
   const { data, error, response } = await apiClient.GET('/api/v1/audit', {
-    params: { query: compactQuery({ cursor, limit: 50 }) }
+    params: { query: compactQuery({ limit: 50, ...filters }) }
   });
   const page = result(data, error, response);
   return { items: page.data, nextCursor: page.next_cursor ?? null };

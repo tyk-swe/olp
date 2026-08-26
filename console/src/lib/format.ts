@@ -75,3 +75,27 @@ export function statusLabel(status?: number | null, errorClass?: string | null):
   if (status === null || status === undefined) return 'In progress';
   return String(status);
 }
+
+const BYTE_UNITS = ['B', 'KiB', 'MiB', 'GiB', 'TiB', 'PiB'];
+
+/**
+ * Binary units, because every byte figure the console shows comes from a
+ * capacity or a spool the operator configured in KiB/MiB/GiB.
+ */
+export function formatBytes(value?: number | string | null): string {
+  if (value === null || value === undefined || value === '') return '—';
+  const number = typeof value === 'number' ? value : Number(value);
+  if (!Number.isFinite(number)) return '—';
+  const sign = number < 0 ? '-' : '';
+  let size = Math.abs(number);
+  let unit = 0;
+  while (size >= 1024 && unit < BYTE_UNITS.length - 1) {
+    size /= 1024;
+    unit += 1;
+  }
+  const digits = unit === 0 || size >= 100 ? 0 : size >= 10 ? 1 : 2;
+  return `${sign}${new Intl.NumberFormat(undefined, {
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits
+  }).format(size)} ${BYTE_UNITS[unit]}`;
+}

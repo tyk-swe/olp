@@ -12,6 +12,7 @@
   let { children } = $props();
   authLifecycle.markProtectedBoundaryChecking();
   let authentication = $state<AuthenticationSnapshot>(authLifecycle.snapshot());
+  let installationName = $state('');
   let signOutError = $state('');
   let signingOut = $state(false);
 
@@ -45,7 +46,11 @@
       authentication = snapshot;
     });
     const unregister = authLifecycle.registerBoundary({
-      loadSession: currentSession,
+      async loadSession(signal) {
+        const session = await currentSession(signal);
+        installationName = session.installation_name;
+        return session;
+      },
       async unauthenticatedDestination(signal, sessionExpired) {
         const setup = await getSetupStatus(signal);
         return setup.setup_required
@@ -110,6 +115,7 @@
 {:else}
   <AppShell
     user={authentication.user}
+    {installationName}
     {signingOut}
     signOutError={signOutError || authentication.principalExitError}
     onSignOut={signOut}

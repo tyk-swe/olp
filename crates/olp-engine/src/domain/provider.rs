@@ -38,7 +38,6 @@ closed_string_enum! {
 closed_string_enum! {
     pub enum CapabilitySource {
         Declared => "declared",
-        Probed => "probed",
         Certified => "certified",
     }
     parse_error ClosedSetParseError => |value| ClosedSetParseError::new("capability source", value);

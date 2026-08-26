@@ -104,8 +104,22 @@ impl Store {
             "INSERT INTO invitations \
              (id, email, role, token_digest, invited_by, expires_at, created_at) \
              VALUES ($1, $2, CAST($3::text AS user_role), $4, $5, $6, $7) \
-             RETURNING id, email, role::text AS \"role!\", invited_by, expires_at, accepted_at, revoked_at, expired_at, created_at",
-        id, &email, invitation.role.as_str(), material.token_digest().to_vec(), invitation.actor, invitation.expires_at, now)
+             RETURNING id, email, role::text AS \"role!\", invited_by, expires_at, accepted_at, \
+                       revoked_at, expired_at, created_at, \
+                       (SELECT u.email FROM users u WHERE u.id = invitations.invited_by) \
+                         AS \"invited_by_email?\", \
+                       (SELECT u.email FROM users u WHERE u.id = invitations.accepted_by) \
+                         AS \"accepted_by_email?\", \
+                       (SELECT u.email FROM users u WHERE u.id = invitations.revoked_by) \
+                         AS \"revoked_by_email?\"",
+            id,
+            &email,
+            invitation.role.as_str(),
+            material.token_digest().to_vec(),
+            invitation.actor,
+            invitation.expires_at,
+            now
+        )
         .fetch_one(&mut *transaction)
         .await
         {
@@ -117,6 +131,7 @@ impl Store {
         };
         insert_audit(
             &mut transaction,
+            self.provenance(),
             invitation.actor,
             "invitation.create",
             "invitation",
@@ -153,9 +168,19 @@ impl Store {
         let limit = limit.clamp(1, MAX_PAGE_SIZE);
         let rows = sqlx::query_as!(
             InvitationRow,
-            "SELECT id, email, role::text AS \"role!\", invited_by, expires_at, accepted_at, revoked_at, expired_at, created_at \
-             FROM invitations WHERE ($1::uuid IS NULL OR id < $1) ORDER BY id DESC LIMIT $2",
-        cursor, limit + 1)
+            "SELECT i.id, i.email, i.role::text AS \"role!\", i.invited_by, i.expires_at, \
+                    i.accepted_at, i.revoked_at, i.expired_at, i.created_at, \
+                    inviter.email AS \"invited_by_email?\", \
+                    accepter.email AS \"accepted_by_email?\", \
+                    revoker.email AS \"revoked_by_email?\" \
+             FROM invitations i \
+             LEFT JOIN users inviter ON inviter.id = i.invited_by \
+             LEFT JOIN users accepter ON accepter.id = i.accepted_by \
+             LEFT JOIN users revoker ON revoker.id = i.revoked_by \
+             WHERE ($1::uuid IS NULL OR i.id < $1) ORDER BY i.id DESC LIMIT $2",
+            cursor,
+            limit + 1
+        )
         .fetch_all(self.pool())
         .await?;
         let invitations = rows
@@ -188,13 +213,23 @@ impl Store {
             InvitationRow,
             "UPDATE invitations SET revoked_at = now(), revoked_by = $2 \
              WHERE id = $1 AND accepted_at IS NULL AND revoked_at IS NULL AND expired_at IS NULL \
-             RETURNING id, email, role::text AS \"role!\", invited_by, expires_at, accepted_at, revoked_at, expired_at, created_at",
-        id, actor)
+             RETURNING id, email, role::text AS \"role!\", invited_by, expires_at, accepted_at, \
+                       revoked_at, expired_at, created_at, \
+                       (SELECT u.email FROM users u WHERE u.id = invitations.invited_by) \
+                         AS \"invited_by_email?\", \
+                       (SELECT u.email FROM users u WHERE u.id = invitations.accepted_by) \
+                         AS \"accepted_by_email?\", \
+                       (SELECT u.email FROM users u WHERE u.id = invitations.revoked_by) \
+                         AS \"revoked_by_email?\"",
+            id,
+            actor
+        )
         .fetch_optional(&mut *transaction)
         .await?
         .ok_or(Error::InvitationUnavailable)?;
         insert_audit(
             &mut transaction,
+            self.provenance(),
             actor,
             "invitation.revoke",
             "invitation",
@@ -306,6 +341,7 @@ impl Store {
         }
         insert_audit(
             &mut transaction,
+            self.provenance(),
             user_id,
             "invitation.accept",
             "invitation",
@@ -314,6 +350,7 @@ impl Store {
         .await?;
         insert_audit(
             &mut transaction,
+            self.provenance(),
             user_id,
             "user.create",
             "user",
@@ -331,6 +368,7 @@ impl Store {
         .await?;
         insert_audit(
             &mut transaction,
+            self.provenance(),
             user_id,
             "session.create",
             "session",
@@ -340,8 +378,6 @@ impl Store {
         transaction.commit().await?;
         Ok(AcceptedInvitation {
             user: super::accounts::user_from_row(user_row)?,
-            invitation_id,
-            session_id,
         })
     }
 }
@@ -391,6 +427,9 @@ struct InvitationRow {
     revoked_at: Option<DateTime<Utc>>,
     expired_at: Option<DateTime<Utc>>,
     created_at: DateTime<Utc>,
+    invited_by_email: Option<String>,
+    accepted_by_email: Option<String>,
+    revoked_by_email: Option<String>,
 }
 
 fn invitation_from_row(row: InvitationRow) -> Result<InvitationRecord, Error> {
@@ -404,6 +443,9 @@ fn invitation_from_row(row: InvitationRow) -> Result<InvitationRecord, Error> {
         revoked_at: row.revoked_at,
         expired_at: row.expired_at,
         created_at: row.created_at,
+        invited_by_email: row.invited_by_email,
+        accepted_by_email: row.accepted_by_email,
+        revoked_by_email: row.revoked_by_email,
     })
 }
 

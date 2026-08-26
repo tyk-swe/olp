@@ -428,6 +428,10 @@ impl MediaSpool for FileMediaSpool {
         Some(self.capacity_bytes)
     }
 
+    fn used_bytes(&self) -> Option<u64> {
+        Some(self.used_bytes.load(Ordering::Acquire))
+    }
+
     fn put<'a>(
         &'a self,
         mut upload: MediaUpload,

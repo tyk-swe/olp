@@ -395,6 +395,7 @@ impl UsageCapture {
     }
 
     #[must_use]
+    #[cfg(any(test, feature = "test-util"))]
     pub const fn is_settled(&self) -> bool {
         self.settled
     }

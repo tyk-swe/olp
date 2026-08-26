@@ -1,11 +1,18 @@
 //! Prometheus snapshot collection and rendering.
 
-use std::{fmt::Write as _, time::Instant};
+use std::{
+    fmt::Write as _,
+    sync::{
+        Arc,
+        atomic::{AtomicU64, Ordering},
+    },
+    time::Instant,
+};
 
 use axum::response::{IntoResponse, Response};
 use olp_db::{
     request_metadata::delivery_health::ConsumerStatus,
-    request_metadata::reconciliation::EpochHealth,
+    request_metadata::reconciliation::{EpochHealth, LossReport},
     runtime::outbox::RuntimeOutboxStatus,
     worker_health::{WorkerRecoveryCounters, WorkerTask, WorkerTaskHealthSummary, WorkerTaskState},
 };
@@ -19,6 +26,41 @@ use crate::bootstrap::mode_dependencies::ObservabilityState;
 
 fn cached_metrics_is_fresh(snapshot: &CachedMetrics, now: Instant) -> bool {
     snapshot_is_current(snapshot.last_success_at, snapshot.last_attempt_at, now)
+}
+
+#[derive(Debug, Default)]
+struct RequestMetadataLossTotals {
+    events: AtomicU64,
+    dropped: AtomicU64,
+    abandoned: AtomicU64,
+}
+
+/// Process-wide totals for request metadata loss that the reporter has
+/// durably recorded in PostgreSQL. The loss reporter owns the increments and
+/// the metrics endpoint renders them.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct RequestMetadataLossCounters(Arc<RequestMetadataLossTotals>);
+
+impl RequestMetadataLossCounters {
+    pub(crate) fn record(&self, report: LossReport) {
+        self.0
+            .events
+            .fetch_add(report.reported_events, Ordering::Relaxed);
+        self.0
+            .dropped
+            .fetch_add(report.reported_dropped, Ordering::Relaxed);
+        self.0
+            .abandoned
+            .fetch_add(report.reported_abandoned, Ordering::Relaxed);
+    }
+
+    fn totals(&self) -> (u64, u64, u64) {
+        (
+            self.0.events.load(Ordering::Relaxed),
+            self.0.dropped.load(Ordering::Relaxed),
+            self.0.abandoned.load(Ordering::Relaxed),
+        )
+    }
 }
 
 pub(super) async fn metrics(
@@ -102,6 +144,8 @@ pub(super) async fn collect_metrics(state: &ObservabilityState) -> String {
         provider_health = page.items;
     }
     let media_reconciliation = media.ok();
+    let (reported_loss_events, reported_loss_dropped, reported_loss_abandoned) =
+        state.request_metadata_loss_counters().totals();
     let mut body = format!(
         "# HELP olp_runtime_generation Current immutable runtime generation.\n\
          # TYPE olp_runtime_generation gauge\n\
@@ -168,7 +212,12 @@ pub(super) async fn collect_metrics(state: &ObservabilityState) -> String {
          olp_media_reconciliation_unbound {}\n\
          # HELP olp_media_reconciliation_gaps_total Upstream media side effects that could not be durably recorded.\n\
          # TYPE olp_media_reconciliation_gaps_total counter\n\
-         olp_media_reconciliation_gaps_total {}\n",
+         olp_media_reconciliation_gaps_total {}\n\
+         # HELP olp_request_metadata_loss_reported_total Local buffer loss durably reported by the gateway checkpoint.\n\
+         # TYPE olp_request_metadata_loss_reported_total counter\n\
+         olp_request_metadata_loss_reported_total{{kind=\"events\"}} {}\n\
+         olp_request_metadata_loss_reported_total{{kind=\"dropped\"}} {}\n\
+         olp_request_metadata_loss_reported_total{{kind=\"abandoned\"}} {}\n",
         state.runtime().active_generation_ordinal().unwrap_or(0),
         request_metadata.map_or(0, |snapshot| snapshot.dropped),
         request_metadata.map_or(0, |snapshot| snapshot.abandoned),
@@ -202,7 +251,24 @@ pub(super) async fn collect_metrics(state: &ObservabilityState) -> String {
             .as_ref()
             .map_or(0, |value| value.unbound),
         state.media_reconciliation_gap_count(),
+        reported_loss_events,
+        reported_loss_dropped,
+        reported_loss_abandoned,
     );
+    if let Some(capacity_bytes) = state.media_spool().capacity_bytes() {
+        body.push_str(
+            "# HELP olp_media_spool_capacity_bytes Configured capacity of the private local media spool.\n\
+             # TYPE olp_media_spool_capacity_bytes gauge\n",
+        );
+        let _ = writeln!(body, "olp_media_spool_capacity_bytes {capacity_bytes}");
+    }
+    if let Some(used_bytes) = state.media_spool().used_bytes() {
+        body.push_str(
+            "# HELP olp_media_spool_used_bytes Bytes currently reserved in the private local media spool.\n\
+             # TYPE olp_media_spool_used_bytes gauge\n",
+        );
+        let _ = writeln!(body, "olp_media_spool_used_bytes {used_bytes}");
+    }
     append_async_worker_metrics(
         &mut body,
         now,
@@ -529,4 +595,30 @@ pub(crate) fn prometheus_label(value: &str) -> String {
         .replace('\\', "\\\\")
         .replace('\n', "\\n")
         .replace('"', "\\\"")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn loss_counters_accumulate_every_reported_checkpoint() {
+        let counters = RequestMetadataLossCounters::default();
+        assert_eq!(counters.totals(), (0, 0, 0));
+
+        counters.record(LossReport {
+            reported_events: 3,
+            reported_dropped: 2,
+            reported_abandoned: 1,
+            process_epoch_changed: true,
+        });
+        counters.record(LossReport {
+            reported_events: 4,
+            reported_dropped: 4,
+            reported_abandoned: 0,
+            process_epoch_changed: false,
+        });
+
+        assert_eq!(counters.totals(), (7, 6, 1));
+    }
 }

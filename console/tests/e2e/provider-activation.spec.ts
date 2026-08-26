@@ -284,3 +284,152 @@ test('provider detail keeps the live revision and credential until a certified d
   expect(probeEtag).toBe('"01980000-0000-7000-8000-000000000202"');
   expect(activationEtag).toBe('"01980000-0000-7000-8000-000000000202"');
 });
+
+test('provider detail disables an active provider and restores it as a draft', async ({
+  page
+}) => {
+  await mockSession(page, sessionOptions);
+  page.on('dialog', (dialog) => dialog.accept());
+  const disabledEtag = '01980000-0000-7000-8000-000000000301';
+  const draftEtag = '01980000-0000-7000-8000-000000000302';
+  let currentProvider = providerRecord('active', [certifiedModelRecord], {
+    active_revision: 1,
+    pending_activation: false
+  });
+  let disableAttempts = 0;
+  let disableHeaders: Record<string, string> = {};
+  let restoreHeaders: Record<string, string> = {};
+
+  await page.route('**/api/v1/providers**', async (route) => {
+    const request = route.request();
+    const pathname = new URL(request.url()).pathname;
+    if (pathname === '/api/v1/providers') {
+      await route.fulfill({
+        json: { items: [currentProvider], next_cursor: null }
+      });
+      return;
+    }
+    if (pathname.endsWith('/revisions') && request.method() === 'GET') {
+      await route.fulfill({ json: { items: [], next_cursor: null } });
+      return;
+    }
+    if (
+      pathname === `/api/v1/providers/${ids.provider}/models` &&
+      request.method() === 'GET'
+    ) {
+      await route.fulfill({
+        json: { items: currentProvider.models, next_cursor: null }
+      });
+      return;
+    }
+    if (pathname.endsWith('/credentials') && request.method() === 'GET') {
+      await route.fulfill({
+        json: {
+          items: [
+            {
+              id: ids.credential,
+              version: 1,
+              active: true,
+              draft_selected: false,
+              created_at: now,
+              revoked_at: null
+            }
+          ]
+        }
+      });
+      return;
+    }
+    if (pathname.endsWith('/disable')) {
+      disableAttempts += 1;
+      disableHeaders = await request.allHeaders();
+      if (disableAttempts === 1) {
+        await route.fulfill({
+          status: 409,
+          contentType: 'application/problem+json',
+          body: JSON.stringify({
+            type: 'about:blank',
+            title: 'Conflict',
+            status: 409,
+            detail:
+              'The resource is active or referenced and cannot be removed.'
+          })
+        });
+        return;
+      }
+      currentProvider = providerRecord('disabled', [certifiedModelRecord], {
+        active_revision: null,
+        pending_activation: false,
+        etag: disabledEtag,
+        updated_at: '2026-07-12T12:20:00Z'
+      });
+      await route.fulfill({
+        json: {
+          provider_id: ids.provider,
+          etag: disabledEtag,
+          credential_id: null,
+          credential_version: null,
+          runtime_generation: { id: ids.generation, sequence: 9 }
+        }
+      });
+      return;
+    }
+    if (pathname.endsWith('/restore-as-draft')) {
+      restoreHeaders = await request.allHeaders();
+      currentProvider = providerRecord('draft', [certifiedModelRecord], {
+        active_revision: null,
+        pending_activation: false,
+        etag: draftEtag,
+        updated_at: '2026-07-12T12:21:00Z'
+      });
+      await route.fulfill({ json: currentProvider });
+      return;
+    }
+    if (pathname === `/api/v1/providers/${ids.provider}`) {
+      await route.fulfill({ json: currentProvider });
+      return;
+    }
+    failUnexpectedApiRequest(route);
+  });
+
+  await page.goto(`/providers/${ids.provider}`);
+  await expect(page.getByText('revision 1 active')).toBeVisible();
+
+  await page.getByRole('button', { name: 'Disable provider' }).click();
+  await expect(
+    page.getByText(/The resource is active or referenced/)
+  ).toBeVisible();
+  await expect(page.getByText(/Retarget every route/)).toBeVisible();
+  await expect(page.getByText('revision 1 active')).toBeVisible();
+
+  await page.getByRole('button', { name: 'Disable provider' }).click();
+  await expect(
+    page.getByText('Provider disabled in runtime generation 9.')
+  ).toBeVisible();
+  await expect(page.getByText('disabled · not serving')).toBeVisible();
+  await expect(
+    page.getByText('This provider is disabled. No revision is serving traffic.')
+  ).toBeVisible();
+  await expect(
+    page.getByRole('button', { name: 'Disable provider' })
+  ).toHaveCount(0);
+
+  await page.getByRole('button', { name: 'Restore provider as draft' }).click();
+  await expect(page.getByText(/Provider restored as a draft/)).toBeVisible();
+  await expect(
+    page.getByRole('button', { name: 'Restore provider as draft' })
+  ).toHaveCount(0);
+  await expect(
+    page.getByRole('button', { name: 'Activate changes' })
+  ).toBeVisible();
+  expect(disableAttempts).toBe(2);
+  expect(disableHeaders['if-match']).toBe(
+    '"01980000-0000-7000-8000-000000000109"'
+  );
+  expect(disableHeaders['idempotency-key']).toMatch(
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
+  );
+  expect(restoreHeaders['if-match']).toBe(`"${disabledEtag}"`);
+  expect(restoreHeaders['idempotency-key']).toMatch(
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
+  );
+});

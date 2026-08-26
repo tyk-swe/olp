@@ -231,6 +231,7 @@ impl Store {
         .await?;
         audit_in_transaction(
             &mut transaction,
+            self.provenance(),
             actor,
             "provider.discover",
             "provider",
@@ -335,6 +336,7 @@ impl Store {
         .await?;
         audit_in_transaction(
             &mut transaction,
+            self.provenance(),
             actor,
             "provider.model.update",
             "provider_model",
@@ -493,6 +495,7 @@ impl Store {
         };
         audit_in_transaction(
             &mut transaction,
+            self.provenance(),
             actor,
             "provider.model.certify",
             "provider_model",

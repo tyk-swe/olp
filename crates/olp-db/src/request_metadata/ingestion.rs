@@ -54,6 +54,7 @@ impl Store {
     /// receipt protects the supported seven-day delivery window after raw
     /// facts roll into hourly usage. Older entries are rejected explicitly so
     /// they cannot silently add to an aggregate after their receipt expires.
+    #[cfg(any(test, feature = "test-util"))]
     pub async fn persist_request_metadata_event(&self, event: &Event) -> Result<Outcome, Error> {
         let event_sha256: [u8; 32] = Sha256::digest(serde_json::to_vec(event)?).into();
         self.persist_request_metadata_event_with_digest(event, event_sha256)
@@ -281,7 +282,7 @@ async fn insert_attempt_usage_facts<'a>(
             "INSERT INTO attempt_usage_facts \
              (attempt_id, event_id, request_id, request_started_at, attempt_ordinal, \
               api_key_id, provider_id, route_slug, upstream_model, operation, surface, \
-              attempt_started_at, attempt_completed_at, observed_at, charge_status, \
+              observed_at, charge_status, \
               usage_observed, usage_complete, input_tokens, output_tokens, \
               cached_input_tokens, media_units, estimated_cost, unpriced, \
               pricing_revision_id, currency, request_counted, provider_request_counted, \
@@ -289,9 +290,9 @@ async fn insert_attempt_usage_facts<'a>(
               provider_unpriced_counted, model_unpriced_counted, target_unpriced_counted, \
               request_incomplete_counted, provider_incomplete_counted, \
               model_incomplete_counted, target_incomplete_counted) \
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, \
-                     $15::text::attempt_charge_status, $16, $17, $18, $19, $20, $21, \
-                     $22::numeric, $23, $24, $25, false, false, false, false, false, \
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, \
+                     $13::text::attempt_charge_status, $14, $15, $16, $17, $18, $19, \
+                     $20::numeric, $21, $22, $23, false, false, false, false, false, \
                      false, false, false, false, false, false, false) \
              ON CONFLICT (request_id, attempt_ordinal) DO NOTHING",
             attempt.event.id,
@@ -305,8 +306,6 @@ async fn insert_attempt_usage_facts<'a>(
             &attempt.event.upstream_model,
             event.operation.as_str(),
             event.surface.as_str(),
-            attempt.event.started_at,
-            attempt.event.completed_at,
             event.observed_at,
             charge_status.as_str(),
             attempt.usage.observed,

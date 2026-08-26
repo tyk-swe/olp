@@ -3,9 +3,12 @@
   import { resolve } from '$app/paths';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import ConflictNotice from '$lib/components/ConflictNotice.svelte';
+  import ReadOnlyNote from '$lib/components/ReadOnlyNote.svelte';
   import {
     errorMessage as providerDetailError,
-    isEtagMismatch
+    fieldIssues,
+    isEtagMismatch,
+    type FieldIssue
   } from '$lib/api/http';
   import {
     getProvider,
@@ -29,6 +32,7 @@
   import ProviderCredentialsSection from './ProviderCredentialsSection.svelte';
   import ProviderModelsSection from './ProviderModelsSection.svelte';
   import ProviderRevisionsSection from './ProviderRevisionsSection.svelte';
+  import ProviderValidationIssues from './ProviderValidationIssues.svelte';
   import {
     buildUpdateProviderInput,
     providerEditValues,
@@ -62,6 +66,7 @@
 
   let busy = $state('');
   let errorMessage = $state('');
+  let validationIssues = $state<FieldIssue[]>([]);
   let notice = $state('');
   let reloadVersion = $state(0);
   let modelPageState = $state(emptyCursorHistory());
@@ -88,12 +93,16 @@
   const run: RunProviderAction = async (label, action) => {
     busy = label;
     errorMessage = notice = '';
+    validationIssues = [];
     try {
       await action();
       return true;
     } catch (error) {
       if (isEtagMismatch(error)) sync = markConflict(sync);
-      else errorMessage = providerDetailError(error);
+      else {
+        errorMessage = providerDetailError(error);
+        validationIssues = fieldIssues(error);
+      }
       return false;
     } finally {
       busy = '';
@@ -113,11 +122,13 @@
 
   function reportError(message: string) {
     errorMessage = message;
+    validationIssues = [];
     notice = '';
   }
 
   function reportNotice(message: string) {
     errorMessage = '';
+    validationIssues = [];
     notice = message;
   }
 
@@ -137,6 +148,7 @@
     if (busy) return;
     busy = 'reload';
     errorMessage = notice = '';
+    validationIssues = [];
     const beforeReload = sync;
     sync = beginReload(sync);
     try {
@@ -188,6 +200,9 @@
       Test identity, review models and capability evidence, and rotate
       write-only credentials.
     </p>
+    {#if provider.data}<p class="provider-meta">
+        Created by {provider.data.created_by_email ?? 'a removed account'}
+      </p>{/if}
   </div>
   <a class="button button-secondary" href={resolve('/providers')}
     >All providers</a
@@ -196,6 +211,7 @@
 
 {#if errorMessage}<div class="inline-problem" role="alert">
     {errorMessage}
+    <ProviderValidationIssues issues={validationIssues} />
   </div>{/if}
 {#if notice}<div class="success-banner" role="status">{notice}</div>{/if}
 <ConflictNotice
@@ -239,9 +255,9 @@
   </div>
 {:else}
   {@const current = provider.data}
-  {#if !canManage}<p class="read-only-note" role="note">
+  {#if !canManage}<ReadOnlyNote>
       Your role can view this provider but not change, test, or activate it.
-    </p>{/if}
+    </ReadOnlyNote>{/if}
   {#if current.pending_activation}<div class="pending-banner" role="status">
       <strong>Revision {current.active_revision} remains live.</strong><span
         >Draft configuration and the draft-selected credential are not serving
@@ -318,6 +334,11 @@
   .pending-banner span {
     color: var(--foreground-muted);
     font-size: 0.82rem;
+  }
+  .provider-meta {
+    margin: 0.35rem 0 0;
+    color: var(--foreground-muted);
+    font-size: 0.78rem;
   }
   .detail-grid {
     display: grid;

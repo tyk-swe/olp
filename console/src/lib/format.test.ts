@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   dateTimeLocalValue,
+  formatBytes,
   formatCompact,
   formatCost,
   formatDay,
@@ -51,6 +52,20 @@ describe('shared formatting', () => {
     expect(label).toMatch(/2026/);
     expect(formatDay(null)).toBe('—');
     expect(formatDay('not-a-date')).toBe('—');
+  });
+
+  it('scales byte counts to binary units', () => {
+    expect(formatBytes(512)).toBe('512 B');
+    expect(formatBytes(1024)).toBe('1.00 KiB');
+    expect(formatBytes(1_572_864)).toBe('1.50 MiB');
+    expect(formatBytes(1_073_741_824)).toBe('1.00 GiB');
+    expect(formatBytes(0)).toBe('0 B');
+  });
+
+  it('reports an unmeasured byte count instead of zero', () => {
+    expect(formatBytes(null)).toBe('—');
+    expect(formatBytes(undefined)).toBe('—');
+    expect(formatBytes('not-a-number')).toBe('—');
   });
 
   it('formats UTC instants as local wall time for datetime-local controls', () => {

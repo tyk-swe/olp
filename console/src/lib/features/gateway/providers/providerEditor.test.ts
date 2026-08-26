@@ -6,6 +6,7 @@ import {
   buildCreateProviderInput,
   buildUpdateProviderInput,
   capabilitiesCertified,
+  capabilityLimitReached,
   certificationPrerequisiteReady,
   createProviderDraft,
   hasApiVersion,
@@ -13,10 +14,13 @@ import {
   hasCloudRegion,
   hasCustomEndpoint,
   hasDeployment,
+  MAX_REVIEWED_CAPABILITIES,
   parseManualModelNames,
   probeReady,
+  probeSummary,
   providerEditValues,
   providerStatus,
+  providerStatusTone,
   requiresCredential,
   requiresSeedModel,
   selectProviderPreset,
@@ -332,6 +336,7 @@ describe('provider editor API mappings', () => {
 describe('provider editor activation policy', () => {
   const readyDraft = {
     state: 'draft',
+    connector_ready: true,
     enabled_model_count: 1,
     capability_count: 2,
     certified_capability_count: 2,
@@ -351,6 +356,15 @@ describe('provider editor activation policy', () => {
       activationReady({ ...readyDraft, last_probe_at: '2026-07-12T11:59:00Z' })
     ).toBe(false);
     expect(activationReady({ ...readyDraft, state: 'active' })).toBe(false);
+    expect(activationReady({ ...readyDraft, state: 'disabled' })).toBe(false);
+  });
+
+  it('refuses activation when the build carries no connector for the kind', () => {
+    // connector_ready is a server-owned build signal, not a capability count:
+    // certified capabilities alone do not make the draft activatable.
+    const withoutConnector = { ...readyDraft, connector_ready: false };
+    expect(capabilitiesCertified(withoutConnector)).toBe(true);
+    expect(activationReady(withoutConnector)).toBe(false);
   });
 
   it('requires fresh catalog evidence only for native provider certification', () => {
@@ -390,5 +404,69 @@ describe('provider editor activation policy', () => {
         pending_activation: false
       })
     ).toBe('draft');
+  });
+
+  it('labels and tones a disabled provider', () => {
+    const disabled = {
+      ...readyDraft,
+      state: 'disabled',
+      active_revision: null,
+      pending_activation: false
+    };
+    expect(providerStatus(disabled)).toBe('disabled · not serving');
+    expect(providerStatusTone(disabled)).toBe('danger');
+    expect(providerStatusTone({ ...disabled, state: 'draft' })).toBe('warning');
+    expect(
+      providerStatusTone({ ...disabled, state: 'active', active_revision: 3 })
+    ).toBe('success');
+    expect(
+      providerStatusTone({
+        ...disabled,
+        state: 'active',
+        active_revision: 3,
+        pending_activation: true
+      })
+    ).toBe('warning');
+  });
+});
+
+describe('reviewed capability cap', () => {
+  it('stops at the server limit of 16 tuples per model', () => {
+    expect(MAX_REVIEWED_CAPABILITIES).toBe(16);
+    expect(capabilityLimitReached(15)).toBe(false);
+    expect(capabilityLimitReached(16)).toBe(true);
+    expect(capabilityLimitReached(17)).toBe(true);
+  });
+});
+
+describe('probeSummary', () => {
+  it('names the probe that ran and the models it saw', () => {
+    expect(
+      probeSummary({
+        probe_type: 'connector_connectivity',
+        detail: 'OpenAI reachable',
+        discovered_models: 12
+      })
+    ).toBe('OpenAI reachable · connector connectivity probe · 12 models seen');
+  });
+
+  it('omits the model count when the probe did not list models', () => {
+    expect(
+      probeSummary({
+        probe_type: 'model_listing',
+        detail: 'Endpoint reachable',
+        discovered_models: null
+      })
+    ).toBe('Endpoint reachable · model listing probe');
+  });
+
+  it('keeps a single discovered model singular', () => {
+    expect(
+      probeSummary({
+        probe_type: 'model_listing',
+        detail: 'Endpoint reachable',
+        discovered_models: 1
+      })
+    ).toBe('Endpoint reachable · model listing probe · 1 model seen');
   });
 });

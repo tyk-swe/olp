@@ -26,7 +26,7 @@ use olp_engine::providers::{
     openai::certification::{CompatibleCapability, CompatibleCapabilityCertificationError},
 };
 use serde::{Deserialize, Serialize};
-use utoipa::ToSchema;
+use utoipa::{IntoParams, ToSchema};
 use uuid::Uuid;
 
 use crate::{
@@ -44,6 +44,7 @@ use crate::{
 
 use super::manage::{ProviderDetailResponse, load_provider_detail};
 use crate::bootstrap::provider_adapter::provider_connector;
+use crate::management::provenance::Provenance;
 
 #[derive(Clone, Debug, Serialize, ToSchema)]
 pub(crate) struct ProviderCapabilityOptionsResponse {
@@ -210,10 +211,15 @@ fn provider_kind_capability_response(spec: &ProviderKindSpec) -> ProviderKindCap
 #[cfg(test)]
 mod provider_kind_catalog_tests;
 
-#[derive(Debug, Deserialize, ToSchema)]
+#[derive(Debug, Deserialize, IntoParams, ToSchema)]
+#[into_params(parameter_in = Query)]
 pub(crate) struct ProviderModelInventoryQuery {
+    /// Opaque cursor returned by the previous page.
     pub cursor: Option<String>,
+    /// Page size, from 1 to 200. Defaults to 50.
+    #[param(minimum = 1, maximum = 200)]
     pub limit: Option<u16>,
+    /// Optional enabled-state filter.
     pub enabled: Option<bool>,
 }
 
@@ -296,11 +302,7 @@ pub(crate) struct ProviderModelInventoryListResponse {
     get,
     path = "/api/v1/provider-models",
     tag = "providers",
-    params(
-        ("cursor" = Option<String>, Query),
-        ("limit" = Option<u16>, Query, minimum = 1, maximum = 200, description = "Page size from 1 to 200; defaults to 50"),
-        ("enabled" = Option<bool>, Query, description = "Optional enabled-state filter")
-    ),
+    params(ProviderModelInventoryQuery),
     responses(
         (status = 200, description = "Bounded cross-provider model and capability page", body = ProviderModelInventoryListResponse)
     )
@@ -429,6 +431,7 @@ pub(crate) struct DiscoverModelsRequest {
 )]
 pub(crate) async fn discover_provider_models(
     State(state): State<ManagementState>,
+    Provenance(provenance): Provenance,
     Path(provider_id): Path<Uuid>,
     headers: HeaderMap,
     payload: Result<Json<DiscoverModelsRequest>, JsonRejection>,
@@ -465,12 +468,12 @@ pub(crate) async fn discover_provider_models(
             })
             .collect()
     };
-    let store = state.store();
+    let store = state.store().with_provenance(&provenance);
     let etag = store
         .discover_provider_models(provider_id, if_match(&headers)?, &models, principal.user_id)
         .await
         .map_err(map_configuration)?;
-    let provider = load_provider_detail(store, provider_id).await?;
+    let provider = load_provider_detail(&store, provider_id).await?;
     with_etag(Json(provider), etag)
 }
 
@@ -494,6 +497,7 @@ pub(crate) struct SetModelRequest {
 )]
 pub(crate) async fn set_provider_model(
     State(state): State<ManagementState>,
+    Provenance(provenance): Provenance,
     Path((provider_id, model_id)): Path<(Uuid, Uuid)>,
     headers: HeaderMap,
     payload: Result<Json<SetModelRequest>, JsonRejection>,
@@ -501,7 +505,7 @@ pub(crate) async fn set_provider_model(
     let principal = require_mutation_session(&state, &headers).await?;
     require_permission(&principal, Permission::ManageProviders)?;
     let request = json_payload(payload)?;
-    let store = state.store();
+    let store = state.store().with_provenance(&provenance);
     let etag = store
         .set_provider_model_enabled(
             provider_id,
@@ -517,7 +521,7 @@ pub(crate) async fn set_provider_model(
         )
         .await
         .map_err(map_configuration)?;
-    let provider = load_provider_detail(store, provider_id).await?;
+    let provider = load_provider_detail(&store, provider_id).await?;
     with_etag(Json(provider), etag)
 }
 
@@ -560,13 +564,14 @@ pub(crate) struct CapabilityCertificationResponse {
 )]
 pub(crate) async fn certify_provider_model(
     State(state): State<ManagementState>,
+    Provenance(provenance): Provenance,
     Path((provider_id, model_id)): Path<(Uuid, Uuid)>,
     headers: HeaderMap,
 ) -> Result<Response, Problem> {
     let principal = require_mutation_session(&state, &headers).await?;
     require_permission(&principal, Permission::ManageProviders)?;
     let expected_etag = if_match(&headers)?;
-    let store = state.store();
+    let store = state.store().with_provenance(&provenance);
     let provider = store
         .get_provider(provider_id)
         .await

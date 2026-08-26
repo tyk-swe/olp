@@ -22,9 +22,13 @@ test('Route Studio creates, simulates, validates, and activates deterministic ro
   await page.emulateMedia({ forcedColors: 'active', reducedMotion: 'reduce' });
   await mockSession(page, sessionOptions);
   let routeState = 'draft';
+  let draftEtag = '01980000-0000-7000-8000-000000000209';
+  // Activation returns the draft to `draft` under a new ETag.
+  const activatedDraftEtag = '01980000-0000-7000-8000-000000000210';
   let createBody: Record<string, unknown> | undefined;
   let createHeaders: Record<string, string> = {};
   let simulationBody: Record<string, unknown> | undefined;
+  let saveHeaders: Record<string, string> = {};
 
   const routeDraft = () => ({
     id: ids.draft,
@@ -32,7 +36,7 @@ test('Route Studio creates, simulates, validates, and activates deterministic ro
     state: routeState,
     overall_timeout_ms: 120000,
     max_attempts: 1,
-    etag: '01980000-0000-7000-8000-000000000209',
+    etag: draftEtag,
     based_on_revision_id: null,
     operations: ['generation'],
     targets: [
@@ -84,12 +88,16 @@ test('Route Studio creates, simulates, validates, and activates deterministic ro
       });
       return;
     }
-    if (
-      pathname === `/api/v1/route-drafts/${ids.draft}` &&
-      request.method() === 'GET'
-    ) {
-      await route.fulfill({ json: routeDraft() });
-      return;
+    if (pathname === `/api/v1/route-drafts/${ids.draft}`) {
+      if (request.method() === 'PUT') {
+        saveHeaders = await request.allHeaders();
+        await route.fulfill({ json: routeDraft() });
+        return;
+      }
+      if (request.method() === 'GET') {
+        await route.fulfill({ json: routeDraft() });
+        return;
+      }
     }
     if (pathname.endsWith('/simulate')) {
       simulationBody = request.postDataJSON();
@@ -128,11 +136,14 @@ test('Route Studio creates, simulates, validates, and activates deterministic ro
       return;
     }
     if (pathname.endsWith('/activate')) {
+      routeState = 'draft';
+      draftEtag = activatedDraftEtag;
       await route.fulfill({
         json: {
           route_id: ids.route,
           revision_id: ids.revision,
           revision: 1,
+          draft_etag: activatedDraftEtag,
           runtime_generation: { id: ids.generation, sequence: 3 }
         }
       });
@@ -151,6 +162,7 @@ test('Route Studio creates, simulates, validates, and activates deterministic ro
   await page.getByLabel('Maximum attempts').fill('1');
   await page.getByRole('button', { name: 'Create draft' }).click();
   await expect(page).toHaveURL(new RegExp(`/routes/${ids.draft}$`));
+  await expect(page.getByText(/^Created /)).toBeVisible();
   expect(createBody).toMatchObject({
     slug: 'default',
     max_attempts: 1,
@@ -184,6 +196,12 @@ test('Route Studio creates, simulates, validates, and activates deterministic ro
   await expect(
     page.getByRole('link', { name: 'View revision history' })
   ).toHaveAttribute('href', `/routes/${ids.route}/revisions`);
+  // The next save has to use the ETag activation handed back, not the one the
+  // draft was loaded with.
+  await page.getByLabel('Public model slug').fill('default-v2');
+  await page.getByRole('button', { name: 'Save draft' }).click();
+  await expect(page.getByText('Draft saved.')).toBeVisible();
+  expect(saveHeaders['if-match']).toBe(`"${activatedDraftEtag}"`);
 });
 
 test('failed route conflict reload preserves dirty fields until a successful reload', async ({
