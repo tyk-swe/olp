@@ -13,8 +13,10 @@
   import {
     activationReady,
     capabilitiesCertified,
+    disableNotice,
     probeReady,
-    probeSummary
+    probeSummary,
+    providerDisabled
   } from './providerEditor';
   import {
     invalidateProviderModelConsumers,
@@ -47,6 +49,21 @@
 
   const queryClient = useQueryClient();
   let referenceConflict = $state('');
+  const editingLocked = $derived(providerDisabled(current));
+
+  // Every action clears the reference conflict, so a later success never
+  // renders beside the red banner the previous disable attempt left behind.
+  const runAction: RunProviderAction = (label, action) => {
+    referenceConflict = '';
+    return run(label, action);
+  };
+
+  // Save draft runs through the parent, so it clears the banner on its own way
+  // out rather than through `runAction`.
+  function save() {
+    referenceConflict = '';
+    onSave();
+  }
 
   function invalidateProviderViews() {
     return Promise.all([
@@ -62,7 +79,7 @@
   }
 
   async function testDraft() {
-    await run('detail-probe', async () => {
+    await runAction('detail-probe', async () => {
       const probe = await probeProvider(current);
       if (!probe.succeeded) throw new Error(probe.detail);
       onAcceptProvider(await getProvider(current.id));
@@ -72,7 +89,7 @@
   }
 
   async function activate() {
-    await run('detail-activate', async () => {
+    await runAction('detail-activate', async () => {
       const generation = await activateProvider(current);
       const refreshed = await onRefetchProvider();
       await invalidateProviderViews();
@@ -90,8 +107,7 @@
       )
     )
       return;
-    referenceConflict = '';
-    await run('detail-disable', async () => {
+    await runAction('detail-disable', async () => {
       let generation: number | null;
       try {
         generation = await disableProvider(current);
@@ -104,20 +120,13 @@
       }
       const refreshed = await onRefetchProvider();
       await invalidateProviderViews();
-      if (refreshed) {
-        onNotice(
-          generation == null
-            ? 'Provider disabled. No revision is serving traffic.'
-            : `Provider disabled in runtime generation ${generation}.`
-        );
-      }
+      if (refreshed) onNotice(disableNotice(generation));
     });
   }
 
   async function restoreDraft() {
     if (!canManage) return;
-    referenceConflict = '';
-    await run('detail-restore-draft', async () => {
+    await runAction('detail-restore-draft', async () => {
       const restored = await restoreProviderAsDraft(current);
       onAcceptProvider(restored);
       await invalidateProviderViews();
@@ -144,7 +153,7 @@
       This build carries no connector for {current.kind.replaceAll('_', ' ')}
       providers, so the draft cannot be activated.
     </p>{/if}
-{:else if current.state === 'disabled'}
+{:else if editingLocked}
   <p class="live-note">
     This provider is disabled. No revision is serving traffic. Restore it as a
     draft to edit, re-certify, and activate it again.
@@ -158,8 +167,9 @@
   <button
     class="button button-secondary"
     type="button"
-    onclick={onSave}
-    disabled={!canManage || Boolean(busy) || !canSave}>Save draft</button
+    onclick={save}
+    disabled={!canManage || Boolean(busy) || !canSave || editingLocked}
+    >Save draft</button
   >
   {#if canManage && current.state === 'draft'}
     <button
@@ -179,7 +189,7 @@
       >Activate changes</button
     >
   {/if}
-  {#if canManage && current.state === 'disabled'}
+  {#if canManage && editingLocked}
     <button
       class="button button-primary"
       type="button"

@@ -150,7 +150,7 @@
     </article>
   </section>
 
-  <section class="metric-grid" aria-label="Usage summary">
+  <section class="metric-grid usage-metrics" aria-label="Usage summary">
     <article class="card metric-card"><p>Requests</p><strong>{formatCompact(usage.data.summary.request_count)}</strong></article>
     <article class="card metric-card"><p>Input / output tokens</p><strong>{formatCompact(usage.data.summary.input_tokens)} / {formatCompact(usage.data.summary.output_tokens)}</strong></article>
     <article class="card metric-card"><p>Cached input tokens</p><strong>{formatCompact(usage.data.summary.cached_input_tokens)}</strong></article>
@@ -183,7 +183,13 @@
   label { display: grid; gap: 0.35rem; color: var(--foreground-muted); font-size: 0.75rem; font-weight: 700; }
   input, select { width: 100%; min-height: 2.5rem; padding: 0.5rem 0.7rem; border: 1px solid var(--border-strong); border-radius: 0.375rem; background: var(--surface); color: var(--foreground); }
   .filter-actions { display: flex; gap: 0.65rem; margin-top: 1rem; }
-  .metric-grid { grid-template-columns: repeat(auto-fit, minmax(10.5rem, 1fr)); }
+  /* Five summary cards do not divide into the shared four-column grid, so this
+     page fits as many as the row holds. Scoped to its own class and its own
+     widths so Health and Models keep the shared 4 -> 2 -> 1 rhythm, and so the
+     app.css breakpoints below still take over on narrow screens. */
+  @media (min-width: 56.0625rem) {
+    .metric-grid.usage-metrics { grid-template-columns: repeat(auto-fit, minmax(10.5rem, 1fr)); }
+  }
   .pipeline-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr)); gap: 0.75rem; margin-top: 1rem; }
   .pipeline-card { display: grid; gap: 0.2rem; padding: 0.9rem 1rem; }
   .pipeline-card p, .pipeline-card span { margin: 0; color: var(--foreground-muted); }

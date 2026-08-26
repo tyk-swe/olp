@@ -1,5 +1,6 @@
-import type { AuditFilters } from '$lib/api/audit';
+import { AUDIT_PAGE_SIZE, type AuditFilters } from '$lib/api/audit';
 import { emptyCursorHistory, type CursorHistory } from '$lib/api/pagination';
+import { instant } from '$lib/api/query';
 
 export type AuditListState = CursorHistory & {
   action: string;
@@ -11,8 +12,6 @@ export type AuditListState = CursorHistory & {
   occurredBefore: string;
   applied: Omit<AuditFilters, 'cursor'>;
 };
-
-export const AUDIT_PAGE_SIZE = 50;
 
 export function emptyAuditListState(): AuditListState {
   return {
@@ -29,14 +28,15 @@ export function emptyAuditListState(): AuditListState {
 }
 
 /**
- * The date inputs are local-time `datetime-local` values; the API compares
- * instants. A half-typed date stays out of the query rather than being sent as
- * an invalid bound the backend would reject.
+ * The API rejects an inverted window with a field-validation problem, but the
+ * operator can be told before the round trip. Equal bounds are a legitimate
+ * point-in-time query and stay allowed.
  */
-function instant(value: string): string | undefined {
-  if (!value.trim()) return undefined;
-  const date = new Date(value);
-  return Number.isNaN(date.valueOf()) ? undefined : date.toISOString();
+export function auditRangeError(state: AuditListState): string | null {
+  const after = instant(state.occurredAfter);
+  const before = instant(state.occurredBefore);
+  if (!after || !before || after < before) return null;
+  return 'Occurred before must be later than occurred after.';
 }
 
 export function auditFilters(

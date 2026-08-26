@@ -1,12 +1,15 @@
 /**
  * Readiness checkpoint ages, measured against the runbook thresholds in
  * `docs/operations.md`: metadata, outbox, and gateway-epoch checkpoints are
- * stale after 20 seconds, maintenance after 180 seconds. The backend reports
- * both timestamps and pre-computed ages; a timestamp is turned into an age here
- * so an operator reading the page never has to subtract clocks by hand.
+ * stale after 20 seconds. The backend reports both timestamps and pre-computed
+ * ages; a timestamp is turned into an age here so an operator reading the page
+ * never has to subtract clocks by hand.
+ *
+ * The maintenance task has a longer budget, but readiness reports no per-task
+ * age for it — only the backend's own stale-task count — so no maintenance
+ * threshold is declared here for the page to pretend it applies.
  */
 export const CHECKPOINT_STALE_SECONDS = 20;
-export const MAINTENANCE_STALE_SECONDS = 180;
 /**
  * Pending metadata is reclaimable after 30 seconds and scanned every five, so
  * the runbook asks for an investigation once recovery has not begun by 35.

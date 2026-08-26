@@ -1,23 +1,46 @@
+/**
+ * The console ships a single English interface, so figures are formatted in one
+ * fixed locale instead of the host's: a viewer in de-DE would otherwise read
+ * German month names beside the hard-coded English unit suffixes below, and the
+ * same byte count would group differently from one operator's machine to the
+ * next. Time zone still follows the viewer, which is what a timestamp needs.
+ */
+const LOCALE = 'en-US';
+
+// Constructing an Intl formatter is the expensive part, and every option here
+// is fixed, so each one is built once for the module rather than per table row.
+const dateTimeFormat = new Intl.DateTimeFormat(LOCALE, {
+  dateStyle: 'medium',
+  timeStyle: 'medium'
+});
+// Daily buckets are UTC midnights. Naming them in the viewer's zone would
+// label every bucket with the previous calendar day west of UTC.
+const dayFormat = new Intl.DateTimeFormat(LOCALE, { dateStyle: 'medium', timeZone: 'UTC' });
+const compactFormat = new Intl.NumberFormat(LOCALE, {
+  notation: 'compact',
+  maximumFractionDigits: 1
+});
+const integerFormat = new Intl.NumberFormat(LOCALE, { maximumFractionDigits: 0 });
+const fixedFormats = [0, 1, 2].map(
+  (digits) =>
+    new Intl.NumberFormat(LOCALE, {
+      minimumFractionDigits: digits,
+      maximumFractionDigits: digits
+    })
+);
+
 export function formatDate(value?: string | null): string {
   if (!value) return '—';
   const date = new Date(value);
   if (Number.isNaN(date.valueOf())) return '—';
-  return new Intl.DateTimeFormat(undefined, {
-    dateStyle: 'medium',
-    timeStyle: 'medium'
-  }).format(date);
+  return dateTimeFormat.format(date);
 }
 
 export function formatDay(value?: string | null): string {
   if (!value) return '—';
   const date = new Date(value);
   if (Number.isNaN(date.valueOf())) return '—';
-  // Daily buckets are UTC midnights. Naming them in the viewer's zone would
-  // label every bucket with the previous calendar day west of UTC.
-  return new Intl.DateTimeFormat(undefined, {
-    dateStyle: 'medium',
-    timeZone: 'UTC'
-  }).format(date);
+  return dayFormat.format(date);
 }
 
 export function dateTimeLocalValue(value: Date | string): string {
@@ -31,16 +54,35 @@ export function formatCompact(value: number | string | null | undefined): string
   if (value === null || value === undefined || value === '') return '—';
   const number = typeof value === 'number' ? value : Number(value);
   if (!Number.isFinite(number)) return String(value);
-  return new Intl.NumberFormat(undefined, { notation: 'compact', maximumFractionDigits: 1 }).format(
-    number
-  );
+  return compactFormat.format(number);
 }
 
 export function formatInteger(value: number | string | null | undefined): string {
   if (value === null || value === undefined || value === '') return '—';
   const number = typeof value === 'number' ? value : Number(value);
   if (!Number.isFinite(number)) return String(value);
-  return new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 }).format(number);
+  return integerFormat.format(number);
+}
+
+// Currency and precision vary per row, so cost formatters are memoized instead
+// of hoisted; a usage table repeats a handful of combinations across hundreds
+// of rows.
+const costFormats = new Map<string, Intl.NumberFormat>();
+
+function costFormat(currency: string | null | undefined, subCent: boolean): Intl.NumberFormat {
+  const key = `${currency ?? ''}|${subCent}`;
+  const existing = costFormats.get(key);
+  if (existing) return existing;
+  const fractionDigits = {
+    minimumFractionDigits: subCent ? 4 : 2,
+    maximumFractionDigits: subCent ? 6 : 2
+  };
+  const format = new Intl.NumberFormat(
+    LOCALE,
+    currency ? { style: 'currency', currency, ...fractionDigits } : fractionDigits
+  );
+  costFormats.set(key, format);
+  return format;
 }
 
 /**
@@ -51,16 +93,7 @@ export function formatCost(value?: string | null, currency?: string | null): str
   if (value === null || value === undefined || value === '') return 'Unpriced';
   const number = Number(value);
   if (!Number.isFinite(number)) return currency ? `${value} ${currency}` : String(value);
-  const fractionDigits = {
-    minimumFractionDigits: number < 0.01 ? 4 : 2,
-    maximumFractionDigits: number < 0.01 ? 6 : 2
-  };
-  if (!currency) return new Intl.NumberFormat(undefined, fractionDigits).format(number);
-  return new Intl.NumberFormat(undefined, {
-    style: 'currency',
-    currency,
-    ...fractionDigits
-  }).format(number);
+  return costFormat(currency, number < 0.01).format(number);
 }
 
 export function statusTone(status?: number | null, errorClass?: string | null) {
@@ -94,8 +127,5 @@ export function formatBytes(value?: number | string | null): string {
     unit += 1;
   }
   const digits = unit === 0 || size >= 100 ? 0 : size >= 10 ? 1 : 2;
-  return `${sign}${new Intl.NumberFormat(undefined, {
-    minimumFractionDigits: digits,
-    maximumFractionDigits: digits
-  }).format(size)} ${BYTE_UNITS[unit]}`;
+  return `${sign}${fixedFormats[digits].format(size)} ${BYTE_UNITS[unit]}`;
 }

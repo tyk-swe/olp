@@ -6,6 +6,9 @@ import { compactQuery } from './query';
 
 export type AuditEvent = components['schemas']['AuditEventResponse'];
 
+/** One request fills a page; the list state and the API agree on the size. */
+export const AUDIT_PAGE_SIZE = 50;
+
 export type AuditFilters = {
   cursor?: string;
   limit?: number;
@@ -22,7 +25,7 @@ export async function listAudit(
   filters: AuditFilters = {}
 ): Promise<CursorPage<AuditEvent>> {
   const { data, error, response } = await apiClient.GET('/api/v1/audit', {
-    params: { query: compactQuery({ limit: 50, ...filters }) }
+    params: { query: compactQuery({ limit: AUDIT_PAGE_SIZE, ...filters }) }
   });
   const page = result(data, error, response);
   return { items: page.data, nextCursor: page.next_cursor ?? null };

@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
   CHECKPOINT_STALE_SECONDS,
-  MAINTENANCE_STALE_SECONDS,
   PENDING_RECOVERY_SECONDS,
   ageStatus,
   formatAge,
@@ -52,11 +51,11 @@ describe('ageStatus', () => {
     expect(past.tone).toBe('warning');
   });
 
-  it('applies the 180 second maintenance threshold when asked', () => {
-    const age = ageStatus('2026-07-12T11:58:00Z', now, MAINTENANCE_STALE_SECONDS);
+  it('applies a caller-supplied threshold instead of the checkpoint default', () => {
+    const age = ageStatus('2026-07-12T11:58:00Z', now, 180);
     expect(age.seconds).toBe(120);
     expect(age.stale).toBe(false);
-    expect(ageStatus('2026-07-12T11:56:00Z', now, MAINTENANCE_STALE_SECONDS).stale).toBe(true);
+    expect(ageStatus('2026-07-12T11:56:00Z', now, 180).stale).toBe(true);
   });
 
   it('never calls an absent checkpoint stale', () => {
@@ -95,5 +94,16 @@ describe('oldestPendingStatus', () => {
   it('warns once recovery should have begun', () => {
     expect(oldestPendingStatus(null, PENDING_RECOVERY_SECONDS, now).stale).toBe(false);
     expect(oldestPendingStatus(null, PENDING_RECOVERY_SECONDS + 1, now).stale).toBe(true);
+  });
+
+  it('holds the outbox to its own 20 second bound, not the metadata one', () => {
+    // A pending outbox row is not covered by the metadata reclaim window: the
+    // outbox is stale at CHECKPOINT_STALE_SECONDS, well before 35.
+    const row = oldestPendingStatus(null, 21, now, CHECKPOINT_STALE_SECONDS);
+    expect(row.stale).toBe(true);
+    expect(oldestPendingStatus(null, 21, now).stale).toBe(false);
+    expect(
+      oldestPendingStatus('2026-07-12T11:59:39Z', null, now, CHECKPOINT_STALE_SECONDS).stale
+    ).toBe(true);
   });
 });

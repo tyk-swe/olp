@@ -117,7 +117,7 @@
   </div>
 
   <div class="field">
-    <label for="installation-name">Installation name <span class="optional">optional</span></label>
+    <label for="installation-name">Installation name (optional)</label>
     <input
       id="installation-name"
       name="installation_name"
@@ -286,12 +286,6 @@
   .field-error {
     color: var(--danger);
     font-weight: 650;
-  }
-
-  .optional {
-    color: var(--foreground-muted);
-    font-weight: 500;
-    text-transform: none;
   }
 
   .submit {

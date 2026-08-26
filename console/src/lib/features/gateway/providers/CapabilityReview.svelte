@@ -369,8 +369,9 @@
   .certification-results {
     margin: 0;
     padding-left: 1.25rem;
+    list-style: disc;
     color: var(--danger);
-    font-size: 0.72rem;
+    font-size: 0.8rem;
   }
   .capability-list {
     display: grid;

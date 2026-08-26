@@ -4,6 +4,7 @@ import type {
   ProviderKind,
   ProviderKindCapability,
   ProviderPreset,
+  ProviderProbe,
   UpdateProviderInput
 } from '$lib/api/management/providers';
 
@@ -261,11 +262,11 @@ export function parseManualModelNames(value: string): string[] {
     .filter(Boolean);
 }
 
-export type ProbeSummary = {
-  probe_type: string;
-  detail: string;
-  discovered_models?: number | null;
-};
+/** The fields of a probe result this summary line reads. */
+export type ProbeSummary = Pick<
+  ProviderProbe,
+  'probe_type' | 'detail' | 'discovered_models'
+>;
 
 /** Probe result line: the server detail, which probe ran, and models seen. */
 export function probeSummary(probe: ProbeSummary): string {
@@ -323,14 +324,35 @@ export function activationReady(
   );
 }
 
+/**
+ * A disabled provider serves nothing, so the disabled state outranks any
+ * `active_revision` the API still reports on it. Both the status line and the
+ * activation note read it in that order.
+ */
+export function providerDisabled(
+  current: Pick<ProviderStatusValue, 'state'>
+): boolean {
+  return current.state === 'disabled';
+}
+
+/** Pointer shown wherever an edit control is locked by the disabled state. */
+export const DISABLED_EDIT_NOTE =
+  'This provider is disabled. Restore it as a draft to change configuration, rotate credentials, or review models again.';
+
+/** Success line after a disable, naming the generation that published it. */
+export function disableNotice(generation: number | null): string {
+  return generation == null
+    ? 'Provider disabled. No revision is serving traffic.'
+    : `Provider disabled in runtime generation ${generation}.`;
+}
+
 export function providerStatus(current: ProviderStatusValue): string {
+  if (providerDisabled(current)) return 'disabled · not serving';
   if (current.pending_activation)
     return `revision ${current.active_revision} live · changes pending`;
   if (current.active_revision != null)
     return `revision ${current.active_revision} active`;
-  return current.state === 'disabled'
-    ? 'disabled · not serving'
-    : current.state;
+  return current.state;
 }
 
 /**
@@ -346,7 +368,7 @@ export function capabilityLimitReached(reviewedCount: number): boolean {
 export function providerStatusTone(
   current: ProviderStatusValue
 ): ProviderStatusTone {
+  if (providerDisabled(current)) return 'danger';
   if (current.pending_activation) return 'warning';
-  if (current.active_revision != null) return 'success';
-  return current.state === 'disabled' ? 'danger' : 'warning';
+  return current.active_revision != null ? 'success' : 'warning';
 }

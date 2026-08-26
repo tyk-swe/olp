@@ -4,6 +4,10 @@
   // The API rejects a provider field with prose and a machine-readable code.
   // Both are shown: the prose explains, the code is what an operator quotes in
   // a bug report or looks up in the connector reference.
+  //
+  // `error_codes[field][i]` always pairs with `errors[field][i]`, so the API
+  // pads an uncoded message with an empty string. The truthiness check below
+  // reads that placeholder as "no code" and leaves the chip off.
   let { issues }: { issues: FieldIssue[] } = $props();
 </script>
 
@@ -22,6 +26,9 @@
   .field-issues {
     margin: 0.5rem 0 0;
     padding-left: 1.1rem;
+    /* The global reset strips list markers; the indent only reads as a list
+       once they are back. */
+    list-style: disc;
   }
   .field-issues li {
     margin-top: 0.2rem;

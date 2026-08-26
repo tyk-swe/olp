@@ -355,9 +355,24 @@ test('audit filters narrow the page and the request origin columns render', asyn
     ])
   );
 
+  // An inverted window is refused in the browser with an inline message the
+  // operator can act on, instead of a round trip that comes back a 422.
+  const requested = seenFilters.length;
+  await page.getByLabel('Occurred after').fill('2026-07-12T14:00');
+  await page.getByLabel('Occurred before').fill('2026-07-12T10:00');
+  await page.getByRole('button', { name: 'Apply filters' }).click();
+  await expect(
+    page.getByText('Occurred before must be later than occurred after.')
+  ).toBeVisible();
+  expect(seenFilters).toHaveLength(requested);
+  expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+
   await page.getByRole('button', { name: 'Clear' }).click();
   await expect(page.getByLabel('Action')).toHaveValue('');
   await expect(page.getByLabel('Occurred after')).toHaveValue('');
+  await expect(
+    page.getByText('Occurred before must be later than occurred after.')
+  ).toHaveCount(0);
   expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
 });
 

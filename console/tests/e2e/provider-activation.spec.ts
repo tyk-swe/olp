@@ -14,6 +14,10 @@ import {
   withProviderModels
 } from './gateway-access-fixtures';
 
+// Mirrors DISABLED_EDIT_NOTE in providerEditor.ts.
+const DISABLED_EDIT_NOTE =
+  'This provider is disabled. Restore it as a draft to change configuration, rotate credentials, or review models again.';
+
 test.beforeEach(async ({ page }) => mockProviderKinds(page));
 
 test('provider detail keeps the live revision and credential until a certified draft activates', async ({
@@ -339,6 +343,13 @@ test('provider detail disables an active provider and restores it as a draft', a
       });
       return;
     }
+    if (
+      pathname === `/api/v1/providers/${ids.provider}` &&
+      request.method() === 'PATCH'
+    ) {
+      await route.fulfill({ json: currentProvider });
+      return;
+    }
     if (pathname.endsWith('/disable')) {
       disableAttempts += 1;
       disableHeaders = await request.allHeaders();
@@ -347,7 +358,7 @@ test('provider detail disables an active provider and restores it as a draft', a
           status: 409,
           contentType: 'application/problem+json',
           body: JSON.stringify({
-            type: 'about:blank',
+            type: 'https://openllmproxy.dev/problems/configuration_resource_in_use',
             title: 'Conflict',
             status: 409,
             detail:
@@ -401,6 +412,12 @@ test('provider detail disables an active provider and restores it as a draft', a
   await expect(page.getByText(/Retarget every route/)).toBeVisible();
   await expect(page.getByText('revision 1 active')).toBeVisible();
 
+  // Any following action clears the conflict, so its success banner never
+  // renders beside the red one the failed disable left behind.
+  await page.getByRole('button', { name: 'Save draft' }).click();
+  await expect(page.getByText('Provider draft settings saved.')).toBeVisible();
+  await expect(page.getByText(/Retarget every route/)).toHaveCount(0);
+
   await page.getByRole('button', { name: 'Disable provider' }).click();
   await expect(
     page.getByText('Provider disabled in runtime generation 9.')
@@ -412,6 +429,14 @@ test('provider detail disables an active provider and restores it as a draft', a
   await expect(
     page.getByRole('button', { name: 'Disable provider' })
   ).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Save draft' })).toBeDisabled();
+  await expect(
+    page.getByRole('button', { name: 'Run upstream discovery' })
+  ).toBeDisabled();
+  await expect(
+    page.getByRole('button', { name: 'Stage rotation' })
+  ).toBeDisabled();
+  await expect(page.getByText(DISABLED_EDIT_NOTE)).toHaveCount(2);
 
   await page.getByRole('button', { name: 'Restore provider as draft' }).click();
   await expect(page.getByText(/Provider restored as a draft/)).toBeVisible();
@@ -421,6 +446,8 @@ test('provider detail disables an active provider and restores it as a draft', a
   await expect(
     page.getByRole('button', { name: 'Activate changes' })
   ).toBeVisible();
+  await expect(page.getByText(DISABLED_EDIT_NOTE)).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Save draft' })).toBeEnabled();
   expect(disableAttempts).toBe(2);
   expect(disableHeaders['if-match']).toBe(
     '"01980000-0000-7000-8000-000000000109"'
@@ -432,4 +459,152 @@ test('provider detail disables an active provider and restores it as a draft', a
   expect(restoreHeaders['idempotency-key']).toMatch(
     /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
   );
+});
+
+test('a disable that conflicts on something other than references shows the generic failure', async ({
+  page
+}) => {
+  await mockSession(page, sessionOptions);
+  page.on('dialog', (dialog) => dialog.accept());
+  const currentProvider = providerRecord('active', [certifiedModelRecord], {
+    active_revision: 1,
+    pending_activation: false
+  });
+
+  await page.route('**/api/v1/providers**', async (route) => {
+    const request = route.request();
+    const pathname = new URL(request.url()).pathname;
+    if (pathname === '/api/v1/providers') {
+      await route.fulfill({
+        json: { items: [currentProvider], next_cursor: null }
+      });
+      return;
+    }
+    if (pathname.endsWith('/revisions') && request.method() === 'GET') {
+      await route.fulfill({ json: { items: [], next_cursor: null } });
+      return;
+    }
+    if (pathname === `/api/v1/providers/${ids.provider}/models`) {
+      await route.fulfill({
+        json: { items: currentProvider.models, next_cursor: null }
+      });
+      return;
+    }
+    if (pathname.endsWith('/credentials')) {
+      await route.fulfill({ json: { items: [] } });
+      return;
+    }
+    if (pathname.endsWith('/disable')) {
+      await route.fulfill({
+        status: 409,
+        contentType: 'application/problem+json',
+        body: JSON.stringify({
+          type: 'https://openllmproxy.dev/problems/idempotency_key_reused',
+          title: 'Conflict',
+          status: 409,
+          detail:
+            'This Idempotency-Key has already been used for this operation.'
+        })
+      });
+      return;
+    }
+    if (pathname === `/api/v1/providers/${ids.provider}`) {
+      await route.fulfill({ json: currentProvider });
+      return;
+    }
+    failUnexpectedApiRequest(route);
+  });
+
+  await page.goto(`/providers/${ids.provider}`);
+  await expect(page.getByText('revision 1 active')).toBeVisible();
+
+  await page.getByRole('button', { name: 'Disable provider' }).click();
+
+  // A replayed Idempotency-Key is a 409 too, but retargeting routes would not
+  // fix it, so only the generic failure path may run.
+  await expect(
+    page.getByText('This Idempotency-Key has already been used')
+  ).toBeVisible();
+  await expect(page.getByText(/Retarget every route/)).toHaveCount(0);
+  await expect(page.getByText('revision 1 active')).toBeVisible();
+});
+
+test('a disabled provider that still reports an active revision reads as disabled and locks editing', async ({
+  page
+}) => {
+  await mockSession(page, sessionOptions);
+  // The API can still name the revision that was serving when the provider was
+  // disabled. Nothing is serving now, so the disabled state has to win.
+  const currentProvider = providerRecord('disabled', [certifiedModelRecord], {
+    active_revision: 1,
+    pending_activation: false
+  });
+
+  await page.route('**/api/v1/providers**', async (route) => {
+    const request = route.request();
+    const pathname = new URL(request.url()).pathname;
+    if (pathname === '/api/v1/providers') {
+      await route.fulfill({
+        json: { items: [currentProvider], next_cursor: null }
+      });
+      return;
+    }
+    if (pathname.endsWith('/revisions') && request.method() === 'GET') {
+      await route.fulfill({ json: { items: [], next_cursor: null } });
+      return;
+    }
+    if (pathname === `/api/v1/providers/${ids.provider}/models`) {
+      await route.fulfill({
+        json: { items: currentProvider.models, next_cursor: null }
+      });
+      return;
+    }
+    if (pathname.endsWith('/credentials')) {
+      await route.fulfill({
+        json: {
+          items: [
+            {
+              id: ids.credential,
+              version: 1,
+              active: true,
+              draft_selected: false,
+              created_at: now,
+              revoked_at: null
+            }
+          ]
+        }
+      });
+      return;
+    }
+    if (pathname === `/api/v1/providers/${ids.provider}`) {
+      await route.fulfill({ json: currentProvider });
+      return;
+    }
+    failUnexpectedApiRequest(route);
+  });
+
+  await page.goto(`/providers/${ids.provider}`);
+
+  await expect(page.getByText('disabled · not serving')).toBeVisible();
+  await expect(page.getByText('Revision 1 is live.')).toHaveCount(0);
+  await expect(
+    page.getByText('This provider is disabled. No revision is serving traffic.')
+  ).toBeVisible();
+  await expect(page.getByText(DISABLED_EDIT_NOTE)).toHaveCount(2);
+  await expect(page.getByRole('button', { name: 'Save draft' })).toBeDisabled();
+  await expect(
+    page.getByRole('button', { name: 'Run upstream discovery' })
+  ).toBeDisabled();
+  await expect(
+    page.getByRole('button', { name: 'Stage rotation' })
+  ).toBeDisabled();
+  await expect(
+    page.getByRole('button', { name: 'Server-certify capabilities' })
+  ).toBeDisabled();
+  await expect(
+    page.getByRole('button', { name: 'Disable provider' })
+  ).toHaveCount(0);
+  await expect(
+    page.getByRole('button', { name: 'Restore provider as draft' })
+  ).toBeVisible();
 });

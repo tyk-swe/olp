@@ -47,8 +47,10 @@ describe('mediaJobFilters', () => {
     const filters = mediaJobFilters(
       state({ createdAfter: '2026-07-12T09:30', createdBefore: '2026-07-12T18:00' })
     );
-    expect(filters.created_after).toBe(new Date('2026-07-12T09:30').toISOString());
-    expect(filters.created_before).toBe(new Date('2026-07-12T18:00').toISOString());
+    // The suite runs in America/New_York (UTC-4 in July), so the wall-clock
+    // values the operator typed are four hours behind the instants sent.
+    expect(filters.created_after).toBe('2026-07-12T13:30:00.000Z');
+    expect(filters.created_before).toBe('2026-07-12T22:00:00.000Z');
   });
 
   it('drops a half-typed date instead of sending an invalid bound', () => {

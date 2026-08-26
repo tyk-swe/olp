@@ -7,11 +7,13 @@
   import { formatDate } from '$lib/format';
   import {
     auditFilters,
+    auditRangeError,
     emptyAuditListState,
     type AuditListState
   } from './auditListState';
 
   const listState = $state<AuditListState>(emptyAuditListState());
+  let rangeError = $state('');
   const audit = createQuery(() => ({
     queryKey: ['audit', listState.applied, listState.cursor ?? 'first'],
     queryFn: () => listAudit({ ...listState.applied, cursor: listState.cursor }),
@@ -20,12 +22,18 @@
 
   function applyFilters(event: SubmitEvent) {
     event.preventDefault();
+    rangeError = auditRangeError(listState) ?? '';
+    // An inverted window is caught here so the operator is not made to wait for
+    // the server's rejection; a server-side problem still renders its own
+    // detail below.
+    if (rangeError) return;
     resetCursor(listState);
     listState.applied = auditFilters(listState);
   }
 
   function clearFilters() {
     Object.assign(listState, emptyAuditListState());
+    rangeError = '';
   }
 </script>
 
@@ -39,8 +47,9 @@
   <label>Resource ID <input bind:value={listState.resourceId} class="mono" placeholder="All resources" /></label>
   <label>Actor user ID <input bind:value={listState.actorUserId} class="mono" placeholder="All actors" /></label>
   <label>Outcome <select bind:value={listState.outcome}><option value="">All outcomes</option><option value="success">success</option><option value="failure">failure</option></select></label>
-  <label>Occurred after <input bind:value={listState.occurredAfter} type="datetime-local" /></label>
-  <label>Occurred before <input bind:value={listState.occurredBefore} type="datetime-local" /></label>
+  <label>Occurred after <input bind:value={listState.occurredAfter} type="datetime-local" aria-invalid={rangeError ? 'true' : undefined} aria-describedby={rangeError ? 'audit-range-error' : undefined} /></label>
+  <label>Occurred before <input bind:value={listState.occurredBefore} type="datetime-local" aria-invalid={rangeError ? 'true' : undefined} aria-describedby={rangeError ? 'audit-range-error' : undefined} /></label>
+  {#if rangeError}<p class="range-error" id="audit-range-error" role="alert">{rangeError}</p>{/if}
   <div class="filter-actions"><button class="button button-primary" type="submit">Apply filters</button><button class="button button-secondary" type="button" onclick={clearFilters}>Clear</button></div>
 </form>
 
@@ -57,14 +66,18 @@
 {/if}
 
 <style>
-  .filters { display: flex; flex-wrap: wrap; align-items: end; gap: .65rem; margin: 1.25rem 0; padding: 1rem; }
-  .filters label { display: grid; gap: .3rem; color: var(--foreground-muted); font-size: .72rem; font-weight: 700; }
-  .filters input, .filters select { min-height: 2.5rem; padding: .5rem .7rem; border: 1px solid var(--border-strong); border-radius: .375rem; background: var(--surface); color: var(--foreground); }
-  .filter-actions { display: flex; gap: .5rem; }
+  .filters { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); align-items: end; gap: .8rem; margin: 1.25rem 0; padding: 1rem; }
+  .filters label { display: grid; min-width: 0; gap: .3rem; color: var(--foreground-muted); font-size: .72rem; font-weight: 700; }
+  /* Operator-typed values are content, not labels: they keep the body size and
+     weight instead of inheriting the label's small bold. */
+  .filters input, .filters select { width: 100%; min-height: 2.5rem; padding: .5rem .7rem; border: 1px solid var(--border-strong); border-radius: .375rem; background: var(--surface); color: var(--foreground); font-size: .875rem; font-weight: 400; }
+  .range-error { grid-column: 1 / -1; margin: 0; color: var(--danger); font-size: .8rem; font-weight: 650; }
+  .filter-actions { display: flex; grid-column: 1 / -1; gap: .5rem; }
   .audit-table { margin-top: 1.5rem; }
   code { font-family: 'JetBrains Mono Variable', monospace; font-size: 0.75rem; }
   td strong, td small { display: block; }
   td small { margin-top: 0.15rem; color: var(--foreground-muted); }
   .text-button { min-height: 2.75rem; border: 0; background: transparent; color: var(--accent-strong); font-weight: 700; }
-  @media (max-width: 48rem) { .filters { display: grid; } }
+  @media (max-width: 72rem) { .filters { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+  @media (max-width: 40rem) { .filters { grid-template-columns: 1fr; } }
 </style>

@@ -9,6 +9,8 @@ import {
   capabilityLimitReached,
   certificationPrerequisiteReady,
   createProviderDraft,
+  disableNotice,
+  DISABLED_EDIT_NOTE,
   hasApiVersion,
   hasCloudProject,
   hasCloudRegion,
@@ -18,6 +20,7 @@ import {
   parseManualModelNames,
   probeReady,
   probeSummary,
+  providerDisabled,
   providerEditValues,
   providerStatus,
   providerStatusTone,
@@ -427,6 +430,43 @@ describe('provider editor activation policy', () => {
         pending_activation: true
       })
     ).toBe('warning');
+  });
+
+  it('keeps the disabled state ahead of an active revision the API still reports', () => {
+    // A provider can come back disabled while `active_revision` still names the
+    // revision that was serving. It serves nothing now, so the disabled state
+    // wins in the status line, the badge tone, and the activation note.
+    const disabledWithRevision = {
+      ...readyDraft,
+      state: 'disabled',
+      active_revision: 4,
+      pending_activation: false
+    };
+    expect(providerDisabled(disabledWithRevision)).toBe(true);
+    expect(providerStatus(disabledWithRevision)).toBe('disabled · not serving');
+    expect(providerStatusTone(disabledWithRevision)).toBe('danger');
+    expect(
+      providerStatus({ ...disabledWithRevision, pending_activation: true })
+    ).toBe('disabled · not serving');
+    expect(providerDisabled({ ...disabledWithRevision, state: 'active' })).toBe(
+      false
+    );
+  });
+});
+
+describe('disableNotice', () => {
+  it('names the runtime generation that published the disable', () => {
+    expect(disableNotice(9)).toBe('Provider disabled in runtime generation 9.');
+  });
+
+  it('says nothing is serving when the disable published no generation', () => {
+    expect(disableNotice(null)).toBe(
+      'Provider disabled. No revision is serving traffic.'
+    );
+  });
+
+  it('points a locked editor at the restore action', () => {
+    expect(DISABLED_EDIT_NOTE).toContain('Restore it as a draft');
   });
 });
 

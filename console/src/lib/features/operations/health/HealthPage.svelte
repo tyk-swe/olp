@@ -15,18 +15,14 @@
   import { errorMessage } from '$lib/api/http';
   import { listRuntimeGenerations } from '$lib/api/runtime';
   import { usageCompleteness } from '$lib/api/usage';
-  import { formatBytes, formatDate, formatInteger } from '$lib/format';
+  import { formatDate, formatInteger } from '$lib/format';
+  import { spoolUsage } from './spool';
   import {
     CHECKPOINT_STALE_SECONDS,
-    MAINTENANCE_STALE_SECONDS,
     ageStatus,
     oldestPendingStatus,
     reportedAgeStatus
   } from './staleness';
-
-  // Readiness fields are read by name. A field the backend adds later is
-  // carried by the response and simply not rendered until it is given a label
-  // here; nothing iterates the payload.
 
   const generationPagination = $state(emptyCursorHistory());
   const epochPagination = $state(emptyCursorHistory());
@@ -100,10 +96,14 @@
         now
       ),
       outboxHeartbeat: reportedAgeStatus(data?.runtime_outbox_heartbeat_age_seconds),
+      // A pending outbox row is not waiting on the metadata reclaim window:
+      // the publication path is stale after CHECKPOINT_STALE_SECONDS, so the
+      // longer pending-recovery default would hide a wedged outbox.
       outboxOldestPending: oldestPendingStatus(
         data?.runtime_outbox_oldest_pending_at,
         data?.runtime_outbox_oldest_pending_age_seconds,
-        now
+        now,
+        CHECKPOINT_STALE_SECONDS
       )
     };
   });
@@ -113,9 +113,15 @@
   }
 
   function healthTone(value?: string | null) {
-    if (!value) return 'warning';
-    if (['healthy', 'ok', 'active', 'passing', 'drained'].includes(value.toLowerCase())) return 'success';
-    if (['degraded', 'stale', 'unknown', 'not_checked', 'backlogged', 'unavailable_lkg'].includes(value.toLowerCase())) return 'warning';
+    const state = value?.toLowerCase();
+    if (!state) return 'warning';
+    if (['healthy', 'ok', 'active', 'passing', 'drained'].includes(state)) return 'success';
+    // `not_configured` is a deployment choice rather than a fault: distributed
+    // limits report it when no limiter backend is configured at all, and the
+    // gateway is then running exactly as installed. `unavailable` is the
+    // opposite case — a limiter is configured and cannot be reached — so it
+    // falls through to danger with the other hard failures.
+    if (['degraded', 'stale', 'unknown', 'not_checked', 'backlogged', 'unavailable_lkg', 'not_configured'].includes(state)) return 'warning';
     return 'danger';
   }
 
@@ -125,18 +131,6 @@
 
   function count(value?: number | null) {
     return formatInteger(value ?? null);
-  }
-
-  /**
-   * Both spool figures come from the same readiness read, so either one being
-   * absent means the volume could not be measured at all.
-   */
-  function spoolUsage(used?: number | null, capacity?: number | null) {
-    if (used === null || used === undefined || capacity === null || capacity === undefined) {
-      return '—';
-    }
-    const share = capacity === 0 ? 'no capacity' : `${((used / capacity) * 100).toFixed(1)}%`;
-    return `${formatBytes(used)} of ${formatBytes(capacity)} (${share})`;
   }
 
   function percent(success: number, total: number) {
@@ -160,6 +154,9 @@
   }
 </script>
 
+<!-- Readiness fields are read by name. A field the backend adds later is
+     carried by the response and simply not rendered until it is given a label
+     here; nothing iterates the payload. -->
 {#snippet fact(term: string, value: string, warn = false)}
   <div><dt>{term}</dt><dd class:warning-text={warn}>{value}</dd></div>
 {/snippet}
@@ -190,7 +187,7 @@
   </section>
 
   <section class="section" aria-labelledby="plane-title">
-    <div class="section-heading"><div><p class="eyebrow">Replicated workers</p><h2 id="plane-title">Asynchronous plane</h2><p class="section-description">Healthy means every fixed worker task holds a current checkpoint and both the request-metadata group and the runtime outbox are drained. It does not require one specific replica. Metadata, outbox, and gateway-epoch checkpoints go stale after {CHECKPOINT_STALE_SECONDS} seconds; maintenance after {MAINTENANCE_STALE_SECONDS}.</p></div><span class="badge {healthTone(readiness.data.asynchronous_plane)}">{stateLabel(readiness.data.asynchronous_plane)}</span></div>
+    <div class="section-heading"><div><p class="eyebrow">Replicated workers</p><h2 id="plane-title">Asynchronous plane</h2><p class="section-description">Healthy means every fixed worker task holds a current checkpoint and both the request-metadata group and the runtime outbox are drained. It does not require one specific replica. Metadata, outbox, and gateway-epoch checkpoints go stale after {CHECKPOINT_STALE_SECONDS} seconds; the maintenance task runs on a longer budget, and the stale count below is the backend's own verdict for every fixed task.</p></div><span class="badge {healthTone(readiness.data.asynchronous_plane)}">{stateLabel(readiness.data.asynchronous_plane)}</span></div>
     <dl class="card facts">
       {@render fact('Checkpoints', readiness.data.asynchronous_plane_current ? 'Current' : 'Behind', !readiness.data.asynchronous_plane_current)}
       {@render fact('Queues', readiness.data.asynchronous_plane_drained ? 'Drained' : 'Not drained', !readiness.data.asynchronous_plane_drained)}
@@ -329,7 +326,9 @@
   .section-heading, .provider-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; margin-bottom: 0.75rem; }
   .heading-controls { display: flex; flex: none; align-items: center; gap: .6rem; }
   .window-select { display: grid; gap: .25rem; color: var(--foreground-muted); font-size: .7rem; font-weight: 700; }
-  .window-select select { min-height: 2.5rem; padding: .35rem .6rem; border: 1px solid var(--border-strong); border-radius: .375rem; background: var(--surface); color: var(--foreground); font-weight: 600; }
+  /* The label is deliberately small and bold; the chosen window is content and
+     keeps a readable control size. */
+  .window-select select { min-height: 2.5rem; padding: .35rem .6rem; border: 1px solid var(--border-strong); border-radius: .375rem; background: var(--surface); color: var(--foreground); font-size: .8125rem; font-weight: 600; }
   .facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr)); gap: 1rem; margin: 0; padding: 1.1rem 1.25rem; }
   .facts div { min-width: 0; }
   .provider-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.85rem; }

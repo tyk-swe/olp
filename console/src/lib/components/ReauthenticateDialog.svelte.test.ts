@@ -13,22 +13,36 @@ const dialogPrototype = HTMLDialogElement.prototype as unknown as Record<
   string,
   unknown
 >;
+// Whatever jsdom does define is put back afterwards: deleting these outright
+// would strip the real `close()` from every later suite in the same worker.
+const originalMethods = new Map<string, PropertyDescriptor | undefined>();
+
+function stub(name: string, implementation: (this: HTMLDialogElement) => void) {
+  originalMethods.set(
+    name,
+    Object.getOwnPropertyDescriptor(HTMLDialogElement.prototype, name)
+  );
+  dialogPrototype[name] = implementation;
+}
 
 beforeEach(() => {
-  dialogPrototype.showModal = function showModal(this: HTMLDialogElement) {
+  stub('showModal', function showModal(this: HTMLDialogElement) {
     this.open = true;
-  };
-  dialogPrototype.close = function close(this: HTMLDialogElement) {
+  });
+  stub('close', function close(this: HTMLDialogElement) {
     this.open = false;
-  };
+  });
   host = document.createElement('div');
   document.body.append(host);
 });
 
 afterEach(() => {
   host.remove();
-  delete dialogPrototype.showModal;
-  delete dialogPrototype.close;
+  for (const [name, descriptor] of originalMethods) {
+    if (descriptor) Object.defineProperty(HTMLDialogElement.prototype, name, descriptor);
+    else delete dialogPrototype[name];
+  }
+  originalMethods.clear();
 });
 
 function render(accepts = correctPassword) {

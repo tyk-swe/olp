@@ -77,6 +77,23 @@ describe('fieldIssues', () => {
     ]);
     expect(fieldIssues(new Error('network failure'))).toEqual([]);
   });
+
+  it('reads the empty padding code as uncoded rather than as a classification', () => {
+    const problem = new ApiProblem({
+      title: 'Validation failed',
+      status: 422,
+      errors: { occurred_after: ['Provide a start no later than the end.'] },
+      errorCodes: { occurred_after: [''] }
+    });
+
+    expect(fieldIssues(problem)).toEqual([
+      {
+        field: 'occurred_after',
+        message: 'Provide a start no later than the end.',
+        code: undefined
+      }
+    ]);
+  });
 });
 
 describe('problem parsing', () => {

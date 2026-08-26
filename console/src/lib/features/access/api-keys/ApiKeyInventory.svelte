@@ -159,8 +159,15 @@
                   : key.expires_at && new Date(key.expires_at) < new Date()
                     ? 'expired'
                     : 'active'}</span
-              ><br /><small>Expires {formatDate(key.expires_at)}</small><br
-              /><small>Rotated {formatDate(key.rotated_at)}</small></td
+              ><br /><small
+                >{key.expires_at
+                  ? `Expires ${formatDate(key.expires_at)}`
+                  : 'No expiry'}</small
+              ><br /><small
+                >{key.rotated_at
+                  ? `Rotated ${formatDate(key.rotated_at)}`
+                  : 'Never rotated'}</small
+              ></td
             >
             <td
               >{key.scopes.join(', ') || 'none'}<br /><small

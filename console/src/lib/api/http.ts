@@ -90,7 +90,9 @@ export function result<T>(
 /**
  * Flattens a validation Problem into one entry per rejected field message.
  * Codes line up with messages by position, and a message without one keeps
- * `code` undefined rather than borrowing its neighbour's.
+ * `code` undefined rather than borrowing its neighbour's. The API pads
+ * `error_codes` with an empty string wherever a message is uncoded, so that
+ * placeholder is read as "no code" rather than as a classification named "".
  */
 export function fieldIssues(error: unknown): FieldIssue[] {
   if (!(error instanceof ApiProblem)) return [];
@@ -100,7 +102,7 @@ export function fieldIssues(error: unknown): FieldIssue[] {
     messages.map((message, index) => ({
       field,
       message,
-      code: errorCodes?.[field]?.[index]
+      code: errorCodes?.[field]?.[index] || undefined
     }))
   );
 }

@@ -117,12 +117,10 @@
         onResetModelPage
       );
       await invalidateProviderSummaries(queryClient);
+      // `credential_restored` is hardcoded false by the API: historical
+      // credential material is never restored, so state the guarantee.
       onNotice(
-        `Revision ${revision} restored as a new draft. ${
-          restored.credential_restored
-            ? 'The historical credential was restored with it.'
-            : 'No historical credential was restored; the current credential selection was preserved.'
-        } Test and certify before activation.`
+        `Revision ${revision} restored as a new draft. No historical credential was restored; the current credential selection was preserved. Test and certify before activation.`
       );
     });
   }
@@ -281,10 +279,10 @@
           </div>
           <div class="revision-actions">
             <button
-              class="button button-secondary"
+              class="button button-secondary view-button"
               type="button"
-              onclick={() => view(item.id, item.revision)}
-              >View revision {item.revision}</button
+              aria-label={`View revision ${item.revision}`}
+              onclick={() => view(item.id, item.revision)}>View</button
             >
             {#if canManage}<button
                 class="button button-secondary"
@@ -558,6 +556,18 @@
     display: flex;
     flex-wrap: wrap;
     gap: 0.5rem;
+  }
+  /* Viewing a revision is the incidental action next to Restore, so it reads
+     as a quiet control rather than a second bordered button. */
+  .revision-actions .view-button {
+    border-color: transparent;
+    background: none;
+    color: var(--foreground-muted);
+  }
+  .revision-actions .view-button:hover:not(:disabled) {
+    border-color: transparent;
+    background: var(--surface-hover);
+    color: var(--foreground-hover);
   }
   .revision-fields {
     display: grid;

@@ -62,6 +62,27 @@ describe('shared formatting', () => {
     expect(formatBytes(0)).toBe('0 B');
   });
 
+  it('rounds each byte rung to a readable precision', () => {
+    // Two decimals below ten, one below a hundred, none above: the rung a
+    // capacity lands on decides the precision, not the caller.
+    expect(formatBytes(10 * 1024 ** 2)).toBe('10.0 MiB');
+    expect(formatBytes(100 * 1024 ** 2)).toBe('100 MiB');
+    // Bytes never carry a fraction, and the scale stops at the largest unit it
+    // knows rather than inventing one past PiB.
+    expect(formatBytes(1024 ** 6)).toBe('1,024 PiB');
+  });
+
+  it('keeps a negative byte delta signed', () => {
+    expect(formatBytes(-1_572_864)).toBe('-1.50 MiB');
+  });
+
+  it('formats in one fixed locale rather than the host default', () => {
+    // The unit suffixes are fixed English, so the number beside them must not
+    // change separators with the machine the console runs on.
+    expect(formatBytes(1024 ** 6)).toContain(',');
+    expect(formatInteger(1234567)).toBe('1,234,567');
+  });
+
   it('reports an unmeasured byte count instead of zero', () => {
     expect(formatBytes(null)).toBe('—');
     expect(formatBytes(undefined)).toBe('—');

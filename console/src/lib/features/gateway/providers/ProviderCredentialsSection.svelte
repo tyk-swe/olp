@@ -12,7 +12,11 @@
     type ProviderKindCapability
   } from '$lib/api/management/providers';
   import { formatDate } from '$lib/format';
-  import { requiresCredential } from './providerEditor';
+  import {
+    DISABLED_EDIT_NOTE,
+    providerDisabled,
+    requiresCredential
+  } from './providerEditor';
   import { invalidateProviderSummaries } from './providerCache';
   import {
     installProviderWithModels,
@@ -45,6 +49,9 @@
     queryFn: ({ signal }) => listProviderCredentials(current.id, signal)
   }));
   let credentialValue = $state('');
+  // The store refuses a rotation on a disabled provider with the same 409 that
+  // Save draft returns, so the form is locked until it is restored as a draft.
+  const editingLocked = $derived(providerDisabled(current));
 
   onDestroy(() => {
     credentialValue = '';
@@ -52,7 +59,7 @@
 
   async function rotate(event: SubmitEvent) {
     event.preventDefault();
-    if (!credentialValue || !canManage) return;
+    if (!credentialValue || !canManage || editingLocked) return;
     await run('rotate-credential', async () => {
       await rotateProviderCredential(current, credentialValue);
       credentialValue = '';
@@ -114,17 +121,19 @@
         autocomplete="new-password"
         bind:value={credentialValue}
         placeholder="New credential"
-        disabled={!canManage}
+        disabled={!canManage || editingLocked}
       /><button
         class="button button-secondary"
         type="submit"
         disabled={!canManage ||
           !credentialValue ||
           Boolean(busy) ||
-          !providerSpec}
+          !providerSpec ||
+          editingLocked}
         >{busy === 'rotate-credential' ? 'Staging…' : 'Stage rotation'}</button
       >
-    </form>{/if}
+    </form>
+    {#if editingLocked}<p class="locked-note">{DISABLED_EDIT_NOTE}</p>{/if}{/if}
   {#if credentials.isError}<div class="inline-problem" role="alert">
       {providerDetailError(credentials.error)}
       <button
@@ -177,8 +186,13 @@
     letter-spacing: -0.025em;
   }
   .muted,
+  .locked-note,
   .credential-list small {
     color: var(--foreground-muted);
+  }
+  .locked-note {
+    margin: 0.75rem 0 0;
+    font-size: 0.8rem;
   }
   .credential-form {
     display: flex;

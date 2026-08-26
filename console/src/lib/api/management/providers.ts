@@ -299,9 +299,22 @@ export async function restoreProviderAsDraft(
   return result(response.data, response.error, response.response) as Provider;
 }
 
+/**
+ * The 409 the server raises for a resource that is still active or referenced.
+ * Several unrelated conflicts share the status — a replayed or in-flight
+ * `Idempotency-Key`, an unvalidated route — so the problem type, not the
+ * status, is what identifies this one.
+ */
+const PROVIDER_IN_USE_TYPE =
+  'https://openllmproxy.dev/problems/configuration_resource_in_use';
+
 /** True for the 409 the server returns when a resource is still referenced. */
 export function isProviderInUse(error: unknown): boolean {
-  return error instanceof ApiProblem && error.problem.status === 409;
+  return (
+    error instanceof ApiProblem &&
+    error.problem.status === 409 &&
+    error.problem.type === PROVIDER_IN_USE_TYPE
+  );
 }
 
 export async function listProviderRevisionPage(

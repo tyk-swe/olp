@@ -11,6 +11,11 @@ export default defineConfig({
   test: {
     clearMocks: true,
     restoreMocks: true,
+    // Local-time conversions are asserted as literal instants, which only means
+    // anything if every machine runs the suite in one zone. New York is a zone
+    // with a non-zero offset and daylight saving, so a UTC-only assumption
+    // cannot hide in a passing test.
+    env: { TZ: 'America/New_York' },
     projects: [
       {
         extends: true,

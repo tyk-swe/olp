@@ -110,9 +110,12 @@ test('provider validation rejections name the field, the reason, and the code', 
           status: 422,
           detail: 'One or more fields are invalid.',
           errors: {
-            cloud_region: ['This connector does not accept a region.']
+            cloud_region: ['This connector does not accept a region.'],
+            endpoint: ['The endpoint must use https.']
           },
-          error_codes: { cloud_region: ['forbidden'] }
+          // `error_codes` always pairs with `errors`; an empty string is the
+          // API's way of saying this message carries no code.
+          error_codes: { cloud_region: ['forbidden'], endpoint: [''] }
         }
       });
       return;
@@ -139,4 +142,7 @@ test('provider validation rejections name the field, the reason, and the code', 
     'This connector does not accept a region.'
   );
   await expect(problem.getByText('forbidden', { exact: true })).toBeVisible();
+  await expect(problem).toContainText('The endpoint must use https.');
+  // The uncoded message renders without an empty code chip beside it.
+  await expect(problem.locator('code')).toHaveCount(1);
 });

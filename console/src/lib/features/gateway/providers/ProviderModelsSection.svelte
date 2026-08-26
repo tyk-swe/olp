@@ -25,7 +25,9 @@
   import {
     activationReady,
     certificationPrerequisiteReady,
-    parseManualModelNames
+    DISABLED_EDIT_NOTE,
+    parseManualModelNames,
+    providerDisabled
   } from './providerEditor';
   import {
     fetchCoordinatedModelPage,
@@ -65,6 +67,9 @@
     {}
   );
   let previousProviderEtag = $state('');
+  // Discovery, manual declaration and capability review all fail with the same
+  // 409 on a disabled provider, so they stay locked until it is a draft again.
+  const editingLocked = $derived(providerDisabled(current));
 
   const capabilityOptions = createQuery(() => ({
     queryKey: ['provider-capability-options', current.kind],
@@ -108,7 +113,7 @@
   }
 
   async function discover() {
-    if (!canManage) return;
+    if (!canManage || editingLocked) return;
     await run('detail-discover', async () => {
       const updated = await discoverProviderModels(current);
       certificationResults = {};
@@ -121,7 +126,7 @@
   }
 
   async function declareModels() {
-    if (!canManage) return;
+    if (!canManage || editingLocked) return;
     const names = parseManualModelNames(manualModelNames);
     if (!names.length) {
       onError('Enter at least one upstream model identifier.');
@@ -202,13 +207,14 @@
       class="button button-secondary"
       type="button"
       onclick={discover}
-      disabled={!canManage || Boolean(busy)}
+      disabled={!canManage || Boolean(busy) || editingLocked}
       >{busy === 'detail-discover'
         ? 'Discovering…'
         : 'Run upstream discovery'}</button
     >
   </div>
-  {#if canManage && current.kind === 'openai_compatible'}<details
+  {#if editingLocked}<p class="locked-note">{DISABLED_EDIT_NOTE}</p>{/if}
+  {#if canManage && !editingLocked && current.kind === 'openai_compatible'}<details
       class="manual-fallback"
     >
       <summary>Manual model identifiers</summary>
@@ -271,7 +277,7 @@
                   options={capabilityOptions.data?.capabilities ?? []}
                   optionsPending={capabilityOptions.isPending}
                   optionsError={capabilityOptions.isError}
-                  disabled={!canManage || Boolean(busy)}
+                  disabled={!canManage || Boolean(busy) || editingLocked}
                   {reloadVersion}
                   certification={certificationResults[model.id]}
                   onSave={(enabled, capabilities, providerEtag) =>
@@ -289,6 +295,7 @@
                     onclick={() => certifyModel(modelPage.provider, model.id)}
                     disabled={!canManage ||
                       Boolean(busy) ||
+                      editingLocked ||
                       !model.capabilities.length}
                     >{busy === `certify-${model.id}`
                       ? 'Server-certifying…'
@@ -311,7 +318,7 @@
       label="Provider model pages"
     />
   {/if}
-  {#if !activationReady(current)}<p class="audit-note">
+  {#if !editingLocked && !activationReady(current)}<p class="audit-note">
       Every native and compatible tuple requires fresh server-owned
       certification. After the last change or certification, run the
       completed-draft connection test before activation.
@@ -330,8 +337,13 @@
     letter-spacing: -0.025em;
   }
   .muted,
-  .audit-note {
+  .audit-note,
+  .locked-note {
     color: var(--foreground-muted);
+  }
+  .locked-note {
+    margin: 1rem 0 0;
+    font-size: 0.8rem;
   }
   .section-heading {
     display: flex;
