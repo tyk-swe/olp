@@ -16,7 +16,7 @@ Rust 2024 workspace: `apps/olp/` (HTTP/CLI binary), `crates/olp-engine/` (domain
 
 ## Commands
 - `make console-install`: install pinned pnpm deps on first setup.
-- `make check`: boundaries, formatting, Clippy, nextest, console, and repo checks.
+- `make check`: `check-static` (boundaries, scripts, formatting, repo checks; ~10 s) then `check-heavy` (Clippy, nextest, console verify in parallel). Use `make check-static` as the quick loop.
 - `cargo run -p olp -- all`: run locally; `OLP_CONSOLE_DIR=console/build` serves built console.
 - `pnpm --dir console dev`: UI-only Vite server (no API proxy).
 - `make e2e`: contract tests vs PostgreSQL, Valkey, mock provider.

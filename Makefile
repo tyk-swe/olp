@@ -16,7 +16,7 @@ FUZZ_TRIPLE = $(shell rustc -vV | sed -n 's/^host: //p')
 
 .DEFAULT_GOAL := help
 
-.PHONY: help check boundaries storage-sqlx source-size fmt fmt-fix clippy test \
+.PHONY: help check check-static check-cargo check-heavy boundaries storage-sqlx source-size fmt fmt-fix clippy test \
 	coverage console-install console-verify console-e2e \
 	screenshots openapi sqlx-prepare sqlx-check db-test release-version \
 	supply-chain helm-verify script-selftest shellcheck fuzz-check \
@@ -27,17 +27,35 @@ help: ## List available targets
 	@grep -E '^[a-z][a-z0-9-]*:.*##' $(MAKEFILE_LIST) \
 		| awk 'BEGIN {FS = ":.*##[ ]*"} {printf "  \033[1m%-18s\033[0m %s\n", $$1, $$2}'
 
-# Every required-tier gate that needs only the standard toolchain. CI
-# additionally enforces the coverage floor (make coverage), the DB/Valkey
-# suites (make db-test) and the SQLx metadata check (make sqlx-check), the
-# fuzz replay (make fuzz-replay) and bounded campaign (make fuzz-campaign),
-# sdk-smoke, the contract suites (make e2e, make worker-ha, plus the
-# toxiproxy-backed ha job), the console Playwright and console-integration
-# jobs, the upgrade rehearsal (make upgrade-rehearsal), the amd64 and arm64
-# image builds (make smoke-image-modes), helm-verify (needs helm + docker
-# compose), the advisory audits (make deny, make advisories), and the
-# actionlint/hadolint quality steps.
-check: boundaries storage-sqlx source-size shellcheck script-selftest fmt clippy test console-verify release-version supply-chain ## Broad local gate; CI also runs service/tool-specific required jobs
+# Every required-tier gate that needs only the standard toolchain, in two
+# tiers so cheap failures surface before anything compiles:
+#   check-static  every script/format gate (~10 s), run in parallel
+#   check-heavy   clippy -> nextest serially (they share the cargo lock and
+#                 target dir) alongside console-verify, CHECK_JOBS at a time
+# Leaf targets are unchanged; CI invokes them individually. CI additionally
+# enforces the coverage floor (make coverage), the DB/Valkey suites (make
+# db-test) and the SQLx metadata check (make sqlx-check), the fuzz replay
+# (make fuzz-replay) and bounded campaign (make fuzz-campaign), sdk-smoke,
+# the contract suites (make e2e, make worker-ha, plus the toxiproxy-backed ha
+# job), the console Playwright and console-integration jobs, the upgrade
+# rehearsal (make upgrade-rehearsal), the amd64 and arm64 image builds (make
+# smoke-image-modes), helm-verify (needs helm + docker compose), the advisory
+# audits (make deny, make advisories), and the actionlint/hadolint quality
+# steps.
+CHECK_JOBS ?= 2
+STATIC_JOBS ?= $(shell nproc 2>/dev/null || echo 4)
+
+check: ## Broad local gate: check-static, then check-heavy; CI also runs service/tool-specific required jobs
+	$(MAKE) -j$(STATIC_JOBS) --output-sync=target check-static
+	$(MAKE) -j$(CHECK_JOBS) --output-sync=recurse check-heavy
+
+check-static: boundaries storage-sqlx source-size shellcheck script-selftest fmt release-version supply-chain ## Cheap script and formatting gates only (parallel-safe; quick pre-commit loop)
+
+check-cargo: ## Clippy then the nextest suite, serially (shared cargo lock)
+	$(MAKE) clippy
+	$(MAKE) test
+
+check-heavy: check-cargo console-verify ## The compile-heavy gates; run with -j to overlap cargo and pnpm
 
 boundaries: ## Enforce crate boundaries and dependency ownership (needs ripgrep)
 	./scripts/check-boundaries.sh
