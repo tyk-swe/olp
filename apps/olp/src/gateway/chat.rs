@@ -14,7 +14,7 @@ use olp_engine::protocols::openai::chat::{CompletionRequest, decode};
 
 use crate::{
     bootstrap::mode_dependencies::GatewayState,
-    public_http::json_media::{admit_openai_chat, cleanup_admitted},
+    public_http::json_media::admit_openai_chat,
     public_http::streaming_response::{TerminalFrames, precommit_stream_failure, sse_stream},
 };
 
@@ -51,10 +51,11 @@ pub(super) async fn chat_completions(
     let operation = match decode::chat_completion(wire_request) {
         Ok(operation) => operation,
         Err(error) => {
-            cleanup_admitted(&state, admitted).await;
+            admitted.release().await;
             return Err(InferenceError::invalid_request(error.to_string()));
         }
     };
+    admitted.disarm();
     let mode = if streaming {
         TransportMode::Streaming
     } else {

@@ -30,7 +30,7 @@ use olp_engine::inference::{
 
 use crate::{
     bootstrap::mode_dependencies::GatewayState,
-    public_http::json_media::{admit_gemini_count, admit_gemini_generate, cleanup_admitted},
+    public_http::json_media::{admit_gemini_count, admit_gemini_generate},
     public_http::streaming_response::{
         ProtocolStreamEncoder, encode_protocol_sse_frames, encode_server_sse_frame,
         precommit_stream_failure, protocol_streaming_response,
@@ -65,13 +65,14 @@ pub(super) async fn action(
         let operation = match decode_request(model, request, false) {
             Ok(operation) => operation,
             Err(error) => {
-                cleanup_admitted(&state, admitted).await;
+                admitted.release().await;
                 return Err(ProtocolError::invalid(
                     Surface::Gemini,
                     format!("Invalid generateContent request: {error}"),
                 ));
             }
         };
+        admitted.disarm();
         let execution =
             execute_event_operation(&state, &principal, operation, TransportMode::Unary)
                 .await
@@ -103,13 +104,14 @@ pub(super) async fn action(
         let operation = match decode_request(model, request, true) {
             Ok(operation) => operation,
             Err(error) => {
-                cleanup_admitted(&state, admitted).await;
+                admitted.release().await;
                 return Err(ProtocolError::invalid(
                     Surface::Gemini,
                     format!("Invalid streamGenerateContent request: {error}"),
                 ));
             }
         };
+        admitted.disarm();
         let mut execution =
             execute_event_operation(&state, &principal, operation, TransportMode::Streaming)
                 .await
@@ -133,13 +135,14 @@ pub(super) async fn action(
         let operation = match decode_count_tokens_request(model, request) {
             Ok(operation) => operation,
             Err(error) => {
-                cleanup_admitted(&state, admitted).await;
+                admitted.release().await;
                 return Err(ProtocolError::invalid(
                     Surface::Gemini,
                     format!("Invalid countTokens request: {error}"),
                 ));
             }
         };
+        admitted.disarm();
         let executed =
             execute_routed_result(&state, &principal, operation, TransportMode::Unary, None)
                 .await

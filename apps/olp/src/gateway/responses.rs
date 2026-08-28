@@ -29,9 +29,7 @@ use serde_json::{Value, json};
 
 use crate::{
     bootstrap::mode_dependencies::GatewayState,
-    public_http::json_media::{
-        admit_openai_response_input_tokens, admit_openai_responses, cleanup_admitted,
-    },
+    public_http::json_media::{admit_openai_response_input_tokens, admit_openai_responses},
     public_http::streaming_response::{
         ProtocolStreamEncoder, encode_protocol_sse_frames, encode_server_sse_frame,
         precommit_stream_failure, protocol_streaming_response,
@@ -59,10 +57,11 @@ pub(super) async fn responses(
     let mut operation = match decode_response_create(request) {
         Ok(operation) => operation,
         Err(error) => {
-            cleanup_admitted(&state, admitted).await;
+            admitted.release().await;
             return Err(InferenceError::invalid_request(error.to_string()));
         }
     };
+    admitted.disarm();
     let Operation::Generation(generation) = &mut operation else {
         unreachable!("the Responses codec always produces generation")
     };
@@ -151,10 +150,11 @@ pub(super) async fn response_input_tokens(
     let operation = match decode_response_input_tokens(request) {
         Ok(operation) => operation,
         Err(error) => {
-            cleanup_admitted(&state, admitted).await;
+            admitted.release().await;
             return Err(InferenceError::invalid_request(error.to_string()));
         }
     };
+    admitted.disarm();
     // Once decoded, the canonical token-count operation owns every admitted
     // handle. execute_unary_result installs a cancellation-safe guard before
     // its first suspension and removes the handles after transport completes.

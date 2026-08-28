@@ -26,7 +26,7 @@ use olp_engine::inference::{execution::CompletedEvents, principal::Principal, ru
 
 use crate::{
     bootstrap::mode_dependencies::GatewayState,
-    public_http::json_media::{admit_anthropic_messages, cleanup_admitted},
+    public_http::json_media::admit_anthropic_messages,
     public_http::streaming_response::{
         ProtocolStreamEncoder, encode_protocol_sse_frames, encode_server_sse_frame,
         precommit_stream_failure, protocol_streaming_response,
@@ -55,13 +55,14 @@ pub(super) async fn messages(
     let operation = match decode_request(request) {
         Ok(operation) => operation,
         Err(error) => {
-            cleanup_admitted(&state, admitted).await;
+            admitted.release().await;
             return Err(ProtocolError::invalid(
                 Surface::Anthropic,
                 format!("Invalid Messages request: {error}"),
             ));
         }
     };
+    admitted.disarm();
     let mode = if streaming {
         TransportMode::Streaming
     } else {
@@ -116,13 +117,14 @@ pub(super) async fn count_tokens(
     let operation = match decode_count_tokens_request(request) {
         Ok(operation) => operation,
         Err(error) => {
-            cleanup_admitted(&state, admitted).await;
+            admitted.release().await;
             return Err(ProtocolError::invalid(
                 Surface::Anthropic,
                 format!("Invalid count_tokens request: {error}"),
             ));
         }
     };
+    admitted.disarm();
     let mut executed =
         execute_routed_result(&state, &principal, operation, TransportMode::Unary, None)
             .await

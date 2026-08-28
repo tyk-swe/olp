@@ -108,28 +108,68 @@ impl InlineMediaAdmission {
     async fn finish(
         mut self,
         result: Result<(), InferenceError>,
-    ) -> Result<Vec<MediaHandle>, InferenceError> {
+    ) -> Result<AdmittedMedia, InferenceError> {
         if let Err(error) = result {
             let handles = std::mem::take(&mut self.handles);
             cleanup_handles_owned(self.spool.clone(), handles).await;
             return Err(error);
         }
-        Ok(std::mem::take(&mut self.handles))
+        Ok(AdmittedMedia {
+            spool: self.spool.clone(),
+            handles: std::mem::take(&mut self.handles),
+        })
+    }
+}
+
+/// Inline media staged in the spool on behalf of one request. The handler owns
+/// the artifacts until the decoded operation carries their handles into the
+/// engine, which installs its own guard on entry; every earlier exit must
+/// either `release` them or let this guard drop and remove them.
+#[must_use = "dropping AdmittedMedia removes the spooled media; call disarm() once the engine owns it"]
+pub(crate) struct AdmittedMedia {
+    spool: Arc<dyn MediaSpool>,
+    handles: Vec<MediaHandle>,
+}
+
+impl AdmittedMedia {
+    #[cfg(test)]
+    pub(crate) fn handles(&self) -> &[MediaHandle] {
+        &self.handles
+    }
+
+    /// Hands ownership of the spooled media to the decoded operation.
+    pub(crate) fn disarm(mut self) {
+        self.handles.clear();
+    }
+
+    /// Removes the spooled media now, before the request is rejected.
+    pub(crate) async fn release(mut self) {
+        let handles = std::mem::take(&mut self.handles);
+        cleanup_handles_owned(self.spool.clone(), handles).await;
+    }
+}
+
+impl Drop for AdmittedMedia {
+    fn drop(&mut self) {
+        spawn_cleanup(&self.spool, std::mem::take(&mut self.handles));
     }
 }
 
 impl Drop for InlineMediaAdmission {
     fn drop(&mut self) {
-        if self.handles.is_empty() {
-            return;
-        }
-        let spool = self.spool.clone();
-        let handles = std::mem::take(&mut self.handles);
-        if let Ok(runtime) = tokio::runtime::Handle::try_current() {
-            runtime.spawn(async move {
-                cleanup_handles(&spool, handles).await;
-            });
-        }
+        spawn_cleanup(&self.spool, std::mem::take(&mut self.handles));
+    }
+}
+
+fn spawn_cleanup(spool: &Arc<dyn MediaSpool>, handles: Vec<MediaHandle>) {
+    if handles.is_empty() {
+        return;
+    }
+    let spool = spool.clone();
+    if let Ok(runtime) = tokio::runtime::Handle::try_current() {
+        runtime.spawn(async move {
+            cleanup_handles(&spool, handles).await;
+        });
     }
 }
 
@@ -225,7 +265,7 @@ async fn admit_anthropic_block(
 pub(crate) async fn admit_anthropic_messages(
     state: &GatewayState,
     messages: &mut [AnthropicMessage],
-) -> Result<Vec<MediaHandle>, InferenceError> {
+) -> Result<AdmittedMedia, InferenceError> {
     let mut admission = InlineMediaAdmission::new(state);
     let result = admit_anthropic_messages_inner(&mut admission, messages).await;
     admission.finish(result).await
@@ -265,7 +305,7 @@ async fn admit_gemini_content(
 pub(crate) async fn admit_gemini_generate(
     state: &GatewayState,
     request: &mut GeminiGenerateContentRequest,
-) -> Result<Vec<MediaHandle>, InferenceError> {
+) -> Result<AdmittedMedia, InferenceError> {
     let mut admission = InlineMediaAdmission::new(state);
     let result = admit_gemini_content(&mut admission, &mut request.contents).await;
     admission.finish(result).await
@@ -274,7 +314,7 @@ pub(crate) async fn admit_gemini_generate(
 pub(crate) async fn admit_gemini_count(
     state: &GatewayState,
     request: &mut GeminiCountTokensRequest,
-) -> Result<Vec<MediaHandle>, InferenceError> {
+) -> Result<AdmittedMedia, InferenceError> {
     let mut admission = InlineMediaAdmission::new(state);
     let result = async {
         admit_gemini_content(&mut admission, &mut request.contents).await?;
@@ -290,7 +330,7 @@ pub(crate) async fn admit_gemini_count(
 pub(crate) async fn admit_openai_chat(
     state: &GatewayState,
     request: &mut CompletionRequest,
-) -> Result<Vec<MediaHandle>, InferenceError> {
+) -> Result<AdmittedMedia, InferenceError> {
     let mut admission = InlineMediaAdmission::new(state);
     let result = async {
         for message in &mut request.messages {
@@ -320,21 +360,21 @@ pub(crate) async fn admit_openai_chat(
 pub(crate) async fn admit_openai_responses(
     state: &GatewayState,
     request: &mut Create,
-) -> Result<Vec<MediaHandle>, InferenceError> {
+) -> Result<AdmittedMedia, InferenceError> {
     admit_openai_response_input(state, &mut request.input).await
 }
 
 pub(crate) async fn admit_openai_response_input_tokens(
     state: &GatewayState,
     request: &mut ResponseInputTokensRequest,
-) -> Result<Vec<MediaHandle>, InferenceError> {
+) -> Result<AdmittedMedia, InferenceError> {
     admit_openai_response_input(state, &mut request.input).await
 }
 
 async fn admit_openai_response_input(
     state: &GatewayState,
     input: &mut ResponseInput,
-) -> Result<Vec<MediaHandle>, InferenceError> {
+) -> Result<AdmittedMedia, InferenceError> {
     let mut admission = InlineMediaAdmission::new(state);
     let result = async {
         let ResponseInput::Items(items) = input else {
@@ -422,10 +462,6 @@ async fn admit_openai_response_input(
     }
     .await;
     admission.finish(result).await
-}
-
-pub(crate) async fn cleanup_admitted(state: &GatewayState, handles: Vec<MediaHandle>) {
-    cleanup_handles_owned(state.media_spool().clone(), handles).await;
 }
 
 async fn cleanup_handles_owned(spool: Arc<dyn MediaSpool>, handles: Vec<MediaHandle>) {
@@ -521,7 +557,7 @@ mod tests {
             panic!("expected bounded image handle")
         };
         assert_spooled(&state, handle, b"hi").await;
-        cleanup_admitted(&state, handles).await;
+        handles.release().await;
     }
 
     #[tokio::test]
@@ -543,7 +579,7 @@ mod tests {
             generation.messages[0].content[0],
             ContentPart::InputAudio { ref format, .. } if format == "audio/wav"
         ));
-        cleanup_admitted(&state, handles).await;
+        handles.release().await;
 
         let mut chat: CompletionRequest = serde_json::from_value(serde_json::json!({
             "model":"route", "messages":[{"role":"user","content":[{
@@ -559,7 +595,7 @@ mod tests {
             generation.messages[0].content[0],
             ContentPart::InputAudio { ref format, .. } if format == "wav"
         ));
-        cleanup_admitted(&state, handles).await;
+        handles.release().await;
     }
 
     #[tokio::test]
@@ -580,7 +616,7 @@ mod tests {
             generation.messages[0].content[0],
             ContentPart::InputFile { ref mime_type, .. } if mime_type == "application/pdf"
         ));
-        cleanup_admitted(&state, handles).await;
+        handles.release().await;
 
         let mut remote: Create = serde_json::from_value(serde_json::json!({
             "model":"route", "input":[{"type":"message","role":"user","content":[{
@@ -606,7 +642,7 @@ mod tests {
         let handles = admit_openai_response_input_tokens(&state, &mut request)
             .await
             .unwrap();
-        assert_eq!(handles.len(), 2);
+        assert_eq!(handles.handles().len(), 2);
         let serialized = serde_json::to_string(&request).unwrap();
         assert!(!serialized.contains("aGk="));
         assert!(serialized.contains("urn:olp:inline-media:"));
@@ -636,7 +672,7 @@ mod tests {
                 .unwrap()
                 .starts_with("urn:olp:inline-media:")
         );
-        cleanup_admitted(&state, handles).await;
+        handles.release().await;
     }
 
     #[tokio::test]
