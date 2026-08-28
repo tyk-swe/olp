@@ -29,8 +29,8 @@ use crate::{
         json_payload::json_payload,
         permissions::require_permission,
         preconditions::{optional_if_match, with_etag},
+        principal::{MutationPrincipal, ReadPrincipal},
         provenance::Provenance,
-        sessions::{require_mutation_session, require_read_session},
     },
     public_http::problem::Problem,
 };
@@ -169,9 +169,8 @@ struct DiscoveryDocument {
 )]
 pub(super) async fn get_configuration(
     State(state): State<ManagementState>,
-    headers: HeaderMap,
+    ReadPrincipal(principal): ReadPrincipal,
 ) -> Result<Response, Problem> {
-    let principal = require_read_session(&state, &headers).await?;
     require_permission(&principal, Permission::ManageAccess)?;
     let configuration = state
         .store()
@@ -199,9 +198,9 @@ pub(super) async fn put_configuration(
     State(state): State<ManagementState>,
     Provenance(provenance): Provenance,
     headers: HeaderMap,
+    MutationPrincipal(principal): MutationPrincipal,
     payload: Result<Json<OidcConfigurationRequest>, JsonRejection>,
 ) -> Result<Response, Problem> {
-    let principal = require_mutation_session(&state, &headers).await?;
     require_permission(&principal, Permission::ManageAccess)?;
     let request = json_payload(payload)?;
     let policy = network_policy(&state);

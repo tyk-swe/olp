@@ -24,8 +24,8 @@ use crate::{
         json_payload::json_payload,
         pagination::PageQuery,
         permissions::require_permission,
+        principal::{MutationPrincipal, ReadPrincipal},
         provenance::Provenance,
-        sessions::{require_mutation_session, require_read_session},
     },
     public_http::problem::Problem,
 };
@@ -187,10 +187,9 @@ pub(super) struct PricingRevisionsResponse {
 )]
 pub(super) async fn list_pricing_revisions(
     State(state): State<ManagementState>,
-    headers: HeaderMap,
     Query(query): Query<PageQuery>,
+    ReadPrincipal(principal): ReadPrincipal,
 ) -> Result<Json<PricingRevisionsResponse>, Problem> {
-    let principal = require_read_session(&state, &headers).await?;
     require_permission(&principal, Permission::ReadOperations)?;
     let before = query
         .cursor
@@ -227,9 +226,9 @@ pub(super) async fn create_pricing_revision(
     State(state): State<ManagementState>,
     Provenance(provenance): Provenance,
     headers: HeaderMap,
+    MutationPrincipal(principal): MutationPrincipal,
     payload: Result<Json<PricingRevisionRequest>, JsonRejection>,
 ) -> Result<Response, Problem> {
-    let principal = require_mutation_session(&state, &headers).await?;
     require_permission(&principal, Permission::ManagePricing)?;
     let idempotency_key = require_idempotency_key(&headers)?.to_owned();
     let request = json_payload(payload)?;

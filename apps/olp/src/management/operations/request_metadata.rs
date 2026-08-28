@@ -1,7 +1,6 @@
 use axum::{
     Json,
     extract::{Path, Query, State},
-    http::HeaderMap,
 };
 use chrono::{DateTime, Utc};
 use olp_db::{
@@ -21,8 +20,8 @@ use crate::{
     management::{
         error_mapping::map_persistence,
         permissions::require_permission,
+        principal::{MutationPrincipal, ReadPrincipal},
         provenance::Provenance,
-        sessions::{require_mutation_session, require_read_session},
     },
     public_http::problem::Problem,
 };
@@ -127,10 +126,9 @@ pub(in crate::management::operations) struct RequestMetadataGatewayEpochListResp
 )]
 pub(in crate::management::operations) async fn list_request_metadata_gateway_epochs(
     State(state): State<ManagementState>,
-    headers: HeaderMap,
     Query(query): Query<RequestMetadataGatewayEpochQuery>,
+    ReadPrincipal(principal): ReadPrincipal,
 ) -> Result<Json<RequestMetadataGatewayEpochListResponse>, Problem> {
-    let principal = require_read_session(&state, &headers).await?;
     require_permission(&principal, Permission::ReadOperations)?;
     let cursor = timestamp_cursor(query.cursor.as_deref())?;
     let state_filter = query
@@ -196,10 +194,9 @@ impl From<EpochAcknowledgement> for RequestMetadataEpochAcknowledgementResponse 
 pub(in crate::management::operations) async fn acknowledge_request_metadata_gateway_epoch(
     State(state): State<ManagementState>,
     Provenance(provenance): Provenance,
-    headers: HeaderMap,
     Path(process_epoch): Path<Uuid>,
+    MutationPrincipal(principal): MutationPrincipal,
 ) -> Result<Json<RequestMetadataEpochAcknowledgementResponse>, Problem> {
-    let principal = require_mutation_session(&state, &headers).await?;
     require_permission(&principal, Permission::ManageSettings)?;
     let acknowledgement = state
         .store()

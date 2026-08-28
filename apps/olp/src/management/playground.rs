@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use axum::{
     Json, Router,
     extract::{State, rejection::JsonRejection},
-    http::{HeaderMap, HeaderValue, StatusCode, header},
+    http::{HeaderValue, StatusCode, header},
     response::{IntoResponse, Response},
     routing::post,
 };
@@ -28,8 +28,7 @@ use crate::{
     bootstrap::mode_dependencies::ManagementState,
     gateway::error::InferenceError,
     management::{
-        json_payload::json_payload, permissions::require_permission,
-        sessions::require_mutation_session,
+        json_payload::json_payload, permissions::require_permission, principal::MutationPrincipal,
     },
     public_http::problem::{FieldErrors, Problem},
 };
@@ -187,10 +186,9 @@ struct ToolCallBuilder {
 )]
 async fn execute_playground(
     State(state): State<ManagementState>,
-    headers: HeaderMap,
+    MutationPrincipal(principal): MutationPrincipal,
     payload: Result<Json<PlaygroundRequest>, JsonRejection>,
 ) -> Result<Response, Problem> {
-    let principal = require_mutation_session(&state, &headers).await?;
     require_permission(&principal, Permission::UsePlayground)?;
     let request = json_payload(payload)?;
     let (operation, surface, structured) = playground_operation(request)?;

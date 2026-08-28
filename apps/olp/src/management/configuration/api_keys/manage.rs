@@ -25,9 +25,9 @@ use crate::{
         pagination::{PageQuery, page},
         permissions::require_permission,
         preconditions::{if_match, with_etag},
+        principal::{MutationPrincipal, ReadPrincipal},
         response_policy::RuntimeGenerationResponse,
         secrets::WriteOnlySecret,
-        sessions::{require_mutation_session, require_read_session},
     },
     public_http::problem::Problem,
 };
@@ -98,10 +98,9 @@ pub(crate) struct ApiKeyListResponse {
 )]
 pub(crate) async fn list_api_keys(
     State(state): State<ManagementState>,
-    headers: HeaderMap,
     Query(query): Query<PageQuery>,
+    ReadPrincipal(principal): ReadPrincipal,
 ) -> Result<Json<ApiKeyListResponse>, Problem> {
-    let principal = require_read_session(&state, &headers).await?;
     require_permission(&principal, Permission::ReadConfiguration)?;
     let (cursor, limit) = page(query)?;
     let page = state
@@ -125,9 +124,8 @@ pub(crate) async fn list_api_keys(
 pub(crate) async fn get_api_key(
     State(state): State<ManagementState>,
     Path(api_key_id): Path<Uuid>,
-    headers: HeaderMap,
+    ReadPrincipal(principal): ReadPrincipal,
 ) -> Result<Response, Problem> {
-    let principal = require_read_session(&state, &headers).await?;
     require_permission(&principal, Permission::ReadConfiguration)?;
     let key: ApiKeyDetailResponse = state
         .store()
@@ -197,9 +195,9 @@ pub(crate) async fn update_api_key(
     Provenance(provenance): Provenance,
     Path(api_key_id): Path<Uuid>,
     headers: HeaderMap,
+    MutationPrincipal(principal): MutationPrincipal,
     payload: Result<Json<UpdateApiKeyRequest>, JsonRejection>,
 ) -> Result<Response, Problem> {
-    let principal = require_mutation_session(&state, &headers).await?;
     require_permission(&principal, Permission::ManageApiKeys)?;
     let request = json_payload(payload)?;
     let expected_etag = if_match(&headers)?;
@@ -279,8 +277,8 @@ pub(crate) async fn rotate_api_key(
     Provenance(provenance): Provenance,
     Path(api_key_id): Path<Uuid>,
     headers: HeaderMap,
+    MutationPrincipal(principal): MutationPrincipal,
 ) -> Result<Response, Problem> {
-    let principal = require_mutation_session(&state, &headers).await?;
     require_permission(&principal, Permission::ManageApiKeys)?;
     let expected_etag = if_match(&headers)?;
     let idempotency_key = require_idempotency_key(&headers)?.to_owned();

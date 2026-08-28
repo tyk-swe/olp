@@ -1,7 +1,7 @@
+use crate::management::principal::ReadPrincipal;
 use axum::{
     Json,
     extract::{Query, State},
-    http::HeaderMap,
 };
 use chrono::{DateTime, Utc};
 use olp_db::{usage::Granularity, usage::series::Point};
@@ -10,10 +10,8 @@ use utoipa::ToSchema;
 
 use super::{UsageQuery, UsageRangeCoverageResponse};
 use crate::{
-    bootstrap::mode_dependencies::ManagementState,
-    management::operations::helpers::map_operations,
-    management::{permissions::require_permission, sessions::require_read_session},
-    public_http::problem::Problem,
+    bootstrap::mode_dependencies::ManagementState, management::operations::helpers::map_operations,
+    management::permissions::require_permission, public_http::problem::Problem,
 };
 use olp_engine::domain::auth::Permission;
 
@@ -73,10 +71,9 @@ pub(in crate::management::operations) struct UsageTimeSeriesResponse {
 )]
 pub(in crate::management::operations) async fn usage_time_series(
     State(state): State<ManagementState>,
-    headers: HeaderMap,
     Query(query): Query<UsageSeriesQuery>,
+    ReadPrincipal(principal): ReadPrincipal,
 ) -> Result<Json<UsageTimeSeriesResponse>, Problem> {
-    let principal = require_read_session(&state, &headers).await?;
     require_permission(&principal, Permission::ReadOperations)?;
     query.usage.validate()?;
     let granularity = match query.granularity.as_deref().unwrap_or("hour") {

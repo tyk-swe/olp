@@ -1,3 +1,4 @@
+use crate::management::principal::{MutationPrincipal, ReadPrincipal};
 use axum::{
     Json,
     extract::{Path, Query, State, rejection::JsonRejection},
@@ -18,7 +19,6 @@ use crate::management::{
     permissions::{parse_user_role, require_permission},
     preconditions::{if_match, with_etag},
     provenance::Provenance,
-    sessions::{require_mutation_session, require_read_session},
 };
 use crate::{bootstrap::mode_dependencies::ManagementState, public_http::problem::Problem};
 
@@ -73,10 +73,9 @@ pub(in crate::management) struct UserListResponse {
 )]
 pub(in crate::management) async fn list_users(
     State(state): State<ManagementState>,
-    headers: HeaderMap,
     Query(query): Query<PageQuery>,
+    ReadPrincipal(principal): ReadPrincipal,
 ) -> Result<Json<UserListResponse>, Problem> {
-    let principal = require_read_session(&state, &headers).await?;
     require_permission(&principal, Permission::ReadAccess)?;
     let (cursor, limit) = page(query)?;
     let (users, next_cursor) = state
@@ -103,9 +102,8 @@ pub(in crate::management) async fn list_users(
 pub(in crate::management) async fn get_user(
     State(state): State<ManagementState>,
     Path(user_id): Path<Uuid>,
-    headers: HeaderMap,
+    ReadPrincipal(principal): ReadPrincipal,
 ) -> Result<Response, Problem> {
-    let principal = require_read_session(&state, &headers).await?;
     require_permission(&principal, Permission::ReadAccess)?;
     let user = state
         .store()
@@ -144,9 +142,9 @@ pub(in crate::management) async fn update_user_role(
     Provenance(provenance): Provenance,
     Path(user_id): Path<Uuid>,
     headers: HeaderMap,
+    MutationPrincipal(principal): MutationPrincipal,
     payload: Result<Json<UpdateUserRoleRequest>, JsonRejection>,
 ) -> Result<Response, Problem> {
-    let principal = require_mutation_session(&state, &headers).await?;
     require_permission(&principal, Permission::ManageAccess)?;
     let request = json_payload(payload)?;
     if request.role.is_none() && request.active.is_none() {

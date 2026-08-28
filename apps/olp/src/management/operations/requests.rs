@@ -1,7 +1,7 @@
+use crate::management::principal::ReadPrincipal;
 use axum::{
     Json,
     extract::{Path, Query, State},
-    http::HeaderMap,
 };
 use chrono::{DateTime, Utc};
 use olp_db::{
@@ -15,8 +15,7 @@ use uuid::Uuid;
 
 use super::helpers::{map_operations, page_limit, timestamp_cursor, validate_time_range};
 use crate::{
-    bootstrap::mode_dependencies::ManagementState,
-    management::{permissions::require_permission, sessions::require_read_session},
+    bootstrap::mode_dependencies::ManagementState, management::permissions::require_permission,
     public_http::problem::Problem,
 };
 
@@ -159,10 +158,9 @@ pub(super) struct RequestDetailResponse {
 )]
 pub(super) async fn list_requests(
     State(state): State<ManagementState>,
-    headers: HeaderMap,
     Query(query): Query<RequestQuery>,
+    ReadPrincipal(principal): ReadPrincipal,
 ) -> Result<Json<RequestListResponse>, Problem> {
-    let principal = require_read_session(&state, &headers).await?;
     require_permission(&principal, Permission::ReadOperations)?;
     let cursor = timestamp_cursor(query.cursor.as_deref())?;
     if let (Some(after), Some(before)) = (query.started_after, query.started_before) {
@@ -216,10 +214,9 @@ pub(super) async fn list_requests(
 )]
 pub(super) async fn get_request(
     State(state): State<ManagementState>,
-    headers: HeaderMap,
     Path(request_id): Path<Uuid>,
+    ReadPrincipal(principal): ReadPrincipal,
 ) -> Result<Json<RequestDetailResponse>, Problem> {
-    let principal = require_read_session(&state, &headers).await?;
     require_permission(&principal, Permission::ReadOperations)?;
     let detail = state
         .store()

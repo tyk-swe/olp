@@ -1,3 +1,4 @@
+use crate::management::principal::{MutationPrincipal, ReadPrincipal};
 use std::fmt;
 
 use axum::{
@@ -30,7 +31,7 @@ use crate::management::{
     provenance::Provenance,
     response_policy::prevent_sensitive_response_caching,
     secrets::WriteOnlySecret,
-    sessions::{cookie, reauthentication_required, require_mutation_session, require_read_session},
+    sessions::{cookie, reauthentication_required},
 };
 use crate::{
     bootstrap::mode_dependencies::ManagementState,
@@ -50,9 +51,8 @@ const RECENT_AUTH_TTL: Duration = Duration::minutes(5);
 )]
 pub(in crate::management) async fn profile(
     State(state): State<ManagementState>,
-    headers: HeaderMap,
+    ReadPrincipal(principal): ReadPrincipal,
 ) -> Result<Response, Problem> {
-    let principal = require_read_session(&state, &headers).await?;
     let user = state
         .store()
         .user(principal.user_id)
@@ -84,9 +84,9 @@ pub(in crate::management) async fn update_profile(
     State(state): State<ManagementState>,
     Provenance(provenance): Provenance,
     headers: HeaderMap,
+    MutationPrincipal(principal): MutationPrincipal,
     payload: Result<Json<UpdateProfileRequest>, JsonRejection>,
 ) -> Result<Response, Problem> {
-    let principal = require_mutation_session(&state, &headers).await?;
     let request = json_payload(payload)?;
     let user = state
         .store()
@@ -140,10 +140,9 @@ impl fmt::Debug for RecentAuthenticationRequest {
 pub(in crate::management) async fn recent_authentication(
     State(state): State<ManagementState>,
     Provenance(provenance): Provenance,
-    headers: HeaderMap,
+    MutationPrincipal(principal): MutationPrincipal,
     payload: Result<Json<RecentAuthenticationRequest>, JsonRejection>,
 ) -> Result<Response, Problem> {
-    let principal = require_mutation_session(&state, &headers).await?;
     let request = json_payload(payload)?;
     let purpose = RecentAuthPurpose::parse(&request.purpose).ok_or_else(|| {
         Problem::field_validation(
@@ -267,9 +266,9 @@ pub(in crate::management) async fn change_password(
     State(state): State<ManagementState>,
     Provenance(provenance): Provenance,
     headers: HeaderMap,
+    MutationPrincipal(principal): MutationPrincipal,
     payload: Result<Json<ChangePasswordRequest>, JsonRejection>,
 ) -> Result<Response, Problem> {
-    let principal = require_mutation_session(&state, &headers).await?;
     validate_session_cookie_ttl(state.session_ttl)?;
     let request = json_payload(payload)?;
     let expected_etag = if_match(&headers)?;
@@ -368,9 +367,9 @@ pub(in crate::management) async fn enroll_password(
     State(state): State<ManagementState>,
     Provenance(provenance): Provenance,
     headers: HeaderMap,
+    MutationPrincipal(principal): MutationPrincipal,
     payload: Result<Json<EnrollPasswordRequest>, JsonRejection>,
 ) -> Result<Response, Problem> {
-    let principal = require_mutation_session(&state, &headers).await?;
     validate_session_cookie_ttl(state.session_ttl)?;
     let recent_auth = cookie(&headers, RECENT_AUTH_COOKIE)?
         .filter(|token| token.len() == 43)

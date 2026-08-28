@@ -1,7 +1,7 @@
+use crate::management::principal::ReadPrincipal;
 use axum::{
     Json,
     extract::{Query, State},
-    http::HeaderMap,
 };
 use olp_db::{usage::Dimension, usage::breakdown::Item};
 use serde::{Deserialize, Serialize};
@@ -11,7 +11,7 @@ use super::{UsageQuery, UsageRangeCoverageResponse};
 use crate::{
     bootstrap::mode_dependencies::ManagementState,
     management::operations::helpers::{map_operations, page_limit},
-    management::{permissions::require_permission, sessions::require_read_session},
+    management::permissions::require_permission,
     public_http::problem::Problem,
 };
 use olp_engine::domain::auth::Permission;
@@ -77,10 +77,9 @@ pub(in crate::management::operations) struct UsageBreakdownResponse {
 )]
 pub(in crate::management::operations) async fn usage_breakdown(
     State(state): State<ManagementState>,
-    headers: HeaderMap,
     Query(query): Query<UsageBreakdownQuery>,
+    ReadPrincipal(principal): ReadPrincipal,
 ) -> Result<Json<UsageBreakdownResponse>, Problem> {
-    let principal = require_read_session(&state, &headers).await?;
     require_permission(&principal, Permission::ReadOperations)?;
     query.usage.validate()?;
     let dimension = match query.dimension.as_str() {

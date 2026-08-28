@@ -19,10 +19,9 @@ use crate::{
     management::{
         cookies::{append_security_transition_cookies, validate_session_cookie_ttl},
         error_mapping::map_persistence,
+        principal::{MutationPrincipal, ReadPrincipal},
         provenance::Provenance,
-        sessions::{
-            cookie, reauthentication_required, require_mutation_session, require_read_session,
-        },
+        sessions::{cookie, reauthentication_required},
     },
     public_http::{problem::Problem, request_cookies::RECENT_AUTH_COOKIE},
 };
@@ -68,9 +67,8 @@ pub(super) struct OidcIdentityListResponse {
 )]
 pub(super) async fn list_identities(
     State(state): State<ManagementState>,
-    headers: HeaderMap,
+    ReadPrincipal(principal): ReadPrincipal,
 ) -> Result<Json<OidcIdentityListResponse>, Problem> {
-    let principal = require_read_session(&state, &headers).await?;
     let store = state.store();
     let identities = store
         .oidc_identities_for_user(principal.user_id)
@@ -112,9 +110,9 @@ pub(super) async fn unlink_identity(
     Provenance(provenance): Provenance,
     Path(identity_id): Path<Uuid>,
     headers: HeaderMap,
+    MutationPrincipal(principal): MutationPrincipal,
 ) -> Result<Response, Problem> {
     validate_session_cookie_ttl(state.session_ttl)?;
-    let principal = require_mutation_session(&state, &headers).await?;
     let recent_auth_token = cookie(&headers, RECENT_AUTH_COOKIE)?
         .filter(|value| value.len() == 43)
         .ok_or_else(reauthentication_required)?;

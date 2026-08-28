@@ -1,3 +1,4 @@
+use crate::management::principal::{MutationPrincipal, ReadPrincipal};
 use std::{fmt, net::SocketAddr};
 
 use axum::{
@@ -37,7 +38,7 @@ use crate::management::{
     permissions::{parse_user_role, require_permission},
     provenance::Provenance,
     secrets::WriteOnlySecret,
-    sessions::{enforce_origin, require_mutation_session, require_read_session},
+    sessions::enforce_origin,
 };
 use crate::{
     bootstrap::mode_dependencies::ManagementState, public_http::problem::FieldErrors,
@@ -136,10 +137,9 @@ pub(in crate::management) struct CreateInvitationResponse {
 )]
 pub(in crate::management) async fn list_invitations(
     State(state): State<ManagementState>,
-    headers: HeaderMap,
     Query(query): Query<PageQuery>,
+    ReadPrincipal(principal): ReadPrincipal,
 ) -> Result<Json<InvitationListResponse>, Problem> {
-    let principal = require_read_session(&state, &headers).await?;
     require_permission(&principal, Permission::ReadAccess)?;
     let (cursor, limit) = page(query)?;
     let (invitations, next_cursor) = state
@@ -171,9 +171,9 @@ pub(in crate::management) async fn create_invitation(
     State(state): State<ManagementState>,
     Provenance(provenance): Provenance,
     headers: HeaderMap,
+    MutationPrincipal(principal): MutationPrincipal,
     payload: Result<Json<CreateInvitationRequest>, JsonRejection>,
 ) -> Result<Response, Problem> {
-    let principal = require_mutation_session(&state, &headers).await?;
     require_permission(&principal, Permission::ManageAccess)?;
     let request = json_payload(payload)?;
     let request_fingerprint = fingerprint(&request).map_err(map_persistence)?;
@@ -243,8 +243,8 @@ pub(in crate::management) async fn revoke_invitation(
     Provenance(provenance): Provenance,
     Path(invitation_id): Path<Uuid>,
     headers: HeaderMap,
+    MutationPrincipal(principal): MutationPrincipal,
 ) -> Result<Response, Problem> {
-    let principal = require_mutation_session(&state, &headers).await?;
     require_permission(&principal, Permission::ManageAccess)?;
     let state = &state;
     let provenance = &provenance;

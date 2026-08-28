@@ -1,7 +1,7 @@
+use crate::management::principal::ReadPrincipal;
 use axum::{
     Json,
     extract::{Query, State, rejection::QueryRejection},
-    http::HeaderMap,
 };
 use chrono::{DateTime, Utc};
 use olp_db::operations::audit::{Filters, Record};
@@ -15,8 +15,7 @@ use super::helpers::{
     validate_time_range,
 };
 use crate::{
-    bootstrap::mode_dependencies::ManagementState,
-    management::{permissions::require_permission, sessions::require_read_session},
+    bootstrap::mode_dependencies::ManagementState, management::permissions::require_permission,
     public_http::problem::Problem,
 };
 
@@ -116,10 +115,9 @@ pub(super) struct AuditListResponse {
 )]
 pub(super) async fn list_audit_events(
     State(state): State<ManagementState>,
-    headers: HeaderMap,
     query: Result<Query<AuditQuery>, QueryRejection>,
+    ReadPrincipal(principal): ReadPrincipal,
 ) -> Result<Json<AuditListResponse>, Problem> {
-    let principal = require_read_session(&state, &headers).await?;
     require_permission(&principal, Permission::ReadOperations)?;
     let query = query_parameters(query)?;
     let cursor = timestamp_cursor(query.cursor.as_deref())?;

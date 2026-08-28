@@ -1,3 +1,4 @@
+use crate::management::principal::MutationPrincipal;
 use axum::{
     Json,
     extract::{Path, State, rejection::JsonRejection},
@@ -31,7 +32,6 @@ use crate::management::{
     preconditions::if_match,
     response_policy::RuntimeGenerationResponse,
     secrets::WriteOnlySecret,
-    sessions::require_mutation_session,
 };
 use crate::{
     bootstrap::mode_dependencies::ManagementState,
@@ -155,9 +155,9 @@ pub(crate) async fn create_provider(
     State(state): State<ManagementState>,
     Provenance(provenance): Provenance,
     headers: HeaderMap,
+    MutationPrincipal(principal): MutationPrincipal,
     payload: Result<Json<CreateProviderRequest>, JsonRejection>,
 ) -> Result<Response, Problem> {
-    let principal = require_mutation_session(&state, &headers).await?;
     require_provider_manager(&principal)?;
     let idempotency_key = require_idempotency_key(&headers)?.to_owned();
     let request = json_payload(payload)?;
@@ -356,8 +356,8 @@ pub(crate) async fn activate_provider(
     Provenance(provenance): Provenance,
     Path(provider_id): Path<Uuid>,
     headers: HeaderMap,
+    MutationPrincipal(principal): MutationPrincipal,
 ) -> Result<Response, Problem> {
-    let principal = require_mutation_session(&state, &headers).await?;
     require_provider_manager(&principal)?;
     let expected_etag = if_match(&headers)?;
     let state = &state;

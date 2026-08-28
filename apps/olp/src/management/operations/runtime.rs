@@ -1,7 +1,6 @@
 use axum::{
     Json,
     extract::{Query, State},
-    http::HeaderMap,
 };
 use chrono::{DateTime, Utc};
 use olp_db::operations::runtime::GenerationRecord;
@@ -14,7 +13,7 @@ use super::helpers::{map_operations, page_limit};
 use crate::{
     bootstrap::mode_dependencies::ManagementState,
     management::{
-        pagination::PageQuery, permissions::require_permission, sessions::require_read_session,
+        pagination::PageQuery, permissions::require_permission, principal::ReadPrincipal,
     },
     public_http::problem::Problem,
 };
@@ -62,10 +61,9 @@ pub(super) struct RuntimeGenerationListResponse {
 )]
 pub(super) async fn list_runtime_generations(
     State(state): State<ManagementState>,
-    headers: HeaderMap,
     Query(query): Query<PageQuery>,
+    ReadPrincipal(principal): ReadPrincipal,
 ) -> Result<Json<RuntimeGenerationListResponse>, Problem> {
-    let principal = require_read_session(&state, &headers).await?;
     require_permission(&principal, Permission::ReadOperations)?;
     let before = query
         .cursor

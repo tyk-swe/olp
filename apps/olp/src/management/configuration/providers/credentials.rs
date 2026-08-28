@@ -29,10 +29,10 @@ use crate::{
         pagination::{PageQuery, page},
         permissions::require_permission,
         preconditions::if_match,
+        principal::{MutationPrincipal, ReadPrincipal},
         provenance::Provenance,
         response_policy::RuntimeGenerationResponse,
         secrets::WriteOnlySecret,
-        sessions::{require_mutation_session, require_read_session},
     },
     public_http::problem::Problem,
 };
@@ -85,10 +85,9 @@ pub(crate) struct CredentialListResponse {
 pub(crate) async fn list_provider_credentials(
     State(state): State<ManagementState>,
     Path(provider_id): Path<Uuid>,
-    headers: HeaderMap,
     Query(query): Query<PageQuery>,
+    ReadPrincipal(principal): ReadPrincipal,
 ) -> Result<Json<CredentialListResponse>, Problem> {
-    let principal = require_read_session(&state, &headers).await?;
     require_permission(&principal, Permission::ReadConfiguration)?;
     let (cursor, limit) = page(query)?;
     let page = state
@@ -148,9 +147,9 @@ pub(crate) async fn rotate_provider_credential(
     Provenance(provenance): Provenance,
     Path(provider_id): Path<Uuid>,
     headers: HeaderMap,
+    MutationPrincipal(principal): MutationPrincipal,
     payload: Result<Json<RotateCredentialRequest>, JsonRejection>,
 ) -> Result<Response, Problem> {
-    let principal = require_mutation_session(&state, &headers).await?;
     require_permission(&principal, Permission::ManageProviders)?;
     let expected_etag = if_match(&headers)?;
     let idempotency_key = require_idempotency_key(&headers)?.to_owned();
@@ -252,8 +251,8 @@ pub(crate) async fn revoke_provider_credential(
     Provenance(provenance): Provenance,
     Path((provider_id, credential_id)): Path<(Uuid, Uuid)>,
     headers: HeaderMap,
+    MutationPrincipal(principal): MutationPrincipal,
 ) -> Result<Response, Problem> {
-    let principal = require_mutation_session(&state, &headers).await?;
     require_permission(&principal, Permission::ManageProviders)?;
     let expected_etag = if_match(&headers)?;
     let state = &state;

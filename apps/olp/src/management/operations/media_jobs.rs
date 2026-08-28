@@ -1,7 +1,6 @@
 use axum::{
     Json,
     extract::{Path, Query, State, rejection::QueryRejection},
-    http::HeaderMap,
     response::Response,
 };
 use chrono::{DateTime, Utc};
@@ -22,7 +21,7 @@ use super::helpers::{
 use crate::{
     bootstrap::mode_dependencies::ManagementState,
     management::{
-        permissions::require_permission, preconditions::with_etag, sessions::require_read_session,
+        permissions::require_permission, preconditions::with_etag, principal::ReadPrincipal,
     },
     public_http::problem::Problem,
 };
@@ -129,10 +128,9 @@ pub(super) struct MediaJobListResponse {
 )]
 pub(super) async fn list_media_jobs(
     State(state): State<ManagementState>,
-    headers: HeaderMap,
     query: Result<Query<MediaJobQuery>, QueryRejection>,
+    ReadPrincipal(principal): ReadPrincipal,
 ) -> Result<Json<MediaJobListResponse>, Problem> {
-    let principal = require_read_session(&state, &headers).await?;
     require_permission(&principal, Permission::ReadOperations)?;
     let query = query_parameters(query)?;
     let cursor = timestamp_cursor(query.cursor.as_deref())?;
@@ -203,10 +201,9 @@ fn parse_media_job_lifecycle(value: &str) -> Result<MediaJobLifecycle, Problem> 
 )]
 pub(super) async fn get_media_job(
     State(state): State<ManagementState>,
-    headers: HeaderMap,
     Path(job_id): Path<Uuid>,
+    ReadPrincipal(principal): ReadPrincipal,
 ) -> Result<Response, Problem> {
-    let principal = require_read_session(&state, &headers).await?;
     require_permission(&principal, Permission::ReadOperations)?;
     let record = state
         .store()

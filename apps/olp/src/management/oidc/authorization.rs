@@ -35,8 +35,9 @@ use crate::{
     management::{
         cookies::clear_recent_auth_cookie,
         json_payload::json_payload,
+        principal::MutationPrincipal,
         provenance::Provenance,
-        sessions::{cookie, enforce_origin, reauthentication_required, require_mutation_session},
+        sessions::{cookie, enforce_origin, reauthentication_required},
     },
     public_http::{
         problem::Problem, relative_url::RelativeReturnTo, request_cookies::RECENT_AUTH_COOKIE,
@@ -175,8 +176,8 @@ pub(super) async fn begin_link(
     State(state): State<ManagementState>,
     Provenance(provenance): Provenance,
     headers: HeaderMap,
+    MutationPrincipal(principal): MutationPrincipal,
 ) -> Result<Response, Problem> {
-    let principal = require_mutation_session(&state, &headers).await?;
     let recent_auth_token = cookie(&headers, RECENT_AUTH_COOKIE)?
         .filter(|value| value.len() == 43)
         .ok_or_else(reauthentication_required)?;
@@ -219,9 +220,9 @@ pub(super) async fn begin_reauthentication(
     State(state): State<ManagementState>,
     Provenance(provenance): Provenance,
     headers: HeaderMap,
+    MutationPrincipal(principal): MutationPrincipal,
     Json(request): Json<OidcReauthenticationRequest>,
 ) -> Result<Response, Problem> {
-    let principal = require_mutation_session(&state, &headers).await?;
     let purpose = RecentAuthPurpose::parse(&request.purpose).ok_or_else(|| {
         Problem::bad_request(
             "invalid_reauthentication_purpose",

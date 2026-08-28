@@ -1,3 +1,4 @@
+use crate::management::principal::MutationPrincipal;
 use std::fmt;
 
 use axum::{
@@ -25,7 +26,6 @@ use crate::management::{
     preconditions::if_match,
     response_policy::RuntimeGenerationResponse,
     secrets::WriteOnlySecret,
-    sessions::require_mutation_session,
 };
 use crate::{bootstrap::mode_dependencies::ManagementState, public_http::problem::Problem};
 
@@ -91,9 +91,9 @@ pub(crate) async fn create_api_key(
     State(state): State<ManagementState>,
     Provenance(provenance): Provenance,
     headers: HeaderMap,
+    MutationPrincipal(principal): MutationPrincipal,
     payload: Result<Json<CreateApiKeyRequest>, JsonRejection>,
 ) -> Result<Response, Problem> {
-    let principal = require_mutation_session(&state, &headers).await?;
     require_key_manager(&principal)?;
     let idempotency_key = require_idempotency_key(&headers)?.to_owned();
     let request = json_payload(payload)?;
@@ -168,8 +168,8 @@ pub(crate) async fn revoke_api_key(
     Provenance(provenance): Provenance,
     Path(api_key_id): Path<Uuid>,
     headers: HeaderMap,
+    MutationPrincipal(principal): MutationPrincipal,
 ) -> Result<Response, Problem> {
-    let principal = require_mutation_session(&state, &headers).await?;
     require_key_manager(&principal)?;
     let expected_etag = if_match(&headers)?;
     let state = &state;

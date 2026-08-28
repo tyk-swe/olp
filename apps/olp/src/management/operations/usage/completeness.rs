@@ -1,7 +1,7 @@
+use crate::management::principal::ReadPrincipal;
 use axum::{
     Json,
     extract::{Query, State},
-    http::HeaderMap,
 };
 use olp_db::usage::completeness::Report;
 use serde::Serialize;
@@ -13,7 +13,7 @@ use crate::{
     management::operations::{
         helpers::map_operations, request_metadata::RequestMetadataConsumerStatusResponse,
     },
-    management::{permissions::require_permission, sessions::require_read_session},
+    management::permissions::require_permission,
     public_http::problem::Problem,
 };
 use olp_engine::domain::auth::Permission;
@@ -60,10 +60,9 @@ impl From<Report> for UsageCompletenessResponse {
 )]
 pub(in crate::management::operations) async fn usage_completeness(
     State(state): State<ManagementState>,
-    headers: HeaderMap,
     Query(query): Query<UsageQuery>,
+    ReadPrincipal(principal): ReadPrincipal,
 ) -> Result<Json<UsageCompletenessResponse>, Problem> {
-    let principal = require_read_session(&state, &headers).await?;
     require_permission(&principal, Permission::ReadOperations)?;
     query.validate()?;
     let filters = query.filters()?;

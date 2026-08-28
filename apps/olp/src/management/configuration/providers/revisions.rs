@@ -24,7 +24,7 @@ use crate::{
         pagination::{DiffQuery, PageQuery, page},
         permissions::require_permission,
         preconditions::if_match,
-        sessions::{require_mutation_session, require_read_session},
+        principal::{MutationPrincipal, ReadPrincipal},
     },
     public_http::problem::Problem,
 };
@@ -196,10 +196,9 @@ pub(crate) struct ProviderRevisionRestoreResponse {
 pub(crate) async fn list_provider_revisions(
     State(state): State<ManagementState>,
     Path(provider_id): Path<Uuid>,
-    headers: HeaderMap,
     Query(query): Query<PageQuery>,
+    ReadPrincipal(principal): ReadPrincipal,
 ) -> Result<Json<ProviderRevisionListResponse>, Problem> {
-    let principal = require_read_session(&state, &headers).await?;
     require_permission(&principal, Permission::ReadConfiguration)?;
     let (cursor, limit) = page(query)?;
     let page = state
@@ -226,9 +225,8 @@ pub(crate) async fn list_provider_revisions(
 pub(crate) async fn get_provider_revision(
     State(state): State<ManagementState>,
     Path((provider_id, revision_id)): Path<(Uuid, Uuid)>,
-    headers: HeaderMap,
+    ReadPrincipal(principal): ReadPrincipal,
 ) -> Result<Json<ProviderRevisionResponse>, Problem> {
-    let principal = require_read_session(&state, &headers).await?;
     require_permission(&principal, Permission::ReadConfiguration)?;
     Ok(Json(
         state
@@ -258,10 +256,9 @@ pub(crate) async fn get_provider_revision(
 pub(crate) async fn list_provider_revision_models(
     State(state): State<ManagementState>,
     Path((provider_id, revision_id)): Path<(Uuid, Uuid)>,
-    headers: HeaderMap,
     Query(query): Query<PageQuery>,
+    ReadPrincipal(principal): ReadPrincipal,
 ) -> Result<Json<ProviderModelListResponse>, Problem> {
-    let principal = require_read_session(&state, &headers).await?;
     require_permission(&principal, Permission::ReadConfiguration)?;
     let (cursor, limit) = page(query)?;
     let page = state
@@ -290,10 +287,9 @@ pub(crate) async fn list_provider_revision_models(
 pub(crate) async fn diff_provider_revisions(
     State(state): State<ManagementState>,
     Path(provider_id): Path<Uuid>,
-    headers: HeaderMap,
     Query(query): Query<DiffQuery>,
+    ReadPrincipal(principal): ReadPrincipal,
 ) -> Result<Json<ProviderRevisionDiffResponse>, Problem> {
-    let principal = require_read_session(&state, &headers).await?;
     require_permission(&principal, Permission::ReadConfiguration)?;
     Ok(Json(
         state
@@ -328,8 +324,8 @@ pub(crate) async fn restore_provider_revision(
     Provenance(provenance): Provenance,
     Path((provider_id, revision_id)): Path<(Uuid, Uuid)>,
     headers: HeaderMap,
+    MutationPrincipal(principal): MutationPrincipal,
 ) -> Result<Response, Problem> {
-    let principal = require_mutation_session(&state, &headers).await?;
     require_permission(&principal, Permission::ManageProviders)?;
     let expected_etag = if_match(&headers)?;
     let state = &state;

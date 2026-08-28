@@ -1,7 +1,8 @@
+use crate::management::principal::{MutationPrincipal, ReadPrincipal};
 use axum::{
     Json,
     extract::{Path, Query, State},
-    http::{HeaderMap, StatusCode},
+    http::StatusCode,
     response::{IntoResponse, Response},
 };
 use olp_engine::domain::auth::Permission;
@@ -15,7 +16,6 @@ use crate::management::{
     pagination::{PageQuery, page},
     permissions::require_permission,
     provenance::Provenance,
-    sessions::{require_mutation_session, require_read_session},
 };
 use crate::{bootstrap::mode_dependencies::ManagementState, public_http::problem::Problem};
 
@@ -61,10 +61,9 @@ pub(in crate::management) struct SessionListResponse {
 )]
 pub(in crate::management) async fn list_sessions(
     State(state): State<ManagementState>,
-    headers: HeaderMap,
     Query(query): Query<SessionPageQuery>,
+    ReadPrincipal(principal): ReadPrincipal,
 ) -> Result<Json<SessionListResponse>, Problem> {
-    let principal = require_read_session(&state, &headers).await?;
     let user_id = query.user_id.unwrap_or(principal.user_id);
     if user_id != principal.user_id {
         require_permission(&principal, Permission::ManageSessions)?;
@@ -109,9 +108,8 @@ pub(in crate::management) async fn revoke_session(
     State(state): State<ManagementState>,
     Provenance(provenance): Provenance,
     Path(session_id): Path<Uuid>,
-    headers: HeaderMap,
+    MutationPrincipal(principal): MutationPrincipal,
 ) -> Result<Response, Problem> {
-    let principal = require_mutation_session(&state, &headers).await?;
     let can_manage_all = require_permission(&principal, Permission::ManageSessions).is_ok();
     state
         .store()

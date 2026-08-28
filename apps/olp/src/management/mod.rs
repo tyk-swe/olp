@@ -12,6 +12,7 @@ pub(crate) mod pagination;
 pub(crate) mod permissions;
 pub(crate) mod playground;
 pub(crate) mod preconditions;
+pub(crate) mod principal;
 pub(crate) mod provenance;
 pub(crate) mod response_policy;
 pub(crate) mod secrets;

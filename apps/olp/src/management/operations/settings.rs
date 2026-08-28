@@ -18,8 +18,8 @@ use crate::{
         json_payload::json_payload,
         permissions::require_permission,
         preconditions::{if_match, with_etag},
+        principal::{MutationPrincipal, ReadPrincipal},
         provenance::Provenance,
-        sessions::{require_mutation_session, require_read_session},
     },
     public_http::problem::Problem,
 };
@@ -60,9 +60,8 @@ pub(super) struct SettingsResponse {
 )]
 pub(super) async fn list_settings(
     State(state): State<ManagementState>,
-    headers: HeaderMap,
+    ReadPrincipal(principal): ReadPrincipal,
 ) -> Result<Json<SettingsResponse>, Problem> {
-    let principal = require_read_session(&state, &headers).await?;
     require_permission(&principal, Permission::ReadOperations)?;
     let settings = state.store().settings().await.map_err(map_operations)?;
     Ok(Json(SettingsResponse {
@@ -79,10 +78,9 @@ pub(super) async fn list_settings(
 )]
 pub(super) async fn get_setting(
     State(state): State<ManagementState>,
-    headers: HeaderMap,
     Path(key): Path<String>,
+    ReadPrincipal(principal): ReadPrincipal,
 ) -> Result<Response, Problem> {
-    let principal = require_read_session(&state, &headers).await?;
     require_permission(&principal, Permission::ReadOperations)?;
     let setting = state
         .store()
@@ -119,9 +117,9 @@ pub(super) async fn update_setting(
     Provenance(provenance): Provenance,
     headers: HeaderMap,
     Path(key): Path<String>,
+    MutationPrincipal(principal): MutationPrincipal,
     payload: Result<Json<UpdateSettingRequest>, JsonRejection>,
 ) -> Result<Response, Problem> {
-    let principal = require_mutation_session(&state, &headers).await?;
     require_permission(&principal, Permission::ManageSettings)?;
     let etag = if_match(&headers)?;
     let request = json_payload(payload)?;

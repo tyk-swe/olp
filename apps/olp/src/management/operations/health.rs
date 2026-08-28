@@ -1,7 +1,7 @@
+use crate::management::principal::ReadPrincipal;
 use axum::{
     Json,
     extract::{Query, State},
-    http::HeaderMap,
 };
 use chrono::{DateTime, Utc};
 use olp_db::operations::health::ProviderHealthRecord;
@@ -12,10 +12,8 @@ use uuid::Uuid;
 
 use super::helpers::{map_operations, page_limit};
 use crate::{
-    bootstrap::mode_dependencies::ManagementState,
-    management::{permissions::require_permission, sessions::require_read_session},
-    observability::readiness::HealthResponse,
-    public_http::problem::Problem,
+    bootstrap::mode_dependencies::ManagementState, management::permissions::require_permission,
+    observability::readiness::HealthResponse, public_http::problem::Problem,
 };
 
 #[utoipa::path(
@@ -31,9 +29,8 @@ use crate::{
 )]
 pub(super) async fn management_readiness(
     State(state): State<ManagementState>,
-    headers: HeaderMap,
+    ReadPrincipal(principal): ReadPrincipal,
 ) -> Result<Json<HealthResponse>, Problem> {
-    let principal = require_read_session(&state, &headers).await?;
     require_permission(&principal, Permission::ReadOperations)?;
     Ok(Json(state.cached_readiness()?))
 }
@@ -112,10 +109,9 @@ pub(super) struct ProviderHealthResponse {
 )]
 pub(super) async fn provider_health(
     State(state): State<ManagementState>,
-    headers: HeaderMap,
     Query(query): Query<ProviderHealthQuery>,
+    ReadPrincipal(principal): ReadPrincipal,
 ) -> Result<Json<ProviderHealthResponse>, Problem> {
-    let principal = require_read_session(&state, &headers).await?;
     require_permission(&principal, Permission::ReadOperations)?;
     let window_minutes = query.window_minutes.unwrap_or(15);
     if !(1..=1_440).contains(&window_minutes) {

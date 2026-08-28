@@ -1,3 +1,4 @@
+use crate::management::principal::ReadPrincipal;
 use std::{collections::BTreeMap, fmt, net::SocketAddr, sync::LazyLock};
 
 use axum::{
@@ -380,8 +381,8 @@ pub(super) async fn current_session(
     State(state): State<ManagementState>,
     Provenance(provenance): Provenance,
     headers: HeaderMap,
+    ReadPrincipal(principal): ReadPrincipal,
 ) -> Result<Response, Problem> {
-    let principal = require_read_session(&state, &headers).await?;
     let supplied_csrf = cookie(&headers, CSRF_COOKIE)?
         .filter(|csrf| SessionMaterial::verify_csrf(csrf, &principal.csrf_digest));
     let replacement = supplied_csrf.is_none().then(CsrfMaterial::generate);

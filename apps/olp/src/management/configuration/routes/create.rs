@@ -1,3 +1,4 @@
+use crate::management::principal::MutationPrincipal;
 use axum::{
     Json,
     extract::{Path, State, rejection::JsonRejection},
@@ -24,7 +25,6 @@ use crate::management::{
     preconditions::{if_match, with_etag},
     provenance::Provenance,
     response_policy::RuntimeGenerationResponse,
-    sessions::require_mutation_session,
 };
 use crate::{bootstrap::mode_dependencies::ManagementState, public_http::problem::Problem};
 
@@ -94,9 +94,9 @@ pub(crate) async fn create_route_draft(
     State(state): State<ManagementState>,
     Provenance(provenance): Provenance,
     headers: HeaderMap,
+    MutationPrincipal(principal): MutationPrincipal,
     payload: Result<Json<CreateRouteDraftRequest>, JsonRejection>,
 ) -> Result<Response, Problem> {
-    let principal = require_mutation_session(&state, &headers).await?;
     require_route_manager(&principal)?;
     let idempotency_key = require_idempotency_key(&headers)?.to_owned();
     let request = json_payload(payload)?;
@@ -185,8 +185,8 @@ pub(crate) async fn validate_route_draft(
     Provenance(provenance): Provenance,
     Path(draft_id): Path<Uuid>,
     headers: HeaderMap,
+    MutationPrincipal(principal): MutationPrincipal,
 ) -> Result<Response, Problem> {
-    let principal = require_mutation_session(&state, &headers).await?;
     require_route_manager(&principal)?;
     let (etag, slug) = state
         .store()
@@ -229,8 +229,8 @@ pub(crate) async fn activate_route_draft(
     Provenance(provenance): Provenance,
     Path(draft_id): Path<Uuid>,
     headers: HeaderMap,
+    MutationPrincipal(principal): MutationPrincipal,
 ) -> Result<Response, Problem> {
-    let principal = require_mutation_session(&state, &headers).await?;
     require_route_manager(&principal)?;
     let expected_etag = if_match(&headers)?;
     let state = &state;

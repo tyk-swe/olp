@@ -26,8 +26,8 @@ use crate::{
         pagination::{DiffQuery, PageQuery, page},
         permissions::require_permission,
         preconditions::{if_match, with_etag},
+        principal::{MutationPrincipal, ReadPrincipal},
         provenance::Provenance,
-        sessions::{require_mutation_session, require_read_session},
     },
     public_http::problem::Problem,
 };
@@ -130,10 +130,9 @@ pub(crate) struct RouteDraftListResponse {
 )]
 pub(crate) async fn list_route_drafts(
     State(state): State<ManagementState>,
-    headers: HeaderMap,
     Query(query): Query<PageQuery>,
+    ReadPrincipal(principal): ReadPrincipal,
 ) -> Result<Json<RouteDraftListResponse>, Problem> {
-    let principal = require_read_session(&state, &headers).await?;
     require_permission(&principal, Permission::ReadConfiguration)?;
     let (cursor, limit) = page(query)?;
     let page = state
@@ -157,9 +156,8 @@ pub(crate) async fn list_route_drafts(
 pub(crate) async fn get_route_draft(
     State(state): State<ManagementState>,
     Path(draft_id): Path<Uuid>,
-    headers: HeaderMap,
+    ReadPrincipal(principal): ReadPrincipal,
 ) -> Result<Response, Problem> {
-    let principal = require_read_session(&state, &headers).await?;
     require_permission(&principal, Permission::ReadConfiguration)?;
     let draft: RouteDraftDetailResponse = state
         .store()
@@ -201,9 +199,9 @@ pub(crate) async fn replace_route_draft(
     Provenance(provenance): Provenance,
     Path(draft_id): Path<Uuid>,
     headers: HeaderMap,
+    MutationPrincipal(principal): MutationPrincipal,
     payload: Result<Json<ReplaceRouteDraftRequest>, JsonRejection>,
 ) -> Result<Response, Problem> {
-    let principal = require_mutation_session(&state, &headers).await?;
     require_permission(&principal, Permission::ManageRoutes)?;
     let request = json_payload(payload)?;
     let targets: Vec<_> = request
@@ -262,8 +260,8 @@ pub(crate) async fn delete_route_draft(
     Provenance(provenance): Provenance,
     Path(draft_id): Path<Uuid>,
     headers: HeaderMap,
+    MutationPrincipal(principal): MutationPrincipal,
 ) -> Result<Response, Problem> {
-    let principal = require_mutation_session(&state, &headers).await?;
     require_permission(&principal, Permission::ManageRoutes)?;
     let expected_etag = if_match(&headers)?;
     state
@@ -342,10 +340,9 @@ impl From<RouteSimulation> for RouteSimulationResponse {
 pub(crate) async fn simulate_route_draft(
     State(state): State<ManagementState>,
     Path(draft_id): Path<Uuid>,
-    headers: HeaderMap,
+    MutationPrincipal(principal): MutationPrincipal,
     payload: Result<Json<SimulateRouteRequest>, JsonRejection>,
 ) -> Result<Json<RouteSimulationResponse>, Problem> {
-    let principal = require_mutation_session(&state, &headers).await?;
     require_permission(&principal, Permission::ManageRoutes)?;
     let request = json_payload(payload)?;
     let simulation =
@@ -449,10 +446,9 @@ pub(crate) struct RouteListResponse {
 )]
 pub(crate) async fn list_routes(
     State(state): State<ManagementState>,
-    headers: HeaderMap,
     Query(query): Query<PageQuery>,
+    ReadPrincipal(principal): ReadPrincipal,
 ) -> Result<Json<RouteListResponse>, Problem> {
-    let principal = require_read_session(&state, &headers).await?;
     require_permission(&principal, Permission::ReadConfiguration)?;
     let (cursor, limit) = page(query)?;
     let routes = state
@@ -476,9 +472,8 @@ pub(crate) async fn list_routes(
 pub(crate) async fn get_route(
     State(state): State<ManagementState>,
     Path(route_id): Path<Uuid>,
-    headers: HeaderMap,
+    ReadPrincipal(principal): ReadPrincipal,
 ) -> Result<Json<RouteDetailResponse>, Problem> {
-    let principal = require_read_session(&state, &headers).await?;
     require_permission(&principal, Permission::ReadConfiguration)?;
     let route = state
         .store()
@@ -511,10 +506,9 @@ pub(crate) struct RouteRevisionListResponse {
 pub(crate) async fn list_route_revisions(
     State(state): State<ManagementState>,
     Path(route_id): Path<Uuid>,
-    headers: HeaderMap,
     Query(query): Query<PageQuery>,
+    ReadPrincipal(principal): ReadPrincipal,
 ) -> Result<Json<RouteRevisionListResponse>, Problem> {
-    let principal = require_read_session(&state, &headers).await?;
     require_permission(&principal, Permission::ReadConfiguration)?;
     let (cursor, limit) = page(query)?;
     let page = state
@@ -539,9 +533,8 @@ pub(crate) async fn list_route_revisions(
 pub(crate) async fn get_route_revision(
     State(state): State<ManagementState>,
     Path((route_id, revision_id)): Path<(Uuid, Uuid)>,
-    headers: HeaderMap,
+    ReadPrincipal(principal): ReadPrincipal,
 ) -> Result<Json<RouteRevisionResponse>, Problem> {
-    let principal = require_read_session(&state, &headers).await?;
     require_permission(&principal, Permission::ReadConfiguration)?;
     Ok(Json(
         state
@@ -602,10 +595,9 @@ impl From<RouteRevisionDiff> for RouteRevisionDiffResponse {
 pub(crate) async fn diff_route_revisions(
     State(state): State<ManagementState>,
     Path(route_id): Path<Uuid>,
-    headers: HeaderMap,
     Query(query): Query<DiffQuery>,
+    ReadPrincipal(principal): ReadPrincipal,
 ) -> Result<Json<RouteRevisionDiffResponse>, Problem> {
-    let principal = require_read_session(&state, &headers).await?;
     require_permission(&principal, Permission::ReadConfiguration)?;
     Ok(Json(
         state
@@ -633,8 +625,8 @@ pub(crate) async fn restore_route_revision(
     Provenance(provenance): Provenance,
     Path((route_id, revision_id)): Path<(Uuid, Uuid)>,
     headers: HeaderMap,
+    MutationPrincipal(principal): MutationPrincipal,
 ) -> Result<Response, Problem> {
-    let principal = require_mutation_session(&state, &headers).await?;
     require_permission(&principal, Permission::ManageRoutes)?;
     let state = &state;
     let provenance = &provenance;

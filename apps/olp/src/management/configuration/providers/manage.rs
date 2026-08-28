@@ -29,7 +29,7 @@ use crate::{
         pagination::{PageQuery, page},
         permissions::require_permission,
         preconditions::{if_match, with_etag},
-        sessions::{require_mutation_session, require_read_session},
+        principal::{MutationPrincipal, ReadPrincipal},
     },
     public_http::problem::{FieldErrorCodes, FieldErrors, Problem},
 };
@@ -193,10 +193,9 @@ pub(crate) struct ProviderListResponse {
 )]
 pub(crate) async fn list_providers(
     State(state): State<ManagementState>,
-    headers: HeaderMap,
     Query(query): Query<PageQuery>,
+    ReadPrincipal(principal): ReadPrincipal,
 ) -> Result<Json<ProviderListResponse>, Problem> {
-    let principal = require_read_session(&state, &headers).await?;
     require_permission(&principal, Permission::ReadConfiguration)?;
     let (cursor, limit) = page(query)?;
     let page = state
@@ -220,9 +219,8 @@ pub(crate) async fn list_providers(
 pub(crate) async fn get_provider(
     State(state): State<ManagementState>,
     Path(provider_id): Path<Uuid>,
-    headers: HeaderMap,
+    ReadPrincipal(principal): ReadPrincipal,
 ) -> Result<Response, Problem> {
-    let principal = require_read_session(&state, &headers).await?;
     require_permission(&principal, Permission::ReadConfiguration)?;
     let provider = load_provider_detail(state.store(), provider_id).await?;
     let etag = provider.etag;
@@ -253,9 +251,9 @@ pub(crate) async fn update_provider(
     Provenance(provenance): Provenance,
     Path(provider_id): Path<Uuid>,
     headers: HeaderMap,
+    MutationPrincipal(principal): MutationPrincipal,
     payload: Result<Json<UpdateProviderRequest>, JsonRejection>,
 ) -> Result<Response, Problem> {
-    let principal = require_mutation_session(&state, &headers).await?;
     require_permission(&principal, Permission::ManageProviders)?;
     let request = json_payload(payload)?;
     let store = state.store().with_provenance(&provenance);
@@ -306,8 +304,8 @@ pub(crate) async fn disable_provider(
     Provenance(provenance): Provenance,
     Path(provider_id): Path<Uuid>,
     headers: HeaderMap,
+    MutationPrincipal(principal): MutationPrincipal,
 ) -> Result<Response, Problem> {
-    let principal = require_mutation_session(&state, &headers).await?;
     require_permission(&principal, Permission::ManageProviders)?;
     let expected_etag = if_match(&headers)?;
     let state = &state;
@@ -372,8 +370,8 @@ pub(crate) async fn restore_provider_as_draft(
     Provenance(provenance): Provenance,
     Path(provider_id): Path<Uuid>,
     headers: HeaderMap,
+    MutationPrincipal(principal): MutationPrincipal,
 ) -> Result<Response, Problem> {
-    let principal = require_mutation_session(&state, &headers).await?;
     require_permission(&principal, Permission::ManageProviders)?;
     let expected_etag = if_match(&headers)?;
     let state = &state;
@@ -481,8 +479,8 @@ pub(crate) async fn probe_provider(
     Provenance(provenance): Provenance,
     Path(provider_id): Path<Uuid>,
     headers: HeaderMap,
+    MutationPrincipal(principal): MutationPrincipal,
 ) -> Result<Response, Problem> {
-    let principal = require_mutation_session(&state, &headers).await?;
     require_permission(&principal, Permission::ManageProviders)?;
     let store = state.store().with_provenance(&provenance);
     let expected_etag = if_match(&headers)?;

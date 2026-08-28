@@ -37,7 +37,7 @@ use crate::{
         pagination::{PageQuery, page},
         permissions::require_permission,
         preconditions::{if_match, with_etag},
-        sessions::{require_mutation_session, require_read_session},
+        principal::{MutationPrincipal, ReadPrincipal},
     },
     public_http::problem::Problem,
 };
@@ -67,11 +67,9 @@ pub(crate) struct ProviderCapabilityOptionsResponse {
     )
 )]
 pub(crate) async fn list_provider_kind_capabilities(
-    State(state): State<ManagementState>,
     Path(provider_kind): Path<String>,
-    headers: HeaderMap,
+    ReadPrincipal(principal): ReadPrincipal,
 ) -> Result<Json<ProviderCapabilityOptionsResponse>, Problem> {
-    let principal = require_read_session(&state, &headers).await?;
     require_permission(&principal, Permission::ReadConfiguration)?;
     let provider_kind = provider_kind.parse::<ProviderKind>().map_err(|_| {
         Problem::bad_request(
@@ -164,10 +162,8 @@ pub(crate) struct ProviderKindCapabilityListResponse {
     )
 )]
 pub(crate) async fn list_provider_kinds(
-    State(state): State<ManagementState>,
-    headers: HeaderMap,
+    ReadPrincipal(principal): ReadPrincipal,
 ) -> Result<Json<ProviderKindCapabilityListResponse>, Problem> {
-    let principal = require_read_session(&state, &headers).await?;
     require_permission(&principal, Permission::ReadConfiguration)?;
     let items = provider_kind_specs()
         .iter()
@@ -310,10 +306,9 @@ pub(crate) struct ProviderModelInventoryListResponse {
 )]
 pub(crate) async fn list_provider_model_inventory(
     State(state): State<ManagementState>,
-    headers: HeaderMap,
     Query(query): Query<ProviderModelInventoryQuery>,
+    ReadPrincipal(principal): ReadPrincipal,
 ) -> Result<Json<ProviderModelInventoryListResponse>, Problem> {
-    let principal = require_read_session(&state, &headers).await?;
     require_permission(&principal, Permission::ReadConfiguration)?;
     let enabled = query.enabled;
     let (cursor, limit) = page(PageQuery {
@@ -348,10 +343,9 @@ pub(crate) async fn list_provider_model_inventory(
 pub(crate) async fn list_provider_models(
     State(state): State<ManagementState>,
     Path(provider_id): Path<Uuid>,
-    headers: HeaderMap,
     Query(query): Query<PageQuery>,
+    ReadPrincipal(principal): ReadPrincipal,
 ) -> Result<Json<ProviderModelListResponse>, Problem> {
-    let principal = require_read_session(&state, &headers).await?;
     require_permission(&principal, Permission::ReadConfiguration)?;
     let (cursor, limit) = page(query)?;
     let page = state
@@ -435,9 +429,9 @@ pub(crate) async fn discover_provider_models(
     Provenance(provenance): Provenance,
     Path(provider_id): Path<Uuid>,
     headers: HeaderMap,
+    MutationPrincipal(principal): MutationPrincipal,
     payload: Result<Json<DiscoverModelsRequest>, JsonRejection>,
 ) -> Result<Response, Problem> {
-    let principal = require_mutation_session(&state, &headers).await?;
     require_permission(&principal, Permission::ManageProviders)?;
     let request = json_payload(payload)?;
     validate_discovered_model_count("models", request.models.len())?;
@@ -501,9 +495,9 @@ pub(crate) async fn set_provider_model(
     Provenance(provenance): Provenance,
     Path((provider_id, model_id)): Path<(Uuid, Uuid)>,
     headers: HeaderMap,
+    MutationPrincipal(principal): MutationPrincipal,
     payload: Result<Json<SetModelRequest>, JsonRejection>,
 ) -> Result<Response, Problem> {
-    let principal = require_mutation_session(&state, &headers).await?;
     require_permission(&principal, Permission::ManageProviders)?;
     let request = json_payload(payload)?;
     let store = state.store().with_provenance(&provenance);
@@ -568,8 +562,8 @@ pub(crate) async fn certify_provider_model(
     Provenance(provenance): Provenance,
     Path((provider_id, model_id)): Path<(Uuid, Uuid)>,
     headers: HeaderMap,
+    MutationPrincipal(principal): MutationPrincipal,
 ) -> Result<Response, Problem> {
-    let principal = require_mutation_session(&state, &headers).await?;
     require_permission(&principal, Permission::ManageProviders)?;
     let expected_etag = if_match(&headers)?;
     let store = state.store().with_provenance(&provenance);
