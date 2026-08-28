@@ -20,7 +20,7 @@ use crate::{
     bootstrap::mode_dependencies::ManagementState,
     management::{
         error_mapping::map_configuration,
-        idempotency::ReplayableMutation,
+        idempotency::{MutationReply, ReplayableMutation},
         pagination::{DiffQuery, PageQuery, page},
         permissions::require_permission,
         preconditions::if_match,
@@ -332,8 +332,10 @@ pub(crate) async fn restore_provider_revision(
     let principal = require_mutation_session(&state, &headers).await?;
     require_permission(&principal, Permission::ManageProviders)?;
     let expected_etag = if_match(&headers)?;
-    let mutation = ReplayableMutation::new(
-        &state,
+    let state = &state;
+    let provenance = &provenance;
+    ReplayableMutation::new(
+        state,
         principal.user_id,
         operations::PROVIDER_REVISION_RESTORE_AS_DRAFT,
         &headers,
@@ -342,33 +344,32 @@ pub(crate) async fn restore_provider_revision(
             revision_id,
             expected_etag,
         },
-    )?;
-    if let Some(replayed) = mutation.replayed().await? {
-        return Ok(replayed);
-    }
-    let restored = state
-        .store()
-        .with_provenance(&provenance)
-        .restore_provider_revision_as_draft(
-            provider_id,
-            revision_id,
-            expected_etag,
-            principal.user_id,
-            mutation.key(),
-        )
-        .await
-        .map_err(map_configuration)?;
-    let etag = restored.etag;
-    mutation
-        .respond(
-            StatusCode::OK,
-            &ProviderRevisionRestoreResponse {
+    )?
+    .run(|key| async move {
+        let restored = state
+            .store()
+            .with_provenance(provenance)
+            .restore_provider_revision_as_draft(
+                provider_id,
+                revision_id,
+                expected_etag,
+                principal.user_id,
+                &key,
+            )
+            .await
+            .map_err(map_configuration)?;
+        let etag = restored.etag;
+        Ok(MutationReply {
+            status: StatusCode::OK,
+            body: ProviderRevisionRestoreResponse {
                 provider: restored.into(),
                 credential_restored: false,
             },
-            Some(etag),
-        )
-        .await
+            etag: Some(etag),
+            location: None,
+        })
+    })
+    .await
 }
 
 #[derive(Serialize)]

@@ -21,7 +21,7 @@ use crate::{
     bootstrap::mode_dependencies::ManagementState,
     management::{
         error_mapping::map_configuration,
-        idempotency::ReplayableMutation,
+        idempotency::{MutationReply, ReplayableMutation},
         json_payload::json_payload,
         pagination::{DiffQuery, PageQuery, page},
         permissions::require_permission,
@@ -633,8 +633,10 @@ pub(crate) async fn restore_route_revision(
 ) -> Result<Response, Problem> {
     let principal = require_mutation_session(&state, &headers).await?;
     require_permission(&principal, Permission::ManageRoutes)?;
-    let mutation = ReplayableMutation::new(
-        &state,
+    let state = &state;
+    let provenance = &provenance;
+    ReplayableMutation::new(
+        state,
         principal.user_id,
         operations::ROUTE_RESTORE_AS_DRAFT,
         &headers,
@@ -642,22 +644,25 @@ pub(crate) async fn restore_route_revision(
             route_id,
             revision_id,
         },
-    )?;
-    if let Some(replayed) = mutation.replayed().await? {
-        return Ok(replayed);
-    }
-    let draft: RouteDraftDetailResponse = state
-        .store()
-        .with_provenance(&provenance)
-        .restore_route_revision_as_draft(route_id, revision_id, principal.user_id, mutation.key())
-        .await
-        .map_err(map_configuration)?
-        .into();
-    let etag = draft.etag;
-    let location = format!("/api/v1/route-drafts/{}", draft.id);
-    mutation
-        .respond_at(StatusCode::CREATED, &draft, Some(etag), Some(location))
-        .await
+    )?
+    .run(|key| async move {
+        let draft: RouteDraftDetailResponse = state
+            .store()
+            .with_provenance(provenance)
+            .restore_route_revision_as_draft(route_id, revision_id, principal.user_id, &key)
+            .await
+            .map_err(map_configuration)?
+            .into();
+        let etag = draft.etag;
+        let location = format!("/api/v1/route-drafts/{}", draft.id);
+        Ok(MutationReply {
+            status: StatusCode::CREATED,
+            body: draft,
+            etag: Some(etag),
+            location: Some(location),
+        })
+    })
+    .await
 }
 
 #[derive(Serialize)]

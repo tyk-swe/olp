@@ -5,6 +5,7 @@ use axum::{
 };
 use olp_db::idempotency::{Outcome, Replayable, ReplayedMutation, fingerprint};
 use serde::Serialize;
+use std::future::Future;
 use tracing::warn;
 use uuid::Uuid;
 
@@ -54,6 +55,15 @@ pub(crate) struct ReplayableMutation<'a> {
     replay: Option<Replayable<'a>>,
 }
 
+/// What a mutation answers with, before [`ReplayableMutation::run`] records it
+/// for replay.
+pub(crate) struct MutationReply<T> {
+    pub(crate) status: StatusCode,
+    pub(crate) body: T,
+    pub(crate) etag: Option<Uuid>,
+    pub(crate) location: Option<String>,
+}
+
 impl<'a> ReplayableMutation<'a> {
     pub(crate) fn new<T: Serialize>(
         state: &'a ManagementState,
@@ -79,12 +89,25 @@ impl<'a> ReplayableMutation<'a> {
         })
     }
 
-    pub(crate) fn key(&self) -> &str {
-        &self.key
+    /// Runs the whole idempotent choreography: answer with the recorded
+    /// response if an identical earlier request already produced one,
+    /// otherwise execute `mutate` under this key and record its reply.
+    pub(crate) async fn run<T, F, Fut>(self, mutate: F) -> Result<Response, Problem>
+    where
+        T: Serialize,
+        F: FnOnce(String) -> Fut,
+        Fut: Future<Output = Result<MutationReply<T>, Problem>>,
+    {
+        if let Some(replayed) = self.replayed().await? {
+            return Ok(replayed);
+        }
+        let reply = mutate(self.key.clone()).await?;
+        self.respond_at(reply.status, &reply.body, reply.etag, reply.location)
+            .await
     }
 
     /// The response an earlier identical request already produced, if any.
-    pub(crate) async fn replayed(&self) -> Result<Option<Response>, Problem> {
+    async fn replayed(&self) -> Result<Option<Response>, Problem> {
         let Some(replay) = self.replay else {
             return Ok(None);
         };
@@ -108,18 +131,9 @@ impl<'a> ReplayableMutation<'a> {
 
     /// Records the mutation's response for replay and returns it. Recording is
     /// best effort: the mutation has already committed, so a storage failure
-    /// here must not turn a successful mutation into an error.
-    pub(crate) async fn respond<T: Serialize>(
-        &self,
-        status: StatusCode,
-        body: &T,
-        etag: Option<Uuid>,
-    ) -> Result<Response, Problem> {
-        self.respond_at(status, body, etag, None).await
-    }
-
-    /// The same, for a 201 that points at the resource it created.
-    pub(crate) async fn respond_at<T: Serialize>(
+    /// here must not turn a successful mutation into an error. `location`
+    /// is set for a 201 that points at the resource it created.
+    async fn respond_at<T: Serialize>(
         &self,
         status: StatusCode,
         body: &T,

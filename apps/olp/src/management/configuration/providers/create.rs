@@ -23,7 +23,9 @@ use uuid::Uuid;
 
 use crate::management::{
     error_mapping::{map_configuration, map_persistence},
-    idempotency::{ReplayableMutation, idempotency_http_response, require_idempotency_key},
+    idempotency::{
+        MutationReply, ReplayableMutation, idempotency_http_response, require_idempotency_key,
+    },
     json_payload::json_payload,
     permissions::require_provider_manager,
     preconditions::if_match,
@@ -358,8 +360,10 @@ pub(crate) async fn activate_provider(
     let principal = require_mutation_session(&state, &headers).await?;
     require_provider_manager(&principal)?;
     let expected_etag = if_match(&headers)?;
-    let mutation = ReplayableMutation::new(
-        &state,
+    let state = &state;
+    let provenance = &provenance;
+    ReplayableMutation::new(
+        state,
         principal.user_id,
         operations::PROVIDER_ACTIVATE,
         &headers,
@@ -367,33 +371,27 @@ pub(crate) async fn activate_provider(
             provider_id,
             expected_etag,
         },
-    )?;
-    if let Some(replayed) = mutation.replayed().await? {
-        return Ok(replayed);
-    }
-    let activated = state
-        .store()
-        .with_provenance(&provenance)
-        .activate_provider(
-            provider_id,
-            expected_etag,
-            principal.user_id,
-            mutation.key(),
-        )
-        .await
-        .map_err(map_configuration)?;
-    mutation
-        .respond(
-            StatusCode::OK,
-            &ProviderActivationResponse {
+    )?
+    .run(|key| async move {
+        let activated = state
+            .store()
+            .with_provenance(provenance)
+            .activate_provider(provider_id, expected_etag, principal.user_id, &key)
+            .await
+            .map_err(map_configuration)?;
+        Ok(MutationReply {
+            status: StatusCode::OK,
+            body: ProviderActivationResponse {
                 id: provider_id,
                 state: "active".to_owned(),
                 etag: activated.etag,
                 runtime_generation: (&activated.release).into(),
             },
-            Some(activated.etag),
-        )
-        .await
+            etag: Some(activated.etag),
+            location: None,
+        })
+    })
+    .await
 }
 
 #[derive(Debug, Serialize, ToSchema)]

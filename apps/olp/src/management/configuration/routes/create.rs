@@ -16,7 +16,9 @@ use uuid::Uuid;
 
 use crate::management::{
     error_mapping::{map_configuration, map_persistence},
-    idempotency::{ReplayableMutation, idempotency_http_response, require_idempotency_key},
+    idempotency::{
+        MutationReply, ReplayableMutation, idempotency_http_response, require_idempotency_key,
+    },
     json_payload::json_payload,
     permissions::require_route_manager,
     preconditions::{if_match, with_etag},
@@ -231,8 +233,10 @@ pub(crate) async fn activate_route_draft(
     let principal = require_mutation_session(&state, &headers).await?;
     require_route_manager(&principal)?;
     let expected_etag = if_match(&headers)?;
-    let mutation = ReplayableMutation::new(
-        &state,
+    let state = &state;
+    let provenance = &provenance;
+    ReplayableMutation::new(
+        state,
         principal.user_id,
         operations::ROUTE_ACTIVATE,
         &headers,
@@ -240,29 +244,28 @@ pub(crate) async fn activate_route_draft(
             draft_id,
             expected_etag,
         },
-    )?;
-    if let Some(replayed) = mutation.replayed().await? {
-        return Ok(replayed);
-    }
-    let activated = state
-        .store()
-        .with_provenance(&provenance)
-        .activate_route_draft(draft_id, expected_etag, principal.user_id, mutation.key())
-        .await
-        .map_err(map_configuration)?;
-    mutation
-        .respond(
-            StatusCode::OK,
-            &RouteActivationResponse {
+    )?
+    .run(|key| async move {
+        let activated = state
+            .store()
+            .with_provenance(provenance)
+            .activate_route_draft(draft_id, expected_etag, principal.user_id, &key)
+            .await
+            .map_err(map_configuration)?;
+        Ok(MutationReply {
+            status: StatusCode::OK,
+            body: RouteActivationResponse {
                 route_id: activated.route_id,
                 revision_id: activated.revision_id,
                 revision: activated.revision,
                 draft_etag: activated.draft_etag,
                 runtime_generation: (&activated.release).into(),
             },
-            Some(activated.draft_etag),
-        )
-        .await
+            etag: Some(activated.draft_etag),
+            location: None,
+        })
+    })
+    .await
 }
 
 #[derive(Serialize)]

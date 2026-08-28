@@ -29,7 +29,9 @@ use crate::management::{
     },
     cookies::validate_session_cookie_ttl,
     error_mapping::{map_identity, map_persistence},
-    idempotency::{ReplayableMutation, idempotency_http_response, require_idempotency_key},
+    idempotency::{
+        MutationReply, ReplayableMutation, idempotency_http_response, require_idempotency_key,
+    },
     json_payload::json_payload,
     pagination::{PageQuery, page},
     permissions::{parse_user_role, require_permission},
@@ -244,25 +246,30 @@ pub(in crate::management) async fn revoke_invitation(
 ) -> Result<Response, Problem> {
     let principal = require_mutation_session(&state, &headers).await?;
     require_permission(&principal, Permission::ManageAccess)?;
-    let mutation = ReplayableMutation::new(
-        &state,
+    let state = &state;
+    let provenance = &provenance;
+    ReplayableMutation::new(
+        state,
         principal.user_id,
         operations::INVITATION_REVOKE,
         &headers,
         &RevokeInvitationFingerprint { invitation_id },
-    )?;
-    if let Some(replayed) = mutation.replayed().await? {
-        return Ok(replayed);
-    }
-    let invitation = state
-        .store()
-        .with_provenance(&provenance)
-        .revoke_invitation(invitation_id, principal.user_id, mutation.key())
-        .await
-        .map_err(map_identity)?;
-    mutation
-        .respond(StatusCode::OK, &InvitationResponse::from(invitation), None)
-        .await
+    )?
+    .run(|key| async move {
+        let invitation = state
+            .store()
+            .with_provenance(provenance)
+            .revoke_invitation(invitation_id, principal.user_id, &key)
+            .await
+            .map_err(map_identity)?;
+        Ok(MutationReply {
+            status: StatusCode::OK,
+            body: InvitationResponse::from(invitation),
+            etag: None,
+            location: None,
+        })
+    })
+    .await
 }
 
 #[derive(Serialize)]

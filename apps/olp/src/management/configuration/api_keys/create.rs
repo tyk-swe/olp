@@ -17,7 +17,9 @@ use uuid::Uuid;
 
 use crate::management::{
     error_mapping::{map_access, map_persistence},
-    idempotency::{ReplayableMutation, idempotency_http_response, require_idempotency_key},
+    idempotency::{
+        MutationReply, ReplayableMutation, idempotency_http_response, require_idempotency_key,
+    },
     json_payload::json_payload,
     permissions::require_key_manager,
     preconditions::if_match,
@@ -170,8 +172,10 @@ pub(crate) async fn revoke_api_key(
     let principal = require_mutation_session(&state, &headers).await?;
     require_key_manager(&principal)?;
     let expected_etag = if_match(&headers)?;
-    let mutation = ReplayableMutation::new(
-        &state,
+    let state = &state;
+    let provenance = &provenance;
+    ReplayableMutation::new(
+        state,
         principal.user_id,
         operations::API_KEY_REVOKE,
         &headers,
@@ -179,23 +183,22 @@ pub(crate) async fn revoke_api_key(
             api_key_id,
             expected_etag,
         },
-    )?;
-    if let Some(replayed) = mutation.replayed().await? {
-        return Ok(replayed);
-    }
-    let revoked = state
-        .store()
-        .with_provenance(&provenance)
-        .revoke_api_key_record(api_key_id, expected_etag, principal.user_id, mutation.key())
-        .await
-        .map_err(map_access)?;
-    mutation
-        .respond(
-            StatusCode::OK,
-            &RuntimeGenerationResponse::from(&revoked.release),
-            Some(revoked.etag),
-        )
-        .await
+    )?
+    .run(|key| async move {
+        let revoked = state
+            .store()
+            .with_provenance(provenance)
+            .revoke_api_key_record(api_key_id, expected_etag, principal.user_id, &key)
+            .await
+            .map_err(map_access)?;
+        Ok(MutationReply {
+            status: StatusCode::OK,
+            body: RuntimeGenerationResponse::from(&revoked.release),
+            etag: Some(revoked.etag),
+            location: None,
+        })
+    })
+    .await
 }
 
 #[derive(Serialize)]

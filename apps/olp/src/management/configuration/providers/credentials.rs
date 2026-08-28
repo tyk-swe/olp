@@ -22,7 +22,9 @@ use crate::{
     bootstrap::provider_adapter::{provider_config, provider_credential},
     management::{
         error_mapping::map_configuration,
-        idempotency::{ReplayableMutation, idempotency_http_response, require_idempotency_key},
+        idempotency::{
+            MutationReply, ReplayableMutation, idempotency_http_response, require_idempotency_key,
+        },
         json_payload::json_payload,
         pagination::{PageQuery, page},
         permissions::require_permission,
@@ -254,8 +256,10 @@ pub(crate) async fn revoke_provider_credential(
     let principal = require_mutation_session(&state, &headers).await?;
     require_permission(&principal, Permission::ManageProviders)?;
     let expected_etag = if_match(&headers)?;
-    let mutation = ReplayableMutation::new(
-        &state,
+    let state = &state;
+    let provenance = &provenance;
+    ReplayableMutation::new(
+        state,
         principal.user_id,
         operations::PROVIDER_REVOKE_CREDENTIAL,
         &headers,
@@ -264,35 +268,34 @@ pub(crate) async fn revoke_provider_credential(
             credential_id,
             expected_etag,
         },
-    )?;
-    if let Some(replayed) = mutation.replayed().await? {
-        return Ok(replayed);
-    }
-    let etag = state
-        .store()
-        .with_provenance(&provenance)
-        .revoke_provider_credential(
-            provider_id,
-            credential_id,
-            expected_etag,
-            principal.user_id,
-            mutation.key(),
-        )
-        .await
-        .map_err(map_configuration)?;
-    mutation
-        .respond(
-            StatusCode::OK,
-            &ProviderMutationResponse {
+    )?
+    .run(|key| async move {
+        let etag = state
+            .store()
+            .with_provenance(provenance)
+            .revoke_provider_credential(
+                provider_id,
+                credential_id,
+                expected_etag,
+                principal.user_id,
+                &key,
+            )
+            .await
+            .map_err(map_configuration)?;
+        Ok(MutationReply {
+            status: StatusCode::OK,
+            body: ProviderMutationResponse {
                 provider_id,
                 etag,
                 credential_id: Some(credential_id),
                 credential_version: None,
                 runtime_generation: None,
             },
-            Some(etag),
-        )
-        .await
+            etag: Some(etag),
+            location: None,
+        })
+    })
+    .await
 }
 
 #[derive(Serialize)]

@@ -24,7 +24,7 @@ use crate::{
     bootstrap::provider_adapter::{ProviderConfigFields, provider_config, provider_connector},
     management::{
         error_mapping::map_configuration,
-        idempotency::ReplayableMutation,
+        idempotency::{MutationReply, ReplayableMutation},
         json_payload::json_payload,
         pagination::{PageQuery, page},
         permissions::require_permission,
@@ -302,8 +302,10 @@ pub(crate) async fn disable_provider(
     let principal = require_mutation_session(&state, &headers).await?;
     require_permission(&principal, Permission::ManageProviders)?;
     let expected_etag = if_match(&headers)?;
-    let mutation = ReplayableMutation::new(
-        &state,
+    let state = &state;
+    let provenance = &provenance;
+    ReplayableMutation::new(
+        state,
         principal.user_id,
         operations::PROVIDER_DISABLE,
         &headers,
@@ -311,34 +313,28 @@ pub(crate) async fn disable_provider(
             provider_id,
             expected_etag,
         },
-    )?;
-    if let Some(replayed) = mutation.replayed().await? {
-        return Ok(replayed);
-    }
-    let result = state
-        .store()
-        .with_provenance(&provenance)
-        .disable_provider(
-            provider_id,
-            expected_etag,
-            principal.user_id,
-            mutation.key(),
-        )
-        .await
-        .map_err(map_configuration)?;
-    mutation
-        .respond(
-            StatusCode::OK,
-            &ProviderMutationResponse {
+    )?
+    .run(|key| async move {
+        let result = state
+            .store()
+            .with_provenance(provenance)
+            .disable_provider(provider_id, expected_etag, principal.user_id, &key)
+            .await
+            .map_err(map_configuration)?;
+        Ok(MutationReply {
+            status: StatusCode::OK,
+            body: ProviderMutationResponse {
                 provider_id,
                 etag: result.etag,
                 credential_id: None,
                 credential_version: None,
                 runtime_generation: result.release.as_ref().map(Into::into),
             },
-            Some(result.etag),
-        )
-        .await
+            etag: Some(result.etag),
+            location: None,
+        })
+    })
+    .await
 }
 
 #[derive(Serialize)]
@@ -372,8 +368,10 @@ pub(crate) async fn restore_provider_as_draft(
     let principal = require_mutation_session(&state, &headers).await?;
     require_permission(&principal, Permission::ManageProviders)?;
     let expected_etag = if_match(&headers)?;
-    let mutation = ReplayableMutation::new(
-        &state,
+    let state = &state;
+    let provenance = &provenance;
+    ReplayableMutation::new(
+        state,
         principal.user_id,
         operations::PROVIDER_RESTORE_AS_DRAFT,
         &headers,
@@ -381,24 +379,22 @@ pub(crate) async fn restore_provider_as_draft(
             provider_id,
             expected_etag,
         },
-    )?;
-    if let Some(replayed) = mutation.replayed().await? {
-        return Ok(replayed);
-    }
-    let store = state.store().with_provenance(&provenance);
-    let etag = store
-        .restore_provider_as_draft(
-            provider_id,
-            expected_etag,
-            principal.user_id,
-            mutation.key(),
-        )
-        .await
-        .map_err(map_configuration)?;
-    let provider = load_provider_detail(&store, provider_id).await?;
-    mutation
-        .respond(StatusCode::OK, &provider, Some(etag))
-        .await
+    )?
+    .run(|key| async move {
+        let store = state.store().with_provenance(provenance);
+        let etag = store
+            .restore_provider_as_draft(provider_id, expected_etag, principal.user_id, &key)
+            .await
+            .map_err(map_configuration)?;
+        let provider = load_provider_detail(&store, provider_id).await?;
+        Ok(MutationReply {
+            status: StatusCode::OK,
+            body: provider,
+            etag: Some(etag),
+            location: None,
+        })
+    })
+    .await
 }
 
 fn validate_provider_update(
