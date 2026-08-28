@@ -1,6 +1,6 @@
 import type { components } from '../schema';
 import { apiClient } from '../client';
-import { ensureSuccess, result } from '../http';
+import { ensureSuccess, pageResult, result } from '../http';
 import { ROUTE_PAGE_SIZE, ROUTE_REVISION_PAGE_SIZE } from '../pageSizes';
 import { collectCursorPages, type CursorPage } from '../pagination';
 
@@ -25,8 +25,7 @@ export async function listRouteDraftPage(
     params: { query: { limit: ROUTE_PAGE_SIZE, cursor } },
     signal
   });
-  const page = result(response.data, response.error, response.response);
-  return { items: page.items, nextCursor: page.next_cursor ?? null };
+  return pageResult(result(response.data, response.error, response.response));
 }
 
 export async function listRoutes(signal?: AbortSignal): Promise<ActiveRoute[]> {
@@ -41,8 +40,7 @@ export async function listRoutePage(
     params: { query: { limit: ROUTE_PAGE_SIZE, cursor } },
     signal
   });
-  const page = result(response.data, response.error, response.response);
-  return { items: page.items, nextCursor: page.next_cursor ?? null };
+  return pageResult(result(response.data, response.error, response.response));
 }
 
 export async function getRouteDraft(
@@ -156,8 +154,7 @@ async function listRouteRevisionPage(
     },
     signal
   });
-  const page = result(response.data, response.error, response.response);
-  return { items: page.items, nextCursor: page.next_cursor ?? null };
+  return pageResult(result(response.data, response.error, response.response));
 }
 
 export async function diffRouteRevisions(

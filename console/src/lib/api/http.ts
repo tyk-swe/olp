@@ -74,6 +74,23 @@ function apiProblem(error: unknown, response: Response): ApiProblem {
   });
 }
 
+export type CursorPage<T> = { items: T[]; nextCursor: string | null };
+
+/**
+ * Unwraps a management list envelope into the console's cursor page. The
+ * `data` key is accepted until every list endpoint emits `items`.
+ */
+export function pageResult<T>(page: {
+  items?: T[];
+  data?: T[];
+  next_cursor?: string | null;
+}): CursorPage<T> {
+  return {
+    items: page.items ?? page.data ?? [],
+    nextCursor: page.next_cursor ?? null
+  };
+}
+
 export function ensureSuccess(error: unknown, response: Response): void {
   if (!response.ok) throw apiProblem(error, response);
 }

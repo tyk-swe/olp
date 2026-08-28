@@ -1,6 +1,8 @@
 import { ApiProblem } from './http';
 
-export type CursorPage<T> = { items: T[]; nextCursor: string | null };
+import type { CursorPage } from './http';
+
+export type { CursorPage };
 
 /// Back/forward cursor pagination state shared by the list pages. `history`
 /// holds the cursor of every previous page (undefined = first page) so the

@@ -1,6 +1,6 @@
 import type { components } from './schema';
 import { apiClient } from './client';
-import { result } from './http';
+import { pageResult, result } from './http';
 import { RUNTIME_GENERATION_PAGE_SIZE } from './pageSizes';
 import type { CursorPage } from './pagination';
 import { compactQuery } from './query';
@@ -18,6 +18,5 @@ export async function listRuntimeGenerations(
       }
     }
   );
-  const page = result(data, error, response);
-  return { items: page.data, nextCursor: page.next_cursor ?? null };
+  return pageResult(result(data, error, response));
 }

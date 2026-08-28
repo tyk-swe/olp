@@ -1,6 +1,6 @@
 import type { components } from '../schema';
 import { apiClient } from '../client';
-import { ApiProblem, result } from '../http';
+import { ApiProblem, pageResult, result } from '../http';
 import {
   PROVIDER_CREDENTIAL_PAGE_SIZE,
   PROVIDER_PAGE_SIZE,
@@ -50,11 +50,7 @@ export async function getProviderCapabilityOptions(
       signal
     }
   );
-  return result(
-    response.data,
-    response.error,
-    response.response
-  ) as ProviderCapabilityOptions;
+  return result(response.data, response.error, response.response);
 }
 
 export async function listProviderKinds(
@@ -72,8 +68,7 @@ export async function listProviderPage(
     params: { query: { limit: PROVIDER_PAGE_SIZE, cursor } },
     signal
   });
-  const page = result(response.data, response.error, response.response);
-  return { items: page.items, nextCursor: page.next_cursor ?? null };
+  return pageResult(result(response.data, response.error, response.response));
 }
 
 export async function listProviderModelPage(
@@ -91,8 +86,7 @@ export async function listProviderModelPage(
       signal
     }
   );
-  const page = result(response.data, response.error, response.response);
-  return { items: page.items, nextCursor: page.next_cursor ?? null };
+  return pageResult(result(response.data, response.error, response.response));
 }
 
 export async function listProviderModelInventoryPage(
@@ -104,8 +98,7 @@ export async function listProviderModelInventoryPage(
     params: { query: { limit: PROVIDER_PAGE_SIZE, cursor, enabled } },
     signal
   });
-  const page = result(response.data, response.error, response.response);
-  return { items: page.items, nextCursor: page.next_cursor ?? null };
+  return pageResult(result(response.data, response.error, response.response));
 }
 
 export async function listProviderModelInventory(
@@ -337,8 +330,7 @@ export async function listProviderRevisionPage(
       signal
     }
   );
-  const page = result(response.data, response.error, response.response);
-  return { items: page.items, nextCursor: page.next_cursor ?? null };
+  return pageResult(result(response.data, response.error, response.response));
 }
 
 export async function getProviderRevision(
@@ -374,8 +366,7 @@ export async function listProviderRevisionModelPage(
       signal
     }
   );
-  const page = result(response.data, response.error, response.response);
-  return { items: page.items, nextCursor: page.next_cursor ?? null };
+  return pageResult(result(response.data, response.error, response.response));
 }
 
 export async function diffProviderRevisions(
@@ -441,8 +432,7 @@ async function listProviderCredentialPage(
       signal
     }
   );
-  const page = result(response.data, response.error, response.response);
-  return { items: page.items, nextCursor: page.next_cursor ?? null };
+  return pageResult(result(response.data, response.error, response.response));
 }
 
 export async function rotateProviderCredential(

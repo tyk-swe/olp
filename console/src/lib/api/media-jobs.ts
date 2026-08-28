@@ -1,6 +1,6 @@
 import type { components } from './schema';
 import { apiClient } from './client';
-import { result } from './http';
+import { pageResult, result } from './http';
 import type { CursorPage } from './pagination';
 import { compactQuery } from './query';
 
@@ -24,8 +24,7 @@ export async function listMediaJobs(
   const { data, error, response } = await apiClient.GET('/api/v1/media-jobs', {
     params: { query: compactQuery(filters) }
   });
-  const page = result(data, error, response);
-  return { items: page.data, nextCursor: page.next_cursor ?? null };
+  return pageResult(result(data, error, response));
 }
 
 export async function getMediaJob(jobId: string): Promise<MediaJob> {

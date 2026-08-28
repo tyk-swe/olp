@@ -1,6 +1,6 @@
 import type { components } from './schema';
 import { apiClient } from './client';
-import { result } from './http';
+import { pageResult, result } from './http';
 import {
   GATEWAY_EPOCH_PAGE_SIZE,
   PROVIDER_HEALTH_PAGE_SIZE
@@ -25,8 +25,7 @@ export async function listRequestMetadataGatewayEpochs(
     '/api/v1/request-metadata/gateway-epochs',
     { params: { query: { state, cursor, limit: GATEWAY_EPOCH_PAGE_SIZE } } }
   );
-  const page = result(data, error, response);
-  return { items: page.data, nextCursor: page.next_cursor ?? null };
+  return pageResult(result(data, error, response));
 }
 
 export async function acknowledgeRequestMetadataGatewayEpoch(
@@ -61,7 +60,7 @@ export async function listProviderHealth(windowMinutes = 15): Promise<{
     });
     const page = result(response.data, response.error, response.response);
     responseWindow = page.window_minutes;
-    return { items: page.data, nextCursor: page.next_cursor ?? null };
+    return pageResult(page);
   });
   return { window_minutes: responseWindow, data };
 }

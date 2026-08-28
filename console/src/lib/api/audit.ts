@@ -1,6 +1,6 @@
 import type { components } from './schema';
 import { apiClient } from './client';
-import { result } from './http';
+import { pageResult, result } from './http';
 import { AUDIT_PAGE_SIZE } from './pageSizes';
 import type { CursorPage } from './pagination';
 import { compactQuery } from './query';
@@ -25,6 +25,5 @@ export async function listAudit(
   const { data, error, response } = await apiClient.GET('/api/v1/audit', {
     params: { query: compactQuery({ limit: AUDIT_PAGE_SIZE, ...filters }) }
   });
-  const page = result(data, error, response);
-  return { items: page.data, nextCursor: page.next_cursor ?? null };
+  return pageResult(result(data, error, response));
 }

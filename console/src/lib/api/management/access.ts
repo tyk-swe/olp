@@ -1,6 +1,6 @@
 import type { components } from '../schema';
 import { apiClient } from '../client';
-import { ensureSuccess, result } from '../http';
+import { ensureSuccess, pageResult, result } from '../http';
 import type { CursorPage } from '../pagination';
 
 type Schemas = components['schemas'];
@@ -18,8 +18,7 @@ export async function listUserPage(
     params: { query: { limit: 50, cursor } },
     signal
   });
-  const page = result(response.data, response.error, response.response);
-  return { items: page.data, nextCursor: page.next_cursor ?? null };
+  return pageResult(result(response.data, response.error, response.response));
 }
 
 export async function updateUserRole(user: User, role: string): Promise<User> {
@@ -49,8 +48,7 @@ export async function listInvitationPage(
     params: { query: { limit: 50, cursor } },
     signal
   });
-  const page = result(response.data, response.error, response.response);
-  return { items: page.data, nextCursor: page.next_cursor ?? null };
+  return pageResult(result(response.data, response.error, response.response));
 }
 
 export async function createInvitation(
@@ -93,8 +91,7 @@ export async function listSessionPage(
     params: { query: { limit: 50, user_id: userId, cursor } },
     signal
   });
-  const page = result(response.data, response.error, response.response);
-  return { items: page.data, nextCursor: page.next_cursor ?? null };
+  return pageResult(result(response.data, response.error, response.response));
 }
 
 export async function revokeSession(id: string): Promise<void> {
