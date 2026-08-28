@@ -12,7 +12,7 @@ use olp_db::{
     configuration::resources::RouteSimulationTarget, configuration::resources::RouteTargetRecord,
     idempotency::operations,
 };
-use olp_engine::domain::auth::Permission;
+use olp_engine::domain::{auth::Permission, canonical::identity::OperationKind};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use uuid::Uuid;
@@ -65,6 +65,17 @@ impl From<RouteTargetRecord> for RouteTargetResponse {
     }
 }
 
+fn operation_names(operations: Vec<OperationKind>) -> Vec<String> {
+    operations
+        .into_iter()
+        .map(|operation| operation.to_string())
+        .collect()
+}
+
+fn target_responses(targets: Vec<RouteTargetRecord>) -> Vec<RouteTargetResponse> {
+    targets.into_iter().map(Into::into).collect()
+}
+
 #[derive(Clone, Debug, Serialize, ToSchema)]
 pub(crate) struct RouteDraftDetailResponse {
     pub id: Uuid,
@@ -92,12 +103,8 @@ impl From<RouteDraftRecord> for RouteDraftDetailResponse {
             max_attempts: value.max_attempts,
             etag: value.etag,
             based_on_revision_id: value.based_on_revision_id,
-            operations: value
-                .operations
-                .into_iter()
-                .map(|operation| operation.to_string())
-                .collect(),
-            targets: value.targets.into_iter().map(Into::into).collect(),
+            operations: operation_names(value.operations),
+            targets: target_responses(value.targets),
             created_at: value.created_at,
             updated_at: value.updated_at,
             created_by_email: value.created_by_email,
@@ -390,12 +397,8 @@ impl From<RouteRevisionRecord> for RouteRevisionResponse {
             source_draft_id: value.source_draft_id,
             activated_by: value.activated_by,
             activated_at: value.activated_at,
-            operations: value
-                .operations
-                .into_iter()
-                .map(|operation| operation.to_string())
-                .collect(),
-            targets: value.targets.into_iter().map(Into::into).collect(),
+            operations: operation_names(value.operations),
+            targets: target_responses(value.targets),
         }
     }
 }

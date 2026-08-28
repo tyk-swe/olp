@@ -60,13 +60,15 @@ pub(crate) struct ProviderSummaryResponse {
     pub created_by_email: Option<String>,
 }
 
-impl From<ProviderRecord> for ProviderSummaryResponse {
-    fn from(value: ProviderRecord) -> Self {
+/// The summary is the detail minus its connector and credential fields, so
+/// the record-to-response mapping is written once, on the detail.
+impl From<ProviderDetailResponse> for ProviderSummaryResponse {
+    fn from(value: ProviderDetailResponse) -> Self {
         Self {
             id: value.id,
             name: value.name,
             kind: value.kind,
-            state: value.state.to_string(),
+            state: value.state,
             connector_ready: value.connector_ready,
             etag: value.etag,
             active_revision: value.active_revision,
@@ -81,6 +83,12 @@ impl From<ProviderRecord> for ProviderSummaryResponse {
             certified_capability_count: value.certified_capability_count,
             created_by_email: value.created_by_email,
         }
+    }
+}
+
+impl From<ProviderRecord> for ProviderSummaryResponse {
+    fn from(value: ProviderRecord) -> Self {
+        ProviderDetailResponse::from(value).into()
     }
 }
 
