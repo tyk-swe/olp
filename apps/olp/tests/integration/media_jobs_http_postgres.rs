@@ -279,12 +279,12 @@ async fn media_job_management_views_are_session_authorized_and_metadata_only() {
     assert_eq!(list.status(), StatusCode::OK);
     let list_body: Value =
         serde_json::from_slice(&list.into_body().collect().await.unwrap().to_bytes()).unwrap();
-    assert_eq!(list_body["data"][0]["id"], job.id.to_string());
-    assert_eq!(list_body["data"][0]["surface"], "openai");
-    assert_eq!(list_body["data"][0]["state"], "queued");
-    assert_eq!(list_body["data"][0]["lifecycle"], "active");
-    assert!(list_body["data"][0].get("prompt").is_none());
-    assert!(list_body["data"][0].get("content").is_none());
+    assert_eq!(list_body["items"][0]["id"], job.id.to_string());
+    assert_eq!(list_body["items"][0]["surface"], "openai");
+    assert_eq!(list_body["items"][0]["state"], "queued");
+    assert_eq!(list_body["items"][0]["lifecycle"], "active");
+    assert!(list_body["items"][0].get("prompt").is_none());
+    assert!(list_body["items"][0].get("content").is_none());
 
     let detail = app
         .clone()

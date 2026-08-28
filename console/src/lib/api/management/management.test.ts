@@ -38,7 +38,7 @@ describe('management resources', () => {
     const requests = captureRequests((request) => {
       const body =
         new URL(request.url).pathname === '/api/v1/users'
-          ? { data: [], next_cursor: null }
+          ? { items: [], next_cursor: null }
           : { items: [], next_cursor: null };
       return jsonResponse(body);
     });

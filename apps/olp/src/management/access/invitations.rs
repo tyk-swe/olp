@@ -101,7 +101,7 @@ impl From<InvitationRecord> for InvitationResponse {
 
 #[derive(Debug, Serialize, ToSchema)]
 pub(in crate::management) struct InvitationListResponse {
-    pub data: Vec<InvitationResponse>,
+    pub items: Vec<InvitationResponse>,
     pub next_cursor: Option<String>,
 }
 
@@ -148,7 +148,7 @@ pub(in crate::management) async fn list_invitations(
         .await
         .map_err(map_identity)?;
     Ok(Json(InvitationListResponse {
-        data: invitations.into_iter().map(Into::into).collect(),
+        items: invitations.into_iter().map(Into::into).collect(),
         next_cursor: next_cursor.map(|cursor| cursor.to_string()),
     }))
 }

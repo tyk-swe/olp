@@ -233,11 +233,11 @@ test('request filters and cursor history survive list-detail-list navigation', a
         json:
           url.searchParams.get('cursor') === 'request-next'
             ? {
-                data: [requestSummary(ids.requestTwo, 'request-page-two')],
+                items: [requestSummary(ids.requestTwo, 'request-page-two')],
                 next_cursor: null
               }
             : {
-                data: [requestSummary(ids.requestOne, 'request-page-one')],
+                items: [requestSummary(ids.requestOne, 'request-page-one')],
                 next_cursor: 'request-next'
               }
       });
@@ -373,11 +373,11 @@ test('media-job filter drafts, applied filters, and pagination survive detail na
         json:
           url.searchParams.get('cursor') === 'media-next'
             ? {
-                data: [mediaJob(ids.jobTwo, 'media-page-two')],
+                items: [mediaJob(ids.jobTwo, 'media-page-two')],
                 next_cursor: null
               }
             : {
-                data: [mediaJob(ids.jobOne, 'media-page-one')],
+                items: [mediaJob(ids.jobOne, 'media-page-one')],
                 next_cursor: 'media-next'
               }
       });

@@ -84,7 +84,7 @@ test('profile updates identity, changes password, and revokes another session', 
     });
   });
   await page.route(/\/api\/v1\/sessions(?:\?.*)?$/, async (route) =>
-    route.fulfill({ json: { data: sessions, next_cursor: null } })
+    route.fulfill({ json: { items: sessions, next_cursor: null } })
   );
   await page.route(/\/api\/v1\/sessions\/[0-9a-f-]{36}$/, async (route) => {
     const id = new URL(route.request().url()).pathname.split('/').at(-1);
@@ -94,7 +94,7 @@ test('profile updates identity, changes password, and revokes another session', 
   await page.route(/\/api\/v1\/oidc\/identities(?:\?.*)?$/, async (route) => {
     await route.fulfill({
       json: {
-        data: identities,
+        items: identities,
         has_local_password: true,
         linking_available: true
       }
@@ -197,11 +197,11 @@ test('OIDC callback markers require explicit confirmation before beginning an id
     })
   );
   await page.route(/\/api\/v1\/sessions(?:\?.*)?$/, async (route) =>
-    route.fulfill({ json: { data: [], next_cursor: null } })
+    route.fulfill({ json: { items: [], next_cursor: null } })
   );
   await page.route(/\/api\/v1\/oidc\/identities(?:\?.*)?$/, async (route) =>
     route.fulfill({
-      json: { data: [], linking_available: true, has_local_password: true }
+      json: { items: [], linking_available: true, has_local_password: true }
     })
   );
   await page.route('**/api/v1/oidc/link', async (route) => {
@@ -295,12 +295,12 @@ test('OIDC-only profile enrolls a local password before unlinking', async ({
     });
   });
   await page.route(/\/api\/v1\/sessions(?:\?.*)?$/, async (route) =>
-    route.fulfill({ json: { data: [], next_cursor: null } })
+    route.fulfill({ json: { items: [], next_cursor: null } })
   );
   await page.route(/\/api\/v1\/oidc\/identities(?:\?.*)?$/, async (route) =>
     route.fulfill({
       json: {
-        data: [
+        items: [
           {
             id: '01980000-0000-7000-8000-000000000130',
             issuer: 'https://id.example.test',
@@ -431,11 +431,11 @@ test('stale profile save reloads the remote version and retries with its ETag', 
     await route.fulfill({ json: current });
   });
   await page.route(/\/api\/v1\/sessions(?:\?.*)?$/, async (route) =>
-    route.fulfill({ json: { data: [], next_cursor: null } })
+    route.fulfill({ json: { items: [], next_cursor: null } })
   );
   await page.route(/\/api\/v1\/oidc\/identities(?:\?.*)?$/, async (route) =>
     route.fulfill({
-      json: { data: [], has_local_password: true, linking_available: true }
+      json: { items: [], has_local_password: true, linking_available: true }
     })
   );
 
@@ -498,11 +498,11 @@ test('background profile refresh announces drift without clobbering dirty input'
     await route.fulfill({ json: current });
   });
   await page.route(/\/api\/v1\/sessions(?:\?.*)?$/, async (route) =>
-    route.fulfill({ json: { data: [], next_cursor: null } })
+    route.fulfill({ json: { items: [], next_cursor: null } })
   );
   await page.route(/\/api\/v1\/oidc\/identities(?:\?.*)?$/, async (route) =>
     route.fulfill({
-      json: { data: [], has_local_password: true, linking_available: true }
+      json: { items: [], has_local_password: true, linking_available: true }
     })
   );
 

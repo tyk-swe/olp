@@ -76,7 +76,7 @@ test('access roles, one-time invitations, sessions, and OIDC are API-backed', as
       await route.fulfill({ json: updated });
       return;
     }
-    await route.fulfill({ json: { data: members, next_cursor: null } });
+    await route.fulfill({ json: { items: members, next_cursor: null } });
   });
   await page.route('**/api/v1/invitations**', async (route) => {
     const request = route.request();
@@ -94,7 +94,7 @@ test('access roles, one-time invitations, sessions, and OIDC are API-backed', as
     }
     await route.fulfill({
       json: {
-        data: inviteCreated
+        items: inviteCreated
           ? [pendingInvitation, acceptedInvitation]
           : [acceptedInvitation],
         next_cursor: null
@@ -104,7 +104,7 @@ test('access roles, one-time invitations, sessions, and OIDC are API-backed', as
   await page.route('**/api/v1/sessions?**', async (route) => {
     await route.fulfill({
       json: {
-        data: [
+        items: [
           {
             id: ids.session,
             user_id: ids.user,
@@ -157,7 +157,7 @@ test('access roles, one-time invitations, sessions, and OIDC are API-backed', as
   });
   await page.route('**/api/v1/oidc/identities', async (route) => {
     await route.fulfill({
-      json: { data: [], linking_available: true, has_local_password: true }
+      json: { items: [], linking_available: true, has_local_password: true }
     });
   });
   await page.route('**/api/v1/profile/reauthenticate', async (route) => {
@@ -266,7 +266,7 @@ test('new OIDC configuration leaves the sentinel state and versions later saves'
   const saveEtags: Array<string | undefined> = [];
 
   await page.route('**/api/v1/users**', async (route) => {
-    await route.fulfill({ json: { data: [], next_cursor: null } });
+    await route.fulfill({ json: { items: [], next_cursor: null } });
   });
   await page.route('**/api/v1/oidc/configuration', async (route) => {
     const request = route.request();
@@ -338,7 +338,7 @@ test('failed OIDC conflict reload preserves edits and write-only secret', async 
   };
 
   await page.route('**/api/v1/users**', async (route) => {
-    await route.fulfill({ json: { data: [], next_cursor: null } });
+    await route.fulfill({ json: { items: [], next_cursor: null } });
   });
   await page.route('**/api/v1/oidc/configuration', async (route) => {
     const request = route.request();

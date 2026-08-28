@@ -40,7 +40,7 @@ pub(in crate::management) struct SessionDetailResponse {
 
 #[derive(Debug, Serialize, ToSchema)]
 pub(in crate::management) struct SessionListResponse {
-    pub data: Vec<SessionDetailResponse>,
+    pub items: Vec<SessionDetailResponse>,
     pub next_cursor: Option<String>,
 }
 
@@ -79,7 +79,7 @@ pub(in crate::management) async fn list_sessions(
         .await
         .map_err(map_identity)?;
     Ok(Json(SessionListResponse {
-        data: sessions
+        items: sessions
             .into_iter()
             .map(|session| SessionDetailResponse {
                 id: session.id,

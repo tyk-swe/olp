@@ -48,9 +48,9 @@
       >
     </p>
   {:else}
-    {#if identities?.data.length}
+    {#if identities?.items.length}
       <div class="identity-list">
-        {#each identities.data as identity (identity.id)}
+        {#each identities.items as identity (identity.id)}
           <article class="identity-row">
             <div>
               <strong>{identity.email_at_link ?? 'OIDC identity'}</strong>

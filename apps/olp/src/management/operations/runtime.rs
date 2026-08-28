@@ -46,7 +46,7 @@ impl From<GenerationRecord> for RuntimeGenerationItem {
 
 #[derive(Debug, Serialize, ToSchema)]
 pub(super) struct RuntimeGenerationListResponse {
-    data: Vec<RuntimeGenerationItem>,
+    items: Vec<RuntimeGenerationItem>,
     next_cursor: Option<String>,
 }
 
@@ -80,7 +80,7 @@ pub(super) async fn list_runtime_generations(
         .await
         .map_err(map_operations)?;
     Ok(Json(RuntimeGenerationListResponse {
-        data: page.items.into_iter().map(Into::into).collect(),
+        items: page.items.into_iter().map(Into::into).collect(),
         next_cursor: page.next_cursor,
     }))
 }

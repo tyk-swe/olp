@@ -43,7 +43,7 @@ for (const state of ['empty', 'error'] as const) {
     await emulateTwoHundredPercentZoom(page);
     await page.route('**/api/v1/requests*', async (route) => {
       if (state === 'empty')
-        await route.fulfill({ json: { data: [], next_cursor: null } });
+        await route.fulfill({ json: { items: [], next_cursor: null } });
       else
         await route.fulfill({
           status: 503,
@@ -120,7 +120,7 @@ test('request explorer filters metadata and opens an accessible attempt timeline
       }
       await route.fulfill({
         json: {
-          data: [
+          items: [
             {
               id: requestId,
               runtime_generation_id: generationId,
@@ -229,11 +229,11 @@ test('usage exposes pricing gaps and exact chart data accessibly', async ({
         }
       });
     else if (path.endsWith('/time-series'))
-      await route.fulfill({ json: { data: [point], coverage } });
+      await route.fulfill({ json: { items: [point], coverage } });
     else if (path.endsWith('/breakdown'))
       await route.fulfill({
         json: {
-          data: [
+          items: [
             {
               dimension: 'support-chat',
               request_count: 12,
@@ -405,13 +405,13 @@ test('health and audit remain usable with forced colors, reduced motion, and 200
       new URL(route.request().url()).searchParams.get('window_minutes') ?? 15
     );
     await route.fulfill({
-      json: { window_minutes: window, data: [providerHealthItem] }
+      json: { window_minutes: window, items: [providerHealthItem] }
     });
   });
   await page.route('**/api/v1/runtime-generations*', async (route) =>
     route.fulfill({
       json: {
-        data: [
+        items: [
           {
             id: generationId,
             sequence: 8,
@@ -461,7 +461,7 @@ test('health and audit remain usable with forced colors, reduced motion, and 200
       }
       await route.fulfill({
         json: {
-          data: epochOpen
+          items: epochOpen
             ? [
                 {
                   process_epoch: requestId,
@@ -588,7 +588,7 @@ test('health and audit remain usable with forced colors, reduced motion, and 200
   await page.route('**/api/v1/audit*', async (route) =>
     route.fulfill({
       json: {
-        data: [
+        items: [
           {
             id: requestId,
             actor_user_id: keyId,
@@ -640,7 +640,7 @@ test('audit filters narrow the page and the request origin columns render', asyn
     seenFilters.push(query);
     await route.fulfill({
       json: {
-        data: [
+        items: [
           query.get('action') === 'provider.update'
             ? auditEvent({
                 id: generationId,

@@ -47,8 +47,8 @@
       ]);
       return {
         summary,
-        points: series.data,
-        breakdown: breakdown.data,
+        points: series.items,
+        breakdown: breakdown.items,
         completeness
       };
     }

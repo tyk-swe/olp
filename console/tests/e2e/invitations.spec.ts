@@ -49,7 +49,7 @@ test('one-time fragment invitation creates a session without leaking its token',
     await route.fulfill({ json: { items: [], next_cursor: null } });
   });
   await page.route('**/api/v1/requests*', async (route) => {
-    await route.fulfill({ json: { data: [], next_cursor: null } });
+    await route.fulfill({ json: { items: [], next_cursor: null } });
   });
 
   const token = 'invite-secret-that-must-not-enter-the-request-url';

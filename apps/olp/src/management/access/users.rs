@@ -53,7 +53,7 @@ impl From<UserRecord> for UserDetailResponse {
 
 #[derive(Debug, Serialize, ToSchema)]
 pub(in crate::management) struct UserListResponse {
-    pub data: Vec<UserDetailResponse>,
+    pub items: Vec<UserDetailResponse>,
     pub next_cursor: Option<String>,
 }
 
@@ -85,7 +85,7 @@ pub(in crate::management) async fn list_users(
         .await
         .map_err(map_identity)?;
     Ok(Json(UserListResponse {
-        data: users.into_iter().map(Into::into).collect(),
+        items: users.into_iter().map(Into::into).collect(),
         next_cursor: next_cursor.map(|cursor| cursor.to_string()),
     }))
 }

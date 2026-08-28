@@ -99,7 +99,7 @@ impl AuditQuery {
 
 #[derive(Debug, Serialize, ToSchema)]
 pub(super) struct AuditListResponse {
-    data: Vec<AuditEventResponse>,
+    items: Vec<AuditEventResponse>,
     next_cursor: Option<String>,
 }
 
@@ -131,7 +131,7 @@ pub(super) async fn list_audit_events(
         .await
         .map_err(map_operations)?;
     Ok(Json(AuditListResponse {
-        data: page.items.into_iter().map(Into::into).collect(),
+        items: page.items.into_iter().map(Into::into).collect(),
         next_cursor: page.next_cursor,
     }))
 }

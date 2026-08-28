@@ -11,7 +11,7 @@
   }: {
     providers: CreateQueryResult<{
       window_minutes: number;
-      data: ProviderHealth[];
+      items: ProviderHealth[];
     }>;
     windowMinutes: number;
   } = $props();
@@ -46,7 +46,7 @@
             >{/each}</select
         ></label
       >{#if providers.data}<span class="badge"
-          >{providers.data.data.length} configured</span
+          >{providers.data.items.length} configured</span
         >{/if}
     </div>
   </div>
@@ -59,11 +59,11 @@
     </div>
   {:else if !providers.data}
     <div class="loading-state" role="status">Loading provider outcomes…</div>
-  {:else if providers.data.data.length === 0}
+  {:else if providers.data.items.length === 0}
     <div class="card empty-state">No providers are configured.</div>
   {:else}
     <div class="provider-grid">
-      {#each providers.data.data as provider (provider.provider_id)}
+      {#each providers.data.items as provider (provider.provider_id)}
         <article class="card provider-card">
           <div class="provider-heading">
             <div>

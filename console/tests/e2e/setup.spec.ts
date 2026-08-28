@@ -50,7 +50,7 @@ test('creates the first owner through the local setup contract', async ({
     route.fulfill({ json: { items: [], next_cursor: null } })
   );
   await page.route('**/api/v1/requests*', async (route) =>
-    route.fulfill({ json: { data: [], next_cursor: null } })
+    route.fulfill({ json: { items: [], next_cursor: null } })
   );
   await page.route('**/api/v1/setup', async (route) => {
     if (route.request().method() !== 'POST') return route.fallback();

@@ -57,7 +57,7 @@ impl From<Point> for UsagePointResponse {
 
 #[derive(Debug, Serialize, ToSchema)]
 pub(in crate::management::operations) struct UsageTimeSeriesResponse {
-    data: Vec<UsagePointResponse>,
+    items: Vec<UsagePointResponse>,
     coverage: UsageRangeCoverageResponse,
 }
 
@@ -96,7 +96,7 @@ pub(in crate::management::operations) async fn usage_time_series(
         .await
         .map_err(map_operations)?;
     Ok(Json(UsageTimeSeriesResponse {
-        data: series.points.into_iter().map(Into::into).collect(),
+        items: series.points.into_iter().map(Into::into).collect(),
         coverage: series.coverage.into(),
     }))
 }

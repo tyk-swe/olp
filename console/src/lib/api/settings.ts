@@ -6,7 +6,7 @@ export type Setting = components['schemas']['SettingResponse'];
 
 export async function listSettings(): Promise<Setting[]> {
   const { data, error, response } = await apiClient.GET('/api/v1/settings');
-  return result(data, error, response).data;
+  return result(data, error, response).items;
 }
 
 export async function updateSetting(

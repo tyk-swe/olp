@@ -1314,7 +1314,7 @@ export interface components {
             user_agent_family?: string | null;
         };
         AuditListResponse: {
-            data: components["schemas"]["AuditEventResponse"][];
+            items: components["schemas"]["AuditEventResponse"][];
             next_cursor?: string | null;
         };
         AuthenticationCapabilities: {
@@ -1548,7 +1548,7 @@ export interface components {
             worker_tasks_unknown: number;
         };
         InvitationListResponse: {
-            data: components["schemas"]["InvitationResponse"][];
+            items: components["schemas"]["InvitationResponse"][];
             next_cursor?: string | null;
         };
         InvitationResponse: {
@@ -1613,7 +1613,7 @@ export interface components {
             upstream_job_id?: string | null;
         };
         MediaJobListResponse: {
-            data: components["schemas"]["MediaJobItem"][];
+            items: components["schemas"]["MediaJobItem"][];
             next_cursor?: string | null;
         };
         OidcAuthorizationResponse: {
@@ -1656,8 +1656,8 @@ export interface components {
             updated_by_email?: string | null;
         };
         OidcIdentityListResponse: {
-            data: components["schemas"]["OidcIdentityResponse"][];
             has_local_password: boolean;
+            items: components["schemas"]["OidcIdentityResponse"][];
             linking_available: boolean;
         };
         OidcIdentityResponse: {
@@ -1815,7 +1815,7 @@ export interface components {
             revision: number;
         };
         PricingRevisionsResponse: {
-            data: components["schemas"]["PricingRevisionResponse"][];
+            items: components["schemas"]["PricingRevisionResponse"][];
             next_cursor?: string | null;
         };
         ProbeResponse: {
@@ -1948,7 +1948,7 @@ export interface components {
             transport_error_count: number;
         };
         ProviderHealthResponse: {
-            data: components["schemas"]["ProviderHealthItem"][];
+            items: components["schemas"]["ProviderHealthItem"][];
             next_cursor?: string | null;
             /** Format: int32 */
             window_minutes: number;
@@ -2182,7 +2182,7 @@ export interface components {
             attempts: components["schemas"]["AttemptResponse"][];
         };
         RequestListResponse: {
-            data: components["schemas"]["RequestSummary"][];
+            items: components["schemas"]["RequestSummary"][];
             next_cursor?: string | null;
         };
         RequestMetadataConsumerStatusResponse: {
@@ -2208,7 +2208,7 @@ export interface components {
             process_epoch: string;
         };
         RequestMetadataGatewayEpochListResponse: {
-            data: components["schemas"]["RequestMetadataGatewayEpochResponse"][];
+            items: components["schemas"]["RequestMetadataGatewayEpochResponse"][];
             next_cursor?: string | null;
         };
         RequestMetadataGatewayEpochResponse: {
@@ -2463,7 +2463,7 @@ export interface components {
             sha256: string;
         };
         RuntimeGenerationListResponse: {
-            data: components["schemas"]["RuntimeGenerationItem"][];
+            items: components["schemas"]["RuntimeGenerationItem"][];
             next_cursor?: string | null;
         };
         RuntimeGenerationResponse: {
@@ -2486,7 +2486,7 @@ export interface components {
             user_id: string;
         };
         SessionListResponse: {
-            data: components["schemas"]["SessionDetailResponse"][];
+            items: components["schemas"]["SessionDetailResponse"][];
             next_cursor?: string | null;
         };
         SessionResponse: {
@@ -2514,7 +2514,7 @@ export interface components {
             value: string;
         };
         SettingsResponse: {
-            data: components["schemas"]["SettingResponse"][];
+            items: components["schemas"]["SettingResponse"][];
         };
         SetupRequest: {
             display_name: string;
@@ -2595,7 +2595,7 @@ export interface components {
         };
         UsageBreakdownResponse: {
             coverage: components["schemas"]["UsageRangeCoverageResponse"];
-            data: components["schemas"]["UsageBreakdownItem"][];
+            items: components["schemas"]["UsageBreakdownItem"][];
         };
         UsageCompletenessResponse: {
             complete: boolean;
@@ -2668,7 +2668,7 @@ export interface components {
         };
         UsageTimeSeriesResponse: {
             coverage: components["schemas"]["UsageRangeCoverageResponse"];
-            data: components["schemas"]["UsagePointResponse"][];
+            items: components["schemas"]["UsagePointResponse"][];
         };
         UserDetailResponse: {
             active: boolean;
@@ -2685,7 +2685,7 @@ export interface components {
             updated_at: string;
         };
         UserListResponse: {
-            data: components["schemas"]["UserDetailResponse"][];
+            items: components["schemas"]["UserDetailResponse"][];
             next_cursor?: string | null;
         };
         UserResponse: {

@@ -295,7 +295,7 @@
       },
       "AuditListResponse": {
         "properties": {
-          "data": {
+          "items": {
             "items": {
               "$ref": "#/components/schemas/AuditEventResponse"
             },
@@ -309,7 +309,7 @@
           }
         },
         "required": [
-          "data"
+          "items"
         ],
         "type": "object"
       },
@@ -1113,7 +1113,7 @@
       },
       "InvitationListResponse": {
         "properties": {
-          "data": {
+          "items": {
             "items": {
               "$ref": "#/components/schemas/InvitationResponse"
             },
@@ -1127,7 +1127,7 @@
           }
         },
         "required": [
-          "data"
+          "items"
         ],
         "type": "object"
       },
@@ -1344,7 +1344,7 @@
       },
       "MediaJobListResponse": {
         "properties": {
-          "data": {
+          "items": {
             "items": {
               "$ref": "#/components/schemas/MediaJobItem"
             },
@@ -1358,7 +1358,7 @@
           }
         },
         "required": [
-          "data"
+          "items"
         ],
         "type": "object"
       },
@@ -1514,21 +1514,21 @@
       },
       "OidcIdentityListResponse": {
         "properties": {
-          "data": {
+          "has_local_password": {
+            "type": "boolean"
+          },
+          "items": {
             "items": {
               "$ref": "#/components/schemas/OidcIdentityResponse"
             },
             "type": "array"
-          },
-          "has_local_password": {
-            "type": "boolean"
           },
           "linking_available": {
             "type": "boolean"
           }
         },
         "required": [
-          "data",
+          "items",
           "linking_available",
           "has_local_password"
         ],
@@ -2101,7 +2101,7 @@
       },
       "PricingRevisionsResponse": {
         "properties": {
-          "data": {
+          "items": {
             "items": {
               "$ref": "#/components/schemas/PricingRevisionResponse"
             },
@@ -2115,7 +2115,7 @@
           }
         },
         "required": [
-          "data"
+          "items"
         ],
         "type": "object"
       },
@@ -2557,7 +2557,7 @@
       },
       "ProviderHealthResponse": {
         "properties": {
-          "data": {
+          "items": {
             "items": {
               "$ref": "#/components/schemas/ProviderHealthItem"
             },
@@ -2577,7 +2577,7 @@
         },
         "required": [
           "window_minutes",
-          "data"
+          "items"
         ],
         "type": "object"
       },
@@ -3414,7 +3414,7 @@
       },
       "RequestListResponse": {
         "properties": {
-          "data": {
+          "items": {
             "items": {
               "$ref": "#/components/schemas/RequestSummary"
             },
@@ -3428,7 +3428,7 @@
           }
         },
         "required": [
-          "data"
+          "items"
         ],
         "type": "object"
       },
@@ -3507,7 +3507,7 @@
       },
       "RequestMetadataGatewayEpochListResponse": {
         "properties": {
-          "data": {
+          "items": {
             "items": {
               "$ref": "#/components/schemas/RequestMetadataGatewayEpochResponse"
             },
@@ -3521,7 +3521,7 @@
           }
         },
         "required": [
-          "data"
+          "items"
         ],
         "type": "object"
       },
@@ -4361,7 +4361,7 @@
       },
       "RuntimeGenerationListResponse": {
         "properties": {
-          "data": {
+          "items": {
             "items": {
               "$ref": "#/components/schemas/RuntimeGenerationItem"
             },
@@ -4375,7 +4375,7 @@
           }
         },
         "required": [
-          "data"
+          "items"
         ],
         "type": "object"
       },
@@ -4434,7 +4434,7 @@
       },
       "SessionListResponse": {
         "properties": {
-          "data": {
+          "items": {
             "items": {
               "$ref": "#/components/schemas/SessionDetailResponse"
             },
@@ -4448,7 +4448,7 @@
           }
         },
         "required": [
-          "data"
+          "items"
         ],
         "type": "object"
       },
@@ -4521,7 +4521,7 @@
       },
       "SettingsResponse": {
         "properties": {
-          "data": {
+          "items": {
             "items": {
               "$ref": "#/components/schemas/SettingResponse"
             },
@@ -4529,7 +4529,7 @@
           }
         },
         "required": [
-          "data"
+          "items"
         ],
         "type": "object"
       },
@@ -4790,7 +4790,7 @@
           "coverage": {
             "$ref": "#/components/schemas/UsageRangeCoverageResponse"
           },
-          "data": {
+          "items": {
             "items": {
               "$ref": "#/components/schemas/UsageBreakdownItem"
             },
@@ -4798,7 +4798,7 @@
           }
         },
         "required": [
-          "data",
+          "items",
           "coverage"
         ],
         "type": "object"
@@ -5033,7 +5033,7 @@
           "coverage": {
             "$ref": "#/components/schemas/UsageRangeCoverageResponse"
           },
-          "data": {
+          "items": {
             "items": {
               "$ref": "#/components/schemas/UsagePointResponse"
             },
@@ -5041,7 +5041,7 @@
           }
         },
         "required": [
-          "data",
+          "items",
           "coverage"
         ],
         "type": "object"
@@ -5091,7 +5091,7 @@
       },
       "UserListResponse": {
         "properties": {
-          "data": {
+          "items": {
             "items": {
               "$ref": "#/components/schemas/UserDetailResponse"
             },
@@ -5105,7 +5105,7 @@
           }
         },
         "required": [
-          "data"
+          "items"
         ],
         "type": "object"
       },

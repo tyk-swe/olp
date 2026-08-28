@@ -171,7 +171,7 @@ impl From<RevisionRecord> for PricingRevisionResponse {
 
 #[derive(Debug, Serialize, ToSchema)]
 pub(super) struct PricingRevisionsResponse {
-    data: Vec<PricingRevisionResponse>,
+    items: Vec<PricingRevisionResponse>,
     next_cursor: Option<String>,
 }
 
@@ -204,7 +204,7 @@ pub(super) async fn list_pricing_revisions(
         .await
         .map_err(map_operations)?;
     Ok(Json(PricingRevisionsResponse {
-        data: page.items.into_iter().map(Into::into).collect(),
+        items: page.items.into_iter().map(Into::into).collect(),
         next_cursor: page.next_cursor,
     }))
 }

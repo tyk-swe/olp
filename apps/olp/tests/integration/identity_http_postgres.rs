@@ -282,7 +282,7 @@ async fn identity_http_flow_enforces_sessions_csrf_roles_and_owner_guard() {
     .await;
     assert_eq!(users.status(), StatusCode::OK);
     let users_body = response_json(users).await;
-    assert_eq!(users_body["data"].as_array().unwrap().len(), 1);
+    assert_eq!(users_body["items"].as_array().unwrap().len(), 1);
     assert!(users_body["next_cursor"].is_string());
 
     let developer = send_empty(
@@ -314,7 +314,7 @@ async fn identity_http_flow_enforces_sessions_csrf_roles_and_owner_guard() {
     .await;
     assert_eq!(sessions.status(), StatusCode::OK);
     let sessions_body = response_json(sessions).await;
-    let developer_session_id = sessions_body["data"][0]["id"].as_str().unwrap().to_owned();
+    let developer_session_id = sessions_body["items"][0]["id"].as_str().unwrap().to_owned();
     let revoked_session = send_empty(
         &app,
         Method::DELETE,
@@ -542,7 +542,7 @@ async fn identity_http_flow_enforces_sessions_csrf_roles_and_owner_guard() {
     )
     .await;
     assert_eq!(audit.status(), StatusCode::OK);
-    for event in response_json(audit).await["data"].as_array().unwrap() {
+    for event in response_json(audit).await["items"].as_array().unwrap() {
         assert!(event["source_ip"].is_string());
         assert!(event["user_agent_family"].is_null());
     }

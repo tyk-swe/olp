@@ -12,6 +12,14 @@ one invitation constraint, 0045 lands the drops that 0038 and 0039 staged.
 
 ### Changed
 
+**Management API (breaking)**
+- Every list response now carries its rows under `items`. Fourteen endpoints
+  (audit, requests, media jobs, runtime generations, request-metadata epochs,
+  provider health, pricing revisions, settings, usage series and breakdown,
+  users, sessions, invitations, and OIDC identities) used `data` while the
+  configuration endpoints already used `items`; clients that read `data`
+  from those responses must switch to `items`.
+
 **Gateway (client-visible)**
 - The Anthropic surface no longer forwards an unmodelled content block just
   because it does not recognise it. `thinking`, `redacted_thinking`,

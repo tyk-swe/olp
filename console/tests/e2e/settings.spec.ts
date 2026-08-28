@@ -29,7 +29,7 @@ test('updates retention with ETag and creates an exact-decimal pricing revision'
   await page.route('**/api/v1/settings', async (route) =>
     route.fulfill({
       json: {
-        data: [
+        items: [
           {
             key: 'request_retention_days',
             value: retention,
@@ -75,7 +75,7 @@ test('updates retention with ETag and creates an exact-decimal pricing revision'
         }
       ];
       await route.fulfill({ status: 201, json: revisions[0] });
-    } else await route.fulfill({ json: { data: revisions } });
+    } else await route.fulfill({ json: { items: revisions } });
   });
 
   await page.goto('/settings');

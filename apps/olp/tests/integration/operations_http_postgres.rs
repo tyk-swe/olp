@@ -312,9 +312,12 @@ async fn operations_http_contract_is_authorized_paginated_exact_and_metadata_onl
     let requests = get(&app, "/api/v1/requests?limit=1", &cookie).await;
     assert_eq!(requests.status(), StatusCode::OK);
     let requests_body = response_json(requests).await;
-    assert_eq!(requests_body["data"][0]["id"], request_id.to_string());
-    assert_eq!(requests_body["data"][0]["estimated_cost"], "0.000200000000");
-    assert!(requests_body["data"][0].get("prompt").is_none());
+    assert_eq!(requests_body["items"][0]["id"], request_id.to_string());
+    assert_eq!(
+        requests_body["items"][0]["estimated_cost"],
+        "0.000200000000"
+    );
+    assert!(requests_body["items"][0].get("prompt").is_none());
 
     let detail = get(&app, &format!("/api/v1/requests/{request_id}"), &cookie).await;
     assert_eq!(detail.status(), StatusCode::OK);
@@ -559,7 +562,7 @@ async fn operations_http_contract_is_authorized_paginated_exact_and_metadata_onl
     assert_eq!(archived_partial_series.status(), StatusCode::OK);
     let archived_partial_series = response_json(archived_partial_series).await;
     assert!(
-        archived_partial_series["data"]
+        archived_partial_series["items"]
             .as_array()
             .unwrap()
             .is_empty()
@@ -599,8 +602,8 @@ async fn operations_http_contract_is_authorized_paginated_exact_and_metadata_onl
     let pricing_page = get(&app, "/api/v1/pricing/revisions?limit=1", &cookie).await;
     assert_eq!(pricing_page.status(), StatusCode::OK);
     let pricing_page = response_json(pricing_page).await;
-    assert_eq!(pricing_page["data"].as_array().unwrap().len(), 1);
-    assert_eq!(pricing_page["data"][0]["revision"], 2);
+    assert_eq!(pricing_page["items"].as_array().unwrap().len(), 1);
+    assert_eq!(pricing_page["items"][0]["revision"], 2);
     assert_eq!(pricing_page["next_cursor"], "2");
 
     let older_pricing = get(
@@ -614,8 +617,8 @@ async fn operations_http_contract_is_authorized_paginated_exact_and_metadata_onl
     .await;
     assert_eq!(older_pricing.status(), StatusCode::OK);
     let older_pricing = response_json(older_pricing).await;
-    assert_eq!(older_pricing["data"].as_array().unwrap().len(), 1);
-    assert_eq!(older_pricing["data"][0]["revision"], 1);
+    assert_eq!(older_pricing["items"].as_array().unwrap().len(), 1);
+    assert_eq!(older_pricing["items"][0]["revision"], 1);
     assert!(older_pricing["next_cursor"].is_null());
 
     let setting = get(&app, "/api/v1/settings/retention.requests_days", &cookie).await;

@@ -110,7 +110,7 @@ pub(super) const fn media_job_surface_wire_value(surface: Surface) -> &'static s
 
 #[derive(Debug, Serialize, ToSchema)]
 pub(super) struct MediaJobListResponse {
-    data: Vec<MediaJobItem>,
+    items: Vec<MediaJobItem>,
     next_cursor: Option<String>,
 }
 
@@ -171,7 +171,7 @@ pub(super) async fn list_media_jobs(
         .await
         .map_err(map_media_job)?;
     Ok(Json(MediaJobListResponse {
-        data: page.items.into_iter().map(Into::into).collect(),
+        items: page.items.into_iter().map(Into::into).collect(),
         next_cursor: page.next_cursor,
     }))
 }

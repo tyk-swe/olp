@@ -45,10 +45,10 @@ export async function getReadiness(): Promise<Readiness> {
 
 export async function listProviderHealth(windowMinutes = 15): Promise<{
   window_minutes: number;
-  data: ProviderHealth[];
+  items: ProviderHealth[];
 }> {
   let responseWindow = windowMinutes;
-  const data = await collectCursorPages(async (cursor) => {
+  const items = await collectCursorPages(async (cursor) => {
     const response = await apiClient.GET('/api/v1/provider-health', {
       params: {
         query: {
@@ -62,5 +62,5 @@ export async function listProviderHealth(windowMinutes = 15): Promise<{
     responseWindow = page.window_minutes;
     return pageResult(page);
   });
-  return { window_minutes: responseWindow, data };
+  return { window_minutes: responseWindow, items };
 }

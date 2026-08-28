@@ -30,7 +30,7 @@ function providerHealth(providerId: string) {
 describe('request query serialization', () => {
   it('omits empty filters while retaining numeric zero', async () => {
     const requests = captureRequests(() =>
-      jsonResponse({ data: [], next_cursor: null })
+      jsonResponse({ items: [], next_cursor: null })
     );
 
     await listRequests({
@@ -51,7 +51,7 @@ describe('resource API cursor pages', () => {
   it('normalizes every paginated response at the API boundary', async () => {
     captureRequests((_request, index) =>
       jsonResponse({
-        data: [{ index }],
+        items: [{ index }],
         next_cursor: index === 5 ? null : `page-${index + 2}`
       })
     );
@@ -77,7 +77,7 @@ describe('resource API cursor pages', () => {
 describe('audit filters', () => {
   it('sends every filled filter and omits the empty ones', async () => {
     const requests = captureRequests(() =>
-      jsonResponse({ data: [], next_cursor: null })
+      jsonResponse({ items: [], next_cursor: null })
     );
 
     await listAudit({
@@ -113,19 +113,19 @@ describe('provider-health pagination', () => {
       index === 0
         ? jsonResponse({
             window_minutes: 30,
-            data: [first],
+            items: [first],
             next_cursor: 'page-2'
           })
         : jsonResponse({
             window_minutes: 30,
-            data: [second],
+            items: [second],
             next_cursor: null
           })
     );
 
     await expect(listProviderHealth(30)).resolves.toEqual({
       window_minutes: 30,
-      data: [first, second]
+      items: [first, second]
     });
     expect(requests).toHaveLength(2);
     expect(new URL(requests[0]!.url).searchParams.get('cursor')).toBeNull();
@@ -139,7 +139,7 @@ describe('provider-health pagination', () => {
 
   it('rejects a repeated cursor instead of looping', async () => {
     const requests = captureRequests(() =>
-      jsonResponse({ window_minutes: 15, data: [], next_cursor: 'repeat' })
+      jsonResponse({ window_minutes: 15, items: [], next_cursor: 'repeat' })
     );
 
     const error = await listProviderHealth().catch((value: unknown) => value);
@@ -157,7 +157,7 @@ describe('provider-health pagination', () => {
     const requests = captureRequests((_request, page) =>
       jsonResponse({
         window_minutes: 15,
-        data: Array.from({ length: 200 }, (_, item) =>
+        items: Array.from({ length: 200 }, (_, item) =>
           providerHealth(`provider-${page + 1}-${item + 1}`)
         ),
         next_cursor: `page-${page + 2}`

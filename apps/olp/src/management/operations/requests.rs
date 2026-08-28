@@ -97,7 +97,7 @@ impl From<RequestRecord> for RequestSummary {
 
 #[derive(Debug, Serialize, ToSchema)]
 pub(super) struct RequestListResponse {
-    data: Vec<RequestSummary>,
+    items: Vec<RequestSummary>,
     next_cursor: Option<String>,
 }
 
@@ -199,7 +199,7 @@ pub(super) async fn list_requests(
         .await
         .map_err(map_operations)?;
     Ok(Json(RequestListResponse {
-        data: page.items.into_iter().map(Into::into).collect(),
+        items: page.items.into_iter().map(Into::into).collect(),
         next_cursor: page.next_cursor,
     }))
 }

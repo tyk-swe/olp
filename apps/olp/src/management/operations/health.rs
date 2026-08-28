@@ -94,7 +94,7 @@ impl From<ProviderHealthRecord> for ProviderHealthItem {
 #[derive(Debug, Serialize, ToSchema)]
 pub(super) struct ProviderHealthResponse {
     window_minutes: u16,
-    data: Vec<ProviderHealthItem>,
+    items: Vec<ProviderHealthItem>,
     next_cursor: Option<String>,
 }
 
@@ -137,7 +137,7 @@ pub(super) async fn provider_health(
         .map_err(map_operations)?;
     Ok(Json(ProviderHealthResponse {
         window_minutes,
-        data: page.items.into_iter().map(Into::into).collect(),
+        items: page.items.into_iter().map(Into::into).collect(),
         next_cursor: page.next_cursor,
     }))
 }

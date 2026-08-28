@@ -381,9 +381,9 @@ async fn oidc_code_flow_is_bound_validated_mapped_linked_and_session_backed() {
     .await;
     assert_eq!(developer_identities.status(), StatusCode::OK);
     let developer_identity = response_json(developer_identities).await;
-    assert_eq!(developer_identity["data"].as_array().unwrap().len(), 1);
-    assert_eq!(developer_identity["data"][0]["can_unlink"], false);
-    let developer_identity_id = developer_identity["data"][0]["id"]
+    assert_eq!(developer_identity["items"].as_array().unwrap().len(), 1);
+    assert_eq!(developer_identity["items"][0]["can_unlink"], false);
+    let developer_identity_id = developer_identity["items"][0]["id"]
         .as_str()
         .unwrap()
         .to_owned();
@@ -529,7 +529,7 @@ async fn oidc_code_flow_is_bound_validated_mapped_linked_and_session_backed() {
     )
     .await;
     let developer_identity = response_json(developer_identities).await;
-    assert_eq!(developer_identity["data"][0]["can_unlink"], true);
+    assert_eq!(developer_identity["items"][0]["can_unlink"], true);
     let developer_unlink_reauthentication = send_json(
         &app,
         Method::POST,
@@ -771,10 +771,10 @@ async fn oidc_code_flow_is_bound_validated_mapped_linked_and_session_backed() {
     .await;
     assert_eq!(owner_identities.status(), StatusCode::OK);
     let owner_identity_body = response_json(owner_identities).await;
-    assert_eq!(owner_identity_body["data"].as_array().unwrap().len(), 1);
-    assert_eq!(owner_identity_body["data"][0]["can_unlink"], true);
+    assert_eq!(owner_identity_body["items"].as_array().unwrap().len(), 1);
+    assert_eq!(owner_identity_body["items"][0]["can_unlink"], true);
     assert_eq!(owner_identity_body["linking_available"], true);
-    let owner_identity_id = owner_identity_body["data"][0]["id"].as_str().unwrap();
+    let owner_identity_id = owner_identity_body["items"][0]["id"].as_str().unwrap();
     let owner_unlink_reauthentication = send_json(
         &app,
         Method::POST,

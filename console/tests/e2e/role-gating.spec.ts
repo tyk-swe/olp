@@ -136,13 +136,13 @@ async function mockReadOnlyApi(page: Page) {
   });
   await page.route('**/api/v1/users**', async (route) => {
     if (route.request().method() !== 'GET') failUnexpectedApiRequest(route);
-    await route.fulfill({ json: { data: members, next_cursor: null } });
+    await route.fulfill({ json: { items: members, next_cursor: null } });
   });
   await page.route('**/api/v1/invitations**', async (route) => {
     if (route.request().method() !== 'GET') failUnexpectedApiRequest(route);
     await route.fulfill({
       json: {
-        data: [
+        items: [
           {
             id: ids.invitation,
             email: 'new@example.com',
@@ -162,7 +162,7 @@ async function mockReadOnlyApi(page: Page) {
     if (route.request().method() !== 'GET') failUnexpectedApiRequest(route);
     await route.fulfill({
       json: {
-        data: [
+        items: [
           {
             id: ids.session,
             user_id: ids.user,

@@ -57,7 +57,7 @@ impl From<Item> for UsageBreakdownItem {
 
 #[derive(Debug, Serialize, ToSchema)]
 pub(in crate::management::operations) struct UsageBreakdownResponse {
-    data: Vec<UsageBreakdownItem>,
+    items: Vec<UsageBreakdownItem>,
     coverage: UsageRangeCoverageResponse,
 }
 
@@ -103,7 +103,7 @@ pub(in crate::management::operations) async fn usage_breakdown(
         .await
         .map_err(map_operations)?;
     Ok(Json(UsageBreakdownResponse {
-        data: report.items.into_iter().map(Into::into).collect(),
+        items: report.items.into_iter().map(Into::into).collect(),
         coverage: report.coverage.into(),
     }))
 }

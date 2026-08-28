@@ -458,13 +458,13 @@ impl World {
                     response.status, response.body
                 ));
             }
-            let rows = response.body["data"].as_array().cloned().ok_or_else(|| {
+            let rows = response.body["items"].as_array().cloned().ok_or_else(|| {
                 format!("request listing carries no data array: {}", response.body)
             })?;
             if rows.len() >= expected {
                 tokio::time::sleep(Duration::from_millis(750)).await;
                 let settled = self.management.get(&path).await?;
-                return settled.body["data"].as_array().cloned().ok_or_else(|| {
+                return settled.body["items"].as_array().cloned().ok_or_else(|| {
                     format!("request listing carries no data array: {}", settled.body)
                 });
             }

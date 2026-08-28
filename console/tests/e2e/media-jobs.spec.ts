@@ -48,7 +48,7 @@ test('media jobs list the working timestamps and filter by key, provider, and cr
         return;
       }
       query = url.searchParams;
-      await route.fulfill({ json: { data: [job], next_cursor: null } });
+      await route.fulfill({ json: { items: [job], next_cursor: null } });
     }
   );
 
@@ -101,7 +101,7 @@ test('the media job detail panel keeps the retention and polling clocks', async 
       const url = new URL(route.request().url());
       if (url.pathname.endsWith(`/media-jobs/${jobId}`))
         await route.fulfill({ json: job });
-      else await route.fulfill({ json: { data: [job], next_cursor: null } });
+      else await route.fulfill({ json: { items: [job], next_cursor: null } });
     }
   );
 

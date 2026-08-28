@@ -206,7 +206,7 @@ test('media job explorer stays metadata-only through list and detail', async ({
         json:
           pathname === `/api/v1/media-jobs/${ids.job}`
             ? job
-            : { data: [job], next_cursor: null }
+            : { items: [job], next_cursor: null }
       });
     }
   );

@@ -480,6 +480,6 @@ export async function mockRecentRequests(page: Page) {
     })
   ];
   await page.route('**/api/v1/requests*', async (route) => {
-    await route.fulfill({ json: { data: items, next_cursor: null } });
+    await route.fulfill({ json: { items, next_cursor: null } });
   });
 }

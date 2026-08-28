@@ -49,7 +49,7 @@ impl From<SettingRecord> for SettingResponse {
 
 #[derive(Debug, Serialize, ToSchema)]
 pub(super) struct SettingsResponse {
-    data: Vec<SettingResponse>,
+    items: Vec<SettingResponse>,
 }
 
 #[utoipa::path(
@@ -66,7 +66,7 @@ pub(super) async fn list_settings(
     require_permission(&principal, Permission::ReadOperations)?;
     let settings = state.store().settings().await.map_err(map_operations)?;
     Ok(Json(SettingsResponse {
-        data: settings.into_iter().map(Into::into).collect(),
+        items: settings.into_iter().map(Into::into).collect(),
     }))
 }
 
