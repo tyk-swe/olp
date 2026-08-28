@@ -17,6 +17,8 @@ use super::extensions::apply_pointer_extensions;
 use super::responses::OPENAI_RESPONSES_RAW_OUTPUT_PREFIX;
 use super::responses::response::{ErrorBody, InputTokenDetails, Object, OutputTokenDetails, Usage};
 
+const MAX_RETAINED_BYTES: usize = 16 * 1024 * 1024;
+
 /// `created_at` is the fallback used when the canonical events did not come
 /// from a Responses upstream, so a client never sees `created_at: 0`.
 pub fn encode_response_object(
@@ -309,7 +311,6 @@ impl Encoder {
         }
         // Keep this aligned with the transport-neutral collection ceiling in
         // crates/olp-engine/src/inference/events.rs.
-        const MAX_RETAINED_BYTES: usize = 16 * 1024 * 1024;
         self.retained_bytes = self
             .retained_bytes
             .checked_add(retained_bytes(&event.kind)?)
@@ -679,10 +680,10 @@ fn is_stream_only(extensions: &crate::domain::canonical::requests::SourceExtensi
         .all(|path| path.starts_with("/stream/"))
 }
 
-/// Bytes an event adds to the state the encoder keeps until `Done`: the
-/// aggregated text, refusal, and tool arguments, plus retained extensions.
+/// Estimated bytes an event adds to state kept until `Done`, including fixed
+/// event bookkeeping and retained payloads.
 fn retained_bytes(kind: &Kind) -> Result<usize, OpenAiClientEncodeError> {
-    Ok(match kind {
+    let payload_bytes = match kind {
         Kind::TextDelta { text, .. } | Kind::RefusalDelta { text, .. } => text.len(),
         Kind::ToolCallDelta {
             id,
@@ -707,7 +708,10 @@ fn retained_bytes(kind: &Kind) -> Result<usize, OpenAiClientEncodeError> {
             serde_json::to_vec(&extensions.values)?.len()
         }
         _ => 0,
-    })
+    };
+    std::mem::size_of::<Kind>()
+        .checked_add(payload_bytes)
+        .ok_or(OpenAiClientEncodeError::EventHistoryTooLarge)
 }
 
 fn take_i64_extension(extensions: &mut BTreeMap<String, Value>, path: &str) -> Option<i64> {
@@ -782,6 +786,24 @@ mod tests {
             Kind::TextDelta {
                 output_index: 0,
                 text: "x".repeat(16 * 1024 * 1024 + 1),
+            },
+        );
+
+        assert!(matches!(
+            encoder.push(event),
+            Err(OpenAiClientEncodeError::EventHistoryTooLarge)
+        ));
+    }
+
+    #[test]
+    fn responses_stream_encoder_charges_empty_deltas_against_event_history() {
+        let mut encoder = Encoder::new("route", "response", 0);
+        encoder.retained_bytes = MAX_RETAINED_BYTES;
+        let event = Event::new(
+            0,
+            Kind::TextDelta {
+                output_index: 0,
+                text: String::new(),
             },
         );
 
