@@ -111,7 +111,6 @@ impl Decoder {
             if self.done {
                 return Err(Error::DataAfterDone);
             }
-            let raw_frame = self.preserve_raw_frames.then(|| frame.clone());
             let event_start = events.len();
             let sequence_start = self.sequence;
             let value: Value = serde_json::from_str(&frame.data)?;
@@ -144,19 +143,14 @@ impl Decoder {
                 "error" => self.error(payload, &mut events)?,
                 other => self.unknown_event(other, payload, &mut events),
             }
-            if let Some(raw_frame) = raw_frame {
+            if self.preserve_raw_frames {
                 let semantic_events = events.len().saturating_sub(event_start);
                 for event in &mut events[event_start..] {
                     event.sequence = event.sequence.saturating_add(1);
                 }
                 events.insert(
                     event_start,
-                    raw_sse_frame_event(
-                        sequence_start,
-                        Surface::Anthropic,
-                        &raw_frame,
-                        semantic_events,
-                    ),
+                    raw_sse_frame_event(sequence_start, Surface::Anthropic, frame, semantic_events),
                 );
                 self.sequence = self.sequence.saturating_add(1);
             }

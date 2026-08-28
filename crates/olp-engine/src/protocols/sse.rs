@@ -1,4 +1,4 @@
-use std::{fmt, str};
+use std::{borrow::Cow, fmt, str};
 
 use std::collections::BTreeMap;
 
@@ -8,7 +8,7 @@ use crate::domain::canonical::{
     requests::SourceExtensions,
 };
 use bytes::BytesMut;
-use serde_json::{Value, json};
+use serde_json::Value;
 use thiserror::Error;
 
 pub const DEFAULT_MAX_EVENT_BYTES: usize = 1024 * 1024;
@@ -30,35 +30,46 @@ enum TrailingCr {
     DeferredLine,
 }
 
+/// Wraps a raw upstream frame for passthrough. The frame is moved, not
+/// cloned: this runs once per streamed token on the passthrough path.
 pub(in crate::protocols) fn raw_sse_frame_event(
     sequence: u64,
     surface: Surface,
-    frame: &Frame,
+    frame: Frame,
     semantic_events: usize,
 ) -> Event {
+    let mut raw = serde_json::Map::with_capacity(5);
+    raw.insert(
+        "event".into(),
+        frame.event.map_or(Value::Null, Value::String),
+    );
+    raw.insert("data".into(), Value::String(frame.data));
+    raw.insert("id".into(), frame.id.map_or(Value::Null, Value::String));
+    raw.insert(
+        "retry_ms".into(),
+        frame.retry_ms.map_or(Value::Null, Value::from),
+    );
+    raw.insert("semantic_events".into(), Value::from(semantic_events));
     Event::new(
         sequence,
         Kind::SourceExtension {
             extensions: SourceExtensions::new(
                 surface,
-                BTreeMap::from([(
-                    RAW_SSE_FRAME_EXTENSION.to_owned(),
-                    json!({
-                        "event": frame.event,
-                        "data": frame.data,
-                        "id": frame.id,
-                        "retry_ms": frame.retry_ms,
-                        "semantic_events": semantic_events,
-                    }),
-                )]),
+                BTreeMap::from([(RAW_SSE_FRAME_EXTENSION.to_owned(), Value::Object(raw))]),
             ),
         },
     )
 }
 
-pub(in crate::protocols) fn decode_raw_sse_frame(value: &Value) -> Option<(Frame, usize)> {
-    let object = value.as_object()?;
-    let data = object.get("data")?.as_str()?.to_owned();
+/// Inverse of [`raw_sse_frame_event`]; consumes the extension value so the
+/// frame data is moved back out rather than copied.
+pub(in crate::protocols) fn decode_raw_sse_frame(value: Value) -> Option<(Frame, usize)> {
+    let Value::Object(mut object) = value else {
+        return None;
+    };
+    let Value::String(data) = object.remove("data")? else {
+        return None;
+    };
     let event = optional_string(object.get("event"))?;
     let id = optional_string(object.get("id"))?;
     let retry_ms = optional_u64(object.get("retry_ms"))?;
@@ -96,7 +107,9 @@ pub struct Decoder {
     buffer: BytesMut,
     trailing_cr: TrailingCr,
     event: Option<String>,
-    data_lines: Vec<String>,
+    // Joined with '\n' as data lines arrive; `has_data` distinguishes an
+    // empty payload (one bare `data:` line) from no data lines at all.
+    data: String,
     has_data: bool,
     last_event_id: Option<String>,
     retry_ms: Option<u64>,
@@ -109,7 +122,7 @@ impl fmt::Debug for Decoder {
         formatter
             .debug_struct("Decoder")
             .field("buffered_bytes", &self.buffer.len())
-            .field("data_line_count", &self.data_lines.len())
+            .field("data_bytes", &self.data.len())
             .field("has_data", &self.has_data)
             .field("has_last_event_id", &self.last_event_id.is_some())
             .field("pending_bytes", &self.pending_bytes)
@@ -131,7 +144,7 @@ impl Decoder {
             buffer: BytesMut::new(),
             trailing_cr: TrailingCr::None,
             event: None,
-            data_lines: Vec::new(),
+            data: String::new(),
             has_data: false,
             last_event_id: None,
             retry_ms: None,
@@ -304,8 +317,11 @@ impl Decoder {
         match field {
             "event" => self.event = Some(value.to_owned()),
             "data" => {
+                if self.has_data {
+                    self.data.push('\n');
+                }
                 self.has_data = true;
-                self.data_lines.push(value.to_owned());
+                self.data.push_str(value);
             }
             "id" if !value.contains('\0') => self.last_event_id = Some(value.to_owned()),
             "retry" if !value.is_empty() && value.bytes().all(|byte| byte.is_ascii_digit()) => {
@@ -321,14 +337,14 @@ impl Decoder {
         let event = self.event.take();
         let retry_ms = self.retry_ms.take();
         if !self.has_data {
-            self.data_lines.clear();
+            self.data.clear();
             return None;
         }
 
         self.has_data = false;
         Some(Frame {
             event,
-            data: self.data_lines.drain(..).collect::<Vec<_>>().join("\n"),
+            data: std::mem::take(&mut self.data),
             id: self.last_event_id.clone(),
             retry_ms,
         })
@@ -369,7 +385,11 @@ pub fn encode_frame(frame: &Frame) -> Result<Vec<u8>, EncodeError> {
     // Event streams normalize CR, LF, and CRLF line endings. Emitting a raw
     // carriage return inside a data field would let a conforming client parse
     // the remainder as a new SSE field instead of payload data.
-    let normalized_data = frame.data.replace("\r\n", "\n").replace('\r', "\n");
+    let normalized_data: Cow<'_, str> = if frame.data.contains('\r') {
+        Cow::Owned(frame.data.replace("\r\n", "\n").replace('\r', "\n"))
+    } else {
+        Cow::Borrowed(&frame.data)
+    };
     for line in normalized_data.split('\n') {
         encoded.extend_from_slice(b"data: ");
         encoded.extend_from_slice(line.as_bytes());

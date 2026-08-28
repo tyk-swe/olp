@@ -163,14 +163,14 @@ impl Encoder {
                     retry_ms: None,
                 });
             }
-            Kind::SourceExtension { extensions } => {
+            Kind::SourceExtension { mut extensions } => {
                 // A stream already in flight cannot renegotiate, so extensions
                 // that this surface cannot carry are dropped, not fatal.
                 if extensions.source != Some(Surface::Gemini) {
                     return Ok(frames);
                 }
-                if let Some(value) = extensions.values.get(RAW_SSE_FRAME_EXTENSION) {
-                    if extensions.values.len() != 1 {
+                if let Some(value) = extensions.values.remove(RAW_SSE_FRAME_EXTENSION) {
+                    if !extensions.values.is_empty() {
                         return Err(Error::Extension);
                     }
                     let (mut raw, semantic_events) =
@@ -221,6 +221,11 @@ impl Encoder {
 }
 
 fn rewrite_gemini_model(frame: &mut Frame, public_model: &str) -> Result<(), Error> {
+    // Frames without modelVersion are replayed byte-for-byte; a false
+    // positive here merely takes the parse path.
+    if !frame.data.contains("\"modelVersion\"") {
+        return Ok(());
+    }
     let mut value: Value = serde_json::from_str(&frame.data).map_err(|_| Error::Extension)?;
     let object = value.as_object_mut().ok_or(Error::Extension)?;
     if object.contains_key("modelVersion") {

@@ -302,7 +302,7 @@ impl Encoder {
 
     fn apply_source_extension(
         &mut self,
-        extensions: SourceExtensions,
+        mut extensions: SourceExtensions,
         frames: &mut Vec<Frame>,
     ) -> Result<(), Error> {
         // Anything from another surface is unrepresentable here, and the
@@ -311,8 +311,8 @@ impl Encoder {
         if extensions.source != Some(Surface::Anthropic) {
             return Ok(());
         }
-        if let Some(value) = extensions.values.get(RAW_SSE_FRAME_EXTENSION) {
-            if extensions.values.len() != 1 {
+        if let Some(value) = extensions.values.remove(RAW_SSE_FRAME_EXTENSION) {
+            if !extensions.values.is_empty() {
                 return Err(Error::Extension);
             }
             let (mut raw, semantic_events) = decode_raw_sse_frame(value).ok_or(Error::Extension)?;
@@ -396,6 +396,11 @@ impl Encoder {
 }
 
 fn rewrite_anthropic_model(frame: &mut Frame, public_model: &str) -> Result<(), Error> {
+    // Only message_start carries the model. Every other frame is replayed
+    // byte-for-byte; a false positive here merely takes the parse path.
+    if !frame.data.contains("\"model\"") {
+        return Ok(());
+    }
     let mut value: Value = serde_json::from_str(&frame.data).map_err(|_| Error::Extension)?;
     if let Some(message) = value.get_mut("message").and_then(Value::as_object_mut)
         && message.contains_key("model")

@@ -110,14 +110,13 @@ impl Decoder {
             if self.done {
                 return Err(Error::DataAfterDone);
             }
-            let raw_frame = self.preserve_raw_frames.then(|| frame.clone());
             let event_start = events.len();
             let sequence_start = self.sequence;
             let value: Value = serde_json::from_str(&frame.data)?;
             if value.get("error").is_some() {
                 self.decode_error(value, &mut events)?;
             } else {
-                if let Some(event_name) = frame.event.clone()
+                if let Some(event_name) = frame.event.as_deref()
                     && event_name != "message"
                 {
                     self.emit(
@@ -125,7 +124,10 @@ impl Decoder {
                         Kind::SourceExtension {
                             extensions: SourceExtensions::new(
                                 Surface::Gemini,
-                                BTreeMap::from([("/sse/event".into(), Value::String(event_name))]),
+                                BTreeMap::from([(
+                                    "/sse/event".into(),
+                                    Value::String(event_name.to_owned()),
+                                )]),
                             ),
                         },
                     );
@@ -215,19 +217,14 @@ impl Decoder {
                     }
                 }
             }
-            if let Some(raw_frame) = raw_frame {
+            if self.preserve_raw_frames {
                 let semantic_events = events.len().saturating_sub(event_start);
                 for event in &mut events[event_start..] {
                     event.sequence = event.sequence.saturating_add(1);
                 }
                 events.insert(
                     event_start,
-                    raw_sse_frame_event(
-                        sequence_start,
-                        Surface::Gemini,
-                        &raw_frame,
-                        semantic_events,
-                    ),
+                    raw_sse_frame_event(sequence_start, Surface::Gemini, frame, semantic_events),
                 );
                 self.sequence = self.sequence.saturating_add(1);
             }

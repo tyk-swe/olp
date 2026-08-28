@@ -668,3 +668,22 @@ fn a_cross_protocol_vision_request_carries_its_mime_type_to_gemini() {
         "https://example.test/cat.png"
     );
 }
+
+/// Raw passthrough replays a chunk without `modelVersion` byte-for-byte,
+/// including its original key order and whitespace.
+#[test]
+fn raw_passthrough_replays_chunks_without_a_model_version_byte_for_byte() {
+    let raw_chunk =
+        r#"{"candidates": [{"content":{"parts":[{"text":"hi"}],"role":"model"},  "index":0}]}"#;
+    let wire = format!("data: {raw_chunk}\n\n");
+    let mut decoder = Decoder::with_max_event_bytes_and_raw_passthrough(1024 * 1024, true);
+    let events = decoder.push(wire.as_bytes()).unwrap();
+
+    let mut encoder = Encoder::new("public-route", "fallback");
+    let frames = events
+        .into_iter()
+        .flat_map(|event| encoder.push(event).unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(frames.len(), 1);
+    assert_eq!(frames[0].data, raw_chunk);
+}

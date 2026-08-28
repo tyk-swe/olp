@@ -1175,3 +1175,38 @@ fn count_tokens_rejects_a_base64_document_like_the_messages_surface() {
     .unwrap();
     assert!(decode_count_tokens_request(dto).is_err());
 }
+
+/// Raw passthrough replays every frame that does not carry the model
+/// byte-for-byte, including its original key order and whitespace; only
+/// `message_start` is re-serialised to swap in the public model.
+#[test]
+fn raw_passthrough_replays_frames_without_a_model_byte_for_byte() {
+    let raw_delta = r#"{"type": "content_block_delta",  "index":0, "delta":{"text":"hi ","type":"text_delta"}}"#;
+    let wire = [
+        sse(
+            "message_start",
+            json!({"type": "message_start", "message": {
+                "id": "msg_1", "type": "message", "role": "assistant", "model": "claude-upstream",
+                "content": [], "stop_reason": null, "usage": {"input_tokens": 1, "output_tokens": 0}
+            }}),
+        ),
+        sse(
+            "content_block_start",
+            json!({"type": "content_block_start", "index": 0, "content_block": {"type": "text", "text": ""}}),
+        ),
+        format!("event: content_block_delta\ndata: {raw_delta}\n\n"),
+    ]
+    .concat();
+    let mut decoder = Decoder::with_max_event_bytes_and_raw_passthrough(1024 * 1024, true);
+    let events = decoder.push(wire.as_bytes()).unwrap();
+
+    let mut encoder = Encoder::new("public-route", "fallback");
+    let frames = events
+        .into_iter()
+        .flat_map(|event| encoder.push(event).unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(frames.len(), 3);
+    assert!(frames[0].data.contains("\"model\":\"public-route\""));
+    assert_eq!(frames[2].data, raw_delta);
+    assert_eq!(frames[2].event.as_deref(), Some("content_block_delta"));
+}
