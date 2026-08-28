@@ -168,7 +168,7 @@ async fn transcription_text_formats_and_known_speakers_use_current_multipart_con
     .await;
     let connector = test_connector(&base_url, Timeouts::default());
     let mut request = transcription_request(false);
-    let Operation::Transcription(operation) = &mut request.operation else {
+    let Operation::Transcription(operation) = Arc::make_mut(&mut request.operation) else {
         unreachable!()
     };
     operation.extensions = SourceExtensions::new(
@@ -195,7 +195,7 @@ async fn transcription_text_formats_and_known_speakers_use_current_multipart_con
     let connector = test_connector(&base_url, Timeouts::default());
     let mut request = transcription_request(false);
     request.attempt.upstream_model = "gpt-4o-transcribe-diarize".into();
-    let Operation::Transcription(operation) = &mut request.operation else {
+    let Operation::Transcription(operation) = Arc::make_mut(&mut request.operation) else {
         unreachable!()
     };
     operation.extensions = SourceExtensions::new(

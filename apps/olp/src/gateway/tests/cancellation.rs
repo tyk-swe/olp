@@ -104,7 +104,7 @@ impl ProviderTransport for CapturingPendingTransport {
         &'a self,
         request: ProviderRequest,
     ) -> BoxFuture<'a, Result<ProviderOutput, TransportError>> {
-        if let Operation::TokenCount(operation) = &request.operation
+        if let Operation::TokenCount(operation) = &*request.operation
             && let Some(handle) = operation.input.iter().find_map(|part| match part {
                 olp_engine::domain::canonical::requests::ContentPart::InputAudio {
                     media, ..

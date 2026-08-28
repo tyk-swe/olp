@@ -140,7 +140,7 @@ fn attempt(
             timeout: DurationMs::new(2_000),
             priority: 0,
         },
-        operation: operation_value,
+        operation: Arc::new(operation_value),
         media: None,
     }
 }
@@ -194,7 +194,7 @@ fn count() -> ProviderRequest {
 #[test]
 fn preserved_count_tokens_body_is_forwarded_exactly_with_late_bound_model() {
     let mut request = count();
-    let Operation::TokenCount(count) = &mut request.operation else {
+    let Operation::TokenCount(count) = Arc::make_mut(&mut request.operation) else {
         unreachable!()
     };
     count.extensions = SourceExtensions::new(

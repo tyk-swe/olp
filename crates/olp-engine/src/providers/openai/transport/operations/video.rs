@@ -27,7 +27,7 @@ pub(super) async fn execute(
     request: ProviderRequest,
 ) -> Result<ProviderOutput, TransportError> {
     // The operation dispatcher routes only video requests here.
-    let Operation::Video(operation) = &request.operation else {
+    let Operation::Video(operation) = &*request.operation else {
         unreachable!("checked by caller")
     };
     match operation {

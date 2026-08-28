@@ -1,4 +1,5 @@
 use super::*;
+use std::sync::Arc;
 
 #[tokio::test]
 async fn rejects_attempts_for_another_provider_kind_before_transport() {
@@ -230,7 +231,7 @@ async fn responses_input_tokens_rehydrates_bounded_media_before_transport() {
     let mut request = fixture_request(false);
     request.metadata.operation = OperationKind::TokenCount;
     request.attempt.upstream_model = "gpt-count-upstream".into();
-    request.operation = operation;
+    request.operation = Arc::new(operation);
     request.media = Some(Arc::new(FixtureMediaSpool::new(
         "inline.bin",
         "application/octet-stream",

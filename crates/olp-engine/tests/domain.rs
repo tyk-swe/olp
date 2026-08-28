@@ -1,3 +1,4 @@
+use std::sync::Arc;
 use std::{
     collections::{BTreeMap, BTreeSet},
     num::{NonZeroU16, NonZeroU32},
@@ -670,7 +671,7 @@ fn provider_request_debug_never_includes_prompt_content() {
             mode: TransportMode::Streaming,
         },
         attempt: select(&runtime, b"debug").remove(0),
-        operation,
+        operation: Arc::new(operation),
         media: None,
     };
 

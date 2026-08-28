@@ -340,7 +340,7 @@ impl Connector {
         &self,
         request: &ProviderRequest,
     ) -> Result<(Url, Vec<u8>, ResponseKind, bool), TransportError> {
-        match &request.operation {
+        match &*request.operation {
             Operation::Generation(generation) => {
                 let streaming = request.metadata.mode == TransportMode::Streaming;
                 if generation.parameters.stream != streaming {

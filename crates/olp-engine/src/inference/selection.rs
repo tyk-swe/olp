@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
 use crate::domain::{
     canonical::{
@@ -99,16 +100,29 @@ pub fn select_representable_attempts_filtered(
 /// different provider protocol. These hints choose an adapter endpoint; they
 /// are not client semantics and must neither block nor leak into another
 /// protocol encoder.
-pub fn operation_for_provider(operation: &Operation, provider_kind: ProviderKind) -> Operation {
-    let mut operation = operation.clone();
-    if !matches!(
+pub fn operation_for_provider(
+    operation: &Arc<Operation>,
+    provider_kind: ProviderKind,
+) -> Arc<Operation> {
+    let openai_family = matches!(
         provider_kind,
         ProviderKind::OpenAi | ProviderKind::AzureOpenAi | ProviderKind::OpenAiCompatible
-    ) && let Operation::Generation(request) = &mut operation
-    {
+    );
+    let carries_hint = matches!(
+        &**operation,
+        Operation::Generation(request)
+            if request.extensions.values.contains_key(OPENAI_ENDPOINT_EXTENSION)
+    );
+    if openai_family || !carries_hint {
+        // Nothing to strip: every attempt shares the one canonical request
+        // rather than deep-copying the prompt per provider.
+        return Arc::clone(operation);
+    }
+    let mut stripped = Operation::clone(operation);
+    if let Operation::Generation(request) = &mut stripped {
         request.extensions.values.remove(OPENAI_ENDPOINT_EXTENSION);
     }
-    operation
+    Arc::new(stripped)
 }
 
 #[cfg(test)]
@@ -507,7 +521,7 @@ mod tests {
         retain_representable_attempts(&operation, &mut attempts).unwrap();
 
         assert_eq!(attempts.len(), 4);
-        let openai = operation_for_provider(&operation, ProviderKind::OpenAi);
+        let openai = operation_for_provider(&Arc::new(operation.clone()), ProviderKind::OpenAi);
         assert!(
             openai
                 .extensions()
@@ -515,7 +529,8 @@ mod tests {
                 .values
                 .contains_key(OPENAI_ENDPOINT_EXTENSION)
         );
-        let anthropic = operation_for_provider(&operation, ProviderKind::Anthropic);
+        let anthropic =
+            operation_for_provider(&Arc::new(operation.clone()), ProviderKind::Anthropic);
         assert!(
             !anthropic
                 .extensions()

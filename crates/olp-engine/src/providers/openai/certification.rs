@@ -1,3 +1,4 @@
+use std::sync::Arc;
 use std::{collections::BTreeMap, time::Duration};
 
 use crate::domain::{
@@ -289,7 +290,7 @@ pub(in crate::providers) async fn execute_capability_probe(
             timeout: DurationMs::new(PROBE_TIMEOUT_MS),
             priority: 0,
         },
-        operation,
+        operation: Arc::new(operation),
         media: None,
     };
     let output = tokio::time::timeout(

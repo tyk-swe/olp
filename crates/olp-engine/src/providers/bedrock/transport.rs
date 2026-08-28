@@ -105,7 +105,7 @@ impl Connector {
         validate_request(&request)?;
         validate_model_id(&request.attempt.upstream_model)?;
         let attempt_deadline = Instant::now() + request.attempt.timeout.as_duration();
-        match &request.operation {
+        match &*request.operation {
             Operation::Generation(generation) => {
                 let encoded = encode_generation(generation)?;
                 if request.metadata.mode == TransportMode::Streaming {
@@ -498,7 +498,7 @@ fn validate_request(request: &ProviderRequest) -> Result<(), TransportError> {
             "request metadata operation does not match the canonical operation",
         ));
     }
-    match &request.operation {
+    match &*request.operation {
         Operation::Generation(generation) => {
             let streaming = request.metadata.mode == TransportMode::Streaming;
             if generation.parameters.stream != streaming {

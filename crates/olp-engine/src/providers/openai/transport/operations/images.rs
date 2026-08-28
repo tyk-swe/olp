@@ -22,7 +22,7 @@ pub(super) async fn execute(
     request: ProviderRequest,
 ) -> Result<ProviderOutput, TransportError> {
     // The operation dispatcher routes only image requests into this module.
-    let Operation::Images(operation) = &request.operation else {
+    let Operation::Images(operation) = &*request.operation else {
         unreachable!("checked by caller")
     };
     let (path, body) = match operation {
@@ -67,7 +67,7 @@ async fn execute_multipart(
         .as_ref()
         .ok_or_else(|| protocol_body_error("OpenAI image uploads require a bounded media spool"))?;
     // The operation dispatcher routes only image requests into this module.
-    let Operation::Images(operation) = &request.operation else {
+    let Operation::Images(operation) = &*request.operation else {
         unreachable!("checked by caller")
     };
     let mut form = multipart::Form::new();

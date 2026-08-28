@@ -67,7 +67,7 @@ impl ProviderTransport for VideoLifecycleTransport {
     ) -> BoxFuture<'a, Result<ProviderOutput, TransportError>> {
         let spool = self.spool.clone();
         Box::pin(async move {
-            let result = match request.operation {
+            let result = match &*request.operation {
                 Operation::Video(VideoOperation::Create(_)) => {
                     let ordinal = self.create_calls.fetch_add(1, Ordering::AcqRel) + 1;
                     let id = if ordinal == 1 {
@@ -126,7 +126,7 @@ impl ProviderTransport for VideoLifecycleTransport {
                         });
                     }
                     CanonicalResult::VideoDelete(VideoDeleteResult {
-                        id: operation.job_id,
+                        id: operation.job_id.clone(),
                         deleted: true,
                         extensions: SourceExtensions::new(Surface::OpenAi, BTreeMap::new()),
                     })

@@ -1,3 +1,4 @@
+use std::sync::Arc;
 use std::time::Duration;
 
 use crate::domain::{
@@ -43,7 +44,7 @@ fn provider_request() -> ProviderRequest {
             timeout: DurationMs::new(2_000),
             priority: 0,
         },
-        operation: Operation::Generation(GenerationRequest {
+        operation: Arc::new(Operation::Generation(GenerationRequest {
             route: RouteSlug::parse("chat").unwrap(),
             messages: vec![Message {
                 role: MessageRole::User,
@@ -59,7 +60,7 @@ fn provider_request() -> ProviderRequest {
             tool_choice: None,
             response_format: None,
             extensions: SourceExtensions::default(),
-        }),
+        })),
         media: None,
     }
 }
@@ -67,7 +68,7 @@ fn provider_request() -> ProviderRequest {
 fn streaming_request() -> ProviderRequest {
     let mut request = provider_request();
     request.metadata.mode = TransportMode::Streaming;
-    let Operation::Generation(generation) = &mut request.operation else {
+    let Operation::Generation(generation) = Arc::make_mut(&mut request.operation) else {
         unreachable!();
     };
     generation.parameters.stream = true;
@@ -77,13 +78,13 @@ fn streaming_request() -> ProviderRequest {
 fn token_count_request() -> ProviderRequest {
     let mut request = provider_request();
     request.metadata.operation = OperationKind::TokenCount;
-    request.operation = Operation::TokenCount(TokenCountRequest {
+    request.operation = Arc::new(Operation::TokenCount(TokenCountRequest {
         route: RouteSlug::parse("chat").unwrap(),
         input: vec![crate::domain::canonical::requests::ContentPart::Text {
             text: "count this".to_owned(),
         }],
         extensions: SourceExtensions::default(),
-    });
+    }));
     request
 }
 
@@ -108,7 +109,7 @@ fn connector_and_model_validation_is_explicit() {
         |r| r.metadata.mode = TransportMode::Streaming,
         |r| {
             r.metadata.mode = TransportMode::Async;
-            let Operation::Generation(generation) = &mut r.operation else {
+            let Operation::Generation(generation) = Arc::make_mut(&mut r.operation) else {
                 unreachable!()
             };
             generation.parameters.stream = true;

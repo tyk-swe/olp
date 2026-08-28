@@ -22,7 +22,7 @@ pub(super) async fn execute_speech(
     request: ProviderRequest,
 ) -> Result<ProviderOutput, TransportError> {
     // The operation dispatcher routes only speech requests here.
-    let Operation::Speech(operation) = &request.operation else {
+    let Operation::Speech(operation) = &*request.operation else {
         unreachable!("checked by caller")
     };
     let wire = encode_speech(operation, &request.attempt.upstream_model)
@@ -66,7 +66,7 @@ pub(super) async fn execute_transcription(
     request: ProviderRequest,
 ) -> Result<ProviderOutput, TransportError> {
     // The operation dispatcher routes only transcription requests here.
-    let Operation::Transcription(operation) = &request.operation else {
+    let Operation::Transcription(operation) = &*request.operation else {
         unreachable!("checked by caller")
     };
     let spool = request.media.as_ref().ok_or_else(|| {

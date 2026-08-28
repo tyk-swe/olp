@@ -1,3 +1,4 @@
+use std::sync::Arc;
 use std::{collections::BTreeMap, time::Duration};
 
 use super::*;
@@ -86,7 +87,7 @@ fn envelope(operation: Operation, mode: TransportMode) -> ProviderRequest {
             timeout: DurationMs::new(2_000),
             priority: 0,
         },
-        operation,
+        operation: Arc::new(operation),
         media: None,
     }
 }

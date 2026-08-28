@@ -54,7 +54,7 @@ fn streaming_request() -> ProviderRequest {
             timeout: DurationMs::new(2_000),
             priority: 0,
         },
-        operation: Operation::Generation(GenerationRequest {
+        operation: Arc::new(Operation::Generation(GenerationRequest {
             route: RouteSlug::parse("default").unwrap(),
             messages: vec![Message {
                 role: MessageRole::User,
@@ -73,7 +73,7 @@ fn streaming_request() -> ProviderRequest {
             tool_choice: None,
             response_format: None,
             extensions: SourceExtensions::new(Surface::Gemini, BTreeMap::new()),
-        }),
+        })),
         media: None,
     }
 }

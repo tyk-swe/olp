@@ -20,7 +20,7 @@ pub(super) async fn execute(
     request: ProviderRequest,
 ) -> Result<ProviderOutput, TransportError> {
     // The operation dispatcher routes only generation requests here.
-    let Operation::Generation(generation) = &request.operation else {
+    let Operation::Generation(generation) = &*request.operation else {
         unreachable!("checked by caller")
     };
     let responses_endpoint = generation

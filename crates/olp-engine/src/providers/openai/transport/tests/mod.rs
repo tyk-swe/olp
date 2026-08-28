@@ -236,7 +236,7 @@ fn fixture_request(streaming: bool) -> ProviderRequest {
             timeout: DurationMs::new(2_000),
             priority: 0,
         },
-        operation: Operation::Generation(GenerationRequest {
+        operation: Arc::new(Operation::Generation(GenerationRequest {
             route: RouteSlug::parse("default").unwrap(),
             messages: vec![Message {
                 role: MessageRole::User,
@@ -255,7 +255,7 @@ fn fixture_request(streaming: bool) -> ProviderRequest {
             tool_choice: None,
             response_format: None,
             extensions: SourceExtensions::new(Surface::OpenAi, BTreeMap::new()),
-        }),
+        })),
         media: None,
     }
 }
@@ -264,18 +264,18 @@ fn embeddings_request() -> ProviderRequest {
     let mut request = fixture_request(false);
     request.metadata.operation = OperationKind::Embeddings;
     request.attempt.upstream_model = "text-embedding-3-small".into();
-    request.operation = Operation::Embeddings(EmbeddingsRequest {
+    request.operation = Arc::new(Operation::Embeddings(EmbeddingsRequest {
         route: RouteSlug::parse("embeddings").unwrap(),
         input: vec![EmbeddingInput::Text("hello".into())],
         dimensions: Some(2),
         extensions: SourceExtensions::new(Surface::OpenAi, BTreeMap::new()),
-    });
+    }));
     request
 }
 
 fn responses_request(streaming: bool) -> ProviderRequest {
     let mut request = fixture_request(streaming);
-    let Operation::Generation(generation) = &mut request.operation else {
+    let Operation::Generation(generation) = Arc::make_mut(&mut request.operation) else {
         unreachable!()
     };
     generation.extensions.values.insert(
@@ -304,7 +304,7 @@ fn responses_input_tokens_request() -> ProviderRequest {
     let mut request = fixture_request(false);
     request.metadata.operation = OperationKind::TokenCount;
     request.attempt.upstream_model = "gpt-count-upstream".into();
-    request.operation = operation;
+    request.operation = Arc::new(operation);
     request
 }
 
@@ -312,14 +312,16 @@ fn image_request(streaming: bool) -> ProviderRequest {
     let mut request = fixture_request(streaming);
     request.metadata.operation = OperationKind::ImageGeneration;
     request.attempt.upstream_model = "gpt-image-1".into();
-    request.operation = Operation::Images(ImageOperation::Generation(ImageGenerationRequest {
-        route: RouteSlug::parse("images").unwrap(),
-        prompt: "a blue square".into(),
-        count: Some(1),
-        size: Some("1024x1024".into()),
-        stream: streaming,
-        extensions: SourceExtensions::new(Surface::OpenAi, BTreeMap::new()),
-    }));
+    request.operation = Arc::new(Operation::Images(ImageOperation::Generation(
+        ImageGenerationRequest {
+            route: RouteSlug::parse("images").unwrap(),
+            prompt: "a blue square".into(),
+            count: Some(1),
+            size: Some("1024x1024".into()),
+            stream: streaming,
+            extensions: SourceExtensions::new(Surface::OpenAi, BTreeMap::new()),
+        },
+    )));
     request
 }
 
@@ -328,12 +330,14 @@ fn video_create_request() -> ProviderRequest {
     request.metadata.operation = OperationKind::VideoCreate;
     request.metadata.mode = TransportMode::Async;
     request.attempt.upstream_model = "sora-2".into();
-    request.operation = Operation::Video(VideoOperation::Create(VideoCreateRequest {
-        route: RouteSlug::parse("video").unwrap(),
-        prompt: "a calm ocean".into(),
-        input: Some(MediaHandle::new("video-reference")),
-        extensions: SourceExtensions::new(Surface::OpenAi, BTreeMap::new()),
-    }));
+    request.operation = Arc::new(Operation::Video(VideoOperation::Create(
+        VideoCreateRequest {
+            route: RouteSlug::parse("video").unwrap(),
+            prompt: "a calm ocean".into(),
+            input: Some(MediaHandle::new("video-reference")),
+            extensions: SourceExtensions::new(Surface::OpenAi, BTreeMap::new()),
+        },
+    )));
     request.media = Some(Arc::new(StaticMediaSpool));
     request
 }
@@ -342,14 +346,14 @@ fn image_edit_request() -> ProviderRequest {
     let mut request = fixture_request(false);
     request.metadata.operation = OperationKind::ImageEdit;
     request.attempt.upstream_model = "gpt-image-1".into();
-    request.operation = Operation::Images(ImageOperation::Edit(ImageEditRequest {
+    request.operation = Arc::new(Operation::Images(ImageOperation::Edit(ImageEditRequest {
         route: RouteSlug::parse("image-edit").unwrap(),
         images: vec![MediaHandle::new("edit-source")],
         mask: Some(MediaHandle::new("edit-mask")),
         prompt: "replace the sky".into(),
         stream: false,
         extensions: SourceExtensions::new(Surface::OpenAi, BTreeMap::new()),
-    }));
+    })));
     request.media = Some(Arc::new(FixtureMediaSpool::new(
         "source.png",
         "image/png",
@@ -362,13 +366,15 @@ fn image_variation_request() -> ProviderRequest {
     let mut request = fixture_request(false);
     request.metadata.operation = OperationKind::ImageVariation;
     request.attempt.upstream_model = "dall-e-2".into();
-    request.operation = Operation::Images(ImageOperation::Variation(ImageVariationRequest {
-        route: RouteSlug::parse("image-variation").unwrap(),
-        image: MediaHandle::new("variation-source"),
-        count: Some(2),
-        size: Some("512x512".into()),
-        extensions: SourceExtensions::new(Surface::OpenAi, BTreeMap::new()),
-    }));
+    request.operation = Arc::new(Operation::Images(ImageOperation::Variation(
+        ImageVariationRequest {
+            route: RouteSlug::parse("image-variation").unwrap(),
+            image: MediaHandle::new("variation-source"),
+            count: Some(2),
+            size: Some("512x512".into()),
+            extensions: SourceExtensions::new(Surface::OpenAi, BTreeMap::new()),
+        },
+    )));
     request.media = Some(Arc::new(FixtureMediaSpool::new(
         "variation.png",
         "image/png",
@@ -381,14 +387,14 @@ fn speech_request(streaming: bool) -> ProviderRequest {
     let mut request = fixture_request(streaming);
     request.metadata.operation = OperationKind::Speech;
     request.attempt.upstream_model = "gpt-4o-mini-tts".into();
-    request.operation = Operation::Speech(SpeechRequest {
+    request.operation = Arc::new(Operation::Speech(SpeechRequest {
         route: RouteSlug::parse("speech").unwrap(),
         input: "hello from the gateway".into(),
         voice: "coral".into(),
         format: Some("mp3".into()),
         stream: streaming,
         extensions: SourceExtensions::new(Surface::OpenAi, BTreeMap::new()),
-    });
+    }));
     request
 }
 
@@ -396,14 +402,14 @@ fn transcription_request(streaming: bool) -> ProviderRequest {
     let mut request = fixture_request(streaming);
     request.metadata.operation = OperationKind::Transcription;
     request.attempt.upstream_model = "gpt-4o-transcribe".into();
-    request.operation = Operation::Transcription(TranscriptionRequest {
+    request.operation = Arc::new(Operation::Transcription(TranscriptionRequest {
         route: RouteSlug::parse("transcription").unwrap(),
         audio: MediaHandle::new("audio-source"),
         language: Some("en".into()),
         prompt: Some("Names: Ada, Grace".into()),
         stream: streaming,
         extensions: SourceExtensions::new(Surface::OpenAi, BTreeMap::new()),
-    });
+    }));
     request.media = Some(Arc::new(FixtureMediaSpool::new(
         "sample.wav",
         "audio/wav",
@@ -416,7 +422,7 @@ fn moderation_request() -> ProviderRequest {
     let mut request = fixture_request(false);
     request.metadata.operation = OperationKind::Moderation;
     request.attempt.upstream_model = "omni-moderation-latest".into();
-    request.operation = Operation::Moderation(ModerationRequest {
+    request.operation = Arc::new(Operation::Moderation(ModerationRequest {
         route: RouteSlug::parse("moderation").unwrap(),
         input: vec![
             ContentPart::Text {
@@ -429,7 +435,7 @@ fn moderation_request() -> ProviderRequest {
             },
         ],
         extensions: SourceExtensions::new(Surface::OpenAi, BTreeMap::new()),
-    });
+    }));
     request
 }
 
@@ -442,12 +448,12 @@ fn video_job_request(operation: OperationKind) -> ProviderRequest {
         job_id: "video_123".into(),
         extensions: SourceExtensions::new(Surface::OpenAi, BTreeMap::new()),
     };
-    request.operation = Operation::Video(match operation {
+    request.operation = Arc::new(Operation::Video(match operation {
         OperationKind::VideoGet => VideoOperation::Get(job),
         OperationKind::VideoContent => VideoOperation::Content(job),
         OperationKind::VideoDelete => VideoOperation::Delete(job),
         _ => panic!("unsupported video job fixture operation"),
-    });
+    }));
     request
 }
 

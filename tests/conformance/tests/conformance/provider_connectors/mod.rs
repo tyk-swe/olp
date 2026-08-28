@@ -335,7 +335,7 @@ fn provider_request(
             timeout: DurationMs::new(timeout_ms),
             priority: 0,
         },
-        operation,
+        operation: Arc::new(operation),
         media: None,
     }
 }
@@ -880,7 +880,7 @@ fn tool_response(kind: ProviderKind) -> Vec<u8> {
 fn tool_request(kind: ProviderKind) -> ProviderRequest {
     let surface = native_surface(kind);
     let mut request = generation_request(kind, surface, TransportMode::Unary);
-    let Operation::Generation(generation) = &mut request.operation else {
+    let Operation::Generation(generation) = Arc::make_mut(&mut request.operation) else {
         unreachable!()
     };
     generation.tools = vec![ToolDefinition {
@@ -938,7 +938,7 @@ async fn structured_output_is_exercised_or_rejected_exactly_as_reviewed() {
     for row in ROWS {
         let kind = row.kind;
         let mut request = generation_request(kind, native_surface(kind), TransportMode::Unary);
-        let Operation::Generation(generation) = &mut request.operation else {
+        let Operation::Generation(generation) = Arc::make_mut(&mut request.operation) else {
             unreachable!()
         };
         generation.response_format = Some(ResponseFormat::JsonSchema {
@@ -1399,14 +1399,14 @@ async fn all_generation_connectors_hydrate_bounded_inline_media() {
         let mut request = generation_request(kind, native_surface(kind), TransportMode::Unary);
         if openai_like {
             request.metadata.operation = OperationKind::Transcription;
-            request.operation = Operation::Transcription(TranscriptionRequest {
+            request.operation = Arc::new(Operation::Transcription(TranscriptionRequest {
                 route: RouteSlug::parse("transcription").unwrap(),
                 audio: MediaHandle::new("conformance-audio"),
                 language: Some("en".to_owned()),
                 prompt: None,
                 stream: false,
                 extensions: SourceExtensions::new(Surface::OpenAi, BTreeMap::new()),
-            });
+            }));
             request.media = Some(Arc::new(InlineMediaSpool {
                 filename: "sample.wav",
                 content_type: "audio/wav",
@@ -1419,7 +1419,7 @@ async fn all_generation_connectors_hydrate_bounded_inline_media() {
                     if matches!(*result, CanonicalResult::Transcription(_))
             ));
         } else {
-            let Operation::Generation(generation) = &mut request.operation else {
+            let Operation::Generation(generation) = Arc::make_mut(&mut request.operation) else {
                 unreachable!()
             };
             // The MIME extension below still has to work for a same-surface

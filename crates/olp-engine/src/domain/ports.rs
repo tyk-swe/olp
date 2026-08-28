@@ -128,7 +128,8 @@ impl fmt::Debug for ProviderOutput {
 pub struct ProviderRequest {
     pub metadata: RequestMetadata,
     pub attempt: AttemptPlan,
-    pub operation: Operation,
+    /// Shared across failover attempts; connectors only read it.
+    pub operation: Arc<Operation>,
     pub media: Option<Arc<dyn MediaSpool>>,
 }
 

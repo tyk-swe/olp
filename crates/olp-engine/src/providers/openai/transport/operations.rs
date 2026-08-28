@@ -51,7 +51,7 @@ impl Connector {
 
         // This dispatcher owns the operation narrowing contract used by each
         // operation module's infallible destructuring below.
-        match &request.operation {
+        match &*request.operation {
             Operation::Generation(_) => generation::execute(self, request).await,
             Operation::Images(_) => images::execute(self, request).await,
             Operation::Speech(_) => audio::execute_speech(self, request).await,
@@ -76,7 +76,7 @@ impl Connector {
 pub(super) fn validate_transport_mode(request: &ProviderRequest) -> Result<(), TransportError> {
     let mode = request.metadata.mode;
     let streaming = mode == TransportMode::Streaming;
-    let valid = match &request.operation {
+    let valid = match &*request.operation {
         Operation::Generation(operation) => {
             matches!(mode, TransportMode::Unary | TransportMode::Streaming)
                 && operation.parameters.stream == streaming

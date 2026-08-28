@@ -355,7 +355,7 @@ struct AttemptExecutionContext<'a> {
     media_spool: &'a Arc<dyn MediaSpool>,
     circuits: &'a Breaker,
     metadata: &'a RequestMetadata,
-    operation: &'a Operation,
+    operation: &'a Arc<Operation>,
     route_deadline: tokio::time::Instant,
     can_retry_canonical: bool,
 }
@@ -386,6 +386,9 @@ pub async fn execute(
         mut on_attempt_started,
     } = context;
     let route_deadline = tokio::time::Instant::now() + overall_timeout;
+    // Shared by every attempt; operation_for_provider only copies it when a
+    // provider needs the OpenAI endpoint hint stripped.
+    let operation = Arc::new(operation);
     let mut failures = FailureHistory::default();
     let mut traces = Vec::with_capacity(attempts.len());
     let attempts = with_sole_target_retry(attempts, max_attempts);

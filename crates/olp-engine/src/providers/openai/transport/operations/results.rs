@@ -18,7 +18,7 @@ pub(super) async fn execute(
     connector: &Connector,
     request: ProviderRequest,
 ) -> Result<ProviderOutput, TransportError> {
-    let (path, body, result_kind) = match &request.operation {
+    let (path, body, result_kind) = match &*request.operation {
         Operation::Embeddings(operation) => {
             let wire = encode_embedding_request(operation, &request.attempt.upstream_model)
                 .map_err(|error| protocol_encode_error("embeddings", error))?;

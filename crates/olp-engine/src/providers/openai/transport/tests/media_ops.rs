@@ -336,7 +336,8 @@ async fn video_delete_missing_is_success_only_for_durable_reconciliation() {
     .await;
     let connector = test_connector(&base_url, Timeouts::default());
     let mut request = video_job_request(OperationKind::VideoDelete);
-    let Operation::Video(VideoOperation::Delete(operation)) = &mut request.operation else {
+    let Operation::Video(VideoOperation::Delete(operation)) = Arc::make_mut(&mut request.operation)
+    else {
         unreachable!()
     };
     operation.extensions.source = Some(Surface::OpenAi);

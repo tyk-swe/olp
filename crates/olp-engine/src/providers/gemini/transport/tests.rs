@@ -133,7 +133,7 @@ fn attempt(
             timeout: DurationMs::new(2_000),
             priority: 0,
         },
-        operation: operation_value,
+        operation: Arc::new(operation_value),
         media: None,
     }
 }
@@ -186,7 +186,7 @@ fn count() -> ProviderRequest {
 #[test]
 fn preserved_count_tokens_body_keeps_nested_semantics_and_rebinds_model() {
     let mut request = count();
-    let Operation::TokenCount(count) = &mut request.operation else {
+    let Operation::TokenCount(count) = Arc::make_mut(&mut request.operation) else {
         unreachable!()
     };
     count.extensions = SourceExtensions::new(
@@ -379,7 +379,7 @@ async fn request_envelope_and_transport_mode_mismatches_stop_before_network() {
     cases.push(asynchronous);
 
     let mut stream_mismatch = generation(false);
-    let Operation::Generation(generation) = &mut stream_mismatch.operation else {
+    let Operation::Generation(generation) = Arc::make_mut(&mut stream_mismatch.operation) else {
         unreachable!()
     };
     generation.parameters.stream = true;
