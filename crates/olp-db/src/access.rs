@@ -179,35 +179,50 @@ impl Store {
         )
         .execute(&mut *transaction)
         .await?;
-        for scope in &key.scopes {
-            sqlx::query!(
-                "INSERT INTO api_key_scopes (api_key_id, scope) VALUES ($1, $2)",
-                id,
-                scope.as_str()
-            )
-            .execute(&mut *transaction)
-            .await?;
+        let scopes = key
+            .scopes
+            .iter()
+            .map(|scope| scope.as_str().to_owned())
+            .collect::<Vec<_>>();
+        sqlx::query!(
+            "INSERT INTO api_key_scopes (api_key_id, scope) SELECT $1, UNNEST($2::text[])",
+            id,
+            &scopes
+        )
+        .execute(&mut *transaction)
+        .await?;
+        let allowed_routes = key
+            .allowed_routes
+            .iter()
+            .map(|route| route.as_str().to_owned())
+            .collect::<Vec<_>>();
+        // One lookup covers the whole allowlist; the first unknown slug in
+        // request order is the one reported, as the per-route check did.
+        let known: BTreeSet<String> = sqlx::query_scalar!(
+            "SELECT slug FROM routes WHERE slug = ANY($1::text[])",
+            &allowed_routes
+        )
+        .fetch_all(&mut *transaction)
+        .await?
+        .into_iter()
+        .collect();
+        if let Some(route) = key
+            .allowed_routes
+            .iter()
+            .find(|route| !known.contains(route.as_str()))
+        {
+            return Err(Error::Invalid(format!(
+                "allowlisted route {route} is not active"
+            )));
         }
-        for route in &key.allowed_routes {
-            let exists: bool = sqlx::query_scalar!(
-                "SELECT EXISTS (SELECT 1 FROM routes WHERE slug = $1) AS \"value!\"",
-                route.as_str()
-            )
-            .fetch_one(&mut *transaction)
-            .await?;
-            if !exists {
-                return Err(Error::Invalid(format!(
-                    "allowlisted route {route} is not active"
-                )));
-            }
-            sqlx::query!(
-                "INSERT INTO api_key_route_allowlist (api_key_id, route_slug) VALUES ($1, $2)",
-                id,
-                route.as_str()
-            )
-            .execute(&mut *transaction)
-            .await?;
-        }
+        sqlx::query!(
+            "INSERT INTO api_key_route_allowlist (api_key_id, route_slug) \
+             SELECT $1, UNNEST($2::text[])",
+            id,
+            &allowed_routes
+        )
+        .execute(&mut *transaction)
+        .await?;
         record_success(
             &mut *transaction,
             self.provenance(),

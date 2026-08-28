@@ -1,3 +1,4 @@
+use super::helpers::{self, insert_draft_operations, insert_draft_targets};
 use super::*;
 use crate::audit_events::record_success;
 
@@ -177,29 +178,32 @@ impl Store {
         )
         .execute(&mut *transaction)
         .await?;
-        for operation in &input.operations {
-            sqlx::query!(
-                "INSERT INTO route_draft_operations (route_draft_id, operation) VALUES ($1, $2)",
-                draft_id,
-                operation.as_str()
-            )
-            .execute(&mut *transaction)
-            .await?;
-        }
+        insert_draft_operations(&mut transaction, draft_id, &input.operations).await?;
+        let requested = input
+            .targets
+            .iter()
+            .map(|(provider_model_id, _, _, _)| *provider_model_id)
+            .collect::<Vec<_>>();
+        // One query decides which requested models are active; the loop below
+        // keeps reporting the first inactive one in position order.
+        let active: BTreeSet<Uuid> = sqlx::query_scalar!(
+            "SELECT prm.source_provider_model_id AS \"id!\" FROM providers p \
+             JOIN provider_revision_models prm ON prm.provider_revision_id = p.active_revision_id \
+             WHERE prm.source_provider_model_id = ANY($1::uuid[]) AND prm.enabled \
+               AND p.state <> 'disabled'::provider_state",
+            &requested
+        )
+        .fetch_all(&mut *transaction)
+        .await?
+        .into_iter()
+        .collect();
+        let mut rows = helpers::DraftTargetRows::default();
         for (position, (provider_model_id, priority, weight, timeout_ms)) in
             input.targets.iter().enumerate()
         {
             let position = i32::try_from(position)
                 .map_err(|_| Error::Invalid("too many targets".to_owned()))?;
-            let enabled: bool = sqlx::query_scalar!(
-                "SELECT EXISTS (SELECT 1 FROM providers p \
-                 JOIN provider_revision_models prm ON prm.provider_revision_id = p.active_revision_id \
-                 WHERE prm.source_provider_model_id = $1 AND prm.enabled \
-                   AND p.state <> 'disabled'::provider_state) AS \"value!\"",
-            provider_model_id)
-            .fetch_one(&mut *transaction)
-            .await?;
-            if !enabled {
+            if !active.contains(provider_model_id) {
                 return Err(Error::Invalid(format!(
                     "provider model {provider_model_id} is not active"
                 )));
@@ -214,14 +218,16 @@ impl Store {
                         && target.timeout_ms == *timeout_ms
                 })
                 .map_or_else(Uuid::now_v7, |target| target.routing_id);
-            sqlx::query!(
-                "INSERT INTO route_draft_targets \
-                  (id, routing_id, route_draft_id, provider_model_id, priority, weight, timeout_ms, position) \
-                  VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
-            Uuid::now_v7(), routing_id, draft_id, provider_model_id, priority, weight, timeout_ms, position)
-            .execute(&mut *transaction)
-            .await?;
+            rows.push(
+                routing_id,
+                *provider_model_id,
+                *priority,
+                *weight,
+                *timeout_ms,
+                position,
+            );
         }
+        insert_draft_targets(&mut transaction, draft_id, &rows).await?;
         record_success(
             &mut *transaction,
             self.provenance(),

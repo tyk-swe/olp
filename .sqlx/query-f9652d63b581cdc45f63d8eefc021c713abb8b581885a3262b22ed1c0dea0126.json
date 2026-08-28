@@ -1,0 +1,44 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO provider_models (id, provider_id, upstream_model, display_name, enabled, discovered_at) SELECT t.id, $1, t.upstream_model, t.display_name, t.enabled, now() FROM UNNEST($2::uuid[], $3::text[], $4::text[], $5::bool[]) AS t(id, upstream_model, display_name, enabled) ON CONFLICT (provider_id, upstream_model) DO UPDATE SET display_name = EXCLUDED.display_name, enabled = EXCLUDED.enabled, discovered_at = EXCLUDED.discovered_at RETURNING id, upstream_model",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "provider_models",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "upstream_model",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "provider_models",
+            "name": "upstream_model"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "UuidArray",
+        "TextArray",
+        "TextArray",
+        "BoolArray"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "f9652d63b581cdc45f63d8eefc021c713abb8b581885a3262b22ed1c0dea0126"
+}

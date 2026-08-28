@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO api_key_route_allowlist (api_key_id, route_slug) SELECT $1, UNNEST($2::text[])",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "TextArray"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "f819eb6f35249f9e60a263249d28b454fb91fad292c6826608a1e0c6e3bdac66"
+}

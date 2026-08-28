@@ -188,38 +188,7 @@ impl Store {
                 validate_provider_capability(&provider_kind, capability)?;
             }
         }
-        for model in models {
-            let model_id: Uuid = sqlx::query_scalar!(
-                "INSERT INTO provider_models \
-                 (id, provider_id, upstream_model, display_name, enabled, discovered_at) \
-                 VALUES ($1, $2, $3, $4, $5, now()) \
-                 ON CONFLICT (provider_id, upstream_model) DO UPDATE SET \
-                   display_name = EXCLUDED.display_name, enabled = EXCLUDED.enabled, \
-                   discovered_at = EXCLUDED.discovered_at RETURNING id",
-                Uuid::now_v7(),
-                provider_id,
-                model.upstream_model.trim(),
-                model.display_name.trim(),
-                model.enabled
-            )
-            .fetch_one(&mut *transaction)
-            .await?;
-            sqlx::query!(
-                "DELETE FROM model_capabilities WHERE provider_model_id = $1",
-                model_id
-            )
-            .execute(&mut *transaction)
-            .await?;
-            for capability in &model.capabilities {
-                sqlx::query!(
-                    "INSERT INTO model_capabilities \
-                     (provider_model_id, operation, surface, mode, source, certified_at) \
-                     VALUES ($1, $2, $3, $4, $5, CASE WHEN $5 = 'certified' THEN now() ELSE NULL END)",
-                model_id, capability.operation.as_str(), capability.surface.as_str(), capability.mode.as_str(), capability.source.as_str())
-                .execute(&mut *transaction)
-                .await?;
-            }
-        }
+        store_discovered_models(&mut transaction, provider_id, models).await?;
         let etag = Uuid::now_v7();
         // The `FOR UPDATE` read above already refused a disabled provider, and
         // it holds the row for the rest of the transaction. The guard repeats
@@ -594,4 +563,86 @@ async fn ensure_provider_exists(store: &Store, provider_id: Uuid) -> Result<(), 
     .fetch_one(store.pool())
     .await?;
     exists.then_some(()).ok_or(Error::NotFound)
+}
+
+/// Upserts every discovered model in one statement and rewrites their
+/// capability rows in two more, instead of three statements per model.
+async fn store_discovered_models(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    provider_id: Uuid,
+    models: &[DiscoveredModelInput],
+) -> Result<(), Error> {
+    // Every model is upserted in one statement; the returned ids key the
+    // capability rewrite that follows.
+    let ids = models.iter().map(|_| Uuid::now_v7()).collect::<Vec<_>>();
+    let upstream_models = models
+        .iter()
+        .map(|model| model.upstream_model.trim().to_owned())
+        .collect::<Vec<_>>();
+    let display_names = models
+        .iter()
+        .map(|model| model.display_name.trim().to_owned())
+        .collect::<Vec<_>>();
+    let enabled = models.iter().map(|model| model.enabled).collect::<Vec<_>>();
+    let model_ids: BTreeMap<String, Uuid> = sqlx::query!(
+        "INSERT INTO provider_models \
+         (id, provider_id, upstream_model, display_name, enabled, discovered_at) \
+         SELECT t.id, $1, t.upstream_model, t.display_name, t.enabled, now() \
+         FROM UNNEST($2::uuid[], $3::text[], $4::text[], $5::bool[]) \
+           AS t(id, upstream_model, display_name, enabled) \
+         ON CONFLICT (provider_id, upstream_model) DO UPDATE SET \
+           display_name = EXCLUDED.display_name, enabled = EXCLUDED.enabled, \
+           discovered_at = EXCLUDED.discovered_at \
+         RETURNING id, upstream_model",
+        provider_id,
+        &ids,
+        &upstream_models,
+        &display_names,
+        &enabled
+    )
+    .fetch_all(&mut **transaction)
+    .await?
+    .into_iter()
+    .map(|row| (row.upstream_model, row.id))
+    .collect();
+    let stored_ids = model_ids.values().copied().collect::<Vec<_>>();
+    sqlx::query!(
+        "DELETE FROM model_capabilities WHERE provider_model_id = ANY($1::uuid[])",
+        &stored_ids
+    )
+    .execute(&mut **transaction)
+    .await?;
+    let mut capability_model_ids = Vec::new();
+    let mut operations = Vec::new();
+    let mut surfaces = Vec::new();
+    let mut modes = Vec::new();
+    let mut sources = Vec::new();
+    for model in models {
+        let model_id = *model_ids
+            .get(model.upstream_model.trim())
+            .ok_or_else(|| Error::Invalid("discovered model was not stored".to_owned()))?;
+        for capability in &model.capabilities {
+            capability_model_ids.push(model_id);
+            operations.push(capability.operation.as_str().to_owned());
+            surfaces.push(capability.surface.as_str().to_owned());
+            modes.push(capability.mode.as_str().to_owned());
+            sources.push(capability.source.as_str().to_owned());
+        }
+    }
+    sqlx::query!(
+        "INSERT INTO model_capabilities \
+         (provider_model_id, operation, surface, mode, source, certified_at) \
+         SELECT t.provider_model_id, t.operation, t.surface, t.mode, t.source, \
+                CASE WHEN t.source = 'certified' THEN now() ELSE NULL END \
+         FROM UNNEST($1::uuid[], $2::text[], $3::text[], $4::text[], $5::text[]) \
+           AS t(provider_model_id, operation, surface, mode, source)",
+        &capability_model_ids,
+        &operations,
+        &surfaces,
+        &modes,
+        &sources
+    )
+    .execute(&mut **transaction)
+    .await?;
+    Ok(())
 }

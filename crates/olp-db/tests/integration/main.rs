@@ -6,6 +6,7 @@
 
 mod support;
 
+mod batched_writes_postgres;
 mod configuration_postgres;
 mod distributed_limits_valkey;
 mod idempotency_replay_postgres;

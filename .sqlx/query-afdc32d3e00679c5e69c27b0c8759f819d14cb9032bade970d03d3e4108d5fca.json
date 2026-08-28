@@ -1,0 +1,36 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT t.ordinality AS \"ordinality!\", prm.source_provider_model_id AS \"provider_model_id!\" FROM UNNEST($1::uuid[], $2::text[]) WITH ORDINALITY AS t(provider_id, upstream_model, ordinality) JOIN providers p ON p.id = t.provider_id JOIN provider_revision_models prm ON prm.provider_revision_id = p.active_revision_id AND prm.upstream_model = t.upstream_model AND prm.enabled WHERE p.state <> 'disabled'::provider_state",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "ordinality!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 1,
+        "name": "provider_model_id!",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "provider_revision_models",
+            "name": "source_provider_model_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "UuidArray",
+        "TextArray"
+      ]
+    },
+    "nullable": [
+      null,
+      false
+    ]
+  },
+  "hash": "afdc32d3e00679c5e69c27b0c8759f819d14cb9032bade970d03d3e4108d5fca"
+}

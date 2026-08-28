@@ -310,8 +310,7 @@ impl Service {
                 "provider_protocol_error",
                 "The provider returned an incompatible generation response.",
             );
-            accounting
-                .finish(RequestOutcome::from_error(&failure));
+            accounting.finish(RequestOutcome::from_error(&failure));
             return Err(failure);
         };
         Ok(RoutedEvents {
@@ -410,8 +409,7 @@ impl Service {
                 } else {
                     error
                 };
-                accounting
-                    .finish(RequestOutcome::from_error(&failure));
+                accounting.finish(RequestOutcome::from_error(&failure));
                 return Err(failure);
             }
         };
@@ -476,8 +474,7 @@ impl Service {
                 "provider_protocol_error",
                 "The provider returned an event stream for a media-job operation.",
             );
-            accounting
-                .finish(RequestOutcome::from_error(&failure));
+            accounting.finish(RequestOutcome::from_error(&failure));
             return Err(failure);
         };
         accounting.replace_usage(usage_from_result(&result));
@@ -518,8 +515,7 @@ impl Service {
                 "provider_protocol_error",
                 "The provider returned an event stream for a unary result operation.",
             );
-            accounting
-                .finish(RequestOutcome::from_error(&failure));
+            accounting.finish(RequestOutcome::from_error(&failure));
             return Err(failure);
         };
         accounting.replace_usage(usage_from_result(&result));
@@ -636,8 +632,7 @@ impl Service {
                 } else {
                     error
                 };
-                accounting
-                    .finish(RequestOutcome::from_error(&failure));
+                accounting.finish(RequestOutcome::from_error(&failure));
                 return Err(failure);
             }
         };

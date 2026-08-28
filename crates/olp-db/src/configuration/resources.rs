@@ -37,7 +37,7 @@ use super::{
 
 mod api_keys;
 mod credentials;
-mod helpers;
+pub(crate) mod helpers;
 mod models;
 mod providers;
 mod revisions;

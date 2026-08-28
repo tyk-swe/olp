@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO route_draft_operations (route_draft_id, operation) SELECT $1, UNNEST($2::text[])",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "TextArray"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "ebf0b9790ce38d615d6ec734d4248807a81112456f0d019a86d37139da0d16db"
+}
