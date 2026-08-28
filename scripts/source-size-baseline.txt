@@ -58,14 +58,12 @@ fn:crates/olp-engine/src/inference/execution.rs:execute_reconciliation_result_in
 fn:crates/olp-engine/src/inference/failover.rs:execute_attempt
 fn:crates/olp-engine/src/protocols/anthropic/translate/decode.rs:request
 fn:crates/olp-engine/src/protocols/anthropic/translate/encode.rs:request
-fn:crates/olp-engine/src/protocols/client.rs:aggregate_generation
 fn:crates/olp-engine/src/protocols/gemini/client_stream.rs:push
 fn:crates/olp-engine/src/protocols/gemini/stream.rs:decode_frames
 fn:crates/olp-engine/src/protocols/gemini/translate/decode.rs:decode_content
 fn:crates/olp-engine/src/protocols/gemini/translate/decode.rs:request
 fn:crates/olp-engine/src/protocols/gemini/translate/encode.rs:encode_content
 fn:crates/olp-engine/src/protocols/gemini/translate/encode.rs:request
-fn:crates/olp-engine/src/protocols/openai/client.rs:encode_response_object
 fn:crates/olp-engine/src/protocols/openai/client.rs:push
 fn:crates/olp-engine/src/protocols/openai/response.rs:decode_chunk
 fn:crates/olp-engine/src/protocols/openai/responses/request.rs:encode_response_create

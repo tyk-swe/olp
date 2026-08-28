@@ -57,15 +57,33 @@ pub(in crate::protocols) fn aggregate_generation(
     if !matches!(events.last().map(|event| &event.kind), Some(Kind::Done)) {
         return Err(AggregateError::MissingDone);
     }
-    let mut aggregate = AggregatedGeneration {
-        response_id: None,
-        provider_model: None,
-        outputs: BTreeMap::new(),
-        usage: None,
-        extensions: BTreeMap::new(),
-    };
+    let mut aggregate = AggregatedGeneration::new();
     for event in events {
-        match &event.kind {
+        aggregate.apply(&event.kind, target)?;
+    }
+    Ok(aggregate)
+}
+
+impl AggregatedGeneration {
+    pub(in crate::protocols) fn new() -> Self {
+        Self {
+            response_id: None,
+            provider_model: None,
+            outputs: BTreeMap::new(),
+            usage: None,
+            extensions: BTreeMap::new(),
+        }
+    }
+
+    /// Folds one canonical event into the aggregate. Streaming encoders call
+    /// this per event so they never have to retain the event history.
+    pub(in crate::protocols) fn apply(
+        &mut self,
+        kind: &Kind,
+        target: Surface,
+    ) -> Result<(), AggregateError> {
+        let aggregate = self;
+        match kind {
             Kind::ResponseStart {
                 response_id,
                 provider_model,
@@ -134,7 +152,7 @@ pub(in crate::protocols) fn aggregate_generation(
                 // gateway cannot renegotiate mid-response, so they are dropped
                 // rather than turned into a 502. Requests still fail closed.
                 if extensions.source != Some(target) {
-                    continue;
+                    return Ok(());
                 }
                 for (path, value) in &extensions.values {
                     if aggregate
@@ -148,6 +166,6 @@ pub(in crate::protocols) fn aggregate_generation(
             }
             Kind::Done => {}
         }
+        Ok(())
     }
-    Ok(aggregate)
 }

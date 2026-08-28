@@ -7,7 +7,9 @@ use crate::domain::canonical::{
 use serde_json::{Value, json};
 use thiserror::Error;
 
-use crate::protocols::client::{AggregateError, aggregate_generation};
+use crate::protocols::client::{
+    AggregateError, AggregatedGeneration, AggregatedTool, aggregate_generation,
+};
 use crate::protocols::sse::Frame;
 
 use super::extensions::apply_pointer_extensions;
@@ -22,106 +24,18 @@ pub fn encode_response_object(
     fallback_id: &str,
     created_at: i64,
 ) -> Result<Object, OpenAiClientEncodeError> {
-    let mut aggregate = aggregate_generation(events, Surface::OpenAi)?;
+    let aggregate = aggregate_generation(events, Surface::OpenAi)?;
+    encode_aggregate(aggregate, client_model, fallback_id, created_at)
+}
+
+fn encode_aggregate(
+    mut aggregate: AggregatedGeneration,
+    client_model: &str,
+    fallback_id: &str,
+    created_at: i64,
+) -> Result<Object, OpenAiClientEncodeError> {
     let raw_output = take_raw_response_output(&mut aggregate.extensions)?;
-    // Raw items are re-inserted at their original wire indices below, so the
-    // items rebuilt here have to claim the positions those leave free. Each
-    // gets its own index: two tool calls under one canonical output otherwise
-    // reused the same `/output/{n}/id` extension and shipped duplicate ids.
-    let raw_indices = raw_output
-        .iter()
-        .map(|(index, _)| *index)
-        .collect::<BTreeSet<_>>();
-    let mut next_index = 0_usize;
-    let mut claim_wire_index = move || {
-        while raw_indices.contains(&next_index) {
-            next_index += 1;
-        }
-        let index = next_index;
-        next_index += 1;
-        index
-    };
-    let mut output = Vec::new();
-    let mut finish = None;
-    for (_, item) in aggregate.outputs {
-        finish = finish.or_else(|| item.finish.clone());
-        if !item.text.is_empty() || !item.refusal.is_empty() || item.tools.is_empty() {
-            let wire_index = claim_wire_index();
-            let mut content = Vec::new();
-            if !item.text.is_empty() {
-                let annotations = aggregate
-                    .extensions
-                    .remove(&format!("/output/{wire_index}/content/0/annotations"))
-                    .unwrap_or_else(|| json!([]));
-                content.push(json!({
-                    "type": "output_text",
-                    "text": item.text,
-                    "annotations": annotations,
-                }));
-            }
-            if !item.refusal.is_empty() {
-                content.push(json!({"type": "refusal", "refusal": item.refusal}));
-            }
-            let id = take_string_extension(
-                &mut aggregate.extensions,
-                &format!("/output/{wire_index}/id"),
-            )
-            .unwrap_or_else(|| format!("msg_{wire_index}"));
-            let status = take_string_extension(
-                &mut aggregate.extensions,
-                &format!("/output/{wire_index}/status"),
-            )
-            .unwrap_or_else(|| "completed".into());
-            output.push(json!({
-                "id": id,
-                "type": "message",
-                "role": "assistant",
-                "status": status,
-                "content": content,
-            }));
-        }
-        for (_, tool) in item.tools {
-            let wire_index = claim_wire_index();
-            let id = tool
-                .id
-                .ok_or(OpenAiClientEncodeError::IncompleteToolCall("id"))?;
-            let name = tool
-                .name
-                .ok_or(OpenAiClientEncodeError::IncompleteToolCall("name"))?;
-            let wire_id = take_string_extension(
-                &mut aggregate.extensions,
-                &format!("/output/{wire_index}/id"),
-            )
-            .unwrap_or_else(|| format!("fc_{wire_index}"));
-            let status = take_string_extension(
-                &mut aggregate.extensions,
-                &format!("/output/{wire_index}/status"),
-            )
-            .unwrap_or_else(|| "completed".into());
-            output.push(json!({
-                "id": wire_id,
-                "type": "function_call",
-                "call_id": id,
-                "name": name,
-                // A tool invoked with no parameters aggregates to an empty
-                // string, which is not valid JSON for the client to parse.
-                "arguments": if tool.arguments.trim().is_empty() {
-                    "{}".to_owned()
-                } else {
-                    tool.arguments
-                },
-                "status": status,
-            }));
-        }
-    }
-    for (index, item) in raw_output {
-        if index > output.len() {
-            return Err(OpenAiClientEncodeError::InvalidExtension(format!(
-                "{OPENAI_RESPONSES_RAW_OUTPUT_PREFIX}/{index}"
-            )));
-        }
-        output.insert(index, item);
-    }
+    let (output, finish) = build_output(&mut aggregate, raw_output)?;
     let observed_created_at =
         take_i64_extension(&mut aggregate.extensions, "/created_at").unwrap_or(0);
     let created_at = if observed_created_at == 0 {
@@ -152,7 +66,148 @@ pub fn encode_response_object(
         message: "the provider ended the response with an error".to_owned(),
         extra: BTreeMap::new(),
     });
-    let usage = aggregate.usage.map(|usage| Usage {
+    let usage = aggregate.usage.map(encode_usage);
+    apply_pointer_extensions(
+        Object {
+            id: aggregate.response_id.unwrap_or_else(|| fallback_id.into()),
+            object: "response".into(),
+            created_at,
+            status,
+            model: client_model.into(),
+            output,
+            usage,
+            error,
+            incomplete_details,
+            extra: BTreeMap::new(),
+        },
+        &aggregate.extensions,
+    )
+    .map_err(OpenAiClientEncodeError::InvalidExtension)
+}
+
+/// Rebuilds the `output` array: canonical items claim the wire indices that
+/// raw passthrough items leave free, then the raw items are re-inserted at
+/// their original positions.
+fn build_output(
+    aggregate: &mut AggregatedGeneration,
+    raw_output: Vec<(usize, Value)>,
+) -> Result<(Vec<Value>, Option<FinishReason>), OpenAiClientEncodeError> {
+    // Raw items are re-inserted at their original wire indices below, so the
+    // items rebuilt here have to claim the positions those leave free. Each
+    // gets its own index: two tool calls under one canonical output otherwise
+    // reused the same `/output/{n}/id` extension and shipped duplicate ids.
+    let raw_indices = raw_output
+        .iter()
+        .map(|(index, _)| *index)
+        .collect::<BTreeSet<_>>();
+    let mut next_index = 0_usize;
+    let mut claim_wire_index = move || {
+        while raw_indices.contains(&next_index) {
+            next_index += 1;
+        }
+        let index = next_index;
+        next_index += 1;
+        index
+    };
+    let mut output = Vec::new();
+    let mut finish = None;
+    for (_, item) in std::mem::take(&mut aggregate.outputs) {
+        finish = finish.or_else(|| item.finish.clone());
+        if !item.text.is_empty() || !item.refusal.is_empty() || item.tools.is_empty() {
+            let wire_index = claim_wire_index();
+            output.push(message_item(
+                &mut aggregate.extensions,
+                wire_index,
+                item.text,
+                item.refusal,
+            ));
+        }
+        for (_, tool) in item.tools {
+            let wire_index = claim_wire_index();
+            output.push(function_call_item(
+                &mut aggregate.extensions,
+                wire_index,
+                tool,
+            )?);
+        }
+    }
+    for (index, item) in raw_output {
+        if index > output.len() {
+            return Err(OpenAiClientEncodeError::InvalidExtension(format!(
+                "{OPENAI_RESPONSES_RAW_OUTPUT_PREFIX}/{index}"
+            )));
+        }
+        output.insert(index, item);
+    }
+    Ok((output, finish))
+}
+
+fn message_item(
+    extensions: &mut BTreeMap<String, Value>,
+    wire_index: usize,
+    text: String,
+    refusal: String,
+) -> Value {
+    let mut content = Vec::new();
+    if !text.is_empty() {
+        let annotations = extensions
+            .remove(&format!("/output/{wire_index}/content/0/annotations"))
+            .unwrap_or_else(|| json!([]));
+        content.push(json!({
+            "type": "output_text",
+            "text": text,
+            "annotations": annotations,
+        }));
+    }
+    if !refusal.is_empty() {
+        content.push(json!({"type": "refusal", "refusal": refusal}));
+    }
+    let id = take_string_extension(extensions, &format!("/output/{wire_index}/id"))
+        .unwrap_or_else(|| format!("msg_{wire_index}"));
+    let status = take_string_extension(extensions, &format!("/output/{wire_index}/status"))
+        .unwrap_or_else(|| "completed".into());
+    json!({
+        "id": id,
+        "type": "message",
+        "role": "assistant",
+        "status": status,
+        "content": content,
+    })
+}
+
+fn function_call_item(
+    extensions: &mut BTreeMap<String, Value>,
+    wire_index: usize,
+    tool: AggregatedTool,
+) -> Result<Value, OpenAiClientEncodeError> {
+    let id = tool
+        .id
+        .ok_or(OpenAiClientEncodeError::IncompleteToolCall("id"))?;
+    let name = tool
+        .name
+        .ok_or(OpenAiClientEncodeError::IncompleteToolCall("name"))?;
+    let wire_id = take_string_extension(extensions, &format!("/output/{wire_index}/id"))
+        .unwrap_or_else(|| format!("fc_{wire_index}"));
+    let status = take_string_extension(extensions, &format!("/output/{wire_index}/status"))
+        .unwrap_or_else(|| "completed".into());
+    Ok(json!({
+        "id": wire_id,
+        "type": "function_call",
+        "call_id": id,
+        "name": name,
+        // A tool invoked with no parameters aggregates to an empty
+        // string, which is not valid JSON for the client to parse.
+        "arguments": if tool.arguments.trim().is_empty() {
+            "{}".to_owned()
+        } else {
+            tool.arguments
+        },
+        "status": status,
+    }))
+}
+
+fn encode_usage(usage: crate::domain::canonical::events::Usage) -> Usage {
+    Usage {
         input_tokens: usage.input_tokens,
         // The Responses API reports reasoning inside `output_tokens`.
         output_tokens: usage
@@ -172,23 +227,7 @@ pub fn encode_response_object(
                 extra: BTreeMap::new(),
             }),
         extra: BTreeMap::new(),
-    });
-    apply_pointer_extensions(
-        Object {
-            id: aggregate.response_id.unwrap_or_else(|| fallback_id.into()),
-            object: "response".into(),
-            created_at,
-            status,
-            model: client_model.into(),
-            output,
-            usage,
-            error,
-            incomplete_details,
-            extra: BTreeMap::new(),
-        },
-        &aggregate.extensions,
-    )
-    .map_err(OpenAiClientEncodeError::InvalidExtension)
+    }
 }
 
 pub struct Encoder {
@@ -197,8 +236,13 @@ pub struct Encoder {
     created_at: i64,
     next_sequence: u64,
     sequence_number: u64,
-    events: Vec<Event>,
-    collected_event_bytes: usize,
+    // The terminal response object is built from this running aggregate, so
+    // the encoder never retains the event history. Errors the aggregate
+    // raises are deferred to `Done` so the frames emitted before them are
+    // unchanged.
+    aggregate: AggregatedGeneration,
+    deferred_error: Option<AggregateError>,
+    retained_bytes: usize,
     outputs: BTreeMap<u32, StreamOutput>,
     done: bool,
 
@@ -225,7 +269,7 @@ impl std::fmt::Debug for Encoder {
         formatter
             .debug_struct("Encoder")
             .field("next_sequence", &self.next_sequence)
-            .field("collected_event_bytes", &self.collected_event_bytes)
+            .field("retained_bytes", &self.retained_bytes)
             .field("emitted_output_count", &self.outputs.len())
             .field("done", &self.done)
             .finish_non_exhaustive()
@@ -245,8 +289,9 @@ impl Encoder {
             created_at,
             next_sequence: 0,
             sequence_number: 0,
-            events: Vec::new(),
-            collected_event_bytes: 0,
+            aggregate: AggregatedGeneration::new(),
+            deferred_error: None,
+            retained_bytes: 0,
             outputs: BTreeMap::new(),
             done: false,
             incomplete_reason: None,
@@ -265,14 +310,28 @@ impl Encoder {
         }
         // Keep this aligned with the transport-neutral collection ceiling in
         // crates/olp-engine/src/inference/events.rs.
-        const MAX_COLLECTED_CANONICAL_EVENT_BYTES: usize = 16 * 1024 * 1024;
-        let event_bytes = serde_json::to_vec(&event)?.len();
-        self.collected_event_bytes = self
-            .collected_event_bytes
-            .checked_add(event_bytes)
-            .filter(|total| *total <= MAX_COLLECTED_CANONICAL_EVENT_BYTES)
+        const MAX_RETAINED_BYTES: usize = 16 * 1024 * 1024;
+        self.retained_bytes = self
+            .retained_bytes
+            .checked_add(retained_bytes(&event.kind)?)
+            .filter(|total| *total <= MAX_RETAINED_BYTES)
             .ok_or(OpenAiClientEncodeError::EventHistoryTooLarge)?;
         self.next_sequence = self.next_sequence.saturating_add(1);
+        match &event.kind {
+            // An upstream error still streams `response.failed` below; the
+            // aggregate only refuses to complete afterwards.
+            Kind::Error { .. } => {
+                self.deferred_error.get_or_insert(AggregateError::Upstream);
+            }
+            // Stream-only extensions are replayed as frames and never reach
+            // the terminal object.
+            Kind::SourceExtension { extensions } if is_stream_only(extensions) => {}
+            kind => {
+                if let Err(error) = self.aggregate.apply(kind, Surface::OpenAi) {
+                    self.deferred_error.get_or_insert(error);
+                }
+            }
+        }
         let mut frames = Vec::new();
         match &event.kind {
             Kind::ResponseStart {
@@ -376,17 +435,16 @@ impl Encoder {
                 // Extensions from another surface have no Responses
                 // representation; dropping them keeps the stream alive.
                 if extensions.source != Some(Surface::OpenAi) {
-                    self.events.push(event);
                     return Ok(frames);
                 }
-                for (path, value) in extensions.values.clone() {
+                for (path, value) in &extensions.values {
                     if path.starts_with("/stream/") {
                         let kind = value
                             .get("type")
                             .and_then(Value::as_str)
                             .ok_or_else(|| OpenAiClientEncodeError::InvalidExtension(path.clone()))?
                             .to_owned();
-                        frames.push(self.frame(&kind, value)?);
+                        frames.push(self.frame(&kind, value.clone())?);
                     }
                 }
             }
@@ -404,9 +462,12 @@ impl Encoder {
             }
             Kind::Done => {
                 let terminal_reason = self.incomplete_reason.take();
-                let normalized = self.normalized_events_with(event.clone());
-                let mut response = encode_response_object(
-                    &normalized,
+                if let Some(error) = self.deferred_error.take() {
+                    return Err(error.into());
+                }
+                let aggregate = std::mem::replace(&mut self.aggregate, AggregatedGeneration::new());
+                let mut response = encode_aggregate(
+                    aggregate,
                     &self.client_model,
                     &self.fallback_id,
                     self.created_at,
@@ -424,7 +485,6 @@ impl Encoder {
                 self.done = true;
             }
         }
-        self.events.push(event);
         Ok(frames)
     }
 
@@ -612,24 +672,44 @@ impl Encoder {
             retry_ms: None,
         })
     }
+}
 
-    fn normalized_events_with(&self, terminal: Event) -> Vec<Event> {
-        self.events
-            .iter()
-            .chain(std::iter::once(&terminal))
-            .filter(|event| {
-                !matches!(
-                    &event.kind,
-                    Kind::SourceExtension { extensions }
-                        if extensions.values.keys().all(|path| path.starts_with("/stream/"))
-                )
-            })
-            .enumerate()
-            .map(|(sequence, event)| {
-                Event::new(sequence.try_into().unwrap_or(u64::MAX), event.kind.clone())
-            })
-            .collect()
-    }
+fn is_stream_only(extensions: &crate::domain::canonical::requests::SourceExtensions) -> bool {
+    extensions
+        .values
+        .keys()
+        .all(|path| path.starts_with("/stream/"))
+}
+
+/// Bytes an event adds to the state the encoder keeps until `Done`: the
+/// aggregated text, refusal, and tool arguments, plus retained extensions.
+fn retained_bytes(kind: &Kind) -> Result<usize, OpenAiClientEncodeError> {
+    Ok(match kind {
+        Kind::TextDelta { text, .. } | Kind::RefusalDelta { text, .. } => text.len(),
+        Kind::ToolCallDelta {
+            id,
+            name,
+            arguments_delta,
+            ..
+        } => {
+            arguments_delta.len()
+                + id.as_ref().map_or(0, String::len)
+                + name.as_ref().map_or(0, String::len)
+        }
+        Kind::ResponseStart {
+            response_id,
+            provider_model,
+        } => {
+            response_id.as_ref().map_or(0, String::len)
+                + provider_model.as_ref().map_or(0, String::len)
+        }
+        Kind::SourceExtension { extensions }
+            if extensions.source == Some(Surface::OpenAi) && !is_stream_only(extensions) =>
+        {
+            serde_json::to_vec(&extensions.values)?.len()
+        }
+        _ => 0,
+    })
 }
 
 fn take_i64_extension(extensions: &mut BTreeMap<String, Value>, path: &str) -> Option<i64> {
@@ -703,7 +783,7 @@ mod tests {
             0,
             Kind::TextDelta {
                 output_index: 0,
-                text: "x".repeat(16 * 1024 * 1024),
+                text: "x".repeat(16 * 1024 * 1024 + 1),
             },
         );
 
