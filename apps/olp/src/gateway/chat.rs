@@ -1,3 +1,4 @@
+use crate::public_http::request_admission::HttpRequestAdmission;
 use axum::{
     Json,
     body::Bytes,
@@ -6,7 +7,7 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use olp_engine::domain::canonical::{events::Event, identity::TransportMode};
-use olp_engine::inference::{execution::RoutedEvents, principal::Principal};
+use olp_engine::inference::execution::RoutedEvents;
 use olp_engine::protocols::openai::chat::{CompletionRequest, decode};
 
 use crate::{
@@ -27,7 +28,7 @@ use super::{
 
 pub(super) async fn chat_completions(
     State(state): State<GatewayState>,
-    Extension(principal): Extension<Principal>,
+    Extension(principal): Extension<HttpRequestAdmission>,
     payload: Result<Json<CompletionRequest>, JsonRejection>,
 ) -> Result<Response, InferenceError> {
     let Json(mut wire_request) = match payload {

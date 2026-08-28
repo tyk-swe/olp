@@ -1,3 +1,4 @@
+use crate::public_http::request_admission::HttpRequestAdmission;
 use std::{collections::BTreeMap, time::Duration};
 
 use chrono::Utc;
@@ -16,7 +17,6 @@ use olp_engine::domain::{
     ids::RouteSlug,
 };
 use olp_engine::inference::execution::RequiredTarget;
-use olp_engine::inference::principal::Principal;
 use olp_engine::inference::selection::select_representable_attempts_filtered;
 use serde_json::Value;
 use tracing::{error, warn};
@@ -30,7 +30,7 @@ use super::{
 
 pub(super) fn select_video_create_target(
     state: &GatewayState,
-    principal: &Principal,
+    principal: &HttpRequestAdmission,
     operation: &Operation,
     local_job_id: uuid::Uuid,
 ) -> Result<(ApiKey, RouteSlug, RequiredTarget), InferenceError> {
@@ -310,7 +310,7 @@ async fn execute_media_reconciliation_result(
 
 pub(super) async fn refresh_video_list_record(
     state: &GatewayState,
-    principal: &Principal,
+    principal: &HttpRequestAdmission,
     record: MediaJobRecord,
 ) -> MediaJobRecord {
     if !matches!(record.state, MediaJobState::Queued | MediaJobState::Running) {
@@ -362,7 +362,7 @@ pub(super) async fn refresh_video_list_record(
 
 pub(super) async fn owned_media_job(
     state: &GatewayState,
-    principal: &Principal,
+    principal: &HttpRequestAdmission,
     video_id: &str,
     operation: OperationKind,
 ) -> Result<(ApiKey, MediaJobRecord), InferenceError> {

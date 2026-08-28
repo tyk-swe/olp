@@ -1,3 +1,4 @@
+use crate::public_http::request_admission::HttpRequestAdmission;
 use axum::{
     Json,
     extract::{Extension, Path, Query, State, rejection::JsonRejection},
@@ -22,7 +23,7 @@ use olp_engine::protocols::anthropic::{
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
-use olp_engine::inference::{execution::CompletedEvents, principal::Principal, runtime::Bundle};
+use olp_engine::inference::{execution::CompletedEvents, runtime::Bundle};
 
 use crate::{
     bootstrap::mode_dependencies::GatewayState,
@@ -44,7 +45,7 @@ use super::{
 
 pub(super) async fn messages(
     State(state): State<GatewayState>,
-    Extension(principal): Extension<Principal>,
+    Extension(principal): Extension<HttpRequestAdmission>,
     payload: Result<Json<MessagesRequest>, JsonRejection>,
 ) -> Result<Response, ProtocolError> {
     let Json(mut request) = valid_json(payload, Surface::Anthropic)?;
@@ -105,7 +106,7 @@ fn unary_response(mut completed: CompletedEvents) -> Result<Response, ProtocolEr
 
 pub(super) async fn count_tokens(
     State(state): State<GatewayState>,
-    Extension(principal): Extension<Principal>,
+    Extension(principal): Extension<HttpRequestAdmission>,
     payload: Result<Json<CountTokensRequest>, JsonRejection>,
 ) -> Result<Response, ProtocolError> {
     let Json(mut request) = valid_json(payload, Surface::Anthropic)?;
@@ -174,7 +175,7 @@ struct Model {
 
 pub(super) async fn models(
     State(state): State<GatewayState>,
-    Extension(principal): Extension<Principal>,
+    Extension(principal): Extension<HttpRequestAdmission>,
     Query(query): Query<ModelsQuery>,
 ) -> Result<Response, ProtocolError> {
     let (runtime, key) =
@@ -242,7 +243,7 @@ fn model_page<'a>(
 
 pub(super) async fn model(
     State(state): State<GatewayState>,
-    Extension(principal): Extension<Principal>,
+    Extension(principal): Extension<HttpRequestAdmission>,
     Path(id): Path<String>,
 ) -> Result<Response, ProtocolError> {
     let (runtime, key) =

@@ -15,25 +15,16 @@ use olp_engine::domain::{
     canonical::{identity::TransportMode, requests::Operation},
 };
 use olp_engine::inference::{
-    execution::{RequestAdmission, RoutedUnaryFinalizer},
-    limits::Reservation,
-    runtime::Bundle,
+    execution::RoutedUnaryFinalizer, limits::Reservation, runtime::Bundle,
 };
 
 use crate::bootstrap::mode_dependencies::GatewayState;
+use crate::public_http::request_admission::HttpRequestAdmission;
 use olp_engine::inference::principal::Principal;
 
 use super::error::InferenceError;
 
 use olp_engine::inference::execution::{RequiredTarget, RoutedEvents, RoutedUnaryResult};
-
-fn admitted_request() -> RequestAdmission {
-    RequestAdmission::new(
-        crate::public_http::request_admission::http_inference_reservation(),
-        crate::public_http::request_admission::http_inference_reserved_tokens(),
-        crate::public_http::request_admission::http_inference_metadata_claim(),
-    )
-}
 
 pub(super) fn authorize_principal<'a>(
     state: &GatewayState,
@@ -56,42 +47,33 @@ pub(super) fn incompatible_result(operation: &'static str) -> InferenceError {
 
 pub(crate) async fn execute_event_operation(
     state: &GatewayState,
-    principal: &Principal,
+    admission: &HttpRequestAdmission,
     operation: Operation,
     mode: TransportMode,
 ) -> Result<RoutedEvents, InferenceError> {
     state
         .inference()
-        .execute_event(principal, operation, mode, admitted_request())
-        .await
-        .map_err(Into::into)
-}
-
-#[cfg(test)]
-pub(super) async fn execute_event_operation_without_admission(
-    state: &GatewayState,
-    principal: &Principal,
-    operation: Operation,
-    mode: TransportMode,
-) -> Result<RoutedEvents, InferenceError> {
-    state
-        .inference()
-        .execute_event(principal, operation, mode, RequestAdmission::default())
+        .execute_event(
+            admission.principal(),
+            operation,
+            mode,
+            admission.engine_admission(),
+        )
         .await
         .map_err(Into::into)
 }
 
 pub(super) async fn execute_unary_result(
     state: &GatewayState,
-    principal: &Principal,
+    admission: &HttpRequestAdmission,
     operation: Operation,
 ) -> Result<RoutedUnaryResult, InferenceError> {
-    execute_routed_result(state, principal, operation, TransportMode::Unary, None).await
+    execute_routed_result(state, admission, operation, TransportMode::Unary, None).await
 }
 
 pub(super) async fn execute_routed_result(
     state: &GatewayState,
-    principal: &Principal,
+    admission: &HttpRequestAdmission,
     operation: Operation,
     mode: TransportMode,
     required_target: Option<RequiredTarget>,
@@ -99,32 +81,11 @@ pub(super) async fn execute_routed_result(
     state
         .inference()
         .execute_result(
-            principal,
+            admission.principal(),
             operation,
             mode,
             required_target,
-            admitted_request(),
-        )
-        .await
-        .map_err(Into::into)
-}
-
-#[cfg(test)]
-pub(super) async fn execute_routed_result_without_admission(
-    state: &GatewayState,
-    principal: &Principal,
-    operation: Operation,
-    mode: TransportMode,
-    required_target: Option<RequiredTarget>,
-) -> Result<RoutedUnaryResult, InferenceError> {
-    state
-        .inference()
-        .execute_result(
-            principal,
-            operation,
-            mode,
-            required_target,
-            RequestAdmission::default(),
+            admission.engine_admission(),
         )
         .await
         .map_err(Into::into)
@@ -142,14 +103,11 @@ pub(crate) fn authorize_model_access<'a>(
 
 pub(crate) async fn reserve_model_limits(
     state: &GatewayState,
-    principal: &Principal,
+    admission: &HttpRequestAdmission,
 ) -> Result<Option<Reservation>, InferenceError> {
     state
         .inference()
-        .reserve_model_limits(
-            principal,
-            crate::public_http::request_admission::http_inference_reserved_tokens(),
-        )
+        .reserve_model_limits(admission.principal(), admission.reserved_tokens())
         .await
         .map_err(Into::into)
 }

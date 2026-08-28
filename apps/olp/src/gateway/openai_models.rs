@@ -1,3 +1,4 @@
+use crate::public_http::request_admission::HttpRequestAdmission;
 use axum::{
     Json,
     extract::{Extension, Path, State},
@@ -10,7 +11,7 @@ use olp_engine::domain::{
 };
 use serde::Serialize;
 
-use olp_engine::inference::{principal::Principal, runtime::Bundle};
+use olp_engine::inference::runtime::Bundle;
 
 use crate::{
     bootstrap::mode_dependencies::GatewayState,
@@ -23,7 +24,7 @@ use super::error::openai_error_response;
 
 pub(super) async fn list_models(
     State(state): State<GatewayState>,
-    Extension(principal): Extension<Principal>,
+    Extension(principal): Extension<HttpRequestAdmission>,
 ) -> Result<Json<ModelList>, OpenAiModelError> {
     let (runtime, key) =
         authorize_model_access(&state, &principal).map_err(OpenAiModelError::from_inference)?;
@@ -50,7 +51,7 @@ pub(super) async fn list_models(
 
 pub(super) async fn get_model(
     State(state): State<GatewayState>,
-    Extension(principal): Extension<Principal>,
+    Extension(principal): Extension<HttpRequestAdmission>,
     Path(model_id): Path<String>,
 ) -> Result<Json<ModelObject>, OpenAiModelError> {
     let (runtime, key) =

@@ -333,18 +333,12 @@ async fn direct_executor_reserves_hard_limits_before_route_selection() {
     }))
     .unwrap();
     let operation = decode::chat_completion(request).unwrap();
-    let principal = test_principal(&state, Surface::OpenAi);
-    let error = match execute_event_operation_without_admission(
-        &state,
-        &principal,
-        operation,
-        TransportMode::Unary,
-    )
-    .await
-    {
-        Ok(_) => panic!("missing limiter must fail closed before route selection"),
-        Err(error) => error,
-    };
+    let admission = test_admission(&state, Surface::OpenAi);
+    let error =
+        match execute_event_operation(&state, &admission, operation, TransportMode::Unary).await {
+            Ok(_) => panic!("missing limiter must fail closed before route selection"),
+            Err(error) => error,
+        };
     assert_eq!(error.status(), StatusCode::SERVICE_UNAVAILABLE);
     assert_eq!(error.code(), "distributed_limits_unavailable");
 }
@@ -369,11 +363,11 @@ async fn required_target_unavailability_is_normalized_by_shared_execution_kernel
     }))
     .unwrap();
     let operation = decode_response_input_tokens(request).unwrap();
-    let principal = test_principal(&state, Surface::OpenAi);
+    let admission = test_admission(&state, Surface::OpenAi);
 
-    let error = match execute_routed_result_without_admission(
+    let error = match execute_routed_result(
         &state,
-        &principal,
+        &admission,
         operation,
         TransportMode::Unary,
         Some(RequiredTarget {
@@ -406,20 +400,16 @@ async fn http_pre_reservation_marker_reuses_the_full_reservation() {
         .unwrap(),
     )
     .unwrap();
-    let lease = crate::public_http::request_admission::HTTP_INFERENCE_LIMITS_RESERVED
-        .scope(
-            10_000,
-            reserve(
-                state.limiter(),
-                api_key,
-                &operation,
-                lookup,
-                Duration::from_secs(30),
-                Some(10_000),
-            ),
-        )
-        .await
-        .expect("the canonical executor must reuse the HTTP reservation");
+    let lease = reserve(
+        state.limiter(),
+        api_key,
+        &operation,
+        lookup,
+        Duration::from_secs(30),
+        Some(10_000),
+    )
+    .await
+    .expect("the canonical executor must reuse the HTTP reservation");
     assert!(lease.is_none());
 }
 
@@ -450,22 +440,18 @@ async fn http_request_above_baseline_requires_token_delta_reservation() {
             },
         ),
     );
-    let error = crate::public_http::request_admission::HTTP_INFERENCE_LIMITS_RESERVED
-        .scope(
-            2_000,
-            reserve(
-                state.limiter(),
-                api_key,
-                &operation,
-                lookup,
-                Duration::from_secs(30),
-                Some(2_000),
-            ),
-        )
-        .await
-        .map_err(InferenceError::from)
-        .err()
-        .expect("missing delta limiter must fail closed above the HTTP baseline");
+    let error = reserve(
+        state.limiter(),
+        api_key,
+        &operation,
+        lookup,
+        Duration::from_secs(30),
+        Some(2_000),
+    )
+    .await
+    .map_err(InferenceError::from)
+    .err()
+    .expect("missing delta limiter must fail closed above the HTTP baseline");
     assert_eq!(error.status(), StatusCode::SERVICE_UNAVAILABLE);
     assert_eq!(error.code(), "distributed_limits_unavailable");
 }

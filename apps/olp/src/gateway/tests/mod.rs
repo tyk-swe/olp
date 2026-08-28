@@ -63,10 +63,7 @@ use tower::ServiceExt;
 use super::*;
 use super::{
     error::InferenceError,
-    execution::{
-        execute_event_operation, execute_event_operation_without_admission,
-        execute_routed_result_without_admission,
-    },
+    execution::{execute_event_operation, execute_routed_result},
     multipart::MultipartFormData,
 };
 use crate::public_http::request_admission::multipart::MultipartRequestAdmission;
@@ -241,6 +238,17 @@ fn test_state(streaming: bool) -> (GatewayState, String) {
     );
     state.replace_auth_hmac_key_for_test(auth_hmac_key);
     (state, plaintext)
+}
+
+fn test_admission(
+    state: &GatewayState,
+    surface: Surface,
+) -> crate::public_http::request_admission::HttpRequestAdmission {
+    crate::public_http::request_admission::HttpRequestAdmission::for_test(
+        test_principal(state, surface),
+        None,
+        None,
+    )
 }
 
 fn test_principal(

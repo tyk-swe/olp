@@ -1,3 +1,4 @@
+use crate::public_http::request_admission::HttpRequestAdmission;
 use axum::{
     Json,
     body::Bytes,
@@ -14,7 +15,7 @@ use olp_engine::domain::{
         results::CanonicalResult,
     },
 };
-use olp_engine::inference::{execution::RoutedEvents, principal::Principal};
+use olp_engine::inference::execution::RoutedEvents;
 use olp_engine::protocols::openai::{
     client::{Encoder, encode_response_object},
     responses::{
@@ -47,7 +48,7 @@ use super::{
 
 pub(super) async fn responses(
     State(state): State<GatewayState>,
-    Extension(principal): Extension<Principal>,
+    Extension(principal): Extension<HttpRequestAdmission>,
     payload: Result<Json<Create>, JsonRejection>,
 ) -> Result<Response, InferenceError> {
     let _ = authorize_principal(&state, &principal, GatewayCapability::Inference, None)?;
@@ -139,7 +140,7 @@ fn responses_error_sse(error: &InferenceError) -> Bytes {
 
 pub(super) async fn response_input_tokens(
     State(state): State<GatewayState>,
-    Extension(principal): Extension<Principal>,
+    Extension(principal): Extension<HttpRequestAdmission>,
     payload: Result<Json<ResponseInputTokensRequest>, JsonRejection>,
 ) -> Result<Response, InferenceError> {
     let _ = authorize_principal(&state, &principal, GatewayCapability::Inference, None)?;

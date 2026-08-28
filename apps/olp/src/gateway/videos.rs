@@ -1,3 +1,4 @@
+use crate::public_http::request_admission::HttpRequestAdmission;
 use std::collections::BTreeMap;
 
 use axum::{
@@ -20,10 +21,7 @@ use olp_engine::domain::{
         results::{CanonicalResult, VideoJobResult},
     },
 };
-use olp_engine::inference::{
-    execution::{RequiredTarget, RoutedUnaryResult},
-    principal::Principal,
-};
+use olp_engine::inference::execution::{RequiredTarget, RoutedUnaryResult};
 use olp_engine::protocols::openai::video::{
     OpenAiVideoContentQuery, OpenAiVideoCreateRequest, OpenAiVideoListQuery,
     decode_video_content_with_query, decode_video_create, decode_video_delete, decode_video_get,
@@ -54,7 +52,7 @@ use super::{
 
 pub(super) async fn video_create(
     State(state): State<GatewayState>,
-    Extension(principal): Extension<Principal>,
+    Extension(principal): Extension<HttpRequestAdmission>,
     Extension(admission): Extension<MultipartRequestAdmission>,
     multipart: Multipart,
 ) -> Result<Response, InferenceError> {
@@ -97,17 +95,16 @@ pub(super) async fn video_create(
     // handle. Until the durable reservation succeeds, the multipart guard
     // remains armed so selection or PostgreSQL failures cannot leak uploads.
     form.disarm_cleanup();
-    // The accepted upstream create must outlive client disconnects. Capture
-    // the HTTP inference context before spawning so it keeps the original
-    // runtime generation, limits reservation, and metadata ownership.
-    let task =
-        crate::public_http::request_admission::spawn_http_inference_task(complete_video_create(
-            state.clone(),
-            principal,
-            operation,
-            reserved,
-            required_target,
-        ));
+    // The accepted upstream create must outlive client disconnects. The
+    // admission moves into the task, so it keeps the original runtime
+    // generation, limits reservation, and metadata ownership.
+    let task = tokio::spawn(complete_video_create(
+        state.clone(),
+        principal,
+        operation,
+        reserved,
+        required_target,
+    ));
     match task.await {
         Ok(result) => result,
         Err(error) => {
@@ -260,7 +257,7 @@ async fn persist_video_create_cleanup_intent(
 
 async fn compensate_video_create(
     state: &GatewayState,
-    principal: &Principal,
+    principal: &HttpRequestAdmission,
     executed: &RoutedUnaryResult,
     upstream_job_id: &str,
     required_target: RequiredTarget,
@@ -297,7 +294,7 @@ async fn compensate_video_create(
 
 async fn handle_failed_video_attachment(
     state: &GatewayState,
-    principal: &Principal,
+    principal: &HttpRequestAdmission,
     reserved_id: uuid::Uuid,
     upstream_job_id: &str,
     required_target: RequiredTarget,
@@ -355,7 +352,7 @@ async fn handle_failed_video_attachment(
 
 async fn complete_video_create(
     state: GatewayState,
-    principal: Principal,
+    principal: HttpRequestAdmission,
     operation: Operation,
     reserved: MediaJobRecord,
     required_target: RequiredTarget,
@@ -408,7 +405,7 @@ async fn complete_video_create(
 
 pub(super) async fn video_list(
     State(state): State<GatewayState>,
-    Extension(principal): Extension<Principal>,
+    Extension(principal): Extension<HttpRequestAdmission>,
     Query(query): Query<OpenAiVideoListQuery>,
 ) -> Result<Response, InferenceError> {
     let key = authorize_principal(&state, &principal, GatewayCapability::Inference, None)?;
@@ -505,7 +502,7 @@ fn validate_video_list_query(
 
 pub(super) async fn video_get(
     State(state): State<GatewayState>,
-    Extension(principal): Extension<Principal>,
+    Extension(principal): Extension<HttpRequestAdmission>,
     Path(video_id): Path<String>,
 ) -> Result<Response, InferenceError> {
     let (key, record) =
@@ -565,7 +562,7 @@ pub(super) async fn video_get(
 
 pub(super) async fn video_content(
     State(state): State<GatewayState>,
-    Extension(principal): Extension<Principal>,
+    Extension(principal): Extension<HttpRequestAdmission>,
     Path(video_id): Path<String>,
     Query(query): Query<OpenAiVideoContentQuery>,
 ) -> Result<Response, InferenceError> {
@@ -614,7 +611,7 @@ pub(super) async fn video_content(
 
 pub(super) async fn video_delete(
     State(state): State<GatewayState>,
-    Extension(principal): Extension<Principal>,
+    Extension(principal): Extension<HttpRequestAdmission>,
     Path(video_id): Path<String>,
 ) -> Result<Response, InferenceError> {
     let (_, loaded) =

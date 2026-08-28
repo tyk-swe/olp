@@ -52,13 +52,9 @@ use super::{
     public_http::proxy::{audit_request_provenance, public_auth_source},
     public_http::public_auth_routes::PublicAuthRoute,
     public_http::request_admission::{
-        HTTP_INFERENCE_LIMITS_RESERVED, HTTP_INFERENCE_METADATA_CLAIMED, HTTP_INFERENCE_PRINCIPAL,
-        HTTP_INFERENCE_RESERVATION_HOLD, LocalRequestMetadata, RequestFinalization,
-        claim_http_inference_metadata, enforce_request_limits, http_inference_principal,
-        http_inference_reserved_tokens,
+        HttpRequestAdmission, LocalRequestMetadata, RequestFinalization, enforce_request_limits,
         limits::{ReleaseReservationBody, estimate_http_json_request_tokens},
         multipart::{MultipartAdmissionState, validate_multipart_boundary},
-        spawn_http_inference_task,
         validation::{JsonBodyReadError, read_json_body, validate_json_depth},
     },
     public_http::router::{

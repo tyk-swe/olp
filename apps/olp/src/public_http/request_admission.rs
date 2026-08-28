@@ -1,9 +1,7 @@
 //! HTTP request admission, inference reservations, and body safety limits.
 
 use std::{
-    future::Future,
     net::SocketAddr,
-    pin::Pin,
     sync::{
         Arc,
         atomic::{AtomicBool, Ordering},
@@ -51,107 +49,84 @@ use validation::{
     validate_body_framing_and_encoding, validate_json_depth, validate_target_and_headers,
 };
 
-use olp_engine::inference::{limits::Reservation, principal::Principal};
+use olp_engine::inference::{
+    execution::RequestAdmission, limits::Reservation, principal::Principal,
+};
 
 #[derive(Clone, Copy)]
 pub(crate) struct FirstOwnerSetupAuthorized;
 
-tokio::task_local! {
-    /// The sole verified API-key identity for an admitted inference request.
-    pub(crate) static HTTP_INFERENCE_PRINCIPAL: Principal;
-
-    /// Set by the canonical pipeline once it owns metadata completion for an
-    /// authenticated request. The HTTP boundary emits a content-free fallback
-    /// only when decoding or authorization fails before that handoff.
-    pub(crate) static HTTP_INFERENCE_METADATA_CLAIMED: Arc<AtomicBool>;
-
-    /// Set while an authenticated inference request is executing beneath the
-    /// HTTP boundary. Canonical executors use this marker to avoid charging a
-    /// second RPM/TPM reservation for the same request.
-    pub(crate) static HTTP_INFERENCE_LIMITS_RESERVED: i64;
-
-    /// Keeps the HTTP concurrency reservation alive while request work is
-    /// transferred to a detached inference task.
-    pub(crate) static HTTP_INFERENCE_RESERVATION_HOLD: Reservation;
-}
-
-#[cfg(test)]
-pub(crate) fn http_inference_principal() -> Option<Principal> {
-    HTTP_INFERENCE_PRINCIPAL.try_with(Clone::clone).ok()
-}
-
-pub(crate) fn http_inference_reserved_tokens() -> Option<i64> {
-    HTTP_INFERENCE_LIMITS_RESERVED
-        .try_with(|tokens| *tokens)
-        .ok()
-}
-
-pub(crate) fn http_inference_reservation() -> Option<Reservation> {
-    HTTP_INFERENCE_RESERVATION_HOLD
-        .try_with(Reservation::clone)
-        .ok()
-}
-
-#[cfg(test)]
-pub(crate) fn claim_http_inference_metadata() {
-    let _ = HTTP_INFERENCE_METADATA_CLAIMED.try_with(|claimed| {
-        claimed.store(true, Ordering::Release);
-    });
-}
-
-pub(crate) fn http_inference_metadata_claim() -> Option<Arc<AtomicBool>> {
-    HTTP_INFERENCE_METADATA_CLAIMED.try_with(Arc::clone).ok()
-}
-
+/// Everything an admitted inference request carries into its handler: the
+/// verified principal, the metadata-completion claim, and the limits
+/// reservation the HTTP boundary took on its behalf. It travels as a request
+/// extension, so handlers receive it explicitly rather than through a
+/// task-local, and a detached task keeps it alive simply by cloning it. It
+/// dereferences to the principal, which is what most handler code reads.
 #[derive(Clone)]
-struct HttpInferenceTaskContext {
-    principal: Option<Principal>,
-    metadata_claimed: Option<Arc<AtomicBool>>,
+pub(crate) struct HttpRequestAdmission {
+    principal: Principal,
+    metadata_claimed: Arc<AtomicBool>,
     reserved_tokens: Option<i64>,
     reservation_hold: Option<Reservation>,
 }
 
-impl HttpInferenceTaskContext {
-    fn capture() -> Self {
+impl HttpRequestAdmission {
+    #[cfg(test)]
+    pub(crate) fn for_test(
+        principal: Principal,
+        reservation_hold: Option<Reservation>,
+        reserved_tokens: Option<i64>,
+    ) -> Self {
         Self {
-            principal: HTTP_INFERENCE_PRINCIPAL.try_with(Clone::clone).ok(),
-            metadata_claimed: HTTP_INFERENCE_METADATA_CLAIMED.try_with(Arc::clone).ok(),
-            reserved_tokens: http_inference_reserved_tokens(),
-            reservation_hold: HTTP_INFERENCE_RESERVATION_HOLD
-                .try_with(|reservation| reservation.clone())
-                .ok(),
+            principal,
+            metadata_claimed: Arc::new(AtomicBool::new(false)),
+            reserved_tokens,
+            reservation_hold,
         }
     }
 
-    async fn scope<F, T>(self, future: F) -> T
-    where
-        F: Future<Output = T> + Send + 'static,
-        T: Send + 'static,
-    {
-        let mut future: Pin<Box<dyn Future<Output = T> + Send>> = Box::pin(future);
-        if let Some(reservation) = self.reservation_hold {
-            future = Box::pin(HTTP_INFERENCE_RESERVATION_HOLD.scope(reservation, future));
-        }
-        if let Some(reserved_tokens) = self.reserved_tokens {
-            future = Box::pin(HTTP_INFERENCE_LIMITS_RESERVED.scope(reserved_tokens, future));
-        }
-        if let Some(metadata_claimed) = self.metadata_claimed {
-            future = Box::pin(HTTP_INFERENCE_METADATA_CLAIMED.scope(metadata_claimed, future));
-        }
-        if let Some(principal) = self.principal {
-            future = Box::pin(HTTP_INFERENCE_PRINCIPAL.scope(principal, future));
-        }
-        future.await
+    pub(crate) fn principal(&self) -> &Principal {
+        &self.principal
+    }
+
+    /// The RPM/TPM tokens this exact HTTP request reserved, so canonical
+    /// executors do not charge a second reservation for it.
+    pub(crate) fn reserved_tokens(&self) -> Option<i64> {
+        self.reserved_tokens
+    }
+
+    /// The engine-side view: the canonical pipeline takes over metadata
+    /// completion and the reservation from here.
+    pub(crate) fn engine_admission(&self) -> RequestAdmission {
+        RequestAdmission::new(
+            self.reservation_hold.clone(),
+            self.reserved_tokens,
+            Some(Arc::clone(&self.metadata_claimed)),
+        )
+    }
+
+    #[cfg(test)]
+    pub(crate) fn claim_metadata(&self) {
+        self.metadata_claimed.store(true, Ordering::Release);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn metadata_claimed(&self) -> bool {
+        self.metadata_claimed.load(Ordering::Acquire)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn holds_reservation(&self) -> bool {
+        self.reservation_hold.is_some()
     }
 }
 
-pub(crate) fn spawn_http_inference_task<F, T>(future: F) -> tokio::task::JoinHandle<T>
-where
-    F: Future<Output = T> + Send + 'static,
-    T: Send + 'static,
-{
-    let context = HttpInferenceTaskContext::capture();
-    tokio::spawn(context.scope(future))
+impl std::ops::Deref for HttpRequestAdmission {
+    type Target = Principal;
+
+    fn deref(&self) -> &Principal {
+        &self.principal
+    }
 }
 
 pub(crate) async fn enforce_request_limits(
@@ -572,42 +547,25 @@ impl RequestFinalization {
         }
     }
 
-    async fn dispatch(mut self, request: Request<Body>, next: middleware::Next) -> Response {
-        let metadata_claimed = self
-            .principal
+    async fn dispatch(mut self, mut request: Request<Body>, next: middleware::Next) -> Response {
+        // Only an authenticated inference request carries an admission; the
+        // fallback metadata below is suppressed once the canonical pipeline
+        // claims completion through it. Unlimited keys keep the same pinned
+        // generation and therefore remain unlimited throughout this request
+        // even if a newer release activates concurrently.
+        let admission = self.principal.take().map(|principal| HttpRequestAdmission {
+            principal,
+            metadata_claimed: Arc::new(AtomicBool::new(false)),
+            reserved_tokens: self.reserved_tokens,
+            reservation_hold: self.reservation.clone(),
+        });
+        let metadata_claimed = admission
             .as_ref()
-            .map(|_| Arc::new(AtomicBool::new(false)));
-        let reserved_tokens = self.reserved_tokens;
-        let run = async move {
-            // Only suppress the canonical fallback when this exact HTTP request
-            // actually acquired a hard-limit reservation. Unlimited keys retain
-            // the same pinned generation and therefore remain unlimited throughout
-            // this request even if a newer release activates concurrently.
-            if let Some(reserved_tokens) = reserved_tokens {
-                HTTP_INFERENCE_LIMITS_RESERVED
-                    .scope(reserved_tokens, next.run(request))
-                    .await
-            } else {
-                next.run(request).await
-            }
-        };
-        let run: Pin<Box<dyn Future<Output = Response> + Send>> =
-            if let Some(reservation_hold) = self.reservation.clone() {
-                Box::pin(HTTP_INFERENCE_RESERVATION_HOLD.scope(reservation_hold, run))
-            } else {
-                Box::pin(run)
-            };
-        let response = match (self.principal.take(), metadata_claimed.as_ref()) {
-            (Some(principal), Some(claimed)) => {
-                HTTP_INFERENCE_METADATA_CLAIMED
-                    .scope(
-                        Arc::clone(claimed),
-                        HTTP_INFERENCE_PRINCIPAL.scope(principal, run),
-                    )
-                    .await
-            }
-            _ => run.await,
-        };
+            .map(|admission| Arc::clone(&admission.metadata_claimed));
+        if let Some(admission) = admission {
+            request.extensions_mut().insert(admission);
+        }
+        let response = next.run(request).await;
         if let Some(metadata) = self.local_metadata.take() {
             let claimed = metadata_claimed
                 .as_ref()

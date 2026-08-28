@@ -1,3 +1,4 @@
+use crate::public_http::request_admission::HttpRequestAdmission;
 use axum::{
     Json,
     extract::{Extension, Path, Query, State, rejection::JsonRejection},
@@ -24,7 +25,6 @@ use serde::{Deserialize, Serialize};
 
 use olp_engine::inference::{
     execution::{CompletedEvents, RoutedUnaryResult},
-    principal::Principal,
     runtime::Bundle,
 };
 
@@ -48,7 +48,7 @@ use super::{
 
 pub(super) async fn action(
     State(state): State<GatewayState>,
-    Extension(principal): Extension<Principal>,
+    Extension(principal): Extension<HttpRequestAdmission>,
     Path(resource): Path<String>,
     Query(query): Query<ActionQuery>,
     payload: Result<Json<serde_json::Value>, JsonRejection>,
@@ -225,7 +225,7 @@ struct Model {
 
 pub(super) async fn models(
     State(state): State<GatewayState>,
-    Extension(principal): Extension<Principal>,
+    Extension(principal): Extension<HttpRequestAdmission>,
     Query(query): Query<ModelsQuery>,
 ) -> Result<Response, ProtocolError> {
     let (runtime, key) =
@@ -288,7 +288,7 @@ fn models_response(
 
 pub(super) async fn model(
     State(state): State<GatewayState>,
-    Extension(principal): Extension<Principal>,
+    Extension(principal): Extension<HttpRequestAdmission>,
     Path(resource): Path<String>,
 ) -> Result<Response, ProtocolError> {
     let (runtime, key) =

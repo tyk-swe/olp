@@ -2,7 +2,7 @@ use super::*;
 
 async fn activate_runtime_inside_handler(
     State(state): State<GatewayState>,
-    Extension(principal): Extension<Principal>,
+    Extension(principal): Extension<HttpRequestAdmission>,
 ) -> String {
     let pinned_before_activation = principal.runtime();
     let pinned_generation = pinned_before_activation.generation.id;
@@ -23,12 +23,9 @@ async fn activate_runtime_inside_handler(
         )
         .unwrap();
     assert_ne!(state.runtime().pin().generation.id, pinned_generation);
-    let detached_principal = spawn_http_inference_task(async move {
-        http_inference_principal()
-            .expect("admitted principal must cross the detached task boundary")
-            .runtime()
-            .generation
-            .id
+    let detached_principal = tokio::spawn({
+        let admission = principal.clone();
+        async move { admission.runtime().generation.id }
     })
     .await
     .unwrap();
@@ -155,35 +152,47 @@ async fn concurrent_final_reservation_drops_release_once() {
     .expect("the final reservation drop must schedule its release");
 }
 
+fn pinned_principal(state: &GatewayState) -> Principal {
+    let pinned = state.runtime().pin();
+    let (lookup_id, _) = pinned.api_keys.iter().next().unwrap();
+    Principal::new(
+        Arc::clone(&pinned),
+        lookup_id.clone(),
+        Surface::OpenAi,
+        Some(olp_engine::domain::auth::GatewayCapability::Inference),
+    )
+}
+
 #[tokio::test]
 async fn detached_inference_task_holds_the_http_reservation_after_request_cancellation() {
+    let (state, _) = inference_state(false);
+    let state = state.gateway_state_for_test();
     let released = Arc::new(AtomicBool::new(false));
     let release_signal = Arc::clone(&released);
     let reservation = Reservation::for_test(async move {
         release_signal.store(true, Ordering::Release);
     });
+    let admission =
+        HttpRequestAdmission::for_test(pinned_principal(&state), Some(reservation), Some(2_000));
     let started = Arc::new(tokio::sync::Notify::new());
     let release_child = Arc::new(tokio::sync::Notify::new());
     let (completed_sender, completed) = tokio::sync::oneshot::channel();
     let started_wait = started.notified();
     let outer = tokio::spawn({
-        let reservation = reservation.clone();
+        let admission = admission.clone();
         let started = Arc::clone(&started);
         let release_child = Arc::clone(&release_child);
         async move {
-            HTTP_INFERENCE_RESERVATION_HOLD
-                .scope(reservation, async move {
-                    let _task = spawn_http_inference_task(async move {
-                        started.notify_one();
-                        release_child.notified().await;
-                        let _ = completed_sender.send(());
-                    });
-                    futures::future::pending::<()>().await;
-                })
-                .await;
+            let _task = tokio::spawn(async move {
+                started.notify_one();
+                release_child.notified().await;
+                drop(admission);
+                let _ = completed_sender.send(());
+            });
+            futures::future::pending::<()>().await;
         }
     });
-    drop(reservation);
+    drop(admission);
     started_wait.await;
     outer.abort();
     let _ = outer.await;
@@ -207,72 +216,55 @@ async fn detached_inference_task_holds_the_http_reservation_after_request_cancel
 async fn spawned_inference_task_inherits_the_http_execution_context() {
     let (state, _) = inference_state(false);
     let state = state.gateway_state_for_test();
-    let pinned = state.runtime().pin();
-    let (lookup_id, _) = pinned.api_keys.iter().next().unwrap();
-    let principal = Principal::new(
-        Arc::clone(&pinned),
-        lookup_id.clone(),
-        Surface::OpenAi,
-        Some(olp_engine::domain::auth::GatewayCapability::Inference),
-    );
+    let principal = pinned_principal(&state);
+    let pinned_generation = principal.runtime().generation.id;
     state
         .runtime()
         .install(
             Snapshot {
                 generation: RuntimeGeneration {
                     id: RuntimeGenerationId::new(),
-                    ordinal: pinned.generation.ordinal + 1,
+                    ordinal: principal.runtime().generation.ordinal + 1,
                     activated_at: chrono::Utc::now(),
                 },
-                providers: pinned.providers.clone(),
-                routes: pinned.routes.clone(),
-                api_keys: pinned.api_keys.clone(),
+                providers: principal.runtime().providers.clone(),
+                routes: principal.runtime().routes.clone(),
+                api_keys: principal.runtime().api_keys.clone(),
             },
             BTreeMap::new(),
         )
         .unwrap();
-    let metadata_claimed = Arc::new(AtomicBool::new(false));
-    let reservation = Reservation::for_test(async {});
-    let (
-        principal_generation,
-        principal_surface,
-        principal_capability,
-        reserved_tokens,
-        has_reservation_hold,
-    ) = HTTP_INFERENCE_PRINCIPAL
-        .scope(
-            principal,
-            HTTP_INFERENCE_METADATA_CLAIMED.scope(
-                Arc::clone(&metadata_claimed),
-                HTTP_INFERENCE_LIMITS_RESERVED.scope(
-                    2_000,
-                    HTTP_INFERENCE_RESERVATION_HOLD.scope(reservation, async move {
-                        let task = spawn_http_inference_task(async move {
-                            claim_http_inference_metadata();
-                            let principal = http_inference_principal()
-                                .expect("the detached task inherits the admitted principal");
-                            (
-                                principal.runtime().generation.id,
-                                principal.surface(),
-                                principal.gateway_capability(),
-                                http_inference_reserved_tokens(),
-                                HTTP_INFERENCE_RESERVATION_HOLD.try_with(|_| ()).is_ok(),
-                            )
-                        });
-                        task.await.unwrap()
-                    }),
-                ),
-            ),
-        )
-        .await;
-    assert_eq!(principal_generation, pinned.generation.id);
+    let admission = HttpRequestAdmission::for_test(
+        principal,
+        Some(Reservation::for_test(async {})),
+        Some(2_000),
+    );
+    let task = tokio::spawn({
+        let admission = admission.clone();
+        async move {
+            admission.claim_metadata();
+            (
+                admission.runtime().generation.id,
+                admission.surface(),
+                admission.gateway_capability(),
+                admission.reserved_tokens(),
+                admission.holds_reservation(),
+            )
+        }
+    });
+    let (principal_generation, principal_surface, principal_capability, reserved_tokens, held) =
+        task.await.unwrap();
+    assert_eq!(principal_generation, pinned_generation);
     assert_eq!(principal_surface, Surface::OpenAi);
     assert_eq!(
         principal_capability,
         Some(olp_engine::domain::auth::GatewayCapability::Inference)
     );
-    assert_ne!(state.runtime().pin().generation.id, pinned.generation.id);
+    assert_ne!(state.runtime().pin().generation.id, pinned_generation);
     assert_eq!(reserved_tokens, Some(2_000));
-    assert!(has_reservation_hold);
-    assert!(metadata_claimed.load(Ordering::Acquire));
+    assert!(held);
+    assert!(
+        admission.metadata_claimed(),
+        "the detached task's claim is visible to the HTTP boundary"
+    );
 }

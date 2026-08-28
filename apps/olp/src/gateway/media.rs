@@ -1,3 +1,4 @@
+use crate::public_http::request_admission::HttpRequestAdmission;
 use crate::public_http::streaming_response::{ProtocolStreamEncoder, protocol_streaming_response};
 use olp_engine::inference::accounting::UsageCapture;
 use std::sync::Arc;
@@ -18,7 +19,6 @@ use olp_engine::domain::canonical::{
 use olp_engine::inference::{
     execution::{RoutedEvents, RoutedUnaryResult},
     media_lifecycle::CleanupMediaStream,
-    principal::Principal,
 };
 use olp_engine::protocols::openai::{
     audio::{
@@ -53,7 +53,7 @@ use super::{
 
 pub(super) async fn embeddings(
     State(state): State<GatewayState>,
-    Extension(principal): Extension<Principal>,
+    Extension(principal): Extension<HttpRequestAdmission>,
     payload: Result<Json<EmbeddingRequest>, JsonRejection>,
 ) -> Result<Response, InferenceError> {
     let Json(request) = valid_json(payload)?;
@@ -78,7 +78,7 @@ pub(super) async fn embeddings(
 
 pub(super) async fn moderations(
     State(state): State<GatewayState>,
-    Extension(principal): Extension<Principal>,
+    Extension(principal): Extension<HttpRequestAdmission>,
     payload: Result<Json<Request>, JsonRejection>,
 ) -> Result<Response, InferenceError> {
     let Json(request) = valid_json(payload)?;
@@ -102,7 +102,7 @@ pub(super) async fn moderations(
 
 pub(super) async fn image_generations(
     State(state): State<GatewayState>,
-    Extension(principal): Extension<Principal>,
+    Extension(principal): Extension<HttpRequestAdmission>,
     payload: Result<Json<OpenAiImageGenerationRequest>, JsonRejection>,
 ) -> Result<Response, InferenceError> {
     let Json(request) = valid_json(payload)?;
@@ -126,7 +126,7 @@ pub(super) async fn image_generations(
 
 pub(super) async fn image_edits(
     State(state): State<GatewayState>,
-    Extension(principal): Extension<Principal>,
+    Extension(principal): Extension<HttpRequestAdmission>,
     Extension(admission): Extension<MultipartRequestAdmission>,
     multipart: Multipart,
 ) -> Result<Response, InferenceError> {
@@ -170,7 +170,7 @@ pub(super) async fn image_edits(
 
 pub(super) async fn image_variations(
     State(state): State<GatewayState>,
-    Extension(principal): Extension<Principal>,
+    Extension(principal): Extension<HttpRequestAdmission>,
     Extension(admission): Extension<MultipartRequestAdmission>,
     multipart: Multipart,
 ) -> Result<Response, InferenceError> {
@@ -211,7 +211,7 @@ async fn encode_executed_images(
 
 pub(super) async fn speech(
     State(state): State<GatewayState>,
-    Extension(principal): Extension<Principal>,
+    Extension(principal): Extension<HttpRequestAdmission>,
     payload: Result<Json<SpeechRequest>, JsonRejection>,
 ) -> Result<Response, InferenceError> {
     let Json(request) = valid_json(payload)?;
@@ -246,7 +246,7 @@ pub(super) async fn speech(
 
 pub(super) async fn transcriptions(
     State(state): State<GatewayState>,
-    Extension(principal): Extension<Principal>,
+    Extension(principal): Extension<HttpRequestAdmission>,
     Extension(admission): Extension<MultipartRequestAdmission>,
     multipart: Multipart,
 ) -> Result<Response, InferenceError> {
