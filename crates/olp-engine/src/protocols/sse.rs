@@ -61,6 +61,28 @@ pub(in crate::protocols) fn raw_sse_frame_event(
     )
 }
 
+/// Places the raw frame ahead of the semantic events it produced and shifts
+/// their sequence numbers by one, so a passthrough client replays the frame
+/// first and the canonical consumers still see a gapless sequence.
+pub(in crate::protocols) fn insert_raw_frame(
+    events: &mut Vec<Event>,
+    event_start: usize,
+    sequence_start: u64,
+    surface: Surface,
+    frame: Frame,
+    next_sequence: &mut u64,
+) {
+    let semantic_events = events.len().saturating_sub(event_start);
+    for event in &mut events[event_start..] {
+        event.sequence = event.sequence.saturating_add(1);
+    }
+    events.insert(
+        event_start,
+        raw_sse_frame_event(sequence_start, surface, frame, semantic_events),
+    );
+    *next_sequence = next_sequence.saturating_add(1);
+}
+
 /// Inverse of [`raw_sse_frame_event`]; consumes the extension value so the
 /// frame data is moved back out rather than copied.
 pub(in crate::protocols) fn decode_raw_sse_frame(value: Value) -> Option<(Frame, usize)> {

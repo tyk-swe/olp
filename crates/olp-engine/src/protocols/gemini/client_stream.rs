@@ -9,6 +9,7 @@ use serde_json::{Value, json};
 use thiserror::Error;
 
 use super::finish_reason;
+use crate::protocols::client_sequence::{Admission, ClientSequence};
 use crate::protocols::sse::{Frame, RAW_SSE_FRAME_EXTENSION, decode_raw_sse_frame};
 
 #[derive(Debug, Error)]
@@ -29,11 +30,9 @@ pub enum Error {
 pub struct Encoder {
     public_model: String,
     fallback_id: String,
-    expected_sequence: u64,
+    sequence: ClientSequence,
     response_id: Option<String>,
     tools: BTreeMap<(u32, u32), ToolState>,
-    done: bool,
-    skip_native_events: usize,
 }
 
 #[derive(Debug, Default)]
@@ -49,25 +48,17 @@ impl Encoder {
         Self {
             public_model: public_model.into(),
             fallback_id: fallback_id.into(),
-            expected_sequence: 0,
+            sequence: ClientSequence::default(),
             response_id: None,
             tools: BTreeMap::new(),
-            done: false,
-            skip_native_events: 0,
         }
     }
 
     pub fn push(&mut self, event: Event) -> Result<Vec<Frame>, Error> {
-        if self.done || event.sequence != self.expected_sequence {
-            return Err(Error::Sequence);
-        }
-        self.expected_sequence = self.expected_sequence.saturating_add(1);
-        if self.skip_native_events > 0 {
-            self.skip_native_events -= 1;
-            if matches!(event.kind, Kind::Done) {
-                self.done = true;
-            }
-            return Ok(Vec::new());
+        match self.sequence.admit(&event) {
+            Ok(Admission::Handle) => {}
+            Ok(Admission::Skipped) => return Ok(Vec::new()),
+            Err(_) => return Err(Error::Sequence),
         }
         let mut frames = Vec::new();
         match event.kind {
@@ -176,7 +167,7 @@ impl Encoder {
                     let (mut raw, semantic_events) =
                         decode_raw_sse_frame(value).ok_or(Error::Extension)?;
                     rewrite_gemini_model(&mut raw, &self.public_model)?;
-                    self.skip_native_events = semantic_events;
+                    self.sequence.skip_native(semantic_events);
                     frames.push(raw);
                 } else if !extensions.values.is_empty() {
                     return Ok(frames);
@@ -189,7 +180,7 @@ impl Encoder {
                 if !self.tools.is_empty() {
                     return Err(Error::UnfinishedTools);
                 }
-                self.done = true;
+                self.sequence.finish();
             }
         }
         Ok(frames)

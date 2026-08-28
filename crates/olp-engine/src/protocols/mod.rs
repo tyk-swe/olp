@@ -4,6 +4,7 @@ use crate::domain::canonical::events::{Event, Kind};
 
 pub mod anthropic;
 mod client;
+mod client_sequence;
 mod extensions;
 pub mod gemini;
 pub mod openai;

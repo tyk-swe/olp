@@ -14,7 +14,7 @@ use super::{
     translate::{errors::ResponseError, response::decode_generate_content_chunk},
 };
 use crate::protocols::sse::{
-    DEFAULT_MAX_EVENT_BYTES, DecodeError, Decoder as SseDecoder, Frame, raw_sse_frame_event,
+    DEFAULT_MAX_EVENT_BYTES, DecodeError, Decoder as SseDecoder, Frame, insert_raw_frame,
 };
 
 pub struct Decoder {
@@ -218,15 +218,14 @@ impl Decoder {
                 }
             }
             if self.preserve_raw_frames {
-                let semantic_events = events.len().saturating_sub(event_start);
-                for event in &mut events[event_start..] {
-                    event.sequence = event.sequence.saturating_add(1);
-                }
-                events.insert(
+                insert_raw_frame(
+                    &mut events,
                     event_start,
-                    raw_sse_frame_event(sequence_start, Surface::Gemini, frame, semantic_events),
+                    sequence_start,
+                    Surface::Gemini,
+                    frame,
+                    &mut self.sequence,
                 );
-                self.sequence = self.sequence.saturating_add(1);
             }
         }
         Ok(events)

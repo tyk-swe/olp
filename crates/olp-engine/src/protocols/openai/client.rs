@@ -10,6 +10,7 @@ use thiserror::Error;
 use crate::protocols::client::{
     AggregateError, AggregatedGeneration, AggregatedTool, aggregate_generation,
 };
+use crate::protocols::client_sequence::{ClientSequence, SequenceRejection};
 use crate::protocols::sse::Frame;
 
 use super::extensions::apply_pointer_extensions;
@@ -234,7 +235,7 @@ pub struct Encoder {
     client_model: String,
     fallback_id: String,
     created_at: i64,
-    next_sequence: u64,
+    sequence: ClientSequence,
     sequence_number: u64,
     // The terminal response object is built from this running aggregate, so
     // the encoder never retains the event history. Errors the aggregate
@@ -244,7 +245,6 @@ pub struct Encoder {
     deferred_error: Option<AggregateError>,
     retained_bytes: usize,
     outputs: BTreeMap<u32, StreamOutput>,
-    done: bool,
 
     incomplete_reason: Option<&'static str>,
 }
@@ -268,10 +268,10 @@ impl std::fmt::Debug for Encoder {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter
             .debug_struct("Encoder")
-            .field("next_sequence", &self.next_sequence)
+            .field("next_sequence", &self.sequence.expected())
             .field("retained_bytes", &self.retained_bytes)
             .field("emitted_output_count", &self.outputs.len())
-            .field("done", &self.done)
+            .field("done", &self.sequence.is_done())
             .finish_non_exhaustive()
     }
 }
@@ -287,26 +287,25 @@ impl Encoder {
             client_model: client_model.into(),
             fallback_id: fallback_id.into(),
             created_at,
-            next_sequence: 0,
+            sequence: ClientSequence::default(),
             sequence_number: 0,
             aggregate: AggregatedGeneration::new(),
             deferred_error: None,
             retained_bytes: 0,
             outputs: BTreeMap::new(),
-            done: false,
             incomplete_reason: None,
         }
     }
 
     pub fn push(&mut self, event: Event) -> Result<Vec<Frame>, OpenAiClientEncodeError> {
-        if self.done {
-            return Err(OpenAiClientEncodeError::DataAfterDone);
-        }
-        if event.sequence != self.next_sequence {
-            return Err(OpenAiClientEncodeError::OutOfOrder {
-                expected: self.next_sequence,
-                actual: event.sequence,
-            });
+        match self.sequence.admit(&event) {
+            Ok(_) => {}
+            Err(SequenceRejection::AfterDone) => {
+                return Err(OpenAiClientEncodeError::DataAfterDone);
+            }
+            Err(SequenceRejection::OutOfOrder { expected, actual }) => {
+                return Err(OpenAiClientEncodeError::OutOfOrder { expected, actual });
+            }
         }
         // Keep this aligned with the transport-neutral collection ceiling in
         // crates/olp-engine/src/inference/events.rs.
@@ -316,7 +315,6 @@ impl Encoder {
             .checked_add(retained_bytes(&event.kind)?)
             .filter(|total| *total <= MAX_RETAINED_BYTES)
             .ok_or(OpenAiClientEncodeError::EventHistoryTooLarge)?;
-        self.next_sequence = self.next_sequence.saturating_add(1);
         match &event.kind {
             // An upstream error still streams `response.failed` below; the
             // aggregate only refuses to complete afterwards.
@@ -482,7 +480,7 @@ impl Encoder {
                     _ => "response.completed",
                 };
                 frames.push(self.frame(terminal_event_type, json!({"response": response}))?);
-                self.done = true;
+                self.sequence.finish();
             }
         }
         Ok(frames)
