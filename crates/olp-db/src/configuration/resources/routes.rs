@@ -17,42 +17,87 @@ impl Store {
         .await?;
         let (rows, next_cursor) = split_page(rows, limit as usize, |row| row.id);
         let ids: Vec<Uuid> = rows.into_iter().map(|row| row.id).collect();
-        let mut items = Vec::with_capacity(ids.len());
-        for id in ids {
-            items.push(self.get_route_draft(id).await?);
-        }
+        let items = self.get_route_drafts(&ids).await?;
         Ok(ConfigurationPage { items, next_cursor })
     }
 
-    pub async fn get_route_draft(&self, draft_id: Uuid) -> Result<RouteDraftRecord, Error> {
-        let row = sqlx::query!(
-            "SELECT rd.id, rd.routing_id, rd.slug, rd.state::text AS \"state!\", rd.overall_timeout_ms, \
-                    rd.max_attempts, rd.etag, rd.based_on_revision_id, rd.created_at, rd.updated_at, \
+    /// Reads drafts in the order of `ids` with three queries for the whole
+    /// set, mirroring [`Store::get_routes`]. Any missing id is `NotFound`.
+    pub async fn get_route_drafts(&self, ids: &[Uuid]) -> Result<Vec<RouteDraftRecord>, Error> {
+        if ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let header_rows = sqlx::query!(
+            "SELECT rd.id AS \"id!\", rd.routing_id AS \"routing_id!\", rd.slug AS \"slug!\", \
+                    rd.state::text AS \"state!\", rd.overall_timeout_ms AS \"overall_timeout_ms!\", \
+                    rd.max_attempts AS \"max_attempts!\", rd.etag AS \"etag!\", rd.based_on_revision_id, \
+                    rd.created_at AS \"created_at!\", rd.updated_at AS \"updated_at!\", \
                     creator.email AS \"created_by_email?\" \
              FROM route_drafts rd LEFT JOIN users creator ON creator.id = rd.created_by \
-             WHERE rd.id = $1",
-        draft_id)
-        .fetch_optional(self.pool())
+             WHERE rd.id = ANY($1::uuid[])",
+            ids
+        )
+        .fetch_all(self.pool())
+        .await?;
+        let mut operations_map = BTreeMap::<Uuid, Vec<OperationKind>>::new();
+        for row in sqlx::query!(
+            "SELECT route_draft_id, operation FROM route_draft_operations \
+             WHERE route_draft_id = ANY($1::uuid[]) ORDER BY route_draft_id, operation",
+            ids
+        )
+        .fetch_all(self.pool())
         .await?
-        .ok_or(Error::NotFound)?;
-        Ok(RouteDraftRecord {
-            id: row.id,
-            routing_id: row.routing_id,
-            slug: row.slug,
-            state: row
-                .state
+        {
+            let operation = row
+                .operation
                 .parse()
-                .map_err(|_| PersistenceError::InvalidStoredValue("route draft state"))?,
-            overall_timeout_ms: row.overall_timeout_ms,
-            max_attempts: row.max_attempts,
-            etag: row.etag,
-            based_on_revision_id: row.based_on_revision_id,
-            operations: draft_operations(self.pool(), draft_id).await?,
-            targets: draft_targets(self.pool(), draft_id).await?,
-            created_at: row.created_at,
-            updated_at: row.updated_at,
-            created_by_email: row.created_by_email,
-        })
+                .map_err(|_| PersistenceError::InvalidStoredValue("route draft operation"))?;
+            operations_map
+                .entry(row.route_draft_id)
+                .or_default()
+                .push(operation);
+        }
+        let mut targets_map = BTreeMap::<Uuid, Vec<RouteTargetRecord>>::new();
+        for row in draft_targets(self.pool(), ids).await? {
+            let (draft_id, target) = row.split();
+            targets_map.entry(draft_id).or_default().push(target);
+        }
+
+        let mut headers = BTreeMap::new();
+        for row in header_rows {
+            headers.insert(row.id, row);
+        }
+        let mut items = Vec::with_capacity(ids.len());
+        for id in ids {
+            let row = headers.remove(id).ok_or(Error::NotFound)?;
+            items.push(RouteDraftRecord {
+                id: row.id,
+                routing_id: row.routing_id,
+                slug: row.slug,
+                state: row
+                    .state
+                    .parse()
+                    .map_err(|_| PersistenceError::InvalidStoredValue("route draft state"))?,
+                overall_timeout_ms: row.overall_timeout_ms,
+                max_attempts: row.max_attempts,
+                etag: row.etag,
+                based_on_revision_id: row.based_on_revision_id,
+                operations: operations_map.remove(id).unwrap_or_default(),
+                targets: targets_map.remove(id).unwrap_or_default(),
+                created_at: row.created_at,
+                updated_at: row.updated_at,
+                created_by_email: row.created_by_email,
+            });
+        }
+        Ok(items)
+    }
+
+    pub async fn get_route_draft(&self, draft_id: Uuid) -> Result<RouteDraftRecord, Error> {
+        self.get_route_drafts(&[draft_id])
+            .await?
+            .into_iter()
+            .next()
+            .ok_or(Error::NotFound)
     }
 
     pub async fn replace_route_draft(
@@ -430,30 +475,17 @@ impl Store {
     }
 }
 
-async fn draft_operations(pool: &sqlx::PgPool, id: Uuid) -> Result<Vec<OperationKind>, Error> {
-    sqlx::query_scalar!(
-        "SELECT operation FROM route_draft_operations WHERE route_draft_id = $1 ORDER BY operation",
-        id
-    )
-    .fetch_all(pool)
-    .await?
-    .into_iter()
-    .map(|value: String| {
-        value
-            .parse()
-            .map_err(|_| PersistenceError::InvalidStoredValue("route draft operation").into())
-    })
-    .collect()
-}
-
-async fn draft_targets(pool: &sqlx::PgPool, id: Uuid) -> Result<Vec<RouteTargetRecord>, Error> {
+async fn draft_targets(
+    pool: &sqlx::PgPool,
+    ids: &[Uuid],
+) -> Result<Vec<RouteDraftTargetRow>, Error> {
     Ok(sqlx::query_as!(
-        RouteTargetRow,
+        RouteDraftTargetRow,
         // A draft read must return every stored target: the console writes
         // back what it reads, so a target hidden by an inner join would be
         // deleted by the next replace. Availability is decoration only.
-        "SELECT rdt.id, rdt.routing_id, rdt.provider_model_id, p.id AS provider_id, \
-                    COALESCE(pr.name, p.name) AS \"provider_name!\", \
+        "SELECT rdt.route_draft_id, rdt.id, rdt.routing_id, rdt.provider_model_id, \
+                    p.id AS provider_id, COALESCE(pr.name, p.name) AS \"provider_name!\", \
                     COALESCE(prm.upstream_model, pm.upstream_model) AS \"provider_model!\", \
                     (p.state <> 'disabled'::provider_state AND prm.id IS NOT NULL \
                      AND COALESCE(prm.enabled, false)) AS \"available!\", \
@@ -464,14 +496,62 @@ async fn draft_targets(pool: &sqlx::PgPool, id: Uuid) -> Result<Vec<RouteTargetR
              LEFT JOIN provider_revisions pr ON pr.id = p.active_revision_id \
              LEFT JOIN provider_revision_models prm ON prm.provider_revision_id = pr.id \
                AND prm.source_provider_model_id = pm.id \
-             WHERE rdt.route_draft_id = $1 ORDER BY rdt.position",
-        id
+             WHERE rdt.route_draft_id = ANY($1::uuid[]) ORDER BY rdt.route_draft_id, rdt.position",
+        ids
     )
     .fetch_all(pool)
-    .await?
-    .into_iter()
-    .map(RouteTargetRecord::from)
-    .collect())
+    .await?)
+}
+
+/// `query_as!` fills fields positionally, so the draft key column sits in
+/// the struct; the remaining columns are exactly a [`RouteTargetRow`].
+#[derive(Debug, sqlx::FromRow)]
+struct RouteDraftTargetRow {
+    route_draft_id: Uuid,
+    id: Uuid,
+    routing_id: Uuid,
+    provider_model_id: Uuid,
+    provider_id: Uuid,
+    provider_name: String,
+    provider_model: String,
+    available: bool,
+    priority: i32,
+    weight: i32,
+    timeout_ms: i32,
+    position: i32,
+}
+
+impl RouteDraftTargetRow {
+    fn split(self) -> (Uuid, RouteTargetRecord) {
+        let Self {
+            route_draft_id,
+            id,
+            routing_id,
+            provider_model_id,
+            provider_id,
+            provider_name,
+            provider_model,
+            available,
+            priority,
+            weight,
+            timeout_ms,
+            position,
+        } = self;
+        let target = RouteTargetRow {
+            id,
+            routing_id,
+            provider_model_id,
+            provider_id,
+            provider_name,
+            provider_model,
+            available,
+            priority,
+            weight,
+            timeout_ms,
+            position,
+        };
+        (route_draft_id, target.into())
+    }
 }
 
 struct RouteHeader {
