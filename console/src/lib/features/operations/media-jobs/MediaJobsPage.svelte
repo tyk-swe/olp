@@ -1,5 +1,6 @@
 <script lang="ts">
   import { resolve } from '$app/paths';
+  import { queryKeys } from '$lib/api/queryKeys';
   import { createQuery } from '@tanstack/svelte-query';
   import CursorPagination from '$lib/components/CursorPagination.svelte';
   import { getMediaJob, listMediaJobs } from '$lib/api/media-jobs';
@@ -21,14 +22,14 @@
   } = $props();
 
   const jobs = createQuery(() => ({
-    queryKey: ['media-jobs', listState.applied, listState.cursor ?? 'first'],
+    queryKey: queryKeys.mediaJobs.page(listState.applied, listState.cursor),
     queryFn: () =>
       listMediaJobs({ ...listState.applied, cursor: listState.cursor }),
     placeholderData: (previous) => previous,
     enabled: !jobId
   }));
   const detail = createQuery(() => ({
-    queryKey: ['media-job', jobId],
+    queryKey: queryKeys.mediaJobs.detail(jobId),
     queryFn: () => getMediaJob(jobId),
     enabled: Boolean(jobId)
   }));

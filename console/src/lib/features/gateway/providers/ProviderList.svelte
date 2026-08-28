@@ -1,5 +1,6 @@
 <script lang="ts">
   import { resolve } from '$app/paths';
+  import { queryKeys } from '$lib/api/queryKeys';
   import { createQuery } from '@tanstack/svelte-query';
   import { errorMessage as message } from '$lib/api/http';
   import NavIcon from '$lib/components/NavIcon.svelte';
@@ -18,7 +19,7 @@
   const access = useRole();
   const canManage = $derived(access.can('providers.manage'));
   const providers = createQuery(() => ({
-    queryKey: ['provider-page', listState.cursor ?? 'first'],
+    queryKey: queryKeys.providers.page(listState.cursor),
     queryFn: ({ signal }) => listProviderPage(listState.cursor, signal)
   }));
 </script>

@@ -1,5 +1,6 @@
 <script lang="ts">
   import { createQuery } from '@tanstack/svelte-query';
+  import { queryKeys } from '$lib/api/queryKeys';
   import { logout } from '$lib/api/auth';
   import {
     listSessionPage,
@@ -26,13 +27,13 @@
   let notice = $state('');
 
   const users = createQuery(() => ({
-    queryKey: ['user-page', 'first'],
+    queryKey: queryKeys.users.page(),
     queryFn: () => listUserPage(),
     // Only the member filter needs the roster, and only managers see it.
     enabled: canManage
   }));
   const sessions = createQuery(() => ({
-    queryKey: ['session-page', selectedUser, pagination.cursor ?? 'first'],
+    queryKey: queryKeys.users.sessions(selectedUser, pagination.cursor),
     queryFn: () => listSessionPage(selectedUser || undefined, pagination.cursor)
   }));
 

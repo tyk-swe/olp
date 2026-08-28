@@ -1,5 +1,6 @@
 <script lang="ts">
   import { resolve } from '$app/paths';
+  import { queryKeys } from '$lib/api/queryKeys';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { onDestroy } from 'svelte';
   import ConflictNotice from '$lib/components/ConflictNotice.svelte';
@@ -9,10 +10,6 @@
   import ProviderConnectorForm from './ProviderConnectorForm.svelte';
   import ProviderDiscoveryStage from './ProviderDiscoveryStage.svelte';
   import ProviderValidationIssues from './ProviderValidationIssues.svelte';
-  import {
-    invalidateProviderModelConsumers,
-    invalidateProviderSummaries
-  } from './providerCache';
   import {
     errorMessage as message,
     fieldIssues,
@@ -64,7 +61,7 @@
   const canManage = $derived(access.can('providers.manage'));
   const queryClient = useQueryClient();
   const providerKinds = createQuery(() => ({
-    queryKey: ['provider-kinds'],
+    queryKey: queryKeys.providers.kinds(),
     queryFn: ({ signal }) => listProviderKinds(signal)
   }));
   let draft = $state<ProviderDraft | null>(null);
@@ -72,11 +69,10 @@
   let wizardStep = $state(1);
   const wizardModelPagination = $state(emptyCursorHistory());
   const wizardModels = createQuery(() => ({
-    queryKey: [
-      'provider-model-page',
+    queryKey: queryKeys.providers.models(
       wizardProvider?.id ?? '',
-      wizardModelPagination.cursor ?? 'first'
-    ],
+      wizardModelPagination.cursor
+    ),
     queryFn: ({ signal }) =>
       listProviderModelPage(
         wizardProvider!.id,
@@ -86,7 +82,7 @@
     enabled: Boolean(wizardProvider) && wizardStep >= 3
   }));
   const capabilityOptions = createQuery(() => ({
-    queryKey: ['provider-capability-options', wizardProvider?.kind ?? ''],
+    queryKey: queryKeys.providers.capabilityOptions(wizardProvider?.kind ?? ''),
     queryFn: ({ signal }) =>
       getProviderCapabilityOptions(wizardProvider!.kind, signal),
     enabled: Boolean(wizardProvider)
@@ -236,8 +232,12 @@
       wizardProvider = await getProvider(id);
       wizardStep = 2;
       await Promise.all([
-        invalidateProviderSummaries(queryClient),
-        invalidateProviderModelConsumers(queryClient)
+        queryClient.invalidateQueries({
+          queryKey: queryKeys.providers.summaries
+        }),
+        queryClient.invalidateQueries({
+          queryKey: queryKeys.providers.modelCatalog
+        })
       ]);
     });
   }
@@ -267,7 +267,9 @@
       await refetchWizardModels();
       wizardProvider = discovered;
       wizardStep = 4;
-      await invalidateProviderModelConsumers(queryClient);
+      await queryClient.invalidateQueries({
+        queryKey: queryKeys.providers.modelCatalog
+      });
     });
   }
 
@@ -286,7 +288,9 @@
       await refetchWizardModels();
       wizardProvider = declared;
       wizardStep = 4;
-      await invalidateProviderModelConsumers(queryClient);
+      await queryClient.invalidateQueries({
+        queryKey: queryKeys.providers.modelCatalog
+      });
     });
   }
 
@@ -307,7 +311,9 @@
       clearCertificationResults();
       await refetchWizardModels();
       wizardProvider = updated;
-      await invalidateProviderModelConsumers(queryClient);
+      await queryClient.invalidateQueries({
+        queryKey: queryKeys.providers.modelCatalog
+      });
       notice = 'Capability review saved with declared provenance.';
     });
   }
@@ -330,7 +336,9 @@
       const updated = await getProvider(wizardProvider!.id);
       await refetchWizardModels();
       wizardProvider = updated;
-      await invalidateProviderModelConsumers(queryClient);
+      await queryClient.invalidateQueries({
+        queryKey: queryKeys.providers.modelCatalog
+      });
       probe = null;
       notice = `${result.certified_count} of ${result.attempted_count} reviewed tuples passed server certification. Test the completed draft before activation.`;
     });
@@ -354,8 +362,12 @@
       wizardStep = 5;
       notice = `Provider activated in runtime generation ${generation}.`;
       await Promise.all([
-        invalidateProviderSummaries(queryClient),
-        invalidateProviderModelConsumers(queryClient)
+        queryClient.invalidateQueries({
+          queryKey: queryKeys.providers.summaries
+        }),
+        queryClient.invalidateQueries({
+          queryKey: queryKeys.providers.modelCatalog
+        })
       ]);
     });
   }

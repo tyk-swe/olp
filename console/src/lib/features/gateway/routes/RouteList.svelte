@@ -1,5 +1,6 @@
 <script lang="ts">
   import { resolve } from '$app/paths';
+  import { queryKeys } from '$lib/api/queryKeys';
   import { createQuery } from '@tanstack/svelte-query';
   import { errorMessage as message } from '$lib/api/http';
   import CursorPagination from '$lib/components/CursorPagination.svelte';
@@ -19,11 +20,11 @@
   const canManage = $derived(access.can('routes.manage'));
 
   const drafts = createQuery(() => ({
-    queryKey: ['route-draft-page', listState.draft.cursor ?? 'first'],
+    queryKey: queryKeys.routes.draftPage(listState.draft.cursor),
     queryFn: () => listRouteDraftPage(listState.draft.cursor)
   }));
   const activeRoutes = createQuery(() => ({
-    queryKey: ['route-page', listState.route.cursor ?? 'first'],
+    queryKey: queryKeys.routes.page(listState.route.cursor),
     queryFn: () => listRoutePage(listState.route.cursor)
   }));
 </script>

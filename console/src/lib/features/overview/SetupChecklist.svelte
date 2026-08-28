@@ -1,5 +1,6 @@
 <script lang="ts">
   import { createQuery } from '@tanstack/svelte-query';
+  import { queryKeys } from '$lib/api/queryKeys';
   import NavIcon from '$lib/components/NavIcon.svelte';
   import { listApiKeys } from '$lib/api/management/api-keys';
   import { listProviders } from '$lib/api/management/providers';
@@ -13,15 +14,15 @@
   };
 
   const providers = createQuery(() => ({
-    queryKey: ['providers'],
+    queryKey: queryKeys.providers.all(),
     queryFn: ({ signal }) => listProviders(signal)
   }));
   const routes = createQuery(() => ({
-    queryKey: ['routes'],
+    queryKey: queryKeys.routes.all(),
     queryFn: ({ signal }) => listRoutes(signal)
   }));
   const keys = createQuery(() => ({
-    queryKey: ['api-keys'],
+    queryKey: queryKeys.apiKeys.all(),
     queryFn: ({ signal }) => listApiKeys(signal)
   }));
 

@@ -1,5 +1,6 @@
 <script lang="ts">
   import { goto } from '$app/navigation';
+  import { queryKeys } from '$lib/api/queryKeys';
   import { resolve } from '$app/paths';
   import { onDestroy } from 'svelte';
   import { useQueryClient } from '@tanstack/svelte-query';
@@ -67,8 +68,7 @@
         preferredRoute = route;
       }
       await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ['api-keys'] }),
-        queryClient.invalidateQueries({ queryKey: ['api-key-page'] })
+        queryClient.invalidateQueries({ queryKey: queryKeys.apiKeys.root })
       ]);
       return true;
     } catch (error) {

@@ -1,5 +1,6 @@
 <script lang="ts">
   import { resolve } from '$app/paths';
+  import { queryKeys } from '$lib/api/queryKeys';
   import { createQuery } from '@tanstack/svelte-query';
   import type { ApiKey } from '$lib/api/management/api-keys';
   import { listRoutes } from '$lib/api/management/routes';
@@ -43,7 +44,7 @@
   let initialized = $state(false);
   let dirty = $state(false);
   const routes = createQuery(() => ({
-    queryKey: ['routes'],
+    queryKey: queryKeys.routes.all(),
     queryFn: ({ signal }) => listRoutes(signal)
   }));
 

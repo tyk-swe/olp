@@ -1,5 +1,6 @@
 <script lang="ts">
   import { resolve } from '$app/paths';
+  import { queryKeys } from '$lib/api/queryKeys';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { errorMessage } from '$lib/api/http';
   import { cursorPaginationProps } from '$lib/api/pagination';
@@ -36,7 +37,7 @@
   let busy = $state('');
   let mutationError = $state('');
   const keys = createQuery(() => ({
-    queryKey: ['api-key-page', listState.cursor ?? 'first'],
+    queryKey: queryKeys.apiKeys.page(listState.cursor),
     queryFn: () => listApiKeyPage(listState.cursor)
   }));
 
@@ -44,7 +45,7 @@
   async function refreshKeyConsumers() {
     await Promise.all([
       keys.refetch(),
-      queryClient.invalidateQueries({ queryKey: ['api-keys'] })
+      queryClient.invalidateQueries({ queryKey: queryKeys.apiKeys.all() })
     ]);
   }
 

@@ -1,5 +1,6 @@
 <script lang="ts">
   import { resolve } from '$app/paths';
+  import { queryKeys } from '$lib/api/queryKeys';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import CursorPagination from '$lib/components/CursorPagination.svelte';
   import ReadOnlyNote from '$lib/components/ReadOnlyNote.svelte';
@@ -64,12 +65,12 @@
   const pricingPagination = $state(emptyCursorHistory());
 
   const settings = createQuery(() => ({
-    queryKey: ['settings'],
+    queryKey: queryKeys.settings.all(),
     queryFn: () => listSettings()
   }));
 
   const providerKinds = createQuery(() => ({
-    queryKey: ['provider-kinds'],
+    queryKey: queryKeys.providers.kinds(),
     queryFn: ({ signal }) => listProviderKinds(signal)
   }));
 
@@ -79,7 +80,7 @@
   });
 
   const pricing = createQuery(() => ({
-    queryKey: ['pricing', pricingPagination.cursor ?? 'first'],
+    queryKey: queryKeys.pricing.page(pricingPagination.cursor),
     queryFn: () => listPricing(pricingPagination.cursor)
   }));
 
@@ -108,7 +109,7 @@
         setting,
         values[setting.key] ?? setting.value
       );
-      queryClient.setQueryData<Setting[]>(['settings'], (current) =>
+      queryClient.setQueryData<Setting[]>(queryKeys.settings.all(), (current) =>
         current?.map((item) => (item.key === updated.key ? updated : item))
       );
       delete values[setting.key];

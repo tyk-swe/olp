@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import { queryKeys } from '$lib/api/queryKeys';
   import { createQuery } from '@tanstack/svelte-query';
   import { errorMessage } from '$lib/api/http';
   import { listRoutes } from '$lib/api/management/routes';
@@ -33,7 +34,7 @@
   let testState = $state<'idle' | 'running' | 'passed' | 'failed'>('idle');
   let testMessage = $state('');
   const routes = createQuery(() => ({
-    queryKey: ['routes'],
+    queryKey: queryKeys.routes.all(),
     queryFn: ({ signal }) => listRoutes(signal)
   }));
   const routeSlug = $derived(

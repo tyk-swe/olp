@@ -1,5 +1,6 @@
 <script lang="ts">
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
+  import { queryKeys } from '$lib/api/queryKeys';
   import { errorMessage as providerDetailError } from '$lib/api/http';
   import {
     cursorPaginationProps,
@@ -17,7 +18,6 @@
     type ProviderRevisionDiff
   } from '$lib/api/management/providers';
   import { formatDate, stateLabel } from '$lib/format';
-  import { invalidateProviderSummaries } from './providerCache';
   import {
     installProviderWithModels,
     type RunProviderAction
@@ -51,22 +51,21 @@
   let revisionDiff = $state<ProviderRevisionDiff | null>(null);
   let comparisonError = $state('');
   const revisions = createQuery(() => ({
-    queryKey: ['provider-revisions', current.id, pagination.cursor ?? 'first'],
+    queryKey: queryKeys.providers.revisions(current.id, pagination.cursor),
     queryFn: ({ signal }) =>
       listProviderRevisionPage(current.id, pagination.cursor, signal)
   }));
   const revisionDetail = createQuery(() => ({
-    queryKey: ['provider-revision', current.id, viewedId],
+    queryKey: queryKeys.providers.revision(current.id, viewedId),
     queryFn: ({ signal }) => getProviderRevision(current.id, viewedId, signal),
     enabled: Boolean(viewedId)
   }));
   const revisionModels = createQuery(() => ({
-    queryKey: [
-      'provider-revision-models',
+    queryKey: queryKeys.providers.revisionModels(
       current.id,
       viewedId,
-      modelPagination.cursor ?? 'first'
-    ],
+      modelPagination.cursor
+    ),
     queryFn: ({ signal }) =>
       listProviderRevisionModelPage(
         current.id,
@@ -116,7 +115,9 @@
         onAcceptProvider,
         onResetModelPage
       );
-      await invalidateProviderSummaries(queryClient);
+      await queryClient.invalidateQueries({
+        queryKey: queryKeys.providers.summaries
+      });
       // `credential_restored` is hardcoded false by the API: historical
       // credential material is never restored, so state the guarantee.
       onNotice(

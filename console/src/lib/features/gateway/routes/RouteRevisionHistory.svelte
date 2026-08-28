@@ -1,5 +1,6 @@
 <script lang="ts">
   import { goto } from '$app/navigation';
+  import { queryKeys } from '$lib/api/queryKeys';
   import { resolve } from '$app/paths';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { errorMessage as message } from '$lib/api/http';
@@ -19,7 +20,7 @@
   const access = useRole();
   const canManage = $derived(access.can('routes.manage'));
   const revisions = createQuery(() => ({
-    queryKey: ['route-revisions', routeId],
+    queryKey: queryKeys.routes.revisions(routeId),
     queryFn: () => listRouteRevisions(routeId)
   }));
 
@@ -71,7 +72,7 @@
       return;
     await run(`restore-${revision.id}`, async () => {
       const restored = await restoreRouteRevision(routeId, revision.id);
-      await queryClient.invalidateQueries({ queryKey: ['route-draft-page'] });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.routes.lists });
       await goto(resolve(`/routes/${restored.id}`));
     });
   }

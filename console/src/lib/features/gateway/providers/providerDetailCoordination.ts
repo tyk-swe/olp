@@ -1,11 +1,11 @@
 import type { QueryClient } from '@tanstack/svelte-query';
+import { queryKeys } from '$lib/api/queryKeys';
 import {
   listProviderModelPage,
   type Provider,
   type ProviderModel
 } from '$lib/api/management/providers';
 import type { CursorPage } from '$lib/api/pagination';
-import { invalidateProviderModelConsumers } from './providerCache';
 
 export type CoordinatedModelPage = {
   page: CursorPage<ProviderModel>;
@@ -74,10 +74,12 @@ export async function installProviderWithModels(
   acceptProvider(provider);
   await Promise.all([
     queryClient.invalidateQueries({
-      queryKey: ['provider-model-page', provider.id],
+      queryKey: queryKeys.providers.modelsOf(provider.id),
       refetchType: 'none',
       predicate: (query) => query.queryKey[3] !== provider.etag
     }),
-    invalidateProviderModelConsumers(queryClient)
+    queryClient.invalidateQueries({
+      queryKey: queryKeys.providers.modelCatalog
+    })
   ]);
 }

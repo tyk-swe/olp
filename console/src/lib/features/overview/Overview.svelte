@@ -1,5 +1,6 @@
 <script lang="ts">
   import { resolve } from '$app/paths';
+  import { queryKeys } from '$lib/api/queryKeys';
   import { createQuery } from '@tanstack/svelte-query';
   import { onMount } from 'svelte';
   import NavIcon from '$lib/components/NavIcon.svelte';
@@ -20,15 +21,15 @@
   const access = useRole();
   const playgroundAllowed = $derived(access.can('playground.use'));
   const providers = createQuery(() => ({
-    queryKey: ['providers'],
+    queryKey: queryKeys.providers.all(),
     queryFn: ({ signal }) => listProviders(signal)
   }));
   const routes = createQuery(() => ({
-    queryKey: ['routes'],
+    queryKey: queryKeys.routes.all(),
     queryFn: ({ signal }) => listRoutes(signal)
   }));
   const recentRequests = createQuery(() => ({
-    queryKey: ['requests', 'overview'],
+    queryKey: queryKeys.requests.overview(),
     queryFn: () => listRequests({ limit: 5 }),
     enabled: controlConnected
   }));

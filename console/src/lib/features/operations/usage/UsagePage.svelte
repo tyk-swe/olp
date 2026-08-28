@@ -1,5 +1,6 @@
 <script lang="ts">
   import { createQuery } from '@tanstack/svelte-query';
+  import { queryKeys } from '$lib/api/queryKeys';
   import {
     usageBreakdown,
     usageCompleteness,
@@ -36,7 +37,7 @@
   });
 
   const usage = createQuery(() => ({
-    queryKey: ['usage', JSON.stringify(applied)],
+    queryKey: queryKeys.usage.report(JSON.stringify(applied)),
     queryFn: async () => {
       const [summary, series, breakdown, completeness] = await Promise.all([
         usageSummary(applied.filters),

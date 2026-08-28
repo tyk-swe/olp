@@ -1,5 +1,6 @@
 <script lang="ts">
   import { createQuery } from '@tanstack/svelte-query';
+  import { queryKeys } from '$lib/api/queryKeys';
   import CursorPagination from '$lib/components/CursorPagination.svelte';
   import {
     cursorPaginationProps,
@@ -24,18 +25,18 @@
   let windowMinutes = $state(15);
 
   const readiness = createQuery(() => ({
-    queryKey: ['operator-health', 'readiness'],
+    queryKey: queryKeys.health.readiness(),
     queryFn: () => getReadiness(),
     refetchInterval
   }));
   const providers = createQuery(() => ({
-    queryKey: ['operator-health', 'providers', windowMinutes],
+    queryKey: queryKeys.health.providers(windowMinutes),
     queryFn: () => listProviderHealth(windowMinutes),
     placeholderData: (previous) => previous,
     refetchInterval
   }));
   const persistence = createQuery(() => ({
-    queryKey: ['operator-health', 'persistence'],
+    queryKey: queryKeys.health.persistence(),
     queryFn: () => {
       const end = new Date();
       const start = new Date(end.valueOf() - 24 * 60 * 60 * 1000);
@@ -47,17 +48,13 @@
     refetchInterval
   }));
   const generations = createQuery(() => ({
-    queryKey: [
-      'operator-health',
-      'generations',
-      generationPagination.cursor ?? 'first'
-    ],
+    queryKey: queryKeys.health.generations(generationPagination.cursor),
     queryFn: () => listRuntimeGenerations(generationPagination.cursor),
     placeholderData: (previous) => previous,
     refetchInterval
   }));
   const epochs = createQuery(() => ({
-    queryKey: ['operator-health', 'epochs', epochPagination.cursor ?? 'first'],
+    queryKey: queryKeys.health.epochs(epochPagination.cursor),
     queryFn: () =>
       listRequestMetadataGatewayEpochs('unresolved', epochPagination.cursor),
     placeholderData: (previous) => previous,

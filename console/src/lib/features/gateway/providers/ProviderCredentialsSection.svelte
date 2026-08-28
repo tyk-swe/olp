@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onDestroy } from 'svelte';
+  import { queryKeys } from '$lib/api/queryKeys';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { errorMessage as providerDetailError } from '$lib/api/http';
   import {
@@ -17,7 +18,6 @@
     providerDisabled,
     requiresCredential
   } from './providerEditor';
-  import { invalidateProviderSummaries } from './providerCache';
   import {
     installProviderWithModels,
     type RunProviderAction
@@ -45,7 +45,7 @@
 
   const queryClient = useQueryClient();
   const credentials = createQuery(() => ({
-    queryKey: ['provider-credentials', current.id],
+    queryKey: queryKeys.providers.credentials(current.id),
     queryFn: ({ signal }) => listProviderCredentials(current.id, signal)
   }));
   let credentialValue = $state('');
@@ -74,7 +74,9 @@
         onAcceptProvider,
         onResetModelPage
       );
-      await invalidateProviderSummaries(queryClient);
+      await queryClient.invalidateQueries({
+        queryKey: queryKeys.providers.summaries
+      });
       onNotice(
         'Credential version staged. Test and activate the provider to publish it; the current runtime credential remains live until then.'
       );
@@ -90,7 +92,9 @@
         credentials.refetch()
       ]);
       onAcceptProvider(updated);
-      await invalidateProviderSummaries(queryClient);
+      await queryClient.invalidateQueries({
+        queryKey: queryKeys.providers.summaries
+      });
       onNotice(`Credential version ${credential.version} revoked.`);
     });
   }

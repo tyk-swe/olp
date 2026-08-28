@@ -1,5 +1,6 @@
 <script lang="ts">
   import { createQuery } from '@tanstack/svelte-query';
+  import { queryKeys } from '$lib/api/queryKeys';
   import { logout } from '$lib/api/auth';
   import { listSessionPage, revokeSession } from '$lib/api/management/access';
   import { errorMessage } from '$lib/api/http';
@@ -17,7 +18,7 @@
   let notice = $state('');
 
   const sessions = createQuery(() => ({
-    queryKey: ['profile-sessions', pagination.cursor],
+    queryKey: queryKeys.profile.sessions(pagination.cursor),
     queryFn: () => listSessionPage(undefined, pagination.cursor)
   }));
 

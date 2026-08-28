@@ -1,5 +1,6 @@
 <script lang="ts">
   import { goto } from '$app/navigation';
+  import { queryKeys } from '$lib/api/queryKeys';
   import { guardUnsavedChanges } from '$lib/forms/unsavedChanges';
   import { resolve } from '$app/paths';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
@@ -53,12 +54,12 @@
   const canManage = $derived(access.can('routes.manage'));
 
   const draft = createQuery(() => ({
-    queryKey: ['route-draft', resourceId],
+    queryKey: queryKeys.routes.draft(resourceId),
     queryFn: () => getRouteDraft(resourceId),
     enabled: Boolean(resourceId)
   }));
   const providerModels = createQuery(() => ({
-    queryKey: ['enabled-provider-models'],
+    queryKey: queryKeys.providers.enabledModels(),
     queryFn: () => listProviderModelInventory(true)
   }));
   const modelOptions = $derived(toRouteModelOptions(providerModels.data ?? []));
@@ -196,7 +197,7 @@
       const id = await createRouteDraft(
         buildCreateRouteDraftInput(editorValues, modelOptions)
       );
-      await queryClient.invalidateQueries({ queryKey: ['route-draft-page'] });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.routes.lists });
       sync = initialConcurrentEdit();
       await goto(resolve(`/routes/${id}`));
     });
@@ -218,7 +219,7 @@
         buildReplaceRouteDraftInput(editorValues)
       );
       sync = markSaved(sync, updated.etag);
-      queryClient.setQueryData(['route-draft', current.id], updated);
+      queryClient.setQueryData(queryKeys.routes.draft(current.id), updated);
       validated = false;
       notice = 'Draft saved. Simulate and validate before activation.';
     });
@@ -242,7 +243,7 @@
     await run('validate', async () => {
       const validation = await validateRoute(current);
       sync = acceptRemote(sync, validation.etag);
-      queryClient.setQueryData<RouteDraft>(['route-draft', current.id], {
+      queryClient.setQueryData<RouteDraft>(queryKeys.routes.draft(current.id), {
         ...current,
         state: validation.state,
         etag: validation.etag
@@ -259,7 +260,7 @@
       // Activation returns the draft to `draft` under a fresh ETag. Adopting it
       // here keeps the next save from failing its If-Match precondition.
       sync = acceptRemote(sync, activation.draft_etag);
-      queryClient.setQueryData<RouteDraft>(['route-draft', current.id], {
+      queryClient.setQueryData<RouteDraft>(queryKeys.routes.draft(current.id), {
         ...current,
         state: 'draft',
         etag: activation.draft_etag
@@ -268,9 +269,7 @@
       notice = `Route activated as revision ${activation.revision} in runtime generation ${activation.runtime_generation.sequence}.`;
       await Promise.all([
         draft.refetch(),
-        queryClient.invalidateQueries({ queryKey: ['route-draft-page'] }),
-        queryClient.invalidateQueries({ queryKey: ['routes'] }),
-        queryClient.invalidateQueries({ queryKey: ['route-page'] })
+        queryClient.invalidateQueries({ queryKey: queryKeys.routes.lists })
       ]);
     });
   }
@@ -280,7 +279,7 @@
     if (!confirm(`Delete draft “${current.slug}”?`)) return;
     await run('delete', async () => {
       await deleteRouteDraft(current.id, current.etag);
-      await queryClient.invalidateQueries({ queryKey: ['route-draft-page'] });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.routes.lists });
       sync = initialConcurrentEdit();
       await goto(resolve('/routes'));
     });

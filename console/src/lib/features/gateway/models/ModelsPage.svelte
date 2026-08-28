@@ -1,5 +1,6 @@
 <script lang="ts">
   import { resolve } from '$app/paths';
+  import { queryKeys } from '$lib/api/queryKeys';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import CursorPagination from '$lib/components/CursorPagination.svelte';
   import ReadOnlyNote from '$lib/components/ReadOnlyNote.svelte';
@@ -7,10 +8,6 @@
     cursorPaginationProps,
     emptyCursorHistory
   } from '$lib/api/pagination';
-  import {
-    invalidateProviderModelConsumers,
-    invalidateProviderSummaries
-  } from '../providers/providerCache';
   import {
     getProvider,
     listProviderModelInventoryPage,
@@ -26,7 +23,7 @@
   const queryClient = useQueryClient();
   const pagination = $state(emptyCursorHistory());
   const models = createQuery(() => ({
-    queryKey: ['provider-model-inventory-page', pagination.cursor ?? 'first'],
+    queryKey: queryKeys.providers.modelInventory(pagination.cursor),
     queryFn: () => listProviderModelInventoryPage(pagination.cursor)
   }));
   let search = $state('');
@@ -80,15 +77,19 @@
       );
       await setProviderModel(provider, entry.model.id, enabled, capabilities);
       await Promise.all([
-        invalidateProviderSummaries(queryClient),
-        invalidateProviderModelConsumers(queryClient)
+        queryClient.invalidateQueries({
+          queryKey: queryKeys.providers.summaries
+        }),
+        queryClient.invalidateQueries({
+          queryKey: queryKeys.providers.modelCatalog
+        })
       ]);
       notice = `Model eligibility staged. Activate ${entry.provider_name} to apply the change.`;
     } catch (error) {
       mutationError = message(error);
       eligibilityVersion += 1;
       await queryClient.invalidateQueries({
-        queryKey: ['provider-model-inventory-page']
+        queryKey: queryKeys.providers.modelCatalog
       });
     } finally {
       busyModel = '';

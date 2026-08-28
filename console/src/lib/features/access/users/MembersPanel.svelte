@@ -1,5 +1,6 @@
 <script lang="ts">
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
+  import { queryKeys } from '$lib/api/queryKeys';
   import {
     listUserPage,
     updateUserActive,
@@ -28,7 +29,7 @@
   let notice = $state('');
 
   const users = createQuery(() => ({
-    queryKey: ['user-page', pagination.cursor ?? 'first'],
+    queryKey: queryKeys.users.page(pagination.cursor),
     queryFn: () => listUserPage(pagination.cursor)
   }));
 
@@ -48,7 +49,9 @@
 
   /** Role changes and deactivation revoke sessions server-side. */
   async function refreshSessionViews() {
-    await queryClient.invalidateQueries({ queryKey: ['session-page'] });
+    await queryClient.invalidateQueries({
+      queryKey: queryKeys.users.sessionsRoot
+    });
   }
 
   function updateCachedUser(updated: User) {

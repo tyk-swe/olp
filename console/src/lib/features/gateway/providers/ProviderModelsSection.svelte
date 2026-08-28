@@ -1,5 +1,6 @@
 <script lang="ts">
   import { resolve } from '$app/paths';
+  import { queryKeys } from '$lib/api/queryKeys';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { errorMessage as providerDetailError } from '$lib/api/http';
   import CursorPagination from '$lib/components/CursorPagination.svelte';
@@ -36,7 +37,6 @@
     type CoordinatedModelPage,
     type RunProviderAction
   } from './providerDetailCoordination';
-  import { invalidateProviderSummaries } from './providerCache';
 
   let {
     current,
@@ -72,7 +72,7 @@
   const editingLocked = $derived(providerDisabled(current));
 
   const capabilityOptions = createQuery(() => ({
-    queryKey: ['provider-capability-options', current.kind],
+    queryKey: queryKeys.providers.capabilityOptions(current.kind),
     queryFn: ({ signal }) => getProviderCapabilityOptions(current.kind, signal)
   }));
   const models = createQuery(() => ({
@@ -118,7 +118,9 @@
       const updated = await discoverProviderModels(current);
       certificationResults = {};
       await install(updated, true);
-      await invalidateProviderSummaries(queryClient);
+      await queryClient.invalidateQueries({
+        queryKey: queryKeys.providers.summaries
+      });
       onNotice(
         `${updated.model_count} model${updated.model_count === 1 ? '' : 's'} discovered. Review capabilities before activation.`
       );
@@ -137,7 +139,9 @@
       manualModelNames = '';
       certificationResults = {};
       await install(updated, true);
-      await invalidateProviderSummaries(queryClient);
+      await queryClient.invalidateQueries({
+        queryKey: queryKeys.providers.summaries
+      });
       onNotice(
         `${updated.model_count} manually declared model${updated.model_count === 1 ? '' : 's'} ready for capability review.`
       );
@@ -159,7 +163,9 @@
       );
       certificationResults = {};
       await install(updated, false);
-      await invalidateProviderSummaries(queryClient);
+      await queryClient.invalidateQueries({
+        queryKey: queryKeys.providers.summaries
+      });
       onNotice('Capability review saved with declared provenance.');
     });
   }
@@ -180,7 +186,9 @@
       certificationResults = { ...certificationResults, [modelId]: result };
       const updated = await getProvider(provider.id);
       await install(updated, false);
-      await invalidateProviderSummaries(queryClient);
+      await queryClient.invalidateQueries({
+        queryKey: queryKeys.providers.summaries
+      });
       onNotice(
         `${result.certified_count} of ${result.attempted_count} reviewed tuples passed server certification. Test the completed draft before activation.`
       );

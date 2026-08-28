@@ -1,5 +1,6 @@
 <script lang="ts">
   import { createQuery } from '@tanstack/svelte-query';
+  import { queryKeys } from '$lib/api/queryKeys';
   import { listAudit } from '$lib/api/audit';
   import { errorMessage } from '$lib/api/http';
   import { cursorPaginationProps, resetCursor } from '$lib/api/pagination';
@@ -17,7 +18,7 @@
   setAuditListState(listState);
   let rangeError = $state('');
   const audit = createQuery(() => ({
-    queryKey: ['audit', listState.applied, listState.cursor ?? 'first'],
+    queryKey: queryKeys.audit.page(listState.applied, listState.cursor),
     queryFn: () =>
       listAudit({ ...listState.applied, cursor: listState.cursor }),
     placeholderData: (previous) => previous

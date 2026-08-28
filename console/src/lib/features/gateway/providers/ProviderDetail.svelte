@@ -1,5 +1,6 @@
 <script lang="ts">
   import { guardUnsavedChanges } from '$lib/forms/unsavedChanges';
+  import { queryKeys } from '$lib/api/queryKeys';
   import { resolve } from '$app/paths';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import ConflictNotice from '$lib/components/ConflictNotice.svelte';
@@ -42,7 +43,6 @@
     installProviderWithModels,
     type RunProviderAction
   } from './providerDetailCoordination';
-  import { invalidateProviderSummaries } from './providerCache';
 
   let { providerId }: { providerId: string } = $props();
 
@@ -50,12 +50,12 @@
   const access = useRole();
   const canManage = $derived(access.can('providers.manage'));
   const provider = createQuery(() => ({
-    queryKey: ['provider', providerId],
+    queryKey: queryKeys.providers.detail(providerId),
     queryFn: ({ signal }) => getProvider(providerId, signal),
     enabled: Boolean(providerId)
   }));
   const providerKinds = createQuery(() => ({
-    queryKey: ['provider-kinds'],
+    queryKey: queryKeys.providers.kinds(),
     queryFn: ({ signal }) => listProviderKinds(signal)
   }));
   const providerSpec = $derived(
@@ -117,7 +117,7 @@
 
   function acceptProvider(updated: Provider) {
     sync = acceptRemote(sync, updated.etag);
-    queryClient.setQueryData(['provider', updated.id], updated);
+    queryClient.setQueryData(queryKeys.providers.detail(updated.id), updated);
   }
 
   function reportError(message: string) {
@@ -158,7 +158,10 @@
       if (next.hydrate && providerSpec) {
         editValues = providerEditValues(reloaded, providerSpec);
       }
-      queryClient.setQueryData(['provider', reloaded.id], reloaded);
+      queryClient.setQueryData(
+        queryKeys.providers.detail(reloaded.id),
+        reloaded
+      );
       reloadVersion += 1;
     } catch (error) {
       sync = beforeReload;
@@ -186,7 +189,9 @@
         acceptProvider,
         resetModelPage
       );
-      await invalidateProviderSummaries(queryClient);
+      await queryClient.invalidateQueries({
+        queryKey: queryKeys.providers.summaries
+      });
       reportNotice('Provider draft settings saved.');
     });
   }

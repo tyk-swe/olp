@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import { queryKeys } from '$lib/api/queryKeys';
   import { replaceState } from '$app/navigation';
   import { resolve } from '$app/paths';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
@@ -70,11 +71,11 @@
   const queryClient = useQueryClient();
 
   const profile = createQuery(() => ({
-    queryKey: ['profile'],
+    queryKey: queryKeys.profile.current(),
     queryFn: getProfile
   }));
   const identities = createQuery(() => ({
-    queryKey: ['profile-oidc-identities'],
+    queryKey: queryKeys.profile.oidcIdentities(),
     queryFn: listOidcIdentities
   }));
   let passwordEnrollmentNeeded = $derived(
@@ -293,7 +294,7 @@
         { display_name: normalizedDisplayName }
       );
       profileSync = markSaved(profileSync, updated.etag);
-      queryClient.setQueryData(['profile'], updated);
+      queryClient.setQueryData(queryKeys.profile.current(), updated);
       message = 'Profile updated.';
     } catch (cause) {
       if (isEtagMismatch(cause)) profileSync = markConflict(profileSync);
@@ -334,7 +335,7 @@
         });
       }
       profileSync = acceptRemote(profileSync, updated.etag);
-      queryClient.setQueryData(['profile'], updated);
+      queryClient.setQueryData(queryKeys.profile.current(), updated);
       currentPassword = newPassword = confirmPassword = '';
       clearEnrollmentGrant();
       message = passwordEnrollmentNeeded
@@ -399,7 +400,9 @@
     await Promise.all([
       refetchProfile(),
       identities.refetch(),
-      queryClient.invalidateQueries({ queryKey: ['profile-sessions'] })
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.profile.sessionsRoot
+      })
     ]);
   }
 

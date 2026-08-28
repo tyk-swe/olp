@@ -1,5 +1,6 @@
 <script lang="ts">
   import { useQueryClient } from '@tanstack/svelte-query';
+  import { queryKeys } from '$lib/api/queryKeys';
   import { errorMessage as providerActionError } from '$lib/api/http';
   import {
     activateProvider,
@@ -18,10 +19,6 @@
     probeSummary,
     providerDisabled
   } from './providerEditor';
-  import {
-    invalidateProviderModelConsumers,
-    invalidateProviderSummaries
-  } from './providerCache';
   import type { RunProviderAction } from './providerDetailCoordination';
   import { formatDate, stateLabel } from '$lib/format';
 
@@ -67,13 +64,17 @@
 
   function invalidateProviderViews() {
     return Promise.all([
-      invalidateProviderSummaries(queryClient),
-      invalidateProviderModelConsumers(queryClient),
       queryClient.invalidateQueries({
-        queryKey: ['provider-credentials', current.id]
+        queryKey: queryKeys.providers.summaries
       }),
       queryClient.invalidateQueries({
-        queryKey: ['provider-revisions', current.id]
+        queryKey: queryKeys.providers.modelCatalog
+      }),
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.providers.credentials(current.id)
+      }),
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.providers.revisionsOf(current.id)
       })
     ]);
   }
@@ -83,7 +84,9 @@
       const probe = await probeProvider(current);
       if (!probe.succeeded) throw new Error(probe.detail);
       onAcceptProvider(await getProvider(current.id));
-      await invalidateProviderSummaries(queryClient);
+      await queryClient.invalidateQueries({
+        queryKey: queryKeys.providers.summaries
+      });
       onNotice(`Connection succeeded: ${probeSummary(probe)}`);
     });
   }

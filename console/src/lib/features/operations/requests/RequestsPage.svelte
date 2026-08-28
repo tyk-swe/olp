@@ -1,5 +1,6 @@
 <script lang="ts">
   import { resolve } from '$app/paths';
+  import { queryKeys } from '$lib/api/queryKeys';
   import { createQuery } from '@tanstack/svelte-query';
   import { getRequest, listRequests } from '$lib/api/requests';
   import { errorMessage } from '$lib/api/http';
@@ -26,7 +27,7 @@
   } = $props();
 
   const requests = createQuery(() => ({
-    queryKey: ['requests', listState.applied, listState.cursor ?? 'first'],
+    queryKey: queryKeys.requests.page(listState.applied, listState.cursor),
     queryFn: () =>
       listRequests({ ...listState.applied, cursor: listState.cursor }),
     placeholderData: (previous) => previous,
@@ -34,7 +35,7 @@
   }));
 
   const detail = createQuery(() => ({
-    queryKey: ['request', requestId],
+    queryKey: queryKeys.requests.detail(requestId),
     queryFn: () => getRequest(requestId),
     enabled: Boolean(requestId)
   }));

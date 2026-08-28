@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onDestroy } from 'svelte';
+  import { queryKeys } from '$lib/api/queryKeys';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { isEtagMismatch } from '$lib/api/http';
   import {
@@ -34,7 +35,7 @@
   const access = useRole();
   const canManage = $derived(access.can('users.manage'));
   const oidc = createQuery(() => ({
-    queryKey: ['oidc-configuration'],
+    queryKey: queryKeys.oidc.configuration(),
     queryFn: ({ signal }) => getOidcConfiguration(signal),
     retry: false
   }));
@@ -140,7 +141,7 @@
       );
       clientSecret = '';
       sync = markSaved(sync, updated.etag);
-      queryClient.setQueryData(['oidc-configuration'], updated);
+      queryClient.setQueryData(queryKeys.oidc.configuration(), updated);
       notice = updated.enabled
         ? 'OIDC configuration validated and enabled.'
         : 'OIDC configuration saved but disabled.';

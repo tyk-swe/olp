@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onDestroy } from 'svelte';
+  import { queryKeys } from '$lib/api/queryKeys';
   import { createQuery } from '@tanstack/svelte-query';
   import {
     createInvitation,
@@ -50,7 +51,7 @@
   let copyError = $state('');
 
   const invitations = createQuery(() => ({
-    queryKey: ['invitation-page', pagination.cursor ?? 'first'],
+    queryKey: queryKeys.invitations.page(pagination.cursor),
     queryFn: () => listInvitationPage(pagination.cursor)
   }));
 
