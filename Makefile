@@ -19,7 +19,7 @@ FUZZ_TRIPLE = $(shell rustc -vV | sed -n 's/^host: //p')
 .PHONY: help check check-static check-cargo check-heavy boundaries storage-sqlx source-size fmt fmt-fix clippy test \
 	coverage console-install console-verify console-e2e \
 	screenshots openapi sqlx-prepare sqlx-check db-test release-version \
-	supply-chain helm-verify script-selftest shellcheck fuzz-check \
+	supply-chain machete helm-verify script-selftest shellcheck fuzz-check \
 	fuzz-replay fuzz-campaign sdk-smoke sdk-smoke-install sdk-smoke-run \
 	e2e worker-ha smoke-image-modes upgrade-rehearsal advisories deny
 
@@ -41,7 +41,8 @@ help: ## List available targets
 # rehearsal (make upgrade-rehearsal), the amd64 and arm64 image builds (make
 # smoke-image-modes), helm-verify (needs helm + docker compose), the advisory
 # audits (make deny, make advisories), and the actionlint/hadolint quality
-# steps.
+# steps. The harness jobs share one `olp --features test-util` binary built
+# by the rust-test-util-build job; locally the scripts build it on demand.
 CHECK_JOBS ?= 2
 STATIC_JOBS ?= $(shell nproc 2>/dev/null || echo 4)
 
@@ -49,7 +50,7 @@ check: ## Broad local gate: check-static, then check-heavy; CI also runs service
 	$(MAKE) -j$(STATIC_JOBS) --output-sync=target check-static
 	$(MAKE) -j$(CHECK_JOBS) --output-sync=recurse check-heavy
 
-check-static: boundaries storage-sqlx source-size shellcheck script-selftest fmt release-version supply-chain ## Cheap script and formatting gates only (parallel-safe; quick pre-commit loop)
+check-static: boundaries storage-sqlx source-size shellcheck script-selftest fmt release-version supply-chain machete ## Cheap script and formatting gates only (parallel-safe; quick pre-commit loop)
 
 check-cargo: ## Clippy then the nextest suite, serially (shared cargo lock)
 	$(MAKE) clippy
@@ -124,6 +125,9 @@ release-version: ## Require consistent release metadata
 
 supply-chain: ## Require immutable Action and image references
 	scripts/check-supply-chain-pins.sh
+
+machete: ## Reject workspace dependencies no crate uses (needs cargo-machete)
+	cargo machete --with-metadata
 
 helm-verify: ## Verify Helm values, schema, and templates change together
 	scripts/verify-helm-contract.sh deploy/helm

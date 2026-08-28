@@ -19,6 +19,8 @@ repository = "https://github.com/tyk-swe/olp"
 aes-gcm = "0.11"
 arc-swap = "1"
 argon2 = "0.5"
+aws-smithy-eventstream = "0.61.1"
+aws-smithy-types = "1.6.1"
 axum = { version = "0.8", features = ["http2", "json", "multipart", "tokio"] }
 base64 = "0.22"
 bytes = "1"

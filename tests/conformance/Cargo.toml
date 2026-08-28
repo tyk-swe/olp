@@ -10,8 +10,8 @@ publish = false
 role = "test-harness"
 
 [dependencies]
-aws-smithy-eventstream = "0.61.1"
-aws-smithy-types = "1.6.1"
+aws-smithy-eventstream.workspace = true
+aws-smithy-types.workspace = true
 bytes.workspace = true
 futures.workspace = true
 olp-engine = { workspace = true, features = ["test-util"] }
