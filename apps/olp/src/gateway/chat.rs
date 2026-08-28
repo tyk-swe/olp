@@ -151,7 +151,7 @@ fn streaming_response(mut execution: RoutedEvents, include_usage: bool) -> Respo
         let outcome = failure
             .as_ref()
             .map_or_else(RequestOutcome::success, InferenceError::accounting_outcome);
-        accounting.finish(outcome).await;
+        accounting.finish(outcome);
     });
     response
 }

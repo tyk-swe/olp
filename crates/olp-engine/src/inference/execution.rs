@@ -134,11 +134,11 @@ impl RoutedEvents {
         let events = match events {
             Ok(events) => events,
             Err(failure) => {
-                accounting.finish_detached(RequestOutcome::from_error(&failure));
+                accounting.finish(RequestOutcome::from_error(&failure));
                 return Err(failure);
             }
         };
-        accounting.release_detached();
+        accounting.release();
         let finalizer = accounting.into_finalizer();
         Ok(CompletedEvents {
             events,
@@ -311,8 +311,7 @@ impl Service {
                 "The provider returned an incompatible generation response.",
             );
             accounting
-                .finish(RequestOutcome::from_error(&failure))
-                .await;
+                .finish(RequestOutcome::from_error(&failure));
             return Err(failure);
         };
         Ok(RoutedEvents {
@@ -412,8 +411,7 @@ impl Service {
                     error
                 };
                 accounting
-                    .finish(RequestOutcome::from_error(&failure))
-                    .await;
+                    .finish(RequestOutcome::from_error(&failure));
                 return Err(failure);
             }
         };
@@ -462,7 +460,7 @@ impl Service {
             Err(failure) => {
                 let error = failure.error;
                 accounting.record_attempts(failure.attempts, None, None, false);
-                accounting.finish(RequestOutcome::from_error(&error)).await;
+                accounting.finish(RequestOutcome::from_error(&error));
                 return Err(error);
             }
         };
@@ -479,12 +477,11 @@ impl Service {
                 "The provider returned an event stream for a media-job operation.",
             );
             accounting
-                .finish(RequestOutcome::from_error(&failure))
-                .await;
+                .finish(RequestOutcome::from_error(&failure));
             return Err(failure);
         };
         accounting.replace_usage(usage_from_result(&result));
-        accounting.finish(RequestOutcome::success()).await;
+        accounting.finish(RequestOutcome::success());
         Ok(result)
     }
 
@@ -522,12 +519,11 @@ impl Service {
                 "The provider returned an event stream for a unary result operation.",
             );
             accounting
-                .finish(RequestOutcome::from_error(&failure))
-                .await;
+                .finish(RequestOutcome::from_error(&failure));
             return Err(failure);
         };
         accounting.replace_usage(usage_from_result(&result));
-        accounting.release_detached();
+        accounting.release();
         let finalizer = accounting.into_finalizer();
         Ok(RoutedUnaryResult {
             result,
@@ -576,8 +572,7 @@ impl Service {
                 admission.reservation.take(),
                 admission.reserved_tokens,
             )
-            .finish(RequestOutcome::from_error(&failure))
-            .await;
+            .finish(RequestOutcome::from_error(&failure));
             return Err(failure);
         }
         let lease_ttl = principal
@@ -606,8 +601,7 @@ impl Service {
                     admission.reservation.take(),
                     admission.reserved_tokens,
                 )
-                .finish(RequestOutcome::from_error(&failure))
-                .await;
+                .finish(RequestOutcome::from_error(&failure));
                 return Err(failure);
             }
         };
@@ -643,8 +637,7 @@ impl Service {
                     error
                 };
                 accounting
-                    .finish(RequestOutcome::from_error(&failure))
-                    .await;
+                    .finish(RequestOutcome::from_error(&failure));
                 return Err(failure);
             }
         };
@@ -698,7 +691,7 @@ impl Service {
             Err(failure) => {
                 let error = failure.error;
                 accounting.record_attempts(failure.attempts, None, None, false);
-                accounting.finish(RequestOutcome::from_error(&error)).await;
+                accounting.finish(RequestOutcome::from_error(&error));
                 Err(error)
             }
         }

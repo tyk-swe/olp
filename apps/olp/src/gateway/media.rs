@@ -396,7 +396,7 @@ fn raw_media_streaming_response(mut execution: RoutedEvents) -> Response {
             olp_engine::inference::accounting::RequestOutcome::success,
             InferenceError::accounting_outcome,
         );
-        accounting.finish(outcome).await;
+        accounting.finish(outcome);
     });
     response
 }

@@ -231,7 +231,7 @@ pub(crate) async fn precommit_stream_failure(
     let first = execution.first.clone();
     let mut accounting = execution.take_accounting();
     accounting.usage_mut().observe(&first);
-    accounting.finish(failure.accounting_outcome()).await;
+    accounting.finish(failure.accounting_outcome());
     Some(failure)
 }
 
@@ -321,7 +321,7 @@ where
             olp_engine::inference::accounting::RequestOutcome::success,
             InferenceError::accounting_outcome,
         );
-        accounting.finish(outcome).await;
+        accounting.finish(outcome);
     });
     response
 }

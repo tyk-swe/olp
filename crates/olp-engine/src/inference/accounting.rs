@@ -231,31 +231,15 @@ impl RequestAccountingGuard {
         self.usage = usage;
     }
 
-    pub async fn release(&mut self) {
-        self.release_failed(false).await;
+    /// Hands the limit reservations to a cleanup task without waiting for
+    /// it. Reconciling and releasing retry with backoff when Valkey is
+    /// unreachable, and that latency must never sit on the response path.
+    pub fn release(&mut self) {
+        self.spawn_limit_cleanup(false);
     }
 
-    async fn release_failed(&mut self, failed: bool) {
-        let Some(task) = self.spawn_limit_cleanup(failed) else {
-            return;
-        };
-        if let Err(error) = task.await {
-            tracing::warn!(%error, "request limit cleanup task failed");
-        }
-    }
-
-    pub(in crate::inference) fn release_detached(&mut self) {
-        let _ = self.spawn_limit_cleanup(false);
-    }
-
-    pub async fn finish(mut self, outcome: RequestOutcome) {
-        self.release_failed(outcome.error_class.is_some()).await;
-        self.emit(&outcome, true);
-        self.armed = false;
-    }
-
-    pub(in crate::inference) fn finish_detached(mut self, outcome: RequestOutcome) {
-        let _ = self.spawn_limit_cleanup(outcome.error_class.is_some());
+    pub fn finish(mut self, outcome: RequestOutcome) {
+        self.spawn_limit_cleanup(outcome.error_class.is_some());
         self.emit(&outcome, true);
         self.armed = false;
     }
@@ -285,8 +269,10 @@ impl RequestAccountingGuard {
         })
     }
 
-    fn spawn_limit_cleanup(&mut self, failed: bool) -> Option<tokio::task::JoinHandle<()>> {
-        Some(tokio::spawn(self.take_limit_cleanup(failed)?.run()))
+    fn spawn_limit_cleanup(&mut self, failed: bool) {
+        if let Some(cleanup) = self.take_limit_cleanup(failed) {
+            tokio::spawn(cleanup.run());
+        }
     }
 
     fn emit(&self, outcome: &RequestOutcome, finalize_attempt: bool) {
