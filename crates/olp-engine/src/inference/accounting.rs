@@ -275,9 +275,11 @@ impl RequestAccountingGuard {
         }
     }
 
-    fn emit(&self, outcome: &RequestOutcome, finalize_attempt: bool) {
-        let mut attempts = self.attempts.clone();
-        if let Some(active) = &self.active_attempt {
+    /// Emits the request's metadata event. The attempts move out of the
+    /// guard: every caller is finishing or dropping it.
+    fn emit(&mut self, outcome: &RequestOutcome, finalize_attempt: bool) {
+        let mut attempts = std::mem::take(&mut self.attempts);
+        if let Some(active) = self.active_attempt.take() {
             attempts.push(RequestAttemptMetadata {
                 id: uuid::Uuid::now_v7(),
                 ordinal: active.ordinal,
@@ -308,7 +310,7 @@ impl RequestAccountingGuard {
                 api_key_id: self.api_key_id,
                 request_id: self.request_id,
                 route_slug: &self.route_slug,
-                attempts: &attempts,
+                attempts,
                 request_started_at: self.request_started_at,
                 request_started: self.request_started,
                 final_attempt_started: finalize_attempt.then_some(self.attempt_started).flatten(),
@@ -344,7 +346,7 @@ impl Drop for RequestAccountingGuard {
 pub(in crate::inference) struct RequestMetadataFinalizer(RequestAccountingGuard);
 
 impl RequestMetadataFinalizer {
-    pub(in crate::inference) fn finalize(self, outcome: &RequestOutcome) {
+    pub(in crate::inference) fn finalize(mut self, outcome: &RequestOutcome) {
         self.0.emit(outcome, true);
     }
 }
@@ -524,7 +526,7 @@ struct RequestMetadataInput<'a> {
     api_key_id: uuid::Uuid,
     request_id: uuid::Uuid,
     route_slug: &'a RouteSlug,
-    attempts: &'a [RequestAttemptMetadata],
+    attempts: Vec<RequestAttemptMetadata>,
     request_started_at: chrono::DateTime<Utc>,
     request_started: tokio::time::Instant,
     final_attempt_started: Option<tokio::time::Instant>,
@@ -576,7 +578,7 @@ fn emit_request_metadata_event(service: &Service, input: RequestMetadataInput<'_
         return;
     };
     let request_completed_at = Utc::now();
-    let mut attempts = input.attempts.to_vec();
+    let mut attempts = input.attempts;
     if let (Some(final_attempt), Some(started)) = (attempts.last_mut(), input.final_attempt_started)
     {
         update_final_attempt(
