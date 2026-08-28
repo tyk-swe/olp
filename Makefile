@@ -1,6 +1,6 @@
 # OpenLLMProxy task index. Every recipe is a thin dispatcher to the same
-# script, cargo, or pnpm command CI runs (.github/workflows/ci.yml); keep the
-# two in lockstep when either changes.
+# script, cargo, or pnpm command CI runs (.github/workflows/ci.yml); `make
+# ci-lockstep` fails if a ci.yml step bypasses this file.
 
 SHELL := bash
 .SHELLFLAGS := -euo pipefail -c
@@ -19,7 +19,9 @@ FUZZ_TRIPLE = $(shell rustc -vV | sed -n 's/^host: //p')
 .PHONY: help check check-static check-cargo check-heavy boundaries storage-sqlx source-size fmt fmt-fix clippy test \
 	coverage console-install console-verify console-e2e \
 	screenshots openapi sqlx-prepare sqlx-check db-test release-version \
-	supply-chain machete helm-verify script-selftest shellcheck fuzz-check \
+	supply-chain machete ci-lockstep helm-verify script-selftest shellcheck fuzz-check \
+	olp-build-test-util olp-prebuilt olp-migrate sqlx-migrate playwright-install \
+	console-e2e-project console-integration-prebuilt \
 	fuzz-replay fuzz-campaign sdk-smoke sdk-smoke-install sdk-smoke-run \
 	e2e worker-ha smoke-image-modes upgrade-rehearsal advisories deny
 
@@ -50,7 +52,7 @@ check: ## Broad local gate: check-static, then check-heavy; CI also runs service
 	$(MAKE) -j$(STATIC_JOBS) --output-sync=target check-static
 	$(MAKE) -j$(CHECK_JOBS) --output-sync=recurse check-heavy
 
-check-static: boundaries storage-sqlx source-size shellcheck script-selftest fmt release-version supply-chain machete ## Cheap script and formatting gates only (parallel-safe; quick pre-commit loop)
+check-static: boundaries storage-sqlx source-size shellcheck script-selftest fmt release-version supply-chain machete ci-lockstep ## Cheap script and formatting gates only (parallel-safe; quick pre-commit loop)
 
 check-cargo: ## Clippy then the nextest suite, serially (shared cargo lock)
 	$(MAKE) clippy
@@ -95,8 +97,24 @@ console-install: ## Install locked console dependencies
 console-verify: ## Console gate: api:check + vitest + svelte-check/eslint + build
 	pnpm --dir console verify
 
-console-e2e: ## Console Playwright e2e suite: all four projects; CI splits chromium from firefox/webkit/mobile-chromium
+console-e2e: ## Console Playwright e2e suite: all four projects; CI runs them one project per job via console-e2e-project
 	pnpm --dir console test:e2e
+
+BROWSER ?= chromium
+PROJECT ?= chromium
+
+playwright-install: ## Install one Playwright browser with its system packages (BROWSER=chromium)
+	pnpm --dir console exec playwright install --with-deps $(BROWSER)
+
+# svelte-kit sync first: a job that downloads the prebuilt console never ran
+# a build, so .svelte-kit/tsconfig.json (which console/tsconfig.json extends)
+# does not exist yet and Playwright refuses to load the tests without it.
+console-e2e-project: ## Console Playwright e2e for one project (PROJECT=chromium)
+	pnpm --dir console exec svelte-kit sync
+	pnpm --dir console exec playwright test --project=$(PROJECT)
+
+console-integration-prebuilt: ## Rust-hosted console integration against the prebuilt console and olp binary
+	scripts/ci/run-console-integration.sh
 
 screenshots: ## Regenerate docs/assets/screenshots/*.png from console fixtures
 	pnpm --dir console screenshots
@@ -108,8 +126,20 @@ openapi: ## Regenerate openapi/management.json and the console API schema
 sqlx-prepare: ## Regenerate .sqlx/ metadata against a migrated development database
 	cargo sqlx prepare --workspace -- --all-targets --all-features
 
+sqlx-migrate: ## Apply the migrations to DATABASE_URL with sqlx-cli
+	cargo sqlx migrate run --source crates/olp-db/migrations
+
 sqlx-check: ## Verify .sqlx/ metadata is fresh (CI: postgres-integration job)
 	cargo sqlx prepare --workspace --check -- --all-targets --all-features
+
+olp-build-test-util: ## Build the harness olp binary that the contract and console jobs share
+	SQLX_OFFLINE=true cargo build --locked -p olp --features test-util
+
+olp-prebuilt: ## Restore the execute bit an artifact download drops from target/debug/olp
+	chmod +x target/debug/olp
+
+olp-migrate: ## Apply the migrations with the built olp binary
+	target/debug/olp migrate
 
 db-test: ## PostgreSQL/Valkey integration tests via nextest; needs OLP_TEST_DATABASE_ADMIN_URL and OLP_TEST_DATABASE_URL_PREFIX; extra args via ARGS
 	./scripts/run-postgres-tests.sh $(ARGS)
@@ -128,6 +158,9 @@ supply-chain: ## Require immutable Action and image references
 
 machete: ## Reject workspace dependencies no crate uses (needs cargo-machete)
 	cargo machete --with-metadata
+
+ci-lockstep: ## Require every ci.yml command step to run through make or scripts/ci
+	scripts/check-ci-make-lockstep.sh
 
 helm-verify: ## Verify Helm values, schema, and templates change together
 	scripts/verify-helm-contract.sh deploy/helm

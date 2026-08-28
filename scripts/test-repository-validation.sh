@@ -514,6 +514,54 @@ test_external_cargo_patch_path_is_rejected() {
     'Cargo.toml has a path dependency outside the workspace: ../external'
 }
 
+write_ci_workflow_fixture() {
+  local file=$1
+  shift
+  printf '%s\n' "$@" > "$file"
+}
+
+test_ci_lockstep_accepts_make_and_allow_listed_steps() {
+  local fixture="$test_root/ci-lockstep-ok.yml"
+  write_ci_workflow_fixture "$fixture" \
+    'defaults:' \
+    '  run:' \
+    '    shell: bash' \
+    'jobs:' \
+    '  build:' \
+    '    steps:' \
+    '      - name: Check' \
+    '        run: make check' \
+    '      - name: Client tools' \
+    '        run: ./scripts/ci/install-postgres-client.sh 18' \
+    '      - name: Install lint dependencies' \
+    '        run: |' \
+    '          sudo apt-get install --yes ripgrep'
+  CI_WORKFLOW="$fixture" "$script_dir/check-ci-make-lockstep.sh" > /dev/null
+}
+
+test_ci_lockstep_rejects_raw_and_unlisted_steps() {
+  local fixture="$test_root/ci-lockstep-bad.yml"
+  local output="$test_root/ci-lockstep-bad.log"
+  local status
+  write_ci_workflow_fixture "$fixture" \
+    'jobs:' \
+    '  build:' \
+    '    steps:' \
+    '      - name: Raw build' \
+    '        run: cargo build --locked' \
+    '      - name: Ad hoc block' \
+    '        run: |' \
+    '          echo drift'
+  if CI_WORKFLOW="$fixture" "$script_dir/check-ci-make-lockstep.sh" > "$output" 2>&1; then
+    return 1
+  else
+    status=$?
+  fi
+  [[ $status == 1 ]] || return 1
+  assert_contains "$output" "step 'Raw build' runs 'cargo build --locked' instead of a make target" || return 1
+  assert_contains "$output" "multi-line step 'Ad hoc block' is not in the allow-list"
+}
+
 run_test "valid no-match scan succeeds" test_valid_no_match_scan
 run_test "missing required directory fails" test_missing_required_directory
 run_test "ripgrep exit greater than one fails" test_simulated_rg_failure
@@ -539,5 +587,9 @@ run_test "same-name non-workspace paths remain unclassified" \
   test_same_name_non_workspace_path_is_rejected
 run_test "external Cargo patch paths are rejected" \
   test_external_cargo_patch_path_is_rejected
+run_test "CI steps that run through make pass the lockstep check" \
+  test_ci_lockstep_accepts_make_and_allow_listed_steps
+run_test "CI steps that bypass make fail the lockstep check" \
+  test_ci_lockstep_rejects_raw_and_unlisted_steps
 
 tap_plan

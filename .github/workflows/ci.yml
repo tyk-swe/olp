@@ -210,19 +210,15 @@ jobs:
         with:
           name: console-build-${{ github.run_id }}-${{ github.run_attempt }}
           path: console/build
-      # This job takes the prebuilt console artifact instead of running a
-      # build, so nothing has generated .svelte-kit/tsconfig.json yet, and
-      # console/tsconfig.json extends it. Playwright resolves that extends
-      # chain when it loads the test files and fails hard if it dangles.
-      - name: Generate SvelteKit types
-        run: pnpm exec svelte-kit sync
       - name: Install Chromium
-        run: pnpm exec playwright install --with-deps chromium
+        working-directory: .
+        run: make playwright-install BROWSER=chromium
       - name: Run Chromium end-to-end tests
+        working-directory: .
         env:
           PLAYWRIGHT_HTML_OUTPUT_DIR: playwright-report/chromium
           PLAYWRIGHT_OUTPUT_DIR: test-results/chromium
-        run: pnpm exec playwright test --project=chromium
+        run: make console-e2e-project PROJECT=chromium
       - name: Upload Chromium Playwright diagnostics
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: ${{ failure() && !cancelled() }}
@@ -291,12 +287,12 @@ jobs:
           cache-shared-key: workspace-registry
       - name: Install PostgreSQL 18 client tools
         run: ./scripts/ci/install-postgres-client.sh 18
-      - name: Verify checked SQLx metadata
+      - name: Migrate the integration database
         env:
           DATABASE_URL: postgres://olp:olp@localhost:5432/olp
-        run: |
-          cargo sqlx migrate run --source crates/olp-db/migrations
-          make sqlx-check
+        run: make sqlx-migrate
+      - name: Verify checked SQLx metadata
+        run: make sqlx-check
       - name: Run isolated PostgreSQL and Valkey integration suites
         run: make db-test
 
@@ -318,7 +314,7 @@ jobs:
       # ha, worker-ha, and upgrade-rehearsal do not each recompile the same
       # debug binary from source.
       - name: Build the olp binary with test-util
-        run: cargo build --locked -p olp --features test-util
+        run: make olp-build-test-util
       - name: Upload the olp binary for downstream jobs
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -370,22 +366,16 @@ jobs:
           name: console-build-${{ github.run_id }}-${{ github.run_attempt }}
           path: console/build
       - name: Install Chromium
-        run: pnpm --dir console exec playwright install --with-deps chromium
+        run: make playwright-install BROWSER=chromium
       - name: Download the prebuilt olp test-util binary
         uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6.0.0
         with:
           name: olp-test-util-${{ github.run_id }}-${{ github.run_attempt }}
           path: target/debug
       - name: Restore the execute bit on the downloaded binary
-        run: chmod +x target/debug/olp
+        run: make olp-prebuilt
       - name: Run complete Rust-hosted console integration
-        run: |
-          umask 077
-          openssl rand -base64 32 > "$OLP_CONSOLE_E2E_MASTER_KEY_FILE"
-          openssl rand -base64 32 > "$OLP_CONSOLE_E2E_AUTH_HMAC_KEY_FILE"
-          printf '%s\n' 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=' \
-            > "$OLP_CONSOLE_E2E_BOOTSTRAP_TOKEN_FILE"
-          pnpm --dir console test:integration:prebuilt
+        run: make console-integration-prebuilt
       - name: Upload integration Playwright diagnostics
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: ${{ failure() && !cancelled() }}
@@ -436,7 +426,7 @@ jobs:
           name: olp-test-util-${{ github.run_id }}-${{ github.run_attempt }}
           path: target/debug
       - name: Restore the execute bit on the downloaded binary
-        run: chmod +x target/debug/olp
+        run: make olp-prebuilt
       - name: Run the end-to-end contract suite
         run: make e2e
 
@@ -554,18 +544,15 @@ jobs:
         with:
           name: console-build-${{ github.run_id }}-${{ github.run_attempt }}
           path: console/build
-      # Same as Console / Chromium: the prebuilt artifact means
-      # .svelte-kit/tsconfig.json does not exist yet, and Playwright refuses
-      # to load tests whose tsconfig extends a missing file.
-      - name: Generate SvelteKit types
-        run: pnpm exec svelte-kit sync
       - name: Install ${{ matrix.browser }}
-        run: pnpm exec playwright install --with-deps ${{ matrix.browser }}
+        working-directory: .
+        run: make playwright-install BROWSER=${{ matrix.browser }}
       - name: Run ${{ matrix.label }} end-to-end tests
+        working-directory: .
         env:
           PLAYWRIGHT_HTML_OUTPUT_DIR: playwright-report/${{ matrix.project }}
           PLAYWRIGHT_OUTPUT_DIR: test-results/${{ matrix.project }}
-        run: pnpm exec playwright test --project=${{ matrix.project }}
+        run: make console-e2e-project PROJECT=${{ matrix.project }}
       - name: Upload ${{ matrix.label }} Playwright diagnostics
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: failure() && !cancelled()
@@ -616,7 +603,7 @@ jobs:
           name: olp-test-util-${{ github.run_id }}-${{ github.run_attempt }}
           path: target/debug
       - name: Restore the execute bit on the downloaded binary
-        run: chmod +x target/debug/olp
+        run: make olp-prebuilt
       - name: Run two-gateway limits, LKG, missed-hint, and revocation proof
         env:
           OLP_E2E_DATABASE_ADMIN_URL: postgres://olp:olp@localhost:5432/postgres
@@ -678,7 +665,7 @@ jobs:
           name: olp-test-util-${{ github.run_id }}-${{ github.run_attempt }}
           path: target/debug
       - name: Restore the execute bit on the downloaded binary
-        run: chmod +x target/debug/olp
+        run: make olp-prebuilt
       - name: Run shared-Valkey and three-worker crash-recovery proofs
         env:
           OLP_E2E_DATABASE_ADMIN_URL: postgres://olp:olp@localhost:5432/postgres
@@ -721,11 +708,11 @@ jobs:
           name: olp-test-util-${{ github.run_id }}-${{ github.run_attempt }}
           path: target/debug
       - name: Restore the execute bit on the downloaded binary
-        run: chmod +x target/debug/olp
+        run: make olp-prebuilt
       # The rehearsal exercises the same debug binary the other harness jobs
       # use; test-util only adds harness hooks and leaves migrations untouched.
       - name: Migrate the current release
-        run: target/debug/olp migrate
+        run: make olp-migrate
       - name: Rehearse PostgreSQL backup, restore, and upgrade
         env:
           OLP_REHEARSAL_SERVER_URL: postgres://olp:olp@localhost:5432
