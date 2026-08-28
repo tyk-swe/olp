@@ -59,7 +59,7 @@ pub(in crate::management::operations) struct RequestMetadataGatewayEpochQuery {
     state: Option<String>,
 }
 
-#[derive(Debug, Serialize, ToSchema)]
+#[derive(Clone, Debug, Serialize, ToSchema)]
 pub(in crate::management::operations) struct RequestMetadataGatewayEpochResponse {
     gateway_instance: String,
     #[schema(value_type = String, format = Uuid)]
@@ -110,6 +110,7 @@ impl From<GatewayEpochRecord> for RequestMetadataGatewayEpochResponse {
 
 #[derive(Debug, Serialize, ToSchema)]
 pub(in crate::management::operations) struct RequestMetadataGatewayEpochListResponse {
+    data: Vec<RequestMetadataGatewayEpochResponse>,
     items: Vec<RequestMetadataGatewayEpochResponse>,
     next_cursor: Option<String>,
 }
@@ -141,8 +142,10 @@ pub(in crate::management::operations) async fn list_request_metadata_gateway_epo
         .request_metadata_gateway_epochs(state_filter, cursor.as_ref(), page_limit(query.limit)?)
         .await
         .map_err(map_operations)?;
+    let items = page.items.into_iter().map(Into::into).collect::<Vec<_>>();
     Ok(Json(RequestMetadataGatewayEpochListResponse {
-        items: page.items.into_iter().map(Into::into).collect(),
+        data: items.clone(),
+        items,
         next_cursor: page.next_cursor,
     }))
 }

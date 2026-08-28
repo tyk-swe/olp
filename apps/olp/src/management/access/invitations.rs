@@ -48,7 +48,7 @@ use crate::{
 pub(in crate::management) const INVALID_INVITATION_RATE_LIMIT_TARGET: &str =
     "<invalid-invitation-token>";
 
-#[derive(Debug, Serialize, ToSchema)]
+#[derive(Clone, Debug, Serialize, ToSchema)]
 pub(in crate::management) struct InvitationResponse {
     #[schema(value_type = String, format = Uuid)]
     pub id: Uuid,
@@ -102,6 +102,7 @@ impl From<InvitationRecord> for InvitationResponse {
 
 #[derive(Debug, Serialize, ToSchema)]
 pub(in crate::management) struct InvitationListResponse {
+    pub data: Vec<InvitationResponse>,
     pub items: Vec<InvitationResponse>,
     pub next_cursor: Option<String>,
 }
@@ -147,8 +148,10 @@ pub(in crate::management) async fn list_invitations(
         .list_invitations(cursor, limit)
         .await
         .map_err(map_identity)?;
+    let items = invitations.into_iter().map(Into::into).collect::<Vec<_>>();
     Ok(Json(InvitationListResponse {
-        items: invitations.into_iter().map(Into::into).collect(),
+        data: items.clone(),
+        items,
         next_cursor: next_cursor.map(|cursor| cursor.to_string()),
     }))
 }

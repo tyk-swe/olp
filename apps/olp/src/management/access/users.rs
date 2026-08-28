@@ -22,7 +22,7 @@ use crate::management::{
 };
 use crate::{bootstrap::mode_dependencies::ManagementState, public_http::problem::Problem};
 
-#[derive(Debug, Serialize, ToSchema)]
+#[derive(Clone, Debug, Serialize, ToSchema)]
 pub(in crate::management) struct UserDetailResponse {
     #[schema(value_type = String, format = Uuid)]
     pub id: Uuid,
@@ -53,6 +53,7 @@ impl From<UserRecord> for UserDetailResponse {
 
 #[derive(Debug, Serialize, ToSchema)]
 pub(in crate::management) struct UserListResponse {
+    pub data: Vec<UserDetailResponse>,
     pub items: Vec<UserDetailResponse>,
     pub next_cursor: Option<String>,
 }
@@ -83,8 +84,10 @@ pub(in crate::management) async fn list_users(
         .list_users(cursor, limit)
         .await
         .map_err(map_identity)?;
+    let items = users.into_iter().map(Into::into).collect::<Vec<_>>();
     Ok(Json(UserListResponse {
-        items: users.into_iter().map(Into::into).collect(),
+        data: items.clone(),
+        items,
         next_cursor: next_cursor.map(|cursor| cursor.to_string()),
     }))
 }

@@ -40,7 +40,7 @@ pub(super) struct RequestQuery {
     started_before: Option<DateTime<Utc>>,
 }
 
-#[derive(Debug, Serialize, ToSchema)]
+#[derive(Clone, Debug, Serialize, ToSchema)]
 pub(super) struct RequestSummary {
     #[schema(value_type = String, format = Uuid)]
     id: Uuid,
@@ -96,6 +96,7 @@ impl From<RequestRecord> for RequestSummary {
 
 #[derive(Debug, Serialize, ToSchema)]
 pub(super) struct RequestListResponse {
+    data: Vec<RequestSummary>,
     items: Vec<RequestSummary>,
     next_cursor: Option<String>,
 }
@@ -196,8 +197,10 @@ pub(super) async fn list_requests(
         )
         .await
         .map_err(map_operations)?;
+    let items = page.items.into_iter().map(Into::into).collect::<Vec<_>>();
     Ok(Json(RequestListResponse {
-        items: page.items.into_iter().map(Into::into).collect(),
+        data: items.clone(),
+        items,
         next_cursor: page.next_cursor,
     }))
 }

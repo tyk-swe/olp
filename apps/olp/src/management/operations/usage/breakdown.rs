@@ -24,7 +24,7 @@ pub(in crate::management::operations) struct UsageBreakdownQuery {
     limit: Option<u16>,
 }
 
-#[derive(Debug, Serialize, ToSchema)]
+#[derive(Clone, Debug, Serialize, ToSchema)]
 pub(in crate::management::operations) struct UsageBreakdownItem {
     dimension: String,
     request_count: u64,
@@ -57,6 +57,7 @@ impl From<Item> for UsageBreakdownItem {
 
 #[derive(Debug, Serialize, ToSchema)]
 pub(in crate::management::operations) struct UsageBreakdownResponse {
+    data: Vec<UsageBreakdownItem>,
     items: Vec<UsageBreakdownItem>,
     coverage: UsageRangeCoverageResponse,
 }
@@ -101,8 +102,10 @@ pub(in crate::management::operations) async fn usage_breakdown(
         .usage_breakdown(&filters, dimension, page_limit(query.limit)?)
         .await
         .map_err(map_operations)?;
+    let items = report.items.into_iter().map(Into::into).collect::<Vec<_>>();
     Ok(Json(UsageBreakdownResponse {
-        items: report.items.into_iter().map(Into::into).collect(),
+        data: items.clone(),
+        items,
         coverage: report.coverage.into(),
     }))
 }

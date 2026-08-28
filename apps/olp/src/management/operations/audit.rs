@@ -19,7 +19,7 @@ use crate::{
     public_http::problem::Problem,
 };
 
-#[derive(Debug, Serialize, ToSchema)]
+#[derive(Clone, Debug, Serialize, ToSchema)]
 pub(super) struct AuditEventResponse {
     #[schema(value_type = String, format = Uuid)]
     id: Uuid,
@@ -98,6 +98,7 @@ impl AuditQuery {
 
 #[derive(Debug, Serialize, ToSchema)]
 pub(super) struct AuditListResponse {
+    data: Vec<AuditEventResponse>,
     items: Vec<AuditEventResponse>,
     next_cursor: Option<String>,
 }
@@ -128,8 +129,10 @@ pub(super) async fn list_audit_events(
         .audit_events(cursor.as_ref(), limit, &filters)
         .await
         .map_err(map_operations)?;
+    let items = page.items.into_iter().map(Into::into).collect::<Vec<_>>();
     Ok(Json(AuditListResponse {
-        items: page.items.into_iter().map(Into::into).collect(),
+        data: items.clone(),
+        items,
         next_cursor: page.next_cursor,
     }))
 }

@@ -51,6 +51,7 @@ impl From<OidcIdentityRecord> for OidcIdentityResponse {
 
 #[derive(Clone, Debug, Serialize, ToSchema)]
 pub(super) struct OidcIdentityListResponse {
+    pub(super) data: Vec<OidcIdentityResponse>,
     pub(super) items: Vec<OidcIdentityResponse>,
     pub(super) linking_available: bool,
     pub(super) has_local_password: bool,
@@ -84,8 +85,10 @@ pub(super) async fn list_identities(
         .await
         .map_err(map_persistence)?
         .ok_or_else(|| Problem::unauthorized("The session is missing or expired."))?;
+    let items = identities.into_iter().map(Into::into).collect::<Vec<_>>();
     Ok(Json(OidcIdentityListResponse {
-        items: identities.into_iter().map(Into::into).collect(),
+        data: items.clone(),
+        items,
         linking_available,
         has_local_password,
     }))

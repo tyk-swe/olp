@@ -18,7 +18,7 @@ use crate::{
     public_http::problem::Problem,
 };
 
-#[derive(Debug, Serialize, ToSchema)]
+#[derive(Clone, Debug, Serialize, ToSchema)]
 pub(super) struct RuntimeGenerationItem {
     #[schema(value_type = String, format = Uuid)]
     id: Uuid,
@@ -45,6 +45,7 @@ impl From<GenerationRecord> for RuntimeGenerationItem {
 
 #[derive(Debug, Serialize, ToSchema)]
 pub(super) struct RuntimeGenerationListResponse {
+    data: Vec<RuntimeGenerationItem>,
     items: Vec<RuntimeGenerationItem>,
     next_cursor: Option<String>,
 }
@@ -77,8 +78,10 @@ pub(super) async fn list_runtime_generations(
         .runtime_generations(before, limit)
         .await
         .map_err(map_operations)?;
+    let items = page.items.into_iter().map(Into::into).collect::<Vec<_>>();
     Ok(Json(RuntimeGenerationListResponse {
-        items: page.items.into_iter().map(Into::into).collect(),
+        data: items.clone(),
+        items,
         next_cursor: page.next_cursor,
     }))
 }

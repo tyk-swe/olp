@@ -24,7 +24,7 @@ use crate::{
     public_http::problem::Problem,
 };
 
-#[derive(Debug, Serialize, ToSchema)]
+#[derive(Clone, Debug, Serialize, ToSchema)]
 pub(super) struct SettingResponse {
     key: String,
     value: String,
@@ -49,6 +49,7 @@ impl From<SettingRecord> for SettingResponse {
 
 #[derive(Debug, Serialize, ToSchema)]
 pub(super) struct SettingsResponse {
+    data: Vec<SettingResponse>,
     items: Vec<SettingResponse>,
 }
 
@@ -64,8 +65,10 @@ pub(super) async fn list_settings(
 ) -> Result<Json<SettingsResponse>, Problem> {
     require_permission(&principal, Permission::ReadOperations)?;
     let settings = state.store().settings().await.map_err(map_operations)?;
+    let items = settings.into_iter().map(Into::into).collect::<Vec<_>>();
     Ok(Json(SettingsResponse {
-        items: settings.into_iter().map(Into::into).collect(),
+        data: items.clone(),
+        items,
     }))
 }
 

@@ -22,7 +22,7 @@ pub(in crate::management::operations) struct UsageSeriesQuery {
     granularity: Option<String>,
 }
 
-#[derive(Debug, Serialize, ToSchema)]
+#[derive(Clone, Debug, Serialize, ToSchema)]
 pub(in crate::management::operations) struct UsagePointResponse {
     bucket: DateTime<Utc>,
     request_count: u64,
@@ -55,6 +55,7 @@ impl From<Point> for UsagePointResponse {
 
 #[derive(Debug, Serialize, ToSchema)]
 pub(in crate::management::operations) struct UsageTimeSeriesResponse {
+    data: Vec<UsagePointResponse>,
     items: Vec<UsagePointResponse>,
     coverage: UsageRangeCoverageResponse,
 }
@@ -92,8 +93,14 @@ pub(in crate::management::operations) async fn usage_time_series(
         .usage_series(&filters, granularity)
         .await
         .map_err(map_operations)?;
+    let items = series
+        .points
+        .into_iter()
+        .map(Into::into)
+        .collect::<Vec<_>>();
     Ok(Json(UsageTimeSeriesResponse {
-        items: series.points.into_iter().map(Into::into).collect(),
+        data: items.clone(),
+        items,
         coverage: series.coverage.into(),
     }))
 }

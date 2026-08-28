@@ -46,7 +46,7 @@ pub(super) struct ProviderHealthQuery {
     limit: Option<u16>,
 }
 
-#[derive(Debug, Serialize, ToSchema)]
+#[derive(Clone, Debug, Serialize, ToSchema)]
 pub(super) struct ProviderHealthItem {
     #[schema(value_type = String, format = Uuid)]
     provider_id: Uuid,
@@ -91,6 +91,7 @@ impl From<ProviderHealthRecord> for ProviderHealthItem {
 #[derive(Debug, Serialize, ToSchema)]
 pub(super) struct ProviderHealthResponse {
     window_minutes: u16,
+    data: Vec<ProviderHealthItem>,
     items: Vec<ProviderHealthItem>,
     next_cursor: Option<String>,
 }
@@ -131,9 +132,11 @@ pub(super) async fn provider_health(
         .provider_health(window_minutes, cursor, page_limit(query.limit)?)
         .await
         .map_err(map_operations)?;
+    let items = page.items.into_iter().map(Into::into).collect::<Vec<_>>();
     Ok(Json(ProviderHealthResponse {
         window_minutes,
-        items: page.items.into_iter().map(Into::into).collect(),
+        data: items.clone(),
+        items,
         next_cursor: page.next_cursor,
     }))
 }

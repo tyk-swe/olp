@@ -11,6 +11,34 @@ fn checked_in_management_schema_matches_generated_contract() {
     );
 }
 
+#[test]
+fn v1_list_contracts_keep_data_alongside_items() {
+    let document = serde_json::to_value(document()).unwrap();
+    for schema in [
+        "AuditListResponse",
+        "InvitationListResponse",
+        "MediaJobListResponse",
+        "OidcIdentityListResponse",
+        "PricingRevisionsResponse",
+        "ProviderHealthResponse",
+        "RequestListResponse",
+        "RequestMetadataGatewayEpochListResponse",
+        "RuntimeGenerationListResponse",
+        "SessionListResponse",
+        "SettingsResponse",
+        "UsageBreakdownResponse",
+        "UsageTimeSeriesResponse",
+        "UserListResponse",
+    ] {
+        let response_schema = &document["components"]["schemas"][schema];
+        let properties = response_schema["properties"].as_object().unwrap();
+        assert_eq!(properties["data"], properties["items"], "{schema}");
+        let required = response_schema["required"].as_array().unwrap();
+        assert!(required.iter().any(|field| field == "data"), "{schema}");
+        assert!(required.iter().any(|field| field == "items"), "{schema}");
+    }
+}
+
 /// Every mutation that demands `Idempotency-Key` can reject the header (400)
 /// and can refuse a reused key (409). A generated client that does not know
 /// those exist treats them as transport failures.

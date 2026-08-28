@@ -26,7 +26,7 @@ pub(in crate::management) struct SessionPageQuery {
     user_id: Option<Uuid>,
 }
 
-#[derive(Debug, Serialize, ToSchema)]
+#[derive(Clone, Debug, Serialize, ToSchema)]
 pub(in crate::management) struct SessionDetailResponse {
     #[schema(value_type = String, format = Uuid)]
     pub id: Uuid,
@@ -40,6 +40,7 @@ pub(in crate::management) struct SessionDetailResponse {
 
 #[derive(Debug, Serialize, ToSchema)]
 pub(in crate::management) struct SessionListResponse {
+    pub data: Vec<SessionDetailResponse>,
     pub items: Vec<SessionDetailResponse>,
     pub next_cursor: Option<String>,
 }
@@ -77,18 +78,20 @@ pub(in crate::management) async fn list_sessions(
         .list_sessions(user_id, cursor, limit)
         .await
         .map_err(map_identity)?;
+    let items = sessions
+        .into_iter()
+        .map(|session| SessionDetailResponse {
+            id: session.id,
+            user_id: session.user_id,
+            current: session.id == principal.session_id,
+            expires_at: session.expires_at,
+            last_seen_at: session.last_seen_at,
+            created_at: session.created_at,
+        })
+        .collect::<Vec<_>>();
     Ok(Json(SessionListResponse {
-        items: sessions
-            .into_iter()
-            .map(|session| SessionDetailResponse {
-                id: session.id,
-                user_id: session.user_id,
-                current: session.id == principal.session_id,
-                expires_at: session.expires_at,
-                last_seen_at: session.last_seen_at,
-                created_at: session.created_at,
-            })
-            .collect(),
+        data: items.clone(),
+        items,
         next_cursor: next_cursor.map(|cursor| cursor.to_string()),
     }))
 }

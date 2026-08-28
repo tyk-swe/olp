@@ -45,7 +45,7 @@ pub(super) struct MediaJobQuery {
     created_before: Option<DateTime<Utc>>,
 }
 
-#[derive(Debug, Serialize, ToSchema)]
+#[derive(Clone, Debug, Serialize, ToSchema)]
 pub(super) struct MediaJobItem {
     #[schema(value_type = String, format = Uuid)]
     id: Uuid,
@@ -109,6 +109,7 @@ pub(super) const fn media_job_surface_wire_value(surface: Surface) -> &'static s
 
 #[derive(Debug, Serialize, ToSchema)]
 pub(super) struct MediaJobListResponse {
+    data: Vec<MediaJobItem>,
     items: Vec<MediaJobItem>,
     next_cursor: Option<String>,
 }
@@ -168,8 +169,10 @@ pub(super) async fn list_media_jobs(
         )
         .await
         .map_err(map_media_job)?;
+    let items = page.items.into_iter().map(Into::into).collect::<Vec<_>>();
     Ok(Json(MediaJobListResponse {
-        items: page.items.into_iter().map(Into::into).collect(),
+        data: items.clone(),
+        items,
         next_cursor: page.next_cursor,
     }))
 }

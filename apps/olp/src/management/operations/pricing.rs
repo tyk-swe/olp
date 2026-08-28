@@ -112,7 +112,7 @@ pub(super) struct PricingRevisionRequest {
     prices: Vec<PriceRequest>,
 }
 
-#[derive(Debug, Serialize, ToSchema)]
+#[derive(Clone, Debug, Serialize, ToSchema)]
 pub(super) struct PriceResponse {
     provider_kind: ProviderKind,
     #[schema(value_type = Option<String>, format = Uuid)]
@@ -144,7 +144,7 @@ impl From<PriceInput> for PriceResponse {
     }
 }
 
-#[derive(Debug, Serialize, ToSchema)]
+#[derive(Clone, Debug, Serialize, ToSchema)]
 pub(super) struct PricingRevisionResponse {
     #[schema(value_type = String, format = Uuid)]
     id: Uuid,
@@ -171,6 +171,7 @@ impl From<RevisionRecord> for PricingRevisionResponse {
 
 #[derive(Debug, Serialize, ToSchema)]
 pub(super) struct PricingRevisionsResponse {
+    data: Vec<PricingRevisionResponse>,
     items: Vec<PricingRevisionResponse>,
     next_cursor: Option<String>,
 }
@@ -202,8 +203,10 @@ pub(super) async fn list_pricing_revisions(
         .pricing_revisions_page(before, page_limit(query.limit)?)
         .await
         .map_err(map_operations)?;
+    let items = page.items.into_iter().map(Into::into).collect::<Vec<_>>();
     Ok(Json(PricingRevisionsResponse {
-        items: page.items.into_iter().map(Into::into).collect(),
+        data: items.clone(),
+        items,
         next_cursor: page.next_cursor,
     }))
 }
