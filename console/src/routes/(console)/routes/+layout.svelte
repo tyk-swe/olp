@@ -1,14 +1,11 @@
 <script lang="ts">
-  import {
-    emptyRouteListState,
-    setRouteListState,
-    type RouteListState
-  } from '$lib/features/gateway/routes/routeListState';
+  import { routeList } from '$lib/features/gateway/routes/routeListState';
 
   let { children } = $props();
-  const listState = $state<RouteListState>(emptyRouteListState());
-
-  setRouteListState(listState);
+  // The list keeps its cursor (and filters) across this route family, so a
+  // detail visit returns to the same page; leaving the family resets it.
+  const listState = $state(routeList.empty());
+  routeList.set(listState);
 </script>
 
 {@render children()}

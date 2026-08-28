@@ -1,3 +1,4 @@
+import { createContext } from 'svelte';
 import { ApiProblem } from './http';
 
 import type { CursorPage } from './http';
@@ -33,6 +34,57 @@ export function popCursor(state: CursorHistory) {
 export function resetCursor(state: CursorHistory) {
   state.cursor = undefined;
   state.history = [];
+}
+
+/**
+ * Page state shared through Svelte context so a list keeps its cursor (and
+ * filters) while the operator visits a detail route and comes back. The
+ * console layout owns one instance per list for the whole session.
+ */
+export function listState<T extends object>(empty: () => T) {
+  const [get, set] = createContext<T>();
+  return { get, set, empty };
+}
+
+/** A list's cursor history plus the filter form and the query last applied. */
+export type FilteredListState<Form, Query> = CursorHistory &
+  Form & { applied: Query };
+
+export type FilteredListSpec<Form extends object, Query> = {
+  emptyForm: () => Form;
+  toQuery: (form: Form) => Query;
+  /** A message that blocks applying the form, if it is inconsistent. */
+  validate?: (form: Form) => string | null;
+};
+
+export function filteredListState<Form extends object, Query>(
+  spec: FilteredListSpec<Form, Query>
+) {
+  const [get, set] = createContext<FilteredListState<Form, Query>>();
+  const empty = (): FilteredListState<Form, Query> => ({
+    ...emptyCursorHistory(),
+    ...spec.emptyForm(),
+    applied: spec.toQuery(spec.emptyForm())
+  });
+  return {
+    get,
+    set,
+    empty,
+    /**
+     * Restarts paging and applies the form. Returns the validation message
+     * that blocked it instead, leaving the applied query untouched.
+     */
+    apply(state: FilteredListState<Form, Query>): string | null {
+      const problem = spec.validate?.(state) ?? null;
+      if (problem) return problem;
+      resetCursor(state);
+      state.applied = spec.toQuery(state);
+      return null;
+    },
+    clear(state: FilteredListState<Form, Query>) {
+      Object.assign(state, empty());
+    }
+  };
 }
 
 export function cursorPaginationProps(

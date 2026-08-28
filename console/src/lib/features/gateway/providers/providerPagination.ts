@@ -1,5 +1,10 @@
-import { createContext } from 'svelte';
-import type { CursorHistory } from '$lib/api/pagination';
+import {
+  emptyCursorHistory,
+  listState,
+  type CursorHistory
+} from '$lib/api/pagination';
 
-export const [getProviderPagination, setProviderPagination] =
-  createContext<CursorHistory>();
+export const providerList = listState<CursorHistory>(emptyCursorHistory);
+
+export const { get: getProviderPagination, set: setProviderPagination } =
+  providerList;

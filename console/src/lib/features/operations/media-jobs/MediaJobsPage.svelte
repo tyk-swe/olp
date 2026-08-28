@@ -5,13 +5,9 @@
   import CursorPagination from '$lib/components/CursorPagination.svelte';
   import { getMediaJob, listMediaJobs } from '$lib/api/media-jobs';
   import { errorMessage } from '$lib/api/http';
-  import { cursorPaginationProps, resetCursor } from '$lib/api/pagination';
+  import { cursorPaginationProps } from '$lib/api/pagination';
   import { formatDate, stateLabel } from '$lib/format';
-  import {
-    emptyMediaJobListState,
-    mediaJobFilters,
-    type MediaJobListState
-  } from './mediaJobListState';
+  import { mediaJobList, type MediaJobListState } from './mediaJobListState';
 
   let {
     jobId = '',
@@ -36,12 +32,11 @@
 
   function apply(event: SubmitEvent) {
     event.preventDefault();
-    resetCursor(listState);
-    listState.applied = mediaJobFilters(listState);
+    mediaJobList.apply(listState);
   }
 
   function clear() {
-    Object.assign(listState, emptyMediaJobListState());
+    mediaJobList.clear(listState);
   }
 
   function tone(value: string) {

@@ -3,19 +3,13 @@
   import { queryKeys } from '$lib/api/queryKeys';
   import { listAudit } from '$lib/api/audit';
   import { errorMessage } from '$lib/api/http';
-  import { cursorPaginationProps, resetCursor } from '$lib/api/pagination';
+  import { cursorPaginationProps } from '$lib/api/pagination';
   import CursorPagination from '$lib/components/CursorPagination.svelte';
   import { formatDate } from '$lib/format';
-  import {
-    auditFilters,
-    auditRangeError,
-    emptyAuditListState,
-    setAuditListState,
-    type AuditListState
-  } from './auditListState';
+  import { auditList } from './auditListState';
 
-  const listState = $state<AuditListState>(emptyAuditListState());
-  setAuditListState(listState);
+  const listState = $state(auditList.empty());
+  auditList.set(listState);
   let rangeError = $state('');
   const audit = createQuery(() => ({
     queryKey: queryKeys.audit.page(listState.applied, listState.cursor),
@@ -26,17 +20,14 @@
 
   function applyFilters(event: SubmitEvent) {
     event.preventDefault();
-    rangeError = auditRangeError(listState) ?? '';
     // An inverted window is caught here so the operator is not made to wait for
     // the server's rejection; a server-side problem still renders its own
     // detail below.
-    if (rangeError) return;
-    resetCursor(listState);
-    listState.applied = auditFilters(listState);
+    rangeError = auditList.apply(listState) ?? '';
   }
 
   function clearFilters() {
-    Object.assign(listState, emptyAuditListState());
+    auditList.clear(listState);
     rangeError = '';
   }
 </script>

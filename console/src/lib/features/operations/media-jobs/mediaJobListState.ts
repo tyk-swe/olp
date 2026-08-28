@@ -1,10 +1,9 @@
-import { createContext } from 'svelte';
 import type { MediaJobFilters } from '$lib/api/media-jobs';
 import { MEDIA_JOB_PAGE_SIZE } from '$lib/api/pageSizes';
-import { emptyCursorHistory, type CursorHistory } from '$lib/api/pagination';
+import { filteredListState, type FilteredListState } from '$lib/api/pagination';
 import { instant } from '$lib/api/query';
 
-export type MediaJobListState = CursorHistory & {
+export type MediaJobForm = {
   route: string;
   jobState: string;
   lifecycle: string;
@@ -12,28 +11,15 @@ export type MediaJobListState = CursorHistory & {
   providerId: string;
   createdAfter: string;
   createdBefore: string;
-  applied: Omit<MediaJobFilters, 'cursor'>;
 };
 
-export const [getMediaJobListState, setMediaJobListState] =
-  createContext<MediaJobListState>();
-
-export function emptyMediaJobListState(): MediaJobListState {
-  return {
-    ...emptyCursorHistory(),
-    route: '',
-    jobState: '',
-    lifecycle: '',
-    apiKeyId: '',
-    providerId: '',
-    createdAfter: '',
-    createdBefore: '',
-    applied: { limit: MEDIA_JOB_PAGE_SIZE }
-  };
-}
+export type MediaJobListState = FilteredListState<
+  MediaJobForm,
+  Omit<MediaJobFilters, 'cursor'>
+>;
 
 export function mediaJobFilters(
-  state: MediaJobListState
+  state: MediaJobForm
 ): Omit<MediaJobFilters, 'cursor'> {
   return {
     limit: MEDIA_JOB_PAGE_SIZE,
@@ -46,3 +32,22 @@ export function mediaJobFilters(
     created_before: instant(state.createdBefore)
   };
 }
+
+export const mediaJobList = filteredListState({
+  emptyForm: (): MediaJobForm => ({
+    route: '',
+    jobState: '',
+    lifecycle: '',
+    apiKeyId: '',
+    providerId: '',
+    createdAfter: '',
+    createdBefore: ''
+  }),
+  toQuery: mediaJobFilters
+});
+
+export const {
+  get: getMediaJobListState,
+  set: setMediaJobListState,
+  empty: emptyMediaJobListState
+} = mediaJobList;

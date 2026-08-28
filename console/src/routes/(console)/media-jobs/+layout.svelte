@@ -1,14 +1,11 @@
 <script lang="ts">
-  import {
-    emptyMediaJobListState,
-    setMediaJobListState,
-    type MediaJobListState
-  } from '$lib/features/operations/media-jobs/mediaJobListState';
+  import { mediaJobList } from '$lib/features/operations/media-jobs/mediaJobListState';
 
   let { children } = $props();
-  const listState = $state<MediaJobListState>(emptyMediaJobListState());
-
-  setMediaJobListState(listState);
+  // The list keeps its cursor (and filters) across this route family, so a
+  // detail visit returns to the same page; leaving the family resets it.
+  const listState = $state(mediaJobList.empty());
+  mediaJobList.set(listState);
 </script>
 
 {@render children()}

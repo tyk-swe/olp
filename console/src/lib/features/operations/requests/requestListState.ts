@@ -1,10 +1,9 @@
-import { createContext } from 'svelte';
 import type { RequestFilters } from '$lib/api/requests';
 import { REQUEST_PAGE_SIZE } from '$lib/api/pageSizes';
-import { emptyCursorHistory, type CursorHistory } from '$lib/api/pagination';
+import { filteredListState, type FilteredListState } from '$lib/api/pagination';
 import { instant } from '$lib/api/query';
 
-export type RequestListState = CursorHistory & {
+export type RequestForm = {
   route: string;
   providerId: string;
   model: string;
@@ -14,30 +13,15 @@ export type RequestListState = CursorHistory & {
   errorClass: string;
   startedAfter: string;
   startedBefore: string;
-  applied: Omit<RequestFilters, 'cursor'>;
 };
 
-export const [getRequestListState, setRequestListState] =
-  createContext<RequestListState>();
-
-export function emptyRequestListState(): RequestListState {
-  return {
-    ...emptyCursorHistory(),
-    route: '',
-    providerId: '',
-    model: '',
-    apiKeyId: '',
-    operation: '',
-    statusCode: '',
-    errorClass: '',
-    startedAfter: '',
-    startedBefore: '',
-    applied: { limit: REQUEST_PAGE_SIZE }
-  };
-}
+export type RequestListState = FilteredListState<
+  RequestForm,
+  Omit<RequestFilters, 'cursor'>
+>;
 
 export function requestFilters(
-  state: RequestListState
+  state: RequestForm
 ): Omit<RequestFilters, 'cursor'> {
   return {
     limit: REQUEST_PAGE_SIZE,
@@ -52,3 +36,24 @@ export function requestFilters(
     started_before: instant(state.startedBefore)
   };
 }
+
+export const requestList = filteredListState({
+  emptyForm: (): RequestForm => ({
+    route: '',
+    providerId: '',
+    model: '',
+    apiKeyId: '',
+    operation: '',
+    statusCode: '',
+    errorClass: '',
+    startedAfter: '',
+    startedBefore: ''
+  }),
+  toQuery: requestFilters
+});
+
+export const {
+  get: getRequestListState,
+  set: setRequestListState,
+  empty: emptyRequestListState
+} = requestList;

@@ -4,7 +4,7 @@
   import { createQuery } from '@tanstack/svelte-query';
   import { getRequest, listRequests } from '$lib/api/requests';
   import { errorMessage } from '$lib/api/http';
-  import { cursorPaginationProps, resetCursor } from '$lib/api/pagination';
+  import { cursorPaginationProps } from '$lib/api/pagination';
   import {
     formatCost,
     formatDate,
@@ -12,11 +12,7 @@
     statusLabel,
     statusTone
   } from '$lib/format';
-  import {
-    emptyRequestListState,
-    requestFilters,
-    type RequestListState
-  } from './requestListState';
+  import { requestList, type RequestListState } from './requestListState';
 
   let {
     requestId = '',
@@ -42,12 +38,11 @@
 
   function applyFilters(event: SubmitEvent) {
     event.preventDefault();
-    resetCursor(listState);
-    listState.applied = requestFilters(listState);
+    requestList.apply(listState);
   }
 
   function resetFilters() {
-    Object.assign(listState, emptyRequestListState());
+    requestList.clear(listState);
   }
 </script>
 

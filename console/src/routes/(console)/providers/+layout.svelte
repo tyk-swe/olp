@@ -1,11 +1,11 @@
 <script lang="ts">
-  import { emptyCursorHistory, type CursorHistory } from '$lib/api/pagination';
-  import { setProviderPagination } from '$lib/features/gateway/providers/providerPagination';
+  import { providerList } from '$lib/features/gateway/providers/providerPagination';
 
   let { children } = $props();
-  const pagination = $state<CursorHistory>(emptyCursorHistory());
-
-  setProviderPagination(pagination);
+  // The list keeps its cursor (and filters) across this route family, so a
+  // detail visit returns to the same page; leaving the family resets it.
+  const listState = $state(providerList.empty());
+  providerList.set(listState);
 </script>
 
 {@render children()}
