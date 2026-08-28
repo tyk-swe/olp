@@ -88,25 +88,14 @@ pub(super) fn remaining(
     deadline: Instant,
     phase: TransportPhase,
 ) -> Result<Duration, TransportError> {
-    deadline
-        .checked_duration_since(Instant::now())
-        .ok_or_else(|| {
-            transport_error(
-                phase,
-                AttemptFailureClass::Timeout,
-                false,
-                "OpenAI attempt deadline elapsed",
-            )
-        })
+    RESPONSE_IO.remaining(deadline, phase)
 }
 
 pub(super) fn remaining_until(
     phase_deadline: Instant,
     attempt_deadline: Instant,
 ) -> Option<Duration> {
-    phase_deadline
-        .min(attempt_deadline)
-        .checked_duration_since(Instant::now())
+    RESPONSE_IO.remaining_until(phase_deadline, attempt_deadline)
 }
 
 pub(super) fn map_endpoint_error(error: Error) -> TransportError {
@@ -143,10 +132,5 @@ pub(super) fn ambiguous_multipart_timeout() -> TransportError {
 }
 
 pub(super) fn first_byte_timeout() -> TransportError {
-    transport_error(
-        TransportPhase::FirstByte,
-        AttemptFailureClass::Timeout,
-        false,
-        "OpenAI first-byte deadline elapsed",
-    )
+    RESPONSE_IO.first_byte_timeout()
 }

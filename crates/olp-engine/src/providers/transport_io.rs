@@ -251,6 +251,25 @@ impl ProviderResponseIo {
             .checked_duration_since(Instant::now())
     }
 
+    /// Sends a request whose response headers must arrive before the earlier
+    /// of the first-byte and attempt deadlines. Every connector's send used to
+    /// spell out this wait/timeout/map sequence itself.
+    pub(in crate::providers) async fn send_before(
+        self,
+        request: reqwest::RequestBuilder,
+        first_byte_deadline: Instant,
+        attempt_deadline: Instant,
+        map_send_error: impl FnOnce(reqwest::Error) -> TransportError,
+    ) -> Result<reqwest::Response, TransportError> {
+        let send_wait = self
+            .remaining_until(first_byte_deadline, attempt_deadline)
+            .ok_or_else(|| self.first_byte_timeout())?;
+        timeout(send_wait, request.send())
+            .await
+            .map_err(|_| self.first_byte_timeout())?
+            .map_err(map_send_error)
+    }
+
     async fn read_bounded_stream(
         self,
         mut source: ReqwestByteStream,

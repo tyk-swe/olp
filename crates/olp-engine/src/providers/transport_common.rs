@@ -116,6 +116,14 @@ pub(in crate::providers) fn map_send_error(
     }
 }
 
+/// The `x-request-id` every provider request carries for upstream correlation.
+pub(in crate::providers) fn request_id_header(
+    request_id: impl fmt::Display,
+) -> Result<http::HeaderValue, TransportError> {
+    http::HeaderValue::from_str(&request_id.to_string())
+        .map_err(|_| protocol_error("request ID cannot be represented as a header"))
+}
+
 pub(in crate::providers) fn protocol_error(message: impl Into<String>) -> TransportError {
     transport_error(
         TransportPhase::Connect,

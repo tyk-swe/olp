@@ -1,11 +1,11 @@
-use crate::domain::ports::{AttemptFailureClass, ProviderRequest, TransportError, TransportPhase};
+use crate::domain::ports::{ProviderRequest, TransportError, TransportPhase};
 use http::{HeaderMap, HeaderValue, header};
 use reqwest::{Method, Response, multipart};
 use tokio::time::{Instant, timeout};
 
 use super::super::{Connector, errors::*, streams::*};
-use crate::providers::transport_common::upstream_response_error;
-use crate::providers::{transport_common::transport_error, transport_io::bounded_duration};
+use crate::providers::transport_common::{request_id_header, upstream_response_error};
+use crate::providers::transport_io::bounded_duration;
 
 impl Connector {
     pub(super) async fn post_raw_json(
@@ -37,14 +37,14 @@ impl Connector {
             header::CONTENT_TYPE,
             HeaderValue::from_static("application/json"),
         );
-        let wait = bounded_duration(
-            self.config.timeouts.first_byte,
-            remaining(attempt_deadline, TransportPhase::FirstByte)?,
-        );
-        let response = timeout(wait, client.post(url).headers(headers).body(body).send())
-            .await
-            .map_err(|_| first_byte_timeout())?
-            .map_err(map_send_error)?;
+        let response = RESPONSE_IO
+            .send_before(
+                client.post(url).headers(headers).body(body),
+                Instant::now() + self.config.timeouts.first_byte,
+                attempt_deadline,
+                map_send_error,
+            )
+            .await?;
         if !response.status().is_success() {
             return Err(self.map_error_response(response, attempt_deadline).await);
         }
@@ -232,24 +232,16 @@ impl Connector {
         headers.insert(header::ACCEPT, HeaderValue::from_static("application/json"));
         headers.insert(
             "x-request-id",
-            HeaderValue::from_str(&request.metadata.request_id.to_string()).map_err(|_| {
-                transport_error(
-                    TransportPhase::Connect,
-                    AttemptFailureClass::Protocol,
-                    false,
-                    "request ID cannot be represented as an HTTP header",
-                )
-            })?,
+            request_id_header(request.metadata.request_id)?,
         );
-        let send_wait = remaining_until(first_byte_deadline, attempt_deadline)
-            .ok_or_else(first_byte_timeout)?;
-        let response = timeout(
-            send_wait,
-            client.post(url).headers(headers).body(body).send(),
-        )
-        .await
-        .map_err(|_| first_byte_timeout())?
-        .map_err(map_send_error)?;
+        let response = RESPONSE_IO
+            .send_before(
+                client.post(url).headers(headers).body(body),
+                first_byte_deadline,
+                attempt_deadline,
+                map_send_error,
+            )
+            .await?;
         if !response.status().is_success() {
             return Err(self.map_error_response(response, attempt_deadline).await);
         }

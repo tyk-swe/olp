@@ -4,7 +4,7 @@ use crate::domain::ports::{
     DiscoveredProviderModel, ProviderOutput, ProviderRequest, ProviderTransport, TransportError,
 };
 use http::{HeaderMap, HeaderValue, header};
-use tokio::time::{Instant, timeout};
+use tokio::time::Instant;
 
 use crate::providers::openai::{ApiKey, ConnectorConfig};
 
@@ -14,9 +14,7 @@ mod operations;
 mod streams;
 
 use crate::providers::transport_common::protocol_body_error;
-use errors::{
-    bearer_header, first_byte_timeout, map_endpoint_error, map_send_error, raw_api_key_header,
-};
+use errors::{bearer_header, map_endpoint_error, map_send_error, raw_api_key_header};
 use streams::read_bounded_body;
 
 pub struct Connector {
@@ -88,13 +86,14 @@ impl Connector {
         self.attach_auth(&mut headers)?;
         headers.insert(header::ACCEPT, HeaderValue::from_static("application/json"));
         let first_byte_deadline = Instant::now() + self.config.timeouts.first_byte;
-        let response = timeout(
-            self.config.timeouts.first_byte,
-            client.get(url).headers(headers).send(),
-        )
-        .await
-        .map_err(|_| first_byte_timeout())?
-        .map_err(map_send_error)?;
+        let response = streams::RESPONSE_IO
+            .send_before(
+                client.get(url).headers(headers),
+                first_byte_deadline,
+                attempt_deadline,
+                map_send_error,
+            )
+            .await?;
         if !response.status().is_success() {
             return Err(self.map_error_response(response, attempt_deadline).await);
         }

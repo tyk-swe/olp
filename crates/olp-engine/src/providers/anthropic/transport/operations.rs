@@ -21,10 +21,11 @@ use crate::protocols::anthropic::{
     },
     translate::{encode::request as encode_request, response::decode},
 };
+use crate::providers::transport_common::request_id_header;
 use futures::stream;
 use http::{HeaderMap, HeaderValue, header};
 use reqwest::{Response, Url};
-use tokio::time::{Instant, timeout};
+use tokio::time::Instant;
 
 use super::errors::*;
 use super::media::hydrate_anthropic_messages;
@@ -110,13 +111,14 @@ impl Connector {
             );
             headers.insert(header::ACCEPT, HeaderValue::from_static("application/json"));
             let first_byte_deadline = Instant::now() + self.config.timeouts.first_byte;
-            let response = timeout(
-                self.config.timeouts.first_byte,
-                client.get(url).headers(headers).send(),
-            )
-            .await
-            .map_err(|_| RESPONSE_IO.first_byte_timeout())?
-            .map_err(map_send_error)?;
+            let response = RESPONSE_IO
+                .send_before(
+                    client.get(url).headers(headers),
+                    first_byte_deadline,
+                    attempt_deadline,
+                    map_send_error,
+                )
+                .await?;
             if !response.status().is_success() {
                 return Err(self.map_error_response(response, attempt_deadline).await);
             }
@@ -223,20 +225,17 @@ impl Connector {
         );
         headers.insert(
             "x-request-id",
-            HeaderValue::from_str(&request.metadata.request_id.to_string())
-                .map_err(|_| protocol_error("request ID cannot be represented as a header"))?,
+            request_id_header(request.metadata.request_id)?,
         );
 
-        let send_wait = RESPONSE_IO
-            .remaining_until(first_byte_deadline, attempt_deadline)
-            .ok_or_else(|| RESPONSE_IO.first_byte_timeout())?;
-        let response = timeout(
-            send_wait,
-            client.post(url).headers(headers).body(body).send(),
-        )
-        .await
-        .map_err(|_| RESPONSE_IO.first_byte_timeout())?
-        .map_err(map_send_error)?;
+        let response = RESPONSE_IO
+            .send_before(
+                client.post(url).headers(headers).body(body),
+                first_byte_deadline,
+                attempt_deadline,
+                map_send_error,
+            )
+            .await?;
 
         if !response.status().is_success() {
             return Err(self.map_error_response(response, attempt_deadline).await);
