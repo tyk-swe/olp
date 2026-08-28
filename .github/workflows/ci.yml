@@ -292,6 +292,8 @@ jobs:
           DATABASE_URL: postgres://olp:olp@localhost:5432/olp
         run: make sqlx-migrate
       - name: Verify checked SQLx metadata
+        env:
+          DATABASE_URL: postgres://olp:olp@localhost:5432/olp
         run: make sqlx-check
       - name: Run isolated PostgreSQL and Valkey integration suites
         run: make db-test
