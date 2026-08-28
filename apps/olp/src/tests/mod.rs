@@ -107,11 +107,11 @@ fn inference_state(limited: bool) -> (ProcessComposition, String) {
         .unwrap();
     let mut state = ProcessComposition::new(
         ApiMode::Gateway,
-        None,
+        crate::bootstrap::mode_dependencies::test_store(),
         runtime,
         "https://olp.example.test",
         PathBuf::from("missing-console"),
     );
-    state.auth_hmac_key = Some(auth_hmac_key);
+    state.auth_hmac_key = auth_hmac_key;
     (state, plaintext)
 }

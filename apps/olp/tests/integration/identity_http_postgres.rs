@@ -27,14 +27,14 @@ async fn identity_http_flow_enforces_sessions_csrf_roles_and_owner_guard() {
     let store = db.store(5).await;
     let mut state = ProcessComposition::new(
         ApiMode::Control,
-        Some(store.clone()),
+        store.clone(),
         Arc::new(Manager::empty()),
         ORIGIN,
         PathBuf::from("missing-console-for-api-test"),
     );
     state.master_key = Some(Arc::new(MasterKey::new(1, [7; 32])));
     configure_bootstrap(&mut state, [8; 32]);
-    let app = management_router_for_test(state.mode_dependencies().unwrap().management().unwrap());
+    let app = management_router_for_test(state.mode_dependencies().management().unwrap());
 
     let setup = send_json(
         &app,
@@ -555,7 +555,7 @@ async fn audit_provenance_follows_the_trusted_proxy_boundary() {
     let store = db.store(5).await;
     let mut state = ProcessComposition::new(
         ApiMode::Control,
-        Some(store.clone()),
+        store.clone(),
         Arc::new(Manager::empty()),
         ORIGIN,
         PathBuf::from("missing-console-for-api-test"),
@@ -563,7 +563,7 @@ async fn audit_provenance_follows_the_trusted_proxy_boundary() {
     state.master_key = Some(Arc::new(MasterKey::new(1, [7; 32])));
     state.set_trusted_proxy_cidrs(vec!["198.51.100.0/24".parse().unwrap()]);
     configure_bootstrap(&mut state, [8; 32]);
-    let app = management_router_for_test(state.mode_dependencies().unwrap().management().unwrap());
+    let app = management_router_for_test(state.mode_dependencies().management().unwrap());
 
     let setup = attributed_request(
         &app,
@@ -695,7 +695,7 @@ async fn audit_provenance_ignores_forwarding_from_an_untrusted_peer() {
 
     let mut trusting = ProcessComposition::new(
         ApiMode::Control,
-        Some(store.clone()),
+        store.clone(),
         Arc::new(Manager::empty()),
         ORIGIN,
         PathBuf::from("missing-console-for-api-test"),
@@ -704,7 +704,7 @@ async fn audit_provenance_ignores_forwarding_from_an_untrusted_peer() {
     trusting.set_trusted_proxy_cidrs(vec!["198.51.100.0/24".parse().unwrap()]);
     configure_bootstrap(&mut trusting, [8; 32]);
     let trusting_app =
-        management_router_for_test(trusting.mode_dependencies().unwrap().management().unwrap());
+        management_router_for_test(trusting.mode_dependencies().management().unwrap());
 
     // A peer outside the trusted CIDR sends a forwarding header anyway.
     let setup = attributed_request_from_peer(
@@ -743,20 +743,15 @@ async fn audit_provenance_ignores_forwarding_from_an_untrusted_peer() {
     // another deployment would have trusted.
     let mut untrusting = ProcessComposition::new(
         ApiMode::Control,
-        Some(store.clone()),
+        store.clone(),
         Arc::new(Manager::empty()),
         ORIGIN,
         PathBuf::from("missing-console-for-api-test"),
     );
     untrusting.master_key = Some(Arc::new(MasterKey::new(1, [7; 32])));
     configure_bootstrap(&mut untrusting, [8; 32]);
-    let untrusting_app = management_router_for_test(
-        untrusting
-            .mode_dependencies()
-            .unwrap()
-            .management()
-            .unwrap(),
-    );
+    let untrusting_app =
+        management_router_for_test(untrusting.mode_dependencies().management().unwrap());
 
     let login = attributed_request_from_peer(
         &untrusting_app,

@@ -11,6 +11,10 @@ pub mod bootstrap;
 pub mod console;
 pub mod gateway;
 pub mod management;
+#[cfg(feature = "test-util")]
+pub mod media_spool;
+#[cfg(not(feature = "test-util"))]
+pub(crate) mod media_spool;
 pub mod observability;
 pub mod public_http;
 

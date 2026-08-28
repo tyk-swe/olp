@@ -79,7 +79,7 @@ async fn oidc_code_flow_is_bound_validated_mapped_linked_and_session_backed() {
 
     let mut api_state = ProcessComposition::new(
         ApiMode::Control,
-        Some(store.clone()),
+        store.clone(),
         Arc::new(Manager::empty()),
         ORIGIN,
         PathBuf::from("missing-console-for-oidc-test"),
@@ -87,8 +87,7 @@ async fn oidc_code_flow_is_bound_validated_mapped_linked_and_session_backed() {
     api_state.master_key = Some(Arc::new(MasterKey::new(1, [42_u8; 32])));
     configure_bootstrap(&mut api_state, [43_u8; 32]);
     api_state.oidc_allow_insecure_test_endpoints = true;
-    let app =
-        management_router_for_test(api_state.mode_dependencies().unwrap().management().unwrap());
+    let app = management_router_for_test(api_state.mode_dependencies().management().unwrap());
 
     let setup = send_json(
         &app,
@@ -149,20 +148,15 @@ async fn oidc_code_flow_is_bound_validated_mapped_linked_and_session_backed() {
 
     let mut oidc_only_state = ProcessComposition::new(
         ApiMode::Control,
-        Some(store.clone()),
+        store.clone(),
         Arc::new(Manager::empty()),
         ORIGIN,
         PathBuf::from("missing-console-for-oidc-only-test"),
     );
     oidc_only_state.local_login_enabled = false;
     configure_bootstrap(&mut oidc_only_state, [44_u8; 32]);
-    let oidc_only_app = management_router_for_test(
-        oidc_only_state
-            .mode_dependencies()
-            .unwrap()
-            .management()
-            .unwrap(),
-    );
+    let oidc_only_app =
+        management_router_for_test(oidc_only_state.mode_dependencies().management().unwrap());
     let oidc_only_capabilities = send_empty(
         &oidc_only_app,
         Method::GET,

@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use olp_db::request_metadata::writer::run_connecting;
-use olp_db::{store::Store, valkey::Keyspace};
+use olp_db::{security::key_material::AuthHmacKey, store::Store, valkey::Keyspace};
 use olp_engine::inference::request_metadata::Emitter;
 use tokio::{
     net::TcpListener,
@@ -13,9 +13,7 @@ use tracing::{error, info, warn};
 use olp_engine::inference::runtime::Manager;
 
 use crate::{bootstrap::connectors::register_mounted_connectors, public_http::listener};
-use crate::{
-    bootstrap::media_spool, bootstrap::state::ApiMode, bootstrap::state::ProcessComposition,
-};
+use crate::{bootstrap::state::ApiMode, bootstrap::state::ProcessComposition, media_spool};
 
 use super::{
     AppResult, BACKGROUND_SHUTDOWN_TIMEOUT,
@@ -52,7 +50,8 @@ pub(super) async fn serve(
 ) -> AppResult<()> {
     validate_serve_args(&args)?;
     let store = connect_store(&args.database).await?;
-    let mut state = compose_state(mode, &args, &store)?;
+    let auth_hmac_key = load_serve_auth_hmac_key(&args).await?;
+    let mut state = compose_state(mode, &args, &store, auth_hmac_key)?;
     apply_secrets_and_policy(&mut state, &args, &store, mode).await?;
     if let Some(path) = &args.assets.connector_config_file {
         register_mounted_connectors(path, &state.transports).await?;
@@ -71,7 +70,7 @@ pub(super) async fn serve(
         &background_shutdown_receiver,
     )
     .await?;
-    let dependencies = state.mode_dependencies()?;
+    let dependencies = state.mode_dependencies();
     let observability_state = dependencies.observability();
     if let Some(gateway_state) = dependencies.gateway() {
         plane
@@ -143,7 +142,22 @@ fn validate_serve_args(args: &ServeArgs) -> AppResult<()> {
     Ok(())
 }
 
-fn compose_state(mode: ApiMode, args: &ServeArgs, store: &Store) -> AppResult<ProcessComposition> {
+/// Every HTTP mode authenticates with the HMAC key, so it is loaded before
+/// the process composition exists rather than patched in afterwards.
+async fn load_serve_auth_hmac_key(args: &ServeArgs) -> AppResult<Arc<AuthHmacKey>> {
+    let path = args.auth_hmac_key_file.as_ref().ok_or_else(|| {
+        std::io::Error::other("OLP_AUTH_HMAC_KEY_FILE is required when serving an HTTP mode")
+    })?;
+    check_secret_permissions(path).await?;
+    Ok(Arc::new(load_auth_hmac_key(path).await?))
+}
+
+fn compose_state(
+    mode: ApiMode,
+    args: &ServeArgs,
+    store: &Store,
+    auth_hmac_key: Arc<AuthHmacKey>,
+) -> AppResult<ProcessComposition> {
     let runtime = Arc::new(Manager::empty());
     let media_spool_dir = args
         .assets
@@ -154,8 +168,9 @@ fn compose_state(mode: ApiMode, args: &ServeArgs, store: &Store) -> AppResult<Pr
         media_spool::create(&media_spool_dir, args.assets.media_spool_capacity_bytes)?;
     let mut state = ProcessComposition::new_with_media_spool(
         mode,
-        Some(store.clone()),
+        store.clone(),
         runtime,
+        auth_hmac_key,
         args.public_origin.as_str(),
         args.assets.console_dir.clone(),
         media_spool,
@@ -188,10 +203,6 @@ async fn apply_secrets_and_policy(
     store: &Store,
     mode: ApiMode,
 ) -> AppResult<()> {
-    if let Some(path) = &args.auth_hmac_key_file {
-        check_secret_permissions(path).await?;
-        state.auth_hmac_key = Some(Arc::new(load_auth_hmac_key(path).await?));
-    }
     state.set_trusted_proxy_cidrs(args.trusted_proxy_cidrs.0.clone());
     let setup_required = if mode.serves_control() {
         store.setup_required().await?
@@ -200,11 +211,7 @@ async fn apply_secrets_and_policy(
     };
     let bootstrap_token_digest = if let Some(path) = &args.bootstrap_token_file {
         check_secret_permissions(path).await?;
-        let auth_hmac_key = state.auth_hmac_key.as_deref().ok_or_else(|| {
-            std::io::Error::other(
-                "OLP_BOOTSTRAP_TOKEN_FILE requires OLP_AUTH_HMAC_KEY_FILE for digest verification",
-            )
-        })?;
+        let auth_hmac_key = &*state.auth_hmac_key;
         Some(load_bootstrap_token_digest(path, auth_hmac_key).await?)
     } else {
         None

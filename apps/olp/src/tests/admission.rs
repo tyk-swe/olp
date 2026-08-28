@@ -69,7 +69,7 @@ fn public_auth_query_strings_do_not_change_source_policy() {
 fn public_auth_source_uses_forwarding_only_from_trusted_peers() {
     let mut state = ProcessComposition::new(
         ApiMode::Control,
-        None,
+        crate::bootstrap::mode_dependencies::test_store(),
         Arc::new(Manager::empty()),
         "https://olp.example.test",
         PathBuf::from("missing-console"),
@@ -134,7 +134,7 @@ fn public_auth_source_uses_forwarding_only_from_trusted_peers() {
 fn audit_request_provenance_records_only_what_the_boundary_proves() {
     let mut state = ProcessComposition::new(
         ApiMode::Control,
-        None,
+        crate::bootstrap::mode_dependencies::test_store(),
         Arc::new(Manager::empty()),
         "https://olp.example.test",
         PathBuf::from("missing-console"),
@@ -213,7 +213,7 @@ fn multipart_admission_is_post_only_and_recovers_after_a_parser_drops() {
 async fn malformed_trusted_proxy_chain_precedes_all_public_auth_json_handling() {
     let mut state = ProcessComposition::new(
         ApiMode::Control,
-        None,
+        crate::bootstrap::mode_dependencies::test_store(),
         Arc::new(Manager::empty()),
         "https://olp.example.test",
         PathBuf::from("missing-console"),
@@ -376,7 +376,7 @@ async fn request_limit_matrix_rejects_depth_size_encoding_and_bad_multipart() {
     let app = gateway_router_for_test(
         ProcessComposition::new(
             ApiMode::Gateway,
-            None,
+            crate::bootstrap::mode_dependencies::test_store(),
             Arc::new(Manager::empty()),
             "https://olp.example.test",
             PathBuf::from("missing-console"),

@@ -49,7 +49,7 @@ async fn configuration_http_flow_enforces_etags_roles_idempotency_and_one_time_s
     let store = db.store(5).await;
     let mut state = ProcessComposition::new(
         ApiMode::Control,
-        Some(store.clone()),
+        store.clone(),
         Arc::new(Manager::empty()),
         ORIGIN,
         PathBuf::from("missing-console-for-configuration-test"),
@@ -57,7 +57,7 @@ async fn configuration_http_flow_enforces_etags_roles_idempotency_and_one_time_s
     state.master_key = Some(Arc::new(MasterKey::new(1, [7; 32])));
     configure_bootstrap(&mut state, [9; 32]);
     let configuration_state = state.clone();
-    let app = management_router_for_test(state.mode_dependencies().unwrap().management().unwrap());
+    let app = management_router_for_test(state.mode_dependencies().management().unwrap());
     let mock_provider = MockOpenAiProvider::spawn().await;
 
     let setup = send(

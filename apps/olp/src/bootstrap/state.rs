@@ -27,7 +27,7 @@ use crate::{
     public_http::request_admission::{self, multipart::MultipartAdmissionState},
 };
 
-use super::media_spool;
+use crate::media_spool;
 
 pub(crate) const MAX_JSON_BODY_BYTES: usize = 2 * 1024 * 1024;
 pub(crate) const MAX_MEDIA_BODY_BYTES: usize = 64 * 1024 * 1024;
@@ -54,10 +54,10 @@ impl ApiMode {
 #[derive(Clone)]
 pub struct ProcessComposition {
     pub mode: ApiMode,
-    pub store: Option<Store>,
+    pub store: Store,
     pub runtime: Arc<Manager>,
     pub limiter: ReloadableLimiter,
-    pub auth_hmac_key: Option<Arc<AuthHmacKey>>,
+    pub auth_hmac_key: Arc<AuthHmacKey>,
     pub(crate) trusted_proxy_cidrs: Arc<[TrustedProxyCidr]>,
     pub(crate) bootstrap_token_digest: Arc<AsyncRwLock<Option<Zeroizing<[u8; 32]>>>>,
     pub master_key: Option<Arc<MasterKey>>,
@@ -82,10 +82,12 @@ pub struct ProcessComposition {
 }
 
 impl ProcessComposition {
+    /// Test composition with a private spool and a fixed authentication
+    /// key; tests that need a specific key assign `auth_hmac_key` afterwards.
     #[cfg(any(test, feature = "test-util"))]
     pub fn new(
         mode: ApiMode,
-        store: Option<Store>,
+        store: Store,
         runtime: Arc<Manager>,
         public_origin: impl AsRef<str>,
         console_dir: impl Into<PathBuf>,
@@ -96,6 +98,7 @@ impl ProcessComposition {
             mode,
             store,
             runtime,
+            Arc::new(AuthHmacKey::new([0xA5; 32])),
             public_origin,
             console_dir,
             media_spool,
@@ -104,8 +107,9 @@ impl ProcessComposition {
 
     pub fn new_with_media_spool(
         mode: ApiMode,
-        store: Option<Store>,
+        store: Store,
         runtime: Arc<Manager>,
+        auth_hmac_key: Arc<AuthHmacKey>,
         public_origin: impl AsRef<str>,
         console_dir: impl Into<PathBuf>,
         media_spool: Arc<dyn MediaSpool>,
@@ -120,7 +124,7 @@ impl ProcessComposition {
             store,
             runtime,
             limiter: ReloadableLimiter::default(),
-            auth_hmac_key: None,
+            auth_hmac_key,
             trusted_proxy_cidrs: Arc::from([]),
             bootstrap_token_digest: Arc::new(AsyncRwLock::new(None)),
             master_key: None,

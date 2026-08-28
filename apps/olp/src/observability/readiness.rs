@@ -539,7 +539,7 @@ mod tests {
         for mode in [ApiMode::Gateway, ApiMode::Control] {
             let state = ProcessComposition::new(
                 mode,
-                None,
+                crate::bootstrap::mode_dependencies::test_store(),
                 Arc::new(Manager::empty()),
                 "https://olp.example.test",
                 PathBuf::from("missing-console"),

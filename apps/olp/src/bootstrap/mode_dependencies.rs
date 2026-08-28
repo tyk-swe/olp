@@ -21,7 +21,6 @@ use olp_engine::domain::routing::provider::ProviderKind;
 use olp_engine::inference::{
     limits::ReloadableLimiter, request_metadata::Emitter, runtime::Manager, service::Service,
 };
-use thiserror::Error;
 
 use crate::{
     bootstrap::state::ApiMode,
@@ -102,15 +101,14 @@ impl GatewayState {
         console_dir: impl Into<PathBuf>,
     ) -> Self {
         let store = store.unwrap_or_else(test_store);
-        let mut builder =
-            ProcessComposition::new(mode, Some(store), runtime, public_origin, console_dir);
+        let mut builder = ProcessComposition::new(mode, store, runtime, public_origin, console_dir);
         builder.mode = ApiMode::All;
-        builder.auth_hmac_key = Some(Arc::new(AuthHmacKey::new([0xA5; 32])));
+        builder.auth_hmac_key = Arc::new(AuthHmacKey::new([0xA5; 32]));
         match builder.mode_dependencies() {
-            Ok(ModeDependencies::All { gateway, .. })
-            | Ok(ModeDependencies::Gateway { gateway, .. }) => *gateway,
-            Ok(ModeDependencies::Control { .. }) => unreachable!("test builder uses all mode"),
-            Err(error) => panic!("test state must be valid: {error}"),
+            ModeDependencies::All { gateway, .. } | ModeDependencies::Gateway { gateway, .. } => {
+                *gateway
+            }
+            ModeDependencies::Control { .. } => unreachable!("test builder uses all mode"),
         }
     }
 
@@ -219,15 +217,13 @@ impl ManagementState {
         console_dir: impl Into<PathBuf>,
     ) -> Self {
         let store = store.unwrap_or_else(test_store);
-        let mut builder =
-            ProcessComposition::new(mode, Some(store), runtime, public_origin, console_dir);
+        let mut builder = ProcessComposition::new(mode, store, runtime, public_origin, console_dir);
         builder.mode = ApiMode::All;
-        builder.auth_hmac_key = Some(Arc::new(AuthHmacKey::new([0xA5; 32])));
+        builder.auth_hmac_key = Arc::new(AuthHmacKey::new([0xA5; 32]));
         match builder.mode_dependencies() {
-            Ok(ModeDependencies::All { management, .. })
-            | Ok(ModeDependencies::Control { management, .. }) => *management,
-            Ok(ModeDependencies::Gateway { .. }) => unreachable!("test builder uses all mode"),
-            Err(error) => panic!("test state must be valid: {error}"),
+            ModeDependencies::All { management, .. }
+            | ModeDependencies::Control { management, .. } => *management,
+            ModeDependencies::Gateway { .. } => unreachable!("test builder uses all mode"),
         }
     }
 
@@ -375,14 +371,6 @@ impl ModeDependencies {
     }
 }
 
-#[derive(Clone, Debug, Error, Eq, PartialEq)]
-pub enum ModeDependencyError {
-    #[error("{0} mode requires PostgreSQL storage")]
-    MissingStorage(ApiMode),
-    #[error("{0} mode requires the authentication HMAC key")]
-    MissingAuthHmacKey(ApiMode),
-}
-
 impl std::fmt::Display for ApiMode {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -394,15 +382,9 @@ impl std::fmt::Display for ApiMode {
 }
 
 impl ProcessComposition {
-    pub fn mode_dependencies(&self) -> Result<ModeDependencies, ModeDependencyError> {
-        let store = self
-            .store
-            .clone()
-            .ok_or(ModeDependencyError::MissingStorage(self.mode))?;
-        let auth_hmac_key = self
-            .auth_hmac_key
-            .clone()
-            .ok_or(ModeDependencyError::MissingAuthHmacKey(self.mode))?;
+    pub fn mode_dependencies(&self) -> ModeDependencies {
+        let store = self.store.clone();
+        let auth_hmac_key = self.auth_hmac_key.clone();
         let inference = Arc::new(Service::new(
             Arc::clone(&self.runtime),
             self.limiter.clone(),
@@ -447,19 +429,19 @@ impl ProcessComposition {
             observability: self.observability.clone(),
         };
         match self.mode {
-            ApiMode::All => Ok(ModeDependencies::All {
+            ApiMode::All => ModeDependencies::All {
                 gateway: Box::new(gateway),
                 management: Box::new(management),
                 observability,
-            }),
-            ApiMode::Gateway => Ok(ModeDependencies::Gateway {
+            },
+            ApiMode::Gateway => ModeDependencies::Gateway {
                 gateway: Box::new(gateway),
                 observability,
-            }),
-            ApiMode::Control => Ok(ModeDependencies::Control {
+            },
+            ApiMode::Control => ModeDependencies::Control {
                 management: Box::new(management),
                 observability,
-            }),
+            },
         }
     }
 
@@ -499,21 +481,13 @@ impl ModeDependencies {
 
 #[cfg(test)]
 fn test_dependencies(state: &ProcessComposition) -> ModeDependencies {
-    let mut builder = state.clone();
-    if builder.store.is_none() {
-        builder.store = Some(test_store());
-    }
-    if builder.auth_hmac_key.is_none() {
-        builder.auth_hmac_key = Some(Arc::new(AuthHmacKey::new([0xA5; 32])));
-    }
-    match builder.mode_dependencies() {
-        Ok(dependencies) => dependencies,
-        Err(error) => panic!("test state must be valid: {error}"),
-    }
+    state.mode_dependencies()
 }
 
+/// A lazily connecting store for compositions under unit test; nothing
+/// touches PostgreSQL unless a test actually issues a query.
 #[cfg(test)]
-fn test_store() -> Store {
+pub(crate) fn test_store() -> Store {
     static TEST_RUNTIME: std::sync::OnceLock<tokio::runtime::Runtime> = std::sync::OnceLock::new();
     static TEST_STORE: std::sync::OnceLock<Store> = std::sync::OnceLock::new();
 
@@ -543,54 +517,29 @@ mod tests {
 
     use super::*;
 
-    fn state(mode: ApiMode, with_store: bool, with_auth_hmac_key: bool) -> ProcessComposition {
-        let store = with_store.then(test_store);
-        let mut state = ProcessComposition::new(
+    fn state(mode: ApiMode) -> ProcessComposition {
+        ProcessComposition::new(
             mode,
-            store,
+            test_store(),
             Arc::new(Manager::empty()),
             "https://olp.example.test",
             PathBuf::from("missing-console"),
-        );
-        if with_auth_hmac_key {
-            state.auth_hmac_key = Some(Arc::new(AuthHmacKey::new([7; 32])));
-        }
-        state
-    }
-
-    #[test]
-    fn every_http_mode_rejects_missing_storage_at_startup() {
-        for mode in [ApiMode::All, ApiMode::Gateway, ApiMode::Control] {
-            assert_eq!(
-                state(mode, false, false).mode_dependencies().err(),
-                Some(ModeDependencyError::MissingStorage(mode))
-            );
-        }
-    }
-
-    #[test]
-    fn every_http_mode_rejects_missing_authentication_key() {
-        for mode in [ApiMode::All, ApiMode::Gateway, ApiMode::Control] {
-            assert_eq!(
-                state(mode, true, false).mode_dependencies().err(),
-                Some(ModeDependencyError::MissingAuthHmacKey(mode))
-            );
-        }
+        )
     }
 
     #[test]
     fn fully_composed_modes_produce_only_their_owned_surfaces() {
         assert!(matches!(
-            state(ApiMode::All, true, true).mode_dependencies(),
-            Ok(ModeDependencies::All { .. })
+            state(ApiMode::All).mode_dependencies(),
+            ModeDependencies::All { .. }
         ));
         assert!(matches!(
-            state(ApiMode::Control, true, true).mode_dependencies(),
-            Ok(ModeDependencies::Control { .. })
+            state(ApiMode::Control).mode_dependencies(),
+            ModeDependencies::Control { .. }
         ));
         assert!(matches!(
-            state(ApiMode::Gateway, true, true).mode_dependencies(),
-            Ok(ModeDependencies::Gateway { .. })
+            state(ApiMode::Gateway).mode_dependencies(),
+            ModeDependencies::Gateway { .. }
         ));
     }
 }

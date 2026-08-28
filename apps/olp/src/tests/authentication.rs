@@ -4,7 +4,7 @@ use super::*;
 async fn bootstrap_token_digest_is_verified_then_cleared() {
     let mut state = ProcessComposition::new(
         ApiMode::Control,
-        None,
+        crate::bootstrap::mode_dependencies::test_store(),
         Arc::new(Manager::empty()),
         "https://olp.example.test",
         PathBuf::from("missing-console"),
@@ -14,7 +14,7 @@ async fn bootstrap_token_digest_is_verified_then_cleared() {
     let digest = auth_hmac_key
         .bootstrap_token_digest_from_base64(&token)
         .unwrap();
-    state.auth_hmac_key = Some(auth_hmac_key);
+    state.auth_hmac_key = auth_hmac_key;
     state.set_bootstrap_token_digest(digest);
     let state = state.gateway_state_for_test();
     assert_eq!(state.verify_bootstrap_token(Some(&token)).await, Some(true));
@@ -30,12 +30,12 @@ async fn bootstrap_token_digest_is_verified_then_cleared() {
 async fn inference_authentication_precedes_body_decode_with_native_errors() {
     let mut state = ProcessComposition::new(
         ApiMode::Gateway,
-        None,
+        crate::bootstrap::mode_dependencies::test_store(),
         Arc::new(Manager::empty()),
         "https://olp.example.test",
         PathBuf::from("missing-console"),
     );
-    state.auth_hmac_key = Some(Arc::new(AuthHmacKey::new([3; 32])));
+    state.auth_hmac_key = Arc::new(AuthHmacKey::new([3; 32]));
     let app = gateway_router_for_test(state.gateway_state_for_test());
     let too_deep = format!("{}0{}", "[".repeat(65), "]".repeat(65));
     for (path, header_name, value, expected_pointer) in [

@@ -288,19 +288,19 @@ fn test_gateway() -> TestGateway {
     runtime.install(snapshot, transports).unwrap();
     let mut state = ProcessComposition::new(
         ApiMode::Gateway,
-        Some(Store::from_pool(
+        Store::from_pool(
             sqlx::postgres::PgPoolOptions::new()
                 .max_connections(1)
                 .acquire_timeout(Duration::from_millis(10))
                 .connect_lazy("postgres://olp:olp@127.0.0.1/olp")
                 .unwrap(),
-        )),
+        ),
         runtime,
         "https://olp.test",
         "console",
     );
-    state.auth_hmac_key = Some(auth_hmac_key);
-    let state = state.mode_dependencies().unwrap().gateway().unwrap();
+    state.auth_hmac_key = auth_hmac_key;
+    let state = state.mode_dependencies().gateway().unwrap();
     TestGateway {
         state,
         key,

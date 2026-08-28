@@ -333,7 +333,7 @@ async fn cancelling_media_cleanup_preserves_the_completed_attempt_outcome() {
     state.replace_request_metadata_for_test(emitter);
     let remove_started = Arc::new(tokio::sync::Notify::new());
     state.replace_media_spool_for_test(Arc::new(BlockingRemoveSpool {
-        inner: crate::bootstrap::media_spool::FileMediaSpool::create().unwrap(),
+        inner: crate::media_spool::FileMediaSpool::create().unwrap(),
         remove_started: remove_started.clone(),
     }));
     install_transport(

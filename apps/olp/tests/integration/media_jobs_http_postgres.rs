@@ -165,13 +165,13 @@ async fn media_job_management_views_are_session_authorized_and_metadata_only() {
     let store = db.store(5).await;
     let mut state = ProcessComposition::new(
         ApiMode::Control,
-        Some(store.clone()),
+        store.clone(),
         Arc::new(Manager::empty()),
         ORIGIN,
         PathBuf::from("missing-console-for-media-job-test"),
     );
     configure_bootstrap(&mut state, [18; 32]);
-    let app = management_router_for_test(state.mode_dependencies().unwrap().management().unwrap());
+    let app = management_router_for_test(state.mode_dependencies().management().unwrap());
 
     let mut setup_request = Request::post("/api/v1/setup")
         .header(header::CONTENT_TYPE, "application/json")
@@ -350,12 +350,12 @@ async fn media_job_management_views_are_session_authorized_and_metadata_only() {
     let runtime = Arc::new(Manager::empty());
     let mut gateway_state = ProcessComposition::new(
         ApiMode::Gateway,
-        Some(store.clone()),
+        store.clone(),
         runtime.clone(),
         ORIGIN,
         PathBuf::from("missing-console-for-video-inference-test"),
     );
-    gateway_state.auth_hmac_key = Some(auth_hmac_key);
+    gateway_state.auth_hmac_key = auth_hmac_key;
     let delete_calls = Arc::new(AtomicUsize::new(0));
     let create_calls = Arc::new(AtomicUsize::new(0));
     let fail_cleanup = Arc::new(AtomicBool::new(false));
@@ -422,13 +422,7 @@ async fn media_job_management_views_are_session_authorized_and_metadata_only() {
         )
         .unwrap();
     let reconciliation_state = gateway_state.clone();
-    let gateway = gateway_router_for_test(
-        gateway_state
-            .mode_dependencies()
-            .unwrap()
-            .gateway()
-            .unwrap(),
-    );
+    let gateway = gateway_router_for_test(gateway_state.mode_dependencies().gateway().unwrap());
     let authorization = format!("Bearer {plaintext_key}");
     let create_body = concat!(
         "--video-boundary\r\n",
@@ -715,11 +709,7 @@ async fn media_job_management_views_are_session_authorized_and_metadata_only() {
         .unwrap();
     drop(current);
     fail_cleanup.store(false, Ordering::Release);
-    let reconciliation_state = reconciliation_state
-        .mode_dependencies()
-        .unwrap()
-        .gateway()
-        .unwrap();
+    let reconciliation_state = reconciliation_state.mode_dependencies().gateway().unwrap();
     let pass = reconcile_media_jobs_once(&reconciliation_state, 8)
         .await
         .unwrap();

@@ -261,7 +261,7 @@ mod tests {
 
     #[tokio::test]
     async fn image_json_is_incremental_valid_and_cleans_the_spool() {
-        let spool = crate::bootstrap::media_spool::create_bounded_for_test().unwrap();
+        let spool = crate::media_spool::create_bounded_for_test().unwrap();
         let raw = vec![0x5a; 2 * 1024 * 1024 + 1];
         let artifact = spool
             .put(MediaUpload {

@@ -363,7 +363,7 @@ mod tests {
             ] {
                 let state = ProcessComposition::new(
                     mode,
-                    None,
+                    crate::bootstrap::mode_dependencies::test_store(),
                     std::sync::Arc::new(olp_engine::inference::runtime::Manager::empty()),
                     origin,
                     std::path::PathBuf::from("missing-console"),
@@ -415,7 +415,7 @@ mod tests {
         ] {
             let mut state = ProcessComposition::new(
                 mode,
-                None,
+                crate::bootstrap::mode_dependencies::test_store(),
                 std::sync::Arc::new(olp_engine::inference::runtime::Manager::empty()),
                 "https://console.example.test",
                 std::path::PathBuf::from("missing-console"),

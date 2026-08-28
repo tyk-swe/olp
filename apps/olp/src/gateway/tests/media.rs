@@ -104,9 +104,7 @@ impl MediaSpool for RecordingSpool {
 }
 
 fn recording_spool() -> Arc<RecordingSpool> {
-    RecordingSpool::new(
-        crate::bootstrap::media_spool::FileMediaSpool::create().unwrap() as Arc<dyn MediaSpool>,
-    )
+    RecordingSpool::new(crate::media_spool::FileMediaSpool::create().unwrap() as Arc<dyn MediaSpool>)
 }
 
 async fn assert_cleanup(spool: &RecordingSpool, handle: &MediaHandle) {
@@ -457,7 +455,7 @@ async fn malformed_multipart_is_rejected_before_routing() {
 
 #[tokio::test]
 async fn failed_multipart_validation_removes_staged_files() {
-    let spool = crate::bootstrap::media_spool::FileMediaSpool::create().unwrap();
+    let spool = crate::media_spool::FileMediaSpool::create().unwrap();
     let artifact = spool
         .put(olp_engine::domain::ports::MediaUpload {
             filename: "upload.png".to_owned(),

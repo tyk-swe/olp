@@ -366,7 +366,7 @@ async fn one_http2_connection_cannot_exceed_request_budget_and_shutdown_drains()
 async fn observability_is_independent_while_both_public_pools_are_saturated() {
     let mut state = ProcessComposition::new(
         ApiMode::All,
-        None,
+        crate::bootstrap::mode_dependencies::test_store(),
         Arc::new(Manager::empty()),
         "https://olp.example.test",
         PathBuf::from("missing-console"),

@@ -39,7 +39,7 @@ async fn operations_http_contract_is_authorized_paginated_exact_and_metadata_onl
     let store = db.store(5).await;
     let mut state = ProcessComposition::new(
         ApiMode::Control,
-        Some(store.clone()),
+        store.clone(),
         Arc::new(Manager::empty()),
         ORIGIN,
         PathBuf::from("missing-console-for-operations-test"),
@@ -47,7 +47,7 @@ async fn operations_http_contract_is_authorized_paginated_exact_and_metadata_onl
     state.master_key = Some(Arc::new(MasterKey::new(1, [31; 32])));
     state.limiter.mark_configured();
     configure_bootstrap(&mut state, [32; 32]);
-    let dependencies = state.mode_dependencies().unwrap();
+    let dependencies = state.mode_dependencies();
     let observability_state = dependencies.observability();
     let app = management_router_for_test(dependencies.management().unwrap());
     let observability = observability_router(observability_state.clone());

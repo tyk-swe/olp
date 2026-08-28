@@ -4,8 +4,8 @@ use olp_db::limits::DistributedLimiter;
 use serde_json::json;
 
 use crate::{
-    bootstrap::connectors::register_mounted_connectors, bootstrap::media_spool,
-    bootstrap::state::TransportRegistry,
+    bootstrap::connectors::register_mounted_connectors, bootstrap::state::TransportRegistry,
+    media_spool,
 };
 
 use super::{

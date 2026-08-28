@@ -225,7 +225,7 @@ async fn public_router_serves_console_health_and_hides_observability_paths() {
     .unwrap();
     let state = ProcessComposition::new(
         ApiMode::Control,
-        None,
+        crate::bootstrap::mode_dependencies::test_store(),
         Arc::new(Manager::empty()),
         "https://olp.example.test",
         console_dir.clone(),
@@ -447,7 +447,7 @@ async fn management_openapi_is_only_served_on_the_versioned_route() {
     let app = management_router_for_test(
         ProcessComposition::new(
             ApiMode::Control,
-            None,
+            crate::bootstrap::mode_dependencies::test_store(),
             Arc::new(Manager::empty()),
             "https://olp.example.test",
             &console_dir,
@@ -479,7 +479,7 @@ async fn management_extractor_rejections_are_rfc9457_without_query_reflection() 
     let app = management_router_for_test(
         ProcessComposition::new(
             ApiMode::Control,
-            None,
+            crate::bootstrap::mode_dependencies::test_store(),
             Arc::new(Manager::empty()),
             "https://olp.example.test",
             PathBuf::from("missing-console"),
