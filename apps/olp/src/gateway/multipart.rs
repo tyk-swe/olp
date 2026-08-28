@@ -1,7 +1,6 @@
 use std::{collections::BTreeMap, sync::Arc, time::Duration};
 
 use axum::extract::Multipart;
-use futures::stream;
 use olp_engine::domain::{canonical::requests::MediaHandle, ports::MediaSpool};
 use olp_engine::protocols::openai::media::BoundedMediaPart;
 use serde_json::Value;
@@ -13,6 +12,7 @@ use crate::{
 };
 
 use super::error::InferenceError;
+use crate::public_http::streaming_response::channel_stream;
 
 const UTF8_BOM: &[u8] = &[0xEF, 0xBB, 0xBF];
 
@@ -279,9 +279,7 @@ async fn parse_multipart_fields(
             }
             let content_type = field.content_type().map(str::to_owned);
             let (sender, receiver) = tokio::sync::mpsc::channel(8);
-            let stream = stream::unfold(receiver, |mut receiver| async move {
-                receiver.recv().await.map(|item| (item, receiver))
-            });
+            let stream = channel_stream(receiver);
             let put = state
                 .media_spool()
                 .put(olp_engine::domain::ports::MediaUpload {
@@ -368,8 +366,14 @@ async fn parse_multipart_fields(
                 debug_assert_eq!(bytes.len(), next_field);
                 text_bytes = next_total;
             }
-            let text = String::from_utf8_lossy(bytes.strip_prefix(UTF8_BOM).unwrap_or(&bytes))
-                .into_owned();
+            // A text field that is not UTF-8 is a malformed request, not
+            // something to repair with replacement characters.
+            let text = String::from_utf8(bytes.strip_prefix(UTF8_BOM).unwrap_or(&bytes).to_vec())
+                .map_err(|_| {
+                InferenceError::invalid_request(format!(
+                    "The multipart field {name} is not valid UTF-8."
+                ))
+            })?;
             if name == "model" {
                 match admission {
                     MultipartRouteAdmission::Expected(expected) if text != expected.as_str() => {

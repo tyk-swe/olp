@@ -1,3 +1,4 @@
+use crate::public_http::streaming_response::channel_stream;
 use std::{io, sync::Arc};
 
 use axum::{
@@ -130,10 +131,7 @@ pub(crate) async fn streaming_image_json_response(
         }
         cleanup_handles(&producer_spool, &cleanup).await;
     });
-    let body_stream = futures::stream::unfold(receiver, |mut receiver| async move {
-        receiver.recv().await.map(|item| (item, receiver))
-    });
-    let mut response = Response::new(Body::from_stream(body_stream));
+    let mut response = Response::new(Body::from_stream(channel_stream(receiver)));
     response.headers_mut().insert(
         header::CONTENT_TYPE,
         HeaderValue::from_static("application/json"),

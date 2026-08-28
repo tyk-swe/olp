@@ -354,6 +354,16 @@ where
     response
 }
 
+/// Adapts a bounded channel receiver into a `Stream`, for bodies that a
+/// producer task fills chunk by chunk.
+pub(crate) fn channel_stream<T>(
+    receiver: tokio::sync::mpsc::Receiver<T>,
+) -> impl futures::Stream<Item = T> {
+    stream::unfold(receiver, |mut receiver| async move {
+        receiver.recv().await.map(|item| (item, receiver))
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use std::time::Duration;
