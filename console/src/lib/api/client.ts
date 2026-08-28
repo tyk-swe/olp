@@ -1,6 +1,7 @@
 import createClient from 'openapi-fetch';
 import type { paths } from './schema';
 import { serializeIfMatch } from './http';
+import { createAuthMiddleware } from '$lib/auth/authMiddleware';
 import { authLifecycle } from '$lib/auth/lifecycle';
 
 /** Generated-schema client for feature slices that need operation-level types. */
@@ -23,10 +24,7 @@ apiClient.use({
     request.headers.set('accept', 'application/json');
     const ifMatch = request.headers.get('if-match');
     if (ifMatch) request.headers.set('if-match', serializeIfMatch(ifMatch));
-    return authLifecycle.prepareRequest(request);
-  },
-  async onResponse({ request, response }) {
-    await authLifecycle.handleResponse(request, response);
-    return response;
+    return request;
   }
 });
+apiClient.use(createAuthMiddleware(authLifecycle));

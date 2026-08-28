@@ -1,12 +1,17 @@
-import { hashKey, type QueryClient } from '@tanstack/svelte-query';
-import { ApiProblem } from '$lib/api/http';
+import type { QueryClient } from '@tanstack/svelte-query';
 import { clearCsrfToken, getCsrfToken, setCsrfToken } from '$lib/api/session';
+import { QueryPartition } from './queryPartition';
 import {
   isAuthenticationEndpoint,
   isCurrentSessionDeletion,
   isMutationRequest,
   isSessionValidationEndpoint
 } from './requestPolicy';
+import {
+  abortError,
+  sessionIsFresh,
+  unauthorizedError
+} from './sessionFreshness';
 import {
   anonymousAuthenticationSnapshot,
   reduceAuthentication,
@@ -34,25 +39,13 @@ type AuthenticationRequest = (
   signal: AbortSignal
 ) => Promise<AuthenticatedSession>;
 
-const SESSION_FRESHNESS_MS = 60_000;
-
-function unauthorizedError(error: unknown): boolean {
-  return error instanceof ApiProblem && error.problem.status === 401;
-}
-
-function abortError(error: unknown): boolean {
-  return error instanceof Error && error.name === 'AbortError';
-}
-
 export class AuthenticationLifecycle {
-  private queryClient: QueryClient | null = null;
+  private queries = new QueryPartition();
   private boundary: Boundary | null = null;
   private boundaryGeneration = 0;
   private listeners = new Set<(snapshot: AuthenticationSnapshot) => void>();
   private snapshotValue: AuthenticationSnapshot =
     anonymousAuthenticationSnapshot();
-  private partitionGeneration = 0;
-  private partition = 'anonymous:0';
   private sessionController: AbortController | null = null;
   private transitionController: AbortController | null = null;
   private authenticationController: AbortController | null = null;
@@ -67,10 +60,7 @@ export class AuthenticationLifecycle {
   private unauthorizedHandled = false;
 
   attachQueryClient(client: QueryClient): () => void {
-    this.queryClient = client;
-    return () => {
-      if (this.queryClient === client) this.queryClient = null;
-    };
+    return this.queries.attach(client);
   }
 
   registerBoundary(boundary: Boundary): () => void {
@@ -99,7 +89,7 @@ export class AuthenticationLifecycle {
   }
 
   queryKeyHash(key: readonly unknown[]): string {
-    return `${this.partition}|${hashKey(key)}`;
+    return this.queries.keyHash(key);
   }
 
   async authenticate(
@@ -114,7 +104,7 @@ export class AuthenticationLifecycle {
     this.authenticationController = controller;
     this.gateProtectedContent('transitioning');
     this.rotateAuthenticatedRequests();
-    await this.cancelAndClearQueries();
+    await this.queries.cancelAndClear();
     if (
       generation !== this.authenticationGeneration ||
       controller.signal.aborted
@@ -122,7 +112,7 @@ export class AuthenticationLifecycle {
       throw new DOMException('Authentication was superseded.', 'AbortError');
     }
     clearCsrfToken();
-    this.rotatePartition();
+    this.queries.rotateAnonymous();
     const session = await request(controller.signal);
     if (
       generation !== this.authenticationGeneration ||
@@ -136,7 +126,7 @@ export class AuthenticationLifecycle {
 
   establishSession(session: AuthenticatedSession): void {
     const partition = this.principalPartition(session.user);
-    if (partition !== this.partition) this.partition = partition;
+    if (partition !== this.queries.current()) this.queries.use(partition);
     if (session.csrf_token) setCsrfToken(session.csrf_token);
     else clearCsrfToken();
     this.unauthorizedHandled = false;
@@ -175,17 +165,17 @@ export class AuthenticationLifecycle {
         )
           return null;
         const nextPartition = this.principalPartition(session.user);
-        if (nextPartition !== this.partition) {
+        if (nextPartition !== this.queries.current()) {
           this.gateProtectedContent('checking');
           this.rotateAuthenticatedRequests();
-          await this.cancelAndClearQueries();
+          await this.queries.cancelAndClear();
           if (
             controller.signal.aborted ||
             generation !== this.validationGeneration
           )
             return null;
           clearCsrfToken();
-          this.partition = nextPartition;
+          this.queries.use(nextPartition);
         }
         this.establishSession(session);
         return session;
@@ -223,14 +213,14 @@ export class AuthenticationLifecycle {
             : 'The current session could not be loaded.'
         );
         this.rotateAuthenticatedRequests();
-        await this.cancelAndClearQueries();
+        await this.queries.cancelAndClear();
         if (
           controller.signal.aborted ||
           generation !== this.validationGeneration
         )
           return null;
         clearCsrfToken();
-        this.rotatePartition();
+        this.queries.rotateAnonymous();
         return null;
       } finally {
         if (generation === this.validationGeneration) {
@@ -254,16 +244,21 @@ export class AuthenticationLifecycle {
         'AbortError'
       );
     }
-    const startingPartition = this.partition;
-    const age = Date.now() - (this.snapshotValue.lastValidatedAt ?? 0);
-    if (getCsrfToken() && age <= SESSION_FRESHNESS_MS) return;
+    const startingPartition = this.queries.current();
+    if (
+      sessionIsFresh(
+        this.snapshotValue.lastValidatedAt,
+        Boolean(getCsrfToken())
+      )
+    )
+      return;
     const session = await (this.activeValidation ?? this.validateSession());
     if (!session)
       throw new DOMException(
         'Session validation did not complete.',
         'AbortError'
       );
-    if (startingPartition !== this.partition) {
+    if (startingPartition !== this.queries.current()) {
       throw new DOMException(
         'The authenticated principal changed while the request was being prepared.',
         'AbortError'
@@ -372,8 +367,8 @@ export class AuthenticationLifecycle {
     this.principalExitController = controller;
     this.gateProtectedContent('transitioning');
     this.rotateAuthenticatedRequests();
-    await this.cancelAndClearQueries();
-    this.rotatePartition();
+    await this.queries.cancelAndClear();
+    this.queries.rotateAnonymous();
     try {
       await request(controller.signal);
       if (controller.signal.aborted) return false;
@@ -412,7 +407,7 @@ export class AuthenticationLifecycle {
     this.principalExitController?.abort();
     this.rotateAuthenticatedRequests();
     clearCsrfToken();
-    this.rotatePartition();
+    this.queries.rotateAnonymous();
 
     const boundary = this.boundary;
     const boundaryGeneration = this.boundaryGeneration;
@@ -420,7 +415,7 @@ export class AuthenticationLifecycle {
     this.transitionController?.abort();
     this.transitionController = controller;
     this.unauthorizedTransition = (async () => {
-      await this.cancelAndClearQueries();
+      await this.queries.cancelAndClear();
       if (
         controller.signal.aborted ||
         boundaryGeneration !== this.boundaryGeneration
@@ -480,10 +475,6 @@ export class AuthenticationLifecycle {
     return `principal:${user.id}:${user.role}`;
   }
 
-  private rotatePartition(): void {
-    this.partition = `anonymous:${++this.partitionGeneration}`;
-  }
-
   private rotateAuthenticatedRequests(): void {
     this.authenticatedRequestController.abort();
     this.authenticatedRequestController = new AbortController();
@@ -504,16 +495,6 @@ export class AuthenticationLifecycle {
   private setSnapshot(snapshot: AuthenticationSnapshot): void {
     this.snapshotValue = snapshot;
     for (const listener of this.listeners) listener(snapshot);
-  }
-
-  private async cancelAndClearQueries(): Promise<void> {
-    const client = this.queryClient;
-    if (!client) return;
-    try {
-      await client.cancelQueries();
-    } finally {
-      client.clear();
-    }
   }
 }
 
