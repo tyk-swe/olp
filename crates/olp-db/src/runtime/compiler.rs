@@ -235,84 +235,7 @@ async fn compile_snapshot(
         ));
     }
 
-    let route_rows = sqlx::query!(
-        "SELECT r.id, r.slug, rr.id AS revision_id, rr.routing_id, rr.overall_timeout_ms, rr.max_attempts \
-         FROM routes r \
-         JOIN LATERAL ( \
-             SELECT id, routing_id, overall_timeout_ms, max_attempts FROM route_revisions \
-             WHERE route_id = r.id ORDER BY revision DESC LIMIT 1 \
-         ) rr ON true ORDER BY r.slug",
-    )
-    .fetch_all(&mut **transaction)
-    .await?;
-    let mut routes = BTreeMap::new();
-    for row in route_rows {
-        let revision_id: Uuid = row.revision_id;
-        let slug = RouteSlug::parse(row.slug)
-            .map_err(|error| RuntimeCompileError::InvalidConfiguration(error.to_string()))?;
-        let operations = sqlx::query!(
-            "SELECT operation FROM route_revision_operations \
-             WHERE route_revision_id = $1 ORDER BY operation",
-            revision_id
-        )
-        .fetch_all(&mut **transaction)
-        .await?
-        .into_iter()
-        .map(|row| parse_operation(row.operation.as_str()))
-        .collect::<Result<BTreeSet<_>, _>>()?;
-        let targets = sqlx::query!(
-            "SELECT rt.id, rt.routing_id, pr.provider_id, prm.upstream_model, rt.priority, rt.weight, rt.timeout_ms \
-             FROM route_revision_targets rt \
-             JOIN provider_revision_models prm \
-               ON prm.source_provider_model_id = rt.provider_model_id \
-             JOIN provider_revisions pr ON pr.id = prm.provider_revision_id \
-             JOIN providers p ON p.id = pr.provider_id AND p.active_revision_id = pr.id \
-             WHERE rt.route_revision_id = $1 AND prm.enabled \
-               AND p.state <> 'disabled'::provider_state \
-             ORDER BY rt.position",
-        revision_id)
-        .fetch_all(&mut **transaction)
-        .await?
-        .into_iter()
-        .map(|target| {
-            let weight: i32 = target.weight;
-            Ok(Target {
-                id: TargetId::from_uuid(target.id),
-                routing_id: Some(TargetId::from_uuid(target.routing_id)),
-                provider_id: ProviderId::from_uuid(target.provider_id),
-                upstream_model: target.upstream_model,
-                priority: u16::try_from(target.priority).map_err(|_| {
-                    RuntimeCompileError::InvalidConfiguration("target priority is invalid".into())
-                })?,
-                weight: NonZeroU32::new(u32::try_from(weight).unwrap_or_default()).ok_or_else(
-                    || RuntimeCompileError::InvalidConfiguration("target weight is zero".into()),
-                )?,
-                timeout: DurationMs::new(
-                    u64::try_from(target.timeout_ms).map_err(|_| {
-                        RuntimeCompileError::InvalidConfiguration("target timeout is invalid".into())
-                    })?,
-                ),
-            })
-        })
-        .collect::<Result<Vec<_>, RuntimeCompileError>>()?;
-        let overall_timeout_ms: i32 = row.overall_timeout_ms;
-        let max_attempts: i16 = row.max_attempts;
-        let route = Route {
-            id: RouteId::from_uuid(row.id),
-            routing_id: Some(RouteId::from_uuid(row.routing_id)),
-            slug: slug.clone(),
-            operations,
-            overall_timeout: DurationMs::new(u64::try_from(overall_timeout_ms).map_err(|_| {
-                RuntimeCompileError::InvalidConfiguration("route timeout is invalid".into())
-            })?),
-            max_attempts: NonZeroU16::new(u16::try_from(max_attempts).unwrap_or_default())
-                .ok_or_else(|| {
-                    RuntimeCompileError::InvalidConfiguration("route max attempts is zero".into())
-                })?,
-            targets,
-        };
-        routes.insert(slug, route);
-    }
+    let routes = compile_routes(transaction).await?;
 
     let api_keys = compile_api_keys(transaction).await?;
 
@@ -328,19 +251,179 @@ async fn compile_snapshot(
     })
 }
 
+/// Routes and their targets are read in three fixed queries rather than two
+/// per route: this runs under the cluster-wide publication lock, so its round
+/// trips serialise every activation on every replica.
+async fn compile_routes(
+    transaction: &mut Transaction<'_, Postgres>,
+) -> Result<BTreeMap<RouteSlug, Route>, RuntimeCompileError> {
+    let route_rows = sqlx::query!(
+        "SELECT r.id, r.slug, rr.id AS revision_id, rr.routing_id, rr.overall_timeout_ms, rr.max_attempts \
+         FROM routes r \
+         JOIN LATERAL ( \
+             SELECT id, routing_id, overall_timeout_ms, max_attempts FROM route_revisions \
+             WHERE route_id = r.id ORDER BY revision DESC LIMIT 1 \
+         ) rr ON true ORDER BY r.slug",
+    )
+    .fetch_all(&mut **transaction)
+    .await?;
+    let revision_ids: Vec<Uuid> = route_rows.iter().map(|row| row.revision_id).collect();
+
+    let mut operations_map = BTreeMap::<Uuid, BTreeSet<OperationKind>>::new();
+    for row in sqlx::query!(
+        "SELECT route_revision_id, operation FROM route_revision_operations \
+         WHERE route_revision_id = ANY($1::uuid[]) ORDER BY route_revision_id, operation",
+        &revision_ids
+    )
+    .fetch_all(&mut **transaction)
+    .await?
+    {
+        operations_map
+            .entry(row.route_revision_id)
+            .or_default()
+            .insert(parse_operation(row.operation.as_str())?);
+    }
+
+    // Grouping in row order keeps each revision's targets in position order.
+    let mut targets_map = BTreeMap::<Uuid, Vec<Target>>::new();
+    for row in sqlx::query!(
+        "SELECT rt.route_revision_id, rt.id, rt.routing_id, pr.provider_id, prm.upstream_model, \
+                rt.priority, rt.weight, rt.timeout_ms \
+         FROM route_revision_targets rt \
+         JOIN provider_revision_models prm \
+           ON prm.source_provider_model_id = rt.provider_model_id \
+         JOIN provider_revisions pr ON pr.id = prm.provider_revision_id \
+         JOIN providers p ON p.id = pr.provider_id AND p.active_revision_id = pr.id \
+         WHERE rt.route_revision_id = ANY($1::uuid[]) AND prm.enabled \
+           AND p.state <> 'disabled'::provider_state \
+         ORDER BY rt.route_revision_id, rt.position",
+        &revision_ids
+    )
+    .fetch_all(&mut **transaction)
+    .await?
+    {
+        targets_map
+            .entry(row.route_revision_id)
+            .or_default()
+            .push(compile_target(
+                row.id,
+                row.routing_id,
+                row.provider_id,
+                row.upstream_model,
+                row.priority,
+                row.weight,
+                row.timeout_ms,
+            )?);
+    }
+
+    let mut routes = BTreeMap::new();
+    for row in route_rows {
+        let revision_id: Uuid = row.revision_id;
+        let slug = RouteSlug::parse(row.slug)
+            .map_err(|error| RuntimeCompileError::InvalidConfiguration(error.to_string()))?;
+        let overall_timeout_ms: i32 = row.overall_timeout_ms;
+        let max_attempts: i16 = row.max_attempts;
+        let route = Route {
+            id: RouteId::from_uuid(row.id),
+            routing_id: Some(RouteId::from_uuid(row.routing_id)),
+            slug: slug.clone(),
+            operations: operations_map.remove(&revision_id).unwrap_or_default(),
+            overall_timeout: DurationMs::new(u64::try_from(overall_timeout_ms).map_err(|_| {
+                RuntimeCompileError::InvalidConfiguration("route timeout is invalid".into())
+            })?),
+            max_attempts: NonZeroU16::new(u16::try_from(max_attempts).unwrap_or_default())
+                .ok_or_else(|| {
+                    RuntimeCompileError::InvalidConfiguration("route max attempts is zero".into())
+                })?,
+            targets: targets_map.remove(&revision_id).unwrap_or_default(),
+        };
+        routes.insert(slug, route);
+    }
+    Ok(routes)
+}
+
+fn compile_target(
+    id: Uuid,
+    routing_id: Uuid,
+    provider_id: Uuid,
+    upstream_model: String,
+    priority: i32,
+    weight: i32,
+    timeout_ms: i32,
+) -> Result<Target, RuntimeCompileError> {
+    Ok(Target {
+        id: TargetId::from_uuid(id),
+        routing_id: Some(TargetId::from_uuid(routing_id)),
+        provider_id: ProviderId::from_uuid(provider_id),
+        upstream_model,
+        priority: u16::try_from(priority).map_err(|_| {
+            RuntimeCompileError::InvalidConfiguration("target priority is invalid".into())
+        })?,
+        weight: NonZeroU32::new(u32::try_from(weight).unwrap_or_default()).ok_or_else(|| {
+            RuntimeCompileError::InvalidConfiguration("target weight is zero".into())
+        })?,
+        timeout: DurationMs::new(u64::try_from(timeout_ms).map_err(|_| {
+            RuntimeCompileError::InvalidConfiguration("target timeout is invalid".into())
+        })?),
+    })
+}
+
+/// Same shape as [`compile_routes`]: three fixed queries under the lock.
 async fn compile_api_keys(
     transaction: &mut Transaction<'_, Postgres>,
 ) -> Result<BTreeMap<ApiKeyLookupId, ApiKey>, RuntimeCompileError> {
-    let mut api_keys = BTreeMap::new();
-    for row in sqlx::query!(
+    let key_rows = sqlx::query!(
         "SELECT id, lookup_id, secret_digest, expires_at, requests_per_minute, \
                 tokens_per_minute, max_concurrency \
          FROM api_keys WHERE revoked_at IS NULL AND (expires_at IS NULL OR expires_at > now()) \
          ORDER BY lookup_id",
     )
     .fetch_all(&mut **transaction)
+    .await?;
+    // The child reads take the filtered id list rather than repeating the
+    // revocation/expiry predicate, so both sides see the same key set.
+    let key_ids: Vec<Uuid> = key_rows.iter().map(|row| row.id).collect();
+
+    let mut scopes_map = BTreeMap::<Uuid, BTreeSet<ApiKeyScope>>::new();
+    for row in sqlx::query!(
+        "SELECT api_key_id, scope FROM api_key_scopes \
+         WHERE api_key_id = ANY($1::uuid[]) ORDER BY api_key_id, scope",
+        &key_ids
+    )
+    .fetch_all(&mut **transaction)
     .await?
     {
+        let scope = match row.scope.as_str() {
+            "inference" => ApiKeyScope::Inference,
+            "models_read" => ApiKeyScope::ModelsRead,
+            value => {
+                return Err(RuntimeCompileError::InvalidConfiguration(format!(
+                    "unknown API key scope {value}"
+                )));
+            }
+        };
+        scopes_map.entry(row.api_key_id).or_default().insert(scope);
+    }
+
+    let mut allowlist_map = BTreeMap::<Uuid, BTreeSet<RouteSlug>>::new();
+    for row in sqlx::query!(
+        "SELECT api_key_id, route_slug FROM api_key_route_allowlist \
+         WHERE api_key_id = ANY($1::uuid[]) ORDER BY api_key_id, route_slug",
+        &key_ids
+    )
+    .fetch_all(&mut **transaction)
+    .await?
+    {
+        let slug = RouteSlug::parse(row.route_slug)
+            .map_err(|error| RuntimeCompileError::InvalidConfiguration(error.to_string()))?;
+        allowlist_map
+            .entry(row.api_key_id)
+            .or_default()
+            .insert(slug);
+    }
+
+    let mut api_keys = BTreeMap::new();
+    for row in key_rows {
         let id: Uuid = row.id;
         let lookup_id = ApiKeyLookupId::parse(row.lookup_id)
             .map_err(|error| RuntimeCompileError::InvalidConfiguration(error.to_string()))?;
@@ -348,33 +431,8 @@ async fn compile_api_keys(
         let digest: [u8; 32] = digest.try_into().map_err(|_| {
             RuntimeCompileError::InvalidConfiguration("API key digest is not 32 bytes".into())
         })?;
-        let scopes = sqlx::query!(
-            "SELECT scope FROM api_key_scopes WHERE api_key_id = $1 ORDER BY scope",
-            id
-        )
-        .fetch_all(&mut **transaction)
-        .await?
-        .into_iter()
-        .map(|scope| match scope.scope.as_str() {
-            "inference" => Ok(ApiKeyScope::Inference),
-            "models_read" => Ok(ApiKeyScope::ModelsRead),
-            value => Err(RuntimeCompileError::InvalidConfiguration(format!(
-                "unknown API key scope {value}"
-            ))),
-        })
-        .collect::<Result<BTreeSet<_>, _>>()?;
-        let allowed_routes = sqlx::query!(
-            "SELECT route_slug FROM api_key_route_allowlist WHERE api_key_id = $1 ORDER BY route_slug",
-        id)
-        .fetch_all(&mut **transaction)
-        .await?
-        .into_iter()
-        .map(|route| {
-            RouteSlug::parse(route.route_slug).map_err(|error| {
-                RuntimeCompileError::InvalidConfiguration(error.to_string())
-            })
-        })
-        .collect::<Result<BTreeSet<_>, _>>()?;
+        let scopes = scopes_map.remove(&id).unwrap_or_default();
+        let allowed_routes = allowlist_map.remove(&id).unwrap_or_default();
         let rpm: Option<i32> = row.requests_per_minute;
         let tpm: Option<i64> = row.tokens_per_minute;
         let concurrency: Option<i32> = row.max_concurrency;

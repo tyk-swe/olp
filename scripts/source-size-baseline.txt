@@ -50,7 +50,6 @@ fn:crates/olp-db/src/operations/pricing.rs:create_pricing_revision
 fn:crates/olp-db/src/request_metadata/ingestion.rs:admit_request_metadata_receipt
 fn:crates/olp-db/src/request_metadata/ingestion.rs:insert_attempt_usage_facts
 fn:crates/olp-db/src/request_metadata/reconciliation.rs:checkpoint_request_metadata_buffer_epoch
-fn:crates/olp-db/src/runtime/compiler.rs:compile_snapshot
 fn:crates/olp-db/src/security/rotation.rs:verify_encrypted_table
 fn:crates/olp-db/src/valkey/request_metadata.rs:run_request_metadata_consumer_with_policy
 fn:crates/olp-engine/src/inference/execution.rs:execute_operation
