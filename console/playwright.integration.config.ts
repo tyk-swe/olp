@@ -1,4 +1,5 @@
 import { defineConfig, devices } from '@playwright/test';
+import { baseConfig } from './playwright.base';
 
 const databaseUrl = process.env.OLP_CONSOLE_E2E_DATABASE_URL;
 const masterKeyFile = process.env.OLP_CONSOLE_E2E_MASTER_KEY_FILE;
@@ -32,8 +33,8 @@ if (!valkeyUrl) {
 }
 
 export default defineConfig({
+  ...baseConfig,
   testDir: './tests/integration',
-  outputDir: process.env.PLAYWRIGHT_OUTPUT_DIR ?? 'test-results',
   fullyParallel: false,
   // One explicit serial suite owns the disposable database and installation.
   // First-run setup is true exactly once, and retries against mutated state
@@ -43,14 +44,12 @@ export default defineConfig({
   // The test mutates a real database. Retrying against that same database
   // would no longer prove the first-run setup path and could mask a failure.
   retries: 0,
-  reporter: process.env.CI ? [['github'], ['html', { open: 'never' }]] : 'list',
   use: {
+    ...baseConfig.use,
     // Browsers apply the Secure exception for localhost. This lets the test
     // prove that real cookie storage accepts the __Host- contract while the
     // Rust listener remains loopback-only.
-    baseURL: 'http://localhost:4175',
-    reducedMotion: 'reduce',
-    trace: 'retain-on-failure'
+    baseURL: 'http://localhost:4175'
   },
   projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
   webServer: [
