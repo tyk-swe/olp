@@ -1,4 +1,4 @@
-use crate::support::route_fixtures::{DraftFixture, insert_provider};
+use crate::support::route_fixtures::{insert_provider, insert_unbased_route_draft};
 use olp_db::{
     configuration::Error, configuration::resources::ReplaceRouteDraftInput,
     identity::InstallationSetupInput, security::session_material::SessionMaterial,
@@ -231,55 +231,6 @@ async fn route_draft_simulation_matches_activated_runtime_attempts() {
     assert_eq!(simulated_routing_ids, runtime_routing_ids);
 }
 
-async fn insert_unbased_route_draft(
-    pool: &PgPool,
-    actor: Uuid,
-    slug: &str,
-    model_ids: &[Uuid],
-) -> DraftFixture {
-    let fixture = DraftFixture {
-        id: Uuid::now_v7(),
-        etag: Uuid::now_v7(),
-    };
-    sqlx::query(
-        "INSERT INTO route_drafts \
-         (id, routing_id, slug, state, overall_timeout_ms, max_attempts, etag, created_by) \
-         VALUES ($1, $2, $3, 'draft', 30000, $4, $5, $6)",
-    )
-    .bind(fixture.id)
-    .bind(Uuid::now_v7())
-    .bind(slug)
-    .bind(i16::try_from(model_ids.len()).unwrap())
-    .bind(fixture.etag)
-    .bind(actor)
-    .execute(pool)
-    .await
-    .unwrap();
-    sqlx::query(
-        "INSERT INTO route_draft_operations (route_draft_id, operation) VALUES ($1, 'video_get')",
-    )
-    .bind(fixture.id)
-    .execute(pool)
-    .await
-    .unwrap();
-    for (position, model_id) in model_ids.iter().enumerate() {
-        sqlx::query(
-            "INSERT INTO route_draft_targets \
-             (id, routing_id, route_draft_id, provider_model_id, priority, weight, timeout_ms, position) \
-             VALUES ($1, $2, $3, $4, 0, 1, 20000, $5)",
-        )
-        .bind(Uuid::now_v7())
-        .bind(Uuid::now_v7())
-        .bind(fixture.id)
-        .bind(model_id)
-        .bind(i32::try_from(position).unwrap())
-        .execute(pool)
-        .await
-        .unwrap();
-    }
-    fixture
-}
-
 async fn revision_target_identities(pool: &PgPool, revision_id: Uuid) -> Vec<(Uuid, Uuid)> {
     sqlx::query(
         "SELECT id, routing_id FROM route_revision_targets \
@@ -292,4 +243,79 @@ async fn revision_target_identities(pool: &PgPool, revision_id: Uuid) -> Vec<(Uu
     .into_iter()
     .map(|row| (row.get("id"), row.get("routing_id")))
     .collect()
+}
+
+/// Draft pages are read with three queries for the whole page. Every draft must
+/// still get exactly its own operations and targets, in position order, with
+/// unavailable targets decorated rather than dropped and empty drafts intact.
+#[tokio::test]
+#[ignore = "requires OLP_TEST_DATABASE_ADMIN_URL and OLP_TEST_DATABASE_URL_PREFIX"]
+async fn route_draft_pages_are_read_in_batches() {
+    let db = olp_db::test_support::TestDb::create_migrated("route_draft_pages").await;
+    let store = db.store(5).await;
+    let (owner, _) = store
+        .setup_installation_with_session(
+            InstallationSetupInput {
+                installation_name: "Route draft pages".to_owned(),
+                email: "owner@route-draft-pages.test".to_owned(),
+                display_name: "Owner".to_owned(),
+                password_hash: "test-password-hash".to_owned(),
+            },
+            &SessionMaterial::generate(),
+            chrono::Duration::hours(1),
+        )
+        .await
+        .unwrap();
+    let actor = owner.user_id;
+    let alpha = insert_provider(store.pool(), actor, "page-alpha").await;
+    let beta = insert_provider(store.pool(), actor, "page-beta").await;
+    let ordered = insert_unbased_route_draft(
+        store.pool(),
+        actor,
+        "page-ordered",
+        &[beta.model_id, alpha.model_id],
+    )
+    .await;
+    let empty = insert_unbased_route_draft(store.pool(), actor, "page-empty", &[]).await;
+    let single =
+        insert_unbased_route_draft(store.pool(), actor, "page-single", &[alpha.model_id]).await;
+    sqlx::query("UPDATE providers SET state = 'disabled'::provider_state WHERE id = $1")
+        .bind(alpha.provider_id)
+        .execute(store.pool())
+        .await
+        .unwrap();
+
+    let page = store.list_route_drafts(None, 10).await.unwrap();
+    assert_eq!(page.items.len(), 3);
+    assert!(page.next_cursor.is_none());
+    let by_id = |id: Uuid| page.items.iter().find(|draft| draft.id == id).unwrap();
+
+    let draft = by_id(ordered.id);
+    assert_eq!(
+        draft
+            .targets
+            .iter()
+            .map(|target| (target.upstream_model.as_str(), target.available))
+            .collect::<Vec<_>>(),
+        vec![("page-beta-model", true), ("page-alpha-model", false)]
+    );
+    assert_eq!(draft.operations, vec!["video_get".parse().unwrap()]);
+    let draft = by_id(empty.id);
+    assert!(draft.targets.is_empty());
+    assert_eq!(draft.operations, vec!["video_get".parse().unwrap()]);
+    let draft = by_id(single.id);
+    assert_eq!(draft.targets.len(), 1);
+    assert!(!draft.targets[0].available);
+
+    let first_page = store.list_route_drafts(None, 2).await.unwrap();
+    assert_eq!(first_page.items.len(), 2);
+    let cursor = first_page.next_cursor.expect("a third draft remains");
+    let second_page = store.list_route_drafts(Some(cursor), 2).await.unwrap();
+    assert_eq!(second_page.items.len(), 1);
+    assert!(second_page.next_cursor.is_none());
+
+    assert!(matches!(
+        store.get_route_drafts(&[ordered.id, Uuid::now_v7()]).await,
+        Err(Error::NotFound)
+    ));
 }

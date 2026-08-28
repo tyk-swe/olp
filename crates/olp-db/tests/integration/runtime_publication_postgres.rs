@@ -7,9 +7,12 @@ use olp_db::{
 };
 use olp_engine::domain::{
     auth::{ApiKeyLimits, ApiKeyScope},
+    ids::RouteSlug,
     routing::snapshot::Snapshot,
 };
 use uuid::Uuid;
+
+use crate::support::route_fixtures::{insert_provider, insert_unbased_route_draft};
 
 const PUBLICATION_LOCK_ID: i64 = 0x4f4c_505f_5254;
 
@@ -158,4 +161,107 @@ async fn replayable_key_creation_takes_its_snapshot_after_the_publication_lock()
             .await
             .unwrap();
     assert_eq!(guarded_generation_count, generation_count);
+}
+
+/// The compiler reads route children and API key children with one query per
+/// table for the whole snapshot. Every route must still get exactly its own
+/// targets in position order, and every key its own scopes and allowlist.
+#[tokio::test]
+#[ignore = "requires OLP_TEST_DATABASE_ADMIN_URL and OLP_TEST_DATABASE_URL_PREFIX"]
+async fn batched_compilation_keeps_targets_ordered_and_key_sets_separate() {
+    let db = olp_db::test_support::TestDb::create_migrated("runtime_batched_compile").await;
+    let store = db.store(5).await;
+    let owner = store
+        .setup_installation(InstallationSetupInput {
+            installation_name: "Batched compilation".to_owned(),
+            email: "owner@batched-compile.test".to_owned(),
+            display_name: "Owner".to_owned(),
+            password_hash: hash("correct horse battery staple").unwrap(),
+        })
+        .await
+        .unwrap();
+    let actor = owner.user_id;
+    let first = insert_provider(store.pool(), actor, "compile-first").await;
+    let second = insert_provider(store.pool(), actor, "compile-second").await;
+    for (slug, models) in [
+        ("compile-wide", vec![second.model_id, first.model_id]),
+        ("compile-narrow", vec![first.model_id]),
+    ] {
+        let draft = insert_unbased_route_draft(store.pool(), actor, slug, &models).await;
+        let (etag, _) = store
+            .validate_route_draft(draft.id, draft.etag, actor)
+            .await
+            .unwrap();
+        store
+            .activate_route_draft(draft.id, etag, actor, &format!("activate-{slug}"))
+            .await
+            .unwrap();
+    }
+
+    let auth_hmac_key = AuthHmacKey::new([31; 32]);
+    let master_key = MasterKey::new(1, [37; 32]);
+    for (name, scopes, allowed_routes) in [
+        (
+            "scoped",
+            vec![ApiKeyScope::Inference, ApiKeyScope::ModelsRead],
+            vec![RouteSlug::parse("compile-wide").unwrap()],
+        ),
+        ("open", vec![ApiKeyScope::Inference], Vec::new()),
+    ] {
+        let key = NewApiKeyRecord {
+            name: name.to_owned(),
+            material: auth_hmac_key.generate_api_key(),
+            scopes,
+            allowed_routes,
+            limits: ApiKeyLimits::default(),
+            expires_at: None,
+            actor,
+            idempotency_key: format!("batched-compile-{name}"),
+        };
+        let fingerprint = fingerprint(&key.idempotency_key).unwrap();
+        store
+            .create_api_key_record(&key, Replayable::new(fingerprint, &master_key), |_| {
+                Response::new(201, None, None, Vec::new())
+            })
+            .await
+            .unwrap();
+    }
+
+    let release = store.compile_and_publish_runtime(actor).await.unwrap();
+    let runtime: Snapshot = serde_json::from_slice(&release.payload).unwrap();
+    let targets = |slug: &str| {
+        runtime.routes[&RouteSlug::parse(slug).unwrap()]
+            .targets
+            .iter()
+            .map(|target| target.upstream_model.as_str())
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        targets("compile-wide"),
+        vec!["compile-second-model", "compile-first-model"]
+    );
+    assert_eq!(targets("compile-narrow"), vec!["compile-first-model"]);
+    assert!(
+        runtime
+            .routes
+            .values()
+            .all(|route| route.operations.len() == 1)
+    );
+
+    assert_eq!(runtime.api_keys.len(), 2);
+    let scoped = runtime
+        .api_keys
+        .values()
+        .find(|key| key.scopes.len() == 2)
+        .expect("the scoped key compiles with both scopes");
+    assert_eq!(
+        scoped.allowed_routes.iter().collect::<Vec<_>>(),
+        vec![&RouteSlug::parse("compile-wide").unwrap()]
+    );
+    let open = runtime
+        .api_keys
+        .values()
+        .find(|key| key.scopes.len() == 1)
+        .expect("the open key compiles with one scope");
+    assert!(open.allowed_routes.is_empty());
 }
