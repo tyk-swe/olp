@@ -127,7 +127,7 @@ fn routed_events(success: bool, effects: Arc<CleanupEffects>) -> RoutedEvents {
         deadline: tokio::time::Instant::now() + Duration::from_secs(1),
         request_id,
         route_slug,
-        accounting: Some(accounting),
+        accounting,
     }
 }
 

@@ -10,7 +10,10 @@ use olp_engine::domain::canonical::events::{Event, Kind};
 use olp_engine::protocols::sse::{EncodeError, Frame, encode_frame};
 
 use crate::gateway::error::InferenceError;
-use olp_engine::inference::execution::RoutedEvents;
+use olp_engine::inference::{
+    accounting::{RequestOutcome, UsageCapture},
+    execution::{RoutedEvents, RoutedStream},
+};
 
 pub(crate) fn encode_sse_frame(frame: &Frame) -> Result<Bytes, EncodeError> {
     encode_frame(frame).map(Bytes::from)
@@ -18,13 +21,16 @@ pub(crate) fn encode_sse_frame(frame: &Frame) -> Result<Bytes, EncodeError> {
 
 pub(crate) fn encode_protocol_sse_frames<E: Display>(
     frames: Result<Vec<Frame>, E>,
-) -> Result<Vec<Bytes>, String> {
+) -> Result<Vec<Bytes>, InferenceError> {
+    let protocol_error = |error: &dyn Display| {
+        InferenceError::bad_gateway("provider_protocol_error", error.to_string())
+    };
     frames
-        .map_err(|error| error.to_string())?
+        .map_err(|error| protocol_error(&error))?
         .iter()
         .map(encode_sse_frame)
         .collect::<Result<_, _>>()
-        .map_err(|error| error.to_string())
+        .map_err(|error| protocol_error(&error))
 }
 
 pub(crate) fn encode_server_sse_frame(frame: &Frame) -> Bytes {
@@ -221,37 +227,65 @@ fn sse_stream_with_capacity(capacity: usize) -> (SseResponseWriter, Response) {
 /// status-driven retry in an SDK, load balancer, or proxy — and the unary path
 /// on the identical failure already returns the right status. Returns the
 /// failure after closing out accounting for it.
-pub(crate) async fn precommit_stream_failure(
-    execution: &mut RoutedEvents,
-) -> Option<InferenceError> {
+pub(crate) fn precommit_stream_failure(
+    execution: RoutedEvents,
+) -> Result<RoutedEvents, InferenceError> {
     let Kind::Error { error } = &execution.first.kind else {
-        return None;
+        return Ok(execution);
     };
     let failure = InferenceError::from_canonical(error);
-    let first = execution.first.clone();
-    let mut accounting = execution.take_accounting();
-    accounting.usage_mut().observe(&first);
+    let (stream, mut accounting) = execution.into_parts();
+    accounting.usage_mut().observe(&stream.first);
     accounting.finish(failure.accounting_outcome());
-    Some(failure)
+    Err(failure)
 }
 
+/// How one wire protocol turns canonical events into SSE bytes. The pump in
+/// [`protocol_streaming_response`] owns everything protocol-neutral: usage
+/// observation, deadlines, client disconnects, terminal detection, and
+/// accounting; an encoder only supplies the bytes.
 pub(crate) trait ProtocolStreamEncoder: Send + 'static {
-    fn push(&mut self, event: Event) -> Result<Vec<Bytes>, String>;
+    fn push(&mut self, event: Event) -> Result<Vec<Bytes>, InferenceError>;
+
     fn encode_error(&self, error: &InferenceError) -> Bytes;
+
+    /// Frames appended after the encoded terminal event. `failure` is the
+    /// canonical error the stream ended on, if any.
+    fn terminal_tail(&self, failure: Option<&InferenceError>) -> Vec<Bytes> {
+        let _ = failure;
+        Vec::new()
+    }
+
+    /// Frames closing a stream that ended on a gateway-side failure rather
+    /// than a provider terminal event.
+    fn error_frames(&self, error: &InferenceError) -> TerminalFrames {
+        TerminalFrames::one(self.encode_error(error))
+    }
+
+    fn observe(&self, usage: &mut UsageCapture, event: &Event) {
+        usage.observe(event);
+    }
+
+    /// Called once the provider's `Done` has been encoded.
+    fn settle(&self, usage: &mut UsageCapture) {
+        let _ = usage;
+    }
 }
 
-pub(crate) fn protocol_streaming_response<E>(
-    mut execution: RoutedEvents,
-    mut encoder: E,
-) -> Response
+pub(crate) fn protocol_streaming_response<E>(execution: RoutedEvents, mut encoder: E) -> Response
 where
     E: ProtocolStreamEncoder,
 {
     let (writer, response) = sse_stream();
     tokio::spawn(async move {
-        let mut accounting = execution.take_accounting();
-        let mut events = std::mem::replace(&mut execution.events, Box::pin(stream::empty()));
-        let mut next = Some(Ok(execution.first.clone()));
+        let (stream, mut accounting) = execution.into_parts();
+        let RoutedStream {
+            first,
+            mut events,
+            deadline,
+            ..
+        } = stream;
+        let mut next = Some(Ok(first));
         let mut failure = None;
         let mut terminal = None;
         while let Some(item) = next {
@@ -262,7 +296,7 @@ where
                     break;
                 }
             };
-            accounting.usage_mut().observe(&event);
+            encoder.observe(accounting.usage_mut(), &event);
             let is_done = matches!(event.kind, Kind::Done);
             let canonical_failure = match &event.kind {
                 Kind::Error { error } => Some(InferenceError::from_canonical(error)),
@@ -270,27 +304,24 @@ where
             };
             let is_terminal = is_done || canonical_failure.is_some();
             match encoder.push(event) {
-                Ok(chunks) => {
+                Ok(mut chunks) => {
                     if is_terminal {
-                        terminal = Some(TerminalFrames::new(chunks));
-                        if let Some(canonical_failure) = canonical_failure {
-                            failure = Some(canonical_failure);
+                        chunks.extend(encoder.terminal_tail(canonical_failure.as_ref()));
+                        if is_done {
+                            encoder.settle(accounting.usage_mut());
                         }
+                        terminal = Some(TerminalFrames::new(chunks));
+                        failure = canonical_failure;
                         break;
                     }
                     for chunk in chunks {
-                        if let Err(error) = writer.send_or_fail(chunk, execution.deadline).await {
+                        if let Err(error) = writer.send_or_fail(chunk, deadline).await {
                             failure = Some(error);
                             break;
                         }
                     }
                 }
-                Err(message) => {
-                    failure = Some(InferenceError::bad_gateway(
-                        "provider_protocol_error",
-                        message,
-                    ));
-                }
+                Err(error) => failure = Some(error),
             }
             if failure.is_some() {
                 break;
@@ -300,7 +331,7 @@ where
                     failure = Some(InferenceError::client_cancelled());
                     None
                 }
-                () = tokio::time::sleep_until(execution.deadline) => {
+                () = tokio::time::sleep_until(deadline) => {
                     failure = Some(InferenceError::timeout());
                     None
                 }
@@ -313,14 +344,11 @@ where
                 "The provider stream ended without a terminal event.",
             ));
         }
-        writer.finish_stream(terminal, &mut failure, |error| {
-            TerminalFrames::one(encoder.encode_error(error))
-        });
         drop(events);
-        let outcome = failure.as_ref().map_or_else(
-            olp_engine::inference::accounting::RequestOutcome::success,
-            InferenceError::accounting_outcome,
-        );
+        writer.finish_stream(terminal, &mut failure, |error| encoder.error_frames(error));
+        let outcome = failure
+            .as_ref()
+            .map_or_else(RequestOutcome::success, InferenceError::accounting_outcome);
         accounting.finish(outcome);
     });
     response

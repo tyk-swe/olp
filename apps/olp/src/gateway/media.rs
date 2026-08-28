@@ -1,3 +1,5 @@
+use crate::public_http::streaming_response::{ProtocolStreamEncoder, protocol_streaming_response};
+use olp_engine::inference::accounting::UsageCapture;
 use std::sync::Arc;
 
 use axum::{
@@ -7,7 +9,6 @@ use axum::{
     http::{HeaderValue, StatusCode, header},
     response::{IntoResponse, Response},
 };
-use futures::{StreamExt, stream};
 use olp_engine::domain::canonical::{
     events::{Event, Kind},
     identity::{Surface, TransportMode},
@@ -37,7 +38,7 @@ use crate::{
     bootstrap::mode_dependencies::GatewayState,
     public_http::image_response::streaming_image_json_response,
     public_http::request_admission::multipart::MultipartRequestAdmission,
-    public_http::streaming_response::{TerminalFrames, encode_sse_frame, sse_stream},
+    public_http::streaming_response::encode_sse_frame,
 };
 
 use super::{
@@ -334,71 +335,31 @@ pub(super) async fn transcriptions(
     outcome
 }
 
-fn raw_media_streaming_response(mut execution: RoutedEvents) -> Response {
-    let (writer, response) = sse_stream();
-    tokio::spawn(async move {
-        let mut accounting = execution.take_accounting();
-        let mut events = std::mem::replace(&mut execution.events, Box::pin(stream::empty()));
-        let mut next = Some(Ok(execution.first.clone()));
-        let mut failure = None;
-        let mut terminal = None;
-        while let Some(item) = next {
-            let event = match item {
-                Ok(event) => event,
-                Err(error) => {
-                    failure = Some(InferenceError::from_transport(error));
-                    break;
-                }
-            };
-            accounting.usage_mut().observe(&event);
-            accounting.usage_mut().observe_openai_media_event(&event);
-            match raw_media_event_bytes(event) {
-                Ok(Some(bytes)) => {
-                    if let Err(error) = writer.send_or_fail(bytes, execution.deadline).await {
-                        failure = Some(error);
-                        break;
-                    }
-                }
-                Ok(None) => {
-                    // The terminal media frame is this stream's `Kind::Done`.
-                    accounting.usage_mut().settle();
-                    terminal = Some(TerminalFrames::empty());
-                    break;
-                }
-                Err(error) => {
-                    failure = Some(error);
-                    break;
-                }
-            }
-            next = tokio::select! {
-                () = writer.closed() => {
-                    failure = Some(InferenceError::client_cancelled());
-                    None
-                }
-                () = tokio::time::sleep_until(execution.deadline) => {
-                    failure = Some(InferenceError::timeout());
-                    None
-                }
-                next = events.next() => next,
-            };
-        }
-        if terminal.is_none() && failure.is_none() {
-            failure = Some(InferenceError::bad_gateway(
-                "provider_protocol_error",
-                "The provider media stream ended without a terminal event.",
-            ));
-        }
-        drop(events);
-        writer.finish_stream(terminal, &mut failure, |error| {
-            TerminalFrames::one(openai_error_sse(error))
-        });
-        let outcome = failure.as_ref().map_or_else(
-            olp_engine::inference::accounting::RequestOutcome::success,
-            InferenceError::accounting_outcome,
-        );
-        accounting.finish(outcome);
-    });
-    response
+fn raw_media_streaming_response(execution: RoutedEvents) -> Response {
+    protocol_streaming_response(execution, RawMediaStreamEncoder)
+}
+
+/// Replays a media provider's own SSE frames; the terminal media frame is
+/// the stream's `Kind::Done`, which carries no bytes of its own.
+struct RawMediaStreamEncoder;
+
+impl ProtocolStreamEncoder for RawMediaStreamEncoder {
+    fn push(&mut self, event: Event) -> Result<Vec<Bytes>, InferenceError> {
+        Ok(raw_media_event_bytes(event)?.into_iter().collect())
+    }
+
+    fn encode_error(&self, error: &InferenceError) -> Bytes {
+        openai_error_sse(error)
+    }
+
+    fn observe(&self, usage: &mut UsageCapture, event: &Event) {
+        usage.observe(event);
+        usage.observe_openai_media_event(event);
+    }
+
+    fn settle(&self, usage: &mut UsageCapture) {
+        usage.settle();
+    }
 }
 
 pub(super) fn raw_media_event_bytes(event: Event) -> Result<Option<Bytes>, InferenceError> {

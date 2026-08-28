@@ -112,13 +112,11 @@ pub(super) async fn action(
             }
         };
         admitted.disarm();
-        let mut execution =
+        let execution =
             execute_event_operation(&state, &principal, operation, TransportMode::Streaming)
                 .await
                 .map_err(ProtocolError::gemini)?;
-        if let Some(failure) = precommit_stream_failure(&mut execution).await {
-            return Err(ProtocolError::gemini(failure));
-        }
+        let execution = precommit_stream_failure(execution).map_err(ProtocolError::gemini)?;
         let encoder = GeminiHttpStreamEncoder(Encoder::new(
             execution.route_slug.as_str(),
             execution.request_id.to_string(),
@@ -352,7 +350,7 @@ impl ProtocolStreamEncoder for GeminiHttpStreamEncoder {
     fn push(
         &mut self,
         event: olp_engine::domain::canonical::events::Event,
-    ) -> Result<Vec<bytes::Bytes>, String> {
+    ) -> Result<Vec<bytes::Bytes>, InferenceError> {
         encode_protocol_sse_frames(self.0.push(event))
     }
 

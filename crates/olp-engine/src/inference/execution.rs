@@ -110,23 +110,47 @@ pub struct RoutedEvents {
     pub deadline: tokio::time::Instant,
     pub request_id: uuid::Uuid,
     pub route_slug: RouteSlug,
-    accounting: Option<RequestAccountingGuard>,
+    accounting: RequestAccountingGuard,
+}
+
+/// The event stream of a routed execution once its accounting guard has been
+/// split off, so a consumer can own both without cloning the first event.
+pub struct RoutedStream {
+    pub first: Event,
+    pub events: crate::domain::ports::ProviderEventStream,
+    pub deadline: tokio::time::Instant,
+    pub request_id: uuid::Uuid,
+    pub route_slug: RouteSlug,
 }
 
 impl RoutedEvents {
     #[must_use]
-    pub fn take_accounting(&mut self) -> RequestAccountingGuard {
-        self.accounting
-            .take()
-            .expect("routed event execution owns request accounting")
+    pub fn into_parts(self) -> (RoutedStream, RequestAccountingGuard) {
+        (
+            RoutedStream {
+                first: self.first,
+                events: self.events,
+                deadline: self.deadline,
+                request_id: self.request_id,
+                route_slug: self.route_slug,
+            },
+            self.accounting,
+        )
     }
 
-    pub async fn collect(mut self) -> Result<CompletedEvents, InferenceError> {
-        let mut accounting = self.take_accounting();
+    pub async fn collect(self) -> Result<CompletedEvents, InferenceError> {
+        let (stream, mut accounting) = self.into_parts();
+        let RoutedStream {
+            first,
+            mut events,
+            deadline,
+            request_id,
+            route_slug,
+        } = stream;
         let events = collect_provider_events_with_observer(
-            self.first.clone(),
-            &mut self.events,
-            self.deadline,
+            first,
+            &mut events,
+            deadline,
             MAX_COLLECTED_CANONICAL_EVENT_BYTES,
             &mut |event| accounting.usage_mut().observe(event),
         )
@@ -142,8 +166,8 @@ impl RoutedEvents {
         let finalizer = accounting.into_finalizer();
         Ok(CompletedEvents {
             events,
-            route_slug: self.route_slug,
-            request_id: self.request_id,
+            route_slug,
+            request_id,
             request_metadata_finalizer: Some(finalizer),
         })
     }
@@ -317,7 +341,7 @@ impl Service {
             first,
             events,
             deadline,
-            accounting: Some(accounting),
+            accounting,
             request_id: context.request_id.as_uuid(),
             route_slug: context.route_slug,
         })

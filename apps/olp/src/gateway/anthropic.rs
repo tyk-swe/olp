@@ -68,13 +68,11 @@ pub(super) async fn messages(
     } else {
         TransportMode::Unary
     };
-    let mut execution = execute_event_operation(&state, &principal, operation, mode)
+    let execution = execute_event_operation(&state, &principal, operation, mode)
         .await
         .map_err(ProtocolError::anthropic)?;
     if streaming {
-        if let Some(failure) = precommit_stream_failure(&mut execution).await {
-            return Err(ProtocolError::anthropic(failure));
-        }
+        let execution = precommit_stream_failure(execution).map_err(ProtocolError::anthropic)?;
         let encoder = AnthropicHttpStreamEncoder(Encoder::new(
             execution.route_slug.as_str(),
             format!("msg_{}", execution.request_id.simple()),
@@ -273,7 +271,7 @@ impl ProtocolStreamEncoder for AnthropicHttpStreamEncoder {
     fn push(
         &mut self,
         event: olp_engine::domain::canonical::events::Event,
-    ) -> Result<Vec<bytes::Bytes>, String> {
+    ) -> Result<Vec<bytes::Bytes>, InferenceError> {
         encode_protocol_sse_frames(self.0.push(event))
     }
 

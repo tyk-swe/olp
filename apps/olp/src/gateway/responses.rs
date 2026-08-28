@@ -74,11 +74,9 @@ pub(super) async fn responses(
     } else {
         TransportMode::Unary
     };
-    let mut execution = execute_event_operation(&state, &principal, operation, mode).await?;
+    let execution = execute_event_operation(&state, &principal, operation, mode).await?;
     if streaming {
-        if let Some(failure) = precommit_stream_failure(&mut execution).await {
-            return Err(failure);
-        }
+        let execution = precommit_stream_failure(execution)?;
         Ok(responses_streaming_response(execution))
     } else {
         responses_unary_response(execution).await
@@ -115,7 +113,7 @@ fn responses_streaming_response(execution: RoutedEvents) -> Response {
 struct OpenAiResponsesHttpStreamEncoder(Encoder);
 
 impl ProtocolStreamEncoder for OpenAiResponsesHttpStreamEncoder {
-    fn push(&mut self, event: Event) -> Result<Vec<Bytes>, String> {
+    fn push(&mut self, event: Event) -> Result<Vec<Bytes>, InferenceError> {
         encode_protocol_sse_frames(self.0.push(event))
     }
 
