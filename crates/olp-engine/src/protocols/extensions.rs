@@ -10,6 +10,12 @@ pub(in crate::protocols) enum PointerExtensionError {
     Json(serde_json::Error),
 }
 
+impl From<serde_json::Error> for PointerExtensionError {
+    fn from(error: serde_json::Error) -> Self {
+        Self::Json(error)
+    }
+}
+
 pub(in crate::protocols) fn collect_extra(
     prefix: &str,
     extra: &BTreeMap<String, Value>,
@@ -106,7 +112,7 @@ where
     if deliverable().next().is_none() {
         return Ok(());
     }
-    let mut value = serde_json::to_value(&*request).map_err(PointerExtensionError::Json)?;
+    let mut value = serde_json::to_value(&*request)?;
     let mut insertions = deliverable()
         .filter(|(path, _)| is_array_item_path(path))
         .collect::<Vec<_>>();
@@ -117,7 +123,7 @@ where
     for (path, extension) in deliverable().filter(|(path, _)| !is_array_item_path(path)) {
         set_request_pointer(&mut value, path, extension.clone(), false)?;
     }
-    *request = serde_json::from_value(value).map_err(PointerExtensionError::Json)?;
+    *request = serde_json::from_value(value)?;
     Ok(())
 }
 
@@ -202,7 +208,7 @@ pub(in crate::protocols) fn apply_response_extensions<T>(
 where
     T: Serialize + DeserializeOwned,
 {
-    let mut value = serde_json::to_value(response).map_err(PointerExtensionError::Json)?;
+    let mut value = serde_json::to_value(response)?;
     let mut entries = extensions.iter().collect::<Vec<_>>();
     entries.sort_by_key(|(pointer, _)| pointer_depth(pointer));
     for (pointer, extension) in entries {

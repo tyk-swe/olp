@@ -50,8 +50,7 @@ pub fn decode(response: MessagesResponse) -> Result<Vec<Event>, ResponseError> {
                     tool_index,
                     id: Some(block.id),
                     name: Some(block.name),
-                    arguments_delta: serde_json::to_string(&block.input)
-                        .map_err(ResponseError::Json)?,
+                    arguments_delta: serde_json::to_string(&block.input)?,
                 });
                 tool_index = tool_index
                     .checked_add(1)

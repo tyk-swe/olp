@@ -94,7 +94,7 @@ pub fn request(request: MessagesRequest) -> Result<Operation, DecodeError> {
         } else {
             extensions.insert(
                 format!("/tools/{wire_tool_index}"),
-                serde_json::to_value(tool).map_err(DecodeError::Json)?,
+                serde_json::to_value(tool)?,
             );
         }
     }
@@ -242,7 +242,7 @@ fn decode_blocks(
                 tool_calls.push(ToolCall {
                     id: block.id,
                     name: block.name,
-                    arguments: serde_json::to_string(&block.input).map_err(DecodeError::Json)?,
+                    arguments: serde_json::to_string(&block.input)?,
                 });
             }
             // Anthropic requires signed `thinking` and allowlisted unmodelled

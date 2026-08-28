@@ -38,7 +38,7 @@ pub enum DecodeError {
     #[error("Anthropic named tool choice is missing name")]
     MissingToolName,
     #[error("Anthropic JSON value is invalid: {0}")]
-    Json(serde_json::Error),
+    Json(#[from] serde_json::Error),
 }
 
 #[derive(Debug, Error)]
@@ -85,7 +85,7 @@ pub enum EncodeError {
     #[error("source extension path cannot be applied: {0}")]
     InvalidExtensionPath(String),
     #[error("Anthropic JSON value is invalid: {0}")]
-    Json(serde_json::Error),
+    Json(#[from] serde_json::Error),
 }
 
 #[derive(Debug, Error)]
@@ -99,5 +99,5 @@ pub enum ResponseError {
     #[error("Anthropic response has too many content blocks")]
     TooManyContentBlocks,
     #[error("Anthropic response JSON is invalid: {0}")]
-    Json(serde_json::Error),
+    Json(#[from] serde_json::Error),
 }

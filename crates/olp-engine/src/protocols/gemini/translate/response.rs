@@ -146,8 +146,7 @@ fn decode_candidate(
                         tool_index,
                         id: part.function_call.id,
                         name: Some(part.function_call.name),
-                        arguments_delta: serde_json::to_string(&part.function_call.args)
-                            .map_err(ResponseError::Json)?,
+                        arguments_delta: serde_json::to_string(&part.function_call.args)?,
                     });
                     tool_index = tool_index
                         .checked_add(1)

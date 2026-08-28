@@ -95,7 +95,7 @@ pub fn request(
         if tool.function_declarations.is_empty() {
             extensions.insert(
                 format!("/tools/{output_tool_index}"),
-                serde_json::to_value(tool).map_err(DecodeError::Json)?,
+                serde_json::to_value(tool)?,
             );
             output_tool_index += 1;
             continue;
@@ -183,8 +183,7 @@ fn decode_content(
                     &part.function_response.extra,
                     &mut local_extensions,
                 );
-                let response = serde_json::to_string(&part.function_response.response)
-                    .map_err(DecodeError::Json)?;
+                let response = serde_json::to_string(&part.function_response.response)?;
                 let id = match part.function_response.id {
                     Some(id) => id,
                     None => {
@@ -306,8 +305,7 @@ fn decode_content(
                 tool_calls.push(ToolCall {
                     id,
                     name: part.function_call.name,
-                    arguments: serde_json::to_string(&part.function_call.args)
-                        .map_err(DecodeError::Json)?,
+                    arguments: serde_json::to_string(&part.function_call.args)?,
                 });
             }
             Part::Unknown(value) => {
@@ -364,7 +362,7 @@ fn decode_tool_config(
     config: ToolConfig,
     extensions: &mut BTreeMap<String, Value>,
 ) -> Result<Option<CanonicalToolChoice>, DecodeError> {
-    let raw_config = serde_json::to_value(&config).map_err(DecodeError::Json)?;
+    let raw_config = serde_json::to_value(&config)?;
     collect_extra("/toolConfig", &config.extra, extensions);
     let Some(function) = config.function_calling_config else {
         if !config.extra.is_empty() {
@@ -389,7 +387,7 @@ fn decode_tool_config(
         "ANY" => {
             extensions.insert(
                 "/toolConfig/functionCallingConfig/allowedFunctionNames".into(),
-                serde_json::to_value(function.allowed_function_names).map_err(DecodeError::Json)?,
+                serde_json::to_value(function.allowed_function_names)?,
             );
             Ok(Some(CanonicalToolChoice::Required))
         }

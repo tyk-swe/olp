@@ -37,7 +37,7 @@ pub enum DecodeError {
     #[error("responseSchema requires responseMimeType application/json")]
     SchemaWithoutJsonMimeType,
     #[error("Gemini JSON value is invalid: {0}")]
-    Json(serde_json::Error),
+    Json(#[from] serde_json::Error),
 }
 
 #[derive(Debug, Error)]
@@ -86,7 +86,7 @@ pub enum EncodeError {
     #[error("source extension path cannot be applied: {0}")]
     InvalidExtensionPath(String),
     #[error("Gemini JSON value is invalid: {0}")]
-    Json(serde_json::Error),
+    Json(#[from] serde_json::Error),
 }
 
 #[derive(Debug, Error)]
@@ -104,7 +104,7 @@ pub enum ResponseError {
     #[error("Gemini response has too many tool calls")]
     TooManyToolCalls,
     #[error("Gemini response JSON is invalid: {0}")]
-    Json(serde_json::Error),
+    Json(#[from] serde_json::Error),
 }
 
 #[derive(Clone, Copy, Debug, Error, Eq, PartialEq)]
