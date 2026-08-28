@@ -1,3 +1,4 @@
+use super::helpers::lock_provider;
 use super::{
     helpers::{CapabilityRow, capability_from_row},
     *,
@@ -169,13 +170,9 @@ impl Store {
             }
         }
         let mut transaction = self.pool().begin().await?;
-        let provider = sqlx::query!(
-            "SELECT etag, state::text AS \"state!\", kind FROM providers WHERE id = $1 FOR UPDATE",
-            provider_id
-        )
-        .fetch_optional(&mut *transaction)
-        .await?
-        .ok_or(Error::NotFound)?;
+        let provider = lock_provider(&mut transaction, provider_id)
+            .await?
+            .ok_or(Error::NotFound)?;
         if provider.etag != expected_etag {
             return Err(Error::PreconditionFailed);
         }
@@ -253,13 +250,9 @@ impl Store {
             }
         }
         let mut transaction = self.pool().begin().await?;
-        let provider = sqlx::query!(
-            "SELECT etag, state::text AS \"state!\", kind FROM providers WHERE id = $1 FOR UPDATE",
-            provider_id
-        )
-        .fetch_optional(&mut *transaction)
-        .await?
-        .ok_or(Error::NotFound)?;
+        let provider = lock_provider(&mut transaction, provider_id)
+            .await?
+            .ok_or(Error::NotFound)?;
         if provider.etag != expected_etag {
             return Err(Error::PreconditionFailed);
         }
@@ -359,15 +352,9 @@ impl Store {
         }
 
         let mut transaction = self.pool().begin().await?;
-        let provider = sqlx::query!(
-            "SELECT etag, state::text AS \"state!\", kind, updated_at, last_probe_at, \
-                    last_probe_status \
-             FROM providers WHERE id = $1 FOR UPDATE",
-            provider_id
-        )
-        .fetch_optional(&mut *transaction)
-        .await?
-        .ok_or(Error::NotFound)?;
+        let provider = lock_provider(&mut transaction, provider_id)
+            .await?
+            .ok_or(Error::NotFound)?;
         if provider.etag != expected_etag {
             return Err(Error::PreconditionFailed);
         }

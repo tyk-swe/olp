@@ -1,3 +1,4 @@
+use super::helpers::lock_provider;
 use super::*;
 use crate::audit_events::record_success;
 
@@ -68,22 +69,24 @@ impl Store {
             .ok()
             .filter(|value| *value > 0)
             .ok_or_else(|| Error::Invalid("master-key version is invalid".to_owned()))?;
-        let provider = sqlx::query!(
-            "SELECT etag, state::text AS \"state!\", COALESCE((SELECT max(version) FROM \
-             provider_credential_versions WHERE provider_id = $1), 0) + 1 AS \"next_version!\" \
-             FROM providers WHERE id = $1 FOR UPDATE",
+        let provider = lock_provider(&mut transaction, provider_id)
+            .await?
+            .ok_or(Error::NotFound)?;
+        // Under the row lock, so the next version cannot race another writer.
+        let next_version: i32 = sqlx::query_scalar!(
+            "SELECT COALESCE(max(version), 0) + 1 AS \"next_version!\" \
+             FROM provider_credential_versions WHERE provider_id = $1",
             provider_id
         )
-        .fetch_optional(&mut *transaction)
-        .await?
-        .ok_or(Error::NotFound)?;
+        .fetch_one(&mut *transaction)
+        .await?;
         if provider.etag != input.expected_etag {
             return Err(Error::PreconditionFailed);
         }
         if provider.state == "disabled" {
             return Err(Error::InUse);
         }
-        if provider.next_version != database_version {
+        if next_version != database_version {
             return Err(Error::PreconditionFailed);
         }
         sqlx::query!(

@@ -118,3 +118,32 @@ pub(crate) async fn insert_draft_operations(
     .await?;
     Ok(())
 }
+
+/// The provider row every mutation locks first. A superset of the columns the
+/// callers compare, so each site takes the same `FOR UPDATE` read.
+pub(crate) struct LockedProvider {
+    pub(crate) etag: Uuid,
+    pub(crate) state: String,
+    pub(crate) kind: String,
+    pub(crate) active_credential_version_id: Option<Uuid>,
+    pub(crate) updated_at: DateTime<Utc>,
+    pub(crate) last_probe_at: Option<DateTime<Utc>>,
+    pub(crate) last_probe_status: Option<String>,
+}
+
+/// Locks a provider row for the rest of the transaction; `None` when it does
+/// not exist, so the caller picks its own not-found error.
+pub(crate) async fn lock_provider(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    provider_id: Uuid,
+) -> Result<Option<LockedProvider>, sqlx::Error> {
+    sqlx::query_as!(
+        LockedProvider,
+        "SELECT etag, state::text AS \"state!\", kind, active_credential_version_id, \
+                updated_at, last_probe_at, last_probe_status \
+         FROM providers WHERE id = $1 FOR UPDATE",
+        provider_id
+    )
+    .fetch_optional(&mut **transaction)
+    .await
+}

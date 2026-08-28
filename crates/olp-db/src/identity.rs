@@ -11,6 +11,7 @@ mod accounts;
 mod auth_admission;
 mod installation;
 pub(crate) mod invitations;
+pub(crate) mod locks;
 mod setup;
 
 pub struct InstallationSetupInput {

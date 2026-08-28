@@ -16,7 +16,7 @@ use crate::{
 
 use super::{
     Error, PasswordSessionRotation, SessionRecord, UserRecord,
-    invitations::retire_invitations_on_access_loss, parse_role,
+    invitations::retire_invitations_on_access_loss, locks::lock_user, parse_role,
 };
 
 const MAX_PAGE_SIZE: i64 = 100;
@@ -62,8 +62,7 @@ impl Store {
         actor: Uuid,
     ) -> Result<UserRecord, Error> {
         let mut transaction = self.pool().begin().await?;
-        let current = sqlx::query!("SELECT etag FROM users WHERE id = $1 FOR UPDATE", id)
-            .fetch_optional(&mut *transaction)
+        let current = lock_user(&mut transaction, id)
             .await?
             .ok_or(Error::NotFound)?;
         if current.etag != expected_etag {
@@ -142,8 +141,7 @@ impl Store {
             ));
         }
         let mut transaction = self.pool().begin().await?;
-        let current = sqlx::query!("SELECT etag FROM users WHERE id = $1 FOR UPDATE", id)
-            .fetch_optional(&mut *transaction)
+        let current = lock_user(&mut transaction, id)
             .await?
             .ok_or(Error::NotFound)?;
         if current.etag != expected_etag {
@@ -280,15 +278,10 @@ impl Store {
             .filter(|expires_at| *expires_at > now)
             .ok_or_else(|| Error::Invalid("session lifetime is invalid".to_owned()))?;
         let mut transaction = self.pool().begin().await?;
-        let current = sqlx::query!(
-            "SELECT etag, password_hash IS NOT NULL AS \"local!\", active, security_version \
-             FROM users WHERE id = $1 FOR UPDATE",
-            id
-        )
-        .fetch_optional(&mut *transaction)
-        .await?
-        .ok_or(Error::NotFound)?;
-        if !current.local {
+        let current = lock_user(&mut transaction, id)
+            .await?
+            .ok_or(Error::NotFound)?;
+        if !current.has_local_password {
             return Err(Error::LocalPasswordUnavailable);
         }
         if !current.active
@@ -379,15 +372,10 @@ impl Store {
             .filter(|expires_at| *expires_at > now)
             .ok_or_else(|| Error::Invalid("session lifetime is invalid".to_owned()))?;
         let mut transaction = self.pool().begin().await?;
-        let current = sqlx::query!(
-            "SELECT etag, password_hash IS NOT NULL AS \"local!\", active, security_version \
-             FROM users WHERE id = $1 FOR UPDATE",
-            id
-        )
-        .fetch_optional(&mut *transaction)
-        .await?
-        .ok_or(Error::NotFound)?;
-        if current.local {
+        let current = lock_user(&mut transaction, id)
+            .await?
+            .ok_or(Error::NotFound)?;
+        if current.has_local_password {
             return Err(Error::LocalPasswordAlreadyConfigured);
         }
         if !current.active || current.security_version != context.security_version {

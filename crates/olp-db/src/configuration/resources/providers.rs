@@ -8,11 +8,32 @@ impl Store {
         limit: i64,
     ) -> Result<ConfigurationPage<ProviderRecord>, Error> {
         let limit = checked_limit(limit)?;
+        let rows = sqlx::query!(
+            "SELECT id FROM providers WHERE ($1::uuid IS NULL OR id > $1) ORDER BY id LIMIT $2",
+            cursor,
+            limit + 1
+        )
+        .fetch_all(self.pool())
+        .await?;
+        let (rows, next_cursor) = split_page(rows, limit as usize, |row| row.id);
+        let ids: Vec<Uuid> = rows.into_iter().map(|row| row.id).collect();
+        let items = self.get_providers(&ids).await?;
+        Ok(ConfigurationPage { items, next_cursor })
+    }
+
+    /// Reads providers in the order of `ids`; the one projection every
+    /// provider read shares lives here. Any missing id is `NotFound`.
+    pub async fn get_providers(&self, ids: &[Uuid]) -> Result<Vec<ProviderRecord>, Error> {
+        if ids.is_empty() {
+            return Ok(Vec::new());
+        }
         let rows = sqlx::query_as!(
             ProviderRow,
-            "SELECT p.id, p.name, p.kind, p.state::text AS \"state!\", p.endpoint, p.cloud_region, \
-                    p.cloud_project, p.deployment, p.api_version, p.auth_mode, p.connector_ready, \
-                    p.etag, ar.revision AS \"active_revision?\", \
+            "SELECT p.id AS \"id!\", p.name AS \"name!\", p.kind AS \"kind!\", \
+                    p.state::text AS \"state!\", p.endpoint, p.cloud_region, \
+                    p.cloud_project, p.deployment, p.api_version, p.auth_mode AS \"auth_mode!\", \
+                    p.connector_ready AS \"connector_ready!\", \
+                    p.etag AS \"etag!\", ar.revision AS \"active_revision?\", \
                     (p.state = 'draft'::provider_state AND p.active_revision_id IS NOT NULL) \
                       AS \"pending_activation!\", \
                     p.active_credential_version_id AS draft_credential_id, \
@@ -20,7 +41,7 @@ impl Store {
                     ar.credential_version_id AS \"runtime_credential_id?\", \
                     runtime_cv.version AS \"runtime_credential_version?\", \
                     p.last_probe_at, p.last_probe_status, p.last_probe_detail, \
-                    p.created_at, p.updated_at, \
+                    p.created_at AS \"created_at!\", p.updated_at AS \"updated_at!\", \
                     stats.model_count AS \"model_count!\", \
                     stats.enabled_model_count AS \"enabled_model_count!\", \
                     stats.capability_count AS \"capability_count!\", \
@@ -49,69 +70,25 @@ impl Store {
                  SELECT pm.upstream_model FROM provider_models pm \
                  WHERE pm.provider_id = p.id ORDER BY pm.id LIMIT 1 \
              ) probe ON true \
-             WHERE ($1::uuid IS NULL OR p.id > $1) ORDER BY p.id LIMIT $2",
-            cursor,
-            limit + 1
+             WHERE p.id = ANY($1::uuid[])",
+            ids
         )
         .fetch_all(self.pool())
         .await?;
-        let (rows, next_cursor) = split_page(rows, limit as usize, |row| row.id);
-        let items = rows
-            .into_iter()
-            .map(provider_from_row)
-            .collect::<Result<Vec<_>, _>>()?;
-        Ok(ConfigurationPage { items, next_cursor })
+        let mut by_id: BTreeMap<Uuid, ProviderRow> =
+            rows.into_iter().map(|row| (row.id, row)).collect();
+        ids.iter()
+            .map(|id| by_id.remove(id).ok_or(Error::NotFound))
+            .map(|row| row.and_then(provider_from_row))
+            .collect()
     }
 
     pub async fn get_provider(&self, provider_id: Uuid) -> Result<ProviderRecord, Error> {
-        let row = sqlx::query_as!(
-            ProviderRow,
-            "SELECT p.id, p.name, p.kind, p.state::text AS \"state!\", p.endpoint, p.cloud_region, \
-                    p.cloud_project, p.deployment, p.api_version, p.auth_mode, p.connector_ready, \
-                    p.etag, ar.revision AS \"active_revision?\", \
-                    (p.state = 'draft'::provider_state AND p.active_revision_id IS NOT NULL) \
-                      AS \"pending_activation!\", \
-                    p.active_credential_version_id AS draft_credential_id, \
-                    draft_cv.version AS \"draft_credential_version?\", \
-                    ar.credential_version_id AS \"runtime_credential_id?\", \
-                    runtime_cv.version AS \"runtime_credential_version?\", \
-                    p.last_probe_at, p.last_probe_status, \
-                    p.last_probe_detail, p.created_at, p.updated_at, \
-                    stats.model_count AS \"model_count!\", \
-                    stats.enabled_model_count AS \"enabled_model_count!\", \
-                    stats.capability_count AS \"capability_count!\", \
-                    stats.certified_capability_count AS \"certified_capability_count!\", \
-                    probe.upstream_model AS \"probe_model?\", \
-                    creator.email AS \"created_by_email?\" \
-             FROM providers p \
-             LEFT JOIN users creator ON creator.id = p.created_by \
-             LEFT JOIN provider_credential_versions draft_cv \
-               ON draft_cv.id = p.active_credential_version_id \
-             LEFT JOIN provider_revisions ar ON ar.id = p.active_revision_id \
-             LEFT JOIN provider_credential_versions runtime_cv \
-               ON runtime_cv.id = ar.credential_version_id \
-             LEFT JOIN LATERAL ( \
-                 SELECT COUNT(DISTINCT pm.id)::bigint AS model_count, \
-                        COUNT(DISTINCT pm.id) FILTER (WHERE pm.enabled)::bigint \
-                          AS enabled_model_count, \
-                        COUNT(mc.provider_model_id)::bigint AS capability_count, \
-                        COUNT(mc.provider_model_id) FILTER (WHERE mc.source = 'certified')::bigint \
-                          AS certified_capability_count \
-                 FROM provider_models pm \
-                 LEFT JOIN model_capabilities mc ON mc.provider_model_id = pm.id \
-                 WHERE pm.provider_id = p.id \
-             ) stats ON true \
-             LEFT JOIN LATERAL ( \
-                 SELECT pm.upstream_model FROM provider_models pm \
-                 WHERE pm.provider_id = p.id ORDER BY pm.id LIMIT 1 \
-             ) probe ON true \
-             WHERE p.id = $1",
-            provider_id
-        )
-        .fetch_optional(self.pool())
-        .await?
-        .ok_or(Error::NotFound)?;
-        provider_from_row(row)
+        self.get_providers(&[provider_id])
+            .await?
+            .into_iter()
+            .next()
+            .ok_or(Error::NotFound)
     }
 
     pub async fn update_provider(

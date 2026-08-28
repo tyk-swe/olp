@@ -17,6 +17,7 @@ use crate::{
         insert_versioned_session, install_recent_authentication, revoke_user_sessions,
     },
     identity::invitations::retire_invitations_on_access_loss,
+    identity::locks::lock_user,
     store::Store,
 };
 
@@ -257,15 +258,9 @@ impl Store {
         // lock the user before deleting its sessions, so this avoids a
         // session/user deadlock while retaining the session-revocation fence.
         lock_subject(&mut transaction, input.issuer, input.subject).await?;
-        let user_row = sqlx::query_as!(
-            LinkedUserRow,
-            "SELECT id, email, display_name, role::text AS \"role!\", active, security_version \
-             FROM users WHERE id = $1 FOR UPDATE",
-            input.user_id
-        )
-        .fetch_optional(&mut *transaction)
-        .await?
-        .ok_or(OidcError::InactiveUser)?;
+        let user_row = lock_user(&mut transaction, input.user_id)
+            .await?
+            .ok_or(OidcError::InactiveUser)?;
         // Hold a lock on the exact initiating session until the identity link
         // commits. This closes the gap between HTTP authentication and the
         // storage transaction: a concurrently revoked or expired session
@@ -380,7 +375,12 @@ impl Store {
             .await?;
         }
         transaction.commit().await?;
-        authenticated_user_from_row(user_row.authenticated())
+        authenticated_user_from_row(AuthenticatedUserRow {
+            id: input.user_id,
+            email: user_row.email,
+            display_name: user_row.display_name,
+            role: user_row.role,
+        })
     }
 
     /// Completes a fresh IdP authentication only when the asserted provider
@@ -510,14 +510,9 @@ impl Store {
         let now = Utc::now();
         let expires_at = checked_session_expiry(now, input.session_ttl)?;
         let mut transaction = self.pool().begin().await?;
-        let user = sqlx::query!(
-            "SELECT password_hash IS NOT NULL AS \"has_local_password!\", active, security_version \
-             FROM users WHERE id = $1 FOR UPDATE",
-            input.user_id
-        )
-        .fetch_optional(&mut *transaction)
-        .await?
-        .ok_or(OidcError::InactiveUser)?;
+        let user = lock_user(&mut transaction, input.user_id)
+            .await?
+            .ok_or(OidcError::InactiveUser)?;
         if !user.active {
             return Err(OidcError::InactiveUser);
         }
@@ -621,27 +616,6 @@ impl LinkedLoginRow {
             email: self.email.clone(),
             display_name: self.display_name.clone(),
             role: self.role.clone(),
-        }
-    }
-}
-
-#[derive(Debug, sqlx::FromRow)]
-struct LinkedUserRow {
-    id: Uuid,
-    email: String,
-    display_name: String,
-    role: String,
-    active: bool,
-    security_version: i64,
-}
-
-impl LinkedUserRow {
-    fn authenticated(self) -> AuthenticatedUserRow {
-        AuthenticatedUserRow {
-            id: self.id,
-            email: self.email,
-            display_name: self.display_name,
-            role: self.role,
         }
     }
 }

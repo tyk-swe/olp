@@ -1,3 +1,4 @@
+use super::helpers::lock_provider;
 use super::{
     helpers::{CapabilityRow, capability_from_row, checked_configuration_count},
     *,
@@ -326,14 +327,9 @@ impl Store {
         {
             return Err(Error::IdempotencyConflict);
         }
-        let provider = sqlx::query!(
-            "SELECT etag, kind, active_credential_version_id \
-             FROM providers WHERE id = $1 FOR UPDATE",
-            provider_id
-        )
-        .fetch_optional(&mut *transaction)
-        .await?
-        .ok_or(Error::NotFound)?;
+        let provider = lock_provider(&mut transaction, provider_id)
+            .await?
+            .ok_or(Error::NotFound)?;
         if provider.etag != expected_etag {
             return Err(Error::PreconditionFailed);
         }
