@@ -945,7 +945,7 @@ async fn reclaim_gaps_are_recorded_even_when_the_activity_counter_write_fails() 
     // The surviving entry's own processing counter still fails hard, so the
     // consumer is expected to exit with an error here. What matters is that
     // the gap evidence was already durable before that happened.
-    shutdown.send(true).unwrap();
+    let _ = shutdown.send(true);
     consumer.abort();
     let _ = consumer.await;
 }
