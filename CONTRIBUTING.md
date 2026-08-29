@@ -95,9 +95,12 @@ boundary and SQLx checks, `shellcheck` over every tracked shell script, the
 script self-tests, Rust formatting, release-version checks, and supply-chain
 pin checks; use it alone as the quick pre-commit loop. `make check-heavy` then
 runs locked Clippy followed by the locked nextest workspace suite, with console
-verification overlapping them (`CHECK_JOBS=1` serialises it). `make coverage` is the CI Rust gate: llvm-cov nextest
-with a 62% line floor. Plain `cargo test` is not a substitute. The workspace
-has no doctests by policy; if one is added, restore a `cargo test --doc` gate.
+verification overlapping them (`CHECK_JOBS=1` serialises it). `make coverage`
+is the CI Rust gate: llvm-cov nextest combines the workspace unit suites with
+the ignored PostgreSQL/Valkey suites and enforces an 80% line floor. It needs
+the database-test environment below, including `OLP_VALKEY_URL`. Plain
+`cargo test` is not a substitute. The workspace has no doctests by policy; if
+one is added, restore a `cargo test --doc` gate.
 
 The pass-gated contract suite (`make e2e`) drives the real `olp all` binary
 against PostgreSQL, Valkey, and a loopback mock provider. Its assertions cite

@@ -10,6 +10,10 @@ deliver the three capabilities that matter most against peer gateways —
 distributed tracing, spend controls, and performance evidence. Week 8 ships
 all of it as 2.3.0 and resets the plan.
 
+Progress is mirrored in the
+[pinned roadmap issue](https://github.com/tyk-swe/olp/issues/116); the checked-in
+backlog and milestone files remain the source of truth.
+
 ## Layout
 
 | File | Holds | Update when |
@@ -24,7 +28,7 @@ all of it as 2.3.0 and resets the plan.
 
 | # | Dates | Theme | Ships | Status |
 |---|---|---|---|---|
-| [1](milestones/01-green-main.md) | Aug 31 – Sep 6 | Green and protected `main` | Four CI fixes, branch ruleset, merge queue, pruned branches | not started |
+| [1](milestones/01-green-main.md) | Aug 31 – Sep 6 | Green and protected `main` | Five CI fixes, protected `main`, pruned branches | in progress |
 | [2](milestones/02-first-release.md) | Sep 7 – Sep 13 | First published release | `v2.2.0`: signed multi-arch image on GHCR, Helm chart on OCI, GitHub Release, pull-based quick start | not started |
 | [3](milestones/03-risk-tests.md) | Sep 14 – Sep 20 | Test the real risks | Weekly live-provider job, Python SDK smoke, `Required` tier under 8 minutes | not started |
 | [4](milestones/04-onboarding.md) | Sep 21 – Sep 27 | Onboarding and docs | "Your first request", concepts page, generated compatibility matrix, Helm NetworkPolicy, repository presentation | not started |

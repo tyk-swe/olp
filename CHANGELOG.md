@@ -42,6 +42,17 @@ staged, 0048 seeds the `limits.valkey_unavailable` setting.
 
 ### Changed
 
+**Repository**
+- Rust coverage combines the workspace unit tests with all ignored
+  PostgreSQL/Valkey suites, prints its summary before enforcing an 80% line
+  floor, and uploads the combined LCOV report.
+- Playwright keeps the Request Explorer baseline on Chromium, Firefox,
+  WebKit, and mobile Chromium, with a 1% pixel ratio that tolerates localized
+  anti-aliasing drift while still rejecting layout changes.
+- The shared-Valkey isolation proof checks only the durable request-metadata
+  stream and consumer-group state after teardown. Expiring limiter keys are
+  proved before teardown, removing the UTC-minute rollover race.
+
 **Providers**
 - Renaming a provider, rotating its credential, disabling a model, or
   re-reviewing an unchanged capability set no longer resets certified

@@ -23,7 +23,14 @@ source "$script_dir/lib/postgres-test-databases.sh"
 : "${OLP_TEST_DATABASE_ADMIN_URL:?set OLP_TEST_DATABASE_ADMIN_URL to the PostgreSQL maintenance database}"
 : "${OLP_TEST_DATABASE_URL_PREFIX:?set OLP_TEST_DATABASE_URL_PREFIX without a trailing database name}"
 
-for command in psql cargo cargo-nextest sha256sum timeout; do
+OLP_DB_TEST_RUNNER=${OLP_DB_TEST_RUNNER:-cargo nextest run}
+read -r -a db_test_runner <<< "$OLP_DB_TEST_RUNNER"
+if ((${#db_test_runner[@]} == 0)); then
+  echo "OLP_DB_TEST_RUNNER must name a command" >&2
+  exit 1
+fi
+
+for command in psql sha256sum timeout "${db_test_runner[0]}"; do
   command -v "$command" >/dev/null 2>&1 || {
     echo "required command is unavailable: $command" >&2
     exit 1
@@ -75,7 +82,7 @@ fi
 
 (
   unset OLP_DATABASE_URL
-  SQLX_OFFLINE=true cargo nextest run --locked --all-features \
+  SQLX_OFFLINE=true "${db_test_runner[@]}" --locked --all-features \
     --package olp-db --package olp \
     --profile db --run-ignored ignored-only \
     "$@" "${skip_args[@]}"

@@ -514,10 +514,10 @@ async fn prove_shared_valkey_isolation(
         "installation B did not enforce its own exhausted RPM/TPM/concurrency state"
     );
 
-    let keys_b = valkey_keys(&valkey_url_b, &format!("{prefix_b}:*")).await?;
+    let keys_b = durable_valkey_keys(&valkey_url_b, &format!("{prefix_b}:*")).await?;
     require!(
         !keys_b.is_empty(),
-        "installation B created no namespaced Valkey keys"
+        "installation B created no durable namespaced Valkey keys"
     );
     Ok(keys_b)
 }
@@ -614,17 +614,29 @@ async fn database_scalar(database_url: &str, query: &'static str) -> Result<i64,
         .map_err(|error| format!("database assertion failed: {error}"))
 }
 
-async fn valkey_keys(url: &str, pattern: &str) -> Result<Vec<String>, String> {
+async fn durable_valkey_keys(url: &str, pattern: &str) -> Result<Vec<String>, String> {
     let client =
         redis::Client::open(url).map_err(|error| format!("invalid shared Valkey URL: {error}"))?;
     let mut connection = client
         .get_multiplexed_async_connection()
         .await
         .map_err(|error| format!("failed to connect shared Valkey: {error}"))?;
-    connection
+    let keys: Vec<String> = connection
         .keys(pattern)
         .await
-        .map_err(|error| format!("failed to list shared Valkey keys: {error}"))
+        .map_err(|error| format!("failed to list shared Valkey keys: {error}"))?;
+    let mut keys_with_pttl = Vec::with_capacity(keys.len());
+    for key in keys {
+        let pttl: i64 = connection
+            .pttl(&key)
+            .await
+            .map_err(|error| format!("failed to inspect installation B key {key}: {error}"))?;
+        keys_with_pttl.push((key, pttl));
+    }
+    Ok(keys_with_pttl
+        .into_iter()
+        .filter_map(|(key, pttl)| (pttl == -1).then_some(key))
+        .collect())
 }
 
 async fn assert_valkey_keys_exist(url: &str, keys: &[String]) -> Result<(), String> {
@@ -634,6 +646,7 @@ async fn assert_valkey_keys_exist(url: &str, keys: &[String]) -> Result<(), Stri
         .get_multiplexed_async_connection()
         .await
         .map_err(|error| format!("failed to reconnect shared Valkey: {error}"))?;
+    let checked_keys = keys.join(", ");
     for key in keys {
         let exists: bool = connection
             .exists(key)
@@ -641,7 +654,8 @@ async fn assert_valkey_keys_exist(url: &str, keys: &[String]) -> Result<(), Stri
             .map_err(|error| format!("failed to inspect installation B key {key}: {error}"))?;
         require!(
             exists,
-            "installation A teardown deleted installation B key {key}"
+            "installation A teardown deleted installation B durable key {key}; \
+             durable keys checked: {checked_keys}"
         );
     }
     Ok(())

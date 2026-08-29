@@ -1,7 +1,13 @@
 # TODOS
 
-Nothing open. Items carried from the v2.0.1 and v2.1.0 reviews (PRs #111, #114)
-and the v2.1.1 recovery pass are all closed. Priorities were: P0 blocks release,
+## Open
+
+Review-derived hygiene remains open at P3 (`HYG-06`, `HYG-07`) and P4
+(`HYG-04`, `HYG-05`, `HYG-08`). Details, scheduling, and status live in the
+[roadmap backlog](docs/roadmap/backlog.md#hyg--hardening-and-hygiene).
+
+Items carried from the v2.0.1 and v2.1.0 reviews (PRs #111, #114) and the
+v2.1.1 recovery pass are otherwise closed. Priorities are: P0 blocks release,
 P1 next, P2 soon, P3 when convenient, P4 someday.
 
 ## Completed
