@@ -12,8 +12,8 @@ importers:
         specifier: 0.116.0
         version: 0.116.0
       '@google/genai':
-        specifier: 2.16.0
-        version: 2.16.0
+        specifier: 2.19.0
+        version: 2.19.0
       openai:
         specifier: 7.4.0
         version: 7.4.0(ws@8.21.3)
@@ -33,8 +33,8 @@ packages:
     resolution: {integrity: sha512-Nq8OhGWiZIZGV6hLHoyAKLLcJihP/xFeBMGJoUrxTX2psI8dCifzLhZISFb+VWS3wFMRDmCGw5R+dOySCqPLhw==}
     engines: {node: '>=6.9.0'}
 
-  '@google/genai@2.16.0':
-    resolution: {integrity: sha512-K+1C1sqR0u7NJ5xpKJCQBws0QXpfuklo3WTNuUIMvtbQfNW2O5OohX0BYT2V+PXzsUzQEwGCXPWQxttLyGQ6xw==}
+  '@google/genai@2.19.0':
+    resolution: {integrity: sha512-IM3u1FjpOLyOPsPh0smGA6Ntj2olUWCPbTs/WQj7cA/2AKCGw/652W7IaySx0XtwuscFnMYBoraebQusSZ0zSQ==}
     engines: {node: '>=20.0.0'}
     peerDependencies:
       '@modelcontextprotocol/sdk': ^1.25.2
@@ -243,7 +243,7 @@ snapshots:
 
   '@babel/runtime@7.29.7': {}
 
-  '@google/genai@2.16.0':
+  '@google/genai@2.19.0':
     dependencies:
       google-auth-library: 10.9.1
       p-retry: 4.6.2
