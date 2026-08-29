@@ -7,6 +7,7 @@ updates:
     groups:
       cargo-minor-patch:
         update-types: [minor, patch]
+        # Keep futures standalone until dependabot-core#16092 fixes lockstep updates.
         exclude-patterns: [futures]
   - package-ecosystem: github-actions
     directory: /
