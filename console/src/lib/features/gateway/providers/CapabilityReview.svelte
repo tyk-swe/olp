@@ -305,8 +305,8 @@
   <ConflictNotice notice={concurrentNotice} onReload={reload} {disabled} />
   <div class="review-footer">
     <span
-      >Options are owned by the server. Operator-reviewed tuples are stored with
-      declared provenance.</span
+      >Options are owned by the server. New tuples are stored with declared
+      provenance; unchanged tuples keep their certification.</span
     >
     <button
       class="button button-secondary"

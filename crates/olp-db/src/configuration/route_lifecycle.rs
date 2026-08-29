@@ -277,9 +277,6 @@ impl Store {
         if draft.etag != expected_etag {
             return Err(Error::PreconditionFailed);
         }
-        if draft.state != "validated" {
-            return Err(Error::RouteNotValidated);
-        }
         // Media reservations are not runtime-publication mutations. Block
         // their short INSERT/UPDATE transactions while checking and
         // publishing so a job cannot appear against the old route after the

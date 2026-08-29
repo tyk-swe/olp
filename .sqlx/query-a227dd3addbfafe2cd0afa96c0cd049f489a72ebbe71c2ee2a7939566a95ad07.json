@@ -1,0 +1,167 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT etag, state::text AS \"state!\", kind, endpoint, cloud_region, cloud_project, deployment, api_version, auth_mode, active_credential_version_id, updated_at, last_probe_at, last_probe_status FROM providers WHERE id = $1 FOR UPDATE",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "etag",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "providers",
+            "name": "etag"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "state!",
+        "type_info": "Text",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 2,
+        "name": "kind",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "providers",
+            "name": "kind"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "endpoint",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "providers",
+            "name": "endpoint"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "cloud_region",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "providers",
+            "name": "cloud_region"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "cloud_project",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "providers",
+            "name": "cloud_project"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "deployment",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "providers",
+            "name": "deployment"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "api_version",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "providers",
+            "name": "api_version"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "auth_mode",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "providers",
+            "name": "auth_mode"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "active_credential_version_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "providers",
+            "name": "active_credential_version_id"
+          }
+        }
+      },
+      {
+        "ordinal": 10,
+        "name": "updated_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "providers",
+            "name": "updated_at"
+          }
+        }
+      },
+      {
+        "ordinal": 11,
+        "name": "last_probe_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "providers",
+            "name": "last_probe_at"
+          }
+        }
+      },
+      {
+        "ordinal": 12,
+        "name": "last_probe_status",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "providers",
+            "name": "last_probe_status"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      null,
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      false,
+      true,
+      false,
+      true,
+      true
+    ]
+  },
+  "hash": "a227dd3addbfafe2cd0afa96c0cd049f489a72ebbe71c2ee2a7939566a95ad07"
+}

@@ -32,6 +32,10 @@ impl MockOpenAiProvider {
         }
     }
 
+    pub(super) fn base_url(&self) -> &str {
+        &self.base_url
+    }
+
     pub(super) fn connector(&self, api_key: &str) -> Connector {
         Connector::new(
             ConnectorConfig::for_local_test(

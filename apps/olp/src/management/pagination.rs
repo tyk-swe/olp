@@ -10,7 +10,7 @@ pub(crate) const DEFAULT_PAGE_SIZE: u16 = 50;
 /// endpoint: a generated client cannot tell which list it is calling from the
 /// error it gets back, so the limit and the status code have to agree
 /// everywhere.
-pub(crate) const MAX_PAGE_SIZE: u16 = 200;
+pub(crate) const MAX_PAGE_SIZE: u16 = olp_db::configuration::MAX_PAGE_SIZE as u16;
 
 #[derive(Debug, Deserialize, IntoParams, ToSchema)]
 #[into_params(parameter_in = Query)]
@@ -57,6 +57,15 @@ pub(crate) fn page_limit(value: Option<u16>) -> Result<u16, Problem> {
 #[cfg(test)]
 mod tests {
     use super::{DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE, PageQuery, page, page_limit};
+
+    #[test]
+    fn db_and_http_page_caps_agree() {
+        assert_eq!(
+            i64::from(MAX_PAGE_SIZE),
+            olp_db::configuration::MAX_PAGE_SIZE
+        );
+        assert_eq!(MAX_PAGE_SIZE, 200);
+    }
 
     #[test]
     fn an_absent_limit_uses_the_default_page_size() {

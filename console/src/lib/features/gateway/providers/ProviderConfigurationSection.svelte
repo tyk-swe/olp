@@ -53,6 +53,11 @@
       >{providerStatus(current)}</span
     >
   </div>
+  <p class="muted">
+    Renaming keeps probe evidence and certification. Changing the endpoint,
+    region, project, deployment, or API version clears the probe and resets
+    capabilities to declared.
+  </p>
   <div class="form-grid">
     <div class="form-field">
       <label for="detail-name">Name</label><input
@@ -142,5 +147,9 @@
     align-items: flex-start;
     justify-content: space-between;
     gap: 1rem;
+  }
+  .muted {
+    margin: 0 0 1rem;
+    color: var(--foreground-muted);
   }
 </style>

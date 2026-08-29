@@ -3,7 +3,10 @@ use std::{fmt, time::Duration};
 use reqwest::{Client, Url};
 use thiserror::Error;
 
-use crate::providers::endpoint::{EndpointCore, Error as CommonEndpointError};
+use crate::providers::{
+    EgressPolicy,
+    endpoint::{EndpointCore, Error as CommonEndpointError},
+};
 
 const DEFAULT_BASE_URL: &str = "https://generativelanguage.googleapis.com/v1beta/";
 const PROVIDER: &str = "Gemini";
@@ -37,18 +40,22 @@ impl Default for Endpoint {
 
 impl Endpoint {
     pub(in crate::providers) fn parse(value: &str) -> Result<Self, Error> {
-        Self::parse_with_policy(value, false)
+        Self::parse_with_policy(value, &EgressPolicy::default())
     }
 
-    fn parse_with_policy(value: &str, allow_unsafe_target: bool) -> Result<Self, Error> {
+    pub(in crate::providers) fn parse_with_policy(
+        value: &str,
+        policy: &EgressPolicy,
+    ) -> Result<Self, Error> {
         Ok(Self {
-            core: EndpointCore::parse(value, PROVIDER, allow_unsafe_target)?,
+            core: EndpointCore::parse(value, PROVIDER, policy)?,
         })
     }
 
     #[cfg(any(test, feature = "test-util"))]
     pub(in crate::providers) fn for_local_test(value: &str) -> Self {
-        Self::parse_with_policy(value, true).expect("local test endpoint must be valid")
+        Self::parse_with_policy(value, &EgressPolicy::unsafe_test_targets())
+            .expect("local test endpoint must be valid")
     }
 
     pub(in crate::providers) fn generate_url(

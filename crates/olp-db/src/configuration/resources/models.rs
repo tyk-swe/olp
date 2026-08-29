@@ -4,6 +4,7 @@ use super::{
     *,
 };
 use crate::audit_events::{AuditEvent, record_audit_event, record_success};
+use crate::configuration::MAX_MODEL_CAPABILITY_TUPLES;
 
 impl Store {
     pub async fn list_provider_models(
@@ -193,8 +194,7 @@ impl Store {
         // into a path that resurrects a disabled provider as a draft, skipping
         // the `restore_as_draft` ceremony.
         let restored = sqlx::query!(
-            "UPDATE providers SET etag = $1, state = 'draft'::provider_state, updated_at = now(), \
-                    last_probe_at = NULL, last_probe_status = NULL, last_probe_detail = NULL \
+            "UPDATE providers SET etag = $1, state = 'draft'::provider_state \
              WHERE id = $2 AND state <> 'disabled'::provider_state",
             etag,
             provider_id
@@ -231,10 +231,10 @@ impl Store {
                 "enabled models require at least one reviewed capability".to_owned(),
             ));
         }
-        if capabilities.len() > 16 {
-            return Err(Error::Invalid(
-                "a model can declare at most 16 capability tuples".to_owned(),
-            ));
+        if capabilities.len() > MAX_MODEL_CAPABILITY_TUPLES {
+            return Err(Error::Invalid(format!(
+                "a model can declare at most {MAX_MODEL_CAPABILITY_TUPLES} capability tuples"
+            )));
         }
         let mut unique = BTreeSet::new();
         for capability in capabilities {
@@ -274,32 +274,12 @@ impl Store {
         if result.rows_affected() != 1 {
             return Err(Error::NotFound);
         }
-        sqlx::query!(
-            "DELETE FROM model_capabilities WHERE provider_model_id = $1",
-            model_id
-        )
-        .execute(&mut *transaction)
-        .await?;
-        for capability in capabilities {
-            sqlx::query!(
-                "INSERT INTO model_capabilities \
-                 (provider_model_id, operation, surface, mode, source, certified_at) \
-                 VALUES ($1, $2, $3, $4, $5, CASE WHEN $5 = 'certified' THEN now() ELSE NULL END)",
-                model_id,
-                capability.operation.as_str(),
-                capability.surface.as_str(),
-                capability.mode.as_str(),
-                capability.source.as_str()
-            )
-            .execute(&mut *transaction)
-            .await?;
-        }
+        replace_model_capabilities(&mut transaction, model_id, capabilities).await?;
         let etag = Uuid::now_v7();
         // Same guard as discovery: capability review must never be the door a
         // disabled provider walks back through into `draft`.
         let restored = sqlx::query!(
-            "UPDATE providers SET etag = $1, state = 'draft'::provider_state, updated_at = now(), \
-                    last_probe_at = NULL, last_probe_status = NULL, last_probe_detail = NULL \
+            "UPDATE providers SET etag = $1, state = 'draft'::provider_state \
              WHERE id = $2 AND state <> 'disabled'::provider_state",
             etag,
             provider_id
@@ -337,10 +317,10 @@ impl Store {
         actor: Uuid,
         outcomes: &[CapabilityCertificationOutcome],
     ) -> Result<CapabilityCertificationApplied, Error> {
-        if outcomes.is_empty() || outcomes.len() > 16 {
-            return Err(Error::Invalid(
-                "certification requires 1-16 reviewed capability tuples".to_owned(),
-            ));
+        if outcomes.is_empty() || outcomes.len() > MAX_MODEL_CAPABILITY_TUPLES {
+            return Err(Error::Invalid(format!(
+                "certification requires 1-{MAX_MODEL_CAPABILITY_TUPLES} reviewed capability tuples"
+            )));
         }
         let mut submitted = BTreeSet::new();
         for outcome in outcomes {
@@ -552,8 +532,8 @@ async fn ensure_provider_exists(store: &Store, provider_id: Uuid) -> Result<(), 
     exists.then_some(()).ok_or(Error::NotFound)
 }
 
-/// Upserts every discovered model in one statement and rewrites their
-/// capability rows in two more, instead of three statements per model.
+/// Upserts every discovered model in one statement and reconciles their
+/// capability rows in two more, keeping evidence on tuples that persist.
 async fn store_discovered_models(
     transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     provider_id: Uuid,
@@ -593,12 +573,6 @@ async fn store_discovered_models(
     .map(|row| (row.upstream_model, row.id))
     .collect();
     let stored_ids = model_ids.values().copied().collect::<Vec<_>>();
-    sqlx::query!(
-        "DELETE FROM model_capabilities WHERE provider_model_id = ANY($1::uuid[])",
-        &stored_ids
-    )
-    .execute(&mut **transaction)
-    .await?;
     let mut capability_model_ids = Vec::new();
     let mut operations = Vec::new();
     let mut surfaces = Vec::new();
@@ -617,13 +591,80 @@ async fn store_discovered_models(
         }
     }
     sqlx::query!(
+        "DELETE FROM model_capabilities WHERE provider_model_id = ANY($1::uuid[]) \
+           AND (provider_model_id, operation, surface, mode) NOT IN \
+             (SELECT * FROM UNNEST($2::uuid[], $3::text[], $4::text[], $5::text[]))",
+        &stored_ids,
+        &capability_model_ids,
+        &operations,
+        &surfaces,
+        &modes
+    )
+    .execute(&mut **transaction)
+    .await?;
+    sqlx::query!(
         "INSERT INTO model_capabilities \
          (provider_model_id, operation, surface, mode, source, certified_at) \
          SELECT t.provider_model_id, t.operation, t.surface, t.mode, t.source, \
                 CASE WHEN t.source = 'certified' THEN now() ELSE NULL END \
          FROM UNNEST($1::uuid[], $2::text[], $3::text[], $4::text[], $5::text[]) \
-           AS t(provider_model_id, operation, surface, mode, source)",
+           AS t(provider_model_id, operation, surface, mode, source) \
+         ON CONFLICT DO NOTHING",
         &capability_model_ids,
+        &operations,
+        &surfaces,
+        &modes,
+        &sources
+    )
+    .execute(&mut **transaction)
+    .await?;
+    Ok(())
+}
+
+/// Rewrites one model's reviewed tuple set while keeping the evidence on
+/// every tuple that survives the review: removed tuples are deleted, new ones
+/// are inserted, unchanged ones are left untouched.
+async fn replace_model_capabilities(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    model_id: Uuid,
+    capabilities: &[CapabilityRecord],
+) -> Result<(), Error> {
+    let operations = capabilities
+        .iter()
+        .map(|capability| capability.operation.as_str().to_owned())
+        .collect::<Vec<_>>();
+    let surfaces = capabilities
+        .iter()
+        .map(|capability| capability.surface.as_str().to_owned())
+        .collect::<Vec<_>>();
+    let modes = capabilities
+        .iter()
+        .map(|capability| capability.mode.as_str().to_owned())
+        .collect::<Vec<_>>();
+    let sources = capabilities
+        .iter()
+        .map(|capability| capability.source.as_str().to_owned())
+        .collect::<Vec<_>>();
+    sqlx::query!(
+        "DELETE FROM model_capabilities WHERE provider_model_id = $1 \
+           AND (operation, surface, mode) NOT IN \
+             (SELECT * FROM UNNEST($2::text[], $3::text[], $4::text[]))",
+        model_id,
+        &operations,
+        &surfaces,
+        &modes
+    )
+    .execute(&mut **transaction)
+    .await?;
+    sqlx::query!(
+        "INSERT INTO model_capabilities \
+         (provider_model_id, operation, surface, mode, source, certified_at) \
+         SELECT $1, t.operation, t.surface, t.mode, t.source, \
+                CASE WHEN t.source = 'certified' THEN now() ELSE NULL END \
+         FROM UNNEST($2::text[], $3::text[], $4::text[], $5::text[]) \
+           AS t(operation, surface, mode, source) \
+         ON CONFLICT DO NOTHING",
+        model_id,
         &operations,
         &surfaces,
         &modes,

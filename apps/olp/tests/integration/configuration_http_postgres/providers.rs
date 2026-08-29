@@ -329,6 +329,49 @@ pub(super) async fn exercise(
         1
     );
 
+    // A rename keeps the probe evidence and the certification, so the
+    // renamed draft activates without another probe or certify round trip.
+    let renamed_provider = send(
+        app,
+        Method::PATCH,
+        &format!("/api/v1/providers/{provider_id}"),
+        Some(json!({
+            "name": "openai-primary-renamed",
+            "auth_mode": "api_key"
+        })),
+        Some(cookie),
+        Some(csrf),
+        None,
+        Some(&certified_etag),
+    )
+    .await;
+    assert_eq!(renamed_provider.status(), StatusCode::OK);
+    let renamed_etag = etag(&renamed_provider);
+    let renamed_provider_body = response_json(renamed_provider).await;
+    assert_eq!(renamed_provider_body["name"], "openai-primary-renamed");
+    assert_eq!(renamed_provider_body["state"], "draft");
+    assert!(renamed_provider_body["last_probe_at"].is_string());
+    assert_eq!(renamed_provider_body["last_probe_status"], "succeeded");
+    let renamed_models = send(
+        app,
+        Method::GET,
+        &format!("/api/v1/providers/{provider_id}/models?limit=100"),
+        None,
+        Some(cookie),
+        None,
+        None,
+        None,
+    )
+    .await;
+    let renamed_models = response_json(renamed_models).await;
+    let renamed_model = renamed_models["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|model| model["id"] == model_id)
+        .unwrap();
+    assert_eq!(renamed_model["capabilities"][0]["source"], "certified");
+
     let missing_activation_key = send(
         app,
         Method::POST,
@@ -337,7 +380,7 @@ pub(super) async fn exercise(
         Some(cookie),
         Some(csrf),
         None,
-        Some(&certified_etag),
+        Some(&renamed_etag),
     )
     .await;
     assert_eq!(missing_activation_key.status(), StatusCode::BAD_REQUEST);
@@ -350,7 +393,7 @@ pub(super) async fn exercise(
         Some(cookie),
         Some(csrf),
         Some("provider-http-activate-01"),
-        Some(&certified_etag),
+        Some(&renamed_etag),
     )
     .await;
     assert_eq!(activation.status(), StatusCode::OK);
@@ -365,7 +408,7 @@ pub(super) async fn exercise(
         Some(cookie),
         Some(csrf),
         Some("provider-http-activate-01"),
-        Some(&certified_etag),
+        Some(&renamed_etag),
     )
     .await;
     assert_eq!(replayed_activation.status(), StatusCode::OK);
@@ -538,23 +581,8 @@ pub(super) async fn exercise(
         mock_provider.last_authorization().as_deref(),
         Some("Bearer sk-openai-rotated-secret")
     );
-    let rotated_certification = send(
-        app,
-        Method::POST,
-        &format!("/api/v1/providers/{provider_id}/models/{model_id}/certify"),
-        None,
-        Some(cookie),
-        Some(csrf),
-        None,
-        Some(&rotated_provider_etag),
-    )
-    .await;
-    assert_eq!(rotated_certification.status(), StatusCode::OK);
-    let rotated_certified_etag = etag(&rotated_certification);
-    assert_eq!(
-        response_json(rotated_certification).await["certified_count"],
-        1
-    );
+    // Rotation kept the certification, so the fresh probe alone unlocks
+    // activation.
     let rotated_activation = send(
         app,
         Method::POST,
@@ -563,7 +591,7 @@ pub(super) async fn exercise(
         Some(cookie),
         Some(csrf),
         Some("provider-http-activate-02"),
-        Some(&rotated_certified_etag),
+        Some(&rotated_provider_etag),
     )
     .await;
     assert_eq!(rotated_activation.status(), StatusCode::OK);

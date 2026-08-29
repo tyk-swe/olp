@@ -26,14 +26,14 @@ use olp_engine::protocols::{
 };
 use serde_json::Value;
 
-use crate::{bootstrap::mode_dependencies::GatewayState, gateway::error::InferenceError};
-
-pub(crate) const MAX_INLINE_MEDIA_ITEMS: usize = 4;
-pub(crate) const MAX_INLINE_MEDIA_BYTES: usize = 1024 * 1024;
-pub(crate) const MAX_INLINE_MEDIA_TOTAL_BYTES: usize = 2 * 1024 * 1024;
+use crate::{
+    bootstrap::mode_dependencies::GatewayState, bootstrap::state::BodyLimits,
+    gateway::error::InferenceError,
+};
 
 struct InlineMediaAdmission {
     spool: Arc<dyn MediaSpool>,
+    limits: BodyLimits,
     handles: Vec<MediaHandle>,
     total_bytes: usize,
 }
@@ -42,6 +42,7 @@ impl InlineMediaAdmission {
     fn new(state: &GatewayState) -> Self {
         Self {
             spool: state.media_spool().clone(),
+            limits: state.body_limits(),
             handles: Vec::new(),
             total_bytes: 0,
         }
@@ -53,10 +54,11 @@ impl InlineMediaAdmission {
         mime_type: &str,
         filename: String,
     ) -> Result<String, InferenceError> {
-        if self.handles.len() >= MAX_INLINE_MEDIA_ITEMS {
+        if self.handles.len() >= self.limits.inline_media_items {
             return Err(invalid_inline_media("Too many inline media items."));
         }
-        let maximum_encoded = MAX_INLINE_MEDIA_BYTES.div_ceil(3).saturating_mul(4);
+        let maximum_decoded = self.limits.inline_media_item_bytes;
+        let maximum_encoded = maximum_decoded.div_ceil(3).saturating_mul(4);
         if encoded.is_empty()
             || encoded.len() > maximum_encoded
             || encoded.bytes().any(|byte| byte.is_ascii_whitespace())
@@ -68,13 +70,13 @@ impl InlineMediaAdmission {
         let decoded = STANDARD
             .decode(encoded)
             .map_err(|_| invalid_inline_media("Inline media is not valid canonical base64."))?;
-        if decoded.is_empty() || decoded.len() > MAX_INLINE_MEDIA_BYTES {
+        if decoded.is_empty() || decoded.len() > maximum_decoded {
             return Err(invalid_inline_media(
                 "Inline media exceeds its decoded size limit.",
             ));
         }
         self.total_bytes = self.total_bytes.saturating_add(decoded.len());
-        if self.total_bytes > MAX_INLINE_MEDIA_TOTAL_BYTES {
+        if self.total_bytes > self.limits.inline_media_total_bytes {
             return Err(invalid_inline_media(
                 "Inline media exceeds the aggregate decoded size limit.",
             ));
@@ -85,7 +87,7 @@ impl InlineMediaAdmission {
             .put(MediaUpload {
                 filename,
                 content_type: Some(mime_type.to_owned()),
-                maximum_length: u64::try_from(MAX_INLINE_MEDIA_BYTES).unwrap_or(u64::MAX),
+                maximum_length: u64::try_from(maximum_decoded).unwrap_or(u64::MAX),
                 bytes: Box::pin(stream::once(async move {
                     Ok::<Bytes, MediaSpoolError>(Bytes::from(decoded))
                 })),
@@ -680,7 +682,10 @@ mod tests {
         let state = state();
         for data in [
             "%%%".to_owned(),
-            STANDARD.encode(vec![0_u8; MAX_INLINE_MEDIA_BYTES + 1]),
+            STANDARD.encode(vec![
+                0_u8;
+                BodyLimits::default().inline_media_item_bytes + 1
+            ]),
         ] {
             let mut request: CompletionRequest = serde_json::from_value(serde_json::json!({
                 "model":"route", "messages":[{"role":"user","content":[{

@@ -24,11 +24,10 @@ use serde_json::Value;
 use super::{Connector, errors::*, streams::*};
 use crate::providers::transport_common::protocol_body_error;
 
-const MAX_INLINE_REQUEST_MEDIA_BYTES: usize = 1024 * 1024;
-
 pub(super) async fn hydrate_chat_media(
     request: &mut CompletionRequest,
     spool: Option<&Arc<dyn MediaSpool>>,
+    maximum_bytes: usize,
 ) -> Result<(), TransportError> {
     for message in &mut request.messages {
         let Some(MessageContent::Parts(parts)) = &mut message.content else {
@@ -39,7 +38,8 @@ pub(super) async fn hydrate_chat_media(
                 continue;
             };
             if media_handle_from_inline_marker(&input_audio.data).is_some() {
-                input_audio.data = read_inline_request_media(&input_audio.data, spool).await?;
+                input_audio.data =
+                    read_inline_request_media(&input_audio.data, spool, maximum_bytes).await?;
             }
         }
     }
@@ -49,6 +49,7 @@ pub(super) async fn hydrate_chat_media(
 pub(super) async fn hydrate_responses_media(
     input: &mut ResponseInput,
     spool: Option<&Arc<dyn MediaSpool>>,
+    maximum_bytes: usize,
 ) -> Result<(), TransportError> {
     let ResponseInput::Items(items) = input else {
         return Ok(());
@@ -75,7 +76,8 @@ pub(super) async fn hydrate_responses_media(
                         ));
                     };
                     if media_handle_from_inline_marker(marker).is_some() {
-                        let encoded = read_inline_request_media(marker, spool).await?;
+                        let encoded =
+                            read_inline_request_media(marker, spool, maximum_bytes).await?;
                         audio.insert("data".to_owned(), Value::String(encoded));
                     }
                 }
@@ -86,7 +88,8 @@ pub(super) async fn hydrate_responses_media(
                         ));
                     };
                     if media_handle_from_inline_marker(marker).is_some() {
-                        let encoded = read_inline_request_media(marker, spool).await?;
+                        let encoded =
+                            read_inline_request_media(marker, spool, maximum_bytes).await?;
                         object.insert(
                             "file_data".to_owned(),
                             Value::String(format!("data:application/pdf;base64,{encoded}")),
@@ -103,6 +106,7 @@ pub(super) async fn hydrate_responses_media(
 async fn read_inline_request_media(
     marker: &str,
     spool: Option<&Arc<dyn MediaSpool>>,
+    maximum_bytes: usize,
 ) -> Result<String, TransportError> {
     let handle = media_handle_from_inline_marker(marker)
         .ok_or_else(|| protocol_body_error("invalid bounded inline-media handle"))?;
@@ -112,7 +116,7 @@ async fn read_inline_request_media(
     if opened
         .artifact
         .content_length
-        .is_none_or(|length| length > MAX_INLINE_REQUEST_MEDIA_BYTES as u64)
+        .is_none_or(|length| length > maximum_bytes as u64)
     {
         return Err(protocol_body_error(
             "bounded inline request media exceeded its limit",
@@ -122,7 +126,7 @@ async fn read_inline_request_media(
     let mut bytes = Vec::new();
     while let Some(chunk) = stream.next().await {
         let chunk = chunk.map_err(map_spool_error)?;
-        if bytes.len().saturating_add(chunk.len()) > MAX_INLINE_REQUEST_MEDIA_BYTES {
+        if bytes.len().saturating_add(chunk.len()) > maximum_bytes {
             return Err(protocol_body_error(
                 "bounded inline request media exceeded its limit",
             ));

@@ -560,6 +560,7 @@ mod execute {
                     overall_timeout,
                     max_attempts: NonZeroU16::new(max_attempts).unwrap(),
                     media_spool: Arc::new(UnavailableSpool),
+                    max_inline_media_bytes: 1024 * 1024,
                     circuits: &self.circuits,
                     on_attempt_started: None,
                 },

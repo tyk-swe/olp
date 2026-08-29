@@ -355,79 +355,126 @@ pub(super) async fn exercise(
         .await
         .unwrap();
     assert_eq!(certified.certified_count, 2);
+    let generation_tuples = [
+        CapabilityRecord {
+            operation: "generation".parse().unwrap(),
+            surface: "openai".parse().unwrap(),
+            mode: "unary".parse().unwrap(),
+            source: olp_engine::domain::provider::CapabilitySource::Declared,
+            certified_at: None,
+        },
+        CapabilityRecord {
+            operation: "generation".parse().unwrap(),
+            surface: "openai".parse().unwrap(),
+            mode: "streaming".parse().unwrap(),
+            source: olp_engine::domain::provider::CapabilitySource::Declared,
+            certified_at: None,
+        },
+    ];
+    let all_certified = |capabilities: &[CapabilityRecord]| {
+        capabilities.iter().all(|capability| {
+            capability.source == olp_engine::domain::provider::CapabilitySource::Certified
+                && capability.certified_at.is_some()
+        })
+    };
+    // Re-reviewing the identical tuple set keeps the certification evidence.
     let edited_etag = store
         .set_provider_model_enabled(
             compatible_id,
             compatible_model_id,
             true,
-            &[
-                CapabilityRecord {
-                    operation: "generation".parse().unwrap(),
-                    surface: "openai".parse().unwrap(),
-                    mode: "unary".parse().unwrap(),
-                    source: olp_engine::domain::provider::CapabilitySource::Declared,
-                    certified_at: None,
-                },
-                CapabilityRecord {
-                    operation: "generation".parse().unwrap(),
-                    surface: "openai".parse().unwrap(),
-                    mode: "streaming".parse().unwrap(),
-                    source: olp_engine::domain::provider::CapabilitySource::Declared,
-                    certified_at: None,
-                },
-            ],
+            &generation_tuples,
             certified.etag,
             actor,
         )
         .await
         .unwrap();
-    assert!(
-        provider_models(store, compatible_id).await[0]
-            .capabilities
-            .iter()
-            .all(|capability| {
-                capability.source == olp_engine::domain::provider::CapabilitySource::Declared
-                    && capability.certified_at.is_none()
-            })
-    );
-    assert!(
-        store
-            .activate_provider(
-                compatible_id,
-                edited_etag,
-                actor,
-                "provider-compatible-activate-edited-01",
-            )
-            .await
-            .is_err()
-    );
-    let recertified = store
-        .apply_compatible_capability_certification(
+    let edited_models = provider_models(store, compatible_id).await;
+    assert_eq!(edited_models[0].capabilities.len(), 2);
+    assert!(all_certified(&edited_models[0].capabilities));
+    // Only a new tuple starts as declared; the surviving tuples stay certified.
+    let mut extended_tuples = generation_tuples.to_vec();
+    extended_tuples.push(CapabilityRecord {
+        operation: "embeddings".parse().unwrap(),
+        surface: "openai".parse().unwrap(),
+        mode: "unary".parse().unwrap(),
+        source: olp_engine::domain::provider::CapabilitySource::Declared,
+        certified_at: None,
+    });
+    let extended_etag = store
+        .set_provider_model_enabled(
             compatible_id,
             compatible_model_id,
+            true,
+            &extended_tuples,
             edited_etag,
             actor,
-            &[
-                CapabilityCertificationOutcome {
-                    operation: "generation".parse().unwrap(),
-                    surface: "openai".parse().unwrap(),
-                    mode: "unary".parse().unwrap(),
-                    succeeded: true,
-                },
-                CapabilityCertificationOutcome {
-                    operation: "generation".parse().unwrap(),
-                    surface: "openai".parse().unwrap(),
-                    mode: "streaming".parse().unwrap(),
-                    succeeded: true,
-                },
-            ],
         )
         .await
         .unwrap();
+    let extended_models = provider_models(store, compatible_id).await;
+    assert_eq!(extended_models[0].capabilities.len(), 3);
+    for capability in &extended_models[0].capabilities {
+        let expected = if capability.operation.as_str() == "embeddings" {
+            olp_engine::domain::provider::CapabilitySource::Declared
+        } else {
+            olp_engine::domain::provider::CapabilitySource::Certified
+        };
+        assert_eq!(capability.source, expected);
+    }
+    assert!(matches!(
+        store
+            .activate_provider(
+                compatible_id,
+                extended_etag,
+                actor,
+                "provider-compatible-activate-extended-01",
+            )
+            .await,
+        Err(Error::ProviderIncomplete)
+    ));
+    // Disabling the model and dropping the declared tuple keeps the rest.
+    let disabled_etag = store
+        .set_provider_model_enabled(
+            compatible_id,
+            compatible_model_id,
+            false,
+            &generation_tuples,
+            extended_etag,
+            actor,
+        )
+        .await
+        .unwrap();
+    let disabled_models = provider_models(store, compatible_id).await;
+    assert!(!disabled_models[0].enabled);
+    assert_eq!(disabled_models[0].capabilities.len(), 2);
+    assert!(all_certified(&disabled_models[0].capabilities));
+    let reenabled_etag = store
+        .set_provider_model_enabled(
+            compatible_id,
+            compatible_model_id,
+            true,
+            &generation_tuples,
+            disabled_etag,
+            actor,
+        )
+        .await
+        .unwrap();
+    assert!(matches!(
+        store
+            .activate_provider(
+                compatible_id,
+                reenabled_etag,
+                actor,
+                "provider-compatible-activate-unprobed-01",
+            )
+            .await,
+        Err(Error::ProviderIncomplete)
+    ));
     store
         .record_provider_probe(
             compatible_id,
-            recertified.etag,
+            reenabled_etag,
             true,
             "pre-patch compatible probe succeeded",
             actor,
@@ -436,20 +483,55 @@ pub(super) async fn exercise(
         .unwrap();
     let pre_patch = store.get_provider(compatible_id).await.unwrap();
     assert_eq!(pre_patch.last_probe_status.as_deref(), Some("succeeded"));
-    assert!(
-        provider_models(store, compatible_id).await[0]
-            .capabilities
-            .iter()
-            .all(|capability| {
-                capability.source == olp_engine::domain::provider::CapabilitySource::Certified
-                    && capability.certified_at.is_some()
-            })
+    assert!(all_certified(
+        &provider_models(store, compatible_id).await[0].capabilities
+    ));
+
+    // A rename is not a transport change: probe evidence and certification
+    // survive and the draft activates without a new probe.
+    let renamed_etag = store
+        .update_provider(
+            compatible_id,
+            reenabled_etag,
+            &UpdateProvider {
+                name: "compatible-renamed".to_owned(),
+                endpoint: Some("https://compatible.example/v1/".to_owned()),
+                cloud_region: None,
+                cloud_project: None,
+                deployment: None,
+                api_version: None,
+                auth_mode: "api_key".parse().unwrap(),
+            },
+            actor,
+        )
+        .await
+        .unwrap();
+    let renamed = store.get_provider(compatible_id).await.unwrap();
+    assert_eq!(renamed.name, "compatible-renamed");
+    assert_eq!(
+        renamed.state,
+        olp_engine::domain::provider::ProviderState::Draft
     );
+    assert_eq!(renamed.updated_at, pre_patch.updated_at);
+    assert_eq!(renamed.last_probe_at, pre_patch.last_probe_at);
+    assert_eq!(renamed.last_probe_status.as_deref(), Some("succeeded"));
+    assert!(all_certified(
+        &provider_models(store, compatible_id).await[0].capabilities
+    ));
+    let renamed_activation = store
+        .activate_provider(
+            compatible_id,
+            renamed_etag,
+            actor,
+            "provider-compatible-activate-renamed-01",
+        )
+        .await
+        .unwrap();
 
     let patched_etag = store
         .update_provider(
             compatible_id,
-            recertified.etag,
+            renamed_activation.etag,
             &UpdateProvider {
                 name: "compatible-draft".to_owned(),
                 endpoint: Some("https://compatible-v2.example/v1/".to_owned()),
@@ -570,5 +652,5 @@ pub(super) async fn exercise(
     .fetch_one(store.pool())
     .await
     .unwrap();
-    assert_eq!(certification_audits, 4);
+    assert_eq!(certification_audits, 3);
 }

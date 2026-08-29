@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use crate::providers::http_egress::{
-    is_public_ip,
+    EgressPolicy,
     pinned::{PinnedClientConfig, PinnedClientError, literal_ip, one_shot_client},
 };
 use bytes::Bytes;
@@ -97,9 +97,10 @@ impl Policy {
                 connect_timeout: CONNECT_TIMEOUT,
                 pool_idle_timeout: None,
                 pool_max_idle_per_host: None,
-                allow_unsafe_target: self.allow_insecure_test_endpoints,
+                https_only: !self.allow_insecure_test_endpoints,
                 user_agent: "openllmproxy-oidc",
             },
+            &EgressPolicy::loopback_test_targets(self.allow_insecure_test_endpoints),
         )
         .await
         .map_err(map_pinned_client_error)
@@ -138,7 +139,7 @@ fn parse_url(value: &str, allow_insecure: bool) -> Result<Url, Error> {
     }
     if let Some(ip) = literal_ip(&url)
         && !allow_insecure
-        && !is_public_ip(ip)
+        && !EgressPolicy::default().permits_address(ip)
     {
         return Err(Error::ForbiddenAddress);
     }

@@ -371,6 +371,17 @@ async fn staged_provider_changes_do_not_leak_until_reactivation() {
     assert_eq!(staged_secret[0].credential_id, Some(first_credential_id));
 
     certify_all_draft_capabilities(&store, provider_id).await;
+    assert!(matches!(
+        store
+            .activate_provider(
+                provider_id,
+                rotation.etag,
+                actor,
+                "provider-revision-activate-unprobed-01",
+            )
+            .await,
+        Err(Error::ProviderIncomplete)
+    ));
     store
         .record_provider_probe(
             provider_id,

@@ -1,9 +1,13 @@
 use std::time::Duration;
 
 use olp_db::{
-    limits::DistributedLimiter, request_metadata::reconciliation::LossReport, store::Store,
+    limits::DistributedLimiter, operations::settings::LimitsValkeyUnavailablePolicy,
+    request_metadata::reconciliation::LossReport, store::Store,
 };
-use olp_engine::inference::{limits::ReloadableLimiter, request_metadata::Emitter};
+use olp_engine::inference::{
+    limits::{LimitOutagePolicy, ReloadableLimiter},
+    request_metadata::Emitter,
+};
 use tokio::sync::watch;
 use tracing::{error, info, warn};
 
@@ -191,6 +195,43 @@ pub(super) async fn limiter_supervisor(
             () = tokio::time::sleep(backoff) => {}
         }
         backoff = (backoff * 2).min(Duration::from_secs(5));
+    }
+}
+
+pub(super) async fn load_limits_outage_policy(store: &Store, limiter: &ReloadableLimiter) {
+    match store.limits_valkey_unavailable_policy().await {
+        Ok(policy) => {
+            let policy = match policy {
+                LimitsValkeyUnavailablePolicy::FailClosed => LimitOutagePolicy::FailClosed,
+                LimitsValkeyUnavailablePolicy::FailOpen => LimitOutagePolicy::FailOpen,
+            };
+            if limiter.outage_policy() != policy {
+                info!(?policy, "limits.valkey_unavailable policy applied");
+                limiter.set_outage_policy(policy);
+            }
+        }
+        Err(error) => {
+            warn!(%error, "limits.valkey_unavailable policy load failed; keeping current")
+        }
+    }
+}
+
+pub(super) async fn limits_policy_supervisor(
+    store: Store,
+    limiter: ReloadableLimiter,
+    mut shutdown: watch::Receiver<bool>,
+) {
+    let mut interval = tokio::time::interval(Duration::from_secs(15));
+    interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    loop {
+        tokio::select! {
+            _ = interval.tick() => load_limits_outage_policy(&store, &limiter).await,
+            changed = shutdown.changed() => {
+                if changed.is_err() || *shutdown.borrow() {
+                    return;
+                }
+            }
+        }
     }
 }
 

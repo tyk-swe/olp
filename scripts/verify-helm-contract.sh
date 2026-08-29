@@ -102,6 +102,10 @@ helm template olp "$chart" --namespace olp --set-string image.digest="$digest" \
   --set mediaSpool.capacityBytes=9007199254740991 \
   > "$work/max-spool-manifests.yaml"
 helm template olp "$chart" --namespace olp --set-string image.digest="$digest" \
+  --set-string config.providerEgressAllowCidrs=10.0.0.0/8 \
+  --set-string config.providerEgressAllowHttpHosts=localhost \
+  > "$work/egress-manifests.yaml"
+helm template olp "$chart" --namespace olp --set-string image.digest="$digest" \
   --set worker.replicas=3 \
   --set worker.podDisruptionBudget.minAvailable=2 \
   > "$work/worker-ha-manifests.yaml"
@@ -137,6 +141,18 @@ fi
 if helm template invalid "$chart" --set gateway.httpMaxConnections=0 \
   >/dev/null 2>&1; then
   echo "chart accepted a zero gateway connection cap" >&2
+  exit 1
+fi
+if helm template invalid "$chart" --set config.httpMaxInlineMediaItemBytes=4194304 \
+  --set config.httpMaxInlineMediaTotalBytes=2097152 \
+  --set config.httpMaxJsonBodyBytes=8388608 >/dev/null 2>&1; then
+  echo "chart accepted an inline media item limit above the aggregate limit" >&2
+  exit 1
+fi
+if helm template invalid "$chart" --set config.httpMaxInlineMediaItemBytes=1048576 \
+  --set config.httpMaxInlineMediaTotalBytes=4194304 \
+  --set config.httpMaxJsonBodyBytes=2097152 >/dev/null 2>&1; then
+  echo "chart accepted an inline media aggregate limit above the JSON body limit" >&2
   exit 1
 fi
 
@@ -205,6 +221,22 @@ grep -Fq 'name: OLP_TRUSTED_PROXY_CIDRS' "$work/edge-manifests.yaml" || {
   echo "ingress chart must pass configured trusted-proxy CIDRs to application pods" >&2
   exit 1
 }
+for expected in \
+  'name: OLP_PROVIDER_EGRESS_ALLOW_CIDRS' \
+  'value: "10.0.0.0/8"' \
+  'name: OLP_PROVIDER_EGRESS_ALLOW_HTTP_HOSTS' \
+  'value: "localhost"'; do
+  grep -Fq "$expected" "$work/egress-manifests.yaml" || {
+    echo "rendered Helm contract is missing provider egress environment: $expected" >&2
+    exit 1
+  }
+done
+awk '/volumeMounts:/ { mounts = 1 } /^      volumes:/ { mounts = 0 } mounts { print }' \
+  "$work/egress-manifests.yaml" > "$work/egress-volume-mounts.yaml"
+if grep -Fq 'OLP_PROVIDER_EGRESS_' "$work/egress-volume-mounts.yaml"; then
+  echo "provider egress environment was rendered as a volume mount" >&2
+  exit 1
+fi
 scientific_notation_values_matched=
 checked_rg_match scientific_notation_values_matched \
   "scan rendered numeric notation" \

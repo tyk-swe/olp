@@ -14,7 +14,7 @@ use olp_engine::domain::{
     ids::{ApiKeyLookupId, RouteSlug},
 };
 use olp_engine::inference::{
-    limits::{LimitDimension, LimitError, LimitRequest, Reservation},
+    limits::{LimitDimension, LimitError, LimitRequest, Reservation, outage_reservation},
     principal::Principal,
 };
 use olp_engine::protocols::openai::embeddings::EmbeddingWireInput;
@@ -189,9 +189,10 @@ pub(super) async fn reserve_http_inference_limits(
     if !principal.key().limits.has_hard_limits() {
         return Ok(None);
     }
-    let limiter = state.inference.limiter().current().ok_or_else(|| {
-        gateway::error::InferenceError::unavailable("distributed_limits_unavailable")
-    })?;
+    let limiter = state.inference.limiter();
+    let Some(backend) = limiter.current() else {
+        return outage_reservation(limiter, "backend_missing").map_err(Into::into);
+    };
     let tokens_per_minute = principal
         .key()
         .limits
@@ -215,9 +216,9 @@ pub(super) async fn reserve_http_inference_limits(
         &principal.key().allowed_routes,
         route,
     );
-    let result = tokio::time::timeout(
+    let Ok(result) = tokio::time::timeout(
         Duration::from_secs(1),
-        limiter.reserve(LimitRequest {
+        backend.reserve(LimitRequest {
             lookup_id: principal.lookup_id().as_str(),
             requests_per_minute: principal
                 .key()
@@ -237,7 +238,9 @@ pub(super) async fn reserve_http_inference_limits(
         }),
     )
     .await
-    .map_err(|_| gateway::error::InferenceError::unavailable("distributed_limits_unavailable"))?;
+    else {
+        return outage_reservation(limiter, "timeout").map_err(Into::into);
+    };
     match result {
         Ok(lease) => Ok(Some(Reservation::distributed(lease))),
         Err(LimitError::Exceeded {
@@ -247,12 +250,7 @@ pub(super) async fn reserve_http_inference_limits(
             dimension,
             retry_hint(dimension, retry_after),
         )),
-        Err(error) => {
-            tracing::error!(%error, "hard HTTP limit reservation failed closed");
-            Err(gateway::error::InferenceError::unavailable(
-                "distributed_limits_unavailable",
-            ))
-        }
+        Err(error) => outage_reservation(limiter, &error.to_string()).map_err(Into::into),
     }
 }
 

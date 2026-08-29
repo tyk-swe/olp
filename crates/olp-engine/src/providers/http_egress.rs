@@ -2,11 +2,111 @@
 
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
+use ipnet::IpNet;
+
 pub(in crate::providers) mod pinned;
 
-/// Returns whether an IP address is safe to use as a public egress target.
-#[must_use]
-pub(in crate::providers) fn is_public_ip(address: IpAddr) -> bool {
+/// Operator-configured exemptions from the default public-only egress policy.
+/// The empty policy denies every non-public address and every plain-HTTP
+/// endpoint; the allowlists widen it for private or on-premises upstreams.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct EgressPolicy {
+    allowed_networks: Vec<IpNet>,
+    plain_http_hosts: Vec<String>,
+    #[cfg(any(test, feature = "test-util"))]
+    allow_any_target: bool,
+}
+
+impl EgressPolicy {
+    #[must_use]
+    pub fn new(allowed_networks: Vec<IpNet>, plain_http_hosts: Vec<String>) -> Self {
+        Self {
+            allowed_networks,
+            plain_http_hosts: plain_http_hosts
+                .into_iter()
+                .map(|host| normalize_host(&host))
+                .collect(),
+            #[cfg(any(test, feature = "test-util"))]
+            allow_any_target: false,
+        }
+    }
+
+    /// Accepts every target, including loopback over plain HTTP. Exists only
+    /// for tests that drive connectors against local mock upstreams.
+    #[cfg(any(test, feature = "test-util"))]
+    #[must_use]
+    pub fn unsafe_test_targets() -> Self {
+        Self {
+            allow_any_target: true,
+            ..Self::default()
+        }
+    }
+
+    /// Loopback-only exemption for the OIDC and OAuth clients when their
+    /// debug-only insecure-endpoint switch points them at a local mock issuer.
+    #[must_use]
+    pub(in crate::providers) fn loopback_test_targets(enabled: bool) -> Self {
+        if !enabled {
+            return Self::default();
+        }
+        Self::new(
+            vec![
+                IpNet::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 8).expect("valid loopback prefix"),
+                IpNet::new(IpAddr::V6(Ipv6Addr::LOCALHOST), 128).expect("valid loopback prefix"),
+            ],
+            vec![],
+        )
+    }
+
+    #[must_use]
+    pub fn allowed_networks(&self) -> &[IpNet] {
+        &self.allowed_networks
+    }
+
+    #[must_use]
+    pub fn plain_http_hosts(&self) -> &[String] {
+        &self.plain_http_hosts
+    }
+
+    #[must_use]
+    pub fn permits_address(&self, address: IpAddr) -> bool {
+        #[cfg(any(test, feature = "test-util"))]
+        if self.allow_any_target {
+            return true;
+        }
+        if is_public_ip(address) {
+            return true;
+        }
+        let mapped = match address {
+            IpAddr::V6(address) => address
+                .to_ipv4_mapped()
+                .or_else(|| address.to_ipv4())
+                .map(IpAddr::V4),
+            IpAddr::V4(_) => None,
+        };
+        self.allowed_networks.iter().any(|network| {
+            network.contains(&address) || mapped.is_some_and(|mapped| network.contains(&mapped))
+        })
+    }
+
+    #[must_use]
+    pub fn permits_plain_http(&self, host: &str) -> bool {
+        #[cfg(any(test, feature = "test-util"))]
+        if self.allow_any_target {
+            return true;
+        }
+        let host = normalize_host(host);
+        self.plain_http_hosts.contains(&host)
+    }
+}
+
+fn normalize_host(host: &str) -> String {
+    host.trim_start_matches('[')
+        .trim_end_matches(']')
+        .to_ascii_lowercase()
+}
+
+fn is_public_ip(address: IpAddr) -> bool {
     !is_blocked_ip(address)
 }
 
@@ -206,5 +306,50 @@ mod tests {
         for address in ["2610:200::1", "2611::1", "2620:200::1", "2621::1"] {
             assert!(!is_public_ip(ip(address)), "{address} must be blocked");
         }
+    }
+
+    #[test]
+    fn default_policy_only_permits_public_addresses_and_never_plain_http() {
+        let policy = EgressPolicy::default();
+        assert!(policy.permits_address(ip("8.8.8.8")));
+        assert!(!policy.permits_address(ip("10.1.2.3")));
+        assert!(!policy.permits_address(ip("127.0.0.1")));
+        assert!(!policy.permits_plain_http("localhost"));
+        assert!(!policy.permits_plain_http("8.8.8.8"));
+    }
+
+    #[test]
+    fn allowlisted_networks_exempt_private_addresses_including_mapped_ipv6() {
+        let policy = EgressPolicy::new(
+            vec!["10.0.0.0/8".parse().unwrap(), "::1/128".parse().unwrap()],
+            vec![],
+        );
+        assert!(policy.permits_address(ip("10.1.2.3")));
+        assert!(policy.permits_address(ip("::ffff:10.1.2.3")));
+        assert!(policy.permits_address(ip("::1")));
+        assert!(!policy.permits_address(ip("192.168.0.1")));
+        assert!(!policy.permits_address(ip("127.0.0.1")));
+        assert!(!policy.permits_address(ip("169.254.169.254")));
+        assert!(policy.permits_address(ip("1.1.1.1")));
+    }
+
+    #[test]
+    fn plain_http_hosts_match_exactly_and_case_insensitively() {
+        let policy = EgressPolicy::new(
+            vec![],
+            vec![
+                "Localhost".to_owned(),
+                "127.0.0.1".to_owned(),
+                "[::1]".to_owned(),
+            ],
+        );
+        assert!(policy.permits_plain_http("localhost"));
+        assert!(policy.permits_plain_http("LOCALHOST"));
+        assert!(policy.permits_plain_http("127.0.0.1"));
+        assert!(policy.permits_plain_http("[::1]"));
+        assert!(policy.permits_plain_http("::1"));
+        assert!(!policy.permits_plain_http("localhost.example"));
+        assert!(!policy.permits_plain_http("127.0.0.2"));
+        assert!(!policy.permits_address(ip("127.0.0.1")));
     }
 }

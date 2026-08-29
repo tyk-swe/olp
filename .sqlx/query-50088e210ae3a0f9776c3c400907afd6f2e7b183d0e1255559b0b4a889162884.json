@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM model_capabilities WHERE provider_model_id = $1 AND (operation, surface, mode) NOT IN (SELECT * FROM UNNEST($2::text[], $3::text[], $4::text[]))",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "TextArray",
+        "TextArray",
+        "TextArray"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "50088e210ae3a0f9776c3c400907afd6f2e7b183d0e1255559b0b4a889162884"
+}

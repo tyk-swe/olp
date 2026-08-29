@@ -14,6 +14,7 @@ use std::fmt;
 use crate::providers::endpoint::Error;
 use zeroize::Zeroizing;
 
+use crate::providers::EgressPolicy;
 use crate::providers::anthropic::endpoint::Endpoint;
 use crate::providers::connector::Timeouts;
 
@@ -44,8 +45,15 @@ impl Default for ConnectorConfig {
 
 impl ConnectorConfig {
     pub fn with_base_url(base_url: &str) -> Result<Self, ConnectorBuildError> {
+        Self::with_base_url_and_policy(base_url, &EgressPolicy::default())
+    }
+
+    pub fn with_base_url_and_policy(
+        base_url: &str,
+        policy: &EgressPolicy,
+    ) -> Result<Self, ConnectorBuildError> {
         Ok(Self {
-            endpoint: Endpoint::parse(base_url)?,
+            endpoint: Endpoint::parse_with_policy(base_url, policy)?,
             ..Self::default()
         })
     }
@@ -82,7 +90,17 @@ impl ConnectorConfig {
         Ok(self)
     }
 
-    #[cfg(any(test, feature = "test-util"))]
+    #[cfg(test)]
+    pub(in crate::providers) fn response_limits(
+        &self,
+    ) -> crate::providers::connector::ResponseLimits {
+        crate::providers::connector::ResponseLimits {
+            max_response_bytes: self.max_response_bytes,
+            max_event_bytes: self.max_event_bytes,
+        }
+    }
+
+    #[cfg(test)]
     pub(in crate::providers) fn for_local_test(base_url: &str, timeouts: Timeouts) -> Self {
         let mut endpoint = Endpoint::for_local_test(base_url);
         endpoint.set_connect_timeout(timeouts.connect);

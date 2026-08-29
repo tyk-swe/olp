@@ -673,6 +673,7 @@ fn provider_request_debug_never_includes_prompt_content() {
         attempt: select(&runtime, b"debug").remove(0),
         operation: Arc::new(operation),
         media: None,
+        max_inline_media_bytes: 1024 * 1024,
     };
 
     let debug = format!("{request:?}");

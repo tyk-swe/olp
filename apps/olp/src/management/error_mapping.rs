@@ -34,10 +34,6 @@ pub(crate) fn map_configuration(error: ConfigurationError) -> Problem {
             "Route draft not found",
             "The route draft does not exist.",
         ),
-        ConfigurationError::RouteNotValidated => Problem::conflict(
-            "route_not_validated",
-            "Validate the route draft before activation.",
-        ),
         ConfigurationError::InvalidRoute(detail) => Problem::field_validation("route", detail),
         ConfigurationError::RuntimeCompile(error) => {
             error!(%error, "runtime compilation failed");
@@ -228,11 +224,6 @@ mod tests {
                 ConfigurationError::RouteNotFound,
                 404,
                 "route_draft_not_found",
-            ),
-            (
-                ConfigurationError::RouteNotValidated,
-                409,
-                "route_not_validated",
             ),
             (
                 ConfigurationError::InvalidRoute("invalid route".to_owned()),

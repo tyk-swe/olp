@@ -292,6 +292,7 @@ pub(in crate::providers) async fn execute_capability_probe(
         },
         operation: Arc::new(operation),
         media: None,
+        max_inline_media_bytes: 1024 * 1024,
     };
     let output = tokio::time::timeout(
         Duration::from_millis(PROBE_TIMEOUT_MS),

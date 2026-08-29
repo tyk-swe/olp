@@ -311,7 +311,7 @@ async fn one_http2_connection_cannot_exceed_request_budget_and_shutdown_drains()
     let server = tokio::spawn(listener::serve_http(
         listener_socket,
         app,
-        listener::HttpServerConfig::standard(8),
+        listener::HttpServerConfig::standard(8, Duration::from_secs(300), Duration::from_secs(30)),
         shutdown_receiver,
     ));
 

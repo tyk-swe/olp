@@ -3,7 +3,10 @@ use std::{fmt, time::Duration};
 use reqwest::{Client, Url};
 use thiserror::Error;
 
-use crate::providers::endpoint::{EndpointCore, Error as CommonEndpointError};
+use crate::providers::{
+    EgressPolicy,
+    endpoint::{EndpointCore, Error as CommonEndpointError},
+};
 
 const DEFAULT_OPENAI_BASE_URL: &str = "https://api.openai.com/v1/";
 const PROVIDER: &str = "OpenAI";
@@ -38,24 +41,23 @@ impl Default for Endpoint {
 
 impl Endpoint {
     pub(in crate::providers) fn parse(value: &str) -> Result<Self, Error> {
-        Self::parse_with_policy(value, false)
+        Self::parse_with_policy(value, &EgressPolicy::default())
     }
 
-    fn parse_with_policy(value: &str, allow_unsafe_target: bool) -> Result<Self, Error> {
+    pub(in crate::providers) fn parse_with_policy(
+        value: &str,
+        policy: &EgressPolicy,
+    ) -> Result<Self, Error> {
         Ok(Self {
-            core: EndpointCore::parse(value, PROVIDER, allow_unsafe_target)?,
+            core: EndpointCore::parse(value, PROVIDER, policy)?,
             fixed_query: None,
         })
     }
 
     #[cfg(any(test, feature = "test-util"))]
     pub(in crate::providers) fn for_local_test(value: &str) -> Self {
-        Self::parse_with_policy(value, true).expect("local test endpoint must be a valid HTTP URL")
-    }
-
-    #[cfg(any(test, feature = "test-util"))]
-    pub(in crate::providers) fn parse_with_unsafe_test_target(value: &str) -> Result<Self, Error> {
-        Self::parse_with_policy(value, true)
+        Self::parse_with_policy(value, &EgressPolicy::unsafe_test_targets())
+            .expect("local test endpoint must be a valid HTTP URL")
     }
 
     pub(in crate::providers) fn resource_url(&self, path: &str) -> Result<Url, Error> {
@@ -124,6 +126,40 @@ mod tests {
                 CommonEndpointError::QueryOrFragmentForbidden { .. }
             ))
         ));
+    }
+
+    #[test]
+    fn plain_http_is_accepted_only_for_allowlisted_hosts() {
+        let policy = EgressPolicy::new(vec![], vec!["vllm.internal".to_owned()]);
+        Endpoint::parse_with_policy("http://vllm.internal:8000/v1", &policy).unwrap();
+        assert!(matches!(
+            Endpoint::parse_with_policy("http://other.internal:8000/v1", &policy),
+            Err(Error::Common(CommonEndpointError::HttpsRequired { .. }))
+        ));
+        assert!(matches!(
+            Endpoint::parse_with_policy("ftp://vllm.internal/v1", &policy),
+            Err(Error::Common(CommonEndpointError::UnsupportedScheme { .. }))
+        ));
+    }
+
+    #[test]
+    fn plain_http_private_literal_needs_both_allowlists() {
+        let host_only = EgressPolicy::new(vec![], vec!["10.0.0.5".to_owned()]);
+        assert!(matches!(
+            Endpoint::parse_with_policy("http://10.0.0.5/v1", &host_only),
+            Err(Error::Common(CommonEndpointError::ForbiddenAddress { .. }))
+        ));
+        let cidr_only = EgressPolicy::new(vec!["10.0.0.0/8".parse().unwrap()], vec![]);
+        assert!(matches!(
+            Endpoint::parse_with_policy("http://10.0.0.5/v1", &cidr_only),
+            Err(Error::Common(CommonEndpointError::HttpsRequired { .. }))
+        ));
+        Endpoint::parse_with_policy("https://10.0.0.5/v1", &cidr_only).unwrap();
+        let both = EgressPolicy::new(
+            vec!["10.0.0.0/8".parse().unwrap()],
+            vec!["10.0.0.5".to_owned()],
+        );
+        Endpoint::parse_with_policy("http://10.0.0.5/v1", &both).unwrap();
     }
 
     #[test]

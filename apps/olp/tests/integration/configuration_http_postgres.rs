@@ -22,6 +22,7 @@ use olp::{
 use olp_db::security::envelope::MasterKey;
 use olp_engine::inference::runtime::Manager;
 use olp_engine::providers::{
+    EgressPolicy,
     connector::Timeouts,
     openai::{ApiKey, ConnectorConfig, transport::Connector},
 };
@@ -56,6 +57,10 @@ async fn configuration_http_flow_enforces_etags_roles_idempotency_and_one_time_s
     );
     state.master_key = Some(Arc::new(MasterKey::new(1, [7; 32])));
     configure_bootstrap(&mut state, [9; 32]);
+    state.set_provider_egress_policy(EgressPolicy::new(
+        vec!["127.0.0.0/8".parse().unwrap(), "::1/128".parse().unwrap()],
+        vec!["127.0.0.1".to_owned()],
+    ));
     let configuration_state = state.clone();
     let app = management_router_for_test(state.mode_dependencies().management().unwrap());
     let mock_provider = MockOpenAiProvider::spawn().await;
@@ -82,6 +87,7 @@ async fn configuration_http_flow_enforces_etags_roles_idempotency_and_one_time_s
     let csrf = setup_body["csrf_token"].as_str().unwrap().to_owned();
 
     provider_kinds::verify(&app, &cookie, &csrf).await;
+    provider_kinds::verify_egress_policy(&app, &mock_provider, &cookie, &csrf).await;
     let (provider_id, model_id) =
         providers::exercise(&app, &configuration_state, &mock_provider, &cookie, &csrf).await;
     let draft_id = routes::exercise(&app, &cookie, &csrf, &provider_id, &model_id).await;

@@ -131,6 +131,7 @@ pub struct ProviderRequest {
     /// Shared across failover attempts; connectors only read it.
     pub operation: Arc<Operation>,
     pub media: Option<Arc<dyn MediaSpool>>,
+    pub max_inline_media_bytes: usize,
 }
 
 impl fmt::Debug for ProviderRequest {
@@ -142,6 +143,7 @@ impl fmt::Debug for ProviderRequest {
             .field("operation", &self.operation.kind())
             .field("route", &self.operation.route())
             .field("media", &self.media.as_ref().map(|_| "[MEDIA SPOOL]"))
+            .field("max_inline_media_bytes", &self.max_inline_media_bytes)
             .finish_non_exhaustive()
     }
 }

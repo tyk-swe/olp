@@ -105,7 +105,8 @@
   <h2 id="credential-heading">Credential versions</h2>
   <p class="muted">
     The API never returns secret material. Rotation selects a draft version; the
-    runtime credential remains live until activation.
+    runtime credential remains live until activation. Rotation keeps certified
+    capabilities; test with the new credential before activation.
   </p>
   {#if providerSpec && !requiresCredential(providerSpec, current.auth_mode)}<div
       class="identity-note"

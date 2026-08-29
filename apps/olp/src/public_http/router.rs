@@ -1,6 +1,6 @@
 //! Public application route composition and boundary middleware.
 
-use std::time::Duration;
+use std::{sync::Arc, time::Duration};
 
 use axum::{
     Router,
@@ -26,8 +26,8 @@ use crate::{
     bootstrap::mode_dependencies::ManagementState,
     bootstrap::mode_dependencies::ModeDependencies,
     bootstrap::mode_dependencies::RequestBoundaryState,
-    bootstrap::state::MAX_JSON_BODY_BYTES,
     console, gateway, management,
+    public_http::cors::apply_gateway_cors,
     public_http::problem::Problem,
     public_http::request_admission::{
         enforce_request_limits,
@@ -91,6 +91,10 @@ fn compose_public_router(
         request_limit_state.public_admission.clone(),
         gateway_state.is_some(),
     );
+    let cors_allowed_origins = gateway_state
+        .as_ref()
+        .map(|state| Arc::clone(&state.cors_allowed_origins))
+        .unwrap_or_default();
     // The request boundary protects public authentication as well as
     // inference, so control-only mode uses the playground's validated gateway
     // capabilities without exposing gateway routes.
@@ -124,16 +128,19 @@ fn compose_public_router(
         // Protocol routes are merged here by the gateway module once transports
         // have been wired. Keeping mode composition explicit prevents a control
         // deployment from accidentally becoming an inference data plane.
-        router = router
-            .merge(gateway::router().with_state(state))
+        let inference = Router::new()
+            .merge(gateway::router(state.body_limits()).with_state(state))
             .route("/openai/{*path}", any(protocol_not_found))
             .route("/v1/{*path}", any(protocol_not_found))
             .route("/anthropic/{*path}", any(protocol_not_found))
             .route("/gemini/{*path}", any(protocol_not_found));
+        router = router.merge(inference);
     }
 
     let router = router
-        .layer(DefaultBodyLimit::max(MAX_JSON_BODY_BYTES))
+        .layer(DefaultBodyLimit::max(
+            request_limit_state.body_limits.json_body_bytes,
+        ))
         .layer(middleware::from_fn_with_state(
             request_limit_state,
             enforce_request_limits,
@@ -183,6 +190,13 @@ fn compose_public_router(
                     content_security_policy,
                 )),
         );
+    let router = if cors_allowed_origins.is_empty() {
+        router
+    } else {
+        router.layer(middleware::from_fn(move |request, next| {
+            apply_gateway_cors(cors_allowed_origins.clone(), request, next)
+        }))
+    };
     if public_origin_is_https {
         router.layer(SetResponseHeaderLayer::if_not_present(
             HeaderName::from_static("strict-transport-security"),

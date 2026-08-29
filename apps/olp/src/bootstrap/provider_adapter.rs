@@ -66,50 +66,6 @@ impl<'a> From<&'a RuntimeProvider> for ProviderConfigFields<'a> {
     }
 }
 
-/// True only when a debug binary built with `test-util` opts in via
-/// `OLP_ALLOW_INSECURE_PROVIDER_ENDPOINTS_FOR_TESTS=test-only`. The E2E
-/// harness uses this to point providers at a loopback mock upstream; the
-/// branch is compiled out of release binaries, so no deployment setting can
-/// weaken the production HTTPS/SSRF endpoint policy.
-#[cfg(all(debug_assertions, feature = "test-util"))]
-pub(crate) fn insecure_provider_endpoints_for_tests() -> bool {
-    std::env::var("OLP_ALLOW_INSECURE_PROVIDER_ENDPOINTS_FOR_TESTS").as_deref() == Ok("test-only")
-}
-
-/// Factory entry points below honor the test-only insecure-endpoint opt-in.
-/// Every application call site that assembles or validates a provider from
-/// stored configuration must go through them rather than `Factory`
-/// directly.
-pub(crate) async fn factory_create(
-    config: Config,
-    credential: Credential,
-) -> Result<Facade, Error> {
-    #[cfg(all(debug_assertions, feature = "test-util"))]
-    if insecure_provider_endpoints_for_tests() {
-        return Factory::create_with_unsafe_test_endpoints(config, credential).await;
-    }
-    Factory::create(config, credential).await
-}
-
-pub(crate) async fn factory_transport(
-    config: Config,
-    credential: Credential,
-) -> Result<std::sync::Arc<dyn olp_engine::domain::ports::ProviderTransport>, Error> {
-    #[cfg(all(debug_assertions, feature = "test-util"))]
-    if insecure_provider_endpoints_for_tests() {
-        return Factory::transport_with_unsafe_test_endpoints(config, credential).await;
-    }
-    Factory::transport(config, credential).await
-}
-
-pub(crate) fn factory_validate(config: &Config) -> Result<(), Error> {
-    #[cfg(all(debug_assertions, feature = "test-util"))]
-    if insecure_provider_endpoints_for_tests() {
-        return Factory::validate_with_unsafe_test_endpoints(config);
-    }
-    Factory::validate(config)
-}
-
 pub(crate) fn provider_config(fields: ProviderConfigFields<'_>) -> Result<Config, Error> {
     if let Some(violation) = validate(Configuration {
         kind: fields.kind,
@@ -230,9 +186,14 @@ pub(crate) async fn provider_connector(
         plaintext.as_ref().map(|plaintext| plaintext.as_slice()),
     )
     .map_err(|error| Problem::field_validation("provider", error.to_string()))?;
-    factory_create(config, credential)
-        .await
-        .map_err(|error| Problem::field_validation("provider", error.to_string()))
+    Factory::create(
+        config,
+        credential,
+        &state.provider_egress_policy,
+        state.provider_response_limits,
+    )
+    .await
+    .map_err(|error| Problem::field_validation("provider", error.to_string()))
 }
 
 pub(crate) fn runtime_provider_config(

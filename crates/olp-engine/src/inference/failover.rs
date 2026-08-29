@@ -272,6 +272,7 @@ pub struct Context<'a> {
     pub overall_timeout: Duration,
     pub max_attempts: NonZeroU16,
     pub media_spool: Arc<dyn MediaSpool>,
+    pub max_inline_media_bytes: usize,
     pub circuits: &'a Breaker,
     pub on_attempt_started: Option<&'a mut AttemptStartedObserver<'a>>,
 }
@@ -353,6 +354,7 @@ impl FailureHistory {
 struct AttemptExecutionContext<'a> {
     runtime: &'a Bundle,
     media_spool: &'a Arc<dyn MediaSpool>,
+    max_inline_media_bytes: usize,
     circuits: &'a Breaker,
     metadata: &'a RequestMetadata,
     operation: &'a Arc<Operation>,
@@ -382,6 +384,7 @@ pub async fn execute(
         overall_timeout,
         max_attempts,
         media_spool,
+        max_inline_media_bytes,
         circuits,
         mut on_attempt_started,
     } = context;
@@ -407,9 +410,8 @@ pub async fn execute(
             };
             // Wait before claiming the circuit's exclusive half-open probe
             // permit: holding it across the backoff would block every other
-            // caller from probing this provider for the whole delay. The cheap
-            // selection check keeps a target we are about to skip from costing
-            // a sleep first.
+            // caller from probing this provider for the whole delay. The cheap selection check
+            // keeps a target we are about to skip from costing a sleep first.
             if !delay.is_zero() && circuits.is_selectable(attempt.routing_id) {
                 tokio::time::sleep(delay).await;
             }
@@ -440,6 +442,7 @@ pub async fn execute(
             AttemptExecutionContext {
                 runtime,
                 media_spool: &media_spool,
+                max_inline_media_bytes,
                 circuits,
                 metadata: &metadata,
                 operation: &operation,
@@ -548,6 +551,7 @@ async fn execute_attempt(
     let AttemptExecutionContext {
         runtime,
         media_spool,
+        max_inline_media_bytes,
         circuits,
         metadata,
         operation,
@@ -578,6 +582,7 @@ async fn execute_attempt(
         attempt: attempt.clone(),
         operation: operation_for_provider(operation, attempt.provider_kind),
         media: Some(Arc::clone(media_spool)),
+        max_inline_media_bytes,
     };
     let output = match tokio::time::timeout(remaining, transport.execute(provider_request)).await {
         Ok(Ok(output)) => output,

@@ -23,6 +23,7 @@ use crate::domain::{
         ProviderTransport, TransportError, TransportPhase,
     },
 };
+use crate::providers::EgressPolicy;
 use crate::providers::openai::{
     ApiKey as OpenAiApiKey, ConnectorConfig as OpenAiConnectorConfig,
     certification::{CompatibleCapability, CompatibleCapabilityCertificationError},
@@ -40,63 +41,57 @@ pub(in crate::providers) struct ConnectorConfig {
 }
 
 impl ConnectorConfig {
+    #[cfg(test)]
     pub(in crate::providers) fn new(
         resource_endpoint: &str,
         deployment: impl Into<String>,
         api_version: impl Into<String>,
     ) -> Result<Self, ConnectorBuildError> {
-        Self::build(
+        Self::new_with_policy(
             resource_endpoint,
             deployment,
             api_version,
-            false,
-            OpenAiConnectorConfig::with_base_url,
+            &EgressPolicy::default(),
         )
     }
 
-    /// Accepts plain-HTTP and non-public resource endpoints. Exists only for
-    /// test builds; release binaries never compile this constructor.
-    #[cfg(any(test, feature = "test-util"))]
-    pub(in crate::providers) fn new_unsafe_test_target(
+    pub(in crate::providers) fn new_with_policy(
         resource_endpoint: &str,
         deployment: impl Into<String>,
         api_version: impl Into<String>,
+        policy: &EgressPolicy,
     ) -> Result<Self, ConnectorBuildError> {
-        Self::build(
-            resource_endpoint,
-            deployment,
-            api_version,
-            true,
-            OpenAiConnectorConfig::with_base_url_unsafe_test_target,
-        )
-    }
-
-    fn build(
-        resource_endpoint: &str,
-        deployment: impl Into<String>,
-        api_version: impl Into<String>,
-        allow_unsafe_endpoint: bool,
-        build_inner: impl FnOnce(
-            &str,
-        ) -> Result<
-            OpenAiConnectorConfig,
-            crate::providers::openai::ConnectorBuildError,
-        >,
-    ) -> Result<Self, ConnectorBuildError> {
-        let resource_endpoint =
-            validate_resource_endpoint(resource_endpoint, allow_unsafe_endpoint)?;
+        let resource_endpoint = validate_resource_endpoint(resource_endpoint, policy)?;
         let deployment = deployment.into();
         validate_deployment(&deployment)?;
         let api_version = api_version.into();
         validate_api_version(&api_version)?;
         let base_url = deployment_base_url(&resource_endpoint, &deployment)?;
-        let inner = build_inner(base_url.as_str())?.with_api_version(&api_version)?;
+        let inner = OpenAiConnectorConfig::with_base_url_and_policy(base_url.as_str(), policy)?
+            .with_api_version(&api_version)?;
         Ok(Self {
             inner,
             resource_endpoint,
             deployment,
             api_version,
         })
+    }
+
+    pub(in crate::providers) fn with_response_limits(
+        mut self,
+        limits: crate::providers::connector::ResponseLimits,
+    ) -> Result<Self, ConnectorBuildError> {
+        self.inner = self
+            .inner
+            .with_response_limits(limits.max_response_bytes, limits.max_event_bytes)?;
+        Ok(self)
+    }
+
+    #[cfg(test)]
+    pub(in crate::providers) fn response_limits(
+        &self,
+    ) -> crate::providers::connector::ResponseLimits {
+        self.inner.response_limits()
     }
 
     #[cfg(test)]
@@ -106,7 +101,9 @@ impl ConnectorConfig {
         api_version: &str,
         timeouts: crate::providers::connector::Timeouts,
     ) -> Self {
-        let endpoint = validate_resource_endpoint(resource_endpoint, true).unwrap();
+        let endpoint =
+            validate_resource_endpoint(resource_endpoint, &EgressPolicy::unsafe_test_targets())
+                .unwrap();
         let base_url = deployment_base_url(&endpoint, deployment).unwrap();
         Self {
             inner: OpenAiConnectorConfig::for_local_test(base_url.as_str(), timeouts)
@@ -284,11 +281,14 @@ impl ProviderTransport for Connector {
 
 fn validate_resource_endpoint(
     value: &str,
-    allow_local_test: bool,
+    policy: &EgressPolicy,
 ) -> Result<Url, ConnectorBuildError> {
     let mut endpoint = Url::parse(value).map_err(|_| ConnectorBuildError::InvalidEndpoint)?;
-    if (!allow_local_test && endpoint.scheme() != "https")
-        || (allow_local_test && !matches!(endpoint.scheme(), "http" | "https"))
+    let plain_http_permitted = endpoint.scheme() == "http"
+        && endpoint
+            .host_str()
+            .is_some_and(|host| policy.permits_plain_http(host));
+    if (endpoint.scheme() != "https" && !plain_http_permitted)
         || endpoint.host().is_none()
         || !endpoint.username().is_empty()
         || endpoint.password().is_some()

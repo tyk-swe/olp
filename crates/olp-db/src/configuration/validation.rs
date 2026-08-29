@@ -5,8 +5,23 @@ use uuid::Uuid;
 
 use super::{
     Error,
-    resources::{CapabilityRecord, DiscoveredModelInput, UpdateProvider},
+    resources::{CapabilityRecord, DiscoveredModelInput, UpdateProvider, helpers::LockedProvider},
 };
+
+/// Whether an update touches anything the connector transport depends on.
+/// A pure rename keeps probe evidence and certification; everything else
+/// invalidates both.
+pub(crate) fn transport_changed(current: &LockedProvider, update: &UpdateProvider) -> bool {
+    fn trimmed(value: &Option<String>) -> Option<&str> {
+        value.as_deref().map(str::trim)
+    }
+    trimmed(&update.endpoint) != current.endpoint.as_deref()
+        || trimmed(&update.cloud_region) != current.cloud_region.as_deref()
+        || trimmed(&update.cloud_project) != current.cloud_project.as_deref()
+        || trimmed(&update.deployment) != current.deployment.as_deref()
+        || trimmed(&update.api_version) != current.api_version.as_deref()
+        || update.auth_mode.as_str() != current.auth_mode
+}
 
 pub(crate) fn validate_provider_update(update: &UpdateProvider) -> Result<(), Error> {
     if update.name.trim().is_empty() || update.name.chars().count() > 100 {
@@ -47,10 +62,10 @@ pub(crate) fn validate_model(model: &DiscoveredModelInput) -> Result<(), Error> 
             "enabled models require an explicit capability".to_owned(),
         ));
     }
-    if model.capabilities.len() > 16 {
-        return Err(Error::Invalid(
-            "a model can declare at most 16 capability tuples".to_owned(),
-        ));
+    if model.capabilities.len() > MAX_MODEL_CAPABILITY_TUPLES {
+        return Err(Error::Invalid(format!(
+            "a model can declare at most {MAX_MODEL_CAPABILITY_TUPLES} capability tuples"
+        )));
     }
     Ok(())
 }
@@ -120,13 +135,20 @@ pub(crate) fn validate_route_input(
     Ok(())
 }
 
+/// Largest reviewed capability tuple set a single model may carry.
+pub const MAX_MODEL_CAPABILITY_TUPLES: usize = 64;
+
+/// Largest page any collection returns; the HTTP layer derives its bound
+/// from this so the two cannot drift.
+pub const MAX_PAGE_SIZE: i64 = 200;
+
 pub(crate) fn checked_limit(limit: i64) -> Result<i64, Error> {
-    if (1..=100).contains(&limit) {
+    if (1..=MAX_PAGE_SIZE).contains(&limit) {
         Ok(limit)
     } else {
-        Err(Error::Invalid(
-            "page size must be between 1 and 100".to_owned(),
-        ))
+        Err(Error::Invalid(format!(
+            "page size must be between 1 and {MAX_PAGE_SIZE}"
+        )))
     }
 }
 
@@ -184,6 +206,50 @@ mod tests {
         );
     }
 
+    fn locked_provider() -> LockedProvider {
+        LockedProvider {
+            etag: Uuid::nil(),
+            state: "draft".to_owned(),
+            kind: "openai_compatible".to_owned(),
+            endpoint: Some("https://api.example.test".to_owned()),
+            cloud_region: None,
+            cloud_project: None,
+            deployment: None,
+            api_version: None,
+            auth_mode: "api_key".to_owned(),
+            active_credential_version_id: None,
+            updated_at: chrono::Utc::now(),
+            last_probe_at: None,
+            last_probe_status: None,
+        }
+    }
+
+    #[test]
+    fn transport_change_ignores_renames_and_whitespace_but_not_connector_settings() {
+        let current = locked_provider();
+        let mut renamed = provider_update();
+        renamed.name = "Renamed".to_owned();
+        renamed.endpoint = Some("  https://api.example.test  ".to_owned());
+        assert!(!transport_changed(&current, &renamed));
+
+        let mutators: [fn(&mut UpdateProvider); 6] = [
+            |update| update.endpoint = Some("https://other.example.test".to_owned()),
+            |update| update.cloud_region = Some("eu-west-1".to_owned()),
+            |update| update.cloud_project = Some("project".to_owned()),
+            |update| update.deployment = Some("deployment".to_owned()),
+            |update| update.api_version = Some("2024-06-01".to_owned()),
+            |update| {
+                update.auth_mode =
+                    olp_engine::domain::provider::ProviderAuthMode::ApplicationDefault;
+            },
+        ];
+        for mutate in mutators {
+            let mut candidate = provider_update();
+            mutate(&mut candidate);
+            assert!(transport_changed(&current, &candidate));
+        }
+    }
+
     #[test]
     fn provider_revision_diff_ceiling_accepts_boundary_and_rejects_excess() {
         assert!(enforce_provider_revision_diff_limit(2_000, "models", 2_000).is_ok());
@@ -229,8 +295,11 @@ mod tests {
         candidate.display_name = "x".repeat(201);
         assert!(validate_model(&candidate).is_err());
         let mut candidate = valid;
-        candidate.capabilities =
-            std::iter::repeat_n(capability("generation", "openai", "unary"), 17).collect();
+        candidate.capabilities = std::iter::repeat_n(
+            capability("generation", "openai", "unary"),
+            MAX_MODEL_CAPABILITY_TUPLES + 1,
+        )
+        .collect();
         assert!(validate_model(&candidate).is_err());
     }
 
@@ -267,8 +336,8 @@ mod tests {
         }
 
         assert_eq!(checked_limit(1).unwrap(), 1);
-        assert_eq!(checked_limit(100).unwrap(), 100);
-        for invalid in [i64::MIN, 0, 101, i64::MAX] {
+        assert_eq!(checked_limit(MAX_PAGE_SIZE).unwrap(), MAX_PAGE_SIZE);
+        for invalid in [i64::MIN, 0, MAX_PAGE_SIZE + 1, i64::MAX] {
             assert!(checked_limit(invalid).is_err());
         }
     }

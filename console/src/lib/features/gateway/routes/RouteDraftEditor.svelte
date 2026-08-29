@@ -79,7 +79,6 @@
   let simulationMode = $state('streaming');
   let simulation = $state<RouteSimulation | null>(null);
   let activation = $state<RouteActivation | null>(null);
-  let validated = $state(false);
   const editorValues = $derived({
     slug,
     operations,
@@ -105,7 +104,6 @@
       weight: target.weight,
       timeoutMs: target.timeout_ms
     }));
-    validated = current.state === 'validated';
   });
 
   $effect(() => {
@@ -139,7 +137,6 @@
 
   function touch() {
     sync = markDirty(sync);
-    validated = false;
   }
 
   async function reload() {
@@ -220,8 +217,8 @@
       );
       sync = markSaved(sync, updated.etag);
       queryClient.setQueryData(queryKeys.routes.draft(current.id), updated);
-      validated = false;
-      notice = 'Draft saved. Simulate and validate before activation.';
+      notice =
+        'Draft saved. Validate to preview, or activate directly; activation validates the saved draft.';
     });
   }
 
@@ -248,7 +245,6 @@
         state: validation.state,
         etag: validation.etag
       });
-      validated = true;
       notice = 'Validation passed. The saved draft is ready to activate.';
     });
   }
@@ -265,7 +261,6 @@
         state: 'draft',
         etag: activation.draft_etag
       });
-      validated = false;
       notice = `Route activated as revision ${activation.revision} in runtime generation ${activation.runtime_generation.sequence}.`;
       await Promise.all([
         draft.refetch(),
@@ -614,7 +609,7 @@
           class="button button-primary"
           type="button"
           onclick={() => activate(draft.data!)}
-          disabled={!canManage || Boolean(busy) || !validated}
+          disabled={!canManage || Boolean(busy) || sync.dirty}
           >{busy === 'activate' ? 'Activating…' : 'Activate route'}</button
         >
       {/if}

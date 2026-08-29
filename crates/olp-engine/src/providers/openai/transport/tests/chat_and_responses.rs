@@ -46,7 +46,9 @@ async fn same_protocol_inline_audio_and_file_handles_are_rehydrated() {
         }]}]
     }))
     .unwrap();
-    hydrate_chat_media(&mut chat, Some(&spool)).await.unwrap();
+    hydrate_chat_media(&mut chat, Some(&spool), 2)
+        .await
+        .unwrap();
     let MessageContent::Parts(parts) = chat.messages[0].content.as_ref().unwrap() else {
         panic!("expected content parts")
     };
@@ -61,7 +63,7 @@ async fn same_protocol_inline_audio_and_file_handles_are_rehydrated() {
         }]
     }]))
     .unwrap();
-    hydrate_responses_media(&mut input, Some(&spool))
+    hydrate_responses_media(&mut input, Some(&spool), 2)
         .await
         .unwrap();
     let ResponseInput::Items(items) = input else {

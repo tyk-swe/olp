@@ -269,8 +269,12 @@ fn process_environment(
         ("OLP_MASTER_KEY_FILE", path("master-key")),
         ("OLP_AUTH_HMAC_KEY_FILE", path("auth-hmac-key")),
         (
-            "OLP_ALLOW_INSECURE_PROVIDER_ENDPOINTS_FOR_TESTS",
-            "test-only".to_owned(),
+            "OLP_PROVIDER_EGRESS_ALLOW_CIDRS",
+            "127.0.0.0/8,::1/128".to_owned(),
+        ),
+        (
+            "OLP_PROVIDER_EGRESS_ALLOW_HTTP_HOSTS",
+            "127.0.0.1,localhost".to_owned(),
         ),
         ("RUST_LOG", "olp=info".to_owned()),
     ];

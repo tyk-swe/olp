@@ -337,6 +337,7 @@ fn provider_request(
         },
         operation: Arc::new(operation),
         media: None,
+        max_inline_media_bytes: 1024 * 1024,
     }
 }
 

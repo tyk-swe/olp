@@ -21,9 +21,11 @@ use olp_engine::domain::routing::provider::ProviderKind;
 use olp_engine::inference::{
     limits::ReloadableLimiter, request_metadata::Emitter, runtime::Manager, service::Service,
 };
+use olp_engine::providers::{EgressPolicy, connector::ResponseLimits};
 
 use crate::{
     bootstrap::state::ApiMode,
+    bootstrap::state::BodyLimits,
     bootstrap::state::ProcessComposition,
     bootstrap::state::TransportRegistry,
     observability::{
@@ -47,6 +49,7 @@ pub(crate) struct RequestBoundaryState {
     pub(crate) multipart_admission: MultipartAdmissionState,
     pub(crate) public_admission: PublicAdmission,
     pub(crate) public_origin: PublicOrigin,
+    pub(crate) body_limits: BodyLimits,
     trusted_proxy_cidrs: Arc<[TrustedProxyCidr]>,
     bootstrap_token_digest: Arc<tokio::sync::RwLock<Option<zeroize::Zeroizing<[u8; 32]>>>>,
 }
@@ -88,6 +91,7 @@ impl RequestBoundaryState {
 #[derive(Clone)]
 pub struct GatewayState {
     pub(crate) request_boundary: RequestBoundaryState,
+    pub(crate) cors_allowed_origins: Arc<[axum::http::HeaderValue]>,
     media_reconciliation_gaps: Arc<AtomicU64>,
 }
 
@@ -145,6 +149,11 @@ impl GatewayState {
     }
 
     #[must_use]
+    pub(crate) const fn body_limits(&self) -> BodyLimits {
+        self.request_boundary.body_limits
+    }
+
+    #[must_use]
     #[cfg(test)]
     pub(crate) fn request_boundary(&self) -> &RequestBoundaryState {
         &self.request_boundary
@@ -197,6 +206,8 @@ pub struct ManagementState {
     request_boundary: RequestBoundaryState,
     pub(crate) transports: TransportRegistry,
     pub(crate) master_key: Option<Arc<MasterKey>>,
+    pub(crate) provider_egress_policy: Arc<EgressPolicy>,
+    pub(crate) provider_response_limits: ResponseLimits,
     #[cfg(any(test, feature = "test-util"))]
     certification_probe_connectors: olp_engine::providers::factory::overrides::Registry,
     pub(crate) public_origin: PublicOrigin,
@@ -385,13 +396,17 @@ impl ProcessComposition {
     pub fn mode_dependencies(&self) -> ModeDependencies {
         let store = self.store.clone();
         let auth_hmac_key = self.auth_hmac_key.clone();
-        let inference = Arc::new(Service::new(
-            Arc::clone(&self.runtime),
-            self.limiter.clone(),
-            self.request_metadata.clone(),
-            self.circuits.clone(),
-            Arc::clone(&self.media_spool),
-        ));
+        let inference = Arc::new(
+            Service::new(
+                Arc::clone(&self.runtime),
+                self.limiter.clone(),
+                self.request_metadata.clone(),
+                self.circuits.clone(),
+                Arc::clone(&self.media_spool),
+            )
+            .with_max_inline_media_bytes(self.body_limits.inline_media_item_bytes)
+            .with_max_collected_event_bytes(self.provider_response_limits.max_response_bytes),
+        );
         let request_boundary = RequestBoundaryState {
             store: store.clone(),
             inference: Arc::clone(&inference),
@@ -399,17 +414,21 @@ impl ProcessComposition {
             multipart_admission: self.multipart_admission.clone(),
             public_admission: self.public_admission.clone(),
             public_origin: self.public_origin.clone(),
+            body_limits: self.body_limits,
             trusted_proxy_cidrs: Arc::clone(&self.trusted_proxy_cidrs),
             bootstrap_token_digest: Arc::clone(&self.bootstrap_token_digest),
         };
         let gateway = GatewayState {
             request_boundary: request_boundary.clone(),
+            cors_allowed_origins: Arc::clone(&self.gateway_cors_allowed_origins),
             media_reconciliation_gaps: Arc::clone(&self.media_reconciliation_gaps),
         };
         let management = ManagementState {
             request_boundary: request_boundary.clone(),
             transports: self.transports.clone(),
             master_key: self.master_key.clone(),
+            provider_egress_policy: Arc::clone(&self.provider_egress_policy),
+            provider_response_limits: self.provider_response_limits,
             #[cfg(any(test, feature = "test-util"))]
             certification_probe_connectors: self.certification_probe_connectors.clone(),
             public_origin: self.public_origin.clone(),
@@ -541,5 +560,18 @@ mod tests {
             state(ApiMode::Gateway).mode_dependencies(),
             ModeDependencies::Gateway { .. }
         ));
+    }
+
+    #[test]
+    fn inline_media_item_limit_reaches_inference_connectors() {
+        let mut state = state(ApiMode::Gateway);
+        state.body_limits.inline_media_item_bytes = 2 * 1024 * 1024;
+
+        let gateway = state.mode_dependencies().gateway_state_for_test();
+
+        assert_eq!(
+            gateway.inference().max_inline_media_bytes(),
+            2 * 1024 * 1024
+        );
     }
 }

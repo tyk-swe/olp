@@ -41,7 +41,7 @@ use uuid::Uuid;
 use super::*;
 use super::{
     bootstrap::mode_dependencies::GatewayState,
-    bootstrap::state::{ApiMode, MAX_JSON_BODY_BYTES, ProcessComposition},
+    bootstrap::state::{ApiMode, BodyLimits, ProcessComposition},
     gateway::endpoint_policy::classification::{InferenceEndpoint, TokenEstimate},
     observability::{
         cache::{OBSERVABILITY_SNAPSHOT_STALE_AFTER, refresh_observability_cache},
@@ -59,12 +59,13 @@ use super::{
     },
     public_http::router::{
         gateway_router_for_test, http_request_span, management_router_for_test, request_trace_path,
-        sensitive_request_headers, sensitive_response_headers,
+        sensitive_request_headers, sensitive_response_headers, validated_public_router,
     },
 };
 
 mod admission;
 mod authentication;
+mod cors;
 mod observability;
 mod reservations;
 

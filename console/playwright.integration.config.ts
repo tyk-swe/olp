@@ -82,7 +82,8 @@ export default defineConfig({
         OLP_BOOTSTRAP_TOKEN_FILE: bootstrapTokenFile,
         OLP_VALKEY_URL: valkeyUrl,
         OLP_ALLOW_INSECURE_OIDC_FOR_TESTS: 'test-only',
-        OLP_ALLOW_INSECURE_PROVIDER_ENDPOINTS_FOR_TESTS: 'test-only'
+        OLP_PROVIDER_EGRESS_ALLOW_CIDRS: '127.0.0.0/8,::1/128',
+        OLP_PROVIDER_EGRESS_ALLOW_HTTP_HOSTS: '127.0.0.1,localhost'
       }
     }
   ]

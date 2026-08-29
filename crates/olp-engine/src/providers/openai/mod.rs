@@ -15,6 +15,7 @@ use std::fmt;
 
 use zeroize::Zeroizing;
 
+use crate::providers::EgressPolicy;
 use crate::providers::connector::Timeouts;
 use crate::providers::openai::endpoint::Endpoint;
 
@@ -42,18 +43,15 @@ impl Default for ConnectorConfig {
 
 impl ConnectorConfig {
     pub fn with_base_url(base_url: &str) -> Result<Self, ConnectorBuildError> {
-        Ok(Self {
-            endpoint: Endpoint::parse(base_url)?,
-            ..Self::default()
-        })
+        Self::with_base_url_and_policy(base_url, &EgressPolicy::default())
     }
 
-    /// Accepts plain-HTTP and non-public targets. Exists only for test
-    /// builds; release binaries never compile this constructor.
-    #[cfg(any(test, feature = "test-util"))]
-    pub fn with_base_url_unsafe_test_target(base_url: &str) -> Result<Self, ConnectorBuildError> {
+    pub fn with_base_url_and_policy(
+        base_url: &str,
+        policy: &EgressPolicy,
+    ) -> Result<Self, ConnectorBuildError> {
         Ok(Self {
-            endpoint: Endpoint::parse_with_unsafe_test_target(base_url)?,
+            endpoint: Endpoint::parse_with_policy(base_url, policy)?,
             ..Self::default()
         })
     }
@@ -76,6 +74,16 @@ impl ConnectorConfig {
         self.max_response_bytes = max_response_bytes;
         self.max_event_bytes = max_event_bytes;
         Ok(self)
+    }
+
+    #[cfg(test)]
+    pub(in crate::providers) fn response_limits(
+        &self,
+    ) -> crate::providers::connector::ResponseLimits {
+        crate::providers::connector::ResponseLimits {
+            max_response_bytes: self.max_response_bytes,
+            max_event_bytes: self.max_event_bytes,
+        }
     }
 
     /// Appends a validated `api-version` query parameter to every resource

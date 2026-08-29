@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{sync::Arc, time::Duration};
 
 use olp_db::request_metadata::writer::run_connecting;
 use olp_db::{security::key_material::AuthHmacKey, store::Store, valkey::Keyspace};
@@ -23,10 +23,12 @@ use super::{
         shutdown_signal, stop_background_tasks,
     },
     runtime_activation::{
-        RuntimeHintSource, activate_latest_runtime, runtime_hint_supervisor, spawn_runtime_poller,
+        RuntimeActivator, RuntimeHintSource, activate_latest_runtime, runtime_hint_supervisor,
+        spawn_runtime_poller,
     },
     service_supervisors::{
-        limiter_supervisor, media_reconciliation_supervisor, request_metadata_loss_reporter,
+        limiter_supervisor, limits_policy_supervisor, load_limits_outage_policy,
+        media_reconciliation_supervisor, request_metadata_loss_reporter,
     },
     validation::{
         check_secret_permissions, connect_store, load_auth_hmac_key, load_bootstrap_token_digest,
@@ -54,7 +56,13 @@ pub(super) async fn serve(
     let mut state = compose_state(mode, &args, &store, auth_hmac_key)?;
     apply_secrets_and_policy(&mut state, &args, &store, mode).await?;
     if let Some(path) = &args.assets.connector_config_file {
-        register_mounted_connectors(path, &state.transports).await?;
+        register_mounted_connectors(
+            path,
+            &state.transports,
+            &state.provider_egress_policy,
+            state.provider_response_limits,
+        )
+        .await?;
     }
     activate_initial_runtime(&state, &store).await;
     let listener = TcpListener::bind(args.listen_addr).await?;
@@ -89,10 +97,16 @@ pub(super) async fn serve(
 
     info!(address = %args.listen_addr, ?mode, "OLP public listener ready");
     info!(address = %args.observability_listen_addr, ?mode, "OLP observability listener ready");
+    let connection_max_age = Duration::from_secs(args.http_connection_max_age_seconds);
+    let connection_drain_timeout = Duration::from_secs(args.http_connection_drain_timeout_seconds);
     let public_server = listener::serve_http(
         listener,
         crate::public_http::router::validated_public_router(dependencies),
-        listener::HttpServerConfig::standard(args.http_max_connections),
+        listener::HttpServerConfig::standard(
+            args.http_max_connections,
+            connection_max_age,
+            connection_drain_timeout,
+        ),
         listener_shutdown_receiver.clone(),
     );
     // This listener has its own router-level concurrency cap. Constrain its
@@ -101,7 +115,11 @@ pub(super) async fn serve(
     let observability_server = listener::serve_http(
         observability_listener,
         crate::observability::router(observability_state),
-        listener::HttpServerConfig::standard(args.http_max_connections.clamp(1, 32)),
+        listener::HttpServerConfig::standard(
+            args.http_max_connections.clamp(1, 32),
+            connection_max_age,
+            connection_drain_timeout,
+        ),
         listener_shutdown_receiver,
     );
     let (public_result, observability_result, terminal_error) = coordinate_shutdown(
@@ -166,6 +184,15 @@ fn compose_state(
         .unwrap_or_else(std::env::temp_dir);
     let media_spool =
         media_spool::create(&media_spool_dir, args.assets.media_spool_capacity_bytes)?;
+    let body_limits = args
+        .body_limits
+        .limits()
+        .validate(args.assets.media_spool_capacity_bytes)
+        .map_err(std::io::Error::other)?;
+    let provider_response_limits = args
+        .provider_response_limits
+        .limits()
+        .map_err(std::io::Error::other)?;
     let mut state = ProcessComposition::new_with_media_spool(
         mode,
         store.clone(),
@@ -180,6 +207,8 @@ fn compose_state(
         args.http_max_in_flight_management_requests,
     );
     state.local_login_enabled = args.local_login_enabled;
+    state.body_limits = body_limits;
+    state.provider_response_limits = provider_response_limits;
     // The browser integration fixture uses a loopback mock identity
     // provider. This branch is compiled out of release binaries, so no
     // deployment setting can weaken the production HTTPS/SSRF policy.
@@ -188,12 +217,17 @@ fn compose_state(
         state.oidc_allow_insecure_test_endpoints = true;
         warn!("test-only loopback OIDC endpoints are enabled");
     }
-    // The E2E harness points providers at a loopback mock upstream. Same
-    // posture as the OIDC override above: compiled out of release binaries.
-    #[cfg(all(debug_assertions, feature = "test-util"))]
-    if crate::bootstrap::provider_adapter::insecure_provider_endpoints_for_tests() {
-        warn!("test-only insecure provider endpoints are enabled");
+    let provider_egress_policy = args.provider_egress.policy();
+    if !provider_egress_policy.allowed_networks().is_empty()
+        || !provider_egress_policy.plain_http_hosts().is_empty()
+    {
+        warn!(
+            allowed_networks = ?provider_egress_policy.allowed_networks(),
+            plain_http_hosts = ?provider_egress_policy.plain_http_hosts(),
+            "provider egress policy exempts non-public or plain-HTTP endpoints"
+        );
     }
+    state.set_provider_egress_policy(provider_egress_policy);
     Ok(state)
 }
 
@@ -204,6 +238,7 @@ async fn apply_secrets_and_policy(
     mode: ApiMode,
 ) -> AppResult<()> {
     state.set_trusted_proxy_cidrs(args.trusted_proxy_cidrs.0.clone());
+    state.set_gateway_cors_allowed_origins(args.gateway_cors_allowed_origins.0.clone());
     let setup_required = if mode.serves_control() {
         store.setup_required().await?
     } else {
@@ -238,6 +273,8 @@ async fn activate_initial_runtime(state: &ProcessComposition, store: &Store) {
         &state.transports,
         &state.circuits,
         state.master_key.as_deref(),
+        &state.provider_egress_policy,
+        state.provider_response_limits,
     )
     .await
     {
@@ -262,22 +299,22 @@ async fn spawn_background_plane(
         tasks: Vec::new(),
         request_metadata_writer_status: None,
     };
-    plane.tasks.push(spawn_runtime_poller(
-        Arc::clone(&state.runtime),
-        store.clone(),
-        state.transports.clone(),
-        state.circuits.clone(),
-        state.master_key.clone(),
-        shutdown.clone(),
-    ));
+    let activator = RuntimeActivator {
+        runtime: Arc::clone(&state.runtime),
+        store: store.clone(),
+        transports: state.transports.clone(),
+        circuits: state.circuits.clone(),
+        master_key: state.master_key.clone(),
+        egress_policy: Arc::clone(&state.provider_egress_policy),
+        response_limits: state.provider_response_limits,
+    };
+    plane
+        .tasks
+        .push(spawn_runtime_poller(activator.clone(), shutdown.clone()));
     if let Some(url) = &args.valkey_url {
         let keyspace = store.valkey_keyspace().await?;
         plane.tasks.push(tokio::spawn(runtime_hint_supervisor(
-            Arc::clone(&state.runtime),
-            store.clone(),
-            state.transports.clone(),
-            state.circuits.clone(),
-            state.master_key.clone(),
+            activator.clone(),
             RuntimeHintSource {
                 url: url.clone(),
                 channel: keyspace.runtime_hint_channel(),
@@ -293,6 +330,12 @@ async fn spawn_background_plane(
         )));
 
         if mode.serves_gateway() {
+            load_limits_outage_policy(store, &state.limiter).await;
+            plane.tasks.push(tokio::spawn(limits_policy_supervisor(
+                store.clone(),
+                state.limiter.clone(),
+                shutdown.clone(),
+            )));
             spawn_request_metadata_plane(&mut plane, state, args, store, url, &keyspace, shutdown);
         }
         if run_worker_in_process {

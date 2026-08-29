@@ -178,11 +178,15 @@ Native-provider activation requires server-owned certification for every exact
 provider/model/operation tuple. Probes use production connectors, deadlines,
 encoders, streaming decoders, and response codecs; they are bounded and store
 no prompt or response. Generic OpenAI-compatible providers keep browser review
-as `declared` until an explicit per-model certification succeeds. At most 16
-reviewed tuples and four concurrent probe requests are allowed; unsafe media,
+as `declared` until an explicit per-model certification succeeds. At most 64
+reviewed tuples and eight concurrent probe requests are allowed; unsafe media,
 video, asynchronous, and cross-protocol claims fail closed. Only an exact
-successful probe receives `source = certified` and `certified_at`, and a
-replaced tuple set removes previous evidence.
+successful probe receives `source = certified` and `certified_at`. Re-reviewing
+a tuple set is a per-tuple diff: removed tuples lose their evidence, unchanged
+tuples keep it, and new tuples start as `declared`. Only transport edits
+(endpoint, region, project, deployment, API version, auth mode) reset every
+tuple to `declared` and clear the probe; renames and credential rotation do
+not, though rotation still requires a fresh probe before activation.
 
 ## Data-safety invariants
 

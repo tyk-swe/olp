@@ -179,17 +179,80 @@ fn audit_request_provenance_records_only_what_the_boundary_proves() {
 }
 
 #[test]
+fn multipart_reservations_scale_with_media_cap() {
+    let reservation = |path: &str, limits: BodyLimits| {
+        InferenceEndpoint::classify(&axum::http::Method::POST, path)
+            .unwrap()
+            .multipart(limits)
+            .unwrap()
+            .1
+    };
+    let mib: usize = 1024 * 1024;
+    let default = BodyLimits::default();
+    let reservation = |path, limits| usize::try_from(reservation(path, limits)).unwrap();
+    assert_eq!(reservation("/openai/v1/images/edits", default), 64 * mib);
+    assert_eq!(
+        reservation("/openai/v1/images/variations", default),
+        55 * mib
+    );
+    assert_eq!(
+        reservation("/openai/v1/audio/transcriptions", default),
+        30 * mib
+    );
+    assert_eq!(reservation("/openai/v1/videos", default), 25 * mib);
+
+    let doubled = BodyLimits {
+        media_body_bytes: 128 * mib,
+        ..default
+    };
+    assert_eq!(reservation("/openai/v1/images/edits", doubled), 128 * mib);
+    assert_eq!(
+        reservation("/openai/v1/images/variations", doubled),
+        110 * mib
+    );
+    assert_eq!(
+        reservation("/openai/v1/audio/transcriptions", doubled),
+        60 * mib
+    );
+    assert_eq!(reservation("/openai/v1/videos", doubled), 50 * mib);
+}
+
+#[test]
+fn body_limits_validate_against_spool_and_json_caps() {
+    let default = BodyLimits::default();
+    default.validate(1024 * 1024 * 1024).unwrap();
+    assert!(default.validate(127 * 1024 * 1024).is_err());
+    default.validate(128 * 1024 * 1024).unwrap();
+    assert!(
+        BodyLimits {
+            inline_media_item_bytes: 3 * 1024 * 1024,
+            ..default
+        }
+        .validate(u64::MAX)
+        .is_err()
+    );
+    assert!(
+        BodyLimits {
+            json_body_bytes: 2 * 1024 * 1024 - 1,
+            ..default
+        }
+        .validate(u64::MAX)
+        .is_err()
+    );
+}
+
+#[test]
 fn multipart_admission_is_post_only_and_recovers_after_a_parser_drops() {
     assert!(
         InferenceEndpoint::classify(&axum::http::Method::GET, "/openai/v1/videos")
             .unwrap()
-            .multipart()
+            .multipart(BodyLimits::default())
             .is_none()
     );
     assert!(
         InferenceEndpoint::classify(&axum::http::Method::POST, "/openai/v1/videos")
             .unwrap()
-            .multipart()
+            .multipart(BodyLimits::default())
             .is_some()
     );
 
@@ -367,7 +430,12 @@ fn raw_json_tpm_estimate_counts_compact_embedding_token_arrays() {
 #[tokio::test]
 async fn json_body_read_has_its_own_deadline_outside_route_layers() {
     let body = Body::from_stream(futures::stream::pending::<Result<bytes::Bytes, Infallible>>());
-    let result = read_json_body(body, MAX_JSON_BODY_BYTES, Duration::from_millis(5)).await;
+    let result = read_json_body(
+        body,
+        BodyLimits::default().json_body_bytes,
+        Duration::from_millis(5),
+    )
+    .await;
     assert_eq!(result.unwrap_err(), JsonBodyReadError::Timeout);
 }
 
@@ -411,7 +479,7 @@ async fn request_limit_matrix_rejects_depth_size_encoding_and_bad_multipart() {
                 .header(axum::http::header::CONTENT_TYPE, "application/json")
                 .header(
                     axum::http::header::CONTENT_LENGTH,
-                    (MAX_JSON_BODY_BYTES + 1).to_string(),
+                    (BodyLimits::default().json_body_bytes + 1).to_string(),
                 )
                 .body(Body::empty())
                 .unwrap(),
@@ -421,7 +489,7 @@ async fn request_limit_matrix_rejects_depth_size_encoding_and_bad_multipart() {
             "content encoding",
             Request::post("/openai/not-found")
                 .header(axum::http::header::CONTENT_TYPE, "application/json")
-                .header(axum::http::header::CONTENT_ENCODING, "gzip")
+                .header(axum::http::header::CONTENT_ENCODING, "br")
                 .body(Body::empty())
                 .unwrap(),
             axum::http::StatusCode::UNSUPPORTED_MEDIA_TYPE,

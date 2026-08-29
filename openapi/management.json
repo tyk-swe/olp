@@ -4544,7 +4544,7 @@
       "SetModelRequest": {
         "properties": {
           "capabilities": {
-            "description": "Explicit operator-reviewed capability tuples. Their provenance is\nrecorded as `declared`; certification/probe jobs may promote provenance\nseparately and cannot be forged by the browser.",
+            "description": "Explicit operator-reviewed capability tuples. New tuples are recorded\nas `declared`, tuples already stored keep their provenance, and tuples\nleft out are removed. Certification/probe jobs promote provenance\nseparately and cannot be forged by the browser.",
             "items": {
               "$ref": "#/components/schemas/CapabilityInput"
             },
@@ -11968,7 +11968,7 @@
                 }
               }
             },
-            "description": "Draft has not been validated, or the Idempotency-Key was already used for a different request"
+            "description": "The Idempotency-Key was already used for a different request"
           },
           "412": {
             "content": {

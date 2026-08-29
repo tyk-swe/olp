@@ -27,6 +27,7 @@ futures.workspace = true
 http-body.workspace = true
 hyper.workspace = true
 hyper-util.workspace = true
+flate2.workspace = true
 ipnet.workspace = true
 jsonwebtoken.workspace = true
 olp-db.workspace = true

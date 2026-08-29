@@ -4,7 +4,7 @@ use std::{
     pin::Pin,
     sync::{
         Arc, Mutex,
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
     },
     time::Duration,
 };
@@ -275,11 +275,21 @@ impl Drop for InferenceReservationInner {
     }
 }
 
+/// What hard-limited keys get while a configured Valkey is unreachable.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum LimitOutagePolicy {
+    #[default]
+    FailClosed,
+    FailOpen,
+}
+
 /// Hot-swappable Valkey limiter connection used by inference services.
 #[derive(Clone, Default)]
 pub struct ReloadableLimiter {
     inner: Arc<ArcSwapOption<InstalledLimitBackend>>,
     configured: Arc<AtomicBool>,
+    fail_open: Arc<AtomicBool>,
+    fail_open_total: Arc<AtomicU64>,
 }
 
 struct InstalledLimitBackend {
@@ -294,6 +304,25 @@ impl ReloadableLimiter {
     #[must_use]
     pub fn is_configured(&self) -> bool {
         self.configured.load(Ordering::Acquire)
+    }
+
+    pub fn set_outage_policy(&self, policy: LimitOutagePolicy) {
+        self.fail_open
+            .store(policy == LimitOutagePolicy::FailOpen, Ordering::Release);
+    }
+
+    #[must_use]
+    pub fn outage_policy(&self) -> LimitOutagePolicy {
+        if self.fail_open.load(Ordering::Acquire) {
+            LimitOutagePolicy::FailOpen
+        } else {
+            LimitOutagePolicy::FailClosed
+        }
+    }
+
+    #[must_use]
+    pub fn fail_open_total(&self) -> u64 {
+        self.fail_open_total.load(Ordering::Relaxed)
     }
 
     pub fn install(&self, backend: impl LimitBackend + 'static) {
@@ -314,6 +343,31 @@ impl ReloadableLimiter {
     }
 }
 
+/// The single decision point for a limiter outage. Admits without a lease only
+/// when Valkey is configured (so its absence is an outage, not misconfiguration)
+/// and the operator opted into fail-open; `LimitError::Exceeded` never lands
+/// here because a rejected reservation is not an outage.
+pub fn outage_reservation(
+    limiter: &ReloadableLimiter,
+    reason: &str,
+) -> Result<Option<Reservation>, InferenceError> {
+    if limiter.is_configured() && limiter.outage_policy() == LimitOutagePolicy::FailOpen {
+        limiter.fail_open_total.fetch_add(1, Ordering::Relaxed);
+        warn!(
+            reason,
+            "distributed limiter unavailable; admitting hard-limited key fail-open"
+        );
+        return Ok(None);
+    }
+    error!(
+        reason,
+        "distributed limiter unavailable; hard-limited key failed closed"
+    );
+    Err(InferenceError::unavailable(
+        "distributed_limits_unavailable",
+    ))
+}
+
 pub async fn reserve(
     limiter: &ReloadableLimiter,
     key: &ApiKey,
@@ -330,14 +384,14 @@ pub async fn reserve(
         if delta <= 0 {
             return Ok(None);
         }
-        let limiter = limiter
-            .current()
-            .ok_or_else(|| InferenceError::unavailable("distributed_limits_unavailable"))?;
+        let Some(backend) = limiter.current() else {
+            return outage_reservation(limiter, "backend_missing");
+        };
         let tokens_per_minute = i64::try_from(tokens_per_minute.get())
             .map_err(|_| InferenceError::unavailable("limit_configuration_invalid"))?;
-        let result = tokio::time::timeout(
+        let Ok(result) = tokio::time::timeout(
             Duration::from_secs(1),
-            limiter.reserve(LimitRequest {
+            backend.reserve(LimitRequest {
                 lookup_id,
                 requests_per_minute: None,
                 tokens_per_minute: Some(tokens_per_minute),
@@ -347,27 +401,24 @@ pub async fn reserve(
             }),
         )
         .await
-        .map_err(|_| InferenceError::unavailable("distributed_limits_unavailable"))?;
+        else {
+            return outage_reservation(limiter, "timeout");
+        };
         return match result {
             Ok(lease) => Ok(Some(Reservation::distributed(lease))),
             Err(LimitError::Exceeded {
                 dimension,
                 retry_after,
             }) => Err(InferenceError::rate_limited(dimension, retry_after)),
-            Err(error) => {
-                error!(%error, "HTTP TPM reconciliation failed closed");
-                Err(InferenceError::unavailable(
-                    "distributed_limits_unavailable",
-                ))
-            }
+            Err(error) => outage_reservation(limiter, &error.to_string()),
         };
     }
     if !key.limits.has_hard_limits() {
         return Ok(None);
     }
-    let limiter = limiter
-        .current()
-        .ok_or_else(|| InferenceError::unavailable("distributed_limits_unavailable"))?;
+    let Some(backend) = limiter.current() else {
+        return outage_reservation(limiter, "backend_missing");
+    };
     let tokens_per_minute = key
         .limits
         .tokens_per_minute
@@ -383,9 +434,9 @@ pub async fn reserve(
             limit,
         ));
     }
-    let result = tokio::time::timeout(
+    let Ok(result) = tokio::time::timeout(
         Duration::from_secs(1),
-        limiter.reserve(LimitRequest {
+        backend.reserve(LimitRequest {
             lookup_id,
             requests_per_minute: key
                 .limits
@@ -398,19 +449,16 @@ pub async fn reserve(
         }),
     )
     .await
-    .map_err(|_| InferenceError::unavailable("distributed_limits_unavailable"))?;
+    else {
+        return outage_reservation(limiter, "timeout");
+    };
     match result {
         Ok(lease) => Ok(Some(Reservation::distributed(lease))),
         Err(LimitError::Exceeded {
             dimension,
             retry_after,
         }) => Err(InferenceError::rate_limited(dimension, retry_after)),
-        Err(error) => {
-            error!(%error, "hard distributed limit reservation failed closed");
-            Err(InferenceError::unavailable(
-                "distributed_limits_unavailable",
-            ))
-        }
+        Err(error) => outage_reservation(limiter, &error.to_string()),
     }
 }
 

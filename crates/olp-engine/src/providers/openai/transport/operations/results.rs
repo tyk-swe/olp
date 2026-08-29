@@ -31,7 +31,12 @@ pub(super) async fn execute(
         Operation::TokenCount(operation) => {
             let mut wire = encode_response_input_tokens(operation, &request.attempt.upstream_model)
                 .map_err(|error| protocol_encode_error("input-token count", error))?;
-            hydrate_responses_media(&mut wire.input, request.media.as_ref()).await?;
+            hydrate_responses_media(
+                &mut wire.input,
+                request.media.as_ref(),
+                request.max_inline_media_bytes,
+            )
+            .await?;
             (
                 "responses/input_tokens",
                 serialize_wire("input-token count", &wire)?,

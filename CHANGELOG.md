@@ -7,10 +7,68 @@ semantic versioning and match `Cargo.toml`, `console/package.json`,
 
 ## [Unreleased]
 
-Clears the review backlog carried in `TODOS.md`. Two migrations: 0044 relaxes
-one invitation constraint, 0045 lands the drops that 0038 and 0039 staged.
+Clears the review backlog carried in `TODOS.md` and loosens the restrictions
+that bought nothing: private provider endpoints, certification that survived no
+edit, a 5-minute cap on streams, compile-time size caps. Three migrations: 0044
+relaxes one invitation constraint, 0045 lands the drops that 0038 and 0039
+staged, 0048 seeds the `limits.valkey_unavailable` setting.
+
+### Added
+
+**Operator settings**
+- `OLP_PROVIDER_EGRESS_ALLOW_CIDRS` and `OLP_PROVIDER_EGRESS_ALLOW_HTTP_HOSTS`
+  let an installation reach on-premises or VPC model servers. The default
+  denies every non-public address and every plain-HTTP endpoint exactly as
+  before; the allowlist is checked on literal hosts and on every DNS answer,
+  and a mixed answer set still fails closed. The debug-only
+  `OLP_ALLOW_INSECURE_PROVIDER_ENDPOINTS_FOR_TESTS` hatch is gone; the e2e and
+  Playwright harnesses now use the production variables.
+- `OLP_HTTP_CONNECTION_MAX_AGE_SECONDS` and
+  `OLP_HTTP_CONNECTION_DRAIN_TIMEOUT_SECONDS` replace the fixed 5-minute age
+  and 30-second drain.
+- `OLP_HTTP_MAX_JSON_BODY_BYTES`, `OLP_HTTP_MAX_MEDIA_BODY_BYTES`,
+  `OLP_HTTP_MAX_INLINE_MEDIA_ITEMS`, `OLP_HTTP_MAX_INLINE_MEDIA_ITEM_BYTES`,
+  `OLP_HTTP_MAX_INLINE_MEDIA_TOTAL_BYTES`, `OLP_PROVIDER_MAX_RESPONSE_BYTES`
+  and `OLP_PROVIDER_MAX_EVENT_BYTES` expose the request, inline-media and
+  provider-response caps that were constants. Defaults are unchanged; the
+  media cap must stay within half the media spool.
+- `OLP_GATEWAY_CORS_ALLOWED_ORIGINS` enables browser access to the inference
+  gateway for an explicit origin list. Wildcards are refused, credentials are
+  never allowed, and the management API stays same-origin.
+- The `limits.valkey_unavailable` installation setting (`fail_closed`, the
+  default, or `fail_open`) decides whether hard-limited keys are admitted while
+  Valkey is unreachable. Fail-open applies only when Valkey is configured,
+  is audited like every setting, and counts `olp_limits_fail_open_total`.
 
 ### Changed
+
+**Providers**
+- Renaming a provider, rotating its credential, disabling a model, or
+  re-reviewing an unchanged capability set no longer resets certified
+  capabilities to `declared`. Only endpoint, region, project, deployment, API
+  version or model-set changes clear probe evidence; credential rotation keeps
+  the certification but still requires a successful probe before activation.
+- A model may carry 64 reviewed capability tuples (was 16) and certification
+  runs eight probes concurrently (was four).
+
+**Gateway (client-visible)**
+- A streaming response is no longer cut when its connection reaches the
+  maximum age. HTTP/2 connections still receive GOAWAY for rebalancing, but a
+  connection is never force-closed while a response body is in flight (with a
+  one-hour ceiling). HTTP/1 connections are single-request and are not
+  age-limited at all.
+- `Content-Encoding: gzip` JSON request bodies are accepted; the inflated size
+  is bounded by the JSON cap. Multipart bodies still require identity.
+- `/v1/models` and the Anthropic and Gemini model listings now include routes
+  whose only operations are embeddings, images, audio or video; they were
+  hidden because visibility probed generation and token counting only.
+
+**Management API**
+- Activating a route draft validates it inline. The `validated` state is no
+  longer a prerequisite, so `route_not_validated` (409) is gone; the separate
+  validate endpoint remains for previewing the attempt plan.
+- Every collection accepts page sizes up to 200. Nine configuration lists
+  refused sizes above 100 with a message that contradicted the contract.
 
 **Management API**
 - Every list response now also carries its rows under `items`. Fourteen endpoints

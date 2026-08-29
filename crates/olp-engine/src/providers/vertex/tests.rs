@@ -75,6 +75,7 @@ fn streaming_request() -> ProviderRequest {
             extensions: SourceExtensions::new(Surface::Gemini, BTreeMap::new()),
         })),
         media: None,
+        max_inline_media_bytes: 1024 * 1024,
     }
 }
 

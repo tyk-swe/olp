@@ -41,6 +41,7 @@ chrono.workspace = true
 futures.workspace = true
 google-cloud-auth = "1.13"
 http.workspace = true
+ipnet.workspace = true
 jsonwebtoken = { workspace = true, features = ["use_pem"] }
 reqwest.workspace = true
 rust_decimal.workspace = true

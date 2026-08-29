@@ -79,8 +79,13 @@ pub(super) fn supported_operations(
     slug: &RouteSlug,
     surface: Surface,
 ) -> Vec<OperationKind> {
-    [OperationKind::Generation, OperationKind::TokenCount]
-        .into_iter()
+    let Some(route) = runtime.routes.get(slug) else {
+        return Vec::new();
+    };
+    route
+        .operations
+        .iter()
+        .copied()
         .filter(|operation| {
             let modes: &[TransportMode] = if *operation == OperationKind::Generation {
                 &[TransportMode::Unary, TransportMode::Streaming]

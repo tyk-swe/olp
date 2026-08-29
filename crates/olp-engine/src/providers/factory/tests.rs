@@ -17,13 +17,17 @@ use crate::{
         routing::provider::ProviderKind,
     },
     providers::{
+        EgressPolicy,
+        connector::ResponseLimits,
         factory::{
             assembly::Factory,
             certification::{
                 certifiable_capabilities, execute_native_capability_probe, native_probe_operation,
                 supports,
             },
-            configuration::{Config, Credential, CredentialKind},
+            configuration::{
+                Config, Credential, CredentialKind, connector_configuration_with_policy,
+            },
             overrides::Registry,
         },
         openai::{
@@ -315,50 +319,127 @@ async fn native_streaming_certification_stops_at_terminal_event() {
     .unwrap();
 }
 
+fn private_http_policy() -> EgressPolicy {
+    EgressPolicy::new(
+        vec!["10.0.0.0/8".parse().unwrap()],
+        vec!["10.1.2.3".to_owned()],
+    )
+}
+
 #[test]
-fn strict_factory_rejects_loopback_endpoints_that_unsafe_test_variants_accept() {
+fn default_policy_rejects_private_plain_http_endpoints_that_an_allowlist_accepts() {
     let compat = Config::OpenAiCompatible {
-        endpoint: "http://127.0.0.1:9/v1".to_owned(),
+        endpoint: "http://10.1.2.3:8000/v1".to_owned(),
     };
-    assert!(Factory::validate(&compat).is_err());
-    Factory::validate_with_unsafe_test_endpoints(&compat).unwrap();
+    assert!(Factory::validate(&compat, &EgressPolicy::default()).is_err());
+    Factory::validate(&compat, &private_http_policy()).unwrap();
+
+    let cidr_only = EgressPolicy::new(vec!["10.0.0.0/8".parse().unwrap()], vec![]);
+    assert!(Factory::validate(&compat, &cidr_only).is_err());
+    let host_only = EgressPolicy::new(vec![], vec!["10.1.2.3".to_owned()]);
+    assert!(Factory::validate(&compat, &host_only).is_err());
+    let other_host = Config::OpenAiCompatible {
+        endpoint: "http://10.1.2.4:8000/v1".to_owned(),
+    };
+    assert!(Factory::validate(&other_host, &private_http_policy()).is_err());
 
     let azure = Config::AzureOpenAi {
-        endpoint: "http://127.0.0.1:9".to_owned(),
+        endpoint: "http://10.1.2.3".to_owned(),
         deployment: "deployment".to_owned(),
         api_version: "2024-10-21".to_owned(),
     };
-    assert!(Factory::validate(&azure).is_err());
-    Factory::validate_with_unsafe_test_endpoints(&azure).unwrap();
+    assert!(Factory::validate(&azure, &EgressPolicy::default()).is_err());
+    Factory::validate(&azure, &private_http_policy()).unwrap();
+
+    let loopback = Config::OpenAiCompatible {
+        endpoint: "http://127.0.0.1:9/v1".to_owned(),
+    };
+    assert!(Factory::validate(&loopback, &EgressPolicy::default()).is_err());
+    Factory::validate(&loopback, &EgressPolicy::unsafe_test_targets()).unwrap();
 }
 
 #[tokio::test]
-async fn unsafe_test_variants_assemble_loopback_transports_without_network_io() {
+async fn allowlisted_private_endpoints_assemble_transports_without_network_io() {
     let compat = Config::OpenAiCompatible {
-        endpoint: "http://127.0.0.1:9/v1".to_owned(),
+        endpoint: "http://10.1.2.3:8000/v1".to_owned(),
     };
     let credential = Credential::ApiKey(Zeroizing::new("sk-test".to_owned()));
     assert!(
         Factory::create(
             compat.clone(),
-            Credential::ApiKey(Zeroizing::new("sk-test".to_owned()))
+            Credential::ApiKey(Zeroizing::new("sk-test".to_owned())),
+            &EgressPolicy::default(),
+            ResponseLimits::default(),
         )
         .await
         .is_err()
     );
-    Factory::transport_with_unsafe_test_endpoints(compat, credential)
-        .await
-        .unwrap();
-
-    let azure = Config::AzureOpenAi {
-        endpoint: "http://127.0.0.1:9".to_owned(),
-        deployment: "deployment".to_owned(),
-        api_version: "2024-10-21".to_owned(),
-    };
-    Factory::transport_with_unsafe_test_endpoints(
-        azure,
-        Credential::ApiKey(Zeroizing::new("azure-secret".to_owned())),
+    Factory::transport(
+        compat,
+        credential,
+        &private_http_policy(),
+        ResponseLimits::default(),
     )
     .await
     .unwrap();
+
+    let azure = Config::AzureOpenAi {
+        endpoint: "http://10.1.2.3".to_owned(),
+        deployment: "deployment".to_owned(),
+        api_version: "2024-10-21".to_owned(),
+    };
+    Factory::transport(
+        azure,
+        Credential::ApiKey(Zeroizing::new("azure-secret".to_owned())),
+        &private_http_policy(),
+        ResponseLimits::default(),
+    )
+    .await
+    .unwrap();
+}
+
+#[tokio::test]
+async fn response_limits_reach_every_http_connector_and_reject_zero() {
+    let limits = ResponseLimits {
+        max_response_bytes: 4 * 1024 * 1024,
+        max_event_bytes: 256 * 1024,
+    };
+    for config in [
+        Config::OpenAi { endpoint: None },
+        Config::Anthropic {
+            endpoint: None,
+            api_version: None,
+        },
+        Config::Gemini { endpoint: None },
+        Config::AzureOpenAi {
+            endpoint: "https://example.openai.azure.com".to_owned(),
+            deployment: "deployment".to_owned(),
+            api_version: "2024-10-21".to_owned(),
+        },
+        Config::VertexAi {
+            project: "project".to_owned(),
+            location: "us-central1".to_owned(),
+            probe_model: "model".to_owned(),
+            auth_mode: ProviderAuthMode::ApplicationDefault,
+        },
+    ] {
+        let configuration =
+            connector_configuration_with_policy(&config, &EgressPolicy::default(), limits).unwrap();
+        assert_eq!(configuration.response_limits(), Some(limits), "{config:?}");
+        let zero = ResponseLimits {
+            max_event_bytes: 0,
+            ..limits
+        };
+        assert!(
+            connector_configuration_with_policy(&config, &EgressPolicy::default(), zero).is_err(),
+            "{config:?}"
+        );
+    }
+    let bedrock = Config::Bedrock {
+        region: "us-east-1".to_owned(),
+        auth_mode: ProviderAuthMode::DefaultChain,
+    };
+    let configuration =
+        connector_configuration_with_policy(&bedrock, &EgressPolicy::default(), limits).unwrap();
+    assert_eq!(configuration.response_limits(), None);
 }

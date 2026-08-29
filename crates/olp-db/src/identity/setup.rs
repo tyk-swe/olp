@@ -99,6 +99,7 @@ impl Store {
             ("retention.requests_days", "30"),
             ("retention.usage_days", "90"),
             ("retention.audit_days", "365"),
+            ("limits.valkey_unavailable", "fail_closed"),
         ] {
             sqlx::query!(
                 "INSERT INTO settings (key, value, etag, updated_by, updated_at) \

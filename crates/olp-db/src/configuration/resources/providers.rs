@@ -1,5 +1,9 @@
-use super::{helpers::checked_configuration_count, *};
+use super::{
+    helpers::{checked_configuration_count, lock_provider},
+    *,
+};
 use crate::audit_events::{AuditEvent, record_audit_event, record_success};
+use crate::configuration::validation::transport_changed;
 
 impl Store {
     pub async fn list_providers(
@@ -101,50 +105,28 @@ impl Store {
         validate_provider_update(update)?;
         let etag = Uuid::now_v7();
         let mut transaction = self.pool().begin().await?;
-        let result = sqlx::query!(
-            "UPDATE providers SET name = $1, endpoint = $2, cloud_region = $3, cloud_project = $4, \
-                    deployment = $5, api_version = $6, auth_mode = $7, \
-                    active_credential_version_id = CASE \
-                      WHEN $7 IN ('adc', 'default_chain') THEN NULL \
-                      ELSE active_credential_version_id END, \
-                    state = 'draft'::provider_state, etag = $8, updated_at = now(), \
-                    last_probe_at = NULL, last_probe_status = NULL, last_probe_detail = NULL \
-             WHERE id = $9 AND etag = $10 AND state <> 'disabled'::provider_state",
-            update.name.trim(),
-            update.endpoint.as_deref().map(str::trim),
-            update.cloud_region.as_deref().map(str::trim),
-            update.cloud_project.as_deref().map(str::trim),
-            update.deployment.as_deref().map(str::trim),
-            update.api_version.as_deref().map(str::trim),
-            update.auth_mode.as_str(),
-            etag,
-            provider_id,
-            expected_etag
-        )
-        .execute(&mut *transaction)
-        .await?;
-        if result.rows_affected() != 1 {
-            let current = sqlx::query!(
-                "SELECT etag, state::text AS state FROM providers WHERE id = $1",
-                provider_id
-            )
-            .fetch_optional(&mut *transaction)
+        let current = lock_provider(&mut transaction, provider_id)
             .await?
             .ok_or(Error::NotFound)?;
-            return Err(if current.etag != expected_etag {
-                Error::PreconditionFailed
-            } else {
-                Error::InUse
-            });
+        if current.etag != expected_etag {
+            return Err(Error::PreconditionFailed);
         }
-        sqlx::query!(
-            "UPDATE model_capabilities SET source = 'declared', certified_at = NULL \
-             WHERE provider_model_id IN \
-               (SELECT id FROM provider_models WHERE provider_id = $1)",
-            provider_id
-        )
-        .execute(&mut *transaction)
-        .await?;
+        if current.state == "disabled" {
+            return Err(Error::InUse);
+        }
+        if transport_changed(&current, update) {
+            replace_provider_transport(&mut transaction, provider_id, update, etag).await?;
+        } else {
+            sqlx::query!(
+                "UPDATE providers SET name = $1, state = 'draft'::provider_state, etag = $2 \
+                 WHERE id = $3",
+                update.name.trim(),
+                etag,
+                provider_id
+            )
+            .execute(&mut *transaction)
+            .await?;
+        }
         record_success(
             &mut *transaction,
             self.provenance(),
@@ -461,4 +443,44 @@ fn provider_from_row(row: ProviderRow) -> Result<ProviderRecord, Error> {
         probe_model: row.probe_model,
         created_by_email: row.created_by_email,
     })
+}
+
+/// A transport edit invalidates every piece of evidence gathered against the
+/// previous configuration: the probe columns and all capability certification.
+async fn replace_provider_transport(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    provider_id: Uuid,
+    update: &UpdateProvider,
+    etag: Uuid,
+) -> Result<(), Error> {
+    sqlx::query!(
+        "UPDATE providers SET name = $1, endpoint = $2, cloud_region = $3, cloud_project = $4, \
+                deployment = $5, api_version = $6, auth_mode = $7, \
+                active_credential_version_id = CASE \
+                  WHEN $7 IN ('adc', 'default_chain') THEN NULL \
+                  ELSE active_credential_version_id END, \
+                state = 'draft'::provider_state, etag = $8, updated_at = now(), \
+                last_probe_at = NULL, last_probe_status = NULL, last_probe_detail = NULL \
+         WHERE id = $9",
+        update.name.trim(),
+        update.endpoint.as_deref().map(str::trim),
+        update.cloud_region.as_deref().map(str::trim),
+        update.cloud_project.as_deref().map(str::trim),
+        update.deployment.as_deref().map(str::trim),
+        update.api_version.as_deref().map(str::trim),
+        update.auth_mode.as_str(),
+        etag,
+        provider_id
+    )
+    .execute(&mut **transaction)
+    .await?;
+    sqlx::query!(
+        "UPDATE model_capabilities SET source = 'declared', certified_at = NULL \
+         WHERE provider_model_id IN \
+           (SELECT id FROM provider_models WHERE provider_id = $1)",
+        provider_id
+    )
+    .execute(&mut **transaction)
+    .await?;
+    Ok(())
 }

@@ -2,6 +2,7 @@ use std::{collections::BTreeSet, sync::Arc, time::Duration};
 
 use olp_db::{security::envelope::MasterKey, store::Store, valkey::RuntimeHintSubscriber};
 use olp_engine::inference::{circuit::Breaker, runtime::Manager};
+use olp_engine::providers::{EgressPolicy, connector::ResponseLimits};
 use tokio::{sync::watch, task::JoinHandle};
 use tracing::{error, info, warn};
 
@@ -14,12 +15,35 @@ pub(super) struct RuntimeHintSource {
     pub(super) channel: String,
 }
 
+/// Everything a background activation needs, cloned once per supervisor.
+#[derive(Clone)]
+pub(super) struct RuntimeActivator {
+    pub(super) runtime: Arc<Manager>,
+    pub(super) store: Store,
+    pub(super) transports: TransportRegistry,
+    pub(super) circuits: Breaker,
+    pub(super) master_key: Option<Arc<MasterKey>>,
+    pub(super) egress_policy: Arc<EgressPolicy>,
+    pub(super) response_limits: ResponseLimits,
+}
+
+impl RuntimeActivator {
+    async fn activate(&self) -> AppResult<bool> {
+        activate_latest_runtime(
+            &self.runtime,
+            &self.store,
+            &self.transports,
+            &self.circuits,
+            self.master_key.as_deref(),
+            &self.egress_policy,
+            self.response_limits,
+        )
+        .await
+    }
+}
+
 pub(super) async fn runtime_hint_supervisor(
-    runtime: Arc<Manager>,
-    store: Store,
-    transports: TransportRegistry,
-    circuits: Breaker,
-    master_key: Option<Arc<MasterKey>>,
+    activator: RuntimeActivator,
     source: RuntimeHintSource,
     mut shutdown: watch::Receiver<bool>,
 ) {
@@ -41,17 +65,9 @@ pub(super) async fn runtime_hint_supervisor(
                     }
                     hint = subscriber.recv() => {
                         hint?;
-                        match activate_latest_runtime(
-                            &runtime,
-                            &store,
-                            &transports,
-                            &circuits,
-                            master_key.as_deref(),
-                        )
-                        .await
-                        {
+                        match activator.activate().await {
                             Ok(true) => info!(
-                                generation = ?runtime.active_generation_ordinal(),
+                                generation = ?activator.runtime.active_generation_ordinal(),
                                 "runtime hint activated generation"
                             ),
                             Ok(false) => {}
@@ -81,11 +97,7 @@ pub(super) async fn runtime_hint_supervisor(
 }
 
 pub(super) fn spawn_runtime_poller(
-    runtime: Arc<Manager>,
-    store: Store,
-    transports: TransportRegistry,
-    circuits: Breaker,
-    master_key: Option<Arc<MasterKey>>,
+    activator: RuntimeActivator,
     mut shutdown: watch::Receiver<bool>,
 ) -> JoinHandle<()> {
     tokio::spawn(async move {
@@ -94,18 +106,10 @@ pub(super) fn spawn_runtime_poller(
         loop {
             tokio::select! {
                 _ = interval.tick() => {
-                    match activate_latest_runtime(
-                        &runtime,
-                        &store,
-                        &transports,
-                        &circuits,
-                        master_key.as_deref(),
-                    )
-                        .await
-                    {
+                    match activator.activate().await {
                         Ok(true) => {
                             info!(
-                                generation = ?runtime.active_generation_ordinal(),
+                                generation = ?activator.runtime.active_generation_ordinal(),
                                 "runtime generation activated"
                             );
                         }
@@ -133,6 +137,8 @@ pub(super) async fn activate_latest_runtime(
     transports: &TransportRegistry,
     circuits: &Breaker,
     master_key: Option<&MasterKey>,
+    egress_policy: &EgressPolicy,
+    response_limits: ResponseLimits,
 ) -> AppResult<bool> {
     let releases = store
         .recent_valid_runtime_releases_after(32, runtime.active_generation_ordinal())
@@ -161,9 +167,15 @@ pub(super) async fn activate_latest_runtime(
         }
         let mut candidate_transports = transports.snapshot();
         if let Some(master_key) = master_key
-            && let Err(error) =
-                load_runtime_transports(store, master_key, &snapshot, &mut candidate_transports)
-                    .await
+            && let Err(error) = load_runtime_transports(
+                store,
+                master_key,
+                &snapshot,
+                &mut candidate_transports,
+                egress_policy,
+                response_limits,
+            )
+            .await
         {
             rejected.push(format!("{}: {error}", release.sequence));
             continue;

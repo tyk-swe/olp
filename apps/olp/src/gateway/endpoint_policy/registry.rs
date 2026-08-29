@@ -1,19 +1,39 @@
 use axum::{http::Method, routing::MethodFilter};
 use olp_engine::domain::canonical::identity::{OperationKind, Surface};
 
-use crate::bootstrap::state::MAX_MEDIA_BODY_BYTES;
-
 use super::classification::TokenEstimate;
 
-const IMAGE_VARIATION_BODY_BYTES: usize = 55 * 1024 * 1024;
-const TRANSCRIPTION_BODY_BYTES: usize = 30 * 1024 * 1024;
-const VIDEO_CREATE_BODY_BYTES: usize = 25 * 1024 * 1024;
+/// Fraction of the configured media body cap one multipart endpoint may
+/// reserve, so per-endpoint sub-caps scale with the operator's setting.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct MediaShare {
+    numerator: u64,
+    denominator: u64,
+}
+
+impl MediaShare {
+    pub(crate) const FULL: Self = Self::new(1, 1);
+    const IMAGE_VARIATION: Self = Self::new(55, 64);
+    const TRANSCRIPTION: Self = Self::new(30, 64);
+    const VIDEO_CREATE: Self = Self::new(25, 64);
+
+    const fn new(numerator: u64, denominator: u64) -> Self {
+        Self {
+            numerator,
+            denominator,
+        }
+    }
+
+    pub(crate) const fn reservation_bytes(self, media_body_bytes: usize) -> u64 {
+        media_body_bytes as u64 / self.denominator * self.numerator
+    }
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum BodyAdmission {
     Standard,
     Media,
-    Multipart { reservation_bytes: u64 },
+    Multipart { share: MediaShare },
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -311,7 +331,7 @@ pub(super) static ENDPOINTS: &[EndpointSpec] = &[
         always_emit: false,
         token_estimate: TokenEstimate::Media,
         body_admission: BodyAdmission::Multipart {
-        reservation_bytes: MAX_MEDIA_BODY_BYTES as u64,
+            share: MediaShare::FULL,
         },
         handler: Handler::OpenAiImageEdits,
     ),
@@ -329,7 +349,7 @@ pub(super) static ENDPOINTS: &[EndpointSpec] = &[
         always_emit: false,
         token_estimate: TokenEstimate::Media,
         body_admission: BodyAdmission::Multipart {
-        reservation_bytes: IMAGE_VARIATION_BODY_BYTES as u64,
+            share: MediaShare::IMAGE_VARIATION,
         },
         handler: Handler::OpenAiImageVariations,
     ),
@@ -363,7 +383,7 @@ pub(super) static ENDPOINTS: &[EndpointSpec] = &[
         always_emit: false,
         token_estimate: TokenEstimate::Transcription,
         body_admission: BodyAdmission::Multipart {
-        reservation_bytes: TRANSCRIPTION_BODY_BYTES as u64,
+            share: MediaShare::TRANSCRIPTION,
         },
         handler: Handler::OpenAiTranscriptions,
     ),
@@ -381,7 +401,7 @@ pub(super) static ENDPOINTS: &[EndpointSpec] = &[
         always_emit: false,
         token_estimate: TokenEstimate::Media,
         body_admission: BodyAdmission::Multipart {
-        reservation_bytes: VIDEO_CREATE_BODY_BYTES as u64,
+            share: MediaShare::VIDEO_CREATE,
         },
         handler: Handler::OpenAiVideoCreate,
     ),

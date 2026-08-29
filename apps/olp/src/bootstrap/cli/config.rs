@@ -1,8 +1,15 @@
-use std::{net::SocketAddr, path::PathBuf};
+use std::{
+    net::{IpAddr, SocketAddr},
+    path::PathBuf,
+};
 
 use clap::{Args, Parser, Subcommand};
+use ipnet::IpNet;
+use olp_engine::providers::{EgressPolicy, connector::ResponseLimits};
 
 use crate::{
+    bootstrap::state::BodyLimits,
+    public_http::cors::CorsAllowedOrigins,
     public_http::proxy::TrustedProxyCidr,
     public_http::public_origin::PublicOrigin,
     public_http::request_admission::public::{
@@ -127,6 +134,22 @@ pub(super) struct ServeArgs {
         value_parser = parse_admission_capacity
     )]
     pub(super) http_max_in_flight_management_requests: usize,
+    /// Age after which an HTTP/2 connection receives GOAWAY so clients rebalance.
+    #[arg(
+        long,
+        env = "OLP_HTTP_CONNECTION_MAX_AGE_SECONDS",
+        default_value_t = 300,
+        value_parser = parse_connection_max_age_seconds
+    )]
+    pub(super) http_connection_max_age_seconds: u64,
+    /// Grace period for a draining connection; extended while responses stream.
+    #[arg(
+        long,
+        env = "OLP_HTTP_CONNECTION_DRAIN_TIMEOUT_SECONDS",
+        default_value_t = 30,
+        value_parser = parse_connection_drain_timeout_seconds
+    )]
+    pub(super) http_connection_drain_timeout_seconds: u64,
     #[arg(
         long,
         env = "OLP_PUBLIC_ORIGIN",
@@ -158,8 +181,184 @@ pub(super) struct ServeArgs {
         hide_default_value = true
     )]
     pub(super) trusted_proxy_cidrs: TrustedProxyCidrs,
+    /// Comma-separated browser origins allowed to call the inference gateway
+    /// cross-origin. Empty (the default) disables CORS; wildcards are refused.
+    #[arg(
+        long,
+        env = "OLP_GATEWAY_CORS_ALLOWED_ORIGINS",
+        default_value = "",
+        hide_default_value = true
+    )]
+    pub(super) gateway_cors_allowed_origins: CorsAllowedOrigins,
+    #[command(flatten)]
+    pub(super) provider_egress: ProviderEgressArgs,
+    #[command(flatten)]
+    pub(super) provider_response_limits: ProviderResponseLimitArgs,
+    #[command(flatten)]
+    pub(super) body_limits: BodyLimitArgs,
     #[arg(long, env = "OLP_MASTER_KEY_FILE")]
     pub(super) master_key_file: Option<PathBuf>,
+}
+
+#[derive(Clone, Debug, Args)]
+pub(super) struct BodyLimitArgs {
+    /// Largest JSON request body, before and after gzip inflation.
+    #[arg(
+        long,
+        env = "OLP_HTTP_MAX_JSON_BODY_BYTES",
+        default_value_t = BodyLimits::default().json_body_bytes,
+        value_parser = parse_json_body_bytes
+    )]
+    pub(super) http_max_json_body_bytes: usize,
+    /// Largest raw or multipart media request body; must stay within half
+    /// of the media spool capacity.
+    #[arg(
+        long,
+        env = "OLP_HTTP_MAX_MEDIA_BODY_BYTES",
+        default_value_t = BodyLimits::default().media_body_bytes,
+        value_parser = parse_media_body_bytes
+    )]
+    pub(super) http_max_media_body_bytes: usize,
+    /// Inline base64 media items accepted per JSON request.
+    #[arg(
+        long,
+        env = "OLP_HTTP_MAX_INLINE_MEDIA_ITEMS",
+        default_value_t = BodyLimits::default().inline_media_items,
+        value_parser = parse_inline_media_items
+    )]
+    pub(super) http_max_inline_media_items: usize,
+    /// Decoded size cap for one inline media item.
+    #[arg(
+        long,
+        env = "OLP_HTTP_MAX_INLINE_MEDIA_ITEM_BYTES",
+        default_value_t = BodyLimits::default().inline_media_item_bytes,
+        value_parser = parse_inline_media_bytes
+    )]
+    pub(super) http_max_inline_media_item_bytes: usize,
+    /// Decoded size cap for all inline media in one request.
+    #[arg(
+        long,
+        env = "OLP_HTTP_MAX_INLINE_MEDIA_TOTAL_BYTES",
+        default_value_t = BodyLimits::default().inline_media_total_bytes,
+        value_parser = parse_inline_media_bytes
+    )]
+    pub(super) http_max_inline_media_total_bytes: usize,
+}
+
+impl BodyLimitArgs {
+    pub(super) const fn limits(&self) -> BodyLimits {
+        BodyLimits {
+            json_body_bytes: self.http_max_json_body_bytes,
+            media_body_bytes: self.http_max_media_body_bytes,
+            inline_media_items: self.http_max_inline_media_items,
+            inline_media_item_bytes: self.http_max_inline_media_item_bytes,
+            inline_media_total_bytes: self.http_max_inline_media_total_bytes,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Args)]
+pub(super) struct ProviderResponseLimitArgs {
+    /// Largest provider response body buffered for non-streaming operations.
+    #[arg(
+        long,
+        env = "OLP_PROVIDER_MAX_RESPONSE_BYTES",
+        default_value_t = ResponseLimits::default().max_response_bytes,
+        value_parser = parse_provider_response_bytes
+    )]
+    pub(super) provider_max_response_bytes: usize,
+    /// Largest single streamed provider event; must not exceed the response cap.
+    #[arg(
+        long,
+        env = "OLP_PROVIDER_MAX_EVENT_BYTES",
+        default_value_t = ResponseLimits::default().max_event_bytes,
+        value_parser = parse_provider_event_bytes
+    )]
+    pub(super) provider_max_event_bytes: usize,
+}
+
+impl ProviderResponseLimitArgs {
+    pub(super) fn limits(&self) -> Result<ResponseLimits, String> {
+        if self.provider_max_event_bytes > self.provider_max_response_bytes {
+            return Err(
+                "OLP_PROVIDER_MAX_EVENT_BYTES must not exceed OLP_PROVIDER_MAX_RESPONSE_BYTES"
+                    .to_owned(),
+            );
+        }
+        Ok(ResponseLimits {
+            max_response_bytes: self.provider_max_response_bytes,
+            max_event_bytes: self.provider_max_event_bytes,
+        })
+    }
+}
+
+const KIB: usize = 1024;
+const MIB: usize = 1024 * KIB;
+
+fn parse_json_body_bytes(value: &str) -> Result<usize, String> {
+    parse_bytes_in(value, 64 * KIB, 64 * MIB, "JSON body limit")
+}
+
+fn parse_media_body_bytes(value: &str) -> Result<usize, String> {
+    parse_bytes_in(value, MIB, 1024 * MIB, "media body limit")
+}
+
+fn parse_inline_media_items(value: &str) -> Result<usize, String> {
+    parse_bytes_in(value, 1, 64, "inline media item count")
+}
+
+fn parse_inline_media_bytes(value: &str) -> Result<usize, String> {
+    parse_bytes_in(value, KIB, 64 * MIB, "inline media limit")
+}
+
+fn parse_provider_response_bytes(value: &str) -> Result<usize, String> {
+    parse_bytes_in(value, MIB, 256 * MIB, "provider response limit")
+}
+
+fn parse_provider_event_bytes(value: &str) -> Result<usize, String> {
+    parse_bytes_in(value, 64 * KIB, 256 * MIB, "provider event limit")
+}
+
+fn parse_bytes_in(value: &str, min: usize, max: usize, label: &str) -> Result<usize, String> {
+    let bytes = value
+        .parse::<usize>()
+        .map_err(|_| format!("{label} must be an integer"))?;
+    if !(min..=max).contains(&bytes) {
+        return Err(format!("{label} must be between {min} and {max}"));
+    }
+    Ok(bytes)
+}
+
+#[derive(Clone, Debug, Args)]
+pub(super) struct ProviderEgressArgs {
+    /// Comma-separated CIDRs exempt from the non-public egress denylist for
+    /// provider endpoints. Applied to literal hosts and every resolved
+    /// address. Empty (the default) keeps the public-only policy.
+    #[arg(
+        long,
+        env = "OLP_PROVIDER_EGRESS_ALLOW_CIDRS",
+        default_value = "",
+        hide_default_value = true
+    )]
+    pub(super) provider_egress_allow_cidrs: ProviderEgressAllowCidrs,
+    /// Comma-separated hostnames or IP literals whose provider endpoints may
+    /// use plain HTTP. Empty (the default) requires HTTPS everywhere.
+    #[arg(
+        long,
+        env = "OLP_PROVIDER_EGRESS_ALLOW_HTTP_HOSTS",
+        default_value = "",
+        hide_default_value = true
+    )]
+    pub(super) provider_egress_allow_http_hosts: ProviderEgressAllowHttpHosts,
+}
+
+impl ProviderEgressArgs {
+    pub(super) fn policy(&self) -> EgressPolicy {
+        EgressPolicy::new(
+            self.provider_egress_allow_cidrs.0.clone(),
+            self.provider_egress_allow_http_hosts.0.clone(),
+        )
+    }
 }
 
 fn parse_admission_capacity(value: &str) -> Result<usize, String> {
@@ -174,6 +373,24 @@ fn parse_admission_capacity(value: &str) -> Result<usize, String> {
     Ok(capacity)
 }
 
+fn parse_connection_max_age_seconds(value: &str) -> Result<u64, String> {
+    parse_seconds_in(value, 1, 86_400, "connection max age")
+}
+
+fn parse_connection_drain_timeout_seconds(value: &str) -> Result<u64, String> {
+    parse_seconds_in(value, 1, 3_600, "connection drain timeout")
+}
+
+fn parse_seconds_in(value: &str, min: u64, max: u64, label: &str) -> Result<u64, String> {
+    let seconds = value
+        .parse::<u64>()
+        .map_err(|_| format!("{label} must be an integer number of seconds"))?;
+    if !(min..=max).contains(&seconds) {
+        return Err(format!("{label} must be between {min} and {max} seconds"));
+    }
+    Ok(seconds)
+}
+
 #[derive(Clone, Debug, Args)]
 pub(super) struct DoctorArgs {
     #[command(flatten)]
@@ -184,6 +401,8 @@ pub(super) struct DoctorArgs {
     pub(super) master_key_file: PathBuf,
     #[arg(long, env = "OLP_AUTH_HMAC_KEY_FILE")]
     pub(super) auth_hmac_key_file: PathBuf,
+    #[command(flatten)]
+    pub(super) provider_egress: ProviderEgressArgs,
 }
 
 #[derive(Clone, Debug, Args)]
@@ -246,4 +465,61 @@ impl std::str::FromStr for TrustedProxyCidrs {
             .collect::<Result<Vec<_>, _>>()
             .map(Self)
     }
+}
+
+#[derive(Clone, Debug, Default)]
+pub(super) struct ProviderEgressAllowCidrs(pub(super) Vec<IpNet>);
+
+impl std::str::FromStr for ProviderEgressAllowCidrs {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        value
+            .split(',')
+            .map(str::trim)
+            .filter(|part| !part.is_empty())
+            .map(|part| {
+                part.parse::<IpNet>()
+                    .map_err(|_| format!("provider egress CIDR `{part}` is invalid"))
+            })
+            .collect::<Result<Vec<_>, _>>()
+            .map(Self)
+    }
+}
+
+#[derive(Clone, Debug, Default)]
+pub(super) struct ProviderEgressAllowHttpHosts(pub(super) Vec<String>);
+
+impl std::str::FromStr for ProviderEgressAllowHttpHosts {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        value
+            .split(',')
+            .map(str::trim)
+            .filter(|part| !part.is_empty())
+            .map(parse_plain_http_host)
+            .collect::<Result<Vec<_>, _>>()
+            .map(Self)
+    }
+}
+
+fn parse_plain_http_host(value: &str) -> Result<String, String> {
+    let literal = value.trim_start_matches('[').trim_end_matches(']');
+    if let Ok(address) = literal.parse::<IpAddr>() {
+        return Ok(address.to_string());
+    }
+    let hostname_shaped = !value.is_empty()
+        && value.len() <= 253
+        && !value.starts_with(['-', '.'])
+        && !value.ends_with(['-', '.'])
+        && value.bytes().all(|byte| {
+            byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-' || byte == b'.'
+        });
+    if !hostname_shaped {
+        return Err(format!(
+            "provider egress HTTP host `{value}` must be a lowercase hostname or an IP literal"
+        ));
+    }
+    Ok(value.to_owned())
 }

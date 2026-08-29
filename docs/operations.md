@@ -91,13 +91,16 @@ secrets, or master keys in tickets or diagnostic bundles.
 
 ### OpenAI-compatible capability certification
 
-Review at most 16 exact provider/model/operation tuples per compatible model,
+Review at most 64 exact provider/model/operation tuples per compatible model,
 then run **Server-certify capabilities**. The probe uses production codecs,
 requests at most one generated token, and persists no prompt or response. Only
 `succeeded` tuples become eligible; `partial` and `failed` remain declared.
-Remove unsupported media, asynchronous, or cross-surface claims. Re-certify
-after endpoint, model, or credential changes and require a timestamp for every
-enabled tuple before activation.
+Remove unsupported media, asynchronous, or cross-surface claims. Changing the
+endpoint, region, project, deployment, or API version resets every tuple to
+declared, so re-certify afterwards; renaming a provider, rotating its
+credential, or re-reviewing an unchanged tuple set keeps the certification
+(rotation still requires a fresh probe). Every enabled tuple needs a
+certification timestamp before activation.
 
 ## Backup and restore
 
@@ -204,7 +207,12 @@ stop admission and preserve Valkey/AOF and PostgreSQL before repair.
   last-known-good generation; restore PostgreSQL rather than restarting them.
 - **Valkey:** hard-limited keys fail closed; unlimited keys may continue.
   Readiness reports `status: degraded` and `limits: unavailable`; restore
-  Valkey and verify lease cleanup. Valkey server time controls fixed UTC-minute
+  Valkey and verify lease cleanup. To keep hard-limited keys serving during a
+  prolonged outage, an owner can set `limits.valkey_unavailable` to
+  `fail_open` in Settings (or `PUT /api/v1/settings/limits.valkey_unavailable`);
+  gateways apply it within 15 seconds, admit those keys without RPM/TPM/
+  concurrency enforcement, and count each admission in
+  `olp_limits_fail_open_total`. Revert to `fail_closed` once Valkey is back. Valkey server time controls fixed UTC-minute
   RPM/TPM windows, `Retry-After`, and lease expiry.
 - **Metadata persistence:** continue only with explicit acceptance of
   incomplete cost data. Preserve Stream state, suspend retention, record the

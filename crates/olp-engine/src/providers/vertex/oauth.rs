@@ -7,6 +7,7 @@ use std::{
 use arc_swap::ArcSwapOption;
 
 use crate::providers::gemini::{BearerTokenError, BearerTokenProvider, SecretBearerToken};
+use crate::providers::http_egress::EgressPolicy;
 use crate::providers::http_egress::pinned::{
     PinnedClientConfig, PinnedClientError, PinnedClientPool,
 };
@@ -312,9 +313,10 @@ impl OAuthEndpoint {
                     connect_timeout,
                     pool_idle_timeout: Some(POOL_IDLE_TIMEOUT),
                     pool_max_idle_per_host: Some(MAX_IDLE_CONNECTIONS_PER_HOST),
-                    allow_unsafe_target: self.allow_unsafe_test_endpoint,
+                    https_only: !self.allow_unsafe_test_endpoint,
                     user_agent: "openllmproxy",
                 },
+                &EgressPolicy::loopback_test_targets(self.allow_unsafe_test_endpoint),
             )
             .await
             .map_err(map_pinned_client_error)

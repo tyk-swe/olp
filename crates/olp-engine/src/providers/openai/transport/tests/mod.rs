@@ -257,6 +257,7 @@ fn fixture_request(streaming: bool) -> ProviderRequest {
             extensions: SourceExtensions::new(Surface::OpenAi, BTreeMap::new()),
         })),
         media: None,
+        max_inline_media_bytes: 1024 * 1024,
     }
 }
 

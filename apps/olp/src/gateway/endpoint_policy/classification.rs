@@ -5,7 +5,7 @@ use olp_engine::domain::{
     ids::RouteSlug,
 };
 
-use crate::bootstrap::state::{MAX_JSON_BODY_BYTES, MAX_MEDIA_BODY_BYTES};
+use crate::bootstrap::state::BodyLimits;
 use crate::public_http::relative_url::percent_decode;
 
 use super::registry::{BodyAdmission, ENDPOINTS, EndpointSpec, INVALID_ROUTE, Policy};
@@ -133,24 +133,26 @@ impl InferenceEndpoint {
         }
     }
 
-    pub(crate) fn body_limit(self, content_type: &str) -> usize {
+    pub(crate) fn body_limit(self, content_type: &str, limits: BodyLimits) -> usize {
         if matches!(
             self.body_admission(),
             BodyAdmission::Media | BodyAdmission::Multipart { .. }
         ) && is_media_content_type(content_type)
         {
-            MAX_MEDIA_BODY_BYTES
+            limits.media_body_bytes
         } else {
-            MAX_JSON_BODY_BYTES
+            limits.json_body_bytes
         }
     }
 
-    pub(crate) const fn multipart(self) -> Option<(GatewayCapability, u64)> {
+    pub(crate) const fn multipart(self, limits: BodyLimits) -> Option<(GatewayCapability, u64)> {
         let Some(capability) = self.capability() else {
             return None;
         };
         match self.body_admission() {
-            BodyAdmission::Multipart { reservation_bytes } => Some((capability, reservation_bytes)),
+            BodyAdmission::Multipart { share } => {
+                Some((capability, share.reservation_bytes(limits.media_body_bytes)))
+            }
             BodyAdmission::Standard | BodyAdmission::Media => None,
         }
     }

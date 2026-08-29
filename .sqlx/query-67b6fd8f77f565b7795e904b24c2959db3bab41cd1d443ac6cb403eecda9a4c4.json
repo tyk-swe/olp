@@ -1,0 +1,18 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO model_capabilities (provider_model_id, operation, surface, mode, source, certified_at) SELECT t.provider_model_id, t.operation, t.surface, t.mode, t.source, CASE WHEN t.source = 'certified' THEN now() ELSE NULL END FROM UNNEST($1::uuid[], $2::text[], $3::text[], $4::text[], $5::text[]) AS t(provider_model_id, operation, surface, mode, source) ON CONFLICT DO NOTHING",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "UuidArray",
+        "TextArray",
+        "TextArray",
+        "TextArray",
+        "TextArray"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "67b6fd8f77f565b7795e904b24c2959db3bab41cd1d443ac6cb403eecda9a4c4"
+}

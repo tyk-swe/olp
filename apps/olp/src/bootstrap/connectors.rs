@@ -7,9 +7,13 @@ use crate::{
 use olp_db::{security::envelope::MasterKey, store::Store};
 use olp_engine::{
     domain::{ids::ProviderId, ports::ProviderTransport, routing::snapshot::Snapshot},
-    providers::factory::{
-        assembly::Factory,
-        configuration::{Config, Credential},
+    providers::{
+        EgressPolicy,
+        connector::ResponseLimits,
+        factory::{
+            assembly::Factory,
+            configuration::{Config, Credential},
+        },
     },
 };
 use serde::Deserialize;
@@ -86,6 +90,8 @@ fn default_openai_base_url() -> String {
 pub(crate) async fn register_mounted_connectors(
     path: &Path,
     registry: &TransportRegistry,
+    egress_policy: &EgressPolicy,
+    response_limits: ResponseLimits,
 ) -> AppResult<()> {
     let bytes = tokio::fs::read(path).await?;
     let config: MountedConnectorConfig = serde_json::from_slice(&bytes)?;
@@ -97,6 +103,8 @@ pub(crate) async fn register_mounted_connectors(
                 endpoint: Some(provider.base_url),
             },
             Credential::ApiKey(Zeroizing::new(secret.trim().to_owned())),
+            egress_policy,
+            response_limits,
         )
         .await?;
         registry.register(ProviderId::from_uuid(provider.provider_id), transport);
@@ -111,6 +119,8 @@ pub(crate) async fn register_mounted_connectors(
                 api_version: provider.api_version,
             },
             Credential::ApiKey(Zeroizing::new(secret.trim().to_owned())),
+            egress_policy,
+            response_limits,
         )
         .await?;
         registry.register(ProviderId::from_uuid(provider.provider_id), transport);
@@ -152,6 +162,8 @@ pub(crate) async fn register_mounted_connectors(
                 auth_mode: provider.auth_mode.parse()?,
             },
             credential,
+            egress_policy,
+            response_limits,
         )
         .await?;
         registry.register(ProviderId::from_uuid(provider.provider_id), transport);
@@ -189,6 +201,8 @@ pub(crate) async fn register_mounted_connectors(
                 auth_mode: provider.auth_mode.parse()?,
             },
             credential,
+            egress_policy,
+            response_limits,
         )
         .await?;
         registry.register(ProviderId::from_uuid(provider.provider_id), transport);
@@ -201,12 +215,14 @@ pub(crate) async fn load_runtime_transports(
     master_key: &MasterKey,
     snapshot: &Snapshot,
     transports: &mut BTreeMap<ProviderId, Arc<dyn ProviderTransport>>,
+    egress_policy: &EgressPolicy,
+    response_limits: ResponseLimits,
 ) -> AppResult<()> {
     for provider in store.runtime_provider_configurations(snapshot).await? {
         let config = runtime_provider_config(&provider, snapshot)?;
         let credential = runtime_provider_credential(&provider, &config, master_key)?;
         let transport =
-            crate::bootstrap::provider_adapter::factory_transport(config, credential).await?;
+            Factory::transport(config, credential, egress_policy, response_limits).await?;
         transports.insert(provider.provider_id, transport);
     }
     Ok(())
@@ -218,6 +234,7 @@ mod tests {
 
     use crate::bootstrap::state::TransportRegistry;
     use olp_engine::domain::ids::ProviderId;
+    use olp_engine::providers::{EgressPolicy, connector::ResponseLimits};
     use serde_json::json;
     use tempfile::NamedTempFile;
 
@@ -266,9 +283,14 @@ mod tests {
         }));
         let registry = TransportRegistry::default();
 
-        register_mounted_connectors(config.path(), &registry)
-            .await
-            .unwrap();
+        register_mounted_connectors(
+            config.path(),
+            &registry,
+            &EgressPolicy::default(),
+            ResponseLimits::default(),
+        )
+        .await
+        .unwrap();
 
         let snapshot = registry.snapshot();
         assert!(snapshot.contains_key(&ProviderId::from_uuid(openai_provider_uuid)));
@@ -361,9 +383,14 @@ mod tests {
 
         for (document, expected_error) in cases {
             let config = write_connector_config(document);
-            let error = register_mounted_connectors(config.path(), &TransportRegistry::default())
-                .await
-                .unwrap_err();
+            let error = register_mounted_connectors(
+                config.path(),
+                &TransportRegistry::default(),
+                &EgressPolicy::default(),
+                ResponseLimits::default(),
+            )
+            .await
+            .unwrap_err();
             assert_eq!(error.to_string(), expected_error);
         }
     }
@@ -380,11 +407,15 @@ mod tests {
                 "credential_file": openai_credential.path(),
             }]
         }));
-        let openai_error =
-            register_mounted_connectors(openai_config.path(), &TransportRegistry::default())
-                .await
-                .unwrap_err()
-                .to_string();
+        let openai_error = register_mounted_connectors(
+            openai_config.path(),
+            &TransportRegistry::default(),
+            &EgressPolicy::default(),
+            ResponseLimits::default(),
+        )
+        .await
+        .unwrap_err()
+        .to_string();
         assert!(!openai_error.contains(openai_secret));
 
         let bedrock_access_key = "MOUNTEDACCESSKEY1";
@@ -402,11 +433,15 @@ mod tests {
                 "credential_file": bedrock_credential.path(),
             }]
         }));
-        let bedrock_error =
-            register_mounted_connectors(bedrock_config.path(), &TransportRegistry::default())
-                .await
-                .unwrap_err()
-                .to_string();
+        let bedrock_error = register_mounted_connectors(
+            bedrock_config.path(),
+            &TransportRegistry::default(),
+            &EgressPolicy::default(),
+            ResponseLimits::default(),
+        )
+        .await
+        .unwrap_err()
+        .to_string();
         assert!(!bedrock_error.contains(bedrock_access_key));
         assert!(!bedrock_error.contains(bedrock_secret));
     }

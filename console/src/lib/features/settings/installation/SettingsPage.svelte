@@ -20,7 +20,11 @@
     listProviderKinds,
     type ProviderKind
   } from '$lib/api/management/providers';
-  import { optionalDecimal } from './validation';
+  import {
+    LIMITS_OUTAGE_POLICIES,
+    isLimitsOutagePolicy,
+    optionalDecimal
+  } from './validation';
   import { errorMessage } from '$lib/api/http';
   import { useRole } from '$lib/auth/useRole.svelte';
 
@@ -90,7 +94,11 @@
     );
   }
 
+  const LIMITS_OUTAGE_KEY = 'limits.valkey_unavailable';
+
   function settingHelp(key: string) {
+    if (key === LIMITS_OUTAGE_KEY)
+      return 'What hard-limited API keys get while Valkey is unreachable: fail_closed rejects them with 503; fail_open admits them without rate limits and counts olp_limits_fail_open_total. Gateways apply a change within 15 seconds.';
     if (key.includes('retention'))
       return 'Number of days before detailed records are removed; hourly aggregates remain retained.';
     if (key.includes('origin'))
@@ -225,13 +233,26 @@
             >
           </div>
           <div class="setting-control">
-            <input
-              id={`setting-${setting.key}`}
-              value={values[setting.key] ?? setting.value}
-              oninput={(event) =>
-                (values[setting.key] = event.currentTarget.value)}
-              readonly={!canEditSettings}
-            /><button
+            {#if setting.key === LIMITS_OUTAGE_KEY}<select
+                id={`setting-${setting.key}`}
+                value={isLimitsOutagePolicy(
+                  values[setting.key] ?? setting.value
+                )
+                  ? (values[setting.key] ?? setting.value)
+                  : 'fail_closed'}
+                onchange={(event) =>
+                  (values[setting.key] = event.currentTarget.value)}
+                disabled={!canEditSettings}
+                >{#each LIMITS_OUTAGE_POLICIES as policy (policy)}<option
+                    value={policy}>{policy}</option
+                  >{/each}</select
+              >{:else}<input
+                id={`setting-${setting.key}`}
+                value={values[setting.key] ?? setting.value}
+                oninput={(event) =>
+                  (values[setting.key] = event.currentTarget.value)}
+                readonly={!canEditSettings}
+              />{/if}<button
               class="button button-secondary"
               type="button"
               onclick={() => save(setting)}

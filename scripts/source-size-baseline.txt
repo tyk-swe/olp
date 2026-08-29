@@ -24,7 +24,6 @@ fn:apps/olp/src/management/openapi.rs:complete_contract
 fn:apps/olp/src/management/playground.rs:execute_playground
 fn:apps/olp/src/management/playground.rs:playground_operation
 fn:apps/olp/src/public_http/image_response.rs:streaming_image_json_response
-fn:apps/olp/src/public_http/listener.rs:serve_connection
 fn:apps/olp/src/public_http/request_admission.rs:enforce_request_limits_inner
 fn:apps/olp/src/public_http/router.rs:compose_public_router
 fn:crates/olp-db/src/access.rs:create_api_key_record
@@ -33,7 +32,6 @@ fn:crates/olp-db/src/configuration/resources/api_keys.rs:rotate_api_key
 fn:crates/olp-db/src/configuration/resources/api_keys.rs:update_api_key
 fn:crates/olp-db/src/configuration/resources/credentials.rs:rotate_provider_credential
 fn:crates/olp-db/src/configuration/resources/models.rs:apply_compatible_capability_certification
-fn:crates/olp-db/src/configuration/resources/models.rs:set_provider_model_enabled
 fn:crates/olp-db/src/configuration/resources/revisions.rs:restore_provider_revision_as_draft
 fn:crates/olp-db/src/configuration/resources/routes.rs:replace_route_draft
 fn:crates/olp-db/src/configuration/resources/routes.rs:simulate_route_draft

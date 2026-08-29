@@ -153,10 +153,33 @@ config:
   # Comma-separated CIDRs for the ingress/controller peers allowed to provide
   # X-Forwarded-For. Required when this chart's Ingress is enabled.
   trustedProxyCidrs: ""
+  # Comma-separated browser origins allowed to call the inference gateway
+  # cross-origin. Empty disables CORS; wildcards are refused.
+  gatewayCorsAllowedOrigins: ""
+  # Comma-separated CIDRs exempt from the non-public provider egress denylist
+  # and hostnames/IP literals whose provider endpoints may use plain HTTP.
+  # Empty keeps the public-only HTTPS policy.
+  providerEgressAllowCidrs: ""
+  providerEgressAllowHttpHosts: ""
   publicOrigin: https://olp.example.com
   # Hide password sign-in when every operator authenticates through OIDC.
   localLoginEnabled: true
   databaseMaxConnections: 20
+  # HTTP/2 connections receive GOAWAY at this age so clients rebalance.
+  httpConnectionMaxAgeSeconds: 300
+  # Draining connections get this long, extended while responses still
+  # stream. Must stay below terminationGracePeriodSeconds - preStopDelaySeconds.
+  httpConnectionDrainTimeoutSeconds: 30
+  # Request body caps. httpMaxMediaBodyBytes must stay within half of
+  # mediaSpool.capacityBytes or every multipart request is refused.
+  httpMaxJsonBodyBytes: 2097152
+  httpMaxMediaBodyBytes: 67108864
+  httpMaxInlineMediaItems: 4
+  httpMaxInlineMediaItemBytes: 1048576
+  httpMaxInlineMediaTotalBytes: 2097152
+  # Provider response caps; the event cap must not exceed the response cap.
+  providerMaxResponseBytes: 16777216
+  providerMaxEventBytes: 1048576
 
 nodeSelector: {}
 tolerations: []

@@ -15,6 +15,7 @@ use olp_engine::domain::{
     provider_configuration::{Configuration, validate},
     routing::provider::ProviderKind,
 };
+use olp_engine::providers::{EgressPolicy, factory::assembly::Factory};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use uuid::Uuid;
@@ -261,7 +262,7 @@ pub(crate) async fn update_provider(
         .get_provider(provider_id)
         .await
         .map_err(map_configuration)?;
-    validate_provider_update(&current, &request)?;
+    validate_provider_update(&current, &request, &state.provider_egress_policy)?;
     let etag = store
         .update_provider(
             provider_id,
@@ -406,6 +407,7 @@ pub(crate) async fn restore_provider_as_draft(
 fn validate_provider_update(
     provider: &ProviderRecord,
     request: &UpdateProviderRequest,
+    egress_policy: &EgressPolicy,
 ) -> Result<(), Problem> {
     if request.auth_mode != provider.auth_mode {
         return Err(Problem::field_validation(
@@ -446,7 +448,7 @@ fn validate_provider_update(
         probe_model: provider.probe_model.as_deref(),
     })
     .map_err(|error| Problem::field_validation("provider", error.to_string()))?;
-    crate::bootstrap::provider_adapter::factory_validate(&config)
+    Factory::validate(&config, egress_policy)
         .map_err(|error| Problem::field_validation("provider", error.to_string()))
 }
 

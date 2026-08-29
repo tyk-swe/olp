@@ -347,7 +347,12 @@ impl Connector {
                 let mut wire = encode_request(generation).map_err(|error| {
                     protocol_error(format!("cannot encode Gemini generation request: {error}"))
                 })?;
-                hydrate_gemini_contents(&mut wire.contents, request.media.as_ref()).await?;
+                hydrate_gemini_contents(
+                    &mut wire.contents,
+                    request.media.as_ref(),
+                    request.max_inline_media_bytes,
+                )
+                .await?;
                 let body = serde_json::to_vec(&wire).map_err(|error| {
                     protocol_error(format!("cannot serialize Gemini request: {error}"))
                 })?;
@@ -368,10 +373,19 @@ impl Connector {
                     ));
                 }
                 let mut wire = encode_count_tokens(count, &request.attempt.upstream_model)?;
-                hydrate_gemini_contents(&mut wire.contents, request.media.as_ref()).await?;
+                hydrate_gemini_contents(
+                    &mut wire.contents,
+                    request.media.as_ref(),
+                    request.max_inline_media_bytes,
+                )
+                .await?;
                 if let Some(generation) = &mut wire.generate_content_request {
-                    hydrate_gemini_contents(&mut generation.contents, request.media.as_ref())
-                        .await?;
+                    hydrate_gemini_contents(
+                        &mut generation.contents,
+                        request.media.as_ref(),
+                        request.max_inline_media_bytes,
+                    )
+                    .await?;
                 }
                 validate_count_tokens_request(&wire).map_err(|error| {
                     protocol_error(format!("invalid Gemini count request: {error}"))

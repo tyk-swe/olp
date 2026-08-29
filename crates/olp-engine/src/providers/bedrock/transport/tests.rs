@@ -62,6 +62,7 @@ fn provider_request() -> ProviderRequest {
             extensions: SourceExtensions::default(),
         })),
         media: None,
+        max_inline_media_bytes: 1024 * 1024,
     }
 }
 

@@ -12,6 +12,7 @@ use crate::domain::{
 use crate::inference::{
     circuit::Breaker,
     error::Error as InferenceError,
+    events::MAX_COLLECTED_CANONICAL_EVENT_BYTES,
     events::collect,
     failover::{Context, ExecutionOutput, execute},
     limits::ReloadableLimiter,
@@ -38,6 +39,8 @@ pub struct Service {
     request_metadata: Option<Emitter>,
     circuits: Breaker,
     media_spool: Arc<dyn MediaSpool>,
+    max_collected_event_bytes: usize,
+    max_inline_media_bytes: usize,
 }
 
 impl Service {
@@ -55,7 +58,33 @@ impl Service {
             request_metadata,
             circuits,
             media_spool,
+            max_collected_event_bytes: MAX_COLLECTED_CANONICAL_EVENT_BYTES,
+            max_inline_media_bytes: 1024 * 1024,
         }
+    }
+
+    /// Caps the bytes buffered while collecting a non-streaming generation;
+    /// operators align it with the provider response cap.
+    #[must_use]
+    pub fn with_max_collected_event_bytes(mut self, bytes: usize) -> Self {
+        self.max_collected_event_bytes = bytes.max(1);
+        self
+    }
+
+    #[must_use]
+    pub const fn max_collected_event_bytes(&self) -> usize {
+        self.max_collected_event_bytes
+    }
+
+    #[must_use]
+    pub fn with_max_inline_media_bytes(mut self, bytes: usize) -> Self {
+        self.max_inline_media_bytes = bytes.max(1);
+        self
+    }
+
+    #[must_use]
+    pub const fn max_inline_media_bytes(&self) -> usize {
+        self.max_inline_media_bytes
     }
 
     #[must_use]
@@ -151,6 +180,7 @@ impl Service {
                 overall_timeout: route.overall_timeout.as_duration(),
                 max_attempts: route.max_attempts,
                 media_spool: Arc::clone(&self.media_spool),
+                max_inline_media_bytes: self.max_inline_media_bytes,
                 circuits: &self.circuits,
                 on_attempt_started: None,
             },

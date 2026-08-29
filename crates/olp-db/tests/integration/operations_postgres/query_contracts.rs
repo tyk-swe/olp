@@ -681,6 +681,38 @@ pub(super) async fn exercise(
         .unwrap();
     assert_eq!(usage_setting.value, "1");
 
+    let outage_setting = store
+        .settings()
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|setting| setting.key == "limits.valkey_unavailable")
+        .unwrap();
+    assert_eq!(outage_setting.value, "fail_closed");
+    assert_eq!(
+        store.limits_valkey_unavailable_policy().await.unwrap(),
+        LimitsValkeyUnavailablePolicy::FailClosed
+    );
+    assert!(matches!(
+        store
+            .update_setting(&outage_setting.key, "open", outage_setting.etag, owner_id)
+            .await,
+        Err(Error::Invalid(_))
+    ));
+    store
+        .update_setting(
+            &outage_setting.key,
+            "fail_open",
+            outage_setting.etag,
+            owner_id,
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        store.limits_valkey_unavailable_policy().await.unwrap(),
+        LimitsValkeyUnavailablePolicy::FailOpen
+    );
+
     QueryFixture {
         observed_at,
         loss_epoch: loss_snapshot.process_epoch,

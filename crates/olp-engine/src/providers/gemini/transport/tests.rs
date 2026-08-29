@@ -97,7 +97,7 @@ async fn same_protocol_inline_data_handle_is_rehydrated() {
         extra: BTreeMap::new(),
     }];
     let spool: Arc<dyn MediaSpool> = Arc::new(InlineSpool);
-    hydrate_gemini_contents(&mut contents, Some(&spool))
+    hydrate_gemini_contents(&mut contents, Some(&spool), 2)
         .await
         .unwrap();
     let Part::InlineData(part) = &contents[0].parts[0] else {
@@ -135,6 +135,7 @@ fn attempt(
         },
         operation: Arc::new(operation_value),
         media: None,
+        max_inline_media_bytes: 1024 * 1024,
     }
 }
 

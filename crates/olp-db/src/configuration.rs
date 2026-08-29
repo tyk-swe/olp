@@ -18,6 +18,7 @@ mod provider_lifecycle;
 pub mod resources;
 mod route_lifecycle;
 mod validation;
+pub use validation::{MAX_MODEL_CAPABILITY_TUPLES, MAX_PAGE_SIZE};
 
 #[derive(Debug, Error)]
 pub enum Error {
@@ -44,8 +45,6 @@ pub enum Error {
     },
     #[error("route draft does not exist")]
     RouteNotFound,
-    #[error("route draft is not validated")]
-    RouteNotValidated,
     #[error("route draft is invalid: {0}")]
     InvalidRoute(String),
     #[error(transparent)]

@@ -61,6 +61,7 @@ async fn pre_0010_usage_surfaces_survive_upgrade_and_rollup() {
         ("retention.requests_days", "30"),
         ("retention.usage_days", "90"),
         ("retention.audit_days", "365"),
+        ("limits.valkey_unavailable", "fail_closed"),
     ] {
         sqlx::query("INSERT INTO settings (key, value, etag, updated_by) VALUES ($1, $2, $3, $4)")
             .bind(key)

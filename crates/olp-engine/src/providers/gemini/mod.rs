@@ -13,6 +13,7 @@ use std::{fmt, sync::Arc};
 use crate::domain::ports::BoxFuture;
 use zeroize::Zeroizing;
 
+use crate::providers::EgressPolicy;
 use crate::providers::connector::Timeouts;
 use crate::providers::gemini::endpoint::Endpoint;
 
@@ -42,8 +43,15 @@ impl ConnectorConfig {
     /// Overrides the Developer API root. The root normally ends in `/v1beta/`
     /// (or `/v1/` when the stable surface is desired).
     pub fn with_base_url(base_url: &str) -> Result<Self, ConnectorBuildError> {
+        Self::with_base_url_and_policy(base_url, &EgressPolicy::default())
+    }
+
+    pub fn with_base_url_and_policy(
+        base_url: &str,
+        policy: &EgressPolicy,
+    ) -> Result<Self, ConnectorBuildError> {
         Ok(Self {
-            endpoint: Endpoint::parse(base_url)?,
+            endpoint: Endpoint::parse_with_policy(base_url, policy)?,
             ..Self::default()
         })
     }
@@ -66,6 +74,16 @@ impl ConnectorConfig {
         self.max_response_bytes = max_response_bytes;
         self.max_event_bytes = max_event_bytes;
         Ok(self)
+    }
+
+    #[cfg(test)]
+    pub(in crate::providers) fn response_limits(
+        &self,
+    ) -> crate::providers::connector::ResponseLimits {
+        crate::providers::connector::ResponseLimits {
+            max_response_bytes: self.max_response_bytes,
+            max_event_bytes: self.max_event_bytes,
+        }
     }
 
     #[cfg(any(test, feature = "test-util"))]

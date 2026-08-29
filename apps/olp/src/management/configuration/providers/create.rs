@@ -17,7 +17,7 @@ use olp_engine::domain::{
     provider_configuration::{Configuration, provider_kind_spec, validate},
     routing::provider::ProviderKind,
 };
-use olp_engine::providers::factory::configuration::Error;
+use olp_engine::providers::factory::{assembly::Factory, configuration::Error};
 use serde::{Deserialize, Serialize};
 use tracing::error;
 use utoipa::ToSchema;
@@ -246,9 +246,14 @@ pub(crate) async fn create_provider(
             .map(|credential| credential.expose().as_bytes()),
     )
     .map_err(|error| provider_connector_validation(kind, error))?;
-    let transport = crate::bootstrap::provider_adapter::factory_transport(config, credential)
-        .await
-        .map_err(|error| provider_connector_validation(kind, error))?;
+    let transport = Factory::transport(
+        config,
+        credential,
+        &state.provider_egress_policy,
+        state.provider_response_limits,
+    )
+    .await
+    .map_err(|error| provider_connector_validation(kind, error))?;
     let connector_available = true;
     let provider_id = Uuid::now_v7();
     let credential_id = request.credential.as_ref().map(|_| Uuid::now_v7());

@@ -179,9 +179,11 @@ pub(super) async fn exercise(store: &Store, actor: Uuid, master_key: &MasterKey)
         )
         .await
         .unwrap();
+    // Discovery changes the model set, not the transport: the probe stays
+    // valid, and only the declared capabilities keep activation closed.
     let discovered = store.get_provider(provider_id).await.unwrap();
-    assert!(discovered.last_probe_at.is_none());
-    assert!(discovered.last_probe_status.is_none());
+    assert!(discovered.last_probe_at.is_some());
+    assert_eq!(discovered.last_probe_status.as_deref(), Some("succeeded"));
     assert!(matches!(
         store
             .record_provider_probe(
@@ -194,31 +196,18 @@ pub(super) async fn exercise(store: &Store, actor: Uuid, master_key: &MasterKey)
             .await,
         Err(Error::PreconditionFailed)
     ));
-    let after_stale_probe = store.get_provider(provider_id).await.unwrap();
-    assert!(after_stale_probe.last_probe_at.is_none());
-    assert!(after_stale_probe.last_probe_status.is_none());
     assert!(matches!(
         store
             .activate_provider(
                 provider_id,
                 discovered_etag,
                 actor,
-                "provider-activate-after-stale-probe-01",
+                "provider-activate-with-declared-capabilities-01",
             )
             .await,
         Err(Error::ProviderIncomplete)
     ));
     certify_all_capabilities(store, provider_id).await;
-    store
-        .record_provider_probe(
-            provider_id,
-            discovered_etag,
-            true,
-            "fresh post-discovery probe",
-            actor,
-        )
-        .await
-        .unwrap();
     let activated = store
         .activate_provider(
             provider_id,
@@ -282,7 +271,29 @@ pub(super) async fn exercise(store: &Store, actor: Uuid, master_key: &MasterKey)
         .await
         .unwrap();
     assert_eq!(staged_secrets[0].credential_id, Some(credential_id));
-    certify_all_capabilities(store, provider_id).await;
+    // Rotation keeps certified capabilities but demands a probe with the new
+    // credential before the draft can activate.
+    let rotated = store.get_provider(provider_id).await.unwrap();
+    assert!(rotated.last_probe_at.is_none());
+    assert!(
+        provider_models(store, provider_id).await[0]
+            .capabilities
+            .iter()
+            .all(|capability| {
+                capability.source == olp_engine::domain::provider::CapabilitySource::Certified
+            })
+    );
+    assert!(matches!(
+        store
+            .activate_provider(
+                provider_id,
+                rotation.etag,
+                actor,
+                "provider-rotate-activate-unprobed-0001",
+            )
+            .await,
+        Err(Error::ProviderIncomplete)
+    ));
     store
         .record_provider_probe(
             provider_id,

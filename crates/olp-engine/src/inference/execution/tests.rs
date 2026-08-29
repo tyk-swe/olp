@@ -128,6 +128,7 @@ fn routed_events(success: bool, effects: Arc<CleanupEffects>) -> RoutedEvents {
         request_id,
         route_slug,
         accounting,
+        max_collected_bytes: crate::inference::events::MAX_COLLECTED_CANONICAL_EVENT_BYTES,
     }
 }
 

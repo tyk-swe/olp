@@ -33,6 +33,7 @@ http-body = "1"
 http-body-util = "0.1"
 hyper = { version = "1", features = ["http1", "http2", "server"] }
 hyper-util = { version = "0.1", features = ["http1", "http2", "server", "server-auto", "service", "tokio"] }
+flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
 ipnet = "2"
 jsonwebtoken = { version = "11", default-features = false, features = ["aws_lc_rs"] }
 percent-encoding = "2"
@@ -61,6 +62,7 @@ tokio = { version = "1", features = ["fs", "macros", "net", "rt-multi-thread", "
 tower = { version = "0.5", features = ["limit", "load-shed", "timeout", "util"] }
 tower-http = { version = "0.7", features = [
     "catch-panic",
+    "cors",
     "fs",
     "request-id",
     "sensitive-headers",

@@ -5,6 +5,26 @@ use super::cursor::Error;
 use crate::audit_events::{AuditEvent, record_audit_event};
 use crate::store::Store;
 
+pub const LIMITS_VALKEY_UNAVAILABLE_KEY: &str = "limits.valkey_unavailable";
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum LimitsValkeyUnavailablePolicy {
+    #[default]
+    FailClosed,
+    FailOpen,
+}
+
+impl LimitsValkeyUnavailablePolicy {
+    #[must_use]
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "fail_closed" => Some(Self::FailClosed),
+            "fail_open" => Some(Self::FailOpen),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct SettingRecord {
     pub key: String,
@@ -33,6 +53,21 @@ impl Store {
             .collect())
     }
 
+    pub async fn limits_valkey_unavailable_policy(
+        &self,
+    ) -> Result<LimitsValkeyUnavailablePolicy, Error> {
+        let value = sqlx::query_scalar!(
+            "SELECT value FROM settings WHERE key = $1",
+            LIMITS_VALKEY_UNAVAILABLE_KEY
+        )
+        .fetch_optional(self.pool())
+        .await?;
+        Ok(value
+            .as_deref()
+            .and_then(LimitsValkeyUnavailablePolicy::parse)
+            .unwrap_or_default())
+    }
+
     pub async fn update_setting(
         &self,
         key: &str,
@@ -55,6 +90,13 @@ impl Store {
         {
             return Err(Error::Invalid(
                 "retention days must be an integer between 1 and 3650".to_owned(),
+            ));
+        }
+        if key == LIMITS_VALKEY_UNAVAILABLE_KEY
+            && LimitsValkeyUnavailablePolicy::parse(value).is_none()
+        {
+            return Err(Error::Invalid(
+                "limits.valkey_unavailable must be fail_closed or fail_open".to_owned(),
             ));
         }
         let mut transaction = self.pool().begin().await?;

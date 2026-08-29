@@ -558,3 +558,82 @@ async fn issued_lease_survives_backend_replacement_and_clear() {
     assert_eq!(second_calls.releases.load(Ordering::Relaxed), 0);
     assert!(limiter.current().is_none());
 }
+
+fn hard_limited_key() -> ApiKey {
+    api_key(ApiKeyLimits {
+        requests_per_minute: NonZeroU32::new(10),
+        tokens_per_minute: NonZeroU64::new(100),
+        concurrency: None,
+    })
+}
+
+#[tokio::test]
+async fn fail_open_policy_admits_when_backend_missing() {
+    let key = hard_limited_key();
+    let limiter = ReloadableLimiter::default();
+    limiter.mark_configured();
+    limiter.set_outage_policy(LimitOutagePolicy::FailOpen);
+    assert_eq!(limiter.outage_policy(), LimitOutagePolicy::FailOpen);
+    for pre_reserved in [None, Some(1)] {
+        assert!(
+            reserve(&limiter, &key, &text_count("123456789012"), pre_reserved)
+                .await
+                .unwrap()
+                .is_none()
+        );
+    }
+    let calls = Arc::new(BackendCalls::default());
+    limiter.install(backend(&calls, BackendBehavior::Failure));
+    assert!(
+        reserve(&limiter, &key, &text_count("1234"), None)
+            .await
+            .unwrap()
+            .is_none()
+    );
+    assert_eq!(limiter.fail_open_total(), 3);
+}
+
+#[tokio::test]
+async fn fail_open_policy_requires_configured_valkey() {
+    let key = hard_limited_key();
+    let limiter = ReloadableLimiter::default();
+    limiter.set_outage_policy(LimitOutagePolicy::FailOpen);
+    assert_eq!(
+        reserve(&limiter, &key, &text_count("1234"), None)
+            .await
+            .err()
+            .unwrap()
+            .code(),
+        "distributed_limits_unavailable"
+    );
+    assert_eq!(limiter.fail_open_total(), 0);
+}
+
+#[tokio::test]
+async fn exceeded_limits_still_reject_under_fail_open() {
+    let key = hard_limited_key();
+    let limiter = ReloadableLimiter::default();
+    limiter.mark_configured();
+    limiter.set_outage_policy(LimitOutagePolicy::FailOpen);
+    let calls = Arc::new(BackendCalls::default());
+    limiter.install(backend(
+        &calls,
+        BackendBehavior::Exceeded(LimitDimension::Tokens),
+    ));
+    let error = reserve(&limiter, &key, &text_count("123456789012"), None)
+        .await
+        .err()
+        .unwrap();
+    assert_eq!(error.code(), "rate_limit_exceeded");
+    assert_eq!(limiter.fail_open_total(), 0);
+    limiter.set_outage_policy(LimitOutagePolicy::FailClosed);
+    limiter.clear();
+    assert_eq!(
+        reserve(&limiter, &key, &text_count("1234"), None)
+            .await
+            .err()
+            .unwrap()
+            .code(),
+        "distributed_limits_unavailable"
+    );
+}

@@ -123,14 +123,6 @@ impl Store {
         if restored.rows_affected() != 1 {
             return Err(Error::InUse);
         }
-        sqlx::query!(
-            "UPDATE model_capabilities SET source = 'declared', certified_at = NULL \
-             WHERE provider_model_id IN \
-               (SELECT id FROM provider_models WHERE provider_id = $1)",
-            provider_id
-        )
-        .execute(&mut *transaction)
-        .await?;
         record_success(
             &mut *transaction,
             self.provenance(),

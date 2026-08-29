@@ -45,7 +45,12 @@ pub(super) async fn execute(
     let body = if responses_endpoint {
         let mut wire = encode_response_create(generation, &request.attempt.upstream_model)
             .map_err(|error| protocol_encode_error("Responses", error))?;
-        hydrate_responses_media(&mut wire.input, request.media.as_ref()).await?;
+        hydrate_responses_media(
+            &mut wire.input,
+            request.media.as_ref(),
+            request.max_inline_media_bytes,
+        )
+        .await?;
         serialize_wire("Responses", &wire)?
     } else {
         let mut wire = encode::chat_completion(generation, &request.attempt.upstream_model)
@@ -53,7 +58,12 @@ pub(super) async fn execute(
         if streaming {
             require_stream_usage(&mut wire)?;
         }
-        hydrate_chat_media(&mut wire, request.media.as_ref()).await?;
+        hydrate_chat_media(
+            &mut wire,
+            request.media.as_ref(),
+            request.max_inline_media_bytes,
+        )
+        .await?;
         serialize_wire("chat", &wire)?
     };
 

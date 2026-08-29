@@ -53,6 +53,23 @@ impl ConnectorConfig {
         })
     }
 
+    pub(in crate::providers) fn with_response_limits(
+        mut self,
+        limits: crate::providers::connector::ResponseLimits,
+    ) -> Result<Self, ConnectorBuildError> {
+        self.inner = self
+            .inner
+            .with_response_limits(limits.max_response_bytes, limits.max_event_bytes)?;
+        Ok(self)
+    }
+
+    #[cfg(test)]
+    pub(in crate::providers) fn response_limits(
+        &self,
+    ) -> crate::providers::connector::ResponseLimits {
+        self.inner.response_limits()
+    }
+
     #[cfg(any(test, feature = "test-util"))]
     pub(in crate::providers) fn for_local_test(
         project: &str,

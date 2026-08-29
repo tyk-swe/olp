@@ -1,7 +1,25 @@
 {{- $root := . -}}
 {{- $trustedProxyCidrs := trim $root.Values.config.trustedProxyCidrs -}}
+{{- $gatewayCorsAllowedOrigins := trim $root.Values.config.gatewayCorsAllowedOrigins -}}
+{{- $providerEgressAllowCidrs := trim $root.Values.config.providerEgressAllowCidrs -}}
+{{- $providerEgressAllowHttpHosts := trim $root.Values.config.providerEgressAllowHttpHosts -}}
 {{- if ge (int $root.Values.preStopDelaySeconds) (int $root.Values.terminationGracePeriodSeconds) -}}
 {{- fail "preStopDelaySeconds must be less than terminationGracePeriodSeconds" -}}
+{{- end -}}
+{{- if ge (int $root.Values.config.httpConnectionDrainTimeoutSeconds) (sub (int $root.Values.terminationGracePeriodSeconds) (int $root.Values.preStopDelaySeconds)) -}}
+{{- fail "config.httpConnectionDrainTimeoutSeconds must be less than terminationGracePeriodSeconds minus preStopDelaySeconds" -}}
+{{- end -}}
+{{- if gt (int64 $root.Values.config.httpMaxMediaBodyBytes) (div (int64 $root.Values.mediaSpool.capacityBytes) 2) -}}
+{{- fail "config.httpMaxMediaBodyBytes must not exceed half of mediaSpool.capacityBytes" -}}
+{{- end -}}
+{{- if gt (int64 $root.Values.config.httpMaxInlineMediaItemBytes) (int64 $root.Values.config.httpMaxInlineMediaTotalBytes) -}}
+{{- fail "config.httpMaxInlineMediaItemBytes must not exceed config.httpMaxInlineMediaTotalBytes" -}}
+{{- end -}}
+{{- if gt (int64 $root.Values.config.httpMaxInlineMediaTotalBytes) (int64 $root.Values.config.httpMaxJsonBodyBytes) -}}
+{{- fail "config.httpMaxInlineMediaTotalBytes must not exceed config.httpMaxJsonBodyBytes" -}}
+{{- end -}}
+{{- if gt (int64 $root.Values.config.providerMaxEventBytes) (int64 $root.Values.config.providerMaxResponseBytes) -}}
+{{- fail "config.providerMaxEventBytes must not exceed config.providerMaxResponseBytes" -}}
 {{- end -}}
 {{- if and $root.Values.ingress.enabled (empty $trustedProxyCidrs) -}}
 {{- fail "config.trustedProxyCidrs is required when ingress is enabled" -}}
@@ -72,6 +90,24 @@ spec:
               value: {{ $component.httpMaxInFlightInferenceRequests | quote }}
             - name: OLP_HTTP_MAX_IN_FLIGHT_MANAGEMENT_REQUESTS
               value: {{ $component.httpMaxInFlightManagementRequests | quote }}
+            - name: OLP_HTTP_CONNECTION_MAX_AGE_SECONDS
+              value: {{ $root.Values.config.httpConnectionMaxAgeSeconds | quote }}
+            - name: OLP_HTTP_CONNECTION_DRAIN_TIMEOUT_SECONDS
+              value: {{ $root.Values.config.httpConnectionDrainTimeoutSeconds | quote }}
+            - name: OLP_HTTP_MAX_JSON_BODY_BYTES
+              value: {{ printf "%d" (int64 $root.Values.config.httpMaxJsonBodyBytes) | quote }}
+            - name: OLP_HTTP_MAX_MEDIA_BODY_BYTES
+              value: {{ printf "%d" (int64 $root.Values.config.httpMaxMediaBodyBytes) | quote }}
+            - name: OLP_HTTP_MAX_INLINE_MEDIA_ITEMS
+              value: {{ $root.Values.config.httpMaxInlineMediaItems | quote }}
+            - name: OLP_HTTP_MAX_INLINE_MEDIA_ITEM_BYTES
+              value: {{ printf "%d" (int64 $root.Values.config.httpMaxInlineMediaItemBytes) | quote }}
+            - name: OLP_HTTP_MAX_INLINE_MEDIA_TOTAL_BYTES
+              value: {{ printf "%d" (int64 $root.Values.config.httpMaxInlineMediaTotalBytes) | quote }}
+            - name: OLP_PROVIDER_MAX_RESPONSE_BYTES
+              value: {{ printf "%d" (int64 $root.Values.config.providerMaxResponseBytes) | quote }}
+            - name: OLP_PROVIDER_MAX_EVENT_BYTES
+              value: {{ printf "%d" (int64 $root.Values.config.providerMaxEventBytes) | quote }}
             - name: OLP_PUBLIC_ORIGIN
               value: {{ $root.Values.config.publicOrigin | quote }}
             - name: OLP_LOCAL_LOGIN_ENABLED
@@ -101,6 +137,18 @@ spec:
             {{- if $trustedProxyCidrs }}
             - name: OLP_TRUSTED_PROXY_CIDRS
               value: {{ $trustedProxyCidrs | quote }}
+            {{- end }}
+            {{- if and (eq $componentName "gateway") $gatewayCorsAllowedOrigins }}
+            - name: OLP_GATEWAY_CORS_ALLOWED_ORIGINS
+              value: {{ $gatewayCorsAllowedOrigins | quote }}
+            {{- end }}
+            {{- if $providerEgressAllowCidrs }}
+            - name: OLP_PROVIDER_EGRESS_ALLOW_CIDRS
+              value: {{ $providerEgressAllowCidrs | quote }}
+            {{- end }}
+            {{- if $providerEgressAllowHttpHosts }}
+            - name: OLP_PROVIDER_EGRESS_ALLOW_HTTP_HOSTS
+              value: {{ $providerEgressAllowHttpHosts | quote }}
             {{- end }}
             {{- if and (eq $componentName "control") $root.Values.config.bootstrapTokenSecretName }}
             - name: OLP_BOOTSTRAP_TOKEN_FILE

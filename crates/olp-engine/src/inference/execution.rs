@@ -23,7 +23,7 @@ use crate::inference::{
         usage_from_result,
     },
     error::Error as InferenceError,
-    events::{MAX_COLLECTED_CANONICAL_EVENT_BYTES, collect_provider_events_with_observer},
+    events::collect_provider_events_with_observer,
     failover::{Context, ExecutionOutput, ExecutionSuccess, execute},
     limits::{Reservation, release, reserve},
     media_lifecycle::{RequestMediaGuard, operation_media_handles},
@@ -111,6 +111,7 @@ pub struct RoutedEvents {
     pub request_id: uuid::Uuid,
     pub route_slug: RouteSlug,
     accounting: RequestAccountingGuard,
+    max_collected_bytes: usize,
 }
 
 /// The event stream of a routed execution once its accounting guard has been
@@ -139,6 +140,7 @@ impl RoutedEvents {
     }
 
     pub async fn collect(self) -> Result<CompletedEvents, InferenceError> {
+        let max_collected_bytes = self.max_collected_bytes;
         let (stream, mut accounting) = self.into_parts();
         let RoutedStream {
             first,
@@ -151,7 +153,7 @@ impl RoutedEvents {
             first,
             &mut events,
             deadline,
-            MAX_COLLECTED_CANONICAL_EVENT_BYTES,
+            max_collected_bytes,
             &mut |event| accounting.usage_mut().observe(event),
         )
         .await;
@@ -344,6 +346,7 @@ impl Service {
             accounting,
             request_id: context.request_id.as_uuid(),
             route_slug: context.route_slug,
+            max_collected_bytes: self.max_collected_event_bytes(),
         })
     }
 
@@ -463,6 +466,7 @@ impl Service {
                     overall_timeout: route.overall_timeout.as_duration(),
                     max_attempts: route.max_attempts,
                     media_spool: self.media_spool().clone(),
+                    max_inline_media_bytes: self.max_inline_media_bytes(),
                     circuits: self.circuits(),
                     on_attempt_started: Some(&mut record_attempt_started),
                 },
@@ -687,6 +691,7 @@ impl Service {
                     overall_timeout: route.overall_timeout.as_duration(),
                     max_attempts: route.max_attempts,
                     media_spool: self.media_spool().clone(),
+                    max_inline_media_bytes: self.max_inline_media_bytes(),
                     circuits: self.circuits(),
                     on_attempt_started: Some(&mut record_attempt_started),
                 },

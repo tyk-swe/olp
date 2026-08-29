@@ -10,6 +10,7 @@ use crate::domain::{ports::BoxFuture, routing::provider::ProviderKind};
 use zeroize::Zeroizing;
 
 use crate::providers::{
+    EgressPolicy,
     bedrock::{
         ConnectorConfig as BedrockConnectorConfig, Credentials, StaticCredentials,
         transport::Connector as BedrockConnector,
@@ -116,9 +117,11 @@ pub async fn local_provider(
 }
 
 async fn factory_provider(config: Config) -> Result<Facade, LocalProviderError> {
-    Factory::create_with_unsafe_test_endpoints(
+    Factory::create(
         config,
         Credential::ApiKey(Zeroizing::new(API_KEY.to_owned())),
+        &EgressPolicy::unsafe_test_targets(),
+        crate::providers::connector::ResponseLimits::default(),
     )
     .await
     .map_err(|error| LocalProviderError(error.to_string()))

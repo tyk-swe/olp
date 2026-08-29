@@ -7,7 +7,8 @@ use axum::{
 use chrono::{DateTime, Utc};
 use futures::{StreamExt as _, stream};
 use olp_db::{
-    configuration::Error, configuration::resources::CapabilityCertificationOutcome,
+    configuration::Error, configuration::MAX_MODEL_CAPABILITY_TUPLES,
+    configuration::resources::CapabilityCertificationOutcome,
     configuration::resources::CapabilityRecord, configuration::resources::DiscoveredModelInput,
     configuration::resources::PROVIDER_REVISION_DIFF_MODEL_LIMIT,
     configuration::resources::ProviderModelInventoryRecord,
@@ -392,6 +393,9 @@ pub(crate) struct DiscoveredModelRequest {
 /// load from one revision, or its revisions become impossible to compare.
 const DISCOVERY_MODEL_LIMIT: usize = PROVIDER_REVISION_DIFF_MODEL_LIMIT;
 
+/// Certification probes hit the upstream provider with real requests.
+const CERTIFICATION_PROBE_CONCURRENCY: usize = 8;
+
 fn validate_discovered_model_count(field: &'static str, count: usize) -> Result<(), Problem> {
     if count > DISCOVERY_MODEL_LIMIT {
         return Err(Problem::field_validation(
@@ -475,8 +479,9 @@ pub(crate) async fn discover_provider_models(
 #[derive(Debug, Deserialize, ToSchema)]
 pub(crate) struct SetModelRequest {
     pub enabled: bool,
-    /// Explicit operator-reviewed capability tuples. Their provenance is
-    /// recorded as `declared`; certification/probe jobs may promote provenance
+    /// Explicit operator-reviewed capability tuples. New tuples are recorded
+    /// as `declared`, tuples already stored keep their provenance, and tuples
+    /// left out are removed. Certification/probe jobs promote provenance
     /// separately and cannot be forged by the browser.
     #[serde(default)]
     pub capabilities: Vec<CapabilityInput>,
@@ -581,10 +586,12 @@ pub(crate) async fn certify_provider_model(
         .get_provider_model(provider_id, model_id)
         .await
         .map_err(map_configuration)?;
-    if model.capabilities.is_empty() || model.capabilities.len() > 16 {
+    if model.capabilities.is_empty() || model.capabilities.len() > MAX_MODEL_CAPABILITY_TUPLES {
         return Err(Problem::field_validation(
             "capabilities",
-            "Review between 1 and 16 capability tuples before certification.",
+            format!(
+                "Review between 1 and {MAX_MODEL_CAPABILITY_TUPLES} capability tuples before certification."
+            ),
         ));
     }
     let upstream_model = model.upstream_model;
@@ -598,7 +605,7 @@ pub(crate) async fn certify_provider_model(
             Ok::<_, Problem>(certification_item(capability, result))
         }
     }))
-    .buffered(4)
+    .buffered(CERTIFICATION_PROBE_CONCURRENCY)
     .collect::<Vec<_>>()
     .await
     .into_iter()

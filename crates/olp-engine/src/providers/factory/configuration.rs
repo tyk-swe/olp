@@ -3,6 +3,9 @@ use std::fmt;
 use crate::domain::{provider::ProviderAuthMode, routing::provider::ProviderKind};
 use zeroize::Zeroizing;
 
+use crate::providers::EgressPolicy;
+use crate::providers::connector::ResponseLimits;
+
 use crate::providers::anthropic::{
     ApiKey as AnthropicApiKey, ConnectorConfig as AnthropicConnectorConfig,
 };
@@ -195,16 +198,11 @@ pub(super) fn validate_provider_credential(
 
 /// Validates connector configuration without acquiring default credentials or
 /// issuing network I/O.
-pub(super) fn validate_connector_configuration(config: &Config) -> Result<(), Error> {
-    connector_configuration(config).map(|_| ())
-}
-
-#[cfg(any(test, feature = "test-util"))]
-pub(super) fn validate_connector_configuration_with_policy(
+pub(super) fn validate_connector_configuration(
     config: &Config,
-    allow_unsafe_test_targets: bool,
+    policy: &EgressPolicy,
 ) -> Result<(), Error> {
-    connector_configuration_with_policy(config, allow_unsafe_test_targets).map(|_| ())
+    connector_configuration_with_policy(config, policy, ResponseLimits::default()).map(|_| ())
 }
 
 /// Validates only a supplied credential. Callers retain their own encryption,
@@ -281,6 +279,20 @@ pub(super) enum ConnectorConfiguration {
     AzureOpenAi(Box<AzureOpenAiConnectorConfig>),
 }
 
+impl ConnectorConfiguration {
+    #[cfg(test)]
+    pub(super) fn response_limits(&self) -> Option<ResponseLimits> {
+        match self {
+            Self::OpenAi(configuration) => Some(configuration.response_limits()),
+            Self::Anthropic(configuration) => Some(configuration.response_limits()),
+            Self::Gemini(configuration) => Some(configuration.response_limits()),
+            Self::Vertex { configuration, .. } => Some(configuration.response_limits()),
+            Self::AzureOpenAi(configuration) => Some(configuration.response_limits()),
+            Self::Bedrock { .. } => None,
+        }
+    }
+}
+
 pub(super) enum VertexAuthMode {
     ApplicationDefault,
     ServiceAccount,
@@ -291,23 +303,29 @@ pub(super) enum BedrockAuthMode {
     Static,
 }
 
-pub(super) fn connector_configuration(config: &Config) -> Result<ConnectorConfiguration, Error> {
-    connector_configuration_with_policy(config, false)
-}
-
 pub(super) fn connector_configuration_with_policy(
     config: &Config,
-    allow_unsafe_test_targets: bool,
+    policy: &EgressPolicy,
+    limits: ResponseLimits,
 ) -> Result<ConnectorConfiguration, Error> {
+    let (max_response_bytes, max_event_bytes) = (limits.max_response_bytes, limits.max_event_bytes);
     match config {
         Config::OpenAi { endpoint } => endpoint
             .as_deref()
-            .map(|endpoint| open_ai_configuration(endpoint, allow_unsafe_test_targets))
+            .map(|endpoint| OpenAiConnectorConfig::with_base_url_and_policy(endpoint, policy))
             .transpose()
-            .map(|configuration| ConnectorConfiguration::OpenAi(configuration.unwrap_or_default()))
+            .and_then(|configuration| {
+                configuration
+                    .unwrap_or_default()
+                    .with_response_limits(max_response_bytes, max_event_bytes)
+            })
+            .map(ConnectorConfiguration::OpenAi)
             .map_err(Error::configuration),
         Config::OpenAiCompatible { endpoint } => {
-            open_ai_configuration(endpoint, allow_unsafe_test_targets)
+            OpenAiConnectorConfig::with_base_url_and_policy(endpoint, policy)
+                .and_then(|configuration| {
+                    configuration.with_response_limits(max_response_bytes, max_event_bytes)
+                })
                 .map(ConnectorConfiguration::OpenAi)
                 .map_err(Error::configuration)
         }
@@ -317,7 +335,9 @@ pub(super) fn connector_configuration_with_policy(
         } => {
             let mut configuration = endpoint
                 .as_deref()
-                .map(|endpoint| anthropic_configuration(endpoint, allow_unsafe_test_targets))
+                .map(|endpoint| {
+                    AnthropicConnectorConfig::with_base_url_and_policy(endpoint, policy)
+                })
                 .transpose()
                 .map_err(Error::configuration)?
                 .unwrap_or_default();
@@ -326,132 +346,46 @@ pub(super) fn connector_configuration_with_policy(
                     .with_api_version(version.clone())
                     .map_err(Error::configuration)?;
             }
-            Ok(ConnectorConfiguration::Anthropic(configuration))
+            configuration
+                .with_response_limits(max_response_bytes, max_event_bytes)
+                .map(ConnectorConfiguration::Anthropic)
+                .map_err(Error::configuration)
         }
         Config::Gemini { endpoint } => endpoint
             .as_deref()
-            .map(|endpoint| gemini_configuration(endpoint, allow_unsafe_test_targets))
+            .map(|endpoint| GeminiConnectorConfig::with_base_url_and_policy(endpoint, policy))
             .transpose()
-            .map(|configuration| ConnectorConfiguration::Gemini(configuration.unwrap_or_default()))
+            .and_then(|configuration| {
+                configuration
+                    .unwrap_or_default()
+                    .with_response_limits(max_response_bytes, max_event_bytes)
+            })
+            .map(ConnectorConfiguration::Gemini)
             .map_err(Error::configuration),
         Config::VertexAi {
             project,
             location,
             probe_model,
             auth_mode,
-        } => {
-            let configuration = vertex_configuration(project, location, probe_model)?;
-            let auth_mode = match auth_mode {
-                ProviderAuthMode::ApplicationDefault => VertexAuthMode::ApplicationDefault,
-                ProviderAuthMode::ServiceAccount => VertexAuthMode::ServiceAccount,
-                mode => {
-                    return Err(Error::configuration(format!(
-                        "Unsupported Vertex AI authentication mode {mode}"
-                    )));
-                }
-            };
-            Ok(ConnectorConfiguration::Vertex {
-                configuration,
-                auth_mode,
-            })
-        }
+        } => vertex_connector_configuration(project, location, probe_model, *auth_mode, limits),
         Config::Bedrock { region, auth_mode } => {
-            let configuration =
-                BedrockConnectorConfig::new(region).map_err(Error::configuration)?;
-            let auth_mode = match auth_mode {
-                ProviderAuthMode::DefaultChain => BedrockAuthMode::DefaultChain,
-                ProviderAuthMode::Static => BedrockAuthMode::Static,
-                mode => {
-                    return Err(Error::configuration(format!(
-                        "Unsupported Bedrock authentication mode {mode}"
-                    )));
-                }
-            };
-            Ok(ConnectorConfiguration::Bedrock {
-                configuration,
-                auth_mode,
-            })
+            bedrock_connector_configuration(region, *auth_mode)
         }
         Config::AzureOpenAi {
             endpoint,
             deployment,
             api_version,
         } => Ok(ConnectorConfiguration::AzureOpenAi(Box::new(
-            azure_open_ai_configuration(
+            AzureOpenAiConnectorConfig::new_with_policy(
                 endpoint,
-                deployment,
-                api_version,
-                allow_unsafe_test_targets,
+                deployment.clone(),
+                api_version.clone(),
+                policy,
             )
+            .and_then(|configuration| configuration.with_response_limits(limits))
             .map_err(Error::configuration)?,
         ))),
     }
-}
-
-/// The unsafe-target constructors exist only in test builds; outside them the
-/// policy flag is compiled out and the strict parser is the only path.
-fn open_ai_configuration(
-    endpoint: &str,
-    allow_unsafe_test_targets: bool,
-) -> Result<OpenAiConnectorConfig, crate::providers::openai::ConnectorBuildError> {
-    #[cfg(any(test, feature = "test-util"))]
-    if allow_unsafe_test_targets {
-        return OpenAiConnectorConfig::with_base_url_unsafe_test_target(endpoint);
-    }
-    #[cfg(not(any(test, feature = "test-util")))]
-    let _ = allow_unsafe_test_targets;
-    OpenAiConnectorConfig::with_base_url(endpoint)
-}
-
-fn anthropic_configuration(
-    endpoint: &str,
-    allow_unsafe_test_targets: bool,
-) -> Result<AnthropicConnectorConfig, crate::providers::anthropic::ConnectorBuildError> {
-    #[cfg(any(test, feature = "test-util"))]
-    if allow_unsafe_test_targets {
-        return Ok(AnthropicConnectorConfig::for_local_test(
-            endpoint,
-            crate::providers::connector::Timeouts::default(),
-        ));
-    }
-    #[cfg(not(any(test, feature = "test-util")))]
-    let _ = allow_unsafe_test_targets;
-    AnthropicConnectorConfig::with_base_url(endpoint)
-}
-
-fn gemini_configuration(
-    endpoint: &str,
-    allow_unsafe_test_targets: bool,
-) -> Result<GeminiConnectorConfig, crate::providers::gemini::ConnectorBuildError> {
-    #[cfg(any(test, feature = "test-util"))]
-    if allow_unsafe_test_targets {
-        return Ok(GeminiConnectorConfig::for_local_test(
-            endpoint,
-            crate::providers::connector::Timeouts::default(),
-        ));
-    }
-    #[cfg(not(any(test, feature = "test-util")))]
-    let _ = allow_unsafe_test_targets;
-    GeminiConnectorConfig::with_base_url(endpoint)
-}
-
-fn azure_open_ai_configuration(
-    endpoint: &str,
-    deployment: &str,
-    api_version: &str,
-    allow_unsafe_test_targets: bool,
-) -> Result<AzureOpenAiConnectorConfig, crate::providers::azure_openai::ConnectorBuildError> {
-    #[cfg(any(test, feature = "test-util"))]
-    if allow_unsafe_test_targets {
-        return AzureOpenAiConnectorConfig::new_unsafe_test_target(
-            endpoint,
-            deployment.to_owned(),
-            api_version.to_owned(),
-        );
-    }
-    #[cfg(not(any(test, feature = "test-util")))]
-    let _ = allow_unsafe_test_targets;
-    AzureOpenAiConnectorConfig::new(endpoint, deployment.to_owned(), api_version.to_owned())
 }
 
 fn vertex_configuration(
@@ -460,6 +394,53 @@ fn vertex_configuration(
     probe_model: &str,
 ) -> Result<VertexConnectorConfig, Error> {
     VertexConnectorConfig::new(project, location, probe_model).map_err(Error::configuration)
+}
+
+fn vertex_connector_configuration(
+    project: &str,
+    location: &str,
+    probe_model: &str,
+    auth_mode: ProviderAuthMode,
+    limits: ResponseLimits,
+) -> Result<ConnectorConfiguration, Error> {
+    let configuration = vertex_configuration(project, location, probe_model)?
+        .with_response_limits(limits)
+        .map_err(Error::configuration)?;
+    let auth_mode = match auth_mode {
+        ProviderAuthMode::ApplicationDefault => VertexAuthMode::ApplicationDefault,
+        ProviderAuthMode::ServiceAccount => VertexAuthMode::ServiceAccount,
+        mode => {
+            return Err(Error::configuration(format!(
+                "Unsupported Vertex AI authentication mode {mode}"
+            )));
+        }
+    };
+    Ok(ConnectorConfiguration::Vertex {
+        configuration,
+        auth_mode,
+    })
+}
+
+/// Bedrock speaks the AWS SDK, which carries no response byte cap, so the
+/// response limits do not apply here.
+fn bedrock_connector_configuration(
+    region: &str,
+    auth_mode: ProviderAuthMode,
+) -> Result<ConnectorConfiguration, Error> {
+    let configuration = BedrockConnectorConfig::new(region).map_err(Error::configuration)?;
+    let auth_mode = match auth_mode {
+        ProviderAuthMode::DefaultChain => BedrockAuthMode::DefaultChain,
+        ProviderAuthMode::Static => BedrockAuthMode::Static,
+        mode => {
+            return Err(Error::configuration(format!(
+                "Unsupported Bedrock authentication mode {mode}"
+            )));
+        }
+    };
+    Ok(ConnectorConfiguration::Bedrock {
+        configuration,
+        auth_mode,
+    })
 }
 
 pub(super) fn text_credential<'a>(

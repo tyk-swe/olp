@@ -12,6 +12,9 @@ use olp_db::{
     security::rotation::EncryptedTable, security::rotation::KeyVersionReference,
     security::rotation::MasterKeyEncryptionStatus,
 };
+use olp_engine::providers::EgressPolicy;
+
+use crate::bootstrap::state::BodyLimits;
 use tempfile::NamedTempFile;
 use tokio::{sync::watch, task::JoinSet};
 
@@ -262,6 +265,195 @@ fn server_cli_rejects_invalid_admission_capacities() {
     for (flag, value) in [
         ("--http-max-in-flight-inference-requests", "0"),
         ("--http-max-in-flight-management-requests", "1000001"),
+    ] {
+        let result = Cli::try_parse_from([
+            "olp",
+            "control",
+            "--database-url",
+            "postgres://example/olp",
+            flag,
+            value,
+        ]);
+        assert!(result.is_err(), "{flag}={value} must be rejected");
+    }
+}
+
+#[test]
+fn server_cli_bounds_connection_age_and_drain_timeout() {
+    for (flag, value) in [
+        ("--http-connection-max-age-seconds", "0"),
+        ("--http-connection-max-age-seconds", "86401"),
+        ("--http-connection-drain-timeout-seconds", "0"),
+        ("--http-connection-drain-timeout-seconds", "3601"),
+    ] {
+        let result = Cli::try_parse_from([
+            "olp",
+            "control",
+            "--database-url",
+            "postgres://example/olp",
+            flag,
+            value,
+        ]);
+        assert!(result.is_err(), "{flag}={value} must be rejected");
+    }
+    let cli = Cli::try_parse_from([
+        "olp",
+        "control",
+        "--database-url",
+        "postgres://example/olp",
+        "--http-connection-max-age-seconds",
+        "600",
+        "--http-connection-drain-timeout-seconds",
+        "45",
+    ])
+    .unwrap();
+    let Command::Control(args) = cli.command else {
+        panic!("expected control command");
+    };
+    assert_eq!(args.http_connection_max_age_seconds, 600);
+    assert_eq!(args.http_connection_drain_timeout_seconds, 45);
+}
+
+#[test]
+fn server_cli_bounds_body_and_provider_response_caps() {
+    let mib = 1024 * 1024;
+    for (flag, value) in [
+        ("--http-max-json-body-bytes", 64 * 1024 - 1),
+        ("--http-max-json-body-bytes", 64 * mib + 1),
+        ("--http-max-media-body-bytes", mib - 1),
+        ("--http-max-media-body-bytes", 1024 * mib + 1),
+        ("--http-max-inline-media-items", 0),
+        ("--http-max-inline-media-items", 65),
+        ("--http-max-inline-media-item-bytes", 1023),
+        ("--http-max-inline-media-total-bytes", 64 * mib + 1),
+        ("--provider-max-response-bytes", mib - 1),
+        ("--provider-max-response-bytes", 256 * mib + 1),
+        ("--provider-max-event-bytes", 64 * 1024 - 1),
+        ("--provider-max-event-bytes", 256 * mib + 1),
+    ] {
+        let value = value.to_string();
+        let result = Cli::try_parse_from([
+            "olp",
+            "control",
+            "--database-url",
+            "postgres://example/olp",
+            flag,
+            &value,
+        ]);
+        assert!(result.is_err(), "{flag}={value} must be rejected");
+    }
+    let cli = Cli::try_parse_from([
+        "olp",
+        "control",
+        "--database-url",
+        "postgres://example/olp",
+        "--http-max-json-body-bytes",
+        "8388608",
+        "--http-max-media-body-bytes",
+        "134217728",
+        "--http-max-inline-media-items",
+        "8",
+        "--http-max-inline-media-item-bytes",
+        "2097152",
+        "--http-max-inline-media-total-bytes",
+        "4194304",
+        "--provider-max-response-bytes",
+        "33554432",
+        "--provider-max-event-bytes",
+        "2097152",
+    ])
+    .unwrap();
+    let Command::Control(args) = cli.command else {
+        panic!("expected control command");
+    };
+    let limits = args.body_limits.limits();
+    assert_eq!(limits.json_body_bytes, 8 * mib);
+    assert_eq!(limits.media_body_bytes, 128 * mib);
+    assert_eq!(limits.inline_media_items, 8);
+    assert_eq!(limits.inline_media_item_bytes, 2 * mib);
+    assert_eq!(limits.inline_media_total_bytes, 4 * mib);
+    let response_limits = args.provider_response_limits.limits().unwrap();
+    assert_eq!(response_limits.max_response_bytes, 32 * mib);
+    assert_eq!(response_limits.max_event_bytes, 2 * mib);
+
+    let defaults = Cli::try_parse_from([
+        "olp",
+        "control",
+        "--database-url",
+        "postgres://example/olp",
+        "--provider-max-event-bytes",
+        "33554432",
+    ])
+    .unwrap();
+    let Command::Control(args) = defaults.command else {
+        panic!("expected control command");
+    };
+    assert_eq!(args.body_limits.limits(), BodyLimits::default());
+    assert!(args.provider_response_limits.limits().is_err());
+}
+
+#[test]
+fn server_cli_parses_provider_egress_allowlists() {
+    let cli = Cli::try_parse_from([
+        "olp",
+        "control",
+        "--database-url",
+        "postgres://example/olp",
+        "--provider-egress-allow-cidrs",
+        "10.0.0.0/8, ::1/128",
+        "--provider-egress-allow-http-hosts",
+        "vllm.internal,127.0.0.1,[::1]",
+    ])
+    .unwrap();
+    let Command::Control(args) = cli.command else {
+        panic!("expected control command");
+    };
+    let policy = args.provider_egress.policy();
+    assert_eq!(policy.allowed_networks().len(), 2);
+    assert_eq!(
+        policy.plain_http_hosts(),
+        ["vllm.internal", "127.0.0.1", "::1"]
+    );
+    assert!(policy.permits_address("10.1.2.3".parse().unwrap()));
+    assert!(!policy.permits_address("192.168.0.1".parse().unwrap()));
+    assert!(policy.permits_plain_http("vllm.internal"));
+    assert!(policy.permits_plain_http("[::1]"));
+    assert!(!policy.permits_plain_http("other.internal"));
+
+    let cli = Cli::try_parse_from([
+        "olp",
+        "doctor",
+        "--database-url",
+        "postgres://example/olp",
+        "--valkey-url",
+        "redis://example/0",
+        "--master-key-file",
+        "/run/secrets/master-key",
+        "--auth-hmac-key-file",
+        "/run/secrets/auth-hmac-key",
+        "--provider-egress-allow-cidrs",
+        "",
+        "--provider-egress-allow-http-hosts",
+        "",
+    ])
+    .unwrap();
+    let Command::Doctor(args) = cli.command else {
+        panic!("expected doctor command");
+    };
+    assert_eq!(args.provider_egress.policy(), EgressPolicy::default());
+}
+
+#[test]
+fn server_cli_rejects_malformed_provider_egress_allowlists() {
+    for (flag, value) in [
+        ("--provider-egress-allow-cidrs", "10.0.0.0"),
+        ("--provider-egress-allow-cidrs", "10.0.0.0/33"),
+        ("--provider-egress-allow-cidrs", "vllm.internal"),
+        ("--provider-egress-allow-http-hosts", "VLLM.internal"),
+        ("--provider-egress-allow-http-hosts", "http://vllm.internal"),
+        ("--provider-egress-allow-http-hosts", "vllm.internal:8000"),
+        ("--provider-egress-allow-http-hosts", "-bad.host"),
+        ("--provider-egress-allow-http-hosts", "bad_host"),
     ] {
         let result = Cli::try_parse_from([
             "olp",

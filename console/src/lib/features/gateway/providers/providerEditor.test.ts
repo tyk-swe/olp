@@ -471,11 +471,11 @@ describe('disableNotice', () => {
 });
 
 describe('reviewed capability cap', () => {
-  it('stops at the server limit of 16 tuples per model', () => {
-    expect(MAX_REVIEWED_CAPABILITIES).toBe(16);
-    expect(capabilityLimitReached(15)).toBe(false);
-    expect(capabilityLimitReached(16)).toBe(true);
-    expect(capabilityLimitReached(17)).toBe(true);
+  it('stops at the server limit of 64 tuples per model', () => {
+    expect(MAX_REVIEWED_CAPABILITIES).toBe(64);
+    expect(capabilityLimitReached(63)).toBe(false);
+    expect(capabilityLimitReached(64)).toBe(true);
+    expect(capabilityLimitReached(65)).toBe(true);
   });
 });
 

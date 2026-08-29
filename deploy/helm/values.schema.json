@@ -79,9 +79,21 @@
         "bootstrapTokenSecretName",
         "bootstrapTokenSecretKey",
         "trustedProxyCidrs",
+        "gatewayCorsAllowedOrigins",
+        "providerEgressAllowCidrs",
+        "providerEgressAllowHttpHosts",
         "publicOrigin",
         "localLoginEnabled",
-        "databaseMaxConnections"
+        "databaseMaxConnections",
+        "httpConnectionMaxAgeSeconds",
+        "httpConnectionDrainTimeoutSeconds",
+        "httpMaxJsonBodyBytes",
+        "httpMaxMediaBodyBytes",
+        "httpMaxInlineMediaItems",
+        "httpMaxInlineMediaItemBytes",
+        "httpMaxInlineMediaTotalBytes",
+        "providerMaxResponseBytes",
+        "providerMaxEventBytes"
       ],
       "properties": {
         "databaseSecretName": { "type": "string", "minLength": 1 },
@@ -95,9 +107,21 @@
         "bootstrapTokenSecretName": { "type": "string" },
         "bootstrapTokenSecretKey": { "type": "string", "minLength": 1 },
         "trustedProxyCidrs": { "type": "string" },
+        "gatewayCorsAllowedOrigins": { "type": "string" },
+        "providerEgressAllowCidrs": { "type": "string" },
+        "providerEgressAllowHttpHosts": { "type": "string" },
         "publicOrigin": { "type": "string", "format": "uri", "minLength": 1 },
         "localLoginEnabled": { "type": "boolean" },
-        "databaseMaxConnections": { "type": "integer", "minimum": 1 }
+        "databaseMaxConnections": { "type": "integer", "minimum": 1 },
+        "httpConnectionMaxAgeSeconds": { "type": "integer", "minimum": 1, "maximum": 86400 },
+        "httpConnectionDrainTimeoutSeconds": { "type": "integer", "minimum": 1, "maximum": 3600 },
+        "httpMaxJsonBodyBytes": { "type": "integer", "minimum": 65536, "maximum": 67108864 },
+        "httpMaxMediaBodyBytes": { "type": "integer", "minimum": 1048576, "maximum": 1073741824 },
+        "httpMaxInlineMediaItems": { "type": "integer", "minimum": 1, "maximum": 64 },
+        "httpMaxInlineMediaItemBytes": { "type": "integer", "minimum": 1024, "maximum": 67108864 },
+        "httpMaxInlineMediaTotalBytes": { "type": "integer", "minimum": 1024, "maximum": 67108864 },
+        "providerMaxResponseBytes": { "type": "integer", "minimum": 1048576, "maximum": 268435456 },
+        "providerMaxEventBytes": { "type": "integer", "minimum": 65536, "maximum": 268435456 }
       }
     },
     "serviceAccount": {

@@ -231,13 +231,12 @@ fn httpdate_seconds(value: &str) -> Option<u64> {
     u64::try_from(date.and_utc().timestamp()).ok()
 }
 
-pub(in crate::providers) const MAX_INLINE_MEDIA_BYTES: usize = 1024 * 1024;
-
 /// Reads a bounded inline-media handle from the spool and returns its bytes
 /// base64-encoded, shared by every connector that hydrates inline media.
 pub(in crate::providers) async fn read_inline_media(
     marker: &str,
     spool: Option<&std::sync::Arc<dyn crate::domain::ports::MediaSpool>>,
+    maximum_bytes: usize,
 ) -> Result<String, TransportError> {
     use base64::{Engine as _, engine::general_purpose::STANDARD};
     use futures::StreamExt as _;
@@ -253,7 +252,7 @@ pub(in crate::providers) async fn read_inline_media(
     if opened
         .artifact
         .content_length
-        .is_none_or(|length| length > MAX_INLINE_MEDIA_BYTES as u64)
+        .is_none_or(|length| length > maximum_bytes as u64)
     {
         return Err(protocol_error("bounded inline media exceeded its limit"));
     }
@@ -263,7 +262,7 @@ pub(in crate::providers) async fn read_inline_media(
         let chunk = chunk.map_err(|error| {
             protocol_error(format!("bounded inline-media read failed: {error}"))
         })?;
-        if bytes.len().saturating_add(chunk.len()) > MAX_INLINE_MEDIA_BYTES {
+        if bytes.len().saturating_add(chunk.len()) > maximum_bytes {
             return Err(protocol_error("bounded inline media exceeded its limit"));
         }
         bytes.extend_from_slice(&chunk);
@@ -399,6 +398,7 @@ mod tests {
 
     #[tokio::test]
     async fn inline_media_reading_validates_handle_spool_metadata_and_stream_bounds() {
+        let maximum_bytes = 3;
         let marker = inline_media_marker(&MediaHandle::new("media"));
         let unavailable = ReadSpool {
             content_length: Some(1),
@@ -411,7 +411,7 @@ mod tests {
             open_error: None,
         };
         let advertised_oversize = ReadSpool {
-            content_length: Some(MAX_INLINE_MEDIA_BYTES as u64 + 1),
+            content_length: Some(maximum_bytes as u64 + 1),
             chunks: vec![],
             open_error: None,
         };
@@ -422,7 +422,7 @@ mod tests {
         };
         let streamed_oversize = ReadSpool {
             content_length: Some(1),
-            chunks: vec![Ok(Bytes::from(vec![0; MAX_INLINE_MEDIA_BYTES + 1]))],
+            chunks: vec![Ok(Bytes::from(vec![0; maximum_bytes + 1]))],
             open_error: None,
         };
 
@@ -436,13 +436,17 @@ mod tests {
             (&marker, Some(Arc::new(streamed_oversize))),
         ];
         for (value, spool) in failures {
-            let error = read_inline_media(value, spool.as_ref()).await.unwrap_err();
+            let error = read_inline_media(value, spool.as_ref(), maximum_bytes)
+                .await
+                .unwrap_err();
             assert_eq!(error.class, AttemptFailureClass::Protocol);
         }
 
         let spool = ReadSpool::bytes(Bytes::from_static(b"abc"));
         assert_eq!(
-            read_inline_media(&marker, Some(&spool)).await.unwrap(),
+            read_inline_media(&marker, Some(&spool), maximum_bytes)
+                .await
+                .unwrap(),
             "YWJj"
         );
     }

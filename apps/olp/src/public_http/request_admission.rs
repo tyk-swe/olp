@@ -22,7 +22,6 @@ use olp_engine::{
 
 use crate::{
     bootstrap::mode_dependencies::RequestBoundaryState,
-    bootstrap::state::MAX_JSON_BODY_BYTES,
     gateway::{
         self,
         endpoint_policy::classification::{InferenceEndpoint, TokenEstimate},
@@ -45,7 +44,8 @@ use limits::{
 };
 use multipart::{MultipartRequestAdmission, preauthorize_multipart, validate_multipart_boundary};
 use validation::{
-    BodyAdmission, JsonBodyReadError, payload_too_large, read_json_body, request_body_timeout,
+    BodyAdmission, ContentEncoding, JsonBodyReadError, content_encoding_unsupported,
+    decompress_gzip_bounded, payload_too_large, read_json_body, request_body_timeout,
     validate_body_framing_and_encoding, validate_json_depth, validate_target_and_headers,
 };
 
@@ -134,7 +134,11 @@ pub(crate) async fn enforce_request_limits(
     request: Request<axum::body::Body>,
     next: middleware::Next,
 ) -> Response {
-    let endpoint = InferenceEndpoint::classify(request.method(), request.uri().path());
+    let endpoint = if is_cors_preflight(&request) {
+        None
+    } else {
+        InferenceEndpoint::classify(request.method(), request.uri().path())
+    };
     let surface = endpoint.map(InferenceEndpoint::surface);
     match enforce_request_limits_inner(&state, request, next, endpoint).await {
         Ok(response) => response,
@@ -147,6 +151,17 @@ pub(crate) async fn enforce_request_limits(
             None => Problem::from(error).into_response(),
         },
     }
+}
+
+/// A browser preflight carries no credentials; the gateway CORS layer answers
+/// it (or the protocol fallback returns 404), so it must not be classified as
+/// an authenticated inference request.
+fn is_cors_preflight(request: &Request<axum::body::Body>) -> bool {
+    request.method() == axum::http::Method::OPTIONS
+        && request.headers().contains_key(axum::http::header::ORIGIN)
+        && request
+            .headers()
+            .contains_key(axum::http::header::ACCESS_CONTROL_REQUEST_METHOD)
 }
 
 enum RequestLimitRejection {
@@ -238,8 +253,12 @@ async fn enforce_request_limits_inner(
     enforce_public_auth_source(state, &request)?;
     let mut request = request;
     preauthorize_setup_if_needed(state, &mut request).await?;
-    validate_body_framing_and_encoding(&request)?;
-    let body_admission = BodyAdmission::classify(&request, endpoint);
+    let content_encoding = validate_body_framing_and_encoding(&request)?;
+    let limits = state.body_limits;
+    let body_admission = BodyAdmission::classify(&request, endpoint, limits);
+    if content_encoding == ContentEncoding::Gzip && !body_admission.is_json {
+        return Err(content_encoding_unsupported().into());
+    }
     body_admission.enforce_declared_size(&request)?;
     let BodyAdmission {
         multipart_content_type,
@@ -273,7 +292,7 @@ async fn enforce_request_limits_inner(
             always_emit: metadata.always_emit,
         })
     });
-    let multipart_policy = endpoint.and_then(InferenceEndpoint::multipart);
+    let multipart_policy = endpoint.and_then(|endpoint| endpoint.multipart(limits));
     if multipart_policy.is_some() && multipart_content_type.is_none() {
         if let Some(metadata) = local_metadata {
             metadata.emit(axum::http::StatusCode::BAD_REQUEST);
@@ -285,20 +304,38 @@ async fn enforce_request_limits_inner(
     }
 
     if is_json {
-        let (parts, body) = request.into_parts();
-        let bytes = match read_json_body(body, MAX_JSON_BODY_BYTES, REQUEST_BODY_TIMEOUT).await {
+        let (mut parts, body) = request.into_parts();
+        let bytes = match read_json_body(body, limits.json_body_bytes, REQUEST_BODY_TIMEOUT).await {
             Ok(bytes) => bytes,
             Err(JsonBodyReadError::Rejected) => {
                 if let Some(metadata) = local_metadata.clone() {
                     metadata.emit(axum::http::StatusCode::PAYLOAD_TOO_LARGE);
                 }
-                return Err(payload_too_large(MAX_JSON_BODY_BYTES).into());
+                return Err(payload_too_large(limits.json_body_bytes).into());
             }
             Err(JsonBodyReadError::Timeout) => {
                 if let Some(metadata) = local_metadata.clone() {
                     metadata.emit(axum::http::StatusCode::REQUEST_TIMEOUT);
                 }
                 return Err(request_body_timeout().into());
+            }
+        };
+        let bytes = match content_encoding {
+            ContentEncoding::Identity => bytes,
+            ContentEncoding::Gzip => {
+                parts.headers.remove(axum::http::header::CONTENT_ENCODING);
+                match decompress_gzip_bounded(&bytes, limits.json_body_bytes) {
+                    Ok(bytes) => bytes,
+                    Err(problem) => {
+                        if let Some(metadata) = local_metadata.clone() {
+                            metadata.emit(
+                                axum::http::StatusCode::from_u16(problem.status)
+                                    .unwrap_or(axum::http::StatusCode::BAD_REQUEST),
+                            );
+                        }
+                        return Err(problem.into());
+                    }
+                }
             }
         };
         let requested_route =

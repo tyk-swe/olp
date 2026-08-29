@@ -4,7 +4,7 @@ use reqwest::{Client, Url};
 use thiserror::Error;
 
 use crate::providers::http_egress::{
-    is_public_ip,
+    EgressPolicy,
     pinned::{PinnedClientConfig, PinnedClientError, PinnedClientPool, literal_ip},
 };
 
@@ -18,21 +18,23 @@ pub(in crate::providers) struct EndpointCore {
     provider: &'static str,
     client_connect_timeout: Duration,
     client_pool: PinnedClientPool,
-    #[cfg(any(test, feature = "test-util"))]
-    allow_unsafe_test_target: bool,
+    policy: EgressPolicy,
 }
 
 impl EndpointCore {
     pub(in crate::providers) fn parse(
         value: &str,
         provider: &'static str,
-        allow_unsafe_target: bool,
+        policy: &EgressPolicy,
     ) -> Result<Self, Error> {
         let mut base_url = Url::parse(value).map_err(|error| Error::InvalidUrl {
             provider,
             message: error.to_string(),
         })?;
-        if base_url.scheme() != "https" && !allow_unsafe_target {
+        let plain_http_permitted = base_url
+            .host_str()
+            .is_some_and(|host| policy.permits_plain_http(host));
+        if base_url.scheme() != "https" && !plain_http_permitted {
             return Err(Error::HttpsRequired { provider });
         }
         if !matches!(base_url.scheme(), "http" | "https") {
@@ -54,8 +56,7 @@ impl EndpointCore {
             base_url.set_path(&format!("{}/", base_url.path()));
         }
         if let Some(address) = literal_ip(&base_url)
-            && !allow_unsafe_target
-            && !is_public_ip(address)
+            && !policy.permits_address(address)
         {
             return Err(Error::ForbiddenAddress { provider, address });
         }
@@ -64,8 +65,7 @@ impl EndpointCore {
             provider,
             client_connect_timeout: DEFAULT_CONNECT_TIMEOUT,
             client_pool: PinnedClientPool::default(),
-            #[cfg(any(test, feature = "test-util"))]
-            allow_unsafe_test_target: allow_unsafe_target,
+            policy: policy.clone(),
         })
     }
 
@@ -88,10 +88,6 @@ impl EndpointCore {
         &self,
         connect_timeout: Duration,
     ) -> Result<Client, Error> {
-        #[cfg(any(test, feature = "test-util"))]
-        let allow_unsafe_target = self.allow_unsafe_test_target;
-        #[cfg(not(any(test, feature = "test-util")))]
-        let allow_unsafe_target = false;
         self.client_pool
             .client(
                 &self.base_url,
@@ -100,9 +96,10 @@ impl EndpointCore {
                     connect_timeout: self.client_connect_timeout,
                     pool_idle_timeout: Some(POOL_IDLE_TIMEOUT),
                     pool_max_idle_per_host: Some(MAX_IDLE_CONNECTIONS_PER_HOST),
-                    allow_unsafe_target,
+                    https_only: self.base_url.scheme() == "https",
                     user_agent: "openllmproxy",
                 },
+                &self.policy,
             )
             .await
             .map_err(|error| Error::from_pinned(self.provider, error))
@@ -125,7 +122,9 @@ impl fmt::Debug for EndpointCore {
 /// existing diagnostics vendor-specific without duplicating endpoint policy.
 #[derive(Debug, Error)]
 pub enum Error {
-    #[error("custom {provider} endpoints must use HTTPS")]
+    #[error(
+        "custom {provider} endpoints must use HTTPS unless the host is in the provider egress plain-HTTP allowlist"
+    )]
     HttpsRequired { provider: &'static str },
     #[error("custom {provider} endpoint scheme must be HTTP or HTTPS")]
     UnsupportedScheme { provider: &'static str },

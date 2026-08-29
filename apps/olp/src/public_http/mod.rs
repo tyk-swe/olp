@@ -1,6 +1,7 @@
 //! Shared public delivery boundary: listener hardening, routing, admission,
 //! request parsing, and protocol-independent response primitives.
 
+pub(crate) mod cors;
 pub(crate) mod image_response;
 pub(crate) mod json_media;
 pub(crate) mod listener;

@@ -42,7 +42,13 @@ pub(super) async fn doctor(args: DoctorArgs) -> AppResult<()> {
 
     if let Some(path) = &args.assets.connector_config_file {
         let registry = TransportRegistry::default();
-        register_mounted_connectors(path, &registry).await?;
+        register_mounted_connectors(
+            path,
+            &registry,
+            &args.provider_egress.policy(),
+            olp_engine::providers::connector::ResponseLimits::default(),
+        )
+        .await?;
         checks.insert(
             "connector_config".into(),
             json!({ "ok": true, "configured": registry.snapshot().len() }),

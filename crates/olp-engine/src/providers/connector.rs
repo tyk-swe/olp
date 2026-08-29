@@ -40,6 +40,25 @@ impl Timeouts {
     }
 }
 
+/// Byte caps applied to every provider response body and streamed event.
+///
+/// Bedrock connectors speak the AWS SDK and carry no byte cap, so these
+/// limits are a no-op there.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ResponseLimits {
+    pub max_response_bytes: usize,
+    pub max_event_bytes: usize,
+}
+
+impl Default for ResponseLimits {
+    fn default() -> Self {
+        Self {
+            max_response_bytes: 16 * 1024 * 1024,
+            max_event_bytes: 1024 * 1024,
+        }
+    }
+}
+
 pub(in crate::providers) fn validate_response_limits(
     max_response_bytes: usize,
     max_event_bytes: usize,

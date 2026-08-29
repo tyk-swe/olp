@@ -17,6 +17,7 @@ use olp_engine::inference::{
 };
 #[cfg(feature = "test-util")]
 use olp_engine::providers::openai::transport::Connector;
+use olp_engine::providers::{EgressPolicy, connector::ResponseLimits};
 use tokio::sync::RwLock as AsyncRwLock;
 use zeroize::Zeroizing;
 
@@ -29,10 +30,57 @@ use crate::{
 
 use crate::media_spool;
 
-pub(crate) const MAX_JSON_BODY_BYTES: usize = 2 * 1024 * 1024;
-pub(crate) const MAX_MEDIA_BODY_BYTES: usize = 64 * 1024 * 1024;
 pub const MAX_HTTP_HEADER_COUNT: usize = 100;
 pub const MAX_HTTP_HEADER_BYTES: usize = 32 * 1024;
+
+/// Request body caps enforced at the public boundary. Header caps stay
+/// constant because they are tied to the Hyper parser configuration.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct BodyLimits {
+    pub json_body_bytes: usize,
+    pub media_body_bytes: usize,
+    pub inline_media_items: usize,
+    pub inline_media_item_bytes: usize,
+    pub inline_media_total_bytes: usize,
+}
+
+impl Default for BodyLimits {
+    fn default() -> Self {
+        Self {
+            json_body_bytes: 2 * 1024 * 1024,
+            media_body_bytes: 64 * 1024 * 1024,
+            inline_media_items: 4,
+            inline_media_item_bytes: 1024 * 1024,
+            inline_media_total_bytes: 2 * 1024 * 1024,
+        }
+    }
+}
+
+impl BodyLimits {
+    /// Multipart admission budgets half the spool, so a media cap above that
+    /// would make every multipart request fail with 503.
+    pub fn validate(self, spool_capacity_bytes: u64) -> Result<Self, String> {
+        if self.inline_media_item_bytes > self.inline_media_total_bytes {
+            return Err(
+                "OLP_HTTP_MAX_INLINE_MEDIA_ITEM_BYTES must not exceed OLP_HTTP_MAX_INLINE_MEDIA_TOTAL_BYTES"
+                    .to_owned(),
+            );
+        }
+        if self.inline_media_total_bytes > self.json_body_bytes {
+            return Err(
+                "OLP_HTTP_MAX_INLINE_MEDIA_TOTAL_BYTES must not exceed OLP_HTTP_MAX_JSON_BODY_BYTES"
+                    .to_owned(),
+            );
+        }
+        if self.media_body_bytes as u64 > spool_capacity_bytes / 2 {
+            return Err(format!(
+                "OLP_HTTP_MAX_MEDIA_BODY_BYTES must not exceed half of OLP_MEDIA_SPOOL_CAPACITY_BYTES ({})",
+                spool_capacity_bytes / 2
+            ));
+        }
+        Ok(self)
+    }
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ApiMode {
@@ -59,6 +107,10 @@ pub struct ProcessComposition {
     pub limiter: ReloadableLimiter,
     pub auth_hmac_key: Arc<AuthHmacKey>,
     pub(crate) trusted_proxy_cidrs: Arc<[TrustedProxyCidr]>,
+    pub(crate) gateway_cors_allowed_origins: Arc<[axum::http::HeaderValue]>,
+    pub(crate) provider_egress_policy: Arc<EgressPolicy>,
+    pub(crate) provider_response_limits: ResponseLimits,
+    pub(crate) body_limits: BodyLimits,
     pub(crate) bootstrap_token_digest: Arc<AsyncRwLock<Option<Zeroizing<[u8; 32]>>>>,
     pub master_key: Option<Arc<MasterKey>>,
     pub request_metadata: Option<Emitter>,
@@ -126,6 +178,10 @@ impl ProcessComposition {
             limiter: ReloadableLimiter::default(),
             auth_hmac_key,
             trusted_proxy_cidrs: Arc::from([]),
+            gateway_cors_allowed_origins: Arc::from([]),
+            provider_egress_policy: Arc::new(EgressPolicy::default()),
+            provider_response_limits: ResponseLimits::default(),
+            body_limits: BodyLimits::default(),
             bootstrap_token_digest: Arc::new(AsyncRwLock::new(None)),
             master_key: None,
             request_metadata: None,
@@ -152,6 +208,16 @@ impl ProcessComposition {
     /// An empty set means that all `X-Forwarded-For` headers are ignored.
     pub fn set_trusted_proxy_cidrs(&mut self, cidrs: Vec<TrustedProxyCidr>) {
         self.trusted_proxy_cidrs = Arc::from(cidrs);
+    }
+
+    pub fn set_gateway_cors_allowed_origins(&mut self, origins: Vec<axum::http::HeaderValue>) {
+        self.gateway_cors_allowed_origins = Arc::from(origins);
+    }
+
+    /// Installs the operator egress allowlists applied to every provider
+    /// endpoint parse, DNS answer, and connector assembly.
+    pub fn set_provider_egress_policy(&mut self, policy: EgressPolicy) {
+        self.provider_egress_policy = Arc::new(policy);
     }
 
     /// Stores only a keyed digest of the first-run setup token. The raw token

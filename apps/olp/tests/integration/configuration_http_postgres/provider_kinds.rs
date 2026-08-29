@@ -222,3 +222,52 @@ pub(super) async fn verify(app: &Router, cookie: &str, csrf: &str) {
         assert!(response_json(legacy_provider_request).await["errors"]["api_key"].is_array());
     }
 }
+
+pub(super) async fn verify_egress_policy(
+    app: &Router,
+    mock_provider: &MockOpenAiProvider,
+    cookie: &str,
+    csrf: &str,
+) {
+    let loopback = send(
+        app,
+        Method::POST,
+        "/api/v1/providers",
+        Some(json!({
+            "name": "loopback-compatible",
+            "kind": "openai_compatible",
+            "endpoint": mock_provider.base_url(),
+            "credential": "sk-loopback-secret",
+            "model": "compatible-model",
+            "display_name": "Loopback Compatible"
+        })),
+        Some(cookie),
+        Some(csrf),
+        Some("provider-egress-create-01"),
+        None,
+    )
+    .await;
+    assert_eq!(loopback.status(), StatusCode::CREATED);
+
+    let outside_allowlist = send(
+        app,
+        Method::POST,
+        "/api/v1/providers",
+        Some(json!({
+            "name": "private-compatible",
+            "kind": "openai_compatible",
+            "endpoint": "http://10.0.0.5:8000/v1",
+            "credential": "sk-private-secret",
+            "model": "compatible-model",
+            "display_name": "Private Compatible"
+        })),
+        Some(cookie),
+        Some(csrf),
+        Some("provider-egress-create-02"),
+        None,
+    )
+    .await;
+    assert_eq!(outside_allowlist.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    let problem = response_json(outside_allowlist).await;
+    assert!(problem["errors"]["endpoint"].is_array());
+}

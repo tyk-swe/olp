@@ -6,8 +6,8 @@ use axum::{
 };
 
 use crate::{
-    bootstrap::state::MAX_HTTP_HEADER_BYTES, bootstrap::state::MAX_HTTP_HEADER_COUNT,
-    bootstrap::state::MAX_JSON_BODY_BYTES,
+    bootstrap::state::BodyLimits, bootstrap::state::MAX_HTTP_HEADER_BYTES,
+    bootstrap::state::MAX_HTTP_HEADER_COUNT,
     gateway::endpoint_policy::classification::InferenceEndpoint, public_http::problem::Problem,
 };
 
@@ -49,7 +49,15 @@ pub(super) fn validate_target_and_headers(request: &Request<Body>) -> Result<(),
     Ok(())
 }
 
-pub(super) fn validate_body_framing_and_encoding(request: &Request<Body>) -> Result<(), Problem> {
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum ContentEncoding {
+    Identity,
+    Gzip,
+}
+
+pub(super) fn validate_body_framing_and_encoding(
+    request: &Request<Body>,
+) -> Result<ContentEncoding, Problem> {
     let content_length_count = request
         .headers()
         .get_all(axum::http::header::CONTENT_LENGTH)
@@ -77,23 +85,58 @@ pub(super) fn validate_body_framing_and_encoding(request: &Request<Body>) -> Res
             "The request has ambiguous framing headers.",
         ));
     }
-    if request
+    let encodings = request
         .headers()
-        .get(axum::http::header::CONTENT_ENCODING)
-        .is_some_and(|value| {
-            !value
-                .to_str()
-                .is_ok_and(|value| value.trim().eq_ignore_ascii_case("identity"))
-        })
-    {
-        return Err(Problem::new(
-            axum::http::StatusCode::UNSUPPORTED_MEDIA_TYPE,
-            "content_encoding_unsupported",
-            "Content encoding unsupported",
-            "Compressed request bodies are not accepted.",
-        ));
+        .get_all(axum::http::header::CONTENT_ENCODING)
+        .iter()
+        .collect::<Vec<_>>();
+    let encoding = match encodings.as_slice() {
+        [] => Some(ContentEncoding::Identity),
+        [value] => value.to_str().ok().and_then(|value| {
+            let value = value.trim();
+            if value.eq_ignore_ascii_case("identity") {
+                Some(ContentEncoding::Identity)
+            } else if value.eq_ignore_ascii_case("gzip") || value.eq_ignore_ascii_case("x-gzip") {
+                Some(ContentEncoding::Gzip)
+            } else {
+                None
+            }
+        }),
+        _ => None,
+    };
+    encoding.ok_or_else(content_encoding_unsupported)
+}
+
+pub(super) fn content_encoding_unsupported() -> Problem {
+    Problem::new(
+        axum::http::StatusCode::UNSUPPORTED_MEDIA_TYPE,
+        "content_encoding_unsupported",
+        "Content encoding unsupported",
+        "Only identity or gzip JSON request bodies are accepted.",
+    )
+}
+
+/// Inflates a gzip body that was already capped in its compressed form. The
+/// inflated size is bounded again so a small body cannot expand past the JSON
+/// limit.
+pub(super) fn decompress_gzip_bounded(
+    bytes: &[u8],
+    maximum: usize,
+) -> Result<bytes::Bytes, Problem> {
+    use std::io::Read as _;
+
+    let mut inflated = Vec::new();
+    let mut decoder = flate2::bufread::GzDecoder::new(bytes).take(maximum as u64 + 1);
+    decoder.read_to_end(&mut inflated).map_err(|_| {
+        Problem::bad_request(
+            "invalid_content_encoding",
+            "The request body is not valid gzip.",
+        )
+    })?;
+    if inflated.len() > maximum {
+        return Err(payload_too_large(maximum));
     }
-    Ok(())
+    Ok(bytes::Bytes::from(inflated))
 }
 
 pub(super) struct BodyAdmission {
@@ -103,7 +146,11 @@ pub(super) struct BodyAdmission {
 }
 
 impl BodyAdmission {
-    pub(super) fn classify(request: &Request<Body>, endpoint: Option<InferenceEndpoint>) -> Self {
+    pub(super) fn classify(
+        request: &Request<Body>,
+        endpoint: Option<InferenceEndpoint>,
+        limits: BodyLimits,
+    ) -> Self {
         let content_type = request
             .headers()
             .get(axum::http::header::CONTENT_TYPE)
@@ -111,8 +158,8 @@ impl BodyAdmission {
             .unwrap_or_default();
         Self {
             maximum: endpoint
-                .map(|endpoint| endpoint.body_limit(content_type))
-                .unwrap_or(MAX_JSON_BODY_BYTES),
+                .map(|endpoint| endpoint.body_limit(content_type, limits))
+                .unwrap_or(limits.json_body_bytes),
             multipart_content_type: content_type
                 .split(';')
                 .next()
@@ -233,7 +280,11 @@ mod tests {
         request
     }
 
-    fn assert_problem(result: Result<(), Problem>, status: StatusCode, code: &str) {
+    fn assert_problem<T: std::fmt::Debug>(
+        result: Result<T, Problem>,
+        status: StatusCode,
+        code: &str,
+    ) {
         let problem = result.unwrap_err();
         assert_eq!(problem.status, status.as_u16());
         assert_eq!(
@@ -306,8 +357,44 @@ mod tests {
             &[(header::TRANSFER_ENCODING, "chunked")][..],
             &[(header::CONTENT_ENCODING, "IDENTITY")][..],
         ] {
-            validate_body_framing_and_encoding(&request_with_headers(headers)).unwrap();
+            assert_eq!(
+                validate_body_framing_and_encoding(&request_with_headers(headers)).unwrap(),
+                ContentEncoding::Identity
+            );
         }
+        for value in ["gzip", "GZIP", "x-gzip"] {
+            assert_eq!(
+                validate_body_framing_and_encoding(&request_with_headers(&[(
+                    header::CONTENT_ENCODING,
+                    value,
+                )]))
+                .unwrap(),
+                ContentEncoding::Gzip
+            );
+        }
+    }
+
+    #[test]
+    fn gzip_bodies_inflate_within_the_cap_and_reject_bombs() {
+        use std::io::Write as _;
+
+        let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+        encoder.write_all(br#"{"model":"alpha"}"#).unwrap();
+        let compressed = encoder.finish().unwrap();
+        assert_eq!(
+            decompress_gzip_bounded(&compressed, 64).unwrap().as_ref(),
+            br#"{"model":"alpha"}"#
+        );
+        assert_problem(
+            decompress_gzip_bounded(&compressed, 8),
+            StatusCode::PAYLOAD_TOO_LARGE,
+            "body_too_large",
+        );
+        assert_problem(
+            decompress_gzip_bounded(b"not gzip", 64),
+            StatusCode::BAD_REQUEST,
+            "invalid_content_encoding",
+        );
     }
 
     #[test]
@@ -331,14 +418,20 @@ mod tests {
             );
         }
 
-        assert_problem(
-            validate_body_framing_and_encoding(&request_with_headers(&[(
-                header::CONTENT_ENCODING,
-                "gzip",
-            )])),
-            StatusCode::UNSUPPORTED_MEDIA_TYPE,
-            "content_encoding_unsupported",
-        );
+        for headers in [
+            &[(header::CONTENT_ENCODING, "br")][..],
+            &[(header::CONTENT_ENCODING, "gzip, identity")][..],
+            &[
+                (header::CONTENT_ENCODING, "gzip"),
+                (header::CONTENT_ENCODING, "gzip"),
+            ][..],
+        ] {
+            assert_problem(
+                validate_body_framing_and_encoding(&request_with_headers(headers)),
+                StatusCode::UNSUPPORTED_MEDIA_TYPE,
+                "content_encoding_unsupported",
+            );
+        }
     }
 
     #[test]
@@ -348,20 +441,26 @@ mod tests {
             header::CONTENT_TYPE,
             HeaderValue::from_static("Application/Problem+JSON; charset=utf-8"),
         );
-        let json = BodyAdmission::classify(&vendor_json, None);
+        let limits = BodyLimits {
+            json_body_bytes: 3 * 1024 * 1024,
+            media_body_bytes: 96 * 1024 * 1024,
+            ..BodyLimits::default()
+        };
+        let json = BodyAdmission::classify(&vendor_json, None, limits);
         assert!(json.is_json);
         assert!(json.multipart_content_type.is_none());
-        assert_eq!(json.maximum, MAX_JSON_BODY_BYTES);
+        assert_eq!(json.maximum, limits.json_body_bytes);
 
         let endpoint =
             InferenceEndpoint::classify(&Method::POST, "/openai/v1/audio/transcriptions").unwrap();
-        let endpoint_maximum = endpoint.body_limit("multipart/form-data; boundary=olp");
+        let endpoint_maximum = endpoint.body_limit("multipart/form-data; boundary=olp", limits);
+        assert_eq!(endpoint_maximum, limits.media_body_bytes);
         let mut multipart = empty_request("/");
         multipart.headers_mut().insert(
             header::CONTENT_TYPE,
             HeaderValue::from_static("multipart/form-data; boundary=olp"),
         );
-        let admission = BodyAdmission::classify(&multipart, Some(endpoint));
+        let admission = BodyAdmission::classify(&multipart, Some(endpoint), limits);
         assert!(!admission.is_json);
         assert_eq!(
             admission.multipart_content_type.as_deref(),

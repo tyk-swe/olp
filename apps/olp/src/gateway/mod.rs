@@ -23,8 +23,8 @@ mod responses;
 mod videos;
 
 use execution::{authorize_model_access, release_model_limits, reserve_model_limits};
-pub fn router() -> Router<GatewayState> {
-    endpoint_policy::router::router()
+pub fn router(limits: crate::bootstrap::state::BodyLimits) -> Router<GatewayState> {
+    endpoint_policy::router::router(limits)
 }
 
 #[cfg(test)]

@@ -2506,8 +2506,9 @@ export interface components {
         };
         SetModelRequest: {
             /**
-             * @description Explicit operator-reviewed capability tuples. Their provenance is
-             *     recorded as `declared`; certification/probe jobs may promote provenance
+             * @description Explicit operator-reviewed capability tuples. New tuples are recorded
+             *     as `declared`, tuples already stored keep their provenance, and tuples
+             *     left out are removed. Certification/probe jobs promote provenance
              *     separately and cannot be forged by the browser.
              */
             capabilities?: components["schemas"]["CapabilityInput"][];
@@ -7378,7 +7379,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
-            /** @description Draft has not been validated, or the Idempotency-Key was already used for a different request */
+            /** @description The Idempotency-Key was already used for a different request */
             409: {
                 headers: {
                     [name: string]: unknown;

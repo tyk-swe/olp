@@ -639,6 +639,55 @@ async fn operations_http_contract_is_authorized_paginated_exact_and_metadata_onl
     .await;
     assert_eq!(updated.status(), StatusCode::OK);
 
+    let outage_uri = "/api/v1/settings/limits.valkey_unavailable";
+    let outage = get(&app, outage_uri, &cookie).await;
+    assert_eq!(outage.status(), StatusCode::OK);
+    let outage_etag = outage.headers()[header::ETAG].to_str().unwrap().to_owned();
+    assert_eq!(response_json(outage).await["value"], "fail_closed");
+    let rejected = send(
+        &app,
+        Method::PUT,
+        outage_uri,
+        Some(json!({ "value": "open" })),
+        RequestHeaders {
+            cookie: Some(&cookie),
+            csrf: Some(&csrf),
+            idempotency_key: None,
+            if_match: Some(&outage_etag),
+        },
+    )
+    .await;
+    assert_eq!(rejected.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    let accepted = send(
+        &app,
+        Method::PUT,
+        outage_uri,
+        Some(json!({ "value": "fail_open" })),
+        RequestHeaders {
+            cookie: Some(&cookie),
+            csrf: Some(&csrf),
+            idempotency_key: None,
+            if_match: Some(&outage_etag),
+        },
+    )
+    .await;
+    assert_eq!(accepted.status(), StatusCode::OK);
+    assert_eq!(response_json(accepted).await["value"], "fail_open");
+    let audit = get(
+        &app,
+        "/api/v1/audit?action=setting.update&resource_id=limits.valkey_unavailable",
+        &cookie,
+    )
+    .await;
+    assert_eq!(audit.status(), StatusCode::OK);
+    assert_eq!(
+        response_json(audit).await["items"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+
     let unauthenticated = app
         .clone()
         .oneshot(

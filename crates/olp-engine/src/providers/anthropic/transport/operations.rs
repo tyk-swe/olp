@@ -276,7 +276,12 @@ impl Connector {
                     .map_err(|error| {
                         protocol_error(format!("cannot encode Anthropic messages request: {error}"))
                     })?;
-                hydrate_anthropic_messages(&mut wire.messages, request.media.as_ref()).await?;
+                hydrate_anthropic_messages(
+                    &mut wire.messages,
+                    request.media.as_ref(),
+                    request.max_inline_media_bytes,
+                )
+                .await?;
                 let body = serde_json::to_vec(&wire).map_err(|error| {
                     protocol_error(format!("cannot serialize Anthropic request: {error}"))
                 })?;
@@ -297,7 +302,12 @@ impl Connector {
                     ));
                 }
                 let mut wire = encode_count_tokens(count, &request.attempt.upstream_model)?;
-                hydrate_anthropic_messages(&mut wire.messages, request.media.as_ref()).await?;
+                hydrate_anthropic_messages(
+                    &mut wire.messages,
+                    request.media.as_ref(),
+                    request.max_inline_media_bytes,
+                )
+                .await?;
                 let body = serde_json::to_vec(&wire).map_err(|error| {
                     protocol_error(format!("cannot serialize Anthropic count request: {error}"))
                 })?;

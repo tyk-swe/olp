@@ -5,15 +5,22 @@ use axum::{
 };
 
 use crate::bootstrap::mode_dependencies::GatewayState;
+use crate::bootstrap::state::BodyLimits;
 
 use super::super::{anthropic, chat, gemini, media, openai_models, responses, videos};
 use super::registry::{BodyAdmission, ENDPOINTS, EndpointSpec, Handler};
 
-pub(in crate::gateway) fn router() -> Router<GatewayState> {
-    ENDPOINTS.iter().fold(Router::new(), register)
+pub(in crate::gateway) fn router(limits: BodyLimits) -> Router<GatewayState> {
+    ENDPOINTS
+        .iter()
+        .fold(Router::new(), |router, spec| register(router, spec, limits))
 }
 
-fn register(router: Router<GatewayState>, spec: &'static EndpointSpec) -> Router<GatewayState> {
+fn register(
+    router: Router<GatewayState>,
+    spec: &'static EndpointSpec,
+    limits: BodyLimits,
+) -> Router<GatewayState> {
     let filter = spec.method.filter();
     let method_router: MethodRouter<GatewayState> = match spec.handler {
         Handler::OpenAiChatCompletions => on(filter, chat::chat_completions),
@@ -42,11 +49,10 @@ fn register(router: Router<GatewayState>, spec: &'static EndpointSpec) -> Router
         Handler::GeminiModelAction => on(filter, gemini::action),
     };
     let method_router = match spec.body_admission {
-        BodyAdmission::Multipart { reservation_bytes } => {
-            method_router.layer(DefaultBodyLimit::max(
-                usize::try_from(reservation_bytes).expect("multipart reservation fits usize"),
-            ))
-        }
+        BodyAdmission::Multipart { share } => method_router.layer(DefaultBodyLimit::max(
+            usize::try_from(share.reservation_bytes(limits.media_body_bytes))
+                .expect("multipart reservation fits usize"),
+        )),
         BodyAdmission::Standard | BodyAdmission::Media => method_router,
     };
     let router = router.route(spec.route_path, method_router.clone());

@@ -18,9 +18,9 @@ Status values: `planned`, `in progress`, `done`, `dropped` (with a reason).
 | 6 — Spend controls | SPEND-01 … SPEND-05 | — | — | 5 | — |
 | 7 — Performance evidence | PERF-01 … PERF-04 | — | — | 2 | 2 |
 | 8 — Release 2.3.0 and hardening | REL-06, HYG-01 … HYG-03 | — | 1 | 2 | 1 |
-| Unscheduled | TEST-04, HYG-04 … HYG-08 | — | — | — | 6 (incl. P4) |
+| Unscheduled | TEST-04, HYG-04 … HYG-08, FLEX-01 … FLEX-06 | — | 3 | 3 | 6 (incl. P4) |
 
-47 items: 41 scheduled, 6 unscheduled. [`deferred.md`](deferred.md) lists what
+53 items: 41 scheduled, 12 unscheduled (6 done). [`deferred.md`](deferred.md) lists what
 is intentionally not here.
 
 ## CI — the gates themselves
@@ -97,3 +97,16 @@ is intentionally not here.
 - [ ] **HYG-06** Transitive lockfile maintenance: a scheduled `cargo update` PR so yanks and patch releases surface weekly, not on the next unrelated push — P3 · S · unscheduled · planned
 - [ ] **HYG-07** Toolchain bump procedure documented in `CONTRIBUTING.md` (Rust pin in three places, Node, pnpm, fuzz nightly, sqlx-cli, nextest, llvm-cov) — P3 · S · unscheduled · planned
 - [ ] **HYG-08** Node 26 / corepack plan for the console build stage (majors are excluded from Dependabot on purpose) — P4 · S · unscheduled · planned
+
+## FLEX — restrictive where it matters, flexible where it does not
+
+Loosens restrictions that carried no security or integrity benefit. The
+default-deny, certification-before-activation, never-store-content and
+immutable-generation invariants are untouched.
+
+- [x] **FLEX-01** Operator egress allowlist (`OLP_PROVIDER_EGRESS_ALLOW_CIDRS`, `OLP_PROVIDER_EGRESS_ALLOW_HTTP_HOSTS`) replaces the debug-only insecure-endpoint hatch — P1 · M · unscheduled · done
+- [x] **FLEX-02** Certification survives renames, credential rotation, model disable and unchanged tuple re-review — P1 · M · unscheduled · done
+- [x] **FLEX-03** Connection age never cuts an in-flight stream; age and drain configurable — P1 · M · unscheduled · done
+- [x] **FLEX-04** Request, inline-media and provider-response caps configurable with unchanged defaults — P2 · M · unscheduled · done
+- [x] **FLEX-05** `limits.valkey_unavailable` setting: opt-in fail-open for hard-limited keys — P2 · M · unscheduled · done
+- [x] **FLEX-06** Small fixes: models listing covers every operation, page cap 200 everywhere, gzip JSON bodies, 64 tuples / 8 probes, gateway CORS, activate validates inline — P2 · M · unscheduled · done

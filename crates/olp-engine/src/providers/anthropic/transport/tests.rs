@@ -101,7 +101,7 @@ async fn same_protocol_base64_image_handle_is_rehydrated() {
         extra: BTreeMap::new(),
     }];
     let spool: Arc<dyn MediaSpool> = Arc::new(InlineSpool);
-    hydrate_anthropic_messages(&mut messages, Some(&spool))
+    hydrate_anthropic_messages(&mut messages, Some(&spool), 2)
         .await
         .unwrap();
     let MessageContent::Blocks(blocks) = &messages[0].content else {
@@ -142,6 +142,7 @@ fn attempt(
         },
         operation: Arc::new(operation_value),
         media: None,
+        max_inline_media_bytes: 1024 * 1024,
     }
 }
 

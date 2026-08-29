@@ -353,11 +353,7 @@ export function providerStatus(current: ProviderStatusValue): string {
   return current.state;
 }
 
-/**
- * The server rejects certification for a model carrying more than 16 reviewed
- * tuples (`docs/operations.md`, "OpenAI-compatible capability certification").
- */
-export const MAX_REVIEWED_CAPABILITIES = 16;
+export const MAX_REVIEWED_CAPABILITIES = 64;
 
 export function capabilityLimitReached(reviewedCount: number): boolean {
   return reviewedCount >= MAX_REVIEWED_CAPABILITIES;

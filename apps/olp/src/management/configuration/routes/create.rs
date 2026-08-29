@@ -220,7 +220,7 @@ pub(crate) async fn validate_route_draft(
     responses(
         (status = 200, description = "Route activated, runtime published, and the draft returned to `draft` under a new ETag", body = RouteActivationResponse),
         (status = 400, description = "Idempotency-Key is missing or invalid", body = Problem),
-        (status = 409, description = "Draft has not been validated, or the Idempotency-Key was already used for a different request", body = Problem),
+        (status = 409, description = "The Idempotency-Key was already used for a different request", body = Problem),
         (status = 412, description = "ETag mismatch", body = Problem)
     )
 )]

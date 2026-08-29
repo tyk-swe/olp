@@ -9,7 +9,7 @@ use reqwest::{Client, Url, redirect::Policy};
 use thiserror::Error;
 use tokio::{net::lookup_host, sync::Mutex, time::Instant, time::timeout};
 
-use super::is_public_ip;
+use super::EgressPolicy;
 
 const DNS_REVALIDATION_INTERVAL: Duration = Duration::from_secs(30);
 
@@ -18,7 +18,7 @@ pub(in crate::providers) struct PinnedClientConfig {
     pub(in crate::providers) connect_timeout: Duration,
     pub(in crate::providers) pool_idle_timeout: Option<Duration>,
     pub(in crate::providers) pool_max_idle_per_host: Option<usize>,
-    pub(in crate::providers) allow_unsafe_target: bool,
+    pub(in crate::providers) https_only: bool,
     pub(in crate::providers) user_agent: &'static str,
 }
 
@@ -77,10 +77,11 @@ impl PinnedClientPool {
         url: &Url,
         preparation_timeout: Duration,
         config: PinnedClientConfig,
+        policy: &EgressPolicy,
     ) -> Result<Client, PinnedClientError> {
         timeout(
             preparation_timeout,
-            self.client_inner(url, config, |host, port| async move {
+            self.client_inner(url, config, policy, |host, port| async move {
                 let resolved = lookup_host((host.as_str(), port)).await?;
                 Ok(resolved.collect())
             }),
@@ -93,6 +94,7 @@ impl PinnedClientPool {
         &self,
         url: &Url,
         config: PinnedClientConfig,
+        policy: &EgressPolicy,
         resolve: Resolve,
     ) -> Result<Client, PinnedClientError>
     where
@@ -112,7 +114,7 @@ impl PinnedClientPool {
         }
 
         let addresses = target.resolve(resolve).await?;
-        validate_addresses(&addresses, config.allow_unsafe_target)?;
+        validate_addresses(&addresses, policy)?;
 
         let identity = ClientIdentity {
             scheme: target.scheme.clone(),
@@ -149,15 +151,19 @@ impl PinnedClientPool {
         url: &Url,
         preparation_timeout: Duration,
         config: PinnedClientConfig,
+        policy: &EgressPolicy,
         resolve: Resolve,
     ) -> Result<Client, PinnedClientError>
     where
         Resolve: FnOnce(String, u16) -> ResolveFuture,
         ResolveFuture: Future<Output = Result<Vec<SocketAddr>, std::io::Error>>,
     {
-        timeout(preparation_timeout, self.client_inner(url, config, resolve))
-            .await
-            .map_err(|_| PinnedClientError::DnsTimeout)?
+        timeout(
+            preparation_timeout,
+            self.client_inner(url, config, policy, resolve),
+        )
+        .await
+        .map_err(|_| PinnedClientError::DnsTimeout)?
     }
 
     #[cfg(test)]
@@ -232,6 +238,7 @@ pub(in crate::providers) async fn one_shot_client(
     url: &Url,
     resolution_timeout: Duration,
     config: PinnedClientConfig,
+    policy: &EgressPolicy,
 ) -> Result<Client, PinnedClientError> {
     let target = Target::from_url(url)?;
     let addresses = if let Some(ip) = target.literal_ip {
@@ -247,7 +254,7 @@ pub(in crate::providers) async fn one_shot_client(
         .collect()
     };
     let addresses = normalize_addresses(addresses)?;
-    validate_addresses(&addresses, config.allow_unsafe_target)?;
+    validate_addresses(&addresses, policy)?;
     build_client(&target, &addresses, config)
 }
 
@@ -265,13 +272,11 @@ fn normalize_addresses(addresses: Vec<SocketAddr>) -> Result<Vec<SocketAddr>, Pi
 
 fn validate_addresses(
     addresses: &[SocketAddr],
-    allow_unsafe_target: bool,
+    policy: &EgressPolicy,
 ) -> Result<(), PinnedClientError> {
-    if !allow_unsafe_target {
-        for address in addresses {
-            if !is_public_ip(address.ip()) {
-                return Err(PinnedClientError::ForbiddenAddress(address.ip()));
-            }
+    for address in addresses {
+        if !policy.permits_address(address.ip()) {
+            return Err(PinnedClientError::ForbiddenAddress(address.ip()));
         }
     }
     Ok(())
@@ -296,7 +301,7 @@ fn build_client(
     if let Some(maximum) = config.pool_max_idle_per_host {
         builder = builder.pool_max_idle_per_host(maximum);
     }
-    if !config.allow_unsafe_target {
+    if config.https_only {
         builder = builder.https_only(true);
     }
     if target.literal_ip.is_none() {
@@ -329,9 +334,13 @@ mod tests {
             connect_timeout: Duration::from_secs(1),
             pool_idle_timeout: Some(Duration::from_secs(30)),
             pool_max_idle_per_host: Some(256),
-            allow_unsafe_target: false,
+            https_only: true,
             user_agent: "openllmproxy",
         }
+    }
+
+    fn public_only() -> EgressPolicy {
+        EgressPolicy::default()
     }
 
     #[tokio::test]
@@ -347,6 +356,7 @@ mod tests {
                 &url,
                 preparation_timeout,
                 data_plane_config(),
+                &public_only(),
                 move |_, _| async move {
                     resolutions.fetch_add(1, Ordering::Relaxed);
                     Ok(vec![public])
@@ -366,6 +376,7 @@ mod tests {
                 &url,
                 Duration::from_secs(1),
                 data_plane_config(),
+                &public_only(),
                 move |_, _| async move {
                     counted_resolutions.fetch_add(1, Ordering::Relaxed);
                     Ok(vec![public])
@@ -381,6 +392,7 @@ mod tests {
             &url,
             Duration::from_secs(1),
             data_plane_config(),
+            &public_only(),
             |_, _| async move { Ok(vec![public]) },
         )
         .await
@@ -393,6 +405,7 @@ mod tests {
             &url,
             Duration::from_secs(1),
             changed_connect_timeout,
+            &public_only(),
             |_, _| async move { Ok(vec![public]) },
         )
         .await
@@ -409,6 +422,7 @@ mod tests {
             &url,
             Duration::from_secs(1),
             data_plane_config(),
+            &public_only(),
             |_, _| async move { Ok(vec![public]) },
         )
         .await
@@ -420,6 +434,7 @@ mod tests {
                 &url,
                 Duration::from_secs(1),
                 data_plane_config(),
+                &public_only(),
                 |_, _| async move {
                     Ok(vec![
                         public,
@@ -438,11 +453,66 @@ mod tests {
             &url,
             Duration::from_secs(1),
             data_plane_config(),
+            &public_only(),
             |_, _| async move { Ok(vec![SocketAddr::new("1.1.1.1".parse().unwrap(), 443)]) },
         )
         .await
         .unwrap();
         assert_eq!(pool.client_builds_for_test(), 2);
+    }
+
+    #[tokio::test]
+    async fn allowlisted_private_addresses_pass_but_mixed_answers_and_rebinding_fail_closed() {
+        let url = Url::parse("https://vllm.internal/v1").unwrap();
+        let pool = PinnedClientPool::default();
+        let policy = EgressPolicy::new(vec!["10.0.0.0/8".parse().unwrap()], vec![]);
+        let private = SocketAddr::new("10.1.2.3".parse().unwrap(), 443);
+        pool.client_with_resolver(
+            &url,
+            Duration::from_secs(1),
+            data_plane_config(),
+            &policy,
+            |_, _| async move { Ok(vec![private]) },
+        )
+        .await
+        .unwrap();
+        assert_eq!(pool.client_builds_for_test(), 1);
+
+        pool.expire_cached_dns_for_test().await;
+        let mixed = pool
+            .client_with_resolver(
+                &url,
+                Duration::from_secs(1),
+                data_plane_config(),
+                &policy,
+                |_, _| async move {
+                    Ok(vec![
+                        private,
+                        SocketAddr::new("192.168.0.1".parse().unwrap(), 443),
+                    ])
+                },
+            )
+            .await;
+        assert!(matches!(
+            mixed,
+            Err(PinnedClientError::ForbiddenAddress(address))
+                if address == IpAddr::from([192, 168, 0, 1])
+        ));
+
+        let rebound = pool
+            .client_with_resolver(
+                &url,
+                Duration::from_secs(1),
+                data_plane_config(),
+                &policy,
+                |_, _| async move { Ok(vec![SocketAddr::new("127.0.0.1".parse().unwrap(), 443)]) },
+            )
+            .await;
+        assert!(matches!(
+            rebound,
+            Err(PinnedClientError::ForbiddenAddress(address)) if address.is_loopback()
+        ));
+        assert_eq!(pool.client_builds_for_test(), 1);
     }
 
     #[tokio::test]
@@ -456,6 +526,7 @@ mod tests {
                     &url,
                     Duration::from_secs(1),
                     data_plane_config(),
+                    &public_only(),
                     |_, _| async move {
                         tokio::time::sleep(Duration::from_millis(100)).await;
                         Ok(vec![SocketAddr::new("8.8.8.8".parse().unwrap(), 443)])
@@ -470,6 +541,7 @@ mod tests {
                 &Url::parse("https://pool.example/v1").unwrap(),
                 Duration::from_millis(5),
                 data_plane_config(),
+                &public_only(),
                 |_, _| async move { unreachable!("the first refresh owns resolution") },
             )
             .await;
@@ -499,12 +571,13 @@ mod tests {
             &url,
             Duration::from_secs(1),
             PinnedClientConfig {
-                allow_unsafe_target: true,
+                https_only: false,
                 user_agent: "pinned-client-test",
                 pool_idle_timeout: None,
                 pool_max_idle_per_host: None,
                 ..data_plane_config()
             },
+            &EgressPolicy::unsafe_test_targets(),
         )
         .await
         .unwrap();
