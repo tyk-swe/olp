@@ -26,7 +26,7 @@ static RUNTIME: LazyLock<tokio::runtime::Runtime> = LazyLock::new(|| {
 });
 
 async fn drive(payload: Vec<u8>) {
-    let Ok(spool) = olp::bootstrap::media_spool::create_bounded_for_test() else {
+    let Ok(spool) = olp::media_spool::create_bounded_for_test() else {
         return;
     };
     let source = stream::once(async move { Ok::<Bytes, Infallible>(Bytes::from(payload)) });

@@ -702,6 +702,10 @@ fn retained_bytes(kind: &Kind) -> Result<usize, OpenAiClientEncodeError> {
             response_id.as_ref().map_or(0, String::len)
                 + provider_model.as_ref().map_or(0, String::len)
         }
+        Kind::Finish {
+            reason: FinishReason::Other(reason),
+            ..
+        } => reason.len(),
         Kind::SourceExtension { extensions }
             if extensions.source == Some(Surface::OpenAi) && !is_stream_only(extensions) =>
         {
@@ -804,6 +808,24 @@ mod tests {
             Kind::TextDelta {
                 output_index: 0,
                 text: String::new(),
+            },
+        );
+
+        assert!(matches!(
+            encoder.push(event),
+            Err(OpenAiClientEncodeError::EventHistoryTooLarge)
+        ));
+    }
+
+    #[test]
+    fn responses_stream_encoder_charges_unknown_finish_reasons_against_event_history() {
+        let mut encoder = Encoder::new("route", "response", 0);
+        encoder.retained_bytes = MAX_RETAINED_BYTES - std::mem::size_of::<Kind>();
+        let event = Event::new(
+            0,
+            Kind::Finish {
+                output_index: 0,
+                reason: FinishReason::Other("x".to_owned()),
             },
         );
 
