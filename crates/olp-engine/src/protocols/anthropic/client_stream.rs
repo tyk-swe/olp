@@ -387,17 +387,18 @@ impl Encoder {
 }
 
 fn rewrite_anthropic_model(frame: &mut Frame, public_model: &str) -> Result<(), Error> {
-    // Only message_start carries the model. Every other frame is replayed
-    // byte-for-byte; a false positive here merely takes the parse path.
-    if !frame.data.contains("\"model\"") {
+    // ASCII letters in JSON keys can only be escaped with \uXXXX.
+    if !frame.data.contains("\"model\"") && !frame.data.contains("\\u") {
         return Ok(());
     }
     let mut value: Value = serde_json::from_str(&frame.data).map_err(|_| Error::Extension)?;
-    if let Some(message) = value.get_mut("message").and_then(Value::as_object_mut)
-        && message.contains_key("model")
-    {
-        message.insert("model".into(), Value::String(public_model.to_owned()));
+    let Some(message) = value.get_mut("message").and_then(Value::as_object_mut) else {
+        return Ok(());
+    };
+    if !message.contains_key("model") {
+        return Ok(());
     }
+    message.insert("model".into(), Value::String(public_model.to_owned()));
     frame.data = serde_json::to_string(&value).map_err(|_| Error::Extension)?;
     Ok(())
 }

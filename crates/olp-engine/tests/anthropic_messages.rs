@@ -1210,3 +1210,20 @@ fn raw_passthrough_replays_frames_without_a_model_byte_for_byte() {
     assert_eq!(frames[2].data, raw_delta);
     assert_eq!(frames[2].event.as_deref(), Some("content_block_delta"));
 }
+
+#[test]
+fn raw_passthrough_rewrites_an_escaped_model_key() {
+    let raw_start = r#"{"type":"message_start","message":{"id":"msg_1","type":"message","role":"assistant","m\u006fdel":"claude-upstream","content":[],"stop_reason":null,"usage":{"input_tokens":1,"output_tokens":0}}}"#;
+    let wire = format!("event: message_start\ndata: {raw_start}\n\n");
+    let mut decoder = Decoder::with_max_event_bytes_and_raw_passthrough(1024 * 1024, true);
+    let events = decoder.push(wire.as_bytes()).unwrap();
+
+    let mut encoder = Encoder::new("public-route", "fallback");
+    let frames = events
+        .into_iter()
+        .flat_map(|event| encoder.push(event).unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(frames.len(), 1);
+    let output: Value = serde_json::from_str(&frames[0].data).unwrap();
+    assert_eq!(output["message"]["model"], "public-route");
+}

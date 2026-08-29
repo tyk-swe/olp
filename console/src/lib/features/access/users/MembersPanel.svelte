@@ -56,7 +56,7 @@
 
   function updateCachedUser(updated: User) {
     queryClient.setQueryData<CursorPage<User>>(
-      ['user-page', pagination.cursor ?? 'first'],
+      queryKeys.users.page(pagination.cursor),
       (current) =>
         current
           ? {

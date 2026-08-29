@@ -687,3 +687,20 @@ fn raw_passthrough_replays_chunks_without_a_model_version_byte_for_byte() {
     assert_eq!(frames.len(), 1);
     assert_eq!(frames[0].data, raw_chunk);
 }
+
+#[test]
+fn raw_passthrough_rewrites_an_escaped_model_version_key() {
+    let raw_chunk = r#"{"responseId":"native-1","m\u006fdelVersion":"gemini-upstream","candidates":[{"index":0,"content":{"role":"model","parts":[{"text":"hi"}]}}]}"#;
+    let wire = format!("data: {raw_chunk}\n\n");
+    let mut decoder = Decoder::with_max_event_bytes_and_raw_passthrough(1024 * 1024, true);
+    let events = decoder.push(wire.as_bytes()).unwrap();
+
+    let mut encoder = Encoder::new("public-route", "fallback");
+    let frames = events
+        .into_iter()
+        .flat_map(|event| encoder.push(event).unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(frames.len(), 1);
+    let output: Value = serde_json::from_str(&frames[0].data).unwrap();
+    assert_eq!(output["modelVersion"], "public-route");
+}

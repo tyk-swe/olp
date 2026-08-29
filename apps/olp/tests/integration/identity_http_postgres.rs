@@ -282,6 +282,7 @@ async fn identity_http_flow_enforces_sessions_csrf_roles_and_owner_guard() {
     .await;
     assert_eq!(users.status(), StatusCode::OK);
     let users_body = response_json(users).await;
+    assert_eq!(users_body["data"].as_array().unwrap().len(), 1);
     assert_eq!(users_body["items"].as_array().unwrap().len(), 1);
     assert!(users_body["next_cursor"].is_string());
 
