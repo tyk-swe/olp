@@ -51,9 +51,3 @@ export const requestList = filteredListState({
   }),
   toQuery: requestFilters
 });
-
-export const {
-  get: getRequestListState,
-  set: setRequestListState,
-  empty: emptyRequestListState
-} = requestList;

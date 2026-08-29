@@ -1,8 +1,8 @@
 <script lang="ts">
   import ProviderList from '$lib/features/gateway/providers/ProviderList.svelte';
-  import { getProviderPagination } from '$lib/features/gateway/providers/providerPagination';
+  import { providerList } from '$lib/features/gateway/providers/providerPagination';
 
-  let pagination = getProviderPagination();
+  let pagination = providerList.get();
 </script>
 
 <svelte:head><title>Providers · OpenLLMProxy</title></svelte:head>

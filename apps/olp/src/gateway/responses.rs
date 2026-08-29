@@ -103,19 +103,17 @@ async fn responses_unary_response(execution: RoutedEvents) -> Result<Response, I
 }
 
 fn responses_streaming_response(execution: RoutedEvents) -> Response {
-    let encoder = OpenAiResponsesHttpStreamEncoder(Encoder::new(
+    let encoder = Encoder::new(
         execution.route_slug.as_str(),
         format!("resp_{}", execution.request_id.simple()),
         unix_seconds(),
-    ));
+    );
     protocol_streaming_response(execution, encoder)
 }
 
-struct OpenAiResponsesHttpStreamEncoder(Encoder);
-
-impl ProtocolStreamEncoder for OpenAiResponsesHttpStreamEncoder {
+impl ProtocolStreamEncoder for Encoder {
     fn push(&mut self, event: Event) -> Result<Vec<Bytes>, InferenceError> {
-        encode_protocol_sse_frames(self.0.push(event))
+        encode_protocol_sse_frames(Encoder::push(self, event))
     }
 
     fn encode_error(&self, error: &InferenceError) -> Bytes {

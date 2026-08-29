@@ -1,8 +1,8 @@
 <script lang="ts">
   import RouteList from '$lib/features/gateway/routes/RouteList.svelte';
-  import { getRouteListState } from '$lib/features/gateway/routes/routeListState';
+  import { routeList } from '$lib/features/gateway/routes/routeListState';
 
-  let listState = getRouteListState();
+  let listState = routeList.get();
 </script>
 
 <RouteList bind:listState />

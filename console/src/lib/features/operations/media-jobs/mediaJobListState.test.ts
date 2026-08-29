@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import {
-  emptyMediaJobListState,
+  mediaJobList,
   mediaJobFilters,
   type MediaJobListState
 } from './mediaJobListState';
 
 function state(changes: Partial<MediaJobListState> = {}): MediaJobListState {
-  return { ...emptyMediaJobListState(), ...changes };
+  return { ...mediaJobList.empty(), ...changes };
 }
 
 describe('mediaJobFilters', () => {

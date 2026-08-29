@@ -12,6 +12,7 @@ use olp_db::{
     security::aad::credential as credential_aad,
 };
 use olp_engine::domain::{
+    auth::Permission,
     provider::ProviderAuthMode,
     provider_configuration::{Configuration, provider_kind_spec, validate},
     routing::provider::ProviderKind,
@@ -28,7 +29,7 @@ use crate::management::{
         MutationReply, ReplayableMutation, idempotency_http_response, require_idempotency_key,
     },
     json_payload::json_payload,
-    permissions::require_provider_manager,
+    permissions::require_permission,
     preconditions::if_match,
     response_policy::RuntimeGenerationResponse,
     secrets::WriteOnlySecret,
@@ -158,7 +159,7 @@ pub(crate) async fn create_provider(
     MutationPrincipal(principal): MutationPrincipal,
     payload: Result<Json<CreateProviderRequest>, JsonRejection>,
 ) -> Result<Response, Problem> {
-    require_provider_manager(&principal)?;
+    require_permission(&principal, Permission::ManageProviders)?;
     let idempotency_key = require_idempotency_key(&headers)?.to_owned();
     let request = json_payload(payload)?;
     let request_fingerprint =
@@ -358,7 +359,7 @@ pub(crate) async fn activate_provider(
     headers: HeaderMap,
     MutationPrincipal(principal): MutationPrincipal,
 ) -> Result<Response, Problem> {
-    require_provider_manager(&principal)?;
+    require_permission(&principal, Permission::ManageProviders)?;
     let expected_etag = if_match(&headers)?;
     let state = &state;
     let provenance = &provenance;

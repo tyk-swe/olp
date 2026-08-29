@@ -45,9 +45,3 @@ export const mediaJobList = filteredListState({
   }),
   toQuery: mediaJobFilters
 });
-
-export const {
-  get: getMediaJobListState,
-  set: setMediaJobListState,
-  empty: emptyMediaJobListState
-} = mediaJobList;

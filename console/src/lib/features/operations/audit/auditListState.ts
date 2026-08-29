@@ -56,9 +56,3 @@ export const auditList = filteredListState({
   toQuery: auditFilters,
   validate: auditRangeError
 });
-
-export const {
-  get: getAuditListState,
-  set: setAuditListState,
-  empty: emptyAuditListState
-} = auditList;

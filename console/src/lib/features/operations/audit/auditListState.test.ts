@@ -1,13 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import {
+  auditList,
   auditFilters,
   auditRangeError,
-  emptyAuditListState,
   type AuditListState
 } from './auditListState';
 
 function state(changes: Partial<AuditListState> = {}): AuditListState {
-  return { ...emptyAuditListState(), ...changes };
+  return { ...auditList.empty(), ...changes };
 }
 
 describe('auditFilters', () => {
@@ -107,9 +107,9 @@ describe('auditRangeError', () => {
   });
 });
 
-describe('emptyAuditListState', () => {
+describe('auditList.empty', () => {
   it('starts an unfiltered page from the first cursor', () => {
-    expect(emptyAuditListState()).toMatchObject({
+    expect(auditList.empty()).toMatchObject({
       cursor: undefined,
       history: []
     });

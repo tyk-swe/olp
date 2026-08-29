@@ -30,15 +30,3 @@ pub(crate) fn require_permission(
         ))
     }
 }
-
-pub(crate) fn require_provider_manager(principal: &SessionPrincipal) -> Result<(), Problem> {
-    require_permission(principal, Permission::ManageProviders)
-}
-
-pub(crate) fn require_key_manager(principal: &SessionPrincipal) -> Result<(), Problem> {
-    require_permission(principal, Permission::ManageApiKeys)
-}
-
-pub(crate) fn require_route_manager(principal: &SessionPrincipal) -> Result<(), Problem> {
-    require_permission(principal, Permission::ManageRoutes)
-}

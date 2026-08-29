@@ -21,7 +21,6 @@ use olp_engine::protocols::anthropic::{
     translate::decode::request as decode_request,
 };
 use serde::{Deserialize, Serialize};
-use serde_json::json;
 
 use olp_engine::inference::{execution::CompletedEvents, runtime::Bundle};
 
@@ -39,7 +38,7 @@ use super::{
     error::InferenceError,
     execution::{execute_event_operation, execute_routed_result},
     native_models::{after_cursor_start, before_cursor_end, visible_route, visible_routes},
-    protocol_error::{ProtocolError, anthropic_error_kind, valid_json},
+    protocol_error::{ProtocolError, anthropic_error_body, valid_json},
     release_model_limits, reserve_model_limits,
 };
 
@@ -74,10 +73,10 @@ pub(super) async fn messages(
         .map_err(ProtocolError::anthropic)?;
     if streaming {
         let execution = precommit_stream_failure(execution).map_err(ProtocolError::anthropic)?;
-        let encoder = AnthropicHttpStreamEncoder(Encoder::new(
+        let encoder = Encoder::new(
             execution.route_slug.as_str(),
             format!("msg_{}", execution.request_id.simple()),
-        ));
+        );
         return Ok(protocol_streaming_response(execution, encoder));
     }
     let completed = execution
@@ -266,24 +265,18 @@ fn model_object(runtime: &Bundle, slug: &RouteSlug) -> Model {
     }
 }
 
-struct AnthropicHttpStreamEncoder(Encoder);
-
-impl ProtocolStreamEncoder for AnthropicHttpStreamEncoder {
+impl ProtocolStreamEncoder for Encoder {
     fn push(
         &mut self,
         event: olp_engine::domain::canonical::events::Event,
     ) -> Result<Vec<bytes::Bytes>, InferenceError> {
-        encode_protocol_sse_frames(self.0.push(event))
+        encode_protocol_sse_frames(Encoder::push(self, event))
     }
 
     fn encode_error(&self, error: &InferenceError) -> bytes::Bytes {
         encode_server_sse_frame(&olp_engine::protocols::sse::Frame {
             event: Some("error".to_owned()),
-            data: json!({
-                "type": "error",
-                "error": {"type": anthropic_error_kind(error), "message": error.message()}
-            })
-            .to_string(),
+            data: anthropic_error_body(error.status(), error.message()).to_string(),
             id: None,
             retry_ms: None,
         })

@@ -117,10 +117,10 @@ pub(super) async fn action(
                 .await
                 .map_err(ProtocolError::gemini)?;
         let execution = precommit_stream_failure(execution).map_err(ProtocolError::gemini)?;
-        let encoder = GeminiHttpStreamEncoder(Encoder::new(
+        let encoder = Encoder::new(
             execution.route_slug.as_str(),
             execution.request_id.to_string(),
-        ));
+        );
         return Ok(protocol_streaming_response(execution, encoder));
     }
     if let Some(model) = resource.strip_suffix(":countTokens") {
@@ -344,20 +344,18 @@ fn decode_page_token(token: &str) -> Result<String, ProtocolError> {
         .ok_or_else(|| ProtocolError::invalid(Surface::Gemini, "The pageToken is invalid."))
 }
 
-struct GeminiHttpStreamEncoder(Encoder);
-
-impl ProtocolStreamEncoder for GeminiHttpStreamEncoder {
+impl ProtocolStreamEncoder for Encoder {
     fn push(
         &mut self,
         event: olp_engine::domain::canonical::events::Event,
     ) -> Result<Vec<bytes::Bytes>, InferenceError> {
-        encode_protocol_sse_frames(self.0.push(event))
+        encode_protocol_sse_frames(Encoder::push(self, event))
     }
 
     fn encode_error(&self, error: &InferenceError) -> bytes::Bytes {
         encode_server_sse_frame(&olp_engine::protocols::sse::Frame {
             event: None,
-            data: gemini_error_body(error).to_string(),
+            data: gemini_error_body(error.status(), error.message()).to_string(),
             id: None,
             retry_ms: None,
         })

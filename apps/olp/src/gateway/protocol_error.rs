@@ -61,16 +61,14 @@ impl IntoResponse for ProtocolError {
         let mut response = match self.surface {
             Surface::Anthropic => (
                 status,
-                Json(json!({
-                    "type": "error",
-                    "error": {
-                        "type": anthropic_error_kind(&self.error),
-                        "message": self.error.message()
-                    }
-                })),
+                Json(anthropic_error_body(status, self.error.message())),
             )
                 .into_response(),
-            Surface::Gemini => (status, Json(gemini_error_body(&self.error))).into_response(),
+            Surface::Gemini => (
+                status,
+                Json(gemini_error_body(status, self.error.message())),
+            )
+                .into_response(),
             Surface::OpenAi => return self.error.into_response(),
         };
         insert_retry_after_header(&mut response, retry_after);
@@ -105,35 +103,12 @@ pub(crate) fn problem_response(surface: Surface, problem: Problem) -> Response {
             None,
             status == StatusCode::UNAUTHORIZED,
         ),
-        Surface::Anthropic => (
-            status,
-            Json(json!({
-                "type": "error",
-                "error": {
-                    "type": match status {
-                        StatusCode::UNAUTHORIZED => "authentication_error",
-                        StatusCode::FORBIDDEN => "permission_error",
-                        StatusCode::NOT_FOUND => "not_found_error",
-                        StatusCode::TOO_MANY_REQUESTS => "rate_limit_error",
-                        status if status.is_client_error() => "invalid_request_error",
-                        _ => "api_error"
-                    },
-                    "message": problem.detail
-                }
-            })),
-        )
-            .into_response(),
-        Surface::Gemini => (
-            status,
-            Json(json!({
-                "error": {
-                    "code": status.as_u16(),
-                    "message": problem.detail,
-                    "status": gemini_error_status(status)
-                }
-            })),
-        )
-            .into_response(),
+        Surface::Anthropic => {
+            (status, Json(anthropic_error_body(status, &problem.detail))).into_response()
+        }
+        Surface::Gemini => {
+            (status, Json(gemini_error_body(status, &problem.detail))).into_response()
+        }
     }
 }
 
@@ -149,8 +124,15 @@ pub(super) fn valid_json<T>(
         .map_err(|error| ProtocolError::invalid(surface, format!("Invalid JSON request: {error}")))
 }
 
-pub(super) fn anthropic_error_kind(error: &InferenceError) -> &'static str {
-    match error.status() {
+pub(super) fn anthropic_error_body(status: StatusCode, message: &str) -> serde_json::Value {
+    json!({
+        "type": "error",
+        "error": {"type": anthropic_error_kind(status), "message": message}
+    })
+}
+
+fn anthropic_error_kind(status: StatusCode) -> &'static str {
+    match status {
         StatusCode::UNAUTHORIZED => "authentication_error",
         StatusCode::FORBIDDEN => "permission_error",
         StatusCode::NOT_FOUND => "not_found_error",
@@ -160,12 +142,12 @@ pub(super) fn anthropic_error_kind(error: &InferenceError) -> &'static str {
     }
 }
 
-pub(super) fn gemini_error_body(error: &InferenceError) -> serde_json::Value {
+pub(super) fn gemini_error_body(status: StatusCode, message: &str) -> serde_json::Value {
     json!({
         "error": {
-            "code": error.status().as_u16(),
-            "message": error.message(),
-            "status": gemini_error_status(error.status())
+            "code": status.as_u16(),
+            "message": message,
+            "status": gemini_error_status(status)
         }
     })
 }

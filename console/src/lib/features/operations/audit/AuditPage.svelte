@@ -9,7 +9,6 @@
   import { auditList } from './auditListState';
 
   const listState = $state(auditList.empty());
-  auditList.set(listState);
   let rangeError = $state('');
   const audit = createQuery(() => ({
     queryKey: queryKeys.audit.page(listState.applied, listState.cursor),

@@ -1,13 +1,6 @@
-use sqlx::{FromRow, Postgres, QueryBuilder};
-
-use super::{
-    Coverage, Filters,
-    query::{UsageCountScope, push_usage_rows_cte, validate_usage_range},
-};
+use super::{Coverage, Filters};
 use crate::{
-    operations::cursor::{Error, checked_u64, trimmed_optional},
-    request_metadata::delivery_health::ConsumerStatus,
-    store::Store,
+    operations::cursor::Error, request_metadata::delivery_health::ConsumerStatus, store::Store,
 };
 
 #[derive(Clone, Debug)]
@@ -27,16 +20,6 @@ pub struct Report {
     pub complete: bool,
 }
 
-#[derive(Debug, FromRow)]
-struct UsageCompletenessRow {
-    request_count: i64,
-    priced_count: i64,
-    unpriced_count: i64,
-    incomplete_count: i64,
-    estimated_cost: Option<String>,
-    currency: Option<String>,
-}
-
 #[derive(Clone, Copy, Debug)]
 pub(super) struct RequestMetadataGapEvidence {
     pub(super) event_count: i64,
@@ -45,50 +28,23 @@ pub(super) struct RequestMetadataGapEvidence {
 
 impl Store {
     pub async fn usage_completeness(&self, filters: &Filters) -> Result<Report, Error> {
-        validate_usage_range(filters)?;
-        let mut query = QueryBuilder::<Postgres>::new("");
-        push_usage_rows_cte(&mut query, filters, UsageCountScope::for_filters(filters));
-        query.push(
-            " SELECT COALESCE(SUM(request_count), 0)::bigint AS request_count, \
-                    COALESCE(SUM(request_count - unpriced_count), 0)::bigint AS priced_count, \
-                    COALESCE(SUM(unpriced_count), 0)::bigint AS unpriced_count, \
-                    COALESCE(SUM(incomplete_count), 0)::bigint AS incomplete_count, \
-                    SUM(estimated_cost)::text AS estimated_cost, \
-                    COALESCE(MAX(btrim(currency)), \
-                      (SELECT btrim(currency) FROM pricing_currency WHERE singleton)) AS currency \
-             FROM usage_rows",
-        );
-        let row = query
-            .build_query_as::<UsageCompletenessRow>()
-            .fetch_one(self.pool())
-            .await?;
-        let gap = self.request_metadata_gap_evidence(filters).await?;
-        let unpriced_count = checked_u64(row.unpriced_count, "unpriced count")?;
-        let incomplete_count = checked_u64(row.incomplete_count, "incomplete count")?;
-        let request_metadata_gap_events = checked_u64(gap.event_count, "gap event count")?;
-        let uncertain_request_metadata_gap_count =
-            checked_u64(gap.uncertain_gap_count, "uncertain gap count")?;
-        let coverage = self.usage_range_coverage(filters).await?;
-        let request_metadata_consumer = self
-            .request_metadata_consumer_status(chrono::Utc::now())
-            .await?;
+        let summary = self.usage_summary(filters).await?;
+        let priced_count = summary
+            .request_count
+            .checked_sub(summary.unpriced_count)
+            .ok_or_else(|| Error::Invalid("stored priced count is invalid".to_owned()))?;
         Ok(Report {
-            request_count: checked_u64(row.request_count, "request count")?,
-            priced_count: checked_u64(row.priced_count, "priced count")?,
-            unpriced_count,
-            incomplete_count,
-            request_metadata_gap_events,
-            uncertain_request_metadata_gap_count,
-            estimated_cost: row.estimated_cost,
-            currency: trimmed_optional(row.currency),
-            coverage,
-            request_metadata_consumer,
-            complete: unpriced_count == 0
-                && incomplete_count == 0
-                && request_metadata_gap_events == 0
-                && uncertain_request_metadata_gap_count == 0
-                && coverage.range_complete
-                && request_metadata_consumer.complete(),
+            request_count: summary.request_count,
+            priced_count,
+            unpriced_count: summary.unpriced_count,
+            incomplete_count: summary.incomplete_count,
+            request_metadata_gap_events: summary.request_metadata_gap_events,
+            uncertain_request_metadata_gap_count: summary.uncertain_request_metadata_gap_count,
+            estimated_cost: summary.estimated_cost,
+            currency: summary.currency,
+            coverage: summary.coverage,
+            request_metadata_consumer: summary.request_metadata_consumer,
+            complete: summary.complete,
         })
     }
 

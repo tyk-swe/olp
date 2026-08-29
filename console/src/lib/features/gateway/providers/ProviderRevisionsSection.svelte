@@ -4,7 +4,8 @@
   import { errorMessage as providerDetailError } from '$lib/api/http';
   import {
     cursorPaginationProps,
-    emptyCursorHistory
+    emptyCursorHistory,
+    resetCursor
   } from '$lib/api/pagination';
   import CursorPagination from '$lib/components/CursorPagination.svelte';
   import SecretDialog from '$lib/components/SecretDialog.svelte';
@@ -132,8 +133,7 @@
   }
 
   function view(revisionId: string, revision: number) {
-    modelPagination.cursor = undefined;
-    modelPagination.history = [];
+    resetCursor(modelPagination);
     viewed = { id: revisionId, revision };
   }
 </script>

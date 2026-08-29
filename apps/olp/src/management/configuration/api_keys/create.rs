@@ -12,6 +12,7 @@ use olp_db::{
     access::NewApiKeyRecord, idempotency::Replayable, idempotency::Response as IdempotencyResponse,
     idempotency::fingerprint, idempotency::operations,
 };
+use olp_engine::domain::auth::Permission;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use uuid::Uuid;
@@ -22,7 +23,7 @@ use crate::management::{
         MutationReply, ReplayableMutation, idempotency_http_response, require_idempotency_key,
     },
     json_payload::json_payload,
-    permissions::require_key_manager,
+    permissions::require_permission,
     preconditions::if_match,
     response_policy::RuntimeGenerationResponse,
     secrets::WriteOnlySecret,
@@ -94,7 +95,7 @@ pub(crate) async fn create_api_key(
     MutationPrincipal(principal): MutationPrincipal,
     payload: Result<Json<CreateApiKeyRequest>, JsonRejection>,
 ) -> Result<Response, Problem> {
-    require_key_manager(&principal)?;
+    require_permission(&principal, Permission::ManageApiKeys)?;
     let idempotency_key = require_idempotency_key(&headers)?.to_owned();
     let request = json_payload(payload)?;
     let request_fingerprint = fingerprint(&request).map_err(map_persistence)?;
@@ -170,7 +171,7 @@ pub(crate) async fn revoke_api_key(
     headers: HeaderMap,
     MutationPrincipal(principal): MutationPrincipal,
 ) -> Result<Response, Problem> {
-    require_key_manager(&principal)?;
+    require_permission(&principal, Permission::ManageApiKeys)?;
     let expected_etag = if_match(&headers)?;
     let state = &state;
     let provenance = &provenance;

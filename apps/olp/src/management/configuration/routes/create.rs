@@ -10,7 +10,7 @@ use olp_db::{
     idempotency::Response as IdempotencyResponse, idempotency::fingerprint,
     idempotency::operations,
 };
-use olp_engine::domain::canonical::identity::OperationKind;
+use olp_engine::domain::{auth::Permission, canonical::identity::OperationKind};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use uuid::Uuid;
@@ -21,7 +21,7 @@ use crate::management::{
         MutationReply, ReplayableMutation, idempotency_http_response, require_idempotency_key,
     },
     json_payload::json_payload,
-    permissions::require_route_manager,
+    permissions::require_permission,
     preconditions::{if_match, with_etag},
     provenance::Provenance,
     response_policy::RuntimeGenerationResponse,
@@ -97,7 +97,7 @@ pub(crate) async fn create_route_draft(
     MutationPrincipal(principal): MutationPrincipal,
     payload: Result<Json<CreateRouteDraftRequest>, JsonRejection>,
 ) -> Result<Response, Problem> {
-    require_route_manager(&principal)?;
+    require_permission(&principal, Permission::ManageRoutes)?;
     let idempotency_key = require_idempotency_key(&headers)?.to_owned();
     let request = json_payload(payload)?;
     let request_fingerprint = fingerprint(&request).map_err(map_persistence)?;
@@ -187,7 +187,7 @@ pub(crate) async fn validate_route_draft(
     headers: HeaderMap,
     MutationPrincipal(principal): MutationPrincipal,
 ) -> Result<Response, Problem> {
-    require_route_manager(&principal)?;
+    require_permission(&principal, Permission::ManageRoutes)?;
     let (etag, slug) = state
         .store()
         .with_provenance(&provenance)
@@ -231,7 +231,7 @@ pub(crate) async fn activate_route_draft(
     headers: HeaderMap,
     MutationPrincipal(principal): MutationPrincipal,
 ) -> Result<Response, Problem> {
-    require_route_manager(&principal)?;
+    require_permission(&principal, Permission::ManageRoutes)?;
     let expected_etag = if_match(&headers)?;
     let state = &state;
     let provenance = &provenance;

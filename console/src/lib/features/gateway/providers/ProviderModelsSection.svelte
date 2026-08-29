@@ -20,6 +20,7 @@
   } from '$lib/api/management/providers';
   import {
     cursorPaginationProps,
+    resetCursor,
     type CursorHistory
   } from '$lib/api/pagination';
   import CapabilityReview from './CapabilityReview.svelte';
@@ -103,12 +104,7 @@
         previousProviderEtag = provider.etag;
         onAcceptProvider(provider);
       },
-      resetToFirstPage
-        ? () => {
-            pageState.cursor = undefined;
-            pageState.history = [];
-          }
-        : undefined
+      resetToFirstPage ? () => resetCursor(pageState) : undefined
     );
   }
 

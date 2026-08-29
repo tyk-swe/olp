@@ -13,9 +13,3 @@ export const routeList = listState<RouteListState>(() => ({
   draft: emptyCursorHistory(),
   route: emptyCursorHistory()
 }));
-
-export const {
-  get: getRouteListState,
-  set: setRouteListState,
-  empty: emptyRouteListState
-} = routeList;

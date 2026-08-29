@@ -7,5 +7,3 @@ import {
 export type ApiKeyListState = CursorHistory;
 
 export const apiKeyList = listState<ApiKeyListState>(emptyCursorHistory);
-
-export const { get: getApiKeyListState, set: setApiKeyListState } = apiKeyList;

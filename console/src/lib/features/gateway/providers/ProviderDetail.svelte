@@ -17,7 +17,7 @@
     updateProvider,
     type Provider
   } from '$lib/api/management/providers';
-  import { emptyCursorHistory } from '$lib/api/pagination';
+  import { emptyCursorHistory, resetCursor } from '$lib/api/pagination';
   import { useRole } from '$lib/auth/useRole.svelte';
   import {
     acceptRemote,
@@ -133,8 +133,7 @@
   }
 
   function resetModelPage() {
-    modelPageState.cursor = undefined;
-    modelPageState.history = [];
+    resetCursor(modelPageState);
   }
 
   async function refetchProvider(): Promise<boolean> {
