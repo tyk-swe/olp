@@ -1,0 +1,99 @@
+# Backlog
+
+Every roadmap work item, in one place. Milestone files carry the detailed
+task checklists; this file carries the identity, priority, size, week, and
+status of each item. Change the week here when an item moves.
+
+Status values: `planned`, `in progress`, `done`, `dropped` (with a reason).
+
+## Summary
+
+| Week | Items | P0 | P1 | P2 | P3 |
+|---|---|---|---|---|---|
+| 1 — Green and protected `main` | CI-01 … CI-05, GOV-01 … GOV-04 | 3 | 3 | 2 | 1 |
+| 2 — First published release | REL-01 … REL-05 | — | 5 | — | — |
+| 3 — Test the real risks | TEST-01, TEST-02, CI-06, CI-07 | — | 1 | 2 | 1 |
+| 4 — Onboarding and docs | DOC-01 … DOC-04, TEST-03, GOV-05 | — | 1 | 5 | — |
+| 5 — Distributed tracing | OTEL-01 … OTEL-04 | — | — | 4 | — |
+| 6 — Spend controls | SPEND-01 … SPEND-05 | — | — | 5 | — |
+| 7 — Performance evidence | PERF-01 … PERF-04 | — | — | 2 | 2 |
+| 8 — Release 2.3.0 and hardening | REL-06, HYG-01 … HYG-03 | — | 1 | 2 | 1 |
+| Unscheduled | TEST-04, HYG-04 … HYG-08 | — | — | — | 6 (incl. P4) |
+
+47 items: 41 scheduled, 6 unscheduled. [`deferred.md`](deferred.md) lists what
+is intentionally not here.
+
+## CI — the gates themselves
+
+- [ ] **CI-01** Coverage measures the DB suites, prints its number, floor 80 — P0 · M · week 1 · planned
+  Root cause and numbers in [`baseline.md`](baseline.md#rust--coverage--floor-failure-caused-by-measurement-not-by-tests). Unblocks every pull request. → [milestone 1](milestones/01-green-main.md)
+- [ ] **CI-02** Bump yanked `chacha20`, drop the stale `RUSTSEC-2026-0235` ignore, write down the yank policy — P0 · S · week 1 · planned → [milestone 1](milestones/01-green-main.md)
+- [ ] **CI-03** Refresh the Firefox `request-explorer` baseline and decide the cross-browser snapshot policy — P1 · S · week 1 · planned → [milestone 1](milestones/01-green-main.md)
+- [ ] **CI-04** Make the shared-Valkey isolation proof immune to UTC-minute rollover — P1 · S · week 1 · planned → [milestone 1](milestones/01-green-main.md)
+- [ ] **CI-05** Repair the Dependabot cargo group (`futures: unknown_error`) and land the pending bumps once — P1 · S · week 1 · planned → [milestone 1](milestones/01-green-main.md)
+- [ ] **CI-06** `Required` tier under 8 minutes: cache fuzz targets or move `fuzz-replay` to the full tier — P2 · S · week 3 · planned → [milestone 3](milestones/03-risk-tests.md)
+- [ ] **CI-07** Flake policy: no retries anywhere; time-dependent assertions must be deterministic — P3 · S · week 3 · planned → [milestone 3](milestones/03-risk-tests.md)
+
+## GOV — governance and repository hygiene
+
+- [ ] **GOV-01** Ruleset on `main` (require `Required`, linear history, no force-push, no deletion) and merge queue — P0 · S · week 1 · planned → [milestone 1](milestones/01-green-main.md)
+- [ ] **GOV-02** Prune 62 remote branches to ≤ 10; auto-delete merged heads — P2 · S · week 1 · planned → [milestone 1](milestones/01-green-main.md)
+- [ ] **GOV-03** Backlog hygiene: `TODOS.md` reflects reality, tracking issues per milestone, CHANGELOG entry for the CI changes — P2 · S · week 1 · planned → [milestone 1](milestones/01-green-main.md)
+- [ ] **GOV-04** Remove the dead `stable` branch trigger; fix the dev-box git identity — P3 · S · week 1 · planned → [milestone 1](milestones/01-green-main.md)
+- [ ] **GOV-05** Repository presentation: description, topics, issue templates, CODEOWNERS, code of conduct, sharper `SECURITY.md` — P2 · S · week 4 · planned → [milestone 4](milestones/04-onboarding.md)
+
+## REL — releases
+
+- [ ] **REL-01** `release.yml` with tag/version verification, Make lockstep, and supply-chain pins — P1 · M · week 2 · planned → [milestone 2](milestones/02-first-release.md)
+- [ ] **REL-02** Native amd64 + arm64 image on GHCR by digest, cosign-signed, SBOM attested, Trivy-scanned — P1 · M · week 2 · planned → [milestone 2](milestones/02-first-release.md)
+- [ ] **REL-03** Helm chart on `oci://ghcr.io/tyk-swe/charts`, signed, render-identical to the repo — P1 · S · week 2 · planned → [milestone 2](milestones/02-first-release.md)
+- [ ] **REL-04** Cut `v2.2.0`: version bump, CHANGELOG, tag, release notes from CHANGELOG, assets — P1 · S · week 2 · planned → [milestone 2](milestones/02-first-release.md)
+- [ ] **REL-05** Quick start pulls the published image; source build becomes a Compose overlay — P1 · S · week 2 · planned → [milestone 2](milestones/02-first-release.md)
+- [ ] **REL-06** Cut `v2.3.0` with tracing, budgets, bench, Python smoke, NetworkPolicy — P1 · S · week 8 · planned → [milestone 8](milestones/08-release-and-retro.md)
+
+## TEST — tests that guard external risk
+
+- [ ] **TEST-01** Weekly live-provider job with environment-scoped secrets, cloud OIDC federation, auto-filed `provider-drift` issue — P1 · M · week 3 · planned → [milestone 3](milestones/03-risk-tests.md)
+- [ ] **TEST-02** Python SDK smoke (`openai`, `anthropic`, `google-genai`) mirroring the JavaScript cases — P2 · M · week 3 · planned → [milestone 3](milestones/03-risk-tests.md)
+- [ ] **TEST-03** The README first-request example executes verbatim in the e2e suite — P2 · S · week 4 · planned → [milestone 4](milestones/04-onboarding.md)
+- [ ] **TEST-04** Property-based round-trip tests for the protocol translators (OpenAI ↔ canonical ↔ Anthropic/Gemini) — P3 · M · unscheduled · planned
+
+## DOC — onboarding and documentation
+
+- [ ] **DOC-01** "Your first request": curl plus Python/JavaScript for all three surfaces, `model` = route slug explained — P1 · S · week 4 · planned → [milestone 4](milestones/04-onboarding.md)
+- [ ] **DOC-02** `docs/concepts.md` with one request-lifecycle diagram — P2 · M · week 4 · planned → [milestone 4](milestones/04-onboarding.md)
+- [ ] **DOC-03** `docs/compatibility.md`: generated surface × operation table plus per-provider notes, drift-checked by `make compat-check` — P2 · M · week 4 · planned → [milestone 4](milestones/04-onboarding.md)
+- [ ] **DOC-04** Helm NetworkPolicy template, values, schema, and docs — P2 · S · week 4 · planned → [milestone 4](milestones/04-onboarding.md)
+
+## OTEL — distributed tracing
+
+- [ ] **OTEL-01** Design record: crates, ownership, configuration surface, span attribute allowlist — P2 · S · week 5 · planned → [milestone 5](milestones/05-tracing.md)
+- [ ] **OTEL-02** Request and attempt spans, OTLP/HTTP exporter, W3C propagation in and out, off by default — P2 · L · week 5 · planned → [milestone 5](milestones/05-tracing.md)
+- [ ] **OTEL-03** Proof: allowlist unit test, e2e collector assertions, HA trace continuity — P2 · M · week 5 · planned → [milestone 5](milestones/05-tracing.md)
+- [ ] **OTEL-04** Configuration docs, Helm values, Jaeger compose overlay, CHANGELOG — P2 · S · week 5 · planned → [milestone 5](milestones/05-tracing.md)
+
+## SPEND — spend controls
+
+- [ ] **SPEND-01** Budget semantics written before code: windows, accrual, unpriced attempts, fail-closed, error shape — P2 · S · week 6 · planned → [milestone 6](milestones/06-spend-controls.md)
+- [ ] **SPEND-02** Migration 0048, cost reservation script, limiter dimension, PostgreSQL reconciliation task — P2 · M · week 6 · planned → [milestone 6](milestones/06-spend-controls.md)
+- [ ] **SPEND-03** Engine admission, terminal accrual, management API fields, audit events, metrics — P2 · M · week 6 · planned → [milestone 6](milestones/06-spend-controls.md)
+- [ ] **SPEND-04** Console: key form, list column, detail view, usage filter — P2 · M · week 6 (stretch) · planned → [milestone 6](milestones/06-spend-controls.md)
+- [ ] **SPEND-05** Integration and e2e proofs, docs, CHANGELOG semantics sentence — P2 · M · week 6 · planned → [milestone 6](milestones/06-spend-controls.md)
+
+## PERF — performance evidence
+
+- [ ] **PERF-01** `make bench`: `oha` against the loopback mock, added-latency p50/p95/p99, JSON results — P2 · M · week 7 · planned → [milestone 7](milestones/07-performance.md)
+- [ ] **PERF-02** Criterion micro-benchmarks on the SSE decoder, translators, and codecs — P3 · S · week 7 · planned → [milestone 7](milestones/07-performance.md)
+- [ ] **PERF-03** Non-blocking `perf` job with artifact and regression warning — P3 · S · week 7 · planned → [milestone 7](milestones/07-performance.md)
+- [ ] **PERF-04** Act on the numbers: profile once, revalidate admission defaults, replace the unmeasured SLO sentence — P2 · M · week 7 · planned → [milestone 7](milestones/07-performance.md)
+
+## HYG — hardening and hygiene
+
+- [ ] **HYG-01** Size-baseline burn-down: split the 9 oversized test files and the 15 longest functions — P3 · M · week 8 · planned → [milestone 8](milestones/08-release-and-retro.md)
+- [ ] **HYG-02** Security pass on 2.3.0: headers, cookies, auth throttling, egress rules for the collector, audit tools — P2 · M · week 8 · planned → [milestone 8](milestones/08-release-and-retro.md)
+- [ ] **HYG-03** Retrospective and the next roadmap — P2 · S · week 8 · planned → [milestone 8](milestones/08-release-and-retro.md)
+- [ ] **HYG-04** `deploy/Dockerfile` `USER 65532:65532` to clear hadolint DL3066 and match the Helm security context — P4 · S · unscheduled · planned
+- [ ] **HYG-05** Retire the duplicate `jsonwebtoken` line once `google-cloud-auth` moves off 10.x — P4 · S · unscheduled · planned (watch Dependabot)
+- [ ] **HYG-06** Transitive lockfile maintenance: a scheduled `cargo update` PR so yanks and patch releases surface weekly, not on the next unrelated push — P3 · S · unscheduled · planned
+- [ ] **HYG-07** Toolchain bump procedure documented in `CONTRIBUTING.md` (Rust pin in three places, Node, pnpm, fuzz nightly, sqlx-cli, nextest, llvm-cov) — P3 · S · unscheduled · planned
+- [ ] **HYG-08** Node 26 / corepack plan for the console build stage (majors are excluded from Dependabot on purpose) — P4 · S · unscheduled · planned

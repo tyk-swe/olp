@@ -115,6 +115,7 @@ screenshots with `pnpm --dir console screenshots`.
 | [Operations](docs/operations.md) | Monitoring, recovery, upgrades, incidents, and master-key rotation |
 | [Contributing](CONTRIBUTING.md) | Toolchain, sources of truth, and validation |
 | [Changelog](CHANGELOG.md) | Release notes, and the upgrade notes that go with them |
+| [Roadmap](docs/roadmap/README.md) | Eight-week plan, backlog, baseline evidence, deferred items, and risks |
 | [Security](SECURITY.md) | Supported releases and private vulnerability reporting |
 | [Console development](console/README.md) | Frontend commands, boundaries, integration tests, and screenshots |
 | [Compatibility and contract tests](tests/README.md) | Conformance, SDK, end-to-end, HA, and fuzz suites |
