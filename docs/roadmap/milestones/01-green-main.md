@@ -26,7 +26,7 @@ never run under `make coverage`. Measured with them: 86.0 %.
 - [x] Floor: 80. Put the measured per-crate numbers (`olp-db` 88.7, `apps/olp` 82.6, `olp-engine` 87.6) in the commit message so the next raise is deliberate
 - [x] `make ci-lockstep`, `make script-selftest`, `make shellcheck` pass; `scripts/test-postgres-test-databases.sh` gains a case for the runner override
 - [x] `CONTRIBUTING.md` "Validation" and the Makefile header comment say coverage now includes the DB suites and needs the `make db-test` environment
-- [ ] On the PR: coverage job green, `rust-coverage-*` artifact present, the summary line visible in the job log
+- [x] On [PR #117](https://github.com/tyk-swe/olp/pull/117): the [coverage job](https://github.com/tyk-swe/olp/actions/runs/33252607630/job/99100780659) is green, artifact `rust-coverage-33252607630-1` is present, and the summary reports 86.12% line coverage
 
 ## CI-02 — Yanked `chacha20` (S)
 
@@ -52,10 +52,10 @@ never run under `make coverage`. Measured with them: 86.0 %.
 
 ## CI-05 — Dependabot cargo group (S)
 
-- [x] Read the update log at `github.com/tyk-swe/olp/network/updates/1541862126` (`futures: unknown_error`)
-- [x] If the grouped update trips on the workspace-level `futures = "0.3"`, exclude `futures` from `cargo-minor-patch` in `.github/dependabot.yml`; otherwise file the Dependabot issue and link it here
-- [ ] Land the pending bumps once by hand: `cargo update --workspace` in a PR titled `build(deps): cargo minor/patch catch-up 2026-09`, so `deny`, `machete`, and the full gate run against current versions
-- [ ] Merge Dependabot #115 (console group) after CI-01 turns `Required` green
+- [x] Read [Dependabot update 1541862126](https://github.com/tyk-swe/olp/network/updates/1541862126) (maintainer access required; `futures: unknown_error`)
+- [x] Exclude `futures` from `cargo-minor-patch`; the standalone lockstep updater defect is tracked in [dependabot-core#16092](https://github.com/dependabot/dependabot-core/issues/16092)
+- [x] Land the pending cargo bumps in [PR #117](https://github.com/tyk-swe/olp/pull/117) and advance the lockstep `futures` family in [PR #122](https://github.com/tyk-swe/olp/pull/122)
+- [x] Merge [Dependabot #115](https://github.com/tyk-swe/olp/pull/115) after CI-01 turns `Required` green
 
 ## GOV-01 — Protect `main` (S)
 
@@ -87,9 +87,9 @@ broad, stale refactor; the other unmerged branches were superseded by `main`.
 
 ## Exit criteria
 
-- [ ] The latest push to `main` shows `Required` and `Full` both green
+- [x] The post-implementation push to `main` shows `Required` and `Full` both green ([run 33256090035](https://github.com/tyk-swe/olp/actions/runs/33256090035))
 - [x] Ruleset active and verified against a failing check
-- [ ] `cargo deny check` clean; the next scheduled Dependabot cargo run succeeds
+- [x] `cargo deny check` is clean; the [fresh Dependabot cargo run](https://github.com/tyk-swe/olp/actions/runs/33256092124) triggered by [PR #123](https://github.com/tyk-swe/olp/pull/123) succeeds
 - [x] Remote branch count ≤ 10
 - [x] `TODOS.md` and `CHANGELOG.md` reflect the week
 

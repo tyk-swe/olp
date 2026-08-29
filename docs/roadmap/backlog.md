@@ -20,26 +20,26 @@ Status values: `planned`, `in progress`, `done`, `dropped` (with a reason).
 | 8 — Release 2.3.0 and hardening | REL-06, HYG-01 … HYG-03 | — | 1 | 2 | 1 |
 | Unscheduled | TEST-04, HYG-04 … HYG-08, FLEX-01 … FLEX-06 | — | 3 | 3 | 6 (incl. P4) |
 
-53 items: 41 scheduled, 12 unscheduled (6 done). [`deferred.md`](deferred.md) lists what
+53 items: 41 scheduled, 12 unscheduled; 15 done. [`deferred.md`](deferred.md) lists what
 is intentionally not here.
 
 ## CI — the gates themselves
 
-- [ ] **CI-01** Coverage measures the DB suites, prints its number, floor 80 — P0 · M · week 1 · in progress
+- [x] **CI-01** Coverage measures the DB suites, prints its number, floor 80 — P0 · M · week 1 · done
   Root cause and numbers in [`baseline.md`](baseline.md#rust--coverage--floor-failure-caused-by-measurement-not-by-tests). Unblocks every pull request. → [milestone 1](milestones/01-green-main.md)
-- [ ] **CI-02** Bump yanked `chacha20`, drop the stale `RUSTSEC-2026-0235` ignore, write down the yank policy — P0 · S · week 1 · in progress → [milestone 1](milestones/01-green-main.md)
-- [ ] **CI-03** Refresh the Firefox `request-explorer` baseline and decide the cross-browser snapshot policy — P1 · S · week 1 · in progress → [milestone 1](milestones/01-green-main.md)
-- [ ] **CI-04** Make the shared-Valkey isolation proof immune to UTC-minute rollover — P1 · S · week 1 · in progress → [milestone 1](milestones/01-green-main.md)
-- [ ] **CI-05** Repair the Dependabot cargo group (`futures: unknown_error`) and land the pending bumps once — P1 · S · week 1 · in progress → [milestone 1](milestones/01-green-main.md)
+- [x] **CI-02** Bump yanked `chacha20`, drop the stale `RUSTSEC-2026-0235` ignore, write down the yank policy — P0 · S · week 1 · done → [milestone 1](milestones/01-green-main.md)
+- [x] **CI-03** Refresh the Firefox `request-explorer` baseline and decide the cross-browser snapshot policy — P1 · S · week 1 · done → [milestone 1](milestones/01-green-main.md)
+- [x] **CI-04** Make the shared-Valkey isolation proof immune to UTC-minute rollover — P1 · S · week 1 · done → [milestone 1](milestones/01-green-main.md)
+- [x] **CI-05** Repair the Dependabot cargo group (`futures: unknown_error`) and land the pending bumps once — P1 · S · week 1 · done → [milestone 1](milestones/01-green-main.md)
 - [ ] **CI-06** `Required` tier under 8 minutes: cache fuzz targets or move `fuzz-replay` to the full tier — P2 · S · week 3 · planned → [milestone 3](milestones/03-risk-tests.md)
 - [ ] **CI-07** Flake policy: no retries anywhere; time-dependent assertions must be deterministic — P3 · S · week 3 · planned → [milestone 3](milestones/03-risk-tests.md)
 
 ## GOV — governance and repository hygiene
 
-- [ ] **GOV-01** Protect `main` with a ruleset requiring `Required`, linear history, and deletion/force-push blocks; merge queue unavailable for this personal-account-owned public repository — P0 · S · week 1 · in progress → [milestone 1](milestones/01-green-main.md)
-- [ ] **GOV-02** Prune 62 remote branches to ≤ 10; auto-delete merged heads — P2 · S · week 1 · in progress → [milestone 1](milestones/01-green-main.md)
-- [ ] **GOV-03** Backlog hygiene: `TODOS.md` reflects reality, tracking issues per milestone, CHANGELOG entry for the CI changes — P2 · S · week 1 · in progress → [milestone 1](milestones/01-green-main.md)
-- [ ] **GOV-04** Remove the dead `stable` branch trigger; fix the dev-box git identity — P3 · S · week 1 · in progress → [milestone 1](milestones/01-green-main.md)
+- [x] **GOV-01** Protect `main` with a ruleset requiring `Required`, linear history, and deletion/force-push blocks; merge queue unavailable for this personal-account-owned public repository — P0 · S · week 1 · done → [milestone 1](milestones/01-green-main.md)
+- [x] **GOV-02** Prune 62 remote branches to ≤ 10; auto-delete merged heads — P2 · S · week 1 · done → [milestone 1](milestones/01-green-main.md)
+- [x] **GOV-03** Backlog hygiene: `TODOS.md` reflects reality, tracking issues per milestone, CHANGELOG entry for the CI changes — P2 · S · week 1 · done → [milestone 1](milestones/01-green-main.md)
+- [x] **GOV-04** Remove the dead `stable` branch trigger; fix the dev-box git identity — P3 · S · week 1 · done → [milestone 1](milestones/01-green-main.md)
 - [ ] **GOV-05** Repository presentation: description, topics, issue templates, CODEOWNERS, code of conduct, sharper `SECURITY.md` — P2 · S · week 4 · planned → [milestone 4](milestones/04-onboarding.md)
 
 ## REL — releases
