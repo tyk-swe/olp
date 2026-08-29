@@ -9,7 +9,8 @@
 - [ ] Regenerated any affected artifacts and committed them:
       `.sqlx/` (`make sqlx-prepare`), `openapi/management.json` +
       `console/src/lib/api/schema.d.ts` (`make openapi`),
-      `docs/assets/screenshots/` (`make screenshots`)
+      `docs/assets/screenshots/` (`make screenshots`), and all four Playwright
+      baselines under `console/tests/e2e/operations.spec.ts-snapshots/`
 - [ ] Migrations (if any) are forward-only and sequential
 - [ ] Helm values, schema, and templates changed together (`make helm-verify`),
       or this change touches no `deploy/helm/` files

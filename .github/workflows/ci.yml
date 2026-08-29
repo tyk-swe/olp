@@ -1,13 +1,12 @@
 name: CI
 
-# Pull requests and merge queues run the required tier, including advisory
-# audits and amd64 image validation. Cross-browser, HA, arm64, upgrade, and
-# bounded fuzz campaigns remain in the post-merge/scheduled/manual full tier.
+# Pull requests run the required tier, including advisory audits and amd64
+# image validation. Cross-browser, HA, arm64, upgrade, and bounded fuzz
+# campaigns remain in the post-merge/scheduled/manual full tier.
 on:
-  merge_group:
   pull_request:
   push:
-    branches: [main, stable]
+    branches: [main]
   schedule:
     - cron: "17 3 * * 1"
   workflow_dispatch:
@@ -115,9 +114,26 @@ jobs:
     name: Rust / coverage
     runs-on: ubuntu-24.04
     timeout-minutes: 90
+    services:
+      postgres:
+        image: postgres:18@sha256:22c89fe0d0f507606260237fd55e51f6137f58b2d5bcf6152242b96d9fe8f9a4
+        env: { POSTGRES_DB: olp, POSTGRES_USER: olp, POSTGRES_PASSWORD: olp }
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U olp -d olp"
+          --health-interval 2s --health-timeout 2s --health-retries 30
+      valkey:
+        image: valkey/valkey:9.1@sha256:4963247afc4cd33c7d3b2d2816b9f7f8eeebab148d29056c2ca4d7cbc966f2d9
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "valkey-cli ping"
+          --health-interval 2s --health-timeout 2s --health-retries 30
     env:
       SQLX_OFFLINE: "true"
       NEXTEST_PROFILE: ci
+      OLP_TEST_DATABASE_ADMIN_URL: postgres://olp:olp@localhost:5432/postgres
+      OLP_TEST_DATABASE_URL_PREFIX: postgres://olp:olp@localhost:5432
+      OLP_VALKEY_URL: redis://localhost:6379
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -126,8 +142,9 @@ jobs:
         with:
           tools: "cargo-nextest@0.9.140,cargo-llvm-cov@0.8.7"
           cache-shared-key: coverage-registry
+      - name: Install PostgreSQL 18 client tools
+        run: ./scripts/ci/install-postgres-client.sh 18
       - name: Run workspace coverage
-        # test_support only executes under db-test; see the Makefile note.
         run: make coverage
       - name: Upload Rust coverage
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

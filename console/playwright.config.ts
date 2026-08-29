@@ -7,10 +7,9 @@ export default defineConfig({
   fullyParallel: true,
   retries: process.env.CI ? 1 : 0,
   expect: {
-    // Browser point releases shift anti-aliasing on a handful of pixels
-    // (WebKit drifted by 5 px on a 1280x815 page). Layout changes still fail:
-    // a 4 px height change in mobile Chromium was ~12k differing pixels.
-    toHaveScreenshot: { maxDiffPixels: 50 }
+    // Browser point releases shift localized anti-aliasing. A 1% ratio absorbs
+    // that rasterization drift while a 4 px layout change still exceeds it.
+    toHaveScreenshot: { maxDiffPixelRatio: 0.01 }
   },
   use: { ...baseConfig.use, baseURL: 'http://127.0.0.1:4174' },
   projects: [

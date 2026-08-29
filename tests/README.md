@@ -38,7 +38,9 @@ make sdk-smoke
 loopback mock provider. `make worker-ha` verifies shared-Valkey installation
 isolation and three-worker crash recovery. The full CI tier separately runs a
 two-gateway HA job through PostgreSQL and Valkey Toxiproxy partitions. The
-suites assert public paths, routing/capability policy, generation pinning,
+request-metadata stream and its consumer-group state are durable; limiter
+rate-window and concurrency keys expire by design. The suites assert public
+paths, routing/capability policy, generation pinning,
 usage completeness, data-safety, recovery, and distributed limits.
 
 ## Fuzzing

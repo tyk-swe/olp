@@ -27,7 +27,7 @@ Rust 2024 workspace: `apps/olp/` (HTTP/CLI binary), `crates/olp-engine/` (domain
 Rust: 4-space indent, `rustfmt` (`max_width = 100`), Clippy warnings denied, no unsafe. `snake_case` functions/modules, `PascalCase` types, behavior-focused test names. TS/Svelte: ESLint + Prettier; feature code in `console/src/lib/features/`, thin routes. Never hand-edit generated OpenAPI types, `.sqlx/` metadata, or screenshots—use matching Make targets.
 
 ## Testing
-`make test` (locked nextest) is the gate, not plain `cargo test`. Add unit tests beside owning modules; add contract fixtures as new cases, don't replace valid expectations. `make coverage` enforces 62% line-coverage floor. Run browser/db/e2e suites when touched areas require.
+`make test` (locked nextest) is the gate, not plain `cargo test`. Add unit tests beside owning modules; add contract fixtures as new cases, don't replace valid expectations. `make coverage` includes the database-backed suites and enforces an 80% line-coverage floor; it needs the `make db-test` environment. Run browser/db/e2e suites when touched areas require.
 
 ## Commits & PRs
 Concise imperative commit summaries, optional `test:`/`build:`/`refactor:` prefix; keep commits focused. PRs: explain what/why, link issues, report validation, include UI screenshots when visible. PR checklist: regenerate affected artifacts, migrations forward-only and sequential, update Helm values/schema/templates together.

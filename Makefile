@@ -17,7 +17,7 @@ FUZZ_TRIPLE = $(shell rustc -vV | sed -n 's/^host: //p')
 .DEFAULT_GOAL := help
 
 .PHONY: help check check-static check-cargo check-heavy boundaries storage-sqlx source-size fmt fmt-fix clippy test \
-	coverage console-install console-verify console-e2e \
+	coverage coverage-unit coverage-db coverage-report console-install console-verify console-e2e \
 	screenshots openapi sqlx-prepare sqlx-check db-test release-version \
 	supply-chain machete ci-lockstep helm-verify script-selftest shellcheck fuzz-check \
 	olp-build-test-util olp-prebuilt olp-migrate sqlx-migrate playwright-install \
@@ -35,8 +35,9 @@ help: ## List available targets
 #   check-heavy   clippy -> nextest serially (they share the cargo lock and
 #                 target dir) alongside console-verify, CHECK_JOBS at a time
 # Leaf targets are unchanged; CI invokes them individually. CI additionally
-# enforces the coverage floor (make coverage), the DB/Valkey suites (make
-# db-test) and the SQLx metadata check (make sqlx-check), the fuzz replay
+# enforces the coverage floor (make coverage, including the DB/Valkey suites;
+# it needs the make db-test environment) and the SQLx metadata check (make
+# sqlx-check), the fuzz replay
 # (make fuzz-replay) and bounded campaign (make fuzz-campaign), sdk-smoke,
 # the contract suites (make e2e, make worker-ha, plus the toxiproxy-backed ha
 # job), the console Playwright and console-integration jobs, the upgrade
@@ -83,13 +84,22 @@ clippy: ## Clippy with -D warnings, offline sqlx metadata
 test: ## Workspace unit tests via nextest (postgres-backed tests stay #[ignore]d; see db-test)
 	SQLX_OFFLINE=true cargo nextest run --locked --workspace --all-features
 
-# test_support only executes under `make db-test`, which coverage never
-# runs; llvm-cov's defaults already exclude tests/ dirs and src tests.rs
-# modules from the report.
-coverage: ## CI's real Rust test gate: llvm-cov nextest with the 62% line floor
-	SQLX_OFFLINE=true NEXTEST_PROFILE=ci cargo llvm-cov nextest --locked --workspace --all-features \
-		--ignore-filename-regex 'src/test_support\.rs' \
-		--lcov --output-path lcov.info --fail-under-lines 62
+coverage: ## CI's Rust gate: unit and DB suites with an 80% line floor; needs the db-test environment
+	cargo llvm-cov clean --workspace
+	$(MAKE) coverage-unit
+	$(MAKE) coverage-db
+	$(MAKE) coverage-report
+
+coverage-unit: ## Collect coverage from the workspace unit suites without reporting
+	SQLX_OFFLINE=true NEXTEST_PROFILE=ci cargo llvm-cov nextest --no-report --locked --workspace --all-features
+
+coverage-db: ## Add the ignored PostgreSQL/Valkey suites to the coverage data
+	OLP_DB_TEST_RUNNER="cargo llvm-cov nextest --no-report" ./scripts/run-postgres-tests.sh
+
+coverage-report: ## Print coverage and write lcov.info, enforcing the 80% line floor
+	cargo llvm-cov report --summary-only
+	cargo llvm-cov report --lcov --output-path lcov.info \
+		--ignore-filename-regex 'src/test_support\.rs' --fail-under-lines 80
 
 console-install: ## Install locked console dependencies
 	pnpm --dir console install --frozen-lockfile

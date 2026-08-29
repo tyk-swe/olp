@@ -55,6 +55,27 @@ if postgres_test_sweep_databases \
   exit 1
 fi
 
+runner_log="$test_dir/runner.log"
+coverage_runner() {
+  printf '%s\n' "$@" > "$runner_log"
+}
+export -f coverage_runner psql timeout
+export drop_log query_log runner_log
+
+OLP_TEST_DATABASE_ADMIN_URL='postgres://example.invalid/postgres' \
+OLP_TEST_DATABASE_URL_PREFIX='postgres://example.invalid/' \
+OLP_VALKEY_URL='redis://example.invalid' \
+OLP_DB_TEST_RUNNER='coverage_runner --no-report' \
+  "$script_dir/run-postgres-tests.sh" -E 'test(runner_override)'
+grep -Fxq -- '--no-report' "$runner_log"
+grep -Fxq -- '--locked' "$runner_log"
+grep -Fxq -- '--package' "$runner_log"
+grep -Fxq -- 'olp-db' "$runner_log"
+grep -Fxq -- '--profile' "$runner_log"
+grep -Fxq -- 'db' "$runner_log"
+grep -Fxq -- '-E' "$runner_log"
+grep -Fxq -- 'test(runner_override)' "$runner_log"
+
 fake_list_status=7
 if postgres_test_sweep_databases \
   'postgres://example.invalid/postgres' "$prefix" lower-identifier integration \

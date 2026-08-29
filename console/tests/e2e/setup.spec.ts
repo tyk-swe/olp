@@ -100,9 +100,11 @@ test('creates the first owner through the local setup contract', async ({
   await page
     .getByRole('button', { name: 'Copy OpenAI-compatible base URL' })
     .click();
-  await expect(page.getByRole('alert')).toContainText(
-    'Clipboard access is unavailable. Copy the URL manually.'
-  );
+  await expect(
+    page.getByRole('alert').filter({
+      hasText: 'Clipboard access is unavailable. Copy the URL manually.'
+    })
+  ).toBeVisible();
   const overviewAccessibility = await new AxeBuilder({ page }).analyze();
   expect(overviewAccessibility.violations).toEqual([]);
   expect(submittedBody).toEqual({
