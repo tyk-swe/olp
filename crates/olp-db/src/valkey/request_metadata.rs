@@ -116,7 +116,10 @@ async fn run_request_metadata_consumer_with_policy(
     policy: ConsumerPolicy,
 ) -> Result<(), Error> {
     validate_configuration(stream, consumer, policy)?;
-    let mut connection = request_metadata_connection(valkey_url, policy.block_interval).await?;
+    let longest_block_interval = policy
+        .block_interval
+        .max(policy.active_recovery_block_interval);
+    let mut connection = request_metadata_connection(valkey_url, longest_block_interval).await?;
     create_consumer_group(&mut connection, stream).await?;
     #[cfg(all(feature = "test-util", debug_assertions))]
     {

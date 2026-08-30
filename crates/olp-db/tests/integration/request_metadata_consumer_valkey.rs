@@ -384,9 +384,10 @@ async fn kill_consumer_connection(connection: &mut MultiplexedConnection, consum
 
 #[tokio::test]
 #[ignore = "requires PostgreSQL 18 and Valkey in OLP_VALKEY_URL"]
-async fn idle_production_consumer_survives_a_full_blocking_read() {
+async fn idle_production_consumer_processes_after_a_full_blocking_read() {
     let db = olp_db::test_support::TestDb::create_migrated("metadata_idle_block").await;
     let store = db.store(5).await;
+    let fixture = fixture(&store, "idle-production-block").await;
     let stream = stream("idle-production-block");
     let mut connection = valkey_connection().await;
     let (shutdown, receiver) = watch::channel(false);
@@ -409,6 +410,8 @@ async fn idle_production_consumer_survives_a_full_blocking_read() {
         !consumer.is_finished(),
         "an idle consumer must outlive its one-second blocking read"
     );
+    add_event(&mut connection, &stream, &event(&fixture)).await;
+    wait_for_usage_facts(&store, 1).await;
     stop_consumers(shutdown, vec![consumer]).await;
 }
 
