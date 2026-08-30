@@ -1,0 +1,58 @@
+name: Provider drift
+description: >-
+  A provider changed its API behavior and the gateway's translation or
+  conformance expectation no longer matches.
+labels: ["provider-drift"]
+body:
+  - type: markdown
+    attributes:
+      value: >-
+        A scheduled workflow already files "Live provider drift detected"
+        automatically when the live checks fail; search existing
+        `provider-drift` issues before opening a duplicate.
+  - type: dropdown
+    id: provider-kind
+    attributes:
+      label: Provider kind
+      options:
+        - openai
+        - anthropic
+        - gemini
+        - vertex_ai
+        - bedrock
+        - azure_openai
+        - openai_compatible
+    validations:
+      required: true
+  - type: input
+    id: model
+    attributes:
+      label: Provider model
+      placeholder: e.g. gpt-5.2
+    validations:
+      required: true
+  - type: input
+    id: operation
+    attributes:
+      label: Operation
+      placeholder: e.g. generation, embeddings, token_count
+    validations:
+      required: true
+  - type: textarea
+    id: observed-change
+    attributes:
+      label: Observed change
+      description: >-
+        What the provider now returns or requires, versus what the gateway
+        expects. Redact prompts, outputs, and credentials.
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Affected fixture, SDK, or evidence
+      description: >-
+        Name the conformance fixture (tests/fixtures/...), SDK, or link the
+        provider changelog entry.
+    validations:
+      required: false

@@ -1,0 +1,62 @@
+name: Bug report
+description: Something behaves differently from what the documentation says.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: >-
+        Never paste prompts, model outputs, API keys, credentials, or
+        customer data. Suspected vulnerabilities go through
+        [SECURITY.md](https://github.com/tyk-swe/olp/blob/main/SECURITY.md),
+        not a public issue.
+  - type: dropdown
+    id: version
+    attributes:
+      label: Version
+      options:
+        - v2.2.1
+        - v2.2.0
+        - other (name it below)
+    validations:
+      required: true
+  - type: dropdown
+    id: deployment
+    attributes:
+      label: Deployment
+      options:
+        - Docker Compose
+        - Helm
+        - other (name it below)
+    validations:
+      required: true
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Surface
+      options:
+        - OpenAI-compatible API (/v1 or /openai/v1)
+        - Anthropic-compatible API (/anthropic/v1)
+        - Gemini-compatible API (/gemini/v1 or /gemini/v1beta)
+        - Management API (/api/v1)
+        - Console
+        - Worker / background jobs
+        - other (name it below)
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what you observed.
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant log output
+      description: >-
+        Redact anything sensitive. OpenLLMProxy logs carry operational
+        metadata only, but double-check before pasting.
+      render: text
+    validations:
+      required: false
