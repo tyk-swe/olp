@@ -780,10 +780,11 @@ test_release_manifest_reads_buildx_descriptor_digest() {
     FAKE_CURRENT_VERSION=2.1.9 \
     RELEASE_TAG=v2.2.0 RELEASE_DIGEST_DIR="$digest_dir" \
     RELEASE_OUTPUT_DIR="$output_dir" \
+    RELEASE_CANDIDATE_TAG=candidate-2.2.0-test-1 \
     "$script_dir/release-manifest.sh"
   [[ $(<"$output_dir/image-index-digest.txt") == "$index_digest" ]] || return 1
   assert_contains "$docker_log" \
-    "--tag ghcr.io/tyk-swe/olp:candidate-2.2.0-local-1" || return 1
+    "--tag ghcr.io/tyk-swe/olp:candidate-2.2.0-test-1" || return 1
   assert_contains "$docker_log" \
     "--annotation index:org.opencontainers.image.version=2.2.0" || return 1
   PATH="$fake_bin:$original_path" \
