@@ -415,7 +415,6 @@ async fn prove_shared_valkey_isolation(
         .await
         .map_err(|error| format!("failed to subscribe to installation B hints: {error}"))?;
     let mut hints = pubsub.on_message();
-    while let Ok(Some(_)) = tokio::time::timeout(Duration::from_millis(100), hints.next()).await {}
 
     let b_generation_before = latest_runtime_generation(&installation_b.database_url).await?;
     let b_processed_before =
@@ -432,13 +431,19 @@ async fn prove_shared_valkey_isolation(
             .map_err(|_| "installation A published no runtime hint within 10s".to_owned())?
             .ok_or_else(|| "shared Valkey Pub/Sub stream ended".to_owned())?;
         let channel = message.get_channel_name();
+        let payload: Value = serde_json::from_slice(message.get_payload_bytes())
+            .map_err(|error| format!("runtime hint payload was invalid: {error}"))?;
+        let generation_id = payload["generation_id"]
+            .as_str()
+            .ok_or_else(|| format!("runtime hint lacks generation ID: {payload}"))?;
+        if generation_id != key_a.generation_id {
+            continue;
+        }
         require!(
-            channel != channel_b,
+            channel == channel_a,
             "installation A mutation published on installation B channel"
         );
-        if channel == channel_a {
-            break;
-        }
+        break;
     }
 
     let response = installation_a
