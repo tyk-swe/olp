@@ -1,7 +1,7 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "type": "object",
-  "required": ["image", "gateway", "control", "ingress", "worker", "migration", "config", "mediaSpool", "monitoring", "preStopDelaySeconds", "terminationGracePeriodSeconds", "podSecurityContext", "containerSecurityContext"],
+  "required": ["image", "gateway", "control", "ingress", "worker", "migration", "config", "mediaSpool", "monitoring", "networkPolicy", "preStopDelaySeconds", "terminationGracePeriodSeconds", "podSecurityContext", "containerSecurityContext"],
   "additionalProperties": false,
   "properties": {
     "image": {
@@ -220,12 +220,62 @@
           }
         }
       }
+    },
+    "networkPolicy": {
+      "type": "object",
+      "required": ["enabled", "edge", "prometheus", "egress"],
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "edge": {
+          "type": "object",
+          "required": ["namespaceLabels", "cidrs"],
+          "properties": {
+            "namespaceLabels": { "$ref": "#/definitions/stringMap" },
+            "cidrs": { "$ref": "#/definitions/cidrList" }
+          }
+        },
+        "prometheus": {
+          "type": "object",
+          "required": ["namespaceLabels", "podLabels"],
+          "properties": {
+            "namespaceLabels": { "$ref": "#/definitions/stringMap" },
+            "podLabels": { "$ref": "#/definitions/stringMap" }
+          }
+        },
+        "egress": {
+          "type": "object",
+          "required": ["restricted", "dns", "postgresql", "valkey", "providers"],
+          "properties": {
+            "restricted": { "type": "boolean" },
+            "dns": {
+              "type": "object",
+              "required": ["enabled"],
+              "properties": { "enabled": { "type": "boolean" } }
+            },
+            "postgresql": { "$ref": "#/definitions/networkPolicyPeer" },
+            "valkey": { "$ref": "#/definitions/networkPolicyPeer" },
+            "providers": { "$ref": "#/definitions/networkPolicyPeer" }
+          }
+        }
+      }
     }
   },
   "definitions": {
     "stringMap": {
       "type": "object",
       "additionalProperties": { "type": "string" }
+    },
+    "cidrList": {
+      "type": "array",
+      "items": { "type": "string", "pattern": "^[0-9a-fA-F:.]+/[0-9]{1,3}$" }
+    },
+    "networkPolicyPeer": {
+      "type": "object",
+      "required": ["cidrs", "port"],
+      "properties": {
+        "cidrs": { "$ref": "#/definitions/cidrList" },
+        "port": { "type": "integer", "minimum": 1, "maximum": 65535 }
+      }
     },
     "serverComponent": {
       "type": "object",

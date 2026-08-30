@@ -199,3 +199,39 @@ monitoring:
     # installation-specific noise budget.
     requestMetadataPendingThreshold: 0
     runtimeOutboxPendingThreshold: 0
+
+networkPolicy:
+  enabled: false
+  # Peers allowed to reach the public listener. Rules target container port
+  # 8080, not the Service port. namespaceLabels selects one namespace set,
+  # for example kubernetes.io/metadata.name: ingress-nginx; some CNIs also
+  # need the edge load balancer, node, or kubelet probe CIDRs listed here.
+  # At least one peer is required whenever this block is enabled.
+  edge:
+    namespaceLabels: {}
+    cidrs: []
+  # Peers allowed to scrape the private observability port 9090. Often, but
+  # not necessarily, the same namespace and labels as monitoring.*, which
+  # only places the ServiceMonitor object. Leaving both empty denies every
+  # scrape.
+  prometheus:
+    namespaceLabels: {}
+    podLabels: {}
+  # Egress starts allow-all because provider endpoints are arbitrary public
+  # HTTPS hosts. restricted: true replaces that with DNS plus the explicit
+  # peers below, and then requires the PostgreSQL and Valkey CIDRs the chart
+  # never sees: config.databaseSecretName and config.valkeySecretName carry
+  # opaque connection URLs.
+  egress:
+    restricted: false
+    dns:
+      enabled: true
+    postgresql:
+      cidrs: []
+      port: 5432
+    valkey:
+      cidrs: []
+      port: 6379
+    providers:
+      cidrs: ["0.0.0.0/0"]
+      port: 443

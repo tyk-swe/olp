@@ -1,0 +1,85 @@
+{{- if .Values.networkPolicy.enabled -}}
+{{- $root := . -}}
+{{- $edge := $root.Values.networkPolicy.edge -}}
+{{- $prometheus := $root.Values.networkPolicy.prometheus -}}
+{{- $egress := $root.Values.networkPolicy.egress -}}
+{{- if and (empty $edge.namespaceLabels) (empty $edge.cidrs) -}}
+{{- fail "networkPolicy requires at least one edge peer (networkPolicy.edge.namespaceLabels or networkPolicy.edge.cidrs)" -}}
+{{- end -}}
+{{- if $egress.restricted -}}
+{{- if empty $egress.postgresql.cidrs -}}
+{{- fail "networkPolicy.egress.postgresql.cidrs is required when networkPolicy.egress.restricted is true" -}}
+{{- end -}}
+{{- if empty $egress.valkey.cidrs -}}
+{{- fail "networkPolicy.egress.valkey.cidrs is required when networkPolicy.egress.restricted is true" -}}
+{{- end -}}
+{{- end -}}
+{{- $edgePeers := list -}}
+{{- if $edge.namespaceLabels -}}
+{{- $edgePeers = append $edgePeers (dict "namespaceSelector" (dict "matchLabels" $edge.namespaceLabels)) -}}
+{{- end -}}
+{{- range $cidr := $edge.cidrs -}}
+{{- $edgePeers = append $edgePeers (dict "ipBlock" (dict "cidr" $cidr)) -}}
+{{- end -}}
+{{- $prometheusPeer := dict -}}
+{{- if $prometheus.namespaceLabels -}}
+{{- $_ := set $prometheusPeer "namespaceSelector" (dict "matchLabels" $prometheus.namespaceLabels) -}}
+{{- end -}}
+{{- if $prometheus.podLabels -}}
+{{- $_ := set $prometheusPeer "podSelector" (dict "matchLabels" $prometheus.podLabels) -}}
+{{- end -}}
+{{- range $componentName := list "gateway" "control" -}}
+{{- $component := index $root.Values $componentName -}}
+{{- if $component.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "olp.componentFullname" (dict "root" $root "component" $componentName) }}
+  labels:
+    {{- include "olp.labels" $root | nindent 4 }}
+    app.kubernetes.io/component: {{ $componentName }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "olp.selectorLabels" (dict "root" $root "component" $componentName) | nindent 6 }}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        {{- toYaml $edgePeers | nindent 8 }}
+      ports:
+        - port: 8080
+          protocol: TCP
+    {{- if $prometheusPeer }}
+    - from:
+        {{- list $prometheusPeer | toYaml | nindent 8 }}
+      ports:
+        - port: 9090
+          protocol: TCP
+    {{- end }}
+  egress:
+    {{- include "olp.networkPolicyEgress" $root | nindent 4 }}
+---
+{{- end }}
+{{- end }}
+{{- range $componentName := list "worker" "migration" -}}
+{{- $component := index $root.Values $componentName -}}
+{{- if $component.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "olp.componentFullname" (dict "root" $root "component" $componentName) }}
+  labels:
+    {{- include "olp.labels" $root | nindent 4 }}
+    app.kubernetes.io/component: {{ $componentName }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "olp.selectorLabels" (dict "root" $root "component" $componentName) | nindent 6 }}
+  # No listener, so ingress stays default-deny with the policy type declared.
+  policyTypes: [Ingress, Egress]
+  egress:
+    {{- include "olp.networkPolicyEgress" $root | nindent 4 }}
+---
+{{- end }}
+{{- end }}
+{{- end }}

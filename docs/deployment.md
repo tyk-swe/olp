@@ -125,8 +125,8 @@ bounds.
 `OLP_OBSERVABILITY_LISTEN_ADDR` exposes only `/health/live`, `/health/ready`,
 and `/metrics` on the pod network. The chart creates internal
 `*-observability` ClusterIP Services on port 9090; the public Ingress has no
-health or metrics route. Add an installation-specific NetworkPolicy for the
-kubelet and Prometheus topology.
+health or metrics route. [Network policy](#network-policy) below closes the
+port to everything except the installation's Prometheus topology.
 
 Per-pod TCP caps default to 16,384 gateway and 1,024 control connections.
 In-flight work is separate: gateway/control inference pools default to 256
@@ -134,6 +134,60 @@ and management pools to 32. Each permit lasts through streaming completion or
 cancellation; a full pool returns HTTP 503 with `Retry-After: 1` instead of
 queueing. Size limits from CPU, memory, provider connections, and stream
 duration.
+
+## Network policy
+
+`networkPolicy.enabled: true` renders one NetworkPolicy per enabled
+component. Rules target the container ports — 8080 for the public listener
+and 9090 for observability — not `gateway.service.port`, so changing a
+Service port does not change what the policy admits. The chart refuses to
+render without at least one edge peer, because an empty peer list would
+silently deny all traffic to the gateway.
+
+```yaml
+networkPolicy:
+  enabled: true
+  edge:
+    namespaceLabels:
+      kubernetes.io/metadata.name: ingress-nginx
+    cidrs: []
+  prometheus:
+    namespaceLabels:
+      kubernetes.io/metadata.name: monitoring
+    podLabels:
+      app.kubernetes.io/name: prometheus
+```
+
+`edge.namespaceLabels` selects the namespaces allowed to reach 8080;
+`edge.cidrs` adds raw peers for an edge load balancer or node range, and some
+CNIs need the kubelet probe CIDRs there as well. The `prometheus` block is
+separate from `monitoring.*`, which only places the ServiceMonitor object:
+leaving both `prometheus` maps empty denies every scrape of 9090. Worker and
+migration pods have no listener, so they receive a default-deny ingress
+policy and their egress rules only.
+
+Egress defaults to allow-all. Provider endpoints are arbitrary public HTTPS
+hosts, and the chart never sees the PostgreSQL or Valkey addresses —
+`config.databaseSecretName` and `config.valkeySecretName` hold opaque
+connection URLs — so a restrictive default would break every installation on
+first upgrade. Harden it once those addresses are known:
+
+```yaml
+networkPolicy:
+  egress:
+    restricted: true
+    postgresql:
+      cidrs: [10.10.0.0/16]
+    valkey:
+      cidrs: [10.11.0.0/16]
+```
+
+`restricted: true` requires both `postgresql.cidrs` and `valkey.cidrs` and
+replaces allow-all with DNS on 53, those two peers on their configured ports,
+and `providers.cidrs` on 443. Narrow `providers.cidrs` from `0.0.0.0/0` only
+when every configured provider endpoint resolves inside a known range;
+`config.providerEgressAllowCidrs` continues to enforce the application-level
+public-host rule independently of the CNI.
 
 ## Install and verify
 
