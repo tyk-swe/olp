@@ -24,7 +24,9 @@
 - [x] SBOM per architecture with the already-pinned `anchore/sbom-action`; both `openllmproxy-<arch>.spdx.json` files become release assets
 - [x] cosign keyless: sign the index digest and attest each SBOM (`sigstore/cosign-installer`, pinned); `docs/deployment.md` gains "Verifying a release" with the `cosign verify` invocation and the expected certificate identity `https://github.com/tyk-swe/olp/.github/workflows/release.yml@refs/tags/v2.2.0`
 - [x] Trivy scans both linux/amd64 and linux/arm64 from the candidate index with `exit-code: 1` for HIGH/CRITICAL before stable tags are promoted
-- [ ] GHCR package set to public and linked to the repository (the OCI `source` label already points at it)
+- [x] GHCR package is repository-linked and anonymously pullable by digest on
+  native amd64 and arm64 runners in
+  [release run 33310224902](https://github.com/tyk-swe/olp/actions/runs/33310224902)
 
 ## REL-03 — Helm chart publication (S)
 
@@ -32,13 +34,17 @@
 - [x] Sign the chart with cosign as well
 - [x] Render the pushed chart with `image.digest` set to the release digest and diff against `helm template deploy/helm` — byte-identical
 - [x] `deploy/helm/Chart.yaml`: add the missing `artifacthub.io/*` annotations (changes, images); `make helm-verify` green
-- [ ] The chart package is public and repository-linked; a fresh unauthenticated job renders it and verifies its cosign signature before the GitHub Release is created
+- [x] The chart package is public and repository-linked; anonymous pull resolves
+  digest `sha256:2f40b7dc…cbf2`, its tag-identity signature verifies, and its
+  pulled archive renders byte-identically to the repository chart
 
 ## REL-04 — Cut the release (S)
 
 - [x] Release commit: bump the four canonical version locations to `2.2.0`, regenerate `Cargo.lock` and `fuzz/Cargo.lock`, rename `## [Unreleased]` to `## [2.2.0] - 2026-08-30`, and add a fresh empty `[Unreleased]`; confirm `release-metadata.env` still names `0043` (the last migration of the previous release) and `make release-version` passes
 - [x] Add an "Upgrading from 2.1.1" paragraph to the 2.2.0 entry: migrations 0044–0048 run in the migration Job / `migrate` service; the N-1 rehearsal covers 0043 → 0048
-- [ ] Tag after CI is green on the release commit: `git tag -a v2.2.0 -m "OpenLLMProxy 2.2.0"`, push, watch `release.yml`
+- [x] Tag after the complete candidate
+  [run 33309244354](https://github.com/tyk-swe/olp/actions/runs/33309244354)
+  is green: annotated `v2.2.0` points at release commit `780d1ab`
 - [x] `make release-notes`: a script extracts the `[2.2.0]` CHANGELOG section into the GitHub Release body — never hand-copied; assets: both SBOMs, chart `.tgz`, `values.schema.json`, `checksums.txt`
 - [ ] Optional: annotated tags `v2.0.0`, `v2.0.1`, `v2.1.0`, `v2.1.1` at the commits that set those versions, so `git describe` and the README badge history make sense
 
@@ -47,14 +53,18 @@
 - [x] `deploy/compose.yaml`: `image: ${OLP_IMAGE:-ghcr.io/tyk-swe/olp:2.2.0}`; move the `build:` block into a new `deploy/compose.build.yaml` overlay for contributors
 - [x] README Quick start: drop `--build`; one line points contributors at the build overlay; keep the bootstrap-token flow unchanged
 - [ ] Re-run the README quick start verbatim on a clean machine and time it (target: under 3 minutes to the setup form)
-- [ ] `docs/deployment.md` install example uses the real chart version and a real index digest
+- [x] `docs/deployment.md` uses chart `2.2.0` and the published image/chart digests
 - [x] `scripts/prepare-compose-secrets.sh` and `scripts/retire-compose-bootstrap-secret.sh` unchanged; `make e2e` still green (23 contract tests)
 
 ## Exit criteria
 
 - [ ] `docker pull ghcr.io/tyk-swe/olp:2.2.0` works anonymously on amd64 and arm64
-- [ ] `helm install olp oci://ghcr.io/tyk-swe/charts/openllmproxy --version 2.2.0 …` renders and starts on a kind cluster
-- [ ] GitHub Release `v2.2.0` exists with body, SBOMs, chart, and checksums; `cosign verify` succeeds for image and chart
+- [x] `helm install olp oci://ghcr.io/tyk-swe/charts/openllmproxy --version 2.2.0 …`
+  applied all 48 migrations and started healthy control/worker deployments on
+  kind v0.33.0 / Kubernetes 1.35 by the signed image digest
+- [x] [GitHub Release `v2.2.0`](https://github.com/tyk-swe/olp/releases/tag/v2.2.0)
+  has the generated body, two SBOMs, chart, schema, and checksums; image and
+  chart signatures verify against the tag workflow identity
 - [ ] README quick start completes without a Rust toolchain in under 3 minutes
 
 ## Carry-over
@@ -69,5 +79,6 @@ _None yet._
   metadata for both workspaces, actionlint 1.7.12, and `git diff --check` pass.
 - `make e2e`: 23 contract tests pass against PostgreSQL and Valkey.
 - Two defect-first `review-agent` passes finished with no remaining findings.
-- Publication, package visibility, real digest replacement, hosted arm64,
-  anonymous pull, kind, and clean-machine timing evidence remain open above.
+- Published image/chart digests, native arm64, anonymous digest pulls, release
+  assets/signatures, and the kind install are proven above. Stable image aliases
+  and the clean-machine quick-start timing remain open.

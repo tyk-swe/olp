@@ -56,9 +56,9 @@ unauthenticated runners pull the image, render the chart, and verify both
 signatures. Publishing with the repository `GITHUB_TOKEN` and the OCI source
 label links the packages to this repository, but does not make them public.
 
-The `v2.2.0` image and chart digests below are deliberately marked for
-replacement because they do not exist until the release workflow publishes
-them. After publication, resolve the versioned references:
+The `v2.2.0` image index and chart are published at the immutable digests used
+below. Resolve the versioned references independently before each upgrade and
+confirm they still match the approved release:
 
 ```console
 docker buildx imagetools inspect ghcr.io/tyk-swe/olp:2.2.0
@@ -72,12 +72,12 @@ registry-reported digest, then verify the exact OCI artifacts with cosign:
 cosign verify \
   --certificate-identity 'https://github.com/tyk-swe/olp/.github/workflows/release.yml@refs/tags/v2.2.0' \
   --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' \
-  'ghcr.io/tyk-swe/olp@sha256:REPLACE_WITH_V2_2_0_INDEX_DIGEST'
+  'ghcr.io/tyk-swe/olp@sha256:3c4b33dabf173d7f2f1af24f24d673480d2bf2326f4b69b96410c35a0de52f29'
 
 cosign verify \
   --certificate-identity 'https://github.com/tyk-swe/olp/.github/workflows/release.yml@refs/tags/v2.2.0' \
   --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' \
-  'ghcr.io/tyk-swe/charts/openllmproxy@sha256:REPLACE_WITH_V2_2_0_CHART_DIGEST'
+  'ghcr.io/tyk-swe/charts/openllmproxy@sha256:2f40b7dc25cad809c80b6ef3017447e4382afb77afc5b887308c672e8b74cbf2'
 ```
 
 The chart digest is the OCI manifest digest reported by `helm push`, not the
@@ -98,7 +98,7 @@ Example values:
 ```yaml
 image:
   repository: ghcr.io/tyk-swe/olp
-  digest: sha256:REPLACE_WITH_V2_2_0_INDEX_DIGEST
+  digest: sha256:3c4b33dabf173d7f2f1af24f24d673480d2bf2326f4b69b96410c35a0de52f29
 config:
   publicOrigin: https://olp.example.com
   localLoginEnabled: true
@@ -142,7 +142,7 @@ Render the exact configuration before applying it:
 ```console
 helm lint --strict deploy/helm
 helm template olp deploy/helm --namespace olp \
-  --set-string image.digest=sha256:REPLACE_WITH_V2_2_0_INDEX_DIGEST \
+  --set-string image.digest=sha256:3c4b33dabf173d7f2f1af24f24d673480d2bf2326f4b69b96410c35a0de52f29 \
   --set ingress.enabled=true --set ingress.className=nginx \
   --set ingress.host=olp.example.com \
   --set-string config.trustedProxyCidrs=10.0.0.0/8 \
@@ -155,7 +155,7 @@ Install with approved values and at least a 20-minute timeout:
 helm upgrade --install olp \
   oci://ghcr.io/tyk-swe/charts/openllmproxy --version 2.2.0 \
   --namespace olp --create-namespace \
-  --set-string image.digest=sha256:REPLACE_WITH_V2_2_0_INDEX_DIGEST \
+  --set-string image.digest=sha256:3c4b33dabf173d7f2f1af24f24d673480d2bf2326f4b69b96410c35a0de52f29 \
   --values production-values.yaml --timeout 20m --wait
 ```
 
