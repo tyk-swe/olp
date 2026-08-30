@@ -36,18 +36,19 @@ help: ## List available targets
 #   check-static  every script/format gate (~10 s), run in parallel
 #   check-heavy   clippy -> nextest serially (they share the cargo lock and
 #                 target dir) alongside console-verify, CHECK_JOBS at a time
-# Leaf targets are unchanged; CI invokes them individually. CI additionally
+# Leaf targets are unchanged; CI invokes them individually. Required CI also
 # enforces the coverage floor (make coverage, including the DB/Valkey suites;
-# it needs the make db-test environment) and the SQLx metadata check (make
-# sqlx-check), the fuzz replay
-# (make fuzz-replay) and bounded campaign (make fuzz-campaign), sdk-smoke,
-# the contract suites (make e2e, make worker-ha, plus the toxiproxy-backed ha
-# job), the console Playwright and console-integration jobs, the upgrade
-# rehearsal (make upgrade-rehearsal), the amd64 and arm64 image builds (make
-# smoke-image-modes), helm-verify (needs helm + docker compose), the advisory
-# audits (make deny, make advisories), and the actionlint/hadolint quality
-# steps. The harness jobs share one `olp --features test-util` binary built
-# by the rust-test-util-build job; locally the scripts build it on demand.
+# it needs the make db-test environment), the SQLx metadata check (make
+# sqlx-check), stable fuzz compilation (make fuzz-check), sdk-smoke, the e2e
+# contract suite, required console Playwright and console-integration jobs,
+# the amd64 image build (make smoke-image-modes), helm-verify (needs helm +
+# docker compose), advisory audits (make deny, make advisories), and the
+# actionlint/hadolint quality steps. Full CI adds the nightly fuzz replay and
+# bounded campaign (make fuzz-replay, make fuzz-campaign), worker-ha, the
+# toxiproxy-backed ha job, cross-browser Playwright, upgrade rehearsal (make
+# upgrade-rehearsal), and the arm64 image build. The harness jobs share one
+# `olp --features test-util` binary built by the rust-test-util-build job;
+# locally the scripts build it on demand.
 CHECK_JOBS ?= 2
 STATIC_JOBS ?= $(shell nproc 2>/dev/null || echo 4)
 
