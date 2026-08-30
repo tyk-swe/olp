@@ -209,6 +209,12 @@ test('failed route conflict reload preserves dirty fields until a successful rel
 }) => {
   await mockSession(page, sessionOptions);
   let reloadFailuresRemaining = 0;
+  // Firefox can strand one of two simultaneous Playwright-mocked responses;
+  // the Rust-hosted suite covers the same editor flow over real HTTP.
+  let allowProviderModelsResponse = () => {};
+  const providerModelsCanRespond = new Promise<void>((resolve) => {
+    allowProviderModelsResponse = resolve;
+  });
   let current = {
     id: ids.draft,
     slug: 'default',
@@ -236,6 +242,7 @@ test('failed route conflict reload preserves dirty fields until a successful rel
   };
 
   await page.route('**/api/v1/provider-models**', async (route) => {
+    await providerModelsCanRespond;
     await route.fulfill({
       json: {
         items: [
@@ -282,7 +289,13 @@ test('failed route conflict reload preserves dirty fields until a successful rel
   });
 
   await page.goto(`/routes/${ids.draft}`);
-  await page.getByLabel('Public model slug').fill('local-route');
+  await expect(
+    page.getByRole('button', { name: 'Delete draft', exact: true })
+  ).toBeVisible();
+  allowProviderModelsResponse();
+  const slug = page.getByLabel('Public model slug');
+  await expect(slug).toHaveValue('default');
+  await slug.fill('local-route');
   await page.getByRole('button', { name: 'Save draft' }).click();
   await expect(page.getByRole('alert')).toContainText(
     'This item changed elsewhere.'
@@ -291,9 +304,7 @@ test('failed route conflict reload preserves dirty fields until a successful rel
   await page.getByRole('button', { name: 'Reload' }).click();
   await expect.poll(() => reloadFailuresRemaining).toBe(0);
   await expect(page.getByText('Route reload unavailable')).toBeVisible();
-  await expect(page.getByLabel('Public model slug')).toHaveValue('local-route');
+  await expect(slug).toHaveValue('local-route');
   await page.getByRole('button', { name: 'Reload' }).click();
-  await expect(page.getByLabel('Public model slug')).toHaveValue(
-    'remote-route'
-  );
+  await expect(slug).toHaveValue('remote-route');
 });
