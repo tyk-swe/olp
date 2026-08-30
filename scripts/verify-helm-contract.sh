@@ -127,6 +127,16 @@ helm template olp "$chart" --namespace olp --set-string image.digest="$digest" \
   --set worker.podDisruptionBudget.minAvailable=2 \
   > "$work/worker-ha-manifests.yaml"
 helm template olp "$chart" --namespace olp --set-string image.digest="$digest" \
+  --set networkPolicy.enabled=true \
+  --set-string 'networkPolicy.edge.namespaceLabels.kubernetes\.io/metadata\.name=ingress-nginx' \
+  --set 'networkPolicy.edge.cidrs={10.0.0.0/8}' \
+  --set-string 'networkPolicy.prometheus.namespaceLabels.kubernetes\.io/metadata\.name=monitoring' \
+  --set networkPolicy.egress.restricted=true \
+  --set 'networkPolicy.egress.postgresql.cidrs={10.10.0.0/16}' \
+  --set 'networkPolicy.egress.valkey.cidrs={10.11.0.0/16}' \
+  --show-only templates/networkpolicy.yaml \
+  > "$work/networkpolicy-manifests.yaml"
+helm template olp "$chart" --namespace olp --set-string image.digest="$digest" \
   --set-string config.valkeySecretName=migration-preflight-valkey \
   --set-string config.valkeySecretKey=migration-preflight-url \
   --show-only templates/migration-job.yaml \
@@ -172,6 +182,17 @@ if helm template invalid "$chart" --set config.httpMaxInlineMediaItemBytes=10485
   echo "chart accepted an inline media aggregate limit above the JSON body limit" >&2
   exit 1
 fi
+if helm template invalid "$chart" --set networkPolicy.enabled=true \
+  >/dev/null 2>&1; then
+  echo "chart accepted a network policy without an edge peer" >&2
+  exit 1
+fi
+if helm template invalid "$chart" --set networkPolicy.enabled=true \
+  --set 'networkPolicy.edge.cidrs={10.0.0.0/8}' \
+  --set networkPolicy.egress.restricted=true >/dev/null 2>&1; then
+  echo "chart accepted restricted egress without PostgreSQL and Valkey peers" >&2
+  exit 1
+fi
 
 for expected in \
   "ghcr.io/tyk-swe/olp@$digest" \
@@ -205,6 +226,36 @@ for expected in \
     exit 1
   }
 done
+
+for expected in \
+  'kind: NetworkPolicy' \
+  'name: olp-openllmproxy-gateway' \
+  'name: olp-openllmproxy-control' \
+  'name: olp-openllmproxy-worker' \
+  'name: olp-openllmproxy-migration' \
+  'kubernetes.io/metadata.name: ingress-nginx' \
+  'port: 8080' \
+  'kubernetes.io/metadata.name: monitoring' \
+  'port: 9090' \
+  'port: 53' \
+  'cidr: 10.10.0.0/16' \
+  'port: 5432' \
+  'cidr: 10.11.0.0/16' \
+  'port: 6379' \
+  'port: 443'; do
+  grep -Fq "$expected" "$work/networkpolicy-manifests.yaml" || {
+    echo "rendered network policy contract is missing: $expected" >&2
+    exit 1
+  }
+done
+default_network_policies_matched=
+checked_rg_match default_network_policies_matched \
+  "scan default network policies" "$work/manifests.yaml" \
+  -q 'kind: NetworkPolicy' "$work/manifests.yaml"
+if (( default_network_policies_matched )); then
+  echo "default chart must not render a NetworkPolicy" >&2
+  exit 1
+fi
 
 grep -Fq 'value: "9007199254740991"' "$work/max-spool-manifests.yaml" || {
   echo "rendered Helm contract did not preserve the maximum exact spool capacity" >&2
@@ -508,4 +559,4 @@ jq -e '
   exit 1
 }
 
-echo "Helm contract verified: digest, drain, spread, private observability, exact media capacity, same-origin edge, monitoring, dashboard, package"
+echo "Helm contract verified: digest, drain, spread, private observability, exact media capacity, same-origin edge, monitoring, network policy, dashboard, package"

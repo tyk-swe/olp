@@ -56,6 +56,30 @@ app.kubernetes.io/component: {{ .component }}
 {{- printf "%s-%s" $base .component -}}
 {{- end -}}
 
+{{- define "olp.networkPolicyEgress" -}}
+{{- $egress := .Values.networkPolicy.egress -}}
+{{- $rules := list -}}
+{{- if not $egress.restricted -}}
+{{- $rules = append $rules dict -}}
+{{- else -}}
+{{- if $egress.dns.enabled -}}
+{{- $dnsPorts := list (dict "port" 53 "protocol" "UDP") (dict "port" 53 "protocol" "TCP") -}}
+{{- $rules = append $rules (dict "ports" $dnsPorts) -}}
+{{- end -}}
+{{- range $peer := list $egress.postgresql $egress.valkey $egress.providers -}}
+{{- if $peer.cidrs -}}
+{{- $destinations := list -}}
+{{- range $cidr := $peer.cidrs -}}
+{{- $destinations = append $destinations (dict "ipBlock" (dict "cidr" $cidr)) -}}
+{{- end -}}
+{{- $ports := list (dict "port" (int $peer.port) "protocol" "TCP") -}}
+{{- $rules = append $rules (dict "to" $destinations "ports" $ports) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- toYaml $rules -}}
+{{- end -}}
+
 {{- define "olp.observabilityServiceFullname" -}}
 {{- $maxBaseLength := int (sub 48 (len .component)) -}}
 {{- $base := include "olp.fullname" .root | trunc $maxBaseLength | trimSuffix "-" -}}
