@@ -9,14 +9,11 @@ body:
         customer data. Suspected vulnerabilities go through
         [SECURITY.md](https://github.com/tyk-swe/olp/blob/main/SECURITY.md),
         not a public issue.
-  - type: dropdown
+  - type: input
     id: version
     attributes:
       label: Version
-      options:
-        - v2.2.1
-        - v2.2.0
-        - other (name it below)
+      placeholder: e.g. v2.2.1 — see CHANGELOG.md
     validations:
       required: true
   - type: dropdown
@@ -29,6 +26,8 @@ body:
         - other (name it below)
     validations:
       required: true
+  # Keep in sync with the surface list in docs/compatibility.md (generated
+  # from apps/olp/src/gateway/endpoint_policy/registry.rs).
   - type: dropdown
     id: surface
     attributes:
@@ -54,9 +53,7 @@ body:
     id: logs
     attributes:
       label: Relevant log output
-      description: >-
-        Redact anything sensitive. OpenLLMProxy logs carry operational
-        metadata only, but double-check before pasting.
+      description: Redact anything sensitive before pasting.
       render: text
     validations:
       required: false
