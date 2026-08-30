@@ -46,6 +46,8 @@ mod f_data_safety;
 mod g_telemetry;
 #[path = "contract/distributed_limits.rs"]
 mod h_distributed_limits;
+#[path = "contract/readme_examples.rs"]
+mod i_readme_examples;
 
 use std::fs;
 use std::path::{Path, PathBuf};

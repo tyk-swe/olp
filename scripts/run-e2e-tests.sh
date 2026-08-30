@@ -33,7 +33,7 @@ source "$repo_root/scripts/lib/postgres-test-databases.sh"
 : "${OLP_E2E_DATABASE_ADMIN_URL:=postgres://olp_test:olp_test@localhost:5433/postgres}"
 export OLP_E2E_DATABASE_ADMIN_URL
 
-for command in cargo psql sha256sum timeout; do
+for command in cargo curl psql sha256sum timeout; do
   command -v "$command" >/dev/null 2>&1 || {
     echo "required command is unavailable: $command" >&2
     exit 1
