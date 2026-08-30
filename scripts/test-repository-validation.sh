@@ -611,7 +611,8 @@ test_release_tag_matches_repository() {
   local version output
   version=$(workspace_release_version)
   output="$test_root/release-tag-valid.log"
-  RELEASE_TAG="v$version" "$script_dir/check-release-tag.sh" > "$output"
+  GITHUB_EVENT_NAME=push RELEASE_TAG="v$version" \
+    "$script_dir/check-release-tag.sh" > "$output"
   assert_contains "$output" "release tag matches repository metadata: v$version"
 }
 
@@ -620,11 +621,13 @@ test_release_tag_rejects_invalid_inputs() {
   local version
   version=$(workspace_release_version)
 
-  if RELEASE_TAG=v999.999.999 "$script_dir/check-release-tag.sh" > "$output" 2>&1; then
+  if GITHUB_EVENT_NAME=push RELEASE_TAG=v999.999.999 \
+    "$script_dir/check-release-tag.sh" > "$output" 2>&1; then
     return 1
   fi
   assert_contains "$output" "does not match package version $version" || return 1
-  if RELEASE_TAG="$version" "$script_dir/check-release-tag.sh" > "$output" 2>&1; then
+  if GITHUB_EVENT_NAME=push RELEASE_TAG="$version" \
+    "$script_dir/check-release-tag.sh" > "$output" 2>&1; then
     return 1
   fi
   assert_contains "$output" "release tag must match vMAJOR.MINOR.PATCH" || return 1
