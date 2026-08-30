@@ -15,6 +15,7 @@ __pycache__/
 .env
 .env.*
 !.env.example
+gha-creds-*.json
 
 *.log
 /logs/

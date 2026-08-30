@@ -67,10 +67,11 @@ jobs:
           AWS_EC2_METADATA_DISABLED: "true"
         run: make live-tests
       - name: Clear cloud credentials
+        id: clear-credentials
         if: ${{ always() }}
         run: ./scripts/ci/clear-live-provider-credentials.sh
       - name: Upload live-provider results
-        if: ${{ always() && !cancelled() }}
+        if: ${{ always() && !cancelled() && steps.clear-credentials.outcome == 'success' }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: live-provider-results-${{ github.run_id }}-${{ github.run_attempt }}

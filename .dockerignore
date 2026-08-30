@@ -5,6 +5,7 @@
 .github
 .env
 .env.*
+gha-creds-*.json
 **/.env
 **/.env.*
 **/.aws
