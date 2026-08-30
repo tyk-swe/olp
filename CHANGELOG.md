@@ -7,6 +7,12 @@ semantic versioning and match `Cargo.toml`, `console/package.json`,
 
 ## [Unreleased]
 
+### Fixed
+
+- **CI-07:** Provider conflict reloads retain pending hydration until
+  provider-kind metadata arrives, so the connector form no longer retains a
+  stale local field after the remote provider and model rows have loaded.
+
 ## [2.2.1] - 2026-08-30
 
 Repairs the pull-based quick start after the first public release and ships the

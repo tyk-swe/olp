@@ -152,11 +152,15 @@
     sync = beginReload(sync);
     try {
       const reloaded = await getProvider(providerId);
-      const next = reconcile(sync, reloaded.etag);
-      sync = next.state;
-      if (next.hydrate && providerSpec) {
-        editValues = providerEditValues(reloaded, providerSpec);
+      if (providerSpec) {
+        const next = reconcile(sync, reloaded.etag);
+        sync = next.state;
+        if (next.hydrate) {
+          editValues = providerEditValues(reloaded, providerSpec);
+        }
       }
+      // Keep reloadPending until the effect can hydrate with a loaded
+      // specification.
       queryClient.setQueryData(
         queryKeys.providers.detail(reloaded.id),
         reloaded

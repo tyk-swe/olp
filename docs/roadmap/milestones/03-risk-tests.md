@@ -63,10 +63,14 @@ the mocked service-account flow remains covered locally.
   Chromium is green without a retry in
   [run 33308319108](https://github.com/tyk-swe/olp/actions/runs/33308319108/job/99248820696)
 - [x] Firefox failures were filed separately as
-  [#135](https://github.com/tyk-swe/olp/issues/135) and
-  [#140](https://github.com/tyk-swe/olp/issues/140), fixed at their distinct
-  causes, and passed 70/70 without retries in
+  [#135](https://github.com/tyk-swe/olp/issues/135),
+  [#140](https://github.com/tyk-swe/olp/issues/140), and
+  [#143](https://github.com/tyk-swe/olp/issues/143). The first two were fixed at
+  their distinct response-order and browser-diagnostic causes and passed 70/70
+  without retries in
   [main run 33314516539](https://github.com/tyk-swe/olp/actions/runs/33314516539/job/99265453077)
+  while #143 records the later late-hydration cause and closes only with its
+  fresh post-merge proof
 - [x] `CONTRIBUTING.md` "Validation": time-dependent assertions (UTC windows, TTLs, minute boundaries) must be deterministic or deliberately straddle the boundary
 
 ## CI-08 — Deterministic shared-Valkey hint attribution (S)
