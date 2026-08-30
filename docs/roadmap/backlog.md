@@ -20,7 +20,7 @@ Status values: `planned`, `in progress`, `done`, `dropped` (with a reason).
 | 8 — Release 2.3.0 and hardening | REL-06, HYG-01 … HYG-03 | — | 1 | 2 | 1 |
 | Unscheduled | TEST-04, HYG-04 … HYG-08, FLEX-01 … FLEX-06 | — | 3 | 3 | 6 (incl. P4) |
 
-53 items: 41 scheduled, 12 unscheduled; 15 done. [`deferred.md`](deferred.md) lists what
+53 items: 41 scheduled, 12 unscheduled; 16 done. [`deferred.md`](deferred.md) lists what
 is intentionally not here.
 
 ## CI — the gates themselves
@@ -44,11 +44,11 @@ is intentionally not here.
 
 ## REL — releases
 
-- [ ] **REL-01** `release.yml` with tag/version verification, Make lockstep, and supply-chain pins — P1 · M · week 2 · planned → [milestone 2](milestones/02-first-release.md)
-- [ ] **REL-02** Native amd64 + arm64 image on GHCR by digest, cosign-signed, SBOM attested, Trivy-scanned — P1 · M · week 2 · planned → [milestone 2](milestones/02-first-release.md)
-- [ ] **REL-03** Helm chart on `oci://ghcr.io/tyk-swe/charts`, signed, render-identical to the repo — P1 · S · week 2 · planned → [milestone 2](milestones/02-first-release.md)
-- [ ] **REL-04** Cut `v2.2.0`: version bump, CHANGELOG, tag, release notes from CHANGELOG, assets — P1 · S · week 2 · planned → [milestone 2](milestones/02-first-release.md)
-- [ ] **REL-05** Quick start pulls the published image; source build becomes a Compose overlay — P1 · S · week 2 · planned → [milestone 2](milestones/02-first-release.md)
+- [x] **REL-01** `release.yml` with tag/version verification, Make lockstep, and supply-chain pins — P1 · M · week 2 · done → [milestone 2](milestones/02-first-release.md)
+- [ ] **REL-02** Native amd64 + arm64 image on GHCR by digest, cosign-signed, SBOM attested, Trivy-scanned — P1 · M · week 2 · in progress → [milestone 2](milestones/02-first-release.md)
+- [ ] **REL-03** Helm chart on `oci://ghcr.io/tyk-swe/charts`, signed, render-identical to the repo — P1 · S · week 2 · in progress → [milestone 2](milestones/02-first-release.md)
+- [ ] **REL-04** Cut `v2.2.0`: version bump, CHANGELOG, tag, release notes from CHANGELOG, assets — P1 · S · week 2 · in progress → [milestone 2](milestones/02-first-release.md)
+- [ ] **REL-05** Quick start pulls the published image; source build becomes a Compose overlay — P1 · S · week 2 · in progress → [milestone 2](milestones/02-first-release.md)
 - [ ] **REL-06** Cut `v2.3.0` with tracing, budgets, bench, Python smoke, NetworkPolicy — P1 · S · week 8 · planned → [milestone 8](milestones/08-release-and-retro.md)
 
 ## TEST — tests that guard external risk
@@ -75,7 +75,7 @@ is intentionally not here.
 ## SPEND — spend controls
 
 - [ ] **SPEND-01** Budget semantics written before code: windows, accrual, unpriced attempts, fail-closed, error shape — P2 · S · week 6 · planned → [milestone 6](milestones/06-spend-controls.md)
-- [ ] **SPEND-02** Migration 0048, cost reservation script, limiter dimension, PostgreSQL reconciliation task — P2 · M · week 6 · planned → [milestone 6](milestones/06-spend-controls.md)
+- [ ] **SPEND-02** Migration 0049, cost reservation script, limiter dimension, PostgreSQL reconciliation task — P2 · M · week 6 · planned → [milestone 6](milestones/06-spend-controls.md)
 - [ ] **SPEND-03** Engine admission, terminal accrual, management API fields, audit events, metrics — P2 · M · week 6 · planned → [milestone 6](milestones/06-spend-controls.md)
 - [ ] **SPEND-04** Console: key form, list column, detail view, usage filter — P2 · M · week 6 (stretch) · planned → [milestone 6](milestones/06-spend-controls.md)
 - [ ] **SPEND-05** Integration and e2e proofs, docs, CHANGELOG semantics sentence — P2 · M · week 6 · planned → [milestone 6](milestones/06-spend-controls.md)

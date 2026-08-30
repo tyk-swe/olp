@@ -7,11 +7,18 @@ semantic versioning and match `Cargo.toml`, `console/package.json`,
 
 ## [Unreleased]
 
+## [2.2.0] - 2026-08-30
+
 Clears the review backlog carried in `TODOS.md` and loosens the restrictions
 that bought nothing: private provider endpoints, certification that survived no
-edit, a 5-minute cap on streams, compile-time size caps. Three migrations: 0044
+edit, a 5-minute cap on streams, compile-time size caps. Five migrations: 0044
 relaxes one invitation constraint, 0045 lands the drops that 0038 and 0039
-staged, 0048 seeds the `limits.valkey_unavailable` setting.
+staged, 0046 and 0047 index route targets by provider model, and 0048 seeds the
+`limits.valkey_unavailable` setting.
+
+Upgrading from 2.1.1: migrations 0044–0048 run in the Helm migration Job or
+the Compose `migrate` service before the application starts. The N-1 upgrade
+rehearsal covers 0043 → 0048.
 
 ### Added
 
@@ -43,6 +50,12 @@ staged, 0048 seeds the `limits.valkey_unavailable` setting.
 ### Changed
 
 **Repository**
+- Tag pushes now build native amd64 and arm64 images, publish a signed OCI
+  index and Helm chart, attest per-architecture SPDX SBOMs, scan the index,
+  verify the public artifacts from fresh runners, and create release notes and
+  checksums directly from this changelog.
+- The Compose quick start pulls the versioned release image. Contributors use
+  `deploy/compose.build.yaml` when they need to build the current source.
 - Rust coverage combines the workspace unit tests with all ignored
   PostgreSQL/Valkey suites, prints its summary before enforcing an 80% line
   floor, and uploads the combined LCOV report.
@@ -111,6 +124,9 @@ staged, 0048 seeds the `limits.valkey_unavailable` setting.
   sync stamped the demoted user as the revoker, so an identity provider's
   decision read as the person revoking their own pending invitations.
   Demotions performed by an operator still record that operator.
+- Migrations 0046 and 0047 add the missing provider-model indexes for route
+  draft and revision targets, avoiding full target-table scans during provider
+  disablement, draft revalidation, and runtime snapshot compilation.
 
 **Management API**
 - Every list endpoint that takes `limit` now declares its 400 in the OpenAPI

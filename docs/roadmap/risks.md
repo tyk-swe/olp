@@ -16,5 +16,5 @@ the record.
 | R-08 | GHCR anonymous pull limits hurt the quick start | Low | Medium | Users report pull failures | Package is public; document a Docker Hub mirror as a follow-up if it bites | maintainer |
 | R-09 | Coverage floor of 80 becomes a tax on refactors | Medium | Low | PRs blocked on coverage with no behaviour change | Floor is a workspace line floor, not per-file; add tests with the refactor; never lower it | maintainer |
 | R-10 | Tracing accidentally records content | Low | High | Allowlist test fails; e2e "secret prompt" assertion fails | Attribute allowlist enforced by a unit test; e2e collector assertion; review of every new `span.record` call | maintainer |
-| R-11 | Migration 0048 and the N-1 rehearsal disagree | Low | High | `upgrade-rehearsal` job fails | Rehearsal runs before tagging; `release-metadata.env` moves only in the release commit | maintainer |
+| R-11 | Migration 0049 and the N-1 rehearsal disagree | Low | High | `upgrade-rehearsal` job fails | Rehearsal runs before tagging; `release-metadata.env` moves only in the release commit | maintainer |
 | R-12 | Screenshot baselines drift again after UI work | High | Low | Full-tier Firefox/WebKit job fails post-merge | Weekly cadence rule: all four baselines regenerate in the same PR; CI-03 decides whether pixel snapshots stay cross-browser | maintainer |

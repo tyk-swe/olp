@@ -9,10 +9,10 @@
 
 ## REL-06 — Cut `v2.3.0` (S)
 
-- [ ] Same procedure as REL-04; `release-metadata.env` advances to `0047` (the last migration shipped by 2.2.0) in the release commit; `make release-version` passes
+- [ ] Same procedure as REL-04; `release-metadata.env` advances to `0048` (the last migration shipped by 2.2.0) in the release commit; `make release-version` passes
 - [ ] CHANGELOG `[2.3.0]` groups tracing, budgets, Python SDK smoke, bench, NetworkPolicy, and docs, each with its backlog ID
 - [ ] Upgrade rehearsal 2.2.0 → 2.3.0 green in CI before tagging
-- [ ] `helm upgrade` from the 2.2.0 chart on the kind cluster used in week 2; migration Job runs 0048
+- [ ] `helm upgrade` from the 2.2.0 chart on the kind cluster used in week 2; migration Job runs 0049
 
 ## HYG-01 — Size-baseline burn-down (M)
 

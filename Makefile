@@ -18,7 +18,8 @@ FUZZ_TRIPLE = $(shell rustc -vV | sed -n 's/^host: //p')
 
 .PHONY: help check check-static check-cargo check-heavy boundaries storage-sqlx source-size fmt fmt-fix clippy test \
 	coverage coverage-unit coverage-db coverage-report console-install console-verify console-e2e \
-	screenshots openapi sqlx-prepare sqlx-check db-test release-version \
+	screenshots openapi sqlx-prepare sqlx-check db-test release-version release-verify \
+	release-image release-manifest release-chart release-notes \
 	supply-chain machete ci-lockstep helm-verify script-selftest shellcheck fuzz-check \
 	olp-build-test-util olp-prebuilt olp-migrate sqlx-migrate playwright-install \
 	console-e2e-project console-integration-prebuilt \
@@ -162,6 +163,21 @@ worker-ha: ## Shared-Valkey isolation and three-worker crash recovery against re
 
 release-version: ## Require consistent release metadata
 	scripts/check-release-version.sh
+
+release-verify: ## Require a strict release tag matching every version pin
+	scripts/check-release-tag.sh
+
+release-image: ## Record, smoke, or attest one release image; set RELEASE_IMAGE_STEP
+	scripts/release-image.sh
+
+release-manifest: ## Create or sign the multi-architecture release index; set RELEASE_MANIFEST_STEP
+	scripts/release-manifest.sh
+
+release-chart: ## Package and optionally publish the release Helm chart
+	scripts/release-chart.sh
+
+release-notes: ## Extract release notes, checksum assets, and optionally create the GitHub Release
+	scripts/release-notes.sh
 
 supply-chain: ## Require immutable Action and image references
 	scripts/check-supply-chain-pins.sh

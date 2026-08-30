@@ -39,6 +39,50 @@ outbox publication and Valkey consumer groups reclaim metadata ownership. The
 worker Deployment uses `Recreate`: mixed-version workers are not supported
 through the namespace transition.
 
+## Release artifacts and verification
+
+Published releases use two public GHCR packages: `ghcr.io/tyk-swe/olp` for
+the multi-architecture image and `ghcr.io/tyk-swe/charts/openllmproxy` for the
+Helm chart. Image tags `2.2.0`, `2.2`, and `latest` identify the same index at
+publication. The versioned tag supports the Compose quick start and `latest`
+is a convenience alias; production installations must pin the index digest.
+The chart is selected independently with `--version 2.2.0`.
+
+GitHub creates the first version of each GHCR package as private. On the first
+release, a maintainer must open the package settings for both `olp` and
+`charts/openllmproxy`, change their visibility to **Public**, and rerun the
+failed release jobs. The workflow creates no GitHub Release until fresh,
+unauthenticated runners pull the image, render the chart, and verify both
+signatures. Publishing with the repository `GITHUB_TOKEN` and the OCI source
+label links the packages to this repository, but does not make them public.
+
+The `v2.2.0` image and chart digests below are deliberately marked for
+replacement because they do not exist until the release workflow publishes
+them. After publication, resolve the versioned references:
+
+```console
+docker buildx imagetools inspect ghcr.io/tyk-swe/olp:2.2.0
+helm pull oci://ghcr.io/tyk-swe/charts/openllmproxy --version 2.2.0
+```
+
+Both commands report a `Digest:`. Replace each placeholder with the matching
+registry-reported digest, then verify the exact OCI artifacts with cosign:
+
+```console
+cosign verify \
+  --certificate-identity 'https://github.com/tyk-swe/olp/.github/workflows/release.yml@refs/tags/v2.2.0' \
+  --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' \
+  'ghcr.io/tyk-swe/olp@sha256:REPLACE_WITH_V2_2_0_INDEX_DIGEST'
+
+cosign verify \
+  --certificate-identity 'https://github.com/tyk-swe/olp/.github/workflows/release.yml@refs/tags/v2.2.0' \
+  --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' \
+  'ghcr.io/tyk-swe/charts/openllmproxy@sha256:REPLACE_WITH_V2_2_0_CHART_DIGEST'
+```
+
+The chart digest is the OCI manifest digest reported by `helm push`, not the
+SHA-256 checksum of the downloaded `.tgz` release asset.
+
 ## Edge routing
 
 Route the shared origin as follows, preserving prefixes, streaming, and client
@@ -54,7 +98,7 @@ Example values:
 ```yaml
 image:
   repository: ghcr.io/tyk-swe/olp
-  digest: sha256:REPLACE_WITH_APPROVED_INDEX_DIGEST
+  digest: sha256:REPLACE_WITH_V2_2_0_INDEX_DIGEST
 config:
   publicOrigin: https://olp.example.com
   localLoginEnabled: true
@@ -98,7 +142,7 @@ Render the exact configuration before applying it:
 ```console
 helm lint --strict deploy/helm
 helm template olp deploy/helm --namespace olp \
-  --set-string image.digest=sha256:REPLACE_WITH_APPROVED_INDEX_DIGEST \
+  --set-string image.digest=sha256:REPLACE_WITH_V2_2_0_INDEX_DIGEST \
   --set ingress.enabled=true --set ingress.className=nginx \
   --set ingress.host=olp.example.com \
   --set-string config.trustedProxyCidrs=10.0.0.0/8 \
@@ -109,9 +153,9 @@ Install with approved values and at least a 20-minute timeout:
 
 ```console
 helm upgrade --install olp \
-  oci://ghcr.io/tyk-swe/charts/openllmproxy --version 2.1.1 \
+  oci://ghcr.io/tyk-swe/charts/openllmproxy --version 2.2.0 \
   --namespace olp --create-namespace \
-  --set-string image.digest=sha256:REPLACE_WITH_APPROVED_INDEX_DIGEST \
+  --set-string image.digest=sha256:REPLACE_WITH_V2_2_0_INDEX_DIGEST \
   --values production-values.yaml --timeout 20m --wait
 ```
 
