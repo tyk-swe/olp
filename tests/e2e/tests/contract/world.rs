@@ -418,6 +418,10 @@ impl World {
             .ok_or_else(|| format!("api key response lacks id: {}", created.body))?
             .to_owned();
         let etag = created.require_etag("API key create")?;
+        let generation_id = created.body["runtime_generation"]["id"]
+            .as_str()
+            .ok_or_else(|| format!("API key response lacks generation ID: {}", created.body))?
+            .to_owned();
         let generation = created.body["runtime_generation"]["sequence"]
             .as_i64()
             .ok_or_else(|| format!("API key response lacks generation: {}", created.body))?;
@@ -426,6 +430,7 @@ impl World {
             id,
             secret,
             etag,
+            generation_id,
             generation,
             published_at,
         })
@@ -642,6 +647,7 @@ pub(crate) struct IssuedKey {
     pub(crate) id: String,
     pub(crate) secret: String,
     pub(crate) etag: String,
+    pub(crate) generation_id: String,
     pub(crate) generation: i64,
     pub(crate) published_at: Instant,
 }
