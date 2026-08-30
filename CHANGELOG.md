@@ -45,9 +45,9 @@ advances to migration 0048, the schema already shipped by 2.2.0.
 - The Firefox route-conflict test waits for draft hydration before releasing
   concurrent mocked provider-model responses, without retries or longer
   timeouts.
-- Firefox navigation tests ignore only the browser's `NS_BINDING_ABORTED`
-  diagnostic for a font request canceled by the navigation; other font,
-  network, and runtime errors remain fatal.
+- The Playwright runtime fixture ignores Firefox's `NS_BINDING_ABORTED`
+  downloadable-font diagnostic; other downloadable-font status codes remain
+  fatal.
 
 ## [2.2.0] - 2026-08-30
 

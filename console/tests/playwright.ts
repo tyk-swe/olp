@@ -84,7 +84,7 @@ const svelteWarningMarkers = [
 ];
 
 export const test = base.extend({
-  page: async ({ page }, use) => {
+  page: async ({ browserName, page }, use) => {
     const runtimeFailures: string[] = [];
     page.on('pageerror', (error) => {
       runtimeFailures.push(`Uncaught page error: ${error.message}`);
@@ -94,7 +94,7 @@ export const test = base.extend({
       if (
         (message.type() === 'error' &&
           !text.startsWith('Failed to load resource:') &&
-          !isAbortedFirefoxFontDownload(text)) ||
+          !isAbortedFirefoxFontDownload(browserName, text)) ||
         (message.type() === 'warning' &&
           svelteWarningMarkers.some((marker) => text.includes(marker)))
       ) {
