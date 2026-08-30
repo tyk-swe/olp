@@ -31,6 +31,7 @@ advances to migration 0048, the schema already shipped by 2.2.0.
   all other Rust jobs continue to omit target directories from their cache.
 - **CI-07:** Automated retries are disabled outside the weekly live-provider
   profile, and contributor guidance requires deterministic time assertions.
+
 ### Fixed
 
 - Compose starts the pinned Valkey image as its non-root UID/GID, so dropping
@@ -44,6 +45,9 @@ advances to migration 0048, the schema already shipped by 2.2.0.
 - The Firefox route-conflict test waits for draft hydration before releasing
   concurrent mocked provider-model responses, without retries or longer
   timeouts.
+- Firefox navigation tests ignore only the browser's `NS_BINDING_ABORTED`
+  diagnostic for a font request canceled by the navigation; other font,
+  network, and runtime errors remain fatal.
 
 ## [2.2.0] - 2026-08-30
 
