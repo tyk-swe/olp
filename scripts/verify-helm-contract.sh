@@ -373,6 +373,13 @@ jq -e '
   echo "Compose migration must wait for and preflight Valkey" >&2
   exit 1
 }
+jq -e '
+  .services.valkey.user == "999:1000" and
+  .services.valkey.cap_drop == ["ALL"]
+' "$work/compose.json" >/dev/null || {
+  echo "Compose Valkey must run as the pinned image identity with all capabilities dropped" >&2
+  exit 1
+}
 rendered_bootstrap_tokens_matched=
 checked_rg_match rendered_bootstrap_tokens_matched \
   "scan rendered base Compose bootstrap tokens" "$work/compose.yaml" \

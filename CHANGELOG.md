@@ -17,9 +17,10 @@ advances to migration 0048, the schema already shipped by 2.2.0.
 
 ### Added
 
-- **TEST-01:** A weekly OIDC-authenticated live-provider workflow detects
-  upstream catalog, token-count, and bounded generation drift and maintains one
-  `provider-drift` issue until the suite recovers.
+- **TEST-01:** A weekly live-provider workflow is ready to detect upstream
+  catalog, token-count, and bounded generation drift and maintain one
+  `provider-drift` issue once dedicated provider identities and cloud OIDC
+  federation are configured.
 - **TEST-02:** Python OpenAI, Anthropic, and Google GenAI clients now run the
   same gateway compatibility smoke as the JavaScript SDKs, including streaming,
   Responses, token counting, model discovery, and typed failures.
@@ -30,9 +31,6 @@ advances to migration 0048, the schema already shipped by 2.2.0.
   all other Rust jobs continue to omit target directories from their cache.
 - **CI-07:** Automated retries are disabled outside the weekly live-provider
   profile, and contributor guidance requires deterministic time assertions.
-- **CI-08:** The shared-Valkey isolation proof correlates runtime hints by
-  generation identity instead of attributing delayed bootstrap hints by timing.
-
 ### Fixed
 
 - Compose starts the pinned Valkey image as its non-root UID/GID, so dropping
