@@ -221,6 +221,50 @@ test_supply_chain_scan_error_has_no_success() {
   fi
 }
 
+test_live_provider_credentials_clear_before_path_rejection() {
+  local fixture_root="$test_root/live-provider-credentials-rejection"
+  local workspace="$fixture_root/workspace"
+  local github_env="$fixture_root/github-env"
+  local output="$fixture_root/output.log"
+  local status
+  mkdir -p "$workspace"
+  : > "$github_env"
+
+  if GITHUB_ENV="$github_env" GITHUB_WORKSPACE="$workspace" \
+    GOOGLE_GHA_CREDS_PATH="$workspace/unexpected.json" \
+    "$script_dir/ci/clear-live-provider-credentials.sh" > "$output" 2>&1; then
+    return 1
+  else
+    status=$?
+  fi
+  [[ $status == 1 ]] || return 1
+  for variable in \
+    AWS_ACCESS_KEY_ID \
+    AWS_SECRET_ACCESS_KEY \
+    AWS_SESSION_TOKEN \
+    GOOGLE_GHA_CREDS_PATH \
+    GOOGLE_APPLICATION_CREDENTIALS \
+    CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE; do
+    assert_contains "$github_env" "$variable=" || return 1
+  done
+  assert_contains "$output" "refusing to remove an unexpected Google credentials path"
+}
+
+test_live_provider_credentials_remove_expected_file() {
+  local fixture_root="$test_root/live-provider-credentials-removal"
+  local workspace="$fixture_root/workspace"
+  local github_env="$fixture_root/github-env"
+  local credentials_path="$workspace/gha-creds-0123456789abcdef.json"
+  mkdir -p "$workspace"
+  printf 'temporary credential\n' > "$credentials_path"
+  : > "$github_env"
+
+  GITHUB_ENV="$github_env" GITHUB_WORKSPACE="$workspace" \
+    GOOGLE_GHA_CREDS_PATH="$credentials_path" \
+    "$script_dir/ci/clear-live-provider-credentials.sh" || return
+  [[ ! -e $credentials_path ]]
+}
+
 test_semantic_role_edge_allows_new_packages() {
   local fixture_root="$test_root/semantic-role-allowed"
   local workspace="$fixture_root/workspace"
@@ -846,6 +890,10 @@ run_test "missing required directory fails" test_missing_required_directory
 run_test "ripgrep exit greater than one fails" test_simulated_rg_failure
 run_test "supply-chain success is suppressed after scan error" \
   test_supply_chain_scan_error_has_no_success
+run_test "live-provider variables clear before credential path rejection" \
+  test_live_provider_credentials_clear_before_path_rejection
+run_test "live-provider cleanup removes the expected credential file" \
+  test_live_provider_credentials_remove_expected_file
 run_test "new packages are accepted through semantic role edges" \
   test_semantic_role_edge_allows_new_packages
 run_test "forbidden semantic role edges are rejected" \

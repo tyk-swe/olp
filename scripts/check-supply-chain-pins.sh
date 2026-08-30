@@ -16,8 +16,9 @@ done
 dockerfile="$root/deploy/Dockerfile"
 dockerignore="$root/deploy/Dockerfile.dockerignore"
 root_dockerignore="$root/.dockerignore"
+gitignore="$root/.gitignore"
 for required_file in \
-  "$root/LICENSE" "$dockerfile" "$dockerignore" "$root_dockerignore" \
+  "$root/LICENSE" "$dockerfile" "$dockerignore" "$root_dockerignore" "$gitignore" \
   "$root/deploy/helm/LICENSE"; do
   validation_require_file "$required_file"
 done
@@ -110,7 +111,8 @@ if ! grep -Fq 'COPY LICENSE /usr/share/doc/openllmproxy/' "$dockerfile"; then
 fi
 
 for required in \
-  '.env' '**/.env.*' '**/secrets/**' '**/credentials/**' '**/*.key' '**/*.pem' \
+  '.env' '**/.env.*' 'gha-creds-*.json' '**/secrets/**' '**/credentials/**' \
+  '**/*.key' '**/*.pem' \
   '**/target/**' '**/node_modules/**' 'backups/**' \
   'console/build' 'console/test-results' 'fuzz/artifacts/**' '**/*.spdx.json' \
   '**/*.sarif'; do
@@ -119,6 +121,10 @@ for required in \
     failed=true
   fi
 done
+if ! grep -Fxq 'gha-creds-*.json' "$gitignore"; then
+  echo "Git ignore policy does not exclude: gha-creds-*.json" >&2
+  failed=true
+fi
 dockerignore_reincludes_matched=
 checked_rg_match dockerignore_reincludes_matched \
   "scan Dockerfile context re-inclusions" "$dockerignore" -n '^!' "$dockerignore"

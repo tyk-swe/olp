@@ -7,6 +7,17 @@ if [[ -z ${GITHUB_ENV:-} ]]; then
 fi
 
 credentials_path=${GOOGLE_GHA_CREDS_PATH:-}
+for variable in \
+  AWS_ACCESS_KEY_ID \
+  AWS_SECRET_ACCESS_KEY \
+  AWS_SESSION_TOKEN \
+  GOOGLE_GHA_CREDS_PATH \
+  GOOGLE_APPLICATION_CREDENTIALS \
+  CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE; do
+  printf '%s=\n' "$variable" >>"$GITHUB_ENV"
+  unset "$variable"
+done
+
 if [[ -n $credentials_path ]]; then
   credentials_directory=$(dirname -- "$credentials_path")
   credentials_name=$(basename -- "$credentials_path")
@@ -18,12 +29,3 @@ if [[ -n $credentials_path ]]; then
   fi
   rm -f -- "$credentials_path"
 fi
-
-for variable in \
-  AWS_ACCESS_KEY_ID \
-  AWS_SECRET_ACCESS_KEY \
-  AWS_SESSION_TOKEN \
-  GOOGLE_APPLICATION_CREDENTIALS \
-  CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE; do
-  printf '%s=\n' "$variable" >>"$GITHUB_ENV"
-done
