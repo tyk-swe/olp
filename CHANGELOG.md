@@ -7,6 +7,14 @@ semantic versioning and match `Cargo.toml`, `console/package.json`,
 
 ## [Unreleased]
 
+## [2.2.1] - 2026-08-30
+
+Repairs the pull-based quick start after the first public release and ships the
+completed repository and SDK portions of Milestone 3.
+
+Upgrading from 2.2.0 runs no new schema migrations. The N-1 upgrade baseline
+advances to migration 0048, the schema already shipped by 2.2.0.
+
 ### Added
 
 - **TEST-01:** A weekly OIDC-authenticated live-provider workflow detects
@@ -24,6 +32,20 @@ semantic versioning and match `Cargo.toml`, `console/package.json`,
   profile, and contributor guidance requires deterministic time assertions.
 - **CI-08:** The shared-Valkey isolation proof correlates runtime hints by
   generation identity instead of attributing delayed bootstrap hints by timing.
+
+### Fixed
+
+- Compose starts the pinned Valkey image as its non-root UID/GID, so dropping
+  every Linux capability no longer prevents the image entrypoint from starting.
+- The request-metadata consumer gives its blocking Valkey read an explicit
+  response budget longer than the block interval instead of inheriting the
+  redis-rs 500 ms default and restarting while idle.
+- Release verification renders the anonymously pulled chart archive, and
+  partial image promotion verifies the original tag-bound signature from
+  trusted `main` workflow code.
+- The Firefox route-conflict test waits for draft hydration before releasing
+  concurrent mocked provider-model responses, without retries or longer
+  timeouts.
 
 ## [2.2.0] - 2026-08-30
 

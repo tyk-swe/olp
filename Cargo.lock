@@ -2324,7 +2324,7 @@ dependencies = [
 
 [[package]]
 name = "olp"
-version = "2.2.0"
+version = "2.2.1"
 dependencies = [
  "axum",
  "base64",
@@ -2363,7 +2363,7 @@ dependencies = [
 
 [[package]]
 name = "olp-conformance"
-version = "2.2.0"
+version = "2.2.1"
 dependencies = [
  "aws-smithy-eventstream",
  "aws-smithy-types",
@@ -2377,7 +2377,7 @@ dependencies = [
 
 [[package]]
 name = "olp-db"
-version = "2.2.0"
+version = "2.2.1"
 dependencies = [
  "aes-gcm",
  "argon2",
@@ -2402,7 +2402,7 @@ dependencies = [
 
 [[package]]
 name = "olp-e2e"
-version = "2.2.0"
+version = "2.2.1"
 dependencies = [
  "axum",
  "base64",
@@ -2420,7 +2420,7 @@ dependencies = [
 
 [[package]]
 name = "olp-engine"
-version = "2.2.0"
+version = "2.2.1"
 dependencies = [
  "arc-swap",
  "aws-config",
