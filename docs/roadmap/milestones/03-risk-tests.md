@@ -17,7 +17,10 @@ the mocked service-account flow remains covered locally.
 
 - [x] Inventory: `tests/README.md` maps every variable to its gated test and call cost; catalog and token-count probes are free, Azure uses `gpt-5-nano`, Vertex uses `gemini-3.1-flash-lite`, and Bedrock uses `amazon.nova-micro-v1:0`
 - [x] GitHub environment `live-providers` requires `tyk-swe` review and permits deployments only from `main`
-- [ ] Provider keys dedicated to CI with hard monthly caps set in each provider console and stored in `live-providers`
+- [ ] Provider identities dedicated to CI and stored in `live-providers`; use a
+  provider-enforced cap or fixed prepaid balance without automatic reload where
+  available, otherwise the lowest practical permissions and quotas, spend
+  alerts with automatic disablement, and a recorded residual-overshoot bound
 - [ ] AWS and GCP through OIDC federation (`aws-actions/configure-aws-credentials`, `google-github-actions/auth`, both SHA-pinned) — no static cloud keys in secrets
 - [x] `.github/workflows/live-providers.yml`: Wednesday `schedule` offset from the Monday CI cron plus `workflow_dispatch`; runs `make live-tests` with the `live` nextest profile (`retries = 1`, 60-second slow timeout); never part of `Required`
 - [x] Failure routing: the job opens or updates one issue labelled `provider-drift` with the failing test names and run link; it closes the issue when green
@@ -33,27 +36,38 @@ the mocked service-account flow remains covered locally.
 
 ## CI-06 — `Required` tier under 8 minutes (S)
 
-- [ ] `.github/actions/setup-rust`: `cache-targets` now defaults to `"false"`; `fuzz-replay` writes and `fuzz-campaign` reads the schema-versioned target cache keyed by `fuzz/Cargo.lock` and the nightly pin; a pushed cold/warm pair still needs measuring
-- [ ] If still over 8 minutes: keep `make fuzz-check` (stable `cargo check`) in `Required` and move `fuzz-replay` to the full tier beside `fuzz-campaign`; update the tier comments at the top of `ci.yml` and in `Makefile`
-- [ ] Record job durations before and after in the PR description
+- [x] `.github/actions/setup-rust`: `cache-targets` defaults to `"false"`;
+  `fuzz-replay` writes and `fuzz-campaign` reads the schema-versioned target
+  cache. Cold [run 33303620675](https://github.com/tyk-swe/olp/actions/runs/33303620675)
+  took 15m10s for replay; warm [run 33305412730](https://github.com/tyk-swe/olp/actions/runs/33305412730)
+  restored the exact 877 MB entry but still took 7m32s.
+- [x] Keep `make fuzz-check` (stable `cargo check`) in `Required`; move nightly
+  replay to the full tier beside the campaign; run E2E in parallel with the
+  independently required PostgreSQL integration job; update CI/Make tier text
+- [x] Record before/after job durations in
+  [PR #133](https://github.com/tyk-swe/olp/pull/133)
 
 ## CI-07 — Flake policy (S)
 
 - [x] `.config/nextest.toml`: retries stay at 0 in every profile except `live`; a test that fails once gets an issue, not a retry
+- [x] Playwright retries are 0 for required and full-tier browsers; required
+  Chromium is green without a retry in
+  [run 33308319108](https://github.com/tyk-swe/olp/actions/runs/33308319108/job/99248820696)
 - [x] `CONTRIBUTING.md` "Validation": time-dependent assertions (UTC windows, TTLs, minute boundaries) must be deterministic or deliberately straddle the boundary
 
 ## Exit criteria
 
 - [ ] `live-providers.yml` has run green once via `workflow_dispatch`; schedule armed; the `provider-drift` issue mechanism tested with a forced failure
-- [ ] `sdk-compatibility` runs JavaScript and Python smokes; both green
+- [x] `sdk-compatibility` runs JavaScript and Python smokes; both green in
+  [run 33305412730](https://github.com/tyk-swe/olp/actions/runs/33305412730/job/99240982566)
 - [ ] `Required` wall time ≤ 8 minutes on a warm cache (baseline ~16)
 
-Repository validation is green for both SDK runtimes. Hosted evidence remains
-open: configure provider secrets and cloud federation, dispatch a green and a
-forced-failure live run, run `sdk-compatibility`, then measure a cold
-cache-writing fuzz replay followed by a warm run. The baseline successful
-[Required run](https://github.com/tyk-swe/olp/actions/runs/33292128914) took
-15m20s; its fuzz replay took 15m15s.
+Repository validation and hosted CI are green for both SDK runtimes. The first
+fallback [PR run](https://github.com/tyk-swe/olp/actions/runs/33308319108)
+completed `Required` in 6m20s: stable fuzz compile 1m53s, PostgreSQL 6m06s,
+test-util 3m03s, E2E 2m36s after test-util, and coverage—the final gate—6m14s.
+A second warm measurement remains before closing CI-06. TEST-01 still needs
+provider identities, cloud federation, and the green/failure/recovery runs.
 
 ## Carry-over
 
