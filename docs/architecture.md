@@ -95,9 +95,9 @@ is enforced in storage.
 
 ## Canonical endpoint and provider policy
 
-`apps/olp/src/gateway/endpoint_policy.rs` is the sole inference endpoint
-registry. Each entry binds an identity to method, path, surface, typed
-operation, handler, admission, route extraction, token estimation, and
+`apps/olp/src/gateway/endpoint_policy/registry.rs` is the sole inference
+endpoint registry. Each entry binds an identity to method, path, surface,
+typed operation, handler, admission, route extraction, token estimation, and
 metadata behavior. Routing, visibility, and classification consume this same
 registry; uniqueness checks reject duplicate identities or method/path pairs.
 

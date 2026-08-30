@@ -76,7 +76,7 @@ broad, stale refactor; the other unmerged branches were superseded by `main`.
 
 ## GOV-03 — Backlog hygiene (S)
 
-- [x] `TODOS.md`: replace "Nothing open" with the open review-derived items and a pointer to `docs/roadmap/backlog.md` for planned work
+- [x] Review tracking: replace "Nothing open" with the open review-derived items in `docs/roadmap/backlog.md`
 - [x] [Pinned roadmap tracking issue #116](https://github.com/tyk-swe/olp/issues/116) so releases can link it
 - [x] `CHANGELOG.md` `[Unreleased]` → "Repository": coverage now includes the DB suites; floor 80; Firefox snapshot policy; isolation-proof determinism
 
@@ -91,7 +91,7 @@ broad, stale refactor; the other unmerged branches were superseded by `main`.
 - [x] Ruleset active and verified against a failing check
 - [x] `cargo deny check` is clean; the [fresh Dependabot cargo run](https://github.com/tyk-swe/olp/actions/runs/33256092124) triggered by [PR #123](https://github.com/tyk-swe/olp/pull/123) succeeds
 - [x] Remote branch count ≤ 10
-- [x] `TODOS.md` and `CHANGELOG.md` reflect the week
+- [x] `backlog.md` and `CHANGELOG.md` reflect the week
 
 ## Carry-over
 

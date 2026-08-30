@@ -36,7 +36,7 @@
 
 ## REL-04 — Cut the release (S)
 
-- [ ] Release commit: bump the four canonical version locations to `2.2.0`, regenerate `Cargo.lock` and `fuzz/Cargo.lock`, rename `## [Unreleased]` to `## [2.2.0] - 2026-08-30`, and add a fresh empty `[Unreleased]`; confirm `release-metadata.env` still names `0043` (the last migration of the previous release) and `make release-version` passes
+- [x] Release commit: bump the four canonical version locations to `2.2.0`, regenerate `Cargo.lock` and `fuzz/Cargo.lock`, rename `## [Unreleased]` to `## [2.2.0] - 2026-08-30`, and add a fresh empty `[Unreleased]`; confirm `release-metadata.env` still names `0043` (the last migration of the previous release) and `make release-version` passes
 - [x] Add an "Upgrading from 2.1.1" paragraph to the 2.2.0 entry: migrations 0044–0048 run in the migration Job / `migrate` service; the N-1 rehearsal covers 0043 → 0048
 - [ ] Tag after CI is green on the release commit: `git tag -a v2.2.0 -m "OpenLLMProxy 2.2.0"`, push, watch `release.yml`
 - [x] `make release-notes`: a script extracts the `[2.2.0]` CHANGELOG section into the GitHub Release body — never hand-copied; assets: both SBOMs, chart `.tgz`, `values.schema.json`, `checksums.txt`

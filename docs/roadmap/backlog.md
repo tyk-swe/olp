@@ -38,7 +38,7 @@ is intentionally not here.
 
 - [x] **GOV-01** Protect `main` with a ruleset requiring `Required`, linear history, and deletion/force-push blocks; merge queue unavailable for this personal-account-owned public repository — P0 · S · week 1 · done → [milestone 1](milestones/01-green-main.md)
 - [x] **GOV-02** Prune 62 remote branches to ≤ 10; auto-delete merged heads — P2 · S · week 1 · done → [milestone 1](milestones/01-green-main.md)
-- [x] **GOV-03** Backlog hygiene: `TODOS.md` reflects reality, tracking issues per milestone, CHANGELOG entry for the CI changes — P2 · S · week 1 · done → [milestone 1](milestones/01-green-main.md)
+- [x] **GOV-03** Backlog hygiene: review tracking reflects reality, tracking issues per milestone, CHANGELOG entry for the CI changes — P2 · S · week 1 · done → [milestone 1](milestones/01-green-main.md)
 - [x] **GOV-04** Remove the dead `stable` branch trigger; fix the dev-box git identity — P3 · S · week 1 · done → [milestone 1](milestones/01-green-main.md)
 - [ ] **GOV-05** Repository presentation: description, topics, issue templates, CODEOWNERS, code of conduct, sharper `SECURITY.md` — P2 · S · week 4 · planned → [milestone 4](milestones/04-onboarding.md)
 
@@ -85,7 +85,7 @@ is intentionally not here.
 - [ ] **PERF-01** `make bench`: `oha` against the loopback mock, added-latency p50/p95/p99, JSON results — P2 · M · week 7 · planned → [milestone 7](milestones/07-performance.md)
 - [ ] **PERF-02** Criterion micro-benchmarks on the SSE decoder, translators, and codecs — P3 · S · week 7 · planned → [milestone 7](milestones/07-performance.md)
 - [ ] **PERF-03** Non-blocking `perf` job with artifact and regression warning — P3 · S · week 7 · planned → [milestone 7](milestones/07-performance.md)
-- [ ] **PERF-04** Act on the numbers: profile once, revalidate admission defaults, replace the unmeasured SLO sentence — P2 · M · week 7 · planned → [milestone 7](milestones/07-performance.md)
+- [ ] **PERF-04** Act on the numbers: profile once, revalidate admission defaults, replace the provisional latency objectives — P2 · M · week 7 · planned → [milestone 7](milestones/07-performance.md)
 
 ## HYG — hardening and hygiene
 

@@ -25,7 +25,7 @@ semantic versioning and match `Cargo.toml`, `console/package.json`,
 
 ## [2.2.0] - 2026-08-30
 
-Clears the review backlog carried in `TODOS.md` and loosens the restrictions
+Clears the review backlog from prior releases and loosens the restrictions
 that bought nothing: private provider endpoints, certification that survived no
 edit, a 5-minute cap on streams, compile-time size caps. Five migrations: 0044
 relaxes one invitation constraint, 0045 lands the drops that 0038 and 0039
@@ -169,9 +169,8 @@ rehearsal covers 0043 → 0048.
 
 ### Fixed
 
-- `TODOS.md` claimed the four `audit_events` insert helpers and the media-job
-  poll gate were still open. Both were closed in 2.1.1 and the file was never
-  updated.
+- Review tracking still listed the four `audit_events` insert helpers and the
+  media-job poll gate as open. Both were closed in 2.1.1.
 
 ### Tests
 
