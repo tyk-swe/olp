@@ -12,7 +12,7 @@ Status values: `planned`, `in progress`, `done`, `dropped` (with a reason).
 |---|---|---|---|---|---|
 | 1 — Green and protected `main` | CI-01 … CI-05, GOV-01 … GOV-04 | 3 | 3 | 2 | 1 |
 | 2 — First published release | REL-01 … REL-05 | — | 5 | — | — |
-| 3 — Test the real risks | TEST-01, TEST-02, CI-06, CI-07 | — | 1 | 2 | 1 |
+| 3 — Test the real risks | TEST-01, TEST-02, CI-06 … CI-08 | — | 2 | 2 | 1 |
 | 4 — Onboarding and docs | DOC-01 … DOC-04, TEST-03, GOV-05 | — | 1 | 5 | — |
 | 5 — Distributed tracing | OTEL-01 … OTEL-04 | — | — | 4 | — |
 | 6 — Spend controls | SPEND-01 … SPEND-05 | — | — | 5 | — |
@@ -20,7 +20,7 @@ Status values: `planned`, `in progress`, `done`, `dropped` (with a reason).
 | 8 — Release 2.3.0 and hardening | REL-06, HYG-01 … HYG-03 | — | 1 | 2 | 1 |
 | Unscheduled | TEST-04, HYG-04 … HYG-08, FLEX-01 … FLEX-06 | — | 3 | 3 | 6 (incl. P4) |
 
-53 items: 41 scheduled, 12 unscheduled; 18 done. [`deferred.md`](deferred.md) lists what
+54 items: 42 scheduled, 12 unscheduled; 20 done. [`deferred.md`](deferred.md) lists what
 is intentionally not here.
 
 ## CI — the gates themselves
@@ -31,8 +31,9 @@ is intentionally not here.
 - [x] **CI-03** Refresh the Firefox `request-explorer` baseline and decide the cross-browser snapshot policy — P1 · S · week 1 · done → [milestone 1](milestones/01-green-main.md)
 - [x] **CI-04** Make the shared-Valkey isolation proof immune to UTC-minute rollover — P1 · S · week 1 · done → [milestone 1](milestones/01-green-main.md)
 - [x] **CI-05** Repair the Dependabot cargo group (`futures: unknown_error`) and land the pending bumps once — P1 · S · week 1 · done → [milestone 1](milestones/01-green-main.md)
-- [ ] **CI-06** `Required` tier under 8 minutes: cache fuzz targets or move `fuzz-replay` to the full tier — P2 · S · week 3 · in progress → [milestone 3](milestones/03-risk-tests.md)
+- [x] **CI-06** `Required` tier under 8 minutes: stable fuzz compile required, nightly replay full-tier, E2E parallelized — P2 · S · week 3 · done → [milestone 3](milestones/03-risk-tests.md)
 - [x] **CI-07** Flake policy: no retries outside live-provider tests; time-dependent assertions must be deterministic — P3 · S · week 3 · done → [milestone 3](milestones/03-risk-tests.md)
+- [x] **CI-08** Correlate shared-Valkey runtime hints by generation UUID instead of timing — P1 · S · week 3 · done → [milestone 3](milestones/03-risk-tests.md)
 
 ## GOV — governance and repository hygiene
 

@@ -4,7 +4,7 @@
 |---|---|
 | Dates | Mon 2026-09-14 → Sun 2026-09-20 |
 | Goal | Provider drift is detected weekly instead of by users; the dominant client ecosystem is smoke-tested; pull requests get their verdict in under 8 minutes |
-| Backlog items | TEST-01, TEST-02, CI-06, CI-07 |
+| Backlog items | TEST-01, TEST-02, CI-06, CI-07, CI-08 |
 | Prerequisites | Provider accounts with API keys dedicated to CI; AWS role and GCP workload identity for OIDC federation |
 
 ## TEST-01 — Weekly live-provider job (M)
@@ -55,19 +55,34 @@ the mocked service-account flow remains covered locally.
   [run 33308319108](https://github.com/tyk-swe/olp/actions/runs/33308319108/job/99248820696)
 - [x] `CONTRIBUTING.md` "Validation": time-dependent assertions (UTC windows, TTLs, minute boundaries) must be deterministic or deliberately straddle the boundary
 
+## CI-08 — Deterministic shared-Valkey hint attribution (S)
+
+- [x] [Issue #132](https://github.com/tyk-swe/olp/issues/132) records both
+  failures instead of retrying them for green
+- [x] The isolation proof correlates a runtime hint with the exact generation
+  UUID returned by installation A; delayed bootstrap hints from installation B
+  no longer get attributed to A by timing
+- [x] The complete three-test worker-HA suite passes three consecutive local
+  runs against PostgreSQL and Valkey
+- [x] The backported release-candidate proof is green in
+  [run 33309244354](https://github.com/tyk-swe/olp/actions/runs/33309244354/job/99251507975)
+
 ## Exit criteria
 
 - [ ] `live-providers.yml` has run green once via `workflow_dispatch`; schedule armed; the `provider-drift` issue mechanism tested with a forced failure
 - [x] `sdk-compatibility` runs JavaScript and Python smokes; both green in
   [run 33305412730](https://github.com/tyk-swe/olp/actions/runs/33305412730/job/99240982566)
-- [ ] `Required` wall time ≤ 8 minutes on a warm cache (baseline ~16)
+- [x] `Required` wall time ≤ 8 minutes on a warm cache: 6m20s in
+  [run 33308319108](https://github.com/tyk-swe/olp/actions/runs/33308319108)
+  and 6m47s in
+  [run 33308637297](https://github.com/tyk-swe/olp/actions/runs/33308637297)
 
 Repository validation and hosted CI are green for both SDK runtimes. The first
 fallback [PR run](https://github.com/tyk-swe/olp/actions/runs/33308319108)
 completed `Required` in 6m20s: stable fuzz compile 1m53s, PostgreSQL 6m06s,
 test-util 3m03s, E2E 2m36s after test-util, and coverage—the final gate—6m14s.
-A second warm measurement remains before closing CI-06. TEST-01 still needs
-provider identities, cloud federation, and the green/failure/recovery runs.
+The second warm measurement completed in 6m47s. TEST-01 still needs provider
+identities, cloud federation, and the green/failure/recovery runs.
 
 ## Carry-over
 
