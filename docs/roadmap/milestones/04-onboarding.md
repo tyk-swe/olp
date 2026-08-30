@@ -5,7 +5,7 @@
 | Dates | Mon 2026-09-21 → Sun 2026-09-27 |
 | Goal | A new user reaches a successful chat completion from the README alone; the docs say which operations work with which providers; the repository looks like what it is |
 | Backlog items | DOC-01, DOC-02, DOC-03, DOC-04, TEST-03, GOV-05 |
-| Prerequisites | `v2.2.0` published (examples reference the pulled image) |
+| Prerequisites | `v2.2.1` published (examples reference the pulled image) |
 
 ## DOC-01 — "Your first request" (S)
 

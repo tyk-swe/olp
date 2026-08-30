@@ -20,7 +20,7 @@ Status values: `planned`, `in progress`, `done`, `dropped` (with a reason).
 | 8 — Release 2.3.0 and hardening | REL-06, HYG-01 … HYG-03 | — | 1 | 2 | 1 |
 | Unscheduled | TEST-04, HYG-04 … HYG-08, FLEX-01 … FLEX-06 | — | 3 | 3 | 6 (incl. P4) |
 
-54 items: 42 scheduled, 12 unscheduled; 23 done. [`deferred.md`](deferred.md) lists what
+54 items: 42 scheduled, 12 unscheduled; 24 done. [`deferred.md`](deferred.md) lists what
 is intentionally not here.
 
 ## CI — the gates themselves
@@ -49,8 +49,8 @@ is intentionally not here.
 - [x] **REL-02** Native amd64 + arm64 image on GHCR by digest, cosign-signed, SBOM attested, Trivy-scanned — P1 · M · week 2 · done → [milestone 2](milestones/02-first-release.md)
 - [x] **REL-03** Helm chart on `oci://ghcr.io/tyk-swe/charts`, signed, render-identical to the repo — P1 · S · week 2 · done → [milestone 2](milestones/02-first-release.md)
 - [x] **REL-04** Cut `v2.2.0`: version bump, CHANGELOG, tag, release notes from CHANGELOG, assets — P1 · S · week 2 · done → [milestone 2](milestones/02-first-release.md)
-- [ ] **REL-05** Quick start pulls the published image; source build becomes a Compose overlay — P1 · S · week 2 · in progress → [milestone 2](milestones/02-first-release.md)
-- [ ] **REL-06** Cut `v2.3.0` with tracing, budgets, bench, Python smoke, NetworkPolicy — P1 · S · week 8 · planned → [milestone 8](milestones/08-release-and-retro.md)
+- [x] **REL-05** Quick start pulls the published image; source build becomes a Compose overlay — P1 · S · week 2 · done → [milestone 2](milestones/02-first-release.md)
+- [ ] **REL-06** Cut `v2.3.0` with tracing, budgets, bench, and NetworkPolicy — P1 · S · week 8 · planned → [milestone 8](milestones/08-release-and-retro.md)
 
 ## TEST — tests that guard external risk
 

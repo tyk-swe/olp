@@ -30,7 +30,7 @@ evidence.
 | # | Dates | Theme | Ships |
 |---|---|---|---|
 | [1](milestones/01-green-main.md) | Aug 31 – Sep 6 | Green and protected `main` | Five CI fixes, protected `main`, pruned branches |
-| [2](milestones/02-first-release.md) | Sep 7 – Sep 13 | First published release | `v2.2.0`: signed multi-arch image on GHCR, Helm chart on OCI, GitHub Release, pull-based quick start |
+| [2](milestones/02-first-release.md) | Sep 7 – Sep 13 | First published release | `v2.2.0`, plus `v2.2.1` quick-start repair: signed image, OCI chart, GitHub Release, pull-based setup |
 | [3](milestones/03-risk-tests.md) | Sep 14 – Sep 20 | Test the real risks | Weekly live-provider job, Python SDK smoke, `Required` tier under 8 minutes |
 | [4](milestones/04-onboarding.md) | Sep 21 – Sep 27 | Onboarding and docs | "Your first request", concepts page, generated compatibility matrix, Helm NetworkPolicy, repository presentation |
 | [5](milestones/05-tracing.md) | Sep 28 – Oct 4 | Distributed tracing | OpenTelemetry request and attempt spans, OTLP export, W3C propagation, content-free by construction |

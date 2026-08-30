@@ -3,16 +3,17 @@
 | | |
 |---|---|
 | Dates | Mon 2026-10-19 → Sun 2026-10-25 |
-| Goal | Everything from weeks 3–7 ships as `v2.3.0` through the pipeline built in week 2; the repository's own rules are back to zero grandfathered debt where it is cheap; the next plan exists |
+| Goal | Everything not already released from weeks 3–7 ships as `v2.3.0` through the pipeline built in week 2; the repository's own rules are back to zero grandfathered debt where it is cheap; the next plan exists |
 | Backlog items | REL-06, HYG-01, HYG-02, HYG-03 |
 | Prerequisites | Milestones 5–7 exit criteria, or their carry-over explicitly excluded from 2.3.0 |
 
 ## REL-06 — Cut `v2.3.0` (S)
 
-- [ ] Same procedure as REL-04; `release-metadata.env` advances to `0048` (the last migration shipped by 2.2.0) in the release commit; `make release-version` passes
-- [ ] CHANGELOG `[2.3.0]` groups tracing, budgets, Python SDK smoke, bench, NetworkPolicy, and docs, each with its backlog ID
-- [ ] Upgrade rehearsal 2.2.0 → 2.3.0 green in CI before tagging
-- [ ] `helm upgrade` from the 2.2.0 chart on the kind cluster used in week 2; migration Job runs 0049
+- [ ] Same procedure as REL-04; `release-metadata.env` remains `0048` (the last migration shipped by 2.2.1) in the release commit; `make release-version` passes
+- [ ] CHANGELOG `[2.3.0]` groups tracing, budgets, bench, NetworkPolicy, and docs, each with its backlog ID
+- [ ] Upgrade rehearsal 2.2.1 → 2.3.0 green in CI before tagging
+- [ ] `helm upgrade` from the 2.2.1 chart on a fresh cluster reproducing the
+  week-2 topology; migration Job runs 0049
 
 ## HYG-01 — Size-baseline burn-down (M)
 
