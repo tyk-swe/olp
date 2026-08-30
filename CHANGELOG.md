@@ -22,6 +22,8 @@ semantic versioning and match `Cargo.toml`, `console/package.json`,
   all other Rust jobs continue to omit target directories from their cache.
 - **CI-07:** Automated retries are disabled outside the weekly live-provider
   profile, and contributor guidance requires deterministic time assertions.
+- **CI-08:** The shared-Valkey isolation proof correlates runtime hints by
+  generation identity instead of attributing delayed bootstrap hints by timing.
 
 ## [2.2.0] - 2026-08-30
 
