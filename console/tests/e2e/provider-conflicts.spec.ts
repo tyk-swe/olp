@@ -210,6 +210,11 @@ test('provider capability conflict reloads the row and retries from the remote E
   page
 }) => {
   await mockSession(page, sessionOptions);
+  let allowProviderKindsResponse = () => {};
+  const providerKindsCanRespond = new Promise<void>((resolve) => {
+    allowProviderKindsResponse = resolve;
+  });
+  let providerKindsRequestBlocked = false;
   let currentModel = { ...modelRecord };
   let current = providerRecord('draft', [currentModel], {
     etag: '01980000-0000-7000-8000-000000000511'
@@ -230,6 +235,11 @@ test('provider capability conflict reloads the row and retries from the remote E
       });
     }
   );
+  await page.route('**/api/v1/provider-kinds', async (route) => {
+    providerKindsRequestBlocked = true;
+    await providerKindsCanRespond;
+    await route.fallback();
+  });
   await page.route('**/api/v1/providers/**', async (route) => {
     const request = route.request();
     const pathname = new URL(request.url()).pathname;
@@ -286,28 +296,51 @@ test('provider capability conflict reloads the row and retries from the remote E
     failUnexpectedApiRequest(route);
   });
 
-  await page.goto(`/providers/${ids.provider}`);
-  await page.getByLabel('Name').fill('local-provider-name');
-  await page.getByRole('button', { name: 'Remove capability 2' }).click();
-  await page.getByRole('button', { name: 'Save capability review' }).click();
-  await expect(page.getByRole('alert')).toContainText(
-    'This item changed elsewhere.'
-  );
-  await page.getByRole('button', { name: 'Reload' }).click();
-  await expect(page.getByLabel('Name')).toHaveValue('remote-provider-name');
-  await expect(page.getByLabel('Mode 1')).toHaveValue('unary');
-  await expect(
-    page.getByRole('button', { name: 'Remove capability 2' })
-  ).toHaveCount(0);
-  await expect(page.getByText('This item changed elsewhere.')).toHaveCount(0);
-  await page.getByRole('button', { name: 'Save capability review' }).click();
-  await expect(
-    page.getByText('Capability review saved with declared provenance.')
-  ).toBeVisible();
-  expect(saveEtags).toEqual([
-    '"01980000-0000-7000-8000-000000000511"',
-    '"01980000-0000-7000-8000-000000000512"'
-  ]);
+  try {
+    await page.goto(`/providers/${ids.provider}`);
+    await expect(
+      page.getByRole('heading', { name: 'production-openai', exact: true })
+    ).toBeVisible();
+    await expect(
+      page.getByRole('button', { name: 'Remove capability 2' })
+    ).toBeVisible();
+    await expect.poll(() => providerKindsRequestBlocked).toBe(true);
+    await page.getByLabel('Name').fill('local-provider-name');
+    await expect(
+      page.getByRole('button', { name: 'Save draft' })
+    ).toBeDisabled();
+    await page.getByRole('button', { name: 'Remove capability 2' }).click();
+    await page.getByRole('button', { name: 'Save capability review' }).click();
+    await expect(page.getByRole('alert')).toContainText(
+      'This item changed elsewhere.'
+    );
+    await page.getByRole('button', { name: 'Reload' }).click();
+    await expect(
+      page.getByRole('heading', { name: 'remote-provider-name', exact: true })
+    ).toBeVisible();
+    // Keep the specification pending through reload, then prove its arrival
+    // hydrates every form.
+    allowProviderKindsResponse();
+    await expect(
+      page.getByRole('button', { name: 'Save draft' })
+    ).toBeEnabled();
+    await expect(page.getByLabel('Name')).toHaveValue('remote-provider-name');
+    await expect(page.getByLabel('Mode 1')).toHaveValue('unary');
+    await expect(
+      page.getByRole('button', { name: 'Remove capability 2' })
+    ).toHaveCount(0);
+    await expect(page.getByText('This item changed elsewhere.')).toHaveCount(0);
+    await page.getByRole('button', { name: 'Save capability review' }).click();
+    await expect(
+      page.getByText('Capability review saved with declared provenance.')
+    ).toBeVisible();
+    expect(saveEtags).toEqual([
+      '"01980000-0000-7000-8000-000000000511"',
+      '"01980000-0000-7000-8000-000000000512"'
+    ]);
+  } finally {
+    allowProviderKindsResponse();
+  }
 });
 
 test('provider wizard recovers a capability save after an ETag conflict', async ({
