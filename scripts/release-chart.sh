@@ -114,7 +114,22 @@ printf '%s\n' "$chart_digest" > "$output_dir/chart-oci-digest.txt"
 
 chart_reference="$registry/openllmproxy"
 cosign sign --yes "${chart_reference#oci://}@$chart_digest"
-helm template olp "$chart_reference" --version "$version" --namespace olp \
+if pull_output=$(helm pull "$chart_reference" --version "$version" \
+  --destination "$work" 2>&1); then
+  :
+else
+  status=$?
+  printf '%s\n' "$pull_output" >&2
+  exit "$status"
+fi
+printf '%s\n' "$pull_output"
+resolved_digest=$(sed -nE \
+  's/^Digest:[[:space:]]+(sha256:[0-9a-f]{64})$/\1/p' <<< "$pull_output")
+[[ $resolved_digest == "$chart_digest" ]] || {
+  echo "published chart resolved to ${resolved_digest:-no digest}, expected $chart_digest" >&2
+  exit 1
+}
+helm template olp "$work/openllmproxy-$version.tgz" --namespace olp \
   --set-string image.digest="$IMAGE_DIGEST" > "$work/remote.yaml"
 diff -u "$work/local.yaml" "$work/remote.yaml"
 if [[ -n ${GITHUB_OUTPUT:-} ]]; then
