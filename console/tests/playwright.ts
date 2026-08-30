@@ -1,5 +1,7 @@
 import { test as base, type Page, type Route } from '@playwright/test';
 
+import { isAbortedFirefoxFontDownload } from './browserRuntime';
+
 export {
   expect,
   type APIRequestContext,
@@ -91,7 +93,8 @@ export const test = base.extend({
       const text = message.text();
       if (
         (message.type() === 'error' &&
-          !text.startsWith('Failed to load resource:')) ||
+          !text.startsWith('Failed to load resource:') &&
+          !isAbortedFirefoxFontDownload(text)) ||
         (message.type() === 'warning' &&
           svelteWarningMarkers.some((marker) => text.includes(marker)))
       ) {

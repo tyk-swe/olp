@@ -21,7 +21,7 @@ export default defineConfig({
         extends: true,
         test: {
           name: 'unit',
-          include: ['src/**/*.test.ts'],
+          include: ['src/**/*.test.ts', 'tests/unit/**/*.test.ts'],
           exclude: ['src/**/*.svelte.test.ts']
         }
       },
