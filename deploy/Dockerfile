@@ -45,7 +45,7 @@ RUN --mount=type=cache,id=olp-cargo-registry,target=/usr/local/cargo/registry,sh
     cargo build --locked --release -p olp
 
 FROM gcr.io/distroless/cc-debian12:nonroot@sha256:fccdbb0a547c14e23fcf4ce8ad62ca5d43b4faae8d22cd292f490fef9946c96e
-ARG OLP_VERSION=2.1.1
+ARG OLP_VERSION=2.2.0
 LABEL org.opencontainers.image.source="https://github.com/tyk-swe/olp" \
       org.opencontainers.image.title="OpenLLMProxy" \
       org.opencontainers.image.description="Self-hosted AI gateway and control plane" \

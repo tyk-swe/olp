@@ -13,6 +13,7 @@ done
 docker compose version >/dev/null 2>&1 || { echo "Docker Compose is required" >&2; exit 1; }
 compose_file="$(dirname "$chart")/compose.yaml"
 bootstrap_compose_file="$(dirname "$chart")/compose.bootstrap.yaml"
+build_compose_file="$(dirname "$chart")/compose.build.yaml"
 dockerfile="$(dirname "$chart")/Dockerfile"
 compose_secret_helper="$(dirname "$chart")/../scripts/prepare-compose-secrets.sh"
 compose_bootstrap_retirement_helper="$(dirname "$chart")/../scripts/retire-compose-bootstrap-secret.sh"
@@ -20,9 +21,25 @@ compose_bootstrap_retirement_helper="$(dirname "$chart")/../scripts/retire-compo
 dashboard="$(dirname "$chart")/monitoring/grafana-dashboard.json"
 validation_require_directory "$chart"
 for required_file in \
-  "$dashboard" "$compose_file" "$bootstrap_compose_file" "$dockerfile" \
+  "$chart/Chart.yaml" "$dashboard" "$compose_file" "$bootstrap_compose_file" \
+  "$build_compose_file" "$dockerfile" \
   "$compose_secret_helper" "$compose_bootstrap_retirement_helper"; do
   validation_require_file "$required_file"
+done
+
+chart_version=$(awk '$1 == "version:" { gsub(/"/, "", $2); print $2; exit }' \
+  "$chart/Chart.yaml")
+release_image="ghcr.io/tyk-swe/olp:$chart_version"
+for expected in \
+  'artifacthub.io/changes: |' \
+  'artifacthub.io/images: |' \
+  "image: $release_image" \
+  'linux/amd64' \
+  'linux/arm64'; do
+  grep -Fq "$expected" "$chart/Chart.yaml" || {
+    echo "Helm chart release metadata is missing: $expected" >&2
+    exit 1
+  }
 done
 for required_helper in \
   "$compose_secret_helper" "$compose_bootstrap_retirement_helper"; do
@@ -291,10 +308,64 @@ grep -Fq 'EXPOSE 8080 9090' "$dockerfile" || {
   echo "image does not declare the observability port" >&2
   exit 1
 }
-docker compose -f "$compose_file" config > "$work/compose.yaml"
-docker compose -f "$compose_file" config --format json > "$work/compose.json"
-docker compose -f "$compose_file" -f "$bootstrap_compose_file" config \
+OLP_IMAGE='' docker compose -f "$compose_file" config > "$work/compose.yaml"
+OLP_IMAGE='' docker compose -f "$compose_file" config --format json > "$work/compose.json"
+OLP_IMAGE=ghcr.io/example/olp:test docker compose -f "$compose_file" config \
+  --format json > "$work/compose-image-override.json"
+OLP_IMAGE='' docker compose -f "$compose_file" -f "$bootstrap_compose_file" config \
   > "$work/compose-bootstrap.yaml"
+OLP_IMAGE='' docker compose -f "$compose_file" -f "$bootstrap_compose_file" config \
+  --format json > "$work/compose-bootstrap.json"
+OLP_IMAGE='' docker compose -f "$compose_file" -f "$build_compose_file" config \
+  --format json > "$work/compose-build.json"
+OLP_IMAGE='' docker compose -f "$compose_file" -f "$bootstrap_compose_file" \
+  -f "$build_compose_file" config --format json > "$work/compose-bootstrap-build.json"
+compose_build_context=$(cd "$(dirname "$compose_file")/.." && pwd)
+jq -e --arg release_image "$release_image" '
+  .services.migrate.image == $release_image and
+  .services.olp.image == $release_image and
+  (.services.migrate | has("build") | not) and
+  (.services.olp | has("build") | not)
+' "$work/compose.json" >/dev/null || {
+  echo "base Compose must pull $release_image without building" >&2
+  exit 1
+}
+jq -e '
+  .services.migrate.image == "ghcr.io/example/olp:test" and
+  .services.olp.image == "ghcr.io/example/olp:test"
+' "$work/compose-image-override.json" >/dev/null || {
+  echo "OLP_IMAGE must override both application services" >&2
+  exit 1
+}
+jq -e --arg release_image "$release_image" '
+  .services.migrate.image == $release_image and
+  .services.olp.image == $release_image and
+  (.services.migrate | has("build") | not) and
+  (.services.olp | has("build") | not) and
+  .services.olp.environment.OLP_BOOTSTRAP_TOKEN_FILE == "/run/secrets/olp_bootstrap_token"
+' "$work/compose-bootstrap.json" >/dev/null || {
+  echo "bootstrap Compose must retain $release_image without building" >&2
+  exit 1
+}
+jq -e --arg context "$compose_build_context" '
+  .services.migrate.image == "openllmproxy:dev" and
+  .services.olp.image == "openllmproxy:dev" and
+  .services.migrate.build.context == $context and
+  .services.olp.build.context == $context and
+  .services.migrate.build.dockerfile == "deploy/Dockerfile" and
+  .services.olp.build.dockerfile == "deploy/Dockerfile"
+' "$work/compose-build.json" >/dev/null || {
+  echo "Compose build overlay must build both application services from the repository" >&2
+  exit 1
+}
+jq -e '
+  .services.olp.image == "openllmproxy:dev" and
+  (.services.olp | has("build")) and
+  .services.olp.environment.OLP_BOOTSTRAP_TOKEN_FILE == "/run/secrets/olp_bootstrap_token"
+' "$work/compose-bootstrap-build.json" >/dev/null || {
+  echo "Compose source build must retain the bootstrap overlay" >&2
+  exit 1
+}
 jq -e '
   .services.migrate.environment.OLP_VALKEY_URL == "redis://valkey:6379" and
   .services.migrate.depends_on.valkey.condition == "service_healthy"

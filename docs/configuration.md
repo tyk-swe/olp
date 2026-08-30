@@ -83,10 +83,11 @@ API-key and bootstrap-token digests.
 
 ## Compose-only variables
 
-`.env.example` also defines `OLP_HOST_PORT`, `POSTGRES_PASSWORD`,
-`POSTGRES_PASSWORD_URL_ENCODED`, `OLP_UID`, and `OLP_GID`. They configure the
-Compose wrapper, not the binary. The encoded password is used in the database
-URL; PostgreSQL receives the raw password.
+Compose accepts `OLP_IMAGE`, defaulting to the versioned release image used by
+the quick start. `.env.example` also defines `OLP_HOST_PORT`,
+`POSTGRES_PASSWORD`, `POSTGRES_PASSWORD_URL_ENCODED`, `OLP_UID`, and `OLP_GID`.
+They configure the Compose wrapper, not the binary. The encoded password is
+used in the database URL; PostgreSQL receives the raw password.
 
 ## OpenAI-compatible provider presets
 

@@ -17,7 +17,7 @@
 
 ## SPEND-02 — Storage (M)
 
-- [ ] Migration `0048_api_key_cost_budgets.sql` (forward-only, sequential): two nullable numeric columns with `CHECK (… > 0)`; add an index for "spend by key by window" only if `EXPLAIN` on the reconciliation query shows the usage-fact indexes do not cover it
+- [ ] Migration `0049_api_key_cost_budgets.sql` (forward-only, sequential): two nullable numeric columns with `CHECK (… > 0)`; add an index for "spend by key by window" only if `EXPLAIN` on the reconciliation query shows the usage-fact indexes do not cover it
 - [ ] `make sqlx-prepare` → commit `.sqlx/`; `make sqlx-check` green
 - [ ] A separate `crates/olp-db/scripts/reserve_cost.lua` invoked in the same admission step, so `reserve_limits.lua` keeps its argument contract and unit tests untouched
 - [ ] `crates/olp-db/src/limits.rs`: the cost dimension in `DistributedLimiter::reserve`; `LimitError::Exceeded { dimension: Cost, .. }`
@@ -44,7 +44,7 @@
 ## Exit criteria
 
 - [ ] Budget exhaustion demonstrable in the compose stack from the console (or via the API if SPEND-04 slips)
-- [ ] Migration 0048 passes the N-1 upgrade rehearsal (`make upgrade-rehearsal`)
+- [ ] Migration 0049 passes the N-1 upgrade rehearsal (`make upgrade-rehearsal`)
 - [ ] The coverage floor holds with the new DB suites included
 
 ## Carry-over

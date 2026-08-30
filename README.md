@@ -33,8 +33,12 @@ Prerequisites: Docker with Compose support and OpenSSL.
 cp .env.example .env
 ./scripts/prepare-compose-secrets.sh
 docker compose --env-file .env \
-  -f deploy/compose.yaml -f deploy/compose.bootstrap.yaml up --build -d
+  -f deploy/compose.yaml -f deploy/compose.bootstrap.yaml up -d
 ```
+
+Contributors building from source should add `-f deploy/compose.build.yaml`
+beside the other Compose files and add `--build` to `up`. Keep the build
+overlay and `--build` on the post-bootstrap recreation command as well.
 
 The helper creates only missing secrets, including the one-time bootstrap
 token. Compose runs as UID/GID `1000`; set `OLP_UID` and `OLP_GID` in `.env`
@@ -52,9 +56,10 @@ docker compose --env-file .env -f deploy/compose.yaml up -d --force-recreate olp
 ./scripts/retire-compose-bootstrap-secret.sh
 ```
 
-Use `deploy/compose.yaml` alone for later restarts and upgrades. See
-[`deploy/secrets/README.md`](deploy/secrets/README.md) for rotation and
-file-backed connector details.
+Use `deploy/compose.yaml` alone for later release-image restarts and upgrades.
+Contributors running a source build must keep the build overlay and `--build`
+on those commands. See [`deploy/secrets/README.md`](deploy/secrets/README.md)
+for rotation and file-backed connector details.
 
 ## Interfaces
 

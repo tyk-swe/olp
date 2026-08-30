@@ -14,12 +14,14 @@ source "$script_dir/lib/repository-validation.sh"
 for required_executable in rg awk sed sort dirname jq; do
   validation_require_executable "$required_executable"
 done
-for required_directory in "$root/console" "$root/deploy" "$root/deploy/helm"; do
+for required_directory in "$root/console" "$root/deploy" "$root/deploy/helm" "$root/fuzz"; do
   validation_require_directory "$required_directory"
 done
 for required_file in \
-  "$root/Cargo.toml" "$root/console/package.json" \
+  "$root/Cargo.toml" "$root/Cargo.lock" "$root/fuzz/Cargo.lock" \
+  "$root/console/package.json" \
   "$root/deploy/helm/Chart.yaml" "$root/deploy/Dockerfile" \
+  "$root/deploy/compose.yaml" \
   "$root/rust-toolchain.toml" "$root/.github/actions/setup-rust/action.yml" \
   "$root/release-metadata.env"; do
   validation_require_file "$required_file"
@@ -37,6 +39,27 @@ require_pin() {
     echo "$label is ${value:-unset}, expected $required" >&2
     exit 1
   }
+}
+
+lock_package_version() {
+  local lockfile=$1 package=$2
+
+  awk -v package="$package" '
+    /^\[\[package\]\]$/ { name = ""; next }
+    /^name = "/ {
+      name = $0
+      sub(/^name = "/, "", name)
+      sub(/"$/, "", name)
+      next
+    }
+    name == package && /^version = "/ {
+      value = $0
+      sub(/^version = "/, "", value)
+      sub(/"$/, "", value)
+      print value
+      exit
+    }
+  ' "$lockfile"
 }
 
 workspace_version=$(awk '
@@ -57,6 +80,12 @@ console_version=$(jq -r '.version // empty' "$root/console/package.json")
 chart_version=$(sed -nE 's/^version: "?([^"[:space:]]+)"?$/\1/p' "$root/deploy/helm/Chart.yaml")
 chart_app_version=$(sed -nE 's/^appVersion: "?([^"[:space:]]+)"?$/\1/p' "$root/deploy/helm/Chart.yaml")
 image_version=$(sed -nE 's/^ARG OLP_VERSION=([^[:space:]]+)$/\1/p' "$root/deploy/Dockerfile")
+compose_version=$(sed -nE \
+  's|^[[:space:]]*image: \$\{OLP_IMAGE:-ghcr\.io/tyk-swe/olp:([^}]+)\}$|\1|p' \
+  "$root/deploy/compose.yaml")
+artifacthub_image_version=$(sed -nE \
+  's|^[[:space:]]*image: ghcr\.io/tyk-swe/olp:([^[:space:]]+)$|\1|p' \
+  "$root/deploy/helm/Chart.yaml")
 
 semver='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$'
 [[ $workspace_version =~ $semver ]] || {
@@ -67,7 +96,18 @@ semver='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?(\+[
 require_pin "console/package.json" "$console_version" "$workspace_version"
 require_pin "deploy/helm/Chart.yaml version" "$chart_version" "$workspace_version"
 require_pin "deploy/helm/Chart.yaml appVersion" "$chart_app_version" "$workspace_version"
+require_pin "deploy/helm/Chart.yaml Artifact Hub image" \
+  "$artifacthub_image_version" "$workspace_version"
 require_pin "deploy/Dockerfile OLP_VERSION" "$image_version" "$workspace_version"
+require_pin "deploy/compose.yaml default image" "$compose_version" "$workspace_version"
+for package in olp olp-conformance olp-db olp-e2e olp-engine; do
+  require_pin "Cargo.lock $package" \
+    "$(lock_package_version "$root/Cargo.lock" "$package")" "$workspace_version"
+done
+for package in olp olp-db olp-engine; do
+  require_pin "fuzz/Cargo.lock $package" \
+    "$(lock_package_version "$root/fuzz/Cargo.lock" "$package")" "$workspace_version"
+done
 
 if [[ -n $expected && $workspace_version != "$expected" ]]; then
   echo "release tag version $expected does not match package version $workspace_version" >&2

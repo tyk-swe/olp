@@ -1,0 +1,11 @@
+x-olp-build: &olp-build
+  image: openllmproxy:dev
+  build:
+    context: ..
+    dockerfile: deploy/Dockerfile
+
+services:
+  migrate:
+    <<: *olp-build
+  olp:
+    <<: *olp-build

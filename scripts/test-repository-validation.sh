@@ -4,7 +4,7 @@ set -euo pipefail
 script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 helper="$script_dir/lib/repository-validation.sh"
 
-for required_executable in bash rg grep mktemp mkdir chmod cargo cp cat jq sed; do
+for required_executable in bash rg grep mktemp mkdir chmod cargo cp cat jq sed awk env; do
   command -v "$required_executable" >/dev/null || {
     echo "test-repository-validation.sh: $required_executable is required" >&2
     exit 1
@@ -28,7 +28,7 @@ VALIDATION_SCRIPT_NAME=test-repository-validation.sh
 assert_contains() {
   local file=$1
   local expected=$2
-  "$real_grep" -Fq "$expected" "$file"
+  "$real_grep" -Fq -- "$expected" "$file"
 }
 
 write_fake_rg() {
@@ -562,6 +562,284 @@ test_ci_lockstep_rejects_raw_and_unlisted_steps() {
   assert_contains "$output" "multi-line step 'Ad hoc block' is not in the allow-list"
 }
 
+test_ci_lockstep_checks_every_workflow() {
+  local fixture_root="$test_root/ci-lockstep-all"
+  local output="$fixture_root/output.log"
+  local status
+  mkdir -p "$fixture_root/.github/workflows" "$fixture_root/scripts/lib"
+  cp "$script_dir/check-ci-make-lockstep.sh" "$fixture_root/scripts/check-ci-make-lockstep.sh"
+  cp "$helper" "$fixture_root/scripts/lib/repository-validation.sh"
+  write_ci_workflow_fixture "$fixture_root/.github/workflows/ci.yml" \
+    'jobs:' \
+    '  valid:' \
+    '    steps:' \
+    '      - name: Check' \
+    '        run: make check'
+  write_ci_workflow_fixture "$fixture_root/.github/workflows/release.yaml" \
+    'jobs:' \
+    '  invalid:' \
+    '    steps:' \
+    '      - name: Raw release' \
+    '        run: docker push example.invalid/image'
+
+  if OLP_REPOSITORY_ROOT="$fixture_root" \
+    "$fixture_root/scripts/check-ci-make-lockstep.sh" > "$output" 2>&1; then
+    return 1
+  else
+    status=$?
+  fi
+  [[ $status == 1 ]] || return 1
+  assert_contains "$output" ".github/workflows/release.yaml" || return 1
+  assert_contains "$output" "step 'Raw release' runs 'docker push example.invalid/image'"
+}
+
+workspace_release_version() {
+  awk '
+    /^\[workspace.package\]$/ { workspace = 1; next }
+    /^\[/ { workspace = 0 }
+    workspace && /^version = "/ {
+      value = $0
+      sub(/^version = "/, "", value)
+      sub(/"$/, "", value)
+      print value
+      exit
+    }
+  ' "$script_dir/../Cargo.toml"
+}
+
+test_release_tag_matches_repository() {
+  local version output
+  version=$(workspace_release_version)
+  output="$test_root/release-tag-valid.log"
+  RELEASE_TAG="v$version" "$script_dir/check-release-tag.sh" > "$output"
+  assert_contains "$output" "release tag matches repository metadata: v$version"
+}
+
+test_release_tag_rejects_invalid_inputs() {
+  local output="$test_root/release-tag-invalid.log"
+  local version
+  version=$(workspace_release_version)
+
+  if RELEASE_TAG=v999.999.999 "$script_dir/check-release-tag.sh" > "$output" 2>&1; then
+    return 1
+  fi
+  assert_contains "$output" "does not match package version $version" || return 1
+  if RELEASE_TAG="$version" "$script_dir/check-release-tag.sh" > "$output" 2>&1; then
+    return 1
+  fi
+  assert_contains "$output" "release tag must match vMAJOR.MINOR.PATCH" || return 1
+  if env -u RELEASE_TAG -u GITHUB_REF_TYPE -u GITHUB_REF_NAME -u DRY_RUN \
+    "$script_dir/check-release-tag.sh" > "$output" 2>&1; then
+    return 1
+  fi
+  assert_contains "$output" "release tag is required" || return 1
+  if GITHUB_EVENT_NAME=workflow_dispatch DRY_RUN=false RELEASE_TAG="v$version" \
+    "$script_dir/check-release-tag.sh" > "$output" 2>&1; then
+    return 1
+  fi
+  assert_contains "$output" "workflow_dispatch may only run with dry_run=true"
+}
+
+test_release_notes_extract_exact_section() {
+  local fixture="$test_root/release-notes.md"
+  local output="$test_root/release-notes-output.md"
+  printf '%s\n' \
+    '# Changelog' \
+    '' \
+    '## [Unreleased]' \
+    '' \
+    'Future work.' \
+    '' \
+    '## [2.2.0] - 2026-08-30' \
+    '' \
+    'Release body.' \
+    '' \
+    '### Fixed' \
+    '' \
+    '- One fix.' \
+    '' \
+    '## [2.1.1] - 2026-08-26' \
+    '' \
+    'Old body.' > "$fixture"
+
+  "$script_dir/extract-release-notes.sh" v2.2.0 "$fixture" "$output"
+  assert_contains "$output" "Release body." || return 1
+  assert_contains "$output" "- One fix." || return 1
+  if assert_contains "$output" "Unreleased" || assert_contains "$output" "Old body." ||
+    assert_contains "$output" "## [2.2.0]"; then
+    return 1
+  fi
+}
+
+test_release_notes_reject_invalid_sections() {
+  local fixture="$test_root/release-notes-invalid.md"
+  local output="$test_root/release-notes-invalid-output.md"
+  local diagnostic="$test_root/release-notes-invalid.log"
+
+  printf '%s\n' '# Changelog' '## [2.1.1] - 2026-08-26' 'Old.' > "$fixture"
+  if "$script_dir/extract-release-notes.sh" v2.2.0 "$fixture" "$output" \
+    > "$diagnostic" 2>&1; then
+    return 1
+  fi
+  assert_contains "$diagnostic" "exactly one dated 2.2.0 section" || return 1
+
+  printf '%s\n' \
+    '## [2.2.0] - 2026-08-30' 'First.' \
+    '## [2.2.0] - 2026-08-31' 'Second.' > "$fixture"
+  if "$script_dir/extract-release-notes.sh" v2.2.0 "$fixture" "$output" \
+    > "$diagnostic" 2>&1; then
+    return 1
+  fi
+  assert_contains "$diagnostic" "exactly one dated 2.2.0 section" || return 1
+
+  printf '%s\n' '## [2.2.0] - 2026-08-30' '' '## [2.1.1] - 2026-08-26' 'Old.' \
+    > "$fixture"
+  if "$script_dir/extract-release-notes.sh" v2.2.0 "$fixture" "$output" \
+    > "$diagnostic" 2>&1; then
+    return 1
+  fi
+  assert_contains "$diagnostic" "changelog section for 2.2.0 is empty"
+}
+
+test_release_image_records_retained_manifest_digest() {
+  local fixture_root="$test_root/release-image"
+  local fake_bin="$fixture_root/bin"
+  local digest_dir="$fixture_root/digests"
+  local github_output="$fixture_root/github-output"
+  local docker_log="$fixture_root/docker.log"
+  local index_digest amd64_digest arm64_digest provenance_digest
+  mkdir -p "$fake_bin" "$digest_dir"
+  index_digest="sha256:$(printf 'a%.0s' {1..64})"
+  amd64_digest="sha256:$(printf 'b%.0s' {1..64})"
+  arm64_digest="sha256:$(printf 'c%.0s' {1..64})"
+  provenance_digest="sha256:$(printf 'd%.0s' {1..64})"
+  {
+    printf '#!%s\n' "$real_bash"
+    printf '%s\n' \
+      'set -euo pipefail' \
+      "printf '%s\\n' \"\$*\" >> \"\$FAKE_DOCKER_LOG\"" \
+      "printf '{\"manifests\":['" \
+      "printf '{\"digest\":\"%s\",\"platform\":{\"os\":\"linux\",\"architecture\":\"amd64\"}},' \"\$FAKE_AMD64_DIGEST\"" \
+      "printf '{\"digest\":\"%s\",\"platform\":{\"os\":\"unknown\",\"architecture\":\"unknown\"},\"annotations\":{\"vnd.docker.reference.type\":\"attestation-manifest\"}},' \"\$FAKE_PROVENANCE_DIGEST\"" \
+      "printf '{\"digest\":\"%s\",\"platform\":{\"os\":\"linux\",\"architecture\":\"arm64\"}}]}\\n' \"\$FAKE_ARM64_DIGEST\""
+  } > "$fake_bin/docker"
+  chmod +x "$fake_bin/docker"
+
+  PATH="$fake_bin:$original_path" FAKE_DOCKER_LOG="$docker_log" \
+    FAKE_AMD64_DIGEST="$amd64_digest" FAKE_ARM64_DIGEST="$arm64_digest" \
+    FAKE_PROVENANCE_DIGEST="$provenance_digest" \
+    RELEASE_IMAGE_STEP=record RELEASE_ARCH=amd64 \
+    RELEASE_IMAGE_INDEX_DIGEST="$index_digest" RELEASE_IMAGE_PLATFORM=linux/amd64 \
+    RELEASE_DIGEST_DIR="$digest_dir" GITHUB_OUTPUT="$github_output" \
+    "$script_dir/release-image.sh"
+
+  [[ $(<"$digest_dir/amd64.digest") == "$index_digest" ]] || return 1
+  assert_contains "$github_output" "digest=$amd64_digest" || return 1
+  assert_contains "$docker_log" "ghcr.io/tyk-swe/olp@$index_digest"
+}
+
+test_release_manifest_reads_buildx_descriptor_digest() {
+  local fixture_root="$test_root/release-manifest"
+  local fake_bin="$fixture_root/bin"
+  local digest_dir="$fixture_root/digests"
+  local output_dir="$fixture_root/output"
+  local docker_log="$fixture_root/docker.log"
+  local amd64_digest arm64_digest index_digest
+  mkdir -p "$fake_bin" "$digest_dir"
+  amd64_digest="sha256:$(printf 'a%.0s' {1..64})"
+  arm64_digest="sha256:$(printf 'b%.0s' {1..64})"
+  index_digest="sha256:$(printf 'c%.0s' {1..64})"
+  printf '%s\n' "$amd64_digest" > "$digest_dir/amd64.digest"
+  printf '%s\n' "$arm64_digest" > "$digest_dir/arm64.digest"
+  {
+    printf '#!%s\n' "$real_bash"
+    printf '%s\n' \
+      'set -euo pipefail' \
+      "printf '%s\\n' \"\$*\" >> \"\$FAKE_DOCKER_LOG\"" \
+      "if [[ \$* == *'.Image'* ]]; then" \
+      "  printf '{\"config\":{\"Labels\":{\"org.opencontainers.image.version\":\"%s\"}}}\\n' \"\$FAKE_CURRENT_VERSION\"" \
+      '  exit 0' \
+      'fi' \
+      "if [[ \$* == *'imagetools inspect'* ]]; then" \
+      "  printf '{\"digest\":\"%s\"}\\n' \"\$FAKE_INDEX_DIGEST\"" \
+      '  exit 0' \
+      'fi' \
+      'metadata_file=' \
+      "while ((\$#)); do" \
+      "  if [[ \$1 == --metadata-file ]]; then metadata_file=\$2; break; fi" \
+      '  shift' \
+      'done' \
+      "[[ -n \$metadata_file ]]" \
+      "printf '{\"containerimage.descriptor\":{\"digest\":\"%s\"}}\\n' \\
+        \"\$FAKE_INDEX_DIGEST\" > \"\$metadata_file\""
+  } > "$fake_bin/docker"
+  chmod +x "$fake_bin/docker"
+
+  PATH="$fake_bin:$original_path" \
+    FAKE_DOCKER_LOG="$docker_log" FAKE_INDEX_DIGEST="$index_digest" \
+    FAKE_CURRENT_VERSION=2.1.9 \
+    RELEASE_TAG=v2.2.0 RELEASE_DIGEST_DIR="$digest_dir" \
+    RELEASE_OUTPUT_DIR="$output_dir" \
+    "$script_dir/release-manifest.sh"
+  [[ $(<"$output_dir/image-index-digest.txt") == "$index_digest" ]] || return 1
+  assert_contains "$docker_log" \
+    "--tag ghcr.io/tyk-swe/olp:candidate-2.2.0-local-1" || return 1
+  assert_contains "$docker_log" \
+    "--annotation index:org.opencontainers.image.version=2.2.0" || return 1
+  PATH="$fake_bin:$original_path" \
+    FAKE_DOCKER_LOG="$docker_log" FAKE_INDEX_DIGEST="$index_digest" \
+    FAKE_CURRENT_VERSION=2.1.9 \
+    RELEASE_TAG=v2.2.0 RELEASE_MANIFEST_STEP=promote IMAGE_DIGEST="$index_digest" \
+    "$script_dir/release-manifest.sh"
+  assert_contains "$docker_log" "--tag ghcr.io/tyk-swe/olp:2.2.0" || return 1
+  assert_contains "$docker_log" "--tag ghcr.io/tyk-swe/olp:2.2" || return 1
+  assert_contains "$docker_log" "--tag ghcr.io/tyk-swe/olp:latest" || return 1
+  assert_contains "$docker_log" "ghcr.io/tyk-swe/olp@$amd64_digest" || return 1
+  assert_contains "$docker_log" "ghcr.io/tyk-swe/olp@$arm64_digest"
+}
+
+test_release_manifest_does_not_regress_aliases() {
+  local fixture_root="$test_root/release-manifest-rollback"
+  local fake_bin="$fixture_root/bin"
+  local docker_log="$fixture_root/docker.log"
+  local index_digest
+  mkdir -p "$fake_bin"
+  index_digest="sha256:$(printf 'e%.0s' {1..64})"
+  {
+    printf '#!%s\n' "$real_bash"
+    printf '%s\n' \
+      'set -euo pipefail' \
+      "printf '%s\\n' \"\$*\" >> \"\$FAKE_DOCKER_LOG\"" \
+      "if [[ \$* == *'.Image'* ]]; then" \
+      "  printf '{\"config\":{\"Labels\":{\"org.opencontainers.image.version\":\"2.2.1\"}}}\\n'" \
+      '  exit 0' \
+      'fi' \
+      "if [[ \$* == *'imagetools inspect'* ]]; then" \
+      "  printf '{\"digest\":\"%s\"}\\n' \"\$FAKE_INDEX_DIGEST\"" \
+      '  exit 0' \
+      'fi' \
+      'metadata_file=' \
+      "while ((\$#)); do" \
+      "  if [[ \$1 == --metadata-file ]]; then metadata_file=\$2; break; fi" \
+      '  shift' \
+      'done' \
+      "printf '{\"containerimage.descriptor\":{\"digest\":\"%s\"}}\\n' \\
+        \"\$FAKE_INDEX_DIGEST\" > \"\$metadata_file\""
+  } > "$fake_bin/docker"
+  chmod +x "$fake_bin/docker"
+
+  PATH="$fake_bin:$original_path" FAKE_DOCKER_LOG="$docker_log" \
+    FAKE_INDEX_DIGEST="$index_digest" RELEASE_TAG=v2.2.0 \
+    RELEASE_MANIFEST_STEP=promote IMAGE_DIGEST="$index_digest" \
+    "$script_dir/release-manifest.sh"
+
+  assert_contains "$docker_log" "--tag ghcr.io/tyk-swe/olp:2.2.0" || return 1
+  if assert_contains "$docker_log" "--tag ghcr.io/tyk-swe/olp:2.2 " || \
+    assert_contains "$docker_log" "--tag ghcr.io/tyk-swe/olp:latest "; then
+    return 1
+  fi
+}
+
 run_test "valid no-match scan succeeds" test_valid_no_match_scan
 run_test "missing required directory fails" test_missing_required_directory
 run_test "ripgrep exit greater than one fails" test_simulated_rg_failure
@@ -591,5 +869,21 @@ run_test "CI steps that run through make pass the lockstep check" \
   test_ci_lockstep_accepts_make_and_allow_listed_steps
 run_test "CI steps that bypass make fail the lockstep check" \
   test_ci_lockstep_rejects_raw_and_unlisted_steps
+run_test "CI lockstep checks every workflow file" \
+  test_ci_lockstep_checks_every_workflow
+run_test "release tag matches repository metadata" \
+  test_release_tag_matches_repository
+run_test "release tag rejects missing, malformed, and mismatched inputs" \
+  test_release_tag_rejects_invalid_inputs
+run_test "release notes extract only the requested changelog section" \
+  test_release_notes_extract_exact_section
+run_test "release notes reject missing, duplicate, and empty sections" \
+  test_release_notes_reject_invalid_sections
+run_test "release image records the retained architecture manifest digest" \
+  test_release_image_records_retained_manifest_digest
+run_test "release manifest reads the Buildx descriptor digest" \
+  test_release_manifest_reads_buildx_descriptor_digest
+run_test "older releases do not regress mutable image aliases" \
+  test_release_manifest_does_not_regress_aliases
 
 tap_plan
