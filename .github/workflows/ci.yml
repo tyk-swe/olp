@@ -167,7 +167,7 @@ jobs:
       - name: Derive the pinned fuzz toolchain
         id: fuzz-toolchain
         # The Makefile's FUZZ_TOOLCHAIN is the source of truth for the pin;
-        # include it in the shared registry cache key so nightly bumps start
+        # include it in the cache key so nightly bumps start
         # with a fresh immutable entry.
         run: |
           toolchain="$(sed -n 's/^FUZZ_TOOLCHAIN := //p' Makefile)"
@@ -176,8 +176,9 @@ jobs:
       - uses: ./.github/actions/setup-rust
         with:
           cache-workspaces: fuzz
+          cache-targets: "true"
           tools: "cargo-fuzz@0.13.2"
-          cache-shared-key: fuzz-registry-${{ steps.fuzz-toolchain.outputs.toolchain }}
+          cache-shared-key: fuzz-targets-v1-${{ steps.fuzz-toolchain.outputs.toolchain }}
       - name: Compile fuzz targets
         run: make fuzz-check
       - name: Replay fuzz regression corpora
@@ -259,6 +260,7 @@ jobs:
         with:
           cache-dependency-path: tests/sdk-smoke/pnpm-lock.yaml
           install-dirs: tests/sdk-smoke
+      - uses: ./.github/actions/setup-python-uv
       - uses: ./.github/actions/setup-rust
         with:
           cache-shared-key: workspace-registry
@@ -267,6 +269,8 @@ jobs:
         # setup-node-pnpm already installed tests/sdk-smoke; skip make sdk-smoke's
         # install prerequisite.
         run: make sdk-smoke-run
+      - name: Smoke official Python SDKs
+        run: make sdk-smoke-python
 
   postgres-integration:
     name: PostgreSQL integration
@@ -754,6 +758,7 @@ jobs:
             console/pnpm-lock.yaml
             tests/sdk-smoke/pnpm-lock.yaml
           install-dirs: console tests/sdk-smoke
+      - uses: ./.github/actions/setup-python-uv
       - name: Audit console and SDK smoke advisories
         # Cargo advisories are enforced by `make deny` in the quality job, which
         # reads its RUSTSEC exceptions from deny.toml.
@@ -780,9 +785,10 @@ jobs:
       - uses: ./.github/actions/setup-rust
         with:
           cache-workspaces: fuzz
+          cache-targets: "true"
           tools: "cargo-fuzz@0.13.2"
-          # Keep registry/tool state read-only.
-          cache-shared-key: fuzz-registry-${{ steps.fuzz-toolchain.outputs.toolchain }}
+          # Keep the shared fuzz cache read-only.
+          cache-shared-key: fuzz-targets-v1-${{ steps.fuzz-toolchain.outputs.toolchain }}
           cache-save: "false"
       - name: Run every seeded fuzz target for two minutes
         run: make fuzz-campaign

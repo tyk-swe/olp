@@ -24,6 +24,13 @@ updates:
     directory: /tests/sdk-smoke
     schedule:
       interval: weekly
+  - package-ecosystem: uv
+    directory: /tests/sdk-smoke-python
+    schedule:
+      interval: weekly
+    groups:
+      sdk-smoke-python-minor-patch:
+        update-types: [minor, patch]
   - package-ecosystem: docker
     directory: /deploy
     schedule:

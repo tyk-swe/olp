@@ -8,7 +8,7 @@ inputs:
     description: Comma-separated rustup components
     default: ""
   cache:
-    description: Whether to restore/save the Cargo registry/tool cache
+    description: Whether to restore/save the Cargo cache
     default: "true"
   cache-workspaces:
     description: Newline-separated workspaces used to key the Cargo registry/tool cache
@@ -16,13 +16,16 @@ inputs:
   cache-shared-key:
     description: >-
       rust-cache shared-key. Jobs passing the same value restore one shared
-      registry/tool cache instead of a per-job one; designate exactly one of
+      Cargo cache instead of a per-job one; designate exactly one of
       them as the writer (cache-save "true") because GitHub cache entries are
       immutable.
     default: ""
   cache-save:
-    description: Whether this job saves the Cargo registry/tool cache on a miss
+    description: Whether this job saves the Cargo cache on a miss
     default: "true"
+  cache-targets:
+    description: Whether to cache workspace target directories
+    default: "false"
   tools:
     description: Comma-separated tool@version list for taiki-e/install-action
     default: ""
@@ -38,7 +41,7 @@ runs:
       uses: Swatinem/rust-cache@23869a5bd66c73db3c0ac40331f3206eb23791dc # v2.9.1
       with:
         cache-on-failure: true
-        cache-targets: false
+        cache-targets: ${{ inputs.cache-targets }}
         workspaces: ${{ inputs.cache-workspaces }}
         shared-key: ${{ inputs.cache-shared-key }}
         save-if: ${{ inputs.cache-save }}

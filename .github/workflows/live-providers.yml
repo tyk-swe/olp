@@ -1,0 +1,182 @@
+name: Live providers
+
+on:
+  schedule:
+    - cron: "43 4 * * 3"
+  workflow_dispatch:
+
+concurrency:
+  group: live-providers
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: "1"
+
+defaults:
+  run:
+    shell: bash --noprofile --norc -euo pipefail {0}
+
+jobs:
+  test:
+    name: Live provider drift
+    if: ${{ github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    environment: live-providers
+    permissions:
+      contents: read
+      id-token: write
+    outputs:
+      test_outcome: ${{ steps.live-tests.outcome }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-rust
+        with:
+          tools: "cargo-nextest@0.9.140"
+          cache-shared-key: live-providers
+      - uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c # v6.2.3
+        continue-on-error: true
+        with:
+          role-to-assume: ${{ vars.OLP_BEDROCK_LIVE_ROLE_ARN }}
+          aws-region: ${{ vars.OLP_BEDROCK_LIVE_REGION }}
+          role-session-name: olp-live-providers
+      - uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        continue-on-error: true
+        with:
+          workload_identity_provider: ${{ vars.OLP_VERTEX_LIVE_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.OLP_VERTEX_LIVE_SERVICE_ACCOUNT }}
+      - name: Run live-provider tests
+        id: live-tests
+        continue-on-error: true
+        env:
+          OLP_LIVE_OPENAI_API_KEY: ${{ secrets.OLP_LIVE_OPENAI_API_KEY }}
+          OLP_LIVE_ANTHROPIC_API_KEY: ${{ secrets.OLP_LIVE_ANTHROPIC_API_KEY }}
+          OLP_LIVE_GEMINI_API_KEY: ${{ secrets.OLP_LIVE_GEMINI_API_KEY }}
+          OLP_AZURE_OPENAI_LIVE_ENDPOINT: ${{ vars.OLP_AZURE_OPENAI_LIVE_ENDPOINT }}
+          OLP_AZURE_OPENAI_LIVE_DEPLOYMENT: ${{ vars.OLP_AZURE_OPENAI_LIVE_DEPLOYMENT }}
+          OLP_AZURE_OPENAI_LIVE_API_VERSION: ${{ vars.OLP_AZURE_OPENAI_LIVE_API_VERSION }}
+          OLP_AZURE_OPENAI_LIVE_API_KEY: ${{ secrets.OLP_AZURE_OPENAI_LIVE_API_KEY }}
+          OLP_VERTEX_LIVE_PROJECT: ${{ vars.OLP_VERTEX_LIVE_PROJECT }}
+          OLP_VERTEX_LIVE_LOCATION: ${{ vars.OLP_VERTEX_LIVE_LOCATION }}
+          OLP_VERTEX_LIVE_MODEL: ${{ vars.OLP_VERTEX_LIVE_MODEL }}
+          OLP_BEDROCK_LIVE_REGION: ${{ vars.OLP_BEDROCK_LIVE_REGION }}
+          OLP_BEDROCK_LIVE_MODEL: ${{ vars.OLP_BEDROCK_LIVE_MODEL }}
+          AWS_EC2_METADATA_DISABLED: "true"
+        run: make live-tests
+      - name: Clear cloud credentials
+        if: ${{ always() }}
+        run: ./scripts/ci/clear-live-provider-credentials.sh
+      - name: Upload live-provider results
+        if: ${{ always() && !cancelled() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: live-provider-results-${{ github.run_id }}-${{ github.run_attempt }}
+          path: target/nextest/live/junit.xml
+          if-no-files-found: ignore
+          retention-days: 7
+
+  route-provider-drift:
+    name: Route provider drift
+    needs: test
+    if: ${{ always() && !cancelled() && github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      actions: read
+      issues: write
+    steps:
+      - name: Download live-provider results
+        continue-on-error: true
+        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6.0.0
+        with:
+          name: live-provider-results-${{ github.run_id }}-${{ github.run_attempt }}
+          path: live-provider-results
+      - name: Route provider drift
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          LIVE_TEST_OUTCOME: ${{ needs.test.outputs.test_outcome }}
+          LIVE_TEST_REPORT: live-provider-results/junit.xml
+          RUN_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        with:
+          script: |
+            const fs = require('node:fs');
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const title = 'Live provider drift detected';
+            const label = 'provider-drift';
+            try {
+              await github.rest.issues.getLabel({ owner, repo, name: label });
+            } catch (error) {
+              if (error.status !== 404) throw error;
+              await github.rest.issues.createLabel({
+                owner,
+                repo,
+                name: label,
+                color: 'b60205',
+                description: 'A live provider contract check is failing',
+              });
+            }
+            const issues = await github.paginate(github.rest.issues.listForRepo, {
+              owner,
+              repo,
+              state: 'all',
+              labels: label,
+              per_page: 100,
+            });
+            const issue = issues.find(candidate => !candidate.pull_request && candidate.title === title);
+            if (process.env.LIVE_TEST_OUTCOME === 'success') {
+              if (issue?.state === 'open') {
+                await github.rest.issues.createComment({
+                  owner,
+                  repo,
+                  issue_number: issue.number,
+                  body: `Recovered in [workflow run](${process.env.RUN_URL}).`,
+                });
+                await github.rest.issues.update({
+                  owner,
+                  repo,
+                  issue_number: issue.number,
+                  state: 'closed',
+                  state_reason: 'completed',
+                });
+              }
+              return;
+            }
+            let failedTests = [];
+            if (fs.existsSync(process.env.LIVE_TEST_REPORT)) {
+              const report = fs.readFileSync(process.env.LIVE_TEST_REPORT, 'utf8');
+              const cases = report.matchAll(/<testcase\b([^>]*)>([\s\S]*?)<\/testcase>/g);
+              for (const testCase of cases) {
+                if (!testCase[2].includes('<failure')) continue;
+                const name = testCase[1].match(/\bname="([^"]+)"/);
+                if (name) failedTests.push(name[1]);
+              }
+            }
+            failedTests = [...new Set(failedTests)].sort();
+            const failures = failedTests.length
+              ? failedTests.map(name => `- \`${name}\``).join('\n')
+              : '- Test names unavailable; inspect the run log.';
+            const body = [
+              'The weekly live-provider contract check failed.',
+              '',
+              'Failing tests:',
+              failures,
+              '',
+              `[Workflow run](${process.env.RUN_URL})`,
+              `Commit: \`${context.sha}\``,
+            ].join('\n');
+            if (issue) {
+              await github.rest.issues.update({
+                owner,
+                repo,
+                issue_number: issue.number,
+                body,
+                state: 'open',
+              });
+            } else {
+              await github.rest.issues.create({ owner, repo, title, body, labels: [label] });
+            }
+            core.setFailed('Live-provider tests failed.');

@@ -24,6 +24,7 @@ use olp_engine::domain::{
         events::{Event, FinishReason, Kind, Usage},
         identity::{OperationKind, Surface, TransportMode},
         requests::MessageRole,
+        results::{CanonicalResult, TokenCountResult},
     },
     ids::{
         ApiKeyId, ApiKeyLookupId, DurationMs, ProviderId, RouteId, RouteSlug, RuntimeGenerationId,
@@ -54,8 +55,11 @@ impl ProviderTransport for StaticCanonicalTransport {
         request: ProviderRequest,
     ) -> BoxFuture<'a, Result<ProviderOutput, TransportError>> {
         Box::pin(async move {
-            if request.metadata.operation != OperationKind::Generation
-                || request.operation.route().map(RouteSlug::as_str) != Some(ROUTE_SLUG)
+            if request.operation.route().map(RouteSlug::as_str) != Some(ROUTE_SLUG)
+                || !matches!(
+                    request.metadata.operation,
+                    OperationKind::Generation | OperationKind::TokenCount
+                )
             {
                 return Err(TransportError {
                     upstream: Default::default(),
@@ -65,6 +69,15 @@ impl ProviderTransport for StaticCanonicalTransport {
                     message: "SDK smoke fixture received an unexpected canonical operation"
                         .to_owned(),
                 });
+            }
+
+            if request.metadata.operation == OperationKind::TokenCount {
+                return Ok(ProviderOutput::Result(Box::new(
+                    CanonicalResult::TokenCount(TokenCountResult {
+                        input_tokens: 13,
+                        extensions: Default::default(),
+                    }),
+                )));
             }
 
             let surface = match request.metadata.surface {
@@ -175,12 +188,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             ));
         }
     }
+    capabilities.insert(Capability::new(
+        UPSTREAM_MODEL,
+        OperationKind::TokenCount,
+        Surface::Anthropic,
+        TransportMode::Unary,
+    ));
 
     let route = Route {
         id: RouteId::new(),
         routing_id: None,
         slug: route_slug.clone(),
-        operations: BTreeSet::from([OperationKind::Generation]),
+        operations: BTreeSet::from([OperationKind::Generation, OperationKind::TokenCount]),
         overall_timeout: DurationMs::new(5_000),
         max_attempts: NonZeroU16::new(1).expect("one is nonzero"),
         targets: vec![Target {

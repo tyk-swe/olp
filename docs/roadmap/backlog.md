@@ -20,7 +20,7 @@ Status values: `planned`, `in progress`, `done`, `dropped` (with a reason).
 | 8 — Release 2.3.0 and hardening | REL-06, HYG-01 … HYG-03 | — | 1 | 2 | 1 |
 | Unscheduled | TEST-04, HYG-04 … HYG-08, FLEX-01 … FLEX-06 | — | 3 | 3 | 6 (incl. P4) |
 
-53 items: 41 scheduled, 12 unscheduled; 16 done. [`deferred.md`](deferred.md) lists what
+53 items: 41 scheduled, 12 unscheduled; 18 done. [`deferred.md`](deferred.md) lists what
 is intentionally not here.
 
 ## CI — the gates themselves
@@ -31,8 +31,8 @@ is intentionally not here.
 - [x] **CI-03** Refresh the Firefox `request-explorer` baseline and decide the cross-browser snapshot policy — P1 · S · week 1 · done → [milestone 1](milestones/01-green-main.md)
 - [x] **CI-04** Make the shared-Valkey isolation proof immune to UTC-minute rollover — P1 · S · week 1 · done → [milestone 1](milestones/01-green-main.md)
 - [x] **CI-05** Repair the Dependabot cargo group (`futures: unknown_error`) and land the pending bumps once — P1 · S · week 1 · done → [milestone 1](milestones/01-green-main.md)
-- [ ] **CI-06** `Required` tier under 8 minutes: cache fuzz targets or move `fuzz-replay` to the full tier — P2 · S · week 3 · planned → [milestone 3](milestones/03-risk-tests.md)
-- [ ] **CI-07** Flake policy: no retries anywhere; time-dependent assertions must be deterministic — P3 · S · week 3 · planned → [milestone 3](milestones/03-risk-tests.md)
+- [ ] **CI-06** `Required` tier under 8 minutes: cache fuzz targets or move `fuzz-replay` to the full tier — P2 · S · week 3 · in progress → [milestone 3](milestones/03-risk-tests.md)
+- [x] **CI-07** Flake policy: no retries outside live-provider tests; time-dependent assertions must be deterministic — P3 · S · week 3 · done → [milestone 3](milestones/03-risk-tests.md)
 
 ## GOV — governance and repository hygiene
 
@@ -53,8 +53,8 @@ is intentionally not here.
 
 ## TEST — tests that guard external risk
 
-- [ ] **TEST-01** Weekly live-provider job with environment-scoped secrets, cloud OIDC federation, auto-filed `provider-drift` issue — P1 · M · week 3 · planned → [milestone 3](milestones/03-risk-tests.md)
-- [ ] **TEST-02** Python SDK smoke (`openai`, `anthropic`, `google-genai`) mirroring the JavaScript cases — P2 · M · week 3 · planned → [milestone 3](milestones/03-risk-tests.md)
+- [ ] **TEST-01** Weekly live-provider job with environment-scoped secrets, cloud OIDC federation, auto-filed `provider-drift` issue — P1 · M · week 3 · in progress → [milestone 3](milestones/03-risk-tests.md)
+- [x] **TEST-02** Python SDK smoke (`openai`, `anthropic`, `google-genai`) mirroring the JavaScript cases — P2 · M · week 3 · done → [milestone 3](milestones/03-risk-tests.md)
 - [ ] **TEST-03** The README first-request example executes verbatim in the e2e suite — P2 · S · week 4 · planned → [milestone 4](milestones/04-onboarding.md)
 - [ ] **TEST-04** Property-based round-trip tests for the protocol translators (OpenAI ↔ canonical ↔ Anthropic/Gemini) — P3 · M · unscheduled · planned
 

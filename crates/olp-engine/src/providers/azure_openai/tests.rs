@@ -301,7 +301,7 @@ async fn live_provider_azure_chat_smoke() {
     let api_version = std::env::var("OLP_AZURE_OPENAI_LIVE_API_VERSION").unwrap();
     let key = std::env::var("OLP_AZURE_OPENAI_LIVE_API_KEY").unwrap();
     let connector = Connector::new(
-        ConnectorConfig::new(&endpoint, deployment, api_version).unwrap(),
+        ConnectorConfig::new(&endpoint, &deployment, api_version).unwrap(),
         ApiKey::new(key).unwrap(),
     );
     let operation = Operation::Generation(GenerationRequest {
@@ -315,17 +315,19 @@ async fn live_provider_azure_chat_smoke() {
             tool_call_id: None,
             tool_calls: Vec::new(),
         }],
-        parameters: GenerationParameters::default(),
+        parameters: GenerationParameters {
+            max_output_tokens: Some(1),
+            ..GenerationParameters::default()
+        },
         tools: Vec::new(),
         tool_choice: None,
         response_format: None,
         extensions: SourceExtensions::new(Surface::OpenAi, BTreeMap::new()),
     });
-    let ProviderOutput::Events(mut events) = connector
-        .execute(envelope(operation, TransportMode::Unary))
-        .await
-        .unwrap()
-    else {
+    let mut request = envelope(operation, TransportMode::Unary);
+    request.attempt.upstream_model = deployment;
+    request.attempt.timeout = DurationMs::new(30_000);
+    let ProviderOutput::Events(mut events) = connector.execute(request).await.unwrap() else {
         panic!("expected generation events")
     };
     assert!(events.next().await.is_some());
