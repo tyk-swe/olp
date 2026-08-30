@@ -21,9 +21,18 @@ the mocked service-account flow remains covered locally.
   provider-enforced cap or fixed prepaid balance without automatic reload where
   available, otherwise the lowest practical permissions and quotas, spend
   alerts with automatic disablement, and a recorded residual-overshoot bound
-- [ ] AWS and GCP through OIDC federation (`aws-actions/configure-aws-credentials`, `google-github-actions/auth`, both SHA-pinned) — no static cloud keys in secrets
+- [x] The workflow requests AWS and GCP through SHA-pinned
+  `aws-actions/configure-aws-credentials` and `google-github-actions/auth`
+  actions; no static cloud keys are accepted from secrets
+- [ ] Configure the provider-side AWS role trust and GCP workload-identity
+  provider/service account, then store their identifiers in `live-providers`
 - [x] `.github/workflows/live-providers.yml`: Wednesday `schedule` offset from the Monday CI cron plus `workflow_dispatch`; runs `make live-tests` with the `live` nextest profile (`retries = 1`, 60-second slow timeout); never part of `Required`
-- [x] Failure routing: the job opens or updates one issue labelled `provider-drift` with the failing test names and run link; it closes the issue when green
+- [x] Failure routing: the job opens or updates one issue labelled
+  `provider-drift` with the failing test names and run link; unconfigured
+  [run 33309985467](https://github.com/tyk-swe/olp/actions/runs/33309985467)
+  created [issue #134](https://github.com/tyk-swe/olp/issues/134), and
+  [run 33310239451](https://github.com/tyk-swe/olp/actions/runs/33310239451)
+  updated that same issue instead of duplicating it
 - [x] `tests/README.md`: what runs live, cost expectations, how to run locally, and what to do when the issue fires
 
 ## TEST-02 — Python SDK smoke (M)
@@ -53,6 +62,11 @@ the mocked service-account flow remains covered locally.
 - [x] Playwright retries are 0 for required and full-tier browsers; required
   Chromium is green without a retry in
   [run 33308319108](https://github.com/tyk-swe/olp/actions/runs/33308319108/job/99248820696)
+- [x] Firefox failures were filed separately as
+  [#135](https://github.com/tyk-swe/olp/issues/135) and
+  [#140](https://github.com/tyk-swe/olp/issues/140), fixed at their distinct
+  causes, and passed 70/70 without retries in
+  [main run 33314516539](https://github.com/tyk-swe/olp/actions/runs/33314516539/job/99265453077)
 - [x] `CONTRIBUTING.md` "Validation": time-dependent assertions (UTC windows, TTLs, minute boundaries) must be deterministic or deliberately straddle the boundary
 
 ## CI-08 — Deterministic shared-Valkey hint attribution (S)
@@ -69,7 +83,9 @@ the mocked service-account flow remains covered locally.
 
 ## Exit criteria
 
-- [ ] `live-providers.yml` has run green once via `workflow_dispatch`; schedule armed; the `provider-drift` issue mechanism tested with a forced failure
+- [ ] `live-providers.yml` has run green once via `workflow_dispatch` and the
+  recovery run has closed the drift issue; the schedule is armed and the
+  create/update failure path is proven by the two unconfigured dispatches above
 - [x] `sdk-compatibility` runs JavaScript and Python smokes; both green in
   [run 33305412730](https://github.com/tyk-swe/olp/actions/runs/33305412730/job/99240982566)
 - [x] `Required` wall time ≤ 8 minutes on a warm cache: 6m20s in
@@ -81,9 +97,16 @@ Repository validation and hosted CI are green for both SDK runtimes. The first
 fallback [PR run](https://github.com/tyk-swe/olp/actions/runs/33308319108)
 completed `Required` in 6m20s: stable fuzz compile 1m53s, PostgreSQL 6m06s,
 test-util 3m03s, E2E 2m36s after test-util, and coverage—the final gate—6m14s.
-The second warm measurement completed in 6m47s. TEST-01 still needs provider
-identities, cloud federation, and the green/failure/recovery runs.
+The second warm measurement completed in 6m47s. As of 2026-08-30 the protected
+`live-providers` environment contains zero secrets and zero variables. TEST-01
+therefore still needs four dedicated API-key secrets, eleven provider/cloud
+variables, the provider-side caps/alerts and AWS/GCP trust configuration, then
+one green dispatch and one recovery closure. The failure-create and
+failure-update paths are already proven. Because the environment requires
+review, the maintainer must approve each Wednesday deployment; an unapproved
+scheduled run waits and does not detect drift.
 
 ## Carry-over
 
-_None yet._
+TEST-01 external provider provisioning remains in progress; it cannot be
+completed from repository code or by fabricating credentials.

@@ -8,6 +8,11 @@
 | Prerequisites | Milestone 1 exit criteria (green `main`); GHCR write access for the `GITHUB_TOKEN`; after the first registry push creates the packages, a maintainer can make both `olp` and `charts/openllmproxy` public and rerun the anonymous verification jobs |
 | Why 2.2.0 and not 2.1.2 | The release carries client-visible changes (list responses gain `items`, Anthropic unknown-block refusal, `Retry-After` 429s count toward the circuit) and migrations 0044–0048 |
 
+The exit proof found two quick-start defects in `v2.2.0`. Patch release
+[`v2.2.1`](https://github.com/tyk-swe/olp/releases/tag/v2.2.1) repairs them;
+the pull-based exit criteria below use that current patch without rewriting the
+historical `v2.2.0` release evidence.
+
 ## REL-01 — Release workflow (M)
 
 - [x] `.github/workflows/release.yml`: `on.push.tags: ['v*']` plus `workflow_dispatch` with a `dry_run` input; `permissions: contents: write, packages: write, id-token: write`; concurrency group per tag
@@ -46,39 +51,77 @@
   [run 33309244354](https://github.com/tyk-swe/olp/actions/runs/33309244354)
   is green: annotated `v2.2.0` points at release commit `780d1ab`
 - [x] `make release-notes`: a script extracts the `[2.2.0]` CHANGELOG section into the GitHub Release body — never hand-copied; assets: both SBOMs, chart `.tgz`, `values.schema.json`, `checksums.txt`
-- [ ] Optional: annotated tags `v2.0.0`, `v2.0.1`, `v2.1.0`, `v2.1.1` at the commits that set those versions, so `git describe` and the README badge history make sense
+- [-] Add historical `v2.0.0` through `v2.1.1` tags — dropped: they are not
+  needed for artifact integrity, and retroactively changing release history has
+  no user-facing benefit
 
 ## REL-05 — Quick start pulls (S)
 
-- [x] `deploy/compose.yaml`: `image: ${OLP_IMAGE:-ghcr.io/tyk-swe/olp:2.2.0}`; move the `build:` block into a new `deploy/compose.build.yaml` overlay for contributors
+- [x] `deploy/compose.yaml`: the default image is the current
+  `ghcr.io/tyk-swe/olp:2.2.1`; the `build:` block lives in
+  `deploy/compose.build.yaml` for contributors
 - [x] README Quick start: drop `--build`; one line points contributors at the build overlay; keep the bootstrap-token flow unchanged
-- [ ] Re-run the README quick start verbatim on a clean machine and time it (target: under 3 minutes to the setup form)
-- [x] `docs/deployment.md` uses chart `2.2.0` and the published image/chart digests
+- [x] Re-run the README quick start from a pristine tag and empty Docker daemon:
+  the complete setup form rendered in 18.389 seconds, below the 3-minute target
+- [x] `docs/deployment.md` uses chart `2.2.1` and the published image/chart digests
 - [x] `scripts/prepare-compose-secrets.sh` and `scripts/retire-compose-bootstrap-secret.sh` unchanged; `make e2e` still green (23 contract tests)
+- [x] [Issues #137](https://github.com/tyk-swe/olp/issues/137) and
+  [#138](https://github.com/tyk-swe/olp/issues/138) record the failed first
+  proof, root causes, regression, and published fix rather than treating a
+  visible form as sufficient evidence
 
 ## Exit criteria
 
-- [ ] `docker pull ghcr.io/tyk-swe/olp:2.2.0` works anonymously on amd64 and arm64
-- [x] `helm install olp oci://ghcr.io/tyk-swe/charts/openllmproxy --version 2.2.0 …`
-  applied all 48 migrations and started healthy control/worker deployments on
-  kind v0.33.0 / Kubernetes 1.35 by the signed image digest
-- [x] [GitHub Release `v2.2.0`](https://github.com/tyk-swe/olp/releases/tag/v2.2.0)
+- [x] `docker pull ghcr.io/tyk-swe/olp:2.2.1` works anonymously on
+  [amd64](https://github.com/tyk-swe/olp/actions/runs/33315228525/job/99267571117)
+  and
+  [arm64](https://github.com/tyk-swe/olp/actions/runs/33315228525/job/99267571050);
+  final
+  [promotion](https://github.com/tyk-swe/olp/actions/runs/33315228525/job/99267672200)
+  made the version tag, `2.2`, and `latest` resolve to index digest
+  `sha256:4b511434…eee1a8`
+- [x] `helm upgrade` from chart `2.2.0` to `2.2.1` on kind v0.33.0 /
+  Kubernetes 1.35 preserved `48|48|0` migration state and installation identity,
+  and left control/worker Available and Ready with zero restarts, backlog, or
+  [supervisor errors](https://github.com/tyk-swe/olp/issues/138#issuecomment-5469178070)
+- [x] [GitHub Release `v2.2.1`](https://github.com/tyk-swe/olp/releases/tag/v2.2.1)
   has the generated body, two SBOMs, chart, schema, and checksums; image and
   chart signatures verify against the tag workflow identity
-- [ ] README quick start completes without a Rust toolchain in under 3 minutes
+- [x] README quick start completes without a Rust toolchain in under 3 minutes:
+  a pristine `v2.2.1` checkout and empty disposable daemon pulled anonymously,
+  rendered the full form in 18.389 seconds, created the owner, retired the
+  bootstrap token, and recorded zero application restarts or metadata-consumer
+  supervisor errors. Docker readiness remained unhealthy as designed because a
+  fresh installation has no published runtime generation; both control and
+  worker health are proven separately by the kind deployment. The
+  [full proof](https://github.com/tyk-swe/olp/issues/137#issuecomment-5469178073)
+  records the empty daemon, credentials, lifecycle, and cleanup checks
 
 ## Carry-over
 
-_None yet._
+_None._
 
 ## Local implementation evidence — 2026-08-30
 
-- `make check`: Clippy clean; 914 Rust tests and 332 console tests pass; console
+- `make check`: Clippy clean; 915 Rust tests and 333 console tests pass; console
   type-check, lint, and production build pass.
 - `make check-static`, `make helm-verify`, `make fuzz-check`, locked Cargo
   metadata for both workspaces, actionlint 1.7.12, and `git diff --check` pass.
 - `make e2e`: 23 contract tests pass against PostgreSQL and Valkey.
-- Two defect-first `review-agent` passes finished with no remaining findings.
-- Published image/chart digests, native arm64, anonymous digest pulls, release
-  assets/signatures, and the kind install are proven above. Stable image aliases
-  and the clean-machine quick-start timing remain open.
+- Defect-first and adversarial reviews found and fixed the Compose, Valkey,
+  Firefox, chart-verification, and partial-promotion gaps before the patch tag;
+  the two publication-dependent issues closed after the public proof passed.
+- [Main run 33314516539](https://github.com/tyk-swe/olp/actions/runs/33314516539)
+  passed `Required` and `Full` at the annotated patch tag commit.
+- [Release run 33315228525](https://github.com/tyk-swe/olp/actions/runs/33315228525)
+  published image digest `sha256:4b511434…eee1a8` and chart digest
+  `sha256:367ebb53…2994c`; both signatures and native manifests, release
+  assets/checksums, and `2.2.1`/`2.2`/`latest` alias equality were independently
+  verified. Separate post-release `cosign verify-attestation` checks matched
+  each architecture's signed SPDX predicate to its Release asset.
+- A [kind v0.33.0 / Kubernetes 1.35 upgrade](https://github.com/tyk-swe/olp/issues/138#issuecomment-5469178070)
+  superseded Helm revision 1
+  (`2.2.0`) with revision 2 (`2.2.1`), preserved the installation identity and
+  `48|48|0` successful-count/max-version/failed-count tuple, left
+  control/worker Ready with zero restarts and zero backlog, and reduced the
+  baseline worker's 327 supervisor errors to zero for roughly one minute.
