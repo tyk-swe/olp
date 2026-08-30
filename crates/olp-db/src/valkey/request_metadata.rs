@@ -4,7 +4,7 @@ use chrono::{DateTime, Utc};
 use olp_engine::inference::request_metadata::Event;
 use redis::{
     AsyncCommands, Value,
-    aio::ConnectionManager,
+    aio::{ConnectionManager, ConnectionManagerConfig},
     streams::{StreamInfoGroupsReply, StreamPendingReply},
 };
 use tokio::sync::watch;
@@ -17,7 +17,7 @@ use crate::{
     worker_health::RequestMetadataConsumerActivity,
 };
 
-use super::{Error, valkey_connection};
+use super::Error;
 
 mod protocol;
 
@@ -34,6 +34,7 @@ const REQUEST_METADATA_OWN_PENDING_INTERVAL: Duration = Duration::from_secs(1);
 const REQUEST_METADATA_HEALTH_INTERVAL: Duration = Duration::from_secs(5);
 const REQUEST_METADATA_RETRY_MIN: Duration = Duration::from_millis(100);
 const REQUEST_METADATA_RETRY_MAX: Duration = Duration::from_secs(5);
+const REQUEST_METADATA_RESPONSE_TIMEOUT_MARGIN: Duration = Duration::from_secs(1);
 
 /// A delivery must remain idle for this long before another process may steal
 /// it. `XAUTOCLAIM` atomically transfers ownership and resets this idle clock.
@@ -115,7 +116,7 @@ async fn run_request_metadata_consumer_with_policy(
     policy: ConsumerPolicy,
 ) -> Result<(), Error> {
     validate_configuration(stream, consumer, policy)?;
-    let mut connection = valkey_connection(valkey_url).await?;
+    let mut connection = request_metadata_connection(valkey_url, policy.block_interval).await?;
     create_consumer_group(&mut connection, stream).await?;
     #[cfg(all(feature = "test-util", debug_assertions))]
     {
@@ -283,6 +284,20 @@ async fn run_request_metadata_consumer_with_policy(
             retry_delay = (retry_delay * 2).min(REQUEST_METADATA_RETRY_MAX);
         }
     }
+}
+
+async fn request_metadata_connection(
+    valkey_url: &str,
+    block_interval: Duration,
+) -> Result<ConnectionManager, Error> {
+    let response_timeout = block_interval
+        .checked_add(REQUEST_METADATA_RESPONSE_TIMEOUT_MARGIN)
+        .ok_or(Error::InvalidState(
+            "request metadata response timeout overflow",
+        ))?;
+    let client = redis::Client::open(valkey_url)?;
+    let config = ConnectionManagerConfig::new().set_response_timeout(Some(response_timeout));
+    Ok(ConnectionManager::new_with_config(client, config).await?)
 }
 
 fn validate_configuration(

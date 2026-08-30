@@ -384,6 +384,36 @@ async fn kill_consumer_connection(connection: &mut MultiplexedConnection, consum
 
 #[tokio::test]
 #[ignore = "requires PostgreSQL 18 and Valkey in OLP_VALKEY_URL"]
+async fn idle_production_consumer_survives_a_full_blocking_read() {
+    let db = olp_db::test_support::TestDb::create_migrated("metadata_idle_block").await;
+    let store = db.store(5).await;
+    let stream = stream("idle-production-block");
+    let mut connection = valkey_connection().await;
+    let (shutdown, receiver) = watch::channel(false);
+    let consumer_store = store.clone();
+    let consumer_stream = stream.clone();
+    let consumer = tokio::spawn(async move {
+        olp_db::valkey::request_metadata::run_request_metadata_consumer(
+            &consumer_store,
+            &valkey_url(),
+            &consumer_stream,
+            "idle-production-consumer",
+            receiver,
+        )
+        .await
+    });
+
+    wait_for_consumers(&mut connection, &stream, &["idle-production-consumer"]).await;
+    tokio::time::sleep(Duration::from_millis(1_500)).await;
+    assert!(
+        !consumer.is_finished(),
+        "an idle consumer must outlive its one-second blocking read"
+    );
+    stop_consumers(shutdown, vec![consumer]).await;
+}
+
+#[tokio::test]
+#[ignore = "requires PostgreSQL 18 and Valkey in OLP_VALKEY_URL"]
 async fn three_workers_distribute_new_events_and_checkpoint_group_wide_drain() {
     let db = olp_db::test_support::TestDb::create_migrated("metadata_ha").await;
     let store = db.store(12).await;

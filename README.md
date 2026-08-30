@@ -29,7 +29,7 @@ and certified OpenAI-compatible providers.
 
 Prerequisites: Docker with Compose support and OpenSSL.
 
-The release-image quick start requires public `v2.2.0` artifacts. For a
+The release-image quick start requires public `v2.2.1` artifacts. For a
 pre-release checkout or source changes, use the contributor build overlay
 described below.
 
