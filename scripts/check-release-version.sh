@@ -23,7 +23,7 @@ for required_file in \
   "$root/deploy/helm/Chart.yaml" "$root/deploy/Dockerfile" \
   "$root/deploy/compose.yaml" \
   "$root/rust-toolchain.toml" "$root/.github/actions/setup-rust/action.yml" \
-  "$root/release-metadata.env"; do
+  "$root/release-metadata.env" "$root/SECURITY.md"; do
   validation_require_file "$required_file"
 done
 
@@ -125,6 +125,20 @@ if (( version_mismatches_matched )); then
   echo "a workspace path dependency does not match $workspace_version" >&2
   exit 1
 fi
+
+workspace_minor_line=$(sed -E 's/^([0-9]+\.[0-9]+)\..*$/\1.x/' <<<"$workspace_version")
+security_minor_lines=
+security_minor_lines_matched=
+checked_rg_capture security_minor_lines security_minor_lines_matched \
+  "scan SECURITY.md supported minor lines" "$root/SECURITY.md" \
+  -o '[0-9]+\.[0-9]+\.x' "$root/SECURITY.md"
+(( security_minor_lines_matched )) || {
+  echo "SECURITY.md does not name a supported minor line (X.Y.x)" >&2
+  exit 1
+}
+while IFS= read -r pinned; do
+  require_pin "SECURITY.md supported line" "$pinned" "$workspace_minor_line"
+done < <(sort -u <<<"$security_minor_lines")
 
 released_migration=$(sed -nE 's/^OLP_PREVIOUS_RELEASED_SCHEMA_MIGRATION=([0-9]{4})$/\1/p' "$root/release-metadata.env")
 [[ -n $released_migration ]] || {

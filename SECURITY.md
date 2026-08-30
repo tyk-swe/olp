@@ -3,13 +3,8 @@
 ## Supported versions
 
 Security fixes land on the newest minor release line only; currently that is
-`2.2.x` (latest release `v2.2.1`, 2026-08-30). Upgrade to the newest `2.2.x`
-release before reporting.
-
-| Version | Supported |
-|---|---|
-| 2.2.x | Yes |
-| < 2.2 | No |
+`2.2.x`. Older lines are unsupported — upgrade to the newest `2.2.x` release
+before reporting.
 
 ## Reporting a vulnerability
 
