@@ -4,6 +4,7 @@ use crate::bootstrap::mode_dependencies::GatewayState;
 
 mod anthropic;
 mod chat;
+pub mod compatibility;
 pub(crate) mod endpoint_policy;
 pub(crate) mod error;
 mod execution;

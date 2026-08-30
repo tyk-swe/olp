@@ -67,6 +67,8 @@ jobs:
         run: make shellcheck
       - name: Run script self-tests
         run: make script-selftest
+      - name: Check compatibility doc structure
+        run: make compat-check
       - name: Require consistent release metadata
         run: make release-version
       - name: Require immutable supply-chain references

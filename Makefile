@@ -18,7 +18,7 @@ FUZZ_TRIPLE = $(shell rustc -vV | sed -n 's/^host: //p')
 
 .PHONY: help check check-static check-cargo check-heavy boundaries storage-sqlx source-size fmt fmt-fix clippy test \
 	coverage coverage-unit coverage-db coverage-report console-install console-verify console-e2e \
-	screenshots openapi sqlx-prepare sqlx-check db-test release-version release-verify \
+	screenshots openapi compat compat-check sqlx-prepare sqlx-check db-test release-version release-verify \
 	release-image release-manifest release-chart release-notes \
 	supply-chain machete ci-lockstep helm-verify script-selftest shellcheck fuzz-check \
 	olp-build-test-util olp-prebuilt olp-migrate sqlx-migrate playwright-install \
@@ -34,6 +34,12 @@ help: ## List available targets
 # Every required-tier gate that needs only the standard toolchain, in two
 # tiers so cheap failures surface before anything compiles:
 #   check-static  every script/format gate (~10 s), run in parallel
+#                 (compat-check is the structural gate on
+#                 docs/compatibility.md — markers, headings, cited paths;
+#                 the table's content is checked against the endpoint
+#                 registry by the nextest suite, in
+#                 apps/olp/tests/integration/compatibility_drift.rs, which
+#                 needs a compiled olp and so cannot live in this tier)
 #   check-heavy   clippy -> nextest serially (they share the cargo lock and
 #                 target dir) alongside console-verify, CHECK_JOBS at a time
 # Leaf targets are unchanged; CI invokes them individually. Required CI also
@@ -56,7 +62,7 @@ check: ## Broad local gate: check-static, then check-heavy; CI also runs service
 	$(MAKE) -j$(STATIC_JOBS) --output-sync=target check-static
 	$(MAKE) -j$(CHECK_JOBS) --output-sync=recurse check-heavy
 
-check-static: boundaries storage-sqlx source-size shellcheck script-selftest fmt release-version supply-chain machete ci-lockstep ## Cheap script and formatting gates only (parallel-safe; quick pre-commit loop)
+check-static: boundaries storage-sqlx source-size shellcheck script-selftest fmt release-version supply-chain machete ci-lockstep compat-check ## Cheap script and formatting gates only (parallel-safe; quick pre-commit loop)
 
 check-cargo: ## Clippy then the nextest suite, serially (shared cargo lock)
 	$(MAKE) clippy
@@ -135,6 +141,12 @@ screenshots: ## Regenerate docs/assets/screenshots/*.png from console fixtures
 openapi: ## Regenerate openapi/management.json and the console API schema
 	cargo run --locked -p olp --example export_openapi > openapi/management.json
 	pnpm --dir console api:generate
+
+compat: ## Regenerate the generated table in docs/compatibility.md
+	./scripts/update-compatibility-matrix.sh
+
+compat-check: ## Verify docs/compatibility.md structure and its cited paths
+	./scripts/check-compatibility-doc.sh
 
 sqlx-prepare: ## Regenerate .sqlx/ metadata against a migrated development database
 	cargo sqlx prepare --workspace -- --all-targets --all-features

@@ -22,6 +22,21 @@ closed_string_enum! {
 }
 
 impl ProviderKind {
+    /// Returns the gateway surface this provider family speaks natively, so a
+    /// request arriving on it is forwarded on the provider's own protocol
+    /// rather than encoded through the canonical model. [`Self::Bedrock`] has
+    /// none: its wire protocol, Converse, is not a gateway surface, so every
+    /// Bedrock request is translated.
+    #[must_use]
+    pub const fn native_surface(self) -> Option<Surface> {
+        match self {
+            Self::OpenAi | Self::OpenAiCompatible | Self::AzureOpenAi => Some(Surface::OpenAi),
+            Self::Anthropic => Some(Surface::Anthropic),
+            Self::Gemini | Self::VertexAi => Some(Surface::Gemini),
+            Self::Bedrock => None,
+        }
+    }
+
     /// Returns whether this provider family can serve a reviewed capability
     /// tuple. Connector-specific request validation remains at the adapter
     /// boundary; this is the canonical configuration eligibility policy.

@@ -9,6 +9,7 @@
 mod common;
 
 mod anthropic_gemini_inference;
+mod compatibility_drift;
 mod configuration_http_postgres;
 mod identity_http_postgres;
 mod management_router_openapi_coverage;
