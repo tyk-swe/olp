@@ -41,7 +41,7 @@ is intentionally not here.
 - [x] **GOV-02** Prune 62 remote branches to ≤ 10; auto-delete merged heads — P2 · S · week 1 · done → [milestone 1](milestones/01-green-main.md)
 - [x] **GOV-03** Backlog hygiene: review tracking reflects reality, tracking issues per milestone, CHANGELOG entry for the CI changes — P2 · S · week 1 · done → [milestone 1](milestones/01-green-main.md)
 - [x] **GOV-04** Remove the dead `stable` branch trigger; fix the dev-box git identity — P3 · S · week 1 · done → [milestone 1](milestones/01-green-main.md)
-- [ ] **GOV-05** Repository presentation: description, topics, issue templates, CODEOWNERS, code of conduct, sharper `SECURITY.md` — P2 · S · week 4 · planned → [milestone 4](milestones/04-onboarding.md)
+- [x] **GOV-05** Repository presentation: description, topics, issue templates, CODEOWNERS, code of conduct, sharper `SECURITY.md` — P2 · S · week 4 · done → [milestone 4](milestones/04-onboarding.md)
 
 ## REL — releases
 
@@ -56,15 +56,15 @@ is intentionally not here.
 
 - [ ] **TEST-01** Weekly live-provider job with environment-scoped secrets, cloud OIDC federation, auto-filed `provider-drift` issue — P1 · M · week 3 · in progress → [milestone 3](milestones/03-risk-tests.md)
 - [x] **TEST-02** Python SDK smoke (`openai`, `anthropic`, `google-genai`) mirroring the JavaScript cases — P2 · M · week 3 · done → [milestone 3](milestones/03-risk-tests.md)
-- [ ] **TEST-03** The README first-request example executes verbatim in the e2e suite — P2 · S · week 4 · planned → [milestone 4](milestones/04-onboarding.md)
+- [x] **TEST-03** The README first-request example executes verbatim in the e2e suite — P2 · S · week 4 · done → [milestone 4](milestones/04-onboarding.md)
 - [ ] **TEST-04** Property-based round-trip tests for the protocol translators (OpenAI ↔ canonical ↔ Anthropic/Gemini) — P3 · M · unscheduled · planned
 
 ## DOC — onboarding and documentation
 
-- [ ] **DOC-01** "Your first request": curl plus Python/JavaScript for all three surfaces, `model` = route slug explained — P1 · S · week 4 · planned → [milestone 4](milestones/04-onboarding.md)
-- [ ] **DOC-02** `docs/concepts.md` with one request-lifecycle diagram — P2 · M · week 4 · planned → [milestone 4](milestones/04-onboarding.md)
-- [ ] **DOC-03** `docs/compatibility.md`: generated surface × operation table plus per-provider notes, drift-checked by `make compat-check` — P2 · M · week 4 · planned → [milestone 4](milestones/04-onboarding.md)
-- [ ] **DOC-04** Helm NetworkPolicy template, values, schema, and docs — P2 · S · week 4 · planned → [milestone 4](milestones/04-onboarding.md)
+- [x] **DOC-01** "Your first request": curl plus Python/JavaScript for all three surfaces, `model` = route slug explained — P1 · S · week 4 · done → [milestone 4](milestones/04-onboarding.md)
+- [x] **DOC-02** `docs/concepts.md` with one request-lifecycle diagram — P2 · M · week 4 · done → [milestone 4](milestones/04-onboarding.md)
+- [x] **DOC-03** `docs/compatibility.md`: generated surface × operation table plus per-provider notes, drift-checked by `make compat-check` — P2 · M · week 4 · done → [milestone 4](milestones/04-onboarding.md)
+- [x] **DOC-04** Helm NetworkPolicy template, values, schema, and docs — P2 · S · week 4 · done → [milestone 4](milestones/04-onboarding.md)
 
 ## OTEL — distributed tracing
 

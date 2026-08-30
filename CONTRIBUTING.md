@@ -4,6 +4,13 @@ This guide is the contributor-facing index for the repository. Keep product
 behavior, operational guidance, and the focused READMEs in sync with the code
 that owns them.
 
+## Support and questions
+
+GitHub issues are the only support and question channel; Discussions are
+intentionally disabled. Use the issue forms for bugs, provider drift, and
+feature requests. Suspected vulnerabilities go through the private channel in
+[`SECURITY.md`](SECURITY.md), never through a public issue.
+
 ## Development environment
 
 Use Rust 1.97.1, Node.js 24.15 or newer within the 24.x line (or Node.js 26+),
