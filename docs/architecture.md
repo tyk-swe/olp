@@ -1,8 +1,10 @@
 # Architecture
 
 This document records the boundaries and runtime contracts that are useful to
-operators and contributors. Implementation ownership and command details are
-kept in [`CONTRIBUTING.md`](../CONTRIBUTING.md).
+operators and contributors. The user-facing model — routes and slugs,
+provider revisions, keys and limits, attempts and pricing — lives in
+[`concepts.md`](concepts.md). Implementation ownership and command details
+are kept in [`CONTRIBUTING.md`](../CONTRIBUTING.md).
 
 ## Component boundaries
 
