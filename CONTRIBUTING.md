@@ -7,11 +7,12 @@ that owns them.
 ## Development environment
 
 Use Rust 1.97.1, Node.js 24.15 or newer within the 24.x line (or Node.js 26+),
-pnpm 11, ripgrep, PostgreSQL 18, and Valkey 9.1. Rust is pinned by
+pnpm 11, Python 3.14.7, uv 0.12.7, ripgrep, PostgreSQL 18, and Valkey 9.1. Rust is pinned by
 `rust-toolchain.toml`; the Compose stack supplies PostgreSQL and Valkey for
 local service tests. The main Cargo workspace contains the application and
 test harnesses, `console/` and `tests/sdk-smoke/` are separate pnpm projects,
-and `fuzz/` is a separate nightly Cargo workspace.
+`tests/sdk-smoke-python/` is a separate uv project, and `fuzz/` is a separate
+nightly Cargo workspace.
 
 The normal local gate needs `cargo-nextest`:
 
@@ -101,6 +102,10 @@ the ignored PostgreSQL/Valkey suites and enforces an 80% line floor. It needs
 the database-test environment below, including `OLP_VALKEY_URL`. Plain
 `cargo test` is not a substitute. The workspace has no doctests by policy; if
 one is added, restore a `cargo test --doc` gate.
+
+Time-dependent assertions involving UTC windows, TTLs, or minute boundaries
+must use deterministic time or deliberately straddle the boundary. They must
+not assume the test remains in the time bucket where it started.
 
 The pass-gated contract suite (`make e2e`) drives the real `olp all` binary
 against PostgreSQL, Valkey, and a loopback mock provider. Its assertions cite

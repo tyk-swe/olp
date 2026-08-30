@@ -168,35 +168,31 @@ fn validates_cloud_context_and_redacts_credentials() {
     assert!(!format!("{token:?}").contains("do-not-print"));
 }
 
+#[test]
+fn builds_regional_and_multi_region_endpoints() {
+    for (location, host) in [
+        ("us-central1", "us-central1-aiplatform.googleapis.com"),
+        ("us", "aiplatform.us.rep.googleapis.com"),
+        ("eu", "aiplatform.eu.rep.googleapis.com"),
+        ("global", "aiplatform.googleapis.com"),
+    ] {
+        let url = regional_base_url("test-project", location).unwrap();
+        assert_eq!(url.host_str(), Some(host));
+        assert_eq!(
+            url.path(),
+            format!("/v1/projects/test-project/locations/{location}/publishers/google/")
+        );
+    }
+}
+
 #[tokio::test]
 #[ignore = "requires OLP_VERTEX_LIVE_PROJECT, OLP_VERTEX_LIVE_LOCATION, OLP_VERTEX_LIVE_MODEL and ADC"]
-async fn live_vertex_adc_smoke() {
+async fn live_provider_vertex_adc_smoke() {
     let project = std::env::var("OLP_VERTEX_LIVE_PROJECT").unwrap();
     let location = std::env::var("OLP_VERTEX_LIVE_LOCATION").unwrap();
     let model = std::env::var("OLP_VERTEX_LIVE_MODEL").unwrap();
     let connector = Connector::with_application_default(
         ConnectorConfig::new(project, location, model).unwrap(),
-    )
-    .unwrap();
-    assert_eq!(connector.discover_models().await.unwrap().len(), 1);
-}
-
-#[tokio::test]
-#[ignore = "requires OLP_VERTEX_LIVE_CREDENTIALS, OLP_VERTEX_LIVE_LOCATION, and OLP_VERTEX_LIVE_MODEL"]
-async fn live_provider_vertex_service_account_smoke() {
-    let credential = std::env::var("OLP_VERTEX_LIVE_CREDENTIALS")
-        .expect("set OLP_VERTEX_LIVE_CREDENTIALS for the ignored live test");
-    let project = serde_json::from_str::<serde_json::Value>(&credential)
-        .ok()
-        .and_then(|value| value["project_id"].as_str().map(str::to_owned))
-        .expect("Vertex service-account JSON must contain project_id");
-    let location = std::env::var("OLP_VERTEX_LIVE_LOCATION")
-        .expect("set OLP_VERTEX_LIVE_LOCATION for the ignored live test");
-    let model = std::env::var("OLP_VERTEX_LIVE_MODEL")
-        .expect("set OLP_VERTEX_LIVE_MODEL for the ignored live test");
-    let connector = Connector::with_service_account_json(
-        ConnectorConfig::new(project, location, model).unwrap(),
-        &credential,
     )
     .unwrap();
     assert_eq!(connector.discover_models().await.unwrap().len(), 1);

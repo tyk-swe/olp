@@ -1,8 +1,5 @@
 import { readFile } from 'node:fs/promises';
 import assert from 'node:assert/strict';
-import Anthropic from '@anthropic-ai/sdk';
-import { GoogleGenAI } from '@google/genai';
-import OpenAI from 'openai';
 
 const metadataPath = process.env.OLP_SDK_SMOKE_METADATA;
 assert.ok(metadataPath, 'OLP_SDK_SMOKE_METADATA is required');
@@ -19,6 +16,14 @@ assert.equal(routeSlug, 'sdk-smoke-route');
 assert.ok(apiKey.startsWith('olp_'), 'fixture returned an OLP proxy key');
 assert.ok(conflictApiKey.startsWith('olp_'), 'fixture returned a second OLP proxy key');
 assert.notEqual(conflictApiKey, apiKey, 'fixture keys must be distinct for conflict coverage');
+
+if (process.argv.includes('--check-metadata')) process.exit(0);
+
+const [{ default: Anthropic }, { GoogleGenAI }, { default: OpenAI }] = await Promise.all([
+  import('@anthropic-ai/sdk'),
+  import('@google/genai'),
+  import('openai')
+]);
 
 const nativeFetch = globalThis.fetch.bind(globalThis);
 const localOnlyFetch = async (input, init) => {
@@ -153,6 +158,12 @@ async function smokeAnthropic() {
 
   const page = await client.models.list({ limit: 10 });
   assert.ok(page.data.some((model) => model.id === routeSlug));
+
+  const count = await client.messages.countTokens({
+    model: routeSlug,
+    messages: [{ role: 'user', content: 'official token count SDK smoke' }]
+  });
+  assert.equal(count.input_tokens, 13);
 }
 
 async function smokeGoogle() {

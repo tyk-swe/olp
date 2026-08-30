@@ -1,7 +1,7 @@
 //! Native Vertex AI connector.
 //!
 //! Vertex uses the Gemini canonical codecs, but its resource names and
-//! authentication boundary are distinct: requests target a regional
+//! authentication boundary are distinct: requests target a regional or multi-region
 //! `projects/.../locations/.../publishers/google/models/...` resource and use
 //! short-lived OAuth access tokens. Provider requests retain the Gemini
 //! connector's isolated, DNS-revalidated connection pool, redirect/retry/proxy
@@ -170,8 +170,13 @@ impl ProviderTransport for Connector {
 }
 
 fn regional_base_url(project: &str, location: &str) -> Result<Url, ConnectorBuildError> {
+    let host = match location {
+        "global" => "aiplatform.googleapis.com".to_owned(),
+        "us" | "eu" => format!("aiplatform.{location}.rep.googleapis.com"),
+        _ => format!("{location}-aiplatform.googleapis.com"),
+    };
     Url::parse(&format!(
-        "https://{location}-aiplatform.googleapis.com/v1/projects/{project}/locations/{location}/publishers/google/"
+        "https://{host}/v1/projects/{project}/locations/{location}/publishers/google/"
     ))
     .map_err(|_| ConnectorBuildError::InvalidCloudContext)
 }
@@ -207,7 +212,7 @@ pub(in crate::providers) enum ConnectorBuildError {
     Gemini(#[from] crate::providers::gemini::ConnectorBuildError),
     #[error("Vertex AI {0} is not a valid cloud resource identifier")]
     InvalidIdentifier(&'static str),
-    #[error("Vertex AI cloud context could not be represented as a regional endpoint")]
+    #[error("Vertex AI cloud context could not be represented as an API endpoint")]
     InvalidCloudContext,
     #[error("Application Default Credentials are unavailable or invalid")]
     ApplicationDefaultCredentials,

@@ -7,6 +7,22 @@ semantic versioning and match `Cargo.toml`, `console/package.json`,
 
 ## [Unreleased]
 
+### Added
+
+- **TEST-01:** A weekly OIDC-authenticated live-provider workflow detects
+  upstream catalog, token-count, and bounded generation drift and maintains one
+  `provider-drift` issue until the suite recovers.
+- **TEST-02:** Python OpenAI, Anthropic, and Google GenAI clients now run the
+  same gateway compatibility smoke as the JavaScript SDKs, including streaming,
+  Responses, token counting, model discovery, and typed failures.
+
+### Changed
+
+- **CI-06:** The required fuzz replay can cache its nightly target artifacts;
+  all other Rust jobs continue to omit target directories from their cache.
+- **CI-07:** Automated retries are disabled outside the weekly live-provider
+  profile, and contributor guidance requires deterministic time assertions.
+
 ## [2.2.0] - 2026-08-30
 
 Clears the review backlog carried in `TODOS.md` and loosens the restrictions

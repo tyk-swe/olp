@@ -1,0 +1,14 @@
+name: Setup Python and uv
+description: Pinned Python and uv with a lockfile-keyed package cache.
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      with:
+        python-version: "3.14.7"
+    - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+      with:
+        version: "0.12.7"
+        enable-cache: true
+        cache-dependency-glob: tests/sdk-smoke-python/uv.lock

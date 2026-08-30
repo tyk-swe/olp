@@ -1,6 +1,7 @@
 node_modules/
 __pycache__/
 *.py[cod]
+.venv/
 /target/
 /fuzz/target/
 /fuzz/artifacts/

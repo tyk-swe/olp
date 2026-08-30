@@ -23,7 +23,8 @@ FUZZ_TRIPLE = $(shell rustc -vV | sed -n 's/^host: //p')
 	supply-chain machete ci-lockstep helm-verify script-selftest shellcheck fuzz-check \
 	olp-build-test-util olp-prebuilt olp-migrate sqlx-migrate playwright-install \
 	console-e2e-project console-integration-prebuilt \
-	fuzz-replay fuzz-campaign sdk-smoke sdk-smoke-install sdk-smoke-run \
+	fuzz-replay fuzz-campaign live-tests sdk-smoke sdk-smoke-install sdk-smoke-run \
+	sdk-smoke-python sdk-smoke-python-install \
 	e2e worker-ha smoke-image-modes upgrade-rehearsal advisories deny
 
 help: ## List available targets
@@ -220,6 +221,10 @@ fuzz-campaign: ## Bounded fuzz campaign: each seeded target for FUZZ_MAX_TOTAL_T
 		cargo +$(FUZZ_TOOLCHAIN) fuzz run --target $(FUZZ_TRIPLE) "$$target" "corpus/$$target" -- -max_total_time=$(FUZZ_MAX_TOTAL_TIME); \
 	done
 
+live-tests: ## Run the credentialed live-provider drift tests
+	SQLX_OFFLINE=true cargo nextest run --locked -p olp-engine --all-features \
+		--profile live --run-ignored only -E 'test(/live_provider/)'
+
 sdk-smoke-install: ## Install locked SDK smoke-test dependencies
 	pnpm --dir tests/sdk-smoke install --frozen-lockfile
 
@@ -230,6 +235,13 @@ sdk-smoke: sdk-smoke-install ## Official OpenAI/Anthropic/Gemini SDK smoke tests
 # target instead of sdk-smoke and skips the second pnpm install.
 sdk-smoke-run: ## Run the SDK smoke tests against already-installed dependencies
 	./tests/sdk-smoke/run.sh
+
+sdk-smoke-python-install: ## Install locked Python SDK smoke-test dependencies
+	uv sync --project tests/sdk-smoke-python --locked --no-dev
+
+sdk-smoke-python: sdk-smoke-python-install ## Run the official Python SDK smoke tests
+	./tests/sdk-smoke/run.sh uv run --project tests/sdk-smoke-python --locked --no-dev \
+		python tests/sdk-smoke-python/smoke.py
 
 IMAGE ?= openllmproxy:ci-amd64
 smoke-image-modes: ## Smoke a built image's binary modes, non-root user, and packaged console; set IMAGE and OLP_IMAGE_PLATFORM
@@ -244,3 +256,4 @@ deny: ## Cargo advisories, bans, licenses, and sources, all configured in deny.t
 advisories: ## Console and SDK smoke dependency advisories (Cargo advisories run under make deny)
 	pnpm --dir console audit --audit-level high
 	pnpm --dir tests/sdk-smoke audit --prod --audit-level high
+	uv audit --project tests/sdk-smoke-python --locked --no-dev

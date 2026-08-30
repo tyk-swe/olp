@@ -565,6 +565,11 @@ async fn live_provider_runs_converse_with_default_chain() {
     .await;
     let mut request = provider_request();
     request.attempt.upstream_model = model;
+    request.attempt.timeout = DurationMs::new(30_000);
+    let Operation::Generation(generation) = Arc::make_mut(&mut request.operation) else {
+        unreachable!();
+    };
+    generation.parameters.max_output_tokens = Some(1);
     let ProviderOutput::Events(events) = connector.execute(request).await.unwrap() else {
         panic!("expected generation events");
     };

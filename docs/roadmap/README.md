@@ -30,7 +30,7 @@ backlog and milestone files remain the source of truth.
 |---|---|---|---|---|
 | [1](milestones/01-green-main.md) | Aug 31 – Sep 6 | Green and protected `main` | Five CI fixes, protected `main`, pruned branches | done |
 | [2](milestones/02-first-release.md) | Sep 7 – Sep 13 | First published release | `v2.2.0`: signed multi-arch image on GHCR, Helm chart on OCI, GitHub Release, pull-based quick start | in progress |
-| [3](milestones/03-risk-tests.md) | Sep 14 – Sep 20 | Test the real risks | Weekly live-provider job, Python SDK smoke, `Required` tier under 8 minutes | not started |
+| [3](milestones/03-risk-tests.md) | Sep 14 – Sep 20 | Test the real risks | Weekly live-provider job, Python SDK smoke, `Required` tier under 8 minutes | in progress |
 | [4](milestones/04-onboarding.md) | Sep 21 – Sep 27 | Onboarding and docs | "Your first request", concepts page, generated compatibility matrix, Helm NetworkPolicy, repository presentation | not started |
 | [5](milestones/05-tracing.md) | Sep 28 – Oct 4 | Distributed tracing | OpenTelemetry request and attempt spans, OTLP export, W3C propagation, content-free by construction | not started |
 | [6](milestones/06-spend-controls.md) | Oct 5 – Oct 11 | Spend controls | Per-key daily and monthly cost budgets: migration 0049, fail-closed enforcement, API, console | not started |
@@ -57,7 +57,7 @@ backlog and milestone files remain the source of truth.
 
 - [ ] Monday — triage the scheduled CI run (03:17 UTC) and the Dependabot
   results the same day; merge or explain every dependency PR.
-- [ ] Monday — check the live-provider job (from week 3) and the
+- [ ] Wednesday — check the live-provider job (from week 3) and the
   `provider-drift` issue.
 - [ ] Friday — score the milestone against its exit criteria; move leftovers
   into the next milestone's carry-over section and re-assign the week in
