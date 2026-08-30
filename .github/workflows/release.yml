@@ -60,7 +60,12 @@ jobs:
 
   promotion-recovery:
     name: Promote an existing signed release
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs.promote_tag != '' }}
+    if: >-
+      ${{
+        github.event_name == 'workflow_dispatch' &&
+        github.ref == 'refs/heads/main' &&
+        inputs.promote_tag != ''
+      }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     env:
@@ -70,7 +75,6 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ inputs.promote_tag }}
           persist-credentials: false
       - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
         with:
