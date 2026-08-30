@@ -91,7 +91,9 @@ two-gateway HA job through PostgreSQL and Valkey Toxiproxy partitions. The
 request-metadata stream and its consumer-group state are durable; limiter
 rate-window and concurrency keys expire by design. The suites assert public
 paths, routing/capability policy, generation pinning,
-usage completeness, data-safety, recovery, and distributed limits.
+usage completeness, data-safety, recovery, and distributed limits. The
+end-to-end suite also executes the README "Your first request" `curl` blocks
+verbatim, so a README example that stops working is a build failure.
 
 ## Fuzzing
 
