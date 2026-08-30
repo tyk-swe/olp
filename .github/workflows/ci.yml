@@ -1,8 +1,9 @@
 name: CI
 
-# Pull requests run the required tier, including advisory audits and amd64
-# image validation. Cross-browser, HA, arm64, upgrade, and bounded fuzz
-# campaigns remain in the post-merge/scheduled/manual full tier.
+# Pull requests run the required tier, including stable fuzz compilation,
+# advisory audits, and amd64 image validation. Cross-browser, HA, arm64,
+# upgrade, and nightly fuzz jobs remain in the post-merge/scheduled/manual
+# full tier.
 on:
   pull_request:
   push:
@@ -155,8 +156,24 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
+  fuzz-check:
+    name: Rust / fuzz compile
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-rust
+        with:
+          cache-workspaces: fuzz
+          cache-shared-key: fuzz-check-registry
+      - name: Compile fuzz targets on stable Rust
+        run: make fuzz-check
+
   fuzz-replay:
     name: Rust / fuzz replay
+    if: ${{ github.event_name == 'push' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
     runs-on: ubuntu-24.04
     # A cold sanitizer build is ~11min; replaying the seeded corpora is fast.
     timeout-minutes: 45
@@ -179,8 +196,6 @@ jobs:
           cache-targets: "true"
           tools: "cargo-fuzz@0.13.2"
           cache-shared-key: fuzz-targets-v1-${{ steps.fuzz-toolchain.outputs.toolchain }}
-      - name: Compile fuzz targets
-        run: make fuzz-check
       - name: Replay fuzz regression corpora
         run: make fuzz-replay
 
@@ -412,7 +427,7 @@ jobs:
 
   e2e:
     name: End-to-end contract
-    needs: [postgres-integration, rust-test-util-build]
+    needs: rust-test-util-build
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     services:
@@ -513,7 +528,7 @@ jobs:
       - quality
       - lint
       - coverage
-      - fuzz-replay
+      - fuzz-check
       - console
       - console-chromium
       - sdk-compatibility
@@ -858,6 +873,7 @@ jobs:
       - ha
       - worker-ha
       - upgrade-rehearsal
+      - fuzz-replay
       - fuzz
       - image-arm64
     runs-on: ubuntu-24.04
