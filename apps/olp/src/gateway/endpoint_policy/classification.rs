@@ -26,6 +26,13 @@ pub(crate) struct MetadataPolicy {
     pub(crate) always_emit: bool,
 }
 
+/// Action suffixes of the Gemini `models/{model}:{action}` resource form. The
+/// classifier matches requests against them and the compatibility export
+/// expands the single registry row into one documented endpoint each.
+pub(crate) const GEMINI_GENERATE_SUFFIX: &str = ":generateContent";
+pub(crate) const GEMINI_STREAM_GENERATE_SUFFIX: &str = ":streamGenerateContent";
+pub(crate) const GEMINI_COUNT_TOKENS_SUFFIX: &str = ":countTokens";
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum GeminiAction {
     Generate,
@@ -212,11 +219,11 @@ fn gemini_action(path: &str) -> GeminiAction {
     let Some(resource) = path_model_resource(path).and_then(percent_decode) else {
         return GeminiAction::Unsupported;
     };
-    if resource.ends_with(":generateContent") {
+    if resource.ends_with(GEMINI_GENERATE_SUFFIX) {
         GeminiAction::Generate
-    } else if resource.ends_with(":streamGenerateContent") {
+    } else if resource.ends_with(GEMINI_STREAM_GENERATE_SUFFIX) {
         GeminiAction::StreamGenerate
-    } else if resource.ends_with(":countTokens") {
+    } else if resource.ends_with(GEMINI_COUNT_TOKENS_SUFFIX) {
         GeminiAction::CountTokens
     } else {
         GeminiAction::Unsupported
@@ -235,8 +242,8 @@ fn token_estimate_from_path(path: &str) -> TokenEstimate {
     if path.ends_with("/chat/completions")
         || path.ends_with("/responses")
         || path.ends_with("/messages")
-        || path.ends_with(":generateContent")
-        || path.ends_with(":streamGenerateContent")
+        || path.ends_with(GEMINI_GENERATE_SUFFIX)
+        || path.ends_with(GEMINI_STREAM_GENERATE_SUFFIX)
     {
         TokenEstimate::Generation
     } else if path.ends_with("/embeddings") {

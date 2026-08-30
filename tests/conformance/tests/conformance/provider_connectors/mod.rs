@@ -371,15 +371,11 @@ fn event_frame(event_type: &str, payload: &str) -> Vec<u8> {
     encoded
 }
 
+/// Bedrock has no native gateway surface — Converse is not one — so the
+/// harness drives its connector with OpenAI-surface canonical requests, which
+/// is why the domain's `None` collapses to [`Surface::OpenAi`] here.
 fn native_surface(kind: ProviderKind) -> Surface {
-    match kind {
-        ProviderKind::OpenAi | ProviderKind::OpenAiCompatible | ProviderKind::AzureOpenAi => {
-            Surface::OpenAi
-        }
-        ProviderKind::Anthropic => Surface::Anthropic,
-        ProviderKind::Gemini | ProviderKind::VertexAi => Surface::Gemini,
-        ProviderKind::Bedrock => Surface::OpenAi,
-    }
+    kind.native_surface().unwrap_or(Surface::OpenAi)
 }
 
 fn unary_response(kind: ProviderKind) -> Vec<u8> {
