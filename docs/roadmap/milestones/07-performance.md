@@ -28,7 +28,7 @@
 
 - [ ] One `cargo flamegraph` session under the streaming scenario; fix what is obvious (allocations in the SSE pump, repeated JSON serialisation, lock contention in circuit or limit state)
 - [ ] Re-validate the `OLP_HTTP_MAX_IN_FLIGHT_INFERENCE_REQUESTS` and `OLP_HTTP_MAX_CONNECTIONS` defaults against measured saturation (the 503 + `Retry-After: 1` semantics stay); update the capacity paragraph in `docs/deployment.md` with measured numbers
-- [ ] Replace the unmeasured SLO sentence in `docs/operations.md` with the measured baseline and the machine it was measured on
+- [ ] Replace the provisional latency objectives in `docs/operations.md` with the measured baseline and the machine it was measured on
 
 ## Exit criteria
 

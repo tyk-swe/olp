@@ -70,7 +70,7 @@ may never depend on test harnesses.
 - Provider kinds, auth fields, presets, and validation live in
   `crates/olp-engine/src/domain/provider_configuration.rs`.
 - Inference endpoint method/path/admission/routing policy lives in
-  `apps/olp/src/gateway/endpoint_policy.rs`.
+  `apps/olp/src/gateway/endpoint_policy/registry.rs`.
 - Runtime capability eligibility and rendezvous scoring live under
   `crates/olp-engine/src/domain/routing/`; generation pinning, failover, limits,
   and accounting live in `crates/olp-engine/src/inference/`.

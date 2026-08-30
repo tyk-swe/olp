@@ -6,10 +6,11 @@ release; deployment topology is in [`deployment.md`](deployment.md).
 
 ## Objectives and monitoring
 
-Measure SLOs at the client-facing listener: 99.9% successful availability
-(excluding upstream failures), at most 15 ms p95 and 30 ms p99 added latency.
-OLP on-call owns gateway availability and request-metadata completeness;
-provider owners own credentials, quotas, and model availability.
+Measure SLOs at the client-facing listener: target 99.9% successful availability
+(excluding upstream failures). Treat 15 ms p95 and 30 ms p99 added latency as
+provisional objectives until the performance milestone publishes a reproducible
+baseline. OLP on-call owns gateway availability and request-metadata
+completeness; provider owners own credentials, quotas, and model availability.
 
 Scrape each in-cluster `*-observability` Service on port 9090 every 15 seconds
 and probe `/health/live` and `/health/ready`. The public listener returns 404

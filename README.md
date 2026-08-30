@@ -29,6 +29,10 @@ and certified OpenAI-compatible providers.
 
 Prerequisites: Docker with Compose support and OpenSSL.
 
+The release-image quick start requires public `v2.2.0` artifacts. For a
+pre-release checkout or source changes, use the contributor build overlay
+described below.
+
 ```bash
 cp .env.example .env
 ./scripts/prepare-compose-secrets.sh
@@ -81,8 +85,8 @@ Liveness, readiness, and metrics are private endpoints on
 
 ### OpenAI compatibility
 
-Use either registered OpenAI base with the official OpenAI JavaScript SDK;
-both also accept a trailing slash:
+Both registered OpenAI base URLs work with the official OpenAI JavaScript and
+Python SDKs and accept a trailing slash:
 
 | Base URL | Meaning | Gateway credentials |
 |---|---|---|

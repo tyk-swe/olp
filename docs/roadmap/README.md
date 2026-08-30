@@ -11,8 +11,9 @@ distributed tracing, spend controls, and performance evidence. Week 8 ships
 all of it as 2.3.0 and resets the plan.
 
 Progress is mirrored in the
-[pinned roadmap issue](https://github.com/tyk-swe/olp/issues/116); the checked-in
-backlog and milestone files remain the source of truth.
+[pinned roadmap issue](https://github.com/tyk-swe/olp/issues/116). The checked-in
+backlog is the sole source of work-item status; milestone files hold detail and
+evidence.
 
 ## Layout
 
@@ -26,16 +27,16 @@ backlog and milestone files remain the source of truth.
 
 ## Milestones
 
-| # | Dates | Theme | Ships | Status |
-|---|---|---|---|---|
-| [1](milestones/01-green-main.md) | Aug 31 – Sep 6 | Green and protected `main` | Five CI fixes, protected `main`, pruned branches | done |
-| [2](milestones/02-first-release.md) | Sep 7 – Sep 13 | First published release | `v2.2.0`: signed multi-arch image on GHCR, Helm chart on OCI, GitHub Release, pull-based quick start | in progress |
-| [3](milestones/03-risk-tests.md) | Sep 14 – Sep 20 | Test the real risks | Weekly live-provider job, Python SDK smoke, `Required` tier under 8 minutes | in progress |
-| [4](milestones/04-onboarding.md) | Sep 21 – Sep 27 | Onboarding and docs | "Your first request", concepts page, generated compatibility matrix, Helm NetworkPolicy, repository presentation | not started |
-| [5](milestones/05-tracing.md) | Sep 28 – Oct 4 | Distributed tracing | OpenTelemetry request and attempt spans, OTLP export, W3C propagation, content-free by construction | not started |
-| [6](milestones/06-spend-controls.md) | Oct 5 – Oct 11 | Spend controls | Per-key daily and monthly cost budgets: migration 0049, fail-closed enforcement, API, console | not started |
-| [7](milestones/07-performance.md) | Oct 12 – Oct 18 | Performance evidence | `make bench`, Criterion micro-benchmarks, non-blocking perf job, measured SLO numbers | not started |
-| [8](milestones/08-release-and-retro.md) | Oct 19 – Oct 25 | Release 2.3.0 and hardening | Release, size-baseline burn-down, security pass, retrospective, next plan | not started |
+| # | Dates | Theme | Ships |
+|---|---|---|---|
+| [1](milestones/01-green-main.md) | Aug 31 – Sep 6 | Green and protected `main` | Five CI fixes, protected `main`, pruned branches |
+| [2](milestones/02-first-release.md) | Sep 7 – Sep 13 | First published release | `v2.2.0`: signed multi-arch image on GHCR, Helm chart on OCI, GitHub Release, pull-based quick start |
+| [3](milestones/03-risk-tests.md) | Sep 14 – Sep 20 | Test the real risks | Weekly live-provider job, Python SDK smoke, `Required` tier under 8 minutes |
+| [4](milestones/04-onboarding.md) | Sep 21 – Sep 27 | Onboarding and docs | "Your first request", concepts page, generated compatibility matrix, Helm NetworkPolicy, repository presentation |
+| [5](milestones/05-tracing.md) | Sep 28 – Oct 4 | Distributed tracing | OpenTelemetry request and attempt spans, OTLP export, W3C propagation, content-free by construction |
+| [6](milestones/06-spend-controls.md) | Oct 5 – Oct 11 | Spend controls | Per-key daily and monthly cost budgets: migration 0049, fail-closed enforcement, API, console |
+| [7](milestones/07-performance.md) | Oct 12 – Oct 18 | Performance evidence | `make bench`, Criterion micro-benchmarks, non-blocking perf job, measured SLO numbers |
+| [8](milestones/08-release-and-retro.md) | Oct 19 – Oct 25 | Release 2.3.0 and hardening | Release, size-baseline burn-down, security pass, retrospective, next plan |
 
 ## Conventions
 
@@ -45,8 +46,8 @@ backlog and milestone files remain the source of truth.
 - **Checkboxes.** `[ ]` open, `[x]` done, `[-]` dropped — a dropped box gets
   one line saying why, on the same line.
 - **Size.** S under half a day, M one to two days, L three days or more.
-- **Priority.** The `TODOS.md` scale: P0 blocks release, P1 next, P2 soon,
-  P3 when convenient, P4 someday.
+- **Priority.** P0 blocks release, P1 next, P2 soon, P3 when convenient, P4
+  someday.
 - **Gates.** Every change passes `make check` locally and the `Required` job
   in CI. Nothing here overrides `AGENTS.md`, `CONTRIBUTING.md`, the
   forward-only migration rule, or the generated-artifact rule.
@@ -72,8 +73,8 @@ backlog and milestone files remain the source of truth.
 
 - `CHANGELOG.md` records what shipped. This directory records what is planned.
   When an item ships, its CHANGELOG entry is the closing evidence.
-- `TODOS.md` keeps review-derived defects on the same priority scale. Roadmap
-  work lives here; cross-reference by ID rather than duplicating text.
+- `backlog.md` holds review-derived defects and roadmap work on the same
+  priority scale; cross-reference by ID rather than duplicating text.
 - `release-metadata.env` is release bookkeeping, not roadmap state.
 
 ## Updating the plan

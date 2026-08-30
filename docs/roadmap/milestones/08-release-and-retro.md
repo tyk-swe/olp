@@ -30,7 +30,7 @@
 
 ## HYG-03 — Retrospective and the next plan (S)
 
-- [ ] Score all eight milestones against their exit criteria; write every miss into `backlog.md` with a new week or into `TODOS.md` with a priority
+- [ ] Score all eight milestones against their exit criteria; write every miss into `backlog.md` with a new week and priority
 - [ ] Update `README.md` in this directory: tick, drop with reasons, and list candidates for the next period (exact-match response cache, guardrail hooks, provider-level budgets, OpenAI Files and Batch, console i18n, the licensing question)
 - [ ] Health signals to keep watching: `Required` green streak, time-to-first-request for a new user, `provider-drift` issue streak
 - [ ] Move this period's files under `docs/roadmap/archive/2026-09/` with their final state intact and start the next period's `README.md`
