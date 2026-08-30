@@ -5,7 +5,7 @@ export default defineConfig({
   ...baseConfig,
   testDir: './tests/e2e',
   fullyParallel: true,
-  retries: process.env.CI ? 1 : 0,
+  retries: 0,
   expect: {
     // Browser point releases shift localized anti-aliasing. A 1% ratio absorbs
     // that rasterization drift while a 4 px layout change still exceeds it.

@@ -107,6 +107,9 @@ Time-dependent assertions involving UTC windows, TTLs, or minute boundaries
 must use deterministic time or deliberately straddle the boundary. They must
 not assume the test remains in the time bucket where it started.
 
+When a test fails, investigate it and open a tracking issue before rerunning
+the test or workflow. Do not rerun merely to obtain a green result.
+
 The pass-gated contract suite (`make e2e`) drives the real `olp all` binary
 against PostgreSQL, Valkey, and a loopback mock provider. Its assertions cite
 `README.md`, `docs/*.md`, or the OpenAPI schema, so a documentation/product
