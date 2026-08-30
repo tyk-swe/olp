@@ -59,10 +59,14 @@ at most two executions of that test per workflow run.
 Store the four API keys as environment secrets. Store endpoints, deployment,
 API version, cloud project/location/model, region/model, AWS role ARN, GCP
 workload identity provider, and GCP service account as environment variables.
-Provider accounts must be dedicated to CI and have hard monthly spend caps.
-The `live-providers` environment requires `tyk-swe` approval and allows
-deployments only from `main`. CI gets AWS and GCP credentials through GitHub
-OIDC; do not add a service-account JSON or static AWS keys.
+Provider identities must be dedicated to CI. Use a provider-enforced cap or a
+fixed prepaid balance without automatic reload where available. Otherwise use
+the lowest practical API/model permissions and quotas, spend alerts with
+automatic disablement, and record the remaining overshoot bound in the
+milestone evidence. The `live-providers` environment requires `tyk-swe`
+approval and allows deployments only from `main`. CI gets AWS and GCP
+credentials through GitHub OIDC; do not add a service-account JSON or static
+AWS keys.
 
 For a local run, export the listed values, establish Google application-default
 credentials and an AWS default credential chain, then run:
