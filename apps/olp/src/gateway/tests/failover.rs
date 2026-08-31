@@ -426,7 +426,7 @@ async fn http_request_above_baseline_requires_token_delta_reservation() {
         .next()
         .unwrap()
         .limits
-        .tokens_per_minute = std::num::NonZeroU64::new(2_200);
+        .tokens_per_minute = std::num::NonZeroU64::new(4_000);
     reinstall_api_keys(&state, api_keys);
     let snapshot = state.runtime().pin();
     let api_key = snapshot.api_keys.values().next().unwrap();

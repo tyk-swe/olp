@@ -4,7 +4,10 @@
   // exists once a real parent owns `busy`, `error`, and the open state.
   import ReauthenticateDialog from '../ReauthenticateDialog.svelte';
 
-  let { accepts }: { accepts: string } = $props();
+  let {
+    accepts,
+    verification = Promise.resolve()
+  }: { accepts: string; verification?: Promise<void> } = $props();
 
   let open = $state(true);
   let busy = $state(false);
@@ -15,7 +18,7 @@
     attempts += 1;
     busy = true;
     error = '';
-    await Promise.resolve();
+    await verification;
     if (password === accepts) open = false;
     else error = 'That password is incorrect.';
     busy = false;

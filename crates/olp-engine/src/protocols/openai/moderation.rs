@@ -95,7 +95,17 @@ pub fn encode(
     let input = request
         .input
         .iter()
-        .map(|part| match part {
+        .enumerate()
+        .map(|(index, part)| match part {
+            ContentPart::Text { text }
+                if request
+                    .extensions
+                    .values
+                    .keys()
+                    .any(|path| path.starts_with(&format!("/input/{index}/"))) =>
+            {
+                Ok(serde_json::json!({"type": "text", "text": text}))
+            }
             ContentPart::Text { text } => Ok(Value::String(text.clone())),
             ContentPart::Image {
                 source: MediaSource::Uri(url),

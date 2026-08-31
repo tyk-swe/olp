@@ -380,15 +380,22 @@ pub async fn reserve(
         let Some(tokens_per_minute) = key.limits.tokens_per_minute else {
             return Ok(None);
         };
-        let delta = estimate_tokens(operation).saturating_sub(reserved_tokens);
+        let tokens_per_minute = i64::try_from(tokens_per_minute.get())
+            .map_err(|_| InferenceError::unavailable("limit_configuration_invalid"))?;
+        let requested_tokens = estimate_tokens(operation);
+        if requested_tokens > tokens_per_minute {
+            return Err(InferenceError::request_exceeds_token_limit(
+                requested_tokens,
+                tokens_per_minute,
+            ));
+        }
+        let delta = requested_tokens.saturating_sub(reserved_tokens);
         if delta <= 0 {
             return Ok(None);
         }
         let Some(backend) = limiter.current() else {
             return outage_reservation(limiter, "backend_missing");
         };
-        let tokens_per_minute = i64::try_from(tokens_per_minute.get())
-            .map_err(|_| InferenceError::unavailable("limit_configuration_invalid"))?;
         let Ok(result) = tokio::time::timeout(
             Duration::from_secs(1),
             backend.reserve(LimitRequest {

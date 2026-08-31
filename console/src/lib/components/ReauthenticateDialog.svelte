@@ -41,6 +41,15 @@
     await onConfirm(password);
     password = '';
   }
+
+  function cancel() {
+    if (!busy) onCancel();
+  }
+
+  function handleCancel(event: Event) {
+    event.preventDefault();
+    cancel();
+  }
 </script>
 
 <dialog
@@ -48,10 +57,8 @@
   bind:this={dialog}
   aria-labelledby="reauth-title"
   aria-describedby="reauth-description"
-  oncancel={(event) => {
-    event.preventDefault();
-    onCancel();
-  }}
+  aria-busy={busy}
+  oncancel={handleCancel}
 >
   <p class="eyebrow">Security</p>
   <h2 id="reauth-title">{title}</h2>
@@ -66,6 +73,7 @@
         bind:value={password}
         data-autofocus
         aria-invalid={localError ? 'true' : undefined}
+        disabled={busy}
       />
     </div>
     {#if localError || error}<p class="inline-problem" role="alert">
@@ -75,7 +83,7 @@
       <button
         class="button button-secondary"
         type="button"
-        onclick={onCancel}
+        onclick={cancel}
         disabled={busy}>Cancel</button
       >
       <button class="button button-primary" type="submit" disabled={busy}

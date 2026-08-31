@@ -6,6 +6,93 @@ struct TrackingMediaSpool {
     removes: AtomicUsize,
 }
 
+#[derive(Default)]
+struct CancellingMediaSpool {
+    puts: AtomicUsize,
+    removes: AtomicUsize,
+    second_put_started: tokio::sync::Notify,
+    removed: tokio::sync::Notify,
+}
+
+#[derive(Default)]
+struct SlowRemovalMediaSpool {
+    removal_started: tokio::sync::Notify,
+    allow_removal: tokio::sync::Notify,
+    removal_completed: tokio::sync::Notify,
+    completed: AtomicUsize,
+}
+
+impl MediaSpool for SlowRemovalMediaSpool {
+    fn put<'a>(
+        &'a self,
+        upload: MediaUpload,
+    ) -> crate::domain::ports::BoxFuture<'a, Result<MediaArtifact, MediaSpoolError>> {
+        Box::pin(async move {
+            Ok(MediaArtifact {
+                handle: MediaHandle::new("staged-before-error"),
+                content_type: upload.content_type,
+                content_length: Some(1),
+            })
+        })
+    }
+
+    fn open<'a>(
+        &'a self,
+        _handle: &'a MediaHandle,
+    ) -> crate::domain::ports::BoxFuture<'a, Result<OpenedMedia, MediaSpoolError>> {
+        Box::pin(async { Err(MediaSpoolError::NotFound) })
+    }
+
+    fn remove<'a>(
+        &'a self,
+        _handle: &'a MediaHandle,
+    ) -> crate::domain::ports::BoxFuture<'a, Result<(), MediaSpoolError>> {
+        Box::pin(async move {
+            self.removal_started.notify_one();
+            self.allow_removal.notified().await;
+            self.completed.fetch_add(1, Ordering::AcqRel);
+            self.removal_completed.notify_one();
+            Ok(())
+        })
+    }
+}
+
+impl MediaSpool for CancellingMediaSpool {
+    fn put<'a>(
+        &'a self,
+        upload: MediaUpload,
+    ) -> crate::domain::ports::BoxFuture<'a, Result<MediaArtifact, MediaSpoolError>> {
+        let index = self.puts.fetch_add(1, Ordering::AcqRel);
+        Box::pin(async move {
+            if index > 0 {
+                self.second_put_started.notify_one();
+                std::future::pending().await
+            }
+            Ok(MediaArtifact {
+                handle: MediaHandle::new("staged-first"),
+                content_type: upload.content_type,
+                content_length: Some(1),
+            })
+        })
+    }
+
+    fn open<'a>(
+        &'a self,
+        _handle: &'a MediaHandle,
+    ) -> crate::domain::ports::BoxFuture<'a, Result<OpenedMedia, MediaSpoolError>> {
+        Box::pin(async { Err(MediaSpoolError::NotFound) })
+    }
+
+    fn remove<'a>(
+        &'a self,
+        _handle: &'a MediaHandle,
+    ) -> crate::domain::ports::BoxFuture<'a, Result<(), MediaSpoolError>> {
+        self.removes.fetch_add(1, Ordering::AcqRel);
+        self.removed.notify_one();
+        Box::pin(async { Ok(()) })
+    }
+}
+
 impl MediaSpool for TrackingMediaSpool {
     fn put<'a>(
         &'a self,
@@ -408,4 +495,62 @@ async fn image_decode_failure_removes_already_staged_response_media() {
     assert!(connector.decode_image_result(&request, wire).await.is_err());
     assert_eq!(spool.puts.load(Ordering::Acquire), 1);
     assert_eq!(spool.removes.load(Ordering::Acquire), 1);
+}
+
+#[tokio::test]
+async fn cancelling_image_staging_removes_already_staged_response_media() {
+    let connector = test_connector("http://127.0.0.1:1/v1/", Timeouts::default());
+    let spool = Arc::new(CancellingMediaSpool::default());
+    let mut request = image_request(false);
+    request.media = Some(spool.clone());
+    let wire: OpenAiImageResponse = serde_json::from_value(serde_json::json!({
+        "created": 1,
+        "data": [
+            {"b64_json": "b2s="},
+            {"b64_json": "b2s="}
+        ]
+    }))
+    .unwrap();
+
+    let task = tokio::spawn(async move { connector.decode_image_result(&request, wire).await });
+    tokio::time::timeout(Duration::from_secs(1), spool.second_put_started.notified())
+        .await
+        .expect("the second image staging operation must start");
+    task.abort();
+    let _ = task.await;
+    tokio::time::timeout(Duration::from_secs(1), spool.removed.notified())
+        .await
+        .expect("cancellation must schedule removal of the first image");
+
+    assert_eq!(spool.puts.load(Ordering::Acquire), 2);
+    assert_eq!(spool.removes.load(Ordering::Acquire), 1);
+}
+
+#[tokio::test]
+async fn cancelling_failed_image_cleanup_does_not_abandon_staged_response_media() {
+    let connector = test_connector("http://127.0.0.1:1/v1/", Timeouts::default());
+    let spool = Arc::new(SlowRemovalMediaSpool::default());
+    let mut request = image_request(false);
+    request.media = Some(spool.clone());
+    let wire: OpenAiImageResponse = serde_json::from_value(serde_json::json!({
+        "created": 1,
+        "data": [
+            {"b64_json": "b2s="},
+            {"b64_json": "%%%"}
+        ]
+    }))
+    .unwrap();
+
+    let task = tokio::spawn(async move { connector.decode_image_result(&request, wire).await });
+    tokio::time::timeout(Duration::from_secs(1), spool.removal_started.notified())
+        .await
+        .expect("failed decoding must start staged-media cleanup");
+    task.abort();
+    let _ = task.await;
+    spool.allow_removal.notify_one();
+    tokio::time::timeout(Duration::from_secs(1), spool.removal_completed.notified())
+        .await
+        .expect("cleanup must outlive cancellation of the decoding request");
+
+    assert_eq!(spool.completed.load(Ordering::Acquire), 1);
 }

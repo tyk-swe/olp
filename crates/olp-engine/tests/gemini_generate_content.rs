@@ -479,6 +479,27 @@ fn native_gemini_stream_losslessly_preserves_safety_and_grounding_metadata() {
     assert!(output.get("promptFeedback").is_some());
 }
 
+#[test]
+fn native_gemini_errors_remain_visible_to_failover() {
+    let wire = sse(json!({
+        "error": {
+            "code": 429,
+            "message": "try another target",
+            "status": "RESOURCE_EXHAUSTED"
+        }
+    }));
+    let mut decoder = Decoder::with_max_event_bytes_and_raw_passthrough(1024 * 1024, true);
+    let events = decoder.push(wire.as_bytes()).unwrap();
+
+    validate_event_sequence(&events).unwrap();
+    assert!(matches!(
+        &events[0].kind,
+        Kind::Error { error } if error.retryable
+    ));
+    assert!(matches!(events[1].kind, Kind::Done));
+    assert_eq!(events.len(), 2);
+}
+
 /// A real-shaped Gemini response: every one of these fields is unmodelled and
 /// swept into a Gemini-surface extension.
 fn realistic_gemini_response() -> GenerateContentResponse {

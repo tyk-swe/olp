@@ -479,7 +479,6 @@ impl Decoder {
         let mut extensions = BTreeMap::new();
         collect_extra("", &event.extra, &mut extensions);
         collect_extra("/error", &event.error.extra, &mut extensions);
-        self.emit_extensions(events, extensions);
         let (class, retryable) = match event.error.kind.as_str() {
             "authentication_error" => (ErrorClass::Authentication, false),
             "permission_error" => (ErrorClass::Authorization, false),
@@ -498,6 +497,7 @@ impl Decoder {
                 },
             },
         );
+        self.emit_extensions(events, extensions);
         self.emit(events, Kind::Done);
         self.done = true;
         Ok(())

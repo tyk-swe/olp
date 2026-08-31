@@ -25,6 +25,8 @@ use protocol::{
     AutoClaimPage, StreamEntry, parse_auto_claim_reply, parse_stream_id, parse_xread_reply,
 };
 
+const AUTOCLAIM_SCRIPT: &str = include_str!("../../scripts/claim_request_metadata.lua");
+
 pub const LEGACY_REQUEST_METADATA_STREAM: &str = "olp:v2:request-metadata";
 const REQUEST_METADATA_GROUP: &str = "olp:persistence";
 const REQUEST_METADATA_BATCH_SIZE: usize = 100;
@@ -382,15 +384,14 @@ async fn auto_claim(
     start: &str,
     batch_size: usize,
 ) -> Result<AutoClaimPage, Error> {
-    let reply: Value = redis::cmd("XAUTOCLAIM")
-        .arg(stream)
+    let reply: Value = redis::Script::new(AUTOCLAIM_SCRIPT)
+        .key(stream)
         .arg(REQUEST_METADATA_GROUP)
         .arg(consumer)
         .arg(checked_milliseconds_allow_zero(min_idle)?)
         .arg(start)
-        .arg("COUNT")
         .arg(batch_size)
-        .query_async(connection)
+        .invoke_async(connection)
         .await?;
     parse_auto_claim_reply(reply, batch_size)
 }
@@ -448,6 +449,9 @@ async fn process_entry(
     consumer: &str,
     entry: StreamEntry,
 ) -> Result<EntryProcessingOutcome, Error> {
+    if entry.deleted_pending_id.is_some() {
+        return finish_deleted_pending_marker(store, connection, stream, consumer, &entry).await;
+    }
     let Some(payload) = entry.payload else {
         // The entry is still in this consumer's PEL but its payload is gone:
         // the stream entry was deleted. That is stream loss, not a producer
@@ -530,6 +534,33 @@ async fn process_entry(
             Ok(EntryProcessingOutcome::Retry)
         }
     }
+}
+
+async fn finish_deleted_pending_marker(
+    store: &Store,
+    connection: &mut ConnectionManager,
+    stream: &str,
+    consumer: &str,
+    entry: &StreamEntry,
+) -> Result<EntryProcessingOutcome, Error> {
+    let deleted_id = entry
+        .deleted_pending_id
+        .as_deref()
+        .ok_or(Error::InvalidState("deleted pending marker is empty"))?;
+    let now = Utc::now();
+    let result = store
+        .report_request_metadata_gap_once(
+            Gap {
+                gateway_instance: consumer.to_owned(),
+                event_count: 1,
+                reason: "missing_stream_event".to_owned(),
+                first_observed_at: now,
+                last_observed_at: now,
+            },
+            &format!("request-metadata-stream:{deleted_id}:missing"),
+        )
+        .await;
+    finish_gap_or_retry(result, connection, stream, &entry.id).await
 }
 
 #[cfg(all(feature = "test-util", debug_assertions))]

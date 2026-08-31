@@ -371,11 +371,24 @@ pub(in crate::providers) fn decode_converse(
 pub(in crate::providers) fn decode_usage(
     usage: &aws_sdk_bedrockruntime::types::TokenUsage,
 ) -> Result<Usage, TransportError> {
+    let cache_read_input_tokens = usage
+        .cache_read_input_tokens
+        .map(|tokens| nonnegative_tokens(tokens, "cache-read input"))
+        .transpose()?;
+    let cache_write_input_tokens = usage
+        .cache_write_input_tokens
+        .map(|tokens| nonnegative_tokens(tokens, "cache-write input"))
+        .transpose()?;
+    let input_tokens = nonnegative_tokens(usage.input_tokens, "input")?
+        .saturating_add(cache_read_input_tokens.unwrap_or(0))
+        .saturating_add(cache_write_input_tokens.unwrap_or(0));
+    let output_tokens = nonnegative_tokens(usage.output_tokens, "output")?;
+    nonnegative_tokens(usage.total_tokens, "total")?;
     Ok(Usage {
-        input_tokens: nonnegative_tokens(usage.input_tokens, "input")?,
-        output_tokens: nonnegative_tokens(usage.output_tokens, "output")?,
-        total_tokens: nonnegative_tokens(usage.total_tokens, "total")?,
-        cached_input_tokens: None,
+        input_tokens,
+        output_tokens,
+        total_tokens: input_tokens.saturating_add(output_tokens),
+        cached_input_tokens: cache_read_input_tokens,
         reasoning_tokens: None,
     })
 }

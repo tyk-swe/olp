@@ -45,6 +45,7 @@ use olp_engine::domain::{
 };
 use olp_engine::inference::runtime::Manager;
 use serde_json::{Value, json};
+use sha2::{Digest as _, Sha256};
 use tower::ServiceExt as _;
 use uuid::Uuid;
 
@@ -213,6 +214,7 @@ async fn media_job_management_views_are_session_authorized_and_metadata_only() {
     let owner_id = Uuid::parse_str(setup_body["user"]["id"].as_str().unwrap()).unwrap();
 
     let provider_id = Uuid::now_v7();
+    let provider_etag = Uuid::now_v7();
     let api_key_id = Uuid::now_v7();
     sqlx::query(
         "INSERT INTO providers
@@ -220,7 +222,7 @@ async fn media_job_management_views_are_session_authorized_and_metadata_only() {
          VALUES ($1, 'media-provider', 'openai', 'active', 'api_key', $2, $3)",
     )
     .bind(provider_id)
-    .bind(Uuid::now_v7())
+    .bind(provider_etag)
     .bind(owner_id)
     .execute(store.pool())
     .await
@@ -365,61 +367,118 @@ async fn media_job_management_views_are_session_authorized_and_metadata_only() {
         delete_calls: delete_calls.clone(),
         fail_cleanup: fail_cleanup.clone(),
     });
-    runtime
-        .install(
-            Snapshot {
-                generation: RuntimeGeneration {
-                    id: RuntimeGenerationId::new(),
-                    ordinal: 1,
-                    activated_at: chrono::Utc::now(),
-                },
-                providers: BTreeMap::from([(
-                    core_provider_id,
-                    Provider {
-                        id: core_provider_id,
-                        name: "video-provider".into(),
-                        kind: ProviderKind::OpenAi,
-                        enabled: true,
-                        active_credential: None,
-                        capabilities,
-                    },
-                )]),
-                routes: BTreeMap::from([(
-                    route_slug.clone(),
-                    Route {
-                        id: RouteId::new(),
-                        routing_id: None,
-                        slug: route_slug.clone(),
-                        operations,
-                        overall_timeout: DurationMs::new(5_000),
-                        max_attempts: NonZeroU16::new(1).unwrap(),
-                        targets: vec![Target {
-                            id: TargetId::new(),
-                            routing_id: None,
-                            provider_id: core_provider_id,
-                            upstream_model: "upstream-video-model".into(),
-                            priority: 0,
-                            weight: NonZeroU32::new(1).unwrap(),
-                            timeout: DurationMs::new(4_000),
-                        }],
-                    },
-                )]),
-                api_keys: BTreeMap::from([(
-                    lookup_id.clone(),
-                    ApiKey {
-                        id: ApiKeyId::from_uuid(api_key_id),
-                        lookup_id,
-                        digest: ApiKeyDigest::new(material.digest),
-                        status: ApiKeyStatus::Active,
-                        expires_at: None,
-                        scopes: BTreeSet::from([ApiKeyScope::Inference]),
-                        allowed_routes: BTreeSet::new(),
-                        limits: ApiKeyLimits::default(),
-                    },
-                )]),
+    let provider_revision_id = Uuid::now_v7();
+    sqlx::query(
+        "INSERT INTO provider_revisions \
+         (id, provider_id, revision, name, kind, auth_mode, connector_ready, \
+          source_etag, activated_by) \
+         VALUES ($1, $2, 1, 'media-provider', 'openai', 'api_key', true, $3, $4)",
+    )
+    .bind(provider_revision_id)
+    .bind(provider_id)
+    .bind(provider_etag)
+    .bind(owner_id)
+    .execute(store.pool())
+    .await
+    .unwrap();
+    sqlx::query("UPDATE providers SET active_revision_id = $1 WHERE id = $2")
+        .bind(provider_revision_id)
+        .bind(provider_id)
+        .execute(store.pool())
+        .await
+        .unwrap();
+    let generation_id = RuntimeGenerationId::new();
+    let generation_sequence: i64 = sqlx::query_scalar(
+        "INSERT INTO runtime_generations \
+         (id, compiled_release, release_sha256, created_by) \
+         VALUES ($1, $2, $3, $4) RETURNING sequence",
+    )
+    .bind(generation_id.as_uuid())
+    .bind(Vec::<u8>::new())
+    .bind([0_u8; 32].as_slice())
+    .bind(owner_id)
+    .fetch_one(store.pool())
+    .await
+    .unwrap();
+    let snapshot = Snapshot {
+        generation: RuntimeGeneration {
+            id: generation_id,
+            ordinal: u64::try_from(generation_sequence).unwrap(),
+            activated_at: chrono::Utc::now(),
+        },
+        providers: BTreeMap::from([(
+            core_provider_id,
+            Provider {
+                id: core_provider_id,
+                name: "video-provider".into(),
+                kind: ProviderKind::OpenAi,
+                enabled: true,
+                active_credential: None,
+                capabilities,
             },
-            BTreeMap::from([(core_provider_id, transport)]),
-        )
+        )]),
+        routes: BTreeMap::from([(
+            route_slug.clone(),
+            Route {
+                id: RouteId::new(),
+                routing_id: None,
+                slug: route_slug.clone(),
+                operations,
+                overall_timeout: DurationMs::new(5_000),
+                max_attempts: NonZeroU16::new(1).unwrap(),
+                targets: vec![Target {
+                    id: TargetId::new(),
+                    routing_id: None,
+                    provider_id: core_provider_id,
+                    upstream_model: "upstream-video-model".into(),
+                    priority: 0,
+                    weight: NonZeroU32::new(1).unwrap(),
+                    timeout: DurationMs::new(4_000),
+                }],
+            },
+        )]),
+        api_keys: BTreeMap::from([(
+            lookup_id.clone(),
+            ApiKey {
+                id: ApiKeyId::from_uuid(api_key_id),
+                lookup_id,
+                digest: ApiKeyDigest::new(material.digest),
+                status: ApiKeyStatus::Active,
+                expires_at: None,
+                scopes: BTreeSet::from([ApiKeyScope::Inference]),
+                allowed_routes: BTreeSet::new(),
+                limits: ApiKeyLimits::default(),
+            },
+        )]),
+    };
+    let payload = serde_json::to_vec(&snapshot).unwrap();
+    let release_sha256: [u8; 32] = Sha256::digest(&payload).into();
+    sqlx::query(
+        "UPDATE runtime_generations SET compiled_release = $1, release_sha256 = $2 \
+         WHERE id = $3",
+    )
+    .bind(payload)
+    .bind(release_sha256.as_slice())
+    .bind(generation_id.as_uuid())
+    .execute(store.pool())
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO runtime_generation_provider_configs \
+         (runtime_generation_id, provider_id, kind, auth_mode, provider_revision_id) \
+         VALUES ($1, $2, 'openai', 'api_key', $3)",
+    )
+    .bind(generation_id.as_uuid())
+    .bind(provider_id)
+    .bind(provider_revision_id)
+    .execute(store.pool())
+    .await
+    .unwrap();
+    gateway_state
+        .transports
+        .register(core_provider_id, Arc::clone(&transport));
+    runtime
+        .install(snapshot, BTreeMap::from([(core_provider_id, transport)]))
         .unwrap();
     let reconciliation_state = gateway_state.clone();
     let gateway = gateway_router_for_test(gateway_state.mode_dependencies().gateway().unwrap());
@@ -672,6 +731,17 @@ async fn media_job_management_views_are_session_authorized_and_metadata_only() {
     .await
     .unwrap();
     assert_eq!(unresolved_lifecycle, "create_cleanup_pending");
+    let unresolved_authority: (Option<Uuid>, Option<Uuid>) = sqlx::query_as(
+        "SELECT runtime_generation_id, provider_revision_id FROM async_media_jobs \
+         WHERE upstream_job_id = 'upstream-video-created-3'",
+    )
+    .fetch_one(store.pool())
+    .await
+    .unwrap();
+    assert_eq!(
+        unresolved_authority,
+        (Some(generation_id.as_uuid()), Some(provider_revision_id))
+    );
     sqlx::query("DROP TRIGGER fail_test_media_attach ON async_media_jobs")
         .execute(store.pool())
         .await
@@ -698,7 +768,7 @@ async fn media_job_management_views_are_session_authorized_and_metadata_only() {
                     activated_at: chrono::Utc::now(),
                 },
                 providers: current.providers.clone(),
-                routes: current.routes.clone(),
+                routes: BTreeMap::new(),
                 api_keys: BTreeMap::new(),
             },
             BTreeMap::from([(

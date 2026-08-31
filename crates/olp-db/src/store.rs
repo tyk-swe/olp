@@ -35,6 +35,14 @@ const CONCURRENT_INDEX_CLEANUP: &[(i64, &str)] = &[
         43,
         "DROP INDEX CONCURRENTLY IF EXISTS attempts_provider_started_idx",
     ),
+    (
+        46,
+        "DROP INDEX CONCURRENTLY IF EXISTS route_draft_targets_provider_model_idx",
+    ),
+    (
+        47,
+        "DROP INDEX CONCURRENTLY IF EXISTS route_revision_targets_provider_model_idx",
+    ),
 ];
 
 /// Boundary attribution recorded on the audit rows a request produces. The
@@ -43,6 +51,39 @@ const CONCURRENT_INDEX_CLEANUP: &[(i64, &str)] = &[
 pub struct RequestProvenance {
     pub source_ip: Option<IpAddr>,
     pub user_agent_family: Option<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeSet;
+
+    use super::CONCURRENT_INDEX_CLEANUP;
+
+    #[test]
+    fn every_concurrent_index_migration_has_retry_cleanup() {
+        let migrations = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("migrations");
+        let concurrent_versions = std::fs::read_dir(migrations)
+            .unwrap()
+            .filter_map(Result::ok)
+            .filter_map(|entry| {
+                let name = entry.file_name().into_string().ok()?;
+                let sql = std::fs::read_to_string(entry.path()).ok()?;
+                sql.contains("CREATE INDEX CONCURRENTLY").then(|| {
+                    name.split_once('_')
+                        .expect("migration filename has a version")
+                        .0
+                        .parse::<i64>()
+                        .expect("migration version is numeric")
+                })
+            })
+            .collect::<BTreeSet<_>>();
+        let cleanup_versions = CONCURRENT_INDEX_CLEANUP
+            .iter()
+            .map(|(version, _)| *version)
+            .collect::<BTreeSet<_>>();
+
+        assert_eq!(cleanup_versions, concurrent_versions);
+    }
 }
 
 impl RequestProvenance {

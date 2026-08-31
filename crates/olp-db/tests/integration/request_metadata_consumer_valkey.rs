@@ -983,6 +983,80 @@ async fn reclaim_gaps_are_recorded_even_when_the_activity_counter_write_fails() 
     let _ = consumer.await;
 }
 
+#[tokio::test]
+#[ignore = "requires PostgreSQL 18 and Valkey in OLP_VALKEY_URL"]
+async fn reclaim_gap_survives_a_postgres_reporting_failure() {
+    let db = olp_db::test_support::TestDb::create_migrated("metadata_reclaim_retry").await;
+    let store = db.store(5).await;
+    let fixture = fixture(&store, "reclaim-retry").await;
+    let stream = stream("reclaim-retry");
+    let mut connection = valkey_connection().await;
+    create_group(&mut connection, &stream).await;
+
+    let (deleted_id, _) = add_event(&mut connection, &stream, &event(&fixture)).await;
+    assert_eq!(
+        deliver(&mut connection, &stream, "dead-reclaim-retry-owner", 1).await,
+        std::slice::from_ref(&deleted_id)
+    );
+    let deleted: usize = connection
+        .xdel(&stream, &[deleted_id.as_str()])
+        .await
+        .unwrap();
+    assert_eq!(deleted, 1);
+
+    sqlx::query(
+        "CREATE FUNCTION reject_request_metadata_gap() RETURNS trigger AS $$ \
+         BEGIN RAISE EXCEPTION 'gap write rejected'; END; $$ LANGUAGE plpgsql",
+    )
+    .execute(store.pool())
+    .await
+    .unwrap();
+    sqlx::query(
+        "CREATE TRIGGER reject_request_metadata_gap BEFORE INSERT \
+         ON request_metadata_ingestion_gaps FOR EACH ROW \
+         EXECUTE FUNCTION reject_request_metadata_gap()",
+    )
+    .execute(store.pool())
+    .await
+    .unwrap();
+
+    let (_failed_shutdown, failed_receiver) = watch::channel(false);
+    let failed_consumer = spawn_consumer(
+        store.clone(),
+        stream.clone(),
+        "reclaim-retry-first",
+        failed_receiver,
+        test_policy(Duration::ZERO),
+    );
+    let failed = tokio::time::timeout(WAIT_TIMEOUT, failed_consumer)
+        .await
+        .expect("consumer must return the rejected gap write")
+        .unwrap();
+    assert!(failed.is_err());
+    let marker_count: usize = connection.xlen(&stream).await.unwrap();
+    assert_eq!(marker_count, 1);
+
+    sqlx::query("DROP TRIGGER reject_request_metadata_gap ON request_metadata_ingestion_gaps")
+        .execute(store.pool())
+        .await
+        .unwrap();
+    sqlx::query("DROP FUNCTION reject_request_metadata_gap()")
+        .execute(store.pool())
+        .await
+        .unwrap();
+
+    let (shutdown, receiver) = watch::channel(false);
+    let consumer = spawn_consumer(
+        store.clone(),
+        stream.clone(),
+        "reclaim-retry-second",
+        receiver,
+        test_policy(Duration::ZERO),
+    );
+    wait_for_gap(&store, "missing_stream_event").await;
+    stop_consumers(shutdown, vec![consumer]).await;
+}
+
 async fn wait_for_gap(store: &Store, reason: &str) {
     tokio::time::timeout(WAIT_TIMEOUT, async {
         let mut interval = tokio::time::interval(Duration::from_millis(10));

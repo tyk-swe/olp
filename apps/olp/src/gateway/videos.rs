@@ -1,5 +1,5 @@
 use crate::public_http::request_admission::HttpRequestAdmission;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use axum::{
     Json,
@@ -14,14 +14,17 @@ use olp_db::{
     media_jobs::NewMediaJobReservation,
 };
 use olp_engine::domain::{
-    auth::GatewayCapability,
+    auth::{ApiKey, GatewayCapability},
     canonical::{
         identity::{OperationKind, Surface, TransportMode},
         requests::Operation,
         results::{CanonicalResult, VideoJobResult},
     },
+    ids::RouteSlug,
+    routing::provider::Provider,
 };
 use olp_engine::inference::execution::{RequiredTarget, RoutedUnaryResult};
+use olp_engine::inference::selection::select_representable_attempts_filtered;
 use olp_engine::protocols::openai::video::{
     OpenAiVideoContentQuery, OpenAiVideoCreateRequest, OpenAiVideoListQuery,
     decode_video_content_with_query, decode_video_create, decode_video_delete, decode_video_get,
@@ -44,11 +47,73 @@ use super::{
     media_jobs::{
         attach_media_job_with_retry, mark_missing_delete_as_success, media_job_deletion_finalized,
         media_job_error, media_job_result, media_job_state, media_job_update, owned_media_job,
-        refresh_video_list_record, select_video_create_target, set_video_route,
-        valid_upstream_media_job_id,
+        refresh_video_list_record, set_video_route, valid_upstream_media_job_id,
     },
     multipart::parse_multipart,
 };
+
+fn select_video_create_target(
+    state: &GatewayState,
+    principal: &HttpRequestAdmission,
+    operation: &Operation,
+    local_job_id: uuid::Uuid,
+) -> Result<(ApiKey, RouteSlug, RequiredTarget), InferenceError> {
+    let route_slug = operation
+        .route()
+        .cloned()
+        .ok_or_else(|| InferenceError::invalid_request("A route model is required."))?;
+    let key = authorize_principal(
+        state,
+        principal,
+        GatewayCapability::Inference,
+        Some(&route_slug),
+    )?;
+    let snapshot = principal.runtime();
+    let route = snapshot
+        .routes
+        .get(&route_slug)
+        .ok_or_else(|| InferenceError::resource_not_found("route_not_found"))?;
+    let attempt = select_representable_attempts_filtered(
+        snapshot,
+        &route_slug,
+        operation,
+        Surface::OpenAi,
+        TransportMode::Async,
+        local_job_id.as_bytes(),
+        |provider, target| {
+            state.circuits().is_selectable(target.id)
+                && video_lifecycle_supported(&route.operations, provider, &target.upstream_model)
+        },
+    )?
+    .into_iter()
+    .next()
+    .ok_or_else(|| InferenceError::unavailable("no_eligible_provider"))?;
+    Ok((
+        key.clone(),
+        route_slug,
+        RequiredTarget {
+            provider_id: attempt.provider_id.as_uuid(),
+            upstream_model: attempt.upstream_model,
+        },
+    ))
+}
+
+pub(super) fn video_lifecycle_supported(
+    route_operations: &BTreeSet<OperationKind>,
+    provider: &Provider,
+    model: &str,
+) -> bool {
+    [
+        OperationKind::VideoGet,
+        OperationKind::VideoContent,
+        OperationKind::VideoDelete,
+    ]
+    .into_iter()
+    .all(|operation| {
+        route_operations.contains(&operation)
+            && provider.supports(model, operation, Surface::OpenAi, TransportMode::Unary)
+    })
+}
 
 pub(super) async fn video_create(
     State(state): State<GatewayState>,
