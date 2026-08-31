@@ -567,6 +567,32 @@ fn native_anthropic_stream_losslessly_preserves_thinking_cache_and_unknown_event
     assert!(encoded.contains("\"kept\":true"));
 }
 
+#[test]
+fn native_anthropic_errors_remain_visible_to_failover() {
+    let wire = sse(
+        "error",
+        json!({
+            "type": "error",
+            "error": {
+                "type": "overloaded_error",
+                "message": "try another target",
+                "request_id": "provider-request"
+            }
+        }),
+    );
+    let mut decoder = Decoder::with_max_event_bytes_and_raw_passthrough(1024 * 1024, true);
+    let events = decoder.push(wire.as_bytes()).unwrap();
+
+    validate_event_sequence(&events).unwrap();
+    assert!(matches!(
+        &events[0].kind,
+        Kind::Error { error } if error.retryable
+    ));
+    assert!(matches!(events[1].kind, Kind::SourceExtension { .. }));
+    assert!(matches!(events[2].kind, Kind::Done));
+    assert_eq!(events.len(), 3);
+}
+
 /// A3: a request whose only tool is a server-side (typed) tool has an empty
 /// canonical `tools`, so the encoder used to omit the key entirely and the
 /// `/tools/0` extension then had nothing to walk into.
@@ -608,7 +634,7 @@ fn thinking_and_unmodelled_assistant_blocks_round_trip_through_canonical() {
             {"role": "user", "content": "weather?"},
             {"role": "assistant", "content": [
                 {"type": "thinking", "thinking": "let me check", "signature": "sig-abc"},
-                {"type": "text", "text": "checking"},
+                {"type": "text", "text": "checking", "vendor_text": "kept"},
                 {"type": "tool_use", "id": "toolu_1", "name": "weather", "input": {}}
             ]},
             {"role": "user", "content": [
@@ -633,6 +659,8 @@ fn thinking_and_unmodelled_assistant_blocks_round_trip_through_canonical() {
     assert_eq!(assistant[0]["thinking"], "let me check");
     assert_eq!(assistant[1]["type"], "text");
     assert_eq!(assistant[1]["text"], "checking");
+    assert_eq!(assistant[1]["vendor_text"], "kept");
+    assert_eq!(assistant[0].get("vendor_text"), None);
     assert_eq!(assistant[2]["type"], "tool_use");
     assert_eq!(assistant[2]["id"], "toolu_1");
 }

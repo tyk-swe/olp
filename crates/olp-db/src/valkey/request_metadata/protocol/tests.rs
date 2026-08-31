@@ -26,6 +26,7 @@ fn xread_parser_accepts_exact_resp2_and_resp3_shapes() {
         entries[0].payload.as_deref(),
         Some(b"{\"event_id\":\"opaque\"}".as_slice())
     );
+    assert!(entries[0].deleted_pending_id.is_none());
 
     let resp3 = Value::Map(vec![(
         bulk("installation:request-metadata"),
@@ -36,6 +37,24 @@ fn xread_parser_accepts_exact_resp2_and_resp3_shapes() {
     )]);
     let entries = parse_xread_reply(resp3, "installation:request-metadata", 10).unwrap();
     assert_eq!(entries[0].payload.as_deref(), Some(b"{}".as_slice()));
+}
+
+#[test]
+fn xread_parser_recovers_durable_deleted_pending_markers() {
+    let reply = Value::Array(vec![Value::Array(vec![
+        bulk("stream"),
+        Value::Array(vec![entry(
+            "1713465533411-0",
+            vec![bulk("deleted_pending_id"), bulk("1713465532000-0")],
+        )]),
+    ])]);
+    let entries = parse_xread_reply(reply, "stream", 1).unwrap();
+
+    assert!(entries[0].payload.is_none());
+    assert_eq!(
+        entries[0].deleted_pending_id.as_deref(),
+        Some("1713465532000-0")
+    );
 }
 
 #[test]
@@ -57,6 +76,7 @@ fn xread_parser_preserves_semantically_malformed_entries_for_gap_handling() {
         ])]);
         let entries = parse_xread_reply(reply, "stream", 1).unwrap();
         assert!(entries[0].payload.is_none());
+        assert!(entries[0].deleted_pending_id.is_none());
     }
 }
 

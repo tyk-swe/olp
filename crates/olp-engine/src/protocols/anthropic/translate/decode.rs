@@ -216,7 +216,7 @@ fn decode_blocks(
                 if seen_tool_use {
                     return Err(DecodeError::InterleavedToolUse);
                 }
-                let index = content.len();
+                let index = content.len() + raw_blocks.len();
                 content_extensions.push((format!("/content/{index}"), block.extra));
                 content.push(ContentPart::Text { text: block.text });
             }
@@ -225,7 +225,7 @@ fn decode_blocks(
                 if seen_tool_use {
                     return Err(DecodeError::InterleavedToolUse);
                 }
-                let index = content.len();
+                let index = content.len() + raw_blocks.len();
                 let image = decode_image(block)?;
                 content_extensions.push((format!("/content/{index}"), image.block_extra));
                 content_extensions.push((format!("/content/{index}/source"), image.source_extra));

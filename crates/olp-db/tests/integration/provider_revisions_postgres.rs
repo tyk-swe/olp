@@ -10,7 +10,7 @@ use olp_db::{
 use olp_engine::domain::{
     auth::{ApiKeyLimits, ApiKeyScope},
     canonical::identity::OperationKind,
-    ids::RouteSlug,
+    ids::{ProviderId, RouteSlug},
     routing::snapshot::Snapshot,
 };
 use uuid::Uuid;
@@ -459,6 +459,37 @@ async fn staged_provider_changes_do_not_leak_until_reactivation() {
     .await
     .unwrap();
     assert!(first_revoked);
+    let historical_release = store
+        .valid_runtime_release(staged_publication.generation.id.as_uuid())
+        .await
+        .unwrap();
+    assert_eq!(
+        historical_release.generation_id,
+        staged_publication.generation.id.as_uuid()
+    );
+    let historical_provider = store
+        .media_job_runtime_provider_configuration(
+            &staged_publication,
+            ProviderId::from_uuid(provider_id),
+            live_media_job.provider_revision_id.unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        historical_provider.endpoint.as_deref(),
+        Some("https://old.example.test/v1/")
+    );
+    assert_eq!(historical_provider.credential_id, Some(first_credential_id));
+    assert!(
+        !store
+            .runtime_provider_authority_is_current(
+                staged_publication.generation.id.as_uuid(),
+                provider_id,
+                live_media_job.provider_revision_id.unwrap(),
+            )
+            .await
+            .unwrap()
+    );
 
     let history = store
         .list_provider_revisions(provider_id, None, 10)
@@ -469,6 +500,16 @@ async fn staged_provider_changes_do_not_leak_until_reactivation() {
     assert_eq!(history.items[1].revision, 1);
     let second_revision_id = history.items[0].id;
     let first_revision_id = history.items[1].id;
+    assert!(
+        store
+            .runtime_provider_authority_is_current(
+                second_activation.release.generation_id,
+                provider_id,
+                second_revision_id,
+            )
+            .await
+            .unwrap()
+    );
     let first_revision = store
         .get_provider_revision(provider_id, first_revision_id)
         .await

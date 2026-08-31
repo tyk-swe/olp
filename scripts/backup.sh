@@ -37,6 +37,7 @@ timestamp=$(date -u +%Y%m%dT%H%M%SZ)
 backup_name="olp-${timestamp}.dump"
 backup_path="${output_dir}/${backup_name}"
 temporary_path="${backup_path}.partial"
+snapshot_session_pid=
 
 umask 077
 mkdir -p "$output_dir"
@@ -44,22 +45,35 @@ if [[ -e $backup_path || -e ${backup_path}.sha256 || -e ${backup_path}.manifest.
   echo "refusing to overwrite an existing backup: $backup_path" >&2
   exit 1
 fi
-trap 'rm -f "$temporary_path"' EXIT
+cleanup() {
+  rm -f "$temporary_path"
+  if [[ -n $snapshot_session_pid ]]; then
+    kill "$snapshot_session_pid" 2>/dev/null || true
+    wait "$snapshot_session_pid" 2>/dev/null || true
+  fi
+}
+trap cleanup EXIT
 
-server_version=$("$psql_command" "$OLP_DATABASE_URL" -X --no-psqlrc --tuples-only --no-align \
-  --command='SHOW server_version' | tr -d '[:space:]')
-migration_count=$("$psql_command" "$OLP_DATABASE_URL" -X --no-psqlrc --tuples-only --no-align \
-  --command='SELECT count(*) FROM _sqlx_migrations WHERE success' | tr -d '[:space:]')
-latest_generation=$("$psql_command" "$OLP_DATABASE_URL" -X --no-psqlrc --tuples-only --no-align \
-  --command='SELECT COALESCE(max(sequence), 0) FROM runtime_generations' | tr -d '[:space:]')
-request_metadata_schema=$("$psql_command" "$OLP_DATABASE_URL" -X --no-psqlrc \
-  --tuples-only --no-align --command="
-    SELECT CASE
-      WHEN to_regclass('public.request_metadata_consumer_health') IS NOT NULL THEN 'current'
-      WHEN to_regclass('public.usage_consumer_health') IS NOT NULL THEN 'legacy'
-      ELSE 'missing'
-    END
-  " | tr -d '[:space:]')
+coproc BACKUP_SNAPSHOT_SESSION {
+  "$psql_command" "$OLP_DATABASE_URL" -X --no-psqlrc --quiet \
+    --tuples-only --no-align --field-separator='|' --set=ON_ERROR_STOP=1
+}
+snapshot_read_fd=${BACKUP_SNAPSHOT_SESSION[0]}
+snapshot_write_fd=${BACKUP_SNAPSHOT_SESSION[1]}
+snapshot_session_pid=$BACKUP_SNAPSHOT_SESSION_PID
+printf '%s\n' \
+  'BEGIN TRANSACTION ISOLATION LEVEL SERIALIZABLE READ ONLY DEFERRABLE;' \
+  "SELECT pg_export_snapshot(), current_setting('server_version'), (SELECT count(*) FROM _sqlx_migrations WHERE success), (SELECT COALESCE(max(sequence), 0) FROM runtime_generations), CASE WHEN to_regclass('public.request_metadata_consumer_health') IS NOT NULL THEN 'current' WHEN to_regclass('public.usage_consumer_health') IS NOT NULL THEN 'legacy' ELSE 'missing' END;" \
+  >&"$snapshot_write_fd"
+if ! IFS='|' read -r -u "$snapshot_read_fd" snapshot_id server_version \
+  migration_count latest_generation request_metadata_schema; then
+  echo "could not establish the PostgreSQL backup snapshot" >&2
+  exit 1
+fi
+[[ $snapshot_id =~ ^[A-Fa-f0-9]+-[A-Fa-f0-9]+-[0-9]+$ ]] || {
+  echo "PostgreSQL returned an invalid exported snapshot identifier" >&2
+  exit 1
+}
 [[ $request_metadata_schema == current || $request_metadata_schema == legacy ]] || {
   echo "request metadata consumer health schema is unavailable" >&2
   exit 1
@@ -83,20 +97,17 @@ if [[ $traffic_quiesced == true ]]; then
   else
     consumer_health_table=usage_consumer_health
   fi
-  checkpoint=$("$psql_command" "$OLP_DATABASE_URL" -X --no-psqlrc \
-    --tuples-only --no-align --field-separator='|' --command="
-      SELECT pending_events,
-             lag_events,
-             to_char(checked_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"'),
-             greatest(0, floor(extract(epoch FROM now() - checked_at)))::bigint
-        FROM ${consumer_health_table}
-       WHERE singleton
-    " | tr -d '[:space:]')
-  [[ -n $checkpoint ]] || {
+  printf '%s\n' \
+    "SELECT COALESCE((SELECT pending_events::text || '|' || lag_events::text || '|' || to_char(checked_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') || '|' || greatest(0, floor(extract(epoch FROM clock_timestamp() - checked_at)))::bigint::text FROM ${consumer_health_table} WHERE singleton), '|||');" \
+    >&"$snapshot_write_fd"
+  if ! IFS='|' read -r -u "$snapshot_read_fd" pending lag checked_at checkpoint_age; then
+    echo "could not read the request metadata checkpoint from the backup snapshot" >&2
+    exit 1
+  fi
+  [[ -n $pending ]] || {
     echo "no durable request metadata consumer checkpoint exists; start the worker and wait for a checkpoint" >&2
     exit 1
   }
-  IFS='|' read -r pending lag checked_at checkpoint_age <<<"$checkpoint"
   [[ $pending =~ ^[0-9]+$ && $lag =~ ^[0-9]+$ && $checkpoint_age =~ ^[0-9]+$ ]] || {
     echo "request metadata consumer checkpoint is malformed" >&2
     exit 1
@@ -124,8 +135,16 @@ fi
   --compress=9 \
   --no-owner \
   --no-privileges \
-  --serializable-deferrable \
+  --snapshot="$snapshot_id" \
   --file="$temporary_path"
+printf '%s\n' 'COMMIT;' >&"$snapshot_write_fd"
+exec {snapshot_write_fd}>&-
+if ! wait "$snapshot_session_pid"; then
+  echo "PostgreSQL backup snapshot transaction did not commit cleanly" >&2
+  exit 1
+fi
+snapshot_session_pid=
+exec {snapshot_read_fd}<&-
 
 mv "$temporary_path" "$backup_path"
 created_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)

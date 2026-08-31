@@ -31,7 +31,7 @@ use olp_engine::protocols::openai::{
         encode_image_stream_update,
     },
     media::BoundedMediaPart,
-    moderation::{Request, Response, decode, decode_response, encode_response},
+    moderation::{Request, Response, decode, decode_response, encode, encode_response},
     responses::{
         request::{Create, decode_response_create, encode_response_create},
         response::{Object, decode_response_object},
@@ -671,6 +671,14 @@ fn moderation_preserves_dynamic_categories_and_multimodal_input() {
     };
     assert_eq!(canonical.input.len(), 2);
     assert_eq!(canonical.extensions.values["/input/0/locale"], "en");
+    let encoded_request = encode(&canonical, "omni-moderation-latest").unwrap();
+    assert_eq!(encoded_request.input[0]["type"], "text");
+    assert_eq!(encoded_request.input[0]["text"], "hello");
+    assert_eq!(encoded_request.input[0]["locale"], "en");
+    let Operation::Moderation(round_tripped) = decode(encoded_request).unwrap() else {
+        panic!("wrong operation")
+    };
+    assert_eq!(round_tripped.extensions.values["/input/0/locale"], "en");
 
     let response: Response = serde_json::from_value(json!({
         "id": "modr_1",

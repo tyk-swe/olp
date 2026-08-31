@@ -92,6 +92,10 @@ impl RequestBoundaryState {
 pub struct GatewayState {
     pub(crate) request_boundary: RequestBoundaryState,
     pub(crate) cors_allowed_origins: Arc<[axum::http::HeaderValue]>,
+    pub(crate) transports: TransportRegistry,
+    pub(crate) master_key: Option<Arc<MasterKey>>,
+    pub(crate) provider_egress_policy: Arc<EgressPolicy>,
+    pub(crate) provider_response_limits: ResponseLimits,
     media_reconciliation_gaps: Arc<AtomicU64>,
 }
 
@@ -421,6 +425,10 @@ impl ProcessComposition {
         let gateway = GatewayState {
             request_boundary: request_boundary.clone(),
             cors_allowed_origins: Arc::clone(&self.gateway_cors_allowed_origins),
+            transports: self.transports.clone(),
+            master_key: self.master_key.clone(),
+            provider_egress_policy: Arc::clone(&self.provider_egress_policy),
+            provider_response_limits: self.provider_response_limits,
             media_reconciliation_gaps: Arc::clone(&self.media_reconciliation_gaps),
         };
         let management = ManagementState {

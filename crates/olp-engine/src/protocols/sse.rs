@@ -61,9 +61,9 @@ pub(in crate::protocols) fn raw_sse_frame_event(
     )
 }
 
-/// Places the raw frame ahead of the semantic events it produced and shifts
-/// their sequence numbers by one, so a passthrough client replays the frame
-/// first and the canonical consumers still see a gapless sequence.
+/// Places a non-error raw frame ahead of the semantic events it produced and
+/// shifts their sequence numbers by one. Error frames stay canonical so
+/// routing can observe failures before committing a response.
 pub(in crate::protocols) fn insert_raw_frame(
     events: &mut Vec<Event>,
     event_start: usize,
@@ -72,6 +72,12 @@ pub(in crate::protocols) fn insert_raw_frame(
     frame: Frame,
     next_sequence: &mut u64,
 ) {
+    if events[event_start..]
+        .iter()
+        .any(|event| matches!(&event.kind, Kind::Error { .. }))
+    {
+        return;
+    }
     let semantic_events = events.len().saturating_sub(event_start);
     for event in &mut events[event_start..] {
         event.sequence = event.sequence.saturating_add(1);

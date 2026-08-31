@@ -8,6 +8,7 @@ use super::super::Error;
 pub(super) struct StreamEntry {
     pub(super) id: String,
     pub(super) payload: Option<Vec<u8>>,
+    pub(super) deleted_pending_id: Option<String>,
 }
 
 #[derive(Debug)]
@@ -124,17 +125,19 @@ fn parse_entries(entries: Value, batch_size: usize) -> Result<Vec<StreamEntry>, 
                     "stream reply contained a duplicate entry ID",
                 ));
             }
+            let (payload, deleted_pending_id) = parse_entry_fields(field_values)?;
             Ok(StreamEntry {
                 id,
-                payload: parse_event_payload(field_values)?,
+                payload,
+                deleted_pending_id,
             })
         })
         .collect()
 }
 
-fn parse_event_payload(fields: Value) -> Result<Option<Vec<u8>>, Error> {
+fn parse_entry_fields(fields: Value) -> Result<(Option<Vec<u8>>, Option<String>), Error> {
     let pairs = match fields {
-        Value::Nil => return Ok(None),
+        Value::Nil => return Ok((None, None)),
         Value::Array(values) => {
             if values.len() % 2 != 0 {
                 return Err(Error::InvalidState("stream field list has odd length"));
@@ -153,16 +156,21 @@ fn parse_event_payload(fields: Value) -> Result<Option<Vec<u8>>, Error> {
         }
     };
     if pairs.len() != 1 {
-        return Ok(None);
+        return Ok((None, None));
     }
     let (field, value) = pairs
         .into_iter()
         .next()
         .expect("one stream field was validated");
-    if value_bytes(field).as_deref() != Some(b"event") {
-        return Ok(None);
+    match value_bytes(field).as_deref() {
+        Some(b"event") => Ok((value_bytes(value), None)),
+        Some(b"deleted_pending_id") => {
+            let id = value_string(value)?;
+            parse_stream_id(&id)?;
+            Ok((None, Some(id)))
+        }
+        _ => Ok((None, None)),
     }
-    Ok(value_bytes(value))
 }
 
 fn parse_id_list(value: Value) -> Result<Vec<String>, Error> {

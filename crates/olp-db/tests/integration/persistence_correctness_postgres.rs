@@ -568,6 +568,50 @@ async fn usage_hour_buckets_stay_utc_under_a_half_hour_session_timezone() {
     transaction.rollback().await.unwrap();
 }
 
+#[tokio::test]
+#[ignore = "requires OLP_TEST_DATABASE_ADMIN_URL and OLP_TEST_DATABASE_URL_PREFIX"]
+async fn concurrent_route_target_index_migrations_retry_leftover_relations() {
+    let db = olp_db::test_support::TestDb::create_empty("index_retry").await;
+    let store = db.store(2).await;
+    store.migrate_to(45).await.unwrap();
+
+    sqlx::query(
+        "CREATE INDEX route_draft_targets_provider_model_idx \
+         ON route_draft_targets(provider_model_id)",
+    )
+    .execute(store.pool())
+    .await
+    .unwrap();
+    store.migrate_to(46).await.unwrap();
+
+    sqlx::query(
+        "CREATE INDEX route_revision_targets_provider_model_idx \
+         ON route_revision_targets(provider_model_id)",
+    )
+    .execute(store.pool())
+    .await
+    .unwrap();
+    store.migrate_to(47).await.unwrap();
+
+    let indexes: Vec<(String, bool)> = sqlx::query_as(
+        "SELECT indexrelid::regclass::text, indisvalid FROM pg_index \
+         WHERE indexrelid IN ( \
+           'route_draft_targets_provider_model_idx'::regclass, \
+           'route_revision_targets_provider_model_idx'::regclass) \
+         ORDER BY indexrelid::regclass::text",
+    )
+    .fetch_all(store.pool())
+    .await
+    .unwrap();
+    assert_eq!(
+        indexes,
+        [
+            ("route_draft_targets_provider_model_idx".to_owned(), true),
+            ("route_revision_targets_provider_model_idx".to_owned(), true)
+        ]
+    );
+}
+
 // E4: staleness must use the same poll gate the claim query uses, and a client
 // poll must carry the next reconciliation deadline past that gate.
 // E5: a clean reconciliation resets the consecutive-failure counter the

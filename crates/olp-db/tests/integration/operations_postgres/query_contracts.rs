@@ -343,7 +343,11 @@ pub(super) async fn exercise(
         unresolved_first_page.items[0].process_epoch,
         unresolved_second_page.items[0].process_epoch
     );
-    let first_acknowledgement = store
+    let acknowledgement_store = store.with_provenance(&RequestProvenance {
+        source_ip: Some("198.51.100.7".parse().unwrap()),
+        user_agent_family: Some("olp-console".to_owned()),
+    });
+    let first_acknowledgement = acknowledgement_store
         .acknowledge_request_metadata_gateway_epoch(loss_snapshot.process_epoch, owner_id)
         .await
         .unwrap()
@@ -380,8 +384,8 @@ pub(super) async fn exercise(
             .iter()
             .all(|epoch| epoch.acknowledged_at.is_some())
     );
-    let acknowledgement_audits: i64 = sqlx::query_scalar(
-        "SELECT count(*) FROM audit_events \
+    let acknowledgement_audit: (i64, Option<String>, Option<String>) = sqlx::query_as(
+        "SELECT count(*), min(host(source_ip)), min(user_agent_family) FROM audit_events \
          WHERE action = 'request_metadata.gateway_epoch_acknowledge' \
            AND resource_id = $1 AND outcome = 'success'",
     )
@@ -389,7 +393,14 @@ pub(super) async fn exercise(
     .fetch_one(store.pool())
     .await
     .unwrap();
-    assert_eq!(acknowledgement_audits, 1);
+    assert_eq!(
+        acknowledgement_audit,
+        (
+            1,
+            Some("198.51.100.7".to_owned()),
+            Some("olp-console".to_owned())
+        )
+    );
 
     let request_page = store
         .requests(&RequestFilters::default(), None, 50)

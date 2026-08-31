@@ -1,4 +1,6 @@
 use std::{
+    collections::{BTreeMap, BTreeSet},
+    num::{NonZeroU16, NonZeroU32},
     sync::{
         Arc,
         atomic::{AtomicI64, AtomicUsize, Ordering},
@@ -13,11 +15,19 @@ use crate::{
     domain::{
         canonical::{
             events::{Kind, Usage},
-            requests::MediaHandle,
-            results::MediaArtifact,
+            identity::TransportMode,
+            requests::{MediaHandle, Operation, VideoOperation},
+            results::{CanonicalResult, MediaArtifact, VideoJobResult, VideoStatus},
         },
+        ids::{DurationMs, ProviderId, RouteId, RuntimeGenerationId, TargetId},
         ports::{
             BoxFuture, MediaSpool, MediaSpoolError, MediaUpload, OpenedMedia, ProviderEventStream,
+            ProviderOutput, ProviderRequest, ProviderTransport, TransportError,
+        },
+        routing::{
+            provider::{Capability, Provider, ProviderKind},
+            route::{Route, Target},
+            snapshot::{RuntimeGeneration, Snapshot},
         },
     },
     inference::{
@@ -27,6 +37,32 @@ use crate::{
         runtime::Manager,
     },
 };
+
+struct ReconciliationTransport(Arc<AtomicUsize>);
+
+impl ProviderTransport for ReconciliationTransport {
+    fn execute(&self, _: ProviderRequest) -> BoxFuture<'_, Result<ProviderOutput, TransportError>> {
+        self.0.fetch_add(1, Ordering::SeqCst);
+        Box::pin(async {
+            Ok(ProviderOutput::Result(Box::new(CanonicalResult::VideoJob(
+                VideoJobResult {
+                    id: "upstream-job".into(),
+                    model: Some("video-model".into()),
+                    status: VideoStatus::InProgress,
+                    progress_percent: Some(10.0),
+                    created_at: None,
+                    completed_at: None,
+                    expires_at: None,
+                    prompt: None,
+                    seconds: None,
+                    size: None,
+                    error: None,
+                    extensions: Default::default(),
+                },
+            ))))
+        })
+    }
+}
 
 struct UnavailableSpool;
 
@@ -157,4 +193,89 @@ async fn unary_collection_detaches_success_and_post_usage_failure_cleanup() {
         assert_eq!(effects.reconciles.load(Ordering::Relaxed), 1);
         assert_eq!(effects.releases.load(Ordering::Relaxed), 1);
     }
+}
+
+#[tokio::test]
+async fn reconciliation_uses_the_supplied_historical_bundle() {
+    let manager = Arc::new(Manager::empty());
+    let service = Service::new(
+        Arc::clone(&manager),
+        ReloadableLimiter::default(),
+        None,
+        Breaker::default(),
+        Arc::new(UnavailableSpool),
+    );
+    let route_slug = RouteSlug::parse("historical-video").unwrap();
+    let provider_id = ProviderId::new();
+    let generation_id = RuntimeGenerationId::new();
+    let target = Target {
+        id: TargetId::new(),
+        routing_id: None,
+        provider_id,
+        upstream_model: "video-model".into(),
+        priority: 0,
+        weight: NonZeroU32::new(1).unwrap(),
+        timeout: DurationMs::new(1_000),
+    };
+    let route = Route {
+        id: RouteId::new(),
+        routing_id: None,
+        slug: route_slug.clone(),
+        operations: BTreeSet::from([OperationKind::VideoGet]),
+        overall_timeout: DurationMs::new(2_000),
+        max_attempts: NonZeroU16::new(1).unwrap(),
+        targets: vec![target],
+    };
+    let snapshot = Snapshot {
+        generation: RuntimeGeneration {
+            id: generation_id,
+            ordinal: 1,
+            activated_at: Utc::now(),
+        },
+        providers: BTreeMap::from([(
+            provider_id,
+            Provider {
+                id: provider_id,
+                name: "historical-provider".into(),
+                kind: ProviderKind::OpenAi,
+                enabled: true,
+                active_credential: None,
+                capabilities: BTreeSet::from([Capability::new(
+                    "video-model",
+                    OperationKind::VideoGet,
+                    Surface::OpenAi,
+                    TransportMode::Unary,
+                )]),
+            },
+        )]),
+        routes: BTreeMap::from([(route_slug.clone(), route)]),
+        api_keys: BTreeMap::new(),
+    };
+    let calls = Arc::new(AtomicUsize::new(0));
+    let transport: Arc<dyn ProviderTransport> =
+        Arc::new(ReconciliationTransport(Arc::clone(&calls)));
+    let historical = Manager::reconciliation_bundle(snapshot, provider_id, transport).unwrap();
+    let mut operation = crate::protocols::openai::video::decode_video_get("upstream-job");
+    let Operation::Video(VideoOperation::Get(request)) = &mut operation else {
+        unreachable!()
+    };
+    request.route = Some(route_slug);
+
+    let result = service
+        .execute_reconciliation_result(
+            historical,
+            uuid::Uuid::now_v7(),
+            operation,
+            Surface::OpenAi,
+            RequiredTarget {
+                provider_id: provider_id.as_uuid(),
+                upstream_model: "video-model".into(),
+            },
+        )
+        .await
+        .unwrap();
+
+    assert!(matches!(*result, CanonicalResult::VideoJob(_)));
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    assert!(manager.pin().routes.is_empty());
 }

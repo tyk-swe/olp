@@ -142,6 +142,29 @@ fn decodes_text_tools_usage_and_finish() {
 }
 
 #[test]
+fn prompt_cache_usage_follows_the_canonical_inclusive_input_contract() {
+    let usage = TokenUsage::builder()
+        .input_tokens(2)
+        .output_tokens(3)
+        .total_tokens(5)
+        .cache_read_input_tokens(7)
+        .cache_write_input_tokens(11)
+        .build()
+        .unwrap();
+
+    assert_eq!(
+        decode_usage(&usage).unwrap(),
+        Usage {
+            input_tokens: 20,
+            output_tokens: 3,
+            total_tokens: 23,
+            cached_input_tokens: Some(7),
+            reasoning_tokens: None,
+        }
+    );
+}
+
+#[test]
 fn generation_validation_rejects_lossy_request_shapes() {
     type RequestMutator = fn(&mut GenerationRequest);
     let cases: [(&str, RequestMutator); 9] = [
@@ -326,6 +349,18 @@ fn wire_value_and_finish_reason_mappings_are_total_and_checked() {
             .input_tokens(0)
             .output_tokens(0)
             .total_tokens(-1)
+            .build(),
+        TokenUsage::builder()
+            .input_tokens(0)
+            .output_tokens(0)
+            .total_tokens(0)
+            .cache_read_input_tokens(-1)
+            .build(),
+        TokenUsage::builder()
+            .input_tokens(0)
+            .output_tokens(0)
+            .total_tokens(0)
+            .cache_write_input_tokens(-1)
             .build(),
     ] {
         assert!(decode_usage(&usage.unwrap()).is_err());

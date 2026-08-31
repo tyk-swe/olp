@@ -294,6 +294,26 @@ async fn http_token_reservation_charges_only_a_positive_estimate_delta() {
 }
 
 #[tokio::test]
+async fn http_delta_reservation_rejects_a_request_larger_than_the_whole_tpm_budget() {
+    let calls = Arc::new(BackendCalls::default());
+    let limiter = ReloadableLimiter::default();
+    limiter.install(backend(&calls, BackendBehavior::Success));
+    let key = api_key(ApiKeyLimits {
+        tokens_per_minute: NonZeroU64::new(2),
+        ..ApiKeyLimits::default()
+    });
+
+    let error = reserve(&limiter, &key, &text_count("123456789012"), Some(1))
+        .await
+        .err()
+        .expect("the complete request cannot fit within the token budget");
+
+    assert_eq!(error.code(), "request_exceeds_token_limit");
+    assert_eq!(error.kind(), InferenceErrorKind::InvalidRequest);
+    assert_eq!(calls.reserves.load(Ordering::Relaxed), 0);
+}
+
+#[tokio::test]
 async fn a_request_larger_than_the_whole_tpm_budget_is_a_client_error_not_a_rate_limit() {
     // A 2000 TPM key against the 4096-token default output estimate: the Lua
     // script rejects `requested > limit` outright, so reporting it as a 429

@@ -6,12 +6,49 @@ use crate::{error::Error, store::Store};
 
 use super::PublishedRuntimeRelease;
 
+#[derive(sqlx::FromRow)]
+struct RuntimeReleaseRow {
+    id: Uuid,
+    sequence: i64,
+    compiled_release: Vec<u8>,
+    release_sha256: Vec<u8>,
+    created_at: chrono::DateTime<chrono::Utc>,
+}
+
 /// Upper bound on rows examined while searching for verified releases. A run
 /// of corrupt rows must not hide an intact older release, but neither should
 /// one call walk an unbounded history.
 const RUNTIME_RELEASE_SCAN_LIMIT: usize = 1_024;
 
 impl Store {
+    pub async fn valid_runtime_release(
+        &self,
+        generation_id: Uuid,
+    ) -> Result<PublishedRuntimeRelease, Error> {
+        let row = sqlx::query_as::<_, RuntimeReleaseRow>(
+            "SELECT id, sequence, compiled_release, release_sha256, created_at \
+             FROM runtime_generations WHERE id = $1",
+        )
+        .bind(generation_id)
+        .fetch_optional(self.pool())
+        .await?
+        .ok_or(Error::CorruptRelease)?;
+        let payload = row.compiled_release;
+        let actual_sha: [u8; 32] = Sha256::digest(&payload).into();
+        if row.release_sha256.as_slice() != actual_sha
+            || verify_release_envelope(&payload, row.id, row.sequence).is_err()
+        {
+            return Err(Error::CorruptRelease);
+        }
+        Ok(PublishedRuntimeRelease {
+            generation_id: row.id,
+            sequence: row.sequence,
+            payload,
+            payload_sha256: actual_sha,
+            created_at: row.created_at,
+        })
+    }
+
     /// Returns verified releases newer than the supplied installed sequence.
     /// Pollers use this to avoid decoding unchanged immutable snapshots.
     ///

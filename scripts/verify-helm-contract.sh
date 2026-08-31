@@ -116,6 +116,16 @@ helm template olp "$chart" --namespace olp --set-string image.digest="$digest" \
   --set config.trustedProxyCidrs=10.0.0.0/8 \
   > "$work/edge-manifests.yaml"
 helm template olp "$chart" --namespace olp --set-string image.digest="$digest" \
+  --set monitoring.enabled=true \
+  --set control.enabled=false \
+  --show-only templates/monitoring.yaml \
+  > "$work/gateway-monitoring.yaml"
+helm template olp "$chart" --namespace olp --set-string image.digest="$digest" \
+  --set monitoring.enabled=true \
+  --set gateway.enabled=false \
+  --show-only templates/monitoring.yaml \
+  > "$work/control-monitoring.yaml"
+helm template olp "$chart" --namespace olp --set-string image.digest="$digest" \
   --set mediaSpool.capacityBytes=9007199254740991 \
   > "$work/max-spool-manifests.yaml"
 helm template olp "$chart" --namespace olp --set-string image.digest="$digest" \
@@ -477,6 +487,34 @@ for expected in \
     exit 1
   }
 done
+
+gateway_observability_service=olp-openllmproxy-gateway-observability
+control_observability_service=olp-openllmproxy-control-observability
+grep -Fq "service=\"$gateway_observability_service\"" "$work/gateway-monitoring.yaml" || {
+  echo "gateway-only monitoring does not target the gateway observability service" >&2
+  exit 1
+}
+if grep -Fq "service=\"$control_observability_service\"" "$work/gateway-monitoring.yaml"; then
+  echo "gateway-only monitoring contains a guaranteed-absent control target" >&2
+  exit 1
+fi
+grep -Fq "olp_request_metadata_persistence_available{namespace=\"olp\",service=\"$gateway_observability_service\"}" \
+  "$work/gateway-monitoring.yaml" || {
+  echo "request metadata persistence monitoring is not scoped to the gateway" >&2
+  exit 1
+}
+grep -Fq "service=\"$control_observability_service\"" "$work/control-monitoring.yaml" || {
+  echo "control-only monitoring does not target the control observability service" >&2
+  exit 1
+}
+if grep -Fq "service=\"$gateway_observability_service\"" "$work/control-monitoring.yaml"; then
+  echo "control-only monitoring contains a guaranteed-absent gateway target" >&2
+  exit 1
+fi
+if grep -Fq 'alert: OLPRequestMetadataPersistenceUnavailable' "$work/control-monitoring.yaml"; then
+  echo "control-only monitoring alerts on a gateway-local metadata emitter" >&2
+  exit 1
+fi
 
 legacy_usage_telemetry_matched=
 checked_rg_match legacy_usage_telemetry_matched \

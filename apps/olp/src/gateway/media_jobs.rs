@@ -1,5 +1,5 @@
 use crate::public_http::request_admission::HttpRequestAdmission;
-use std::{collections::BTreeMap, time::Duration};
+use std::{collections::BTreeMap, sync::Arc, time::Duration};
 
 use chrono::Utc;
 use futures::{StreamExt, stream};
@@ -8,64 +8,29 @@ use olp_db::{
     media_jobs::MediaJobState, media_jobs::MediaJobUpdate, media_jobs::MediaReconciliationPass,
 };
 use olp_engine::domain::{
-    auth::{ApiKey, GatewayCapability, authorize_api_key, gateway_capability_for_operation},
+    auth::{ApiKey, authorize_api_key, gateway_capability_for_operation},
     canonical::{
         identity::{OperationKind, Surface, TransportMode},
         requests::{MEDIA_DELETE_MISSING_IS_SUCCESS_EXTENSION, Operation},
         results::CanonicalResult,
     },
-    ids::RouteSlug,
+    ids::{ProviderId, RouteSlug},
 };
 use olp_engine::inference::execution::RequiredTarget;
-use olp_engine::inference::selection::select_representable_attempts_filtered;
+use olp_engine::inference::runtime::{Bundle, Manager};
+use olp_engine::providers::factory::assembly::Factory;
 use serde_json::Value;
 use tracing::{error, warn};
 
-use crate::bootstrap::mode_dependencies::GatewayState;
+use crate::bootstrap::{
+    mode_dependencies::GatewayState,
+    provider_adapter::{runtime_provider_config, runtime_provider_credential},
+};
 
 use super::{
     error::InferenceError,
     execution::{authorize_principal, execute_routed_result},
 };
-
-pub(super) fn select_video_create_target(
-    state: &GatewayState,
-    principal: &HttpRequestAdmission,
-    operation: &Operation,
-    local_job_id: uuid::Uuid,
-) -> Result<(ApiKey, RouteSlug, RequiredTarget), InferenceError> {
-    let route_slug = operation
-        .route()
-        .cloned()
-        .ok_or_else(|| InferenceError::invalid_request("A route model is required."))?;
-    let key = authorize_principal(
-        state,
-        principal,
-        GatewayCapability::Inference,
-        Some(&route_slug),
-    )?;
-    let snapshot = principal.runtime();
-    let attempt = select_representable_attempts_filtered(
-        snapshot,
-        &route_slug,
-        operation,
-        Surface::OpenAi,
-        TransportMode::Async,
-        local_job_id.as_bytes(),
-        |_, target| state.circuits().is_selectable(target.id),
-    )?
-    .into_iter()
-    .next()
-    .ok_or_else(|| InferenceError::unavailable("no_eligible_provider"))?;
-    Ok((
-        key.clone(),
-        route_slug,
-        RequiredTarget {
-            provider_id: attempt.provider_id.as_uuid(),
-            upstream_model: attempt.upstream_model,
-        },
-    ))
-}
 
 pub(super) async fn attach_media_job_with_retry(
     state: &GatewayState,
@@ -293,9 +258,11 @@ async fn execute_media_reconciliation_result(
     record: &MediaJobRecord,
     operation: Operation,
 ) -> Result<Box<CanonicalResult>, &'static str> {
+    let runtime = media_job_runtime(state, record).await?;
     state
         .inference()
         .execute_reconciliation_result(
+            runtime,
             record.api_key_id,
             operation,
             Surface::OpenAi,
@@ -306,6 +273,66 @@ async fn execute_media_reconciliation_result(
         )
         .await
         .map_err(|failure| failure.code())
+}
+
+async fn media_job_runtime(
+    state: &GatewayState,
+    record: &MediaJobRecord,
+) -> Result<Arc<Bundle>, &'static str> {
+    let (generation_id, provider_revision_id) =
+        match (record.runtime_generation_id, record.provider_revision_id) {
+            (Some(generation_id), Some(provider_revision_id)) => {
+                (generation_id, provider_revision_id)
+            }
+            _ => return Err("media_job_runtime_unavailable"),
+        };
+    let release = state
+        .store()
+        .valid_runtime_release(generation_id)
+        .await
+        .map_err(|_| "media_job_runtime_unavailable")?;
+    let snapshot = Manager::decode_persisted_release(&release.activation_candidate())
+        .map_err(|_| "media_job_runtime_unavailable")?;
+    let provider_id = ProviderId::from_uuid(record.provider_id);
+    let provider = state
+        .store()
+        .media_job_runtime_provider_configuration(&snapshot, provider_id, provider_revision_id)
+        .await
+        .map_err(|_| "media_job_runtime_unavailable")?;
+    let transport = if let Some(master_key) = state.master_key.as_deref() {
+        let config = runtime_provider_config(&provider, &snapshot)
+            .map_err(|_| "media_job_runtime_unavailable")?;
+        let credential = runtime_provider_credential(&provider, &config, master_key)
+            .map_err(|_| "media_job_runtime_unavailable")?;
+        Factory::transport(
+            config,
+            credential,
+            &state.provider_egress_policy,
+            state.provider_response_limits,
+        )
+        .await
+        .map_err(|_| "media_job_runtime_unavailable")?
+    } else {
+        let current = state
+            .store()
+            .runtime_provider_authority_is_current(
+                generation_id,
+                record.provider_id,
+                provider_revision_id,
+            )
+            .await
+            .map_err(|_| "media_job_runtime_unavailable")?;
+        if !current {
+            return Err("media_job_runtime_unavailable");
+        }
+        state
+            .transports
+            .snapshot()
+            .remove(&provider_id)
+            .ok_or("media_job_runtime_unavailable")?
+    };
+    Manager::reconciliation_bundle(snapshot, provider_id, transport)
+        .map_err(|_| "media_job_runtime_unavailable")
 }
 
 pub(super) async fn refresh_video_list_record(

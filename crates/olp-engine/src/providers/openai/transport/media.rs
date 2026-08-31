@@ -6,7 +6,10 @@ use std::{
 };
 
 use crate::domain::{
-    canonical::{requests::media_handle_from_inline_marker, results::MediaArtifact},
+    canonical::{
+        requests::{MediaHandle, media_handle_from_inline_marker},
+        results::MediaArtifact,
+    },
     ports::{MediaSpool, MediaSpoolError, MediaUpload, ProviderRequest, TransportError},
 };
 use crate::protocols::openai::{
@@ -23,6 +26,54 @@ use serde_json::Value;
 
 use super::{Connector, errors::*, streams::*};
 use crate::providers::transport_common::protocol_body_error;
+
+struct StagedMediaGuard {
+    spool: Arc<dyn MediaSpool>,
+    handles: Vec<MediaHandle>,
+}
+
+impl StagedMediaGuard {
+    fn new(spool: Arc<dyn MediaSpool>) -> Self {
+        Self {
+            spool,
+            handles: Vec::new(),
+        }
+    }
+
+    fn track(&mut self, handle: MediaHandle) {
+        self.handles.push(handle);
+    }
+
+    fn keep(mut self) {
+        self.handles.clear();
+    }
+
+    async fn cleanup(mut self) {
+        let handles = std::mem::take(&mut self.handles);
+        let spool = Arc::clone(&self.spool);
+        let cleanup = tokio::spawn(remove_staged_media(spool, handles));
+        let _ = cleanup.await;
+    }
+}
+
+async fn remove_staged_media(spool: Arc<dyn MediaSpool>, handles: Vec<MediaHandle>) {
+    for handle in handles {
+        let _ = spool.remove(&handle).await;
+    }
+}
+
+impl Drop for StagedMediaGuard {
+    fn drop(&mut self) {
+        let handles = std::mem::take(&mut self.handles);
+        if handles.is_empty() {
+            return;
+        }
+        let spool = Arc::clone(&self.spool);
+        if let Ok(runtime) = tokio::runtime::Handle::try_current() {
+            runtime.spawn(remove_staged_media(spool, handles));
+        }
+    }
+}
 
 pub(super) async fn hydrate_chat_media(
     request: &mut CompletionRequest,
@@ -143,7 +194,10 @@ impl Connector {
         mut wire: OpenAiImageResponse,
     ) -> Result<crate::domain::canonical::results::ImagesResult, TransportError> {
         let mut handles = VecDeque::new();
-        let mut staged = Vec::new();
+        let mut staged = request
+            .media
+            .as_ref()
+            .map(|spool| StagedMediaGuard::new(Arc::clone(spool)));
         let decoded = async {
             for (index, image) in wire.data.iter_mut().enumerate() {
                 let Some(encoded) = image.b64_json.take() else {
@@ -170,7 +224,10 @@ impl Connector {
                     })
                     .await
                     .map_err(map_spool_error)?;
-                staged.push(artifact.handle.clone());
+                staged
+                    .as_mut()
+                    .expect("image staging requires the checked media spool")
+                    .track(artifact.handle.clone());
                 handles.push_back(artifact.handle);
                 image.b64_json = Some(String::new());
             }
@@ -184,14 +241,20 @@ impl Connector {
             .map_err(|error| protocol_decode_error("image", error))
         }
         .await;
-        if decoded.is_err()
-            && let Some(spool) = request.media.as_ref()
-        {
-            for handle in staged {
-                let _ = spool.remove(&handle).await;
+        match decoded {
+            Ok(result) => {
+                if let Some(staged) = staged {
+                    staged.keep();
+                }
+                Ok(result)
+            }
+            Err(error) => {
+                if let Some(staged) = staged {
+                    staged.cleanup().await;
+                }
+                Err(error)
             }
         }
-        decoded
     }
 }
 

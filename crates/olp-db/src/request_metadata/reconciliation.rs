@@ -3,10 +3,7 @@ use olp_engine::inference::request_metadata::Snapshot;
 use rust_decimal::Decimal;
 use uuid::Uuid;
 
-use crate::{
-    audit_events::{AuditEvent, record_audit_event},
-    store::RequestProvenance,
-};
+use crate::audit_events::{AuditEvent, record_audit_event};
 use crate::{error::Error, store::Store};
 
 const REQUEST_METADATA_GATEWAY_EPOCH_LOCK_SEED: i64 = 0x4f4c_505f_5545;
@@ -543,7 +540,7 @@ impl Store {
         record_audit_event(
             &mut *transaction,
             AuditEvent {
-                provenance: &RequestProvenance::default(),
+                provenance: self.provenance(),
                 actor: Some(actor),
                 action: "request_metadata.gateway_epoch_acknowledge",
                 resource_type: "request_metadata_gateway_epoch",

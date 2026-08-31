@@ -46,10 +46,10 @@ afterEach(() => {
   originalMethods.clear();
 });
 
-function render(accepts = correctPassword) {
+function render(accepts = correctPassword, verification?: Promise<void>) {
   const component = mount(ReauthenticateProbe, {
     target: host,
-    props: { accepts }
+    props: { accepts, verification }
   });
   flushSync();
   return component;
@@ -65,7 +65,7 @@ function passwordField() {
   return field;
 }
 
-async function submitPassword(password: string) {
+function beginPasswordSubmission(password: string) {
   const field = passwordField();
   field.value = password;
   field.dispatchEvent(new Event('input', { bubbles: true }));
@@ -73,6 +73,10 @@ async function submitPassword(password: string) {
   host
     .querySelector('form')
     ?.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+}
+
+async function submitPassword(password: string) {
+  beginPasswordSubmission(password);
   // The confirmation handler resolves on a microtask before it reports back.
   await Promise.resolve();
   await Promise.resolve();
@@ -117,6 +121,41 @@ describe('reauthentication dialog', () => {
     expect(shown('state')).toBe('open');
     // The field is cleared for the retry but the dialog never unmounts.
     expect(passwordField().value).toBe('');
+
+    void unmount(component);
+  });
+
+  it('does not dismiss or enable controls while verification is in flight', async () => {
+    let finishVerification!: () => void;
+    const verification = new Promise<void>((resolve) => {
+      finishVerification = resolve;
+    });
+    const component = render(correctPassword, verification);
+
+    beginPasswordSubmission(correctPassword);
+    await Promise.resolve();
+    flushSync();
+
+    const dialog = host.querySelector('dialog');
+    const cancelEvent = new Event('cancel', { cancelable: true });
+    dialog?.dispatchEvent(cancelEvent);
+    flushSync();
+
+    expect(cancelEvent.defaultPrevented).toBe(true);
+    expect(shown('state')).toBe('open');
+    expect(dialog?.getAttribute('aria-busy')).toBe('true');
+    expect(passwordField().disabled).toBe(true);
+    expect(
+      host.querySelector<HTMLButtonElement>('button[type="button"]')?.disabled
+    ).toBe(true);
+
+    finishVerification();
+    await Promise.resolve();
+    await Promise.resolve();
+    flushSync();
+
+    expect(shown('state')).toBe('closed');
+    expect(host.querySelector('dialog')).toBeNull();
 
     void unmount(component);
   });

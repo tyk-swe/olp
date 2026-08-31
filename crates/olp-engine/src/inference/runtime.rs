@@ -138,7 +138,7 @@ impl Manager {
         Ok(true)
     }
 
-    fn decode_release(release: &ReleaseCandidate<'_>) -> Result<Snapshot, Error> {
+    pub fn decode_persisted_release(release: &ReleaseCandidate<'_>) -> Result<Snapshot, Error> {
         let mut snapshot = Snapshot::from_persisted_slice(release.payload)?;
         if snapshot.generation.id.as_uuid() != release.generation_id {
             return Err(Error::GenerationMismatch);
@@ -147,6 +147,21 @@ impl Manager {
             u64::try_from(release.sequence).map_err(|_| Error::GenerationMismatch)?;
         snapshot.validate()?;
         Ok(snapshot)
+    }
+
+    pub fn reconciliation_bundle(
+        snapshot: Snapshot,
+        provider_id: ProviderId,
+        transport: Arc<dyn ProviderTransport>,
+    ) -> Result<Arc<Bundle>, Error> {
+        snapshot.validate()?;
+        if !snapshot.providers.contains_key(&provider_id) {
+            return Err(Error::MissingTransport(provider_id));
+        }
+        Ok(Arc::new(Bundle {
+            snapshot,
+            transports: BTreeMap::from([(provider_id, transport)]),
+        }))
     }
 
     /// Decodes a release while replacing all historical API-key material with
@@ -158,7 +173,7 @@ impl Manager {
         release: ReleaseCandidate<'_>,
         current_api_keys: BTreeMap<ApiKeyLookupId, ApiKey>,
     ) -> Result<Snapshot, Error> {
-        let mut snapshot = Self::decode_release(&release)?;
+        let mut snapshot = Self::decode_persisted_release(&release)?;
         snapshot.api_keys = current_api_keys;
         snapshot.validate()?;
         Ok(snapshot)
@@ -268,6 +283,43 @@ mod tests {
         assert!(Arc::ptr_eq(
             &manager.pin().transport(provider_id).unwrap(),
             &second
+        ));
+    }
+
+    #[test]
+    fn reconciliation_bundle_keeps_the_persisted_generation_and_transport() {
+        let provider_id = ProviderId::new();
+        let generation_id = RuntimeGenerationId::new();
+        let transport: Arc<dyn ProviderTransport> = Arc::new(MarkerTransport);
+        let snapshot = Snapshot {
+            generation: RuntimeGeneration {
+                id: generation_id,
+                ordinal: 7,
+                activated_at: Utc::now(),
+            },
+            providers: BTreeMap::from([(
+                provider_id,
+                Provider {
+                    id: provider_id,
+                    name: "provider".into(),
+                    kind: ProviderKind::OpenAi,
+                    enabled: true,
+                    active_credential: None,
+                    capabilities: Default::default(),
+                },
+            )]),
+            routes: Default::default(),
+            api_keys: Default::default(),
+        };
+
+        let bundle =
+            Manager::reconciliation_bundle(snapshot, provider_id, transport.clone()).unwrap();
+
+        assert_eq!(bundle.generation.id, generation_id);
+        assert_eq!(bundle.generation.ordinal, 7);
+        assert!(Arc::ptr_eq(
+            &bundle.transport(provider_id).unwrap(),
+            &transport
         ));
     }
 

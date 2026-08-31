@@ -375,6 +375,7 @@ impl Service {
     /// runtime pinning, circuit, failover, and metadata accounting semantics.
     pub async fn execute_reconciliation_result(
         &self,
+        runtime: Arc<Bundle>,
         api_key_id: uuid::Uuid,
         operation: Operation,
         surface: Surface,
@@ -385,7 +386,13 @@ impl Service {
             operation_media_handles(&operation),
         );
         let result = self
-            .execute_reconciliation_result_inner(api_key_id, operation, surface, &required_target)
+            .execute_reconciliation_result_inner(
+                &runtime,
+                api_key_id,
+                operation,
+                surface,
+                &required_target,
+            )
             .await;
         request_media.cleanup().await;
         result
@@ -393,12 +400,12 @@ impl Service {
 
     async fn execute_reconciliation_result_inner(
         &self,
+        runtime: &Bundle,
         api_key_id: uuid::Uuid,
         operation: Operation,
         surface: Surface,
         required_target: &RequiredTarget,
     ) -> Result<Box<CanonicalResult>, InferenceError> {
-        let runtime = self.runtime().pin();
         let route_slug = operation
             .route()
             .cloned()
@@ -416,7 +423,7 @@ impl Service {
         let mut accounting =
             RequestAccountingGuard::new(self.clone(), context.accounting_input(), None, None, None);
         let attempts = match select_representable_attempts_filtered(
-            &runtime,
+            runtime,
             &context.route_slug,
             &operation,
             surface,
@@ -462,7 +469,7 @@ impl Service {
                 };
             execute(
                 Context {
-                    runtime: &runtime,
+                    runtime,
                     overall_timeout: route.overall_timeout.as_duration(),
                     max_attempts: route.max_attempts,
                     media_spool: self.media_spool().clone(),
