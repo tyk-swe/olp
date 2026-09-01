@@ -14,6 +14,9 @@ use uuid::Uuid;
 
 use crate::store::Store;
 
+mod cost_reconciliation;
+pub use cost_reconciliation::CostReconciliationLeader;
+
 const RESERVE_SCRIPT: &str = include_str!("../scripts/reserve_limits.lua");
 const RESERVE_COST_SCRIPT: &str = include_str!("../scripts/reserve_cost.lua");
 const RECONCILE_COST_SCRIPT: &str = include_str!("../scripts/reconcile_cost.lua");
@@ -71,6 +74,7 @@ impl CostSnapshot {
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct CostReconciliationReport {
+    pub lock_acquired: bool,
     pub keys_reconciled: u64,
     pub daily_windows_reconciled: u64,
     pub monthly_windows_reconciled: u64,
@@ -83,6 +87,10 @@ pub enum CostReconciliationError {
     #[error(transparent)]
     Limiter(#[from] LimitError),
 }
+
+#[derive(Debug, Error)]
+#[error("cost state awaits PostgreSQL reconciliation for the current UTC window")]
+struct UninitializedCostState;
 
 impl DistributedLimiter {
     pub async fn connect(url: &str, namespace: impl Into<String>) -> Result<Self, LimitError> {
@@ -176,6 +184,9 @@ impl DistributedLimiter {
             .map_err(LimitError::service)?;
         match CostReservationScriptResult::parse_value(&raw_response)? {
             CostReservationScriptResult::Granted => Ok(()),
+            CostReservationScriptResult::UninitializedState => {
+                Err(LimitError::service(UninitializedCostState))
+            }
             CostReservationScriptResult::Rejected {
                 dimension,
                 retry_after_ms,
@@ -254,8 +265,21 @@ impl DistributedLimiter {
         now: DateTime<Utc>,
         now_override_ms: i64,
     ) -> Result<CostReconciliationReport, CostReconciliationError> {
-        let snapshots = store.cost_reconciliation_snapshots(now).await?;
-        let mut report = CostReconciliationReport::default();
+        let Some(mut leader) = store.try_acquire_cost_reconciliation_leader().await? else {
+            return Ok(CostReconciliationReport::default());
+        };
+        leader.reconcile_at(self, now, now_override_ms).await
+    }
+
+    async fn apply_cost_snapshots(
+        &self,
+        snapshots: Vec<CostSnapshot>,
+        now_override_ms: i64,
+    ) -> Result<CostReconciliationReport, CostReconciliationError> {
+        let mut report = CostReconciliationReport {
+            lock_acquired: true,
+            ..CostReconciliationReport::default()
+        };
         let mut first_error = None;
         for snapshot in snapshots {
             match self
@@ -528,6 +552,7 @@ enum ReservationScriptResult {
 
 enum CostReservationScriptResult {
     Granted,
+    UninitializedState,
     Rejected {
         dimension: LimitDimension,
         retry_after_ms: u64,
@@ -555,6 +580,11 @@ impl CostReservationScriptResult {
                     dimension: LimitDimension::MonthlyCost,
                     retry_after_ms: retry_after_ms as u64,
                 })
+            }
+            (-1, "uninitialized_daily_cost_state" | "uninitialized_monthly_cost_state")
+                if retry_after_ms == 0 =>
+            {
+                Ok(Self::UninitializedState)
             }
             (-1, "malformed_daily_cost_state" | "malformed_monthly_cost_state")
                 if retry_after_ms == 0 =>

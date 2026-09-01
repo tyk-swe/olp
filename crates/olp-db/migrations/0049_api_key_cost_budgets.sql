@@ -44,7 +44,10 @@ WITH bounds AS (
       AND bucket >= bounds.month_start AND bucket < bounds.month_end
 ), totals AS (
     SELECT usage.api_key_id,
-           COALESCE(sum(usage.cost) FILTER (WHERE usage.observed_at >= bounds.day_start), 0)
+           COALESCE(sum(usage.cost) FILTER (
+               WHERE usage.observed_at >= bounds.day_start
+                 AND usage.observed_at < bounds.day_start + interval '24 hours'
+           ), 0)
                AS daily_accrued,
            COALESCE(sum(usage.cost), 0) AS monthly_accrued,
            COALESCE(sum(usage.unpriced_attempts), 0)::bigint AS monthly_unpriced_attempts,

@@ -116,6 +116,17 @@ async fn cost_reservation_rolls_daily_without_resetting_the_month() {
         LimitDimension::DailyCost,
     );
     assert_eq!(retry, Duration::from_secs(12 * 60 * 60));
+    assert!(matches!(
+        limiter.reserve_cost_at(&request, next_day).await,
+        Err(LimitError::Service { .. })
+    ));
+    limiter
+        .apply_cost_snapshot_at(
+            &snapshot(api_key_id, next_day, Decimal::ZERO, Decimal::new(1, 2), 0),
+            next_day,
+        )
+        .await
+        .unwrap();
     limiter.reserve_cost_at(&request, next_day).await.unwrap();
 
     let mut connection = connection().await;
@@ -163,6 +174,17 @@ async fn cost_reservation_rolls_monthly_at_the_injected_utc_boundary() {
         LimitDimension::MonthlyCost,
     );
     assert_eq!(retry, Duration::from_secs(12 * 60 * 60));
+    assert!(matches!(
+        limiter.reserve_cost_at(&request, february).await,
+        Err(LimitError::Service { .. })
+    ));
+    limiter
+        .apply_cost_snapshot_at(
+            &snapshot(api_key_id, february, Decimal::ZERO, Decimal::ZERO, 0),
+            february,
+        )
+        .await
+        .unwrap();
     limiter.reserve_cost_at(&request, february).await.unwrap();
 
     let mut connection = connection().await;
@@ -302,3 +324,6 @@ async fn exhausted_cost_rejects_before_rate_or_concurrency_mutation() {
     assert!(!connection.exists::<_, bool>(rate_key).await.unwrap());
     assert!(!connection.exists::<_, bool>(concurrency_key).await.unwrap());
 }
+
+#[path = "distributed_cost_recovery_valkey.rs"]
+mod recovery;

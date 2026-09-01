@@ -6,7 +6,7 @@
   import { listRoutes } from '$lib/api/management/routes';
   import NavIcon from '$lib/components/NavIcon.svelte';
   import ReadOnlyNote from '$lib/components/ReadOnlyNote.svelte';
-  import { formatCost, formatDate, formatInteger } from '$lib/format';
+  import { formatBudget, formatDate, formatInteger } from '$lib/format';
   import { guardUnsavedChanges } from '$lib/forms/unsavedChanges';
   import { validateApiKey } from './keyValidation';
   import {
@@ -314,10 +314,10 @@
         <div>
           <span>Daily accrued / limit</span>
           <strong
-            >{formatCost(editing.budget.daily.accrued)} / {editing.budget.daily
+            >{formatBudget(editing.budget.daily.accrued)} / {editing.budget.daily
               .limit === null
               ? 'No limit'
-              : formatCost(editing.budget.daily.limit)}</strong
+              : formatBudget(editing.budget.daily.limit)}</strong
           >
           <small
             >Window ends {formatDate(
@@ -328,10 +328,10 @@
         <div>
           <span>Monthly accrued / limit</span>
           <strong
-            >{formatCost(editing.budget.monthly.accrued)} / {editing.budget
+            >{formatBudget(editing.budget.monthly.accrued)} / {editing.budget
               .monthly.limit === null
               ? 'No limit'
-              : formatCost(editing.budget.monthly.limit)}</strong
+              : formatBudget(editing.budget.monthly.limit)}</strong
           >
           <small
             >Window ends {formatDate(

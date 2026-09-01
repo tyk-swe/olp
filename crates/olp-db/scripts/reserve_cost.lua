@@ -127,6 +127,10 @@ local function windows(now_ms)
 end
 
 local function read_state(key, expected_fields, current_window)
+  local key_type = redis.call("TYPE", key).ok
+  if key_type ~= "none" and key_type ~= "hash" then
+    return nil
+  end
   local values = redis.call("HMGET", key, unpack(expected_fields))
   local present = 0
   for index = 1, #values do
@@ -200,25 +204,20 @@ if monthly_limit ~= nil and compare_decimal(monthly_accrued, monthly_limit) >= 0
   return {RESPONSE_VERSION, 0, "monthly_cost", month_ttl, day_window, month_window}
 end
 
-if daily_limit ~= nil then
-  if daily_state ~= "current" then
-    redis.call("DEL", KEYS[1])
-    redis.call("HSET", KEYS[1], "window", day_window, "accrued", "0")
-  end
-  if redis.call("PTTL", KEYS[1]) < 1 then
-    redis.call("PEXPIRE", KEYS[1], day_ttl)
-  end
+-- Only authoritative snapshots may initialize a window. Missing state can
+-- also mean eviction or data loss, even while Valkey itself is reachable.
+if daily_limit ~= nil and daily_state ~= "current" then
+  return {RESPONSE_VERSION, -1, "uninitialized_daily_cost_state", 0, day_window, month_window}
 end
-if monthly_limit ~= nil then
-  if monthly_state ~= "current" then
-    redis.call("DEL", KEYS[2])
-    redis.call(
-      "HSET", KEYS[2], "window", month_window, "accrued", "0", "unpriced", 0
-    )
-  end
-  if redis.call("PTTL", KEYS[2]) < 1 then
-    redis.call("PEXPIRE", KEYS[2], month_ttl)
-  end
+if monthly_limit ~= nil and monthly_state ~= "current" then
+  return {RESPONSE_VERSION, -1, "uninitialized_monthly_cost_state", 0, day_window, month_window}
+end
+
+if daily_limit ~= nil and redis.call("PTTL", KEYS[1]) < 1 then
+  redis.call("PEXPIRE", KEYS[1], day_ttl)
+end
+if monthly_limit ~= nil and redis.call("PTTL", KEYS[2]) < 1 then
+  redis.call("PEXPIRE", KEYS[2], month_ttl)
 end
 
 return {RESPONSE_VERSION, 1, "ok", 0, day_window, month_window}

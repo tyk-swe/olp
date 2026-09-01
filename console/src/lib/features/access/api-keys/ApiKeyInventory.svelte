@@ -14,7 +14,7 @@
   import CursorPagination from '$lib/components/CursorPagination.svelte';
   import NavIcon from '$lib/components/NavIcon.svelte';
   import ReadOnlyNote from '$lib/components/ReadOnlyNote.svelte';
-  import { formatCost, formatDate } from '$lib/format';
+  import { formatBudget, formatDate } from '$lib/format';
   import type { ApiKeyListState } from './apiKeyListState';
 
   let {
@@ -191,14 +191,14 @@
             <td>
               {#if key.budget.daily.limit !== null || key.budget.monthly.limit !== null}
                 <small>
-                  {#if key.budget.daily.limit !== null}Daily {formatCost(
+                  {#if key.budget.daily.limit !== null}Daily {formatBudget(
                       key.budget.daily.accrued
-                    )} / {formatCost(key.budget.daily.limit)}{/if}
+                    )} / {formatBudget(key.budget.daily.limit)}{/if}
                   {#if key.budget.daily.limit !== null && key.budget.monthly.limit !== null}<br
                     />{/if}
-                  {#if key.budget.monthly.limit !== null}Monthly {formatCost(
+                  {#if key.budget.monthly.limit !== null}Monthly {formatBudget(
                       key.budget.monthly.accrued
-                    )} / {formatCost(key.budget.monthly.limit)}{/if}
+                    )} / {formatBudget(key.budget.monthly.limit)}{/if}
                 </small>
               {:else}
                 <small>No cost budget</small>

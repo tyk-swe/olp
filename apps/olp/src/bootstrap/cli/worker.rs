@@ -1,7 +1,10 @@
 use std::time::Duration;
 
 use olp_db::{
-    limits::DistributedLimiter,
+    limits::{
+        CostReconciliationError, CostReconciliationLeader, CostReconciliationReport,
+        DistributedLimiter,
+    },
     runtime::outbox::{RuntimeOutboxLeader, RuntimeOutboxLeadershipProbe},
     store::Store,
     valkey::{
@@ -140,46 +143,71 @@ pub(super) async fn cost_reconciliation_supervisor(
 ) {
     let mut interval = tokio::time::interval(Duration::from_secs(60));
     interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    let mut leader = None;
     loop {
+        if *shutdown.borrow() {
+            return;
+        }
         tokio::select! {
-            _ = interval.tick() => {
-                let result = async {
-                    let limiter = DistributedLimiter::connect(&valkey_url, &limits_namespace).await?;
-                    limiter.reconcile_costs(&store, chrono::Utc::now()).await
-                        .map_err(olp_engine::inference::limits::LimitError::service)
-                }.await;
-                match result {
-                    Ok(report) => {
-                        if let Err(error) = store.report_worker_task_checkpoint(
-                            WorkerTask::CostReconciliation,
-                            WorkerTaskCheckpointOutcome::Success,
-                            report.keys_reconciled > 0,
-                        ).await {
-                            warn!(%error, "cost reconciliation health checkpoint failed");
-                        }
-                        if report.keys_reconciled > 0 {
-                            info!(?report, "cost reconciliation pass completed");
-                        }
-                    }
-                    Err(error) => {
-                        if let Err(checkpoint_error) = store.report_worker_task_checkpoint(
-                            WorkerTask::CostReconciliation,
-                            WorkerTaskCheckpointOutcome::Failure,
-                            false,
-                        ).await {
-                            warn!(%checkpoint_error, "cost reconciliation failure checkpoint failed");
-                        }
-                        warn!(%error, "cost reconciliation failed; retrying next interval");
-                    }
-                }
-            }
+            biased;
             changed = shutdown.changed() => {
                 if changed.is_err() || *shutdown.borrow() {
                     return;
                 }
             }
+            _ = interval.tick() => {
+                let result = tokio::select! {
+                    biased;
+                    _ = shutdown.changed() => return,
+                    result = tokio::time::timeout(
+                        Duration::from_secs(120),
+                        reconcile_costs_as_leader(
+                            &store, &valkey_url, &limits_namespace, &mut leader,
+                        ),
+                    ) => result
+                        .map_err(olp_engine::inference::limits::LimitError::service)
+                        .and_then(|result| result.map_err(
+                            olp_engine::inference::limits::LimitError::service,
+                        )),
+                };
+                let (outcome, progress) = match result {
+                    Ok(report) if report.lock_acquired => {
+                        if report.keys_reconciled > 0 {
+                            info!(?report, "cost reconciliation pass completed");
+                        }
+                        (WorkerTaskCheckpointOutcome::Success, report.keys_reconciled > 0)
+                    }
+                    Ok(_) => (WorkerTaskCheckpointOutcome::Skipped, false),
+                    Err(error) => {
+                        leader = None;
+                        warn!(%error, "cost reconciliation failed; releasing leadership and retrying");
+                        (WorkerTaskCheckpointOutcome::Failure, false)
+                    }
+                };
+                if let Err(error) = store.report_worker_task_checkpoint(
+                    WorkerTask::CostReconciliation, outcome, progress,
+                ).await {
+                    warn!(%error, "cost reconciliation health checkpoint failed");
+                }
+            }
         }
     }
+}
+
+async fn reconcile_costs_as_leader(
+    store: &Store,
+    valkey_url: &str,
+    limits_namespace: &str,
+    leader: &mut Option<CostReconciliationLeader>,
+) -> Result<CostReconciliationReport, CostReconciliationError> {
+    if leader.is_none() {
+        *leader = store.try_acquire_cost_reconciliation_leader().await?;
+    }
+    let Some(leader) = leader.as_mut() else {
+        return Ok(CostReconciliationReport::default());
+    };
+    let limiter = DistributedLimiter::connect(valkey_url, limits_namespace).await?;
+    leader.reconcile(&limiter, chrono::Utc::now()).await
 }
 
 pub(super) async fn maintenance_supervisor(store: Store, mut shutdown: watch::Receiver<bool>) {

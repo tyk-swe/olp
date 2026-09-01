@@ -29,6 +29,7 @@ mod route_draft_simulation_postgres;
 mod runtime_fallback_postgres;
 mod runtime_publication_postgres;
 mod spend_controls_postgres;
+mod spend_recovery_postgres;
 mod upgrade_0021_postgres;
 mod usage_surface_upgrade_postgres;
 mod worker_ha_postgres;

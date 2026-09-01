@@ -2,7 +2,7 @@ use std::{collections::BTreeMap, str::FromStr as _};
 
 use chrono::{DateTime, Datelike as _, NaiveDate, Utc};
 use rust_decimal::Decimal;
-use sqlx::{Postgres, Transaction};
+use sqlx::{PgConnection, Postgres, Transaction};
 use uuid::Uuid;
 
 use crate::{error::Error, limits::CostSnapshot, store::Store};
@@ -74,7 +74,8 @@ impl Store {
                WHERE api_key_id = ANY($1::uuid[]) AND bucket >= $3 AND bucket < $4 \
              ), requested AS (SELECT DISTINCT unnest($1::uuid[]) AS api_key_id) \
              SELECT requested.api_key_id AS \"api_key_id!\", \
-                    COALESCE(SUM(usage.cost) FILTER (WHERE usage.observed_at >= $2), 0)::text \
+                    COALESCE(SUM(usage.cost) FILTER ( \
+                      WHERE usage.observed_at >= $2 AND usage.observed_at < $5), 0)::text \
                       AS \"daily_accrued!\", \
                     COALESCE(SUM(usage.cost), 0)::text AS \"monthly_accrued!\", \
                     COALESCE(SUM(usage.unpriced_attempts), 0)::bigint \
@@ -85,6 +86,7 @@ impl Store {
             windows.daily_start,
             windows.monthly_start,
             windows.monthly_end,
+            windows.daily_end,
         )
         .fetch_all(self.pool())
         .await?;
@@ -106,8 +108,8 @@ impl Store {
             .collect()
     }
 
-    pub(crate) async fn cost_reconciliation_snapshots(
-        &self,
+    pub(crate) async fn cost_reconciliation_snapshots_on(
+        connection: &mut PgConnection,
         now: DateTime<Utc>,
     ) -> Result<Vec<CostSnapshot>, Error> {
         let windows = budget_windows(now)?;
@@ -133,7 +135,8 @@ impl Store {
                WHERE hourly.bucket >= $3 AND hourly.bucket < $4 \
              ), totals AS ( \
                SELECT key.api_key_id, \
-                      COALESCE(SUM(usage.cost) FILTER (WHERE usage.observed_at >= $2), 0) \
+                      COALESCE(SUM(usage.cost) FILTER ( \
+                        WHERE usage.observed_at >= $2 AND usage.observed_at < $7), 0) \
                         AS daily_accrued, \
                       COALESCE(SUM(usage.cost), 0) AS monthly_accrued, \
                       COALESCE(SUM(usage.unpriced_attempts), 0)::bigint AS unpriced_attempts \
@@ -173,8 +176,9 @@ impl Store {
             windows.monthly_end,
             windows.daily_id,
             windows.monthly_id,
+            windows.daily_end,
         )
-        .fetch_all(self.pool())
+        .fetch_all(connection)
         .await?;
         rows.into_iter().map(snapshot_from_row).collect()
     }

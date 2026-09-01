@@ -120,6 +120,10 @@ local function windows(now_ms)
 end
 
 local function read_state(key, expected_fields, current_window)
+  local key_type = redis.call("TYPE", key).ok
+  if key_type ~= "none" and key_type ~= "hash" then
+    return nil
+  end
   local values = redis.call("HMGET", key, unpack(expected_fields))
   local present = 0
   for index = 1, #values do
@@ -135,7 +139,10 @@ local function read_state(key, expected_fields, current_window)
   end
   local stored_window = parse_safe_unsigned_integer(values[1])
   local accrued = normalize_decimal(values[2])
-  local unpriced = #values == 3 and parse_safe_unsigned_integer(values[3]) or 0
+  local unpriced = 0
+  if #values == 3 then
+    unpriced = parse_safe_unsigned_integer(values[3])
+  end
   if stored_window == nil or accrued == nil or unpriced == nil or stored_window > current_window then
     return nil
   end

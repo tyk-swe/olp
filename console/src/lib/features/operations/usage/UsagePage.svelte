@@ -14,6 +14,7 @@
   import { errorMessage } from '$lib/api/http';
   import {
     dateTimeLocalValue,
+    formatBudget,
     formatCompact,
     formatCost,
     formatDate,
@@ -195,12 +196,12 @@
       <div>
         <p>Daily accrued / limit</p>
         <strong
-          >{formatCost(
+          >{formatBudget(
             usage.data.apiKey.budget.daily.accrued,
             usage.data.summary.currency
           )} / {usage.data.apiKey.budget.daily.limit === null
             ? 'No limit'
-            : formatCost(
+            : formatBudget(
                 usage.data.apiKey.budget.daily.limit,
                 usage.data.summary.currency
               )}</strong
@@ -214,12 +215,12 @@
       <div>
         <p>Monthly accrued / limit</p>
         <strong
-          >{formatCost(
+          >{formatBudget(
             usage.data.apiKey.budget.monthly.accrued,
             usage.data.summary.currency
           )} / {usage.data.apiKey.budget.monthly.limit === null
             ? 'No limit'
-            : formatCost(
+            : formatBudget(
                 usage.data.apiKey.budget.monthly.limit,
                 usage.data.summary.currency
               )}</strong

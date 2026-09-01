@@ -1017,12 +1017,16 @@ async fn issue_key(
     name: &str,
     overrides: Value,
 ) -> Result<IssuedKey, String> {
+    let budgeted = ["daily_cost_limit", "monthly_cost_limit"]
+        .iter()
+        .any(|field| overrides.get(*field).is_some_and(|value| !value.is_null()));
     let key = world.issue_key(name, overrides).await?;
-    let timeout = Duration::from_secs(5);
+    // Budget readiness includes the authoritative snapshot bootstrap interval.
+    let timeout = Duration::from_secs(if budgeted { 90 } else { 5 });
     await_keys(http, &[second_gateway], &key, 200, timeout).await?;
     require!(
         key.published_at.elapsed() <= timeout,
-        "runtime generation {} did not converge within five seconds",
+        "runtime generation {} did not become ready within {timeout:?}",
         key.generation
     );
     Ok(key)
