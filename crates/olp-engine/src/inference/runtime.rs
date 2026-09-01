@@ -259,6 +259,7 @@ mod tests {
                 provider_id,
                 Provider {
                     id: provider_id,
+                    revision_id: None,
                     name: "provider".into(),
                     kind: ProviderKind::OpenAi,
                     enabled: true,
@@ -301,6 +302,7 @@ mod tests {
                 provider_id,
                 Provider {
                     id: provider_id,
+                    revision_id: None,
                     name: "provider".into(),
                     kind: ProviderKind::OpenAi,
                     enabled: true,

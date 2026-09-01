@@ -43,6 +43,8 @@ google-cloud-auth = "1.13"
 http.workspace = true
 ipnet.workspace = true
 jsonwebtoken = { workspace = true, features = ["use_pem"] }
+opentelemetry.workspace = true
+opentelemetry-http.workspace = true
 reqwest.workspace = true
 rust_decimal.workspace = true
 serde.workspace = true
@@ -51,6 +53,7 @@ sha2.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["io-util"] }
 tracing.workspace = true
+tracing-opentelemetry.workspace = true
 url.workspace = true
 utoipa.workspace = true
 uuid.workspace = true

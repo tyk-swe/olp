@@ -50,7 +50,7 @@ use validation::{
 };
 
 use olp_engine::inference::{
-    execution::RequestAdmission, limits::Reservation, principal::Principal,
+    execution::RequestAdmission, limits::Reservation, principal::Principal, tracing::RequestTrace,
 };
 
 #[derive(Clone, Copy)]
@@ -68,6 +68,7 @@ pub(crate) struct HttpRequestAdmission {
     metadata_claimed: Arc<AtomicBool>,
     reserved_tokens: Option<i64>,
     reservation_hold: Option<Reservation>,
+    trace: Option<RequestTrace>,
 }
 
 impl HttpRequestAdmission {
@@ -82,6 +83,7 @@ impl HttpRequestAdmission {
             metadata_claimed: Arc::new(AtomicBool::new(false)),
             reserved_tokens,
             reservation_hold,
+            trace: None,
         }
     }
 
@@ -102,6 +104,16 @@ impl HttpRequestAdmission {
             self.reservation_hold.clone(),
             self.reserved_tokens,
             Some(Arc::clone(&self.metadata_claimed)),
+            self.trace.clone(),
+        )
+    }
+
+    pub(crate) fn internal_engine_admission(&self) -> RequestAdmission {
+        RequestAdmission::new(
+            self.reservation_hold.clone(),
+            self.reserved_tokens,
+            Some(Arc::clone(&self.metadata_claimed)),
+            self.trace.as_ref().map(RequestTrace::attempts_only),
         )
     }
 
@@ -590,11 +602,13 @@ impl RequestFinalization {
         // claims completion through it. Unlimited keys keep the same pinned
         // generation and therefore remain unlimited throughout this request
         // even if a newer release activates concurrently.
+        let trace = request.extensions().get::<RequestTrace>().cloned();
         let admission = self.principal.take().map(|principal| HttpRequestAdmission {
             principal,
             metadata_claimed: Arc::new(AtomicBool::new(false)),
             reserved_tokens: self.reserved_tokens,
             reservation_hold: self.reservation.clone(),
+            trace,
         });
         let metadata_claimed = admission
             .as_ref()

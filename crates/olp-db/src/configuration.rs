@@ -102,6 +102,7 @@ pub struct ProviderActivated {
 #[derive(Debug, Clone)]
 pub struct RuntimeProvider {
     pub provider_id: ProviderId,
+    pub provider_revision_id: Option<Uuid>,
     pub kind: ProviderKind,
     pub endpoint: Option<String>,
     pub cloud_region: Option<String>,

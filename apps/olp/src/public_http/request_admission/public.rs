@@ -19,6 +19,7 @@ use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 
 use crate::{
     gateway::{self, endpoint_policy::classification::InferenceEndpoint},
+    observability::tracing::{RequestConfig as RequestTracingConfig, trace_admitted_request},
     public_http::problem::Problem,
 };
 
@@ -53,6 +54,7 @@ struct AdmissionInner {
 pub(crate) struct PublicAdmissionMiddleware {
     admission: PublicAdmission,
     inference_enabled: bool,
+    tracing: Option<RequestTracingConfig>,
 }
 
 struct AdmissionPermit {
@@ -164,10 +166,15 @@ impl PublicAdmission {
 }
 
 impl PublicAdmissionMiddleware {
-    pub(crate) const fn new(admission: PublicAdmission, inference_enabled: bool) -> Self {
+    pub(crate) const fn new(
+        admission: PublicAdmission,
+        inference_enabled: bool,
+        tracing: Option<RequestTracingConfig>,
+    ) -> Self {
         Self {
             admission,
             inference_enabled,
+            tracing,
         }
     }
 }
@@ -246,7 +253,10 @@ pub(crate) async fn admit_public_request(
         Err(()) => return overload_response(surface, endpoint, request.uri()),
     };
 
-    let response = next.run(request).await;
+    let response = match state.tracing {
+        Some(tracing) => trace_admitted_request(tracing, endpoint, request, next).await,
+        None => next.run(request).await,
+    };
     let (parts, body) = response.into_parts();
     Response::from_parts(parts, Body::new(AdmissionBody::new(body, permit)))
 }

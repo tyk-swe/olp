@@ -7,7 +7,7 @@ use crate::domain::{
     canonical::{
         events::{Event, Kind},
         identity::TransportMode,
-        requests::{MessageRole, Operation},
+        requests::{GenerationRequest, MessageRole, Operation, TokenCountRequest},
         results::{CanonicalResult, TokenCountResult},
     },
     ports::{
@@ -22,9 +22,18 @@ use aws_sdk_bedrockruntime::{
     operation::converse_stream::ConverseStreamOutput as ConverseStreamResponse,
     types::{ContentBlockDelta, ContentBlockStart, ConverseStreamOutput, CountTokensInput},
 };
-use aws_smithy_runtime_api::client::orchestrator::HttpResponse;
-use aws_smithy_types::event_stream::RawMessage;
+use aws_smithy_runtime_api::{
+    box_error::BoxError,
+    client::{
+        interceptors::{Intercept, context::BeforeTransmitInterceptorContextMut},
+        orchestrator::HttpResponse,
+        runtime_components::RuntimeComponents,
+    },
+    http::Headers,
+};
+use aws_smithy_types::{config_bag::ConfigBag, event_stream::RawMessage};
 use futures::stream;
+use opentelemetry::propagation::Injector;
 use tokio::time::{Instant, timeout};
 
 use crate::providers::bedrock::{
@@ -34,7 +43,39 @@ use crate::providers::bedrock::{
         protocol_body_error, protocol_error,
     },
 };
-use crate::providers::transport_common::parse_retry_after_value;
+use crate::providers::transport_common::{inject_current_trace_context, parse_retry_after_value};
+
+#[derive(Debug)]
+struct TraceContextInterceptor(bool);
+
+impl Intercept for TraceContextInterceptor {
+    fn name(&self) -> &'static str {
+        "TraceContextInterceptor"
+    }
+
+    fn modify_before_signing(
+        &self,
+        context: &mut BeforeTransmitInterceptorContextMut<'_>,
+        _runtime_components: &RuntimeComponents,
+        _config: &mut ConfigBag,
+    ) -> Result<(), BoxError> {
+        if !self.0 {
+            return Ok(());
+        }
+        inject_current_trace_context(&mut SmithyHeaderInjector(
+            context.request_mut().headers_mut(),
+        ));
+        Ok(())
+    }
+}
+
+struct SmithyHeaderInjector<'a>(&'a mut Headers);
+
+impl Injector for SmithyHeaderInjector<'_> {
+    fn set(&mut self, key: &str, value: String) {
+        let _ = self.0.try_insert(key.to_owned(), value);
+    }
+}
 
 pub(in crate::providers) struct Connector {
     runtime: aws_sdk_bedrockruntime::Client,
@@ -107,92 +148,117 @@ impl Connector {
         let attempt_deadline = Instant::now() + request.attempt.timeout.as_duration();
         match &*request.operation {
             Operation::Generation(generation) => {
-                let encoded = encode_generation(generation)?;
-                if request.metadata.mode == TransportMode::Streaming {
-                    let send_wait = first_byte_wait(attempt_deadline, self.timeouts.first_byte)?;
-                    let response = timeout(
-                        send_wait,
-                        self.runtime
-                            .converse_stream()
-                            .model_id(&request.attempt.upstream_model)
-                            .set_messages(Some(encoded.messages))
-                            .set_system((!encoded.system.is_empty()).then_some(encoded.system))
-                            .inference_config(encoded.inference_config)
-                            .set_tool_config(encoded.tool_config)
-                            .send(),
-                    )
+                self.execute_generation(&request, generation, attempt_deadline)
                     .await
-                    .map_err(|_| deadline_error(TransportPhase::FirstByte, false))?
-                    .map_err(|error| map_sdk_error(&error, TransportPhase::FirstByte, false))?;
-                    Ok(ProviderOutput::Events(stream_events(
-                        response,
-                        request.attempt.upstream_model.clone(),
-                        attempt_deadline,
-                        self.timeouts.idle,
-                    )))
-                } else {
-                    // The AWS SDK buffers unary response bodies before `.send()`
-                    // resolves. Socket inactivity is bounded by the SDK read
-                    // timeout; this outer bound is therefore the total attempt,
-                    // not a misleading first-byte deadline.
-                    let wait = remaining(attempt_deadline, TransportPhase::Body, false)?;
-                    let response = timeout(
-                        wait,
-                        self.runtime
-                            .converse()
-                            .model_id(&request.attempt.upstream_model)
-                            .set_messages(Some(encoded.messages))
-                            .set_system((!encoded.system.is_empty()).then_some(encoded.system))
-                            .inference_config(encoded.inference_config)
-                            .set_tool_config(encoded.tool_config)
-                            .send(),
-                    )
-                    .await
-                    .map_err(|_| deadline_error(TransportPhase::Body, false))?
-                    .map_err(|error| map_sdk_error(&error, TransportPhase::Body, false))?;
-                    let events = decode_converse(response, &request.attempt.upstream_model)
-                        .map_err(mark_uncommitted)?;
-                    Ok(ProviderOutput::Events(Box::pin(stream::iter(
-                        events.into_iter().map(Ok),
-                    ))))
-                }
             }
             Operation::TokenCount(count) => {
-                if request.metadata.mode != TransportMode::Unary {
-                    return Err(protocol_error(
-                        "Bedrock token counting supports unary mode only",
-                    ));
-                }
-                let input = encode_token_count(count)?;
-                let wait = remaining(attempt_deadline, TransportPhase::Body, false)?;
-                let response = timeout(
-                    wait,
-                    self.runtime
-                        .count_tokens()
-                        .model_id(&request.attempt.upstream_model)
-                        .input(CountTokensInput::Converse(input))
-                        .send(),
-                )
-                .await
-                .map_err(|_| deadline_error(TransportPhase::Body, false))?
-                .map_err(|error| map_sdk_error(&error, TransportPhase::Body, false))?;
-                let input_tokens = u64::try_from(response.input_tokens())
-                    .map_err(|_| {
-                        protocol_body_error("Bedrock returned a negative input token count")
-                    })
-                    .map_err(mark_uncommitted)?;
-                Ok(ProviderOutput::Result(Box::new(
-                    CanonicalResult::TokenCount(TokenCountResult {
-                        input_tokens,
-                        extensions: crate::domain::canonical::requests::SourceExtensions::default(),
-                    }),
-                )))
+                self.execute_token_count(&request, count, attempt_deadline)
+                    .await
             }
             operation => Err(protocol_error(format!(
                 "Bedrock connector does not support {:?}",
                 operation.kind()
             ))),
         }
+    }
+
+    async fn execute_generation(
+        &self,
+        request: &ProviderRequest,
+        generation: &GenerationRequest,
+        attempt_deadline: Instant,
+    ) -> Result<ProviderOutput, TransportError> {
+        let encoded = encode_generation(generation)?;
+        if request.metadata.mode == TransportMode::Streaming {
+            let send_wait = first_byte_wait(attempt_deadline, self.timeouts.first_byte)?;
+            let operation = self
+                .runtime
+                .converse_stream()
+                .model_id(&request.attempt.upstream_model)
+                .set_messages(Some(encoded.messages))
+                .set_system((!encoded.system.is_empty()).then_some(encoded.system))
+                .inference_config(encoded.inference_config)
+                .set_tool_config(encoded.tool_config);
+            let response = timeout(
+                send_wait,
+                operation
+                    .customize()
+                    .interceptor(TraceContextInterceptor(request.propagate_trace_context))
+                    .send(),
+            )
+            .await
+            .map_err(|_| deadline_error(TransportPhase::FirstByte, false))?
+            .map_err(|error| map_sdk_error(&error, TransportPhase::FirstByte, false))?;
+            return Ok(ProviderOutput::Events(stream_events(
+                response,
+                request.attempt.upstream_model.clone(),
+                attempt_deadline,
+                self.timeouts.idle,
+            )));
+        }
+        let wait = remaining(attempt_deadline, TransportPhase::Body, false)?;
+        let operation = self
+            .runtime
+            .converse()
+            .model_id(&request.attempt.upstream_model)
+            .set_messages(Some(encoded.messages))
+            .set_system((!encoded.system.is_empty()).then_some(encoded.system))
+            .inference_config(encoded.inference_config)
+            .set_tool_config(encoded.tool_config);
+        let response = timeout(
+            wait,
+            operation
+                .customize()
+                .interceptor(TraceContextInterceptor(request.propagate_trace_context))
+                .send(),
+        )
+        .await
+        .map_err(|_| deadline_error(TransportPhase::Body, false))?
+        .map_err(|error| map_sdk_error(&error, TransportPhase::Body, false))?;
+        let events =
+            decode_converse(response, &request.attempt.upstream_model).map_err(mark_uncommitted)?;
+        Ok(ProviderOutput::Events(Box::pin(stream::iter(
+            events.into_iter().map(Ok),
+        ))))
+    }
+
+    async fn execute_token_count(
+        &self,
+        request: &ProviderRequest,
+        count: &TokenCountRequest,
+        attempt_deadline: Instant,
+    ) -> Result<ProviderOutput, TransportError> {
+        if request.metadata.mode != TransportMode::Unary {
+            return Err(protocol_error(
+                "Bedrock token counting supports unary mode only",
+            ));
+        }
+        let input = encode_token_count(count)?;
+        let wait = remaining(attempt_deadline, TransportPhase::Body, false)?;
+        let operation = self
+            .runtime
+            .count_tokens()
+            .model_id(&request.attempt.upstream_model)
+            .input(CountTokensInput::Converse(input));
+        let response = timeout(
+            wait,
+            operation
+                .customize()
+                .interceptor(TraceContextInterceptor(request.propagate_trace_context))
+                .send(),
+        )
+        .await
+        .map_err(|_| deadline_error(TransportPhase::Body, false))?
+        .map_err(|error| map_sdk_error(&error, TransportPhase::Body, false))?;
+        let input_tokens = u64::try_from(response.input_tokens())
+            .map_err(|_| protocol_body_error("Bedrock returned a negative input token count"))
+            .map_err(mark_uncommitted)?;
+        Ok(ProviderOutput::Result(Box::new(
+            CanonicalResult::TokenCount(TokenCountResult {
+                input_tokens,
+                extensions: crate::domain::canonical::requests::SourceExtensions::default(),
+            }),
+        )))
     }
 }
 

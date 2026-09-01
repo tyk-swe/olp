@@ -22,9 +22,11 @@ use tokio::sync::Mutex;
 
 use crate::harness::{GatewayProcess, Server, WorkerBoundary, WorkerProcess};
 use crate::mock_upstream::{self, MockUpstream};
+use crate::otlp::OtlpReceiver;
 
 pub(crate) const OPENAI_ROUTE: &str = "e2e-openai";
 pub(crate) const CROSS_ROUTE: &str = "e2e-cross";
+pub(crate) const TRACE_ROUTE: &str = "e2e-trace-failover";
 pub(crate) const OWNER_EMAIL: &str = "owner@e2e.test";
 pub(crate) const OWNER_PASSWORD: &str = "correct horse battery staple";
 
@@ -267,6 +269,7 @@ pub(crate) struct World {
     pub(crate) api_key: String,
     pub(crate) compat_provider: String,
     pub(crate) azure_provider: String,
+    otlp: Option<OtlpReceiver>,
 }
 
 /// A gateway response kept whole: assertions need the status line, the headers
@@ -320,6 +323,12 @@ impl World {
 
     pub(crate) fn origin(&self) -> &str {
         &self.public_origin
+    }
+
+    pub(crate) fn otlp(&self) -> &OtlpReceiver {
+        self.otlp
+            .as_ref()
+            .expect("this fixture was launched with tracing enabled")
     }
 
     /// Posts to a gateway surface with a bearer credential.
@@ -494,10 +503,12 @@ impl World {
     }
 }
 
-/// Brings up a server, two providers, two routes and an API key, and waits
+/// Brings up a server, two providers, three routes and an API key, and waits
 /// until the gateway serves the key.
 pub(crate) async fn bootstrap() -> Result<World, String> {
-    bootstrap_server(Server::launch().await?).await
+    let otlp = OtlpReceiver::spawn().await?;
+    let server = Server::launch_traced(otlp.endpoint()).await?;
+    bootstrap_server_at_gateway(server, None, Some(otlp)).await
 }
 
 pub(crate) async fn bootstrap_sharing_valkey(valkey_url: &str) -> Result<World, String> {
@@ -505,9 +516,13 @@ pub(crate) async fn bootstrap_sharing_valkey(valkey_url: &str) -> Result<World, 
 }
 
 pub(crate) async fn bootstrap_ha() -> Result<(World, GatewayProcess), String> {
-    let mut server = Server::launch().await?;
+    let otlp = OtlpReceiver::spawn().await?;
+    let mut server = Server::launch_traced(otlp.endpoint()).await?;
     let gateway = server.launch_gateway().await?;
-    Ok((bootstrap_server(server).await?, gateway))
+    Ok((
+        bootstrap_server_at_gateway(server, None, Some(otlp)).await?,
+        gateway,
+    ))
 }
 
 pub(crate) async fn bootstrap_worker_ha() -> Result<(World, [WorkerProcess; 3]), String> {
@@ -523,17 +538,18 @@ pub(crate) async fn bootstrap_worker_ha() -> Result<(World, [WorkerProcess; 3]),
         .launch_worker("worker-3", WorkerBoundary::None)
         .await?;
     server.release_worker(&first)?;
-    let world = bootstrap_server_at_gateway(server, Some(gateway.public_origin)).await?;
+    let world = bootstrap_server_at_gateway(server, Some(gateway.public_origin), None).await?;
     Ok((world, [first, second, third]))
 }
 
 async fn bootstrap_server(server: Server) -> Result<World, String> {
-    bootstrap_server_at_gateway(server, None).await
+    bootstrap_server_at_gateway(server, None, None).await
 }
 
 async fn bootstrap_server_at_gateway(
     server: Server,
     gateway_origin: Option<String>,
+    otlp: Option<OtlpReceiver>,
 ) -> Result<World, String> {
     let mock = MockUpstream::spawn().await;
     let mut management = Management::new(&server.public_origin);
@@ -568,6 +584,8 @@ async fn bootstrap_server_at_gateway(
         }),
         mock_upstream::DEPLOYMENT,
         json!([
+            {"operation": "generation", "surface": "openai", "mode": "unary"},
+            {"operation": "generation", "surface": "openai", "mode": "streaming"},
             {"operation": "generation", "surface": "anthropic", "mode": "unary"},
             {"operation": "generation", "surface": "anthropic", "mode": "streaming"},
             {"operation": "generation", "surface": "gemini", "mode": "unary"},
@@ -579,15 +597,25 @@ async fn bootstrap_server_at_gateway(
     configure_route(
         &management,
         OPENAI_ROUTE,
-        &compat_provider,
-        mock_upstream::MODEL,
+        vec![route_target(&compat_provider, mock_upstream::MODEL, 0)],
+        1,
     )
     .await?;
     configure_route(
         &management,
         CROSS_ROUTE,
-        &azure_provider,
-        mock_upstream::DEPLOYMENT,
+        vec![route_target(&azure_provider, mock_upstream::DEPLOYMENT, 0)],
+        1,
+    )
+    .await?;
+    configure_route(
+        &management,
+        TRACE_ROUTE,
+        vec![
+            route_target(&compat_provider, mock_upstream::MODEL, 0),
+            route_target(&azure_provider, mock_upstream::DEPLOYMENT, 1),
+        ],
+        2,
     )
     .await?;
 
@@ -601,7 +629,7 @@ async fn bootstrap_server_at_gateway(
             Some(json!({
                 "name": "e2e contract key",
                 "scopes": ["inference", "models_read"],
-                "allowed_routes": [OPENAI_ROUTE, CROSS_ROUTE]
+                "allowed_routes": [OPENAI_ROUTE, CROSS_ROUTE, TRACE_ROUTE]
             })),
             Some(&key),
             None,
@@ -640,6 +668,7 @@ async fn bootstrap_server_at_gateway(
         api_key: secret,
         compat_provider,
         azure_provider,
+        otlp,
     })
 }
 
@@ -874,11 +903,21 @@ async fn configure_pricing(management: &Management) -> Result<(), String> {
     Ok(())
 }
 
+fn route_target(provider_id: &str, model_id: &str, priority: u32) -> Value {
+    json!({
+        "provider_id": provider_id,
+        "provider_model": model_id,
+        "priority": priority,
+        "weight": 1,
+        "timeout_ms": 30_000
+    })
+}
+
 async fn configure_route(
     management: &Management,
     route: &str,
-    provider_id: &str,
-    model_id: &str,
+    targets: Vec<Value>,
+    max_attempts: u16,
 ) -> Result<(), String> {
     // Routes are drafts-first: `/api/v1/routes` is read-only and a route comes
     // into being by creating a draft and activating it. Field names and the
@@ -892,16 +931,8 @@ async fn configure_route(
                 "slug": route,
                 "operations": ["generation"],
                 "overall_timeout_ms": 30_000,
-                // Bounded by the target count, so a single-target route may
-                // attempt exactly once.
-                "max_attempts": 1,
-                "targets": [{
-                    "provider_id": provider_id,
-                    "provider_model": model_id,
-                    "priority": 0,
-                    "weight": 1,
-                    "timeout_ms": 30_000
-                }]
+                "max_attempts": max_attempts,
+                "targets": targets
             })),
             None,
             None,

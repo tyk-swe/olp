@@ -106,6 +106,7 @@ pub(super) async fn metrics(
         body.push_str(&metrics);
     }
     body.push_str(&state.public_admission.metrics());
+    append_trace_export_metrics(&mut body);
     let mut response = (
         [(
             axum::http::header::CONTENT_TYPE,
@@ -116,6 +117,18 @@ pub(super) async fn metrics(
         .into_response();
     attach_snapshot_freshness(&mut response, metrics_age, metrics_fresh);
     response
+}
+
+fn append_trace_export_metrics(body: &mut String) {
+    body.push_str(
+        "# HELP olp_trace_export_dropped_total Spans dropped before successful OTLP export.\n\
+         # TYPE olp_trace_export_dropped_total counter\n",
+    );
+    let _ = writeln!(
+        body,
+        "olp_trace_export_dropped_total {}",
+        crate::observability::tracing::export_dropped_total()
+    );
 }
 
 /// Renders the durably reported request metadata loss totals. All three series
@@ -507,5 +520,14 @@ mod tests {
         append_media_spool_metrics(&mut partial, Some(4096), None);
         assert!(partial.contains("olp_media_spool_capacity_bytes 4096\n"));
         assert!(!partial.contains("olp_media_spool_used_bytes"));
+    }
+
+    #[test]
+    fn trace_export_drop_counter_is_always_rendered() {
+        let mut body = String::new();
+        append_trace_export_metrics(&mut body);
+
+        assert!(body.contains("# TYPE olp_trace_export_dropped_total counter\n"));
+        assert!(body.contains("olp_trace_export_dropped_total "));
     }
 }

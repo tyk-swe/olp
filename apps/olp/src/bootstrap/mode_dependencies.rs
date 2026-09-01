@@ -32,6 +32,7 @@ use crate::{
         cache::ObservabilityCache,
         metrics::RequestMetadataLossCounters,
         readiness::{HealthResponse, cached_readiness_from_snapshot},
+        tracing::RequestConfig as RequestTracingConfig,
     },
     public_http::problem::Problem,
     public_http::proxy::TrustedProxyCidr,
@@ -50,6 +51,7 @@ pub(crate) struct RequestBoundaryState {
     pub(crate) public_admission: PublicAdmission,
     pub(crate) public_origin: PublicOrigin,
     pub(crate) body_limits: BodyLimits,
+    pub(crate) request_tracing: Option<RequestTracingConfig>,
     trusted_proxy_cidrs: Arc<[TrustedProxyCidr]>,
     bootstrap_token_digest: Arc<tokio::sync::RwLock<Option<zeroize::Zeroizing<[u8; 32]>>>>,
 }
@@ -419,6 +421,7 @@ impl ProcessComposition {
             public_admission: self.public_admission.clone(),
             public_origin: self.public_origin.clone(),
             body_limits: self.body_limits,
+            request_tracing: self.request_tracing,
             trusted_proxy_cidrs: Arc::clone(&self.trusted_proxy_cidrs),
             bootstrap_token_digest: Arc::clone(&self.bootstrap_token_digest),
         };

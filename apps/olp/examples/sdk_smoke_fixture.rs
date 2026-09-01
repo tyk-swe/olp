@@ -222,6 +222,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             provider_id,
             Provider {
                 id: provider_id,
+                revision_id: None,
                 name: "sdk-smoke-static-provider".to_owned(),
                 kind: ProviderKind::OpenAi,
                 enabled: true,

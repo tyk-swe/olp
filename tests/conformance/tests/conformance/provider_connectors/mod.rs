@@ -330,6 +330,7 @@ fn provider_request(
             target_id: TargetId::new(),
             routing_id: TargetId::new(),
             provider_id: ProviderId::new(),
+            provider_revision_id: None,
             provider_kind: kind,
             upstream_model: MODEL.to_owned(),
             timeout: DurationMs::new(timeout_ms),
@@ -338,6 +339,7 @@ fn provider_request(
         operation: Arc::new(operation),
         media: None,
         max_inline_media_bytes: 1024 * 1024,
+        propagate_trace_context: false,
     }
 }
 

@@ -13,7 +13,10 @@ use http::{HeaderMap, HeaderValue, header};
 use tokio::time::{Instant, timeout};
 
 use super::super::{Connector, errors::*, media::*};
-use crate::providers::{transport_common::transport_error, transport_io::bounded_duration};
+use crate::providers::{
+    transport_common::{inject_trace_context, transport_error},
+    transport_io::bounded_duration,
+};
 
 pub(super) async fn execute(
     connector: &Connector,
@@ -117,6 +120,7 @@ pub(super) async fn execute(
             )
         })?,
     );
+    inject_trace_context(&mut headers, request.propagate_trace_context);
 
     let send_wait =
         remaining_until(first_byte_deadline, attempt_deadline).ok_or_else(first_byte_timeout)?;

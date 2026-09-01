@@ -3,6 +3,7 @@
 pub mod cache;
 pub(crate) mod metrics;
 pub(crate) mod readiness;
+pub(crate) mod tracing;
 
 use std::time::Duration;
 

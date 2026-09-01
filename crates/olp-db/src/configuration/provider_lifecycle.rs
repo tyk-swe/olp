@@ -35,7 +35,7 @@ impl Store {
                 .map(|credential| credential.as_uuid());
             let row = sqlx::query_as!(
                 RuntimeProviderRow,
-                "SELECT rpc.provider_id AS id, rpc.kind, rpc.endpoint, rpc.cloud_region, \
+                "SELECT rpc.provider_id AS id, rpc.provider_revision_id, rpc.kind, rpc.endpoint, rpc.cloud_region, \
                         rpc.cloud_project, rpc.deployment, rpc.api_version, rpc.auth_mode, \
                         cv.id AS \"credential_id?\", cv.version AS \"credential_version?\", \
                         cv.ciphertext AS \"ciphertext?\", cv.nonce AS \"nonce?\", \
@@ -57,7 +57,11 @@ impl Store {
             .await?
             .ok_or(Error::InvalidCredential)?;
             let stored_kind = parse_provider_kind(row.kind.as_str())?;
-            if stored_kind != runtime_provider.kind {
+            if stored_kind != runtime_provider.kind
+                || runtime_provider
+                    .revision_id
+                    .is_some_and(|revision| Some(revision) != row.provider_revision_id)
+            {
                 return Err(Error::InvalidCredential);
             }
             records.push(runtime_provider_configuration_from_row(row)?);
@@ -79,7 +83,7 @@ impl Store {
             .active_credential
             .map(|credential| credential.as_uuid());
         let row = sqlx::query_as::<_, RuntimeProviderRow>(
-            "SELECT rpc.provider_id AS id, rpc.kind, rpc.endpoint, rpc.cloud_region, \
+            "SELECT rpc.provider_id AS id, rpc.provider_revision_id, rpc.kind, rpc.endpoint, rpc.cloud_region, \
                     rpc.cloud_project, rpc.deployment, rpc.api_version, rpc.auth_mode, \
                     cv.id AS credential_id, cv.version AS credential_version, \
                     cv.ciphertext, cv.nonce, cv.master_key_version \
@@ -623,6 +627,7 @@ async fn reject_unroutable_activation(
 #[derive(Debug, FromRow)]
 struct RuntimeProviderRow {
     id: Uuid,
+    provider_revision_id: Option<Uuid>,
     kind: String,
     endpoint: Option<String>,
     cloud_region: Option<String>,
@@ -661,6 +666,7 @@ fn runtime_provider_configuration_from_row(
     }
     Ok(RuntimeProvider {
         provider_id: ProviderId::from_uuid(row.id),
+        provider_revision_id: row.provider_revision_id,
         kind: parse_provider_kind(row.kind.as_str())?,
         endpoint: row.endpoint,
         cloud_region: row.cloud_region,

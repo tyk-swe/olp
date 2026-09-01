@@ -146,7 +146,7 @@ checked_rg_capture third_party_containers third_party_containers_matched \
   "scan executed third-party containers" "$root" \
   --hidden -n --glob '*.yml' --glob '*.yaml' --glob '*.sh' \
   --glob '!.git/**' \
-  '(image:[[:space:]]*(postgres|valkey/valkey|node|nginx|grafana/k6|alpine|ghcr\.io/shopify/toxiproxy):|(?:docker[[:space:]]+(?:pull|run)[^\n]*|image=)(grafana/k6|alpine):|^[[:space:]]+(postgres|valkey/valkey|node|nginx|grafana/k6|alpine|ghcr\.io/shopify/toxiproxy):[0-9])' \
+  '(image:[[:space:]]*(postgres|valkey/valkey|node|nginx|grafana/k6|alpine|ghcr\.io/shopify/toxiproxy|cr\.jaegertracing\.io/jaegertracing/jaeger):|(?:docker[[:space:]]+(?:pull|run)[^\n]*|image=)(grafana/k6|alpine|cr\.jaegertracing\.io/jaegertracing/jaeger):|^[[:space:]]+(postgres|valkey/valkey|node|nginx|grafana/k6|alpine|ghcr\.io/shopify/toxiproxy|cr\.jaegertracing\.io/jaegertracing/jaeger):[0-9])' \
   "$root"
 if (( third_party_containers_matched )); then
   while IFS= read -r entry; do

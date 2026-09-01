@@ -3,6 +3,8 @@
 {{- $gatewayCorsAllowedOrigins := trim $root.Values.config.gatewayCorsAllowedOrigins -}}
 {{- $providerEgressAllowCidrs := trim $root.Values.config.providerEgressAllowCidrs -}}
 {{- $providerEgressAllowHttpHosts := trim $root.Values.config.providerEgressAllowHttpHosts -}}
+{{- $tracingEndpoint := trim $root.Values.tracing.endpoint -}}
+{{- $tracingHeadersSecretName := trim $root.Values.tracing.headersSecretName -}}
 {{- if ge (int $root.Values.preStopDelaySeconds) (int $root.Values.terminationGracePeriodSeconds) -}}
 {{- fail "preStopDelaySeconds must be less than terminationGracePeriodSeconds" -}}
 {{- end -}}
@@ -84,6 +86,16 @@ spec:
               value: "0.0.0.0:8080"
             - name: OLP_OBSERVABILITY_LISTEN_ADDR
               value: "0.0.0.0:9090"
+            {{- if $tracingEndpoint }}
+            - name: OLP_OTLP_TRACES_ENDPOINT
+              value: {{ $tracingEndpoint | quote }}
+            - name: OLP_TRACE_SAMPLE_RATIO
+              value: {{ $root.Values.tracing.sampleRatio | quote }}
+            {{- if $tracingHeadersSecretName }}
+            - name: OLP_OTLP_HEADERS_FILE
+              value: /run/secrets/otlp-headers/headers
+            {{- end }}
+            {{- end }}
             - name: OLP_HTTP_MAX_CONNECTIONS
               value: {{ $component.httpMaxConnections | quote }}
             - name: OLP_HTTP_MAX_IN_FLIGHT_INFERENCE_REQUESTS
@@ -188,6 +200,11 @@ spec:
             - name: auth-hmac-key
               mountPath: /run/secrets/auth-hmac-key
               readOnly: true
+            {{- if and $tracingEndpoint $tracingHeadersSecretName }}
+            - name: otlp-headers
+              mountPath: /run/secrets/otlp-headers
+              readOnly: true
+            {{- end }}
             {{- if and (eq $componentName "control") $root.Values.config.bootstrapTokenSecretName }}
             - name: bootstrap-token
               mountPath: /run/secrets/bootstrap-token
@@ -212,6 +229,15 @@ spec:
             items:
               - key: {{ required "config.authHmacKeySecretKey is required" $root.Values.config.authHmacKeySecretKey | quote }}
                 path: key
+        {{- if and $tracingEndpoint $tracingHeadersSecretName }}
+        - name: otlp-headers
+          secret:
+            secretName: {{ $tracingHeadersSecretName | quote }}
+            defaultMode: 0440
+            items:
+              - key: {{ required "tracing.headersSecretKey is required when tracing.headersSecretName is set" $root.Values.tracing.headersSecretKey | quote }}
+                path: headers
+        {{- end }}
         {{- if and (eq $componentName "control") $root.Values.config.bootstrapTokenSecretName }}
         - name: bootstrap-token
           secret:

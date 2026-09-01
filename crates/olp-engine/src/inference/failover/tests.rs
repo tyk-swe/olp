@@ -22,6 +22,7 @@ fn plan(target_id: TargetId) -> AttemptPlan {
         target_id,
         routing_id: target_id,
         provider_id: ProviderId::new(),
+        provider_revision_id: None,
         provider_kind: ProviderKind::OpenAi,
         upstream_model: "backoff-test".to_owned(),
         timeout: DurationMs::new(1_000),
@@ -221,13 +222,14 @@ fn elapsed_deadline_records_attempt_without_penalizing_closed_circuit() {
         target_id,
         routing_id: target_id,
         provider_id: ProviderId::new(),
+        provider_revision_id: None,
         provider_kind: ProviderKind::OpenAi,
         upstream_model: "deadline-test".to_owned(),
         timeout: DurationMs::new(1_000),
         priority: 0,
     };
     let circuits = Breaker::default();
-    let record = AttemptRecord {
+    let mut record = AttemptRecord {
         plan: &attempt,
         circuit_permit: circuits
             .try_acquire_permit(target_id)
@@ -235,6 +237,7 @@ fn elapsed_deadline_records_attempt_without_penalizing_closed_circuit() {
         ordinal: 1,
         started_at: Utc::now(),
         started: tokio::time::Instant::now(),
+        trace: None,
     };
 
     let mut traces = Vec::new();
@@ -510,6 +513,7 @@ mod execute {
                     plan.provider_id,
                     Provider {
                         id: plan.provider_id,
+                        revision_id: None,
                         name: "scripted".into(),
                         kind: ProviderKind::OpenAi,
                         enabled: true,
@@ -563,6 +567,7 @@ mod execute {
                     max_inline_media_bytes: 1024 * 1024,
                     circuits: &self.circuits,
                     on_attempt_started: None,
+                    trace: None,
                 },
                 self.targets
                     .iter()

@@ -1,5 +1,39 @@
 use super::*;
 
+const REQUEST_TRACE_ATTRIBUTE_KEYS: &[&str] = &[
+    "olp.request_id",
+    "olp.surface",
+    "olp.operation",
+    "olp.route_slug",
+    "olp.key_id",
+    "olp.installation_id",
+    "olp.generation",
+    "olp.status",
+    "olp.error_class",
+    "olp.attempt_count",
+    "olp.time_to_first_byte_ms",
+    "olp.total_duration_ms",
+    "olp.cancelled",
+];
+const ATTEMPT_TRACE_ATTRIBUTE_KEYS: &[&str] = &[
+    "olp.provider_kind",
+    "olp.provider_revision",
+    "olp.model",
+    "olp.outcome_class",
+    "olp.upstream_status_class",
+    "olp.usage.input_tokens",
+    "olp.usage.output_tokens",
+    "olp.usage.cached_input_tokens",
+    "olp.usage.media_units",
+    "olp.pricing_provenance",
+];
+// Deliberately restated rather than imported: `assert_trace_allowlist` is a
+// subset check, so importing the engine constant would let a newly exported
+// attribute pass unnoticed. `trace_allowlists_match_the_engine` keeps the two
+// from drifting apart silently.
+const TRACE_RESOURCE_ATTRIBUTE_KEYS: [&str; 3] =
+    ["olp.process.mode", "service.name", "service.version"];
+
 // ---------------------------------------------------------------------------
 // Telemetry
 //
@@ -275,4 +309,259 @@ fn missing_upstream_usage_is_incomplete_and_unpriced_never_zero() {
             completeness.body
         );
     });
+}
+
+#[test]
+#[ignore = "end-to-end; run via make e2e"]
+fn streamed_failover_exports_one_content_free_linked_trace() {
+    runtime().block_on(async {
+        let proof = run_failover_trace(world()).await;
+        assert_request_span(&proof);
+        assert_attempt_spans(&proof);
+        assert_upstream_propagation(&proof);
+        assert_trace_has_no_content(&proof);
+    });
+}
+
+struct FailoverTraceProof {
+    inbound: otlp::InboundTrace,
+    prompt_secret: String,
+    malicious_request_id: String,
+    request: otlp::CollectedSpan,
+    attempts: [otlp::CollectedSpan; 2],
+    upstream: [mock_upstream::RecordedRequest; 2],
+}
+
+async fn run_failover_trace(world: &world::World) -> FailoverTraceProof {
+    let inbound = otlp::inbound_trace();
+    let prompt_secret = nonce("secret-trace-prompt");
+    let malicious_request_id = nonce("secret-trace-request-id");
+    let prompt = format!("{} {prompt_secret}", mock_upstream::TRACE_FAILOVER_MARKER);
+    let authorization = format!("Bearer {}", world.api_key);
+    let checkpoint = world.mock.checkpoint();
+    let response = world
+        .gateway_send(
+            reqwest::Method::POST,
+            "/openai/v1/chat/completions",
+            Some(json!({
+                "model": world::TRACE_ROUTE,
+                "stream": true,
+                "messages": [{"role": "user", "content": prompt}]
+            })),
+            &[
+                (reqwest::header::AUTHORIZATION.as_str(), &authorization),
+                ("traceparent", &inbound.header),
+                ("x-request-id", &malicious_request_id),
+            ],
+        )
+        .await
+        .expect("streamed failover request");
+    assert_eq!(response.status, 200, "streamed failover: {}", response.text);
+    assert!(
+        response
+            .header("content-type")
+            .is_some_and(|value| value.starts_with("text/event-stream"))
+    );
+    assert!(response.text.contains("data: [DONE]"));
+
+    let upstream = world
+        .mock
+        .since(checkpoint)
+        .try_into()
+        .unwrap_or_else(|calls: Vec<_>| panic!("expected two provider calls: {calls:#?}"));
+    let mut spans = world
+        .otlp()
+        .await_trace(&inbound.trace_id, 3, std::time::Duration::from_secs(15))
+        .await
+        .expect("trace export");
+    assert_eq!(spans.len(), 3, "unexpected trace span count");
+    let request_index = spans
+        .iter()
+        .position(|span| span.string_attribute("olp.surface").is_some())
+        .expect("request span");
+    let request = spans.remove(request_index);
+    spans.sort_by_key(|span| span.span.start_time_unix_nano);
+    let attempts = spans
+        .try_into()
+        .unwrap_or_else(|spans: Vec<_>| panic!("expected two attempt spans, got {}", spans.len()));
+    FailoverTraceProof {
+        inbound,
+        prompt_secret,
+        malicious_request_id,
+        request,
+        attempts,
+        upstream,
+    }
+}
+
+fn assert_request_span(proof: &FailoverTraceProof) {
+    let request = &proof.request;
+    assert_eq!(request.span.name, "request");
+    assert_eq!(request.span.trace_id, proof.inbound.trace_id);
+    assert_eq!(request.span.parent_span_id, proof.inbound.parent_span_id);
+    assert_eq!(request.string_attribute("olp.request_id"), None);
+    assert_eq!(request.string_attribute("olp.surface"), Some("openai"));
+    assert_eq!(
+        request.string_attribute("olp.operation"),
+        Some("generation")
+    );
+    assert_eq!(
+        request.string_attribute("olp.route_slug"),
+        Some(world::TRACE_ROUTE)
+    );
+    assert_eq!(request.integer_attribute("olp.status"), Some(200));
+    assert_eq!(request.integer_attribute("olp.attempt_count"), Some(2));
+    assert_eq!(
+        request.resource_attribute("service.name"),
+        Some("openllmproxy")
+    );
+    assert_trace_allowlist(request, REQUEST_TRACE_ATTRIBUTE_KEYS);
+    assert!(
+        request.span.end_time_unix_nano
+            >= proof
+                .attempts
+                .iter()
+                .map(|span| span.span.end_time_unix_nano)
+                .max()
+                .unwrap(),
+        "request span ended before its final provider attempt"
+    );
+}
+
+fn assert_attempt_spans(proof: &FailoverTraceProof) {
+    for attempt in &proof.attempts {
+        assert_eq!(attempt.span.name, "attempt");
+        assert_eq!(attempt.span.trace_id, proof.inbound.trace_id);
+        assert_eq!(attempt.span.parent_span_id, proof.request.span.span_id);
+        assert_trace_allowlist(attempt, ATTEMPT_TRACE_ATTRIBUTE_KEYS);
+    }
+    assert_ne!(
+        proof.attempts[0].span.span_id,
+        proof.attempts[1].span.span_id
+    );
+    for (attempt, provider, model, outcome, status) in [
+        (
+            &proof.attempts[0],
+            "openai_compatible",
+            mock_upstream::MODEL,
+            "rate_limit",
+            "4xx",
+        ),
+        (
+            &proof.attempts[1],
+            "azure_openai",
+            mock_upstream::DEPLOYMENT,
+            "success",
+            "2xx",
+        ),
+    ] {
+        assert_eq!(
+            attempt.string_attribute("olp.provider_kind"),
+            Some(provider)
+        );
+        assert_eq!(attempt.string_attribute("olp.model"), Some(model));
+        let revision = attempt
+            .string_attribute("olp.provider_revision")
+            .expect("attempt span provider revision");
+        revision
+            .parse::<olp_engine::domain::ids::ProviderId>()
+            .expect("provider revision is a UUID");
+        assert_eq!(attempt.string_attribute("olp.outcome_class"), Some(outcome));
+        assert_eq!(
+            attempt.string_attribute("olp.upstream_status_class"),
+            Some(status)
+        );
+    }
+    assert_eq!(
+        proof.attempts[1].integer_attribute("olp.usage.input_tokens"),
+        Some(i64::try_from(mock_upstream::PROMPT_TOKENS).unwrap())
+    );
+    assert_eq!(
+        proof.attempts[1].integer_attribute("olp.usage.output_tokens"),
+        Some(i64::try_from(mock_upstream::COMPLETION_TOKENS).unwrap())
+    );
+}
+
+fn assert_upstream_propagation(proof: &FailoverTraceProof) {
+    assert_eq!(proof.upstream[0].path, "/v1/chat/completions");
+    assert_eq!(
+        proof.upstream[1].path,
+        format!(
+            "/openai/deployments/{}/chat/completions",
+            mock_upstream::DEPLOYMENT
+        )
+    );
+    let trace_id = otlp::hex_id(&proof.inbound.trace_id);
+    for (call, attempt) in proof.upstream.iter().zip(&proof.attempts) {
+        let traceparent = call
+            .header("traceparent")
+            .unwrap_or_else(|| panic!("provider call lacks traceparent: {call:#?}"));
+        let fields: Vec<&str> = traceparent.split('-').collect();
+        assert_eq!(
+            fields.len(),
+            4,
+            "invalid provider traceparent: {traceparent}"
+        );
+        assert_eq!(fields[0], "00");
+        assert_eq!(fields[1], trace_id);
+        assert_eq!(fields[2], otlp::hex_id(&attempt.span.span_id));
+        assert_eq!(fields[3], "01");
+        assert!(
+            !call.headers.iter().any(|(_, value)| {
+                value.contains(&proof.prompt_secret) || value.contains(&proof.malicious_request_id)
+            }),
+            "content reached provider headers: {:#?}",
+            call.headers
+        );
+    }
+}
+
+fn assert_trace_has_no_content(proof: &FailoverTraceProof) {
+    let forbidden = [
+        proof.prompt_secret.as_str(),
+        proof.malicious_request_id.as_str(),
+        mock_upstream::PLAIN_TEXT,
+        mock_upstream::PLAIN_DELTAS[0],
+        mock_upstream::PLAIN_DELTAS[2],
+    ];
+    for span in std::iter::once(&proof.request).chain(&proof.attempts) {
+        assert!(span.span.events.is_empty(), "trace span exported events");
+        assert!(span.span.links.is_empty(), "trace span exported links");
+        assert!(
+            !span.contains_any_text(&forbidden),
+            "request or response content reached exported span {}",
+            span.span.name
+        );
+    }
+}
+
+/// The restated allowlists above are only trustworthy while they agree with
+/// what the engine actually exports.
+#[test]
+fn trace_allowlists_match_the_engine() {
+    assert_eq!(
+        REQUEST_TRACE_ATTRIBUTE_KEYS,
+        olp_engine::inference::tracing::REQUEST_ATTRIBUTE_KEYS
+    );
+    assert_eq!(
+        ATTEMPT_TRACE_ATTRIBUTE_KEYS,
+        olp_engine::inference::tracing::ATTEMPT_ATTRIBUTE_KEYS
+    );
+}
+
+fn assert_trace_allowlist(span: &otlp::CollectedSpan, allowed_attributes: &[&str]) {
+    let allowed: std::collections::BTreeSet<_> = allowed_attributes.iter().copied().collect();
+    let actual = span.attribute_keys();
+    let unexpected: Vec<_> = actual.difference(&allowed).copied().collect();
+    assert!(
+        unexpected.is_empty(),
+        "span {} exported attributes outside its allowlist: {unexpected:?}",
+        span.span.name
+    );
+    assert_eq!(
+        span.resource_attribute_keys(),
+        std::collections::BTreeSet::from(TRACE_RESOURCE_ATTRIBUTE_KEYS),
+        "span {} exported unexpected resource attributes",
+        span.span.name
+    );
 }

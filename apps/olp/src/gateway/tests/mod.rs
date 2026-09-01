@@ -142,6 +142,7 @@ fn test_state(streaming: bool) -> (GatewayState, String) {
     };
     let provider = Provider {
         id: provider_id,
+        revision_id: None,
         name: "mock-openai".to_owned(),
         kind: ProviderKind::OpenAi,
         enabled: true,

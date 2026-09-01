@@ -78,10 +78,9 @@ impl Store {
     }
 
     pub async fn valkey_keyspace(&self) -> Result<Keyspace, PersistenceError> {
-        let id = sqlx::query_scalar!("SELECT id FROM installation_identity WHERE singleton")
-            .fetch_one(self.pool())
-            .await?;
-        Ok(Keyspace::from_installation_id(id))
+        Ok(Keyspace::from_installation_id(
+            self.installation_id().await?,
+        ))
     }
 }
 

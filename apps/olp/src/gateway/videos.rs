@@ -40,8 +40,9 @@ use crate::{
 use super::{
     error::InferenceError,
     execution::{
-        authorize_principal, defer_unary_outcome_to_body, execute_routed_result,
-        incompatible_result, mark_unary_outcome, mark_unary_outcome_with_status,
+        authorize_principal, defer_unary_outcome_to_body, execute_internal_routed_result,
+        execute_routed_result, incompatible_result, mark_unary_outcome,
+        mark_unary_outcome_with_status,
     },
     media::{open_response_media, response_from_opened_media},
     media_jobs::{
@@ -330,7 +331,7 @@ async fn compensate_video_create(
     let mut cleanup = decode_video_delete(upstream_job_id.to_owned());
     set_video_route(&mut cleanup, executed.route_slug.as_str())?;
     mark_missing_delete_as_success(&mut cleanup)?;
-    let mut compensation = execute_routed_result(
+    let mut compensation = execute_internal_routed_result(
         state,
         principal,
         cleanup,

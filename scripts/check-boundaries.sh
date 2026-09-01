@@ -114,6 +114,7 @@ role_violations=$(jq -r '
   | ["engine:engine","db:engine","db:db",
      "delivery:engine","delivery:db","delivery:delivery"] as $allowed
   | {sqlx:"db", redis:"db", reqwest:"engine", "google-cloud-auth":"engine",
+     "opentelemetry-otlp":"delivery", opentelemetry_sdk:"delivery",
      axum:"delivery", tower:"delivery", "tower-http":"delivery", clap:"delivery"} as $owners
   | (reduce .packages[] as $p ({}; .[dir($p.manifest_path)] = ($p | role))) as $role_by_dir
   | .packages[]

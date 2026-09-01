@@ -33,6 +33,7 @@ use crate::inference::{
     selection::select_representable_attempts_filtered,
     service::Service,
     telemetry::elapsed_ms,
+    tracing::RequestTrace,
 };
 use chrono::Utc;
 
@@ -43,6 +44,7 @@ pub struct RequestAdmission {
     reservation: Option<Reservation>,
     reserved_tokens: Option<i64>,
     metadata_claimed: Option<Arc<AtomicBool>>,
+    trace: Option<RequestTrace>,
 }
 
 impl RequestAdmission {
@@ -51,11 +53,13 @@ impl RequestAdmission {
         reservation: Option<Reservation>,
         reserved_tokens: Option<i64>,
         metadata_claimed: Option<Arc<AtomicBool>>,
+        trace: Option<RequestTrace>,
     ) -> Self {
         Self {
             reservation,
             reserved_tokens,
             metadata_claimed,
+            trace,
         }
     }
 
@@ -81,6 +85,7 @@ struct ExecutionContext {
     request_started_at: chrono::DateTime<Utc>,
     request_started: tokio::time::Instant,
     surface: Surface,
+    trace: Option<RequestTrace>,
 }
 
 impl ExecutionContext {
@@ -94,6 +99,7 @@ impl ExecutionContext {
             request_started: self.request_started,
             surface: self.surface,
             operation: self.operation_kind,
+            trace: self.trace.clone(),
         }
     }
 }
@@ -164,6 +170,7 @@ impl RoutedEvents {
                 return Err(failure);
             }
         };
+        accounting.finish_provider_attempt(&RequestOutcome::success());
         accounting.release();
         let finalizer = accounting.into_finalizer();
         Ok(CompletedEvents {
@@ -328,9 +335,16 @@ impl Service {
             deadline,
             attempts,
             attempt_started,
+            attempt_trace,
         } = success;
         let first_byte_ms = elapsed_ms(context.request_started.elapsed());
-        accounting.record_attempts(attempts, Some(attempt_started), Some(first_byte_ms), true);
+        accounting.record_attempts(
+            attempts,
+            Some(attempt_started),
+            Some(first_byte_ms),
+            true,
+            attempt_trace,
+        );
         let ExecutionOutput::Events { first, events } = output else {
             let failure = InferenceError::bad_gateway(
                 "provider_protocol_error",
@@ -419,6 +433,7 @@ impl Service {
             request_started_at: Utc::now(),
             request_started: tokio::time::Instant::now(),
             surface,
+            trace: None,
         };
         let mut accounting =
             RequestAccountingGuard::new(self.clone(), context.accounting_input(), None, None, None);
@@ -476,6 +491,7 @@ impl Service {
                     max_inline_media_bytes: self.max_inline_media_bytes(),
                     circuits: self.circuits(),
                     on_attempt_started: Some(&mut record_attempt_started),
+                    trace: None,
                 },
                 attempts,
                 RequestMetadata {
@@ -492,7 +508,7 @@ impl Service {
             Ok(success) => success,
             Err(failure) => {
                 let error = failure.error;
-                accounting.record_attempts(failure.attempts, None, None, false);
+                accounting.record_attempts(failure.attempts, None, None, false, None);
                 accounting.finish(RequestOutcome::from_error(&error));
                 return Err(error);
             }
@@ -503,6 +519,7 @@ impl Service {
             Some(success.attempt_started),
             Some(first_byte_ms),
             true,
+            success.attempt_trace,
         );
         let ExecutionOutput::Result(result) = success.output else {
             let failure = InferenceError::bad_gateway(
@@ -536,6 +553,7 @@ impl Service {
             output,
             attempts,
             attempt_started,
+            attempt_trace,
             ..
         } = success;
         let first_byte_ms = elapsed_ms(context.request_started.elapsed());
@@ -544,7 +562,13 @@ impl Service {
             .expect("a successful execution has one provider attempt");
         let provider_id = final_attempt.provider_id;
         let upstream_model = final_attempt.upstream_model.clone();
-        accounting.record_attempts(attempts, Some(attempt_started), Some(first_byte_ms), true);
+        accounting.record_attempts(
+            attempts,
+            Some(attempt_started),
+            Some(first_byte_ms),
+            true,
+            attempt_trace,
+        );
         let ExecutionOutput::Result(result) = output else {
             let failure = InferenceError::bad_gateway(
                 "provider_protocol_error",
@@ -554,6 +578,7 @@ impl Service {
             return Err(failure);
         };
         accounting.replace_usage(usage_from_result(&result));
+        accounting.finish_provider_attempt(&RequestOutcome::success());
         accounting.release();
         let finalizer = accounting.into_finalizer();
         Ok(RoutedUnaryResult {
@@ -588,7 +613,17 @@ impl Service {
             request_started_at: Utc::now(),
             request_started: tokio::time::Instant::now(),
             surface: principal.surface(),
+            trace: admission.trace.take(),
         };
+        if let Some(trace) = &context.trace {
+            trace.record_inference_context(
+                context.surface,
+                context.operation_kind,
+                &context.route_slug,
+                context.api_key_id,
+                context.generation_id,
+            );
+        }
         admission.claim_metadata();
         if let Err(error) = self.authorize_principal(
             principal,
@@ -701,6 +736,7 @@ impl Service {
                     max_inline_media_bytes: self.max_inline_media_bytes(),
                     circuits: self.circuits(),
                     on_attempt_started: Some(&mut record_attempt_started),
+                    trace: context.trace.as_ref(),
                 },
                 attempts,
                 RequestMetadata {
@@ -721,7 +757,7 @@ impl Service {
             }),
             Err(failure) => {
                 let error = failure.error;
-                accounting.record_attempts(failure.attempts, None, None, false);
+                accounting.record_attempts(failure.attempts, None, None, false, None);
                 accounting.finish(RequestOutcome::from_error(&error));
                 Err(error)
             }

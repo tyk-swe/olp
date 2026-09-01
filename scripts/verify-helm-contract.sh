@@ -14,6 +14,7 @@ docker compose version >/dev/null 2>&1 || { echo "Docker Compose is required" >&
 compose_file="$(dirname "$chart")/compose.yaml"
 bootstrap_compose_file="$(dirname "$chart")/compose.bootstrap.yaml"
 build_compose_file="$(dirname "$chart")/compose.build.yaml"
+tracing_compose_file="$(dirname "$chart")/compose.tracing.yaml"
 dockerfile="$(dirname "$chart")/Dockerfile"
 compose_secret_helper="$(dirname "$chart")/../scripts/prepare-compose-secrets.sh"
 compose_bootstrap_retirement_helper="$(dirname "$chart")/../scripts/retire-compose-bootstrap-secret.sh"
@@ -22,7 +23,7 @@ dashboard="$(dirname "$chart")/monitoring/grafana-dashboard.json"
 validation_require_directory "$chart"
 for required_file in \
   "$chart/Chart.yaml" "$dashboard" "$compose_file" "$bootstrap_compose_file" \
-  "$build_compose_file" "$dockerfile" \
+  "$build_compose_file" "$tracing_compose_file" "$dockerfile" \
   "$compose_secret_helper" "$compose_bootstrap_retirement_helper"; do
   validation_require_file "$required_file"
 done
@@ -133,6 +134,12 @@ helm template olp "$chart" --namespace olp --set-string image.digest="$digest" \
   --set-string config.providerEgressAllowHttpHosts=localhost \
   > "$work/egress-manifests.yaml"
 helm template olp "$chart" --namespace olp --set-string image.digest="$digest" \
+  --set-string tracing.endpoint=https://tempo.example.test/v1/traces \
+  --set-string tracing.headersSecretName=olp-otlp-headers \
+  --set-string tracing.headersSecretKey=headers.json \
+  --set-json tracing.sampleRatio=0.25 \
+  > "$work/tracing-manifests.yaml"
+helm template olp "$chart" --namespace olp --set-string image.digest="$digest" \
   --set worker.replicas=3 \
   --set worker.podDisruptionBudget.minAvailable=2 \
   > "$work/worker-ha-manifests.yaml"
@@ -190,6 +197,16 @@ if helm template invalid "$chart" --set config.httpMaxInlineMediaItemBytes=10485
   --set config.httpMaxInlineMediaTotalBytes=4194304 \
   --set config.httpMaxJsonBodyBytes=2097152 >/dev/null 2>&1; then
   echo "chart accepted an inline media aggregate limit above the JSON body limit" >&2
+  exit 1
+fi
+if helm template invalid "$chart" --set-json tracing.sampleRatio=1.01 \
+  >/dev/null 2>&1; then
+  echo "chart accepted a tracing sample ratio above one" >&2
+  exit 1
+fi
+if helm template invalid "$chart" --set-string tracing.endpoint=grpc://collector.example.test \
+  >/dev/null 2>&1; then
+  echo "chart accepted a non-HTTP tracing endpoint" >&2
   exit 1
 fi
 if helm template invalid "$chart" --set networkPolicy.enabled=true \
@@ -309,6 +326,49 @@ for expected in \
     exit 1
   }
 done
+for expected in \
+  'name: OLP_OTLP_TRACES_ENDPOINT' \
+  'value: "https://tempo.example.test/v1/traces"' \
+  'name: OLP_TRACE_SAMPLE_RATIO' \
+  'value: "0.25"' \
+  'name: OLP_OTLP_HEADERS_FILE' \
+  'value: /run/secrets/otlp-headers/headers' \
+  'name: otlp-headers' \
+  'mountPath: /run/secrets/otlp-headers' \
+  'secretName: "olp-otlp-headers"' \
+  'key: "headers.json"' \
+  'path: headers'; do
+  grep -Fq "$expected" "$work/tracing-manifests.yaml" || {
+    echo "rendered Helm tracing contract is missing: $expected" >&2
+    exit 1
+  }
+done
+for expected in \
+  'name: OLP_OTLP_TRACES_ENDPOINT' \
+  'name: OLP_TRACE_SAMPLE_RATIO' \
+  'name: OLP_OTLP_HEADERS_FILE'; do
+  [[ $(grep -Fc "$expected" "$work/tracing-manifests.yaml") == 2 ]] || {
+    echo "rendered Helm tracing contract must configure both HTTP deployments exactly once: $expected" >&2
+    exit 1
+  }
+done
+default_tracing_matched=
+checked_rg_match default_tracing_matched \
+  "scan default tracing configuration" "$work/manifests.yaml" \
+  -q 'OLP_OTLP_|OLP_TRACE_SAMPLE_RATIO|otlp-headers' "$work/manifests.yaml"
+if (( default_tracing_matched )); then
+  echo "default chart must omit tracing environment and Secret mounts" >&2
+  exit 1
+fi
+awk -v RS='---' '
+  /kind: Deployment/ && /app.kubernetes.io\/component: worker/ { print }
+  /kind: Job/ && /app.kubernetes.io\/component: migration/ { print }
+' "$work/tracing-manifests.yaml" > "$work/non-http-tracing-workloads.yaml"
+if grep -Eq 'OLP_OTLP_|OLP_TRACE_SAMPLE_RATIO|otlp-headers' \
+  "$work/non-http-tracing-workloads.yaml"; then
+  echo "worker or migration workloads received HTTP tracing configuration" >&2
+  exit 1
+fi
 awk '/volumeMounts:/ { mounts = 1 } /^      volumes:/ { mounts = 0 } mounts { print }' \
   "$work/egress-manifests.yaml" > "$work/egress-volume-mounts.yaml"
 if grep -Fq 'OLP_PROVIDER_EGRESS_' "$work/egress-volume-mounts.yaml"; then
@@ -381,12 +441,17 @@ OLP_IMAGE='' docker compose -f "$compose_file" -f "$build_compose_file" config \
   --format json > "$work/compose-build.json"
 OLP_IMAGE='' docker compose -f "$compose_file" -f "$bootstrap_compose_file" \
   -f "$build_compose_file" config --format json > "$work/compose-bootstrap-build.json"
+OLP_IMAGE='' docker compose -f "$compose_file" -f "$tracing_compose_file" config \
+  > "$work/compose-tracing.yaml"
+OLP_IMAGE='' docker compose -f "$compose_file" -f "$tracing_compose_file" config \
+  --format json > "$work/compose-tracing.json"
 compose_build_context=$(cd "$(dirname "$compose_file")/.." && pwd)
 jq -e --arg release_image "$release_image" '
   .services.migrate.image == $release_image and
   .services.olp.image == $release_image and
   (.services.migrate | has("build") | not) and
-  (.services.olp | has("build") | not)
+  (.services.olp | has("build") | not) and
+  (.services.olp.environment | has("OLP_OTLP_TRACES_ENDPOINT") | not)
 ' "$work/compose.json" >/dev/null || {
   echo "base Compose must pull $release_image without building" >&2
   exit 1
@@ -425,6 +490,23 @@ jq -e '
   .services.olp.environment.OLP_BOOTSTRAP_TOKEN_FILE == "/run/secrets/olp_bootstrap_token"
 ' "$work/compose-bootstrap-build.json" >/dev/null || {
   echo "Compose source build must retain the bootstrap overlay" >&2
+  exit 1
+}
+jaeger_image='cr.jaegertracing.io/jaegertracing/jaeger:2.20.0@sha256:46a886260e04002d8f45e213fc39063fa11a50446048fdaa64786fc0840cb9f8'
+jq -e --arg jaeger_image "$jaeger_image" '
+  .services.jaeger.image == $jaeger_image and
+  .services.jaeger.read_only == true and
+  .services.jaeger.cap_drop == ["ALL"] and
+  .services.olp.environment.OLP_OTLP_TRACES_ENDPOINT == "http://jaeger:4318/v1/traces" and
+  .services.olp.environment.OLP_TRACE_SAMPLE_RATIO == "1.0" and
+  .services.olp.environment.OLP_TRACE_PROPAGATE_UPSTREAM == "true" and
+  .services.olp.environment.OLP_TRACE_ACCEPT_INBOUND == "true" and
+  .services.olp.depends_on.jaeger.condition == "service_started" and
+  (.services.jaeger.ports | length) == 1 and
+  any(.services.jaeger.ports[];
+    .host_ip == "127.0.0.1" and .published == "16686" and .target == 16686)
+' "$work/compose-tracing.json" >/dev/null || {
+  echo "Compose tracing overlay does not preserve its Jaeger and OTLP contract" >&2
   exit 1
 }
 jq -e '

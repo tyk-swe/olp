@@ -36,6 +36,7 @@ pub(crate) struct Server {
     admin_url: String,
     database_name: String,
     run_dir: PathBuf,
+    tracing_endpoint: Option<String>,
     valkey_reservation: Option<ValkeyReservation>,
 }
 
@@ -225,7 +226,7 @@ fn binary() -> Result<PathBuf, String> {
 fn random_hex(bytes: usize) -> String {
     let mut buffer = vec![0_u8; bytes];
     rand::rng().fill_bytes(&mut buffer);
-    buffer.iter().map(|byte| format!("{byte:02x}")).collect()
+    super::otlp::hex_id(&buffer)
 }
 
 fn random_base64_secret() -> String {
@@ -253,6 +254,7 @@ fn process_environment(
     public_origin: String,
     observability_base: String,
     bootstrap: bool,
+    tracing_endpoint: Option<&str>,
 ) -> Vec<(&'static str, String)> {
     let path = |name| run_dir.join(name).display().to_string();
     let mut environment = vec![
@@ -280,6 +282,10 @@ fn process_environment(
     ];
     if bootstrap {
         environment.push(("OLP_BOOTSTRAP_TOKEN_FILE", path("bootstrap-token")));
+    }
+    if let Some(endpoint) = tracing_endpoint {
+        environment.push(("OLP_OTLP_TRACES_ENDPOINT", endpoint.to_owned()));
+        environment.push(("OLP_TRACE_SAMPLE_RATIO", "0".to_owned()));
     }
     environment
 }
@@ -366,6 +372,7 @@ struct PreparedServer {
     database_url: String,
     app_database_url: String,
     valkey_url: String,
+    tracing_endpoint: Option<String>,
     legacy_request_metadata_event_id: Option<String>,
 }
 
@@ -373,6 +380,13 @@ struct PreparedServer {
 enum MigrationFixture {
     Current,
     LegacyRequestMetadataUpgrade,
+}
+
+struct PrepareOptions<'a> {
+    process: &'a str,
+    shared_valkey_url: Option<&'a str>,
+    tracing_endpoint: Option<&'a str>,
+    migration_fixture: MigrationFixture,
 }
 
 /// Owns every resource acquired after `CREATE DATABASE` until startup either
@@ -403,10 +417,14 @@ impl LaunchGuard {
         binary: &Path,
         database: &str,
         app_database: &str,
-        process: &str,
-        shared_valkey_url: Option<&str>,
-        migration_fixture: MigrationFixture,
+        options: PrepareOptions<'_>,
     ) -> Result<PreparedServer, String> {
+        let PrepareOptions {
+            process,
+            shared_valkey_url,
+            tracing_endpoint,
+            migration_fixture,
+        } = options;
         let console_dir = self.run_dir.join("console");
         let spool_dir = self.run_dir.join("spool");
         std::fs::create_dir_all(&console_dir)
@@ -443,6 +461,7 @@ impl LaunchGuard {
                 public_origin.clone(),
                 observability_base.clone(),
                 true,
+                tracing_endpoint,
             );
 
             if attempt == 1 {
@@ -491,6 +510,7 @@ impl LaunchGuard {
                         database_url: database.to_owned(),
                         app_database_url: app_database.to_owned(),
                         valkey_url,
+                        tracing_endpoint: tracing_endpoint.map(str::to_owned),
                         legacy_request_metadata_event_id,
                     });
                 }
@@ -540,6 +560,7 @@ impl LaunchGuard {
             admin_url: self.admin_url,
             database_name: self.database_name,
             run_dir: self.run_dir,
+            tracing_endpoint: prepared.tracing_endpoint,
             valkey_reservation: self.valkey_reservation.take(),
         }
     }
@@ -547,19 +568,23 @@ impl LaunchGuard {
 
 impl Server {
     pub(crate) async fn launch() -> Result<Self, String> {
-        Self::launch_process("all", None).await
+        Self::launch_process("all", None, None).await
+    }
+
+    pub(crate) async fn launch_traced(tracing_endpoint: &str) -> Result<Self, String> {
+        Self::launch_process("all", None, Some(tracing_endpoint)).await
     }
 
     pub(crate) async fn launch_sharing_valkey(valkey_url: &str) -> Result<Self, String> {
-        Self::launch_process("all", Some(valkey_url)).await
+        Self::launch_process("all", Some(valkey_url), None).await
     }
 
     pub(crate) async fn launch_control() -> Result<Self, String> {
-        Self::launch_process("control", None).await
+        Self::launch_process("control", None, None).await
     }
 
     pub(crate) async fn launch_control_sharing_valkey(valkey_url: &str) -> Result<Self, String> {
-        Self::launch_process("control", Some(valkey_url)).await
+        Self::launch_process("control", Some(valkey_url), None).await
     }
 
     pub(crate) async fn launch_control_from_legacy_request_metadata_upgrade(
@@ -568,6 +593,7 @@ impl Server {
         let (server, event_id) = Self::launch_process_with_migration_fixture(
             "control",
             Some(valkey_url),
+            None,
             MigrationFixture::LegacyRequestMetadataUpgrade,
         )
         .await?;
@@ -578,10 +604,12 @@ impl Server {
     async fn launch_process(
         process: &str,
         shared_valkey_url: Option<&str>,
+        tracing_endpoint: Option<&str>,
     ) -> Result<Self, String> {
         Self::launch_process_with_migration_fixture(
             process,
             shared_valkey_url,
+            tracing_endpoint,
             MigrationFixture::Current,
         )
         .await
@@ -591,6 +619,7 @@ impl Server {
     async fn launch_process_with_migration_fixture(
         process: &str,
         shared_valkey_url: Option<&str>,
+        tracing_endpoint: Option<&str>,
         migration_fixture: MigrationFixture,
     ) -> Result<(Self, Option<String>), String> {
         let binary = binary()?;
@@ -621,9 +650,12 @@ impl Server {
                 &binary,
                 &database,
                 &app_database,
-                process,
-                shared_valkey_url,
-                migration_fixture,
+                PrepareOptions {
+                    process,
+                    shared_valkey_url,
+                    tracing_endpoint,
+                    migration_fixture,
+                },
             )
             .await
         {
@@ -675,6 +707,7 @@ impl Server {
                 public_origin.clone(),
                 observability_base.clone(),
                 false,
+                self.tracing_endpoint.as_deref(),
             );
             let stderr = Arc::new(Mutex::new(String::new()));
             let mut child = Command::new(&binary)
@@ -736,6 +769,7 @@ impl Server {
             "http://127.0.0.1:1".to_owned(),
             "http://127.0.0.1:2".to_owned(),
             false,
+            None,
         );
         let stderr = Arc::new(Mutex::new(String::new()));
         let mut command = Command::new(binary);

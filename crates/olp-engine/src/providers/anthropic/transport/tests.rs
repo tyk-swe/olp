@@ -135,6 +135,7 @@ fn attempt(
             target_id: TargetId::new(),
             routing_id: TargetId::new(),
             provider_id: ProviderId::new(),
+            provider_revision_id: None,
             provider_kind: ProviderKind::Anthropic,
             upstream_model: "claude-sonnet-4-5".into(),
             timeout: DurationMs::new(2_000),
@@ -143,6 +144,7 @@ fn attempt(
         operation: Arc::new(operation_value),
         media: None,
         max_inline_media_bytes: 1024 * 1024,
+        propagate_trace_context: false,
     }
 }
 

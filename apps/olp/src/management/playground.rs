@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
 use axum::{
-    Json, Router,
+    Extension, Json, Router,
     extract::{State, rejection::JsonRejection},
     http::{HeaderValue, StatusCode, header},
     response::{IntoResponse, Response},
@@ -186,6 +186,7 @@ struct ToolCallBuilder {
 )]
 async fn execute_playground(
     State(state): State<ManagementState>,
+    trace: Option<Extension<olp_engine::inference::tracing::RequestTrace>>,
     MutationPrincipal(principal): MutationPrincipal,
     payload: Result<Json<PlaygroundRequest>, JsonRejection>,
 ) -> Result<Response, Problem> {
@@ -194,7 +195,7 @@ async fn execute_playground(
     let (operation, surface, structured) = playground_operation(request)?;
     let execution = state
         .inference()
-        .execute_session_generation(operation, surface)
+        .execute_session_generation(operation, surface, trace.map(|Extension(trace)| trace))
         .await
         .map_err(InferenceError::from)
         .map_err(InferenceError::into_problem)?;

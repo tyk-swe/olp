@@ -1,7 +1,7 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "type": "object",
-  "required": ["image", "gateway", "control", "ingress", "worker", "migration", "config", "mediaSpool", "monitoring", "networkPolicy", "preStopDelaySeconds", "terminationGracePeriodSeconds", "podSecurityContext", "containerSecurityContext"],
+  "required": ["image", "gateway", "control", "ingress", "worker", "migration", "tracing", "config", "mediaSpool", "monitoring", "networkPolicy", "preStopDelaySeconds", "terminationGracePeriodSeconds", "podSecurityContext", "containerSecurityContext"],
   "additionalProperties": false,
   "properties": {
     "image": {
@@ -63,6 +63,20 @@
         "activeDeadlineSeconds": { "type": "integer", "minimum": 1 },
         "ttlSecondsAfterFinished": { "type": "integer", "minimum": 0 },
         "resources": { "type": "object" }
+      }
+    },
+    "tracing": {
+      "type": "object",
+      "required": ["endpoint", "headersSecretName", "headersSecretKey", "sampleRatio"],
+      "additionalProperties": false,
+      "properties": {
+        "endpoint": {
+          "type": "string",
+          "pattern": "^$|^https?://\\S+$"
+        },
+        "headersSecretName": { "type": "string" },
+        "headersSecretKey": { "type": "string", "minLength": 1 },
+        "sampleRatio": { "type": "number", "minimum": 0, "maximum": 1 }
       }
     },
     "config": {

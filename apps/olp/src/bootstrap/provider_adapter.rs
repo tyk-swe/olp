@@ -362,6 +362,7 @@ mod tests {
     ) -> RuntimeProvider {
         RuntimeProvider {
             provider_id,
+            provider_revision_id: None,
             kind: ProviderKind::OpenAi,
             endpoint: None,
             cloud_region: None,
@@ -397,6 +398,7 @@ mod tests {
                 provider_id,
                 Provider {
                     id: provider_id,
+                    revision_id: None,
                     name: "provider".to_owned(),
                     kind: ProviderKind::VertexAi,
                     enabled: true,

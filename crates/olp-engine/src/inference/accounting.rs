@@ -19,6 +19,7 @@ use crate::inference::{
     },
     service::Service,
     telemetry::{elapsed_ms, metadata_status_code},
+    tracing::{AttemptTrace, RequestTrace},
 };
 
 /// Terminal accounting information supplied by a delivery adapter after it
@@ -79,6 +80,7 @@ pub(in crate::inference) struct RequestAccountingInput {
     pub request_started: tokio::time::Instant,
     pub surface: Surface,
     pub operation: OperationKind,
+    pub trace: Option<RequestTrace>,
 }
 
 struct ActiveRequestAttempt {
@@ -155,6 +157,8 @@ pub struct RequestAccountingGuard {
     admission_reservation: Option<Reservation>,
     admission_reserved_tokens: Option<i64>,
     active_attempt: Option<ActiveRequestAttempt>,
+    request_trace: Option<RequestTrace>,
+    attempt_trace: Option<AttemptTrace>,
     armed: bool,
 }
 
@@ -185,6 +189,8 @@ impl RequestAccountingGuard {
             admission_reservation,
             admission_reserved_tokens,
             active_attempt: None,
+            request_trace: input.trace,
+            attempt_trace: None,
             armed: true,
         }
     }
@@ -214,12 +220,14 @@ impl RequestAccountingGuard {
         attempt_started: Option<tokio::time::Instant>,
         first_byte_ms: Option<u64>,
         committed: bool,
+        attempt_trace: Option<AttemptTrace>,
     ) {
         self.attempts = attempts;
         self.active_attempt = None;
         self.attempt_started = attempt_started;
         self.first_byte_ms = first_byte_ms;
         self.committed = committed;
+        self.attempt_trace = attempt_trace;
     }
 
     #[must_use]
@@ -231,6 +239,19 @@ impl RequestAccountingGuard {
         self.usage = usage;
     }
 
+    pub(in crate::inference) fn finish_provider_attempt(&mut self, outcome: &RequestOutcome) {
+        let Some(mut trace) = self.attempt_trace.take() else {
+            return;
+        };
+        self.usage.record_trace(&trace);
+        let outcome_class = match outcome.error_class.as_deref() {
+            Some("client_cancelled") => "cancelled",
+            Some(error_class) => error_class,
+            None => "success",
+        };
+        trace.finish(outcome_class, Some("2xx"));
+    }
+
     /// Hands the limit reservations to a cleanup task without waiting for
     /// it. Reconciling and releasing retry with backoff when Valkey is
     /// unreachable, and that latency must never sit on the response path.
@@ -238,7 +259,16 @@ impl RequestAccountingGuard {
         self.spawn_limit_cleanup(false);
     }
 
+    /// Closes both spans for a terminal outcome. Every exit — success,
+    /// finalizer, and the cancellation `Drop` — goes through here so a new
+    /// terminal attribute cannot be added to only some of them.
+    fn record_terminal_traces(&mut self, outcome: &RequestOutcome) {
+        self.finish_provider_attempt(outcome);
+        self.record_request_trace(outcome);
+    }
+
     pub fn finish(mut self, outcome: RequestOutcome) {
+        self.record_terminal_traces(&outcome);
         self.spawn_limit_cleanup(outcome.error_class.is_some());
         self.emit(&outcome, true);
         self.armed = false;
@@ -324,6 +354,20 @@ impl RequestAccountingGuard {
             },
         );
     }
+
+    fn record_request_trace(&self, outcome: &RequestOutcome) {
+        let Some(trace) = &self.request_trace else {
+            return;
+        };
+        let attempt_count = self.attempts.len() + usize::from(self.active_attempt.is_some());
+        trace.record_terminal(
+            outcome.status_code,
+            outcome.error_class.as_deref(),
+            attempt_count,
+            self.first_byte_ms,
+            elapsed_ms(self.request_started.elapsed()),
+        );
+    }
 }
 
 impl Drop for RequestAccountingGuard {
@@ -331,7 +375,9 @@ impl Drop for RequestAccountingGuard {
         if !self.armed {
             return;
         }
-        self.emit(&RequestOutcome::client_cancelled(), false);
+        let outcome = RequestOutcome::client_cancelled();
+        self.record_terminal_traces(&outcome);
+        self.emit(&outcome, false);
         let Some(cleanup) = self.take_limit_cleanup(true) else {
             return;
         };
@@ -347,6 +393,7 @@ pub(in crate::inference) struct RequestMetadataFinalizer(RequestAccountingGuard)
 
 impl RequestMetadataFinalizer {
     pub(in crate::inference) fn finalize(mut self, outcome: &RequestOutcome) {
+        self.0.record_terminal_traces(outcome);
         self.0.emit(outcome, true);
     }
 }
@@ -367,6 +414,15 @@ pub struct UsageCapture {
 }
 
 impl UsageCapture {
+    pub(in crate::inference) fn record_trace(&self, trace: &AttemptTrace) {
+        trace.record_usage(
+            self.input_tokens,
+            self.output_tokens,
+            self.cached_input_tokens,
+            self.media_units,
+        );
+    }
+
     #[must_use]
     pub fn actual_tokens(&self) -> Option<i64> {
         self.input_tokens?.checked_add(self.output_tokens?)

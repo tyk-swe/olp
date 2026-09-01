@@ -22,6 +22,9 @@ mod harness;
 #[path = "contract/mock_upstream.rs"]
 mod mock_upstream;
 #[allow(dead_code)]
+#[path = "contract/otlp.rs"]
+mod otlp;
+#[allow(dead_code)]
 #[path = "contract/sse.rs"]
 mod sse;
 #[allow(dead_code)]

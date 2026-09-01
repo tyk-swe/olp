@@ -49,6 +49,7 @@ fn video_create_requires_exact_lifecycle_capabilities() {
     let mut operations = lifecycle.into_iter().collect::<BTreeSet<_>>();
     let mut provider = Provider {
         id: ProviderId::new(),
+        revision_id: None,
         name: "video-provider".into(),
         kind: ProviderKind::OpenAi,
         enabled: true,
