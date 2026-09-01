@@ -7,6 +7,9 @@ mod harness;
 #[path = "contract/mock_upstream.rs"]
 mod mock_upstream;
 #[allow(dead_code)]
+#[path = "contract/otlp.rs"]
+mod otlp;
+#[allow(dead_code)]
 #[path = "contract/world.rs"]
 mod world;
 
@@ -679,6 +682,8 @@ async fn exercise(world: &World, gateway: &GatewayProcess) -> Result<(), String>
         .build()
         .map_err(|error| format!("failed to build HA client: {error}"))?;
 
+    prove_trace_continuity(world, &http, &public).await?;
+
     for origin in public {
         for path in ["/health/live", "/health/ready", "/metrics"] {
             let status = http
@@ -845,6 +850,113 @@ async fn exercise(world: &World, gateway: &GatewayProcess) -> Result<(), String>
     .await;
     set_proxy(&http, &toxiproxy, &valkey_proxy, true).await?;
     outage
+}
+
+async fn prove_trace_continuity(
+    world: &World,
+    http: &reqwest::Client,
+    origins: &[&str; 2],
+) -> Result<(), String> {
+    let inbound = otlp::inbound_trace();
+    let chat = json!({
+        "model": OPENAI_ROUTE,
+        "messages": [{"role": "user", "content": "HA trace continuity"}],
+        "max_tokens": 1
+    });
+    for origin in origins {
+        let response = http
+            .post(format!("{origin}/openai/v1/chat/completions"))
+            .bearer_auth(&world.api_key)
+            .header("traceparent", &inbound.header)
+            .json(&chat)
+            .send()
+            .await
+            .map_err(|error| format!("HA trace request to {origin} failed: {error}"))?;
+        let status = response.status();
+        let body = response.text().await.unwrap_or_default();
+        require!(
+            status.is_success(),
+            "HA trace request to {origin} returned {status}: {body}"
+        );
+    }
+
+    let spans = world
+        .otlp()
+        .await_trace(&inbound.trace_id, 4, Duration::from_secs(15))
+        .await?;
+    assert_ha_trace(&spans, &inbound)
+}
+
+fn assert_ha_trace(
+    spans: &[otlp::CollectedSpan],
+    inbound: &otlp::InboundTrace,
+) -> Result<(), String> {
+    require!(
+        spans.len() == 4,
+        "two traced gateway requests exported {} spans: {:?}",
+        spans.len(),
+        spans
+            .iter()
+            .map(|span| span.span.name.as_str())
+            .collect::<Vec<_>>()
+    );
+    let requests: Vec<_> = spans
+        .iter()
+        .filter(|span| span.string_attribute("olp.surface").is_some())
+        .collect();
+    let attempts: Vec<_> = spans
+        .iter()
+        .filter(|span| span.string_attribute("olp.provider_kind").is_some())
+        .collect();
+    require!(
+        requests.len() == 2 && attempts.len() == 2,
+        "HA trace did not contain two request/attempt pairs"
+    );
+    let request_ids: Vec<&[u8]> = requests
+        .iter()
+        .map(|request| request.span.span_id.as_slice())
+        .collect();
+    for request in &requests {
+        require!(
+            request.span.name == "request",
+            "unexpected request span name"
+        );
+        require!(
+            request.span.trace_id == inbound.trace_id,
+            "gateway changed the inbound trace ID"
+        );
+        require!(
+            request.span.parent_span_id == inbound.parent_span_id,
+            "gateway changed the inbound parent span ID"
+        );
+    }
+    require!(
+        requests[0].span.span_id != requests[1].span.span_id,
+        "two gateways reused one request span ID"
+    );
+    let process_modes: std::collections::BTreeSet<_> = requests
+        .iter()
+        .filter_map(|request| request.resource_attribute("olp.process.mode"))
+        .collect();
+    require!(
+        process_modes == std::collections::BTreeSet::from(["all", "gateway"]),
+        "trace did not traverse both gateway process modes: {process_modes:?}"
+    );
+    for attempt in attempts {
+        require!(
+            attempt.span.name == "attempt",
+            "unexpected attempt span name"
+        );
+        require!(
+            attempt.span.trace_id == inbound.trace_id,
+            "provider attempt changed the inbound trace ID"
+        );
+        require!(
+            request_ids.contains(&attempt.span.parent_span_id.as_slice()),
+            "provider attempt is not parented by either gateway request span"
+        );
+    }
+    Ok(())
 }
 
 async fn issue_key(

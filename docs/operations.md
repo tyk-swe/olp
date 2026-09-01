@@ -23,6 +23,45 @@ its threshold for ten minutes. The bundled Prometheus rules and per-component
 ServiceMonitors provide starting alerts; keep control and gateway alerts
 separate.
 
+### Distributed tracing
+
+Tracing is off until `OLP_OTLP_TRACES_ENDPOINT` is set. In production, start
+with a low ratio such as `0.01` for locally rooted traces, then raise it only
+for a bounded investigation or a traffic class whose collector budget is
+known. `1.0` is appropriate for local development and short incident windows,
+not as an unreviewed high-volume default. Valid inbound W3C context keeps its
+upstream trace relationship when `OLP_TRACE_ACCEPT_INBOUND=true`; disable that
+setting at a trust boundary that must start new traces. Upstream provider
+propagation is independently controlled by `OLP_TRACE_PROPAGATE_UPSTREAM`.
+
+Set the complete OTLP/HTTP traces URL, including `/v1/traces`. A self-managed
+Tempo or Jaeger receiver commonly uses
+`http://tempo:4318/v1/traces` or `http://jaeger:4318/v1/traces`. Honeycomb's US
+endpoint is `https://api.honeycomb.io/v1/traces` (use the documented regional
+endpoint where applicable) and requires an `x-honeycomb-team` value in the
+JSON headers file; classic environments also require `x-honeycomb-dataset`.
+Tempo multi-tenancy uses `x-scope-orgid` in the same file. Mount header files
+from a secret manager with mode `0600` locally or through Helm's
+`tracing.headersSecretName` and `tracing.headersSecretKey`; never put exporter
+credentials in values files, environment variables, tickets, or traces.
+
+Watch `olp_trace_export_dropped_total`. Export is bounded and asynchronous, so
+an unavailable collector does not extend provider latency; sustained drops
+mean the collector, network, sampling ratio, or queue budget needs attention.
+Request and attempt spans contain only the documented allowlist. Prompt and
+response content, tool payloads, raw headers, credentials, and raw provider
+errors are prohibited even during incident debugging.
+
+For local exploration, start the development-only Jaeger all-in-one overlay:
+
+```console
+docker compose -f deploy/compose.yaml -f deploy/compose.tracing.yaml up -d
+```
+
+Open `http://127.0.0.1:16686`. The overlay samples every local trace, exposes
+only the UI port, and keeps traces in ephemeral memory. Stop it with the same
+two `-f` arguments followed by `down`.
+
 ### Replicated worker health
 
 `/health/ready` and `/metrics` read PostgreSQL-backed fleet summaries; worker

@@ -410,6 +410,7 @@ async fn media_job_management_views_are_session_authorized_and_metadata_only() {
             core_provider_id,
             Provider {
                 id: core_provider_id,
+                revision_id: None,
                 name: "video-provider".into(),
                 kind: ProviderKind::OpenAi,
                 enabled: true,

@@ -17,6 +17,7 @@ Secrets before installing (names and keys are configurable through `config`):
 | Valkey URL | `olp-valkey` / `url` |
 | Master keyring | `olp-master-key` / `key` |
 | Authentication HMAC key | `olp-auth-hmac-key` / `key` |
+| OTLP exporter headers (optional) | none / `headers`; set the name with `tracing.headersSecretName` |
 
 Installations using `olp-key-hash-key` must copy the exact bytes to the new
 HMAC Secret before upgrading; follow
@@ -135,6 +136,24 @@ cancellation; a full pool returns HTTP 503 with `Retry-After: 1` instead of
 queueing. Size limits from CPU, memory, provider connections, and stream
 duration.
 
+Tracing is disabled by default. To export request and provider-attempt spans,
+set the full OTLP/HTTP traces endpoint and an optional Secret containing a JSON
+object of exporter headers:
+
+```yaml
+tracing:
+  endpoint: https://collector.example.com/v1/traces
+  headersSecretName: olp-otlp-headers
+  headersSecretKey: headers
+  sampleRatio: 0.05
+```
+
+The chart mounts the selected key at
+`/run/secrets/otlp-headers/headers` and configures both gateway and control
+pods. Worker and migration pods do not receive tracing configuration. Keep the
+Secret value out of Helm values and use TLS for production collectors. The
+tracing exporter sends no OpenTelemetry metrics or logs.
+
 ## Network policy
 
 `networkPolicy.enabled: true` renders one NetworkPolicy per enabled
@@ -188,6 +207,11 @@ and `providers.cidrs` on 443. Narrow `providers.cidrs` from `0.0.0.0/0` only
 when every configured provider endpoint resolves inside a known range;
 `config.providerEgressAllowCidrs` continues to enforce the application-level
 public-host rule independently of the CNI.
+
+Tracing values do not widen NetworkPolicy egress. When restricted egress does
+not already admit the collector address and port—particularly an in-cluster
+OTLP/HTTP receiver on 4318—add a separate NetworkPolicy selecting gateway and
+control pods before enabling tracing.
 
 ## Install and verify
 

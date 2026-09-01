@@ -15,7 +15,9 @@ use olp_engine::domain::{
     canonical::{identity::TransportMode, requests::Operation},
 };
 use olp_engine::inference::{
-    execution::RoutedUnaryFinalizer, limits::Reservation, runtime::Bundle,
+    execution::{RequestAdmission, RoutedUnaryFinalizer},
+    limits::Reservation,
+    runtime::Bundle,
 };
 
 use crate::bootstrap::mode_dependencies::GatewayState;
@@ -78,6 +80,43 @@ pub(super) async fn execute_routed_result(
     mode: TransportMode,
     required_target: Option<RequiredTarget>,
 ) -> Result<RoutedUnaryResult, InferenceError> {
+    execute_result_with_admission(
+        state,
+        admission,
+        operation,
+        mode,
+        required_target,
+        admission.engine_admission(),
+    )
+    .await
+}
+
+pub(super) async fn execute_internal_routed_result(
+    state: &GatewayState,
+    admission: &HttpRequestAdmission,
+    operation: Operation,
+    mode: TransportMode,
+    required_target: Option<RequiredTarget>,
+) -> Result<RoutedUnaryResult, InferenceError> {
+    execute_result_with_admission(
+        state,
+        admission,
+        operation,
+        mode,
+        required_target,
+        admission.internal_engine_admission(),
+    )
+    .await
+}
+
+async fn execute_result_with_admission(
+    state: &GatewayState,
+    admission: &HttpRequestAdmission,
+    operation: Operation,
+    mode: TransportMode,
+    required_target: Option<RequiredTarget>,
+    engine_admission: RequestAdmission,
+) -> Result<RoutedUnaryResult, InferenceError> {
     state
         .inference()
         .execute_result(
@@ -85,7 +124,7 @@ pub(super) async fn execute_routed_result(
             operation,
             mode,
             required_target,
-            admission.engine_admission(),
+            engine_admission,
         )
         .await
         .map_err(Into::into)

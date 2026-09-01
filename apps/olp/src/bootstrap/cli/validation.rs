@@ -30,7 +30,7 @@ pub(super) async fn load_master_key(path: &Path) -> AppResult<MasterKey> {
     Ok(MasterKey::from_file_contents(&encoded)?)
 }
 
-async fn read_secret_file(path: &Path) -> AppResult<Zeroizing<String>> {
+pub(crate) async fn read_secret_file(path: &Path) -> AppResult<Zeroizing<String>> {
     Ok(Zeroizing::new(tokio::fs::read_to_string(path).await?))
 }
 

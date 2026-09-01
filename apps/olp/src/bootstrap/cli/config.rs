@@ -198,6 +198,37 @@ pub(super) struct ServeArgs {
     pub(super) body_limits: BodyLimitArgs,
     #[arg(long, env = "OLP_MASTER_KEY_FILE")]
     pub(super) master_key_file: Option<PathBuf>,
+    #[command(flatten)]
+    pub(super) tracing: TracingArgs,
+}
+
+#[derive(Clone, Debug, Args)]
+pub(super) struct TracingArgs {
+    #[arg(long, env = "OLP_OTLP_TRACES_ENDPOINT")]
+    pub(super) otlp_traces_endpoint: Option<String>,
+    #[arg(long, env = "OLP_OTLP_HEADERS_FILE")]
+    pub(super) otlp_headers_file: Option<PathBuf>,
+    #[arg(
+        long,
+        env = "OLP_TRACE_SAMPLE_RATIO",
+        default_value_t = 1.0,
+        value_parser = parse_trace_sample_ratio
+    )]
+    pub(super) trace_sample_ratio: f64,
+    #[arg(
+        long,
+        env = "OLP_TRACE_PROPAGATE_UPSTREAM",
+        default_value = "true",
+        action = clap::ArgAction::Set
+    )]
+    pub(super) trace_propagate_upstream: bool,
+    #[arg(
+        long,
+        env = "OLP_TRACE_ACCEPT_INBOUND",
+        default_value = "true",
+        action = clap::ArgAction::Set
+    )]
+    pub(super) trace_accept_inbound: bool,
 }
 
 #[derive(Clone, Debug, Args)]
@@ -317,6 +348,17 @@ fn parse_provider_response_bytes(value: &str) -> Result<usize, String> {
 
 fn parse_provider_event_bytes(value: &str) -> Result<usize, String> {
     parse_bytes_in(value, 64 * KIB, 256 * MIB, "provider event limit")
+}
+
+fn parse_trace_sample_ratio(value: &str) -> Result<f64, String> {
+    let ratio = value
+        .parse::<f64>()
+        .map_err(|_| "trace sample ratio must be a number".to_owned())?;
+    if ratio.is_finite() && (0.0..=1.0).contains(&ratio) {
+        Ok(ratio)
+    } else {
+        Err("trace sample ratio must be between 0.0 and 1.0".to_owned())
+    }
 }
 
 fn parse_bytes_in(value: &str, min: usize, max: usize, label: &str) -> Result<usize, String> {

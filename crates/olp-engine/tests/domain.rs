@@ -50,6 +50,7 @@ fn provider(
     let model = format!("upstream-{provider_number}");
     let provider = Provider {
         id: provider_id,
+        revision_id: None,
         name: format!("provider-{provider_number}"),
         kind: ProviderKind::OpenAi,
         enabled: true,
@@ -111,6 +112,39 @@ fn select(snapshot: &Snapshot, affinity: &[u8]) -> Vec<AttemptPlan> {
         affinity,
     )
     .unwrap()
+}
+
+#[test]
+fn provider_revision_preserves_legacy_snapshot_shape_and_reaches_attempts() {
+    let mut runtime = snapshot(vec![provider(1, 11, 0, 1)], 1);
+    let legacy = serde_json::to_value(&runtime).unwrap();
+    assert!(
+        legacy["providers"]
+            .as_object()
+            .unwrap()
+            .values()
+            .all(|provider| !provider.as_object().unwrap().contains_key("revision_id"))
+    );
+    let decoded: Snapshot = serde_json::from_value(legacy).unwrap();
+    assert!(
+        decoded
+            .providers
+            .values()
+            .all(|provider| provider.revision_id.is_none())
+    );
+
+    let revision_id = id(91);
+    runtime.providers.values_mut().next().unwrap().revision_id = Some(revision_id);
+    let current = serde_json::to_value(&runtime).unwrap();
+    assert!(
+        current["providers"]
+            .to_string()
+            .contains(&revision_id.to_string())
+    );
+    assert_eq!(
+        select(&runtime, b"revision")[0].provider_revision_id,
+        Some(revision_id)
+    );
 }
 
 #[test]
@@ -674,6 +708,7 @@ fn provider_request_debug_never_includes_prompt_content() {
         operation: Arc::new(operation),
         media: None,
         max_inline_media_bytes: 1024 * 1024,
+        propagate_trace_context: false,
     };
 
     let debug = format!("{request:?}");

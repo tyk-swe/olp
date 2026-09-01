@@ -332,6 +332,7 @@ mod tests {
             target_id: TargetId::new(),
             routing_id: TargetId::new(),
             provider_id: crate::domain::ids::ProviderId::new(),
+            provider_revision_id: None,
             provider_kind: kind,
             upstream_model: "upstream-model".into(),
             timeout: DurationMs::new(1_000),
@@ -611,6 +612,7 @@ mod tests {
                         incompatible,
                         Provider {
                             id: incompatible,
+                            revision_id: None,
                             name: "incompatible".into(),
                             kind: ProviderKind::Anthropic,
                             enabled: true,
@@ -622,6 +624,7 @@ mod tests {
                         compatible,
                         Provider {
                             id: compatible,
+                            revision_id: None,
                             name: "compatible".into(),
                             kind: ProviderKind::OpenAi,
                             enabled: true,

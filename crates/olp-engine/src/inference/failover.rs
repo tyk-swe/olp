@@ -2,16 +2,12 @@ use std::{num::NonZeroU16, sync::Arc, time::Duration};
 
 use crate::domain::{
     canonical::{
-        events::{Error, ErrorClass, Event, EventSequenceError, EventSequenceValidator, Kind},
+        events::{Error, Event, EventSequenceValidator, Kind},
         identity::{OperationKind, RequestMetadata},
         requests::Operation,
         results::CanonicalResult,
     },
-    ids::TargetId,
-    ports::{
-        AttemptFailureClass, MediaSpool, ProviderOutput, ProviderRequest, TransportError,
-        TransportPhase,
-    },
+    ports::{AttemptFailureClass, MediaSpool, ProviderOutput, ProviderRequest, TransportError},
     routing::selection::AttemptPlan,
 };
 use crate::inference::{
@@ -23,133 +19,29 @@ use crate::inference::{
     telemetry::{elapsed_ms, metadata_status_code},
 };
 use chrono::Utc;
-use futures::{StreamExt, stream};
+use futures::StreamExt;
+use tracing::Instrument as _;
 
-pub type EventStream = crate::domain::ports::ProviderEventStream;
+use super::tracing::{AttemptTrace, RequestTrace};
 
-fn canonical_event_protocol_error(
-    error: EventSequenceError,
-    response_committed: bool,
-) -> TransportError {
-    TransportError {
-        upstream: Default::default(),
-        phase: TransportPhase::Body,
-        class: AttemptFailureClass::Protocol,
-        response_committed,
-        message: format!("invalid canonical event stream: {error}"),
-    }
-}
-
-pub fn validated_event_stream(
-    events: EventStream,
-    validator: EventSequenceValidator,
-) -> EventStream {
-    Box::pin(stream::unfold(
-        (events, validator, false),
-        |(mut events, mut validator, terminal)| async move {
-            if terminal || validator.is_complete() {
-                return None;
-            }
-            match events.next().await {
-                Some(Ok(event)) => match validator.push(&event) {
-                    Ok(()) => Some((Ok(event), (events, validator, false))),
-                    Err(error) => Some((
-                        Err(canonical_event_protocol_error(error, true)),
-                        (events, validator, true),
-                    )),
-                },
-                Some(Err(error)) => Some((Err(error), (events, validator, true))),
-                None => validator.finish().err().map(|error| {
-                    (
-                        Err(canonical_event_protocol_error(error, true)),
-                        (events, validator, true),
-                    )
-                }),
-            }
-        },
-    ))
-}
+mod streams;
 
 #[cfg(any(test, feature = "test-util"))]
-pub fn circuit_accounted_event_stream(
-    events: EventStream,
-    circuits: Breaker,
-    target: TargetId,
-    initial_failure: bool,
-) -> EventStream {
-    circuit_accounted_event_stream_with_permit(events, circuits, target, initial_failure, None)
-}
+pub use streams::circuit_accounted_event_stream;
+pub use streams::validated_event_stream;
+use streams::{
+    canonical_error_circuit_class, canonical_event_protocol_error,
+    circuit_accounted_event_stream_with_permit,
+};
 
-fn circuit_accounted_event_stream_with_permit(
-    events: EventStream,
-    circuits: Breaker,
-    target: TargetId,
-    initial_failure: bool,
-    permit: Option<crate::inference::circuit::CircuitPermit>,
-) -> EventStream {
-    Box::pin(stream::unfold(
-        (events, circuits, initial_failure),
-        move |(mut events, circuits, mut failed)| async move {
-            let item = events.next().await?;
-            let item = match item {
-                Ok(event) => {
-                    match &event.kind {
-                        Kind::Error { error } => {
-                            if let Some(class) = canonical_error_circuit_class(error.class) {
-                                circuits.record_failure_for_optional_permit(
-                                    target,
-                                    permit.as_ref(),
-                                    class,
-                                    None,
-                                );
-                            }
-                            failed = true;
-                        }
-                        Kind::Done if !failed => {
-                            circuits.record_success_for_optional_permit(target, permit.as_ref())
-                        }
-                        _ => {}
-                    }
-                    Ok(event)
-                }
-                Err(mut error) => {
-                    // A provider stream has already committed once this wrapper
-                    // owns it. Terminal transport failures still affect target
-                    // health, but must never trigger request failover.
-                    error.response_committed = true;
-                    circuits.record_failure_for_optional_permit(
-                        target,
-                        permit.as_ref(),
-                        error.class,
-                        error.upstream.retry_after,
-                    );
-                    failed = true;
-                    Err(error)
-                }
-            };
-            Some((item, (events, circuits, failed)))
-        },
-    ))
-}
-
-const fn canonical_error_circuit_class(class: ErrorClass) -> Option<AttemptFailureClass> {
-    match class {
-        ErrorClass::RateLimit => Some(AttemptFailureClass::RateLimit),
-        ErrorClass::Timeout => Some(AttemptFailureClass::Timeout),
-        ErrorClass::Transport => Some(AttemptFailureClass::Connect),
-        ErrorClass::Upstream => Some(AttemptFailureClass::UpstreamServer),
-        ErrorClass::Authentication
-        | ErrorClass::Authorization
-        | ErrorClass::InvalidRequest
-        | ErrorClass::Internal => None,
-    }
-}
+pub type EventStream = crate::domain::ports::ProviderEventStream;
 
 pub struct ExecutionSuccess {
     pub output: ExecutionOutput,
     pub deadline: tokio::time::Instant,
     pub attempts: Vec<RequestAttemptMetadata>,
     pub attempt_started: tokio::time::Instant,
+    pub(in crate::inference) attempt_trace: Option<AttemptTrace>,
 }
 
 pub enum ExecutionOutput {
@@ -168,16 +60,20 @@ struct AttemptRecord<'a> {
     ordinal: u16,
     started_at: chrono::DateTime<Utc>,
     started: tokio::time::Instant,
+    trace: Option<AttemptTrace>,
 }
 
 impl AttemptRecord<'_> {
     fn finish_failure(
-        &self,
+        &mut self,
         traces: &mut Vec<RequestAttemptMetadata>,
         circuits: &Breaker,
         transport: TransportError,
         terminal: Option<InferenceError>,
     ) -> Result<TransportError, ExecutionFailure> {
+        if let Some(trace) = self.trace.as_mut() {
+            trace.record_transport_failure(&transport);
+        }
         traces.push(failed_attempt(
             self.plan,
             self.ordinal,
@@ -202,7 +98,7 @@ impl AttemptRecord<'_> {
     }
 
     fn record_failure(
-        &self,
+        &mut self,
         traces: &mut Vec<RequestAttemptMetadata>,
         circuits: &Breaker,
         transport: TransportError,
@@ -211,7 +107,7 @@ impl AttemptRecord<'_> {
     }
 
     fn record_terminal_failure(
-        &self,
+        &mut self,
         traces: &mut Vec<RequestAttemptMetadata>,
         circuits: &Breaker,
         transport: TransportError,
@@ -221,7 +117,7 @@ impl AttemptRecord<'_> {
             .expect_err("an explicit gateway failure is terminal")
     }
 
-    fn record_success(&self, traces: &mut Vec<RequestAttemptMetadata>, circuits: &Breaker) {
+    fn record_success(&mut self, traces: &mut Vec<RequestAttemptMetadata>, circuits: &Breaker) {
         circuits
             .record_success_for_optional_permit(self.plan.routing_id, Some(&self.circuit_permit));
         self.record_accepted_output(traces);
@@ -237,7 +133,7 @@ impl AttemptRecord<'_> {
     }
 
     fn record_deadline_elapsed(
-        &self,
+        &mut self,
         traces: &mut Vec<RequestAttemptMetadata>,
         circuits: &Breaker,
     ) -> ExecutionFailure {
@@ -248,6 +144,9 @@ impl AttemptRecord<'_> {
             response_committed: false,
             message: "route deadline elapsed before provider execution".to_owned(),
         };
+        if let Some(trace) = self.trace.as_mut() {
+            trace.record_transport_failure(&timeout);
+        }
         traces.push(failed_attempt(
             self.plan,
             self.ordinal,
@@ -260,6 +159,26 @@ impl AttemptRecord<'_> {
             error: InferenceError::timeout(),
             attempts: std::mem::take(traces),
         }
+    }
+
+    fn take_trace(&mut self) -> Option<AttemptTrace> {
+        self.trace.take()
+    }
+}
+
+fn notify_attempt_started(
+    observer: Option<&mut AttemptStartedObserver<'_>>,
+    completed: &[RequestAttemptMetadata],
+    record: &AttemptRecord<'_>,
+) {
+    if let Some(observer) = observer {
+        observer(
+            completed,
+            record.plan,
+            record.ordinal,
+            record.started_at,
+            record.started,
+        );
     }
 }
 
@@ -275,6 +194,7 @@ pub struct Context<'a> {
     pub max_inline_media_bytes: usize,
     pub circuits: &'a Breaker,
     pub on_attempt_started: Option<&'a mut AttemptStartedObserver<'a>>,
+    pub trace: Option<&'a RequestTrace>,
 }
 
 /// Failure state that crosses attempt boundaries.
@@ -360,6 +280,7 @@ struct AttemptExecutionContext<'a> {
     operation: &'a Arc<Operation>,
     route_deadline: tokio::time::Instant,
     can_retry_canonical: bool,
+    propagate_trace_context: bool,
 }
 
 enum AttemptDisposition {
@@ -370,6 +291,7 @@ enum AttemptDisposition {
     Success {
         output: ExecutionOutput,
         deadline: tokio::time::Instant,
+        trace: Option<AttemptTrace>,
     },
 }
 
@@ -387,16 +309,14 @@ pub async fn execute(
         max_inline_media_bytes,
         circuits,
         mut on_attempt_started,
+        trace,
     } = context;
     let route_deadline = tokio::time::Instant::now() + overall_timeout;
-    // Shared by every attempt; operation_for_provider only copies it when a
-    // provider needs the OpenAI endpoint hint stripped.
     let operation = Arc::new(operation);
     let mut failures = FailureHistory::default();
     let mut traces = Vec::with_capacity(attempts.len());
     let attempts = with_sole_target_retry(attempts, max_attempts);
-    let attempt_count = attempts.len();
-    for attempt_index in 0..attempt_count {
+    for attempt_index in 0..attempts.len() {
         let attempt = &attempts[attempt_index];
         if let Some(previous) = attempt_index.checked_sub(1) {
             let Some(delay) = plan_retry(
@@ -408,10 +328,6 @@ pub async fn execute(
             ) else {
                 break;
             };
-            // Wait before claiming the circuit's exclusive half-open probe
-            // permit: holding it across the backoff would block every other
-            // caller from probing this provider for the whole delay. The cheap selection check
-            // keeps a target we are about to skip from costing a sleep first.
             if !delay.is_zero() && circuits.is_selectable(attempt.routing_id) {
                 tokio::time::sleep(delay).await;
             }
@@ -422,22 +338,15 @@ pub async fn execute(
         let ordinal = u16::try_from(traces.len() + 1).unwrap_or(u16::MAX);
         let attempt_started_at = Utc::now();
         let attempt_started = tokio::time::Instant::now();
-        if let Some(observer) = on_attempt_started.as_mut() {
-            observer(
-                &traces,
-                attempt,
-                ordinal,
-                attempt_started_at,
-                attempt_started,
-            );
-        }
-        let record = AttemptRecord {
+        let mut record = AttemptRecord {
             plan: attempt,
             circuit_permit,
             ordinal,
             started_at: attempt_started_at,
             started: attempt_started,
+            trace: trace.map(|trace| trace.attempt(attempt)),
         };
+        notify_attempt_started(on_attempt_started.as_deref_mut(), &traces, &record);
         match execute_attempt(
             AttemptExecutionContext {
                 runtime,
@@ -447,9 +356,10 @@ pub async fn execute(
                 metadata: &metadata,
                 operation: &operation,
                 route_deadline,
-                can_retry_canonical: attempt_index + 1 < attempt_count,
+                can_retry_canonical: attempt_index + 1 < attempts.len(),
+                propagate_trace_context: trace.is_some_and(RequestTrace::propagate_upstream),
             },
-            &record,
+            &mut record,
             &mut traces,
         )
         .await?
@@ -458,12 +368,17 @@ pub async fn execute(
                 transport,
                 canonical,
             } => failures.record_retry(transport, canonical, traces.len()),
-            AttemptDisposition::Success { output, deadline } => {
+            AttemptDisposition::Success {
+                output,
+                deadline,
+                trace,
+            } => {
                 return Ok(ExecutionSuccess {
                     output,
                     deadline,
                     attempts: traces,
                     attempt_started,
+                    attempt_trace: trace,
                 });
             }
         }
@@ -545,7 +460,7 @@ fn plan_retry(
 
 async fn execute_attempt(
     context: AttemptExecutionContext<'_>,
-    record: &AttemptRecord<'_>,
+    record: &mut AttemptRecord<'_>,
     traces: &mut Vec<RequestAttemptMetadata>,
 ) -> Result<AttemptDisposition, ExecutionFailure> {
     let AttemptExecutionContext {
@@ -557,6 +472,7 @@ async fn execute_attempt(
         operation,
         route_deadline,
         can_retry_canonical,
+        propagate_trace_context,
     } = context;
     let attempt = record.plan;
     let attempt_deadline = route_deadline.min(record.started + attempt.timeout.as_duration());
@@ -583,8 +499,18 @@ async fn execute_attempt(
         operation: operation_for_provider(operation, attempt.provider_kind),
         media: Some(Arc::clone(media_spool)),
         max_inline_media_bytes,
+        propagate_trace_context,
     };
-    let output = match tokio::time::timeout(remaining, transport.execute(provider_request)).await {
+    let output = if let Some(trace) = record.trace.as_ref() {
+        tokio::time::timeout(
+            remaining,
+            transport.execute(provider_request).instrument(trace.span()),
+        )
+        .await
+    } else {
+        tokio::time::timeout(remaining, transport.execute(provider_request)).await
+    };
+    let output = match output {
         Ok(Ok(output)) => output,
         Ok(Err(error)) => {
             let error = reclassify_ambiguous_transport_failure(error, operation.kind());
@@ -617,6 +543,7 @@ async fn execute_attempt(
             return Ok(AttemptDisposition::Success {
                 output: ExecutionOutput::Result(result),
                 deadline: attempt_deadline,
+                trace: record.take_trace(),
             });
         }
     };
@@ -713,6 +640,7 @@ async fn execute_attempt(
     Ok(AttemptDisposition::Success {
         output: ExecutionOutput::Events { first, events },
         deadline: attempt_deadline,
+        trace: record.take_trace(),
     })
 }
 
@@ -828,7 +756,7 @@ const fn attempt_billing_is_uncertain(error: &TransportError) -> bool {
         ) && !matches!(error.phase, crate::domain::ports::TransportPhase::Connect))
 }
 
-const fn attempt_failure_name(class: AttemptFailureClass) -> &'static str {
+pub(in crate::inference) const fn attempt_failure_name(class: AttemptFailureClass) -> &'static str {
     match class {
         AttemptFailureClass::Connect => "connect",
         AttemptFailureClass::Timeout => "timeout",

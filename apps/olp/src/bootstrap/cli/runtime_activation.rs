@@ -149,7 +149,7 @@ pub(super) async fn activate_latest_runtime(
     let current_api_keys = store.current_runtime_api_keys().await?;
     let mut rejected = Vec::new();
     for release in releases {
-        let snapshot = match runtime
+        let mut snapshot = match runtime
             .decode_release_candidate(release.activation_candidate(), current_api_keys.clone())
         {
             Ok(snapshot) => snapshot,
@@ -161,9 +161,19 @@ pub(super) async fn activate_latest_runtime(
         // Provider transports are assembled from normalized secret storage, not
         // the public runtime payload. Require the release-time sidecar to match
         // every current transport-affecting field before accepting an LKG.
-        if let Err(error) = store.runtime_provider_configurations(&snapshot).await {
-            rejected.push(format!("{}: {error}", release.sequence));
-            continue;
+        let provider_configurations = match store.runtime_provider_configurations(&snapshot).await {
+            Ok(configurations) => configurations,
+            Err(error) => {
+                rejected.push(format!("{}: {error}", release.sequence));
+                continue;
+            }
+        };
+        for configuration in provider_configurations {
+            if let Some(revision) = configuration.provider_revision_id
+                && let Some(provider) = snapshot.providers.get_mut(&configuration.provider_id)
+            {
+                provider.revision_id = Some(revision);
+            }
         }
         let mut candidate_transports = transports.snapshot();
         if let Some(master_key) = master_key

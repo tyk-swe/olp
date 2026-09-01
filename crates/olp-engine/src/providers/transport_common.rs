@@ -7,9 +7,23 @@ use crate::domain::{
     ports::{AttemptFailureClass, TransportError, TransportPhase, UpstreamSignal},
 };
 use http::{HeaderMap, HeaderValue, StatusCode};
+use opentelemetry::{global, propagation::Injector};
+use tracing_opentelemetry::OpenTelemetrySpanExt as _;
 use zeroize::Zeroizing;
 
 use crate::providers::transport_io::ProviderResponseIo;
+
+pub(in crate::providers) fn inject_trace_context(headers: &mut HeaderMap, enabled: bool) {
+    if !enabled {
+        return;
+    }
+    inject_current_trace_context(&mut opentelemetry_http::HeaderInjector(headers));
+}
+
+pub(in crate::providers) fn inject_current_trace_context(injector: &mut dyn Injector) {
+    let context = tracing::Span::current().context();
+    global::get_text_map_propagator(|propagator| propagator.inject_context(&context, injector));
+}
 
 pub(in crate::providers) fn secret_header(
     secret: &str,
@@ -279,6 +293,37 @@ mod tests {
     use http::StatusCode;
     use serde_json::json;
 
+    #[derive(Debug)]
+    struct FixedPropagator {
+        fields: Vec<String>,
+    }
+
+    impl opentelemetry::propagation::TextMapPropagator for FixedPropagator {
+        fn inject_context(
+            &self,
+            _: &opentelemetry::Context,
+            injector: &mut dyn opentelemetry::propagation::Injector,
+        ) {
+            injector.set(
+                "traceparent",
+                "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01".to_owned(),
+            );
+            injector.set("tracestate", "vendor=value".to_owned());
+        }
+
+        fn extract_with_context(
+            &self,
+            context: &opentelemetry::Context,
+            _: &dyn opentelemetry::propagation::Extractor,
+        ) -> opentelemetry::Context {
+            context.clone()
+        }
+
+        fn fields(&self) -> opentelemetry::propagation::text_map_propagator::FieldIter<'_> {
+            opentelemetry::propagation::text_map_propagator::FieldIter::new(&self.fields)
+        }
+    }
+
     use super::*;
     use crate::domain::{
         canonical::{
@@ -394,6 +439,24 @@ mod tests {
                 ("/plain".to_owned(), json!(1))
             ])
         );
+    }
+
+    #[test]
+    fn trace_context_injection_is_explicit_and_disabled_is_a_noop() {
+        opentelemetry::global::set_text_map_propagator(FixedPropagator {
+            fields: vec!["traceparent".to_owned(), "tracestate".to_owned()],
+        });
+        let mut disabled = HeaderMap::new();
+        inject_trace_context(&mut disabled, false);
+        assert!(disabled.is_empty());
+
+        let mut enabled = HeaderMap::new();
+        inject_trace_context(&mut enabled, true);
+        assert_eq!(
+            enabled.get("traceparent").unwrap(),
+            "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
+        );
+        assert_eq!(enabled.get("tracestate").unwrap(), "vendor=value");
     }
 
     #[tokio::test]

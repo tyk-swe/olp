@@ -189,7 +189,7 @@ async fn compile_snapshot(
 ) -> Result<Snapshot, RuntimeCompileError> {
     let mut providers = BTreeMap::new();
     for row in sqlx::query!(
-        "SELECT p.id, pr.name, pr.kind, pr.credential_version_id \
+        "SELECT p.id, pr.id AS revision_id, pr.name, pr.kind, pr.credential_version_id \
          FROM providers p JOIN provider_revisions pr ON pr.id = p.active_revision_id \
          WHERE p.state <> 'disabled'::provider_state ORDER BY p.id",
     )
@@ -202,6 +202,7 @@ async fn compile_snapshot(
             id,
             Provider {
                 id,
+                revision_id: Some(row.revision_id),
                 name: row.name,
                 kind: parse_provider_kind(row.kind.as_str())?,
                 enabled: true,

@@ -444,6 +444,54 @@ fn server_cli_parses_provider_egress_allowlists() {
 }
 
 #[test]
+fn server_cli_parses_tracing_settings_and_rejects_invalid_ratios() {
+    let cli = Cli::try_parse_from([
+        "olp",
+        "gateway",
+        "--database-url",
+        "postgres://example/olp",
+        "--otlp-traces-endpoint",
+        "http://collector:4318/v1/traces",
+        "--otlp-headers-file",
+        "/run/secrets/otlp-headers",
+        "--trace-sample-ratio",
+        "0.25",
+        "--trace-propagate-upstream=false",
+        "--trace-accept-inbound=false",
+    ])
+    .unwrap();
+    let Command::Gateway(args) = cli.command else {
+        panic!("expected gateway command");
+    };
+    assert_eq!(
+        args.tracing.otlp_traces_endpoint.as_deref(),
+        Some("http://collector:4318/v1/traces")
+    );
+    assert_eq!(
+        args.tracing.otlp_headers_file.as_deref(),
+        Some(std::path::Path::new("/run/secrets/otlp-headers"))
+    );
+    assert_eq!(args.tracing.trace_sample_ratio, 0.25);
+    assert!(!args.tracing.trace_propagate_upstream);
+    assert!(!args.tracing.trace_accept_inbound);
+
+    for ratio in ["-0.1", "1.1", "NaN", "inf"] {
+        assert!(
+            Cli::try_parse_from([
+                "olp",
+                "gateway",
+                "--database-url",
+                "postgres://example/olp",
+                "--trace-sample-ratio",
+                ratio,
+            ])
+            .is_err(),
+            "ratio {ratio} must be rejected"
+        );
+    }
+}
+
+#[test]
 fn server_cli_rejects_malformed_provider_egress_allowlists() {
     for (flag, value) in [
         ("--provider-egress-allow-cidrs", "10.0.0.0"),

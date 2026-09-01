@@ -20,7 +20,7 @@ Status values: `planned`, `in progress`, `done`, `dropped` (with a reason).
 | 8 — Release 2.3.0 and hardening | REL-06, HYG-01 … HYG-03 | — | 1 | 2 | 1 |
 | Unscheduled | TEST-04, HYG-04 … HYG-08, FLEX-01 … FLEX-06 | — | 3 | 3 | 6 (incl. P4) |
 
-54 items: 42 scheduled, 12 unscheduled; 24 done. [`deferred.md`](deferred.md) lists what
+54 items: 42 scheduled, 12 unscheduled; 28 done. [`deferred.md`](deferred.md) lists what
 is intentionally not here.
 
 ## CI — the gates themselves
@@ -68,10 +68,10 @@ is intentionally not here.
 
 ## OTEL — distributed tracing
 
-- [ ] **OTEL-01** Design record: crates, ownership, configuration surface, span attribute allowlist — P2 · S · week 5 · planned → [milestone 5](milestones/05-tracing.md)
-- [ ] **OTEL-02** Request and attempt spans, OTLP/HTTP exporter, W3C propagation in and out, off by default — P2 · L · week 5 · planned → [milestone 5](milestones/05-tracing.md)
-- [ ] **OTEL-03** Proof: allowlist unit test, e2e collector assertions, HA trace continuity — P2 · M · week 5 · planned → [milestone 5](milestones/05-tracing.md)
-- [ ] **OTEL-04** Configuration docs, Helm values, Jaeger compose overlay, CHANGELOG — P2 · S · week 5 · planned → [milestone 5](milestones/05-tracing.md)
+- [x] **OTEL-01** Design record: crates, ownership, configuration surface, span attribute allowlist — P2 · S · week 5 · done → [milestone 5](milestones/05-tracing.md)
+- [x] **OTEL-02** Request and attempt spans, OTLP/HTTP exporter, W3C propagation in and out, off by default — P2 · L · week 5 · done → [milestone 5](milestones/05-tracing.md)
+- [x] **OTEL-03** Proof: allowlist unit test, e2e collector assertions, HA trace continuity — P2 · M · week 5 · done → [milestone 5](milestones/05-tracing.md)
+- [x] **OTEL-04** Configuration docs, Helm values, Jaeger compose overlay, CHANGELOG — P2 · S · week 5 · done → [milestone 5](milestones/05-tracing.md)
 
 ## SPEND — spend controls
 

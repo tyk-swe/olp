@@ -13,7 +13,10 @@ use tracing::{error, info, warn};
 use olp_engine::inference::runtime::Manager;
 
 use crate::{bootstrap::connectors::register_mounted_connectors, public_http::listener};
-use crate::{bootstrap::state::ApiMode, bootstrap::state::ProcessComposition, media_spool};
+use crate::{
+    bootstrap::state::ApiMode, bootstrap::state::ProcessComposition, media_spool,
+    observability::tracing::RuntimeConfig as TracingRuntimeConfig,
+};
 
 use super::{
     AppResult, BACKGROUND_SHUTDOWN_TIMEOUT,
@@ -49,22 +52,9 @@ pub(super) async fn serve(
     mode: ApiMode,
     args: ServeArgs,
     run_worker_in_process: bool,
+    tracing: Option<TracingRuntimeConfig>,
 ) -> AppResult<()> {
-    validate_serve_args(&args)?;
-    let store = connect_store(&args.database).await?;
-    let auth_hmac_key = load_serve_auth_hmac_key(&args).await?;
-    let mut state = compose_state(mode, &args, &store, auth_hmac_key)?;
-    apply_secrets_and_policy(&mut state, &args, &store, mode).await?;
-    if let Some(path) = &args.assets.connector_config_file {
-        register_mounted_connectors(
-            path,
-            &state.transports,
-            &state.provider_egress_policy,
-            state.provider_response_limits,
-        )
-        .await?;
-    }
-    activate_initial_runtime(&state, &store).await;
+    let (store, mut state) = prepare_state(mode, &args, tracing).await?;
     let listener = TcpListener::bind(args.listen_addr).await?;
     let observability_listener = TcpListener::bind(args.observability_listen_addr).await?;
     let (background_shutdown_sender, background_shutdown_receiver) = watch::channel(false);
@@ -145,6 +135,33 @@ pub(super) async fn serve(
     Ok(())
 }
 
+async fn prepare_state(
+    mode: ApiMode,
+    args: &ServeArgs,
+    tracing: Option<TracingRuntimeConfig>,
+) -> AppResult<(Store, ProcessComposition)> {
+    validate_serve_args(args)?;
+    let store = connect_store(&args.database).await?;
+    let auth_hmac_key = load_serve_auth_hmac_key(args).await?;
+    let request_tracing = match tracing {
+        Some(runtime) => Some(runtime.for_installation(store.installation_id().await?)),
+        None => None,
+    };
+    let mut state = compose_state(mode, args, &store, auth_hmac_key, request_tracing)?;
+    apply_secrets_and_policy(&mut state, args, &store, mode).await?;
+    if let Some(path) = &args.assets.connector_config_file {
+        register_mounted_connectors(
+            path,
+            &state.transports,
+            &state.provider_egress_policy,
+            state.provider_response_limits,
+        )
+        .await?;
+    }
+    activate_initial_runtime(&state, &store).await;
+    Ok((store, state))
+}
+
 fn validate_serve_args(args: &ServeArgs) -> AppResult<()> {
     if args.http_max_connections == 0 {
         return Err(
@@ -175,6 +192,7 @@ fn compose_state(
     args: &ServeArgs,
     store: &Store,
     auth_hmac_key: Arc<AuthHmacKey>,
+    request_tracing: Option<crate::observability::tracing::RequestConfig>,
 ) -> AppResult<ProcessComposition> {
     let runtime = Arc::new(Manager::empty());
     let media_spool_dir = args
@@ -207,6 +225,7 @@ fn compose_state(
         args.http_max_in_flight_management_requests,
     );
     state.local_login_enabled = args.local_login_enabled;
+    state.request_tracing = request_tracing;
     state.body_limits = body_limits;
     state.provider_response_limits = provider_response_limits;
     // The browser integration fixture uses a loopback mock identity

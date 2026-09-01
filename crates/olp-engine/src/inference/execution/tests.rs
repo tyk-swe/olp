@@ -134,6 +134,7 @@ fn routed_events(success: bool, effects: Arc<CleanupEffects>) -> RoutedEvents {
             request_started: tokio::time::Instant::now(),
             surface: Surface::OpenAi,
             operation: OperationKind::Generation,
+            trace: None,
         },
         None,
         Some(Reservation::distributed(Arc::new(GatedLease(Arc::clone(
@@ -236,6 +237,7 @@ async fn reconciliation_uses_the_supplied_historical_bundle() {
             provider_id,
             Provider {
                 id: provider_id,
+                revision_id: None,
                 name: "historical-provider".into(),
                 kind: ProviderKind::OpenAi,
                 enabled: true,

@@ -7,6 +7,24 @@ semantic versioning and match `Cargo.toml`, `console/package.json`,
 
 ## [Unreleased]
 
+### Added
+
+- **OTEL-01–OTEL-04:** Optional OTLP/HTTP distributed tracing follows an
+  admitted request through provider failover, honours W3C context in both
+  directions, exports through a bounded queue, and stays entirely absent when
+  no endpoint is configured. Request-span attributes are exactly
+  `olp.request_id`, `olp.surface`, `olp.operation`, `olp.route_slug`,
+  `olp.key_id`, `olp.installation_id`, `olp.generation`, `olp.status`,
+  `olp.error_class`, `olp.attempt_count`, `olp.time_to_first_byte_ms`,
+  `olp.total_duration_ms`, and `olp.cancelled`. Attempt-span attributes are
+  exactly `olp.provider_kind`, `olp.provider_revision`, `olp.model`,
+  `olp.outcome_class`, `olp.upstream_status_class`,
+  `olp.usage.input_tokens`, `olp.usage.output_tokens`,
+  `olp.usage.cached_input_tokens`, `olp.usage.media_units`, and
+  `olp.pricing_provenance`. Prompts, outputs, tool payloads, headers,
+  credentials, and raw provider errors are never exported. Helm values and a
+  digest-pinned Jaeger development overlay provide deployment paths.
+
 ### Fixed
 
 - **CI-07:** Provider conflict reloads retain pending hydration until

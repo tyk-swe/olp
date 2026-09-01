@@ -14,6 +14,11 @@ paths, never inline values.
 | `OLP_VALKEY_URL` | optional for `all`, `gateway`, `control`; required for `worker`, `migrate`, `doctor` | Valkey for installation-scoped limits, hints, and streams. |
 | `OLP_LISTEN_ADDR` | `127.0.0.1:8080` | Public listener; containers override to `0.0.0.0:8080`. |
 | `OLP_OBSERVABILITY_LISTEN_ADDR` | `127.0.0.1:9090` | Private health and metrics listener. |
+| `OLP_OTLP_TRACES_ENDPOINT` | unset | Complete HTTP or HTTPS OTLP traces endpoint. Unset disables tracing. |
+| `OLP_OTLP_HEADERS_FILE` | unset | JSON object of additional OTLP exporter headers, read only when tracing is enabled. |
+| `OLP_TRACE_SAMPLE_RATIO` | `1.0` | Sampling ratio from `0.0` through `1.0` for locally rooted traces. |
+| `OLP_TRACE_PROPAGATE_UPSTREAM` | `true` | Inject the current W3C trace context into provider attempts. |
+| `OLP_TRACE_ACCEPT_INBOUND` | `true` | Accept a valid inbound W3C trace context as the request parent. |
 | `OLP_HTTP_MAX_CONNECTIONS` | `1024` | Admitted TCP connections. |
 | `OLP_HTTP_MAX_IN_FLIGHT_INFERENCE_REQUESTS` | `256` | Inference work admission. |
 | `OLP_HTTP_MAX_IN_FLIGHT_MANAGEMENT_REQUESTS` | `32` | Management work admission. |
@@ -50,6 +55,35 @@ The CLI loopback default is intentional; Compose and Helm set their container
 listener explicitly. Keep the observability listener private and set trusted
 proxy CIDRs only to peers that append a trustworthy forwarding chain.
 
+Tracing is installed only when `OLP_OTLP_TRACES_ENDPOINT` is set. The value is
+used without path rewriting, so an OTLP/HTTP collector normally needs a full
+URL such as `https://collector.example.com/v1/traces`. With the endpoint unset,
+OLP constructs no exporter or OpenTelemetry layer and does no tracing work on
+the request path. Tracing exports spans only; Prometheus metrics and JSON logs
+keep their existing destinations. Endpoint userinfo and fragments are rejected;
+put collector credentials in the headers file.
+
+The optional headers file must be UTF-8 JSON whose top level is an object and
+whose property names and values are valid HTTP header strings, for example
+`{"x-scope-orgid":"tenant-a"}`. Inline header values are not accepted. The
+file follows the same secret-permission policy as the master and HMAC keys and
+must grant no permissions to other users on Unix. Helm mounts it at
+`/run/secrets/otlp-headers/headers`. Invalid endpoints, ratios, headers, or
+secret permissions fail startup before a listener binds. The standard
+`OTEL_EXPORTER_OTLP_TRACES_HEADERS` and `OTEL_EXPORTER_OTLP_HEADERS` variables
+are rejected when tracing is enabled; exporter headers must come from the file.
+
+Inbound `traceparent` is used only when tracing and inbound acceptance are both
+enabled; invalid context starts a local trace. Caller-supplied `tracestate` is
+discarded. Upstream propagation derives fresh headers from the current span
+instead of forwarding raw client values. Exporter headers are never sent to
+providers. Spans contain
+only the documented identifier, classification, timing, usage, and pricing
+attributes—never prompts, outputs, tool data, raw headers, credentials, or raw
+provider errors. Only canonical lowercase hyphenated UUID `x-request-id`
+values are eligible for the request identifier attribute; other caller values
+are omitted.
+
 All HTTP modes (`all`, `gateway`, and `control`) require PostgreSQL and the
 authentication HMAC key. Configure Valkey for production gateway traffic:
 without it, runtime hints fall back to PostgreSQL polling and keys with hard
@@ -75,6 +109,7 @@ unavailable.
 | `OLP_MASTER_KEY_FILE` | `all`, `control`, a `gateway` loading database-encrypted credentials, `doctor`, `master-key` | Versioned envelope-encryption keyring. |
 | `OLP_AUTH_HMAC_KEY_FILE` | `all`, `gateway`, `control`, `doctor` | Session and authentication HMAC key. |
 | `OLP_BOOTSTRAP_TOKEN_FILE` | first `all` or `control` run | One-time owner-setup token. |
+| `OLP_OTLP_HEADERS_FILE` | traced `all`, `gateway`, or `control` | Optional JSON object of OTLP exporter headers. |
 
 Generate and rotate these through
 [`deploy/secrets/README.md`](../deploy/secrets/README.md). Keep the HMAC key

@@ -132,6 +132,7 @@ pub struct ProviderRequest {
     pub operation: Arc<Operation>,
     pub media: Option<Arc<dyn MediaSpool>>,
     pub max_inline_media_bytes: usize,
+    pub propagate_trace_context: bool,
 }
 
 impl fmt::Debug for ProviderRequest {
@@ -144,6 +145,7 @@ impl fmt::Debug for ProviderRequest {
             .field("route", &self.operation.route())
             .field("media", &self.media.as_ref().map(|_| "[MEDIA SPOOL]"))
             .field("max_inline_media_bytes", &self.max_inline_media_bytes)
+            .field("propagate_trace_context", &self.propagate_trace_context)
             .finish_non_exhaustive()
     }
 }

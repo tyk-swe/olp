@@ -285,6 +285,7 @@ pub(in crate::providers) async fn execute_capability_probe(
             target_id: TargetId::new(),
             routing_id: TargetId::new(),
             provider_id: ProviderId::new(),
+            provider_revision_id: None,
             provider_kind,
             upstream_model: upstream_model.to_owned(),
             timeout: DurationMs::new(PROBE_TIMEOUT_MS),
@@ -293,6 +294,7 @@ pub(in crate::providers) async fn execute_capability_probe(
         operation: Arc::new(operation),
         media: None,
         max_inline_media_bytes: 1024 * 1024,
+        propagate_trace_context: false,
     };
     let output = tokio::time::timeout(
         Duration::from_millis(PROBE_TIMEOUT_MS),

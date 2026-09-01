@@ -18,3 +18,4 @@ pub mod runtime;
 pub mod selection;
 pub mod service;
 mod telemetry;
+pub mod tracing;

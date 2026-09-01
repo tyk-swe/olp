@@ -90,6 +90,7 @@ fn compose_public_router(
     let public_admission = PublicAdmissionMiddleware::new(
         request_limit_state.public_admission.clone(),
         gateway_state.is_some(),
+        request_limit_state.request_tracing,
     );
     let cors_allowed_origins = gateway_state
         .as_ref()

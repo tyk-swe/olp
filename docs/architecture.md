@@ -52,6 +52,127 @@ layer-level re-export facades. Examples include
 `olp_engine::domain::canonical::requests::GenerationRequest`,
 `olp_engine::inference::service::Service`, and `olp_db::store::Store`.
 
+## Distributed tracing
+
+Distributed tracing is an optional delivery capability. `apps/olp` owns OTLP
+exporter construction, configuration, the bounded export queue, and shutdown in
+`apps/olp/src/observability/tracing.rs` because those concerns belong to the
+process lifecycle. Request spans begin at `public_http` admission. Attempt spans
+belong to `olp_engine::inference::execution`, where failover and provider-call
+lifetimes are known. `olp_engine::providers::transport_common` injects the
+current W3C trace context into HTTP provider requests, with the equivalent SDK
+interceptor used for Bedrock. The engine never constructs an exporter, and the
+database crate has no tracing responsibility.
+
+The integration uses `tracing-opentelemetry` with default features disabled;
+the direct `opentelemetry` and `opentelemetry_sdk` declarations request only
+trace support for W3C context, carrier APIs, and span processing. The required
+upstream `opentelemetry-otlp/http-proto` feature also unifies the OpenTelemetry
+metrics compile features, but OLP constructs no meter provider, metric reader,
+or metrics exporter. The delivery-owned processor uses the process Tokio
+runtime, a bounded non-blocking queue, and explicit drop accounting.
+`opentelemetry-otlp` is delivery-owned, has default
+features disabled, and enables only `http-proto` and `reqwest-client`.
+`http-proto` supplies OTLP trace protocol support, the client reuses the
+workspace's existing Reqwest dependency, and no `tonic` or OTLP/gRPC tree is
+allowed. The collector connection is process telemetry, not provider egress;
+it may target a private collector without changing provider egress policy. If
+the boundary checker classifies the OTLP HTTP client as provider networking,
+its ownership table must gain this explicit delivery exception rather than
+moving exporter code into the engine. `cargo tree`, `cargo deny check bans
+licenses`, and `make machete` verify this dependency decision.
+
+The three HTTP-serving modes expose the same environment and CLI surface. A CLI
+value takes precedence over its environment counterpart.
+
+| Environment | CLI | Default and meaning |
+|---|---|---|
+| `OLP_OTLP_TRACES_ENDPOINT` | `--otlp-traces-endpoint` | Unset disables distributed tracing. When set, it is the complete HTTP or HTTPS OTLP traces endpoint and is used without path rewriting. |
+| `OLP_OTLP_HEADERS_FILE` | `--otlp-headers-file` | Unset sends no additional exporter headers. The file is used only when tracing is enabled. |
+| `OLP_TRACE_SAMPLE_RATIO` | `--trace-sample-ratio` | `1.0`; a finite number from `0.0` through `1.0` controlling locally rooted traces. |
+| `OLP_TRACE_PROPAGATE_UPSTREAM` | `--trace-propagate-upstream` | `true`; inject the current trace context into provider attempts. |
+| `OLP_TRACE_ACCEPT_INBOUND` | `--trace-accept-inbound` | `true`; accept a valid inbound `traceparent` as the request parent. Caller-supplied `tracestate` is discarded. |
+
+`OLP_OTLP_HEADERS_FILE` follows the mounted-secret convention. When tracing is
+enabled, startup checks the file with the same secret-permission policy as the
+other secret files, reads it as UTF-8, and requires a JSON object whose property
+names and string values are valid HTTP header names and values. On Unix, any
+permission for "other" users is rejected; on other platforms, the file must be
+readable. An unreadable file, invalid JSON, a non-string value, or an invalid
+header fails startup. Header values are never printed through `Debug`, logs, or
+spans. `OTEL_EXPORTER_OTLP_TRACES_HEADERS` and `OTEL_EXPORTER_OTLP_HEADERS` are
+rejected so exporter headers can come only from this file. When the endpoint is
+unset, no exporter, OpenTelemetry layer, or propagator is installed, the headers
+file is not opened, and the sampling and propagation settings have no
+request-path effect.
+
+Inbound context is used only when both tracing and inbound acceptance are
+enabled; invalid context is ignored and starts a local trace. Upstream context
+is injected only when both tracing and upstream propagation are enabled. OLP
+injects the context derived from the current span rather than forwarding raw
+inbound header values. Exporter authentication headers never become provider
+headers, and propagation headers never become span attributes.
+
+Only dedicated `request` and `attempt` spans are exported. Existing logging
+spans and events remain JSON-log-only and cannot add attributes or events to an
+exported span. Resource attributes are limited to
+`service.name=openllmproxy`, the build's `service.version`, and
+`olp.process.mode`. The request-span attribute allowlist is exactly:
+
+```text
+olp.request_id
+olp.surface
+olp.operation
+olp.route_slug
+olp.key_id
+olp.installation_id
+olp.generation
+olp.status
+olp.error_class
+olp.attempt_count
+olp.time_to_first_byte_ms
+olp.total_duration_ms
+olp.cancelled
+```
+
+`olp.request_id` is the accepted or generated `x-request-id` value only when it
+is a canonical UUID. Arbitrary caller-supplied correlation text remains part of
+the existing HTTP contract but is omitted from tracing rather than copied into
+an attribute.
+`olp.cancelled` is true only when response delivery is cancelled. A request
+span ends at its terminal metadata envelope, including after the last streaming
+frame, rather than at first byte. Management and playground requests use
+`olp.surface=management`; fields that do not apply, such as a route slug on an
+ordinary management request, are omitted rather than fabricated.
+
+The attempt-span attribute allowlist is exactly:
+
+```text
+olp.provider_kind
+olp.provider_revision
+olp.model
+olp.outcome_class
+olp.upstream_status_class
+olp.usage.input_tokens
+olp.usage.output_tokens
+olp.usage.cached_input_tokens
+olp.usage.media_units
+olp.pricing_provenance
+```
+
+Usage attributes are omitted unless the provider reports the corresponding
+unit. Pricing provenance is omitted when it is not known before the attempt
+span closes; no value is inferred from missing usage. Outcome, upstream status,
+and error attributes contain bounded classifications, never messages.
+
+Prompts, outputs, reasoning content, tool arguments or results, uploads,
+request or response headers, raw provider error bodies, credentials, exporter
+header values, and arbitrary provider fields are prohibited in span
+attributes, names, events, links, and status descriptions. This is a traces-only
+integration: metrics remain on the Prometheus observability endpoint, including
+trace-export drop accounting, and logs remain `tracing` JSON. There is no
+OpenTelemetry metrics or logs exporter.
+
 ## Typed HTTP composition
 
 Startup completes mode-specific dependencies before it builds routers. Gateway,

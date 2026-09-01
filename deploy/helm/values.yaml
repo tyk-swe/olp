@@ -136,6 +136,15 @@ migration:
     requests: { cpu: 50m, memory: 128Mi }
     limits: { cpu: "1", memory: 512Mi }
 
+tracing:
+  # Unset keeps tracing disabled and installs no exporter or request-path layer.
+  # When set, use the complete OTLP/HTTP traces endpoint, including /v1/traces.
+  endpoint: ""
+  # Optional Secret containing a JSON object of OTLP exporter headers.
+  headersSecretName: ""
+  headersSecretKey: headers
+  sampleRatio: 1.0
+
 config:
   databaseSecretName: olp-postgresql
   databaseSecretKey: url

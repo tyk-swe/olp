@@ -47,7 +47,7 @@ where
             }),
         )
         .layer(middleware::from_fn_with_state(
-            PublicAdmissionMiddleware::new(admission, false),
+            PublicAdmissionMiddleware::new(admission, false, None),
             admit_public_request,
         ))
 }
@@ -89,7 +89,7 @@ async fn handler_execution_is_admitted_and_early_error_body_releases() {
             }),
         )
         .layer(middleware::from_fn_with_state(
-            PublicAdmissionMiddleware::new(admission.clone(), false),
+            PublicAdmissionMiddleware::new(admission.clone(), false, None),
             admit_public_request,
         ));
     let request = tokio::spawn(app.oneshot(Request::get("/").body(Body::empty()).unwrap()));
@@ -122,7 +122,7 @@ async fn cancelling_handler_future_releases_permit() {
             }),
         )
         .layer(middleware::from_fn_with_state(
-            PublicAdmissionMiddleware::new(admission.clone(), false),
+            PublicAdmissionMiddleware::new(admission.clone(), false, None),
             admit_public_request,
         ));
     let request = tokio::spawn(app.oneshot(Request::get("/").body(Body::empty()).unwrap()));
@@ -229,7 +229,7 @@ async fn independent_pools_reject_without_invoking_saturated_handler() {
         )
         .route("/api/v1/test", get(|| async { "management" }))
         .layer(middleware::from_fn_with_state(
-            PublicAdmissionMiddleware::new(admission.clone(), true),
+            PublicAdmissionMiddleware::new(admission.clone(), true, None),
             admit_public_request,
         ));
 
@@ -302,7 +302,7 @@ async fn one_http2_connection_cannot_exceed_request_budget_and_shutdown_drains()
             }),
         )
         .layer(middleware::from_fn_with_state(
-            PublicAdmissionMiddleware::new(admission.clone(), false),
+            PublicAdmissionMiddleware::new(admission.clone(), false, None),
             admit_public_request,
         ));
     let listener_socket = TcpListener::bind("127.0.0.1:0").await.unwrap();

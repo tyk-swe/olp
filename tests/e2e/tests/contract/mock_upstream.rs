@@ -30,6 +30,8 @@ pub(crate) const NO_USAGE_MARKER: &str = "OMIT_USAGE";
 /// Marker that makes the upstream answer 429 with a `Retry-After`, so the
 /// gateway's own translation of that status can be observed.
 pub(crate) const RATE_LIMITED_MARKER: &str = "UPSTREAM_429";
+/// Marker that rate-limits only the compatible target so a route can fail over.
+pub(crate) const TRACE_FAILOVER_MARKER: &str = "TRACE_FAILOVER_429";
 /// `Retry-After` seconds the mock sends with its 429.
 pub(crate) const RETRY_AFTER_SECONDS: &str = "37";
 /// Reply text for ordinary calls.
@@ -164,6 +166,9 @@ async fn dispatch(State(state): State<MockState>, request: Request) -> Response 
     let azure_responses = format!("/openai/deployments/{DEPLOYMENT}/responses");
     match (method.as_str(), path.as_str()) {
         ("GET", "/v1/models") => models_response(MODEL).into_response(),
+        ("POST", "/v1/chat/completions") if contains(&body, TRACE_FAILOVER_MARKER) => {
+            rate_limited()
+        }
         ("POST", "/v1/chat/completions") => chat_response(&body, MODEL),
         ("POST", "/v1/responses") => responses_response(&body, MODEL),
         ("POST", p) if p == azure_chat => chat_response(&body, DEPLOYMENT),

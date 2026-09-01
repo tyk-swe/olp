@@ -94,6 +94,9 @@ paths, routing/capability policy, generation pinning,
 usage completeness, data-safety, recovery, and distributed limits. The
 end-to-end suite also executes the README "Your first request" `curl` blocks
 verbatim, so a README example that stops working is a build failure.
+The required contract suite also decodes OTLP/HTTP exports to prove request and
+attempt linkage without content leakage; the full two-gateway HA suite proves
+that accepted W3C context retains one trace ID across replicas.
 
 ## Fuzzing
 

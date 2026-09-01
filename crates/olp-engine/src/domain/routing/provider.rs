@@ -140,6 +140,8 @@ impl Capability {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Provider {
     pub id: ProviderId,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub revision_id: Option<uuid::Uuid>,
     pub name: String,
     pub kind: ProviderKind,
     pub enabled: bool,

@@ -15,10 +15,6 @@ pub(crate) mod worker;
 
 use std::{error::Error, time::Duration};
 
-use crate::bootstrap::state::ApiMode;
-use clap::Parser;
-use tracing_subscriber::EnvFilter;
-
 use self::{
     config::{Cli, Command},
     doctor::doctor,
@@ -29,6 +25,8 @@ use self::{
     startup::serve,
     worker::run_worker,
 };
+use crate::bootstrap::state::ApiMode;
+use clap::Parser;
 
 pub(crate) type AppError = Box<dyn Error + Send + Sync>;
 pub(crate) type AppResult<T> = Result<T, AppError>;
@@ -42,17 +40,17 @@ pub fn run() -> AppResult<()> {
 }
 
 async fn execute() -> AppResult<()> {
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("olp=info")),
-        )
-        .json()
-        .init();
-
-    match Cli::parse().command {
-        Command::All(args) => serve(ApiMode::All, args, true).await,
-        Command::Gateway(args) => serve(ApiMode::Gateway, args, false).await,
-        Command::Control(args) => serve(ApiMode::Control, args, false).await,
+    let command = Cli::parse().command;
+    if !matches!(
+        &command,
+        Command::All(_) | Command::Gateway(_) | Command::Control(_)
+    ) {
+        crate::observability::tracing::install_logging()?;
+    }
+    match command {
+        Command::All(args) => serve_http_mode(ApiMode::All, args, true).await,
+        Command::Gateway(args) => serve_http_mode(ApiMode::Gateway, args, false).await,
+        Command::Control(args) => serve_http_mode(ApiMode::Control, args, false).await,
         Command::Worker(args) => run_worker(args).await,
         Command::Migrate(args) => migrate(args).await,
         Command::Doctor(args) => doctor(args).await,
@@ -60,6 +58,28 @@ async fn execute() -> AppResult<()> {
         Command::HealthProbe => health_probe().await,
         Command::InternalPreStop(args) => internal_pre_stop(args).await,
     }
+}
+
+async fn serve_http_mode(
+    mode: ApiMode,
+    args: config::ServeArgs,
+    run_worker_in_process: bool,
+) -> AppResult<()> {
+    let tracing = crate::observability::tracing::Handle::install(
+        crate::observability::tracing::Config {
+            endpoint: args.tracing.otlp_traces_endpoint.clone(),
+            headers_file: args.tracing.otlp_headers_file.clone(),
+            sample_ratio: args.tracing.trace_sample_ratio,
+            propagate_upstream: args.tracing.trace_propagate_upstream,
+            accept_inbound: args.tracing.trace_accept_inbound,
+        },
+        mode,
+    )
+    .await?;
+    let result = serve(mode, args, run_worker_in_process, tracing.runtime()).await;
+    let shutdown = tracing.shutdown().await;
+    result?;
+    shutdown
 }
 
 #[cfg(test)]

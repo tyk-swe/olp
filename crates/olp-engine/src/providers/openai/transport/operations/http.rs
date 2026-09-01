@@ -1,5 +1,5 @@
 use crate::domain::ports::{ProviderRequest, TransportError, TransportPhase};
-use http::{HeaderMap, HeaderValue, header};
+use http::{HeaderValue, header};
 use reqwest::{Method, Response, multipart};
 use tokio::time::{Instant, timeout};
 
@@ -31,8 +31,7 @@ impl Connector {
             .endpoint
             .resource_url(path)
             .map_err(map_endpoint_error)?;
-        let mut headers = HeaderMap::new();
-        self.attach_auth(&mut headers)?;
+        let mut headers = self.base_headers(request)?;
         headers.insert(
             header::CONTENT_TYPE,
             HeaderValue::from_static("application/json"),
@@ -128,8 +127,7 @@ impl Connector {
             );
             url.set_query(Some(&combined));
         }
-        let mut headers = HeaderMap::new();
-        self.attach_auth(&mut headers)?;
+        let mut headers = self.base_headers(request)?;
         headers.insert(header::ACCEPT, HeaderValue::from_static(accept));
         let mut builder = client.request(method, url).headers(headers);
         if let Some(body) = body {
@@ -175,8 +173,7 @@ impl Connector {
             .endpoint
             .resource_url(path)
             .map_err(map_endpoint_error)?;
-        let mut headers = HeaderMap::new();
-        self.attach_auth(&mut headers)?;
+        let mut headers = self.base_headers(request)?;
         headers.insert(header::ACCEPT, HeaderValue::from_static("application/json"));
         let wait = bounded_duration(
             self.config.timeouts.first_byte,
@@ -223,8 +220,7 @@ impl Connector {
             .resource_url(path)
             .map_err(map_endpoint_error)?;
         let first_byte_deadline = Instant::now() + self.config.timeouts.first_byte;
-        let mut headers = HeaderMap::new();
-        self.attach_auth(&mut headers)?;
+        let mut headers = self.base_headers(request)?;
         headers.insert(
             header::CONTENT_TYPE,
             HeaderValue::from_static("application/json"),

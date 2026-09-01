@@ -51,6 +51,22 @@ impl Connector {
         }
     }
 
+    /// Auth plus outbound trace context: every OpenAI-shaped request needs
+    /// both, and assembling them in one place keeps a new endpoint from
+    /// silently dropping trace continuity.
+    fn base_headers(
+        &self,
+        request: &crate::domain::ports::ProviderRequest,
+    ) -> Result<HeaderMap, TransportError> {
+        let mut headers = HeaderMap::new();
+        self.attach_auth(&mut headers)?;
+        crate::providers::transport_common::inject_trace_context(
+            &mut headers,
+            request.propagate_trace_context,
+        );
+        Ok(headers)
+    }
+
     fn attach_auth(&self, headers: &mut HeaderMap) -> Result<(), TransportError> {
         match self.auth_style {
             AuthStyle::Bearer => {

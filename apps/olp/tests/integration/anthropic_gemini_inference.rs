@@ -229,6 +229,7 @@ fn test_gateway() -> TestGateway {
                 anthropic_provider,
                 Provider {
                     id: anthropic_provider,
+                    revision_id: None,
                     name: "anthropic".into(),
                     kind: ProviderKind::Anthropic,
                     enabled: true,
@@ -240,6 +241,7 @@ fn test_gateway() -> TestGateway {
                 gemini_provider,
                 Provider {
                     id: gemini_provider,
+                    revision_id: None,
                     name: "gemini".into(),
                     kind: ProviderKind::Gemini,
                     enabled: true,

@@ -21,7 +21,7 @@ use crate::protocols::anthropic::{
     },
     translate::{encode::request as encode_request, response::decode},
 };
-use crate::providers::transport_common::request_id_header;
+use crate::providers::transport_common::{inject_trace_context, request_id_header};
 use futures::stream;
 use http::{HeaderMap, HeaderValue, header};
 use reqwest::{Response, Url};
@@ -227,6 +227,7 @@ impl Connector {
             "x-request-id",
             request_id_header(request.metadata.request_id)?,
         );
+        inject_trace_context(&mut headers, request.propagate_trace_context);
 
         let response = RESPONSE_IO
             .send_before(

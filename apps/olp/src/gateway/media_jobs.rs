@@ -29,7 +29,7 @@ use crate::bootstrap::{
 
 use super::{
     error::InferenceError,
-    execution::{authorize_principal, execute_routed_result},
+    execution::{authorize_principal, execute_internal_routed_result},
 };
 
 pub(super) async fn attach_media_job_with_retry(
@@ -350,7 +350,7 @@ pub(super) async fn refresh_video_list_record(
     if set_video_route(&mut operation, &record.route_slug).is_err() {
         return record;
     }
-    let Ok(mut executed) = execute_routed_result(
+    let Ok(mut executed) = execute_internal_routed_result(
         state,
         principal,
         operation,

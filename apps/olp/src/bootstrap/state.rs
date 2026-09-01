@@ -22,7 +22,10 @@ use tokio::sync::RwLock as AsyncRwLock;
 use zeroize::Zeroizing;
 
 use crate::{
-    observability::{cache::ObservabilityCache, metrics::RequestMetadataLossCounters},
+    observability::{
+        cache::ObservabilityCache, metrics::RequestMetadataLossCounters,
+        tracing::RequestConfig as RequestTracingConfig,
+    },
     public_http::proxy::TrustedProxyCidr,
     public_http::public_origin::PublicOrigin,
     public_http::request_admission::{self, multipart::MultipartAdmissionState},
@@ -120,6 +123,7 @@ pub struct ProcessComposition {
     pub media_spool: Arc<dyn MediaSpool>,
     pub(crate) multipart_admission: MultipartAdmissionState,
     pub(crate) public_admission: request_admission::public::PublicAdmission,
+    pub(crate) request_tracing: Option<RequestTracingConfig>,
     pub transports: TransportRegistry,
     #[cfg(any(test, feature = "test-util"))]
     pub(crate) certification_probe_connectors: olp_engine::providers::factory::overrides::Registry,
@@ -191,6 +195,7 @@ impl ProcessComposition {
             media_spool,
             multipart_admission,
             public_admission: request_admission::public::PublicAdmission::default(),
+            request_tracing: None,
             transports: TransportRegistry::default(),
             #[cfg(any(test, feature = "test-util"))]
             certification_probe_connectors: Default::default(),

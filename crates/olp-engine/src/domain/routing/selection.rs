@@ -24,6 +24,7 @@ pub struct AttemptPlan {
     /// circuit-breaker health above all — keys on this instead.
     pub routing_id: TargetId,
     pub provider_id: ProviderId,
+    pub provider_revision_id: Option<uuid::Uuid>,
     pub provider_kind: ProviderKind,
     pub upstream_model: String,
     pub timeout: DurationMs,
@@ -127,6 +128,7 @@ pub fn select_attempts_filtered(
                 target_id: ranked.target.id,
                 routing_id: ranked.target.routing_id.unwrap_or(ranked.target.id),
                 provider_id: ranked.provider.id,
+                provider_revision_id: ranked.provider.revision_id,
                 provider_kind: ranked.provider.kind,
                 upstream_model: ranked.target.upstream_model.clone(),
                 timeout: ranked.target.timeout,
