@@ -20,7 +20,7 @@ Status values: `planned`, `in progress`, `done`, `dropped` (with a reason).
 | 8 — Release 2.3.0 and hardening | REL-06, HYG-01 … HYG-03 | — | 1 | 2 | 1 |
 | Unscheduled | TEST-04, HYG-04 … HYG-08, FLEX-01 … FLEX-06 | — | 3 | 3 | 6 (incl. P4) |
 
-54 items: 42 scheduled, 12 unscheduled; 28 done. [`deferred.md`](deferred.md) lists what
+54 items: 42 scheduled, 12 unscheduled; 33 done. [`deferred.md`](deferred.md) lists what
 is intentionally not here.
 
 ## CI — the gates themselves
@@ -75,11 +75,11 @@ is intentionally not here.
 
 ## SPEND — spend controls
 
-- [ ] **SPEND-01** Budget semantics written before code: windows, accrual, unpriced attempts, fail-closed, error shape — P2 · S · week 6 · planned → [milestone 6](milestones/06-spend-controls.md)
-- [ ] **SPEND-02** Migration 0049, cost reservation script, limiter dimension, PostgreSQL reconciliation task — P2 · M · week 6 · planned → [milestone 6](milestones/06-spend-controls.md)
-- [ ] **SPEND-03** Engine admission, terminal accrual, management API fields, audit events, metrics — P2 · M · week 6 · planned → [milestone 6](milestones/06-spend-controls.md)
-- [ ] **SPEND-04** Console: key form, list column, detail view, usage filter — P2 · M · week 6 (stretch) · planned → [milestone 6](milestones/06-spend-controls.md)
-- [ ] **SPEND-05** Integration and e2e proofs, docs, CHANGELOG semantics sentence — P2 · M · week 6 · planned → [milestone 6](milestones/06-spend-controls.md)
+- [x] **SPEND-01** Budget semantics written before code: windows, accrual, unpriced attempts, fail-closed, error shape — P2 · S · week 6 · done → [milestone 6](milestones/06-spend-controls.md)
+- [x] **SPEND-02** Migration 0049, cost reservation script, limiter dimension, PostgreSQL reconciliation task — P2 · M · week 6 · done → [milestone 6](milestones/06-spend-controls.md)
+- [x] **SPEND-03** Engine admission, terminal accrual, management API fields, audit events, metrics — P2 · M · week 6 · done → [milestone 6](milestones/06-spend-controls.md)
+- [x] **SPEND-04** Console: key form, list column, detail view, usage filter — P2 · M · week 6 (stretch) · done → [milestone 6](milestones/06-spend-controls.md)
+- [x] **SPEND-05** Integration and e2e proofs, docs, CHANGELOG semantics sentence — P2 · M · week 6 · done → [milestone 6](milestones/06-spend-controls.md)
 
 ## PERF — performance evidence
 
@@ -109,5 +109,5 @@ immutable-generation invariants are untouched.
 - [x] **FLEX-02** Certification survives renames, credential rotation, model disable and unchanged tuple re-review — P1 · M · unscheduled · done
 - [x] **FLEX-03** Connection age never cuts an in-flight stream; age and drain configurable — P1 · M · unscheduled · done
 - [x] **FLEX-04** Request, inline-media and provider-response caps configurable with unchanged defaults — P2 · M · unscheduled · done
-- [x] **FLEX-05** `limits.valkey_unavailable` setting: opt-in fail-open for hard-limited keys — P2 · M · unscheduled · done
+- [x] **FLEX-05** `limits.valkey_unavailable` setting: opt-in fail-open for rate/concurrency-limited keys; cost-budgeted keys remain fail-closed — P2 · M · unscheduled · done
 - [x] **FLEX-06** Small fixes: models listing covers every operation, page cap 200 everywhere, gzip JSON bodies, 64 tuples / 8 probes, gateway CORS, activate validates inline — P2 · M · unscheduled · done

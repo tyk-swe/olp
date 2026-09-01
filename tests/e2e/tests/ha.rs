@@ -16,7 +16,7 @@ mod world;
 use std::time::{Duration, Instant};
 
 use futures::StreamExt as _;
-use olp_db::limits::DistributedLimiter;
+use olp_db::{limits::DistributedLimiter, worker_health::WorkerTask};
 use olp_engine::inference::limits::{LimitError, LimitRequest};
 use redis::{
     AsyncCommands as _,
@@ -341,7 +341,8 @@ async fn await_healthy_recovered_workers(world: &World, timeout: Duration) -> Re
             "SELECT count(*)::bigint FROM worker_task_health \
              WHERE last_success_at IS NOT NULL AND \
                last_success_at >= clock_timestamp() - \
-                 CASE WHEN task = 'maintenance' THEN interval '180 seconds' ELSE interval '20 seconds' END",
+                 CASE WHEN task IN ('maintenance', 'cost_reconciliation') \
+                      THEN interval '180 seconds' ELSE interval '20 seconds' END",
         )
         .fetch_one(&mut database)
         .await
@@ -355,7 +356,7 @@ async fn await_healthy_recovered_workers(world: &World, timeout: Duration) -> Re
             && state.6 == 0
             && state.7 == Some(0)
             && state.8 == Some(0)
-            && healthy_tasks == 4
+            && healthy_tasks == WorkerTask::ALL.len() as i64
         {
             return Ok(());
         }
@@ -492,10 +493,13 @@ async fn prove_shared_valkey_isolation(
         .await
         .map_err(|error| format!("installation B limiter failed to connect: {error}"))?;
     let limit_request = || LimitRequest {
+        api_key_id: uuid::Uuid::nil(),
         lookup_id: same_lookup,
         requests_per_minute: Some(1),
         tokens_per_minute: Some(10),
         max_concurrency: Some(1),
+        daily_cost_limit: None,
+        monthly_cost_limit: None,
         requested_tokens: 10,
         lease_ttl: Duration::from_secs(60),
     };
@@ -707,6 +711,18 @@ async fn exercise(world: &World, gateway: &GatewayProcess) -> Result<(), String>
         }),
     )
     .await?;
+    let budgeted = issue_key(
+        world,
+        &http,
+        public[1],
+        "HA cost budget",
+        json!({
+            "allowed_routes": [OPENAI_ROUTE],
+            "daily_cost_limit": "1000.00"
+        }),
+    )
+    .await?;
+    set_limits_fail_open(&world.management).await?;
 
     let fast = issue_key(
         world,
@@ -827,10 +843,17 @@ async fn exercise(world: &World, gateway: &GatewayProcess) -> Result<(), String>
             Duration::from_secs(15),
         )
         .await?;
-        let hard_status = gateway_status(&http, public[0], &hard.secret, Some(&chat)).await?;
+        await_keys(&http, &[public[0]], &hard, 200, Duration::from_secs(20))
+            .await
+            .map_err(|error| {
+                format!("rate-limited key did not follow fail-open policy: {error}")
+            })?;
+        let budgeted_status =
+            gateway_status(&http, public[0], &budgeted.secret, Some(&chat)).await?;
         require!(
-            hard_status == 503,
-            "hard-limited key did not fail closed during Valkey outage ({hard_status})"
+            budgeted_status == 503,
+            "cost-budgeted key did not remain fail-closed under the general fail-open policy \
+             ({budgeted_status})"
         );
         let soft_status = gateway_status(&http, public[0], &soft.secret, Some(&chat)).await?;
         require!(
@@ -850,6 +873,34 @@ async fn exercise(world: &World, gateway: &GatewayProcess) -> Result<(), String>
     .await;
     set_proxy(&http, &toxiproxy, &valkey_proxy, true).await?;
     outage
+}
+
+async fn set_limits_fail_open(management: &Management) -> Result<(), String> {
+    let path = "/api/v1/settings/limits.valkey_unavailable";
+    let setting = management.get(path).await?;
+    require!(
+        setting.status == 200,
+        "limits outage setting read returned {}: {}",
+        setting.status,
+        setting.body
+    );
+    let etag = setting.require_etag("limits outage setting")?;
+    let updated = management
+        .expect(
+            reqwest::Method::PUT,
+            path,
+            Some(json!({"value": "fail_open"})),
+            None,
+            Some(&etag),
+            200,
+        )
+        .await?;
+    require!(
+        updated.body["value"] == "fail_open",
+        "limits outage setting did not retain fail_open: {}",
+        updated.body
+    );
+    Ok(())
 }
 
 async fn prove_trace_continuity(

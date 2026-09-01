@@ -328,6 +328,19 @@ const apiKeyItems = [
     requests_per_minute: 600,
     tokens_per_minute: 240_000,
     max_concurrency: 64,
+    budget: {
+      daily: {
+        limit: '25.00',
+        accrued: '8.42',
+        window_ends_at: '2026-07-02T00:00:00Z'
+      },
+      monthly: {
+        limit: '500.00',
+        accrued: '184.37',
+        window_ends_at: '2026-08-01T00:00:00Z'
+      },
+      unpriced_attempts: 2
+    },
     expires_at: null,
     revoked_at: null,
     rotated_at: null,
@@ -345,6 +358,19 @@ const apiKeyItems = [
     requests_per_minute: 120,
     tokens_per_minute: 24_000,
     max_concurrency: 16,
+    budget: {
+      daily: {
+        limit: '5.00',
+        accrued: '0.81',
+        window_ends_at: '2026-07-02T00:00:00Z'
+      },
+      monthly: {
+        limit: '75.00',
+        accrued: '21.16',
+        window_ends_at: '2026-08-01T00:00:00Z'
+      },
+      unpriced_attempts: 1
+    },
     expires_at: null,
     revoked_at: null,
     rotated_at: '2026-07-06T11:32:00Z',
@@ -362,6 +388,19 @@ const apiKeyItems = [
     requests_per_minute: 60,
     tokens_per_minute: null,
     max_concurrency: 8,
+    budget: {
+      daily: {
+        limit: null,
+        accrued: '0',
+        window_ends_at: '2026-07-02T00:00:00Z'
+      },
+      monthly: {
+        limit: null,
+        accrued: '0',
+        window_ends_at: '2026-08-01T00:00:00Z'
+      },
+      unpriced_attempts: 0
+    },
     expires_at: '2026-12-31T23:59:59Z',
     revoked_at: null,
     rotated_at: null,

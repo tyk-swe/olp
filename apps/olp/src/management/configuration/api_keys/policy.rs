@@ -9,6 +9,7 @@ use olp_engine::domain::{
     auth::{ApiKeyLimits, ApiKeyScope},
     ids::RouteSlug,
 };
+use rust_decimal::Decimal;
 
 use crate::{public_http::problem::FieldErrors, public_http::problem::Problem};
 
@@ -17,6 +18,8 @@ use super::{create::CreateApiKeyRequest, manage::UpdateApiKeyRequest};
 const MAX_NAME_CHARACTERS: usize = 100;
 const MAX_U32_DATABASE_LIMIT: u32 = i32::MAX as u32;
 const MAX_U64_DATABASE_LIMIT: u64 = i64::MAX as u64;
+const COST_LIMIT_ERROR: &str =
+    "Use a positive decimal with at most 12 integer and 12 fractional digits, or null.";
 
 pub(super) struct RawApiKeyPolicy<'a> {
     name: &'a str,
@@ -25,6 +28,8 @@ pub(super) struct RawApiKeyPolicy<'a> {
     requests_per_minute: Option<u32>,
     tokens_per_minute: Option<u64>,
     max_concurrency: Option<u32>,
+    daily_cost_limit: Option<&'a str>,
+    monthly_cost_limit: Option<&'a str>,
     expires_at: Option<DateTime<Utc>>,
 }
 
@@ -47,6 +52,8 @@ impl<'a> From<&'a CreateApiKeyRequest> for RawApiKeyPolicy<'a> {
             requests_per_minute: request.requests_per_minute,
             tokens_per_minute: request.tokens_per_minute,
             max_concurrency: request.max_concurrency,
+            daily_cost_limit: request.daily_cost_limit.as_deref(),
+            monthly_cost_limit: request.monthly_cost_limit.as_deref(),
             expires_at: request.expires_at,
         }
     }
@@ -61,6 +68,8 @@ pub(super) struct ApiKeyPolicySnapshot {
     pub requests_per_minute: Option<u32>,
     pub tokens_per_minute: Option<u64>,
     pub max_concurrency: Option<u32>,
+    pub daily_cost_limit: Option<String>,
+    pub monthly_cost_limit: Option<String>,
     pub expires_at: Option<DateTime<Utc>>,
 }
 
@@ -79,6 +88,8 @@ impl From<&ApiKeyRecord> for ApiKeyPolicySnapshot {
             max_concurrency: record
                 .max_concurrency
                 .and_then(|limit| u32::try_from(limit).ok()),
+            daily_cost_limit: record.daily_cost_limit.map(|limit| limit.to_string()),
+            monthly_cost_limit: record.monthly_cost_limit.map(|limit| limit.to_string()),
             expires_at: record.expires_at,
         }
     }
@@ -93,6 +104,8 @@ impl<'a> From<&'a ApiKeyPolicySnapshot> for RawApiKeyPolicy<'a> {
             requests_per_minute: policy.requests_per_minute,
             tokens_per_minute: policy.tokens_per_minute,
             max_concurrency: policy.max_concurrency,
+            daily_cost_limit: policy.daily_cost_limit.as_deref(),
+            monthly_cost_limit: policy.monthly_cost_limit.as_deref(),
             expires_at: policy.expires_at,
         }
     }
@@ -123,6 +136,14 @@ pub(super) fn merge_api_key_policy(
             .tokens_per_minute
             .unwrap_or(stored.tokens_per_minute),
         max_concurrency: request.max_concurrency.unwrap_or(stored.max_concurrency),
+        daily_cost_limit: request
+            .daily_cost_limit
+            .clone()
+            .unwrap_or(stored.daily_cost_limit),
+        monthly_cost_limit: request
+            .monthly_cost_limit
+            .clone()
+            .unwrap_or(stored.monthly_cost_limit),
         expires_at: request.expires_at.unwrap_or(stored.expires_at),
     };
     (merged, expiration_changed)
@@ -150,6 +171,8 @@ impl NormalizedApiKeyPolicy {
             requests_per_minute: self.limits.requests_per_minute.map(NonZeroU32::get),
             tokens_per_minute: self.limits.tokens_per_minute.map(NonZeroU64::get),
             max_concurrency: self.limits.concurrency.map(NonZeroU32::get),
+            daily_cost_limit: self.limits.daily_cost_limit,
+            monthly_cost_limit: self.limits.monthly_cost_limit,
             expires_at: self.expires_at,
         }
     }
@@ -221,6 +244,10 @@ pub(super) fn normalize_api_key_policy(
     let tokens_per_minute =
         normalize_u64_limit(&mut errors, "tokens_per_minute", raw.tokens_per_minute);
     let max_concurrency = normalize_u32_limit(&mut errors, "max_concurrency", raw.max_concurrency);
+    let daily_cost_limit =
+        normalize_cost_limit(&mut errors, "daily_cost_limit", raw.daily_cost_limit);
+    let monthly_cost_limit =
+        normalize_cost_limit(&mut errors, "monthly_cost_limit", raw.monthly_cost_limit);
 
     if let ExpirationValidation::RequireFuture(now) = expiration_validation
         && raw.expires_at.is_some_and(|expiration| expiration <= now)
@@ -243,6 +270,8 @@ pub(super) fn normalize_api_key_policy(
             requests_per_minute,
             tokens_per_minute,
             concurrency: max_concurrency,
+            daily_cost_limit,
+            monthly_cost_limit,
         },
         expires_at: raw.expires_at,
     })
@@ -300,10 +329,57 @@ fn normalize_u64_limit(
     }
 }
 
+fn normalize_cost_limit(
+    errors: &mut FieldErrors,
+    field: &str,
+    value: Option<&str>,
+) -> Option<Decimal> {
+    let value = value?.trim();
+    let mut parts = value.split('.');
+    let integer = parts.next().unwrap_or_default();
+    let fraction = parts.next();
+    let valid = !value.is_empty()
+        && !value.starts_with('-')
+        && parts.next().is_none()
+        && !integer.is_empty()
+        && integer.len() <= 12
+        && integer.bytes().all(|byte| byte.is_ascii_digit())
+        && fraction.is_none_or(|part| {
+            !part.is_empty() && part.len() <= 12 && part.bytes().all(|byte| byte.is_ascii_digit())
+        });
+    let parsed = valid.then(|| value.parse::<Decimal>().ok()).flatten();
+    if parsed.is_some_and(|limit| limit > Decimal::ZERO) {
+        return parsed;
+    }
+    errors.insert(field.to_owned(), vec![COST_LIMIT_ERROR.to_owned()]);
+    None
+}
+
+type CostLimitPatch = Option<Option<Decimal>>;
+
+pub(super) fn normalize_cost_limit_patch(
+    daily: Option<Option<&str>>,
+    monthly: Option<Option<&str>>,
+) -> Result<(CostLimitPatch, CostLimitPatch), Problem> {
+    let mut errors = FieldErrors::new();
+    let daily = daily.map(|value| {
+        value.and_then(|value| normalize_cost_limit(&mut errors, "daily_cost_limit", Some(value)))
+    });
+    let monthly = monthly.map(|value| {
+        value.and_then(|value| normalize_cost_limit(&mut errors, "monthly_cost_limit", Some(value)))
+    });
+    if errors.is_empty() {
+        Ok((daily, monthly))
+    } else {
+        Err(Problem::validation(errors))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use chrono::Duration;
     use olp_db::idempotency::fingerprint;
+    use serde::Serialize;
     use serde_json::json;
 
     use super::*;
@@ -316,6 +392,8 @@ mod tests {
             requests_per_minute: Some(60),
             tokens_per_minute: Some(10_000),
             max_concurrency: Some(4),
+            daily_cost_limit: Some("0.25".to_owned()),
+            monthly_cost_limit: Some("5.00".to_owned()),
             expires_at: None,
         }
     }
@@ -328,6 +406,8 @@ mod tests {
             requests_per_minute: Some(request.requests_per_minute),
             tokens_per_minute: Some(request.tokens_per_minute),
             max_concurrency: Some(request.max_concurrency),
+            daily_cost_limit: Some(request.daily_cost_limit.clone()),
+            monthly_cost_limit: Some(request.monthly_cost_limit.clone()),
             expires_at: Some(request.expires_at),
         }
     }
@@ -340,6 +420,8 @@ mod tests {
             requests_per_minute: Some(30),
             tokens_per_minute: Some(5_000),
             max_concurrency: Some(2),
+            daily_cost_limit: Some("0.10".to_owned()),
+            monthly_cost_limit: Some("2.50".to_owned()),
             expires_at: None,
         }
     }
@@ -402,6 +484,14 @@ mod tests {
             create_policy.limits.concurrency.map(NonZeroU32::get),
             Some(4)
         );
+        assert_eq!(
+            create_policy.limits.daily_cost_limit,
+            Some(Decimal::new(25, 2))
+        );
+        assert_eq!(
+            create_policy.limits.monthly_cost_limit,
+            Some(Decimal::new(500, 2))
+        );
         assert_eq!(create_policy.expires_at, Some(expiration));
     }
 
@@ -415,6 +505,8 @@ mod tests {
             requests_per_minute: Some(0),
             tokens_per_minute: Some(0),
             max_concurrency: Some(0),
+            daily_cost_limit: Some("0".to_owned()),
+            monthly_cost_limit: Some("-1".to_owned()),
             expires_at: None,
         };
         let update = update_request(&create);
@@ -446,6 +538,9 @@ mod tests {
                 create_problem.errors[field],
                 ["Use a positive limit or null."]
             );
+        }
+        for field in ["daily_cost_limit", "monthly_cost_limit"] {
+            assert_eq!(create_problem.errors[field], [COST_LIMIT_ERROR]);
         }
     }
 
@@ -556,6 +651,7 @@ mod tests {
         assert_eq!(patch.name.as_deref(), Some("renamed"));
         assert_eq!(patch.allowed_routes, None);
         assert_eq!(patch.requests_per_minute, None);
+        assert_eq!(patch.daily_cost_limit, None);
         assert_eq!(patch.expires_at, None);
     }
 
@@ -571,6 +667,8 @@ mod tests {
         assert_eq!(merged.requests_per_minute, Some(30));
         assert_eq!(merged.tokens_per_minute, Some(5_000));
         assert_eq!(merged.max_concurrency, Some(2));
+        assert_eq!(merged.daily_cost_limit.as_deref(), Some("0.10"));
+        assert_eq!(merged.monthly_cost_limit.as_deref(), Some("2.50"));
 
         let policy = normalize_patch(stored_policy(), &request, Utc::now()).unwrap();
         assert_eq!(policy.allowed_routes[0].as_str(), "stored-route");
@@ -588,6 +686,7 @@ mod tests {
         };
         let request: UpdateApiKeyRequest = serde_json::from_value(json!({
             "requests_per_minute": null,
+            "daily_cost_limit": null,
             "allowed_routes": [],
             "expires_at": null
         }))
@@ -598,8 +697,61 @@ mod tests {
         assert_eq!(merged.name, "stored key");
         assert_eq!(merged.requests_per_minute, None);
         assert_eq!(merged.tokens_per_minute, Some(5_000));
+        assert_eq!(merged.daily_cost_limit, None);
+        assert_eq!(merged.monthly_cost_limit.as_deref(), Some("2.50"));
         assert!(merged.allowed_routes.is_empty());
         assert_eq!(merged.expires_at, None);
+    }
+
+    #[test]
+    fn cost_limits_reject_values_postgres_would_round_or_overflow() {
+        for value in ["0", "-0.01", "0.0000000000001", "1000000000000"] {
+            let mut create = create_request();
+            create.daily_cost_limit = Some(value.to_owned());
+            let update = update_request(&create);
+            let create_problem = normalize_create(&create).unwrap_err();
+            let update_problem = normalize_update(&update, Utc::now()).unwrap_err();
+            assert_eq!(create_problem.status, 422, "{value}");
+            assert_eq!(create_problem.errors, update_problem.errors, "{value}");
+            assert_eq!(
+                create_problem.errors["daily_cost_limit"],
+                [COST_LIMIT_ERROR],
+                "{value}"
+            );
+        }
+        assert!(
+            serde_json::from_value::<CreateApiKeyRequest>(json!({
+                "name": "key",
+                "daily_cost_limit": 0.01
+            }))
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn cost_limit_patch_preserves_omitted_and_distinguishes_null() {
+        let request: UpdateApiKeyRequest = serde_json::from_value(json!({
+            "daily_cost_limit": null,
+            "monthly_cost_limit": "3.75"
+        }))
+        .unwrap();
+        let (merged, _) = merge_api_key_policy(stored_policy(), &request);
+        assert_eq!(merged.daily_cost_limit, None);
+        assert_eq!(merged.monthly_cost_limit.as_deref(), Some("3.75"));
+        let policy = normalize_patch(stored_policy(), &request, Utc::now()).unwrap();
+        assert_eq!(policy.limits.daily_cost_limit, None);
+        assert_eq!(policy.limits.monthly_cost_limit, Some(Decimal::new(375, 2)));
+    }
+
+    #[test]
+    fn rotate_cost_limit_patch_uses_the_same_validation() {
+        assert_eq!(
+            normalize_cost_limit_patch(Some(None), Some(Some("3.75"))).unwrap(),
+            (Some(None), Some(Some(Decimal::new(375, 2))))
+        );
+        let problem = normalize_cost_limit_patch(Some(Some("1e2")), None).unwrap_err();
+        assert_eq!(problem.status, 422);
+        assert!(problem.errors.contains_key("daily_cost_limit"));
     }
 
     #[test]
@@ -653,6 +805,37 @@ mod tests {
         assert_ne!(
             fingerprint(&padded).unwrap(),
             fingerprint(&trimmed).unwrap()
+        );
+    }
+
+    #[test]
+    fn omitted_cost_limits_preserve_the_pre_budget_create_fingerprint() {
+        #[derive(Serialize)]
+        struct LegacyCreateApiKeyRequest<'a> {
+            name: &'a str,
+            scopes: &'a [String],
+            allowed_routes: &'a [String],
+            requests_per_minute: Option<u32>,
+            tokens_per_minute: Option<u64>,
+            max_concurrency: Option<u32>,
+            expires_at: Option<DateTime<Utc>>,
+        }
+
+        let mut request = create_request();
+        request.daily_cost_limit = None;
+        request.monthly_cost_limit = None;
+        let legacy = LegacyCreateApiKeyRequest {
+            name: &request.name,
+            scopes: &request.scopes,
+            allowed_routes: &request.allowed_routes,
+            requests_per_minute: request.requests_per_minute,
+            tokens_per_minute: request.tokens_per_minute,
+            max_concurrency: request.max_concurrency,
+            expires_at: request.expires_at,
+        };
+        assert_eq!(
+            fingerprint(&request).unwrap(),
+            fingerprint(&legacy).unwrap()
         );
     }
 }

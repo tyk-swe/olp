@@ -241,7 +241,7 @@ helm upgrade --install olp \
 
 Before issuing a proxy key or sending traffic, require a successful migration
 Job, ready pods, runtime-generation convergence, and healthy observability
-targets. With replicated workers also require all four
+targets. With replicated workers also require all five
 `olp_worker_task_healthy` series, zero request-metadata pending/lag, and zero
 runtime-outbox pending/claimed rows. Continue with the monitoring and recovery
 checks in [`operations.md`](operations.md).

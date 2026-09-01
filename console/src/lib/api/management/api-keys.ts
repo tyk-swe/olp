@@ -27,6 +27,17 @@ export async function listApiKeyPage(
   return pageResult(result(response.data, response.error, response.response));
 }
 
+export async function getApiKey(
+  apiKeyId: string,
+  signal?: AbortSignal
+): Promise<ApiKey> {
+  const response = await apiClient.GET('/api/v1/api-keys/{api_key_id}', {
+    params: { path: { api_key_id: apiKeyId } },
+    signal
+  });
+  return result(response.data, response.error, response.response);
+}
+
 export async function createApiKey(
   input: CreateApiKeyInput
 ): Promise<ApiKeySecret> {

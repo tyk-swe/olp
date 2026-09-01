@@ -884,8 +884,8 @@ async fn configure_pricing(management: &Management) -> Result<(), String> {
             "model": model,
             "operation": "generation",
             "currency": "USD",
-            "input_per_million": "1.00",
-            "output_per_million": "2.00"
+            "input_per_million": "1000.00",
+            "output_per_million": "1000.00"
         })
     })
     .collect();

@@ -37,6 +37,12 @@
   let secretContext = $state<'created' | 'rotated'>('created');
   let preferredRoute = $state<string | undefined>();
   const isForm = $derived(isNew || editing !== null);
+  const canChangeForm = $derived(
+    canManage &&
+      (!editing ||
+        (!editing.revoked_at &&
+          (!editing.expires_at || new Date(editing.expires_at) >= new Date())))
+  );
 
   onDestroy(() => {
     secret = null;
@@ -108,7 +114,7 @@
     {editing}
     {busy}
     {submitError}
-    {canManage}
+    canManage={canChangeForm}
     onSubmit={submit}
     onCancel={cancelEdit}
     onClearError={() => (submitError = '')}

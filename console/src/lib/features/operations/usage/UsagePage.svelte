@@ -8,10 +8,17 @@
     usageSummary,
     type UsageFilters
   } from '$lib/api/usage';
+  import { getApiKey } from '$lib/api/management/api-keys';
   import UsageChart from './UsageChart.svelte';
   import UsageCompletenessStatus from './UsageCompletenessStatus.svelte';
   import { errorMessage } from '$lib/api/http';
-  import { dateTimeLocalValue, formatCompact, formatCost } from '$lib/format';
+  import {
+    dateTimeLocalValue,
+    formatCompact,
+    formatCost,
+    formatDate,
+    formatInteger
+  } from '$lib/format';
 
   type Dimension = 'route' | 'provider' | 'model' | 'api_key' | 'operation';
 
@@ -38,18 +45,23 @@
 
   const usage = createQuery(() => ({
     queryKey: queryKeys.usage.report(JSON.stringify(applied)),
-    queryFn: async () => {
-      const [summary, series, breakdown, completeness] = await Promise.all([
-        usageSummary(applied.filters),
-        usageSeries(applied.filters, applied.granularity),
-        usageBreakdown(applied.filters, applied.dimension),
-        usageCompleteness(applied.filters)
-      ]);
+    queryFn: async ({ signal }) => {
+      const [summary, series, breakdown, completeness, apiKey] =
+        await Promise.all([
+          usageSummary(applied.filters),
+          usageSeries(applied.filters, applied.granularity),
+          usageBreakdown(applied.filters, applied.dimension),
+          usageCompleteness(applied.filters),
+          applied.filters.api_key_id
+            ? getApiKey(applied.filters.api_key_id, signal)
+            : Promise.resolve(null)
+        ]);
       return {
         summary,
         points: series.items,
         breakdown: breakdown.items,
-        completeness
+        completeness,
+        apiKey
       };
     }
   }));
@@ -172,6 +184,61 @@
   </div>
 {:else if usage.data}
   <UsageCompletenessStatus completeness={usage.data.completeness} />
+
+  {#if usage.data.apiKey}
+    <section class="card budget-line" aria-label="Filtered API key budget">
+      <div class="budget-key">
+        <p>API key budget</p>
+        <strong>{usage.data.apiKey.name}</strong>
+        <span class="mono">{usage.data.apiKey.id}</span>
+      </div>
+      <div>
+        <p>Daily accrued / limit</p>
+        <strong
+          >{formatCost(
+            usage.data.apiKey.budget.daily.accrued,
+            usage.data.summary.currency
+          )} / {usage.data.apiKey.budget.daily.limit === null
+            ? 'No limit'
+            : formatCost(
+                usage.data.apiKey.budget.daily.limit,
+                usage.data.summary.currency
+              )}</strong
+        >
+        <span
+          >Window ends {formatDate(
+            usage.data.apiKey.budget.daily.window_ends_at
+          )}</span
+        >
+      </div>
+      <div>
+        <p>Monthly accrued / limit</p>
+        <strong
+          >{formatCost(
+            usage.data.apiKey.budget.monthly.accrued,
+            usage.data.summary.currency
+          )} / {usage.data.apiKey.budget.monthly.limit === null
+            ? 'No limit'
+            : formatCost(
+                usage.data.apiKey.budget.monthly.limit,
+                usage.data.summary.currency
+              )}</strong
+        >
+        <span
+          >Window ends {formatDate(
+            usage.data.apiKey.budget.monthly.window_ends_at
+          )}</span
+        >
+      </div>
+      <div>
+        <p>Unpriced attempts this UTC month</p>
+        <strong
+          >{formatInteger(usage.data.apiKey.budget.unpriced_attempts)}</strong
+        >
+        <span>Unpriced attempts accrue 0.</span>
+      </div>
+    </section>
+  {/if}
 
   <section
     class="pipeline-grid"
@@ -397,6 +464,27 @@
     gap: 0.75rem;
     margin-top: 1rem;
   }
+  .budget-line {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 1rem;
+    margin-top: 1rem;
+    padding: 1rem;
+  }
+  .budget-line > div {
+    display: grid;
+    align-content: start;
+    gap: 0.2rem;
+  }
+  .budget-line p,
+  .budget-line span {
+    margin: 0;
+    color: var(--foreground-muted);
+    font-size: 0.75rem;
+  }
+  .budget-key .mono {
+    overflow-wrap: anywhere;
+  }
   .pipeline-card {
     display: grid;
     gap: 0.2rem;
@@ -439,13 +527,15 @@
   }
   @media (max-width: 68rem) {
     .filter-grid,
-    .pipeline-grid {
+    .pipeline-grid,
+    .budget-line {
       grid-template-columns: repeat(2, minmax(0, 1fr));
     }
   }
   @media (max-width: 40rem) {
     .filter-grid,
-    .pipeline-grid {
+    .pipeline-grid,
+    .budget-line {
       grid-template-columns: 1fr;
     }
     .filters {

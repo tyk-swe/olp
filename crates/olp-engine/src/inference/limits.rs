@@ -11,6 +11,7 @@ use std::{
 
 use crate::domain::{auth::ApiKey, canonical::requests::Operation, ports::BoxFuture};
 use arc_swap::ArcSwapOption;
+use rust_decimal::Decimal;
 use thiserror::Error;
 use tracing::{error, warn};
 
@@ -24,10 +25,13 @@ const LIMIT_CLEANUP_TIMEOUT: Duration = Duration::from_millis(250);
 /// A transport-neutral distributed limit request.
 #[derive(Debug, Clone)]
 pub struct LimitRequest<'a> {
+    pub api_key_id: uuid::Uuid,
     pub lookup_id: &'a str,
     pub requests_per_minute: Option<i64>,
     pub tokens_per_minute: Option<i64>,
     pub max_concurrency: Option<i64>,
+    pub daily_cost_limit: Option<Decimal>,
+    pub monthly_cost_limit: Option<Decimal>,
     pub requested_tokens: i64,
     pub lease_ttl: Duration,
 }
@@ -38,6 +42,8 @@ impl LimitRequest<'_> {
         self.requests_per_minute.is_some()
             || self.tokens_per_minute.is_some()
             || self.max_concurrency.is_some()
+            || self.daily_cost_limit.is_some()
+            || self.monthly_cost_limit.is_some()
     }
 
     pub fn validate(&self) -> Result<(), LimitError> {
@@ -67,6 +73,22 @@ impl LimitRequest<'_> {
                 "max_concurrency must be positive",
             ));
         }
+        if self
+            .daily_cost_limit
+            .is_some_and(|value| value <= Decimal::ZERO)
+        {
+            return Err(LimitError::InvalidRequest(
+                "daily_cost_limit must be positive",
+            ));
+        }
+        if self
+            .monthly_cost_limit
+            .is_some_and(|value| value <= Decimal::ZERO)
+        {
+            return Err(LimitError::InvalidRequest(
+                "monthly_cost_limit must be positive",
+            ));
+        }
 
         if self.requested_tokens < 0 {
             return Err(LimitError::InvalidRequest(
@@ -92,6 +114,8 @@ pub enum LimitDimension {
     Requests,
     Tokens,
     Concurrency,
+    DailyCost,
+    MonthlyCost,
     Unknown,
 }
 
@@ -290,6 +314,8 @@ pub struct ReloadableLimiter {
     configured: Arc<AtomicBool>,
     fail_open: Arc<AtomicBool>,
     fail_open_total: Arc<AtomicU64>,
+    daily_budget_rejections: Arc<AtomicU64>,
+    monthly_budget_rejections: Arc<AtomicU64>,
 }
 
 struct InstalledLimitBackend {
@@ -325,6 +351,30 @@ impl ReloadableLimiter {
         self.fail_open_total.load(Ordering::Relaxed)
     }
 
+    pub fn record_rejection(&self, dimension: LimitDimension) {
+        let counter = match dimension {
+            LimitDimension::DailyCost => &self.daily_budget_rejections,
+            LimitDimension::MonthlyCost => &self.monthly_budget_rejections,
+            LimitDimension::Requests
+            | LimitDimension::Tokens
+            | LimitDimension::Concurrency
+            | LimitDimension::Unknown => return,
+        };
+        counter.fetch_add(1, Ordering::Relaxed);
+    }
+
+    #[must_use]
+    pub fn budget_rejections(&self, dimension: LimitDimension) -> u64 {
+        match dimension {
+            LimitDimension::DailyCost => self.daily_budget_rejections.load(Ordering::Relaxed),
+            LimitDimension::MonthlyCost => self.monthly_budget_rejections.load(Ordering::Relaxed),
+            LimitDimension::Requests
+            | LimitDimension::Tokens
+            | LimitDimension::Concurrency
+            | LimitDimension::Unknown => 0,
+        }
+    }
+
     pub fn install(&self, backend: impl LimitBackend + 'static) {
         self.inner.store(Some(Arc::new(InstalledLimitBackend {
             backend: Arc::new(backend),
@@ -343,19 +393,21 @@ impl ReloadableLimiter {
     }
 }
 
-/// The single decision point for a limiter outage. Admits without a lease only
-/// when Valkey is configured (so its absence is an outage, not misconfiguration)
-/// and the operator opted into fail-open; `LimitError::Exceeded` never lands
-/// here because a rejected reservation is not an outage.
+/// The single decision point for a limiter outage. Cost-budgeted keys always
+/// fail closed; other hard limits may use the configured fail-open policy.
 pub fn outage_reservation(
     limiter: &ReloadableLimiter,
     reason: &str,
+    cost_budget_configured: bool,
 ) -> Result<Option<Reservation>, InferenceError> {
-    if limiter.is_configured() && limiter.outage_policy() == LimitOutagePolicy::FailOpen {
+    if !cost_budget_configured
+        && limiter.is_configured()
+        && limiter.outage_policy() == LimitOutagePolicy::FailOpen
+    {
         limiter.fail_open_total.fetch_add(1, Ordering::Relaxed);
         warn!(
             reason,
-            "distributed limiter unavailable; admitting hard-limited key fail-open"
+            "distributed limiter unavailable; admitting rate- or concurrency-limited key fail-open"
         );
         return Ok(None);
     }
@@ -377,54 +429,81 @@ pub async fn reserve(
     http_reserved_tokens: Option<i64>,
 ) -> Result<Option<Reservation>, InferenceError> {
     if let Some(reserved_tokens) = http_reserved_tokens {
-        let Some(tokens_per_minute) = key.limits.tokens_per_minute else {
-            return Ok(None);
-        };
-        let tokens_per_minute = i64::try_from(tokens_per_minute.get())
-            .map_err(|_| InferenceError::unavailable("limit_configuration_invalid"))?;
-        let requested_tokens = estimate_tokens(operation);
-        if requested_tokens > tokens_per_minute {
-            return Err(InferenceError::request_exceeds_token_limit(
-                requested_tokens,
-                tokens_per_minute,
-            ));
-        }
-        let delta = requested_tokens.saturating_sub(reserved_tokens);
-        if delta <= 0 {
-            return Ok(None);
-        }
-        let Some(backend) = limiter.current() else {
-            return outage_reservation(limiter, "backend_missing");
-        };
-        let Ok(result) = tokio::time::timeout(
-            Duration::from_secs(1),
-            backend.reserve(LimitRequest {
-                lookup_id,
-                requests_per_minute: None,
-                tokens_per_minute: Some(tokens_per_minute),
-                max_concurrency: None,
-                requested_tokens: delta,
-                lease_ttl,
-            }),
+        return reserve_token_delta(
+            limiter,
+            key,
+            operation,
+            lookup_id,
+            lease_ttl,
+            reserved_tokens,
         )
-        .await
-        else {
-            return outage_reservation(limiter, "timeout");
-        };
-        return match result {
-            Ok(lease) => Ok(Some(Reservation::distributed(lease))),
-            Err(LimitError::Exceeded {
-                dimension,
-                retry_after,
-            }) => Err(InferenceError::rate_limited(dimension, retry_after)),
-            Err(error) => outage_reservation(limiter, &error.to_string()),
-        };
+        .await;
     }
+    reserve_full(limiter, key, operation, lookup_id, lease_ttl).await
+}
+
+async fn reserve_token_delta(
+    limiter: &ReloadableLimiter,
+    key: &ApiKey,
+    operation: &Operation,
+    lookup_id: &str,
+    lease_ttl: Duration,
+    reserved_tokens: i64,
+) -> Result<Option<Reservation>, InferenceError> {
+    let Some(tokens_per_minute) = key.limits.tokens_per_minute else {
+        return Ok(None);
+    };
+    let tokens_per_minute = i64::try_from(tokens_per_minute.get())
+        .map_err(|_| InferenceError::unavailable("limit_configuration_invalid"))?;
+    let requested_tokens = estimate_tokens(operation);
+    if requested_tokens > tokens_per_minute {
+        return Err(InferenceError::request_exceeds_token_limit(
+            requested_tokens,
+            tokens_per_minute,
+        ));
+    }
+    let delta = requested_tokens.saturating_sub(reserved_tokens);
+    if delta <= 0 {
+        return Ok(None);
+    }
+    let cost_budget_configured = has_cost_budget(key);
+    let Some(backend) = limiter.current() else {
+        return outage_reservation(limiter, "backend_missing", cost_budget_configured);
+    };
+    let Ok(result) = tokio::time::timeout(
+        Duration::from_secs(1),
+        backend.reserve(LimitRequest {
+            api_key_id: key.id.as_uuid(),
+            lookup_id,
+            requests_per_minute: None,
+            tokens_per_minute: Some(tokens_per_minute),
+            max_concurrency: None,
+            daily_cost_limit: None,
+            monthly_cost_limit: None,
+            requested_tokens: delta,
+            lease_ttl,
+        }),
+    )
+    .await
+    else {
+        return outage_reservation(limiter, "timeout", cost_budget_configured);
+    };
+    reservation_result(limiter, result, cost_budget_configured)
+}
+
+async fn reserve_full(
+    limiter: &ReloadableLimiter,
+    key: &ApiKey,
+    operation: &Operation,
+    lookup_id: &str,
+    lease_ttl: Duration,
+) -> Result<Option<Reservation>, InferenceError> {
     if !key.limits.has_hard_limits() {
         return Ok(None);
     }
+    let cost_budget_configured = has_cost_budget(key);
     let Some(backend) = limiter.current() else {
-        return outage_reservation(limiter, "backend_missing");
+        return outage_reservation(limiter, "backend_missing", cost_budget_configured);
     };
     let tokens_per_minute = key
         .limits
@@ -444,6 +523,7 @@ pub async fn reserve(
     let Ok(result) = tokio::time::timeout(
         Duration::from_secs(1),
         backend.reserve(LimitRequest {
+            api_key_id: key.id.as_uuid(),
             lookup_id,
             requests_per_minute: key
                 .limits
@@ -451,22 +531,39 @@ pub async fn reserve(
                 .map(|value| i64::from(value.get())),
             tokens_per_minute,
             max_concurrency: key.limits.concurrency.map(|value| i64::from(value.get())),
+            daily_cost_limit: key.limits.daily_cost_limit,
+            monthly_cost_limit: key.limits.monthly_cost_limit,
             requested_tokens,
             lease_ttl,
         }),
     )
     .await
     else {
-        return outage_reservation(limiter, "timeout");
+        return outage_reservation(limiter, "timeout", cost_budget_configured);
     };
+    reservation_result(limiter, result, cost_budget_configured)
+}
+
+fn reservation_result(
+    limiter: &ReloadableLimiter,
+    result: Result<Arc<dyn LimitLease>, LimitError>,
+    cost_budget_configured: bool,
+) -> Result<Option<Reservation>, InferenceError> {
     match result {
         Ok(lease) => Ok(Some(Reservation::distributed(lease))),
         Err(LimitError::Exceeded {
             dimension,
             retry_after,
-        }) => Err(InferenceError::rate_limited(dimension, retry_after)),
-        Err(error) => outage_reservation(limiter, &error.to_string()),
+        }) => {
+            limiter.record_rejection(dimension);
+            Err(InferenceError::rate_limited(dimension, retry_after))
+        }
+        Err(error) => outage_reservation(limiter, &error.to_string(), cost_budget_configured),
     }
+}
+
+fn has_cost_budget(key: &ApiKey) -> bool {
+    key.limits.daily_cost_limit.is_some() || key.limits.monthly_cost_limit.is_some()
 }
 
 fn estimate_tokens(operation: &Operation) -> i64 {

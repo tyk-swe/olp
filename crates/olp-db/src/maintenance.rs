@@ -217,7 +217,7 @@ async fn roll_up_attempt_usage(
     let mut usage_rows = 0;
     loop {
         let mut transaction = connection.begin().await?;
-        sqlx::query!("SELECT set_config('olp.usage_rollup_writer', 'additive-v2', true)")
+        sqlx::query!("SELECT set_config('olp.usage_rollup_writer', 'additive-v3', true)")
             .fetch_one(&mut *transaction)
             .await?;
         let (rolled, expired) = attempt_usage_rollup_batch(&mut transaction, usage_cutoff).await?;
@@ -248,7 +248,7 @@ async fn attempt_usage_rollup_batch(
        WHERE fact.ctid = candidates.ctid \
        RETURNING route_slug, provider_id, upstream_model, operation, surface, \
                  api_key_id, observed_at, input_tokens, output_tokens, \
-                 cached_input_tokens, media_units, estimated_cost, currency, \
+                 cached_input_tokens, media_units, estimated_cost, currency, charge_status, unpriced, \
                  request_counted, provider_request_counted, model_request_counted, \
                  target_request_counted, request_unpriced_counted, \
                  provider_unpriced_counted, model_unpriced_counted, \
@@ -261,8 +261,8 @@ async fn attempt_usage_rollup_batch(
       request_count, provider_request_count, model_request_count, target_request_count, \
       input_tokens, output_tokens, cached_input_tokens, media_units, estimated_cost, \
       request_unpriced_count, provider_unpriced_count, model_unpriced_count, \
-      target_unpriced_count, request_incomplete_count, provider_incomplete_count, \
-      model_incomplete_count, target_incomplete_count, currency) \
+      target_unpriced_count, unpriced_attempt_count, request_incomplete_count, \
+      provider_incomplete_count, model_incomplete_count, target_incomplete_count, currency) \
      SELECT date_trunc('hour', observed_at AT TIME ZONE 'UTC') AT TIME ZONE 'UTC', \
             route_slug, provider_id, upstream_model, \
             operation, surface, api_key_id, \
@@ -277,6 +277,7 @@ async fn attempt_usage_rollup_batch(
             COUNT(*) FILTER (WHERE provider_unpriced_counted), \
             COUNT(*) FILTER (WHERE model_unpriced_counted), \
             COUNT(*) FILTER (WHERE target_unpriced_counted), \
+            COUNT(*) FILTER (WHERE charge_status <> 'not_billable' AND unpriced), \
             COUNT(*) FILTER (WHERE request_incomplete_counted), \
             COUNT(*) FILTER (WHERE provider_incomplete_counted), \
             COUNT(*) FILTER (WHERE model_incomplete_counted), \
@@ -311,6 +312,7 @@ async fn attempt_usage_rollup_batch(
                               + EXCLUDED.model_unpriced_count, \
        target_unpriced_count = attempt_usage_hourly.target_unpriced_count \
                                + EXCLUDED.target_unpriced_count, \
+       unpriced_attempt_count = attempt_usage_hourly.unpriced_attempt_count + EXCLUDED.unpriced_attempt_count, \
        request_incomplete_count = attempt_usage_hourly.request_incomplete_count \
                                   + EXCLUDED.request_incomplete_count, \
        provider_incomplete_count = attempt_usage_hourly.provider_incomplete_count \
@@ -340,7 +342,7 @@ async fn roll_up_compatibility_usage(
 ) -> Result<(), Error> {
     loop {
         let mut transaction = connection.begin().await?;
-        sqlx::query!("SELECT set_config('olp.usage_rollup_writer', 'additive-v2', true)")
+        sqlx::query!("SELECT set_config('olp.usage_rollup_writer', 'additive-v3', true)")
             .fetch_one(&mut *transaction)
             .await?;
         let _hourly_mirror_setting =
@@ -484,7 +486,7 @@ async fn purge_expiring_records(
     cutoffs: &Cutoffs,
 ) -> Result<ExpiringCounts, Error> {
     let mut transaction = connection.begin().await?;
-    sqlx::query!("SELECT set_config('olp.usage_rollup_writer', 'additive-v2', true)")
+    sqlx::query!("SELECT set_config('olp.usage_rollup_writer', 'additive-v3', true)")
         .fetch_one(&mut *transaction)
         .await?;
     let (rolled, expired) = request_metadata_gap_rollup(&mut transaction, cutoffs.usage).await?;

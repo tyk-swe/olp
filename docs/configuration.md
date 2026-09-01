@@ -88,12 +88,14 @@ All HTTP modes (`all`, `gateway`, and `control`) require PostgreSQL and the
 authentication HMAC key. Configure Valkey for production gateway traffic:
 without it, runtime hints fall back to PostgreSQL polling and keys with hard
 limits fail closed. When Valkey is configured but unreachable, the
-`limits.valkey_unavailable` installation setting decides what hard-limited keys
-get: `fail_closed` (default) rejects them with `503 distributed_limits_unavailable`;
-`fail_open` admits them without rate limits, logs a warning per request, and
-counts `olp_limits_fail_open_total`. Gateways poll the setting every 15 seconds
-and load it once before binding the listener; an unconfigured Valkey never
-fails open, and over-limit rejections are unaffected. The master key is
+`limits.valkey_unavailable` installation setting decides what keys limited
+only by rate or concurrency get: `fail_closed` (default) rejects them with
+`503 distributed_limits_unavailable`; `fail_open` admits them without those
+dimensions, logs a warning per request, and counts
+`olp_limits_fail_open_total`. A key with a daily or monthly cost budget always
+fails closed, regardless of this setting. Gateways poll the setting every 15
+seconds and load it once before binding the listener; an unconfigured Valkey
+never fails open, and over-limit rejections are unaffected. The master key is
 required wherever database-managed
 provider or OIDC credentials and encrypted management replays are used.
 `worker`, `migrate`, and `doctor` require both backing services but publish no

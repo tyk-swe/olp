@@ -98,7 +98,7 @@
 
   function settingHelp(key: string) {
     if (key === LIMITS_OUTAGE_KEY)
-      return 'What hard-limited API keys get while Valkey is unreachable: fail_closed rejects them with 503; fail_open admits them without rate limits and counts olp_limits_fail_open_total. Gateways apply a change within 15 seconds.';
+      return 'What rate/concurrency-only API keys get while Valkey is unreachable: fail_closed rejects them with 503; fail_open bypasses those limits and counts olp_limits_fail_open_total. Budgeted keys always fail closed. Gateways apply a change within 15 seconds.';
     if (key.includes('retention'))
       return 'Number of days before detailed records are removed; hourly aggregates remain retained.';
     if (key.includes('origin'))

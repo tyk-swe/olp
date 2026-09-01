@@ -1,0 +1,122 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id, lookup_id, secret_digest, expires_at, requests_per_minute, tokens_per_minute, max_concurrency, daily_cost_limit, monthly_cost_limit FROM api_keys WHERE revoked_at IS NULL AND (expires_at IS NULL OR expires_at > now()) ORDER BY lookup_id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "api_keys",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "lookup_id",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "api_keys",
+            "name": "lookup_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "secret_digest",
+        "type_info": "Bytea",
+        "origin": {
+          "Table": {
+            "table": "api_keys",
+            "name": "secret_digest"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "expires_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "api_keys",
+            "name": "expires_at"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "requests_per_minute",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "api_keys",
+            "name": "requests_per_minute"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "tokens_per_minute",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "api_keys",
+            "name": "tokens_per_minute"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "max_concurrency",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "api_keys",
+            "name": "max_concurrency"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "daily_cost_limit",
+        "type_info": "Numeric",
+        "origin": {
+          "Table": {
+            "table": "api_keys",
+            "name": "daily_cost_limit"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "monthly_cost_limit",
+        "type_info": "Numeric",
+        "origin": {
+          "Table": {
+            "table": "api_keys",
+            "name": "monthly_cost_limit"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "194f45f9bff429dbef0a44502d29c281539d9f96f52c04c7c4fb205d1442c730"
+}

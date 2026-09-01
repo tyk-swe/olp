@@ -38,8 +38,9 @@ use super::{
         load_master_key,
     },
     worker::{
-        maintenance_supervisor, outbox_supervisor, request_metadata_consumer_name,
-        request_metadata_consumer_supervisor, request_metadata_epoch_supervisor,
+        cost_reconciliation_supervisor, maintenance_supervisor, outbox_supervisor,
+        request_metadata_consumer_name, request_metadata_consumer_supervisor,
+        request_metadata_epoch_supervisor,
     },
 };
 
@@ -371,6 +372,15 @@ async fn spawn_background_plane(
                     url.clone(),
                     keyspace.request_metadata_stream(),
                     request_metadata_consumer_name(),
+                    keyspace.limits_namespace(),
+                    shutdown.clone(),
+                )));
+            plane
+                .tasks
+                .push(tokio::spawn(cost_reconciliation_supervisor(
+                    store.clone(),
+                    url.clone(),
+                    keyspace.limits_namespace(),
                     shutdown.clone(),
                 )));
         }

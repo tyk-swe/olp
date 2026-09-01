@@ -9,6 +9,23 @@ semantic versioning and match `Cargo.toml`, `console/package.json`,
 
 ### Added
 
+- **SPEND-01–SPEND-05:** API keys can carry exact decimal daily and monthly
+  cost budgets in the installation pricing currency. Admission rejects an
+  exhausted window with HTTP 429 `budget_exhausted` and a `Retry-After` to its
+  UTC boundary across the OpenAI, Anthropic, and Gemini surfaces. Terminal
+  accounting updates exact Valkey counters, and a checkpointed worker repairs
+  them monotonically from PostgreSQL after loss. Management create, update,
+  rotate, list, and detail surfaces expose the policy and current accrual; the
+  console adds budget editing, inventory/detail state, and the filtered usage
+  budget line. Prometheus exports only
+  `olp_key_budget_rejections_total{window}` and the bounded
+  `cost_reconciliation` worker task. Unpriced attempts accrue 0 and are counted
+  separately as `unpriced_attempts`; OLP never invents missing cost. Budgeted
+  keys fail closed when the limiter is unavailable or malformed, regardless of
+  the general rate/concurrency fail-open setting. On an upgrade, hourly usage
+  retained before migration 0049 can seed only a proven lower bound for the
+  current month's `unpriced_attempts`; cost remains exact, and the attempt
+  count is exact from the next UTC month onward.
 - **OTEL-01–OTEL-04:** Optional OTLP/HTTP distributed tracing follows an
   admitted request through provider failover, honours W3C context in both
   directions, exports through a bounded queue, and stays entirely absent when

@@ -10,6 +10,7 @@ use olp_engine::domain::{
     provider::{CapabilitySource, ProviderAuthMode, ProviderState, RouteDraftState},
     routing::{provider::ProviderKind, selection::weighted_rendezvous_score},
 };
+use rust_decimal::Decimal;
 use uuid::Uuid;
 
 use crate::{
@@ -357,6 +358,8 @@ pub struct ApiKeyRecord {
     pub requests_per_minute: Option<i32>,
     pub tokens_per_minute: Option<i64>,
     pub max_concurrency: Option<i32>,
+    pub daily_cost_limit: Option<Decimal>,
+    pub monthly_cost_limit: Option<Decimal>,
     pub expires_at: Option<DateTime<Utc>>,
     pub revoked_at: Option<DateTime<Utc>>,
     pub rotated_at: Option<DateTime<Utc>>,
@@ -386,6 +389,8 @@ pub struct UpdateApiKeyInput {
     pub requests_per_minute: Option<u32>,
     pub tokens_per_minute: Option<u64>,
     pub max_concurrency: Option<u32>,
+    pub daily_cost_limit: Option<Decimal>,
+    pub monthly_cost_limit: Option<Decimal>,
     pub expires_at: Option<DateTime<Utc>>,
 }
 
@@ -396,4 +401,6 @@ pub struct RotateApiKeyInput<'a> {
     pub expected_etag: Uuid,
     pub actor: Uuid,
     pub idempotency_key: &'a str,
+    pub daily_cost_limit: Option<Option<Decimal>>,
+    pub monthly_cost_limit: Option<Option<Decimal>>,
 }

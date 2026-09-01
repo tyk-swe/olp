@@ -43,6 +43,10 @@ pub(crate) struct CreateApiKeyRequest {
     pub requests_per_minute: Option<u32>,
     pub tokens_per_minute: Option<u64>,
     pub max_concurrency: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub daily_cost_limit: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub monthly_cost_limit: Option<String>,
     pub expires_at: Option<DateTime<Utc>>,
 }
 

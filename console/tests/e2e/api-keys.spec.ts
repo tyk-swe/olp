@@ -115,6 +115,8 @@ test('API key creation shows a secret once with SDK snippets on mobile', async (
   await page.getByLabel('Key name').fill('mobile-app');
   await page.getByLabel('Requests per minute').fill('120');
   await page.getByLabel('Concurrent requests').fill('8');
+  await page.getByLabel('Daily cost budget (optional)').fill('1.25');
+  await page.getByLabel('Monthly cost budget (optional)').fill('25.00');
   await page
     .getByRole('group', { name: 'Allowed route slugs' })
     .getByRole('checkbox', { name: 'default' })
@@ -139,7 +141,9 @@ test('API key creation shows a secret once with SDK snippets on mobile', async (
     name: 'mobile-app',
     allowed_routes: ['default'],
     requests_per_minute: 120,
-    max_concurrency: 8
+    max_concurrency: 8,
+    daily_cost_limit: '1.25',
+    monthly_cost_limit: '25.00'
   });
   expect(createHeaders['idempotency-key']).toMatch(/^[0-9a-f-]{36}$/);
   expect(createHeaders['x-csrf-token']).toBe('csrf-e2e');
@@ -175,6 +179,8 @@ test('API key policy updates, rotation, and revocation converge in the list', as
   let rotatedAt: string | null = null;
   let keyName = 'production SDK';
   let requestsPerMinute = 120;
+  let dailyCostLimit = '10.00';
+  let monthlyCostLimit = '100.00';
   let keyEtag = '01980000-0000-7000-8000-000000000309';
   const keyRecord = () => ({
     id: ids.key,
@@ -185,10 +191,25 @@ test('API key policy updates, rotation, and revocation converge in the list', as
     requests_per_minute: requestsPerMinute,
     tokens_per_minute: null,
     max_concurrency: 8,
+    budget: {
+      daily: {
+        limit: dailyCostLimit,
+        accrued: '2.50',
+        window_ends_at: '2026-07-13T00:00:00Z'
+      },
+      monthly: {
+        limit: monthlyCostLimit,
+        accrued: '18.75',
+        window_ends_at: '2026-08-01T00:00:00Z'
+      },
+      unpriced_attempts: 3
+    },
     expires_at: null,
     revoked_at: revokedAt,
     rotated_at: rotatedAt,
     etag: keyEtag,
+    created_by: ids.user,
+    created_by_email: 'owner@example.com',
     created_at: now
   });
 
@@ -246,9 +267,13 @@ test('API key policy updates, rotation, and revocation converge in the list', as
       const body = request.postDataJSON() as {
         name: string;
         requests_per_minute: number;
+        daily_cost_limit: string;
+        monthly_cost_limit: string;
       };
       keyName = body.name;
       requestsPerMinute = body.requests_per_minute;
+      dailyCostLimit = body.daily_cost_limit;
+      monthlyCostLimit = body.monthly_cost_limit;
       keyEtag = '01980000-0000-7000-8000-000000000310';
       await route.fulfill({
         json: {
@@ -265,9 +290,16 @@ test('API key policy updates, rotation, and revocation converge in the list', as
   await page.getByRole('button', { name: 'Edit' }).click();
   await page.getByLabel('Key name').fill('renamed SDK');
   await page.getByLabel('Requests per minute').fill('240');
+  await page.getByLabel('Daily cost budget (optional)').fill('12.50');
+  await page.getByLabel('Monthly cost budget (optional)').fill('125.00');
+  await expect(
+    page.getByRole('region', { name: 'Current spend budget' })
+  ).toContainText('Unpriced attempts accrue 0');
   await page.getByRole('button', { name: 'Save and publish' }).click();
-  await expect(page.getByText('renamed SDK', { exact: true })).toBeVisible();
-  await expect(page.getByText(/240 RPM/)).toBeVisible();
+  const updatedRow = page.getByRole('row').filter({ hasText: 'renamed SDK' });
+  await expect(updatedRow).toContainText('240 RPM');
+  await expect(updatedRow).toContainText('Daily 2.50 / 12.50');
+  await expect(updatedRow).toContainText('Monthly 18.75 / 125.00');
   await expect(page.getByText('Never rotated')).toBeVisible();
   // A key with no expiry says so rather than showing an absent-value dash.
   await expect(page.getByText('No expiry')).toBeVisible();
@@ -276,10 +308,17 @@ test('API key policy updates, rotation, and revocation converge in the list', as
   await expect(
     dialog.getByText('rotated-key-shown-once', { exact: true })
   ).toBeVisible();
-  await dialog.getByRole('button', { name: 'I have saved the key' }).click();
+  await dialog
+    .getByRole('button', { name: 'I have saved the key' })
+    .press('Enter');
   await expect(page.getByText('rotated-key-shown-once')).toHaveCount(0);
   await expect(page.getByText('Never rotated')).toHaveCount(0);
   await expect(page.getByText(/^Rotated /)).toBeVisible();
   await page.getByRole('button', { name: 'Revoke' }).click();
   await expect(page.getByText('revoked', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'View' }).click();
+  await expect(page.getByLabel('Daily cost budget (optional)')).toBeDisabled();
+  await expect(
+    page.getByRole('button', { name: 'Save and publish' })
+  ).toHaveCount(0);
 });

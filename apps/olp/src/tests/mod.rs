@@ -99,6 +99,8 @@ fn inference_state(limited: bool) -> (ProcessComposition, String) {
                             requests_per_minute: limited.then(|| NonZeroU32::new(10).unwrap()),
                             tokens_per_minute: None,
                             concurrency: limited.then(|| NonZeroU32::new(2).unwrap()),
+                            daily_cost_limit: None,
+                            monthly_cost_limit: None,
                         },
                     },
                 )]),

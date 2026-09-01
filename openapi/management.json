@@ -22,6 +22,50 @@
         ],
         "type": "object"
       },
+      "ApiKeyBudgetResponse": {
+        "properties": {
+          "daily": {
+            "$ref": "#/components/schemas/ApiKeyBudgetWindowResponse"
+          },
+          "monthly": {
+            "$ref": "#/components/schemas/ApiKeyBudgetWindowResponse"
+          },
+          "unpriced_attempts": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "daily",
+          "monthly",
+          "unpriced_attempts"
+        ],
+        "type": "object"
+      },
+      "ApiKeyBudgetWindowResponse": {
+        "properties": {
+          "accrued": {
+            "type": "string"
+          },
+          "limit": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "window_ends_at": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "limit",
+          "accrued",
+          "window_ends_at"
+        ],
+        "type": "object"
+      },
       "ApiKeyDetailResponse": {
         "properties": {
           "allowed_routes": {
@@ -29,6 +73,9 @@
               "type": "string"
             },
             "type": "array"
+          },
+          "budget": {
+            "$ref": "#/components/schemas/ApiKeyBudgetResponse"
           },
           "created_at": {
             "format": "date-time",
@@ -113,6 +160,7 @@
           "created_by_email",
           "scopes",
           "allowed_routes",
+          "budget",
           "etag",
           "created_at"
         ],
@@ -497,6 +545,12 @@
             },
             "type": "array"
           },
+          "daily_cost_limit": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "expires_at": {
             "format": "date-time",
             "type": [
@@ -509,6 +563,12 @@
             "minimum": 0,
             "type": [
               "integer",
+              "null"
+            ]
+          },
+          "monthly_cost_limit": {
+            "type": [
+              "string",
               "null"
             ]
           },
@@ -3815,6 +3875,23 @@
         ],
         "type": "object"
       },
+      "RotateApiKeyRequest": {
+        "properties": {
+          "daily_cost_limit": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "monthly_cost_limit": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "type": "object"
+      },
       "RotateApiKeyResponse": {
         "properties": {
           "etag": {
@@ -4678,6 +4755,12 @@
             },
             "type": "array"
           },
+          "daily_cost_limit": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "expires_at": {
             "format": "date-time",
             "type": [
@@ -4690,6 +4773,12 @@
             "minimum": 0,
             "type": [
               "integer",
+              "null"
+            ]
+          },
+          "monthly_cost_limit": {
+            "type": [
+              "string",
               "null"
             ]
           },
@@ -5837,6 +5926,22 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "$ref": "#/components/schemas/RotateApiKeyRequest"
+                  }
+                ]
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "content": {
@@ -5905,6 +6010,16 @@
               }
             },
             "description": ""
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Validation failed"
           },
           "500": {
             "content": {

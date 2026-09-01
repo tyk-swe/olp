@@ -214,3 +214,52 @@ fn provider_revision_diff_contract_documents_hard_response_ceilings() {
         ["provider revision diff supports at most 2000 models per revision"]
     );
 }
+
+#[test]
+fn api_key_budget_contract_is_nested_exact_and_rotation_body_is_optional() {
+    let document = serde_json::to_value(ConfigurationApiDoc::openapi()).unwrap();
+    for schema in [
+        "CreateApiKeyRequest",
+        "UpdateApiKeyRequest",
+        "RotateApiKeyRequest",
+    ] {
+        let properties = document["components"]["schemas"][schema]["properties"]
+            .as_object()
+            .unwrap();
+        for field in ["daily_cost_limit", "monthly_cost_limit"] {
+            assert!(properties.contains_key(field), "{schema}.{field}");
+            let property = &properties[field];
+            let is_string = property["type"] == "string"
+                || property["type"]
+                    .as_array()
+                    .is_some_and(|types| types.iter().any(|kind| kind == "string"))
+                || property["anyOf"].as_array().is_some_and(|variants| {
+                    variants.iter().any(|variant| variant["type"] == "string")
+                });
+            assert!(is_string, "{schema}.{field} must preserve decimal strings");
+        }
+    }
+
+    let budget = &document["components"]["schemas"]["ApiKeyBudgetResponse"];
+    for field in ["daily", "monthly", "unpriced_attempts"] {
+        assert!(budget["properties"].get(field).is_some());
+    }
+    let window = &document["components"]["schemas"]["ApiKeyBudgetWindowResponse"];
+    for field in ["limit", "accrued", "window_ends_at"] {
+        assert!(window["properties"].get(field).is_some());
+    }
+    let required = window["required"].as_array().unwrap();
+    for field in ["limit", "accrued", "window_ends_at"] {
+        assert!(required.iter().any(|required| required == field));
+    }
+    assert!(
+        document["components"]["schemas"]["ApiKeyDetailResponse"]["properties"]
+            .get("budget")
+            .is_some()
+    );
+
+    let rotate = &document["paths"]["/api/v1/api-keys/{api_key_id}/rotate"]["post"];
+    assert_ne!(rotate["requestBody"]["required"], true);
+    assert!(rotate["responses"].get("400").is_some());
+    assert!(rotate["responses"].get("422").is_some());
+}

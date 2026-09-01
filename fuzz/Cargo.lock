@@ -2355,6 +2355,7 @@ dependencies = [
  "opentelemetry-otlp",
  "opentelemetry_sdk",
  "percent-encoding",
+ "rust_decimal",
  "serde",
  "serde_json",
  "serde_path_to_error",

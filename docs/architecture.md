@@ -248,7 +248,8 @@ offline compilation against a freshly migrated PostgreSQL 18 database.
 
 Migration 0032 creates an immutable installation UUID in PostgreSQL. OLP
 derives the opaque `olp:v3:<installation>` Valkey namespace from it for
-runtime hints, request-metadata streams, RPM/TPM state, and concurrency leases.
+runtime hints, request-metadata streams, RPM/TPM state, concurrency leases,
+and daily/monthly cost counters.
 Independent installations may share a Valkey logical database; a restored
 database preserves its UUID and must not run beside its source in the same
 keyspace.
@@ -262,9 +263,9 @@ owner. Repeated hints are harmless, and non-owning workers continue their
 other responsibilities.
 
 Every worker responsibility has a shared PostgreSQL checkpoint. Runtime
-publication, request-metadata consumption, maintenance, and gateway-epoch
-detection use additive counters and monotonic timestamps, so a restarted
-replica cannot regress the fleet view. A failed metadata consumer becomes
+publication, request-metadata consumption, maintenance, cost reconciliation,
+and gateway-epoch detection use additive counters and monotonic timestamps, so
+a restarted replica cannot regress the fleet view. A failed metadata consumer becomes
 reclaimable after 30 seconds and is scanned every five seconds. Idempotent
 receipts and usage-fact uniqueness make replay one logical request and one
 logical attempt/usage fact.
@@ -279,21 +280,39 @@ atomic activation.
 ## Distributed limit semantics
 
 Valkey server time, not the gateway process clock, is authoritative for RPM,
-TPM, concurrency, window expiry, and `Retry-After`. The reservation script
-calls `TIME` once and atomically handles rollover, expired-lease cleanup, and
-admission. RPM and TPM are fixed UTC-minute windows, so a boundary burst is
-possible by design.
+TPM, concurrency, cost windows, expiry, and `Retry-After`. The unchanged rate
+and concurrency reservation script calls `TIME` once and atomically handles
+rollover, expired-lease cleanup, and admission. A separate cost reservation
+script checks daily and monthly spend first, preserving the rate script's
+argument contract. RPM and TPM are fixed UTC-minute windows; cost uses fixed
+UTC days and calendar months, so a boundary burst is possible by design.
 
 ```text
 <namespace>:{id}:rate           hash(window, rpm, tpm)
 <namespace>:{id}:concurrency:v2 sorted set(lease_id -> expiry_ms)
+<namespace>:{key_uuid_without_hyphens}:cost:day hash(window, accrued)
+<namespace>:{key_uuid_without_hyphens}:cost:month hash(window, accrued, unpriced)
 ```
 
-The `{id}` hash tag keeps all keys in one cluster slot. A rejection consumes
-no dimension. Malformed state and Valkey errors fail closed for hard-limited
-keys; release is idempotent and abandoned leases expire on server time. New
-binaries do not read or migrate legacy rate/concurrency keys, so mixed-version
-deployments temporarily have separate pools and must be completed promptly.
+Each brace-delimited identity keeps the keys used by one script in a single
+cluster slot. Rate and concurrency follow the rotatable lookup ID; cost uses
+the stable API-key UUID so credential rotation cannot reset spend. Cost is
+stored and compared as an exact decimal string rather than a Lua floating-point
+number. A rejection consumes no dimension. Malformed state and Valkey errors
+fail closed for budgeted keys; release is idempotent and abandoned leases
+expire on server time. New binaries do not read or migrate legacy
+rate/concurrency keys, so mixed-version deployments temporarily have separate
+pools and must be completed promptly.
+
+The metadata transaction prices newly inserted attempt facts and advances
+durable per-key, per-window PostgreSQL counters before it commits. It returns
+the cumulative daily/monthly snapshot rather than a delta. The consumer and
+the checkpointed reconciliation worker both apply cumulative snapshots to
+Valkey, so replay, out-of-order delivery, and every terminal/reconciliation
+interleaving are idempotent. Reconciliation rebuilds the current snapshots
+from raw and hourly usage facts and only raises valid counters; missing,
+stale, or malformed Valkey hashes are replaced from PostgreSQL. Lost Valkey
+state is therefore recoverable without inventing or double-counting cost.
 
 ## Capability certification
 
@@ -326,4 +345,6 @@ revision. Missing upstream usage is incomplete and unpriced, never zero:
 successful billable attempts without observed usage remain unpriced, while a
 failed attempt is retained without inventing usage or cost. Stream entries are
 removed only after the database transaction commits and the consumer
-acknowledges them; producers never trim unconsumed events.
+acknowledges them; producers never trim unconsumed events. Spend controls add
+zero cost for an unpriced attempt and count it separately instead of weakening
+that invariant.

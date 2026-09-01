@@ -1,4 +1,6 @@
 use super::*;
+use rust_decimal::Decimal;
+use std::time::{Duration, Instant};
 
 // ---------------------------------------------------------------------------
 // Distributed limits
@@ -78,5 +80,225 @@ fn a_key_over_its_request_limit_is_refused_with_a_retry_after() {
              refused request still reached the provider",
             upstream.len()
         );
+    });
+}
+
+async fn await_budget(
+    api_key_id: &str,
+    minimum_unpriced_attempts: u64,
+    require_accrued_cost: bool,
+) -> Value {
+    let deadline = Instant::now() + Duration::from_secs(30);
+    loop {
+        let response = world()
+            .management
+            .get(&format!("/api/v1/api-keys/{api_key_id}"))
+            .await
+            .expect("API-key budget read");
+        assert_eq!(
+            response.status, 200,
+            "API-key budget read: {}",
+            response.body
+        );
+        let accrued = response.body["budget"]["daily"]["accrued"]
+            .as_str()
+            .and_then(|value| Decimal::from_str_exact(value).ok());
+        let unpriced_attempts = response.body["budget"]["unpriced_attempts"].as_u64();
+        let accrued_ready = accrued.is_some_and(|value| {
+            if require_accrued_cost {
+                value > Decimal::ZERO
+            } else {
+                value == Decimal::ZERO
+            }
+        });
+        if accrued_ready
+            && unpriced_attempts.is_some_and(|value| value >= minimum_unpriced_attempts)
+        {
+            return response.body;
+        }
+        assert!(
+            Instant::now() <= deadline,
+            "budget did not converge within 30 seconds: {}",
+            response.body
+        );
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+}
+
+async fn await_daily_budget_rejection(api_key_id: &str, limit: Decimal) {
+    use olp_db::{limits::DistributedLimiter, store::Store};
+    use olp_engine::inference::limits::{LimitDimension, LimitError, LimitRequest};
+
+    let world = world();
+    let store = Store::connect(&world.database_url, 1)
+        .await
+        .expect("budget counter PostgreSQL connection");
+    let namespace = store
+        .valkey_keyspace()
+        .await
+        .expect("installation Valkey keyspace")
+        .limits_namespace();
+    let limiter = DistributedLimiter::connect(
+        &world.valkey_url().await.expect("fixture Valkey URL"),
+        namespace,
+    )
+    .await
+    .expect("budget counter connection");
+    let api_key_id = api_key_id.parse().expect("API key UUID");
+    let deadline = Instant::now() + Duration::from_secs(30);
+    loop {
+        let result = limiter
+            .reserve(LimitRequest {
+                api_key_id,
+                lookup_id: "budget_probe",
+                requests_per_minute: None,
+                tokens_per_minute: None,
+                max_concurrency: None,
+                daily_cost_limit: Some(limit),
+                monthly_cost_limit: None,
+                requested_tokens: 0,
+                lease_ttl: Duration::from_secs(1),
+            })
+            .await;
+        match result {
+            Err(LimitError::Exceeded {
+                dimension: LimitDimension::DailyCost,
+                ..
+            }) => return,
+            Ok(_) => {}
+            Err(error) => panic!("budget counter check failed: {error}"),
+        }
+        assert!(
+            Instant::now() <= deadline,
+            "daily budget counter did not converge within 30 seconds"
+        );
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+}
+
+async fn await_unpriced_cost_counter(api_key_id: &str, minimum: u64) {
+    use olp_db::store::Store;
+
+    let world = world();
+    let store = Store::connect(&world.database_url, 1)
+        .await
+        .expect("unpriced counter PostgreSQL connection");
+    let namespace = store
+        .valkey_keyspace()
+        .await
+        .expect("installation Valkey keyspace")
+        .limits_namespace();
+    let key = format!("{namespace}:{{{}}}:cost:month", api_key_id.replace('-', ""));
+    let client = redis::Client::open(world.valkey_url().await.expect("fixture Valkey URL"))
+        .expect("unpriced counter client");
+    let mut connection = client
+        .get_multiplexed_async_connection()
+        .await
+        .expect("unpriced counter connection");
+    let deadline = Instant::now() + Duration::from_secs(30);
+    loop {
+        let count: Option<u64> = redis::cmd("HGET")
+            .arg(&key)
+            .arg("unpriced")
+            .query_async(&mut connection)
+            .await
+            .expect("unpriced counter read");
+        if count.is_some_and(|value| value >= minimum) {
+            return;
+        }
+        assert!(
+            Instant::now() <= deadline,
+            "unpriced counter did not converge within 30 seconds"
+        );
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+}
+
+#[test]
+#[ignore = "end-to-end; run via make e2e"]
+fn a_priced_request_exhausts_a_daily_budget_before_the_second_request() {
+    runtime().block_on(async {
+        let world = world();
+        let key = world
+            .issue_key("daily budget probe", json!({"daily_cost_limit": "0.01"}))
+            .await
+            .expect("budgeted key");
+        let checkpoint = world.mock.checkpoint();
+        let request = || {
+            json!({
+                "model": world::OPENAI_ROUTE,
+                "messages": [{"role": "user", "content": nonce("daily-budget")}]
+            })
+        };
+
+        let first = world
+            .gateway_post("/openai/v1/chat/completions", request(), &key.secret)
+            .await
+            .expect("first budgeted request");
+        assert_eq!(first.status, 200, "first request: {}", first.text);
+        let budget = await_budget(&key.id, 0, true).await;
+        let limit = budget["budget"]["daily"]["limit"]
+            .as_str()
+            .and_then(|value| Decimal::from_str_exact(value).ok());
+        assert_eq!(limit, Some(Decimal::new(1, 2)));
+        await_daily_budget_rejection(&key.id, Decimal::new(1, 2)).await;
+
+        let second = world
+            .gateway_post("/openai/v1/chat/completions", request(), &key.secret)
+            .await
+            .expect("second budgeted request");
+        assert_eq!(second.status, 429, "second request: {}", second.text);
+        let error = second.json();
+        assert_eq!(error["error"]["code"], json!("budget_exhausted"));
+        assert_eq!(
+            error["error"]["message"],
+            json!("The API key cost budget was exhausted. Unpriced attempts accrue 0.")
+        );
+        let retry_after = second
+            .header("retry-after")
+            .expect("budget rejection carries Retry-After")
+            .parse::<u64>()
+            .expect("Retry-After is a delay in seconds");
+        assert!((1..=86_400).contains(&retry_after));
+        assert_eq!(world.mock.since(checkpoint).len(), 1);
+    });
+}
+
+#[test]
+#[ignore = "end-to-end; run via make e2e"]
+fn unpriced_attempts_accrue_zero_and_never_exhaust_the_budget() {
+    runtime().block_on(async {
+        let world = world();
+        let key = world
+            .issue_key(
+                "unpriced budget probe",
+                json!({"daily_cost_limit": "0.000000000001"}),
+            )
+            .await
+            .expect("budgeted key");
+
+        for attempt in 1..=2 {
+            let response = world
+                .gateway_post(
+                    "/openai/v1/chat/completions",
+                    json!({
+                        "model": world::OPENAI_ROUTE,
+                        "messages": [{
+                            "role": "user",
+                            "content": format!("{} {}", mock_upstream::NO_USAGE_MARKER, nonce("unpriced-budget"))
+                        }]
+                    }),
+                    &key.secret,
+                )
+                .await
+                .expect("unpriced request");
+            assert_eq!(response.status, 200, "attempt {attempt}: {}", response.text);
+            let budget = await_budget(&key.id, attempt, false).await;
+            let accrued = budget["budget"]["daily"]["accrued"]
+                .as_str()
+                .and_then(|value| Decimal::from_str_exact(value).ok());
+            assert_eq!(accrued, Some(Decimal::ZERO));
+            await_unpriced_cost_counter(&key.id, attempt).await;
+        }
     });
 }

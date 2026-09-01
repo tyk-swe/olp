@@ -14,7 +14,7 @@
   import CursorPagination from '$lib/components/CursorPagination.svelte';
   import NavIcon from '$lib/components/NavIcon.svelte';
   import ReadOnlyNote from '$lib/components/ReadOnlyNote.svelte';
-  import { formatDate } from '$lib/format';
+  import { formatCost, formatDate } from '$lib/format';
   import type { ApiKeyListState } from './apiKeyListState';
 
   let {
@@ -135,7 +135,7 @@
       <thead
         ><tr
           ><th>Name / lookup ID</th><th>Status</th><th>Scope</th><th>Limits</th
-          ><th>Creator / created</th><th
+          ><th>Budget</th><th>Creator / created</th><th
             ><span class="sr-only">Actions</span></th
           ></tr
         ></thead
@@ -188,6 +188,22 @@
                   : 'unlimited concurrency'}</small
               ></td
             >
+            <td>
+              {#if key.budget.daily.limit !== null || key.budget.monthly.limit !== null}
+                <small>
+                  {#if key.budget.daily.limit !== null}Daily {formatCost(
+                      key.budget.daily.accrued
+                    )} / {formatCost(key.budget.daily.limit)}{/if}
+                  {#if key.budget.daily.limit !== null && key.budget.monthly.limit !== null}<br
+                    />{/if}
+                  {#if key.budget.monthly.limit !== null}Monthly {formatCost(
+                      key.budget.monthly.accrued
+                    )} / {formatCost(key.budget.monthly.limit)}{/if}
+                </small>
+              {:else}
+                <small>No cost budget</small>
+              {/if}
+            </td>
             <td
               ><strong>{key.created_by_email}</strong><br /><small
                 >{formatDate(key.created_at)}</small
@@ -195,12 +211,17 @@
             >
             <td
               ><div class="row-actions">
-                {#if canManage && !key.revoked_at}{#if !key.expires_at || new Date(key.expires_at) >= new Date()}<button
-                      class="button button-secondary"
-                      type="button"
-                      onclick={() => onEdit(key)}
-                      disabled={Boolean(busy)}>Edit</button
-                    ><button
+                <button
+                  class="button button-secondary"
+                  type="button"
+                  onclick={() => onEdit(key)}
+                  disabled={Boolean(busy)}
+                  >{canManage &&
+                  !key.revoked_at &&
+                  (!key.expires_at || new Date(key.expires_at) >= new Date())
+                    ? 'Edit'
+                    : 'View'}</button
+                >{#if canManage && !key.revoked_at}{#if !key.expires_at || new Date(key.expires_at) >= new Date()}<button
                       class="button button-secondary"
                       type="button"
                       onclick={() => rotate(key)}

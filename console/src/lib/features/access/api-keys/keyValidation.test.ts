@@ -13,6 +13,41 @@ describe('API key validation', () => {
     expect(validateApiKey({ name: 'production SDK' })).toEqual({});
   });
 
+  it('accepts exact positive cost budgets within the storage precision', () => {
+    expect(
+      validateApiKey({
+        name: 'production SDK',
+        dailyCostLimit: '000000000001.000000000001',
+        monthlyCostLimit: '999999999999.999999999999'
+      })
+    ).toEqual({});
+  });
+
+  it('rejects zero, signed, malformed, and oversized cost budgets', () => {
+    expect(
+      validateApiKey({
+        name: 'production SDK',
+        dailyCostLimit: '0.000000000000',
+        monthlyCostLimit: '1000000000000'
+      })
+    ).toMatchObject({
+      dailyCostLimit: expect.any(String),
+      monthlyCostLimit: expect.any(String)
+    });
+    expect(
+      validateApiKey({ name: 'production SDK', dailyCostLimit: '+1.00' })
+    ).toMatchObject({ dailyCostLimit: expect.any(String) });
+    expect(
+      validateApiKey({ name: 'production SDK', dailyCostLimit: '1.2.3' })
+    ).toMatchObject({ dailyCostLimit: expect.any(String) });
+    expect(
+      validateApiKey({
+        name: 'production SDK',
+        dailyCostLimit: '1.0000000000001'
+      })
+    ).toMatchObject({ dailyCostLimit: expect.any(String) });
+  });
+
   it('rejects an expiry that has already passed', () => {
     const now = new Date('2026-07-12T12:00:00Z');
 

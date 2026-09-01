@@ -12,6 +12,7 @@ use tracing::{error, warn};
 
 use crate::{
     error::Error as PersistenceError,
+    limits::DistributedLimiter,
     request_metadata::{ingestion::Outcome, reconciliation::Gap},
     store::Store,
     worker_health::RequestMetadataConsumerActivity,
@@ -96,6 +97,7 @@ pub async fn run_request_metadata_consumer(
     valkey_url: &str,
     stream: &str,
     consumer: &str,
+    limits_namespace: &str,
     shutdown: watch::Receiver<bool>,
 ) -> Result<(), Error> {
     run_request_metadata_consumer_with_policy(
@@ -103,6 +105,7 @@ pub async fn run_request_metadata_consumer(
         valkey_url,
         stream,
         consumer,
+        limits_namespace,
         shutdown,
         ConsumerPolicy::default(),
     )
@@ -114,6 +117,7 @@ async fn run_request_metadata_consumer_with_policy(
     valkey_url: &str,
     stream: &str,
     consumer: &str,
+    limits_namespace: &str,
     mut shutdown: watch::Receiver<bool>,
     policy: ConsumerPolicy,
 ) -> Result<(), Error> {
@@ -122,6 +126,7 @@ async fn run_request_metadata_consumer_with_policy(
         .block_interval
         .max(policy.active_recovery_block_interval);
     let mut connection = request_metadata_connection(valkey_url, longest_block_interval).await?;
+    let cost_limiter = DistributedLimiter::connect(valkey_url, limits_namespace).await?;
     create_consumer_group(&mut connection, stream).await?;
     #[cfg(all(feature = "test-util", debug_assertions))]
     {
@@ -167,9 +172,16 @@ async fn run_request_metadata_consumer_with_policy(
             let next_start = entries
                 .last()
                 .map_or_else(|| "0-0".to_owned(), |entry| entry.id.clone());
-            let summary =
-                process_entries(store, &mut connection, stream, consumer, entries, &shutdown)
-                    .await?;
+            let summary = process_entries(
+                store,
+                &cost_limiter,
+                &mut connection,
+                stream,
+                consumer,
+                entries,
+                &shutdown,
+            )
+            .await?;
             report_processing_activity(store, summary, true).await?;
             if summary.shutdown {
                 return Ok(());
@@ -216,6 +228,7 @@ async fn run_request_metadata_consumer_with_policy(
             let next_start = page.next_start;
             let summary = process_entries(
                 store,
+                &cost_limiter,
                 &mut connection,
                 stream,
                 consumer,
@@ -274,8 +287,16 @@ async fn run_request_metadata_consumer_with_policy(
                 Some(block_interval),
             ) => result?,
         };
-        let summary =
-            process_entries(store, &mut connection, stream, consumer, entries, &shutdown).await?;
+        let summary = process_entries(
+            store,
+            &cost_limiter,
+            &mut connection,
+            stream,
+            consumer,
+            entries,
+            &shutdown,
+        )
+        .await?;
         report_processing_activity(store, summary, false).await?;
         if summary.shutdown {
             return Ok(());
@@ -398,6 +419,7 @@ async fn auto_claim(
 
 async fn process_entries(
     store: &Store,
+    cost_limiter: &DistributedLimiter,
     connection: &mut ConnectionManager,
     stream: &str,
     consumer: &str,
@@ -410,7 +432,7 @@ async fn process_entries(
             summary.shutdown = true;
             break;
         }
-        match process_entry(store, connection, stream, consumer, entry).await? {
+        match process_entry(store, cost_limiter, connection, stream, consumer, entry).await? {
             EntryProcessingOutcome::Completed { duplicate } => {
                 summary.completed = summary.completed.saturating_add(1);
                 summary.duplicates = summary.duplicates.saturating_add(u64::from(duplicate));
@@ -444,6 +466,7 @@ async fn report_processing_activity(
 /// entry must remain in the PEL for a later pass.
 async fn process_entry(
     store: &Store,
+    cost_limiter: &DistributedLimiter,
     connection: &mut ConnectionManager,
     stream: &str,
     consumer: &str,
@@ -503,13 +526,19 @@ async fn process_entry(
         .persist_request_metadata_stream_event(&event, &payload)
         .await
     {
-        Ok(outcome) => {
-            if outcome == Outcome::RejectedOutsideReplayWindow {
+        Ok(result) => {
+            if result.outcome == Outcome::RejectedOutsideReplayWindow {
                 warn!(stream_id = %entry.id, "request metadata event outside the replay window was recorded as an uncertain gap");
+            }
+            if result.outcome == Outcome::Persisted
+                && let Some(snapshot) = result.cost_snapshot
+                && let Err(error) = cost_limiter.apply_cost_snapshot(&snapshot).await
+            {
+                warn!(%error, stream_id = %entry.id, "cost snapshot application failed; PostgreSQL reconciliation will repair it");
             }
             acknowledge_and_delete(connection, stream, &entry.id).await?;
             Ok(EntryProcessingOutcome::Completed {
-                duplicate: outcome == Outcome::Duplicate,
+                duplicate: result.outcome == Outcome::Duplicate,
             })
         }
         Err(PersistenceError::InvalidRequestMetadataEvent) => {
@@ -747,6 +776,7 @@ pub mod test_support {
         valkey_url: &str,
         stream: &str,
         consumer: &str,
+        limits_namespace: &str,
         shutdown: watch::Receiver<bool>,
         policy: RequestMetadataConsumerTestPolicy,
     ) -> Result<(), Error> {
@@ -755,6 +785,7 @@ pub mod test_support {
             valkey_url,
             stream,
             consumer,
+            limits_namespace,
             shutdown,
             ConsumerPolicy {
                 batch_size: policy.batch_size,

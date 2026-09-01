@@ -27,7 +27,8 @@ impl Store {
         let key_rows = sqlx::query!(
             "SELECT k.id, k.lookup_id, k.name, k.created_by, u.email AS created_by_email, \
                     k.requests_per_minute, k.tokens_per_minute, k.max_concurrency, k.expires_at, \
-                    k.revoked_at, k.rotated_at, k.etag, k.created_at \
+                    k.daily_cost_limit, k.monthly_cost_limit, k.revoked_at, k.rotated_at, \
+                    k.etag, k.created_at \
              FROM api_keys k JOIN users u ON u.id = k.created_by \
              WHERE k.id = ANY($1::uuid[]) \
              ORDER BY k.id",
@@ -81,6 +82,8 @@ impl Store {
                     requests_per_minute: row.requests_per_minute,
                     tokens_per_minute: row.tokens_per_minute,
                     max_concurrency: row.max_concurrency,
+                    daily_cost_limit: row.daily_cost_limit,
+                    monthly_cost_limit: row.monthly_cost_limit,
                     expires_at: row.expires_at,
                     revoked_at: row.revoked_at,
                     rotated_at: row.rotated_at,
@@ -103,7 +106,8 @@ impl Store {
         let row = sqlx::query!(
             "SELECT k.id, k.lookup_id, k.name, k.created_by, u.email AS created_by_email, \
                     k.requests_per_minute, k.tokens_per_minute, k.max_concurrency, k.expires_at, \
-                    k.revoked_at, k.rotated_at, k.etag, k.created_at \
+                    k.daily_cost_limit, k.monthly_cost_limit, k.revoked_at, k.rotated_at, \
+                    k.etag, k.created_at \
              FROM api_keys k JOIN users u ON u.id = k.created_by WHERE k.id = $1",
             id
         )
@@ -121,6 +125,8 @@ impl Store {
             requests_per_minute: row.requests_per_minute,
             tokens_per_minute: row.tokens_per_minute,
             max_concurrency: row.max_concurrency,
+            daily_cost_limit: row.daily_cost_limit,
+            monthly_cost_limit: row.monthly_cost_limit,
             expires_at: row.expires_at,
             revoked_at: row.revoked_at,
             rotated_at: row.rotated_at,
@@ -205,6 +211,16 @@ impl Store {
                 "hard limits must be positive when configured".to_owned(),
             ));
         }
+        if input
+            .daily_cost_limit
+            .into_iter()
+            .chain(input.monthly_cost_limit)
+            .any(|value| !crate::valid_cost_limit(value))
+        {
+            return Err(Error::Invalid(
+                "cost limits must have at most 12 integer and 12 fractional digits".to_owned(),
+            ));
+        }
 
         let mut transaction = self
             .pool()
@@ -227,13 +243,16 @@ impl Store {
         let etag = Uuid::now_v7();
         let updated = sqlx::query!(
             "UPDATE api_keys SET name = $1, requests_per_minute = $2, tokens_per_minute = $3, \
-                    max_concurrency = $4, expires_at = $5, etag = $6 \
-             WHERE id = $7 AND etag = $8 AND revoked_at IS NULL \
+                    max_concurrency = $4, daily_cost_limit = $5, monthly_cost_limit = $6, \
+                    expires_at = $7, etag = $8 \
+             WHERE id = $9 AND etag = $10 AND revoked_at IS NULL \
                AND (expires_at IS NULL OR expires_at > now())",
             name,
             requests_per_minute,
             tokens_per_minute,
             max_concurrency,
+            input.daily_cost_limit,
+            input.monthly_cost_limit,
             input.expires_at,
             etag,
             id,
@@ -312,7 +331,23 @@ impl Store {
             expected_etag,
             actor,
             idempotency_key,
+            daily_cost_limit,
+            monthly_cost_limit,
         } = input;
+        if daily_cost_limit
+            .flatten()
+            .into_iter()
+            .chain(monthly_cost_limit.flatten())
+            .any(|value| !crate::valid_cost_limit(value))
+        {
+            return Err(Error::Invalid(
+                "cost limits must have at most 12 integer and 12 fractional digits".to_owned(),
+            ));
+        }
+        let daily_cost_limit_changed = daily_cost_limit.is_some();
+        let monthly_cost_limit_changed = monthly_cost_limit.is_some();
+        let daily_cost_limit = daily_cost_limit.flatten();
+        let monthly_cost_limit = monthly_cost_limit.flatten();
         let mut transaction = self
             .pool()
             .begin_with("BEGIN ISOLATION LEVEL READ COMMITTED")
@@ -345,11 +380,18 @@ impl Store {
         }
         let etag = Uuid::now_v7();
         let result = sqlx::query!(
-            "UPDATE api_keys SET lookup_id = $1, secret_digest = $2, etag = $3, rotated_at = now() \
-             WHERE id = $4 AND etag = $5 AND revoked_at IS NULL \
+            "UPDATE api_keys SET lookup_id = $1, secret_digest = $2, \
+                    daily_cost_limit = CASE WHEN $3 THEN $4 ELSE daily_cost_limit END, \
+                    monthly_cost_limit = CASE WHEN $5 THEN $6 ELSE monthly_cost_limit END, \
+                    etag = $7, rotated_at = now() \
+             WHERE id = $8 AND etag = $9 AND revoked_at IS NULL \
                AND (expires_at IS NULL OR expires_at > now())",
             &material.lookup_id,
             material.digest.to_vec(),
+            daily_cost_limit_changed,
+            daily_cost_limit,
+            monthly_cost_limit_changed,
+            monthly_cost_limit,
             etag,
             id,
             expected_etag

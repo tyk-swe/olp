@@ -375,7 +375,7 @@ async fn compile_api_keys(
 ) -> Result<BTreeMap<ApiKeyLookupId, ApiKey>, RuntimeCompileError> {
     let key_rows = sqlx::query!(
         "SELECT id, lookup_id, secret_digest, expires_at, requests_per_minute, \
-                tokens_per_minute, max_concurrency \
+                tokens_per_minute, max_concurrency, daily_cost_limit, monthly_cost_limit \
          FROM api_keys WHERE revoked_at IS NULL AND (expires_at IS NULL OR expires_at > now()) \
          ORDER BY lookup_id",
     )
@@ -451,6 +451,8 @@ async fn compile_api_keys(
                     requests_per_minute: optional_nonzero_u32(rpm, "requests_per_minute")?,
                     tokens_per_minute: optional_nonzero_u64(tpm, "tokens_per_minute")?,
                     concurrency: optional_nonzero_u32(concurrency, "max_concurrency")?,
+                    daily_cost_limit: row.daily_cost_limit,
+                    monthly_cost_limit: row.monthly_cost_limit,
                 },
             },
         );

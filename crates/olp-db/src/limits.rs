@@ -1,5 +1,6 @@
 use std::{fmt, sync::Arc, time::Duration};
 
+use chrono::{DateTime, Utc};
 use olp_engine::{
     domain::ports::BoxFuture,
     inference::limits::{
@@ -7,13 +8,21 @@ use olp_engine::{
     },
 };
 use redis::{AsyncCommands, FromRedisValue, Script, aio::ConnectionManager};
+use rust_decimal::Decimal;
+use thiserror::Error;
 use uuid::Uuid;
 
+use crate::store::Store;
+
 const RESERVE_SCRIPT: &str = include_str!("../scripts/reserve_limits.lua");
+const RESERVE_COST_SCRIPT: &str = include_str!("../scripts/reserve_cost.lua");
+const RECONCILE_COST_SCRIPT: &str = include_str!("../scripts/reconcile_cost.lua");
 const RELEASE_SCRIPT: &str = include_str!("../scripts/release_concurrency.lua");
 const RECONCILE_SCRIPT: &str = include_str!("../scripts/reconcile_limits.lua");
 const SCRIPT_RESPONSE_VERSION: i64 = 1;
 const FIXED_WINDOW_MS: i64 = 60_000;
+const DAY_MS: i64 = 86_400_000;
+const MAX_MONTH_MS: i64 = 31 * DAY_MS;
 // Valkey executes Lua 5.1 scripts with IEEE-754 doubles. Keep every integer
 // involved in a comparison or sorted-set score exactly representable.
 const MAX_LUA_INTEGER: i64 = (1_i64 << 53) - 1;
@@ -22,6 +31,57 @@ const MAX_LUA_INTEGER: i64 = (1_i64 << 53) - 1;
 pub struct DistributedLimiter {
     connection: ConnectionManager,
     namespace: String,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct CostSnapshot {
+    pub api_key_id: Uuid,
+    pub daily_window_id: i64,
+    pub daily_accrued: Decimal,
+    pub monthly_window_id: i64,
+    pub monthly_accrued: Decimal,
+    pub unpriced_attempts: u64,
+}
+
+impl CostSnapshot {
+    fn validate(self) -> Result<(), LimitError> {
+        if !(0..=MAX_LUA_INTEGER).contains(&self.daily_window_id)
+            || !(0..=MAX_LUA_INTEGER).contains(&self.monthly_window_id)
+        {
+            return Err(LimitError::InvalidRequest(
+                "cost snapshot window IDs exceed the Valkey Lua integer range",
+            ));
+        }
+        if [self.daily_accrued, self.monthly_accrued]
+            .into_iter()
+            .any(|cost| cost.is_sign_negative() || cost.scale() > 12)
+        {
+            return Err(LimitError::InvalidRequest(
+                "snapshot cost must be non-negative with at most 12 fractional digits",
+            ));
+        }
+        if self.unpriced_attempts > MAX_LUA_INTEGER as u64 {
+            return Err(LimitError::InvalidRequest(
+                "unpriced attempt count exceeds the Valkey Lua integer range",
+            ));
+        }
+        Ok(())
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct CostReconciliationReport {
+    pub keys_reconciled: u64,
+    pub daily_windows_reconciled: u64,
+    pub monthly_windows_reconciled: u64,
+}
+
+#[derive(Debug, Error)]
+pub enum CostReconciliationError {
+    #[error(transparent)]
+    Persistence(#[from] crate::error::Error),
+    #[error(transparent)]
+    Limiter(#[from] LimitError),
 }
 
 impl DistributedLimiter {
@@ -46,7 +106,9 @@ impl DistributedLimiter {
     ) -> Result<DistributedLimitLease, LimitError> {
         request.validate()?;
         validate_lua_integer_ranges(&request)?;
-        let keys = self.keys_for(request.lookup_id);
+        validate_cost_limits(&request)?;
+        let keys = self.keys_for(request.lookup_id, request.api_key_id);
+        self.reserve_cost(&request, &keys, 0).await?;
         let lease_id = Uuid::now_v7().to_string();
         let ttl_ms = duration_ms(request.lease_ttl)?;
 
@@ -91,6 +153,128 @@ impl DistributedLimiter {
             }),
             ReservationScriptResult::MalformedState => Err(LimitError::MalformedState),
         }
+    }
+
+    async fn reserve_cost(
+        &self,
+        request: &LimitRequest<'_>,
+        keys: &LimitKeys,
+        now_override_ms: i64,
+    ) -> Result<(), LimitError> {
+        if request.daily_cost_limit.is_none() && request.monthly_cost_limit.is_none() {
+            return Ok(());
+        }
+        let mut connection = self.connection.clone();
+        let raw_response: redis::Value = Script::new(RESERVE_COST_SCRIPT)
+            .key(&keys.daily_cost)
+            .key(&keys.monthly_cost)
+            .arg(canonical_optional_decimal(request.daily_cost_limit))
+            .arg(canonical_optional_decimal(request.monthly_cost_limit))
+            .arg(now_override_ms)
+            .invoke_async(&mut connection)
+            .await
+            .map_err(LimitError::service)?;
+        match CostReservationScriptResult::parse_value(&raw_response)? {
+            CostReservationScriptResult::Granted => Ok(()),
+            CostReservationScriptResult::Rejected {
+                dimension,
+                retry_after_ms,
+            } => Err(LimitError::Exceeded {
+                dimension,
+                retry_after: Duration::from_millis(retry_after_ms),
+            }),
+            CostReservationScriptResult::MalformedState => Err(LimitError::MalformedState),
+            CostReservationScriptResult::ScriptFailure => Err(LimitError::UnexpectedResponse),
+        }
+    }
+
+    #[cfg(any(test, feature = "test-util"))]
+    pub async fn reserve_cost_at(
+        &self,
+        request: &LimitRequest<'_>,
+        now: DateTime<Utc>,
+    ) -> Result<(), LimitError> {
+        request.validate()?;
+        validate_cost_limits(request)?;
+        let keys = self.keys_for(request.lookup_id, request.api_key_id);
+        self.reserve_cost(request, &keys, supported_timestamp_ms(now)?)
+            .await
+    }
+
+    pub async fn apply_cost_snapshot(&self, snapshot: &CostSnapshot) -> Result<(), LimitError> {
+        self.apply_cost_snapshot_inner(snapshot, 0)
+            .await
+            .map(|_| ())
+    }
+
+    #[cfg(any(test, feature = "test-util"))]
+    pub async fn apply_cost_snapshot_at(
+        &self,
+        snapshot: &CostSnapshot,
+        now: DateTime<Utc>,
+    ) -> Result<(), LimitError> {
+        self.apply_cost_snapshot_inner(snapshot, supported_timestamp_ms(now)?)
+            .await
+            .map(|_| ())
+    }
+
+    async fn apply_cost_snapshot_inner(
+        &self,
+        snapshot: &CostSnapshot,
+        now_override_ms: i64,
+    ) -> Result<ReconciledCostWindows, LimitError> {
+        snapshot.validate()?;
+        let keys = self.keys_for("unused_lookup", snapshot.api_key_id);
+        let mut connection = self.connection.clone();
+        apply_cost_snapshot_on(&mut connection, &keys, snapshot, now_override_ms).await
+    }
+
+    pub async fn reconcile_costs(
+        &self,
+        store: &Store,
+        now: DateTime<Utc>,
+    ) -> Result<CostReconciliationReport, CostReconciliationError> {
+        self.reconcile_costs_inner(store, now, 0).await
+    }
+
+    #[cfg(any(test, feature = "test-util"))]
+    pub async fn reconcile_costs_at(
+        &self,
+        store: &Store,
+        now: DateTime<Utc>,
+    ) -> Result<CostReconciliationReport, CostReconciliationError> {
+        let now_override_ms = supported_timestamp_ms(now)?;
+        self.reconcile_costs_inner(store, now, now_override_ms)
+            .await
+    }
+
+    async fn reconcile_costs_inner(
+        &self,
+        store: &Store,
+        now: DateTime<Utc>,
+        now_override_ms: i64,
+    ) -> Result<CostReconciliationReport, CostReconciliationError> {
+        let snapshots = store.cost_reconciliation_snapshots(now).await?;
+        let mut report = CostReconciliationReport::default();
+        let mut first_error = None;
+        for snapshot in snapshots {
+            match self
+                .apply_cost_snapshot_inner(&snapshot, now_override_ms)
+                .await
+            {
+                Ok(reconciled) => {
+                    report.keys_reconciled += u64::from(reconciled.daily || reconciled.monthly);
+                    report.daily_windows_reconciled += u64::from(reconciled.daily);
+                    report.monthly_windows_reconciled += u64::from(reconciled.monthly);
+                }
+                Err(error) if first_error.is_none() => first_error = Some(error),
+                Err(_) => {}
+            }
+        }
+        if let Some(error) = first_error {
+            return Err(error.into());
+        }
+        Ok(report)
     }
 
     pub async fn release(&self, lease: &DistributedLimitLease) -> Result<(), LimitError> {
@@ -147,8 +331,8 @@ impl DistributedLimiter {
         }
     }
 
-    fn keys_for(&self, lookup_id: &str) -> LimitKeys {
-        limit_keys(&self.namespace, lookup_id)
+    fn keys_for(&self, lookup_id: &str, api_key_id: Uuid) -> LimitKeys {
+        limit_keys(&self.namespace, lookup_id, api_key_id)
     }
 }
 
@@ -172,6 +356,59 @@ fn validate_lua_integer_ranges(request: &LimitRequest<'_>) -> Result<(), LimitEr
         ));
     }
     Ok(())
+}
+
+fn validate_cost_limits(request: &LimitRequest<'_>) -> Result<(), LimitError> {
+    if request
+        .daily_cost_limit
+        .into_iter()
+        .chain(request.monthly_cost_limit)
+        .any(|value| !crate::valid_cost_limit(value))
+    {
+        return Err(LimitError::InvalidRequest(
+            "cost limits must have at most 12 integer and 12 fractional digits",
+        ));
+    }
+    Ok(())
+}
+
+async fn apply_cost_snapshot_on(
+    connection: &mut ConnectionManager,
+    keys: &LimitKeys,
+    snapshot: &CostSnapshot,
+    now_override_ms: i64,
+) -> Result<ReconciledCostWindows, LimitError> {
+    let response: (i64, i64, String, i64, i64) = Script::new(RECONCILE_COST_SCRIPT)
+        .key(&keys.daily_cost)
+        .key(&keys.monthly_cost)
+        .arg(snapshot.daily_window_id)
+        .arg(canonical_decimal(snapshot.daily_accrued))
+        .arg(snapshot.monthly_window_id)
+        .arg(canonical_decimal(snapshot.monthly_accrued))
+        .arg(snapshot.unpriced_attempts)
+        .arg(now_override_ms)
+        .invoke_async(connection)
+        .await
+        .map_err(LimitError::service)?;
+    match response {
+        (SCRIPT_RESPONSE_VERSION, 1, detail, daily, monthly)
+            if detail == "ok" && matches!(daily, 0 | 1) && matches!(monthly, 0 | 1) =>
+        {
+            Ok(ReconciledCostWindows {
+                daily: daily == 1,
+                monthly: monthly == 1,
+            })
+        }
+        (SCRIPT_RESPONSE_VERSION, -1, detail, 0, 0)
+            if matches!(
+                detail.as_str(),
+                "malformed_daily_cost_state" | "malformed_monthly_cost_state"
+            ) =>
+        {
+            Err(LimitError::MalformedState)
+        }
+        _ => Err(LimitError::UnexpectedResponse),
+    }
 }
 
 struct ValkeyLimitLease {
@@ -211,14 +448,43 @@ impl LimitBackend for DistributedLimiter {
 struct LimitKeys {
     rate: String,
     concurrency: String,
+    daily_cost: String,
+    monthly_cost: String,
 }
 
-fn limit_keys(namespace: &str, lookup_id: &str) -> LimitKeys {
-    let prefix = format!("{namespace}:{{{lookup_id}}}");
+fn limit_keys(namespace: &str, lookup_id: &str, api_key_id: Uuid) -> LimitKeys {
+    let rate_prefix = format!("{namespace}:{{{lookup_id}}}");
+    let cost_prefix = format!("{namespace}:{{{}}}:cost", api_key_id.simple());
     LimitKeys {
-        rate: format!("{prefix}:rate"),
-        concurrency: format!("{prefix}:concurrency:v2"),
+        rate: format!("{rate_prefix}:rate"),
+        concurrency: format!("{rate_prefix}:concurrency:v2"),
+        daily_cost: format!("{cost_prefix}:day"),
+        monthly_cost: format!("{cost_prefix}:month"),
     }
+}
+
+#[cfg(any(test, feature = "test-util"))]
+fn supported_timestamp_ms(at: DateTime<Utc>) -> Result<i64, LimitError> {
+    let milliseconds = at.timestamp_millis();
+    if !(1..=MAX_LUA_INTEGER).contains(&milliseconds) {
+        return Err(LimitError::InvalidRequest(
+            "cost limiter timestamp exceeds the supported range",
+        ));
+    }
+    Ok(milliseconds)
+}
+
+fn canonical_optional_decimal(value: Option<Decimal>) -> String {
+    value.map_or_else(String::new, canonical_decimal)
+}
+
+fn canonical_decimal(value: Decimal) -> String {
+    value.normalize().to_string()
+}
+
+struct ReconciledCostWindows {
+    daily: bool,
+    monthly: bool,
 }
 
 #[derive(Clone)]
@@ -258,6 +524,49 @@ enum ReservationScriptResult {
     },
     MalformedState,
     ScriptFailure,
+}
+
+enum CostReservationScriptResult {
+    Granted,
+    Rejected {
+        dimension: LimitDimension,
+        retry_after_ms: u64,
+    },
+    MalformedState,
+    ScriptFailure,
+}
+
+impl CostReservationScriptResult {
+    fn parse_value(value: &redis::Value) -> Result<Self, LimitError> {
+        let (version, status, detail, retry_after_ms, day_window, month_window) =
+            RawReservationScriptResponse::from_redis_value_ref(value)
+                .map_err(|_| LimitError::UnexpectedResponse)?;
+        if version != SCRIPT_RESPONSE_VERSION || day_window <= 0 || month_window <= 0 {
+            return Err(LimitError::UnexpectedResponse);
+        }
+        match (status, detail.as_str()) {
+            (1, "ok") if retry_after_ms == 0 => Ok(Self::Granted),
+            (0, "daily_cost") if (1..=DAY_MS).contains(&retry_after_ms) => Ok(Self::Rejected {
+                dimension: LimitDimension::DailyCost,
+                retry_after_ms: retry_after_ms as u64,
+            }),
+            (0, "monthly_cost") if (1..=MAX_MONTH_MS).contains(&retry_after_ms) => {
+                Ok(Self::Rejected {
+                    dimension: LimitDimension::MonthlyCost,
+                    retry_after_ms: retry_after_ms as u64,
+                })
+            }
+            (-1, "malformed_daily_cost_state" | "malformed_monthly_cost_state")
+                if retry_after_ms == 0 =>
+            {
+                Ok(Self::MalformedState)
+            }
+            (-1, "invalid_arguments" | "invalid_server_time") if retry_after_ms == 0 => {
+                Ok(Self::ScriptFailure)
+            }
+            _ => Err(LimitError::UnexpectedResponse),
+        }
+    }
 }
 
 type RawReservationScriptResponse = (i64, i64, String, i64, i64, i64);
@@ -355,10 +664,13 @@ mod tests {
 
     fn valid_request() -> LimitRequest<'static> {
         LimitRequest {
+            api_key_id: Uuid::nil(),
             lookup_id: "lookup_01",
             requests_per_minute: Some(60),
             tokens_per_minute: Some(1_000),
             max_concurrency: Some(4),
+            daily_cost_limit: Some(Decimal::new(1, 2)),
+            monthly_cost_limit: Some(Decimal::ONE),
             requested_tokens: 1,
             lease_ttl: Duration::from_secs(10),
         }
@@ -370,6 +682,8 @@ mod tests {
             requests_per_minute: None,
             tokens_per_minute: None,
             max_concurrency: None,
+            daily_cost_limit: None,
+            monthly_cost_limit: None,
             ..valid_request()
         };
         assert!(!unlimited.has_hard_limits());
@@ -427,14 +741,18 @@ mod tests {
 
     #[test]
     fn stable_keys_share_one_cluster_hash_tag() {
-        let first = limit_keys("olp:v2:limits", "lookup_01");
-        let second = limit_keys("olp:v2:limits", "lookup_02");
+        let api_key_id = Uuid::now_v7();
+        let first = limit_keys("olp:v2:limits", "lookup_01", api_key_id);
+        let second = limit_keys("olp:v2:limits", "lookup_02", api_key_id);
 
         assert_eq!(hash_tag(&first.rate), Some("lookup_01"));
         assert_eq!(hash_tag(&first.concurrency), Some("lookup_01"));
         assert_ne!(hash_tag(&first.rate), hash_tag(&second.rate));
         assert!(!first.rate.contains(":rpm:"));
         assert!(!first.rate.contains(":tpm:"));
+        assert_eq!(first.daily_cost, second.daily_cost);
+        assert_eq!(first.monthly_cost, second.monthly_cost);
+        assert_eq!(hash_tag(&first.daily_cost), hash_tag(&first.monthly_cost));
     }
 
     #[test]
@@ -443,6 +761,8 @@ mod tests {
         assert!(RESERVE_SCRIPT.contains("#ARGV ~= 6"));
         assert!(!RESERVE_SCRIPT.contains("ARGV: now_ms"));
         assert!(!RESERVE_SCRIPT.contains("window_ttl_ms"));
+        assert!(RESERVE_COST_SCRIPT.contains("redis.call(\"TIME\")"));
+        assert!(RESERVE_COST_SCRIPT.contains("#ARGV ~= 3"));
     }
 
     #[test]

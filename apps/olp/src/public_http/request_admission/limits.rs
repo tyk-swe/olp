@@ -190,8 +190,11 @@ pub(super) async fn reserve_http_inference_limits(
         return Ok(None);
     }
     let limiter = state.inference.limiter();
+    let cost_budget_configured = principal.key().limits.daily_cost_limit.is_some()
+        || principal.key().limits.monthly_cost_limit.is_some();
     let Some(backend) = limiter.current() else {
-        return outage_reservation(limiter, "backend_missing").map_err(Into::into);
+        return outage_reservation(limiter, "backend_missing", cost_budget_configured)
+            .map_err(Into::into);
     };
     let tokens_per_minute = principal
         .key()
@@ -219,6 +222,7 @@ pub(super) async fn reserve_http_inference_limits(
     let Ok(result) = tokio::time::timeout(
         Duration::from_secs(1),
         backend.reserve(LimitRequest {
+            api_key_id: principal.key().id.as_uuid(),
             lookup_id: principal.lookup_id().as_str(),
             requests_per_minute: principal
                 .key()
@@ -231,6 +235,8 @@ pub(super) async fn reserve_http_inference_limits(
                 .limits
                 .concurrency
                 .map(|value| i64::from(value.get())),
+            daily_cost_limit: principal.key().limits.daily_cost_limit,
+            monthly_cost_limit: principal.key().limits.monthly_cost_limit,
             requested_tokens,
             // Account for the bounded body-read phase in addition to the
             // route deadline. This is only a crash-recovery backstop.
@@ -239,18 +245,22 @@ pub(super) async fn reserve_http_inference_limits(
     )
     .await
     else {
-        return outage_reservation(limiter, "timeout").map_err(Into::into);
+        return outage_reservation(limiter, "timeout", cost_budget_configured).map_err(Into::into);
     };
     match result {
         Ok(lease) => Ok(Some(Reservation::distributed(lease))),
         Err(LimitError::Exceeded {
             dimension,
             retry_after,
-        }) => Err(gateway::error::InferenceError::rate_limited(
-            dimension,
-            retry_hint(dimension, retry_after),
-        )),
-        Err(error) => outage_reservation(limiter, &error.to_string()).map_err(Into::into),
+        }) => {
+            limiter.record_rejection(dimension);
+            Err(gateway::error::InferenceError::rate_limited(
+                dimension,
+                retry_hint(dimension, retry_after),
+            ))
+        }
+        Err(error) => outage_reservation(limiter, &error.to_string(), cost_budget_configured)
+            .map_err(Into::into),
     }
 }
 

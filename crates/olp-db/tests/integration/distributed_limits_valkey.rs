@@ -26,10 +26,13 @@ fn keys(namespace: &str, lookup_id: &str) -> (String, String) {
 
 fn request(lookup_id: &str) -> LimitRequest<'_> {
     LimitRequest {
+        api_key_id: Uuid::nil(),
         lookup_id,
         requests_per_minute: Some(10),
         tokens_per_minute: Some(1_000),
         max_concurrency: Some(10),
+        daily_cost_limit: None,
+        monthly_cost_limit: None,
         requested_tokens: 5,
         lease_ttl: Duration::from_secs(5),
     }
