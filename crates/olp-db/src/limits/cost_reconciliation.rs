@@ -47,7 +47,9 @@ impl CostReconciliationLeader {
         now_override_ms: i64,
     ) -> Result<CostReconciliationReport, CostReconciliationError> {
         let snapshots = Store::cost_reconciliation_snapshots_on(&mut self.connection, now).await?;
-        let report = limiter.apply_cost_snapshots(snapshots, now_override_ms).await?;
+        let report = limiter
+            .apply_cost_snapshots(snapshots, now_override_ms)
+            .await?;
         // A pass cannot report success after losing the session that owns its lock.
         self.connection.ping().await.map_err(Error::from)?;
         Ok(report)

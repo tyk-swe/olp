@@ -83,13 +83,22 @@ async fn invalid_unpriced_values_are_repaired_even_when_authoritative_count_is_z
     let mut connection = connection().await;
     let (_, monthly) = cost_keys(&namespace, api_key_id);
     for malformed in ["garbage", "-1", "1.5", "9007199254740992", ""] {
-        limiter.apply_cost_snapshot_at(&authoritative, now).await.unwrap();
-        connection.hset::<_, _, _, ()>(&monthly, "unpriced", malformed).await.unwrap();
+        limiter
+            .apply_cost_snapshot_at(&authoritative, now)
+            .await
+            .unwrap();
+        connection
+            .hset::<_, _, _, ()>(&monthly, "unpriced", malformed)
+            .await
+            .unwrap();
         assert!(matches!(
             limiter.reserve_cost_at(&request, now).await,
             Err(LimitError::MalformedState)
         ));
-        limiter.apply_cost_snapshot_at(&authoritative, now).await.unwrap();
+        limiter
+            .apply_cost_snapshot_at(&authoritative, now)
+            .await
+            .unwrap();
         assert_eq!(cost_state(&mut connection, &monthly).await["unpriced"], "0");
         limiter.reserve_cost_at(&request, now).await.unwrap();
     }
@@ -111,7 +120,10 @@ async fn wrong_type_keys_are_rebuilt_without_lowering_an_intact_window() {
     let (daily, monthly) = cost_keys(&namespace, api_key_id);
     for (broken, intact) in [(&daily, &monthly), (&monthly, &daily)] {
         limiter.apply_cost_snapshot_at(&newer, now).await.unwrap();
-        connection.set::<_, _, ()>(broken, "wrong-type").await.unwrap();
+        connection
+            .set::<_, _, ()>(broken, "wrong-type")
+            .await
+            .unwrap();
         assert!(matches!(
             limiter.reserve_cost_at(&request, now).await,
             Err(LimitError::MalformedState)

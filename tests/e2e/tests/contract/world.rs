@@ -440,8 +440,12 @@ impl World {
         if budgeted {
             // A new budget must wait for an authoritative snapshot, not seed zero.
             await_key_with_timeout(
-                &self.http, &self.public_origin, &secret, Duration::from_secs(90),
-            ).await?;
+                &self.http,
+                &self.public_origin,
+                &secret,
+                Duration::from_secs(90),
+            )
+            .await?;
         } else {
             await_key(&self.http, &self.public_origin, &secret).await?;
         }

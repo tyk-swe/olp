@@ -314,8 +314,8 @@
         <div>
           <span>Daily accrued / limit</span>
           <strong
-            >{formatBudget(editing.budget.daily.accrued)} / {editing.budget.daily
-              .limit === null
+            >{formatBudget(editing.budget.daily.accrued)} / {editing.budget
+              .daily.limit === null
               ? 'No limit'
               : formatBudget(editing.budget.daily.limit)}</strong
           >
