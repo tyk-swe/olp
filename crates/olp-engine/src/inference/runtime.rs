@@ -371,6 +371,8 @@ mod tests {
                 requests_per_minute: NonZeroU32::new(7),
                 tokens_per_minute: None,
                 concurrency: NonZeroU32::new(2),
+                daily_cost_limit: None,
+                monthly_cost_limit: None,
             },
         };
 

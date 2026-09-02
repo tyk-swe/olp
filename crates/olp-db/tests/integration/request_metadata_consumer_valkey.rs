@@ -5,6 +5,7 @@ use std::{sync::Arc, time::Duration};
 use chrono::Utc;
 use olp_db::{
     identity::InstallationSetupInput,
+    limits::DistributedLimiter,
     request_metadata::ingestion::Outcome,
     security::password::hash,
     store::Store,
@@ -45,6 +46,10 @@ fn stream(label: &str) -> String {
         "olp:test:request-metadata:{label}:{}",
         Uuid::now_v7().simple()
     )
+}
+
+fn limits_namespace(stream: &str) -> String {
+    format!("{stream}:limits")
 }
 
 async fn valkey_connection() -> MultiplexedConnection {
@@ -227,8 +232,16 @@ fn spawn_consumer(
     policy: RequestMetadataConsumerTestPolicy,
 ) -> JoinHandle<Result<(), olp_db::valkey::Error>> {
     tokio::spawn(async move {
-        run_request_metadata_consumer(&store, &valkey_url(), &stream, consumer, shutdown, policy)
-            .await
+        run_request_metadata_consumer(
+            &store,
+            &valkey_url(),
+            &stream,
+            consumer,
+            &limits_namespace(&stream),
+            shutdown,
+            policy,
+        )
+        .await
     })
 }
 
@@ -399,6 +412,7 @@ async fn idle_production_consumer_processes_after_a_full_blocking_read() {
             &valkey_url(),
             &consumer_stream,
             "idle-production-consumer",
+            &limits_namespace(&consumer_stream),
             receiver,
         )
         .await
@@ -677,13 +691,13 @@ async fn commit_before_ack_replays_as_duplicate_under_two_concurrent_claimants()
         [id]
     );
 
-    assert_eq!(
-        store
-            .persist_request_metadata_stream_event(&event, &payload)
-            .await
-            .unwrap(),
-        Outcome::Persisted
-    );
+    let persisted = store
+        .persist_request_metadata_stream_event(&event, &payload)
+        .await
+        .unwrap();
+    assert_eq!(persisted.outcome, Outcome::Persisted);
+    let first_snapshot = persisted.cost_snapshot.unwrap();
+    assert_eq!(first_snapshot.unpriced_attempts, 1);
 
     let (shutdown, receiver) = watch::channel(false);
     let barrier = Arc::new(tokio::sync::Barrier::new(3));
@@ -700,6 +714,7 @@ async fn commit_before_ack_replays_as_duplicate_under_two_concurrent_claimants()
                 &valkey_url(),
                 &stream,
                 consumer,
+                &limits_namespace(&stream),
                 receiver,
                 test_policy(Duration::ZERO),
             )
@@ -709,13 +724,12 @@ async fn commit_before_ack_replays_as_duplicate_under_two_concurrent_claimants()
     barrier.wait().await;
     wait_for_group_drain(&store, &mut connection, &stream).await;
 
-    assert_eq!(
-        store
-            .persist_request_metadata_stream_event(&event, &payload)
-            .await
-            .unwrap(),
-        Outcome::Duplicate
-    );
+    let duplicate = store
+        .persist_request_metadata_stream_event(&event, &payload)
+        .await
+        .unwrap();
+    assert_eq!(duplicate.outcome, Outcome::Duplicate);
+    assert_eq!(duplicate.cost_snapshot, None);
     let counts: (i64, i64, i64) = sqlx::query_as(
         "SELECT (SELECT count(*) FROM requests), \
                 (SELECT count(*) FROM usage_facts), \
@@ -725,6 +739,41 @@ async fn commit_before_ack_replays_as_duplicate_under_two_concurrent_claimants()
     .await
     .unwrap();
     assert_eq!(counts, (1, 1, 1));
+    let second_event = self::event(&fixture);
+    let second_payload = serde_json::to_vec(&second_event).unwrap();
+    let second = store
+        .persist_request_metadata_stream_event(&second_event, &second_payload)
+        .await
+        .unwrap();
+    let second_snapshot = second.cost_snapshot.unwrap();
+    assert_eq!(
+        second_snapshot.monthly_window_id,
+        first_snapshot.monthly_window_id
+    );
+    assert_eq!(second_snapshot.unpriced_attempts, 2);
+    let cost_limiter = DistributedLimiter::connect(&valkey_url(), limits_namespace(&stream))
+        .await
+        .unwrap();
+    cost_limiter
+        .apply_cost_snapshot(&second_snapshot)
+        .await
+        .unwrap();
+    cost_limiter
+        .apply_cost_snapshot(&second_snapshot)
+        .await
+        .unwrap();
+    let monthly_cost_key = format!(
+        "{}:{{{}}}:cost:month",
+        limits_namespace(&stream),
+        fixture.api_key_id.simple()
+    );
+    assert_eq!(
+        connection
+            .hget::<_, _, i64>(monthly_cost_key, "unpriced")
+            .await
+            .unwrap(),
+        2
+    );
     stop_consumers(shutdown, consumers).await;
     let counters = store.worker_recovery_counters().await.unwrap();
     // With a zero-idle test policy both contenders may transfer the same PEL
@@ -848,6 +897,7 @@ async fn concurrent_recovery_records_malformed_and_invalid_entries_once_then_dra
                 &valkey_url(),
                 &stream,
                 consumer,
+                &limits_namespace(&stream),
                 receiver,
                 test_policy(Duration::ZERO),
             )

@@ -98,20 +98,41 @@ restriction on the key; a non-empty one refuses any request naming a slug
 outside it. A key may also carry an expiry, after which it is refused.
 
 Hard limits are optional and independent of each other: requests per minute,
-tokens per minute, and a maximum number of requests in flight at once. A key
-with none of them is admitted without consulting the shared limit store at
-all.
+tokens per minute, a maximum number of requests in flight at once, and exact
+decimal cost budgets for the current UTC day and UTC month. Cost budgets use
+the installation's pricing currency. A key with no hard limit is admitted
+without consulting the shared limit store at all.
 
 Enforcement uses the shared limit store's server time — never a gateway
 process clock — for the windows, for lease expiry, and for the `Retry-After`
 hint returned with a rejection. The request and token windows are fixed UTC
-minutes, so a burst straddling a minute boundary is possible by design. The
-token dimension is charged an estimate computed from the request before it
-reaches a provider. A rejection consumes nothing: a request refused on one
-dimension spends no part of any other. A key with at least one hard limit
-fails closed when the limit store is unreachable or its state is malformed,
-rather than being admitted unmetered. Concurrency leases are released
-idempotently, and an abandoned lease expires on server time.
+minutes; cost windows are fixed UTC days and calendar months. A burst
+straddling any boundary is possible by design. The token dimension is charged
+an estimate computed before the request reaches a provider.
+
+Cost admission compares each configured budget with the price already
+attributed to completed attempts in that window. Pricing is known only on the
+terminal accounting path, so an admitted attempt, or several concurrent
+attempts, can carry the final accrued value past the limit. Once attributed
+spend is at or above a budget, the next request is rejected with HTTP 429,
+`budget_exhausted`, and `Retry-After` set to the end of that UTC window. A
+rejection consumes nothing in any other dimension.
+
+PostgreSQL usage facts are the authority for spend. Terminal accounting
+advances durable window totals and applies their cumulative snapshots to
+Valkey; the worker monotonically rebuilds and reconciles those snapshots from
+PostgreSQL, including after Valkey loss. An attempt with no observed usage or
+no applicable pricing revision remains unpriced:
+unpriced attempts accrue 0 and increment the key's separate current-month
+`unpriced_attempts` count. The API-key detail and list responses expose each
+window's limit, accrued cost, and end time.
+
+A key with either cost budget always fails closed when Valkey is unreachable
+or its state is malformed. For keys limited only by rate or concurrency, the
+explicit installation-wide `fail_open` override described in
+[Configuration](configuration.md) can bypass those dimensions during an
+outage. Concurrency leases are released idempotently, and an abandoned lease
+expires on server time.
 
 ## Attempts, usage, pricing
 
@@ -126,9 +147,11 @@ that happened to succeed.
 Usage and cost attach to the exact attempt that produced them, which keeps
 retries, provider changes, and partial streams auditable without storing any
 request content. Missing upstream usage is recorded as incomplete and
-unpriced, never as zero: a successful billable attempt with no observed
-usage stays unpriced rather than free, and a failed attempt is retained
-without inventing usage or cost for it.
+unpriced, never as zero: a successful billable attempt with no observed usage
+stays unpriced rather than free, and a failed attempt is retained without
+inventing usage or cost for it. For spend controls, unpriced attempts accrue 0
+and remain visible through `unpriced_attempts`; provider-side quotas are still
+needed when pricing coverage is incomplete.
 
 Every request ends in exactly one terminal envelope, bounded independently
 of how large the response was: status, timing, transport and error

@@ -549,7 +549,7 @@ async fn usage_hour_buckets_stay_utc_under_a_half_hour_session_timezone() {
     // Migration 0035's constraint is stated in UTC too: a local-hour bucket is
     // rejected even when the writing session sits on a half-hour offset.
     let mut transaction = skewed.pool().begin().await.unwrap();
-    sqlx::query("SELECT set_config('olp.usage_rollup_writer', 'additive-v2', true)")
+    sqlx::query("SELECT set_config('olp.usage_rollup_writer', 'additive-v3', true)")
         .execute(&mut *transaction)
         .await
         .unwrap();

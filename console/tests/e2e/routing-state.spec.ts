@@ -122,6 +122,19 @@ function apiKey(id: string, name: string) {
     requests_per_minute: null,
     tokens_per_minute: null,
     max_concurrency: null,
+    budget: {
+      daily: {
+        limit: null,
+        accrued: '0',
+        window_ends_at: '2026-07-13T00:00:00Z'
+      },
+      monthly: {
+        limit: null,
+        accrued: '0',
+        window_ends_at: '2026-08-01T00:00:00Z'
+      },
+      unpriced_attempts: 0
+    },
     expires_at: null,
     revoked_at: null,
     rotated_at: null,

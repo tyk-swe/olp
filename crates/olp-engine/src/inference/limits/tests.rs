@@ -8,6 +8,7 @@ use crate::domain::{
     auth::{ApiKeyDigest, ApiKeyLimits, ApiKeyStatus},
     ids::{ApiKeyId, ApiKeyLookupId},
 };
+use rust_decimal::Decimal;
 use serde_json::json;
 
 use crate::inference::error::Kind as InferenceErrorKind;
@@ -16,10 +17,13 @@ use super::*;
 
 #[derive(Debug, Eq, PartialEq)]
 struct CapturedRequest {
+    api_key_id: uuid::Uuid,
     lookup_id: String,
     requests_per_minute: Option<i64>,
     tokens_per_minute: Option<i64>,
     max_concurrency: Option<i64>,
+    daily_cost_limit: Option<Decimal>,
+    monthly_cost_limit: Option<Decimal>,
     requested_tokens: i64,
     lease_ttl: Duration,
 }
@@ -95,10 +99,13 @@ impl LimitBackend for FakeBackend {
             request.validate()?;
             calls.reserves.fetch_add(1, Ordering::Relaxed);
             calls.requests.lock().unwrap().push(CapturedRequest {
+                api_key_id: request.api_key_id,
                 lookup_id: request.lookup_id.to_owned(),
                 requests_per_minute: request.requests_per_minute,
                 tokens_per_minute: request.tokens_per_minute,
                 max_concurrency: request.max_concurrency,
+                daily_cost_limit: request.daily_cost_limit,
+                monthly_cost_limit: request.monthly_cost_limit,
                 requested_tokens: request.requested_tokens,
                 lease_ttl: request.lease_ttl,
             });
@@ -171,10 +178,13 @@ async fn reserve(
 #[test]
 fn limit_requests_validate_every_backend_invariant() {
     let valid = LimitRequest {
+        api_key_id: uuid::Uuid::now_v7(),
         lookup_id: "lookup_01",
         requests_per_minute: Some(10),
         tokens_per_minute: Some(100),
         max_concurrency: Some(2),
+        daily_cost_limit: Some(Decimal::new(1, 2)),
+        monthly_cost_limit: Some(Decimal::ONE),
         requested_tokens: 20,
         lease_ttl: Duration::from_secs(30),
     };
@@ -182,11 +192,17 @@ fn limit_requests_validate_every_backend_invariant() {
     assert!(valid.validate().is_ok());
 
     type Mutator = for<'a> fn(&mut LimitRequest<'a>);
-    let cases: [(&str, Mutator); 7] = [
+    let cases: [(&str, Mutator); 9] = [
         ("API key lookup ID", |r| r.lookup_id = "short"),
         ("requests_per_minute", |r| r.requests_per_minute = Some(0)),
         ("tokens_per_minute", |r| r.tokens_per_minute = Some(-1)),
         ("max_concurrency", |r| r.max_concurrency = Some(0)),
+        ("daily_cost_limit", |r| {
+            r.daily_cost_limit = Some(Decimal::ZERO);
+        }),
+        ("monthly_cost_limit", |r| {
+            r.monthly_cost_limit = Some(Decimal::new(-1, 0));
+        }),
         ("non-negative", |r| r.requested_tokens = -1),
         ("positive when", |r| r.requested_tokens = 0),
         ("lease TTL", |r| r.lease_ttl = Duration::ZERO),
@@ -201,10 +217,13 @@ fn limit_requests_validate_every_backend_invariant() {
     }
 
     let unlimited = LimitRequest {
+        api_key_id: uuid::Uuid::now_v7(),
         lookup_id: "lookup_01",
         requests_per_minute: None,
         tokens_per_minute: None,
         max_concurrency: None,
+        daily_cost_limit: None,
+        monthly_cost_limit: None,
         requested_tokens: 0,
         lease_ttl: Duration::from_secs(1),
     };
@@ -221,6 +240,8 @@ async fn full_limit_reservation_forwards_all_dimensions_and_reconciles_usage() {
         requests_per_minute: NonZeroU32::new(10),
         tokens_per_minute: NonZeroU64::new(100),
         concurrency: NonZeroU32::new(2),
+        daily_cost_limit: Some(Decimal::new(1, 2)),
+        monthly_cost_limit: Some(Decimal::ONE),
     });
 
     let reservation = super::reserve(
@@ -236,10 +257,13 @@ async fn full_limit_reservation_forwards_all_dimensions_and_reconciles_usage() {
     assert_eq!(
         calls.requests.lock().unwrap().as_slice(),
         [CapturedRequest {
+            api_key_id: key.id.as_uuid(),
             lookup_id: "lookup_01".into(),
             requests_per_minute: Some(10),
             tokens_per_minute: Some(100),
             max_concurrency: Some(2),
+            daily_cost_limit: Some(Decimal::new(1, 2)),
+            monthly_cost_limit: Some(Decimal::ONE),
             requested_tokens: 2,
             lease_ttl: Duration::from_secs(45),
         }]
@@ -322,6 +346,8 @@ async fn a_request_larger_than_the_whole_tpm_budget_is_a_client_error_not_a_rate
         requests_per_minute: None,
         tokens_per_minute: NonZeroU64::new(2_000),
         concurrency: None,
+        daily_cost_limit: None,
+        monthly_cost_limit: None,
     });
     let limiter = ReloadableLimiter::default();
     let calls = Arc::new(BackendCalls::default());
@@ -369,6 +395,8 @@ async fn both_reservation_paths_map_exceeded_and_backend_failures_fail_closed() 
         requests_per_minute: NonZeroU32::new(10),
         tokens_per_minute: NonZeroU64::new(100),
         concurrency: None,
+        daily_cost_limit: None,
+        monthly_cost_limit: None,
     });
     for (behavior, expected_code) in [
         (
@@ -401,6 +429,32 @@ async fn both_reservation_paths_map_exceeded_and_backend_failures_fail_closed() 
             .code(),
         "distributed_limits_unavailable"
     );
+}
+
+#[tokio::test]
+async fn budget_rejections_are_counted_only_for_the_rejected_window() {
+    for dimension in [LimitDimension::DailyCost, LimitDimension::MonthlyCost] {
+        let limiter = ReloadableLimiter::default();
+        let calls = Arc::new(BackendCalls::default());
+        limiter.install(backend(&calls, BackendBehavior::Exceeded(dimension)));
+        let key = api_key(ApiKeyLimits {
+            daily_cost_limit: Some(Decimal::new(1, 2)),
+            monthly_cost_limit: Some(Decimal::ONE),
+            ..ApiKeyLimits::default()
+        });
+        let error = reserve(&limiter, &key, &text_count("1234"), None)
+            .await
+            .err()
+            .unwrap();
+        assert_eq!(error.code(), "budget_exhausted");
+        assert_eq!(limiter.budget_rejections(dimension), 1);
+        let other = if dimension == LimitDimension::DailyCost {
+            LimitDimension::MonthlyCost
+        } else {
+            LimitDimension::DailyCost
+        };
+        assert_eq!(limiter.budget_rejections(other), 0);
+    }
 }
 
 #[tokio::test]
@@ -553,10 +607,13 @@ async fn issued_lease_survives_backend_replacement_and_clear() {
         .current()
         .unwrap()
         .reserve(LimitRequest {
+            api_key_id: uuid::Uuid::now_v7(),
             lookup_id: "lookup_01",
             requests_per_minute: Some(10),
             tokens_per_minute: Some(100),
             max_concurrency: Some(2),
+            daily_cost_limit: None,
+            monthly_cost_limit: None,
             requested_tokens: 20,
             lease_ttl: Duration::from_secs(30),
         })
@@ -584,6 +641,8 @@ fn hard_limited_key() -> ApiKey {
         requests_per_minute: NonZeroU32::new(10),
         tokens_per_minute: NonZeroU64::new(100),
         concurrency: None,
+        daily_cost_limit: None,
+        monthly_cost_limit: None,
     })
 }
 
@@ -626,6 +685,24 @@ async fn fail_open_policy_requires_configured_valkey() {
             .code(),
         "distributed_limits_unavailable"
     );
+    assert_eq!(limiter.fail_open_total(), 0);
+}
+
+#[tokio::test]
+async fn cost_budgets_remain_fail_closed_under_the_general_fail_open_policy() {
+    let key = api_key(ApiKeyLimits {
+        daily_cost_limit: Some(Decimal::new(1, 2)),
+        ..ApiKeyLimits::default()
+    });
+    let limiter = ReloadableLimiter::default();
+    limiter.mark_configured();
+    limiter.set_outage_policy(LimitOutagePolicy::FailOpen);
+
+    let error = reserve(&limiter, &key, &text_count("1234"), None)
+        .await
+        .err()
+        .unwrap();
+    assert_eq!(error.code(), "distributed_limits_unavailable");
     assert_eq!(limiter.fail_open_total(), 0);
 }
 

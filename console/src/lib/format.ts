@@ -114,6 +114,24 @@ export function formatCost(
   return costFormat(currency, number < 0.01).format(number);
 }
 
+export function formatBudget(
+  value?: string | null,
+  currency?: string | null
+): string {
+  if (value === null || value === undefined || value === '') return '—';
+  const parsed = /^(\d+)(?:\.(\d+))?$/.exec(value.trim());
+  if (!parsed) return currency ? `${value} ${currency}` : value;
+  const integer = parsed[1].replace(/^0+(?=\d)/, '');
+  const fraction = (parsed[2] ?? '').replace(/0+$/, '');
+  const subCent =
+    integer === '0' && fraction.slice(0, 2).padEnd(2, '0') === '00';
+  const exactFraction = fraction.padEnd(subCent ? 4 : 2, '0');
+  return costFormat(currency, subCent)
+    .formatToParts(BigInt(integer))
+    .map((part) => (part.type === 'fraction' ? exactFraction : part.value))
+    .join('');
+}
+
 export function statusTone(status?: number | null, errorClass?: string | null) {
   if (errorClass || (status !== null && status !== undefined && status >= 500))
     return 'danger';

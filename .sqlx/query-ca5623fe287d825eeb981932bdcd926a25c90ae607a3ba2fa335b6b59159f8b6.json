@@ -1,0 +1,25 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO api_keys (id, lookup_id, secret_digest, name, created_by, expires_at, requests_per_minute, tokens_per_minute, max_concurrency, daily_cost_limit, monthly_cost_limit, etag) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Bytea",
+        "Text",
+        "Uuid",
+        "Timestamptz",
+        "Int4",
+        "Int8",
+        "Int4",
+        "Numeric",
+        "Numeric",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "ca5623fe287d825eeb981932bdcd926a25c90ae607a3ba2fa335b6b59159f8b6"
+}

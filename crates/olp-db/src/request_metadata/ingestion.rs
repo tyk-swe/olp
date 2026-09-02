@@ -7,13 +7,19 @@ use super::{
     REQUEST_METADATA_EVENT_FUTURE_SKEW_MINUTES, REQUEST_METADATA_EVENT_REPLAY_HORIZON_DAYS,
     validation::{ValidatedAttempt, ValidatedAttemptUsage, ValidatedRequestMetadata},
 };
-use crate::{error::Error, store::Store};
+use crate::{error::Error, limits::CostSnapshot, spend::add_cost_delta_on, store::Store};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Outcome {
     Persisted,
     Duplicate,
     RejectedOutsideReplayWindow,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct StreamPersistence {
+    pub outcome: Outcome,
+    pub cost_snapshot: Option<CostSnapshot>,
 }
 
 #[derive(Clone, Copy, Eq, PartialEq)]
@@ -59,6 +65,7 @@ impl Store {
         let event_sha256: [u8; 32] = Sha256::digest(serde_json::to_vec(event)?).into();
         self.persist_request_metadata_event_with_digest(event, event_sha256)
             .await
+            .map(|result| result.outcome)
     }
 
     /// Processes an event decoded from a Valkey Stream while fingerprinting
@@ -68,7 +75,7 @@ impl Store {
         &self,
         event: &Event,
         original_payload: &[u8],
-    ) -> Result<Outcome, Error> {
+    ) -> Result<StreamPersistence, Error> {
         let event_sha256: [u8; 32] = Sha256::digest(original_payload).into();
         self.persist_request_metadata_event_with_digest(event, event_sha256)
             .await
@@ -78,18 +85,24 @@ impl Store {
         &self,
         event: &Event,
         event_sha256: [u8; 32],
-    ) -> Result<Outcome, Error> {
+    ) -> Result<StreamPersistence, Error> {
         let validated = ValidatedRequestMetadata::validate(event)?;
         let mut transaction = self.pool().begin().await?;
         match admit_request_metadata_receipt(&mut transaction, event, &event_sha256).await? {
             ReceiptAdmission::Acquired => {}
             ReceiptAdmission::Duplicate => {
                 transaction.rollback().await?;
-                return Ok(Outcome::Duplicate);
+                return Ok(StreamPersistence {
+                    outcome: Outcome::Duplicate,
+                    cost_snapshot: None,
+                });
             }
             ReceiptAdmission::RejectedOutsideReplayWindow => {
                 transaction.commit().await?;
-                return Ok(Outcome::RejectedOutsideReplayWindow);
+                return Ok(StreamPersistence {
+                    outcome: Outcome::RejectedOutsideReplayWindow,
+                    cost_snapshot: None,
+                });
             }
         }
         insert_request_metadata_rows(&mut transaction, event, &validated).await?;
@@ -105,11 +118,27 @@ impl Store {
             )
             .await?;
             transaction.commit().await?;
-            return Ok(Outcome::Persisted);
+            return Ok(StreamPersistence {
+                outcome: Outcome::Persisted,
+                cost_snapshot: None,
+            });
         }
 
         let persisted_facts =
             insert_attempt_usage_facts(&mut transaction, event, &validated.attempts).await?;
+        let cost_snapshot = match cost_delta(&persisted_facts)? {
+            Some((cost, unpriced_attempts)) => Some(
+                add_cost_delta_on(
+                    &mut transaction,
+                    event.api_key_id,
+                    event.observed_at,
+                    cost,
+                    unpriced_attempts,
+                )
+                .await?,
+            ),
+            None => None,
+        };
 
         recompute_attempt_fact_markers(&mut transaction, event.request_id).await?;
 
@@ -118,8 +147,28 @@ impl Store {
         mark_request_metadata_receipt_persisted(&mut transaction, event.event_id, event.request_id)
             .await?;
         transaction.commit().await?;
-        Ok(Outcome::Persisted)
+        Ok(StreamPersistence {
+            outcome: Outcome::Persisted,
+            cost_snapshot,
+        })
     }
+}
+
+fn cost_delta(facts: &[PersistedAttemptFact<'_>]) -> Result<Option<(Decimal, u64)>, Error> {
+    if facts.is_empty() {
+        return Ok(None);
+    }
+    let cost = facts.iter().try_fold(Decimal::ZERO, |sum, fact| {
+        sum.checked_add(fact.estimated_cost.unwrap_or(Decimal::ZERO))
+            .ok_or(Error::InvalidRequestMetadataEvent)
+    })?;
+    let unpriced_attempts = facts
+        .iter()
+        .filter(|fact| fact.charge_status != AttemptChargeStatus::NotBillable && fact.unpriced)
+        .count()
+        .try_into()
+        .map_err(|_| Error::InvalidRequestMetadataEvent)?;
+    Ok(Some((cost, unpriced_attempts)))
 }
 
 async fn insert_request_metadata_rows(
@@ -278,7 +327,7 @@ async fn insert_attempt_usage_facts<'a>(
         let unpriced = charge_status != AttemptChargeStatus::NotBillable
             && (successful_without_usage || !pricing_complete);
 
-        sqlx::query!(
+        let inserted = sqlx::query!(
             "INSERT INTO attempt_usage_facts \
              (attempt_id, event_id, request_id, request_started_at, attempt_ordinal, \
               api_key_id, provider_id, route_slug, upstream_model, operation, surface, \
@@ -321,6 +370,9 @@ async fn insert_attempt_usage_facts<'a>(
         )
         .execute(&mut **transaction)
         .await?;
+        if inserted.rows_affected() == 0 {
+            continue;
+        }
         persisted_facts.push(PersistedAttemptFact {
             attempt: attempt.event,
             usage: attempt.usage.clone(),
@@ -652,41 +704,4 @@ fn checked_optional_decimal_sum<T>(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn charge_status_and_optional_sums_cover_closed_boundaries() {
-        assert_eq!(AttemptChargeStatus::NotBillable.as_str(), "not_billable");
-        assert_eq!(AttemptChargeStatus::Billable.as_str(), "billable");
-        assert_eq!(
-            AttemptChargeStatus::BillingUncertain.as_str(),
-            "billing_uncertain"
-        );
-
-        let integers = [None, Some(2_i64), None, Some(3)];
-        let integer_refs = integers.iter().collect::<Vec<_>>();
-        assert_eq!(
-            checked_optional_i64_sum(&integer_refs, |value| *value).unwrap(),
-            Some(5)
-        );
-        assert_eq!(
-            checked_optional_i64_sum(&[&None::<i64>], |value| *value).unwrap(),
-            None
-        );
-        assert!(checked_optional_i64_sum(&[&Some(i64::MAX), &Some(1)], |value| *value).is_err());
-
-        let decimals = [None, Some(Decimal::ONE), Some(Decimal::new(25, 1))];
-        let decimal_refs = decimals.iter().collect::<Vec<_>>();
-        assert_eq!(
-            checked_optional_decimal_sum(&decimal_refs, |value| *value).unwrap(),
-            Some(Decimal::new(35, 1))
-        );
-        assert!(
-            checked_optional_decimal_sum(&[&Some(Decimal::MAX), &Some(Decimal::ONE)], |value| {
-                *value
-            })
-            .is_err()
-        );
-    }
-}
+mod tests;

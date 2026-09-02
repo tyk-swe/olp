@@ -8,14 +8,16 @@ pub enum WorkerTask {
     RuntimeOutbox,
     RequestMetadataConsumer,
     Maintenance,
+    CostReconciliation,
     RequestMetadataGatewayEpochDetection,
 }
 
 impl WorkerTask {
-    pub const ALL: [Self; 4] = [
+    pub const ALL: [Self; 5] = [
         Self::RuntimeOutbox,
         Self::RequestMetadataConsumer,
         Self::Maintenance,
+        Self::CostReconciliation,
         Self::RequestMetadataGatewayEpochDetection,
     ];
 
@@ -25,6 +27,7 @@ impl WorkerTask {
             Self::RuntimeOutbox => "runtime_outbox",
             Self::RequestMetadataConsumer => "request_metadata_consumer",
             Self::Maintenance => "maintenance",
+            Self::CostReconciliation => "cost_reconciliation",
             Self::RequestMetadataGatewayEpochDetection => {
                 "request_metadata_gateway_epoch_detection"
             }
@@ -40,7 +43,7 @@ impl WorkerTask {
             | Self::RequestMetadataGatewayEpochDetection => 20,
             // Maintenance ticks once per minute. Three missed passes allow
             // scheduler and database jitter without hiding a stopped fleet.
-            Self::Maintenance => 180,
+            Self::Maintenance | Self::CostReconciliation => 180,
         }
     }
 
@@ -49,6 +52,7 @@ impl WorkerTask {
             "runtime_outbox" => Ok(Self::RuntimeOutbox),
             "request_metadata_consumer" => Ok(Self::RequestMetadataConsumer),
             "maintenance" => Ok(Self::Maintenance),
+            "cost_reconciliation" => Ok(Self::CostReconciliation),
             "request_metadata_gateway_epoch_detection" => {
                 Ok(Self::RequestMetadataGatewayEpochDetection)
             }
@@ -583,6 +587,7 @@ mod tests {
                 20,
             ),
             (WorkerTask::Maintenance, "maintenance", 180),
+            (WorkerTask::CostReconciliation, "cost_reconciliation", 180),
             (
                 WorkerTask::RequestMetadataGatewayEpochDetection,
                 "request_metadata_gateway_epoch_detection",

@@ -301,6 +301,7 @@ async fn operations_http_contract_is_authorized_paginated_exact_and_metadata_onl
         .unwrap();
     for task in [
         WorkerTask::Maintenance,
+        WorkerTask::CostReconciliation,
         WorkerTask::RequestMetadataGatewayEpochDetection,
     ] {
         store
@@ -489,7 +490,7 @@ async fn operations_http_contract_is_authorized_paginated_exact_and_metadata_onl
         .with_nanosecond(0)
         .unwrap();
     let mut aggregate_fixture = store.pool().begin().await.unwrap();
-    sqlx::query("SELECT set_config('olp.usage_rollup_writer', 'additive-v2', true)")
+    sqlx::query("SELECT set_config('olp.usage_rollup_writer', 'additive-v3', true)")
         .execute(&mut *aggregate_fixture)
         .await
         .unwrap();

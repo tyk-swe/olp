@@ -21,8 +21,10 @@ and certified OpenAI-compatible providers.
   credential revision for its entire lifetime.
 - Attempt-level usage and cost accounting with operational metadata only —
   never prompts, outputs, tool data, uploads, or raw credentials.
-- Installation-scoped keys, route permissions, expiry, hard distributed
-  limits, and an audit stream for administrative changes.
+- Installation-scoped keys, route permissions, expiry, hard distributed rate,
+  concurrency, daily cost, and monthly cost limits, plus an audit stream for
+  administrative changes. Unpriced attempts accrue 0 and are counted
+  separately instead of being assigned an invented cost.
 - Private health/metrics, backup/restore, upgrade rehearsal, and HA workers.
 
 ## Quick start

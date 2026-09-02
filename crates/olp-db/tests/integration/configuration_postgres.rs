@@ -19,6 +19,7 @@ use olp_engine::domain::{
     ids::{CredentialVersionId, ProviderId, RouteSlug},
     routing::{provider::ProviderKind, snapshot::Snapshot},
 };
+use rust_decimal::Decimal;
 use uuid::Uuid;
 
 mod disabled_guards;

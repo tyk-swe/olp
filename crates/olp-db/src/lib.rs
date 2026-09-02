@@ -18,12 +18,19 @@ pub mod operations;
 pub mod request_metadata;
 pub mod runtime;
 pub mod security;
+pub mod spend;
 pub mod store;
 #[cfg(feature = "test-util")]
 pub mod test_support;
 pub mod usage;
 pub mod valkey;
 pub mod worker_health;
+
+fn valid_cost_limit(value: rust_decimal::Decimal) -> bool {
+    value > rust_decimal::Decimal::ZERO
+        && value.scale() <= 12
+        && value < rust_decimal::Decimal::from(1_000_000_000_000_i64)
+}
 
 /// Truncates a query result fetched with `limit + 1` and derives the cursor
 /// from the last visible item only when another page exists.
@@ -48,6 +55,8 @@ pub(crate) static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migratio
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeSet;
+
+    use rust_decimal::Decimal;
 
     use super::split_page;
 
@@ -87,5 +96,19 @@ mod tests {
     #[test]
     fn split_page_never_derives_a_cursor_without_a_visible_item() {
         assert_eq!(split_page(vec![1], 0, |item| *item), (Vec::new(), None));
+    }
+
+    #[test]
+    fn cost_limits_match_numeric_24_12_without_database_rounding() {
+        assert!(super::valid_cost_limit(Decimal::new(1, 12)));
+        assert!(super::valid_cost_limit(Decimal::new(
+            999_999_999_999_999_999,
+            6
+        )));
+        assert!(!super::valid_cost_limit(Decimal::ZERO));
+        assert!(!super::valid_cost_limit(Decimal::new(1, 13)));
+        assert!(!super::valid_cost_limit(Decimal::from(
+            1_000_000_000_000_i64
+        )));
     }
 }

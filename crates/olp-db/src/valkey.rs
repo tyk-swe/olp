@@ -90,6 +90,8 @@ pub enum Error {
     Service(#[from] redis::RedisError),
     #[error("storage operation failed")]
     Storage(#[from] PersistenceError),
+    #[error("cost limiter operation failed")]
+    CostLimiter(#[from] olp_engine::inference::limits::LimitError),
     #[error("Valkey returned invalid stream state: {0}")]
     InvalidState(&'static str),
 }

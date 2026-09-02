@@ -2362,6 +2362,7 @@ dependencies = [
  "opentelemetry-otlp",
  "opentelemetry_sdk",
  "percent-encoding",
+ "rust_decimal",
  "serde",
  "serde_json",
  "serde_path_to_error",
@@ -2435,9 +2436,11 @@ dependencies = [
  "rand 0.9.5",
  "redis",
  "reqwest",
+ "rust_decimal",
  "serde_json",
  "sqlx",
  "tokio",
+ "uuid",
 ]
 
 [[package]]

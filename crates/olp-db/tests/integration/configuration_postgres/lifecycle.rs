@@ -532,7 +532,11 @@ pub(super) async fn exercise(store: &Store, actor: Uuid, master_key: &MasterKey)
                 material,
                 scopes: vec![ApiKeyScope::Inference, ApiKeyScope::ModelsRead],
                 allowed_routes: vec![RouteSlug::parse("default").unwrap()],
-                limits: ApiKeyLimits::default(),
+                limits: ApiKeyLimits {
+                    daily_cost_limit: Some(Decimal::new(25, 2)),
+                    monthly_cost_limit: Some(Decimal::new(5, 0)),
+                    ..ApiKeyLimits::default()
+                },
                 expires_at: None,
                 actor,
                 idempotency_key: "api-key-configuration-create-01".to_owned(),
@@ -548,6 +552,14 @@ pub(super) async fn exercise(store: &Store, actor: Uuid, master_key: &MasterKey)
     assert_eq!(key.release.sequence, 5);
     let key_creation_release = key.release.clone();
     let initial_key_record = store.get_api_key(key.id).await.unwrap();
+    assert_eq!(
+        initial_key_record.daily_cost_limit,
+        Some(Decimal::new(25, 2))
+    );
+    assert_eq!(
+        initial_key_record.monthly_cost_limit,
+        Some(Decimal::new(5, 0))
+    );
     assert!(matches!(
         store
             .update_api_key(
@@ -560,6 +572,8 @@ pub(super) async fn exercise(store: &Store, actor: Uuid, master_key: &MasterKey)
                     requests_per_minute: None,
                     tokens_per_minute: None,
                     max_concurrency: None,
+                    daily_cost_limit: None,
+                    monthly_cost_limit: None,
                     expires_at: None,
                 },
                 actor,
@@ -578,6 +592,8 @@ pub(super) async fn exercise(store: &Store, actor: Uuid, master_key: &MasterKey)
                 requests_per_minute: Some(60),
                 tokens_per_minute: Some(10_000),
                 max_concurrency: Some(4),
+                daily_cost_limit: Some(Decimal::new(10, 2)),
+                monthly_cost_limit: None,
                 expires_at: Some(Utc::now() + Duration::days(30)),
             },
             actor,
@@ -592,6 +608,8 @@ pub(super) async fn exercise(store: &Store, actor: Uuid, master_key: &MasterKey)
     assert_eq!(key_record.requests_per_minute, Some(60));
     assert_eq!(key_record.tokens_per_minute, Some(10_000));
     assert_eq!(key_record.max_concurrency, Some(4));
+    assert_eq!(key_record.daily_cost_limit, Some(Decimal::new(10, 2)));
+    assert_eq!(key_record.monthly_cost_limit, None);
     assert_eq!(key_record.etag, key_update.etag);
     let updated_runtime: Snapshot = serde_json::from_slice(&key_update.release.payload).unwrap();
     let updated_runtime_key = updated_runtime
@@ -606,6 +624,11 @@ pub(super) async fn exercise(store: &Store, actor: Uuid, master_key: &MasterKey)
             .map(std::num::NonZeroU32::get),
         Some(60)
     );
+    assert_eq!(
+        updated_runtime_key.limits.daily_cost_limit,
+        Some(Decimal::new(10, 2))
+    );
+    assert_eq!(updated_runtime_key.limits.monthly_cost_limit, None);
     assert!(updated_runtime_key.allowed_routes.is_empty());
     let replacement = auth_hmac_key.generate_api_key();
     let rotation_fingerprint = fingerprint(&"api-key-configuration-rotate-01").unwrap();
@@ -617,6 +640,8 @@ pub(super) async fn exercise(store: &Store, actor: Uuid, master_key: &MasterKey)
                 expected_etag: key_record.etag,
                 actor,
                 idempotency_key: "api-key-configuration-rotate-01",
+                daily_cost_limit: None,
+                monthly_cost_limit: None,
             },
             Replayable::new(rotation_fingerprint, master_key),
             |_| Response::new(200, None, None, Vec::new()),
@@ -631,18 +656,58 @@ pub(super) async fn exercise(store: &Store, actor: Uuid, master_key: &MasterKey)
         panic!("new API-key rotation must execute");
     };
     assert_eq!(key_rotation.release.sequence, 7);
+    assert_eq!(key_rotation.id, key.id);
     assert_ne!(key.lookup_id, key_rotation.lookup_id);
+    let rotated_record = store.get_api_key(key.id).await.unwrap();
+    assert_eq!(rotated_record.daily_cost_limit, Some(Decimal::new(10, 2)));
+    assert_eq!(rotated_record.monthly_cost_limit, None);
+
+    let second_replacement = auth_hmac_key.generate_api_key();
+    let second_rotation = store
+        .rotate_api_key(
+            RotateApiKeyInput {
+                id: key.id,
+                material: &second_replacement,
+                expected_etag: key_rotation.etag,
+                actor,
+                idempotency_key: "api-key-configuration-rotate-02",
+                daily_cost_limit: Some(None),
+                monthly_cost_limit: Some(Some(Decimal::new(250, 2))),
+            },
+            Replayable::new(
+                fingerprint(&"api-key-configuration-rotate-02").unwrap(),
+                master_key,
+            ),
+            |_| Response::new(200, None, None, Vec::new()),
+        )
+        .await
+        .unwrap();
+    let Outcome::Executed {
+        value: second_rotation,
+        ..
+    } = second_rotation
+    else {
+        panic!("second API-key rotation must execute");
+    };
+    assert_eq!(second_rotation.id, key.id);
+    assert_eq!(second_rotation.release.sequence, 8);
+    let second_rotated_record = store.get_api_key(key.id).await.unwrap();
+    assert_eq!(second_rotated_record.daily_cost_limit, None);
+    assert_eq!(
+        second_rotated_record.monthly_cost_limit,
+        Some(Decimal::new(250, 2))
+    );
 
     let key_revocation = store
         .revoke_api_key_record(
             key.id,
-            key_rotation.etag,
+            second_rotation.etag,
             actor,
             "api-key-configuration-revoke-01",
         )
         .await
         .unwrap();
-    assert_eq!(key_revocation.release.sequence, 8);
+    assert_eq!(key_revocation.release.sequence, 9);
     let current_api_keys = store.current_runtime_api_keys().await.unwrap();
     assert!(
         !current_api_keys
@@ -662,6 +727,19 @@ pub(super) async fn exercise(store: &Store, actor: Uuid, master_key: &MasterKey)
             .api_keys
             .keys()
             .any(|lookup| lookup.as_str() == key.lookup_id)
+    );
+    let historical_key = historical_runtime
+        .api_keys
+        .values()
+        .find(|runtime_key| runtime_key.id.as_uuid() == key.id)
+        .unwrap();
+    assert_eq!(
+        historical_key.limits.daily_cost_limit,
+        Some(Decimal::new(25, 2))
+    );
+    assert_eq!(
+        historical_key.limits.monthly_cost_limit,
+        Some(Decimal::new(5, 0))
     );
     historical_runtime.api_keys = current_api_keys;
     assert!(historical_runtime.api_keys.is_empty());
@@ -719,6 +797,13 @@ pub(super) async fn exercise(store: &Store, actor: Uuid, master_key: &MasterKey)
             "missing {action}"
         );
     }
+    assert_eq!(
+        audit_actions
+            .iter()
+            .filter(|action| action.as_str() == "api_key.rotate")
+            .count(),
+        2
+    );
 
     // ETags remain concurrency tokens across unrelated probe evidence updates.
     assert_ne!(revoked_etag, provider.etag);

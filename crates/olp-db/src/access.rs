@@ -109,6 +109,17 @@ impl Store {
                 "route allowlist entries must be unique".to_owned(),
             ));
         }
+        if key
+            .limits
+            .daily_cost_limit
+            .into_iter()
+            .chain(key.limits.monthly_cost_limit)
+            .any(|value| !crate::valid_cost_limit(value))
+        {
+            return Err(Error::Invalid(
+                "cost limits must have at most 12 integer and 12 fractional digits".to_owned(),
+            ));
+        }
         let id = Uuid::now_v7();
         let etag = Uuid::now_v7();
         let mut transaction = self
@@ -152,8 +163,8 @@ impl Store {
         sqlx::query!(
             "INSERT INTO api_keys \
              (id, lookup_id, secret_digest, name, created_by, expires_at, requests_per_minute, \
-              tokens_per_minute, max_concurrency, etag) \
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)",
+              tokens_per_minute, max_concurrency, daily_cost_limit, monthly_cost_limit, etag) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)",
             id,
             &key.material.lookup_id,
             key.material.digest.to_vec(),
@@ -175,6 +186,8 @@ impl Store {
                 .map(|value| i32::try_from(value.get()))
                 .transpose()
                 .map_err(|_| Error::Invalid("concurrency limit is too large".to_owned()))?,
+            key.limits.daily_cost_limit,
+            key.limits.monthly_cost_limit,
             etag
         )
         .execute(&mut *transaction)

@@ -1235,8 +1235,21 @@ export interface components {
             password: string;
             token: string;
         };
+        ApiKeyBudgetResponse: {
+            daily: components["schemas"]["ApiKeyBudgetWindowResponse"];
+            monthly: components["schemas"]["ApiKeyBudgetWindowResponse"];
+            /** Format: int64 */
+            unpriced_attempts: number;
+        };
+        ApiKeyBudgetWindowResponse: {
+            accrued: string;
+            limit: string | null;
+            /** Format: date-time */
+            window_ends_at: string;
+        };
         ApiKeyDetailResponse: {
             allowed_routes: string[];
+            budget: components["schemas"]["ApiKeyBudgetResponse"];
             /** Format: date-time */
             created_at: string;
             /**
@@ -1364,10 +1377,12 @@ export interface components {
         };
         CreateApiKeyRequest: {
             allowed_routes?: string[];
+            daily_cost_limit?: string | null;
             /** Format: date-time */
             expires_at?: string | null;
             /** Format: int32 */
             max_concurrency?: number | null;
+            monthly_cost_limit?: string | null;
             name: string;
             /** Format: int32 */
             requests_per_minute?: number | null;
@@ -2288,6 +2303,10 @@ export interface components {
             unpriced?: boolean | null;
             usage_complete?: boolean | null;
         };
+        RotateApiKeyRequest: {
+            daily_cost_limit?: string | null;
+            monthly_cost_limit?: string | null;
+        };
         RotateApiKeyResponse: {
             /** Format: uuid */
             etag: string;
@@ -2560,10 +2579,12 @@ export interface components {
              *     allowlist places no route restriction on the key.
              */
             allowed_routes?: string[];
+            daily_cost_limit?: string | null;
             /** Format: date-time */
             expires_at?: string | null;
             /** Format: int32 */
             max_concurrency?: number | null;
+            monthly_cost_limit?: string | null;
             name?: string;
             /** Format: int32 */
             requests_per_minute?: number | null;
@@ -3114,7 +3135,11 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody?: {
+            content: {
+                "application/json": null | components["schemas"]["RotateApiKeyRequest"];
+            };
+        };
         responses: {
             200: {
                 headers: {
@@ -3163,6 +3188,15 @@ export interface operations {
                 };
             };
             412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Validation failed */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };

@@ -21,6 +21,19 @@ const apiKey = {
   requests_per_minute: null,
   tokens_per_minute: null,
   max_concurrency: null,
+  budget: {
+    daily: {
+      limit: null,
+      accrued: '0',
+      window_ends_at: '2026-07-13T00:00:00Z'
+    },
+    monthly: {
+      limit: null,
+      accrued: '0',
+      window_ends_at: '2026-08-01T00:00:00Z'
+    },
+    unpriced_attempts: 0
+  },
   expires_at: null,
   revoked_at: null,
   created_by: ids.user,
@@ -196,6 +209,13 @@ test('a viewer sees API keys without any create, rotate, or revoke control', asy
   for (const action of ['Edit', 'Rotate', 'Revoke']) {
     await expect(page.getByRole('button', { name: action })).toHaveCount(0);
   }
+  await page.getByRole('button', { name: 'View' }).click();
+  await expect(
+    page.getByRole('region', { name: 'Current spend budget' })
+  ).toContainText('Unpriced attempts accrue 0');
+  await expect(
+    page.getByRole('button', { name: 'Save and publish' })
+  ).toHaveCount(0);
 });
 
 test('a developer keeps the API key create control that its role grants', async ({

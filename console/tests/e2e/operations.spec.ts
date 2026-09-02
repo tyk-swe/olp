@@ -265,6 +265,40 @@ test('usage exposes pricing gaps and exact chart data accessibly', async ({
         }
       });
   });
+  await page.route(`**/api/v1/api-keys/${keyId}`, async (route) => {
+    await route.fulfill({
+      json: {
+        id: keyId,
+        lookup_id: 'olp_live_abcd',
+        name: 'production SDK',
+        scopes: ['inference'],
+        allowed_routes: [],
+        requests_per_minute: 120,
+        tokens_per_minute: 24_000,
+        max_concurrency: 8,
+        budget: {
+          daily: {
+            limit: '10.00',
+            accrued: '2.50',
+            window_ends_at: '2026-07-13T00:00:00Z'
+          },
+          monthly: {
+            limit: '100.00',
+            accrued: '18.75',
+            window_ends_at: '2026-08-01T00:00:00Z'
+          },
+          unpriced_attempts: 3
+        },
+        expires_at: null,
+        revoked_at: null,
+        rotated_at: null,
+        etag: '01980000-0000-7000-8000-000000000105',
+        created_by: '01980000-0000-7000-8000-000000000106',
+        created_by_email: 'owner@example.com',
+        created_at: '2026-07-01T12:00:00Z'
+      }
+    });
+  });
 
   await page.goto('/usage');
   await expect(
@@ -318,6 +352,15 @@ test('usage exposes pricing gaps and exact chart data accessibly', async ({
   });
   await expect(chartData).toBeVisible();
   await expect(chartData).toContainText('96');
+  await page.getByLabel('API key ID').fill(keyId);
+  await page.getByRole('button', { name: 'Apply' }).click();
+  const budget = page.getByRole('region', {
+    name: 'Filtered API key budget'
+  });
+  await expect(budget).toContainText('production SDK');
+  await expect(budget).toContainText('2.50 / 10.00');
+  await expect(budget).toContainText('18.75 / 100.00');
+  await expect(budget).toContainText('Unpriced attempts accrue 0.');
   expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
 });
 

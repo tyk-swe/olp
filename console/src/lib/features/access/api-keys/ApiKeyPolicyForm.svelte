@@ -6,10 +6,14 @@
   import { listRoutes } from '$lib/api/management/routes';
   import NavIcon from '$lib/components/NavIcon.svelte';
   import ReadOnlyNote from '$lib/components/ReadOnlyNote.svelte';
-  import { dateTimeLocalValue } from '$lib/format';
+  import { formatBudget, formatDate, formatInteger } from '$lib/format';
   import { guardUnsavedChanges } from '$lib/forms/unsavedChanges';
   import { validateApiKey } from './keyValidation';
-  import type { ApiKeyPolicyInput } from './apiKeyPolicy';
+  import {
+    buildApiKeyPolicyInput,
+    createApiKeyFormState,
+    type ApiKeyPolicyInput
+  } from './apiKeyPolicy';
 
   let {
     editing,
@@ -32,17 +36,11 @@
     onClearError: () => void;
   } = $props();
 
-  let name = $state('');
-  let scopes = $state<string[]>(['inference']);
-  let allowedRoutes = $state<string[]>([]);
-  let requestsPerMinute = $state('');
-  let tokensPerMinute = $state('');
-  let maxConcurrency = $state('');
-  let expiresAt = $state('');
+  let form = $state(createApiKeyFormState());
   let errors = $state<Record<string, string>>({});
   let formError = $state('');
-  let initialized = $state(false);
   let dirty = $state(false);
+  let initialized = $state(false);
   const routes = createQuery(() => ({
     queryKey: queryKeys.routes.all(),
     queryFn: ({ signal }) => listRoutes(signal)
@@ -51,16 +49,7 @@
   $effect(() => {
     if (initialized) return;
     initialized = true;
-    if (!editing) return;
-    name = editing.name;
-    scopes = [...editing.scopes];
-    allowedRoutes = [...editing.allowed_routes];
-    requestsPerMinute = editing.requests_per_minute?.toString() ?? '';
-    tokensPerMinute = editing.tokens_per_minute?.toString() ?? '';
-    maxConcurrency = editing.max_concurrency?.toString() ?? '';
-    expiresAt = editing.expires_at
-      ? dateTimeLocalValue(editing.expires_at)
-      : '';
+    form = createApiKeyFormState(editing);
   });
 
   guardUnsavedChanges(() => dirty);
@@ -85,28 +74,22 @@
     onClearError();
     formError = '';
     errors = validateApiKey({
-      name,
-      requestsPerMinute: numberValue(requestsPerMinute),
-      tokensPerMinute: numberValue(tokensPerMinute),
-      maxConcurrency: numberValue(maxConcurrency),
-      expiresAt
+      name: form.name,
+      requestsPerMinute: numberValue(form.requestsPerMinute),
+      tokensPerMinute: numberValue(form.tokensPerMinute),
+      maxConcurrency: numberValue(form.maxConcurrency),
+      dailyCostLimit: form.dailyCostLimit,
+      monthlyCostLimit: form.monthlyCostLimit,
+      expiresAt: form.expiresAt
     });
     if (Object.keys(errors).length) return;
-    if (!scopes.length) {
+    if (!form.scopes.length) {
       formError = 'Select at least one scope.';
       return;
     }
     const saved = await onSubmit(
-      {
-        name: name.trim(),
-        scopes,
-        allowed_routes: allowedRoutes,
-        requests_per_minute: numberValue(requestsPerMinute) ?? null,
-        tokens_per_minute: numberValue(tokensPerMinute) ?? null,
-        max_concurrency: numberValue(maxConcurrency) ?? null,
-        expires_at: expiresAt ? new Date(expiresAt).toISOString() : null
-      },
-      allowedRoutes[0]
+      buildApiKeyPolicyInput(form),
+      form.allowedRoutes[0]
     );
     if (saved) dirty = false;
   }
@@ -116,7 +99,11 @@
   <div>
     <p class="eyebrow">Access · API Keys</p>
     <h1 class="page-title">
-      {editing ? 'Edit key policy.' : 'Create a proxy key.'}
+      {editing
+        ? canManage
+          ? 'Edit key policy.'
+          : 'View key policy.'
+        : 'Create a proxy key.'}
     </h1>
     <p class="page-description">
       {editing
@@ -137,7 +124,9 @@
   </div>{/if}
 {#if !canManage}
   <ReadOnlyNote>
-    Your role can view API key policies but not create or change them.
+    {editing
+      ? 'This API key policy can be viewed but not changed.'
+      : 'Your role can view API key policies but not create or change them.'}
   </ReadOnlyNote>
 {/if}
 
@@ -155,7 +144,7 @@
       <div class="form-field">
         <label for="key-name">Key name</label><input
           id="key-name"
-          bind:value={name}
+          bind:value={form.name}
           disabled={!canManage}
           aria-invalid={errors.name ? 'true' : undefined}
           aria-describedby={errors.name ? 'key-name-error' : undefined}
@@ -167,7 +156,7 @@
         <label for="key-expiry">Expires at (optional)</label><input
           id="key-expiry"
           type="datetime-local"
-          bind:value={expiresAt}
+          bind:value={form.expiresAt}
           disabled={!canManage}
           aria-invalid={errors.expiresAt ? 'true' : undefined}
           aria-describedby={errors.expiresAt ? 'key-expiry-error' : undefined}
@@ -185,10 +174,14 @@
       >{#each [['inference', 'Inference requests'], ['models_read', 'Model listing']] as scope (scope[0])}<label
           ><input
             type="checkbox"
-            checked={scopes.includes(scope[0])}
+            checked={form.scopes.includes(scope[0])}
             disabled={!canManage}
             onchange={(event) =>
-              (scopes = toggle(scopes, scope[0], event.currentTarget.checked))}
+              (form.scopes = toggle(
+                form.scopes,
+                scope[0],
+                event.currentTarget.checked
+              ))}
           />
           {scope[1]}</label
         >{/each}
@@ -207,11 +200,11 @@
         >{:else}{#each routes.data ?? [] as route (route.id)}<label
             ><input
               type="checkbox"
-              checked={allowedRoutes.includes(route.slug)}
+              checked={form.allowedRoutes.includes(route.slug)}
               disabled={!canManage}
               onchange={(event) =>
-                (allowedRoutes = toggle(
-                  allowedRoutes,
+                (form.allowedRoutes = toggle(
+                  form.allowedRoutes,
                   route.slug,
                   event.currentTarget.checked
                 ))}
@@ -225,8 +218,8 @@
     <p class="eyebrow">Distributed limits</p>
     <h2 id="limits-heading">Hard runtime limits</h2>
     <p class="section-help">
-      Configured limits fail closed if Valkey is unavailable. Leave blank for no
-      limit.
+      These limits follow the installation's Valkey outage policy. Leave blank
+      for no limit.
     </p>
     <div class="form-grid limits">
       <div class="form-field">
@@ -235,7 +228,7 @@
           type="number"
           min="1"
           inputmode="numeric"
-          bind:value={requestsPerMinute}
+          bind:value={form.requestsPerMinute}
           disabled={!canManage}
           aria-invalid={errors.requestsPerMinute ? 'true' : undefined}
         />{#if errors.requestsPerMinute}<small class="field-error"
@@ -248,7 +241,7 @@
           type="number"
           min="1"
           inputmode="numeric"
-          bind:value={tokensPerMinute}
+          bind:value={form.tokensPerMinute}
           disabled={!canManage}
           aria-invalid={errors.tokensPerMinute ? 'true' : undefined}
         />{#if errors.tokensPerMinute}<small class="field-error"
@@ -261,7 +254,7 @@
           type="number"
           min="1"
           inputmode="numeric"
-          bind:value={maxConcurrency}
+          bind:value={form.maxConcurrency}
           disabled={!canManage}
           aria-invalid={errors.maxConcurrency ? 'true' : undefined}
         />{#if errors.maxConcurrency}<small class="field-error"
@@ -270,21 +263,105 @@
       </div>
     </div>
   </section>
-  <div class="form-actions">
-    <button
-      class="button button-primary"
-      type="submit"
-      disabled={!canManage || Boolean(busy)}
-      >{busy === 'create'
-        ? 'Creating securely…'
-        : busy === 'update'
-          ? 'Publishing policy…'
-          : editing
-            ? 'Save and publish'
-            : 'Create and show key'}
-      <NavIcon name="arrow" /></button
-    >
-  </div>
+  <section aria-labelledby="budget-heading">
+    <p class="eyebrow">Spend controls</p>
+    <h2 id="budget-heading">Cost budgets</h2>
+    <p class="section-help">
+      Amounts use the installation pricing currency. Daily and monthly windows
+      reset at UTC boundaries and always fail closed if Valkey is unavailable.
+      Leave blank for no cost budget.
+    </p>
+    <div class="form-grid budget-inputs">
+      <div class="form-field">
+        <label for="daily-budget">Daily cost budget (optional)</label><input
+          id="daily-budget"
+          inputmode="decimal"
+          placeholder="10.00"
+          bind:value={form.dailyCostLimit}
+          disabled={!canManage}
+          aria-invalid={errors.dailyCostLimit ? 'true' : undefined}
+          aria-describedby={errors.dailyCostLimit
+            ? 'daily-budget-error'
+            : undefined}
+        />{#if errors.dailyCostLimit}<small
+            class="field-error"
+            id="daily-budget-error">{errors.dailyCostLimit}</small
+          >{/if}
+      </div>
+      <div class="form-field">
+        <label for="monthly-budget">Monthly cost budget (optional)</label><input
+          id="monthly-budget"
+          inputmode="decimal"
+          placeholder="100.00"
+          bind:value={form.monthlyCostLimit}
+          disabled={!canManage}
+          aria-invalid={errors.monthlyCostLimit ? 'true' : undefined}
+          aria-describedby={errors.monthlyCostLimit
+            ? 'monthly-budget-error'
+            : undefined}
+        />{#if errors.monthlyCostLimit}<small
+            class="field-error"
+            id="monthly-budget-error">{errors.monthlyCostLimit}</small
+          >{/if}
+      </div>
+    </div>
+    {#if editing}
+      <div
+        class="budget-detail"
+        role="region"
+        aria-label="Current spend budget"
+      >
+        <div>
+          <span>Daily accrued / limit</span>
+          <strong
+            >{formatBudget(editing.budget.daily.accrued)} / {editing.budget
+              .daily.limit === null
+              ? 'No limit'
+              : formatBudget(editing.budget.daily.limit)}</strong
+          >
+          <small
+            >Window ends {formatDate(
+              editing.budget.daily.window_ends_at
+            )}</small
+          >
+        </div>
+        <div>
+          <span>Monthly accrued / limit</span>
+          <strong
+            >{formatBudget(editing.budget.monthly.accrued)} / {editing.budget
+              .monthly.limit === null
+              ? 'No limit'
+              : formatBudget(editing.budget.monthly.limit)}</strong
+          >
+          <small
+            >Window ends {formatDate(
+              editing.budget.monthly.window_ends_at
+            )}</small
+          >
+        </div>
+        <div>
+          <span>Unpriced attempts this UTC month</span>
+          <strong>{formatInteger(editing.budget.unpriced_attempts)}</strong>
+          <small>Unpriced attempts accrue 0 toward both budgets.</small>
+        </div>
+      </div>
+    {/if}
+  </section>
+  {#if canManage || !editing}<div class="form-actions">
+      <button
+        class="button button-primary"
+        type="submit"
+        disabled={!canManage || Boolean(busy)}
+        >{busy === 'create'
+          ? 'Creating securely…'
+          : busy === 'update'
+            ? 'Publishing policy…'
+            : editing
+              ? 'Save and publish'
+              : 'Create and show key'}
+        <NavIcon name="arrow" /></button
+      >
+    </div>{/if}
 </form>
 
 <style>
@@ -339,6 +416,27 @@
   .limits {
     grid-template-columns: repeat(3, 1fr);
   }
+  .budget-inputs {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .budget-detail {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0.75rem;
+    margin-top: 1rem;
+  }
+  .budget-detail div {
+    display: grid;
+    gap: 0.2rem;
+    padding: 0.85rem;
+    border: 1px solid var(--border);
+    border-radius: 0.375rem;
+  }
+  .budget-detail span,
+  .budget-detail small {
+    color: var(--foreground-muted);
+    font-size: 0.78rem;
+  }
   .field-error {
     color: var(--danger) !important;
     font-weight: 700;
@@ -353,7 +451,9 @@
       monospace;
   }
   @media (max-width: 48rem) {
-    .limits {
+    .limits,
+    .budget-inputs,
+    .budget-detail {
       grid-template-columns: 1fr;
     }
   }

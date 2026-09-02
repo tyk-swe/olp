@@ -1,0 +1,48 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "WITH usage AS ( SELECT api_key_id, observed_at, COALESCE(estimated_cost, 0)::numeric AS cost, CASE WHEN charge_status <> 'not_billable' AND unpriced THEN 1 ELSE 0 END::bigint AS unpriced_attempts FROM attempt_usage_facts WHERE api_key_id = ANY($1::uuid[]) AND observed_at >= $3 AND observed_at < $4 UNION ALL SELECT api_key_id, bucket AS observed_at, COALESCE(estimated_cost, 0)::numeric AS cost, unpriced_attempt_count AS unpriced_attempts FROM attempt_usage_hourly WHERE api_key_id = ANY($1::uuid[]) AND bucket >= $3 AND bucket < $4 ), requested AS (SELECT DISTINCT unnest($1::uuid[]) AS api_key_id) SELECT requested.api_key_id AS \"api_key_id!\", COALESCE(SUM(usage.cost) FILTER ( WHERE usage.observed_at >= $2 AND usage.observed_at < $5), 0)::text AS \"daily_accrued!\", COALESCE(SUM(usage.cost), 0)::text AS \"monthly_accrued!\", COALESCE(SUM(usage.unpriced_attempts), 0)::bigint AS \"unpriced_attempts!\" FROM requested LEFT JOIN usage ON usage.api_key_id = requested.api_key_id GROUP BY requested.api_key_id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "api_key_id!",
+        "type_info": "Uuid",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 1,
+        "name": "daily_accrued!",
+        "type_info": "Text",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 2,
+        "name": "monthly_accrued!",
+        "type_info": "Text",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 3,
+        "name": "unpriced_attempts!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "UuidArray",
+        "Timestamptz",
+        "Timestamptz",
+        "Timestamptz",
+        "Timestamptz"
+      ]
+    },
+    "nullable": [
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "e35181d9c414da0a1c7dcd39aa4a2523444649b24f5aaa9296e96500105fd9fc"
+}

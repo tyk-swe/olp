@@ -16,6 +16,7 @@ use olp_db::{
     request_metadata::delivery_health::ConsumerStatus,
     request_metadata::reconciliation::{EpochHealth, LossReport},
 };
+use olp_engine::inference::limits::LimitDimension;
 use olp_engine::inference::request_metadata::{Emitter, Snapshot};
 
 mod async_workers;
@@ -334,9 +335,13 @@ fn append_limiter_circuit_and_media_gauges(
         "# HELP olp_distributed_limiter_available Whether a Valkey limiter connection is installed.\n\
          # TYPE olp_distributed_limiter_available gauge\n\
          olp_distributed_limiter_available {}\n\
-         # HELP olp_limits_fail_open_total Hard-limited requests admitted without a lease under the fail-open outage policy.\n\
+         # HELP olp_limits_fail_open_total Rate- or concurrency-limited requests admitted without a lease under the fail-open outage policy.\n\
          # TYPE olp_limits_fail_open_total counter\n\
          olp_limits_fail_open_total {}\n\
+         # HELP olp_key_budget_rejections_total API-key requests rejected because a cost budget was exhausted.\n\
+         # TYPE olp_key_budget_rejections_total counter\n\
+         olp_key_budget_rejections_total{{window=\"daily\"}} {}\n\
+         olp_key_budget_rejections_total{{window=\"monthly\"}} {}\n\
          # HELP olp_open_target_circuits Number of target circuits currently open or half-open.\n\
          # TYPE olp_open_target_circuits gauge\n\
          olp_open_target_circuits {}\n\
@@ -357,6 +362,10 @@ fn append_limiter_circuit_and_media_gauges(
          olp_media_reconciliation_gaps_total {}\n",
         u8::from(limiter_available),
         state.limiter().fail_open_total(),
+        state.limiter().budget_rejections(LimitDimension::DailyCost),
+        state
+            .limiter()
+            .budget_rejections(LimitDimension::MonthlyCost),
         state.circuits().open_count(),
         media_reconciliation
             .as_ref()

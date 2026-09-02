@@ -119,6 +119,14 @@ impl Error {
             LimitDimension::Requests => "requests per minute",
             LimitDimension::Tokens => "tokens per minute",
             LimitDimension::Concurrency => "concurrency",
+            LimitDimension::DailyCost | LimitDimension::MonthlyCost => {
+                return Self::new(
+                    Kind::RateLimit,
+                    "budget_exhausted",
+                    "The API key cost budget was exhausted. Unpriced attempts accrue 0.",
+                    Some(retry_after),
+                );
+            }
             LimitDimension::Unknown => "configured",
         };
         Self::new(
@@ -306,6 +314,21 @@ mod tests {
             assert_eq!(
                 error.message(),
                 format!("The API key {name} limit was exceeded.")
+            );
+            assert_eq!(error.retry_after(), Some(retry_after));
+        }
+    }
+
+    #[test]
+    fn cost_limit_errors_publish_budget_and_unpriced_semantics() {
+        let retry_after = Duration::from_secs(3_600);
+        for dimension in [LimitDimension::DailyCost, LimitDimension::MonthlyCost] {
+            let error = Error::rate_limited(dimension, retry_after);
+            assert_eq!(error.kind(), Kind::RateLimit);
+            assert_eq!(error.code(), "budget_exhausted");
+            assert_eq!(
+                error.message(),
+                "The API key cost budget was exhausted. Unpriced attempts accrue 0."
             );
             assert_eq!(error.retry_after(), Some(retry_after));
         }

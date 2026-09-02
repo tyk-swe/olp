@@ -5,6 +5,7 @@ use std::{
 };
 
 use chrono::{DateTime, Utc};
+use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -194,10 +195,13 @@ impl fmt::Debug for ApiKeyDigest {
 }
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(default)]
 pub struct ApiKeyLimits {
     pub requests_per_minute: Option<NonZeroU32>,
     pub tokens_per_minute: Option<NonZeroU64>,
     pub concurrency: Option<NonZeroU32>,
+    pub daily_cost_limit: Option<Decimal>,
+    pub monthly_cost_limit: Option<Decimal>,
 }
 
 impl ApiKeyLimits {
@@ -206,6 +210,8 @@ impl ApiKeyLimits {
         self.requests_per_minute.is_some()
             || self.tokens_per_minute.is_some()
             || self.concurrency.is_some()
+            || self.daily_cost_limit.is_some()
+            || self.monthly_cost_limit.is_some()
     }
 }
 
@@ -419,5 +425,18 @@ mod tests {
             serde_json::to_string(&Permission::ManageAccess).unwrap(),
             r#""manage_access""#
         );
+    }
+
+    #[test]
+    fn pre_budget_runtime_limits_deserialize_with_no_cost_limits() {
+        let limits: ApiKeyLimits = serde_json::from_str(
+            r#"{"requests_per_minute":60,"tokens_per_minute":1000,"concurrency":2}"#,
+        )
+        .unwrap();
+        assert_eq!(limits.requests_per_minute.map(NonZeroU32::get), Some(60));
+        assert_eq!(limits.tokens_per_minute.map(NonZeroU64::get), Some(1_000));
+        assert_eq!(limits.concurrency.map(NonZeroU32::get), Some(2));
+        assert_eq!(limits.daily_cost_limit, None);
+        assert_eq!(limits.monthly_cost_limit, None);
     }
 }

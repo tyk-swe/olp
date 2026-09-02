@@ -406,6 +406,9 @@ impl World {
             }
         }
 
+        let budgeted = ["daily_cost_limit", "monthly_cost_limit"]
+            .iter()
+            .any(|field| body.get(*field).is_some_and(|value| !value.is_null()));
         let created = self
             .management
             .expect(
@@ -434,7 +437,18 @@ impl World {
         let generation = created.body["runtime_generation"]["sequence"]
             .as_i64()
             .ok_or_else(|| format!("API key response lacks generation: {}", created.body))?;
-        await_key(&self.http, &self.public_origin, &secret).await?;
+        if budgeted {
+            // A new budget must wait for an authoritative snapshot, not seed zero.
+            await_key_with_timeout(
+                &self.http,
+                &self.public_origin,
+                &secret,
+                Duration::from_secs(90),
+            )
+            .await?;
+        } else {
+            await_key(&self.http, &self.public_origin, &secret).await?;
+        }
         Ok(IssuedKey {
             id,
             secret,
@@ -688,8 +702,17 @@ pub(crate) struct IssuedKey {
 /// propagation explicit, so waiting for it is part of using the API, not a
 /// workaround for flakiness.
 async fn await_key(http: &reqwest::Client, origin: &str, secret: &str) -> Result<(), String> {
+    await_key_with_timeout(http, origin, secret, Duration::from_secs(30)).await
+}
+
+async fn await_key_with_timeout(
+    http: &reqwest::Client,
+    origin: &str,
+    secret: &str,
+    timeout: Duration,
+) -> Result<(), String> {
     let models_url = format!("{origin}/openai/v1/models");
-    let deadline = Instant::now() + Duration::from_secs(30);
+    let deadline = Instant::now() + timeout;
     loop {
         let status = http
             .get(&models_url)
@@ -884,8 +907,8 @@ async fn configure_pricing(management: &Management) -> Result<(), String> {
             "model": model,
             "operation": "generation",
             "currency": "USD",
-            "input_per_million": "1.00",
-            "output_per_million": "2.00"
+            "input_per_million": "1000.00",
+            "output_per_million": "1000.00"
         })
     })
     .collect();

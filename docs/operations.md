@@ -89,6 +89,45 @@ series as a reset. Reclaims and duplicates show recovery, not necessarily an
 incident. Inspect the PostgreSQL advisory-lock session when failed takeover
 counts rise.
 
+### Spend-budget reconciliation
+
+PostgreSQL usage facts are the spend authority; Valkey is the admission copy.
+The terminal metadata transaction advances durable cumulative window totals,
+and its consumer applies that absolute snapshot to Valkey. The
+cost-reconciliation worker rebuilds and applies the same snapshots once per
+minute. Reconciliation never lowers a valid counter, so it cannot erase or
+double-count a terminal charge that races its query. Monitor
+`olp_worker_task_healthy{task="cost_reconciliation"}` and
+`olp_worker_task_runs_total{task="cost_reconciliation",outcome=...}`. Budget
+rejections are counted only by window in
+`olp_key_budget_rejections_total{window="daily|monthly"}`; there is deliberately
+no per-key Prometheus spend gauge.
+
+If the API-key read shows accrued spend at or above a limit while requests are
+still admitted, check the request-metadata consumer, PostgreSQL, Valkey, and the
+cost-reconciliation checkpoint. Revoke the affected key until reconciliation
+is healthy when continued admission risks overspend. For missing or valid but
+lagging state, do not delete or lower a cost counter: restore the worker and let
+the PostgreSQL snapshot repair it monotonically. After Valkey loss, wait for a
+successful cost-reconciliation checkpoint before restoring traffic to
+budgeted keys.
+
+Malformed cost state fails admission closed and is replaced from the next
+authoritative cumulative snapshot. Keep budgeted traffic stopped until a
+successful reconciliation checkpoint and the API-key accrued values confirm
+recovery. Only if reconciliation itself cannot run should an operator remove
+an exact malformed cost hash while traffic is stopped; never use a wildcard or
+delete the lookup-ID rate/concurrency keys. PostgreSQL remains the recovery
+source.
+
+Review `unpriced_attempts` with each budget. Unpriced attempts accrue 0 because
+OLP never invents usage or cost, so a growing count means the configured budget
+cannot bound all provider spend. Repair upstream usage reporting or pricing
+coverage and keep provider-side quotas in place. Budgeted keys remain
+fail-closed during a Valkey outage even when
+`limits.valkey_unavailable=fail_open`; do not remove a budget to bypass that
+safety boundary.
+
 ## Routine checks
 
 1. Confirm pod readiness and one nonzero runtime generation across gateways.
@@ -237,7 +276,7 @@ redirect traffic.
 
 Keep admission open only while the local spool has capacity and the business
 explicitly accepts delayed accounting. Restore a same-version worker and
-require zero metadata pending/lag, zero outbox pending/claimed rows, four
+require zero metadata pending/lag, zero outbox pending/claimed rows, five
 healthy task checkpoints, and reconciled usage. Near the seven-day window,
 stop admission and preserve Valkey/AOF and PostgreSQL before repair.
 
@@ -250,10 +289,12 @@ stop admission and preserve Valkey/AOF and PostgreSQL before repair.
   Valkey and verify lease cleanup. To keep hard-limited keys serving during a
   prolonged outage, an owner can set `limits.valkey_unavailable` to
   `fail_open` in Settings (or `PUT /api/v1/settings/limits.valkey_unavailable`);
-  gateways apply it within 15 seconds, admit those keys without RPM/TPM/
-  concurrency enforcement, and count each admission in
-  `olp_limits_fail_open_total`. Revert to `fail_closed` once Valkey is back. Valkey server time controls fixed UTC-minute
-  RPM/TPM windows, `Retry-After`, and lease expiry.
+  gateways apply it within 15 seconds, admit rate/concurrency-only keys without
+  RPM/TPM or concurrency enforcement, and count each admission in
+  `olp_limits_fail_open_total`. Budgeted keys remain fail-closed. Revert to
+  `fail_closed` once Valkey is back, wait for a successful cost-reconciliation
+  checkpoint, and then restore budgeted traffic. Valkey server time controls
+  fixed UTC minute/day/month windows, `Retry-After`, and lease expiry.
 - **Metadata persistence:** continue only with explicit acceptance of
   incomplete cost data. Preserve Stream state, suspend retention, record the
   interval, and reconcile request/attempt/usage/gap counts. Never report a gap

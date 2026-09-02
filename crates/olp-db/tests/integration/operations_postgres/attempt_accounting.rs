@@ -450,7 +450,7 @@ async fn assert_legacy_fact_mirrors_all_attempts(
     );
 
     let mut transaction = store.pool().begin().await.unwrap();
-    sqlx::query("SELECT set_config('olp.usage_rollup_writer', 'additive-v2', true)")
+    sqlx::query("SELECT set_config('olp.usage_rollup_writer', 'additive-v3', true)")
         .execute(&mut *transaction)
         .await
         .unwrap();
@@ -486,7 +486,7 @@ async fn assert_legacy_fact_mirrors_all_attempts(
     assert_eq!(
         archived,
         (1, 2, "3".to_owned()),
-        "N-1 retention must archive attempt facts once without collapsing providers"
+        "legacy retention must archive attempt facts once without collapsing providers"
     );
     transaction.rollback().await.unwrap();
 }

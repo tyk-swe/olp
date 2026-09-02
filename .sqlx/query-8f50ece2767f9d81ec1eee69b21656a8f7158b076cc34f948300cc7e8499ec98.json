@@ -1,0 +1,67 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "WITH deltas (window_kind, window_id, accrued, unpriced_attempts) AS ( VALUES ('day'::text, $2::bigint, $3::numeric, 0::bigint), ('month'::text, $4::bigint, $3::numeric, $5::bigint) ), applied AS ( INSERT INTO api_key_cost_windows (api_key_id, window_kind, window_id, accrued, unpriced_attempts) SELECT $1, window_kind, window_id, accrued, unpriced_attempts FROM deltas ON CONFLICT (api_key_id, window_kind, window_id) DO UPDATE SET accrued = api_key_cost_windows.accrued + EXCLUDED.accrued, unpriced_attempts = api_key_cost_windows.unpriced_attempts + EXCLUDED.unpriced_attempts RETURNING api_key_id, window_kind, window_id, accrued, unpriced_attempts ) SELECT api_key_id, MAX(window_id) FILTER (WHERE window_kind = 'day')::bigint AS \"daily_window_id!\", MAX(accrued) FILTER (WHERE window_kind = 'day')::text AS \"daily_accrued!\", MAX(window_id) FILTER (WHERE window_kind = 'month')::bigint AS \"monthly_window_id!\", MAX(accrued) FILTER (WHERE window_kind = 'month')::text AS \"monthly_accrued!\", MAX(unpriced_attempts) FILTER (WHERE window_kind = 'month')::bigint AS \"monthly_unpriced_attempts!\" FROM applied GROUP BY api_key_id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "api_key_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "api_key_cost_windows",
+            "name": "api_key_id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "daily_window_id!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 2,
+        "name": "daily_accrued!",
+        "type_info": "Text",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 3,
+        "name": "monthly_window_id!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 4,
+        "name": "monthly_accrued!",
+        "type_info": "Text",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 5,
+        "name": "monthly_unpriced_attempts!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int8",
+        "Numeric",
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      null,
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "8f50ece2767f9d81ec1eee69b21656a8f7158b076cc34f948300cc7e8499ec98"
+}

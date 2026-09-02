@@ -8,6 +8,7 @@ mod support;
 
 mod batched_writes_postgres;
 mod configuration_postgres;
+mod distributed_cost_limits_valkey;
 mod distributed_limits_valkey;
 mod idempotency_replay_postgres;
 mod identity_postgres;
@@ -27,6 +28,8 @@ mod route_activation_revalidation_postgres;
 mod route_draft_simulation_postgres;
 mod runtime_fallback_postgres;
 mod runtime_publication_postgres;
+mod spend_controls_postgres;
+mod spend_recovery_postgres;
 mod upgrade_0021_postgres;
 mod usage_surface_upgrade_postgres;
 mod worker_ha_postgres;

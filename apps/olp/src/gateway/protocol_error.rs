@@ -232,4 +232,45 @@ mod tests {
             }
         }
     }
+
+    #[tokio::test]
+    async fn budget_exhaustion_keeps_each_protocol_shape_and_publishes_unpriced_semantics() {
+        for (surface, code_pointer, kind_pointer, expected_kind) in [
+            (
+                Surface::OpenAi,
+                Some("/error/code"),
+                "/error/type",
+                "rate_limit_error",
+            ),
+            (Surface::Anthropic, None, "/error/type", "rate_limit_error"),
+            (Surface::Gemini, None, "/error/status", "RESOURCE_EXHAUSTED"),
+        ] {
+            let response = inference_error_response(
+                surface,
+                InferenceError::rate_limited(
+                    LimitDimension::DailyCost,
+                    Duration::from_secs(86_400),
+                ),
+            );
+            assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
+            assert_eq!(response.headers()[header::RETRY_AFTER], "86400");
+            let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+                .await
+                .unwrap();
+            let body: serde_json::Value = serde_json::from_slice(&body).unwrap();
+            assert_eq!(
+                body.pointer(kind_pointer)
+                    .and_then(serde_json::Value::as_str),
+                Some(expected_kind),
+                "surface: {surface:?}"
+            );
+            if let Some(pointer) = code_pointer {
+                assert_eq!(
+                    body.pointer(pointer).and_then(serde_json::Value::as_str),
+                    Some("budget_exhausted")
+                );
+            }
+            assert!(body.to_string().contains("Unpriced attempts accrue 0."));
+        }
+    }
 }

@@ -1,9 +1,15 @@
 use std::time::Duration;
 
 use olp_db::{
+    limits::{
+        CostReconciliationError, CostReconciliationLeader, CostReconciliationReport,
+        DistributedLimiter,
+    },
     runtime::outbox::{RuntimeOutboxLeader, RuntimeOutboxLeadershipProbe},
     store::Store,
-    valkey::{Error, RuntimeHintPublisher, request_metadata::run_request_metadata_consumer},
+    valkey::{
+        Error, Keyspace, RuntimeHintPublisher, request_metadata::run_request_metadata_consumer,
+    },
     worker_health::{WorkerTask, WorkerTaskCheckpointOutcome},
 };
 use tokio::{sync::watch, task::JoinSet};
@@ -24,8 +30,7 @@ pub(super) async fn run_worker(args: PersistenceArgs) -> AppResult<()> {
         &mut workers,
         store,
         args.valkey_url,
-        keyspace.runtime_hint_channel(),
-        keyspace.request_metadata_stream(),
+        keyspace,
         request_metadata_consumer_name(),
         receiver,
     );
@@ -102,26 +107,107 @@ fn spawn_worker_supervisors(
     workers: &mut JoinSet<()>,
     store: Store,
     valkey_url: String,
-    runtime_hint_channel: String,
-    request_metadata_stream: String,
+    keyspace: Keyspace,
     request_metadata_consumer: String,
     shutdown: watch::Receiver<bool>,
 ) {
     workers.spawn(outbox_supervisor(
         store.clone(),
         valkey_url.clone(),
-        runtime_hint_channel,
+        keyspace.runtime_hint_channel(),
         shutdown.clone(),
     ));
     workers.spawn(request_metadata_consumer_supervisor(
         store.clone(),
-        valkey_url,
-        request_metadata_stream,
+        valkey_url.clone(),
+        keyspace.request_metadata_stream(),
         request_metadata_consumer,
+        keyspace.limits_namespace(),
+        shutdown.clone(),
+    ));
+    workers.spawn(cost_reconciliation_supervisor(
+        store.clone(),
+        valkey_url,
+        keyspace.limits_namespace(),
         shutdown.clone(),
     ));
     workers.spawn(maintenance_supervisor(store.clone(), shutdown.clone()));
     workers.spawn(request_metadata_epoch_supervisor(store, shutdown));
+}
+
+pub(super) async fn cost_reconciliation_supervisor(
+    store: Store,
+    valkey_url: String,
+    limits_namespace: String,
+    mut shutdown: watch::Receiver<bool>,
+) {
+    let mut interval = tokio::time::interval(Duration::from_secs(60));
+    interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    let mut leader = None;
+    loop {
+        if *shutdown.borrow() {
+            return;
+        }
+        tokio::select! {
+            biased;
+            changed = shutdown.changed() => {
+                if changed.is_err() || *shutdown.borrow() {
+                    return;
+                }
+            }
+            _ = interval.tick() => {
+                let result = tokio::select! {
+                    biased;
+                    _ = shutdown.changed() => return,
+                    result = tokio::time::timeout(
+                        Duration::from_secs(120),
+                        reconcile_costs_as_leader(
+                            &store, &valkey_url, &limits_namespace, &mut leader,
+                        ),
+                    ) => result
+                        .map_err(olp_engine::inference::limits::LimitError::service)
+                        .and_then(|result| result.map_err(
+                            olp_engine::inference::limits::LimitError::service,
+                        )),
+                };
+                let (outcome, progress) = match result {
+                    Ok(report) if report.lock_acquired => {
+                        if report.keys_reconciled > 0 {
+                            info!(?report, "cost reconciliation pass completed");
+                        }
+                        (WorkerTaskCheckpointOutcome::Success, report.keys_reconciled > 0)
+                    }
+                    Ok(_) => (WorkerTaskCheckpointOutcome::Skipped, false),
+                    Err(error) => {
+                        leader = None;
+                        warn!(%error, "cost reconciliation failed; releasing leadership and retrying");
+                        (WorkerTaskCheckpointOutcome::Failure, false)
+                    }
+                };
+                if let Err(error) = store.report_worker_task_checkpoint(
+                    WorkerTask::CostReconciliation, outcome, progress,
+                ).await {
+                    warn!(%error, "cost reconciliation health checkpoint failed");
+                }
+            }
+        }
+    }
+}
+
+async fn reconcile_costs_as_leader(
+    store: &Store,
+    valkey_url: &str,
+    limits_namespace: &str,
+    leader: &mut Option<CostReconciliationLeader>,
+) -> Result<CostReconciliationReport, CostReconciliationError> {
+    if leader.is_none() {
+        *leader = store.try_acquire_cost_reconciliation_leader().await?;
+    }
+    let Some(leader) = leader.as_mut() else {
+        return Ok(CostReconciliationReport::default());
+    };
+    let limiter = DistributedLimiter::connect(valkey_url, limits_namespace).await?;
+    leader.reconcile(&limiter, chrono::Utc::now()).await
 }
 
 pub(super) async fn maintenance_supervisor(store: Store, mut shutdown: watch::Receiver<bool>) {
@@ -309,6 +395,7 @@ pub(super) async fn request_metadata_consumer_supervisor(
     valkey_url: String,
     request_metadata_stream: String,
     consumer: String,
+    limits_namespace: String,
     mut shutdown: watch::Receiver<bool>,
 ) {
     let mut backoff = Duration::from_millis(100);
@@ -321,6 +408,7 @@ pub(super) async fn request_metadata_consumer_supervisor(
             &valkey_url,
             &request_metadata_stream,
             &consumer,
+            &limits_namespace,
             shutdown.clone(),
         )
         .await
@@ -599,6 +687,7 @@ async fn request_metadata_consumer_loop(
     valkey_url: &str,
     request_metadata_stream: &str,
     consumer: &str,
+    limits_namespace: &str,
     shutdown: watch::Receiver<bool>,
 ) -> AppResult<()> {
     run_request_metadata_consumer(
@@ -606,6 +695,7 @@ async fn request_metadata_consumer_loop(
         valkey_url,
         request_metadata_stream,
         consumer,
+        limits_namespace,
         shutdown,
     )
     .await?;
