@@ -566,6 +566,63 @@ fn validate_request_envelope(
     Ok(())
 }
 
+fn restore_preserved_count_request(
+    value: serde_json::Value,
+    upstream_model: &str,
+) -> Result<CountTokensRequest, TransportError> {
+    let mut wire: CountTokensRequest = serde_json::from_value(value).map_err(|error| {
+        protocol_error(format!(
+            "preserved Gemini countTokens request is invalid: {error}"
+        ))
+    })?;
+    if let Some(generation) = &mut wire.generate_content_request {
+        let model = upstream_model
+            .strip_prefix("models/")
+            .unwrap_or(upstream_model);
+        generation.model = Some(format!("models/{model}"));
+    }
+    validate_count_tokens_request(&wire).map_err(|error| {
+        protocol_error(format!(
+            "preserved Gemini countTokens request is invalid: {error}"
+        ))
+    })?;
+    Ok(wire)
+}
+
+fn encode_count_file_part(
+    source: &MediaSource,
+    mime_type: Option<&str>,
+    part_index: usize,
+    remaining_extensions: &mut BTreeMap<String, serde_json::Value>,
+) -> Result<Part, TransportError> {
+    let MediaSource::Uri(file_uri) = source else {
+        return Err(protocol_error(
+            "Gemini token counting cannot encode media handles",
+        ));
+    };
+    let mime_path = format!("/contents/0/parts/{part_index}/fileData/mimeType");
+    let mime_type = mime_type
+        .map(str::to_owned)
+        .or_else(|| {
+            remaining_extensions
+                .remove(&mime_path)
+                .and_then(|value| value.as_str().map(str::to_owned))
+        })
+        .ok_or_else(|| {
+            protocol_error(format!(
+                "Gemini image token counting requires a MIME type extension at {mime_path}"
+            ))
+        })?;
+    Ok(Part::FileData(FileDataPart {
+        file_data: FileData {
+            mime_type,
+            file_uri: file_uri.clone(),
+            extra: BTreeMap::new(),
+        },
+        extra: BTreeMap::new(),
+    }))
+}
+
 pub(super) fn encode_count_tokens(
     request: &crate::domain::canonical::requests::TokenCountRequest,
     upstream_model: &str,
@@ -581,23 +638,7 @@ pub(super) fn encode_count_tokens(
                 "Gemini token-count extensions cannot be reconstructed without losing semantics",
             ));
         }
-        let mut wire: CountTokensRequest = serde_json::from_value(value).map_err(|error| {
-            protocol_error(format!(
-                "preserved Gemini countTokens request is invalid: {error}"
-            ))
-        })?;
-        if let Some(generation) = &mut wire.generate_content_request {
-            let model = upstream_model
-                .strip_prefix("models/")
-                .unwrap_or(upstream_model);
-            generation.model = Some(format!("models/{model}"));
-        }
-        validate_count_tokens_request(&wire).map_err(|error| {
-            protocol_error(format!(
-                "preserved Gemini countTokens request is invalid: {error}"
-            ))
-        })?;
-        return Ok(wire);
+        return restore_preserved_count_request(value, upstream_model);
     }
     if request.input.is_empty() {
         return Err(protocol_error("token-count input cannot be empty"));
@@ -622,32 +663,12 @@ pub(super) fn encode_count_tokens(
                         "Gemini token counting cannot represent image detail",
                     ));
                 }
-                let MediaSource::Uri(file_uri) = source else {
-                    return Err(protocol_error(
-                        "Gemini token counting cannot encode media handles",
-                    ));
-                };
-                let mime_path = format!("/contents/0/parts/{}/fileData/mimeType", parts.len());
-                let mime_type = mime_type
-                    .clone()
-                    .or_else(|| {
-                        remaining_extensions
-                            .remove(&mime_path)
-                            .and_then(|value| value.as_str().map(str::to_owned))
-                    })
-                    .ok_or_else(|| {
-                        protocol_error(format!(
-                            "Gemini image token counting requires a MIME type extension at {mime_path}"
-                        ))
-                    })?;
-                parts.push(Part::FileData(FileDataPart {
-                    file_data: FileData {
-                        mime_type,
-                        file_uri: file_uri.clone(),
-                        extra: BTreeMap::new(),
-                    },
-                    extra: BTreeMap::new(),
-                }));
+                parts.push(encode_count_file_part(
+                    source,
+                    mime_type.as_deref(),
+                    parts.len(),
+                    &mut remaining_extensions,
+                )?);
             }
             ContentPart::InputAudio { .. }
             | ContentPart::InputFile { .. }

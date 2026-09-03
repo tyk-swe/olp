@@ -314,18 +314,10 @@ impl Store {
         let mut ranked: BTreeMap<i32, Vec<(f64, RouteTargetRecord)>> = BTreeMap::new();
         let mut ineligible = Vec::new();
         for target in draft.targets {
-            let capability: bool = sqlx::query_scalar!(
-                "SELECT EXISTS (SELECT 1 FROM providers p \
-                 JOIN provider_revision_models prm ON prm.provider_revision_id = p.active_revision_id \
-                 JOIN provider_revision_capabilities prc \
-                   ON prc.provider_revision_model_id = prm.id \
-                 WHERE prm.source_provider_model_id = $1 AND prc.operation = $2 \
-                   AND prc.surface = $3 AND prc.mode = $4 AND prm.enabled \
-                   AND prc.source = 'certified' AND p.state <> 'disabled'::provider_state) AS \"value!\"",
-            target.provider_model_id, operation.as_str(), surface.as_str(), mode.as_str())
-            .fetch_one(self.pool())
-            .await?;
-            if capability {
+            if self
+                .target_has_certified_capability(&target, operation, surface, mode)
+                .await?
+            {
                 let weight = u32::try_from(target.weight)
                     .ok()
                     .and_then(NonZeroU32::new)
@@ -344,44 +336,10 @@ impl Store {
                     .or_default()
                     .push((score, target));
             } else {
-                ineligible.push(RouteSimulationTarget {
-                    target_id: target.id,
-                    provider_id: target.provider_id,
-                    provider_name: target.provider_name,
-                    upstream_model: target.upstream_model,
-                    priority: target.priority,
-                    eligible: false,
-                    reason: Some(
-                        "missing exact capability or provider/model is disabled".to_owned(),
-                    ),
-                    attempt: None,
-                });
+                ineligible.push(ineligible_simulation_target(target));
             }
         }
-        let mut targets = Vec::new();
-        for (_, mut group) in ranked {
-            group.sort_by(|left, right| {
-                right
-                    .0
-                    .total_cmp(&left.0)
-                    .then_with(|| left.1.routing_id.cmp(&right.1.routing_id))
-            });
-            for (_, target) in group {
-                let attempt = (targets.len() < maximum).then_some(targets.len() + 1);
-                targets.push(RouteSimulationTarget {
-                    target_id: target.id,
-                    provider_id: target.provider_id,
-                    provider_name: target.provider_name,
-                    upstream_model: target.upstream_model,
-                    priority: target.priority,
-                    eligible: true,
-                    reason: attempt
-                        .is_none()
-                        .then(|| "eligible but beyond max_attempts".to_owned()),
-                    attempt,
-                });
-            }
-        }
+        let mut targets = rank_simulation_targets(ranked, maximum);
         targets.extend(ineligible);
         Ok(RouteSimulation {
             deterministic_seed: seed.to_owned(),
@@ -390,6 +348,27 @@ impl Store {
             mode,
             targets,
         })
+    }
+
+    async fn target_has_certified_capability(
+        &self,
+        target: &RouteTargetRecord,
+        operation: OperationKind,
+        surface: Surface,
+        mode: TransportMode,
+    ) -> Result<bool, Error> {
+        let capability: bool = sqlx::query_scalar!(
+            "SELECT EXISTS (SELECT 1 FROM providers p \
+             JOIN provider_revision_models prm ON prm.provider_revision_id = p.active_revision_id \
+             JOIN provider_revision_capabilities prc \
+               ON prc.provider_revision_model_id = prm.id \
+             WHERE prm.source_provider_model_id = $1 AND prc.operation = $2 \
+               AND prc.surface = $3 AND prc.mode = $4 AND prm.enabled \
+               AND prc.source = 'certified' AND p.state <> 'disabled'::provider_state) AS \"value!\"",
+        target.provider_model_id, operation.as_str(), surface.as_str(), mode.as_str())
+        .fetch_one(self.pool())
+        .await?;
+        Ok(capability)
     }
 
     pub async fn list_routes(
@@ -602,4 +581,50 @@ impl From<RouteTargetRow> for RouteTargetRecord {
             position: row.position,
         }
     }
+}
+
+fn ineligible_simulation_target(target: RouteTargetRecord) -> RouteSimulationTarget {
+    RouteSimulationTarget {
+        target_id: target.id,
+        provider_id: target.provider_id,
+        provider_name: target.provider_name,
+        upstream_model: target.upstream_model,
+        priority: target.priority,
+        eligible: false,
+        reason: Some("missing exact capability or provider/model is disabled".to_owned()),
+        attempt: None,
+    }
+}
+
+/// Orders eligible targets by priority, then by descending rendezvous score
+/// with routing id as the tie-break, numbering attempts up to `maximum`.
+fn rank_simulation_targets(
+    ranked: BTreeMap<i32, Vec<(f64, RouteTargetRecord)>>,
+    maximum: usize,
+) -> Vec<RouteSimulationTarget> {
+    let mut targets = Vec::new();
+    for (_, mut group) in ranked {
+        group.sort_by(|left, right| {
+            right
+                .0
+                .total_cmp(&left.0)
+                .then_with(|| left.1.routing_id.cmp(&right.1.routing_id))
+        });
+        for (_, target) in group {
+            let attempt = (targets.len() < maximum).then_some(targets.len() + 1);
+            targets.push(RouteSimulationTarget {
+                target_id: target.id,
+                provider_id: target.provider_id,
+                provider_name: target.provider_name,
+                upstream_model: target.upstream_model,
+                priority: target.priority,
+                eligible: true,
+                reason: attempt
+                    .is_none()
+                    .then(|| "eligible but beyond max_attempts".to_owned()),
+                attempt,
+            });
+        }
+    }
+    targets
 }

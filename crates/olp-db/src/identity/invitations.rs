@@ -6,6 +6,7 @@ use uuid::Uuid;
 use crate::{
     audit_events::record_success,
     authentication::insert_versioned_session,
+    configuration::MAX_PAGE_SIZE,
     error::Error as PersistenceError,
     idempotency::{
         Outcome, Replayable, ReplayableIdempotencyClaim, Response, claim_idempotency,
@@ -21,7 +22,6 @@ use super::{
     NewInvitation, accounts::UserRow, parse_role,
 };
 
-const MAX_PAGE_SIZE: i64 = 100;
 const IDENTITY_EMAIL_LOCK_SEED: i64 = 0x4f4c_505f_4944;
 
 impl Store {

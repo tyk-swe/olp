@@ -23,7 +23,7 @@ Status values: `planned`, `in progress`, `done`, `dropped` (with a reason).
 | Next period, week 3 | OTEL-06 | — | — | 1 | — |
 | Unscheduled | TEST-04, HYG-04 … HYG-08, FLEX-01 … FLEX-06 | — | 3 | 3 | 6 (incl. P4) |
 
-60 items: 48 scheduled, 12 unscheduled; 37 done. [`deferred.md`](deferred.md) lists what
+60 items: 48 scheduled, 12 unscheduled; 49 done. [`deferred.md`](deferred.md) lists what
 is intentionally not here.
 
 ## CI — the gates themselves
@@ -102,10 +102,10 @@ is intentionally not here.
 - [x] **HYG-01** Size-baseline burn-down: split the 9 oversized test files and the 15 longest functions — P3 · M · week 8 · done → [milestone 8](milestones/08-release-and-retro.md)
 - [x] **HYG-02** Security pass on 2.3.0: headers, cookies, auth throttling, egress rules for the collector, audit tools — P2 · M · week 8 · done → [milestone 8](milestones/08-release-and-retro.md)
 - [x] **HYG-03** Retrospective and the next roadmap — P2 · S · week 8 · done → [milestone 8](milestones/08-release-and-retro.md)
-- [ ] **HYG-04** `deploy/Dockerfile` `USER 65532:65532` to clear hadolint DL3066 and match the Helm security context — P4 · S · unscheduled · planned
+- [x] **HYG-04** `deploy/Dockerfile` `USER 65532:65532` to clear hadolint DL3066 and match the Helm security context — P4 · S · unscheduled · done
 - [ ] **HYG-05** Retire the duplicate `jsonwebtoken` line once `google-cloud-auth` moves off 10.x — P4 · S · unscheduled · planned (watch Dependabot)
 - [ ] **HYG-06** Transitive lockfile maintenance: a scheduled `cargo update` PR so yanks and patch releases surface weekly, not on the next unrelated push — P3 · S · unscheduled · planned
-- [ ] **HYG-07** Toolchain bump procedure documented in `CONTRIBUTING.md` (Rust pin in three places, Node, pnpm, fuzz nightly, sqlx-cli, nextest, llvm-cov) — P3 · S · unscheduled · planned
+- [x] **HYG-07** Toolchain bump procedure documented in `CONTRIBUTING.md` (Rust pin in three places, Node, pnpm, fuzz nightly, sqlx-cli, nextest, llvm-cov) — P3 · S · unscheduled · done
 - [ ] **HYG-08** Node 26 / corepack plan for the console build stage (majors are excluded from Dependabot on purpose) — P4 · S · unscheduled · planned
 
 ## FLEX — restrictive where it matters, flexible where it does not

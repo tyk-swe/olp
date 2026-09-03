@@ -8,7 +8,7 @@ use crate::domain::{
             MessageRole, Operation, SourceExtensions, SpeechRequest as CanonicalSpeechRequest,
             TranscriptionRequest as CanonicalTranscriptionRequest,
         },
-        results::{MediaArtifact, SpeechResult, TranscriptionResult, TranscriptionSegment},
+        results::{SpeechResult, TranscriptionResult, TranscriptionSegment},
     },
     ids::{RouteSlug, RouteSlugError},
 };
@@ -143,83 +143,6 @@ pub fn encode_speech_body(result: &SpeechResult) -> Result<BinaryMediaBody, Erro
     Ok(BinaryMediaBody {
         media: result.audio.clone(),
     })
-}
-
-// ponytail: unwired in production — streamed audio flows through raw SSE
-// passthrough (raw_sse_response / is_raw_media_terminal), not this semantic
-// speech-stream codec. Kept only for the protocol_json fuzz target + unit tests.
-// Delete this codec together with its fuzz arm if a passthrough→semantic switch
-// is not on the roadmap.
-#[derive(Clone, Deserialize, PartialEq, Serialize)]
-pub struct SpeechStreamEvent {
-    #[serde(rename = "type")]
-    pub kind: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub audio: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub delta: Option<String>,
-    #[serde(flatten)]
-    pub extra: BTreeMap<String, Value>,
-}
-
-pub enum SpeechStreamUpdate {
-    Audio {
-        media: MediaArtifact,
-        extensions: SourceExtensions,
-    },
-    Done {
-        extensions: SourceExtensions,
-    },
-}
-
-pub fn decode_speech_stream_event(
-    event: SpeechStreamEvent,
-    mut stage_base64: impl FnMut(&str) -> Result<MediaArtifact, Error>,
-) -> Result<SpeechStreamUpdate, Error> {
-    let mut extensions = BTreeMap::new();
-    collect_extra("", &event.extra, &mut extensions);
-    match event.kind.as_str() {
-        "speech.audio.delta" => {
-            let encoded = event
-                .audio
-                .or(event.delta)
-                .ok_or(Error::MissingAudioDelta)?;
-            Ok(SpeechStreamUpdate::Audio {
-                media: stage_base64(&encoded)?,
-                extensions: SourceExtensions::new(Surface::OpenAi, extensions),
-            })
-        }
-        "speech.audio.done" => Ok(SpeechStreamUpdate::Done {
-            extensions: SourceExtensions::new(Surface::OpenAi, extensions),
-        }),
-        _ => Err(Error::UnsupportedStreamEvent(event.kind)),
-    }
-}
-
-pub fn encode_speech_stream_update(
-    update: &SpeechStreamUpdate,
-    mut read_base64: impl FnMut(&MediaArtifact) -> Result<String, Error>,
-) -> Result<SpeechStreamEvent, Error> {
-    let (kind, audio, extensions) = match update {
-        SpeechStreamUpdate::Audio { media, extensions } => {
-            extensions.ensure_representable_on(Surface::OpenAi)?;
-            ("speech.audio.delta", Some(read_base64(media)?), extensions)
-        }
-        SpeechStreamUpdate::Done { extensions } => {
-            extensions.ensure_representable_on(Surface::OpenAi)?;
-            ("speech.audio.done", None, extensions)
-        }
-    };
-    apply_pointer_extensions(
-        SpeechStreamEvent {
-            kind: kind.into(),
-            audio,
-            delta: None,
-            extra: BTreeMap::new(),
-        },
-        &extensions.values,
-    )
-    .map_err(Error::InvalidExtension)
 }
 
 #[derive(Clone, Deserialize, PartialEq, Serialize)]
@@ -836,10 +759,6 @@ pub enum Error {
     Sse(#[from] DecodeError),
     #[error("binary speech extensions require an HTTP header representation")]
     BinaryExtensionsUnsupported,
-    #[error("speech stream event is missing its audio delta")]
-    MissingAudioDelta,
-    #[error("unsupported audio stream event: {0}")]
-    UnsupportedStreamEvent(String),
     #[error("audio chunk staging failed: {0}")]
     Staging(String),
     #[error("transcription stream event is missing type")]

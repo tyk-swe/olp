@@ -30,31 +30,7 @@ pub fn request(request: MessagesRequest) -> Result<Operation, DecodeError> {
 
     let mut messages = Vec::new();
     if let Some(system) = request.system {
-        let mut content = Vec::new();
-        match system {
-            SystemPrompt::Text(text) => content.push(ContentPart::Text { text }),
-            SystemPrompt::Blocks(blocks) => {
-                for (index, block) in blocks.into_iter().enumerate() {
-                    if block.kind != "text" {
-                        return Err(DecodeError::UnexpectedType {
-                            expected: "text",
-                            actual: block.kind,
-                        });
-                    }
-                    collect_extra(&format!("/system/{index}"), &block.extra, &mut extensions);
-                    content.push(ContentPart::Text { text: block.text });
-                }
-            }
-        }
-        if !content.is_empty() {
-            messages.push(CanonicalMessage {
-                role: MessageRole::System,
-                content,
-                name: None,
-                tool_call_id: None,
-                tool_calls: Vec::new(),
-            });
-        }
+        messages.extend(decode_system(system, &mut extensions)?);
     }
 
     let mut wire_message_index = 0_usize;
@@ -79,26 +55,7 @@ pub fn request(request: MessagesRequest) -> Result<Operation, DecodeError> {
         return Err(DecodeError::EmptyMessages);
     }
 
-    let mut tools = Vec::new();
-    for (wire_tool_index, tool) in request.tools.into_iter().enumerate() {
-        if let Some(input_schema) = tool.input_schema.clone()
-            && tool.kind.is_none()
-        {
-            let prefix = format!("/tools/{wire_tool_index}");
-            collect_extra(&prefix, &tool.extra, &mut extensions);
-            tools.push(ToolDefinition {
-                name: tool.name,
-                description: tool.description,
-                input_schema,
-            });
-        } else {
-            extensions.insert(
-                format!("/tools/{wire_tool_index}"),
-                serde_json::to_value(tool)?,
-            );
-        }
-    }
-
+    let tools = decode_tools(request.tools, &mut extensions)?;
     let (tool_choice, parallel_tool_calls) = request
         .tool_choice
         .map(|choice| decode_tool_choice(choice, &mut extensions))
@@ -123,6 +80,61 @@ pub fn request(request: MessagesRequest) -> Result<Operation, DecodeError> {
         response_format: None,
         extensions: SourceExtensions::new(Surface::Anthropic, extensions),
     }))
+}
+
+fn decode_system(
+    system: SystemPrompt,
+    extensions: &mut BTreeMap<String, Value>,
+) -> Result<Option<CanonicalMessage>, DecodeError> {
+    let mut content = Vec::new();
+    match system {
+        SystemPrompt::Text(text) => content.push(ContentPart::Text { text }),
+        SystemPrompt::Blocks(blocks) => {
+            for (index, block) in blocks.into_iter().enumerate() {
+                if block.kind != "text" {
+                    return Err(DecodeError::UnexpectedType {
+                        expected: "text",
+                        actual: block.kind,
+                    });
+                }
+                collect_extra(&format!("/system/{index}"), &block.extra, extensions);
+                content.push(ContentPart::Text { text: block.text });
+            }
+        }
+    }
+    Ok((!content.is_empty()).then(|| CanonicalMessage {
+        role: MessageRole::System,
+        content,
+        name: None,
+        tool_call_id: None,
+        tool_calls: Vec::new(),
+    }))
+}
+
+fn decode_tools(
+    wire_tools: Vec<super::super::dto::Tool>,
+    extensions: &mut BTreeMap<String, Value>,
+) -> Result<Vec<ToolDefinition>, DecodeError> {
+    let mut tools = Vec::new();
+    for (wire_tool_index, tool) in wire_tools.into_iter().enumerate() {
+        if let Some(input_schema) = tool.input_schema.clone()
+            && tool.kind.is_none()
+        {
+            let prefix = format!("/tools/{wire_tool_index}");
+            collect_extra(&prefix, &tool.extra, extensions);
+            tools.push(ToolDefinition {
+                name: tool.name,
+                description: tool.description,
+                input_schema,
+            });
+        } else {
+            extensions.insert(
+                format!("/tools/{wire_tool_index}"),
+                serde_json::to_value(tool)?,
+            );
+        }
+    }
+    Ok(tools)
 }
 
 fn validate_request(request: &MessagesRequest) -> Result<(), DecodeError> {

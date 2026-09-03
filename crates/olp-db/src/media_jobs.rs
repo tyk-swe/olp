@@ -8,8 +8,6 @@ mod lifecycle;
 mod queries;
 mod reconciliation;
 
-const MAX_PAGE_SIZE: u16 = 200;
-
 /// Seconds a client poll holds the reconciler off a job. The claim query, the
 /// staleness summary, and the poll write all bind this same gate.
 const POLL_GATE_SECONDS: i32 = 5;

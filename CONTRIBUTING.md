@@ -34,6 +34,28 @@ Additional targets need the matching tools pinned by CI: `cargo-llvm-cov`
 `cargo-fuzz` 0.13.2 plus nightly `2026-05-15` for fuzz replay, and
 `shellcheck`/`jq` for script checks. `make help` is the complete target list.
 
+## Bumping a toolchain pin
+
+Every pin moves in one change together with the prose in this file. The Rust
+pins are cross-checked by `make release-version`, image digests by
+`make supply-chain`, and the rest by the jobs that consume them:
+
+- Rust: `rust-toolchain.toml`, `.github/actions/setup-rust/action.yml`, and
+  the `FROM rust:` tag and digest in `deploy/Dockerfile`.
+- Node.js and pnpm: `engines` in `console/package.json`, the `FROM node:`
+  digest in `deploy/Dockerfile`, and `console/README.md`.
+- Python and uv: `.github/actions/setup-python-uv/action.yml` and
+  `tests/README.md`.
+- Fuzz nightly: `FUZZ_TOOLCHAIN` in the `Makefile`; CI derives its cache key
+  from that line.
+- Cargo tools (`cargo-nextest`, `cargo-llvm-cov`, `sqlx-cli`, `cargo-fuzz`):
+  the `tools:` lists in `.github/workflows/ci.yml` and
+  `.github/workflows/live-providers.yml`.
+
+After a Rust bump run `make check` and build the image with
+`make smoke-image-modes`; after an `sqlx-cli` bump run `make sqlx-prepare` and
+commit `.sqlx/` if it changed; after a fuzz nightly bump run `make fuzz-replay`.
+
 ## Architectural rules
 
 Keep behavior in its owning role:
@@ -71,9 +93,9 @@ may never depend on test harnesses.
 - `deploy/helm/values.yaml`, `values.schema.json`, and templates change
   together; verify with `make helm-verify`.
 - `release-metadata.env` is the N-1 upgrade-rehearsal baseline: the last
-  migration shipped by the previous release. Advance it in the release commit
-  whenever the release adds migrations; `make release-version` checks it
-  names a tracked migration.
+  migration shipped by the latest published release. A release commit leaves
+  it untouched; the first change after a release that added migrations
+  advances it. `make release-version` checks it names a tracked migration.
 - Provider kinds, auth fields, presets, and validation live in
   `crates/olp-engine/src/domain/provider_configuration.rs`.
 - Inference endpoint method/path/admission/routing policy lives in

@@ -7,6 +7,23 @@ semantic versioning and match `Cargo.toml`, `console/package.json`,
 
 ## [Unreleased]
 
+### Changed
+
+**Repository**
+- **HYG-04:** The image runs as numeric `USER 65532:65532`, matching the
+  chart's security context, so `runAsNonRoot` admission needs no passwd lookup.
+- **HYG-07:** `CONTRIBUTING.md` documents the toolchain bump procedure.
+- The N-1 upgrade-rehearsal baseline advances to migration 0049, the last
+  migration shipped by 2.3.0.
+- The unwired OpenAI speech-stream and video-content encode codecs, kept only
+  for the fuzz target, are removed together with their fuzz arms.
+
+### Fixed
+
+**Management API**
+- User and invitation listings honour page sizes up to 200 like every other
+  collection; they silently returned at most 100 rows.
+
 ## [2.3.0] - 2026-09-03
 
 Adds optional distributed tracing, hard API-key cost budgets, measured
@@ -142,29 +159,30 @@ rehearsal covers 0043 → 0048.
 ### Added
 
 **Operator settings**
-- `OLP_PROVIDER_EGRESS_ALLOW_CIDRS` and `OLP_PROVIDER_EGRESS_ALLOW_HTTP_HOSTS`
-  let an installation reach on-premises or VPC model servers. The default
-  denies every non-public address and every plain-HTTP endpoint exactly as
-  before; the allowlist is checked on literal hosts and on every DNS answer,
-  and a mixed answer set still fails closed. The debug-only
-  `OLP_ALLOW_INSECURE_PROVIDER_ENDPOINTS_FOR_TESTS` hatch is gone; the e2e and
-  Playwright harnesses now use the production variables.
-- `OLP_HTTP_CONNECTION_MAX_AGE_SECONDS` and
-  `OLP_HTTP_CONNECTION_DRAIN_TIMEOUT_SECONDS` replace the fixed 5-minute age
-  and 30-second drain.
-- `OLP_HTTP_MAX_JSON_BODY_BYTES`, `OLP_HTTP_MAX_MEDIA_BODY_BYTES`,
+- **FLEX-01:** `OLP_PROVIDER_EGRESS_ALLOW_CIDRS` and
+  `OLP_PROVIDER_EGRESS_ALLOW_HTTP_HOSTS` let an installation reach on-premises
+  or VPC model servers. The default denies every non-public address and every
+  plain-HTTP endpoint exactly as before; the allowlist is checked on literal
+  hosts and on every DNS answer, and a mixed answer set still fails closed. The
+  debug-only `OLP_ALLOW_INSECURE_PROVIDER_ENDPOINTS_FOR_TESTS` hatch is gone;
+  the e2e and Playwright harnesses now use the production variables.
+- **FLEX-03:** `OLP_HTTP_CONNECTION_MAX_AGE_SECONDS` and
+  `OLP_HTTP_CONNECTION_DRAIN_TIMEOUT_SECONDS` replace the fixed 5-minute age and
+  30-second drain.
+- **FLEX-04:** `OLP_HTTP_MAX_JSON_BODY_BYTES`, `OLP_HTTP_MAX_MEDIA_BODY_BYTES`,
   `OLP_HTTP_MAX_INLINE_MEDIA_ITEMS`, `OLP_HTTP_MAX_INLINE_MEDIA_ITEM_BYTES`,
-  `OLP_HTTP_MAX_INLINE_MEDIA_TOTAL_BYTES`, `OLP_PROVIDER_MAX_RESPONSE_BYTES`
-  and `OLP_PROVIDER_MAX_EVENT_BYTES` expose the request, inline-media and
-  provider-response caps that were constants. Defaults are unchanged; the
-  media cap must stay within half the media spool.
-- `OLP_GATEWAY_CORS_ALLOWED_ORIGINS` enables browser access to the inference
-  gateway for an explicit origin list. Wildcards are refused, credentials are
-  never allowed, and the management API stays same-origin.
-- The `limits.valkey_unavailable` installation setting (`fail_closed`, the
-  default, or `fail_open`) decides whether hard-limited keys are admitted while
-  Valkey is unreachable. Fail-open applies only when Valkey is configured,
-  is audited like every setting, and counts `olp_limits_fail_open_total`.
+  `OLP_HTTP_MAX_INLINE_MEDIA_TOTAL_BYTES`, `OLP_PROVIDER_MAX_RESPONSE_BYTES` and
+  `OLP_PROVIDER_MAX_EVENT_BYTES` expose the request, inline-media and
+  provider-response caps that were constants. Defaults are unchanged; the media
+  cap must stay within half the media spool.
+- **FLEX-06:** `OLP_GATEWAY_CORS_ALLOWED_ORIGINS` enables browser access to the
+  inference gateway for an explicit origin list. Wildcards are refused,
+  credentials are never allowed, and the management API stays same-origin.
+- **FLEX-05:** The `limits.valkey_unavailable` installation setting
+  (`fail_closed`, the default, or `fail_open`) decides whether hard-limited keys
+  are admitted while Valkey is unreachable. Fail-open applies only when Valkey
+  is configured, is audited like every setting, and counts
+  `olp_limits_fail_open_total`.
 
 ### Changed
 
@@ -186,32 +204,33 @@ rehearsal covers 0043 → 0048.
   proved before teardown, removing the UTC-minute rollover race.
 
 **Providers**
-- Renaming a provider, rotating its credential, disabling a model, or
-  re-reviewing an unchanged capability set no longer resets certified
+- **FLEX-02:** Renaming a provider, rotating its credential, disabling a model,
+  or re-reviewing an unchanged capability set no longer resets certified
   capabilities to `declared`. Only endpoint, region, project, deployment, API
   version or model-set changes clear probe evidence; credential rotation keeps
   the certification but still requires a successful probe before activation.
-- A model may carry 64 reviewed capability tuples (was 16) and certification
-  runs eight probes concurrently (was four).
+- **FLEX-06:** A model may carry 64 reviewed capability tuples (was 16) and
+  certification runs eight probes concurrently (was four).
 
 **Gateway (client-visible)**
-- A streaming response is no longer cut when its connection reaches the
-  maximum age. HTTP/2 connections still receive GOAWAY for rebalancing, but a
-  connection is never force-closed while a response body is in flight (with a
+- **FLEX-03:** A streaming response is no longer cut when its connection reaches
+  the maximum age. HTTP/2 connections still receive GOAWAY for rebalancing, but
+  a connection is never force-closed while a response body is in flight (with a
   one-hour ceiling). HTTP/1 connections are single-request and are not
   age-limited at all.
-- `Content-Encoding: gzip` JSON request bodies are accepted; the inflated size
-  is bounded by the JSON cap. Multipart bodies still require identity.
-- `/v1/models` and the Anthropic and Gemini model listings now include routes
-  whose only operations are embeddings, images, audio or video; they were
-  hidden because visibility probed generation and token counting only.
+- **FLEX-06:** `Content-Encoding: gzip` JSON request bodies are accepted; the
+  inflated size is bounded by the JSON cap. Multipart bodies still require
+  identity.
+- **FLEX-06:** `/v1/models` and the Anthropic and Gemini model listings now
+  include routes whose only operations are embeddings, images, audio or video;
+  they were hidden because visibility probed generation and token counting only.
 
 **Management API**
-- Activating a route draft validates it inline. The `validated` state is no
-  longer a prerequisite, so `route_not_validated` (409) is gone; the separate
-  validate endpoint remains for previewing the attempt plan.
-- Every collection accepts page sizes up to 200. Nine configuration lists
-  refused sizes above 100 with a message that contradicted the contract.
+- **FLEX-06:** Activating a route draft validates it inline. The `validated`
+  state is no longer a prerequisite, so `route_not_validated` (409) is gone; the
+  separate validate endpoint remains for previewing the attempt plan.
+- **FLEX-06:** Every collection accepts page sizes up to 200. Nine configuration
+  lists refused sizes above 100 with a message that contradicted the contract.
 
 **Management API**
 - Every list response now also carries its rows under `items`. Fourteen endpoints

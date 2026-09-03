@@ -248,28 +248,8 @@ async fn execute_playground(
             _ => {}
         }
     }
-    let tool_calls = tool_calls
-        .into_values()
-        .map(|call| {
-            Ok(PlaygroundToolCall::from(ToolCall {
-                id: call.id.ok_or_else(|| {
-                    provider_problem("The provider returned a tool call without an ID.")
-                })?,
-                name: call.name.ok_or_else(|| {
-                    provider_problem("The provider returned a tool call without a name.")
-                })?,
-                arguments: call.arguments,
-            }))
-        })
-        .collect::<Result<Vec<_>, Problem>>()?;
-    let structured_output =
-        if structured && !output_text.is_empty() {
-            Some(serde_json::from_str(&output_text).map_err(|_| {
-                provider_problem("The provider did not return valid structured JSON.")
-            })?)
-        } else {
-            None
-        };
+    let tool_calls = finish_tool_calls(tool_calls)?;
+    let structured_output = structured_output(structured, &output_text)?;
     let mut response = Json(PlaygroundResponse {
         id: execution.request_id.as_uuid(),
         model: execution.route_slug.to_string(),
@@ -289,7 +269,37 @@ async fn execute_playground(
     Ok(response)
 }
 
-fn playground_operation(request: PlaygroundRequest) -> Result<(Operation, Surface, bool), Problem> {
+fn finish_tool_calls(
+    tool_calls: BTreeMap<(u32, u32), ToolCallBuilder>,
+) -> Result<Vec<PlaygroundToolCall>, Problem> {
+    tool_calls
+        .into_values()
+        .map(|call| {
+            Ok(PlaygroundToolCall::from(ToolCall {
+                id: call.id.ok_or_else(|| {
+                    provider_problem("The provider returned a tool call without an ID.")
+                })?,
+                name: call.name.ok_or_else(|| {
+                    provider_problem("The provider returned a tool call without a name.")
+                })?,
+                arguments: call.arguments,
+            }))
+        })
+        .collect()
+}
+
+fn structured_output(structured: bool, output_text: &str) -> Result<Option<Value>, Problem> {
+    if !structured || output_text.is_empty() {
+        return Ok(None);
+    }
+    serde_json::from_str(output_text)
+        .map(Some)
+        .map_err(|_| provider_problem("The provider did not return valid structured JSON."))
+}
+
+fn validate_playground_request(
+    request: &PlaygroundRequest,
+) -> Result<(RouteSlug, Surface), Problem> {
     let mut fields = FieldErrors::new();
     let route = match RouteSlug::parse(request.model.trim().to_owned()) {
         Ok(route) => Some(route),
@@ -359,6 +369,11 @@ fn playground_operation(request: PlaygroundRequest) -> Result<(Operation, Surfac
     }
     // Only an unparsed slug leaves the route empty, and that recorded a field error.
     let route = route.ok_or_else(Problem::internal)?;
+    Ok((route, surface))
+}
+
+fn playground_operation(request: PlaygroundRequest) -> Result<(Operation, Surface, bool), Problem> {
+    let (route, surface) = validate_playground_request(&request)?;
     let structured = matches!(
         request.response_format.as_ref(),
         Some(PlaygroundResponseFormat::JsonObject | PlaygroundResponseFormat::JsonSchema { .. })

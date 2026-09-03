@@ -74,40 +74,8 @@ pub fn request(request: &GenerationRequest) -> Result<GenerateContentRequest, En
             extra: BTreeMap::new(),
         })
         .collect();
-    let tool_config = request.tool_choice.as_ref().map(|choice| ToolConfig {
-        function_calling_config: Some(FunctionCallingConfig {
-            mode: match choice {
-                CanonicalToolChoice::Auto => "AUTO",
-                CanonicalToolChoice::None => "NONE",
-                CanonicalToolChoice::Required | CanonicalToolChoice::Named(_) => "ANY",
-            }
-            .into(),
-            allowed_function_names: match choice {
-                CanonicalToolChoice::Named(name) => vec![name.clone()],
-                _ => Vec::new(),
-            },
-            extra: BTreeMap::new(),
-        }),
-        extra: BTreeMap::new(),
-    });
-    let (response_mime_type, response_schema) = match &request.response_format {
-        None | Some(ResponseFormat::Text) => (None, None),
-        Some(ResponseFormat::JsonObject) => (Some("application/json".into()), None),
-        Some(ResponseFormat::JsonSchema { schema, .. }) => {
-            (Some("application/json".into()), Some(schema.clone()))
-        }
-    };
-    let generation_config = GenerationConfig {
-        candidate_count: request.parameters.candidate_count,
-        stop_sequences: request.parameters.stop_sequences.clone(),
-        max_output_tokens: request.parameters.max_output_tokens,
-        temperature: request.parameters.temperature,
-        top_p: request.parameters.top_p,
-        seed: request.parameters.seed,
-        response_mime_type,
-        response_schema,
-        extra: BTreeMap::new(),
-    };
+    let tool_config = request.tool_choice.as_ref().map(encode_tool_config);
+    let generation_config = encode_generation_config(request);
     let mut encoded = GenerateContentRequest {
         model: None,
         contents,
@@ -123,6 +91,46 @@ pub fn request(request: &GenerationRequest) -> Result<GenerateContentRequest, En
     };
     apply_extensions(&mut encoded, &request.extensions.values)?;
     Ok(encoded)
+}
+
+fn encode_tool_config(choice: &CanonicalToolChoice) -> ToolConfig {
+    ToolConfig {
+        function_calling_config: Some(FunctionCallingConfig {
+            mode: match choice {
+                CanonicalToolChoice::Auto => "AUTO",
+                CanonicalToolChoice::None => "NONE",
+                CanonicalToolChoice::Required | CanonicalToolChoice::Named(_) => "ANY",
+            }
+            .into(),
+            allowed_function_names: match choice {
+                CanonicalToolChoice::Named(name) => vec![name.clone()],
+                _ => Vec::new(),
+            },
+            extra: BTreeMap::new(),
+        }),
+        extra: BTreeMap::new(),
+    }
+}
+
+fn encode_generation_config(request: &GenerationRequest) -> GenerationConfig {
+    let (response_mime_type, response_schema) = match &request.response_format {
+        None | Some(ResponseFormat::Text) => (None, None),
+        Some(ResponseFormat::JsonObject) => (Some("application/json".into()), None),
+        Some(ResponseFormat::JsonSchema { schema, .. }) => {
+            (Some("application/json".into()), Some(schema.clone()))
+        }
+    };
+    GenerationConfig {
+        candidate_count: request.parameters.candidate_count,
+        stop_sequences: request.parameters.stop_sequences.clone(),
+        max_output_tokens: request.parameters.max_output_tokens,
+        temperature: request.parameters.temperature,
+        top_p: request.parameters.top_p,
+        seed: request.parameters.seed,
+        response_mime_type,
+        response_schema,
+        extra: BTreeMap::new(),
+    }
 }
 
 fn encode_content(

@@ -26,7 +26,7 @@ The active item definitions and status live in [`backlog.md`](backlog.md).
 
 ## Health signals
 
-- Keep the consecutive-green `Required` streak visible; it was ten inspected
+- Keep the consecutive-green `Required` streak visible; it was twelve inspected
   runs at the September archive cut.
 - Record checkout-to-first-request elapsed time from a person who has not used
   this repository before.

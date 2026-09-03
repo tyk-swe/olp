@@ -26,58 +26,8 @@ pub(super) fn validate_id_token(
     expected_nonce: &str,
     require_recent_authentication: bool,
 ) -> Result<ValidatedIdentity, Problem> {
-    let header = decode_header(id_token).map_err(|_| invalid_id_token())?;
-    if matches!(
-        header.alg,
-        Algorithm::HS256 | Algorithm::HS384 | Algorithm::HS512
-    ) {
-        return Err(invalid_id_token());
-    }
-    let kid = header.kid.as_deref().ok_or_else(invalid_id_token)?;
-    let matching_keys = jwks
-        .keys
-        .iter()
-        .filter(|key| key.common.key_id.as_deref() == Some(kid))
-        .collect::<Vec<_>>();
-    if matching_keys.len() != 1 {
-        return Err(invalid_id_token());
-    }
-    let jwk = matching_keys[0];
-    validate_jwk_for_signature(jwk, header.alg)?;
-    let key = DecodingKey::from_jwk(jwk).map_err(|_| invalid_id_token())?;
-    let mut validation = Validation::new(header.alg);
-    validation.set_required_spec_claims(&["exp", "iss", "aud", "sub"]);
-    validation.set_issuer(&[configuration.issuer.as_str()]);
-    validation.set_audience(&[configuration.client_id.as_str()]);
-    validation.validate_nbf = true;
-    validation.leeway = 60;
-    let claims = decode::<Value>(id_token, &key, &validation)
-        .map_err(|_| invalid_id_token())?
-        .claims;
-    let issued_at = claims
-        .get("iat")
-        .and_then(Value::as_i64)
-        .ok_or_else(invalid_id_token)?;
-    let expires_at = claims
-        .get("exp")
-        .and_then(Value::as_i64)
-        .ok_or_else(invalid_id_token)?;
-    let now = Utc::now().timestamp();
-    if issued_at > now + 60 || issued_at < now - FLOW_TTL.num_seconds() || expires_at <= issued_at {
-        return Err(invalid_id_token());
-    }
-    if require_recent_authentication {
-        let authenticated_at = claims
-            .get("auth_time")
-            .and_then(Value::as_i64)
-            .ok_or_else(invalid_id_token)?;
-        if authenticated_at > now + 60
-            || authenticated_at < now - FLOW_TTL.num_seconds()
-            || authenticated_at > issued_at + 60
-        {
-            return Err(invalid_id_token());
-        }
-    }
+    let claims = decode_claims(id_token, jwks, configuration)?;
+    validate_freshness(&claims, require_recent_authentication)?;
     let nonce = claims
         .get("nonce")
         .and_then(Value::as_str)
@@ -103,8 +53,82 @@ pub(super) fn validate_id_token(
         .and_then(Value::as_bool)
         .unwrap_or(false);
     let display_name = bounded_claim(&claims, "name", 100)?;
-    let groups = match claims.get(&configuration.groups_claim) {
-        None => Vec::new(),
+    let groups = groups_claim(&claims, &configuration.groups_claim)?;
+    Ok(ValidatedIdentity {
+        subject,
+        email,
+        email_verified,
+        display_name,
+        groups,
+    })
+}
+
+fn decode_claims(
+    id_token: &str,
+    jwks: &JwkSet,
+    configuration: &OidcConfiguration,
+) -> Result<Value, Problem> {
+    let header = decode_header(id_token).map_err(|_| invalid_id_token())?;
+    if matches!(
+        header.alg,
+        Algorithm::HS256 | Algorithm::HS384 | Algorithm::HS512
+    ) {
+        return Err(invalid_id_token());
+    }
+    let kid = header.kid.as_deref().ok_or_else(invalid_id_token)?;
+    let matching_keys = jwks
+        .keys
+        .iter()
+        .filter(|key| key.common.key_id.as_deref() == Some(kid))
+        .collect::<Vec<_>>();
+    if matching_keys.len() != 1 {
+        return Err(invalid_id_token());
+    }
+    let jwk = matching_keys[0];
+    validate_jwk_for_signature(jwk, header.alg)?;
+    let key = DecodingKey::from_jwk(jwk).map_err(|_| invalid_id_token())?;
+    let mut validation = Validation::new(header.alg);
+    validation.set_required_spec_claims(&["exp", "iss", "aud", "sub"]);
+    validation.set_issuer(&[configuration.issuer.as_str()]);
+    validation.set_audience(&[configuration.client_id.as_str()]);
+    validation.validate_nbf = true;
+    validation.leeway = 60;
+    Ok(decode::<Value>(id_token, &key, &validation)
+        .map_err(|_| invalid_id_token())?
+        .claims)
+}
+
+fn validate_freshness(claims: &Value, require_recent_authentication: bool) -> Result<(), Problem> {
+    let issued_at = claims
+        .get("iat")
+        .and_then(Value::as_i64)
+        .ok_or_else(invalid_id_token)?;
+    let expires_at = claims
+        .get("exp")
+        .and_then(Value::as_i64)
+        .ok_or_else(invalid_id_token)?;
+    let now = Utc::now().timestamp();
+    if issued_at > now + 60 || issued_at < now - FLOW_TTL.num_seconds() || expires_at <= issued_at {
+        return Err(invalid_id_token());
+    }
+    if require_recent_authentication {
+        let authenticated_at = claims
+            .get("auth_time")
+            .and_then(Value::as_i64)
+            .ok_or_else(invalid_id_token)?;
+        if authenticated_at > now + 60
+            || authenticated_at < now - FLOW_TTL.num_seconds()
+            || authenticated_at > issued_at + 60
+        {
+            return Err(invalid_id_token());
+        }
+    }
+    Ok(())
+}
+
+fn groups_claim(claims: &Value, name: &str) -> Result<Vec<String>, Problem> {
+    match claims.get(name) {
+        None => Ok(Vec::new()),
         Some(Value::Array(values)) if values.len() <= 200 => values
             .iter()
             .map(|value| {
@@ -118,16 +142,9 @@ pub(super) fn validate_id_token(
                     .map(str::to_owned)
                     .ok_or_else(invalid_id_token)
             })
-            .collect::<Result<Vec<_>, _>>()?,
-        Some(_) => return Err(invalid_id_token()),
-    };
-    Ok(ValidatedIdentity {
-        subject,
-        email,
-        email_verified,
-        display_name,
-        groups,
-    })
+            .collect(),
+        Some(_) => Err(invalid_id_token()),
+    }
 }
 
 fn validate_jwk_for_signature(jwk: &Jwk, algorithm: Algorithm) -> Result<(), Problem> {

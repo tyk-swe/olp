@@ -56,7 +56,7 @@ COPY --from=console-build /src/console/build /opt/olp/console
 COPY LICENSE /usr/share/doc/openllmproxy/
 ENV OLP_CONSOLE_DIR=/opt/olp/console
 EXPOSE 8080 9090
-USER nonroot:nonroot
+USER 65532:65532
 STOPSIGNAL SIGTERM
 ENTRYPOINT ["/usr/local/bin/olp"]
 CMD ["all"]

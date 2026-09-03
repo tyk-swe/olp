@@ -9,6 +9,7 @@ use crate::{
         RecentAuthPurpose, SessionSecurityContext, consume_recent_authentication,
         insert_versioned_session, revoke_user_sessions,
     },
+    configuration::MAX_PAGE_SIZE,
     security::session_material::SessionMaterial,
     split_page,
     store::Store,
@@ -18,8 +19,6 @@ use super::{
     Error, PasswordSessionRotation, SessionRecord, UserRecord,
     invitations::retire_invitations_on_access_loss, locks::lock_user, parse_role,
 };
-
-const MAX_PAGE_SIZE: i64 = 100;
 
 impl Store {
     pub async fn list_users(
@@ -372,31 +371,13 @@ impl Store {
             .filter(|expires_at| *expires_at > now)
             .ok_or_else(|| Error::Invalid("session lifetime is invalid".to_owned()))?;
         let mut transaction = self.pool().begin().await?;
-        let current = lock_user(&mut transaction, id)
-            .await?
-            .ok_or(Error::NotFound)?;
-        if current.has_local_password {
-            return Err(Error::LocalPasswordAlreadyConfigured);
-        }
-        if !current.active || current.security_version != context.security_version {
-            return Err(Error::SessionUnavailable);
-        }
-        if current.etag != expected_etag {
-            return Err(Error::PreconditionFailed);
-        }
-        if !consume_recent_authentication(
+        admit_password_enrollment(
             &mut transaction,
-            context.session_id,
-            id,
-            context.security_version,
-            RecentAuthPurpose::PasswordEnrollment,
-            None,
+            context,
+            expected_etag,
             recent_auth_token_digest,
         )
-        .await?
-        {
-            return Err(Error::RecentAuthenticationRequired);
-        }
+        .await?;
         let etag = Uuid::now_v7();
         let row = sqlx::query_as!(
             PasswordUserRow,
@@ -423,47 +404,42 @@ impl Store {
             now,
         )
         .await?;
-        record_success(
-            &mut *transaction,
-            self.provenance(),
-            id,
-            "user.password_enroll",
-            "user",
-            id,
-        )
-        .await?;
-        record_success(
-            &mut *transaction,
-            self.provenance(),
-            id,
-            "user.authentication_method_change",
-            "user",
-            id,
-        )
-        .await?;
-        record_success(
-            &mut *transaction,
-            self.provenance(),
-            id,
-            "session.revoke_for_password_enrollment",
-            "user",
-            id,
-        )
-        .await?;
-        record_success(
-            &mut *transaction,
-            self.provenance(),
-            id,
-            "session.rotate_for_password_enrollment",
-            "session",
-            session_id,
-        )
-        .await?;
+        self.record_password_enrollment(&mut transaction, id, session_id)
+            .await?;
         transaction.commit().await?;
         Ok(PasswordSessionRotation {
             user: user_from_row(row.into_user())?,
             session_id,
         })
+    }
+
+    async fn record_password_enrollment(
+        &self,
+        transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        id: Uuid,
+        session_id: Uuid,
+    ) -> Result<(), Error> {
+        for (action, resource_type, resource_id) in [
+            ("user.password_enroll", "user", id),
+            ("user.authentication_method_change", "user", id),
+            ("session.revoke_for_password_enrollment", "user", id),
+            (
+                "session.rotate_for_password_enrollment",
+                "session",
+                session_id,
+            ),
+        ] {
+            record_success(
+                &mut **transaction,
+                self.provenance(),
+                id,
+                action,
+                resource_type,
+                resource_id,
+            )
+            .await?;
+        }
+        Ok(())
     }
 
     pub async fn list_sessions(
@@ -564,6 +540,41 @@ pub(super) struct UserRow {
     pub(super) etag: Uuid,
     pub(super) created_at: DateTime<Utc>,
     pub(super) updated_at: DateTime<Utc>,
+}
+
+/// Locks the account and checks every precondition for adding a first local
+/// password, consuming the recent-authentication grant on success.
+async fn admit_password_enrollment(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    context: SessionSecurityContext,
+    expected_etag: Uuid,
+    recent_auth_token_digest: [u8; 32],
+) -> Result<(), Error> {
+    let id = context.user_id;
+    let current = lock_user(transaction, id).await?.ok_or(Error::NotFound)?;
+    if current.has_local_password {
+        return Err(Error::LocalPasswordAlreadyConfigured);
+    }
+    if !current.active || current.security_version != context.security_version {
+        return Err(Error::SessionUnavailable);
+    }
+    if current.etag != expected_etag {
+        return Err(Error::PreconditionFailed);
+    }
+    if !consume_recent_authentication(
+        transaction,
+        context.session_id,
+        id,
+        context.security_version,
+        RecentAuthPurpose::PasswordEnrollment,
+        None,
+        recent_auth_token_digest,
+    )
+    .await?
+    {
+        return Err(Error::RecentAuthenticationRequired);
+    }
+    Ok(())
 }
 
 #[derive(Debug, FromRow)]
