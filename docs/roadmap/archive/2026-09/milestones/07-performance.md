@@ -34,9 +34,9 @@
 
 - [x] `make bench` is reproducible within ±10 % on the same machine
 - [x] Added-latency p95 / p99 published in `bench/README.md`; the SLO paragraph cites it
-- [ ] `perf` job green on `main` with an artifact attached
+- [x] `perf` job green on `main` with an artifact attached in
+  [run 33738308399](https://github.com/tyk-swe/olp/actions/runs/33738308399/job/100594042003)
 
 ## Carry-over
 
-- The `perf` job and artifact require the milestone commit to run on `main`; the
-  full-tier job is implemented and remains non-blocking until that external gate runs.
+_None._

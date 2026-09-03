@@ -39,7 +39,7 @@ x-application-environment: &application-environment
   RUST_LOG: ${RUST_LOG:-olp=info,tower_http=info}
 
 x-olp-container: &olp-container
-  image: ${OLP_IMAGE:-ghcr.io/tyk-swe/olp:2.2.1}
+  image: ${OLP_IMAGE:-ghcr.io/tyk-swe/olp:2.3.0}
   read_only: true
   # Compose bind-mounts file-backed secrets with host ownership. Run as the
   # invoking non-root user so mode-0600 development secrets remain readable.

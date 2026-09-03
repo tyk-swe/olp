@@ -592,14 +592,11 @@ impl Service {
         })
     }
 
-    async fn execute_operation(
-        &self,
+    fn new_execution_context(
         principal: &Principal,
-        operation: Operation,
-        mode: TransportMode,
-        required_target: Option<RequiredTarget>,
-        mut admission: RequestAdmission,
-    ) -> Result<CompletedExecution, InferenceError> {
+        operation: &Operation,
+        admission: &mut RequestAdmission,
+    ) -> Result<ExecutionContext, InferenceError> {
         let route_slug = operation
             .route()
             .cloned()
@@ -625,63 +622,21 @@ impl Service {
             );
         }
         admission.claim_metadata();
-        if let Err(error) = self.authorize_principal(
-            principal,
-            gateway_capability_for_operation(context.operation_kind),
-            Some(&context.route_slug),
-        ) {
-            let failure = error;
-            RequestAccountingGuard::new(
-                self.clone(),
-                context.accounting_input(),
-                None,
-                admission.reservation.take(),
-                admission.reserved_tokens,
-            )
-            .finish(RequestOutcome::from_error(&failure));
-            return Err(failure);
-        }
-        let lease_ttl = principal
-            .runtime()
-            .routes
-            .get(&context.route_slug)
-            .map(|route| route.overall_timeout.as_duration())
-            .unwrap_or(Duration::from_secs(30))
-            .saturating_add(Duration::from_secs(30));
-        let lease = match reserve(
-            self.limiter(),
-            principal.key(),
-            &operation,
-            principal.lookup_id().as_str(),
-            lease_ttl,
-            admission.reserved_tokens,
-        )
-        .await
-        {
-            Ok(lease) => lease,
-            Err(failure) => {
-                RequestAccountingGuard::new(
-                    self.clone(),
-                    context.accounting_input(),
-                    None,
-                    admission.reservation.take(),
-                    admission.reserved_tokens,
-                )
-                .finish(RequestOutcome::from_error(&failure));
-                return Err(failure);
-            }
-        };
-        let mut accounting = RequestAccountingGuard::new(
-            self.clone(),
-            context.accounting_input(),
-            lease,
-            admission.reservation.take(),
-            admission.reserved_tokens,
-        );
-        let attempts = match select_representable_attempts_filtered(
+        Ok(context)
+    }
+
+    fn select_operation_attempts(
+        &self,
+        principal: &Principal,
+        context: &ExecutionContext,
+        operation: &Operation,
+        mode: TransportMode,
+        required_target: &Option<RequiredTarget>,
+    ) -> Result<Vec<crate::domain::routing::selection::AttemptPlan>, InferenceError> {
+        match select_representable_attempts_filtered(
             principal.runtime(),
             &context.route_slug,
-            &operation,
+            operation,
             principal.surface(),
             mode,
             context.request_id.as_uuid().as_bytes(),
@@ -694,18 +649,26 @@ impl Service {
                     })
             },
         ) {
-            Ok(attempts) => attempts,
+            Ok(attempts) => Ok(attempts),
             Err(error) => {
-                let failure = if required_target.is_some() && error.code() == "no_eligible_provider"
-                {
-                    InferenceError::unavailable("media_job_target_unavailable")
+                if required_target.is_some() && error.code() == "no_eligible_provider" {
+                    Err(InferenceError::unavailable("media_job_target_unavailable"))
                 } else {
-                    error
-                };
-                accounting.finish(RequestOutcome::from_error(&failure));
-                return Err(failure);
+                    Err(error)
+                }
             }
-        };
+        }
+    }
+
+    async fn run_operation_attempts(
+        &self,
+        principal: &Principal,
+        context: ExecutionContext,
+        operation: Operation,
+        mode: TransportMode,
+        attempts: Vec<crate::domain::routing::selection::AttemptPlan>,
+        mut accounting: RequestAccountingGuard,
+    ) -> Result<CompletedExecution, InferenceError> {
         let route = principal
             .runtime()
             .routes
@@ -762,6 +725,85 @@ impl Service {
                 Err(error)
             }
         }
+    }
+
+    async fn execute_operation(
+        &self,
+        principal: &Principal,
+        operation: Operation,
+        mode: TransportMode,
+        required_target: Option<RequiredTarget>,
+        mut admission: RequestAdmission,
+    ) -> Result<CompletedExecution, InferenceError> {
+        let context = Self::new_execution_context(principal, &operation, &mut admission)?;
+        if let Err(error) = self.authorize_principal(
+            principal,
+            gateway_capability_for_operation(context.operation_kind),
+            Some(&context.route_slug),
+        ) {
+            let failure = error;
+            RequestAccountingGuard::new(
+                self.clone(),
+                context.accounting_input(),
+                None,
+                admission.reservation.take(),
+                admission.reserved_tokens,
+            )
+            .finish(RequestOutcome::from_error(&failure));
+            return Err(failure);
+        }
+        let lease_ttl = principal
+            .runtime()
+            .routes
+            .get(&context.route_slug)
+            .map(|route| route.overall_timeout.as_duration())
+            .unwrap_or(Duration::from_secs(30))
+            .saturating_add(Duration::from_secs(30));
+        let lease = match reserve(
+            self.limiter(),
+            principal.key(),
+            &operation,
+            principal.lookup_id().as_str(),
+            lease_ttl,
+            admission.reserved_tokens,
+        )
+        .await
+        {
+            Ok(lease) => lease,
+            Err(failure) => {
+                RequestAccountingGuard::new(
+                    self.clone(),
+                    context.accounting_input(),
+                    None,
+                    admission.reservation.take(),
+                    admission.reserved_tokens,
+                )
+                .finish(RequestOutcome::from_error(&failure));
+                return Err(failure);
+            }
+        };
+        let accounting = RequestAccountingGuard::new(
+            self.clone(),
+            context.accounting_input(),
+            lease,
+            admission.reservation.take(),
+            admission.reserved_tokens,
+        );
+        let attempts = match self.select_operation_attempts(
+            principal,
+            &context,
+            &operation,
+            mode,
+            &required_target,
+        ) {
+            Ok(attempts) => attempts,
+            Err(failure) => {
+                accounting.finish(RequestOutcome::from_error(&failure));
+                return Err(failure);
+            }
+        };
+        self.run_operation_attempts(principal, context, operation, mode, attempts, accounting)
+            .await
     }
 
     pub fn authorize_model_access<'a>(

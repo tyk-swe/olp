@@ -112,6 +112,212 @@ pub async fn run_request_metadata_consumer(
     .await
 }
 
+struct RecoveryPages<'a> {
+    store: &'a Store,
+    cost_limiter: &'a DistributedLimiter,
+    connection: &'a mut ConnectionManager,
+    stream: &'a str,
+    consumer: &'a str,
+    policy: ConsumerPolicy,
+}
+
+async fn drain_own_pending(
+    pages: &mut RecoveryPages<'_>,
+    shutdown: &watch::Receiver<bool>,
+    start: &mut String,
+    due: &mut tokio::time::Instant,
+) -> Result<Option<(bool, bool)>, Error> {
+    let entries = read_group(
+        &mut *pages.connection,
+        pages.stream,
+        pages.consumer,
+        start,
+        pages.policy.batch_size,
+        None,
+    )
+    .await?;
+    let full_batch = entries.len() == pages.policy.batch_size;
+    let next_start = entries
+        .last()
+        .map_or_else(|| "0-0".to_owned(), |entry| entry.id.clone());
+    let summary = process_entries(
+        pages.store,
+        pages.cost_limiter,
+        &mut *pages.connection,
+        pages.stream,
+        pages.consumer,
+        entries,
+        shutdown,
+    )
+    .await?;
+    report_processing_activity(pages.store, summary, true).await?;
+    if summary.shutdown {
+        return Ok(None);
+    }
+    let idle = pages.policy.own_pending_interval * u32::from(!full_batch);
+    *start = if full_batch {
+        next_start
+    } else {
+        "0-0".to_owned()
+    };
+    *due = tokio::time::Instant::now() + idle;
+    Ok(Some((full_batch, summary.retry)))
+}
+
+async fn reclaim_stale_entries(
+    pages: &mut RecoveryPages<'_>,
+    shutdown: &watch::Receiver<bool>,
+    start: &mut String,
+    due: &mut tokio::time::Instant,
+) -> Result<Option<(bool, bool)>, Error> {
+    let page = auto_claim(
+        &mut *pages.connection,
+        pages.stream,
+        pages.consumer,
+        pages.policy.reclaim_idle,
+        start,
+        pages.policy.batch_size,
+    )
+    .await?;
+    // XAUTOCLAIM has already destroyed the evidence for these IDs:
+    // the server dropped them from the group PEL and will not report
+    // them again. Record the gaps before anything that can fail, and
+    // never let a purely informational counter abort the batch first.
+    report_deleted_pending_entries(pages.store, pages.consumer, &page.deleted_ids).await?;
+    if !page.entries.is_empty() {
+        let reclaimed = u64::try_from(page.entries.len())
+            .map_err(|_| Error::InvalidState("reclaimed entry count overflow"))?;
+        if let Err(error) = pages
+            .store
+            .report_request_metadata_consumer_activity(RequestMetadataConsumerActivity {
+                reclaimed,
+                ..RequestMetadataConsumerActivity::default()
+            })
+            .await
+        {
+            warn!(%error, "reclaimed request metadata counter was not recorded");
+        }
+    }
+    let next_start = page.next_start;
+    let summary = process_entries(
+        pages.store,
+        pages.cost_limiter,
+        &mut *pages.connection,
+        pages.stream,
+        pages.consumer,
+        page.entries,
+        shutdown,
+    )
+    .await?;
+    report_processing_activity(pages.store, summary, true).await?;
+    if summary.shutdown {
+        return Ok(None);
+    }
+    let more = next_start != "0-0";
+    let idle = pages.policy.recovery_interval * u32::from(!more);
+    *start = next_start;
+    *due = tokio::time::Instant::now() + idle;
+    Ok(Some((more, summary.retry)))
+}
+
+async fn settle_new_entries(
+    pages: &mut RecoveryPages<'_>,
+    shutdown: &mut watch::Receiver<bool>,
+    own_pending_start: &mut String,
+    own_pending_due: &mut tokio::time::Instant,
+    block_interval: Duration,
+    retry_delay: &mut Duration,
+) -> Result<Option<()>, Error> {
+    let entries = tokio::select! {
+        changed = shutdown.changed() => {
+            let live = changed.is_ok() && !*shutdown.borrow();
+            return Ok(live.then_some(()));
+        }
+        result = read_group(
+            &mut *pages.connection,
+            pages.stream,
+            pages.consumer,
+            ">",
+            pages.policy.batch_size,
+            Some(block_interval),
+        ) => result?,
+    };
+    let summary = process_entries(
+        pages.store,
+        pages.cost_limiter,
+        &mut *pages.connection,
+        pages.stream,
+        pages.consumer,
+        entries,
+        shutdown,
+    )
+    .await?;
+    report_processing_activity(pages.store, summary, false).await?;
+    if summary.shutdown {
+        return Ok(None);
+    }
+    if summary.retry {
+        *own_pending_start = "0-0".to_owned();
+        *own_pending_due = tokio::time::Instant::now() + *retry_delay;
+        if wait_for_retry(shutdown, *retry_delay).await {
+            return Ok(None);
+        }
+        *retry_delay = (*retry_delay * 2).min(REQUEST_METADATA_RETRY_MAX);
+    }
+    Ok(Some(()))
+}
+
+async fn connect_consumer_backend(
+    valkey_url: &str,
+    stream: &str,
+    consumer: &str,
+    limits_namespace: &str,
+    policy: ConsumerPolicy,
+) -> Result<(ConnectionManager, DistributedLimiter), Error> {
+    let longest_block_interval = policy
+        .block_interval
+        .max(policy.active_recovery_block_interval);
+    let mut connection = request_metadata_connection(valkey_url, longest_block_interval).await?;
+    let cost_limiter = DistributedLimiter::connect(valkey_url, limits_namespace).await?;
+    create_consumer_group(&mut connection, stream).await?;
+    #[cfg(all(feature = "test-util", debug_assertions))]
+    let _: () = connection
+        .client_setname(format!("olp-test-request-metadata-{consumer}"))
+        .await?;
+    Ok((connection, cost_limiter))
+}
+
+async fn run_recovery_pages(
+    pages: &mut RecoveryPages<'_>,
+    shutdown: &watch::Receiver<bool>,
+    own_pending_start: &mut String,
+    own_pending_due: &mut tokio::time::Instant,
+    stale_start: &mut String,
+    stale_due: &mut tokio::time::Instant,
+    now: tokio::time::Instant,
+) -> Result<Option<(bool, bool)>, Error> {
+    let mut outcome = (false, false);
+    if now >= *own_pending_due {
+        let Some(progress) =
+            drain_own_pending(&mut *pages, shutdown, own_pending_start, own_pending_due).await?
+        else {
+            return Ok(None);
+        };
+        outcome.1 |= progress.1;
+        outcome.0 |= progress.0;
+    }
+    if tokio::time::Instant::now() >= *stale_due {
+        let Some(progress) =
+            reclaim_stale_entries(&mut *pages, shutdown, stale_start, stale_due).await?
+        else {
+            return Ok(None);
+        };
+        outcome.1 |= progress.1;
+        outcome.0 |= progress.0;
+    }
+    Ok(Some(outcome))
+}
+
 async fn run_request_metadata_consumer_with_policy(
     store: &Store,
     valkey_url: &str,
@@ -122,18 +328,16 @@ async fn run_request_metadata_consumer_with_policy(
     policy: ConsumerPolicy,
 ) -> Result<(), Error> {
     validate_configuration(stream, consumer, policy)?;
-    let longest_block_interval = policy
-        .block_interval
-        .max(policy.active_recovery_block_interval);
-    let mut connection = request_metadata_connection(valkey_url, longest_block_interval).await?;
-    let cost_limiter = DistributedLimiter::connect(valkey_url, limits_namespace).await?;
-    create_consumer_group(&mut connection, stream).await?;
-    #[cfg(all(feature = "test-util", debug_assertions))]
-    {
-        let _: () = connection
-            .client_setname(format!("olp-test-request-metadata-{consumer}"))
-            .await?;
-    }
+    let (mut connection, cost_limiter) =
+        connect_consumer_backend(valkey_url, stream, consumer, limits_namespace, policy).await?;
+    let mut pages = RecoveryPages {
+        store,
+        cost_limiter: &cost_limiter,
+        connection: &mut connection,
+        stream,
+        consumer,
+        policy,
+    };
 
     let started_at = tokio::time::Instant::now();
     let mut own_pending_start = "0-0".to_owned();
@@ -158,101 +362,25 @@ async fn run_request_metadata_consumer_with_policy(
         let mut cycle_retry = false;
         let now = tokio::time::Instant::now();
 
-        if now >= own_pending_due {
-            let entries = read_group(
-                &mut connection,
-                stream,
-                consumer,
-                &own_pending_start,
-                policy.batch_size,
-                None,
-            )
-            .await?;
-            let full_batch = entries.len() == policy.batch_size;
-            let next_start = entries
-                .last()
-                .map_or_else(|| "0-0".to_owned(), |entry| entry.id.clone());
-            let summary = process_entries(
-                store,
-                &cost_limiter,
-                &mut connection,
-                stream,
-                consumer,
-                entries,
-                &shutdown,
-            )
-            .await?;
-            report_processing_activity(store, summary, true).await?;
-            if summary.shutdown {
-                return Ok(());
-            }
-            cycle_retry |= summary.retry;
-            if full_batch {
-                own_pending_start = next_start;
-                own_pending_due = tokio::time::Instant::now();
-                recovery_active = true;
-            } else {
-                own_pending_start = "0-0".to_owned();
-                own_pending_due = tokio::time::Instant::now() + policy.own_pending_interval;
-            }
-        }
-
-        if tokio::time::Instant::now() >= stale_due {
-            let page = auto_claim(
-                &mut connection,
-                stream,
-                consumer,
-                policy.reclaim_idle,
-                &stale_start,
-                policy.batch_size,
-            )
-            .await?;
-            // XAUTOCLAIM has already destroyed the evidence for these IDs:
-            // the server dropped them from the group PEL and will not report
-            // them again. Record the gaps before anything that can fail, and
-            // never let a purely informational counter abort the batch first.
-            report_deleted_pending_entries(store, consumer, &page.deleted_ids).await?;
-            if !page.entries.is_empty() {
-                let reclaimed = u64::try_from(page.entries.len())
-                    .map_err(|_| Error::InvalidState("reclaimed entry count overflow"))?;
-                if let Err(error) = store
-                    .report_request_metadata_consumer_activity(RequestMetadataConsumerActivity {
-                        reclaimed,
-                        ..RequestMetadataConsumerActivity::default()
-                    })
-                    .await
-                {
-                    warn!(%error, "reclaimed request metadata counter was not recorded");
-                }
-            }
-            let next_start = page.next_start;
-            let summary = process_entries(
-                store,
-                &cost_limiter,
-                &mut connection,
-                stream,
-                consumer,
-                page.entries,
-                &shutdown,
-            )
-            .await?;
-            report_processing_activity(store, summary, true).await?;
-            if summary.shutdown {
-                return Ok(());
-            }
-            cycle_retry |= summary.retry;
-            if next_start == "0-0" {
-                stale_start = next_start;
-                stale_due = tokio::time::Instant::now() + policy.recovery_interval;
-            } else {
-                stale_start = next_start;
-                stale_due = tokio::time::Instant::now();
-                recovery_active = true;
-            }
-        }
+        let Some(outcome) = run_recovery_pages(
+            &mut pages,
+            &shutdown,
+            &mut own_pending_start,
+            &mut own_pending_due,
+            &mut stale_start,
+            &mut stale_due,
+            now,
+        )
+        .await?
+        else {
+            return Ok(());
+        };
+        cycle_retry |= outcome.1;
+        recovery_active |= outcome.0;
 
         if tokio::time::Instant::now() >= health_due {
-            checkpoint_request_metadata_consumer_health(store, &mut connection, stream).await?;
+            checkpoint_request_metadata_consumer_health(store, &mut *pages.connection, stream)
+                .await?;
             health_due = tokio::time::Instant::now() + policy.health_interval;
         }
 
@@ -271,44 +399,18 @@ async fn run_request_metadata_consumer_with_policy(
         } else {
             policy.block_interval
         };
-        let entries = tokio::select! {
-            changed = shutdown.changed() => {
-                if changed.is_err() || *shutdown.borrow() {
-                    return Ok(());
-                }
-                continue;
-            }
-            result = read_group(
-                &mut connection,
-                stream,
-                consumer,
-                ">",
-                policy.batch_size,
-                Some(block_interval),
-            ) => result?,
-        };
-        let summary = process_entries(
-            store,
-            &cost_limiter,
-            &mut connection,
-            stream,
-            consumer,
-            entries,
-            &shutdown,
+        let Some(()) = settle_new_entries(
+            &mut pages,
+            &mut shutdown,
+            &mut own_pending_start,
+            &mut own_pending_due,
+            block_interval,
+            &mut retry_delay,
         )
-        .await?;
-        report_processing_activity(store, summary, false).await?;
-        if summary.shutdown {
+        .await?
+        else {
             return Ok(());
-        }
-        if summary.retry {
-            own_pending_start = "0-0".to_owned();
-            own_pending_due = tokio::time::Instant::now() + retry_delay;
-            if wait_for_retry(&mut shutdown, retry_delay).await {
-                return Ok(());
-            }
-            retry_delay = (retry_delay * 2).min(REQUEST_METADATA_RETRY_MAX);
-        }
+        };
     }
 }
 

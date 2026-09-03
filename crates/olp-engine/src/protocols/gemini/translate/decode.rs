@@ -14,7 +14,10 @@ use crate::domain::{
 };
 use serde_json::Value;
 
-use super::super::dto::{Content, GenerateContentRequest, GenerationConfig, Part, ToolConfig};
+use super::super::dto::{
+    Content, FileDataPart, FunctionCallPart, FunctionResponsePart, GenerateContentRequest,
+    GenerationConfig, InlineDataPart, Part, TextPart, ToolConfig,
+};
 use super::errors::DecodeError;
 use crate::protocols::extensions::collect_extra;
 
@@ -165,149 +168,33 @@ fn decode_content(
 
     for part in content.parts {
         match part {
-            Part::FunctionResponse(part) => {
-                if role != MessageRole::User {
-                    return Err(DecodeError::FunctionResponseRole);
-                }
-                flush_regular(
-                    role,
-                    &mut segments,
-                    &mut parts,
-                    &mut tool_calls,
-                    &mut extensions,
-                );
-                let mut local_extensions = BTreeMap::new();
-                collect_extra("/parts/0", &part.extra, &mut local_extensions);
-                collect_extra(
-                    "/parts/0/functionResponse",
-                    &part.function_response.extra,
-                    &mut local_extensions,
-                );
-                let response = serde_json::to_string(&part.function_response.response)?;
-                let id = match part.function_response.id {
-                    Some(id) => id,
-                    None => {
-                        local_extensions.insert("/parts/0/functionResponse/id".into(), Value::Null);
-                        part.function_response.name.clone()
-                    }
-                };
-                segments.push(DecodedContent {
-                    message: CanonicalMessage {
-                        role: MessageRole::Tool,
-                        content: vec![ContentPart::Text { text: response }],
-                        name: Some(part.function_response.name),
-                        tool_call_id: Some(id),
-                        tool_calls: Vec::new(),
-                    },
-                    content_extra: BTreeMap::new(),
-                    extensions: local_extensions,
-                });
-                seen_function_call = false;
-            }
+            Part::FunctionResponse(part) => decode_function_response_part(
+                role,
+                part,
+                &mut segments,
+                &mut parts,
+                &mut tool_calls,
+                &mut extensions,
+                &mut seen_function_call,
+            )?,
             Part::Text(part) => {
-                if part.thought == Some(true) || part.thought_signature.is_some() {
-                    return Err(DecodeError::ThoughtPartUnsupported);
-                }
-                if seen_function_call {
-                    return Err(DecodeError::InterleavedFunctionCall);
-                }
-                let index = parts.len();
-                collect_extra(&format!("/parts/{index}"), &part.extra, &mut extensions);
-                if let Some(thought) = part.thought {
-                    extensions.insert(format!("/parts/{index}/thought"), Value::Bool(thought));
-                }
-                parts.push(ContentPart::Text { text: part.text });
+                decode_text_part(part, &mut parts, &mut extensions, seen_function_call)?
             }
             Part::FileData(part) => {
-                if seen_function_call {
-                    return Err(DecodeError::InterleavedFunctionCall);
-                }
-                if !part.file_data.mime_type.starts_with("image/") {
-                    return Err(DecodeError::UnsupportedFileMediaType(
-                        part.file_data.mime_type,
-                    ));
-                }
-                let index = parts.len();
-                collect_extra(&format!("/parts/{index}"), &part.extra, &mut extensions);
-                collect_extra(
-                    &format!("/parts/{index}/fileData"),
-                    &part.file_data.extra,
-                    &mut extensions,
-                );
-                let mime_type = part.file_data.mime_type;
-                extensions.insert(
-                    format!("/parts/{index}/fileData/mimeType"),
-                    Value::String(mime_type.clone()),
-                );
-                parts.push(ContentPart::Image {
-                    source: MediaSource::Uri(part.file_data.file_uri),
-                    detail: None,
-                    mime_type: Some(mime_type),
-                });
+                decode_file_data_part(part, &mut parts, &mut extensions, seen_function_call)?
             }
             Part::InlineData(part) => {
-                if seen_function_call {
-                    return Err(DecodeError::InterleavedFunctionCall);
-                }
-                let index = parts.len();
-                collect_extra(&format!("/parts/{index}"), &part.extra, &mut extensions);
-                collect_extra(
-                    &format!("/parts/{index}/inlineData"),
-                    &part.inline_data.extra,
-                    &mut extensions,
-                );
-                let mime_type = part.inline_data.mime_type;
-                extensions.insert(
-                    format!("/parts/{index}/inlineData/mimeType"),
-                    Value::String(mime_type.clone()),
-                );
-                let handle = media_handle_from_inline_marker(&part.inline_data.data)
-                    .ok_or(DecodeError::InlineMediaRequiresBoundedHandle)?;
-                if mime_type.starts_with("image/") {
-                    parts.push(ContentPart::Image {
-                        source: MediaSource::Handle(handle),
-                        detail: None,
-                        mime_type: Some(mime_type),
-                    });
-                } else if mime_type.starts_with("audio/") {
-                    parts.push(ContentPart::InputAudio {
-                        media: handle,
-                        format: mime_type,
-                    });
-                } else {
-                    return Err(DecodeError::UnsupportedFileMediaType(mime_type));
-                }
+                decode_inline_data_part(part, &mut parts, &mut extensions, seen_function_call)?
             }
-            Part::FunctionCall(part) => {
-                if role != MessageRole::Assistant {
-                    return Err(DecodeError::FunctionCallRole);
-                }
-                seen_function_call = true;
-                let part_index = parts.len() + tool_calls.len();
-                collect_extra(
-                    &format!("/parts/{part_index}"),
-                    &part.extra,
-                    &mut extensions,
-                );
-                collect_extra(
-                    &format!("/parts/{part_index}/functionCall"),
-                    &part.function_call.extra,
-                    &mut extensions,
-                );
-                let id = match part.function_call.id {
-                    Some(id) => id,
-                    None => {
-                        extensions
-                            .insert(format!("/parts/{part_index}/functionCall/id"), Value::Null);
-                        format!("gemini-call-{source_index}-{}", tool_calls.len())
-                    }
-                };
-                tool_calls.push(ToolCall {
-                    id,
-                    name: part.function_call.name,
-                    arguments: serde_json::to_string(&part.function_call.args)?,
-                });
-            }
+            Part::FunctionCall(part) => decode_function_call_part(
+                role,
+                part,
+                &parts,
+                &mut tool_calls,
+                &mut extensions,
+                source_index,
+                &mut seen_function_call,
+            )?,
             Part::Unknown(value) => {
                 return Err(DecodeError::UnsupportedPart(
                     value
@@ -333,6 +220,179 @@ fn decode_content(
         first.content_extra = content.extra;
     }
     Ok(segments)
+}
+
+fn decode_function_response_part(
+    role: MessageRole,
+    part: FunctionResponsePart,
+    segments: &mut Vec<DecodedContent>,
+    parts: &mut Vec<ContentPart>,
+    tool_calls: &mut Vec<ToolCall>,
+    extensions: &mut BTreeMap<String, Value>,
+    seen_function_call: &mut bool,
+) -> Result<(), DecodeError> {
+    if role != MessageRole::User {
+        return Err(DecodeError::FunctionResponseRole);
+    }
+    flush_regular(role, segments, parts, tool_calls, extensions);
+    let mut local_extensions = BTreeMap::new();
+    collect_extra("/parts/0", &part.extra, &mut local_extensions);
+    collect_extra(
+        "/parts/0/functionResponse",
+        &part.function_response.extra,
+        &mut local_extensions,
+    );
+    let response = serde_json::to_string(&part.function_response.response)?;
+    let id = match part.function_response.id {
+        Some(id) => id,
+        None => {
+            local_extensions.insert("/parts/0/functionResponse/id".into(), Value::Null);
+            part.function_response.name.clone()
+        }
+    };
+    segments.push(DecodedContent {
+        message: CanonicalMessage {
+            role: MessageRole::Tool,
+            content: vec![ContentPart::Text { text: response }],
+            name: Some(part.function_response.name),
+            tool_call_id: Some(id),
+            tool_calls: Vec::new(),
+        },
+        content_extra: BTreeMap::new(),
+        extensions: local_extensions,
+    });
+    *seen_function_call = false;
+    Ok(())
+}
+
+fn decode_text_part(
+    part: TextPart,
+    parts: &mut Vec<ContentPart>,
+    extensions: &mut BTreeMap<String, Value>,
+    seen_function_call: bool,
+) -> Result<(), DecodeError> {
+    if part.thought == Some(true) || part.thought_signature.is_some() {
+        return Err(DecodeError::ThoughtPartUnsupported);
+    }
+    if seen_function_call {
+        return Err(DecodeError::InterleavedFunctionCall);
+    }
+    let index = parts.len();
+    collect_extra(&format!("/parts/{index}"), &part.extra, extensions);
+    if let Some(thought) = part.thought {
+        extensions.insert(format!("/parts/{index}/thought"), Value::Bool(thought));
+    }
+    parts.push(ContentPart::Text { text: part.text });
+    Ok(())
+}
+
+fn decode_file_data_part(
+    part: FileDataPart,
+    parts: &mut Vec<ContentPart>,
+    extensions: &mut BTreeMap<String, Value>,
+    seen_function_call: bool,
+) -> Result<(), DecodeError> {
+    if seen_function_call {
+        return Err(DecodeError::InterleavedFunctionCall);
+    }
+    if !part.file_data.mime_type.starts_with("image/") {
+        return Err(DecodeError::UnsupportedFileMediaType(
+            part.file_data.mime_type,
+        ));
+    }
+    let index = parts.len();
+    collect_extra(&format!("/parts/{index}"), &part.extra, extensions);
+    collect_extra(
+        &format!("/parts/{index}/fileData"),
+        &part.file_data.extra,
+        extensions,
+    );
+    let mime_type = part.file_data.mime_type;
+    extensions.insert(
+        format!("/parts/{index}/fileData/mimeType"),
+        Value::String(mime_type.clone()),
+    );
+    parts.push(ContentPart::Image {
+        source: MediaSource::Uri(part.file_data.file_uri),
+        detail: None,
+        mime_type: Some(mime_type),
+    });
+    Ok(())
+}
+
+fn decode_inline_data_part(
+    part: InlineDataPart,
+    parts: &mut Vec<ContentPart>,
+    extensions: &mut BTreeMap<String, Value>,
+    seen_function_call: bool,
+) -> Result<(), DecodeError> {
+    if seen_function_call {
+        return Err(DecodeError::InterleavedFunctionCall);
+    }
+    let index = parts.len();
+    collect_extra(&format!("/parts/{index}"), &part.extra, extensions);
+    collect_extra(
+        &format!("/parts/{index}/inlineData"),
+        &part.inline_data.extra,
+        extensions,
+    );
+    let mime_type = part.inline_data.mime_type;
+    extensions.insert(
+        format!("/parts/{index}/inlineData/mimeType"),
+        Value::String(mime_type.clone()),
+    );
+    let handle = media_handle_from_inline_marker(&part.inline_data.data)
+        .ok_or(DecodeError::InlineMediaRequiresBoundedHandle)?;
+    if mime_type.starts_with("image/") {
+        parts.push(ContentPart::Image {
+            source: MediaSource::Handle(handle),
+            detail: None,
+            mime_type: Some(mime_type),
+        });
+    } else if mime_type.starts_with("audio/") {
+        parts.push(ContentPart::InputAudio {
+            media: handle,
+            format: mime_type,
+        });
+    } else {
+        return Err(DecodeError::UnsupportedFileMediaType(mime_type));
+    }
+    Ok(())
+}
+
+fn decode_function_call_part(
+    role: MessageRole,
+    part: FunctionCallPart,
+    parts: &[ContentPart],
+    tool_calls: &mut Vec<ToolCall>,
+    extensions: &mut BTreeMap<String, Value>,
+    source_index: usize,
+    seen_function_call: &mut bool,
+) -> Result<(), DecodeError> {
+    if role != MessageRole::Assistant {
+        return Err(DecodeError::FunctionCallRole);
+    }
+    *seen_function_call = true;
+    let part_index = parts.len() + tool_calls.len();
+    collect_extra(&format!("/parts/{part_index}"), &part.extra, extensions);
+    collect_extra(
+        &format!("/parts/{part_index}/functionCall"),
+        &part.function_call.extra,
+        extensions,
+    );
+    let id = match part.function_call.id {
+        Some(id) => id,
+        None => {
+            extensions.insert(format!("/parts/{part_index}/functionCall/id"), Value::Null);
+            format!("gemini-call-{source_index}-{}", tool_calls.len())
+        }
+    };
+    tool_calls.push(ToolCall {
+        id,
+        name: part.function_call.name,
+        arguments: serde_json::to_string(&part.function_call.args)?,
+    });
+    Ok(())
 }
 
 fn flush_regular(

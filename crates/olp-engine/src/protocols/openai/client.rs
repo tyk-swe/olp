@@ -309,21 +309,15 @@ impl Encoder {
                 return Err(OpenAiClientEncodeError::OutOfOrder { expected, actual });
             }
         }
-        // Keep this aligned with the transport-neutral collection ceiling in
-        // crates/olp-engine/src/inference/events.rs.
         self.retained_bytes = self
             .retained_bytes
             .checked_add(retained_bytes(&event.kind)?)
             .filter(|total| *total <= MAX_RETAINED_BYTES)
             .ok_or(OpenAiClientEncodeError::EventHistoryTooLarge)?;
         match &event.kind {
-            // An upstream error still streams `response.failed` below; the
-            // aggregate only refuses to complete afterwards.
             Kind::Error { .. } => {
                 self.deferred_error.get_or_insert(AggregateError::Upstream);
             }
-            // Stream-only extensions are replayed as frames and never reach
-            // the terminal object.
             Kind::SourceExtension { extensions } if is_stream_only(extensions) => {}
             kind => {
                 if let Err(error) = self.aggregate.apply(kind, Surface::OpenAi) {
@@ -351,9 +345,30 @@ impl Encoder {
                 frames.push(self.frame("response.created", json!({"response": response}))?);
                 frames.push(self.frame("response.in_progress", json!({"response": response}))?);
             }
-            Kind::MessageStart { .. } => {}
+            Kind::MessageStart { .. } | Kind::Usage { .. } => {}
+            kind @ (Kind::TextDelta { .. }
+            | Kind::RefusalDelta { .. }
+            | Kind::ToolCallDelta { .. }) => {
+                self.emit_delta(kind, &mut frames)?;
+            }
+            kind @ (Kind::Finish { .. } | Kind::SourceExtension { .. } | Kind::Error { .. }) => {
+                self.emit_close(kind, &mut frames)?;
+            }
+            Kind::Done => {
+                self.emit_done(&mut frames)?;
+            }
+        }
+        Ok(frames)
+    }
+
+    fn emit_delta(
+        &mut self,
+        kind: &Kind,
+        frames: &mut Vec<Frame>,
+    ) -> Result<(), OpenAiClientEncodeError> {
+        match kind {
             Kind::TextDelta { output_index, text } => {
-                let item_id = self.ensure_message_output(*output_index, &mut frames)?;
+                let item_id = self.ensure_message_output(*output_index, frames)?;
                 if let Some(output) = self.outputs.get_mut(output_index) {
                     output.text.push_str(text);
                 }
@@ -370,7 +385,7 @@ impl Encoder {
                 }
             }
             Kind::RefusalDelta { output_index, text } => {
-                let item_id = self.ensure_message_output(*output_index, &mut frames)?;
+                let item_id = self.ensure_message_output(*output_index, frames)?;
                 if let Some(output) = self.outputs.get_mut(output_index) {
                     output.refusal.push_str(text);
                 }
@@ -391,17 +406,11 @@ impl Encoder {
                 arguments_delta,
                 ..
             } => {
-                let item_id = self.ensure_tool_output(
-                    *output_index,
-                    id.as_deref(),
-                    name.as_deref(),
-                    &mut frames,
-                )?;
+                let item_id =
+                    self.ensure_tool_output(*output_index, id.as_deref(), name.as_deref(), frames)?;
                 if let Some(output) = self.outputs.get_mut(output_index) {
                     output.arguments.push_str(arguments_delta);
                 }
-                // The first frame of a zero-argument call carries no
-                // arguments; real OpenAI emits no empty delta for it.
                 if !arguments_delta.is_empty() {
                     frames.push(self.frame(
                         "response.function_call_arguments.delta",
@@ -413,28 +422,36 @@ impl Encoder {
                     )?);
                 }
             }
+            _ => unreachable!("emit_delta called with a non-delta event"),
+        }
+        Ok(())
+    }
+
+    fn emit_close(
+        &mut self,
+        kind: &Kind,
+        frames: &mut Vec<Frame>,
+    ) -> Result<(), OpenAiClientEncodeError> {
+        match kind {
             Kind::Finish {
                 output_index,
                 reason,
             } => {
-                self.incomplete_reason = if matches!(&reason, FinishReason::Length) {
+                self.incomplete_reason = if matches!(reason, FinishReason::Length) {
                     Some("max_output_tokens")
-                } else if matches!(&reason, FinishReason::ContentFilter) {
+                } else if matches!(reason, FinishReason::ContentFilter) {
                     Some("content_filter")
                 } else {
                     None
                 };
                 if !self.outputs.contains_key(output_index) {
-                    self.ensure_message_output(*output_index, &mut frames)?;
+                    self.ensure_message_output(*output_index, frames)?;
                 }
-                self.close_output(*output_index, &mut frames)?;
+                self.close_output(*output_index, frames)?;
             }
-            Kind::Usage { .. } => {}
             Kind::SourceExtension { extensions } => {
-                // Extensions from another surface have no Responses
-                // representation; dropping them keeps the stream alive.
                 if extensions.source != Some(Surface::OpenAi) {
-                    return Ok(frames);
+                    return Ok(());
                 }
                 for (path, value) in &extensions.values {
                     if path.starts_with("/stream/") {
@@ -459,32 +476,35 @@ impl Encoder {
                 });
                 frames.push(self.frame("response.failed", payload)?);
             }
-            Kind::Done => {
-                let terminal_reason = self.incomplete_reason.take();
-                if let Some(error) = self.deferred_error.take() {
-                    return Err(error.into());
-                }
-                let aggregate = std::mem::replace(&mut self.aggregate, AggregatedGeneration::new());
-                let mut response = encode_aggregate(
-                    aggregate,
-                    &self.client_model,
-                    &self.fallback_id,
-                    self.created_at,
-                )?;
-                if let Some(reason) = terminal_reason {
-                    response.status = "incomplete".to_owned();
-                    response.incomplete_details = Some(serde_json::json!({ "reason": reason }));
-                }
-                let terminal_event_type = match response.status.as_str() {
-                    "incomplete" => "response.incomplete",
-                    "failed" => "response.failed",
-                    _ => "response.completed",
-                };
-                frames.push(self.frame(terminal_event_type, json!({"response": response}))?);
-                self.sequence.finish();
-            }
+            _ => unreachable!("emit_close called with a non-terminal event"),
         }
-        Ok(frames)
+        Ok(())
+    }
+
+    fn emit_done(&mut self, frames: &mut Vec<Frame>) -> Result<(), OpenAiClientEncodeError> {
+        let terminal_reason = self.incomplete_reason.take();
+        if let Some(error) = self.deferred_error.take() {
+            return Err(error.into());
+        }
+        let aggregate = std::mem::replace(&mut self.aggregate, AggregatedGeneration::new());
+        let mut response = encode_aggregate(
+            aggregate,
+            &self.client_model,
+            &self.fallback_id,
+            self.created_at,
+        )?;
+        if let Some(reason) = terminal_reason {
+            response.status = "incomplete".to_owned();
+            response.incomplete_details = Some(serde_json::json!({ "reason": reason }));
+        }
+        let terminal_event_type = match response.status.as_str() {
+            "incomplete" => "response.incomplete",
+            "failed" => "response.failed",
+            _ => "response.completed",
+        };
+        frames.push(self.frame(terminal_event_type, json!({"response": response}))?);
+        self.sequence.finish();
+        Ok(())
     }
 
     fn ensure_message_output(

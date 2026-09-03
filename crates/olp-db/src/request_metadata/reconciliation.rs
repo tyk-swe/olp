@@ -193,6 +193,123 @@ async fn record_unclean_request_metadata_epoch(
     Ok(lower_bound)
 }
 
+#[derive(Clone, Copy)]
+struct CheckpointCounters {
+    accepted: i64,
+    persisted: i64,
+    dropped: i64,
+    abandoned: i64,
+}
+
+fn validated_checkpoint_counters<'a>(
+    gateway_instance: &'a str,
+    snapshot: &Snapshot,
+    graceful_close: bool,
+) -> Result<(&'a str, CheckpointCounters), Error> {
+    let gateway_instance = gateway_instance.trim();
+    if gateway_instance.is_empty()
+        || gateway_instance.len() > 200
+        || gateway_instance.chars().any(char::is_control)
+        || snapshot.persisted > snapshot.accepted
+        || snapshot.abandoned > snapshot.accepted - snapshot.persisted
+        || (graceful_close && !snapshot.gracefully_drained())
+    {
+        return Err(Error::InvalidRequestMetadataGap);
+    }
+    let accepted =
+        i64::try_from(snapshot.accepted).map_err(|_| Error::InvalidRequestMetadataGap)?;
+    let persisted =
+        i64::try_from(snapshot.persisted).map_err(|_| Error::InvalidRequestMetadataGap)?;
+    let dropped = i64::try_from(snapshot.dropped).map_err(|_| Error::InvalidRequestMetadataGap)?;
+    let abandoned =
+        i64::try_from(snapshot.abandoned).map_err(|_| Error::InvalidRequestMetadataGap)?;
+    Ok((
+        gateway_instance,
+        CheckpointCounters {
+            accepted,
+            persisted,
+            dropped,
+            abandoned,
+        },
+    ))
+}
+
+async fn load_checkpoint_baseline(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    gateway_instance: &str,
+    snapshot: &Snapshot,
+    counters: CheckpointCounters,
+    graceful_close: bool,
+    now: DateTime<Utc>,
+) -> Result<(bool, Option<(i64, i64, DateTime<Utc>)>), Error> {
+    let previous = sqlx::query!(
+        "SELECT accepted, persisted, dropped, abandoned, writer_closed, updated_at, \
+                gracefully_closed_at, stale_detected_at \
+         FROM request_metadata_gateway_epochs \
+         WHERE gateway_instance = $1 AND process_epoch = $2 FOR UPDATE",
+        gateway_instance,
+        snapshot.process_epoch
+    )
+    .fetch_optional(&mut **transaction)
+    .await?;
+    let process_epoch_changed = previous.is_none();
+    if process_epoch_changed {
+        let superseded = sqlx::query!(
+            "SELECT process_epoch, accepted, persisted, abandoned, updated_at \
+             FROM request_metadata_gateway_epochs \
+             WHERE gateway_instance = $1 AND process_epoch <> $2 \
+               AND gracefully_closed_at IS NULL AND stale_detected_at IS NULL \
+             FOR UPDATE",
+            gateway_instance,
+            snapshot.process_epoch
+        )
+        .fetch_all(&mut **transaction)
+        .await?;
+        for epoch in superseded {
+            record_unclean_request_metadata_epoch(
+                transaction,
+                UncleanRequestMetadataEpoch {
+                    gateway_instance,
+                    process_epoch: epoch.process_epoch,
+                    accepted: epoch.accepted,
+                    persisted: epoch.persisted,
+                    abandoned: epoch.abandoned,
+                    last_checkpoint: epoch.updated_at,
+                    detected_at: now,
+                },
+            )
+            .await?;
+        }
+    }
+    let Some(row) = previous else {
+        return Ok((true, Some((0_i64, 0_i64, snapshot.started_at))));
+    };
+    if row.stale_detected_at.is_some() {
+        return Err(Error::InvalidRequestMetadataGap);
+    }
+    if counters.accepted < row.accepted
+        || counters.persisted < row.persisted
+        || counters.dropped < row.dropped
+        || counters.abandoned < row.abandoned
+        || (row.writer_closed && !snapshot.closed)
+    {
+        return Err(Error::InvalidRequestMetadataGap);
+    }
+    if row.gracefully_closed_at.is_some() {
+        if graceful_close
+            && snapshot.closed
+            && counters.accepted == row.accepted
+            && counters.persisted == row.persisted
+            && counters.dropped == row.dropped
+            && counters.abandoned == row.abandoned
+        {
+            return Ok((false, None));
+        }
+        return Err(Error::InvalidRequestMetadataGap);
+    }
+    Ok((false, Some((row.dropped, row.abandoned, row.updated_at))))
+}
+
 impl Store {
     /// Durably checkpoints the current gateway epoch and records exact unseen
     /// local-loss deltas. This runs only in the background reporter; inference
@@ -224,24 +341,8 @@ impl Store {
         snapshot: &Snapshot,
         graceful_close: bool,
     ) -> Result<LossReport, Error> {
-        let gateway_instance = gateway_instance.trim();
-        if gateway_instance.is_empty()
-            || gateway_instance.len() > 200
-            || gateway_instance.chars().any(char::is_control)
-            || snapshot.persisted > snapshot.accepted
-            || snapshot.abandoned > snapshot.accepted - snapshot.persisted
-            || (graceful_close && !snapshot.gracefully_drained())
-        {
-            return Err(Error::InvalidRequestMetadataGap);
-        }
-        let accepted =
-            i64::try_from(snapshot.accepted).map_err(|_| Error::InvalidRequestMetadataGap)?;
-        let persisted =
-            i64::try_from(snapshot.persisted).map_err(|_| Error::InvalidRequestMetadataGap)?;
-        let dropped =
-            i64::try_from(snapshot.dropped).map_err(|_| Error::InvalidRequestMetadataGap)?;
-        let abandoned =
-            i64::try_from(snapshot.abandoned).map_err(|_| Error::InvalidRequestMetadataGap)?;
+        let (gateway_instance, counters) =
+            validated_checkpoint_counters(gateway_instance, snapshot, graceful_close)?;
         let now = Utc::now();
         let mut transaction = self.pool().begin().await?;
         sqlx::query!(
@@ -251,87 +352,30 @@ impl Store {
         )
         .fetch_one(&mut *transaction)
         .await?;
-        let previous = sqlx::query!(
-            "SELECT accepted, persisted, dropped, abandoned, writer_closed, updated_at, \
-                    gracefully_closed_at, stale_detected_at \
-             FROM request_metadata_gateway_epochs \
-             WHERE gateway_instance = $1 AND process_epoch = $2 FOR UPDATE",
+        let (process_epoch_changed, baseline) = load_checkpoint_baseline(
+            &mut transaction,
             gateway_instance,
-            snapshot.process_epoch
+            snapshot,
+            counters,
+            graceful_close,
+            now,
         )
-        .fetch_optional(&mut *transaction)
         .await?;
-        let process_epoch_changed = previous.is_none();
-        if previous.is_none() {
-            // A replacement epoch with the same stable gateway identity proves
-            // that every older unclosed epoch ended without its shutdown hook.
-            let superseded = sqlx::query!(
-                "SELECT process_epoch, accepted, persisted, abandoned, updated_at \
-                 FROM request_metadata_gateway_epochs \
-                 WHERE gateway_instance = $1 AND process_epoch <> $2 \
-                   AND gracefully_closed_at IS NULL AND stale_detected_at IS NULL \
-                 FOR UPDATE",
-                gateway_instance,
-                snapshot.process_epoch
-            )
-            .fetch_all(&mut *transaction)
-            .await?;
-            for epoch in superseded {
-                record_unclean_request_metadata_epoch(
-                    &mut transaction,
-                    UncleanRequestMetadataEpoch {
-                        gateway_instance,
-                        process_epoch: epoch.process_epoch,
-                        accepted: epoch.accepted,
-                        persisted: epoch.persisted,
-                        abandoned: epoch.abandoned,
-                        last_checkpoint: epoch.updated_at,
-                        detected_at: now,
-                    },
-                )
-                .await?;
-            }
-        }
-        let (previous_dropped, previous_abandoned, previous_checkpoint) =
-            if let Some(row) = previous {
-                if row.stale_detected_at.is_some() {
-                    return Err(Error::InvalidRequestMetadataGap);
-                }
-                let previous_accepted = row.accepted;
-                let previous_persisted = row.persisted;
-                let previous_dropped = row.dropped;
-                let previous_abandoned = row.abandoned;
-                let previously_closed = row.writer_closed;
-                if accepted < previous_accepted
-                    || persisted < previous_persisted
-                    || dropped < previous_dropped
-                    || abandoned < previous_abandoned
-                    || (previously_closed && !snapshot.closed)
-                {
-                    return Err(Error::InvalidRequestMetadataGap);
-                }
-                if row.gracefully_closed_at.is_some() {
-                    if graceful_close
-                        && snapshot.closed
-                        && accepted == previous_accepted
-                        && persisted == previous_persisted
-                        && dropped == previous_dropped
-                        && abandoned == previous_abandoned
-                    {
-                        transaction.commit().await?;
-                        return Ok(LossReport {
-                            reported_events: 0,
-                            reported_dropped: 0,
-                            reported_abandoned: 0,
-                            process_epoch_changed: false,
-                        });
-                    }
-                    return Err(Error::InvalidRequestMetadataGap);
-                }
-                (previous_dropped, previous_abandoned, row.updated_at)
-            } else {
-                (0_i64, 0_i64, snapshot.started_at)
-            };
+        let CheckpointCounters {
+            accepted,
+            persisted,
+            dropped,
+            abandoned,
+        } = counters;
+        let Some((previous_dropped, previous_abandoned, previous_checkpoint)) = baseline else {
+            transaction.commit().await?;
+            return Ok(LossReport {
+                reported_events: 0,
+                reported_dropped: 0,
+                reported_abandoned: 0,
+                process_epoch_changed: false,
+            });
+        };
         let dropped_delta = dropped - previous_dropped;
         let abandoned_delta = abandoned - previous_abandoned;
         let event_count = dropped_delta

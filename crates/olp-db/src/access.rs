@@ -76,6 +76,186 @@ pub struct ApiKeyRevoked {
     pub release: PublishedRuntimeRelease,
 }
 
+fn validate_new_api_key_record(key: &NewApiKeyRecord) -> Result<(), Error> {
+    if key.name.trim().is_empty() || key.name.chars().count() > 100 {
+        return Err(Error::Invalid(
+            "name must contain 1-100 characters".to_owned(),
+        ));
+    }
+    if key.scopes.is_empty() {
+        return Err(Error::Invalid("at least one scope is required".to_owned()));
+    }
+    if key.scopes.iter().copied().collect::<BTreeSet<_>>().len() != key.scopes.len() {
+        return Err(Error::Invalid("scope entries must be unique".to_owned()));
+    }
+    if key
+        .allowed_routes
+        .iter()
+        .cloned()
+        .collect::<BTreeSet<_>>()
+        .len()
+        != key.allowed_routes.len()
+    {
+        return Err(Error::Invalid(
+            "route allowlist entries must be unique".to_owned(),
+        ));
+    }
+    if key
+        .limits
+        .daily_cost_limit
+        .into_iter()
+        .chain(key.limits.monthly_cost_limit)
+        .any(|value| !crate::valid_cost_limit(value))
+    {
+        return Err(Error::Invalid(
+            "cost limits must have at most 12 integer and 12 fractional digits".to_owned(),
+        ));
+    }
+    Ok(())
+}
+
+fn validate_api_key_expiration(key: &NewApiKeyRecord) -> Result<(), Error> {
+    if key
+        .expires_at
+        .is_some_and(|expiration| expiration <= Utc::now())
+    {
+        return Err(Error::Invalid(
+            "expiration must be in the future".to_owned(),
+        ));
+    }
+    Ok(())
+}
+
+enum ApiKeyCreateClaim<'a> {
+    Execute(sqlx::Transaction<'a, sqlx::Postgres>),
+    Replay(Response),
+}
+
+async fn claim_api_key_create<'a>(
+    mut transaction: sqlx::Transaction<'a, sqlx::Postgres>,
+    key: &NewApiKeyRecord,
+    replay: Replayable<'_>,
+) -> Result<ApiKeyCreateClaim<'a>, Error> {
+    match claim_replayable_idempotency(
+        &mut transaction,
+        key.actor,
+        "api_key.create",
+        &key.idempotency_key,
+        replay.request_fingerprint(),
+        replay.master_key(),
+    )
+    .await?
+    {
+        ReplayableIdempotencyClaim::Execute => {
+            prepare_runtime_mutation(&mut transaction).await?;
+            Ok(ApiKeyCreateClaim::Execute(transaction))
+        }
+        ReplayableIdempotencyClaim::Replay(response) => {
+            transaction.rollback().await?;
+            Ok(ApiKeyCreateClaim::Replay(response))
+        }
+        ReplayableIdempotencyClaim::Conflict => {
+            transaction.rollback().await?;
+            Err(Error::IdempotencyConflict)
+        }
+        ReplayableIdempotencyClaim::InProgress => {
+            transaction.rollback().await?;
+            Err(Error::IdempotencyInProgress)
+        }
+    }
+}
+
+async fn insert_api_key_row(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    id: Uuid,
+    etag: Uuid,
+    key: &NewApiKeyRecord,
+) -> Result<(), Error> {
+    sqlx::query!(
+        "INSERT INTO api_keys \
+         (id, lookup_id, secret_digest, name, created_by, expires_at, requests_per_minute, \
+          tokens_per_minute, max_concurrency, daily_cost_limit, monthly_cost_limit, etag) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)",
+        id,
+        &key.material.lookup_id,
+        key.material.digest.to_vec(),
+        key.name.trim(),
+        key.actor,
+        key.expires_at,
+        key.limits
+            .requests_per_minute
+            .map(|value| i32::try_from(value.get()))
+            .transpose()
+            .map_err(|_| Error::Invalid("RPM limit is too large".to_owned()))?,
+        key.limits
+            .tokens_per_minute
+            .map(|value| i64::try_from(value.get()))
+            .transpose()
+            .map_err(|_| Error::Invalid("TPM limit is too large".to_owned()))?,
+        key.limits
+            .concurrency
+            .map(|value| i32::try_from(value.get()))
+            .transpose()
+            .map_err(|_| Error::Invalid("concurrency limit is too large".to_owned()))?,
+        key.limits.daily_cost_limit,
+        key.limits.monthly_cost_limit,
+        etag
+    )
+    .execute(&mut **transaction)
+    .await?;
+    let scopes = key
+        .scopes
+        .iter()
+        .map(|scope| scope.as_str().to_owned())
+        .collect::<Vec<_>>();
+    sqlx::query!(
+        "INSERT INTO api_key_scopes (api_key_id, scope) SELECT $1, UNNEST($2::text[])",
+        id,
+        &scopes
+    )
+    .execute(&mut **transaction)
+    .await?;
+    Ok(())
+}
+
+async fn insert_api_key_allowlist(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    id: Uuid,
+    key: &NewApiKeyRecord,
+) -> Result<(), Error> {
+    let allowed_routes = key
+        .allowed_routes
+        .iter()
+        .map(|route| route.as_str().to_owned())
+        .collect::<Vec<_>>();
+    let known: BTreeSet<String> = sqlx::query_scalar!(
+        "SELECT slug FROM routes WHERE slug = ANY($1::text[])",
+        &allowed_routes
+    )
+    .fetch_all(&mut **transaction)
+    .await?
+    .into_iter()
+    .collect();
+    if let Some(route) = key
+        .allowed_routes
+        .iter()
+        .find(|route| !known.contains(route.as_str()))
+    {
+        return Err(Error::Invalid(format!(
+            "allowlisted route {route} is not active"
+        )));
+    }
+    sqlx::query!(
+        "INSERT INTO api_key_route_allowlist (api_key_id, route_slug) \
+         SELECT $1, UNNEST($2::text[])",
+        id,
+        &allowed_routes
+    )
+    .execute(&mut **transaction)
+    .await?;
+    Ok(())
+}
+
 impl Store {
     pub async fn create_api_key_record<F>(
         &self,
@@ -86,156 +266,22 @@ impl Store {
     where
         F: FnOnce(&ApiKeyCreated) -> Result<Response, PersistenceError>,
     {
-        if key.name.trim().is_empty() || key.name.chars().count() > 100 {
-            return Err(Error::Invalid(
-                "name must contain 1-100 characters".to_owned(),
-            ));
-        }
-        if key.scopes.is_empty() {
-            return Err(Error::Invalid("at least one scope is required".to_owned()));
-        }
-        if key.scopes.iter().copied().collect::<BTreeSet<_>>().len() != key.scopes.len() {
-            return Err(Error::Invalid("scope entries must be unique".to_owned()));
-        }
-        if key
-            .allowed_routes
-            .iter()
-            .cloned()
-            .collect::<BTreeSet<_>>()
-            .len()
-            != key.allowed_routes.len()
-        {
-            return Err(Error::Invalid(
-                "route allowlist entries must be unique".to_owned(),
-            ));
-        }
-        if key
-            .limits
-            .daily_cost_limit
-            .into_iter()
-            .chain(key.limits.monthly_cost_limit)
-            .any(|value| !crate::valid_cost_limit(value))
-        {
-            return Err(Error::Invalid(
-                "cost limits must have at most 12 integer and 12 fractional digits".to_owned(),
-            ));
-        }
+        validate_new_api_key_record(key)?;
         let id = Uuid::now_v7();
         let etag = Uuid::now_v7();
-        let mut transaction = self
+        let transaction = self
             .pool()
             .begin_with("BEGIN ISOLATION LEVEL READ COMMITTED")
             .await?;
-        match claim_replayable_idempotency(
-            &mut transaction,
-            key.actor,
-            "api_key.create",
-            &key.idempotency_key,
-            replay.request_fingerprint(),
-            replay.master_key(),
-        )
-        .await?
-        {
-            ReplayableIdempotencyClaim::Execute => {
-                prepare_runtime_mutation(&mut transaction).await?;
-            }
-            ReplayableIdempotencyClaim::Replay(response) => {
-                transaction.rollback().await?;
+        let mut transaction = match claim_api_key_create(transaction, key, replay).await? {
+            ApiKeyCreateClaim::Execute(transaction) => transaction,
+            ApiKeyCreateClaim::Replay(response) => {
                 return Ok(Outcome::Replayed(response));
             }
-            ReplayableIdempotencyClaim::Conflict => {
-                transaction.rollback().await?;
-                return Err(Error::IdempotencyConflict);
-            }
-            ReplayableIdempotencyClaim::InProgress => {
-                transaction.rollback().await?;
-                return Err(Error::IdempotencyInProgress);
-            }
-        }
-        if key
-            .expires_at
-            .is_some_and(|expiration| expiration <= Utc::now())
-        {
-            return Err(Error::Invalid(
-                "expiration must be in the future".to_owned(),
-            ));
-        }
-        sqlx::query!(
-            "INSERT INTO api_keys \
-             (id, lookup_id, secret_digest, name, created_by, expires_at, requests_per_minute, \
-              tokens_per_minute, max_concurrency, daily_cost_limit, monthly_cost_limit, etag) \
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)",
-            id,
-            &key.material.lookup_id,
-            key.material.digest.to_vec(),
-            key.name.trim(),
-            key.actor,
-            key.expires_at,
-            key.limits
-                .requests_per_minute
-                .map(|value| i32::try_from(value.get()))
-                .transpose()
-                .map_err(|_| Error::Invalid("RPM limit is too large".to_owned()))?,
-            key.limits
-                .tokens_per_minute
-                .map(|value| i64::try_from(value.get()))
-                .transpose()
-                .map_err(|_| Error::Invalid("TPM limit is too large".to_owned()))?,
-            key.limits
-                .concurrency
-                .map(|value| i32::try_from(value.get()))
-                .transpose()
-                .map_err(|_| Error::Invalid("concurrency limit is too large".to_owned()))?,
-            key.limits.daily_cost_limit,
-            key.limits.monthly_cost_limit,
-            etag
-        )
-        .execute(&mut *transaction)
-        .await?;
-        let scopes = key
-            .scopes
-            .iter()
-            .map(|scope| scope.as_str().to_owned())
-            .collect::<Vec<_>>();
-        sqlx::query!(
-            "INSERT INTO api_key_scopes (api_key_id, scope) SELECT $1, UNNEST($2::text[])",
-            id,
-            &scopes
-        )
-        .execute(&mut *transaction)
-        .await?;
-        let allowed_routes = key
-            .allowed_routes
-            .iter()
-            .map(|route| route.as_str().to_owned())
-            .collect::<Vec<_>>();
-        // One lookup covers the whole allowlist; the first unknown slug in
-        // request order is the one reported, as the per-route check did.
-        let known: BTreeSet<String> = sqlx::query_scalar!(
-            "SELECT slug FROM routes WHERE slug = ANY($1::text[])",
-            &allowed_routes
-        )
-        .fetch_all(&mut *transaction)
-        .await?
-        .into_iter()
-        .collect();
-        if let Some(route) = key
-            .allowed_routes
-            .iter()
-            .find(|route| !known.contains(route.as_str()))
-        {
-            return Err(Error::Invalid(format!(
-                "allowlisted route {route} is not active"
-            )));
-        }
-        sqlx::query!(
-            "INSERT INTO api_key_route_allowlist (api_key_id, route_slug) \
-             SELECT $1, UNNEST($2::text[])",
-            id,
-            &allowed_routes
-        )
-        .execute(&mut *transaction)
-        .await?;
+        };
+        validate_api_key_expiration(key)?;
+        insert_api_key_row(&mut transaction, id, etag, key).await?;
+        insert_api_key_allowlist(&mut transaction, id, key).await?;
         record_success(
             &mut *transaction,
             self.provenance(),

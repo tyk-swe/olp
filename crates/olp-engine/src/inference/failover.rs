@@ -458,136 +458,81 @@ fn plan_retry(
     Some(backoff)
 }
 
-async fn execute_attempt(
-    context: AttemptExecutionContext<'_>,
-    record: &mut AttemptRecord<'_>,
-    traces: &mut Vec<RequestAttemptMetadata>,
-) -> Result<AttemptDisposition, ExecutionFailure> {
-    let AttemptExecutionContext {
-        runtime,
-        media_spool,
-        max_inline_media_bytes,
-        circuits,
-        metadata,
-        operation,
-        route_deadline,
-        can_retry_canonical,
-        propagate_trace_context,
-    } = context;
-    let attempt = record.plan;
-    let attempt_deadline = route_deadline.min(record.started + attempt.timeout.as_duration());
-    let Some(transport) = runtime.transport(attempt.provider_id) else {
-        let error = TransportError {
-            upstream: Default::default(),
-            phase: crate::domain::ports::TransportPhase::Connect,
-            class: AttemptFailureClass::Connect,
-            response_committed: false,
-            message: "provider transport is not loaded".to_owned(),
-        };
-        return Ok(AttemptDisposition::Retry {
-            transport: record.record_failure(traces, circuits, error)?,
-            canonical: None,
-        });
-    };
-    let remaining = attempt_deadline.saturating_duration_since(tokio::time::Instant::now());
-    if remaining.is_zero() {
-        return Err(record.record_deadline_elapsed(traces, circuits));
+fn missing_transport_error() -> TransportError {
+    TransportError {
+        upstream: Default::default(),
+        phase: crate::domain::ports::TransportPhase::Connect,
+        class: AttemptFailureClass::Connect,
+        response_committed: false,
+        message: "provider transport is not loaded".to_owned(),
     }
-    let provider_request = ProviderRequest {
-        metadata: metadata.clone(),
-        attempt: attempt.clone(),
-        operation: operation_for_provider(operation, attempt.provider_kind),
-        media: Some(Arc::clone(media_spool)),
-        max_inline_media_bytes,
-        propagate_trace_context,
-    };
-    let output = if let Some(trace) = record.trace.as_ref() {
+}
+
+async fn execute_provider_output(
+    transport: &Arc<dyn crate::domain::ports::ProviderTransport>,
+    request: ProviderRequest,
+    remaining: Duration,
+    operation: OperationKind,
+    trace: Option<&AttemptTrace>,
+) -> Result<ProviderOutput, TransportError> {
+    let output = if let Some(trace) = trace {
         tokio::time::timeout(
             remaining,
-            transport.execute(provider_request).instrument(trace.span()),
+            transport.execute(request).instrument(trace.span()),
         )
         .await
     } else {
-        tokio::time::timeout(remaining, transport.execute(provider_request)).await
+        tokio::time::timeout(remaining, transport.execute(request)).await
     };
-    let output = match output {
-        Ok(Ok(output)) => output,
-        Ok(Err(error)) => {
-            let error = reclassify_ambiguous_transport_failure(error, operation.kind());
-            return Ok(AttemptDisposition::Retry {
-                transport: record.record_failure(traces, circuits, error)?,
-                canonical: None,
-            });
-        }
-        Err(_) => {
-            let error = reclassify_ambiguous_transport_failure(
-                TransportError {
-                    upstream: Default::default(),
-                    phase: crate::domain::ports::TransportPhase::FirstByte,
-                    class: AttemptFailureClass::Timeout,
-                    response_committed: false,
-                    message: "route deadline elapsed before provider response".to_owned(),
-                },
-                operation.kind(),
-            );
-            return Ok(AttemptDisposition::Retry {
-                transport: record.record_failure(traces, circuits, error)?,
-                canonical: None,
-            });
-        }
-    };
-    let mut events = match output {
-        ProviderOutput::Events(events) => events,
-        ProviderOutput::Result(result) => {
-            record.record_success(traces, circuits);
-            return Ok(AttemptDisposition::Success {
-                output: ExecutionOutput::Result(result),
-                deadline: attempt_deadline,
-                trace: record.take_trace(),
-            });
-        }
-    };
-    let remaining = attempt_deadline.saturating_duration_since(tokio::time::Instant::now());
-    let first = match tokio::time::timeout(remaining, events.next()).await {
-        Ok(Some(Ok(event))) => event,
-        Ok(Some(Err(error))) => {
-            let error = reclassify_ambiguous_transport_failure(error, operation.kind());
-            return Ok(AttemptDisposition::Retry {
-                transport: record.record_failure(traces, circuits, error)?,
-                canonical: None,
-            });
-        }
-        Ok(None) => {
-            let error = TransportError {
+    match output {
+        Ok(Ok(output)) => Ok(output),
+        Ok(Err(error)) => Err(reclassify_ambiguous_transport_failure(error, operation)),
+        Err(_) => Err(reclassify_ambiguous_transport_failure(
+            TransportError {
                 upstream: Default::default(),
                 phase: crate::domain::ports::TransportPhase::FirstByte,
-                class: AttemptFailureClass::Protocol,
+                class: AttemptFailureClass::Timeout,
                 response_committed: false,
-                message: "the provider returned an empty response".to_owned(),
-            };
-            let gateway = InferenceError::bad_gateway(
-                "provider_protocol_error",
-                "The provider returned an empty response.",
-            );
-            return Err(record.record_terminal_failure(traces, circuits, error, gateway));
-        }
-        Err(_) => {
-            let error = reclassify_ambiguous_transport_failure(
-                TransportError {
-                    upstream: Default::default(),
-                    phase: crate::domain::ports::TransportPhase::FirstByte,
-                    class: AttemptFailureClass::Timeout,
-                    response_committed: false,
-                    message: "route deadline elapsed before a canonical event".to_owned(),
-                },
-                operation.kind(),
-            );
-            return Ok(AttemptDisposition::Retry {
-                transport: record.record_failure(traces, circuits, error)?,
-                canonical: None,
-            });
-        }
-    };
+                message: "route deadline elapsed before provider response".to_owned(),
+            },
+            operation,
+        )),
+    }
+}
+
+async fn await_first_event(
+    events: &mut EventStream,
+    remaining: Duration,
+    operation: OperationKind,
+) -> Result<Event, Option<TransportError>> {
+    match tokio::time::timeout(remaining, events.next()).await {
+        Ok(Some(Ok(event))) => Ok(event),
+        Ok(Some(Err(error))) => Err(Some(reclassify_ambiguous_transport_failure(
+            error, operation,
+        ))),
+        Ok(None) => Err(None),
+        Err(_) => Err(Some(reclassify_ambiguous_transport_failure(
+            TransportError {
+                upstream: Default::default(),
+                phase: crate::domain::ports::TransportPhase::FirstByte,
+                class: AttemptFailureClass::Timeout,
+                response_committed: false,
+                message: "route deadline elapsed before a canonical event".to_owned(),
+            },
+            operation,
+        ))),
+    }
+}
+
+fn finish_attempt_with_first_event(
+    first: Event,
+    events: EventStream,
+    attempt_deadline: tokio::time::Instant,
+    can_retry_canonical: bool,
+    record: &mut AttemptRecord<'_>,
+    traces: &mut Vec<RequestAttemptMetadata>,
+    circuits: &Breaker,
+) -> Result<AttemptDisposition, ExecutionFailure> {
     let mut event_sequence = EventSequenceValidator::new();
     if let Err(sequence_error) = event_sequence.push(&first) {
         let error = canonical_event_protocol_error(sequence_error, false);
@@ -613,7 +558,7 @@ async fn execute_attempt(
         }
         if let Some(class) = canonical_error_circuit_class(error.class) {
             circuits.record_failure_for_optional_permit(
-                attempt.routing_id,
+                record.plan.routing_id,
                 Some(&record.circuit_permit),
                 class,
                 None,
@@ -624,15 +569,15 @@ async fn execute_attempt(
         false
     };
     if matches!(first.kind, Kind::Done) && !initial_failure {
-        circuits
-            .record_success_for_optional_permit(attempt.routing_id, Some(&record.circuit_permit));
+        circuits.record_success_for_optional_permit(
+            record.plan.routing_id,
+            Some(&record.circuit_permit),
+        );
     }
-    // The half-open probe outlives this function: a stream is still the same
-    // probe, so it reports its outcome under the same lease.
     let events = circuit_accounted_event_stream_with_permit(
         validated_event_stream(events, event_sequence),
         circuits.clone(),
-        attempt.routing_id,
+        record.plan.routing_id,
         initial_failure,
         Some(record.circuit_permit),
     );
@@ -642,6 +587,106 @@ async fn execute_attempt(
         deadline: attempt_deadline,
         trace: record.take_trace(),
     })
+}
+
+async fn execute_attempt(
+    context: AttemptExecutionContext<'_>,
+    record: &mut AttemptRecord<'_>,
+    traces: &mut Vec<RequestAttemptMetadata>,
+) -> Result<AttemptDisposition, ExecutionFailure> {
+    let AttemptExecutionContext {
+        runtime,
+        media_spool,
+        max_inline_media_bytes,
+        circuits,
+        metadata,
+        operation,
+        route_deadline,
+        can_retry_canonical,
+        propagate_trace_context,
+    } = context;
+    let attempt = record.plan;
+    let attempt_deadline = route_deadline.min(record.started + attempt.timeout.as_duration());
+    let Some(transport) = runtime.transport(attempt.provider_id) else {
+        let error = missing_transport_error();
+        return Ok(AttemptDisposition::Retry {
+            transport: record.record_failure(traces, circuits, error)?,
+            canonical: None,
+        });
+    };
+    let remaining = attempt_deadline.saturating_duration_since(tokio::time::Instant::now());
+    if remaining.is_zero() {
+        return Err(record.record_deadline_elapsed(traces, circuits));
+    }
+    let provider_request = ProviderRequest {
+        metadata: metadata.clone(),
+        attempt: attempt.clone(),
+        operation: operation_for_provider(operation, attempt.provider_kind),
+        media: Some(Arc::clone(media_spool)),
+        max_inline_media_bytes,
+        propagate_trace_context,
+    };
+    let output = match execute_provider_output(
+        &transport,
+        provider_request,
+        remaining,
+        operation.kind(),
+        record.trace.as_ref(),
+    )
+    .await
+    {
+        Ok(output) => output,
+        Err(error) => {
+            return Ok(AttemptDisposition::Retry {
+                transport: record.record_failure(traces, circuits, error)?,
+                canonical: None,
+            });
+        }
+    };
+    let mut events = match output {
+        ProviderOutput::Events(events) => events,
+        ProviderOutput::Result(result) => {
+            record.record_success(traces, circuits);
+            return Ok(AttemptDisposition::Success {
+                output: ExecutionOutput::Result(result),
+                deadline: attempt_deadline,
+                trace: record.take_trace(),
+            });
+        }
+    };
+    let remaining = attempt_deadline.saturating_duration_since(tokio::time::Instant::now());
+    let first = match await_first_event(&mut events, remaining, operation.kind()).await {
+        Ok(event) => event,
+        Err(Some(error)) => {
+            return Ok(AttemptDisposition::Retry {
+                transport: record.record_failure(traces, circuits, error)?,
+                canonical: None,
+            });
+        }
+        Err(None) => {
+            let error = TransportError {
+                upstream: Default::default(),
+                phase: crate::domain::ports::TransportPhase::FirstByte,
+                class: AttemptFailureClass::Protocol,
+                response_committed: false,
+                message: "the provider returned an empty response".to_owned(),
+            };
+            let gateway = InferenceError::bad_gateway(
+                "provider_protocol_error",
+                "The provider returned an empty response.",
+            );
+            return Err(record.record_terminal_failure(traces, circuits, error, gateway));
+        }
+    };
+    finish_attempt_with_first_event(
+        first,
+        events,
+        attempt_deadline,
+        can_retry_canonical,
+        record,
+        traces,
+        circuits,
+    )
 }
 
 /// A transport failure after the request may have reached the provider is

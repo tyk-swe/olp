@@ -244,6 +244,139 @@ pub(super) async fn parse_multipart(
     }
 }
 
+async fn store_multipart_file(
+    state: &GatewayState,
+    field: &mut axum::extract::multipart::Field<'_>,
+    filename: String,
+    content_type: Option<String>,
+    name: String,
+    maximum_file_bytes: u64,
+    output: &mut MultipartFormData,
+) -> Result<(), InferenceError> {
+    let (sender, receiver) = tokio::sync::mpsc::channel(8);
+    let stream = channel_stream(receiver);
+    let put = state
+        .media_spool()
+        .put(olp_engine::domain::ports::MediaUpload {
+            filename: filename.clone(),
+            content_type: content_type.clone(),
+            maximum_length: maximum_file_bytes,
+            bytes: Box::pin(stream),
+        });
+    let produce = async move {
+        while let Some(chunk) = field.chunk().await.transpose() {
+            match chunk {
+                Ok(chunk) => {
+                    if sender.send(Ok(chunk)).await.is_err() {
+                        return Ok::<(), InferenceError>(());
+                    }
+                }
+                Err(error) => {
+                    let _ = sender
+                        .send(Err(olp_engine::domain::ports::MediaSpoolError::Unavailable))
+                        .await;
+                    return Err(InferenceError::invalid_request(format!(
+                        "The multipart file is invalid: {error}"
+                    )));
+                }
+            }
+        }
+        Ok(())
+    };
+    let (artifact, produced) = tokio::join!(put, produce);
+    let artifact = match (artifact, produced) {
+        (Ok(artifact), Ok(())) => artifact,
+        (Ok(artifact), Err(error)) => {
+            output.cleanup_handles.push(artifact.handle);
+            return Err(error);
+        }
+        (Err(_), Err(error)) => return Err(error),
+        (Err(error), Ok(())) => return Err(media_spool_error(error)),
+    };
+    output.cleanup_handles.push(artifact.handle.clone());
+    let part = BoundedMediaPart::new(
+        artifact.handle,
+        filename,
+        content_type,
+        artifact.content_length.unwrap_or_default(),
+        maximum_file_bytes,
+    )
+    .map_err(|error| InferenceError::invalid_request(error.to_string()))?;
+    output.files.entry(name).or_default().push(part);
+    Ok(())
+}
+
+async fn store_multipart_text(
+    field: &mut axum::extract::multipart::Field<'_>,
+    name: String,
+    admission: &MultipartRouteAdmission,
+    output: &mut MultipartFormData,
+    text_bytes: &mut usize,
+    authorized_model_seen: &mut bool,
+) -> Result<(), InferenceError> {
+    let mut bytes = Vec::new();
+    while let Some(chunk) = field.chunk().await.map_err(|error| {
+        InferenceError::invalid_request(format!("The multipart field is invalid: {error}"))
+    })? {
+        let next_field = bytes
+            .len()
+            .checked_add(chunk.len())
+            .filter(|length| *length <= MAX_MULTIPART_TEXT_FIELD_BYTES)
+            .ok_or_else(|| {
+                InferenceError::invalid_request("A multipart text field exceeded 64 KiB.")
+            })?;
+        let next_total = text_bytes
+            .checked_add(chunk.len())
+            .filter(|length| *length <= MAX_MULTIPART_TEXT_TOTAL_BYTES)
+            .ok_or_else(|| {
+                InferenceError::invalid_request(
+                    "Multipart text fields exceeded the 512 KiB aggregate limit.",
+                )
+            })?;
+        bytes
+            .try_reserve(chunk.len())
+            .map_err(|_| InferenceError::unavailable("multipart_text_allocation_unavailable"))?;
+        bytes.extend_from_slice(&chunk);
+        debug_assert_eq!(bytes.len(), next_field);
+        *text_bytes = next_total;
+    }
+    let text = String::from_utf8(bytes.strip_prefix(UTF8_BOM).unwrap_or(&bytes).to_vec()).map_err(
+        |_| {
+            InferenceError::invalid_request(format!(
+                "The multipart field {name} is not valid UTF-8."
+            ))
+        },
+    )?;
+    if name == "model" {
+        match admission {
+            MultipartRouteAdmission::Expected(expected) if text != expected.as_str() => {
+                return Err(InferenceError::invalid_request(
+                    "X-OLP-Route must match the multipart model field.",
+                ));
+            }
+            MultipartRouteAdmission::RequireAuthorizedModel(allowed_routes) => {
+                let route =
+                    olp_engine::domain::ids::RouteSlug::parse(text.as_str()).map_err(|_| {
+                        InferenceError::invalid_request(
+                            "The model field must contain a valid authorized route.",
+                        )
+                    })?;
+                if !allowed_routes.contains(&route) {
+                    return Err(InferenceError::forbidden(
+                        "The API key is not authorized for the multipart model route.".to_owned(),
+                    ));
+                }
+                *authorized_model_seen = true;
+            }
+            MultipartRouteAdmission::Expected(_) | MultipartRouteAdmission::Unrestricted => {
+                *authorized_model_seen = true;
+            }
+        }
+    }
+    output.text.entry(name).or_default().push(text);
+    Ok(())
+}
+
 async fn parse_multipart_fields(
     state: &GatewayState,
     mut multipart: Multipart,
@@ -278,131 +411,26 @@ async fn parse_multipart_fields(
                 ));
             }
             let content_type = field.content_type().map(str::to_owned);
-            let (sender, receiver) = tokio::sync::mpsc::channel(8);
-            let stream = channel_stream(receiver);
-            let put = state
-                .media_spool()
-                .put(olp_engine::domain::ports::MediaUpload {
-                    filename: filename.clone(),
-                    content_type: content_type.clone(),
-                    maximum_length: maximum_file_bytes,
-                    bytes: Box::pin(stream),
-                });
-            let produce = async move {
-                while let Some(chunk) = field.chunk().await.transpose() {
-                    match chunk {
-                        Ok(chunk) => {
-                            if sender.send(Ok(chunk)).await.is_err() {
-                                return Ok::<(), InferenceError>(());
-                            }
-                        }
-                        Err(error) => {
-                            let _ = sender
-                                .send(Err(olp_engine::domain::ports::MediaSpoolError::Unavailable))
-                                .await;
-                            return Err(InferenceError::invalid_request(format!(
-                                "The multipart file is invalid: {error}"
-                            )));
-                        }
-                    }
-                }
-                Ok(())
-            };
-            let (artifact, produced) = tokio::join!(put, produce);
-            let artifact = match (artifact, produced) {
-                (Ok(artifact), Ok(())) => artifact,
-                (Ok(artifact), Err(error)) => {
-                    // The spool may have completed while the producer noticed
-                    // malformed input. Register it before returning so the
-                    // outer parser cleanup (and cancellation-safe `Drop`)
-                    // owns it even if this request is aborted immediately.
-                    output.cleanup_handles.push(artifact.handle);
-                    return Err(error);
-                }
-                // A malformed multipart body is a client error even if the
-                // spool was told to stop by the producer. Prefer that
-                // original parser error over the expected receiver-side
-                // `Unavailable` result from `put`.
-                (Err(_), Err(error)) => return Err(error),
-                (Err(error), Ok(())) => return Err(media_spool_error(error)),
-            };
-            output.cleanup_handles.push(artifact.handle.clone());
-            let part = BoundedMediaPart::new(
-                artifact.handle,
+            store_multipart_file(
+                state,
+                &mut field,
                 filename,
                 content_type,
-                artifact.content_length.unwrap_or_default(),
+                name,
                 maximum_file_bytes,
+                output,
             )
-            .map_err(|error| InferenceError::invalid_request(error.to_string()))?;
-            output.files.entry(name).or_default().push(part);
+            .await?;
         } else {
-            // Text fields are UTF-8: every official SDK encodes them that way
-            // and the OpenAI multipart contract does not define another
-            // charset. Bound the raw bytes before growing an allocation.
-            let mut bytes = Vec::new();
-            while let Some(chunk) = field.chunk().await.map_err(|error| {
-                InferenceError::invalid_request(format!("The multipart field is invalid: {error}"))
-            })? {
-                let next_field = bytes
-                    .len()
-                    .checked_add(chunk.len())
-                    .filter(|length| *length <= MAX_MULTIPART_TEXT_FIELD_BYTES)
-                    .ok_or_else(|| {
-                        InferenceError::invalid_request("A multipart text field exceeded 64 KiB.")
-                    })?;
-                let next_total = text_bytes
-                    .checked_add(chunk.len())
-                    .filter(|length| *length <= MAX_MULTIPART_TEXT_TOTAL_BYTES)
-                    .ok_or_else(|| {
-                        InferenceError::invalid_request(
-                            "Multipart text fields exceeded the 512 KiB aggregate limit.",
-                        )
-                    })?;
-                bytes.try_reserve(chunk.len()).map_err(|_| {
-                    InferenceError::unavailable("multipart_text_allocation_unavailable")
-                })?;
-                bytes.extend_from_slice(&chunk);
-                debug_assert_eq!(bytes.len(), next_field);
-                text_bytes = next_total;
-            }
-            // A text field that is not UTF-8 is a malformed request, not
-            // something to repair with replacement characters.
-            let text = String::from_utf8(bytes.strip_prefix(UTF8_BOM).unwrap_or(&bytes).to_vec())
-                .map_err(|_| {
-                InferenceError::invalid_request(format!(
-                    "The multipart field {name} is not valid UTF-8."
-                ))
-            })?;
-            if name == "model" {
-                match admission {
-                    MultipartRouteAdmission::Expected(expected) if text != expected.as_str() => {
-                        return Err(InferenceError::invalid_request(
-                            "X-OLP-Route must match the multipart model field.",
-                        ));
-                    }
-                    MultipartRouteAdmission::RequireAuthorizedModel(allowed_routes) => {
-                        let route = olp_engine::domain::ids::RouteSlug::parse(text.as_str())
-                            .map_err(|_| {
-                                InferenceError::invalid_request(
-                                    "The model field must contain a valid authorized route.",
-                                )
-                            })?;
-                        if !allowed_routes.contains(&route) {
-                            return Err(InferenceError::forbidden(
-                                "The API key is not authorized for the multipart model route."
-                                    .to_owned(),
-                            ));
-                        }
-                        authorized_model_seen = true;
-                    }
-                    MultipartRouteAdmission::Expected(_)
-                    | MultipartRouteAdmission::Unrestricted => {
-                        authorized_model_seen = true;
-                    }
-                }
-            }
-            output.text.entry(name).or_default().push(text);
+            store_multipart_text(
+                &mut field,
+                name,
+                admission,
+                output,
+                &mut text_bytes,
+                &mut authorized_model_seen,
+            )
+            .await?;
         }
     }
     if admission.requires_authorized_model() && !authorized_model_seen {

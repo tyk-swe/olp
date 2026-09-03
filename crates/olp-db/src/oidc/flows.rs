@@ -16,11 +16,7 @@ const MAX_AUTHORIZATION_FLOWS_PER_MINUTE: i64 = 300;
 const OIDC_LOGIN_CONSUMPTION_DELETE_BATCH: i64 = 1_000;
 
 impl Store {
-    /// Persists an authenticated link or reauthentication flow. The exact
-    /// initiating session and security version are part of the durable flow.
-    /// Link creation additionally consumes its one-time recent-auth grant in
-    /// the same transaction as flow insertion.
-    pub async fn create_oidc_flow(&self, flow: NewOidcFlow) -> Result<(), OidcError> {
+    fn validated_oidc_flow_actor(flow: &NewOidcFlow) -> Result<(Uuid, Uuid, i64), OidcError> {
         if flow.purpose == OidcFlowPurpose::Login {
             return Err(OidcError::Invalid(
                 "new OIDC login flows are stateless and cannot be persisted".to_owned(),
@@ -34,7 +30,7 @@ impl Store {
                 "authorization flow metadata is invalid".to_owned(),
             ));
         }
-        let (actor_user_id, actor_session_id, actor_security_version) = match (
+        let actor = match (
             flow.actor_user_id,
             flow.actor_session_id,
             flow.actor_security_version,
@@ -66,23 +62,21 @@ impl Store {
                 ));
             }
         }
+        Ok(actor)
+    }
 
-        let mut transaction = self.pool().begin().await?;
-        // Configuration updates delete every outstanding redirect while
-        // holding this lock. Serialize insertion with that invalidation and
-        // reject a flow built from a configuration that changed while its
-        // authorization URL was being prepared.
-        require_current_enabled_configuration(
-            &mut transaction,
-            flow.configuration_id,
-            flow.configuration_etag,
-        )
-        .await?;
-
+    async fn authorize_oidc_flow_session(
+        &self,
+        transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        flow: &NewOidcFlow,
+        actor_user_id: Uuid,
+        actor_session_id: Uuid,
+        actor_security_version: i64,
+    ) -> Result<(), OidcError> {
         match flow.purpose {
             OidcFlowPurpose::Link => {
                 if !consume_recent_authentication(
-                    &mut transaction,
+                    transaction,
                     actor_session_id,
                     actor_user_id,
                     actor_security_version,
@@ -95,7 +89,7 @@ impl Store {
                     return Err(OidcError::RecentAuthenticationRequired);
                 }
                 record_audit_event(
-                    &mut *transaction,
+                    &mut **transaction,
                     AuditEvent {
                         provenance: self.provenance(),
                         actor: Some(actor_user_id),
@@ -122,7 +116,7 @@ impl Store {
                     actor_user_id,
                     actor_security_version
                 )
-                .fetch_one(&mut *transaction)
+                .fetch_one(&mut **transaction)
                 .await?;
                 if !current {
                     return Err(OidcError::SessionUnavailable);
@@ -134,6 +128,37 @@ impl Store {
                 ));
             }
         }
+        Ok(())
+    }
+
+    /// Persists an authenticated link or reauthentication flow. The exact
+    /// initiating session and security version are part of the durable flow.
+    /// Link creation additionally consumes its one-time recent-auth grant in
+    /// the same transaction as flow insertion.
+    pub async fn create_oidc_flow(&self, flow: NewOidcFlow) -> Result<(), OidcError> {
+        let (actor_user_id, actor_session_id, actor_security_version) =
+            Self::validated_oidc_flow_actor(&flow)?;
+
+        let mut transaction = self.pool().begin().await?;
+        // Configuration updates delete every outstanding redirect while
+        // holding this lock. Serialize insertion with that invalidation and
+        // reject a flow built from a configuration that changed while its
+        // authorization URL was being prepared.
+        require_current_enabled_configuration(
+            &mut transaction,
+            flow.configuration_id,
+            flow.configuration_etag,
+        )
+        .await?;
+
+        self.authorize_oidc_flow_session(
+            &mut transaction,
+            &flow,
+            actor_user_id,
+            actor_session_id,
+            actor_security_version,
+        )
+        .await?;
 
         sqlx::query!(
             "SELECT pg_advisory_xact_lock($1)",
