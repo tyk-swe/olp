@@ -1,8 +1,9 @@
 # Execution roadmap
 
-This period closes the external evidence gaps carried from the archived
-[September 2026 roadmap](archive/2026-09/README.md). It does not reopen product
-scope. Work candidates stay trigger-gated in [`deferred.md`](deferred.md).
+Version 2.3.0 is published. This period closes the external evidence gaps
+carried from the archived [September 2026 roadmap](archive/2026-09/README.md).
+It does not reopen product scope. Work candidates stay trigger-gated in
+[`deferred.md`](deferred.md).
 
 ## Priorities
 

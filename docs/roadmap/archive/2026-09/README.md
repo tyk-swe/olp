@@ -89,9 +89,7 @@ evidence.
 
 ## Final score
 
-Scored against each milestone's exit criteria at the archive cut. Publication
-and release-image scanning remain the two tag-dependent milestone-8 gates; the
-archive is updated with their final evidence after the tag workflow completes.
+Scored against each milestone's exit criteria after the 2.3.0 tag workflow.
 
 | Milestone | Score | Decision |
 |---|---:|---|
@@ -102,13 +100,13 @@ archive is updated with their final evidence after the tag workflow completes.
 | 5 — Tracing | 1 / 3 | Carry OTEL-05 and OTEL-06; Docker-backed Jaeger and benchmark dependencies are unavailable in this environment |
 | 6 — Spend controls | 2 / 3 | Carry SPEND-06 and SPEND-07; Docker-backed Compose and Toxiproxy proofs are unavailable |
 | 7 — Performance | 3 / 3 | Complete; `main` run 33738308399 published a green performance artifact |
-| 8 — Release and retro | 2 / 4 | Baseline, local gate, and next plan complete; publication and release-image security evidence are tag-dependent |
+| 8 — Release and retro | 4 / 4 | Complete; REL-07 carries the environment-blocked fresh-cluster Helm proof |
 
 ## Decisions
 
 - **Completed:** all repository work scheduled for CI, SDK parity,
   documentation, tracing, spend controls, performance, source-size reduction,
-  and the 2.3.0 release candidate.
+  and the published 2.3.0 release.
 - **Carried, not dropped:** every missed exit criterion appears in the final
   [`backlog.md`](backlog.md) with a new week and priority.
 - **Dropped:** GitHub merge queue enablement because public repositories owned
@@ -120,8 +118,8 @@ archive is updated with their final evidence after the tag workflow completes.
 
 ## Health at close
 
-- The ten most recent inspected `Required` jobs are green, ending with
-  [run 33738308399](https://github.com/tyk-swe/olp/actions/runs/33738308399).
+- The twelve most recent inspected `Required` jobs are green, ending with
+  [run 33783393182](https://github.com/tyk-swe/olp/actions/runs/33783393182/job/100750001133).
 - Time-to-first-request remains unmeasured by a person new to the repository;
   DOC-05 carries that signal into the next period.
 - [`provider-drift` issue #134](https://github.com/tyk-swe/olp/issues/134) is
