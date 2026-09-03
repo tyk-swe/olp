@@ -270,7 +270,7 @@ async fn settle_new_entries(
 async fn connect_consumer_backend(
     valkey_url: &str,
     stream: &str,
-    consumer: &str,
+    _consumer: &str,
     limits_namespace: &str,
     policy: ConsumerPolicy,
 ) -> Result<(ConnectionManager, DistributedLimiter), Error> {
@@ -282,7 +282,7 @@ async fn connect_consumer_backend(
     create_consumer_group(&mut connection, stream).await?;
     #[cfg(all(feature = "test-util", debug_assertions))]
     let _: () = connection
-        .client_setname(format!("olp-test-request-metadata-{consumer}"))
+        .client_setname(format!("olp-test-request-metadata-{_consumer}"))
         .await?;
     Ok((connection, cost_limiter))
 }
