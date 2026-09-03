@@ -1,9 +1,10 @@
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use axum::body::Bytes;
-use olp_engine::domain::canonical::events::ErrorClass;
 use olp_engine::protocols::sse::{Frame, encode_frame};
 use serde_json::{Value, json};
+
+pub(super) use olp_engine::protocols::openai::error_type;
 
 use super::error::InferenceError;
 
@@ -14,24 +15,6 @@ pub(super) fn error_sse(error: &InferenceError) -> Bytes {
         "param": null,
         "code": error.code()
     }}))
-}
-
-/// OpenAI publishes a closed set of `error.type` values. Inventing new ones
-/// (`upstream_error`, `internal_error`, `timeout_error`, …) means every client
-/// that branches on the type falls through its own error handling, so a
-/// server-side fault is reported as OpenAI reports one and the specific cause
-/// stays in `error.code`.
-pub(super) fn error_type(class: ErrorClass) -> &'static str {
-    match class {
-        ErrorClass::Authentication => "authentication_error",
-        ErrorClass::Authorization => "permission_error",
-        ErrorClass::InvalidRequest => "invalid_request_error",
-        ErrorClass::RateLimit => "rate_limit_error",
-        ErrorClass::Timeout
-        | ErrorClass::Transport
-        | ErrorClass::Upstream
-        | ErrorClass::Internal => "server_error",
-    }
 }
 
 pub(super) fn sse_json(value: &Value) -> Bytes {
@@ -57,22 +40,6 @@ pub(super) fn unix_seconds() -> i64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn canonical_error_classes_have_stable_openai_types() {
-        for (class, expected) in [
-            (ErrorClass::Authentication, "authentication_error"),
-            (ErrorClass::Authorization, "permission_error"),
-            (ErrorClass::InvalidRequest, "invalid_request_error"),
-            (ErrorClass::RateLimit, "rate_limit_error"),
-            (ErrorClass::Timeout, "server_error"),
-            (ErrorClass::Transport, "server_error"),
-            (ErrorClass::Upstream, "server_error"),
-            (ErrorClass::Internal, "server_error"),
-        ] {
-            assert_eq!(error_type(class), expected);
-        }
-    }
 
     #[test]
     fn json_and_errors_are_encoded_as_complete_data_only_sse_frames() {

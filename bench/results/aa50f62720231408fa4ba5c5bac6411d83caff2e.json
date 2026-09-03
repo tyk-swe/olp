@@ -1,0 +1,1126 @@
+{
+  "schema_version": 1,
+  "git_sha": "aa50f62720231408fa4ba5c5bac6411d83caff2e",
+  "source_dirty": true,
+  "source_fingerprint": null,
+  "duration_seconds": 60,
+  "build_profile": "release",
+  "machine": {
+    "platform": "Linux-7.0.0-30-generic-x86_64-with-glibc2.43",
+    "cpu": "Intel Core Processor (Haswell, no TSX)",
+    "logical_cpus": 8,
+    "rustc": "rustc 1.97.1 (8bab26f4f 2026-07-14)",
+    "oha": "1.12.0"
+  },
+  "mock": {
+    "unary_delay_ms": 200,
+    "stream_tokens": 50
+  },
+  "admission_rejections": 0,
+  "scenarios": [
+    {
+      "name": "chat_unary_c16",
+      "duration_seconds": 60,
+      "concurrency": 16,
+      "gateway": {
+        "latency_ms": {
+          "p50": 242.934,
+          "p95": 244.375,
+          "p99": 246.02
+        },
+        "throughput_rps": 66.064,
+        "error_rate": 0.0,
+        "status_codes": {
+          "200": 3948
+        },
+        "errors": {
+          "aborted due to deadline": 16
+        },
+        "raw": {
+          "summary": {
+            "successRate": 1.0,
+            "total": 60.002135259,
+            "slowest": 0.456521138,
+            "fastest": 0.201481398,
+            "average": 0.24294028205445772,
+            "requestsPerSec": 66.06431559292585,
+            "totalData": 3186036,
+            "sizePerRequest": 807,
+            "sizePerSec": 53098.71034168091
+          },
+          "responseTimeHistogram": {
+            "0.201481398": 1,
+            "0.226985372": 28,
+            "0.252489346": 3911,
+            "0.27799332": 3,
+            "0.303497294": 1,
+            "0.32900126799999996": 0,
+            "0.354505242": 0,
+            "0.380009216": 0,
+            "0.40551318999999997": 0,
+            "0.43101716399999995": 0,
+            "0.45652113799999994": 4
+          },
+          "latencyPercentiles": {
+            "p10": 0.241971278,
+            "p25": 0.242316878,
+            "p50": 0.242934115,
+            "p75": 0.243259596,
+            "p90": 0.2439488,
+            "p95": 0.24437524,
+            "p99": 0.246019875,
+            "p99.9": 0.454968444,
+            "p99.99": 0.456521138
+          },
+          "rps": {
+            "mean": 307940.45003639226,
+            "stddev": 5265637.576437007,
+            "max": 166666652.876606,
+            "min": 4.638840003504366,
+            "percentiles": {
+              "p10": 6.35868215829003,
+              "p25": 23.422841144252487,
+              "p50": 82.94028622859824,
+              "p75": 1676.8714776534246,
+              "p90": 4193.212028364836,
+              "p95": 11454.09770348005,
+              "p99": 313676.28598663094,
+              "p99.9": 62499994.82872724,
+              "p99.99": 166666652.876606
+            }
+          },
+          "details": {
+            "DNSDialup": {
+              "average": 0.00013545572264437702,
+              "fastest": 5.1648e-05,
+              "slowest": 0.00557491
+            },
+            "DNSLookup": {
+              "average": 1.086242983789261e-05,
+              "fastest": 2.297e-06,
+              "slowest": 0.000300835
+            }
+          },
+          "statusCodeDistribution": {
+            "200": 3948
+          },
+          "errorDistribution": {
+            "aborted due to deadline": 16
+          }
+        }
+      },
+      "mock": {
+        "latency_ms": {
+          "p50": 241.92,
+          "p95": 242.845,
+          "p99": 243.798
+        },
+        "throughput_rps": 65.997,
+        "error_rate": 0.0,
+        "status_codes": {
+          "200": 3944
+        },
+        "errors": {
+          "aborted due to deadline": 16
+        },
+        "raw": {
+          "summary": {
+            "successRate": 1.0,
+            "total": 60.002863312,
+            "slowest": 1.247612811,
+            "fastest": 0.200923658,
+            "average": 0.24305826944650086,
+            "requestsPerSec": 65.99685050709968,
+            "totalData": 2693752,
+            "sizePerRequest": 683,
+            "sizePerSec": 44893.72425434363
+          },
+          "responseTimeHistogram": {
+            "0.200923658": 1,
+            "0.3055925733": 3937,
+            "0.4102614886": 0,
+            "0.5149304039": 0,
+            "0.6195993192": 0,
+            "0.7242682345": 0,
+            "0.8289371498": 0,
+            "0.9336060651": 0,
+            "1.0382749804": 0,
+            "1.1429438957": 0,
+            "1.247612811": 6
+          },
+          "latencyPercentiles": {
+            "p10": 0.240989017,
+            "p25": 0.241101882,
+            "p50": 0.241919504,
+            "p75": 0.242017386,
+            "p90": 0.242198018,
+            "p95": 0.242844578,
+            "p99": 0.243798206,
+            "p99.9": 1.245931198,
+            "p99.99": 1.247612811
+          },
+          "rps": {
+            "mean": 143997.08741017652,
+            "stddev": 2933662.632767474,
+            "max": 83333326.438303,
+            "min": 4.193694485943032,
+            "percentiles": {
+              "p10": 6.295863476668473,
+              "p25": 23.87224586198006,
+              "p50": 335.64154020530555,
+              "p75": 3629.184449672656,
+              "p90": 6910.2701421851625,
+              "p95": 22190.16975491358,
+              "p99": 224921.2775538588,
+              "p99.9": 66666645.36081017,
+              "p99.99": 83333326.438303
+            }
+          },
+          "details": {
+            "DNSDialup": {
+              "average": 0.3915627257499999,
+              "fastest": 0.000152069,
+              "slowest": 1.043962682
+            },
+            "DNSLookup": {
+              "average": 2.8114562500000004e-05,
+              "fastest": 2.752e-06,
+              "slowest": 7.0582e-05
+            }
+          },
+          "statusCodeDistribution": {
+            "200": 3944
+          },
+          "errorDistribution": {
+            "aborted due to deadline": 16
+          }
+        }
+      },
+      "added_latency_ms": {
+        "p50": 1.014,
+        "p95": 1.53,
+        "p99": 2.222
+      }
+    },
+    {
+      "name": "chat_unary_c64",
+      "duration_seconds": 60,
+      "concurrency": 64,
+      "gateway": {
+        "latency_ms": {
+          "p50": 242.895,
+          "p95": 244.596,
+          "p99": 246.898
+        },
+        "throughput_rps": 262.917,
+        "error_rate": 0.0,
+        "status_codes": {
+          "200": 15712
+        },
+        "errors": {
+          "aborted due to deadline": 64
+        },
+        "raw": {
+          "summary": {
+            "successRate": 1.0,
+            "total": 60.003747495,
+            "slowest": 0.856683377,
+            "fastest": 0.201369004,
+            "average": 0.24398169437277217,
+            "requestsPerSec": 262.9169120031142,
+            "totalData": 12679584,
+            "sizePerRequest": 807,
+            "sizePerSec": 211313.20174721698
+          },
+          "responseTimeHistogram": {
+            "0.201369004": 1,
+            "0.2669004413": 15654,
+            "0.3324318786": 1,
+            "0.3979633159": 0,
+            "0.4634947532": 20,
+            "0.5290261905": 0,
+            "0.5945576278": 0,
+            "0.6600890651": 9,
+            "0.7256205024": 22,
+            "0.7911519397": 0,
+            "0.856683377": 5
+          },
+          "latencyPercentiles": {
+            "p10": 0.241941162,
+            "p25": 0.242181486,
+            "p50": 0.242894788,
+            "p75": 0.243370594,
+            "p90": 0.244075177,
+            "p95": 0.244596313,
+            "p99": 0.246897919,
+            "p99.9": 0.69338143,
+            "p99.99": 0.854613492
+          },
+          "rps": {
+            "mean": 217112.11697190342,
+            "stddev": 6984872.3768376885,
+            "max": 333332911.00778043,
+            "min": 4.856321644827593,
+            "percentiles": {
+              "p10": 38.2335620248382,
+              "p25": 63.11723527826086,
+              "p50": 307.8337849426264,
+              "p75": 1080.1188994891454,
+              "p90": 2121.616353420127,
+              "p95": 3360.963655501855,
+              "p99": 26476.039180457443,
+              "p99.9": 45454541.69361981,
+              "p99.99": 333332911.00778043
+            }
+          },
+          "details": {
+            "DNSDialup": {
+              "average": 0.00013348380785386968,
+              "fastest": 5.03e-05,
+              "slowest": 0.004962417
+            },
+            "DNSLookup": {
+              "average": 1.0611778004073336e-05,
+              "fastest": 2.078e-06,
+              "slowest": 0.000858465
+            }
+          },
+          "statusCodeDistribution": {
+            "200": 15712
+          },
+          "errorDistribution": {
+            "aborted due to deadline": 64
+          }
+        }
+      },
+      "mock": {
+        "latency_ms": {
+          "p50": 241.886,
+          "p95": 242.977,
+          "p99": 244.044
+        },
+        "throughput_rps": 256.789,
+        "error_rate": 0.0,
+        "status_codes": {
+          "200": 15344
+        },
+        "errors": {
+          "aborted due to deadline": 64
+        },
+        "raw": {
+          "summary": {
+            "successRate": 1.0,
+            "total": 60.002649195,
+            "slowest": 7.850957657,
+            "fastest": 0.200389766,
+            "average": 0.2497305384068052,
+            "requestsPerSec": 256.7886619460119,
+            "totalData": 10479952,
+            "sizePerRequest": 683,
+            "sizePerSec": 174658.154941487
+          },
+          "responseTimeHistogram": {
+            "0.200389766": 1,
+            "0.9654465551000001": 15298,
+            "1.7305033442000002": 20,
+            "2.4955601333": 6,
+            "3.2606169224": 7,
+            "4.0256737115000005": 0,
+            "4.7907305006000005": 6,
+            "5.5557872897000005": 0,
+            "6.3208440788": 0,
+            "7.0859008679": 0,
+            "7.850957657": 6
+          },
+          "latencyPercentiles": {
+            "p10": 0.240961123,
+            "p25": 0.241013089,
+            "p50": 0.241885533,
+            "p75": 0.242012101,
+            "p90": 0.242489956,
+            "p95": 0.242976803,
+            "p99": 0.244043706,
+            "p99.9": 2.9141074099999997,
+            "p99.99": 7.849767967
+          },
+          "rps": {
+            "mean": 60553.39219079483,
+            "stddev": 1087621.4617321135,
+            "max": 43478263.98806288,
+            "min": 4.85771847041113,
+            "percentiles": {
+              "p10": 27.750125548503206,
+              "p25": 34.47056911426747,
+              "p50": 400.7035553024676,
+              "p75": 2015.6041353474882,
+              "p90": 4066.6607022370645,
+              "p95": 26049.807231350936,
+              "p99": 108234.47917569007,
+              "p99.9": 16949152.16059518,
+              "p99.99": 43478263.98806288
+            }
+          },
+          "details": {
+            "DNSDialup": {
+              "average": 0.7398043152968752,
+              "fastest": 0.000163493,
+              "slowest": 1.056226133
+            },
+            "DNSLookup": {
+              "average": 1.0691656250000002e-05,
+              "fastest": 2.042e-06,
+              "slowest": 9.1621e-05
+            }
+          },
+          "statusCodeDistribution": {
+            "200": 15344
+          },
+          "errorDistribution": {
+            "aborted due to deadline": 64
+          }
+        }
+      },
+      "added_latency_ms": {
+        "p50": 1.009,
+        "p95": 1.619,
+        "p99": 2.854
+      }
+    },
+    {
+      "name": "chat_unary_c256",
+      "duration_seconds": 60,
+      "concurrency": 256,
+      "gateway": {
+        "latency_ms": {
+          "p50": 243.086,
+          "p95": 246.034,
+          "p99": 251.531
+        },
+        "throughput_rps": 1046.987,
+        "error_rate": 0.0,
+        "status_codes": {
+          "200": 62568
+        },
+        "errors": {
+          "aborted due to deadline": 256
+        },
+        "raw": {
+          "summary": {
+            "successRate": 1.0,
+            "total": 60.004580317,
+            "slowest": 1.025433081,
+            "fastest": 0.201158793,
+            "average": 0.24503470148102813,
+            "requestsPerSec": 1046.9867411471791,
+            "totalData": 50492376,
+            "sizePerRequest": 807,
+            "sizePerSec": 841475.3629348344
+          },
+          "responseTimeHistogram": {
+            "0.201158793": 1,
+            "0.28358622180000004": 62230,
+            "0.3660136506": 43,
+            "0.4484410794": 38,
+            "0.5308685082": 83,
+            "0.613295937": 0,
+            "0.6957233658": 20,
+            "0.7781507946000001": 97,
+            "0.8605782234000001": 5,
+            "0.9430056522000001": 50,
+            "1.025433081": 1
+          },
+          "latencyPercentiles": {
+            "p10": 0.241987449,
+            "p25": 0.242459882,
+            "p50": 0.243086331,
+            "p75": 0.243946913,
+            "p90": 0.244989047,
+            "p95": 0.246034238,
+            "p99": 0.251531321,
+            "p99.9": 0.731036561,
+            "p99.99": 0.920073618
+          },
+          "rps": {
+            "mean": 1091.5220453226013,
+            "stddev": 620.173951436836,
+            "max": 4915.007237355452,
+            "min": 4.6170786570598805,
+            "percentiles": {
+              "p10": 282.62686978867157,
+              "p25": 637.9113252225783,
+              "p50": 1046.7467686143639,
+              "p75": 1474.333944123575,
+              "p90": 1911.157336530797,
+              "p95": 2174.4552027938057,
+              "p99": 2762.0271644262743,
+              "p99.9": 3524.654251558303,
+              "p99.99": 4915.007237355452
+            }
+          },
+          "details": {
+            "DNSDialup": {
+              "average": 0.0001613050694284608,
+              "fastest": 5.0851e-05,
+              "slowest": 0.015106777
+            },
+            "DNSLookup": {
+              "average": 9.21399763457353e-06,
+              "fastest": 1.965e-06,
+              "slowest": 0.00341677
+            }
+          },
+          "statusCodeDistribution": {
+            "200": 62568
+          },
+          "errorDistribution": {
+            "aborted due to deadline": 256
+          }
+        }
+      },
+      "mock": {
+        "latency_ms": {
+          "p50": 241.065,
+          "p95": 242.936,
+          "p99": 244.409
+        },
+        "throughput_rps": 399.829,
+        "error_rate": 0.0,
+        "status_codes": {
+          "200": 23736
+        },
+        "errors": {
+          "aborted due to deadline": 256
+        },
+        "raw": {
+          "summary": {
+            "successRate": 1.0,
+            "total": 60.005603867,
+            "slowest": 54.642472255,
+            "fastest": 0.200444552,
+            "average": 0.2773911316004803,
+            "requestsPerSec": 399.8293234941407,
+            "totalData": 16211688,
+            "sizePerRequest": 683,
+            "sizePerSec": 270169.56676134036
+          },
+          "responseTimeHistogram": {
+            "0.200444552": 1,
+            "11.088850092600001": 7,
+            "16.5330528629": 8,
+            "21.977255633200002": 0,
+            "27.421458403500004": 0,
+            "32.8656611738": 7,
+            "38.3098639441": 0,
+            "43.754066714400004": 0,
+            "49.198269484700006": 0,
+            "5.644647322300001": 23706,
+            "54.64247225500001": 7
+          },
+          "latencyPercentiles": {
+            "p10": 0.240945114,
+            "p25": 0.240988029,
+            "p50": 0.241065002,
+            "p75": 0.241975145,
+            "p90": 0.242096126,
+            "p95": 0.242935787,
+            "p99": 0.244408573,
+            "p99.9": 7.9003955900000005,
+            "p99.99": 54.628067565
+          },
+          "rps": {
+            "mean": 18458.06235367553,
+            "stddev": 1178055.300906038,
+            "max": 81081082.15775008,
+            "min": 4.912477724861005,
+            "percentiles": {
+              "p10": 37.11932370373901,
+              "p25": 82.25917249412304,
+              "p50": 547.8011862965215,
+              "p75": 1336.6254417965622,
+              "p90": 2309.0106832916285,
+              "p95": 3068.48866705381,
+              "p99": 11764.29067176739,
+              "p99.9": 81017.58082762068,
+              "p99.99": 81081082.15775008
+            }
+          },
+          "details": {
+            "DNSDialup": {
+              "average": 0.8147458167454545,
+              "fastest": 0.000488116,
+              "slowest": 1.065725366
+            },
+            "DNSLookup": {
+              "average": 6.82522727272727e-06,
+              "fastest": 1.413e-06,
+              "slowest": 9.3074e-05
+            }
+          },
+          "statusCodeDistribution": {
+            "200": 23736
+          },
+          "errorDistribution": {
+            "aborted due to deadline": 256
+          }
+        }
+      },
+      "added_latency_ms": {
+        "p50": 2.021,
+        "p95": 3.098,
+        "p99": 7.122
+      }
+    },
+    {
+      "name": "chat_stream_c64",
+      "duration_seconds": 60,
+      "concurrency": 64,
+      "gateway": {
+        "latency_ms": {
+          "p50": 50.225,
+          "p95": 151.968,
+          "p99": 225.286
+        },
+        "throughput_rps": 1051.212,
+        "error_rate": 0.0,
+        "status_codes": {
+          "200": 63014
+        },
+        "errors": {
+          "aborted due to deadline": 64
+        },
+        "raw": {
+          "summary": {
+            "successRate": 1.0,
+            "total": 60.005010118,
+            "slowest": 26.835410112,
+            "fastest": 0.001484867,
+            "average": 0.06087737151785322,
+            "requestsPerSec": 1051.212221712103,
+            "totalData": 616718018,
+            "sizePerRequest": 9787,
+            "sizePerSec": 10277775.418872898
+          },
+          "responseTimeHistogram": {
+            "0.001484867": 1,
+            "10.735054965000002": 0,
+            "13.418447489500002": 0,
+            "16.101840014": 0,
+            "18.7852325385": 0,
+            "2.6848773915": 63010,
+            "21.468625063": 0,
+            "24.1520175875": 0,
+            "26.835410112": 1,
+            "5.368269916000001": 2,
+            "8.051662440500001": 0
+          },
+          "latencyPercentiles": {
+            "p10": 0.011634598,
+            "p25": 0.024267376,
+            "p50": 0.050225116,
+            "p75": 0.079556561,
+            "p90": 0.120507716,
+            "p95": 0.151967815,
+            "p99": 0.225285829,
+            "p99.9": 0.388721778,
+            "p99.99": 1.86899764
+          },
+          "rps": {
+            "mean": 1049.8225120084685,
+            "stddev": 354.6677542360506,
+            "max": 3978.139931635233,
+            "min": 71.14573663443747,
+            "percentiles": {
+              "p10": 610.2884253612673,
+              "p25": 810.8695440641121,
+              "p50": 1033.880122375225,
+              "p75": 1276.4429110110052,
+              "p90": 1503.184427884845,
+              "p95": 1642.815720432385,
+              "p99": 1941.0838153860639,
+              "p99.9": 2372.1668914290044,
+              "p99.99": 3978.139931635233
+            }
+          },
+          "details": {
+            "DNSDialup": {
+              "average": 0.00014095692511187932,
+              "fastest": 4.8843e-05,
+              "slowest": 0.010962101
+            },
+            "DNSLookup": {
+              "average": 1.1555486495064527e-05,
+              "fastest": 2.069e-06,
+              "slowest": 0.00307724
+            }
+          },
+          "statusCodeDistribution": {
+            "200": 63014
+          },
+          "errorDistribution": {
+            "aborted due to deadline": 64
+          }
+        }
+      },
+      "mock": {
+        "latency_ms": {
+          "p50": 43.061,
+          "p95": 119.198,
+          "p99": 175.44
+        },
+        "throughput_rps": 1270.0,
+        "error_rate": 0.0,
+        "status_codes": {
+          "200": 76140
+        },
+        "errors": {
+          "aborted due to deadline": 64
+        },
+        "raw": {
+          "summary": {
+            "successRate": 1.0,
+            "total": 60.003158977,
+            "slowest": 7.351703501,
+            "fastest": 0.000462328,
+            "average": 0.050393263975124836,
+            "requestsPerSec": 1269.9998016639424,
+            "totalData": 705208680,
+            "sizePerRequest": 9262,
+            "sizePerSec": 11752859.216467516
+          },
+          "responseTimeHistogram": {
+            "0.000462328": 1,
+            "0.7355864453000001": 76083,
+            "1.4707105626": 12,
+            "2.2058346799": 5,
+            "2.9409587972": 10,
+            "3.6760829145": 9,
+            "4.411207031800001": 9,
+            "5.146331149100001": 7,
+            "5.881455266400001": 0,
+            "6.6165793837": 0,
+            "7.351703501": 4
+          },
+          "latencyPercentiles": {
+            "p10": 0.006193674,
+            "p25": 0.019893646,
+            "p50": 0.043060667,
+            "p75": 0.066314743,
+            "p90": 0.096729646,
+            "p95": 0.119197659,
+            "p99": 0.175440494,
+            "p99.9": 0.295786889,
+            "p99.99": 4.960615164
+          },
+          "rps": {
+            "mean": 2055.6909131371026,
+            "stddev": 62667.937487852585,
+            "max": 5050505.0489155445,
+            "min": 37.12428322754207,
+            "percentiles": {
+              "p10": 802.1423158603295,
+              "p25": 1016.5185277274608,
+              "p50": 1274.2057954914512,
+              "p75": 1526.9009407743877,
+              "p90": 1764.802501583114,
+              "p95": 1931.5931951109146,
+              "p99": 2222.8226088539654,
+              "p99.9": 2612.976207074889,
+              "p99.99": 5050505.0489155445
+            }
+          },
+          "details": {
+            "DNSDialup": {
+              "average": 1.7707296461875,
+              "fastest": 0.000223284,
+              "slowest": 3.08545665
+            },
+            "DNSLookup": {
+              "average": 8.76625e-06,
+              "fastest": 1.608e-06,
+              "slowest": 7.2229e-05
+            }
+          },
+          "statusCodeDistribution": {
+            "200": 76140
+          },
+          "errorDistribution": {
+            "aborted due to deadline": 64
+          }
+        }
+      },
+      "added_latency_ms": {
+        "p50": 7.164,
+        "p95": 32.77,
+        "p99": 49.846
+      }
+    },
+    {
+      "name": "models_c256",
+      "duration_seconds": 60,
+      "concurrency": 256,
+      "gateway": {
+        "latency_ms": {
+          "p50": 6.795,
+          "p95": 13.829,
+          "p99": 19.731
+        },
+        "throughput_rps": 20886.165,
+        "error_rate": 0.0,
+        "status_codes": {
+          "200": 1253094
+        },
+        "errors": {
+          "aborted due to deadline": 253
+        },
+        "raw": {
+          "summary": {
+            "successRate": 1.0,
+            "total": 60.008479568,
+            "slowest": 3.089517686,
+            "fastest": 0.000311383,
+            "average": 0.012180862246205924,
+            "requestsPerSec": 20886.164905740377,
+            "totalData": 250618800,
+            "sizePerRequest": 200,
+            "sizePerSec": 4176389.7669829396
+          },
+          "responseTimeHistogram": {
+            "0.000311383": 1,
+            "0.3092320133": 1247278,
+            "0.6181526436": 1,
+            "0.9270732738999999": 0,
+            "1.2359939042": 5693,
+            "1.5449145345000002": 34,
+            "1.8538351648": 0,
+            "2.1627557951000003": 86,
+            "2.4716764254": 0,
+            "2.7805970557": 0,
+            "3.089517686": 1
+          },
+          "latencyPercentiles": {
+            "p10": 0.003443175,
+            "p25": 0.00490655,
+            "p50": 0.006794591,
+            "p75": 0.009124127,
+            "p90": 0.011826326,
+            "p95": 0.013829442,
+            "p99": 0.019730658,
+            "p99.9": 1.062202147,
+            "p99.99": 1.23087282
+          },
+          "rps": {
+            "mean": 20882.9084640111,
+            "stddev": 3133.1684241181474,
+            "max": 31993.235128158674,
+            "min": 53.045492928691,
+            "percentiles": {
+              "p10": 17260.54056519564,
+              "p25": 19055.340519939222,
+              "p50": 20933.059580991565,
+              "p75": 22832.35801778781,
+              "p90": 24656.695767284873,
+              "p95": 25736.48372800388,
+              "p99": 27941.297237324474,
+              "p99.9": 30247.00687338192,
+              "p99.99": 31993.235128158674
+            }
+          },
+          "details": {
+            "DNSDialup": {
+              "average": 0.005468570466980128,
+              "fastest": 4.3476e-05,
+              "slowest": 3.085821138
+            },
+            "DNSLookup": {
+              "average": 5.4432484179158125e-06,
+              "fastest": 1.477e-06,
+              "slowest": 0.012963704
+            }
+          },
+          "statusCodeDistribution": {
+            "200": 1253094
+          },
+          "errorDistribution": {
+            "aborted due to deadline": 253
+          }
+        }
+      },
+      "historical_unrelated_mock": {
+        "latency_ms": {
+          "p50": 41.048,
+          "p95": 42.921,
+          "p99": 43.957
+        },
+        "throughput_rps": 2251.752,
+        "error_rate": 0.0,
+        "status_codes": {
+          "200": 134871
+        },
+        "errors": {
+          "aborted due to deadline": 256
+        },
+        "raw": {
+          "summary": {
+            "successRate": 1.0,
+            "total": 60.009728543,
+            "slowest": 49.748601834,
+            "fastest": 0.000218076,
+            "average": 0.04845978694304226,
+            "requestsPerSec": 2251.7515623016807,
+            "totalData": 8631744,
+            "sizePerRequest": 64,
+            "sizePerSec": 143839.0775891432
+          },
+          "responseTimeHistogram": {
+            "0.000218076": 1,
+            "14.924733203399997": 12,
+            "19.899571579199996": 0,
+            "24.874409954999994": 7,
+            "29.849248330799995": 5,
+            "34.8240867066": 0,
+            "39.7989250824": 0,
+            "4.9750564518": 134830,
+            "44.773763458199994": 0,
+            "49.74860183399999": 7,
+            "9.949894827599998": 9
+          },
+          "latencyPercentiles": {
+            "p10": 0.040937762,
+            "p25": 0.040982772,
+            "p50": 0.041048125,
+            "p75": 0.041970235,
+            "p90": 0.042097122,
+            "p95": 0.042921203,
+            "p99": 0.043957254,
+            "p99.9": 0.048951833,
+            "p99.99": 24.130595189
+          },
+          "rps": {
+            "mean": 2277.94205952054,
+            "stddev": 1144.4923960381782,
+            "max": 76958.59627527262,
+            "min": 37.958284604385476,
+            "percentiles": {
+              "p10": 1451.0849315544692,
+              "p25": 1904.9296666349992,
+              "p50": 2314.908939534579,
+              "p75": 2675.4623979356124,
+              "p90": 2982.9814735252426,
+              "p95": 3139.5457726818618,
+              "p99": 3516.3591577094744,
+              "p99.9": 3932.908943324607,
+              "p99.99": 76958.59627527262
+            }
+          },
+          "details": {
+            "DNSDialup": {
+              "average": 1.2597608809541287,
+              "fastest": 0.000395692,
+              "slowest": 3.069838967
+            },
+            "DNSLookup": {
+              "average": 6.124935779816516e-06,
+              "fastest": 1.51e-06,
+              "slowest": 6.7252e-05
+            }
+          },
+          "statusCodeDistribution": {
+            "200": 134871
+          },
+          "errorDistribution": {
+            "aborted due to deadline": 256
+          }
+        }
+      },
+      "added_latency_ms": null
+    },
+    {
+      "name": "embeddings_c64",
+      "duration_seconds": 60,
+      "concurrency": 64,
+      "gateway": {
+        "latency_ms": {
+          "p50": 242.828,
+          "p95": 244.498,
+          "p99": 246.33
+        },
+        "throughput_rps": 262.717,
+        "error_rate": 0.0,
+        "status_codes": {
+          "200": 15700
+        },
+        "errors": {
+          "aborted due to deadline": 64
+        },
+        "raw": {
+          "summary": {
+            "successRate": 1.0,
+            "total": 60.003828719,
+            "slowest": 0.89167594,
+            "fastest": 0.201025501,
+            "average": 0.24403317421012746,
+            "requestsPerSec": 262.71656886801935,
+            "totalData": 2606200,
+            "sizePerRequest": 166,
+            "sizePerSec": 43433.89506367876
+          },
+          "responseTimeHistogram": {
+            "0.201025501": 1,
+            "0.27009054489999995": 15640,
+            "0.33915558879999996": 3,
+            "0.4082206327": 0,
+            "0.47728567659999993": 16,
+            "0.5463507205": 0,
+            "0.6154157643999999": 0,
+            "0.6844808082999998": 14,
+            "0.7535458521999998": 14,
+            "0.8226108960999998": 0,
+            "0.8916759399999998": 12
+          },
+          "latencyPercentiles": {
+            "p10": 0.241910092,
+            "p25": 0.242109302,
+            "p50": 0.24282841,
+            "p75": 0.243267562,
+            "p90": 0.244007344,
+            "p95": 0.244497536,
+            "p99": 0.246330193,
+            "p99.9": 0.698769267,
+            "p99.99": 0.868824646
+          },
+          "rps": {
+            "mean": 52696.29823785029,
+            "stddev": 2341347.385819835,
+            "max": 142857058.53277883,
+            "min": 4.718498975264703,
+            "percentiles": {
+              "p10": 51.35109084865412,
+              "p25": 89.99227416324283,
+              "p50": 403.0174724195396,
+              "p75": 1017.7261174348199,
+              "p90": 1692.7338271978335,
+              "p95": 2201.7262211028283,
+              "p99": 6429.297020608252,
+              "p99.9": 47901.89691765846,
+              "p99.99": 142857058.53277883
+            }
+          },
+          "details": {
+            "DNSDialup": {
+              "average": 0.00013349699719745206,
+              "fastest": 5.1482e-05,
+              "slowest": 0.005906961
+            },
+            "DNSLookup": {
+              "average": 1.0752018598726075e-05,
+              "fastest": 2.033e-06,
+              "slowest": 0.001144558
+            }
+          },
+          "statusCodeDistribution": {
+            "200": 15700
+          },
+          "errorDistribution": {
+            "aborted due to deadline": 64
+          }
+        }
+      },
+      "mock": {
+        "latency_ms": {
+          "p50": 241.032,
+          "p95": 242.183,
+          "p99": 243.086
+        },
+        "throughput_rps": 254.066,
+        "error_rate": 0.0,
+        "status_codes": {
+          "200": 15181
+        },
+        "errors": {
+          "aborted due to deadline": 64
+        },
+        "raw": {
+          "summary": {
+            "successRate": 1.0,
+            "total": 60.004174161,
+            "slowest": 14.568473687000001,
+            "fastest": 0.200436937,
+            "average": 0.2523496840380092,
+            "requestsPerSec": 254.06565815063846,
+            "totalData": 2444141,
+            "sizePerRequest": 161,
+            "sizePerSec": 40732.84957546472
+          },
+          "responseTimeHistogram": {
+            "0.200436937": 1,
+            "1.6372406120000003": 15145,
+            "10.258062662": 0,
+            "11.694866337": 0,
+            "13.131670012": 0,
+            "14.568473687000001": 3,
+            "3.0740442870000004": 20,
+            "4.510847962000001": 0,
+            "5.947651637000001": 6,
+            "7.384455312000001": 0,
+            "8.821258987": 6
+          },
+          "latencyPercentiles": {
+            "p10": 0.240933768,
+            "p25": 0.240977839,
+            "p50": 0.241032281,
+            "p75": 0.241916801,
+            "p90": 0.24203337,
+            "p95": 0.242183052,
+            "p99": 0.243085635,
+            "p99.9": 2.9249584410000002,
+            "p99.99": 14.561409897
+          },
+          "rps": {
+            "mean": 16192.457965558171,
+            "stddev": 461027.84153118514,
+            "max": 16949153.181196652,
+            "min": 4.906775967129469,
+            "percentiles": {
+              "p10": 32.21366992237387,
+              "p25": 71.84164033430862,
+              "p50": 333.3370000402298,
+              "p75": 997.3315148663063,
+              "p90": 1692.7078484427407,
+              "p95": 2611.9740202621724,
+              "p99": 46919.72036342693,
+              "p99.9": 9009009.128638899,
+              "p99.99": 16949153.181196652
+            }
+          },
+          "details": {
+            "DNSDialup": {
+              "average": 0.8049183717343751,
+              "fastest": 0.000201661,
+              "slowest": 1.055962401
+            },
+            "DNSLookup": {
+              "average": 8.3615625e-06,
+              "fastest": 1.594e-06,
+              "slowest": 6.4639e-05
+            }
+          },
+          "statusCodeDistribution": {
+            "200": 15181
+          },
+          "errorDistribution": {
+            "aborted due to deadline": 64
+          }
+        }
+      },
+      "added_latency_ms": {
+        "p50": 1.796,
+        "p95": 2.315,
+        "p99": 3.244
+      }
+    }
+  ],
+  "metrics": {
+    "before": "# HELP olp_ready Whether the process currently satisfies the HTTP readiness contract.\n# TYPE olp_ready gauge\nolp_ready 0\n# HELP olp_observability_readiness_snapshot_age_seconds Age of the last successful readiness snapshot.\n# TYPE olp_observability_readiness_snapshot_age_seconds gauge\nolp_observability_readiness_snapshot_age_seconds 18446744073709551615\n# HELP olp_observability_metrics_snapshot_age_seconds Age of the last successful metrics snapshot.\n# TYPE olp_observability_metrics_snapshot_age_seconds gauge\nolp_observability_metrics_snapshot_age_seconds 0\n# HELP olp_observability_readiness_snapshot_fresh Whether the readiness snapshot is fresh.\n# TYPE olp_observability_readiness_snapshot_fresh gauge\nolp_observability_readiness_snapshot_fresh 0\n# HELP olp_observability_metrics_snapshot_fresh Whether the metrics snapshot is fresh.\n# TYPE olp_observability_metrics_snapshot_fresh gauge\nolp_observability_metrics_snapshot_fresh 1\n# HELP olp_runtime_generation Current immutable runtime generation.\n# TYPE olp_runtime_generation gauge\nolp_runtime_generation 0\n# HELP olp_request_metadata_events_dropped_total Metadata events dropped from the bounded buffer.\n# TYPE olp_request_metadata_events_dropped_total counter\nolp_request_metadata_events_dropped_total 0\n# HELP olp_request_metadata_events_abandoned_total Accepted metadata events abandoned during shutdown or worker failure.\n# TYPE olp_request_metadata_events_abandoned_total counter\nolp_request_metadata_events_abandoned_total 0\n# HELP olp_request_metadata_events_pending Accepted metadata events not yet written to the stream.\n# TYPE olp_request_metadata_events_pending gauge\nolp_request_metadata_events_pending 0\n# HELP olp_request_metadata_stream_retrying Whether the local writer is retrying Valkey.\n# TYPE olp_request_metadata_stream_retrying gauge\nolp_request_metadata_stream_retrying 1\n# HELP olp_request_metadata_persistence_available Whether a request metadata sink is active.\n# TYPE olp_request_metadata_persistence_available gauge\nolp_request_metadata_persistence_available 1\n# HELP olp_request_metadata_consumer_pending_events Delivered request metadata events awaiting consumer acknowledgement.\n# TYPE olp_request_metadata_consumer_pending_events gauge\nolp_request_metadata_consumer_pending_events 0\n# HELP olp_request_metadata_consumer_lag_events Request metadata stream events not yet delivered to the persistence consumer.\n# TYPE olp_request_metadata_consumer_lag_events gauge\nolp_request_metadata_consumer_lag_events 0\n# HELP olp_request_metadata_consumer_heartbeat_age_seconds Age of the last durable worker checkpoint.\n# TYPE olp_request_metadata_consumer_heartbeat_age_seconds gauge\nolp_request_metadata_consumer_heartbeat_age_seconds 0\n# HELP olp_request_metadata_consumer_healthy Whether the durable consumer is current and fully drained.\n# TYPE olp_request_metadata_consumer_healthy gauge\nolp_request_metadata_consumer_healthy 1\n# HELP olp_request_metadata_consumer_stale Whether the durable consumer missed its heartbeat threshold.\n# TYPE olp_request_metadata_consumer_stale gauge\nolp_request_metadata_consumer_stale 0\n# HELP olp_request_metadata_gateway_open_epochs Gateway process epochs still emitting checkpoints.\n# TYPE olp_request_metadata_gateway_open_epochs gauge\nolp_request_metadata_gateway_open_epochs 1\n# HELP olp_request_metadata_gateway_unresolved_epochs Unclean gateway epochs awaiting operator acknowledgement.\n# TYPE olp_request_metadata_gateway_unresolved_epochs gauge\nolp_request_metadata_gateway_unresolved_epochs 0\n# HELP olp_request_metadata_historical_uncertain_gaps Retained exactness gaps across raw and hourly evidence.\n# TYPE olp_request_metadata_historical_uncertain_gaps gauge\nolp_request_metadata_historical_uncertain_gaps 0\n# HELP olp_request_metadata_gateway_unresolved_event_lower_bound Last durable in-flight event lower bound across unresolved epochs.\n# TYPE olp_request_metadata_gateway_unresolved_event_lower_bound gauge\nolp_request_metadata_gateway_unresolved_event_lower_bound 0\n# HELP olp_distributed_limiter_available Whether a Valkey limiter connection is installed.\n# TYPE olp_distributed_limiter_available gauge\nolp_distributed_limiter_available 1\n# HELP olp_limits_fail_open_total Rate- or concurrency-limited requests admitted without a lease under the fail-open outage policy.\n# TYPE olp_limits_fail_open_total counter\nolp_limits_fail_open_total 0\n# HELP olp_key_budget_rejections_total API-key requests rejected because a cost budget was exhausted.\n# TYPE olp_key_budget_rejections_total counter\nolp_key_budget_rejections_total{window=\"daily\"} 0\nolp_key_budget_rejections_total{window=\"monthly\"} 0\n# HELP olp_open_target_circuits Number of target circuits currently open or half-open.\n# TYPE olp_open_target_circuits gauge\nolp_open_target_circuits 0\n# HELP olp_media_reconciliation_pending Metadata-only media jobs awaiting reconciliation.\n# TYPE olp_media_reconciliation_pending gauge\nolp_media_reconciliation_pending 0\n# HELP olp_media_reconciliation_stale Media reconciliation jobs past their grace period.\n# TYPE olp_media_reconciliation_stale gauge\nolp_media_reconciliation_stale 0\n# HELP olp_media_reconciliation_failed Media jobs whose latest autonomous reconciliation attempt failed.\n# TYPE olp_media_reconciliation_failed gauge\nolp_media_reconciliation_failed 0\n# HELP olp_media_reconciliation_unbound Live media jobs without immutable runtime authority.\n# TYPE olp_media_reconciliation_unbound gauge\nolp_media_reconciliation_unbound 0\n# HELP olp_media_reconciliation_gaps_total Upstream media side effects that could not be durably recorded.\n# TYPE olp_media_reconciliation_gaps_total counter\nolp_media_reconciliation_gaps_total 0\n# HELP olp_request_metadata_loss_reported_total Local buffer loss durably reported by the gateway checkpoint.\n# TYPE olp_request_metadata_loss_reported_total counter\nolp_request_metadata_loss_reported_total{kind=\"events\"} 0\nolp_request_metadata_loss_reported_total{kind=\"dropped\"} 0\nolp_request_metadata_loss_reported_total{kind=\"abandoned\"} 0\n# HELP olp_media_spool_capacity_bytes Configured capacity of the private local media spool.\n# TYPE olp_media_spool_capacity_bytes gauge\nolp_media_spool_capacity_bytes 1073741824\n# HELP olp_media_spool_used_bytes Bytes currently reserved in the private local media spool.\n# TYPE olp_media_spool_used_bytes gauge\nolp_media_spool_used_bytes 0\n# HELP olp_async_worker_observability_available Whether all PostgreSQL-backed asynchronous worker summaries were available.\n# TYPE olp_async_worker_observability_available gauge\nolp_async_worker_observability_available 1\n# HELP olp_async_plane_current Whether every replicated worker responsibility has a current successful checkpoint.\n# TYPE olp_async_plane_current gauge\n# HELP olp_async_plane_drained Whether request-metadata and runtime-outbox backlogs are drained.\n# TYPE olp_async_plane_drained gauge\n# HELP olp_async_plane_healthy Whether the asynchronous plane is both current and drained.\n# TYPE olp_async_plane_healthy gauge\n# HELP olp_async_plane_last_progress_timestamp_seconds Unix time of the latest durable worker progress.\n# TYPE olp_async_plane_last_progress_timestamp_seconds gauge\n# HELP olp_request_metadata_consumer_oldest_pending_age_seconds Age of the oldest delivered metadata entry awaiting acknowledgement.\n# TYPE olp_request_metadata_consumer_oldest_pending_age_seconds gauge\n# HELP olp_runtime_outbox_pending_rows Unpublished runtime-hint outbox rows.\n# TYPE olp_runtime_outbox_pending_rows gauge\n# HELP olp_runtime_outbox_oldest_pending_age_seconds Age of the oldest unpublished runtime-hint outbox row.\n# TYPE olp_runtime_outbox_oldest_pending_age_seconds gauge\n# HELP olp_runtime_outbox_owner_active Whether the durable summary records an active advisory-lock owner.\n# TYPE olp_runtime_outbox_owner_active gauge\n# HELP olp_runtime_outbox_claimed_rows Outbox rows currently inside a publication attempt.\n# TYPE olp_runtime_outbox_claimed_rows gauge\n# HELP olp_runtime_outbox_owner_stale Whether recorded outbox ownership has exceeded its heartbeat window.\n# TYPE olp_runtime_outbox_owner_stale gauge\n# HELP olp_runtime_outbox_heartbeat_age_seconds Age of the last durable outbox-owner checkpoint.\n# TYPE olp_runtime_outbox_heartbeat_age_seconds gauge\n# HELP olp_worker_task_healthy Whether a fixed worker responsibility has a current successful checkpoint.\n# TYPE olp_worker_task_healthy gauge\n# HELP olp_worker_task_heartbeat_age_seconds Age of the latest checkpoint for a fixed worker responsibility.\n# TYPE olp_worker_task_heartbeat_age_seconds gauge\n# HELP olp_worker_task_last_success_age_seconds Age of the latest successful checkpoint for a fixed worker responsibility.\n# TYPE olp_worker_task_last_success_age_seconds gauge\n# HELP olp_worker_task_runs_total Durable checkpoint outcomes across all worker replicas.\n# TYPE olp_worker_task_runs_total counter\nolp_async_plane_current 1\nolp_async_plane_drained 1\nolp_async_plane_healthy 1\nolp_async_plane_last_progress_timestamp_seconds 1788333115\nolp_request_metadata_consumer_oldest_pending_age_seconds 0\nolp_runtime_outbox_pending_rows 0\nolp_runtime_outbox_oldest_pending_age_seconds 0\nolp_runtime_outbox_owner_active 1\nolp_runtime_outbox_claimed_rows 0\nolp_runtime_outbox_owner_stale 0\nolp_runtime_outbox_heartbeat_age_seconds 0\nolp_worker_task_healthy{task=\"runtime_outbox\"} 1\nolp_worker_task_heartbeat_age_seconds{task=\"runtime_outbox\"} 0\nolp_worker_task_last_success_age_seconds{task=\"runtime_outbox\"} 0\nolp_worker_task_runs_total{task=\"runtime_outbox\",outcome=\"success\"} 2\nolp_worker_task_runs_total{task=\"runtime_outbox\",outcome=\"failure\"} 0\nolp_worker_task_runs_total{task=\"runtime_outbox\",outcome=\"skipped\"} 0\nolp_worker_task_healthy{task=\"request_metadata_consumer\"} 1\nolp_worker_task_heartbeat_age_seconds{task=\"request_metadata_consumer\"} 0\nolp_worker_task_last_success_age_seconds{task=\"request_metadata_consumer\"} 0\nolp_worker_task_runs_total{task=\"request_metadata_consumer\",outcome=\"success\"} 1\nolp_worker_task_runs_total{task=\"request_metadata_consumer\",outcome=\"failure\"} 0\nolp_worker_task_runs_total{task=\"request_metadata_consumer\",outcome=\"skipped\"} 0\nolp_worker_task_healthy{task=\"maintenance\"} 1\nolp_worker_task_heartbeat_age_seconds{task=\"maintenance\"} 0\nolp_worker_task_last_success_age_seconds{task=\"maintenance\"} 0\nolp_worker_task_runs_total{task=\"maintenance\",outcome=\"success\"} 1\nolp_worker_task_runs_total{task=\"maintenance\",outcome=\"failure\"} 0\nolp_worker_task_runs_total{task=\"maintenance\",outcome=\"skipped\"} 0\nolp_worker_task_healthy{task=\"cost_reconciliation\"} 1\nolp_worker_task_heartbeat_age_seconds{task=\"cost_reconciliation\"} 0\nolp_worker_task_last_success_age_seconds{task=\"cost_reconciliation\"} 0\nolp_worker_task_runs_total{task=\"cost_reconciliation\",outcome=\"success\"} 1\nolp_worker_task_runs_total{task=\"cost_reconciliation\",outcome=\"failure\"} 0\nolp_worker_task_runs_total{task=\"cost_reconciliation\",outcome=\"skipped\"} 0\nolp_worker_task_healthy{task=\"request_metadata_gateway_epoch_detection\"} 1\nolp_worker_task_heartbeat_age_seconds{task=\"request_metadata_gateway_epoch_detection\"} 0\nolp_worker_task_last_success_age_seconds{task=\"request_metadata_gateway_epoch_detection\"} 0\nolp_worker_task_runs_total{task=\"request_metadata_gateway_epoch_detection\",outcome=\"success\"} 1\nolp_worker_task_runs_total{task=\"request_metadata_gateway_epoch_detection\",outcome=\"failure\"} 0\nolp_worker_task_runs_total{task=\"request_metadata_gateway_epoch_detection\",outcome=\"skipped\"} 0\n# HELP olp_request_metadata_events_reclaimed_total Metadata entries transferred from stale consumer ownership.\n# TYPE olp_request_metadata_events_reclaimed_total counter\n# HELP olp_request_metadata_events_recovered_total Pending metadata entries durably resolved by a recovery pass.\n# TYPE olp_request_metadata_events_recovered_total counter\n# HELP olp_request_metadata_persistence_duplicates_total Duplicate metadata persistence outcomes accepted idempotently.\n# TYPE olp_request_metadata_persistence_duplicates_total counter\n# HELP olp_request_metadata_events_processed_total Stream metadata entries durably resolved by the replicated consumer group.\n# TYPE olp_request_metadata_events_processed_total counter\n# HELP olp_runtime_outbox_publication_attempts_total Runtime-hint publication attempts begun durably.\n# TYPE olp_runtime_outbox_publication_attempts_total counter\n# HELP olp_runtime_outbox_publication_retries_total Ambiguous or failed publications left pending for retry.\n# TYPE olp_runtime_outbox_publication_retries_total counter\n# HELP olp_runtime_outbox_repeated_publication_attempts_total Publication attempts for rows that had already been attempted.\n# TYPE olp_runtime_outbox_repeated_publication_attempts_total counter\n# HELP olp_runtime_outbox_published_total Runtime-hint outbox rows durably completed after publication.\n# TYPE olp_runtime_outbox_published_total counter\n# HELP olp_runtime_outbox_duplicate_publications_total Accepted publications whose outbox row was already complete.\n# TYPE olp_runtime_outbox_duplicate_publications_total counter\n# HELP olp_runtime_outbox_abandoned_ownership_total Advisory-lock acquisitions that recovered uncleared ownership.\n# TYPE olp_runtime_outbox_abandoned_ownership_total counter\n# HELP olp_runtime_outbox_abandoned_claims_total Claimed rows recovered from owners that disappeared.\n# TYPE olp_runtime_outbox_abandoned_claims_total counter\n# HELP olp_runtime_outbox_failed_takeovers_total Attempts that could not take over an owner past its heartbeat window.\n# TYPE olp_runtime_outbox_failed_takeovers_total counter\nolp_request_metadata_events_reclaimed_total 0\nolp_request_metadata_events_recovered_total 0\nolp_request_metadata_persistence_duplicates_total 0\nolp_request_metadata_events_processed_total 0\nolp_runtime_outbox_publication_attempts_total 0\nolp_runtime_outbox_publication_retries_total 0\nolp_runtime_outbox_repeated_publication_attempts_total 0\nolp_runtime_outbox_published_total 0\nolp_runtime_outbox_duplicate_publications_total 0\nolp_runtime_outbox_abandoned_ownership_total 0\nolp_runtime_outbox_abandoned_claims_total 0\nolp_runtime_outbox_failed_takeovers_total 0\n# HELP olp_operational_metrics_available Whether the PostgreSQL operational rollup was available.\n# TYPE olp_operational_metrics_available gauge\nolp_operational_metrics_available 1\n# HELP olp_requests_5m Metadata requests observed during the trailing five minutes.\n# TYPE olp_requests_5m gauge\n# HELP olp_request_success_ratio_5m Successful request ratio during the trailing five minutes.\n# TYPE olp_request_success_ratio_5m gauge\n# HELP olp_request_latency_seconds Request latency quantiles during the trailing five minutes.\n# TYPE olp_request_latency_seconds gauge\n# HELP olp_upstream_cancellations_5m Cancelled upstream attempts during the trailing five minutes.\n# TYPE olp_upstream_cancellations_5m gauge\nolp_requests_5m 0\nolp_request_success_ratio_5m 1.000000\nolp_request_latency_seconds{quantile=\"0.95\"} 0.000000\nolp_request_latency_seconds{quantile=\"0.99\"} 0.000000\nolp_upstream_cancellations_5m 0\n# HELP olp_http_admission_capacity Configured process-local HTTP request admission capacity.\n# TYPE olp_http_admission_capacity gauge\nolp_http_admission_capacity{surface=\"inference\"} 256\nolp_http_admission_capacity{surface=\"management\"} 32\n# HELP olp_http_admitted_requests Current process-local admitted HTTP requests whose responses have not completed.\n# TYPE olp_http_admitted_requests gauge\nolp_http_admitted_requests{surface=\"inference\"} 0\nolp_http_admitted_requests{surface=\"management\"} 0\n# HELP olp_http_admission_rejections_total HTTP requests rejected because the process-local admission pool was full.\n# TYPE olp_http_admission_rejections_total counter\nolp_http_admission_rejections_total{surface=\"inference\"} 0\nolp_http_admission_rejections_total{surface=\"management\"} 0\n# HELP olp_trace_export_dropped_total Spans dropped before successful OTLP export.\n# TYPE olp_trace_export_dropped_total counter\nolp_trace_export_dropped_total 0\n",
+    "after": "# HELP olp_ready Whether the process currently satisfies the HTTP readiness contract.\n# TYPE olp_ready gauge\nolp_ready 1\n# HELP olp_observability_readiness_snapshot_age_seconds Age of the last successful readiness snapshot.\n# TYPE olp_observability_readiness_snapshot_age_seconds gauge\nolp_observability_readiness_snapshot_age_seconds 2\n# HELP olp_observability_metrics_snapshot_age_seconds Age of the last successful metrics snapshot.\n# TYPE olp_observability_metrics_snapshot_age_seconds gauge\nolp_observability_metrics_snapshot_age_seconds 2\n# HELP olp_observability_readiness_snapshot_fresh Whether the readiness snapshot is fresh.\n# TYPE olp_observability_readiness_snapshot_fresh gauge\nolp_observability_readiness_snapshot_fresh 1\n# HELP olp_observability_metrics_snapshot_fresh Whether the metrics snapshot is fresh.\n# TYPE olp_observability_metrics_snapshot_fresh gauge\nolp_observability_metrics_snapshot_fresh 1\n# HELP olp_runtime_generation Current immutable runtime generation.\n# TYPE olp_runtime_generation gauge\nolp_runtime_generation 4\n# HELP olp_request_metadata_events_dropped_total Metadata events dropped from the bounded buffer.\n# TYPE olp_request_metadata_events_dropped_total counter\nolp_request_metadata_events_dropped_total 1221575\n# HELP olp_request_metadata_events_abandoned_total Accepted metadata events abandoned during shutdown or worker failure.\n# TYPE olp_request_metadata_events_abandoned_total counter\nolp_request_metadata_events_abandoned_total 0\n# HELP olp_request_metadata_events_pending Accepted metadata events not yet written to the stream.\n# TYPE olp_request_metadata_events_pending gauge\nolp_request_metadata_events_pending 0\n# HELP olp_request_metadata_stream_retrying Whether the local writer is retrying Valkey.\n# TYPE olp_request_metadata_stream_retrying gauge\nolp_request_metadata_stream_retrying 0\n# HELP olp_request_metadata_persistence_available Whether a request metadata sink is active.\n# TYPE olp_request_metadata_persistence_available gauge\nolp_request_metadata_persistence_available 1\n# HELP olp_request_metadata_consumer_pending_events Delivered request metadata events awaiting consumer acknowledgement.\n# TYPE olp_request_metadata_consumer_pending_events gauge\nolp_request_metadata_consumer_pending_events 0\n# HELP olp_request_metadata_consumer_lag_events Request metadata stream events not yet delivered to the persistence consumer.\n# TYPE olp_request_metadata_consumer_lag_events gauge\nolp_request_metadata_consumer_lag_events 113527\n# HELP olp_request_metadata_consumer_heartbeat_age_seconds Age of the last durable worker checkpoint.\n# TYPE olp_request_metadata_consumer_heartbeat_age_seconds gauge\nolp_request_metadata_consumer_heartbeat_age_seconds 1\n# HELP olp_request_metadata_consumer_healthy Whether the durable consumer is current and fully drained.\n# TYPE olp_request_metadata_consumer_healthy gauge\nolp_request_metadata_consumer_healthy 0\n# HELP olp_request_metadata_consumer_stale Whether the durable consumer missed its heartbeat threshold.\n# TYPE olp_request_metadata_consumer_stale gauge\nolp_request_metadata_consumer_stale 0\n# HELP olp_request_metadata_gateway_open_epochs Gateway process epochs still emitting checkpoints.\n# TYPE olp_request_metadata_gateway_open_epochs gauge\nolp_request_metadata_gateway_open_epochs 1\n# HELP olp_request_metadata_gateway_unresolved_epochs Unclean gateway epochs awaiting operator acknowledgement.\n# TYPE olp_request_metadata_gateway_unresolved_epochs gauge\nolp_request_metadata_gateway_unresolved_epochs 0\n# HELP olp_request_metadata_historical_uncertain_gaps Retained exactness gaps across raw and hourly evidence.\n# TYPE olp_request_metadata_historical_uncertain_gaps gauge\nolp_request_metadata_historical_uncertain_gaps 0\n# HELP olp_request_metadata_gateway_unresolved_event_lower_bound Last durable in-flight event lower bound across unresolved epochs.\n# TYPE olp_request_metadata_gateway_unresolved_event_lower_bound gauge\nolp_request_metadata_gateway_unresolved_event_lower_bound 0\n# HELP olp_distributed_limiter_available Whether a Valkey limiter connection is installed.\n# TYPE olp_distributed_limiter_available gauge\nolp_distributed_limiter_available 1\n# HELP olp_limits_fail_open_total Rate- or concurrency-limited requests admitted without a lease under the fail-open outage policy.\n# TYPE olp_limits_fail_open_total counter\nolp_limits_fail_open_total 0\n# HELP olp_key_budget_rejections_total API-key requests rejected because a cost budget was exhausted.\n# TYPE olp_key_budget_rejections_total counter\nolp_key_budget_rejections_total{window=\"daily\"} 0\nolp_key_budget_rejections_total{window=\"monthly\"} 0\n# HELP olp_open_target_circuits Number of target circuits currently open or half-open.\n# TYPE olp_open_target_circuits gauge\nolp_open_target_circuits 0\n# HELP olp_media_reconciliation_pending Metadata-only media jobs awaiting reconciliation.\n# TYPE olp_media_reconciliation_pending gauge\nolp_media_reconciliation_pending 0\n# HELP olp_media_reconciliation_stale Media reconciliation jobs past their grace period.\n# TYPE olp_media_reconciliation_stale gauge\nolp_media_reconciliation_stale 0\n# HELP olp_media_reconciliation_failed Media jobs whose latest autonomous reconciliation attempt failed.\n# TYPE olp_media_reconciliation_failed gauge\nolp_media_reconciliation_failed 0\n# HELP olp_media_reconciliation_unbound Live media jobs without immutable runtime authority.\n# TYPE olp_media_reconciliation_unbound gauge\nolp_media_reconciliation_unbound 0\n# HELP olp_media_reconciliation_gaps_total Upstream media side effects that could not be durably recorded.\n# TYPE olp_media_reconciliation_gaps_total counter\nolp_media_reconciliation_gaps_total 0\n# HELP olp_request_metadata_loss_reported_total Local buffer loss durably reported by the gateway checkpoint.\n# TYPE olp_request_metadata_loss_reported_total counter\nolp_request_metadata_loss_reported_total{kind=\"events\"} 1221575\nolp_request_metadata_loss_reported_total{kind=\"dropped\"} 1221575\nolp_request_metadata_loss_reported_total{kind=\"abandoned\"} 0\n# HELP olp_media_spool_capacity_bytes Configured capacity of the private local media spool.\n# TYPE olp_media_spool_capacity_bytes gauge\nolp_media_spool_capacity_bytes 1073741824\n# HELP olp_media_spool_used_bytes Bytes currently reserved in the private local media spool.\n# TYPE olp_media_spool_used_bytes gauge\nolp_media_spool_used_bytes 0\n# HELP olp_async_worker_observability_available Whether all PostgreSQL-backed asynchronous worker summaries were available.\n# TYPE olp_async_worker_observability_available gauge\nolp_async_worker_observability_available 1\n# HELP olp_async_plane_current Whether every replicated worker responsibility has a current successful checkpoint.\n# TYPE olp_async_plane_current gauge\n# HELP olp_async_plane_drained Whether request-metadata and runtime-outbox backlogs are drained.\n# TYPE olp_async_plane_drained gauge\n# HELP olp_async_plane_healthy Whether the asynchronous plane is both current and drained.\n# TYPE olp_async_plane_healthy gauge\n# HELP olp_async_plane_last_progress_timestamp_seconds Unix time of the latest durable worker progress.\n# TYPE olp_async_plane_last_progress_timestamp_seconds gauge\n# HELP olp_request_metadata_consumer_oldest_pending_age_seconds Age of the oldest delivered metadata entry awaiting acknowledgement.\n# TYPE olp_request_metadata_consumer_oldest_pending_age_seconds gauge\n# HELP olp_runtime_outbox_pending_rows Unpublished runtime-hint outbox rows.\n# TYPE olp_runtime_outbox_pending_rows gauge\n# HELP olp_runtime_outbox_oldest_pending_age_seconds Age of the oldest unpublished runtime-hint outbox row.\n# TYPE olp_runtime_outbox_oldest_pending_age_seconds gauge\n# HELP olp_runtime_outbox_owner_active Whether the durable summary records an active advisory-lock owner.\n# TYPE olp_runtime_outbox_owner_active gauge\n# HELP olp_runtime_outbox_claimed_rows Outbox rows currently inside a publication attempt.\n# TYPE olp_runtime_outbox_claimed_rows gauge\n# HELP olp_runtime_outbox_owner_stale Whether recorded outbox ownership has exceeded its heartbeat window.\n# TYPE olp_runtime_outbox_owner_stale gauge\n# HELP olp_runtime_outbox_heartbeat_age_seconds Age of the last durable outbox-owner checkpoint.\n# TYPE olp_runtime_outbox_heartbeat_age_seconds gauge\n# HELP olp_worker_task_healthy Whether a fixed worker responsibility has a current successful checkpoint.\n# TYPE olp_worker_task_healthy gauge\n# HELP olp_worker_task_heartbeat_age_seconds Age of the latest checkpoint for a fixed worker responsibility.\n# TYPE olp_worker_task_heartbeat_age_seconds gauge\n# HELP olp_worker_task_last_success_age_seconds Age of the latest successful checkpoint for a fixed worker responsibility.\n# TYPE olp_worker_task_last_success_age_seconds gauge\n# HELP olp_worker_task_runs_total Durable checkpoint outcomes across all worker replicas.\n# TYPE olp_worker_task_runs_total counter\nolp_async_plane_current 1\nolp_async_plane_drained 0\nolp_async_plane_healthy 0\nolp_async_plane_last_progress_timestamp_seconds 1788333835\nolp_request_metadata_consumer_oldest_pending_age_seconds 0\nolp_runtime_outbox_pending_rows 0\nolp_runtime_outbox_oldest_pending_age_seconds 0\nolp_runtime_outbox_owner_active 1\nolp_runtime_outbox_claimed_rows 0\nolp_runtime_outbox_owner_stale 0\nolp_runtime_outbox_heartbeat_age_seconds 0\nolp_worker_task_healthy{task=\"runtime_outbox\"} 1\nolp_worker_task_heartbeat_age_seconds{task=\"runtime_outbox\"} 0\nolp_worker_task_last_success_age_seconds{task=\"runtime_outbox\"} 0\nolp_worker_task_runs_total{task=\"runtime_outbox\",outcome=\"success\"} 153\nolp_worker_task_runs_total{task=\"runtime_outbox\",outcome=\"failure\"} 0\nolp_worker_task_runs_total{task=\"runtime_outbox\",outcome=\"skipped\"} 0\nolp_worker_task_healthy{task=\"request_metadata_consumer\"} 1\nolp_worker_task_heartbeat_age_seconds{task=\"request_metadata_consumer\"} 0\nolp_worker_task_last_success_age_seconds{task=\"request_metadata_consumer\"} 0\nolp_worker_task_runs_total{task=\"request_metadata_consumer\",outcome=\"success\"} 2075\nolp_worker_task_runs_total{task=\"request_metadata_consumer\",outcome=\"failure\"} 0\nolp_worker_task_runs_total{task=\"request_metadata_consumer\",outcome=\"skipped\"} 0\nolp_worker_task_healthy{task=\"maintenance\"} 1\nolp_worker_task_heartbeat_age_seconds{task=\"maintenance\"} 0\nolp_worker_task_last_success_age_seconds{task=\"maintenance\"} 0\nolp_worker_task_runs_total{task=\"maintenance\",outcome=\"success\"} 13\nolp_worker_task_runs_total{task=\"maintenance\",outcome=\"failure\"} 0\nolp_worker_task_runs_total{task=\"maintenance\",outcome=\"skipped\"} 0\nolp_worker_task_healthy{task=\"cost_reconciliation\"} 1\nolp_worker_task_heartbeat_age_seconds{task=\"cost_reconciliation\"} 60\nolp_worker_task_last_success_age_seconds{task=\"cost_reconciliation\"} 60\nolp_worker_task_runs_total{task=\"cost_reconciliation\",outcome=\"success\"} 12\nolp_worker_task_runs_total{task=\"cost_reconciliation\",outcome=\"failure\"} 0\nolp_worker_task_runs_total{task=\"cost_reconciliation\",outcome=\"skipped\"} 0\nolp_worker_task_healthy{task=\"request_metadata_gateway_epoch_detection\"} 1\nolp_worker_task_heartbeat_age_seconds{task=\"request_metadata_gateway_epoch_detection\"} 0\nolp_worker_task_last_success_age_seconds{task=\"request_metadata_gateway_epoch_detection\"} 0\nolp_worker_task_runs_total{task=\"request_metadata_gateway_epoch_detection\",outcome=\"success\"} 145\nolp_worker_task_runs_total{task=\"request_metadata_gateway_epoch_detection\",outcome=\"failure\"} 0\nolp_worker_task_runs_total{task=\"request_metadata_gateway_epoch_detection\",outcome=\"skipped\"} 0\n# HELP olp_request_metadata_events_reclaimed_total Metadata entries transferred from stale consumer ownership.\n# TYPE olp_request_metadata_events_reclaimed_total counter\n# HELP olp_request_metadata_events_recovered_total Pending metadata entries durably resolved by a recovery pass.\n# TYPE olp_request_metadata_events_recovered_total counter\n# HELP olp_request_metadata_persistence_duplicates_total Duplicate metadata persistence outcomes accepted idempotently.\n# TYPE olp_request_metadata_persistence_duplicates_total counter\n# HELP olp_request_metadata_events_processed_total Stream metadata entries durably resolved by the replicated consumer group.\n# TYPE olp_request_metadata_events_processed_total counter\n# HELP olp_runtime_outbox_publication_attempts_total Runtime-hint publication attempts begun durably.\n# TYPE olp_runtime_outbox_publication_attempts_total counter\n# HELP olp_runtime_outbox_publication_retries_total Ambiguous or failed publications left pending for retry.\n# TYPE olp_runtime_outbox_publication_retries_total counter\n# HELP olp_runtime_outbox_repeated_publication_attempts_total Publication attempts for rows that had already been attempted.\n# TYPE olp_runtime_outbox_repeated_publication_attempts_total counter\n# HELP olp_runtime_outbox_published_total Runtime-hint outbox rows durably completed after publication.\n# TYPE olp_runtime_outbox_published_total counter\n# HELP olp_runtime_outbox_duplicate_publications_total Accepted publications whose outbox row was already complete.\n# TYPE olp_runtime_outbox_duplicate_publications_total counter\n# HELP olp_runtime_outbox_abandoned_ownership_total Advisory-lock acquisitions that recovered uncleared ownership.\n# TYPE olp_runtime_outbox_abandoned_ownership_total counter\n# HELP olp_runtime_outbox_abandoned_claims_total Claimed rows recovered from owners that disappeared.\n# TYPE olp_runtime_outbox_abandoned_claims_total counter\n# HELP olp_runtime_outbox_failed_takeovers_total Attempts that could not take over an owner past its heartbeat window.\n# TYPE olp_runtime_outbox_failed_takeovers_total counter\nolp_request_metadata_events_reclaimed_total 0\nolp_request_metadata_events_recovered_total 0\nolp_request_metadata_persistence_duplicates_total 0\nolp_request_metadata_events_processed_total 78682\nolp_runtime_outbox_publication_attempts_total 4\nolp_runtime_outbox_publication_retries_total 0\nolp_runtime_outbox_repeated_publication_attempts_total 0\nolp_runtime_outbox_published_total 4\nolp_runtime_outbox_duplicate_publications_total 0\nolp_runtime_outbox_abandoned_ownership_total 0\nolp_runtime_outbox_abandoned_claims_total 0\nolp_runtime_outbox_failed_takeovers_total 0\n# HELP olp_operational_metrics_available Whether the PostgreSQL operational rollup was available.\n# TYPE olp_operational_metrics_available gauge\nolp_operational_metrics_available 1\n# HELP olp_requests_5m Metadata requests observed during the trailing five minutes.\n# TYPE olp_requests_5m gauge\n# HELP olp_request_success_ratio_5m Successful request ratio during the trailing five minutes.\n# TYPE olp_request_success_ratio_5m gauge\n# HELP olp_request_latency_seconds Request latency quantiles during the trailing five minutes.\n# TYPE olp_request_latency_seconds gauge\n# HELP olp_upstream_cancellations_5m Cancelled upstream attempts during the trailing five minutes.\n# TYPE olp_upstream_cancellations_5m gauge\nolp_requests_5m 0\nolp_request_success_ratio_5m 1.000000\nolp_request_latency_seconds{quantile=\"0.95\"} 0.000000\nolp_request_latency_seconds{quantile=\"0.99\"} 0.000000\nolp_upstream_cancellations_5m 0\n# HELP olp_provider_health Provider health classification over the trailing fifteen minutes.\n# TYPE olp_provider_health gauge\n# HELP olp_provider_success_ratio_15m Provider attempt success ratio over the trailing fifteen minutes.\n# TYPE olp_provider_success_ratio_15m gauge\n# HELP olp_provider_latency_seconds_15m Provider average attempt latency over the trailing fifteen minutes.\n# TYPE olp_provider_latency_seconds_15m gauge\nolp_provider_health{provider_id=\"01a060f5-c992-73e1-b5c6-dd6519454e6d\",provider_name=\"benchmark\",provider_kind=\"openai_compatible\",status=\"healthy\"} 1\nolp_provider_success_ratio_15m{provider_id=\"01a060f5-c992-73e1-b5c6-dd6519454e6d\",provider_name=\"benchmark\",provider_kind=\"openai_compatible\",status=\"healthy\"} 0.998984\nolp_provider_latency_seconds_15m{provider_id=\"01a060f5-c992-73e1-b5c6-dd6519454e6d\",provider_name=\"benchmark\",provider_kind=\"openai_compatible\",status=\"healthy\"} 0.243181\n# HELP olp_http_admission_capacity Configured process-local HTTP request admission capacity.\n# TYPE olp_http_admission_capacity gauge\nolp_http_admission_capacity{surface=\"inference\"} 256\nolp_http_admission_capacity{surface=\"management\"} 32\n# HELP olp_http_admitted_requests Current process-local admitted HTTP requests whose responses have not completed.\n# TYPE olp_http_admitted_requests gauge\nolp_http_admitted_requests{surface=\"inference\"} 0\nolp_http_admitted_requests{surface=\"management\"} 0\n# HELP olp_http_admission_rejections_total HTTP requests rejected because the process-local admission pool was full.\n# TYPE olp_http_admission_rejections_total counter\nolp_http_admission_rejections_total{surface=\"inference\"} 0\nolp_http_admission_rejections_total{surface=\"management\"} 0\n# HELP olp_trace_export_dropped_total Spans dropped before successful OTLP export.\n# TYPE olp_trace_export_dropped_total counter\nolp_trace_export_dropped_total 0\n"
+  }
+}

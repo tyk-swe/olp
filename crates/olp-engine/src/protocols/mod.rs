@@ -10,6 +10,8 @@ pub mod gemini;
 pub mod openai;
 pub mod sse;
 
+pub use extensions::{UnresolvablePointer, materialize_response_pointer};
+
 #[derive(Default)]
 pub(in crate::protocols) struct CanonicalEventBuilder {
     pub(in crate::protocols) events: Vec<Event>,

@@ -7,10 +7,16 @@ release; deployment topology is in [`deployment.md`](deployment.md).
 ## Objectives and monitoring
 
 Measure SLOs at the client-facing listener: target 99.9% successful availability
-(excluding upstream failures). Treat 15 ms p95 and 30 ms p99 added latency as
-provisional objectives until the performance milestone publishes a reproducible
-baseline. OLP on-call owns gateway availability and request-metadata
-completeness; provider owners own credentials, quotas, and model availability.
+(excluding upstream failures). The release-benchmark objectives are 15 ms p95
+and 30 ms p99 added latency for unary chat and embeddings, and 35 ms p95 and
+55 ms p99 for the fixed 50-token burst stream. These bounds cover three
+60-second release runs on an 8-vCPU KVM Haswell guest; gateway throughput varied
+by at most 3.6%, with zero gateway errors and zero admission rejections. The
+scenario results and interpretation are published in [`bench/README.md`](../bench/README.md).
+The `/v1/models` stress result is excluded from metadata-plane capacity claims
+because the checked-in run saturated request-metadata ingestion.
+OLP on-call owns gateway availability and request-metadata completeness;
+provider owners own credentials, quotas, and model availability.
 
 Scrape each in-cluster `*-observability` Service on port 9090 every 15 seconds
 and probe `/health/live` and `/health/ready`. The public listener returns 404

@@ -1,9 +1,11 @@
 use std::collections::BTreeMap;
 
 use serde::{Serialize, de::DeserializeOwned};
-use serde_json::Value;
+use serde_json::{Value, map::Entry};
 
 use crate::domain::canonical::requests::is_delivery_only_extension;
+
+const MAX_MATERIALIZED_ARRAY_INDEX: usize = 1_024;
 
 pub(in crate::protocols) enum PointerExtensionError {
     InvalidPath(String),
@@ -35,6 +37,93 @@ pub(in crate::protocols) fn escape_json_pointer(value: &str) -> String {
 
 pub(in crate::protocols) fn unescape_json_pointer(value: &str) -> String {
     value.replace("~1", "/").replace("~0", "~")
+}
+
+/// Reports a response pointer that could not be materialized. It carries
+/// nothing: the only failure is the pointer itself, which every caller already
+/// holds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct UnresolvablePointer;
+
+/// Sets `value` at `pointer` in a response document being assembled, creating
+/// the missing objects and arrays along the way.
+pub fn materialize_response_pointer(
+    root: &mut Value,
+    pointer: &str,
+    value: Value,
+) -> Result<(), UnresolvablePointer> {
+    if !pointer.starts_with('/') || pointer.len() > 1_024 {
+        return Err(UnresolvablePointer);
+    }
+    let segments = pointer[1..]
+        .split('/')
+        .map(unescape_json_pointer)
+        .collect::<Vec<_>>();
+    if segments.len() > 16 {
+        return Err(UnresolvablePointer);
+    }
+    let mut current = root;
+    for (index, segment) in segments.iter().enumerate() {
+        if index + 1 == segments.len() {
+            match current {
+                Value::Object(object) => {
+                    object.insert(segment.clone(), value);
+                    return Ok(());
+                }
+                Value::Array(array) => {
+                    let position = materialized_array_index(segment).ok_or(UnresolvablePointer)?;
+                    while array.len() <= position {
+                        array.push(Value::Null);
+                    }
+                    array[position] = value;
+                    return Ok(());
+                }
+                _ => return Err(UnresolvablePointer),
+            }
+        }
+        current = match current {
+            Value::Object(object) => match object.entry(segment.clone()) {
+                Entry::Occupied(entry) => entry.into_mut(),
+                Entry::Vacant(entry) => {
+                    entry.insert(empty_materialized_container(&segments[index + 1])?)
+                }
+            },
+            Value::Array(array) => {
+                let position = materialized_array_index(segment).ok_or(UnresolvablePointer)?;
+                if array.len() <= position {
+                    let next_value = empty_materialized_container(&segments[index + 1])?;
+                    while array.len() <= position {
+                        let mut next_value = next_value.clone();
+                        if let Value::Object(object) = &mut next_value {
+                            object.insert("index".to_owned(), Value::from(array.len()));
+                        }
+                        array.push(next_value);
+                    }
+                }
+                &mut array[position]
+            }
+            _ => return Err(UnresolvablePointer),
+        };
+    }
+    Err(UnresolvablePointer)
+}
+
+fn materialized_array_index(segment: &str) -> Option<usize> {
+    segment
+        .parse::<usize>()
+        .ok()
+        .filter(|index| *index <= MAX_MATERIALIZED_ARRAY_INDEX)
+}
+
+fn empty_materialized_container(segment: &str) -> Result<Value, UnresolvablePointer> {
+    match segment.parse::<usize>() {
+        Ok(index) if index <= MAX_MATERIALIZED_ARRAY_INDEX => Ok(Value::Array(Vec::new())),
+        Ok(_) => Err(UnresolvablePointer),
+        Err(_) if !segment.is_empty() && segment.bytes().all(|byte| byte.is_ascii_digit()) => {
+            Err(UnresolvablePointer)
+        }
+        Err(_) => Ok(Value::Object(Default::default())),
+    }
 }
 
 /// Restores extensions located directly on a wire object. Nested extensions
@@ -310,6 +399,36 @@ mod tests {
         assert_eq!(escape_json_pointer("a/b~c"), "a~1b~0c");
         assert_eq!(unescape_json_pointer("a~1b~0c"), "a/b~c");
         assert_eq!(extensions["/body/a~1b~0c"], json!({"retained": true}));
+    }
+
+    #[test]
+    fn materialized_response_pointers_reject_oversized_array_indices() {
+        for pointer in ["/choices/1025", "/choices/4294967295/vendor"] {
+            let mut root = json!({"choices": []});
+            assert_eq!(
+                materialize_response_pointer(&mut root, pointer, json!(true)),
+                Err(UnresolvablePointer)
+            );
+            assert_eq!(root, json!({"choices": []}));
+        }
+
+        for pointer in ["/items/1025/name", "/items/18446744073709551616/name"] {
+            let mut root = json!({});
+            assert_eq!(
+                materialize_response_pointer(&mut root, pointer, json!(true)),
+                Err(UnresolvablePointer)
+            );
+            assert_eq!(root, json!({}));
+        }
+    }
+
+    #[test]
+    fn materialized_response_pointers_allow_numeric_keys_in_existing_objects() {
+        let mut root = json!({"items": {"1025": {}}});
+
+        materialize_response_pointer(&mut root, "/items/1025/name", json!("kept")).unwrap();
+
+        assert_eq!(root, json!({"items": {"1025": {"name": "kept"}}}));
     }
 
     #[test]
