@@ -13,7 +13,7 @@ RUN pnpm build
 # cargo-chef splits the release build into a dependency layer keyed only on
 # the manifests (recipe.json) and a source layer, so BuildKit's gha cache
 # reuses the expensive dependency compilation across source-only changes.
-FROM rust:1.97.1-bookworm@sha256:77fac8b98f9f46062bb680b6d25d5bcaabfc400143952ebc572e924bcbedc3fa AS chef
+FROM rust:1.98.0-bookworm@sha256:82150a52ec202c1b14d7817e14516c392bb7f5cfebd88f1ed531cb37ebd39922 AS chef
 RUN --mount=type=cache,id=olp-cargo-registry,target=/usr/local/cargo/registry,sharing=locked \
     cargo install cargo-chef --locked --version 0.1.77
 WORKDIR /src
