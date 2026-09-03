@@ -380,3 +380,66 @@ async fn local_identity_lifecycle_is_transactional_and_audited() {
         actor.is_none() && outcome == "failure" && resource.is_none()
     }));
 }
+
+#[tokio::test]
+#[ignore = "requires OLP_TEST_DATABASE_ADMIN_URL and OLP_TEST_DATABASE_URL_PREFIX"]
+async fn identity_listings_honour_the_shared_page_cap() {
+    let db = olp_db::test_support::TestDb::create_migrated("identity-page-cap").await;
+    let store = db.store(5).await;
+    let master_key = MasterKey::new(1, [7; 32]);
+    let owner = store
+        .setup_installation(InstallationSetupInput {
+            installation_name: "Identity page cap".to_owned(),
+            email: "owner@example.test".to_owned(),
+            display_name: "Owner".to_owned(),
+            password_hash: hash("correct horse battery staple").unwrap(),
+        })
+        .await
+        .unwrap();
+
+    for index in 0..150 {
+        let key = format!("invite-{index:04}");
+        let invitation = store
+            .create_invitation(
+                NewInvitation {
+                    email: format!("user-{index:04}@example.test"),
+                    role: Role::Viewer,
+                    expires_at: Utc::now() + Duration::days(1),
+                    actor: owner.user_id,
+                    idempotency_key: key.clone(),
+                },
+                Replayable::new(fingerprint(&key).unwrap(), &master_key),
+                |_| Response::new(201, None, None, Vec::new()),
+            )
+            .await
+            .unwrap();
+        let Outcome::Executed { value, .. } = invitation else {
+            panic!("new invitation must execute");
+        };
+        store
+            .accept_invitation(
+                AcceptInvitation {
+                    token: value.material.token().to_owned(),
+                    display_name: format!("User {index}"),
+                    password_hash: hash("correct horse battery staple").unwrap(),
+                },
+                &SessionMaterial::generate(),
+                Duration::hours(12),
+            )
+            .await
+            .unwrap();
+    }
+
+    let (invitations, next) = store.list_invitations(None, 150).await.unwrap();
+    assert_eq!(invitations.len(), 150);
+    assert!(next.is_none());
+    let (invitations, next) = store.list_invitations(None, 500).await.unwrap();
+    assert_eq!(invitations.len(), 150);
+    assert!(next.is_none());
+
+    let (users, next) = store.list_users(None, 150).await.unwrap();
+    assert_eq!(users.len(), 150);
+    assert!(next.is_some());
+    let (users, _) = store.list_users(None, 500).await.unwrap();
+    assert_eq!(users.len(), 151);
+}

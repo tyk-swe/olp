@@ -290,10 +290,11 @@ screenshots with `pnpm --dir console screenshots`.
 | [Configuration](docs/configuration.md) | Binary defaults, mounted secrets, Compose values, and provider presets |
 | [Deployment](docs/deployment.md) | Helm install, edge routing, workers, observability, and readiness |
 | [Operations](docs/operations.md) | Monitoring, recovery, upgrades, incidents, and master-key rotation |
+| [Spend-budget recovery](docs/spend-budget-recovery.md) | How cost-budgeted keys initialize, fail closed, and recover after Valkey loss |
 | [Provider compatibility matrix](docs/compatibility.md) | Which operations each provider kind serves natively, via translation, or refuses, and what each translation drops |
 | [Contributing](CONTRIBUTING.md) | Toolchain, sources of truth, and validation |
 | [Changelog](CHANGELOG.md) | Release notes, and the upgrade notes that go with them |
-| [Roadmap](docs/roadmap/README.md) | Eight-week plan, backlog, baseline evidence, deferred items, and risks |
+| [Roadmap](docs/roadmap/README.md) | Current evidence period, open backlog, deferred items, and the archived September plan |
 | [Security](SECURITY.md) | Supported releases and private vulnerability reporting |
 | [Console development](console/README.md) | Frontend commands, boundaries, integration tests, and screenshots |
 | [Compatibility and contract tests](tests/README.md) | Conformance, SDK, end-to-end, HA, and fuzz suites |
@@ -302,9 +303,8 @@ screenshots with `pnpm --dir console screenshots`.
 
 ## Contributing
 
-Use Rust 1.97.1, Node.js 24.15 or newer within the 24.x line (or Node.js 26+),
-pnpm 11, ripgrep, `cargo-nextest`, `shellcheck`, and `jq`. Install the console
-dependencies once, then run the standard local gate:
+[`CONTRIBUTING.md`](CONTRIBUTING.md) lists the pinned toolchain. Install the
+console dependencies once, then run the standard local gate:
 
 ```bash
 make console-install

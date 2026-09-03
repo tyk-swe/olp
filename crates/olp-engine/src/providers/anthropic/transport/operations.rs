@@ -132,49 +132,9 @@ impl Connector {
                     self.config.max_response_bytes,
                 )
                 .await?;
-            let value: serde_json::Value = serde_json::from_slice(&body).map_err(|error| {
-                protocol_body_error(format!(
-                    "Anthropic model discovery is not valid JSON: {error}"
-                ))
-            })?;
-            let data = value
-                .get("data")
-                .and_then(serde_json::Value::as_array)
-                .ok_or_else(|| protocol_body_error("Anthropic model discovery omitted data"))?;
-            for model in data {
-                let id = model
-                    .get("id")
-                    .and_then(serde_json::Value::as_str)
-                    .filter(|id| !id.is_empty())
-                    .ok_or_else(|| {
-                        protocol_body_error("Anthropic model discovery returned an invalid ID")
-                    })?;
-                let display_name = model
-                    .get("display_name")
-                    .and_then(serde_json::Value::as_str)
-                    .filter(|name| !name.is_empty())
-                    .unwrap_or(id);
-                discovered.push(DiscoveredProviderModel {
-                    id: id.to_owned(),
-                    display_name: display_name.to_owned(),
-                });
-            }
-            if !value
-                .get("has_more")
-                .and_then(serde_json::Value::as_bool)
-                .unwrap_or(false)
-            {
-                return Ok(discovered);
-            }
-            after_id = value
-                .get("last_id")
-                .and_then(serde_json::Value::as_str)
-                .map(str::to_owned)
-                .or_else(|| discovered.last().map(|model| model.id.clone()));
-            if after_id.is_none() {
-                return Err(protocol_body_error(
-                    "Anthropic discovery indicated another page without a cursor",
-                ));
+            match append_discovery_page(&body, &mut discovered)? {
+                Some(cursor) => after_id = Some(cursor),
+                None => return Ok(discovered),
             }
         }
         Err(protocol_body_error(
@@ -423,6 +383,57 @@ impl ProviderTransport for Connector {
     ) -> crate::domain::ports::BoxFuture<'a, Result<ProviderOutput, TransportError>> {
         Box::pin(async move { self.execute_request(request).await })
     }
+}
+
+/// Appends one discovery page to `discovered` and returns the cursor for the
+/// next page, or `None` when the catalog is exhausted.
+fn append_discovery_page(
+    body: &[u8],
+    discovered: &mut Vec<DiscoveredProviderModel>,
+) -> Result<Option<String>, TransportError> {
+    let value: serde_json::Value = serde_json::from_slice(body).map_err(|error| {
+        protocol_body_error(format!(
+            "Anthropic model discovery is not valid JSON: {error}"
+        ))
+    })?;
+    let data = value
+        .get("data")
+        .and_then(serde_json::Value::as_array)
+        .ok_or_else(|| protocol_body_error("Anthropic model discovery omitted data"))?;
+    for model in data {
+        let id = model
+            .get("id")
+            .and_then(serde_json::Value::as_str)
+            .filter(|id| !id.is_empty())
+            .ok_or_else(|| {
+                protocol_body_error("Anthropic model discovery returned an invalid ID")
+            })?;
+        let display_name = model
+            .get("display_name")
+            .and_then(serde_json::Value::as_str)
+            .filter(|name| !name.is_empty())
+            .unwrap_or(id);
+        discovered.push(DiscoveredProviderModel {
+            id: id.to_owned(),
+            display_name: display_name.to_owned(),
+        });
+    }
+    if !value
+        .get("has_more")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false)
+    {
+        return Ok(None);
+    }
+    value
+        .get("last_id")
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_owned)
+        .or_else(|| discovered.last().map(|model| model.id.clone()))
+        .map(Some)
+        .ok_or_else(|| {
+            protocol_body_error("Anthropic discovery indicated another page without a cursor")
+        })
 }
 
 fn validate_request_envelope(request: &ProviderRequest) -> Result<(), TransportError> {

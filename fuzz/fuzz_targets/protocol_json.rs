@@ -234,21 +234,6 @@ fuzz_target!(|data: &[u8]| {
     );
     roundtrip(
         data,
-        "openai::speech_stream_event",
-        |event| {
-            audio::decode_speech_stream_event(event, |_| {
-                Ok(MediaArtifact {
-                    handle: MediaHandle::new("fuzz-speech-stream"),
-                    content_type: Some("audio/mpeg".into()),
-                    content_length: None,
-                })
-            })
-            .ok()
-        },
-        |canonical| audio::encode_speech_stream_update(canonical, |_| Ok("Zg==".into())),
-    );
-    roundtrip(
-        data,
         "anthropic::messages_response",
         |response| anthropic_response::decode(response).ok(),
         |events| anthropic_client::encode_messages_response(events, PUBLIC_MODEL, "fuzz-message"),
@@ -312,6 +297,5 @@ fuzz_target!(|data: &[u8]| {
     };
     let speech = audio::decode_speech_body(binary.clone());
     let _ = audio::encode_speech_body(&speech);
-    let video_result = video::decode_video_content_body(binary);
-    let _ = video::encode_video_content_body(&video_result);
+    let _ = video::decode_video_content_body(binary);
 });

@@ -4,14 +4,16 @@ use sqlx::{FromRow, Postgres, QueryBuilder};
 use uuid::Uuid;
 
 use crate::{
-    operations::cursor::{Page, Timestamp},
+    operations::{
+        MAX_PAGE_SIZE,
+        cursor::{Page, Timestamp},
+    },
     split_page,
     store::Store,
 };
 
 use super::{
-    MAX_PAGE_SIZE, MediaJobError, MediaJobFilters, MediaJobLifecycle, MediaJobOrder,
-    MediaJobRecord, MediaJobState,
+    MediaJobError, MediaJobFilters, MediaJobLifecycle, MediaJobOrder, MediaJobRecord, MediaJobState,
 };
 
 const MEDIA_JOB_SELECT: &str = "SELECT j.id, j.upstream_job_id, j.api_key_id, j.provider_id,

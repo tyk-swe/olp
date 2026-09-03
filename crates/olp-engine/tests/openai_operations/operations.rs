@@ -7,16 +7,14 @@ use olp_engine::domain::{
             GenerationParameters, GenerationRequest, ImageOperation, MediaHandle, MediaSource,
             Message, MessageRole, Operation, SourceExtensions, VideoOperation,
         },
-        results::MediaArtifact,
     },
     ids::RouteSlug,
 };
 use olp_engine::protocols::openai::{
     audio::{
-        Decoder as AudioDecoder, Encoder as AudioEncoder, SpeechRequest, SpeechStreamEvent,
-        SpeechStreamUpdate, TranscriptionRequest, TranscriptionResponse, decode_speech,
-        decode_speech_stream_event, decode_transcription, decode_transcription_response,
-        encode_speech_stream_update, encode_transcription, encode_transcription_response,
+        Decoder as AudioDecoder, Encoder as AudioEncoder, SpeechRequest, TranscriptionRequest,
+        TranscriptionResponse, decode_speech, decode_transcription, decode_transcription_response,
+        encode_transcription, encode_transcription_response,
     },
     embeddings::{
         EmbeddingRequest, EmbeddingResponse, decode_embedding_request, decode_embedding_response,
@@ -490,27 +488,6 @@ fn media_stream_updates_are_bounded_handles_and_fragment_safe() {
     })
     .unwrap();
     assert_eq!(encoded.b64_json.as_deref(), Some("re-encoded"));
-
-    let speech: SpeechStreamEvent = serde_json::from_value(json!({
-        "type": "speech.audio.delta",
-        "delta": "opaque"
-    }))
-    .unwrap();
-    let update = decode_speech_stream_event(speech, |_| {
-        Ok(MediaArtifact {
-            handle: MediaHandle::new("speech-chunk"),
-            content_type: Some("audio/mpeg".into()),
-            content_length: Some(6),
-        })
-    })
-    .unwrap();
-    assert!(matches!(
-        &update,
-        SpeechStreamUpdate::Audio { media, .. }
-            if media.handle.as_str() == "speech-chunk"
-    ));
-    let encoded = encode_speech_stream_update(&update, |_| Ok("re-encoded".into())).unwrap();
-    assert_eq!(encoded.audio.as_deref(), Some("re-encoded"));
 
     let wire = concat!(
         "event: transcript.text.delta\n",

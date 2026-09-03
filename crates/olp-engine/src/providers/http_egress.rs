@@ -42,8 +42,8 @@ impl EgressPolicy {
         }
     }
 
-    /// Loopback-only exemption for the OIDC and OAuth clients when their
-    /// debug-only insecure-endpoint switch points them at a local mock issuer.
+    /// Loopback-only exemption for the OIDC and OAuth clients when
+    /// `OLP_ALLOW_INSECURE_OIDC_FOR_TESTS` points them at a local mock issuer.
     #[must_use]
     pub(in crate::providers) fn loopback_test_targets(enabled: bool) -> Self {
         if !enabled {

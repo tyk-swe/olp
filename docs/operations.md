@@ -108,6 +108,8 @@ double-count a terminal charge that races its query. Monitor
 rejections are counted only by window in
 `olp_key_budget_rejections_total{window="daily|monthly"}`; there is deliberately
 no per-key Prometheus spend gauge.
+[`spend-budget-recovery.md`](spend-budget-recovery.md) explains how a budgeted
+key initializes and recovers its Valkey snapshot.
 
 If the API-key read shows accrued spend at or above a limit while requests are
 still admitted, check the request-metadata consumer, PostgreSQL, Valkey, and the
@@ -239,7 +241,8 @@ until candidate health and the rollback decision point pass.
    and fresh Valkey. It restores/migrates twice and rejects incomplete or
    non-idempotent results. For N-1 rehearsal set
    `OLP_REHEARSAL_EXPECTED_NEW_MIGRATIONS`; CI derives its fixture from
-   `release-metadata.env`, whose baseline is advanced only after a release.
+   `release-metadata.env`, which names the last migration shipped by the latest
+   published release.
 3. Enter maintenance: stop edge inference admission and every control
    mutation, drain old inference workloads, and verify no active requests or
    media reconciliation writers. Leave the old worker until Stream pending and

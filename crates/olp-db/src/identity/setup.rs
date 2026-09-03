@@ -95,24 +95,7 @@ impl Store {
         .execute(&mut *transaction)
         .await?;
 
-        for (key, value) in [
-            ("retention.requests_days", "30"),
-            ("retention.usage_days", "90"),
-            ("retention.audit_days", "365"),
-            ("limits.valkey_unavailable", "fail_closed"),
-        ] {
-            sqlx::query!(
-                "INSERT INTO settings (key, value, etag, updated_by, updated_at) \
-                 VALUES ($1, $2, $3, $4, $5)",
-                key,
-                value,
-                Uuid::now_v7(),
-                user_id,
-                now
-            )
-            .execute(&mut *transaction)
-            .await?;
-        }
+        insert_default_settings(&mut transaction, user_id, now).await?;
 
         record_audit_event(
             &mut *transaction,
@@ -128,27 +111,12 @@ impl Store {
         )
         .await?;
 
-        let session_id = if let Some((material, ttl)) = session {
-            let expires_at = checked_session_expiry(now, ttl)?;
-            let session_id =
-                insert_versioned_session(&mut transaction, user_id, 1, material, expires_at, now)
-                    .await?;
-            record_audit_event(
-                &mut *transaction,
-                AuditEvent {
-                    provenance: self.provenance(),
-                    actor: Some(user_id),
-                    action: "session.create",
-                    resource_type: "session",
-                    resource_id: Some(&session_id.to_string()),
-                    outcome: "success",
-                    occurred_at: Some(now),
-                },
-            )
-            .await?;
-            Some(session_id)
-        } else {
-            None
+        let session_id = match session {
+            Some((material, ttl)) => Some(
+                self.create_setup_session(&mut transaction, user_id, now, material, ttl)
+                    .await?,
+            ),
+            None => None,
         };
         transaction.commit().await?;
 
@@ -162,4 +130,57 @@ impl Store {
             session_id,
         ))
     }
+
+    async fn create_setup_session(
+        &self,
+        transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        user_id: Uuid,
+        now: chrono::DateTime<Utc>,
+        material: &SessionMaterial,
+        ttl: chrono::Duration,
+    ) -> Result<Uuid, Error> {
+        let expires_at = checked_session_expiry(now, ttl)?;
+        let session_id =
+            insert_versioned_session(transaction, user_id, 1, material, expires_at, now).await?;
+        record_audit_event(
+            &mut **transaction,
+            AuditEvent {
+                provenance: self.provenance(),
+                actor: Some(user_id),
+                action: "session.create",
+                resource_type: "session",
+                resource_id: Some(&session_id.to_string()),
+                outcome: "success",
+                occurred_at: Some(now),
+            },
+        )
+        .await?;
+        Ok(session_id)
+    }
+}
+
+async fn insert_default_settings(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    user_id: Uuid,
+    now: chrono::DateTime<Utc>,
+) -> Result<(), Error> {
+    for (key, value) in [
+        ("retention.requests_days", "30"),
+        ("retention.usage_days", "90"),
+        ("retention.audit_days", "365"),
+        ("limits.valkey_unavailable", "fail_closed"),
+    ] {
+        sqlx::query!(
+            "INSERT INTO settings (key, value, etag, updated_by, updated_at) \
+             VALUES ($1, $2, $3, $4, $5)",
+            key,
+            value,
+            Uuid::now_v7(),
+            user_id,
+            now
+        )
+        .execute(&mut **transaction)
+        .await?;
+    }
+    Ok(())
 }

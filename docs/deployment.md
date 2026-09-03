@@ -44,10 +44,10 @@ through the namespace transition.
 
 Published releases use two public GHCR packages: `ghcr.io/tyk-swe/olp` for
 the multi-architecture image and `ghcr.io/tyk-swe/charts/openllmproxy` for the
-Helm chart. Image tags `2.2.1`, `2.2`, and `latest` identify the same index at
+Helm chart. Image tags `2.3.0`, `2.3`, and `latest` identify the same index at
 publication. The versioned tag supports the Compose quick start and `latest`
 is a convenience alias; production installations must pin the index digest.
-The chart is selected independently with `--version 2.2.1`.
+The chart is selected independently with `--version 2.3.0`.
 
 GitHub creates the first version of each GHCR package as private. On the first
 release, a maintainer must open the package settings for both `olp` and
@@ -57,13 +57,13 @@ unauthenticated runners pull the image, render the chart, and verify both
 signatures. Publishing with the repository `GITHUB_TOKEN` and the OCI source
 label links the packages to this repository, but does not make them public.
 
-The `v2.2.1` image index and chart are published at the immutable digests used
+The `v2.3.0` image index and chart are published at the immutable digests used
 below. Resolve the versioned references independently before each upgrade and
 confirm they still match the approved release:
 
 ```console
-docker buildx imagetools inspect ghcr.io/tyk-swe/olp:2.2.1
-helm pull oci://ghcr.io/tyk-swe/charts/openllmproxy --version 2.2.1
+docker buildx imagetools inspect ghcr.io/tyk-swe/olp:2.3.0
+helm pull oci://ghcr.io/tyk-swe/charts/openllmproxy --version 2.3.0
 ```
 
 Both commands report a `Digest:`. Confirm each one matches the pinned value
@@ -71,14 +71,14 @@ below, then verify the exact OCI artifacts with cosign:
 
 ```console
 cosign verify \
-  --certificate-identity 'https://github.com/tyk-swe/olp/.github/workflows/release.yml@refs/tags/v2.2.1' \
+  --certificate-identity 'https://github.com/tyk-swe/olp/.github/workflows/release.yml@refs/tags/v2.3.0' \
   --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' \
-  'ghcr.io/tyk-swe/olp@sha256:4b5114341f9eed2b2079d9c8a822b1413e0d9d50c199e40e906659f886eee1a8'
+  'ghcr.io/tyk-swe/olp@sha256:51a19182a05e0f5cae582203f99d5335a56b7a90cd363a5cad889d1b04b653ae'
 
 cosign verify \
-  --certificate-identity 'https://github.com/tyk-swe/olp/.github/workflows/release.yml@refs/tags/v2.2.1' \
+  --certificate-identity 'https://github.com/tyk-swe/olp/.github/workflows/release.yml@refs/tags/v2.3.0' \
   --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' \
-  'ghcr.io/tyk-swe/charts/openllmproxy@sha256:367ebb5378d07a29d86fc92cb03a981cf5c8d1c3d9c63cfb4023bde4a092994c'
+  'ghcr.io/tyk-swe/charts/openllmproxy@sha256:02be3a6af3fd88bb667d42cdbbdff42155e3b5de226057623723a89a56702f83'
 ```
 
 The chart digest is the OCI manifest digest reported by `helm push`, not the
@@ -99,7 +99,7 @@ Example values:
 ```yaml
 image:
   repository: ghcr.io/tyk-swe/olp
-  digest: sha256:4b5114341f9eed2b2079d9c8a822b1413e0d9d50c199e40e906659f886eee1a8
+  digest: sha256:51a19182a05e0f5cae582203f99d5335a56b7a90cd363a5cad889d1b04b653ae
 config:
   publicOrigin: https://olp.example.com
   localLoginEnabled: false
@@ -245,7 +245,7 @@ Render the exact configuration before applying it:
 ```console
 helm lint --strict deploy/helm
 helm template olp deploy/helm --namespace olp \
-  --set-string image.digest=sha256:4b5114341f9eed2b2079d9c8a822b1413e0d9d50c199e40e906659f886eee1a8 \
+  --set-string image.digest=sha256:51a19182a05e0f5cae582203f99d5335a56b7a90cd363a5cad889d1b04b653ae \
   --set ingress.enabled=true --set ingress.className=nginx \
   --set ingress.host=olp.example.com \
   --set-string config.trustedProxyCidrs=10.0.0.0/8 \
@@ -256,9 +256,9 @@ Install with approved values and at least a 20-minute timeout:
 
 ```console
 helm upgrade --install olp \
-  oci://ghcr.io/tyk-swe/charts/openllmproxy --version 2.2.1 \
+  oci://ghcr.io/tyk-swe/charts/openllmproxy --version 2.3.0 \
   --namespace olp --create-namespace \
-  --set-string image.digest=sha256:4b5114341f9eed2b2079d9c8a822b1413e0d9d50c199e40e906659f886eee1a8 \
+  --set-string image.digest=sha256:51a19182a05e0f5cae582203f99d5335a56b7a90cd363a5cad889d1b04b653ae \
   --values production-values.yaml --timeout 20m --wait
 ```
 

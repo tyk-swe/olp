@@ -408,19 +408,6 @@ pub fn decode_video_content_body(body: BinaryMediaBody) -> VideoContentResult {
     }
 }
 
-// ponytail: encode direction unwired — production only downloads/decodes video
-// content, never encodes it back. Kept only for the protocol_json fuzz target.
-// Delete with its fuzz arm if no encode path is planned.
-pub fn encode_video_content_body(result: &VideoContentResult) -> Result<BinaryMediaBody, Error> {
-    result.extensions.ensure_representable_on(Surface::OpenAi)?;
-    if !result.extensions.values.is_empty() {
-        return Err(Error::BinaryExtensionsUnsupported);
-    }
-    Ok(BinaryMediaBody {
-        media: result.media.clone(),
-    })
-}
-
 #[derive(Clone, Deserialize, PartialEq, Serialize)]
 pub struct OpenAiVideoDeleteResponse {
     pub id: String,

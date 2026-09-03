@@ -10,6 +10,7 @@ use olp_engine::domain::{
     auth::ApiKey,
     canonical::{
         identity::{OperationKind, Surface, TransportMode},
+        requests::Operation,
         results::CanonicalResult,
     },
     ids::RouteSlug,
@@ -55,24 +56,7 @@ pub(super) async fn action(
 ) -> Result<Response, ProtocolError> {
     let Json(value) = valid_json(payload, Surface::Gemini)?;
     if let Some(model) = resource.strip_suffix(":generateContent") {
-        let mut request: GenerateContentRequest =
-            serde_json::from_value(value).map_err(|error| {
-                ProtocolError::invalid(Surface::Gemini, format!("Invalid JSON request: {error}"))
-            })?;
-        let admitted = admit_gemini_generate(&state, &mut request)
-            .await
-            .map_err(ProtocolError::gemini)?;
-        let operation = match decode_request(model, request, false) {
-            Ok(operation) => operation,
-            Err(error) => {
-                admitted.release().await;
-                return Err(ProtocolError::invalid(
-                    Surface::Gemini,
-                    format!("Invalid generateContent request: {error}"),
-                ));
-            }
-        };
-        admitted.disarm();
+        let operation = decode_generate_operation(&state, value, model, false).await?;
         let execution =
             execute_event_operation(&state, &principal, operation, TransportMode::Unary)
                 .await
@@ -94,24 +78,7 @@ pub(super) async fn action(
                 "streamGenerateContent supports only alt=sse.",
             ));
         }
-        let mut request: GenerateContentRequest =
-            serde_json::from_value(value).map_err(|error| {
-                ProtocolError::invalid(Surface::Gemini, format!("Invalid JSON request: {error}"))
-            })?;
-        let admitted = admit_gemini_generate(&state, &mut request)
-            .await
-            .map_err(ProtocolError::gemini)?;
-        let operation = match decode_request(model, request, true) {
-            Ok(operation) => operation,
-            Err(error) => {
-                admitted.release().await;
-                return Err(ProtocolError::invalid(
-                    Surface::Gemini,
-                    format!("Invalid streamGenerateContent request: {error}"),
-                ));
-            }
-        };
-        admitted.disarm();
+        let operation = decode_generate_operation(&state, value, model, true).await?;
         let execution =
             execute_event_operation(&state, &principal, operation, TransportMode::Streaming)
                 .await
@@ -124,23 +91,7 @@ pub(super) async fn action(
         return Ok(protocol_streaming_response(execution, encoder));
     }
     if let Some(model) = resource.strip_suffix(":countTokens") {
-        let mut request: CountTokensRequest = serde_json::from_value(value).map_err(|error| {
-            ProtocolError::invalid(Surface::Gemini, format!("Invalid JSON request: {error}"))
-        })?;
-        let admitted = admit_gemini_count(&state, &mut request)
-            .await
-            .map_err(ProtocolError::gemini)?;
-        let operation = match decode_count_tokens_request(model, request) {
-            Ok(operation) => operation,
-            Err(error) => {
-                admitted.release().await;
-                return Err(ProtocolError::invalid(
-                    Surface::Gemini,
-                    format!("Invalid countTokens request: {error}"),
-                ));
-            }
-        };
-        admitted.disarm();
+        let operation = decode_count_operation(&state, value, model).await?;
         let executed =
             execute_routed_result(&state, &principal, operation, TransportMode::Unary, None)
                 .await
@@ -151,6 +102,64 @@ pub(super) async fn action(
         Surface::Gemini,
         "The requested Gemini method does not exist.",
     ))
+}
+
+async fn decode_generate_operation(
+    state: &GatewayState,
+    value: serde_json::Value,
+    model: &str,
+    stream: bool,
+) -> Result<Operation, ProtocolError> {
+    let mut request: GenerateContentRequest = serde_json::from_value(value).map_err(|error| {
+        ProtocolError::invalid(Surface::Gemini, format!("Invalid JSON request: {error}"))
+    })?;
+    let admitted = admit_gemini_generate(state, &mut request)
+        .await
+        .map_err(ProtocolError::gemini)?;
+    match decode_request(model, request, stream) {
+        Ok(operation) => {
+            admitted.disarm();
+            Ok(operation)
+        }
+        Err(error) => {
+            admitted.release().await;
+            let method = if stream {
+                "streamGenerateContent"
+            } else {
+                "generateContent"
+            };
+            Err(ProtocolError::invalid(
+                Surface::Gemini,
+                format!("Invalid {method} request: {error}"),
+            ))
+        }
+    }
+}
+
+async fn decode_count_operation(
+    state: &GatewayState,
+    value: serde_json::Value,
+    model: &str,
+) -> Result<Operation, ProtocolError> {
+    let mut request: CountTokensRequest = serde_json::from_value(value).map_err(|error| {
+        ProtocolError::invalid(Surface::Gemini, format!("Invalid JSON request: {error}"))
+    })?;
+    let admitted = admit_gemini_count(state, &mut request)
+        .await
+        .map_err(ProtocolError::gemini)?;
+    match decode_count_tokens_request(model, request) {
+        Ok(operation) => {
+            admitted.disarm();
+            Ok(operation)
+        }
+        Err(error) => {
+            admitted.release().await;
+            Err(ProtocolError::invalid(
+                Surface::Gemini,
+                format!("Invalid countTokens request: {error}"),
+            ))
+        }
+    }
 }
 
 fn unary_response(mut completed: CompletedEvents) -> Result<Response, ProtocolError> {
