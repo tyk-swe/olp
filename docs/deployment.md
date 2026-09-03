@@ -129,12 +129,26 @@ and `/metrics` on the pod network. The chart creates internal
 health or metrics route. [Network policy](#network-policy) below closes the
 port to everything except the installation's Prometheus topology.
 
-Per-pod TCP caps default to 16,384 gateway and 1,024 control connections.
-In-flight work is separate: gateway/control inference pools default to 256
-and management pools to 32. Each permit lasts through streaming completion or
+The binary's `OLP_HTTP_MAX_CONNECTIONS` default remains 1,024. The chart raises
+the gateway per-pod TCP cap to 16,384 and keeps the control cap at 1,024.
+In-flight work is separate: gateway/control inference pools default to 256 and
+management pools to 32. Each permit lasts through streaming completion or
 cancellation; a full pool returns HTTP 503 with `Retry-After: 1` instead of
-queueing. Size limits from CPU, memory, provider connections, and stream
-duration.
+queueing.
+
+The release baseline on an 8-vCPU KVM Haswell guest exercised the 256-request
+inference limit with a fixed 200 ms upstream at 1,044–1,047 chat requests/s,
+without admission rejections. At concurrency 64 it sustained 1,051–1,089 fixed
+50-token streams/s and 262–263 embedding requests/s; `/v1/models` at concurrency
+256 sustained 20,490–21,150 requests/s. Gateway throughput varied by at most
+3.6% across three runs. The `/v1/models` figure is an HTTP-path stress signal,
+not a metadata-safe request-rate target; that run saturated request-metadata
+ingestion. The 256 inference default therefore remains the measured saturation
+point, while the standalone 1,024 connection cap preserves four
+connection slots per inference permit and did not bind the scenarios. Treat
+these as a starting point, not a pod-sizing guarantee: CPU, memory, provider
+connections, and especially long-lived stream duration still determine safe
+production capacity. Full results are in [`bench/README.md`](../bench/README.md).
 
 Tracing is disabled by default. To export request and provider-attempt spans,
 set the full OTLP/HTTP traces endpoint and an optional Secret containing a JSON

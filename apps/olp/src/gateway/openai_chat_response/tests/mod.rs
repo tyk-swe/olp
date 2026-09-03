@@ -9,10 +9,9 @@ use olp_engine::domain::canonical::{
 use olp_engine::protocols::openai::response::{Decoder, OpenAiStreamError};
 use serde_json::{Value, json};
 
-use super::{
-    OpenAiChatCompletionStreamEncoder, aggregate_chat_completion_response, set_json_pointer,
-};
+use super::{OpenAiChatCompletionStreamEncoder, aggregate_chat_completion_response};
 use crate::gateway::openai_http::unix_seconds;
+use olp_engine::protocols::materialize_response_pointer;
 
 mod streaming;
 mod unary;
@@ -62,7 +61,7 @@ fn join_sse_frames(frames: &[Bytes]) -> Vec<u8> {
 #[test]
 fn source_extension_pointer_materializes_nested_arrays_without_loss() {
     let mut value = json!({ "choices": [] });
-    set_json_pointer(
+    materialize_response_pointer(
         &mut value,
         "/choices/2/delta/vendor_field",
         json!({ "preserved": true }),

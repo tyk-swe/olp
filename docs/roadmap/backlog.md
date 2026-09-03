@@ -83,10 +83,10 @@ is intentionally not here.
 
 ## PERF — performance evidence
 
-- [ ] **PERF-01** `make bench`: `oha` against the loopback mock, added-latency p50/p95/p99, JSON results — P2 · M · week 7 · planned → [milestone 7](milestones/07-performance.md)
-- [ ] **PERF-02** Criterion micro-benchmarks on the SSE decoder, translators, and codecs — P3 · S · week 7 · planned → [milestone 7](milestones/07-performance.md)
-- [ ] **PERF-03** Non-blocking `perf` job with artifact and regression warning — P3 · S · week 7 · planned → [milestone 7](milestones/07-performance.md)
-- [ ] **PERF-04** Act on the numbers: profile once, revalidate admission defaults, replace the provisional latency objectives — P2 · M · week 7 · planned → [milestone 7](milestones/07-performance.md)
+- [x] **PERF-01** `make bench`: `oha` against the loopback mock, added-latency p50/p95/p99, JSON results — P2 · M · week 7 · done → [milestone 7](milestones/07-performance.md)
+- [x] **PERF-02** Criterion micro-benchmarks on the SSE decoder, translators, and codecs — P3 · S · week 7 · done → [milestone 7](milestones/07-performance.md)
+- [x] **PERF-03** Non-blocking `perf` job with artifact and regression warning — P3 · S · week 7 · done → [milestone 7](milestones/07-performance.md)
+- [x] **PERF-04** Act on the numbers: profile once, revalidate admission defaults, replace the provisional latency objectives — P2 · M · week 7 · done → [milestone 7](milestones/07-performance.md)
 
 ## HYG — hardening and hygiene
 

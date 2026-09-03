@@ -25,7 +25,7 @@ FUZZ_TRIPLE = $(shell rustc -vV | sed -n 's/^host: //p')
 	console-e2e-project console-integration-prebuilt \
 	fuzz-replay fuzz-campaign live-tests sdk-smoke sdk-smoke-install sdk-smoke-run \
 	sdk-smoke-python sdk-smoke-python-install \
-	e2e worker-ha smoke-image-modes upgrade-rehearsal advisories deny
+	e2e worker-ha smoke-image-modes upgrade-rehearsal advisories deny bench bench-micro bench-report
 
 help: ## List available targets
 	@grep -E '^[a-z][a-z0-9-]*:.*##' $(MAKEFILE_LIST) \
@@ -92,6 +92,20 @@ clippy: ## Clippy with -D warnings, offline sqlx metadata
 # run them. If you add one, restore a `cargo test --doc` gate here and in CI.
 test: ## Workspace unit tests via nextest (postgres-backed tests stay #[ignore]d; see db-test)
 	SQLX_OFFLINE=true cargo nextest run --locked --workspace --all-features
+
+bench: ## Run the reproducible local gateway benchmark suite
+	./scripts/bench.sh
+
+bench-micro: ## Run engine protocol microbenchmarks and validate dependency licenses
+	cargo bench --locked -p olp-engine --bench protocols
+	cargo deny check licenses
+
+BENCH_RESULT ?= $(shell python3 scripts/bench.py --print-output-path)
+BENCH_BASELINE ?= bench/baseline
+BENCH_REPORT ?= bench/comment.md
+
+bench-report: ## Render current and prior benchmark JSON as Markdown
+	python3 scripts/bench-report.py "$(BENCH_RESULT)" --baseline "$(BENCH_BASELINE)" --output "$(BENCH_REPORT)"
 
 coverage: ## CI's Rust gate: unit and DB suites with an 80% line floor; needs the db-test environment
 	cargo llvm-cov clean --workspace

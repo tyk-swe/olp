@@ -38,6 +38,7 @@ pub(crate) fn encode_server_sse_frame(frame: &Frame) -> Bytes {
 }
 
 const STREAM_BUFFER_CAPACITY: usize = 32;
+const MAX_COALESCED_BYTES: usize = 64 * 1024;
 const MAX_TERMINAL_FRAMES: usize = 2;
 
 #[derive(Debug, Eq, PartialEq)]
@@ -167,8 +168,41 @@ enum SseBodyState {
     Ordinary {
         receiver: tokio::sync::mpsc::Receiver<Result<Bytes, Infallible>>,
         terminal: tokio::sync::oneshot::Receiver<TerminalFrames>,
+        pending: Option<Bytes>,
     },
     Terminal(VecDeque<Bytes>),
+}
+
+fn coalesce_ready_frames(
+    receiver: &mut tokio::sync::mpsc::Receiver<Result<Bytes, Infallible>>,
+    first: Result<Bytes, Infallible>,
+) -> Result<(Bytes, Option<Bytes>), Infallible> {
+    let first = first?;
+    let ready_frames = receiver.len();
+    if ready_frames == 0 || first.len() >= MAX_COALESCED_BYTES {
+        return Ok((first, None));
+    }
+    let Ok(next) = receiver.try_recv() else {
+        return Ok((first, None));
+    };
+    let next = next?;
+    if first.len().saturating_add(next.len()) > MAX_COALESCED_BYTES {
+        return Ok((first, Some(next)));
+    }
+    let mut combined = Vec::with_capacity(first.len() + next.len());
+    combined.extend_from_slice(&first);
+    combined.extend_from_slice(&next);
+    for _ in 1..ready_frames {
+        let Ok(next) = receiver.try_recv() else {
+            break;
+        };
+        let next = next?;
+        if combined.len().saturating_add(next.len()) > MAX_COALESCED_BYTES {
+            return Ok((Bytes::from(combined), Some(next)));
+        }
+        combined.extend_from_slice(&next);
+    }
+    Ok((Bytes::from(combined), None))
 }
 
 pub(crate) fn sse_stream() -> (SseResponseWriter, Response) {
@@ -182,15 +216,38 @@ fn sse_stream_with_capacity(capacity: usize) -> (SseResponseWriter, Response) {
         SseBodyState::Ordinary {
             receiver,
             terminal: terminal_receiver,
+            pending: None,
         },
         |state| async move {
             match state {
                 SseBodyState::Ordinary {
                     mut receiver,
                     terminal,
+                    pending,
                 } => {
-                    if let Some(item) = receiver.recv().await {
-                        Some((item, SseBodyState::Ordinary { receiver, terminal }))
+                    let item = match pending {
+                        Some(frame) => Some(Ok(frame)),
+                        None => receiver.recv().await,
+                    };
+                    if let Some(item) = item {
+                        match coalesce_ready_frames(&mut receiver, item) {
+                            Ok((frame, pending)) => Some((
+                                Ok(frame),
+                                SseBodyState::Ordinary {
+                                    receiver,
+                                    terminal,
+                                    pending,
+                                },
+                            )),
+                            Err(error) => Some((
+                                Err(error),
+                                SseBodyState::Ordinary {
+                                    receiver,
+                                    terminal,
+                                    pending: None,
+                                },
+                            )),
+                        }
                     } else {
                         let mut frames = terminal.await.unwrap_or_default().into_queue();
                         frames
@@ -375,8 +432,8 @@ mod tests {
     use http_body_util::BodyExt as _;
 
     use super::{
-        StreamFinishOutcome, StreamSendFailure, TerminalFrames, encode_sse_frame,
-        sse_stream_with_capacity,
+        MAX_COALESCED_BYTES, StreamFinishOutcome, StreamSendFailure, TerminalFrames,
+        encode_sse_frame, sse_stream_with_capacity,
     };
 
     #[test]
@@ -472,6 +529,54 @@ mod tests {
                 .as_ref(),
             b"data: one\n\ndata: two\n\ndata: error\n\ndata: [DONE]\n\n"
         );
+    }
+
+    #[tokio::test]
+    async fn ready_ordinary_frames_share_one_body_chunk() {
+        let (writer, response) = sse_stream_with_capacity(2);
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(1);
+        writer
+            .send(Bytes::from_static(b"data: one\n\n"), deadline)
+            .await
+            .unwrap();
+        writer
+            .send(Bytes::from_static(b"data: two\n\n"), deadline)
+            .await
+            .unwrap();
+        assert_eq!(
+            writer.finish(TerminalFrames::empty()),
+            StreamFinishOutcome::Queued
+        );
+
+        let mut body = response.into_body();
+        let frame = body.frame().await.unwrap().unwrap().into_data().unwrap();
+        assert_eq!(frame, b"data: one\n\ndata: two\n\n"[..]);
+        assert!(body.frame().await.is_none());
+    }
+
+    #[tokio::test]
+    async fn ready_ordinary_frames_respect_the_coalesced_byte_limit() {
+        let (writer, response) = sse_stream_with_capacity(2);
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(1);
+        let first = Bytes::from(vec![b'a'; MAX_COALESCED_BYTES / 2]);
+        let second = Bytes::from(vec![b'b'; MAX_COALESCED_BYTES / 2 + 1]);
+        writer.send(first.clone(), deadline).await.unwrap();
+        writer.send(second.clone(), deadline).await.unwrap();
+        assert_eq!(
+            writer.finish(TerminalFrames::empty()),
+            StreamFinishOutcome::Queued
+        );
+
+        let mut body = response.into_body();
+        assert_eq!(
+            body.frame().await.unwrap().unwrap().into_data().unwrap(),
+            first
+        );
+        assert_eq!(
+            body.frame().await.unwrap().unwrap().into_data().unwrap(),
+            second
+        );
+        assert!(body.frame().await.is_none());
     }
 
     #[tokio::test]

@@ -61,8 +61,13 @@ zeroize.workspace = true
 
 [dev-dependencies]
 aws-smithy-eventstream.workspace = true
+criterion = "0.7"
 proptest.workspace = true
 tokio = { workspace = true, features = ["test-util"] }
+
+[[bench]]
+name = "protocols"
+harness = false
 
 [lints]
 workspace = true

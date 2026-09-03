@@ -391,24 +391,14 @@ impl Decoder {
 }
 
 pub fn encode_frame(frame: &Frame) -> Result<Vec<u8>, EncodeError> {
-    let mut encoded = Vec::new();
     if let Some(event) = &frame.event {
         validate_single_line("event", event)?;
-        encoded.extend_from_slice(b"event: ");
-        encoded.extend_from_slice(event.as_bytes());
-        encoded.push(b'\n');
     }
     if let Some(id) = &frame.id {
         validate_single_line("id", id)?;
         if id.contains('\0') {
             return Err(EncodeError::NullId);
         }
-        encoded.extend_from_slice(b"id: ");
-        encoded.extend_from_slice(id.as_bytes());
-        encoded.push(b'\n');
-    }
-    if let Some(retry_ms) = frame.retry_ms {
-        encoded.extend_from_slice(format!("retry: {retry_ms}\n").as_bytes());
     }
     // Event streams normalize CR, LF, and CRLF line endings. Emitting a raw
     // carriage return inside a data field would let a conforming client parse
@@ -418,6 +408,31 @@ pub fn encode_frame(frame: &Frame) -> Result<Vec<u8>, EncodeError> {
     } else {
         Cow::Borrowed(&frame.data)
     };
+    // Sized for the single-line data field every streaming frame carries:
+    // `data: ` plus the payload, the field newline, and the frame's blank line.
+    // A rare multi-line payload costs one growth rather than a second pass over
+    // the data to count its newlines.
+    let mut capacity = normalized_data.len() + "data: \n\n".len();
+    capacity += frame
+        .event
+        .as_ref()
+        .map_or(0, |event| event.len() + "event: \n".len());
+    capacity += frame.id.as_ref().map_or(0, |id| id.len() + "id: \n".len());
+    capacity += frame.retry_ms.map_or(0, |_| "retry: \n".len() + 20);
+    let mut encoded = Vec::with_capacity(capacity);
+    if let Some(event) = &frame.event {
+        encoded.extend_from_slice(b"event: ");
+        encoded.extend_from_slice(event.as_bytes());
+        encoded.push(b'\n');
+    }
+    if let Some(id) = &frame.id {
+        encoded.extend_from_slice(b"id: ");
+        encoded.extend_from_slice(id.as_bytes());
+        encoded.push(b'\n');
+    }
+    if let Some(retry_ms) = frame.retry_ms {
+        encoded.extend_from_slice(format!("retry: {retry_ms}\n").as_bytes());
+    }
     for line in normalized_data.split('\n') {
         encoded.extend_from_slice(b"data: ");
         encoded.extend_from_slice(line.as_bytes());

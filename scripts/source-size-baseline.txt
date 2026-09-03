@@ -14,7 +14,6 @@ fn:apps/olp/src/bootstrap/connectors.rs:register_mounted_connectors
 fn:apps/olp/src/gateway/gemini.rs:action
 fn:apps/olp/src/gateway/multipart.rs:parse_multipart_fields
 fn:apps/olp/src/gateway/openai_chat_response.rs:aggregate_chat_completion_response
-fn:apps/olp/src/gateway/openai_chat_response.rs:encode
 fn:apps/olp/src/management/configuration.rs:router
 fn:apps/olp/src/management/configuration/providers/create.rs:create_provider
 fn:apps/olp/src/management/oidc/authorization.rs:begin_authorization
