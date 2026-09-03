@@ -115,32 +115,7 @@ impl Decoder {
                 self.ensure_response_started(response, events);
             }
             "response.output_item.added" => {
-                self.ensure_response_started(value, events);
-                let output_index = stream_index(value, "output_index")?;
-                let item = value
-                    .get("item")
-                    .ok_or_else(|| ResponsesCodecError::InvalidResponse("stream item".into()))?;
-                self.ensure_output_started(output_index, MessageRole::Assistant, events);
-                if item.get("type").and_then(Value::as_str) == Some("function_call") {
-                    self.emit(
-                        events,
-                        Kind::ToolCallDelta {
-                            output_index,
-                            tool_index: 0,
-                            id: item
-                                .get("call_id")
-                                .or_else(|| item.get("id"))
-                                .and_then(Value::as_str)
-                                .map(str::to_owned),
-                            name: item.get("name").and_then(Value::as_str).map(str::to_owned),
-                            arguments_delta: item
-                                .get("arguments")
-                                .and_then(Value::as_str)
-                                .unwrap_or_default()
-                                .to_owned(),
-                        },
-                    );
-                }
+                self.decode_item_added(value, events)?;
             }
             "response.output_text.delta" => {
                 let output_index = stream_index(value, "output_index")?;
@@ -172,11 +147,6 @@ impl Decoder {
                     Kind::ToolCallDelta {
                         output_index,
                         tool_index: 0,
-                        // `item_id` is the output item's id (`fc_…`), not the
-                        // tool call id (`call_…`) the client has to send back.
-                        // Aggregation is last-write-wins, so re-sending it here
-                        // would overwrite the real id captured by
-                        // `response.output_item.added`.
                         id: None,
                         name: None,
                         arguments_delta: stream_string(value, "delta")?,
@@ -184,98 +154,14 @@ impl Decoder {
                 );
             }
             "response.output_item.done" => {
-                let output_index = stream_index(value, "output_index")?;
-                if self.finished_outputs.insert(output_index) {
-                    let reason = if value
-                        .get("item")
-                        .and_then(|item| item.get("type"))
-                        .and_then(Value::as_str)
-                        == Some("function_call")
-                    {
-                        FinishReason::ToolCalls
-                    } else {
-                        FinishReason::Stop
-                    };
-                    self.emit(
-                        events,
-                        Kind::Finish {
-                            output_index,
-                            reason,
-                        },
-                    );
-                }
+                self.decode_output_item_done(value, events)?;
             }
             terminal_type @ ("response.completed" | "response.incomplete") => {
-                let response = value.get("response").unwrap_or(value);
-                self.ensure_response_started(response, events);
-                let finish_reason = if terminal_type == "response.incomplete" {
-                    match response
-                        .pointer("/incomplete_details/reason")
-                        .and_then(|value| value.as_str())
-                    {
-                        Some("content_filter") => FinishReason::ContentFilter,
-                        _ => FinishReason::Length,
-                    }
-                } else {
-                    FinishReason::Stop
-                };
-                self.finish_open_outputs(events, finish_reason);
-                let raw_output = raw_response_output_extensions(response)?;
-                if !raw_output.is_empty() {
-                    self.emit(
-                        events,
-                        Kind::SourceExtension {
-                            extensions: SourceExtensions::new(Surface::OpenAi, raw_output),
-                        },
-                    );
-                }
-                if let Some(usage) = response.get("usage") {
-                    let usage: Usage = serde_json::from_value(usage.clone())?;
-                    self.emit(
-                        events,
-                        Kind::Usage {
-                            usage: canonical_response_usage(&usage),
-                        },
-                    );
-                }
-                self.emit(events, Kind::Done);
-                self.done = true;
+                self.decode_terminal(terminal_type, value, events)?;
             }
             "response.failed" | "error" => {
-                let error = value
-                    .get("response")
-                    .and_then(|response| response.get("error"))
-                    .or_else(|| value.get("error"))
-                    .unwrap_or(value);
-                let provider_code = error.get("code").and_then(Value::as_str).map(str::to_owned);
-                let retryable = crate::protocols::openai::error_signals_rate_limit(
-                    provider_code.as_deref(),
-                    error.get("type").and_then(Value::as_str),
-                );
-                self.emit(
-                    events,
-                    Kind::Error {
-                        error: Error {
-                            class: if retryable {
-                                ErrorClass::RateLimit
-                            } else {
-                                ErrorClass::Upstream
-                            },
-                            message: error
-                                .get("message")
-                                .and_then(Value::as_str)
-                                .unwrap_or("OpenAI Responses stream failed")
-                                .to_owned(),
-                            provider_code,
-                            retryable,
-                        },
-                    },
-                );
-                self.finish_open_outputs(events, FinishReason::Stop);
-                self.emit(events, Kind::Done);
-                self.done = true;
+                self.decode_failed(value, events);
             }
-            // Lifecycle events that contain no new semantic payload.
             "response.content_part.added"
             | "response.content_part.done"
             | "response.output_text.done"
@@ -296,6 +182,146 @@ impl Decoder {
             }
         }
         Ok(())
+    }
+
+    fn decode_item_added(
+        &mut self,
+        value: &Value,
+        events: &mut Vec<Event>,
+    ) -> Result<(), ResponsesCodecError> {
+        self.ensure_response_started(value, events);
+        let output_index = stream_index(value, "output_index")?;
+        let item = value
+            .get("item")
+            .ok_or_else(|| ResponsesCodecError::InvalidResponse("stream item".into()))?;
+        self.ensure_output_started(output_index, MessageRole::Assistant, events);
+        if item.get("type").and_then(Value::as_str) == Some("function_call") {
+            self.emit(
+                events,
+                Kind::ToolCallDelta {
+                    output_index,
+                    tool_index: 0,
+                    id: item
+                        .get("call_id")
+                        .or_else(|| item.get("id"))
+                        .and_then(Value::as_str)
+                        .map(str::to_owned),
+                    name: item.get("name").and_then(Value::as_str).map(str::to_owned),
+                    arguments_delta: item
+                        .get("arguments")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default()
+                        .to_owned(),
+                },
+            );
+        }
+        Ok(())
+    }
+
+    fn decode_output_item_done(
+        &mut self,
+        value: &Value,
+        events: &mut Vec<Event>,
+    ) -> Result<(), ResponsesCodecError> {
+        let output_index = stream_index(value, "output_index")?;
+        if self.finished_outputs.insert(output_index) {
+            let reason = if value
+                .get("item")
+                .and_then(|item| item.get("type"))
+                .and_then(Value::as_str)
+                == Some("function_call")
+            {
+                FinishReason::ToolCalls
+            } else {
+                FinishReason::Stop
+            };
+            self.emit(
+                events,
+                Kind::Finish {
+                    output_index,
+                    reason,
+                },
+            );
+        }
+        Ok(())
+    }
+
+    fn decode_terminal(
+        &mut self,
+        terminal_type: &str,
+        value: &Value,
+        events: &mut Vec<Event>,
+    ) -> Result<(), ResponsesCodecError> {
+        let response = value.get("response").unwrap_or(value);
+        self.ensure_response_started(response, events);
+        let finish_reason = if terminal_type == "response.incomplete" {
+            match response
+                .pointer("/incomplete_details/reason")
+                .and_then(|value| value.as_str())
+            {
+                Some("content_filter") => FinishReason::ContentFilter,
+                _ => FinishReason::Length,
+            }
+        } else {
+            FinishReason::Stop
+        };
+        self.finish_open_outputs(events, finish_reason);
+        let raw_output = raw_response_output_extensions(response)?;
+        if !raw_output.is_empty() {
+            self.emit(
+                events,
+                Kind::SourceExtension {
+                    extensions: SourceExtensions::new(Surface::OpenAi, raw_output),
+                },
+            );
+        }
+        if let Some(usage) = response.get("usage") {
+            let usage: Usage = serde_json::from_value(usage.clone())?;
+            self.emit(
+                events,
+                Kind::Usage {
+                    usage: canonical_response_usage(&usage),
+                },
+            );
+        }
+        self.emit(events, Kind::Done);
+        self.done = true;
+        Ok(())
+    }
+
+    fn decode_failed(&mut self, value: &Value, events: &mut Vec<Event>) {
+        let error = value
+            .get("response")
+            .and_then(|response| response.get("error"))
+            .or_else(|| value.get("error"))
+            .unwrap_or(value);
+        let provider_code = error.get("code").and_then(Value::as_str).map(str::to_owned);
+        let retryable = crate::protocols::openai::error_signals_rate_limit(
+            provider_code.as_deref(),
+            error.get("type").and_then(Value::as_str),
+        );
+        self.emit(
+            events,
+            Kind::Error {
+                error: Error {
+                    class: if retryable {
+                        ErrorClass::RateLimit
+                    } else {
+                        ErrorClass::Upstream
+                    },
+                    message: error
+                        .get("message")
+                        .and_then(Value::as_str)
+                        .unwrap_or("OpenAI Responses stream failed")
+                        .to_owned(),
+                    provider_code,
+                    retryable,
+                },
+            },
+        );
+        self.finish_open_outputs(events, FinishReason::Stop);
+        self.emit(events, Kind::Done);
+        self.done = true;
     }
 
     fn ensure_response_started(&mut self, value: &Value, events: &mut Vec<Event>) {

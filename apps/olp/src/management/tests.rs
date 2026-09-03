@@ -6,8 +6,11 @@ use axum::{
 };
 use chrono::Utc;
 use olp_db::{
-    authentication::SessionPrincipal, configuration::Error, idempotency::Outcome,
-    idempotency::Response, security::session_material::SessionMaterial,
+    authentication::SessionPrincipal,
+    configuration::Error,
+    idempotency::Outcome,
+    idempotency::Response,
+    security::session_material::{RecentAuthMaterial, SessionMaterial},
 };
 use olp_engine::domain::{
     auth::{Permission, Role},
@@ -36,7 +39,7 @@ use super::{
     configuration::{
         api_keys::create::CreateApiKeyResponse, providers::create::CreateProviderRequest,
     },
-    cookies::append_session_cookies,
+    cookies::{append_recent_auth_cookie, append_session_cookies},
     error_mapping::map_configuration,
     idempotency::{idempotency_http_response, require_idempotency_key},
     openapi::document,
@@ -224,8 +227,36 @@ fn session_cookie_lifetime_uses_the_configured_ttl() {
         .iter()
         .map(|value| value.to_str().unwrap())
         .collect::<Vec<_>>();
+    let expected_session = format!(
+        "__Host-olp_session={}; Path=/; Max-Age=1234; Secure; HttpOnly; SameSite=Lax",
+        material.token()
+    );
+    let expected_csrf = format!(
+        "__Host-olp_csrf={}; Path=/; Max-Age=1234; Secure; SameSite=Lax",
+        material.csrf_token()
+    );
     assert_eq!(cookies.len(), 2);
-    assert!(cookies.iter().all(|cookie| cookie.contains("Max-Age=1234")));
+    assert_eq!(cookies, [expected_session.as_str(), expected_csrf.as_str()]);
+}
+
+#[test]
+fn recent_auth_cookie_uses_the_hardened_flags() {
+    let material = RecentAuthMaterial::generate();
+    let mut response = StatusCode::NO_CONTENT.into_response();
+    append_recent_auth_cookie(&mut response, &material, chrono::Duration::seconds(300)).unwrap();
+    let expected = format!(
+        "__Host-olp_recent_auth={}; Path=/; Max-Age=300; Secure; HttpOnly; SameSite=Lax",
+        material.token()
+    );
+    assert_eq!(
+        response
+            .headers()
+            .get(header::SET_COOKIE)
+            .unwrap()
+            .to_str()
+            .unwrap(),
+        expected
+    );
 }
 
 #[tokio::test]
@@ -254,7 +285,14 @@ async fn logout_without_a_server_side_session_still_expires_every_browser_creden
         .map(|value| value.to_str().unwrap())
         .collect::<Vec<_>>();
     assert_eq!(cookies.len(), 3);
+    assert!(cookies.iter().all(|cookie| cookie.contains("; Path=/;")));
     assert!(cookies.iter().all(|cookie| cookie.contains("Max-Age=0")));
+    assert!(cookies.iter().all(|cookie| cookie.contains("; Secure;")));
+    assert!(
+        cookies
+            .iter()
+            .all(|cookie| cookie.ends_with("SameSite=Lax"))
+    );
     assert!(
         cookies
             .iter()

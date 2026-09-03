@@ -7,6 +7,17 @@ semantic versioning and match `Cargo.toml`, `console/package.json`,
 
 ## [Unreleased]
 
+## [2.3.0] - 2026-09-03
+
+Adds optional distributed tracing, hard API-key cost budgets, measured
+performance evidence, chart-managed NetworkPolicies, and a documented first
+request across every supported protocol surface.
+
+Upgrading from 2.2.1 runs migration 0049 in the Helm migration Job or Compose
+`migrate` service before the application starts. Migration 0049 adds nullable
+daily and monthly cost-budget columns and seeds the current-month unpriced
+attempt lower bound; the N-1 rehearsal covers schema 0048 → 0049.
+
 ### Added
 
 - **SPEND-01–SPEND-05:** API keys can carry exact decimal daily and monthly
@@ -41,6 +52,31 @@ semantic versioning and match `Cargo.toml`, `console/package.json`,
   `olp.pricing_provenance`. Prompts, outputs, tool payloads, headers,
   credentials, and raw provider errors are never exported. Helm values and a
   digest-pinned Jaeger development overlay provide deployment paths.
+- **PERF-01–PERF-04:** `make bench` measures non-streaming, streaming, model
+  discovery, and embedding scenarios against a fixed loopback upstream,
+  records gateway and added-latency percentiles in JSON, and publishes a
+  non-blocking full-tier regression signal. Criterion micro-benchmarks cover
+  protocol decoding, translation, and encoding hot paths; measured saturation
+  and latency baselines replace provisional capacity guidance.
+- **DOC-04:** The Helm chart can render component-scoped NetworkPolicies for
+  edge ingress, Prometheus scraping, PostgreSQL, Valkey, and provider HTTPS
+  egress. Egress remains allow-all by default so upgrades do not silently lose
+  opaque database, Valkey, or provider destinations.
+- **DOC-01–DOC-03, TEST-03, GOV-05:** The README now carries enforced first
+  request and official-SDK examples; concepts and generated compatibility
+  documentation explain routing, storage, limits, and every supported
+  provider operation. Repository presentation and contributor entry points
+  match the released product.
+
+### Changed
+
+- **HYG-01:** Nine oversized test roots are split by behavior, and the fifteen
+  longest production functions are decomposed without changing their public
+  contracts. The source-size grandfather list shrinks from 71 to 47 entries.
+- **HYG-02:** The release security pass verifies public response hardening with
+  tracing both disabled and enabled, locks cookie and authentication-throttle
+  behavior under test, documents the private OTLP collector exception, and
+  makes OIDC with local login disabled the production deployment policy.
 
 ### Fixed
 

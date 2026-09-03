@@ -18,6 +18,103 @@ use super::{
     resources::helpers::{DraftTargetRows, insert_draft_operations, insert_draft_targets},
 };
 
+fn validated_route_draft_input(route: &NewRouteDraft) -> Result<(RouteSlug, i32), Error> {
+    let slug = RouteSlug::parse(route.slug.clone())
+        .map_err(|error| Error::InvalidRoute(error.to_string()))?;
+    if route.operations.is_empty() {
+        return Err(Error::InvalidRoute(
+            "at least one operation is required".to_owned(),
+        ));
+    }
+    if route.targets.is_empty() {
+        return Err(Error::InvalidRoute(
+            "at least one target is required".to_owned(),
+        ));
+    }
+    if route.max_attempts == 0 || usize::from(route.max_attempts) > route.targets.len() {
+        return Err(Error::InvalidRoute(
+            "max_attempts must be between one and the target count".to_owned(),
+        ));
+    }
+    let overall_timeout_ms = i32::try_from(route.overall_timeout_ms)
+        .map_err(|_| Error::InvalidRoute("overall timeout is too large".to_owned()))?;
+    if overall_timeout_ms <= 0 {
+        return Err(Error::InvalidRoute(
+            "overall timeout must be positive".to_owned(),
+        ));
+    }
+    Ok((slug, overall_timeout_ms))
+}
+
+async fn resolve_route_draft_targets(
+    transaction: &mut Transaction<'_, Postgres>,
+    route: &NewRouteDraft,
+) -> Result<DraftTargetRows, Error> {
+    let provider_ids = route
+        .targets
+        .iter()
+        .map(|target| target.provider_id)
+        .collect::<Vec<_>>();
+    let upstream_models = route
+        .targets
+        .iter()
+        .map(|target| target.upstream_model.trim().to_owned())
+        .collect::<Vec<_>>();
+    let mut resolved: Vec<Option<Uuid>> = vec![None; route.targets.len()];
+    for row in sqlx::query!(
+        "SELECT t.ordinality AS \"ordinality!\", \
+                prm.source_provider_model_id AS \"provider_model_id!\" \
+         FROM UNNEST($1::uuid[], $2::text[]) WITH ORDINALITY \
+           AS t(provider_id, upstream_model, ordinality) \
+         JOIN providers p ON p.id = t.provider_id \
+         JOIN provider_revision_models prm ON prm.provider_revision_id = p.active_revision_id \
+           AND prm.upstream_model = t.upstream_model AND prm.enabled \
+         WHERE p.state <> 'disabled'::provider_state",
+        &provider_ids,
+        &upstream_models
+    )
+    .fetch_all(&mut **transaction)
+    .await?
+    {
+        if let Some(slot) = usize::try_from(row.ordinality)
+            .ok()
+            .and_then(|ordinality| ordinality.checked_sub(1))
+            .and_then(|index| resolved.get_mut(index))
+        {
+            *slot = Some(row.provider_model_id);
+        }
+    }
+    let mut rows = DraftTargetRows::default();
+    for (position, (target, provider_model_id)) in route.targets.iter().zip(resolved).enumerate() {
+        if target.weight == 0
+            || target.timeout_ms == 0
+            || target.timeout_ms > route.overall_timeout_ms
+        {
+            return Err(Error::InvalidRoute(
+                "target weight/timeout is invalid".to_owned(),
+            ));
+        }
+        let provider_model_id = provider_model_id.ok_or_else(|| {
+            Error::InvalidRoute(format!(
+                "target provider/model {}/{} is not active",
+                target.provider_id, target.upstream_model
+            ))
+        })?;
+        rows.push(
+            Uuid::now_v7(),
+            provider_model_id,
+            i32::from(target.priority),
+            i32::try_from(target.weight)
+                .map_err(|_| Error::InvalidRoute("target weight is too large".to_owned()))?,
+            i32::try_from(target.timeout_ms)
+                .map_err(|_| Error::InvalidRoute("target timeout is too large".to_owned()))?,
+            i32::try_from(position)
+                .map_err(|_| Error::InvalidRoute("too many targets".to_owned()))?,
+        );
+    }
+    Ok(rows)
+}
+
 impl Store {
     pub async fn create_route_draft<F>(
         &self,
@@ -53,30 +150,7 @@ impl Store {
                 return Err(Error::IdempotencyInProgress);
             }
         }
-        let slug =
-            RouteSlug::parse(route.slug).map_err(|error| Error::InvalidRoute(error.to_string()))?;
-        if route.operations.is_empty() {
-            return Err(Error::InvalidRoute(
-                "at least one operation is required".to_owned(),
-            ));
-        }
-        if route.targets.is_empty() {
-            return Err(Error::InvalidRoute(
-                "at least one target is required".to_owned(),
-            ));
-        }
-        if route.max_attempts == 0 || usize::from(route.max_attempts) > route.targets.len() {
-            return Err(Error::InvalidRoute(
-                "max_attempts must be between one and the target count".to_owned(),
-            ));
-        }
-        let overall_timeout_ms = i32::try_from(route.overall_timeout_ms)
-            .map_err(|_| Error::InvalidRoute("overall timeout is too large".to_owned()))?;
-        if overall_timeout_ms <= 0 {
-            return Err(Error::InvalidRoute(
-                "overall timeout must be positive".to_owned(),
-            ));
-        }
+        let (slug, overall_timeout_ms) = validated_route_draft_input(&route)?;
         let id = Uuid::now_v7();
         let routing_id = Uuid::now_v7();
         let etag = Uuid::now_v7();
@@ -91,73 +165,7 @@ impl Store {
         .execute(&mut *transaction)
         .await?;
         insert_draft_operations(&mut transaction, id, &route.operations).await?;
-        // One lookup resolves every target's active model; the checks below
-        // still run in position order so the first invalid target is the one
-        // reported, exactly as the per-target loop did.
-        let provider_ids = route
-            .targets
-            .iter()
-            .map(|target| target.provider_id)
-            .collect::<Vec<_>>();
-        let upstream_models = route
-            .targets
-            .iter()
-            .map(|target| target.upstream_model.trim().to_owned())
-            .collect::<Vec<_>>();
-        let mut resolved: Vec<Option<Uuid>> = vec![None; route.targets.len()];
-        for row in sqlx::query!(
-            "SELECT t.ordinality AS \"ordinality!\", \
-                    prm.source_provider_model_id AS \"provider_model_id!\" \
-             FROM UNNEST($1::uuid[], $2::text[]) WITH ORDINALITY \
-               AS t(provider_id, upstream_model, ordinality) \
-             JOIN providers p ON p.id = t.provider_id \
-             JOIN provider_revision_models prm ON prm.provider_revision_id = p.active_revision_id \
-               AND prm.upstream_model = t.upstream_model AND prm.enabled \
-             WHERE p.state <> 'disabled'::provider_state",
-            &provider_ids,
-            &upstream_models
-        )
-        .fetch_all(&mut *transaction)
-        .await?
-        {
-            if let Some(slot) = usize::try_from(row.ordinality)
-                .ok()
-                .and_then(|ordinality| ordinality.checked_sub(1))
-                .and_then(|index| resolved.get_mut(index))
-            {
-                *slot = Some(row.provider_model_id);
-            }
-        }
-        let mut rows = DraftTargetRows::default();
-        for (position, (target, provider_model_id)) in
-            route.targets.iter().zip(resolved).enumerate()
-        {
-            if target.weight == 0
-                || target.timeout_ms == 0
-                || target.timeout_ms > route.overall_timeout_ms
-            {
-                return Err(Error::InvalidRoute(
-                    "target weight/timeout is invalid".to_owned(),
-                ));
-            }
-            let provider_model_id = provider_model_id.ok_or_else(|| {
-                Error::InvalidRoute(format!(
-                    "target provider/model {}/{} is not active",
-                    target.provider_id, target.upstream_model
-                ))
-            })?;
-            rows.push(
-                Uuid::now_v7(),
-                provider_model_id,
-                i32::from(target.priority),
-                i32::try_from(target.weight)
-                    .map_err(|_| Error::InvalidRoute("target weight is too large".to_owned()))?,
-                i32::try_from(target.timeout_ms)
-                    .map_err(|_| Error::InvalidRoute("target timeout is too large".to_owned()))?,
-                i32::try_from(position)
-                    .map_err(|_| Error::InvalidRoute("too many targets".to_owned()))?,
-            );
-        }
+        let rows = resolve_route_draft_targets(&mut transaction, &route).await?;
         insert_draft_targets(&mut transaction, id, &rows).await?;
         record_success_at(
             &mut *transaction,

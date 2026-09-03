@@ -102,7 +102,7 @@ image:
   digest: sha256:4b5114341f9eed2b2079d9c8a822b1413e0d9d50c199e40e906659f886eee1a8
 config:
   publicOrigin: https://olp.example.com
-  localLoginEnabled: true
+  localLoginEnabled: false
   trustedProxyCidrs: 10.0.0.0/8
   bootstrapTokenSecretName: olp-bootstrap-token
   bootstrapTokenSecretKey: token
@@ -116,8 +116,12 @@ ingress:
 ```
 
 `config.publicOrigin` and `ingress.host` must identify the same trusted
-origin. Disable local login only after OIDC is verified. For Gateway API or a
-mesh, leave chart Ingress disabled and reproduce the same routing table.
+origin. Production uses OIDC and sets `config.localLoginEnabled: false` after
+the OIDC login path has been verified. Local login remains available for
+bootstrap and small installations; MFA for that surface is deferred until a
+deployment requests it, as recorded in
+[`roadmap/deferred.md`](roadmap/deferred.md). For Gateway API or a mesh, leave
+chart Ingress disabled and reproduce the same routing table.
 Disable buffering for SSE and do not lower request-size or idle-timeout
 bounds.
 
@@ -166,7 +170,12 @@ The chart mounts the selected key at
 `/run/secrets/otlp-headers/headers` and configures both gateway and control
 pods. Worker and migration pods do not receive tracing configuration. Keep the
 Secret value out of Helm values and use TLS for production collectors. The
-tracing exporter sends no OpenTelemetry metrics or logs.
+tracing exporter sends no OpenTelemetry metrics or logs. The collector is an
+operator-controlled endpoint and may be private or in-cluster; unlike provider
+endpoints, it is not subject to OLP's public-HTTPS provider egress policy. This
+explicit exception does not widen `config.providerEgressAllowCidrs` or
+`config.providerEgressAllowHttpHosts`, and provider endpoint checks are
+unchanged.
 
 ## Network policy
 
@@ -223,9 +232,11 @@ when every configured provider endpoint resolves inside a known range;
 public-host rule independently of the CNI.
 
 Tracing values do not widen NetworkPolicy egress. When restricted egress does
-not already admit the collector address and port—particularly an in-cluster
-OTLP/HTTP receiver on 4318—add a separate NetworkPolicy selecting gateway and
-control pods before enabling tracing.
+not already admit the collector address and port, particularly an in-cluster
+OTLP/HTTP receiver on 4318, add a separate NetworkPolicy selecting gateway and
+control pods before enabling tracing. Do not add the collector CIDR to the
+provider allowlist: collector and provider egress remain separate trust
+boundaries.
 
 ## Install and verify
 

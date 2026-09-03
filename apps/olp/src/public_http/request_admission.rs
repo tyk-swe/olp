@@ -16,7 +16,10 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use olp_engine::{
-    domain::canonical::identity::{OperationKind, Surface},
+    domain::{
+        auth::GatewayCapability,
+        canonical::identity::{OperationKind, Surface},
+    },
     inference::request_metadata::{Emitter, Event},
 };
 
@@ -253,154 +256,126 @@ impl LocalRequestMetadata {
     }
 }
 
-async fn enforce_request_limits_inner(
+struct InferenceAdmissionContext {
+    endpoint: Option<InferenceEndpoint>,
+    endpoint_capability: Option<GatewayCapability>,
+    principal: Option<Principal>,
+    local_metadata: Option<LocalRequestMetadata>,
+}
+
+async fn admit_json_request(
     state: &RequestBoundaryState,
     request: Request<axum::body::Body>,
     next: middleware::Next,
-    endpoint: Option<InferenceEndpoint>,
+    context: InferenceAdmissionContext,
+    content_encoding: ContentEncoding,
 ) -> Result<Response, RequestLimitRejection> {
-    let request_started_at = chrono::Utc::now();
-    let metadata_policy = endpoint.and_then(InferenceEndpoint::metadata);
-    validate_target_and_headers(&request)?;
-    enforce_public_auth_source(state, &request)?;
-    let mut request = request;
-    preauthorize_setup_if_needed(state, &mut request).await?;
-    let content_encoding = validate_body_framing_and_encoding(&request)?;
+    let InferenceAdmissionContext {
+        endpoint,
+        endpoint_capability,
+        principal,
+        local_metadata,
+    } = context;
     let limits = state.body_limits;
-    let body_admission = BodyAdmission::classify(&request, endpoint, limits);
-    if content_encoding == ContentEncoding::Gzip && !body_admission.is_json {
-        return Err(content_encoding_unsupported().into());
-    }
-    body_admission.enforce_declared_size(&request)?;
-    let BodyAdmission {
-        multipart_content_type,
-        is_json,
-        ..
-    } = body_admission;
-
-    let endpoint_capability = endpoint.and_then(InferenceEndpoint::capability);
-    let principal = endpoint
-        .map(|endpoint| {
-            authenticate_inference_headers(
-                state,
-                request.headers(),
-                endpoint.surface(),
-                endpoint_capability,
-            )
-        })
-        .transpose()?;
-    if let Some(principal) = principal.clone() {
-        request.extensions_mut().insert(principal);
-    }
-    let local_metadata = principal.as_ref().and_then(|principal| {
-        metadata_policy.map(|metadata| LocalRequestMetadata {
-            request_metadata: state.inference.request_metadata().cloned(),
-            request_started_at,
-            runtime_generation_id: principal.runtime().generation.id.as_uuid(),
-            api_key_id: principal.key().id.as_uuid(),
-            route_slug: metadata.fallback_route.to_owned(),
-            operation: metadata.operation,
-            surface: principal.surface(),
-            always_emit: metadata.always_emit,
-        })
-    });
-    let multipart_policy = endpoint.and_then(|endpoint| endpoint.multipart(limits));
-    if multipart_policy.is_some() && multipart_content_type.is_none() {
-        if let Some(metadata) = local_metadata {
-            metadata.emit(axum::http::StatusCode::BAD_REQUEST);
+    let (mut parts, body) = request.into_parts();
+    let bytes = match read_json_body(body, limits.json_body_bytes, REQUEST_BODY_TIMEOUT).await {
+        Ok(bytes) => bytes,
+        Err(JsonBodyReadError::Rejected) => {
+            if let Some(metadata) = local_metadata.clone() {
+                metadata.emit(axum::http::StatusCode::PAYLOAD_TOO_LARGE);
+            }
+            return Err(payload_too_large(limits.json_body_bytes).into());
         }
-        return Err(gateway::error::InferenceError::invalid_request(
-            "Content-Type must be multipart/form-data.",
-        )
-        .into());
-    }
-
-    if is_json {
-        let (mut parts, body) = request.into_parts();
-        let bytes = match read_json_body(body, limits.json_body_bytes, REQUEST_BODY_TIMEOUT).await {
-            Ok(bytes) => bytes,
-            Err(JsonBodyReadError::Rejected) => {
-                if let Some(metadata) = local_metadata.clone() {
-                    metadata.emit(axum::http::StatusCode::PAYLOAD_TOO_LARGE);
-                }
-                return Err(payload_too_large(limits.json_body_bytes).into());
+        Err(JsonBodyReadError::Timeout) => {
+            if let Some(metadata) = local_metadata.clone() {
+                metadata.emit(axum::http::StatusCode::REQUEST_TIMEOUT);
             }
-            Err(JsonBodyReadError::Timeout) => {
-                if let Some(metadata) = local_metadata.clone() {
-                    metadata.emit(axum::http::StatusCode::REQUEST_TIMEOUT);
-                }
-                return Err(request_body_timeout().into());
-            }
-        };
-        let bytes = match content_encoding {
-            ContentEncoding::Identity => bytes,
-            ContentEncoding::Gzip => {
-                parts.headers.remove(axum::http::header::CONTENT_ENCODING);
-                match decompress_gzip_bounded(&bytes, limits.json_body_bytes) {
-                    Ok(bytes) => bytes,
-                    Err(problem) => {
-                        if let Some(metadata) = local_metadata.clone() {
-                            metadata.emit(
-                                axum::http::StatusCode::from_u16(problem.status)
-                                    .unwrap_or(axum::http::StatusCode::BAD_REQUEST),
-                            );
-                        }
-                        return Err(problem.into());
-                    }
-                }
-            }
-        };
-        let requested_route =
-            endpoint.and_then(|endpoint| endpoint.route_from_json(parts.uri.path(), &bytes));
-        let local_metadata = local_metadata.map(|mut metadata| {
-            if let Some(route) = requested_route.clone() {
-                metadata.route_slug = route;
-            }
-            metadata
-        });
-        let requested_route = requested_route
-            .as_deref()
-            .and_then(|slug| olp_engine::domain::ids::RouteSlug::parse(slug).ok());
-        let requested_tokens = estimate_http_json_request_tokens(
-            endpoint
-                .map(InferenceEndpoint::token_estimate)
-                .unwrap_or(TokenEstimate::Default),
-            &bytes,
-        );
-        // Protocol-shaped misses remain authenticated, but capability-free
-        // requests must reach the router fallback without requiring a limiter.
-        let reservation = if let (Some(principal), Some(_)) = (&principal, endpoint_capability) {
-            match reserve_http_inference_limits(
-                state,
-                principal,
-                requested_route.as_ref(),
-                requested_tokens,
-            )
-            .await
-            {
-                Ok(reservation) => reservation,
-                Err(error) => {
+            return Err(request_body_timeout().into());
+        }
+    };
+    let bytes = match content_encoding {
+        ContentEncoding::Identity => bytes,
+        ContentEncoding::Gzip => {
+            parts.headers.remove(axum::http::header::CONTENT_ENCODING);
+            match decompress_gzip_bounded(&bytes, limits.json_body_bytes) {
+                Ok(bytes) => bytes,
+                Err(problem) => {
                     if let Some(metadata) = local_metadata.clone() {
-                        metadata.emit(error.status());
+                        metadata.emit(
+                            axum::http::StatusCode::from_u16(problem.status)
+                                .unwrap_or(axum::http::StatusCode::BAD_REQUEST),
+                        );
                     }
-                    return Err(error.into());
+                    return Err(problem.into());
                 }
             }
-        } else {
-            None
-        };
-        let finalization =
-            RequestFinalization::new(reservation, local_metadata, principal, requested_tokens);
-        if let Err(problem) = validate_json_depth(&bytes) {
-            finalization
-                .finish_rejection(axum::http::StatusCode::BAD_REQUEST)
-                .await;
-            return Err(problem.into());
         }
-        let request = Request::from_parts(parts, Body::from(bytes));
-        return Ok(finalization.dispatch(request, next).await);
+    };
+    let requested_route =
+        endpoint.and_then(|endpoint| endpoint.route_from_json(parts.uri.path(), &bytes));
+    let local_metadata = local_metadata.map(|mut metadata| {
+        if let Some(route) = requested_route.clone() {
+            metadata.route_slug = route;
+        }
+        metadata
+    });
+    let requested_route = requested_route
+        .as_deref()
+        .and_then(|slug| olp_engine::domain::ids::RouteSlug::parse(slug).ok());
+    let requested_tokens = estimate_http_json_request_tokens(
+        endpoint
+            .map(InferenceEndpoint::token_estimate)
+            .unwrap_or(TokenEstimate::Default),
+        &bytes,
+    );
+    // Protocol-shaped misses remain authenticated, but capability-free
+    // requests must reach the router fallback without requiring a limiter.
+    let reservation = if let (Some(principal), Some(_)) = (&principal, endpoint_capability) {
+        match reserve_http_inference_limits(
+            state,
+            principal,
+            requested_route.as_ref(),
+            requested_tokens,
+        )
+        .await
+        {
+            Ok(reservation) => reservation,
+            Err(error) => {
+                if let Some(metadata) = local_metadata.clone() {
+                    metadata.emit(error.status());
+                }
+                return Err(error.into());
+            }
+        }
+    } else {
+        None
+    };
+    let finalization =
+        RequestFinalization::new(reservation, local_metadata, principal, requested_tokens);
+    if let Err(problem) = validate_json_depth(&bytes) {
+        finalization
+            .finish_rejection(axum::http::StatusCode::BAD_REQUEST)
+            .await;
+        return Err(problem.into());
     }
+    let request = Request::from_parts(parts, Body::from(bytes));
+    Ok(finalization.dispatch(request, next).await)
+}
 
+async fn admit_other_request(
+    state: &RequestBoundaryState,
+    mut request: Request<axum::body::Body>,
+    next: middleware::Next,
+    context: InferenceAdmissionContext,
+    multipart_content_type: Option<String>,
+    multipart_policy: Option<(GatewayCapability, u64)>,
+) -> Result<Response, RequestLimitRejection> {
+    let InferenceAdmissionContext {
+        endpoint,
+        endpoint_capability,
+        principal,
+        local_metadata,
+    } = context;
     let requested_tokens = estimate_http_non_json_request_tokens(
         endpoint
             .map(InferenceEndpoint::token_estimate)
@@ -480,6 +455,88 @@ async fn enforce_request_limits_inner(
         request.extensions_mut().insert(admission);
     }
     Ok(finalization.dispatch(request, next).await)
+}
+
+async fn enforce_request_limits_inner(
+    state: &RequestBoundaryState,
+    request: Request<axum::body::Body>,
+    next: middleware::Next,
+    endpoint: Option<InferenceEndpoint>,
+) -> Result<Response, RequestLimitRejection> {
+    let request_started_at = chrono::Utc::now();
+    let metadata_policy = endpoint.and_then(InferenceEndpoint::metadata);
+    validate_target_and_headers(&request)?;
+    enforce_public_auth_source(state, &request)?;
+    let mut request = request;
+    preauthorize_setup_if_needed(state, &mut request).await?;
+    let content_encoding = validate_body_framing_and_encoding(&request)?;
+    let limits = state.body_limits;
+    let body_admission = BodyAdmission::classify(&request, endpoint, limits);
+    if content_encoding == ContentEncoding::Gzip && !body_admission.is_json {
+        return Err(content_encoding_unsupported().into());
+    }
+    body_admission.enforce_declared_size(&request)?;
+    let BodyAdmission {
+        multipart_content_type,
+        is_json,
+        ..
+    } = body_admission;
+
+    let endpoint_capability = endpoint.and_then(InferenceEndpoint::capability);
+    let principal = endpoint
+        .map(|endpoint| {
+            authenticate_inference_headers(
+                state,
+                request.headers(),
+                endpoint.surface(),
+                endpoint_capability,
+            )
+        })
+        .transpose()?;
+    if let Some(principal) = principal.clone() {
+        request.extensions_mut().insert(principal);
+    }
+    let local_metadata = principal.as_ref().and_then(|principal| {
+        metadata_policy.map(|metadata| LocalRequestMetadata {
+            request_metadata: state.inference.request_metadata().cloned(),
+            request_started_at,
+            runtime_generation_id: principal.runtime().generation.id.as_uuid(),
+            api_key_id: principal.key().id.as_uuid(),
+            route_slug: metadata.fallback_route.to_owned(),
+            operation: metadata.operation,
+            surface: principal.surface(),
+            always_emit: metadata.always_emit,
+        })
+    });
+    let multipart_policy = endpoint.and_then(|endpoint| endpoint.multipart(limits));
+    if multipart_policy.is_some() && multipart_content_type.is_none() {
+        if let Some(metadata) = local_metadata {
+            metadata.emit(axum::http::StatusCode::BAD_REQUEST);
+        }
+        return Err(gateway::error::InferenceError::invalid_request(
+            "Content-Type must be multipart/form-data.",
+        )
+        .into());
+    }
+    let context = InferenceAdmissionContext {
+        endpoint,
+        endpoint_capability,
+        principal,
+        local_metadata,
+    };
+
+    if is_json {
+        return admit_json_request(state, request, next, context, content_encoding).await;
+    }
+    admit_other_request(
+        state,
+        request,
+        next,
+        context,
+        multipart_content_type,
+        multipart_policy,
+    )
+    .await
 }
 
 fn enforce_public_auth_source(

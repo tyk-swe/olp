@@ -2,17 +2,21 @@ apiVersion: v2
 name: openllmproxy
 description: OpenLLMProxy gateway and control plane
 type: application
-version: "2.2.1"
-appVersion: "2.2.1"
+version: "2.3.0"
+appVersion: "2.3.0"
 kubeVersion: ">=1.27.0-0"
 annotations:
   artifacthub.io/license: AGPL-3.0-only
   artifacthub.io/changes: |
-    - kind: fixed
-      description: Idle request-metadata consumption after the redis-rs timeout change.
+    - kind: added
+      description: Optional OTLP/HTTP request and provider-attempt tracing.
+    - kind: added
+      description: Daily and monthly API-key cost budgets.
+    - kind: added
+      description: Configurable ingress and egress NetworkPolicies.
   artifacthub.io/images: |
     - name: openllmproxy
-      image: ghcr.io/tyk-swe/olp:2.2.1
+      image: ghcr.io/tyk-swe/olp:2.3.0
       platforms:
         - linux/amd64
         - linux/arm64

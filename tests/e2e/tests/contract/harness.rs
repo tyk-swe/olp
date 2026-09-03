@@ -1,19 +1,17 @@
 //! Process orchestration: per-run database, secret files, and the real `olp`
 //! binary (`migrate` then `all`) against real PostgreSQL and Valkey.
 
-use std::io::Read as _;
+#[path = "harness/support.rs"]
+mod support;
+#[path = "harness/valkey.rs"]
+mod valkey;
+
+#[allow(unused_imports)]
+pub(crate) use valkey::SharedValkey;
+
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
-
-use base64::Engine as _;
-use rand::RngCore as _;
-use redis::{
-    AsyncCommands as _,
-    streams::{StreamReadOptions, StreamReadReply},
-};
-use sqlx::Connection as _;
 
 pub(crate) struct Server {
     child: Child,
@@ -37,7 +35,7 @@ pub(crate) struct Server {
     database_name: String,
     run_dir: PathBuf,
     tracing_endpoint: Option<String>,
-    valkey_reservation: Option<ValkeyReservation>,
+    valkey_reservation: Option<valkey::ValkeyReservation>,
 }
 
 pub(crate) struct GatewayProcess {
@@ -61,296 +59,6 @@ pub(crate) struct WorkerProcess {
 pub(crate) fn admin_url() -> String {
     std::env::var("OLP_E2E_DATABASE_ADMIN_URL")
         .unwrap_or_else(|_| "postgres://olp_test:olp_test@localhost:5433/postgres".to_owned())
-}
-
-/// The Valkey logical database leased by this test run.
-///
-/// Installation resources are durably namespaced, so multiple independently
-/// migrated servers may safely share this exact URL. The lease protects the
-/// run from unrelated parallel tests and owns whole-database cleanup only
-/// after every sharing installation has stopped.
-///
-/// An explicit `OLP_E2E_VALKEY_URL` is honoured verbatim — CI gives the job a
-/// Valkey service of its own. Otherwise the harness atomically reserves one of
-/// logical databases 1–15 with a PostgreSQL session advisory lock and clears
-/// the reserved database before use. PostgreSQL releases the lock if the test
-/// process dies, and the next owner clears any state the abandoned run left.
-async fn valkey(admin_url: &str) -> Result<(String, Option<ValkeyReservation>), String> {
-    if let Ok(url) = std::env::var("OLP_E2E_VALKEY_URL") {
-        return Ok((std::env::var("OLP_E2E_VALKEY_APP_URL").unwrap_or(url), None));
-    }
-
-    let mut byte = [0_u8; 1];
-    rand::rng().fill_bytes(&mut byte);
-    let start = usize::from(byte[0]) % 15;
-    for offset in 0..15 {
-        let database = u16::try_from(1 + (start + offset) % 15).unwrap();
-        let mut lock = sqlx::postgres::PgConnection::connect(admin_url)
-            .await
-            .map_err(|error| format!("failed to connect for a Valkey reservation: {error}"))?;
-        let acquired: bool = sqlx::query_scalar("SELECT pg_try_advisory_lock($1, $2)")
-            .bind(0x4f4c_5002_i32)
-            .bind(i32::from(database))
-            .fetch_one(&mut lock)
-            .await
-            .map_err(|error| format!("failed to reserve a Valkey logical database: {error}"))?;
-        if !acquired {
-            lock.close().await.ok();
-            continue;
-        }
-        if let Err(error) = flush_valkey(database).await {
-            lock.close().await.ok();
-            return Err(error);
-        }
-        let reservation = ValkeyReservation { database, lock };
-        return Ok((reservation.url(), Some(reservation)));
-    }
-    Err("all 15 local Valkey logical databases are reserved by other E2E runs".to_owned())
-}
-
-struct ValkeyReservation {
-    database: u16,
-    lock: sqlx::postgres::PgConnection,
-}
-
-/// Owns one test Valkey lease independently of any OLP installation. Multiple
-/// independently migrated servers can therefore share the exact URL while the
-/// advisory lease remains held until every server has stopped.
-pub(crate) struct SharedValkey {
-    url: String,
-    reservation: Option<ValkeyReservation>,
-}
-
-impl SharedValkey {
-    pub(crate) async fn reserve() -> Result<Self, String> {
-        let (url, reservation) = valkey(&admin_url()).await?;
-        Ok(Self { url, reservation })
-    }
-
-    pub(crate) fn url(&self) -> &str {
-        &self.url
-    }
-
-    pub(crate) async fn release(mut self) {
-        if let Some(reservation) = self.reservation.take() {
-            reservation.release().await;
-        }
-    }
-}
-
-impl ValkeyReservation {
-    fn url(&self) -> String {
-        format!("redis://localhost:6379/{}", self.database)
-    }
-
-    async fn release(self) {
-        flush_valkey(self.database).await.ok();
-        self.lock.close().await.ok();
-    }
-}
-
-async fn flush_valkey(database: u16) -> Result<(), String> {
-    let client = redis::Client::open(format!("redis://localhost:6379/{database}"))
-        .map_err(|error| format!("invalid local Valkey URL: {error}"))?;
-    let mut connection = client
-        .get_multiplexed_async_connection()
-        .await
-        .map_err(|error| format!("failed to connect to local Valkey: {error}"))?;
-    let _: () = redis::cmd("FLUSHDB")
-        .query_async(&mut connection)
-        .await
-        .map_err(|error| format!("failed to clear local Valkey database {database}: {error}"))?;
-    Ok(())
-}
-
-async fn seed_legacy_request_metadata_stream(valkey_url: &str) -> Result<String, String> {
-    const LEGACY: &str = "olp:v2:request-metadata";
-    const GROUP: &str = "olp:persistence";
-
-    let client = redis::Client::open(valkey_url)
-        .map_err(|error| format!("invalid shared Valkey URL: {error}"))?;
-    let mut connection = client
-        .get_multiplexed_async_connection()
-        .await
-        .map_err(|error| format!("failed to connect shared Valkey: {error}"))?;
-    let _: i64 = redis::cmd("DEL")
-        .arg(LEGACY)
-        .query_async(&mut connection)
-        .await
-        .map_err(|error| format!("failed to clear legacy stream fixture: {error}"))?;
-    let event_id: String = redis::cmd("XADD")
-        .arg(LEGACY)
-        .arg("*")
-        .arg("event")
-        .arg("legacy-pending-event")
-        .query_async(&mut connection)
-        .await
-        .map_err(|error| format!("failed to seed legacy stream: {error}"))?;
-    let _: String = redis::cmd("XGROUP")
-        .arg("CREATE")
-        .arg(LEGACY)
-        .arg(GROUP)
-        .arg("0")
-        .query_async(&mut connection)
-        .await
-        .map_err(|error| format!("failed to seed legacy consumer group: {error}"))?;
-    let delivered: StreamReadReply = connection
-        .xread_options(
-            &[LEGACY],
-            &[">"],
-            &StreamReadOptions::default().group(GROUP, "legacy-owner"),
-        )
-        .await
-        .map_err(|error| format!("failed to establish legacy ownership: {error}"))?;
-    if !delivered
-        .keys
-        .iter()
-        .flat_map(|stream| &stream.ids)
-        .any(|entry| entry.id == event_id)
-    {
-        return Err("legacy event was not delivered into the pending-entry list".to_owned());
-    }
-    Ok(event_id)
-}
-
-fn binary() -> Result<PathBuf, String> {
-    let path = std::env::var("OLP_E2E_BIN")
-        .map_err(|_| "OLP_E2E_BIN is unset; run via scripts/run-e2e-tests.sh".to_owned())?;
-    let path = PathBuf::from(path);
-    if !path.is_file() {
-        return Err(format!("OLP_E2E_BIN does not exist: {}", path.display()));
-    }
-    Ok(path)
-}
-
-fn random_hex(bytes: usize) -> String {
-    let mut buffer = vec![0_u8; bytes];
-    rand::rng().fill_bytes(&mut buffer);
-    super::otlp::hex_id(&buffer)
-}
-
-fn random_base64_secret() -> String {
-    let mut buffer = [0_u8; 32];
-    rand::rng().fill_bytes(&mut buffer);
-    base64::engine::general_purpose::STANDARD.encode(buffer)
-}
-
-fn write_secret(path: &Path, contents: &str) -> Result<(), String> {
-    std::fs::write(path, format!("{contents}\n"))
-        .map_err(|error| format!("failed to write {}: {error}", path.display()))?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt as _;
-        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
-            .map_err(|error| format!("failed to chmod {}: {error}", path.display()))?;
-    }
-    Ok(())
-}
-
-fn process_environment(
-    run_dir: &Path,
-    database: &str,
-    valkey: &str,
-    public_origin: String,
-    observability_base: String,
-    bootstrap: bool,
-    tracing_endpoint: Option<&str>,
-) -> Vec<(&'static str, String)> {
-    let path = |name| run_dir.join(name).display().to_string();
-    let mut environment = vec![
-        ("OLP_DATABASE_URL", database.to_owned()),
-        ("OLP_VALKEY_URL", valkey.to_owned()),
-        ("OLP_LISTEN_ADDR", public_origin.replace("http://", "")),
-        (
-            "OLP_OBSERVABILITY_LISTEN_ADDR",
-            observability_base.replace("http://", ""),
-        ),
-        ("OLP_PUBLIC_ORIGIN", public_origin),
-        ("OLP_CONSOLE_DIR", path("console")),
-        ("OLP_MEDIA_SPOOL_DIR", path("spool")),
-        ("OLP_MASTER_KEY_FILE", path("master-key")),
-        ("OLP_AUTH_HMAC_KEY_FILE", path("auth-hmac-key")),
-        (
-            "OLP_PROVIDER_EGRESS_ALLOW_CIDRS",
-            "127.0.0.0/8,::1/128".to_owned(),
-        ),
-        (
-            "OLP_PROVIDER_EGRESS_ALLOW_HTTP_HOSTS",
-            "127.0.0.1,localhost".to_owned(),
-        ),
-        ("RUST_LOG", "olp=info".to_owned()),
-    ];
-    if bootstrap {
-        environment.push(("OLP_BOOTSTRAP_TOKEN_FILE", path("bootstrap-token")));
-    }
-    if let Some(endpoint) = tracing_endpoint {
-        environment.push(("OLP_OTLP_TRACES_ENDPOINT", endpoint.to_owned()));
-        environment.push(("OLP_TRACE_SAMPLE_RATIO", "0".to_owned()));
-    }
-    environment
-}
-
-fn run_migrate(
-    binary: &Path,
-    environment: &[(&'static str, String)],
-    database: &str,
-    through_version: Option<i64>,
-) -> Result<(), String> {
-    let mut command = Command::new(binary);
-    command
-        .arg("migrate")
-        .envs(environment.iter().map(|(key, value)| (*key, value.clone())))
-        .env("OLP_DATABASE_URL", database);
-    if let Some(target) = through_version {
-        command
-            .arg("--through-version")
-            .arg(target.to_string())
-            .env("OLP_ALLOW_PARTIAL_MIGRATIONS_FOR_TESTS", "test-only");
-    }
-    let migrate = command
-        .output()
-        .map_err(|error| format!("failed to run olp migrate: {error}"))?;
-    if !migrate.status.success() {
-        let stderr = String::from_utf8_lossy(&migrate.stderr);
-        return Err(format!("olp migrate failed ({}): {stderr}", migrate.status));
-    }
-    Ok(())
-}
-
-fn free_port() -> Result<u16, String> {
-    let listener = std::net::TcpListener::bind("127.0.0.1:0")
-        .map_err(|error| format!("failed to bind an ephemeral port: {error}"))?;
-    let port = listener
-        .local_addr()
-        .map_err(|error| format!("failed to read the ephemeral port: {error}"))?
-        .port();
-    drop(listener);
-    Ok(port)
-}
-
-async fn create_database(admin: &str, name: &str) -> Result<(), String> {
-    let mut connection = sqlx::postgres::PgConnection::connect(admin)
-        .await
-        .map_err(|error| format!("failed to connect to {admin}: {error}"))?;
-    // Names are harness-generated hex, never user input.
-    sqlx::query(sqlx::AssertSqlSafe(format!("CREATE DATABASE \"{name}\"")))
-        .execute(&mut connection)
-        .await
-        .map_err(|error| format!("failed to create database {name}: {error}"))?;
-    connection.close().await.ok();
-    Ok(())
-}
-
-async fn drop_database(admin: &str, name: &str) {
-    if let Ok(mut connection) = sqlx::postgres::PgConnection::connect(admin).await {
-        sqlx::query(sqlx::AssertSqlSafe(format!(
-            "DROP DATABASE IF EXISTS \"{name}\" WITH (FORCE)"
-        )))
-        .execute(&mut connection)
-        .await
-        .ok();
-        connection.close().await.ok();
-    }
 }
 
 fn database_url(admin: &str, name: &str) -> Result<String, String> {
@@ -397,7 +105,7 @@ struct LaunchGuard {
     admin_url: String,
     database_name: String,
     run_dir: PathBuf,
-    valkey_reservation: Option<ValkeyReservation>,
+    valkey_reservation: Option<valkey::ValkeyReservation>,
 }
 
 impl LaunchGuard {
@@ -434,27 +142,27 @@ impl LaunchGuard {
         let master_key_file = self.run_dir.join("master-key");
         let auth_hmac_key_file = self.run_dir.join("auth-hmac-key");
         let bootstrap_token_file = self.run_dir.join("bootstrap-token");
-        let setup_token = random_base64_secret();
-        write_secret(&master_key_file, &random_base64_secret())?;
-        write_secret(&auth_hmac_key_file, &random_base64_secret())?;
-        write_secret(&bootstrap_token_file, &setup_token)?;
+        let setup_token = support::random_base64_secret();
+        support::write_secret(&master_key_file, &support::random_base64_secret())?;
+        support::write_secret(&auth_hmac_key_file, &support::random_base64_secret())?;
+        support::write_secret(&bootstrap_token_file, &setup_token)?;
 
         let (valkey_url, reservation) = match shared_valkey_url {
             Some(url) => (url.to_owned(), None),
-            None => valkey(&self.admin_url).await?,
+            None => valkey::valkey(&self.admin_url).await?,
         };
         self.valkey_reservation = reservation;
         let mut legacy_request_metadata_event_id = None;
 
         for attempt in 1..=3 {
-            let public_port = free_port()?;
-            let mut observability_port = free_port()?;
+            let public_port = support::free_port()?;
+            let mut observability_port = support::free_port()?;
             while observability_port == public_port {
-                observability_port = free_port()?;
+                observability_port = support::free_port()?;
             }
             let public_origin = format!("http://127.0.0.1:{public_port}");
             let observability_base = format!("http://127.0.0.1:{observability_port}");
-            let environment = process_environment(
+            let environment = support::process_environment(
                 &self.run_dir,
                 app_database,
                 &valkey_url,
@@ -467,13 +175,13 @@ impl LaunchGuard {
             if attempt == 1 {
                 match migration_fixture {
                     MigrationFixture::Current => {
-                        run_migrate(binary, &environment, database, None)?;
+                        support::run_migrate(binary, &environment, database, None)?;
                     }
                     MigrationFixture::LegacyRequestMetadataUpgrade => {
-                        run_migrate(binary, &environment, database, Some(31))?;
+                        support::run_migrate(binary, &environment, database, Some(31))?;
                         legacy_request_metadata_event_id =
-                            Some(seed_legacy_request_metadata_stream(&valkey_url).await?);
-                        run_migrate(binary, &environment, database, None)?;
+                            Some(valkey::seed_legacy_request_metadata_stream(&valkey_url).await?);
+                        support::run_migrate(binary, &environment, database, None)?;
                     }
                 }
             }
@@ -487,14 +195,14 @@ impl LaunchGuard {
                 .spawn()
                 .map_err(|error| format!("failed to spawn olp all: {error}"))?;
             if let Some(pipe) = child.stderr.take() {
-                capture_stderr(pipe, Arc::clone(&self.stderr));
+                support::capture_stderr(pipe, Arc::clone(&self.stderr));
             }
             self.child = Some(child);
             let pid = self.child.as_ref().expect("child was just installed").id();
             std::fs::write(self.run_dir.join("olp.pid"), format!("{pid}\n"))
                 .map_err(|error| format!("failed to write olp pid file: {error}"))?;
 
-            let startup = await_live(
+            let startup = support::await_live(
                 self.child.as_mut().expect("child was just installed"),
                 &self.stderr,
                 &observability_base,
@@ -516,7 +224,7 @@ impl LaunchGuard {
                 }
                 Err(error) => {
                     if let Some(mut child) = self.child.take() {
-                        terminate_child(&mut child).await;
+                        support::terminate_child(&mut child).await;
                     }
                     std::fs::remove_file(self.run_dir.join("olp.pid")).ok();
                     let bind_race = error.contains("Address already in use")
@@ -535,12 +243,12 @@ impl LaunchGuard {
 
     async fn cleanup(&mut self) {
         if let Some(mut child) = self.child.take() {
-            terminate_child(&mut child).await;
+            support::terminate_child(&mut child).await;
         }
         if let Some(reservation) = self.valkey_reservation.take() {
             reservation.release().await;
         }
-        drop_database(&self.admin_url, &self.database_name).await;
+        support::drop_database(&self.admin_url, &self.database_name).await;
         std::fs::remove_dir_all(&self.run_dir).ok();
     }
 
@@ -622,7 +330,7 @@ impl Server {
         tracing_endpoint: Option<&str>,
         migration_fixture: MigrationFixture,
     ) -> Result<(Self, Option<String>), String> {
-        let binary = binary()?;
+        let binary = support::binary()?;
         let run_token = std::env::var("OLP_E2E_RUN_TOKEN").map_err(|_| {
             "OLP_E2E_RUN_TOKEN is unset; run via scripts/run-e2e-tests.sh".to_owned()
         })?;
@@ -635,15 +343,16 @@ impl Server {
         }
 
         let admin = admin_url();
-        let database_name = format!("olp_e2e_{run_token}_{}", random_hex(6));
+        let database_name = format!("olp_e2e_{run_token}_{}", support::random_hex(6));
         let database = database_url(&admin, &database_name)?;
         let app_database = match std::env::var("OLP_E2E_DATABASE_APP_ADMIN_URL") {
             Ok(app_admin) => database_url(&app_admin, &database_name)?,
             Err(_) => database.clone(),
         };
-        create_database(&admin, &database_name).await?;
+        support::create_database(&admin, &database_name).await?;
 
-        let run_dir = std::env::temp_dir().join(format!("olp-e2e-{run_token}-{}", random_hex(6)));
+        let run_dir =
+            std::env::temp_dir().join(format!("olp-e2e-{run_token}-{}", support::random_hex(6)));
         let mut guard = LaunchGuard::new(admin, database_name, run_dir);
         match guard
             .prepare(
@@ -679,28 +388,28 @@ impl Server {
     }
 
     pub(crate) fn stderr_tail(&self) -> String {
-        let mut output = stderr_tail(&self.stderr);
+        let mut output = support::stderr_tail(&self.stderr);
         for (index, stderr) in self.additional_stderr.iter().enumerate() {
             output.push_str(&format!(
                 "\n--- gateway {} ---\n{}",
                 index + 2,
-                stderr_tail(stderr)
+                support::stderr_tail(stderr)
             ));
         }
         output
     }
 
     pub(crate) async fn launch_gateway(&mut self) -> Result<GatewayProcess, String> {
-        let binary = binary()?;
+        let binary = support::binary()?;
         for attempt in 1..=3 {
-            let public_port = free_port()?;
-            let mut observability_port = free_port()?;
+            let public_port = support::free_port()?;
+            let mut observability_port = support::free_port()?;
             while observability_port == public_port {
-                observability_port = free_port()?;
+                observability_port = support::free_port()?;
             }
             let public_origin = format!("http://127.0.0.1:{public_port}");
             let observability_base = format!("http://127.0.0.1:{observability_port}");
-            let environment = process_environment(
+            let environment = support::process_environment(
                 &self.run_dir,
                 &self.app_database_url,
                 &self.valkey_url,
@@ -718,9 +427,10 @@ impl Server {
                 .spawn()
                 .map_err(|error| format!("failed to spawn olp gateway: {error}"))?;
             if let Some(pipe) = child.stderr.take() {
-                capture_stderr(pipe, Arc::clone(&stderr));
+                support::capture_stderr(pipe, Arc::clone(&stderr));
             }
-            match await_live(&mut child, &stderr, &observability_base, "olp gateway").await {
+            match support::await_live(&mut child, &stderr, &observability_base, "olp gateway").await
+            {
                 Ok(()) => {
                     let pid_file = self.run_dir.join(format!(
                         "gateway-{}.pid",
@@ -728,7 +438,7 @@ impl Server {
                     ));
                     let pid = child.id();
                     if let Err(error) = std::fs::write(&pid_file, format!("{pid}\n")) {
-                        terminate_child(&mut child).await;
+                        support::terminate_child(&mut child).await;
                         return Err(format!("failed to write gateway pid file: {error}"));
                     }
                     self.additional_children.push(child);
@@ -740,7 +450,7 @@ impl Server {
                     });
                 }
                 Err(error) => {
-                    terminate_child(&mut child).await;
+                    support::terminate_child(&mut child).await;
                     let bind_race = error.contains("Address already in use")
                         || error.contains("os error 48")
                         || error.contains("os error 98")
@@ -759,10 +469,10 @@ impl Server {
         label: &str,
         boundary: WorkerBoundary,
     ) -> Result<WorkerProcess, String> {
-        let binary = binary()?;
+        let binary = support::binary()?;
         let start_marker = self.run_dir.join(format!("{label}-start"));
         let ownership_marker = self.run_dir.join(format!("{label}-owned"));
-        let environment = process_environment(
+        let environment = support::process_environment(
             &self.run_dir,
             &self.app_database_url,
             &self.valkey_url,
@@ -794,17 +504,17 @@ impl Server {
         let pid_file = self.run_dir.join(format!("{label}.pid"));
         let pid = child.id();
         if let Err(error) = std::fs::write(&pid_file, format!("{pid}\n")) {
-            terminate_child(&mut child).await;
+            support::terminate_child(&mut child).await;
             return Err(format!("failed to write {label} pid file: {error}"));
         }
         if let Some(pipe) = child.stderr.take() {
-            capture_stderr(pipe, Arc::clone(&stderr));
+            support::capture_stderr(pipe, Arc::clone(&stderr));
         }
         let child_index = self.additional_children.len();
         self.additional_children.push(child);
         self.additional_stderr.push(stderr);
         self.additional_pid_files.push(pid_file);
-        await_path_or_exit(
+        support::await_path_or_exit(
             &mut self.additional_children[child_index],
             &start_marker,
             label,
@@ -844,7 +554,7 @@ impl Server {
     /// SIGTERM, bounded wait, then SIGKILL as a last resort.
     pub(crate) async fn shutdown(mut self) -> String {
         for (index, child) in self.additional_children.iter_mut().enumerate() {
-            terminate_child(child).await;
+            support::terminate_child(child).await;
             if let Some(pid_file) = self.additional_pid_files.get(index) {
                 std::fs::remove_file(pid_file).ok();
             }
@@ -860,120 +570,14 @@ impl Server {
                 self.run_dir.display()
             );
         } else {
-            drop_database(&self.admin_url, &self.database_name).await;
+            support::drop_database(&self.admin_url, &self.database_name).await;
             std::fs::remove_dir_all(&self.run_dir).ok();
         }
         self.stderr_tail()
     }
 
     async fn terminate(&mut self) {
-        terminate_child(&mut self.child).await;
-    }
-}
-
-async fn await_path_or_exit(child: &mut Child, path: &Path, process: &str) -> Result<(), String> {
-    let deadline = Instant::now() + Duration::from_secs(30);
-    loop {
-        if path.exists() {
-            return Ok(());
-        }
-        if let Some(status) = child
-            .try_wait()
-            .map_err(|error| format!("failed to inspect {process}: {error}"))?
-        {
-            return Err(format!(
-                "{process} exited before reaching its start barrier: {status}"
-            ));
-        }
-        if Instant::now() >= deadline {
-            return Err(format!(
-                "{process} did not reach its start barrier within 30s"
-            ));
-        }
-        tokio::time::sleep(Duration::from_millis(25)).await;
-    }
-}
-
-fn capture_stderr(pipe: impl std::io::Read + Send + 'static, sink: Arc<Mutex<String>>) {
-    std::thread::spawn(move || {
-        let mut reader = std::io::BufReader::new(pipe);
-        let mut buffer = [0_u8; 4096];
-        while let Ok(read) = reader.read(&mut buffer) {
-            if read == 0 {
-                break;
-            }
-            sink.lock()
-                .unwrap()
-                .push_str(&String::from_utf8_lossy(&buffer[..read]));
-        }
-    });
-}
-
-async fn await_live(
-    child: &mut Child,
-    stderr: &Arc<Mutex<String>>,
-    observability_base: &str,
-    process: &str,
-) -> Result<(), String> {
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(2))
-        .build()
-        .map_err(|error| format!("failed to build health-check client: {error}"))?;
-    let url = format!("{observability_base}/health/live");
-    let deadline = Instant::now() + Duration::from_secs(30);
-    loop {
-        if let Ok(Some(status)) = child.try_wait() {
-            // Give the stderr reader a moment to drain the pipe so a released
-            // port race can be recognized and retried.
-            tokio::time::sleep(Duration::from_millis(50)).await;
-            return Err(format!(
-                "{process} exited during startup ({status}); stderr:\n{}",
-                stderr_tail(stderr)
-            ));
-        }
-        if let Ok(response) = client.get(&url).send().await
-            && response.status().is_success()
-        {
-            return Ok(());
-        }
-        if Instant::now() > deadline {
-            return Err(format!(
-                "{process} did not become live within 30s; stderr:\n{}",
-                stderr_tail(stderr)
-            ));
-        }
-        tokio::time::sleep(Duration::from_millis(200)).await;
-    }
-}
-
-fn stderr_tail(stderr: &Arc<Mutex<String>>) -> String {
-    let stderr = stderr.lock().unwrap();
-    let mut tail_start = stderr.len().saturating_sub(8_192);
-    while !stderr.is_char_boundary(tail_start) {
-        tail_start += 1;
-    }
-    stderr[tail_start..].to_owned()
-}
-
-async fn terminate_child(child: &mut Child) {
-    match child.try_wait() {
-        Ok(Some(_)) | Err(_) => return,
-        Ok(None) => {}
-    }
-    let pid = child.id().to_string();
-    Command::new("kill").args(["-TERM", &pid]).status().ok();
-    let deadline = Instant::now() + Duration::from_secs(10);
-    loop {
-        match child.try_wait() {
-            Ok(Some(_)) => break,
-            Ok(None) if Instant::now() > deadline => {
-                child.kill().ok();
-                child.wait().ok();
-                break;
-            }
-            Ok(None) => tokio::time::sleep(Duration::from_millis(100)).await,
-            Err(_) => break,
-        }
+        support::terminate_child(&mut self.child).await;
     }
 }
 

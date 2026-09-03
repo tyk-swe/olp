@@ -1,8 +1,8 @@
 # Deferred
 
-Deliberately outside the September–October plan. Each entry names the trigger
-that would bring it back into [`backlog.md`](backlog.md); until a trigger
-fires, do not start it.
+Deliberately outside the current execution period. Each entry names the trigger
+that would bring it into [`backlog.md`](backlog.md); until a trigger fires, do
+not start it.
 
 | Item | Why not now | Reopen when |
 |---|---|---|
@@ -15,4 +15,4 @@ fires, do not start it.
 | Console i18n and dark-mode completeness | Cosmetic relative to everything above; the console is operator-facing | A non-English-speaking operator team adopts the console |
 | Cargo features to split Bedrock/Vertex out of the default build | `AGENTS.md` discourages speculative structure; cold clippy is 4.5 min and the full gate 11 min, which is tolerable | A contributor reports build time as the reason they stopped |
 | Licensing follow-ups (CLA, dual licensing, AGPL positioning) | Strategic, not engineering; the AGPL-3.0-only choice is deliberate | A prospective adopter says the licence is the blocker |
-| Rewriting `docs/architecture.md` for end users | Week 4 adds `docs/concepts.md` instead; the architecture document stays contributor-facing on purpose | Never — the two audiences stay separate |
+| Rewriting `docs/architecture.md` for end users | The archived plan added `docs/concepts.md` instead; the architecture document stays contributor-facing on purpose | Never — the two audiences stay separate |

@@ -47,4 +47,7 @@
 ## Carry-over
 
 - Jaeger compose-overlay UI smoke remains local exit evidence; this environment cannot access the Docker API. The digest, rendered Compose contract, and OTLP export path are verified.
-- The tracing-off `oha` comparison remains local exit evidence because `oha` is unavailable in this environment. Disabled-path construction and allocation guards are covered structurally and by unit tests.
+- The tracing-off comparison remains local exit evidence. `oha` is installed,
+  but PostgreSQL and Valkey cannot be started because this environment cannot
+  access the Docker API. Disabled-path construction and allocation guards are
+  covered structurally and by unit tests.

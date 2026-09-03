@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use crate::management::principal::MutationPrincipal;
 use axum::{
     Json,
@@ -9,10 +11,12 @@ use olp_db::{
     configuration::NewProviderDraft, idempotency::Outcome, idempotency::Replayable,
     idempotency::Response as IdempotencyResponse, idempotency::fingerprint,
     idempotency::operations, idempotency::secret_digest,
-    security::aad::credential as credential_aad,
+    security::aad::credential as credential_aad, security::envelope::MasterKey,
+    store::RequestProvenance,
 };
 use olp_engine::domain::{
     auth::Permission,
+    ports::ProviderTransport,
     provider::ProviderAuthMode,
     provider_configuration::{Configuration, provider_kind_spec, validate},
     routing::provider::ProviderKind,
@@ -136,38 +140,9 @@ pub(crate) struct ProviderResponse {
     pub etag: Uuid,
 }
 
-#[utoipa::path(
-    post,
-    path = "/api/v1/providers",
-    tag = "providers",
-    request_body = CreateProviderRequest,
-    params(("Idempotency-Key" = String, Header, description = "Unique provider-draft creation key")),
-    responses(
-        (status = 201, description = "Provider draft created", body = ProviderResponse, headers(("Location" = String, description = "Path of the created resource"))),
-        (status = 400, description = "Idempotency-Key is missing or invalid", body = Problem),
-        (status = 401, description = "No active session", body = Problem),
-        (status = 403, description = "Insufficient role, CSRF, or origin failure", body = Problem),
-        (status = 409, description = "Idempotency-Key was already used or is in progress", body = Problem),
-        (status = 422, description = "Validation failed", body = Problem),
-        (status = 503, description = "Master key or database unavailable", body = Problem)
-    )
-)]
-pub(crate) async fn create_provider(
-    State(state): State<ManagementState>,
-    Provenance(provenance): Provenance,
-    headers: HeaderMap,
-    MutationPrincipal(principal): MutationPrincipal,
-    payload: Result<Json<CreateProviderRequest>, JsonRejection>,
-) -> Result<Response, Problem> {
-    require_permission(&principal, Permission::ManageProviders)?;
-    let idempotency_key = require_idempotency_key(&headers)?.to_owned();
-    let request = json_payload(payload)?;
-    let request_fingerprint =
-        fingerprint(&CreateProviderFingerprint::from(&request)).map_err(map_persistence)?;
-    let master_key = state
-        .master_key
-        .as_deref()
-        .ok_or_else(|| Problem::service_unavailable("master_key_not_configured"))?;
+fn validated_create_mode(
+    request: &CreateProviderRequest,
+) -> Result<(ProviderKind, ProviderAuthMode), Problem> {
     let mut errors = FieldErrors::new();
     reject_create_field(
         &mut errors,
@@ -206,8 +181,9 @@ pub(crate) async fn create_provider(
             .push("Provide a credential no larger than 8 KiB.".to_owned());
     }
     let kind = request.kind;
-    let spec = provider_kind_spec(kind);
-    let auth_mode = request.auth_mode.unwrap_or(spec.default_auth_mode);
+    let auth_mode = request
+        .auth_mode
+        .unwrap_or_else(|| provider_kind_spec(kind).default_auth_mode);
     let mut codes = FieldErrorCodes::new();
     record_violations(
         validate(Configuration {
@@ -227,6 +203,15 @@ pub(crate) async fn create_provider(
     if !errors.is_empty() {
         return Err(Problem::coded_validation(errors, codes));
     }
+    Ok((kind, auth_mode))
+}
+
+async fn provisioned_provider_transport(
+    state: &ManagementState,
+    kind: ProviderKind,
+    request: &CreateProviderRequest,
+    auth_mode: ProviderAuthMode,
+) -> Result<Arc<dyn ProviderTransport>, Problem> {
     let config = provider_config(ProviderConfigFields {
         kind,
         endpoint: request.endpoint.as_deref(),
@@ -246,15 +231,40 @@ pub(crate) async fn create_provider(
             .map(|credential| credential.expose().as_bytes()),
     )
     .map_err(|error| provider_connector_validation(kind, error))?;
-    let transport = Factory::transport(
+    Factory::transport(
         config,
         credential,
         &state.provider_egress_policy,
         state.provider_response_limits,
     )
     .await
-    .map_err(|error| provider_connector_validation(kind, error))?;
-    let connector_available = true;
+    .map_err(|error| provider_connector_validation(kind, error))
+}
+
+struct PreparedProviderDraft {
+    kind: ProviderKind,
+    auth_mode: ProviderAuthMode,
+    request_fingerprint: [u8; 32],
+    idempotency_key: String,
+    transport: Arc<dyn ProviderTransport>,
+}
+
+async fn persist_provider_draft(
+    state: &ManagementState,
+    provenance: &RequestProvenance,
+    actor: Uuid,
+    request: &CreateProviderRequest,
+    master_key: &MasterKey,
+    draft: PreparedProviderDraft,
+) -> Result<Response, Problem> {
+    let PreparedProviderDraft {
+        kind,
+        auth_mode,
+        request_fingerprint,
+        idempotency_key,
+        transport,
+    } = draft;
+    let spec = provider_kind_spec(kind);
     let provider_id = Uuid::now_v7();
     let credential_id = request.credential.as_ref().map(|_| Uuid::now_v7());
     let model_id = request.model.as_ref().map(|_| Uuid::now_v7());
@@ -278,7 +288,7 @@ pub(crate) async fn create_provider(
     let response_model = request.model.clone();
     let created = state
         .store()
-        .with_provenance(&provenance)
+        .with_provenance(provenance)
         .create_provider_draft(
             NewProviderDraft {
                 provider_id,
@@ -292,7 +302,7 @@ pub(crate) async fn create_provider(
                 deployment: request.deployment.clone(),
                 api_version: request.api_version.clone(),
                 auth_mode,
-                connector_ready: connector_available,
+                connector_ready: true,
                 credential: encrypted,
                 model: request.model.clone(),
                 display_name: request.model.as_ref().map(|model| {
@@ -301,9 +311,9 @@ pub(crate) async fn create_provider(
                         .clone()
                         .unwrap_or_else(|| model.clone())
                 }),
-                model_enabled: connector_available && request.model.is_some(),
+                model_enabled: request.model.is_some(),
                 surface: request.model.as_ref().and(spec.seed_surface),
-                actor: principal.user_id,
+                actor,
                 idempotency_key,
             },
             Replayable::new(request_fingerprint, master_key),
@@ -338,6 +348,57 @@ pub(crate) async fn create_provider(
         );
     }
     idempotency_http_response(created)
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/v1/providers",
+    tag = "providers",
+    request_body = CreateProviderRequest,
+    params(("Idempotency-Key" = String, Header, description = "Unique provider-draft creation key")),
+    responses(
+        (status = 201, description = "Provider draft created", body = ProviderResponse, headers(("Location" = String, description = "Path of the created resource"))),
+        (status = 400, description = "Idempotency-Key is missing or invalid", body = Problem),
+        (status = 401, description = "No active session", body = Problem),
+        (status = 403, description = "Insufficient role, CSRF, or origin failure", body = Problem),
+        (status = 409, description = "Idempotency-Key was already used or is in progress", body = Problem),
+        (status = 422, description = "Validation failed", body = Problem),
+        (status = 503, description = "Master key or database unavailable", body = Problem)
+    )
+)]
+pub(crate) async fn create_provider(
+    State(state): State<ManagementState>,
+    Provenance(provenance): Provenance,
+    headers: HeaderMap,
+    MutationPrincipal(principal): MutationPrincipal,
+    payload: Result<Json<CreateProviderRequest>, JsonRejection>,
+) -> Result<Response, Problem> {
+    require_permission(&principal, Permission::ManageProviders)?;
+    let idempotency_key = require_idempotency_key(&headers)?.to_owned();
+    let request = json_payload(payload)?;
+    let request_fingerprint =
+        fingerprint(&CreateProviderFingerprint::from(&request)).map_err(map_persistence)?;
+    let master_key = state
+        .master_key
+        .as_deref()
+        .ok_or_else(|| Problem::service_unavailable("master_key_not_configured"))?;
+    let (kind, auth_mode) = validated_create_mode(&request)?;
+    let transport = provisioned_provider_transport(&state, kind, &request, auth_mode).await?;
+    persist_provider_draft(
+        &state,
+        &provenance,
+        principal.user_id,
+        &request,
+        master_key,
+        PreparedProviderDraft {
+            kind,
+            auth_mode,
+            request_fingerprint,
+            idempotency_key,
+            transport,
+        },
+    )
+    .await
 }
 
 #[utoipa::path(
