@@ -23,7 +23,7 @@ Status values: `planned`, `in progress`, `done`, `dropped` (with a reason).
 | Next period, week 3 | OTEL-06 | — | — | 1 | — |
 | Unscheduled | TEST-04, HYG-04 … HYG-08, FLEX-01 … FLEX-06 | — | 3 | 3 | 6 (incl. P4) |
 
-60 items: 48 scheduled, 12 unscheduled; 36 done. [`deferred.md`](deferred.md) lists what
+60 items: 48 scheduled, 12 unscheduled; 37 done. [`deferred.md`](deferred.md) lists what
 is intentionally not here.
 
 ## CI — the gates themselves
@@ -53,7 +53,7 @@ is intentionally not here.
 - [x] **REL-03** Helm chart on `oci://ghcr.io/tyk-swe/charts`, signed, render-identical to the repo — P1 · S · week 2 · done → [milestone 2](milestones/02-first-release.md)
 - [x] **REL-04** Cut `v2.2.0`: version bump, CHANGELOG, tag, release notes from CHANGELOG, assets — P1 · S · week 2 · done → [milestone 2](milestones/02-first-release.md)
 - [x] **REL-05** Quick start pulls the published image; source build becomes a Compose overlay — P1 · S · week 2 · done → [milestone 2](milestones/02-first-release.md)
-- [ ] **REL-06** Cut `v2.3.0` with tracing, budgets, bench, and NetworkPolicy — P1 · S · week 8 · in progress → [milestone 8](milestones/08-release-and-retro.md)
+- [x] **REL-06** Cut `v2.3.0` with tracing, budgets, bench, and NetworkPolicy — P1 · S · week 8 · done → [milestone 8](milestones/08-release-and-retro.md)
 - [ ] **REL-07** Reproduce the 2.2.1-chart to 2.3.0 fresh-cluster Helm upgrade and record migration 0049 — P1 · S · next period, week 1 · planned
 
 ## TEST — tests that guard external risk

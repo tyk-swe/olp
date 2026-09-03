@@ -11,8 +11,8 @@
 
 - [x] Same procedure as REL-04; `release-metadata.env` remains `0048` (the last migration shipped by 2.2.1) in the release commit; `make release-version` passes
 - [x] CHANGELOG `[2.3.0]` groups tracing, budgets, bench, NetworkPolicy, and docs, each with its backlog ID
-- [x] Upgrade rehearsal 2.2.1 → 2.3.0 green in CI before tagging in
-  [run 33738308399](https://github.com/tyk-swe/olp/actions/runs/33738308399/job/100594824226)
+- [x] Upgrade rehearsal 2.2.1 → 2.3.0 green in CI before tagging on the final
+  candidate in [run 33783393182](https://github.com/tyk-swe/olp/actions/runs/33783393182/job/100748364413)
 - [ ] `helm upgrade` from the 2.2.1 chart on a fresh cluster reproducing the
   week-2 topology; migration Job runs 0049
 
@@ -29,7 +29,9 @@
 - [x] Session cookie flags, login and invitation throttling (`public_auth_rate_limits`) unchanged and tested
 - [x] Egress classification for the OTLP collector endpoint: it may be private (it is our collector) — the explicit exception is documented and provider egress rules are unchanged
 - [x] Every tracing `span.record` call exports only the documented attribute allowlist and never content, credentials, headers, or raw errors
-- [ ] `cargo deny`, `pnpm audit`, `uv audit`, and Trivy on the release image: clean, or ignored with an expiry date and a reason
+- [x] `cargo deny`, the console and JavaScript SDK `pnpm audit`, and `uv audit`
+  are clean. Release-run Trivy reports zero HIGH/CRITICAL vulnerabilities on
+  both architectures; no finding required an explicit ignore.
 - [x] MFA decision recorded in `docs/deployment.md`: production disables local login and uses OIDC; revisit only on request (see `deferred.md`)
 
 ## HYG-03 — Retrospective and the next plan (S)
@@ -41,13 +43,33 @@
 
 ## Exit criteria
 
-- [ ] `v2.3.0` published with image, chart, signatures, SBOMs, and release notes
+- [x] `v2.3.0` published with image, chart, signatures, SBOMs, and release notes
 - [x] Baseline file shorter than at the start of the week; `make check` green
-- [ ] Security pass recorded with no open HIGH/CRITICAL findings
+- [x] Security pass recorded with no open HIGH/CRITICAL findings
 - [x] Next period's roadmap README exists
+
+## Release evidence
+
+- [GitHub Release v2.3.0](https://github.com/tyk-swe/olp/releases/tag/v2.3.0)
+  and [release run 33786425505](https://github.com/tyk-swe/olp/actions/runs/33786425505)
+  completed on 2026-09-03.
+- The signed multi-architecture image index is
+  `sha256:51a19182a05e0f5cae582203f99d5335a56b7a90cd363a5cad889d1b04b653ae`.
+  Anonymous inspection confirms native `linux/amd64` and `linux/arm64`
+  manifests.
+- The signed OCI chart is
+  `oci://ghcr.io/tyk-swe/charts/openllmproxy:2.3.0` at
+  `sha256:02be3a6af3fd88bb667d42cdbbdff42155e3b5de226057623723a89a56702f83`.
+- The release contains per-architecture SPDX 2.3 SBOMs, the chart, values
+  schema, and checksums. Downloading the public assets and running
+  `sha256sum -c checksums.txt` passed for every asset.
+- The release workflow publicly verified the image and chart signatures. Its
+  Trivy reports show zero vulnerabilities for both architecture images.
 
 ## Carry-over
 
 - REL-07 records the fresh-cluster Helm upgrade after publication. This
-  environment cannot access the Docker API, so it cannot create the disposable
-  kind cluster used by the release procedure.
+  environment receives permission denied from `/var/run/docker.sock`, so it
+  cannot create the disposable kind cluster used by the release procedure.
+  Anonymous OCI chart pull and metadata verification passed, but the migration
+  Job cannot be exercised here.
