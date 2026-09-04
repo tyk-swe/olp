@@ -119,8 +119,7 @@ ingress:
 origin. Production uses OIDC and sets `config.localLoginEnabled: false` after
 the OIDC login path has been verified. Local login remains available for
 bootstrap and small installations; MFA for that surface is deferred until a
-deployment requests it, as recorded in
-[`roadmap/deferred.md`](roadmap/deferred.md). For Gateway API or a mesh, leave
+deployment requests it. For Gateway API or a mesh, leave
 chart Ingress disabled and reproduce the same routing table.
 Disable buffering for SSE and do not lower request-size or idle-timeout
 bounds.
