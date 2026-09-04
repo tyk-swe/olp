@@ -294,7 +294,6 @@ screenshots with `pnpm --dir console screenshots`.
 | [Provider compatibility matrix](docs/compatibility.md) | Which operations each provider kind serves natively, via translation, or refuses, and what each translation drops |
 | [Contributing](CONTRIBUTING.md) | Toolchain, sources of truth, and validation |
 | [Changelog](CHANGELOG.md) | Release notes, and the upgrade notes that go with them |
-| [Roadmap](docs/roadmap/README.md) | Current evidence period, open backlog, deferred items, and the archived September plan |
 | [Security](SECURITY.md) | Supported releases and private vulnerability reporting |
 | [Console development](console/README.md) | Frontend commands, boundaries, integration tests, and screenshots |
 | [Compatibility and contract tests](tests/README.md) | Conformance, SDK, end-to-end, HA, and fuzz suites |
