@@ -35,10 +35,12 @@ use olp_engine::protocols::openai::{
 use tracing::warn;
 
 use crate::{
-    bootstrap::mode_dependencies::GatewayState,
-    public_http::image_response::streaming_image_json_response,
-    public_http::request_admission::multipart::MultipartRequestAdmission,
-    public_http::streaming_response::encode_sse_frame,
+    gateway::state::GatewayState,
+    public_http::{
+        image_response::streaming_image_json_response,
+        request_admission::multipart::MultipartRequestAdmission,
+        streaming_response::encode_sse_frame,
+    },
 };
 
 use super::{

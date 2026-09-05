@@ -2,10 +2,10 @@ import type { QueryClient } from '@tanstack/svelte-query';
 import { queryKeys } from '$lib/api/queryKeys';
 import {
   listProviderModelPage,
-  type Provider,
   type ProviderModel
-} from '$lib/api/management/providers';
-import type { CursorPage } from '$lib/api/pagination';
+} from '$lib/api/management/providerModels';
+import { type Provider } from '$lib/api/management/providers';
+import type { CursorPage } from '$lib/api/http';
 
 export type CoordinatedModelPage = {
   page: CursorPage<ProviderModel>;

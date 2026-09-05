@@ -5,7 +5,6 @@ import { isFixedRole, type FixedRole } from '$lib/auth/authorization';
 
 type Schemas = components['schemas'];
 
-export type { FixedRole };
 export type SessionUser = Schemas['UserResponse'] & { role: FixedRole };
 export type CurrentSession = Omit<Schemas['SessionResponse'], 'user'> & {
   user: SessionUser;

@@ -15,15 +15,16 @@ use tracing::error;
 use utoipa::{IntoParams, ToSchema};
 use uuid::Uuid;
 
-use super::helpers::{
-    not_found, page_limit, query_parameters, timestamp_cursor, validate_time_range,
-};
 use crate::{
-    bootstrap::mode_dependencies::ManagementState,
     management::{
         permissions::require_permission, preconditions::with_etag, principal::ReadPrincipal,
+        state::ManagementState,
     },
     public_http::problem::Problem,
+};
+use {
+    super::helpers::{not_found, query_parameters, timestamp_cursor, validate_time_range},
+    crate::management::pagination::page_limit,
 };
 
 #[derive(Debug, Deserialize, IntoParams)]

@@ -1,7 +1,7 @@
 use olp_db::security::envelope::MasterKey;
 use olp_engine::providers::oidc::Policy;
 
-use crate::{bootstrap::mode_dependencies::ManagementState, public_http::problem::Problem};
+use crate::{management::state::ManagementState, public_http::problem::Problem};
 
 pub(super) fn callback_url(state: &ManagementState) -> Result<String, Problem> {
     Ok(state
@@ -53,7 +53,7 @@ mod tests {
 
     fn state() -> ManagementState {
         ManagementState::new(
-            crate::bootstrap::state::ApiMode::Control,
+            crate::application::mode::ApiMode::Control,
             None,
             Arc::new(Manager::empty()),
             "https://console.example.test",

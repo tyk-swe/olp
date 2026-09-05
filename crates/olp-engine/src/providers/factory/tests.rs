@@ -17,7 +17,6 @@ use crate::{
         routing::provider::ProviderKind,
     },
     providers::{
-        EgressPolicy,
         connector::ResponseLimits,
         factory::{
             assembly::Factory,
@@ -30,6 +29,7 @@ use crate::{
             },
             overrides::Registry,
         },
+        http_egress::EgressPolicy,
         openai::{
             ApiKey, ConnectorConfig as OpenAiConnectorConfig,
             certification::{CompatibleCapability, CompatibleCapabilityCertificationError},

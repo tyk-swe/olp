@@ -29,9 +29,8 @@ use super::*;
 use olp_engine::inference::runtime::Manager;
 
 use crate::{
-    bootstrap::state::{ApiMode, ProcessComposition},
-    observability::router as observability_router,
-    public_http::listener,
+    application::mode::ApiMode, bootstrap::state::ProcessComposition,
+    observability::router as observability_router, public_http::listener,
 };
 
 fn app<F>(admission: PublicAdmission, make_body: F) -> Router

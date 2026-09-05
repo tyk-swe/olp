@@ -3,7 +3,7 @@ use std::time::Duration;
 use chrono::{DateTime, TimeZone as _, Utc};
 use olp_db::{
     identity::InstallationSetupInput,
-    limits::{CostReconciliationLeader, DistributedLimiter},
+    limits::{DistributedLimiter, cost_reconciliation::CostReconciliationLeader},
     security::password::hash,
     store::Store,
     test_support::TestDb,

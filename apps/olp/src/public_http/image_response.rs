@@ -81,35 +81,7 @@ pub(crate) async fn streaming_image_json_response(
         return Ok(response);
     }
 
-    let mut opened = Vec::with_capacity(staged.len());
-    for (_, handle) in &staged {
-        match spool.open(handle).await {
-            Ok(media)
-                if media
-                    .artifact
-                    .content_length
-                    .is_none_or(|length| length <= MAX_IMAGE_BYTES) =>
-            {
-                opened.push((handle.clone(), media));
-            }
-            Ok(_) => {
-                drop(opened);
-                cleanup_staged(&spool, &staged).await;
-                return Err(InferenceError::bad_gateway(
-                    "provider_protocol_error",
-                    "A spooled image exceeded its declared bound.",
-                ));
-            }
-            Err(_) => {
-                drop(opened);
-                cleanup_staged(&spool, &staged).await;
-                return Err(InferenceError::bad_gateway(
-                    "provider_protocol_error",
-                    "A spooled provider image was unavailable.",
-                ));
-            }
-        }
-    }
+    let opened = open_staged_images(&spool, &staged).await?;
 
     let (sender, receiver) = tokio::sync::mpsc::channel(8);
     let producer_spool = Arc::clone(&spool);
@@ -239,6 +211,43 @@ async fn cleanup_handles(spool: &Arc<dyn MediaSpool>, handles: &[MediaHandle]) {
     for handle in handles {
         let _ = spool.remove(handle).await;
     }
+}
+
+async fn open_staged_images(
+    spool: &Arc<dyn MediaSpool>,
+    staged: &[(String, MediaHandle)],
+) -> Result<Vec<(MediaHandle, OpenedMedia)>, InferenceError> {
+    let mut opened = Vec::with_capacity(staged.len());
+    for (_, handle) in staged {
+        match spool.open(handle).await {
+            Ok(media)
+                if media
+                    .artifact
+                    .content_length
+                    .is_none_or(|length| length <= MAX_IMAGE_BYTES) =>
+            {
+                opened.push((handle.clone(), media));
+            }
+            Ok(_) => {
+                drop(opened);
+                cleanup_staged(spool, staged).await;
+                return Err(InferenceError::bad_gateway(
+                    "provider_protocol_error",
+                    "A spooled image exceeded its declared bound.",
+                ));
+            }
+            Err(_) => {
+                drop(opened);
+                cleanup_staged(spool, staged).await;
+                return Err(InferenceError::bad_gateway(
+                    "provider_protocol_error",
+                    "A spooled provider image was unavailable.",
+                ));
+            }
+        }
+    }
+
+    Ok(opened)
 }
 
 #[cfg(test)]

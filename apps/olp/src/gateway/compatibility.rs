@@ -12,7 +12,7 @@ use olp_engine::domain::canonical::identity::{OperationKind, Surface, TransportM
 use olp_engine::domain::routing::provider::ProviderKind;
 use olp_engine::providers::factory::certification;
 
-pub use super::endpoint_policy::export::{RegisteredOperation, registered_operations};
+use super::endpoint_policy::export::{RegisteredOperation, registered_operations};
 
 pub const START_MARKER: &str = "<!-- generated:compatibility:start -->";
 pub const END_MARKER: &str = "<!-- generated:compatibility:end -->";

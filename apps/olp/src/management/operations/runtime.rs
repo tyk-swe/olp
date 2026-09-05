@@ -9,14 +9,14 @@ use serde::Serialize;
 use utoipa::ToSchema;
 use uuid::Uuid;
 
-use super::helpers::{map_operations, page_limit};
 use crate::{
-    bootstrap::mode_dependencies::ManagementState,
     management::{
         pagination::PageQuery, permissions::require_permission, principal::ReadPrincipal,
+        state::ManagementState,
     },
     public_http::problem::Problem,
 };
+use {super::helpers::map_operations, crate::management::pagination::page_limit};
 
 #[derive(Clone, Debug, Serialize, ToSchema)]
 pub(super) struct RuntimeGenerationItem {

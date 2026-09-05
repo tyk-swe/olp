@@ -4,14 +4,17 @@ use olp_db::limits::DistributedLimiter;
 use serde_json::json;
 
 use crate::{
-    bootstrap::connectors::register_mounted_connectors, bootstrap::state::TransportRegistry,
+    application::transports::TransportRegistry, bootstrap::connectors::register_mounted_connectors,
     media_spool,
 };
 
-use super::{
-    AppResult,
-    config::DoctorArgs,
-    validation::{check_secret_permissions, connect_store, load_auth_hmac_key, load_master_key},
+use {
+    super::{
+        AppResult,
+        config::DoctorArgs,
+        validation::{connect_store, load_auth_hmac_key, load_master_key},
+    },
+    crate::application::secret_files::check_secret_permissions,
 };
 
 pub(super) async fn doctor(args: DoctorArgs) -> AppResult<()> {

@@ -13,11 +13,9 @@ use serde::Serialize;
 
 use olp_engine::inference::runtime::Bundle;
 
-use crate::{
-    bootstrap::mode_dependencies::GatewayState,
-    gateway::{
-        authorize_model_access, error::InferenceError, release_model_limits, reserve_model_limits,
-    },
+use crate::gateway::{
+    authorize_model_access, error::InferenceError, release_model_limits, reserve_model_limits,
+    state::GatewayState,
 };
 
 use super::error::openai_error_response;
@@ -312,7 +310,7 @@ mod tests {
             .install(snapshot, BTreeMap::from([(provider_id, transport)]))
             .unwrap();
         let mut state = GatewayState::new(
-            crate::bootstrap::state::ApiMode::Gateway,
+            crate::application::mode::ApiMode::Gateway,
             None,
             runtime,
             "https://olp.test",

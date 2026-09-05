@@ -469,6 +469,9 @@ test_engine_internal_boundaries_are_rejected() {
   printf '%s\n' 'fn allowed() { let _ = OpenAiConnector::new(); }' > \
     "$workspace/packages/source/src/providers/allowed.rs"
 
+  printf '%s\n' 'pub use crate::domain::{' '    Example,' '};' > \
+    "$workspace/packages/source/src/forwarding.rs"
+
   if PATH="$fake_bin:$original_path" \
     "$workspace/scripts/check-boundaries.sh" > "$output" 2>&1; then
     return 1
@@ -482,10 +485,41 @@ test_engine_internal_boundaries_are_rejected() {
     "engine inference must use provider and persistence ports instead of infrastructure:" || return
   assert_contains "$output" \
     "concrete provider construction escaped olp_engine::providers:" || return
+  assert_contains "$output" "production crates must not expose forwarding re-export surfaces:" || return
   assert_contains "$output" "src/inference/forbidden.rs" || return
   if assert_contains "$output" "src/providers/allowed.rs"; then
     return 1
   fi
+}
+
+test_delivery_ownership_edges_are_rejected() {
+  local fixture_root="$test_root/delivery-ownership"
+  local workspace="$fixture_root/workspace"
+  local fake_bin="$fixture_root/bin"
+  local metadata_file="$fixture_root/metadata.json"
+  local output="$fixture_root/output.log"
+
+  write_boundary_fixture "$workspace"
+  write_two_role_fixture "$workspace" "$metadata_file" delivery engine
+  write_fake_cargo_metadata "$fake_bin" "$metadata_file"
+  mkdir -p "$workspace/packages/source/src/management" \
+    "$workspace/packages/source/src/application" \
+    "$workspace/packages/source/src/bootstrap/workers"
+  printf '%s\n' 'use crate::bootstrap::state::ManagementState;' > \
+    "$workspace/packages/source/src/management/state.rs"
+  printf '%s\n' 'use crate::gateway::state::GatewayState;' > \
+    "$workspace/packages/source/src/application/media.rs"
+  printf '%s\n' 'use crate::gateway::media_jobs::reconcile;' > \
+    "$workspace/packages/source/src/bootstrap/workers/media.rs"
+  if PATH="$fake_bin:$original_path" \
+    "$workspace/scripts/check-boundaries.sh" > "$output" 2>&1; then
+    return 1
+  fi
+  assert_contains "$output" "delivery surfaces must not depend on bootstrap composition:" || return
+  assert_contains "$output" "application workflows and workers must not depend on gateway handlers:" || return
+  assert_contains "$output" "src/management/state.rs" || return
+  assert_contains "$output" "src/application/media.rs" || return
+  assert_contains "$output" "src/bootstrap/workers/media.rs"
 }
 
 test_same_name_non_workspace_path_is_rejected() {
@@ -913,6 +947,7 @@ run_test "external metadata paths are rejected" \
   test_external_metadata_paths_are_rejected
 run_test "engine internal module boundaries are enforced" \
   test_engine_internal_boundaries_are_rejected
+  test_delivery_ownership_edges_are_rejected
 run_test "same-name non-workspace paths remain unclassified" \
   test_same_name_non_workspace_path_is_rejected
 run_test "external Cargo patch paths are rejected" \

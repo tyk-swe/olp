@@ -7,13 +7,14 @@
 use crate::support::route_fixtures::{insert_provider, insert_unbased_route_draft};
 use olp_db::{
     access::{Error as AccessError, NewApiKeyRecord},
-    configuration::resources::{CapabilityRecord, DiscoveredModelInput, ReplaceRouteDraftInput},
-    configuration::{Error, NewRouteDraft, NewRouteTarget},
+    configuration::{
+        error::Error,
+        resources::{CapabilityRecord, DiscoveredModelInput, ReplaceRouteDraftInput},
+        route_lifecycle::{NewRouteDraft, NewRouteTarget},
+    },
     idempotency::{Outcome, Replayable, Response, fingerprint},
     identity::InstallationSetupInput,
-    security::envelope::MasterKey,
-    security::key_material::AuthHmacKey,
-    security::password::hash,
+    security::{envelope::MasterKey, key_material::AuthHmacKey, password::hash},
 };
 use olp_engine::domain::{
     auth::{ApiKeyLimits, ApiKeyScope},
@@ -53,7 +54,7 @@ async fn create_draft(
     actor: Uuid,
     seed: &str,
     targets: Vec<NewRouteTarget>,
-) -> Result<olp_db::configuration::RouteDraftCreated, Error> {
+) -> Result<olp_db::configuration::route_lifecycle::RouteDraftCreated, Error> {
     let master_key = MasterKey::new(1, [37; 32]);
     let outcome = store
         .create_route_draft(

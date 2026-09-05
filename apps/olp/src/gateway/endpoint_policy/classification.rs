@@ -5,7 +5,7 @@ use olp_engine::domain::{
     ids::RouteSlug,
 };
 
-use crate::bootstrap::state::BodyLimits;
+use crate::public_http::body_limits::BodyLimits;
 use crate::public_http::relative_url::percent_decode;
 
 use super::registry::{BodyAdmission, ENDPOINTS, EndpointSpec, INVALID_ROUTE, Policy};

@@ -8,10 +8,12 @@ use axum::{
     response::Response,
 };
 use olp_db::{
-    configuration::NewProviderDraft, idempotency::Outcome, idempotency::Replayable,
-    idempotency::Response as IdempotencyResponse, idempotency::fingerprint,
-    idempotency::operations, idempotency::secret_digest,
-    security::aad::credential as credential_aad, security::envelope::MasterKey,
+    configuration::provider_lifecycle::NewProviderDraft,
+    idempotency::{
+        Outcome, Replayable, Response as IdempotencyResponse, fingerprint, operations,
+        secret_digest,
+    },
+    security::{aad::credential as credential_aad, envelope::MasterKey},
     store::RequestProvenance,
 };
 use olp_engine::domain::{
@@ -38,12 +40,13 @@ use crate::management::{
     response_policy::RuntimeGenerationResponse,
     secrets::WriteOnlySecret,
 };
-use crate::{
-    bootstrap::mode_dependencies::ManagementState,
-    bootstrap::provider_adapter::{ProviderConfigFields, provider_config, provider_credential},
-    public_http::problem::FieldErrorCodes,
-    public_http::problem::FieldErrors,
-    public_http::problem::Problem,
+use {
+    crate::{
+        application::provider_fields::ProviderConfigFields,
+        management::state::ManagementState,
+        public_http::problem::{FieldErrorCodes, FieldErrors, Problem},
+    },
+    olp_engine::providers::factory::input::{provider_config, provider_credential},
 };
 
 use super::manage::ProviderMutationFingerprint;
@@ -212,16 +215,19 @@ async fn provisioned_provider_transport(
     request: &CreateProviderRequest,
     auth_mode: ProviderAuthMode,
 ) -> Result<Arc<dyn ProviderTransport>, Problem> {
-    let config = provider_config(ProviderConfigFields {
-        kind,
-        endpoint: request.endpoint.as_deref(),
-        cloud_region: request.cloud_region.as_deref(),
-        cloud_project: request.cloud_project.as_deref(),
-        deployment: request.deployment.as_deref(),
-        api_version: request.api_version.as_deref(),
-        auth_mode,
-        probe_model: request.model.as_deref(),
-    })
+    let config = provider_config(
+        ProviderConfigFields {
+            kind,
+            endpoint: request.endpoint.as_deref(),
+            cloud_region: request.cloud_region.as_deref(),
+            cloud_project: request.cloud_project.as_deref(),
+            deployment: request.deployment.as_deref(),
+            api_version: request.api_version.as_deref(),
+            auth_mode,
+            probe_model: request.model.as_deref(),
+        }
+        .into(),
+    )
     .map_err(|_| Problem::internal())?;
     let credential = provider_credential(
         &config,

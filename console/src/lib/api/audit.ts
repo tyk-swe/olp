@@ -2,7 +2,7 @@ import type { components } from './schema';
 import { apiClient } from './client';
 import { pageResult, result } from './http';
 import { AUDIT_PAGE_SIZE } from './pageSizes';
-import type { CursorPage } from './pagination';
+import type { CursorPage } from '$lib/api/http';
 import { compactQuery } from './query';
 
 export type AuditEvent = components['schemas']['AuditEventResponse'];

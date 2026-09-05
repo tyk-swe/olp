@@ -9,7 +9,7 @@ use reqwest::{Client, Url, redirect::Policy};
 use thiserror::Error;
 use tokio::{net::lookup_host, sync::Mutex, time::Instant, time::timeout};
 
-use super::EgressPolicy;
+use crate::providers::http_egress::EgressPolicy;
 
 const DNS_REVALIDATION_INTERVAL: Duration = Duration::from_secs(30);
 

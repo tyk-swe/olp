@@ -412,6 +412,58 @@ impl Service {
         result
     }
 
+    async fn execute_reconciliation_attempts(
+        &self,
+        runtime: &Bundle,
+        context: &ExecutionContext,
+        operation: Operation,
+        attempts: Vec<crate::domain::routing::selection::AttemptPlan>,
+        accounting: &mut RequestAccountingGuard,
+    ) -> Result<ExecutionSuccess, super::failover::ExecutionFailure> {
+        let route = runtime
+            .routes
+            .get(&context.route_slug)
+            .expect("attempt selection returned a known route");
+        {
+            let mut record_attempt_started =
+                |completed: &[RequestAttemptMetadata],
+                 attempt: &crate::domain::routing::selection::AttemptPlan,
+                 ordinal: u16,
+                 started_at: chrono::DateTime<Utc>,
+                 started: tokio::time::Instant| {
+                    accounting.record_attempt_started(
+                        completed,
+                        ordinal,
+                        attempt.provider_id.as_uuid(),
+                        &attempt.upstream_model,
+                        started_at,
+                        started,
+                    );
+                };
+            execute(
+                Context {
+                    runtime,
+                    overall_timeout: route.overall_timeout.as_duration(),
+                    max_attempts: route.max_attempts,
+                    media_spool: self.media_spool().clone(),
+                    max_inline_media_bytes: self.max_inline_media_bytes(),
+                    circuits: self.circuits(),
+                    on_attempt_started: Some(&mut record_attempt_started),
+                    trace: None,
+                },
+                attempts,
+                RequestMetadata {
+                    request_id: context.request_id,
+                    operation: context.operation_kind,
+                    surface: context.surface,
+                    mode: TransportMode::Unary,
+                },
+                operation,
+            )
+            .await
+        }
+    }
+
     async fn execute_reconciliation_result_inner(
         &self,
         runtime: &Bundle,
@@ -462,48 +514,15 @@ impl Service {
                 return Err(failure);
             }
         };
-        let route = runtime
-            .routes
-            .get(&context.route_slug)
-            .expect("attempt selection returned a known route");
-        let execution = {
-            let mut record_attempt_started =
-                |completed: &[RequestAttemptMetadata],
-                 attempt: &crate::domain::routing::selection::AttemptPlan,
-                 ordinal: u16,
-                 started_at: chrono::DateTime<Utc>,
-                 started: tokio::time::Instant| {
-                    accounting.record_attempt_started(
-                        completed,
-                        ordinal,
-                        attempt.provider_id.as_uuid(),
-                        &attempt.upstream_model,
-                        started_at,
-                        started,
-                    );
-                };
-            execute(
-                Context {
-                    runtime,
-                    overall_timeout: route.overall_timeout.as_duration(),
-                    max_attempts: route.max_attempts,
-                    media_spool: self.media_spool().clone(),
-                    max_inline_media_bytes: self.max_inline_media_bytes(),
-                    circuits: self.circuits(),
-                    on_attempt_started: Some(&mut record_attempt_started),
-                    trace: None,
-                },
-                attempts,
-                RequestMetadata {
-                    request_id: context.request_id,
-                    operation: context.operation_kind,
-                    surface,
-                    mode: TransportMode::Unary,
-                },
+        let execution = self
+            .execute_reconciliation_attempts(
+                runtime,
+                &context,
                 operation,
+                attempts,
+                &mut accounting,
             )
-            .await
-        };
+            .await;
         let success = match execution {
             Ok(success) => success,
             Err(failure) => {

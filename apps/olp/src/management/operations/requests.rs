@@ -13,10 +13,13 @@ use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
 use uuid::Uuid;
 
-use super::helpers::{map_operations, page_limit, timestamp_cursor, validate_time_range};
 use crate::{
-    bootstrap::mode_dependencies::ManagementState, management::permissions::require_permission,
+    management::{permissions::require_permission, state::ManagementState},
     public_http::problem::Problem,
+};
+use {
+    super::helpers::{map_operations, timestamp_cursor, validate_time_range},
+    crate::management::pagination::page_limit,
 };
 
 #[derive(Debug, Deserialize, IntoParams)]

@@ -12,35 +12,43 @@ use tracing::{error, info, warn};
 
 use olp_engine::inference::runtime::Manager;
 
-use crate::{bootstrap::connectors::register_mounted_connectors, public_http::listener};
 use crate::{
-    bootstrap::state::ApiMode, bootstrap::state::ProcessComposition, media_spool,
+    application::mode::ApiMode, bootstrap::state::ProcessComposition, media_spool,
     observability::tracing::RuntimeConfig as TracingRuntimeConfig,
 };
+use crate::{bootstrap::connectors::register_mounted_connectors, public_http::listener};
 
-use super::{
-    AppResult, BACKGROUND_SHUTDOWN_TIMEOUT,
-    config::ServeArgs,
-    lifecycle::{
-        coordinate_shutdown, resolve_request_metadata_writer_error, shutdown_reason,
-        shutdown_signal, stop_background_tasks,
+use {
+    super::{
+        AppResult, BACKGROUND_SHUTDOWN_TIMEOUT,
+        config::ServeArgs,
+        lifecycle::{
+            coordinate_shutdown, resolve_request_metadata_writer_error, shutdown_reason,
+            shutdown_signal, stop_background_tasks,
+        },
+        runtime_activation::{
+            RuntimeActivator, RuntimeHintSource, activate_latest_runtime, runtime_hint_supervisor,
+            spawn_runtime_poller,
+        },
+        validation::{
+            connect_store, load_auth_hmac_key, load_bootstrap_token_digest, load_master_key,
+        },
     },
-    runtime_activation::{
-        RuntimeActivator, RuntimeHintSource, activate_latest_runtime, runtime_hint_supervisor,
-        spawn_runtime_poller,
-    },
-    service_supervisors::{
-        limiter_supervisor, limits_policy_supervisor, load_limits_outage_policy,
-        media_reconciliation_supervisor, request_metadata_loss_reporter,
-    },
-    validation::{
-        check_secret_permissions, connect_store, load_auth_hmac_key, load_bootstrap_token_digest,
-        load_master_key,
-    },
-    worker::{
-        cost_reconciliation_supervisor, maintenance_supervisor, outbox_supervisor,
-        request_metadata_consumer_name, request_metadata_consumer_supervisor,
-        request_metadata_epoch_supervisor,
+    crate::{
+        application::secret_files::check_secret_permissions,
+        bootstrap::workers::{
+            costs::cost_reconciliation_supervisor,
+            maintenance::maintenance_supervisor,
+            outbox::outbox_supervisor,
+            request_metadata::{
+                request_metadata_consumer_name, request_metadata_consumer_supervisor,
+                request_metadata_epoch_supervisor,
+            },
+            service_supervisors::{
+                limiter_supervisor, limits_policy_supervisor, load_limits_outage_policy,
+                media_reconciliation_supervisor, request_metadata_loss_reporter,
+            },
+        },
     },
 };
 
@@ -75,7 +83,7 @@ pub(super) async fn serve(
         plane
             .tasks
             .push(tokio::spawn(media_reconciliation_supervisor(
-                gateway_state,
+                gateway_state.media_jobs,
                 background_shutdown_receiver.clone(),
             )));
     }

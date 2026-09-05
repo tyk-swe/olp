@@ -52,6 +52,11 @@ const olpBoundaries = {
         type: 'problem',
         schema: [],
         messages: {
+          neutral: 'Shared $lib modules must not import feature modules.',
+          apiUi:
+            'API modules must not own Svelte state or depend on UI modules.',
+          forwarding:
+            'Import from the defining module instead of forwarding exports.',
           crossFeature:
             'Feature "{{sourceFeature}}" must not import feature "{{targetFeature}}". Move shared code to a neutral $lib module or expose the behavior through an API boundary.'
         }
@@ -61,14 +66,61 @@ const olpBoundaries = {
         if (!filename) return {};
 
         const sourceFeature = featureForPath(filename);
-        if (!sourceFeature) return {};
+        const relative = path.relative(
+          path.join(consoleRoot, 'src', 'lib'),
+          filename
+        );
+        const neutral =
+          !sourceFeature &&
+          !relative.startsWith('..') &&
+          !path.isAbsolute(relative);
+        const api = relative.startsWith(`api${path.sep}`);
 
         function checkImport(node) {
+          if (node.type.startsWith('Export')) {
+            const scope = context.sourceCode.getScope(node);
+            const forwarded =
+              node.source ||
+              node.specifiers?.some((specifier) =>
+                scope.variables.some(
+                  (variable) =>
+                    variable.name === specifier.local?.name &&
+                    variable.defs.some(
+                      (definition) => definition.type === 'ImportBinding'
+                    )
+                )
+              );
+            if (forwarded) context.report({ node, messageId: 'forwarding' });
+          }
           const specifier = node.source?.value;
           if (typeof specifier !== 'string') return;
 
           const targetFeature = importedFeature(filename, specifier);
-          if (targetFeature && targetFeature !== sourceFeature) {
+          const target = specifier.startsWith('$lib/')
+            ? path.resolve(consoleRoot, 'src', 'lib', specifier.slice(5))
+            : specifier.startsWith('.')
+              ? path.resolve(path.dirname(filename), specifier)
+              : null;
+          const targetRelative =
+            target &&
+            path.relative(path.join(consoleRoot, 'src', 'lib'), target);
+          if (
+            api &&
+            (specifier === 'svelte' ||
+              specifier.startsWith('svelte/') ||
+              /^(lists|forms|components)(\/|\\)/.test(targetRelative ?? '') ||
+              target?.endsWith('.svelte') ||
+              target?.endsWith('.svelte.ts'))
+          ) {
+            context.report({ node, messageId: 'apiUi' });
+          }
+          if (targetFeature && neutral) {
+            context.report({ node, messageId: 'neutral' });
+          } else if (
+            targetFeature &&
+            sourceFeature &&
+            targetFeature !== sourceFeature
+          ) {
             context.report({
               node,
               messageId: 'crossFeature',
@@ -117,7 +169,7 @@ export default [
     }
   },
   {
-    files: ['src/lib/features/**/*.{svelte,ts,tsx}'],
+    files: ['src/lib/**/*.{svelte,ts,tsx}'],
     plugins: { olp: olpBoundaries },
     rules: {
       'olp/no-cross-feature-imports': 'error'

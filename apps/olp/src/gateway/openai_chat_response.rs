@@ -7,7 +7,7 @@ use olp_engine::{
         identity::Surface,
     },
     protocols::{
-        materialize_response_pointer,
+        extensions::materialize_response_pointer,
         openai::chat::client::{ChatCompletionStreamEncoder, finish_name},
         sse::encode_frame,
     },
@@ -68,120 +68,24 @@ pub(crate) fn aggregate_chat_completion_response(
     model: &str,
     events: &[Event],
 ) -> Result<Value, InferenceError> {
-    let mut id = format!("chatcmpl-{request_id}");
-    let mut choices: BTreeMap<u32, UnaryChoice> = BTreeMap::new();
-    let mut usage = None;
-    let mut extensions = Vec::new();
+    let mut aggregate = ChatCompletionAggregate {
+        id: format!("chatcmpl-{request_id}"),
+        choices: BTreeMap::new(),
+        usage: None,
+        extensions: Vec::new(),
+    };
     for event in events {
-        match &event.kind {
-            Kind::ResponseStart { response_id, .. } => {
-                if let Some(response_id) = response_id {
-                    id.clone_from(response_id);
-                }
-            }
-            Kind::MessageStart { output_index, .. } => {
-                choices.entry(*output_index).or_default();
-            }
-            Kind::TextDelta { output_index, text } => {
-                choices
-                    .entry(*output_index)
-                    .or_default()
-                    .content
-                    .push_str(text);
-            }
-            Kind::RefusalDelta { output_index, text } => {
-                choices
-                    .entry(*output_index)
-                    .or_default()
-                    .refusal
-                    .push_str(text);
-            }
-            Kind::ToolCallDelta {
-                output_index,
-                tool_index,
-                id,
-                name,
-                arguments_delta,
-            } => {
-                let tool = choices
-                    .entry(*output_index)
-                    .or_default()
-                    .tools
-                    .entry(*tool_index)
-                    .or_default();
-                if let Some(id) = id {
-                    tool.id.clone_from(id);
-                }
-                if let Some(name) = name {
-                    tool.name.clone_from(name);
-                }
-                tool.arguments.push_str(arguments_delta);
-            }
-            Kind::Finish {
-                output_index,
-                reason,
-            } => {
-                choices.entry(*output_index).or_default().finish_reason =
-                    Some(finish_name(reason.clone()).into_owned());
-            }
-            Kind::Usage { usage: value } => {
-                usage = Some(json!({
-                    "prompt_tokens": value.input_tokens,
-                    "completion_tokens": value
-                        .output_tokens
-                        .saturating_add(value.reasoning_tokens.unwrap_or(0)),
-                    "total_tokens": value.total_tokens,
-                    "prompt_tokens_details": { "cached_tokens": value.cached_input_tokens },
-                    "completion_tokens_details": { "reasoning_tokens": value.reasoning_tokens }
-                }));
-            }
-            Kind::SourceExtension { extensions: values } => {
-                if values.source != Some(Surface::OpenAi) {
-                    continue;
-                }
-                extensions.extend(
-                    values
-                        .values
-                        .iter()
-                        .map(|(key, value)| (key.clone(), value.clone())),
-                );
-            }
-            Kind::Error { error } => {
-                return Err(InferenceError::from_canonical(error));
-            }
-            Kind::Done => {}
-        }
+        aggregate.push(&event.kind)?;
     }
+    let ChatCompletionAggregate {
+        id,
+        choices,
+        usage,
+        extensions,
+    } = aggregate;
     let choices = choices
         .into_iter()
-        .map(|(index, choice)| {
-            let tools = choice
-                .tools
-                .into_values()
-                .map(|tool| {
-                    json!({
-                        "id": tool.id,
-                        "type": "function",
-                        "function": { "name": tool.name, "arguments": tool.arguments }
-                    })
-                })
-                .collect::<Vec<_>>();
-            let mut message = json!({
-                "role": "assistant",
-                "content": (!choice.content.is_empty()).then_some(choice.content),
-                "refusal": (!choice.refusal.is_empty()).then_some(choice.refusal),
-            });
-            if !tools.is_empty()
-                && let Some(object) = message.as_object_mut()
-            {
-                object.insert("tool_calls".to_owned(), Value::from(tools));
-            }
-            json!({
-                "index": index,
-                "message": message,
-                "finish_reason": choice.finish_reason
-            })
-        })
+        .map(|(index, choice)| choice.into_json(index))
         .collect::<Vec<_>>();
     let mut response = json!({
         "id": id,
@@ -204,3 +108,124 @@ pub(crate) fn aggregate_chat_completion_response(
 
 #[cfg(test)]
 mod tests;
+
+struct ChatCompletionAggregate {
+    id: String,
+    choices: BTreeMap<u32, UnaryChoice>,
+    usage: Option<Value>,
+    extensions: Vec<(String, Value)>,
+}
+impl ChatCompletionAggregate {
+    fn push(&mut self, kind: &Kind) -> Result<(), InferenceError> {
+        match kind {
+            Kind::ResponseStart { response_id, .. } => {
+                if let Some(response_id) = response_id {
+                    self.id.clone_from(response_id);
+                }
+            }
+            Kind::MessageStart { output_index, .. } => {
+                self.choices.entry(*output_index).or_default();
+            }
+            Kind::TextDelta { output_index, text } => {
+                self.choices
+                    .entry(*output_index)
+                    .or_default()
+                    .content
+                    .push_str(text);
+            }
+            Kind::RefusalDelta { output_index, text } => {
+                self.choices
+                    .entry(*output_index)
+                    .or_default()
+                    .refusal
+                    .push_str(text);
+            }
+            Kind::ToolCallDelta {
+                output_index,
+                tool_index,
+                id,
+                name,
+                arguments_delta,
+            } => {
+                let tool = self
+                    .choices
+                    .entry(*output_index)
+                    .or_default()
+                    .tools
+                    .entry(*tool_index)
+                    .or_default();
+                if let Some(id) = id {
+                    tool.id.clone_from(id);
+                }
+                if let Some(name) = name {
+                    tool.name.clone_from(name);
+                }
+                tool.arguments.push_str(arguments_delta);
+            }
+            Kind::Finish {
+                output_index,
+                reason,
+            } => {
+                self.choices.entry(*output_index).or_default().finish_reason =
+                    Some(finish_name(reason.clone()).into_owned());
+            }
+            Kind::Usage { usage: value } => {
+                self.usage = Some(json!({
+                    "prompt_tokens": value.input_tokens,
+                    "completion_tokens": value
+                        .output_tokens
+                        .saturating_add(value.reasoning_tokens.unwrap_or(0)),
+                    "total_tokens": value.total_tokens,
+                    "prompt_tokens_details": { "cached_tokens": value.cached_input_tokens },
+                    "completion_tokens_details": { "reasoning_tokens": value.reasoning_tokens }
+                }));
+            }
+            Kind::SourceExtension { extensions: values } => {
+                if values.source != Some(Surface::OpenAi) {
+                    return Ok(());
+                }
+                self.extensions.extend(
+                    values
+                        .values
+                        .iter()
+                        .map(|(key, value)| (key.clone(), value.clone())),
+                );
+            }
+            Kind::Error { error } => {
+                return Err(InferenceError::from_canonical(error));
+            }
+            Kind::Done => {}
+        }
+        Ok(())
+    }
+}
+impl UnaryChoice {
+    fn into_json(self, index: u32) -> Value {
+        let tools = self
+            .tools
+            .into_values()
+            .map(|tool| {
+                json!({
+                    "id": tool.id,
+                    "type": "function",
+                    "function": { "name": tool.name, "arguments": tool.arguments }
+                })
+            })
+            .collect::<Vec<_>>();
+        let mut message = json!({
+            "role": "assistant",
+            "content": (!self.content.is_empty()).then_some(self.content),
+            "refusal": (!self.refusal.is_empty()).then_some(self.refusal),
+        });
+        if !tools.is_empty()
+            && let Some(object) = message.as_object_mut()
+        {
+            object.insert("tool_calls".to_owned(), Value::from(tools));
+        }
+        json!({
+            "index": index,
+            "message": message,
+            "finish_reason": self.finish_reason
+        })
+    }
+}

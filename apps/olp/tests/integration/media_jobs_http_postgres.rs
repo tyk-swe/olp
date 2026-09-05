@@ -12,8 +12,8 @@ use axum::{
 };
 use http_body_util::BodyExt as _;
 use olp::{
-    bootstrap::state::{ApiMode, ProcessComposition},
-    gateway::media_jobs::reconcile_media_jobs_once,
+    application::{media_jobs::reconcile_media_jobs_once, mode::ApiMode},
+    bootstrap::state::ProcessComposition,
     public_http::router::{gateway_router_for_test, management_router_for_test},
 };
 use olp_db::{
@@ -781,7 +781,7 @@ async fn media_job_management_views_are_session_authorized_and_metadata_only() {
     drop(current);
     fail_cleanup.store(false, Ordering::Release);
     let reconciliation_state = reconciliation_state.mode_dependencies().gateway().unwrap();
-    let pass = reconcile_media_jobs_once(&reconciliation_state, 8)
+    let pass = reconcile_media_jobs_once(&reconciliation_state.media_jobs, 8)
         .await
         .unwrap();
     assert!(pass.claimed >= 1);

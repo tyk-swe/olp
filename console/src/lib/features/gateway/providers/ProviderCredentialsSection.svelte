@@ -3,15 +3,14 @@
   import { queryKeys } from '$lib/api/queryKeys';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { errorMessage as providerDetailError } from '$lib/api/http';
+  import { getProvider, type Provider } from '$lib/api/management/providers';
   import {
-    getProvider,
     listProviderCredentials,
     revokeProviderCredential,
     rotateProviderCredential,
-    type Provider,
-    type ProviderCredential,
-    type ProviderKindCapability
-  } from '$lib/api/management/providers';
+    type ProviderCredential
+  } from '$lib/api/management/providerCredentials';
+  import { type ProviderKindCapability } from '$lib/api/management/providerModels';
   import { formatDate } from '$lib/format';
   import {
     DISABLED_EDIT_NOTE,

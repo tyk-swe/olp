@@ -277,44 +277,7 @@ pub fn encode_response_create(
             extra: BTreeMap::new(),
         }),
     });
-    let text = request
-        .response_format
-        .as_ref()
-        .map(|format| ResponseTextConfig {
-            format: match format {
-                ResponseFormat::Text => ResponseTextFormat {
-                    kind: "text".into(),
-                    name: None,
-                    description: None,
-                    schema: None,
-                    strict: None,
-                    extra: BTreeMap::new(),
-                },
-                ResponseFormat::JsonObject => ResponseTextFormat {
-                    kind: "json_object".into(),
-                    name: None,
-                    description: None,
-                    schema: None,
-                    strict: None,
-                    extra: BTreeMap::new(),
-                },
-                ResponseFormat::JsonSchema {
-                    name,
-                    description,
-                    schema,
-                    strict,
-                } => ResponseTextFormat {
-                    kind: "json_schema".into(),
-                    name: Some(name.clone()),
-                    description: description.clone(),
-                    schema: Some(schema.clone()),
-                    strict: *strict,
-                    extra: BTreeMap::new(),
-                },
-            },
-            verbosity: None,
-            extra: BTreeMap::new(),
-        });
+    let text = encode_response_text(request.response_format.as_ref());
     let mut extension_values = request.extensions.values.clone();
     extension_values.retain(|path, _| !is_delivery_only_extension(path));
     restore_raw_response_tools(&mut tools, &mut tool_choice, &mut extension_values)?;
@@ -792,4 +755,42 @@ fn decode_response_text_config(
         }),
         kind => Err(ResponsesCodecError::UnsupportedResponseFormat(kind.into())),
     }
+}
+
+fn encode_response_text(format: Option<&ResponseFormat>) -> Option<ResponseTextConfig> {
+    format.map(|format| ResponseTextConfig {
+        format: match format {
+            ResponseFormat::Text => ResponseTextFormat {
+                kind: "text".into(),
+                name: None,
+                description: None,
+                schema: None,
+                strict: None,
+                extra: BTreeMap::new(),
+            },
+            ResponseFormat::JsonObject => ResponseTextFormat {
+                kind: "json_object".into(),
+                name: None,
+                description: None,
+                schema: None,
+                strict: None,
+                extra: BTreeMap::new(),
+            },
+            ResponseFormat::JsonSchema {
+                name,
+                description,
+                schema,
+                strict,
+            } => ResponseTextFormat {
+                kind: "json_schema".into(),
+                name: Some(name.clone()),
+                description: description.clone(),
+                schema: Some(schema.clone()),
+                strict: *strict,
+                extra: BTreeMap::new(),
+            },
+        },
+        verbosity: None,
+        extra: BTreeMap::new(),
+    })
 }

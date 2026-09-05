@@ -6,7 +6,7 @@ use uuid::Uuid;
 use crate::{
     audit_events::record_success,
     authentication::insert_versioned_session,
-    configuration::MAX_PAGE_SIZE,
+    configuration::validation::MAX_PAGE_SIZE,
     error::Error as PersistenceError,
     idempotency::{
         Outcome, Replayable, ReplayableIdempotencyClaim, Response, claim_idempotency,
@@ -66,70 +66,9 @@ impl Store {
                 "expiration must be within the next 30 days".to_owned(),
             ));
         }
-        lock_identity_email(&mut transaction, &email).await?;
-        let member_exists: bool = sqlx::query_scalar!(
-            "SELECT EXISTS (SELECT 1 FROM users WHERE email = $1) AS \"value!\"",
-            &email
-        )
-        .fetch_one(&mut *transaction)
-        .await?;
-        if member_exists {
-            return Err(Error::EmailAlreadyMember);
-        }
-        let pending_exists: bool = sqlx::query_scalar!(
-            "SELECT EXISTS (SELECT 1 FROM invitations WHERE email = $1 \
-             AND accepted_at IS NULL AND revoked_at IS NULL AND expires_at > now()) AS \"value!\"",
-            &email
-        )
-        .fetch_one(&mut *transaction)
-        .await?;
-        if pending_exists {
-            return Err(Error::PendingInvitationExists);
-        }
-        // Expired pending rows no longer reserve the partial unique index.
-        // Record the timeout in its own column: stamping revoked_at here would
-        // rewrite a passive expiry as this operator's deliberate revocation.
-        sqlx::query!(
-            "UPDATE invitations SET expired_at = now() \
-             WHERE email = $1 AND accepted_at IS NULL AND revoked_at IS NULL \
-               AND expired_at IS NULL AND expires_at <= now()",
-            &email
-        )
-        .execute(&mut *transaction)
-        .await?;
-
-        let id = Uuid::now_v7();
-        let material = InvitationMaterial::generate();
-        let row = match sqlx::query_as!(
-            InvitationRow,
-            "INSERT INTO invitations \
-             (id, email, role, token_digest, invited_by, expires_at, created_at) \
-             VALUES ($1, $2, CAST($3::text AS user_role), $4, $5, $6, $7) \
-             RETURNING id, email, role::text AS \"role!\", invited_by, expires_at, accepted_at, \
-                       revoked_at, expired_at, created_at, \
-                       (SELECT u.email FROM users u WHERE u.id = invitations.invited_by) \
-                         AS \"invited_by_email?\", \
-                       (SELECT u.email FROM users u WHERE u.id = invitations.accepted_by) \
-                         AS \"accepted_by_email?\", \
-                       (SELECT u.email FROM users u WHERE u.id = invitations.revoked_by) \
-                         AS \"revoked_by_email?\"",
-            id,
-            &email,
-            invitation.role.as_str(),
-            material.token_digest().to_vec(),
-            invitation.actor,
-            invitation.expires_at,
-            now
-        )
-        .fetch_one(&mut *transaction)
-        .await
-        {
-            Ok(row) => row,
-            Err(error) if is_constraint(&error, "invitations_pending_email_idx") => {
-                return Err(Error::PendingInvitationExists);
-            }
-            Err(error) => return Err(error.into()),
-        };
+        prepare_invitation_email(&mut transaction, &email).await?;
+        let created = insert_invitation(&mut transaction, &invitation, &email, now).await?;
+        let id = created.invitation.id;
         record_success(
             &mut *transaction,
             self.provenance(),
@@ -139,10 +78,6 @@ impl Store {
             id,
         )
         .await?;
-        let created = InvitationCreated {
-            invitation: invitation_from_row(row)?,
-            material,
-        };
         let response = build_response(&created)?;
         complete_replayable_idempotency(
             &mut transaction,
@@ -267,48 +202,8 @@ impl Store {
             .ok_or_else(|| Error::Invalid("session lifetime is invalid".to_owned()))?;
         let digest = InvitationMaterial::digest_token(&acceptance.token);
         let mut transaction = self.pool().begin().await?;
-        let invitation_email: String = sqlx::query_scalar!(
-            "SELECT email FROM invitations WHERE token_digest = $1",
-            digest.to_vec()
-        )
-        .fetch_optional(&mut *transaction)
-        .await?
-        .ok_or(Error::InvitationUnavailable)?;
-        lock_identity_email(&mut transaction, &invitation_email).await?;
-        let invitation = sqlx::query!(
-            "SELECT id, email, role::text AS \"role!\", invited_by, expires_at, \
-                    accepted_at, revoked_at, expired_at \
-             FROM invitations WHERE token_digest = $1 FOR UPDATE",
-            digest.to_vec()
-        )
-        .fetch_optional(&mut *transaction)
-        .await?
-        .ok_or(Error::InvitationUnavailable)?;
-        let expires_at: DateTime<Utc> = invitation.expires_at;
-        if invitation.accepted_at.is_some()
-            || invitation.revoked_at.is_some()
-            || invitation.expired_at.is_some()
-            || expires_at <= Utc::now()
-        {
-            return Err(Error::InvitationUnavailable);
-        }
-        // An invitation is an out-of-band grant that outlives the session it
-        // was minted from. Sessions are revoked when a user is demoted or
-        // deactivated; this token must not survive that either, or a former
-        // owner's pending invitation still redeems into a live owner.
-        let inviter = sqlx::query!(
-            "SELECT role::text AS \"role!\", active FROM users WHERE id = $1",
-            invitation.invited_by
-        )
-        .fetch_optional(&mut *transaction)
-        .await?
-        .ok_or(Error::InvitationUnavailable)?;
-        if !inviter.active || !parse_role(inviter.role)?.allows(Permission::ManageAccess) {
-            return Err(Error::InvitationUnavailable);
-        }
-        let invitation_id: Uuid = invitation.id;
-        let email: String = invitation.email;
-        let role = parse_role(invitation.role)?;
+        let (invitation_id, email, role) =
+            lock_redeemable_invitation(&mut transaction, &digest).await?;
         let user_id = Uuid::now_v7();
         let etag = Uuid::now_v7();
         let now = Utc::now();
@@ -467,4 +362,136 @@ async fn lock_identity_email(
 fn is_constraint(error: &sqlx::Error, constraint: &str) -> bool {
     matches!(error, sqlx::Error::Database(database)
         if database.constraint() == Some(constraint))
+}
+
+async fn lock_redeemable_invitation(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    digest: &[u8; 32],
+) -> Result<(Uuid, String, olp_engine::domain::auth::Role), Error> {
+    let invitation_email: String = sqlx::query_scalar!(
+        "SELECT email FROM invitations WHERE token_digest = $1",
+        digest.to_vec()
+    )
+    .fetch_optional(&mut **transaction)
+    .await?
+    .ok_or(Error::InvitationUnavailable)?;
+    lock_identity_email(transaction, &invitation_email).await?;
+    let invitation = sqlx::query!(
+        "SELECT id, email, role::text AS \"role!\", invited_by, expires_at, \
+                    accepted_at, revoked_at, expired_at \
+             FROM invitations WHERE token_digest = $1 FOR UPDATE",
+        digest.to_vec()
+    )
+    .fetch_optional(&mut **transaction)
+    .await?
+    .ok_or(Error::InvitationUnavailable)?;
+    let expires_at: DateTime<Utc> = invitation.expires_at;
+    if invitation.accepted_at.is_some()
+        || invitation.revoked_at.is_some()
+        || invitation.expired_at.is_some()
+        || expires_at <= Utc::now()
+    {
+        return Err(Error::InvitationUnavailable);
+    }
+    // An invitation is an out-of-band grant that outlives the session it
+    // was minted from. Sessions are revoked when a user is demoted or
+    // deactivated; this token must not survive that either, or a former
+    // owner's pending invitation still redeems into a live owner.
+    let inviter = sqlx::query!(
+        "SELECT role::text AS \"role!\", active FROM users WHERE id = $1",
+        invitation.invited_by
+    )
+    .fetch_optional(&mut **transaction)
+    .await?
+    .ok_or(Error::InvitationUnavailable)?;
+    if !inviter.active || !parse_role(inviter.role)?.allows(Permission::ManageAccess) {
+        return Err(Error::InvitationUnavailable);
+    }
+    let invitation_id: Uuid = invitation.id;
+    let email: String = invitation.email;
+    let role = parse_role(invitation.role)?;
+    Ok((invitation_id, email, role))
+}
+
+async fn prepare_invitation_email(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    email: &str,
+) -> Result<(), Error> {
+    lock_identity_email(transaction, email).await?;
+    let member_exists: bool = sqlx::query_scalar!(
+        "SELECT EXISTS (SELECT 1 FROM users WHERE email = $1) AS \"value!\"",
+        &email
+    )
+    .fetch_one(&mut **transaction)
+    .await?;
+    if member_exists {
+        return Err(Error::EmailAlreadyMember);
+    }
+    let pending_exists: bool = sqlx::query_scalar!(
+        "SELECT EXISTS (SELECT 1 FROM invitations WHERE email = $1 \
+             AND accepted_at IS NULL AND revoked_at IS NULL AND expires_at > now()) AS \"value!\"",
+        &email
+    )
+    .fetch_one(&mut **transaction)
+    .await?;
+    if pending_exists {
+        return Err(Error::PendingInvitationExists);
+    }
+    // Expired pending rows no longer reserve the partial unique index.
+    // Record the timeout in its own column: stamping revoked_at here would
+    // rewrite a passive expiry as this operator's deliberate revocation.
+    sqlx::query!(
+        "UPDATE invitations SET expired_at = now() \
+             WHERE email = $1 AND accepted_at IS NULL AND revoked_at IS NULL \
+               AND expired_at IS NULL AND expires_at <= now()",
+        &email
+    )
+    .execute(&mut **transaction)
+    .await?;
+
+    Ok(())
+}
+
+async fn insert_invitation(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    invitation: &NewInvitation,
+    email: &str,
+    now: DateTime<Utc>,
+) -> Result<InvitationCreated, Error> {
+    let id = Uuid::now_v7();
+    let material = InvitationMaterial::generate();
+    let row = match sqlx::query_as!(
+        InvitationRow,
+        "INSERT INTO invitations \
+             (id, email, role, token_digest, invited_by, expires_at, created_at) \
+             VALUES ($1, $2, CAST($3::text AS user_role), $4, $5, $6, $7) \
+             RETURNING id, email, role::text AS \"role!\", invited_by, expires_at, accepted_at, \
+                       revoked_at, expired_at, created_at, \
+                       (SELECT u.email FROM users u WHERE u.id = invitations.invited_by) \
+                         AS \"invited_by_email?\", \
+                       (SELECT u.email FROM users u WHERE u.id = invitations.accepted_by) \
+                         AS \"accepted_by_email?\", \
+                       (SELECT u.email FROM users u WHERE u.id = invitations.revoked_by) \
+                         AS \"revoked_by_email?\"",
+        id,
+        &email,
+        invitation.role.as_str(),
+        material.token_digest().to_vec(),
+        invitation.actor,
+        invitation.expires_at,
+        now
+    )
+    .fetch_one(&mut **transaction)
+    .await
+    {
+        Ok(row) => row,
+        Err(error) if is_constraint(&error, "invitations_pending_email_idx") => {
+            return Err(Error::PendingInvitationExists);
+        }
+        Err(error) => return Err(error.into()),
+    };
+    Ok(InvitationCreated {
+        invitation: invitation_from_row(row)?,
+        material,
+    })
 }

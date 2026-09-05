@@ -23,7 +23,7 @@ use crate::domain::{
         ProviderTransport, TransportError, TransportPhase,
     },
 };
-use crate::providers::EgressPolicy;
+use crate::providers::http_egress::EgressPolicy;
 use crate::providers::openai::{
     ApiKey as OpenAiApiKey, ConnectorConfig as OpenAiConnectorConfig,
     certification::{CompatibleCapability, CompatibleCapabilityCertificationError},

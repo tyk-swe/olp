@@ -7,13 +7,13 @@
   import {
     cursorPaginationProps,
     emptyCursorHistory
-  } from '$lib/api/pagination';
+  } from '$lib/lists/pagination';
+  import { getProvider } from '$lib/api/management/providers';
   import {
-    getProvider,
     listProviderModelInventoryPage,
     setProviderModel,
     type ProviderModelInventory
-  } from '$lib/api/management/providers';
+  } from '$lib/api/management/providerModels';
   import { errorMessage } from '$lib/api/http';
   import { stateLabel } from '$lib/format';
   import { useRole } from '$lib/auth/useRole.svelte';

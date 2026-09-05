@@ -11,11 +11,13 @@ use olp_engine::inference::execution::RoutedEvents;
 use olp_engine::protocols::openai::chat::{CompletionRequest, decode};
 
 use crate::{
-    bootstrap::mode_dependencies::GatewayState,
-    public_http::json_media::admit_openai_chat,
-    public_http::streaming_response::{
-        ProtocolStreamEncoder, TerminalFrames, precommit_stream_failure,
-        protocol_streaming_response,
+    gateway::state::GatewayState,
+    public_http::{
+        json_media::admit_openai_chat,
+        streaming_response::{
+            ProtocolStreamEncoder, TerminalFrames, precommit_stream_failure,
+            protocol_streaming_response,
+        },
     },
 };
 

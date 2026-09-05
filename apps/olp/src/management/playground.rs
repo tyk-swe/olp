@@ -25,10 +25,10 @@ use utoipa::{OpenApi, ToSchema};
 use uuid::Uuid;
 
 use crate::{
-    bootstrap::mode_dependencies::ManagementState,
     gateway::error::InferenceError,
     management::{
         json_payload::json_payload, permissions::require_permission, principal::MutationPrincipal,
+        state::ManagementState,
     },
     public_http::problem::{FieldErrors, Problem},
 };

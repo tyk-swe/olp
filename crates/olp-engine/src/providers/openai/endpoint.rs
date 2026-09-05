@@ -4,8 +4,8 @@ use reqwest::{Client, Url};
 use thiserror::Error;
 
 use crate::providers::{
-    EgressPolicy,
     endpoint::{EndpointCore, Error as CommonEndpointError},
+    http_egress::EgressPolicy,
 };
 
 const DEFAULT_OPENAI_BASE_URL: &str = "https://api.openai.com/v1/";

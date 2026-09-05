@@ -5,12 +5,10 @@ use crate::domain::canonical::events::{Event, Kind};
 pub mod anthropic;
 mod client;
 mod client_sequence;
-mod extensions;
+pub mod extensions;
 pub mod gemini;
 pub mod openai;
 pub mod sse;
-
-pub use extensions::{UnresolvablePointer, materialize_response_pointer};
 
 #[derive(Default)]
 pub(in crate::protocols) struct CanonicalEventBuilder {

@@ -25,11 +25,13 @@ use serde::{Deserialize, Serialize};
 use olp_engine::inference::{execution::CompletedEvents, runtime::Bundle};
 
 use crate::{
-    bootstrap::mode_dependencies::GatewayState,
-    public_http::json_media::admit_anthropic_messages,
-    public_http::streaming_response::{
-        ProtocolStreamEncoder, encode_protocol_sse_frames, encode_server_sse_frame,
-        precommit_stream_failure, protocol_streaming_response,
+    gateway::state::GatewayState,
+    public_http::{
+        json_media::admit_anthropic_messages,
+        streaming_response::{
+            ProtocolStreamEncoder, encode_protocol_sse_frames, encode_server_sse_frame,
+            precommit_stream_failure, protocol_streaming_response,
+        },
     },
 };
 

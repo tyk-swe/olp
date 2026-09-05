@@ -9,7 +9,7 @@ use crate::{
         identity::Surface,
         requests::MessageRole,
     },
-    protocols::{materialize_response_pointer, openai::error_type, sse::Frame},
+    protocols::{extensions::materialize_response_pointer, openai::error_type, sse::Frame},
 };
 
 pub struct ChatCompletionStreamEncoder {

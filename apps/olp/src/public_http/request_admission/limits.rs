@@ -21,8 +21,8 @@ use olp_engine::protocols::openai::embeddings::EmbeddingWireInput;
 use serde::Deserialize;
 
 use crate::{
-    bootstrap::mode_dependencies::RequestBoundaryState,
     gateway::{self, endpoint_policy::classification::TokenEstimate},
+    public_http::state::RequestBoundaryState,
 };
 
 const LITELLM_API_KEY_HEADER: &str = "x-litellm-api-key";

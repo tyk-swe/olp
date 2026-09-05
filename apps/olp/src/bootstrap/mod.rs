@@ -7,7 +7,8 @@ pub(crate) mod connectors;
 pub mod mode_dependencies;
 #[cfg(not(feature = "test-util"))]
 pub(crate) mod mode_dependencies;
-pub(crate) mod provider_adapter;
+pub mod workers;
+
 #[cfg(feature = "test-util")]
 pub mod state;
 #[cfg(not(feature = "test-util"))]

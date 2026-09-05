@@ -5,7 +5,8 @@ import {
   GATEWAY_EPOCH_PAGE_SIZE,
   PROVIDER_HEALTH_PAGE_SIZE
 } from './pageSizes';
-import { collectCursorPages, type CursorPage } from './pagination';
+import { collectCursorPages } from './pagination';
+import { type CursorPage } from '$lib/api/http';
 
 export type RequestMetadataGatewayEpoch =
   components['schemas']['RequestMetadataGatewayEpochResponse'];

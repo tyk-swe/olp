@@ -85,20 +85,10 @@ impl Encoder {
                 name,
                 arguments_delta,
             } => {
-                let tool = self.tools.entry((output_index, tool_index)).or_default();
-                if let Some(id) = id {
-                    if tool.id.as_ref().is_some_and(|existing| existing != &id) {
-                        return Err(Error::Tool);
-                    }
-                    tool.id = Some(id);
-                }
-                if let Some(name) = name {
-                    if tool.name.as_ref().is_some_and(|existing| existing != &name) {
-                        return Err(Error::Tool);
-                    }
-                    tool.name = Some(name);
-                }
-                tool.arguments.push_str(&arguments_delta);
+                self.tools
+                    .entry((output_index, tool_index))
+                    .or_default()
+                    .push(id, name, &arguments_delta)?;
             }
             Kind::Usage { usage } => {
                 frames.push(self.response_frame(json!({
@@ -115,29 +105,7 @@ impl Encoder {
                 output_index,
                 reason,
             } => {
-                let keys = self
-                    .tools
-                    .keys()
-                    .filter(|(candidate, _)| *candidate == output_index)
-                    .copied()
-                    .collect::<Vec<_>>();
-                let mut parts = Vec::with_capacity(keys.len());
-                for key in keys {
-                    let tool = self.tools.remove(&key).ok_or(Error::Tool)?;
-                    let name = tool.name.ok_or(Error::Tool)?;
-                    let args =
-                        serde_json::from_str::<Value>(&tool.arguments).map_err(|_| Error::Tool)?;
-                    parts.push(json!({
-                        "functionCall": {"id": tool.id, "name": name, "args": args}
-                    }));
-                }
-                frames.push(self.response_frame(json!({
-                    "candidates": [{
-                        "index": output_index,
-                        "content": {"role": "model", "parts": parts},
-                        "finishReason": finish_reason(&reason)
-                    }]
-                })));
+                frames.push(self.finish_candidate(output_index, reason)?);
             }
             Kind::Error { error } => {
                 frames.push(Frame {
@@ -184,6 +152,35 @@ impl Encoder {
             }
         }
         Ok(frames)
+    }
+
+    fn finish_candidate(
+        &mut self,
+        output_index: u32,
+        reason: crate::domain::canonical::events::FinishReason,
+    ) -> Result<Frame, Error> {
+        let keys = self
+            .tools
+            .keys()
+            .filter(|(candidate, _)| *candidate == output_index)
+            .copied()
+            .collect::<Vec<_>>();
+        let mut parts = Vec::with_capacity(keys.len());
+        for key in keys {
+            let tool = self.tools.remove(&key).ok_or(Error::Tool)?;
+            let name = tool.name.ok_or(Error::Tool)?;
+            let args = serde_json::from_str::<Value>(&tool.arguments).map_err(|_| Error::Tool)?;
+            parts.push(json!({
+                "functionCall": {"id": tool.id, "name": name, "args": args}
+            }));
+        }
+        Ok(self.response_frame(json!({
+            "candidates": [{
+                "index": output_index,
+                "content": {"role": "model", "parts": parts},
+                "finishReason": finish_reason(&reason)
+            }]
+        })))
     }
 
     fn response_frame(&self, mut value: Value) -> Frame {
@@ -248,5 +245,29 @@ const fn error_code(class: ErrorClass) -> &'static str {
         ErrorClass::RateLimit => "RESOURCE_EXHAUSTED",
         ErrorClass::Timeout => "DEADLINE_EXCEEDED",
         ErrorClass::Transport | ErrorClass::Upstream | ErrorClass::Internal => "INTERNAL",
+    }
+}
+
+impl ToolState {
+    fn push(
+        &mut self,
+        id: Option<String>,
+        name: Option<String>,
+        arguments_delta: &str,
+    ) -> Result<(), Error> {
+        if let Some(id) = id {
+            if self.id.as_ref().is_some_and(|existing| existing != &id) {
+                return Err(Error::Tool);
+            }
+            self.id = Some(id);
+        }
+        if let Some(name) = name {
+            if self.name.as_ref().is_some_and(|existing| existing != &name) {
+                return Err(Error::Tool);
+            }
+            self.name = Some(name);
+        }
+        self.arguments.push_str(arguments_delta);
+        Ok(())
     }
 }

@@ -10,8 +10,11 @@ use utoipa::ToSchema;
 
 use super::{UsageQuery, UsageRangeCoverageResponse};
 use crate::{
-    bootstrap::mode_dependencies::ManagementState, management::operations::helpers::map_operations,
-    management::permissions::require_permission, public_http::problem::Problem,
+    management::{
+        operations::helpers::map_operations, permissions::require_permission,
+        state::ManagementState,
+    },
+    public_http::problem::Problem,
 };
 use olp_engine::domain::auth::Permission;
 

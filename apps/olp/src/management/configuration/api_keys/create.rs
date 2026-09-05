@@ -28,7 +28,7 @@ use crate::management::{
     response_policy::RuntimeGenerationResponse,
     secrets::WriteOnlySecret,
 };
-use crate::{bootstrap::mode_dependencies::ManagementState, public_http::problem::Problem};
+use crate::{management::state::ManagementState, public_http::problem::Problem};
 
 use super::policy::{ExpirationValidation, RawApiKeyPolicy, normalize_api_key_policy};
 use crate::management::provenance::Provenance;

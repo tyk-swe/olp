@@ -1,11 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import {
-  acceptInvitation,
-  currentSession,
-  login,
-  logout,
-  type FixedRole
-} from './auth';
+import { acceptInvitation, currentSession, login, logout } from './auth';
+import { type FixedRole } from '$lib/auth/authorization';
 import { ApiProblem } from './http';
 import { clearCsrfToken, getCsrfToken, setCsrfToken } from './session';
 import { captureRequests, jsonResponse } from './test/requestCapture';

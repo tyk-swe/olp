@@ -13,13 +13,13 @@ use uuid::Uuid;
 
 use super::helpers::{map_operations, not_found};
 use crate::{
-    bootstrap::mode_dependencies::ManagementState,
     management::{
         json_payload::json_payload,
         permissions::require_permission,
         preconditions::{if_match, with_etag},
         principal::{MutationPrincipal, ReadPrincipal},
         provenance::Provenance,
+        state::ManagementState,
     },
     public_http::problem::Problem,
 };

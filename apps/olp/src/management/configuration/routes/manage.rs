@@ -18,7 +18,6 @@ use utoipa::ToSchema;
 use uuid::Uuid;
 
 use crate::{
-    bootstrap::mode_dependencies::ManagementState,
     management::{
         error_mapping::map_configuration,
         idempotency::{MutationReply, ReplayableMutation},
@@ -28,6 +27,7 @@ use crate::{
         preconditions::{if_match, with_etag},
         principal::{MutationPrincipal, ReadPrincipal},
         provenance::Provenance,
+        state::ManagementState,
     },
     public_http::problem::Problem,
 };

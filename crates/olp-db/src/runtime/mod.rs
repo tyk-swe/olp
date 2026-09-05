@@ -8,6 +8,7 @@ use uuid::Uuid;
 
 pub mod compiler;
 pub mod outbox;
+pub mod provider_configuration;
 mod releases;
 
 /// A durable runtime publication envelope. Hash and creation metadata remain

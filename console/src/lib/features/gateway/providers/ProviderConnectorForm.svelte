@@ -1,6 +1,6 @@
 <script lang="ts">
   import NavIcon from '$lib/components/NavIcon.svelte';
-  import type { ProviderKindCapability } from '$lib/api/management/providers';
+  import type { ProviderKindCapability } from '$lib/api/management/providerModels';
   import {
     authOptionsFor,
     hasApiVersion,

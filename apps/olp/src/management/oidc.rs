@@ -24,8 +24,8 @@ use identities::{
 use utoipa::OpenApi;
 
 use crate::{
-    bootstrap::mode_dependencies::ManagementState, public_http::problem::Problem,
-    public_http::public_auth_routes::PublicAuthRoute,
+    management::state::ManagementState,
+    public_http::{problem::Problem, public_auth_routes::PublicAuthRoute},
 };
 
 pub(crate) fn router() -> Router<ManagementState> {

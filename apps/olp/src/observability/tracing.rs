@@ -21,16 +21,16 @@ use tracing_subscriber::{
 
 use olp_engine::inference::tracing::OTEL_TARGET;
 
-use crate::{
-    bootstrap::cli::validation::{check_secret_permissions, read_secret_file},
-    bootstrap::{cli::AppResult, state::ApiMode},
+use crate::application::{
+    error::AppResult,
+    mode::ApiMode,
+    secret_files::{check_secret_permissions, read_secret_file},
 };
 
 mod processor;
-mod request;
+pub(crate) mod request;
 
 use processor::BoundedSpanProcessor;
-pub(crate) use request::trace_admitted_request;
 
 const EXPORT_TIMEOUT: Duration = Duration::from_secs(2);
 const EXPORT_QUEUE_CAPACITY: usize = 2_048;

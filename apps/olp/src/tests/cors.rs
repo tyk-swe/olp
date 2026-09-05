@@ -6,7 +6,7 @@ use axum::{
 };
 use tower::ServiceExt as _;
 
-use crate::bootstrap::{mode_dependencies::test_store, state::ApiMode};
+use crate::{application::mode::ApiMode, bootstrap::mode_dependencies::test_store};
 use olp_db::security::key_material::AuthHmacKey;
 use olp_engine::inference::runtime::Manager;
 

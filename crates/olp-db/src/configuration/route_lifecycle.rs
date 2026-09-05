@@ -1,4 +1,6 @@
-use olp_engine::domain::ids::RouteSlug;
+use crate::runtime::PublishedRuntimeRelease;
+use chrono::{DateTime, Utc};
+use olp_engine::domain::{canonical::identity::OperationKind, ids::RouteSlug};
 use sqlx::{Postgres, Transaction};
 use uuid::Uuid;
 
@@ -14,9 +16,49 @@ use crate::{
 };
 
 use super::{
-    Error, NewRouteDraft, RouteActivated, RouteDraftCreated,
+    error::Error,
     resources::helpers::{DraftTargetRows, insert_draft_operations, insert_draft_targets},
 };
+
+#[derive(Debug, Clone)]
+pub struct NewRouteTarget {
+    pub provider_id: Uuid,
+    pub upstream_model: String,
+    pub priority: u16,
+    pub weight: u32,
+    pub timeout_ms: u64,
+}
+
+#[derive(Debug)]
+pub struct NewRouteDraft {
+    pub slug: String,
+    pub operations: Vec<OperationKind>,
+    pub overall_timeout_ms: u64,
+    pub max_attempts: u16,
+    pub targets: Vec<NewRouteTarget>,
+    pub actor: Uuid,
+    pub idempotency_key: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct RouteDraftCreated {
+    pub id: Uuid,
+    pub slug: RouteSlug,
+    pub etag: Uuid,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone)]
+pub struct RouteActivated {
+    pub route_id: Uuid,
+    pub revision_id: Uuid,
+    pub revision: i32,
+    /// The draft is consumed by activation: it returns to `draft` under this
+    /// new ETag, so a second activation has to revalidate first instead of
+    /// minting a byte-identical revision.
+    pub draft_etag: Uuid,
+    pub release: PublishedRuntimeRelease,
+}
 
 fn validated_route_draft_input(route: &NewRouteDraft) -> Result<(RouteSlug, i32), Error> {
     let slug = RouteSlug::parse(route.slug.clone())
@@ -285,35 +327,18 @@ impl Store {
         if draft.etag != expected_etag {
             return Err(Error::PreconditionFailed);
         }
-        // Media reservations are not runtime-publication mutations. Block
-        // their short INSERT/UPDATE transactions while checking and
-        // publishing so a job cannot appear against the old route after the
-        // compatibility decision but before this activation commits.
-        sqlx::query!("LOCK TABLE async_media_jobs IN SHARE MODE")
-            .execute(&mut *transaction)
-            .await?;
-        revalidate_route_draft(&mut transaction, draft_id).await?;
+        validate_activation_media_jobs(&mut transaction, draft_id).await?;
         let slug: String = draft.slug;
         let based_route_id: Option<Uuid> = draft.based_route_id;
         let based_slug: Option<String> = draft.based_slug;
-        let route_id = if let Some(route_id) = based_route_id {
-            if based_slug.as_deref() != Some(slug.as_str()) {
-                return Err(Error::InvalidRoute(
-                    "a restored route draft must retain its original stable slug".to_owned(),
-                ));
-            }
-            route_id
-        } else {
-            sqlx::query_scalar!(
-                "INSERT INTO routes (id, slug, created_by) VALUES ($1, $2, $3) \
-                 ON CONFLICT (slug) DO UPDATE SET slug = EXCLUDED.slug RETURNING id AS \"value!\"",
-                Uuid::now_v7(),
-                &slug,
-                actor
-            )
-            .fetch_one(&mut *transaction)
-            .await?
-        };
+        let route_id = resolve_activated_route_id(
+            &mut transaction,
+            based_route_id,
+            based_slug.as_deref(),
+            &slug,
+            actor,
+        )
+        .await?;
         let revision: i32 = sqlx::query_scalar!(
             "SELECT COALESCE(max(revision), 0) + 1 AS \"value!\" FROM route_revisions WHERE route_id = $1",
             route_id
@@ -328,47 +353,8 @@ impl Store {
         revision_id, route_id, draft.routing_id, revision, &slug, draft.overall_timeout_ms, draft.max_attempts, draft_id, actor)
         .execute(&mut *transaction)
         .await?;
-        sqlx::query!(
-            "INSERT INTO route_revision_operations (route_revision_id, operation) \
-             SELECT $1, operation FROM route_draft_operations WHERE route_draft_id = $2",
-            revision_id,
-            draft_id
-        )
-        .execute(&mut *transaction)
-        .await?;
-        let targets = sqlx::query!(
-            "SELECT routing_id, provider_model_id, priority, weight, timeout_ms, position \
-             FROM route_draft_targets WHERE route_draft_id = $1 ORDER BY position",
-            draft_id
-        )
-        .fetch_all(&mut *transaction)
-        .await?;
-        for target in targets {
-            sqlx::query!(
-                "INSERT INTO route_revision_targets \
-                 (id, routing_id, route_revision_id, provider_model_id, priority, weight, timeout_ms, position) \
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
-            Uuid::now_v7(), target.routing_id, revision_id, target.provider_model_id, target.priority, target.weight, target.timeout_ms, target.position)
-            .execute(&mut *transaction)
-            .await?;
-        }
-        // Activation consumes the draft. Without this the same validated ETag
-        // activates again under a fresh Idempotency-Key, minting a revision
-        // identical to the one just published and republishing the runtime to
-        // every replica.
-        let draft_etag = Uuid::now_v7();
-        let consumed = sqlx::query!(
-            "UPDATE route_drafts SET state = 'draft', etag = $2, updated_at = now() \
-             WHERE id = $1 AND etag = $3",
-            draft_id,
-            draft_etag,
-            expected_etag
-        )
-        .execute(&mut *transaction)
-        .await?;
-        if consumed.rows_affected() != 1 {
-            return Err(Error::PreconditionFailed);
-        }
+        populate_route_revision(&mut transaction, draft_id, revision_id).await?;
+        let draft_etag = consume_route_draft(&mut transaction, draft_id, expected_etag).await?;
         record_success(
             &mut *transaction,
             self.provenance(),
@@ -460,6 +446,15 @@ async fn revalidate_route_draft(
         )));
     }
 
+    validate_media_job_route_targets(transaction, draft_id).await?;
+
+    Ok(())
+}
+
+async fn validate_media_job_route_targets(
+    transaction: &mut Transaction<'_, Postgres>,
+    draft_id: Uuid,
+) -> Result<(), Error> {
     let media_job_without_target: Option<Uuid> = sqlx::query_scalar!(
         "SELECT j.id FROM async_media_jobs j \
          JOIN route_drafts rd ON rd.id = $1 AND rd.slug = j.route_slug \
@@ -517,5 +512,105 @@ async fn revalidate_route_draft(
         )));
     }
 
+    Ok(())
+}
+
+async fn resolve_activated_route_id(
+    transaction: &mut Transaction<'_, Postgres>,
+    based_route_id: Option<Uuid>,
+    based_slug: Option<&str>,
+    slug: &str,
+    actor: Uuid,
+) -> Result<Uuid, Error> {
+    let route_id = if let Some(route_id) = based_route_id {
+        if based_slug != Some(slug) {
+            return Err(Error::InvalidRoute(
+                "a restored route draft must retain its original stable slug".to_owned(),
+            ));
+        }
+        route_id
+    } else {
+        sqlx::query_scalar!(
+            "INSERT INTO routes (id, slug, created_by) VALUES ($1, $2, $3) \
+             ON CONFLICT (slug) DO UPDATE SET slug = EXCLUDED.slug RETURNING id AS \"value!\"",
+            Uuid::now_v7(),
+            &slug,
+            actor
+        )
+        .fetch_one(&mut **transaction)
+        .await?
+    };
+    Ok(route_id)
+}
+
+async fn populate_route_revision(
+    transaction: &mut Transaction<'_, Postgres>,
+    draft_id: Uuid,
+    revision_id: Uuid,
+) -> Result<(), Error> {
+    sqlx::query!(
+        "INSERT INTO route_revision_operations (route_revision_id, operation) \
+         SELECT $1, operation FROM route_draft_operations WHERE route_draft_id = $2",
+        revision_id,
+        draft_id
+    )
+    .execute(&mut **transaction)
+    .await?;
+    let targets = sqlx::query!(
+        "SELECT routing_id, provider_model_id, priority, weight, timeout_ms, position \
+         FROM route_draft_targets WHERE route_draft_id = $1 ORDER BY position",
+        draft_id
+    )
+    .fetch_all(&mut **transaction)
+    .await?;
+    for target in targets {
+        sqlx::query!(
+            "INSERT INTO route_revision_targets \
+             (id, routing_id, route_revision_id, provider_model_id, priority, weight, timeout_ms, position) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
+        Uuid::now_v7(), target.routing_id, revision_id, target.provider_model_id, target.priority, target.weight, target.timeout_ms, target.position)
+        .execute(&mut **transaction)
+        .await?;
+    }
+    Ok(())
+}
+
+async fn consume_route_draft(
+    transaction: &mut Transaction<'_, Postgres>,
+    draft_id: Uuid,
+    expected_etag: Uuid,
+) -> Result<Uuid, Error> {
+    // Activation consumes the draft. Without this the same validated ETag
+    // activates again under a fresh Idempotency-Key, minting a revision
+    // identical to the one just published and republishing the runtime to
+    // every replica.
+    let draft_etag = Uuid::now_v7();
+    let consumed = sqlx::query!(
+        "UPDATE route_drafts SET state = 'draft', etag = $2, updated_at = now() \
+             WHERE id = $1 AND etag = $3",
+        draft_id,
+        draft_etag,
+        expected_etag
+    )
+    .execute(&mut **transaction)
+    .await?;
+    if consumed.rows_affected() != 1 {
+        return Err(Error::PreconditionFailed);
+    }
+    Ok(draft_etag)
+}
+
+async fn validate_activation_media_jobs(
+    transaction: &mut Transaction<'_, Postgres>,
+    draft_id: Uuid,
+) -> Result<(), Error> {
+    // Media reservations are not runtime-publication mutations. Block
+    // their short INSERT/UPDATE transactions while checking and
+    // publishing so a job cannot appear against the old route after the
+    // compatibility decision but before this activation commits.
+    sqlx::query!("LOCK TABLE async_media_jobs IN SHARE MODE")
+        .execute(&mut **transaction)
+        .await?;
+    revalidate_route_draft(transaction, draft_id).await?;
     Ok(())
 }

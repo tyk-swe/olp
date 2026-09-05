@@ -18,8 +18,8 @@ use crate::providers::gemini::{
 use crate::providers::openai::{ApiKey as OpenAiApiKey, transport::Connector as OpenAiConnector};
 use crate::providers::vertex::Connector as VertexConnector;
 
-use crate::providers::EgressPolicy;
 use crate::providers::connector::ResponseLimits;
+use crate::providers::http_egress::EgressPolicy;
 
 use super::configuration::{
     BedrockAuthMode, BorrowedCredential, Config, ConnectorConfiguration, Credential,

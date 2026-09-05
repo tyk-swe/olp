@@ -1,284 +1,20 @@
 <script lang="ts">
-  import { goto } from '$app/navigation';
-  import { queryKeys } from '$lib/api/queryKeys';
-  import { guardUnsavedChanges } from '$lib/forms/unsavedChanges';
+  import RouteTargets from './RouteTargets.svelte';
+  import RoutePublishPanel from './RoutePublishPanel.svelte';
+  import RouteSimulation from './RouteSimulation.svelte';
   import { resolve } from '$app/paths';
-  import { createQuery, useQueryClient } from '@tanstack/svelte-query';
-  import { errorMessage as message, isEtagMismatch } from '$lib/api/http';
+  import { errorMessage as message } from '$lib/api/http';
   import ConflictNotice from '$lib/components/ConflictNotice.svelte';
   import ReadOnlyNote from '$lib/components/ReadOnlyNote.svelte';
-  import {
-    beginReload,
-    conflictNotice,
-    initialConcurrentEdit,
-    markConflict,
-    markDirty,
-    markSaved,
-    reconcile,
-    acceptRemote
-  } from '$lib/forms/concurrentEdit';
-  import {
-    activateRoute,
-    createRouteDraft,
-    deleteRouteDraft,
-    getRouteDraft,
-    replaceRouteDraft,
-    simulateRoute,
-    validateRoute,
-    type RouteActivation,
-    type RouteDraft,
-    type RouteSimulation
-  } from '$lib/api/management/routes';
-  import { listProviderModelInventory } from '$lib/api/management/providers';
-  import { useRole } from '$lib/auth/useRole.svelte';
   import { formatDate } from '$lib/format';
-  import {
-    buildCreateRouteDraftInput,
-    buildReplaceRouteDraftInput,
-    eligibleTargetTuples,
-    missingTargetOperations,
-    modesFor,
-    operationOptions,
-    routeEligibilityWarnings as findRouteEligibilityWarnings,
-    surfacesFor,
-    toRouteModelOptions,
-    validateRouteEditor,
-    type EditableTarget
-  } from './routeEditor';
-
-  let { routeId }: { routeId?: string } = $props();
-  const resourceId = $derived(routeId ?? '');
-  const isNew = $derived(!resourceId);
-  const queryClient = useQueryClient();
-  const access = useRole();
-  const canManage = $derived(access.can('routes.manage'));
-
-  const draft = createQuery(() => ({
-    queryKey: queryKeys.routes.draft(resourceId),
-    queryFn: () => getRouteDraft(resourceId),
-    enabled: Boolean(resourceId)
-  }));
-  const providerModels = createQuery(() => ({
-    queryKey: queryKeys.providers.enabledModels(),
-    queryFn: () => listProviderModelInventory(true)
-  }));
-  const modelOptions = $derived(toRouteModelOptions(providerModels.data ?? []));
-
-  let slug = $state('default');
-  let operations = $state<string[]>(['generation']);
-  let overallTimeoutMs = $state(120000);
-  let maxAttempts = $state(2);
-  let targets = $state<EditableTarget[]>([]);
-  let sync = $state(initialConcurrentEdit());
-  let busy = $state('');
-  let errorMessage = $state('');
-  let notice = $state('');
-  let seed = $state('setup-preview');
-  let simulationOperation = $state('generation');
-  let simulationSurface = $state('openai');
-  let simulationMode = $state('streaming');
-  let simulation = $state<RouteSimulation | null>(null);
-  let activation = $state<RouteActivation | null>(null);
-  const editorValues = $derived({
-    slug,
-    operations,
-    overallTimeoutMs,
-    maxAttempts,
-    targets
-  });
-  const concurrentNotice = $derived(conflictNotice(sync));
-
-  $effect(() => {
-    const current = draft.data;
-    if (!current) return;
-    const next = reconcile(sync, current.etag);
-    if (next.state !== sync) sync = next.state;
-    if (!next.hydrate) return;
-    slug = current.slug;
-    operations = [...current.operations];
-    overallTimeoutMs = current.overall_timeout_ms;
-    maxAttempts = current.max_attempts;
-    targets = current.targets.map((target) => ({
-      providerModelId: target.provider_model_id,
-      priority: target.priority,
-      weight: target.weight,
-      timeoutMs: target.timeout_ms
-    }));
-  });
-
-  $effect(() => {
-    if (!operations.includes(simulationOperation)) {
-      simulationOperation = operations[0] ?? 'generation';
-    }
-    const surfaces = surfacesFor(simulationOperation);
-    if (!surfaces.includes(simulationSurface))
-      simulationSurface = surfaces[0] ?? 'openai';
-    const modes = modesFor(simulationOperation);
-    if (!modes.includes(simulationMode)) simulationMode = modes[0] ?? 'unary';
-  });
-
-  const routeEligibilityWarnings = $derived(
-    findRouteEligibilityWarnings(targets, modelOptions, operations)
-  );
-
-  async function run(label: string, action: () => Promise<void>) {
-    busy = label;
-    errorMessage = '';
-    notice = '';
-    try {
-      await action();
-    } catch (error) {
-      if (isEtagMismatch(error)) sync = markConflict(sync);
-      else errorMessage = message(error);
-    } finally {
-      busy = '';
-    }
-  }
-
-  function touch() {
-    sync = markDirty(sync);
-  }
-
-  async function reload() {
-    errorMessage = '';
-    const result = await draft.refetch();
-    if (result.error) {
-      errorMessage = message(result.error);
-      return;
-    }
-    sync = beginReload(sync);
-  }
-
-  guardUnsavedChanges(() => sync.dirty);
-
-  function toggleOperation(operation: string, checked: boolean) {
-    operations = checked
-      ? [...new Set([...operations, operation])]
-      : operations.filter((item) => item !== operation);
-    touch();
-  }
-
-  function addTarget() {
-    const firstUnused =
-      modelOptions.find(
-        (option) =>
-          !targets.some((target) => target.providerModelId === option.id)
-      ) ?? modelOptions[0];
-    if (!firstUnused) return;
-    targets = [
-      ...targets,
-      {
-        providerModelId: firstUnused.id,
-        priority: 1,
-        weight: 100,
-        timeoutMs: 60000
-      }
-    ];
-    touch();
-  }
-
-  function removeTarget(index: number) {
-    targets = targets.filter((_, targetIndex) => targetIndex !== index);
-    touch();
-  }
-
-  async function create(event: SubmitEvent) {
-    event.preventDefault();
-    if (!canManage) return;
-    const issue = validateRouteEditor(editorValues);
-    if (issue) {
-      errorMessage = issue;
-      return;
-    }
-    await run('save', async () => {
-      const id = await createRouteDraft(
-        buildCreateRouteDraftInput(editorValues, modelOptions)
-      );
-      await queryClient.invalidateQueries({ queryKey: queryKeys.routes.lists });
-      sync = initialConcurrentEdit();
-      await goto(resolve(`/routes/${id}`));
-    });
-  }
-
-  async function save(current: RouteDraft) {
-    if (!canManage) return;
-    const issue = validateRouteEditor(editorValues);
-    if (issue) {
-      errorMessage = issue;
-      return;
-    }
-    await run('save', async () => {
-      if (!sync.snapshotEtag)
-        throw new Error('Reload the draft before saving.');
-      const updated = await replaceRouteDraft(
-        current.id,
-        sync.snapshotEtag,
-        buildReplaceRouteDraftInput(editorValues)
-      );
-      sync = markSaved(sync, updated.etag);
-      queryClient.setQueryData(queryKeys.routes.draft(current.id), updated);
-      notice =
-        'Draft saved. Validate to preview, or activate directly; activation validates the saved draft.';
-    });
-  }
-
-  async function simulate(current: RouteDraft) {
-    if (!canManage) return;
-    await run('simulate', async () => {
-      simulation = await simulateRoute(current.id, {
-        operation: simulationOperation,
-        surface: simulationSurface,
-        mode: simulationMode,
-        seed: seed || 'preview'
-      });
-      notice = 'Deterministic attempt order calculated from the saved draft.';
-    });
-  }
-
-  async function validate(current: RouteDraft) {
-    if (!canManage) return;
-    await run('validate', async () => {
-      const validation = await validateRoute(current);
-      sync = acceptRemote(sync, validation.etag);
-      queryClient.setQueryData<RouteDraft>(queryKeys.routes.draft(current.id), {
-        ...current,
-        state: validation.state,
-        etag: validation.etag
-      });
-      notice = 'Validation passed. The saved draft is ready to activate.';
-    });
-  }
-
-  async function activate(current: RouteDraft) {
-    if (!canManage) return;
-    await run('activate', async () => {
-      activation = await activateRoute(current);
-      // Activation returns the draft to `draft` under a fresh ETag. Adopting it
-      // here keeps the next save from failing its If-Match precondition.
-      sync = acceptRemote(sync, activation.draft_etag);
-      queryClient.setQueryData<RouteDraft>(queryKeys.routes.draft(current.id), {
-        ...current,
-        state: 'draft',
-        etag: activation.draft_etag
-      });
-      notice = `Route activated as revision ${activation.revision} in runtime generation ${activation.runtime_generation.sequence}.`;
-      await Promise.all([
-        draft.refetch(),
-        queryClient.invalidateQueries({ queryKey: queryKeys.routes.lists })
-      ]);
-    });
-  }
-
-  async function remove(current: RouteDraft) {
-    if (!canManage) return;
-    if (!confirm(`Delete draft “${current.slug}”?`)) return;
-    await run('delete', async () => {
-      await deleteRouteDraft(current.id, current.etag);
-      await queryClient.invalidateQueries({ queryKey: queryKeys.routes.lists });
-      sync = initialConcurrentEdit();
-      await goto(resolve('/routes'));
-    });
-  }
+  import { operationOptions } from './routeEditor';
+  import { RouteDraftEditorState } from './routeDraftEditor.svelte';
+  let {
+    routeId
+  }: {
+    routeId?: string;
+  } = $props();
+  const editor = new RouteDraftEditorState(() => routeId);
 </script>
 
 <svelte:head><title>Routes · OpenLLMProxy</title></svelte:head>
@@ -287,77 +23,82 @@
   <div>
     <p class="eyebrow">Gateway · Route Studio</p>
     <h1 class="page-title">
-      {isNew ? 'Build a route draft.' : (draft.data?.slug ?? 'Route draft')}
+      {editor.isNew
+        ? 'Build a route draft.'
+        : (editor.draft.data?.slug ?? 'Route draft')}
     </h1>
     <p class="page-description">
       Set explicit eligibility, deterministic priority and weight, and bounded
       failover before publishing.
     </p>
-    {#if draft.data}<p class="draft-meta">
-        Created {formatDate(draft.data.created_at)} by {draft.data
+    {#if editor.draft.data}<p class="draft-meta">
+        Created {formatDate(editor.draft.data.created_at)} by {editor.draft.data
           .created_by_email ??
-          'a removed account'}{#if draft.data.based_on_revision_id}
-          · Based on revision <code>{draft.data.based_on_revision_id}</code
+          'a removed account'}{#if editor.draft.data.based_on_revision_id}
+          · Based on revision <code
+            >{editor.draft.data.based_on_revision_id}</code
           >{/if}
       </p>{/if}
   </div>
   <div class="page-actions">
     <a class="button button-secondary" href={resolve('/routes')}
-      >{canManage ? 'Cancel' : 'Back to routes'}</a
-    >{#if canManage && resourceId && draft.data}<button
+      >{editor.canManage ? 'Cancel' : 'Back to routes'}</a
+    >{#if editor.canManage && editor.resourceId && editor.draft.data}<button
         class="button button-secondary danger-button"
         type="button"
-        onclick={() => remove(draft.data!)}
-        disabled={Boolean(busy)}>Delete draft</button
+        onclick={() => editor.remove(editor.draft.data!)}
+        disabled={Boolean(editor.busy)}>Delete draft</button
       >{/if}
   </div>
 </div>
-{#if !canManage}<ReadOnlyNote
+{#if !editor.canManage}<ReadOnlyNote
     >Your role can view this route draft but not change or activate it.</ReadOnlyNote
   >{/if}
-{#if errorMessage}<div class="inline-problem" role="alert">
-    {errorMessage}
+{#if editor.errorMessage}<div class="inline-problem" role="alert">
+    {editor.errorMessage}
   </div>{/if}
-{#if notice}<div class="success-banner" role="status">{notice}</div>{/if}
+{#if editor.notice}<div class="success-banner" role="status">
+    {editor.notice}
+  </div>{/if}
 <ConflictNotice
-  notice={concurrentNotice}
-  onReload={reload}
-  disabled={Boolean(busy)}
+  notice={editor.concurrentNotice}
+  onReload={editor.reload}
+  disabled={Boolean(editor.busy)}
 />
-{#if !isNew && draft.isError && !draft.data}
+{#if !editor.isNew && editor.draft.isError && !editor.draft.data}
   <div class="inline-problem" role="alert">
-    {message(draft.error)}
+    {message(editor.draft.error)}
     <button
       class="button button-secondary"
       type="button"
-      onclick={() => draft.refetch()}>Retry</button
+      onclick={() => editor.draft.refetch()}>Retry</button
     >
   </div>
 {/if}
 <!-- The draft and the enabled-model inventory are independent queries; a failure in one must not blank the other. -->
-{#if providerModels.isError}
+{#if editor.providerModels.isError}
   <div class="inline-problem" role="alert">
-    {message(providerModels.error)} Target selection is unavailable until the model
-    inventory loads.
+    {message(editor.providerModels.error)} Target selection is unavailable until the
+    model inventory loads.
     <button
       class="button button-secondary"
       type="button"
-      onclick={() => providerModels.refetch()}>Retry</button
+      onclick={() => editor.providerModels.refetch()}>Retry</button
     >
   </div>
 {/if}
-{#if (!isNew && draft.isPending) || providerModels.isPending}
+{#if (!editor.isNew && editor.draft.isPending) || editor.providerModels.isPending}
   <div class="loading-state" role="status">Loading Route Studio…</div>
-{:else if (!isNew && !draft.data) || providerModels.isError}
+{:else if (!editor.isNew && !editor.draft.data) || editor.providerModels.isError}
   <!-- Nothing editable can be rendered without a draft or an inventory. -->
 {:else}
   <form
     class="studio"
-    onsubmit={isNew
-      ? create
+    onsubmit={editor.isNew
+      ? editor.create
       : (event) => {
           event.preventDefault();
-          if (draft.data) save(draft.data);
+          if (editor.draft.data) editor.save(editor.draft.data);
         }}
   >
     <div class="studio-main">
@@ -369,9 +110,9 @@
             <label for="route-slug">Public model slug</label><input
               id="route-slug"
               autocomplete="off"
-              bind:value={slug}
-              oninput={touch}
-              disabled={!canManage}
+              bind:value={editor.slug}
+              oninput={editor.touch}
+              disabled={!editor.canManage}
             /><small
               >Clients send this value as their model. Direct provider/model
               addressing is unavailable.</small
@@ -382,139 +123,20 @@
             >{#each operationOptions as option (option[0])}<label
                 ><input
                   type="checkbox"
-                  checked={operations.includes(option[0])}
-                  disabled={!canManage}
+                  checked={editor.operations.includes(option[0])}
+                  disabled={!editor.canManage}
                   onchange={(event) =>
-                    toggleOperation(option[0], event.currentTarget.checked)}
+                    editor.toggleOperation(
+                      option[0],
+                      event.currentTarget.checked
+                    )}
                 />
                 {option[1]}</label
               >{/each}
           </fieldset>
         </div>
       </section>
-      <section class="card editor" aria-labelledby="targets-heading">
-        <div class="section-heading">
-          <div>
-            <p class="eyebrow">Attempt order</p>
-            <h2 id="targets-heading">Eligible targets</h2>
-          </div>
-          <button
-            class="button button-secondary"
-            type="button"
-            onclick={addTarget}
-            disabled={!canManage || !modelOptions.length}>Add target</button
-          >
-        </div>
-        {#if !modelOptions.length}<div class="empty-state compact">
-            <p>
-              No enabled models are available. <a href={resolve('/models')}
-                >Review model eligibility</a
-              >.
-            </p>
-          </div>{/if}
-        <ol class="targets">
-          {#each targets as target, index (index)}
-            <li>
-              <span class="target-number" aria-hidden="true">{index + 1}</span>
-              <div class="target-fields">
-                <div class="form-field model-select">
-                  <label for={`target-model-${index}`}>Provider model</label
-                  ><select
-                    id={`target-model-${index}`}
-                    bind:value={target.providerModelId}
-                    onchange={touch}
-                    disabled={!canManage}
-                    >{#each modelOptions as option (option.id)}<option
-                        value={option.id}>{option.label}</option
-                      >{/each}</select
-                  >
-                </div>
-                <div class="form-field">
-                  <label for={`priority-${index}`}>Priority</label><input
-                    id={`priority-${index}`}
-                    type="number"
-                    min="1"
-                    max="100"
-                    bind:value={target.priority}
-                    oninput={touch}
-                    disabled={!canManage}
-                  />
-                </div>
-                <div class="form-field">
-                  <label for={`weight-${index}`}>Weight</label><input
-                    id={`weight-${index}`}
-                    type="number"
-                    min="1"
-                    max="10000"
-                    bind:value={target.weight}
-                    oninput={touch}
-                    disabled={!canManage}
-                  />
-                </div>
-                <div class="form-field">
-                  <label for={`timeout-${index}`}>Attempt timeout (ms)</label
-                  ><input
-                    id={`timeout-${index}`}
-                    type="number"
-                    min="100"
-                    bind:value={target.timeoutMs}
-                    oninput={touch}
-                    disabled={!canManage}
-                  />
-                </div>
-              </div>
-              <button
-                class="remove-target"
-                type="button"
-                aria-label={`Remove target ${index + 1}`}
-                onclick={() => removeTarget(index)}
-                disabled={!canManage}>×</button
-              >
-              <div
-                class:warning={missingTargetOperations(
-                  target,
-                  modelOptions,
-                  operations
-                ).length > 0}
-                class="target-eligibility"
-              >
-                {#if eligibleTargetTuples(target, modelOptions, operations).length}
-                  <span
-                    ><strong>Certified tuples:</strong>
-                    {eligibleTargetTuples(
-                      target,
-                      modelOptions,
-                      operations
-                    ).join(', ')}</span
-                  >
-                {:else}
-                  <span
-                    >No selected operation has a certified tuple on this target.</span
-                  >
-                {/if}
-                {#if missingTargetOperations(target, modelOptions, operations).length}<span
-                    ><strong>Missing:</strong>
-                    {missingTargetOperations(
-                      target,
-                      modelOptions,
-                      operations
-                    ).join(', ')}</span
-                  >{/if}
-              </div>
-            </li>
-          {/each}
-        </ol>
-        {#if routeEligibilityWarnings.length}<div
-            class="eligibility-warning"
-            role="status"
-          >
-            <strong>Route eligibility is incomplete.</strong><span
-              >No selected target has a certified tuple for: {routeEligibilityWarnings.join(
-                ', '
-              )}.</span
-            >
-          </div>{/if}
-      </section>
+      <RouteTargets {editor} />
       <section class="card editor advanced" aria-labelledby="advanced-heading">
         <p class="eyebrow">Advanced</p>
         <h2 id="advanced-heading">Deadline and failover</h2>
@@ -524,9 +146,9 @@
               id="overall-timeout"
               type="number"
               min="100"
-              bind:value={overallTimeoutMs}
-              oninput={touch}
-              disabled={!canManage}
+              bind:value={editor.overallTimeoutMs}
+              oninput={editor.touch}
+              disabled={!editor.canManage}
             />
           </div>
           <div class="form-field">
@@ -534,9 +156,9 @@
               id="max-attempts"
               type="number"
               min="1"
-              bind:value={maxAttempts}
-              oninput={touch}
-              disabled={!canManage}
+              bind:value={editor.maxAttempts}
+              oninput={editor.touch}
+              disabled={!editor.canManage}
             />
           </div>
         </div>
@@ -552,108 +174,9 @@
         </details>
       </section>
     </div>
-    <aside class="card publish-panel" aria-labelledby="publish-heading">
-      <p class="eyebrow">Draft controls</p>
-      <h2 id="publish-heading">Test before activation</h2>
-      <p>
-        Saving changes invalidates prior validation. Unsaved edits must be saved
-        before you can simulate or validate them.
-      </p>
-      <button
-        class="button button-secondary"
-        type="submit"
-        disabled={!canManage || Boolean(busy)}
-        >{busy === 'save'
-          ? 'Saving…'
-          : isNew
-            ? 'Create draft'
-            : 'Save draft'}</button
-      >
-      {#if !isNew && draft.data}
-        <hr />
-        <label for="simulation-operation">Dry-run operation</label>
-        <select id="simulation-operation" bind:value={simulationOperation}
-          >{#each operations as operation (operation)}<option value={operation}
-              >{operation}</option
-            >{/each}</select
-        >
-        <label for="simulation-surface">Client surface</label>
-        <select id="simulation-surface" bind:value={simulationSurface}
-          >{#each surfacesFor(simulationOperation) as surface (surface)}<option
-              value={surface}>{surface}</option
-            >{/each}</select
-        >
-        <label for="simulation-mode">Transport mode</label>
-        <select id="simulation-mode" bind:value={simulationMode}
-          >{#each modesFor(simulationOperation) as mode (mode)}<option
-              value={mode}>{mode}</option
-            >{/each}</select
-        >
-        <label for="simulation-seed">Dry-run seed</label>
-        <input id="simulation-seed" bind:value={seed} />
-        <button
-          class="button button-secondary"
-          type="button"
-          onclick={() => simulate(draft.data!)}
-          disabled={!canManage || Boolean(busy) || sync.dirty}
-          >{busy === 'simulate' ? 'Simulating…' : 'Simulate order'}</button
-        >
-        <button
-          class="button button-secondary"
-          type="button"
-          onclick={() => validate(draft.data!)}
-          disabled={!canManage || Boolean(busy) || sync.dirty}
-          >{busy === 'validate' ? 'Validating…' : 'Validate draft'}</button
-        >
-        <button
-          class="button button-primary"
-          type="button"
-          onclick={() => activate(draft.data!)}
-          disabled={!canManage || Boolean(busy) || sync.dirty}
-          >{busy === 'activate' ? 'Activating…' : 'Activate route'}</button
-        >
-      {/if}
-      {#if activation}<div class="activation">
-          <strong>Revision {activation.revision} active</strong><span
-            >Runtime generation {activation.runtime_generation.sequence}</span
-          ><a href={resolve(`/routes/${activation.route_id}/revisions`)}
-            >View revision history</a
-          >
-        </div>{/if}
-    </aside>
+    <RoutePublishPanel {editor} />
   </form>
-  {#if simulation}<section
-      class="card simulation"
-      aria-labelledby="simulation-heading"
-    >
-      <div class="section-heading">
-        <div>
-          <p class="eyebrow">Deterministic dry run</p>
-          <h2 id="simulation-heading">Attempt explanation</h2>
-        </div>
-        <code>seed: {simulation.deterministic_seed}</code>
-      </div>
-      <ol>
-        {#each simulation.targets as target (target.target_id)}<li
-            class:ineligible={!target.eligible}
-          >
-            <span class="attempt">{target.attempt ?? '—'}</span>
-            <div>
-              <strong>{target.provider_name} · {target.provider_model}</strong>
-              <p>
-                {target.eligible
-                  ? `Eligible in priority group ${target.priority}`
-                  : (target.reason ?? 'Capability tuple is not eligible')}
-              </p>
-            </div>
-            <span
-              class:success={target.eligible}
-              class:warning={!target.eligible}
-              class="badge">{target.eligible ? 'eligible' : 'filtered'}</span
-            >
-          </li>{/each}
-      </ol>
-    </section>{/if}
+  <RouteSimulation {editor} />
 {/if}
 
 <style>
@@ -682,9 +205,7 @@
     gap: 1rem;
     min-width: 0;
   }
-  .editor,
-  .publish-panel,
-  .simulation {
+  .editor {
     padding: clamp(1.1rem, 2.5vw, 1.5rem);
   }
   .operations {
@@ -702,78 +223,7 @@
     gap: 0.45rem;
     font-weight: 600;
   }
-  .section-heading {
-    display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
-    gap: 1rem;
-  }
-  .targets {
-    display: grid;
-    gap: 0.65rem;
-    margin: 1rem 0 0;
-    padding: 0;
-    list-style: none;
-  }
-  .targets li {
-    display: grid;
-    grid-template-columns: 2rem minmax(0, 1fr) 2.75rem;
-    gap: 0.65rem;
-    align-items: end;
-    padding: 0.75rem;
-    border: 1px solid var(--border);
-    border-radius: 0.375rem;
-    background: var(--surface-subtle);
-  }
-  .target-number {
-    display: grid;
-    width: 2rem;
-    height: 2rem;
-    place-items: center;
-    margin-bottom: 0.35rem;
-    border-radius: 50%;
-    background: var(--accent-soft);
-    color: var(--accent-strong);
-    font: 750 0.72rem 'JetBrains Mono Variable';
-  }
-  .target-fields {
-    display: grid;
-    grid-column: 2;
-    grid-template-columns: minmax(12rem, 2fr) repeat(3, minmax(7rem, 1fr));
-    gap: 0.6rem;
-  }
-  .remove-target {
-    grid-column: 3;
-    grid-row: 1;
-    width: 2.5rem;
-    height: 2.5rem;
-    border: 1px solid var(--border);
-    border-radius: 0.375rem;
-    background: var(--surface);
-    color: var(--danger);
-    font-size: 1.3rem;
-  }
-  .target-eligibility {
-    display: grid;
-    grid-column: 2 / -1;
-    gap: 0.2rem;
-    color: var(--success);
-    font-size: 0.72rem;
-  }
-  .target-eligibility.warning {
-    color: var(--warning);
-  }
-  .eligibility-warning {
-    display: grid;
-    gap: 0.2rem;
-    margin-top: 0.75rem;
-    padding: 0.75rem;
-    border: 1px solid color-mix(in srgb, var(--warning) 45%, var(--border));
-    border-radius: 0.375rem;
-    background: var(--warning-soft);
-    color: var(--warning);
-    font-size: 0.78rem;
-  }
+
   .advanced details {
     margin-top: 1rem;
     padding: 0.8rem;
@@ -784,88 +234,10 @@
     min-height: 2.75rem;
     font-weight: 700;
   }
-  .advanced details p,
-  .publish-panel p {
+  .advanced details p {
     color: var(--foreground-muted);
   }
-  .publish-panel {
-    position: sticky;
-    top: 5rem;
-    display: grid;
-    gap: 0.65rem;
-  }
-  .publish-panel h2,
-  .publish-panel p {
-    margin-bottom: 0;
-  }
-  .publish-panel hr {
-    width: 100%;
-    margin: 0.5rem 0;
-    border: 0;
-    border-top: 1px solid var(--border);
-  }
-  .publish-panel > :is(input, select) {
-    min-height: 2.5rem;
-    padding: 0.5rem 0.65rem;
-    border: 1px solid var(--border-strong);
-    border-radius: 0.375rem;
-    background: var(--surface);
-    color: var(--foreground);
-  }
-  .activation {
-    display: grid;
-    gap: 0.2rem;
-    padding: 0.75rem;
-    border-radius: 0.375rem;
-    background: var(--success-soft);
-    color: var(--success);
-    font-size: 0.78rem;
-  }
-  .activation a {
-    min-height: 2.75rem;
-    padding-top: 0.65rem;
-    font-weight: 750;
-  }
-  .simulation {
-    margin-top: 1rem;
-  }
-  .simulation ol {
-    margin: 1rem 0 0;
-    padding: 0;
-    list-style: none;
-  }
-  .simulation li {
-    display: grid;
-    grid-template-columns: 2.2rem 1fr auto;
-    align-items: center;
-    gap: 0.75rem;
-    min-height: 4rem;
-    border-top: 1px solid var(--border);
-  }
-  .simulation li.ineligible {
-    color: var(--foreground-muted);
-  }
-  .simulation p {
-    margin: 0.15rem 0 0;
-    color: var(--foreground-muted);
-    font-size: 0.78rem;
-  }
-  .attempt {
-    display: grid;
-    width: 2rem;
-    height: 2rem;
-    place-items: center;
-    border-radius: 50%;
-    background: var(--surface-subtle);
-    font: 700 0.72rem 'JetBrains Mono Variable';
-  }
-  .compact {
-    min-height: 6rem;
-  }
-  .compact a {
-    color: var(--accent-strong);
-    font-weight: 700;
-  }
+
   .danger-button {
     color: var(--danger);
   }
@@ -883,45 +255,9 @@
     .studio {
       grid-template-columns: 1fr;
     }
-    .publish-panel {
-      position: static;
-      grid-template-columns: repeat(3, 1fr);
-    }
-    .publish-panel
-      > :is(.eyebrow, h2, p, hr, label, input, select, .activation) {
-      grid-column: 1 / -1;
-    }
-    .target-fields {
-      grid-template-columns: repeat(3, 1fr);
-    }
-    .model-select {
-      grid-column: 1 / -1;
-    }
   }
   @media (max-width: 48rem) {
     .operations {
-      grid-template-columns: 1fr;
-    }
-    .targets li {
-      grid-template-columns: 1fr 2.75rem;
-    }
-    .target-number {
-      display: none;
-    }
-    .target-fields {
-      grid-column: 1;
-      grid-template-columns: 1fr;
-    }
-    .remove-target {
-      grid-column: 2;
-    }
-    .target-eligibility {
-      grid-column: 1 / -1;
-    }
-    .model-select {
-      grid-column: auto;
-    }
-    .publish-panel {
       grid-template-columns: 1fr;
     }
   }

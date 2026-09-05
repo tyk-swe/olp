@@ -5,15 +5,11 @@ mod lifecycle;
 mod master_key;
 mod migrate;
 mod runtime_activation;
-mod service_supervisors;
 mod startup;
 pub(crate) mod validation;
-#[cfg(feature = "test-util")]
-pub mod worker;
-#[cfg(not(feature = "test-util"))]
-pub(crate) mod worker;
+mod worker;
 
-use std::{error::Error, time::Duration};
+use std::time::Duration;
 
 use self::{
     config::{Cli, Command},
@@ -25,11 +21,10 @@ use self::{
     startup::serve,
     worker::run_worker,
 };
-use crate::bootstrap::state::ApiMode;
+use crate::application::mode::ApiMode;
 use clap::Parser;
 
-pub(crate) type AppError = Box<dyn Error + Send + Sync>;
-pub(crate) type AppResult<T> = Result<T, AppError>;
+use crate::application::error::{AppError, AppResult};
 const BACKGROUND_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(5);
 
 pub fn run() -> AppResult<()> {

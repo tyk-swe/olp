@@ -10,7 +10,7 @@
   import {
     cursorPaginationProps,
     type CursorHistory
-  } from '$lib/api/pagination';
+  } from '$lib/lists/pagination';
   import { useRole } from '$lib/auth/useRole.svelte';
   import { formatDate, stateLabel } from '$lib/format';
   import { providerStatus, providerStatusTone } from './providerEditor';

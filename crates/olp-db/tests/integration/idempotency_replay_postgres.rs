@@ -1,7 +1,7 @@
 use chrono::{Duration, Utc};
 use olp_db::{
     access::{Error as AccessError, NewApiKeyRecord},
-    configuration::Error as ConfigurationError,
+    configuration::error::Error as ConfigurationError,
     configuration::resources::RotateApiKeyInput,
     idempotency::Outcome,
     idempotency::Replayable,

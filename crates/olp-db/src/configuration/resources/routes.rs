@@ -159,75 +159,7 @@ impl Store {
                 Error::NotFound
             });
         }
-        let previous_targets = sqlx::query!(
-            "SELECT routing_id, provider_model_id, priority, weight, timeout_ms, position \
-             FROM route_draft_targets WHERE route_draft_id = $1 ORDER BY position",
-            draft_id
-        )
-        .fetch_all(&mut *transaction)
-        .await?;
-        sqlx::query!(
-            "DELETE FROM route_draft_operations WHERE route_draft_id = $1",
-            draft_id
-        )
-        .execute(&mut *transaction)
-        .await?;
-        sqlx::query!(
-            "DELETE FROM route_draft_targets WHERE route_draft_id = $1",
-            draft_id
-        )
-        .execute(&mut *transaction)
-        .await?;
-        insert_draft_operations(&mut transaction, draft_id, &input.operations).await?;
-        let requested = input
-            .targets
-            .iter()
-            .map(|(provider_model_id, _, _, _)| *provider_model_id)
-            .collect::<Vec<_>>();
-        // One query decides which requested models are active; the loop below
-        // keeps reporting the first inactive one in position order.
-        let active: BTreeSet<Uuid> = sqlx::query_scalar!(
-            "SELECT prm.source_provider_model_id AS \"id!\" FROM providers p \
-             JOIN provider_revision_models prm ON prm.provider_revision_id = p.active_revision_id \
-             WHERE prm.source_provider_model_id = ANY($1::uuid[]) AND prm.enabled \
-               AND p.state <> 'disabled'::provider_state",
-            &requested
-        )
-        .fetch_all(&mut *transaction)
-        .await?
-        .into_iter()
-        .collect();
-        let mut rows = helpers::DraftTargetRows::default();
-        for (position, (provider_model_id, priority, weight, timeout_ms)) in
-            input.targets.iter().enumerate()
-        {
-            let position = i32::try_from(position)
-                .map_err(|_| Error::Invalid("too many targets".to_owned()))?;
-            if !active.contains(provider_model_id) {
-                return Err(Error::Invalid(format!(
-                    "provider model {provider_model_id} is not active"
-                )));
-            }
-            let routing_id = previous_targets
-                .iter()
-                .find(|target| {
-                    target.position == position
-                        && target.provider_model_id == *provider_model_id
-                        && target.priority == *priority
-                        && target.weight == *weight
-                        && target.timeout_ms == *timeout_ms
-                })
-                .map_or_else(Uuid::now_v7, |target| target.routing_id);
-            rows.push(
-                routing_id,
-                *provider_model_id,
-                *priority,
-                *weight,
-                *timeout_ms,
-                position,
-            );
-        }
-        insert_draft_targets(&mut transaction, draft_id, &rows).await?;
+        replace_draft_targets(&mut transaction, draft_id, input).await?;
         record_success(
             &mut *transaction,
             self.provenance(),
@@ -627,4 +559,81 @@ fn rank_simulation_targets(
         }
     }
     targets
+}
+
+async fn replace_draft_targets(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    draft_id: Uuid,
+    input: &ReplaceRouteDraftInput,
+) -> Result<(), Error> {
+    let previous_targets = sqlx::query!(
+        "SELECT routing_id, provider_model_id, priority, weight, timeout_ms, position \
+             FROM route_draft_targets WHERE route_draft_id = $1 ORDER BY position",
+        draft_id
+    )
+    .fetch_all(&mut **transaction)
+    .await?;
+    sqlx::query!(
+        "DELETE FROM route_draft_operations WHERE route_draft_id = $1",
+        draft_id
+    )
+    .execute(&mut **transaction)
+    .await?;
+    sqlx::query!(
+        "DELETE FROM route_draft_targets WHERE route_draft_id = $1",
+        draft_id
+    )
+    .execute(&mut **transaction)
+    .await?;
+    insert_draft_operations(transaction, draft_id, &input.operations).await?;
+    let requested = input
+        .targets
+        .iter()
+        .map(|(provider_model_id, _, _, _)| *provider_model_id)
+        .collect::<Vec<_>>();
+    // One query decides which requested models are active; the loop below
+    // keeps reporting the first inactive one in position order.
+    let active: BTreeSet<Uuid> = sqlx::query_scalar!(
+        "SELECT prm.source_provider_model_id AS \"id!\" FROM providers p \
+             JOIN provider_revision_models prm ON prm.provider_revision_id = p.active_revision_id \
+             WHERE prm.source_provider_model_id = ANY($1::uuid[]) AND prm.enabled \
+               AND p.state <> 'disabled'::provider_state",
+        &requested
+    )
+    .fetch_all(&mut **transaction)
+    .await?
+    .into_iter()
+    .collect();
+    let mut rows = helpers::DraftTargetRows::default();
+    for (position, (provider_model_id, priority, weight, timeout_ms)) in
+        input.targets.iter().enumerate()
+    {
+        let position =
+            i32::try_from(position).map_err(|_| Error::Invalid("too many targets".to_owned()))?;
+        if !active.contains(provider_model_id) {
+            return Err(Error::Invalid(format!(
+                "provider model {provider_model_id} is not active"
+            )));
+        }
+        let routing_id = previous_targets
+            .iter()
+            .find(|target| {
+                target.position == position
+                    && target.provider_model_id == *provider_model_id
+                    && target.priority == *priority
+                    && target.weight == *weight
+                    && target.timeout_ms == *timeout_ms
+            })
+            .map_or_else(Uuid::now_v7, |target| target.routing_id);
+        rows.push(
+            routing_id,
+            *provider_model_id,
+            *priority,
+            *weight,
+            *timeout_ms,
+            position,
+        );
+    }
+    insert_draft_targets(transaction, draft_id, &rows).await?;
+    Ok(())
 }

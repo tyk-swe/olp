@@ -4,8 +4,8 @@ use reqwest::{Client, Url};
 use thiserror::Error;
 
 use crate::providers::{
-    EgressPolicy,
     endpoint::{EndpointCore, Error as CommonEndpointError},
+    http_egress::EgressPolicy,
 };
 
 const DEFAULT_BASE_URL: &str = "https://generativelanguage.googleapis.com/v1beta/";

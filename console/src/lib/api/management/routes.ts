@@ -2,7 +2,8 @@ import type { components } from '../schema';
 import { apiClient } from '../client';
 import { ensureSuccess, pageResult, result } from '../http';
 import { ROUTE_PAGE_SIZE, ROUTE_REVISION_PAGE_SIZE } from '../pageSizes';
-import { collectCursorPages, type CursorPage } from '../pagination';
+import { collectCursorPages } from '../pagination';
+import { type CursorPage } from '$lib/api/http';
 
 type Schemas = components['schemas'];
 

@@ -38,50 +38,6 @@ impl olp_engine::domain::ports::MediaSpool for CountingAdmissionSpool {
     }
 }
 
-#[test]
-fn video_create_requires_exact_lifecycle_capabilities() {
-    let model = "video-model";
-    let lifecycle = [
-        OperationKind::VideoGet,
-        OperationKind::VideoContent,
-        OperationKind::VideoDelete,
-    ];
-    let mut operations = lifecycle.into_iter().collect::<BTreeSet<_>>();
-    let mut provider = Provider {
-        id: ProviderId::new(),
-        revision_id: None,
-        name: "video-provider".into(),
-        kind: ProviderKind::OpenAi,
-        enabled: true,
-        active_credential: None,
-        capabilities: lifecycle
-            .into_iter()
-            .map(|operation| {
-                Capability::new(model, operation, Surface::OpenAi, TransportMode::Unary)
-            })
-            .collect(),
-    };
-    assert!(crate::gateway::videos::video_lifecycle_supported(
-        &operations,
-        &provider,
-        model
-    ));
-
-    operations.remove(&OperationKind::VideoDelete);
-    assert!(!crate::gateway::videos::video_lifecycle_supported(
-        &operations,
-        &provider,
-        model
-    ));
-    operations.insert(OperationKind::VideoDelete);
-    provider.capabilities.clear();
-    assert!(!crate::gateway::videos::video_lifecycle_supported(
-        &operations,
-        &provider,
-        model
-    ));
-}
-
 struct RecordingSpool {
     inner: Arc<dyn MediaSpool>,
     handles: Mutex<Vec<MediaHandle>>,

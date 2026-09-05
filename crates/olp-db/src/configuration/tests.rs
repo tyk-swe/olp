@@ -1,4 +1,4 @@
-use super::provider_lifecycle::{database_version, stored_version};
+use crate::configuration::validation::{database_version, stored_version};
 
 #[test]
 fn credential_versions_must_be_positive_database_integers() {

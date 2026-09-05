@@ -20,7 +20,7 @@ use olp_engine::inference::{
     runtime::Bundle,
 };
 
-use crate::bootstrap::mode_dependencies::GatewayState;
+use crate::gateway::state::GatewayState;
 use crate::public_http::request_admission::HttpRequestAdmission;
 use olp_engine::inference::principal::Principal;
 

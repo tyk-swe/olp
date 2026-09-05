@@ -17,10 +17,7 @@ use chrono::Utc;
 use futures::{Stream, stream};
 use http_body_util::BodyExt;
 use olp::{
-    bootstrap::{
-        mode_dependencies::GatewayState,
-        state::{ApiMode, ProcessComposition},
-    },
+    application::mode::ApiMode, bootstrap::state::ProcessComposition, gateway::state::GatewayState,
     public_http::router::gateway_router_for_test,
 };
 use olp_db::{security::key_material::AuthHmacKey, store::Store};

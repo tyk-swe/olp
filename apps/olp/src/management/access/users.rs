@@ -20,7 +20,7 @@ use crate::management::{
     preconditions::{if_match, with_etag},
     provenance::Provenance,
 };
-use crate::{bootstrap::mode_dependencies::ManagementState, public_http::problem::Problem};
+use crate::{management::state::ManagementState, public_http::problem::Problem};
 
 #[derive(Clone, Debug, Serialize, ToSchema)]
 pub(in crate::management) struct UserDetailResponse {

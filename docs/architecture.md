@@ -37,20 +37,37 @@ use all three. `domain` imports no sibling module, and no engine module except
 connectors. Inference reaches persistence only through its own ports.
 
 Delivery is grouped by owner: `bootstrap/` contains CLI, process composition,
-activation, workers, and shutdown; `public_http/` contains shared listener,
+activation, worker supervision, and shutdown; `application/` owns persisted
+provider runtime assembly and durable media-job workflows; `public_http/` contains shared listener,
 admission, proxy, origin, and response policy; `gateway/` contains protocol
 HTTP adapters; `management/` contains the `/api/v1` control plane;
 `observability/` contains the private health/metrics surface; and `console/`
 contains static-asset delivery. The database crate exposes subsystem
 namespaces rather than a flat persistence API. The role checker validates
 semantic package-role edges, the engine's module ordering, and infrastructure
-ownership.
+ownership. Delivery surfaces own their typed state; bootstrap constructs those
+states without becoming a dependency of HTTP handlers or application workflows.
+Background media reconciliation receives application dependencies rather than
+gateway state. Provider configuration conversion belongs to the engine; persisted
+credential loading belongs to application code; management maps failures to HTTP.
+
+Console API modules own requests and contracts. Neutral list modules own cursor
+history and Svelte list contexts. Route and provider editors keep reactive state
+and actions in feature-local controllers, with separate presentation components.
+Neutral modules cannot depend on features, and API modules cannot own UI state.
 
 Rust APIs likewise follow ownership rather than layers: public items are
 imported from the leaf module that defines them, with no crate-root or
 layer-level re-export facades. Examples include
 `olp_engine::domain::canonical::requests::GenerationRequest`,
 `olp_engine::inference::service::Service`, and `olp_db::store::Store`.
+Boundary checks reject named and wildcard forwarding exports, including scoped
+Rust exports and TypeScript forwarding of imported bindings. Engine-only tests
+live with the engine so test imports do not force execution internals public.
+
+The source-size baseline may only shrink: `check-source-size.sh --update` rejects
+new exceptions. Transactional helpers retain the caller-owned transaction and
+lock order; refactoring does not split commits or change persistent formats.
 
 ## Distributed tracing
 

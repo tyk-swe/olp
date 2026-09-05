@@ -6,7 +6,7 @@
 
 use chrono::{DateTime, Duration, Timelike as _, Utc};
 use olp_db::{
-    configuration::Error as ConfigurationError,
+    configuration::error::Error as ConfigurationError,
     idempotency::{Outcome, Replayable, Response},
     identity::{AcceptInvitation, Error as IdentityError, InstallationSetupInput, NewInvitation},
     media_jobs::{MediaJobState, MediaJobUpdate, NewMediaJobReservation},

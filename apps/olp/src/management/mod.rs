@@ -14,9 +14,11 @@ pub(crate) mod playground;
 pub(crate) mod preconditions;
 pub(crate) mod principal;
 pub(crate) mod provenance;
+pub(crate) mod provider_connector;
 pub(crate) mod response_policy;
 pub(crate) mod secrets;
 pub(crate) mod sessions;
+pub mod state;
 
 use access::{
     invitations::{
@@ -43,7 +45,7 @@ use axum::{Json, Router, routing::get, routing::post};
 use utoipa::OpenApi;
 
 use crate::{
-    bootstrap::mode_dependencies::ManagementState,
+    management::state::ManagementState,
     public_http::{problem::Problem, public_auth_routes::PublicAuthRoute},
 };
 

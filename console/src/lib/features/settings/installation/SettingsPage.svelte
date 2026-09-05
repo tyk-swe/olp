@@ -8,7 +8,7 @@
     cursorPaginationProps,
     emptyCursorHistory,
     resetCursor
-  } from '$lib/api/pagination';
+  } from '$lib/lists/pagination';
   import {
     createPricingRevision,
     listPricing,
@@ -16,10 +16,8 @@
   } from '$lib/api/pricing';
   import { listSettings, updateSetting, type Setting } from '$lib/api/settings';
   import { dateTimeLocalValue, formatDate, stateLabel } from '$lib/format';
-  import {
-    listProviderKinds,
-    type ProviderKind
-  } from '$lib/api/management/providers';
+  import { listProviderKinds } from '$lib/api/management/providerModels';
+  import { type ProviderKind } from '$lib/api/management/providers';
   import {
     LIMITS_OUTAGE_POLICIES,
     isLimitsOutagePolicy,

@@ -5,14 +5,14 @@ use std::{
 
 use clap::{Args, Parser, Subcommand};
 use ipnet::IpNet;
-use olp_engine::providers::{EgressPolicy, connector::ResponseLimits};
+use olp_engine::providers::{connector::ResponseLimits, http_egress::EgressPolicy};
 
-use crate::{
-    bootstrap::state::BodyLimits,
-    public_http::cors::CorsAllowedOrigins,
-    public_http::proxy::TrustedProxyCidr,
-    public_http::public_origin::PublicOrigin,
-    public_http::request_admission::public::{
+use crate::public_http::{
+    body_limits::BodyLimits,
+    cors::CorsAllowedOrigins,
+    proxy::TrustedProxyCidr,
+    public_origin::PublicOrigin,
+    request_admission::public::{
         DEFAULT_MAX_IN_FLIGHT_INFERENCE_REQUESTS, DEFAULT_MAX_IN_FLIGHT_MANAGEMENT_REQUESTS,
         MAX_ADMISSION_CAPACITY,
     },

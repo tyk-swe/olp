@@ -1,6 +1,9 @@
 import type { MediaJobFilters } from '$lib/api/media-jobs';
 import { MEDIA_JOB_PAGE_SIZE } from '$lib/api/pageSizes';
-import { filteredListState, type FilteredListState } from '$lib/api/pagination';
+import {
+  filteredListState,
+  type FilteredListState
+} from '$lib/lists/pagination';
 import { instant } from '$lib/api/query';
 
 export type MediaJobForm = {

@@ -1,5 +1,5 @@
 use axum::http::StatusCode;
-use olp_db::{configuration::Error, configuration::resources::CapabilityRecord};
+use olp_db::configuration::{error::Error, resources::CapabilityRecord};
 use olp_engine::providers::{
     factory::certification::CapabilityCertificationEvidence,
     openai::certification::CompatibleCapabilityCertificationError,

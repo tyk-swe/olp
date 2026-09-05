@@ -3,10 +3,11 @@
 //!
 //! Top-level modules follow runtime ownership: process bootstrap, public HTTP
 //! policy, inference delivery, management delivery, observability, and the
-//! embedded console. `apps/olp/AGENTS.md` carries the detailed map.
+//! embedded console. `docs/architecture.md` carries the detailed map.
 
 // HTTP surfaces: inference gateway, management API, operations reads, OIDC,
 // playground, embedded console, private observability listener, composition.
+pub mod application;
 pub mod bootstrap;
 pub mod console;
 pub mod gateway;

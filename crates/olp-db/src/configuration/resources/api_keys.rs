@@ -364,11 +364,11 @@ impl Store {
         let RotateApiKeyInput {
             id,
             material,
-            expected_etag,
             actor,
             idempotency_key,
             daily_cost_limit,
             monthly_cost_limit,
+            ..
         } = input;
         if daily_cost_limit
             .flatten()
@@ -380,10 +380,6 @@ impl Store {
                 "cost limits must have at most 12 integer and 12 fractional digits".to_owned(),
             ));
         }
-        let daily_cost_limit_changed = daily_cost_limit.is_some();
-        let monthly_cost_limit_changed = monthly_cost_limit.is_some();
-        let daily_cost_limit = daily_cost_limit.flatten();
-        let monthly_cost_limit = monthly_cost_limit.flatten();
         let mut transaction = self
             .pool()
             .begin_with("BEGIN ISOLATION LEVEL READ COMMITTED")
@@ -414,41 +410,7 @@ impl Store {
                 return Err(Error::IdempotencyInProgress);
             }
         }
-        let etag = Uuid::now_v7();
-        let result = sqlx::query!(
-            "UPDATE api_keys SET lookup_id = $1, secret_digest = $2, \
-                    daily_cost_limit = CASE WHEN $3 THEN $4 ELSE daily_cost_limit END, \
-                    monthly_cost_limit = CASE WHEN $5 THEN $6 ELSE monthly_cost_limit END, \
-                    etag = $7, rotated_at = now() \
-             WHERE id = $8 AND etag = $9 AND revoked_at IS NULL \
-               AND (expires_at IS NULL OR expires_at > now())",
-            &material.lookup_id,
-            material.digest.to_vec(),
-            daily_cost_limit_changed,
-            daily_cost_limit,
-            monthly_cost_limit_changed,
-            monthly_cost_limit,
-            etag,
-            id,
-            expected_etag
-        )
-        .execute(&mut *transaction)
-        .await?;
-        if result.rows_affected() != 1 {
-            let row = sqlx::query!(
-                "SELECT etag, revoked_at, expires_at FROM api_keys WHERE id = $1",
-                id
-            )
-            .fetch_optional(&mut *transaction)
-            .await?
-            .ok_or(Error::NotFound)?;
-            if row.etag != expected_etag {
-                return Err(Error::PreconditionFailed);
-            }
-            return Err(Error::Invalid(
-                "revoked or expired keys cannot be rotated".to_owned(),
-            ));
-        }
+        let etag = rotate_api_key_record(&mut transaction, &input).await?;
         record_success(
             &mut *transaction,
             self.provenance(),
@@ -482,4 +444,58 @@ impl Store {
             response,
         })
     }
+}
+
+async fn rotate_api_key_record(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    input: &RotateApiKeyInput<'_>,
+) -> Result<Uuid, Error> {
+    let RotateApiKeyInput {
+        id,
+        material,
+        expected_etag,
+        daily_cost_limit,
+        monthly_cost_limit,
+        ..
+    } = *input;
+    let daily_cost_limit_changed = daily_cost_limit.is_some();
+    let monthly_cost_limit_changed = monthly_cost_limit.is_some();
+    let daily_cost_limit = daily_cost_limit.flatten();
+    let monthly_cost_limit = monthly_cost_limit.flatten();
+    let etag = Uuid::now_v7();
+    let result = sqlx::query!(
+        "UPDATE api_keys SET lookup_id = $1, secret_digest = $2, \
+                    daily_cost_limit = CASE WHEN $3 THEN $4 ELSE daily_cost_limit END, \
+                    monthly_cost_limit = CASE WHEN $5 THEN $6 ELSE monthly_cost_limit END, \
+                    etag = $7, rotated_at = now() \
+             WHERE id = $8 AND etag = $9 AND revoked_at IS NULL \
+               AND (expires_at IS NULL OR expires_at > now())",
+        &material.lookup_id,
+        material.digest.to_vec(),
+        daily_cost_limit_changed,
+        daily_cost_limit,
+        monthly_cost_limit_changed,
+        monthly_cost_limit,
+        etag,
+        id,
+        expected_etag
+    )
+    .execute(&mut **transaction)
+    .await?;
+    if result.rows_affected() != 1 {
+        let row = sqlx::query!(
+            "SELECT etag, revoked_at, expires_at FROM api_keys WHERE id = $1",
+            id
+        )
+        .fetch_optional(&mut **transaction)
+        .await?
+        .ok_or(Error::NotFound)?;
+        if row.etag != expected_etag {
+            return Err(Error::PreconditionFailed);
+        }
+        return Err(Error::Invalid(
+            "revoked or expired keys cannot be rotated".to_owned(),
+        ));
+    }
+    Ok(etag)
 }

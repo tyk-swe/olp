@@ -5,7 +5,7 @@ import {
   popCursor,
   pushCursor,
   resetCursor
-} from './pagination';
+} from '$lib/lists/pagination';
 
 describe('cursor history', () => {
   it('moves forward and back through opaque cursors', () => {

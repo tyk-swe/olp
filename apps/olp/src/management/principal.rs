@@ -2,7 +2,7 @@ use axum::extract::FromRequestParts;
 use axum::http::request::Parts;
 use olp_db::authentication::SessionPrincipal;
 
-use crate::{bootstrap::mode_dependencies::ManagementState, public_http::problem::Problem};
+use crate::{management::state::ManagementState, public_http::problem::Problem};
 
 use super::sessions::{require_mutation_session, require_read_session};
 

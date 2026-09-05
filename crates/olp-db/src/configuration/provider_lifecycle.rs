@@ -1,8 +1,5 @@
-use olp_engine::domain::{
-    ids::ProviderId,
-    routing::{provider::ProviderKind, snapshot::Snapshot},
-};
-use sqlx::{FromRow, Postgres, Transaction};
+use olp_engine::domain::routing::provider::ProviderKind;
+use sqlx::{Postgres, Transaction};
 use uuid::Uuid;
 
 use crate::{
@@ -17,131 +14,50 @@ use crate::{
     store::Store,
 };
 
-use super::{Error, NewProviderDraft, ProviderActivated, ProviderDraftCreated, RuntimeProvider};
+use super::{error::Error, validation::database_version};
+use crate::runtime::PublishedRuntimeRelease;
+use chrono::{DateTime, Utc};
+use olp_engine::domain::{canonical::identity::Surface, provider::ProviderAuthMode};
+
+#[derive(Debug)]
+pub struct NewProviderDraft {
+    pub provider_id: Uuid,
+    pub credential_id: Option<Uuid>,
+    pub model_id: Option<Uuid>,
+    pub name: String,
+    pub kind: ProviderKind,
+    pub endpoint: Option<String>,
+    pub cloud_region: Option<String>,
+    pub cloud_project: Option<String>,
+    pub deployment: Option<String>,
+    pub api_version: Option<String>,
+    pub auth_mode: ProviderAuthMode,
+    pub connector_ready: bool,
+    pub credential: Option<EncryptedSecret>,
+    pub model: Option<String>,
+    pub display_name: Option<String>,
+    pub model_enabled: bool,
+    pub surface: Option<Surface>,
+    pub actor: Uuid,
+    pub idempotency_key: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct ProviderDraftCreated {
+    pub provider_id: Uuid,
+    pub credential_id: Option<Uuid>,
+    pub model_id: Option<Uuid>,
+    pub etag: Uuid,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ProviderActivated {
+    pub etag: Uuid,
+    pub release: PublishedRuntimeRelease,
+}
 
 impl Store {
-    /// Loads the release-exact connector configuration and credential named by
-    /// a verified runtime sidecar. Mutable configuration drafts are deliberately not
-    /// consulted, so testing a replacement endpoint or credential cannot alter
-    /// the transport used by the last activated provider revision.
-    pub async fn runtime_provider_configurations(
-        &self,
-        snapshot: &Snapshot,
-    ) -> Result<Vec<RuntimeProvider>, Error> {
-        let mut records = Vec::with_capacity(snapshot.providers.len());
-        for runtime_provider in snapshot.providers.values() {
-            let expected_credential = runtime_provider
-                .active_credential
-                .map(|credential| credential.as_uuid());
-            let row = sqlx::query_as!(
-                RuntimeProviderRow,
-                "SELECT rpc.provider_id AS id, rpc.provider_revision_id, rpc.kind, rpc.endpoint, rpc.cloud_region, \
-                        rpc.cloud_project, rpc.deployment, rpc.api_version, rpc.auth_mode, \
-                        cv.id AS \"credential_id?\", cv.version AS \"credential_version?\", \
-                        cv.ciphertext AS \"ciphertext?\", cv.nonce AS \"nonce?\", \
-                        cv.master_key_version AS \"master_key_version?\" \
-                 FROM runtime_generation_provider_configs rpc \
-                 JOIN providers p ON p.id = rpc.provider_id \
-                 LEFT JOIN provider_credential_versions cv \
-                   ON cv.id = rpc.active_credential_version_id AND cv.revoked_at IS NULL \
-                 WHERE rpc.provider_id = $1 AND rpc.runtime_generation_id = $3 \
-                   AND rpc.active_credential_version_id IS NOT DISTINCT FROM $2 \
-                   AND p.active_revision_id IS NOT NULL \
-                   AND p.state <> 'disabled'::provider_state \
-                   AND (rpc.active_credential_version_id IS NULL OR cv.id IS NOT NULL)",
-                runtime_provider.id.as_uuid(),
-                expected_credential,
-                snapshot.generation.id.as_uuid()
-            )
-            .fetch_optional(self.pool())
-            .await?
-            .ok_or(Error::InvalidCredential)?;
-            let stored_kind = parse_provider_kind(row.kind.as_str())?;
-            if stored_kind != runtime_provider.kind
-                || runtime_provider
-                    .revision_id
-                    .is_some_and(|revision| Some(revision) != row.provider_revision_id)
-            {
-                return Err(Error::InvalidCredential);
-            }
-            records.push(runtime_provider_configuration_from_row(row)?);
-        }
-        Ok(records)
-    }
-
-    pub async fn media_job_runtime_provider_configuration(
-        &self,
-        snapshot: &Snapshot,
-        provider_id: ProviderId,
-        provider_revision_id: Uuid,
-    ) -> Result<RuntimeProvider, Error> {
-        let runtime_provider = snapshot
-            .providers
-            .get(&provider_id)
-            .ok_or(Error::InvalidCredential)?;
-        let expected_credential = runtime_provider
-            .active_credential
-            .map(|credential| credential.as_uuid());
-        let row = sqlx::query_as::<_, RuntimeProviderRow>(
-            "SELECT rpc.provider_id AS id, rpc.provider_revision_id, rpc.kind, rpc.endpoint, rpc.cloud_region, \
-                    rpc.cloud_project, rpc.deployment, rpc.api_version, rpc.auth_mode, \
-                    cv.id AS credential_id, cv.version AS credential_version, \
-                    cv.ciphertext, cv.nonce, cv.master_key_version \
-             FROM runtime_generation_provider_configs rpc \
-             LEFT JOIN provider_credential_versions cv \
-               ON cv.id = rpc.active_credential_version_id \
-             WHERE rpc.provider_id = $1 AND rpc.runtime_generation_id = $2 \
-               AND rpc.provider_revision_id = $3 \
-               AND rpc.active_credential_version_id IS NOT DISTINCT FROM $4 \
-               AND (rpc.active_credential_version_id IS NULL OR cv.id IS NOT NULL)",
-        )
-        .bind(provider_id.as_uuid())
-        .bind(snapshot.generation.id.as_uuid())
-        .bind(provider_revision_id)
-        .bind(expected_credential)
-        .fetch_optional(self.pool())
-        .await?
-        .ok_or(Error::InvalidCredential)?;
-        let stored_kind = parse_provider_kind(&row.kind)?;
-        if stored_kind != runtime_provider.kind {
-            return Err(Error::InvalidCredential);
-        }
-        runtime_provider_configuration_from_row(row)
-    }
-
-    pub async fn runtime_provider_authority_is_current(
-        &self,
-        runtime_generation_id: Uuid,
-        provider_id: Uuid,
-        provider_revision_id: Uuid,
-    ) -> Result<bool, Error> {
-        Ok(sqlx::query_scalar::<_, bool>(
-            "SELECT EXISTS ( \
-               SELECT 1 FROM runtime_generation_provider_configs historical \
-               JOIN providers provider ON provider.id = historical.provider_id \
-               JOIN provider_revisions current ON current.id = provider.active_revision_id \
-               WHERE historical.runtime_generation_id = $1 \
-                 AND historical.provider_id = $2 \
-                 AND historical.provider_revision_id = $3 \
-                 AND provider.state <> 'disabled'::provider_state \
-                 AND historical.kind IS NOT DISTINCT FROM current.kind \
-                 AND historical.endpoint IS NOT DISTINCT FROM current.endpoint \
-                 AND historical.cloud_region IS NOT DISTINCT FROM current.cloud_region \
-                 AND historical.cloud_project IS NOT DISTINCT FROM current.cloud_project \
-                 AND historical.deployment IS NOT DISTINCT FROM current.deployment \
-                 AND historical.api_version IS NOT DISTINCT FROM current.api_version \
-                 AND historical.auth_mode IS NOT DISTINCT FROM current.auth_mode \
-                 AND historical.active_credential_version_id \
-                     IS NOT DISTINCT FROM current.credential_version_id \
-             )",
-        )
-        .bind(runtime_generation_id)
-        .bind(provider_id)
-        .bind(provider_revision_id)
-        .fetch_one(self.pool())
-        .await?)
-    }
-
     pub async fn create_provider_draft<F>(
         &self,
         provider: NewProviderDraft,
@@ -195,50 +111,8 @@ impl Store {
         provider.provider_id, provider.name.trim(), provider.kind.as_str(), provider.endpoint.as_deref(), provider.cloud_region.as_deref(), provider.cloud_project.as_deref(), provider.deployment.as_deref(), provider.api_version.as_deref(), provider.auth_mode.as_str(), provider.connector_ready, etag, provider.actor, now)
         .execute(&mut *transaction)
         .await?;
-        if let (Some(credential_id), Some(credential)) =
-            (provider.credential_id, provider.credential.as_ref())
-        {
-            let master_key_version = database_version(credential.key_version)?;
-            sqlx::query!(
-                "INSERT INTO provider_credential_versions \
-                 (id, provider_id, version, ciphertext, nonce, master_key_version, created_by, created_at) \
-                 VALUES ($1, $2, 1, $3, $4, $5, $6, $7)",
-            credential_id, provider.provider_id, &credential.ciphertext, credential.nonce.to_vec(), master_key_version, provider.actor, now)
-            .execute(&mut *transaction)
-            .await?;
-            sqlx::query!(
-                "UPDATE providers SET active_credential_version_id = $1 WHERE id = $2",
-                credential_id,
-                provider.provider_id
-            )
-            .execute(&mut *transaction)
-            .await?;
-        }
-        if let (Some(model_id), Some(model), Some(display_name)) =
-            (provider.model_id, &provider.model, &provider.display_name)
-        {
-            sqlx::query!(
-                "INSERT INTO provider_models \
-                 (id, provider_id, upstream_model, display_name, enabled, discovered_at, created_at) \
-                 VALUES ($1, $2, $3, $4, $5, $6, $6)",
-            model_id, provider.provider_id, model.trim(), display_name.trim(), provider.model_enabled, now)
-            .execute(&mut *transaction)
-            .await?;
-        }
-        if let (Some(surface), Some(model_id)) = (&provider.surface, provider.model_id) {
-            for mode in ["unary", "streaming"] {
-                sqlx::query!(
-                    "INSERT INTO model_capabilities \
-                     (provider_model_id, operation, surface, mode, source, certified_at) \
-                     VALUES ($1, 'generation', $2, $3, 'declared', NULL)",
-                    model_id,
-                    surface.as_str(),
-                    mode
-                )
-                .execute(&mut *transaction)
-                .await?;
-            }
-        }
+        insert_initial_provider_credential(&mut transaction, &provider, now).await?;
+        insert_initial_provider_model(&mut transaction, &provider, now).await?;
         record_success_at(
             &mut *transaction,
             self.provenance(),
@@ -624,78 +498,68 @@ async fn reject_unroutable_activation(
     Ok(())
 }
 
-#[derive(Debug, FromRow)]
-struct RuntimeProviderRow {
-    id: Uuid,
-    provider_revision_id: Option<Uuid>,
-    kind: String,
-    endpoint: Option<String>,
-    cloud_region: Option<String>,
-    cloud_project: Option<String>,
-    deployment: Option<String>,
-    api_version: Option<String>,
-    auth_mode: String,
-    credential_id: Option<Uuid>,
-    credential_version: Option<i32>,
-    ciphertext: Option<Vec<u8>>,
-    nonce: Option<Vec<u8>>,
-    master_key_version: Option<i32>,
-}
-
-fn runtime_provider_configuration_from_row(
-    row: RuntimeProviderRow,
-) -> Result<RuntimeProvider, Error> {
-    let credential_id: Option<Uuid> = row.credential_id;
-    let credential_version = row.credential_version.map(stored_version).transpose()?;
-    let nonce = row.nonce;
-    let ciphertext = row.ciphertext;
-    let key_version = row.master_key_version.map(stored_version).transpose()?;
-    let encrypted = match (nonce, ciphertext, key_version) {
-        (Some(nonce), Some(ciphertext), Some(key_version)) => Some(EncryptedSecret {
-            key_version,
-            nonce: nonce.try_into().map_err(|_| Error::InvalidCredential)?,
-            ciphertext,
-        }),
-        (None, None, None) => None,
-        _ => return Err(Error::InvalidCredential),
-    };
-    if credential_id.is_some() != credential_version.is_some()
-        || credential_id.is_some() != encrypted.is_some()
+async fn insert_initial_provider_credential(
+    transaction: &mut Transaction<'_, Postgres>,
+    provider: &NewProviderDraft,
+    now: DateTime<Utc>,
+) -> Result<(), Error> {
+    if let (Some(credential_id), Some(credential)) =
+        (provider.credential_id, provider.credential.as_ref())
     {
-        return Err(Error::InvalidCredential);
+        let master_key_version = database_version(credential.key_version)?;
+        sqlx::query!(
+            "INSERT INTO provider_credential_versions \
+             (id, provider_id, version, ciphertext, nonce, master_key_version, created_by, created_at) \
+             VALUES ($1, $2, 1, $3, $4, $5, $6, $7)",
+        credential_id, provider.provider_id, &credential.ciphertext, credential.nonce.to_vec(), master_key_version, provider.actor, now)
+        .execute(&mut **transaction)
+        .await?;
+        sqlx::query!(
+            "UPDATE providers SET active_credential_version_id = $1 WHERE id = $2",
+            credential_id,
+            provider.provider_id
+        )
+        .execute(&mut **transaction)
+        .await?;
     }
-    Ok(RuntimeProvider {
-        provider_id: ProviderId::from_uuid(row.id),
-        provider_revision_id: row.provider_revision_id,
-        kind: parse_provider_kind(row.kind.as_str())?,
-        endpoint: row.endpoint,
-        cloud_region: row.cloud_region,
-        cloud_project: row.cloud_project,
-        deployment: row.deployment,
-        api_version: row.api_version,
-        auth_mode: row.auth_mode.parse().map_err(|_| {
-            PersistenceError::InvalidStoredValue("runtime provider authentication mode")
-        })?,
-        credential_id,
-        credential_version,
-        encrypted_credential: encrypted,
-    })
+    Ok(())
 }
 
-fn parse_provider_kind(value: &str) -> Result<ProviderKind, Error> {
-    value.parse().map_err(|_| Error::InvalidCredential)
-}
-
-pub(super) fn database_version(version: u32) -> Result<i32, Error> {
-    i32::try_from(version)
-        .ok()
-        .filter(|version| *version > 0)
-        .ok_or(Error::InvalidCredential)
-}
-
-pub(super) fn stored_version(version: i32) -> Result<u32, Error> {
-    u32::try_from(version)
-        .ok()
-        .filter(|version| *version > 0)
-        .ok_or(Error::InvalidCredential)
+async fn insert_initial_provider_model(
+    transaction: &mut Transaction<'_, Postgres>,
+    provider: &NewProviderDraft,
+    now: DateTime<Utc>,
+) -> Result<(), Error> {
+    if let (Some(model_id), Some(model), Some(display_name)) =
+        (provider.model_id, &provider.model, &provider.display_name)
+    {
+        sqlx::query!(
+            "INSERT INTO provider_models \
+             (id, provider_id, upstream_model, display_name, enabled, discovered_at, created_at) \
+             VALUES ($1, $2, $3, $4, $5, $6, $6)",
+            model_id,
+            provider.provider_id,
+            model.trim(),
+            display_name.trim(),
+            provider.model_enabled,
+            now
+        )
+        .execute(&mut **transaction)
+        .await?;
+    }
+    if let (Some(surface), Some(model_id)) = (&provider.surface, provider.model_id) {
+        for mode in ["unary", "streaming"] {
+            sqlx::query!(
+                "INSERT INTO model_capabilities \
+                 (provider_model_id, operation, surface, mode, source, certified_at) \
+                 VALUES ($1, 'generation', $2, $3, 'declared', NULL)",
+                model_id,
+                surface.as_str(),
+                mode
+            )
+            .execute(&mut **transaction)
+            .await?;
+        }
+    }
+    Ok(())
 }

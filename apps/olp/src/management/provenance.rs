@@ -4,9 +4,7 @@ use axum::extract::{ConnectInfo, FromRequestParts};
 use axum::http::request::Parts;
 use olp_db::store::RequestProvenance;
 
-use crate::{
-    bootstrap::mode_dependencies::ManagementState, public_http::proxy::audit_request_provenance,
-};
+use crate::{management::state::ManagementState, public_http::proxy::audit_request_provenance};
 
 /// Request-boundary attribution for the audit rows a handler writes. Handlers
 /// that produce audit events pass it to `Store::with_provenance`; every other

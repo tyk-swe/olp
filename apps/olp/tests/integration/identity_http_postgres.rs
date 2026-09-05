@@ -7,7 +7,7 @@ use axum::{
 };
 use http_body_util::BodyExt as _;
 use olp::{
-    bootstrap::state::{ApiMode, ProcessComposition},
+    application::mode::ApiMode, bootstrap::state::ProcessComposition,
     public_http::router::management_router_for_test,
 };
 use olp_db::security::envelope::MasterKey;

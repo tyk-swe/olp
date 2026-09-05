@@ -34,7 +34,7 @@ use crate::management::{
     sessions::{cookie, reauthentication_required},
 };
 use crate::{
-    bootstrap::mode_dependencies::ManagementState,
+    management::state::ManagementState,
     public_http::{problem::Problem, request_cookies::RECENT_AUTH_COOKIE},
 };
 

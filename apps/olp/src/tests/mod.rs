@@ -40,26 +40,34 @@ use uuid::Uuid;
 
 use super::*;
 use super::{
-    bootstrap::mode_dependencies::GatewayState,
-    bootstrap::state::{ApiMode, BodyLimits, ProcessComposition},
-    gateway::endpoint_policy::classification::{InferenceEndpoint, TokenEstimate},
+    application::mode::ApiMode,
+    bootstrap::state::ProcessComposition,
+    gateway::{
+        endpoint_policy::classification::{InferenceEndpoint, TokenEstimate},
+        state::GatewayState,
+    },
     observability::{
         cache::{OBSERVABILITY_SNAPSHOT_STALE_AFTER, refresh_observability_cache},
         metrics::prometheus_label,
         router as observability_router,
     },
-    public_http::problem::Problem,
-    public_http::proxy::{audit_request_provenance, public_auth_source},
-    public_http::public_auth_routes::PublicAuthRoute,
-    public_http::request_admission::{
-        HttpRequestAdmission, LocalRequestMetadata, RequestFinalization, enforce_request_limits,
-        limits::{ReleaseReservationBody, estimate_http_json_request_tokens},
-        multipart::{MultipartAdmissionState, validate_multipart_boundary},
-        validation::{JsonBodyReadError, read_json_body, validate_json_depth},
-    },
-    public_http::router::{
-        gateway_router_for_test, http_request_span, management_router_for_test, request_trace_path,
-        sensitive_request_headers, sensitive_response_headers, validated_public_router,
+    public_http::{
+        body_limits::BodyLimits,
+        problem::Problem,
+        proxy::{audit_request_provenance, public_auth_source},
+        public_auth_routes::PublicAuthRoute,
+        request_admission::{
+            HttpRequestAdmission, LocalRequestMetadata, RequestFinalization,
+            enforce_request_limits,
+            limits::{ReleaseReservationBody, estimate_http_json_request_tokens},
+            multipart::{MultipartAdmissionState, validate_multipart_boundary},
+            validation::{JsonBodyReadError, read_json_body, validate_json_depth},
+        },
+        router::{
+            gateway_router_for_test, http_request_span, management_router_for_test,
+            request_trace_path, sensitive_request_headers, sensitive_response_headers,
+            validated_public_router,
+        },
     },
 };
 

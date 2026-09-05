@@ -4,8 +4,6 @@ use axum::body::Bytes;
 use olp_engine::protocols::sse::{Frame, encode_frame};
 use serde_json::{Value, json};
 
-pub(super) use olp_engine::protocols::openai::error_type;
-
 use super::error::InferenceError;
 
 pub(super) fn error_sse(error: &InferenceError) -> Bytes {

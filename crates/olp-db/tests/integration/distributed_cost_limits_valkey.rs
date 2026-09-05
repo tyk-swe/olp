@@ -1,7 +1,7 @@
 use std::{collections::HashMap, time::Duration};
 
 use chrono::{Datelike as _, TimeZone as _, Utc};
-use olp_db::limits::{CostSnapshot, DistributedLimiter};
+use olp_db::limits::{DistributedLimiter, costs::CostSnapshot};
 use olp_engine::inference::limits::{LimitDimension, LimitError, LimitRequest};
 use redis::{AsyncCommands as _, aio::MultiplexedConnection};
 use rust_decimal::Decimal;

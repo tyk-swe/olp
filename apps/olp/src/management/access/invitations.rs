@@ -41,8 +41,11 @@ use crate::management::{
     sessions::enforce_origin,
 };
 use crate::{
-    bootstrap::mode_dependencies::ManagementState, public_http::problem::FieldErrors,
-    public_http::problem::Problem, public_http::proxy::public_auth_source_target_digests,
+    management::state::ManagementState,
+    public_http::{
+        problem::{FieldErrors, Problem},
+        proxy::public_auth_source_target_digests,
+    },
 };
 
 pub(in crate::management) const INVALID_INVITATION_RATE_LIMIT_TARGET: &str =

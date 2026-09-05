@@ -15,13 +15,13 @@ use uuid::Uuid;
 
 use super::error::map_oidc;
 use crate::{
-    bootstrap::mode_dependencies::ManagementState,
     management::{
         cookies::{append_security_transition_cookies, validate_session_cookie_ttl},
         error_mapping::map_persistence,
         principal::{MutationPrincipal, ReadPrincipal},
         provenance::Provenance,
         sessions::{cookie, reauthentication_required},
+        state::ManagementState,
     },
     public_http::{problem::Problem, request_cookies::RECENT_AUTH_COOKIE},
 };

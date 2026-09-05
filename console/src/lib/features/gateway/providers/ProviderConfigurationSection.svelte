@@ -1,8 +1,6 @@
 <script lang="ts">
-  import type {
-    Provider,
-    ProviderKindCapability
-  } from '$lib/api/management/providers';
+  import type { Provider } from '$lib/api/management/providers';
+  import type { ProviderKindCapability } from '$lib/api/management/providerModels';
   import ProviderActivationControls from './ProviderActivationControls.svelte';
   import type { RunProviderAction } from './providerDetailCoordination';
   import {

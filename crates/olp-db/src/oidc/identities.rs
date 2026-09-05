@@ -253,75 +253,7 @@ impl Store {
             input.configuration_etag,
         )
         .await?;
-        // Keep the subject-before-user order used by login completion, then
-        // lock the user before its initiating session. User access changes
-        // lock the user before deleting its sessions, so this avoids a
-        // session/user deadlock while retaining the session-revocation fence.
-        lock_subject(&mut transaction, input.issuer, input.subject).await?;
-        let user_row = lock_user(&mut transaction, input.user_id)
-            .await?
-            .ok_or(OidcError::InactiveUser)?;
-        // Hold a lock on the exact initiating session until the identity link
-        // commits. This closes the gap between HTTP authentication and the
-        // storage transaction: a concurrently revoked or expired session
-        // cannot authorize the link, and revocation cannot complete midway.
-        let initiating_session = sqlx::query!(
-            "SELECT id FROM sessions \
-             WHERE id = $1 AND user_id = $2 AND expires_at > $3 FOR KEY SHARE",
-            input.session_id,
-            input.user_id,
-            now
-        )
-        .fetch_optional(&mut *transaction)
-        .await?;
-        if initiating_session.is_none() {
-            return Err(OidcError::FlowUnavailable);
-        }
-        if !user_row.active {
-            return Err(OidcError::InactiveUser);
-        }
-        if user_row.security_version != input.security_version {
-            return Err(OidcError::SessionUnavailable);
-        }
-        let current_session: bool = sqlx::query_scalar!(
-            "SELECT EXISTS ( \
-                 SELECT 1 FROM sessions \
-                 WHERE id = $1 AND user_id = $2 AND security_version = $3 \
-                   AND expires_at > now() \
-             ) AS \"value!\"",
-            input.session_id,
-            input.user_id,
-            input.security_version
-        )
-        .fetch_one(&mut *transaction)
-        .await?;
-        if !current_session {
-            return Err(OidcError::SessionUnavailable);
-        }
-        let existing_subject = sqlx::query!(
-            "SELECT user_id FROM oidc_identities WHERE issuer = $1 AND subject = $2",
-            input.issuer,
-            input.subject
-        )
-        .fetch_optional(&mut *transaction)
-        .await?;
-        if let Some(existing) = existing_subject
-            && existing.user_id != input.user_id
-        {
-            return Err(OidcError::IdentityAlreadyLinked);
-        }
-        let other_identity: bool = sqlx::query_scalar!(
-            "SELECT EXISTS (SELECT 1 FROM oidc_identities \
-             WHERE issuer = $1 AND user_id = $2 AND subject <> $3) AS \"value!\"",
-            input.issuer,
-            input.user_id,
-            input.subject
-        )
-        .fetch_one(&mut *transaction)
-        .await?;
-        if other_identity {
-            return Err(OidcError::IdentityAlreadyLinked);
-        }
+        let user_row = lock_oidc_link_authority(&mut transaction, &input, now).await?;
         let normalized_claim_email = input.email.and_then(|value| normalize_email(value).ok());
         sqlx::query!(
             "INSERT INTO oidc_identities \
@@ -618,4 +550,81 @@ impl LinkedLoginRow {
             role: self.role.clone(),
         }
     }
+}
+
+async fn lock_oidc_link_authority(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    input: &CompleteOidcLink<'_>,
+    now: chrono::DateTime<Utc>,
+) -> Result<crate::identity::locks::LockedUser, OidcError> {
+    // Keep the subject-before-user order used by login completion, then
+    // lock the user before its initiating session. User access changes
+    // lock the user before deleting its sessions, so this avoids a
+    // session/user deadlock while retaining the session-revocation fence.
+    lock_subject(transaction, input.issuer, input.subject).await?;
+    let user_row = lock_user(transaction, input.user_id)
+        .await?
+        .ok_or(OidcError::InactiveUser)?;
+    // Hold a lock on the exact initiating session until the identity link
+    // commits. This closes the gap between HTTP authentication and the
+    // storage transaction: a concurrently revoked or expired session
+    // cannot authorize the link, and revocation cannot complete midway.
+    let initiating_session = sqlx::query!(
+        "SELECT id FROM sessions \
+             WHERE id = $1 AND user_id = $2 AND expires_at > $3 FOR KEY SHARE",
+        input.session_id,
+        input.user_id,
+        now
+    )
+    .fetch_optional(&mut **transaction)
+    .await?;
+    if initiating_session.is_none() {
+        return Err(OidcError::FlowUnavailable);
+    }
+    if !user_row.active {
+        return Err(OidcError::InactiveUser);
+    }
+    if user_row.security_version != input.security_version {
+        return Err(OidcError::SessionUnavailable);
+    }
+    let current_session: bool = sqlx::query_scalar!(
+        "SELECT EXISTS ( \
+                 SELECT 1 FROM sessions \
+                 WHERE id = $1 AND user_id = $2 AND security_version = $3 \
+                   AND expires_at > now() \
+             ) AS \"value!\"",
+        input.session_id,
+        input.user_id,
+        input.security_version
+    )
+    .fetch_one(&mut **transaction)
+    .await?;
+    if !current_session {
+        return Err(OidcError::SessionUnavailable);
+    }
+    let existing_subject = sqlx::query!(
+        "SELECT user_id FROM oidc_identities WHERE issuer = $1 AND subject = $2",
+        input.issuer,
+        input.subject
+    )
+    .fetch_optional(&mut **transaction)
+    .await?;
+    if let Some(existing) = existing_subject
+        && existing.user_id != input.user_id
+    {
+        return Err(OidcError::IdentityAlreadyLinked);
+    }
+    let other_identity: bool = sqlx::query_scalar!(
+        "SELECT EXISTS (SELECT 1 FROM oidc_identities \
+             WHERE issuer = $1 AND user_id = $2 AND subject <> $3) AS \"value!\"",
+        input.issuer,
+        input.user_id,
+        input.subject
+    )
+    .fetch_one(&mut **transaction)
+    .await?;
+    if other_identity {
+        return Err(OidcError::IdentityAlreadyLinked);
+    }
+    Ok(user_row)
 }

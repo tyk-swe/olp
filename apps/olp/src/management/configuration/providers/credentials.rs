@@ -17,24 +17,27 @@ use tracing::error;
 use utoipa::ToSchema;
 use uuid::Uuid;
 
-use crate::{
-    bootstrap::mode_dependencies::ManagementState,
-    bootstrap::provider_adapter::{provider_config, provider_credential},
-    management::{
-        error_mapping::map_configuration,
-        idempotency::{
-            MutationReply, ReplayableMutation, idempotency_http_response, require_idempotency_key,
+use {
+    crate::{
+        management::{
+            error_mapping::map_configuration,
+            idempotency::{
+                MutationReply, ReplayableMutation, idempotency_http_response,
+                require_idempotency_key,
+            },
+            json_payload::json_payload,
+            pagination::{PageQuery, page},
+            permissions::require_permission,
+            preconditions::if_match,
+            principal::{MutationPrincipal, ReadPrincipal},
+            provenance::Provenance,
+            response_policy::RuntimeGenerationResponse,
+            secrets::WriteOnlySecret,
+            state::ManagementState,
         },
-        json_payload::json_payload,
-        pagination::{PageQuery, page},
-        permissions::require_permission,
-        preconditions::if_match,
-        principal::{MutationPrincipal, ReadPrincipal},
-        provenance::Provenance,
-        response_policy::RuntimeGenerationResponse,
-        secrets::WriteOnlySecret,
+        public_http::problem::Problem,
     },
-    public_http::problem::Problem,
+    olp_engine::providers::factory::input::{provider_config, provider_credential},
 };
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -223,7 +226,10 @@ pub(crate) async fn rotate_provider_credential(
 }
 
 fn validate_rotated_credential(provider: &ProviderRecord, credential: &str) -> Result<(), String> {
-    let config = provider_config(provider.into()).map_err(|error| error.to_string())?;
+    let config = provider_config(
+        crate::application::provider_fields::ProviderConfigFields::from(provider).into(),
+    )
+    .map_err(|error| error.to_string())?;
     let credential = provider_credential(&config, Some(credential.as_bytes()))
         .map_err(|error| error.to_string())?;
     Factory::validate_credential(&config, &credential).map_err(|error| error.to_string())

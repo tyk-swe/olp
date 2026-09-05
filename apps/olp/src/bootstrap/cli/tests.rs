@@ -12,23 +12,28 @@ use olp_db::{
     security::rotation::EncryptedTable, security::rotation::KeyVersionReference,
     security::rotation::MasterKeyEncryptionStatus,
 };
-use olp_engine::providers::EgressPolicy;
+use olp_engine::providers::http_egress::EgressPolicy;
 
-use crate::bootstrap::state::BodyLimits;
+use crate::public_http::body_limits::BodyLimits;
 use tempfile::NamedTempFile;
 use tokio::{sync::watch, task::JoinSet};
 
-use super::{
-    config::{Cli, Command, MasterKeyAction, MasterKeyArgs},
-    lifecycle::{
-        coordinate_shutdown, resolve_request_metadata_writer_error, shutdown_reason,
-        stop_background_tasks, wait_for_shutdown,
+use {
+    super::{
+        config::{Cli, Command, MasterKeyAction, MasterKeyArgs},
+        lifecycle::{
+            coordinate_shutdown, resolve_request_metadata_writer_error, shutdown_reason,
+            stop_background_tasks, wait_for_shutdown,
+        },
+        migrate::legacy_request_metadata_stream_claim_token,
+        validation::{ensure_keyring_covers_references, load_bootstrap_token_digest},
     },
-    migrate::legacy_request_metadata_stream_claim_token,
-    validation::{
-        check_secret_permissions, ensure_keyring_covers_references, load_bootstrap_token_digest,
+    crate::{
+        application::secret_files::check_secret_permissions,
+        bootstrap::workers::{
+            request_metadata::request_metadata_consumer_name_from, stop_worker_tasks,
+        },
     },
-    worker::{request_metadata_consumer_name_from, stop_worker_tasks},
 };
 
 #[test]

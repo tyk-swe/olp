@@ -1,7 +1,8 @@
 import type { components } from '../schema';
 import { apiClient } from '../client';
 import { pageResult, result } from '../http';
-import { collectCursorPages, type CursorPage } from '../pagination';
+import { collectCursorPages } from '../pagination';
+import { type CursorPage } from '$lib/api/http';
 
 type Schemas = components['schemas'];
 

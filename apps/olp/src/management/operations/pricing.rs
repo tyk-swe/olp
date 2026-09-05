@@ -15,9 +15,7 @@ use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use uuid::Uuid;
 
-use super::helpers::{map_operations, page_limit};
 use crate::{
-    bootstrap::mode_dependencies::ManagementState,
     management::{
         error_mapping::map_persistence,
         idempotency::{idempotency_http_response, require_idempotency_key},
@@ -26,9 +24,11 @@ use crate::{
         permissions::require_permission,
         principal::{MutationPrincipal, ReadPrincipal},
         provenance::Provenance,
+        state::ManagementState,
     },
     public_http::problem::Problem,
 };
+use {super::helpers::map_operations, crate::management::pagination::page_limit};
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, ToSchema)]
 #[serde(rename_all = "snake_case")]

@@ -29,11 +29,13 @@ use olp_engine::protocols::openai::{
 use serde_json::{Value, json};
 
 use crate::{
-    bootstrap::mode_dependencies::GatewayState,
-    public_http::json_media::{admit_openai_response_input_tokens, admit_openai_responses},
-    public_http::streaming_response::{
-        ProtocolStreamEncoder, encode_protocol_sse_frames, encode_server_sse_frame,
-        precommit_stream_failure, protocol_streaming_response,
+    gateway::state::GatewayState,
+    public_http::{
+        json_media::{admit_openai_response_input_tokens, admit_openai_responses},
+        streaming_response::{
+            ProtocolStreamEncoder, encode_protocol_sse_frames, encode_server_sse_frame,
+            precommit_stream_failure, protocol_streaming_response,
+        },
     },
 };
 

@@ -31,13 +31,13 @@ use super::session::{
     seal_login_flow_cookie,
 };
 use crate::{
-    bootstrap::mode_dependencies::ManagementState,
     management::{
         cookies::clear_recent_auth_cookie,
         json_payload::json_payload,
         principal::MutationPrincipal,
         provenance::Provenance,
         sessions::{cookie, enforce_origin, reauthentication_required},
+        state::ManagementState,
     },
     public_http::{
         problem::Problem, relative_url::RelativeReturnTo, request_cookies::RECENT_AUTH_COOKIE,
@@ -312,58 +312,31 @@ async fn begin_authorization(
             if context.is_some() {
                 return Err(Problem::internal());
             }
-            let payload = LoginFlowCookiePayload {
-                version: LOGIN_FLOW_COOKIE_VERSION,
-                flow_id: flow_id.as_uuid(),
-                state: material.state().to_owned(),
-                nonce: material.nonce().to_owned(),
-                pkce_verifier: material.pkce_verifier().to_owned(),
-                configuration_id: configuration.id,
-                configuration_etag: configuration.etag,
-                expires_at_unix: (Utc::now() + FLOW_TTL).timestamp(),
-                return_to,
-            };
+
             (
                 flow_cookie_name(purpose, flow_id),
-                seal_login_flow_cookie(state, master_key, &payload)?,
+                seal_login_authorization(
+                    state,
+                    master_key,
+                    &configuration,
+                    flow_id,
+                    &material,
+                    return_to,
+                )?,
             )
         }
         OidcFlowPurpose::Link | OidcFlowPurpose::Reauthenticate => {
             let context = context.ok_or_else(Problem::internal)?;
-            let payload = Zeroizing::new(
-                serde_json::to_vec(&FlowSecretPayload {
-                    nonce: material.nonce().to_owned(),
-                    pkce_verifier: material.pkce_verifier().to_owned(),
-                    configuration_etag: Some(configuration.etag),
-                    actor_session_id: Some(context.principal.session_id),
-                })
-                .map_err(|_| Problem::internal())?,
-            );
-            let encrypted_payload = master_key
-                .seal(&payload, &flow_payload_aad(flow_id.as_uuid()))
-                .map_err(|error| {
-                    error!(%error, "OIDC authenticated flow encryption failed");
-                    Problem::internal()
-                })?;
             state
                 .store()
                 .with_provenance(provenance)
-                .create_oidc_flow(NewOidcFlow {
-                    id: flow_id.as_uuid(),
-                    configuration_id: configuration.id,
-                    configuration_etag: configuration.etag,
+                .create_oidc_flow(context.flow(
+                    master_key,
+                    flow_id,
+                    &material,
+                    &configuration,
                     purpose,
-                    actor_user_id: Some(context.principal.user_id),
-                    actor_session_id: Some(context.principal.session_id),
-                    actor_security_version: Some(context.principal.security_version),
-                    recent_auth_purpose: context.recent_auth_purpose,
-                    recent_auth_resource_id: context.recent_auth_resource_id,
-                    recent_auth_token_digest: context.recent_auth_token_digest,
-                    state_digest: material.state_digest(),
-                    browser_binding_digest: material.browser_binding_digest(),
-                    encrypted_payload,
-                    expires_at: Utc::now() + FLOW_TTL,
-                })
+                )?)
                 .await
                 .map_err(map_oidc)?;
             (
@@ -374,6 +347,29 @@ async fn begin_authorization(
     };
 
     let callback_uri = callback_url(state)?;
+    let authorization_url = authorization_url(
+        &configuration,
+        &material,
+        &callback_uri,
+        &callback_state,
+        purpose,
+    )?;
+    authorization_response(
+        authorization_url,
+        redirect,
+        flow_cookie_name,
+        flow_cookie_value,
+        evictions,
+    )
+}
+
+fn authorization_url(
+    configuration: &olp_db::oidc::types::OidcConfiguration,
+    material: &OidcFlowMaterial,
+    callback_uri: &str,
+    callback_state: &str,
+    purpose: OidcFlowPurpose,
+) -> Result<Url, Problem> {
     let scopes = configuration.scopes.join(" ");
     let challenge = material.pkce_challenge();
     let mut authorization_url =
@@ -383,9 +379,9 @@ async fn begin_authorization(
         query
             .append_pair("response_type", "code")
             .append_pair("client_id", &configuration.client_id)
-            .append_pair("redirect_uri", &callback_uri)
+            .append_pair("redirect_uri", callback_uri)
             .append_pair("scope", &scopes)
-            .append_pair("state", &callback_state)
+            .append_pair("state", callback_state)
             .append_pair("nonce", material.nonce())
             .append_pair("code_challenge", &challenge)
             .append_pair("code_challenge_method", "S256");
@@ -397,6 +393,16 @@ async fn begin_authorization(
                 .append_pair("max_age", "0");
         }
     }
+    Ok(authorization_url)
+}
+
+fn authorization_response(
+    authorization_url: Url,
+    redirect: bool,
+    flow_cookie_name: String,
+    flow_cookie_value: String,
+    evictions: Vec<String>,
+) -> Result<Response, Problem> {
     let flow_cookie = format!(
         "{flow_cookie_name}={flow_cookie_value}; Path=/; Max-Age={}; Secure; HttpOnly; SameSite=Lax",
         FLOW_TTL.num_seconds()
@@ -422,4 +428,70 @@ async fn begin_authorization(
         .headers_mut()
         .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
     Ok(response)
+}
+
+fn seal_login_authorization(
+    state: &ManagementState,
+    master_key: &olp_db::security::envelope::MasterKey,
+    configuration: &olp_db::oidc::types::OidcConfiguration,
+    flow_id: OidcFlowId,
+    material: &OidcFlowMaterial,
+    return_to: RelativeReturnTo,
+) -> Result<String, Problem> {
+    let payload = LoginFlowCookiePayload {
+        version: LOGIN_FLOW_COOKIE_VERSION,
+        flow_id: flow_id.as_uuid(),
+        state: material.state().to_owned(),
+        nonce: material.nonce().to_owned(),
+        pkce_verifier: material.pkce_verifier().to_owned(),
+        configuration_id: configuration.id,
+        configuration_etag: configuration.etag,
+        expires_at_unix: (Utc::now() + FLOW_TTL).timestamp(),
+        return_to,
+    };
+    seal_login_flow_cookie(state, master_key, &payload)
+}
+
+impl PersistentFlowContext<'_> {
+    fn flow(
+        &self,
+        master_key: &olp_db::security::envelope::MasterKey,
+        flow_id: OidcFlowId,
+        material: &OidcFlowMaterial,
+        configuration: &olp_db::oidc::types::OidcConfiguration,
+        purpose: OidcFlowPurpose,
+    ) -> Result<NewOidcFlow, Problem> {
+        let payload = Zeroizing::new(
+            serde_json::to_vec(&FlowSecretPayload {
+                nonce: material.nonce().to_owned(),
+                pkce_verifier: material.pkce_verifier().to_owned(),
+                configuration_etag: Some(configuration.etag),
+                actor_session_id: Some(self.principal.session_id),
+            })
+            .map_err(|_| Problem::internal())?,
+        );
+        let encrypted_payload = master_key
+            .seal(&payload, &flow_payload_aad(flow_id.as_uuid()))
+            .map_err(|error| {
+                error!(%error, "OIDC authenticated flow encryption failed");
+                Problem::internal()
+            })?;
+
+        Ok(NewOidcFlow {
+            id: flow_id.as_uuid(),
+            configuration_id: configuration.id,
+            configuration_etag: configuration.etag,
+            purpose,
+            actor_user_id: Some(self.principal.user_id),
+            actor_session_id: Some(self.principal.session_id),
+            actor_security_version: Some(self.principal.security_version),
+            recent_auth_purpose: self.recent_auth_purpose,
+            recent_auth_resource_id: self.recent_auth_resource_id,
+            recent_auth_token_digest: self.recent_auth_token_digest,
+            state_digest: material.state_digest(),
+            browser_binding_digest: material.browser_binding_digest(),
+            encrypted_payload,
+            expires_at: Utc::now() + FLOW_TTL,
+        })
+    }
 }

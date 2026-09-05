@@ -2,7 +2,7 @@ use axum::{Router, routing::get};
 use utoipa::OpenApi;
 
 use crate::{
-    bootstrap::mode_dependencies::ManagementState, observability::readiness::HealthResponse,
+    management::state::ManagementState, observability::readiness::HealthResponse,
     public_http::problem::Problem,
 };
 
@@ -148,9 +148,9 @@ pub(crate) fn router() -> Router<ManagementState> {
 pub(crate) struct OperationsApiDoc;
 
 #[cfg(test)]
-use helpers::{page_limit, validate_time_range};
-#[cfg(test)]
 use media_jobs::media_job_surface_wire_value;
+#[cfg(test)]
+use {crate::management::pagination::page_limit, helpers::validate_time_range};
 
 #[cfg(test)]
 mod tests;

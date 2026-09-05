@@ -146,7 +146,7 @@ fi
 
 # Production source roots, and the engine module roots whose inward topology is
 # enforced by path below.
-declare -a production_roots=() engine_roots=() non_engine_roots=()
+declare -a production_roots=() engine_roots=() non_engine_roots=() delivery_roots=()
 source_root_output=
 if source_root_output=$(jq -r '
   .packages[] | select((.metadata.olp.role? // "") | IN("engine","db","delivery"))
@@ -179,6 +179,7 @@ while IFS=$'\t' read -r role source_root; do
     continue
   fi
   production_roots+=("$source_root")
+  [[ $role != delivery ]] || delivery_roots+=("$source_root")
   if [[ $role == engine ]]; then engine_roots+=("$source_root"); else non_engine_roots+=("$source_root"); fi
 done <<< "$source_root_output"
 
@@ -230,8 +231,8 @@ infrastructure='\b(reqwest|aws_[[:alnum:]_]+|google_cloud_auth|sqlx|redis|axum|t
     --include='*.rs' -e '\b(olp_db|reqwest|aws_[[:alnum:]_]+|google_cloud_auth|sqlx|redis|axum|tower|tower_http|clap)::' \
     -- "${inference_roots[@]}"
 (( ${#production_roots[@]} )) && \
-  scan "production crates must not expose wildcard re-export surfaces:" \
-    --include='*.rs' -e 'pub(\([^)]*\))?[[:space:]]+use[^;]*::\*;' -- "${production_roots[@]}"
+  scan "production crates must not expose forwarding re-export surfaces:" \
+    --include='*.rs' -e '^[[:space:]]*pub(\([^)]*\))?[[:space:]]+use([[:space:]]|$)' -- "${production_roots[@]}"
 (( ${#non_provider_roots[@]} )) && \
   scan "concrete provider construction escaped olp_engine::providers:" \
     --include='*.rs' \
@@ -275,6 +276,21 @@ for delivery_api_file in "${delivery_api_files[@]}"; do
   }
   scan "bootstrap composition types must not be exported from a production delivery API:" \
     -e '^pub[[:space:]]+use[[:space:]]+bootstrap::(state|mode_dependencies)' -- "$delivery_api_file"
+done
+
+for delivery_root in "${delivery_roots[@]}"; do
+  for owner in application gateway management observability public_http console; do
+    [[ -d $delivery_root/$owner ]] || continue
+    scan "delivery surfaces must not depend on bootstrap composition:" \
+      --include='*.rs' --exclude='tests.rs' --exclude-dir=tests \
+      -e '\bbootstrap::' -- "$delivery_root/$owner"
+  done
+  for owner in application bootstrap/workers; do
+    [[ -d $delivery_root/$owner ]] || continue
+    scan "application workflows and workers must not depend on gateway handlers:" \
+      --include='*.rs' --exclude='tests.rs' --exclude-dir=tests \
+      -e '\bgateway::' -- "$delivery_root/$owner"
+  done
 done
 
 # The console ships as static assets from the Rust binary; a server route or

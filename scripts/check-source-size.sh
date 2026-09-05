@@ -92,12 +92,6 @@ violations=$(
   } | sort -u
 )
 
-if (( update )); then
-  printf '%s\n' "$violations" | sed '/^$/d' > "$baseline"
-  echo "wrote $(wc -l < "$baseline") grandfathered entries to $baseline"
-  exit 0
-fi
-
 validation_require_file "$baseline"
 known=$(sort -u "$baseline")
 new=$(comm -23 <(printf '%s\n' "$violations" | sed '/^$/d') <(printf '%s\n' "$known" | sed '/^$/d'))
@@ -108,6 +102,12 @@ if [[ -n $new ]]; then
   echo "source size rule broken (files > ${max_file_bytes} bytes, fns > ${max_fn_lines} lines):" >&2
   printf '  %s\n' "$new" >&2
   status=1
+fi
+if (( update )); then
+  (( status )) && exit "$status"
+  printf '%s\n' "$violations" | sed '/^$/d' > "$baseline"
+  echo "retained $(wc -l < "$baseline") grandfathered entries in $baseline"
+  exit 0
 fi
 if [[ -n $stale ]]; then
   echo "fixed entries still listed in $baseline; remove them:" >&2

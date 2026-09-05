@@ -1,10 +1,10 @@
 use std::path::Path;
 
+use crate::application::secret_files::read_secret_file;
 use olp_db::{
     security::envelope::MasterKey, security::key_material::AuthHmacKey,
     security::rotation::MasterKeyEncryptionStatus, store::Store,
 };
-use zeroize::Zeroizing;
 
 use super::{AppResult, config::DatabaseArgs};
 
@@ -30,10 +30,6 @@ pub(super) async fn load_master_key(path: &Path) -> AppResult<MasterKey> {
     Ok(MasterKey::from_file_contents(&encoded)?)
 }
 
-pub(crate) async fn read_secret_file(path: &Path) -> AppResult<Zeroizing<String>> {
-    Ok(Zeroizing::new(tokio::fs::read_to_string(path).await?))
-}
-
 pub(super) fn ensure_keyring_covers_references(
     master_key: &MasterKey,
     status: &MasterKeyEncryptionStatus,
@@ -49,25 +45,5 @@ pub(super) fn ensure_keyring_covers_references(
         ))
         .into());
     }
-    Ok(())
-}
-
-#[cfg(unix)]
-pub(crate) async fn check_secret_permissions(path: &Path) -> AppResult<()> {
-    use std::os::unix::fs::PermissionsExt;
-    let mode = tokio::fs::metadata(path).await?.permissions().mode() & 0o777;
-    if mode & 0o007 != 0 {
-        return Err(std::io::Error::other(format!(
-            "{} must not be accessible by other users",
-            path.display()
-        ))
-        .into());
-    }
-    Ok(())
-}
-
-#[cfg(not(unix))]
-pub(crate) async fn check_secret_permissions(path: &Path) -> AppResult<()> {
-    tokio::fs::metadata(path).await?;
     Ok(())
 }

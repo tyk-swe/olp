@@ -13,11 +13,11 @@
   } from '$lib/api/http';
   import {
     getProvider,
-    listProviderKinds,
     updateProvider,
     type Provider
   } from '$lib/api/management/providers';
-  import { emptyCursorHistory, resetCursor } from '$lib/api/pagination';
+  import { listProviderKinds } from '$lib/api/management/providerModels';
+  import { emptyCursorHistory, resetCursor } from '$lib/lists/pagination';
   import { useRole } from '$lib/auth/useRole.svelte';
   import {
     acceptRemote,

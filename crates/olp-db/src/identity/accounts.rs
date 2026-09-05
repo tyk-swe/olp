@@ -9,7 +9,7 @@ use crate::{
         RecentAuthPurpose, SessionSecurityContext, consume_recent_authentication,
         insert_versioned_session, revoke_user_sessions,
     },
-    configuration::MAX_PAGE_SIZE,
+    configuration::validation::MAX_PAGE_SIZE,
     security::session_material::SessionMaterial,
     split_page,
     store::Store,

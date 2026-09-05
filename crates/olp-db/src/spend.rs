@@ -5,7 +5,7 @@ use rust_decimal::Decimal;
 use sqlx::{PgConnection, Postgres, Transaction};
 use uuid::Uuid;
 
-use crate::{error::Error, limits::CostSnapshot, store::Store};
+use crate::{error::Error, limits::costs::CostSnapshot, store::Store};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct BudgetWindowStatus {

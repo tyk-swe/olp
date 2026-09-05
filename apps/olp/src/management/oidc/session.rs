@@ -20,10 +20,10 @@ use zeroize::{Zeroize, Zeroizing};
 use super::error::invalid_login_flow_cookie;
 use super::helpers::{require_master_key, valid_binding_token};
 use crate::{
-    bootstrap::mode_dependencies::ManagementState,
     management::{
         cookies::{append_recent_auth_cookie, append_security_transition_cookies},
         response_policy::prevent_sensitive_response_caching,
+        state::ManagementState,
     },
     public_http::{
         problem::Problem,

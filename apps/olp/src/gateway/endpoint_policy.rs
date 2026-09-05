@@ -4,7 +4,7 @@
 //! table in [`registry::ENDPOINTS`].
 
 pub(crate) mod classification;
-pub(crate) mod export;
+pub mod export;
 mod registry;
 pub(super) mod router;
 

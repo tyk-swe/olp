@@ -1,6 +1,9 @@
 import type { RequestFilters } from '$lib/api/requests';
 import { REQUEST_PAGE_SIZE } from '$lib/api/pageSizes';
-import { filteredListState, type FilteredListState } from '$lib/api/pagination';
+import {
+  filteredListState,
+  type FilteredListState
+} from '$lib/lists/pagination';
 import { instant } from '$lib/api/query';
 
 export type RequestForm = {

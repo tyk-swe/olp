@@ -4,7 +4,7 @@ use super::{
     *,
 };
 use crate::audit_events::{AuditEvent, record_audit_event, record_success};
-use crate::configuration::MAX_MODEL_CAPABILITY_TUPLES;
+use crate::configuration::validation::MAX_MODEL_CAPABILITY_TUPLES;
 
 impl Store {
     pub async fn list_provider_models(
@@ -332,69 +332,14 @@ impl Store {
         }
 
         let mut transaction = self.pool().begin().await?;
-        let provider = lock_provider(&mut transaction, provider_id)
-            .await?
-            .ok_or(Error::NotFound)?;
-        if provider.etag != expected_etag {
-            return Err(Error::PreconditionFailed);
-        }
-        if provider.state != "draft" {
-            return Err(Error::InUse);
-        }
-        let provider_kind = provider.kind;
-        if provider_kind != "openai_compatible" {
-            let last_probe_at: Option<DateTime<Utc>> = provider.last_probe_at;
-            let updated_at: DateTime<Utc> = provider.updated_at;
-            let has_fresh_probe = provider.last_probe_status.as_deref() == Some("succeeded")
-                && last_probe_at.is_some_and(|probed_at| probed_at >= updated_at);
-            if !has_fresh_probe {
-                return Err(Error::Invalid(
-                    "native capability certification requires a successful credentialed probe of the current provider draft"
-                        .to_owned(),
-                ));
-            }
-        }
-        let discovered_at_row: Option<Option<DateTime<Utc>>> = sqlx::query_scalar!(
-            "SELECT discovered_at FROM provider_models WHERE id = $1 AND provider_id = $2",
+        validate_certification_evidence(
+            &mut transaction,
+            provider_id,
             model_id,
-            provider_id
+            expected_etag,
+            &submitted,
         )
-        .fetch_optional(&mut *transaction)
         .await?;
-        let Some(model_discovered_at) = discovered_at_row else {
-            return Err(Error::NotFound);
-        };
-        if provider_kind != "openai_compatible" && model_discovered_at.is_none() {
-            return Err(Error::Invalid(
-                "native capability certification requires a discovered provider model".to_owned(),
-            ));
-        }
-        let current = sqlx::query!(
-            "SELECT operation, surface, mode FROM model_capabilities \
-             WHERE provider_model_id = $1 FOR UPDATE",
-            model_id
-        )
-        .fetch_all(&mut *transaction)
-        .await?
-        .into_iter()
-        .map(|row| -> Result<_, Error> {
-            Ok((
-                row.operation
-                    .parse()
-                    .map_err(|_| PersistenceError::InvalidStoredValue("capability operation"))?,
-                row.surface
-                    .parse()
-                    .map_err(|_| PersistenceError::InvalidStoredValue("capability surface"))?,
-                row.mode.parse().map_err(|_| {
-                    PersistenceError::InvalidStoredValue("capability transport mode")
-                })?,
-            ))
-        })
-        .collect::<Result<BTreeSet<_>, _>>()?;
-        if current != submitted {
-            return Err(Error::PreconditionFailed);
-        }
-
         let certified_at = Utc::now();
         sqlx::query!(
             "UPDATE model_capabilities SET source = 'declared', certified_at = NULL \
@@ -672,5 +617,78 @@ async fn replace_model_capabilities(
     )
     .execute(&mut **transaction)
     .await?;
+    Ok(())
+}
+
+async fn validate_certification_evidence(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    provider_id: Uuid,
+    model_id: Uuid,
+    expected_etag: Uuid,
+    submitted: &BTreeSet<(OperationKind, Surface, TransportMode)>,
+) -> Result<(), Error> {
+    let provider = lock_provider(transaction, provider_id)
+        .await?
+        .ok_or(Error::NotFound)?;
+    if provider.etag != expected_etag {
+        return Err(Error::PreconditionFailed);
+    }
+    if provider.state != "draft" {
+        return Err(Error::InUse);
+    }
+    let provider_kind = provider.kind;
+    if provider_kind != "openai_compatible" {
+        let last_probe_at: Option<DateTime<Utc>> = provider.last_probe_at;
+        let updated_at: DateTime<Utc> = provider.updated_at;
+        let has_fresh_probe = provider.last_probe_status.as_deref() == Some("succeeded")
+            && last_probe_at.is_some_and(|probed_at| probed_at >= updated_at);
+        if !has_fresh_probe {
+            return Err(Error::Invalid(
+                    "native capability certification requires a successful credentialed probe of the current provider draft"
+                        .to_owned(),
+                ));
+        }
+    }
+    let discovered_at_row: Option<Option<DateTime<Utc>>> = sqlx::query_scalar!(
+        "SELECT discovered_at FROM provider_models WHERE id = $1 AND provider_id = $2",
+        model_id,
+        provider_id
+    )
+    .fetch_optional(&mut **transaction)
+    .await?;
+    let Some(model_discovered_at) = discovered_at_row else {
+        return Err(Error::NotFound);
+    };
+    if provider_kind != "openai_compatible" && model_discovered_at.is_none() {
+        return Err(Error::Invalid(
+            "native capability certification requires a discovered provider model".to_owned(),
+        ));
+    }
+    let current = sqlx::query!(
+        "SELECT operation, surface, mode FROM model_capabilities \
+             WHERE provider_model_id = $1 FOR UPDATE",
+        model_id
+    )
+    .fetch_all(&mut **transaction)
+    .await?
+    .into_iter()
+    .map(|row| -> Result<_, Error> {
+        Ok((
+            row.operation
+                .parse()
+                .map_err(|_| PersistenceError::InvalidStoredValue("capability operation"))?,
+            row.surface
+                .parse()
+                .map_err(|_| PersistenceError::InvalidStoredValue("capability surface"))?,
+            row.mode
+                .parse()
+                .map_err(|_| PersistenceError::InvalidStoredValue("capability transport mode"))?,
+        ))
+    })
+    .collect::<Result<BTreeSet<_>, _>>()?;
+    if &current != submitted {
+        return Err(Error::PreconditionFailed);
+    }
+
     Ok(())
 }

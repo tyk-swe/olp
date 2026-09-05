@@ -472,6 +472,80 @@ impl Store {
         checked_row_count(row_count)
     }
 
+    async fn encrypted_verification_rows(
+        &self,
+        table: EncryptedTable,
+        cursor: Option<Uuid>,
+        batch_size: u16,
+    ) -> Result<Vec<VerificationRow>, ReencryptionError> {
+        Ok(match table {
+            EncryptedTable::ProviderCredentialVersions => {
+                sqlx::query_as!(
+                    VerificationRow,
+                    "SELECT id, provider_id AS \"provider_id?\", version AS \"version?\", \
+                            ciphertext AS \"encrypted?\", nonce AS \"nonce?\", \
+                            master_key_version AS \"key_version?\", \
+                            NULL::uuid AS \"actor_user_id?\", NULL::text AS \"operation?\", \
+                            NULL::text AS \"idempotency_key?\" \
+                     FROM provider_credential_versions WHERE ($1::uuid IS NULL OR id > $1) \
+                     ORDER BY id LIMIT $2",
+                    cursor,
+                    i64::from(batch_size)
+                )
+                .fetch_all(self.pool())
+                .await?
+            }
+            EncryptedTable::OidcConfigurations => {
+                sqlx::query_as!(
+                    VerificationRow,
+                    "SELECT id, NULL::uuid AS \"provider_id?\", NULL::integer AS \"version?\", \
+                            encrypted_client_secret AS \"encrypted?\", secret_nonce AS \"nonce?\", \
+                            secret_key_version AS \"key_version?\", \
+                            NULL::uuid AS \"actor_user_id?\", NULL::text AS \"operation?\", \
+                            NULL::text AS \"idempotency_key?\" \
+                     FROM oidc_configurations WHERE secret_key_version IS NOT NULL \
+                       AND ($1::uuid IS NULL OR id > $1) ORDER BY id LIMIT $2",
+                    cursor,
+                    i64::from(batch_size)
+                )
+                .fetch_all(self.pool())
+                .await?
+            }
+            EncryptedTable::OidcAuthorizationFlows => {
+                sqlx::query_as!(
+                    VerificationRow,
+                    "SELECT id, NULL::uuid AS \"provider_id?\", NULL::integer AS \"version?\", \
+                            encrypted_payload AS \"encrypted?\", payload_nonce AS \"nonce?\", \
+                            payload_key_version AS \"key_version?\", \
+                            NULL::uuid AS \"actor_user_id?\", NULL::text AS \"operation?\", \
+                            NULL::text AS \"idempotency_key?\" \
+                     FROM oidc_authorization_flows WHERE ($1::uuid IS NULL OR id > $1) \
+                     ORDER BY id LIMIT $2",
+                    cursor,
+                    i64::from(batch_size)
+                )
+                .fetch_all(self.pool())
+                .await?
+            }
+            EncryptedTable::IdempotencyRecords => {
+                sqlx::query_as!(
+                    VerificationRow,
+                    "SELECT id, NULL::uuid AS \"provider_id?\", NULL::integer AS \"version?\", \
+                            replay_ciphertext AS \"encrypted?\", replay_nonce AS \"nonce?\", \
+                            replay_key_version AS \"key_version?\", \
+                            actor_user_id AS \"actor_user_id?\", operation AS \"operation?\", \
+                            idempotency_key AS \"idempotency_key?\" \
+                     FROM idempotency_records WHERE replay_key_version IS NOT NULL \
+                       AND ($1::uuid IS NULL OR id > $1) ORDER BY id LIMIT $2",
+                    cursor,
+                    i64::from(batch_size)
+                )
+                .fetch_all(self.pool())
+                .await?
+            }
+        })
+    }
+
     async fn verify_encrypted_table(
         &self,
         master_key: &MasterKey,
@@ -481,67 +555,9 @@ impl Store {
         let mut cursor: Option<Uuid> = None;
         let mut verified = 0_u64;
         loop {
-            let rows =
-                match table {
-                    EncryptedTable::ProviderCredentialVersions => {
-                        sqlx::query_as!(
-                            VerificationRow,
-                            "SELECT id, provider_id AS \"provider_id?\", version AS \"version?\", \
-                            ciphertext AS \"encrypted?\", nonce AS \"nonce?\", \
-                            master_key_version AS \"key_version?\", \
-                            NULL::uuid AS \"actor_user_id?\", NULL::text AS \"operation?\", \
-                            NULL::text AS \"idempotency_key?\" \
-                     FROM provider_credential_versions WHERE ($1::uuid IS NULL OR id > $1) \
-                     ORDER BY id LIMIT $2",
-                            cursor,
-                            i64::from(batch_size)
-                        )
-                        .fetch_all(self.pool())
-                        .await?
-                    }
-                    EncryptedTable::OidcConfigurations => sqlx::query_as!(
-                        VerificationRow,
-                        "SELECT id, NULL::uuid AS \"provider_id?\", NULL::integer AS \"version?\", \
-                            encrypted_client_secret AS \"encrypted?\", secret_nonce AS \"nonce?\", \
-                            secret_key_version AS \"key_version?\", \
-                            NULL::uuid AS \"actor_user_id?\", NULL::text AS \"operation?\", \
-                            NULL::text AS \"idempotency_key?\" \
-                     FROM oidc_configurations WHERE secret_key_version IS NOT NULL \
-                       AND ($1::uuid IS NULL OR id > $1) ORDER BY id LIMIT $2",
-                        cursor,
-                        i64::from(batch_size)
-                    )
-                    .fetch_all(self.pool())
-                    .await?,
-                    EncryptedTable::OidcAuthorizationFlows => sqlx::query_as!(
-                        VerificationRow,
-                        "SELECT id, NULL::uuid AS \"provider_id?\", NULL::integer AS \"version?\", \
-                            encrypted_payload AS \"encrypted?\", payload_nonce AS \"nonce?\", \
-                            payload_key_version AS \"key_version?\", \
-                            NULL::uuid AS \"actor_user_id?\", NULL::text AS \"operation?\", \
-                            NULL::text AS \"idempotency_key?\" \
-                     FROM oidc_authorization_flows WHERE ($1::uuid IS NULL OR id > $1) \
-                     ORDER BY id LIMIT $2",
-                        cursor,
-                        i64::from(batch_size)
-                    )
-                    .fetch_all(self.pool())
-                    .await?,
-                    EncryptedTable::IdempotencyRecords => sqlx::query_as!(
-                        VerificationRow,
-                        "SELECT id, NULL::uuid AS \"provider_id?\", NULL::integer AS \"version?\", \
-                            replay_ciphertext AS \"encrypted?\", replay_nonce AS \"nonce?\", \
-                            replay_key_version AS \"key_version?\", \
-                            actor_user_id AS \"actor_user_id?\", operation AS \"operation?\", \
-                            idempotency_key AS \"idempotency_key?\" \
-                     FROM idempotency_records WHERE replay_key_version IS NOT NULL \
-                       AND ($1::uuid IS NULL OR id > $1) ORDER BY id LIMIT $2",
-                        cursor,
-                        i64::from(batch_size)
-                    )
-                    .fetch_all(self.pool())
-                    .await?,
-                };
+            let rows = self
+                .encrypted_verification_rows(table, cursor, batch_size)
+                .await?;
             if rows.is_empty() {
                 break;
             }

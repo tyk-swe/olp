@@ -9,20 +9,22 @@
     certifyProviderModel,
     declareProviderModels,
     discoverProviderModels,
-    getProvider,
     getProviderCapabilityOptions,
-    probeProvider,
     setProviderModel,
     type CapabilityCertification,
     type CapabilityDeclaration,
-    type Provider,
     type ProviderModel
+  } from '$lib/api/management/providerModels';
+  import {
+    getProvider,
+    probeProvider,
+    type Provider
   } from '$lib/api/management/providers';
   import {
     cursorPaginationProps,
     resetCursor,
     type CursorHistory
-  } from '$lib/api/pagination';
+  } from '$lib/lists/pagination';
   import CapabilityReview from './CapabilityReview.svelte';
   import {
     activationReady,

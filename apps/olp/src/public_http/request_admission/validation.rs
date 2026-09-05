@@ -6,9 +6,11 @@ use axum::{
 };
 
 use crate::{
-    bootstrap::state::BodyLimits, bootstrap::state::MAX_HTTP_HEADER_BYTES,
-    bootstrap::state::MAX_HTTP_HEADER_COUNT,
-    gateway::endpoint_policy::classification::InferenceEndpoint, public_http::problem::Problem,
+    gateway::endpoint_policy::classification::InferenceEndpoint,
+    public_http::{
+        body_limits::{BodyLimits, MAX_HTTP_HEADER_BYTES, MAX_HTTP_HEADER_COUNT},
+        problem::Problem,
+    },
 };
 
 const MAX_HEADER_VALUE_BYTES: usize = 8 * 1024;

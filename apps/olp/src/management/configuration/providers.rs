@@ -33,6 +33,89 @@ pub(in crate::management) fn record_violations(
     }
 }
 
+pub(super) fn router() -> axum::Router<crate::management::state::ManagementState> {
+    use axum::routing::{get, patch, post};
+    axum::Router::new()
+        .route("/api/v1/provider-kinds", get(models::list_provider_kinds))
+        .route(
+            "/api/v1/provider-kinds/{provider_kind}/capabilities",
+            get(models::list_provider_kind_capabilities),
+        )
+        .route(
+            "/api/v1/providers",
+            get(manage::list_providers).post(create::create_provider),
+        )
+        .route(
+            "/api/v1/provider-models",
+            get(models::list_provider_model_inventory),
+        )
+        .route(
+            "/api/v1/providers/{provider_id}",
+            get(manage::get_provider).patch(manage::update_provider),
+        )
+        .route(
+            "/api/v1/providers/{provider_id}/activate",
+            post(create::activate_provider),
+        )
+        .route(
+            "/api/v1/providers/{provider_id}/disable",
+            post(manage::disable_provider),
+        )
+        .route(
+            "/api/v1/providers/{provider_id}/restore-as-draft",
+            post(manage::restore_provider_as_draft),
+        )
+        .route(
+            "/api/v1/providers/{provider_id}/revisions",
+            get(revisions::list_provider_revisions),
+        )
+        .route(
+            "/api/v1/providers/{provider_id}/revisions/diff",
+            get(revisions::diff_provider_revisions),
+        )
+        .route(
+            "/api/v1/providers/{provider_id}/revisions/{revision_id}",
+            get(revisions::get_provider_revision),
+        )
+        .route(
+            "/api/v1/providers/{provider_id}/revisions/{revision_id}/models",
+            get(revisions::list_provider_revision_models),
+        )
+        .route(
+            "/api/v1/providers/{provider_id}/revisions/{revision_id}/restore-as-draft",
+            post(revisions::restore_provider_revision),
+        )
+        .route(
+            "/api/v1/providers/{provider_id}/credentials",
+            get(credentials::list_provider_credentials)
+                .post(credentials::rotate_provider_credential),
+        )
+        .route(
+            "/api/v1/providers/{provider_id}/credentials/{credential_id}/revoke",
+            post(credentials::revoke_provider_credential),
+        )
+        .route(
+            "/api/v1/providers/{provider_id}/probe",
+            post(manage::probe_provider),
+        )
+        .route(
+            "/api/v1/providers/{provider_id}/discovery",
+            post(models::discover_provider_models),
+        )
+        .route(
+            "/api/v1/providers/{provider_id}/models/{model_id}",
+            patch(models::set_provider_model),
+        )
+        .route(
+            "/api/v1/providers/{provider_id}/models",
+            get(models::list_provider_models),
+        )
+        .route(
+            "/api/v1/providers/{provider_id}/models/{model_id}/certify",
+            post(models::certify_provider_model),
+        )
+}
+
 #[cfg(test)]
 mod tests {
     use olp_engine::domain::provider_configuration::{

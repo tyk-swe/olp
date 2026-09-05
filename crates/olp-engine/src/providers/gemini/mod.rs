@@ -13,9 +13,9 @@ use std::{fmt, sync::Arc};
 use crate::domain::ports::BoxFuture;
 use zeroize::Zeroizing;
 
-use crate::providers::EgressPolicy;
 use crate::providers::connector::Timeouts;
 use crate::providers::gemini::endpoint::Endpoint;
+use crate::providers::http_egress::EgressPolicy;
 
 pub const DEFAULT_MAX_RESPONSE_BYTES: usize = 16 * 1024 * 1024;
 pub const DEFAULT_MAX_EVENT_BYTES: usize = 1024 * 1024;

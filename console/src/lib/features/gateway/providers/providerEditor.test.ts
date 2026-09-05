@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { ProviderKindCapability } from '$lib/api/management/providers';
+import type { ProviderKindCapability } from '$lib/api/management/providerModels';
 import {
   activationReady,
   authOptionsFor,

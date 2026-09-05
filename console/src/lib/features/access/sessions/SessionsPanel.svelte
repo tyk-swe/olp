@@ -14,7 +14,7 @@
     cursorPaginationProps,
     emptyCursorHistory,
     resetCursor
-  } from '$lib/api/pagination';
+  } from '$lib/lists/pagination';
   import CursorPagination from '$lib/components/CursorPagination.svelte';
   import { formatDate } from '$lib/format';
 

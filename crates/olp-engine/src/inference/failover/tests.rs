@@ -324,6 +324,7 @@ fn failure(phase: TransportPhase, class: AttemptFailureClass) -> TransportError 
 }
 
 mod execute {
+    mod first_event;
     use std::{
         collections::{BTreeMap, VecDeque},
         num::NonZeroU16,

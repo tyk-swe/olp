@@ -17,7 +17,7 @@ use crate::management::{
     permissions::require_permission,
     provenance::Provenance,
 };
-use crate::{bootstrap::mode_dependencies::ManagementState, public_http::problem::Problem};
+use crate::{management::state::ManagementState, public_http::problem::Problem};
 
 #[derive(Debug, Deserialize)]
 pub(in crate::management) struct SessionPageQuery {

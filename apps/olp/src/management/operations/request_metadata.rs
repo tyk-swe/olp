@@ -15,13 +15,14 @@ use utoipa::{IntoParams, ToSchema};
 use uuid::Uuid;
 
 use crate::{
-    bootstrap::mode_dependencies::ManagementState,
-    management::operations::helpers::{map_operations, not_found, page_limit, timestamp_cursor},
     management::{
         error_mapping::map_persistence,
+        operations::helpers::{map_operations, not_found, timestamp_cursor},
+        pagination::page_limit,
         permissions::require_permission,
         principal::{MutationPrincipal, ReadPrincipal},
         provenance::Provenance,
+        state::ManagementState,
     },
     public_http::problem::Problem,
 };

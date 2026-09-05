@@ -40,48 +40,7 @@ pub fn request(
     if request.response_format.is_some() {
         return Err(EncodeError::ResponseFormatUnsupported);
     }
-    let mut system_blocks = Vec::new();
-    let mut messages = Vec::new();
-    let mut conversation_started = false;
-    for message in &request.messages {
-        match message.role {
-            MessageRole::System | MessageRole::Developer => {
-                if conversation_started {
-                    return Err(EncodeError::SystemMessageAfterConversation);
-                }
-                if message.name.is_some()
-                    || message.tool_call_id.is_some()
-                    || !message.tool_calls.is_empty()
-                {
-                    return Err(EncodeError::UnsupportedSystemContent);
-                }
-                for part in &message.content {
-                    let ContentPart::Text { text } = part else {
-                        return Err(EncodeError::UnsupportedSystemContent);
-                    };
-                    system_blocks.push(TextBlock {
-                        kind: "text".into(),
-                        text: text.clone(),
-                        extra: BTreeMap::new(),
-                    });
-                }
-            }
-            _ => {
-                conversation_started = true;
-                let message_index = messages.len();
-                let content_prefix = format!("/messages/{message_index}/content/");
-                let force_blocks = request
-                    .extensions
-                    .values
-                    .keys()
-                    .any(|path| path.starts_with(&content_prefix));
-                messages.push(encode_message(message, force_blocks)?);
-            }
-        }
-    }
-    if messages.is_empty() {
-        return Err(EncodeError::EmptyMessages);
-    }
+    let (system_blocks, messages) = encode_messages(request)?;
 
     let tools = request
         .tools
@@ -94,38 +53,7 @@ pub fn request(
             extra: BTreeMap::new(),
         })
         .collect();
-    let tool_choice = request
-        .tool_choice
-        .as_ref()
-        .map(|choice| ToolChoice {
-            kind: match choice {
-                CanonicalToolChoice::Auto => "auto",
-                CanonicalToolChoice::None => "none",
-                CanonicalToolChoice::Required => "any",
-                CanonicalToolChoice::Named(_) => "tool",
-            }
-            .into(),
-            name: match choice {
-                CanonicalToolChoice::Named(name) => Some(name.clone()),
-                _ => None,
-            },
-            disable_parallel_tool_use: request
-                .parameters
-                .parallel_tool_calls
-                .map(|enabled| !enabled),
-            extra: BTreeMap::new(),
-        })
-        .or_else(|| {
-            request
-                .parameters
-                .parallel_tool_calls
-                .map(|enabled| ToolChoice {
-                    kind: "auto".into(),
-                    name: None,
-                    disable_parallel_tool_use: Some(!enabled),
-                    extra: BTreeMap::new(),
-                })
-        });
+    let tool_choice = encode_tool_choice(request);
     let force_system_blocks = request
         .extensions
         .values
@@ -268,4 +196,88 @@ fn encode_content(content: &[ContentPart]) -> Result<Vec<ContentBlock>, EncodeEr
             ContentPart::Refusal { .. } => Err(EncodeError::RefusalUnsupported),
         })
         .collect()
+}
+
+fn encode_messages(
+    request: &GenerationRequest,
+) -> Result<(Vec<TextBlock>, Vec<Message>), EncodeError> {
+    let mut system_blocks = Vec::new();
+    let mut messages = Vec::new();
+    let mut conversation_started = false;
+    for message in &request.messages {
+        match message.role {
+            MessageRole::System | MessageRole::Developer => {
+                if conversation_started {
+                    return Err(EncodeError::SystemMessageAfterConversation);
+                }
+                if message.name.is_some()
+                    || message.tool_call_id.is_some()
+                    || !message.tool_calls.is_empty()
+                {
+                    return Err(EncodeError::UnsupportedSystemContent);
+                }
+                for part in &message.content {
+                    let ContentPart::Text { text } = part else {
+                        return Err(EncodeError::UnsupportedSystemContent);
+                    };
+                    system_blocks.push(TextBlock {
+                        kind: "text".into(),
+                        text: text.clone(),
+                        extra: BTreeMap::new(),
+                    });
+                }
+            }
+            _ => {
+                conversation_started = true;
+                let message_index = messages.len();
+                let content_prefix = format!("/messages/{message_index}/content/");
+                let force_blocks = request
+                    .extensions
+                    .values
+                    .keys()
+                    .any(|path| path.starts_with(&content_prefix));
+                messages.push(encode_message(message, force_blocks)?);
+            }
+        }
+    }
+    if messages.is_empty() {
+        return Err(EncodeError::EmptyMessages);
+    }
+
+    Ok((system_blocks, messages))
+}
+
+fn encode_tool_choice(request: &GenerationRequest) -> Option<ToolChoice> {
+    request
+        .tool_choice
+        .as_ref()
+        .map(|choice| ToolChoice {
+            kind: match choice {
+                CanonicalToolChoice::Auto => "auto",
+                CanonicalToolChoice::None => "none",
+                CanonicalToolChoice::Required => "any",
+                CanonicalToolChoice::Named(_) => "tool",
+            }
+            .into(),
+            name: match choice {
+                CanonicalToolChoice::Named(name) => Some(name.clone()),
+                _ => None,
+            },
+            disable_parallel_tool_use: request
+                .parameters
+                .parallel_tool_calls
+                .map(|enabled| !enabled),
+            extra: BTreeMap::new(),
+        })
+        .or_else(|| {
+            request
+                .parameters
+                .parallel_tool_calls
+                .map(|enabled| ToolChoice {
+                    kind: "auto".into(),
+                    name: None,
+                    disable_parallel_tool_use: Some(!enabled),
+                    extra: BTreeMap::new(),
+                })
+        })
 }

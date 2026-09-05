@@ -1,10 +1,7 @@
-use axum::{
-    Router,
-    routing::{get, patch, post},
-};
+use axum::Router;
 use utoipa::OpenApi;
 
-use crate::{bootstrap::mode_dependencies::ManagementState, public_http::problem::Problem};
+use crate::{management::state::ManagementState, public_http::problem::Problem};
 
 pub(crate) mod api_keys;
 pub(crate) mod providers;
@@ -12,143 +9,9 @@ mod routes;
 
 pub(super) fn router() -> Router<ManagementState> {
     Router::new()
-        .route(
-            "/api/v1/provider-kinds",
-            get(providers::models::list_provider_kinds),
-        )
-        .route(
-            "/api/v1/provider-kinds/{provider_kind}/capabilities",
-            get(providers::models::list_provider_kind_capabilities),
-        )
-        .route(
-            "/api/v1/providers",
-            get(providers::manage::list_providers).post(providers::create::create_provider),
-        )
-        .route(
-            "/api/v1/provider-models",
-            get(providers::models::list_provider_model_inventory),
-        )
-        .route(
-            "/api/v1/providers/{provider_id}",
-            get(providers::manage::get_provider).patch(providers::manage::update_provider),
-        )
-        .route(
-            "/api/v1/providers/{provider_id}/activate",
-            post(providers::create::activate_provider),
-        )
-        .route(
-            "/api/v1/providers/{provider_id}/disable",
-            post(providers::manage::disable_provider),
-        )
-        .route(
-            "/api/v1/providers/{provider_id}/restore-as-draft",
-            post(providers::manage::restore_provider_as_draft),
-        )
-        .route(
-            "/api/v1/providers/{provider_id}/revisions",
-            get(providers::revisions::list_provider_revisions),
-        )
-        .route(
-            "/api/v1/providers/{provider_id}/revisions/diff",
-            get(providers::revisions::diff_provider_revisions),
-        )
-        .route(
-            "/api/v1/providers/{provider_id}/revisions/{revision_id}",
-            get(providers::revisions::get_provider_revision),
-        )
-        .route(
-            "/api/v1/providers/{provider_id}/revisions/{revision_id}/models",
-            get(providers::revisions::list_provider_revision_models),
-        )
-        .route(
-            "/api/v1/providers/{provider_id}/revisions/{revision_id}/restore-as-draft",
-            post(providers::revisions::restore_provider_revision),
-        )
-        .route(
-            "/api/v1/providers/{provider_id}/credentials",
-            get(providers::credentials::list_provider_credentials)
-                .post(providers::credentials::rotate_provider_credential),
-        )
-        .route(
-            "/api/v1/providers/{provider_id}/credentials/{credential_id}/revoke",
-            post(providers::credentials::revoke_provider_credential),
-        )
-        .route(
-            "/api/v1/providers/{provider_id}/probe",
-            post(providers::manage::probe_provider),
-        )
-        .route(
-            "/api/v1/providers/{provider_id}/discovery",
-            post(providers::models::discover_provider_models),
-        )
-        .route(
-            "/api/v1/providers/{provider_id}/models/{model_id}",
-            patch(providers::models::set_provider_model),
-        )
-        .route(
-            "/api/v1/providers/{provider_id}/models",
-            get(providers::models::list_provider_models),
-        )
-        .route(
-            "/api/v1/providers/{provider_id}/models/{model_id}/certify",
-            post(providers::models::certify_provider_model),
-        )
-        .route(
-            "/api/v1/route-drafts",
-            get(routes::manage::list_route_drafts).post(routes::create::create_route_draft),
-        )
-        .route(
-            "/api/v1/route-drafts/{draft_id}",
-            get(routes::manage::get_route_draft)
-                .put(routes::manage::replace_route_draft)
-                .delete(routes::manage::delete_route_draft),
-        )
-        .route(
-            "/api/v1/route-drafts/{draft_id}/simulate",
-            post(routes::manage::simulate_route_draft),
-        )
-        .route(
-            "/api/v1/route-drafts/{draft_id}/validate",
-            post(routes::create::validate_route_draft),
-        )
-        .route(
-            "/api/v1/route-drafts/{draft_id}/activate",
-            post(routes::create::activate_route_draft),
-        )
-        .route("/api/v1/routes", get(routes::manage::list_routes))
-        .route("/api/v1/routes/{route_id}", get(routes::manage::get_route))
-        .route(
-            "/api/v1/routes/{route_id}/revisions",
-            get(routes::manage::list_route_revisions),
-        )
-        .route(
-            "/api/v1/routes/{route_id}/revisions/diff",
-            get(routes::manage::diff_route_revisions),
-        )
-        .route(
-            "/api/v1/routes/{route_id}/revisions/{revision_id}",
-            get(routes::manage::get_route_revision),
-        )
-        .route(
-            "/api/v1/routes/{route_id}/revisions/{revision_id}/restore-as-draft",
-            post(routes::manage::restore_route_revision),
-        )
-        .route(
-            "/api/v1/api-keys",
-            get(api_keys::manage::list_api_keys).post(api_keys::create::create_api_key),
-        )
-        .route(
-            "/api/v1/api-keys/{api_key_id}",
-            get(api_keys::manage::get_api_key).patch(api_keys::manage::update_api_key),
-        )
-        .route(
-            "/api/v1/api-keys/{api_key_id}/rotate",
-            post(api_keys::manage::rotate_api_key),
-        )
-        .route(
-            "/api/v1/api-keys/{api_key_id}/revoke",
-            post(api_keys::create::revoke_api_key),
-        )
+        .merge(providers::router())
+        .merge(routes::router())
+        .merge(api_keys::router())
 }
 
 #[derive(OpenApi)]

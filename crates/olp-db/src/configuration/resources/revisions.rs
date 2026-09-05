@@ -373,44 +373,7 @@ impl Store {
         )
         .execute(&mut *transaction)
         .await?;
-        sqlx::query!(
-            "UPDATE provider_models SET enabled = false WHERE provider_id = $1",
-            provider_id
-        )
-        .execute(&mut *transaction)
-        .await?;
-        sqlx::query!(
-            "UPDATE provider_models pm SET upstream_model = prm.upstream_model, \
-                    display_name = prm.display_name, enabled = prm.enabled, \
-                    discovered_at = prm.discovered_at \
-             FROM provider_revision_models prm \
-             WHERE prm.provider_revision_id = $1 \
-               AND pm.id = prm.source_provider_model_id AND pm.provider_id = $2",
-            revision_id,
-            provider_id
-        )
-        .execute(&mut *transaction)
-        .await?;
-        sqlx::query!(
-            "DELETE FROM model_capabilities WHERE provider_model_id IN \
-               (SELECT id FROM provider_models WHERE provider_id = $1)",
-            provider_id
-        )
-        .execute(&mut *transaction)
-        .await?;
-        sqlx::query!(
-            "INSERT INTO model_capabilities \
-               (provider_model_id, operation, surface, mode, source, certified_at) \
-             SELECT prm.source_provider_model_id, prc.operation, prc.surface, prc.mode, \
-                    'declared', NULL \
-             FROM provider_revision_models prm \
-             JOIN provider_revision_capabilities prc \
-               ON prc.provider_revision_model_id = prm.id \
-             WHERE prm.provider_revision_id = $1",
-            revision_id
-        )
-        .execute(&mut *transaction)
-        .await?;
+        restore_revision_models(&mut transaction, provider_id, revision_id).await?;
         record_success(
             &mut *transaction,
             self.provenance(),
@@ -578,4 +541,50 @@ fn provider_revision_capability_set(models: &[ProviderModelRecord]) -> BTreeSet<
             })
         })
         .collect()
+}
+
+async fn restore_revision_models(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    provider_id: Uuid,
+    revision_id: Uuid,
+) -> Result<(), Error> {
+    sqlx::query!(
+        "UPDATE provider_models SET enabled = false WHERE provider_id = $1",
+        provider_id
+    )
+    .execute(&mut **transaction)
+    .await?;
+    sqlx::query!(
+        "UPDATE provider_models pm SET upstream_model = prm.upstream_model, \
+                    display_name = prm.display_name, enabled = prm.enabled, \
+                    discovered_at = prm.discovered_at \
+             FROM provider_revision_models prm \
+             WHERE prm.provider_revision_id = $1 \
+               AND pm.id = prm.source_provider_model_id AND pm.provider_id = $2",
+        revision_id,
+        provider_id
+    )
+    .execute(&mut **transaction)
+    .await?;
+    sqlx::query!(
+        "DELETE FROM model_capabilities WHERE provider_model_id IN \
+               (SELECT id FROM provider_models WHERE provider_id = $1)",
+        provider_id
+    )
+    .execute(&mut **transaction)
+    .await?;
+    sqlx::query!(
+        "INSERT INTO model_capabilities \
+               (provider_model_id, operation, surface, mode, source, certified_at) \
+             SELECT prm.source_provider_model_id, prc.operation, prc.surface, prc.mode, \
+                    'declared', NULL \
+             FROM provider_revision_models prm \
+             JOIN provider_revision_capabilities prc \
+               ON prc.provider_revision_model_id = prm.id \
+             WHERE prm.provider_revision_id = $1",
+        revision_id
+    )
+    .execute(&mut **transaction)
+    .await?;
+    Ok(())
 }

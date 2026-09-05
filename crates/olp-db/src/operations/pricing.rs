@@ -89,29 +89,7 @@ impl Store {
         sqlx::query!("SELECT pg_advisory_xact_lock($1)", PRICING_LOCK_ID)
             .fetch_one(&mut *transaction)
             .await?;
-        let requested_currency = prices
-            .first()
-            .ok_or_else(|| Error::Invalid("pricing revision is empty".to_owned()))?
-            .currency
-            .trim()
-            .to_uppercase();
-        let configured_currency: Option<String> = sqlx::query_scalar!(
-            "SELECT currency::text AS \"value!\" FROM pricing_currency WHERE singleton"
-        )
-        .fetch_optional(&mut *transaction)
-        .await?;
-        if configured_currency
-            .as_deref()
-            .is_some_and(|currency| currency.trim() != requested_currency)
-        {
-            return Err(Error::Invalid(format!(
-                "pricing currency must match the installation currency {}",
-                configured_currency
-                    .as_deref()
-                    .map(str::trim)
-                    .unwrap_or_default()
-            )));
-        }
+        validate_installation_currency(&mut transaction, prices).await?;
         let revision: i32 = sqlx::query_scalar!(
             "SELECT COALESCE(MAX(revision), 0) + 1 AS \"value!\" FROM pricing_revisions"
         )
@@ -130,45 +108,7 @@ impl Store {
         )
         .execute(&mut *transaction)
         .await?;
-        for price in prices {
-            let input_per_million = parse_optional_decimal(price.input_per_million.as_deref())?;
-            let cached_input_per_million =
-                parse_optional_decimal(price.cached_input_per_million.as_deref())?;
-            let output_per_million = parse_optional_decimal(price.output_per_million.as_deref())?;
-            let unit_price = parse_optional_decimal(price.unit_price.as_deref())?;
-            if let Some(provider_id) = price.provider_id {
-                let provider_kind: Option<String> =
-                    sqlx::query_scalar!("SELECT kind FROM providers WHERE id = $1", provider_id)
-                        .fetch_optional(&mut *transaction)
-                        .await?;
-                if provider_kind.as_deref() != Some(price.provider_kind.as_str()) {
-                    return Err(Error::Invalid(
-                        "a pricing override must reference a provider of the declared kind"
-                            .to_owned(),
-                    ));
-                }
-            }
-            sqlx::query!(
-                "INSERT INTO prices \
-                 (pricing_revision_id, provider_kind, provider_id, model, operation, \
-                  input_per_million, cached_input_per_million, output_per_million, \
-                  unit_price, currency) \
-                 VALUES ($1, $2, $3, $4, $5, $6::numeric, $7::numeric, $8::numeric, \
-                         $9::numeric, $10)",
-                id,
-                price.provider_kind.as_str(),
-                price.provider_id,
-                price.model.trim(),
-                price.operation.as_str(),
-                input_per_million,
-                cached_input_per_million,
-                output_per_million,
-                unit_price,
-                price.currency.trim().to_uppercase()
-            )
-            .execute(&mut *transaction)
-            .await?;
-        }
+        insert_revision_prices(&mut transaction, id, prices).await?;
         record_audit_event(
             &mut *transaction,
             AuditEvent {
@@ -385,4 +325,80 @@ fn parse_optional_decimal(value: Option<&str>) -> Result<Option<Decimal>, Error>
             })
         })
         .transpose()
+}
+
+async fn insert_revision_prices(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    id: Uuid,
+    prices: &[PriceInput],
+) -> Result<(), Error> {
+    for price in prices {
+        let input_per_million = parse_optional_decimal(price.input_per_million.as_deref())?;
+        let cached_input_per_million =
+            parse_optional_decimal(price.cached_input_per_million.as_deref())?;
+        let output_per_million = parse_optional_decimal(price.output_per_million.as_deref())?;
+        let unit_price = parse_optional_decimal(price.unit_price.as_deref())?;
+        if let Some(provider_id) = price.provider_id {
+            let provider_kind: Option<String> =
+                sqlx::query_scalar!("SELECT kind FROM providers WHERE id = $1", provider_id)
+                    .fetch_optional(&mut **transaction)
+                    .await?;
+            if provider_kind.as_deref() != Some(price.provider_kind.as_str()) {
+                return Err(Error::Invalid(
+                    "a pricing override must reference a provider of the declared kind".to_owned(),
+                ));
+            }
+        }
+        sqlx::query!(
+            "INSERT INTO prices \
+                 (pricing_revision_id, provider_kind, provider_id, model, operation, \
+                  input_per_million, cached_input_per_million, output_per_million, \
+                  unit_price, currency) \
+                 VALUES ($1, $2, $3, $4, $5, $6::numeric, $7::numeric, $8::numeric, \
+                         $9::numeric, $10)",
+            id,
+            price.provider_kind.as_str(),
+            price.provider_id,
+            price.model.trim(),
+            price.operation.as_str(),
+            input_per_million,
+            cached_input_per_million,
+            output_per_million,
+            unit_price,
+            price.currency.trim().to_uppercase()
+        )
+        .execute(&mut **transaction)
+        .await?;
+    }
+    Ok(())
+}
+
+async fn validate_installation_currency(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    prices: &[PriceInput],
+) -> Result<(), Error> {
+    let requested_currency = prices
+        .first()
+        .ok_or_else(|| Error::Invalid("pricing revision is empty".to_owned()))?
+        .currency
+        .trim()
+        .to_uppercase();
+    let configured_currency: Option<String> = sqlx::query_scalar!(
+        "SELECT currency::text AS \"value!\" FROM pricing_currency WHERE singleton"
+    )
+    .fetch_optional(&mut **transaction)
+    .await?;
+    if configured_currency
+        .as_deref()
+        .is_some_and(|currency| currency.trim() != requested_currency)
+    {
+        return Err(Error::Invalid(format!(
+            "pricing currency must match the installation currency {}",
+            configured_currency
+                .as_deref()
+                .map(str::trim)
+                .unwrap_or_default()
+        )));
+    }
+    Ok(())
 }

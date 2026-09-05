@@ -1,7 +1,8 @@
 use crate::support::route_fixtures::{insert_provider, insert_unbased_route_draft};
 use olp_db::{
-    configuration::Error, configuration::resources::ReplaceRouteDraftInput,
-    identity::InstallationSetupInput, security::session_material::SessionMaterial,
+    configuration::{error::Error, resources::ReplaceRouteDraftInput},
+    identity::InstallationSetupInput,
+    security::session_material::SessionMaterial,
 };
 use olp_engine::domain::{
     canonical::identity::{OperationKind, Surface, TransportMode},

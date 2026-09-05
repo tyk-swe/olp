@@ -14,7 +14,7 @@ use std::{
 use axum::http::{HeaderMap, HeaderName};
 use olp_db::{security::key_material::AuthHmacKey, store::RequestProvenance};
 
-use crate::{bootstrap::mode_dependencies::RequestBoundaryState, public_http::problem::Problem};
+use crate::public_http::{problem::Problem, state::RequestBoundaryState};
 
 const UNCONFIGURED_PROXY_WARNING_INTERVAL_SECONDS: u64 = 60;
 const USER_AGENT_FAMILY_MAX_CHARS: usize = 64;

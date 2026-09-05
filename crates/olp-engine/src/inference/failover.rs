@@ -7,7 +7,10 @@ use crate::domain::{
         requests::Operation,
         results::CanonicalResult,
     },
-    ports::{AttemptFailureClass, MediaSpool, ProviderOutput, ProviderRequest, TransportError},
+    ports::{
+        AttemptFailureClass, MediaSpool, ProviderEventStream, ProviderOutput, ProviderRequest,
+        TransportError,
+    },
     routing::selection::AttemptPlan,
 };
 use crate::inference::{
@@ -26,17 +29,13 @@ use super::tracing::{AttemptTrace, RequestTrace};
 
 mod streams;
 
-#[cfg(any(test, feature = "test-util"))]
-pub use streams::circuit_accounted_event_stream;
-pub use streams::validated_event_stream;
+use streams::validated_event_stream;
 use streams::{
     canonical_error_circuit_class, canonical_event_protocol_error,
     circuit_accounted_event_stream_with_permit,
 };
 
-pub type EventStream = crate::domain::ports::ProviderEventStream;
-
-pub struct ExecutionSuccess {
+pub(super) struct ExecutionSuccess {
     pub output: ExecutionOutput,
     pub deadline: tokio::time::Instant,
     pub attempts: Vec<RequestAttemptMetadata>,
@@ -44,12 +43,15 @@ pub struct ExecutionSuccess {
     pub(in crate::inference) attempt_trace: Option<AttemptTrace>,
 }
 
-pub enum ExecutionOutput {
-    Events { first: Event, events: EventStream },
+pub(super) enum ExecutionOutput {
+    Events {
+        first: Event,
+        events: ProviderEventStream,
+    },
     Result(Box<CanonicalResult>),
 }
 
-pub struct ExecutionFailure {
+pub(super) struct ExecutionFailure {
     pub error: InferenceError,
     pub attempts: Vec<RequestAttemptMetadata>,
 }
@@ -182,11 +184,11 @@ fn notify_attempt_started(
     }
 }
 
-pub type AttemptStartedObserver<'a> = dyn FnMut(&[RequestAttemptMetadata], &AttemptPlan, u16, chrono::DateTime<Utc>, tokio::time::Instant)
+pub(super) type AttemptStartedObserver<'a> = dyn FnMut(&[RequestAttemptMetadata], &AttemptPlan, u16, chrono::DateTime<Utc>, tokio::time::Instant)
     + Send
     + 'a;
 
-pub struct Context<'a> {
+pub(super) struct Context<'a> {
     pub runtime: &'a Bundle,
     pub overall_timeout: Duration,
     pub max_attempts: NonZeroU16,
@@ -295,7 +297,7 @@ enum AttemptDisposition {
     },
 }
 
-pub async fn execute(
+pub(super) async fn execute(
     context: Context<'_>,
     attempts: Vec<AttemptPlan>,
     metadata: RequestMetadata,
@@ -501,7 +503,7 @@ async fn execute_provider_output(
 }
 
 async fn await_first_event(
-    events: &mut EventStream,
+    events: &mut ProviderEventStream,
     remaining: Duration,
     operation: OperationKind,
 ) -> Result<Event, Option<TransportError>> {
@@ -526,7 +528,7 @@ async fn await_first_event(
 
 fn finish_attempt_with_first_event(
     first: Event,
-    events: EventStream,
+    events: ProviderEventStream,
     attempt_deadline: tokio::time::Instant,
     can_retry_canonical: bool,
     record: &mut AttemptRecord<'_>,
@@ -693,7 +695,7 @@ async fn execute_attempt(
 /// ambiguous for side-effecting operations: the upstream may have executed
 /// (and billed) the work, so failing over could duplicate it. Failures during
 /// the connection phase remain retryable.
-pub fn reclassify_ambiguous_transport_failure(
+pub(super) fn reclassify_ambiguous_transport_failure(
     mut error: TransportError,
     operation: OperationKind,
 ) -> TransportError {

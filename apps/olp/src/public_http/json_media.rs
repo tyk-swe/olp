@@ -27,8 +27,8 @@ use olp_engine::protocols::{
 use serde_json::Value;
 
 use crate::{
-    bootstrap::mode_dependencies::GatewayState, bootstrap::state::BodyLimits,
-    gateway::error::InferenceError,
+    gateway::{error::InferenceError, state::GatewayState},
+    public_http::body_limits::BodyLimits,
 };
 
 struct InlineMediaAdmission {
@@ -512,7 +512,7 @@ mod tests {
     use super::*;
     use olp_engine::inference::runtime::Manager;
 
-    use crate::bootstrap::state::ApiMode;
+    use crate::application::mode::ApiMode;
 
     fn state() -> GatewayState {
         GatewayState::new(

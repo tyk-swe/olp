@@ -3,6 +3,7 @@
 pub mod cache;
 pub(crate) mod metrics;
 pub(crate) mod readiness;
+pub mod state;
 pub(crate) mod tracing;
 
 use std::time::Duration;
@@ -14,7 +15,7 @@ use self::{
     metrics::metrics,
     readiness::{live, ready},
 };
-use crate::{bootstrap::mode_dependencies::ObservabilityState, public_http::problem::Problem};
+use crate::{observability::state::ObservabilityState, public_http::problem::Problem};
 
 const OBSERVABILITY_CONCURRENCY_LIMIT: usize = 8;
 const OBSERVABILITY_REQUEST_TIMEOUT: Duration = Duration::from_secs(2);

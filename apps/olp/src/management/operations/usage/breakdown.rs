@@ -9,9 +9,10 @@ use utoipa::ToSchema;
 
 use super::{UsageQuery, UsageRangeCoverageResponse};
 use crate::{
-    bootstrap::mode_dependencies::ManagementState,
-    management::operations::helpers::{map_operations, page_limit},
-    management::permissions::require_permission,
+    management::{
+        operations::helpers::map_operations, pagination::page_limit,
+        permissions::require_permission, state::ManagementState,
+    },
     public_http::problem::Problem,
 };
 use olp_engine::domain::auth::Permission;

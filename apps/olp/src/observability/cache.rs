@@ -11,7 +11,7 @@ use super::{
     metrics::collect_metrics,
     readiness::{HealthResponse, collect_readiness},
 };
-use crate::{bootstrap::mode_dependencies::ObservabilityState, public_http::problem::Problem};
+use crate::{observability::state::ObservabilityState, public_http::problem::Problem};
 
 const OBSERVABILITY_REFRESH_TIMEOUT: Duration = Duration::from_secs(4);
 const OBSERVABILITY_READINESS_REFRESH_INTERVAL: Duration = Duration::from_secs(5);

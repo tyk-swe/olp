@@ -1,6 +1,9 @@
 import type { AuditFilters } from '$lib/api/audit';
 import { AUDIT_PAGE_SIZE } from '$lib/api/pageSizes';
-import { filteredListState, type FilteredListState } from '$lib/api/pagination';
+import {
+  filteredListState,
+  type FilteredListState
+} from '$lib/lists/pagination';
 import { instant } from '$lib/api/query';
 
 export type AuditForm = {

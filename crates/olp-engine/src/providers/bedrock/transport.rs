@@ -406,71 +406,10 @@ fn map_stream_event(
             }])
         }
         ConverseStreamOutput::ContentBlockStart(start) => {
-            require_content_phase(state)?;
-            let bedrock_index = content_block_index(start.content_block_index)?;
-            // OLP ContentBlockStart lifecycle validation
-            if state.stopped_content_blocks.contains(&bedrock_index)
-                || !state.open_content_blocks.insert(bedrock_index)
-            {
-                state.invalid_event_order = true;
-            }
-            match start.start {
-                None => Ok(Vec::new()),
-                Some(ContentBlockStart::ToolUse(tool)) => {
-                    if state.tool_indices.contains_key(&bedrock_index) {
-                        return Err(protocol_body_error(
-                            "Bedrock stream returned a duplicate tool content block",
-                        ));
-                    }
-                    let tool_index = state.next_tool_index;
-                    state.next_tool_index = state.next_tool_index.saturating_add(1);
-                    state.tool_indices.insert(bedrock_index, tool_index);
-                    Ok(vec![Kind::ToolCallDelta {
-                        output_index: 0,
-                        tool_index,
-                        id: Some(tool.tool_use_id),
-                        name: Some(tool.name),
-                        arguments_delta: String::new(),
-                    }])
-                }
-                Some(_) => Err(protocol_body_error(
-                    "Bedrock stream started content that cannot be represented canonically",
-                )),
-            }
+            map_content_block_start(state, start.content_block_index, start.start)
         }
         ConverseStreamOutput::ContentBlockDelta(delta) => {
-            require_content_phase(state)?;
-            let bedrock_index = content_block_index(delta.content_block_index)?;
-            // OLP ContentBlockDelta lifecycle validation
-            if state.stopped_content_blocks.contains(&bedrock_index) {
-                state.invalid_event_order = true;
-            } else {
-                // Text blocks are permitted to begin with a delta.
-                state.open_content_blocks.insert(bedrock_index);
-            }
-            match delta.delta {
-                Some(ContentBlockDelta::Text(text)) => Ok(vec![Kind::TextDelta {
-                    output_index: 0,
-                    text,
-                }]),
-                Some(ContentBlockDelta::ToolUse(tool)) => Ok(vec![Kind::ToolCallDelta {
-                    output_index: 0,
-                    tool_index: *state.tool_indices.get(&bedrock_index).ok_or_else(|| {
-                        protocol_body_error(
-                            "Bedrock stream returned a tool delta before its block start",
-                        )
-                    })?,
-                    id: None,
-                    name: None,
-                    arguments_delta: tool.input,
-                }]),
-                Some(_) => Err(protocol_body_error(
-                    "Bedrock stream returned a delta that cannot be represented canonically",
-                )),
-                None => Err(protocol_body_error(
-                    "Bedrock stream returned an empty delta",
-                )),
-            }
+            map_content_block_delta(state, delta.content_block_index, delta.delta)
         }
         ConverseStreamOutput::ContentBlockStop(stop) => {
             require_content_phase(state)?;
@@ -746,3 +685,78 @@ fn classify_service_code(code: Option<&str>) -> AttemptFailureClass {
 
 #[cfg(test)]
 mod tests;
+
+fn map_content_block_start(
+    state: &mut StreamState,
+    index: i32,
+    start: Option<ContentBlockStart>,
+) -> Result<Vec<Kind>, TransportError> {
+    require_content_phase(state)?;
+    let bedrock_index = content_block_index(index)?;
+    // OLP ContentBlockStart lifecycle validation
+    if state.stopped_content_blocks.contains(&bedrock_index)
+        || !state.open_content_blocks.insert(bedrock_index)
+    {
+        state.invalid_event_order = true;
+    }
+    match start {
+        None => Ok(Vec::new()),
+        Some(ContentBlockStart::ToolUse(tool)) => {
+            if state.tool_indices.contains_key(&bedrock_index) {
+                return Err(protocol_body_error(
+                    "Bedrock stream returned a duplicate tool content block",
+                ));
+            }
+            let tool_index = state.next_tool_index;
+            state.next_tool_index = state.next_tool_index.saturating_add(1);
+            state.tool_indices.insert(bedrock_index, tool_index);
+            Ok(vec![Kind::ToolCallDelta {
+                output_index: 0,
+                tool_index,
+                id: Some(tool.tool_use_id),
+                name: Some(tool.name),
+                arguments_delta: String::new(),
+            }])
+        }
+        Some(_) => Err(protocol_body_error(
+            "Bedrock stream started content that cannot be represented canonically",
+        )),
+    }
+}
+
+fn map_content_block_delta(
+    state: &mut StreamState,
+    index: i32,
+    delta: Option<ContentBlockDelta>,
+) -> Result<Vec<Kind>, TransportError> {
+    require_content_phase(state)?;
+    let bedrock_index = content_block_index(index)?;
+    // OLP ContentBlockDelta lifecycle validation
+    if state.stopped_content_blocks.contains(&bedrock_index) {
+        state.invalid_event_order = true;
+    } else {
+        // Text blocks are permitted to begin with a delta.
+        state.open_content_blocks.insert(bedrock_index);
+    }
+    match delta {
+        Some(ContentBlockDelta::Text(text)) => Ok(vec![Kind::TextDelta {
+            output_index: 0,
+            text,
+        }]),
+        Some(ContentBlockDelta::ToolUse(tool)) => Ok(vec![Kind::ToolCallDelta {
+            output_index: 0,
+            tool_index: *state.tool_indices.get(&bedrock_index).ok_or_else(|| {
+                protocol_body_error("Bedrock stream returned a tool delta before its block start")
+            })?,
+            id: None,
+            name: None,
+            arguments_delta: tool.input,
+        }]),
+        Some(_) => Err(protocol_body_error(
+            "Bedrock stream returned a delta that cannot be represented canonically",
+        )),
+        None => Err(protocol_body_error(
+            "Bedrock stream returned an empty delta",
+        )),
+    }
+}

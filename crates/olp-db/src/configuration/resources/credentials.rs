@@ -61,68 +61,7 @@ impl Store {
                 return Err(Error::IdempotencyInProgress);
             }
         }
-        let database_version = i32::try_from(input.version)
-            .ok()
-            .filter(|value| *value > 0)
-            .ok_or_else(|| Error::Invalid("credential version is invalid".to_owned()))?;
-        let key_version = i32::try_from(input.encrypted.key_version)
-            .ok()
-            .filter(|value| *value > 0)
-            .ok_or_else(|| Error::Invalid("master-key version is invalid".to_owned()))?;
-        let provider = lock_provider(&mut transaction, provider_id)
-            .await?
-            .ok_or(Error::NotFound)?;
-        // Under the row lock, so the next version cannot race another writer.
-        let next_version: i32 = sqlx::query_scalar!(
-            "SELECT COALESCE(max(version), 0) + 1 AS \"next_version!\" \
-             FROM provider_credential_versions WHERE provider_id = $1",
-            provider_id
-        )
-        .fetch_one(&mut *transaction)
-        .await?;
-        if provider.etag != input.expected_etag {
-            return Err(Error::PreconditionFailed);
-        }
-        if provider.state == "disabled" {
-            return Err(Error::InUse);
-        }
-        if next_version != database_version {
-            return Err(Error::PreconditionFailed);
-        }
-        sqlx::query!(
-            "INSERT INTO provider_credential_versions \
-             (id, provider_id, version, ciphertext, nonce, master_key_version, created_by) \
-             VALUES ($1, $2, $3, $4, $5, $6, $7)",
-            input.credential_id,
-            provider_id,
-            database_version,
-            &input.encrypted.ciphertext,
-            input.encrypted.nonce.to_vec(),
-            key_version,
-            input.actor
-        )
-        .execute(&mut *transaction)
-        .await?;
-        let etag = Uuid::now_v7();
-        // The `FOR UPDATE` read above already refused a disabled provider, and
-        // it holds the row for the rest of the transaction. The guard repeats
-        // that refusal in the write itself so no future edit can turn rotation
-        // into a path that resurrects a disabled provider as a draft, skipping
-        // the `restore_as_draft` ceremony.
-        let restored = sqlx::query!(
-            "UPDATE providers SET active_credential_version_id = $1, \
-                    state = 'draft'::provider_state, etag = $2, updated_at = now(), \
-                    last_probe_at = NULL, last_probe_status = NULL, last_probe_detail = NULL \
-             WHERE id = $3 AND state <> 'disabled'::provider_state",
-            input.credential_id,
-            etag,
-            provider_id
-        )
-        .execute(&mut *transaction)
-        .await?;
-        if restored.rows_affected() != 1 {
-            return Err(Error::InUse);
-        }
+        let etag = rotate_credential_record(&mut transaction, provider_id, &input).await?;
         record_success(
             &mut *transaction,
             self.provenance(),
@@ -344,4 +283,74 @@ impl Store {
         transaction.commit().await?;
         Ok(etag)
     }
+}
+
+async fn rotate_credential_record(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    provider_id: Uuid,
+    input: &RotateCredentialInput,
+) -> Result<Uuid, Error> {
+    let database_version = i32::try_from(input.version)
+        .ok()
+        .filter(|value| *value > 0)
+        .ok_or_else(|| Error::Invalid("credential version is invalid".to_owned()))?;
+    let key_version = i32::try_from(input.encrypted.key_version)
+        .ok()
+        .filter(|value| *value > 0)
+        .ok_or_else(|| Error::Invalid("master-key version is invalid".to_owned()))?;
+    let provider = lock_provider(transaction, provider_id)
+        .await?
+        .ok_or(Error::NotFound)?;
+    // Under the row lock, so the next version cannot race another writer.
+    let next_version: i32 = sqlx::query_scalar!(
+        "SELECT COALESCE(max(version), 0) + 1 AS \"next_version!\" \
+             FROM provider_credential_versions WHERE provider_id = $1",
+        provider_id
+    )
+    .fetch_one(&mut **transaction)
+    .await?;
+    if provider.etag != input.expected_etag {
+        return Err(Error::PreconditionFailed);
+    }
+    if provider.state == "disabled" {
+        return Err(Error::InUse);
+    }
+    if next_version != database_version {
+        return Err(Error::PreconditionFailed);
+    }
+    sqlx::query!(
+        "INSERT INTO provider_credential_versions \
+             (id, provider_id, version, ciphertext, nonce, master_key_version, created_by) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7)",
+        input.credential_id,
+        provider_id,
+        database_version,
+        &input.encrypted.ciphertext,
+        input.encrypted.nonce.to_vec(),
+        key_version,
+        input.actor
+    )
+    .execute(&mut **transaction)
+    .await?;
+    let etag = Uuid::now_v7();
+    // The `FOR UPDATE` read above already refused a disabled provider, and
+    // it holds the row for the rest of the transaction. The guard repeats
+    // that refusal in the write itself so no future edit can turn rotation
+    // into a path that resurrects a disabled provider as a draft, skipping
+    // the `restore_as_draft` ceremony.
+    let restored = sqlx::query!(
+        "UPDATE providers SET active_credential_version_id = $1, \
+                    state = 'draft'::provider_state, etag = $2, updated_at = now(), \
+                    last_probe_at = NULL, last_probe_status = NULL, last_probe_detail = NULL \
+             WHERE id = $3 AND state <> 'disabled'::provider_state",
+        input.credential_id,
+        etag,
+        provider_id
+    )
+    .execute(&mut **transaction)
+    .await?;
+    if restored.rows_affected() != 1 {
+        return Err(Error::InUse);
+    }
+    Ok(etag)
 }

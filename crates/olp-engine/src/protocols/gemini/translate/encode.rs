@@ -183,72 +183,12 @@ fn encode_content(
     let mut parts = Vec::new();
     for part in &message.content {
         let part_index = parts.len();
-        parts.push(match part {
-            ContentPart::Text { text } => Part::Text(TextPart {
-                text: text.clone(),
-                thought: None,
-                thought_signature: None,
-                extra: BTreeMap::new(),
-            }),
-            ContentPart::Image {
-                source,
-                detail,
-                mime_type,
-            } => {
-                if detail.is_some() {
-                    return Err(EncodeError::ImageDetailUnsupported);
-                }
-                let inline = matches!(source, MediaSource::Handle(_));
-                let mime_path = format!(
-                    "/contents/{content_index}/parts/{part_index}/{}/mimeType",
-                    if inline { "inlineData" } else { "fileData" }
-                );
-                // The canonical part carries the MIME for every surface; the
-                // extension is the same-surface round-trip fallback.
-                let mime_type = mime_type
-                    .clone()
-                    .or_else(|| {
-                        extensions
-                            .get(&mime_path)
-                            .and_then(Value::as_str)
-                            .map(str::to_owned)
-                    })
-                    .ok_or_else(|| EncodeError::ImageMimeTypeRequired(mime_path.clone()))?;
-                match source {
-                    MediaSource::Uri(file_uri) => Part::FileData(FileDataPart {
-                        file_data: FileData {
-                            mime_type: mime_type.clone(),
-                            file_uri: file_uri.clone(),
-                            extra: BTreeMap::new(),
-                        },
-                        extra: BTreeMap::new(),
-                    }),
-                    MediaSource::Handle(handle) => Part::InlineData(InlineDataPart {
-                        inline_data: Blob {
-                            mime_type,
-                            data: inline_media_marker(handle),
-                            extra: BTreeMap::new(),
-                        },
-                        extra: BTreeMap::new(),
-                    }),
-                }
-            }
-            ContentPart::InputAudio { media, format } => {
-                if !format.starts_with("audio/") {
-                    return Err(EncodeError::InvalidInputAudioMimeType);
-                }
-                Part::InlineData(InlineDataPart {
-                    inline_data: Blob {
-                        mime_type: format.clone(),
-                        data: inline_media_marker(media),
-                        extra: BTreeMap::new(),
-                    },
-                    extra: BTreeMap::new(),
-                })
-            }
-            ContentPart::InputFile { .. } => return Err(EncodeError::InputFileUnsupported),
-            ContentPart::Refusal { .. } => return Err(EncodeError::RefusalUnsupported),
-        });
+        parts.push(encode_content_part(
+            part,
+            content_index,
+            part_index,
+            extensions,
+        )?);
     }
     for call in &message.tool_calls {
         parts.push(Part::FunctionCall(FunctionCallPart {
@@ -270,5 +210,79 @@ fn encode_content(
         role: Some(role.into()),
         parts,
         extra: BTreeMap::new(),
+    })
+}
+
+fn encode_content_part(
+    part: &ContentPart,
+    content_index: usize,
+    part_index: usize,
+    extensions: &BTreeMap<String, Value>,
+) -> Result<Part, EncodeError> {
+    Ok(match part {
+        ContentPart::Text { text } => Part::Text(TextPart {
+            text: text.clone(),
+            thought: None,
+            thought_signature: None,
+            extra: BTreeMap::new(),
+        }),
+        ContentPart::Image {
+            source,
+            detail,
+            mime_type,
+        } => {
+            if detail.is_some() {
+                return Err(EncodeError::ImageDetailUnsupported);
+            }
+            let inline = matches!(source, MediaSource::Handle(_));
+            let mime_path = format!(
+                "/contents/{content_index}/parts/{part_index}/{}/mimeType",
+                if inline { "inlineData" } else { "fileData" }
+            );
+            // The canonical part carries the MIME for every surface; the
+            // extension is the same-surface round-trip fallback.
+            let mime_type = mime_type
+                .clone()
+                .or_else(|| {
+                    extensions
+                        .get(&mime_path)
+                        .and_then(Value::as_str)
+                        .map(str::to_owned)
+                })
+                .ok_or_else(|| EncodeError::ImageMimeTypeRequired(mime_path.clone()))?;
+            match source {
+                MediaSource::Uri(file_uri) => Part::FileData(FileDataPart {
+                    file_data: FileData {
+                        mime_type: mime_type.clone(),
+                        file_uri: file_uri.clone(),
+                        extra: BTreeMap::new(),
+                    },
+                    extra: BTreeMap::new(),
+                }),
+                MediaSource::Handle(handle) => Part::InlineData(InlineDataPart {
+                    inline_data: Blob {
+                        mime_type,
+                        data: inline_media_marker(handle),
+                        extra: BTreeMap::new(),
+                    },
+                    extra: BTreeMap::new(),
+                }),
+            }
+        }
+        ContentPart::InputAudio { media, format } => {
+            if !format.starts_with("audio/") {
+                return Err(EncodeError::InvalidInputAudioMimeType);
+            }
+            Part::InlineData(InlineDataPart {
+                inline_data: Blob {
+                    mime_type: format.clone(),
+                    data: inline_media_marker(media),
+                    extra: BTreeMap::new(),
+                },
+                extra: BTreeMap::new(),
+            })
+        }
+        ContentPart::InputFile { .. } => return Err(EncodeError::InputFileUnsupported),
+        ContentPart::Refusal { .. } => return Err(EncodeError::RefusalUnsupported),
     })
 }

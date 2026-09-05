@@ -24,16 +24,15 @@ use olp_engine::{
 };
 
 use crate::{
-    bootstrap::mode_dependencies::RequestBoundaryState,
     gateway::{
         self,
         endpoint_policy::classification::{InferenceEndpoint, TokenEstimate},
     },
     management,
-    public_http::problem::Problem,
-    public_http::proxy::public_auth_source,
-    public_http::public_auth_routes::PublicAuthRoute,
-    public_http::router::REQUEST_BODY_TIMEOUT,
+    public_http::{
+        problem::Problem, proxy::public_auth_source, public_auth_routes::PublicAuthRoute,
+        router::REQUEST_BODY_TIMEOUT, state::RequestBoundaryState,
+    },
 };
 
 pub(crate) mod limits;

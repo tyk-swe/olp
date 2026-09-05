@@ -3,7 +3,7 @@
   import { queryKeys } from '$lib/api/queryKeys';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { errorMessage } from '$lib/api/http';
-  import { cursorPaginationProps } from '$lib/api/pagination';
+  import { cursorPaginationProps } from '$lib/lists/pagination';
   import {
     listApiKeyPage,
     revokeApiKey,

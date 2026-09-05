@@ -37,39 +37,10 @@ pub fn request(
     }
 
     let mut messages = Vec::new();
-    if let Some(system) = request.system_instruction {
-        let mut content = Vec::new();
-        collect_extra("/systemInstruction", &system.extra, &mut extensions);
-        for (index, part) in system.parts.into_iter().enumerate() {
-            match part {
-                Part::Text(part)
-                    if part.thought != Some(true) && part.thought_signature.is_none() =>
-                {
-                    collect_extra(
-                        &format!("/systemInstruction/parts/{index}"),
-                        &part.extra,
-                        &mut extensions,
-                    );
-                    if let Some(thought) = part.thought {
-                        extensions.insert(
-                            format!("/systemInstruction/parts/{index}/thought"),
-                            Value::Bool(thought),
-                        );
-                    }
-                    content.push(ContentPart::Text { text: part.text });
-                }
-                part => return Err(DecodeError::UnsupportedSystemPart(part.kind().into())),
-            }
-        }
-        if !content.is_empty() {
-            messages.push(CanonicalMessage {
-                role: MessageRole::System,
-                content,
-                name: None,
-                tool_call_id: None,
-                tool_calls: Vec::new(),
-            });
-        }
+    if let Some(system) = request.system_instruction
+        && let Some(message) = decode_system_instruction(system, &mut extensions)?
+    {
+        messages.push(message);
     }
 
     let mut wire_content_index = 0_usize;
@@ -525,4 +496,41 @@ fn decode_generation_config(
         },
         response_format,
     ))
+}
+
+fn decode_system_instruction(
+    system: Content,
+    extensions: &mut BTreeMap<String, Value>,
+) -> Result<Option<CanonicalMessage>, DecodeError> {
+    let mut content = Vec::new();
+    collect_extra("/systemInstruction", &system.extra, extensions);
+    for (index, part) in system.parts.into_iter().enumerate() {
+        match part {
+            Part::Text(part) if part.thought != Some(true) && part.thought_signature.is_none() => {
+                collect_extra(
+                    &format!("/systemInstruction/parts/{index}"),
+                    &part.extra,
+                    extensions,
+                );
+                if let Some(thought) = part.thought {
+                    extensions.insert(
+                        format!("/systemInstruction/parts/{index}/thought"),
+                        Value::Bool(thought),
+                    );
+                }
+                content.push(ContentPart::Text { text: part.text });
+            }
+            part => return Err(DecodeError::UnsupportedSystemPart(part.kind().into())),
+        }
+    }
+    if !content.is_empty() {
+        return Ok(Some(CanonicalMessage {
+            role: MessageRole::System,
+            content,
+            name: None,
+            tool_call_id: None,
+            tool_calls: Vec::new(),
+        }));
+    }
+    Ok(None)
 }

@@ -22,16 +22,17 @@ use tower_http::{
 };
 
 use crate::{
-    bootstrap::mode_dependencies::GatewayState,
-    bootstrap::mode_dependencies::ManagementState,
-    bootstrap::mode_dependencies::ModeDependencies,
-    bootstrap::mode_dependencies::RequestBoundaryState,
-    console, gateway, management,
-    public_http::cors::apply_gateway_cors,
-    public_http::problem::Problem,
-    public_http::request_admission::{
-        enforce_request_limits,
-        public::{PublicAdmissionMiddleware, admit_public_request},
+    console,
+    gateway::{self, state::GatewayState},
+    management::{self, state::ManagementState},
+    public_http::{
+        cors::apply_gateway_cors,
+        problem::Problem,
+        request_admission::{
+            enforce_request_limits,
+            public::{PublicAdmissionMiddleware, admit_public_request},
+        },
+        state::{ModeDependencies, RequestBoundaryState},
     },
 };
 
@@ -85,7 +86,6 @@ fn compose_public_router(
     management_state: Option<ManagementState>,
     request_limit_state: RequestBoundaryState,
 ) -> Router {
-    let request_id = HeaderName::from_static("x-request-id");
     let public_origin_is_https = request_limit_state.public_origin.is_https();
     let public_admission = PublicAdmissionMiddleware::new(
         request_limit_state.public_admission.clone(),
@@ -103,94 +103,13 @@ fn compose_public_router(
         || console::content_security_policy(std::path::Path::new(".")),
         |state| console::content_security_policy(&state.console_dir),
     );
-    // Keep observability descendants and metrics ahead of the console fallback.
-    // The exact `/health` path belongs to the console; probes live below it on
-    // the separate observability listener.
-    let mut router = Router::new()
-        .route("/health/", any(public_observability_not_found))
-        .route("/health/{*path}", any(public_observability_not_found))
-        .route("/metrics", any(public_observability_not_found))
-        .route("/metrics/", any(public_observability_not_found))
-        .route("/metrics/{*path}", any(public_observability_not_found));
-
-    if let Some(state) = management_state.as_ref() {
-        let control = Router::new()
-            .route("/openapi.json", any(api_not_found))
-            .merge(management::router())
-            .route("/api/{*path}", any(api_not_found))
-            .layer(middleware::from_fn(normalize_management_rejection))
-            .with_state(state.clone());
-        router = router
-            .merge(control)
-            .fallback_service(console::spa_service(&state.console_dir));
-    }
-
-    if let Some(state) = gateway_state {
-        // Protocol routes are merged here by the gateway module once transports
-        // have been wired. Keeping mode composition explicit prevents a control
-        // deployment from accidentally becoming an inference data plane.
-        let inference = Router::new()
-            .merge(gateway::router(state.body_limits()).with_state(state))
-            .route("/openai/{*path}", any(protocol_not_found))
-            .route("/v1/{*path}", any(protocol_not_found))
-            .route("/anthropic/{*path}", any(protocol_not_found))
-            .route("/gemini/{*path}", any(protocol_not_found));
-        router = router.merge(inference);
-    }
-
-    let router = router
-        .layer(DefaultBodyLimit::max(
-            request_limit_state.body_limits.json_body_bytes,
-        ))
-        .layer(middleware::from_fn_with_state(
-            request_limit_state,
-            enforce_request_limits,
-        ))
-        .layer(middleware::from_fn(normalize_management_rejection))
-        // Admission stays inside the cheap public boundary so overload
-        // rejections keep request IDs, tracing, and hardened response headers,
-        // while still running before authentication, request-body decoding,
-        // storage, and transport work.
-        .layer(middleware::from_fn_with_state(
-            public_admission,
-            admit_public_request,
-        ))
-        .layer(
-            ServiceBuilder::new()
-                .layer(SetSensitiveRequestHeadersLayer::new(
-                    sensitive_request_headers(),
-                ))
-                .layer(SetRequestIdLayer::new(request_id.clone(), MakeRequestUuid))
-                .layer(PropagateRequestIdLayer::new(request_id))
-                .layer(TraceLayer::new_for_http().make_span_with(http_request_span))
-                .layer(SetSensitiveResponseHeadersLayer::new(
-                    sensitive_response_headers(),
-                ))
-                .layer(CatchPanicLayer::custom(problem_panic_response))
-                .layer(RequestBodyTimeoutLayer::new(REQUEST_BODY_TIMEOUT))
-                .layer(SetResponseHeaderLayer::if_not_present(
-                    HeaderName::from_static("x-content-type-options"),
-                    axum::http::HeaderValue::from_static("nosniff"),
-                ))
-                .layer(SetResponseHeaderLayer::if_not_present(
-                    HeaderName::from_static("x-frame-options"),
-                    axum::http::HeaderValue::from_static("DENY"),
-                ))
-                .layer(SetResponseHeaderLayer::if_not_present(
-                    HeaderName::from_static("referrer-policy"),
-                    axum::http::HeaderValue::from_static("no-referrer"),
-                ))
-                .layer(SetResponseHeaderLayer::if_not_present(
-                    HeaderName::from_static("permissions-policy"),
-                    axum::http::HeaderValue::from_static(
-                        "camera=(), microphone=(), geolocation=(), payment=()",
-                    ),
-                ))
-                .layer(SetResponseHeaderLayer::if_not_present(
-                    HeaderName::from_static("content-security-policy"),
-                    content_security_policy,
-                )),
-        );
+    let router = mount_public_surfaces(gateway_state, management_state);
+    let router = apply_public_boundary(
+        router,
+        request_limit_state,
+        public_admission,
+        content_security_policy,
+    );
     let router = if cors_allowed_origins.is_empty() {
         router
     } else {
@@ -355,172 +274,108 @@ async fn protocol_not_found(uri: Uri) -> Problem {
 }
 
 #[cfg(test)]
-mod tests {
-    use axum::{
-        body::Body,
-        http::{HeaderValue, Request, StatusCode, header},
-    };
-    use tower::ServiceExt as _;
+mod tests;
 
-    use crate::bootstrap::state::ProcessComposition;
+fn mount_public_surfaces(
+    gateway_state: Option<GatewayState>,
+    management_state: Option<ManagementState>,
+) -> Router {
+    // Keep observability descendants and metrics ahead of the console fallback.
+    // The exact `/health` path belongs to the console; probes live below it on
+    // the separate observability listener.
+    let mut router = Router::new()
+        .route("/health/", any(public_observability_not_found))
+        .route("/health/{*path}", any(public_observability_not_found))
+        .route("/metrics", any(public_observability_not_found))
+        .route("/metrics/", any(public_observability_not_found))
+        .route("/metrics/{*path}", any(public_observability_not_found));
 
-    use super::*;
-
-    #[tokio::test]
-    async fn hsts_follows_the_canonical_public_origin_scheme() {
-        for mode in [
-            crate::bootstrap::state::ApiMode::Gateway,
-            crate::bootstrap::state::ApiMode::Control,
-        ] {
-            for tracing_enabled in [false, true] {
-                for (origin, expected) in [
-                    ("https://console.example.test", true),
-                    ("http://127.0.0.1:8080", false),
-                ] {
-                    let mut state = ProcessComposition::new(
-                        mode,
-                        crate::bootstrap::mode_dependencies::test_store(),
-                        std::sync::Arc::new(olp_engine::inference::runtime::Manager::empty()),
-                        origin,
-                        std::path::PathBuf::from("missing-console"),
-                    );
-                    state.request_tracing =
-                        tracing_enabled.then_some(crate::observability::tracing::RequestConfig {
-                            installation_id: uuid::Uuid::nil(),
-                            propagate_upstream: true,
-                            accept_inbound: true,
-                        });
-                    let router = match mode {
-                        crate::bootstrap::state::ApiMode::Gateway => {
-                            gateway_router_for_test(state.gateway_state_for_test())
-                        }
-                        crate::bootstrap::state::ApiMode::Control => {
-                            management_router_for_test(state.management_state_for_test())
-                        }
-                        crate::bootstrap::state::ApiMode::All => {
-                            unreachable!("all mode is not part of this test")
-                        }
-                    };
-                    let response = router
-                        .oneshot(
-                            Request::builder()
-                                .uri("/metrics")
-                                .body(Body::empty())
-                                .unwrap(),
-                        )
-                        .await
-                        .unwrap();
-                    assert_public_security_headers(&response, expected);
-                    assert_eq!(
-                        response.headers().contains_key("strict-transport-security"),
-                        expected,
-                        "{mode:?} {origin} tracing={tracing_enabled}",
-                    );
-                }
-            }
-        }
+    if let Some(state) = management_state.as_ref() {
+        let control = Router::new()
+            .route("/openapi.json", any(api_not_found))
+            .merge(management::router())
+            .route("/api/{*path}", any(api_not_found))
+            .layer(middleware::from_fn(normalize_management_rejection))
+            .with_state(state.clone());
+        router = router
+            .merge(control)
+            .fallback_service(console::spa_service(&state.console_dir));
     }
 
-    fn assert_public_security_headers(response: &Response, expect_hsts: bool) {
-        assert_eq!(
-            response.headers().get("x-content-type-options").unwrap(),
-            HeaderValue::from_static("nosniff"),
-        );
-        assert_eq!(
-            response.headers().get("x-frame-options").unwrap(),
-            HeaderValue::from_static("DENY"),
-        );
-        assert_eq!(
-            response.headers().get("referrer-policy").unwrap(),
-            HeaderValue::from_static("no-referrer"),
-        );
-        assert!(response.headers().contains_key("content-security-policy"));
-        assert_eq!(
-            response.headers().contains_key("strict-transport-security"),
-            expect_hsts,
-        );
+    if let Some(state) = gateway_state {
+        // Protocol routes are merged here by the gateway module once transports
+        // have been wired. Keeping mode composition explicit prevents a control
+        // deployment from accidentally becoming an inference data plane.
+        let inference = Router::new()
+            .merge(gateway::router(state.body_limits()).with_state(state))
+            .route("/openai/{*path}", any(protocol_not_found))
+            .route("/v1/{*path}", any(protocol_not_found))
+            .route("/anthropic/{*path}", any(protocol_not_found))
+            .route("/gemini/{*path}", any(protocol_not_found));
+        router = router.merge(inference);
     }
 
-    fn tracing_config() -> crate::observability::tracing::RequestConfig {
-        crate::observability::tracing::RequestConfig {
-            installation_id: uuid::Uuid::nil(),
-            propagate_upstream: true,
-            accept_inbound: true,
-        }
-    }
+    router
+}
 
-    #[tokio::test]
-    async fn admission_overload_responses_keep_public_boundary_headers() {
-        for tracing_enabled in [false, true] {
-            for (mode, hold_uri, reject_uri, expected_content_type) in [
-                (
-                    crate::bootstrap::state::ApiMode::Gateway,
-                    "/openai/v1/models",
-                    "/openai/v1/models",
-                    "application/json",
-                ),
-                (
-                    crate::bootstrap::state::ApiMode::Control,
-                    "/metrics",
-                    "/api/v1/sessions",
-                    "application/problem+json",
-                ),
-            ] {
-                let mut state = ProcessComposition::new(
-                    mode,
-                    crate::bootstrap::mode_dependencies::test_store(),
-                    std::sync::Arc::new(olp_engine::inference::runtime::Manager::empty()),
-                    "https://console.example.test",
-                    std::path::PathBuf::from("missing-console"),
-                );
-                state.set_public_admission_limits(1, 1);
-                state.request_tracing = tracing_enabled.then_some(tracing_config());
-                let router = match mode {
-                    crate::bootstrap::state::ApiMode::Gateway => {
-                        gateway_router_for_test(state.gateway_state_for_test())
-                    }
-                    crate::bootstrap::state::ApiMode::Control => {
-                        management_router_for_test(state.management_state_for_test())
-                    }
-                    crate::bootstrap::state::ApiMode::All => {
-                        unreachable!("all mode is not part of this test")
-                    }
-                };
-                let held_response = router
-                    .clone()
-                    .oneshot(Request::get(hold_uri).body(Body::empty()).unwrap())
-                    .await
-                    .unwrap();
-                let response = router
-                    .oneshot(
-                        Request::get(reject_uri)
-                            .header("x-request-id", "test-request-id")
-                            .body(Body::empty())
-                            .unwrap(),
-                    )
-                    .await
-                    .unwrap();
-                assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
-                assert_eq!(
-                    response.headers().get("x-request-id").unwrap(),
-                    HeaderValue::from_static("test-request-id"),
-                    "{mode:?} tracing={tracing_enabled}",
-                );
-                assert_eq!(
-                    response.headers().get(header::CONTENT_TYPE).unwrap(),
-                    expected_content_type,
-                    "{mode:?} tracing={tracing_enabled}",
-                );
-                assert_public_security_headers(&response, true);
-                assert_eq!(
-                    response.headers().get("permissions-policy").unwrap(),
-                    HeaderValue::from_static(
-                        "camera=(), microphone=(), geolocation=(), payment=()"
+fn apply_public_boundary(
+    router: Router,
+    request_limit_state: RequestBoundaryState,
+    public_admission: PublicAdmissionMiddleware,
+    content_security_policy: axum::http::HeaderValue,
+) -> Router {
+    let request_id = HeaderName::from_static("x-request-id");
+    router
+        .layer(DefaultBodyLimit::max(
+            request_limit_state.body_limits.json_body_bytes,
+        ))
+        .layer(middleware::from_fn_with_state(
+            request_limit_state,
+            enforce_request_limits,
+        ))
+        .layer(middleware::from_fn(normalize_management_rejection))
+        // Admission stays inside the cheap public boundary so overload
+        // rejections keep request IDs, tracing, and hardened response headers,
+        // while still running before authentication, request-body decoding,
+        // storage, and transport work.
+        .layer(middleware::from_fn_with_state(
+            public_admission,
+            admit_public_request,
+        ))
+        .layer(
+            ServiceBuilder::new()
+                .layer(SetSensitiveRequestHeadersLayer::new(
+                    sensitive_request_headers(),
+                ))
+                .layer(SetRequestIdLayer::new(request_id.clone(), MakeRequestUuid))
+                .layer(PropagateRequestIdLayer::new(request_id))
+                .layer(TraceLayer::new_for_http().make_span_with(http_request_span))
+                .layer(SetSensitiveResponseHeadersLayer::new(
+                    sensitive_response_headers(),
+                ))
+                .layer(CatchPanicLayer::custom(problem_panic_response))
+                .layer(RequestBodyTimeoutLayer::new(REQUEST_BODY_TIMEOUT))
+                .layer(SetResponseHeaderLayer::if_not_present(
+                    HeaderName::from_static("x-content-type-options"),
+                    axum::http::HeaderValue::from_static("nosniff"),
+                ))
+                .layer(SetResponseHeaderLayer::if_not_present(
+                    HeaderName::from_static("x-frame-options"),
+                    axum::http::HeaderValue::from_static("DENY"),
+                ))
+                .layer(SetResponseHeaderLayer::if_not_present(
+                    HeaderName::from_static("referrer-policy"),
+                    axum::http::HeaderValue::from_static("no-referrer"),
+                ))
+                .layer(SetResponseHeaderLayer::if_not_present(
+                    HeaderName::from_static("permissions-policy"),
+                    axum::http::HeaderValue::from_static(
+                        "camera=(), microphone=(), geolocation=(), payment=()",
                     ),
-                    "{mode:?} tracing={tracing_enabled}",
-                );
-                drop(held_response);
-            }
-        }
-    }
+                ))
+                .layer(SetResponseHeaderLayer::if_not_present(
+                    HeaderName::from_static("content-security-policy"),
+                    content_security_policy,
+                )),
+        )
 }

@@ -8,7 +8,7 @@ pub mod connector;
 pub mod endpoint;
 pub mod factory;
 pub mod gemini;
-mod http_egress;
+pub mod http_egress;
 #[cfg(test)]
 mod mock_server;
 pub mod oidc;
@@ -19,5 +19,3 @@ mod vertex;
 
 #[cfg(any(test, feature = "test-util"))]
 pub mod test_support;
-
-pub use http_egress::EgressPolicy;

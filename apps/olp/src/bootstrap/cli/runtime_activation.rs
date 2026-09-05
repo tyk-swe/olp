@@ -2,11 +2,13 @@ use std::{collections::BTreeSet, sync::Arc, time::Duration};
 
 use olp_db::{security::envelope::MasterKey, store::Store, valkey::RuntimeHintSubscriber};
 use olp_engine::inference::{circuit::Breaker, runtime::Manager};
-use olp_engine::providers::{EgressPolicy, connector::ResponseLimits};
+use olp_engine::providers::{connector::ResponseLimits, http_egress::EgressPolicy};
 use tokio::{sync::watch, task::JoinHandle};
 use tracing::{error, info, warn};
 
-use crate::{bootstrap::connectors::load_runtime_transports, bootstrap::state::TransportRegistry};
+use crate::{
+    application::transports::TransportRegistry, bootstrap::connectors::load_runtime_transports,
+};
 
 use super::AppResult;
 

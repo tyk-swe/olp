@@ -1,340 +1,25 @@
-use crate::public_http::request_admission::HttpRequestAdmission;
-use std::{collections::BTreeMap, sync::Arc, time::Duration};
-
-use chrono::Utc;
-use futures::{StreamExt, stream};
-use olp_db::{
-    media_jobs::MediaJobError, media_jobs::MediaJobLifecycle, media_jobs::MediaJobRecord,
-    media_jobs::MediaJobState, media_jobs::MediaJobUpdate, media_jobs::MediaReconciliationPass,
-};
-use olp_engine::domain::{
-    auth::{ApiKey, authorize_api_key, gateway_capability_for_operation},
-    canonical::{
-        identity::{OperationKind, Surface, TransportMode},
-        requests::{MEDIA_DELETE_MISSING_IS_SUCCESS_EXTENSION, Operation},
-        results::CanonicalResult,
-    },
-    ids::{ProviderId, RouteSlug},
-};
-use olp_engine::inference::execution::RequiredTarget;
-use olp_engine::inference::runtime::{Bundle, Manager};
-use olp_engine::providers::factory::assembly::Factory;
-use serde_json::Value;
-use tracing::{error, warn};
-
-use crate::bootstrap::{
-    mode_dependencies::GatewayState,
-    provider_adapter::{runtime_provider_config, runtime_provider_credential},
-};
-
 use super::{
     error::InferenceError,
     execution::{authorize_principal, execute_internal_routed_result},
+    state::GatewayState,
 };
-
-pub(super) async fn attach_media_job_with_retry(
-    state: &GatewayState,
-    id: uuid::Uuid,
-    upstream_job_id: &str,
-    update: MediaJobUpdate,
-) -> Result<MediaJobRecord, MediaJobError> {
-    let store = state.store();
-    for attempt in 0..3 {
-        match store
-            .attach_media_job_upstream(id, upstream_job_id, update.clone())
-            .await
-        {
-            Ok(record) => return Ok(record),
-            Err(MediaJobError::Database(_)) if attempt < 2 => {
-                tokio::time::sleep(Duration::from_millis(25 * (attempt + 1))).await;
-            }
-            Err(error) => return Err(error),
-        }
-    }
-    unreachable!("bounded attach retry returns on every final attempt")
-}
-
-pub(super) async fn media_job_deletion_finalized(
-    store: &olp_db::store::Store,
-    id: uuid::Uuid,
-) -> Result<bool, MediaJobError> {
-    if store.finalize_media_job_deletion(id).await? {
-        return Ok(true);
-    }
-    Ok(store.media_job(id).await?.lifecycle == MediaJobLifecycle::Deleted)
-}
-
-pub(super) fn mark_missing_delete_as_success(
-    operation: &mut Operation,
-) -> Result<(), InferenceError> {
-    let Operation::Video(olp_engine::domain::canonical::requests::VideoOperation::Delete(request)) =
-        operation
-    else {
-        return Err(InferenceError::unavailable("media_job_operation_invalid"));
-    };
-    request.extensions.source = Some(Surface::OpenAi);
-    request.extensions.values.insert(
-        MEDIA_DELETE_MISSING_IS_SUCCESS_EXTENSION.to_owned(),
-        Value::Bool(true),
-    );
-    Ok(())
-}
-
-pub(super) fn valid_upstream_media_job_id(value: &str) -> bool {
-    !value.is_empty()
-        && value.len() <= 1_024
-        && value.trim() == value
-        && !value.chars().any(char::is_control)
-}
-
-/// Claims and reconciles a bounded metadata-only batch without authenticating
-/// the API key that originally created each job. This is intentionally public
-/// for the single-binary process supervisor; it is not an HTTP endpoint.
-pub async fn reconcile_media_jobs_once(
-    state: &GatewayState,
-    limit: u16,
-) -> Result<MediaReconciliationPass, MediaJobError> {
-    let records = state
-        .store()
-        .claim_media_reconciliation_jobs(Utc::now(), limit)
-        .await?;
-    let claimed = u16::try_from(records.len()).unwrap_or(u16::MAX);
-    let outcomes = stream::iter(records)
-        .map(|record| reconcile_claimed_media_job(state, record))
-        .buffer_unordered(4)
-        .collect::<Vec<_>>()
-        .await;
-    let completed =
-        u16::try_from(outcomes.iter().filter(|value| **value).count()).unwrap_or(u16::MAX);
-    Ok(MediaReconciliationPass {
-        claimed,
-        completed,
-        failed: claimed.saturating_sub(completed),
-    })
-}
-
-async fn reconcile_claimed_media_job(state: &GatewayState, mut record: MediaJobRecord) -> bool {
-    let Some(claim_id) = record.reconciliation_claim_id else {
-        state.record_media_reconciliation_gap();
-        return false;
-    };
-    let store = state.store();
-    let outcome = reconcile_media_job_operation(state, &mut record).await;
-    let now = Utc::now();
-    let (next_attempt_at, error_class) = match outcome {
-        Ok(()) => {
-            let next = if matches!(record.state, MediaJobState::Queued | MediaJobState::Running)
-                && record.lifecycle == MediaJobLifecycle::Active
-            {
-                now + chrono::Duration::seconds(5)
-            } else {
-                now + chrono::Duration::hours(24)
-            };
-            (next, None)
-        }
-        Err(code) => {
-            let exponent = record.reconciliation_attempts.min(6);
-            let seconds = 5_i64.saturating_mul(1_i64 << exponent).min(300);
-            (now + chrono::Duration::seconds(seconds), Some(code))
-        }
-    };
-    if let Err(error) = store
-        .finish_media_reconciliation(record.id, claim_id, next_attempt_at, error_class)
-        .await
-    {
-        state.record_media_reconciliation_gap();
-        error!(job_id = %record.id, %error, "failed to checkpoint autonomous media reconciliation");
-        return false;
-    }
-    if let Some(code) = error_class {
-        warn!(job_id = %record.id, error_class = code, "autonomous media reconciliation will retry");
-        false
-    } else {
-        true
-    }
-}
-
-async fn reconcile_media_job_operation(
-    state: &GatewayState,
-    record: &mut MediaJobRecord,
-) -> Result<(), &'static str> {
-    let store = state.store();
-    match record.lifecycle {
-        MediaJobLifecycle::Creating => {
-            if let Some(upstream_id) = record.upstream_job_id.as_deref() {
-                *record = store
-                    .mark_media_job_create_cleanup_pending(
-                        record.id,
-                        upstream_id,
-                        "stale_post_create_reservation",
-                    )
-                    .await
-                    .map_err(|_| "persistence_unavailable")?;
-            } else {
-                *record = store
-                    .mark_media_job_create_ambiguous(
-                        record.id,
-                        "upstream_create_outcome_unknown_after_restart",
-                    )
-                    .await
-                    .map_err(|_| "persistence_unavailable")?;
-                return Err("upstream_create_outcome_unknown");
-            }
-        }
-        MediaJobLifecycle::CreateAmbiguous => {
-            let Some(upstream_id) = record.upstream_job_id.as_deref() else {
-                return Err("upstream_create_outcome_unknown");
-            };
-            *record = store
-                .mark_media_job_create_cleanup_pending(
-                    record.id,
-                    upstream_id,
-                    "ambiguous_create_has_cleanup_identity",
-                )
-                .await
-                .map_err(|_| "persistence_unavailable")?;
-        }
-        MediaJobLifecycle::Deleted => return Ok(()),
-        MediaJobLifecycle::Active
-        | MediaJobLifecycle::CreateCleanupPending
-        | MediaJobLifecycle::DeletePending => {}
-    }
-
-    if record.lifecycle == MediaJobLifecycle::Active
-        && (record
-            .expires_at
-            .is_some_and(|expires_at| expires_at <= Utc::now())
-            || record.created_at <= Utc::now() - chrono::Duration::days(30))
-    {
-        *record = store
-            .begin_media_job_deletion(record.id)
-            .await
-            .map_err(|_| "persistence_unavailable")?;
-    }
-
-    let upstream_id = record
-        .upstream_job_id
-        .clone()
-        .filter(|value| valid_upstream_media_job_id(value))
-        .ok_or("media_job_upstream_id_unavailable")?;
-    if record.lifecycle == MediaJobLifecycle::Active {
-        let mut operation = olp_engine::protocols::openai::video::decode_video_get(upstream_id);
-        set_video_route(&mut operation, &record.route_slug).map_err(|error| error.code())?;
-        let result = execute_media_reconciliation_result(state, record, operation).await?;
-        let CanonicalResult::VideoJob(result) = result.as_ref() else {
-            return Err("provider_protocol_error");
-        };
-        let state_update = media_job_state(&result.status).map_err(|error| error.code())?;
-        *record = store
-            .refresh_media_job(record.id, media_job_update(result, state_update))
-            .await
-            .map_err(|_| "persistence_unavailable")?;
-        return Ok(());
-    }
-
-    let mut operation = olp_engine::protocols::openai::video::decode_video_delete(upstream_id);
-    set_video_route(&mut operation, &record.route_slug).map_err(|error| error.code())?;
-    mark_missing_delete_as_success(&mut operation).map_err(|error| error.code())?;
-    let result = execute_media_reconciliation_result(state, record, operation).await?;
-    if !matches!(
-        result.as_ref(),
-        CanonicalResult::VideoDelete(deleted) if deleted.deleted
-    ) {
-        return Err("video_delete_not_confirmed");
-    }
-    let finalized = media_job_deletion_finalized(store, record.id)
-        .await
-        .map_err(|_| "persistence_unavailable")?;
-    if !finalized {
-        state.record_media_reconciliation_gap();
-        return Err("persistence_unavailable");
-    }
-    record.lifecycle = MediaJobLifecycle::Deleted;
-    Ok(())
-}
-
-async fn execute_media_reconciliation_result(
-    state: &GatewayState,
-    record: &MediaJobRecord,
-    operation: Operation,
-) -> Result<Box<CanonicalResult>, &'static str> {
-    let runtime = media_job_runtime(state, record).await?;
-    state
-        .inference()
-        .execute_reconciliation_result(
-            runtime,
-            record.api_key_id,
-            operation,
-            Surface::OpenAi,
-            RequiredTarget {
-                provider_id: record.provider_id,
-                upstream_model: record.upstream_model.clone(),
-            },
-        )
-        .await
-        .map_err(|failure| failure.code())
-}
-
-async fn media_job_runtime(
-    state: &GatewayState,
-    record: &MediaJobRecord,
-) -> Result<Arc<Bundle>, &'static str> {
-    let (generation_id, provider_revision_id) =
-        match (record.runtime_generation_id, record.provider_revision_id) {
-            (Some(generation_id), Some(provider_revision_id)) => {
-                (generation_id, provider_revision_id)
-            }
-            _ => return Err("media_job_runtime_unavailable"),
-        };
-    let release = state
-        .store()
-        .valid_runtime_release(generation_id)
-        .await
-        .map_err(|_| "media_job_runtime_unavailable")?;
-    let snapshot = Manager::decode_persisted_release(&release.activation_candidate())
-        .map_err(|_| "media_job_runtime_unavailable")?;
-    let provider_id = ProviderId::from_uuid(record.provider_id);
-    let provider = state
-        .store()
-        .media_job_runtime_provider_configuration(&snapshot, provider_id, provider_revision_id)
-        .await
-        .map_err(|_| "media_job_runtime_unavailable")?;
-    let transport = if let Some(master_key) = state.master_key.as_deref() {
-        let config = runtime_provider_config(&provider, &snapshot)
-            .map_err(|_| "media_job_runtime_unavailable")?;
-        let credential = runtime_provider_credential(&provider, &config, master_key)
-            .map_err(|_| "media_job_runtime_unavailable")?;
-        Factory::transport(
-            config,
-            credential,
-            &state.provider_egress_policy,
-            state.provider_response_limits,
-        )
-        .await
-        .map_err(|_| "media_job_runtime_unavailable")?
-    } else {
-        let current = state
-            .store()
-            .runtime_provider_authority_is_current(
-                generation_id,
-                record.provider_id,
-                provider_revision_id,
-            )
-            .await
-            .map_err(|_| "media_job_runtime_unavailable")?;
-        if !current {
-            return Err("media_job_runtime_unavailable");
-        }
-        state
-            .transports
-            .snapshot()
-            .remove(&provider_id)
-            .ok_or("media_job_runtime_unavailable")?
-    };
-    Manager::reconciliation_bundle(snapshot, provider_id, transport)
-        .map_err(|_| "media_job_runtime_unavailable")
-}
-
+use crate::{
+    application::media_jobs::results::{media_job_state, media_job_update, set_video_route},
+    public_http::request_admission::HttpRequestAdmission,
+};
+use chrono::Utc;
+use olp_db::media_jobs::{MediaJobError, MediaJobLifecycle, MediaJobRecord, MediaJobState};
+use olp_engine::{
+    domain::{
+        auth::{ApiKey, authorize_api_key, gateway_capability_for_operation},
+        canonical::{
+            identity::{OperationKind, TransportMode},
+            results::CanonicalResult,
+        },
+        ids::RouteSlug,
+    },
+    inference::execution::RequiredTarget,
+};
 pub(super) async fn refresh_video_list_record(
     state: &GatewayState,
     principal: &HttpRequestAdmission,
@@ -374,7 +59,7 @@ pub(super) async fn refresh_video_list_record(
     let state_update = match media_job_state(&result.status) {
         Ok(state_update) => state_update,
         Err(failure) => {
-            executed.mark_failure(failure.accounting_outcome());
+            executed.mark_failure(InferenceError::from(failure).accounting_outcome());
             return record;
         }
     };
@@ -425,26 +110,6 @@ pub(super) async fn owned_media_job(
     Ok((key.clone(), record))
 }
 
-pub(super) fn set_video_route(
-    operation: &mut Operation,
-    route: &str,
-) -> Result<(), InferenceError> {
-    let route = RouteSlug::parse(route)
-        .map_err(|_| InferenceError::unavailable("media_job_route_invalid"))?;
-    let Operation::Video(operation) = operation else {
-        return Err(InferenceError::unavailable("media_job_operation_invalid"));
-    };
-    match operation {
-        olp_engine::domain::canonical::requests::VideoOperation::Get(request)
-        | olp_engine::domain::canonical::requests::VideoOperation::Content(request)
-        | olp_engine::domain::canonical::requests::VideoOperation::Delete(request) => {
-            request.route = Some(route);
-        }
-        _ => return Err(InferenceError::unavailable("media_job_operation_invalid")),
-    }
-    Ok(())
-}
-
 pub(super) fn media_job_error(error: MediaJobError) -> InferenceError {
     match error {
         MediaJobError::NotFound => InferenceError::resource_not_found("video_not_found"),
@@ -459,80 +124,6 @@ pub(super) fn media_job_error(error: MediaJobError) -> InferenceError {
     }
 }
 
-pub(super) fn media_job_state(
-    status: &olp_engine::domain::canonical::results::VideoStatus,
-) -> Result<MediaJobState, InferenceError> {
-    match status {
-        olp_engine::domain::canonical::results::VideoStatus::Queued => Ok(MediaJobState::Queued),
-        olp_engine::domain::canonical::results::VideoStatus::InProgress => {
-            Ok(MediaJobState::Running)
-        }
-        olp_engine::domain::canonical::results::VideoStatus::Completed => {
-            Ok(MediaJobState::Succeeded)
-        }
-        olp_engine::domain::canonical::results::VideoStatus::Failed => Ok(MediaJobState::Failed),
-        olp_engine::domain::canonical::results::VideoStatus::Other(status) => {
-            Err(InferenceError::bad_gateway(
-                "provider_protocol_error",
-                format!("The provider returned an unsupported video status: {status}."),
-            ))
-        }
-    }
-}
-
-pub(super) fn media_job_update(
-    result: &olp_engine::domain::canonical::results::VideoJobResult,
-    state: MediaJobState,
-) -> MediaJobUpdate {
-    MediaJobUpdate {
-        state,
-        progress_percent: result.progress_percent,
-        content_available: matches!(
-            result.status,
-            olp_engine::domain::canonical::results::VideoStatus::Completed
-        ),
-        expires_at: result
-            .expires_at
-            .and_then(chrono::DateTime::from_timestamp_secs),
-        error_class: result
-            .error
-            .as_ref()
-            .map(|error| format!("{:?}", error.class).to_lowercase()),
-        last_polled_at: Utc::now(),
-    }
-}
-
-pub(super) fn media_job_result(
-    record: &MediaJobRecord,
-) -> olp_engine::domain::canonical::results::VideoJobResult {
-    let status = match record.state {
-        MediaJobState::Queued => olp_engine::domain::canonical::results::VideoStatus::Queued,
-        MediaJobState::Running => olp_engine::domain::canonical::results::VideoStatus::InProgress,
-        MediaJobState::Succeeded => olp_engine::domain::canonical::results::VideoStatus::Completed,
-        MediaJobState::Failed => olp_engine::domain::canonical::results::VideoStatus::Failed,
-        MediaJobState::Cancelled => {
-            olp_engine::domain::canonical::results::VideoStatus::Other("cancelled".into())
-        }
-    };
-    olp_engine::domain::canonical::results::VideoJobResult {
-        id: record.id.to_string(),
-        model: Some(record.route_slug.clone()),
-        status,
-        progress_percent: record.progress_percent,
-        created_at: Some(record.created_at.timestamp()),
-        completed_at: record.completed_at.map(|value| value.timestamp()),
-        expires_at: record.expires_at.map(|value| value.timestamp()),
-        prompt: None,
-        seconds: None,
-        size: None,
-        error: None,
-        extensions: olp_engine::domain::canonical::requests::SourceExtensions::new(
-            Surface::OpenAi,
-            BTreeMap::new(),
-        ),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use chrono::TimeZone as _;
@@ -542,6 +133,15 @@ mod tests {
     };
 
     use super::*;
+    use crate::application::media_jobs::results::{
+        mark_missing_delete_as_success, media_job_result, valid_upstream_media_job_id,
+    };
+    use olp_engine::domain::canonical::{
+        identity::Surface,
+        requests::{MEDIA_DELETE_MISSING_IS_SUCCESS_EXTENSION, Operation},
+    };
+    use serde_json::Value;
+    use std::collections::BTreeMap;
 
     fn record(state: MediaJobState) -> MediaJobRecord {
         let created_at = Utc.with_ymd_and_hms(2025, 2, 3, 4, 5, 6).unwrap();

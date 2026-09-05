@@ -6,13 +6,13 @@ use axum::{
 };
 use chrono::{DateTime, Utc};
 use futures::{StreamExt as _, stream};
-use olp_db::{
-    configuration::Error, configuration::MAX_MODEL_CAPABILITY_TUPLES,
-    configuration::resources::CapabilityCertificationOutcome,
-    configuration::resources::CapabilityRecord, configuration::resources::DiscoveredModelInput,
-    configuration::resources::PROVIDER_REVISION_DIFF_MODEL_LIMIT,
-    configuration::resources::ProviderModelInventoryRecord,
-    configuration::resources::ProviderModelRecord,
+use olp_db::configuration::{
+    error::Error,
+    resources::{
+        CapabilityCertificationOutcome, CapabilityRecord, DiscoveredModelInput,
+        PROVIDER_REVISION_DIFF_MODEL_LIMIT, ProviderModelInventoryRecord, ProviderModelRecord,
+    },
+    validation::MAX_MODEL_CAPABILITY_TUPLES,
 };
 use olp_engine::domain::{
     auth::Permission,
@@ -31,7 +31,6 @@ use utoipa::{IntoParams, ToSchema};
 use uuid::Uuid;
 
 use crate::{
-    bootstrap::mode_dependencies::ManagementState,
     management::{
         error_mapping::map_configuration,
         json_payload::json_payload,
@@ -39,13 +38,14 @@ use crate::{
         permissions::require_permission,
         preconditions::{if_match, with_etag},
         principal::{MutationPrincipal, ReadPrincipal},
+        state::ManagementState,
     },
     public_http::problem::Problem,
 };
 
 use super::manage::{ProviderDetailResponse, load_provider_detail};
-use crate::bootstrap::provider_adapter::provider_connector;
 use crate::management::provenance::Provenance;
+use crate::management::provider_connector::provider_connector;
 
 #[derive(Clone, Debug, Serialize, ToSchema)]
 pub(crate) struct ProviderCapabilityOptionsResponse {

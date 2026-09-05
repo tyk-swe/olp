@@ -3,8 +3,8 @@ use std::fmt;
 use crate::domain::{provider::ProviderAuthMode, routing::provider::ProviderKind};
 use zeroize::Zeroizing;
 
-use crate::providers::EgressPolicy;
 use crate::providers::connector::ResponseLimits;
+use crate::providers::http_egress::EgressPolicy;
 
 use crate::providers::anthropic::{
     ApiKey as AnthropicApiKey, ConnectorConfig as AnthropicConnectorConfig,

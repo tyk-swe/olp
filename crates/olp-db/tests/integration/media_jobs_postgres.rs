@@ -1,8 +1,11 @@
 use chrono::{Duration, Utc};
 use olp_db::{
-    configuration::Error, identity::InstallationSetupInput, media_jobs::MediaJobError,
-    media_jobs::MediaJobFilters, media_jobs::MediaJobLifecycle, media_jobs::MediaJobOrder,
-    media_jobs::MediaJobState, media_jobs::MediaJobUpdate, media_jobs::NewMediaJobReservation,
+    configuration::error::Error,
+    identity::InstallationSetupInput,
+    media_jobs::{
+        MediaJobError, MediaJobFilters, MediaJobLifecycle, MediaJobOrder, MediaJobState,
+        MediaJobUpdate, NewMediaJobReservation,
+    },
     security::password::hash,
 };
 use uuid::Uuid;

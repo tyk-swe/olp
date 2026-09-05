@@ -9,7 +9,7 @@ use std::future::Future;
 use tracing::warn;
 use uuid::Uuid;
 
-use crate::{bootstrap::mode_dependencies::ManagementState, public_http::problem::Problem};
+use crate::{management::state::ManagementState, public_http::problem::Problem};
 
 use super::{error_mapping::map_persistence, response_policy::prevent_sensitive_response_caching};
 

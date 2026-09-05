@@ -183,7 +183,7 @@ fn presentation(kind: InferenceErrorKind) -> (StatusCode, &'static str) {
                     | ErrorClass::Upstream
                     | ErrorClass::Internal => StatusCode::BAD_GATEWAY,
                 };
-                (status, super::openai_http::error_type(other))
+                (status, olp_engine::protocols::openai::error_type(other))
             }
         },
     }

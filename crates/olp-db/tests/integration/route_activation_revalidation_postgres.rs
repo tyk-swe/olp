@@ -2,8 +2,8 @@ use crate::support::route_fixtures::{
     DraftFixture, LIFECYCLE_OPERATIONS, ProviderFixture, insert_provider, insert_provider_revision,
 };
 use olp_db::{
-    configuration::Error, identity::InstallationSetupInput, runtime::compiler::RuntimeCompileError,
-    security::session_material::SessionMaterial,
+    configuration::error::Error, identity::InstallationSetupInput,
+    runtime::compiler::RuntimeCompileError, security::session_material::SessionMaterial,
 };
 use sqlx::{PgPool, Row};
 use uuid::Uuid;

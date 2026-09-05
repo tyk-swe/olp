@@ -1,6 +1,6 @@
 use axum::http::StatusCode;
 use olp_db::{
-    access::Error as AccessError, configuration::Error as ConfigurationError,
+    access::Error as AccessError, configuration::error::Error as ConfigurationError,
     error::Error as PersistenceError, identity::Error as IdentityError,
 };
 use tracing::error;

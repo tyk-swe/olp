@@ -8,7 +8,8 @@ use axum::{
 use chrono::{Duration, SecondsFormat, Timelike, Utc};
 use http_body_util::BodyExt as _;
 use olp::{
-    bootstrap::state::{ApiMode, ProcessComposition},
+    application::mode::ApiMode,
+    bootstrap::state::ProcessComposition,
     observability::{cache::refresh_observability_cache, router as observability_router},
     public_http::router::management_router_for_test,
 };

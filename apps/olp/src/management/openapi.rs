@@ -42,6 +42,45 @@ fn complete_contract(document: utoipa::openapi::OpenApi) -> serde_json::Value {
         }),
     );
 
+    complete_operation_contracts(&mut value);
+    // Utoipa's typed OpenAPI model is intentionally narrower than OpenAPI
+    // 3.1 in a few extension points (notably response-header schemas). The
+    // generated contract is the JSON document served and drift-checked by OLP,
+    // so retain the standards-compliant transformed value instead of trying to
+    // deserialize it back through that lossy model.
+    value
+}
+
+fn normalize_problem_content(response: &mut serde_json::Value) {
+    let Some(content) = response
+        .get_mut("content")
+        .and_then(serde_json::Value::as_object_mut)
+    else {
+        return;
+    };
+    let is_problem = content.get("application/json").is_some_and(|media| {
+        media
+            .pointer("/schema/$ref")
+            .and_then(serde_json::Value::as_str)
+            .is_some_and(|reference| reference.ends_with("/Problem"))
+    });
+    if is_problem && let Some(media) = content.remove("application/json") {
+        content.insert("application/problem+json".to_owned(), media);
+    }
+}
+
+fn problem_response(description: &str) -> serde_json::Value {
+    serde_json::json!({
+        "description": description,
+        "content": {
+            "application/problem+json": {
+                "schema": { "$ref": "#/components/schemas/Problem" }
+            }
+        }
+    })
+}
+
+fn complete_operation_contracts(value: &mut serde_json::Value) {
     let public_operations = [
         ("/api/v1/openapi.json", "get"),
         ("/api/v1/auth/capabilities", "get"),
@@ -85,89 +124,60 @@ fn complete_contract(document: utoipa::openapi::OpenApi) -> serde_json::Value {
                 },
             );
 
-            let has_if_match = operation
-                .get("parameters")
-                .and_then(serde_json::Value::as_array)
-                .is_some_and(|parameters| {
-                    parameters.iter().any(|parameter| {
-                        parameter.get("name").and_then(serde_json::Value::as_str)
-                            == Some("If-Match")
-                    })
-                });
-            if let Some(responses) = operation
-                .get_mut("responses")
-                .and_then(serde_json::Value::as_object_mut)
-            {
-                for (status, response) in responses.iter_mut() {
-                    normalize_problem_content(response);
-                    if has_if_match && status.starts_with('2') {
-                        response
-                            .as_object_mut()
-                            .expect("OpenAPI response is an object")
-                            .entry("headers")
-                            .or_insert_with(|| serde_json::json!({}))
-                            .as_object_mut()
-                            .expect("OpenAPI response headers are an object")
-                            .insert(
-                                "ETag".to_owned(),
-                                serde_json::json!({
-                                    "description": "Current strong entity tag.",
-                                    "schema": { "type": "string" }
-                                }),
-                            );
-                    }
-                }
-                if !is_public {
-                    responses
-                        .entry("401")
-                        .or_insert_with(|| problem_response("Authentication required."));
-                    responses.entry("403").or_insert_with(|| {
-                        problem_response(
-                            "The session lacks permission or mutation CSRF/origin checks failed.",
-                        )
-                    });
-                }
-                responses
-                    .entry("500")
-                    .or_insert_with(|| problem_response("The request could not be completed."));
-            }
+            complete_operation_responses(operation, is_public);
         }
     }
-    // Utoipa's typed OpenAPI model is intentionally narrower than OpenAPI
-    // 3.1 in a few extension points (notably response-header schemas). The
-    // generated contract is the JSON document served and drift-checked by OLP,
-    // so retain the standards-compliant transformed value instead of trying to
-    // deserialize it back through that lossy model.
-    value
 }
 
-fn normalize_problem_content(response: &mut serde_json::Value) {
-    let Some(content) = response
-        .get_mut("content")
+fn complete_operation_responses(
+    operation: &mut serde_json::Map<String, serde_json::Value>,
+    is_public: bool,
+) {
+    let has_if_match = operation
+        .get("parameters")
+        .and_then(serde_json::Value::as_array)
+        .is_some_and(|parameters| {
+            parameters.iter().any(|parameter| {
+                parameter.get("name").and_then(serde_json::Value::as_str) == Some("If-Match")
+            })
+        });
+    if let Some(responses) = operation
+        .get_mut("responses")
         .and_then(serde_json::Value::as_object_mut)
-    else {
-        return;
-    };
-    let is_problem = content.get("application/json").is_some_and(|media| {
-        media
-            .pointer("/schema/$ref")
-            .and_then(serde_json::Value::as_str)
-            .is_some_and(|reference| reference.ends_with("/Problem"))
-    });
-    if is_problem && let Some(media) = content.remove("application/json") {
-        content.insert("application/problem+json".to_owned(), media);
-    }
-}
-
-fn problem_response(description: &str) -> serde_json::Value {
-    serde_json::json!({
-        "description": description,
-        "content": {
-            "application/problem+json": {
-                "schema": { "$ref": "#/components/schemas/Problem" }
+    {
+        for (status, response) in responses.iter_mut() {
+            normalize_problem_content(response);
+            if has_if_match && status.starts_with('2') {
+                response
+                    .as_object_mut()
+                    .expect("OpenAPI response is an object")
+                    .entry("headers")
+                    .or_insert_with(|| serde_json::json!({}))
+                    .as_object_mut()
+                    .expect("OpenAPI response headers are an object")
+                    .insert(
+                        "ETag".to_owned(),
+                        serde_json::json!({
+                            "description": "Current strong entity tag.",
+                            "schema": { "type": "string" }
+                        }),
+                    );
             }
         }
-    })
+        if !is_public {
+            responses
+                .entry("401")
+                .or_insert_with(|| problem_response("Authentication required."));
+            responses.entry("403").or_insert_with(|| {
+                problem_response(
+                    "The session lacks permission or mutation CSRF/origin checks failed.",
+                )
+            });
+        }
+        responses
+            .entry("500")
+            .or_insert_with(|| problem_response("The request could not be completed."));
+    }
 }
 
 #[cfg(test)]

@@ -1,201 +1,20 @@
+use super::{error::AppResult, provider_fields::ProviderConfigFields};
 use olp_db::{
-    configuration::RuntimeProvider, configuration::resources::ProviderRecord,
-    security::aad::credential, security::envelope::MasterKey,
+    runtime::provider_configuration::RuntimeProvider,
+    security::{aad::credential, envelope::MasterKey},
 };
 use olp_engine::{
     domain::{
         ids::ProviderId,
-        provider::ProviderAuthMode,
-        provider_configuration::{Configuration, validate},
         routing::{provider::ProviderKind, snapshot::Snapshot},
     },
     providers::factory::{
-        assembly::{Facade, Factory},
-        configuration::{Config, Credential, CredentialKind, Error},
+        assembly::Factory,
+        configuration::{Config, Credential, CredentialKind},
+        input::{provider_config, provider_credential},
     },
 };
-use uuid::Uuid;
 use zeroize::Zeroizing;
-
-use crate::{
-    bootstrap::{cli::AppResult, mode_dependencies::ManagementState},
-    management::error_mapping::map_configuration,
-    public_http::problem::Problem,
-};
-
-/// Application-owned provider fields before they cross into `olp-engine::providers`.
-#[derive(Clone, Copy, Debug)]
-pub(crate) struct ProviderConfigFields<'a> {
-    pub kind: ProviderKind,
-    pub endpoint: Option<&'a str>,
-    pub cloud_region: Option<&'a str>,
-    pub cloud_project: Option<&'a str>,
-    pub deployment: Option<&'a str>,
-    pub api_version: Option<&'a str>,
-    pub auth_mode: ProviderAuthMode,
-    pub probe_model: Option<&'a str>,
-}
-
-impl<'a> From<&'a ProviderRecord> for ProviderConfigFields<'a> {
-    fn from(provider: &'a ProviderRecord) -> Self {
-        Self {
-            kind: provider.kind,
-            endpoint: provider.endpoint.as_deref(),
-            cloud_region: provider.cloud_region.as_deref(),
-            cloud_project: provider.cloud_project.as_deref(),
-            deployment: provider.deployment.as_deref(),
-            api_version: provider.api_version.as_deref(),
-            auth_mode: provider.auth_mode,
-            probe_model: provider.probe_model.as_deref(),
-        }
-    }
-}
-
-impl<'a> From<&'a RuntimeProvider> for ProviderConfigFields<'a> {
-    fn from(provider: &'a RuntimeProvider) -> Self {
-        Self {
-            kind: provider.kind,
-            endpoint: provider.endpoint.as_deref(),
-            cloud_region: provider.cloud_region.as_deref(),
-            cloud_project: provider.cloud_project.as_deref(),
-            deployment: provider.deployment.as_deref(),
-            api_version: provider.api_version.as_deref(),
-            auth_mode: provider.auth_mode,
-            probe_model: None,
-        }
-    }
-}
-
-pub(crate) fn provider_config(fields: ProviderConfigFields<'_>) -> Result<Config, Error> {
-    if let Some(violation) = validate(Configuration {
-        kind: fields.kind,
-        auth_mode: fields.auth_mode,
-        endpoint: fields.endpoint,
-        cloud_region: fields.cloud_region,
-        cloud_project: fields.cloud_project,
-        deployment: fields.deployment,
-        api_version: fields.api_version,
-        model: fields.probe_model,
-        credential_present: None,
-    })
-    .into_iter()
-    .next()
-    {
-        return Err(Error::Configuration(violation.detail.to_owned()));
-    }
-
-    let required = |value: Option<&str>, message: &'static str| {
-        value
-            .map(str::to_owned)
-            .ok_or_else(|| Error::Configuration(message.to_owned()))
-    };
-
-    Ok(match fields.kind {
-        ProviderKind::OpenAi => Config::OpenAi {
-            endpoint: fields.endpoint.map(str::to_owned),
-        },
-        ProviderKind::OpenAiCompatible => Config::OpenAiCompatible {
-            endpoint: required(fields.endpoint, "OpenAI-compatible endpoint is missing")?,
-        },
-        ProviderKind::Anthropic => Config::Anthropic {
-            endpoint: fields.endpoint.map(str::to_owned),
-            api_version: fields.api_version.map(str::to_owned),
-        },
-        ProviderKind::Gemini => Config::Gemini {
-            endpoint: fields.endpoint.map(str::to_owned),
-        },
-        ProviderKind::VertexAi => Config::VertexAi {
-            project: required(fields.cloud_project, "Vertex AI project is missing")?,
-            location: required(fields.cloud_region, "Vertex AI location is missing")?,
-            probe_model: required(fields.probe_model, "Vertex AI probe model is missing")?,
-            auth_mode: fields.auth_mode,
-        },
-        ProviderKind::Bedrock => Config::Bedrock {
-            region: required(fields.cloud_region, "Bedrock AWS region is missing")?,
-            auth_mode: fields.auth_mode,
-        },
-        ProviderKind::AzureOpenAi => Config::AzureOpenAi {
-            endpoint: required(fields.endpoint, "Azure OpenAI endpoint is missing")?,
-            deployment: required(fields.deployment, "Azure OpenAI deployment is missing")?,
-            api_version: required(fields.api_version, "Azure OpenAI API version is missing")?,
-        },
-    })
-}
-
-pub(crate) fn provider_credential(
-    config: &Config,
-    plaintext: Option<&[u8]>,
-) -> Result<Credential, Error> {
-    match (Factory::credential_kind(config)?, plaintext) {
-        (CredentialKind::None, _) | (_, None) => Ok(Credential::None),
-        (CredentialKind::ApiKey, Some(plaintext)) => Ok(Credential::ApiKey(Zeroizing::new(
-            secret_text(plaintext)?.to_owned(),
-        ))),
-        (CredentialKind::ServiceAccountJson, Some(plaintext)) => Ok(
-            Credential::ServiceAccountJson(Zeroizing::new(secret_text(plaintext)?.to_owned())),
-        ),
-        (CredentialKind::AwsStatic, Some(plaintext)) => {
-            Ok(Credential::AwsStatic(Zeroizing::new(plaintext.to_vec())))
-        }
-    }
-}
-
-pub(crate) async fn provider_connector(
-    state: &ManagementState,
-    provider_id: Uuid,
-) -> Result<Facade, Problem> {
-    let store = state.store();
-    let provider = store
-        .get_provider(provider_id)
-        .await
-        .map_err(map_configuration)?;
-    let config = provider_config((&provider).into())
-        .map_err(|error| Problem::field_validation("provider", error.to_string()))?;
-    #[cfg(any(test, feature = "test-util"))]
-    if let Some(connector) = state.certification_probe_connector(provider_id, config.kind()) {
-        return Ok(connector);
-    }
-    let plaintext = match Factory::credential_kind(&config)
-        .map_err(|error| Problem::field_validation("provider", error.to_string()))?
-    {
-        CredentialKind::None => None,
-        CredentialKind::ApiKey | CredentialKind::ServiceAccountJson | CredentialKind::AwsStatic => {
-            let stored = store
-                .active_provider_credential_secret(provider_id)
-                .await
-                .map_err(map_configuration)?;
-            let master_key = state
-                .master_key
-                .as_ref()
-                .ok_or_else(|| Problem::service_unavailable("master_key_not_configured"))?;
-            Some(
-                master_key
-                    .open(
-                        &stored.encrypted,
-                        &credential(provider_id, stored.id, stored.version),
-                    )
-                    .map_err(|error| {
-                        tracing::error!(%error, provider_id = %provider_id, "provider credential decryption failed");
-                        Problem::internal()
-                    })?,
-            )
-        }
-    };
-    let credential = provider_credential(
-        &config,
-        plaintext.as_ref().map(|plaintext| plaintext.as_slice()),
-    )
-    .map_err(|error| Problem::field_validation("provider", error.to_string()))?;
-    Factory::create(
-        config,
-        credential,
-        &state.provider_egress_policy,
-        state.provider_response_limits,
-    )
-    .await
-    .map_err(|error| Problem::field_validation("provider", error.to_string()))
-}
-
 pub(crate) fn runtime_provider_config(
     provider: &RuntimeProvider,
     snapshot: &Snapshot,
@@ -235,7 +54,7 @@ pub(crate) fn runtime_provider_config(
         };
     let mut fields = ProviderConfigFields::from(provider);
     fields.probe_model = probe_model.as_deref();
-    Ok(provider_config(fields)?)
+    Ok(provider_config(fields.into())?)
 }
 
 pub(crate) fn runtime_provider_credential(
@@ -300,11 +119,6 @@ fn decrypt_provider_credential(
     Ok(master_key.open(encrypted, &aad)?)
 }
 
-fn secret_text(secret: &[u8]) -> Result<&str, Error> {
-    std::str::from_utf8(secret)
-        .map_err(|_| Error::Credential("provider credential is not valid UTF-8".to_owned()))
-}
-
 fn runtime_provider_model(snapshot: &Snapshot, provider_id: ProviderId) -> AppResult<String> {
     snapshot
         .providers
@@ -323,7 +137,8 @@ mod tests {
 
     use chrono::Utc;
     use olp_db::{
-        configuration::RuntimeProvider, security::aad::credential, security::envelope::MasterKey,
+        runtime::provider_configuration::RuntimeProvider,
+        security::{aad::credential, envelope::MasterKey},
     };
     use olp_engine::domain::{
         canonical::identity::{OperationKind, Surface, TransportMode},
@@ -337,9 +152,10 @@ mod tests {
     use olp_engine::providers::factory::configuration::{Config, Credential};
 
     use super::{
-        ProviderConfigFields, decrypt_provider_credential, provider_config, provider_credential,
-        runtime_provider_config, runtime_provider_credential,
+        decrypt_provider_credential, runtime_provider_config, runtime_provider_credential,
     };
+    use crate::application::provider_fields::ProviderConfigFields;
+    use olp_engine::providers::factory::input::{provider_config, provider_credential};
 
     fn fields(kind: ProviderKind) -> ProviderConfigFields<'static> {
         ProviderConfigFields {
@@ -414,25 +230,25 @@ mod tests {
     #[test]
     fn native_provider_defaults_remain_implicit() {
         assert!(matches!(
-            provider_config(fields(ProviderKind::OpenAi)).unwrap(),
+            provider_config(fields(ProviderKind::OpenAi).into()).unwrap(),
             Config::OpenAi { endpoint: None }
         ));
         assert!(matches!(
-            provider_config(fields(ProviderKind::Anthropic)).unwrap(),
+            provider_config(fields(ProviderKind::Anthropic).into()).unwrap(),
             Config::Anthropic {
                 endpoint: None,
                 api_version: None
             }
         ));
         assert!(matches!(
-            provider_config(fields(ProviderKind::Gemini)).unwrap(),
+            provider_config(fields(ProviderKind::Gemini).into()).unwrap(),
             Config::Gemini { endpoint: None }
         ));
     }
 
     #[test]
     fn credential_representation_follows_factory_configuration() {
-        let api_key_config = provider_config(fields(ProviderKind::OpenAi)).unwrap();
+        let api_key_config = provider_config(fields(ProviderKind::OpenAi).into()).unwrap();
         assert!(matches!(
             provider_credential(&api_key_config, Some(b"api-key")).unwrap(),
             Credential::ApiKey(_)
@@ -443,7 +259,7 @@ mod tests {
         vertex.cloud_region = Some("region");
         vertex.probe_model = Some("model");
         vertex.auth_mode = ProviderAuthMode::ServiceAccount;
-        let vertex = provider_config(vertex).unwrap();
+        let vertex = provider_config(vertex.into()).unwrap();
         assert!(matches!(
             provider_credential(&vertex, Some(b"{}")).unwrap(),
             Credential::ServiceAccountJson(_)
@@ -452,7 +268,7 @@ mod tests {
         let mut bedrock = fields(ProviderKind::Bedrock);
         bedrock.cloud_region = Some("us-east-1");
         bedrock.auth_mode = ProviderAuthMode::Static;
-        let bedrock = provider_config(bedrock).unwrap();
+        let bedrock = provider_config(bedrock.into()).unwrap();
         assert!(matches!(
             provider_credential(&bedrock, Some(b"{}")).unwrap(),
             Credential::AwsStatic(_)
@@ -518,7 +334,7 @@ mod tests {
 
     #[test]
     fn text_credentials_must_be_utf8() {
-        let config = provider_config(fields(ProviderKind::OpenAi)).unwrap();
+        let config = provider_config(fields(ProviderKind::OpenAi).into()).unwrap();
         let error = provider_credential(&config, Some(&[0xff, 0xfe])).unwrap_err();
         assert_eq!(error.to_string(), "provider credential is not valid UTF-8");
     }
@@ -528,7 +344,7 @@ mod tests {
         let mut compatible = fields(ProviderKind::OpenAiCompatible);
         compatible.endpoint = Some("https://inference.example.test/v1");
         assert!(matches!(
-            provider_config(compatible).unwrap(),
+            provider_config(compatible.into()).unwrap(),
             Config::OpenAiCompatible { endpoint }
                 if endpoint == "https://inference.example.test/v1"
         ));
@@ -539,7 +355,7 @@ mod tests {
         vertex.probe_model = Some("gemini-model");
         vertex.auth_mode = ProviderAuthMode::ApplicationDefault;
         assert!(matches!(
-            provider_config(vertex).unwrap(),
+            provider_config(vertex.into()).unwrap(),
             Config::VertexAi { project, location, probe_model, auth_mode }
                 if project == "project" && location == "us-central1"
                     && probe_model == "gemini-model"
@@ -551,7 +367,7 @@ mod tests {
         azure.deployment = Some("deployment");
         azure.api_version = Some("2025-01-01-preview");
         assert!(matches!(
-            provider_config(azure).unwrap(),
+            provider_config(azure.into()).unwrap(),
             Config::AzureOpenAi { endpoint, deployment, api_version }
                 if endpoint == "https://resource.openai.azure.com"
                     && deployment == "deployment" && api_version == "2025-01-01-preview"
@@ -573,7 +389,7 @@ mod tests {
             (missing_azure_endpoint, "endpoint"),
         ] {
             assert!(
-                provider_config(invalid)
+                provider_config(invalid.into())
                     .unwrap_err()
                     .to_string()
                     .to_ascii_lowercase()

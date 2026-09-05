@@ -1,7 +1,7 @@
 import type { components } from './schema';
 import { apiClient } from './client';
 import { pageResult, result } from './http';
-import type { CursorPage } from './pagination';
+import type { CursorPage } from '$lib/api/http';
 import { compactQuery } from './query';
 
 export type PricingRevision = components['schemas']['PricingRevisionResponse'];

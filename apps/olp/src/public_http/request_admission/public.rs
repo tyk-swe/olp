@@ -19,7 +19,9 @@ use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 
 use crate::{
     gateway::{self, endpoint_policy::classification::InferenceEndpoint},
-    observability::tracing::{RequestConfig as RequestTracingConfig, trace_admitted_request},
+    observability::tracing::{
+        RequestConfig as RequestTracingConfig, request::trace_admitted_request,
+    },
     public_http::problem::Problem,
 };
 

@@ -39,10 +39,11 @@ long_fn too_long 120 > "$fixture/apps/demo/src/long.rs"
 new_violation_fails() { ! check >/dev/null 2>&1; }
 run_test "a new function over the limit fails" new_violation_fails
 
-update_records_baseline() {
-  check --update >/dev/null && grep -q '^fn:apps/demo/src/long.rs:too_long$' "$fixture/scripts/source-size-baseline.txt"
+update_rejects_growth() {
+  ! check --update >/dev/null 2>&1 && [[ ! -s "$fixture/scripts/source-size-baseline.txt" ]]
 }
-run_test "--update grandfathers the violation" update_records_baseline
+run_test "--update rejects baseline growth without modifying it" update_rejects_growth
+printf '%s\n' 'fn:apps/demo/src/long.rs:too_long' > "$fixture/scripts/source-size-baseline.txt"
 run_test "a grandfathered violation passes" clean_tree_passes
 
 head -c 31000 /dev/zero | tr '\0' 'x' > "$fixture/apps/demo/src/big.ts"
@@ -51,5 +52,11 @@ rm "$fixture/apps/demo/src/big.ts"
 
 rm "$fixture/apps/demo/src/long.rs"
 run_test "a fixed entry left in the baseline fails" new_violation_fails
+
+update_removes_fixed_entries() {
+  check --update >/dev/null && [[ ! -s "$fixture/scripts/source-size-baseline.txt" ]]
+}
+run_test "--update removes fixed exceptions" update_removes_fixed_entries
+run_test "the retired baseline passes" clean_tree_passes
 
 tap_plan

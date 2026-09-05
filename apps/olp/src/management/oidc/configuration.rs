@@ -24,13 +24,13 @@ use super::claims::is_allowed_algorithm_name;
 use super::error::{field_problem, map_discovery_network, map_oidc, oidc_not_configured};
 use super::helpers::{network_policy, require_master_key, valid_claim_name};
 use crate::{
-    bootstrap::mode_dependencies::ManagementState,
     management::{
         json_payload::json_payload,
         permissions::require_permission,
         preconditions::{optional_if_match, with_etag},
         principal::{MutationPrincipal, ReadPrincipal},
         provenance::Provenance,
+        state::ManagementState,
     },
     public_http::problem::Problem,
 };
@@ -215,37 +215,8 @@ pub(super) async fn put_configuration(
         .as_ref()
         .map_or_else(Uuid::now_v7, |configuration| configuration.id);
     let master_key = require_master_key(&state)?;
-    let encrypted_client_secret = match request.client_secret.as_ref() {
-        Some(secret) => {
-            if secret.expose().is_empty() || secret.expose().len() > 4096 {
-                return Err(field_problem(
-                    "client_secret",
-                    "Use a client secret between 1 and 4,096 bytes.",
-                ));
-            }
-            master_key
-                .seal(secret.expose().as_bytes(), &client_secret_aad(id))
-                .map_err(|error| {
-                    error!(%error, "OIDC client secret encryption failed");
-                    Problem::internal()
-                })?
-        }
-        None => {
-            let existing = existing.as_ref().ok_or_else(|| {
-                field_problem(
-                    "client_secret",
-                    "A client secret is required when OIDC is first configured.",
-                )
-            })?;
-            if existing.encrypted_client_secret.key_version != master_key.version() {
-                return Err(field_problem(
-                    "client_secret",
-                    "Re-enter the client secret to rotate it to the active master key.",
-                ));
-            }
-            existing.encrypted_client_secret.clone()
-        }
-    };
+    let encrypted_client_secret =
+        configuration_client_secret(&request, existing.as_ref(), master_key, id)?;
 
     let discovery: DiscoveryDocument = policy
         .get_json(request.discovery_url.trim(), DISCOVERY_LIMIT)
@@ -623,3 +594,42 @@ pub(super) fn default_groups_claim() -> String {
 
 #[cfg(test)]
 mod tests;
+
+fn configuration_client_secret(
+    request: &OidcConfigurationRequest,
+    existing: Option<&OidcConfiguration>,
+    master_key: &olp_db::security::envelope::MasterKey,
+    id: Uuid,
+) -> Result<olp_db::security::envelope::EncryptedSecret, Problem> {
+    Ok(match request.client_secret.as_ref() {
+        Some(secret) => {
+            if secret.expose().is_empty() || secret.expose().len() > 4096 {
+                return Err(field_problem(
+                    "client_secret",
+                    "Use a client secret between 1 and 4,096 bytes.",
+                ));
+            }
+            master_key
+                .seal(secret.expose().as_bytes(), &client_secret_aad(id))
+                .map_err(|error| {
+                    error!(%error, "OIDC client secret encryption failed");
+                    Problem::internal()
+                })?
+        }
+        None => {
+            let existing = existing.ok_or_else(|| {
+                field_problem(
+                    "client_secret",
+                    "A client secret is required when OIDC is first configured.",
+                )
+            })?;
+            if existing.encrypted_client_secret.key_version != master_key.version() {
+                return Err(field_problem(
+                    "client_secret",
+                    "Re-enter the client secret to rotate it to the active master key.",
+                ));
+            }
+            existing.encrypted_client_secret.clone()
+        }
+    })
+}

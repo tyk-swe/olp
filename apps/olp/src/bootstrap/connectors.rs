@@ -1,25 +1,25 @@
 use std::{collections::BTreeMap, path::Path, sync::Arc};
 
-use crate::{
-    bootstrap::provider_adapter::{runtime_provider_config, runtime_provider_credential},
-    bootstrap::state::TransportRegistry,
+use crate::application::{
+    provider_runtime::{runtime_provider_config, runtime_provider_credential},
+    transports::TransportRegistry,
 };
 use olp_db::{security::envelope::MasterKey, store::Store};
 use olp_engine::{
     domain::{ids::ProviderId, ports::ProviderTransport, routing::snapshot::Snapshot},
     providers::{
-        EgressPolicy,
         connector::ResponseLimits,
         factory::{
             assembly::Factory,
             configuration::{Config, Credential},
         },
+        http_egress::EgressPolicy,
     },
 };
 use serde::Deserialize;
 use zeroize::Zeroizing;
 
-use crate::bootstrap::cli::{AppResult, validation::check_secret_permissions};
+use crate::application::{error::AppResult, secret_files::check_secret_permissions};
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -126,86 +126,10 @@ pub(crate) async fn register_mounted_connectors(
         registry.register(ProviderId::from_uuid(provider.provider_id), transport);
     }
     for provider in config.vertex {
-        let secret = match (provider.auth_mode.as_str(), provider.credential_file) {
-            ("adc", None) => None,
-            ("service_account", Some(path)) => {
-                check_secret_permissions(&path).await?;
-                Some(Zeroizing::new(tokio::fs::read_to_string(path).await?))
-            }
-            ("adc", Some(_)) => {
-                return Err(std::io::Error::other(
-                    "Vertex ADC connector must not configure a credential file",
-                )
-                .into());
-            }
-            ("service_account", None) => {
-                return Err(std::io::Error::other(
-                    "Vertex service_account connector requires a credential file",
-                )
-                .into());
-            }
-            _ => {
-                return Err(std::io::Error::other(
-                    "Vertex connector auth_mode must be adc or service_account",
-                )
-                .into());
-            }
-        };
-        let credential = secret.map_or(Credential::None, |secret| {
-            Credential::ServiceAccountJson(secret)
-        });
-        let transport = Factory::transport(
-            Config::VertexAi {
-                project: provider.project,
-                location: provider.location,
-                probe_model: provider.model,
-                auth_mode: provider.auth_mode.parse()?,
-            },
-            credential,
-            egress_policy,
-            response_limits,
-        )
-        .await?;
-        registry.register(ProviderId::from_uuid(provider.provider_id), transport);
+        register_mounted_vertex(provider, registry, egress_policy, response_limits).await?;
     }
     for provider in config.bedrock {
-        let secret = match (provider.auth_mode.as_str(), provider.credential_file) {
-            ("default_chain", None) => None,
-            ("static", Some(path)) => {
-                check_secret_permissions(&path).await?;
-                Some(Zeroizing::new(tokio::fs::read(path).await?))
-            }
-            ("default_chain", Some(_)) => {
-                return Err(std::io::Error::other(
-                    "Bedrock default_chain connector must not configure a credential file",
-                )
-                .into());
-            }
-            ("static", None) => {
-                return Err(std::io::Error::other(
-                    "Bedrock static connector requires a credential file",
-                )
-                .into());
-            }
-            _ => {
-                return Err(std::io::Error::other(
-                    "Bedrock connector auth_mode must be default_chain or static",
-                )
-                .into());
-            }
-        };
-        let credential = secret.map_or(Credential::None, Credential::AwsStatic);
-        let transport = Factory::transport(
-            Config::Bedrock {
-                region: provider.region,
-                auth_mode: provider.auth_mode.parse()?,
-            },
-            credential,
-            egress_policy,
-            response_limits,
-        )
-        .await?;
-        registry.register(ProviderId::from_uuid(provider.provider_id), transport);
+        register_mounted_bedrock(provider, registry, egress_policy, response_limits).await?;
     }
     Ok(())
 }
@@ -228,13 +152,111 @@ pub(crate) async fn load_runtime_transports(
     Ok(())
 }
 
+async fn register_mounted_vertex(
+    provider: MountedVertexConnector,
+    registry: &TransportRegistry,
+    egress_policy: &EgressPolicy,
+    response_limits: ResponseLimits,
+) -> AppResult<()> {
+    let secret = match (provider.auth_mode.as_str(), provider.credential_file) {
+        ("adc", None) => None,
+        ("service_account", Some(path)) => {
+            check_secret_permissions(&path).await?;
+            Some(Zeroizing::new(tokio::fs::read_to_string(path).await?))
+        }
+        ("adc", Some(_)) => {
+            return Err(std::io::Error::other(
+                "Vertex ADC connector must not configure a credential file",
+            )
+            .into());
+        }
+        ("service_account", None) => {
+            return Err(std::io::Error::other(
+                "Vertex service_account connector requires a credential file",
+            )
+            .into());
+        }
+        _ => {
+            return Err(std::io::Error::other(
+                "Vertex connector auth_mode must be adc or service_account",
+            )
+            .into());
+        }
+    };
+    let credential = secret.map_or(Credential::None, |secret| {
+        Credential::ServiceAccountJson(secret)
+    });
+    let transport = Factory::transport(
+        Config::VertexAi {
+            project: provider.project,
+            location: provider.location,
+            probe_model: provider.model,
+            auth_mode: provider.auth_mode.parse()?,
+        },
+        credential,
+        egress_policy,
+        response_limits,
+    )
+    .await?;
+    registry.register(ProviderId::from_uuid(provider.provider_id), transport);
+
+    Ok(())
+}
+
+async fn register_mounted_bedrock(
+    provider: MountedBedrockConnector,
+    registry: &TransportRegistry,
+    egress_policy: &EgressPolicy,
+    response_limits: ResponseLimits,
+) -> AppResult<()> {
+    let secret = match (provider.auth_mode.as_str(), provider.credential_file) {
+        ("default_chain", None) => None,
+        ("static", Some(path)) => {
+            check_secret_permissions(&path).await?;
+            Some(Zeroizing::new(tokio::fs::read(path).await?))
+        }
+        ("default_chain", Some(_)) => {
+            return Err(std::io::Error::other(
+                "Bedrock default_chain connector must not configure a credential file",
+            )
+            .into());
+        }
+        ("static", None) => {
+            return Err(std::io::Error::other(
+                "Bedrock static connector requires a credential file",
+            )
+            .into());
+        }
+        _ => {
+            return Err(std::io::Error::other(
+                "Bedrock connector auth_mode must be default_chain or static",
+            )
+            .into());
+        }
+    };
+    let credential = secret.map_or(Credential::None, Credential::AwsStatic);
+    let transport = Factory::transport(
+        Config::Bedrock {
+            region: provider.region,
+            auth_mode: provider.auth_mode.parse()?,
+        },
+        credential,
+        egress_policy,
+        response_limits,
+    )
+    .await?;
+    registry.register(ProviderId::from_uuid(provider.provider_id), transport);
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use std::{io::Write as _, path::Path};
 
-    use crate::bootstrap::state::TransportRegistry;
+    use crate::application::transports::TransportRegistry;
     use olp_engine::domain::ids::ProviderId;
-    use olp_engine::providers::{EgressPolicy, connector::ResponseLimits};
+    use olp_engine::providers::{connector::ResponseLimits, http_egress::EgressPolicy};
     use serde_json::json;
     use tempfile::NamedTempFile;
 

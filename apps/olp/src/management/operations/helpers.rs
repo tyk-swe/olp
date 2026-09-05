@@ -8,9 +8,6 @@ use tracing::error;
 
 use crate::{management::error_mapping::map_persistence, public_http::problem::Problem};
 
-// One page-size contract for every management collection.
-pub(super) use crate::management::pagination::page_limit;
-
 /// Turns Axum's typed-query rejection into a problem+json response so a
 /// malformed UUID, timestamp, or page size never escapes as a bare text/plain
 /// 400. The rejection's own message can quote the offending value, so the

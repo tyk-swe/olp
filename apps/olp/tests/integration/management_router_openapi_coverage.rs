@@ -13,9 +13,11 @@ use std::{
 
 use olp::management::openapi::document;
 
-const ROUTER_SOURCES: [&str; 5] = [
+const ROUTER_SOURCES: [&str; 7] = [
     include_str!("../../src/management/mod.rs"),
-    include_str!("../../src/management/configuration.rs"),
+    include_str!("../../src/management/configuration/api_keys.rs"),
+    include_str!("../../src/management/configuration/providers.rs"),
+    include_str!("../../src/management/configuration/routes.rs"),
     include_str!("../../src/management/oidc.rs"),
     include_str!("../../src/management/operations.rs"),
     include_str!("../../src/management/playground.rs"),
@@ -25,7 +27,9 @@ const ROUTER_SOURCES: [&str; 5] = [
 /// are checked against each other rather than trusted to stay in step.
 const ROUTER_SOURCE_PATHS: [&str; ROUTER_SOURCES.len()] = [
     "src/management/mod.rs",
-    "src/management/configuration.rs",
+    "src/management/configuration/api_keys.rs",
+    "src/management/configuration/providers.rs",
+    "src/management/configuration/routes.rs",
     "src/management/oidc.rs",
     "src/management/operations.rs",
     "src/management/playground.rs",

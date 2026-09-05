@@ -6,9 +6,8 @@ use axum::{
     response::Response,
 };
 use olp_db::{
-    configuration::NewRouteDraft, configuration::NewRouteTarget, idempotency::Replayable,
-    idempotency::Response as IdempotencyResponse, idempotency::fingerprint,
-    idempotency::operations,
+    configuration::route_lifecycle::{NewRouteDraft, NewRouteTarget},
+    idempotency::{Replayable, Response as IdempotencyResponse, fingerprint, operations},
 };
 use olp_engine::domain::{auth::Permission, canonical::identity::OperationKind};
 use serde::{Deserialize, Serialize};
@@ -26,7 +25,7 @@ use crate::management::{
     provenance::Provenance,
     response_policy::RuntimeGenerationResponse,
 };
-use crate::{bootstrap::mode_dependencies::ManagementState, public_http::problem::Problem};
+use crate::{management::state::ManagementState, public_http::problem::Problem};
 
 #[derive(Debug, Deserialize, Serialize, ToSchema)]
 pub(crate) struct CreateRouteDraftRequest {

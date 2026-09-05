@@ -20,39 +20,26 @@ use olp_db::security::key_material::AuthHmacKey;
 use olp_engine::domain::{
     auth::{ApiKey, ApiKeyDigest, ApiKeyLimits, ApiKeyScope, ApiKeyStatus},
     canonical::{
-        events::{Error, ErrorClass, Event, EventSequenceValidator, FinishReason, Kind},
-        identity::{OperationKind, RequestMetadata, Surface, TransportMode},
-        requests::{
-            ImageGenerationRequest, ImageOperation, MediaHandle, MessageRole, Operation,
-            SourceExtensions,
-        },
+        events::{Error, ErrorClass, Event, FinishReason, Kind},
+        identity::{OperationKind, Surface, TransportMode},
+        requests::{MediaHandle, MessageRole, Operation, SourceExtensions},
         results::CanonicalResult,
     },
     ids::{
-        ApiKeyId, ApiKeyLookupId, CredentialVersionId, DurationMs, ProviderId, RequestId, RouteId,
-        RouteSlug, RuntimeGenerationId, TargetId,
+        ApiKeyId, ApiKeyLookupId, CredentialVersionId, DurationMs, ProviderId, RouteId, RouteSlug,
+        RuntimeGenerationId, TargetId,
     },
     ports::{
-        AttemptFailureClass, BoxFuture, MediaSpool, ProviderEventStream, ProviderOutput,
-        ProviderRequest, ProviderTransport, TransportError,
+        BoxFuture, MediaSpool, ProviderEventStream, ProviderOutput, ProviderRequest,
+        ProviderTransport, TransportError,
     },
     routing::{
         provider::{Capability, Provider, ProviderKind},
         route::{Route, Target},
-        selection::select_attempts,
         snapshot::{RuntimeGeneration, Snapshot},
     },
 };
-use olp_engine::inference::{
-    circuit::Breaker,
-    execution::RequiredTarget,
-    failover::{
-        Context, EventStream, circuit_accounted_event_stream, execute,
-        reclassify_ambiguous_transport_failure, validated_event_stream,
-    },
-    limits::reserve,
-    runtime::{Bundle, Manager},
-};
+use olp_engine::inference::{execution::RequiredTarget, limits::reserve, runtime::Manager};
 use olp_engine::protocols::openai::{
     chat::{CompletionRequest, decode},
     responses::token_count::{ResponseInputTokensRequest, decode_response_input_tokens},
@@ -231,7 +218,7 @@ fn test_state(streaming: bool) -> (GatewayState, String) {
         .install(snapshot, BTreeMap::from([(provider_id, transport)]))
         .unwrap();
     let mut state = GatewayState::new(
-        crate::bootstrap::state::ApiMode::Gateway,
+        crate::application::mode::ApiMode::Gateway,
         None,
         runtime,
         "https://olp.test",

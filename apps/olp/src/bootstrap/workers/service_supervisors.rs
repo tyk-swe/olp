@@ -12,12 +12,12 @@ use tokio::sync::watch;
 use tracing::{error, info, warn};
 
 use crate::{
-    gateway::media_jobs::reconcile_media_jobs_once,
+    application::media_jobs::reconcile_media_jobs_once,
     observability::metrics::RequestMetadataLossCounters,
 };
 
-pub(super) async fn media_reconciliation_supervisor(
-    state: crate::bootstrap::mode_dependencies::GatewayState,
+pub(crate) async fn media_reconciliation_supervisor(
+    state: crate::application::media_jobs::MediaJobs,
     mut shutdown: watch::Receiver<bool>,
 ) {
     let mut interval = tokio::time::interval(Duration::from_secs(5));
@@ -93,7 +93,7 @@ fn record_loss_checkpoint(
     }
 }
 
-pub(super) async fn request_metadata_loss_reporter(
+pub(crate) async fn request_metadata_loss_reporter(
     store: Store,
     emitter: Emitter,
     gateway_instance: String,
@@ -141,7 +141,7 @@ pub(super) async fn request_metadata_loss_reporter(
     }
 }
 
-pub(super) async fn limiter_supervisor(
+pub(crate) async fn limiter_supervisor(
     reloadable_limiter: ReloadableLimiter,
     valkey_url: String,
     limits_namespace: String,
@@ -198,7 +198,7 @@ pub(super) async fn limiter_supervisor(
     }
 }
 
-pub(super) async fn load_limits_outage_policy(store: &Store, limiter: &ReloadableLimiter) {
+pub(crate) async fn load_limits_outage_policy(store: &Store, limiter: &ReloadableLimiter) {
     match store.limits_valkey_unavailable_policy().await {
         Ok(policy) => {
             let policy = match policy {
@@ -216,7 +216,7 @@ pub(super) async fn load_limits_outage_policy(store: &Store, limiter: &Reloadabl
     }
 }
 
-pub(super) async fn limits_policy_supervisor(
+pub(crate) async fn limits_policy_supervisor(
     store: Store,
     limiter: ReloadableLimiter,
     mut shutdown: watch::Receiver<bool>,

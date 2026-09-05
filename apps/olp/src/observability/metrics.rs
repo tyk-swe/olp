@@ -19,14 +19,14 @@ use olp_db::{
 use olp_engine::inference::limits::LimitDimension;
 use olp_engine::inference::request_metadata::{Emitter, Snapshot};
 
-mod async_workers;
+pub(crate) mod async_workers;
 
-pub(crate) use async_workers::append_async_worker_metrics;
+use async_workers::append_async_worker_metrics;
 
 use super::cache::{
     CachedMetrics, attach_snapshot_freshness, snapshot_age_seconds, snapshot_is_current,
 };
-use crate::bootstrap::mode_dependencies::ObservabilityState;
+use crate::observability::state::ObservabilityState;
 
 fn cached_metrics_is_fresh(snapshot: &CachedMetrics, now: Instant) -> bool {
     snapshot_is_current(snapshot.last_success_at, snapshot.last_attempt_at, now)

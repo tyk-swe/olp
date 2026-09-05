@@ -9,9 +9,9 @@
   import { errorMessage } from '$lib/api/http';
   import {
     cursorPaginationProps,
-    type CursorHistory,
-    type CursorPage
-  } from '$lib/api/pagination';
+    type CursorHistory
+  } from '$lib/lists/pagination';
+  import { type CursorPage } from '$lib/api/http';
   import { formatDate } from '$lib/format';
 
   let {

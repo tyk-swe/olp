@@ -2,22 +2,18 @@
 //! the hot-swappable Valkey limiter, and the runtime transport registry.
 
 use std::{
-    collections::BTreeMap,
     path::PathBuf,
-    sync::{Arc, RwLock, atomic::AtomicU64},
+    sync::{Arc, atomic::AtomicU64},
 };
 
 use olp_db::{security::envelope::MasterKey, security::key_material::AuthHmacKey, store::Store};
-use olp_engine::domain::{
-    ids::ProviderId,
-    ports::{MediaSpool, ProviderTransport},
-};
+use olp_engine::domain::ports::MediaSpool;
 use olp_engine::inference::{
     circuit::Breaker, limits::ReloadableLimiter, request_metadata::Emitter, runtime::Manager,
 };
 #[cfg(feature = "test-util")]
 use olp_engine::providers::openai::transport::Connector;
-use olp_engine::providers::{EgressPolicy, connector::ResponseLimits};
+use olp_engine::providers::{connector::ResponseLimits, http_egress::EgressPolicy};
 use tokio::sync::RwLock as AsyncRwLock;
 use zeroize::Zeroizing;
 
@@ -32,75 +28,6 @@ use crate::{
 };
 
 use crate::media_spool;
-
-pub const MAX_HTTP_HEADER_COUNT: usize = 100;
-pub const MAX_HTTP_HEADER_BYTES: usize = 32 * 1024;
-
-/// Request body caps enforced at the public boundary. Header caps stay
-/// constant because they are tied to the Hyper parser configuration.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct BodyLimits {
-    pub json_body_bytes: usize,
-    pub media_body_bytes: usize,
-    pub inline_media_items: usize,
-    pub inline_media_item_bytes: usize,
-    pub inline_media_total_bytes: usize,
-}
-
-impl Default for BodyLimits {
-    fn default() -> Self {
-        Self {
-            json_body_bytes: 2 * 1024 * 1024,
-            media_body_bytes: 64 * 1024 * 1024,
-            inline_media_items: 4,
-            inline_media_item_bytes: 1024 * 1024,
-            inline_media_total_bytes: 2 * 1024 * 1024,
-        }
-    }
-}
-
-impl BodyLimits {
-    /// Multipart admission budgets half the spool, so a media cap above that
-    /// would make every multipart request fail with 503.
-    pub fn validate(self, spool_capacity_bytes: u64) -> Result<Self, String> {
-        if self.inline_media_item_bytes > self.inline_media_total_bytes {
-            return Err(
-                "OLP_HTTP_MAX_INLINE_MEDIA_ITEM_BYTES must not exceed OLP_HTTP_MAX_INLINE_MEDIA_TOTAL_BYTES"
-                    .to_owned(),
-            );
-        }
-        if self.inline_media_total_bytes > self.json_body_bytes {
-            return Err(
-                "OLP_HTTP_MAX_INLINE_MEDIA_TOTAL_BYTES must not exceed OLP_HTTP_MAX_JSON_BODY_BYTES"
-                    .to_owned(),
-            );
-        }
-        if self.media_body_bytes as u64 > spool_capacity_bytes / 2 {
-            return Err(format!(
-                "OLP_HTTP_MAX_MEDIA_BODY_BYTES must not exceed half of OLP_MEDIA_SPOOL_CAPACITY_BYTES ({})",
-                spool_capacity_bytes / 2
-            ));
-        }
-        Ok(self)
-    }
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum ApiMode {
-    All,
-    Gateway,
-    Control,
-}
-
-impl ApiMode {
-    pub const fn serves_gateway(self) -> bool {
-        matches!(self, Self::All | Self::Gateway)
-    }
-
-    pub const fn serves_control(self) -> bool {
-        matches!(self, Self::All | Self::Control)
-    }
-}
 
 #[derive(Clone)]
 pub struct ProcessComposition {
@@ -260,24 +187,7 @@ impl ProcessComposition {
     }
 }
 
-#[derive(Clone, Default)]
-pub struct TransportRegistry {
-    inner: Arc<RwLock<BTreeMap<ProviderId, Arc<dyn ProviderTransport>>>>,
-}
-
-impl TransportRegistry {
-    pub fn register(&self, provider_id: ProviderId, transport: Arc<dyn ProviderTransport>) {
-        self.inner
-            .write()
-            .expect("transport registry lock poisoned")
-            .insert(provider_id, transport);
-    }
-
-    #[must_use]
-    pub fn snapshot(&self) -> BTreeMap<ProviderId, Arc<dyn ProviderTransport>> {
-        self.inner
-            .read()
-            .expect("transport registry lock poisoned")
-            .clone()
-    }
-}
+use crate::{
+    application::{mode::ApiMode, transports::TransportRegistry},
+    public_http::body_limits::BodyLimits,
+};

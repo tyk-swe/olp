@@ -6,9 +6,10 @@ use olp_engine::protocols::openai::media::BoundedMediaPart;
 use serde_json::Value;
 
 use crate::{
-    bootstrap::mode_dependencies::GatewayState,
-    public_http::request_admission::multipart::MultipartRequestAdmission,
-    public_http::request_admission::multipart::MultipartRouteAdmission,
+    gateway::state::GatewayState,
+    public_http::request_admission::multipart::{
+        MultipartRequestAdmission, MultipartRouteAdmission,
+    },
 };
 
 use super::error::InferenceError;

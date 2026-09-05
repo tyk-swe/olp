@@ -1,8 +1,5 @@
 <script lang="ts">
   import { resolve } from '$app/paths';
-  import { queryKeys } from '$lib/api/queryKeys';
-  import { createQuery, useQueryClient } from '@tanstack/svelte-query';
-  import { onDestroy } from 'svelte';
   import ConflictNotice from '$lib/components/ConflictNotice.svelte';
   import ReadOnlyNote from '$lib/components/ReadOnlyNote.svelte';
   import ProviderActivationStage from './ProviderActivationStage.svelte';
@@ -10,367 +7,9 @@
   import ProviderConnectorForm from './ProviderConnectorForm.svelte';
   import ProviderDiscoveryStage from './ProviderDiscoveryStage.svelte';
   import ProviderValidationIssues from './ProviderValidationIssues.svelte';
-  import {
-    errorMessage as message,
-    fieldIssues,
-    isEtagMismatch,
-    type FieldIssue
-  } from '$lib/api/http';
-  import { emptyCursorHistory, resetCursor } from '$lib/api/pagination';
-  import {
-    activateProvider,
-    certifyProviderModel,
-    createProvider,
-    declareProviderModels,
-    discoverProviderModels,
-    getProvider,
-    getProviderCapabilityOptions,
-    listProviderKinds,
-    listProviderModelPage,
-    probeProvider,
-    rotateProviderCredential,
-    setProviderModel,
-    updateProvider,
-    type CapabilityDeclaration,
-    type CapabilityCertification,
-    type Provider,
-    type ProviderProbe
-  } from '$lib/api/management/providers';
-  import {
-    authOptionsFor,
-    buildCreateProviderInput,
-    buildUpdateProviderInput,
-    certificationPrerequisiteReady,
-    createProviderDraft,
-    parseManualModelNames,
-    probeSummary,
-    requiresCredential,
-    validateProviderDraft,
-    type ProviderDraft
-  } from './providerEditor';
-  import { useRole } from '$lib/auth/useRole.svelte';
+  import { ProviderWizardState } from './providerWizard.svelte';
 
-  const stepLabels = [
-    'Connector',
-    'Test',
-    'Discovery',
-    'Capabilities',
-    'Activate'
-  ] as const;
-  const access = useRole();
-  const canManage = $derived(access.can('providers.manage'));
-  const queryClient = useQueryClient();
-  const providerKinds = createQuery(() => ({
-    queryKey: queryKeys.providers.kinds(),
-    queryFn: ({ signal }) => listProviderKinds(signal)
-  }));
-  let draft = $state<ProviderDraft | null>(null);
-  let wizardProvider = $state<Provider | null>(null);
-  let wizardStep = $state(1);
-  const wizardModelPagination = $state(emptyCursorHistory());
-  const wizardModels = createQuery(() => ({
-    queryKey: queryKeys.providers.models(
-      wizardProvider?.id ?? '',
-      wizardModelPagination.cursor
-    ),
-    queryFn: ({ signal }) =>
-      listProviderModelPage(
-        wizardProvider!.id,
-        wizardModelPagination.cursor,
-        signal
-      ),
-    enabled: Boolean(wizardProvider) && wizardStep >= 3
-  }));
-  const capabilityOptions = createQuery(() => ({
-    queryKey: queryKeys.providers.capabilityOptions(wizardProvider?.kind ?? ''),
-    queryFn: ({ signal }) =>
-      getProviderCapabilityOptions(wizardProvider!.kind, signal),
-    enabled: Boolean(wizardProvider)
-  }));
-  let probe = $state<ProviderProbe | null>(null);
-  let manualModelNames = $state('');
-  let busy = $state('');
-  let errorMessage = $state('');
-  let validationIssues = $state<FieldIssue[]>([]);
-  let notice = $state('');
-  let certificationResults = $state<Record<string, CapabilityCertification>>(
-    {}
-  );
-  let wizardConflict = $state(false);
-  let wizardModelReloadVersion = $state(0);
-
-  const selectedSpec = $derived(
-    providerKinds.data?.find((candidate) => candidate.kind === draft?.kind)
-  );
-  const authOptions = $derived(
-    selectedSpec ? authOptionsFor(selectedSpec) : []
-  );
-  const credentialRequired = $derived(
-    Boolean(
-      draft && selectedSpec && requiresCredential(selectedSpec, draft.authMode)
-    )
-  );
-  $effect(() => {
-    const first = providerKinds.data?.[0];
-    if (!draft && first) draft = createProviderDraft(first);
-    const current = draft;
-    const spec = selectedSpec;
-    if (!current || !spec) return;
-    if (!authOptions.some(([value]) => value === current.authMode)) {
-      current.authMode = spec.default_auth_mode;
-    }
-    if (!credentialRequired) current.credential = '';
-  });
-
-  onDestroy(() => {
-    if (draft) draft.credential = '';
-  });
-
-  async function run(
-    label: string,
-    action: () => Promise<void>
-  ): Promise<boolean> {
-    busy = label;
-    errorMessage = '';
-    validationIssues = [];
-    notice = '';
-    try {
-      await action();
-      return true;
-    } catch (error) {
-      if (wizardProvider && isEtagMismatch(error)) wizardConflict = true;
-      else {
-        errorMessage = message(error);
-        validationIssues = fieldIssues(error);
-      }
-      return false;
-    } finally {
-      busy = '';
-    }
-  }
-
-  function clearCertificationResults() {
-    certificationResults = {};
-  }
-
-  async function refetchWizardModels() {
-    const result = await wizardModels.refetch();
-    if (result.error) throw result.error;
-    if (!result.data)
-      throw new Error('The provider model reload returned no data.');
-    return result.data;
-  }
-
-  async function reloadWizard() {
-    if (!wizardProvider) return;
-    busy = 'reload';
-    errorMessage = '';
-    validationIssues = [];
-    notice = '';
-    try {
-      const reloadedProvider = await getProvider(wizardProvider.id);
-      await refetchWizardModels();
-      wizardProvider = reloadedProvider;
-      wizardModelReloadVersion += 1;
-      wizardConflict = false;
-    } catch (error) {
-      errorMessage = message(error);
-    } finally {
-      busy = '';
-    }
-  }
-
-  function goBack() {
-    if (wizardStep > 1) wizardStep -= 1;
-  }
-
-  async function createDraft(event: SubmitEvent) {
-    event.preventDefault();
-    if (!draft || !selectedSpec) return;
-    const current = draft;
-    const spec = selectedSpec;
-    // The connector kind is locked once the draft exists, so stepping back
-    // always edits that provider rather than orphaning it behind a second one.
-    const existing = wizardProvider;
-    const issue = validateProviderDraft(current, spec, {
-      // The first pass stored a write-only credential; the field is cleared
-      // afterwards and must not be demanded again on a re-save.
-      credentialAlreadyStored: Boolean(existing)
-    });
-    if (issue) {
-      errorMessage = issue;
-      validationIssues = [];
-      return;
-    }
-    await run('create', async () => {
-      let id: string;
-      if (existing) {
-        const updated = await updateProvider(
-          existing.id,
-          existing.etag,
-          buildUpdateProviderInput(
-            {
-              name: current.name,
-              endpoint: current.endpoint,
-              apiVersion: current.apiVersion,
-              cloudRegion: current.cloudRegion,
-              cloudProject: current.cloudProject,
-              deployment: current.deployment,
-              authMode: current.authMode
-            },
-            spec
-          )
-        );
-        if (current.credential) {
-          await rotateProviderCredential(updated, current.credential);
-        }
-        id = updated.id;
-      } else {
-        id = await createProvider(buildCreateProviderInput(current, spec));
-      }
-      current.credential = '';
-      wizardProvider = await getProvider(id);
-      wizardStep = 2;
-      await Promise.all([
-        queryClient.invalidateQueries({
-          queryKey: queryKeys.providers.summaries
-        }),
-        queryClient.invalidateQueries({
-          queryKey: queryKeys.providers.modelCatalog
-        })
-      ]);
-    });
-  }
-
-  async function testWizardProvider() {
-    if (!wizardProvider) return;
-    await run('probe', async () => {
-      probe = await probeProvider(wizardProvider!);
-      if (!probe.succeeded) throw new Error(probe.detail);
-      wizardStep = 3;
-    });
-  }
-
-  async function discoverWizardProvider() {
-    if (!wizardProvider) return;
-    await run('discover', async () => {
-      const discovered = await discoverProviderModels(wizardProvider!);
-      if (discovered.model_count === 0) {
-        throw new Error(
-          discovered.kind === 'openai_compatible'
-            ? 'The endpoint returned no models. Use the manual identifier fallback below if it has no model-list API.'
-            : 'The upstream returned no models. Verify its identity and cloud context, then retry discovery.'
-        );
-      }
-      clearCertificationResults();
-      resetCursor(wizardModelPagination);
-      await refetchWizardModels();
-      wizardProvider = discovered;
-      wizardStep = 4;
-      await queryClient.invalidateQueries({
-        queryKey: queryKeys.providers.modelCatalog
-      });
-    });
-  }
-
-  async function declareWizardModels() {
-    if (!wizardProvider) return;
-    const names = parseManualModelNames(manualModelNames);
-    if (!names.length) {
-      errorMessage = 'Enter at least one upstream model identifier.';
-      return;
-    }
-    await run('declare-models', async () => {
-      const declared = await declareProviderModels(wizardProvider!, names);
-      clearCertificationResults();
-      manualModelNames = '';
-      resetCursor(wizardModelPagination);
-      await refetchWizardModels();
-      wizardProvider = declared;
-      wizardStep = 4;
-      await queryClient.invalidateQueries({
-        queryKey: queryKeys.providers.modelCatalog
-      });
-    });
-  }
-
-  async function reviewWizardModel(
-    modelId: string,
-    enabled: boolean,
-    capabilities: CapabilityDeclaration[],
-    providerEtag: string
-  ): Promise<boolean> {
-    if (!wizardProvider) return false;
-    return run(`model-${modelId}`, async () => {
-      const updated = await setProviderModel(
-        { ...wizardProvider!, etag: providerEtag },
-        modelId,
-        enabled,
-        capabilities
-      );
-      clearCertificationResults();
-      await refetchWizardModels();
-      wizardProvider = updated;
-      await queryClient.invalidateQueries({
-        queryKey: queryKeys.providers.modelCatalog
-      });
-      notice = 'Capability review saved with declared provenance.';
-    });
-  }
-
-  async function certifyWizardModel(modelId: string) {
-    if (!wizardProvider) return;
-    await run(`certify-${modelId}`, async () => {
-      if (!certificationPrerequisiteReady(wizardProvider!)) {
-        probe = await probeProvider(wizardProvider!);
-        if (!probe.succeeded) throw new Error(probe.detail);
-        wizardProvider = {
-          ...wizardProvider!,
-          last_probe_at: probe.checked_at,
-          last_probe_status: 'succeeded',
-          last_probe_detail: probe.detail
-        };
-      }
-      const result = await certifyProviderModel(wizardProvider!, modelId);
-      certificationResults = { ...certificationResults, [modelId]: result };
-      const updated = await getProvider(wizardProvider!.id);
-      await refetchWizardModels();
-      wizardProvider = updated;
-      await queryClient.invalidateQueries({
-        queryKey: queryKeys.providers.modelCatalog
-      });
-      probe = null;
-      notice = `${result.certified_count} of ${result.attempted_count} reviewed tuples passed server certification. Test the completed draft before activation.`;
-    });
-  }
-
-  async function testWizardDraftForActivation() {
-    if (!wizardProvider) return;
-    await run('final-probe', async () => {
-      probe = await probeProvider(wizardProvider!);
-      if (!probe.succeeded) throw new Error(probe.detail);
-      wizardProvider = await getProvider(wizardProvider!.id);
-      notice = `Final draft test passed: ${probeSummary(probe)}`;
-    });
-  }
-
-  async function activateWizardProvider() {
-    if (!wizardProvider) return;
-    await run('activate', async () => {
-      const generation = await activateProvider(wizardProvider!);
-      wizardProvider = await getProvider(wizardProvider!.id);
-      wizardStep = 5;
-      notice = `Provider activated in runtime generation ${generation}.`;
-      await Promise.all([
-        queryClient.invalidateQueries({
-          queryKey: queryKeys.providers.summaries
-        }),
-        queryClient.invalidateQueries({
-          queryKey: queryKeys.providers.modelCatalog
-        })
-      ]);
-    });
-  }
+  const wizard = new ProviderWizardState();
 </script>
 
 <div class="page-header">
@@ -383,79 +22,81 @@
     </p>
   </div>
   <a class="button button-secondary" href={resolve('/providers')}
-    >{wizardProvider ? 'Save and exit' : 'Cancel'}</a
+    >{wizard.wizardProvider ? 'Save and exit' : 'Cancel'}</a
   >
 </div>
 
 <p class="step-progress" aria-hidden="true">
-  Step {wizardStep} of {stepLabels.length}
+  Step {wizard.wizardStep} of {wizard.stepLabels.length}
 </p>
 <ol class="steps" aria-label="Provider setup progress">
-  {#each stepLabels as label, index (label)}
+  {#each wizard.stepLabels as label, index (label)}
     <li
-      class:current={wizardStep === index + 1}
-      class:complete={wizardStep > index + 1}
-      aria-current={wizardStep === index + 1 ? 'step' : undefined}
+      class:current={wizard.wizardStep === index + 1}
+      class:complete={wizard.wizardStep > index + 1}
+      aria-current={wizard.wizardStep === index + 1 ? 'step' : undefined}
     >
-      <span>{wizardStep > index + 1 ? '✓' : index + 1}</span>{label}
+      <span>{wizard.wizardStep > index + 1 ? '✓' : index + 1}</span>{label}
     </li>
   {/each}
 </ol>
 
-{#if !canManage}
+{#if !wizard.canManage}
   <ReadOnlyNote>
     Your role can view providers but not connect or activate them.
   </ReadOnlyNote>
 {/if}
-{#if canManage && wizardStep >= 2 && wizardStep <= 4}
+{#if wizard.canManage && wizard.wizardStep >= 2 && wizard.wizardStep <= 4}
   <div class="wizard-back">
     <button
       class="button button-secondary"
       type="button"
-      onclick={goBack}
-      disabled={Boolean(busy)}>Back</button
+      onclick={wizard.goBack}
+      disabled={Boolean(wizard.busy)}>Back</button
     >
   </div>
 {/if}
-{#if errorMessage}<div class="inline-problem" role="alert">
-    {errorMessage}
-    <ProviderValidationIssues issues={validationIssues} />
+{#if wizard.errorMessage}<div class="inline-problem" role="alert">
+    {wizard.errorMessage}
+    <ProviderValidationIssues issues={wizard.validationIssues} />
   </div>{/if}
-{#if notice}<div class="success-banner" role="status">{notice}</div>{/if}
+{#if wizard.notice}<div class="success-banner" role="status">
+    {wizard.notice}
+  </div>{/if}
 <ConflictNotice
-  notice={wizardConflict ? 'conflict' : null}
-  onReload={reloadWizard}
-  disabled={Boolean(busy)}
+  notice={wizard.wizardConflict ? 'conflict' : null}
+  onReload={wizard.reloadWizard}
+  disabled={Boolean(wizard.busy)}
 />
 
-{#if !canManage}
+{#if !wizard.canManage}
   <div class="card stage">
     <p>
       Providers are managed by owners and operators. Ask one of them to connect
       this upstream.
     </p>
   </div>
-{:else if wizardStep === 1 && providerKinds.isPending}
+{:else if wizard.wizardStep === 1 && wizard.providerKinds.isPending}
   <div class="card stage" role="status">Loading provider capabilities…</div>
-{:else if wizardStep === 1 && providerKinds.isError}
+{:else if wizard.wizardStep === 1 && wizard.providerKinds.isError}
   <div class="inline-problem" role="alert">
     Provider capabilities could not be loaded. Retry before configuring a
     provider. <button
       class="button button-secondary"
       type="button"
-      onclick={() => providerKinds.refetch()}>Retry</button
+      onclick={() => wizard.providerKinds.refetch()}>Retry</button
     >
   </div>
-{:else if wizardStep === 1 && draft && selectedSpec}
+{:else if wizard.wizardStep === 1 && wizard.draft && wizard.selectedSpec}
   <ProviderConnectorForm
-    bind:draft
-    providerKinds={providerKinds.data ?? []}
-    {selectedSpec}
-    {busy}
-    lockKind={Boolean(wizardProvider)}
-    onSubmit={createDraft}
+    bind:draft={wizard.draft}
+    providerKinds={wizard.providerKinds.data ?? []}
+    selectedSpec={wizard.selectedSpec}
+    busy={wizard.busy}
+    lockKind={Boolean(wizard.wizardProvider)}
+    onSubmit={wizard.createDraft}
   />
-{:else if wizardStep === 2}
+{:else if wizard.wizardStep === 2}
   <section class="card stage" aria-labelledby="test-heading">
     <p class="eyebrow">Identity saved</p>
     <h2 id="test-heading">Verify upstream reachability</h2>
@@ -466,75 +107,75 @@
     <dl>
       <div>
         <dt>Provider</dt>
-        <dd>{wizardProvider?.name}</dd>
+        <dd>{wizard.wizardProvider?.name}</dd>
       </div>
       <div>
         <dt>Connector</dt>
-        <dd>{wizardProvider?.kind}</dd>
+        <dd>{wizard.wizardProvider?.kind}</dd>
       </div>
     </dl>
     <div class="stage-actions">
       <button
         class="button button-primary"
         type="button"
-        onclick={testWizardProvider}
-        disabled={Boolean(busy)}
-        >{busy === 'probe' ? 'Testing…' : 'Test connection'}</button
+        onclick={wizard.testWizardProvider}
+        disabled={Boolean(wizard.busy)}
+        >{wizard.busy === 'probe' ? 'Testing…' : 'Test connection'}</button
       >
-      {#if wizardProvider}<a
+      {#if wizard.wizardProvider}<a
           class="button button-secondary"
-          href={resolve(`/providers/${wizardProvider.id}`)}
+          href={resolve(`/providers/${wizard.wizardProvider.id}`)}
           >Edit connector settings</a
         >{/if}
     </div>
   </section>
-{:else if wizardStep === 3}
+{:else if wizard.wizardStep === 3}
   <ProviderDiscoveryStage
-    provider={wizardProvider}
-    {probe}
-    bind:manualModelNames
-    {busy}
-    onDiscover={discoverWizardProvider}
-    onDeclareModels={declareWizardModels}
+    provider={wizard.wizardProvider}
+    probe={wizard.probe}
+    bind:manualModelNames={wizard.manualModelNames}
+    busy={wizard.busy}
+    onDiscover={wizard.discoverWizardProvider}
+    onDeclareModels={wizard.declareWizardModels}
   />
-  {#if wizardProvider}<p class="stage-escape">
-      <a href={resolve(`/providers/${wizardProvider.id}`)}
+  {#if wizard.wizardProvider}<p class="stage-escape">
+      <a href={resolve(`/providers/${wizard.wizardProvider.id}`)}
         >Edit connector settings</a
       >
     </p>{/if}
-{:else if wizardStep === 4 && wizardProvider}
+{:else if wizard.wizardStep === 4 && wizard.wizardProvider}
   <section class="card stage wide" aria-labelledby="capability-heading">
     <ProviderCapabilityReviewStage
-      provider={wizardProvider}
-      models={wizardModels.data?.items ?? []}
-      modelsPending={wizardModels.isPending}
-      modelsError={wizardModels.isError}
-      capabilityOptions={capabilityOptions.data?.capabilities ?? []}
-      optionsPending={capabilityOptions.isPending}
-      optionsError={capabilityOptions.isError}
-      {busy}
-      reloadVersion={wizardModelReloadVersion}
-      {certificationResults}
-      pagination={wizardModelPagination}
-      nextCursor={wizardModels.data?.nextCursor}
-      onSave={reviewWizardModel}
-      onCertify={certifyWizardModel}
-      onRetryModels={() => wizardModels.refetch()}
+      provider={wizard.wizardProvider}
+      models={wizard.wizardModels.data?.items ?? []}
+      modelsPending={wizard.wizardModels.isPending}
+      modelsError={wizard.wizardModels.isError}
+      capabilityOptions={wizard.capabilityOptions.data?.capabilities ?? []}
+      optionsPending={wizard.capabilityOptions.isPending}
+      optionsError={wizard.capabilityOptions.isError}
+      busy={wizard.busy}
+      reloadVersion={wizard.wizardModelReloadVersion}
+      certificationResults={wizard.certificationResults}
+      pagination={wizard.wizardModelPagination}
+      nextCursor={wizard.wizardModels.data?.nextCursor}
+      onSave={wizard.reviewWizardModel}
+      onCertify={wizard.certifyWizardModel}
+      onRetryModels={() => wizard.wizardModels.refetch()}
     />
     <ProviderActivationStage
-      provider={wizardProvider}
-      {busy}
-      onTest={testWizardDraftForActivation}
-      onActivate={activateWizardProvider}
+      provider={wizard.wizardProvider}
+      busy={wizard.busy}
+      onTest={wizard.testWizardDraftForActivation}
+      onActivate={wizard.activateWizardProvider}
     />
   </section>
 {:else}
   <ProviderActivationStage
-    provider={wizardProvider}
+    provider={wizard.wizardProvider}
     activated
-    {busy}
-    onTest={testWizardDraftForActivation}
-    onActivate={activateWizardProvider}
+    busy={wizard.busy}
+    onTest={wizard.testWizardDraftForActivation}
+    onActivate={wizard.activateWizardProvider}
   />
 {/if}
 

@@ -45,30 +45,7 @@ pub(super) async fn execute(
         })?;
 
     let streaming = request.metadata.mode == TransportMode::Streaming;
-    let body = if responses_endpoint {
-        let mut wire = encode_response_create(generation, &request.attempt.upstream_model)
-            .map_err(|error| protocol_encode_error("Responses", error))?;
-        hydrate_responses_media(
-            &mut wire.input,
-            request.media.as_ref(),
-            request.max_inline_media_bytes,
-        )
-        .await?;
-        serialize_wire("Responses", &wire)?
-    } else {
-        let mut wire = encode::chat_completion(generation, &request.attempt.upstream_model)
-            .map_err(|error| protocol_encode_error("chat", error))?;
-        if streaming {
-            require_stream_usage(&mut wire)?;
-        }
-        hydrate_chat_media(
-            &mut wire,
-            request.media.as_ref(),
-            request.max_inline_media_bytes,
-        )
-        .await?;
-        serialize_wire("chat", &wire)?
-    };
+    let body = encode_generation_body(&request, generation, responses_endpoint, streaming).await?;
 
     let started = Instant::now();
     let attempt_deadline = started + request.attempt.timeout.as_duration();
@@ -95,32 +72,7 @@ pub(super) async fn execute(
         .map_err(map_endpoint_error)?;
 
     let first_byte_deadline = Instant::now() + connector.config.timeouts.first_byte;
-    let mut headers = HeaderMap::new();
-    connector.attach_auth(&mut headers)?;
-    headers.insert(
-        header::CONTENT_TYPE,
-        HeaderValue::from_static("application/json"),
-    );
-    headers.insert(
-        header::ACCEPT,
-        HeaderValue::from_static(if streaming {
-            "text/event-stream"
-        } else {
-            "application/json"
-        }),
-    );
-    headers.insert(
-        "x-request-id",
-        HeaderValue::from_str(&request.metadata.request_id.to_string()).map_err(|_| {
-            transport_error(
-                TransportPhase::Connect,
-                AttemptFailureClass::Protocol,
-                false,
-                "request ID cannot be represented as an HTTP header",
-            )
-        })?,
-    );
-    inject_trace_context(&mut headers, request.propagate_trace_context);
+    let headers = generation_headers(connector, &request, streaming)?;
 
     let send_wait =
         remaining_until(first_byte_deadline, attempt_deadline).ok_or_else(first_byte_timeout)?;
@@ -173,4 +125,71 @@ fn require_stream_usage(request: &mut CompletionRequest) -> Result<(), Transport
     };
     options.insert("include_usage".to_owned(), serde_json::Value::Bool(true));
     Ok(())
+}
+
+async fn encode_generation_body(
+    request: &ProviderRequest,
+    generation: &crate::domain::canonical::requests::GenerationRequest,
+    responses_endpoint: bool,
+    streaming: bool,
+) -> Result<Vec<u8>, TransportError> {
+    if responses_endpoint {
+        let mut wire = encode_response_create(generation, &request.attempt.upstream_model)
+            .map_err(|error| protocol_encode_error("Responses", error))?;
+        hydrate_responses_media(
+            &mut wire.input,
+            request.media.as_ref(),
+            request.max_inline_media_bytes,
+        )
+        .await?;
+        serialize_wire("Responses", &wire)
+    } else {
+        let mut wire = encode::chat_completion(generation, &request.attempt.upstream_model)
+            .map_err(|error| protocol_encode_error("chat", error))?;
+        if streaming {
+            require_stream_usage(&mut wire)?;
+        }
+        hydrate_chat_media(
+            &mut wire,
+            request.media.as_ref(),
+            request.max_inline_media_bytes,
+        )
+        .await?;
+        serialize_wire("chat", &wire)
+    }
+}
+
+fn generation_headers(
+    connector: &Connector,
+    request: &ProviderRequest,
+    streaming: bool,
+) -> Result<HeaderMap, TransportError> {
+    let mut headers = HeaderMap::new();
+    connector.attach_auth(&mut headers)?;
+    headers.insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_static("application/json"),
+    );
+    headers.insert(
+        header::ACCEPT,
+        HeaderValue::from_static(if streaming {
+            "text/event-stream"
+        } else {
+            "application/json"
+        }),
+    );
+    headers.insert(
+        "x-request-id",
+        HeaderValue::from_str(&request.metadata.request_id.to_string()).map_err(|_| {
+            transport_error(
+                TransportPhase::Connect,
+                AttemptFailureClass::Protocol,
+                false,
+                "request ID cannot be represented as an HTTP header",
+            )
+        })?,
+    );
+    inject_trace_context(&mut headers, request.propagate_trace_context);
+
+    Ok(headers)
 }

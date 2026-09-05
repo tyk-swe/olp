@@ -14,7 +14,7 @@
   import {
     cursorPaginationProps,
     emptyCursorHistory
-  } from '$lib/api/pagination';
+  } from '$lib/lists/pagination';
   import { FIXED_ROLES } from '$lib/auth/authorization';
   import { useRole } from '$lib/auth/useRole.svelte';
   import CursorPagination from '$lib/components/CursorPagination.svelte';

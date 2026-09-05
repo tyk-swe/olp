@@ -10,7 +10,7 @@
     listRouteDraftPage,
     listRoutePage
   } from '$lib/api/management/routes';
-  import { cursorPaginationProps } from '$lib/api/pagination';
+  import { cursorPaginationProps } from '$lib/lists/pagination';
   import { useRole } from '$lib/auth/useRole.svelte';
   import { formatDate } from '$lib/format';
   import type { RouteListState } from './routeListState';

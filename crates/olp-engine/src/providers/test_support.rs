@@ -10,7 +10,6 @@ use crate::domain::{ports::BoxFuture, routing::provider::ProviderKind};
 use zeroize::Zeroizing;
 
 use crate::providers::{
-    EgressPolicy,
     bedrock::{
         ConnectorConfig as BedrockConnectorConfig, Credentials, StaticCredentials,
         transport::Connector as BedrockConnector,
@@ -20,6 +19,7 @@ use crate::providers::{
         configuration::{Config, Credential},
     },
     gemini::{BearerTokenError, BearerTokenProvider, SecretBearerToken},
+    http_egress::EgressPolicy,
     vertex::{Connector as VertexConnector, ConnectorConfig as VertexConnectorConfig},
 };
 

@@ -15,24 +15,28 @@ use olp_engine::domain::{
     provider_configuration::{Configuration, validate},
     routing::provider::ProviderKind,
 };
-use olp_engine::providers::{EgressPolicy, factory::assembly::Factory};
+use olp_engine::providers::{factory::assembly::Factory, http_egress::EgressPolicy};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use uuid::Uuid;
 
-use crate::{
-    bootstrap::mode_dependencies::ManagementState,
-    bootstrap::provider_adapter::{ProviderConfigFields, provider_config, provider_connector},
-    management::{
-        error_mapping::map_configuration,
-        idempotency::{MutationReply, ReplayableMutation},
-        json_payload::json_payload,
-        pagination::{PageQuery, page},
-        permissions::require_permission,
-        preconditions::{if_match, with_etag},
-        principal::{MutationPrincipal, ReadPrincipal},
+use {
+    crate::{
+        application::provider_fields::ProviderConfigFields,
+        management::{
+            error_mapping::map_configuration,
+            idempotency::{MutationReply, ReplayableMutation},
+            json_payload::json_payload,
+            pagination::{PageQuery, page},
+            permissions::require_permission,
+            preconditions::{if_match, with_etag},
+            principal::{MutationPrincipal, ReadPrincipal},
+            provider_connector::provider_connector,
+            state::ManagementState,
+        },
+        public_http::problem::{FieldErrorCodes, FieldErrors, Problem},
     },
-    public_http::problem::{FieldErrorCodes, FieldErrors, Problem},
+    olp_engine::providers::factory::input::provider_config,
 };
 
 use super::credentials::ProviderMutationResponse;
@@ -437,16 +441,19 @@ fn validate_provider_update(
         return Err(Problem::coded_validation(errors, codes));
     }
 
-    let config = provider_config(ProviderConfigFields {
-        kind: provider.kind,
-        endpoint: request.endpoint.as_deref(),
-        cloud_region: request.cloud_region.as_deref(),
-        cloud_project: request.cloud_project.as_deref(),
-        deployment: request.deployment.as_deref(),
-        api_version: request.api_version.as_deref(),
-        auth_mode: request.auth_mode,
-        probe_model: provider.probe_model.as_deref(),
-    })
+    let config = provider_config(
+        ProviderConfigFields {
+            kind: provider.kind,
+            endpoint: request.endpoint.as_deref(),
+            cloud_region: request.cloud_region.as_deref(),
+            cloud_project: request.cloud_project.as_deref(),
+            deployment: request.deployment.as_deref(),
+            api_version: request.api_version.as_deref(),
+            auth_mode: request.auth_mode,
+            probe_model: provider.probe_model.as_deref(),
+        }
+        .into(),
+    )
     .map_err(|error| Problem::field_validation("provider", error.to_string()))?;
     Factory::validate(&config, egress_policy)
         .map_err(|error| Problem::field_validation("provider", error.to_string()))
@@ -492,7 +499,7 @@ pub(crate) async fn probe_provider(
         .map_err(map_configuration)?;
     if provider.etag != expected_etag {
         return Err(map_configuration(
-            olp_db::configuration::Error::PreconditionFailed,
+            olp_db::configuration::error::Error::PreconditionFailed,
         ));
     }
     let connector = provider_connector(&state, provider_id).await?;

@@ -15,8 +15,8 @@ use std::fmt;
 
 use zeroize::Zeroizing;
 
-use crate::providers::EgressPolicy;
 use crate::providers::connector::Timeouts;
+use crate::providers::http_egress::EgressPolicy;
 use crate::providers::openai::endpoint::Endpoint;
 
 pub const DEFAULT_MAX_RESPONSE_BYTES: usize = 16 * 1024 * 1024;

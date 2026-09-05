@@ -6,7 +6,7 @@ use crate::domain::{
 use crate::inference::circuit::{Breaker, CircuitPermit};
 use futures::{StreamExt, stream};
 
-use super::EventStream;
+use crate::domain::ports::ProviderEventStream;
 
 pub(super) fn canonical_event_protocol_error(
     error: EventSequenceError,
@@ -21,10 +21,10 @@ pub(super) fn canonical_event_protocol_error(
     }
 }
 
-pub fn validated_event_stream(
-    events: EventStream,
+pub(super) fn validated_event_stream(
+    events: ProviderEventStream,
     validator: EventSequenceValidator,
-) -> EventStream {
+) -> ProviderEventStream {
     Box::pin(stream::unfold(
         (events, validator, false),
         |(mut events, mut validator, terminal)| async move {
@@ -51,23 +51,23 @@ pub fn validated_event_stream(
     ))
 }
 
-#[cfg(any(test, feature = "test-util"))]
-pub fn circuit_accounted_event_stream(
-    events: EventStream,
+#[cfg(test)]
+fn circuit_accounted_event_stream(
+    events: ProviderEventStream,
     circuits: Breaker,
     target: TargetId,
     initial_failure: bool,
-) -> EventStream {
+) -> ProviderEventStream {
     circuit_accounted_event_stream_with_permit(events, circuits, target, initial_failure, None)
 }
 
 pub(super) fn circuit_accounted_event_stream_with_permit(
-    events: EventStream,
+    events: ProviderEventStream,
     circuits: Breaker,
     target: TargetId,
     initial_failure: bool,
     permit: Option<CircuitPermit>,
-) -> EventStream {
+) -> ProviderEventStream {
     Box::pin(stream::unfold(
         (events, circuits, initial_failure),
         move |(mut events, circuits, mut failed)| async move {
@@ -124,3 +124,6 @@ pub(super) const fn canonical_error_circuit_class(
         | ErrorClass::Internal => None,
     }
 }
+
+#[cfg(test)]
+mod tests;

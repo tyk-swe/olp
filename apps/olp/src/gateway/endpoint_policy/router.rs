@@ -4,8 +4,8 @@ use axum::{
     routing::{MethodRouter, on},
 };
 
-use crate::bootstrap::mode_dependencies::GatewayState;
-use crate::bootstrap::state::BodyLimits;
+use crate::gateway::state::GatewayState;
+use crate::public_http::body_limits::BodyLimits;
 
 use super::super::{anthropic, chat, gemini, media, openai_models, responses, videos};
 use super::registry::{BodyAdmission, ENDPOINTS, EndpointSpec, Handler};

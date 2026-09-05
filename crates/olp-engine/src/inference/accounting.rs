@@ -53,7 +53,7 @@ impl RequestOutcome {
     }
 
     #[must_use]
-    pub(in crate::inference) fn from_error(error: &InferenceError) -> Self {
+    pub fn from_error(error: &InferenceError) -> Self {
         Self::failure(
             (error.code() != "client_cancelled").then(|| metadata_status_code(error)),
             error.code(),

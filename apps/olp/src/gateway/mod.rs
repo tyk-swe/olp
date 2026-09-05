@@ -1,11 +1,12 @@
+pub mod state;
 use axum::Router;
 
-use crate::bootstrap::mode_dependencies::GatewayState;
+use crate::gateway::state::GatewayState;
 
 mod anthropic;
 mod chat;
 pub mod compatibility;
-pub(crate) mod endpoint_policy;
+pub mod endpoint_policy;
 pub(crate) mod error;
 mod execution;
 mod gemini;
@@ -24,7 +25,7 @@ mod responses;
 mod videos;
 
 use execution::{authorize_model_access, release_model_limits, reserve_model_limits};
-pub fn router(limits: crate::bootstrap::state::BodyLimits) -> Router<GatewayState> {
+pub fn router(limits: crate::public_http::body_limits::BodyLimits) -> Router<GatewayState> {
     endpoint_policy::router::router(limits)
 }
 

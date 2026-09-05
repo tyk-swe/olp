@@ -3,9 +3,11 @@ use olp_db::{authentication::SessionPrincipal, security::session_material::Sessi
 use tracing::warn;
 
 use crate::{
-    bootstrap::mode_dependencies::ManagementState,
-    public_http::problem::Problem,
-    public_http::request_cookies::{RequestCookies, SESSION_COOKIE},
+    management::state::ManagementState,
+    public_http::{
+        problem::Problem,
+        request_cookies::{RequestCookies, SESSION_COOKIE},
+    },
 };
 
 use super::error_mapping::map_persistence;

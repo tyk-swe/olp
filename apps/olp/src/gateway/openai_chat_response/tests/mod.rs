@@ -11,7 +11,7 @@ use serde_json::{Value, json};
 
 use super::{OpenAiChatCompletionStreamEncoder, aggregate_chat_completion_response};
 use crate::gateway::openai_http::unix_seconds;
-use olp_engine::protocols::materialize_response_pointer;
+use olp_engine::protocols::extensions::materialize_response_pointer;
 
 mod streaming;
 mod unary;

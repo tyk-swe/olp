@@ -7,9 +7,8 @@ use axum::{
 use chrono::Utc;
 use olp_db::{
     authentication::SessionPrincipal,
-    configuration::Error,
-    idempotency::Outcome,
-    idempotency::Response,
+    configuration::error::Error,
+    idempotency::{Outcome, Response},
     security::session_material::{RecentAuthMaterial, SessionMaterial},
 };
 use olp_engine::domain::{
@@ -49,11 +48,11 @@ use super::{
     secrets::WriteOnlySecret,
     sessions::{enforce_origin, session_cookie},
 };
-use crate::bootstrap::mode_dependencies::ManagementState;
+use crate::management::state::ManagementState;
 
 fn state() -> ManagementState {
     ManagementState::new(
-        crate::bootstrap::state::ApiMode::Control,
+        crate::application::mode::ApiMode::Control,
         None,
         Arc::new(Manager::empty()),
         "https://olp.example.test",

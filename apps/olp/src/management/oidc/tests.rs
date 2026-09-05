@@ -99,7 +99,7 @@ fn optional_etag_parser_requires_a_strong_quoted_uuid() {
 #[test]
 fn stateless_login_cookie_is_encrypted_origin_bound_and_state_checked() {
     let mut state = ManagementState::new(
-        crate::bootstrap::state::ApiMode::Control,
+        crate::application::mode::ApiMode::Control,
         None,
         std::sync::Arc::new(Manager::empty()),
         "https://console.example.test",
@@ -148,7 +148,7 @@ fn stateless_login_cookie_is_encrypted_origin_bound_and_state_checked() {
     assert!(consume_login_flow_cookie(&state, &encoded, &wrong_state).is_err());
 
     let mut other_origin = ManagementState::new(
-        crate::bootstrap::state::ApiMode::Control,
+        crate::application::mode::ApiMode::Control,
         None,
         std::sync::Arc::new(Manager::empty()),
         "https://other.example.test",
@@ -161,7 +161,7 @@ fn stateless_login_cookie_is_encrypted_origin_bound_and_state_checked() {
 #[test]
 fn callback_prefers_the_flow_specific_cookie_matching_its_state() {
     let mut state = ManagementState::new(
-        crate::bootstrap::state::ApiMode::Control,
+        crate::application::mode::ApiMode::Control,
         None,
         std::sync::Arc::new(Manager::empty()),
         "https://console.example.test",
@@ -231,7 +231,7 @@ fn callback_prefers_the_flow_specific_cookie_matching_its_state() {
 #[test]
 fn expired_or_tampered_stateless_login_cookie_is_rejected() {
     let mut state = ManagementState::new(
-        crate::bootstrap::state::ApiMode::Control,
+        crate::application::mode::ApiMode::Control,
         None,
         std::sync::Arc::new(Manager::empty()),
         "https://console.example.test",
@@ -271,7 +271,7 @@ fn expired_or_tampered_stateless_login_cookie_is_rejected() {
 #[tokio::test]
 async fn callback_clears_a_login_cookie_when_query_extraction_fails() {
     let state = ManagementState::new(
-        crate::bootstrap::state::ApiMode::Control,
+        crate::application::mode::ApiMode::Control,
         None,
         std::sync::Arc::new(Manager::empty()),
         "https://console.example.test",
@@ -300,7 +300,7 @@ async fn callback_clears_a_login_cookie_when_query_extraction_fails() {
 #[tokio::test]
 async fn callback_clears_the_matching_scoped_cookie_when_query_extraction_fails() {
     let state = ManagementState::new(
-        crate::bootstrap::state::ApiMode::Control,
+        crate::application::mode::ApiMode::Control,
         None,
         std::sync::Arc::new(Manager::empty()),
         "https://console.example.test",

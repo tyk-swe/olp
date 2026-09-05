@@ -14,7 +14,7 @@ use std::{
 use chrono::Utc;
 use futures::stream;
 use olp::{
-    bootstrap::state::{ApiMode, ProcessComposition},
+    application::mode::ApiMode, bootstrap::state::ProcessComposition,
     public_http::router::gateway_router_for_test,
 };
 use olp_db::{security::key_material::AuthHmacKey, store::Store};
@@ -177,61 +177,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let provider_id = ProviderId::new();
     let route_slug = RouteSlug::parse(ROUTE_SLUG)?;
 
-    let mut capabilities = BTreeSet::new();
-    for surface in [Surface::OpenAi, Surface::Anthropic, Surface::Gemini] {
-        for mode in [TransportMode::Unary, TransportMode::Streaming] {
-            capabilities.insert(Capability::new(
-                UPSTREAM_MODEL,
-                OperationKind::Generation,
-                surface,
-                mode,
-            ));
-        }
-    }
-    capabilities.insert(Capability::new(
-        UPSTREAM_MODEL,
-        OperationKind::TokenCount,
-        Surface::Anthropic,
-        TransportMode::Unary,
-    ));
-
-    let route = Route {
-        id: RouteId::new(),
-        routing_id: None,
-        slug: route_slug.clone(),
-        operations: BTreeSet::from([OperationKind::Generation, OperationKind::TokenCount]),
-        overall_timeout: DurationMs::new(5_000),
-        max_attempts: NonZeroU16::new(1).expect("one is nonzero"),
-        targets: vec![Target {
-            id: TargetId::new(),
-            routing_id: None,
-            provider_id,
-            upstream_model: UPSTREAM_MODEL.to_owned(),
-            priority: 0,
-            weight: NonZeroU32::new(1).expect("one is nonzero"),
-            timeout: DurationMs::new(4_000),
-        }],
-    };
-    let snapshot = Snapshot {
-        generation: RuntimeGeneration {
-            id: RuntimeGenerationId::new(),
-            ordinal: 1,
-            activated_at: Utc::now(),
-        },
-        providers: BTreeMap::from([(
-            provider_id,
-            Provider {
-                id: provider_id,
-                revision_id: None,
-                name: "sdk-smoke-static-provider".to_owned(),
-                kind: ProviderKind::OpenAi,
-                enabled: true,
-                active_credential: None,
-                capabilities,
-            },
-        )]),
-        routes: BTreeMap::from([(route_slug, route)]),
-        api_keys: BTreeMap::from([
+    let snapshot = fixture_snapshot(
+        provider_id,
+        route_slug,
+        BTreeMap::from([
             (
                 lookup_id.clone(),
                 fixture_api_key(lookup_id, ApiKeyDigest::new(key_material.digest)),
@@ -244,7 +193,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 ),
             ),
         ]),
-    };
+    );
     let runtime = Arc::new(Manager::empty());
     runtime.install(
         snapshot,
@@ -284,4 +233,67 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     axum::serve(listener, gateway_router_for_test(gateway_state)).await?;
     Ok(())
+}
+
+fn fixture_snapshot(
+    provider_id: ProviderId,
+    route_slug: RouteSlug,
+    api_keys: BTreeMap<ApiKeyLookupId, ApiKey>,
+) -> Snapshot {
+    let mut capabilities = BTreeSet::new();
+    for surface in [Surface::OpenAi, Surface::Anthropic, Surface::Gemini] {
+        for mode in [TransportMode::Unary, TransportMode::Streaming] {
+            capabilities.insert(Capability::new(
+                UPSTREAM_MODEL,
+                OperationKind::Generation,
+                surface,
+                mode,
+            ));
+        }
+    }
+    capabilities.insert(Capability::new(
+        UPSTREAM_MODEL,
+        OperationKind::TokenCount,
+        Surface::Anthropic,
+        TransportMode::Unary,
+    ));
+
+    let route = Route {
+        id: RouteId::new(),
+        routing_id: None,
+        slug: route_slug.clone(),
+        operations: BTreeSet::from([OperationKind::Generation, OperationKind::TokenCount]),
+        overall_timeout: DurationMs::new(5_000),
+        max_attempts: NonZeroU16::new(1).expect("one is nonzero"),
+        targets: vec![Target {
+            id: TargetId::new(),
+            routing_id: None,
+            provider_id,
+            upstream_model: UPSTREAM_MODEL.to_owned(),
+            priority: 0,
+            weight: NonZeroU32::new(1).expect("one is nonzero"),
+            timeout: DurationMs::new(4_000),
+        }],
+    };
+    Snapshot {
+        generation: RuntimeGeneration {
+            id: RuntimeGenerationId::new(),
+            ordinal: 1,
+            activated_at: Utc::now(),
+        },
+        providers: BTreeMap::from([(
+            provider_id,
+            Provider {
+                id: provider_id,
+                revision_id: None,
+                name: "sdk-smoke-static-provider".to_owned(),
+                kind: ProviderKind::OpenAi,
+                enabled: true,
+                active_credential: None,
+                capabilities,
+            },
+        )]),
+        routes: BTreeMap::from([(route_slug, route)]),
+        api_keys,
+    }
 }

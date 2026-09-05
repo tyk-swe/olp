@@ -227,7 +227,7 @@ pub(super) async fn exercise(store: &Store, actor: Uuid, master_key: &MasterKey)
                 "provider-activate-openai-01",
             )
             .await,
-        Err(olp_db::configuration::Error::IdempotencyConflict)
+        Err(olp_db::configuration::error::Error::IdempotencyConflict)
     ));
     let initial_runtime: Snapshot = serde_json::from_slice(&activated.release.payload).unwrap();
     let initial_secrets = store
@@ -579,7 +579,7 @@ pub(super) async fn exercise(store: &Store, actor: Uuid, master_key: &MasterKey)
                 actor,
             )
             .await,
-        Err(olp_db::configuration::Error::Invalid(_))
+        Err(olp_db::configuration::error::Error::Invalid(_))
     ));
     let key_update = store
         .update_api_key(

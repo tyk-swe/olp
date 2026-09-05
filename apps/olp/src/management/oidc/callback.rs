@@ -37,9 +37,10 @@ use super::session::{
     consume_login_flow_cookie, reauthenticated_redirect,
 };
 use crate::{
-    bootstrap::mode_dependencies::ManagementState,
-    management::provenance::Provenance,
-    management::{cookies::validate_session_cookie_ttl, sessions::require_read_session},
+    management::{
+        cookies::validate_session_cookie_ttl, provenance::Provenance,
+        sessions::require_read_session, state::ManagementState,
+    },
     public_http::{
         problem::Problem, relative_url::RelativeReturnTo, request_cookies::RequestCookies,
     },

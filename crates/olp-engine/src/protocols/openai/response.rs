@@ -347,6 +347,97 @@ impl Decoder {
         Ok(events)
     }
 
+    fn decode_choice(
+        &mut self,
+        choice: ChatChunkChoice,
+        events: &mut Vec<Event>,
+        extensions: &mut BTreeMap<String, Value>,
+    ) -> Result<(), OpenAiStreamError> {
+        let choice_finished = self.finished_choices.contains(&choice.index);
+        if choice_finished && !choice.is_extension_only() {
+            return Err(OpenAiStreamError::DataAfterChoiceFinish(choice.index));
+        }
+        let prefix = format!("/choices/{}", choice.index);
+        collect_extra(&prefix, &choice.extra, extensions);
+        collect_extra(&format!("{prefix}/delta"), &choice.delta.extra, extensions);
+        if choice_finished {
+            return Ok(());
+        }
+        if self.started_choices.insert(choice.index) {
+            self.emit(
+                events,
+                Kind::MessageStart {
+                    output_index: choice.index,
+                    role: choice
+                        .delta
+                        .role
+                        .map_or(MessageRole::Assistant, canonical_role),
+                },
+            );
+        }
+        if let Some(content) = choice.delta.content {
+            self.emit(
+                events,
+                Kind::TextDelta {
+                    output_index: choice.index,
+                    text: content,
+                },
+            );
+        }
+        if let Some(refusal) = choice.delta.refusal {
+            self.emit(
+                events,
+                Kind::RefusalDelta {
+                    output_index: choice.index,
+                    text: refusal,
+                },
+            );
+        }
+        for tool in choice.delta.tool_calls {
+            if tool.kind.as_deref().is_some_and(|kind| kind != "function") {
+                return Err(OpenAiStreamError::UnsupportedToolType(
+                    tool.kind.unwrap_or_default(),
+                ));
+            }
+            let tool_prefix = format!("{prefix}/delta/tool_calls/{}", tool.index);
+            collect_extra(&tool_prefix, &tool.extra, extensions);
+            if let Some(function) = &tool.function {
+                collect_extra(
+                    &format!("{tool_prefix}/function"),
+                    &function.extra,
+                    extensions,
+                );
+            }
+            self.emit(
+                events,
+                Kind::ToolCallDelta {
+                    output_index: choice.index,
+                    tool_index: tool.index,
+                    id: tool.id,
+                    name: tool
+                        .function
+                        .as_ref()
+                        .and_then(|function| function.name.clone()),
+                    arguments_delta: tool
+                        .function
+                        .and_then(|function| function.arguments)
+                        .unwrap_or_default(),
+                },
+            );
+        }
+        if let Some(reason) = choice.finish_reason {
+            self.finished_choices.insert(choice.index);
+            self.emit(
+                events,
+                Kind::Finish {
+                    output_index: choice.index,
+                    reason: finish_reason(&reason),
+                },
+            );
+        }
+        Ok(())
+    }
+
     fn decode_chunk(
         &mut self,
         chunk: ChatCompletionChunk,
@@ -367,92 +458,7 @@ impl Decoder {
         collect_extra("", &chunk.extra, &mut extensions);
 
         for choice in chunk.choices {
-            let choice_finished = self.finished_choices.contains(&choice.index);
-            if choice_finished && !choice.is_extension_only() {
-                return Err(OpenAiStreamError::DataAfterChoiceFinish(choice.index));
-            }
-            let prefix = format!("/choices/{}", choice.index);
-            collect_extra(&prefix, &choice.extra, &mut extensions);
-            collect_extra(
-                &format!("{prefix}/delta"),
-                &choice.delta.extra,
-                &mut extensions,
-            );
-            if choice_finished {
-                continue;
-            }
-            if self.started_choices.insert(choice.index) {
-                self.emit(
-                    events,
-                    Kind::MessageStart {
-                        output_index: choice.index,
-                        role: choice
-                            .delta
-                            .role
-                            .map_or(MessageRole::Assistant, canonical_role),
-                    },
-                );
-            }
-            if let Some(content) = choice.delta.content {
-                self.emit(
-                    events,
-                    Kind::TextDelta {
-                        output_index: choice.index,
-                        text: content,
-                    },
-                );
-            }
-            if let Some(refusal) = choice.delta.refusal {
-                self.emit(
-                    events,
-                    Kind::RefusalDelta {
-                        output_index: choice.index,
-                        text: refusal,
-                    },
-                );
-            }
-            for tool in choice.delta.tool_calls {
-                if tool.kind.as_deref().is_some_and(|kind| kind != "function") {
-                    return Err(OpenAiStreamError::UnsupportedToolType(
-                        tool.kind.unwrap_or_default(),
-                    ));
-                }
-                let tool_prefix = format!("{prefix}/delta/tool_calls/{}", tool.index);
-                collect_extra(&tool_prefix, &tool.extra, &mut extensions);
-                if let Some(function) = &tool.function {
-                    collect_extra(
-                        &format!("{tool_prefix}/function"),
-                        &function.extra,
-                        &mut extensions,
-                    );
-                }
-                self.emit(
-                    events,
-                    Kind::ToolCallDelta {
-                        output_index: choice.index,
-                        tool_index: tool.index,
-                        id: tool.id,
-                        name: tool
-                            .function
-                            .as_ref()
-                            .and_then(|function| function.name.clone()),
-                        arguments_delta: tool
-                            .function
-                            .and_then(|function| function.arguments)
-                            .unwrap_or_default(),
-                    },
-                );
-            }
-            if let Some(reason) = choice.finish_reason {
-                self.finished_choices.insert(choice.index);
-                self.emit(
-                    events,
-                    Kind::Finish {
-                        output_index: choice.index,
-                        reason: finish_reason(&reason),
-                    },
-                );
-            }
+            self.decode_choice(choice, events, &mut extensions)?;
         }
 
         if let Some(usage) = chunk.usage {

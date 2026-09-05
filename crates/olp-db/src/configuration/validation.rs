@@ -3,9 +3,11 @@ use olp_engine::domain::{
 };
 use uuid::Uuid;
 
-use super::{
-    Error,
-    resources::{CapabilityRecord, DiscoveredModelInput, UpdateProvider, helpers::LockedProvider},
+use {
+    super::resources::{
+        CapabilityRecord, DiscoveredModelInput, UpdateProvider, helpers::LockedProvider,
+    },
+    crate::configuration::error::Error,
 };
 
 /// Whether an update touches anything the connector transport depends on.
@@ -162,6 +164,20 @@ pub(crate) fn enforce_provider_revision_diff_limit(
     } else {
         Err(Error::ProviderRevisionDiffTooLarge { dimension, maximum })
     }
+}
+
+pub(crate) fn database_version(version: u32) -> Result<i32, Error> {
+    i32::try_from(version)
+        .ok()
+        .filter(|version| *version > 0)
+        .ok_or(Error::InvalidCredential)
+}
+
+pub(crate) fn stored_version(version: i32) -> Result<u32, Error> {
+    u32::try_from(version)
+        .ok()
+        .filter(|version| *version > 0)
+        .ok_or(Error::InvalidCredential)
 }
 
 #[cfg(test)]

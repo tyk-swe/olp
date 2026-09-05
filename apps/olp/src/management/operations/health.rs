@@ -10,11 +10,12 @@ use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
 use uuid::Uuid;
 
-use super::helpers::{map_operations, page_limit};
 use crate::{
-    bootstrap::mode_dependencies::ManagementState, management::permissions::require_permission,
-    observability::readiness::HealthResponse, public_http::problem::Problem,
+    management::{permissions::require_permission, state::ManagementState},
+    observability::readiness::HealthResponse,
+    public_http::problem::Problem,
 };
+use {super::helpers::map_operations, crate::management::pagination::page_limit};
 
 #[utoipa::path(
     get,

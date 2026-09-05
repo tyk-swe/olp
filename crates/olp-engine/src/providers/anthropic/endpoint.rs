@@ -3,8 +3,8 @@ use std::{fmt, time::Duration};
 use reqwest::{Client, Url};
 
 use crate::providers::{
-    EgressPolicy,
     endpoint::{EndpointCore, Error},
+    http_egress::EgressPolicy,
 };
 
 const DEFAULT_BASE_URL: &str = "https://api.anthropic.com/v1/";

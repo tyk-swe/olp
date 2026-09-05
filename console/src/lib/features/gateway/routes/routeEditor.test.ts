@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { ProviderModelInventory } from '$lib/api/management/providers';
+import type { ProviderModelInventory } from '$lib/api/management/providerModels';
 import {
   buildCreateRouteDraftInput,
   buildReplaceRouteDraftInput,

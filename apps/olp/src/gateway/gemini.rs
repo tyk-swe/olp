@@ -30,11 +30,13 @@ use olp_engine::inference::{
 };
 
 use crate::{
-    bootstrap::mode_dependencies::GatewayState,
-    public_http::json_media::{admit_gemini_count, admit_gemini_generate},
-    public_http::streaming_response::{
-        ProtocolStreamEncoder, encode_protocol_sse_frames, encode_server_sse_frame,
-        precommit_stream_failure, protocol_streaming_response,
+    gateway::state::GatewayState,
+    public_http::{
+        json_media::{admit_gemini_count, admit_gemini_generate},
+        streaming_response::{
+            ProtocolStreamEncoder, encode_protocol_sse_frames, encode_server_sse_frame,
+            precommit_stream_failure, protocol_streaming_response,
+        },
     },
 };
 

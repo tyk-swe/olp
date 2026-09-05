@@ -2,13 +2,13 @@
   import type {
     CapabilityCertification,
     CapabilityDeclaration,
-    Provider,
     ProviderModel
-  } from '$lib/api/management/providers';
+  } from '$lib/api/management/providerModels';
+  import type { Provider } from '$lib/api/management/providers';
   import {
     cursorPaginationProps,
     type CursorHistory
-  } from '$lib/api/pagination';
+  } from '$lib/lists/pagination';
   import CursorPagination from '$lib/components/CursorPagination.svelte';
   import { formatDate } from '$lib/format';
   import CapabilityReview from './CapabilityReview.svelte';

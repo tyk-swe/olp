@@ -2,11 +2,13 @@ import type {
   CreateProviderInput,
   ProviderAuthMode,
   ProviderKind,
-  ProviderKindCapability,
-  ProviderPreset,
   ProviderProbe,
   UpdateProviderInput
 } from '$lib/api/management/providers';
+import type {
+  ProviderKindCapability,
+  ProviderPreset
+} from '$lib/api/management/providerModels';
 import { stateLabel } from '$lib/format';
 
 export type ProviderDraft = {

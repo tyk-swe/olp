@@ -149,73 +149,7 @@ impl Decoder {
                     && (response.extra.contains_key("promptFeedback")
                         || response.extra.contains_key("prompt_feedback"));
                 let canonical = decode_generate_content_chunk(response)?;
-                for event in canonical {
-                    match event.kind {
-                        Kind::ResponseStart { .. } if self.response_started => {}
-                        Kind::ResponseStart { .. } => {
-                            self.response_started = true;
-                            self.emit(&mut events, event.kind);
-                        }
-                        Kind::MessageStart { output_index, .. } => {
-                            if self.started_candidates.insert(output_index) {
-                                self.emit(&mut events, event.kind);
-                            }
-                        }
-                        Kind::Finish {
-                            output_index,
-                            reason,
-                        } => {
-                            if !self.finished_candidates.insert(output_index) {
-                                return Err(Error::DuplicateCandidateFinish(output_index));
-                            }
-                            // A tool call may have arrived in an earlier chunk
-                            // than the finishReason, so the upgrade the unary
-                            // decoder applies per chunk is repeated per stream.
-                            let reason = if reason == FinishReason::Stop
-                                && self
-                                    .next_tool_indexes
-                                    .get(&output_index)
-                                    .is_some_and(|index| *index > 0)
-                            {
-                                FinishReason::ToolCalls
-                            } else {
-                                reason
-                            };
-                            self.emit(
-                                &mut events,
-                                Kind::Finish {
-                                    output_index,
-                                    reason,
-                                },
-                            );
-                        }
-                        Kind::ToolCallDelta {
-                            output_index,
-                            id,
-                            name,
-                            arguments_delta,
-                            ..
-                        } => {
-                            let tool_index =
-                                self.next_tool_indexes.entry(output_index).or_default();
-                            let current = *tool_index;
-                            *tool_index =
-                                tool_index.checked_add(1).ok_or(Error::TooManyToolCalls)?;
-                            self.emit(
-                                &mut events,
-                                Kind::ToolCallDelta {
-                                    output_index,
-                                    tool_index: current,
-                                    id,
-                                    name,
-                                    arguments_delta,
-                                },
-                            );
-                        }
-                        Kind::Done => {}
-                        kind => self.emit(&mut events, kind),
-                    }
-                }
+                self.admit_canonical_events(canonical, &mut events)?;
             }
             if self.preserve_raw_frames {
                 insert_raw_frame(
@@ -229,6 +163,79 @@ impl Decoder {
             }
         }
         Ok(events)
+    }
+
+    fn admit_canonical_events(
+        &mut self,
+        canonical: Vec<Event>,
+        events: &mut Vec<Event>,
+    ) -> Result<(), Error> {
+        for event in canonical {
+            match event.kind {
+                Kind::ResponseStart { .. } if self.response_started => {}
+                Kind::ResponseStart { .. } => {
+                    self.response_started = true;
+                    self.emit(events, event.kind);
+                }
+                Kind::MessageStart { output_index, .. } => {
+                    if self.started_candidates.insert(output_index) {
+                        self.emit(events, event.kind);
+                    }
+                }
+                Kind::Finish {
+                    output_index,
+                    reason,
+                } => {
+                    if !self.finished_candidates.insert(output_index) {
+                        return Err(Error::DuplicateCandidateFinish(output_index));
+                    }
+                    // A tool call may have arrived in an earlier chunk
+                    // than the finishReason, so the upgrade the unary
+                    // decoder applies per chunk is repeated per stream.
+                    let reason = if reason == FinishReason::Stop
+                        && self
+                            .next_tool_indexes
+                            .get(&output_index)
+                            .is_some_and(|index| *index > 0)
+                    {
+                        FinishReason::ToolCalls
+                    } else {
+                        reason
+                    };
+                    self.emit(
+                        events,
+                        Kind::Finish {
+                            output_index,
+                            reason,
+                        },
+                    );
+                }
+                Kind::ToolCallDelta {
+                    output_index,
+                    id,
+                    name,
+                    arguments_delta,
+                    ..
+                } => {
+                    let tool_index = self.next_tool_indexes.entry(output_index).or_default();
+                    let current = *tool_index;
+                    *tool_index = tool_index.checked_add(1).ok_or(Error::TooManyToolCalls)?;
+                    self.emit(
+                        events,
+                        Kind::ToolCallDelta {
+                            output_index,
+                            tool_index: current,
+                            id,
+                            name,
+                            arguments_delta,
+                        },
+                    );
+                }
+                Kind::Done => {}
+                kind => self.emit(events, kind),
+            }
+        }
+        Ok(())
     }
 
     fn decode_error(&mut self, value: Value, events: &mut Vec<Event>) -> Result<(), Error> {

@@ -5,7 +5,7 @@
   import {
     cursorPaginationProps,
     emptyCursorHistory
-  } from '$lib/api/pagination';
+  } from '$lib/lists/pagination';
   import {
     getReadiness,
     listProviderHealth,
