@@ -350,7 +350,7 @@ pub(super) async fn login(
 
     let material = SessionMaterial::generate();
     store
-        .create_session(user.id, &material, state.session_ttl)
+        .create_session(user.id, user.security_version, &material, state.session_ttl)
         .await
         .map_err(map_persistence)?;
     session_response(

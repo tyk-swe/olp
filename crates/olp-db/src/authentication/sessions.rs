@@ -14,6 +14,7 @@ impl Store {
     pub async fn create_session(
         &self,
         user_id: Uuid,
+        expected_security_version: i64,
         material: &SessionMaterial,
         ttl: chrono::Duration,
     ) -> Result<Uuid, Error> {
@@ -26,7 +27,9 @@ impl Store {
         )
         .fetch_optional(&mut *transaction)
         .await?;
-        let security_version = security_version.ok_or(Error::SessionUnavailable)?;
+        let security_version = security_version
+            .filter(|version| *version == expected_security_version)
+            .ok_or(Error::SessionUnavailable)?;
         let id = insert_versioned_session(
             &mut transaction,
             user_id,
@@ -92,7 +95,7 @@ impl Store {
         email: &str,
     ) -> Result<Option<LocalPasswordUser>, Error> {
         let row = sqlx::query!(
-            "SELECT id, email, display_name, password_hash AS \"password_hash!\", \
+            "SELECT id, email, display_name, security_version, password_hash AS \"password_hash!\", \
                     role::text AS \"role!\" \
              FROM users WHERE email = $1 AND active AND password_hash IS NOT NULL",
             email.trim().to_lowercase()
@@ -104,6 +107,7 @@ impl Store {
             email: row.email,
             display_name: row.display_name,
             password_hash: row.password_hash,
+            security_version: row.security_version,
             role: row.role,
         }))
     }
