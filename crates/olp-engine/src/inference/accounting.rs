@@ -106,10 +106,20 @@ impl LimitCleanup {
             self.admission_reservation.is_some(),
             self.delta_lease.is_some(),
         );
-        if let (Some(reservation), Some(actual)) = (self.admission_reservation, admission_actual) {
-            reservation.reconcile(actual).await;
-        }
-        release(self.delta_lease, delta_actual).await;
+        let delta_release = self.delta_lease.clone();
+        tokio::join!(
+            async {
+                if let (Some(reservation), Some(actual)) =
+                    (self.admission_reservation, admission_actual)
+                {
+                    reservation.reconcile(actual).await;
+                }
+                if let (Some(reservation), Some(actual)) = (self.delta_lease, delta_actual) {
+                    reservation.reconcile(actual).await;
+                }
+            },
+            release(delta_release, None),
+        );
     }
 }
 
@@ -289,13 +299,9 @@ impl RequestAccountingGuard {
             delta_lease,
             admission_reservation,
             admission_reserved_tokens: self.admission_reserved_tokens,
-            // A request that failed consumed no tokens we can attribute, so it
-            // must give the conservative reservation back. Leaving it charged
-            // let a run of upstream 502s eat a whole minute's TPM budget and
-            // then 429 unrelated, valid traffic. A *successful* request whose
-            // provider reported nothing keeps the estimate: it really did use
-            // tokens, we just never learned how many.
-            actual_tokens: self.usage.actual_tokens().or(failed.then_some(0)),
+            actual_tokens: self.usage.actual_tokens().or_else(|| {
+                (failed && self.active_attempt.is_none() && self.attempts.is_empty()).then_some(0)
+            }),
         })
     }
 
@@ -377,8 +383,9 @@ impl Drop for RequestAccountingGuard {
         }
         let outcome = RequestOutcome::client_cancelled();
         self.record_terminal_traces(&outcome);
+        let cleanup = self.take_limit_cleanup(true);
         self.emit(&outcome, false);
-        let Some(cleanup) = self.take_limit_cleanup(true) else {
+        let Some(cleanup) = cleanup else {
             return;
         };
         if let Ok(runtime) = tokio::runtime::Handle::try_current() {
@@ -425,6 +432,9 @@ impl UsageCapture {
 
     #[must_use]
     pub fn actual_tokens(&self) -> Option<i64> {
+        if !self.complete || !self.settled {
+            return None;
+        }
         self.input_tokens?.checked_add(self.output_tokens?)
     }
 

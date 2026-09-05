@@ -47,6 +47,7 @@ pub struct LocalPasswordUser {
     pub email: String,
     pub display_name: String,
     pub password_hash: String,
+    pub security_version: i64,
     pub role: String,
 }
 
@@ -326,6 +327,7 @@ mod tests {
             email: "owner@example.test".into(),
             display_name: "Owner".into(),
             password_hash: "secret-hash".into(),
+            security_version: 1,
             role: "owner".into(),
         };
         assert!(!format!("{password:?}").contains("secret-hash"));

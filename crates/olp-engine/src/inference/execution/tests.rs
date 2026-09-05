@@ -123,7 +123,7 @@ fn routed_events(success: bool, effects: Arc<CleanupEffects>) -> RoutedEvents {
     );
     let request_id = uuid::Uuid::now_v7();
     let route_slug = RouteSlug::parse("test").unwrap();
-    let accounting = RequestAccountingGuard::new(
+    let mut accounting = RequestAccountingGuard::new(
         service,
         RequestAccountingInput {
             generation_id: uuid::Uuid::now_v7(),
@@ -136,11 +136,19 @@ fn routed_events(success: bool, effects: Arc<CleanupEffects>) -> RoutedEvents {
             operation: OperationKind::Generation,
             trace: None,
         },
-        None,
         Some(Reservation::distributed(Arc::new(GatedLease(Arc::clone(
             &effects,
         ))))),
-        Some(100),
+        None,
+        None,
+    );
+    accounting.record_attempt_started(
+        &[],
+        1,
+        uuid::Uuid::now_v7(),
+        "mock-model",
+        Utc::now(),
+        tokio::time::Instant::now(),
     );
     let events: ProviderEventStream = if success {
         Box::pin(stream::iter([Ok(Event::new(1, Kind::Done))]))
@@ -175,23 +183,32 @@ async fn unary_collection_detaches_success_and_post_usage_failure_cleanup() {
         let effects = Arc::new(CleanupEffects::default());
         let collected = tokio::spawn(routed_events(success, Arc::clone(&effects)).collect());
 
-        tokio::time::timeout(Duration::from_secs(1), effects.started.notified())
-            .await
-            .expect("reconciliation must start");
+        if success {
+            tokio::time::timeout(Duration::from_secs(1), effects.started.notified())
+                .await
+                .expect("reconciliation must start");
+        }
         let result = tokio::time::timeout(Duration::from_secs(1), collected)
             .await
             .expect("collection must not wait for reconciliation")
             .expect("collection task must not panic");
         assert_eq!(result.is_ok(), success);
-        assert_eq!(effects.reconciles.load(Ordering::Relaxed), 1);
-        assert_eq!(effects.releases.load(Ordering::Relaxed), 0);
-        assert_eq!(effects.actual_tokens.load(Ordering::Relaxed), 10);
+        assert_eq!(
+            effects.reconciles.load(Ordering::Relaxed),
+            usize::from(success)
+        );
+        if success {
+            assert_eq!(effects.actual_tokens.load(Ordering::Relaxed), 10);
+        }
 
-        effects.gate.notify_one();
         tokio::time::timeout(Duration::from_secs(1), effects.released.notified())
             .await
-            .expect("detached cleanup must release the reservation");
-        assert_eq!(effects.reconciles.load(Ordering::Relaxed), 1);
+            .expect("concurrency release must not wait for reconciliation");
+        effects.gate.notify_one();
+        assert_eq!(
+            effects.reconciles.load(Ordering::Relaxed),
+            usize::from(success)
+        );
         assert_eq!(effects.releases.load(Ordering::Relaxed), 1);
     }
 }
@@ -280,4 +297,35 @@ async fn reconciliation_uses_the_supplied_historical_bundle() {
     assert!(matches!(*result, CanonicalResult::VideoJob(_)));
     assert_eq!(calls.load(Ordering::SeqCst), 1);
     assert!(manager.pin().routes.is_empty());
+}
+
+#[tokio::test]
+async fn cancelled_provider_work_retains_tokens_and_releases_concurrency() {
+    for intermediate_usage in [false, true] {
+        for implicit_drop in [false, true] {
+            let effects = Arc::new(CleanupEffects::default());
+            let routed = routed_events(false, Arc::clone(&effects));
+            let mut accounting = routed.accounting;
+            accounting.usage_mut().observe(&Event::new(
+                1,
+                Kind::TextDelta {
+                    output_index: 0,
+                    text: "provider output".into(),
+                },
+            ));
+            if intermediate_usage {
+                accounting.usage_mut().observe(&routed.first);
+            }
+            if implicit_drop {
+                drop(accounting);
+            } else {
+                accounting.finish(RequestOutcome::client_cancelled());
+            }
+            tokio::time::timeout(Duration::from_secs(1), effects.released.notified())
+                .await
+                .expect("cancellation must release concurrency without reconciliation");
+            assert_eq!(effects.reconciles.load(Ordering::Relaxed), 0);
+            assert_eq!(effects.releases.load(Ordering::Relaxed), 1);
+        }
+    }
 }

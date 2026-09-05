@@ -299,6 +299,7 @@ fn reasoning_tokens_are_metered_as_billable_output() {
     ));
     assert_eq!(usage.reasoning_tokens(), Some(120));
     assert_eq!(usage.output_tokens, Some(125));
+    usage.settle();
     assert_eq!(usage.actual_tokens(), Some(135));
 
     // No reasoning reported: the output count is used as-is.
@@ -315,12 +316,13 @@ fn reasoning_tokens_are_metered_as_billable_output() {
             },
         },
     ));
+    plain.settle();
     assert_eq!(plain.actual_tokens(), Some(15));
     assert_eq!(billable_output_tokens(None, Some(3)), None);
 }
 
 #[tokio::test]
-async fn a_failed_request_without_usage_refunds_its_whole_reservation() {
+async fn a_request_without_upstream_work_refunds_its_whole_reservation() {
     let admission = Arc::new(CleanupEffects::default());
     let admission_reservation = Reservation::distributed(recording_lease(&admission));
     let release = admission_reservation.clone();
@@ -328,7 +330,6 @@ async fn a_failed_request_without_usage_refunds_its_whole_reservation() {
         delta_lease: None,
         admission_reservation: Some(admission_reservation),
         admission_reserved_tokens: Some(4_096),
-        // What `take_limit_cleanup(true)` produces with nothing observed.
         actual_tokens: Some(0),
     }
     .run()

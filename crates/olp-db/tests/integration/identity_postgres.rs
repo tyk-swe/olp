@@ -240,7 +240,7 @@ async fn local_identity_lifecycle_is_transactional_and_audited() {
 
     let expired_session = SessionMaterial::generate();
     let expired_session_id = store
-        .create_session(owner.user_id, &expired_session, Duration::hours(1))
+        .create_session(owner.user_id, 1, &expired_session, Duration::hours(1))
         .await
         .unwrap();
     let expired_last_seen: chrono::DateTime<Utc> = sqlx::query_scalar(
@@ -442,4 +442,84 @@ async fn identity_listings_honour_the_shared_page_cap() {
     assert!(next.is_some());
     let (users, _) = store.list_users(None, 500).await.unwrap();
     assert_eq!(users.len(), 151);
+}
+
+#[tokio::test]
+#[ignore = "requires OLP_TEST_DATABASE_ADMIN_URL and OLP_TEST_DATABASE_URL_PREFIX"]
+async fn password_rotation_rejects_login_with_previously_fetched_credentials() {
+    use olp_db::authentication::SessionSecurityContext;
+
+    let db = olp_db::test_support::TestDb::create_migrated("stale-login").await;
+    let store = db.store(5).await;
+    let session = SessionMaterial::generate();
+    let (owner, session_id) = store
+        .setup_installation_with_session(
+            InstallationSetupInput {
+                installation_name: "Stale login".into(),
+                email: "owner@example.test".into(),
+                display_name: "Owner".into(),
+                password_hash: hash("original correct password").unwrap(),
+            },
+            &session,
+            Duration::hours(1),
+        )
+        .await
+        .unwrap();
+    let credentials = store
+        .local_password_user("owner@example.test")
+        .await
+        .unwrap()
+        .unwrap();
+    let user = store.user(owner.user_id).await.unwrap().unwrap();
+    store
+        .update_local_password(
+            &hash("replacement correct password").unwrap(),
+            user.etag,
+            SessionSecurityContext {
+                session_id,
+                user_id: owner.user_id,
+                security_version: credentials.security_version,
+            },
+            &SessionMaterial::generate(),
+            Duration::hours(1),
+        )
+        .await
+        .unwrap();
+    assert!(olp_db::security::password::verify(
+        "original correct password",
+        &credentials.password_hash
+    ));
+    let stale_session = SessionMaterial::generate();
+    assert!(matches!(
+        store
+            .create_session(
+                credentials.id,
+                credentials.security_version,
+                &stale_session,
+                Duration::hours(1),
+            )
+            .await,
+        Err(olp_db::error::Error::SessionUnavailable)
+    ));
+    assert!(
+        store
+            .session_principal(stale_session.token())
+            .await
+            .unwrap()
+            .is_none()
+    );
+    let current = store
+        .local_password_user("owner@example.test")
+        .await
+        .unwrap()
+        .unwrap();
+    store
+        .create_session(
+            current.id,
+            current.security_version,
+            &SessionMaterial::generate(),
+            Duration::hours(1),
+        )
+        .await
+        .unwrap();
 }
