@@ -69,23 +69,7 @@ pub(crate) async fn exercise(world: &World, gateway: &GatewayProcess) -> Result<
         "healthy revocation convergence exceeded five seconds"
     );
 
-    let chat = json!({
-        "model": OPENAI_ROUTE,
-        "messages": [{"role": "user", "content": "HA limiter probe"}],
-        "max_tokens": 1
-    });
-    for public in &public {
-        let status = gateway_status(&http, public, &hard.secret, Some(&chat)).await?;
-        crate::require!(
-            status != 429,
-            "shared RPM denied before the fourth admitted request"
-        );
-    }
-    let status = gateway_status(&http, public[0], &hard.secret, Some(&chat)).await?;
-    crate::require!(
-        status == 429,
-        "shared RPM was not atomic across gateways (last status {status})"
-    );
+    prove_shared_rpm(world, &http, &public, &hard).await?;
 
     let lkg = issue_key(
         world,
@@ -333,6 +317,52 @@ pub(crate) fn assert_ha_trace(
             "provider attempt is not parented by either gateway request span"
         );
     }
+    Ok(())
+}
+
+async fn prove_shared_rpm(
+    world: &World,
+    http: &reqwest::Client,
+    origins: &[&str; 2],
+    key: &IssuedKey,
+) -> Result<(), String> {
+    let client = redis::Client::open(world.valkey_url().await?)
+        .map_err(|error| format!("invalid Valkey URL: {error}"))?;
+    let mut connection = client
+        .get_multiplexed_async_connection()
+        .await
+        .map_err(|error| format!("failed to connect to Valkey: {error}"))?;
+    let (seconds, microseconds): (u64, u64) = redis::cmd("TIME")
+        .query_async(&mut connection)
+        .await
+        .map_err(|error| format!("failed to read Valkey time: {error}"))?;
+    // Readiness probes consume RPM; start a fresh server-time window before counting.
+    let until_next_minute = 60_000_000 - (seconds % 60 * 1_000_000 + microseconds);
+    tokio::time::sleep(Duration::from_micros(until_next_minute) + Duration::from_millis(100)).await;
+    let started = Instant::now();
+    let chat = json!({
+        "model": OPENAI_ROUTE,
+        "messages": [{"role": "user", "content": "HA limiter probe"}],
+        "max_tokens": 1
+    });
+    for request in 0..4 {
+        let status = gateway_status(http, origins[request % 2], &key.secret, Some(&chat)).await?;
+        crate::require!(
+            status == 200,
+            "shared RPM request {request} returned {status}"
+        );
+    }
+    for origin in origins {
+        let status = gateway_status(http, origin, &key.secret, Some(&chat)).await?;
+        crate::require!(
+            status == 429,
+            "shared RPM was not atomic across gateways ({origin} returned {status})"
+        );
+    }
+    crate::require!(
+        started.elapsed() < Duration::from_secs(30),
+        "shared RPM proof exceeded its fresh minute window"
+    );
     Ok(())
 }
 

@@ -199,9 +199,7 @@ test('a viewer sees API keys without any create, rotate, or revoke control', asy
 
   await page.goto('/api-keys');
 
-  await expect(
-    page.getByRole('cell', { name: 'production SDK' })
-  ).toBeVisible();
+  await expect(page.getByText('production SDK', { exact: true })).toBeVisible();
   await expect(
     page.getByText('Your role can view API keys but not create')
   ).toBeVisible();

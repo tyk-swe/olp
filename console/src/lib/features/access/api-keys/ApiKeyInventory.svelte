@@ -20,7 +20,7 @@
   import type { ApiKeyListState } from './apiKeyListState';
 
   let {
-    listState,
+    listState = $bindable(),
     notice,
     submitError,
     canManage,

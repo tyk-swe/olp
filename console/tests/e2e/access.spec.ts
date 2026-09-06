@@ -197,9 +197,11 @@ test('access roles, one-time invitations, sessions, and OIDC are API-backed', as
     );
     await route.fulfill({ json: { items: [], next_cursor: null } });
   });
-  await page
-    .getByRole('link', { name: 'Review API keys issued by Grace Developer' })
-    .click();
+  const reviewGraceKeys = page.getByRole('link', {
+    name: 'Review API keys issued by Grace Developer'
+  });
+  await reviewGraceKeys.focus();
+  await reviewGraceKeys.press('Enter');
   await expect(page.getByLabel('Issuer (user ID)')).toHaveValue(ids.developer);
   await expect(
     page.getByRole('heading', { name: 'No API keys for this issuer' })
