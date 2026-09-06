@@ -69,7 +69,12 @@ pub(crate) async fn exercise(world: &World, gateway: &GatewayProcess) -> Result<
         "healthy revocation convergence exceeded five seconds"
     );
 
-    prove_shared_rpm(world, &http, &public, &hard).await?;
+    let chat = json!({
+        "model": OPENAI_ROUTE,
+        "messages": [{"role": "user", "content": "HA limiter probe"}],
+        "max_tokens": 1
+    });
+    prove_shared_rpm(world, &http, &public, &hard, &chat).await?;
 
     let lkg = issue_key(
         world,
@@ -325,6 +330,7 @@ async fn prove_shared_rpm(
     http: &reqwest::Client,
     origins: &[&str; 2],
     key: &IssuedKey,
+    chat: &Value,
 ) -> Result<(), String> {
     let client = redis::Client::open(world.valkey_url().await?)
         .map_err(|error| format!("invalid Valkey URL: {error}"))?;
@@ -340,20 +346,15 @@ async fn prove_shared_rpm(
     let until_next_minute = 60_000_000 - (seconds % 60 * 1_000_000 + microseconds);
     tokio::time::sleep(Duration::from_micros(until_next_minute) + Duration::from_millis(100)).await;
     let started = Instant::now();
-    let chat = json!({
-        "model": OPENAI_ROUTE,
-        "messages": [{"role": "user", "content": "HA limiter probe"}],
-        "max_tokens": 1
-    });
     for request in 0..4 {
-        let status = gateway_status(http, origins[request % 2], &key.secret, Some(&chat)).await?;
+        let status = gateway_status(http, origins[request % 2], &key.secret, Some(chat)).await?;
         crate::require!(
             status == 200,
             "shared RPM request {request} returned {status}"
         );
     }
     for origin in origins {
-        let status = gateway_status(http, origin, &key.secret, Some(&chat)).await?;
+        let status = gateway_status(http, origin, &key.secret, Some(chat)).await?;
         crate::require!(
             status == 429,
             "shared RPM was not atomic across gateways ({origin} returned {status})"
