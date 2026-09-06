@@ -609,7 +609,7 @@ jobs:
         run: make smoke-image-modes IMAGE=openllmproxy:ci-amd64
       - name: Generate amd64 SBOM
         if: ${{ github.event_name == 'push' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
-        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0
+        uses: anchore/sbom-action@3ad7283483fc7af8ff2b4ea19663c2d5ca935e26 # v0.24.2
         with:
           image: openllmproxy:ci-amd64
           syft-version: v1.46.0
@@ -951,7 +951,7 @@ jobs:
           OLP_IMAGE_PLATFORM: linux/arm64
         run: make smoke-image-modes IMAGE=openllmproxy:ci-arm64
       - name: Generate arm64 SBOM
-        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0
+        uses: anchore/sbom-action@3ad7283483fc7af8ff2b4ea19663c2d5ca935e26 # v0.24.2
         with:
           image: openllmproxy:ci-arm64
           syft-version: v1.46.0
