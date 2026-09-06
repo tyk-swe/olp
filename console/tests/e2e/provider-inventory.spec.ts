@@ -50,7 +50,11 @@ test('provider inventory preserves its cursor through detail and wizard navigati
     }
     if (pathname.endsWith('/models')) {
       await route.fulfill({
-        json: { items: detailProvider.models, next_cursor: null }
+        json: {
+          provider_etag: detailProvider.etag,
+          items: detailProvider.models,
+          next_cursor: null
+        }
       });
       return;
     }

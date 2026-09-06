@@ -454,6 +454,119 @@ async fn malformed_multipart_is_rejected_before_routing() {
 }
 
 #[tokio::test]
+async fn indexed_images_reach_the_upstream_in_numeric_order() {
+    use olp_engine::providers::openai::{ApiKey, ConnectorConfig, transport::Connector};
+
+    let (state, key) = test_state(false);
+    let result = olp_engine::domain::canonical::results::ImagesResult {
+        created_at: Some(1),
+        images: Vec::new(),
+        usage: None,
+        extensions: SourceExtensions::new(Surface::OpenAi, BTreeMap::new()),
+    };
+    install_result(
+        &state,
+        OperationKind::ImageEdit,
+        CanonicalResult::Images(result),
+    );
+    let (sender, mut captured) = tokio::sync::mpsc::channel(1);
+    let upstream = axum::Router::new().route(
+        "/v1/images/edits",
+        axum::routing::post(move |mut form: axum::extract::Multipart| async move {
+            let mut images = Vec::new();
+            while let Some(field) = form.next_field().await.unwrap() {
+                let name = field.name().unwrap().to_owned();
+                if name.starts_with("image[") {
+                    images.push((name, field.text().await.unwrap()));
+                }
+            }
+            sender.send(images).await.unwrap();
+            axum::Json(
+                json!({"created": 1, "data": [{"url": "https://images.example/result.png"}]}),
+            )
+        }),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let base_url = format!("http://{}/v1/", listener.local_addr().unwrap());
+    let server = tokio::spawn(async move { axum::serve(listener, upstream).await.unwrap() });
+    install_transport(
+        &state,
+        Arc::new(Connector::new(
+            ConnectorConfig::for_local_test(&base_url, Default::default()),
+            ApiKey::new("test-upstream-key").unwrap(),
+        )),
+    );
+    let mut body = multipart(
+        &[("model", "default"), ("prompt", "edit")],
+        "image[10]",
+        "image-10",
+    );
+    body.truncate(body.len() - "--olp-test-boundary--\r\n".len());
+    for index in (0..10).rev() {
+        body.push_str(&format!(
+            "--olp-test-boundary\r\nContent-Disposition: form-data; name=\"image[{index}]\"; \
+             filename=\"image-{index}.png\"\r\nContent-Type: image/png\r\n\r\nimage-{index}\r\n"
+        ));
+    }
+    body.push_str("--olp-test-boundary--\r\n");
+    let response = post_multipart(&state, &key, "/openai/v1/images/edits", body).await;
+    assert_eq!(
+        response.status(),
+        StatusCode::OK,
+        "{}",
+        response_text(response).await
+    );
+    assert_eq!(
+        captured.recv().await.unwrap(),
+        (0..=10)
+            .map(|index| (format!("image[{index}]"), format!("image-{index}")))
+            .collect::<Vec<_>>()
+    );
+    server.abort();
+}
+
+#[tokio::test]
+async fn mixed_transcription_aliases_are_client_errors_and_clean_staged_audio() {
+    for name in [
+        "include",
+        "timestamp_granularities",
+        "known_speaker_names",
+        "known_speaker_references",
+    ] {
+        for reverse in [false, true] {
+            let (mut state, key) = test_state(false);
+            let spool = recording_spool();
+            state.replace_media_spool_for_test(spool.clone());
+            let alias = format!("{name}[]");
+            let mut fields = vec![
+                ("model", "default"),
+                (name, "segment"),
+                (alias.as_str(), "word"),
+            ];
+            if reverse {
+                fields.reverse();
+            }
+            let response = post_multipart(
+                &state,
+                &key,
+                "/openai/v1/audio/transcriptions",
+                multipart(&fields, "file", "audio"),
+            )
+            .await;
+            assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+            let body = response_text(response).await;
+            assert!(
+                body.contains(&format!("The {name} and {name}[] fields cannot be mixed.")),
+                "{body}"
+            );
+            let handles = spool.handles();
+            assert_eq!(handles.len(), 1);
+            assert_cleanup(&spool, &handles[0]).await;
+        }
+    }
+}
+
+#[tokio::test]
 async fn failed_multipart_validation_removes_staged_files() {
     let spool = crate::media_spool::FileMediaSpool::create().unwrap();
     let artifact = spool

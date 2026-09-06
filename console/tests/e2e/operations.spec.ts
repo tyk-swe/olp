@@ -1,5 +1,10 @@
 import AxeBuilder from '@axe-core/playwright';
 import {
+  expectUsageRequests,
+  mockUsageKey,
+  mockUsageReport
+} from './usage-fixtures';
+import {
   emulateTwoHundredPercentZoom,
   expect,
   mockSession,
@@ -184,121 +189,8 @@ test('usage exposes pricing gaps and exact chart data accessibly', async ({
   page
 }) => {
   await mockSession(page);
-  const point = {
-    bucket: '2026-07-12T12:00:00Z',
-    request_count: 12,
-    input_tokens: '420',
-    cached_input_tokens: '96',
-    output_tokens: '180',
-    media_units: '0',
-    estimated_cost: '0.45',
-    unpriced_count: 1,
-    incomplete_count: 0
-  };
-  const coverage = {
-    range_complete: false,
-    approximate: true,
-    excluded_partial_aggregate_boundaries: 1
-  };
-  const request_metadata_consumer = {
-    state: 'stale',
-    pending_events: 4,
-    lag_events: 7,
-    oldest_pending_at: '2026-07-12T11:59:00Z',
-    checked_at: '2026-07-12T12:00:00Z',
-    heartbeat_age_seconds: 61
-  };
-  await page.route('**/api/v1/usage/**', async (route) => {
-    const path = new URL(route.request().url()).pathname;
-    if (path.endsWith('/summary'))
-      await route.fulfill({
-        json: {
-          request_count: 12,
-          input_tokens: '420',
-          output_tokens: '180',
-          cached_input_tokens: '96',
-          media_units: '0',
-          estimated_cost: '0.45',
-          unpriced_count: 1,
-          incomplete_count: 0,
-          request_metadata_gap_events: 0,
-          uncertain_request_metadata_gap_count: 1,
-          coverage,
-          request_metadata_consumer,
-          complete: false
-        }
-      });
-    else if (path.endsWith('/time-series'))
-      await route.fulfill({ json: { items: [point], coverage } });
-    else if (path.endsWith('/breakdown'))
-      await route.fulfill({
-        json: {
-          items: [
-            {
-              dimension: 'support-chat',
-              request_count: 12,
-              input_tokens: '420',
-              cached_input_tokens: '96',
-              output_tokens: '180',
-              media_units: '0',
-              estimated_cost: '0.45',
-              unpriced_count: 1,
-              incomplete_count: 0
-            }
-          ],
-          coverage
-        }
-      });
-    else
-      await route.fulfill({
-        json: {
-          complete: false,
-          request_count: 12,
-          priced_count: 11,
-          unpriced_count: 1,
-          incomplete_count: 0,
-          request_metadata_gap_events: 0,
-          uncertain_request_metadata_gap_count: 1,
-          estimated_cost: '0.45',
-          coverage,
-          request_metadata_consumer
-        }
-      });
-  });
-  await page.route(`**/api/v1/api-keys/${keyId}`, async (route) => {
-    await route.fulfill({
-      json: {
-        id: keyId,
-        lookup_id: 'olp_live_abcd',
-        name: 'production SDK',
-        scopes: ['inference'],
-        allowed_routes: [],
-        requests_per_minute: 120,
-        tokens_per_minute: 24_000,
-        max_concurrency: 8,
-        budget: {
-          daily: {
-            limit: '10.00',
-            accrued: '2.50',
-            window_ends_at: '2026-07-13T00:00:00Z'
-          },
-          monthly: {
-            limit: '100.00',
-            accrued: '18.75',
-            window_ends_at: '2026-08-01T00:00:00Z'
-          },
-          unpriced_attempts: 3
-        },
-        expires_at: null,
-        revoked_at: null,
-        rotated_at: null,
-        etag: '01980000-0000-7000-8000-000000000105',
-        created_by: '01980000-0000-7000-8000-000000000106',
-        created_by_email: 'owner@example.com',
-        created_at: '2026-07-01T12:00:00Z'
-      }
-    });
-  });
+  await mockUsageReport(page);
+  await mockUsageKey(page, keyId);
 
   await page.goto('/usage');
   await expect(
@@ -362,6 +254,140 @@ test('usage exposes pricing gaps and exact chart data accessibly', async ({
   await expect(budget).toContainText('18.75 / 100.00');
   await expect(budget).toContainText('Unpriced attempts accrue 0.');
   expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+});
+
+test.describe('usage report URLs', () => {
+  test.use({ timezoneId: 'America/New_York' });
+
+  test('direct links preserve applied filters across edits, reload and browser history', async ({
+    page
+  }) => {
+    await mockSession(page);
+    const requests = await mockUsageReport(page);
+    await mockUsageKey(page, keyId);
+    const filters = {
+      start: '2026-11-01T06:30:42.123Z',
+      end: '2026-11-01T07:30:12.456Z',
+      route: 'support-chat',
+      model: 'model/one',
+      provider_id: providerId,
+      api_key_id: keyId,
+      operation: 'generation',
+      dimension: 'api_key',
+      granularity: 'day'
+    };
+    const initial = `/usage?${new URLSearchParams(filters)}`;
+    await page.goto(initial);
+    const budget = page.getByRole('region', {
+      name: 'Filtered API key budget'
+    });
+    await expect(budget).toContainText('production SDK');
+    await expect(page.getByLabel('From', { exact: true })).toHaveValue(
+      '2026-11-01T01:30'
+    );
+    await expect(page.getByLabel('To', { exact: true })).toHaveValue(
+      '2026-11-01T02:30'
+    );
+    await expect(page.getByLabel('Provider ID')).toHaveValue(providerId);
+    await expect(page.getByLabel('Model', { exact: true })).toHaveValue(
+      'model/one'
+    );
+    await expect(page.getByLabel('Operation', { exact: true })).toHaveValue(
+      'generation'
+    );
+    await expect(page.getByLabel('Break down by')).toHaveValue('api_key');
+    await expect(page.getByLabel('Time buckets')).toHaveValue('day');
+    const canonical = page.url();
+    await expect.poll(() => requests.length).toBe(4);
+    await page.getByLabel('Route', { exact: true }).fill('second-route');
+    await page.getByRole('button', { name: 'Refresh', exact: true }).click();
+    await expect.poll(() => requests.length).toBe(8);
+    expectUsageRequests(requests.slice(-4), filters);
+    expect(page.url()).toBe(canonical);
+    await page.getByRole('button', { name: 'Apply', exact: true }).click();
+    await expect
+      .poll(() => new URL(page.url()).searchParams.get('route'))
+      .toBe('second-route');
+    await expect.poll(() => requests.length).toBe(12);
+    expectUsageRequests(requests.slice(-4), {
+      ...filters,
+      route: 'second-route'
+    });
+    const appliedUrl = page.url();
+    await page.reload();
+    await expect(budget).toContainText('2.50 / 10.00');
+    await expect(page.getByLabel('Route', { exact: true })).toHaveValue(
+      'second-route'
+    );
+    expect(page.url()).toBe(appliedUrl);
+    await page.goBack();
+    await expect(page.getByLabel('Route', { exact: true })).toHaveValue(
+      'support-chat'
+    );
+    await page.goForward();
+    await expect(page.getByLabel('Route', { exact: true })).toHaveValue(
+      'second-route'
+    );
+    await page.getByRole('button', { name: 'Clear', exact: true }).click();
+    await expect(page.getByLabel('API key ID')).toHaveValue('');
+    await expect(budget).toHaveCount(0);
+    const cleared = new URL(page.url()).searchParams;
+    expect([...cleared.keys()]).toEqual([
+      'start',
+      'end',
+      'dimension',
+      'granularity'
+    ]);
+    expect(cleared.get('dimension')).toBe('api_key');
+    expect(cleared.get('granularity')).toBe('day');
+    await page.goBack();
+    await expect(budget).toContainText('production SDK');
+    await expect(page.getByLabel('Route', { exact: true })).toHaveValue(
+      'second-route'
+    );
+  });
+
+  test('malformed parameters stay visible until corrected and unknown axes get defaults', async ({
+    page
+  }) => {
+    await mockSession(page);
+    const requests = await mockUsageReport(page);
+    await page.goto(
+      '/usage?start=invalid&end=2026-07-12T12%3A00%3A00Z&provider_id=invalid&dimension=unknown&granularity=minute'
+    );
+    await expect(page.getByRole('alert')).toHaveText(
+      'Enter valid start and end times.'
+    );
+    expect(requests).toHaveLength(0);
+    await expect(
+      page.getByRole('button', { name: 'Refresh', exact: true })
+    ).toBeDisabled();
+    await expect(page.getByLabel('Break down by')).toHaveValue('route');
+    await expect(page.getByLabel('Time buckets')).toHaveValue('hour');
+    await page.getByLabel('From', { exact: true }).fill('2026-07-12T07:00');
+    await page.getByRole('button', { name: 'Apply', exact: true }).click();
+    await expect(
+      page.getByText('Provider ID must be a UUID.', { exact: true })
+    ).toBeVisible();
+    expect(requests).toHaveLength(0);
+    await page.getByLabel('Provider ID').fill('');
+    await page.getByRole('button', { name: 'Apply', exact: true }).click();
+    await expect(
+      page.getByRole('region', { name: 'Usage summary' })
+    ).toBeVisible();
+    await expect(
+      page.getByText('Enter valid start and end times.', { exact: true })
+    ).toHaveCount(0);
+    await expect(
+      page.getByText('Provider ID must be a UUID.', { exact: true })
+    ).toHaveCount(0);
+    const query = new URL(page.url()).searchParams;
+    expect(query.get('start')).toBe('2026-07-12T11:00:00.000Z');
+    expect(query.get('end')).toBe('2026-07-12T12:00:00.000Z');
+    expect(query.get('dimension')).toBe('route');
+    expect(query.get('granularity')).toBe('hour');
+    expect(query.has('provider_id')).toBe(false);
+  });
 });
 
 const readinessSnapshot = () => ({
@@ -766,141 +792,4 @@ test('audit filters narrow the page and the request origin columns render', asyn
     page.getByText('Occurred before must be later than occurred after.')
   ).toHaveCount(0);
   expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
-});
-
-test('playground sends an ephemeral session-authorized structured-output request', async ({
-  page
-}) => {
-  await mockSession(page);
-  let headers: Record<string, string> = {};
-  let payload: Record<string, unknown> = {};
-  await page.route('**/api/v1/playground', async (route) => {
-    headers = route.request().headers();
-    payload = route.request().postDataJSON() as Record<string, unknown>;
-    await route.fulfill({
-      json: {
-        id: 'resp_test',
-        model: 'support-chat',
-        provider_model: 'gpt-test',
-        finish_reason: 'stop',
-        output_text: null,
-        tool_calls: null,
-        structured_output: { answer: 'Safe and ephemeral' },
-        usage: {
-          input_tokens: 12,
-          cached_input_tokens: 8,
-          output_tokens: 4,
-          reasoning_tokens: 2,
-          total_tokens: 16
-        },
-        latency_ms: 142
-      }
-    });
-  });
-  await page.goto('/playground');
-  await page.getByRole('radio', { name: 'Text' }).focus();
-  await page.keyboard.press('ArrowRight');
-  await page.keyboard.press('ArrowRight');
-  await expect(
-    page.getByRole('radio', { name: 'Structured output' })
-  ).toBeChecked();
-  await page.getByLabel('Route slug').fill('support-chat');
-  await page.getByLabel('Client surface').selectOption('anthropic');
-  await page.getByLabel('Prompt').fill('Return a structured answer.');
-  await page.getByLabel('Temperature').fill('0.2');
-  await page.getByLabel('Max output tokens').fill('256');
-  await page.getByRole('button', { name: 'Run test' }).click();
-  await expect(page.getByText('Safe and ephemeral')).toBeVisible();
-  await expect(page.getByText('Provider model').locator('..')).toContainText(
-    'gpt-test'
-  );
-  await expect(page.getByText('Finish reason').locator('..')).toContainText(
-    'stop'
-  );
-  await expect(
-    page.getByText('Cached input tokens').locator('..')
-  ).toContainText('8');
-  await expect(page.getByText('Reasoning tokens').locator('..')).toContainText(
-    '2'
-  );
-  await expect(page.getByText('Total tokens').locator('..')).toContainText(
-    '16'
-  );
-  expect(payload).toMatchObject({
-    model: 'support-chat',
-    surface: 'anthropic',
-    input: 'Return a structured answer.',
-    temperature: 0.2,
-    max_output_tokens: 256
-  });
-  expect(payload).not.toHaveProperty('stream');
-  expect(headers.authorization).toBeUndefined();
-  // WebKit serializes Fetch's `cache: 'no-store'` mode as `no-cache` on the
-  // wire; both values forbid reuse by the browser cache.
-  expect(['no-store', 'no-cache']).toContain(headers['cache-control']);
-  expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
-});
-
-test('playground shows a refusal instead of an empty result', async ({
-  page
-}) => {
-  await mockSession(page);
-  await page.route('**/api/v1/playground', async (route) => {
-    await route.fulfill({
-      json: {
-        id: 'resp_refusal',
-        model: 'support-chat',
-        provider_model: 'gpt-test',
-        finish_reason: 'refusal',
-        output_text: '',
-        tool_calls: [],
-        structured_output: null,
-        refusal: 'I cannot help with that request.',
-        usage: { input_tokens: 9, output_tokens: 0, total_tokens: 9 },
-        latency_ms: 88
-      }
-    });
-  });
-
-  await page.goto('/playground');
-  await page.getByLabel('Route slug').fill('support-chat');
-  await page.getByLabel('Prompt').fill('Do something disallowed.');
-  await page.getByRole('button', { name: 'Run test' }).click();
-  const refusal = page.getByRole('alert');
-  await expect(refusal).toContainText('The model refused this request');
-  await expect(refusal).toContainText('I cannot help with that request.');
-  await expect(page.getByText('No content returned')).toHaveCount(0);
-  await expect(page.getByText('Finish reason').locator('..')).toContainText(
-    'refusal'
-  );
-  expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
-});
-
-test('playground refuses an out-of-range temperature before sending it', async ({
-  page
-}) => {
-  await mockSession(page);
-  let sent = 0;
-  await page.route('**/api/v1/playground', async (route) => {
-    sent += 1;
-    await route.fulfill({
-      json: {
-        id: 'resp_test',
-        model: 'support-chat',
-        output_text: 'ok',
-        tool_calls: [],
-        latency_ms: 10
-      }
-    });
-  });
-
-  await page.goto('/playground');
-  await page.getByLabel('Route slug').fill('support-chat');
-  await page.getByLabel('Prompt').fill('Hello.');
-  await page.getByLabel('Temperature').fill('3');
-  await page.getByRole('button', { name: 'Run test' }).click();
-  await expect(
-    page.getByText('Temperature must be from 0 through 2.')
-  ).toBeVisible();
-  expect(sent).toBe(0);
 });

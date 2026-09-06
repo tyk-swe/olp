@@ -58,6 +58,29 @@ async fn media_job_lifecycle_is_paginated_metadata_only_and_transition_checked()
         .execute(store.pool())
         .await
         .unwrap();
+    sqlx::query(
+        "WITH model AS (
+             INSERT INTO provider_models
+             (id, provider_id, upstream_model, display_name, enabled, discovered_at)
+             VALUES (uuidv7(), $1, 'video-model', 'Video model', true, now()) RETURNING id
+         ), revision_model AS (
+             INSERT INTO provider_revision_models
+             (id, provider_revision_id, source_provider_model_id, upstream_model,
+              display_name, enabled, discovered_at)
+             SELECT uuidv7(), $2, id, 'video-model', 'Video model', true, now() FROM model
+             RETURNING id
+         )
+         INSERT INTO provider_revision_capabilities
+         (provider_revision_model_id, operation, surface, mode, source, certified_at)
+         SELECT id, operation, 'openai', 'unary', 'certified', now()
+         FROM revision_model CROSS JOIN
+              unnest(ARRAY['video_get', 'video_content', 'video_delete']) AS operation",
+    )
+    .bind(provider_id)
+    .bind(provider_revision_id)
+    .execute(store.pool())
+    .await
+    .unwrap();
     let runtime_generation_id = Uuid::now_v7();
     sqlx::query(
         "INSERT INTO runtime_generations
@@ -444,3 +467,5 @@ async fn media_job_lifecycle_is_paginated_metadata_only_and_transition_checked()
         assert!(!columns.iter().any(|column| column == prohibited));
     }
 }
+
+mod reservation;

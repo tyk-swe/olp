@@ -110,6 +110,16 @@ async fn staged_provider_changes_do_not_leak_until_reactivation() {
     .execute(store.pool())
     .await
     .unwrap();
+    sqlx::query(
+        "INSERT INTO model_capabilities
+         (provider_model_id, operation, surface, mode, source, certified_at)
+         SELECT $1, operation, 'openai', 'unary', 'certified', now()
+         FROM unnest(ARRAY['video_get', 'video_content', 'video_delete']) AS operation",
+    )
+    .bind(model_id)
+    .execute(store.pool())
+    .await
+    .unwrap();
     certify_all_draft_capabilities(&store, provider_id).await;
     store
         .record_provider_probe(

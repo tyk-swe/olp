@@ -2,7 +2,7 @@
   import { createQuery } from '@tanstack/svelte-query';
   import { queryKeys } from '$lib/api/queryKeys';
   import NavIcon from '$lib/components/NavIcon.svelte';
-  import { listApiKeys } from '$lib/api/management/api-keys';
+  import { hasNonrevokedApiKey } from '$lib/api/management/api-keys';
   import { listProviders } from '$lib/api/management/providers';
   import { listRoutes } from '$lib/api/management/routes';
 
@@ -22,8 +22,8 @@
     queryFn: ({ signal }) => listRoutes(signal)
   }));
   const keys = createQuery(() => ({
-    queryKey: queryKeys.apiKeys.all(),
-    queryFn: ({ signal }) => listApiKeys(signal)
+    queryKey: queryKeys.apiKeys.hasNonrevoked(),
+    queryFn: ({ signal }) => hasNonrevokedApiKey(signal)
   }));
 
   const loading = $derived(
@@ -42,7 +42,7 @@
             providers.data?.some((provider) => provider.enabled_model_count > 0)
           ),
           Boolean(routes.data?.length),
-          Boolean(keys.data?.some((key) => !key.revoked_at))
+          Boolean(keys.data)
         ]
       : []
   );

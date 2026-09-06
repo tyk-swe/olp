@@ -133,7 +133,7 @@ pub(super) async fn image_edits(
     multipart: Multipart,
 ) -> Result<Response, InferenceError> {
     let mut form = parse_multipart(&state, multipart, 50 * 1024 * 1024, 32, admission).await?;
-    let images = form.take_files_with_prefix("image");
+    let images = form.take_files_with_prefix("image")?;
     let mask = form.take_single_file("mask")?;
     let request = OpenAiImageEditRequest {
         model: form.required("model")?,
@@ -257,14 +257,14 @@ pub(super) async fn transcriptions(
         .take_single_file("file")?
         .ok_or_else(|| InferenceError::invalid_request("The audio file is required."))?;
     let response_format = form.optional("response_format")?;
-    let known_speaker_names = form.take_repeated("known_speaker_names");
-    let known_speaker_references = form.take_repeated("known_speaker_references");
+    let known_speaker_names = form.take_repeated("known_speaker_names")?;
+    let known_speaker_references = form.take_repeated("known_speaker_references")?;
     let model = form.required("model")?;
     let language = form.optional("language")?;
     let prompt = form.optional("prompt")?;
     let temperature = form.optional_parse("temperature")?;
-    let include = form.take_repeated("include");
-    let timestamp_granularities = form.take_repeated("timestamp_granularities");
+    let include = form.take_repeated("include")?;
+    let timestamp_granularities = form.take_repeated("timestamp_granularities")?;
     let chunking_strategy = form
         .optional("chunking_strategy")?
         .map(|value| serde_json::from_str(&value))

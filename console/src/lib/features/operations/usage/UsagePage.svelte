@@ -1,19 +1,20 @@
 <script lang="ts">
+  import { goto } from '$app/navigation';
+  import { page } from '$app/state';
+  import { resolve } from '$app/paths';
   import { createQuery } from '@tanstack/svelte-query';
   import { queryKeys } from '$lib/api/queryKeys';
   import {
     usageBreakdown,
     usageCompleteness,
     usageSeries,
-    usageSummary,
-    type UsageFilters
+    usageSummary
   } from '$lib/api/usage';
   import { getApiKey } from '$lib/api/management/api-keys';
   import UsageChart from './UsageChart.svelte';
   import UsageCompletenessStatus from './UsageCompletenessStatus.svelte';
   import { errorMessage } from '$lib/api/http';
   import {
-    dateTimeLocalValue,
     formatBudget,
     formatCompact,
     formatCost,
@@ -21,80 +22,80 @@
     formatInteger
   } from '$lib/format';
 
-  type Dimension = 'route' | 'provider' | 'model' | 'api_key' | 'operation';
+  import {
+    applyUsageDraft,
+    defaultUsageState,
+    readUsageState,
+    usageDraft,
+    usageProblem,
+    usageSearch,
+    type UsageState
+  } from './usageState';
 
-  const now = new Date();
-  const yesterday = new Date(now.valueOf() - 24 * 60 * 60 * 1000);
-  let start = $state(dateTimeLocalValue(yesterday));
-  let end = $state(dateTimeLocalValue(now));
-  let route = $state('');
-  let model = $state('');
-  let providerId = $state('');
-  let apiKeyId = $state('');
-  let operation = $state('');
-  let dimension = $state<Dimension>('route');
-  let granularity = $state<'hour' | 'day'>('hour');
-  let applied = $state<{
-    filters: UsageFilters;
-    dimension: Dimension;
-    granularity: 'hour' | 'day';
-  }>({
-    filters: { start: yesterday.toISOString(), end: now.toISOString() },
-    dimension: 'route',
-    granularity: 'hour'
+  const defaults = defaultUsageState();
+  const applied = $derived(readUsageState(page.url.searchParams, defaults));
+  const urlProblem = $derived(usageProblem(applied));
+  let draft = $state(usageDraft(defaults));
+  let validation = $state<string | null>(null);
+
+  $effect(() => {
+    draft = usageDraft(applied);
+    validation = null;
+  });
+  $effect(() => {
+    if (!urlProblem && page.url.search !== `?${usageSearch(applied)}`) {
+      void showUsage(applied, true);
+    }
   });
 
-  const usage = createQuery(() => ({
-    queryKey: queryKeys.usage.report(JSON.stringify(applied)),
-    queryFn: async ({ signal }) => {
-      const [summary, series, breakdown, completeness, apiKey] =
-        await Promise.all([
-          usageSummary(applied.filters),
-          usageSeries(applied.filters, applied.granularity),
-          usageBreakdown(applied.filters, applied.dimension),
-          usageCompleteness(applied.filters),
-          applied.filters.api_key_id
-            ? getApiKey(applied.filters.api_key_id, signal)
-            : Promise.resolve(null)
-        ]);
-      return {
-        summary,
-        points: series.items,
-        breakdown: breakdown.items,
-        completeness,
-        apiKey
-      };
-    }
-  }));
+  const usage = createQuery(() => {
+    const snapshot = applied;
+    return {
+      queryKey: queryKeys.usage.report(JSON.stringify(snapshot)),
+      enabled: !urlProblem,
+      queryFn: async ({ signal }) => {
+        const [summary, series, breakdown, completeness, apiKey] =
+          await Promise.all([
+            usageSummary(snapshot.filters),
+            usageSeries(snapshot.filters, snapshot.granularity),
+            usageBreakdown(snapshot.filters, snapshot.dimension),
+            usageCompleteness(snapshot.filters),
+            snapshot.filters.api_key_id
+              ? getApiKey(snapshot.filters.api_key_id, signal)
+              : Promise.resolve(null)
+          ]);
+        return {
+          summary,
+          points: series.items,
+          breakdown: breakdown.items,
+          completeness,
+          apiKey
+        };
+      }
+    };
+  });
+
+  function showUsage(state: UsageState, replaceState = false) {
+    return goto(resolve(`/usage?${usageSearch(state)}`), {
+      replaceState,
+      keepFocus: true,
+      noScroll: true
+    });
+  }
 
   function apply(event: SubmitEvent) {
     event.preventDefault();
-    applied = {
-      filters: {
-        start: new Date(start).toISOString(),
-        end: new Date(end).toISOString(),
-        route: route || undefined,
-        model: model || undefined,
-        provider_id: providerId || undefined,
-        api_key_id: apiKeyId || undefined,
-        operation: operation || undefined
-      },
-      dimension,
-      granularity
-    };
+    const state = applyUsageDraft(draft, applied);
+    validation = usageProblem(state);
+    if (!validation) void showUsage(state);
   }
 
   function clear() {
-    const resetEnd = new Date();
-    const resetStart = new Date(resetEnd.valueOf() - 24 * 60 * 60 * 1000);
-    start = dateTimeLocalValue(resetStart);
-    end = dateTimeLocalValue(resetEnd);
-    route = model = providerId = apiKeyId = operation = '';
-    applied = {
-      filters: { start: resetStart.toISOString(), end: resetEnd.toISOString() },
-      dimension,
-      granularity
-    };
+    void showUsage({
+      ...defaultUsageState(),
+      dimension: draft.dimension,
+      granularity: draft.granularity
+    });
   }
 
   function titleCase(value: string) {
@@ -117,40 +118,50 @@
     class="button button-secondary"
     type="button"
     onclick={() => usage.refetch()}
-    disabled={usage.isFetching}>Refresh</button
+    disabled={usage.isFetching || Boolean(urlProblem)}>Refresh</button
   >
 </div>
 
 <form class="card filters" aria-label="Usage filters" onsubmit={apply}>
   <div class="filter-grid">
     <label
-      >From <input bind:value={start} type="datetime-local" required /></label
+      >From <input
+        bind:value={draft.start}
+        type="datetime-local"
+        required
+      /></label
     >
-    <label>To <input bind:value={end} type="datetime-local" required /></label>
-    <label>Route <input bind:value={route} placeholder="All routes" /></label>
+    <label
+      >To <input bind:value={draft.end} type="datetime-local" required /></label
+    >
+    <label
+      >Route <input bind:value={draft.route} placeholder="All routes" /></label
+    >
     <label
       >Provider ID <input
-        bind:value={providerId}
+        bind:value={draft.provider_id}
         class="mono"
         placeholder="All providers"
       /></label
     >
-    <label>Model <input bind:value={model} placeholder="All models" /></label>
+    <label
+      >Model <input bind:value={draft.model} placeholder="All models" /></label
+    >
     <label
       >API key ID <input
-        bind:value={apiKeyId}
+        bind:value={draft.api_key_id}
         class="mono"
         placeholder="All keys"
       /></label
     >
     <label
       >Operation <input
-        bind:value={operation}
+        bind:value={draft.operation}
         placeholder="All operations"
       /></label
     >
     <label
-      >Break down by <select bind:value={dimension}
+      >Break down by <select bind:value={draft.dimension}
         ><option value="route">Route</option><option value="provider"
           >Provider</option
         ><option value="model">Model</option><option value="api_key"
@@ -159,7 +170,7 @@
       ></label
     >
     <label
-      >Time buckets <select bind:value={granularity}
+      >Time buckets <select bind:value={draft.granularity}
         ><option value="hour">Hourly</option><option value="day">Daily</option
         ></select
       ></label
@@ -169,12 +180,16 @@
     <button class="button button-primary" type="submit">Apply</button><button
       class="button button-secondary"
       type="button"
-      onclick={clear}>Reset</button
+      onclick={clear}>Clear</button
     >
   </div>
 </form>
 
-{#if usage.isPending}
+{#if validation}<div class="inline-problem" role="alert">{validation}</div>{/if}
+
+{#if urlProblem}
+  <div class="inline-problem" role="alert">{urlProblem}</div>
+{:else if usage.isPending}
   <div class="loading-state" role="status">Calculating usage…</div>
 {:else if usage.isError}
   <div class="inline-problem" role="alert">

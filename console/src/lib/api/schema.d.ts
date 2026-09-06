@@ -2007,6 +2007,8 @@ export interface components {
         ProviderModelListResponse: {
             items: components["schemas"]["ProviderModelResponse"][];
             next_cursor?: string | null;
+            /** Format: uuid */
+            provider_etag: string;
         };
         ProviderModelResponse: {
             capabilities: components["schemas"]["CapabilityResponse"][];
@@ -2072,6 +2074,10 @@ export interface components {
         };
         ProviderRevisionListResponse: {
             items: components["schemas"]["ProviderRevisionSummaryResponse"][];
+            next_cursor?: string | null;
+        };
+        ProviderRevisionModelListResponse: {
+            items: components["schemas"]["ProviderModelResponse"][];
             next_cursor?: string | null;
         };
         ProviderRevisionResponse: {
@@ -2743,10 +2749,9 @@ export interface operations {
     list_api_keys: {
         parameters: {
             query?: {
-                /** @description Opaque cursor returned by the previous page. */
                 cursor?: string;
-                /** @description Page size, from 1 to 200. Defaults to 50. */
                 limit?: number;
+                created_by?: string;
             };
             header?: never;
             path?: never;
@@ -6625,7 +6630,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProviderModelListResponse"];
+                    "application/json": components["schemas"]["ProviderRevisionModelListResponse"];
                 };
             };
             /** @description Malformed query parameters, or an invalid cursor or page size */

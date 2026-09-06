@@ -72,7 +72,11 @@ test('provider discovery advances its ETag without dropping dirty connector edit
     }
     if (pathname === `/api/v1/providers/${ids.provider}/models`) {
       await route.fulfill({
-        json: { items: [currentModel], next_cursor: null }
+        json: {
+          provider_etag: current.etag,
+          items: [currentModel],
+          next_cursor: null
+        }
       });
       return;
     }
@@ -162,7 +166,11 @@ test('provider refetch failures keep dirty connector and capability forms mounte
         });
       } else {
         await route.fulfill({
-          json: { items: [currentModel], next_cursor: null }
+          json: {
+            provider_etag: current.etag,
+            items: [currentModel],
+            next_cursor: null
+          }
         });
       }
       return;
@@ -285,7 +293,11 @@ test('provider capability conflict reloads the row and retries from the remote E
     }
     if (pathname === `/api/v1/providers/${ids.provider}/models`) {
       await route.fulfill({
-        json: { items: [currentModel], next_cursor: null }
+        json: {
+          provider_etag: current.etag,
+          items: [currentModel],
+          next_cursor: null
+        }
       });
       return;
     }
@@ -429,7 +441,11 @@ test('provider wizard recovers a capability save after an ETag conflict', async 
     }
     if (pathname === `/api/v1/providers/${ids.provider}/models`) {
       await route.fulfill({
-        json: { items: [currentModel], next_cursor: null }
+        json: {
+          provider_etag: current.etag,
+          items: [currentModel],
+          next_cursor: null
+        }
       });
       return;
     }

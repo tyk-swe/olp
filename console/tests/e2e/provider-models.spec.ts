@@ -82,6 +82,7 @@ test('provider detail resets provider-wide model mutations and retains row-local
       modelCursors.push(cursor);
       await route.fulfill({
         json: {
+          provider_etag: currentProvider.etag,
           items: [modelPage(cursor)],
           next_cursor:
             cursor === 'opaque-next-model' ? null : 'opaque-next-model'
@@ -418,7 +419,11 @@ test('provider revision viewer shows historical configuration and paged models',
       request.method() === 'GET'
     ) {
       await route.fulfill({
-        json: { items: currentProvider.models, next_cursor: null }
+        json: {
+          provider_etag: currentProvider.etag,
+          items: currentProvider.models,
+          next_cursor: null
+        }
       });
       return;
     }
@@ -513,7 +518,11 @@ test('failed certification tuples show the server detail and error code', async 
       request.method() === 'GET'
     ) {
       await route.fulfill({
-        json: { items: currentProvider.models, next_cursor: null }
+        json: {
+          provider_etag: currentProvider.etag,
+          items: currentProvider.models,
+          next_cursor: null
+        }
       });
       return;
     }

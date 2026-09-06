@@ -78,7 +78,7 @@ def main() -> int:
                 warnings.append(
                     f"{name}: p95 {basis} latency increased {latency_change:.1f}%"
                 )
-        if basis == "gateway" and previous:
+        if previous:
             previous_throughput = previous["gateway"]["throughput_rps"]
             current_throughput = scenario["gateway"]["throughput_rps"]
             if previous_throughput > 0:

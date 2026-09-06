@@ -316,13 +316,6 @@ async fn snapshot_provider_revision(
     actor: Uuid,
     provider: &ActivationSource,
 ) -> Result<Uuid, Error> {
-    // Media reservations are short RowExclusive transactions. Holding a
-    // table SHARE lock makes this activation decision atomic with respect
-    // to new upstream jobs on every gateway replica.
-    sqlx::query!("LOCK TABLE async_media_jobs IN SHARE MODE")
-        .execute(&mut **transaction)
-        .await?;
-
     let revision: i32 = sqlx::query_scalar!(
         "SELECT COALESCE(max(revision), 0) + 1 AS \"value!\" FROM provider_revisions WHERE provider_id = $1",
         provider_id

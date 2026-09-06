@@ -29,9 +29,11 @@ use olp_engine::domain::{
 use rust_decimal::Decimal;
 use uuid::Uuid;
 
+mod api_key_issuers;
 mod disabled_guards;
 mod eligibility;
 mod lifecycle;
+mod model_snapshot;
 
 trait ExpectExecuted<T> {
     fn expect_executed(self) -> T;

@@ -162,7 +162,11 @@ test('provider wizard keeps the write-only secret out of subsequent steps', asyn
       request.method() === 'GET'
     ) {
       await route.fulfill({
-        json: { items: currentProvider.models, next_cursor: null }
+        json: {
+          provider_etag: currentProvider.etag,
+          items: currentProvider.models,
+          next_cursor: null
+        }
       });
       return;
     }

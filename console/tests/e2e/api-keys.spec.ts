@@ -8,6 +8,7 @@ import {
 } from '../playwright';
 import { mockProviderKinds } from './provider-capabilities';
 import { ids, now, sessionOptions } from './gateway-access-fixtures';
+import { mockUsageReport } from './usage-fixtures';
 
 test.beforeEach(async ({ page }) => mockProviderKinds(page));
 
@@ -283,10 +284,15 @@ test('API key policy updates, rotation, and revocation converge in the list', as
       });
       return;
     }
+    if (pathname === `/api/v1/api-keys/${ids.key}`) {
+      await route.fulfill({ json: keyRecord() });
+      return;
+    }
     await route.fulfill({ json: { items: [keyRecord()], next_cursor: null } });
   });
 
-  await page.goto('/api-keys');
+  await mockUsageReport(page);
+  await page.goto(`/api-keys?created_by=${ids.user}`);
   await page.getByRole('button', { name: 'Edit' }).click();
   await page.getByLabel('Key name').fill('renamed SDK');
   await page.getByLabel('Requests per minute').fill('240');
@@ -314,6 +320,19 @@ test('API key policy updates, rotation, and revocation converge in the list', as
   await expect(page.getByText('rotated-key-shown-once')).toHaveCount(0);
   await expect(page.getByText('Never rotated')).toHaveCount(0);
   await expect(page.getByText(/^Rotated /)).toBeVisible();
+  await page.getByRole('link', { name: 'Usage for renamed SDK' }).click();
+  await expect(page.getByLabel('API key ID')).toHaveValue(ids.key);
+  await expect(
+    page.getByRole('region', { name: 'Filtered API key budget' })
+  ).toContainText('2.50 / 12.50');
+  expect(new URL(page.url()).searchParams.get('api_key_id')).toBe(ids.key);
+  expect(page.url()).not.toContain('rotated-key-shown-once');
+  await expect(page.getByText('rotated-key-shown-once')).toHaveCount(0);
+  await page.goBack();
+  await expect(page.getByLabel('Issuer (user ID)')).toHaveValue(ids.user);
+  await expect(
+    page.getByRole('link', { name: 'Usage for renamed SDK' })
+  ).toBeVisible();
   await page.getByRole('button', { name: 'Revoke' }).click();
   await expect(page.getByText('revoked', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'View' }).click();

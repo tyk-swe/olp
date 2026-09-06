@@ -91,17 +91,29 @@ test('media jobs list the working timestamps and filter by key, provider, and cr
   await expect(page.getByLabel('API key ID')).toHaveValue('');
 });
 
-test('the media job detail panel keeps the retention and polling clocks', async ({
+test('the media job detail panel refreshes progress and polling clocks', async ({
   page
 }) => {
   await mockSession(page);
+  let detailRequests = 0;
+  const refreshResponse = Promise.withResolvers<void>();
+  const refreshedJob = {
+    ...job,
+    progress_percent: 84,
+    last_polled_at: '2026-07-13T11:59:00Z',
+    updated_at: '2026-07-13T12:00:00Z'
+  };
   await page.route(
     /\/api\/v1\/media-jobs(?:\/[^?]+)?(?:\?.*)?$/,
     async (route) => {
       const url = new URL(route.request().url());
-      if (url.pathname.endsWith(`/media-jobs/${jobId}`))
-        await route.fulfill({ json: job });
-      else await route.fulfill({ json: { items: [job], next_cursor: null } });
+      if (url.pathname.endsWith(`/media-jobs/${jobId}`)) {
+        detailRequests += 1;
+        if (detailRequests > 1) await refreshResponse.promise;
+        await route.fulfill({
+          json: detailRequests === 1 ? job : refreshedJob
+        });
+      } else await route.fulfill({ json: { items: [job], next_cursor: null } });
     }
   );
 
@@ -121,5 +133,26 @@ test('the media job detail panel keeps the retention and polling clocks', async 
   await expect(
     facts.getByText('Deleted', { exact: true }).locator('..')
   ).toContainText('Not deleted');
+  await expect(
+    facts.getByText('Progress', { exact: true }).locator('..')
+  ).toContainText('42%');
   expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+
+  const refresh = page.getByRole('button', { name: 'Refresh', exact: true });
+  await expect(refresh).toBeEnabled();
+  await refresh.click();
+  await expect(refresh).toBeDisabled();
+  refreshResponse.resolve();
+  await expect(refresh).toBeEnabled();
+  await expect(
+    facts.getByText('Progress', { exact: true }).locator('..')
+  ).toContainText('84%');
+  await expect(
+    facts.getByText('Last polled', { exact: true }).locator('..')
+  ).toContainText('Jul 13, 2026');
+  await expect(
+    facts.getByText('Updated', { exact: true }).locator('..')
+  ).toContainText('Jul 13, 2026');
+  await page.getByRole('link', { name: 'All media jobs' }).click();
+  await expect(page.getByRole('heading', { name: 'Media Jobs' })).toBeVisible();
 });

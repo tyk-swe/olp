@@ -1,15 +1,15 @@
 use super::{
     MediaJobs, attach_media_job_with_retry, media_job_deletion_finalized,
-    results::{
-        mark_missing_delete_as_success, media_job_state, media_job_update, set_video_route,
-        valid_upstream_media_job_id,
-    },
+    results::{media_job_state, media_job_update, valid_upstream_media_job_id},
 };
 use olp_db::media_jobs::{MediaJobError, MediaJobLifecycle, MediaJobRecord, MediaJobUpdate};
 use olp_engine::{
     domain::canonical::{
-        identity::TransportMode,
-        requests::Operation,
+        identity::{Surface, TransportMode},
+        requests::{
+            MEDIA_DELETE_MISSING_IS_SUCCESS_EXTENSION, Operation, SourceExtensions,
+            VideoJobRequest, VideoOperation,
+        },
         results::{CanonicalResult, VideoJobResult},
     },
     inference::{
@@ -18,8 +18,8 @@ use olp_engine::{
         execution::{RequestAdmission, RequiredTarget, RoutedUnaryResult},
         principal::Principal,
     },
-    protocols::openai::video::decode_video_delete,
 };
+use std::collections::BTreeMap;
 use tracing::error;
 
 pub(crate) struct VideoCreateAdmission<'a> {
@@ -233,10 +233,18 @@ async fn compensate_video_create(
     executed: &RoutedUnaryResult,
     upstream_job_id: &str,
     required_target: RequiredTarget,
-) -> Result<bool, InferenceError> {
-    let mut cleanup = decode_video_delete(upstream_job_id.to_owned());
-    set_video_route(&mut cleanup, executed.route_slug.as_str())?;
-    mark_missing_delete_as_success(&mut cleanup)?;
+) -> bool {
+    let cleanup = Operation::Video(VideoOperation::Delete(VideoJobRequest {
+        route: Some(executed.route_slug.clone()),
+        job_id: upstream_job_id.to_owned(),
+        extensions: SourceExtensions::new(
+            Surface::OpenAi,
+            BTreeMap::from([(
+                MEDIA_DELETE_MISSING_IS_SUCCESS_EXTENSION.to_owned(),
+                serde_json::Value::Bool(true),
+            )]),
+        ),
+    }));
     let mut compensation = state
         .inference
         .execute_result(
@@ -255,7 +263,7 @@ async fn compensate_video_create(
             ) =>
         {
             compensation.mark_success();
-            Ok(true)
+            true
         }
         Ok(compensation) => {
             let failure = InferenceError::bad_gateway(
@@ -263,9 +271,9 @@ async fn compensate_video_create(
                 "The provider returned an incompatible video deletion response.",
             );
             compensation.mark_failure(RequestOutcome::from_error(&failure));
-            Ok(false)
+            false
         }
-        Err(_) => Ok(false),
+        Err(_) => false,
     }
 }
 
@@ -286,15 +294,7 @@ async fn handle_failed_video_attachment(
     )
     .await;
     let compensation_confirmed = if cleanup_intent_persisted {
-        match compensate_video_create(state, admission, executed, upstream_job_id, required_target)
-            .await
-        {
-            Ok(confirmed) => confirmed,
-            Err(failure) => {
-                executed.mark_failure(RequestOutcome::from_error(&failure));
-                return failure;
-            }
-        }
+        compensate_video_create(state, admission, executed, upstream_job_id, required_target).await
     } else {
         false
     };

@@ -189,6 +189,27 @@ test('access roles, one-time invitations, sessions, and OIDC are API-backed', as
     )
   ).toBeVisible();
 
+  let reviewedIssuer: string | null = null;
+  await page.route('**/api/v1/api-keys**', async (route) => {
+    expect(route.request().method()).toBe('GET');
+    reviewedIssuer = new URL(route.request().url()).searchParams.get(
+      'created_by'
+    );
+    await route.fulfill({ json: { items: [], next_cursor: null } });
+  });
+  await page
+    .getByRole('link', { name: 'Review API keys issued by Grace Developer' })
+    .click();
+  await expect(page.getByLabel('Issuer (user ID)')).toHaveValue(ids.developer);
+  await expect(
+    page.getByRole('heading', { name: 'No API keys for this issuer' })
+  ).toBeVisible();
+  expect(reviewedIssuer).toBe(ids.developer);
+  await page.goBack();
+  await expect(
+    page.getByRole('row', { name: /Grace Developer/ })
+  ).toContainText('disabled');
+
   await page.getByRole('button', { name: 'Invitations' }).click();
   await expect(
     page.getByRole('row', { name: /accepted@example.com/ })
@@ -310,10 +331,9 @@ test('new OIDC configuration leaves the sentinel state and versions later saves'
 
   await page.getByLabel('Client ID').fill('olp-console-v2');
   await page.getByRole('button', { name: 'Save and validate' }).click();
-  expect(saveEtags).toEqual([
-    undefined,
-    '"01980000-0000-7000-8000-000000000451"'
-  ]);
+  await expect
+    .poll(() => saveEtags)
+    .toEqual([undefined, '"01980000-0000-7000-8000-000000000451"']);
 });
 
 test('failed OIDC conflict reload preserves edits and write-only secret', async ({

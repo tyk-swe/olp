@@ -2831,9 +2831,14 @@
               "string",
               "null"
             ]
+          },
+          "provider_etag": {
+            "format": "uuid",
+            "type": "string"
           }
         },
         "required": [
+          "provider_etag",
           "items"
         ],
         "type": "object"
@@ -3085,6 +3090,26 @@
           "items": {
             "items": {
               "$ref": "#/components/schemas/ProviderRevisionSummaryResponse"
+            },
+            "type": "array"
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
+      "ProviderRevisionModelListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ProviderModelResponse"
             },
             "type": "array"
           },
@@ -5358,7 +5383,6 @@
         "operationId": "list_api_keys",
         "parameters": [
           {
-            "description": "Opaque cursor returned by the previous page.",
             "in": "query",
             "name": "cursor",
             "required": false,
@@ -5367,7 +5391,6 @@
             }
           },
           {
-            "description": "Page size, from 1 to 200. Defaults to 50.",
             "in": "query",
             "name": "limit",
             "required": false,
@@ -5376,6 +5399,15 @@
               "maximum": 200,
               "minimum": 1,
               "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "created_by",
+            "required": false,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
             }
           }
         ],
@@ -10878,7 +10910,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ProviderModelListResponse"
+                  "$ref": "#/components/schemas/ProviderRevisionModelListResponse"
                 }
               }
             },

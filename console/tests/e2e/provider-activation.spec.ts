@@ -73,7 +73,11 @@ test('provider detail keeps the live revision and credential until a certified d
       request.method() === 'GET'
     ) {
       await route.fulfill({
-        json: { items: currentProvider.models, next_cursor: null }
+        json: {
+          provider_etag: currentProvider.etag,
+          items: currentProvider.models,
+          next_cursor: null
+        }
       });
       return;
     }
@@ -322,7 +326,11 @@ test('provider detail disables an active provider and restores it as a draft', a
       request.method() === 'GET'
     ) {
       await route.fulfill({
-        json: { items: currentProvider.models, next_cursor: null }
+        json: {
+          provider_etag: currentProvider.etag,
+          items: currentProvider.models,
+          next_cursor: null
+        }
       });
       return;
     }
@@ -486,7 +494,11 @@ test('a disable that conflicts on something other than references shows the gene
     }
     if (pathname === `/api/v1/providers/${ids.provider}/models`) {
       await route.fulfill({
-        json: { items: currentProvider.models, next_cursor: null }
+        json: {
+          provider_etag: currentProvider.etag,
+          items: currentProvider.models,
+          next_cursor: null
+        }
       });
       return;
     }
@@ -555,7 +567,11 @@ test('a disabled provider that still reports an active revision reads as disable
     }
     if (pathname === `/api/v1/providers/${ids.provider}/models`) {
       await route.fulfill({
-        json: { items: currentProvider.models, next_cursor: null }
+        json: {
+          provider_etag: currentProvider.etag,
+          items: currentProvider.models,
+          next_cursor: null
+        }
       });
       return;
     }

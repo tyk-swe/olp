@@ -2,7 +2,10 @@
   import { resolve } from '$app/paths';
   import { queryKeys } from '$lib/api/queryKeys';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
-  import { errorMessage as providerDetailError } from '$lib/api/http';
+  import {
+    errorMessage as providerDetailError,
+    isEtagMismatch
+  } from '$lib/api/http';
   import CursorPagination from '$lib/components/CursorPagination.svelte';
   import { formatDate } from '$lib/format';
   import {
@@ -50,6 +53,7 @@
     pageState = $bindable(),
     onAcceptProvider,
     onError,
+    onConflict,
     onNotice
   }: {
     current: Provider;
@@ -60,6 +64,7 @@
     pageState: CursorHistory;
     onAcceptProvider: (provider: Provider) => void;
     onError: (message: string) => void;
+    onConflict: () => void;
     onNotice: (message: string) => void;
   } = $props();
 
@@ -79,12 +84,16 @@
     queryFn: ({ signal }) => getProviderCapabilityOptions(current.kind, signal)
   }));
   const models = createQuery(() => ({
-    queryKey: providerModelPageKey(current.id, current, pageState.cursor),
+    queryKey: providerModelPageKey(current, pageState.cursor),
     queryFn: ({ signal }) =>
       fetchCoordinatedModelPage(current, pageState.cursor, signal),
     placeholderData: (previous: CoordinatedModelPage | undefined) => previous
   }));
   const visibleModelPage = $derived(models.data ?? retainedModelPage);
+
+  $effect(() => {
+    if (isEtagMismatch(models.error)) onConflict();
+  });
 
   $effect(() => {
     if (models.data) retainedModelPage = models.data;

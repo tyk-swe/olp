@@ -115,11 +115,27 @@ impl MultipartFormData {
             .transpose()
     }
 
-    pub(super) fn take_repeated(&mut self, name: &str) -> Vec<String> {
-        self.text
-            .remove(name)
-            .or_else(|| self.text.remove(&format!("{name}[]")))
-            .unwrap_or_default()
+    pub(super) fn take_repeated(&mut self, name: &str) -> Result<Vec<String>, InferenceError> {
+        let array_name = format!("{name}[]");
+        let indexed_prefix = format!("{name}[");
+        if let Some(invalid) = self
+            .text
+            .keys()
+            .find(|field| field.starts_with(&indexed_prefix) && **field != array_name)
+        {
+            return Err(InferenceError::invalid_request(format!(
+                "The {invalid} field is invalid; use {name} or {array_name}."
+            )));
+        }
+        let bare = self.text.remove(name);
+        let array = self.text.remove(&array_name);
+        match (bare, array) {
+            (Some(_), Some(_)) => Err(InferenceError::invalid_request(format!(
+                "The {name} and {array_name} fields cannot be mixed."
+            ))),
+            (Some(values), None) | (None, Some(values)) => Ok(values),
+            (None, None) => Ok(Vec::new()),
+        }
     }
 
     pub(super) fn take_single_file(
@@ -137,16 +153,31 @@ impl MultipartFormData {
         Ok(values.pop())
     }
 
-    pub(super) fn take_files_with_prefix(&mut self, prefix: &str) -> Vec<BoundedMediaPart> {
-        let keys = self
+    pub(super) fn take_files_with_prefix(
+        &mut self,
+        prefix: &str,
+    ) -> Result<Vec<BoundedMediaPart>, InferenceError> {
+        let indexed_prefix = format!("{prefix}[");
+        if let Some(name) = self
+            .text
+            .keys()
+            .find(|name| *name == prefix || name.starts_with(&indexed_prefix))
+        {
+            return Err(InferenceError::invalid_request(format!(
+                "The {name} field must be a file."
+            )));
+        }
+        let mut keys = self
             .files
             .keys()
-            .filter(|name| *name == prefix || name.starts_with(&format!("{prefix}[")))
-            .cloned()
-            .collect::<Vec<_>>();
-        keys.into_iter()
-            .flat_map(|name| self.files.remove(&name).unwrap_or_default())
-            .collect()
+            .filter(|name| *name == prefix || name.starts_with(&indexed_prefix))
+            .map(|name| Ok((file_array_order(name, prefix)?, name.clone())))
+            .collect::<Result<Vec<_>, InferenceError>>()?;
+        keys.sort_by_key(|(order, _)| *order);
+        Ok(keys
+            .into_iter()
+            .flat_map(|(_, name)| self.files.remove(&name).unwrap_or_default())
+            .collect())
     }
 
     pub(super) fn take_extensions(&mut self) -> Result<BTreeMap<String, Value>, InferenceError> {
@@ -170,6 +201,30 @@ impl MultipartFormData {
             })
             .collect()
     }
+}
+
+fn file_array_order(name: &str, prefix: &str) -> Result<(u8, usize), InferenceError> {
+    if name == prefix {
+        return Ok((0, 0));
+    }
+    let index = name
+        .strip_prefix(prefix)
+        .and_then(|suffix| suffix.strip_prefix('['))
+        .and_then(|suffix| suffix.strip_suffix(']'));
+    if index == Some("") {
+        return Ok((2, 0));
+    }
+    if let Some(index) = index
+        && index.bytes().all(|byte| byte.is_ascii_digit())
+        && (index == "0" || !index.starts_with('0'))
+        && let Ok(index) = index.parse::<usize>()
+    {
+        return Ok((1, index));
+    }
+    Err(InferenceError::invalid_request(format!(
+        "The {name} file field is invalid; use {prefix}, {prefix}[], or \
+         {prefix}[N] with a nonnegative integer index and no leading zeros."
+    )))
 }
 
 impl Drop for MultipartFormData {
@@ -538,8 +593,11 @@ mod tests {
             "include[]".to_owned(),
             vec!["usage".to_owned(), "logprobs".to_owned()],
         );
-        assert_eq!(data.take_repeated("include"), ["usage", "logprobs"]);
-        assert!(data.take_repeated("include").is_empty());
+        assert_eq!(
+            data.take_repeated("include").unwrap(),
+            ["usage", "logprobs"]
+        );
+        assert!(data.take_repeated("include").unwrap().is_empty());
     }
 
     #[test]
@@ -564,7 +622,7 @@ mod tests {
             .insert("image[1]".to_owned(), vec![file("second")]);
         data.files
             .insert("unrelated".to_owned(), vec![file("other")]);
-        let selected = data.take_files_with_prefix("image");
+        let selected = data.take_files_with_prefix("image").unwrap();
         assert_eq!(
             selected
                 .iter()
@@ -576,6 +634,108 @@ mod tests {
             data.files.keys().map(String::as_str).collect::<Vec<_>>(),
             ["unrelated"]
         );
+    }
+
+    #[test]
+    fn image_arrays_preserve_alias_and_duplicate_order_with_numeric_indices() {
+        let mut data = form();
+        data.files.insert("image".to_owned(), vec![file("bare")]);
+        data.files.insert(
+            "image[]".to_owned(),
+            vec![file("array-first"), file("array-second")],
+        );
+        for index in (0..=10).rev() {
+            data.files.insert(
+                format!("image[{index}]"),
+                vec![file(&format!("indexed-{index}"))],
+            );
+        }
+        data.files
+            .get_mut("image[2]")
+            .unwrap()
+            .push(file("duplicate"));
+        let mut expected = vec!["bare".to_owned()];
+        for index in 0..=10 {
+            expected.push(format!("indexed-{index}"));
+            if index == 2 {
+                expected.push("duplicate".to_owned());
+            }
+        }
+        expected.extend(["array-first".to_owned(), "array-second".to_owned()]);
+        assert_eq!(
+            data.take_files_with_prefix("image")
+                .unwrap()
+                .into_iter()
+                .map(|part| part.filename)
+                .collect::<Vec<_>>(),
+            expected
+        );
+        assert!(data.take_extensions().unwrap().is_empty());
+    }
+
+    #[test]
+    fn malformed_image_indices_and_text_uploads_are_client_errors() {
+        for name in [
+            "image[01]",
+            "image[-1]",
+            "image[+1]",
+            "image[1.0]",
+            "image[ 1]",
+            "image[1",
+            "image[1]suffix",
+            "image[[1]]",
+            "image[word]",
+            "image[184467440737095516160]",
+        ] {
+            let mut data = form();
+            data.files.insert(name.to_owned(), vec![file("invalid")]);
+            let error = data.take_files_with_prefix("image").unwrap_err();
+            assert_eq!(error.code(), "invalid_request", "{name}");
+            assert!(error.message().contains(name), "{name}");
+        }
+        let mut data = form();
+        data.text
+            .insert("image[1]".to_owned(), vec!["text".to_owned()]);
+        assert_eq!(
+            data.take_files_with_prefix("image").unwrap_err().message(),
+            "The image[1] field must be a file."
+        );
+    }
+
+    #[test]
+    fn repeated_text_arrays_consume_aliases_and_reject_mixed_or_indexed_names() {
+        for name in [
+            "include",
+            "timestamp_granularities",
+            "known_speaker_names",
+            "known_speaker_references",
+        ] {
+            for alias in [name.to_owned(), format!("{name}[]")] {
+                let mut data = form();
+                data.text
+                    .insert(alias, vec!["first".to_owned(), "second".to_owned()]);
+                assert_eq!(data.take_repeated(name).unwrap(), ["first", "second"]);
+                assert!(data.take_extensions().unwrap().is_empty());
+            }
+            let mut data = form();
+            data.text.insert(name.to_owned(), vec!["bare".to_owned()]);
+            data.text
+                .insert(format!("{name}[]"), vec!["array".to_owned()]);
+            assert_eq!(
+                data.take_repeated(name).unwrap_err().message(),
+                format!("The {name} and {name}[] fields cannot be mixed.")
+            );
+            assert!(data.take_extensions().unwrap().is_empty());
+            for suffix in ["[0]", "[", "[]suffix", "[[0]]"] {
+                let mut data = form();
+                data.text
+                    .insert(format!("{name}{suffix}"), vec!["invalid".to_owned()]);
+                assert_eq!(
+                    data.take_repeated(name).unwrap_err().code(),
+                    "invalid_request"
+                );
+            }
+        }
     }
 
     #[test]

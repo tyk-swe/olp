@@ -155,11 +155,9 @@ impl Store {
         if !claim_idempotency(&mut transaction, actor, "provider.disable", idempotency_key).await? {
             return Err(Error::IdempotencyConflict);
         }
-        // Serialize against the short reservation INSERT so the decision and
-        // runtime publication cannot race a newly committed upstream job.
-        sqlx::query!("LOCK TABLE async_media_jobs IN SHARE MODE")
-            .execute(&mut *transaction)
-            .await?;
+        let current = lock_provider(&mut transaction, provider_id)
+            .await?
+            .ok_or(Error::NotFound)?;
         let has_live_media_jobs: bool = sqlx::query_scalar!(
             "SELECT EXISTS (SELECT 1 FROM async_media_jobs
              WHERE provider_id = $1 AND lifecycle_state <> 'deleted') AS \"value!\"",
@@ -199,11 +197,7 @@ impl Store {
         .execute(&mut *transaction)
         .await?;
         if updated.rows_affected() != 1 {
-            let row = sqlx::query!("SELECT etag FROM providers WHERE id = $1", provider_id)
-                .fetch_optional(&mut *transaction)
-                .await?
-                .ok_or(Error::NotFound)?;
-            return Err(if row.etag != expected_etag {
+            return Err(if current.etag != expected_etag {
                 Error::PreconditionFailed
             } else {
                 Error::InUse

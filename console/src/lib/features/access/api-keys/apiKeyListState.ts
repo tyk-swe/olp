@@ -4,6 +4,6 @@ import {
   type CursorHistory
 } from '$lib/lists/pagination';
 
-export type ApiKeyListState = CursorHistory;
+export type ApiKeyListState = CursorHistory & { createdBy?: string };
 
 export const apiKeyList = listState<ApiKeyListState>(emptyCursorHistory);

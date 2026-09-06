@@ -39,6 +39,7 @@
     "eslint": "^10.9.0",
     "eslint-plugin-svelte": "^3.23.0",
     "globals": "^17.11.0",
+    "jsdom": "30.0.1",
     "openapi-typescript": "^7.13.0",
     "prettier": "3.9.6",
     "prettier-plugin-svelte": "4.1.1",

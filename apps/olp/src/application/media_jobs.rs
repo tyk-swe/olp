@@ -1,7 +1,4 @@
-use self::results::{
-    mark_missing_delete_as_success, media_job_state, media_job_update, set_video_route,
-    valid_upstream_media_job_id,
-};
+use self::results::{media_job_state, media_job_update, valid_upstream_media_job_id};
 use super::{
     provider_runtime::{runtime_provider_config, runtime_provider_credential},
     transports::TransportRegistry,
@@ -18,8 +15,15 @@ use olp_db::{
 };
 use olp_engine::{
     domain::{
-        canonical::{identity::Surface, requests::Operation, results::CanonicalResult},
-        ids::ProviderId,
+        canonical::{
+            identity::Surface,
+            requests::{
+                MEDIA_DELETE_MISSING_IS_SUCCESS_EXTENSION, Operation, SourceExtensions,
+                VideoJobRequest, VideoOperation,
+            },
+            results::CanonicalResult,
+        },
+        ids::{ProviderId, RouteSlug},
     },
     inference::{
         execution::RequiredTarget,
@@ -29,6 +33,7 @@ use olp_engine::{
     providers::{connector::ResponseLimits, factory::assembly::Factory, http_egress::EgressPolicy},
 };
 use std::{
+    collections::BTreeMap,
     sync::{
         Arc,
         atomic::{AtomicU64, Ordering},
@@ -212,15 +217,8 @@ async fn reconcile_media_job_operation(
             .map_err(|_| "persistence_unavailable")?;
     }
 
-    let upstream_id = record
-        .upstream_job_id
-        .clone()
-        .filter(|value| valid_upstream_media_job_id(value))
-        .ok_or("media_job_upstream_id_unavailable")?;
+    let result = execute_media_reconciliation_result(state, record).await?;
     if record.lifecycle == MediaJobLifecycle::Active {
-        let mut operation = olp_engine::protocols::openai::video::decode_video_get(upstream_id);
-        set_video_route(&mut operation, &record.route_slug).map_err(|error| error.code())?;
-        let result = execute_media_reconciliation_result(state, record, operation).await?;
         let CanonicalResult::VideoJob(result) = result.as_ref() else {
             return Err("provider_protocol_error");
         };
@@ -232,10 +230,6 @@ async fn reconcile_media_job_operation(
         return Ok(());
     }
 
-    let mut operation = olp_engine::protocols::openai::video::decode_video_delete(upstream_id);
-    set_video_route(&mut operation, &record.route_slug).map_err(|error| error.code())?;
-    mark_missing_delete_as_success(&mut operation).map_err(|error| error.code())?;
-    let result = execute_media_reconciliation_result(state, record, operation).await?;
     if !matches!(
         result.as_ref(),
         CanonicalResult::VideoDelete(deleted) if deleted.deleted
@@ -256,15 +250,34 @@ async fn reconcile_media_job_operation(
 async fn execute_media_reconciliation_result(
     state: &MediaJobs,
     record: &MediaJobRecord,
-    operation: Operation,
 ) -> Result<Box<CanonicalResult>, &'static str> {
+    let upstream_id = record
+        .upstream_job_id
+        .clone()
+        .filter(|value| valid_upstream_media_job_id(value))
+        .ok_or("media_job_upstream_id_unavailable")?;
+    let route = RouteSlug::parse(&record.route_slug).map_err(|_| "media_job_route_invalid")?;
+    let mut request = VideoJobRequest {
+        route: Some(route),
+        job_id: upstream_id,
+        extensions: SourceExtensions::new(Surface::OpenAi, BTreeMap::new()),
+    };
+    let operation = if record.lifecycle == MediaJobLifecycle::Active {
+        VideoOperation::Get(request)
+    } else {
+        request.extensions.values.insert(
+            MEDIA_DELETE_MISSING_IS_SUCCESS_EXTENSION.to_owned(),
+            serde_json::Value::Bool(true),
+        );
+        VideoOperation::Delete(request)
+    };
     let runtime = media_job_runtime(state, record).await?;
     state
         .inference
         .execute_reconciliation_result(
             runtime,
             record.api_key_id,
-            operation,
+            Operation::Video(operation),
             Surface::OpenAi,
             RequiredTarget {
                 provider_id: record.provider_id,

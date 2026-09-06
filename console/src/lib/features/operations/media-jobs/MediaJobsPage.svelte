@@ -59,9 +59,17 @@
         never appears in the console.
       </p>
     </div>
-    <a class="button button-secondary" href={resolve('/media-jobs')}
-      >All media jobs</a
-    >
+    <div class="page-actions">
+      <a class="button button-secondary" href={resolve('/media-jobs')}
+        >All media jobs</a
+      >
+      <button
+        class="button button-secondary"
+        type="button"
+        onclick={() => detail.refetch()}
+        disabled={detail.isFetching}>Refresh</button
+      >
+    </div>
   </div>
   {#if detail.isPending}<div class="loading-state" role="status">
       Loading media job…

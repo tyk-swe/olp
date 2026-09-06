@@ -1,6 +1,8 @@
 <script lang="ts">
-  import { createMutation } from '@tanstack/svelte-query';
+  import { createMutation, createQuery } from '@tanstack/svelte-query';
   import { errorMessage } from '$lib/api/http';
+  import { listRoutes } from '$lib/api/management/routes';
+  import { queryKeys } from '$lib/api/queryKeys';
   import { runPlayground, type PlaygroundRequest } from '$lib/api/playground';
   import SegmentedRadioGroup from '$lib/components/SegmentedRadioGroup.svelte';
   import { formatInteger } from '$lib/format';
@@ -25,6 +27,10 @@
     '{\n  "type": "object",\n  "properties": {\n    "answer": { "type": "string" }\n  },\n  "required": ["answer"],\n  "additionalProperties": false\n}'
   );
   let validationError = $state('');
+  const routes = createQuery(() => ({
+    queryKey: queryKeys.routes.all(),
+    queryFn: ({ signal }) => listRoutes(signal)
+  }));
   const mutation = createMutation(() => ({ mutationFn: runPlayground }));
   const modes = [
     { value: 'text', label: 'Text' },
@@ -108,12 +114,39 @@
         <label for="playground-model">Route slug</label><input
           id="playground-model"
           bind:value={model}
+          list="playground-routes"
           autocomplete="off"
           placeholder="support-chat"
-          aria-describedby="model-help"
-        /><small id="model-help"
-          >The public model name clients use, not provider/model.</small
+          aria-describedby="model-help route-status"
+        />
+        <datalist id="playground-routes">
+          {#each routes.data ?? [] as route (route.id)}
+            <option value={route.slug}></option>
+          {/each}
+        </datalist>
+        <small id="model-help"
+          >Choose an active route suggestion or enter its public slug.</small
         >
+        <div id="route-status">
+          {#if routes.isPending}
+            <small role="status">Loading active routes…</small>
+          {:else if routes.isError}
+            <p class="field-error" role="alert">
+              {errorMessage(routes.error, 'Active routes could not be loaded.')}
+            </p>
+            <small>You can still enter a route slug.</small>
+            <button
+              type="button"
+              class="button button-secondary"
+              onclick={() => routes.refetch()}
+              disabled={routes.isFetching}>Retry routes</button
+            >
+          {:else if routes.data?.length === 0}
+            <small
+              >No active routes are available. Activate a route to get started.</small
+            >
+          {/if}
+        </div>
       </div>
       <div class="form-field">
         <label for="playground-surface">Client surface</label><select

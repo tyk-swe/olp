@@ -387,6 +387,33 @@ async fn media_job_management_views_are_session_authorized_and_metadata_only() {
         .execute(store.pool())
         .await
         .unwrap();
+    sqlx::query(
+        "WITH model AS (
+             INSERT INTO provider_models
+             (id, provider_id, upstream_model, display_name, enabled, discovered_at)
+             VALUES (uuidv7(), $1, 'upstream-video-model', 'Video model', true, now())
+             RETURNING id
+         ), revision_model AS (
+             INSERT INTO provider_revision_models
+             (id, provider_revision_id, source_provider_model_id, upstream_model,
+              display_name, enabled, discovered_at)
+             SELECT uuidv7(), $2, id, 'upstream-video-model', 'Video model', true, now()
+             FROM model RETURNING id
+         )
+         INSERT INTO provider_revision_capabilities
+         (provider_revision_model_id, operation, surface, mode, source, certified_at)
+         SELECT id, operation, 'openai',
+                CASE WHEN operation = 'video_create' THEN 'async' ELSE 'unary' END,
+                'certified', now()
+         FROM revision_model CROSS JOIN
+              unnest(ARRAY['video_create', 'video_list', 'video_get',
+                           'video_content', 'video_delete']) AS operation",
+    )
+    .bind(provider_id)
+    .bind(provider_revision_id)
+    .execute(store.pool())
+    .await
+    .unwrap();
     let generation_id = RuntimeGenerationId::new();
     let generation_sequence: i64 = sqlx::query_scalar(
         "INSERT INTO runtime_generations \
@@ -507,9 +534,10 @@ async fn media_job_management_views_are_session_authorized_and_metadata_only() {
         )
         .await
         .unwrap();
-    assert_eq!(create.status(), StatusCode::CREATED);
+    let create_status = create.status();
     let created: Value =
         serde_json::from_slice(&create.into_body().collect().await.unwrap().to_bytes()).unwrap();
+    assert_eq!(create_status, StatusCode::CREATED, "{created}");
     let video_id = created["id"].as_str().unwrap().to_owned();
     assert_eq!(created["model"], "video-default");
     assert_ne!(video_id, "upstream-video-created");

@@ -58,6 +58,13 @@ pub struct ConfigurationPage<T> {
     pub next_cursor: Option<Uuid>,
 }
 
+#[derive(Clone, Debug)]
+pub struct ProviderModelPage {
+    pub provider_etag: Uuid,
+    pub items: Vec<ProviderModelRecord>,
+    pub next_cursor: Option<Uuid>,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CapabilityRecord {
     pub operation: OperationKind,

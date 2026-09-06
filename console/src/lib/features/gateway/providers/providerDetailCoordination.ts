@@ -2,13 +2,13 @@ import type { QueryClient } from '@tanstack/svelte-query';
 import { queryKeys } from '$lib/api/queryKeys';
 import {
   listProviderModelPage,
-  type ProviderModel
+  type ProviderModelPage
 } from '$lib/api/management/providerModels';
 import { type Provider } from '$lib/api/management/providers';
-import type { CursorPage } from '$lib/api/http';
+import { ApiProblem } from '$lib/api/http';
 
 export type CoordinatedModelPage = {
-  page: CursorPage<ProviderModel>;
+  page: ProviderModelPage;
   provider: Provider;
 };
 
@@ -18,15 +18,14 @@ export type RunProviderAction = (
 ) => Promise<boolean>;
 
 export function providerModelPageKey(
-  providerId: string,
-  providerSnapshot: Provider | undefined,
+  provider: Provider,
   cursor: string | undefined
 ) {
   return [
     'provider-model-page',
-    providerSnapshot?.id ?? providerId,
+    provider.id,
     cursor ?? 'first',
-    providerSnapshot?.etag ?? 'unversioned'
+    provider.etag
   ] as const;
 }
 
@@ -35,21 +34,16 @@ export async function fetchCoordinatedModelPage(
   cursor: string | undefined,
   signal?: AbortSignal
 ): Promise<CoordinatedModelPage> {
-  return {
-    page: await listProviderModelPage(provider.id, cursor, signal),
-    provider
-  };
-}
-
-function cacheCoordinatedModelPage(
-  queryClient: QueryClient,
-  coordinated: CoordinatedModelPage,
-  cursor: string | undefined
-) {
-  queryClient.setQueryData(
-    providerModelPageKey(coordinated.provider.id, coordinated.provider, cursor),
-    coordinated
-  );
+  const page = await listProviderModelPage(provider.id, cursor, signal);
+  if (page.providerEtag !== provider.etag) {
+    throw new ApiProblem({
+      type: 'https://openllmproxy.dev/problems/etag_mismatch',
+      title:
+        'The provider changed while loading its model page. Reload to continue.',
+      status: 412
+    });
+  }
+  return { page, provider };
 }
 
 /**
@@ -69,14 +63,13 @@ export async function installProviderWithModels(
   beforeAcceptProvider?: () => void
 ) {
   const coordinated = await fetchCoordinatedModelPage(provider, cursor);
-  cacheCoordinatedModelPage(queryClient, coordinated, cursor);
+  queryClient.setQueryData(providerModelPageKey(provider, cursor), coordinated);
   beforeAcceptProvider?.();
   acceptProvider(provider);
   await Promise.all([
     queryClient.invalidateQueries({
       queryKey: queryKeys.providers.modelsOf(provider.id),
-      refetchType: 'none',
-      predicate: (query) => query.queryKey[3] !== provider.etag
+      refetchType: 'none'
     }),
     queryClient.invalidateQueries({
       queryKey: queryKeys.providers.modelCatalog

@@ -9,6 +9,10 @@ type Schemas = components['schemas'];
 
 export type ProviderModel = Schemas['ProviderModelResponse'];
 
+export type ProviderModelPage = CursorPage<ProviderModel> & {
+  providerEtag: string;
+};
+
 export type ProviderModelInventory = Schemas['ProviderModelInventoryResponse'];
 
 export type CapabilityDeclaration = Schemas['CapabilityInput'];
@@ -48,7 +52,7 @@ export async function listProviderModelPage(
   providerId: string,
   cursor?: string,
   signal?: AbortSignal
-): Promise<CursorPage<ProviderModel>> {
+): Promise<ProviderModelPage> {
   const response = await apiClient.GET(
     '/api/v1/providers/{provider_id}/models',
     {
@@ -59,7 +63,8 @@ export async function listProviderModelPage(
       signal
     }
   );
-  return pageResult(result(response.data, response.error, response.response));
+  const page = result(response.data, response.error, response.response);
+  return { ...pageResult(page), providerEtag: page.provider_etag };
 }
 
 export async function listProviderModelInventoryPage(

@@ -17,7 +17,7 @@ use olp_db::{
 use olp_engine::domain::auth::Permission;
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
-use utoipa::ToSchema;
+use utoipa::{IntoParams, ToSchema};
 use uuid::Uuid;
 
 use crate::{
@@ -121,11 +121,20 @@ pub(crate) struct ApiKeyListResponse {
     pub next_cursor: Option<String>,
 }
 
+#[derive(Debug, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
+pub(crate) struct ApiKeyListQuery {
+    pub cursor: Option<String>,
+    #[param(minimum = 1, maximum = 200)]
+    pub limit: Option<u16>,
+    pub created_by: Option<Uuid>,
+}
+
 #[utoipa::path(
     get,
     path = "/api/v1/api-keys",
     tag = "api-keys",
-    params(PageQuery),
+    params(ApiKeyListQuery),
     responses(
         (status = 200, body = ApiKeyListResponse),
         (status = 400, description = "Malformed query parameters, or an invalid cursor or page size", body = Problem)
@@ -133,14 +142,17 @@ pub(crate) struct ApiKeyListResponse {
 )]
 pub(crate) async fn list_api_keys(
     State(state): State<ManagementState>,
-    Query(query): Query<PageQuery>,
+    Query(query): Query<ApiKeyListQuery>,
     ReadPrincipal(principal): ReadPrincipal,
 ) -> Result<Json<ApiKeyListResponse>, Problem> {
     require_permission(&principal, Permission::ReadConfiguration)?;
-    let (cursor, limit) = page(query)?;
+    let (cursor, limit) = page(PageQuery {
+        cursor: query.cursor,
+        limit: query.limit,
+    })?;
     let page = state
         .store()
-        .list_api_keys(cursor, limit)
+        .list_api_keys(query.created_by, cursor, limit)
         .await
         .map_err(map_configuration)?;
     let ids = page.items.iter().map(|key| key.id).collect::<Vec<_>>();

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { resolve } from '$app/paths';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { queryKeys } from '$lib/api/queryKeys';
   import {
@@ -186,7 +187,13 @@
                     : user.active
                       ? 'Deactivate'
                       : 'Reactivate'}</button
-                >{/if}</td
+                >{/if}
+              <a
+                class="button button-secondary"
+                href={`${resolve('/api-keys')}?created_by=${user.id}`}
+                aria-label={`Review API keys issued by ${user.display_name}`}
+                >Review API keys</a
+              ></td
             >
           </tr>
         {/each}

@@ -137,12 +137,15 @@ async fn replace_api_key_associations(
 impl Store {
     pub async fn list_api_keys(
         &self,
+        created_by: Option<Uuid>,
         cursor: Option<Uuid>,
         limit: i64,
     ) -> Result<ConfigurationPage<ApiKeyRecord>, Error> {
         let limit = checked_limit(limit)?;
         let rows = sqlx::query!(
-            "SELECT id FROM api_keys WHERE ($1::uuid IS NULL OR id > $1) ORDER BY id LIMIT $2",
+            "SELECT id FROM api_keys WHERE ($1::uuid IS NULL OR created_by = $1) \
+             AND ($2::uuid IS NULL OR id > $2) ORDER BY id LIMIT $3",
+            created_by,
             cursor,
             limit + 1
         )
@@ -200,11 +203,11 @@ impl Store {
                 .push(row.route_slug);
         }
 
-        let mut key_map = key_rows
+        let items = key_rows
             .into_iter()
             .map(|row| {
                 let id = row.id;
-                let record = ApiKeyRecord {
+                ApiKeyRecord {
                     id,
                     lookup_id: row.lookup_id,
                     name: row.name,
@@ -222,14 +225,8 @@ impl Store {
                     rotated_at: row.rotated_at,
                     etag: row.etag,
                     created_at: row.created_at,
-                };
-                (id, record)
+                }
             })
-            .collect::<BTreeMap<_, _>>();
-
-        let items = ids
-            .into_iter()
-            .filter_map(|id| key_map.remove(&id))
             .collect();
 
         Ok(ConfigurationPage { items, next_cursor })

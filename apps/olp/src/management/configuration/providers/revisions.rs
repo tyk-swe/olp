@@ -29,8 +29,14 @@ use crate::{
     public_http::problem::Problem,
 };
 
-use super::{manage::ProviderDetailResponse, models::ProviderModelListResponse};
+use super::{manage::ProviderDetailResponse, models::ProviderModelResponse};
 use crate::management::provenance::Provenance;
+
+#[derive(Clone, Debug, Serialize, ToSchema)]
+pub(crate) struct ProviderRevisionModelListResponse {
+    pub items: Vec<ProviderModelResponse>,
+    pub next_cursor: Option<String>,
+}
 
 #[derive(Clone, Debug, Serialize, ToSchema)]
 pub(crate) struct ProviderRevisionResponse {
@@ -248,7 +254,7 @@ pub(crate) async fn get_provider_revision(
         PageQuery,
     ),
     responses(
-        (status = 200, description = "Bounded historical provider model and capability page", body = ProviderModelListResponse),
+        (status = 200, description = "Bounded historical provider model and capability page", body = ProviderRevisionModelListResponse),
         (status = 400, description = "Malformed query parameters, or an invalid cursor or page size", body = Problem),
         (status = 404, body = Problem)
     )
@@ -258,7 +264,7 @@ pub(crate) async fn list_provider_revision_models(
     Path((provider_id, revision_id)): Path<(Uuid, Uuid)>,
     Query(query): Query<PageQuery>,
     ReadPrincipal(principal): ReadPrincipal,
-) -> Result<Json<ProviderModelListResponse>, Problem> {
+) -> Result<Json<ProviderRevisionModelListResponse>, Problem> {
     require_permission(&principal, Permission::ReadConfiguration)?;
     let (cursor, limit) = page(query)?;
     let page = state
@@ -266,7 +272,7 @@ pub(crate) async fn list_provider_revision_models(
         .list_provider_revision_models(provider_id, revision_id, cursor, limit)
         .await
         .map_err(map_configuration)?;
-    Ok(Json(ProviderModelListResponse {
+    Ok(Json(ProviderRevisionModelListResponse {
         items: page.items.into_iter().map(Into::into).collect(),
         next_cursor: page.next_cursor.map(|value| value.to_string()),
     }))

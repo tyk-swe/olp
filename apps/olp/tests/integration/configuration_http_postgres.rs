@@ -33,6 +33,7 @@ use uuid::Uuid;
 
 use crate::common::{BOOTSTRAP_TOKEN, configure_bootstrap};
 
+mod api_key_issuers;
 mod api_keys;
 mod provider_kinds;
 mod providers;
@@ -92,4 +93,5 @@ async fn configuration_http_flow_enforces_etags_roles_idempotency_and_one_time_s
         providers::exercise(&app, &configuration_state, &mock_provider, &cookie, &csrf).await;
     let draft_id = routes::exercise(&app, &cookie, &csrf, &provider_id, &model_id).await;
     api_keys::exercise(&app, &cookie, &csrf, &draft_id, &model_id).await;
+    api_key_issuers::verify(&app, &store, &cookie).await;
 }

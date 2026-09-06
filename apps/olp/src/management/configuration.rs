@@ -83,6 +83,7 @@ pub(super) fn router() -> Router<ManagementState> {
         providers::revisions::ProviderRevisionSummaryResponse,
         providers::revisions::ProviderRevisionResponse,
         providers::revisions::ProviderRevisionListResponse,
+        providers::revisions::ProviderRevisionModelListResponse,
         providers::revisions::ProviderRevisionDiffResponse,
         providers::revisions::ProviderRevisionRestoreResponse,
         providers::manage::UpdateProviderRequest,

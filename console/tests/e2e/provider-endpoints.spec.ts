@@ -31,7 +31,11 @@ test('native provider detail never round-trips its official endpoint as a custom
     }
     if (pathname === `/api/v1/providers/${ids.provider}/models`) {
       await route.fulfill({
-        json: { items: currentProvider.models, next_cursor: null }
+        json: {
+          provider_etag: currentProvider.etag,
+          items: currentProvider.models,
+          next_cursor: null
+        }
       });
       return;
     }
@@ -89,7 +93,11 @@ test('provider validation rejections name the field, the reason, and the code', 
     }
     if (pathname === `/api/v1/providers/${ids.provider}/models`) {
       await route.fulfill({
-        json: { items: currentProvider.models, next_cursor: null }
+        json: {
+          provider_etag: currentProvider.etag,
+          items: currentProvider.models,
+          next_cursor: null
+        }
       });
       return;
     }

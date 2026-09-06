@@ -69,6 +69,24 @@ The source-size baseline may only shrink: `check-source-size.sh --update` reject
 new exceptions. Transactional helpers retain the caller-owned transaction and
 lock order; refactoring does not split commits or change persistent formats.
 
+## Durable media reservation
+
+A video request gains durable admission when its media-job reservation commits,
+before any upstream create. The reservation takes a shared provider row lock;
+activation and disable take an exclusive lock on that same row until their
+runtime publication commits. After acquiring the lock, reservation uses a fresh
+READ COMMITTED snapshot to compare the pinned connector and credential with the
+current activated revision and require the selected model's enabled, certified
+unary video-get, content, and delete support on the request surface.
+
+If reservation wins, incompatible activation and disable see the reserved job
+and fail. If mutation wins, an incompatible delayed reservation fails before
+upstream submission. Matching generation or revision IDs are not required:
+compatible older pinned requests retain their original authority. Already
+reserved jobs keep their historical connector and credentials for reconciliation
+and cleanup, including after those credentials are retired. These recovery reads
+do not grant admission to new jobs.
+
 ## Distributed tracing
 
 Distributed tracing is an optional delivery capability. `apps/olp` owns OTLP

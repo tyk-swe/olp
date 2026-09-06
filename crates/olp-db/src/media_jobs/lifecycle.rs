@@ -17,12 +17,50 @@ impl Store {
         input: NewMediaJobReservation,
     ) -> Result<MediaJobRecord, MediaJobError> {
         validate_reservation(&input)?;
+        let mut transaction = self
+            .pool()
+            .begin_with("BEGIN ISOLATION LEVEL READ COMMITTED")
+            .await?;
+        // Acquire admission authority before taking the INSERT's fresh snapshot.
+        sqlx::query!(
+            "SELECT id FROM providers WHERE id = $1 FOR SHARE",
+            input.provider_id
+        )
+        .fetch_optional(&mut *transaction)
+        .await?;
         let inserted = sqlx::query!(
             "WITH authority AS (
                 SELECT rpc.runtime_generation_id, rpc.provider_revision_id
                 FROM runtime_generation_provider_configs rpc
+                JOIN providers provider ON provider.id = rpc.provider_id
+                JOIN provider_revisions current ON current.id = provider.active_revision_id
                 WHERE rpc.runtime_generation_id = $8 AND rpc.provider_id = $3
                   AND rpc.provider_revision_id IS NOT NULL
+                  AND rpc.kind IS NOT DISTINCT FROM current.kind
+                  AND rpc.endpoint IS NOT DISTINCT FROM current.endpoint
+                  AND rpc.cloud_region IS NOT DISTINCT FROM current.cloud_region
+                  AND rpc.cloud_project IS NOT DISTINCT FROM current.cloud_project
+                  AND rpc.deployment IS NOT DISTINCT FROM current.deployment
+                  AND rpc.api_version IS NOT DISTINCT FROM current.api_version
+                  AND rpc.auth_mode IS NOT DISTINCT FROM current.auth_mode
+                  AND rpc.active_credential_version_id
+                      IS NOT DISTINCT FROM current.credential_version_id
+                  AND EXISTS (
+                    SELECT 1 FROM provider_revision_models prm
+                    WHERE prm.provider_revision_id = current.id
+                      AND prm.upstream_model = $4 AND prm.enabled
+                      AND NOT EXISTS (
+                        SELECT required.operation
+                        FROM (VALUES ('video_get'), ('video_content'), ('video_delete'))
+                             AS required(operation)
+                        WHERE NOT EXISTS (
+                          SELECT 1 FROM provider_revision_capabilities prc
+                          WHERE prc.provider_revision_model_id = prm.id
+                            AND prc.operation = required.operation AND prc.surface = $7
+                            AND prc.mode = 'unary' AND prc.source = 'certified'
+                        )
+                      )
+                  )
              )
              INSERT INTO async_media_jobs (
                 id, upstream_job_id, api_key_id, provider_id, provider_model,
@@ -32,8 +70,10 @@ impl Store {
              SELECT $1, NULL, $2, $3, $4, $5, $6, $7, 'queued', 'creating',
                     authority.runtime_generation_id, authority.provider_revision_id
              FROM (SELECT 1) seed LEFT JOIN authority ON true
-             WHERE authority.provider_revision_id IS NOT NULL
-                OR NOT EXISTS (SELECT 1 FROM runtime_generations)",
+             WHERE (authority.provider_revision_id IS NOT NULL
+                    OR NOT EXISTS (SELECT 1 FROM runtime_generations))
+               AND EXISTS (SELECT 1 FROM providers
+                           WHERE id = $3 AND state <> 'disabled'::provider_state)",
             input.id,
             input.api_key_id,
             input.provider_id,
@@ -43,13 +83,14 @@ impl Store {
             input.surface.as_str(),
             input.runtime_generation_id
         )
-        .execute(self.pool())
+        .execute(&mut *transaction)
         .await?;
         if inserted.rows_affected() != 1 {
             return Err(MediaJobError::Invalid(
-                "the pinned runtime generation has no durable provider authority".to_owned(),
+                "the pinned provider authority is unavailable or incompatible with current video support".to_owned(),
             ));
         }
+        transaction.commit().await?;
         self.media_job(input.id).await
     }
 

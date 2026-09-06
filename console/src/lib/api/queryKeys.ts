@@ -54,8 +54,9 @@ export const queryKeys = {
   },
   apiKeys: {
     root: ['api-keys'] as const,
-    all: () => ['api-keys', 'all'] as const,
-    page: (cursor?: string) => ['api-keys', 'page', first(cursor)] as const
+    hasNonrevoked: () => ['api-keys', 'has-nonrevoked'] as const,
+    page: (cursor?: string, createdBy?: string) =>
+      ['api-keys', 'page', createdBy ?? 'all', first(cursor)] as const
   },
   users: {
     page: (cursor?: string) => ['users', 'page', first(cursor)] as const,

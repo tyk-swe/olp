@@ -93,8 +93,10 @@ test('provider studio compares redacted history and restores non-secret configur
       await route.fulfill({ json: { items: [], next_cursor: null } });
       return;
     }
-    if (url.pathname.endsWith('/models')) {
-      await route.fulfill({ json: { items: [], next_cursor: null } });
+    if (url.pathname === `/api/v1/providers/${ids.provider}/models`) {
+      await route.fulfill({
+        json: { provider_etag: current.etag, items: [], next_cursor: null }
+      });
       return;
     }
     if (url.pathname.endsWith('/revisions/diff')) {

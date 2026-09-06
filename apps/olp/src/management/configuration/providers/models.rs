@@ -266,6 +266,7 @@ impl From<ProviderModelRecord> for ProviderModelResponse {
 
 #[derive(Clone, Debug, Serialize, ToSchema)]
 pub(crate) struct ProviderModelListResponse {
+    pub provider_etag: Uuid,
     pub items: Vec<ProviderModelResponse>,
     pub next_cursor: Option<String>,
 }
@@ -355,6 +356,7 @@ pub(crate) async fn list_provider_models(
         .await
         .map_err(map_configuration)?;
     Ok(Json(ProviderModelListResponse {
+        provider_etag: page.provider_etag,
         items: page.items.into_iter().map(Into::into).collect(),
         next_cursor: page.next_cursor.map(|value| value.to_string()),
     }))

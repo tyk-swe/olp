@@ -148,26 +148,28 @@
     busy = 'reload';
     errorMessage = notice = '';
     validationIssues = [];
-    const beforeReload = sync;
-    sync = beginReload(sync);
     try {
       const reloaded = await getProvider(providerId);
-      if (providerSpec) {
-        const next = reconcile(sync, reloaded.etag);
-        sync = next.state;
-        if (next.hydrate) {
-          editValues = providerEditValues(reloaded, providerSpec);
+      await installProviderWithModels(
+        queryClient,
+        reloaded,
+        modelPageState.cursor,
+        (updated) => {
+          sync = beginReload(sync);
+          if (providerSpec) {
+            const next = reconcile(sync, updated.etag);
+            sync = next.state;
+            if (next.hydrate)
+              editValues = providerEditValues(updated, providerSpec);
+          }
+          queryClient.setQueryData(
+            queryKeys.providers.detail(updated.id),
+            updated
+          );
+          reloadVersion += 1;
         }
-      }
-      // Keep reloadPending until the effect can hydrate with a loaded
-      // specification.
-      queryClient.setQueryData(
-        queryKeys.providers.detail(reloaded.id),
-        reloaded
       );
-      reloadVersion += 1;
     } catch (error) {
-      sync = beforeReload;
       errorMessage = providerDetailError(error);
     } finally {
       busy = '';
@@ -184,12 +186,14 @@
         sync.snapshotEtag,
         buildUpdateProviderInput(editValues, providerSpec)
       );
-      sync = markSaved(sync, updated.etag);
       await installProviderWithModels(
         queryClient,
         updated,
         undefined,
-        acceptProvider,
+        (accepted) => {
+          sync = markSaved(sync, accepted.etag);
+          acceptProvider(accepted);
+        },
         resetModelPage
       );
       await queryClient.invalidateQueries({
@@ -307,6 +311,9 @@
     bind:pageState={modelPageState}
     onAcceptProvider={acceptProvider}
     onError={reportError}
+    onConflict={() => {
+      sync = markConflict(sync);
+    }}
     onNotice={reportNotice}
   />
   <ProviderRevisionsSection

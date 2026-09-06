@@ -1,5 +1,5 @@
 import { ESLint } from 'eslint';
-import { describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it } from 'vitest';
 
 const lint = new ESLint();
 
@@ -13,6 +13,10 @@ async function boundaryMessages(file: string, source: string) {
 }
 
 describe('architecture boundaries', () => {
+  beforeAll(async () => {
+    await lint.calculateConfigForFile('src/lib/shared.ts');
+  });
+
   it.each([
     ['shared.ts', "import '$lib/features/gateway/example';", 'neutral'],
     ['lists/shared.ts', "import '../features/gateway/example';", 'neutral'],

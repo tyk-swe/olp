@@ -12,9 +12,17 @@ impl Store {
         provider_id: Uuid,
         cursor: Option<Uuid>,
         limit: i64,
-    ) -> Result<ConfigurationPage<ProviderModelRecord>, Error> {
+    ) -> Result<ProviderModelPage, Error> {
         let limit = checked_limit(limit)?;
-        ensure_provider_exists(self, provider_id).await?;
+        let mut transaction = self
+            .pool()
+            .begin_with("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY")
+            .await?;
+        let provider_etag =
+            sqlx::query_scalar!("SELECT etag FROM providers WHERE id = $1", provider_id)
+                .fetch_optional(&mut *transaction)
+                .await?
+                .ok_or(Error::NotFound)?;
         let rows = sqlx::query_as!(
             ProviderModelRow,
             "SELECT id, upstream_model, display_name, enabled, discovered_at \
@@ -24,11 +32,16 @@ impl Store {
             cursor,
             limit + 1
         )
-        .fetch_all(self.pool())
+        .fetch_all(&mut *transaction)
         .await?;
         let (rows, next_cursor) = split_page(rows, limit as usize, |row| row.id);
-        let items = self.provider_models_from_rows(rows).await?;
-        Ok(ConfigurationPage { items, next_cursor })
+        let items = Self::provider_models_from_rows(&mut *transaction, rows).await?;
+        transaction.commit().await?;
+        Ok(ProviderModelPage {
+            provider_etag,
+            items,
+            next_cursor,
+        })
     }
 
     pub async fn list_provider_model_inventory(
@@ -69,8 +82,7 @@ impl Store {
             })
             .collect::<Result<BTreeMap<_, _>, Error>>()?;
         let model_rows = rows.into_iter().map(ProviderInventoryRow::model).collect();
-        let items = self
-            .provider_models_from_rows(model_rows)
+        let items = Self::provider_models_from_rows(self.pool(), model_rows)
             .await?
             .into_iter()
             .map(|model| {
@@ -104,7 +116,7 @@ impl Store {
         )
         .fetch_all(self.pool())
         .await?;
-        self.provider_models_from_rows(rows)
+        Self::provider_models_from_rows(self.pool(), rows)
             .await?
             .into_iter()
             .next()
@@ -112,7 +124,7 @@ impl Store {
     }
 
     async fn provider_models_from_rows(
-        &self,
+        executor: impl sqlx::PgExecutor<'_>,
         rows: Vec<ProviderModelRow>,
     ) -> Result<Vec<ProviderModelRecord>, Error> {
         let model_ids = rows.iter().map(|row| row.id).collect::<Vec<_>>();
@@ -126,7 +138,7 @@ impl Store {
                  ORDER BY provider_model_id, operation, surface, mode",
                 &model_ids
             )
-            .fetch_all(self.pool())
+            .fetch_all(executor)
             .await?
         };
         let mut capabilities = BTreeMap::<Uuid, Vec<CapabilityRecord>>::new();
@@ -465,16 +477,6 @@ impl ProviderInventoryRow {
             discovered_at: self.discovered_at,
         }
     }
-}
-
-async fn ensure_provider_exists(store: &Store, provider_id: Uuid) -> Result<(), Error> {
-    let exists: bool = sqlx::query_scalar!(
-        "SELECT EXISTS (SELECT 1 FROM providers WHERE id = $1) AS \"value!\"",
-        provider_id
-    )
-    .fetch_one(store.pool())
-    .await?;
-    exists.then_some(()).ok_or(Error::NotFound)
 }
 
 /// Upserts every discovered model in one statement and reconciles their

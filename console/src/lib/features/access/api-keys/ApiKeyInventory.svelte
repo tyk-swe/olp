@@ -1,9 +1,11 @@
 <script lang="ts">
+  import { goto } from '$app/navigation';
+  import { page } from '$app/state';
   import { resolve } from '$app/paths';
   import { queryKeys } from '$lib/api/queryKeys';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { errorMessage } from '$lib/api/http';
-  import { cursorPaginationProps } from '$lib/lists/pagination';
+  import { cursorPaginationProps, resetCursor } from '$lib/lists/pagination';
   import {
     listApiKeyPage,
     revokeApiKey,
@@ -36,17 +38,48 @@
   const queryClient = useQueryClient();
   let busy = $state('');
   let mutationError = $state('');
+  const createdBy = $derived(
+    page.url.searchParams.get('created_by')?.trim().toLowerCase() || undefined
+  );
+  let issuer = $state('');
+  const cursor = $derived(
+    listState.createdBy === createdBy ? listState.cursor : undefined
+  );
+  $effect(() => {
+    issuer = createdBy ?? '';
+    if (listState.createdBy !== createdBy) {
+      resetCursor(listState);
+      listState.createdBy = createdBy;
+    }
+  });
   const keys = createQuery(() => ({
-    queryKey: queryKeys.apiKeys.page(listState.cursor),
-    queryFn: () => listApiKeyPage(listState.cursor)
+    queryKey: queryKeys.apiKeys.page(cursor, createdBy),
+    queryFn: ({ signal }) => listApiKeyPage(cursor, signal, createdBy)
   }));
 
-  /** The overview setup checklist owns ['api-keys'] and goes stale otherwise. */
-  async function refreshKeyConsumers() {
-    await Promise.all([
-      keys.refetch(),
-      queryClient.invalidateQueries({ queryKey: queryKeys.apiKeys.all() })
-    ]);
+  const issuers = $derived(
+    new Map(
+      (keys.data?.items ?? []).map((key) => [
+        key.created_by,
+        key.created_by_email
+      ])
+    )
+  );
+
+  async function filterIssuer(value: string) {
+    const url = new URL(page.url);
+    const id = value.trim().toLowerCase();
+    if (id) url.searchParams.set('created_by', id);
+    else url.searchParams.delete('created_by');
+    const target = url.search
+      ? resolve(`/api-keys?${url.searchParams}${url.hash}`)
+      : url.hash
+        ? resolve(`/api-keys#${url.hash.slice(1)}`)
+        : resolve('/api-keys');
+    await goto(target, {
+      keepFocus: true,
+      noScroll: true
+    });
   }
 
   async function rotate(key: ApiKey) {
@@ -60,7 +93,7 @@
     mutationError = '';
     try {
       onSecret(await rotateApiKey(key), key.allowed_routes[0]);
-      await refreshKeyConsumers();
+      await queryClient.invalidateQueries({ queryKey: queryKeys.apiKeys.root });
     } catch (error) {
       mutationError = errorMessage(error);
     } finally {
@@ -74,7 +107,7 @@
     mutationError = '';
     try {
       await revokeApiKey(key);
-      await refreshKeyConsumers();
+      await queryClient.invalidateQueries({ queryKey: queryKeys.apiKeys.root });
     } catch (error) {
       mutationError = errorMessage(error);
     } finally {
@@ -107,6 +140,41 @@
   </div>{/if}
 {#if notice}<div class="success-message" role="status">{notice}</div>{/if}
 
+<form
+  class="card issuer-filter"
+  onsubmit={(event) => {
+    event.preventDefault();
+    void filterIssuer(issuer);
+  }}
+>
+  <label class="field">
+    <span>Issuer (user ID)</span>
+    <input
+      bind:value={issuer}
+      list="key-issuers"
+      placeholder="All issuers"
+      pattern={'[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}'}
+      aria-describedby="issuer-hint"
+    />
+  </label>
+  <datalist id="key-issuers">
+    {#each [...issuers] as [id, email] (id)}<option value={id}>{email}</option
+      >{/each}
+  </datalist>
+  <p id="issuer-hint">
+    Choose an issuer from this page or enter a user ID. Keys attributed to
+    inactive members remain available for review.
+  </p>
+  <div class="page-actions">
+    <button class="button button-secondary" type="submit">Apply issuer</button>
+    <button
+      class="button button-secondary"
+      type="button"
+      onclick={() => filterIssuer('')}>Clear issuer</button
+    >
+  </div>
+</form>
+
 {#if keys.isPending}
   <div class="loading-state" role="status">Loading API keys…</div>
 {:else if keys.isError}
@@ -121,9 +189,13 @@
 {:else if !keys.data?.items.length && listState.history.length === 0}
   <section class="card empty-state">
     <div>
-      <h2>No API keys</h2>
-      <p>Create a scoped key after activating your first route.</p>
-      {#if canManage}<a
+      <h2>{createdBy ? 'No API keys for this issuer' : 'No API keys'}</h2>
+      <p>
+        {createdBy
+          ? 'Choose another issuer or clear the filter to review all keys.'
+          : 'Create a scoped key after activating your first route.'}
+      </p>
+      {#if canManage && !createdBy}<a
           class="button button-primary"
           href={resolve('/api-keys/new')}>Create first key</a
         >{/if}
@@ -205,12 +277,19 @@
               {/if}
             </td>
             <td
-              ><strong>{key.created_by_email}</strong><br /><small
-                >{formatDate(key.created_at)}</small
-              ></td
+              ><a
+                href={`${resolve('/api-keys')}?created_by=${key.created_by}`}
+                aria-label={`Review API keys issued by ${key.created_by_email}`}
+                >{key.created_by_email}</a
+              ><br /><small>{formatDate(key.created_at)}</small></td
             >
             <td
               ><div class="row-actions">
+                <a
+                  class="button button-secondary"
+                  href={resolve(`/usage?api_key_id=${key.id}`)}
+                  aria-label={`Usage for ${key.name}`}>Usage</a
+                >
                 <button
                   class="button button-secondary"
                   type="button"
@@ -264,6 +343,9 @@
     background: var(--success-soft);
     color: var(--success);
     font-weight: 700;
+  }
+  .issuer-filter {
+    padding: 1rem;
   }
   .key-table {
     margin-top: 1.5rem;

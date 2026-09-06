@@ -47,6 +47,11 @@ throughput range for the ±10% same-machine reproducibility gate. The local
 `/v1/models` route has no upstream request, so its result contains only gateway
 latency and throughput.
 
+`make bench-report` compares gateway throughput for both added-latency and
+gateway-latency scenarios when the current and previous runs are valid. A
+throughput loss greater than 25% produces a warning; invalid runs are excluded
+from comparisons. Offline reporter fixtures run with `make script-selftest`.
+
 The mock returns unary chat and embedding responses after 200 ms and emits a
 fixed 50-token chat stream. A valid run requires zero admission rejections and
 zero scenario errors. The JSON retains error rates, status distributions, raw

@@ -1,7 +1,6 @@
 import type { components } from '../schema';
 import { apiClient } from '../client';
-import { pageResult, result } from '../http';
-import { collectCursorPages } from '../pagination';
+import { ApiProblem, pageResult, result } from '../http';
 import { type CursorPage } from '$lib/api/http';
 
 type Schemas = components['schemas'];
@@ -13,16 +12,36 @@ export type ApiKeyMutation = Schemas['ApiKeyMutationResponse'];
 export type ApiKeySecret =
   Schemas['CreateApiKeyResponse'] | Schemas['RotateApiKeyResponse'];
 
-export async function listApiKeys(signal?: AbortSignal): Promise<ApiKey[]> {
-  return collectCursorPages((cursor) => listApiKeyPage(cursor, signal));
+export async function hasNonrevokedApiKey(
+  signal?: AbortSignal
+): Promise<boolean> {
+  const seen = new Set<string>();
+  let cursor: string | undefined;
+  do {
+    const page = await listApiKeyPage(cursor, signal);
+    if (page.items.some((key) => !key.revoked_at)) return true;
+    cursor = page.nextCursor ?? undefined;
+    if (cursor) {
+      if (seen.has(cursor)) {
+        throw new ApiProblem({
+          type: 'urn:olp:problem:invalid-cursor-cycle',
+          title: 'The control API returned a repeated pagination cursor',
+          status: 502
+        });
+      }
+      seen.add(cursor);
+    }
+  } while (cursor);
+  return false;
 }
 
 export async function listApiKeyPage(
   cursor?: string,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  createdBy?: string
 ): Promise<CursorPage<ApiKey>> {
   const response = await apiClient.GET('/api/v1/api-keys', {
-    params: { query: { limit: 50, cursor } },
+    params: { query: { limit: 50, cursor, created_by: createdBy } },
     signal
   });
   return pageResult(result(response.data, response.error, response.response));
