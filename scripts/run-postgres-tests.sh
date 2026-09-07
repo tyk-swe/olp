@@ -70,11 +70,19 @@ if [[ -z ${OLP_VALKEY_URL:-} ]]; then
   # composes with any caller filterset or name filter, unlike a second -E
   # expression, which nextest would OR-combine. Reuse the caller's `--`
   # section if they already opened one.
-  echo "OLP_VALKEY_URL is unset; skipping the Valkey-backed suites" >&2
-  skip_args=(-- --skip distributed_limits_valkey --skip request_metadata_consumer_valkey)
+  echo "OLP_VALKEY_URL is unset or empty; skipping the Valkey-backed cases" >&2
+  skip_args=(
+    --
+    --skip distributed_limits_valkey
+    --skip distributed_cost_limits_valkey
+    --skip request_metadata_consumer_valkey
+    --skip spend_controls_postgres::status_and_reconciliation_include_raw_and_exact_hourly_attempts
+    --skip spend_controls_postgres::reconciliation_repairs_malformed_state_and_continues_to_later_keys
+    --skip spend_recovery_postgres::future_skew_is_excluded_from_today_but_retained_in_its_own_window
+  )
   for argument in "$@"; do
     if [[ $argument == -- ]]; then
-      skip_args=(--skip distributed_limits_valkey --skip request_metadata_consumer_valkey)
+      skip_args=("${skip_args[@]:1}")
       break
     fi
   done
