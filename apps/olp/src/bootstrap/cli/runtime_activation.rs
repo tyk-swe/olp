@@ -1,13 +1,22 @@
-use std::{collections::BTreeSet, sync::Arc, time::Duration};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    sync::Arc,
+    time::Duration,
+};
 
 use olp_db::{security::envelope::MasterKey, store::Store, valkey::RuntimeHintSubscriber};
+use olp_engine::domain::{ids::ProviderId, ports::ProviderTransport, routing::snapshot::Snapshot};
 use olp_engine::inference::{circuit::Breaker, runtime::Manager};
 use olp_engine::providers::{connector::ResponseLimits, http_egress::EgressPolicy};
-use tokio::{sync::watch, task::JoinHandle};
+use tokio::{
+    sync::{Mutex, watch},
+    task::JoinHandle,
+};
 use tracing::{error, info, warn};
 
 use crate::{
-    application::transports::TransportRegistry, bootstrap::connectors::load_runtime_transports,
+    application::transports::TransportRegistry,
+    bootstrap::{connectors::load_runtime_transports, state::ProcessComposition},
 };
 
 use super::AppResult;
@@ -17,30 +26,38 @@ pub(super) struct RuntimeHintSource {
     pub(super) channel: String,
 }
 
-/// Everything a background activation needs, cloned once per supervisor.
 #[derive(Clone)]
 pub(super) struct RuntimeActivator {
     pub(super) runtime: Arc<Manager>,
-    pub(super) store: Store,
-    pub(super) transports: TransportRegistry,
-    pub(super) circuits: Breaker,
-    pub(super) master_key: Option<Arc<MasterKey>>,
-    pub(super) egress_policy: Arc<EgressPolicy>,
-    pub(super) response_limits: ResponseLimits,
+    store: Store,
+    transports: TransportRegistry,
+    circuits: Breaker,
+    master_key: Option<Arc<MasterKey>>,
+    egress_policy: Arc<EgressPolicy>,
+    response_limits: ResponseLimits,
+    activation_lock: Arc<Mutex<()>>,
+    #[cfg(test)]
+    after_publication: Option<Arc<tokio::sync::Barrier>>,
+    #[cfg(test)]
+    after_authority_read: Option<Arc<tokio::sync::Barrier>>,
 }
 
 impl RuntimeActivator {
-    async fn activate(&self) -> AppResult<bool> {
-        activate_latest_runtime(
-            &self.runtime,
-            &self.store,
-            &self.transports,
-            &self.circuits,
-            self.master_key.as_deref(),
-            &self.egress_policy,
-            self.response_limits,
-        )
-        .await
+    pub(super) fn new(state: &ProcessComposition) -> Self {
+        Self {
+            runtime: Arc::clone(&state.runtime),
+            store: state.store.clone(),
+            transports: state.transports.clone(),
+            circuits: state.circuits.clone(),
+            master_key: state.master_key.clone(),
+            egress_policy: Arc::clone(&state.provider_egress_policy),
+            response_limits: state.provider_response_limits,
+            activation_lock: Arc::new(Mutex::new(())),
+            #[cfg(test)]
+            after_publication: None,
+            #[cfg(test)]
+            after_authority_read: None,
+        }
     }
 }
 
@@ -133,66 +150,99 @@ pub(super) fn spawn_runtime_poller(
     })
 }
 
-pub(super) async fn activate_latest_runtime(
-    runtime: &Manager,
-    store: &Store,
-    transports: &TransportRegistry,
-    circuits: &Breaker,
-    master_key: Option<&MasterKey>,
-    egress_policy: &EgressPolicy,
-    response_limits: ResponseLimits,
-) -> AppResult<bool> {
-    let releases = store
-        .recent_valid_runtime_releases_after(32, runtime.active_generation_ordinal())
-        .await?;
-    if releases.is_empty() {
-        return Ok(false);
-    }
-    let current_api_keys = store.current_runtime_api_keys().await?;
-    let mut rejected = Vec::new();
-    for release in releases {
-        let mut snapshot = match runtime
-            .decode_release_candidate(release.activation_candidate(), current_api_keys.clone())
-        {
-            Ok(snapshot) => snapshot,
-            Err(error) => {
-                rejected.push(format!("{}: {error}", release.sequence));
-                continue;
-            }
-        };
-        // Provider transports are assembled from normalized secret storage, not
-        // the public runtime payload. Require the release-time sidecar to match
-        // every current transport-affecting field before accepting an LKG.
-        let provider_configurations = match store.runtime_provider_configurations(&snapshot).await {
-            Ok(configurations) => configurations,
-            Err(error) => {
-                rejected.push(format!("{}: {error}", release.sequence));
-                continue;
-            }
-        };
-        for configuration in provider_configurations {
-            if let Some(revision) = configuration.provider_revision_id
-                && let Some(provider) = snapshot.providers.get_mut(&configuration.provider_id)
+impl RuntimeActivator {
+    pub(super) async fn activate(&self) -> AppResult<bool> {
+        let _activation = self.activation_lock.lock().await;
+        let current_api_keys = self.store.current_runtime_api_keys().await?;
+        #[cfg(test)]
+        if let Some(barrier) = &self.after_authority_read {
+            barrier.wait().await;
+            barrier.wait().await;
+        }
+        self.runtime.refresh_api_keys(current_api_keys.clone())?;
+        let releases = self
+            .store
+            .recent_valid_runtime_releases_after(32, self.runtime.active_generation_ordinal())
+            .await?;
+        if releases.is_empty() {
+            return Ok(false);
+        }
+        let mut rejected = Vec::new();
+        for release in releases {
+            let mut snapshot = match self
+                .runtime
+                .decode_release_candidate(release.activation_candidate(), &current_api_keys)
             {
-                provider.revision_id = Some(revision);
+                Ok(snapshot) => snapshot,
+                Err(error) => {
+                    rejected.push(format!("{}: {error}", release.sequence));
+                    continue;
+                }
+            };
+            // Provider transports are assembled from normalized secret storage, not
+            // the public runtime payload. Require the release-time sidecar to match
+            // every current transport-affecting field before accepting an LKG.
+            let provider_configurations =
+                match self.store.runtime_provider_configurations(&snapshot).await {
+                    Ok(configurations) => configurations,
+                    Err(error) => {
+                        rejected.push(format!("{}: {error}", release.sequence));
+                        continue;
+                    }
+                };
+            for configuration in &provider_configurations {
+                if let Some(revision) = configuration.provider_revision_id
+                    && let Some(provider) = snapshot.providers.get_mut(&configuration.provider_id)
+                {
+                    provider.revision_id = Some(revision);
+                }
+            }
+            let mut candidate_transports = self.transports.snapshot();
+            if let Some(master_key) = self.master_key.as_deref()
+                && let Err(error) = load_runtime_transports(
+                    &provider_configurations,
+                    master_key,
+                    &snapshot,
+                    &mut candidate_transports,
+                    &self.egress_policy,
+                    self.response_limits,
+                )
+                .await
+            {
+                rejected.push(format!("{}: {error}", release.sequence));
+                continue;
+            }
+            candidate_transports
+                .retain(|provider_id, _| snapshot.providers.contains_key(provider_id));
+            match self.install_candidate(snapshot, candidate_transports).await {
+                Ok(installed) => {
+                    if !rejected.is_empty() {
+                        warn!(
+                            rejected = ?rejected,
+                            selected_sequence = release.sequence,
+                            "installed previous verified runtime release after rejecting newer candidates"
+                        );
+                    }
+                    return Ok(installed);
+                }
+                Err(error) => rejected.push(format!("{}: {error}", release.sequence)),
             }
         }
-        let mut candidate_transports = transports.snapshot();
-        if let Some(master_key) = master_key
-            && let Err(error) = load_runtime_transports(
-                store,
-                master_key,
-                &snapshot,
-                &mut candidate_transports,
-                egress_policy,
-                response_limits,
-            )
-            .await
-        {
-            rejected.push(format!("{}: {error}", release.sequence));
-            continue;
+        if rejected.is_empty() {
+            return Ok(false);
         }
-        candidate_transports.retain(|provider_id, _| snapshot.providers.contains_key(provider_id));
+        Err(std::io::Error::other(format!(
+            "no verified runtime release could be installed: {}",
+            rejected.join("; ")
+        ))
+        .into())
+    }
+
+    async fn install_candidate(
+        &self,
+        snapshot: Snapshot,
+        transports: BTreeMap<ProviderId, Arc<dyn ProviderTransport>>,
+    ) -> AppResult<bool> {
         let live_targets = snapshot
             .routes
             .values()
@@ -203,29 +253,17 @@ pub(super) async fn activate_latest_runtime(
                     .map(|target| target.routing_id.unwrap_or(target.id))
             })
             .collect::<BTreeSet<_>>();
-        match runtime.install(snapshot, candidate_transports) {
-            Ok(installed) => {
-                if installed {
-                    circuits.retain_targets(&live_targets);
-                }
-                if !rejected.is_empty() {
-                    warn!(
-                        rejected = ?rejected,
-                        selected_sequence = release.sequence,
-                        "installed previous verified runtime release after rejecting newer candidates"
-                    );
-                }
-                return Ok(installed);
+        let installed = self.runtime.install(snapshot, transports)?;
+        if installed {
+            #[cfg(test)]
+            if let Some(barrier) = &self.after_publication {
+                barrier.wait().await;
             }
-            Err(error) => rejected.push(format!("{}: {error}", release.sequence)),
+            self.circuits.retain_targets(&live_targets);
         }
+        Ok(installed)
     }
-    if rejected.is_empty() {
-        return Ok(false);
-    }
-    Err(std::io::Error::other(format!(
-        "no verified runtime release could be installed: {}",
-        rejected.join("; ")
-    ))
-    .into())
 }
+
+#[cfg(test)]
+mod tests;

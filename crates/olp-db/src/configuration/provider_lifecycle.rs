@@ -419,8 +419,8 @@ async fn reject_incompatible_media_jobs(
     )
     .fetch_optional(&mut **transaction)
     .await?;
-    if incompatible_media_job.is_some() {
-        return Err(Error::ProviderIncomplete);
+    if let Some(job_id) = incompatible_media_job {
+        return Err(Error::ProviderMediaJobIncompatible { job_id });
     }
     Ok(())
 }

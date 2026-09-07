@@ -138,6 +138,28 @@ impl Manager {
         Ok(true)
     }
 
+    pub fn refresh_api_keys(
+        &self,
+        api_keys: BTreeMap<ApiKeyLookupId, ApiKey>,
+    ) -> Result<(), Error> {
+        let _install = self
+            .install_lock
+            .lock()
+            .expect("runtime install lock poisoned");
+        let current = self.bundle.load_full();
+        if current.snapshot.api_keys == api_keys {
+            return Ok(());
+        }
+        let mut snapshot = current.snapshot.clone();
+        snapshot.api_keys = api_keys;
+        snapshot.validate()?;
+        self.bundle.store(Arc::new(Bundle {
+            snapshot,
+            transports: current.transports.clone(),
+        }));
+        Ok(())
+    }
+
     pub fn decode_persisted_release(release: &ReleaseCandidate<'_>) -> Result<Snapshot, Error> {
         let mut snapshot = Snapshot::from_persisted_slice(release.payload)?;
         if snapshot.generation.id.as_uuid() != release.generation_id {
@@ -171,10 +193,10 @@ impl Manager {
     pub fn decode_release_candidate(
         &self,
         release: ReleaseCandidate<'_>,
-        current_api_keys: BTreeMap<ApiKeyLookupId, ApiKey>,
+        current_api_keys: &BTreeMap<ApiKeyLookupId, ApiKey>,
     ) -> Result<Snapshot, Error> {
         let mut snapshot = Self::decode_persisted_release(&release)?;
-        snapshot.api_keys = current_api_keys;
+        snapshot.api_keys = current_api_keys.clone();
         snapshot.validate()?;
         Ok(snapshot)
     }
@@ -377,7 +399,7 @@ mod tests {
         };
 
         let candidate = manager
-            .decode_release_candidate(release, BTreeMap::from([(lookup_id.clone(), current_key)]))
+            .decode_release_candidate(release, &BTreeMap::from([(lookup_id.clone(), current_key)]))
             .unwrap();
         let installed_key = candidate.api_keys.get(&lookup_id).unwrap();
         assert_eq!(installed_key.digest.as_bytes(), &[2; 32]);
@@ -400,3 +422,6 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+mod authority_tests;

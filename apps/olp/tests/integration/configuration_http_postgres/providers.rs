@@ -1,3 +1,8 @@
+use olp_db::{
+    media_jobs::{MediaJobLifecycle, MediaJobState, MediaJobUpdate, NewMediaJobReservation},
+    store::Store,
+};
+
 use super::*;
 
 pub(super) async fn exercise(
@@ -428,6 +433,16 @@ pub(super) async fn exercise(
     .await;
     assert_eq!(duplicate_activation.status(), StatusCode::CONFLICT);
 
+    let live_media_job = reserve_media_activation_blocker(
+        &configuration_state.store,
+        &provider_id,
+        &model_id,
+        activation_body["runtime_generation"]["id"]
+            .as_str()
+            .unwrap(),
+    )
+    .await;
+
     let rotated_provider = send(
         app,
         Method::POST,
@@ -581,8 +596,17 @@ pub(super) async fn exercise(
         mock_provider.last_authorization().as_deref(),
         Some("Bearer sk-openai-rotated-secret")
     );
-    // Rotation kept the certification, so the fresh probe alone unlocks
-    // activation.
+    assert_media_activation_blocked(
+        app,
+        configuration_state,
+        cookie,
+        csrf,
+        &provider_id,
+        &rotated_provider_etag,
+        live_media_job,
+    )
+    .await;
+
     let rotated_activation = send(
         app,
         Method::POST,
@@ -715,4 +739,125 @@ pub(super) async fn exercise(
     assert_eq!(revoked_credential.status(), StatusCode::OK);
 
     (provider_id, model_id)
+}
+
+async fn reserve_media_activation_blocker(
+    store: &Store,
+    provider_id: &str,
+    model_id: &str,
+    generation_id: &str,
+) -> Uuid {
+    let provider_id = Uuid::parse_str(provider_id).unwrap();
+    let model_id = Uuid::parse_str(model_id).unwrap();
+    let generation_id = Uuid::parse_str(generation_id).unwrap();
+    sqlx::query(
+        "INSERT INTO provider_revision_capabilities          (provider_revision_model_id, operation, surface, mode, source, certified_at)          SELECT prm.id, required.operation, 'openai', 'unary', 'certified', now()          FROM provider_revision_models prm          JOIN providers p ON p.active_revision_id = prm.provider_revision_id          CROSS JOIN unnest(ARRAY['video_get', 'video_content', 'video_delete']) AS required(operation)          WHERE p.id = $1 AND prm.source_provider_model_id = $2",
+    )
+    .bind(provider_id)
+    .bind(model_id)
+    .execute(store.pool())
+    .await
+    .unwrap();
+    let api_key_id = Uuid::now_v7();
+    sqlx::query(
+        "INSERT INTO api_keys (id, lookup_id, secret_digest, name, created_by)          SELECT $1, 'olpv2httpmediaguard', $2, 'media activation guard', created_by          FROM providers WHERE id = $3",
+    )
+    .bind(api_key_id)
+    .bind([19_u8; 32].as_slice())
+    .bind(provider_id)
+    .execute(store.pool())
+    .await
+    .unwrap();
+    let job_id = Uuid::now_v7();
+    store
+        .reserve_media_job(NewMediaJobReservation {
+            id: job_id,
+            runtime_generation_id: generation_id,
+            api_key_id,
+            provider_id,
+            upstream_model: "compatible-model".to_owned(),
+            route_slug: "media-activation-guard".to_owned(),
+            operation: "video_create".parse().unwrap(),
+            surface: "openai".parse().unwrap(),
+        })
+        .await
+        .unwrap();
+    store
+        .attach_media_job_upstream(
+            job_id,
+            "synthetic-upstream-media-job",
+            MediaJobUpdate {
+                state: MediaJobState::Queued,
+                progress_percent: Some(0.0),
+                content_available: false,
+                expires_at: None,
+                error_class: None,
+                last_polled_at: chrono::Utc::now(),
+            },
+        )
+        .await
+        .unwrap();
+    job_id
+}
+
+async fn assert_media_activation_blocked(
+    app: &Router,
+    state: &ProcessComposition,
+    cookie: &str,
+    csrf: &str,
+    provider_id: &str,
+    expected_etag: &str,
+    job_id: Uuid,
+) {
+    let response = send(
+        app,
+        Method::POST,
+        &format!("/api/v1/providers/{provider_id}/activate"),
+        None,
+        Some(cookie),
+        Some(csrf),
+        Some("provider-http-activate-live-job"),
+        Some(expected_etag),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    let body = response_json(response).await;
+    assert_eq!(
+        body["type"],
+        "https://openllmproxy.dev/problems/validation_failed"
+    );
+    let message = body["errors"]["provider"][0].as_str().unwrap();
+    assert!(message.contains(&job_id.to_string()));
+    assert!(message.contains("provider connection, credential, model"));
+    assert!(message.contains("Restore a compatible configuration or delete this job"));
+    for private in [
+        "sk-openai-test-secret",
+        "sk-openai-rotated-secret",
+        "synthetic-upstream-media-job",
+        "compatible-model",
+    ] {
+        assert!(!body.to_string().contains(private));
+    }
+    let provider = state
+        .store
+        .get_provider(Uuid::parse_str(provider_id).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(provider.active_revision, Some(1));
+    assert!(provider.pending_activation);
+    assert_eq!(format!("\"{}\"", provider.etag), expected_etag);
+    assert_eq!(provider.runtime_credential_version, Some(1));
+    assert_eq!(provider.draft_credential_version, Some(2));
+    assert_eq!(
+        state.store.media_job(job_id).await.unwrap().lifecycle,
+        MediaJobLifecycle::Active
+    );
+    state.store.begin_media_job_deletion(job_id).await.unwrap();
+    assert!(
+        state
+            .store
+            .finalize_media_job_deletion(job_id)
+            .await
+            .unwrap()
+    );
 }

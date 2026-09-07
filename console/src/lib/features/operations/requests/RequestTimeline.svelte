@@ -10,8 +10,32 @@
   } from '$lib/format';
 
   import type { CreateQueryResult } from '@tanstack/svelte-query';
-  import type { RequestDetail } from '$lib/api/requests';
+  import type { RequestAttempt, RequestDetail } from '$lib/api/requests';
   let { detail }: { detail: CreateQueryResult<RequestDetail> } = $props();
+
+  function chargeLabel(status: RequestAttempt['charge_status']) {
+    switch (status) {
+      case 'billable':
+        return 'Billable';
+      case 'not_billable':
+        return 'Not billable';
+      case 'billing_uncertain':
+        return 'Billing uncertain';
+      default:
+        return 'Unknown';
+    }
+  }
+
+  function attemptCost(attempt: RequestAttempt) {
+    if (attempt.estimated_cost != null) {
+      return attempt.estimated_cost;
+    }
+    if (attempt.charge_status === 'not_billable') return 'Not applicable';
+    if (attempt.unpriced === true) return 'Unpriced';
+    if (attempt.usage_complete === false)
+      return 'Unavailable (incomplete usage)';
+    return 'Unknown';
+  }
 </script>
 
 {#if detail.isPending}
@@ -192,6 +216,76 @@
                 <dd>{attempt.committed ? 'Yes — failover stopped' : 'No'}</dd>
               </div>
             </dl>
+            {#if attempt.charge_status == null}
+              <p>No usage or pricing facts were recorded.</p>
+            {:else}
+              <dl aria-label="Attempt usage and pricing">
+                <div>
+                  <dt>Charge status</dt>
+                  <dd>{chargeLabel(attempt.charge_status)}</dd>
+                </div>
+                <div>
+                  <dt>Usage observed</dt>
+                  <dd>
+                    {attempt.usage_observed == null
+                      ? 'Unknown'
+                      : attempt.usage_observed
+                        ? 'Yes'
+                        : 'No'}
+                  </dd>
+                </div>
+                <div>
+                  <dt>Usage completeness</dt>
+                  <dd>
+                    {attempt.usage_complete == null
+                      ? 'Unknown'
+                      : attempt.usage_complete
+                        ? 'Complete'
+                        : 'Incomplete'}
+                  </dd>
+                </div>
+                <div>
+                  <dt>Input tokens</dt>
+                  <dd>{formatInteger(attempt.input_tokens)}</dd>
+                </div>
+                <div>
+                  <dt>Cached input tokens</dt>
+                  <dd>{formatInteger(attempt.cached_input_tokens)}</dd>
+                </div>
+                <div>
+                  <dt>Output tokens</dt>
+                  <dd>{formatInteger(attempt.output_tokens)}</dd>
+                </div>
+                <div>
+                  <dt>Media units</dt>
+                  <dd>{attempt.media_units ?? '—'}</dd>
+                </div>
+                <div>
+                  <dt>Estimated cost</dt>
+                  <dd class:unpriced={attempt.unpriced === true}>
+                    {attemptCost(attempt)}
+                  </dd>
+                </div>
+                <div>
+                  <dt>Currency</dt>
+                  <dd>
+                    {attempt.currency ??
+                      (attempt.charge_status === 'not_billable'
+                        ? 'Not applicable'
+                        : 'Not recorded')}
+                  </dd>
+                </div>
+                <div>
+                  <dt>Pricing revision</dt>
+                  <dd class="mono">
+                    {attempt.pricing_revision_id ??
+                      (attempt.charge_status === 'not_billable'
+                        ? 'Not applicable'
+                        : 'Not recorded')}
+                  </dd>
+                </div>
+              </dl>
+            {/if}
           </li>
         {/each}
       </ol>
@@ -200,25 +294,6 @@
 {/if}
 
 <style>
-  .filters {
-    margin-top: 1.5rem;
-    padding: 1rem;
-  }
-  .filter-grid {
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 0.8rem;
-  }
-
-  .filter-actions {
-    display: flex;
-    gap: 0.65rem;
-    margin-top: 1rem;
-  }
-  .result-note {
-    margin: 0;
-    color: var(--foreground-muted);
-  }
   .text-button {
     padding: 0.4rem 0.65rem;
   }
@@ -226,37 +301,8 @@
     text-decoration: underline;
   }
 
-  .warning-text,
   .unpriced {
     color: var(--warning);
-  }
-  .row-link {
-    display: inline-flex;
-    min-height: 2.75rem;
-    align-items: center;
-    color: var(--accent-strong);
-    font-weight: 700;
-  }
-  .mobile-results {
-    display: none;
-    margin: 0;
-    padding: 0;
-    list-style: none;
-  }
-
-  .mobile-result-heading {
-    display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
-    gap: 0.75rem;
-  }
-
-  .pagination {
-    display: flex;
-    align-items: center;
-    justify-content: flex-end;
-    gap: 1rem;
-    margin-top: 1rem;
   }
 
   .request-facts {
@@ -335,35 +381,15 @@
     grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
   }
   @media (max-width: 72rem) {
-    .filter-grid {
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-    }
     dl,
     .timeline dl {
       grid-template-columns: repeat(2, minmax(0, 1fr));
-    }
-  }
-  @media (max-width: 44rem) {
-    .desktop-results {
-      display: none;
-    }
-    .mobile-results {
-      display: grid;
-      gap: 0.75rem;
     }
   }
   @media (max-width: 40rem) {
-    .filter-grid,
     dl,
     .timeline dl {
       grid-template-columns: 1fr;
-    }
-
-    .filters {
-      padding: 0.85rem;
-    }
-    .pagination {
-      justify-content: space-between;
     }
   }
   @media (forced-colors: active) {

@@ -156,3 +156,107 @@ test('the media job detail panel refreshes progress and polling clocks', async (
   await page.getByRole('link', { name: 'All media jobs' }).click();
   await expect(page.getByRole('heading', { name: 'Media Jobs' })).toBeVisible();
 });
+
+test.describe('media-job investigation URLs', () => {
+  test.use({ timezoneId: 'America/New_York' });
+
+  test('direct links retain precise applied filters across edits, reload and browser history', async ({
+    page
+  }) => {
+    await mockSession(page);
+    const requests: URLSearchParams[] = [];
+    await page.route('**/api/v1/media-jobs?*', async (route) => {
+      requests.push(new URL(route.request().url()).searchParams);
+      await route.fulfill({ json: { items: [job], next_cursor: null } });
+    });
+    const filters = {
+      route: 'video-render',
+      state: 'running',
+      lifecycle: 'active',
+      api_key_id: keyId,
+      provider_id: providerId,
+      created_after: '2026-11-01T05:50:00.123456Z',
+      created_before: '2026-11-01T06:10:00.456789Z'
+    };
+    await page.goto(`/media-jobs?${new URLSearchParams(filters)}`);
+    await expect(
+      page.getByRole('row').filter({ hasText: 'video-render' })
+    ).toBeVisible();
+    await expect(page.getByLabel('Created after')).toHaveValue(
+      '2026-11-01T01:50'
+    );
+    await expect(page.getByLabel('Created before')).toHaveValue(
+      '2026-11-01T01:10'
+    );
+    const count = requests.length;
+    await page.getByLabel('Route').fill('changed-route');
+    expect(requests).toHaveLength(count);
+    expect(new URL(page.url()).searchParams.get('route')).toBe('video-render');
+    await page.getByRole('button', { name: 'Refresh', exact: true }).click();
+    await expect.poll(() => requests.length).toBe(count + 1);
+    expect(Object.fromEntries(requests.at(-1)!)).toMatchObject(filters);
+    await page.getByRole('button', { name: 'Apply filters' }).click();
+    await expect
+      .poll(() => new URL(page.url()).searchParams.get('route'))
+      .toBe('changed-route');
+    await expect(page.getByRole('alert')).toHaveCount(0);
+    expect(new URL(page.url()).searchParams.get('created_after')).toBe(
+      filters.created_after
+    );
+    expect(new URL(page.url()).searchParams.get('created_before')).toBe(
+      filters.created_before
+    );
+    await page.reload();
+    await expect(page.getByLabel('Route')).toHaveValue('changed-route');
+    await page.goBack();
+    await expect(page.getByLabel('Route')).toHaveValue('video-render');
+    await page.goForward();
+    await expect(page.getByLabel('Route')).toHaveValue('changed-route');
+    await page.getByRole('button', { name: 'Clear' }).click();
+    await expect.poll(() => new URL(page.url()).search).toBe('');
+    await expect(page.getByLabel('State')).toHaveValue('');
+    await expect.poll(() => requests.at(-1)?.has('state')).toBe(false);
+  });
+
+  for (const [parameter, value, label] of [
+    ['state', 'unknown-state', 'State'],
+    ['lifecycle', 'unknown-lifecycle', 'Lifecycle'],
+    ['provider_id', 'not-a-uuid', 'Provider ID'],
+    ['created_after', '2026-02-30T12:00:00Z', 'Created after']
+  ]) {
+    test(`invalid ${parameter} is visible and does not fetch`, async ({
+      page
+    }) => {
+      await mockSession(page);
+      let requests = 0;
+      let lastQuery = new URLSearchParams();
+      await page.route('**/api/v1/media-jobs?*', async (route) => {
+        requests += 1;
+        lastQuery = new URL(route.request().url()).searchParams;
+        await route.fulfill({ json: { items: [], next_cursor: null } });
+      });
+      await page.goto(
+        `/media-jobs?${new URLSearchParams({ [parameter]: value })}`
+      );
+      await expect(page.getByRole('alert')).toContainText(value);
+      await expect(page.getByLabel(label)).toHaveValue(value);
+      await expect(
+        page.getByRole('button', { name: 'Refresh', exact: true })
+      ).toBeDisabled();
+      expect(requests).toBe(0);
+      if (parameter === 'created_after') {
+        const corrected = '2026-02-28T12:00:00Z';
+        await page.getByLabel(label).fill(corrected);
+        await expect(page.getByLabel(label)).toHaveValue(corrected);
+        await page.getByRole('button', { name: 'Apply filters' }).click();
+        await expect.poll(() => requests).toBe(1);
+        await expect(page.getByRole('alert')).toHaveCount(0);
+        expect(new URL(page.url()).searchParams.get(parameter)).toBe(corrected);
+        expect(lastQuery.get(parameter)).toBe(corrected);
+        return;
+      }
+      await page.getByRole('button', { name: 'Clear' }).click();
+      await expect.poll(() => requests).toBe(1);
+    });
+  }
+});

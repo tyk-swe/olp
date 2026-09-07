@@ -1,10 +1,16 @@
 <script lang="ts">
-  import { requestList } from '$lib/features/operations/requests/requestListState';
+  import { page } from '$app/state';
+  import { syncListWithUrl } from '$lib/lists/urlSync.svelte';
+  import {
+    requestList,
+    requestUrl
+  } from '$lib/features/operations/requests/requestListState';
 
   let { children } = $props();
-  // The list keeps its cursor (and filters) across this route family, so a
-  // detail visit returns to the same page; leaving the family resets it.
-  const listState = $state(requestList.empty());
+  const listState = $state(requestUrl.state(page.url.searchParams));
+  syncListWithUrl(listState, requestUrl, {
+    detail: () => (page.params.requestId ? `/${page.params.requestId}` : '')
+  });
   requestList.set(listState);
 </script>
 

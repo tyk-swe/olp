@@ -272,7 +272,10 @@ def run_oha(url, duration, concurrency, body=None, token=None):
     command.append(url)
     environment = os.environ.copy()
     environment.pop("NO_COLOR", None)
-    completed = subprocess.run(command, check=True, capture_output=True, text=True, env=environment)
+    try:
+        completed = subprocess.run(command, check=True, capture_output=True, text=True, env=environment)
+    except subprocess.CalledProcessError as error:
+        raise RuntimeError(f"oha load generation failed with exit status {error.returncode}") from None
     return json.loads(completed.stdout)
 
 
@@ -381,11 +384,12 @@ def process_environment(run_dir, database, valkey, origin, observability):
     return environment
 
 
-def await_live(observability, process, log_path):
+def await_live(observability, process):
     deadline = time.monotonic() + 30
     while time.monotonic() < deadline:
-        if process.poll() is not None:
-            raise RuntimeError(f"olp exited during startup:\n{log_path.read_text(errors='replace')}")
+        status = process.poll()
+        if status is not None:
+            raise RuntimeError(f"olp startup failed with exit status {status}")
         try:
             if request(observability + "/health/live", timeout=1)[0] == 200:
                 return
@@ -416,8 +420,8 @@ def machine_metadata():
         if match:
             cpu = match.group(1)
     return {"platform": platform.platform(), "cpu": cpu, "logical_cpus": os.cpu_count(),
-            "rustc": subprocess.run(["rustc", "--version"], capture_output=True, text=True,
-                                     check=True).stdout.strip(), "oha": "1.12.0"}
+            "rustc": run_step("benchmark metadata collection", ["rustc", "--version"],
+                              text=True).stdout.strip(), "oha": "1.12.0"}
 
 
 def source_metadata(repo):
@@ -446,6 +450,13 @@ def source_metadata(repo):
         digest.update(b"\0")
         digest.update((repo / os.fsdecode(relative)).read_bytes())
     return sha, True, digest.hexdigest()
+
+
+def run_step(label, command, **kwargs):
+    try:
+        return subprocess.run(command, check=True, capture_output=True, **kwargs)
+    except subprocess.CalledProcessError as error:
+        raise RuntimeError(f"{label} failed with exit status {error.returncode}") from None
 
 
 def terminate(process):
@@ -487,9 +498,9 @@ def main():
     mock = MockServer(("127.0.0.1", 0), MockHandler)
     threading.Thread(target=mock.serve_forever, daemon=True).start()
     try:
-        subprocess.run(["psql", admin, "-v", "ON_ERROR_STOP=1", "-c",
-                        f'CREATE DATABASE "{database_name}"'], check=True, capture_output=True)
-        subprocess.run([valkey_cli, "-u", valkey, "FLUSHDB"], check=True, capture_output=True)
+        run_step("PostgreSQL database creation", ["psql", admin, "-v", "ON_ERROR_STOP=1", "-c",
+                                                 f'CREATE DATABASE "{database_name}"'])
+        run_step("Valkey reset", [valkey_cli, "-u", valkey, "FLUSHDB"])
         for directory in (run_dir / "console", run_dir / "spool"):
             directory.mkdir()
         write_secret(run_dir / "master-key")
@@ -504,13 +515,13 @@ def main():
         database = database_url(admin, database_name)
         environment = process_environment(run_dir, database, valkey, origin, observability)
         binary = os.environ["OLP_BENCH_BIN"]
-        subprocess.run([binary, "migrate"], check=True, env=environment)
-        log_path = run_dir / "olp.log"
-        log = log_path.open("w")
+        run_step("database migration", [binary, "migrate"], env=environment)
         for reservation in port_reservations:
             reservation.close()
-        process = subprocess.Popen([binary, "all"], env=environment, stdout=log, stderr=subprocess.STDOUT)
-        await_live(observability, process, log_path)
+        with (run_dir / "olp.log").open("w") as log:
+            process = subprocess.Popen([binary, "all"], env=environment,
+                                       stdout=log, stderr=subprocess.STDOUT)
+        await_live(observability, process)
         key = configure_gateway(origin, setup_token, mock_origin)
         before = metrics_text(observability)
         scenarios = benchmark_scenarios(origin, mock_origin, key, args.duration)
@@ -537,6 +548,7 @@ def main():
             reservation.close()
         terminate(process)
         mock.shutdown()
+        mock.server_close()
         subprocess.run([valkey_cli, "-u", valkey, "FLUSHDB"], capture_output=True)
         subprocess.run(["psql", admin, "-c", f'DROP DATABASE IF EXISTS "{database_name}" WITH (FORCE)'],
                        capture_output=True)
@@ -546,6 +558,9 @@ def main():
 if __name__ == "__main__":
     try:
         main()
-    except (KeyError, RuntimeError, subprocess.CalledProcessError) as error:
+    except subprocess.CalledProcessError as error:
+        print(f"benchmark subprocess failed with exit status {error.returncode}", file=sys.stderr)
+        raise SystemExit(1)
+    except (KeyError, RuntimeError) as error:
         print(f"benchmark failed: {error}", file=sys.stderr)
         raise SystemExit(1)

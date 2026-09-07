@@ -347,6 +347,24 @@ pub(super) async fn exercise(
         "provider and model filters must match the same attempt"
     );
 
+    assert_attempt_usage_states(
+        store,
+        first_request_id,
+        partial_request_id,
+        unpriced_request_id,
+        uncertain_request_id,
+    )
+    .await;
+    assert_two_charged_attempts(
+        store,
+        generation_id,
+        api_key_id,
+        first_provider_id,
+        second_provider_id,
+    )
+    .await;
+    assert_media_attempt_units(store, generation_id, api_key_id, second_provider_id).await;
+
     assert_legacy_fact_mirrors_all_attempts(
         store,
         generation_id,
@@ -406,6 +424,22 @@ async fn assert_legacy_fact_mirrors_all_attempts(
     .execute(store.pool())
     .await
     .unwrap();
+    let missing = store.request_detail(request_id).await.unwrap();
+    assert_eq!(missing.attempts.len(), 2);
+    for attempt in &missing.attempts {
+        assert!(attempt.charge_status.is_none());
+        assert!(attempt.usage_observed.is_none());
+        assert!(attempt.usage_complete.is_none());
+        assert!(attempt.input_tokens.is_none());
+        assert!(attempt.output_tokens.is_none());
+        assert!(attempt.cached_input_tokens.is_none());
+        assert!(attempt.media_units.is_none());
+        assert!(attempt.estimated_cost.is_none());
+        assert!(attempt.currency.is_none());
+        assert!(attempt.unpriced.is_none());
+        assert!(attempt.pricing_revision_id.is_none());
+    }
+
     sqlx::query(
         "INSERT INTO usage_request_anchors (request_id, request_started_at) VALUES ($1, $2)",
     )
@@ -587,4 +621,178 @@ fn uncertain_usage() -> RequestAttemptUsageMetadata {
         cached_input_tokens: None,
         media_units: None,
     }
+}
+
+async fn assert_attempt_usage_states(
+    store: &Store,
+    first: Uuid,
+    partial: Uuid,
+    unpriced: Uuid,
+    uncertain: Uuid,
+) {
+    let first = store.request_detail(first).await.unwrap();
+    let not_billable = &first.attempts[0];
+    assert_eq!(not_billable.charge_status.as_deref(), Some("not_billable"));
+    assert_eq!(not_billable.usage_observed, Some(false));
+    assert_eq!(not_billable.usage_complete, Some(true));
+    assert_eq!(not_billable.unpriced, Some(false));
+    assert!(not_billable.estimated_cost.is_none());
+    assert!(not_billable.pricing_revision_id.is_none());
+    assert!(not_billable.currency.is_none());
+
+    let partial = store.request_detail(partial).await.unwrap();
+    let partial = &partial.attempts[0];
+    assert_eq!(partial.charge_status.as_deref(), Some("billable"));
+    assert_eq!(partial.usage_observed, Some(true));
+    assert_eq!(partial.usage_complete, Some(false));
+    assert_eq!(partial.input_tokens, Some(7));
+    assert!(partial.output_tokens.is_none());
+    assert_eq!(partial.unpriced, Some(false));
+    assert!(partial.estimated_cost.is_none());
+    assert!(partial.pricing_revision_id.is_some());
+    assert_eq!(partial.currency.as_deref(), Some("USD"));
+
+    let unpriced = store.request_detail(unpriced).await.unwrap();
+    let unpriced = &unpriced.attempts[0];
+    assert_eq!(unpriced.charge_status.as_deref(), Some("billable"));
+    assert_eq!(unpriced.usage_complete, Some(true));
+    assert_eq!(unpriced.unpriced, Some(true));
+    assert!(unpriced.estimated_cost.is_none());
+    assert!(unpriced.pricing_revision_id.is_none());
+
+    let uncertain = store.request_detail(uncertain).await.unwrap();
+    let uncertain = &uncertain.attempts[0];
+    assert_eq!(
+        uncertain.charge_status.as_deref(),
+        Some("billing_uncertain")
+    );
+    assert_eq!(uncertain.usage_observed, Some(false));
+    assert_eq!(uncertain.usage_complete, Some(false));
+    assert_eq!(uncertain.unpriced, Some(false));
+    assert!(uncertain.estimated_cost.is_none());
+}
+
+async fn assert_two_charged_attempts(
+    store: &Store,
+    generation: Uuid,
+    key: Uuid,
+    first_provider: Uuid,
+    second_provider: Uuid,
+) {
+    let observed = Utc::now() - Duration::minutes(20);
+    let mut first_usage = complete_usage(10, 5);
+    first_usage.cached_input_tokens = Some(4);
+    let mut second_usage = complete_usage(10, 5);
+    second_usage.cached_input_tokens = Some(0);
+    let event = event(
+        Uuid::now_v7(),
+        generation,
+        key,
+        "two-charge-attempts",
+        observed,
+        second_provider,
+        "mock-model",
+        Some(10),
+        Some(5),
+        true,
+        vec![
+            attempt(
+                1,
+                first_provider,
+                "mock-model",
+                observed - Duration::milliseconds(10),
+                Some(503),
+                Some("upstream_http"),
+                false,
+                first_usage,
+            ),
+            attempt(
+                2,
+                second_provider,
+                "mock-model",
+                observed,
+                Some(200),
+                None,
+                true,
+                second_usage,
+            ),
+        ],
+    );
+    store.persist_request_metadata_event(&event).await.unwrap();
+    assert_eq!(
+        store.persist_request_metadata_event(&event).await.unwrap(),
+        IngestionOutcome::Duplicate
+    );
+    let detail = store.request_detail(event.request_id).await.unwrap();
+    assert_eq!(detail.attempts.len(), 2);
+    assert_eq!(detail.attempts[0].id, event.attempts[0].id);
+    assert_eq!(detail.attempts[1].id, event.attempts[1].id);
+    assert_eq!(
+        detail.attempts[0].estimated_cost.as_deref(),
+        Some("0.000042000000")
+    );
+    assert_eq!(
+        detail.attempts[1].estimated_cost.as_deref(),
+        Some("0.000020000000")
+    );
+    assert_eq!(detail.attempts[0].cached_input_tokens, Some(4));
+    assert_eq!(detail.attempts[1].cached_input_tokens, Some(0));
+    for attempt in &detail.attempts {
+        assert_eq!(attempt.charge_status.as_deref(), Some("billable"));
+        assert_eq!(attempt.usage_observed, Some(true));
+        assert_eq!(attempt.usage_complete, Some(true));
+        assert_eq!(attempt.unpriced, Some(false));
+        assert_eq!(attempt.currency.as_deref(), Some("USD"));
+        assert!(attempt.pricing_revision_id.is_some());
+    }
+    assert_eq!(
+        detail.request.estimated_cost.as_deref(),
+        Some("0.000062000000")
+    );
+    assert_eq!(detail.request.input_tokens, Some(20));
+    assert_eq!(detail.request.output_tokens, Some(10));
+    assert_eq!(detail.request.cached_input_tokens, Some(4));
+    assert_eq!(detail.request.usage_complete, Some(true));
+}
+
+async fn assert_media_attempt_units(store: &Store, generation: Uuid, key: Uuid, provider: Uuid) {
+    let observed = Utc::now() - Duration::minutes(20);
+    let units = Decimal::new(1125, 3);
+    let mut usage = complete_usage(0, 0);
+    usage.input_tokens = None;
+    usage.output_tokens = None;
+    usage.media_units = Some(units);
+    let mut event = event(
+        Uuid::now_v7(),
+        generation,
+        key,
+        "media-attempt-units",
+        observed,
+        provider,
+        "mock-model",
+        None,
+        None,
+        true,
+        vec![attempt(
+            1,
+            provider,
+            "mock-model",
+            observed,
+            Some(200),
+            None,
+            true,
+            usage,
+        )],
+    );
+    event.operation = olp_engine::domain::canonical::identity::OperationKind::ImageGeneration;
+    event.media_units = Some(units);
+    store.persist_request_metadata_event(&event).await.unwrap();
+    let detail = store.request_detail(event.request_id).await.unwrap();
+    assert_eq!(detail.attempts.len(), 1);
+    let attempt = &detail.attempts[0];
+    assert_eq!(attempt.media_units.as_deref(), Some("1.125000"));
+    assert_eq!(attempt.estimated_cost.as_deref(), Some("0.045000000000"));
+    assert_eq!(attempt.currency.as_deref(), Some("USD"));
+    assert!(attempt.input_tokens.is_none());
+    assert!(attempt.output_tokens.is_none());
 }

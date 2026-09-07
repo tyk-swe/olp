@@ -63,6 +63,17 @@ pub struct AttemptRecord {
     pub committed: bool,
     pub latency_ms: Option<u64>,
     pub first_byte_ms: Option<u64>,
+    pub charge_status: Option<String>,
+    pub usage_observed: Option<bool>,
+    pub usage_complete: Option<bool>,
+    pub input_tokens: Option<u64>,
+    pub output_tokens: Option<u64>,
+    pub cached_input_tokens: Option<u64>,
+    pub media_units: Option<String>,
+    pub estimated_cost: Option<String>,
+    pub currency: Option<String>,
+    pub unpriced: Option<bool>,
+    pub pricing_revision_id: Option<Uuid>,
 }
 
 #[derive(Clone, Debug)]
@@ -93,6 +104,33 @@ struct RequestRow {
     currency: Option<String>,
     unpriced: Option<bool>,
     usage_complete: Option<bool>,
+}
+
+#[derive(Debug)]
+struct AttemptRow {
+    id: Uuid,
+    ordinal: i16,
+    provider_id: Uuid,
+    provider_name: String,
+    upstream_model: String,
+    started_at: DateTime<Utc>,
+    completed_at: Option<DateTime<Utc>>,
+    status_code: Option<i32>,
+    error_class: Option<String>,
+    committed: bool,
+    latency_ms: Option<i32>,
+    first_byte_ms: Option<i32>,
+    charge_status: Option<String>,
+    usage_observed: Option<bool>,
+    usage_complete: Option<bool>,
+    input_tokens: Option<i64>,
+    output_tokens: Option<i64>,
+    cached_input_tokens: Option<i64>,
+    media_units: Option<String>,
+    estimated_cost: Option<String>,
+    currency: Option<String>,
+    unpriced: Option<bool>,
+    pricing_revision_id: Option<Uuid>,
 }
 
 impl Store {
@@ -181,11 +219,21 @@ impl Store {
         .await?
         .ok_or(Error::NotFound)?;
         let request = request_from_row(row)?;
-        let rows = sqlx::query!(
+        let rows = sqlx::query_as!(
+            AttemptRow,
             "SELECT a.id, a.ordinal, a.provider_id, p.name AS provider_name, a.upstream_model, \
                     a.started_at, a.completed_at, a.status_code, a.error_class, a.committed, \
-                    a.latency_ms, a.first_byte_ms \
+                    a.latency_ms, a.first_byte_ms, f.charge_status::text AS \"charge_status?\", \
+                    f.usage_observed AS \"usage_observed?\", \
+                    f.usage_complete AS \"usage_complete?\", \
+                    f.input_tokens, f.output_tokens, f.cached_input_tokens, \
+                    f.media_units::text AS \"media_units?\", \
+                    f.estimated_cost::text AS \"estimated_cost?\", \
+                    f.currency::text AS \"currency?\", f.unpriced AS \"unpriced?\", \
+                    f.pricing_revision_id \
              FROM attempts a JOIN providers p ON p.id = a.provider_id \
+             LEFT JOIN attempt_usage_facts f ON f.request_id = a.request_id \
+               AND f.request_started_at = a.request_started_at AND f.attempt_ordinal = a.ordinal \
              WHERE a.request_id = $1 AND a.request_started_at = $2 ORDER BY a.ordinal",
             request.id,
             request.started_at
@@ -194,22 +242,7 @@ impl Store {
         .await?;
         let attempts = rows
             .into_iter()
-            .map(|row| {
-                Ok(AttemptRecord {
-                    id: row.id,
-                    ordinal: checked_u16(row.ordinal, "attempt ordinal")?,
-                    provider_id: row.provider_id,
-                    provider_name: row.provider_name,
-                    upstream_model: row.upstream_model,
-                    started_at: row.started_at,
-                    completed_at: row.completed_at,
-                    status_code: optional_u16(row.status_code, "attempt status")?,
-                    error_class: row.error_class,
-                    committed: row.committed,
-                    latency_ms: optional_i32_u64(row.latency_ms, "attempt latency")?,
-                    first_byte_ms: optional_i32_u64(row.first_byte_ms, "attempt first byte")?,
-                })
-            })
+            .map(attempt_from_row)
             .collect::<Result<Vec<_>, Error>>()?;
         Ok(RequestDetail { request, attempts })
     }
@@ -287,5 +320,33 @@ fn request_from_row(row: RequestRow) -> Result<RequestRecord, Error> {
         currency: trimmed_optional(row.currency),
         unpriced: row.unpriced,
         usage_complete: row.usage_complete,
+    })
+}
+
+fn attempt_from_row(row: AttemptRow) -> Result<AttemptRecord, Error> {
+    Ok(AttemptRecord {
+        id: row.id,
+        ordinal: checked_u16(row.ordinal, "attempt ordinal")?,
+        provider_id: row.provider_id,
+        provider_name: row.provider_name,
+        upstream_model: row.upstream_model,
+        started_at: row.started_at,
+        completed_at: row.completed_at,
+        status_code: optional_u16(row.status_code, "attempt status")?,
+        error_class: row.error_class,
+        committed: row.committed,
+        latency_ms: optional_i32_u64(row.latency_ms, "attempt latency")?,
+        first_byte_ms: optional_i32_u64(row.first_byte_ms, "attempt first byte")?,
+        charge_status: row.charge_status,
+        usage_observed: row.usage_observed,
+        usage_complete: row.usage_complete,
+        input_tokens: optional_u64(row.input_tokens, "attempt input tokens")?,
+        output_tokens: optional_u64(row.output_tokens, "attempt output tokens")?,
+        cached_input_tokens: optional_u64(row.cached_input_tokens, "attempt cached tokens")?,
+        media_units: row.media_units,
+        estimated_cost: row.estimated_cost,
+        currency: trimmed_optional(row.currency),
+        unpriced: row.unpriced,
+        pricing_revision_id: row.pricing_revision_id,
     })
 }

@@ -1,5 +1,6 @@
 use crate::{error::Error as PersistenceError, runtime::compiler::RuntimeCompileError};
 use thiserror::Error;
+use uuid::Uuid;
 
 #[derive(Debug, Error)]
 pub enum Error {
@@ -11,6 +12,8 @@ pub enum Error {
     ProviderNotFound,
     #[error("provider cannot be activated without a credential and enabled model")]
     ProviderIncomplete,
+    #[error("provider activation is incompatible with live media job {job_id}")]
+    ProviderMediaJobIncompatible { job_id: Uuid },
     #[error("provider ETag does not match")]
     PreconditionFailed,
     #[error("configuration resource does not exist")]

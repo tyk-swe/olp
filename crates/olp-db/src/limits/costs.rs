@@ -1,9 +1,9 @@
-#[cfg(any(test, feature = "test-util"))]
-use super::supported_timestamp_ms;
 use super::{
     DistributedLimiter, LimitKeys, MAX_LUA_INTEGER, RECONCILE_COST_SCRIPT, RESERVE_COST_SCRIPT,
-    SCRIPT_RESPONSE_VERSION, script_results::CostReservationScriptResult, validate_cost_limits,
+    SCRIPT_RESPONSE_VERSION, script_results::CostReservationScriptResult,
 };
+#[cfg(any(test, feature = "test-util"))]
+use super::{supported_timestamp_ms, validate_cost_limits};
 use crate::store::Store;
 use chrono::{DateTime, Utc};
 use olp_engine::inference::limits::{LimitError, LimitRequest};

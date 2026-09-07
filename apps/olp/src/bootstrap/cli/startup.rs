@@ -27,8 +27,7 @@ use {
             shutdown_signal, stop_background_tasks,
         },
         runtime_activation::{
-            RuntimeActivator, RuntimeHintSource, activate_latest_runtime, runtime_hint_supervisor,
-            spawn_runtime_poller,
+            RuntimeActivator, RuntimeHintSource, runtime_hint_supervisor, spawn_runtime_poller,
         },
         validation::{
             connect_store, load_auth_hmac_key, load_bootstrap_token_digest, load_master_key,
@@ -64,6 +63,8 @@ pub(super) async fn serve(
     tracing: Option<TracingRuntimeConfig>,
 ) -> AppResult<()> {
     let (store, mut state) = prepare_state(mode, &args, tracing).await?;
+    let activator = RuntimeActivator::new(&state);
+    activate_initial_runtime(&activator).await;
     let listener = TcpListener::bind(args.listen_addr).await?;
     let observability_listener = TcpListener::bind(args.observability_listen_addr).await?;
     let (background_shutdown_sender, background_shutdown_receiver) = watch::channel(false);
@@ -75,6 +76,7 @@ pub(super) async fn serve(
         mode,
         run_worker_in_process,
         &background_shutdown_receiver,
+        activator,
     )
     .await?;
     let dependencies = state.mode_dependencies();
@@ -167,7 +169,6 @@ async fn prepare_state(
         )
         .await?;
     }
-    activate_initial_runtime(&state, &store).await;
     Ok((store, state))
 }
 
@@ -294,20 +295,10 @@ async fn apply_secrets_and_policy(
     Ok(())
 }
 
-async fn activate_initial_runtime(state: &ProcessComposition, store: &Store) {
-    match activate_latest_runtime(
-        &state.runtime,
-        store,
-        &state.transports,
-        &state.circuits,
-        state.master_key.as_deref(),
-        &state.provider_egress_policy,
-        state.provider_response_limits,
-    )
-    .await
-    {
+async fn activate_initial_runtime(activator: &RuntimeActivator) {
+    match activator.activate().await {
         Ok(true) => info!(
-            generation = ?state.runtime.active_generation_ordinal(),
+            generation = ?activator.runtime.active_generation_ordinal(),
             "loaded runtime generation"
         ),
         Ok(false) => warn!("no active runtime generation; gateway will remain unready"),
@@ -322,19 +313,11 @@ async fn spawn_background_plane(
     mode: ApiMode,
     run_worker_in_process: bool,
     shutdown: &watch::Receiver<bool>,
+    activator: RuntimeActivator,
 ) -> AppResult<BackgroundPlane> {
     let mut plane = BackgroundPlane {
         tasks: Vec::new(),
         request_metadata_writer_status: None,
-    };
-    let activator = RuntimeActivator {
-        runtime: Arc::clone(&state.runtime),
-        store: store.clone(),
-        transports: state.transports.clone(),
-        circuits: state.circuits.clone(),
-        master_key: state.master_key.clone(),
-        egress_policy: Arc::clone(&state.provider_egress_policy),
-        response_limits: state.provider_response_limits,
     };
     plane
         .tasks

@@ -296,6 +296,7 @@ async fn reservation_first_blocks_incompatible_activation_and_disable() {
         Mutation::Model,
         Mutation::Capability,
         Mutation::Disable,
+        Mutation::Compatible,
     ] {
         let (db, mut fixture) = Fixture::create().await;
         fixture.stage(mutation).await;
@@ -328,9 +329,11 @@ async fn reservation_first_blocks_incompatible_activation_and_disable() {
                 matches!(result, Err(Error::InUse)),
                 "{mutation:?}: {result:?}"
             );
+        } else if matches!(mutation, Mutation::Compatible) {
+            assert!(result.is_ok(), "{mutation:?}: {result:?}");
         } else {
             assert!(
-                matches!(result, Err(Error::ProviderIncomplete)),
+                matches!(result, Err(Error::ProviderMediaJobIncompatible { job_id }) if job_id == job.id),
                 "{mutation:?}: {result:?}"
             );
         }

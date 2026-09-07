@@ -1,10 +1,16 @@
 <script lang="ts">
-  import { mediaJobList } from '$lib/features/operations/media-jobs/mediaJobListState';
+  import { page } from '$app/state';
+  import { syncListWithUrl } from '$lib/lists/urlSync.svelte';
+  import {
+    mediaJobList,
+    mediaJobUrl
+  } from '$lib/features/operations/media-jobs/mediaJobListState';
 
   let { children } = $props();
-  // The list keeps its cursor (and filters) across this route family, so a
-  // detail visit returns to the same page; leaving the family resets it.
-  const listState = $state(mediaJobList.empty());
+  const listState = $state(mediaJobUrl.state(page.url.searchParams));
+  syncListWithUrl(listState, mediaJobUrl, {
+    detail: () => (page.params.jobId ? `/${page.params.jobId}` : '')
+  });
   mediaJobList.set(listState);
 </script>
 

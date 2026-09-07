@@ -37,6 +37,8 @@ macro_rules! require {
     };
 }
 
+#[path = "ha/authority.rs"]
+mod authority;
 #[path = "ha/convergence.rs"]
 mod convergence;
 #[path = "ha/shared_valkey.rs"]
@@ -48,7 +50,11 @@ mod worker_recovery;
 #[ignore = "high-availability; run through scripts/run-e2e-tests.sh"]
 async fn two_gateways_converge_and_degrade_safely() -> Result<(), String> {
     let (world, gateway) = world::bootstrap_ha().await?;
-    let result = convergence::exercise(&world, &gateway).await;
+    let result = async {
+        convergence::exercise(&world, &gateway).await?;
+        authority::exercise(&world, &gateway).await
+    }
+    .await;
     let logs = world.shutdown().await;
     result.map_err(|error| format!("{error}\nserver logs:\n{logs}"))
 }

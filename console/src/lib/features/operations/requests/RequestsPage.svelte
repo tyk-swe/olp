@@ -2,11 +2,20 @@
   import RequestTimeline from './RequestTimeline.svelte';
   import RequestResults from './RequestResults.svelte';
   import { resolve } from '$app/paths';
+  import { page } from '$app/state';
+  import { applyListSearch } from '$lib/lists/urlSync.svelte';
   import { queryKeys } from '$lib/api/queryKeys';
   import { createQuery } from '@tanstack/svelte-query';
   import { getRequest, listRequests } from '$lib/api/requests';
 
-  import { requestList, type RequestListState } from './requestListState';
+  import {
+    requestFilters,
+    requestProblem,
+    requestSearch,
+    requestUrl,
+    readRequestForm,
+    type RequestListState
+  } from './requestListState';
 
   let {
     requestId = '',
@@ -16,13 +25,28 @@
     listState: RequestListState;
   } = $props();
 
-  const requests = createQuery(() => ({
-    queryKey: queryKeys.requests.page(listState.applied, listState.cursor),
-    queryFn: () =>
-      listRequests({ ...listState.applied, cursor: listState.cursor }),
-    placeholderData: (previous) => previous,
-    enabled: !requestId
-  }));
+  let validation = $state<string | null>(null);
+  const urlForm = $derived(readRequestForm(page.url.searchParams));
+  const urlFilters = $derived(requestFilters(urlForm));
+  const urlProblem = $derived(requestProblem(urlForm, true));
+  $effect(() => {
+    void page.url.search;
+    validation = null;
+  });
+
+  const requests = createQuery(() => {
+    const applied = urlFilters;
+    const cursor =
+      requestSearch(applied) === requestSearch(listState.applied)
+        ? listState.cursor
+        : undefined;
+    return {
+      queryKey: queryKeys.requests.page(applied, cursor),
+      queryFn: () => listRequests({ ...applied, cursor }),
+      placeholderData: (previous) => previous,
+      enabled: !requestId && !urlProblem
+    };
+  });
 
   const detail = createQuery(() => ({
     queryKey: queryKeys.requests.detail(requestId),
@@ -32,11 +56,18 @@
 
   function applyFilters(event: SubmitEvent) {
     event.preventDefault();
-    requestList.apply(listState);
+    validation = requestProblem(listState, false, listState.applied);
+    if (validation) return;
+    applyListSearch(
+      listState,
+      requestUrl,
+      requestSearch(requestFilters(listState, listState.applied))
+    );
   }
 
   function resetFilters() {
-    requestList.clear(listState);
+    validation = null;
+    applyListSearch(listState, requestUrl, '');
   }
 </script>
 
@@ -54,8 +85,9 @@
         : 'Filter operational metadata by route, target, key, outcome, or time range—never prompt or output content.'}
     </p>
   </div>
-  {#if requestId}<a class="button button-secondary" href={resolve('/requests')}
-      >Back to requests</a
+  {#if requestId}<a
+      class="button button-secondary"
+      href={resolve(`/requests${page.url.search}`)}>Back to requests</a
     >{/if}
 </div>
 
@@ -64,4 +96,6 @@
     bind:listState
     {applyFilters}
     {resetFilters}
+    problem={validation ?? urlProblem}
+    queryProblem={urlProblem}
   />{/if}

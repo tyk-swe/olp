@@ -29,6 +29,9 @@ test('Route Studio creates, simulates, validates, and activates deterministic ro
   let createHeaders: Record<string, string> = {};
   let simulationBody: Record<string, unknown> | undefined;
   let saveHeaders: Record<string, string> = {};
+  let holdNextSimulation = false;
+  let pendingSimulation = Promise.withResolvers<void>();
+  let releaseSimulation = Promise.withResolvers<void>();
 
   const routeDraft = () => ({
     id: ids.draft,
@@ -100,13 +103,26 @@ test('Route Studio creates, simulates, validates, and activates deterministic ro
       }
     }
     if (pathname.endsWith('/simulate')) {
-      simulationBody = request.postDataJSON();
+      const body = request.postDataJSON();
+      simulationBody = body;
+      if (holdNextSimulation) {
+        holdNextSimulation = false;
+        pendingSimulation.resolve();
+        await releaseSimulation.promise;
+      }
+      if (body.seed.endsWith('-failure')) {
+        await route.fulfill({
+          status: 503,
+          json: { title: 'Simulation unavailable', status: 503 }
+        });
+        return;
+      }
       await route.fulfill({
         json: {
-          deterministic_seed: 'setup-preview',
-          operation: 'generation',
-          surface: 'openai',
-          mode: 'streaming',
+          deterministic_seed: body.seed,
+          operation: body.operation,
+          surface: body.surface,
+          mode: body.mode,
           targets: [
             {
               target_id: ids.target,
@@ -189,6 +205,71 @@ test('Route Studio creates, simulates, validates, and activates deterministic ro
     mode: 'streaming',
     seed: 'setup-preview'
   });
+  const explanation = page.getByRole('heading', {
+    name: 'Attempt explanation'
+  });
+  const completion = page.getByText(
+    'Deterministic attempt order calculated from the saved draft.'
+  );
+  await expect(completion).toBeVisible();
+  await page.getByLabel('Transport mode').selectOption('unary');
+  await expect(explanation).toBeHidden();
+  await expect(completion).toBeHidden();
+
+  holdNextSimulation = true;
+  await page.getByRole('button', { name: 'Simulate order' }).click();
+  await pendingSimulation.promise;
+  await page.getByLabel('Dry-run seed').fill('changed-while-pending');
+  await page.getByLabel('Dry-run seed').fill('setup-preview');
+  releaseSimulation.resolve();
+  await expect(
+    page.getByRole('button', { name: 'Simulate order' })
+  ).toBeEnabled();
+  await expect(explanation).toBeHidden();
+  await expect(completion).toBeHidden();
+
+  await page.getByLabel('Dry-run seed').fill('fresh-preview');
+  await page.getByRole('button', { name: 'Simulate order' }).click();
+  await expect(explanation).toBeVisible();
+  await expect(page.getByText('seed: fresh-preview')).toBeVisible();
+  await expect(completion).toBeVisible();
+  await page.getByLabel('Dry-run seed').fill('stale-failure');
+  holdNextSimulation = true;
+  pendingSimulation = Promise.withResolvers<void>();
+  releaseSimulation = Promise.withResolvers<void>();
+  await page.getByRole('button', { name: 'Simulate order' }).click();
+  await pendingSimulation.promise;
+  await page.getByLabel('Dry-run seed').fill('fresh-preview');
+  releaseSimulation.resolve();
+  await expect(
+    page.getByRole('button', { name: 'Simulate order' })
+  ).toBeEnabled();
+  await expect(page.getByText('Simulation unavailable')).toBeHidden();
+  await expect(explanation).toBeHidden();
+  await expect(completion).toBeHidden();
+  await page.getByLabel('Dry-run seed').fill('current-failure');
+  await page.getByRole('button', { name: 'Simulate order' }).click();
+  await expect(page.getByText('Simulation unavailable')).toBeVisible();
+  await page.getByLabel('Dry-run seed').fill('fresh-preview');
+  await page.getByRole('button', { name: 'Simulate order' }).click();
+  await expect(explanation).toBeVisible();
+  await expect(page.getByText('Simulation unavailable')).toBeHidden();
+  await page.getByLabel('Client surface').selectOption('anthropic');
+  await expect(explanation).toBeHidden();
+  await expect(completion).toBeHidden();
+  await page.getByRole('button', { name: 'Simulate order' }).click();
+  await expect(explanation).toBeVisible();
+  await page.getByLabel('Weight', { exact: true }).fill('50');
+  await expect(explanation).toBeHidden();
+  await expect(completion).toBeHidden();
+  await expect(
+    page.getByRole('button', { name: 'Simulate order' })
+  ).toBeDisabled();
+  await page.getByRole('button', { name: 'Save draft' }).click();
+  await expect(page.getByText('Draft saved.')).toBeVisible();
+  await expect(explanation).toBeHidden();
+  await page.getByRole('button', { name: 'Simulate order' }).click();
+  await expect(explanation).toBeVisible();
   await page.getByRole('button', { name: 'Validate draft' }).click();
   await expect(page.getByText('Validation passed.')).toBeVisible();
   await page.getByRole('button', { name: 'Activate route' }).click();

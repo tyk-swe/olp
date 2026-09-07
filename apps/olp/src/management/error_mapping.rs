@@ -21,6 +21,12 @@ pub(crate) fn map_configuration(error: ConfigurationError) -> Problem {
             "provider",
             "A credential and enabled model are required before activation; OpenAI-compatible model capabilities must also be live-certified.",
         ),
+        ConfigurationError::ProviderMediaJobIncompatible { job_id } => Problem::field_validation(
+            "provider",
+            format!(
+                "Activation is blocked by live media job {job_id}. The draft must preserve the job's provider connection, credential, model and certified video get/content/delete operations. Restore a compatible configuration or delete this job before activating."
+            ),
+        ),
         ConfigurationError::PreconditionFailed => Problem::new(
             StatusCode::PRECONDITION_FAILED,
             "etag_mismatch",
@@ -268,6 +274,29 @@ mod tests {
         for (error, status, code) in cases {
             assert_problem(map_configuration(error), status, code);
         }
+    }
+
+    #[test]
+    fn media_job_activation_conflicts_name_the_job_and_resolution() {
+        let job_id = uuid::Uuid::parse_str("01980000-0000-7000-8000-000000000321").unwrap();
+        let problem =
+            map_configuration(ConfigurationError::ProviderMediaJobIncompatible { job_id });
+        assert_eq!(problem.errors.len(), 1);
+        let messages = &problem.errors["provider"];
+        assert_eq!(messages.len(), 1);
+        let message = &messages[0];
+        assert!(message.contains(&job_id.to_string()));
+        assert!(message.contains("provider connection, credential, model"));
+        assert!(message.contains("certified video get/content/delete operations"));
+        assert!(message.contains("Restore a compatible configuration or delete this job"));
+        assert!(message.len() < 400);
+        assert_problem(problem, 422, "validation_failed");
+
+        let incomplete = map_configuration(ConfigurationError::ProviderIncomplete);
+        assert!(
+            incomplete.errors["provider"][0]
+                .starts_with("A credential and enabled model are required before activation")
+        );
     }
 
     #[test]

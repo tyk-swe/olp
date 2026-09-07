@@ -313,11 +313,6 @@ pub(crate) struct IssuedKey {
 }
 
 /// Blocks until the gateway accepts `secret`.
-///
-/// A newly published key exists only inside a runtime generation the gateways
-/// have not yet loaded; `docs/architecture.md` "Runtime publication" makes that
-/// propagation explicit, so waiting for it is part of using the API, not a
-/// workaround for flakiness.
 async fn await_key(http: &reqwest::Client, origin: &str, secret: &str) -> Result<(), String> {
     await_key_with_timeout(http, origin, secret, Duration::from_secs(30)).await
 }

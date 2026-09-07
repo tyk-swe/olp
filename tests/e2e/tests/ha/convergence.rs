@@ -74,18 +74,7 @@ pub(crate) async fn exercise(world: &World, gateway: &GatewayProcess) -> Result<
         "messages": [{"role": "user", "content": "HA limiter probe"}],
         "max_tokens": 1
     });
-    for public in &public {
-        let status = gateway_status(&http, public, &hard.secret, Some(&chat)).await?;
-        crate::require!(
-            status != 429,
-            "shared RPM denied before the fourth admitted request"
-        );
-    }
-    let status = gateway_status(&http, public[0], &hard.secret, Some(&chat)).await?;
-    crate::require!(
-        status == 429,
-        "shared RPM was not atomic across gateways (last status {status})"
-    );
+    prove_shared_rpm(world, &http, &public, &hard, &chat).await?;
 
     let lkg = issue_key(
         world,
@@ -199,6 +188,68 @@ pub(crate) async fn exercise(world: &World, gateway: &GatewayProcess) -> Result<
     .await;
     set_proxy(&http, &toxiproxy, &valkey_proxy, true).await?;
     outage
+}
+
+async fn prove_shared_rpm(
+    world: &World,
+    http: &reqwest::Client,
+    public: &[&str; 2],
+    hard: &IssuedKey,
+    chat: &Value,
+) -> Result<(), String> {
+    let client = redis::Client::open(world.valkey_url().await?)
+        .map_err(|error| format!("invalid Valkey URL for RPM proof: {error}"))?;
+    let mut connection = client
+        .get_multiplexed_async_connection()
+        .await
+        .map_err(|error| format!("Valkey connection failed for RPM proof: {error}"))?;
+    let (seconds, microseconds): (u64, u64) = redis::cmd("TIME")
+        .query_async(&mut connection)
+        .await
+        .map_err(|error| format!("Valkey time read failed before RPM boundary: {error}"))?;
+    // The fixed-window counter must not roll over mid-burst, so only wait for
+    // the next Valkey minute when the current one cannot hold the 30s budget.
+    let remaining = 60 - seconds % 60;
+    let next_window = if remaining <= 35 {
+        tokio::time::sleep(Duration::from_secs(remaining) - Duration::from_micros(microseconds))
+            .await;
+        seconds / 60 + 1
+    } else {
+        seconds / 60
+    };
+    let (synchronized_seconds, _): (u64, u64) = redis::cmd("TIME")
+        .query_async(&mut connection)
+        .await
+        .map_err(|error| format!("Valkey time read failed after RPM boundary: {error}"))?;
+    crate::require!(
+        synchronized_seconds / 60 == next_window && synchronized_seconds % 60 < 30,
+        "RPM proof did not synchronize inside the first half of Valkey minute {next_window}"
+    );
+
+    let burst = tokio::time::timeout(Duration::from_secs(30), async {
+        for request in 0..4 {
+            let origin = public[request % public.len()];
+            let status = gateway_status(http, origin, &hard.secret, Some(chat)).await?;
+            crate::require!(status == 200,
+                "shared RPM request {} of four returned {status} on {origin}", request + 1);
+        }
+        for origin in public {
+            let status = gateway_status(http, origin, &hard.secret, Some(chat)).await?;
+            crate::require!(status == 429,
+                "shared RPM was not atomic across gateways: {origin} returned {status} after four admissions");
+        }
+        Ok::<(), String>(())
+    }).await.map_err(|_| "shared RPM burst exceeded its 30-second window budget".to_owned())?;
+    let (finished_seconds, _): (u64, u64) =
+        redis::cmd("TIME")
+            .query_async(&mut connection)
+            .await
+            .map_err(|error| format!("Valkey time read failed after RPM proof: {error}"))?;
+    crate::require!(
+        finished_seconds / 60 == next_window,
+        "Valkey minute changed during the bounded RPM proof"
+    );
+    burst
 }
 
 pub(crate) async fn set_limits_fail_open(management: &Management) -> Result<(), String> {

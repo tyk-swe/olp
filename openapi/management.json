@@ -204,6 +204,20 @@
       },
       "AttemptResponse": {
         "properties": {
+          "cached_input_tokens": {
+            "format": "int64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "charge_status": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "committed": {
             "type": "boolean"
           },
@@ -214,7 +228,19 @@
               "null"
             ]
           },
+          "currency": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "error_class": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "estimated_cost": {
             "type": [
               "string",
               "null"
@@ -232,6 +258,14 @@
             "format": "uuid",
             "type": "string"
           },
+          "input_tokens": {
+            "format": "int64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
           "latency_ms": {
             "format": "int64",
             "minimum": 0,
@@ -240,10 +274,31 @@
               "null"
             ]
           },
+          "media_units": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "ordinal": {
             "format": "int32",
             "minimum": 0,
             "type": "integer"
+          },
+          "output_tokens": {
+            "format": "int64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "pricing_revision_id": {
+            "format": "uuid",
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "provider_id": {
             "format": "uuid",
@@ -264,8 +319,26 @@
               "null"
             ]
           },
+          "unpriced": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
           "upstream_model": {
             "type": "string"
+          },
+          "usage_complete": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "usage_observed": {
+            "type": [
+              "boolean",
+              "null"
+            ]
           }
         },
         "required": [
@@ -9363,7 +9436,7 @@
                 }
               }
             },
-            "description": "Provider is incomplete"
+            "description": "Provider is incomplete or incompatible with live media jobs"
           },
           "500": {
             "content": {

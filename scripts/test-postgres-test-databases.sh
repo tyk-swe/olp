@@ -62,19 +62,60 @@ coverage_runner() {
 export -f coverage_runner psql timeout
 export drop_log query_log runner_log
 
-OLP_TEST_DATABASE_ADMIN_URL='postgres://example.invalid/postgres' \
-OLP_TEST_DATABASE_URL_PREFIX='postgres://example.invalid/' \
-OLP_VALKEY_URL='redis://example.invalid' \
-OLP_DB_TEST_RUNNER='coverage_runner --no-report' \
-  "$script_dir/run-postgres-tests.sh" -E 'test(runner_override)'
-grep -Fxq -- '--no-report' "$runner_log"
-grep -Fxq -- '--locked' "$runner_log"
-grep -Fxq -- '--package' "$runner_log"
-grep -Fxq -- 'olp-db' "$runner_log"
-grep -Fxq -- '--profile' "$runner_log"
-grep -Fxq -- 'db' "$runner_log"
-grep -Fxq -- '-E' "$runner_log"
-grep -Fxq -- 'test(runner_override)' "$runner_log"
+valkey_skip_args=(
+  --skip distributed_limits_valkey
+  --skip distributed_cost_limits_valkey
+  --skip request_metadata_consumer_valkey
+  --skip spend_controls_postgres::status_and_reconciliation_include_raw_and_exact_hourly_attempts
+  --skip spend_controls_postgres::reconciliation_repairs_malformed_state_and_continues_to_later_keys
+  --skip spend_recovery_postgres::future_skew_is_excluded_from_today_but_retained_in_its_own_window
+)
+
+check_runner_arguments() (
+  local valkey_mode=$1
+  shift
+  export OLP_TEST_DATABASE_ADMIN_URL='postgres://example.invalid/postgres'
+  export OLP_TEST_DATABASE_URL_PREFIX='postgres://example.invalid/'
+  export OLP_DB_TEST_RUNNER='coverage_runner --no-report'
+  case "$valkey_mode" in
+    unset) unset OLP_VALKEY_URL ;;
+    empty) export OLP_VALKEY_URL='' ;;
+    set) export OLP_VALKEY_URL='redis://example.invalid' ;;
+  esac
+  "$script_dir/run-postgres-tests.sh" "$@"
+  local expected_args=(
+    --no-report --locked --all-features --package olp-db --package olp
+    --profile db --run-ignored ignored-only "$@"
+  )
+  if [[ $valkey_mode != set ]]; then
+    local has_separator=false argument
+    for argument in "$@"; do
+      if [[ $argument == -- ]]; then has_separator=true; fi
+    done
+    if [[ $has_separator == false ]]; then expected_args+=(--); fi
+    expected_args+=("${valkey_skip_args[@]}")
+  fi
+  diff -u <(printf '%s\n' "${expected_args[@]}") "$runner_log"
+)
+
+for valkey_mode in unset empty set; do
+  check_runner_arguments "$valkey_mode"
+  check_runner_arguments "$valkey_mode" -E 'test(spend_controls_postgres)' spend
+  check_runner_arguments "$valkey_mode" -E 'test(runner_override)' -- --skip caller_skip
+  check_runner_arguments "$valkey_mode" -- spend_recovery_postgres
+done
+
+postgres_only_cases=(
+  spend_controls_postgres::future_window_delta_cannot_replace_the_current_durable_window
+  spend_controls_postgres::migration_fences_n_minus_one_rollup_before_raw_fact_deletion
+  spend_recovery_postgres::leadership_is_retained_across_follower_ticks_and_released_on_drop
+  spend_recovery_postgres::cancelling_the_owner_drops_the_detached_lock_session
+)
+for test_case in "${postgres_only_cases[@]}"; do
+  for ((index = 1; index < ${#valkey_skip_args[@]}; index += 2)); do
+    [[ $test_case != *"${valkey_skip_args[index]}"* ]]
+  done
+done
 
 fake_list_status=7
 if postgres_test_sweep_databases \

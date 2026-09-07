@@ -48,8 +48,6 @@ export type FilteredListState<Form, Query> = CursorHistory &
 export type FilteredListSpec<Form extends object, Query> = {
   emptyForm: () => Form;
   toQuery: (form: Form) => Query;
-  /** A message that blocks applying the form, if it is inconsistent. */
-  validate?: (form: Form) => string | null;
 };
 
 export function filteredListState<Form extends object, Query>(
@@ -61,25 +59,7 @@ export function filteredListState<Form extends object, Query>(
     ...spec.emptyForm(),
     applied: spec.toQuery(spec.emptyForm())
   });
-  return {
-    get,
-    set,
-    empty,
-    /**
-     * Restarts paging and applies the form. Returns the validation message
-     * that blocked it instead, leaving the applied query untouched.
-     */
-    apply(state: FilteredListState<Form, Query>): string | null {
-      const problem = spec.validate?.(state) ?? null;
-      if (problem) return problem;
-      resetCursor(state);
-      state.applied = spec.toQuery(state);
-      return null;
-    },
-    clear(state: FilteredListState<Form, Query>) {
-      Object.assign(state, empty());
-    }
-  };
+  return { get, set, empty };
 }
 
 export function cursorPaginationProps(

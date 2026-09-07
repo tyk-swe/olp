@@ -1,6 +1,7 @@
 import { instant } from '$lib/api/query';
 import type { UsageFilters } from '$lib/api/usage';
 import { dateTimeLocalValue } from '$lib/format';
+import { UUID } from '$lib/lists/filters';
 
 const dimensions = [
   'route',
@@ -16,7 +17,6 @@ const resources = [
   'api_key_id',
   'operation'
 ] as const;
-const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export type UsageState = {
   filters: UsageFilters;
@@ -47,9 +47,9 @@ export function usageProblem(state: UsageState): string | null {
   if (!urlInstant(start) || !urlInstant(end))
     return 'Enter valid start and end times.';
   if (new Date(start) >= new Date(end)) return 'End must be after start.';
-  if (provider_id && !uuid.test(provider_id))
+  if (provider_id && !UUID.test(provider_id))
     return 'Provider ID must be a UUID.';
-  if (api_key_id && !uuid.test(api_key_id)) return 'API key ID must be a UUID.';
+  if (api_key_id && !UUID.test(api_key_id)) return 'API key ID must be a UUID.';
   return null;
 }
 

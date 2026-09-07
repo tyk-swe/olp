@@ -120,6 +120,18 @@ pub(super) struct AttemptResponse {
     committed: bool,
     latency_ms: Option<u64>,
     first_byte_ms: Option<u64>,
+    charge_status: Option<String>,
+    usage_observed: Option<bool>,
+    usage_complete: Option<bool>,
+    input_tokens: Option<u64>,
+    output_tokens: Option<u64>,
+    cached_input_tokens: Option<u64>,
+    media_units: Option<String>,
+    estimated_cost: Option<String>,
+    currency: Option<String>,
+    unpriced: Option<bool>,
+    #[schema(value_type = Option<String>, format = Uuid)]
+    pricing_revision_id: Option<Uuid>,
 }
 
 impl From<AttemptRecord> for AttemptResponse {
@@ -137,6 +149,17 @@ impl From<AttemptRecord> for AttemptResponse {
             committed: record.committed,
             latency_ms: record.latency_ms,
             first_byte_ms: record.first_byte_ms,
+            charge_status: record.charge_status,
+            usage_observed: record.usage_observed,
+            usage_complete: record.usage_complete,
+            input_tokens: record.input_tokens,
+            output_tokens: record.output_tokens,
+            cached_input_tokens: record.cached_input_tokens,
+            media_units: record.media_units,
+            estimated_cost: record.estimated_cost,
+            currency: record.currency,
+            unpriced: record.unpriced,
+            pricing_revision_id: record.pricing_revision_id,
         }
     }
 }
