@@ -18,7 +18,25 @@ import {
 const DISABLED_EDIT_NOTE =
   'This provider is disabled. Restore it as a draft to change configuration, rotate credentials, or review models again.';
 
-test.beforeEach(async ({ page }) => mockProviderKinds(page));
+test.beforeEach(async ({ page }) => {
+  await mockProviderKinds(page);
+  for (const kind of ['openai', 'openai_compatible']) {
+    await page.route(
+      `**/api/v1/provider-kinds/${kind}/capabilities`,
+      async (route) => {
+        await route.fulfill({
+          json: {
+            provider_kind: kind,
+            capabilities: [
+              { operation: 'generation', surface: 'openai', mode: 'unary' },
+              { operation: 'generation', surface: 'openai', mode: 'streaming' }
+            ]
+          }
+        });
+      }
+    );
+  }
+});
 
 test('provider detail keeps the live revision and credential until a certified draft activates', async ({
   page
