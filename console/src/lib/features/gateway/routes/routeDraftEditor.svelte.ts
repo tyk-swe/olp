@@ -1,3 +1,4 @@
+import { untrack } from 'svelte';
 import { SvelteSet } from 'svelte/reactivity';
 import { goto } from '$app/navigation';
 import { queryKeys } from '$lib/api/queryKeys';
@@ -40,6 +41,9 @@ import {
   type EditableTarget
 } from './routeEditor';
 
+const simulationNotice =
+  'Deterministic attempt order calculated from the saved draft.';
+
 export class RouteDraftEditorState {
   readRouteId: () => string | undefined;
   get routeId() {
@@ -69,6 +73,18 @@ export class RouteDraftEditorState {
   simulationSurface = $state('openai');
   simulationMode = $state('streaming');
   simulation = $state<RouteSimulation | null>(null);
+  private simulationVersion = 0;
+  simulationInputs = $derived.by(() =>
+    JSON.stringify([
+      this.resourceId,
+      this.draft.data?.id,
+      this.draft.data?.etag,
+      this.simulationOperation,
+      this.simulationSurface,
+      this.simulationMode,
+      this.seed
+    ])
+  );
   activation = $state<RouteActivation | null>(null);
   editorValues = $derived({
     slug: this.slug,
@@ -98,7 +114,13 @@ export class RouteDraftEditorState {
       this.busy = '';
     }
   };
+  invalidateSimulation = () => {
+    this.simulationVersion += 1;
+    this.simulation = null;
+    if (this.notice === simulationNotice) this.notice = '';
+  };
   touch = () => {
+    this.invalidateSimulation();
     this.sync = markDirty(this.sync);
   };
   reload = async () => {
@@ -166,6 +188,7 @@ export class RouteDraftEditorState {
       this.errorMessage = issue;
       return;
     }
+    this.invalidateSimulation();
     await this.run('save', async () => {
       if (!this.sync.snapshotEtag)
         throw new Error('Reload the draft before saving.');
@@ -185,15 +208,33 @@ export class RouteDraftEditorState {
   };
   simulate = async (current: RouteDraft) => {
     if (!this.canManage) return;
+    this.invalidateSimulation();
+    const version = this.simulationVersion;
+    const inputs = this.simulationInputs;
     await this.run('simulate', async () => {
-      this.simulation = await simulateRoute(current.id, {
-        operation: this.simulationOperation,
-        surface: this.simulationSurface,
-        mode: this.simulationMode,
-        seed: this.seed || 'preview'
-      });
-      this.notice =
-        'Deterministic attempt order calculated from the saved draft.';
+      let simulation: RouteSimulation;
+      try {
+        simulation = await simulateRoute(current.id, {
+          operation: this.simulationOperation,
+          surface: this.simulationSurface,
+          mode: this.simulationMode,
+          seed: this.seed || 'preview'
+        });
+      } catch (error) {
+        if (
+          version === this.simulationVersion &&
+          inputs === this.simulationInputs
+        )
+          throw error;
+        return;
+      }
+      if (
+        version !== this.simulationVersion ||
+        inputs !== this.simulationInputs
+      )
+        return;
+      this.simulation = simulation;
+      this.notice = simulationNotice;
     });
   };
   validate = async (current: RouteDraft) => {
@@ -284,6 +325,10 @@ export class RouteDraftEditorState {
       const modes = modesFor(this.simulationOperation);
       if (!modes.includes(this.simulationMode))
         this.simulationMode = modes[0] ?? 'unary';
+    });
+    $effect(() => {
+      void this.simulationInputs;
+      untrack(this.invalidateSimulation);
     });
     guardUnsavedChanges(() => this.sync.dirty);
   }
