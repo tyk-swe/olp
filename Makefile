@@ -221,6 +221,7 @@ helm-verify: ## Verify Helm values, schema, and templates change together
 
 script-selftest: ## Self-tests for shell helpers and repository invariants
 	scripts/test-backup-manifest.sh
+	python3 scripts/test-bench-diagnostics.py
 	scripts/test-bench-report.sh
 	scripts/test-postgres-test-databases.sh
 	scripts/test-repository-validation.sh
