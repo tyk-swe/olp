@@ -56,7 +56,9 @@ def scenario_comparison_issues(current, previous, scenario, prior) -> list[str]:
     issues = metadata_issues(scenario, prior, ("duration_seconds", "concurrency"))
     has_mock = scenario.get("mock") is not None
     had_mock = prior.get("mock") is not None
-    if (scenario.get("added_latency_ms") is not None and not has_mock) or (
+    if (
+        scenario["name"] != "models_c256" and (not has_mock or not had_mock)
+    ) or (scenario.get("added_latency_ms") is not None and not has_mock) or (
         prior.get("added_latency_ms") is not None and not had_mock
     ):
         issues.append("missing direct-mock phase metadata")

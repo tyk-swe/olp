@@ -20,11 +20,11 @@ jq -n '{
             rustc: "rustc-fixture", oha: "1.12.0"},
   mock: {unary_delay_ms: 200, stream_tokens: 50},
   scenarios: [
-    {name: "added", duration_seconds: 60, concurrency: 16,
+    {name: "chat_unary_c16", duration_seconds: 60, concurrency: 16,
      mock: {latency_ms: {p95: 200, p99: 200}, throughput_rps: 100},
      added_latency_ms: {p95: 10, p99: 20},
      gateway: {latency_ms: {p95: 210, p99: 220}, throughput_rps: 100}},
-    {name: "gateway", duration_seconds: 60, concurrency: 256,
+    {name: "models_c256", duration_seconds: 60, concurrency: 256,
      gateway: {latency_ms: {p95: 5, p99: 8}, throughput_rps: 100}}
   ]
 }' > "$baseline"
@@ -36,11 +36,12 @@ render_report() {
 }
 
 throughput_loss_is_reported() {
-  local basis=$1 latency=$2 tail=$3
+  local basis=$1 latency=$2 tail=$3 scenario=chat_unary_c16
+  if [[ $basis == gateway ]]; then scenario=models_c256; fi
   render_report "$current" "$baseline" || return
-  grep -Fq "| $basis | $basis | $latency ms | $tail ms | $latency ms | p95 +0.0%, throughput -30.0% |" "$report" &&
-    grep -Fq -- "- $basis: gateway throughput decreased 30.0%" "$report" &&
-    grep -Fxq "::warning::$basis: gateway throughput decreased 30.0%" "$warnings"
+  grep -Fq "| $scenario | $basis | $latency ms | $tail ms | $latency ms | p95 +0.0%, throughput -30.0% |" "$report" &&
+    grep -Fq -- "- $scenario: gateway throughput decreased 30.0%" "$report" &&
+    grep -Fxq "::warning::$scenario: gateway throughput decreased 30.0%" "$warnings"
 }
 
 run_test "positive added latency includes throughput loss and warning" \
@@ -117,8 +118,8 @@ run_test "different source revisions and fingerprints remain comparable" source_
 all_comparisons_are_unavailable() {
   render_report "$1" "$2" || return
   grep -Fq "$3" "$warnings" &&
-    grep -Fq '| added | added | 10.00 ms | 20.00 ms | — | — |' "$report" &&
-    grep -Fq '| gateway | gateway | 5.00 ms | 8.00 ms | — | — |' "$report" &&
+    grep -Fq '| chat_unary_c16 | added | 10.00 ms | 20.00 ms | — | — |' "$report" &&
+    grep -Fq '| models_c256 | gateway | 5.00 ms | 8.00 ms | — | — |' "$report" &&
     ! grep -Eq 'p95 [+-]|throughput [+-]|No performance regression' "$report"
 }
 
@@ -141,10 +142,10 @@ run_test "changed run duration excludes all comparisons" \
 
 only_added_comparison_is_unavailable() {
   render_report "$1" "$2" || return
-  grep -Fq "added: comparison unavailable: $3" "$warnings" &&
-    grep -Fq '| added | added | 10.00 ms | 20.00 ms | — | — |' "$report" &&
-    grep -Fq '| gateway | gateway | 5.00 ms | 8.00 ms | 5.00 ms | p95 +0.0%, throughput -30.0% |' "$report" &&
-    ! grep -Fq 'added: gateway throughput decreased' "$warnings"
+  grep -Fq "chat_unary_c16: comparison unavailable: $3" "$warnings" &&
+    grep -Fq '| chat_unary_c16 | added | 10.00 ms | 20.00 ms | — | — |' "$report" &&
+    grep -Fq '| models_c256 | gateway | 5.00 ms | 8.00 ms | 5.00 ms | p95 +0.0%, throughput -30.0% |' "$report" &&
+    ! grep -Fq 'chat_unary_c16: gateway throughput decreased' "$warnings"
 }
 
 scenario_metadata_change_is_excluded() {
@@ -237,11 +238,32 @@ direct_mock_phase_changes_are_excluded() {
     'missing direct-mock phase metadata' || return
   jq '.scenarios[1].mock = {}' "$current" > "$test_root/phase.json" || return
   render_report "$test_root/phase.json" "$baseline" || return
-  grep -Fq 'gateway: comparison unavailable: direct-mock phase differs' "$warnings" &&
-    grep -Fq '| gateway | gateway | 5.00 ms | 8.00 ms | — | — |' "$report" &&
-    grep -Fq '| added | added | 10.00 ms | 20.00 ms | 10.00 ms | p95 +0.0%, throughput -30.0% |' "$report"
+  grep -Fq 'models_c256: comparison unavailable: direct-mock phase differs' "$warnings" &&
+    grep -Fq '| models_c256 | gateway | 5.00 ms | 8.00 ms | — | — |' "$report" &&
+    grep -Fq '| chat_unary_c16 | added | 10.00 ms | 20.00 ms | 10.00 ms | p95 +0.0%, throughput -30.0% |' "$report"
 }
 run_test "missing or different direct-mock phases cannot be compared" direct_mock_phase_changes_are_excluded
+
+missing_upstream_phases_are_not_local() {
+  jq 'del(.scenarios[0].mock, .scenarios[0].added_latency_ms) |
+      .mock.unary_delay_ms = 400' "$current" > "$test_root/no-phase-current.json" || return
+  jq 'del(.scenarios[0].mock, .scenarios[0].added_latency_ms)' \
+    "$baseline" > "$test_root/no-phase-previous.json" || return
+  render_report "$test_root/no-phase-current.json" "$test_root/no-phase-previous.json" || return
+  grep -Fq 'chat_unary_c16: comparison unavailable: missing direct-mock phase metadata' "$warnings" &&
+    grep -Fq '| chat_unary_c16 | gateway | 210.00 ms | 220.00 ms | — | — |' "$report" &&
+    grep -Fq '| models_c256 | gateway | 5.00 ms | 8.00 ms | 5.00 ms | p95 +0.0%, throughput -30.0% |' "$report" &&
+    ! grep -Fq 'chat_unary_c16: gateway throughput decreased' "$warnings"
+}
+run_test "missing upstream phase measurements cannot masquerade as a local scenario" missing_upstream_phases_are_not_local
+
+local_models_do_not_require_mock_metadata() {
+  jq 'del(.mock)' "$current" > "$test_root/no-mock-current.json" || return
+  jq 'del(.mock)' "$baseline" > "$test_root/no-mock-previous.json" || return
+  only_added_comparison_is_unavailable "$test_root/no-mock-current.json" "$test_root/no-mock-previous.json" \
+    'missing mock.unary_delay_ms metadata in current and previous'
+}
+run_test "recorded local models remain comparable without mock metadata" local_models_do_not_require_mock_metadata
 
 historical_capture_is_readable() {
   local historical="$script_dir/../bench/results/aa50f62720231408fa4ba5c5bac6411d83caff2e.json"
