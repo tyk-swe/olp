@@ -5,7 +5,6 @@ use super::{
 use crate::bootstrap::workers::{
     request_metadata::request_metadata_consumer_name, spawn_worker_supervisors, stop_worker_tasks,
 };
-use std::time::Duration;
 use tokio::{sync::watch, task::JoinSet};
 pub(super) async fn run_worker(args: PersistenceArgs) -> AppResult<()> {
     let store = connect_store(&args.database).await?;
@@ -44,7 +43,7 @@ async fn test_worker_start_barrier() -> AppResult<()> {
     let release = format!("{marker}.release");
     std::fs::write(&marker, b"ready\n")?;
     while !std::path::Path::new(&release).exists() {
-        tokio::time::sleep(Duration::from_millis(25)).await;
+        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
     }
     Ok(())
 }
