@@ -48,9 +48,20 @@ throughput range for the ±10% same-machine reproducibility gate. The local
 latency and throughput.
 
 `make bench-report` compares gateway throughput for both added-latency and
-gateway-latency scenarios when the current and previous runs are valid. A
-throughput loss greater than 25% produces a warning; invalid runs are excluded
-from comparisons. Offline reporter fixtures run with `make script-selftest`.
+gateway-latency scenarios when both runs are valid and their recorded setup is
+comparable. Platform, CPU model/count, Rust compiler, `oha`, build profile and
+run duration must match; each scenario also requires matching duration and
+concurrency. Upstream-backed scenarios require matching direct-mock phases and
+mock delay/token settings. Mock changes do not block local `/v1/models`
+comparisons. Different source revisions, dirty-tree states and fingerprints are
+expected and do not block comparisons.
+
+Missing or unknown metadata (including an unspecified `external` build profile)
+leaves the affected comparison unavailable with an explanation; current latency
+measurements remain visible. Older captures stay readable without assuming
+missing settings match. Existing validity checks still exclude invalid runs.
+A throughput loss greater than 25% produces a warning only for comparable
+runs. Offline reporter fixtures run with `make script-selftest`.
 
 The mock returns unary chat and embedding responses after 200 ms and emits a
 fixed 50-token chat stream. A valid run requires zero admission rejections and
