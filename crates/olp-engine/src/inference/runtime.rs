@@ -138,6 +138,25 @@ impl Manager {
         Ok(true)
     }
 
+    pub fn refresh_api_keys(
+        &self,
+        api_keys: BTreeMap<ApiKeyLookupId, ApiKey>,
+    ) -> Result<(), Error> {
+        let _install = self
+            .install_lock
+            .lock()
+            .expect("runtime install lock poisoned");
+        let current = self.bundle.load_full();
+        let mut snapshot = current.snapshot.clone();
+        snapshot.api_keys = api_keys;
+        snapshot.validate()?;
+        self.bundle.store(Arc::new(Bundle {
+            snapshot,
+            transports: current.transports.clone(),
+        }));
+        Ok(())
+    }
+
     pub fn decode_persisted_release(release: &ReleaseCandidate<'_>) -> Result<Snapshot, Error> {
         let mut snapshot = Snapshot::from_persisted_slice(release.payload)?;
         if snapshot.generation.id.as_uuid() != release.generation_id {
@@ -400,3 +419,6 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+mod authority_tests;

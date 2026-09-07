@@ -44,6 +44,7 @@ fn activator() -> RuntimeActivator {
         response_limits: ResponseLimits::default(),
         activation_lock: Arc::new(Mutex::new(())),
         after_publication: None,
+        after_authority_read: None,
     }
 }
 
@@ -180,3 +181,5 @@ async fn older_publication_finishes_pruning_before_a_newer_activation_can_publis
             .any(|target| target.routing_id == Some(removed))
     );
 }
+
+mod authority_postgres;

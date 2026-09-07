@@ -156,8 +156,6 @@ async fn bootstrap_server_at_gateway(
         .build()
         .expect("reqwest client builds");
 
-    // The key exists only inside the activated runtime generation, so wait for
-    // the gateway to converge before handing the fixture to any test.
     let public_origin = gateway_origin.unwrap_or_else(|| server.public_origin.clone());
     await_key(&http, &public_origin, &secret).await?;
 

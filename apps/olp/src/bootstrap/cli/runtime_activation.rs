@@ -38,6 +38,8 @@ pub(super) struct RuntimeActivator {
     activation_lock: Arc<Mutex<()>>,
     #[cfg(test)]
     after_publication: Option<Arc<tokio::sync::Barrier>>,
+    #[cfg(test)]
+    after_authority_read: Option<Arc<tokio::sync::Barrier>>,
 }
 
 impl RuntimeActivator {
@@ -53,6 +55,8 @@ impl RuntimeActivator {
             activation_lock: Arc::new(Mutex::new(())),
             #[cfg(test)]
             after_publication: None,
+            #[cfg(test)]
+            after_authority_read: None,
         }
     }
 }
@@ -149,6 +153,13 @@ pub(super) fn spawn_runtime_poller(
 impl RuntimeActivator {
     pub(super) async fn activate(&self) -> AppResult<bool> {
         let activation = self.activation_lock.lock().await;
+        let current_api_keys = self.store.current_runtime_api_keys().await?;
+        #[cfg(test)]
+        if let Some(barrier) = &self.after_authority_read {
+            barrier.wait().await;
+            barrier.wait().await;
+        }
+        self.runtime.refresh_api_keys(current_api_keys.clone())?;
         let releases = self
             .store
             .recent_valid_runtime_releases_after(32, self.runtime.active_generation_ordinal())
@@ -156,7 +167,6 @@ impl RuntimeActivator {
         if releases.is_empty() {
             return Ok(false);
         }
-        let current_api_keys = self.store.current_runtime_api_keys().await?;
         let mut rejected = Vec::new();
         for release in releases {
             let mut snapshot = match self

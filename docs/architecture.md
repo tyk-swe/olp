@@ -69,6 +69,23 @@ The source-size baseline may only shrink: `check-source-size.sh --update` reject
 new exceptions. Transactional helpers retain the caller-owned transaction and
 lock order; refactoring does not split commits or change persistent formats.
 
+## Runtime activation and API-key authority
+
+Startup, runtime hints and periodic polls share one activation ordering boundary.
+Each successful authority poll replaces the API-key policy used for new admissions
+before examining newer routing releases. Revocations, rotated digests, scopes,
+route allowlists, expiry and hard limits therefore apply even when no newer release
+exists or when its payload or provider transport cannot be installed. A later poll
+cannot finish ahead of an earlier poll and then have its policy overwritten by the
+older result.
+
+An authority refresh preserves the installed routing generation and provider
+transport objects. Already admitted requests keep their immutable bundle, including
+the credentials and policy they pinned. Routing generation numbers advance only
+when a complete candidate installs. If PostgreSQL becomes unavailable, gateways
+retain their last successfully loaded authority and routing bundle, as described in
+[dependency failure operations](operations.md#dependency-failure).
+
 ## Durable media reservation
 
 A video request gains durable admission when its media-job reservation commits,
