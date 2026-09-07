@@ -36,26 +36,49 @@ output_dir=${1:-./backups}
 timestamp=$(date -u +%Y%m%dT%H%M%SZ)
 backup_name="olp-${timestamp}.dump"
 backup_path="${output_dir}/${backup_name}"
-temporary_path="${backup_path}.partial"
+reservation_dir="${backup_path}.partial"
+temporary_path="${reservation_dir}/${backup_name}"
+dump_pid=
+publication_started=false
+backup_complete=false
 snapshot_session_pid=
 
 umask 077
 mkdir -p "$output_dir"
-if [[ -e $backup_path || -e ${backup_path}.sha256 || -e ${backup_path}.manifest.json ]]; then
-  echo "refusing to overwrite an existing backup: $backup_path" >&2
+if ! mkdir -- "$reservation_dir"; then
+  echo "refusing to overwrite an existing backup reservation: $backup_path" >&2
   exit 1
 fi
 cleanup() {
-  rm -f "$temporary_path"
+  local status=$?
+  trap - EXIT INT TERM
+  if [[ -n $dump_pid ]]; then
+    kill "$dump_pid" 2>/dev/null || true
+    wait "$dump_pid" 2>/dev/null || true
+  fi
   if [[ -n $snapshot_session_pid ]]; then
     kill "$snapshot_session_pid" 2>/dev/null || true
     wait "$snapshot_session_pid" 2>/dev/null || true
   fi
+  if [[ $publication_started == true && $backup_complete == false ]]; then
+    rm -f -- "$backup_path" "${backup_path}.sha256" "${backup_path}.manifest.json"
+  fi
+  rm -rf -- "$reservation_dir"
+  exit "$status"
 }
 trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+for output in "$backup_path" "${backup_path}.sha256" "${backup_path}.manifest.json"; do
+  if [[ -e $output || -L $output ]]; then
+    echo "refusing to overwrite an existing backup: $output" >&2
+    exit 1
+  fi
+done
 
 coproc BACKUP_SNAPSHOT_SESSION {
-  "$psql_command" "$OLP_DATABASE_URL" -X --no-psqlrc --quiet \
+  exec "$psql_command" "$OLP_DATABASE_URL" -X --no-psqlrc --quiet \
     --tuples-only --no-align --field-separator='|' --set=ON_ERROR_STOP=1
 }
 snapshot_read_fd=${BACKUP_SNAPSHOT_SESSION[0]}
@@ -136,7 +159,10 @@ fi
   --no-owner \
   --no-privileges \
   --snapshot="$snapshot_id" \
-  --file="$temporary_path"
+  --file="$temporary_path" &
+dump_pid=$!
+wait "$dump_pid"
+dump_pid=
 printf '%s\n' 'COMMIT;' >&"$snapshot_write_fd"
 exec {snapshot_write_fd}>&-
 if ! wait "$snapshot_session_pid"; then
@@ -146,13 +172,16 @@ fi
 snapshot_session_pid=
 exec {snapshot_read_fd}<&-
 
-mv "$temporary_path" "$backup_path"
 created_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-"$manifest_tool" create-v2 "$backup_path" "$created_at" "$server_version" \
+"$manifest_tool" create-v2 "$temporary_path" "$created_at" "$server_version" \
   "$migration_count" "$latest_generation" "$traffic_quiesced" \
   "$request_metadata_stream_drained" "$request_metadata_consumer_checked_at"
 if [[ $request_metadata_schema == legacy ]]; then
-  "$manifest_tool" convert-v2-to-v1 "$backup_path"
+  "$manifest_tool" convert-v2-to-v1 "$temporary_path"
 fi
+
+publication_started=true
+mv -- "$temporary_path" "${temporary_path}.sha256" "${temporary_path}.manifest.json" "$output_dir/"
+backup_complete=true
 
 echo "$backup_path"
