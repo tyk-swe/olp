@@ -259,7 +259,7 @@ test('Route Studio creates, simulates, validates, and activates deterministic ro
   await expect(completion).toBeHidden();
   await page.getByRole('button', { name: 'Simulate order' }).click();
   await expect(explanation).toBeVisible();
-  await page.getByLabel('Maximum attempts').fill('2');
+  await page.getByLabel('Weight', { exact: true }).fill('50');
   await expect(explanation).toBeHidden();
   await expect(completion).toBeHidden();
   await expect(
