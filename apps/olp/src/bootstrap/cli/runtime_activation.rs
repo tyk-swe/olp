@@ -190,7 +190,7 @@ impl RuntimeActivator {
                         continue;
                     }
                 };
-            for configuration in provider_configurations {
+            for configuration in &provider_configurations {
                 if let Some(revision) = configuration.provider_revision_id
                     && let Some(provider) = snapshot.providers.get_mut(&configuration.provider_id)
                 {
@@ -200,7 +200,7 @@ impl RuntimeActivator {
             let mut candidate_transports = self.transports.snapshot();
             if let Some(master_key) = self.master_key.as_deref()
                 && let Err(error) = load_runtime_transports(
-                    &self.store,
+                    &provider_configurations,
                     master_key,
                     &snapshot,
                     &mut candidate_transports,

@@ -4,7 +4,7 @@ use crate::application::{
     provider_runtime::{runtime_provider_config, runtime_provider_credential},
     transports::TransportRegistry,
 };
-use olp_db::{security::envelope::MasterKey, store::Store};
+use olp_db::{runtime::provider_configuration::RuntimeProvider, security::envelope::MasterKey};
 use olp_engine::{
     domain::{ids::ProviderId, ports::ProviderTransport, routing::snapshot::Snapshot},
     providers::{
@@ -135,16 +135,16 @@ pub(crate) async fn register_mounted_connectors(
 }
 
 pub(crate) async fn load_runtime_transports(
-    store: &Store,
+    providers: &[RuntimeProvider],
     master_key: &MasterKey,
     snapshot: &Snapshot,
     transports: &mut BTreeMap<ProviderId, Arc<dyn ProviderTransport>>,
     egress_policy: &EgressPolicy,
     response_limits: ResponseLimits,
 ) -> AppResult<()> {
-    for provider in store.runtime_provider_configurations(snapshot).await? {
-        let config = runtime_provider_config(&provider, snapshot)?;
-        let credential = runtime_provider_credential(&provider, &config, master_key)?;
+    for provider in providers {
+        let config = runtime_provider_config(provider, snapshot)?;
+        let credential = runtime_provider_credential(provider, &config, master_key)?;
         let transport =
             Factory::transport(config, credential, egress_policy, response_limits).await?;
         transports.insert(provider.provider_id, transport);
