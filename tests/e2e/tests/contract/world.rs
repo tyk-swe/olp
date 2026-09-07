@@ -313,7 +313,6 @@ pub(crate) struct IssuedKey {
 }
 
 /// Blocks until the gateway accepts `secret`.
-
 async fn await_key(http: &reqwest::Client, origin: &str, secret: &str) -> Result<(), String> {
     await_key_with_timeout(http, origin, secret, Duration::from_secs(30)).await
 }
