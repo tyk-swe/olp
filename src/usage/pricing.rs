@@ -1,0 +1,419 @@
+use std::collections::HashSet;
+
+use crate::protocols::canonical::identity::OperationKind;
+use crate::providers::runtime_model::ProviderKind;
+use chrono::DateTime;
+use chrono::Utc;
+use rust_decimal::Decimal;
+use uuid::Uuid;
+
+use crate::database::cursor::Error;
+use crate::database::cursor::Page;
+use crate::database::error::Error as PersistenceError;
+use crate::database::idempotency::Outcome;
+use crate::database::idempotency::Replayable;
+use crate::database::idempotency::ReplayableIdempotencyClaim;
+use crate::database::idempotency::Response;
+use crate::database::idempotency::claim_replayable_idempotency;
+use crate::database::idempotency::complete_replayable_idempotency;
+use crate::database::query::split_page;
+use crate::database::reads::MAX_PAGE_SIZE;
+
+const PRICING_LOCK_ID: i64 = 0x4f4c_505f_5052; // "OLP_PR"
+
+#[derive(Clone, Debug)]
+pub struct PriceInput {
+    pub provider_kind: ProviderKind,
+    pub provider_id: Option<Uuid>,
+    pub model: String,
+    pub operation: OperationKind,
+    pub input_per_million: Option<String>,
+    /// Rate for the cached share of `input_per_million`'s token count. Absent
+    /// means cached tokens bill at the full input rate.
+    pub cached_input_per_million: Option<String>,
+    pub output_per_million: Option<String>,
+    pub unit_price: Option<String>,
+    pub currency: String,
+}
+
+#[derive(Clone, Debug)]
+pub struct RevisionRecord {
+    pub id: Uuid,
+    pub revision: u32,
+    pub effective_at: DateTime<Utc>,
+    pub created_by: Uuid,
+    pub created_at: DateTime<Utc>,
+    pub prices: Vec<PriceInput>,
+}
+
+#[allow(clippy::too_many_arguments)]
+pub async fn create_pricing_revision<F>(
+    pool: &sqlx::PgPool,
+    provenance: &crate::database::RequestProvenance,
+    actor: Uuid,
+    idempotency_key: &str,
+    effective_at: DateTime<Utc>,
+    prices: &[PriceInput],
+    replay: Replayable<'_>,
+    build_response: F,
+) -> Result<Outcome<RevisionRecord>, Error>
+where
+    F: FnOnce(&RevisionRecord) -> Result<Response, PersistenceError>,
+{
+    let mut transaction = pool.begin().await?;
+    match claim_replayable_idempotency(
+        &mut transaction,
+        actor,
+        "pricing_revision.create",
+        idempotency_key,
+        replay.request_fingerprint(),
+        replay.master_key(),
+    )
+    .await?
+    {
+        ReplayableIdempotencyClaim::Execute => {}
+        ReplayableIdempotencyClaim::Replay(response) => {
+            transaction.rollback().await?;
+            return Ok(Outcome::Replayed(response));
+        }
+        ReplayableIdempotencyClaim::Conflict => {
+            transaction.rollback().await?;
+            return Err(Error::IdempotencyConflict);
+        }
+        ReplayableIdempotencyClaim::InProgress => {
+            transaction.rollback().await?;
+            return Err(Error::IdempotencyInProgress);
+        }
+    }
+    validate_prices(prices)?;
+    sqlx::query("SELECT pg_advisory_xact_lock($1)")
+        .bind(PRICING_LOCK_ID)
+        .fetch_one(&mut *transaction)
+        .await?;
+    validate_installation_currency(&mut transaction, prices).await?;
+    let revision: i32 = sqlx::query_scalar::<_, i32>(
+        "SELECT COALESCE(MAX(revision), 0) + 1 AS \"value\" FROM pricing_revisions",
+    )
+    .fetch_one(&mut *transaction)
+    .await?;
+    let id = Uuid::now_v7();
+    let now = Utc::now();
+    sqlx::query(
+        "INSERT INTO pricing_revisions (id, revision, effective_at, created_by, created_at) \
+             VALUES ($1, $2, $3, $4, $5)",
+    )
+    .bind(id)
+    .bind(revision)
+    .bind(effective_at)
+    .bind(actor)
+    .bind(now)
+    .execute(&mut *transaction)
+    .await?;
+    insert_revision_prices(&mut transaction, id, prices).await?;
+    crate::access::audit_events::record_success_at(
+        &mut *transaction,
+        provenance,
+        Some(actor),
+        "pricing_revision.create",
+        "pricing_revision",
+        id,
+        now,
+    )
+    .await?;
+    let record = RevisionRecord {
+        id,
+        revision: u32::try_from(revision)
+            .map_err(|_| Error::Invalid("revision overflow".to_owned()))?,
+        effective_at,
+        created_by: actor,
+        created_at: now,
+        prices: prices.to_vec(),
+    };
+    let response = build_response(&record)?;
+    complete_replayable_idempotency(
+        &mut transaction,
+        actor,
+        "pricing_revision.create",
+        idempotency_key,
+        replay.request_fingerprint(),
+        replay.master_key(),
+        &response,
+    )
+    .await?;
+    transaction.commit().await?;
+    Ok(Outcome::Executed {
+        value: record,
+        response,
+    })
+}
+
+pub async fn pricing_revisions_page(
+    pool: &sqlx::PgPool,
+    before_revision: Option<u32>,
+    limit: u16,
+) -> Result<Page<RevisionRecord>, Error> {
+    let before_revision = before_revision
+        .map(i32::try_from)
+        .transpose()
+        .map_err(|_| Error::InvalidCursor)?;
+    let page_size = limit.clamp(1, MAX_PAGE_SIZE);
+    let rows = sqlx::query_as::<_, PricingRevisionsPageRow>(
+        "SELECT r.id, r.revision, r.effective_at, r.created_by, r.created_at, \
+                    p.provider_kind AS \"provider_kind\", p.provider_id AS \"provider_id\", \
+                    p.model AS \"model\", p.operation AS \"operation\", \
+                    p.input_per_million::text AS \"input_per_million\", \
+                    p.cached_input_per_million::text AS \"cached_input_per_million\", \
+                    p.output_per_million::text AS \"output_per_million\", \
+                    p.unit_price::text AS \"unit_price\", p.currency::text AS \"currency\" \
+             FROM pricing_revisions r LEFT JOIN prices p ON p.pricing_revision_id = r.id \
+             WHERE r.id IN (SELECT id FROM pricing_revisions \
+                            WHERE ($1::int IS NULL OR revision < $1) \
+                            ORDER BY revision DESC LIMIT $2) \
+             ORDER BY r.revision DESC, p.provider_kind, p.provider_id NULLS FIRST, \
+                      p.model, p.operation",
+    )
+    .bind(before_revision)
+    .bind(i64::from(page_size) + 1)
+    .fetch_all(pool)
+    .await?;
+    let mut revisions = Vec::<RevisionRecord>::new();
+    for row in rows {
+        let id: Uuid = row.id;
+        if revisions.last().is_none_or(|revision| revision.id != id) {
+            revisions.push(RevisionRecord {
+                id,
+                revision: u32::try_from(row.revision)
+                    .map_err(|_| Error::Invalid("stored pricing revision is invalid".to_owned()))?,
+                effective_at: row.effective_at,
+                created_by: row.created_by,
+                created_at: row.created_at,
+                prices: Vec::new(),
+            });
+        }
+        let provider_kind: Option<String> = row.provider_kind;
+        if let Some(provider_kind) = provider_kind {
+            let revision = revisions
+                .last_mut()
+                .ok_or_else(|| Error::Invalid("pricing revision grouping is invalid".to_owned()))?;
+            revision.prices.push(PriceInput {
+                provider_kind: provider_kind.parse().map_err(|_| {
+                    Error::Invalid("stored pricing provider kind is invalid".to_owned())
+                })?,
+                provider_id: row.provider_id,
+                model: row
+                    .model
+                    .ok_or(PersistenceError::InvalidStoredValue("pricing model"))?,
+                operation: row
+                    .operation
+                    .ok_or(PersistenceError::InvalidStoredValue("pricing operation"))?
+                    .parse()
+                    .map_err(|_| {
+                        Error::Invalid("stored pricing operation is invalid".to_owned())
+                    })?,
+                input_per_million: row.input_per_million,
+                cached_input_per_million: row.cached_input_per_million,
+                output_per_million: row.output_per_million,
+                unit_price: row.unit_price,
+                currency: row
+                    .currency
+                    .ok_or(PersistenceError::InvalidStoredValue("pricing currency"))?
+                    .trim()
+                    .to_owned(),
+            });
+        }
+    }
+    let (revisions, next_cursor) = split_page(revisions, usize::from(page_size), |revision| {
+        revision.revision.to_string()
+    });
+    Ok(Page {
+        items: revisions,
+        next_cursor,
+    })
+}
+
+pub(crate) fn validate_prices(prices: &[PriceInput]) -> Result<(), Error> {
+    if prices.is_empty() || prices.len() > 10_000 {
+        return Err(Error::Invalid(
+            "a pricing revision must contain 1-10000 entries".to_owned(),
+        ));
+    }
+    let mut dimensions = HashSet::with_capacity(prices.len());
+    let mut revision_currency: Option<String> = None;
+    for price in prices {
+        let currency = price.currency.trim();
+        if price.model.trim().is_empty()
+            || currency.len() != 3
+            || !currency.bytes().all(|byte| byte.is_ascii_alphabetic())
+            || (price.input_per_million.is_none()
+                && price.output_per_million.is_none()
+                && price.unit_price.is_none())
+            // A cached rate prices a share of the input count; without an input
+            // rate there is nothing for it to discount.
+            || (price.cached_input_per_million.is_some() && price.input_per_million.is_none())
+        {
+            return Err(Error::Invalid(
+                "pricing entries require dimensions, ISO currency, and at least one price"
+                    .to_owned(),
+            ));
+        }
+        let normalized_currency = currency.to_ascii_uppercase();
+        if revision_currency
+            .as_ref()
+            .is_some_and(|expected| expected != &normalized_currency)
+        {
+            return Err(Error::Invalid(
+                "a pricing revision cannot mix currencies".to_owned(),
+            ));
+        }
+        revision_currency.get_or_insert(normalized_currency);
+        if !dimensions.insert((
+            price.provider_kind,
+            price.provider_id,
+            price.model.trim(),
+            price.operation,
+        )) {
+            return Err(Error::Invalid(
+                "pricing revision contains duplicate scoped dimensions".to_owned(),
+            ));
+        }
+        for amount in [
+            &price.input_per_million,
+            &price.cached_input_per_million,
+            &price.output_per_million,
+            &price.unit_price,
+        ]
+        .into_iter()
+        .flatten()
+        {
+            validate_decimal(amount)?;
+        }
+    }
+    Ok(())
+}
+
+pub(crate) fn validate_decimal(value: &str) -> Result<(), Error> {
+    let value = value.trim();
+    let mut parts = value.split('.');
+    let integer = parts.next().unwrap_or_default();
+    let fraction = parts.next();
+    if value.is_empty()
+        || value.starts_with('-')
+        || parts.next().is_some()
+        || integer.is_empty()
+        || !integer.bytes().all(|byte| byte.is_ascii_digit())
+        || fraction.is_some_and(|part| {
+            part.is_empty() || part.len() > 12 || !part.bytes().all(|byte| byte.is_ascii_digit())
+        })
+        || integer.len() > 12
+    {
+        return Err(Error::Invalid(
+            "prices must be non-negative decimals with at most 12 fractional digits".to_owned(),
+        ));
+    }
+    Ok(())
+}
+
+fn parse_optional_decimal(value: Option<&str>) -> Result<Option<Decimal>, Error> {
+    value
+        .map(|value| {
+            value.trim().parse().map_err(|_| {
+                Error::Invalid("price is outside the supported numeric range".to_owned())
+            })
+        })
+        .transpose()
+}
+
+async fn insert_revision_prices(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    id: Uuid,
+    prices: &[PriceInput],
+) -> Result<(), Error> {
+    for price in prices {
+        let input_per_million = parse_optional_decimal(price.input_per_million.as_deref())?;
+        let cached_input_per_million =
+            parse_optional_decimal(price.cached_input_per_million.as_deref())?;
+        let output_per_million = parse_optional_decimal(price.output_per_million.as_deref())?;
+        let unit_price = parse_optional_decimal(price.unit_price.as_deref())?;
+        if let Some(provider_id) = price.provider_id {
+            let provider_kind: Option<String> =
+                sqlx::query_scalar::<_, String>("SELECT kind FROM providers WHERE id = $1")
+                    .bind(provider_id)
+                    .fetch_optional(&mut **transaction)
+                    .await?;
+            if provider_kind.as_deref() != Some(price.provider_kind.as_str()) {
+                return Err(Error::Invalid(
+                    "a pricing override must reference a provider of the declared kind".to_owned(),
+                ));
+            }
+        }
+        sqlx::query(
+            "INSERT INTO prices \
+                 (pricing_revision_id, provider_kind, provider_id, model, operation, \
+                  input_per_million, cached_input_per_million, output_per_million, \
+                  unit_price, currency) \
+                 VALUES ($1, $2, $3, $4, $5, $6::numeric, $7::numeric, $8::numeric, \
+                         $9::numeric, $10)",
+        )
+        .bind(id)
+        .bind(price.provider_kind.as_str())
+        .bind(price.provider_id)
+        .bind(price.model.trim())
+        .bind(price.operation.as_str())
+        .bind(input_per_million)
+        .bind(cached_input_per_million)
+        .bind(output_per_million)
+        .bind(unit_price)
+        .bind(price.currency.trim().to_uppercase())
+        .execute(&mut **transaction)
+        .await?;
+    }
+    Ok(())
+}
+
+async fn validate_installation_currency(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    prices: &[PriceInput],
+) -> Result<(), Error> {
+    let requested_currency = prices
+        .first()
+        .ok_or_else(|| Error::Invalid("pricing revision is empty".to_owned()))?
+        .currency
+        .trim()
+        .to_uppercase();
+    let configured_currency: Option<String> = sqlx::query_scalar::<_, String>(
+        "SELECT currency::text AS \"value\" FROM pricing_currency WHERE singleton",
+    )
+    .fetch_optional(&mut **transaction)
+    .await?;
+    if configured_currency
+        .as_deref()
+        .is_some_and(|currency| currency.trim() != requested_currency)
+    {
+        return Err(Error::Invalid(format!(
+            "pricing currency must match the installation currency {}",
+            configured_currency
+                .as_deref()
+                .map(str::trim)
+                .unwrap_or_default()
+        )));
+    }
+    Ok(())
+}
+
+#[derive(sqlx::FromRow)]
+struct PricingRevisionsPageRow {
+    id: uuid::Uuid,
+    revision: i32,
+    effective_at: chrono::DateTime<chrono::Utc>,
+    created_by: uuid::Uuid,
+    created_at: chrono::DateTime<chrono::Utc>,
+    provider_kind: Option<String>,
+    provider_id: Option<uuid::Uuid>,
+    model: Option<String>,
+    operation: Option<String>,
+    input_per_million: Option<String>,
+    cached_input_per_million: Option<String>,
+    output_per_million: Option<String>,
+    unit_price: Option<String>,
+    currency: Option<String>,
+}

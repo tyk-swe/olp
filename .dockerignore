@@ -1,6 +1,3 @@
-# BuildKit uses deploy/Dockerfile.dockerignore for the production image build.
-# Keep this file a synchronized copy so non-BuildKit or root-context builds
-# exclude the same secrets and artifacts.
 .git
 .github
 .env
@@ -40,23 +37,22 @@ lcov.info
 coverage
 **/coverage
 **/coverage/**
-fuzz/artifacts
-fuzz/artifacts/**
 console/.svelte-kit
 console/build
 console/node_modules
 console/.vite
 console/.vite/**
 console/playwright.config.ts
-console/playwright.integration.config.ts
-console/playwright.screenshots.config.ts
-console/vite.console-preview.config.ts
 console/playwright-report
 console/test-results
 console/tests
+console/src/lib/api/schema.d.ts
+openapi/management.json
 deploy/helm
 deploy/secrets
 docs
 **/*.log
 **/*.swp
 **/.DS_Store
+
+.local

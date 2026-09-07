@@ -1,10 +1,11 @@
 <script lang="ts">
+  import { routeKeys } from '$lib/features/routes/routeKeys';
+
   import { onMount } from 'svelte';
-  import { queryKeys } from '$lib/api/queryKeys';
   import { createQuery } from '@tanstack/svelte-query';
   import { errorMessage } from '$lib/api/http';
-  import { listRoutes } from '$lib/api/management/routes';
-  import type { ApiKeySecret } from '$lib/api/management/api-keys';
+  import { listRoutes } from '$lib/features/routes/api';
+  import type { ApiKeySecret } from '$lib/features/access/api-keys/api';
   import { copyText } from '$lib/clipboard';
   import NavIcon from '$lib/components/NavIcon.svelte';
   import SecretDialog from '$lib/components/SecretDialog.svelte';
@@ -13,7 +14,7 @@
     sdkLabel,
     sdkSnippet,
     type ApiKeySdk
-  } from './sdkExamples';
+  } from '$lib/features/access/api-keys/sdkExamples';
 
   let {
     secret,
@@ -34,7 +35,7 @@
   let testState = $state<'idle' | 'running' | 'passed' | 'failed'>('idle');
   let testMessage = $state('');
   const routes = createQuery(() => ({
-    queryKey: queryKeys.routes.all(),
+    queryKey: routeKeys.all(),
     queryFn: ({ signal }) => listRoutes(signal)
   }));
   const routeSlug = $derived(
@@ -120,7 +121,7 @@
           }
         );
       } else {
-        response = await fetch(`${endpoint}/openai/v1/responses`, {
+        response = await fetch(`${endpoint}/v1/responses`, {
           method: 'POST',
           headers: {
             'content-type': 'application/json',

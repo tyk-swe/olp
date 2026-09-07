@@ -1,0 +1,102 @@
+use sqlx::FromRow;
+use sqlx::Postgres;
+use sqlx::QueryBuilder;
+
+use crate::database::cursor::Error;
+use crate::database::cursor::checked_u64;
+use crate::database::cursor::trimmed_optional;
+use crate::usage::ingestion::delivery_health::ConsumerStatus;
+use crate::usage::reports::Coverage;
+use crate::usage::reports::Filters;
+use crate::usage::reports::query::UsageCountScope;
+use crate::usage::reports::query::push_usage_rows_cte;
+use crate::usage::reports::query::validate_usage_range;
+
+#[derive(Clone, Debug)]
+pub struct Report {
+    pub request_count: u64,
+    pub input_tokens: String,
+    pub output_tokens: String,
+    pub cached_input_tokens: String,
+    pub media_units: String,
+    pub estimated_cost: Option<String>,
+    pub currency: Option<String>,
+    pub unpriced_count: u64,
+    pub incomplete_count: u64,
+    pub request_metadata_gap_events: u64,
+    pub uncertain_request_metadata_gap_count: u64,
+    pub coverage: Coverage,
+    pub request_metadata_consumer: ConsumerStatus,
+    pub complete: bool,
+}
+
+#[derive(Debug, FromRow)]
+struct UsageSummaryRow {
+    request_count: i64,
+    input_tokens: String,
+    output_tokens: String,
+    cached_input_tokens: String,
+    media_units: String,
+    estimated_cost: Option<String>,
+    unpriced_count: i64,
+    incomplete_count: i64,
+    currency: Option<String>,
+}
+
+pub async fn usage_summary(pool: &sqlx::PgPool, filters: &Filters) -> Result<Report, Error> {
+    validate_usage_range(filters)?;
+    let mut query = QueryBuilder::<Postgres>::new("");
+    push_usage_rows_cte(&mut query, filters, UsageCountScope::for_filters(filters));
+    query.push(
+        " SELECT COALESCE(SUM(request_count), 0)::bigint AS request_count,
+                    COALESCE(SUM(input_tokens), 0)::text AS input_tokens,
+                    COALESCE(SUM(output_tokens), 0)::text AS output_tokens,
+                    COALESCE(SUM(cached_input_tokens), 0)::text AS cached_input_tokens,
+                    COALESCE(SUM(media_units), 0)::text AS media_units,
+                    SUM(estimated_cost)::text AS estimated_cost,
+                    COALESCE(SUM(unpriced_count), 0)::bigint AS unpriced_count,
+                    COALESCE(SUM(incomplete_count), 0)::bigint AS incomplete_count,
+                    COALESCE(MAX(btrim(currency)),
+                      (SELECT btrim(currency) FROM pricing_currency WHERE singleton)) AS currency
+             FROM usage_rows",
+    );
+    let row = query
+        .build_query_as::<UsageSummaryRow>()
+        .fetch_one(pool)
+        .await?;
+    let gap =
+        crate::usage::reports::completeness::request_metadata_gap_evidence(pool, filters).await?;
+    let unpriced_count = checked_u64(row.unpriced_count, "unpriced count")?;
+    let incomplete_count = checked_u64(row.incomplete_count, "incomplete count")?;
+    let request_metadata_gap_events = checked_u64(gap.event_count, "gap event count")?;
+    let uncertain_request_metadata_gap_count =
+        checked_u64(gap.uncertain_gap_count, "uncertain gap count")?;
+    let coverage = crate::usage::reports::query::usage_range_coverage(pool, filters).await?;
+    let request_metadata_consumer =
+        crate::usage::ingestion::delivery_health::request_metadata_consumer_status(
+            pool,
+            chrono::Utc::now(),
+        )
+        .await?;
+    Ok(Report {
+        request_count: checked_u64(row.request_count, "request count")?,
+        input_tokens: row.input_tokens,
+        output_tokens: row.output_tokens,
+        cached_input_tokens: row.cached_input_tokens,
+        media_units: row.media_units,
+        estimated_cost: row.estimated_cost,
+        currency: trimmed_optional(row.currency),
+        unpriced_count,
+        incomplete_count,
+        request_metadata_gap_events,
+        uncertain_request_metadata_gap_count,
+        coverage,
+        request_metadata_consumer,
+        complete: unpriced_count == 0
+            && incomplete_count == 0
+            && request_metadata_gap_events == 0
+            && uncertain_request_metadata_gap_count == 0
+            && coverage.range_complete
+            && request_metadata_consumer.complete(),
+    })
+}

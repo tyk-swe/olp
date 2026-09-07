@@ -13,9 +13,20 @@
         "enabled": true,
         "active_credential": null,
         "capabilities": [
-          { "model": "gpt-alpha", "operation": "generation", "surface": "openai", "mode": "unary" },
-          { "model": "gpt-alpha", "operation": "generation", "surface": "openai", "mode": "streaming" }
-        ]
+          {
+            "model": "gpt-alpha",
+            "operation": "generation",
+            "surface": "openai",
+            "mode": "unary"
+          },
+          {
+            "model": "gpt-alpha",
+            "operation": "generation",
+            "surface": "openai",
+            "mode": "streaming"
+          }
+        ],
+        "revision_id": "018f0000-0000-7000-8000-000000000101"
       },
       "018f0000-0000-7000-8000-000000000102": {
         "id": "018f0000-0000-7000-8000-000000000102",
@@ -24,9 +35,20 @@
         "enabled": true,
         "active_credential": null,
         "capabilities": [
-          { "model": "gpt-beta", "operation": "generation", "surface": "openai", "mode": "unary" },
-          { "model": "gpt-beta", "operation": "generation", "surface": "openai", "mode": "streaming" }
-        ]
+          {
+            "model": "gpt-beta",
+            "operation": "generation",
+            "surface": "openai",
+            "mode": "unary"
+          },
+          {
+            "model": "gpt-beta",
+            "operation": "generation",
+            "surface": "openai",
+            "mode": "streaming"
+          }
+        ],
+        "revision_id": "018f0000-0000-7000-8000-000000000102"
       },
       "018f0000-0000-7000-8000-000000000103": {
         "id": "018f0000-0000-7000-8000-000000000103",
@@ -35,8 +57,14 @@
         "enabled": true,
         "active_credential": null,
         "capabilities": [
-          { "model": "claude-fallback", "operation": "generation", "surface": "openai", "mode": "unary" }
-        ]
+          {
+            "model": "claude-fallback",
+            "operation": "generation",
+            "surface": "openai",
+            "mode": "unary"
+          }
+        ],
+        "revision_id": "018f0000-0000-7000-8000-000000000103"
       },
       "018f0000-0000-7000-8000-000000000104": {
         "id": "018f0000-0000-7000-8000-000000000104",
@@ -45,15 +73,23 @@
         "enabled": false,
         "active_credential": null,
         "capabilities": [
-          { "model": "gpt-disabled", "operation": "generation", "surface": "openai", "mode": "unary" }
-        ]
+          {
+            "model": "gpt-disabled",
+            "operation": "generation",
+            "surface": "openai",
+            "mode": "unary"
+          }
+        ],
+        "revision_id": "018f0000-0000-7000-8000-000000000104"
       }
     },
     "routes": {
       "team-chat": {
         "id": "018f0000-0000-7000-8000-000000000002",
         "slug": "team-chat",
-        "operations": ["generation"],
+        "operations": [
+          "generation"
+        ],
         "overall_timeout": 30000,
         "max_attempts": 3,
         "targets": [
@@ -63,7 +99,8 @@
             "provider_model": "gpt-alpha",
             "priority": 0,
             "weight": 1,
-            "timeout": 10000
+            "timeout": 10000,
+            "routing_id": "018f0000-0000-7000-8000-000000000011"
           },
           {
             "id": "018f0000-0000-7000-8000-000000000012",
@@ -71,7 +108,8 @@
             "provider_model": "gpt-beta",
             "priority": 0,
             "weight": 4,
-            "timeout": 10000
+            "timeout": 10000,
+            "routing_id": "018f0000-0000-7000-8000-000000000012"
           },
           {
             "id": "018f0000-0000-7000-8000-000000000013",
@@ -79,7 +117,8 @@
             "provider_model": "claude-fallback",
             "priority": 10,
             "weight": 100,
-            "timeout": 10000
+            "timeout": 10000,
+            "routing_id": "018f0000-0000-7000-8000-000000000013"
           },
           {
             "id": "018f0000-0000-7000-8000-000000000014",
@@ -87,9 +126,11 @@
             "provider_model": "gpt-disabled",
             "priority": 0,
             "weight": 1000,
-            "timeout": 10000
+            "timeout": 10000,
+            "routing_id": "018f0000-0000-7000-8000-000000000014"
           }
-        ]
+        ],
+        "routing_id": "018f0000-0000-7000-8000-000000000002"
       }
     },
     "api_keys": {}

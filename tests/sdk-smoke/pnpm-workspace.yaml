@@ -1,8 +1,0 @@
-packages:
-  - .
-
-engineStrict: true
-
-allowBuilds:
-  '@google/genai': false
-  protobufjs: false

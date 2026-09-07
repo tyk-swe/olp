@@ -53,6 +53,8 @@ result=$("$psql_command" "$OLP_DATABASE_URL" -X --no-psqlrc --set=ON_ERROR_STOP=
   --set=certainty="$certainty" \
   --tuples-only --no-align <<'SQL'
 BEGIN;
+SET LOCAL search_path = olp_v3, pg_catalog;
+SET LOCAL TimeZone = 'UTC';
 SELECT pg_advisory_xact_lock(hashtextextended(:'reason', 0));
 WITH inserted AS (
   INSERT INTO request_metadata_ingestion_gaps

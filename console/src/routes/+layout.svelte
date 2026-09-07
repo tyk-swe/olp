@@ -1,7 +1,7 @@
 <script lang="ts">
   import { QueryClient, QueryClientProvider } from '@tanstack/svelte-query';
   import { onDestroy } from 'svelte';
-  import { authLifecycle } from '$lib/auth/lifecycle';
+  import { authLifecycle } from '$lib/features/access/session/lifecycle';
   import '../app.css';
 
   let { children } = $props();

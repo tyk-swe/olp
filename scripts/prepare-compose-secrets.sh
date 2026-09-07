@@ -5,16 +5,6 @@ set -euo pipefail
 # supplied material is preserved, including a versioned master-key keyring.
 secrets_dir=${OLP_COMPOSE_SECRETS_DIR:-deploy/secrets}
 bootstrap_retired_marker="$secrets_dir/.olp_bootstrap_retired"
-legacy_auth_hmac_key="$secrets_dir/olp_key_hash_key"
-auth_hmac_key="$secrets_dir/olp_auth_hmac_key"
-
-if [[ ! -e $auth_hmac_key && ! -L $auth_hmac_key ]] &&
-  [[ -e $legacy_auth_hmac_key || -L $legacy_auth_hmac_key ]]; then
-  echo "legacy Compose authentication HMAC key exists at $legacy_auth_hmac_key, but $auth_hmac_key is missing" >&2
-  echo "move or securely copy the existing bytes to $auth_hmac_key before rerunning; do not generate a replacement" >&2
-  exit 1
-fi
-
 command -v openssl >/dev/null || {
   echo "openssl is required to prepare Compose secrets" >&2
   exit 1
@@ -43,11 +33,11 @@ for name in "${secret_names[@]}"; do
   if [[ ! -e $path ]]; then
     temporary=$(mktemp "$secrets_dir/.${name}.XXXXXX") || exit 1
     chmod 600 "$temporary"
-    if ! openssl rand -base64 32 > "$temporary" ||
-      [[ $(wc -c < "$temporary") -ne 45 ]]; then
-      rm -f "$temporary"
-      echo "failed to create Compose secret: $path" >&2
-      exit 1
+    if [[ $name == olp_master_key ]]; then
+      key=$(openssl rand -base64 32)
+      printf '{"active_version":1,"keys":[{"version":1,"key":"%s"}]}\n' "$key" > "$temporary"
+    else
+      openssl rand -base64 32 > "$temporary"
     fi
     # A hard link publishes the complete value without replacing a value from
     # a concurrent invocation.

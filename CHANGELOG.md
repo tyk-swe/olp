@@ -9,20 +9,31 @@ semantic versioning and match `Cargo.toml`, `console/package.json`,
 
 ### Changed
 
-**Repository**
-- **HYG-04:** The image runs as numeric `USER 65532:65532`, matching the
-  chart's security context, so `runAsNonRoot` admission needs no passwd lookup.
-- **HYG-07:** `CONTRIBUTING.md` documents the toolchain bump procedure.
-- The N-1 upgrade-rehearsal baseline advances to migration 0049, the last
-  migration shipped by 2.3.0.
-- The unwired OpenAI speech-stream and video-content encode codecs, kept only
-  for the fuzz target, are removed together with their fuzz arms.
+- 3.0 requires a fresh installation. Existing 2.x storage is refused before
+  modification; PostgreSQL uses `olp_v3` and Valkey uses installation-specific
+  `olp:3` namespaces. Historical migration and internal compatibility paths are
+  removed.
+- One Rust package now groups management, SQL, runtime behavior, and workers by
+  product feature. Provider configuration has one typed model; inference owns
+  request reservations, attempts, cancellation, accounting, and completion.
+- Management moves to `/api/v3`, with typed field errors and coherent
+  provider/model snapshots. Handler registration also generates OpenAPI and the
+  console's ignored API contract.
+- Provider onboarding uses connection, models/capabilities, and activation.
+  Console features own their API calls and query state.
+- `make dev` starts PostgreSQL, Valkey, Rust, and Vite with API proxying. One
+  required CI job runs `make check`; service, SDK, browser, and recovery checks
+  run explicitly through `make integration`.
+- Dependencies and toolchains are updated. TypeScript remains on supported 6.0;
+  contributor documentation records when that exception can be removed.
 
-### Fixed
+### Removed
 
-**Management API**
-- User and invitation listings honour page sizes up to 200 like every other
-  collection; they silently returned at most 100 rows.
+- `/openai/v1` and `x-litellm-api-key`. Native OpenAI `/v1`, Anthropic, and Gemini
+  SDK interfaces remain available.
+- Separate backend workspace packages, the global persistence store, SQLx
+  metadata/CLI preparation, mandatory nextest and coverage tooling, custom
+  repository gates, duplicate browser suites, and separate JavaScript lockfiles.
 
 ## [2.3.0] - 2026-09-03
 

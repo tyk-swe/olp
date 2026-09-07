@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { providerList } from '$lib/features/gateway/providers/providerPagination';
+  import { providerList } from '$lib/features/providers/providerPagination';
 
   let { children } = $props();
   // The list keeps its cursor (and filters) across this route family, so a

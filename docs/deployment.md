@@ -19,9 +19,8 @@ Secrets before installing (names and keys are configurable through `config`):
 | Authentication HMAC key | `olp-auth-hmac-key` / `key` |
 | OTLP exporter headers (optional) | none / `headers`; set the name with `tracing.headersSecretName` |
 
-Installations using `olp-key-hash-key` must copy the exact bytes to the new
-HMAC Secret before upgrading; follow
-[`operations.md#naming-migration-prerequisites`](operations.md#naming-migration-prerequisites).
+Provision fresh 3.0 PostgreSQL storage and a JSON master-key ring. Existing 2.x
+storage cannot be upgraded in place.
 New installations also need a 32-byte base64 bootstrap-token Secret mounted
 only into control pods. Keep all secret values out of values files and shell
 history; the chart schema validates configured names and keys.
@@ -38,51 +37,16 @@ three replicas, a PodDisruptionBudget, and failure-domain spreading. Workers
 consume work concurrently; PostgreSQL advisory locking serializes runtime
 outbox publication and Valkey consumer groups reclaim metadata ownership. The
 worker Deployment uses `Recreate`: mixed-version workers are not supported
-through the namespace transition.
+during schema changes.
 
-## Release artifacts and verification
+## Release artifacts
 
-Published releases use two public GHCR packages: `ghcr.io/tyk-swe/olp` for
-the multi-architecture image and `ghcr.io/tyk-swe/charts/openllmproxy` for the
-Helm chart. Image tags `2.3.0`, `2.3`, and `latest` identify the same index at
-publication. The versioned tag supports the Compose quick start and `latest`
-is a convenience alias; production installations must pin the index digest.
-The chart is selected independently with `--version 2.3.0`.
-
-GitHub creates the first version of each GHCR package as private. On the first
-release, a maintainer must open the package settings for both `olp` and
-`charts/openllmproxy`, change their visibility to **Public**, and rerun the
-failed release jobs. The workflow creates no GitHub Release until fresh,
-unauthenticated runners pull the image, render the chart, and verify both
-signatures. Publishing with the repository `GITHUB_TOKEN` and the OCI source
-label links the packages to this repository, but does not make them public.
-
-The `v2.3.0` image index and chart are published at the immutable digests used
-below. Resolve the versioned references independently before each upgrade and
-confirm they still match the approved release:
-
-```console
-docker buildx imagetools inspect ghcr.io/tyk-swe/olp:2.3.0
-helm pull oci://ghcr.io/tyk-swe/charts/openllmproxy --version 2.3.0
-```
-
-Both commands report a `Digest:`. Confirm each one matches the pinned value
-below, then verify the exact OCI artifacts with cosign:
-
-```console
-cosign verify \
-  --certificate-identity 'https://github.com/tyk-swe/olp/.github/workflows/release.yml@refs/tags/v2.3.0' \
-  --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' \
-  'ghcr.io/tyk-swe/olp@sha256:51a19182a05e0f5cae582203f99d5335a56b7a90cd363a5cad889d1b04b653ae'
-
-cosign verify \
-  --certificate-identity 'https://github.com/tyk-swe/olp/.github/workflows/release.yml@refs/tags/v2.3.0' \
-  --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' \
-  'ghcr.io/tyk-swe/charts/openllmproxy@sha256:02be3a6af3fd88bb667d42cdbbdff42155e3b5de226057623723a89a56702f83'
-```
-
-The chart digest is the OCI manifest digest reported by `helm push`, not the
-SHA-256 checksum of the downloaded `.tgz` release asset.
+The release workflow publishes the multi-architecture image to
+`ghcr.io/tyk-swe/olp` and the chart to
+`oci://ghcr.io/tyk-swe/charts/openllmproxy`. Select a published 3.x version and
+pin its image digest for production. When testing this source tree before
+publication, build `deploy/Dockerfile` and package `deploy/helm` locally.
+Publication runs independently of the required PR check.
 
 ## Edge routing
 
@@ -91,7 +55,7 @@ disconnects:
 
 | Prefix | Service |
 |---|---|
-| `/v1`, `/openai`, `/anthropic`, `/gemini` | gateway |
+| `/v1`, `/v1beta`, `/anthropic`, `/gemini` | gateway |
 | `/api`, `/`, and console deep links | control |
 
 Example values:
@@ -99,7 +63,7 @@ Example values:
 ```yaml
 image:
   repository: ghcr.io/tyk-swe/olp
-  digest: sha256:51a19182a05e0f5cae582203f99d5335a56b7a90cd363a5cad889d1b04b653ae
+  tag: "3.0.0"
 config:
   publicOrigin: https://olp.example.com
   localLoginEnabled: false
@@ -139,19 +103,9 @@ management pools to 32. Each permit lasts through streaming completion or
 cancellation; a full pool returns HTTP 503 with `Retry-After: 1` instead of
 queueing.
 
-The release baseline on an 8-vCPU KVM Haswell guest exercised the 256-request
-inference limit with a fixed 200 ms upstream at 1,044–1,047 chat requests/s,
-without admission rejections. At concurrency 64 it sustained 1,051–1,089 fixed
-50-token streams/s and 262–263 embedding requests/s; `/v1/models` at concurrency
-256 sustained 20,490–21,150 requests/s. Gateway throughput varied by at most
-3.6% across three runs. The `/v1/models` figure is an HTTP-path stress signal,
-not a metadata-safe request-rate target; that run saturated request-metadata
-ingestion. The 256 inference default therefore remains the measured saturation
-point, while the standalone 1,024 connection cap preserves four
-connection slots per inference permit and did not bind the scenarios. Treat
-these as a starting point, not a pod-sizing guarantee: CPU, memory, provider
-connections, and especially long-lived stream duration still determine safe
-production capacity. Full results are in [`bench/README.md`](../bench/README.md).
+Size deployments with representative unary and streaming workloads, including
+accounting ingestion and worker recovery. CPU, memory, upstream latency, and
+stream duration determine the concurrency a replica can sustain.
 
 Tracing is disabled by default. To export request and provider-attempt spans,
 set the full OTLP/HTTP traces endpoint and an optional Secret containing a JSON
@@ -175,6 +129,7 @@ endpoints, it is not subject to OLP's public-HTTPS provider egress policy. This
 explicit exception does not widen `config.providerEgressAllowCidrs` or
 `config.providerEgressAllowHttpHosts`, and provider endpoint checks are
 unchanged.
+
 
 ## Network policy
 
@@ -244,7 +199,7 @@ Render the exact configuration before applying it:
 ```console
 helm lint --strict deploy/helm
 helm template olp deploy/helm --namespace olp \
-  --set-string image.digest=sha256:51a19182a05e0f5cae582203f99d5335a56b7a90cd363a5cad889d1b04b653ae \
+  --set-string image.tag=3.0.0 \
   --set ingress.enabled=true --set ingress.className=nginx \
   --set ingress.host=olp.example.com \
   --set-string config.trustedProxyCidrs=10.0.0.0/8 \
@@ -255,9 +210,9 @@ Install with approved values and at least a 20-minute timeout:
 
 ```console
 helm upgrade --install olp \
-  oci://ghcr.io/tyk-swe/charts/openllmproxy --version 2.3.0 \
+  oci://ghcr.io/tyk-swe/charts/openllmproxy --version 3.0.0 \
   --namespace olp --create-namespace \
-  --set-string image.digest=sha256:51a19182a05e0f5cae582203f99d5335a56b7a90cd363a5cad889d1b04b653ae \
+  --set-string image.tag=3.0.0 \
   --values production-values.yaml --timeout 20m --wait
 ```
 

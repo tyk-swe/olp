@@ -1,12 +1,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { ApiProblem } from '../http';
-import { listUserPage } from './access';
-import { listApiKeyPage } from './api-keys';
-import { getOidcConfiguration } from './oidc';
-import { listProviderPage, listProviders } from './providers';
-import { listRouteDraftPage } from './routes';
-import { collectCursorPages } from '../pagination';
-import { captureRequests, jsonResponse } from '../test/requestCapture';
+import { ApiProblem } from '$lib/api/http';
+import { listUserPage } from '$lib/features/access/api';
+import { listApiKeyPage } from '$lib/features/access/api-keys/api';
+import { getOidcConfiguration } from '$lib/features/access/oidc/api';
+import { listProviderPage, listProviders } from '$lib/features/providers/api';
+import { listRouteDraftPage } from '$lib/features/routes/api';
+import { collectCursorPages } from '$lib/api/pagination';
+import { captureRequests, jsonResponse } from '$lib/api/test/requestCapture';
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -37,7 +37,7 @@ describe('management resources', () => {
     const controller = new AbortController();
     const requests = captureRequests((request) => {
       const body =
-        new URL(request.url).pathname === '/api/v1/users'
+        new URL(request.url).pathname === '/api/v3/users'
           ? { items: [], next_cursor: null }
           : { items: [], next_cursor: null };
       return jsonResponse(body);
@@ -50,11 +50,11 @@ describe('management resources', () => {
     await getOidcConfiguration(controller.signal);
 
     expect(requests.map((request) => new URL(request.url).pathname)).toEqual([
-      '/api/v1/providers',
-      '/api/v1/route-drafts',
-      '/api/v1/api-keys',
-      '/api/v1/users',
-      '/api/v1/oidc/configuration'
+      '/api/v3/providers',
+      '/api/v3/route-drafts',
+      '/api/v3/api-keys',
+      '/api/v3/users',
+      '/api/v3/oidc/configuration'
     ]);
     expect(requests.every((request) => !request.signal.aborted)).toBe(true);
 

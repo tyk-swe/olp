@@ -1,4 +1,0 @@
---olp-fuzz-boundary
-Content-Disposition: form-data; name="file"; filename="truncated.bin"
-
-truncated-without-closing-boundary

@@ -1,19 +1,20 @@
 <script lang="ts">
+  import { routeKeys } from '$lib/features/routes/routeKeys';
+
   import { resolve } from '$app/paths';
-  import { queryKeys } from '$lib/api/queryKeys';
   import { createQuery } from '@tanstack/svelte-query';
-  import type { ApiKey } from '$lib/api/management/api-keys';
-  import { listRoutes } from '$lib/api/management/routes';
+  import type { ApiKey } from '$lib/features/access/api-keys/api';
+  import { listRoutes } from '$lib/features/routes/api';
   import NavIcon from '$lib/components/NavIcon.svelte';
   import ReadOnlyNote from '$lib/components/ReadOnlyNote.svelte';
   import { formatBudget, formatDate, formatInteger } from '$lib/format';
   import { guardUnsavedChanges } from '$lib/forms/unsavedChanges';
-  import { validateApiKey } from './keyValidation';
+  import { validateApiKey } from '$lib/features/access/api-keys/keyValidation';
   import {
     buildApiKeyPolicyInput,
     createApiKeyFormState,
     type ApiKeyPolicyInput
-  } from './apiKeyPolicy';
+  } from '$lib/features/access/api-keys/apiKeyPolicy';
 
   let {
     editing,
@@ -42,7 +43,7 @@
   let dirty = $state(false);
   let initialized = $state(false);
   const routes = createQuery(() => ({
-    queryKey: queryKeys.routes.all(),
+    queryKey: routeKeys.all(),
     queryFn: ({ signal }) => listRoutes(signal)
   }));
 

@@ -1,0 +1,156 @@
+use sqlx::Postgres;
+use sqlx::Transaction;
+
+use crate::access::identity::Error;
+
+const LOCAL_LOGIN_SOURCE_ATTEMPTS_PER_MINUTE: i32 = 60;
+const INVITATION_SOURCE_ATTEMPTS_PER_MINUTE: i32 = 30;
+const OIDC_LOGIN_SOURCE_ATTEMPTS_PER_MINUTE: i32 = 60;
+const SOURCE_TARGET_ATTEMPTS_PER_MINUTE: i32 = 5;
+const PUBLIC_AUTH_RESOURCE_ATTEMPTS_PER_MINUTE: i32 = 10_000;
+const PUBLIC_AUTH_DELETE_BATCH: i64 = 1_000;
+
+/// Atomically admits an unauthenticated local-login attempt across every
+/// control-plane replica. The caller supplies domain-separated, keyed
+/// digests for the client source and source-plus-submitted-email pair.
+pub async fn admit_local_login_attempt(
+    pool: &sqlx::PgPool,
+    source_digest: [u8; 32],
+    source_target_digest: [u8; 32],
+) -> Result<bool, Error> {
+    crate::access::identity::auth_admission::admit_public_auth_attempt(
+        pool,
+        "local_login",
+        source_digest,
+        Some(source_target_digest),
+        LOCAL_LOGIN_SOURCE_ATTEMPTS_PER_MINUTE,
+    )
+    .await
+}
+
+/// Atomically admits an unauthenticated invitation-acceptance attempt
+/// without retaining the submitted invitation token. The target digest is
+/// bound to the source so one attacker cannot exhaust another source's
+/// attempt budget for the same invitation.
+pub async fn admit_invitation_acceptance_attempt(
+    pool: &sqlx::PgPool,
+    source_digest: [u8; 32],
+    source_target_digest: [u8; 32],
+) -> Result<bool, Error> {
+    crate::access::identity::auth_admission::admit_public_auth_attempt(
+        pool,
+        "invitation_acceptance",
+        source_digest,
+        Some(source_target_digest),
+        INVITATION_SOURCE_ATTEMPTS_PER_MINUTE,
+    )
+    .await
+}
+
+/// Admits an unauthenticated OIDC login initiation. Login starts need a
+/// source-only budget because no password or invitation target is present.
+pub async fn admit_oidc_login_attempt(
+    pool: &sqlx::PgPool,
+    source_digest: [u8; 32],
+) -> Result<bool, Error> {
+    crate::access::identity::auth_admission::admit_public_auth_attempt(
+        pool,
+        "oidc_login",
+        source_digest,
+        None,
+        OIDC_LOGIN_SOURCE_ATTEMPTS_PER_MINUTE,
+    )
+    .await
+}
+
+pub(crate) async fn admit_public_auth_attempt(
+    pool: &sqlx::PgPool,
+    action: &str,
+    source_digest: [u8; 32],
+    source_target_digest: Option<[u8; 32]>,
+    source_limit: i32,
+) -> Result<bool, Error> {
+    let mut transaction = pool.begin().await?;
+    // Every bucket this attempt reached must keep its increment, and the
+    // expiry sweep must run, whatever the decision. Rolling a rejection
+    // back used to hand a caller that had saturated one narrow bucket a
+    // free, uncounted attempt against the wider source and global ceilings.
+    // This transaction therefore only ever commits; a genuine SQL error
+    // still aborts it through `?`.
+    //
+    // The global ceiling is resource admission, not a user-facing policy.
+    // It bounds attacker-controlled source rows before they are inserted.
+    let mut admitted = consume_public_auth_bucket(
+        &mut transaction,
+        action,
+        "global",
+        &[0_u8; 32],
+        PUBLIC_AUTH_RESOURCE_ATTEMPTS_PER_MINUTE,
+    )
+    .await?;
+    if admitted {
+        admitted = consume_public_auth_bucket(
+            &mut transaction,
+            action,
+            "source",
+            &source_digest,
+            source_limit,
+        )
+        .await?;
+    }
+    if let (true, Some(source_target_digest)) = (admitted, source_target_digest) {
+        admitted = consume_public_auth_bucket(
+            &mut transaction,
+            action,
+            "source_target",
+            &source_target_digest,
+            SOURCE_TARGET_ATTEMPTS_PER_MINUTE,
+        )
+        .await?;
+    }
+    sqlx::query(
+        "WITH expired AS ( \
+               SELECT ctid FROM public_auth_rate_limits \
+               WHERE window_started_at <= now() - interval '10 minutes' \
+               LIMIT $1 \
+             ) \
+             DELETE FROM public_auth_rate_limits rate_limit USING expired \
+             WHERE rate_limit.ctid = expired.ctid",
+    )
+    .bind(PUBLIC_AUTH_DELETE_BATCH)
+    .execute(&mut *transaction)
+    .await?;
+    transaction.commit().await?;
+    Ok(admitted)
+}
+
+async fn consume_public_auth_bucket(
+    transaction: &mut Transaction<'_, Postgres>,
+    action: &str,
+    scope: &str,
+    key_digest: &[u8; 32],
+    limit: i32,
+) -> Result<bool, sqlx::Error> {
+    let admitted: Option<bool> = sqlx::query_scalar::<_, bool>(
+        "INSERT INTO public_auth_rate_limits \
+         (action, scope, key_digest, window_started_at, attempts) \
+         VALUES ($1, $2, $3, now(), 1) \
+         ON CONFLICT (action, scope, key_digest) DO UPDATE SET \
+             window_started_at = CASE \
+                 WHEN public_auth_rate_limits.window_started_at <= now() - interval '1 minute' \
+                 THEN now() ELSE public_auth_rate_limits.window_started_at END, \
+             attempts = CASE \
+                 WHEN public_auth_rate_limits.window_started_at <= now() - interval '1 minute' \
+                 THEN 1 ELSE public_auth_rate_limits.attempts + 1 END \
+         WHERE public_auth_rate_limits.window_started_at <= now() - interval '1 minute' \
+            OR public_auth_rate_limits.attempts < $4 \
+         RETURNING true AS \"value\"",
+    )
+    .bind(action)
+    .bind(scope)
+    .bind(key_digest.as_slice())
+    .bind(limit)
+    .fetch_optional(&mut **transaction)
+    .await?;
+    Ok(admitted.unwrap_or(false))
+}

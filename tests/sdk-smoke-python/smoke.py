@@ -46,8 +46,8 @@ from google import genai
 from google.genai import errors, types
 
 openai_base_urls = (
-    ("canonical OpenAI base", f"{origin}/openai/v1"),
-    ("canonical OpenAI base with trailing slash", f"{origin}/openai/v1/"),
+    ("canonical OpenAI base", f"{origin}/v1"),
+    ("canonical OpenAI base with trailing slash", f"{origin}/v1/"),
     ("OpenAI compatibility base", f"{origin}/v1"),
     ("OpenAI compatibility base with trailing slash", f"{origin}/v1/"),
 )
@@ -123,20 +123,6 @@ def smoke_openai(base_url: str, label: str) -> None:
         page = client.models.list()
         assert any(model.id == route_slug for model in page.data), label
         assert client.models.retrieve(route_slug).id == route_slug, label
-
-
-def smoke_openai_litellm() -> None:
-    with openai_client(
-        f"{origin}/v1/",
-        client_api_key="external-upstream-authorization",
-        default_headers={"x-litellm-api-key": api_key},
-    ) as client:
-        raw_response = client.models.with_raw_response.list()
-        page = raw_response.parse()
-        assert any(model.id == route_slug for model in page.data)
-        headers = raw_response.http_response.request.headers
-        assert headers.get("authorization") == "Bearer external-upstream-authorization"
-        assert headers.get("x-litellm-api-key") == api_key
 
 
 def smoke_anthropic() -> None:
@@ -234,28 +220,10 @@ def direct_status(path: str, headers: dict[str, str]) -> int:
 
 
 def direct_negative_contracts() -> None:
-    cases = (
-        (
-            "an invalid x-litellm-api-key",
-            {"x-litellm-api-key": invalid_api_key},
-        ),
-        (
-            "an invalid x-litellm-api-key must not fall back to a valid native key",
-            {
-                "x-litellm-api-key": invalid_api_key,
-                "Authorization": f"Bearer {api_key}",
-            },
-        ),
-        (
-            "conflicting valid OLP gateway credentials",
-            {
-                "x-litellm-api-key": api_key,
-                "Authorization": f"Bearer {conflict_api_key}",
-            },
-        ),
-    )
-    for description, headers in cases:
-        assert direct_status("/v1/models", headers) == 401, description
+    assert direct_status("/v1/models", {"x-litellm-api-key": api_key}) == 401
+    assert direct_status(
+        "/openai/v1/models", {"Authorization": f"Bearer {api_key}"}
+    ) == 404
     assert direct_status(
         "/v1/not-enabled",
         {"Authorization": f"Bearer {api_key}"},
@@ -293,7 +261,6 @@ def error_contract_google() -> None:
 def main() -> None:
     for label, base_url in openai_base_urls:
         smoke_openai(base_url, label)
-    smoke_openai_litellm()
     smoke_anthropic()
     smoke_google()
     for label, base_url in openai_base_urls:

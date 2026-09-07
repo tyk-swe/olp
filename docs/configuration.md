@@ -2,7 +2,7 @@
 
 Application configuration is environment-driven; each application setting
 also has a CLI flag in `olp <subcommand> --help`. Logging uses `RUST_LOG`. The
-source of truth is `apps/olp/src/bootstrap/cli/config.rs`. Secrets are file
+source of truth is `src/bootstrap/cli/config.rs`. Secrets are file
 paths, never inline values.
 
 ## Runtime variables
@@ -134,12 +134,12 @@ stores resolved values, not a catalog reference:
 
 | ID | Provider | Endpoint |
 |---|---|---|
-| `groq` | Groq | `https://api.groq.com/openai/v1` |
+| `groq` | Groq | `https://api.groq.com/v1` |
 | `mistral_ai` | Mistral AI | `https://api.mistral.ai/v1` |
 | `together_ai` | Together AI | `https://api.together.ai/v1` |
 | `xai` | xAI | `https://api.x.ai/v1` |
 | `cerebras` | Cerebras | `https://api.cerebras.ai/v1` |
-| `openrouter` | OpenRouter | `https://openrouter.ai/api/v1` |
+| `openrouter` | OpenRouter | `https://openrouter.ai/api/v3` |
 
 A preset is not provider or model certification. Creation and edits still
 run HTTPS, public-egress, SSRF, and reachability checks unless the host or
@@ -213,3 +213,13 @@ support operations scripts; `OLP_SDK_SMOKE_*` supports SDK smoke; and
 `OLP_BEDROCK_LIVE_*` opt into live-provider tests. See
 [`CONTRIBUTING.md`](../CONTRIBUTING.md) and [`docs/operations.md`](operations.md)
 for command-specific requirements.
+
+## Mounted connectors
+
+`OLP_CONNECTOR_CONFIG_FILE` accepts the 3.0 `providers` list shown in
+[`deploy/connectors.example.json`](../deploy/connectors.example.json). Each
+entry identifies a provider, uses the same nested `configuration` as the
+management API, and references an optional `credential_file`. Vertex entries
+also select a probe `model`. Credential files must have restricted permissions;
+ADC and the AWS default chain reject stored credentials. The former separate
+vendor lists are not accepted by 3.0.

@@ -68,8 +68,8 @@ function googleClient(clientApiKey = apiKey, retryOptions) {
 }
 
 const openAIBaseURLs = [
-  ['canonical OpenAI base', `${origin}/openai/v1`],
-  ['canonical OpenAI base with trailing slash', `${origin}/openai/v1/`],
+  ['canonical OpenAI base', `${origin}/v1`],
+  ['canonical OpenAI base with trailing slash', `${origin}/v1/`],
   ['OpenAI compatibility base', `${origin}/v1`],
   ['OpenAI compatibility base with trailing slash', `${origin}/v1/`]
 ];
@@ -110,29 +110,6 @@ async function smokeOpenAI(baseURL, label) {
 
   const model = await client.models.retrieve(routeSlug);
   assert.equal(model.id, routeSlug, label);
-}
-
-async function smokeOpenAILitellm() {
-  const observedHeaders = [];
-  const captureFetch = async (input, init) => {
-    const request = new Request(input, init);
-    observedHeaders.push({
-      authorization: request.headers.get('authorization'),
-      litellmApiKey: request.headers.get('x-litellm-api-key')
-    });
-    return localOnlyFetch(request);
-  };
-  const client = openAIClient(`${origin}/v1/`, {
-    apiKey: 'external-upstream-authorization',
-    fetch: captureFetch,
-    defaultHeaders: { 'x-litellm-api-key': apiKey }
-  });
-  const page = await client.models.list();
-  assert.ok(page.data.some((model) => model.id === routeSlug));
-  assert.deepEqual(observedHeaders.at(-1), {
-    authorization: 'Bearer external-upstream-authorization',
-    litellmApiKey: apiKey
-  });
 }
 
 async function smokeAnthropic() {
@@ -237,25 +214,16 @@ async function errorContractOpenAI(baseURL, label) {
 }
 
 async function directNegativeContracts() {
-  for (const [description, litellmApiKey, authorization] of [
-    ['an invalid x-litellm-api-key', invalidApiKey, undefined],
-    [
-      'an invalid x-litellm-api-key must not fall back to a valid native key',
-      invalidApiKey,
-      `Bearer ${apiKey}`
-    ],
-    [
-      'conflicting valid OLP gateway credentials',
-      apiKey,
-      `Bearer ${conflictApiKey}`
-    ]
-  ]) {
-    const headers = { 'x-litellm-api-key': litellmApiKey };
-    if (authorization) headers.Authorization = authorization;
-    const response = await localOnlyFetch(`${origin}/v1/models`, { headers });
-    assert.equal(response.status, 401, description);
-    await response.text();
-  }
+  const retiredAuth = await localOnlyFetch(`${origin}/v1/models`, {
+    headers: { 'x-litellm-api-key': apiKey }
+  });
+  assert.equal(retiredAuth.status, 401, 'the retired header does not authenticate');
+  await retiredAuth.text();
+  const retiredPrefix = await localOnlyFetch(`${origin}/openai/v1/models`, {
+    headers: { Authorization: `Bearer ${apiKey}` }
+  });
+  assert.equal(retiredPrefix.status, 404, 'the retired prefix is absent');
+  await retiredPrefix.text();
 
   const unknownRoute = await localOnlyFetch(`${origin}/v1/not-enabled`, {
     headers: { Authorization: `Bearer ${apiKey}` }
@@ -304,7 +272,6 @@ async function errorContractGoogle() {
 }
 
 for (const [label, baseURL] of openAIBaseURLs) await smokeOpenAI(baseURL, label);
-await smokeOpenAILitellm();
 await smokeAnthropic();
 await smokeGoogle();
 for (const [label, baseURL] of openAIBaseURLs) await errorContractOpenAI(baseURL, label);

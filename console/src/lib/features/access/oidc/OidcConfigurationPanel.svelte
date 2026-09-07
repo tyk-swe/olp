@@ -1,6 +1,7 @@
 <script lang="ts">
+  import { oidcKeys } from '$lib/features/access/oidc/oidcKeys';
+
   import { onDestroy } from 'svelte';
-  import { queryKeys } from '$lib/api/queryKeys';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { isEtagMismatch } from '$lib/api/http';
   import {
@@ -8,14 +9,14 @@
     getOidcConfiguration,
     putOidcConfiguration,
     type OidcConfigurationInput
-  } from '$lib/api/management/oidc';
+  } from '$lib/features/access/oidc/api';
   import {
     beginOidcReauthentication,
     listOidcIdentities,
     reauthenticateWithPassword
-  } from '$lib/api/profile';
-  import { FIXED_ROLES } from '$lib/auth/authorization';
-  import { useRole } from '$lib/auth/useRole.svelte';
+  } from '$lib/features/access/profile/api';
+  import { FIXED_ROLES } from '$lib/features/access/session/authorization';
+  import { useRole } from '$lib/features/access/session/useRole.svelte';
   import ConflictNotice from '$lib/components/ConflictNotice.svelte';
   import ReadOnlyNote from '$lib/components/ReadOnlyNote.svelte';
   import ReauthenticateDialog from '$lib/components/ReauthenticateDialog.svelte';
@@ -29,13 +30,13 @@
     reconcile
   } from '$lib/forms/concurrentEdit';
   import { errorMessage } from '$lib/api/http';
-  import { parseRoleMappings } from './mappings';
+  import { parseRoleMappings } from '$lib/features/access/oidc/mappings';
 
   const queryClient = useQueryClient();
   const access = useRole();
   const canManage = $derived(access.can('users.manage'));
   const oidc = createQuery(() => ({
-    queryKey: queryKeys.oidc.configuration(),
+    queryKey: oidcKeys.configuration(),
     queryFn: ({ signal }) => getOidcConfiguration(signal),
     retry: false
   }));
@@ -141,7 +142,7 @@
       );
       clientSecret = '';
       sync = markSaved(sync, updated.etag);
-      queryClient.setQueryData(queryKeys.oidc.configuration(), updated);
+      queryClient.setQueryData(oidcKeys.configuration(), updated);
       notice = updated.enabled
         ? 'OIDC configuration validated and enabled.'
         : 'OIDC configuration saved but disabled.';

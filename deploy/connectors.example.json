@@ -1,39 +1,50 @@
 {
-  "openai": [
+  "providers": [
     {
       "provider_id": "018f1f77-9823-7b8a-b847-3658e91e4d01",
-      "base_url": "https://api.openai.com/v1/",
+      "configuration": {
+        "kind": "openai",
+        "auth_mode": "api_key",
+        "endpoint": "https://api.openai.com/v1/"
+      },
       "credential_file": "/run/secrets/openai_api_key"
-    }
-  ],
-  "azure_openai": [
+    },
     {
       "provider_id": "018f1f77-9823-7b8a-b847-3658e91e4d05",
-      "endpoint": "https://example-resource.openai.azure.com",
-      "deployment": "team-chat",
-      "api_version": "2024-10-21",
+      "configuration": {
+        "kind": "azure_openai",
+        "auth_mode": "api_key",
+        "endpoint": "https://example-resource.openai.azure.com",
+        "deployment": "team-chat",
+        "api_version": "2024-10-21"
+      },
       "credential_file": "/run/secrets/azure_openai_api_key"
-    }
-  ],
-  "vertex": [
+    },
     {
       "provider_id": "018f1f77-9823-7b8a-b847-3658e91e4d02",
-      "project": "example-project",
-      "location": "us-central1",
-      "model": "gemini-2.5-flash",
-      "auth_mode": "adc"
-    }
-  ],
-  "bedrock": [
+      "configuration": {
+        "kind": "vertex_ai",
+        "auth_mode": "adc",
+        "cloud_project": "example-project",
+        "cloud_region": "us-central1"
+      },
+      "model": "gemini-2.5-flash"
+    },
     {
       "provider_id": "018f1f77-9823-7b8a-b847-3658e91e4d03",
-      "region": "us-east-1",
-      "auth_mode": "default_chain"
+      "configuration": {
+        "kind": "bedrock",
+        "auth_mode": "default_chain",
+        "cloud_region": "us-east-1"
+      }
     },
     {
       "provider_id": "018f1f77-9823-7b8a-b847-3658e91e4d04",
-      "region": "us-west-2",
-      "auth_mode": "static",
+      "configuration": {
+        "kind": "bedrock",
+        "auth_mode": "static",
+        "cloud_region": "us-west-2"
+      },
       "credential_file": "/run/secrets/aws_bedrock_credentials.json"
     }
   ]

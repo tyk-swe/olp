@@ -2,7 +2,7 @@ import type {
   ApiKey,
   CreateApiKeyInput,
   UpdateApiKeyInput
-} from '$lib/api/management/api-keys';
+} from '$lib/features/access/api-keys/api';
 import { dateTimeLocalValue } from '$lib/format';
 
 export type ApiKeyPolicyInput = CreateApiKeyInput & UpdateApiKeyInput;

@@ -1,7 +1,7 @@
-import type { components } from './schema';
-import { apiClient } from './client';
-import { result } from './http';
-import { compactQuery } from './query';
+import type { components } from '$lib/api/schema';
+import { apiClient } from '$lib/api/client';
+import { result } from '$lib/api/http';
+import { compactQuery } from '$lib/api/query';
 
 export type UsagePoint = components['schemas']['UsagePointResponse'];
 export type UsageCompleteness =
@@ -25,7 +25,7 @@ export async function usageSummary(
   filters: UsageFilters
 ): Promise<UsageSummary> {
   const { data, error, response } = await apiClient.GET(
-    '/api/v1/usage/summary',
+    '/api/v3/usage/summary',
     {
       params: { query: compactQuery(filters) }
     }
@@ -38,7 +38,7 @@ export async function usageSeries(
   granularity: 'hour' | 'day'
 ): Promise<UsageSeriesResult> {
   const { data, error, response } = await apiClient.GET(
-    '/api/v1/usage/time-series',
+    '/api/v3/usage/time-series',
     { params: { query: compactQuery({ ...filters, granularity }) } }
   );
   return result(data, error, response);
@@ -49,7 +49,7 @@ export async function usageBreakdown(
   dimension: 'route' | 'provider' | 'model' | 'api_key' | 'operation'
 ): Promise<UsageBreakdownResult> {
   const { data, error, response } = await apiClient.GET(
-    '/api/v1/usage/breakdown',
+    '/api/v3/usage/breakdown',
     { params: { query: compactQuery({ ...filters, dimension, limit: 50 }) } }
   );
   return result(data, error, response);
@@ -59,7 +59,7 @@ export async function usageCompleteness(
   filters: UsageFilters
 ): Promise<UsageCompleteness> {
   const { data, error, response } = await apiClient.GET(
-    '/api/v1/usage/completeness',
+    '/api/v3/usage/completeness',
     { params: { query: compactQuery(filters) } }
   );
   return result(data, error, response);

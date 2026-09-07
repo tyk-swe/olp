@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { SDK_OPTIONS, sdkSnippet } from './sdkExamples';
+import {
+  SDK_OPTIONS,
+  sdkSnippet
+} from '$lib/features/access/api-keys/sdkExamples';
 
 describe('sdkSnippet', () => {
   it.each(SDK_OPTIONS)(

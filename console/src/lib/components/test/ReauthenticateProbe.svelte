@@ -2,7 +2,7 @@
   // Test-only host. The dialog reports a rejected password through props the
   // way ProfilePage and OidcConfigurationPanel do, so the failure path only
   // exists once a real parent owns `busy`, `error`, and the open state.
-  import ReauthenticateDialog from '../ReauthenticateDialog.svelte';
+  import ReauthenticateDialog from '$lib/components/ReauthenticateDialog.svelte';
 
   let {
     accepts,

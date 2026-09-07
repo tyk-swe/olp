@@ -1,4 +1,5 @@
-type FieldErrors = Record<string, string[]>;
+type FieldError = { code: string; message: string };
+type FieldErrors = Record<string, FieldError[]>;
 
 export type ProblemDetails = {
   type?: string;
@@ -7,8 +8,6 @@ export type ProblemDetails = {
   detail?: string;
   instance?: string;
   errors?: FieldErrors;
-  /** Machine-readable classification per field message, parallel to `errors`. */
-  errorCodes?: FieldErrors;
 };
 
 /** One rejected field message with the code the API classified it under. */
@@ -46,7 +45,13 @@ function fieldErrors(value: unknown): FieldErrors | undefined {
     !entries.every(
       ([, messages]) =>
         Array.isArray(messages) &&
-        messages.every((message) => typeof message === 'string')
+        messages.every(
+          (error) =>
+            error &&
+            typeof error === 'object' &&
+            typeof error.message === 'string' &&
+            typeof error.code === 'string'
+        )
     )
   ) {
     return undefined;
@@ -69,8 +74,7 @@ function apiProblem(error: unknown, response: Response): ApiProblem {
     status,
     detail: optionalString(value.detail),
     instance: optionalString(value.instance),
-    errors: fieldErrors(value.errors),
-    errorCodes: fieldErrors(value.error_codes)
+    errors: fieldErrors(value.errors)
   });
 }
 
@@ -102,23 +106,10 @@ export function result<T>(
   });
 }
 
-/**
- * Flattens a validation Problem into one entry per rejected field message.
- * Codes line up with messages by position, and a message without one keeps
- * `code` undefined rather than borrowing its neighbour's. The API pads
- * `error_codes` with an empty string wherever a message is uncoded, so that
- * placeholder is read as "no code" rather than as a classification named "".
- */
 export function fieldIssues(error: unknown): FieldIssue[] {
   if (!(error instanceof ApiProblem)) return [];
-  const { errors, errorCodes } = error.problem;
-  if (!errors) return [];
-  return Object.entries(errors).flatMap(([field, messages]) =>
-    messages.map((message, index) => ({
-      field,
-      message,
-      code: errorCodes?.[field]?.[index] || undefined
-    }))
+  return Object.entries(error.problem.errors ?? {}).flatMap(([field, errors]) =>
+    errors.map((error) => ({ field, ...error }))
   );
 }
 
@@ -136,7 +127,7 @@ export function applyServerFieldErrors<Key extends string>(
   if (!(error instanceof ApiProblem)) return mapped;
   for (const [field, messages] of Object.entries(error.problem.errors ?? {})) {
     const local = fields[field];
-    if (local && messages[0]) mapped[local] = messages[0];
+    if (local && messages[0]) mapped[local] = messages[0].message;
   }
   return mapped;
 }

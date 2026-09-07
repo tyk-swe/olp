@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { routeList } from '$lib/features/gateway/routes/routeListState';
+  import { routeList } from '$lib/features/routes/routeListState';
 
   let { children } = $props();
   // The list keeps its cursor (and filters) across this route family, so a

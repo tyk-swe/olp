@@ -1,0 +1,734 @@
+use olp::protocols::canonical::events::FinishReason;
+use olp::protocols::canonical::events::Kind;
+use olp::protocols::canonical::events::validate_event_sequence;
+use olp::protocols::canonical::identity::Surface;
+use olp::protocols::canonical::requests::MessageRole;
+use olp::protocols::canonical::requests::Operation;
+use olp::protocols::canonical::requests::ResponseFormat;
+use olp::protocols::gemini::client_stream::Encoder;
+use olp::protocols::gemini::count::decode_count_tokens_request;
+use olp::protocols::gemini::count::encode_count_tokens_result;
+use olp::protocols::gemini::dto::CountTokensRequest;
+use olp::protocols::gemini::dto::CountTokensResponse;
+use olp::protocols::gemini::dto::GenerateContentRequest;
+use olp::protocols::gemini::dto::GenerateContentResponse;
+use olp::protocols::gemini::stream::Decoder;
+use olp::protocols::gemini::stream::Error as StreamError;
+use olp::protocols::gemini::translate::decode::request as decode_request;
+use olp::protocols::gemini::translate::encode::request as encode_request;
+use olp::protocols::gemini::translate::errors::CountTokensError;
+use olp::protocols::gemini::translate::response::decode as decode_response;
+use olp::protocols::gemini::translate::validation::validate_count_tokens_request;
+use serde_json::Value;
+use serde_json::json;
+
+#[test]
+fn request_translation_round_trips_structured_tools_results_and_extensions() {
+    let wire = json!({
+        "systemInstruction": {
+            "parts": [{"text": "Be concise", "vendorSystem": true}],
+            "vendorInstruction": "kept"
+        },
+        "contents": [
+            {"role": "user", "parts": [{"text": "Weather?", "vendorText": 7}], "vendorTurn": true},
+            {"role": "model", "parts": [
+                {"text": "I'll check."},
+                {"functionCall": {"name": "weather", "args": {"city": "Paris"}, "vendorCall": true}}
+            ]},
+            {"role": "user", "parts": [{
+                "functionResponse": {"name": "weather", "response": {"temperature": 21}, "vendorResult": "kept"}
+            }]}
+        ],
+        "tools": [
+            {"functionDeclarations": [
+                {"name": "weather", "description": "Weather lookup", "parameters": {"type": "object"}, "vendorDecl": 1},
+                {"name": "forecast", "parameters": {"type": "object"}}
+            ], "vendorTool": true},
+            {"googleSearch": {}}
+        ],
+        "toolConfig": {
+            "functionCallingConfig": {"mode": "ANY", "allowedFunctionNames": ["weather"], "vendorChoice": true}
+        },
+        "generationConfig": {
+            "candidateCount": 1,
+            "maxOutputTokens": 256,
+            "temperature": 0.5,
+            "topP": 0.9,
+            "seed": 42,
+            "responseMimeType": "application/json",
+            "responseSchema": {"type": "object"},
+            "topK": 20
+        },
+        "safetySettings": [{"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_ONLY_HIGH"}]
+    });
+    let dto: GenerateContentRequest = serde_json::from_value(wire).unwrap();
+    let Operation::Generation(canonical) = decode_request("team-gemini", dto, true).unwrap() else {
+        panic!("wrong operation");
+    };
+
+    assert_eq!(canonical.route.as_str(), "team-gemini");
+    assert_eq!(canonical.messages.len(), 4);
+    assert_eq!(canonical.messages[0].role, MessageRole::System);
+    assert_eq!(canonical.messages[3].role, MessageRole::Tool);
+    assert_eq!(canonical.messages[3].name.as_deref(), Some("weather"));
+    assert_eq!(canonical.messages[2].tool_calls[0].name, "weather");
+    assert_eq!(canonical.tools.len(), 2);
+    assert_eq!(canonical.parameters.seed, Some(42));
+    assert!(canonical.parameters.stream);
+    assert!(matches!(
+        canonical.response_format,
+        Some(ResponseFormat::JsonSchema { .. })
+    ));
+    assert_eq!(canonical.extensions.source, Some(Surface::Gemini));
+    assert!(canonical.extensions.values.contains_key("/safetySettings"));
+    assert_eq!(canonical.extensions.values["/generationConfig/topK"], 20);
+    assert_eq!(
+        canonical.extensions.values["/contents/1/parts/1/functionCall/id"],
+        Value::Null
+    );
+    assert_eq!(
+        canonical.extensions.values["/contents/2/parts/0/functionResponse/id"],
+        Value::Null
+    );
+
+    let mut wrong_source = canonical.clone();
+    wrong_source.extensions.source = Some(Surface::Anthropic);
+    assert!(encode_request(&wrong_source).is_err());
+
+    let encoded = encode_request(&canonical).unwrap();
+    let encoded = serde_json::to_value(encoded).unwrap();
+    assert_eq!(
+        encoded["systemInstruction"]["parts"][0]["vendorSystem"],
+        true
+    );
+    assert_eq!(encoded["contents"][0]["parts"][0]["vendorText"], 7);
+    assert!(
+        encoded["contents"][1]["parts"][1]["functionCall"]
+            .as_object()
+            .unwrap()
+            .get("id")
+            .is_none()
+    );
+    assert!(
+        encoded["contents"][2]["parts"][0]["functionResponse"]
+            .as_object()
+            .unwrap()
+            .get("id")
+            .is_none()
+    );
+    assert_eq!(encoded["generationConfig"]["topK"], 20);
+    assert_eq!(encoded["tools"].as_array().unwrap().len(), 3);
+    assert!(encoded["tools"][2].get("googleSearch").is_some());
+    assert_eq!(encoded["safetySettings"][0]["threshold"], "BLOCK_ONLY_HIGH");
+}
+
+#[test]
+fn file_media_round_trips_mime_and_inline_media_is_rejected() {
+    let file_request: GenerateContentRequest = serde_json::from_value(json!({
+        "contents": [{"role": "user", "parts": [{
+            "fileData": {"mimeType": "image/png", "fileUri": "https://files.example/image"}
+        }]}]
+    }))
+    .unwrap();
+    let Operation::Generation(canonical) = decode_request("default", file_request, false).unwrap()
+    else {
+        unreachable!();
+    };
+    let encoded = serde_json::to_value(encode_request(&canonical).unwrap()).unwrap();
+    assert_eq!(
+        encoded["contents"][0]["parts"][0]["fileData"]["mimeType"],
+        "image/png"
+    );
+
+    let inline_request: GenerateContentRequest = serde_json::from_value(json!({
+        "contents": [{"role": "user", "parts": [{
+            "inlineData": {"mimeType": "image/png", "data": "AAAA"}
+        }]}]
+    }))
+    .unwrap();
+    assert!(decode_request("default", inline_request, false).is_err());
+}
+
+#[test]
+fn unary_response_maps_text_tools_usage_and_preserves_thought_and_safety() {
+    let response: GenerateContentResponse = serde_json::from_value(json!({
+        "responseId": "response-1",
+        "modelVersion": "gemini-upstream",
+        "candidates": [{
+            "index": 0,
+            "content": {"role": "model", "parts": [
+                {"text": "private reasoning", "thought": true, "thoughtSignature": "sig"},
+                {"text": "Calling weather"},
+                {"functionCall": {"id": "call-1", "name": "weather", "args": {"city": "Paris"}}}
+            ]},
+            "finishReason": "STOP",
+            "safetyRatings": [{"category": "HARM_CATEGORY_HATE_SPEECH", "probability": "NEGLIGIBLE"}]
+        }],
+        "usageMetadata": {
+            "promptTokenCount": 10,
+            "candidatesTokenCount": 5,
+            "totalTokenCount": 17,
+            "cachedContentTokenCount": 2,
+            "thoughtsTokenCount": 2
+        }
+    })).unwrap();
+    let events = decode_response(response).unwrap();
+    validate_event_sequence(&events).unwrap();
+    assert!(events.iter().any(|event| matches!(
+        &event.kind,
+        Kind::TextDelta { text, .. } if text == "Calling weather"
+    )));
+    assert!(events.iter().any(|event| matches!(
+        &event.kind,
+        Kind::ToolCallDelta { name: Some(name), arguments_delta, .. }
+            if name == "weather" && arguments_delta.contains("Paris")
+    )));
+    assert!(events.iter().any(|event| matches!(
+        &event.kind,
+        Kind::SourceExtension { extensions }
+            if extensions.values.contains_key("/candidates/0/content/parts/0")
+                && extensions.values.contains_key("/candidates/0/safetyRatings")
+    )));
+    assert!(events.iter().any(|event| matches!(
+        event.kind,
+        Kind::Usage { usage } if usage.input_tokens == 10
+            && usage.output_tokens == 5 && usage.reasoning_tokens == Some(2)
+    )));
+    // Gemini reports STOP alongside functionCall parts; agent loops key on
+    // tool_calls, so the decoder upgrades the reason.
+    assert!(events.iter().any(|event| matches!(
+        event.kind,
+        Kind::Finish {
+            reason: FinishReason::ToolCalls,
+            ..
+        }
+    )));
+}
+
+fn sse(data: Value) -> String {
+    format!("data: {data}\n\n")
+}
+
+#[test]
+fn fragmented_stream_maps_unicode_tool_usage_finish_and_eof_done() {
+    let first = json!({
+        "responseId": "stream-1",
+        "modelVersion": "gemini-upstream",
+        "candidates": [{"index": 0, "content": {"role": "model", "parts": [{"text": "héllo "}]}}]
+    });
+    let second = json!({
+        "responseId": "stream-1",
+        "modelVersion": "gemini-upstream",
+        "candidates": [{
+            "index": 0,
+            "content": {"role": "model", "parts": [
+                {"text": "🌍"},
+                {"functionCall": {"name": "weather", "args": {"city": "Paris"}}}
+            ]},
+            "finishReason": "STOP"
+        }],
+        "usageMetadata": {"promptTokenCount": 8, "candidatesTokenCount": 4, "totalTokenCount": 12}
+    });
+    let wire = format!("{}{}", sse(first), sse(second));
+    let mut decoder = Decoder::new();
+    let mut events = Vec::new();
+    for byte in wire.as_bytes() {
+        events.extend(decoder.push(std::slice::from_ref(byte)).unwrap());
+    }
+    events.extend(decoder.finish().unwrap());
+
+    validate_event_sequence(&events).unwrap();
+    assert!(decoder.is_done());
+    let text = events
+        .iter()
+        .filter_map(|event| match &event.kind {
+            Kind::TextDelta { text, .. } => Some(text.as_str()),
+            _ => None,
+        })
+        .collect::<String>();
+    assert_eq!(text, "héllo 🌍");
+    assert!(events.iter().any(|event| matches!(
+        &event.kind,
+        Kind::ToolCallDelta { name: Some(name), arguments_delta, .. }
+            if name == "weather" && arguments_delta.contains("Paris")
+    )));
+    assert!(events.iter().any(|event| matches!(
+        event.kind,
+        Kind::Usage { usage } if usage.total_tokens == 12
+    )));
+    assert!(matches!(events.last().unwrap().kind, Kind::Done));
+}
+
+#[test]
+fn stream_error_is_terminal_and_missing_finish_reason_is_truncation() {
+    let mut decoder = Decoder::new();
+    let events = decoder
+        .push(
+            sse(json!({
+                "error": {"code": 429, "message": "quota", "status": "RESOURCE_EXHAUSTED"}
+            }))
+            .as_bytes(),
+        )
+        .unwrap();
+    assert!(decoder.is_done());
+    assert!(matches!(
+        &events[0].kind,
+        Kind::Error { error } if error.retryable
+    ));
+    assert!(matches!(events[1].kind, Kind::Done));
+
+    let mut truncated = Decoder::new();
+    truncated.push(sse(json!({
+        "candidates": [{"index": 0, "content": {"role": "model", "parts": [{"text": "partial"}]}}]
+    })).as_bytes()).unwrap();
+    assert!(matches!(
+        truncated.finish(),
+        Err(StreamError::UnexpectedEof)
+    ));
+}
+
+#[test]
+fn count_token_dtos_enforce_mutually_exclusive_inputs() {
+    let contents_only: CountTokensRequest = serde_json::from_value(json!({
+        "contents": [{"role": "user", "parts": [{"text": "hello"}]}]
+    }))
+    .unwrap();
+    assert_eq!(validate_count_tokens_request(&contents_only), Ok(()));
+
+    let both: CountTokensRequest = serde_json::from_value(json!({
+        "contents": [{"role": "user", "parts": [{"text": "hello"}]}],
+        "generateContentRequest": {"contents": [{"role": "user", "parts": [{"text": "hello"}]}]}
+    }))
+    .unwrap();
+    assert_eq!(
+        validate_count_tokens_request(&both),
+        Err(CountTokensError::ExactlyOneInput)
+    );
+    let response: CountTokensResponse = serde_json::from_value(json!({
+        "totalTokens": 11,
+        "cachedContentTokenCount": 3,
+        "vendorCount": true
+    }))
+    .unwrap();
+    assert_eq!(response.total_tokens, 11);
+    assert_eq!(response.cached_content_token_count, Some(3));
+    assert_eq!(response.extra["vendorCount"], Value::Bool(true));
+}
+
+#[test]
+fn count_tokens_preserves_nested_request_and_encodes_native_result() {
+    let request: CountTokensRequest = serde_json::from_value(json!({
+        "generateContentRequest": {
+            "model": "models/team-gemini",
+            "contents": [{"role": "user", "parts": [{"text": "hello"}]}],
+            "tools": [{"functionDeclarations": [{"name": "lookup", "parameters": {"type": "object"}}]}],
+            "safetySettings": [{"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"}]
+        },
+        "vendorCountOption": true
+    }))
+    .unwrap();
+    let Operation::TokenCount(canonical) =
+        decode_count_tokens_request("team-gemini", request).unwrap()
+    else {
+        panic!("wrong operation")
+    };
+    assert_eq!(canonical.route.as_str(), "team-gemini");
+    let preserved =
+        &canonical.extensions.values[olp::protocols::gemini::count::GEMINI_COUNT_REQUEST_EXTENSION];
+    assert_eq!(preserved["vendorCountOption"], true);
+    assert!(preserved["generateContentRequest"]["safetySettings"].is_array());
+
+    let response =
+        encode_count_tokens_result(&olp::protocols::canonical::results::TokenCountResult {
+            input_tokens: 21,
+            extensions: olp::protocols::canonical::requests::SourceExtensions::new(
+                Surface::Gemini,
+                [("/cachedContentTokenCount".into(), Value::from(3))].into(),
+            ),
+        })
+        .unwrap();
+    assert_eq!(response.total_tokens, 21);
+    assert_eq!(response.cached_content_token_count, Some(3));
+}
+
+#[test]
+fn count_tokens_plain_user_text_is_cross_protocol_representable() {
+    let request: CountTokensRequest = serde_json::from_value(json!({
+        "contents": [{"role": "user", "parts": [{"text": "plain text"}]}]
+    }))
+    .unwrap();
+    let Operation::TokenCount(canonical) =
+        decode_count_tokens_request("team-gemini", request).unwrap()
+    else {
+        panic!("wrong operation")
+    };
+    assert!(canonical.extensions.values.is_empty());
+    assert_eq!(canonical.extensions.source, Some(Surface::Gemini));
+    canonical
+        .extensions
+        .ensure_representable_on(Surface::Anthropic)
+        .unwrap();
+}
+
+#[test]
+fn client_stream_encoder_emits_sdk_sse_chunks_and_buffers_fragmented_tools() {
+    let canonical = vec![
+        olp::protocols::canonical::events::Event::new(
+            0,
+            Kind::ResponseStart {
+                response_id: Some("gem-response".into()),
+                provider_model: Some("private".into()),
+            },
+        ),
+        olp::protocols::canonical::events::Event::new(
+            1,
+            Kind::MessageStart {
+                output_index: 0,
+                role: MessageRole::Assistant,
+            },
+        ),
+        olp::protocols::canonical::events::Event::new(
+            2,
+            Kind::TextDelta {
+                output_index: 0,
+                text: "hello".into(),
+            },
+        ),
+        olp::protocols::canonical::events::Event::new(
+            3,
+            Kind::ToolCallDelta {
+                output_index: 0,
+                tool_index: 0,
+                id: Some("call-1".into()),
+                name: Some("lookup".into()),
+                arguments_delta: "{\"city\":".into(),
+            },
+        ),
+        olp::protocols::canonical::events::Event::new(
+            4,
+            Kind::ToolCallDelta {
+                output_index: 0,
+                tool_index: 0,
+                id: None,
+                name: None,
+                arguments_delta: "\"Paris\"}".into(),
+            },
+        ),
+        olp::protocols::canonical::events::Event::new(
+            5,
+            Kind::Finish {
+                output_index: 0,
+                reason: FinishReason::ToolCalls,
+            },
+        ),
+        olp::protocols::canonical::events::Event::new(6, Kind::Done),
+    ];
+    let mut encoder = Encoder::new("public-route", "fallback");
+    let mut wire = String::new();
+    for event in canonical {
+        for frame in encoder.push(event).unwrap() {
+            wire.push_str(&format!("data: {}\n\n", frame.data));
+        }
+    }
+    assert!(wire.contains("\"modelVersion\":\"public-route\""));
+    let mut decoder = Decoder::new();
+    let mut decoded = Vec::new();
+    for byte in wire.as_bytes() {
+        decoded.extend(decoder.push(std::slice::from_ref(byte)).unwrap());
+    }
+    decoded.extend(decoder.finish().unwrap());
+    assert!(decoded.iter().any(|event| matches!(
+        &event.kind,
+        Kind::ToolCallDelta { name: Some(name), arguments_delta, .. }
+            if name == "lookup" && arguments_delta.contains("Paris")
+    )));
+}
+
+#[test]
+fn native_gemini_stream_losslessly_preserves_safety_and_grounding_metadata() {
+    let wire = sse(json!({
+        "responseId": "native-1",
+        "modelVersion": "gemini-upstream",
+        "candidates": [{
+            "index": 0,
+            "content": {"role": "model", "parts": [{"text": "answer"}]},
+            "finishReason": "STOP",
+            "safetyRatings": [{"category": "HARM_CATEGORY_HATE_SPEECH", "probability": "NEGLIGIBLE"}],
+            "groundingMetadata": {"webSearchQueries": ["source query"]}
+        }],
+        "usageMetadata": {"promptTokenCount": 2, "candidatesTokenCount": 1, "totalTokenCount": 3},
+        "promptFeedback": {"safetyRatings": []}
+    }));
+    let mut decoder = Decoder::with_max_event_bytes_and_raw_passthrough(1024 * 1024, true);
+    let mut events = decoder.push(wire.as_bytes()).unwrap();
+    events.extend(decoder.finish().unwrap());
+    validate_event_sequence(&events).unwrap();
+
+    let mut encoder = Encoder::new("public-route", "fallback");
+    let frames = events
+        .into_iter()
+        .flat_map(|event| encoder.push(event).unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(frames.len(), 1);
+    let output: Value = serde_json::from_str(&frames[0].data).unwrap();
+    assert_eq!(output["modelVersion"], "public-route");
+    assert_eq!(
+        output["candidates"][0]["groundingMetadata"]["webSearchQueries"][0],
+        "source query"
+    );
+    assert_eq!(
+        output["candidates"][0]["safetyRatings"][0]["probability"],
+        "NEGLIGIBLE"
+    );
+    assert!(output.get("promptFeedback").is_some());
+}
+
+#[test]
+fn native_gemini_errors_remain_visible_to_failover() {
+    let wire = sse(json!({
+        "error": {
+            "code": 429,
+            "message": "try another target",
+            "status": "RESOURCE_EXHAUSTED"
+        }
+    }));
+    let mut decoder = Decoder::with_max_event_bytes_and_raw_passthrough(1024 * 1024, true);
+    let events = decoder.push(wire.as_bytes()).unwrap();
+
+    validate_event_sequence(&events).unwrap();
+    assert!(matches!(
+        &events[0].kind,
+        Kind::Error { error } if error.retryable
+    ));
+    assert!(matches!(events[1].kind, Kind::Done));
+    assert_eq!(events.len(), 2);
+}
+
+/// A real-shaped Gemini response: every one of these fields is unmodelled and
+/// swept into a Gemini-surface extension.
+fn realistic_gemini_response() -> GenerateContentResponse {
+    serde_json::from_value(json!({
+        "responseId": "gemini-response-1",
+        "modelVersion": "gemini-2.5-flash",
+        "candidates": [{
+            "index": 0,
+            "content": {"role": "model", "parts": [{"text": "42"}]},
+            "finishReason": "STOP",
+            "avgLogprobs": -0.31,
+            "safetyRatings": [
+                {"category": "HARM_CATEGORY_HATE_SPEECH", "probability": "NEGLIGIBLE"}
+            ],
+            "groundingMetadata": {"webSearchQueries": ["meaning of life"]}
+        }],
+        "usageMetadata": {
+            "promptTokenCount": 10,
+            "candidatesTokenCount": 5,
+            "totalTokenCount": 17,
+            "thoughtsTokenCount": 2,
+            "promptTokensDetails": [{"modality": "TEXT", "tokenCount": 10}]
+        }
+    }))
+    .unwrap()
+}
+
+/// A1: `safetyRatings`, `avgLogprobs`, `groundingMetadata`, and
+/// `promptTokensDetails` are on essentially every real Gemini response, so a
+/// consumer that rejected foreign-surface extensions returned 502 to every
+/// OpenAI or Anthropic client on a Gemini route.
+#[test]
+fn a_real_gemini_response_reaches_anthropic_and_responses_clients() {
+    use olp::protocols::anthropic::client::encode_messages_response;
+    use olp::protocols::openai::client::encode_response_object;
+
+    let events = decode_response(realistic_gemini_response()).unwrap();
+    validate_event_sequence(&events).unwrap();
+    assert!(events.iter().any(|event| matches!(
+        &event.kind,
+        Kind::SourceExtension { extensions } if extensions.source == Some(Surface::Gemini)
+    )));
+
+    let anthropic = encode_messages_response(&events, "team-route", "fallback").unwrap();
+    assert_eq!(anthropic.model, "team-route");
+    assert_eq!(anthropic.stop_reason.as_deref(), Some("end_turn"));
+    // Gemini-only fields are dropped, not leaked onto the Anthropic wire.
+    assert!(anthropic.extra.is_empty());
+
+    let responses = encode_response_object(&events, "team-route", "resp_1", 1_800_000_000).unwrap();
+    let wire = serde_json::to_value(&responses).unwrap();
+    assert_eq!(wire["output"][0]["content"][0]["text"], "42");
+    assert!(wire.get("safetyRatings").is_none());
+}
+
+/// A15: canonical `output_tokens` excludes reasoning and `total_tokens`
+/// includes it, so the client-facing arithmetic has to close on every surface.
+#[test]
+fn gemini_thinking_tokens_keep_the_usage_arithmetic_consistent() {
+    use olp::protocols::openai::client::encode_response_object;
+
+    let events = decode_response(realistic_gemini_response()).unwrap();
+    let usage = events
+        .iter()
+        .find_map(|event| match &event.kind {
+            Kind::Usage { usage } => Some(*usage),
+            _ => None,
+        })
+        .expect("usage must be decoded");
+    assert_eq!(usage.input_tokens, 10);
+    assert_eq!(usage.output_tokens, 5);
+    assert_eq!(usage.reasoning_tokens, Some(2));
+    assert_eq!(
+        usage.total_tokens,
+        usage.input_tokens + usage.output_tokens + usage.reasoning_tokens.unwrap_or(0)
+    );
+
+    // The Responses API counts reasoning inside `output_tokens`, so the wire
+    // numbers still add up for a strict client.
+    let responses = encode_response_object(&events, "team-route", "resp_1", 0).unwrap();
+    let usage = responses.usage.expect("usage must be encoded");
+    assert_eq!(usage.input_tokens, 10);
+    assert_eq!(usage.output_tokens, 7);
+    assert_eq!(usage.total_tokens, 17);
+    assert_eq!(
+        usage
+            .output_tokens_details
+            .map(|details| details.reasoning_tokens),
+        Some(2)
+    );
+}
+
+/// A17: a value Gemini never declares would fail a typed client, but a real
+/// one has to survive.
+#[test]
+fn gemini_finish_reasons_pass_through_only_inside_the_declared_enum() {
+    use olp::protocols::canonical::events::Event;
+    use olp::protocols::canonical::events::Usage as CanonicalUsage;
+    use olp::protocols::gemini::client::encode_generate_content_response;
+
+    for (reason, expected) in [
+        (FinishReason::Other("LANGUAGE".to_owned()), "LANGUAGE"),
+        (FinishReason::Other("pause_turn".to_owned()), "OTHER"),
+        (FinishReason::Error, "OTHER"),
+        (FinishReason::ToolCalls, "STOP"),
+    ] {
+        let events = vec![
+            Event::new(
+                0,
+                Kind::MessageStart {
+                    output_index: 0,
+                    role: MessageRole::Assistant,
+                },
+            ),
+            Event::new(
+                1,
+                Kind::TextDelta {
+                    output_index: 0,
+                    text: "x".into(),
+                },
+            ),
+            Event::new(
+                2,
+                Kind::Usage {
+                    usage: CanonicalUsage::default(),
+                },
+            ),
+            Event::new(
+                3,
+                Kind::Finish {
+                    output_index: 0,
+                    reason: reason.clone(),
+                },
+            ),
+            Event::new(4, Kind::Done),
+        ];
+        let response = encode_generate_content_response(&events, "route", "fallback").unwrap();
+        assert_eq!(
+            response.candidates[0].finish_reason.as_deref(),
+            Some(expected),
+            "{reason:?} must encode as {expected}"
+        );
+    }
+}
+
+/// A26: `ContentPart::Image` had no MIME field, so `inlineData.mimeType` could
+/// only ever come from a Gemini-surface extension and no OpenAI or Anthropic
+/// vision request was representable on a Gemini target.
+#[test]
+fn a_cross_protocol_vision_request_carries_its_mime_type_to_gemini() {
+    use olp::ids::RouteSlug;
+    use olp::protocols::canonical::requests::ContentPart;
+    use olp::protocols::canonical::requests::GenerationParameters;
+    use olp::protocols::canonical::requests::GenerationRequest;
+    use olp::protocols::canonical::requests::MediaSource;
+    use olp::protocols::canonical::requests::Message;
+    use olp::protocols::canonical::requests::SourceExtensions;
+
+    let request = GenerationRequest {
+        route: RouteSlug::parse("vision-route".to_owned()).unwrap(),
+        messages: vec![Message {
+            role: MessageRole::User,
+            content: vec![
+                ContentPart::Text {
+                    text: "what is this?".to_owned(),
+                },
+                ContentPart::Image {
+                    source: MediaSource::Uri("https://example.test/cat.png".to_owned()),
+                    detail: None,
+                    mime_type: Some("image/png".to_owned()),
+                },
+            ],
+            name: None,
+            tool_call_id: None,
+            tool_calls: Vec::new(),
+        }],
+        parameters: GenerationParameters::default(),
+        tools: Vec::new(),
+        tool_choice: None,
+        response_format: None,
+        extensions: SourceExtensions::default(),
+    };
+    let wire = serde_json::to_value(encode_request(&request).unwrap()).unwrap();
+    assert_eq!(
+        wire["contents"][0]["parts"][1]["fileData"]["mimeType"],
+        "image/png"
+    );
+    assert_eq!(
+        wire["contents"][0]["parts"][1]["fileData"]["fileUri"],
+        "https://example.test/cat.png"
+    );
+}
+
+/// Raw passthrough replays a chunk without `modelVersion` byte-for-byte,
+/// including its original key order and whitespace.
+#[test]
+fn raw_passthrough_replays_chunks_without_a_model_version_byte_for_byte() {
+    let raw_chunk =
+        r#"{"candidates": [{"content":{"parts":[{"text":"hi"}],"role":"model"},  "index":0}]}"#;
+    let wire = format!("data: {raw_chunk}\n\n");
+    let mut decoder = Decoder::with_max_event_bytes_and_raw_passthrough(1024 * 1024, true);
+    let events = decoder.push(wire.as_bytes()).unwrap();
+
+    let mut encoder = Encoder::new("public-route", "fallback");
+    let frames = events
+        .into_iter()
+        .flat_map(|event| encoder.push(event).unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(frames.len(), 1);
+    assert_eq!(frames[0].data, raw_chunk);
+}
+
+#[test]
+fn raw_passthrough_rewrites_an_escaped_model_version_key() {
+    let raw_chunk = r#"{"responseId":"native-1","m\u006fdelVersion":"gemini-upstream","candidates":[{"index":0,"content":{"role":"model","parts":[{"text":"hi"}]}}]}"#;
+    let wire = format!("data: {raw_chunk}\n\n");
+    let mut decoder = Decoder::with_max_event_bytes_and_raw_passthrough(1024 * 1024, true);
+    let events = decoder.push(wire.as_bytes()).unwrap();
+
+    let mut encoder = Encoder::new("public-route", "fallback");
+    let frames = events
+        .into_iter()
+        .flat_map(|event| encoder.push(event).unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(frames.len(), 1);
+    let output: Value = serde_json::from_str(&frames[0].data).unwrap();
+    assert_eq!(output["modelVersion"], "public-route");
+}

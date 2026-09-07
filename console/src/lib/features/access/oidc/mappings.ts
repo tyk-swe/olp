@@ -1,4 +1,4 @@
-import { isFixedRole } from '$lib/auth/authorization';
+import { isFixedRole } from '$lib/features/access/session/authorization';
 
 export function parseRoleMappings(value: string) {
   return value

@@ -1,175 +1,38 @@
 # Contributing
 
-This guide is the contributor-facing index for the repository. Keep product
-behavior, operational guidance, and the focused READMEs in sync with the code
-that owns them.
+OpenLLMProxy 3.0 is one Rust 2024 package and a SvelteKit console. Install the Rust toolchain from `rust-toolchain.toml`, Node.js 26, pnpm 11, Docker Compose, PostgreSQL 18 client tools, OpenSSL, curl, and jq. Run commands from the repository root.
 
-## Support and questions
+| Command | Purpose |
+| --- | --- |
+| `make setup` | Install the pnpm workspace and generate API contracts |
+| `make dev` | Start PostgreSQL, Valkey, Rust, and Vite |
+| `make check` | Formatting, Clippy, Rust tests, ESLint, Svelte/type checks, and Vitest |
+| `make test` | Rust unit and protocol tests using `cargo test` |
+| `make integration` | PostgreSQL/Valkey, gateway contracts, recovery, SDKs, and Chromium journeys |
+| `make api` | Generate OpenAPI and the TypeScript client |
+| `make build` | Build the release binary and static console |
+| `make fmt` | Format Rust and console source |
 
-GitHub issues are the only support and question channel; Discussions are
-intentionally disabled. Use the issue forms for bugs, provider drift, and
-feature requests. Suspected vulnerabilities go through the private channel in
-[`SECURITY.md`](SECURITY.md), never through a public issue.
+`make check` is the only required PR job. Integration tests are explicit: run them when changing persistence, inference, authentication, runtime publication, distributed limits, or browser journeys. There is no SQLx metadata preparation, nextest requirement, coverage floor, or nightly toolchain in ordinary development.
 
-## Development environment
+`openapi/management.json` and `console/src/lib/api/schema.d.ts` are ignored outputs. Setup, development, checking, integration, and builds use `make api`. Change the handler's `#[utoipa::path]` annotation and its feature's `utoipa_axum::routes!` registration together; generation obtains paths and schemas from the router. Do not hand-edit generated files.
 
-Use Rust 1.97.1, Node.js 24.15 or newer within the 24.x line (or Node.js 26+),
-pnpm 11, Python 3.14.7, uv 0.12.7, ripgrep, PostgreSQL 18, and Valkey 9.1. Rust is pinned by
-`rust-toolchain.toml`; the Compose stack supplies PostgreSQL and Valkey for
-local service tests. The main Cargo workspace contains the application and
-test harnesses, `console/` and `tests/sdk-smoke/` are separate pnpm projects,
-`tests/sdk-smoke-python/` is a separate uv project, and `fuzz/` is a separate
-nightly Cargo workspace.
+## Local development
 
-The normal local gate needs `cargo-nextest`:
+Open http://localhost:5173 after `make dev`. The bootstrap token is in `.local/dev/bootstrap-token`; the console asks for it once when creating the first owner. Credentials and the master key stay in `.local/dev`. Vite proxies API, OIDC callback, and inference traffic to Rust on port 8081, preserving the browser origin and cookies. Console edits use hot reload. Restart `make dev` after Rust changes.
 
-```sh
-cargo install --locked cargo-nextest@0.9.140
-make console-install       # first run only
-make check
-```
+Development services bind to loopback ports 54320 and 63790. `docker compose -f deploy/compose.dev.yaml stop` stops them. Their named volumes preserve the development installation. Use a distinct database for other installations. Never point development or integration commands at customer storage.
 
-Additional targets need the matching tools pinned by CI: `cargo-llvm-cov`
-0.8.7 for `make coverage`, `sqlx-cli` 0.9.0 for `make sqlx-prepare`,
-`cargo-fuzz` 0.13.2 plus nightly `2026-05-15` for fuzz replay, and
-`shellcheck`/`jq` for script checks. `make help` is the complete target list.
+3.0 requires a fresh database. Startup rejects 2.x storage before modifying it. PostgreSQL objects live in `olp_v3`, and Valkey keys include the 3.0 prefix and durable installation UUID. There is no in-place 2.x upgrade. Back up 2.x with its own version before retiring it, and provision 3.0 independently. Future 3.x schema changes use forward-only sequential migrations.
 
-## Bumping a toolchain pin
+## Making changes
 
-Every pin moves in one change together with the prose in this file. The Rust
-pins are cross-checked by `make release-version`, image digests by
-`make supply-chain`, and the rest by the jobs that consume them:
+See [the architecture map](docs/architecture.md) for feature ownership. Keep types, validation, SQL, handlers, and workflows together. Use concrete PostgreSQL pools and transactions; pass audit provenance explicitly to mutations. Retain traits for real connector implementations and meaningful test substitutions. Prefer descriptive names, direct control flow, and small functions. Do not add compatibility without an explicit supported contract.
 
-- Rust: `rust-toolchain.toml`, `.github/actions/setup-rust/action.yml`, and
-  the `FROM rust:` tag and digest in `deploy/Dockerfile`.
-- Node.js and pnpm: `engines` in `console/package.json`, the `FROM node:`
-  digest in `deploy/Dockerfile`, and `console/README.md`.
-- Python and uv: `.github/actions/setup-python-uv/action.yml` and
-  `tests/README.md`.
-- Fuzz nightly: `FUZZ_TOOLCHAIN` in the `Makefile`; CI derives its cache key
-  from that line.
-- Cargo tools (`cargo-nextest`, `cargo-llvm-cov`, `sqlx-cli`, `cargo-fuzz`):
-  the `tools:` lists in `.github/workflows/ci.yml` and
-  `.github/workflows/live-providers.yml`.
+Tests assert behavior and keep meaningful protocol fixtures. Unit tests belong beside their owner. Service tests use disposable installations, and the Chromium suite exercises the real development proxy. Do not replace valid fixture expectations merely to make a failure pass. Include the checks run and screenshots for visible console changes in PR descriptions.
 
-After a Rust bump run `make check` and build the image with
-`make smoke-image-modes`; after an `sqlx-cli` bump run `make sqlx-prepare` and
-commit `.sqlx/` if it changed; after a fuzz nightly bump run `make fuzz-replay`.
+## Dependency policy
 
-## Architectural rules
+Use current stable dependencies and update the lockfiles through Cargo and pnpm. The JavaScript projects share one workspace and lockfile. Python/uv is only used for the optional Python SDK test: `tests/sdk-smoke-python/run.sh`.
 
-Keep behavior in its owning role:
-
-| Role | Owns |
-|---|---|
-| Engine (`crates/olp-engine`) | Canonical types, vendor protocols, provider/OIDC networking, routing, inference, and persistence ports |
-| Database (`crates/olp-db`) | PostgreSQL, Valkey, encryption, migrations, and engine port implementations |
-| Delivery (`apps/olp`) | HTTP surfaces, CLI, process composition, and workers |
-| Test harness | Conformance and end-to-end support that production packages never depend on |
-
-Dependencies point toward the engine: database code depends on engine-defined
-ports, the engine never depends on the database crate, and delivery composes
-both. Within the engine, dependencies point left in `domain <- protocols <-
-providers <- inference`; each module may use only itself and modules to its left.
-SQLx/Redis stay in the database crate; Reqwest, AWS, Google authentication, and
-concrete connector construction stay in `olp_engine::providers`; Axum, Tower,
-and Clap stay in delivery. The console is a client-only `adapter-static`
-application: do not add server routes, hooks, or a production Node adapter.
-
-Every workspace package declares an architecture role in
-`[package.metadata.olp]`. `scripts/check-boundaries.sh` enforces package-role
-edges, the engine's internal module ordering, infrastructure ownership, and
-console feature isolation. Same-role packages are allowed; production packages
-may never depend on test harnesses.
-
-## Sources of truth and change map
-
-- `Cargo.toml` owns the workspace version; lockfiles are changed only by
-  locked/frozen installs.
-- `openapi/management.json` owns the management contract. Run `make openapi`
-  after endpoint changes; it also regenerates the console schema.
-- `crates/olp-db/migrations/` is sequential and forward-only; `.sqlx/` is
-  generated by `make sqlx-prepare`.
-- `deploy/helm/values.yaml`, `values.schema.json`, and templates change
-  together; verify with `make helm-verify`.
-- `release-metadata.env` is the N-1 upgrade-rehearsal baseline: the last
-  migration shipped by the latest published release. A release commit leaves
-  it untouched; the first change after a release that added migrations
-  advances it. `make release-version` checks it names a tracked migration.
-- Provider kinds, auth fields, presets, and validation live in
-  `crates/olp-engine/src/domain/provider_configuration.rs`.
-- Inference endpoint method/path/admission/routing policy lives in
-  `apps/olp/src/gateway/endpoint_policy/registry.rs`.
-- Runtime capability eligibility and rendezvous scoring live under
-  `crates/olp-engine/src/domain/routing/`; generation pinning, failover, limits,
-  and accounting live in `crates/olp-engine/src/inference/`.
-- Public egress classification lives in
-  `crates/olp-engine/src/providers/http_egress.rs`.
-
-Do not hand-edit generated artifacts: use `make openapi` for
-`openapi/management.json` and `console/src/lib/api/schema.d.ts`,
-`make sqlx-prepare` for `.sqlx/`, and `make screenshots` for
-`docs/assets/screenshots/*.png`. When adding a workspace package, declare its
-`[package.metadata.olp]` role and update the Docker build inputs if needed.
-
-## Validation
-
-Run the broad gate before review:
-
-```sh
-make check
-```
-
-It runs two tiers. `make check-static` (about ten seconds, parallel) covers
-boundary and SQLx checks, `shellcheck` over every tracked shell script, the
-script self-tests, Rust formatting, release-version checks, and supply-chain
-pin checks; use it alone as the quick pre-commit loop. `make check-heavy` then
-runs locked Clippy followed by the locked nextest workspace suite, with console
-verification overlapping them (`CHECK_JOBS=1` serialises it). `make coverage`
-is the CI Rust gate: llvm-cov nextest combines the workspace unit suites with
-the ignored PostgreSQL/Valkey suites and enforces an 80% line floor. It needs
-the database-test environment below, including `OLP_VALKEY_URL`. Plain
-`cargo test` is not a substitute. The workspace has no doctests by policy; if
-one is added, restore a `cargo test --doc` gate.
-
-Time-dependent assertions involving UTC windows, TTLs, or minute boundaries
-must use deterministic time or deliberately straddle the boundary. They must
-not assume the test remains in the time bucket where it started.
-
-When a test fails, investigate it and open a tracking issue before rerunning
-the test or workflow. Do not rerun merely to obtain a green result.
-
-The pass-gated contract suite (`make e2e`) drives the real `olp all` binary
-against PostgreSQL, Valkey, and a loopback mock provider. Its assertions cite
-`README.md`, `docs/*.md`, or the OpenAPI schema, so a documentation/product
-disagreement is a failure to fix at the source. The full CI tier also runs
-`make worker-ha`, SDK compatibility, image, browser, upgrade-rehearsal, and
-fuzz jobs; pull requests run the required tier.
-
-### Database-backed tests
-
-`make db-test` runs ignored PostgreSQL/Valkey suites through the `db` nextest
-profile. Set an admin URL and a prefix without a trailing database name:
-
-```sh
-OLP_TEST_DATABASE_ADMIN_URL=postgres://olp:olp@127.0.0.1:5432/postgres \
-OLP_TEST_DATABASE_URL_PREFIX=postgres://olp:olp@127.0.0.1:5432/ \
-make db-test
-```
-
-Each test creates a run-scoped database through
-`olp_db::test_support`; `OLP_TEST_DATABASE_OWNER` is optional and
-`OLP_VALKEY_URL` is optional. Pass a nextest filter with
-`make db-test ARGS="-E 'test(upgrade_0021)'"`. After query or migration work,
-run `make sqlx-check` and intentionally regenerate metadata with
-`make sqlx-prepare`.
-
-## Test and fixture layout
-
-Rust unit tests stay beside their owner. `tests/conformance` replays bounded
-wire fixtures; `tests/sdk-smoke` runs official SDKs against a local server;
-`tests/e2e` covers public, management, data-safety, telemetry, HA, and
-distributed-limit contracts; `fuzz/` is a separate nightly workspace. The
-provider conformance matrix exercises every connector transport, deadlines,
-malformed bodies, error mapping, and failover. Use the focused READMEs for
-their commands, not a second copy of the repository gate.
+TypeScript stays on the newest 6.0 patch. The [TypeScript ESLint support range](https://typescript-eslint.io/users/dependency-versions/) excludes 7.x, and the Svelte toolchain must support the same compiler. Remove this exception when both support TypeScript 7 and the console passes `make check` and the Chromium journey. Other version exceptions require a concrete incompatibility or regression and a stated removal condition.

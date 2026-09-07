@@ -1,31 +1,98 @@
 import { defineConfig, devices } from '@playwright/test';
-import { baseConfig } from './playwright.base';
+
+const databaseUrl = process.env.OLP_CONSOLE_E2E_DATABASE_URL;
+const masterKeyFile = process.env.OLP_CONSOLE_E2E_MASTER_KEY_FILE;
+const authHmacKeyFile = process.env.OLP_CONSOLE_E2E_AUTH_HMAC_KEY_FILE;
+const bootstrapTokenFile = process.env.OLP_CONSOLE_E2E_BOOTSTRAP_TOKEN_FILE;
+const valkeyUrl = process.env.OLP_VALKEY_URL;
+if (!databaseUrl) {
+  throw new Error(
+    'OLP_CONSOLE_E2E_DATABASE_URL is required for the Rust-hosted console integration'
+  );
+}
+if (!masterKeyFile) {
+  throw new Error(
+    'OLP_CONSOLE_E2E_MASTER_KEY_FILE is required for invitation integration'
+  );
+}
+if (!authHmacKeyFile) {
+  throw new Error(
+    'OLP_CONSOLE_E2E_AUTH_HMAC_KEY_FILE is required for control-plane authentication'
+  );
+}
+if (!bootstrapTokenFile) {
+  throw new Error(
+    'OLP_CONSOLE_E2E_BOOTSTRAP_TOKEN_FILE is required for first-run setup'
+  );
+}
+if (!valkeyUrl) {
+  throw new Error(
+    'OLP_VALKEY_URL is required for the complete gateway integration'
+  );
+}
 
 export default defineConfig({
-  ...baseConfig,
-  testDir: './tests/e2e',
-  fullyParallel: true,
+  outputDir: 'test-results',
+  reporter: process.env.CI ? [['github'], ['html', { open: 'never' }]] : 'list',
+  testDir: './tests/journeys',
+  fullyParallel: false,
+  // One explicit serial suite owns the disposable database and installation.
+  // First-run setup is true exactly once, and retries against mutated state
+  // would no longer exercise the same journey.
+  workers: 1,
+  forbidOnly: true,
+  // The test mutates a real database. Retrying against that same database
+  // would no longer prove the first-run setup path and could mask a failure.
   retries: 0,
-  expect: {
-    // Browser point releases shift localized anti-aliasing. A 1% ratio absorbs
-    // that rasterization drift while a 4 px layout change still exceeds it.
-    toHaveScreenshot: { maxDiffPixelRatio: 0.01 }
+  use: {
+    reducedMotion: 'reduce',
+    trace: 'retain-on-failure',
+    actionTimeout: 10_000,
+    // Browsers apply the Secure exception for localhost. This lets the test
+    // prove that real cookie storage accepts the __Host- contract while the
+    // Rust listener remains loopback-only.
+    baseURL: 'http://localhost:4175'
   },
-  use: { ...baseConfig.use, baseURL: 'http://127.0.0.1:4174' },
-  projects: [
-    { name: 'chromium', use: { ...devices['Desktop Chrome'] } },
-    { name: 'firefox', use: { ...devices['Desktop Firefox'] } },
-    { name: 'webkit', use: { ...devices['Desktop Safari'] } },
-    { name: 'mobile-chromium', use: { ...devices['Pixel 7'] } }
-  ],
-  webServer: {
-    // CI serves the prebuilt adapter-static bundle (the console job's build
-    // artifact) so browsers test what ships; local runs keep the dev server.
-    command: process.env.CI
-      ? 'pnpm exec vite preview --config vite.console-preview.config.ts --host 127.0.0.1 --port 4174 --strictPort'
-      : 'pnpm dev --host 127.0.0.1 --port 4174 --strictPort',
-    url: 'http://127.0.0.1:4174',
-    reuseExistingServer: !process.env.CI,
-    timeout: 120_000
-  }
+  projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
+  webServer: [
+    {
+      command: 'pnpm dev --host localhost --port 4175 --strictPort',
+      url: 'http://localhost:4175',
+      reuseExistingServer: false,
+      env: { OLP_DEV_API_ORIGIN: 'http://127.0.0.1:4179' }
+    },
+    {
+      command: 'node tests/journeys/mock-oidc.mjs',
+      url: 'http://127.0.0.1:4176/.well-known/openid-configuration',
+      reuseExistingServer: false,
+      timeout: 10_000
+    },
+    {
+      command: 'node tests/journeys/mock-azure-openai.mjs',
+      url: 'http://127.0.0.1:4178/health',
+      reuseExistingServer: false,
+      timeout: 10_000
+    },
+    {
+      command: 'tests/journeys/run-olp.sh',
+      url: 'http://127.0.0.1:4177/health/live',
+      reuseExistingServer: false,
+      timeout: 180_000,
+      env: {
+        ...process.env,
+        OLP_DATABASE_URL: databaseUrl,
+        OLP_LISTEN_ADDR: '127.0.0.1:4179',
+        OLP_OBSERVABILITY_LISTEN_ADDR: '127.0.0.1:4177',
+        OLP_PUBLIC_ORIGIN: 'http://localhost:4175',
+        OLP_CONSOLE_DIR: 'build',
+        OLP_MASTER_KEY_FILE: masterKeyFile,
+        OLP_AUTH_HMAC_KEY_FILE: authHmacKeyFile,
+        OLP_BOOTSTRAP_TOKEN_FILE: bootstrapTokenFile,
+        OLP_VALKEY_URL: valkeyUrl,
+        OLP_ALLOW_INSECURE_OIDC_FOR_TESTS: 'test-only',
+        OLP_PROVIDER_EGRESS_ALLOW_CIDRS: '127.0.0.0/8,::1/128',
+        OLP_PROVIDER_EGRESS_ALLOW_HTTP_HOSTS: '127.0.0.1,localhost'
+      }
+    }
+  ]
 });

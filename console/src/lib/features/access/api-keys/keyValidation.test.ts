@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { validateApiKey } from './keyValidation';
+import { validateApiKey } from '$lib/features/access/api-keys/keyValidation';
 
 describe('API key validation', () => {
   it('requires an intentional name and positive hard limits', () => {

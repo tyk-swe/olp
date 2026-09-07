@@ -5,9 +5,9 @@
     can,
     type Capability,
     type FixedRole
-  } from '$lib/auth/authorization';
-  import NavIcon from './NavIcon.svelte';
-  import type { IconName } from './icons';
+  } from '$lib/features/access/session/authorization';
+  import NavIcon from '$lib/components/NavIcon.svelte';
+  import type { IconName } from '$lib/components/icons';
 
   type NavigationItem = {
     label: string;

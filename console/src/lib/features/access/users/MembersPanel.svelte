@@ -1,21 +1,22 @@
 <script lang="ts">
+  import { userKeys } from '$lib/features/access/users/userKeys';
+
   import { resolve } from '$app/paths';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
-  import { queryKeys } from '$lib/api/queryKeys';
   import {
     listUserPage,
     updateUserActive,
     updateUserRole,
     type User
-  } from '$lib/api/management/access';
+  } from '$lib/features/access/api';
   import type { CursorPage } from '$lib/api/http';
   import { errorMessage } from '$lib/api/http';
   import {
     cursorPaginationProps,
     emptyCursorHistory
   } from '$lib/lists/pagination';
-  import { FIXED_ROLES } from '$lib/auth/authorization';
-  import { useRole } from '$lib/auth/useRole.svelte';
+  import { FIXED_ROLES } from '$lib/features/access/session/authorization';
+  import { useRole } from '$lib/features/access/session/useRole.svelte';
   import CursorPagination from '$lib/components/CursorPagination.svelte';
   import ReadOnlyNote from '$lib/components/ReadOnlyNote.svelte';
   import { formatDate } from '$lib/format';
@@ -30,7 +31,7 @@
   let notice = $state('');
 
   const users = createQuery(() => ({
-    queryKey: queryKeys.users.page(pagination.cursor),
+    queryKey: userKeys.page(pagination.cursor),
     queryFn: () => listUserPage(pagination.cursor)
   }));
 
@@ -51,13 +52,13 @@
   /** Role changes and deactivation revoke sessions server-side. */
   async function refreshSessionViews() {
     await queryClient.invalidateQueries({
-      queryKey: queryKeys.users.sessionsRoot
+      queryKey: userKeys.sessionsRoot
     });
   }
 
   function updateCachedUser(updated: User) {
     queryClient.setQueryData<CursorPage<User>>(
-      queryKeys.users.page(pagination.cursor),
+      userKeys.page(pagination.cursor),
       (current) =>
         current
           ? {

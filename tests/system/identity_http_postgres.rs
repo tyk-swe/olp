@@ -1,0 +1,1010 @@
+use std::path::PathBuf;
+use std::sync::Arc;
+
+use axum::Router;
+use axum::body::Body;
+use axum::http::Method;
+use axum::http::Request;
+use axum::http::Response;
+use axum::http::StatusCode;
+use axum::http::header;
+use http_body_util::BodyExt as _;
+use olp::crypto::envelope::MasterKey;
+use olp::http::router::management_router_for_test;
+use olp::process::mode::ApiMode;
+use olp::process::state::ProcessComposition;
+use olp::runtime::manager::Manager;
+use serde_json::Value;
+use serde_json::json;
+use sqlx::Row as _;
+use tower::ServiceExt as _;
+
+use crate::common::BOOTSTRAP_TOKEN;
+use crate::common::configure_bootstrap;
+
+const ORIGIN: &str = "https://olp.example.test";
+
+#[tokio::test]
+#[ignore = "requires OLP_TEST_DATABASE_ADMIN_URL and OLP_TEST_DATABASE_URL_PREFIX"]
+async fn identity_http_flow_enforces_sessions_csrf_roles_and_owner_guard() {
+    let db = olp::test_support::TestDb::create_migrated("identity_http").await;
+    let pool = db.pool(5).await;
+    let mut state = ProcessComposition::new(
+        ApiMode::Control,
+        pool.clone(),
+        Arc::new(Manager::empty()),
+        ORIGIN,
+        PathBuf::from("missing-console-for-api-test"),
+    );
+    state.master_key = Some(Arc::new(MasterKey::new(1, [7; 32])));
+    configure_bootstrap(&mut state, [8; 32]);
+    let app = management_router_for_test(state.mode_dependencies().management().unwrap());
+
+    let setup = send_json(
+        &app,
+        Method::POST,
+        "/api/v3/setup",
+        json!({
+            "email": "owner@example.test",
+            "password": "correct horse battery staple",
+            "display_name": "Owner",
+            "installation_name": "HTTP identity test"
+        }),
+        None,
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(setup.status(), StatusCode::CREATED);
+    let owner_cookie = cookie_header(&setup);
+    let setup_body = response_json(setup).await;
+    let owner_csrf = setup_body["csrf_token"].as_str().unwrap().to_owned();
+    assert_eq!(setup_body["installation_name"], "HTTP identity test");
+    let owner_id = setup_body["user"]["id"].as_str().unwrap().to_owned();
+    let owner_uuid = uuid::Uuid::parse_str(&owner_id).unwrap();
+    let status = send_empty(&app, Method::GET, "/api/v3/setup/status", None, None, None).await;
+    assert_eq!(status.status(), StatusCode::OK);
+    let status_body = response_json(status).await;
+    assert_eq!(status_body["setup_required"], false);
+    // The unauthenticated probe deliberately answers with nothing but the
+    // boolean; the installation name is an authenticated detail.
+    assert_eq!(status_body.as_object().unwrap().len(), 1);
+    assert!(status_body.get("installation_name").is_none());
+    let stale_activity = chrono::Utc::now() - chrono::Duration::minutes(10);
+    sqlx::query("UPDATE sessions SET last_seen_at = $1 WHERE user_id = $2")
+        .bind(stale_activity)
+        .bind(owner_uuid)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let profile = send_empty(
+        &app,
+        Method::GET,
+        "/api/v3/profile",
+        Some(&owner_cookie),
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(profile.status(), StatusCode::OK);
+    let touched_activity: chrono::DateTime<chrono::Utc> =
+        sqlx::query_scalar("SELECT last_seen_at FROM sessions WHERE user_id = $1")
+            .bind(owner_uuid)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert!(touched_activity > stale_activity);
+    let profile_etag = profile.headers()[header::ETAG].to_str().unwrap().to_owned();
+    let updated_profile = send_json_with_if_match(
+        &app,
+        Method::PATCH,
+        "/api/v3/profile",
+        json!({ "display_name": "Renamed Owner" }),
+        &owner_cookie,
+        &owner_csrf,
+        &profile_etag,
+    )
+    .await;
+    assert_eq!(updated_profile.status(), StatusCode::OK);
+    let password_etag = updated_profile.headers()[header::ETAG]
+        .to_str()
+        .unwrap()
+        .to_owned();
+    assert_eq!(
+        response_json(updated_profile).await["display_name"],
+        "Renamed Owner"
+    );
+
+    let second_owner_login = send_json(
+        &app,
+        Method::POST,
+        "/api/v3/sessions",
+        json!({
+            "email": "owner@example.test",
+            "password": "correct horse battery staple"
+        }),
+        None,
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(second_owner_login.status(), StatusCode::CREATED);
+    let second_owner_cookie = cookie_header(&second_owner_login);
+
+    let changed_password = send_json_with_if_match(
+        &app,
+        Method::POST,
+        "/api/v3/profile/password",
+        json!({
+            "current_password": "correct horse battery staple",
+            "new_password": "new correct horse battery staple"
+        }),
+        &owner_cookie,
+        &owner_csrf,
+        &password_etag,
+    )
+    .await;
+    assert_eq!(changed_password.status(), StatusCode::OK);
+    let owner_cookie = cookie_header(&changed_password);
+    let owner_csrf = changed_password
+        .headers()
+        .get("x-csrf-token")
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .to_owned();
+    let revoked_other_session = send_empty(
+        &app,
+        Method::GET,
+        "/api/v3/sessions/current",
+        Some(&second_owner_cookie),
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(revoked_other_session.status(), StatusCode::UNAUTHORIZED);
+    let old_password = send_json(
+        &app,
+        Method::POST,
+        "/api/v3/sessions",
+        json!({
+            "email": "owner@example.test",
+            "password": "correct horse battery staple"
+        }),
+        None,
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(old_password.status(), StatusCode::UNAUTHORIZED);
+    let unknown_identity = send_json(
+        &app,
+        Method::POST,
+        "/api/v3/sessions",
+        json!({
+            "email": "unknown@example.test",
+            "password": "a plausible but incorrect local password"
+        }),
+        None,
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(unknown_identity.status(), StatusCode::UNAUTHORIZED);
+    let new_password = send_json(
+        &app,
+        Method::POST,
+        "/api/v3/sessions",
+        json!({
+            "email": "owner@example.test",
+            "password": "new correct horse battery staple"
+        }),
+        None,
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(new_password.status(), StatusCode::CREATED);
+
+    let invitation = send_json(
+        &app,
+        Method::POST,
+        "/api/v3/invitations",
+        json!({
+            "email": "developer@example.test",
+            "role": "developer",
+            "expires_in_hours": 24
+        }),
+        Some(&owner_cookie),
+        Some(&owner_csrf),
+        Some("invite-developer-http-001"),
+    )
+    .await;
+    assert_eq!(invitation.status(), StatusCode::CREATED);
+    let invitation_body = response_json(invitation).await;
+    let invitation_token = invitation_body["token"].as_str().unwrap();
+    let invitation_replay = send_json(
+        &app,
+        Method::POST,
+        "/api/v3/invitations",
+        json!({
+            "email": "developer@example.test",
+            "role": "developer",
+            "expires_in_hours": 24
+        }),
+        Some(&owner_cookie),
+        Some(&owner_csrf),
+        Some("invite-developer-http-001"),
+    )
+    .await;
+    assert_eq!(invitation_replay.status(), StatusCode::CREATED);
+    assert_eq!(response_json(invitation_replay).await, invitation_body);
+    let invitation_mismatch = send_json(
+        &app,
+        Method::POST,
+        "/api/v3/invitations",
+        json!({
+            "email": "changed@example.test",
+            "role": "viewer",
+            "expires_in_hours": 24
+        }),
+        Some(&owner_cookie),
+        Some(&owner_csrf),
+        Some("invite-developer-http-001"),
+    )
+    .await;
+    assert_eq!(invitation_mismatch.status(), StatusCode::CONFLICT);
+
+    let acceptance = send_json(
+        &app,
+        Method::POST,
+        "/api/v3/invitations/accept",
+        json!({
+            "token": invitation_token,
+            "display_name": "Developer",
+            "password": "another correct local password"
+        }),
+        None,
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(acceptance.status(), StatusCode::CREATED);
+    let developer_cookie = cookie_header(&acceptance);
+    let acceptance_body = response_json(acceptance).await;
+    let developer_id = acceptance_body["user"]["id"].as_str().unwrap().to_owned();
+
+    let users = send_empty(
+        &app,
+        Method::GET,
+        "/api/v3/users?limit=1",
+        Some(&owner_cookie),
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(users.status(), StatusCode::OK);
+    let users_body = response_json(users).await;
+    assert_eq!(users_body["data"].as_array().unwrap().len(), 1);
+    assert_eq!(users_body["items"].as_array().unwrap().len(), 1);
+    assert!(users_body["next_cursor"].is_string());
+
+    let developer = send_empty(
+        &app,
+        Method::GET,
+        &format!("/api/v3/users/{developer_id}"),
+        Some(&owner_cookie),
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(developer.status(), StatusCode::OK);
+    let developer_etag = developer
+        .headers()
+        .get(header::ETAG)
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .to_owned();
+
+    let sessions = send_empty(
+        &app,
+        Method::GET,
+        &format!("/api/v3/sessions?user_id={developer_id}"),
+        Some(&owner_cookie),
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(sessions.status(), StatusCode::OK);
+    let sessions_body = response_json(sessions).await;
+    let developer_session_id = sessions_body["items"][0]["id"].as_str().unwrap().to_owned();
+    let revoked_session = send_empty(
+        &app,
+        Method::DELETE,
+        &format!("/api/v3/sessions/{developer_session_id}"),
+        Some(&owner_cookie),
+        Some(&owner_csrf),
+        None,
+    )
+    .await;
+    assert_eq!(revoked_session.status(), StatusCode::NO_CONTENT);
+    let old_session = send_empty(
+        &app,
+        Method::GET,
+        "/api/v3/sessions/current",
+        Some(&developer_cookie),
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(old_session.status(), StatusCode::UNAUTHORIZED);
+
+    let role_update = send_json_with_if_match(
+        &app,
+        Method::PATCH,
+        &format!("/api/v3/users/{developer_id}"),
+        json!({ "role": "viewer" }),
+        &owner_cookie,
+        &owner_csrf,
+        &developer_etag,
+    )
+    .await;
+    assert_eq!(role_update.status(), StatusCode::OK);
+    assert_eq!(response_json(role_update).await["role"], "viewer");
+
+    let owner = send_empty(
+        &app,
+        Method::GET,
+        &format!("/api/v3/users/{owner_id}"),
+        Some(&owner_cookie),
+        None,
+        None,
+    )
+    .await;
+    let owner_etag = owner
+        .headers()
+        .get(header::ETAG)
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .to_owned();
+    let last_owner = send_json_with_if_match(
+        &app,
+        Method::PATCH,
+        &format!("/api/v3/users/{owner_id}"),
+        json!({ "role": "viewer" }),
+        &owner_cookie,
+        &owner_csrf,
+        &owner_etag,
+    )
+    .await;
+    // A principal can never change their own role, so the sole owner is
+    // stopped before the last-owner guard ever needs to fire.
+    assert_eq!(last_owner.status(), StatusCode::CONFLICT);
+    assert!(
+        response_json(last_owner).await["type"]
+            .as_str()
+            .unwrap()
+            .ends_with("/cannot_change_current_user_role")
+    );
+
+    let pending = send_json(
+        &app,
+        Method::POST,
+        "/api/v3/invitations",
+        json!({ "email": "viewer@example.test", "role": "viewer" }),
+        Some(&owner_cookie),
+        Some(&owner_csrf),
+        Some("invite-viewer-http-0001"),
+    )
+    .await;
+    let pending_body = response_json(pending).await;
+    let pending_id = pending_body["invitation"]["id"].as_str().unwrap();
+    let revoked_invitation = send_empty(
+        &app,
+        Method::DELETE,
+        &format!("/api/v3/invitations/{pending_id}"),
+        Some(&owner_cookie),
+        Some(&owner_csrf),
+        Some("revoke-viewer-http-0001"),
+    )
+    .await;
+    assert_eq!(revoked_invitation.status(), StatusCode::OK);
+    assert_eq!(response_json(revoked_invitation).await["status"], "revoked");
+
+    let audit_count: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM audit_events WHERE action IN \
+         ('invitation.create', 'invitation.accept', 'invitation.revoke', \
+          'user.create', 'user.role_update', 'session.create', 'session.revoke')",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert!(audit_count >= 9);
+    let profile_audit_count: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM audit_events WHERE action IN
+         ('user.profile_update', 'user.password_update')",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(profile_audit_count, 2);
+
+    for _ in 0..5 {
+        let rejected = send_json(
+            &app,
+            Method::POST,
+            "/api/v3/sessions",
+            json!({
+                "email": "rate-limit-target@example.test",
+                "password": "plausible but incorrect password"
+            }),
+            None,
+            None,
+            None,
+        )
+        .await;
+        assert_eq!(rejected.status(), StatusCode::UNAUTHORIZED);
+    }
+    let rate_limited = send_json(
+        &app,
+        Method::POST,
+        "/api/v3/sessions",
+        json!({
+            "email": "rate-limit-target@example.test",
+            "password": "plausible but incorrect password"
+        }),
+        None,
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(rate_limited.status(), StatusCode::TOO_MANY_REQUESTS);
+
+    // Oversized passwords must still consume the source bucket before the
+    // cheap validation path. Vary the target so the five-attempt
+    // source-plus-target ceiling does not hide a source-admission bypass.
+    let oversized_password = "x".repeat(1_025);
+    let oversized_peer = "198.51.100.200:443".parse().unwrap();
+    for attempt in 0..60 {
+        let rejected = send_json_from_peer(
+            &app,
+            Method::POST,
+            "/api/v3/sessions",
+            json!({
+                "email": format!("oversized-password-{attempt}@example.test"),
+                "password": oversized_password.as_str(),
+            }),
+            None,
+            None,
+            None,
+            oversized_peer,
+        )
+        .await;
+        assert_eq!(rejected.status(), StatusCode::UNAUTHORIZED);
+    }
+    let oversized_rate_limited = send_json_from_peer(
+        &app,
+        Method::POST,
+        "/api/v3/sessions",
+        json!({
+            "email": "oversized-password-final@example.test",
+            "password": oversized_password.as_str(),
+        }),
+        None,
+        None,
+        None,
+        oversized_peer,
+    )
+    .await;
+    assert_eq!(
+        oversized_rate_limited.status(),
+        StatusCode::TOO_MANY_REQUESTS
+    );
+
+    let login_audits = sqlx::query(
+        "SELECT actor_user_id, outcome, resource_id, host(source_ip) AS source_ip, \
+                user_agent_family \
+         FROM audit_events WHERE action = 'local_auth.login' ORDER BY occurred_at",
+    )
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert!(login_audits.iter().any(|row| {
+        row.get::<String, _>("outcome") == "success"
+            && row.get::<Option<uuid::Uuid>, _>("actor_user_id") == Some(owner_uuid)
+            && row.get::<Option<String>, _>("resource_id").is_some()
+    }));
+    assert!(login_audits.iter().any(|row| {
+        row.get::<String, _>("outcome") == "failure"
+            && row.get::<Option<uuid::Uuid>, _>("actor_user_id") == Some(owner_uuid)
+            && row.get::<Option<String>, _>("resource_id").is_none()
+    }));
+    assert!(login_audits.iter().any(|row| {
+        row.get::<String, _>("outcome") == "failure"
+            && row.get::<Option<uuid::Uuid>, _>("actor_user_id").is_none()
+            && row.get::<Option<String>, _>("resource_id").is_none()
+    }));
+    // No trusted proxy is configured, so the connected peer is authoritative
+    // and no forwarding header can influence it. No request carried a
+    // user-agent, so the family stays empty.
+    assert!(login_audits.iter().all(|row| {
+        matches!(
+            row.get::<Option<String>, _>("source_ip").as_deref(),
+            Some("198.51.100.11" | "198.51.100.200")
+        ) && row.get::<Option<String>, _>("user_agent_family").is_none()
+    }));
+
+    let audit = send_empty(
+        &app,
+        Method::GET,
+        "/api/v3/audit?limit=200",
+        Some(&owner_cookie),
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(audit.status(), StatusCode::OK);
+    for event in response_json(audit).await["items"].as_array().unwrap() {
+        assert!(event["source_ip"].is_string());
+        assert!(event["user_agent_family"].is_null());
+    }
+}
+
+#[tokio::test]
+#[ignore = "requires OLP_TEST_DATABASE_ADMIN_URL and OLP_TEST_DATABASE_URL_PREFIX"]
+async fn audit_provenance_follows_the_trusted_proxy_boundary() {
+    let db = olp::test_support::TestDb::create_migrated("audit_provenance").await;
+    let pool = db.pool(5).await;
+    let mut state = ProcessComposition::new(
+        ApiMode::Control,
+        pool.clone(),
+        Arc::new(Manager::empty()),
+        ORIGIN,
+        PathBuf::from("missing-console-for-api-test"),
+    );
+    state.master_key = Some(Arc::new(MasterKey::new(1, [7; 32])));
+    state.set_trusted_proxy_cidrs(vec!["198.51.100.0/24".parse().unwrap()]);
+    configure_bootstrap(&mut state, [8; 32]);
+    let app = management_router_for_test(state.mode_dependencies().management().unwrap());
+
+    let setup = attributed_request(
+        &app,
+        Method::POST,
+        "/api/v3/setup",
+        Some(json!({
+            "email": "owner@example.test",
+            "password": "correct horse battery staple",
+            "display_name": "Owner",
+            "installation_name": "Audit provenance test"
+        })),
+        None,
+        None,
+        Some("203.0.113.7"),
+        Some("curl/8.5.0 (x86_64-pc-linux-gnu) libcurl/8.5.0"),
+    )
+    .await;
+    assert_eq!(setup.status(), StatusCode::CREATED);
+    let owner_cookie = cookie_header(&setup);
+    let setup_body = response_json(setup).await;
+    let owner_csrf = setup_body["csrf_token"].as_str().unwrap().to_owned();
+
+    let setup_audit = sqlx::query(
+        "SELECT host(source_ip) AS source_ip, user_agent_family FROM audit_events \
+         WHERE action = 'installation.setup'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        setup_audit.get::<Option<String>, _>("source_ip").as_deref(),
+        Some("203.0.113.7")
+    );
+    assert_eq!(
+        setup_audit
+            .get::<Option<String>, _>("user_agent_family")
+            .as_deref(),
+        Some("curl")
+    );
+
+    let profile = attributed_request(
+        &app,
+        Method::GET,
+        "/api/v3/profile",
+        None,
+        Some(&owner_cookie),
+        None,
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(profile.status(), StatusCode::OK);
+    let profile_etag = profile.headers()[header::ETAG].to_str().unwrap().to_owned();
+
+    // A trusted proxy that omits the forwarding chain leaves no client address
+    // to record; the request is still served and the column stays null.
+    let renamed = attributed_request(
+        &app,
+        Method::PATCH,
+        "/api/v3/profile",
+        Some(json!({ "display_name": "Renamed Owner" })),
+        Some(&owner_cookie),
+        Some((&owner_csrf, &profile_etag)),
+        None,
+        Some("python-requests/2.31.0"),
+    )
+    .await;
+    assert_eq!(renamed.status(), StatusCode::OK);
+
+    let profile_audit = sqlx::query(
+        "SELECT host(source_ip) AS source_ip, user_agent_family FROM audit_events \
+         WHERE action = 'user.profile_update'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert!(
+        profile_audit
+            .get::<Option<String>, _>("source_ip")
+            .is_none()
+    );
+    assert_eq!(
+        profile_audit
+            .get::<Option<String>, _>("user_agent_family")
+            .as_deref(),
+        Some("python-requests")
+    );
+
+    // A multi-hop chain from a trusted proxy resolves to the right-most address
+    // the deployment does not trust: every hop to the left of it is
+    // client-controlled and must not be able to claim the audit trail.
+    let multi_hop_login = attributed_request(
+        &app,
+        Method::POST,
+        "/api/v3/sessions",
+        Some(json!({
+            "email": "owner@example.test",
+            "password": "correct horse battery staple"
+        })),
+        None,
+        None,
+        Some("203.0.113.9, 203.0.113.10, 198.51.100.50"),
+        Some("multihop-probe/1.0"),
+    )
+    .await;
+    assert_eq!(multi_hop_login.status(), StatusCode::CREATED);
+    let multi_hop_audit = sqlx::query(
+        "SELECT host(source_ip) AS source_ip FROM audit_events \
+         WHERE action = 'session.create' AND user_agent_family = 'multihop-probe'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        multi_hop_audit
+            .get::<Option<String>, _>("source_ip")
+            .as_deref(),
+        Some("203.0.113.10")
+    );
+}
+
+/// The denial half of the boundary: forwarding headers are evidence only when
+/// the connected peer is a proxy the deployment trusts.
+#[tokio::test]
+#[ignore = "requires OLP_TEST_DATABASE_ADMIN_URL and OLP_TEST_DATABASE_URL_PREFIX"]
+async fn audit_provenance_ignores_forwarding_from_an_untrusted_peer() {
+    let db = olp::test_support::TestDb::create_migrated("audit_provenance_denied").await;
+    let pool = db.pool(5).await;
+
+    let mut trusting = ProcessComposition::new(
+        ApiMode::Control,
+        pool.clone(),
+        Arc::new(Manager::empty()),
+        ORIGIN,
+        PathBuf::from("missing-console-for-api-test"),
+    );
+    trusting.master_key = Some(Arc::new(MasterKey::new(1, [7; 32])));
+    trusting.set_trusted_proxy_cidrs(vec!["198.51.100.0/24".parse().unwrap()]);
+    configure_bootstrap(&mut trusting, [8; 32]);
+    let trusting_app =
+        management_router_for_test(trusting.mode_dependencies().management().unwrap());
+
+    // A peer outside the trusted CIDR sends a forwarding header anyway.
+    let setup = attributed_request_from_peer(
+        &trusting_app,
+        Method::POST,
+        "/api/v3/setup",
+        Some(json!({
+            "email": "owner@example.test",
+            "password": "correct horse battery staple",
+            "display_name": "Owner",
+            "installation_name": "Audit provenance denial test"
+        })),
+        None,
+        None,
+        Some("203.0.113.7"),
+        Some("curl/8.5.0"),
+        "203.0.113.99:52344".parse().unwrap(),
+    )
+    .await;
+    assert_eq!(setup.status(), StatusCode::CREATED);
+    let setup_audit = sqlx::query(
+        "SELECT host(source_ip) AS source_ip FROM audit_events \
+         WHERE action = 'installation.setup'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        setup_audit.get::<Option<String>, _>("source_ip").as_deref(),
+        Some("203.0.113.99"),
+        "an untrusted peer must not be able to claim a forwarded client address"
+    );
+
+    // The same request shape against a deployment with no trusted proxies at
+    // all: the connected peer stays authoritative even when it sits in what
+    // another deployment would have trusted.
+    let mut untrusting = ProcessComposition::new(
+        ApiMode::Control,
+        pool.clone(),
+        Arc::new(Manager::empty()),
+        ORIGIN,
+        PathBuf::from("missing-console-for-api-test"),
+    );
+    untrusting.master_key = Some(Arc::new(MasterKey::new(1, [7; 32])));
+    configure_bootstrap(&mut untrusting, [8; 32]);
+    let untrusting_app =
+        management_router_for_test(untrusting.mode_dependencies().management().unwrap());
+
+    let login = attributed_request_from_peer(
+        &untrusting_app,
+        Method::POST,
+        "/api/v3/sessions",
+        Some(json!({
+            "email": "owner@example.test",
+            "password": "correct horse battery staple"
+        })),
+        None,
+        None,
+        Some("203.0.113.7"),
+        Some("unconfigured-probe/1.0"),
+        "198.51.100.11:443".parse().unwrap(),
+    )
+    .await;
+    assert_eq!(login.status(), StatusCode::CREATED);
+    let login_audit = sqlx::query(
+        "SELECT host(source_ip) AS source_ip FROM audit_events \
+         WHERE action = 'session.create' AND user_agent_family = 'unconfigured-probe'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        login_audit.get::<Option<String>, _>("source_ip").as_deref(),
+        Some("198.51.100.11"),
+        "without a configured trusted proxy the forwarding header is ignored"
+    );
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn attributed_request(
+    app: &Router,
+    method: Method,
+    uri: &str,
+    body: Option<Value>,
+    cookie: Option<&str>,
+    csrf_and_etag: Option<(&str, &str)>,
+    forwarded_for: Option<&str>,
+    user_agent: Option<&str>,
+) -> Response<Body> {
+    attributed_request_from_peer(
+        app,
+        method,
+        uri,
+        body,
+        cookie,
+        csrf_and_etag,
+        forwarded_for,
+        user_agent,
+        "198.51.100.11:443".parse().unwrap(),
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn attributed_request_from_peer(
+    app: &Router,
+    method: Method,
+    uri: &str,
+    body: Option<Value>,
+    cookie: Option<&str>,
+    csrf_and_etag: Option<(&str, &str)>,
+    forwarded_for: Option<&str>,
+    user_agent: Option<&str>,
+    peer: std::net::SocketAddr,
+) -> Response<Body> {
+    let mut builder = Request::builder().method(method.clone()).uri(uri);
+    if method != Method::GET {
+        builder = builder.header(header::ORIGIN, ORIGIN);
+    }
+    if let Some(cookie) = cookie {
+        builder = builder.header(header::COOKIE, cookie);
+    }
+    if let Some((csrf, etag)) = csrf_and_etag {
+        builder = builder.header("x-csrf-token", csrf);
+        builder = builder.header(header::IF_MATCH, etag);
+    }
+    if let Some(forwarded_for) = forwarded_for {
+        builder = builder.header("x-forwarded-for", forwarded_for);
+    }
+    if let Some(user_agent) = user_agent {
+        builder = builder.header(header::USER_AGENT, user_agent);
+    }
+    if uri == "/api/v3/setup" {
+        builder = builder.header("x-olp-setup-token", BOOTSTRAP_TOKEN);
+    }
+    let body = if let Some(body) = body {
+        builder = builder.header(header::CONTENT_TYPE, "application/json");
+        Body::from(body.to_string())
+    } else {
+        Body::empty()
+    };
+    let mut request = builder.body(body).unwrap();
+    request
+        .extensions_mut()
+        .insert(axum::extract::ConnectInfo(peer));
+    app.clone().oneshot(request).await.unwrap()
+}
+
+async fn send_json(
+    app: &Router,
+    method: Method,
+    uri: &str,
+    body: Value,
+    cookie: Option<&str>,
+    csrf: Option<&str>,
+    idempotency_key: Option<&str>,
+) -> Response<Body> {
+    send_json_from_peer(
+        app,
+        method,
+        uri,
+        body,
+        cookie,
+        csrf,
+        idempotency_key,
+        "198.51.100.11:443".parse().unwrap(),
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn send_json_from_peer(
+    app: &Router,
+    method: Method,
+    uri: &str,
+    body: Value,
+    cookie: Option<&str>,
+    csrf: Option<&str>,
+    idempotency_key: Option<&str>,
+    peer: std::net::SocketAddr,
+) -> Response<Body> {
+    request(
+        app,
+        method,
+        uri,
+        Some(body),
+        cookie,
+        csrf,
+        idempotency_key,
+        None,
+        peer,
+    )
+    .await
+}
+
+async fn send_json_with_if_match(
+    app: &Router,
+    method: Method,
+    uri: &str,
+    body: Value,
+    cookie: &str,
+    csrf: &str,
+    etag: &str,
+) -> Response<Body> {
+    request(
+        app,
+        method,
+        uri,
+        Some(body),
+        Some(cookie),
+        Some(csrf),
+        None,
+        Some(etag),
+        "198.51.100.11:443".parse().unwrap(),
+    )
+    .await
+}
+
+async fn send_empty(
+    app: &Router,
+    method: Method,
+    uri: &str,
+    cookie: Option<&str>,
+    csrf: Option<&str>,
+    idempotency_key: Option<&str>,
+) -> Response<Body> {
+    request(
+        app,
+        method,
+        uri,
+        None,
+        cookie,
+        csrf,
+        idempotency_key,
+        None,
+        "198.51.100.11:443".parse().unwrap(),
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn request(
+    app: &Router,
+    method: Method,
+    uri: &str,
+    body: Option<Value>,
+    cookie: Option<&str>,
+    csrf: Option<&str>,
+    idempotency_key: Option<&str>,
+    etag: Option<&str>,
+    peer: std::net::SocketAddr,
+) -> Response<Body> {
+    let mut builder = Request::builder().method(method.clone()).uri(uri);
+    if method != Method::GET {
+        builder = builder.header(header::ORIGIN, ORIGIN);
+    }
+    if let Some(cookie) = cookie {
+        builder = builder.header(header::COOKIE, cookie);
+    }
+    if let Some(csrf) = csrf {
+        builder = builder.header("x-csrf-token", csrf);
+    }
+    if let Some(idempotency_key) = idempotency_key {
+        builder = builder.header("idempotency-key", idempotency_key);
+    }
+    if let Some(etag) = etag {
+        builder = builder.header(header::IF_MATCH, etag);
+    }
+    if uri == "/api/v3/setup" {
+        builder = builder.header("x-olp-setup-token", BOOTSTRAP_TOKEN);
+    }
+    let body = if let Some(body) = body {
+        builder = builder.header(header::CONTENT_TYPE, "application/json");
+        Body::from(body.to_string())
+    } else {
+        Body::empty()
+    };
+    let mut request = builder.body(body).unwrap();
+    request
+        .extensions_mut()
+        .insert(axum::extract::ConnectInfo(peer));
+    app.clone().oneshot(request).await.unwrap()
+}
+
+fn cookie_header(response: &Response<Body>) -> String {
+    response
+        .headers()
+        .get_all(header::SET_COOKIE)
+        .iter()
+        .map(|cookie| cookie.to_str().unwrap().split(';').next().unwrap())
+        .collect::<Vec<_>>()
+        .join("; ")
+}
+
+async fn response_json(response: Response<Body>) -> Value {
+    let bytes = response.into_body().collect().await.unwrap().to_bytes();
+    serde_json::from_slice(&bytes).unwrap()
+}

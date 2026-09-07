@@ -1,6 +1,6 @@
 {
   "name": "@openllmproxy/console",
-  "version": "2.3.0",
+  "version": "3.0.0",
   "private": true,
   "type": "module",
   "license": "AGPL-3.0-only",
@@ -14,40 +14,36 @@
     "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json && eslint .",
     "test": "vitest run",
     "test:e2e": "svelte-kit sync && playwright test",
-    "test:integration": "pnpm build && playwright test --config playwright.integration.config.ts",
-    "test:integration:prebuilt": "svelte-kit sync && playwright test --config playwright.integration.config.ts",
-    "screenshots": "svelte-kit sync && playwright test --config playwright.screenshots.config.ts",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "api:generate": "openapi-typescript ../openapi/management.json -o src/lib/api/schema.d.ts",
-    "api:check": "openapi-typescript ../openapi/management.json -o src/lib/api/schema.d.ts --check",
-    "verify": "pnpm api:check && pnpm format:check && pnpm test && pnpm check && pnpm build"
+    "verify": "pnpm format:check && pnpm check && pnpm test"
   },
   "dependencies": {
     "@fontsource-variable/inter": "^5.3.0",
     "@fontsource-variable/jetbrains-mono": "^5.3.0",
-    "@tanstack/svelte-query": "^6.1.42",
+    "@tanstack/svelte-query": "^6.1.48",
     "openapi-fetch": "^0.17.0"
   },
   "devDependencies": {
     "@axe-core/playwright": "^4.13.0",
     "@eslint/js": "^10.0.1",
-    "@playwright/test": "^1.62.1",
+    "@playwright/test": "^1.63.0",
     "@sveltejs/adapter-static": "^3.0.10",
     "@sveltejs/kit": "^2.70.3",
     "@sveltejs/vite-plugin-svelte": "^7.3.0",
-    "eslint": "^10.9.0",
+    "eslint": "^10.10.0",
     "eslint-plugin-svelte": "^3.23.0",
-    "globals": "^17.11.0",
+    "globals": "^17.12.0",
     "jsdom": "30.0.1",
     "openapi-typescript": "^7.13.0",
     "prettier": "3.9.6",
     "prettier-plugin-svelte": "4.1.1",
-    "svelte": "^5.56.10",
+    "svelte": "^5.57.0",
     "svelte-check": "^4.7.6",
-    "typescript": "^6.0.3",
-    "typescript-eslint": "^8.67.0",
+    "typescript": "~6.0.3",
+    "typescript-eslint": "^8.69.0",
     "vite": "8.2.2",
-    "vitest": "^4.1.11"
+    "vitest": "^5.0.0"
   }
 }

@@ -3,7 +3,7 @@
 File-backed secrets for the local Compose stack: generation, bootstrap-token
 retirement, key rotation, and optional connector configuration.
 
-## Generate and migrate secrets
+## Generate secrets
 
 From the repository root:
 
@@ -15,17 +15,9 @@ The helper creates only missing files, preserves operator material, applies
 restrictive permissions, and never copies secrets into the image. Compose runs
 as `1000:1000`; set `OLP_UID` and `OLP_GID` when the host user differs.
 
-Existing installations must preserve authentication HMAC bytes. Before an
-upgrade, rename the legacy file without changing it:
-
-```sh
-mv deploy/secrets/olp_key_hash_key deploy/secrets/olp_auth_hmac_key
-```
-
-The helper refuses to generate the new file while the legacy name exists;
-replacing it would invalidate persisted authentication digests. The complete
-2.0 naming migration is in
-[`docs/operations.md`](../../docs/operations.md#naming-migration-prerequisites).
+3.0 uses a JSON master-key ring and a separate authentication HMAC key. Provision
+new 3.0 storage independently of 2.x. Preserve these files when restoring a 3.0
+backup or rotating keys within an installation.
 
 ## Bootstrap token lifecycle
 

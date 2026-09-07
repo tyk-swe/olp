@@ -1,16 +1,12 @@
-## Summary
+## Change
 
-<!-- What changes and why. -->
+<!-- Explain the problem and resulting behavior. -->
 
 ## Validation
 
-- [ ] `make check` passes (see CONTRIBUTING.md for toolchain setup)
-- [ ] `make db-test` passes, or this change touches no storage/query code
-- [ ] Regenerated any affected artifacts and committed them:
-      `.sqlx/` (`make sqlx-prepare`), `openapi/management.json` +
-      `console/src/lib/api/schema.d.ts` (`make openapi`),
-      `docs/assets/screenshots/` (`make screenshots`), and all four Playwright
-      baselines under `console/tests/e2e/operations.spec.ts-snapshots/`
-- [ ] Migrations (if any) are forward-only and sequential
-- [ ] Helm values, schema, and templates changed together (`make helm-verify`),
-      or this change touches no `deploy/helm/` files
+- [ ] `make check` passes
+- [ ] Ran `make integration` for service or browser behavior changes
+- [ ] Regenerated affected API contracts with `make api`
+- [ ] Included screenshots for visible console changes
+- [ ] New migrations are forward-only and sequential
+- [ ] Updated Helm values, schema, and templates together when deployment configuration changed

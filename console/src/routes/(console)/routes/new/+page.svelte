@@ -1,5 +1,5 @@
 <script lang="ts">
-  import RouteDraftEditor from '$lib/features/gateway/routes/RouteDraftEditor.svelte';
+  import RouteDraftEditor from '$lib/features/routes/RouteDraftEditor.svelte';
 </script>
 
 <RouteDraftEditor />

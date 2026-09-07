@@ -8,7 +8,7 @@ import {
   markDirty,
   markSaved,
   reconcile
-} from './concurrentEdit';
+} from '$lib/forms/concurrentEdit';
 
 describe('concurrent edit state', () => {
   it('hydrates initially and preserves object identity when nothing changed', () => {

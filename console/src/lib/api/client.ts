@@ -1,8 +1,8 @@
 import createClient from 'openapi-fetch';
-import type { paths } from './schema';
-import { serializeIfMatch } from './http';
-import { createAuthMiddleware } from '$lib/auth/authMiddleware';
-import { authLifecycle } from '$lib/auth/lifecycle';
+import type { paths } from '$lib/api/schema';
+import { serializeIfMatch } from '$lib/api/http';
+import { createAuthMiddleware } from '$lib/features/access/session/authMiddleware';
+import { authLifecycle } from '$lib/features/access/session/lifecycle';
 
 /** Generated-schema client for feature slices that need operation-level types. */
 export const apiClient = createClient<paths>({

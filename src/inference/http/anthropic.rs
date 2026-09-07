@@ -1,0 +1,336 @@
+use crate::access::policy::ApiKey;
+use crate::http::request_admission::HttpRequestAdmission;
+use crate::ids::RouteSlug;
+use crate::protocols::anthropic::client::encode_messages_response;
+use crate::protocols::anthropic::client_stream::Encoder;
+use crate::protocols::anthropic::count::decode_count_tokens_request;
+use crate::protocols::anthropic::count::encode_count_tokens_result;
+use crate::protocols::anthropic::dto::CountTokensRequest;
+use crate::protocols::anthropic::dto::MessagesRequest;
+use crate::protocols::anthropic::translate::decode::request as decode_request;
+use crate::protocols::canonical::identity::Surface;
+use crate::protocols::canonical::identity::TransportMode;
+use crate::protocols::canonical::results::CanonicalResult;
+use axum::Json;
+use axum::extract::Extension;
+use axum::extract::Path;
+use axum::extract::Query;
+use axum::extract::State;
+use axum::extract::rejection::JsonRejection;
+use axum::http::StatusCode;
+use axum::response::IntoResponse;
+use axum::response::Response;
+use serde::Deserialize;
+use serde::Serialize;
+
+use crate::inference::execution::CompletedEvents;
+use crate::runtime::manager::Bundle;
+
+use crate::http::json_media::admit_anthropic_messages;
+use crate::http::streaming_response::ProtocolStreamEncoder;
+use crate::http::streaming_response::encode_protocol_sse_frames;
+use crate::http::streaming_response::encode_server_sse_frame;
+use crate::http::streaming_response::precommit_stream_failure;
+use crate::http::streaming_response::protocol_streaming_response;
+use crate::inference::http::state::GatewayState;
+
+use crate::inference::http::authorize_model_access;
+use crate::inference::http::error::InferenceError;
+use crate::inference::http::execution::execute_event_operation;
+use crate::inference::http::execution::execute_routed_result;
+use crate::inference::http::native_models::after_cursor_start;
+use crate::inference::http::native_models::before_cursor_end;
+use crate::inference::http::native_models::visible_route;
+use crate::inference::http::native_models::visible_routes;
+use crate::inference::http::protocol_error::ProtocolError;
+use crate::inference::http::protocol_error::anthropic_error_body;
+use crate::inference::http::protocol_error::valid_json;
+use crate::inference::http::release_model_limits;
+use crate::inference::http::reserve_model_limits;
+
+pub(crate) async fn messages(
+    State(state): State<GatewayState>,
+    Extension(principal): Extension<HttpRequestAdmission>,
+    payload: Result<Json<MessagesRequest>, JsonRejection>,
+) -> Result<Response, ProtocolError> {
+    let Json(mut request) = valid_json(payload, Surface::Anthropic)?;
+    let streaming = request.stream;
+    let admitted = admit_anthropic_messages(&state, &mut request.messages)
+        .await
+        .map_err(ProtocolError::anthropic)?;
+    let operation = match decode_request(request) {
+        Ok(operation) => operation,
+        Err(error) => {
+            admitted.release().await;
+            return Err(ProtocolError::invalid(
+                Surface::Anthropic,
+                format!("Invalid Messages request: {error}"),
+            ));
+        }
+    };
+    admitted.disarm();
+    let mode = if streaming {
+        TransportMode::Streaming
+    } else {
+        TransportMode::Unary
+    };
+    let execution = execute_event_operation(&state, &principal, operation, mode)
+        .await
+        .map_err(ProtocolError::anthropic)?;
+    if streaming {
+        let execution = precommit_stream_failure(execution).map_err(ProtocolError::anthropic)?;
+        let encoder = Encoder::new(
+            execution.route_slug.as_str(),
+            format!("msg_{}", execution.request_id.simple()),
+        );
+        return Ok(protocol_streaming_response(execution, encoder));
+    }
+    let completed = execution
+        .collect()
+        .await
+        .map_err(InferenceError::from)
+        .map_err(ProtocolError::anthropic)?;
+    unary_response(completed)
+}
+
+fn unary_response(mut completed: CompletedEvents) -> Result<Response, ProtocolError> {
+    let response = encode_messages_response(
+        &completed.events,
+        completed.route_slug.as_str(),
+        &format!("msg_{}", completed.request_id.simple()),
+    )
+    .map_err(|error| {
+        ProtocolError::upstream(
+            Surface::Anthropic,
+            format!("The provider response cannot be represented as Messages: {error}"),
+        )
+    })?;
+    completed.mark_success();
+    Ok((StatusCode::OK, Json(response)).into_response())
+}
+
+pub(crate) async fn count_tokens(
+    State(state): State<GatewayState>,
+    Extension(principal): Extension<HttpRequestAdmission>,
+    payload: Result<Json<CountTokensRequest>, JsonRejection>,
+) -> Result<Response, ProtocolError> {
+    let Json(mut request) = valid_json(payload, Surface::Anthropic)?;
+    let admitted = admit_anthropic_messages(&state, &mut request.messages)
+        .await
+        .map_err(ProtocolError::anthropic)?;
+    let operation = match decode_count_tokens_request(request) {
+        Ok(operation) => operation,
+        Err(error) => {
+            admitted.release().await;
+            return Err(ProtocolError::invalid(
+                Surface::Anthropic,
+                format!("Invalid count_tokens request: {error}"),
+            ));
+        }
+    };
+    admitted.disarm();
+    let mut executed =
+        execute_routed_result(&state, &principal, operation, TransportMode::Unary, None)
+            .await
+            .map_err(ProtocolError::anthropic)?;
+    let CanonicalResult::TokenCount(result) = executed.result.as_ref() else {
+        executed.mark_provider_protocol_failure();
+        return Err(ProtocolError::upstream(
+            Surface::Anthropic,
+            "The provider returned an incompatible token-count result.",
+        ));
+    };
+    let response = match encode_count_tokens_result(result) {
+        Ok(response) => response,
+        Err(error) => {
+            executed.mark_provider_protocol_failure();
+            return Err(ProtocolError::upstream(
+                Surface::Anthropic,
+                format!("The token-count result is not representable: {error}"),
+            ));
+        }
+    };
+    executed.mark_success();
+    Ok((StatusCode::OK, Json(response)).into_response())
+}
+
+#[derive(Default, Deserialize)]
+pub(crate) struct ModelsQuery {
+    before_id: Option<String>,
+    after_id: Option<String>,
+    limit: Option<usize>,
+}
+
+#[derive(Serialize)]
+struct ModelList {
+    data: Vec<Model>,
+    has_more: bool,
+    first_id: Option<String>,
+    last_id: Option<String>,
+}
+
+#[derive(Clone, Serialize)]
+struct Model {
+    id: String,
+    created_at: String,
+    display_name: String,
+    #[serde(rename = "type")]
+    kind: &'static str,
+}
+
+pub(crate) async fn models(
+    State(state): State<GatewayState>,
+    Extension(principal): Extension<HttpRequestAdmission>,
+    Query(query): Query<ModelsQuery>,
+) -> Result<Response, ProtocolError> {
+    let (runtime, key) =
+        authorize_model_access(&state, &principal).map_err(ProtocolError::anthropic)?;
+    let lease = reserve_model_limits(&state, &principal)
+        .await
+        .map_err(ProtocolError::anthropic)?;
+    let result = models_response(runtime, key, query);
+    release_model_limits(&state, lease).await;
+    result
+}
+
+fn models_response(
+    runtime: &Bundle,
+    key: &ApiKey,
+    query: ModelsQuery,
+) -> Result<Response, ProtocolError> {
+    let limit = query.limit.unwrap_or(20);
+    if !(1..=1_000).contains(&limit) || (query.before_id.is_some() && query.after_id.is_some()) {
+        return Err(ProtocolError::invalid(
+            Surface::Anthropic,
+            "Model pagination parameters are invalid.",
+        ));
+    }
+    let all = visible_routes(runtime, key, Surface::Anthropic);
+    let (selected, has_more) = model_page(&all, &query, limit)?;
+    let models = selected
+        .iter()
+        .map(|slug| model_object(runtime, slug))
+        .collect::<Vec<_>>();
+    let response = ModelList {
+        first_id: models.first().map(|model| model.id.clone()),
+        last_id: models.last().map(|model| model.id.clone()),
+        data: models,
+        has_more,
+    };
+    Ok((StatusCode::OK, Json(response)).into_response())
+}
+
+fn model_page<'a>(
+    routes: &'a [RouteSlug],
+    query: &ModelsQuery,
+    limit: usize,
+) -> Result<(&'a [RouteSlug], bool), ProtocolError> {
+    if query.before_id.is_some() {
+        let end = before_cursor_end(
+            routes,
+            query.before_id.as_deref(),
+            Surface::Anthropic,
+            "The before_id cursor is stale or unknown.",
+        )?;
+        let start = end.saturating_sub(limit);
+        return Ok((&routes[start..end], start != 0));
+    }
+
+    let start = after_cursor_start(
+        routes,
+        query.after_id.as_deref(),
+        Surface::Anthropic,
+        "The after_id cursor is stale or unknown.",
+    )?;
+    let end = start.saturating_add(limit).min(routes.len());
+    Ok((&routes[start..end], end != routes.len()))
+}
+
+pub(crate) async fn model(
+    State(state): State<GatewayState>,
+    Extension(principal): Extension<HttpRequestAdmission>,
+    Path(id): Path<String>,
+) -> Result<Response, ProtocolError> {
+    let (runtime, key) =
+        authorize_model_access(&state, &principal).map_err(ProtocolError::anthropic)?;
+    let lease = reserve_model_limits(&state, &principal)
+        .await
+        .map_err(ProtocolError::anthropic)?;
+    let result = visible_route(runtime, key, &id, Surface::Anthropic)
+        .map(|slug| (StatusCode::OK, Json(model_object(runtime, &slug))).into_response());
+    release_model_limits(&state, lease).await;
+    result
+}
+
+fn model_object(runtime: &Bundle, slug: &RouteSlug) -> Model {
+    Model {
+        id: slug.to_string(),
+        created_at: runtime.generation.activated_at.to_rfc3339(),
+        display_name: slug.to_string(),
+        kind: "model",
+    }
+}
+
+impl ProtocolStreamEncoder for Encoder {
+    fn push(
+        &mut self,
+        event: crate::protocols::canonical::events::Event,
+    ) -> Result<Vec<bytes::Bytes>, InferenceError> {
+        encode_protocol_sse_frames(Encoder::push(self, event))
+    }
+
+    fn encode_error(&self, error: &InferenceError) -> bytes::Bytes {
+        encode_server_sse_frame(&crate::protocols::sse::Frame {
+            event: Some("error".to_owned()),
+            data: anthropic_error_body(error.status(), error.message()).to_string(),
+            id: None,
+            retry_ms: None,
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::inference::http::anthropic::*;
+
+    fn routes() -> Vec<RouteSlug> {
+        ["a", "b", "c", "d", "e"]
+            .into_iter()
+            .map(|value| RouteSlug::parse(value).unwrap())
+            .collect()
+    }
+
+    #[test]
+    fn before_id_returns_the_adjacent_preceding_page() {
+        let routes = routes();
+        let query = ModelsQuery {
+            before_id: Some("e".to_owned()),
+            after_id: None,
+            limit: Some(2),
+        };
+
+        let (page, has_more) = model_page(&routes, &query, 2).unwrap();
+        assert_eq!(
+            page.iter().map(RouteSlug::as_str).collect::<Vec<_>>(),
+            vec!["c", "d"]
+        );
+        assert!(has_more);
+    }
+
+    #[test]
+    fn before_id_reports_no_more_items_at_the_start() {
+        let routes = routes();
+        let query = ModelsQuery {
+            before_id: Some("c".to_owned()),
+            after_id: None,
+            limit: Some(2),
+        };
+
+        let (page, has_more) = model_page(&routes, &query, 2).unwrap();
+        assert_eq!(
+            page.iter().map(RouteSlug::as_str).collect::<Vec<_>>(),
+            vec!["a", "b"]
+        );
+        assert!(!has_more);
+    }
+}

@@ -19,5 +19,5 @@ export function sdkSnippet(
   if (sdk === 'gemini') {
     return `import { GoogleGenAI } from '@google/genai';\n\nconst ai = new GoogleGenAI({\n  apiKey: "${secret}",\n  apiVersion: "v1beta",\n  httpOptions: {\n    baseUrl: "${endpoint}/gemini",\n    apiVersion: "v1beta",\n    retryOptions: { attempts: 1 },\n  },\n});\n\nconst response = await ai.models.generateContent({\n  model: "${routeSlug}",\n  contents: "Hello",\n});`;
   }
-  return `from openai import OpenAI\n\nclient = OpenAI(\n    api_key="${secret}",\n    base_url="${endpoint}/openai/v1",\n)\n\nresponse = client.responses.create(\n    model="${routeSlug}",\n    input="Hello",\n)`;
+  return `from openai import OpenAI\n\nclient = OpenAI(\n    api_key="${secret}",\n    base_url="${endpoint}/v1",\n)\n\nresponse = client.responses.create(\n    model="${routeSlug}",\n    input="Hello",\n)`;
 }

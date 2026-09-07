@@ -1,0 +1,277 @@
+use std::collections::BTreeMap;
+
+use crate::protocols::canonical::events::ErrorClass;
+use crate::protocols::canonical::events::Event;
+use crate::protocols::canonical::events::Kind;
+use crate::protocols::canonical::identity::Surface;
+use crate::protocols::canonical::requests::MessageRole;
+use serde_json::Value;
+use serde_json::json;
+use thiserror::Error;
+
+use crate::protocols::client_sequence::Admission;
+use crate::protocols::client_sequence::ClientSequence;
+use crate::protocols::gemini::finish_reason;
+use crate::protocols::sse::Frame;
+use crate::protocols::sse::RAW_SSE_FRAME_EXTENSION;
+use crate::protocols::sse::decode_raw_sse_frame;
+
+#[derive(Debug, Error)]
+pub enum Error {
+    #[error("Gemini stream received events out of order")]
+    Sequence,
+    #[error("Gemini output role is not model")]
+    Role,
+    #[error("Gemini function call is incomplete or has invalid JSON arguments")]
+    Tool,
+    #[error("source extensions cannot be represented in a Gemini client stream")]
+    Extension,
+    #[error("Gemini stream completed with unfinished function calls")]
+    UnfinishedTools,
+}
+
+#[derive(Debug)]
+pub struct Encoder {
+    public_model: String,
+    fallback_id: String,
+    sequence: ClientSequence,
+    response_id: Option<String>,
+    tools: BTreeMap<(u32, u32), ToolState>,
+}
+
+#[derive(Debug, Default)]
+struct ToolState {
+    id: Option<String>,
+    name: Option<String>,
+    arguments: String,
+}
+
+impl Encoder {
+    #[must_use]
+    pub fn new(public_model: impl Into<String>, fallback_id: impl Into<String>) -> Self {
+        Self {
+            public_model: public_model.into(),
+            fallback_id: fallback_id.into(),
+            sequence: ClientSequence::default(),
+            response_id: None,
+            tools: BTreeMap::new(),
+        }
+    }
+
+    pub fn push(&mut self, event: Event) -> Result<Vec<Frame>, Error> {
+        match self.sequence.admit(&event) {
+            Ok(Admission::Handle) => {}
+            Ok(Admission::Skipped) => return Ok(Vec::new()),
+            Err(_) => return Err(Error::Sequence),
+        }
+        let mut frames = Vec::new();
+        match event.kind {
+            Kind::ResponseStart { response_id, .. } => {
+                self.response_id = response_id;
+            }
+            Kind::MessageStart { role, .. } => {
+                if role != MessageRole::Assistant {
+                    return Err(Error::Role);
+                }
+            }
+            Kind::TextDelta { output_index, text } => {
+                frames.push(self.response_frame(json!({
+                    "candidates": [{
+                        "index": output_index,
+                        "content": {"role": "model", "parts": [{"text": text}]}
+                    }]
+                })));
+            }
+            Kind::ToolCallDelta {
+                output_index,
+                tool_index,
+                id,
+                name,
+                arguments_delta,
+            } => {
+                self.tools
+                    .entry((output_index, tool_index))
+                    .or_default()
+                    .push(id, name, &arguments_delta)?;
+            }
+            Kind::Usage { usage } => {
+                frames.push(self.response_frame(json!({
+                    "usageMetadata": {
+                        "promptTokenCount": usage.input_tokens,
+                        "candidatesTokenCount": usage.output_tokens,
+                        "totalTokenCount": usage.total_tokens,
+                        "cachedContentTokenCount": usage.cached_input_tokens,
+                        "thoughtsTokenCount": usage.reasoning_tokens
+                    }
+                })));
+            }
+            Kind::Finish {
+                output_index,
+                reason,
+            } => {
+                frames.push(self.finish_candidate(output_index, reason)?);
+            }
+            Kind::Error { error } => {
+                frames.push(Frame {
+                    event: None,
+                    data: json!({
+                        "error": {
+                            "code": error_status(error.class),
+                            "message": error.message,
+                            "status": error_code(error.class)
+                        }
+                    })
+                    .to_string(),
+                    id: None,
+                    retry_ms: None,
+                });
+            }
+            Kind::SourceExtension { mut extensions } => {
+                // A stream already in flight cannot renegotiate, so extensions
+                // that this surface cannot carry are dropped, not fatal.
+                if extensions.source != Some(Surface::Gemini) {
+                    return Ok(frames);
+                }
+                if let Some(value) = extensions.values.remove(RAW_SSE_FRAME_EXTENSION) {
+                    if !extensions.values.is_empty() {
+                        return Err(Error::Extension);
+                    }
+                    let (mut raw, semantic_events) =
+                        decode_raw_sse_frame(value).ok_or(Error::Extension)?;
+                    rewrite_gemini_model(&mut raw, &self.public_model)?;
+                    self.sequence.skip_native(semantic_events);
+                    frames.push(raw);
+                } else if !extensions.values.is_empty() {
+                    return Ok(frames);
+                }
+            }
+            Kind::RefusalDelta { .. } => {
+                return Err(Error::Role);
+            }
+            Kind::Done => {
+                if !self.tools.is_empty() {
+                    return Err(Error::UnfinishedTools);
+                }
+                self.sequence.finish();
+            }
+        }
+        Ok(frames)
+    }
+
+    fn finish_candidate(
+        &mut self,
+        output_index: u32,
+        reason: crate::protocols::canonical::events::FinishReason,
+    ) -> Result<Frame, Error> {
+        let keys = self
+            .tools
+            .keys()
+            .filter(|(candidate, _)| *candidate == output_index)
+            .copied()
+            .collect::<Vec<_>>();
+        let mut parts = Vec::with_capacity(keys.len());
+        for key in keys {
+            let tool = self.tools.remove(&key).ok_or(Error::Tool)?;
+            let name = tool.name.ok_or(Error::Tool)?;
+            let args = serde_json::from_str::<Value>(&tool.arguments).map_err(|_| Error::Tool)?;
+            parts.push(json!({
+                "functionCall": {"id": tool.id, "name": name, "args": args}
+            }));
+        }
+        Ok(self.response_frame(json!({
+            "candidates": [{
+                "index": output_index,
+                "content": {"role": "model", "parts": parts},
+                "finishReason": finish_reason(&reason)
+            }]
+        })))
+    }
+
+    fn response_frame(&self, mut value: Value) -> Frame {
+        let object = value
+            .as_object_mut()
+            .expect("Gemini stream chunks are always objects");
+        object.insert(
+            "responseId".into(),
+            Value::String(
+                self.response_id
+                    .clone()
+                    .unwrap_or_else(|| self.fallback_id.clone()),
+            ),
+        );
+        object.insert(
+            "modelVersion".into(),
+            Value::String(self.public_model.clone()),
+        );
+        Frame {
+            event: None,
+            data: value.to_string(),
+            id: None,
+            retry_ms: None,
+        }
+    }
+}
+
+fn rewrite_gemini_model(frame: &mut Frame, public_model: &str) -> Result<(), Error> {
+    // ASCII letters in JSON keys can only be escaped with \uXXXX.
+    if !frame.data.contains("\"modelVersion\"") && !frame.data.contains("\\u") {
+        return Ok(());
+    }
+    let mut value: Value = serde_json::from_str(&frame.data).map_err(|_| Error::Extension)?;
+    let object = value.as_object_mut().ok_or(Error::Extension)?;
+    if !object.contains_key("modelVersion") {
+        return Ok(());
+    }
+    object.insert(
+        "modelVersion".into(),
+        Value::String(public_model.to_owned()),
+    );
+    frame.data = serde_json::to_string(&value).map_err(|_| Error::Extension)?;
+    Ok(())
+}
+
+const fn error_status(class: ErrorClass) -> u16 {
+    match class {
+        ErrorClass::Authentication => 401,
+        ErrorClass::Authorization => 403,
+        ErrorClass::InvalidRequest => 400,
+        ErrorClass::RateLimit => 429,
+        ErrorClass::Timeout => 504,
+        ErrorClass::Transport | ErrorClass::Upstream | ErrorClass::Internal => 500,
+    }
+}
+
+const fn error_code(class: ErrorClass) -> &'static str {
+    match class {
+        ErrorClass::Authentication => "UNAUTHENTICATED",
+        ErrorClass::Authorization => "PERMISSION_DENIED",
+        ErrorClass::InvalidRequest => "INVALID_ARGUMENT",
+        ErrorClass::RateLimit => "RESOURCE_EXHAUSTED",
+        ErrorClass::Timeout => "DEADLINE_EXCEEDED",
+        ErrorClass::Transport | ErrorClass::Upstream | ErrorClass::Internal => "INTERNAL",
+    }
+}
+
+impl ToolState {
+    fn push(
+        &mut self,
+        id: Option<String>,
+        name: Option<String>,
+        arguments_delta: &str,
+    ) -> Result<(), Error> {
+        if let Some(id) = id {
+            if self.id.as_ref().is_some_and(|existing| existing != &id) {
+                return Err(Error::Tool);
+            }
+            self.id = Some(id);
+        }
+        if let Some(name) = name {
+            if self.name.as_ref().is_some_and(|existing| existing != &name) {
+                return Err(Error::Tool);
+            }
+            self.name = Some(name);
+        }
+        self.arguments.push_str(arguments_delta);
+        Ok(())
+    }
+}

@@ -1,0 +1,343 @@
+use std::collections::BTreeMap;
+use std::collections::BTreeSet;
+use std::num::NonZeroU16;
+use std::num::NonZeroU32;
+use std::sync::Arc;
+use std::sync::atomic::AtomicI64;
+use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::Ordering;
+use std::time::Duration;
+
+use futures::stream;
+
+use crate::ids::DurationMs;
+use crate::ids::ProviderId;
+use crate::ids::RouteId;
+use crate::ids::RuntimeGenerationId;
+use crate::ids::TargetId;
+use crate::inference::circuit::Breaker;
+use crate::inference::execution::*;
+use crate::inference::lifecycle::RequestContext;
+use crate::inference::transport::BoxFuture;
+use crate::inference::transport::MediaSpool;
+use crate::inference::transport::MediaSpoolError;
+use crate::inference::transport::MediaUpload;
+use crate::inference::transport::OpenedMedia;
+use crate::inference::transport::ProviderEventStream;
+use crate::inference::transport::ProviderOutput;
+use crate::inference::transport::ProviderRequest;
+use crate::inference::transport::ProviderTransport;
+use crate::inference::transport::TransportError;
+use crate::limits::admission::LimitError;
+use crate::limits::admission::LimitLease;
+use crate::limits::admission::ReloadableLimiter;
+use crate::protocols::canonical::events::Kind;
+use crate::protocols::canonical::events::Usage;
+use crate::protocols::canonical::identity::TransportMode;
+use crate::protocols::canonical::requests::MediaHandle;
+use crate::protocols::canonical::requests::Operation;
+use crate::protocols::canonical::requests::VideoOperation;
+use crate::protocols::canonical::results::CanonicalResult;
+use crate::protocols::canonical::results::MediaArtifact;
+use crate::protocols::canonical::results::VideoJobResult;
+use crate::protocols::canonical::results::VideoStatus;
+use crate::providers::runtime_model::Capability;
+use crate::providers::runtime_model::Provider;
+use crate::providers::runtime_model::ProviderKind;
+use crate::routes::model::Route;
+use crate::routes::model::Target;
+use crate::runtime::manager::Manager;
+use crate::runtime::snapshot::RuntimeGeneration;
+use crate::runtime::snapshot::Snapshot;
+
+struct ReconciliationTransport(Arc<AtomicUsize>);
+
+impl ProviderTransport for ReconciliationTransport {
+    fn execute(&self, _: ProviderRequest) -> BoxFuture<'_, Result<ProviderOutput, TransportError>> {
+        self.0.fetch_add(1, Ordering::SeqCst);
+        Box::pin(async {
+            Ok(ProviderOutput::Result(Box::new(CanonicalResult::VideoJob(
+                VideoJobResult {
+                    id: "upstream-job".into(),
+                    model: Some("video-model".into()),
+                    status: VideoStatus::InProgress,
+                    progress_percent: Some(10.0),
+                    created_at: None,
+                    completed_at: None,
+                    expires_at: None,
+                    prompt: None,
+                    seconds: None,
+                    size: None,
+                    error: None,
+                    extensions: Default::default(),
+                },
+            ))))
+        })
+    }
+}
+
+struct UnavailableSpool;
+
+impl MediaSpool for UnavailableSpool {
+    fn put(&self, _: MediaUpload) -> BoxFuture<'_, Result<MediaArtifact, MediaSpoolError>> {
+        Box::pin(async { Err(MediaSpoolError::Unavailable) })
+    }
+
+    fn open<'a>(
+        &'a self,
+        _: &'a MediaHandle,
+    ) -> BoxFuture<'a, Result<OpenedMedia, MediaSpoolError>> {
+        Box::pin(async { Err(MediaSpoolError::Unavailable) })
+    }
+
+    fn remove<'a>(&'a self, _: &'a MediaHandle) -> BoxFuture<'a, Result<(), MediaSpoolError>> {
+        Box::pin(async { Err(MediaSpoolError::Unavailable) })
+    }
+}
+
+#[derive(Default)]
+struct CleanupEffects {
+    gate: tokio::sync::Notify,
+    started: tokio::sync::Notify,
+    released: tokio::sync::Notify,
+    reconciles: AtomicUsize,
+    releases: AtomicUsize,
+    actual_tokens: AtomicI64,
+}
+
+struct GatedLease(Arc<CleanupEffects>);
+
+impl LimitLease for GatedLease {
+    fn reconcile(&self, actual_tokens: i64) -> BoxFuture<'_, Result<(), LimitError>> {
+        self.0.reconciles.fetch_add(1, Ordering::Relaxed);
+        self.0.actual_tokens.store(actual_tokens, Ordering::Relaxed);
+        Box::pin(async move {
+            self.0.started.notify_one();
+            self.0.gate.notified().await;
+            Ok(())
+        })
+    }
+
+    fn release(&self) -> BoxFuture<'_, Result<(), LimitError>> {
+        self.0.releases.fetch_add(1, Ordering::Relaxed);
+        self.0.released.notify_one();
+        Box::pin(async { Ok(()) })
+    }
+}
+
+fn routed_events(success: bool, effects: Arc<CleanupEffects>) -> RoutedEvents {
+    let service = Executor::new(
+        Arc::new(Manager::empty()),
+        ReloadableLimiter::default(),
+        None,
+        Breaker::default(),
+        Arc::new(UnavailableSpool),
+    );
+    let request_id = uuid::Uuid::now_v7();
+    let route_slug = RouteSlug::parse("test").unwrap();
+    let mut accounting = RequestLifecycle::new(
+        service.request_metadata.clone(),
+        RequestContext {
+            generation_id: uuid::Uuid::now_v7(),
+            api_key_id: uuid::Uuid::now_v7(),
+            request_id,
+            route_slug: route_slug.clone(),
+            request_started_at: Utc::now(),
+            request_started: tokio::time::Instant::now(),
+            surface: Surface::OpenAi,
+            operation: OperationKind::Generation,
+            trace: None,
+        },
+        Some(Reservation::distributed(Arc::new(GatedLease(Arc::clone(
+            &effects,
+        ))))),
+        None,
+        None,
+    );
+    accounting.record_attempt_started(
+        &[],
+        1,
+        uuid::Uuid::now_v7(),
+        "mock-model",
+        Utc::now(),
+        tokio::time::Instant::now(),
+    );
+    let events: ProviderEventStream = if success {
+        Box::pin(stream::iter([Ok(Event::new(1, Kind::Done))]))
+    } else {
+        Box::pin(stream::empty())
+    };
+    RoutedEvents {
+        first: Event::new(
+            0,
+            Kind::Usage {
+                usage: Usage {
+                    input_tokens: 7,
+                    output_tokens: 3,
+                    total_tokens: 10,
+                    cached_input_tokens: None,
+                    reasoning_tokens: None,
+                },
+            },
+        ),
+        events,
+        deadline: tokio::time::Instant::now() + Duration::from_secs(1),
+        request_id,
+        route_slug,
+        accounting,
+        max_collected_bytes: crate::inference::events::MAX_COLLECTED_CANONICAL_EVENT_BYTES,
+    }
+}
+
+#[tokio::test]
+async fn unary_collection_detaches_success_and_post_usage_failure_cleanup() {
+    for success in [true, false] {
+        let effects = Arc::new(CleanupEffects::default());
+        let collected = tokio::spawn(routed_events(success, Arc::clone(&effects)).collect());
+
+        if success {
+            tokio::time::timeout(Duration::from_secs(1), effects.started.notified())
+                .await
+                .expect("reconciliation must start");
+        }
+        let result = tokio::time::timeout(Duration::from_secs(1), collected)
+            .await
+            .expect("collection must not wait for reconciliation")
+            .expect("collection task must not panic");
+        assert_eq!(result.is_ok(), success);
+        assert_eq!(
+            effects.reconciles.load(Ordering::Relaxed),
+            usize::from(success)
+        );
+        if success {
+            assert_eq!(effects.actual_tokens.load(Ordering::Relaxed), 10);
+        }
+
+        tokio::time::timeout(Duration::from_secs(1), effects.released.notified())
+            .await
+            .expect("concurrency release must not wait for reconciliation");
+        effects.gate.notify_one();
+        assert_eq!(
+            effects.reconciles.load(Ordering::Relaxed),
+            usize::from(success)
+        );
+        assert_eq!(effects.releases.load(Ordering::Relaxed), 1);
+    }
+}
+
+#[tokio::test]
+async fn reconciliation_uses_the_supplied_historical_bundle() {
+    let manager = Arc::new(Manager::empty());
+    let service = Executor::new(
+        Arc::clone(&manager),
+        ReloadableLimiter::default(),
+        None,
+        Breaker::default(),
+        Arc::new(UnavailableSpool),
+    );
+    let route_slug = RouteSlug::parse("historical-video").unwrap();
+    let provider_id = ProviderId::new();
+    let generation_id = RuntimeGenerationId::new();
+    let target = Target {
+        id: TargetId::new(),
+        routing_id: TargetId::new(),
+        provider_id,
+        upstream_model: "video-model".into(),
+        priority: 0,
+        weight: NonZeroU32::new(1).unwrap(),
+        timeout: DurationMs::new(1_000),
+    };
+    let route = Route {
+        id: RouteId::new(),
+        routing_id: RouteId::new(),
+        slug: route_slug.clone(),
+        operations: BTreeSet::from([OperationKind::VideoGet]),
+        overall_timeout: DurationMs::new(2_000),
+        max_attempts: NonZeroU16::new(1).unwrap(),
+        targets: vec![target],
+    };
+    let snapshot = Snapshot {
+        generation: RuntimeGeneration {
+            id: generation_id,
+            ordinal: 1,
+            activated_at: Utc::now(),
+        },
+        providers: BTreeMap::from([(
+            provider_id,
+            Provider {
+                id: provider_id,
+                revision_id: uuid::Uuid::now_v7(),
+                name: "historical-provider".into(),
+                kind: ProviderKind::OpenAi,
+                enabled: true,
+                active_credential: None,
+                capabilities: BTreeSet::from([Capability::new(
+                    "video-model",
+                    OperationKind::VideoGet,
+                    Surface::OpenAi,
+                    TransportMode::Unary,
+                )]),
+            },
+        )]),
+        routes: BTreeMap::from([(route_slug.clone(), route)]),
+        api_keys: BTreeMap::new(),
+    };
+    let calls = Arc::new(AtomicUsize::new(0));
+    let transport: Arc<dyn ProviderTransport> =
+        Arc::new(ReconciliationTransport(Arc::clone(&calls)));
+    let historical = Manager::reconciliation_bundle(snapshot, provider_id, transport).unwrap();
+    let mut operation = crate::protocols::openai::video::decode_video_get("upstream-job");
+    let Operation::Video(VideoOperation::Get(request)) = &mut operation else {
+        unreachable!()
+    };
+    request.route = Some(route_slug);
+
+    let result = service
+        .execute_reconciliation_result(
+            historical,
+            uuid::Uuid::now_v7(),
+            operation,
+            Surface::OpenAi,
+            RequiredTarget {
+                provider_id: provider_id.as_uuid(),
+                upstream_model: "video-model".into(),
+            },
+        )
+        .await
+        .unwrap();
+
+    assert!(matches!(*result, CanonicalResult::VideoJob(_)));
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    assert!(manager.pin().routes.is_empty());
+}
+
+#[tokio::test]
+async fn cancelled_provider_work_retains_tokens_and_releases_concurrency() {
+    for intermediate_usage in [false, true] {
+        for implicit_drop in [false, true] {
+            let effects = Arc::new(CleanupEffects::default());
+            let routed = routed_events(false, Arc::clone(&effects));
+            let mut accounting = routed.accounting;
+            accounting.usage_mut().observe(&Event::new(
+                1,
+                Kind::TextDelta {
+                    output_index: 0,
+                    text: "provider output".into(),
+                },
+            ));
+            if intermediate_usage {
+                accounting.usage_mut().observe(&routed.first);
+            }
+            if implicit_drop {
+                drop(accounting);
+            } else {
+                accounting.finish(RequestOutcome::client_cancelled());
+            }
+            tokio::time::timeout(Duration::from_secs(1), effects.released.notified())
+                .await
+                .expect("cancellation must release concurrency without reconciliation");
+            assert_eq!(effects.reconciles.load(Ordering::Relaxed), 0);
+            assert_eq!(effects.releases.load(Ordering::Relaxed), 1);
+        }
+    }
+}

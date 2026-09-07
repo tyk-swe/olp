@@ -11,7 +11,7 @@ services:
         condition: service_started
 
   jaeger:
-    image: cr.jaegertracing.io/jaegertracing/jaeger:2.20.0@sha256:46a886260e04002d8f45e213fc39063fa11a50446048fdaa64786fc0840cb9f8
+    image: cr.jaegertracing.io/jaegertracing/jaeger:2.20.0
     ports:
       - "127.0.0.1:16686:16686"
     read_only: true

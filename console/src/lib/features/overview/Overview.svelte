@@ -1,35 +1,38 @@
 <script lang="ts">
+  import { providerKeys } from '$lib/features/providers/providerKeys';
+  import { routeKeys } from '$lib/features/routes/routeKeys';
+  import { requestKeys } from '$lib/features/usage/history/requestKeys';
+
   import { resolve } from '$app/paths';
-  import { queryKeys } from '$lib/api/queryKeys';
   import { createQuery } from '@tanstack/svelte-query';
   import { onMount } from 'svelte';
   import NavIcon from '$lib/components/NavIcon.svelte';
-  import SetupChecklist from './SetupChecklist.svelte';
-  import { useRole } from '$lib/auth/useRole.svelte';
+  import SetupChecklist from '$lib/features/overview/SetupChecklist.svelte';
+  import { useRole } from '$lib/features/access/session/useRole.svelte';
   import { copyText } from '$lib/clipboard';
-  import { listProviders } from '$lib/api/management/providers';
-  import { listRoutes } from '$lib/api/management/routes';
-  import { listRequests } from '$lib/api/requests';
+  import { listProviders } from '$lib/features/providers/api';
+  import { listRoutes } from '$lib/features/routes/api';
+  import { listRequests } from '$lib/features/usage/history/api';
   import { errorMessage } from '$lib/api/http';
   import { formatDate, statusLabel, statusTone } from '$lib/format';
 
   let { controlConnected = true }: { controlConnected?: boolean } = $props();
-  let endpoint = $state('/openai/v1');
+  let endpoint = $state('/v1');
   let copied = $state(false);
   let copyError = $state('');
   let copyTimer: ReturnType<typeof setTimeout> | undefined;
   const access = useRole();
   const playgroundAllowed = $derived(access.can('playground.use'));
   const providers = createQuery(() => ({
-    queryKey: queryKeys.providers.all(),
+    queryKey: providerKeys.all(),
     queryFn: ({ signal }) => listProviders(signal)
   }));
   const routes = createQuery(() => ({
-    queryKey: queryKeys.routes.all(),
+    queryKey: routeKeys.all(),
     queryFn: ({ signal }) => listRoutes(signal)
   }));
   const recentRequests = createQuery(() => ({
-    queryKey: queryKeys.requests.overview(),
+    queryKey: requestKeys.overview(),
     queryFn: () => listRequests({ limit: 5 }),
     enabled: controlConnected
   }));
@@ -40,7 +43,7 @@
   const readyRoutes = $derived(routes.data?.length ?? 0);
 
   onMount(() => {
-    endpoint = `${window.location.origin}/openai/v1`;
+    endpoint = `${window.location.origin}/v1`;
     return () => copyTimer && clearTimeout(copyTimer);
   });
 

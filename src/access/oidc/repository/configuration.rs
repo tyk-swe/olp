@@ -1,0 +1,543 @@
+use std::collections::BTreeMap;
+
+use chrono::DateTime;
+use chrono::Utc;
+use sqlx::FromRow;
+use sqlx::Postgres;
+use sqlx::Transaction;
+use uuid::Uuid;
+
+use crate::access::audit_events::AuditEvent;
+use crate::access::audit_events::record_audit_event;
+use crate::access::oidc::repository::helpers::encrypted_from_row;
+use crate::access::oidc::repository::helpers::normalize_email;
+use crate::access::oidc::repository::helpers::required_string;
+use crate::access::oidc::repository::helpers::valid_claim_name;
+use crate::access::oidc::repository::types::OidcConfiguration;
+use crate::access::oidc::repository::types::OidcError;
+use crate::access::oidc::repository::types::OidcRoleMapping;
+use crate::access::oidc::repository::types::UpsertOidcConfiguration;
+
+pub(crate) const OIDC_CONFIGURATION_LOCK_ID: i64 = 0x4f4c_505f_4f49; // "OLP_OI"
+const MAX_MAPPINGS: usize = 500;
+
+pub async fn oidc_configuration(
+    pool: &sqlx::PgPool,
+) -> Result<Option<OidcConfiguration>, OidcError> {
+    let row = sqlx::query_as::<_, OidcConfigurationRow>(
+        "SELECT id, discovery_url, issuer, authorization_endpoint, token_endpoint, jwks_uri, \
+                    token_endpoint_auth_method, client_id, encrypted_client_secret, secret_nonce, \
+                    secret_key_version, scopes, email_claim, groups_claim, default_role::text AS \"default_role\", \
+                    enabled, etag, created_at, updated_at, \
+                    (SELECT editor.email FROM users editor \
+                     WHERE editor.id = oidc_configurations.updated_by) AS \"updated_by_email\", \
+                    COALESCE((SELECT jsonb_agg(jsonb_build_object( \
+                        'claim_value', mapping.email, 'role', mapping.role::text) ORDER BY mapping.email) \
+                        FROM oidc_email_role_mappings mapping WHERE mapping.configuration_id = oidc_configurations.id), \
+                        '[]'::jsonb) AS \"email_mappings\", \
+                    COALESCE((SELECT jsonb_agg(jsonb_build_object( \
+                        'claim_value', mapping.group_name, 'role', mapping.role::text) ORDER BY mapping.group_name) \
+                        FROM oidc_group_role_mappings mapping WHERE mapping.configuration_id = oidc_configurations.id), \
+                        '[]'::jsonb) AS \"group_mappings\" \
+             FROM oidc_configurations WHERE singleton LIMIT 1",
+    )
+        .fetch_optional(pool)
+        .await?;
+    let Some(row) = row else {
+        return Ok(None);
+    };
+    oidc_configuration_from_row(row).map(Some)
+}
+
+pub async fn enabled_oidc_configuration(
+    pool: &sqlx::PgPool,
+) -> Result<OidcConfiguration, OidcError> {
+    crate::access::oidc::repository::configuration::oidc_configuration(pool)
+        .await?
+        .ok_or(OidcError::NotConfigured)
+        .and_then(|configuration| {
+            if configuration.enabled {
+                Ok(configuration)
+            } else {
+                Err(OidcError::Disabled)
+            }
+        })
+}
+
+pub async fn upsert_oidc_configuration(
+    pool: &sqlx::PgPool,
+    provenance: &crate::database::RequestProvenance,
+    input: UpsertOidcConfiguration,
+) -> Result<OidcConfiguration, OidcError> {
+    validate_configuration(&input)?;
+    let mut transaction = pool.begin().await?;
+    sqlx::query("SELECT pg_advisory_xact_lock($1)")
+        .bind(OIDC_CONFIGURATION_LOCK_ID)
+        .fetch_one(&mut *transaction)
+        .await?;
+    check_configuration_precondition(&mut transaction, &input).await?;
+
+    let etag = Uuid::now_v7();
+    let now = Utc::now();
+    sqlx::query(
+        "INSERT INTO oidc_configurations \
+             (id, singleton, discovery_url, issuer, authorization_endpoint, token_endpoint, jwks_uri, \
+              token_endpoint_auth_method, client_id, encrypted_client_secret, secret_nonce, \
+              secret_key_version, scopes, email_claim, groups_claim, default_role, enabled, etag, \
+              updated_by, created_at, updated_at) \
+             VALUES ($1, true, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, \
+                     CAST($15::text AS user_role), $16, $17, $18, $19, $19) \
+             ON CONFLICT (singleton) DO UPDATE SET \
+               discovery_url = EXCLUDED.discovery_url, issuer = EXCLUDED.issuer, \
+               authorization_endpoint = EXCLUDED.authorization_endpoint, \
+               token_endpoint = EXCLUDED.token_endpoint, jwks_uri = EXCLUDED.jwks_uri, \
+               token_endpoint_auth_method = EXCLUDED.token_endpoint_auth_method, \
+               client_id = EXCLUDED.client_id, encrypted_client_secret = EXCLUDED.encrypted_client_secret, \
+               secret_nonce = EXCLUDED.secret_nonce, secret_key_version = EXCLUDED.secret_key_version, \
+               scopes = EXCLUDED.scopes, email_claim = EXCLUDED.email_claim, \
+               groups_claim = EXCLUDED.groups_claim, default_role = EXCLUDED.default_role, \
+               enabled = EXCLUDED.enabled, etag = EXCLUDED.etag, updated_by = EXCLUDED.updated_by, \
+               updated_at = EXCLUDED.updated_at",
+    )
+    .bind(input.id)
+    .bind(input.discovery_url.trim())
+    .bind(input.issuer.trim())
+    .bind(input.authorization_endpoint.trim())
+    .bind(input.token_endpoint.trim())
+    .bind(input.jwks_uri.trim())
+    .bind(&input.token_endpoint_auth_method)
+    .bind(input.client_id.trim())
+    .bind(&input.encrypted_client_secret.ciphertext)
+    .bind(input.encrypted_client_secret.nonce.to_vec())
+    .bind(i32::try_from(input.encrypted_client_secret.key_version).map_err(|_| OidcError::Corrupt)?)
+    .bind(&input.scopes)
+    .bind(&input.email_claim)
+    .bind(&input.groups_claim)
+    .bind(input.default_role.map(|role| role.as_str()))
+    .bind(input.enabled)
+    .bind(etag)
+    .bind(input.actor_user_id)
+    .bind(now)
+        .execute(&mut *transaction)
+        .await?;
+
+    sqlx::query("DELETE FROM oidc_email_role_mappings WHERE configuration_id = $1")
+        .bind(input.id)
+        .execute(&mut *transaction)
+        .await?;
+    sqlx::query("DELETE FROM oidc_group_role_mappings WHERE configuration_id = $1")
+        .bind(input.id)
+        .execute(&mut *transaction)
+        .await?;
+    insert_mappings(&mut transaction, input.id, &input.email_role_mappings, true).await?;
+    insert_mappings(
+        &mut transaction,
+        input.id,
+        &input.group_role_mappings,
+        false,
+    )
+    .await?;
+    // Configuration changes invalidate outstanding redirects and their
+    // encrypted PKCE material.
+    sqlx::query("DELETE FROM oidc_authorization_flows WHERE configuration_id = $1")
+        .bind(input.id)
+        .execute(&mut *transaction)
+        .await?;
+    record_audit_event(
+        &mut *transaction,
+        AuditEvent {
+            provenance,
+            actor: Some(input.actor_user_id),
+            action: "oidc.configuration_update",
+            resource_type: "oidc_configuration",
+            resource_id: Some(&input.id.to_string()),
+            outcome: "success",
+            occurred_at: Some(now),
+        },
+    )
+    .await?;
+    transaction.commit().await?;
+    crate::access::oidc::repository::configuration::oidc_configuration(pool)
+        .await?
+        .ok_or(OidcError::Corrupt)
+}
+
+async fn check_configuration_precondition(
+    transaction: &mut Transaction<'_, Postgres>,
+    input: &UpsertOidcConfiguration,
+) -> Result<(), OidcError> {
+    let current = sqlx::query_as::<_, UpsertOidcConfigurationRow>(
+        "SELECT id, etag FROM oidc_configurations WHERE singleton FOR UPDATE",
+    )
+    .fetch_optional(&mut **transaction)
+    .await?;
+    match current {
+        Some(row) => {
+            let current_id: Uuid = row.id;
+            let current_etag: Uuid = row.etag;
+            let expected = input.expected_etag.ok_or(OidcError::PreconditionRequired)?;
+            if current_id != input.id || current_etag != expected {
+                return Err(OidcError::PreconditionFailed);
+            }
+        }
+        None if input.expected_etag.is_some() => return Err(OidcError::PreconditionFailed),
+        None => {}
+    }
+
+    Ok(())
+}
+
+#[derive(Debug, FromRow)]
+struct OidcConfigurationRow {
+    id: Uuid,
+    discovery_url: Option<String>,
+    issuer: String,
+    authorization_endpoint: Option<String>,
+    token_endpoint: Option<String>,
+    jwks_uri: Option<String>,
+    token_endpoint_auth_method: String,
+    client_id: String,
+    encrypted_client_secret: Option<Vec<u8>>,
+    secret_nonce: Option<Vec<u8>>,
+    secret_key_version: Option<i32>,
+    scopes: Vec<String>,
+    email_claim: String,
+    groups_claim: String,
+    default_role: Option<String>,
+    enabled: bool,
+    etag: Uuid,
+    created_at: DateTime<Utc>,
+    updated_at: DateTime<Utc>,
+    updated_by_email: Option<String>,
+    email_mappings: serde_json::Value,
+    group_mappings: serde_json::Value,
+}
+
+fn oidc_configuration_from_row(row: OidcConfigurationRow) -> Result<OidcConfiguration, OidcError> {
+    let id: Uuid = row.id;
+    let discovery_url = required_string(row.discovery_url)?;
+    let authorization_endpoint = required_string(row.authorization_endpoint)?;
+    let token_endpoint = required_string(row.token_endpoint)?;
+    let jwks_uri = required_string(row.jwks_uri)?;
+    let ciphertext: Option<Vec<u8>> = row.encrypted_client_secret;
+    let nonce: Option<Vec<u8>> = row.secret_nonce;
+    let key_version: Option<i32> = row.secret_key_version;
+    let encrypted_client_secret = encrypted_from_row(
+        key_version.ok_or(OidcError::Corrupt)?,
+        nonce.ok_or(OidcError::Corrupt)?,
+        ciphertext.ok_or(OidcError::Corrupt)?,
+    )?;
+    Ok(OidcConfiguration {
+        id,
+        discovery_url,
+        issuer: row.issuer,
+        authorization_endpoint,
+        token_endpoint,
+        jwks_uri,
+        token_endpoint_auth_method: row.token_endpoint_auth_method,
+        client_id: row.client_id,
+        encrypted_client_secret,
+        scopes: row.scopes,
+        email_claim: row.email_claim,
+        groups_claim: row.groups_claim,
+        default_role: row
+            .default_role
+            .map(|value| value.parse().map_err(|_| OidcError::Corrupt))
+            .transpose()?,
+        email_role_mappings: mappings_from_json(row.email_mappings)?,
+        group_role_mappings: mappings_from_json(row.group_mappings)?,
+        enabled: row.enabled,
+        etag: row.etag,
+        created_at: row.created_at,
+        updated_at: row.updated_at,
+        updated_by_email: row.updated_by_email,
+    })
+}
+
+fn validate_configuration(input: &UpsertOidcConfiguration) -> Result<(), OidcError> {
+    if input.client_id.trim().is_empty()
+        || input.client_id.len() > 512
+        || input.client_id.chars().any(char::is_control)
+    {
+        return Err(OidcError::Invalid(
+            "client_id must contain 1-512 characters".to_owned(),
+        ));
+    }
+    if !matches!(
+        input.token_endpoint_auth_method.as_str(),
+        "client_secret_basic" | "client_secret_post"
+    ) {
+        return Err(OidcError::Invalid(
+            "unsupported token endpoint authentication method".to_owned(),
+        ));
+    }
+    if input.scopes.is_empty()
+        || input.scopes.len() > 20
+        || !input.scopes.iter().any(|scope| scope == "openid")
+        || input.scopes.iter().any(|scope| {
+            scope.is_empty()
+                || scope.len() > 128
+                || !scope.bytes().all(|byte| byte.is_ascii_graphic())
+        })
+    {
+        return Err(OidcError::Invalid(
+            "scopes must be URL-safe and include openid".to_owned(),
+        ));
+    }
+    if !valid_claim_name(&input.email_claim) || !valid_claim_name(&input.groups_claim) {
+        return Err(OidcError::Invalid("claim names are invalid".to_owned()));
+    }
+    validate_mappings(&input.email_role_mappings, true)?;
+    validate_mappings(&input.group_role_mappings, false)?;
+    Ok(())
+}
+
+fn validate_mappings(mappings: &[OidcRoleMapping], email: bool) -> Result<(), OidcError> {
+    if mappings.len() > MAX_MAPPINGS {
+        return Err(OidcError::Invalid("too many role mappings".to_owned()));
+    }
+    let mut seen = BTreeMap::new();
+    for mapping in mappings {
+        let value = if email {
+            normalize_email(&mapping.claim_value)?
+        } else {
+            let value = mapping.claim_value.trim();
+            if value.is_empty() || value.len() > 256 || value.chars().any(char::is_control) {
+                return Err(OidcError::Invalid("group mapping is invalid".to_owned()));
+            }
+            value.to_owned()
+        };
+        if seen.insert(value, mapping.role).is_some() {
+            return Err(OidcError::Invalid(
+                "role mappings contain a duplicate".to_owned(),
+            ));
+        }
+    }
+    Ok(())
+}
+
+async fn insert_mappings(
+    transaction: &mut Transaction<'_, Postgres>,
+    configuration_id: Uuid,
+    mappings: &[OidcRoleMapping],
+    email: bool,
+) -> Result<(), OidcError> {
+    for mapping in mappings {
+        let value = if email {
+            normalize_email(&mapping.claim_value)?
+        } else {
+            mapping.claim_value.trim().to_owned()
+        };
+        if email {
+            sqlx::query(
+                "INSERT INTO oidc_email_role_mappings (configuration_id, email, role) \
+                 VALUES ($1, $2, CAST(CAST($3 AS text) AS user_role))",
+            )
+            .bind(configuration_id)
+            .bind(&value)
+            .bind(mapping.role.as_str())
+            .execute(&mut **transaction)
+            .await?;
+        } else {
+            sqlx::query(
+                "INSERT INTO oidc_group_role_mappings (configuration_id, group_name, role) \
+                 VALUES ($1, $2, CAST(CAST($3 AS text) AS user_role))",
+            )
+            .bind(configuration_id)
+            .bind(&value)
+            .bind(mapping.role.as_str())
+            .execute(&mut **transaction)
+            .await?;
+        }
+    }
+    Ok(())
+}
+
+fn mappings_from_json(value: serde_json::Value) -> Result<Vec<OidcRoleMapping>, OidcError> {
+    value
+        .as_array()
+        .ok_or(OidcError::Corrupt)?
+        .iter()
+        .map(|row| {
+            Ok(OidcRoleMapping {
+                claim_value: row
+                    .get("claim_value")
+                    .and_then(serde_json::Value::as_str)
+                    .ok_or(OidcError::Corrupt)?
+                    .to_owned(),
+                role: row
+                    .get("role")
+                    .and_then(serde_json::Value::as_str)
+                    .ok_or(OidcError::Corrupt)?
+                    .parse()
+                    .map_err(|_| OidcError::Corrupt)?,
+            })
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::access::policy::Role;
+    use serde_json::json;
+
+    use crate::access::oidc::repository::configuration::*;
+    use crate::crypto::envelope::EncryptedSecret;
+
+    fn input() -> UpsertOidcConfiguration {
+        UpsertOidcConfiguration {
+            id: Uuid::now_v7(),
+            discovery_url: "https://idp.example/.well-known/openid-configuration".to_owned(),
+            issuer: "https://idp.example".to_owned(),
+            authorization_endpoint: "https://idp.example/authorize".to_owned(),
+            token_endpoint: "https://idp.example/token".to_owned(),
+            jwks_uri: "https://idp.example/jwks".to_owned(),
+            token_endpoint_auth_method: "client_secret_basic".to_owned(),
+            client_id: "openllmproxy".to_owned(),
+            encrypted_client_secret: EncryptedSecret {
+                key_version: 1,
+                nonce: [0; 12],
+                ciphertext: vec![0; 16],
+            },
+            scopes: vec!["openid".to_owned(), "email".to_owned()],
+            email_claim: "email".to_owned(),
+            groups_claim: "realm.groups".to_owned(),
+            default_role: Some(Role::Viewer),
+            email_role_mappings: vec![],
+            group_role_mappings: vec![],
+            enabled: true,
+            actor_user_id: Uuid::now_v7(),
+            expected_etag: None,
+        }
+    }
+
+    fn mapping(value: &str, role: Role) -> OidcRoleMapping {
+        OidcRoleMapping {
+            claim_value: value.to_owned(),
+            role,
+        }
+    }
+
+    type ConfigurationMutation = fn(&mut UpsertOidcConfiguration);
+
+    fn assert_invalid_configurations(cases: &[(&str, ConfigurationMutation)]) {
+        for (name, mutate) in cases {
+            let mut candidate = input();
+            mutate(&mut candidate);
+            assert!(
+                matches!(
+                    validate_configuration(&candidate),
+                    Err(OidcError::Invalid(_))
+                ),
+                "accepted {name}"
+            );
+        }
+    }
+
+    #[test]
+    fn configuration_validation_accepts_both_supported_client_auth_methods() {
+        for method in ["client_secret_basic", "client_secret_post"] {
+            let mut candidate = input();
+            candidate.token_endpoint_auth_method = method.to_owned();
+            validate_configuration(&candidate).unwrap();
+        }
+    }
+
+    #[test]
+    fn configuration_validation_rejects_invalid_client_scope_and_claim_shapes() {
+        assert_invalid_configurations(&[
+            ("empty client ID", |input| input.client_id.clear()),
+            ("oversized client ID", |input| {
+                input.client_id = "a".repeat(513)
+            }),
+            ("control character in client ID", |input| {
+                input.client_id = "client\ncontrol".to_owned()
+            }),
+            ("unsupported client authentication", |input| {
+                input.token_endpoint_auth_method = "private_key_jwt".to_owned()
+            }),
+            ("missing openid scope", |input| {
+                input.scopes = vec!["email".to_owned()]
+            }),
+            ("non-graphic scope", |input| {
+                input.scopes = vec!["openid".to_owned(), "not graphic".to_owned()]
+            }),
+            ("too many scopes", |input| {
+                input.scopes = std::iter::repeat_n("openid".to_owned(), 21).collect()
+            }),
+            ("invalid claim punctuation", |input| {
+                input.email_claim = "email/claim".to_owned()
+            }),
+        ]);
+    }
+
+    #[test]
+    fn role_mapping_validation_normalizes_duplicates_and_bounds_inventory() {
+        for (email_mapping, mappings) in [
+            (
+                true,
+                vec![
+                    mapping(" Owner@Example.test ", Role::Owner),
+                    mapping("owner@example.TEST", Role::Viewer),
+                ],
+            ),
+            (
+                false,
+                vec![
+                    mapping(" operators ", Role::Operator),
+                    mapping("operators", Role::Developer),
+                ],
+            ),
+            (false, vec![mapping("group\nname", Role::Viewer)]),
+        ] {
+            let mut candidate = input();
+            if email_mapping {
+                candidate.email_role_mappings = mappings;
+            } else {
+                candidate.group_role_mappings = mappings;
+            }
+            assert!(validate_configuration(&candidate).is_err());
+        }
+
+        let too_many = (0..=MAX_MAPPINGS)
+            .map(|index| OidcRoleMapping {
+                claim_value: format!("group-{index}"),
+                role: Role::Viewer,
+            })
+            .collect::<Vec<_>>();
+        assert!(validate_mappings(&too_many, false).is_err());
+    }
+
+    #[test]
+    fn stored_role_mappings_are_parsed_strictly() {
+        assert_eq!(
+            mappings_from_json(json!([
+                {"claim_value": "owner@example.test", "role": "owner"},
+                {"claim_value": "developers", "role": "developer"}
+            ]))
+            .unwrap(),
+            vec![
+                mapping("owner@example.test", Role::Owner),
+                mapping("developers", Role::Developer),
+            ]
+        );
+
+        for corrupt in [
+            json!({}),
+            json!([{"role": "owner"}]),
+            json!([{"claim_value": "owner@example.test"}]),
+            json!([{"claim_value": "owner@example.test", "role": "superuser"}]),
+        ] {
+            assert!(matches!(
+                mappings_from_json(corrupt),
+                Err(OidcError::Corrupt)
+            ));
+        }
+    }
+}
+
+#[derive(sqlx::FromRow)]
+struct UpsertOidcConfigurationRow {
+    id: uuid::Uuid,
+    etag: uuid::Uuid,
+}

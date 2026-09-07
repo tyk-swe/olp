@@ -2,9 +2,9 @@
   import { goto, replaceState } from '$app/navigation';
   import { resolve } from '$app/paths';
   import { onDestroy, onMount } from 'svelte';
-  import { acceptInvitation } from '$lib/api/auth';
+  import { acceptInvitation } from '$lib/features/access/session/auth';
   import { ApiProblem, applyServerFieldErrors } from '$lib/api/http';
-  import { authLifecycle } from '$lib/auth/lifecycle';
+  import { authLifecycle } from '$lib/features/access/session/lifecycle';
   import SetupFrame from '$lib/components/SetupFrame.svelte';
   import {
     PASSWORD_MAX_LENGTH,
@@ -15,7 +15,7 @@
     type InvitationAcceptanceErrors,
     type InvitationAcceptanceValues,
     validateInvitationAcceptance
-  } from './invitationValidation';
+  } from '$lib/features/access/invitations/invitationValidation';
 
   let token = $state('');
   let view = $state<'checking' | 'ready' | 'invalid' | 'expired'>('checking');

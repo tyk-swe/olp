@@ -1,0 +1,355 @@
+use crate::support::route_fixtures::insert_provider;
+use crate::support::route_fixtures::insert_unbased_route_draft;
+use olp::access::identity::InstallationSetupInput;
+use olp::crypto::session_material::SessionMaterial;
+use olp::ids::RouteSlug;
+use olp::protocols::canonical::identity::OperationKind;
+use olp::protocols::canonical::identity::Surface;
+use olp::protocols::canonical::identity::TransportMode;
+use olp::providers::error::Error;
+use olp::routes::records::ReplaceRouteDraftInput;
+use olp::routes::selection::select_attempts;
+use olp::runtime::snapshot::Snapshot;
+use sqlx::PgPool;
+use sqlx::Row;
+use uuid::Uuid;
+
+#[tokio::test]
+#[ignore = "requires OLP_TEST_DATABASE_ADMIN_URL and OLP_TEST_DATABASE_URL_PREFIX"]
+async fn route_draft_simulation_matches_activated_runtime_attempts() {
+    let db = olp::test_support::TestDb::create_migrated("route_draft_simulation").await;
+    let pool = db.pool(5).await;
+    let (owner, _) = olp::access::identity::setup::setup_installation_with_session(
+        &pool,
+        &olp::database::RequestProvenance::default(),
+        InstallationSetupInput {
+            installation_name: "Route simulation".to_owned(),
+            email: "owner@route-simulation.test".to_owned(),
+            display_name: "Owner".to_owned(),
+            password_hash: "test-password-hash".to_owned(),
+        },
+        &SessionMaterial::generate(),
+        chrono::Duration::hours(1),
+    )
+    .await
+    .unwrap();
+    let actor = owner.user_id;
+    let primary = insert_provider(&pool, actor, "simulation-primary").await;
+    let fallback = insert_provider(&pool, actor, "simulation-fallback").await;
+    let draft = insert_unbased_route_draft(
+        &pool,
+        actor,
+        "simulation",
+        &[primary.model_id, fallback.model_id],
+    )
+    .await;
+    let initial_targets = olp::routes::repository::get_route_draft(&pool, draft.id)
+        .await
+        .unwrap()
+        .targets;
+    let unchanged_etag = olp::routes::repository::replace_route_draft(
+        &pool,
+        &olp::database::RequestProvenance::default(),
+        draft.id,
+        draft.etag,
+        &ReplaceRouteDraftInput {
+            slug: "simulation".to_owned(),
+            operations: vec!["video_get".parse().unwrap()],
+            overall_timeout_ms: 31_000,
+            max_attempts: 2,
+            targets: vec![
+                (primary.model_id, 0, 1, 20_000),
+                (fallback.model_id, 0, 1, 20_000),
+            ],
+        },
+        actor,
+    )
+    .await
+    .unwrap();
+    let unchanged_targets = olp::routes::repository::get_route_draft(&pool, draft.id)
+        .await
+        .unwrap()
+        .targets;
+    assert_eq!(initial_targets.len(), unchanged_targets.len());
+    assert!(
+        initial_targets
+            .iter()
+            .zip(&unchanged_targets)
+            .all(|(old, new)| old.id != new.id && old.routing_id == new.routing_id)
+    );
+
+    let replacement_etag = olp::routes::repository::replace_route_draft(
+        &pool,
+        &olp::database::RequestProvenance::default(),
+        draft.id,
+        unchanged_etag,
+        &ReplaceRouteDraftInput {
+            slug: "simulation".to_owned(),
+            operations: vec!["video_get".parse().unwrap()],
+            overall_timeout_ms: 30_000,
+            max_attempts: 2,
+            targets: vec![
+                (fallback.model_id, 0, 1, 20_000),
+                (primary.model_id, 0, 1, 20_000),
+            ],
+        },
+        actor,
+    )
+    .await
+    .unwrap();
+    let draft = olp::routes::repository::get_route_draft(&pool, draft.id)
+        .await
+        .unwrap();
+    assert!(
+        draft
+            .targets
+            .iter()
+            .all(|target| !initial_targets.iter().any(|old| old.id == target.id))
+    );
+    assert!(draft.targets.iter().all(|target| {
+        !initial_targets
+            .iter()
+            .any(|old| old.routing_id == target.routing_id)
+    }));
+
+    let seed = "route-draft-simulation-affinity";
+    let simulation = olp::routes::repository::simulate_route_draft(
+        &pool,
+        draft.id,
+        "video_get".parse().unwrap(),
+        "openai".parse().unwrap(),
+        "unary".parse().unwrap(),
+        seed,
+    )
+    .await
+    .unwrap();
+    let simulated_routing_ids = simulation
+        .targets
+        .iter()
+        .filter_map(|target| {
+            target.attempt.map(|_| {
+                draft
+                    .targets
+                    .iter()
+                    .find(|draft_target| draft_target.id == target.target_id)
+                    .unwrap()
+                    .routing_id
+            })
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(simulated_routing_ids.len(), 2);
+
+    // A competing activation can claim the slug after simulation. The draft
+    // identity must still produce the simulated order when this activation
+    // attaches its revision to that competing route.
+    let conflicting_route_id = Uuid::now_v7();
+    sqlx::query("INSERT INTO routes (id, slug, created_by) VALUES ($1, 'simulation', $2)")
+        .bind(conflicting_route_id)
+        .bind(actor)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let (validated_etag, _) = olp::routes::drafts::validate_route_draft(
+        &pool,
+        &olp::database::RequestProvenance::default(),
+        draft.id,
+        replacement_etag,
+        actor,
+    )
+    .await
+    .unwrap();
+    let first_activation = olp::routes::drafts::activate_route_draft(
+        &pool,
+        &olp::database::RequestProvenance::default(),
+        draft.id,
+        validated_etag,
+        actor,
+        "route-simulation-activate",
+    )
+    .await
+    .unwrap();
+    assert_eq!(first_activation.route_id, conflicting_route_id);
+    assert_ne!(first_activation.route_id, draft.id);
+    // Activation consumes the draft. The ETag it was activated under is spent,
+    // and the draft has to pass validation again before it can publish a
+    // second revision.
+    assert!(matches!(
+        olp::routes::drafts::activate_route_draft(
+            &(pool),
+            &olp::database::RequestProvenance::default(),
+            draft.id,
+            validated_etag,
+            actor,
+            "route-simulation-activate-stale",
+        )
+        .await,
+        Err(Error::PreconditionFailed)
+    ));
+    let (revalidated_etag, _) = olp::routes::drafts::validate_route_draft(
+        &pool,
+        &olp::database::RequestProvenance::default(),
+        draft.id,
+        first_activation.draft_etag,
+        actor,
+    )
+    .await
+    .unwrap();
+    let second_activation = olp::routes::drafts::activate_route_draft(
+        &pool,
+        &olp::database::RequestProvenance::default(),
+        draft.id,
+        revalidated_etag,
+        actor,
+        "route-simulation-activate-repeat",
+    )
+    .await
+    .unwrap();
+    assert_eq!(second_activation.route_id, first_activation.route_id);
+    assert_ne!(second_activation.revision_id, first_activation.revision_id);
+
+    let first_targets = revision_target_identities(&pool, first_activation.revision_id).await;
+    let second_targets = revision_target_identities(&pool, second_activation.revision_id).await;
+    assert_eq!(first_targets.len(), second_targets.len());
+    assert!(first_targets.iter().zip(&second_targets).all(
+        |((first_id, first_routing_id), (second_id, second_routing_id))| {
+            first_id != second_id && first_routing_id == second_routing_id
+        }
+    ));
+
+    let compiled = olp::runtime::publication::compiler::compile_and_publish_runtime(&pool, actor)
+        .await
+        .unwrap();
+    let runtime: Snapshot = serde_json::from_slice(&compiled.payload).unwrap();
+    let route_slug = RouteSlug::parse("simulation").unwrap();
+    let route = runtime.routes.get(&route_slug).unwrap();
+    assert_eq!(route.id.as_uuid(), second_activation.route_id);
+    assert_eq!(route.routing_id.as_uuid(), draft.routing_id);
+    assert_eq!(
+        route
+            .targets
+            .iter()
+            .map(|target| target.id.as_uuid())
+            .collect::<Vec<_>>(),
+        second_targets
+            .iter()
+            .map(|(target_id, _)| *target_id)
+            .collect::<Vec<_>>()
+    );
+    let runtime_routing_ids = select_attempts(
+        &runtime,
+        &route_slug,
+        OperationKind::VideoGet,
+        Surface::OpenAi,
+        TransportMode::Unary,
+        seed.as_bytes(),
+    )
+    .unwrap()
+    .into_iter()
+    .map(|attempt| {
+        route
+            .targets
+            .iter()
+            .find(|target| target.id == attempt.target_id)
+            .unwrap()
+            .routing_id
+            .as_uuid()
+    })
+    .collect::<Vec<_>>();
+    assert_eq!(simulated_routing_ids, runtime_routing_ids);
+}
+
+async fn revision_target_identities(pool: &PgPool, revision_id: Uuid) -> Vec<(Uuid, Uuid)> {
+    sqlx::query(
+        "SELECT id, routing_id FROM route_revision_targets \
+         WHERE route_revision_id = $1 ORDER BY position",
+    )
+    .bind(revision_id)
+    .fetch_all(pool)
+    .await
+    .unwrap()
+    .into_iter()
+    .map(|row| (row.get("id"), row.get("routing_id")))
+    .collect()
+}
+
+/// Draft pages are read with three queries for the whole page. Every draft must
+/// still get exactly its own operations and targets, in position order, with
+/// unavailable targets decorated rather than dropped and empty drafts intact.
+#[tokio::test]
+#[ignore = "requires OLP_TEST_DATABASE_ADMIN_URL and OLP_TEST_DATABASE_URL_PREFIX"]
+async fn route_draft_pages_are_read_in_batches() {
+    let db = olp::test_support::TestDb::create_migrated("route_draft_pages").await;
+    let pool = db.pool(5).await;
+    let (owner, _) = olp::access::identity::setup::setup_installation_with_session(
+        &pool,
+        &olp::database::RequestProvenance::default(),
+        InstallationSetupInput {
+            installation_name: "Route draft pages".to_owned(),
+            email: "owner@route-draft-pages.test".to_owned(),
+            display_name: "Owner".to_owned(),
+            password_hash: "test-password-hash".to_owned(),
+        },
+        &SessionMaterial::generate(),
+        chrono::Duration::hours(1),
+    )
+    .await
+    .unwrap();
+    let actor = owner.user_id;
+    let alpha = insert_provider(&pool, actor, "page-alpha").await;
+    let beta = insert_provider(&pool, actor, "page-beta").await;
+    let ordered = insert_unbased_route_draft(
+        &pool,
+        actor,
+        "page-ordered",
+        &[beta.model_id, alpha.model_id],
+    )
+    .await;
+    let empty = insert_unbased_route_draft(&pool, actor, "page-empty", &[]).await;
+    let single = insert_unbased_route_draft(&pool, actor, "page-single", &[alpha.model_id]).await;
+    sqlx::query("UPDATE providers SET state = 'disabled'::provider_state WHERE id = $1")
+        .bind(alpha.provider_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let page = olp::routes::repository::list_route_drafts(&pool, None, 10)
+        .await
+        .unwrap();
+    assert_eq!(page.items.len(), 3);
+    assert!(page.next_cursor.is_none());
+    let by_id = |id: Uuid| page.items.iter().find(|draft| draft.id == id).unwrap();
+
+    let draft = by_id(ordered.id);
+    assert_eq!(
+        draft
+            .targets
+            .iter()
+            .map(|target| (target.upstream_model.as_str(), target.available))
+            .collect::<Vec<_>>(),
+        vec![("page-beta-model", true), ("page-alpha-model", false)]
+    );
+    assert_eq!(draft.operations, vec!["video_get".parse().unwrap()]);
+    let draft = by_id(empty.id);
+    assert!(draft.targets.is_empty());
+    assert_eq!(draft.operations, vec!["video_get".parse().unwrap()]);
+    let draft = by_id(single.id);
+    assert_eq!(draft.targets.len(), 1);
+    assert!(!draft.targets[0].available);
+
+    let first_page = olp::routes::repository::list_route_drafts(&pool, None, 2)
+        .await
+        .unwrap();
+    assert_eq!(first_page.items.len(), 2);
+    let cursor = first_page.next_cursor.expect("a third draft remains");
+    let second_page = olp::routes::repository::list_route_drafts(&pool, Some(cursor), 2)
+        .await
+        .unwrap();
+    assert_eq!(second_page.items.len(), 1);
+    assert!(second_page.next_cursor.is_none());
+
+    assert!(matches!(
+        olp::routes::repository::get_route_drafts(&(pool), &[ordered.id, Uuid::now_v7()]).await,
+        Err(Error::NotFound)
+    ));
+}

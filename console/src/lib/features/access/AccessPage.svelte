@@ -1,9 +1,9 @@
 <script lang="ts">
-  import { useRole } from '$lib/auth/useRole.svelte';
-  import InvitationsPanel from './invitations/InvitationsPanel.svelte';
-  import OidcConfigurationPanel from './oidc/OidcConfigurationPanel.svelte';
-  import SessionsPanel from './sessions/SessionsPanel.svelte';
-  import MembersPanel from './users/MembersPanel.svelte';
+  import { useRole } from '$lib/features/access/session/useRole.svelte';
+  import InvitationsPanel from '$lib/features/access/invitations/InvitationsPanel.svelte';
+  import OidcConfigurationPanel from '$lib/features/access/oidc/OidcConfigurationPanel.svelte';
+  import SessionsPanel from '$lib/features/access/sessions/SessionsPanel.svelte';
+  import MembersPanel from '$lib/features/access/users/MembersPanel.svelte';
 
   type Tab = 'members' | 'invitations' | 'sessions' | 'oidc';
   const tabs: ReadonlyArray<{ id: Tab; label: string }> = [

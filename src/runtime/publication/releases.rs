@@ -1,0 +1,150 @@
+use crate::runtime::snapshot::Snapshot;
+use sha2::Digest;
+use sha2::Sha256;
+use uuid::Uuid;
+
+use crate::database::error::Error;
+
+use crate::runtime::publication::PublishedRuntimeRelease;
+
+#[derive(sqlx::FromRow)]
+struct RuntimeReleaseRow {
+    id: Uuid,
+    sequence: i64,
+    compiled_release: Vec<u8>,
+    release_sha256: Vec<u8>,
+    created_at: chrono::DateTime<chrono::Utc>,
+}
+
+/// Upper bound on rows examined while searching for verified releases. A run
+/// of corrupt rows must not hide an intact older release, but neither should
+/// one call walk an unbounded history.
+const RUNTIME_RELEASE_SCAN_LIMIT: usize = 1_024;
+
+pub async fn valid_runtime_release(
+    pool: &sqlx::PgPool,
+    generation_id: Uuid,
+) -> Result<PublishedRuntimeRelease, Error> {
+    let row = sqlx::query_as::<_, RuntimeReleaseRow>(
+        "SELECT id, sequence, compiled_release, release_sha256, created_at \
+             FROM runtime_generations WHERE id = $1",
+    )
+    .bind(generation_id)
+    .fetch_optional(pool)
+    .await?
+    .ok_or(Error::CorruptRelease)?;
+    let payload = row.compiled_release;
+    let actual_sha: [u8; 32] = Sha256::digest(&payload).into();
+    if row.release_sha256.as_slice() != actual_sha
+        || verify_release_envelope(&payload, row.id, row.sequence).is_err()
+    {
+        return Err(Error::CorruptRelease);
+    }
+    Ok(PublishedRuntimeRelease {
+        generation_id: row.id,
+        sequence: row.sequence,
+        payload,
+        payload_sha256: actual_sha,
+        created_at: row.created_at,
+    })
+}
+
+/// Returns verified releases newer than the supplied installed sequence.
+/// Pollers use this to avoid decoding unchanged immutable snapshots.
+///
+/// Verification is a Rust-side check of the stored digest and the release
+/// envelope, so the scan pages descending and keeps reading past corrupt
+/// rows. Truncating to `limit` in SQL first would let a run of `limit`
+/// corrupt releases hide every intact one behind it, defeating the
+/// last-known-good fallback.
+pub async fn recent_valid_runtime_releases_after(
+    pool: &sqlx::PgPool,
+    limit: u16,
+    installed_sequence: Option<u64>,
+) -> Result<Vec<PublishedRuntimeRelease>, Error> {
+    let installed_sequence = installed_sequence
+        .map(i64::try_from)
+        .transpose()
+        .map_err(|_| Error::CorruptRelease)?;
+    let wanted = usize::from(limit.clamp(1, 100));
+    let page_size = i64::try_from(wanted).unwrap_or(100);
+    let mut releases = Vec::with_capacity(wanted);
+    let mut scanned = 0_usize;
+    let mut before_sequence: Option<i64> = None;
+    while releases.len() < wanted && scanned < RUNTIME_RELEASE_SCAN_LIMIT {
+        let rows = sqlx::query_as::<_, RecentValidRuntimeReleasesAfterRow>(
+            "SELECT id, sequence, compiled_release, release_sha256, created_at \
+                 FROM runtime_generations \
+                 WHERE ($1::bigint IS NULL OR sequence > $1) \
+                   AND ($2::bigint IS NULL OR sequence < $2) \
+                 ORDER BY sequence DESC LIMIT $3",
+        )
+        .bind(installed_sequence)
+        .bind(before_sequence)
+        .bind(page_size)
+        .fetch_all(pool)
+        .await?;
+        let exhausted = rows.len() < wanted;
+        for row in rows {
+            scanned += 1;
+            let payload: Vec<u8> = row.compiled_release;
+            let stored_sha: Vec<u8> = row.release_sha256;
+            let generation_id: Uuid = row.id;
+            let sequence: i64 = row.sequence;
+            before_sequence = Some(sequence);
+            let actual_sha: [u8; 32] = Sha256::digest(&payload).into();
+            if stored_sha.as_slice() != actual_sha
+                || verify_release_envelope(&payload, generation_id, sequence).is_err()
+            {
+                tracing::error!(
+                    %generation_id,
+                    sequence,
+                    "skipping corrupt runtime release while searching for last-known-good"
+                );
+                continue;
+            }
+            releases.push(PublishedRuntimeRelease {
+                generation_id,
+                sequence,
+                payload,
+                payload_sha256: actual_sha,
+                created_at: row.created_at,
+            });
+            if releases.len() == wanted {
+                break;
+            }
+        }
+        if exhausted {
+            break;
+        }
+    }
+    Ok(releases)
+}
+
+pub(crate) fn verify_release_envelope(
+    payload: &[u8],
+    generation_id: Uuid,
+    sequence: i64,
+) -> Result<(), Error> {
+    if generation_id.get_version_num() != 7 {
+        return Err(Error::CorruptRelease);
+    }
+    let ordinal = u64::try_from(sequence).map_err(|_| Error::CorruptRelease)?;
+    let snapshot = Snapshot::from_persisted_slice(payload).map_err(|_| Error::CorruptRelease)?;
+    if snapshot.generation.id.as_uuid() != generation_id
+        || snapshot.generation.ordinal != ordinal
+        || snapshot.validate().is_err()
+    {
+        return Err(Error::CorruptRelease);
+    }
+    Ok(())
+}
+
+#[derive(sqlx::FromRow)]
+struct RecentValidRuntimeReleasesAfterRow {
+    id: uuid::Uuid,
+    sequence: i64,
+    compiled_release: Vec<u8>,
+    release_sha256: Vec<u8>,
+    created_at: chrono::DateTime<chrono::Utc>,
+}

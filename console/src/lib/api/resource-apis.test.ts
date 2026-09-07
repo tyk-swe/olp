@@ -1,12 +1,15 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { listAudit } from './audit';
-import { listProviderHealth, listRequestMetadataGatewayEpochs } from './health';
-import { ApiProblem } from './http';
-import { listMediaJobs } from './media-jobs';
-import { listPricing } from './pricing';
-import { listRequests } from './requests';
-import { listRuntimeGenerations } from './runtime';
-import { captureRequests, jsonResponse } from './test/requestCapture';
+import { listAudit } from '$lib/features/access/audit/api';
+import {
+  listProviderHealth,
+  listRequestMetadataGatewayEpochs
+} from '$lib/features/runtime/health/api';
+import { ApiProblem } from '$lib/api/http';
+import { listMediaJobs } from '$lib/features/media/api';
+import { listPricing } from '$lib/features/usage/pricing';
+import { listRequests } from '$lib/features/usage/history/api';
+import { listRuntimeGenerations } from '$lib/features/runtime/api';
+import { captureRequests, jsonResponse } from '$lib/api/test/requestCapture';
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -185,8 +188,12 @@ describe('resource API errors', () => {
           title: 'Rate limited',
           detail: 'Retry after the window',
           status: 429,
-          instance: '/api/v1/requests',
-          errors: { request: ['Retry after the advertised window.'] }
+          instance: '/api/v3/requests',
+          errors: {
+            request: [
+              { code: 'invalid', message: 'Retry after the advertised window.' }
+            ]
+          }
         },
         { status: 503, headers: { 'content-type': 'application/problem+json' } }
       )
@@ -200,8 +207,12 @@ describe('resource API errors', () => {
       title: 'Rate limited',
       detail: 'Retry after the window',
       status: 429,
-      instance: '/api/v1/requests',
-      errors: { request: ['Retry after the advertised window.'] }
+      instance: '/api/v3/requests',
+      errors: {
+        request: [
+          { code: 'invalid', message: 'Retry after the advertised window.' }
+        ]
+      }
     });
   });
 

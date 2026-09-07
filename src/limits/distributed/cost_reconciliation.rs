@@ -1,0 +1,59 @@
+use chrono::DateTime;
+use chrono::Utc;
+use sqlx::Connection as _;
+use sqlx::PgConnection;
+
+use crate::database::error::Error;
+use crate::limits::distributed::DistributedLimiter;
+use crate::limits::distributed::costs::CostReconciliationError;
+use crate::limits::distributed::costs::CostReconciliationReport;
+
+const COST_RECONCILIATION_LOCK_ID: i64 = 0x4f4c_505f_4352; // "OLP_CR"
+
+/// Owns the fleet lock on a detached session. Dropping it closes the session,
+/// including on cancellation, instead of returning a locked connection to the pool.
+pub struct CostReconciliationLeader {
+    connection: PgConnection,
+}
+
+pub async fn try_acquire_cost_reconciliation_leader(
+    pool: &sqlx::PgPool,
+) -> Result<Option<CostReconciliationLeader>, Error> {
+    let mut connection = pool.acquire().await?.detach();
+    let acquired = sqlx::query_scalar::<_, bool>("SELECT pg_try_advisory_lock($1) AS \"acquired\"")
+        .bind(COST_RECONCILIATION_LOCK_ID)
+        .fetch_one(&mut connection)
+        .await?;
+    if !acquired {
+        connection.close().await?;
+        return Ok(None);
+    }
+    Ok(Some(CostReconciliationLeader { connection }))
+}
+
+impl CostReconciliationLeader {
+    pub async fn reconcile(
+        &mut self,
+        limiter: &DistributedLimiter,
+        now: DateTime<Utc>,
+    ) -> Result<CostReconciliationReport, CostReconciliationError> {
+        self.reconcile_at(limiter, now, 0).await
+    }
+
+    pub(crate) async fn reconcile_at(
+        &mut self,
+        limiter: &DistributedLimiter,
+        now: DateTime<Utc>,
+        now_override_ms: i64,
+    ) -> Result<CostReconciliationReport, CostReconciliationError> {
+        let snapshots =
+            crate::limits::budgets::cost_reconciliation_snapshots_on(&mut self.connection, now)
+                .await?;
+        let report = limiter
+            .apply_cost_snapshots(snapshots, now_override_ms)
+            .await?;
+        // A pass cannot report success after losing the session that owns its lock.
+        self.connection.ping().await.map_err(Error::from)?;
+        Ok(report)
+    }
+}

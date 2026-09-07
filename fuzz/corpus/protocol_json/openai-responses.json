@@ -1,1 +1,0 @@
-{"model":"default","input":"hello","tools":[{"type":"function","name":"lookup","parameters":{"type":"object"}}]}

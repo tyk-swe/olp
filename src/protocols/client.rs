@@ -1,0 +1,169 @@
+use std::collections::BTreeMap;
+
+use crate::protocols::canonical::events::Event;
+use crate::protocols::canonical::events::FinishReason;
+use crate::protocols::canonical::events::Kind;
+use crate::protocols::canonical::events::Usage;
+use crate::protocols::canonical::events::validate_event_sequence;
+use crate::protocols::canonical::identity::Surface;
+use crate::protocols::canonical::requests::MessageRole;
+use serde_json::Value;
+use thiserror::Error;
+
+pub(crate) struct AggregatedGeneration {
+    pub response_id: Option<String>,
+    pub provider_model: Option<String>,
+    pub outputs: BTreeMap<u32, AggregatedOutput>,
+    pub usage: Option<Usage>,
+    pub extensions: BTreeMap<String, Value>,
+}
+
+#[derive(Default)]
+pub(crate) struct AggregatedOutput {
+    pub text: String,
+    pub refusal: String,
+    pub tools: BTreeMap<u32, AggregatedTool>,
+    pub finish: Option<FinishReason>,
+}
+
+#[derive(Default)]
+pub(crate) struct AggregatedTool {
+    pub id: Option<String>,
+    pub name: Option<String>,
+    pub arguments: String,
+}
+
+#[derive(Debug, Error)]
+pub enum AggregateError {
+    #[error("canonical event sequence is invalid")]
+    Sequence,
+    #[error("canonical stream did not terminate")]
+    MissingDone,
+    #[error("canonical stream contains an upstream error")]
+    Upstream,
+    #[error("canonical output role is not assistant")]
+    Role,
+    #[error("canonical refusal output is not representable")]
+    Refusal,
+    #[error("canonical source extensions came from a different protocol")]
+    CrossProtocolExtensions,
+    #[error("canonical source extension paths collide")]
+    ExtensionCollision,
+}
+
+pub(crate) fn aggregate_generation(
+    events: &[Event],
+    target: Surface,
+) -> Result<AggregatedGeneration, AggregateError> {
+    validate_event_sequence(events).map_err(|_| AggregateError::Sequence)?;
+    if !matches!(events.last().map(|event| &event.kind), Some(Kind::Done)) {
+        return Err(AggregateError::MissingDone);
+    }
+    let mut aggregate = AggregatedGeneration::new();
+    for event in events {
+        aggregate.apply(&event.kind, target)?;
+    }
+    Ok(aggregate)
+}
+
+impl AggregatedGeneration {
+    pub(crate) fn new() -> Self {
+        Self {
+            response_id: None,
+            provider_model: None,
+            outputs: BTreeMap::new(),
+            usage: None,
+            extensions: BTreeMap::new(),
+        }
+    }
+
+    /// Folds one canonical event into the aggregate. Streaming encoders call
+    /// this per event so they never have to retain the event history.
+    pub(crate) fn apply(&mut self, kind: &Kind, target: Surface) -> Result<(), AggregateError> {
+        let aggregate = self;
+        match kind {
+            Kind::ResponseStart {
+                response_id,
+                provider_model,
+            } => {
+                aggregate.response_id.clone_from(response_id);
+                aggregate.provider_model.clone_from(provider_model);
+            }
+            Kind::MessageStart { output_index, role } => {
+                if *role != MessageRole::Assistant {
+                    return Err(AggregateError::Role);
+                }
+                aggregate.outputs.entry(*output_index).or_default();
+            }
+            Kind::TextDelta { output_index, text } => {
+                aggregate
+                    .outputs
+                    .entry(*output_index)
+                    .or_default()
+                    .text
+                    .push_str(text);
+            }
+            Kind::RefusalDelta { output_index, text } => {
+                if target != Surface::OpenAi {
+                    return Err(AggregateError::Refusal);
+                }
+                aggregate
+                    .outputs
+                    .entry(*output_index)
+                    .or_default()
+                    .refusal
+                    .push_str(text);
+            }
+            Kind::ToolCallDelta {
+                output_index,
+                tool_index,
+                id,
+                name,
+                arguments_delta,
+            } => {
+                let tool = aggregate
+                    .outputs
+                    .entry(*output_index)
+                    .or_default()
+                    .tools
+                    .entry(*tool_index)
+                    .or_default();
+                if id.is_some() {
+                    tool.id.clone_from(id);
+                }
+                if name.is_some() {
+                    tool.name.clone_from(name);
+                }
+                tool.arguments.push_str(arguments_delta);
+            }
+            Kind::Usage { usage } => aggregate.usage = Some(*usage),
+            Kind::Finish {
+                output_index,
+                reason,
+            } => {
+                aggregate.outputs.entry(*output_index).or_default().finish = Some(reason.clone());
+            }
+            Kind::Error { .. } => return Err(AggregateError::Upstream),
+            Kind::SourceExtension { extensions } => {
+                // Response-path extensions are advisory. A provider on another
+                // surface has nothing the target wire format can carry, and the
+                // gateway cannot renegotiate mid-response, so they are dropped
+                // rather than turned into a 502. Requests still fail closed.
+                if extensions.source != Some(target) {
+                    return Ok(());
+                }
+                for (path, value) in &extensions.values {
+                    if aggregate
+                        .extensions
+                        .insert(path.clone(), value.clone())
+                        .is_some()
+                    {
+                        return Err(AggregateError::ExtensionCollision);
+                    }
+                }
+            }
+            Kind::Done => {}
+        }
+        Ok(())
+    }
+}

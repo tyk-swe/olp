@@ -1,5 +1,5 @@
 <script lang="ts">
-  import ModelsPage from '$lib/features/gateway/models/ModelsPage.svelte';
+  import ModelsPage from '$lib/features/providers/models/ModelsPage.svelte';
 </script>
 
 <ModelsPage />

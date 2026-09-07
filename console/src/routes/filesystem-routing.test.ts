@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import shell from '../lib/components/AppShell.svelte?raw';
+import shell from '$lib/components/AppShell.svelte?raw';
 import config from '../../svelte.config.js?raw';
 import rootLayout from './+layout.ts?raw';
 

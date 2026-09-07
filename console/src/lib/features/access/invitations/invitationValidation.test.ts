@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { validateInvitationAcceptance } from './invitationValidation';
+import { validateInvitationAcceptance } from '$lib/features/access/invitations/invitationValidation';
 
 const valid = {
   displayName: 'Grace Operator',

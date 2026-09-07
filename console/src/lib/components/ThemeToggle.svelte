@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import NavIcon from './NavIcon.svelte';
+  import NavIcon from '$lib/components/NavIcon.svelte';
 
   type Theme = 'light' | 'dark';
   const storageKey = 'olp.console.theme';

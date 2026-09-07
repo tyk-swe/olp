@@ -1,7 +1,17 @@
 import { sveltekit } from '@sveltejs/kit/vite';
 import { defineConfig } from 'vitest/config';
 
+const target = process.env.OLP_DEV_API_ORIGIN ?? 'http://127.0.0.1:8081';
+
 export default defineConfig({
+  server: {
+    proxy: Object.fromEntries(
+      ['/api/', '/v1/', '/anthropic/', '/gemini/', '/v1beta/'].map((prefix) => [
+        prefix,
+        { target, changeOrigin: false }
+      ])
+    )
+  },
   build: {
     // Keep packaged fonts compatible with the production `font-src 'self'`
     // policy even when a small Unicode subset falls below Vite's inline limit.

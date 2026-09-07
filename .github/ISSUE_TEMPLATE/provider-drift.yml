@@ -7,11 +7,8 @@ body:
   - type: markdown
     attributes:
       value: >-
-        A scheduled workflow already files "Live provider drift detected"
-        automatically when the live checks fail; search existing
-        `provider-drift` issues before opening a duplicate.
-  # Keep in sync with the provider kinds in docs/compatibility.md (generated
-  # from apps/olp/src/gateway/endpoint_policy/registry.rs).
+        Search existing provider-drift issues and include the failing live
+        test or sanitized reproduction.
   - type: dropdown
     id: provider-kind
     attributes:

@@ -1,14 +1,15 @@
 <script lang="ts">
+  import { userKeys } from '$lib/features/access/users/userKeys';
+
   import { createQuery } from '@tanstack/svelte-query';
-  import { queryKeys } from '$lib/api/queryKeys';
-  import { logout } from '$lib/api/auth';
+  import { logout } from '$lib/features/access/session/auth';
   import {
     listSessionPage,
     listUserPage,
     revokeSession
-  } from '$lib/api/management/access';
-  import { authLifecycle } from '$lib/auth/lifecycle';
-  import { useRole } from '$lib/auth/useRole.svelte';
+  } from '$lib/features/access/api';
+  import { authLifecycle } from '$lib/features/access/session/lifecycle';
+  import { useRole } from '$lib/features/access/session/useRole.svelte';
   import { errorMessage } from '$lib/api/http';
   import {
     cursorPaginationProps,
@@ -27,13 +28,13 @@
   let notice = $state('');
 
   const users = createQuery(() => ({
-    queryKey: queryKeys.users.page(),
+    queryKey: userKeys.page(),
     queryFn: () => listUserPage(),
     // Only the member filter needs the roster, and only managers see it.
     enabled: canManage
   }));
   const sessions = createQuery(() => ({
-    queryKey: queryKeys.users.sessions(selectedUser, pagination.cursor),
+    queryKey: userKeys.sessions(selectedUser, pagination.cursor),
     queryFn: () => listSessionPage(selectedUser || undefined, pagination.cursor)
   }));
 

@@ -1,0 +1,159 @@
+use crate::access::policy::Permission;
+use crate::access::principal::ReadPrincipal;
+use crate::observability::providers::ProviderHealthRecord;
+use axum::Json;
+use axum::extract::Query;
+use axum::extract::State;
+use chrono::DateTime;
+use chrono::Utc;
+use serde::Deserialize;
+use serde::Serialize;
+use utoipa::IntoParams;
+use utoipa::ToSchema;
+use uuid::Uuid;
+
+use crate::access::permissions::require_permission;
+use crate::http::control::operations::helpers::map_operations;
+use crate::http::control::pagination::page_limit;
+use crate::http::control::state::ManagementState;
+use crate::http::problem::Problem;
+use crate::observability::readiness::HealthResponse;
+
+#[utoipa::path(
+    get,
+    path = "/api/v3/health/ready",
+    tag = "health",
+    responses(
+        (status = 200, description = "Cached readiness snapshot for an authenticated management session", body = HealthResponse),
+        (status = 401, description = "Authentication required", body = Problem, content_type = "application/problem+json"),
+        (status = 403, description = "Insufficient role", body = Problem, content_type = "application/problem+json"),
+        (status = 503, description = "Readiness snapshot is stale or unavailable", body = Problem, content_type = "application/problem+json")
+    ),
+    security(("sessionCookie" = [])))]
+pub(crate) async fn management_readiness(
+    State(state): State<ManagementState>,
+    ReadPrincipal(principal): ReadPrincipal,
+) -> Result<Json<HealthResponse>, Problem> {
+    require_permission(&principal, Permission::ReadOperations)?;
+    Ok(Json(state.cached_readiness()?))
+}
+
+#[derive(Debug, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
+pub(crate) struct ProviderHealthQuery {
+    #[param(minimum = 1, maximum = 1440, default = 15)]
+    window_minutes: Option<u16>,
+    #[param(value_type = Option<String>, format = Uuid)]
+    cursor: Option<String>,
+    #[param(minimum = 1, maximum = 200, default = 50)]
+    limit: Option<u16>,
+}
+
+#[derive(Clone, Debug, Serialize, ToSchema)]
+pub(crate) struct ProviderHealthItem {
+    #[schema(value_type = String, format = Uuid)]
+    provider_id: Uuid,
+    provider_name: String,
+    provider_kind: crate::providers::runtime_model::ProviderKind,
+    provider_state: String,
+    status: String,
+    last_probe_at: Option<DateTime<Utc>>,
+    last_probe_status: Option<String>,
+    last_probe_detail: Option<String>,
+    last_attempt_at: Option<DateTime<Utc>>,
+    attempt_count: u64,
+    success_count: u64,
+    rate_limit_count: u64,
+    server_error_count: u64,
+    transport_error_count: u64,
+    average_latency_ms: Option<f64>,
+}
+
+impl From<ProviderHealthRecord> for ProviderHealthItem {
+    fn from(record: ProviderHealthRecord) -> Self {
+        Self {
+            provider_id: record.provider_id,
+            provider_name: record.provider_name,
+            provider_kind: record.provider_kind,
+            provider_state: record.provider_state.to_string(),
+            status: record.status,
+            last_probe_at: record.last_probe_at,
+            last_probe_status: record.last_probe_status,
+            last_probe_detail: record.last_probe_detail,
+            last_attempt_at: record.last_attempt_at,
+            attempt_count: record.attempt_count,
+            success_count: record.success_count,
+            rate_limit_count: record.rate_limit_count,
+            server_error_count: record.server_error_count,
+            transport_error_count: record.transport_error_count,
+            average_latency_ms: record.average_latency_ms,
+        }
+    }
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub(crate) struct ProviderHealthResponse {
+    window_minutes: u16,
+    data: Vec<ProviderHealthItem>,
+    items: Vec<ProviderHealthItem>,
+    next_cursor: Option<String>,
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/v3/provider-health",
+    tag = "health",
+    params(ProviderHealthQuery),
+    responses(
+        (status = 200, description = "Probe and rolling-attempt provider health", body = ProviderHealthResponse),
+        (status = 400, description = "Malformed query parameters, or an invalid cursor or page size", body = Problem, content_type = "application/problem+json"),
+        (status = 401, description = "Authentication required", body = Problem, content_type = "application/problem+json"),
+        (status = 403, description = "Insufficient role", body = Problem, content_type = "application/problem+json")
+    ),
+    security(("sessionCookie" = [])))]
+pub(crate) async fn provider_health(
+    State(state): State<ManagementState>,
+    Query(query): Query<ProviderHealthQuery>,
+    ReadPrincipal(principal): ReadPrincipal,
+) -> Result<Json<ProviderHealthResponse>, Problem> {
+    require_permission(&principal, Permission::ReadOperations)?;
+    let window_minutes = query.window_minutes.unwrap_or(15);
+    if !(1..=1_440).contains(&window_minutes) {
+        return Err(Problem::field_validation(
+            "window_minutes",
+            "Window must be between 1 and 1440 minutes.",
+        ));
+    }
+    let cursor = query
+        .cursor
+        .as_deref()
+        .map(Uuid::parse_str)
+        .transpose()
+        .map_err(|_| Problem::bad_request("invalid_cursor", "The cursor is invalid."))?;
+    let page = crate::observability::providers::provider_health(
+        &state.request_boundary.pool,
+        window_minutes,
+        cursor,
+        page_limit(query.limit)?,
+    )
+    .await
+    .map_err(map_operations)?;
+    let items = page.items.into_iter().map(Into::into).collect::<Vec<_>>();
+    Ok(Json(ProviderHealthResponse {
+        window_minutes,
+        data: items.clone(),
+        items,
+        next_cursor: page.next_cursor,
+    }))
+}
+
+pub(crate) fn router()
+-> utoipa_axum::router::OpenApiRouter<crate::http::control::state::ManagementState> {
+    utoipa_axum::router::OpenApiRouter::new()
+        .routes(utoipa_axum::routes!(
+            crate::observability::health_http::management_readiness
+        ))
+        .routes(utoipa_axum::routes!(
+            crate::observability::health_http::provider_health
+        ))
+}

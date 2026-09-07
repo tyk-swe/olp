@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseRoleMappings } from './mappings';
+import { parseRoleMappings } from '$lib/features/access/oidc/mappings';
 
 describe('parseRoleMappings', () => {
   it('returns empty array for empty string or whitespace-only input', () => {

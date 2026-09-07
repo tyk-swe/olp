@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { formatBudget, formatCost } from './format';
+import { formatBudget, formatCost } from '$lib/format';
 
 describe('exact budget formatting', () => {
   it('preserves the smallest supported positive budget', () => {

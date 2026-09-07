@@ -1,0 +1,293 @@
+use chrono::DateTime;
+use chrono::Utc;
+use uuid::Uuid;
+
+use crate::access::audit_events::AuditEvent;
+use crate::access::audit_events::record_audit_event;
+use crate::crypto::session_material::CsrfMaterial;
+use crate::crypto::session_material::SessionMaterial;
+use crate::database::error::Error;
+
+use crate::access::authentication::LocalPasswordUser;
+use crate::access::authentication::SessionPrincipal;
+use crate::access::authentication::insert_versioned_session;
+
+pub async fn create_session(
+    pool: &sqlx::PgPool,
+    provenance: &crate::database::RequestProvenance,
+    user_id: Uuid,
+    expected_security_version: i64,
+    material: &SessionMaterial,
+    ttl: chrono::Duration,
+) -> Result<Uuid, Error> {
+    let now = Utc::now();
+    let expires_at = checked_session_expiry(now, ttl)?;
+    let mut transaction = pool.begin().await?;
+    let security_version: Option<i64> = sqlx::query_scalar::<_, i64>(
+        "SELECT security_version FROM users WHERE id = $1 AND active FOR SHARE",
+    )
+    .bind(user_id)
+    .fetch_optional(&mut *transaction)
+    .await?;
+    let security_version = security_version
+        .filter(|version| *version == expected_security_version)
+        .ok_or(Error::SessionUnavailable)?;
+    let id = insert_versioned_session(
+        &mut transaction,
+        user_id,
+        security_version,
+        material,
+        expires_at,
+        now,
+    )
+    .await?;
+    record_audit_event(
+        &mut *transaction,
+        AuditEvent {
+            provenance,
+            actor: Some(user_id),
+            action: "session.create",
+            resource_type: "session",
+            resource_id: Some(&id.to_string()),
+            outcome: "success",
+            occurred_at: Some(now),
+        },
+    )
+    .await?;
+    record_audit_event(
+        &mut *transaction,
+        AuditEvent {
+            provenance,
+            actor: Some(user_id),
+            action: "local_auth.login",
+            resource_type: "session",
+            resource_id: Some(&id.to_string()),
+            outcome: "success",
+            occurred_at: Some(now),
+        },
+    )
+    .await?;
+    transaction.commit().await?;
+    Ok(id)
+}
+
+/// Records a rejected local-password login without retaining the submitted
+/// email, password, headers, or network metadata. A known active local user
+/// may be attached for operator visibility; unknown identities remain
+/// anonymous.
+pub async fn record_local_login_failure(
+    pool: &sqlx::PgPool,
+    provenance: &crate::database::RequestProvenance,
+    user_id: Option<Uuid>,
+) -> Result<(), Error> {
+    record_audit_event(
+        pool,
+        AuditEvent {
+            provenance,
+            actor: user_id,
+            action: "local_auth.login",
+            resource_type: "session",
+            resource_id: None,
+            outcome: "failure",
+            occurred_at: Some(Utc::now()),
+        },
+    )
+    .await?;
+    Ok(())
+}
+
+pub async fn local_password_user(
+    pool: &sqlx::PgPool,
+    email: &str,
+) -> Result<Option<LocalPasswordUser>, Error> {
+    let row = sqlx::query_as::<_, LocalPasswordUserRow>(
+        "SELECT id, email, display_name, security_version, password_hash AS \"password_hash\", \
+                    role::text AS \"role\" \
+             FROM users WHERE email = $1 AND active AND password_hash IS NOT NULL",
+    )
+    .bind(email.trim().to_lowercase())
+    .fetch_optional(pool)
+    .await?;
+    Ok(row.map(|row| LocalPasswordUser {
+        id: row.id,
+        email: row.email,
+        display_name: row.display_name,
+        password_hash: row.password_hash,
+        security_version: row.security_version,
+        role: row.role,
+    }))
+}
+
+pub async fn session_principal(
+    pool: &sqlx::PgPool,
+    plaintext_token: &str,
+) -> Result<Option<SessionPrincipal>, Error> {
+    let digest = SessionMaterial::digest_token(plaintext_token);
+    let row = sqlx::query_as::<_, SessionPrincipalRow>(
+        "WITH authenticated AS MATERIALIZED ( \
+                 SELECT s.id AS session_id, s.security_version, s.csrf_digest, s.expires_at, \
+                        u.id AS user_id, u.email, u.display_name, u.role::text AS role \
+                 FROM sessions s JOIN users u ON u.id = s.user_id \
+                 WHERE s.token_digest = $1 AND s.expires_at > now() AND u.active \
+                   AND s.security_version = u.security_version \
+             ), touched AS ( \
+                 UPDATE sessions s SET last_seen_at = now() \
+                 FROM authenticated authenticated_session \
+                 WHERE s.id = authenticated_session.session_id \
+                   AND s.security_version = authenticated_session.security_version \
+                   AND s.expires_at > now() \
+                   AND s.last_seen_at <= now() - interval '5 minutes' \
+                 RETURNING s.id \
+             ) \
+             SELECT authenticated.session_id, authenticated.security_version, \
+                    authenticated.csrf_digest, authenticated.expires_at, \
+                    authenticated.user_id, authenticated.email, \
+                    authenticated.display_name, authenticated.role AS \"role\" \
+             FROM authenticated \
+             CROSS JOIN (SELECT count(*) FROM touched) activity",
+    )
+    .bind(digest.to_vec())
+    .fetch_optional(pool)
+    .await?;
+
+    Ok(row.map(|row| SessionPrincipal {
+        session_id: row.session_id,
+        user_id: row.user_id,
+        email: row.email,
+        display_name: row.display_name,
+        role: row.role,
+        security_version: row.security_version,
+        csrf_digest: row.csrf_digest,
+        expires_at: row.expires_at,
+    }))
+}
+
+/// Replaces only the CSRF bearer for an exact still-current session. The
+/// expected digest makes concurrent recovery requests a compare-and-swap.
+pub async fn rotate_session_csrf(
+    pool: &sqlx::PgPool,
+    provenance: &crate::database::RequestProvenance,
+    session_id: Uuid,
+    user_id: Uuid,
+    security_version: i64,
+    expected_digest: &[u8],
+    replacement: &CsrfMaterial,
+) -> Result<bool, Error> {
+    let now = Utc::now();
+    let mut transaction = pool.begin().await?;
+    let updated = sqlx::query(
+        "UPDATE sessions session SET csrf_digest = $5 \
+             WHERE session.id = $1 AND session.user_id = $2 \
+               AND session.security_version = $3 AND session.csrf_digest = $4 \
+               AND session.expires_at > $6 \
+               AND EXISTS ( \
+                   SELECT 1 FROM users \
+                   WHERE users.id = session.user_id AND users.active \
+                     AND users.security_version = session.security_version \
+               )",
+    )
+    .bind(session_id)
+    .bind(user_id)
+    .bind(security_version)
+    .bind(expected_digest)
+    .bind(replacement.token_digest().to_vec())
+    .bind(now)
+    .execute(&mut *transaction)
+    .await?
+    .rows_affected();
+    if updated == 1 {
+        record_audit_event(
+            &mut *transaction,
+            AuditEvent {
+                provenance,
+                actor: Some(user_id),
+                action: "session.csrf_rotate",
+                resource_type: "session",
+                resource_id: Some(&session_id.to_string()),
+                outcome: "success",
+                occurred_at: Some(now),
+            },
+        )
+        .await?;
+        transaction.commit().await?;
+        Ok(true)
+    } else {
+        transaction.rollback().await?;
+        Ok(false)
+    }
+}
+
+/// Best-effort, token-addressed revocation for idempotent logout. Expired
+/// and security-version-stale rows are deliberately eligible for deletion.
+pub async fn revoke_session_by_token(
+    pool: &sqlx::PgPool,
+    provenance: &crate::database::RequestProvenance,
+    plaintext_token: &str,
+) -> Result<(), Error> {
+    let digest = SessionMaterial::digest_token(plaintext_token);
+    let now = Utc::now();
+    let mut transaction = pool.begin().await?;
+    let deleted = sqlx::query_as::<_, RevokeSessionByTokenRow>(
+        "DELETE FROM sessions WHERE token_digest = $1 RETURNING id, user_id",
+    )
+    .bind(digest.to_vec())
+    .fetch_optional(&mut *transaction)
+    .await?;
+    if let Some(row) = deleted {
+        let session_id: Uuid = row.id;
+        let user_id: Uuid = row.user_id;
+        record_audit_event(
+            &mut *transaction,
+            AuditEvent {
+                provenance,
+                actor: Some(user_id),
+                action: "session.logout",
+                resource_type: "session",
+                resource_id: Some(&session_id.to_string()),
+                outcome: "success",
+                occurred_at: Some(now),
+            },
+        )
+        .await?;
+    }
+    transaction.commit().await?;
+    Ok(())
+}
+
+pub(crate) fn checked_session_expiry(
+    now: DateTime<Utc>,
+    ttl: chrono::Duration,
+) -> Result<DateTime<Utc>, Error> {
+    if ttl <= chrono::Duration::zero() {
+        return Err(Error::InvalidSessionTtl);
+    }
+    now.checked_add_signed(ttl).ok_or(Error::InvalidSessionTtl)
+}
+
+#[derive(sqlx::FromRow)]
+struct LocalPasswordUserRow {
+    id: uuid::Uuid,
+    email: String,
+    display_name: String,
+    security_version: i64,
+    password_hash: String,
+    role: String,
+}
+
+#[derive(sqlx::FromRow)]
+struct SessionPrincipalRow {
+    session_id: uuid::Uuid,
+    security_version: i64,
+    csrf_digest: Vec<u8>,
+    expires_at: chrono::DateTime<chrono::Utc>,
+    user_id: uuid::Uuid,
+    email: String,
+    display_name: String,
+    role: String,
+}
+
+#[derive(sqlx::FromRow)]
+struct RevokeSessionByTokenRow {
+    id: uuid::Uuid,
+    user_id: uuid::Uuid,
+}

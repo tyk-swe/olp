@@ -8,7 +8,7 @@ import {
   formatInteger,
   statusLabel,
   statusTone
-} from './format';
+} from '$lib/format';
 
 describe('shared formatting', () => {
   it('never represents missing pricing as zero', () => {

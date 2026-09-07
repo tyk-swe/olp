@@ -3,7 +3,7 @@
 // inline error all run in component code rather than in a pure helper.
 import { flushSync, mount, unmount } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import ReauthenticateProbe from './test/ReauthenticateProbe.svelte';
+import ReauthenticateProbe from '$lib/components/test/ReauthenticateProbe.svelte';
 
 const correctPassword = 'correct horse battery staple';
 let host: HTMLElement;

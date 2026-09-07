@@ -158,6 +158,6 @@
   "time": { "from": "now-6h", "to": "now" },
   "timezone": "utc",
   "title": "OpenLLMProxy Operations",
-  "uid": "openllmproxy-v2",
+  "uid": "openllmproxy-v3",
   "version": 3
 }

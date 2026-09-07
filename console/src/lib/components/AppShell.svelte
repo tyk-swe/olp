@@ -1,12 +1,12 @@
 <script lang="ts">
   import { resolve } from '$app/paths';
   import type { Snippet } from 'svelte';
-  import type { SessionUser } from '$lib/api/auth';
-  import { can } from '$lib/auth/authorization';
-  import BrandMark from './BrandMark.svelte';
-  import NavIcon from './NavIcon.svelte';
-  import Navigation from './Navigation.svelte';
-  import ThemeToggle from './ThemeToggle.svelte';
+  import type { SessionUser } from '$lib/features/access/session/auth';
+  import { can } from '$lib/features/access/session/authorization';
+  import BrandMark from '$lib/components/BrandMark.svelte';
+  import NavIcon from '$lib/components/NavIcon.svelte';
+  import Navigation from '$lib/components/Navigation.svelte';
+  import ThemeToggle from '$lib/components/ThemeToggle.svelte';
 
   let {
     children,

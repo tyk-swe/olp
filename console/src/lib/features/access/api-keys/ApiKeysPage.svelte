@@ -1,22 +1,23 @@
 <script lang="ts">
+  import { apiKeyQueries } from '$lib/features/access/api-keys/apiKeyQueries';
+
   import { goto } from '$app/navigation';
-  import { queryKeys } from '$lib/api/queryKeys';
   import { resolve } from '$app/paths';
   import { onDestroy } from 'svelte';
   import { useQueryClient } from '@tanstack/svelte-query';
   import { errorMessage } from '$lib/api/http';
-  import { useRole } from '$lib/auth/useRole.svelte';
+  import { useRole } from '$lib/features/access/session/useRole.svelte';
   import {
     createApiKey,
     updateApiKey,
     type ApiKey,
     type ApiKeySecret
-  } from '$lib/api/management/api-keys';
-  import ApiKeyInventory from './ApiKeyInventory.svelte';
-  import ApiKeyPolicyForm from './ApiKeyPolicyForm.svelte';
-  import ApiKeySecretDialog from './ApiKeySecretDialog.svelte';
-  import type { ApiKeyListState } from './apiKeyListState';
-  import type { ApiKeyPolicyInput } from './apiKeyPolicy';
+  } from '$lib/features/access/api-keys/api';
+  import ApiKeyInventory from '$lib/features/access/api-keys/ApiKeyInventory.svelte';
+  import ApiKeyPolicyForm from '$lib/features/access/api-keys/ApiKeyPolicyForm.svelte';
+  import ApiKeySecretDialog from '$lib/features/access/api-keys/ApiKeySecretDialog.svelte';
+  import type { ApiKeyListState } from '$lib/features/access/api-keys/apiKeyListState';
+  import type { ApiKeyPolicyInput } from '$lib/features/access/api-keys/apiKeyPolicy';
 
   let {
     isNew = false,
@@ -74,7 +75,7 @@
         preferredRoute = route;
       }
       await Promise.all([
-        queryClient.invalidateQueries({ queryKey: queryKeys.apiKeys.root })
+        queryClient.invalidateQueries({ queryKey: apiKeyQueries.root })
       ]);
       return true;
     } catch (error) {

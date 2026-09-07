@@ -1,0 +1,384 @@
+use crate::access::policy::Permission;
+use crate::database::idempotency::operations;
+use crate::providers::records::ProviderRevisionDiff;
+use crate::providers::records::ProviderRevisionRecord;
+use crate::providers::runtime_model::ProviderKind;
+use axum::Json;
+use axum::extract::Path;
+use axum::extract::Query;
+use axum::extract::State;
+use axum::http::HeaderMap;
+use axum::http::StatusCode;
+use axum::response::Response;
+use chrono::DateTime;
+use chrono::Utc;
+use serde::Serialize;
+use utoipa::ToSchema;
+use uuid::Uuid;
+
+use crate::access::permissions::require_permission;
+use crate::access::principal::MutationPrincipal;
+use crate::access::principal::ReadPrincipal;
+use crate::http::control::error_mapping::map_configuration;
+use crate::http::control::idempotency::MutationReply;
+use crate::http::control::idempotency::ReplayableMutation;
+use crate::http::control::pagination::DiffQuery;
+use crate::http::control::pagination::PageQuery;
+use crate::http::control::pagination::page;
+use crate::http::control::preconditions::if_match;
+use crate::http::control::state::ManagementState;
+use crate::http::problem::Problem;
+
+use crate::http::control::provenance::Provenance;
+use crate::providers::http::manage::ProviderDetailResponse;
+use crate::providers::http::models::ProviderModelResponse;
+
+#[derive(Clone, Debug, Serialize, ToSchema)]
+pub(crate) struct ProviderRevisionModelListResponse {
+    pub items: Vec<ProviderModelResponse>,
+    pub next_cursor: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, ToSchema)]
+pub(crate) struct ProviderRevisionResponse {
+    pub id: Uuid,
+    pub provider_id: Uuid,
+    pub revision: i32,
+    pub name: String,
+    pub configuration: crate::providers::configuration::ProviderConfiguration,
+
+    pub connector_ready: bool,
+    /// Historical metadata only. Restore never selects this credential.
+    pub historical_credential_version: Option<i32>,
+    pub source_etag: Uuid,
+    pub activated_by: Uuid,
+    pub activated_at: DateTime<Utc>,
+    pub model_count: u64,
+    pub enabled_model_count: u64,
+    pub capability_count: u64,
+    pub certified_capability_count: u64,
+}
+
+impl From<ProviderRevisionRecord> for ProviderRevisionResponse {
+    fn from(value: ProviderRevisionRecord) -> Self {
+        Self {
+            id: value.id,
+            provider_id: value.provider_id,
+            revision: value.revision,
+            name: value.name,
+            configuration: value.configuration,
+
+            connector_ready: value.connector_ready,
+            historical_credential_version: value.credential_version,
+            source_etag: value.source_etag,
+            activated_by: value.activated_by,
+            activated_at: value.activated_at,
+            model_count: value.model_count,
+            enabled_model_count: value.enabled_model_count,
+            capability_count: value.capability_count,
+            certified_capability_count: value.certified_capability_count,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, ToSchema)]
+pub(crate) struct ProviderRevisionSummaryResponse {
+    pub id: Uuid,
+    pub provider_id: Uuid,
+    pub revision: i32,
+    pub name: String,
+    pub kind: ProviderKind,
+    pub connector_ready: bool,
+    /// Historical metadata only. Restore never selects this credential.
+    pub historical_credential_version: Option<i32>,
+    pub activated_by: Uuid,
+    pub activated_at: DateTime<Utc>,
+    pub model_count: u64,
+    pub enabled_model_count: u64,
+    pub capability_count: u64,
+    pub certified_capability_count: u64,
+}
+
+impl From<ProviderRevisionRecord> for ProviderRevisionSummaryResponse {
+    fn from(value: ProviderRevisionRecord) -> Self {
+        Self {
+            id: value.id,
+            provider_id: value.provider_id,
+            revision: value.revision,
+            name: value.name,
+            kind: value.configuration.kind,
+            connector_ready: value.connector_ready,
+            historical_credential_version: value.credential_version,
+            activated_by: value.activated_by,
+            activated_at: value.activated_at,
+            model_count: value.model_count,
+            enabled_model_count: value.enabled_model_count,
+            capability_count: value.capability_count,
+            certified_capability_count: value.certified_capability_count,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, ToSchema)]
+pub(crate) struct ProviderRevisionListResponse {
+    pub items: Vec<ProviderRevisionSummaryResponse>,
+    pub next_cursor: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, ToSchema)]
+pub(crate) struct ProviderRevisionDiffResponse {
+    pub from_revision: i32,
+    pub to_revision: i32,
+    pub name_changed: bool,
+    pub endpoint_changed: bool,
+    pub cloud_context_changed: bool,
+    pub deployment_changed: bool,
+    pub api_version_changed: bool,
+    pub connector_changed: bool,
+    pub credential_changed: bool,
+    #[schema(max_items = 2000)]
+    pub models_added: Vec<String>,
+    #[schema(max_items = 2000)]
+    pub models_removed: Vec<String>,
+    #[schema(max_items = 2000)]
+    pub models_changed: Vec<String>,
+    #[schema(max_items = 32000)]
+    pub capabilities_added: Vec<String>,
+    #[schema(max_items = 32000)]
+    pub capabilities_removed: Vec<String>,
+}
+
+impl From<ProviderRevisionDiff> for ProviderRevisionDiffResponse {
+    fn from(value: ProviderRevisionDiff) -> Self {
+        Self {
+            from_revision: value.from_revision,
+            to_revision: value.to_revision,
+            name_changed: value.name_changed,
+            endpoint_changed: value.endpoint_changed,
+            cloud_context_changed: value.cloud_context_changed,
+            deployment_changed: value.deployment_changed,
+            api_version_changed: value.api_version_changed,
+            connector_changed: value.connector_changed,
+            credential_changed: value.credential_changed,
+            models_added: value.models_added,
+            models_removed: value.models_removed,
+            models_changed: value.models_changed,
+            capabilities_added: value.capabilities_added,
+            capabilities_removed: value.capabilities_removed,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, ToSchema)]
+pub(crate) struct ProviderRevisionRestoreResponse {
+    pub provider: ProviderDetailResponse,
+    /// Always false: historical credential material is never restored.
+    pub credential_restored: bool,
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/v3/providers/{provider_id}/revisions",
+    tag = "providers",
+    params(
+        ("provider_id" = Uuid, Path),
+        PageQuery,
+    ),
+    responses(
+        (status = 200, body = ProviderRevisionListResponse),
+        (status = 400, description = "Malformed query parameters, or an invalid cursor or page size", body = Problem, content_type = "application/problem+json"),
+        (status = 404, body = Problem, content_type = "application/problem+json")
+    ),
+    security(("sessionCookie" = [])))]
+pub(crate) async fn list_provider_revisions(
+    State(state): State<ManagementState>,
+    Path(provider_id): Path<Uuid>,
+    Query(query): Query<PageQuery>,
+    ReadPrincipal(principal): ReadPrincipal,
+) -> Result<Json<ProviderRevisionListResponse>, Problem> {
+    require_permission(&principal, Permission::ReadConfiguration)?;
+    let (cursor, limit) = page(query)?;
+    let page = crate::providers::revisions::list_provider_revisions(
+        &state.request_boundary.pool,
+        provider_id,
+        cursor,
+        limit,
+    )
+    .await
+    .map_err(map_configuration)?;
+    Ok(Json(ProviderRevisionListResponse {
+        items: page.items.into_iter().map(Into::into).collect(),
+        next_cursor: page.next_cursor.map(|value| value.to_string()),
+    }))
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/v3/providers/{provider_id}/revisions/{revision_id}",
+    tag = "providers",
+    params(("provider_id" = Uuid, Path), ("revision_id" = Uuid, Path)),
+    responses(
+        (status = 200, body = ProviderRevisionResponse),
+        (status = 404, body = Problem, content_type = "application/problem+json")
+    ),
+    security(("sessionCookie" = [])))]
+pub(crate) async fn get_provider_revision(
+    State(state): State<ManagementState>,
+    Path((provider_id, revision_id)): Path<(Uuid, Uuid)>,
+    ReadPrincipal(principal): ReadPrincipal,
+) -> Result<Json<ProviderRevisionResponse>, Problem> {
+    require_permission(&principal, Permission::ReadConfiguration)?;
+    Ok(Json(
+        crate::providers::revisions::get_provider_revision(
+            &state.request_boundary.pool,
+            provider_id,
+            revision_id,
+        )
+        .await
+        .map_err(map_configuration)?
+        .into(),
+    ))
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/v3/providers/{provider_id}/revisions/{revision_id}/models",
+    tag = "providers",
+    params(
+        ("provider_id" = Uuid, Path),
+        ("revision_id" = Uuid, Path),
+        PageQuery,
+    ),
+    responses(
+        (status = 200, description = "Bounded historical provider model and capability page", body = ProviderRevisionModelListResponse),
+        (status = 400, description = "Malformed query parameters, or an invalid cursor or page size", body = Problem, content_type = "application/problem+json"),
+        (status = 404, body = Problem, content_type = "application/problem+json")
+    ),
+    security(("sessionCookie" = [])))]
+pub(crate) async fn list_provider_revision_models(
+    State(state): State<ManagementState>,
+    Path((provider_id, revision_id)): Path<(Uuid, Uuid)>,
+    Query(query): Query<PageQuery>,
+    ReadPrincipal(principal): ReadPrincipal,
+) -> Result<Json<ProviderRevisionModelListResponse>, Problem> {
+    require_permission(&principal, Permission::ReadConfiguration)?;
+    let (cursor, limit) = page(query)?;
+    let page = crate::providers::revisions::list_provider_revision_models(
+        &state.request_boundary.pool,
+        provider_id,
+        revision_id,
+        cursor,
+        limit,
+    )
+    .await
+    .map_err(map_configuration)?;
+    Ok(Json(ProviderRevisionModelListResponse {
+        items: page.items.into_iter().map(Into::into).collect(),
+        next_cursor: page.next_cursor.map(|value| value.to_string()),
+    }))
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/v3/providers/{provider_id}/revisions/diff",
+    tag = "providers",
+    description = "Compares two immutable provider revisions. Each revision is limited to 2,000 models and 32,000 capability tuples; larger revisions fail with 422 instead of producing an unbounded response.",
+    params(("provider_id" = Uuid, Path), ("from" = Uuid, Query), ("to" = Uuid, Query)),
+    responses(
+        (status = 200, body = ProviderRevisionDiffResponse),
+        (status = 422, description = "Either revision exceeds the bounded diff ceiling", body = Problem, content_type = "application/problem+json"),
+        (status = 404, body = Problem, content_type = "application/problem+json")
+    ),
+    security(("sessionCookie" = [])))]
+pub(crate) async fn diff_provider_revisions(
+    State(state): State<ManagementState>,
+    Path(provider_id): Path<Uuid>,
+    Query(query): Query<DiffQuery>,
+    ReadPrincipal(principal): ReadPrincipal,
+) -> Result<Json<ProviderRevisionDiffResponse>, Problem> {
+    require_permission(&principal, Permission::ReadConfiguration)?;
+    Ok(Json(
+        crate::providers::revisions::diff_provider_revisions(
+            &state.request_boundary.pool,
+            provider_id,
+            query.from,
+            query.to,
+        )
+        .await
+        .map_err(map_configuration)?
+        .into(),
+    ))
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/v3/providers/{provider_id}/revisions/{revision_id}/restore-as-draft",
+    tag = "providers",
+    params(
+        ("provider_id" = Uuid, Path),
+        ("revision_id" = Uuid, Path),
+        ("If-Match" = String, Header, description = "Current provider draft ETag"),
+        ("Idempotency-Key" = String, Header)
+    ),
+    responses(
+        (status = 200, description = "Historical non-secret configuration restored as a draft; current credential selection is preserved", body = ProviderRevisionRestoreResponse),
+        (status = 400, description = "Idempotency-Key is missing or invalid", body = Problem, content_type = "application/problem+json"),
+        (status = 409, description = "Idempotency-Key was already used for a different request or is in progress", body = Problem, content_type = "application/problem+json"),
+        (status = 412, body = Problem, content_type = "application/problem+json"),
+        (status = 422, body = Problem, content_type = "application/problem+json")
+    ),
+    security(("sessionCookie" = [], "csrfToken" = [])))]
+pub(crate) async fn restore_provider_revision(
+    State(state): State<ManagementState>,
+    Provenance(provenance): Provenance,
+    Path((provider_id, revision_id)): Path<(Uuid, Uuid)>,
+    headers: HeaderMap,
+    MutationPrincipal(principal): MutationPrincipal,
+) -> Result<Response, Problem> {
+    require_permission(&principal, Permission::ManageProviders)?;
+    let expected_etag = if_match(&headers)?;
+    let state = &state;
+    let provenance = &provenance;
+    ReplayableMutation::new(
+        state,
+        principal.user_id,
+        operations::PROVIDER_REVISION_RESTORE_AS_DRAFT,
+        &headers,
+        &RestoreProviderRevisionFingerprint {
+            provider_id,
+            revision_id,
+            expected_etag,
+        },
+    )?
+    .run(|key| async move {
+        let restored = crate::providers::revisions::restore_provider_revision_as_draft(
+            &state.request_boundary.pool,
+            provenance,
+            provider_id,
+            revision_id,
+            expected_etag,
+            principal.user_id,
+            &key,
+        )
+        .await
+        .map_err(map_configuration)?;
+        let etag = restored.etag;
+        Ok(MutationReply {
+            status: StatusCode::OK,
+            body: ProviderRevisionRestoreResponse {
+                provider: restored.into(),
+                credential_restored: false,
+            },
+            etag: Some(etag),
+            location: None,
+        })
+    })
+    .await
+}
+
+#[derive(Serialize)]
+struct RestoreProviderRevisionFingerprint {
+    provider_id: Uuid,
+    revision_id: Uuid,
+    expected_etag: Uuid,
+}

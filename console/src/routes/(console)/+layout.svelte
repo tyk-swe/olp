@@ -3,11 +3,11 @@
   import { resolve } from '$app/paths';
   import { page } from '$app/state';
   import { onMount } from 'svelte';
-  import { currentSession, logout } from '$lib/api/auth';
+  import { currentSession, logout } from '$lib/features/access/session/auth';
   import { errorMessage } from '$lib/api/http';
-  import { getSetupStatus } from '$lib/api/setup';
-  import { authLifecycle } from '$lib/auth/lifecycle';
-  import type { AuthenticationSnapshot } from '$lib/auth/state';
+  import { getSetupStatus } from '$lib/features/access/setup/api';
+  import { authLifecycle } from '$lib/features/access/session/lifecycle';
+  import type { AuthenticationSnapshot } from '$lib/features/access/session/state';
   import AppShell from '$lib/components/AppShell.svelte';
 
   let { children } = $props();

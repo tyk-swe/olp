@@ -3,9 +3,6 @@ __pycache__/
 *.py[cod]
 .venv/
 /target/
-/fuzz/target/
-/fuzz/artifacts/
-/fuzz/coverage/
 /console/build/
 /console/node_modules/
 /console/.svelte-kit/
@@ -25,10 +22,6 @@ gha-creds-*.json
 /blob-report/
 
 /backups/
-lcov.info
-*.profraw
-*.profdata
-/coverage/
 
 .DS_Store
 Thumbs.db
@@ -39,3 +32,10 @@ Thumbs.db
 *.tsbuildinfo
 /.codex/runtime/
 /.claude/settings.local.json
+
+/openapi/management.json
+/console/src/lib/api/schema.d.ts
+/.local/
+
+**/test-results/
+**/playwright-report/

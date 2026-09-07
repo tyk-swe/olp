@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import type { ApiKey } from '$lib/api/management/api-keys';
-import { buildApiKeyPolicyInput, createApiKeyFormState } from './apiKeyPolicy';
+import type { ApiKey } from '$lib/features/access/api-keys/api';
+import {
+  buildApiKeyPolicyInput,
+  createApiKeyFormState
+} from '$lib/features/access/api-keys/apiKeyPolicy';
 
 const key = {
   id: '01980000-0000-7000-8000-000000000301',

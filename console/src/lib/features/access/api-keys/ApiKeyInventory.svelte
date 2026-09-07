@@ -1,8 +1,9 @@
 <script lang="ts">
+  import { apiKeyQueries } from '$lib/features/access/api-keys/apiKeyQueries';
+
   import { goto } from '$app/navigation';
   import { page } from '$app/state';
   import { resolve } from '$app/paths';
-  import { queryKeys } from '$lib/api/queryKeys';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { errorMessage } from '$lib/api/http';
   import { cursorPaginationProps, resetCursor } from '$lib/lists/pagination';
@@ -12,12 +13,12 @@
     rotateApiKey,
     type ApiKey,
     type ApiKeySecret
-  } from '$lib/api/management/api-keys';
+  } from '$lib/features/access/api-keys/api';
   import CursorPagination from '$lib/components/CursorPagination.svelte';
   import NavIcon from '$lib/components/NavIcon.svelte';
   import ReadOnlyNote from '$lib/components/ReadOnlyNote.svelte';
   import { formatBudget, formatDate } from '$lib/format';
-  import type { ApiKeyListState } from './apiKeyListState';
+  import type { ApiKeyListState } from '$lib/features/access/api-keys/apiKeyListState';
 
   let {
     listState,
@@ -53,7 +54,7 @@
     }
   });
   const keys = createQuery(() => ({
-    queryKey: queryKeys.apiKeys.page(cursor, createdBy),
+    queryKey: apiKeyQueries.page(cursor, createdBy),
     queryFn: ({ signal }) => listApiKeyPage(cursor, signal, createdBy)
   }));
 
@@ -93,7 +94,7 @@
     mutationError = '';
     try {
       onSecret(await rotateApiKey(key), key.allowed_routes[0]);
-      await queryClient.invalidateQueries({ queryKey: queryKeys.apiKeys.root });
+      await queryClient.invalidateQueries({ queryKey: apiKeyQueries.root });
     } catch (error) {
       mutationError = errorMessage(error);
     } finally {
@@ -107,7 +108,7 @@
     mutationError = '';
     try {
       await revokeApiKey(key);
-      await queryClient.invalidateQueries({ queryKey: queryKeys.apiKeys.root });
+      await queryClient.invalidateQueries({ queryKey: apiKeyQueries.root });
     } catch (error) {
       mutationError = errorMessage(error);
     } finally {

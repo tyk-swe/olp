@@ -1,10 +1,13 @@
 <script lang="ts">
+  import { providerKeys } from '$lib/features/providers/providerKeys';
+  import { routeKeys } from '$lib/features/routes/routeKeys';
+  import { apiKeyQueries } from '$lib/features/access/api-keys/apiKeyQueries';
+
   import { createQuery } from '@tanstack/svelte-query';
-  import { queryKeys } from '$lib/api/queryKeys';
   import NavIcon from '$lib/components/NavIcon.svelte';
-  import { hasNonrevokedApiKey } from '$lib/api/management/api-keys';
-  import { listProviders } from '$lib/api/management/providers';
-  import { listRoutes } from '$lib/api/management/routes';
+  import { hasNonrevokedApiKey } from '$lib/features/access/api-keys/api';
+  import { listProviders } from '$lib/features/providers/api';
+  import { listRoutes } from '$lib/features/routes/api';
 
   type Step = {
     label: string;
@@ -14,15 +17,15 @@
   };
 
   const providers = createQuery(() => ({
-    queryKey: queryKeys.providers.all(),
+    queryKey: providerKeys.all(),
     queryFn: ({ signal }) => listProviders(signal)
   }));
   const routes = createQuery(() => ({
-    queryKey: queryKeys.routes.all(),
+    queryKey: routeKeys.all(),
     queryFn: ({ signal }) => listRoutes(signal)
   }));
   const keys = createQuery(() => ({
-    queryKey: queryKeys.apiKeys.hasNonrevoked(),
+    queryKey: apiKeyQueries.hasNonrevoked(),
     queryFn: ({ signal }) => hasNonrevokedApiKey(signal)
   }));
 

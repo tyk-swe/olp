@@ -1,0 +1,43 @@
+name: olp-v3-dev
+services:
+  postgres:
+    image: postgres:18
+    environment:
+      POSTGRES_USER: olp
+      POSTGRES_PASSWORD: olp-local
+      POSTGRES_DB: olp_dev
+    ports: ["127.0.0.1:54320:5432"]
+    volumes: ["postgres:/var/lib/postgresql"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U olp -d olp_dev"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+  valkey:
+    image: valkey/valkey:9
+    ports: ["127.0.0.1:63790:6379"]
+    volumes: ["valkey:/data"]
+    command: ["valkey-server", "--appendonly", "yes"]
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+  toxiproxy:
+    profiles: [integration]
+    image: ghcr.io/shopify/toxiproxy:2.12.0
+    command: ["-host", "0.0.0.0", "-config", "/etc/toxiproxy.json"]
+    ports:
+      - "127.0.0.1:58474:8474"
+      - "127.0.0.1:55432:5432"
+      - "127.0.0.1:56379:6379"
+    volumes: ["./toxiproxy.integration.json:/etc/toxiproxy.json:ro"]
+    healthcheck:
+      test: ["CMD", "/toxiproxy-cli", "list"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+volumes:
+  postgres:
+  valkey:

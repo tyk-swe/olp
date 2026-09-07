@@ -1,6 +1,0 @@
-data: {"text":"hello"}
-
-event: done
-data: [DONE]
-
-: end

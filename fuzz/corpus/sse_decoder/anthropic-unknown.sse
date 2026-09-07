@@ -1,4 +1,0 @@
-event: future_event
-data: {"type":"future_event","payload":{"kept":true}}
-
-: end

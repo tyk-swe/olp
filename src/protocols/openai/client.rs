@@ -1,0 +1,810 @@
+use std::collections::BTreeMap;
+use std::collections::BTreeSet;
+
+use crate::protocols::canonical::events::Event;
+use crate::protocols::canonical::events::FinishReason;
+use crate::protocols::canonical::events::Kind;
+use crate::protocols::canonical::identity::Surface;
+use serde_json::Value;
+use serde_json::json;
+use thiserror::Error;
+
+use crate::protocols::client::AggregateError;
+use crate::protocols::client::AggregatedGeneration;
+use crate::protocols::client::AggregatedTool;
+use crate::protocols::client::aggregate_generation;
+use crate::protocols::client_sequence::ClientSequence;
+use crate::protocols::client_sequence::SequenceRejection;
+use crate::protocols::sse::Frame;
+
+use crate::protocols::openai::extensions::apply_pointer_extensions;
+use crate::protocols::openai::responses::OPENAI_RESPONSES_RAW_OUTPUT_PREFIX;
+use crate::protocols::openai::responses::response::ErrorBody;
+use crate::protocols::openai::responses::response::InputTokenDetails;
+use crate::protocols::openai::responses::response::Object;
+use crate::protocols::openai::responses::response::OutputTokenDetails;
+use crate::protocols::openai::responses::response::Usage;
+
+const MAX_RETAINED_BYTES: usize = 16 * 1024 * 1024;
+
+/// `created_at` is the fallback used when the canonical events did not come
+/// from a Responses upstream, so a client never sees `created_at: 0`.
+pub fn encode_response_object(
+    events: &[Event],
+    client_model: &str,
+    fallback_id: &str,
+    created_at: i64,
+) -> Result<Object, OpenAiClientEncodeError> {
+    let aggregate = aggregate_generation(events, Surface::OpenAi)?;
+    encode_aggregate(aggregate, client_model, fallback_id, created_at)
+}
+
+fn encode_aggregate(
+    mut aggregate: AggregatedGeneration,
+    client_model: &str,
+    fallback_id: &str,
+    created_at: i64,
+) -> Result<Object, OpenAiClientEncodeError> {
+    let raw_output = take_raw_response_output(&mut aggregate.extensions)?;
+    let (output, finish) = build_output(&mut aggregate, raw_output)?;
+    let observed_created_at =
+        take_i64_extension(&mut aggregate.extensions, "/created_at").unwrap_or(0);
+    let created_at = if observed_created_at == 0 {
+        created_at
+    } else {
+        observed_created_at
+    };
+    let mut incomplete_details = aggregate.extensions.remove("/incomplete_details");
+    let observed_status = take_string_extension(&mut aggregate.extensions, "/status");
+    // A non-Responses upstream reports truncation only through the finish
+    // reason, so the terminal status is derived from it rather than always
+    // claiming the response completed. An error finish is never a completion,
+    // whatever status the upstream object claimed.
+    let status = match finish {
+        Some(FinishReason::Error) => "failed".to_owned(),
+        Some(FinishReason::Length) if observed_status.is_none() => {
+            incomplete_details.get_or_insert_with(|| json!({"reason": "max_output_tokens"}));
+            "incomplete".to_owned()
+        }
+        Some(FinishReason::ContentFilter) if observed_status.is_none() => {
+            incomplete_details.get_or_insert_with(|| json!({"reason": "content_filter"}));
+            "incomplete".to_owned()
+        }
+        _ => observed_status.unwrap_or_else(|| "completed".to_owned()),
+    };
+    let error = (status == "failed").then(|| ErrorBody {
+        code: "server_error".to_owned(),
+        message: "the provider ended the response with an error".to_owned(),
+        extra: BTreeMap::new(),
+    });
+    let usage = aggregate.usage.map(encode_usage);
+    apply_pointer_extensions(
+        Object {
+            id: aggregate.response_id.unwrap_or_else(|| fallback_id.into()),
+            object: "response".into(),
+            created_at,
+            status,
+            model: client_model.into(),
+            output,
+            usage,
+            error,
+            incomplete_details,
+            extra: BTreeMap::new(),
+        },
+        &aggregate.extensions,
+    )
+    .map_err(OpenAiClientEncodeError::InvalidExtension)
+}
+
+/// Rebuilds the `output` array: canonical items claim the wire indices that
+/// raw passthrough items leave free, then the raw items are re-inserted at
+/// their original positions.
+fn build_output(
+    aggregate: &mut AggregatedGeneration,
+    raw_output: Vec<(usize, Value)>,
+) -> Result<(Vec<Value>, Option<FinishReason>), OpenAiClientEncodeError> {
+    // Raw items are re-inserted at their original wire indices below, so the
+    // items rebuilt here have to claim the positions those leave free. Each
+    // gets its own index: two tool calls under one canonical output otherwise
+    // reused the same `/output/{n}/id` extension and shipped duplicate ids.
+    let raw_indices = raw_output
+        .iter()
+        .map(|(index, _)| *index)
+        .collect::<BTreeSet<_>>();
+    let mut next_index = 0_usize;
+    let mut claim_wire_index = move || {
+        while raw_indices.contains(&next_index) {
+            next_index += 1;
+        }
+        let index = next_index;
+        next_index += 1;
+        index
+    };
+    let mut output = Vec::new();
+    let mut finish = None;
+    for (_, item) in std::mem::take(&mut aggregate.outputs) {
+        finish = finish.or_else(|| item.finish.clone());
+        if !item.text.is_empty() || !item.refusal.is_empty() || item.tools.is_empty() {
+            let wire_index = claim_wire_index();
+            output.push(message_item(
+                &mut aggregate.extensions,
+                wire_index,
+                item.text,
+                item.refusal,
+            ));
+        }
+        for (_, tool) in item.tools {
+            let wire_index = claim_wire_index();
+            output.push(function_call_item(
+                &mut aggregate.extensions,
+                wire_index,
+                tool,
+            )?);
+        }
+    }
+    for (index, item) in raw_output {
+        if index > output.len() {
+            return Err(OpenAiClientEncodeError::InvalidExtension(format!(
+                "{OPENAI_RESPONSES_RAW_OUTPUT_PREFIX}/{index}"
+            )));
+        }
+        output.insert(index, item);
+    }
+    Ok((output, finish))
+}
+
+fn message_item(
+    extensions: &mut BTreeMap<String, Value>,
+    wire_index: usize,
+    text: String,
+    refusal: String,
+) -> Value {
+    let mut content = Vec::new();
+    if !text.is_empty() {
+        let annotations = extensions
+            .remove(&format!("/output/{wire_index}/content/0/annotations"))
+            .unwrap_or_else(|| json!([]));
+        content.push(json!({
+            "type": "output_text",
+            "text": text,
+            "annotations": annotations,
+        }));
+    }
+    if !refusal.is_empty() {
+        content.push(json!({"type": "refusal", "refusal": refusal}));
+    }
+    let id = take_string_extension(extensions, &format!("/output/{wire_index}/id"))
+        .unwrap_or_else(|| format!("msg_{wire_index}"));
+    let status = take_string_extension(extensions, &format!("/output/{wire_index}/status"))
+        .unwrap_or_else(|| "completed".into());
+    json!({
+        "id": id,
+        "type": "message",
+        "role": "assistant",
+        "status": status,
+        "content": content,
+    })
+}
+
+fn function_call_item(
+    extensions: &mut BTreeMap<String, Value>,
+    wire_index: usize,
+    tool: AggregatedTool,
+) -> Result<Value, OpenAiClientEncodeError> {
+    let id = tool
+        .id
+        .ok_or(OpenAiClientEncodeError::IncompleteToolCall("id"))?;
+    let name = tool
+        .name
+        .ok_or(OpenAiClientEncodeError::IncompleteToolCall("name"))?;
+    let wire_id = take_string_extension(extensions, &format!("/output/{wire_index}/id"))
+        .unwrap_or_else(|| format!("fc_{wire_index}"));
+    let status = take_string_extension(extensions, &format!("/output/{wire_index}/status"))
+        .unwrap_or_else(|| "completed".into());
+    Ok(json!({
+        "id": wire_id,
+        "type": "function_call",
+        "call_id": id,
+        "name": name,
+        // A tool invoked with no parameters aggregates to an empty
+        // string, which is not valid JSON for the client to parse.
+        "arguments": if tool.arguments.trim().is_empty() {
+            "{}".to_owned()
+        } else {
+            tool.arguments
+        },
+        "status": status,
+    }))
+}
+
+fn encode_usage(usage: crate::protocols::canonical::events::Usage) -> Usage {
+    Usage {
+        input_tokens: usage.input_tokens,
+        // The Responses API reports reasoning inside `output_tokens`.
+        output_tokens: usage
+            .output_tokens
+            .saturating_add(usage.reasoning_tokens.unwrap_or(0)),
+        total_tokens: usage.total_tokens,
+        input_tokens_details: usage
+            .cached_input_tokens
+            .map(|cached_tokens| InputTokenDetails {
+                cached_tokens,
+                extra: BTreeMap::new(),
+            }),
+        output_tokens_details: usage
+            .reasoning_tokens
+            .map(|reasoning_tokens| OutputTokenDetails {
+                reasoning_tokens,
+                extra: BTreeMap::new(),
+            }),
+        extra: BTreeMap::new(),
+    }
+}
+
+pub struct Encoder {
+    client_model: String,
+    fallback_id: String,
+    created_at: i64,
+    sequence: ClientSequence,
+    sequence_number: u64,
+    // The terminal response object is built from this running aggregate, so
+    // the encoder never retains the event history. Errors the aggregate
+    // raises are deferred to `Done` so the frames emitted before them are
+    // unchanged.
+    aggregate: AggregatedGeneration,
+    deferred_error: Option<AggregateError>,
+    retained_bytes: usize,
+    outputs: BTreeMap<u32, StreamOutput>,
+
+    incomplete_reason: Option<&'static str>,
+}
+
+/// The lifecycle the Responses API promises per output item. Clients built on
+/// the item events (the OpenAI Agents SDK among them) read the tool name and
+/// call id off `response.output_item.added`, so the frame is held back until a
+/// delta actually carries them.
+#[derive(Default)]
+struct StreamOutput {
+    item_id: String,
+    tool: bool,
+    call_id: Option<String>,
+    name: Option<String>,
+    text: String,
+    refusal: String,
+    arguments: String,
+}
+
+impl std::fmt::Debug for Encoder {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("Encoder")
+            .field("next_sequence", &self.sequence.expected())
+            .field("retained_bytes", &self.retained_bytes)
+            .field("emitted_output_count", &self.outputs.len())
+            .field("done", &self.sequence.is_done())
+            .finish_non_exhaustive()
+    }
+}
+
+impl Encoder {
+    #[must_use]
+    pub fn new(
+        client_model: impl Into<String>,
+        fallback_id: impl Into<String>,
+        created_at: i64,
+    ) -> Self {
+        Self {
+            client_model: client_model.into(),
+            fallback_id: fallback_id.into(),
+            created_at,
+            sequence: ClientSequence::default(),
+            sequence_number: 0,
+            aggregate: AggregatedGeneration::new(),
+            deferred_error: None,
+            retained_bytes: 0,
+            outputs: BTreeMap::new(),
+            incomplete_reason: None,
+        }
+    }
+
+    pub fn push(&mut self, event: Event) -> Result<Vec<Frame>, OpenAiClientEncodeError> {
+        match self.sequence.admit(&event) {
+            Ok(_) => {}
+            Err(SequenceRejection::AfterDone) => {
+                return Err(OpenAiClientEncodeError::DataAfterDone);
+            }
+            Err(SequenceRejection::OutOfOrder { expected, actual }) => {
+                return Err(OpenAiClientEncodeError::OutOfOrder { expected, actual });
+            }
+        }
+        self.retained_bytes = self
+            .retained_bytes
+            .checked_add(retained_bytes(&event.kind)?)
+            .filter(|total| *total <= MAX_RETAINED_BYTES)
+            .ok_or(OpenAiClientEncodeError::EventHistoryTooLarge)?;
+        match &event.kind {
+            Kind::Error { .. } => {
+                self.deferred_error.get_or_insert(AggregateError::Upstream);
+            }
+            Kind::SourceExtension { extensions } if is_stream_only(extensions) => {}
+            kind => {
+                if let Err(error) = self.aggregate.apply(kind, Surface::OpenAi) {
+                    self.deferred_error.get_or_insert(error);
+                }
+            }
+        }
+        let mut frames = Vec::new();
+        match &event.kind {
+            Kind::ResponseStart {
+                response_id,
+                provider_model: _,
+            } => {
+                let id = response_id
+                    .clone()
+                    .unwrap_or_else(|| self.fallback_id.clone());
+                let response = json!({
+                    "id": id,
+                    "object": "response",
+                    "created_at": self.created_at,
+                    "status": "in_progress",
+                    "model": self.client_model,
+                    "output": []
+                });
+                frames.push(self.frame("response.created", json!({"response": response}))?);
+                frames.push(self.frame("response.in_progress", json!({"response": response}))?);
+            }
+            Kind::MessageStart { .. } | Kind::Usage { .. } => {}
+            kind @ (Kind::TextDelta { .. }
+            | Kind::RefusalDelta { .. }
+            | Kind::ToolCallDelta { .. }) => {
+                self.emit_delta(kind, &mut frames)?;
+            }
+            kind @ (Kind::Finish { .. } | Kind::SourceExtension { .. } | Kind::Error { .. }) => {
+                self.emit_close(kind, &mut frames)?;
+            }
+            Kind::Done => {
+                self.emit_done(&mut frames)?;
+            }
+        }
+        Ok(frames)
+    }
+
+    fn emit_delta(
+        &mut self,
+        kind: &Kind,
+        frames: &mut Vec<Frame>,
+    ) -> Result<(), OpenAiClientEncodeError> {
+        match kind {
+            Kind::TextDelta { output_index, text } => {
+                let item_id = self.ensure_message_output(*output_index, frames)?;
+                if let Some(output) = self.outputs.get_mut(output_index) {
+                    output.text.push_str(text);
+                }
+                if !text.is_empty() {
+                    frames.push(self.frame(
+                        "response.output_text.delta",
+                        json!({
+                            "item_id": item_id,
+                            "output_index": output_index,
+                            "content_index": 0,
+                            "delta": text
+                        }),
+                    )?);
+                }
+            }
+            Kind::RefusalDelta { output_index, text } => {
+                let item_id = self.ensure_message_output(*output_index, frames)?;
+                if let Some(output) = self.outputs.get_mut(output_index) {
+                    output.refusal.push_str(text);
+                }
+                frames.push(self.frame(
+                    "response.refusal.delta",
+                    json!({
+                        "item_id": item_id,
+                        "output_index": output_index,
+                        "content_index": 0,
+                        "delta": text
+                    }),
+                )?);
+            }
+            Kind::ToolCallDelta {
+                output_index,
+                id,
+                name,
+                arguments_delta,
+                ..
+            } => {
+                let item_id =
+                    self.ensure_tool_output(*output_index, id.as_deref(), name.as_deref(), frames)?;
+                if let Some(output) = self.outputs.get_mut(output_index) {
+                    output.arguments.push_str(arguments_delta);
+                }
+                if !arguments_delta.is_empty() {
+                    frames.push(self.frame(
+                        "response.function_call_arguments.delta",
+                        json!({
+                            "item_id": item_id,
+                            "output_index": output_index,
+                            "delta": arguments_delta
+                        }),
+                    )?);
+                }
+            }
+            _ => unreachable!("emit_delta called with a non-delta event"),
+        }
+        Ok(())
+    }
+
+    fn emit_close(
+        &mut self,
+        kind: &Kind,
+        frames: &mut Vec<Frame>,
+    ) -> Result<(), OpenAiClientEncodeError> {
+        match kind {
+            Kind::Finish {
+                output_index,
+                reason,
+            } => {
+                self.incomplete_reason = if matches!(reason, FinishReason::Length) {
+                    Some("max_output_tokens")
+                } else if matches!(reason, FinishReason::ContentFilter) {
+                    Some("content_filter")
+                } else {
+                    None
+                };
+                if !self.outputs.contains_key(output_index) {
+                    self.ensure_message_output(*output_index, frames)?;
+                }
+                self.close_output(*output_index, frames)?;
+            }
+            Kind::SourceExtension { extensions } => {
+                if extensions.source != Some(Surface::OpenAi) {
+                    return Ok(());
+                }
+                for (path, value) in &extensions.values {
+                    if path.starts_with("/stream/") {
+                        let kind = value
+                            .get("type")
+                            .and_then(Value::as_str)
+                            .ok_or_else(|| OpenAiClientEncodeError::InvalidExtension(path.clone()))?
+                            .to_owned();
+                        frames.push(self.frame(&kind, value.clone())?);
+                    }
+                }
+            }
+            Kind::Error { error } => {
+                let payload = json!({
+                    "response": {
+                        "id": self.fallback_id,
+                        "object": "response",
+                        "status": "failed",
+                        "model": self.client_model,
+                        "error": {"code": error.provider_code, "message": error.message}
+                    }
+                });
+                frames.push(self.frame("response.failed", payload)?);
+            }
+            _ => unreachable!("emit_close called with a non-terminal event"),
+        }
+        Ok(())
+    }
+
+    fn emit_done(&mut self, frames: &mut Vec<Frame>) -> Result<(), OpenAiClientEncodeError> {
+        let terminal_reason = self.incomplete_reason.take();
+        if let Some(error) = self.deferred_error.take() {
+            return Err(error.into());
+        }
+        let aggregate = std::mem::replace(&mut self.aggregate, AggregatedGeneration::new());
+        let mut response = encode_aggregate(
+            aggregate,
+            &self.client_model,
+            &self.fallback_id,
+            self.created_at,
+        )?;
+        if let Some(reason) = terminal_reason {
+            response.status = "incomplete".to_owned();
+            response.incomplete_details = Some(serde_json::json!({ "reason": reason }));
+        }
+        let terminal_event_type = match response.status.as_str() {
+            "incomplete" => "response.incomplete",
+            "failed" => "response.failed",
+            _ => "response.completed",
+        };
+        frames.push(self.frame(terminal_event_type, json!({"response": response}))?);
+        self.sequence.finish();
+        Ok(())
+    }
+
+    fn ensure_message_output(
+        &mut self,
+        output_index: u32,
+        frames: &mut Vec<Frame>,
+    ) -> Result<String, OpenAiClientEncodeError> {
+        if let Some(output) = self.outputs.get(&output_index) {
+            return Ok(output.item_id.clone());
+        }
+        let item_id = format!("msg_{output_index}");
+        self.outputs.insert(
+            output_index,
+            StreamOutput {
+                item_id: item_id.clone(),
+                ..StreamOutput::default()
+            },
+        );
+        frames.push(self.frame(
+            "response.output_item.added",
+            json!({
+                "output_index": output_index,
+                "item": {
+                    "id": item_id,
+                    "type": "message",
+                    "role": "assistant",
+                    "status": "in_progress",
+                    "content": []
+                }
+            }),
+        )?);
+        frames.push(self.frame(
+            "response.content_part.added",
+            json!({
+                "item_id": item_id,
+                "output_index": output_index,
+                "content_index": 0,
+                "part": {"type": "output_text", "text": "", "annotations": []}
+            }),
+        )?);
+        Ok(item_id)
+    }
+
+    fn ensure_tool_output(
+        &mut self,
+        output_index: u32,
+        call_id: Option<&str>,
+        name: Option<&str>,
+        frames: &mut Vec<Frame>,
+    ) -> Result<String, OpenAiClientEncodeError> {
+        if let Some(output) = self.outputs.get(&output_index) {
+            return Ok(output.item_id.clone());
+        }
+        let item_id = format!("fc_{output_index}");
+        let call_id = call_id
+            .map(str::to_owned)
+            .unwrap_or_else(|| format!("call_{output_index}"));
+        let name = name.map(str::to_owned).unwrap_or_else(|| "function".into());
+        self.outputs.insert(
+            output_index,
+            StreamOutput {
+                item_id: item_id.clone(),
+                tool: true,
+                call_id: Some(call_id.clone()),
+                name: Some(name.clone()),
+                ..StreamOutput::default()
+            },
+        );
+        frames.push(self.frame(
+            "response.output_item.added",
+            json!({
+                "output_index": output_index,
+                "item": {
+                    "id": item_id,
+                    "type": "function_call",
+                    "call_id": call_id,
+                    "name": name,
+                    "arguments": "",
+                    "status": "in_progress"
+                }
+            }),
+        )?);
+        Ok(item_id)
+    }
+
+    fn close_output(
+        &mut self,
+        output_index: u32,
+        frames: &mut Vec<Frame>,
+    ) -> Result<(), OpenAiClientEncodeError> {
+        let Some(output) = self.outputs.get(&output_index) else {
+            return Ok(());
+        };
+        let item_id = output.item_id.clone();
+        if output.tool {
+            let arguments = output.arguments.clone();
+            let item = json!({
+                "id": item_id,
+                "type": "function_call",
+                "call_id": output.call_id.clone(),
+                "name": output.name.clone(),
+                "arguments": arguments,
+                "status": "completed"
+            });
+            frames.push(self.frame(
+                "response.function_call_arguments.done",
+                json!({
+                    "item_id": item_id,
+                    "output_index": output_index,
+                    "arguments": arguments
+                }),
+            )?);
+            frames.push(self.frame(
+                "response.output_item.done",
+                json!({"output_index": output_index, "item": item}),
+            )?);
+            return Ok(());
+        }
+        let text = output.text.clone();
+        let refusal = output.refusal.clone();
+        let mut content = Vec::new();
+        if !text.is_empty() {
+            content.push(json!({"type": "output_text", "text": text, "annotations": []}));
+        }
+        if !refusal.is_empty() {
+            content.push(json!({"type": "refusal", "refusal": refusal}));
+        }
+        let part = if refusal.is_empty() {
+            json!({"type": "output_text", "text": text, "annotations": []})
+        } else {
+            json!({"type": "refusal", "refusal": refusal})
+        };
+        if refusal.is_empty() {
+            frames.push(self.frame(
+                "response.output_text.done",
+                json!({
+                    "item_id": item_id,
+                    "output_index": output_index,
+                    "content_index": 0,
+                    "text": text
+                }),
+            )?);
+        }
+        frames.push(self.frame(
+            "response.content_part.done",
+            json!({
+                "item_id": item_id,
+                "output_index": output_index,
+                "content_index": 0,
+                "part": part
+            }),
+        )?);
+        frames.push(self.frame(
+            "response.output_item.done",
+            json!({
+                "output_index": output_index,
+                "item": {
+                    "id": item_id,
+                    "type": "message",
+                    "role": "assistant",
+                    "status": "completed",
+                    "content": content
+                }
+            }),
+        )?);
+        Ok(())
+    }
+
+    /// Every Responses stream event carries a monotonic `sequence_number`;
+    /// clients use it to detect gaps and to order reconnects.
+    fn frame(&mut self, kind: &str, mut payload: Value) -> Result<Frame, OpenAiClientEncodeError> {
+        let Value::Object(object) = &mut payload else {
+            return Err(OpenAiClientEncodeError::InvalidStreamPayload);
+        };
+        object.insert("type".into(), Value::String(kind.into()));
+        object
+            .entry("sequence_number")
+            .or_insert_with(|| Value::from(self.sequence_number));
+        self.sequence_number = self.sequence_number.saturating_add(1);
+        Ok(Frame {
+            event: Some(kind.into()),
+            data: serde_json::to_string(&payload)?,
+            id: None,
+            retry_ms: None,
+        })
+    }
+}
+
+fn is_stream_only(extensions: &crate::protocols::canonical::requests::SourceExtensions) -> bool {
+    extensions
+        .values
+        .keys()
+        .all(|path| path.starts_with("/stream/"))
+}
+
+/// Estimated bytes an event adds to state kept until `Done`, including fixed
+/// event bookkeeping and retained payloads.
+fn retained_bytes(kind: &Kind) -> Result<usize, OpenAiClientEncodeError> {
+    let payload_bytes = match kind {
+        Kind::TextDelta { text, .. } | Kind::RefusalDelta { text, .. } => text.len(),
+        Kind::ToolCallDelta {
+            id,
+            name,
+            arguments_delta,
+            ..
+        } => {
+            arguments_delta.len()
+                + id.as_ref().map_or(0, String::len)
+                + name.as_ref().map_or(0, String::len)
+        }
+        Kind::ResponseStart {
+            response_id,
+            provider_model,
+        } => {
+            response_id.as_ref().map_or(0, String::len)
+                + provider_model.as_ref().map_or(0, String::len)
+        }
+        Kind::Finish {
+            reason: FinishReason::Other(reason),
+            ..
+        } => reason.len(),
+        Kind::SourceExtension { extensions }
+            if extensions.source == Some(Surface::OpenAi) && !is_stream_only(extensions) =>
+        {
+            serde_json::to_vec(&extensions.values)?.len()
+        }
+        _ => 0,
+    };
+    std::mem::size_of::<Kind>()
+        .checked_add(payload_bytes)
+        .ok_or(OpenAiClientEncodeError::EventHistoryTooLarge)
+}
+
+fn take_i64_extension(extensions: &mut BTreeMap<String, Value>, path: &str) -> Option<i64> {
+    extensions.remove(path).and_then(|value| value.as_i64())
+}
+
+fn take_string_extension(extensions: &mut BTreeMap<String, Value>, path: &str) -> Option<String> {
+    extensions
+        .remove(path)
+        .and_then(|value| value.as_str().map(str::to_owned))
+}
+
+fn take_raw_response_output(
+    extensions: &mut BTreeMap<String, Value>,
+) -> Result<Vec<(usize, Value)>, OpenAiClientEncodeError> {
+    let prefix = format!("{OPENAI_RESPONSES_RAW_OUTPUT_PREFIX}/");
+    let mut keys = extensions
+        .keys()
+        .filter(|path| path.starts_with(&prefix))
+        .cloned()
+        .collect::<Vec<_>>();
+    keys.sort_by_key(|path| {
+        path.strip_prefix(&prefix)
+            .and_then(|index| index.parse::<usize>().ok())
+            .unwrap_or(usize::MAX)
+    });
+    let mut output = Vec::with_capacity(keys.len());
+    for path in keys {
+        let index = path
+            .strip_prefix(&prefix)
+            .and_then(|index| index.parse::<usize>().ok())
+            .ok_or_else(|| OpenAiClientEncodeError::InvalidExtension(path.clone()))?;
+        let value = extensions
+            .remove(&path)
+            .ok_or_else(|| OpenAiClientEncodeError::InvalidExtension(path.clone()))?;
+        output.push((index, value));
+    }
+    Ok(output)
+}
+
+#[derive(Debug, Error)]
+pub enum OpenAiClientEncodeError {
+    #[error(transparent)]
+    Aggregate(#[from] AggregateError),
+    #[error("canonical tool call is missing {0}")]
+    IncompleteToolCall(&'static str),
+    #[error("invalid source extension path: {0}")]
+    InvalidExtension(String),
+    #[error("canonical source extensions came from a different protocol")]
+    CrossProtocolExtensions,
+    #[error("expected canonical event sequence {expected}, got {actual}")]
+    OutOfOrder { expected: u64, actual: u64 },
+    #[error("canonical event appeared after done")]
+    DataAfterDone,
+    #[error("OpenAI stream payload must be an object")]
+    InvalidStreamPayload,
+    #[error("canonical event history exceeded the Responses stream encoder limit")]
+    EventHistoryTooLarge,
+    #[error(transparent)]
+    Json(#[from] serde_json::Error),
+}
+
+#[cfg(test)]
+mod tests;

@@ -4,7 +4,7 @@
   import {
     mediaJobList,
     mediaJobUrl
-  } from '$lib/features/operations/media-jobs/mediaJobListState';
+  } from '$lib/features/media/mediaJobListState';
 
   let { children } = $props();
   const listState = $state(mediaJobUrl.state(page.url.searchParams));

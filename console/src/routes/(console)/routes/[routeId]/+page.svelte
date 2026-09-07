@@ -1,6 +1,6 @@
 <script lang="ts">
   import { page } from '$app/state';
-  import RouteDraftEditor from '$lib/features/gateway/routes/RouteDraftEditor.svelte';
+  import RouteDraftEditor from '$lib/features/routes/RouteDraftEditor.svelte';
 </script>
 
 <RouteDraftEditor routeId={page.params.routeId} />

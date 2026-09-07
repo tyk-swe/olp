@@ -1,0 +1,10 @@
+packages:
+  - console
+  - tests/sdk-smoke
+
+engineStrict: true
+
+allowBuilds:
+  esbuild: true
+  '@google/genai': false
+  protobufjs: false

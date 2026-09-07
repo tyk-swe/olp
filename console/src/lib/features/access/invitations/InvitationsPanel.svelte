@@ -1,6 +1,7 @@
 <script lang="ts">
+  import { invitationKeys } from '$lib/features/access/invitations/invitationKeys';
+
   import { onDestroy } from 'svelte';
-  import { queryKeys } from '$lib/api/queryKeys';
   import { createQuery } from '@tanstack/svelte-query';
   import {
     createInvitation,
@@ -8,15 +9,15 @@
     revokeInvitation,
     type Invitation,
     type InvitationSecret
-  } from '$lib/api/management/access';
+  } from '$lib/features/access/api';
   import { copyText } from '$lib/clipboard';
   import { errorMessage } from '$lib/api/http';
   import {
     cursorPaginationProps,
     emptyCursorHistory
   } from '$lib/lists/pagination';
-  import { FIXED_ROLES } from '$lib/auth/authorization';
-  import { useRole } from '$lib/auth/useRole.svelte';
+  import { FIXED_ROLES } from '$lib/features/access/session/authorization';
+  import { useRole } from '$lib/features/access/session/useRole.svelte';
   import CursorPagination from '$lib/components/CursorPagination.svelte';
   import ReadOnlyNote from '$lib/components/ReadOnlyNote.svelte';
   import SecretDialog from '$lib/components/SecretDialog.svelte';
@@ -51,7 +52,7 @@
   let copyError = $state('');
 
   const invitations = createQuery(() => ({
-    queryKey: queryKeys.invitations.page(pagination.cursor),
+    queryKey: invitationKeys.page(pagination.cursor),
     queryFn: () => listInvitationPage(pagination.cursor)
   }));
 

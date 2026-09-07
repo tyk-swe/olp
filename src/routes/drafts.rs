@@ -1,0 +1,677 @@
+use crate::ids::RouteSlug;
+use crate::protocols::canonical::identity::OperationKind;
+use crate::runtime::publication::PublishedRuntimeRelease;
+use chrono::DateTime;
+use chrono::Utc;
+use sqlx::Postgres;
+use sqlx::Transaction;
+use uuid::Uuid;
+
+use crate::access::audit_events::record_success;
+use crate::access::audit_events::record_success_at;
+use crate::database::error::Error as PersistenceError;
+use crate::database::idempotency::Outcome;
+use crate::database::idempotency::Replayable;
+use crate::database::idempotency::ReplayableIdempotencyClaim;
+use crate::database::idempotency::Response;
+use crate::database::idempotency::claim_idempotency;
+use crate::database::idempotency::claim_replayable_idempotency;
+use crate::database::idempotency::complete_idempotency;
+use crate::database::idempotency::complete_replayable_idempotency;
+use crate::runtime::publication::compiler::compile_and_publish_runtime_in_transaction;
+use crate::runtime::publication::compiler::lock_runtime_publication;
+
+use crate::providers::error::Error;
+use crate::routes::queries::DraftTargetRows;
+use crate::routes::queries::insert_draft_operations;
+use crate::routes::queries::insert_draft_targets;
+
+#[derive(Debug, Clone)]
+pub struct NewRouteTarget {
+    pub provider_id: Uuid,
+    pub upstream_model: String,
+    pub priority: u16,
+    pub weight: u32,
+    pub timeout_ms: u64,
+}
+
+#[derive(Debug)]
+pub struct NewRouteDraft {
+    pub slug: String,
+    pub operations: Vec<OperationKind>,
+    pub overall_timeout_ms: u64,
+    pub max_attempts: u16,
+    pub targets: Vec<NewRouteTarget>,
+    pub actor: Uuid,
+    pub idempotency_key: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct RouteDraftCreated {
+    pub id: Uuid,
+    pub slug: RouteSlug,
+    pub etag: Uuid,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone)]
+pub struct RouteActivated {
+    pub route_id: Uuid,
+    pub revision_id: Uuid,
+    pub revision: i32,
+    /// The draft is consumed by activation: it returns to `draft` under this
+    /// new ETag, so a second activation has to revalidate first instead of
+    /// minting a byte-identical revision.
+    pub draft_etag: Uuid,
+    pub release: PublishedRuntimeRelease,
+}
+
+fn validated_route_draft_input(route: &NewRouteDraft) -> Result<(RouteSlug, i32), Error> {
+    let slug = RouteSlug::parse(route.slug.clone())
+        .map_err(|error| Error::InvalidRoute(error.to_string()))?;
+    if route.operations.is_empty() {
+        return Err(Error::InvalidRoute(
+            "at least one operation is required".to_owned(),
+        ));
+    }
+    if route.targets.is_empty() {
+        return Err(Error::InvalidRoute(
+            "at least one target is required".to_owned(),
+        ));
+    }
+    if route.max_attempts == 0 || usize::from(route.max_attempts) > route.targets.len() {
+        return Err(Error::InvalidRoute(
+            "max_attempts must be between one and the target count".to_owned(),
+        ));
+    }
+    let overall_timeout_ms = i32::try_from(route.overall_timeout_ms)
+        .map_err(|_| Error::InvalidRoute("overall timeout is too large".to_owned()))?;
+    if overall_timeout_ms <= 0 {
+        return Err(Error::InvalidRoute(
+            "overall timeout must be positive".to_owned(),
+        ));
+    }
+    Ok((slug, overall_timeout_ms))
+}
+
+async fn resolve_route_draft_targets(
+    transaction: &mut Transaction<'_, Postgres>,
+    route: &NewRouteDraft,
+) -> Result<DraftTargetRows, Error> {
+    let provider_ids = route
+        .targets
+        .iter()
+        .map(|target| target.provider_id)
+        .collect::<Vec<_>>();
+    let upstream_models = route
+        .targets
+        .iter()
+        .map(|target| target.upstream_model.trim().to_owned())
+        .collect::<Vec<_>>();
+    let mut resolved: Vec<Option<Uuid>> = vec![None; route.targets.len()];
+    for row in sqlx::query_as::<_, ResolveRouteDraftTargetsRow>(
+        "SELECT t.ordinality AS \"ordinality\", \
+                prm.source_provider_model_id AS \"provider_model_id\" \
+         FROM UNNEST($1::uuid[], $2::text[]) WITH ORDINALITY \
+           AS t(provider_id, upstream_model, ordinality) \
+         JOIN providers p ON p.id = t.provider_id \
+         JOIN provider_revision_models prm ON prm.provider_revision_id = p.active_revision_id \
+           AND prm.upstream_model = t.upstream_model AND prm.enabled \
+         WHERE p.state <> 'disabled'::provider_state",
+    )
+    .bind(&provider_ids)
+    .bind(&upstream_models)
+    .fetch_all(&mut **transaction)
+    .await?
+    {
+        if let Some(slot) = usize::try_from(row.ordinality)
+            .ok()
+            .and_then(|ordinality| ordinality.checked_sub(1))
+            .and_then(|index| resolved.get_mut(index))
+        {
+            *slot = Some(row.provider_model_id);
+        }
+    }
+    let mut rows = DraftTargetRows::default();
+    for (position, (target, provider_model_id)) in route.targets.iter().zip(resolved).enumerate() {
+        if target.weight == 0
+            || target.timeout_ms == 0
+            || target.timeout_ms > route.overall_timeout_ms
+        {
+            return Err(Error::InvalidRoute(
+                "target weight/timeout is invalid".to_owned(),
+            ));
+        }
+        let provider_model_id = provider_model_id.ok_or_else(|| {
+            Error::InvalidRoute(format!(
+                "target provider/model {}/{} is not active",
+                target.provider_id, target.upstream_model
+            ))
+        })?;
+        rows.push(
+            Uuid::now_v7(),
+            provider_model_id,
+            i32::from(target.priority),
+            i32::try_from(target.weight)
+                .map_err(|_| Error::InvalidRoute("target weight is too large".to_owned()))?,
+            i32::try_from(target.timeout_ms)
+                .map_err(|_| Error::InvalidRoute("target timeout is too large".to_owned()))?,
+            i32::try_from(position)
+                .map_err(|_| Error::InvalidRoute("too many targets".to_owned()))?,
+        );
+    }
+    Ok(rows)
+}
+
+pub async fn create_route_draft<F>(
+    pool: &sqlx::PgPool,
+    provenance: &crate::database::RequestProvenance,
+    route: NewRouteDraft,
+    replay: Replayable<'_>,
+    build_response: F,
+) -> Result<Outcome<RouteDraftCreated>, Error>
+where
+    F: FnOnce(&RouteDraftCreated) -> Result<Response, PersistenceError>,
+{
+    let mut transaction = pool.begin().await?;
+    match claim_replayable_idempotency(
+        &mut transaction,
+        route.actor,
+        "route.create_draft",
+        &route.idempotency_key,
+        replay.request_fingerprint(),
+        replay.master_key(),
+    )
+    .await?
+    {
+        ReplayableIdempotencyClaim::Execute => {}
+        ReplayableIdempotencyClaim::Replay(response) => {
+            transaction.rollback().await?;
+            return Ok(Outcome::Replayed(response));
+        }
+        ReplayableIdempotencyClaim::Conflict => {
+            transaction.rollback().await?;
+            return Err(Error::IdempotencyConflict);
+        }
+        ReplayableIdempotencyClaim::InProgress => {
+            transaction.rollback().await?;
+            return Err(Error::IdempotencyInProgress);
+        }
+    }
+    let (slug, overall_timeout_ms) = validated_route_draft_input(&route)?;
+    let id = Uuid::now_v7();
+    let routing_id = Uuid::now_v7();
+    let etag = Uuid::now_v7();
+    let now = chrono::Utc::now();
+    sqlx::query(
+        "INSERT INTO route_drafts \
+             (id, routing_id, slug, state, overall_timeout_ms, max_attempts, etag, created_by, created_at, updated_at) \
+             VALUES ($1, $2, $3, 'draft'::route_draft_state, $4, $5, $6, $7, $8, $8)",
+    )
+    .bind(id)
+    .bind(routing_id)
+    .bind(slug.as_str())
+    .bind(overall_timeout_ms)
+    .bind(i16::try_from(route.max_attempts).map_err(|_| {
+            Error::InvalidRoute("max attempts is too large".to_owned())
+        })?)
+    .bind(etag)
+    .bind(route.actor)
+    .bind(now)
+        .execute(&mut *transaction)
+        .await?;
+    insert_draft_operations(&mut transaction, id, &route.operations).await?;
+    let rows = resolve_route_draft_targets(&mut transaction, &route).await?;
+    insert_draft_targets(&mut transaction, id, &rows).await?;
+    record_success_at(
+        &mut *transaction,
+        provenance,
+        Some(route.actor),
+        "route.create_draft",
+        "route_draft",
+        id,
+        now,
+    )
+    .await?;
+    let created = RouteDraftCreated {
+        id,
+        slug,
+        etag,
+        created_at: now,
+    };
+    let response = build_response(&created)?;
+    complete_replayable_idempotency(
+        &mut transaction,
+        route.actor,
+        "route.create_draft",
+        &route.idempotency_key,
+        replay.request_fingerprint(),
+        replay.master_key(),
+        &response,
+    )
+    .await?;
+    transaction.commit().await?;
+    Ok(Outcome::Executed {
+        value: created,
+        response,
+    })
+}
+
+pub async fn validate_route_draft(
+    pool: &sqlx::PgPool,
+    provenance: &crate::database::RequestProvenance,
+    draft_id: Uuid,
+    expected_etag: Uuid,
+    actor: Uuid,
+) -> Result<(Uuid, RouteSlug), Error> {
+    let mut transaction = pool.begin().await?;
+    let row = sqlx::query_as::<_, ValidateRouteDraftRow>(
+        "SELECT etag, slug FROM route_drafts WHERE id = $1",
+    )
+    .bind(draft_id)
+    .fetch_optional(&mut *transaction)
+    .await?;
+    let Some(row) = row else {
+        return Err(Error::RouteNotFound);
+    };
+    if row.etag != expected_etag {
+        return Err(Error::PreconditionFailed);
+    }
+    revalidate_route_draft(&mut transaction, draft_id).await?;
+    let etag = Uuid::now_v7();
+    let updated = sqlx::query(
+        "UPDATE route_drafts SET state = 'validated'::route_draft_state, etag = $1, updated_at = now() \
+             WHERE id = $2 AND etag = $3",
+    )
+    .bind(etag)
+    .bind(draft_id)
+    .bind(expected_etag)
+        .execute(&mut *transaction)
+        .await?;
+    if updated.rows_affected() != 1 {
+        return Err(Error::PreconditionFailed);
+    }
+    let slug =
+        RouteSlug::parse(row.slug).map_err(|error| Error::InvalidRoute(error.to_string()))?;
+    record_success(
+        &mut *transaction,
+        provenance,
+        actor,
+        "route.validate_draft",
+        "route_draft",
+        draft_id,
+    )
+    .await?;
+    transaction.commit().await?;
+    Ok((etag, slug))
+}
+
+pub async fn activate_route_draft(
+    pool: &sqlx::PgPool,
+    provenance: &crate::database::RequestProvenance,
+    draft_id: Uuid,
+    expected_etag: Uuid,
+    actor: Uuid,
+    idempotency_key: &str,
+) -> Result<RouteActivated, Error> {
+    let mut transaction = pool
+        .begin_with("BEGIN ISOLATION LEVEL READ COMMITTED")
+        .await?;
+    // READ COMMITTED observes the revision that won the publication lock;
+    // REPEATABLE READ would pin its snapshot before waiting for that lock.
+    lock_runtime_publication(&mut transaction).await?;
+    if !claim_idempotency(&mut transaction, actor, "route.activate", idempotency_key).await? {
+        return Err(Error::IdempotencyConflict);
+    }
+    sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0))")
+        .bind(draft_id.to_string())
+        .fetch_one(&mut *transaction)
+        .await?;
+    let draft = sqlx::query_as::<_, ActivateRouteDraftRow>(
+        "SELECT rd.slug, rd.routing_id, rd.state::text AS \"state\", rd.etag, rd.overall_timeout_ms, \
+                    rd.max_attempts, rr.route_id AS \"based_route_id\", rr.slug AS \"based_slug\" \
+             FROM route_drafts rd \
+             LEFT JOIN route_revisions rr ON rr.id = rd.based_on_revision_id \
+             WHERE rd.id = $1 FOR UPDATE OF rd",
+    )
+    .bind(draft_id)
+        .fetch_optional(&mut *transaction)
+        .await?
+        .ok_or(Error::RouteNotFound)?;
+    if draft.etag != expected_etag {
+        return Err(Error::PreconditionFailed);
+    }
+    validate_activation_media_jobs(&mut transaction, draft_id).await?;
+    let slug: String = draft.slug;
+    let based_route_id: Option<Uuid> = draft.based_route_id;
+    let based_slug: Option<String> = draft.based_slug;
+    let route_id = resolve_activated_route_id(
+        &mut transaction,
+        based_route_id,
+        based_slug.as_deref(),
+        &slug,
+        actor,
+    )
+    .await?;
+    let revision: i32 = sqlx::query_scalar::<_, i32>("SELECT COALESCE(max(revision), 0) + 1 AS \"value\" FROM route_revisions WHERE route_id = $1")
+    .bind(route_id)
+        .fetch_one(&mut *transaction)
+        .await?;
+    let revision_id = Uuid::now_v7();
+    sqlx::query(
+        "INSERT INTO route_revisions \
+             (id, route_id, routing_id, revision, slug, overall_timeout_ms, max_attempts, source_draft_id, activated_by) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
+    )
+    .bind(revision_id)
+    .bind(route_id)
+    .bind(draft.routing_id)
+    .bind(revision)
+    .bind(&slug)
+    .bind(draft.overall_timeout_ms)
+    .bind(draft.max_attempts)
+    .bind(draft_id)
+    .bind(actor)
+        .execute(&mut *transaction)
+        .await?;
+    populate_route_revision(&mut transaction, draft_id, revision_id).await?;
+    let draft_etag = consume_route_draft(&mut transaction, draft_id, expected_etag).await?;
+    record_success(
+        &mut *transaction,
+        provenance,
+        actor,
+        "route.activate",
+        "route",
+        route_id,
+    )
+    .await?;
+    complete_idempotency(
+        &mut transaction,
+        actor,
+        "route.activate",
+        idempotency_key,
+        &route_id.to_string(),
+    )
+    .await?;
+    let release = compile_and_publish_runtime_in_transaction(&mut transaction, actor).await?;
+    transaction.commit().await?;
+    Ok(RouteActivated {
+        route_id,
+        revision_id,
+        revision,
+        draft_etag,
+        release,
+    })
+}
+
+async fn revalidate_route_draft(
+    transaction: &mut Transaction<'_, Postgres>,
+    draft_id: Uuid,
+) -> Result<(), Error> {
+    let target_count: i64 = sqlx::query_scalar::<_, i64>(
+        "SELECT count(*)::bigint AS \"value\" FROM route_draft_targets WHERE route_draft_id = $1",
+    )
+    .bind(draft_id)
+    .fetch_one(&mut **transaction)
+    .await?;
+    if target_count == 0 {
+        return Err(Error::InvalidRoute(
+            "the draft must contain at least one target".to_owned(),
+        ));
+    }
+
+    let unavailable: Option<String> = sqlx::query_scalar::<_, String>(
+        "SELECT concat(p.name, '/', pm.upstream_model) AS \"value\" \
+         FROM route_draft_targets rdt \
+         JOIN provider_models pm ON pm.id = rdt.provider_model_id \
+         JOIN providers p ON p.id = pm.provider_id \
+         LEFT JOIN provider_revision_models prm \
+           ON prm.provider_revision_id = p.active_revision_id \
+          AND prm.source_provider_model_id = pm.id \
+         WHERE rdt.route_draft_id = $1 \
+           AND (p.state = 'disabled'::provider_state OR prm.id IS NULL OR NOT prm.enabled) \
+         ORDER BY rdt.position LIMIT 1",
+    )
+    .bind(draft_id)
+    .fetch_optional(&mut **transaction)
+    .await?;
+    if let Some(unavailable) = unavailable {
+        return Err(Error::InvalidRoute(format!(
+            "target provider/model is not in an activated provider revision: {unavailable}"
+        )));
+    }
+
+    let uncovered_operation: Option<String> = sqlx::query_scalar::<_, String>(
+        "SELECT rdo.operation FROM route_draft_operations rdo \
+         WHERE rdo.route_draft_id = $1 AND NOT EXISTS ( \
+           SELECT 1 FROM route_draft_targets rdt \
+           JOIN provider_models pm ON pm.id = rdt.provider_model_id \
+           JOIN providers p ON p.id = pm.provider_id \
+           JOIN provider_revision_models prm \
+             ON prm.provider_revision_id = p.active_revision_id \
+            AND prm.source_provider_model_id = pm.id AND prm.enabled \
+           JOIN provider_revision_capabilities prc \
+             ON prc.provider_revision_model_id = prm.id \
+            AND prc.operation = rdo.operation AND prc.source = 'certified' \
+           WHERE rdt.route_draft_id = $1 \
+             AND p.state <> 'disabled'::provider_state) \
+         ORDER BY rdo.operation LIMIT 1",
+    )
+    .bind(draft_id)
+    .fetch_optional(&mut **transaction)
+    .await?;
+    if let Some(operation) = uncovered_operation {
+        return Err(Error::InvalidRoute(format!(
+            "no activated target has a certified capability for route operation {operation}"
+        )));
+    }
+
+    validate_media_job_route_targets(transaction, draft_id).await?;
+
+    Ok(())
+}
+
+async fn validate_media_job_route_targets(
+    transaction: &mut Transaction<'_, Postgres>,
+    draft_id: Uuid,
+) -> Result<(), Error> {
+    let media_job_without_target: Option<Uuid> = sqlx::query_scalar::<_, uuid::Uuid>(
+        "SELECT j.id FROM async_media_jobs j \
+         JOIN route_drafts rd ON rd.id = $1 AND rd.slug = j.route_slug \
+         WHERE j.lifecycle_state <> 'deleted' AND NOT EXISTS ( \
+           SELECT 1 FROM route_draft_targets rdt \
+           JOIN provider_models pm ON pm.id = rdt.provider_model_id \
+           WHERE rdt.route_draft_id = rd.id \
+             AND pm.provider_id = j.provider_id \
+             AND pm.upstream_model = j.provider_model) \
+         ORDER BY j.created_at, j.id LIMIT 1",
+    )
+    .bind(draft_id)
+    .fetch_optional(&mut **transaction)
+    .await?;
+    if let Some(job_id) = media_job_without_target {
+        return Err(Error::InvalidRoute(format!(
+            "active media job {job_id} requires its exact provider/model target"
+        )));
+    }
+
+    let media_job_without_lifecycle: Option<String> = sqlx::query_scalar::<_, String>(
+        "SELECT concat(j.id::text, '/', required.operation) AS \"value\" \
+         FROM async_media_jobs j \
+         JOIN route_drafts rd ON rd.id = $1 AND rd.slug = j.route_slug \
+         CROSS JOIN (VALUES ('video_get'), ('video_content'), ('video_delete')) \
+                    AS required(operation) \
+         WHERE j.lifecycle_state <> 'deleted' AND ( \
+           NOT EXISTS ( \
+             SELECT 1 FROM route_draft_operations rdo \
+             WHERE rdo.route_draft_id = rd.id AND rdo.operation = required.operation) \
+           OR NOT EXISTS ( \
+             SELECT 1 FROM route_draft_targets rdt \
+             JOIN provider_models pm ON pm.id = rdt.provider_model_id \
+             JOIN providers p ON p.id = pm.provider_id \
+             JOIN provider_revision_models prm \
+               ON prm.provider_revision_id = p.active_revision_id \
+              AND prm.source_provider_model_id = pm.id AND prm.enabled \
+             JOIN provider_revision_capabilities prc \
+               ON prc.provider_revision_model_id = prm.id \
+              AND prc.operation = required.operation \
+              AND prc.surface = j.surface \
+              AND prc.mode = 'unary' AND prc.source = 'certified' \
+             WHERE rdt.route_draft_id = rd.id \
+               AND p.state <> 'disabled'::provider_state \
+               AND pm.provider_id = j.provider_id \
+               AND pm.upstream_model = j.provider_model)) \
+         ORDER BY j.created_at, j.id, required.operation LIMIT 1",
+    )
+    .bind(draft_id)
+    .fetch_optional(&mut **transaction)
+    .await?;
+    if let Some(requirement) = media_job_without_lifecycle {
+        return Err(Error::InvalidRoute(format!(
+            "active media job requires an exact certified lifecycle capability: {requirement}"
+        )));
+    }
+
+    Ok(())
+}
+
+async fn resolve_activated_route_id(
+    transaction: &mut Transaction<'_, Postgres>,
+    based_route_id: Option<Uuid>,
+    based_slug: Option<&str>,
+    slug: &str,
+    actor: Uuid,
+) -> Result<Uuid, Error> {
+    let route_id = if let Some(route_id) = based_route_id {
+        if based_slug != Some(slug) {
+            return Err(Error::InvalidRoute(
+                "a restored route draft must retain its original stable slug".to_owned(),
+            ));
+        }
+        route_id
+    } else {
+        sqlx::query_scalar::<_, uuid::Uuid>(
+            "INSERT INTO routes (id, slug, created_by) VALUES ($1, $2, $3) \
+             ON CONFLICT (slug) DO UPDATE SET slug = EXCLUDED.slug RETURNING id AS \"value\"",
+        )
+        .bind(Uuid::now_v7())
+        .bind(slug)
+        .bind(actor)
+        .fetch_one(&mut **transaction)
+        .await?
+    };
+    Ok(route_id)
+}
+
+async fn populate_route_revision(
+    transaction: &mut Transaction<'_, Postgres>,
+    draft_id: Uuid,
+    revision_id: Uuid,
+) -> Result<(), Error> {
+    sqlx::query(
+        "INSERT INTO route_revision_operations (route_revision_id, operation) \
+         SELECT $1, operation FROM route_draft_operations WHERE route_draft_id = $2",
+    )
+    .bind(revision_id)
+    .bind(draft_id)
+    .execute(&mut **transaction)
+    .await?;
+    let targets = sqlx::query_as::<_, PopulateRouteRevisionRow>(
+        "SELECT routing_id, provider_model_id, priority, weight, timeout_ms, position \
+         FROM route_draft_targets WHERE route_draft_id = $1 ORDER BY position",
+    )
+    .bind(draft_id)
+    .fetch_all(&mut **transaction)
+    .await?;
+    for target in targets {
+        sqlx::query(
+            "INSERT INTO route_revision_targets \
+             (id, routing_id, route_revision_id, provider_model_id, priority, weight, timeout_ms, position) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
+        )
+    .bind(Uuid::now_v7())
+    .bind(target.routing_id)
+    .bind(revision_id)
+    .bind(target.provider_model_id)
+    .bind(target.priority)
+    .bind(target.weight)
+    .bind(target.timeout_ms)
+    .bind(target.position)
+        .execute(&mut **transaction)
+        .await?;
+    }
+    Ok(())
+}
+
+async fn consume_route_draft(
+    transaction: &mut Transaction<'_, Postgres>,
+    draft_id: Uuid,
+    expected_etag: Uuid,
+) -> Result<Uuid, Error> {
+    // Activation consumes the draft. Without this the same validated ETag
+    // activates again under a fresh Idempotency-Key, minting a revision
+    // identical to the one just published and republishing the runtime to
+    // every replica.
+    let draft_etag = Uuid::now_v7();
+    let consumed = sqlx::query(
+        "UPDATE route_drafts SET state = 'draft', etag = $2, updated_at = now() \
+             WHERE id = $1 AND etag = $3",
+    )
+    .bind(draft_id)
+    .bind(draft_etag)
+    .bind(expected_etag)
+    .execute(&mut **transaction)
+    .await?;
+    if consumed.rows_affected() != 1 {
+        return Err(Error::PreconditionFailed);
+    }
+    Ok(draft_etag)
+}
+
+async fn validate_activation_media_jobs(
+    transaction: &mut Transaction<'_, Postgres>,
+    draft_id: Uuid,
+) -> Result<(), Error> {
+    // Media reservations are not runtime-publication mutations. Block
+    // their short INSERT/UPDATE transactions while checking and
+    // publishing so a job cannot appear against the old route after the
+    // compatibility decision but before this activation commits.
+    sqlx::query("LOCK TABLE async_media_jobs IN SHARE MODE")
+        .execute(&mut **transaction)
+        .await?;
+    revalidate_route_draft(transaction, draft_id).await?;
+    Ok(())
+}
+
+#[derive(sqlx::FromRow)]
+struct ResolveRouteDraftTargetsRow {
+    ordinality: i64,
+    provider_model_id: uuid::Uuid,
+}
+
+#[derive(sqlx::FromRow)]
+struct ValidateRouteDraftRow {
+    etag: uuid::Uuid,
+    slug: String,
+}
+
+#[derive(sqlx::FromRow)]
+struct ActivateRouteDraftRow {
+    slug: String,
+    routing_id: uuid::Uuid,
+    etag: uuid::Uuid,
+    overall_timeout_ms: i32,
+    max_attempts: i16,
+    based_route_id: Option<uuid::Uuid>,
+    based_slug: Option<String>,
+}
+
+#[derive(sqlx::FromRow)]
+struct PopulateRouteRevisionRow {
+    routing_id: uuid::Uuid,
+    provider_model_id: uuid::Uuid,
+    priority: i32,
+    weight: i32,
+    timeout_ms: i32,
+    position: i32,
+}

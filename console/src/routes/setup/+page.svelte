@@ -3,8 +3,8 @@
   import { resolve } from '$app/paths';
   import { onMount } from 'svelte';
   import { errorMessage } from '$lib/api/http';
-  import { getSetupStatus } from '$lib/api/setup';
-  import OwnerSetup from '$lib/features/setup/OwnerSetup.svelte';
+  import { getSetupStatus } from '$lib/features/access/setup/api';
+  import OwnerSetup from '$lib/features/access/setup/OwnerSetup.svelte';
   import SetupFrame from '$lib/components/SetupFrame.svelte';
 
   let setupView = $state<'checking' | 'ready' | 'error'>('checking');

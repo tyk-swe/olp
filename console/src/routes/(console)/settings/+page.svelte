@@ -1,5 +1,5 @@
 <script lang="ts">
-  import SettingsPage from '$lib/features/settings/installation/SettingsPage.svelte';
+  import SettingsPage from '$lib/features/settings/SettingsPage.svelte';
 </script>
 
 <SettingsPage />

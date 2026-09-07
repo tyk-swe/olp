@@ -1,0 +1,287 @@
+use crate::access::policy::Permission;
+use crate::access::principal::MutationPrincipal;
+use crate::database::idempotency::Replayable;
+use crate::database::idempotency::Response as IdempotencyResponse;
+use crate::database::idempotency::fingerprint;
+use crate::database::idempotency::operations;
+use crate::protocols::canonical::identity::OperationKind;
+use crate::routes::drafts::NewRouteDraft;
+use crate::routes::drafts::NewRouteTarget;
+use axum::Json;
+use axum::extract::Path;
+use axum::extract::State;
+use axum::extract::rejection::JsonRejection;
+use axum::http::HeaderMap;
+use axum::http::StatusCode;
+use axum::response::Response;
+use serde::Deserialize;
+use serde::Serialize;
+use utoipa::ToSchema;
+use uuid::Uuid;
+
+use crate::access::permissions::require_permission;
+use crate::http::control::error_mapping::map_configuration;
+use crate::http::control::error_mapping::map_persistence;
+use crate::http::control::idempotency::MutationReply;
+use crate::http::control::idempotency::ReplayableMutation;
+use crate::http::control::idempotency::idempotency_http_response;
+use crate::http::control::idempotency::require_idempotency_key;
+use crate::http::control::json_payload::json_payload;
+use crate::http::control::preconditions::if_match;
+use crate::http::control::preconditions::with_etag;
+use crate::http::control::provenance::Provenance;
+use crate::http::control::response_policy::RuntimeGenerationResponse;
+use crate::http::control::state::ManagementState;
+use crate::http::problem::Problem;
+
+#[derive(Debug, Deserialize, Serialize, ToSchema)]
+pub(crate) struct CreateRouteDraftRequest {
+    pub slug: String,
+    #[serde(default = "default_route_operations")]
+    pub operations: Vec<String>,
+    pub overall_timeout_ms: u64,
+    pub max_attempts: u16,
+    pub targets: Vec<RouteTargetRequest>,
+}
+
+fn default_route_operations() -> Vec<String> {
+    vec!["generation".to_owned()]
+}
+
+#[derive(Debug, Deserialize, Serialize, ToSchema)]
+pub(crate) struct RouteTargetRequest {
+    #[schema(value_type = String, format = Uuid)]
+    pub provider_id: Uuid,
+    pub provider_model: String,
+    pub priority: u16,
+    pub weight: u32,
+    pub timeout_ms: u64,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub(crate) struct RouteDraftResponse {
+    #[schema(value_type = String, format = Uuid)]
+    pub id: Uuid,
+    pub slug: String,
+    pub state: String,
+    #[schema(value_type = String, format = Uuid)]
+    pub etag: Uuid,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub(crate) struct RouteActivationResponse {
+    #[schema(value_type = String, format = Uuid)]
+    pub route_id: Uuid,
+    #[schema(value_type = String, format = Uuid)]
+    pub revision_id: Uuid,
+    pub revision: i32,
+    /// The activated draft returns to `draft` under this ETag; revalidate
+    /// before activating it again.
+    #[schema(value_type = String, format = Uuid)]
+    pub draft_etag: Uuid,
+    pub runtime_generation: RuntimeGenerationResponse,
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/v3/route-drafts",
+    tag = "routes",
+    request_body = CreateRouteDraftRequest,
+    params(("Idempotency-Key" = String, Header, description = "Unique route-draft creation key")),
+    responses(
+        (status = 201, description = "Route draft created", body = RouteDraftResponse, headers(("Location" = String, description = "Path of the created resource"))),
+        (status = 400, description = "Idempotency-Key is missing or invalid", body = Problem, content_type = "application/problem+json"),
+        (status = 409, description = "Idempotency-Key was already used or is in progress", body = Problem, content_type = "application/problem+json"),
+        (status = 422, description = "Route draft is invalid", body = Problem, content_type = "application/problem+json"),
+        (status = 503, description = "Master key or database unavailable", body = Problem, content_type = "application/problem+json")
+    ),
+    security(("sessionCookie" = [], "csrfToken" = [])))]
+pub(crate) async fn create_route_draft(
+    State(state): State<ManagementState>,
+    Provenance(provenance): Provenance,
+    headers: HeaderMap,
+    MutationPrincipal(principal): MutationPrincipal,
+    payload: Result<Json<CreateRouteDraftRequest>, JsonRejection>,
+) -> Result<Response, Problem> {
+    require_permission(&principal, Permission::ManageRoutes)?;
+    let idempotency_key = require_idempotency_key(&headers)?.to_owned();
+    let request = json_payload(payload)?;
+    let request_fingerprint = fingerprint(&request).map_err(map_persistence)?;
+    let master_key = state
+        .master_key
+        .as_deref()
+        .ok_or_else(|| Problem::service_unavailable("master_key_not_configured"))?;
+    let operations = request
+        .operations
+        .iter()
+        .map(|operation| {
+            operation
+                .parse::<OperationKind>()
+                .map_err(|_| operation.clone())
+        })
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|operation| {
+            Problem::field_validation(
+                "operations",
+                format!("Operation {operation} is not supported by the operation model."),
+            )
+        })?;
+    let targets = request
+        .targets
+        .into_iter()
+        .map(|target| NewRouteTarget {
+            provider_id: target.provider_id,
+            upstream_model: target.provider_model,
+            priority: target.priority,
+            weight: target.weight,
+            timeout_ms: target.timeout_ms,
+        })
+        .collect();
+    let created = crate::routes::drafts::create_route_draft(
+        &state.request_boundary.pool,
+        &provenance,
+        NewRouteDraft {
+            slug: request.slug,
+            operations,
+            overall_timeout_ms: request.overall_timeout_ms,
+            max_attempts: request.max_attempts,
+            targets,
+            actor: principal.user_id,
+            idempotency_key,
+        },
+        Replayable::new(request_fingerprint, master_key),
+        |created| {
+            IdempotencyResponse::json(
+                StatusCode::CREATED.as_u16(),
+                &RouteDraftResponse {
+                    id: created.id,
+                    slug: created.slug.to_string(),
+                    state: "draft".to_owned(),
+                    etag: created.etag,
+                },
+                Some(format!("\"{}\"", created.etag)),
+            )
+            .and_then(|response| {
+                response.with_location(format!("/api/v3/route-drafts/{}", created.id))
+            })
+        },
+    )
+    .await
+    .map_err(map_configuration)?;
+    idempotency_http_response(created)
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/v3/route-drafts/{draft_id}/validate",
+    tag = "routes",
+    params(
+        ("draft_id" = Uuid, Path, description = "Route draft ID"),
+        ("If-Match" = String, Header, description = "Current route-draft ETag")
+    ),
+    responses(
+        (status = 200, description = "Route draft validated", body = RouteDraftResponse),
+        (status = 412, description = "ETag mismatch", body = Problem, content_type = "application/problem+json"),
+        (status = 422, description = "Eligibility validation failed", body = Problem, content_type = "application/problem+json")
+    ),
+    security(("sessionCookie" = [], "csrfToken" = [])))]
+pub(crate) async fn validate_route_draft(
+    State(state): State<ManagementState>,
+    Provenance(provenance): Provenance,
+    Path(draft_id): Path<Uuid>,
+    headers: HeaderMap,
+    MutationPrincipal(principal): MutationPrincipal,
+) -> Result<Response, Problem> {
+    require_permission(&principal, Permission::ManageRoutes)?;
+    let (etag, slug) = crate::routes::drafts::validate_route_draft(
+        &state.request_boundary.pool,
+        &provenance,
+        draft_id,
+        if_match(&headers)?,
+        principal.user_id,
+    )
+    .await
+    .map_err(map_configuration)?;
+    with_etag(
+        (
+            StatusCode::OK,
+            Json(RouteDraftResponse {
+                id: draft_id,
+                slug: slug.to_string(),
+                state: "validated".to_owned(),
+                etag,
+            }),
+        ),
+        etag,
+    )
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/v3/route-drafts/{draft_id}/activate",
+    tag = "routes",
+    params(
+        ("draft_id" = Uuid, Path, description = "Route draft ID"),
+        ("If-Match" = String, Header, description = "Validated route-draft ETag"),
+        ("Idempotency-Key" = String, Header, description = "Unique activation key")
+    ),
+    responses(
+        (status = 200, description = "Route activated, runtime published, and the draft returned to `draft` under a new ETag", body = RouteActivationResponse),
+        (status = 400, description = "Idempotency-Key is missing or invalid", body = Problem, content_type = "application/problem+json"),
+        (status = 409, description = "The Idempotency-Key was already used for a different request", body = Problem, content_type = "application/problem+json"),
+        (status = 412, description = "ETag mismatch", body = Problem, content_type = "application/problem+json")
+    ),
+    security(("sessionCookie" = [], "csrfToken" = [])))]
+pub(crate) async fn activate_route_draft(
+    State(state): State<ManagementState>,
+    Provenance(provenance): Provenance,
+    Path(draft_id): Path<Uuid>,
+    headers: HeaderMap,
+    MutationPrincipal(principal): MutationPrincipal,
+) -> Result<Response, Problem> {
+    require_permission(&principal, Permission::ManageRoutes)?;
+    let expected_etag = if_match(&headers)?;
+    let state = &state;
+    let provenance = &provenance;
+    ReplayableMutation::new(
+        state,
+        principal.user_id,
+        operations::ROUTE_ACTIVATE,
+        &headers,
+        &ActivateRouteDraftFingerprint {
+            draft_id,
+            expected_etag,
+        },
+    )?
+    .run(|key| async move {
+        let activated = crate::routes::drafts::activate_route_draft(
+            &state.request_boundary.pool,
+            provenance,
+            draft_id,
+            expected_etag,
+            principal.user_id,
+            &key,
+        )
+        .await
+        .map_err(map_configuration)?;
+        Ok(MutationReply {
+            status: StatusCode::OK,
+            body: RouteActivationResponse {
+                route_id: activated.route_id,
+                revision_id: activated.revision_id,
+                revision: activated.revision,
+                draft_etag: activated.draft_etag,
+                runtime_generation: (&activated.release).into(),
+            },
+            etag: Some(activated.draft_etag),
+            location: None,
+        })
+    })
+    .await
+}
+
+#[derive(Serialize)]
+struct ActivateRouteDraftFingerprint {
+    draft_id: Uuid,
+    expected_etag: Uuid,
+}
