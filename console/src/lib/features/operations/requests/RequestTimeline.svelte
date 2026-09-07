@@ -200,25 +200,6 @@
 {/if}
 
 <style>
-  .filters {
-    margin-top: 1.5rem;
-    padding: 1rem;
-  }
-  .filter-grid {
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 0.8rem;
-  }
-
-  .filter-actions {
-    display: flex;
-    gap: 0.65rem;
-    margin-top: 1rem;
-  }
-  .result-note {
-    margin: 0;
-    color: var(--foreground-muted);
-  }
   .text-button {
     padding: 0.4rem 0.65rem;
   }
@@ -226,37 +207,8 @@
     text-decoration: underline;
   }
 
-  .warning-text,
   .unpriced {
     color: var(--warning);
-  }
-  .row-link {
-    display: inline-flex;
-    min-height: 2.75rem;
-    align-items: center;
-    color: var(--accent-strong);
-    font-weight: 700;
-  }
-  .mobile-results {
-    display: none;
-    margin: 0;
-    padding: 0;
-    list-style: none;
-  }
-
-  .mobile-result-heading {
-    display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
-    gap: 0.75rem;
-  }
-
-  .pagination {
-    display: flex;
-    align-items: center;
-    justify-content: flex-end;
-    gap: 1rem;
-    margin-top: 1rem;
   }
 
   .request-facts {
@@ -335,35 +287,15 @@
     grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
   }
   @media (max-width: 72rem) {
-    .filter-grid {
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-    }
     dl,
     .timeline dl {
       grid-template-columns: repeat(2, minmax(0, 1fr));
-    }
-  }
-  @media (max-width: 44rem) {
-    .desktop-results {
-      display: none;
-    }
-    .mobile-results {
-      display: grid;
-      gap: 0.75rem;
     }
   }
   @media (max-width: 40rem) {
-    .filter-grid,
     dl,
     .timeline dl {
       grid-template-columns: 1fr;
-    }
-
-    .filters {
-      padding: 0.85rem;
-    }
-    .pagination {
-      justify-content: space-between;
     }
   }
   @media (forced-colors: active) {

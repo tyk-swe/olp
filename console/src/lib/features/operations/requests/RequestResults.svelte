@@ -383,10 +383,6 @@
   .pagination span {
     color: var(--foreground-muted);
   }
-  .request-facts {
-    margin-top: 1rem;
-    padding: 1.25rem;
-  }
 
   dl {
     display: grid;
@@ -405,38 +401,6 @@
   dd {
     overflow-wrap: anywhere;
     margin: 0.2rem 0 0;
-  }
-  .timeline-section {
-    margin-top: 2rem;
-  }
-  .section-heading,
-  .attempt-heading {
-    display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
-    gap: 1rem;
-  }
-  .timeline {
-    display: grid;
-    gap: 0.75rem;
-    margin: 1rem 0 0;
-    padding: 0;
-    list-style: none;
-  }
-
-  .timeline-marker {
-    position: absolute;
-    top: 0.85rem;
-    left: -1.4rem;
-    display: grid;
-    width: 2rem;
-    height: 2rem;
-    place-items: center;
-    border-radius: 999px;
-    background: var(--accent);
-    color: white;
-    font-size: 0.75rem;
-    font-weight: 800;
   }
 
   @media (max-width: 72rem) {
@@ -469,11 +433,6 @@
     }
     .pagination {
       justify-content: space-between;
-    }
-  }
-  @media (forced-colors: active) {
-    .timeline-marker {
-      border: 1px solid CanvasText;
     }
   }
 </style>
