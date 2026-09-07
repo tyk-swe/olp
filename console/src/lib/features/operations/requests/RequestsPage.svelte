@@ -26,6 +26,9 @@
   } = $props();
 
   let validation = $state<string | null>(null);
+  const urlFilters = $derived(
+    requestFilters(readRequestForm(page.url.searchParams))
+  );
   const urlProblem = $derived(
     requestProblem(readRequestForm(page.url.searchParams), true)
   );
@@ -34,13 +37,19 @@
     validation = null;
   });
 
-  const requests = createQuery(() => ({
-    queryKey: queryKeys.requests.page(listState.applied, listState.cursor),
-    queryFn: () =>
-      listRequests({ ...listState.applied, cursor: listState.cursor }),
-    placeholderData: (previous) => previous,
-    enabled: !requestId && !urlProblem
-  }));
+  const requests = createQuery(() => {
+    const applied = urlFilters;
+    const cursor =
+      requestSearch(applied) === requestSearch(listState.applied)
+        ? listState.cursor
+        : undefined;
+    return {
+      queryKey: queryKeys.requests.page(applied, cursor),
+      queryFn: () => listRequests({ ...applied, cursor }),
+      placeholderData: (previous) => previous,
+      enabled: !requestId && !urlProblem
+    };
+  });
 
   const detail = createQuery(() => ({
     queryKey: queryKeys.requests.detail(requestId),

@@ -22,6 +22,9 @@
   const listState = $state(auditState(page.url.searchParams));
   let previousSearch = page.url.search;
   let validation = $state<string | null>(null);
+  const urlFilters = $derived(
+    auditFilters(readAuditForm(page.url.searchParams))
+  );
   const urlProblem = $derived(
     auditProblem(readAuditForm(page.url.searchParams), true)
   );
@@ -49,13 +52,19 @@
       validation = null;
     }
   });
-  const audit = createQuery(() => ({
-    queryKey: queryKeys.audit.page(listState.applied, listState.cursor),
-    queryFn: () =>
-      listAudit({ ...listState.applied, cursor: listState.cursor }),
-    placeholderData: (previous) => previous,
-    enabled: !urlProblem
-  }));
+  const audit = createQuery(() => {
+    const applied = urlFilters;
+    const cursor =
+      auditSearch(applied) === auditSearch(listState.applied)
+        ? listState.cursor
+        : undefined;
+    return {
+      queryKey: queryKeys.audit.page(applied, cursor),
+      queryFn: () => listAudit({ ...applied, cursor }),
+      placeholderData: (previous) => previous,
+      enabled: !urlProblem
+    };
+  });
 
   function applyFilters(event: SubmitEvent) {
     event.preventDefault();

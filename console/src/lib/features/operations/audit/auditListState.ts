@@ -62,8 +62,7 @@ export const auditList = filteredListState({
     occurredAfter: '',
     occurredBefore: ''
   }),
-  toQuery: auditFilters,
-  validate: auditRangeError
+  toQuery: auditFilters
 });
 
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;

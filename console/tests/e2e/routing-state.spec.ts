@@ -590,8 +590,10 @@ test.describe('request investigation URLs', () => {
     }) => {
       await mockSession(page, sessionOptions);
       let requests = 0;
+      let lastQuery = new URLSearchParams();
       await page.route('**/api/v1/requests?*', async (route) => {
         requests += 1;
+        lastQuery = new URL(route.request().url()).searchParams;
         await route.fulfill({ json: { items: [], next_cursor: null } });
       });
       await page.goto(
@@ -608,11 +610,13 @@ test.describe('request investigation URLs', () => {
         await expect.poll(() => requests).toBe(1);
         await expect(page.getByRole('alert')).toHaveCount(0);
         expect(new URL(page.url()).searchParams.get(parameter)).toBe(corrected);
+        expect(lastQuery.get(parameter)).toBe(corrected);
         return;
       }
       await page.getByRole('button', { name: 'Clear' }).click();
       await expect(page.getByText('No matching requests')).toBeVisible();
       expect(requests).toBe(1);
+      expect(lastQuery.has(parameter)).toBe(false);
     });
   }
 });

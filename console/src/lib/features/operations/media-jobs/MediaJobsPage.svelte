@@ -30,6 +30,9 @@
   } = $props();
 
   let validation = $state<string | null>(null);
+  const urlFilters = $derived(
+    mediaJobFilters(readMediaJobForm(page.url.searchParams))
+  );
   const urlProblem = $derived(
     mediaJobProblem(readMediaJobForm(page.url.searchParams), true)
   );
@@ -38,13 +41,19 @@
     validation = null;
   });
 
-  const jobs = createQuery(() => ({
-    queryKey: queryKeys.mediaJobs.page(listState.applied, listState.cursor),
-    queryFn: () =>
-      listMediaJobs({ ...listState.applied, cursor: listState.cursor }),
-    placeholderData: (previous) => previous,
-    enabled: !jobId && !urlProblem
-  }));
+  const jobs = createQuery(() => {
+    const applied = urlFilters;
+    const cursor =
+      mediaJobSearch(applied) === mediaJobSearch(listState.applied)
+        ? listState.cursor
+        : undefined;
+    return {
+      queryKey: queryKeys.mediaJobs.page(applied, cursor),
+      queryFn: () => listMediaJobs({ ...applied, cursor }),
+      placeholderData: (previous) => previous,
+      enabled: !jobId && !urlProblem
+    };
+  });
   const detail = createQuery(() => ({
     queryKey: queryKeys.mediaJobs.detail(jobId),
     queryFn: () => getMediaJob(jobId),
