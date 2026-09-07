@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
 use tokio::sync::Mutex;
@@ -7,10 +7,10 @@ use crate::harness::{GatewayProcess, Server, WorkerBoundary, WorkerProcess};
 use crate::mock_upstream::{self, MockUpstream};
 use crate::otlp::OtlpReceiver;
 
-use super::{CROSS_ROUTE, Management, OPENAI_ROUTE, TRACE_ROUTE, World, await_key};
+use super::{CROSS_ROUTE, Management, OPENAI_ROUTE, TRACE_ROUTE, World};
 
 /// Brings up a server, two providers, three routes and an API key, and waits
-/// until the gateway serves the key.
+/// until the gateway serves all three routes to the key.
 pub(crate) async fn bootstrap() -> Result<World, String> {
     let otlp = OtlpReceiver::spawn().await?;
     let server = Server::launch_traced(otlp.endpoint()).await?;
@@ -157,7 +157,7 @@ async fn bootstrap_server_at_gateway(
         .expect("reqwest client builds");
 
     let public_origin = gateway_origin.unwrap_or_else(|| server.public_origin.clone());
-    await_key(&http, &public_origin, &secret).await?;
+    await_initial_routes(&http, &public_origin, &secret).await?;
 
     Ok(World {
         public_origin,
@@ -174,6 +174,46 @@ async fn bootstrap_server_at_gateway(
         azure_provider,
         otlp,
     })
+}
+
+async fn await_initial_routes(
+    http: &reqwest::Client,
+    origin: &str,
+    secret: &str,
+) -> Result<(), String> {
+    let deadline = Instant::now() + Duration::from_secs(30);
+    loop {
+        let response = http
+            .get(format!("{origin}/openai/v1/models"))
+            .bearer_auth(secret)
+            .send()
+            .await
+            .map_err(|error| format!("initial routing probe failed: {error}"))?;
+        let status = response.status();
+        if status.is_success() {
+            let body = response
+                .json::<Value>()
+                .await
+                .map_err(|error| format!("initial model list was invalid: {error}"))?;
+            if body["data"].as_array().is_some_and(|models| {
+                [OPENAI_ROUTE, CROSS_ROUTE, TRACE_ROUTE]
+                    .iter()
+                    .all(|route| {
+                        models
+                            .iter()
+                            .any(|model| model["id"].as_str() == Some(*route))
+                    })
+            }) {
+                return Ok(());
+            }
+        }
+        if Instant::now() >= deadline {
+            return Err(format!(
+                "gateway did not serve all initial routes within 30 seconds (last status {status})"
+            ));
+        }
+        tokio::time::sleep(Duration::from_millis(250)).await;
+    }
 }
 
 /// Drives one provider from draft to active and returns its id.
