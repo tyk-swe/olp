@@ -25,6 +25,10 @@ test('provider detail keeps the live revision and credential until a certified d
 }) => {
   await mockSession(page, sessionOptions);
   const nextCredential = '01980000-0000-7000-8000-000000000104';
+  const blockingJobId = '01980000-0000-7000-8000-000000000321';
+  const blockedActivationMessage = `Activation is blocked by live media job ${blockingJobId}. The draft must preserve the job's provider connection, credential, model and certified video get/content/delete operations. Restore a compatible configuration or delete this job before activating.`;
+  let blockingJobPresent = true;
+  let activationAttempts = 0;
   let currentProvider = providerRecord('active', [certifiedModelRecord], {
     kind: 'openai_compatible',
     endpoint: 'https://models.example.test/v1/',
@@ -190,6 +194,21 @@ test('provider detail keeps the live revision and credential until a certified d
     }
     if (pathname.endsWith('/activate')) {
       activationEtag = (await request.allHeaders())['if-match'];
+      activationAttempts += 1;
+      if (blockingJobPresent) {
+        await route.fulfill({
+          status: 422,
+          contentType: 'application/problem+json',
+          json: {
+            type: 'https://openllmproxy.dev/problems/validation_failed',
+            title: 'Validation failed',
+            status: 422,
+            detail: 'One or more fields are invalid.',
+            errors: { provider: [blockedActivationMessage] }
+          }
+        });
+        return;
+      }
       currentProvider = providerRecord('active', [certifiedModelRecord], {
         kind: 'openai_compatible',
         endpoint: 'https://models.example.test/v1/',
@@ -280,7 +299,20 @@ test('provider detail keeps the live revision and credential until a certified d
     page.getByRole('button', { name: 'Activate changes' })
   ).toBeEnabled();
   await page.getByRole('button', { name: 'Activate changes' }).click();
+  await expect(page.getByRole('alert')).toContainText(blockedActivationMessage);
+  await expect(page.getByText('Revision 1 remains live.')).toBeVisible();
+  await expect(page.getByText('runtime active', { exact: true })).toBeVisible();
+  await expect(
+    page.getByText('pending activation', { exact: true })
+  ).toBeVisible();
+  await expect(
+    page.getByText(/A credential and enabled model are required/)
+  ).toHaveCount(0);
+  expect(versions.find((version) => version.active)?.id).toBe(ids.credential);
 
+  blockingJobPresent = false;
+  await page.getByRole('button', { name: 'Activate changes' }).click();
+  await expect(page.getByRole('alert')).toHaveCount(0);
   await expect(page.getByText('revision 2 active')).toBeVisible();
   await expect(page.getByText('Revision 1 remains live.')).toHaveCount(0);
   await expect(page.getByText('runtime active', { exact: true })).toBeVisible();
@@ -291,6 +323,7 @@ test('provider detail keeps the live revision and credential until a certified d
   expect(certificationEtag).toBe('"01980000-0000-7000-8000-000000000201"');
   expect(probeEtag).toBe('"01980000-0000-7000-8000-000000000202"');
   expect(activationEtag).toBe('"01980000-0000-7000-8000-000000000202"');
+  expect(activationAttempts).toBe(2);
 });
 
 test('provider detail disables an active provider and restores it as a draft', async ({

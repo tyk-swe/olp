@@ -421,7 +421,7 @@ pub(crate) async fn create_provider(
         (status = 400, description = "Required header is missing or invalid", body = Problem),
         (status = 409, description = "Idempotency-Key was already used", body = Problem),
         (status = 412, description = "ETag mismatch", body = Problem),
-        (status = 422, description = "Provider is incomplete", body = Problem)
+        (status = 422, description = "Provider is incomplete or incompatible with live media jobs", body = Problem)
     )
 )]
 pub(crate) async fn activate_provider(

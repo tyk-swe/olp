@@ -9436,7 +9436,7 @@
                 }
               }
             },
-            "description": "Provider is incomplete"
+            "description": "Provider is incomplete or incompatible with live media jobs"
           },
           "500": {
             "content": {

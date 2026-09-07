@@ -5647,7 +5647,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
-            /** @description Provider is incomplete */
+            /** @description Provider is incomplete or incompatible with live media jobs */
             422: {
                 headers: {
                     [name: string]: unknown;

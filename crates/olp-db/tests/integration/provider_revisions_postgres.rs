@@ -419,7 +419,7 @@ async fn staged_provider_changes_do_not_leak_until_reactivation() {
                 "provider-revision-activate-live-media-01",
             )
             .await,
-        Err(Error::ProviderIncomplete)
+        Err(Error::ProviderMediaJobIncompatible { job_id }) if job_id == live_media_job_id
     ));
     store
         .begin_media_job_deletion(live_media_job_id)
