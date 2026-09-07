@@ -31,6 +31,8 @@ use uuid::Uuid;
 
 use crate::common::{BOOTSTRAP_TOKEN, configure_bootstrap};
 
+mod attempts;
+
 const ORIGIN: &str = "https://olp.example.test";
 
 #[tokio::test]
@@ -711,6 +713,15 @@ async fn operations_http_contract_is_authorized_paginated_exact_and_metadata_onl
         .await
         .unwrap();
     assert_eq!(unauthenticated_readiness.status(), StatusCode::UNAUTHORIZED);
+    attempts::exercise(
+        &store,
+        &app,
+        &cookie,
+        generation_id,
+        provider_id,
+        api_key_id,
+    )
+    .await;
 }
 
 async fn get(app: &Router, uri: &str, cookie: &str) -> Response<Body> {

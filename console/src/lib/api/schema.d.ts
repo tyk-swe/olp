@@ -1288,18 +1288,30 @@ export interface components {
             runtime_generation: components["schemas"]["RuntimeGenerationResponse"];
         };
         AttemptResponse: {
+            /** Format: int64 */
+            cached_input_tokens?: number | null;
+            charge_status?: string | null;
             committed: boolean;
             /** Format: date-time */
             completed_at?: string | null;
+            currency?: string | null;
             error_class?: string | null;
+            estimated_cost?: string | null;
             /** Format: int64 */
             first_byte_ms?: number | null;
             /** Format: uuid */
             id: string;
             /** Format: int64 */
+            input_tokens?: number | null;
+            /** Format: int64 */
             latency_ms?: number | null;
+            media_units?: string | null;
             /** Format: int32 */
             ordinal: number;
+            /** Format: int64 */
+            output_tokens?: number | null;
+            /** Format: uuid */
+            pricing_revision_id?: string | null;
             /** Format: uuid */
             provider_id: string;
             provider_name: string;
@@ -1307,7 +1319,10 @@ export interface components {
             started_at: string;
             /** Format: int32 */
             status_code?: number | null;
+            unpriced?: boolean | null;
             upstream_model: string;
+            usage_complete?: boolean | null;
+            usage_observed?: boolean | null;
         };
         AuditEventResponse: {
             action: string;

@@ -12,10 +12,16 @@ import {
   type Route
 } from '../playwright';
 
-const requestId = '01980000-0000-7000-8000-000000000101';
-const generationId = '01980000-0000-7000-8000-000000000102';
-const keyId = '01980000-0000-7000-8000-000000000103';
-const providerId = '01980000-0000-7000-8000-000000000104';
+import {
+  generationId,
+  incompleteUsageRequest,
+  keyId,
+  mockRequestExplorer,
+  pricingRevisionId,
+  providerId,
+  requestId,
+  twoChargeRequest
+} from './request-fixtures';
 
 test('request explorer loading state is accessible in forced colors at 200% zoom', async ({
   page
@@ -77,82 +83,7 @@ test('request explorer filters metadata and opens an accessible attempt timeline
   page
 }, testInfo) => {
   await mockSession(page);
-  await page.route(
-    /\/api\/v1\/requests(?:\/[^?]+)?(?:\?.*)?$/,
-    async (route) => {
-      const path = new URL(route.request().url()).pathname;
-      if (path === `/api/v1/requests/${requestId}`) {
-        await route.fulfill({
-          json: {
-            id: requestId,
-            runtime_generation_id: generationId,
-            api_key_id: keyId,
-            route: 'support-chat',
-            operation: 'generation',
-            surface: 'openai',
-            started_at: '2026-07-12T12:00:00Z',
-            completed_at: '2026-07-12T12:00:00.245Z',
-            status_code: 200,
-            error_class: null,
-            total_latency_ms: 245,
-            first_byte_ms: 81,
-            attempt_count: 1,
-            input_tokens: 42,
-            output_tokens: 18,
-            cached_input_tokens: 0,
-            estimated_cost: '0.00125',
-            unpriced: false,
-            usage_complete: true,
-            attempts: [
-              {
-                id: '01980000-0000-7000-8000-000000000105',
-                provider_id: providerId,
-                provider_name: 'Primary OpenAI',
-                upstream_model: 'gpt-test',
-                ordinal: 1,
-                started_at: '2026-07-12T12:00:00Z',
-                completed_at: '2026-07-12T12:00:00.245Z',
-                status_code: 200,
-                error_class: null,
-                latency_ms: 245,
-                first_byte_ms: 81,
-                committed: true
-              }
-            ]
-          }
-        });
-        return;
-      }
-      await route.fulfill({
-        json: {
-          items: [
-            {
-              id: requestId,
-              runtime_generation_id: generationId,
-              api_key_id: keyId,
-              route: 'support-chat',
-              operation: 'generation',
-              surface: 'openai',
-              started_at: '2026-07-12T12:00:00Z',
-              completed_at: '2026-07-12T12:00:00.245Z',
-              status_code: 200,
-              error_class: null,
-              total_latency_ms: 245,
-              first_byte_ms: 81,
-              attempt_count: 1,
-              input_tokens: 42,
-              output_tokens: 18,
-              cached_input_tokens: 0,
-              estimated_cost: '0.00125',
-              unpriced: false,
-              usage_complete: true
-            }
-          ],
-          next_cursor: null
-        }
-      });
-    }
-  );
+  await mockRequestExplorer(page);
 
   await page.goto('/requests');
   await expect(
@@ -182,6 +113,83 @@ test('request explorer filters metadata and opens an accessible attempt timeline
     page.getByRole('heading', { name: 'Attempt timeline' })
   ).toBeVisible();
   await expect(page.getByText('Response committed')).toBeVisible();
+  expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+});
+
+test('attempt timeline explains failover costs with exact recorded usage and pricing', async ({
+  page
+}) => {
+  await mockSession(page);
+  await mockRequestExplorer(page, twoChargeRequest());
+  await page.goto(`/requests/${requestId}`);
+  const attempts = page.locator('.timeline > li');
+  await expect(attempts).toHaveCount(2);
+  await expect(
+    page.getByRole('region', { name: 'Request summary' })
+  ).toContainText('$0.000062');
+  for (const [index, cost] of ['0.000042000000', '0.000020000000'].entries()) {
+    const attempt = attempts.nth(index);
+    await expect(attempt.getByText('Billable', { exact: true })).toBeVisible();
+    await expect(attempt.getByText(cost, { exact: true })).toBeVisible();
+    await expect(attempt.getByText('USD', { exact: true })).toBeVisible();
+    await expect(
+      attempt.getByText(pricingRevisionId, { exact: true })
+    ).toBeVisible();
+    await expect(
+      attempt.getByText('Input tokens', { exact: true }).locator('..')
+    ).toContainText('10');
+  }
+  await expect(
+    attempts.nth(0).getByText('Cached input tokens').locator('..')
+  ).toContainText('4');
+  await expect(
+    attempts.nth(1).getByText('Cached input tokens').locator('..')
+  ).toContainText('0');
+  expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+});
+
+test('attempt timeline preserves missing, nonbillable, unpriced and incomplete usage states', async ({
+  page
+}) => {
+  await mockSession(page);
+  await page.emulateMedia({ forcedColors: 'active', reducedMotion: 'reduce' });
+  await emulateTwoHundredPercentZoom(page);
+  await mockRequestExplorer(page, incompleteUsageRequest());
+  await page.goto(`/requests/${requestId}`);
+  const attempts = page.locator('.timeline > li');
+  await expect(attempts).toHaveCount(6);
+  await expect(attempts.nth(0)).toContainText(
+    'No usage or pricing facts were recorded.'
+  );
+  await expect(
+    attempts.nth(0).getByText('Not billable', { exact: true })
+  ).toHaveCount(0);
+  await expect(
+    attempts.nth(1).getByText('Not billable', { exact: true })
+  ).toBeVisible();
+  await expect(
+    attempts.nth(1).getByText('Estimated cost').locator('..')
+  ).toContainText('Not applicable');
+  await expect(attempts.nth(2)).toContainText('Billing uncertain');
+  await expect(
+    attempts.nth(2).getByText('Usage observed').locator('..')
+  ).toContainText('No');
+  await expect(
+    attempts.nth(3).getByText('Unpriced', { exact: true })
+  ).toBeVisible();
+  await expect(
+    attempts.nth(3).getByText('Media units').locator('..')
+  ).toContainText('1.125000');
+  await expect(attempts.nth(4)).toContainText('Unavailable (incomplete usage)');
+  await expect(
+    attempts.nth(4).getByText('Unpriced', { exact: true })
+  ).toHaveCount(0);
+  await expect(
+    attempts.nth(4).getByText('Output tokens').locator('..')
+  ).toContainText('—');
+  await expect(
+    attempts.nth(5).getByText('0.000000000000', { exact: true })
+  ).toBeVisible();
   expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
 });
 

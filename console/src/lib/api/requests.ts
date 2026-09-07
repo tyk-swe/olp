@@ -6,6 +6,7 @@ import { compactQuery } from './query';
 
 export type RequestSummary = components['schemas']['RequestSummary'];
 export type RequestDetail = components['schemas']['RequestDetailResponse'];
+export type RequestAttempt = components['schemas']['AttemptResponse'];
 
 export type RequestFilters = {
   cursor?: string;
