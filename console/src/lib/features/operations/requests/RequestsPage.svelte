@@ -2,11 +2,20 @@
   import RequestTimeline from './RequestTimeline.svelte';
   import RequestResults from './RequestResults.svelte';
   import { resolve } from '$app/paths';
+  import { goto } from '$app/navigation';
+  import { page } from '$app/state';
   import { queryKeys } from '$lib/api/queryKeys';
   import { createQuery } from '@tanstack/svelte-query';
   import { getRequest, listRequests } from '$lib/api/requests';
 
-  import { requestList, type RequestListState } from './requestListState';
+  import {
+    requestFilters,
+    requestProblem,
+    requestSearch,
+    requestState,
+    readRequestForm,
+    type RequestListState
+  } from './requestListState';
 
   let {
     requestId = '',
@@ -16,12 +25,21 @@
     listState: RequestListState;
   } = $props();
 
+  let validation = $state<string | null>(null);
+  const urlProblem = $derived(
+    requestProblem(readRequestForm(page.url.searchParams), true)
+  );
+  $effect(() => {
+    void page.url.search;
+    validation = null;
+  });
+
   const requests = createQuery(() => ({
     queryKey: queryKeys.requests.page(listState.applied, listState.cursor),
     queryFn: () =>
       listRequests({ ...listState.applied, cursor: listState.cursor }),
     placeholderData: (previous) => previous,
-    enabled: !requestId
+    enabled: !requestId && !urlProblem
   }));
 
   const detail = createQuery(() => ({
@@ -32,11 +50,24 @@
 
   function applyFilters(event: SubmitEvent) {
     event.preventDefault();
-    requestList.apply(listState);
+    validation = requestProblem(listState, false, listState.applied);
+    if (validation) return;
+    const search = requestSearch(requestFilters(listState, listState.applied));
+    if (search === page.url.searchParams.toString()) {
+      Object.assign(listState, requestState(new URLSearchParams(search)));
+    } else {
+      void goto(resolve(`/requests${search ? `?${search}` : ''}`), {
+        keepFocus: true,
+        noScroll: true
+      });
+    }
   }
 
   function resetFilters() {
-    requestList.clear(listState);
+    validation = null;
+    if (!page.url.search)
+      Object.assign(listState, requestState(new URLSearchParams()));
+    else void goto(resolve('/requests'), { keepFocus: true, noScroll: true });
   }
 </script>
 
@@ -54,8 +85,9 @@
         : 'Filter operational metadata by route, target, key, outcome, or time range—never prompt or output content.'}
     </p>
   </div>
-  {#if requestId}<a class="button button-secondary" href={resolve('/requests')}
-      >Back to requests</a
+  {#if requestId}<a
+      class="button button-secondary"
+      href={resolve(`/requests${page.url.search}`)}>Back to requests</a
     >{/if}
 </div>
 
@@ -64,4 +96,6 @@
     bind:listState
     {applyFilters}
     {resetFilters}
+    problem={validation ?? urlProblem}
+    queryProblem={urlProblem}
   />{/if}

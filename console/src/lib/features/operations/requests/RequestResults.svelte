@@ -1,5 +1,6 @@
 <script lang="ts">
   import { resolve } from '$app/paths';
+  import { page } from '$app/state';
 
   import { errorMessage } from '$lib/api/http';
   import { cursorPaginationProps } from '$lib/lists/pagination';
@@ -10,7 +11,7 @@
     statusLabel,
     statusTone
   } from '$lib/format';
-  import { type RequestListState } from './requestListState';
+  import { requestTimeValid, type RequestListState } from './requestListState';
 
   import type { CreateQueryResult } from '@tanstack/svelte-query';
   import type { RequestSummary } from '$lib/api/requests';
@@ -19,12 +20,16 @@
     requests,
     listState = $bindable(),
     applyFilters,
-    resetFilters
+    resetFilters,
+    problem,
+    queryProblem
   }: {
     requests: CreateQueryResult<CursorPage<RequestSummary>>;
     listState: RequestListState;
     applyFilters: (event: SubmitEvent) => void;
     resetFilters: () => void;
+    problem: string | null;
+    queryProblem: string | null;
   } = $props();
 </script>
 
@@ -64,7 +69,7 @@
         bind:value={listState.statusCode}
         name="status"
         inputmode="numeric"
-        pattern="[0-9][0-9][0-9]"
+        pattern={'[0-9]{1,5}'}
       /></label
     >
     <label
@@ -77,14 +82,22 @@
       >Started after <input
         bind:value={listState.startedAfter}
         name="after"
-        type="datetime-local"
+        type={listState.startedAfter &&
+        (!requestTimeValid(listState.startedAfter) ||
+          requestTimeValid(listState.startedAfter, true))
+          ? 'text'
+          : 'datetime-local'}
       /></label
     >
     <label
       >Started before <input
         bind:value={listState.startedBefore}
         name="before"
-        type="datetime-local"
+        type={listState.startedBefore &&
+        (!requestTimeValid(listState.startedBefore) ||
+          requestTimeValid(listState.startedBefore, true))
+          ? 'text'
+          : 'datetime-local'}
       /></label
     >
   </div>
@@ -96,194 +109,199 @@
   </div>
 </form>
 
-<div class="toolbar">
-  <p class="result-note" aria-live="polite">
-    {requests.data?.items.length ?? 0} requests on this page
-  </p>
-  <button
-    class="text-button"
-    type="button"
-    onclick={() => requests.refetch()}
-    disabled={requests.isFetching}>Refresh</button
-  >
-</div>
+{#if problem}<div class="inline-problem" role="alert">{problem}</div>{/if}
 
-{#if requests.isPending}
-  <div class="loading-state" role="status">Loading request metadata…</div>
-{:else if requests.isError}
-  <div class="inline-problem" role="alert">
-    {errorMessage(requests.error, 'Request metadata is unavailable.')}
-    <button class="text-button" onclick={() => requests.refetch()}
-      >Try again</button
+{#if !queryProblem}
+  <div class="toolbar">
+    <p class="result-note" aria-live="polite">
+      {requests.data?.items.length ?? 0} requests on this page
+    </p>
+    <button
+      class="text-button"
+      type="button"
+      onclick={() => requests.refetch()}
+      disabled={requests.isFetching}>Refresh</button
     >
   </div>
-{:else if requests.data?.items.length === 0 && listState.history.length === 0}
-  <div class="card empty-state">
-    <div>
-      <strong>No matching requests</strong>
-      <p>Adjust the filters or send traffic through an active route.</p>
-    </div>
-  </div>
-{:else}
-  <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
-  <div
-    class="table-shell desktop-results"
-    tabindex="0"
-    role="region"
-    aria-label="Request results"
-  >
-    <table class="data-table">
-      <caption class="sr-only">Request metadata, newest first</caption>
-      <thead
-        ><tr
-          ><th scope="col">Started</th><th scope="col">Route / operation</th><th
-            scope="col">Status</th
-          ><th scope="col">Attempts</th><th scope="col">TTFT / latency</th><th
-            scope="col">Tokens</th
-          ><th scope="col">Cost</th><th scope="col"
-            ><span class="sr-only">Details</span></th
-          ></tr
-        ></thead
+
+  {#if requests.isPending}
+    <div class="loading-state" role="status">Loading request metadata…</div>
+  {:else if requests.isError}
+    <div class="inline-problem" role="alert">
+      {errorMessage(requests.error, 'Request metadata is unavailable.')}
+      <button class="text-button" onclick={() => requests.refetch()}
+        >Try again</button
       >
-      <tbody>
-        {#each requests.data?.items ?? [] as request (request.id)}
-          <tr>
-            <td
-              >{formatDate(request.started_at)}<small
-                >{request.completed_at
-                  ? `Completed ${formatDate(request.completed_at)}`
-                  : 'In flight'}</small
-              ></td
-            >
-            <td
-              ><strong>{request.route}</strong><small
-                >{request.operation} · {request.surface}</small
-              ></td
-            >
-            <td
-              ><span
-                class="badge {statusTone(
-                  request.status_code,
-                  request.error_class
-                )}"
-                >{statusLabel(request.status_code, request.error_class)}</span
-              ></td
-            >
-            <td>{request.attempt_count}</td>
-            <td
-              >{request.first_byte_ms == null
-                ? '—'
-                : `${request.first_byte_ms} ms`} / {request.total_latency_ms ==
-              null
-                ? '—'
-                : `${request.total_latency_ms} ms`}</td
-            >
-            <td
-              >{formatInteger(request.input_tokens)} in<br />{formatInteger(
-                request.output_tokens
-              )} out<small
-                >{formatInteger(request.cached_input_tokens)} cached</small
-              ></td
-            >
-            <td
-              ><span class:unpriced={request.unpriced}
-                >{formatCost(request.estimated_cost, request.currency)}</span
-              >{#if request.usage_complete === false}<small class="warning-text"
-                  >Incomplete usage</small
-                >{/if}</td
-            >
-            <td
-              ><a
-                class="row-link"
-                href={resolve(`/requests/${request.id}`)}
-                aria-label={`View request ${request.id}`}>View</a
-              ></td
-            >
-          </tr>
-        {/each}
-      </tbody>
-    </table>
-  </div>
-  <ul class="mobile-results" aria-label="Request results">
-    {#each requests.data?.items ?? [] as request (request.id)}
-      <li class="card">
-        <div class="mobile-result-heading">
-          <div>
-            <strong>{request.route}</strong><small
-              >{request.operation} · {request.surface}</small
-            >
-          </div>
-          <span
-            class="badge {statusTone(request.status_code, request.error_class)}"
-            >{statusLabel(request.status_code, request.error_class)}</span
-          >
-        </div>
-        <dl>
-          <div>
-            <dt>Started</dt>
-            <dd>{formatDate(request.started_at)}</dd>
-          </div>
-          <div>
-            <dt>Completed</dt>
-            <dd>
-              {request.completed_at
-                ? formatDate(request.completed_at)
-                : 'In flight'}
-            </dd>
-          </div>
-          <div>
-            <dt>TTFT / latency</dt>
-            <dd>
-              {request.first_byte_ms == null
-                ? '—'
-                : `${request.first_byte_ms} ms`} / {request.total_latency_ms ==
-              null
-                ? '—'
-                : `${request.total_latency_ms} ms`}
-            </dd>
-          </div>
-          <div>
-            <dt>Tokens</dt>
-            <dd>
-              {formatInteger(request.input_tokens)} in · {formatInteger(
-                request.output_tokens
-              )} out · {formatInteger(request.cached_input_tokens)} cached
-            </dd>
-          </div>
-          <div>
-            <dt>Cost</dt>
-            <dd class:unpriced={request.unpriced}>
-              {formatCost(request.estimated_cost, request.currency)}
-            </dd>
-          </div>
-        </dl>
-        <a
-          class="button button-secondary"
-          href={resolve(`/requests/${request.id}`)}
-          aria-label={`View request ${request.id}`}>View timeline</a
+    </div>
+  {:else if requests.data?.items.length === 0 && listState.history.length === 0}
+    <div class="card empty-state">
+      <div>
+        <strong>No matching requests</strong>
+        <p>Adjust the filters or send traffic through an active route.</p>
+      </div>
+    </div>
+  {:else}
+    <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+    <div
+      class="table-shell desktop-results"
+      tabindex="0"
+      role="region"
+      aria-label="Request results"
+    >
+      <table class="data-table">
+        <caption class="sr-only">Request metadata, newest first</caption>
+        <thead
+          ><tr
+            ><th scope="col">Started</th><th scope="col">Route / operation</th
+            ><th scope="col">Status</th><th scope="col">Attempts</th><th
+              scope="col">TTFT / latency</th
+            ><th scope="col">Tokens</th><th scope="col">Cost</th><th scope="col"
+              ><span class="sr-only">Details</span></th
+            ></tr
+          ></thead
         >
-      </li>
-    {/each}
-  </ul>
-  {@const pagination = cursorPaginationProps(
-    listState,
-    requests.isPlaceholderData ? null : requests.data?.nextCursor
-  )}
-  <nav class="pagination" aria-label="Request pages">
-    <button
-      class="button button-secondary"
-      type="button"
-      onclick={pagination.onPrevious}
-      disabled={!pagination.hasPrevious}>Previous</button
-    >
-    <span>Page {pagination.page}</span>
-    <button
-      class="button button-secondary"
-      type="button"
-      onclick={pagination.onNext}
-      disabled={!pagination.hasNext}>Next</button
-    >
-  </nav>
+        <tbody>
+          {#each requests.data?.items ?? [] as request (request.id)}
+            <tr>
+              <td
+                >{formatDate(request.started_at)}<small
+                  >{request.completed_at
+                    ? `Completed ${formatDate(request.completed_at)}`
+                    : 'In flight'}</small
+                ></td
+              >
+              <td
+                ><strong>{request.route}</strong><small
+                  >{request.operation} · {request.surface}</small
+                ></td
+              >
+              <td
+                ><span
+                  class="badge {statusTone(
+                    request.status_code,
+                    request.error_class
+                  )}"
+                  >{statusLabel(request.status_code, request.error_class)}</span
+                ></td
+              >
+              <td>{request.attempt_count}</td>
+              <td
+                >{request.first_byte_ms == null
+                  ? '—'
+                  : `${request.first_byte_ms} ms`} / {request.total_latency_ms ==
+                null
+                  ? '—'
+                  : `${request.total_latency_ms} ms`}</td
+              >
+              <td
+                >{formatInteger(request.input_tokens)} in<br />{formatInteger(
+                  request.output_tokens
+                )} out<small
+                  >{formatInteger(request.cached_input_tokens)} cached</small
+                ></td
+              >
+              <td
+                ><span class:unpriced={request.unpriced}
+                  >{formatCost(request.estimated_cost, request.currency)}</span
+                >{#if request.usage_complete === false}<small
+                    class="warning-text">Incomplete usage</small
+                  >{/if}</td
+              >
+              <td
+                ><a
+                  class="row-link"
+                  href={resolve(`/requests/${request.id}${page.url.search}`)}
+                  aria-label={`View request ${request.id}`}>View</a
+                ></td
+              >
+            </tr>
+          {/each}
+        </tbody>
+      </table>
+    </div>
+    <ul class="mobile-results" aria-label="Request results">
+      {#each requests.data?.items ?? [] as request (request.id)}
+        <li class="card">
+          <div class="mobile-result-heading">
+            <div>
+              <strong>{request.route}</strong><small
+                >{request.operation} · {request.surface}</small
+              >
+            </div>
+            <span
+              class="badge {statusTone(
+                request.status_code,
+                request.error_class
+              )}">{statusLabel(request.status_code, request.error_class)}</span
+            >
+          </div>
+          <dl>
+            <div>
+              <dt>Started</dt>
+              <dd>{formatDate(request.started_at)}</dd>
+            </div>
+            <div>
+              <dt>Completed</dt>
+              <dd>
+                {request.completed_at
+                  ? formatDate(request.completed_at)
+                  : 'In flight'}
+              </dd>
+            </div>
+            <div>
+              <dt>TTFT / latency</dt>
+              <dd>
+                {request.first_byte_ms == null
+                  ? '—'
+                  : `${request.first_byte_ms} ms`} / {request.total_latency_ms ==
+                null
+                  ? '—'
+                  : `${request.total_latency_ms} ms`}
+              </dd>
+            </div>
+            <div>
+              <dt>Tokens</dt>
+              <dd>
+                {formatInteger(request.input_tokens)} in · {formatInteger(
+                  request.output_tokens
+                )} out · {formatInteger(request.cached_input_tokens)} cached
+              </dd>
+            </div>
+            <div>
+              <dt>Cost</dt>
+              <dd class:unpriced={request.unpriced}>
+                {formatCost(request.estimated_cost, request.currency)}
+              </dd>
+            </div>
+          </dl>
+          <a
+            class="button button-secondary"
+            href={resolve(`/requests/${request.id}${page.url.search}`)}
+            aria-label={`View request ${request.id}`}>View timeline</a
+          >
+        </li>
+      {/each}
+    </ul>
+    {@const pagination = cursorPaginationProps(
+      listState,
+      requests.isPlaceholderData ? null : requests.data?.nextCursor
+    )}
+    <nav class="pagination" aria-label="Request pages">
+      <button
+        class="button button-secondary"
+        type="button"
+        onclick={pagination.onPrevious}
+        disabled={!pagination.hasPrevious}>Previous</button
+      >
+      <span>Page {pagination.page}</span>
+      <button
+        class="button button-secondary"
+        type="button"
+        onclick={pagination.onNext}
+        disabled={!pagination.hasNext}>Next</button
+      >
+    </nav>
+  {/if}
 {/if}
 
 <style>

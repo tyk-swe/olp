@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
+  auditProblem,
+  auditSearch,
+  auditState,
+  auditTimeValid,
+  readAuditForm,
   auditList,
   auditFilters,
   auditRangeError,
@@ -113,5 +118,110 @@ describe('auditList.empty', () => {
       cursor: undefined,
       history: []
     });
+  });
+});
+
+describe('audit applied URL filters', () => {
+  it('round trips all applied filters without cursor, limit, or unrelated values', () => {
+    const filters = {
+      action: 'setting.update',
+      resource_type: 'setting',
+      resource_id: 'limits.valkey_unavailable',
+      actor_user_id: '01980000-0000-7000-8000-000000000103',
+      outcome: 'failure',
+      occurred_after: '2026-07-12T13:30:42.123456Z',
+      occurred_before: '2026-07-12T22:00:12.456789Z'
+    };
+    const state = auditState(
+      new URLSearchParams({
+        ...filters,
+        cursor: 'local-only',
+        limit: '1',
+        unrelated: 'discard'
+      })
+    );
+    const search = auditSearch(state.applied);
+    expect(Object.fromEntries(new URLSearchParams(search))).toEqual(filters);
+    expect(state.cursor).toBeUndefined();
+    expect(state.history).toEqual([]);
+    expect(state.occurredAfter).toBe('2026-07-12T09:30');
+    expect(auditState(new URLSearchParams(search))).toEqual(state);
+  });
+
+  it.each([
+    ['actor_user_id', 'bad-id'],
+    ['outcome', 'unsupported'],
+    ['occurred_after', 'not-a-date'],
+    ['occurred_after', '2026-02-30T12:00:00Z'],
+    ['occurred_after', '2026-07-12T10:00:00']
+  ])('retains invalid %s values for visible validation', (name, value) => {
+    const search = new URLSearchParams({ [name]: value });
+    expect(auditProblem(readAuditForm(search), true)).toContain(value);
+    if (name === 'occurred_after' && value === '2026-02-30T12:00:00Z') {
+      expect(auditState(search).occurredAfter).toBe(value);
+      expect(auditState(search).applied.occurred_after).toBeUndefined();
+    }
+  });
+
+  it('preserves fractional precision and the second fall-back hour on unrelated edits', () => {
+    const start = '2026-11-01T06:30:42.123456Z';
+    const end = '2026-11-01T07:30:12.456789Z';
+    const state = auditState(
+      new URLSearchParams({ occurred_after: start, occurred_before: end })
+    );
+    const draft = { ...state, action: 'edited' };
+    const filters = auditFilters(draft, state.applied);
+    expect(draft.occurredAfter).toBe('2026-11-01T01:30');
+    expect(filters.occurred_after).toBe(start);
+    expect(filters.occurred_before).toBe(end);
+    expect(state.applied.action).toBeUndefined();
+    expect(auditProblem(draft, false, state.applied)).toBeNull();
+  });
+
+  it('accepts a valid fall-back interval whose displayed local times reverse', () => {
+    const start = '2026-11-01T05:50:00Z';
+    const end = '2026-11-01T06:10:00Z';
+    const state = auditState(
+      new URLSearchParams({ occurred_after: start, occurred_before: end })
+    );
+    const draft = { ...state, action: 'edited' };
+    expect(draft.occurredAfter).toBe('2026-11-01T01:50');
+    expect(draft.occurredBefore).toBe('2026-11-01T01:10');
+    expect(auditProblem(draft, false, state.applied)).toBeNull();
+    expect(auditFilters(draft, state.applied)).toMatchObject({
+      occurred_after: start,
+      occurred_before: end
+    });
+  });
+
+  it('orders offsets and submillisecond bounds by their exact instants', () => {
+    for (const [start, end] of [
+      ['2026-07-12T12:00:00Z', '2026-07-12T08:30:00-04:00'],
+      ['2026-07-12T12:00:00.123456Z', '2026-07-12T12:00:00.123457Z']
+    ]) {
+      expect(
+        auditProblem(
+          readAuditForm(
+            new URLSearchParams({ occurred_after: start, occurred_before: end })
+          ),
+          true
+        )
+      ).toBeNull();
+      expect(
+        auditProblem(
+          readAuditForm(
+            new URLSearchParams({ occurred_after: end, occurred_before: start })
+          ),
+          true
+        )
+      ).not.toBeNull();
+    }
+  });
+
+  it('validates calendar days without JavaScript date normalization', () => {
+    expect(auditTimeValid('2024-02-29T12:00:00Z', true)).toBe(true);
+    expect(auditTimeValid('2026-02-29T12:00:00Z', true)).toBe(false);
+    expect(auditTimeValid('2026-02-30T12:00:00Z', true)).toBe(false);
+    expect(auditTimeValid('2026-07-12T24:00:00Z', true)).toBe(false);
   });
 });

@@ -1,5 +1,7 @@
 <script lang="ts">
   import { resolve } from '$app/paths';
+  import { goto } from '$app/navigation';
+  import { page } from '$app/state';
   import { queryKeys } from '$lib/api/queryKeys';
   import { createQuery } from '@tanstack/svelte-query';
   import CursorPagination from '$lib/components/CursorPagination.svelte';
@@ -7,7 +9,17 @@
   import { errorMessage } from '$lib/api/http';
   import { cursorPaginationProps } from '$lib/lists/pagination';
   import { formatDate, stateLabel } from '$lib/format';
-  import { mediaJobList, type MediaJobListState } from './mediaJobListState';
+  import {
+    mediaJobTimeValid,
+    mediaJobFilters,
+    mediaJobProblem,
+    mediaJobSearch,
+    mediaJobState,
+    mediaJobStates,
+    mediaJobLifecycles,
+    readMediaJobForm,
+    type MediaJobListState
+  } from './mediaJobListState';
 
   let {
     jobId = '',
@@ -17,12 +29,21 @@
     listState: MediaJobListState;
   } = $props();
 
+  let validation = $state<string | null>(null);
+  const urlProblem = $derived(
+    mediaJobProblem(readMediaJobForm(page.url.searchParams), true)
+  );
+  $effect(() => {
+    void page.url.search;
+    validation = null;
+  });
+
   const jobs = createQuery(() => ({
     queryKey: queryKeys.mediaJobs.page(listState.applied, listState.cursor),
     queryFn: () =>
       listMediaJobs({ ...listState.applied, cursor: listState.cursor }),
     placeholderData: (previous) => previous,
-    enabled: !jobId
+    enabled: !jobId && !urlProblem
   }));
   const detail = createQuery(() => ({
     queryKey: queryKeys.mediaJobs.detail(jobId),
@@ -32,11 +53,26 @@
 
   function apply(event: SubmitEvent) {
     event.preventDefault();
-    mediaJobList.apply(listState);
+    validation = mediaJobProblem(listState, false, listState.applied);
+    if (validation) return;
+    const search = mediaJobSearch(
+      mediaJobFilters(listState, listState.applied)
+    );
+    if (search === page.url.searchParams.toString()) {
+      Object.assign(listState, mediaJobState(new URLSearchParams(search)));
+    } else {
+      void goto(resolve(`/media-jobs${search ? `?${search}` : ''}`), {
+        keepFocus: true,
+        noScroll: true
+      });
+    }
   }
 
   function clear() {
-    mediaJobList.clear(listState);
+    validation = null;
+    if (!page.url.search)
+      Object.assign(listState, mediaJobState(new URLSearchParams()));
+    else void goto(resolve('/media-jobs'), { keepFocus: true, noScroll: true });
   }
 
   function tone(value: string) {
@@ -60,8 +96,9 @@
       </p>
     </div>
     <div class="page-actions">
-      <a class="button button-secondary" href={resolve('/media-jobs')}
-        >All media jobs</a
+      <a
+        class="button button-secondary"
+        href={resolve(`/media-jobs${page.url.search}`)}>All media jobs</a
       >
       <button
         class="button button-secondary"
@@ -202,7 +239,7 @@
       class="button button-secondary"
       type="button"
       onclick={() => jobs.refetch()}
-      disabled={jobs.isFetching}>Refresh</button
+      disabled={jobs.isFetching || Boolean(urlProblem)}>Refresh</button
     >
   </div>
   <form class="card filters" aria-label="Media job filters" onsubmit={apply}>
@@ -215,16 +252,20 @@
     <label
       >State <select bind:value={listState.jobState}
         ><option value="">All states</option
-        >{#each ['queued', 'running', 'succeeded', 'failed', 'cancelled'] as value (value)}<option
-            {value}>{value}</option
+        >{#if listState.jobState && !mediaJobStates.includes(listState.jobState)}<option
+            value={listState.jobState}>{listState.jobState}</option
+          >{/if}{#each mediaJobStates as value (value)}<option {value}
+            >{value}</option
           >{/each}</select
       ></label
     >
     <label
       >Lifecycle <select bind:value={listState.lifecycle}
         ><option value="">All lifecycles</option
-        >{#each ['creating', 'active', 'create_ambiguous', 'create_cleanup_pending', 'delete_pending', 'deleted'] as value (value)}<option
-            {value}>{stateLabel(value)}</option
+        >{#if listState.lifecycle && !mediaJobLifecycles.includes(listState.lifecycle)}<option
+            value={listState.lifecycle}>{listState.lifecycle}</option
+          >{/if}{#each mediaJobLifecycles as value (value)}<option {value}
+            >{stateLabel(value)}</option
           >{/each}</select
       ></label
     >
@@ -245,13 +286,21 @@
     <label
       >Created after <input
         bind:value={listState.createdAfter}
-        type="datetime-local"
+        type={listState.createdAfter &&
+        (!mediaJobTimeValid(listState.createdAfter) ||
+          mediaJobTimeValid(listState.createdAfter, true))
+          ? 'text'
+          : 'datetime-local'}
       /></label
     >
     <label
       >Created before <input
         bind:value={listState.createdBefore}
-        type="datetime-local"
+        type={listState.createdBefore &&
+        (!mediaJobTimeValid(listState.createdBefore) ||
+          mediaJobTimeValid(listState.createdBefore, true))
+          ? 'text'
+          : 'datetime-local'}
       /></label
     >
     <div class="filter-actions">
@@ -261,71 +310,80 @@
       >
     </div>
   </form>
-  {#if jobs.isPending}<div class="loading-state" role="status">
-      Loading media jobs…
-    </div>
-  {:else if jobs.isError}<div class="inline-problem" role="alert">
-      {errorMessage(jobs.error, 'Media jobs are unavailable.')}
-      <button class="text-button" type="button" onclick={() => jobs.refetch()}
-        >Retry</button
-      >
-    </div>
-  {:else if jobs.data?.items.length === 0 && listState.history.length === 0}<section
-      class="card empty-state"
-    >
-      <p>No media jobs match these filters.</p>
-    </section>
-  {:else}<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
-    <div
-      class="table-shell job-table-shell"
-      tabindex="0"
-      role="region"
-      aria-label="Media job results"
-    >
-      <table class="data-table job-table">
-        <caption class="sr-only">Asynchronous media jobs</caption><thead
-          ><tr
-            ><th scope="col">Route / operation</th><th scope="col">Provider</th
-            ><th scope="col">State</th><th scope="col">Lifecycle</th><th
-              scope="col">Progress</th
-            ><th scope="col">Created</th><th scope="col">Updated</th><th
-              scope="col"><span class="sr-only">Actions</span></th
-            ></tr
-          ></thead
-        ><tbody
-          >{#each jobs.data?.items ?? [] as job (job.id)}<tr
-              ><td data-label="Route / operation"
-                ><strong>{job.route}</strong><small>{job.operation}</small></td
-              ><td data-label="Provider"
-                >{job.provider_name}<small>{job.provider_model}</small><small
-                  class="mono">{job.provider_id}</small
-                ></td
-              ><td data-label="State"
-                ><span class={`badge ${tone(job.state)}`}>{job.state}</span></td
-              ><td data-label="Lifecycle">{stateLabel(job.lifecycle)}</td><td
-                data-label="Progress"
-                >{job.progress_percent == null
-                  ? '—'
-                  : `${job.progress_percent}%`}</td
-              ><td data-label="Created">{formatDate(job.created_at)}</td><td
-                data-label="Updated">{formatDate(job.updated_at)}</td
-              ><td class="job-action"
-                ><a
-                  class="button button-secondary"
-                  href={resolve(`/media-jobs/${job.id}`)}>View</a
-                ></td
-              ></tr
-            >{/each}</tbody
+  {#if validation ?? urlProblem}<div class="inline-problem" role="alert">
+      {validation ?? urlProblem}
+    </div>{/if}
+  {#if !urlProblem}
+    {#if jobs.isPending}<div class="loading-state" role="status">
+        Loading media jobs…
+      </div>
+    {:else if jobs.isError}<div class="inline-problem" role="alert">
+        {errorMessage(jobs.error, 'Media jobs are unavailable.')}
+        <button class="text-button" type="button" onclick={() => jobs.refetch()}
+          >Retry</button
         >
-      </table>
-    </div>
-    <CursorPagination
-      {...cursorPaginationProps(
-        listState,
-        jobs.isPlaceholderData ? null : jobs.data?.nextCursor
-      )}
-      label="Media job pages"
-    />{/if}
+      </div>
+    {:else if jobs.data?.items.length === 0 && listState.history.length === 0}<section
+        class="card empty-state"
+      >
+        <p>No media jobs match these filters.</p>
+      </section>
+    {:else}<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+      <div
+        class="table-shell job-table-shell"
+        tabindex="0"
+        role="region"
+        aria-label="Media job results"
+      >
+        <table class="data-table job-table">
+          <caption class="sr-only">Asynchronous media jobs</caption><thead
+            ><tr
+              ><th scope="col">Route / operation</th><th scope="col"
+                >Provider</th
+              ><th scope="col">State</th><th scope="col">Lifecycle</th><th
+                scope="col">Progress</th
+              ><th scope="col">Created</th><th scope="col">Updated</th><th
+                scope="col"><span class="sr-only">Actions</span></th
+              ></tr
+            ></thead
+          ><tbody
+            >{#each jobs.data?.items ?? [] as job (job.id)}<tr
+                ><td data-label="Route / operation"
+                  ><strong>{job.route}</strong><small>{job.operation}</small
+                  ></td
+                ><td data-label="Provider"
+                  >{job.provider_name}<small>{job.provider_model}</small><small
+                    class="mono">{job.provider_id}</small
+                  ></td
+                ><td data-label="State"
+                  ><span class={`badge ${tone(job.state)}`}>{job.state}</span
+                  ></td
+                ><td data-label="Lifecycle">{stateLabel(job.lifecycle)}</td><td
+                  data-label="Progress"
+                  >{job.progress_percent == null
+                    ? '—'
+                    : `${job.progress_percent}%`}</td
+                ><td data-label="Created">{formatDate(job.created_at)}</td><td
+                  data-label="Updated">{formatDate(job.updated_at)}</td
+                ><td class="job-action"
+                  ><a
+                    class="button button-secondary"
+                    href={resolve(`/media-jobs/${job.id}${page.url.search}`)}
+                    >View</a
+                  ></td
+                ></tr
+              >{/each}</tbody
+          >
+        </table>
+      </div>
+      <CursorPagination
+        {...cursorPaginationProps(
+          listState,
+          jobs.isPlaceholderData ? null : jobs.data?.nextCursor
+        )}
+        label="Media job pages"
+      />{/if}
+  {/if}
 {/if}
 
 <style>

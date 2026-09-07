@@ -329,6 +329,8 @@ test('request filters and cursor history survive list-detail-list navigation', a
   await page
     .getByRole('link', { name: `View request ${ids.requestTwo}` })
     .click();
+  expect(new URL(page.url()).searchParams.get('route')).toBe('support-chat');
+  expect(new URL(page.url()).searchParams.has('cursor')).toBe(false);
   await page.getByRole('link', { name: 'Back to requests' }).click();
 
   await expect(page.getByLabel('Route')).toHaveValue('support-chat');
@@ -366,6 +368,19 @@ test('request filters and cursor history survive list-detail-list navigation', a
       })
     ])
   );
+  const appliedUrl = page.url();
+  await page.getByLabel('Route').fill('unsaved-route');
+  await page
+    .getByRole('link', { name: `View request ${ids.requestTwo}` })
+    .click();
+  expect(new URL(page.url()).searchParams.get('route')).toBe('support-chat');
+  await page.getByRole('link', { name: 'Back to requests' }).click();
+  await expect(page.getByLabel('Route')).toHaveValue('unsaved-route');
+  await expect(page.getByLabel('Request pages')).toContainText('Page 2');
+  expect(page.url()).toBe(appliedUrl);
+  expect(
+    seenFilters.some((query) => query.get('route') === 'unsaved-route')
+  ).toBe(false);
 });
 
 test('media-job filter drafts, applied filters, and pagination survive detail navigation', async ({
@@ -407,6 +422,8 @@ test('media-job filter drafts, applied filters, and pagination survive detail na
     .getByRole('button', { name: 'Next' })
     .click();
   await page.getByRole('link', { name: 'View', exact: true }).click();
+  expect(new URL(page.url()).searchParams.get('route')).toBe('video-route');
+  expect(new URL(page.url()).searchParams.has('cursor')).toBe(false);
   await page.getByRole('link', { name: 'All media jobs' }).click();
 
   await expect(page.getByLabel('Route')).toHaveValue('video-route');
@@ -423,6 +440,19 @@ test('media-job filter drafts, applied filters, and pagination survive detail na
         filters.get('cursor') === 'media-next'
     )
   ).toBe(true);
+  const appliedUrl = page.url();
+  await page.getByLabel('Route').fill('unsaved-video-route');
+  await page.getByLabel('State').selectOption('queued');
+  await page.getByRole('link', { name: 'View', exact: true }).click();
+  expect(new URL(page.url()).searchParams.get('state')).toBe('running');
+  await page.getByRole('link', { name: 'All media jobs' }).click();
+  await expect(page.getByLabel('Route')).toHaveValue('unsaved-video-route');
+  await expect(page.getByLabel('State')).toHaveValue('queued');
+  await expect(page.getByLabel('Media job pages')).toContainText('Page 2');
+  expect(page.url()).toBe(appliedUrl);
+  expect(
+    seenFilters.some((query) => query.get('route') === 'unsaved-video-route')
+  ).toBe(false);
 });
 
 test('API-key pagination survives new/cancel and resets after leaving the family', async ({
@@ -475,4 +505,114 @@ test('API-key pagination survives new/cancel and resets after leaving the family
   await page.getByRole('link', { name: 'API Keys', exact: true }).click();
   await expect(page.getByLabel('API key pages')).toContainText('Page 1');
   await expect(page.getByText('key-page-one', { exact: true })).toBeVisible();
+});
+
+test.describe('request investigation URLs', () => {
+  test.use({ timezoneId: 'America/New_York' });
+
+  test('direct links preserve exact applied bounds across drafts, reload and history', async ({
+    page
+  }) => {
+    await mockSession(page, sessionOptions);
+    const requests: URLSearchParams[] = [];
+    await page.route('**/api/v1/requests?*', async (route) => {
+      requests.push(new URL(route.request().url()).searchParams);
+      await route.fulfill({
+        json: {
+          items: [requestSummary(ids.requestOne, 'request-url')],
+          next_cursor: null
+        }
+      });
+    });
+    const filters = {
+      route: 'support-chat',
+      provider_id: ids.provider,
+      model: 'gpt-test',
+      api_key_id: ids.key,
+      operation: 'generation',
+      status_code: '200',
+      error_class: 'transport',
+      started_after: '2026-11-01T05:50:00.123456Z',
+      started_before: '2026-11-01T06:10:00.456789Z'
+    };
+    await page.goto(
+      `/requests?${new URLSearchParams({ ...filters, cursor: 'ignored', unrelated: 'ignored' })}`
+    );
+    await expect(
+      page.getByText('request-url', { exact: true }).filter({ visible: true })
+    ).toBeVisible();
+    await expect
+      .poll(() => Object.fromEntries(new URL(page.url()).searchParams))
+      .toEqual(filters);
+    await expect(page.getByLabel('Started after')).toHaveValue(
+      '2026-11-01T01:50'
+    );
+    await expect(page.getByLabel('Started before')).toHaveValue(
+      '2026-11-01T01:10'
+    );
+    const before = requests.length;
+    await page.getByLabel('Route').fill('edited-route');
+    expect(requests).toHaveLength(before);
+    expect(new URL(page.url()).searchParams.get('route')).toBe('support-chat');
+    await page.getByRole('button', { name: 'Refresh', exact: true }).click();
+    await expect.poll(() => requests.length).toBe(before + 1);
+    expect(Object.fromEntries(requests.at(-1)!)).toMatchObject(filters);
+    await page.getByRole('button', { name: 'Apply filters' }).click();
+    await expect
+      .poll(() => new URL(page.url()).searchParams.get('route'))
+      .toBe('edited-route');
+    await expect(page.getByRole('alert')).toHaveCount(0);
+    expect(new URL(page.url()).searchParams.get('started_after')).toBe(
+      filters.started_after
+    );
+    expect(new URL(page.url()).searchParams.get('started_before')).toBe(
+      filters.started_before
+    );
+    await page.reload();
+    await expect(page.getByLabel('Route')).toHaveValue('edited-route');
+    await page.goBack();
+    await expect(page.getByLabel('Route')).toHaveValue('support-chat');
+    await page.goForward();
+    await expect(page.getByLabel('Route')).toHaveValue('edited-route');
+    await page.getByRole('button', { name: 'Clear' }).click();
+    await expect.poll(() => new URL(page.url()).search).toBe('');
+    await expect(page.getByLabel('Route')).toHaveValue('');
+    await expect.poll(() => requests.at(-1)?.has('route')).toBe(false);
+  });
+
+  for (const [parameter, value, label] of [
+    ['provider_id', 'not-a-uuid', 'Provider ID'],
+    ['status_code', 'invalid', 'Status code'],
+    ['started_after', '2026-02-30T12:00:00Z', 'Started after']
+  ]) {
+    test(`invalid ${parameter} remains visible without fetching`, async ({
+      page
+    }) => {
+      await mockSession(page, sessionOptions);
+      let requests = 0;
+      await page.route('**/api/v1/requests?*', async (route) => {
+        requests += 1;
+        await route.fulfill({ json: { items: [], next_cursor: null } });
+      });
+      await page.goto(
+        `/requests?${new URLSearchParams({ [parameter]: value })}`
+      );
+      await expect(page.getByRole('alert')).toContainText(value);
+      await expect(page.getByLabel(label)).toHaveValue(value);
+      expect(requests).toBe(0);
+      if (parameter === 'started_after') {
+        const corrected = '2026-02-28T12:00:00Z';
+        await page.getByLabel(label).fill(corrected);
+        await expect(page.getByLabel(label)).toHaveValue(corrected);
+        await page.getByRole('button', { name: 'Apply filters' }).click();
+        await expect.poll(() => requests).toBe(1);
+        await expect(page.getByRole('alert')).toHaveCount(0);
+        expect(new URL(page.url()).searchParams.get(parameter)).toBe(corrected);
+        return;
+      }
+      await page.getByRole('button', { name: 'Clear' }).click();
+      await expect(page.getByText('No matching requests')).toBeVisible();
+      expect(requests).toBe(1);
+    });
+  }
 });

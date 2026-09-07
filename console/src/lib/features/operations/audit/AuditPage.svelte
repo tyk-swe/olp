@@ -1,33 +1,82 @@
 <script lang="ts">
   import { createQuery } from '@tanstack/svelte-query';
+  import { goto } from '$app/navigation';
+  import { page } from '$app/state';
+  import { resolve } from '$app/paths';
   import { queryKeys } from '$lib/api/queryKeys';
   import { listAudit } from '$lib/api/audit';
   import { errorMessage } from '$lib/api/http';
   import { cursorPaginationProps } from '$lib/lists/pagination';
   import CursorPagination from '$lib/components/CursorPagination.svelte';
   import { formatDate } from '$lib/format';
-  import { auditList } from './auditListState';
+  import {
+    auditTimeValid,
+    auditFilters,
+    auditProblem,
+    auditRangeError,
+    auditSearch,
+    auditState,
+    readAuditForm
+  } from './auditListState';
 
-  const listState = $state(auditList.empty());
-  let rangeError = $state('');
+  const listState = $state(auditState(page.url.searchParams));
+  let previousSearch = page.url.search;
+  let validation = $state<string | null>(null);
+  const urlProblem = $derived(
+    auditProblem(readAuditForm(page.url.searchParams), true)
+  );
+  const filterError = $derived(validation ?? urlProblem);
+  const rangeError = $derived(
+    filterError && auditRangeError(listState, listState.applied)
+  );
+  $effect(() => {
+    const search = page.url.search;
+    const rawForm = readAuditForm(new URLSearchParams(search));
+    if (!auditProblem(rawForm, true)) {
+      const canonical = auditSearch(auditFilters(rawForm));
+      const suffix = canonical ? `?${canonical}` : '';
+      if (search !== suffix) {
+        void goto(resolve(`/audit${suffix}`), {
+          replaceState: true,
+          keepFocus: true,
+          noScroll: true
+        });
+      }
+    }
+    if (search !== previousSearch) {
+      previousSearch = search;
+      Object.assign(listState, auditState(new URLSearchParams(search)));
+      validation = null;
+    }
+  });
   const audit = createQuery(() => ({
     queryKey: queryKeys.audit.page(listState.applied, listState.cursor),
     queryFn: () =>
       listAudit({ ...listState.applied, cursor: listState.cursor }),
-    placeholderData: (previous) => previous
+    placeholderData: (previous) => previous,
+    enabled: !urlProblem
   }));
 
   function applyFilters(event: SubmitEvent) {
     event.preventDefault();
-    // An inverted window is caught here so the operator is not made to wait for
-    // the server's rejection; a server-side problem still renders its own
-    // detail below.
-    rangeError = auditList.apply(listState) ?? '';
+    validation = auditProblem(listState, false, listState.applied);
+    if (validation) return;
+    const search = auditSearch(auditFilters(listState, listState.applied));
+    if (search === page.url.searchParams.toString()) {
+      Object.assign(listState, auditState(new URLSearchParams(search)));
+    } else {
+      void goto(resolve(`/audit${search ? `?${search}` : ''}`), {
+        keepFocus: true,
+        noScroll: true
+      });
+    }
   }
 
   function clearFilters() {
-    auditList.clear(listState);
-    rangeError = '';
+    validation = null;
+    if (!page.url.search)
+      Object.assign(listState, auditState(new URLSearchParams()));
+    else void goto(resolve('/audit'), { keepFocus: true, noScroll: true });
   }
 </script>
 
@@ -46,7 +95,7 @@
     class="button button-secondary"
     type="button"
     onclick={() => audit.refetch()}
-    disabled={audit.isFetching}>Refresh</button
+    disabled={audit.isFetching || Boolean(urlProblem)}>Refresh</button
   >
 </div>
 
@@ -79,15 +128,22 @@
   >
   <label
     >Outcome <select bind:value={listState.outcome}
-      ><option value="">All outcomes</option><option value="success"
-        >success</option
-      ><option value="failure">failure</option></select
+      ><option value="">All outcomes</option
+      >{#if listState.outcome && !['success', 'failure'].includes(listState.outcome)}<option
+          value={listState.outcome}>{listState.outcome}</option
+        >{/if}<option value="success">success</option><option value="failure"
+        >failure</option
+      ></select
     ></label
   >
   <label
     >Occurred after <input
       bind:value={listState.occurredAfter}
-      type="datetime-local"
+      type={listState.occurredAfter &&
+      (!auditTimeValid(listState.occurredAfter) ||
+        auditTimeValid(listState.occurredAfter, true))
+        ? 'text'
+        : 'datetime-local'}
       aria-invalid={rangeError ? 'true' : undefined}
       aria-describedby={rangeError ? 'audit-range-error' : undefined}
     /></label
@@ -95,13 +151,17 @@
   <label
     >Occurred before <input
       bind:value={listState.occurredBefore}
-      type="datetime-local"
+      type={listState.occurredBefore &&
+      (!auditTimeValid(listState.occurredBefore) ||
+        auditTimeValid(listState.occurredBefore, true))
+        ? 'text'
+        : 'datetime-local'}
       aria-invalid={rangeError ? 'true' : undefined}
       aria-describedby={rangeError ? 'audit-range-error' : undefined}
     /></label
   >
-  {#if rangeError}<p class="range-error" id="audit-range-error" role="alert">
-      {rangeError}
+  {#if filterError}<p class="range-error" id="audit-range-error" role="alert">
+      {filterError}
     </p>{/if}
   <div class="filter-actions">
     <button class="button button-primary" type="submit">Apply filters</button
@@ -113,71 +173,74 @@
   </div>
 </form>
 
-{#if audit.isPending}
-  <div class="loading-state" role="status">Loading audit events…</div>
-{:else if audit.isError}
-  <div class="inline-problem" role="alert">
-    {errorMessage(audit.error, 'Audit events are unavailable.')}
-    <button class="text-button" onclick={() => audit.refetch()}
-      >Try again</button
-    >
-  </div>
-{:else if audit.data?.items.length === 0 && listState.history.length === 0}
-  <div class="card empty-state">
-    <div>
-      <strong>No audit events</strong>
-      <p>
-        Security and configuration changes matching these filters will appear
-        here.
-      </p>
-    </div>
-  </div>
-{:else}
-  <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
-  <div
-    class="table-shell audit-table"
-    tabindex="0"
-    role="region"
-    aria-label="Audit event results"
-  >
-    <table class="data-table">
-      <caption class="sr-only">Audit events, newest first</caption><thead
-        ><tr
-          ><th scope="col">Occurred</th><th scope="col">Actor</th><th
-            scope="col">Action</th
-          ><th scope="col">Resource</th><th scope="col">Outcome</th><th
-            scope="col">Source IP</th
-          ><th scope="col">User agent</th></tr
-        ></thead
-      ><tbody
-        >{#each audit.data?.items ?? [] as event (event.id)}<tr
-            ><td>{formatDate(event.occurred_at)}</td><td
-              >{event.actor_email ?? 'System'}</td
-            ><td><code>{event.action}</code></td><td
-              ><strong>{event.resource_type}</strong
-              >{#if event.resource_id}<small class="mono"
-                  >{event.resource_id}</small
-                >{/if}</td
-            ><td
-              ><span
-                class="badge"
-                class:success={event.outcome === 'success'}
-                class:danger={event.outcome !== 'success'}>{event.outcome}</span
-              ></td
-            ><td class="mono">{event.source_ip ?? '—'}</td><td
-              >{event.user_agent_family ?? '—'}</td
-            ></tr
-          >{/each}</tbody
+{#if !urlProblem}
+  {#if audit.isPending}
+    <div class="loading-state" role="status">Loading audit events…</div>
+  {:else if audit.isError}
+    <div class="inline-problem" role="alert">
+      {errorMessage(audit.error, 'Audit events are unavailable.')}
+      <button class="text-button" onclick={() => audit.refetch()}
+        >Try again</button
       >
-    </table>
-  </div>
-  <CursorPagination
-    {...cursorPaginationProps(
-      listState,
-      audit.isPlaceholderData ? null : audit.data?.nextCursor
-    )}
-    label="Audit pages"
-  />
+    </div>
+  {:else if audit.data?.items.length === 0 && listState.history.length === 0}
+    <div class="card empty-state">
+      <div>
+        <strong>No audit events</strong>
+        <p>
+          Security and configuration changes matching these filters will appear
+          here.
+        </p>
+      </div>
+    </div>
+  {:else}
+    <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+    <div
+      class="table-shell audit-table"
+      tabindex="0"
+      role="region"
+      aria-label="Audit event results"
+    >
+      <table class="data-table">
+        <caption class="sr-only">Audit events, newest first</caption><thead
+          ><tr
+            ><th scope="col">Occurred</th><th scope="col">Actor</th><th
+              scope="col">Action</th
+            ><th scope="col">Resource</th><th scope="col">Outcome</th><th
+              scope="col">Source IP</th
+            ><th scope="col">User agent</th></tr
+          ></thead
+        ><tbody
+          >{#each audit.data?.items ?? [] as event (event.id)}<tr
+              ><td>{formatDate(event.occurred_at)}</td><td
+                >{event.actor_email ?? 'System'}</td
+              ><td><code>{event.action}</code></td><td
+                ><strong>{event.resource_type}</strong
+                >{#if event.resource_id}<small class="mono"
+                    >{event.resource_id}</small
+                  >{/if}</td
+              ><td
+                ><span
+                  class="badge"
+                  class:success={event.outcome === 'success'}
+                  class:danger={event.outcome !== 'success'}
+                  >{event.outcome}</span
+                ></td
+              ><td class="mono">{event.source_ip ?? '—'}</td><td
+                >{event.user_agent_family ?? '—'}</td
+              ></tr
+            >{/each}</tbody
+        >
+      </table>
+    </div>
+    <CursorPagination
+      {...cursorPaginationProps(
+        listState,
+        audit.isPlaceholderData ? null : audit.data?.nextCursor
+      )}
+      label="Audit pages"
+    />
+  {/if}
 {/if}
 
 <style>
