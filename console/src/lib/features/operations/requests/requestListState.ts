@@ -1,11 +1,19 @@
-import type { RequestFilters } from '$lib/api/requests';
+import { operationKinds, type RequestFilters } from '$lib/api/requests';
 import { REQUEST_PAGE_SIZE } from '$lib/api/pageSizes';
 import {
   filteredListState,
   type FilteredListState
 } from '$lib/lists/pagination';
-import { instant } from '$lib/api/query';
-import { dateTimeLocalValue } from '$lib/format';
+import {
+  formTimeValue,
+  preservedTime,
+  querySearch,
+  rangeProblem,
+  readForm,
+  timeProblem,
+  uuidProblem
+} from '$lib/lists/filters';
+import type { ListUrlSpec } from '$lib/lists/urlSync.svelte';
 
 export type RequestForm = {
   route: string;
@@ -19,15 +27,25 @@ export type RequestForm = {
   startedBefore: string;
 };
 
-export type RequestListState = FilteredListState<
-  RequestForm,
-  Omit<RequestFilters, 'cursor'>
->;
+export type RequestQuery = Omit<RequestFilters, 'cursor'>;
+export type RequestListState = FilteredListState<RequestForm, RequestQuery>;
+
+const params = {
+  route: 'route',
+  providerId: 'provider_id',
+  model: 'model',
+  apiKeyId: 'api_key_id',
+  operation: 'operation',
+  statusCode: 'status_code',
+  errorClass: 'error_class',
+  startedAfter: 'started_after',
+  startedBefore: 'started_before'
+} as const;
 
 export function requestFilters(
   state: RequestForm,
-  applied?: Omit<RequestFilters, 'cursor'>
-): Omit<RequestFilters, 'cursor'> {
+  applied?: RequestQuery
+): RequestQuery {
   return {
     limit: REQUEST_PAGE_SIZE,
     route: state.route.trim() || undefined,
@@ -57,72 +75,42 @@ export const requestList = filteredListState({
   toQuery: requestFilters
 });
 
-const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const operations = [
-  'generation',
-  'embeddings',
-  'token_count',
-  'image_generation',
-  'image_edit',
-  'image_variation',
-  'speech',
-  'transcription',
-  'video_create',
-  'video_list',
-  'video_get',
-  'video_content',
-  'video_delete',
-  'moderation',
-  'model_list',
-  'model_get'
-];
-
 export function requestProblem(
   form: RequestForm,
   fromUrl = false,
-  applied?: Omit<RequestFilters, 'cursor'>
+  applied?: RequestQuery
 ): string | null {
-  for (const [value, label] of [
+  const ids = uuidProblem([
     [form.providerId, 'Provider ID'],
     [form.apiKeyId, 'API key ID']
-  ]) {
-    if (value.trim() && !uuid.test(value.trim()))
-      return `${label} must be a UUID: ${value}`;
-  }
-  if (form.operation.trim() && !operations.includes(form.operation.trim()))
+  ]);
+  if (ids) return ids;
+  const operation = form.operation.trim();
+  if (operation && !(operationKinds as readonly string[]).includes(operation))
     return `Unknown operation: ${form.operation}`;
   if (
     form.statusCode &&
     (!/^\d+$/.test(form.statusCode) || Number(form.statusCode) > 65535)
   )
     return `Status code must be an integer from 0 to 65535: ${form.statusCode}`;
-  for (const [value, label] of [
-    [form.startedAfter, 'Started after'],
-    [form.startedBefore, 'Started before']
-  ]) {
-    if (value.trim() && !requestTimeValid(value, fromUrl))
-      return `${label} must be a valid time${fromUrl ? ' with a timezone' : ''}: ${value}`;
-  }
+  const times = timeProblem(
+    [
+      [form.startedAfter, 'Started after'],
+      [form.startedBefore, 'Started before']
+    ],
+    fromUrl
+  );
+  if (times) return times;
   const query = requestFilters(form, applied);
-  const after = query.started_after;
-  const before = query.started_before;
-  if (after && before && timeOrder(after) >= timeOrder(before))
-    return 'Started before must be later than started after.';
-  return null;
+  return rangeProblem(
+    query.started_after,
+    query.started_before,
+    'Started before must be later than started after.'
+  );
 }
 
 export function readRequestForm(search: URLSearchParams): RequestForm {
-  return {
-    route: search.get('route')?.trim() ?? '',
-    providerId: search.get('provider_id')?.trim() ?? '',
-    model: search.get('model')?.trim() ?? '',
-    apiKeyId: search.get('api_key_id')?.trim() ?? '',
-    operation: search.get('operation')?.trim() ?? '',
-    statusCode: search.get('status_code')?.trim() ?? '',
-    errorClass: search.get('error_class')?.trim() ?? '',
-    startedAfter: search.get('started_after')?.trim() ?? '',
-    startedBefore: search.get('started_before')?.trim() ?? ''
-  };
+  return readForm<RequestForm>(search, params);
 }
 
 export function requestState(search: URLSearchParams): RequestListState {
@@ -131,65 +119,22 @@ export function requestState(search: URLSearchParams): RequestListState {
     ...requestList.empty(),
     ...form,
     applied: requestFilters(form),
-    startedAfter: requestTimeValid(form.startedAfter, true)
-      ? dateTimeLocalValue(form.startedAfter)
-      : form.startedAfter,
-    startedBefore: requestTimeValid(form.startedBefore, true)
-      ? dateTimeLocalValue(form.startedBefore)
-      : form.startedBefore
+    startedAfter: formTimeValue(form.startedAfter),
+    startedBefore: formTimeValue(form.startedBefore)
   };
 }
 
-export function requestSearch(applied: Omit<RequestFilters, 'cursor'>): string {
-  const search = new URLSearchParams();
-  for (const name of [
-    'route',
-    'provider_id',
-    'model',
-    'api_key_id',
-    'operation',
-    'status_code',
-    'error_class',
-    'started_after',
-    'started_before'
-  ] as const) {
-    const value = applied[name];
-    if (value !== undefined && value !== '') search.set(name, String(value));
+export function requestSearch(applied: RequestQuery): string {
+  return querySearch(applied, Object.values(params));
+}
+
+export const requestUrl: ListUrlSpec<RequestListState> = {
+  path: '/requests',
+  state: requestState,
+  canonical: (search) => {
+    const form = readRequestForm(search);
+    return requestProblem(form, true)
+      ? null
+      : requestSearch(requestFilters(form));
   }
-  return search.toString();
-}
-
-export function requestTimeValid(value: string, fromUrl = false): boolean {
-  const match =
-    /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(\.\d{1,9})?)?(Z|[+-]\d{2}:\d{2})?$/i.exec(
-      value
-    );
-  if (!match || (fromUrl && !match[8]) || (match[8] && !match[6])) return false;
-  const [year, month, day, hour, minute, second] = match
-    .slice(1, 7)
-    .map(Number);
-  const leap = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
-  const days = [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
-  return (
-    month >= 1 &&
-    month <= 12 &&
-    day >= 1 &&
-    day <= days[month - 1] &&
-    hour <= 23 &&
-    minute <= 59 &&
-    (!match[6] || second <= 59) &&
-    instant(value) !== undefined
-  );
-}
-
-function preservedTime(value: string, applied?: string): string | undefined {
-  value = value.trim();
-  if (applied && value === dateTimeLocalValue(applied)) return applied;
-  if (!requestTimeValid(value)) return undefined;
-  return /(?:Z|[+-]\d{2}:\d{2})$/i.test(value) ? value : instant(value);
-}
-
-function timeOrder(value: string): string {
-  const fraction = /\.(\d+)/.exec(value)?.[1] ?? '';
-  return `${new Date(value).toISOString().slice(0, 19)}.${fraction.padEnd(9, '0')}`;
-}
+};

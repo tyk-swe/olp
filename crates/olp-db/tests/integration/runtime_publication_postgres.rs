@@ -14,7 +14,7 @@ use uuid::Uuid;
 
 use crate::support::route_fixtures::{insert_provider, insert_unbased_route_draft};
 
-const PUBLICATION_LOCK_ID: i64 = 0x4f4c_505f_5254;
+use olp_db::runtime::compiler::PUBLICATION_LOCK_ID;
 
 #[tokio::test]
 #[ignore = "requires OLP_TEST_DATABASE_ADMIN_URL and OLP_TEST_DATABASE_URL_PREFIX"]

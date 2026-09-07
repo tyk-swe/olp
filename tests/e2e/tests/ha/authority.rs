@@ -99,7 +99,7 @@ async fn publish_rejected_authority(
         .await
         .map_err(|error| format!("authority fixture transaction failed: {error}"))?;
     sqlx::query("SELECT pg_advisory_xact_lock($1)")
-        .bind(0x4f4c_505f_5254_i64)
+        .bind(olp_db::runtime::compiler::PUBLICATION_LOCK_ID)
         .execute(&mut *transaction)
         .await
         .map_err(|error| format!("authority fixture publication lock failed: {error}"))?;

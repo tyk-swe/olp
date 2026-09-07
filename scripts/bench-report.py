@@ -27,7 +27,7 @@ def result_is_valid(result: dict) -> bool:
     return result.get("admission_rejections", 0) == 0
 
 
-def metadata_issues(current, previous, fields, prefix="") -> list[str]:
+def metadata_issues(current, previous, fields, prefix="", unknown=("unknown",)) -> list[str]:
     current = current if isinstance(current, dict) else {}
     previous = previous if isinstance(previous, dict) else {}
     issues = []
@@ -35,8 +35,7 @@ def metadata_issues(current, previous, fields, prefix="") -> list[str]:
         name = f"{prefix}{field}"
         missing = [
             side for side, values in (("current", current), ("previous", previous))
-            if values.get(field) in (None, "", "unknown")
-            or (field == "build_profile" and values.get(field) == "external")
+            if values.get(field) in (None, "", *unknown)
         ]
         if missing:
             issues.append(f"missing {name} metadata in {' and '.join(missing)}")
@@ -46,7 +45,9 @@ def metadata_issues(current, previous, fields, prefix="") -> list[str]:
 
 
 def run_comparison_issues(current: dict, previous: dict) -> list[str]:
-    return metadata_issues(current, previous, ("build_profile", "duration_seconds")) + metadata_issues(
+    # bench.py records "external" when the build profile was not supplied.
+    return metadata_issues(current, previous, ("build_profile", "duration_seconds"),
+                           unknown=("unknown", "external")) + metadata_issues(
         current.get("machine"), previous.get("machine"),
         ("platform", "cpu", "logical_cpus", "rustc", "oha"), "machine."
     )

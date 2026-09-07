@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
+import { timeValid } from '$lib/lists/filters';
 import {
   mediaJobProblem,
   mediaJobSearch,
   mediaJobState,
-  mediaJobTimeValid,
   readMediaJobForm,
   mediaJobList,
   mediaJobFilters,
@@ -171,9 +171,9 @@ describe('mediaJob applied URL filters', () => {
   });
 
   it('validates calendar days without JavaScript date normalization', () => {
-    expect(mediaJobTimeValid('2024-02-29T12:00:00Z', true)).toBe(true);
-    expect(mediaJobTimeValid('2026-02-29T12:00:00Z', true)).toBe(false);
-    expect(mediaJobTimeValid('2026-02-30T12:00:00Z', true)).toBe(false);
-    expect(mediaJobTimeValid('2026-07-12T24:00:00Z', true)).toBe(false);
+    expect(timeValid('2024-02-29T12:00:00Z', true)).toBe(true);
+    expect(timeValid('2026-02-29T12:00:00Z', true)).toBe(false);
+    expect(timeValid('2026-02-30T12:00:00Z', true)).toBe(false);
+    expect(timeValid('2026-07-12T24:00:00Z', true)).toBe(false);
   });
 });

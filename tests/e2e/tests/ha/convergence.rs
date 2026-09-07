@@ -207,18 +207,23 @@ async fn prove_shared_rpm(
         .query_async(&mut connection)
         .await
         .map_err(|error| format!("Valkey time read failed before RPM boundary: {error}"))?;
-    let next_window = seconds / 60 + 1;
-    tokio::time::sleep(
-        Duration::from_secs(60 - seconds % 60) - Duration::from_micros(microseconds),
-    )
-    .await;
+    // The fixed-window counter must not roll over mid-burst, so only wait for
+    // the next Valkey minute when the current one cannot hold the 30s budget.
+    let remaining = 60 - seconds % 60;
+    let next_window = if remaining <= 35 {
+        tokio::time::sleep(Duration::from_secs(remaining) - Duration::from_micros(microseconds))
+            .await;
+        seconds / 60 + 1
+    } else {
+        seconds / 60
+    };
     let (synchronized_seconds, _): (u64, u64) = redis::cmd("TIME")
         .query_async(&mut connection)
         .await
         .map_err(|error| format!("Valkey time read failed after RPM boundary: {error}"))?;
     crate::require!(
-        synchronized_seconds / 60 == next_window && synchronized_seconds % 60 < 5,
-        "RPM proof did not synchronize near the start of Valkey minute {next_window}"
+        synchronized_seconds / 60 == next_window && synchronized_seconds % 60 < 30,
+        "RPM proof did not synchronize inside the first half of Valkey minute {next_window}"
     );
 
     let burst = tokio::time::timeout(Duration::from_secs(30), async {

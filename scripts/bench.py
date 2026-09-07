@@ -420,8 +420,8 @@ def machine_metadata():
         if match:
             cpu = match.group(1)
     return {"platform": platform.platform(), "cpu": cpu, "logical_cpus": os.cpu_count(),
-            "rustc": subprocess.run(["rustc", "--version"], capture_output=True, text=True,
-                                     check=True).stdout.strip(), "oha": "1.12.0"}
+            "rustc": run_step("benchmark metadata collection", ["rustc", "--version"],
+                              text=True).stdout.strip(), "oha": "1.12.0"}
 
 
 def source_metadata(repo):
@@ -450,6 +450,13 @@ def source_metadata(repo):
         digest.update(b"\0")
         digest.update((repo / os.fsdecode(relative)).read_bytes())
     return sha, True, digest.hexdigest()
+
+
+def run_step(label, command, **kwargs):
+    try:
+        return subprocess.run(command, check=True, capture_output=True, **kwargs)
+    except subprocess.CalledProcessError as error:
+        raise RuntimeError(f"{label} failed with exit status {error.returncode}") from None
 
 
 def terminate(process):
@@ -490,12 +497,10 @@ def main():
     port_reservations = []
     mock = MockServer(("127.0.0.1", 0), MockHandler)
     threading.Thread(target=mock.serve_forever, daemon=True).start()
-    action = "PostgreSQL database creation"
     try:
-        subprocess.run(["psql", admin, "-v", "ON_ERROR_STOP=1", "-c",
-                        f'CREATE DATABASE "{database_name}"'], check=True, capture_output=True)
-        action = "Valkey reset"
-        subprocess.run([valkey_cli, "-u", valkey, "FLUSHDB"], check=True, capture_output=True)
+        run_step("PostgreSQL database creation", ["psql", admin, "-v", "ON_ERROR_STOP=1", "-c",
+                                                 f'CREATE DATABASE "{database_name}"'])
+        run_step("Valkey reset", [valkey_cli, "-u", valkey, "FLUSHDB"])
         for directory in (run_dir / "console", run_dir / "spool"):
             directory.mkdir()
         write_secret(run_dir / "master-key")
@@ -510,8 +515,7 @@ def main():
         database = database_url(admin, database_name)
         environment = process_environment(run_dir, database, valkey, origin, observability)
         binary = os.environ["OLP_BENCH_BIN"]
-        action = "database migration"
-        subprocess.run([binary, "migrate"], check=True, capture_output=True, env=environment)
+        run_step("database migration", [binary, "migrate"], env=environment)
         for reservation in port_reservations:
             reservation.close()
         with (run_dir / "olp.log").open("w") as log:
@@ -527,7 +531,6 @@ def main():
         invalid_reasons = failures.copy()
         if rejections != 0:
             invalid_reasons.insert(0, f"observed {rejections} admission rejections")
-        action = "benchmark metadata collection"
         result = {"schema_version": 2, "git_sha": sha, "source_dirty": source_dirty,
                   "source_fingerprint": source_fingerprint, "duration_seconds": args.duration,
                   "build_profile": os.getenv("OLP_BENCH_BUILD_PROFILE", "external"),
@@ -540,8 +543,6 @@ def main():
         print(output)
         if invalid_reasons:
             raise RuntimeError("benchmark invalid: " + "; ".join(invalid_reasons))
-    except subprocess.CalledProcessError as error:
-        raise RuntimeError(f"{action} failed with exit status {error.returncode}") from None
     finally:
         for reservation in port_reservations:
             reservation.close()

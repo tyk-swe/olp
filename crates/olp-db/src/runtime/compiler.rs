@@ -27,7 +27,8 @@ use crate::{error::Error, store::Store};
 
 use super::PublishedRuntimeRelease;
 
-const PUBLICATION_LOCK_ID: i64 = 0x4f4c_505f_5254; // "OLP_RT"
+/// Transaction-scoped advisory lock every runtime publication writer holds.
+pub const PUBLICATION_LOCK_ID: i64 = 0x4f4c_505f_5254; // "OLP_RT"
 
 #[derive(Debug, Error)]
 pub enum RuntimeCompileError {

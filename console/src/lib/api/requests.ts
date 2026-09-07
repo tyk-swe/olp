@@ -8,6 +8,26 @@ export type RequestSummary = components['schemas']['RequestSummary'];
 export type RequestDetail = components['schemas']['RequestDetailResponse'];
 export type RequestAttempt = components['schemas']['AttemptResponse'];
 
+/** Every gateway operation kind a request can record. */
+export const operationKinds = [
+  'generation',
+  'embeddings',
+  'token_count',
+  'image_generation',
+  'image_edit',
+  'image_variation',
+  'speech',
+  'transcription',
+  'video_create',
+  'video_list',
+  'video_get',
+  'video_content',
+  'video_delete',
+  'moderation',
+  'model_list',
+  'model_get'
+] as const;
+
 export type RequestFilters = {
   cursor?: string;
   limit?: number;

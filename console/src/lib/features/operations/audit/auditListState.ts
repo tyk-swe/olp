@@ -4,8 +4,16 @@ import {
   filteredListState,
   type FilteredListState
 } from '$lib/lists/pagination';
-import { instant } from '$lib/api/query';
-import { dateTimeLocalValue } from '$lib/format';
+import {
+  formTimeValue,
+  preservedTime,
+  querySearch,
+  rangeProblem,
+  readForm,
+  timeProblem,
+  uuidProblem
+} from '$lib/lists/filters';
+import type { ListUrlSpec } from '$lib/lists/urlSync.svelte';
 
 export type AuditForm = {
   action: string;
@@ -17,26 +25,38 @@ export type AuditForm = {
   occurredBefore: string;
 };
 
-export type AuditListState = FilteredListState<
-  AuditForm,
-  Omit<AuditFilters, 'cursor'>
->;
+export type AuditQuery = Omit<AuditFilters, 'cursor'>;
+export type AuditListState = FilteredListState<AuditForm, AuditQuery>;
+
+const params = {
+  action: 'action',
+  resourceType: 'resource_type',
+  resourceId: 'resource_id',
+  actorUserId: 'actor_user_id',
+  outcome: 'outcome',
+  occurredAfter: 'occurred_after',
+  occurredBefore: 'occurred_before'
+} as const;
+
+export const AUDIT_RANGE_MESSAGE =
+  'Occurred before must be later than occurred after.';
 
 export function auditRangeError(
   state: AuditForm,
-  applied?: Omit<AuditFilters, 'cursor'>
+  applied?: AuditQuery
 ): string | null {
   const query = auditFilters(state, applied);
-  const after = query.occurred_after;
-  const before = query.occurred_before;
-  if (!after || !before || timeOrder(after) < timeOrder(before)) return null;
-  return 'Occurred before must be later than occurred after.';
+  return rangeProblem(
+    query.occurred_after,
+    query.occurred_before,
+    AUDIT_RANGE_MESSAGE
+  );
 }
 
 export function auditFilters(
   state: AuditForm,
-  applied?: Omit<AuditFilters, 'cursor'>
-): Omit<AuditFilters, 'cursor'> {
+  applied?: AuditQuery
+): AuditQuery {
   return {
     limit: AUDIT_PAGE_SIZE,
     action: state.action.trim() || undefined,
@@ -65,37 +85,28 @@ export const auditList = filteredListState({
   toQuery: auditFilters
 });
 
-const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
 export function auditProblem(
   form: AuditForm,
   fromUrl = false,
-  applied?: Omit<AuditFilters, 'cursor'>
+  applied?: AuditQuery
 ): string | null {
-  if (form.actorUserId.trim() && !uuid.test(form.actorUserId.trim()))
-    return `Actor user ID must be a UUID: ${form.actorUserId}`;
+  const actor = uuidProblem([[form.actorUserId, 'Actor user ID']]);
+  if (actor) return actor;
   if (form.outcome && !['success', 'failure'].includes(form.outcome))
     return `Unknown audit outcome: ${form.outcome}`;
-  for (const [value, label] of [
-    [form.occurredAfter, 'Occurred after'],
-    [form.occurredBefore, 'Occurred before']
-  ]) {
-    if (value.trim() && !auditTimeValid(value, fromUrl))
-      return `${label} must be a valid time${fromUrl ? ' with a timezone' : ''}: ${value}`;
-  }
-  return auditRangeError(form, applied);
+  return (
+    timeProblem(
+      [
+        [form.occurredAfter, 'Occurred after'],
+        [form.occurredBefore, 'Occurred before']
+      ],
+      fromUrl
+    ) ?? auditRangeError(form, applied)
+  );
 }
 
 export function readAuditForm(search: URLSearchParams): AuditForm {
-  return {
-    action: search.get('action')?.trim() ?? '',
-    resourceType: search.get('resource_type')?.trim() ?? '',
-    resourceId: search.get('resource_id')?.trim() ?? '',
-    actorUserId: search.get('actor_user_id')?.trim() ?? '',
-    outcome: search.get('outcome')?.trim() ?? '',
-    occurredAfter: search.get('occurred_after')?.trim() ?? '',
-    occurredBefore: search.get('occurred_before')?.trim() ?? ''
-  };
+  return readForm<AuditForm>(search, params);
 }
 
 export function auditState(search: URLSearchParams): AuditListState {
@@ -104,63 +115,20 @@ export function auditState(search: URLSearchParams): AuditListState {
     ...auditList.empty(),
     ...form,
     applied: auditFilters(form),
-    occurredAfter: auditTimeValid(form.occurredAfter, true)
-      ? dateTimeLocalValue(form.occurredAfter)
-      : form.occurredAfter,
-    occurredBefore: auditTimeValid(form.occurredBefore, true)
-      ? dateTimeLocalValue(form.occurredBefore)
-      : form.occurredBefore
+    occurredAfter: formTimeValue(form.occurredAfter),
+    occurredBefore: formTimeValue(form.occurredBefore)
   };
 }
 
-export function auditSearch(applied: Omit<AuditFilters, 'cursor'>): string {
-  const search = new URLSearchParams();
-  for (const name of [
-    'action',
-    'resource_type',
-    'resource_id',
-    'actor_user_id',
-    'outcome',
-    'occurred_after',
-    'occurred_before'
-  ] as const) {
-    const value = applied[name];
-    if (value !== undefined && value !== '') search.set(name, value);
+export function auditSearch(applied: AuditQuery): string {
+  return querySearch(applied, Object.values(params));
+}
+
+export const auditUrl: ListUrlSpec<AuditListState> = {
+  path: '/audit',
+  state: auditState,
+  canonical: (search) => {
+    const form = readAuditForm(search);
+    return auditProblem(form, true) ? null : auditSearch(auditFilters(form));
   }
-  return search.toString();
-}
-
-export function auditTimeValid(value: string, fromUrl = false): boolean {
-  const match =
-    /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(\.\d{1,9})?)?(Z|[+-]\d{2}:\d{2})?$/i.exec(
-      value
-    );
-  if (!match || (fromUrl && !match[8]) || (match[8] && !match[6])) return false;
-  const [year, month, day, hour, minute, second] = match
-    .slice(1, 7)
-    .map(Number);
-  const leap = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
-  const days = [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
-  return (
-    month >= 1 &&
-    month <= 12 &&
-    day >= 1 &&
-    day <= days[month - 1] &&
-    hour <= 23 &&
-    minute <= 59 &&
-    (!match[6] || second <= 59) &&
-    instant(value) !== undefined
-  );
-}
-
-function preservedTime(value: string, applied?: string): string | undefined {
-  value = value.trim();
-  if (applied && value === dateTimeLocalValue(applied)) return applied;
-  if (!auditTimeValid(value)) return undefined;
-  return /(?:Z|[+-]\d{2}:\d{2})$/i.test(value) ? value : instant(value);
-}
-
-function timeOrder(value: string): string {
-  const fraction = /\.(\d+)/.exec(value)?.[1] ?? '';
-  return `${new Date(value).toISOString().slice(0, 19)}.${fraction.padEnd(9, '0')}`;
-}
+};

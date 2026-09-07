@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
+import { timeValid } from '$lib/lists/filters';
 import {
   auditProblem,
   auditSearch,
   auditState,
-  auditTimeValid,
   readAuditForm,
   auditList,
   auditFilters,
@@ -219,9 +219,9 @@ describe('audit applied URL filters', () => {
   });
 
   it('validates calendar days without JavaScript date normalization', () => {
-    expect(auditTimeValid('2024-02-29T12:00:00Z', true)).toBe(true);
-    expect(auditTimeValid('2026-02-29T12:00:00Z', true)).toBe(false);
-    expect(auditTimeValid('2026-02-30T12:00:00Z', true)).toBe(false);
-    expect(auditTimeValid('2026-07-12T24:00:00Z', true)).toBe(false);
+    expect(timeValid('2024-02-29T12:00:00Z', true)).toBe(true);
+    expect(timeValid('2026-02-29T12:00:00Z', true)).toBe(false);
+    expect(timeValid('2026-02-30T12:00:00Z', true)).toBe(false);
+    expect(timeValid('2026-07-12T24:00:00Z', true)).toBe(false);
   });
 });

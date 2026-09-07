@@ -2,8 +2,8 @@
   import RequestTimeline from './RequestTimeline.svelte';
   import RequestResults from './RequestResults.svelte';
   import { resolve } from '$app/paths';
-  import { goto } from '$app/navigation';
   import { page } from '$app/state';
+  import { applyListSearch } from '$lib/lists/urlSync.svelte';
   import { queryKeys } from '$lib/api/queryKeys';
   import { createQuery } from '@tanstack/svelte-query';
   import { getRequest, listRequests } from '$lib/api/requests';
@@ -12,7 +12,7 @@
     requestFilters,
     requestProblem,
     requestSearch,
-    requestState,
+    requestUrl,
     readRequestForm,
     type RequestListState
   } from './requestListState';
@@ -26,12 +26,9 @@
   } = $props();
 
   let validation = $state<string | null>(null);
-  const urlFilters = $derived(
-    requestFilters(readRequestForm(page.url.searchParams))
-  );
-  const urlProblem = $derived(
-    requestProblem(readRequestForm(page.url.searchParams), true)
-  );
+  const urlForm = $derived(readRequestForm(page.url.searchParams));
+  const urlFilters = $derived(requestFilters(urlForm));
+  const urlProblem = $derived(requestProblem(urlForm, true));
   $effect(() => {
     void page.url.search;
     validation = null;
@@ -61,22 +58,16 @@
     event.preventDefault();
     validation = requestProblem(listState, false, listState.applied);
     if (validation) return;
-    const search = requestSearch(requestFilters(listState, listState.applied));
-    if (search === page.url.searchParams.toString()) {
-      Object.assign(listState, requestState(new URLSearchParams(search)));
-    } else {
-      void goto(resolve(`/requests${search ? `?${search}` : ''}`), {
-        keepFocus: true,
-        noScroll: true
-      });
-    }
+    applyListSearch(
+      listState,
+      requestUrl,
+      requestSearch(requestFilters(listState, listState.applied))
+    );
   }
 
   function resetFilters() {
     validation = null;
-    if (!page.url.search)
-      Object.assign(listState, requestState(new URLSearchParams()));
-    else void goto(resolve('/requests'), { keepFocus: true, noScroll: true });
+    applyListSearch(listState, requestUrl, '');
   }
 </script>
 

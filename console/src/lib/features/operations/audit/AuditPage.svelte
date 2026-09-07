@@ -1,57 +1,31 @@
 <script lang="ts">
   import { createQuery } from '@tanstack/svelte-query';
-  import { goto } from '$app/navigation';
   import { page } from '$app/state';
-  import { resolve } from '$app/paths';
   import { queryKeys } from '$lib/api/queryKeys';
   import { listAudit } from '$lib/api/audit';
   import { errorMessage } from '$lib/api/http';
   import { cursorPaginationProps } from '$lib/lists/pagination';
+  import { timeInputType } from '$lib/lists/filters';
+  import { applyListSearch, syncListWithUrl } from '$lib/lists/urlSync.svelte';
   import CursorPagination from '$lib/components/CursorPagination.svelte';
   import { formatDate } from '$lib/format';
   import {
-    auditTimeValid,
     auditFilters,
     auditProblem,
-    auditRangeError,
+    AUDIT_RANGE_MESSAGE,
     auditSearch,
-    auditState,
+    auditUrl,
     readAuditForm
   } from './auditListState';
 
-  const listState = $state(auditState(page.url.searchParams));
-  let previousSearch = page.url.search;
+  const listState = $state(auditUrl.state(page.url.searchParams));
   let validation = $state<string | null>(null);
-  const urlFilters = $derived(
-    auditFilters(readAuditForm(page.url.searchParams))
-  );
-  const urlProblem = $derived(
-    auditProblem(readAuditForm(page.url.searchParams), true)
-  );
+  const urlForm = $derived(readAuditForm(page.url.searchParams));
+  const urlFilters = $derived(auditFilters(urlForm));
+  const urlProblem = $derived(auditProblem(urlForm, true));
   const filterError = $derived(validation ?? urlProblem);
-  const rangeError = $derived(
-    filterError && auditRangeError(listState, listState.applied)
-  );
-  $effect(() => {
-    const search = page.url.search;
-    const rawForm = readAuditForm(new URLSearchParams(search));
-    if (!auditProblem(rawForm, true)) {
-      const canonical = auditSearch(auditFilters(rawForm));
-      const suffix = canonical ? `?${canonical}` : '';
-      if (search !== suffix) {
-        void goto(resolve(`/audit${suffix}`), {
-          replaceState: true,
-          keepFocus: true,
-          noScroll: true
-        });
-      }
-    }
-    if (search !== previousSearch) {
-      previousSearch = search;
-      Object.assign(listState, auditState(new URLSearchParams(search)));
-      validation = null;
-    }
-  });
+  const rangeError = $derived(filterError === AUDIT_RANGE_MESSAGE);
+  syncListWithUrl(listState, auditUrl, { onChange: () => (validation = null) });
   const audit = createQuery(() => {
     const applied = urlFilters;
     const cursor =
@@ -70,22 +44,16 @@
     event.preventDefault();
     validation = auditProblem(listState, false, listState.applied);
     if (validation) return;
-    const search = auditSearch(auditFilters(listState, listState.applied));
-    if (search === page.url.searchParams.toString()) {
-      Object.assign(listState, auditState(new URLSearchParams(search)));
-    } else {
-      void goto(resolve(`/audit${search ? `?${search}` : ''}`), {
-        keepFocus: true,
-        noScroll: true
-      });
-    }
+    applyListSearch(
+      listState,
+      auditUrl,
+      auditSearch(auditFilters(listState, listState.applied))
+    );
   }
 
   function clearFilters() {
     validation = null;
-    if (!page.url.search)
-      Object.assign(listState, auditState(new URLSearchParams()));
-    else void goto(resolve('/audit'), { keepFocus: true, noScroll: true });
+    applyListSearch(listState, auditUrl, '');
   }
 </script>
 
@@ -148,11 +116,7 @@
   <label
     >Occurred after <input
       bind:value={listState.occurredAfter}
-      type={listState.occurredAfter &&
-      (!auditTimeValid(listState.occurredAfter) ||
-        auditTimeValid(listState.occurredAfter, true))
-        ? 'text'
-        : 'datetime-local'}
+      type={timeInputType(listState.occurredAfter)}
       aria-invalid={rangeError ? 'true' : undefined}
       aria-describedby={rangeError ? 'audit-range-error' : undefined}
     /></label
@@ -160,11 +124,7 @@
   <label
     >Occurred before <input
       bind:value={listState.occurredBefore}
-      type={listState.occurredBefore &&
-      (!auditTimeValid(listState.occurredBefore) ||
-        auditTimeValid(listState.occurredBefore, true))
-        ? 'text'
-        : 'datetime-local'}
+      type={timeInputType(listState.occurredBefore)}
       aria-invalid={rangeError ? 'true' : undefined}
       aria-describedby={rangeError ? 'audit-range-error' : undefined}
     /></label

@@ -210,7 +210,6 @@ export class RouteDraftEditorState {
     if (!this.canManage) return;
     this.invalidateSimulation();
     const version = this.simulationVersion;
-    const inputs = this.simulationInputs;
     await this.run('simulate', async () => {
       let simulation: RouteSimulation;
       try {
@@ -221,18 +220,10 @@ export class RouteDraftEditorState {
           seed: this.seed || 'preview'
         });
       } catch (error) {
-        if (
-          version === this.simulationVersion &&
-          inputs === this.simulationInputs
-        )
-          throw error;
+        if (version === this.simulationVersion) throw error;
         return;
       }
-      if (
-        version !== this.simulationVersion ||
-        inputs !== this.simulationInputs
-      )
-        return;
+      if (version !== this.simulationVersion) return;
       this.simulation = simulation;
       this.notice = simulationNotice;
     });

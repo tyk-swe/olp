@@ -24,6 +24,7 @@
     optionalDecimal
   } from './validation';
   import { errorMessage } from '$lib/api/http';
+  import { operationKinds } from '$lib/api/requests';
   import { useRole } from '$lib/auth/useRole.svelte';
 
   const queryClient = useQueryClient();
@@ -35,28 +36,10 @@
   let status = $state('');
   let error = $state('');
 
-  const operationOptions = [
-    'generation',
-    'embeddings',
-    'token_count',
-    'image_generation',
-    'image_edit',
-    'image_variation',
-    'speech',
-    'transcription',
-    'video_create',
-    'video_list',
-    'video_get',
-    'video_content',
-    'video_delete',
-    'moderation',
-    'model_list',
-    'model_get'
-  ] as const;
   let providerKind = $state<ProviderKind | null>(null);
   let providerId = $state('');
   let model = $state('');
-  let operation = $state<(typeof operationOptions)[number]>('generation');
+  let operation = $state<(typeof operationKinds)[number]>('generation');
   let inputPrice = $state('');
   let cachedInputPrice = $state('');
   let outputPrice = $state('');
@@ -320,7 +303,7 @@
           id="price-operation"
           bind:value={operation}
           disabled={!canEditPricing}
-          >{#each operationOptions as option (option)}<option value={option}
+          >{#each operationKinds as option (option)}<option value={option}
               >{option}</option
             >{/each}</select
         >

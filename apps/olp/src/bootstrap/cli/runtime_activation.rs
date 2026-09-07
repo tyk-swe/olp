@@ -9,7 +9,7 @@ use olp_engine::domain::{ids::ProviderId, ports::ProviderTransport, routing::sna
 use olp_engine::inference::{circuit::Breaker, runtime::Manager};
 use olp_engine::providers::{connector::ResponseLimits, http_egress::EgressPolicy};
 use tokio::{
-    sync::{Mutex, MutexGuard, watch},
+    sync::{Mutex, watch},
     task::JoinHandle,
 };
 use tracing::{error, info, warn};
@@ -152,7 +152,7 @@ pub(super) fn spawn_runtime_poller(
 
 impl RuntimeActivator {
     pub(super) async fn activate(&self) -> AppResult<bool> {
-        let activation = self.activation_lock.lock().await;
+        let _activation = self.activation_lock.lock().await;
         let current_api_keys = self.store.current_runtime_api_keys().await?;
         #[cfg(test)]
         if let Some(barrier) = &self.after_authority_read {
@@ -171,7 +171,7 @@ impl RuntimeActivator {
         for release in releases {
             let mut snapshot = match self
                 .runtime
-                .decode_release_candidate(release.activation_candidate(), current_api_keys.clone())
+                .decode_release_candidate(release.activation_candidate(), &current_api_keys)
             {
                 Ok(snapshot) => snapshot,
                 Err(error) => {
@@ -214,10 +214,7 @@ impl RuntimeActivator {
             }
             candidate_transports
                 .retain(|provider_id, _| snapshot.providers.contains_key(provider_id));
-            match self
-                .install_candidate(&activation, snapshot, candidate_transports)
-                .await
-            {
+            match self.install_candidate(snapshot, candidate_transports).await {
                 Ok(installed) => {
                     if !rejected.is_empty() {
                         warn!(
@@ -243,7 +240,6 @@ impl RuntimeActivator {
 
     async fn install_candidate(
         &self,
-        _activation: &MutexGuard<'_, ()>,
         snapshot: Snapshot,
         transports: BTreeMap<ProviderId, Arc<dyn ProviderTransport>>,
     ) -> AppResult<bool> {

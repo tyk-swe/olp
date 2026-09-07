@@ -97,7 +97,7 @@ fn snapshot(ordinal: u64, target_ids: &[TargetId]) -> Snapshot {
 }
 
 async fn install(activator: &RuntimeActivator, snapshot: Snapshot) -> AppResult<bool> {
-    let activation = activator.activation_lock.lock().await;
+    let _activation = activator.activation_lock.lock().await;
     let transports = snapshot
         .providers
         .keys()
@@ -108,9 +108,7 @@ async fn install(activator: &RuntimeActivator, snapshot: Snapshot) -> AppResult<
             )
         })
         .collect();
-    activator
-        .install_candidate(&activation, snapshot, transports)
-        .await
+    activator.install_candidate(snapshot, transports).await
 }
 
 fn open_circuit(breaker: &Breaker, target: TargetId) {

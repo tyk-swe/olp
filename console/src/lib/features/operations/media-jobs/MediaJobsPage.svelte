@@ -1,7 +1,8 @@
 <script lang="ts">
   import { resolve } from '$app/paths';
-  import { goto } from '$app/navigation';
   import { page } from '$app/state';
+  import { applyListSearch } from '$lib/lists/urlSync.svelte';
+  import { timeInputType } from '$lib/lists/filters';
   import { queryKeys } from '$lib/api/queryKeys';
   import { createQuery } from '@tanstack/svelte-query';
   import CursorPagination from '$lib/components/CursorPagination.svelte';
@@ -10,11 +11,10 @@
   import { cursorPaginationProps } from '$lib/lists/pagination';
   import { formatDate, stateLabel } from '$lib/format';
   import {
-    mediaJobTimeValid,
     mediaJobFilters,
     mediaJobProblem,
     mediaJobSearch,
-    mediaJobState,
+    mediaJobUrl,
     mediaJobStates,
     mediaJobLifecycles,
     readMediaJobForm,
@@ -30,12 +30,9 @@
   } = $props();
 
   let validation = $state<string | null>(null);
-  const urlFilters = $derived(
-    mediaJobFilters(readMediaJobForm(page.url.searchParams))
-  );
-  const urlProblem = $derived(
-    mediaJobProblem(readMediaJobForm(page.url.searchParams), true)
-  );
+  const urlForm = $derived(readMediaJobForm(page.url.searchParams));
+  const urlFilters = $derived(mediaJobFilters(urlForm));
+  const urlProblem = $derived(mediaJobProblem(urlForm, true));
   $effect(() => {
     void page.url.search;
     validation = null;
@@ -64,24 +61,16 @@
     event.preventDefault();
     validation = mediaJobProblem(listState, false, listState.applied);
     if (validation) return;
-    const search = mediaJobSearch(
-      mediaJobFilters(listState, listState.applied)
+    applyListSearch(
+      listState,
+      mediaJobUrl,
+      mediaJobSearch(mediaJobFilters(listState, listState.applied))
     );
-    if (search === page.url.searchParams.toString()) {
-      Object.assign(listState, mediaJobState(new URLSearchParams(search)));
-    } else {
-      void goto(resolve(`/media-jobs${search ? `?${search}` : ''}`), {
-        keepFocus: true,
-        noScroll: true
-      });
-    }
   }
 
   function clear() {
     validation = null;
-    if (!page.url.search)
-      Object.assign(listState, mediaJobState(new URLSearchParams()));
-    else void goto(resolve('/media-jobs'), { keepFocus: true, noScroll: true });
+    applyListSearch(listState, mediaJobUrl, '');
   }
 
   function tone(value: string) {
@@ -295,21 +284,13 @@
     <label
       >Created after <input
         bind:value={listState.createdAfter}
-        type={listState.createdAfter &&
-        (!mediaJobTimeValid(listState.createdAfter) ||
-          mediaJobTimeValid(listState.createdAfter, true))
-          ? 'text'
-          : 'datetime-local'}
+        type={timeInputType(listState.createdAfter)}
       /></label
     >
     <label
       >Created before <input
         bind:value={listState.createdBefore}
-        type={listState.createdBefore &&
-        (!mediaJobTimeValid(listState.createdBefore) ||
-          mediaJobTimeValid(listState.createdBefore, true))
-          ? 'text'
-          : 'datetime-local'}
+        type={timeInputType(listState.createdBefore)}
       /></label
     >
     <div class="filter-actions">

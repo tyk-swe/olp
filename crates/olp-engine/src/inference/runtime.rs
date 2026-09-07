@@ -147,6 +147,9 @@ impl Manager {
             .lock()
             .expect("runtime install lock poisoned");
         let current = self.bundle.load_full();
+        if current.snapshot.api_keys == api_keys {
+            return Ok(());
+        }
         let mut snapshot = current.snapshot.clone();
         snapshot.api_keys = api_keys;
         snapshot.validate()?;
@@ -190,10 +193,10 @@ impl Manager {
     pub fn decode_release_candidate(
         &self,
         release: ReleaseCandidate<'_>,
-        current_api_keys: BTreeMap<ApiKeyLookupId, ApiKey>,
+        current_api_keys: &BTreeMap<ApiKeyLookupId, ApiKey>,
     ) -> Result<Snapshot, Error> {
         let mut snapshot = Self::decode_persisted_release(&release)?;
-        snapshot.api_keys = current_api_keys;
+        snapshot.api_keys = current_api_keys.clone();
         snapshot.validate()?;
         Ok(snapshot)
     }
@@ -396,7 +399,7 @@ mod tests {
         };
 
         let candidate = manager
-            .decode_release_candidate(release, BTreeMap::from([(lookup_id.clone(), current_key)]))
+            .decode_release_candidate(release, &BTreeMap::from([(lookup_id.clone(), current_key)]))
             .unwrap();
         let installed_key = candidate.api_keys.get(&lookup_id).unwrap();
         assert_eq!(installed_key.digest.as_bytes(), &[2; 32]);

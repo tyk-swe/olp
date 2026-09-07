@@ -11,7 +11,8 @@
     statusLabel,
     statusTone
   } from '$lib/format';
-  import { requestTimeValid, type RequestListState } from './requestListState';
+  import { timeInputType } from '$lib/lists/filters';
+  import type { RequestListState } from './requestListState';
 
   import type { CreateQueryResult } from '@tanstack/svelte-query';
   import type { RequestSummary } from '$lib/api/requests';
@@ -82,22 +83,14 @@
       >Started after <input
         bind:value={listState.startedAfter}
         name="after"
-        type={listState.startedAfter &&
-        (!requestTimeValid(listState.startedAfter) ||
-          requestTimeValid(listState.startedAfter, true))
-          ? 'text'
-          : 'datetime-local'}
+        type={timeInputType(listState.startedAfter)}
       /></label
     >
     <label
       >Started before <input
         bind:value={listState.startedBefore}
         name="before"
-        type={listState.startedBefore &&
-        (!requestTimeValid(listState.startedBefore) ||
-          requestTimeValid(listState.startedBefore, true))
-          ? 'text'
-          : 'datetime-local'}
+        type={timeInputType(listState.startedBefore)}
       /></label
     >
   </div>
