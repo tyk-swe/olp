@@ -9,6 +9,7 @@ export type User = Schemas['UserDetailResponse'];
 export type Invitation = Schemas['InvitationResponse'];
 export type InvitationSecret = Schemas['CreateInvitationResponse'];
 export type Session = Schemas['SessionDetailResponse'];
+export type UserPatch = Schemas['UpdateUserRoleRequest'];
 
 export async function listUserPage(
   cursor?: string,
@@ -21,21 +22,10 @@ export async function listUserPage(
   return pageResult(result(response.data, response.error, response.response));
 }
 
-export async function updateUserRole(user: User, role: string): Promise<User> {
+export async function updateUser(user: User, patch: UserPatch): Promise<User> {
   const response = await apiClient.PATCH('/api/v3/users/{user_id}', {
     params: { path: { user_id: user.id }, header: { 'If-Match': user.etag } },
-    body: { role }
-  });
-  return result(response.data, response.error, response.response);
-}
-
-export async function updateUserActive(
-  user: User,
-  active: boolean
-): Promise<User> {
-  const response = await apiClient.PATCH('/api/v3/users/{user_id}', {
-    params: { path: { user_id: user.id }, header: { 'If-Match': user.etag } },
-    body: { active }
+    body: patch
   });
   return result(response.data, response.error, response.response);
 }

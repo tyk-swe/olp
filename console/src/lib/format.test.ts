@@ -6,6 +6,7 @@ import {
   formatCost,
   formatDay,
   formatInteger,
+  formatTime,
   statusLabel,
   statusTone
 } from '$lib/format';
@@ -81,6 +82,15 @@ describe('shared formatting', () => {
     // change separators with the machine the console runs on.
     expect(formatBytes(1024 ** 6)).toContain(',');
     expect(formatInteger(1234567)).toBe('1,234,567');
+  });
+
+  it('formats a time of day in the fixed locale and the viewer zone', () => {
+    // Hours follow the viewer's zone; minutes and seconds do not, and the
+    // en-US clock always carries a day period.
+    const formatted = formatTime(Date.UTC(2026, 0, 1, 12, 34, 56));
+    expect(formatted).toMatch(/:34:56 (AM|PM)$/);
+    expect(formatTime(null)).toBe('—');
+    expect(formatTime('not-a-date')).toBe('—');
   });
 
   it('reports an unmeasured byte count instead of zero', () => {
