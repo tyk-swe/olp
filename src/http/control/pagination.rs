@@ -3,15 +3,11 @@ use utoipa::IntoParams;
 use utoipa::ToSchema;
 use uuid::Uuid;
 
+use crate::database::reads::MAX_PAGE_SIZE;
 use crate::http::problem::Problem;
 
 /// Page size used when the caller does not ask for one.
 pub(crate) const DEFAULT_PAGE_SIZE: u16 = 50;
-/// Largest page any management collection returns. One bound for every
-/// endpoint: a generated client cannot tell which list it is calling from the
-/// error it gets back, so the limit and the status code have to agree
-/// everywhere.
-pub(crate) const MAX_PAGE_SIZE: u16 = crate::providers::record_validation::MAX_PAGE_SIZE as u16;
 
 #[derive(Debug, Deserialize, IntoParams, ToSchema)]
 #[into_params(parameter_in = Query)]
@@ -57,20 +53,11 @@ pub(crate) fn page_limit(value: Option<u16>) -> Result<u16, Problem> {
 
 #[cfg(test)]
 mod tests {
+    use crate::database::reads::MAX_PAGE_SIZE;
     use crate::http::control::pagination::DEFAULT_PAGE_SIZE;
-    use crate::http::control::pagination::MAX_PAGE_SIZE;
     use crate::http::control::pagination::PageQuery;
     use crate::http::control::pagination::page;
     use crate::http::control::pagination::page_limit;
-
-    #[test]
-    fn db_and_http_page_caps_agree() {
-        assert_eq!(
-            i64::from(MAX_PAGE_SIZE),
-            crate::providers::record_validation::MAX_PAGE_SIZE
-        );
-        assert_eq!(MAX_PAGE_SIZE, 200);
-    }
 
     #[test]
     fn an_absent_limit_uses_the_default_page_size() {

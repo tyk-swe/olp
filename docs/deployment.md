@@ -122,11 +122,14 @@ tracing:
   headersSecretName: olp-otlp-headers
   headersSecretKey: headers
   sampleRatio: 0.05
+  propagateUpstream: true
+  acceptInbound: true
 ```
 
 The chart mounts the selected key at
 `/run/secrets/otlp-headers/headers` and configures both gateway and control
-pods. Worker and migration pods do not receive tracing configuration. Keep the
+pods. `propagateUpstream` and `acceptInbound` set `OLP_TRACE_PROPAGATE_UPSTREAM`
+and `OLP_TRACE_ACCEPT_INBOUND`; they apply only when `endpoint` is set. Worker and migration pods do not receive tracing configuration. Keep the
 Secret value out of Helm values and use TLS for production collectors. The
 tracing exporter sends no OpenTelemetry metrics or logs. The collector is an
 operator-controlled endpoint and may be private or in-cluster; unlike provider

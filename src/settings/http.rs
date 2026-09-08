@@ -50,7 +50,6 @@ impl From<SettingRecord> for SettingResponse {
 
 #[derive(Debug, Serialize, ToSchema)]
 pub(crate) struct SettingsResponse {
-    data: Vec<SettingResponse>,
     items: Vec<SettingResponse>,
 }
 
@@ -69,10 +68,7 @@ pub(crate) async fn list_settings(
         .await
         .map_err(map_operations)?;
     let items = settings.into_iter().map(Into::into).collect::<Vec<_>>();
-    Ok(Json(SettingsResponse {
-        data: items.clone(),
-        items,
-    }))
+    Ok(Json(SettingsResponse { items }))
 }
 
 #[utoipa::path(

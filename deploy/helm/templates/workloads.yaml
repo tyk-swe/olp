@@ -91,6 +91,10 @@ spec:
               value: {{ $tracingEndpoint | quote }}
             - name: OLP_TRACE_SAMPLE_RATIO
               value: {{ $root.Values.tracing.sampleRatio | quote }}
+            - name: OLP_TRACE_PROPAGATE_UPSTREAM
+              value: {{ $root.Values.tracing.propagateUpstream | quote }}
+            - name: OLP_TRACE_ACCEPT_INBOUND
+              value: {{ $root.Values.tracing.acceptInbound | quote }}
             {{- if $tracingHeadersSecretName }}
             - name: OLP_OTLP_HEADERS_FILE
               value: /run/secrets/otlp-headers/headers

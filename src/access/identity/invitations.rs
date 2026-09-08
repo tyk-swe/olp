@@ -19,7 +19,7 @@ use crate::database::idempotency::claim_replayable_idempotency;
 use crate::database::idempotency::complete_idempotency;
 use crate::database::idempotency::complete_replayable_idempotency;
 use crate::database::query::split_page;
-use crate::providers::record_validation::MAX_PAGE_SIZE;
+use crate::database::reads::MAX_PAGE_SIZE;
 
 use crate::access::identity::AcceptInvitation;
 use crate::access::identity::AcceptedInvitation;
@@ -109,7 +109,7 @@ pub async fn list_invitations(
     cursor: Option<Uuid>,
     limit: i64,
 ) -> Result<(Vec<InvitationRecord>, Option<Uuid>), Error> {
-    let limit = limit.clamp(1, MAX_PAGE_SIZE);
+    let limit = limit.clamp(1, i64::from(MAX_PAGE_SIZE));
     let rows = sqlx::query_as::<_, InvitationRow>(
         "SELECT i.id, i.email, i.role::text AS \"role\", i.invited_by, i.expires_at, \
                     i.accepted_at, i.revoked_at, i.expired_at, i.created_at, \

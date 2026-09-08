@@ -5,8 +5,7 @@
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import {
     listUserPage,
-    updateUserActive,
-    updateUserRole,
+    updateUser,
     type User
   } from '$lib/features/access/api';
   import type { CursorPage } from '$lib/api/http';
@@ -75,7 +74,7 @@
     const role = select.value;
     if (role === user.role) return;
     const saved = await run(`role-${user.id}`, async () => {
-      const updated = await updateUserRole(user, role);
+      const updated = await updateUser(user, { role });
       updateCachedUser(updated);
       await refreshSessionViews();
       notice = `${updated.display_name} is now ${updated.role}. Existing sessions were revoked.`;
@@ -94,7 +93,7 @@
       return;
 
     await run(`active-${user.id}`, async () => {
-      const updated = await updateUserActive(user, active);
+      const updated = await updateUser(user, { active });
       updateCachedUser(updated);
       await refreshSessionViews();
       notice = active

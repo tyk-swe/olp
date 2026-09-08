@@ -1,7 +1,11 @@
 use crate::http::control::operations::helpers::validate_time_range;
-use crate::http::control::operations::*;
+use crate::http::control::pagination::page_limit;
 use crate::http::control::preconditions::if_match;
-use axum::http::{HeaderValue, header};
+use axum::http::HeaderMap;
+use axum::http::HeaderValue;
+use axum::http::header;
+use chrono::Utc;
+use uuid::Uuid;
 
 #[test]
 fn strong_etag_parser_rejects_wildcards_and_unquoted_values() {
@@ -29,16 +33,6 @@ fn pagination_and_time_ranges_reject_silent_clamping_or_reversal() {
     let now = Utc::now();
     assert!(validate_time_range("start", now, "end", now).is_err());
     assert!(validate_time_range("start", now - chrono::Duration::seconds(1), "end", now).is_ok());
-}
-
-#[test]
-fn media_job_surface_preserves_wire_contract() {
-    assert_eq!(media_job_surface_wire_value(Surface::OpenAi), "openai");
-    assert_eq!(
-        media_job_surface_wire_value(Surface::Anthropic),
-        "anthropic"
-    );
-    assert_eq!(media_job_surface_wire_value(Surface::Gemini), "gemini");
 }
 
 #[test]

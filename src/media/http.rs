@@ -4,7 +4,6 @@ use crate::media::jobs::MediaJobFilters;
 use crate::media::jobs::MediaJobLifecycle;
 use crate::media::jobs::MediaJobRecord;
 use crate::media::jobs::MediaJobState;
-use crate::protocols::canonical::identity::Surface;
 use axum::Json;
 use axum::extract::Path;
 use axum::extract::Query;
@@ -90,7 +89,7 @@ impl From<MediaJobRecord> for MediaJobItem {
             provider_model: record.upstream_model,
             route: record.route_slug,
             operation: record.operation.to_string(),
-            surface: media_job_surface_wire_value(record.surface).to_owned(),
+            surface: record.surface.as_str().to_owned(),
             state: record.state.as_str().to_owned(),
             lifecycle: record.lifecycle.as_str().to_owned(),
             progress_percent: record.progress_percent,
@@ -108,13 +107,8 @@ impl From<MediaJobRecord> for MediaJobItem {
     }
 }
 
-pub(crate) const fn media_job_surface_wire_value(surface: Surface) -> &'static str {
-    surface.as_str()
-}
-
 #[derive(Debug, Serialize, ToSchema)]
 pub(crate) struct MediaJobListResponse {
-    data: Vec<MediaJobItem>,
     items: Vec<MediaJobItem>,
     next_cursor: Option<String>,
 }
@@ -175,7 +169,6 @@ pub(crate) async fn list_media_jobs(
     .map_err(map_media_job)?;
     let items = page.items.into_iter().map(Into::into).collect::<Vec<_>>();
     Ok(Json(MediaJobListResponse {
-        data: items.clone(),
         items,
         next_cursor: page.next_cursor,
     }))

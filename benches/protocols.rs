@@ -31,11 +31,11 @@ fn protocol_benches(criterion: &mut Criterion) {
 }
 
 fn sse_decoder(criterion: &mut Criterion) {
-    let corpus = corpus_files("fuzz/corpus/sse_decoder");
+    let corpus = corpus_files("tests/fixtures/streams", "sse");
     let total_bytes = corpus.iter().map(Vec::len).sum::<usize>();
-    let mut group = criterion.benchmark_group("sse_decoder_fuzz_corpus");
+    let mut group = criterion.benchmark_group("sse_decoder_stream_fixtures");
     group.throughput(Throughput::Bytes(total_bytes as u64));
-    group.bench_function("all_seeds", |bencher| {
+    group.bench_function("all_fixtures", |bencher| {
         bencher.iter(|| {
             for bytes in &corpus {
                 let mut decoder = SseDecoder::default();
@@ -165,10 +165,11 @@ fn generation_events() -> Vec<Event> {
         .collect()
 }
 
-fn corpus_files(path: &str) -> Vec<Vec<u8>> {
-    let mut paths = fs::read_dir(workspace_path(path))
+fn corpus_files(directory: &str, extension: &str) -> Vec<Vec<u8>> {
+    let mut paths = fs::read_dir(repo_path(directory))
         .unwrap()
         .map(|entry| entry.unwrap().path())
+        .filter(|path| path.extension().is_some_and(|found| found == extension))
         .collect::<Vec<_>>();
     paths.sort();
     paths
@@ -178,13 +179,11 @@ fn corpus_files(path: &str) -> Vec<Vec<u8>> {
 }
 
 fn fixture(path: &str) -> Vec<u8> {
-    fs::read(workspace_path(path)).unwrap()
+    fs::read(repo_path(path)).unwrap()
 }
 
-fn workspace_path(path: &str) -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../..")
-        .join(path)
+fn repo_path(path: &str) -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(path)
 }
 
 criterion_group!(benches, protocol_benches);

@@ -58,7 +58,6 @@ impl From<Point> for UsagePointResponse {
 
 #[derive(Debug, Serialize, ToSchema)]
 pub(crate) struct UsageTimeSeriesResponse {
-    data: Vec<UsagePointResponse>,
     items: Vec<UsagePointResponse>,
     coverage: UsageRangeCoverageResponse,
 }
@@ -104,7 +103,6 @@ pub(crate) async fn usage_time_series(
         .map(Into::into)
         .collect::<Vec<_>>();
     Ok(Json(UsageTimeSeriesResponse {
-        data: items.clone(),
         items,
         coverage: series.coverage.into(),
     }))

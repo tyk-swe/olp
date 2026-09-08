@@ -15,7 +15,7 @@
   import { errorMessage } from '$lib/api/http';
   import { listRuntimeGenerations } from '$lib/features/runtime/api';
   import { usageCompleteness } from '$lib/api/usage';
-  import { formatDate } from '$lib/format';
+  import { formatDate, formatTime } from '$lib/format';
   import GatewayEpochsPanel from '$lib/features/runtime/health/GatewayEpochsPanel.svelte';
   import ProviderHealthPanel from '$lib/features/runtime/health/ProviderHealthPanel.svelte';
   import ReadinessPanels from '$lib/features/runtime/health/ReadinessPanels.svelte';
@@ -97,7 +97,7 @@
 
 <p class="refresh-note" aria-live="polite">
   Automatically refreshes every 15 seconds{checkedAt
-    ? ` · Last checked ${new Date(checkedAt).toLocaleTimeString()}`
+    ? ` · Last checked ${formatTime(checkedAt)}`
     : ''}.{fetching ? ' Checking now…' : ''}
 </p>
 

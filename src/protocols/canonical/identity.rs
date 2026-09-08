@@ -63,3 +63,15 @@ pub struct RequestMetadata {
     pub surface: Surface,
     pub mode: TransportMode,
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::protocols::canonical::identity::Surface;
+
+    #[test]
+    fn surface_wire_values_are_stable() {
+        assert_eq!(Surface::OpenAi.as_str(), "openai");
+        assert_eq!(Surface::Anthropic.as_str(), "anthropic");
+        assert_eq!(Surface::Gemini.as_str(), "gemini");
+    }
+}

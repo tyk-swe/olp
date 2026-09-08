@@ -61,7 +61,6 @@ impl From<UserRecord> for UserDetailResponse {
 
 #[derive(Debug, Serialize, ToSchema)]
 pub(crate) struct UserListResponse {
-    pub data: Vec<UserDetailResponse>,
     pub items: Vec<UserDetailResponse>,
     pub next_cursor: Option<String>,
 }
@@ -93,7 +92,6 @@ pub(crate) async fn list_users(
             .map_err(map_identity)?;
     let items = users.into_iter().map(Into::into).collect::<Vec<_>>();
     Ok(Json(UserListResponse {
-        data: items.clone(),
         items,
         next_cursor: next_cursor.map(|cursor| cursor.to_string()),
     }))

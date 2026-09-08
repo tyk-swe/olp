@@ -26,6 +26,8 @@ semantic versioning and match `Cargo.toml`, `console/package.json`,
   run explicitly through `make integration`.
 - Dependencies and toolchains are updated. TypeScript remains on supported 6.0;
   contributor documentation records when that exception can be removed.
+- Management list responses carry one `items` array; the duplicate `data`
+  array is removed.
 
 ### Removed
 

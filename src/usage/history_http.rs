@@ -100,7 +100,6 @@ impl From<RequestRecord> for RequestSummary {
 
 #[derive(Debug, Serialize, ToSchema)]
 pub(crate) struct RequestListResponse {
-    data: Vec<RequestSummary>,
     items: Vec<RequestSummary>,
     next_cursor: Option<String>,
 }
@@ -222,7 +221,6 @@ pub(crate) async fn list_requests(
     .map_err(map_operations)?;
     let items = page.items.into_iter().map(Into::into).collect::<Vec<_>>();
     Ok(Json(RequestListResponse {
-        data: items.clone(),
         items,
         next_cursor: page.next_cursor,
     }))

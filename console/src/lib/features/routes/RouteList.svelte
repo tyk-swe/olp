@@ -10,7 +10,7 @@
   import { listRouteDraftPage, listRoutePage } from '$lib/features/routes/api';
   import { cursorPaginationProps } from '$lib/lists/pagination';
   import { useRole } from '$lib/features/access/session/useRole.svelte';
-  import { formatDate } from '$lib/format';
+  import { formatDate, formatInteger } from '$lib/format';
   import type { RouteListState } from '$lib/features/routes/routeListState';
 
   let { listState = $bindable() }: { listState: RouteListState } = $props();
@@ -175,7 +175,7 @@
                 ><td>{item.operations.join(', ')}</td><td
                   >{item.targets.length}</td
                 ><td
-                  >{item.overall_timeout_ms.toLocaleString()} ms / {item.max_attempts}</td
+                  >{formatInteger(item.overall_timeout_ms)} ms / {item.max_attempts}</td
                 ><td>{formatDate(item.updated_at)}</td><td
                   >{item.created_by_email ?? 'A removed account'}</td
                 ><td

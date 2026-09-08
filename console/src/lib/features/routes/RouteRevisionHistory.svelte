@@ -13,7 +13,7 @@
     type RouteRevisionDiff
   } from '$lib/features/routes/api';
   import { useRole } from '$lib/features/access/session/useRole.svelte';
-  import { formatDate } from '$lib/format';
+  import { formatDate, formatInteger } from '$lib/format';
 
   let { routeId }: { routeId: string } = $props();
 
@@ -217,7 +217,7 @@
               ></td
             ><td data-label="Operations">{revision.operations.join(', ')}</td
             ><td data-label="Deadline / attempts"
-              >{revision.overall_timeout_ms.toLocaleString()} ms / {revision.max_attempts}</td
+              >{formatInteger(revision.overall_timeout_ms)} ms / {revision.max_attempts}</td
             ><td data-label="Targets">{revision.targets.length}</td><td
               class="revision-action"
               >{#if canManage}<button

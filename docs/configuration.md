@@ -124,7 +124,10 @@ Compose accepts `OLP_IMAGE`, defaulting to the versioned release image used by
 the quick start. `.env.example` also defines `OLP_HOST_PORT`,
 `POSTGRES_PASSWORD`, `POSTGRES_PASSWORD_URL_ENCODED`, `OLP_UID`, and `OLP_GID`.
 They configure the Compose wrapper, not the binary. The encoded password is
-used in the database URL; PostgreSQL receives the raw password.
+used in the database URL; PostgreSQL receives the raw password. The tracing
+overlay `deploy/compose.tracing.yaml` reads `OLP_TRACE_SAMPLE_RATIO`,
+`OLP_TRACE_PROPAGATE_UPSTREAM`, and `OLP_TRACE_ACCEPT_INBOUND` from the same
+file; leave them empty to keep the binary defaults.
 
 ## OpenAI-compatible provider presets
 

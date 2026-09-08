@@ -114,7 +114,6 @@ impl From<InvitationRecord> for InvitationResponse {
 
 #[derive(Debug, Serialize, ToSchema)]
 pub(crate) struct InvitationListResponse {
-    pub data: Vec<InvitationResponse>,
     pub items: Vec<InvitationResponse>,
     pub next_cursor: Option<String>,
 }
@@ -164,7 +163,6 @@ pub(crate) async fn list_invitations(
     .map_err(map_identity)?;
     let items = invitations.into_iter().map(Into::into).collect::<Vec<_>>();
     Ok(Json(InvitationListResponse {
-        data: items.clone(),
         items,
         next_cursor: next_cursor.map(|cursor| cursor.to_string()),
     }))

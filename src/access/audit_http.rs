@@ -103,7 +103,6 @@ impl AuditQuery {
 
 #[derive(Debug, Serialize, ToSchema)]
 pub(crate) struct AuditListResponse {
-    data: Vec<AuditEventResponse>,
     items: Vec<AuditEventResponse>,
     next_cursor: Option<String>,
 }
@@ -139,7 +138,6 @@ pub(crate) async fn list_audit_events(
     .map_err(map_operations)?;
     let items = page.items.into_iter().map(Into::into).collect::<Vec<_>>();
     Ok(Json(AuditListResponse {
-        data: items.clone(),
         items,
         next_cursor: page.next_cursor,
     }))
