@@ -239,8 +239,36 @@ pub(crate) fn sensitive_response_headers() -> [HeaderName; 2] {
     ]
 }
 
-pub(crate) fn request_trace_path(uri: &Uri) -> &str {
-    uri.path()
+pub(crate) fn request_trace_path(request: &Request<Body>) -> &str {
+    request
+        .extensions()
+        .get::<axum::extract::MatchedPath>()
+        .map_or("unmatched", axum::extract::MatchedPath::as_str)
+}
+
+async fn normalize_request_id(mut request: Request<Body>, next: middleware::Next) -> Response {
+    let valid = request.headers().get("x-request-id").is_some_and(|value| {
+        let bytes = value.as_bytes();
+        !bytes.is_empty()
+            && bytes.len() <= 128
+            && bytes
+                .iter()
+                .all(|byte| byte.is_ascii_alphanumeric() || b"-_.:".contains(byte))
+    });
+    if !valid {
+        request.headers_mut().remove("x-request-id");
+    }
+    next.run(request).await
+}
+
+async fn prevent_api_caching(request: Request<Body>, next: middleware::Next) -> Response {
+    let path = request.uri().path();
+    let sensitive = path.starts_with("/api/") || crate::http::cors::is_gateway_path(path);
+    let mut response = next.run(request).await;
+    if sensitive {
+        crate::http::control::response_policy::prevent_sensitive_response_caching(&mut response);
+    }
+    response
 }
 
 pub(crate) fn http_request_span(request: &Request<Body>) -> tracing::Span {
@@ -252,7 +280,7 @@ pub(crate) fn http_request_span(request: &Request<Body>) -> tracing::Span {
     tracing::info_span!(
         "http_request",
         method = %request.method(),
-        path = %request_trace_path(request.uri()),
+        path = %request_trace_path(request),
         request_id = %request_id,
     )
 }
@@ -348,12 +376,14 @@ fn apply_public_boundary(
                 .layer(SetSensitiveRequestHeadersLayer::new(
                     sensitive_request_headers(),
                 ))
+                .layer(middleware::from_fn(normalize_request_id))
                 .layer(SetRequestIdLayer::new(request_id.clone(), MakeRequestUuid))
                 .layer(PropagateRequestIdLayer::new(request_id))
                 .layer(TraceLayer::new_for_http().make_span_with(http_request_span))
                 .layer(SetSensitiveResponseHeadersLayer::new(
                     sensitive_response_headers(),
                 ))
+                .layer(middleware::from_fn(prevent_api_caching))
                 .layer(CatchPanicLayer::custom(problem_panic_response))
                 .layer(RequestBodyTimeoutLayer::new(REQUEST_BODY_TIMEOUT))
                 .layer(SetResponseHeaderLayer::if_not_present(

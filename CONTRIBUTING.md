@@ -13,7 +13,7 @@ OpenLLMProxy 3.0 is one Rust 2024 package and a SvelteKit console. Install the R
 | `make build` | Build the release binary and static console |
 | `make fmt` | Format Rust and console source |
 
-`make check` is the only required PR job. Integration tests are explicit: run them when changing persistence, inference, authentication, runtime publication, distributed limits, or browser journeys. There is no SQLx metadata preparation, nextest requirement, coverage floor, or nightly toolchain in ordinary development.
+`check`, `integration`, and `dependencies` are the CI qualification jobs; configure repository branch protections to require them. Run integration locally when changing persistence, inference, authentication, runtime publication, distributed limits, or browser journeys. There is no SQLx metadata preparation, nextest requirement, coverage floor, or nightly toolchain in ordinary development.
 
 `openapi/management.json` and `console/src/lib/api/schema.d.ts` are ignored outputs. Setup, development, checking, integration, and builds use `make api`. Change the handler's `#[utoipa::path]` annotation and its feature's `utoipa_axum::routes!` registration together; generation obtains paths and schemas from the router. Do not hand-edit generated files.
 
@@ -29,10 +29,38 @@ Development services bind to loopback ports 54320 and 63790. `docker compose -f 
 
 See [the architecture map](docs/architecture.md) for feature ownership. Keep types, validation, SQL, handlers, and workflows together. Use concrete PostgreSQL pools and transactions; pass audit provenance explicitly to mutations. Retain traits for real connector implementations and meaningful test substitutions. Prefer descriptive names, direct control flow, and small functions. Do not add compatibility without an explicit supported contract.
 
-Tests assert behavior and keep meaningful protocol fixtures. Unit tests belong beside their owner. Service tests use disposable installations, and the Chromium suite exercises the real development proxy. Do not replace valid fixture expectations merely to make a failure pass. Include the checks run and screenshots for visible console changes in PR descriptions.
+Tests assert behavior and keep meaningful protocol fixtures. Unit tests belong beside their owner. Service tests use disposable installations, and the Chromium suite exercises both the development proxy and the packaged Rust origin, followed by replacement restore. Do not replace valid fixture expectations merely to make a failure pass. Include the checks run and screenshots for visible console changes in PR descriptions.
 
 ## Dependency policy
 
 Use current stable dependencies and update the lockfiles through Cargo and pnpm. The JavaScript projects share one workspace and lockfile. Python/uv is only used for the optional Python SDK test: `tests/sdk-smoke-python/run.sh`.
 
 TypeScript stays on the newest 6.0 patch. The [TypeScript ESLint support range](https://typescript-eslint.io/users/dependency-versions/) excludes 7.x, and the Svelte toolchain must support the same compiler. Remove this exception when both support TypeScript 7 and the console passes `make check` and the Chromium journey. Other version exceptions require a concrete incompatibility or regression and a stated removal condition.
+
+
+## Release evidence
+
+The release tag, Cargo, workspace/console package versions, chart version and
+appVersion use the same stable 3.x version; `scripts/check-release-version.mjs`
+checks them before candidate publication. The pinned Rust toolchain is used in
+required checks. Tags require source qualification and packaged candidate
+qualification on both published architectures. Candidate tags are provisional;
+production consumes only promoted, attested digests. Paid provider tests remain
+manual, main-branch-only and receive only the selected provider's credentials.
+
+A provider, protocol or media feature is not release-ready until its review
+includes native conformance, unsupported/lossy semantics, body/time/admission
+limits, pricing and missing-usage treatment, failure/cancellation behavior,
+privacy, documented SDK versions and any recovery/credential-reference impact.
+The reviewer can block expansion when this evidence is missing even if the
+happy path works. Keep the single-package feature ownership and immutable
+publication model; do not add speculative services, tenant abstractions or
+optimization gates to satisfy a review checklist.
+
+CI compares the generated management OpenAPI contract with the latest published
+stable 3.x release using oasdiff. The first 3.x release establishes that baseline;
+a missing contract on an existing 3.x release fails qualification. Publish the
+generated contract with every release. Breaking changes require an explicit
+new compatibility/versioning decision, not silently updating a fixture. Weekly
+released-image scans retain a digest-specific vulnerability report; triage
+findings through SECURITY.md and update the supported patch release.

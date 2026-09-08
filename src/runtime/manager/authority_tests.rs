@@ -121,10 +121,10 @@ fn authority_refresh_preserves_pinned_routing_credentials_and_policy() {
         monthly_cost_limit: Some(Decimal::new(456, 2)),
     };
     manager
-        .refresh_api_keys(BTreeMap::from([(
-            current.lookup_id.clone(),
-            current.clone(),
-        )]))
+        .refresh_api_keys(
+            BTreeMap::from([(current.lookup_id.clone(), current.clone())]),
+            std::time::Instant::now(),
+        )
         .unwrap();
 
     let refreshed = manager.pin();
@@ -203,7 +203,10 @@ fn revoked_or_expired_authority_can_be_removed_without_installing_a_generation()
     let mut expired = historical.clone();
     expired.expires_at = Some(Utc::now() - Duration::hours(1));
     manager
-        .refresh_api_keys(BTreeMap::from([(expired.lookup_id.clone(), expired)]))
+        .refresh_api_keys(
+            BTreeMap::from([(expired.lookup_id.clone(), expired)]),
+            std::time::Instant::now(),
+        )
         .unwrap();
     assert!(
         authorize_api_key(
@@ -216,7 +219,9 @@ fn revoked_or_expired_authority_can_be_removed_without_installing_a_generation()
         .is_err()
     );
 
-    manager.refresh_api_keys(BTreeMap::new()).unwrap();
+    manager
+        .refresh_api_keys(BTreeMap::new(), std::time::Instant::now())
+        .unwrap();
     assert!(manager.pin().api_keys.is_empty());
     assert!(pinned.api_keys.contains_key(&historical.lookup_id));
     assert!(
@@ -235,7 +240,10 @@ fn invalid_authority_refresh_preserves_the_last_successful_bundle() {
     let mismatched_lookup = ApiKeyLookupId::parse("different_lookup").unwrap();
     assert!(
         manager
-            .refresh_api_keys(BTreeMap::from([(mismatched_lookup, historical_key())]))
+            .refresh_api_keys(
+                BTreeMap::from([(mismatched_lookup, historical_key())]),
+                std::time::Instant::now()
+            )
             .is_err()
     );
     assert!(Arc::ptr_eq(&pinned, &manager.pin()));
@@ -246,8 +254,27 @@ fn authority_refresh_does_not_make_an_unloaded_runtime_ready() {
     let manager = Manager::empty();
     let key = historical_key();
     manager
-        .refresh_api_keys(BTreeMap::from([(key.lookup_id.clone(), key)]))
+        .refresh_api_keys(
+            BTreeMap::from([(key.lookup_id.clone(), key)]),
+            std::time::Instant::now(),
+        )
         .unwrap();
     assert_eq!(manager.active_generation_ordinal(), None);
     assert_eq!(manager.pin().generation.ordinal, 0);
+}
+
+#[test]
+fn stale_authority_refuses_new_pins_without_interrupting_existing_work() {
+    let manager = installed_manager(historical_key());
+    let pinned = manager.pin_current_authority().unwrap();
+    manager.record_authority_refresh(
+        std::time::Instant::now() - crate::runtime::manager::API_KEY_AUTHORITY_MAX_AGE,
+    );
+    assert!(manager.pin_current_authority().is_none());
+    assert!(!pinned.api_keys.is_empty());
+    manager
+        .refresh_api_keys(BTreeMap::new(), std::time::Instant::now())
+        .unwrap();
+    assert!(manager.pin_current_authority().unwrap().api_keys.is_empty());
+    assert!(!pinned.api_keys.is_empty());
 }

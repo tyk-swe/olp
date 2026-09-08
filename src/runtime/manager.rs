@@ -5,8 +5,9 @@ use std::fmt;
 use std::ops::Deref;
 use std::sync::Arc;
 use std::sync::Mutex;
-use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicBool, AtomicU64};
+use std::time::{Duration, Instant};
 
 use crate::access::policy::ApiKey;
 use crate::ids::ApiKeyLookupId;
@@ -38,10 +39,16 @@ impl fmt::Debug for ReleaseCandidate<'_> {
     }
 }
 
+/// Maximum age of the last successful API-key authority read before the
+/// gateway stops admitting requests and reports itself not ready.
+pub const API_KEY_AUTHORITY_MAX_AGE: Duration = Duration::from_secs(60);
+
 pub struct Manager {
     bundle: ArcSwap<Bundle>,
     loaded: AtomicBool,
     install_lock: Mutex<()>,
+    authority_refreshed_at: Mutex<Option<Instant>>,
+    desired_generation: AtomicU64,
 }
 
 /// Everything a request may resolve after pinning a generation. In particular,
@@ -93,12 +100,47 @@ impl Manager {
             }),
             loaded: AtomicBool::new(false),
             install_lock: Mutex::new(()),
+            authority_refreshed_at: Mutex::new(None),
+            desired_generation: AtomicU64::new(0),
         }
     }
 
     /// Pins one immutable generation for the lifetime of a request.
     pub fn pin(&self) -> Arc<Bundle> {
         self.bundle.load_full()
+    }
+
+    pub fn authority_age(&self) -> Option<Duration> {
+        self.authority_refreshed_at
+            .lock()
+            .expect("authority refresh timestamp lock poisoned")
+            .map(|at| at.elapsed())
+    }
+
+    /// Whether the API-key authority was read recently enough to admit requests.
+    pub fn authority_is_current(&self) -> bool {
+        self.authority_age()
+            .is_some_and(|age| age < API_KEY_AUTHORITY_MAX_AGE)
+    }
+
+    pub fn pin_current_authority(&self) -> Option<Arc<Bundle>> {
+        self.authority_is_current().then(|| self.bundle.load_full())
+    }
+
+    fn record_authority_refresh(&self, at: Instant) {
+        *self
+            .authority_refreshed_at
+            .lock()
+            .expect("authority refresh timestamp lock poisoned") = Some(at);
+    }
+
+    pub fn observe_desired_generation(&self, ordinal: u64) {
+        self.desired_generation
+            .fetch_max(ordinal, Ordering::Relaxed);
+    }
+
+    pub fn desired_generation_ordinal(&self) -> u64 {
+        self.desired_generation.load(Ordering::Relaxed)
     }
 
     pub fn active_generation_ordinal(&self) -> Option<u64> {
@@ -129,10 +171,14 @@ impl Manager {
         {
             return Ok(false);
         }
+        self.observe_desired_generation(snapshot.generation.ordinal);
         self.bundle.store(Arc::new(Bundle {
             snapshot,
             transports,
         }));
+        if self.authority_age().is_none() {
+            self.record_authority_refresh(Instant::now());
+        }
         self.loaded.store(true, Ordering::Release);
         Ok(true)
     }
@@ -140,6 +186,7 @@ impl Manager {
     pub fn refresh_api_keys(
         &self,
         api_keys: BTreeMap<ApiKeyLookupId, ApiKey>,
+        read_started_at: Instant,
     ) -> Result<(), Error> {
         let _install = self
             .install_lock
@@ -147,6 +194,7 @@ impl Manager {
             .expect("runtime install lock poisoned");
         let current = self.bundle.load_full();
         if current.snapshot.api_keys == api_keys {
+            self.record_authority_refresh(read_started_at);
             return Ok(());
         }
         let mut snapshot = current.snapshot.clone();
@@ -156,6 +204,7 @@ impl Manager {
             snapshot,
             transports: current.transports.clone(),
         }));
+        self.record_authority_refresh(read_started_at);
         Ok(())
     }
 

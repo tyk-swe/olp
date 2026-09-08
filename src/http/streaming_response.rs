@@ -274,7 +274,7 @@ fn sse_stream_with_capacity(capacity: usize) -> (SseResponseWriter, Response) {
     );
     response
         .headers_mut()
-        .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-cache"));
+        .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
     (
         SseResponseWriter {
             ordinary,
@@ -494,7 +494,7 @@ mod tests {
             response.headers()[header::CONTENT_TYPE],
             "text/event-stream; charset=utf-8"
         );
-        assert_eq!(response.headers()[header::CACHE_CONTROL], "no-cache");
+        assert_eq!(response.headers()[header::CACHE_CONTROL], "no-store");
         assert_eq!(
             response
                 .into_body()

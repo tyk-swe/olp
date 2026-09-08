@@ -5,50 +5,117 @@ on:
 permissions:
   contents: read
 jobs:
-  image:
+  qualification:
+    uses: ./.github/workflows/ci.yml
+  candidate:
+    needs: qualification
     runs-on: ubuntu-latest
+    timeout-minutes: 90
     permissions:
       contents: read
       packages: write
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
     steps:
-      - uses: actions/checkout@v7.0.1
-      - uses: docker/setup-qemu-action@v4.3.0
-      - uses: docker/setup-buildx-action@v4.3.0
-      - uses: docker/login-action@v4.6.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: docker/setup-qemu-action@1f40c72289eff860ee54a304f1438e3cff362e0a # v4.3.0
+      - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - uses: docker/metadata-action@v6.2.0
-        id: metadata
-        with:
-          images: ghcr.io/${{ github.repository }}
-          tags: |
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}
-      - uses: docker/build-push-action@v7.3.0
+      - id: version
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: echo "value=${RELEASE_TAG#v}" >> "$GITHUB_OUTPUT"
+      - uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        id: build
         with:
           context: .
           file: deploy/Dockerfile
+          build-args: OLP_VERSION=${{ steps.version.outputs.value }}
           push: true
-          build-args: OLP_VERSION=${{ steps.metadata.outputs.version }}
           platforms: linux/amd64,linux/arm64
-          tags: ${{ steps.metadata.outputs.tags }}
-          labels: ${{ steps.metadata.outputs.labels }}
+          tags: ghcr.io/${{ github.repository }}:candidate-${{ github.sha }}
+          provenance: mode=max
+          sbom: true
           cache-from: type=gha
           cache-to: type=gha,mode=max
-  chart:
-    runs-on: ubuntu-latest
+  packaged:
+    needs: candidate
     permissions:
       contents: read
-      packages: write
+      packages: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            platform: linux/amd64
+          - runner: ubuntu-24.04-arm
+            platform: linux/arm64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v7.0.1
-      - uses: azure/setup-helm@v5.0.1
-      - run: helm lint deploy/helm
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/setup
+      - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - env:
+          OLP_CONSOLE_E2E_IMAGE: ghcr.io/${{ github.repository }}@${{ needs.candidate.outputs.digest }}
+          OLP_IMAGE_PLATFORM: ${{ matrix.platform }}
+        run: ./scripts/qualify-image.sh
+  promote:
+    needs: [candidate, packaged]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a # v3
+        with:
+          subject-name: ghcr.io/${{ github.repository }}
+          subject-digest: ${{ needs.candidate.outputs.digest }}
+          push-to-registry: true
+      - env:
+          IMAGE: ghcr.io/${{ github.repository }}
+          DIGEST: ${{ needs.candidate.outputs.digest }}
+          RELEASE_TAG: ${{ github.ref_name }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh attestation verify "oci://$IMAGE@$DIGEST" --repo "$GITHUB_REPOSITORY" --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml"
+          docker buildx imagetools create --tag "$IMAGE:${RELEASE_TAG#v}" --tag "$IMAGE:3" "$IMAGE@$DIGEST"
+          published=$(docker buildx imagetools inspect "$IMAGE:${RELEASE_TAG#v}" --format '{{json .Manifest}}' | jq -r .digest)
+          test "$published" = "$DIGEST"
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+      - run: helm package deploy/helm --destination /tmp/chart
+      - uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a # v3
+        with:
+          subject-path: /tmp/chart/*.tgz
       - env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           printf '%s' "$GITHUB_TOKEN" | helm registry login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
-          helm package deploy/helm --destination /tmp/chart
           helm push /tmp/chart/*.tgz "oci://ghcr.io/${GITHUB_REPOSITORY_OWNER}/charts"
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: management-contract
+          path: /tmp/contracts
+      - env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: gh release create "$RELEASE_TAG" --verify-tag --generate-notes /tmp/chart/*.tgz /tmp/contracts/management.json

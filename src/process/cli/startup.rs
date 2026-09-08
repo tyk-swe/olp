@@ -161,6 +161,17 @@ async fn prepare_state(
     tracing: Option<TracingRuntimeConfig>,
 ) -> AppResult<(PgPool, ProcessComposition)> {
     validate_serve_args(args)?;
+    if !cfg!(debug_assertions)
+        && std::env::var("OLP_ALLOW_INSECURE_OIDC_FOR_TESTS").is_ok_and(|value| !value.is_empty())
+    {
+        return Err(std::io::Error::other(
+            "test-only OIDC settings are forbidden in release builds",
+        )
+        .into());
+    }
+    if !cfg!(debug_assertions) && mode.serves_control() {
+        crate::console::assets::validate(&args.assets.console_dir)?;
+    }
     let pool = connect_database(&args.database).await?;
     let auth_hmac_key = load_serve_auth_hmac_key(args).await?;
     let request_tracing = match tracing {

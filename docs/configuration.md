@@ -223,3 +223,6 @@ management API, and references an optional `credential_file`. Vertex entries
 also select a probe `model`. Credential files must have restricted permissions;
 ADC and the AWS default chain reject stored credentials. The former separate
 vendor lists are not accepted by 3.0.
+
+Production Compose can generate database credentials and their encoded URL using
+`scripts/prepare-compose-production.sh`; see [deployment.md](deployment.md).

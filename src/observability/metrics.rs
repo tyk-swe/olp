@@ -104,6 +104,16 @@ pub(crate) async fn metrics(
     if let Some(metrics) = metrics.body {
         body.push_str(&metrics);
     }
+    let authority_age = state
+        .inference
+        .runtime
+        .authority_age()
+        .map_or_else(|| "+Inf".to_owned(), |age| age.as_secs_f64().to_string());
+    let _ = writeln!(
+        body,
+        "# HELP olp_api_key_authority_age_seconds Seconds since the current authority read began; infinity before the first successful read.\n# TYPE olp_api_key_authority_age_seconds gauge\nolp_api_key_authority_age_seconds {authority_age}\n# HELP olp_runtime_desired_generation Latest observed desired runtime generation.\n# TYPE olp_runtime_desired_generation gauge\nolp_runtime_desired_generation {}",
+        state.inference.runtime.desired_generation_ordinal()
+    );
     body.push_str(&state.public_admission.metrics());
     append_trace_export_metrics(&mut body);
     let mut response = (
@@ -185,7 +195,6 @@ pub(crate) async fn collect_metrics(state: &ObservabilityState) -> String {
     let now = chrono::Utc::now();
     let mut request_metadata_consumer = ConsumerStatus::from_health(None, now);
     let mut request_metadata_epochs = EpochHealth::default();
-    let mut provider_health = Vec::new();
     let (consumer, epochs, operations, providers, media, outbox, tasks, counters) = tokio::join!(
         crate::usage::ingestion::delivery_health::request_metadata_consumer_status(
             &state.pool,
@@ -193,7 +202,7 @@ pub(crate) async fn collect_metrics(state: &ObservabilityState) -> String {
         ),
         crate::usage::ingestion::reconciliation::request_metadata_gateway_epoch_health(&state.pool,),
         crate::observability::providers::prometheus_operations_summary(&state.pool, 5),
-        crate::observability::providers::provider_health(&state.pool, 15, None, 100),
+        crate::observability::providers::provider_health_metrics(&state.pool),
         crate::media::jobs::reconciliation::media_reconciliation_summary(&state.pool, now),
         crate::runtime::publication::outbox::runtime_outbox_status(&state.pool,),
         crate::observability::workers::worker_task_health(&state.pool,),
@@ -207,13 +216,17 @@ pub(crate) async fn collect_metrics(state: &ObservabilityState) -> String {
         request_metadata_epochs = health;
     }
     let operations_summary = operations.ok();
-    if let Ok(page) = providers {
-        provider_health = page.items;
-    }
+    let (provider_health, providers_complete) = providers.unwrap_or_default();
     let media_reconciliation = media.ok();
     let (reported_loss_events, reported_loss_dropped, reported_loss_abandoned) =
         state.request_metadata_loss.totals();
     let mut body = String::with_capacity(8192);
+    let _ = writeln!(
+        body,
+        "# HELP olp_provider_metrics_complete Whether provider collection completed without truncation or query failure.\n# TYPE olp_provider_metrics_complete gauge\nolp_provider_metrics_complete {}\n# HELP olp_provider_metrics_emitted Number of providers in this snapshot.\n# TYPE olp_provider_metrics_emitted gauge\nolp_provider_metrics_emitted {}",
+        u8::from(providers_complete),
+        provider_health.len()
+    );
     append_runtime_and_metadata_gauges(
         &mut body,
         state,
@@ -446,7 +459,9 @@ fn append_operations_metrics(
 fn append_provider_health_metrics(body: &mut String, provider_health: Vec<ProviderHealthRecord>) {
     if !provider_health.is_empty() {
         body.push_str(
-            "# HELP olp_provider_health Provider health classification over the trailing fifteen minutes.\n\
+            "# HELP olp_provider_attempts_15m Number of sampled provider attempts in the trailing fifteen minutes.\n\
+             # TYPE olp_provider_attempts_15m gauge\n\
+             # HELP olp_provider_health Provider health classification over the trailing fifteen minutes.\n\
              # TYPE olp_provider_health gauge\n\
              # HELP olp_provider_success_ratio_15m Provider attempt success ratio over the trailing fifteen minutes.\n\
              # TYPE olp_provider_success_ratio_15m gauge\n\
@@ -459,17 +474,26 @@ fn append_provider_health_metrics(body: &mut String, provider_health: Vec<Provid
             let kind = prometheus_label(provider.provider_kind.as_str());
             let status = prometheus_label(&provider.status);
             let success_ratio = success_ratio(provider.success_count, provider.attempt_count);
-            let labels = format!(
-                "provider_id=\"{provider_id}\",provider_name=\"{name}\",provider_kind=\"{kind}\",status=\"{status}\""
-            );
-            let _ = writeln!(body, "olp_provider_health{{{labels}}} 1");
             let _ = writeln!(
                 body,
-                "olp_provider_success_ratio_15m{{{labels}}} {success_ratio:.6}"
+                "olp_provider_health{{provider_id=\"{provider_id}\",provider_name=\"{name}\",provider_kind=\"{kind}\",status=\"{status}\"}} 1"
             );
             let _ = writeln!(
                 body,
-                "olp_provider_latency_seconds_15m{{{labels}}} {:.6}",
+                "olp_provider_attempts_15m{{provider_id=\"{provider_id}\",provider_kind=\"{kind}\"}} {}",
+                provider.attempt_count
+            );
+            if provider.attempt_count == 0 {
+                continue;
+            }
+
+            let _ = writeln!(
+                body,
+                "olp_provider_success_ratio_15m{{provider_id=\"{provider_id}\",provider_kind=\"{kind}\"}} {success_ratio:.6}"
+            );
+            let _ = writeln!(
+                body,
+                "olp_provider_latency_seconds_15m{{provider_id=\"{provider_id}\",provider_kind=\"{kind}\"}} {:.6}",
                 provider.average_latency_ms.unwrap_or(0.0) / 1_000.0
             );
         }

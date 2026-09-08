@@ -36,6 +36,7 @@ use crate::common::BOOTSTRAP_TOKEN;
 use crate::common::configure_bootstrap;
 
 mod attempts;
+mod metrics;
 
 const ORIGIN: &str = "https://olp.example.test";
 
@@ -502,6 +503,14 @@ async fn operations_http_contract_is_authorized_paginated_exact_and_metadata_onl
     assert!(metrics.contains("olp_request_latency_seconds{quantile=\"0.95\"}"));
     assert!(metrics.contains("olp_upstream_cancellations_5m"));
     assert!(metrics.contains("olp_provider_health{"));
+    metrics::assert_large_provider_collection(
+        &pool,
+        owner_id,
+        &observability_state,
+        &observability,
+        &cookie,
+    )
+    .await;
 
     olp::usage::ingestion::delivery_health::report_request_metadata_consumer_health(
         &pool, 0, 0, None,

@@ -48,19 +48,7 @@ cargo test --locked --all-features --lib --test persistence --test system -- --i
 cargo test --locked --all-features --test contract --test ha -- --ignored --test-threads=1
 ./tests/sdk-smoke/run.sh
 
-browser_db="olp_browser_${OLP_TEST_RUN_TOKEN}"
-psql "$OLP_TEST_DATABASE_ADMIN_URL" -v ON_ERROR_STOP=1 -c "CREATE DATABASE $browser_db"
-export OLP_CONSOLE_E2E_DATABASE_URL="$OLP_TEST_DATABASE_URL_PREFIX/$browser_db"
-export OLP_CONSOLE_E2E_MASTER_KEY_FILE="$OLP_MASTER_KEY_FILE"
-export OLP_CONSOLE_E2E_AUTH_HMAC_KEY_FILE="$OLP_AUTH_HMAC_KEY_FILE"
-export OLP_CONSOLE_E2E_BOOTSTRAP_TOKEN_FILE="$OLP_BOOTSTRAP_TOKEN_FILE"
 export OLP_CONSOLE_E2E_BIN="$OLP_E2E_BIN"
-pnpm --dir console exec playwright install chromium
-pnpm --dir console test:e2e
-
-restore_db="olp_restore_${OLP_TEST_RUN_TOKEN}"
-psql "$OLP_TEST_DATABASE_ADMIN_URL" -X -v ON_ERROR_STOP=1 -c "CREATE DATABASE $restore_db"
-backup=$(OLP_DATABASE_URL="$OLP_CONSOLE_E2E_DATABASE_URL" OLP_BACKUP_TRAFFIC_QUIESCED=true \
-  ./scripts/backup.sh "$OLP_LOCAL_DIR/backups/$OLP_TEST_RUN_TOKEN")
-OLP_RESTORE_DATABASE_URL="$OLP_TEST_DATABASE_URL_PREFIX/$restore_db" ./scripts/restore.sh "$backup"
-OLP_DATABASE_URL="$OLP_TEST_DATABASE_URL_PREFIX/$restore_db" "$OLP_E2E_BIN" master-key status
+pnpm --dir console build
+OLP_CONSOLE_E2E_PACKAGED=true ./scripts/browser-integration.sh
+./scripts/browser-integration.sh

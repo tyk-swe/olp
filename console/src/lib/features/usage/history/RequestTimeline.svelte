@@ -85,6 +85,10 @@
       <strong class:unpriced={detail.data.unpriced}
         >{formatCost(detail.data.estimated_cost, detail.data.currency)}</strong
       >
+      {#if detail.data.estimated_cost != null}<details>
+          <summary>Exact amount</summary>
+          <p>{detail.data.estimated_cost} {detail.data.currency ?? ''}</p>
+        </details>{/if}
     </article>
   </section>
 

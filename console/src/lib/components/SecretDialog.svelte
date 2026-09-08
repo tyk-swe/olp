@@ -33,10 +33,6 @@
   function close() {
     dialog.close();
   }
-
-  function preventDismiss(event: Event) {
-    event.preventDefault();
-  }
 </script>
 
 <dialog
@@ -45,7 +41,6 @@
   bind:this={dialog}
   aria-labelledby="secret-dialog-title"
   aria-describedby="secret-dialog-description"
-  oncancel={preventDismiss}
   onclose={() => onClose()}
 >
   <div class="dialog-header">

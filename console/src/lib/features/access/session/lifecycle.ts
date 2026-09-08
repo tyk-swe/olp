@@ -45,6 +45,8 @@ type AuthenticationRequest = (
 
 export class AuthenticationLifecycle {
   private queries = new QueryPartition();
+  private channel: BroadcastChannel | null = null;
+
   private boundary: Boundary | null = null;
   private boundaryGeneration = 0;
   private listeners = new Set<(snapshot: AuthenticationSnapshot) => void>();
@@ -54,6 +56,28 @@ export class AuthenticationLifecycle {
   private transitionController: AbortController | null = null;
   private authenticationController: AbortController | null = null;
   private principalExitController: AbortController | null = null;
+
+  connectTabs(): () => void {
+    if (typeof BroadcastChannel === 'undefined') return () => {};
+    const channel = new BroadcastChannel('olp-authentication');
+    this.channel = channel;
+    channel.onmessage = (event: MessageEvent<unknown>) => {
+      if (event.data === 'changed') void this.refreshAfterTabChange();
+    };
+    return () => {
+      channel.close();
+      this.channel = null;
+    };
+  }
+
+  private async refreshAfterTabChange(): Promise<void> {
+    this.abortAuthenticationWork();
+    this.gateProtectedContent('checking');
+    this.queries.rotateAnonymous();
+    clearCsrfToken();
+    await this.queries.cancelAndClear();
+    await this.validateSession();
+  }
   private authenticatedRequestController = new AbortController();
   private authenticatedRequestGeneration = 0;
   private requestGenerations = new WeakMap<Request, number>();
@@ -125,6 +149,7 @@ export class AuthenticationLifecycle {
       throw new DOMException('Authentication was superseded.', 'AbortError');
     }
     this.establishSession(session);
+    this.channel?.postMessage('changed');
     return session;
   }
 
@@ -378,6 +403,7 @@ export class AuthenticationLifecycle {
       if (controller.signal.aborted) return false;
       clearCsrfToken();
       this.apply({ type: 'anonymous' });
+      this.channel?.postMessage('changed');
       return true;
     } catch (error) {
       if (controller.signal.aborted || abortError(error)) return false;
@@ -404,6 +430,7 @@ export class AuthenticationLifecycle {
   private transitionToAnonymous(): Promise<void> {
     if (this.unauthorizedTransition) return this.unauthorizedTransition;
     const sessionExpired = this.snapshotValue.phase === 'authenticated';
+    if (sessionExpired) this.channel?.postMessage('changed');
     this.unauthorizedHandled = true;
     this.gateProtectedContent('transitioning');
     this.authenticationController?.abort();

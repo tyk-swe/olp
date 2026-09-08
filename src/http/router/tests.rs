@@ -164,3 +164,45 @@ async fn admission_overload_responses_keep_public_boundary_headers() {
         }
     }
 }
+
+#[tokio::test]
+async fn api_rejections_are_not_cacheable_and_request_ids_are_bounded() {
+    let state = ProcessComposition::new(
+        crate::process::mode::ApiMode::Gateway,
+        crate::process::mode_dependencies::test_store(),
+        std::sync::Arc::new(crate::runtime::manager::Manager::empty()),
+        "https://gateway.example.test",
+        std::path::PathBuf::from("unused-console"),
+    );
+    let router = gateway_router_for_test(state.gateway_state_for_test());
+    for (incoming, preserve) in [
+        ("safe-id_123".to_owned(), true),
+        ("x".repeat(129), false),
+        ("bad id".to_owned(), false),
+    ] {
+        for path in [
+            "/v1/models",
+            "/openai/missing",
+            "/anthropic/missing",
+            "/gemini/missing",
+        ] {
+            let response = router
+                .clone()
+                .oneshot(
+                    Request::get(path)
+                        .header("x-request-id", &incoming)
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(response.headers()[header::CACHE_CONTROL], "no-store");
+            let id = response.headers()["x-request-id"].to_str().unwrap();
+            if preserve {
+                assert_eq!(id, incoming);
+            } else {
+                assert!(uuid::Uuid::parse_str(id).is_ok());
+            }
+        }
+    }
+}

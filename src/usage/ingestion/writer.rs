@@ -95,7 +95,7 @@ pub async fn run(
             return Ok(());
         };
 
-        let payload = match serde_json::to_string(&event) {
+        let payload = match super::wire::encode(&event) {
             Ok(payload) => payload,
             Err(error) => {
                 receiver.abandon_and_drain(1).await;

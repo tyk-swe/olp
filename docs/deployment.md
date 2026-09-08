@@ -7,7 +7,8 @@ incidents.
 
 ## Prerequisites and secrets
 
-Use Kubernetes 1.27+, PostgreSQL 18, and durable Valkey 9.1. Pin an approved
+The example renders are checked for Kubernetes 1.33–1.35. Use a supported
+cluster release, PostgreSQL 18, and durable Valkey 9.1. Pin an approved
 OCI image digest; do not deploy a mutable development tag. Create these
 Secrets before installing (names and keys are configurable through `config`):
 
@@ -46,7 +47,11 @@ The release workflow publishes the multi-architecture image to
 `oci://ghcr.io/tyk-swe/charts/openllmproxy`. Select a published 3.x version and
 pin its image digest for production. When testing this source tree before
 publication, build `deploy/Dockerfile` and package `deploy/helm` locally.
-Publication runs independently of the required PR check.
+Publication depends on the tagged commit passing check, dependency policy and
+service integration, then the exact candidate index passing packaged Chromium
+journeys on native amd64 and arm64 runners. Release tags are promoted without
+rebuilding that index. Buildx SBOM/provenance and GitHub build attestations are
+attached to the digest; verify provenance before promotion and deployment.
 
 ## Edge routing
 
@@ -224,3 +229,53 @@ targets. With replicated workers also require all five
 `olp_worker_task_healthy` series, zero request-metadata pending/lag, and zero
 runtime-outbox pending/claimed rows. Continue with the monitoring and recovery
 checks in [`operations.md`](operations.md).
+
+
+## Production example and connection budget
+
+Start with `deploy/helm/values.production.yaml`, set real public origin, TLS
+Secret, trusted proxy ranges and network-policy namespace selectors, and pass
+`--set-string image.digest="$QUALIFIED_IMAGE_DIGEST"`. That variable must contain
+the qualified `sha256:...` value, not an example hash. Before installing, verify:
+
+```sh
+gh attestation verify "oci://ghcr.io/tyk-swe/olp@$QUALIFIED_IMAGE_DIGEST" \
+  --repo tyk-swe/olp --signer-workflow tyk-swe/olp/.github/workflows/release.yml
+helm upgrade --install olp deploy/helm -f deploy/helm/values.production.yaml \
+  --set-string image.digest="$QUALIFIED_IMAGE_DIGEST"
+```
+
+The example runs three gateways, two control replicas and three workers with
+10 pooled connections per process: 80 pooled connections. Reserve two additional
+connections per worker for detached outbox/cost leadership sessions, which no
+longer count against pool capacity: 86 planned connections. With the chart's
+one-pod surge for each HTTP deployment and a ten-connection migration job, budget
+116 application connections during rollout. Reserve at least 20 more for
+monitoring, administrators, closing/orphaned sessions and recovery (round the
+minimum planned database limit up to 140).
+Do not run a second full fleet concurrently within that budget. Workers use
+Recreate, and the database/Valkey service, ingress, storage and DNS still need
+independent redundancy. Verify topology and failure behavior on the actual
+cluster; a successful Helm render is not a node-failure qualification.
+
+For a single-host production Compose installation, run
+`scripts/prepare-compose-production.sh`, then supply
+`--env-file deploy/secrets/production.env -f deploy/compose.yaml -f deploy/compose.production.yaml`
+to Compose, together with the documented bootstrap overlay for first setup.
+Set a real HTTPS public origin, qualified image digest and non-root UID/GID.
+The command creates a database password once and constructs its encoded URL;
+PostgreSQL reads the raw value from a mounted secret. For an externally chosen
+password, place it in `deploy/secrets/olp_database_password` with mode 0600 before
+running the command. Existing database passwords must not be regenerated without
+an explicit database rotation. The overlay increases memory to include tmpfs
+spooling but remains a single-host deployment, not an HA profile.
+
+The operational assumptions and evidence are in
+[production-guarantees.md](production-guarantees.md).
+
+The image includes SPDX attestations for the runtime plus Rust and console build
+stages. Inspect them with `docker buildx imagetools inspect IMAGE@DIGEST --format
+'{{json .SBOM}}'`. Candidate qualification and the weekly release scan evaluate
+both the image and those inventories; missing inventory is a failure. Downloaded
+chart archives can be checked with `gh attestation verify CHART.tgz --repo
+tyk-swe/olp` before installation.

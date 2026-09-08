@@ -204,3 +204,24 @@ appears as `translated` on the Anthropic and Gemini surfaces and `—` for the
 media, image, audio, and video operations. Those rules are one match statement
 in `src/providers/factory/certification.rs`, which is also
 what the table above reads, so the two cannot disagree.
+
+## Qualification records
+
+The deterministic JavaScript smoke suite currently pins OpenAI `7.4.0`,
+Anthropic `0.116.0` and Google GenAI `2.16.0` in
+`tests/sdk-smoke/package.json`. These are mock protocol checks, not a claim
+that every upstream model or every SDK version has live certification. Each
+CI run records its source commit, test counts and SDK lockfile. Live-provider
+qualification is separately dispatched with selected-provider credentials;
+use its dated result for the actual provider/model/capability revision. There
+is no inferred live certification date when that workflow has not run.
+
+Provider-owned response/conversation/file IDs are not universally portable.
+Referencing a resource across independently selected providers is unsupported
+unless the operation's implementation explicitly pins the owning provider and
+retained credential revision (as the media job paths do). Unsupported stateful
+fields are rejected by the surface's capability/translation policy; route
+failover cannot turn an upstream identifier into a gateway-owned resource.
+The existing native/translated tables and endpoint registry are the maintained
+support records; update them with the conformance fixtures when semantics
+change, rather than introducing a second independently maintained matrix.

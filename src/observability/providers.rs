@@ -169,6 +169,24 @@ pub async fn provider_health(
     Ok(Page { items, next_cursor })
 }
 
+pub(crate) async fn provider_health_metrics(
+    pool: &sqlx::PgPool,
+) -> Result<(Vec<ProviderHealthRecord>, bool), Error> {
+    let mut items = Vec::new();
+    let mut cursor = None;
+    loop {
+        let page = provider_health(pool, 15, cursor, MAX_PAGE_SIZE).await?;
+        cursor = page.items.last().map(|item| item.provider_id);
+        items.extend(page.items);
+        if page.next_cursor.is_none() {
+            return Ok((items, true));
+        }
+        if items.len() >= 10_000 {
+            return Ok((items, false));
+        }
+    }
+}
+
 pub(crate) fn provider_health_status(
     provider_state: ProviderState,
     last_probe_at: Option<DateTime<Utc>>,

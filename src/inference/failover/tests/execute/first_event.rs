@@ -171,7 +171,7 @@ fn generation_stream_events(text: &str) -> Vec<Event> {
         Event::new(5, Kind::Done),
     ]
 }
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn first_event_timeout_obeys_media_ambiguity_policy() {
     let media_first_calls = Arc::new(AtomicUsize::new(0));
     let media_second_calls = Arc::new(AtomicUsize::new(0));

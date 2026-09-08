@@ -383,6 +383,56 @@ fn asymmetric_validation_enforces_signature_issuer_audience_nonce_and_time() {
         );
     }
 
+    let mut overlap = jwks.clone();
+    let mut retiring = overlap.keys[0].clone();
+    retiring.common.key_id = Some("retiring-key".into());
+    overlap.keys.push(retiring);
+    assert!(
+        validate_id_token(
+            &valid_token,
+            &overlap,
+            &configuration,
+            "expected-nonce",
+            false
+        )
+        .is_ok()
+    );
+    overlap.keys.push(jwks.keys[0].clone());
+    assert!(
+        validate_id_token(
+            &valid_token,
+            &overlap,
+            &configuration,
+            "expected-nonce",
+            false
+        )
+        .is_err()
+    );
+    let mut unknown = jwks.clone();
+    unknown.keys[0].common.key_id = Some("unknown-key".into());
+    assert!(
+        validate_id_token(
+            &valid_token,
+            &unknown,
+            &configuration,
+            "expected-nonce",
+            false
+        )
+        .is_err()
+    );
+    let mut wrong_algorithm = jwks.clone();
+    wrong_algorithm.keys[0].common.key_algorithm = Some(jsonwebtoken::jwk::KeyAlgorithm::RS256);
+    assert!(
+        validate_id_token(
+            &valid_token,
+            &wrong_algorithm,
+            &configuration,
+            "expected-nonce",
+            false
+        )
+        .is_err()
+    );
+
     let mut tampered_parts = valid_token
         .split('.')
         .map(str::to_owned)

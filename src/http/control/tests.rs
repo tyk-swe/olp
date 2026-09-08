@@ -359,7 +359,7 @@ fn csrf_recovery_failures_never_expire_browser_wide_credentials() {
         );
         assert_eq!(
             response.headers().get(header::CACHE_CONTROL).unwrap(),
-            "no-pool"
+            "no-store"
         );
     }
 }
@@ -480,7 +480,7 @@ fn replayable_responses_are_never_cacheable() {
     .unwrap();
     assert_eq!(
         response.headers().get(header::CACHE_CONTROL).unwrap(),
-        "no-pool"
+        "no-store"
     );
     assert_eq!(response.headers().get(header::PRAGMA).unwrap(), "no-cache");
 }

@@ -238,7 +238,7 @@ fn split_api_key(plaintext: &str) -> Result<(&str, &str), Error> {
     Ok((lookup_id, encoded_secret))
 }
 
-fn hex_lower(bytes: &[u8]) -> String {
+pub(crate) fn hex_lower(bytes: &[u8]) -> String {
     const HEX: &[u8; 16] = b"0123456789abcdef";
     let mut output = String::with_capacity(bytes.len() * 2);
     for byte in bytes {

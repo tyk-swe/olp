@@ -134,7 +134,7 @@ safety boundary.
 
 1. Confirm pod readiness and one nonzero runtime generation across gateways.
 2. Check PostgreSQL replication, WAL archiving, disk headroom, and backup age;
-   check Valkey latency/memory (Valkey is runtime state, not backup authority).
+   check Valkey latency, memory and AOF durability (it holds metadata awaiting database ingestion).
 3. Review usage completeness and pricing coverage before exporting costs.
    Missing upstream usage is incomplete and unpriced, never zero.
 4. Review provider health, authentication, role/key changes, credential
@@ -236,3 +236,112 @@ window by suspending maintenance.
 Migrations are forward-only. Never edit migration history or checksums. Restore
 a verified backup into an empty replacement database when a release cannot be
 rolled back safely.
+
+## Database deadlines and privileges
+
+Runtime connections set a 30-second statement deadline, five-second lock
+wait and 60-second idle-transaction deadline when the role/session setting is
+otherwise unlimited. Explicit nonzero deployment settings take precedence.
+Migration connections close after use and have a separate five-minute
+statement and ten-second lock budget. Backup requires a dedicated read role with access to migration history and all
+backed-up tables; the restricted runtime login deliberately lacks that access.
+Large maintenance/export operations should use their own role and explicitly chosen deadlines, not an unlimited
+interactive account. PostgreSQL classifies statement cancellation as `57014`
+and lock expiry as `55P03`; a timeout does not imply a committed mutation.
+
+Provision a non-superuser, non-owner runtime login and a separate migration
+owner. After migrations, run `scripts/grant-runtime-database-role.sql` as that
+owner with psql's `-v runtime_role=olp_runtime`. The script grants table DML and
+sequence usage, then removes migration-history access and installation-identity
+writes. Reapply after each migration; do not give the runtime role membership
+in the migration owner or schema/database CREATE privileges. Set both runtime
+and migration URL Secrets before deploying the production Helm profile.
+
+## Metric aggregation and incidents
+
+Database-derived request counts, provider samples, worker counters and outbox
+summaries are shared installation state exported by several replicas. Choose
+one current exporter or use `max` across replicas of the **same installation**;
+do not sum duplicated global values. Add a stable installation label at scrape
+time if Prometheus monitors more than one installation. Rolling five/fifteen
+minute values are gauges, not monotonic request counters. Never sum or average
+precomputed p95/p99 values into a fleet percentile. Provider quantitative series
+use stable provider IDs; names/status remain on the descriptive health series.
+No sampled attempts means no success/latency series, not measured 100% success.
+
+`olp_provider_metrics_complete=0` means collection failed or exceeded its
+10,000-provider cap. Check `olp_provider_metrics_emitted` and
+`olp_observability_metrics_snapshot_fresh`; a refresh exceeding four seconds
+retains the last successful snapshot and exposes its age. Do not interpret
+stale data as current health. Investigate database latency before increasing
+cardinality. Process-local admission and trace-drop counters may be summed
+across replicas; retain each counter's reset semantics when using `rate`.
+
+Compare `olp_runtime_desired_generation` with `olp_runtime_generation` on each
+gateway. A gap identifies a pending/rejected observed generation. Check
+`olp_api_key_authority_age_seconds` separately: provider activation failure
+must not hide successful authority refresh. At 60 seconds, new key-authenticated
+requests are refused. Restore database reachability and confirm that authority
+age falls and the desired generation converges before returning traffic.
+
+For metadata/worker alerts, first check database and Valkey reachability,
+consumer heartbeat and pending/lag counts. Preserve the queue; restart the
+failed worker, allow the 30-second reclaim plus five-second scan window, and
+confirm progress and cost attribution. For provider alerts, distinguish zero
+samples, failed probes, provider rate limits and circuit failures. Group
+notifications by installation and incident cause, inhibit secondary backlog
+alerts during a confirmed dependency outage, and test routing/recovery in the
+operator's Alertmanager configuration. Repository tests cannot prove that a
+production notification reached an on-call responder.
+
+Success SLIs must identify their denominator. `olp_request_success_ratio_5m`
+counts persisted user requests with no terminal error and a 2xx/3xx status;
+provider success ratios count attempts. A retried request can have a successful
+request and a failed attempt. First byte is a latency milestone, not successful
+completion. A stream failing after headers is a terminal failure; client
+cancellations must be reported separately, with an explicit inclusion/exclusion
+policy. Refusals and missing usage need distinct product/accounting indicators.
+Cost totals are estimates from recorded priced usage; always read their
+unpriced, incomplete, pending and loss coverage alongside the total.
+
+## Recovery assurance
+
+Compose AOF `everysec` may lose roughly one second of recently acknowledged
+metadata on power/storage loss. Surviving epoch/gap records report known
+uncertainty, but cannot enumerate facts that disappeared with their evidence.
+Treat a suspected disaster interval as incomplete, stop budgeted traffic at
+the edge, and reconcile provider billing before declaring accounting complete.
+For a tighter RPO, qualify synchronous persistence and the actual replica/failover
+policy on the deployment's storage; changing fsync alone is not a fleet guarantee.
+
+Logical backup requires externally stopping new inference and control writes,
+waiting for admitted work and accounting to drain, then retaining that fence
+until export completes. The environment flag is an operator assertion, not a
+server admission fence. Verify the load balancer/ingress configuration and all
+replicas; a fresh zero backlog alone does not prove quiescence. Export has
+bounded database waits and a dump timeout (`OLP_BACKUP_TIMEOUT_SECONDS`, default
+600). New backups publish their dump and manifest together by atomic directory
+rename; hidden partial directories are incomplete. Manifests record migration
+versions/checksums and the script checkout's application version. Supply
+`OLP_BACKUP_APP_VERSION` and `OLP_BACKUP_IMAGE_DIGEST` for the producing deployment
+when it differs from that checkout. Restore verifies included migration hashes
+against the local migration files before writing the empty destination.
+
+Store backups with authenticated encryption, independent off-site retention
+and audited access. Keep master-key recovery material in a separate recovery
+process with tested key holders. Checksums detect corruption, not malicious
+replacement of both a dump and its manifest. Rehearse restoration from the
+actual off-site store, not just a local copy.
+
+For PostgreSQL point-in-time recovery, use the managed service's tested PITR
+procedure or [continuous WAL archiving](https://www.postgresql.org/docs/18/continuous-archiving.html)
+with base backups, a restore target and verified WAL continuity. Record the
+service's measured RPO/RTO; neither this repository nor a logical dump promises
+one. Fence traffic first, restore to an isolated replacement, preserve the
+installation identity/keyring, and use isolated Valkey. Reconcile external
+provider/media outcomes and the database/queue time skew before reopening
+budgeted traffic. Never let a rehearsal consume the source's streams or leases.
+`make integration` performs a logical restore, authenticates, decrypts a retained
+provider credential by making a request, and verifies historical accounting was
+preserved and new accounting added. It does not simulate storage power loss or
+certify a managed service's PITR implementation.

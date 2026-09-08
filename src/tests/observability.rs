@@ -432,9 +432,11 @@ async fn trace_boundary_marks_authentication_headers_sensitive() {
 }
 
 #[test]
-fn request_trace_path_omits_query_parameters() {
-    let uri: Uri = "/v1/models?key=must-not-be-logged".parse().unwrap();
-    assert_eq!(request_trace_path(&uri), "/v1/models");
+fn request_trace_path_reports_unmatched_routes() {
+    let request = Request::get("/unknown/secret?key=must-not-be-logged")
+        .body(Body::empty())
+        .unwrap();
+    assert_eq!(request_trace_path(&request), "unmatched");
 }
 
 #[tokio::test]

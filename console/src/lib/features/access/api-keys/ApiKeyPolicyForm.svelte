@@ -269,8 +269,10 @@
     <h2 id="budget-heading">Cost budgets</h2>
     <p class="section-help">
       Amounts use the installation pricing currency. Daily and monthly windows
-      reset at UTC boundaries and always fail closed if Valkey is unavailable.
-      Leave blank for no cost budget.
+      reset at midnight UTC. Budgeted requests are refused when Valkey is
+      unavailable. These are accrued-cost thresholds: accepted concurrent work
+      can exceed them, and unpriced attempts accrue no cost. Leave blank for no
+      cost budget.
     </p>
     <div class="form-grid budget-inputs">
       <div class="form-field">
@@ -321,7 +323,7 @@
               : formatBudget(editing.budget.daily.limit)}</strong
           >
           <small
-            >Window ends {formatDate(
+            >Window ends (local time) {formatDate(
               editing.budget.daily.window_ends_at
             )}</small
           >
@@ -335,7 +337,7 @@
               : formatBudget(editing.budget.monthly.limit)}</strong
           >
           <small
-            >Window ends {formatDate(
+            >Window ends (local time) {formatDate(
               editing.budget.monthly.window_ends_at
             )}</small
           >

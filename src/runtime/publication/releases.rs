@@ -21,6 +21,17 @@ struct RuntimeReleaseRow {
 /// one call walk an unbounded history.
 const RUNTIME_RELEASE_SCAN_LIMIT: usize = 1_024;
 
+pub(crate) async fn latest_runtime_generation_sequence(
+    pool: &sqlx::PgPool,
+) -> Result<Option<i64>, Error> {
+    let row = sqlx::query_as::<_, (i64,)>(
+        "SELECT sequence FROM runtime_generations ORDER BY sequence DESC LIMIT 1",
+    )
+    .fetch_optional(pool)
+    .await?;
+    Ok(row.map(|(sequence,)| sequence))
+}
+
 pub async fn valid_runtime_release(
     pool: &sqlx::PgPool,
     generation_id: Uuid,

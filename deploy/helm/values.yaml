@@ -129,6 +129,8 @@ worker:
 
 migration:
   enabled: true
+  databaseSecretName: ""
+  databaseSecretKey: ""
   backoffLimit: 3
   activeDeadlineSeconds: 600
   ttlSecondsAfterFinished: 300

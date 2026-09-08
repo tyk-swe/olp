@@ -1,12 +1,18 @@
 use std::fmt::Write as _;
 use std::path::Path;
 
+use axum::extract::Request;
 use axum::http::HeaderValue;
+use axum::http::StatusCode;
+use axum::response::IntoResponse as _;
 use base64::Engine as _;
 use sha2::Digest as _;
 use sha2::Sha256;
+use tower::ServiceExt as _;
 use tower_http::services::ServeDir;
 use tower_http::services::ServeFile;
+
+pub(crate) mod assets;
 
 const CSP_PREFIX: &str = "default-src 'self'; base-uri 'none'; connect-src 'self'; font-src 'self'; frame-ancestors 'none'; img-src 'self' data:; object-src 'none'; script-src 'self'";
 // SvelteKit creates its route announcer from a client-side template. Keep the
@@ -47,14 +53,30 @@ pub fn content_security_policy(console_dir: &Path) -> HeaderValue {
     HeaderValue::from_str(&policy).expect("generated console CSP must be a valid header")
 }
 
-pub fn spa_service(console_dir: &Path) -> ServeDir<ServeFile> {
-    ServeDir::new(console_dir)
-        .precompressed_br()
-        .precompressed_gzip()
-        .append_index_html_on_directories(true)
-        // SPA routes are real console entry points. `not_found_service` forces
-        // a 404 even when it serves this file, which breaks direct deep links.
-        .fallback(ServeFile::new(console_dir.join("index.html")))
+pub fn spa_service(console_dir: &Path) -> axum::Router {
+    let index = ServeFile::new(console_dir.join("index.html"));
+    let fallback = tower::service_fn(move |request: Request| {
+        let index = index.clone();
+        async move {
+            let path = request.uri().path();
+            if path.starts_with("/_app/") || Path::new(path).extension().is_some() {
+                return Ok((
+                    StatusCode::NOT_FOUND,
+                    "Asset not found. Reload the page to use the current deployment.",
+                )
+                    .into_response());
+            }
+            let Ok(response) = index.oneshot(request).await;
+            Ok(response.into_response())
+        }
+    });
+    axum::Router::new().fallback_service(
+        ServeDir::new(console_dir)
+            .precompressed_br()
+            .precompressed_gzip()
+            .append_index_html_on_directories(true)
+            .fallback(fallback),
+    )
 }
 
 #[cfg(test)]
@@ -62,7 +84,6 @@ mod tests {
     use axum::body::Body;
     use axum::http::Request;
     use sha2::Sha256;
-    use tower::ServiceExt as _;
     use uuid::Uuid;
 
     use crate::console::*;
@@ -83,6 +104,32 @@ mod tests {
             .unwrap();
         assert_eq!(response.status(), axum::http::StatusCode::OK);
 
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn missing_assets_never_serve_the_spa_document() {
+        let root = std::env::temp_dir().join(format!("olp-console-assets-{}", Uuid::now_v7()));
+        std::fs::create_dir(&root).unwrap();
+        std::fs::write(root.join("index.html"), "<!doctype html><title>OLP</title>").unwrap();
+        for path in [
+            "/_app/immutable/missing.js",
+            "/missing.css",
+            "/favicon.png",
+            "/_app/no-extension",
+        ] {
+            let response = spa_service(&root)
+                .oneshot(Request::get(path).body(Body::empty()).unwrap())
+                .await
+                .unwrap();
+            assert_eq!(response.status(), axum::http::StatusCode::NOT_FOUND);
+            assert!(
+                !response.headers()["content-type"]
+                    .to_str()
+                    .unwrap()
+                    .contains("text/html")
+            );
+        }
         std::fs::remove_dir_all(root).unwrap();
     }
 

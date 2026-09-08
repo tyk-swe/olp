@@ -111,6 +111,10 @@ export function formatCost(
   const number = Number(value);
   if (!Number.isFinite(number))
     return currency ? `${value} ${currency}` : String(value);
+  if (number > 0 && number < 0.000001)
+    return `<${costFormat(currency, true).format(0.000001)}`;
+  if (Math.abs(number) > Number.MAX_SAFE_INTEGER)
+    return formatBudget(value, currency);
   return costFormat(currency, number < 0.01).format(number);
 }
 

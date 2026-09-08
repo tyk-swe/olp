@@ -1,6 +1,5 @@
 use std::time::Duration;
 
-use crate::usage::emitter::Event;
 use chrono::DateTime;
 use chrono::Utc;
 use redis::AsyncCommands;
@@ -18,6 +17,7 @@ use crate::limits::distributed::DistributedLimiter;
 use crate::observability::workers::RequestMetadataConsumerActivity;
 use crate::usage::ingestion::persistence::Outcome;
 use crate::usage::ingestion::reconciliation::Gap;
+use crate::usage::ingestion::wire::Decoded;
 use sqlx::PgPool;
 
 use crate::limits::valkey::Error;
@@ -600,8 +600,12 @@ async fn process_entry(
         .await;
         return finish_gap_or_retry(result, connection, stream, &entry.id).await;
     };
-    let event = match serde_json::from_slice::<Event>(&payload) {
-        Ok(event) => event,
+    let event = match crate::usage::ingestion::wire::decode(&payload) {
+        Ok(Decoded::Event(event)) => *event,
+        Ok(Decoded::Unsupported) => {
+            warn!(stream_id = %entry.id, "unsupported request metadata version retained pending a compatible reader");
+            return Ok(EntryProcessingOutcome::Retry);
+        }
         Err(_) => {
             error!(stream_id = %entry.id, "discarding malformed request metadata stream event");
             let now = Utc::now();

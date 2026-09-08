@@ -13,3 +13,5 @@ pub mod tests;
 pub mod validation;
 
 pub mod writer;
+
+pub(crate) mod wire;

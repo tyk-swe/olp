@@ -362,6 +362,10 @@
     </article>
     <article class="card metric-card">
       <p>Estimated cost</p>
+      <small
+        >Estimate from recorded, priced usage. Review delivery and coverage
+        above; this is not an upstream invoice.</small
+      >
       <strong class:unpriced={usage.data.summary.estimated_cost == null}
         >{formatCost(
           usage.data.summary.estimated_cost,

@@ -1,7 +1,10 @@
-# Yanked crates fail the Monday scheduled run and are fixed with
-# `cargo update -p <crate>`; HYG-06 will make transitive refreshes weekly.
+# Yanked crates fail PR/release and scheduled checks and are fixed with
+# `cargo update -p <crate>`. PR and release qualification use the same policy.
 [advisories]
 yanked = "deny"
+ignore = [
+    { id = "RUSTSEC-2024-0436", reason = "Reviewed 2026-09-07: paste is a build-time macro used by the latest utoipa-axum 0.2.0, not a runtime parser. Remove when utoipa-axum replaces it; review again by 2026-12-01." },
+]
 
 [bans]
 multiple-versions = "deny"
@@ -9,6 +12,8 @@ wildcards = "deny"
 # These incompatible transitive lines are the current, reviewed duplicate set.
 # Removing an entry is required when its dependency graph converges.
 skip = [
+    { name = "base64", version = "0.23.1" },
+    { name = "num-bigint", version = "0.5.1" },
     { name = "block-buffer", version = "0.12.1" },
     { name = "cpufeatures", version = "0.3.0" },
     { name = "crypto-common", version = "0.2.2" },
@@ -20,11 +25,10 @@ skip = [
     { name = "http-body", version = "0.4.6" },
     { name = "r-efi", version = "5.3.0" },
     { name = "rand", version = "0.10.2" },
-    { name = "rand_core", version = "0.6.4" },
     { name = "rand_core", version = "0.10.1" },
     { name = "sha2", version = "0.11.0" },
     { name = "syn", version = "3.0.3" },
-    # reqwest 0.13 still builds on tower-http 0.6 while apps/olp is on 0.7;
+    # reqwest 0.13 still builds on tower-http 0.6 while olp is on 0.7;
     # drop this once reqwest releases against 0.7.
     { name = "tower-http", version = "0.6.11" },
     { name = "untrusted", version = "0.7.1" },

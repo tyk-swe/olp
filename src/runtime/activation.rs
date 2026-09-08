@@ -165,14 +165,23 @@ pub(crate) fn spawn_runtime_poller(
 impl RuntimeActivator {
     pub(crate) async fn activate(&self) -> AppResult<bool> {
         let _activation = self.activation_lock.lock().await;
-        let current_api_keys =
-            crate::runtime::publication::compiler::current_runtime_api_keys(&self.pool).await?;
+        let authority_read_started = std::time::Instant::now();
+        let (current_api_keys, latest_sequence) = tokio::join!(
+            crate::runtime::publication::compiler::current_runtime_api_keys(&self.pool),
+            crate::runtime::publication::releases::latest_runtime_generation_sequence(&self.pool),
+        );
+        let current_api_keys = current_api_keys?;
         #[cfg(test)]
         if let Some(barrier) = &self.after_authority_read {
             barrier.wait().await;
             barrier.wait().await;
         }
-        self.runtime.refresh_api_keys(current_api_keys.clone())?;
+        self.runtime
+            .refresh_api_keys(current_api_keys.clone(), authority_read_started)?;
+        if let Some(sequence) = latest_sequence? {
+            self.runtime
+                .observe_desired_generation(u64::try_from(sequence)?);
+        }
         let releases = crate::runtime::publication::releases::recent_valid_runtime_releases_after(
             &self.pool,
             32,

@@ -147,11 +147,70 @@ async fn current_policy_replaces_every_security_field_despite_a_corrupt_newer_re
     assert_eq!(refreshed.generation.id, pinned.generation.id);
     assert_eq!(refreshed.generation.ordinal, pinned.generation.ordinal);
     assert!(i64::try_from(refreshed.generation.ordinal).unwrap() < rejected_sequence);
+    assert_eq!(
+        fixture.activator.runtime.desired_generation_ordinal(),
+        u64::try_from(rejected_sequence).unwrap()
+    );
     assert_eq!(pinned.api_keys[&fixture.lookup].digest.as_bytes(), &[1; 32]);
     assert_eq!(
         pinned.api_keys[&fixture.lookup].scopes,
         BTreeSet::from([ApiKeyScope::Inference])
     );
+}
+
+#[tokio::test]
+#[ignore = "requires OLP_TEST_DATABASE_ADMIN_URL and OLP_TEST_DATABASE_URL_PREFIX"]
+async fn rejected_generations_remain_desired_until_a_new_valid_release_converges() {
+    for invalid_envelope in [false, true] {
+        let fixture = fixture().await;
+        let pool = &fixture.activator.pool;
+        let active = fixture.activator.runtime.active_generation_ordinal();
+        let rejected_sequence = corrupt_newest_release(&fixture).await;
+        if invalid_envelope {
+            sqlx::query(
+                "UPDATE runtime_generations AS rejected \
+                 SET compiled_release = valid.compiled_release, release_sha256 = valid.release_sha256 \
+                 FROM runtime_generations AS valid \
+                 WHERE rejected.sequence = $1 AND valid.sequence = $2",
+            )
+            .bind(rejected_sequence)
+            .bind(i64::try_from(active.unwrap()).unwrap())
+            .execute(pool)
+            .await
+            .unwrap();
+        }
+        let desired = u64::try_from(rejected_sequence).unwrap();
+        let mut restarted = activator();
+        restarted.pool = pool.clone();
+
+        assert!(!fixture.activator.activate().await.unwrap());
+        assert!(restarted.activate().await.unwrap());
+        for activator in [&fixture.activator, &restarted] {
+            assert_eq!(activator.runtime.active_generation_ordinal(), active);
+            assert_eq!(activator.runtime.desired_generation_ordinal(), desired);
+            assert!(!activator.activate().await.unwrap());
+            assert_eq!(activator.runtime.active_generation_ordinal(), active);
+            assert_eq!(activator.runtime.desired_generation_ordinal(), desired);
+        }
+
+        let recovered =
+            crate::runtime::publication::compiler::compile_and_publish_runtime(pool, fixture.actor)
+                .await
+                .unwrap();
+        let recovered_sequence = u64::try_from(recovered.sequence).unwrap();
+        assert!(recovered_sequence > desired);
+        for activator in [&fixture.activator, &restarted] {
+            assert!(activator.activate().await.unwrap());
+            assert_eq!(
+                activator.runtime.active_generation_ordinal(),
+                Some(recovered_sequence)
+            );
+            assert_eq!(
+                activator.runtime.desired_generation_ordinal(),
+                recovered_sequence
+            );
+        }
+    }
 }
 
 #[tokio::test]

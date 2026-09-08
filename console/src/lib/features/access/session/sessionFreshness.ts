@@ -1,4 +1,6 @@
-import { ApiProblem } from '$lib/api/http';
+import { ApiProblem, abortError } from '$lib/api/http';
+
+export { abortError };
 
 /** How long a validated session is trusted before a mutation revalidates it. */
 export const SESSION_FRESHNESS_MS = 60_000;
@@ -17,8 +19,4 @@ export function sessionIsFresh(
 
 export function unauthorizedError(error: unknown): boolean {
   return error instanceof ApiProblem && error.problem.status === 401;
-}
-
-export function abortError(error: unknown): boolean {
-  return error instanceof Error && error.name === 'AbortError';
 }

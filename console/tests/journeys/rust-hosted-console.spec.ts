@@ -1,34 +1,19 @@
+import {
+  owner,
+  vertical,
+  signInAsOwner,
+  takeSecret,
+  waitForRoutePublication
+} from './fixtures';
 import { expectFact, refreshUntilRequestCount } from './request-history';
 import { readFileSync } from 'node:fs';
 import AxeBuilder from '@axe-core/playwright';
-import {
-  expect,
-  test,
-  type APIRequestContext,
-  type Locator,
-  type Page
-} from '../playwright';
+import { expect, test, type APIRequestContext, type Page } from '../playwright';
 
-const owner = {
-  name: 'Integration Owner',
-  email: 'console-integration@example.com',
-  password: 'correct horse battery staple'
-};
 const bootstrapToken = readFileSync(
   process.env.OLP_CONSOLE_E2E_BOOTSTRAP_TOKEN_FILE!,
   'utf8'
 ).trim();
-
-const vertical = {
-  providerName: 'Vertical Azure provider',
-  deployment: 'vertical-e2e-deployment',
-  endpoint: 'http://127.0.0.1:4178',
-  apiVersion: '2024-10-21',
-  credential: 'vertical-provider-secret',
-  route: 'vertical-all-protocols',
-  keyName: 'Vertical all-protocol key',
-  reply: 'Hello from the vertical upstream'
-};
 
 type ClientSurface = 'openai' | 'anthropic' | 'gemini';
 
@@ -50,22 +35,6 @@ type UpstreamSnapshot = {
   requests: RecordedUpstreamRequest[];
   unexpected: string[];
 };
-
-async function signInAsOwner(page: Page): Promise<void> {
-  await page.goto('/login');
-  await page.getByLabel('Email').fill(owner.email);
-  await page.getByLabel('Password').fill(owner.password);
-  await page.getByRole('button', { name: 'Sign in' }).click();
-  await expect(page).toHaveURL(/\/$/);
-}
-
-/// Reads the one-time secret out of the reveal dialog.
-async function takeSecret(dialog: Locator): Promise<string> {
-  const secret = (
-    await dialog.locator('.secret-value, code, pre').first().textContent()
-  )?.trim();
-  return secret ?? '';
-}
 
 /// Asserts a secret is nowhere in the rendered page.
 ///
@@ -97,45 +66,6 @@ async function upstreamSnapshot(
   const response = await request.get('http://127.0.0.1:4178/__test__/requests');
   expect(response.ok()).toBe(true);
   return (await response.json()) as UpstreamSnapshot;
-}
-
-async function waitForRoutePublication(
-  page: Page,
-  secret: string,
-  route: string
-): Promise<void> {
-  await expect
-    .poll(
-      async () =>
-        page.evaluate(
-          async ({ apiKey, routeSlug }) => {
-            try {
-              const response = await fetch('/v1/models', {
-                headers: { Authorization: `Bearer ${apiKey}` }
-              });
-              if (!response.ok) {
-                await response.body?.cancel();
-                return false;
-              }
-              const payload = (await response.json()) as {
-                data?: Array<{ id?: string }>;
-              };
-              return (
-                payload.data?.some((model) => model.id === routeSlug) ?? false
-              );
-            } catch {
-              return false;
-            }
-          },
-          { apiKey: secret, routeSlug: route }
-        ),
-      {
-        message: `route ${route} and its API key should publish to the runtime`,
-        timeout: 30_000,
-        intervals: [250, 500, 1_000]
-      }
-    )
-    .toBe(true);
 }
 
 async function installGatewayResponseObserver(page: Page): Promise<void> {
@@ -192,6 +122,10 @@ async function observedGatewayResponses(
 
 test.describe('Rust-hosted console integration', () => {
   test.describe.configure({ mode: 'serial' });
+  test.skip(
+    process.env.OLP_CONSOLE_E2E_RESTORED === 'true',
+    'The restored database has already completed setup.'
+  );
 
   test('Rust serves the console and enforces the real setup/session/management boundary', async ({
     page,
@@ -244,42 +178,46 @@ test.describe('Rust-hosted console integration', () => {
       .getByRole('button', { name: 'I have shared it' })
       .click();
 
-    await page.getByRole('button', { name: 'OIDC' }).click();
-    await page.getByLabel('Expected issuer').fill('http://127.0.0.1:4176');
-    await page
-      .getByLabel('Discovery URL')
-      .fill('http://127.0.0.1:4176/.well-known/openid-configuration');
-    await page.getByLabel('Client ID').fill('console-browser-client');
-    await page.getByLabel('Client secret').fill('write-only-browser-secret');
-    await page.getByLabel('Enabled').check();
-    await page.getByRole('button', { name: 'Save and validate' }).click();
-    await expect(
-      page.getByText('OIDC configuration validated and enabled.')
-    ).toBeVisible();
+    const oidcJourney = process.env.OLP_CONSOLE_E2E_CANDIDATE !== 'true';
+    if (oidcJourney) {
+      await page.getByRole('button', { name: 'OIDC' }).click();
+      await page.getByLabel('Expected issuer').fill('http://127.0.0.1:4176');
+      await page
+        .getByLabel('Discovery URL')
+        .fill('http://127.0.0.1:4176/.well-known/openid-configuration');
+      await page.getByLabel('Client ID').fill('console-browser-client');
+      await page.getByLabel('Client secret').fill('write-only-browser-secret');
+      await page.getByLabel('Enabled').check();
+      await page.getByRole('button', { name: 'Save and validate' }).click();
+      await expect(
+        page.getByText('OIDC configuration validated and enabled.')
+      ).toBeVisible();
+    }
 
     await page.getByRole('button', { name: 'Open account menu' }).click();
     await page.getByRole('button', { name: 'Sign out' }).click();
     await expect(page).toHaveURL(/\/login$/);
 
-    await page
-      .getByRole('link', { name: 'Continue with single sign-on' })
-      .click();
-    await expect(page).toHaveURL(/^http:\/\/127\.0\.0\.1:4176\/authorize\?/);
-    const oidcCookies = (await context.cookies('http://localhost:4175')).filter(
-      (cookie) => cookie.name.startsWith('__Host-olp_oidc_')
-    );
-    expect(oidcCookies).toHaveLength(1);
-    expect(oidcCookies[0]?.name).toMatch(
-      /^__Host-olp_oidc_login_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
-    );
-    for (const cookie of oidcCookies) {
-      expect(cookie.domain).toBe('localhost');
-      expect(cookie.path).toBe('/');
-      expect(cookie.secure).toBe(true);
-      expect(cookie.httpOnly).toBe(true);
-      expect(cookie.sameSite).toBe('Lax');
+    if (oidcJourney) {
+      await page
+        .getByRole('link', { name: 'Continue with single sign-on' })
+        .click();
+      await expect(page).toHaveURL(/^http:\/\/127\.0\.0\.1:4176\/authorize\?/);
+      const oidcCookies = (
+        await context.cookies('http://localhost:4175')
+      ).filter((cookie) => cookie.name.startsWith('__Host-olp_oidc_'));
+      expect(oidcCookies).toHaveLength(1);
+      expect(oidcCookies[0]?.name).toMatch(
+        /^__Host-olp_oidc_login_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
+      );
+      for (const cookie of oidcCookies) {
+        expect(cookie.domain).toBe('localhost');
+        expect(cookie.path).toBe('/');
+        expect(cookie.secure).toBe(true);
+        expect(cookie.httpOnly).toBe(true);
+        expect(cookie.sameSite).toBe('Lax');
+      }
     }
-
     await page.goto('/providers');
     await expect(page).toHaveURL(/\/login\?return_to=%2Fproviders$/);
     await expect(page.getByRole('heading', { name: 'Sign in' })).toBeVisible();
@@ -694,6 +632,10 @@ test.describe('Rust-hosted console integration', () => {
     await page.getByLabel('Key name').fill(keyName);
     await page.getByLabel('Requests per minute').fill('120');
     await page.getByLabel('Concurrent requests').fill('8');
+    await page.screenshot({
+      path: test.info().outputPath('budget-thresholds.png'),
+      fullPage: true
+    });
     await page.getByRole('button', { name: /Create and show key/ }).click();
 
     const created = page.getByRole('dialog', { name: 'Copy this secret now.' });
@@ -727,7 +669,7 @@ test.describe('Rust-hosted console integration', () => {
     expect(rotatedSecret).toMatch(/^olp_/);
     // A rotation that returned the same material would not be a rotation.
     expect(rotatedSecret).not.toBe(secret);
-    await rotated.getByRole('button', { name: 'I have saved the key' }).click();
+    await page.keyboard.press('Escape');
     await expect(rotated).toBeHidden();
     await page.reload();
     await expectSecretGone(page, rotatedSecret, 'the rotated secret');
@@ -785,4 +727,27 @@ test.describe('Rust-hosted console integration', () => {
       await otherTab.close();
     }
   });
+});
+
+test('logout clears protected content in another tab', async ({
+  page,
+  context
+}) => {
+  test.skip(
+    process.env.OLP_CONSOLE_E2E_RESTORED === 'true',
+    'Covered on the fresh installation.'
+  );
+  await signInAsOwner(page);
+  const second = await context.newPage();
+  await second.goto('/providers');
+  await expect(
+    second.getByRole('heading', { name: 'Providers', exact: true })
+  ).toBeVisible();
+  await page.getByRole('button', { name: 'Open account menu' }).click();
+  await page.getByRole('button', { name: 'Sign out' }).click();
+  await expect(second).toHaveURL(/\/login/);
+  await expect(
+    second.getByText(vertical.providerName, { exact: true })
+  ).toHaveCount(0);
+  await second.close();
 });

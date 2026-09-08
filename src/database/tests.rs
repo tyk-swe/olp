@@ -72,3 +72,105 @@ async fn fresh_installations_migrate_idempotently_and_have_distinct_namespaces()
     first_pool.close().await;
     second_pool.close().await;
 }
+
+#[tokio::test]
+#[ignore = "requires the integration PostgreSQL service"]
+async fn runtime_deadlines_bound_queries_and_lock_waits_without_poisoning_connections() {
+    let db = TestDb::create_migrated("deadlines").await;
+    let pool = db.pool(2).await;
+    let settings = sqlx::query_as::<_, (String, String, String)>(
+        "SELECT current_setting('statement_timeout'), current_setting('lock_timeout'), current_setting('idle_in_transaction_session_timeout')")
+        .fetch_one(&pool).await.unwrap();
+    assert_eq!(settings, ("30s".into(), "5s".into(), "1min".into()));
+    let mut connection = pool.acquire().await.unwrap();
+    sqlx::raw_sql("SET statement_timeout = '50ms'; SET lock_timeout = '25ms'")
+        .execute(&mut *connection)
+        .await
+        .unwrap();
+    let error = sqlx::query("SELECT pg_sleep(1)")
+        .execute(&mut *connection)
+        .await
+        .unwrap_err();
+    assert_eq!(
+        error.as_database_error().unwrap().code().as_deref(),
+        Some("57014")
+    );
+    let mut held = pool.begin().await.unwrap();
+    sqlx::query("SELECT id FROM installation_identity FOR UPDATE")
+        .execute(&mut *held)
+        .await
+        .unwrap();
+    let error = sqlx::query("SELECT id FROM installation_identity FOR UPDATE")
+        .execute(&mut *connection)
+        .await
+        .unwrap_err();
+    assert_eq!(
+        error.as_database_error().unwrap().code().as_deref(),
+        Some("55P03")
+    );
+    held.rollback().await.unwrap();
+    sqlx::query("SELECT 1")
+        .execute(&mut *connection)
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+#[ignore = "requires the integration PostgreSQL service"]
+async fn runtime_role_can_use_application_tables_but_cannot_change_schema_or_identity() {
+    let db = TestDb::create_migrated("roles").await;
+    let pool = db.pool(1).await;
+    let mut transaction = pool.begin().await.unwrap();
+    let role = format!("olp_runtime_{}", uuid::Uuid::now_v7().simple());
+    sqlx::raw_sql(sqlx::AssertSqlSafe(format!(
+        "CREATE ROLE {role} NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT"
+    )))
+    .execute(&mut *transaction)
+    .await
+    .unwrap();
+    let grants = include_str!("../../scripts/grant-runtime-database-role.sql")
+        .replace("\\set ON_ERROR_STOP on\n", "")
+        .replace("BEGIN;", "")
+        .replace("COMMIT;", "")
+        .replace(":\"runtime_role\"", &role);
+    sqlx::raw_sql(sqlx::AssertSqlSafe(grants))
+        .execute(&mut *transaction)
+        .await
+        .unwrap();
+    sqlx::raw_sql(sqlx::AssertSqlSafe(format!("SET LOCAL ROLE {role}")))
+        .execute(&mut *transaction)
+        .await
+        .unwrap();
+    sqlx::query("SELECT id FROM installation_identity")
+        .fetch_one(&mut *transaction)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE settings SET value = value WHERE false")
+        .execute(&mut *transaction)
+        .await
+        .unwrap();
+    for statement in [
+        "CREATE TABLE public.forbidden (id int)",
+        "CREATE TABLE olp_v3.forbidden (id int)",
+        "DELETE FROM olp_v3._sqlx_migrations",
+        "UPDATE olp_v3.installation_identity SET id = gen_random_uuid()",
+    ] {
+        sqlx::query("SAVEPOINT permission_check")
+            .execute(&mut *transaction)
+            .await
+            .unwrap();
+        let error = sqlx::raw_sql(sqlx::AssertSqlSafe(statement))
+            .execute(&mut *transaction)
+            .await
+            .unwrap_err();
+        assert_eq!(
+            error.as_database_error().unwrap().code().as_deref(),
+            Some("42501")
+        );
+        sqlx::query("ROLLBACK TO SAVEPOINT permission_check")
+            .execute(&mut *transaction)
+            .await
+            .unwrap();
+    }
+    transaction.rollback().await.unwrap();
+}

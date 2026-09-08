@@ -40,8 +40,8 @@ spec:
             - name: OLP_DATABASE_URL
               valueFrom:
                 secretKeyRef:
-                  name: {{ required "config.databaseSecretName is required" .Values.config.databaseSecretName | quote }}
-                  key: {{ required "config.databaseSecretKey is required" .Values.config.databaseSecretKey | quote }}
+                  name: {{ default .Values.config.databaseSecretName .Values.migration.databaseSecretName | quote }}
+                  key: {{ default .Values.config.databaseSecretKey .Values.migration.databaseSecretKey | quote }}
             - name: OLP_VALKEY_URL
               valueFrom:
                 secretKeyRef:

@@ -25,7 +25,7 @@ impl From<&PublishedRuntimeRelease> for RuntimeGenerationResponse {
 pub(crate) fn prevent_sensitive_response_caching(response: &mut Response) {
     response
         .headers_mut()
-        .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-pool"));
+        .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
     response
         .headers_mut()
         .insert(header::PRAGMA, HeaderValue::from_static("no-cache"));

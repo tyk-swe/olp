@@ -252,7 +252,7 @@ async fn execute_playground(
     .into_response();
     response
         .headers_mut()
-        .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-pool"));
+        .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
     Ok(response)
 }
 

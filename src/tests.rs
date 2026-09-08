@@ -38,7 +38,6 @@ use axum::http::HeaderName;
 use axum::http::HeaderValue;
 use axum::http::Request;
 use axum::http::Response;
-use axum::http::Uri;
 use axum::middleware;
 use axum::routing::get;
 use base64::Engine as _;

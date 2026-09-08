@@ -94,7 +94,7 @@ pub(crate) async fn apply_gateway_cors(
         .expect("gateway CORS service is infallible")
 }
 
-fn is_gateway_path(path: &str) -> bool {
+pub(crate) fn is_gateway_path(path: &str) -> bool {
     ["/openai/", "/v1/", "/anthropic/", "/gemini/"]
         .iter()
         .any(|prefix| path.starts_with(prefix))

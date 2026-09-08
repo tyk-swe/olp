@@ -58,6 +58,8 @@
       "type": "object",
       "required": ["enabled", "backoffLimit", "activeDeadlineSeconds", "ttlSecondsAfterFinished", "resources"],
       "properties": {
+        "databaseSecretName": { "type": "string" },
+        "databaseSecretKey": { "type": "string" },
         "enabled": { "type": "boolean" },
         "backoffLimit": { "type": "integer", "minimum": 0 },
         "activeDeadlineSeconds": { "type": "integer", "minimum": 1 },

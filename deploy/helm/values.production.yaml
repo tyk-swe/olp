@@ -1,0 +1,46 @@
+gateway:
+  replicas: 3
+  httpMaxInFlightInferenceRequests: 32
+  topologySpread:
+    whenUnsatisfiable: DoNotSchedule
+  resources:
+    requests: { cpu: '1', memory: 1Gi, ephemeral-storage: 2Gi }
+    limits: { cpu: '4', memory: 2Gi, ephemeral-storage: 3Gi }
+control:
+  replicas: 2
+  podDisruptionBudget:
+    enabled: true
+    minAvailable: 1
+  topologySpread:
+    enabled: true
+    whenUnsatisfiable: DoNotSchedule
+worker:
+  replicas: 3
+  podDisruptionBudget:
+    minAvailable: 2
+  topologySpread:
+    whenUnsatisfiable: DoNotSchedule
+config:
+  databaseMaxConnections: 10
+  publicOrigin: https://olp.example.com
+  trustedProxyCidrs: 10.42.0.0/16
+  bootstrapTokenSecretName: olp-bootstrap
+tracing:
+  sampleRatio: 0.01
+ingress:
+  enabled: true
+  className: nginx
+  tls:
+    enabled: true
+monitoring:
+  enabled: true
+networkPolicy:
+  enabled: true
+  edge:
+    namespaceLabels:
+      kubernetes.io/metadata.name: ingress-nginx
+  prometheus:
+    namespaceLabels:
+      kubernetes.io/metadata.name: monitoring
+migration:
+  databaseSecretName: olp-postgresql-migration

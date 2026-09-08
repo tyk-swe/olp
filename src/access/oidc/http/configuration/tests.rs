@@ -254,7 +254,7 @@ async fn configuration_response_is_redacted_uncacheable_and_versioned() {
     .unwrap();
 
     assert_eq!(response.headers()[header::ETAG], format!("\"{etag}\""));
-    assert_eq!(response.headers()[header::CACHE_CONTROL], "no-pool");
+    assert_eq!(response.headers()[header::CACHE_CONTROL], "no-store");
     let body = Body::new(response.into_body())
         .collect()
         .await

@@ -31,6 +31,21 @@ export const test = base.extend({
       }
     });
 
+    page.on('response', (response) => {
+      const url = new URL(response.url());
+      if (
+        url.origin === 'http://localhost:4175' &&
+        ['/api/', '/v1/', '/openai/', '/anthropic/', '/gemini/'].some(
+          (prefix) => url.pathname.startsWith(prefix)
+        ) &&
+        response.headers()['cache-control'] !== 'no-store'
+      ) {
+        runtimeFailures.push(
+          'A sensitive API response omitted Cache-Control: no-store'
+        );
+      }
+    });
+
     await use(page);
 
     if (runtimeFailures.length > 0) {

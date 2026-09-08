@@ -38,8 +38,12 @@ describe('exact budget formatting', () => {
     expect(formatBudget('invalid', 'USD')).toBe('invalid USD');
   });
 
-  it('leaves the general cost summary formatter unchanged', () => {
+  it('keeps compact summaries while identifying small nonzero costs', () => {
     expect(formatCost('0.015')).toBe('0.02');
     expect(formatCost(null)).toBe('Unpriced');
+    expect(formatCost('0.000000000001', 'USD')).toBe('<$0.000001');
+    expect(formatCost('9999999999999999.999999999999')).toBe(
+      '9,999,999,999,999,999.999999999999'
+    );
   });
 });

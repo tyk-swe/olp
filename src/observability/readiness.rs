@@ -316,6 +316,9 @@ fn check_gateway_runtime(
             "runtime_generation_unavailable",
         ));
     }
+    if !state.inference.runtime.authority_is_current() {
+        return Err(Problem::service_unavailable("api_key_authority_stale"));
+    }
     if !snapshot.has_all_transports() {
         return Err(Problem::service_unavailable(
             "provider_transport_unavailable",

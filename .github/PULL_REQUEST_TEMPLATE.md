@@ -10,3 +10,5 @@
 - [ ] Included screenshots for visible console changes
 - [ ] New migrations are forward-only and sequential
 - [ ] Updated Helm values, schema, and templates together when deployment configuration changed
+
+- [ ] New provider/protocol/media behavior includes conformance, limits, pricing/coverage, failure/privacy and recovery evidence

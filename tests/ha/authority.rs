@@ -30,10 +30,12 @@ pub(crate) async fn exercise(world: &World, gateway: &GatewayProcess) -> Result<
         .await?;
         for origin in observability {
             await_generation(&http, origin, key.generation).await?;
+            await_desired_generation(&http, origin, key.generation).await?;
         }
         let rejected = publish_rejected_authority(world, &key, invalid_transport).await?;
         convergence::await_keys(&http, &public, &key, 401, Duration::from_millis(5_500)).await?;
         for (public, observability) in public.iter().zip(observability) {
+            await_desired_generation(&http, observability, rejected).await?;
             let installed = generation(&http, observability).await?;
             crate::require!(
                 installed == key.generation && installed < rejected,
@@ -67,23 +69,57 @@ async fn generation(http: &reqwest::Client, origin: &str) -> Result<i64, String>
         .ok_or_else(|| "authority readiness had no generation".into())
 }
 
+/// Polls `probe` until it reports the awaited state, failing with `failure`
+/// after ten seconds.
+async fn await_state<F, Fut>(mut probe: F, failure: impl Fn() -> String) -> Result<(), String>
+where
+    F: FnMut() -> Fut,
+    Fut: Future<Output = Result<bool, String>>,
+{
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        if probe().await? {
+            return Ok(());
+        }
+        crate::require!(Instant::now() < deadline, "{}", failure());
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+}
+
 async fn await_generation(
     http: &reqwest::Client,
     origin: &str,
     expected: i64,
 ) -> Result<(), String> {
-    let deadline = Instant::now() + Duration::from_secs(10);
-    loop {
-        let installed = generation(http, origin).await?;
-        if installed == expected {
-            return Ok(());
-        }
-        crate::require!(
-            Instant::now() < deadline,
-            "{origin} did not install fixture generation {expected}; installed {installed}"
-        );
-        tokio::time::sleep(Duration::from_millis(50)).await;
-    }
+    await_state(
+        || async { Ok(generation(http, origin).await? == expected) },
+        || format!("{origin} did not install fixture generation {expected}"),
+    )
+    .await
+}
+
+async fn await_desired_generation(
+    http: &reqwest::Client,
+    origin: &str,
+    expected: i64,
+) -> Result<(), String> {
+    let expected_metric = format!("olp_runtime_desired_generation {expected}");
+    await_state(
+        || async {
+            let body = http
+                .get(format!("{origin}/metrics"))
+                .send()
+                .await
+                .and_then(reqwest::Response::error_for_status)
+                .map_err(|error| format!("authority metrics request failed: {error}"))?
+                .text()
+                .await
+                .map_err(|error| format!("authority metrics response was invalid: {error}"))?;
+            Ok(body.lines().any(|line| line == expected_metric))
+        },
+        || format!("{origin} did not report desired generation {expected}"),
+    )
+    .await
 }
 
 async fn publish_rejected_authority(

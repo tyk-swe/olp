@@ -105,6 +105,15 @@ spec:
             summary: OpenLLMProxy request metadata backlog is sustained
             description: The local metadata backlog has remained above the configured threshold.
 {{ end }}
+        - alert: OLPProviderMetricsIncomplete
+          expr: >-
+            min(olp_provider_metrics_complete{namespace={{ .Release.Namespace | quote }},service=~{{ $observabilityServices | quote }}}) == 0
+            or min(olp_observability_metrics_snapshot_fresh{namespace={{ .Release.Namespace | quote }},service=~{{ $observabilityServices | quote }}}) == 0
+          for: 5m
+          labels: { severity: warning }
+          annotations:
+            summary: OpenLLMProxy provider metrics are incomplete
+            description: Check emitted provider count, snapshot freshness and database latency; collections are capped at 10000 providers.
         - alert: OLPRequestMetadataConsumerBacklogHigh
           expr: max(olp_request_metadata_consumer_pending_events{namespace={{ .Release.Namespace | quote }},service=~{{ $observabilityServices | quote }}} + olp_request_metadata_consumer_lag_events{namespace={{ .Release.Namespace | quote }},service=~{{ $observabilityServices | quote }}}) > {{ .Values.monitoring.rules.requestMetadataPendingThreshold }}
           for: 10m
@@ -150,6 +159,20 @@ spec:
           annotations:
             summary: OpenLLMProxy distributed limiter is unavailable
             description: Hard-limited keys fail closed while Valkey-backed reservations are unavailable.
+        - alert: OLPApiKeyAuthorityStale
+          expr: max(olp_api_key_authority_age_seconds{namespace={{ .Release.Namespace | quote }},service={{ $gatewayService | quote }}}) >= 45
+          for: 15s
+          labels: { severity: critical }
+          annotations:
+            summary: OpenLLMProxy API-key authority is stale
+            description: New admissions stop at 60 seconds; restore PostgreSQL authority refresh independently of provider activation.
+        - alert: OLPRuntimeGenerationNotConverged
+          expr: max(olp_runtime_desired_generation{namespace={{ .Release.Namespace | quote }},service={{ $gatewayService | quote }}} - olp_runtime_generation{namespace={{ .Release.Namespace | quote }},service={{ $gatewayService | quote }}}) > 0
+          for: 2m
+          labels: { severity: warning }
+          annotations:
+            summary: OpenLLMProxy has not activated the desired runtime generation
+            description: Inspect rejected provider revisions and credentials while preserving independent key-authority refresh.
         - alert: OLPRuntimeGenerationMissing
           expr: max_over_time(olp_runtime_generation{namespace={{ .Release.Namespace | quote }},service={{ $gatewayService | quote }}}[5m]) == 0
           for: 5m

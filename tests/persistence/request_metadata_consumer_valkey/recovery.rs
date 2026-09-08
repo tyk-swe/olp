@@ -419,3 +419,46 @@ async fn concurrent_recovery_records_malformed_and_invalid_entries_once_then_dra
     );
     stop_consumers(shutdown, consumers).await;
 }
+
+#[tokio::test]
+#[ignore = "requires PostgreSQL 18 and Valkey in OLP_VALKEY_URL"]
+async fn future_event_versions_remain_pending_while_supported_events_are_committed() {
+    let db = olp::test_support::TestDb::create_migrated("wire_versions").await;
+    let pool = db.pool(5).await;
+    let fixture = fixture(&pool, "wire-versions").await;
+    let stream = stream("wire-versions");
+    let mut connection = valkey_connection().await;
+    create_group(&mut connection, &stream).await;
+    for version in [None, Some(1), Some(2)] {
+        let mut payload = serde_json::to_value(event(&fixture)).unwrap();
+        if let Some(version) = version {
+            payload["version"] = serde_json::json!(version);
+        }
+        add_payload(
+            &mut connection,
+            &stream,
+            &serde_json::to_vec(&payload).unwrap(),
+        )
+        .await;
+    }
+    let (shutdown, receiver) = watch::channel(false);
+    let consumer = spawn_consumer(
+        pool.clone(),
+        stream.clone(),
+        "version-reader",
+        receiver,
+        test_policy(Duration::ZERO),
+    );
+    wait_for_usage_facts(&pool, 2).await;
+    stop_consumers(shutdown, vec![consumer]).await;
+    let length: usize = connection.xlen(&stream).await.unwrap();
+    assert_eq!(length, 1);
+    let groups: StreamInfoGroupsReply = connection.xinfo_groups(&stream).await.unwrap();
+    assert_eq!(groups.groups[0].pending, 1);
+    let gaps: i64 = sqlx::query_scalar("SELECT count(*) FROM request_metadata_ingestion_gaps")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(gaps, 0);
+    let _: usize = connection.del(&stream).await.unwrap();
+}

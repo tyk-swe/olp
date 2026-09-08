@@ -1,0 +1,14 @@
+services:
+  postgres:
+    environment:
+      POSTGRES_PASSWORD: !reset null
+      POSTGRES_PASSWORD_FILE: /run/secrets/olp_database_password
+    secrets:
+      - olp_database_password
+  olp:
+    environment:
+      OLP_HTTP_MAX_IN_FLIGHT_INFERENCE_REQUESTS: 32
+    mem_limit: 4g
+secrets:
+  olp_database_password:
+    file: ./secrets/olp_database_password

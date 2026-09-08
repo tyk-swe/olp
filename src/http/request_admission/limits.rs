@@ -79,7 +79,13 @@ pub(crate) fn authenticate_inference_headers(
     let lookup_id = ApiKeyLookupId::parse(&lookup).map_err(|_| {
         crate::http::problem::Problem::unauthorized("The API key is invalid or unavailable.")
     })?;
-    let snapshot = state.inference.runtime.pin();
+    let snapshot = state
+        .inference
+        .runtime
+        .pin_current_authority()
+        .ok_or_else(|| {
+            crate::http::problem::Problem::service_unavailable("api_key_authority_stale")
+        })?;
     let key = snapshot.api_keys.get(&lookup_id).ok_or_else(|| {
         crate::http::problem::Problem::unauthorized("The API key is invalid or unavailable.")
     })?;
