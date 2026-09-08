@@ -43,7 +43,6 @@ pub(crate) struct SessionDetailResponse {
 
 #[derive(Debug, Serialize, ToSchema)]
 pub(crate) struct SessionListResponse {
-    pub data: Vec<SessionDetailResponse>,
     pub items: Vec<SessionDetailResponse>,
     pub next_cursor: Option<String>,
 }
@@ -96,7 +95,6 @@ pub(crate) async fn list_sessions(
         })
         .collect::<Vec<_>>();
     Ok(Json(SessionListResponse {
-        data: items.clone(),
         items,
         next_cursor: next_cursor.map(|cursor| cursor.to_string()),
     }))

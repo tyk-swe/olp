@@ -111,7 +111,6 @@ impl From<GatewayEpochRecord> for RequestMetadataGatewayEpochResponse {
 
 #[derive(Debug, Serialize, ToSchema)]
 pub(crate) struct RequestMetadataGatewayEpochListResponse {
-    data: Vec<RequestMetadataGatewayEpochResponse>,
     items: Vec<RequestMetadataGatewayEpochResponse>,
     next_cursor: Option<String>,
 }
@@ -148,7 +147,6 @@ pub(crate) async fn list_request_metadata_gateway_epochs(
     .map_err(map_operations)?;
     let items = page.items.into_iter().map(Into::into).collect::<Vec<_>>();
     Ok(Json(RequestMetadataGatewayEpochListResponse {
-        data: items.clone(),
         items,
         next_cursor: page.next_cursor,
     }))

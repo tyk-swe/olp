@@ -58,7 +58,6 @@ impl From<Item> for UsageBreakdownItem {
 
 #[derive(Debug, Serialize, ToSchema)]
 pub(crate) struct UsageBreakdownResponse {
-    data: Vec<UsageBreakdownItem>,
     items: Vec<UsageBreakdownItem>,
     coverage: UsageRangeCoverageResponse,
 }
@@ -108,7 +107,6 @@ pub(crate) async fn usage_breakdown(
     .map_err(map_operations)?;
     let items = report.items.into_iter().map(Into::into).collect::<Vec<_>>();
     Ok(Json(UsageBreakdownResponse {
-        data: items.clone(),
         items,
         coverage: report.coverage.into(),
     }))

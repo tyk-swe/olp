@@ -175,7 +175,6 @@ impl From<RevisionRecord> for PricingRevisionResponse {
 
 #[derive(Debug, Serialize, ToSchema)]
 pub(crate) struct PricingRevisionsResponse {
-    data: Vec<PricingRevisionResponse>,
     items: Vec<PricingRevisionResponse>,
     next_cursor: Option<String>,
 }
@@ -211,7 +210,6 @@ pub(crate) async fn list_pricing_revisions(
     .map_err(map_operations)?;
     let items = page.items.into_iter().map(Into::into).collect::<Vec<_>>();
     Ok(Json(PricingRevisionsResponse {
-        data: items.clone(),
         items,
         next_cursor: page.next_cursor,
     }))
