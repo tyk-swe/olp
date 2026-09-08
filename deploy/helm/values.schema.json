@@ -69,7 +69,14 @@
     },
     "tracing": {
       "type": "object",
-      "required": ["endpoint", "headersSecretName", "headersSecretKey", "sampleRatio"],
+      "required": [
+        "endpoint",
+        "headersSecretName",
+        "headersSecretKey",
+        "sampleRatio",
+        "propagateUpstream",
+        "acceptInbound"
+      ],
       "additionalProperties": false,
       "properties": {
         "endpoint": {
@@ -78,7 +85,9 @@
         },
         "headersSecretName": { "type": "string" },
         "headersSecretKey": { "type": "string", "minLength": 1 },
-        "sampleRatio": { "type": "number", "minimum": 0, "maximum": 1 }
+        "sampleRatio": { "type": "number", "minimum": 0, "maximum": 1 },
+        "propagateUpstream": { "type": "boolean" },
+        "acceptInbound": { "type": "boolean" }
       }
     },
     "config": {

@@ -146,6 +146,10 @@ tracing:
   headersSecretName: ""
   headersSecretKey: headers
   sampleRatio: 1.0
+  # Inject the current W3C trace context into provider attempts.
+  propagateUpstream: true
+  # Accept a valid inbound W3C trace context as the request parent.
+  acceptInbound: true
 
 config:
   databaseSecretName: olp-postgresql
