@@ -4,7 +4,6 @@ use crate::media::jobs::MediaJobFilters;
 use crate::media::jobs::MediaJobLifecycle;
 use crate::media::jobs::MediaJobRecord;
 use crate::media::jobs::MediaJobState;
-use crate::protocols::canonical::identity::Surface;
 use axum::Json;
 use axum::extract::Path;
 use axum::extract::Query;
@@ -90,7 +89,7 @@ impl From<MediaJobRecord> for MediaJobItem {
             provider_model: record.upstream_model,
             route: record.route_slug,
             operation: record.operation.to_string(),
-            surface: media_job_surface_wire_value(record.surface).to_owned(),
+            surface: record.surface.as_str().to_owned(),
             state: record.state.as_str().to_owned(),
             lifecycle: record.lifecycle.as_str().to_owned(),
             progress_percent: record.progress_percent,
@@ -106,10 +105,6 @@ impl From<MediaJobRecord> for MediaJobItem {
             updated_at: record.updated_at,
         }
     }
-}
-
-pub(crate) const fn media_job_surface_wire_value(surface: Surface) -> &'static str {
-    surface.as_str()
 }
 
 #[derive(Debug, Serialize, ToSchema)]
