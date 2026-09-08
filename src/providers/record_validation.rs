@@ -1,3 +1,4 @@
+use crate::database::reads::MAX_PAGE_SIZE;
 use crate::ids::RouteSlug;
 use crate::protocols::canonical::identity::OperationKind;
 use crate::providers::runtime_model::ProviderKind;
@@ -142,12 +143,8 @@ pub(crate) fn validate_route_input(
 /// Largest reviewed capability tuple set a single model may carry.
 pub const MAX_MODEL_CAPABILITY_TUPLES: usize = 64;
 
-/// Largest page any collection returns; the HTTP layer derives its bound
-/// from this so the two cannot drift.
-pub const MAX_PAGE_SIZE: i64 = 200;
-
 pub(crate) fn checked_limit(limit: i64) -> Result<i64, Error> {
-    if (1..=MAX_PAGE_SIZE).contains(&limit) {
+    if (1..=i64::from(MAX_PAGE_SIZE)).contains(&limit) {
         Ok(limit)
     } else {
         Err(Error::Invalid(format!(
@@ -363,9 +360,10 @@ mod tests {
             );
         }
 
+        let cap = i64::from(MAX_PAGE_SIZE);
         assert_eq!(checked_limit(1).unwrap(), 1);
-        assert_eq!(checked_limit(MAX_PAGE_SIZE).unwrap(), MAX_PAGE_SIZE);
-        for invalid in [i64::MIN, 0, MAX_PAGE_SIZE + 1, i64::MAX] {
+        assert_eq!(checked_limit(cap).unwrap(), cap);
+        for invalid in [i64::MIN, 0, cap + 1, i64::MAX] {
             assert!(checked_limit(invalid).is_err());
         }
     }

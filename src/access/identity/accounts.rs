@@ -12,7 +12,7 @@ use crate::access::authentication::insert_versioned_session;
 use crate::access::authentication::revoke_user_sessions;
 use crate::crypto::session_material::SessionMaterial;
 use crate::database::query::split_page;
-use crate::providers::record_validation::MAX_PAGE_SIZE;
+use crate::database::reads::MAX_PAGE_SIZE;
 
 use crate::access::identity::Error;
 use crate::access::identity::PasswordSessionRotation;
@@ -27,7 +27,7 @@ pub async fn list_users(
     cursor: Option<Uuid>,
     limit: i64,
 ) -> Result<(Vec<UserRecord>, Option<Uuid>), Error> {
-    let limit = limit.clamp(1, MAX_PAGE_SIZE);
+    let limit = limit.clamp(1, i64::from(MAX_PAGE_SIZE));
     let rows = sqlx::query_as::<_, UserRow>(
         "SELECT id, email, display_name, role::text AS \"role\", active, etag, created_at, updated_at \
              FROM users WHERE ($1::uuid IS NULL OR id < $1) ORDER BY id DESC LIMIT $2",
@@ -465,7 +465,7 @@ pub async fn list_sessions(
     cursor: Option<Uuid>,
     limit: i64,
 ) -> Result<(Vec<SessionRecord>, Option<Uuid>), Error> {
-    let limit = limit.clamp(1, MAX_PAGE_SIZE);
+    let limit = limit.clamp(1, i64::from(MAX_PAGE_SIZE));
     let rows = sqlx::query_as::<_, ListSessionsRow>(
         "SELECT session.id, session.user_id, session.expires_at, session.last_seen_at, \
                     session.created_at \
