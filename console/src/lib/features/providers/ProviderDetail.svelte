@@ -19,7 +19,8 @@
   import { updateProvider, type Provider } from '$lib/features/providers/api';
   import {
     listProviderModelPage,
-    listProviderKinds
+    listProviderKinds,
+    type ProviderModelPage
   } from '$lib/features/providers/models';
   import { emptyCursorHistory, resetCursor } from '$lib/lists/pagination';
   import { useRole } from '$lib/features/access/session/useRole.svelte';
@@ -69,7 +70,9 @@
   });
 
   let busy = $state('');
+  let editVersion = 0;
   let errorMessage = $state('');
+  let saveRefreshError = $state('');
   let validationIssues = $state<FieldIssue[]>([]);
   let notice = $state('');
   let reloadVersion = $state(0);
@@ -94,6 +97,7 @@
   });
 
   const run: RunProviderAction = async (label, action) => {
+    if (busy) return false;
     busy = label;
     errorMessage = notice = '';
     validationIssues = [];
@@ -113,6 +117,7 @@
   };
 
   function touch() {
+    editVersion += 1;
     sync = markDirty(sync);
   }
 
@@ -174,23 +179,41 @@
   }
 
   async function saveProvider(current: Provider) {
-    if (!providerSpec || !canManage) return;
+    if (!providerSpec || !canManage || busy) return;
     await run('save', async () => {
       if (!sync.snapshotEtag)
         throw new Error('Reload the provider before saving.');
+      const submittedVersion = editVersion;
       const updated = await updateProvider(
         current.id,
         sync.snapshotEtag,
         buildUpdateProviderInput(editValues, providerSpec)
       );
-      sync = markSaved(sync, updated.etag);
+      sync = markSaved(sync, updated.etag, editVersion !== submittedVersion);
+      queryClient.setQueriesData<ProviderModelPage>(
+        { queryKey: providerKeys.modelsOf(current.id) },
+        (page) => (page ? { ...page, provider: updated } : page)
+      );
       resetModelPage();
+      await refreshSavedProvider();
+    });
+  }
+
+  async function refreshSavedProvider() {
+    saveRefreshError = '';
+    try {
       await providerChanged();
       await queryClient.invalidateQueries({
         queryKey: providerKeys.summaries
       });
-      reportNotice('Provider draft settings saved.');
-    });
+    } catch (error) {
+      saveRefreshError = providerDetailError(error);
+    }
+    reportNotice(
+      sync.dirty
+        ? 'Draft saved. You have additional unsaved changes.'
+        : 'Provider draft settings saved.'
+    );
   }
 </script>
 
@@ -213,6 +236,17 @@
     >All providers</a
   >
 </div>
+{#if saveRefreshError}
+  <div class="inline-problem" role="alert">
+    <p>Draft saved, but refreshing failed. {saveRefreshError}</p>
+    <button
+      class="button button-secondary"
+      type="button"
+      disabled={Boolean(busy)}
+      onclick={() => run('refresh', refreshSavedProvider)}>Retry refresh</button
+    >
+  </div>
+{/if}
 
 {#if errorMessage}<div class="inline-problem" role="alert">
     {errorMessage}
@@ -235,7 +269,7 @@
     >
   </div>
 {/if}
-{#if snapshot.isError && snapshot.data?.provider}
+{#if snapshot.isError && snapshot.data?.provider && !saveRefreshError}
   <div class="inline-problem" role="alert">
     {providerDetailError(snapshot.error)} The last loaded provider remains available
     below.

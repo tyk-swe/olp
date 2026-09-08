@@ -294,7 +294,7 @@
         { ...profile.data, etag: profileSync.snapshotEtag },
         { display_name: normalizedDisplayName }
       );
-      profileSync = markSaved(profileSync, updated.etag);
+      profileSync = markSaved(profileSync, updated.etag, false);
       queryClient.setQueryData(profileKeys.current(), updated);
       message = 'Profile updated.';
     } catch (cause) {

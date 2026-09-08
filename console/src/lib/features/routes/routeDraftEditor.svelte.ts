@@ -66,6 +66,7 @@ export class RouteDraftEditorState {
   maxAttempts = $state(2);
   targets = $state<EditableTarget[]>([]);
   sync = $state(initialConcurrentEdit());
+  private editVersion = 0;
   busy = $state('');
   errorMessage = $state('');
   notice = $state('');
@@ -103,6 +104,7 @@ export class RouteDraftEditorState {
     )
   );
   run = async (label: string, action: () => Promise<void>) => {
+    if (this.busy) return;
     this.busy = label;
     this.errorMessage = '';
     this.notice = '';
@@ -121,17 +123,17 @@ export class RouteDraftEditorState {
     if (this.notice === simulationNotice) this.notice = '';
   };
   touch = () => {
+    this.editVersion += 1;
     this.invalidateSimulation();
     this.sync = markDirty(this.sync);
   };
   reload = async () => {
-    this.errorMessage = '';
-    const result = await this.draft.refetch();
-    if (result.error) {
-      this.errorMessage = message(result.error);
-      return;
-    }
-    this.sync = beginReload(this.sync);
+    await this.run('reload', async () => {
+      const result = await this.draft.refetch();
+      if (result.error) throw result.error;
+      if (!result.data) throw new Error('The route draft is unavailable.');
+      this.sync = beginReload(this.sync);
+    });
   };
   toggleOperation = (operation: string, checked: boolean) => {
     this.operations = checked
@@ -165,7 +167,7 @@ export class RouteDraftEditorState {
   };
   create = async (event: SubmitEvent) => {
     event.preventDefault();
-    if (!this.canManage) return;
+    if (!this.canManage || this.busy) return;
     const issue = validateRouteEditor(this.editorValues);
     if (issue) {
       this.errorMessage = issue;
@@ -183,7 +185,7 @@ export class RouteDraftEditorState {
     });
   };
   save = async (current: RouteDraft) => {
-    if (!this.canManage) return;
+    if (!this.canManage || this.busy) return;
     const issue = validateRouteEditor(this.editorValues);
     if (issue) {
       this.errorMessage = issue;
@@ -193,19 +195,25 @@ export class RouteDraftEditorState {
     await this.run('save', async () => {
       if (!this.sync.snapshotEtag)
         throw new Error('Reload the draft before saving.');
+      const submittedVersion = this.editVersion;
       const updated = await replaceRouteDraft(
         current.id,
         this.sync.snapshotEtag,
         buildReplaceRouteDraftInput(this.editorValues)
       );
-      this.sync = markSaved(this.sync, updated.etag);
+      this.sync = markSaved(
+        this.sync,
+        updated.etag,
+        this.editVersion !== submittedVersion
+      );
       this.queryClient.setQueryData(routeKeys.draft(current.id), updated);
-      this.notice =
-        'Draft saved. Validate to preview, or activate directly; activation validates the saved draft.';
+      this.notice = this.sync.dirty
+        ? 'Draft saved. You have additional unsaved changes.'
+        : 'Draft saved. Validate to preview, or activate directly; activation validates the saved draft.';
     });
   };
   simulate = async (current: RouteDraft) => {
-    if (!this.canManage) return;
+    if (!this.canManage || this.busy || this.sync.dirty) return;
     this.invalidateSimulation();
     const version = this.simulationVersion;
     await this.run('simulate', async () => {
@@ -227,7 +235,7 @@ export class RouteDraftEditorState {
     });
   };
   validate = async (current: RouteDraft) => {
-    if (!this.canManage) return;
+    if (!this.canManage || this.busy || this.sync.dirty) return;
     await this.run('validate', async () => {
       const validation = await validateRoute(current);
       this.sync = acceptRemote(this.sync, validation.etag);
@@ -240,7 +248,7 @@ export class RouteDraftEditorState {
     });
   };
   activate = async (current: RouteDraft) => {
-    if (!this.canManage) return;
+    if (!this.canManage || this.busy || this.sync.dirty) return;
     await this.run('activate', async () => {
       this.activation = await activateRoute(current);
       // Activation returns the draft to `draft` under a fresh ETag. Adopting it
@@ -259,7 +267,7 @@ export class RouteDraftEditorState {
     });
   };
   remove = async (current: RouteDraft) => {
-    if (!this.canManage) return;
+    if (!this.canManage || this.busy) return;
     if (!confirm(`Delete draft “${current.slug}”?`)) return;
     await this.run('delete', async () => {
       await deleteRouteDraft(current.id, current.etag);

@@ -45,7 +45,7 @@ describe('concurrent edit state', () => {
     expect(accepted.snapshotEtag).toBe('v2');
     expect(accepted.dirty).toBe(true);
     expect(conflictNotice(accepted)).toBeNull();
-    expect(markSaved(accepted, 'v3')).toEqual({
+    expect(markSaved(accepted, 'v3', false)).toEqual({
       snapshotEtag: 'v3',
       remoteEtag: 'v3',
       dirty: false,
@@ -96,5 +96,17 @@ describe('concurrent edit state', () => {
     expect(markDirty(dirty)).toBe(dirty);
     const conflicted = markConflict(dirty);
     expect(markConflict(conflicted)).toBe(conflicted);
+  });
+});
+
+describe('save completion with newer local edits', () => {
+  it('advances the saved ETag while retaining dirty input and navigation protection', () => {
+    const dirty = markDirty(reconcile(initialConcurrentEdit(), 'v1').state);
+    const saved = markSaved(dirty, 'v2', true);
+    expect(saved.dirty).toBe(true);
+    expect(saved.snapshotEtag).toBe('v2');
+    expect(conflictNotice(saved)).toBeNull();
+    expect(reconcile(saved, 'v2').hydrate).toBe(false);
+    expect(markSaved(saved, 'v3', false).dirty).toBe(false);
   });
 });

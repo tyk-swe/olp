@@ -56,15 +56,15 @@ export function markDirty(state: ConcurrentEditState): ConcurrentEditState {
   return state.dirty ? state : { ...state, dirty: true };
 }
 
-/** A successful save replaces the whole state, so the prior one is discarded. */
 export function markSaved(
   _state: ConcurrentEditState,
-  etag: string
+  etag: string,
+  dirty: boolean
 ): ConcurrentEditState {
   return {
     snapshotEtag: etag,
     remoteEtag: etag,
-    dirty: false,
+    dirty,
     conflict: false,
     reloadPending: false
   };

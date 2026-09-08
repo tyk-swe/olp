@@ -5,6 +5,7 @@ import {
   takeSecret,
   waitForRoutePublication
 } from './fixtures';
+import { verifyDraftSave } from './draft-saving';
 import { expectFact, refreshUntilRequestCount } from './request-history';
 import { readFileSync } from 'node:fs';
 import AxeBuilder from '@axe-core/playwright';
@@ -338,6 +339,7 @@ test.describe('Rust-hosted console integration', () => {
     await page.getByLabel('Maximum attempts').fill('1');
     await page.getByRole('button', { name: 'Create draft' }).click();
     await expect(page).toHaveURL(/\/routes\/[0-9a-f-]+$/);
+    await verifyDraftSave(page, 'route', vertical.route);
 
     await page.getByLabel('Dry-run operation').selectOption('generation');
     for (const surface of surfaces) {
@@ -692,6 +694,7 @@ test.describe('Rust-hosted console integration', () => {
     await expect(page.getByLabel('Provider name')).toHaveValue(
       vertical.providerName
     );
+    await verifyDraftSave(page, 'provider', vertical.providerName);
     const otherTab = await context.newPage();
     try {
       await otherTab.goto(page.url());
