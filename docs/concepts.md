@@ -1,12 +1,9 @@
 # Concepts
 
-This document describes the model OpenLLMProxy presents to the people who
-use it: what a route is, what a key is allowed to do, how a provider change
-reaches traffic, and what the installation records about a request. It is
-the user-facing counterpart to [Architecture](architecture.md), which
-records the internal boundaries and runtime contracts, and to
-[Configuration](configuration.md), which records the install-time settings
-of the binary and its deployment.
+Routes give callers stable model names; provider revisions determine where
+requests run. This guide covers publication, authorization, accounting, and
+privacy. See [compatibility](compatibility.md) for supported operations and
+[configuration](configuration.md) for installation settings.
 
 ## Routes and slugs
 
@@ -19,8 +16,7 @@ change without touching callers.
 A slug is at most 63 bytes of lowercase ASCII letters, digits, and single
 internal hyphens. It starts and ends with a letter or digit, and it never
 contains two consecutive hyphens. Uppercase letters, underscores, dots, and
-slashes are rejected, which is why a provider model identifier is not a
-valid slug by accident.
+slashes are rejected.
 
 A route binds its slug to the operations it serves and to one or more
 targets. A target names a provider, the upstream model to call on that
@@ -73,9 +69,9 @@ byte-stable generation with a digest. Gateways verify that digest and
 replace their snapshot atomically, so a half-applied generation is never
 observable, and a repeated publication is harmless.
 
-Each request pins exactly one generation and one credential revision when it
-is admitted and keeps both for its entire lifetime, including a stream that
-outlives several activations. A configuration change therefore never lands
+Each request pins one generation at admission, and its attempts use the
+provider and credential revisions in that snapshot, including during a stream
+that outlives several activations. A configuration change therefore never lands
 mid-stream: it governs requests admitted after it, while a request already
 in flight finishes against the configuration it started with.
 
@@ -83,7 +79,10 @@ in flight finishes against the configuration it started with.
 
 Gateway keys belong to the installation. The secret is shown once, when the
 key is created; the installation stores only its hash, so a lost secret is
-replaced rather than recovered, and a revoked key is refused from then on.
+replaced rather than recovered. Revocation reaches gateways through authority
+refresh. Gateways poll every five seconds and refuse new admissions when
+authority is 60 seconds old; already admitted streams may finish. See
+[production contracts](production-guarantees.md).
 
 Two scopes exist. `inference` permits the operations that call a provider:
 generation, embeddings, moderation, image generation, editing and variation,
@@ -177,33 +176,11 @@ an installation's own records after the request has finished.
 
 ## Request lifecycle
 
-```text
-   incoming request
-        |
-        v
-  +-------------+  authenticate the key; check scope, route permission,
-  |  admission  |  and expiry; reserve hard limits; enforce body caps
-  +-------------+  -> one request identity, one bounded deadline
-        |
-        v
-  +-------------+  pin one generation and one credential revision; order
-  |  selection  |  the eligible certified targets by priority group, then
-  +-------------+  by weight -> an attempt plan, capped by max attempts
-        |
-        v
-  +-------------+  call the provider within the target timeout and the
-  |  attempt 1  |  route's overall timeout; this attempt keeps its own
-  +-------------+  usage, pricing, and outcome
-        |
-        |  failover appends attempts 2..n; it never rewrites an
-        |  earlier attempt, and the plan bounds how many there can be
-        v
-  +-------------+
-  |  attempt n  |
-  +-------------+
-        |
-        v
-  +-------------+  exactly one envelope, cancellation included: status,
-  |  terminal   |  timing, error class, the full attempt list, usage
-  +-------------+  completeness, pricing provenance -- never content
-```
+1. Authenticate the key, check scope, route permission, and expiry, and enforce
+   admission limits. Assign one request identity and a bounded deadline.
+2. Select eligible targets from the pinned generation by priority, then weight.
+   Cap the attempt plan at the route's maximum attempt count.
+3. Call each selected provider within its target timeout and the route deadline.
+   Failover adds an attempt with its own usage, pricing, and outcome.
+4. Complete one terminal envelope, including on cancellation. Release leases,
+   close streams, and persist metadata and accounting without request content.

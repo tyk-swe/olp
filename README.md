@@ -24,8 +24,9 @@ create the first owner. Vite serves the console with hot reload and proxies API,
 OIDC callback, and streaming requests through that same origin. PostgreSQL and
 Valkey use isolated development volumes and loopback ports 54320 and 63790.
 
-`make check` is the single required PR check. `make integration` runs the
-service, recovery, SDK, and Chromium journey suites explicitly. See
+`make check` runs the required local checks. `make integration` runs the
+service, recovery, SDK, and Chromium journey suites. CI also qualifies
+dependencies. See
 [CONTRIBUTING.md](CONTRIBUTING.md) for commands and the TypeScript 6.0 support
 exception, and [the architecture map](docs/architecture.md) for feature ownership.
 
@@ -100,16 +101,29 @@ The console includes provider and route history, access and OIDC management,
 usage and pricing, request metadata, media jobs, and health. Persisted telemetry
 excludes prompts, outputs, credentials, and uploaded content.
 
+## Documentation
+
+| Guide | Covers |
+| --- | --- |
+| [Concepts](docs/concepts.md) | Routes, provider revisions, keys, usage, and privacy |
+| [Compatibility](docs/compatibility.md) | Supported endpoints and translation limits |
+| [Deployment](docs/deployment.md) | Production topology, secrets, and capacity |
+| [Configuration](docs/configuration.md) | Environment variables and CLI settings |
+| [Operations](docs/operations.md) | Monitoring, recovery, and upgrades |
+| [Production contracts](docs/production-guarantees.md) | Guarantees, assumptions, and qualification limits |
+| [Contributing](CONTRIBUTING.md) | Development, checks, and releases |
+
 ## Operations
 
 Back up a drained 3.0 installation and restore into an empty database:
 
 ```sh
-OLP_BACKUP_TRAFFIC_QUIESCED=true ./scripts/backup.sh backups
-OLP_RESTORE_DATABASE_URL=postgres://... ./scripts/restore.sh backups/olp3-TIMESTAMP.dump
+OLP_DATABASE_URL=postgres://... OLP_BACKUP_TRAFFIC_QUIESCED=true ./scripts/backup.sh backups
+OLP_RESTORE_DATABASE_URL=postgres://... ./scripts/restore.sh /path/printed/by/backup.sh
 ```
 
-Backups include a checksum and manifest and preserve the installation identity.
+Pass the dump path printed by the backup script to restore. Backups include a
+checksum and manifest and preserve the installation identity.
 Retain the installation's master-key ring and authentication HMAC key separately.
 See [operations](docs/operations.md) for quiescing, recovery, and key rotation.
 

@@ -2,7 +2,7 @@
 
 Application configuration is environment-driven; each application setting
 also has a CLI flag in `olp <subcommand> --help`. Logging uses `RUST_LOG`. The
-source of truth is `src/bootstrap/cli/config.rs`. Secrets are file
+source of truth is `src/process/cli/config.rs`. Secrets are file
 paths, never inline values.
 
 ## Runtime variables
@@ -114,9 +114,9 @@ unavailable.
 | `OLP_OTLP_HEADERS_FILE` | traced `all`, `gateway`, or `control` | Optional JSON object of OTLP exporter headers. |
 
 Generate and rotate these through
-[`deploy/secrets/README.md`](../deploy/secrets/README.md). Keep the HMAC key
-bytes when migrating from the old filename; replacing them invalidates stored
-API-key and bootstrap-token digests.
+[`deploy/secrets/README.md`](../deploy/secrets/README.md). Preserve the HMAC key
+when restoring an installation; replacing it invalidates stored API-key and
+bootstrap-token digests.
 
 ## Compose-only variables
 
@@ -185,18 +185,15 @@ which keeps the public-only behaviour.
   before DNS, on every management write.
 
 A plain-HTTP endpoint on a private literal address needs both lists: the host
-in the HTTP allowlist and the address inside an allowed CIDR. Both `serve`
-modes and `doctor` accept the settings; startup logs a warning whenever either
-list is non-empty. The allowlists never relax OIDC issuer or Vertex token
+in the HTTP allowlist and the address inside an allowed CIDR. The `all`,
+`gateway`, `control`, and `doctor` commands accept the settings; startup logs a
+warning whenever either list is non-empty. The allowlists never relax OIDC issuer or Vertex token
 endpoint checks.
 
 ## Test and harness variables
 
-Never set the test escape hatches in production; these require the exact value
-`test-only`:
-
-- `OLP_ALLOW_INSECURE_OIDC_FOR_TESTS` permits HTTP OIDC issuers.
-- `OLP_ALLOW_PARTIAL_MIGRATIONS_FOR_TESTS` builds N-1 migration fixtures.
+`OLP_ALLOW_INSECURE_OIDC_FOR_TESTS=test-only` permits HTTP OIDC issuers in
+debug builds. Never set it in production; release builds reject it.
 
 The e2e and console integration harnesses point providers at loopback mock
 upstreams through the ordinary egress allowlists
@@ -207,7 +204,7 @@ compiled-in escape hatch.
 Script and harness families are intentionally not runtime settings:
 `OLP_TEST_DATABASE_*`, optional `OLP_VALKEY_URL`, and `OLP_CONSOLE_E2E_*`
 support local suites; `OLP_E2E_*` supports the HA contract harness;
-`OLP_REHEARSAL_*`, `OLP_BACKUP_*`, `OLP_RESTORE_*`, `OLP_PG_*`, and `OLP_PSQL`
+`OLP_BACKUP_*`, `OLP_RESTORE_*`, `OLP_PG_*`, and `OLP_PSQL`
 support operations scripts; `OLP_SDK_SMOKE_*` supports SDK smoke; and
 `OLP_LIVE_*`, `OLP_VERTEX_LIVE_*`, `OLP_AZURE_OPENAI_LIVE_*`, and
 `OLP_BEDROCK_LIVE_*` opt into live-provider tests. See

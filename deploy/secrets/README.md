@@ -54,9 +54,8 @@ rewritten and verified:
 
 Add the new key and restart every replica, select it as active and restart
 again, then run `olp master-key reencrypt` and
-`olp master-key verify-retirement --version 1`. Follow the
-[operations rotation procedure](../../docs/operations.md#master-key-rotation)
-before removing a key.
+`olp master-key verify-retirement --version 1`. Remove the old key only after
+retirement verification succeeds.
 
 ## File-backed connectors
 
@@ -66,12 +65,13 @@ read-only JSON file; every `provider_id` must match the active runtime. Start
 from [`deploy/connectors.example.json`](../connectors.example.json); unknown
 fields are rejected.
 
-| Array key | Fields |
-|---|---|
-| `openai` | Required `provider_id` and `credential_file`; optional `base_url` |
-| `azure_openai` | `provider_id`, `endpoint`, `deployment`, `api_version`, `credential_file` |
-| `vertex` | Required `provider_id`, `project`, `location`, and `model`; optional `auth_mode` defaults to `adc`, which must omit `credential_file`; `service_account` requires it |
-| `bedrock` | Required `provider_id` and `region`; optional `auth_mode` defaults to `default_chain`, which must omit `credential_file`; `static` requires it |
+The top-level `providers` array contains entries with `provider_id`, a nested
+`configuration` matching the management API, and an optional `credential_file`.
+Vertex entries also select a probe `model`. Authentication mode is explicit:
+Vertex `adc` and Bedrock `default_chain` omit stored credentials;
+`service_account` and `static` require them. Separate vendor arrays are not
+accepted by 3.0. See the
+[mounted connector reference](../../docs/configuration.md#mounted-connectors).
 
 Mount the configuration and credential files read-only (`0600` for credentials).
 Prefer workload identity. A static Bedrock file is:

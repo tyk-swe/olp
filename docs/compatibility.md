@@ -1,20 +1,15 @@
 # Provider compatibility
 
-OpenLLMProxy accepts requests on three client surfaces — OpenAI, Anthropic,
-and Gemini — and forwards them to whichever provider a route selects. The two
-choices are independent: an Anthropic SDK may be served by a Bedrock provider,
-and an OpenAI SDK by Gemini. This page records which combinations exist, which
-of them are a straight pass-through, and what a client loses when the gateway
-has to re-encode its request for a provider that speaks a different protocol.
-
-Routes, slugs, providers, and certification are explained in
-[`concepts.md`](concepts.md); this page assumes them.
+OpenLLMProxy accepts OpenAI, Anthropic, and Gemini client protocols. A route
+can select a provider using the same protocol or translate to another supported
+protocol. The tables below show supported combinations; translation limits
+follow. See [concepts](concepts.md) for routes and certification.
 
 ## Legend
 
 | Cell | Meaning |
 |---|---|
-| `native` | The provider speaks this surface's protocol. The request is forwarded on it and nothing is re-encoded. |
+| `native` | The provider speaks this surface's protocol. Protocol-specific fields are preserved subject to gateway validation and model rewriting. |
 | `translated` | The request is decoded into the canonical model and re-encoded for the provider. Some fields are dropped and some are refused — see the notes below. |
 | `—` | Refused. The tuple can never be certified, so it can never be activated on a route, and the gateway rejects the request. |
 | `gateway` | Answered by the gateway from the configured routes. Model listing is never proxied to a provider, so it does not depend on the provider kind. |
@@ -34,7 +29,6 @@ certification policy lives in `src/providers/connectors/certification.rs`.
 The conformance corpus and SDK suites exercise these behaviors.
 
 ## Surfaces and operations
-
 
 ### OpenAI surface
 
@@ -71,23 +65,16 @@ Use a base URL ending in `/v1` for native OpenAI SDK requests.
 
 ### Gemini surface
 
-Every Gemini route is served under both `/gemini/v1` and
-`/gemini/v1beta`; the table lists each version because a client
-picks one in its base URL.
+Gemini endpoints are served under both `/gemini/v1` and `/gemini/v1beta`.
+Replace `{version}` below with `v1` or `v1beta`.
 
 | Endpoint | Operation | openai | anthropic | gemini | vertex_ai | bedrock | azure_openai | openai_compatible |
 |---|---|---|---|---|---|---|---|---|
-| `GET /gemini/v1/models` | model_list | gateway | gateway | gateway | gateway | gateway | gateway | gateway |
-| `GET /gemini/v1/models/{model}` | model_get | gateway | gateway | gateway | gateway | gateway | gateway | gateway |
-| `POST /gemini/v1/models/{model}:generateContent` | generation | translated | translated | native | native | translated | translated | — |
-| `POST /gemini/v1/models/{model}:streamGenerateContent` | generation | translated | translated | native | native | translated | translated | — |
-| `POST /gemini/v1/models/{model}:countTokens` | token_count | translated | translated | native | native | translated | translated | — |
-| `GET /gemini/v1beta/models` | model_list | gateway | gateway | gateway | gateway | gateway | gateway | gateway |
-| `GET /gemini/v1beta/models/{model}` | model_get | gateway | gateway | gateway | gateway | gateway | gateway | gateway |
-| `POST /gemini/v1beta/models/{model}:generateContent` | generation | translated | translated | native | native | translated | translated | — |
-| `POST /gemini/v1beta/models/{model}:streamGenerateContent` | generation | translated | translated | native | native | translated | translated | — |
-| `POST /gemini/v1beta/models/{model}:countTokens` | token_count | translated | translated | native | native | translated | translated | — |
-
+| `GET /gemini/{version}/models` | model_list | gateway | gateway | gateway | gateway | gateway | gateway | gateway |
+| `GET /gemini/{version}/models/{model}` | model_get | gateway | gateway | gateway | gateway | gateway | gateway | gateway |
+| `POST /gemini/{version}/models/{model}:generateContent` | generation | translated | translated | native | native | translated | translated | — |
+| `POST /gemini/{version}/models/{model}:streamGenerateContent` | generation | translated | translated | native | native | translated | translated | — |
+| `POST /gemini/{version}/models/{model}:countTokens` | token_count | translated | translated | native | native | translated | translated | — |
 
 ## What translation drops or refuses
 
@@ -96,33 +83,21 @@ semantics: when a request carries something the target protocol cannot express,
 the attempt fails with a protocol error rather than being quietly downgraded.
 The exceptions are noted as drops.
 
-Vendor-specific fields the canonical model has no slot for are neither dropped
-nor refused on the way in — they are preserved as source extensions and
-replayed when the provider is native. The fixtures in
-`tests/fixtures/protocols/` pin that behaviour:
-`tests/fixtures/protocols/anthropic-messages-request.json` and its
-`tests/fixtures/protocols/anthropic-messages-request.expected.json` show
-`cache_control`, an unknown content-part field, and top-level `metadata`
-surviving as extensions, and
-`tests/fixtures/protocols/gemini-generate-content-request.json` with
-`tests/fixtures/protocols/gemini-generate-content-request.expected.json` does
-the same for `topK` and `safetySettings`. Cross-surface extensions are the
-drop: a request routed to a provider that cannot carry them is refused, but a
-response or stream already in flight cannot renegotiate, so they are dropped
-there instead — see `src/protocols/anthropic/client_stream.rs`
-and `src/protocols/gemini/client_stream.rs`.
+Unknown vendor fields are preserved as source extensions and replayed for
+native providers. Cross-protocol requests carrying unsupported extensions are
+refused; unsupported response and stream extensions are dropped. The Anthropic
+and Gemini request fixtures in `tests/fixtures/protocols/` cover preservation
+of fields such as `cache_control`, `metadata`, `topK`, and `safetySettings`.
 
-`tests/fixtures/protocols/selected-operation-families.json` is the coverage
-floor: every operation family on every surface has a golden decode case, so a
-new operation cannot reach this table without one. `tests/conformance` remains
-the source of truth for all of it — the prose below only summarises what those
-suites already enforce.
+`tests/fixtures/protocols/selected-operation-families.json` covers every operation
+family and surface. Keep these tables aligned with `tests/conformance/` when
+semantics change.
 
 ### Anthropic providers
 
 Structured output is the one shared contract Anthropic opts out of. The
 exemption `NO_ANTHROPIC_STRUCTURED_OUTPUT` in
-`tests/conformance/tests/conformance/provider_connectors/matrix.rs` records
+`tests/conformance/provider_connectors/matrix.rs` records
 why: the canonical encoder rejects `response_format` rather than advertising
 support it does not have. Cached-input usage, provider request IDs, media
 parts, and oversized-response bounds are all held to the shared contract.
@@ -161,7 +136,7 @@ a pass-through.
 ### Bedrock providers
 
 Bedrock translates on every surface and carries the most exemptions. The
-constants in `tests/conformance/tests/conformance/provider_connectors/matrix.rs`
+constants in `tests/conformance/provider_connectors/matrix.rs`
 name each one: `NO_BEDROCK_STRUCTURED_OUTPUT` (Converse rejects non-text
 response formats), `NO_BEDROCK_CACHED_USAGE` (the supported Converse token
 usage model has no cached-input field, so cached-token accounting is
@@ -188,10 +163,8 @@ too. `src/providers/bedrock/transport.rs` adds the
 unary-only rule for token counting, the asynchronous-mode refusal for
 generation, and validation of the model ID or ARN.
 
-`docs/providers/bedrock.md` documents the connector itself: the AWS SDK
-clients it uses, the two credential modes, why SDK-level retries are disabled
-in favour of the engine's own failover, and the deadlines applied to unary and
-streaming attempts.
+See the [Bedrock connector guide](providers/bedrock.md) for authentication,
+SDK retry policy, deadlines, and live tests.
 
 ### OpenAI-compatible and Azure OpenAI providers
 
@@ -201,9 +174,8 @@ for generation, embeddings, token counting, and moderation on the OpenAI
 surface, so the other surfaces and every media operation are refused. Azure
 OpenAI can be certified for the same four operations, but on any surface, so it
 appears as `translated` on the Anthropic and Gemini surfaces and `—` for the
-media, image, audio, and video operations. Those rules are one match statement
-in `src/providers/factory/certification.rs`, which is also
-what the table above reads, so the two cannot disagree.
+media, image, audio, and video operations. Certification eligibility is defined in
+`src/providers/connectors/certification.rs`; update this table when it changes.
 
 ## Qualification records
 

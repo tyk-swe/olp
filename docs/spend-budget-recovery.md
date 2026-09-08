@@ -38,19 +38,16 @@ proof that the leader successfully reconciled the current window. If a normal
 reconstruction exceeds the pass deadline, address the scan/application load
 before enabling budgeted traffic; repeated timeouts are not successful repair.
 
-## Applying this pre-merge correction
+## Recovery limits
 
-This correction changes the backfill in unreleased migration 0049. Regenerate
-SQLx metadata against a fresh disposable development database, then run the
-PostgreSQL/Valkey suites and real-binary contract/HA tests. Do not modify
-`_sqlx_migrations`, suppress checksum validation, or drop a persistent database
-to apply the patch. An installation that has already applied the old 0049
-needs a separately reviewed forward migration and controlled data repair.
-The monotonic runtime reconciler intentionally does not lower previously
-inflated, otherwise valid counters.
+The reconciler does not lower inflated but otherwise valid counters. Correcting
+those requires a reviewed data repair; do not edit migration history, suppress
+checksum validation, or reset counters to zero. The 3.0 schema starts at
+`migrations/0001_initial.sql` and requires a fresh installation. Future schema
+changes use forward-only migrations; see [Contributing](../CONTRIBUTING.md).
 
-During rollout, do not allow older gateway binaries that initialize missing
-counters to zero to continue serving budgeted traffic. Resume budgeted traffic
-after all serving gateways use the corrected admission code and authoritative
-initialization is healthy. In-flight overshoot and zero accrual for unpriced
-attempts remain unchanged; these budgets are not provider-side prepaid quotas.
+Resume budgeted traffic after authoritative initialization and reconciliation
+are healthy. Concurrent admitted work may exceed a budget, and unpriced attempts
+accrue no cost. See [production contracts](production-guarantees.md) for these
+limits and [operations](operations.md#spend-budget-reconciliation) for incident
+steps.

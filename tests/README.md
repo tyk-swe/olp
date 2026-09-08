@@ -7,11 +7,11 @@ Add meaningful cases without replacing valid expectations.
 
 `make integration` starts disposable PostgreSQL and Valkey services, runs the
 persistence and HTTP suites, real-process contracts and HA recovery with
-Toxiproxy dependency outages, official
-JavaScript SDK checks, then one Chromium journey suite. The process suites
-share `contract/harness`; the browser uses the same services and starts Rust
-behind Vite to exercise the development origin, setup, provider activation,
-routing, inference, history, OIDC, and conflicts. Each installation has its own
+Toxiproxy dependency outages, official JavaScript SDK checks, then Chromium
+journeys against packaged and development origins, including replacement
+restore. The process suites share `contract/harness`; the browser uses the same
+services to exercise setup, provider activation, routing, inference, history,
+OIDC, and conflicts. Each installation has its own
 database and Valkey namespace.
 
 For a focused run after installing dependencies:

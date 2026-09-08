@@ -33,6 +33,6 @@ Ignored live tests use the default AWS credential chain:
 ```sh
 OLP_BEDROCK_LIVE_REGION=us-east-1 \
 OLP_BEDROCK_LIVE_MODEL=amazon.nova-micro-v1:0 \
-cargo test --locked --all-features --test system \
-  live_provider -- --ignored
+cargo test --locked --all-features --lib \
+  providers::bedrock::transport::tests::live_provider -- --ignored
 ```

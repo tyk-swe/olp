@@ -1,67 +1,59 @@
 # OpenLLMProxy console
 
-The console is a client-only SvelteKit application served as static assets by
-OpenLLMProxy. Its build output is `build/` with `index.html` as the SPA
-fallback. Use Node.js 24.15 or newer within the 24.x line (or Node.js 26+) and
-pnpm 11; repository-wide setup is in [`../CONTRIBUTING.md`](../CONTRIBUTING.md).
+The console is a client-only SvelteKit application. Rust serves its static
+`build/` output with `index.html` as the SPA fallback. See
+[CONTRIBUTING.md](../CONTRIBUTING.md) for the toolchain and repository setup.
 
 ## Local development
 
+Run from the repository root:
+
 ```sh
-pnpm install --frozen-lockfile
-pnpm dev
+make dev
 ```
 
-`pnpm dev` serves only the UI. There is no API proxy in `vite.config.ts`, so
-API-backed pages remain empty/error states unless a Rust server serves the
-production build. For full-stack work, run `pnpm build` and `cargo run -p olp
--- all` with `OLP_CONSOLE_DIR=console/build`, or use the root Compose quick
-start.
+Open http://localhost:5173 and use `.local/dev/bootstrap-token` to create the
+first owner. Vite proxies API, OIDC callback, and inference requests to Rust
+on port 8081, preserving the browser origin and cookies. Console edits hot
+reload; restart `make dev` after Rust changes.
+
+For an already running backend, `pnpm --dir console dev` starts Vite alone.
+Set `OLP_DEV_API_ORIGIN` to override its default `http://127.0.0.1:8081` target.
 
 ## Commands
 
-| Command                 | Purpose                                             |
-| ----------------------- | --------------------------------------------------- |
-| `pnpm verify`           | API drift, tests, lint, types, and build            |
-| `pnpm test:e2e`         | Chromium, Firefox, WebKit, and mobile browser tests |
-| `pnpm test:integration` | Production build through the Rust server            |
-| `pnpm screenshots`      | Regenerate `../docs/assets/screenshots/`            |
+Run these from the repository root after `make setup`:
 
-Unit tests run under `TZ=America/New_York`, a zone with a nonzero UTC offset
-and daylight saving, so local-time formatting is asserted against literal
-instants that a UTC-only machine cannot accidentally satisfy.
+| Command                     | Purpose                                               |
+| --------------------------- | ----------------------------------------------------- |
+| `pnpm --dir console verify` | Formatting, Svelte/type checks, ESLint, and Vitest    |
+| `pnpm --dir console test`   | Unit and component tests                              |
+| `pnpm --dir console build`  | Static assets and asset manifest                      |
+| `make api`                  | Generate management OpenAPI and the TypeScript client |
+| `make check`                | Required Rust and console checks                      |
+| `make integration`          | Service suites and Chromium journeys                  |
 
-Management requests use the generated `openapi-fetch` client. After changing
-`../openapi/management.json`, run `pnpm api:generate`; `pnpm api:check` fails
-when the checked-in TypeScript schema is stale. Never hand-edit
-`src/lib/api/schema.d.ts`.
+Management requests use the generated `openapi-fetch` client. Update the Rust
+handler annotations and route registration, then run `make api`.
+`openapi/management.json` and `src/lib/api/schema.d.ts` are ignored outputs;
+do not hand-edit them.
 
-## Layout and boundaries
+## Feature ownership
 
-`src/lib/features/` contains independent gateway, access, operations, and
-settings slices. ESLint rejects cross-slice imports; put shared code in a
-neutral `$lib` module and keep `src/routes/(console)/` files thin. The
-TypeScript recommended rules apply to `<script lang="ts">` blocks as well as
-`.ts` modules, so an unused import or local in a component fails lint;
-`prefer-const` is off there because runes declare their bindings with `let`.
-`tsconfig.json` sets `noUnusedLocals` and `noUnusedParameters`. The console
-must remain a client-only `adapter-static` application: do not add server
-routes, server hooks, `lib/server/`, or a production Node adapter.
+`src/lib/features/` groups provider, route, access, settings, inference,
+runtime, usage, and media workflows. Keep route components thin and shared UI
+in `$lib/components/`; see the [architecture map](../docs/architecture.md).
+Keep the application client-only: do not add server routes, server hooks,
+`lib/server/`, or a production Node adapter.
 
-## Integration environment
+## Testing
 
-`pnpm test:integration` starts a complete Rust control/gateway/worker process,
-uses a loopback Azure OpenAI provider, and checks OpenAI, Anthropic, Gemini,
-and persisted telemetry. Provide a disposable PostgreSQL URL in
-`OLP_CONSOLE_E2E_DATABASE_URL`, an isolated `OLP_VALKEY_URL`, and file-backed
-`OLP_CONSOLE_E2E_MASTER_KEY_FILE`, `OLP_CONSOLE_E2E_AUTH_HMAC_KEY_FILE`, and
-`OLP_CONSOLE_E2E_BOOTSTRAP_TOKEN_FILE`. Set `OLP_CONSOLE_E2E_BIN` to a debug
-`olp` built with `--features test-util` to skip the harness build. The harness
-refuses a Valkey database containing existing keys because stale stream events
-would invalidate telemetry assertions.
+Vitest runs under `TZ=America/New_York` to exercise local-time formatting and
+daylight-saving behavior. Component tests use jsdom and browser exports.
 
-## Screenshots
-
-`pnpm screenshots` captures mocked API responses; no backend is required.
-Commit regenerated PNGs when the UI changes visibly. The root
-[`README.md`](../README.md) is the index for product screenshots and links.
+`make integration` provisions disposable services and runs Chromium journeys
+against both the packaged Rust origin and the Vite development origin,
+including replacement restore. The suite covers setup, provider activation,
+routing, inference, history, OIDC, and edit conflicts. It supplies the database,
+Valkey, and file-backed secrets required by `pnpm --dir console test:e2e`.
+See [tests/README.md](../tests/README.md) for focused suites.

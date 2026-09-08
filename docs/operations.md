@@ -187,10 +187,12 @@ certification timestamp before activation.
 
 For a production recovery point:
 
-1. Stop new inference admission, leave workers running, and wait for zero
-   pending acknowledgements and zero Stream lag.
+1. Stop new inference admission and control writes, leave workers running,
+   and wait for admitted work, pending acknowledgements, and Stream lag to
+   drain. Keep traffic fenced until the backup finishes.
 2. On an encrypted volume with PostgreSQL 18 client, `jq`, and GNU `sha256sum`,
-   run `scripts/backup.sh` with `OLP_BACKUP_TRAFFIC_QUIESCED=true`.
+   run `scripts/backup.sh` with `OLP_DATABASE_URL` and
+   `OLP_BACKUP_TRAFFIC_QUIESCED=true`.
 
 The script requires a zero, at-most-30-second-old durable checkpoint and an
 explicit quiescence assertion. It exports one PostgreSQL snapshot and creates
@@ -202,8 +204,9 @@ provider/OIDC credentials. Keep master-key rings and authentication HMAC files
 in the secret manager and back them up separately. Retain historical master-key
 versions while records still reference them.
 
-Run `scripts/restore.sh BACKUP` with `OLP_RESTORE_DATABASE_URL` identifying an
-empty isolated database. The command validates the 3.0 manifest and checksum,
+Run `scripts/restore.sh BACKUP` using the dump path printed by the backup
+script, with `OLP_RESTORE_DATABASE_URL` identifying an empty isolated database.
+The command validates the 3.0 manifest and checksum,
 restores in one transaction, and checks the restored identity, migrations, and
 generation. Start the restored installation with its original keys and a fresh
 Valkey service. A restored installation retains its namespace; run it as a

@@ -13,7 +13,7 @@ OpenLLMProxy 3.0 is one Rust 2024 package and a SvelteKit console. Install the R
 | `make build` | Build the release binary and static console |
 | `make fmt` | Format Rust and console source |
 
-`check`, `integration`, and `dependencies` are the CI qualification jobs; configure repository branch protections to require them. Run integration locally when changing persistence, inference, authentication, runtime publication, distributed limits, or browser journeys. There is no SQLx metadata preparation, nextest requirement, coverage floor, or nightly toolchain in ordinary development.
+`check`, `integration`, and `dependencies` are the CI qualification jobs; configure repository branch protections to require them. Run integration locally when changing persistence, inference, authentication, runtime publication, distributed limits, or browser journeys. SQLx queries do not require offline metadata preparation.
 
 `openapi/management.json` and `console/src/lib/api/schema.d.ts` are ignored outputs. Setup, development, checking, integration, and builds use `make api`. Change the handler's `#[utoipa::path]` annotation and its feature's `utoipa_axum::routes!` registration together; generation obtains paths and schemas from the router. Do not hand-edit generated files.
 
@@ -36,7 +36,6 @@ Tests assert behavior and keep meaningful protocol fixtures. Unit tests belong b
 Use current stable dependencies and update the lockfiles through Cargo and pnpm. The JavaScript projects share one workspace and lockfile. Python/uv is only used for the optional Python SDK test: `tests/sdk-smoke-python/run.sh`.
 
 TypeScript stays on the newest 6.0 patch. The [TypeScript ESLint support range](https://typescript-eslint.io/users/dependency-versions/) excludes 7.x, and the Svelte toolchain must support the same compiler. Remove this exception when both support TypeScript 7 and the console passes `make check` and the Chromium journey. Other version exceptions require a concrete incompatibility or regression and a stated removal condition.
-
 
 ## Release evidence
 
