@@ -1,5 +1,8 @@
 use crate::limits::admission::{LimitOutagePolicy, ReloadableLimiter};
 use crate::limits::distributed::DistributedLimiter;
+use crate::process::workers::RESTART_BACKOFF_FLOOR;
+use crate::process::workers::next_restart_backoff;
+use crate::process::workers::sleep_unless_shutdown;
 use crate::settings::repository::LimitsValkeyUnavailablePolicy;
 use sqlx::PgPool;
 use std::time::Duration;
@@ -11,7 +14,7 @@ pub(crate) async fn limiter_supervisor(
     limits_namespace: String,
     mut shutdown: watch::Receiver<bool>,
 ) {
-    let mut backoff = Duration::from_millis(100);
+    let mut backoff = RESTART_BACKOFF_FLOOR;
     loop {
         if *shutdown.borrow() {
             return;
@@ -22,13 +25,8 @@ pub(crate) async fn limiter_supervisor(
                 Ok(Ok(()))
             );
             if healthy {
-                tokio::select! {
-                    changed = shutdown.changed() => {
-                        if changed.is_err() || *shutdown.borrow() {
-                            return;
-                        }
-                    }
-                    () = tokio::time::sleep(Duration::from_secs(5)) => {}
+                if !sleep_unless_shutdown(&mut shutdown, Duration::from_secs(5)).await {
+                    return;
                 }
                 continue;
             }
@@ -44,21 +42,16 @@ pub(crate) async fn limiter_supervisor(
         {
             Ok(Ok(limiter)) => {
                 reloadable_limiter.install(limiter);
-                backoff = Duration::from_millis(100);
+                backoff = RESTART_BACKOFF_FLOOR;
                 info!("Valkey limiter connection is available");
             }
             Ok(Err(error)) => warn!(%error, "Valkey limiter connection failed"),
             Err(_) => warn!("Valkey limiter connection timed out"),
         }
-        tokio::select! {
-            changed = shutdown.changed() => {
-                if changed.is_err() || *shutdown.borrow() {
-                    return;
-                }
-            }
-            () = tokio::time::sleep(backoff) => {}
+        if !sleep_unless_shutdown(&mut shutdown, backoff).await {
+            return;
         }
-        backoff = (backoff * 2).min(Duration::from_secs(5));
+        backoff = next_restart_backoff(backoff);
     }
 }
 

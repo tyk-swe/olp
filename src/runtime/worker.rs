@@ -3,6 +3,9 @@ use crate::limits::valkey::RuntimeHintPublisher;
 use crate::observability::workers::WorkerTask;
 use crate::observability::workers::WorkerTaskCheckpointOutcome;
 use crate::process::error::AppResult;
+use crate::process::workers::RESTART_BACKOFF_FLOOR;
+use crate::process::workers::next_restart_backoff;
+use crate::process::workers::sleep_unless_shutdown;
 use crate::runtime::publication::outbox::RuntimeOutboxLeader;
 use crate::runtime::publication::outbox::RuntimeOutboxLeadershipProbe;
 use sqlx::PgPool;
@@ -17,7 +20,7 @@ pub(crate) async fn outbox_supervisor(
     runtime_hint_channel: String,
     mut shutdown: watch::Receiver<bool>,
 ) {
-    let mut backoff = Duration::from_millis(100);
+    let mut backoff = RESTART_BACKOFF_FLOOR;
     loop {
         if *shutdown.borrow() {
             return;
@@ -46,15 +49,10 @@ pub(crate) async fn outbox_supervisor(
                 error!(%error, "outbox worker failed; restarting");
             }
         }
-        tokio::select! {
-            changed = shutdown.changed() => {
-                if changed.is_err() || *shutdown.borrow() {
-                    return;
-                }
-            }
-            () = tokio::time::sleep(backoff) => {}
+        if !sleep_unless_shutdown(&mut shutdown, backoff).await {
+            return;
         }
-        backoff = (backoff * 2).min(Duration::from_secs(5));
+        backoff = next_restart_backoff(backoff);
     }
 }
 

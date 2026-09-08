@@ -9,6 +9,9 @@ use crate::inference::circuit::Breaker;
 use crate::inference::transport::ProviderTransport;
 use crate::limits::valkey::RuntimeHintSubscriber;
 use crate::net::egress::EgressPolicy;
+use crate::process::workers::RESTART_BACKOFF_FLOOR;
+use crate::process::workers::next_restart_backoff;
+use crate::process::workers::sleep_unless_shutdown;
 use crate::providers::connector::ResponseLimits;
 use crate::runtime::manager::Manager;
 use crate::runtime::snapshot::Snapshot;
@@ -78,7 +81,7 @@ pub(crate) async fn runtime_hint_supervisor(
     source: RuntimeHintSource,
     mut shutdown: watch::Receiver<bool>,
 ) {
-    let mut backoff = Duration::from_millis(100);
+    let mut backoff = RESTART_BACKOFF_FLOOR;
     loop {
         if *shutdown.borrow() {
             return;
@@ -86,7 +89,7 @@ pub(crate) async fn runtime_hint_supervisor(
         let result: AppResult<()> = async {
             let mut subscriber =
                 RuntimeHintSubscriber::connect(&source.url, &source.channel).await?;
-            backoff = Duration::from_millis(100);
+            backoff = RESTART_BACKOFF_FLOOR;
             loop {
                 tokio::select! {
                     changed = shutdown.changed() => {
@@ -115,15 +118,10 @@ pub(crate) async fn runtime_hint_supervisor(
         if let Err(error) = result {
             warn!(%error, "runtime hint subscriber failed; polling remains active");
         }
-        tokio::select! {
-            changed = shutdown.changed() => {
-                if changed.is_err() || *shutdown.borrow() {
-                    return;
-                }
-            }
-            () = tokio::time::sleep(backoff) => {}
+        if !sleep_unless_shutdown(&mut shutdown, backoff).await {
+            return;
         }
-        backoff = (backoff * 2).min(Duration::from_secs(5));
+        backoff = next_restart_backoff(backoff);
     }
 }
 
