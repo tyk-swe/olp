@@ -11,71 +11,35 @@ on:
 permissions:
   contents: read
 jobs:
-  openai:
-    if: github.ref == 'refs/heads/main' && inputs.provider == 'openai'
+  live:
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     environment: live-providers
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - run: rustup show active-toolchain && cargo --version && rustc --version
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-      - env:
+      - if: inputs.provider == 'openai'
+        env:
           OLP_LIVE_OPENAI_API_KEY: ${{ secrets.OLP_LIVE_OPENAI_API_KEY }}
-        run: |
-          cargo test --locked --all-features --lib "providers::openai::" -- --ignored
-  anthropic:
-    if: github.ref == 'refs/heads/main' && inputs.provider == 'anthropic'
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    environment: live-providers
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - run: rustup show active-toolchain && cargo --version && rustc --version
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-      - env:
+        run: cargo test --locked --all-features --lib "providers::openai::" -- --ignored
+      - if: inputs.provider == 'anthropic'
+        env:
           OLP_LIVE_ANTHROPIC_API_KEY: ${{ secrets.OLP_LIVE_ANTHROPIC_API_KEY }}
-        run: |
-          cargo test --locked --all-features --lib "providers::anthropic::" -- --ignored
-  gemini:
-    if: github.ref == 'refs/heads/main' && inputs.provider == 'gemini'
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    environment: live-providers
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - run: rustup show active-toolchain && cargo --version && rustc --version
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-      - env:
+        run: cargo test --locked --all-features --lib "providers::anthropic::" -- --ignored
+      - if: inputs.provider == 'gemini'
+        env:
           OLP_LIVE_GEMINI_API_KEY: ${{ secrets.OLP_LIVE_GEMINI_API_KEY }}
-        run: |
-          cargo test --locked --all-features --lib "providers::gemini::" -- --ignored
-  azure_openai:
-    if: github.ref == 'refs/heads/main' && inputs.provider == 'azure_openai'
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    environment: live-providers
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - run: rustup show active-toolchain && cargo --version && rustc --version
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-      - env:
+        run: cargo test --locked --all-features --lib "providers::gemini::" -- --ignored
+      - if: inputs.provider == 'azure_openai'
+        env:
           OLP_AZURE_OPENAI_LIVE_ENDPOINT: ${{ vars.OLP_AZURE_OPENAI_LIVE_ENDPOINT }}
           OLP_AZURE_OPENAI_LIVE_DEPLOYMENT: ${{ vars.OLP_AZURE_OPENAI_LIVE_DEPLOYMENT }}
           OLP_AZURE_OPENAI_LIVE_API_VERSION: ${{ vars.OLP_AZURE_OPENAI_LIVE_API_VERSION }}
           OLP_AZURE_OPENAI_LIVE_API_KEY: ${{ secrets.OLP_AZURE_OPENAI_LIVE_API_KEY }}
-        run: |
-          cargo test --locked --all-features --lib "providers::azure_openai::" -- --ignored
-  vertex:
-    if: github.ref == 'refs/heads/main' && inputs.provider == 'vertex'
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    environment: live-providers
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - run: rustup show active-toolchain && cargo --version && rustc --version
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-      - env:
+        run: cargo test --locked --all-features --lib "providers::azure_openai::" -- --ignored
+      - if: inputs.provider == 'vertex'
+        env:
           OLP_VERTEX_LIVE_PROJECT: ${{ vars.OLP_VERTEX_LIVE_PROJECT }}
           OLP_VERTEX_LIVE_LOCATION: ${{ vars.OLP_VERTEX_LIVE_LOCATION }}
           OLP_VERTEX_LIVE_MODEL: ${{ vars.OLP_VERTEX_LIVE_MODEL }}
@@ -86,20 +50,11 @@ jobs:
           printf '%s' "$OLP_GOOGLE_CREDENTIALS_JSON" > "$GOOGLE_APPLICATION_CREDENTIALS"
           trap 'rm -f "$GOOGLE_APPLICATION_CREDENTIALS"' EXIT
           cargo test --locked --all-features --lib "providers::vertex::" -- --ignored
-  bedrock:
-    if: github.ref == 'refs/heads/main' && inputs.provider == 'bedrock'
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    environment: live-providers
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - run: rustup show active-toolchain && cargo --version && rustc --version
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-      - env:
+      - if: inputs.provider == 'bedrock'
+        env:
           OLP_BEDROCK_LIVE_REGION: ${{ vars.OLP_BEDROCK_LIVE_REGION }}
           OLP_BEDROCK_LIVE_MODEL: ${{ vars.OLP_BEDROCK_LIVE_MODEL }}
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           AWS_SESSION_TOKEN: ${{ secrets.AWS_SESSION_TOKEN }}
-        run: |
-          cargo test --locked --all-features --lib "providers::bedrock::" -- --ignored
+        run: cargo test --locked --all-features --lib "providers::bedrock::" -- --ignored

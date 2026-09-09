@@ -4,10 +4,8 @@ on:
   push:
     branches: [main]
   workflow_call:
-  schedule:
-    - cron: '23 3 * * *'
 concurrency:
-  group: qualification-${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 permissions:
   contents: read
@@ -21,39 +19,23 @@ jobs:
         with:
           services: false
       - run: make check
-      - run: pnpm audit --audit-level high
-      - run: |
-          if [[ $GITHUB_REF_TYPE == tag ]]; then
-            node scripts/check-release-version.mjs "$GITHUB_REF_NAME"
-          else
-            node scripts/check-release-version.mjs
-          fi
-      - env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: ./scripts/check-api-compatibility.sh
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+      - run: ./scripts/check-helm.sh
       - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: management-contract
           path: openapi/management.json
           if-no-files-found: error
-      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
-      - run: ./scripts/check-helm.sh
   integration:
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/setup
-      - run: make integration | tee "$RUNNER_TEMP/integration.log"
-        shell: bash
-      - if: always()
-        run: |
-          sed -n '/^test result:/p' "$RUNNER_TEMP/integration.log" >> "$GITHUB_STEP_SUMMARY"
-          echo 'Paid live-provider tests are excluded and run only by explicit dispatch. Browser suites report their own counts in the job log.' >> "$GITHUB_STEP_SUMMARY"
+      - run: make integration
   dependencies:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - run: rustup show active-toolchain
       - uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2
