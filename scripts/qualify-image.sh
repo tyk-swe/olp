@@ -9,8 +9,6 @@ docker pull --platform "${OLP_IMAGE_PLATFORM:?set the native image platform}" "$
 docker compose -f deploy/compose.dev.yaml up -d --wait
 export OLP_LOCAL_DIR="$PWD/.local/candidate"
 source scripts/local-env.sh
-export OLP_TEST_DATABASE_ADMIN_URL=postgres://olp:olp-local@127.0.0.1:54320/postgres
-export OLP_TEST_DATABASE_URL_PREFIX=postgres://olp:olp-local@127.0.0.1:54320
 export OLP_TEST_RUN_TOKEN="$(openssl rand -hex 5)"
 ./scripts/smoke-image-services.sh "$OLP_CONSOLE_E2E_IMAGE"
 export OLP_CONSOLE_E2E_PACKAGED=true

@@ -4,8 +4,6 @@ cd "$(dirname "$0")/.."
 docker compose -f deploy/compose.dev.yaml --profile integration up -d --wait
 export OLP_LOCAL_DIR="$PWD/.local/integration"
 source scripts/local-env.sh
-export OLP_TEST_DATABASE_ADMIN_URL=postgres://olp:olp-local@127.0.0.1:54320/postgres
-export OLP_TEST_DATABASE_URL_PREFIX=postgres://olp:olp-local@127.0.0.1:54320
 export OLP_TEST_DATABASE_OWNER=olp
 export OLP_TEST_RUN_TOKEN="$(openssl rand -hex 5)"
 export OLP_TEST_VALKEY_URL="$OLP_VALKEY_URL"

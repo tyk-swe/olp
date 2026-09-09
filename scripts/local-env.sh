@@ -23,6 +23,8 @@ for (const [name, json] of [
 }
 JS
 export OLP_DATABASE_URL="${OLP_DATABASE_URL:-postgres://olp:olp-local@127.0.0.1:54320/olp_dev}"
+export OLP_TEST_DATABASE_URL_PREFIX="${OLP_TEST_DATABASE_URL_PREFIX:-postgres://olp:olp-local@127.0.0.1:54320}"
+export OLP_TEST_DATABASE_ADMIN_URL="${OLP_TEST_DATABASE_ADMIN_URL:-$OLP_TEST_DATABASE_URL_PREFIX/postgres}"
 export OLP_VALKEY_URL="${OLP_VALKEY_URL:-redis://127.0.0.1:63790/0}"
 export OLP_PUBLIC_ORIGIN="${OLP_PUBLIC_ORIGIN:-http://localhost:5173}"
 export OLP_LISTEN_ADDR="${OLP_LISTEN_ADDR:-127.0.0.1:8081}"
