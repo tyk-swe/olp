@@ -85,18 +85,21 @@
     }
   }
 
+  async function loadCapabilities() {
+    try {
+      capabilities = await authenticationCapabilities(
+        publicAuthController.signal
+      );
+    } catch (error) {
+      if (publicAuthController.signal.aborted) return;
+      message = errorMessage(error, 'Sign-in options could not be loaded.');
+    } finally {
+      if (!publicAuthController.signal.aborted) capabilitiesLoading = false;
+    }
+  }
+
   onMount(() => {
-    void authenticationCapabilities(publicAuthController.signal)
-      .then((value) => {
-        capabilities = value;
-      })
-      .catch((error: unknown) => {
-        if (publicAuthController.signal.aborted) return;
-        message = errorMessage(error, 'Sign-in options could not be loaded.');
-      })
-      .finally(() => {
-        if (!publicAuthController.signal.aborted) capabilitiesLoading = false;
-      });
+    void loadCapabilities();
   });
 
   onDestroy(() => {

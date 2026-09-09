@@ -59,11 +59,7 @@ export default [
     }
   },
   {
-    files: [
-      'tests/e2e/**/*.ts',
-      'tests/integration/**/*.ts',
-      'tests/screenshots/**/*.ts'
-    ],
+    files: ['tests/journeys/**/*.ts'],
     rules: {
       'no-restricted-imports': [
         'error',

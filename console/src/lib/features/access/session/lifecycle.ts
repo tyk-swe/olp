@@ -11,8 +11,8 @@ import {
   isMutationRequest,
   isSessionValidationEndpoint
 } from '$lib/features/access/session/requestPolicy';
+import { abortError, errorMessage } from '$lib/api/http';
 import {
-  abortError,
   sessionIsFresh,
   unauthorizedError
 } from '$lib/features/access/session/sessionFreshness';
@@ -42,6 +42,8 @@ type PrincipalExitRequest = (signal: AbortSignal) => Promise<void>;
 type AuthenticationRequest = (
   signal: AbortSignal
 ) => Promise<AuthenticatedSession>;
+
+const SESSION_LOAD_FAILED = 'The current session could not be loaded.';
 
 export class AuthenticationLifecycle {
   private queries = new QueryPartition();
@@ -228,18 +230,13 @@ export class AuthenticationLifecycle {
         if (authenticatedSnapshot) {
           this.apply({
             type: 'validation-error',
-            error:
-              error instanceof Error
-                ? error.message
-                : 'The current session could not be loaded.'
+            error: errorMessage(error, SESSION_LOAD_FAILED)
           });
           return null;
         }
         this.gateProtectedContent(
           'unavailable',
-          error instanceof Error
-            ? error.message
-            : 'The current session could not be loaded.'
+          errorMessage(error, SESSION_LOAD_FAILED)
         );
         this.rotateAuthenticatedRequests();
         await this.queries.cancelAndClear();
@@ -415,10 +412,10 @@ export class AuthenticationLifecycle {
         return false;
       this.apply({
         type: 'principal-exit-error',
-        error:
-          error instanceof Error
-            ? error.message
-            : 'The sign-out request could not be completed.'
+        error: errorMessage(
+          error,
+          'The sign-out request could not be completed.'
+        )
       });
       throw error;
     } finally {
@@ -472,10 +469,10 @@ export class AuthenticationLifecycle {
           this.apply({
             type: 'gate',
             phase: 'unavailable',
-            error:
-              error instanceof Error
-                ? error.message
-                : 'The login destination could not be loaded.'
+            error: errorMessage(
+              error,
+              'The login destination could not be loaded.'
+            )
           });
         }
       })

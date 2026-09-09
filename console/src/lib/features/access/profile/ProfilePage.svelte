@@ -45,6 +45,13 @@
     validatePassword
   } from '$lib/features/access/profile/validation';
 
+  const SECURITY_OPERATION_FAILED =
+    'The security operation could not be completed.';
+  const IDENTITY_UNLINKED =
+    'OIDC identity unlinked. All previous sessions were revoked and this browser was rotated.';
+  const UNLINK_TARGET_MISSING =
+    'The identity selected for unlinking is missing.';
+
   let displayName = $state('');
   let displayNameError = $state('');
   let currentPassword = $state('');
@@ -146,16 +153,12 @@
           'Identity verified. Confirm before linking your OIDC identity.';
         return;
       }
-      if (!resourceId)
-        throw new Error('The identity selected for unlinking is missing.');
+      if (!resourceId) throw new Error(UNLINK_TARGET_MISSING);
       pendingIdentityAction = { purpose, resourceId };
       message =
         'Identity verified. Confirm before unlinking this OIDC identity.';
     } catch (cause) {
-      identityError = errorMessage(
-        cause,
-        'The security operation could not be completed.'
-      );
+      identityError = errorMessage(cause, SECURITY_OPERATION_FAILED);
     } finally {
       identityBusy = '';
     }
@@ -173,14 +176,10 @@
       }
       await unlinkOidcIdentity(action.resourceId);
       pendingIdentityAction = undefined;
-      message =
-        'OIDC identity unlinked. All previous sessions were revoked and this browser was rotated.';
+      message = IDENTITY_UNLINKED;
       await refreshSecurityData();
     } catch (cause) {
-      identityError = errorMessage(
-        cause,
-        'The security operation could not be completed.'
-      );
+      identityError = errorMessage(cause, SECURITY_OPERATION_FAILED);
     } finally {
       identityBusy = '';
     }
@@ -228,17 +227,12 @@
         window.location.assign(await beginOidcLink());
         return;
       }
-      if (!request.resourceId)
-        throw new Error('The identity selected for unlinking is missing.');
+      if (!request.resourceId) throw new Error(UNLINK_TARGET_MISSING);
       await unlinkOidcIdentity(request.resourceId);
-      message =
-        'OIDC identity unlinked. All previous sessions were revoked and this browser was rotated.';
+      message = IDENTITY_UNLINKED;
       await refreshSecurityData();
     } catch (cause) {
-      const detail = errorMessage(
-        cause,
-        'The security operation could not be completed.'
-      );
+      const detail = errorMessage(cause, SECURITY_OPERATION_FAILED);
       if (reauthenticationRequest) reauthenticationError = detail;
       else identityError = detail;
     } finally {
@@ -294,7 +288,7 @@
         { ...profile.data, etag: profileSync.snapshotEtag },
         { display_name: normalizedDisplayName }
       );
-      profileSync = markSaved(profileSync, updated.etag, false);
+      profileSync = markSaved(updated.etag, false);
       queryClient.setQueryData(profileKeys.current(), updated);
       message = 'Profile updated.';
     } catch (cause) {

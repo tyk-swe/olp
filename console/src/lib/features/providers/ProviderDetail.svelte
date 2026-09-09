@@ -189,7 +189,7 @@
         sync.snapshotEtag,
         buildUpdateProviderInput(editValues, providerSpec)
       );
-      sync = markSaved(sync, updated.etag, editVersion !== submittedVersion);
+      sync = markSaved(updated.etag, editVersion !== submittedVersion);
       queryClient.setQueriesData<ProviderModelPage>(
         { queryKey: providerKeys.modelsOf(current.id) },
         (page) => (page ? { ...page, provider: updated } : page)

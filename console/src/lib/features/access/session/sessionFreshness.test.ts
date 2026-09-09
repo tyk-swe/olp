@@ -1,8 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { ApiProblem } from '$lib/api/http';
+import { ApiProblem, abortError } from '$lib/api/http';
 import {
   SESSION_FRESHNESS_MS,
-  abortError,
   sessionIsFresh,
   unauthorizedError
 } from '$lib/features/access/session/sessionFreshness';

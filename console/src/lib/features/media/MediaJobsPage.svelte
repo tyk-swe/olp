@@ -74,10 +74,9 @@
     applyListSearch(listState, mediaJobUrl, '');
   }
 
-  function tone(value: string) {
-    if (['succeeded', 'deleted'].includes(value)) return 'success';
-    if (['failed', 'cancelled', 'create_ambiguous'].includes(value))
-      return 'danger';
+  function tone(state: string) {
+    if (state === 'succeeded') return 'success';
+    if (state === 'failed' || state === 'cancelled') return 'danger';
     return 'warning';
   }
 </script>
