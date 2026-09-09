@@ -23,7 +23,7 @@
     onclick={onPrevious}
     disabled={!hasPrevious}>Previous</button
   >
-  <span>Page {page}</span>
+  <span aria-live="polite" aria-atomic="true">Page {page}</span>
   <button
     class="button button-secondary"
     type="button"
@@ -35,6 +35,7 @@
 <style>
   .pagination {
     display: flex;
+    flex-wrap: wrap;
     min-height: 2.75rem;
     align-items: center;
     justify-content: flex-end;
@@ -46,5 +47,11 @@
     color: var(--foreground-muted);
     font-size: 0.75rem;
     text-align: center;
+  }
+  @media (max-width: 36rem) {
+    .pagination {
+      justify-content: space-between;
+      gap: 0.35rem;
+    }
   }
 </style>

@@ -33,8 +33,7 @@
     <p class="eyebrow">Gateway</p>
     <h1 class="page-title">Providers</h1>
     <p class="page-description">
-      Each named provider has one active credential version and explicit
-      certified capabilities.
+      Connect upstream providers, review their models, and manage activation.
     </p>
   </div>
   {#if canManage}<a
@@ -71,7 +70,13 @@
     </div>
   </section>
 {:else}
-  <div class="table-shell provider-table">
+  <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+  <div
+    class="table-shell provider-table"
+    tabindex="0"
+    role="region"
+    aria-label="Providers"
+  >
     <table class="data-table">
       <thead
         ><tr

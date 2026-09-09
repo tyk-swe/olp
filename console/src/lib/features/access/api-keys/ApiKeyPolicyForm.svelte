@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { focusFormError, focusErrorSummary } from '$lib/forms/focusError';
   import { routeKeys } from '$lib/features/routes/routeKeys';
 
   import { resolve } from '$app/paths';
@@ -65,12 +66,17 @@
       : list.filter((item) => item !== value);
   }
 
+  // Keep numeric controls as strings via oninput: bind:value on type="number"
+  // coerces zero to a number, which would be mistaken for an omitted limit.
   function numberValue(value: string) {
     return value ? Number(value) : undefined;
   }
 
   async function submit(event: SubmitEvent) {
     event.preventDefault();
+    const root =
+      (event.currentTarget as HTMLFormElement).closest('main') ??
+      (event.currentTarget as HTMLFormElement);
     if (!canManage) return;
     onClearError();
     formError = '';
@@ -83,9 +89,13 @@
       monthlyCostLimit: form.monthlyCostLimit,
       expiresAt: form.expiresAt
     });
-    if (Object.keys(errors).length) return;
+    if (Object.keys(errors).length) {
+      await focusFormError(root);
+      return;
+    }
     if (!form.scopes.length) {
       formError = 'Select at least one scope.';
+      await focusFormError(root);
       return;
     }
     const saved = await onSubmit(
@@ -93,6 +103,7 @@
       form.allowedRoutes[0]
     );
     if (saved) dirty = false;
+    else await focusFormError(root);
   }
 </script>
 
@@ -120,7 +131,13 @@
       >Cancel</a
     >{/if}
 </div>
-{#if submitError || formError}<div class="inline-problem" role="alert">
+{#if submitError || formError}<div
+    class="inline-problem"
+    role="alert"
+    tabindex="-1"
+    data-error-summary
+    use:focusErrorSummary
+  >
     {submitError || formError}
   </div>{/if}
 {#if !canManage}
@@ -131,8 +148,10 @@
   </ReadOnlyNote>
 {/if}
 
+<p class="sr-only" role="status">{busy ? 'Saving key policy…' : ''}</p>
 <form
   class="card key-form"
+  aria-busy={Boolean(busy)}
   onsubmit={submit}
   oninput={touch}
   onchange={touch}
@@ -229,11 +248,15 @@
           type="number"
           min="1"
           inputmode="numeric"
-          bind:value={form.requestsPerMinute}
+          value={form.requestsPerMinute}
+          oninput={(event) =>
+            (form.requestsPerMinute = event.currentTarget.value)}
           disabled={!canManage}
           aria-invalid={errors.requestsPerMinute ? 'true' : undefined}
-        />{#if errors.requestsPerMinute}<small class="field-error"
-            >{errors.requestsPerMinute}</small
+          aria-describedby={errors.requestsPerMinute ? 'rpm-error' : undefined}
+        />{#if errors.requestsPerMinute}<small
+            class="field-error"
+            id="rpm-error">{errors.requestsPerMinute}</small
           >{/if}
       </div>
       <div class="form-field">
@@ -242,10 +265,13 @@
           type="number"
           min="1"
           inputmode="numeric"
-          bind:value={form.tokensPerMinute}
+          value={form.tokensPerMinute}
+          oninput={(event) =>
+            (form.tokensPerMinute = event.currentTarget.value)}
           disabled={!canManage}
           aria-invalid={errors.tokensPerMinute ? 'true' : undefined}
-        />{#if errors.tokensPerMinute}<small class="field-error"
+          aria-describedby={errors.tokensPerMinute ? 'tpm-error' : undefined}
+        />{#if errors.tokensPerMinute}<small class="field-error" id="tpm-error"
             >{errors.tokensPerMinute}</small
           >{/if}
       </div>
@@ -255,11 +281,16 @@
           type="number"
           min="1"
           inputmode="numeric"
-          bind:value={form.maxConcurrency}
+          value={form.maxConcurrency}
+          oninput={(event) => (form.maxConcurrency = event.currentTarget.value)}
           disabled={!canManage}
           aria-invalid={errors.maxConcurrency ? 'true' : undefined}
-        />{#if errors.maxConcurrency}<small class="field-error"
-            >{errors.maxConcurrency}</small
+          aria-describedby={errors.maxConcurrency
+            ? 'concurrency-error'
+            : undefined}
+        />{#if errors.maxConcurrency}<small
+            class="field-error"
+            id="concurrency-error">{errors.maxConcurrency}</small
           >{/if}
       </div>
     </div>

@@ -122,7 +122,7 @@
   />
 {:else}
   <ApiKeyInventory
-    {listState}
+    bind:listState
     {notice}
     {submitError}
     {canManage}

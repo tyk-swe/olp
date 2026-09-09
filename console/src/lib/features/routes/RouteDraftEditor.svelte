@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { focusErrorSummary, focusFormError } from '$lib/forms/focusError';
   import RouteTargets from '$lib/features/routes/RouteTargets.svelte';
   import RoutePublishPanel from '$lib/features/routes/RoutePublishPanel.svelte';
   import RouteSimulation from '$lib/features/routes/RouteSimulation.svelte';
@@ -54,12 +55,21 @@
 {#if !editor.canManage}<ReadOnlyNote
     >Your role can view this route draft but not change or activate it.</ReadOnlyNote
   >{/if}
-{#if editor.errorMessage}<div class="inline-problem" role="alert">
+{#if editor.errorMessage}<div
+    class="inline-problem"
+    role="alert"
+    tabindex="-1"
+    data-error-summary
+    use:focusErrorSummary
+  >
     {editor.errorMessage}
   </div>{/if}
 {#if editor.notice}<div class="success-banner" role="status">
     {editor.notice}
   </div>{/if}
+<p class="sr-only" role="status">
+  {editor.busy ? 'Operation in progress. Please wait.' : ''}
+</p>
 <ConflictNotice
   notice={editor.concurrentNotice}
   onReload={editor.reload}
@@ -94,12 +104,14 @@
 {:else}
   <form
     class="studio"
-    onsubmit={editor.isNew
-      ? editor.create
-      : (event) => {
-          event.preventDefault();
-          if (editor.draft.data) editor.save(editor.draft.data);
-        }}
+    aria-busy={Boolean(editor.busy)}
+    onsubmit={async (event) => {
+      event.preventDefault();
+      const root = event.currentTarget.closest('main');
+      if (editor.isNew) await editor.create(event);
+      else if (editor.draft.data) await editor.save(editor.draft.data);
+      if (root) await focusFormError(root);
+    }}
   >
     <div class="studio-main">
       <section class="card editor" aria-labelledby="route-contract-heading">
@@ -109,11 +121,12 @@
           <div class="form-field full">
             <label for="route-slug">Public model slug</label><input
               id="route-slug"
+              aria-describedby="route-slug-help"
               autocomplete="off"
               bind:value={editor.slug}
               oninput={editor.touch}
               disabled={!editor.canManage}
-            /><small
+            /><small id="route-slug-help"
               >Clients send this value as their model. Direct provider/model
               addressing is unavailable.</small
             >
@@ -185,14 +198,7 @@
     font-size: 1.15rem;
     letter-spacing: -0.025em;
   }
-  .success-banner {
-    margin: 1rem 0;
-    padding: 0.85rem 1rem;
-    border: 1px solid color-mix(in srgb, var(--success) 45%, var(--border));
-    border-radius: 0.375rem;
-    background: var(--success-soft);
-    color: var(--success);
-  }
+
   .studio {
     display: grid;
     grid-template-columns: minmax(0, 1fr) 19rem;

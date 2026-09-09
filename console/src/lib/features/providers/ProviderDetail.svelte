@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { focusErrorSummary } from '$lib/forms/focusError';
   import { providerKeys } from '$lib/features/providers/providerKeys';
 
   import { guardUnsavedChanges } from '$lib/forms/unsavedChanges';
@@ -248,7 +249,12 @@
   </div>
 {/if}
 
-{#if errorMessage}<div class="inline-problem" role="alert">
+{#if errorMessage}<div
+    class="inline-problem"
+    role="alert"
+    tabindex="-1"
+    use:focusErrorSummary
+  >
     {errorMessage}
     <ProviderValidationIssues issues={validationIssues} />
   </div>{/if}

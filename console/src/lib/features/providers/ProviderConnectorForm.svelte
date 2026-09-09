@@ -51,7 +51,12 @@
   }
 </script>
 
-<form class="card editor" onsubmit={onSubmit} novalidate>
+<form
+  class="card editor"
+  aria-busy={Boolean(busy)}
+  onsubmit={onSubmit}
+  novalidate
+>
   <fieldset disabled={lockKind}>
     <legend>Choose a connector</legend>
     <div class="connector-grid">
@@ -118,13 +123,14 @@
           : 'Seed model (optional)'}</label
       ><input
         id="initial-model"
+        aria-describedby="initial-model-help"
         autocomplete="off"
         bind:value={draft.model}
         placeholder={seedModelRequired
           ? 'publishers/google/models/gemini-2.5-pro'
           : 'gpt-5.4'}
         required={seedModelRequired}
-      /><small
+      /><small id="initial-model-help"
         >{seedModelRequired
           ? 'Vertex requires a publisher model because it has no global model-list operation.'
           : 'Used for the initial connector probe; upstream discovery follows.'}</small
@@ -133,11 +139,12 @@
     {#if credentialRequired}<div class="form-field full">
         <label for="provider-secret">Credential</label><input
           id="provider-secret"
+          aria-describedby="credential-help"
           type="password"
           autocomplete="new-password"
           bind:value={draft.credential}
           required
-        /><small
+        /><small id="credential-help"
           >Sent once to this installation; never saved by the console or
           returned by the API.</small
         >
@@ -192,6 +199,10 @@
     padding: 0.8rem;
     border: 1px solid var(--border);
     border-radius: 0.375rem;
+  }
+  .connector-grid label:has(input:focus-visible) {
+    outline: 2px solid var(--focus);
+    outline-offset: 2px;
   }
   .connector-grid label.selected {
     border-color: var(--accent);

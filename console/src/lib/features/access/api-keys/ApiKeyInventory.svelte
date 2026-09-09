@@ -21,7 +21,7 @@
   import type { ApiKeyListState } from '$lib/features/access/api-keys/apiKeyListState';
 
   let {
-    listState,
+    listState = $bindable(),
     notice,
     submitError,
     canManage,
@@ -122,8 +122,8 @@
     <p class="eyebrow">Access</p>
     <h1 class="page-title">API Keys</h1>
     <p class="page-description">
-      Issue independent 32-byte proxy keys with scopes, route allowlists, and
-      distributed hard limits.
+      Manage client access with scoped API keys, route permissions, and usage
+      limits.
     </p>
   </div>
   {#if canManage}<a
@@ -196,6 +196,11 @@
           ? 'Choose another issuer or clear the filter to review all keys.'
           : 'Create a scoped key after activating your first route.'}
       </p>
+      {#if createdBy}<button
+          class="button button-secondary"
+          type="button"
+          onclick={() => filterIssuer('')}>Clear issuer</button
+        >{/if}
       {#if canManage && !createdBy}<a
           class="button button-primary"
           href={resolve('/api-keys/new')}>Create first key</a
@@ -203,7 +208,13 @@
     </div>
   </section>
 {:else}
-  <div class="table-shell key-table">
+  <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+  <div
+    class="table-shell key-table"
+    tabindex="0"
+    role="region"
+    aria-label="API keys"
+  >
     <table class="data-table">
       <thead
         ><tr

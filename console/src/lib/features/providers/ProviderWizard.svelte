@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { focusErrorSummary, focusFormError } from '$lib/forms/focusError';
   import { resolve } from '$app/paths';
   import ConflictNotice from '$lib/components/ConflictNotice.svelte';
   import ReadOnlyNote from '$lib/components/ReadOnlyNote.svelte';
@@ -56,13 +57,22 @@
     >
   </div>
 {/if}
-{#if wizard.errorMessage}<div class="inline-problem" role="alert">
+{#if wizard.errorMessage}<div
+    class="inline-problem"
+    role="alert"
+    tabindex="-1"
+    data-error-summary
+    use:focusErrorSummary
+  >
     {wizard.errorMessage}
     <ProviderValidationIssues issues={wizard.validationIssues} />
   </div>{/if}
 {#if wizard.notice}<div class="success-banner" role="status">
     {wizard.notice}
   </div>{/if}
+<p class="sr-only" role="status">
+  {wizard.busy ? 'Operation in progress. Please wait.' : ''}
+</p>
 <ConflictNotice
   notice={wizard.wizardConflict ? 'conflict' : null}
   onReload={wizard.reloadWizard}
@@ -89,7 +99,11 @@
         selectedSpec={wizard.selectedSpec}
         busy={wizard.busy}
         lockKind={Boolean(wizard.wizardProvider)}
-        onSubmit={wizard.createDraft}
+        onSubmit={async (event) => {
+          const root = (event.currentTarget as HTMLFormElement).closest('main');
+          await wizard.createDraft(event);
+          if (root) await focusFormError(root);
+        }}
       />
     {/if}
   {:else if wizard.wizardStep === 2 && wizard.wizardProvider}
@@ -198,14 +212,7 @@
   .stage.wide {
     max-width: none;
   }
-  .success-banner {
-    margin: 1rem 0;
-    padding: 0.85rem 1rem;
-    border: 1px solid color-mix(in srgb, var(--success) 45%, var(--border));
-    border-radius: 0.375rem;
-    background: var(--success-soft);
-    color: var(--success);
-  }
+
   @media (max-width: 42rem) {
     .step-progress {
       display: block;

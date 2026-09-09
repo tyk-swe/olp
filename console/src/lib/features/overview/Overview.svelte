@@ -7,6 +7,9 @@
   import { createQuery } from '@tanstack/svelte-query';
   import { onMount } from 'svelte';
   import NavIcon from '$lib/components/NavIcon.svelte';
+  import { apiKeyQueries } from '$lib/features/access/api-keys/apiKeyQueries';
+  import { hasNonrevokedApiKey } from '$lib/features/access/api-keys/api';
+  import { setupProgress } from './setupProgress';
   import SetupChecklist from '$lib/features/overview/SetupChecklist.svelte';
   import { useRole } from '$lib/features/access/session/useRole.svelte';
   import { copyText } from '$lib/clipboard';
@@ -42,6 +45,28 @@
   );
   const readyRoutes = $derived(routes.data?.length ?? 0);
 
+  const keys = createQuery(() => ({
+    queryKey: apiKeyQueries.hasNonrevoked(),
+    queryFn: ({ signal }) => hasNonrevokedApiKey(signal)
+  }));
+  const progress = $derived(
+    setupProgress({
+      loading: providers.isPending || routes.isPending || keys.isPending,
+      failed: providers.isError || routes.isError || keys.isError,
+      activeProvider: activeProviders > 0,
+      enabledModels: Boolean(
+        providers.data?.some((provider) => provider.enabled_model_count > 0)
+      ),
+      activeRoute: readyRoutes > 0,
+      apiKey: Boolean(keys.data),
+      role: access.role
+    })
+  );
+
+  function refreshSetup() {
+    void Promise.all([providers.refetch(), routes.refetch(), keys.refetch()]);
+  }
+
   onMount(() => {
     endpoint = `${window.location.origin}/v1`;
     return () => copyTimer && clearTimeout(copyTimer);
@@ -63,15 +88,26 @@
 <div class="page-heading">
   <div>
     <p class="eyebrow">Overview</p>
-    <h1 class="page-title">Bring your first model route online.</h1>
+    <h1 class="page-title">
+      {progress.complete || !access.can('providers.manage')
+        ? 'Gateway overview'
+        : 'Bring your first model route online.'}
+    </h1>
     <p class="page-description">
-      Connect an upstream, certify its models, then publish one stable slug for
-      your clients.
+      {progress.complete || !access.can('providers.manage')
+        ? 'Review your gateway configuration and recent requests.'
+        : 'Connect a provider, review its models, and publish a route for your clients.'}
     </p>
   </div>
-  <a class="button button-primary" href={resolve('/providers/new')}
-    >Continue setup <NavIcon name="arrow" /></a
-  >
+  {#if progress.complete}
+    <a class="button button-primary" href={resolve('/requests')}
+      >Explore requests <NavIcon name="arrow" /></a
+    >
+  {:else if progress.nextStep}
+    <a class="button button-primary" href={resolve(progress.nextStep.href)}
+      >{progress.nextStep.label} <NavIcon name="arrow" /></a
+    >
+  {/if}
 </div>
 
 <section class="status-grid" aria-label="Gateway readiness">
@@ -143,16 +179,16 @@
   </article>
 </section>
 
-<div class="primary-grid">
-  <SetupChecklist />
+<div class="primary-grid" class:complete={progress.complete}>
+  <SetupChecklist {progress} onRetry={refreshSetup} />
 
   <div class="side-stack">
     <section class="card endpoint-card" aria-labelledby="endpoint-title">
       <p class="eyebrow">Client endpoint</p>
       <h2 id="endpoint-title">Same host, familiar SDKs</h2>
       <p>
-        Use your route slug as the model after activation. Direct provider/model
-        addressing is intentionally unavailable.
+        After activation, use your route slug as the model in SDK requests to
+        this URL.
       </p>
       <div class="endpoint-row">
         <code>{endpoint}</code>
@@ -282,7 +318,8 @@
   }
 
   .page-heading .button {
-    flex: none;
+    flex: 0 1 auto;
+    max-width: 22rem;
   }
 
   .status-grid {
@@ -345,9 +382,18 @@
 
   .primary-grid {
     display: grid;
-    grid-template-columns: minmax(24rem, 1.2fr) minmax(20rem, 0.8fr);
+    align-items: start;
+    grid-template-columns: minmax(0, 1.2fr) minmax(0, 0.8fr);
     gap: 1rem;
     margin-top: 1rem;
+  }
+
+  .primary-grid.complete {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .primary-grid.complete .side-stack {
+    display: contents;
   }
 
   .side-stack {
@@ -388,12 +434,11 @@
   code {
     min-width: 0;
     flex: 1;
-    overflow: hidden;
+    overflow-wrap: anywhere;
     padding: 0.75rem;
     font-family: 'JetBrains Mono Variable', monospace;
     font-size: 0.72rem;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    white-space: normal;
   }
 
   .recent-table {
@@ -502,8 +547,13 @@
   }
 
   @media (max-width: 72rem) {
-    .primary-grid {
-      grid-template-columns: 1fr;
+    .primary-grid,
+    .primary-grid.complete {
+      grid-template-columns: minmax(0, 1fr);
+    }
+
+    .primary-grid.complete .side-stack {
+      display: grid;
     }
 
     .side-stack {

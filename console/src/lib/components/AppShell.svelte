@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { onMount } from 'svelte';
   import { resolve } from '$app/paths';
   import type { Snippet } from 'svelte';
   import type { SessionUser } from '$lib/features/access/session/auth';
@@ -26,14 +27,41 @@
   const installationLabel = $derived(installationName || 'Local installation');
   let mobileNavigation = $state<HTMLDialogElement>();
   let accountMenu = $state<HTMLDetailsElement>();
+  let navigationOpen = $state(false);
+  let navigationTrigger = $state<HTMLButtonElement>();
+  let desktopBrand = $state<HTMLAnchorElement>();
   let accountMenuOpen = $state(false);
 
   function openNavigation() {
     mobileNavigation?.showModal();
+    navigationOpen = Boolean(mobileNavigation?.open);
   }
 
   function closeNavigation() {
     mobileNavigation?.close();
+    navigationOpen = false;
+  }
+
+  onMount(() => {
+    const desktop = window.matchMedia('(min-width: 62.001rem)');
+    const resize = () => {
+      if (desktop.matches && mobileNavigation?.open) {
+        closeNavigation();
+        desktopBrand?.focus();
+      }
+    };
+    desktop.addEventListener('change', resize);
+    return () => desktop.removeEventListener('change', resize);
+  });
+
+  function navigationClosed() {
+    navigationOpen = false;
+    if (
+      navigationTrigger &&
+      window.getComputedStyle(navigationTrigger).display !== 'none'
+    ) {
+      navigationTrigger.focus();
+    }
   }
 
   function dismissBackdrop(event: MouseEvent) {
@@ -67,7 +95,12 @@
 
 <div class="shell">
   <aside class="desktop-sidebar">
-    <a class="brand" href={resolve('/')} aria-label="OpenLLMProxy overview">
+    <a
+      bind:this={desktopBrand}
+      class="brand"
+      href={resolve('/')}
+      aria-label="OpenLLMProxy overview"
+    >
       <BrandMark />
       <span>OpenLLMProxy</span>
     </a>
@@ -84,6 +117,9 @@
         class="menu-button"
         type="button"
         aria-label="Open navigation"
+        bind:this={navigationTrigger}
+        aria-expanded={navigationOpen}
+        aria-haspopup="dialog"
         aria-controls="mobile-navigation"
         onclick={openNavigation}
       >
@@ -162,6 +198,8 @@
 
 <dialog
   id="mobile-navigation"
+  aria-label="Navigation"
+  onclose={navigationClosed}
   class="mobile-dialog"
   bind:this={mobileNavigation}
   onclick={dismissBackdrop}
@@ -271,6 +309,7 @@
   }
 
   .topbar-actions {
+    min-width: 0;
     display: flex;
     align-items: center;
     gap: 0.35rem;
@@ -305,13 +344,20 @@
     text-overflow: ellipsis;
   }
 
+  .account-label {
+    overflow: hidden;
+    max-width: 12rem;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
   .account-menu {
     position: relative;
   }
 
   .account-menu summary {
     display: flex;
-    min-height: 2.5rem;
+    min-height: 2.75rem;
     align-items: center;
     gap: 0.5rem;
     padding: 0.25rem 0.4rem;
@@ -396,6 +442,7 @@
   }
 
   .mobile-brand {
+    flex-shrink: 0;
     display: none;
     align-items: center;
     gap: 0.55rem;
@@ -458,6 +505,14 @@
     .topbar {
       justify-content: space-between;
       padding: 0 1rem;
+    }
+
+    .edition {
+      max-width: 10rem;
+    }
+
+    .account-label {
+      max-width: 7rem;
     }
 
     .menu-button,

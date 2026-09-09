@@ -5,6 +5,7 @@ import {
   takeSecret,
   waitForRoutePublication
 } from './fixtures';
+import { verifyConsolePolish } from './console-polish';
 import { verifyDraftSave } from './draft-saving';
 import { expectFact, refreshUntilRequestCount } from './request-history';
 import { readFileSync } from 'node:fs';
@@ -732,7 +733,7 @@ test.describe('Rust-hosted console integration', () => {
   });
 });
 
-test('logout clears protected content in another tab', async ({
+test('core console stays accessible and logout clears protected content in another tab', async ({
   page,
   context
 }) => {
@@ -740,7 +741,9 @@ test('logout clears protected content in another tab', async ({
     process.env.OLP_CONSOLE_E2E_RESTORED === 'true',
     'Covered on the fresh installation.'
   );
+  test.setTimeout(180_000);
   await signInAsOwner(page);
+  await verifyConsolePolish(page, test.info());
   const second = await context.newPage();
   await second.goto('/providers');
   await expect(

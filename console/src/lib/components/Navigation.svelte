@@ -216,6 +216,11 @@
     color: #ffffff;
     font-weight: 680;
   }
+  @media (max-width: 62rem), (pointer: coarse) {
+    a {
+      min-height: 2.75rem;
+    }
+  }
   @media (forced-colors: active) {
     a.active,
     a:hover {

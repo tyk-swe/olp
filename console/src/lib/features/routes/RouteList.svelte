@@ -34,8 +34,8 @@
     <p class="eyebrow">Gateway</p>
     <h1 class="page-title">Routes</h1>
     <p class="page-description">
-      Stable client-facing slugs backed by explicit, deterministic
-      provider-model targets.
+      Publish stable model names for your clients and choose the providers
+      behind each route.
     </p>
   </div>
   {#if canManage}<a class="button button-primary" href={resolve('/routes/new')}
@@ -47,7 +47,7 @@
   >{/if}
 {#if drafts.isPending && activeRoutes.isPending}
   <div class="loading-state" role="status">Loading routes and drafts…</div>
-{:else if !drafts.data?.items.length && !activeRoutes.data?.items.length && !drafts.isError && !activeRoutes.isError && listState.draft.history.length === 0 && listState.route.history.length === 0}
+{:else if !drafts.data?.items.length && !activeRoutes.data?.items.length && !drafts.isError && !activeRoutes.isError && !drafts.isPending && !activeRoutes.isPending && listState.draft.history.length === 0 && listState.route.history.length === 0}
   <section class="card empty-state">
     <div>
       <h2>No routes yet</h2>
@@ -88,7 +88,13 @@
         <p>No active routes on this page.</p>
       </div>
     {:else}
-      <div class="table-shell">
+      <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+      <div
+        class="table-shell"
+        tabindex="0"
+        role="region"
+        aria-label="Active routes table"
+      >
         <table class="data-table">
           <thead
             ><tr
@@ -150,7 +156,13 @@
         <p>No unpublished drafts on this page.</p>
       </div>
     {:else}
-      <div class="table-shell">
+      <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+      <div
+        class="table-shell"
+        tabindex="0"
+        role="region"
+        aria-label="Route drafts table"
+      >
         <table class="data-table">
           <thead
             ><tr

@@ -1,113 +1,26 @@
 <script lang="ts">
-  import { providerKeys } from '$lib/features/providers/providerKeys';
-  import { routeKeys } from '$lib/features/routes/routeKeys';
-  import { apiKeyQueries } from '$lib/features/access/api-keys/apiKeyQueries';
-
-  import { createQuery } from '@tanstack/svelte-query';
+  import { resolve } from '$app/paths';
   import NavIcon from '$lib/components/NavIcon.svelte';
-  import { hasNonrevokedApiKey } from '$lib/features/access/api-keys/api';
-  import { listProviders } from '$lib/features/providers/api';
-  import { listRoutes } from '$lib/features/routes/api';
+  import type { SetupProgress } from './setupProgress';
 
-  type Step = {
-    label: string;
-    description: string;
-    status: 'complete' | 'current' | 'upcoming';
-    href: string;
-  };
-
-  const providers = createQuery(() => ({
-    queryKey: providerKeys.all(),
-    queryFn: ({ signal }) => listProviders(signal)
-  }));
-  const routes = createQuery(() => ({
-    queryKey: routeKeys.all(),
-    queryFn: ({ signal }) => listRoutes(signal)
-  }));
-  const keys = createQuery(() => ({
-    queryKey: apiKeyQueries.hasNonrevoked(),
-    queryFn: ({ signal }) => hasNonrevokedApiKey(signal)
-  }));
-
-  const loading = $derived(
-    providers.isPending || routes.isPending || keys.isPending
-  );
-  const failed = $derived(providers.isError || routes.isError || keys.isError);
-  const settled = $derived(!loading && !failed);
-  const completed = $derived(
-    settled
-      ? [
-          true,
-          Boolean(
-            providers.data?.some((provider) => provider.active_revision != null)
-          ),
-          Boolean(
-            providers.data?.some((provider) => provider.enabled_model_count > 0)
-          ),
-          Boolean(routes.data?.length),
-          Boolean(keys.data)
-        ]
-      : []
-  );
-  const completeCount = $derived(completed.filter(Boolean).length);
-  const currentIndex = $derived(completed.findIndex((value) => !value));
-  const definitions = [
-    [
-      'Create the installation owner',
-      'Local authentication is ready.',
-      '/settings/profile'
-    ],
-    [
-      'Connect and activate a provider',
-      'Add a write-only credential and verify upstream reachability.',
-      '/providers/new'
-    ],
-    [
-      'Review discovered models',
-      'Enable only certified model capabilities you intend to expose.',
-      '/models'
-    ],
-    [
-      'Build and activate a route',
-      'Simulate deterministic target selection before activation.',
-      '/routes/new'
-    ],
-    [
-      'Create your first API key',
-      'The full secret is shown once after creation.',
-      '/api-keys/new'
-    ]
-  ] as const;
-  const steps = $derived<Step[]>(
-    definitions.map((definition, index) => ({
-      label: definition[0],
-      description: definition[1],
-      href: definition[2],
-      status: completed[index]
-        ? 'complete'
-        : index === currentIndex
-          ? 'current'
-          : 'upcoming'
-    }))
-  );
-
-  function refresh() {
-    void Promise.all([providers.refetch(), routes.refetch(), keys.refetch()]);
-  }
+  let { progress, onRetry }: { progress: SetupProgress; onRetry: () => void } =
+    $props();
 </script>
 
 <section class="card checklist" aria-labelledby="setup-checklist-title">
   <div class="card-heading">
     <div>
       <p class="eyebrow">Getting started</p>
-      <h2 id="setup-checklist-title">Publish your first route</h2>
+      <h2 id="setup-checklist-title">
+        {progress.complete ? 'Setup complete' : 'Publish your first route'}
+      </h2>
     </div>
     <span class="completion"
-      >{loading
+      >{progress.loading
         ? 'Checking…'
-        : failed
+        : progress.failed
           ? 'Unknown'
-          : `${completeCount} of 5`}</span
+          : `${progress.completeCount} of 5`}</span
     >
   </div>
 
@@ -117,48 +30,54 @@
     aria-label="Installation setup"
     aria-valuemin="0"
     aria-valuemax="5"
-    aria-valuenow={settled ? completeCount : undefined}
+    aria-valuenow={progress.settled ? progress.completeCount : undefined}
   >
-    <span class={`progress-${completeCount}`}></span>
+    <span class={`progress-${progress.completeCount}`}></span>
   </div>
 
-  {#if failed}
+  {#if progress.failed}
     <div class="check-error" role="alert">
       Setup progress could not be refreshed. <button
         type="button"
-        onclick={refresh}>Try again</button
+        onclick={onRetry}>Try again</button
       >
     </div>
   {/if}
 
-  <ol>
-    {#each steps as step, index (step.href)}
-      <li
-        class:complete={step.status === 'complete'}
-        class:current={step.status === 'current'}
-      >
-        <span class="step-marker" aria-hidden="true">
-          {step.status === 'complete' ? '✓' : index + 1}
-        </span>
-        <div>
-          <a
-            href={step.href}
-            aria-current={step.status === 'current' ? 'step' : undefined}
-          >
-            {step.label}
-            {#if step.status === 'current'}<NavIcon
-                name="arrow"
-                size={17}
-              />{/if}
-          </a>
-          <p>{step.description}</p>
-        </div>
-      </li>
-    {/each}
-  </ol>
+  {#if progress.complete}
+    <p class="complete-summary">
+      Your provider, models, route, and API key are configured.
+    </p>
+  {:else}
+    <ol>
+      {#each progress.steps as step, index (step.label)}
+        <li class:complete={step.complete} class:current={step.current}>
+          <span class="step-marker" aria-hidden="true">
+            {step.complete ? '✓' : index + 1}
+          </span>
+          <div>
+            <a
+              href={resolve(step.href)}
+              aria-current={step.current ? 'step' : undefined}
+            >
+              {step.label}
+              {#if step.current}<NavIcon name="arrow" size={17} />{/if}
+            </a>
+            <p>{step.description}</p>
+            {#if step.permissionNote}<p>{step.permissionNote}</p>{/if}
+          </div>
+        </li>
+      {/each}
+    </ol>
+  {/if}
 </section>
 
 <style>
+  .complete-summary {
+    margin-top: 1rem;
+    color: var(--foreground-muted);
+  }
+
   .checklist {
     padding: clamp(1.15rem, 3vw, 1.5rem);
   }

@@ -5,7 +5,8 @@ export {
   type APIRequestContext,
   type Locator,
   type Page,
-  type Route
+  type Route,
+  type TestInfo
 } from '@playwright/test';
 
 const svelteWarningMarkers = [
