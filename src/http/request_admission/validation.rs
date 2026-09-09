@@ -14,8 +14,23 @@ const MAX_HEADER_VALUE_BYTES: usize = 8 * 1024;
 const MAX_JSON_DEPTH: usize = 64;
 const MAX_URI_BYTES: usize = 8 * 1024;
 
+/// The serialized length of a request target without rendering it: absolute
+/// forms count their scheme and authority, origin forms only the path and query.
+fn uri_bytes(uri: &axum::http::Uri) -> usize {
+    let scheme = uri
+        .scheme_str()
+        .map_or(0, |scheme| scheme.len() + "://".len());
+    let authority = uri
+        .authority()
+        .map_or(0, |authority| authority.as_str().len());
+    let target = uri
+        .path_and_query()
+        .map_or(0, |target| target.as_str().len());
+    scheme + authority + target
+}
+
 pub(crate) fn validate_target_and_headers(request: &Request<Body>) -> Result<(), Problem> {
-    if request.uri().to_string().len() > MAX_URI_BYTES {
+    if uri_bytes(request.uri()) > MAX_URI_BYTES {
         return Err(Problem::new(
             axum::http::StatusCode::URI_TOO_LONG,
             "uri_too_long",
@@ -306,6 +321,14 @@ mod tests {
             StatusCode::URI_TOO_LONG,
             "uri_too_long",
         );
+        let query = format!("/path?q={}", "y".repeat(MAX_URI_BYTES));
+        assert_problem(
+            validate_target_and_headers(&empty_request(&query)),
+            StatusCode::URI_TOO_LONG,
+            "uri_too_long",
+        );
+        let absolute = format!("https://gateway.example/{}", "z".repeat(MAX_URI_BYTES - 32));
+        assert_eq!(uri_bytes(&absolute.parse().unwrap()), absolute.len());
 
         let mut too_many = empty_request("/");
         for index in 0..=MAX_HTTP_HEADER_COUNT {

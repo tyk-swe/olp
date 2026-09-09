@@ -392,7 +392,7 @@ pub(crate) fn flow_cookie_name(purpose: OidcFlowPurpose, flow_id: OidcFlowId) ->
     format!("{prefix}{flow_id}")
 }
 
-pub(crate) fn flow_cookie_evictions(headers: &HeaderMap) -> Result<Vec<String>, Problem> {
+pub(crate) fn flow_cookie_evictions(headers: &HeaderMap) -> Result<Vec<HeaderValue>, Problem> {
     let cookies = RequestCookies::parse(headers)?;
     let mut active = Vec::<(OidcFlowId, String)>::new();
     for prefix in [OIDC_LOGIN_FLOW_COOKIE_PREFIX, OIDC_LINK_FLOW_COOKIE_PREFIX] {
@@ -415,15 +415,14 @@ pub(crate) fn flow_cookie_evictions(headers: &HeaderMap) -> Result<Vec<String>, 
         .collect())
 }
 
+/// Flow cookie names are a constant prefix followed by a canonical UUID, so
+/// the expiry header is always representable.
 #[must_use]
-pub(crate) fn clear_flow_cookie(name: &str) -> String {
-    format!("{name}=; Path=/; Max-Age=0; Secure; HttpOnly; SameSite=Lax")
-}
-
-pub(crate) fn append_cookie(response: &mut Response, value: String) {
-    if let Ok(value) = HeaderValue::from_str(&value) {
-        response.headers_mut().append(header::SET_COOKIE, value);
-    }
+pub(crate) fn clear_flow_cookie(name: &str) -> HeaderValue {
+    HeaderValue::from_str(&format!(
+        "{name}=; Path=/; Max-Age=0; Secure; HttpOnly; SameSite=Lax"
+    ))
+    .expect("flow cookie names are a constant prefix and a canonical UUID")
 }
 
 #[cfg(test)]
@@ -472,7 +471,7 @@ mod flow_tests {
         let evictions = flow_cookie_evictions(&headers).unwrap();
         assert_eq!(evictions.len(), 3);
         for (eviction, flow_id) in evictions.iter().zip(ids.iter()) {
-            assert!(eviction.starts_with(&format!(
+            assert!(eviction.to_str().unwrap().starts_with(&format!(
                 "{}=;",
                 flow_cookie_name(OidcFlowPurpose::Login, *flow_id)
             )));

@@ -476,7 +476,9 @@ async fn cleanup_handles_owned(spool: Arc<dyn MediaSpool>, handles: Vec<MediaHan
 
 async fn cleanup_handles(spool: &Arc<dyn MediaSpool>, handles: Vec<MediaHandle>) {
     for handle in handles {
-        let _ = spool.remove(&handle).await;
+        if let Err(error) = spool.remove(&handle).await {
+            tracing::warn!(%error, "inline media spool cleanup failed");
+        }
     }
 }
 

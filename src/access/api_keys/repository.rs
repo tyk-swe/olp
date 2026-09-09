@@ -176,7 +176,7 @@ pub async fn list_api_keys(
         });
     }
 
-    let key_rows = sqlx::query_as::<_, ListApiKeysRow2>(
+    let key_rows = sqlx::query_as::<_, ApiKeyDetailRow>(
         "SELECT k.id, k.lookup_id, k.name, k.created_by, u.email AS created_by_email, \
                     k.requests_per_minute, k.tokens_per_minute, k.max_concurrency, k.expires_at, \
                     k.daily_cost_limit, k.monthly_cost_limit, k.revoked_at, k.rotated_at, \
@@ -189,7 +189,7 @@ pub async fn list_api_keys(
     .fetch_all(pool)
     .await?;
 
-    let scope_rows = sqlx::query_as::<_, ListApiKeysRow3>("SELECT api_key_id, scope FROM api_key_scopes WHERE api_key_id = ANY($1::uuid[]) ORDER BY api_key_id, scope")
+    let scope_rows = sqlx::query_as::<_, ApiKeyScopeRow>("SELECT api_key_id, scope FROM api_key_scopes WHERE api_key_id = ANY($1::uuid[]) ORDER BY api_key_id, scope")
     .bind(&ids)
         .fetch_all(pool)
         .await?;
@@ -202,7 +202,7 @@ pub async fn list_api_keys(
             .push(row.scope);
     }
 
-    let route_rows = sqlx::query_as::<_, ListApiKeysRow4>("SELECT api_key_id, route_slug FROM api_key_route_allowlist WHERE api_key_id = ANY($1::uuid[]) ORDER BY api_key_id, route_slug")
+    let route_rows = sqlx::query_as::<_, ApiKeyRouteAllowlistRow>("SELECT api_key_id, route_slug FROM api_key_route_allowlist WHERE api_key_id = ANY($1::uuid[]) ORDER BY api_key_id, route_slug")
     .bind(&ids)
         .fetch_all(pool)
         .await?;
@@ -245,7 +245,7 @@ pub async fn list_api_keys(
 }
 
 pub async fn get_api_key(pool: &sqlx::PgPool, id: Uuid) -> Result<ApiKeyRecord, Error> {
-    let row = sqlx::query_as::<_, ListApiKeysRow2>(
+    let row = sqlx::query_as::<_, ApiKeyDetailRow>(
         "SELECT k.id, k.lookup_id, k.name, k.created_by, u.email AS created_by_email, \
                     k.requests_per_minute, k.tokens_per_minute, k.max_concurrency, k.expires_at, \
                     k.daily_cost_limit, k.monthly_cost_limit, k.revoked_at, k.rotated_at, \
@@ -516,7 +516,7 @@ struct ListApiKeysRow {
 }
 
 #[derive(sqlx::FromRow)]
-struct ListApiKeysRow2 {
+struct ApiKeyDetailRow {
     id: uuid::Uuid,
     lookup_id: String,
     name: String,
@@ -535,13 +535,13 @@ struct ListApiKeysRow2 {
 }
 
 #[derive(sqlx::FromRow)]
-struct ListApiKeysRow3 {
+struct ApiKeyScopeRow {
     api_key_id: uuid::Uuid,
     scope: String,
 }
 
 #[derive(sqlx::FromRow)]
-struct ListApiKeysRow4 {
+struct ApiKeyRouteAllowlistRow {
     api_key_id: uuid::Uuid,
     route_slug: String,
 }

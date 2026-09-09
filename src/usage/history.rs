@@ -11,7 +11,6 @@ use crate::database::cursor::Error;
 use crate::database::cursor::Page;
 use crate::database::cursor::Timestamp;
 use crate::database::cursor::checked_u16;
-use crate::database::cursor::optional_i32_u64;
 use crate::database::cursor::optional_u16;
 use crate::database::cursor::optional_u64;
 use crate::database::cursor::trimmed_optional;
@@ -310,8 +309,8 @@ fn request_from_row(row: RequestRow) -> Result<RequestRecord, Error> {
         completed_at: row.completed_at,
         status_code: optional_u16(row.status_code, "request status")?,
         error_class: row.error_class,
-        total_latency_ms: optional_i32_u64(row.total_latency_ms, "request latency")?,
-        first_byte_ms: optional_i32_u64(row.first_byte_ms, "request first byte")?,
+        total_latency_ms: optional_u64(row.total_latency_ms, "request latency")?,
+        first_byte_ms: optional_u64(row.first_byte_ms, "request first byte")?,
         attempt_count: checked_u16(row.attempt_count, "attempt count")?,
         input_tokens: optional_u64(row.input_tokens, "input tokens")?,
         output_tokens: optional_u64(row.output_tokens, "output tokens")?,
@@ -335,8 +334,8 @@ fn attempt_from_row(row: AttemptRow) -> Result<AttemptRecord, Error> {
         status_code: optional_u16(row.status_code, "attempt status")?,
         error_class: row.error_class,
         committed: row.committed,
-        latency_ms: optional_i32_u64(row.latency_ms, "attempt latency")?,
-        first_byte_ms: optional_i32_u64(row.first_byte_ms, "attempt first byte")?,
+        latency_ms: optional_u64(row.latency_ms, "attempt latency")?,
+        first_byte_ms: optional_u64(row.first_byte_ms, "attempt first byte")?,
         charge_status: row.charge_status,
         usage_observed: row.usage_observed,
         usage_complete: row.usage_complete,

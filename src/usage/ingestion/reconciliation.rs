@@ -258,7 +258,7 @@ async fn load_checkpoint_baseline(
     .await?;
     let process_epoch_changed = previous.is_none();
     if process_epoch_changed {
-        let superseded = sqlx::query_as::<_, LoadCheckpointBaselineRow2>(
+        let superseded = sqlx::query_as::<_, SupersededGatewayEpochRow>(
             "SELECT process_epoch, accepted, persisted, abandoned, updated_at \
              FROM request_metadata_gateway_epochs \
              WHERE gateway_instance = $1 AND process_epoch <> $2 \
@@ -615,7 +615,7 @@ pub async fn acknowledge_request_metadata_gateway_epoch(
         }));
     }
     let acknowledged_at = Utc::now();
-    let acknowledgement = sqlx::query_as::<_, AcknowledgeRequestMetadataGatewayEpochRow2>(
+    let acknowledgement = sqlx::query_as::<_, GatewayEpochAcknowledgementRow>(
         "UPDATE request_metadata_gateway_epochs \
              SET acknowledged_at = GREATEST($1, stale_detected_at), acknowledged_by = $2 \
              WHERE process_epoch = $3 AND acknowledged_at IS NULL \
@@ -670,7 +670,7 @@ struct LoadCheckpointBaselineRow {
 }
 
 #[derive(sqlx::FromRow)]
-struct LoadCheckpointBaselineRow2 {
+struct SupersededGatewayEpochRow {
     process_epoch: uuid::Uuid,
     accepted: i64,
     persisted: i64,
@@ -705,7 +705,7 @@ struct AcknowledgeRequestMetadataGatewayEpochRow {
 }
 
 #[derive(sqlx::FromRow)]
-struct AcknowledgeRequestMetadataGatewayEpochRow2 {
+struct GatewayEpochAcknowledgementRow {
     acknowledged_at: chrono::DateTime<chrono::Utc>,
     acknowledged_by: Option<uuid::Uuid>,
 }

@@ -1,11 +1,14 @@
 use chrono::DateTime;
 use chrono::Utc;
+use sqlx::Postgres;
+use sqlx::QueryBuilder;
 use uuid::Uuid;
 
 use crate::media::jobs::MediaJobError;
 use crate::media::jobs::MediaJobRecord;
 use crate::media::jobs::MediaReconciliationSummary;
 use crate::media::jobs::POLL_GATE_SECONDS;
+use crate::media::jobs::queries::MEDIA_JOB_SELECT;
 use crate::media::jobs::queries::MediaJobRow;
 use crate::media::jobs::queries::media_job_from_row;
 
@@ -15,26 +18,15 @@ pub async fn pending_media_reconciliation_jobs(
     api_key_id: Uuid,
     limit: u16,
 ) -> Result<Vec<MediaJobRecord>, MediaJobError> {
-    let rows = sqlx::query_as::<_, MediaJobRow>(
-        "SELECT j.id, j.upstream_job_id, j.api_key_id, j.provider_id,
-                    p.name AS provider_name, j.provider_model, j.route_slug,
-                    j.operation, j.surface, j.state::text AS \"state\", j.lifecycle_state,
-                    j.progress_percent::real AS \"progress_percent\",
-                    j.content_available, j.expires_at, j.error_class,
-                    j.completed_at, j.last_polled_at, j.reconciliation_error, j.deleted_at,
-                    j.runtime_generation_id, j.provider_revision_id, j.reconciliation_claim_id,
-                    j.reconciliation_attempts, j.next_reconciliation_at,
-                    j.last_reconciliation_at, j.etag,
-                    j.created_at, j.updated_at
-             FROM async_media_jobs j JOIN providers p ON p.id = j.provider_id
-             WHERE j.api_key_id = $1
-               AND j.lifecycle_state IN ('create_cleanup_pending', 'delete_pending')
-             ORDER BY j.updated_at ASC, j.id ASC LIMIT $2",
-    )
-    .bind(api_key_id)
-    .bind(i64::from(limit.clamp(1, 32)))
-    .fetch_all(pool)
-    .await?;
+    let rows = QueryBuilder::<Postgres>::new(MEDIA_JOB_SELECT)
+        .push(" WHERE j.api_key_id = ")
+        .push_bind(api_key_id)
+        .push(" AND j.lifecycle_state IN ('create_cleanup_pending', 'delete_pending')")
+        .push(" ORDER BY j.updated_at ASC, j.id ASC LIMIT ")
+        .push_bind(i64::from(limit.clamp(1, 32)))
+        .build_query_as::<MediaJobRow>()
+        .fetch_all(pool)
+        .await?;
     rows.into_iter().map(media_job_from_row).collect()
 }
 

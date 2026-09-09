@@ -52,10 +52,7 @@ pub async fn setup_installation_with_session(
         Some((material, ttl)),
     )
     .await?;
-    Ok((
-        result,
-        session_id.expect("session was requested from setup transaction"),
-    ))
+    Ok((result, session_id.ok_or(Error::SessionUnavailable)?))
 }
 
 pub(crate) async fn setup_installation_inner(

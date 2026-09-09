@@ -137,7 +137,7 @@ async fn execute_multipart(
             unreachable!("generation uses JSON transport")
         }
     }
-    let response = connector.post_multipart_raw(&request, path, form).await?;
+    let response = connector.post_multipart_raw(request, path, form).await?;
     if request.metadata.mode == TransportMode::Streaming {
         require_content_type(&response, "text/event-stream")?;
         return Ok(ProviderOutput::Events(connector.raw_sse_response(response)));
@@ -150,7 +150,7 @@ async fn execute_multipart(
     )
     .await?;
     let wire: OpenAiImageResponse = parse_wire("image", &response)?;
-    let result = connector.decode_image_result(&request, wire).await?;
+    let result = connector.decode_image_result(request, wire).await?;
     Ok(ProviderOutput::Result(Box::new(CanonicalResult::Images(
         result,
     ))))

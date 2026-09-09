@@ -129,7 +129,7 @@ pub(crate) async fn revoke_session(
     .map_err(map_identity)?;
     let mut response = StatusCode::NO_CONTENT.into_response();
     if session_id == principal.session_id {
-        expire_session_cookies(&mut response);
+        expire_session_cookies(&mut response)?;
     }
     Ok(response)
 }

@@ -47,7 +47,7 @@ pub(crate) fn append_security_transition_cookies(
         CSRF_HEADER,
         HeaderValue::from_str(material.csrf_token()).map_err(|_| Problem::internal())?,
     );
-    clear_recent_auth_cookie(response);
+    clear_recent_auth_cookie(response)?;
     prevent_sensitive_response_caching(response);
     Ok(())
 }
@@ -67,23 +67,23 @@ pub(crate) fn append_recent_auth_cookie(
     )
 }
 
-pub(crate) fn clear_recent_auth_cookie(response: &mut Response) {
-    append_static_cookie(
+pub(crate) fn clear_recent_auth_cookie(response: &mut Response) -> Result<(), Problem> {
+    append_set_cookie(
         response,
-        "__Host-olp_recent_auth=; Path=/; Max-Age=0; Secure; HttpOnly; SameSite=Lax",
-    );
+        format!("{RECENT_AUTH_COOKIE}=; Path=/; Max-Age=0; Secure; HttpOnly; SameSite=Lax"),
+    )
 }
 
-pub(crate) fn expire_session_cookies(response: &mut Response) {
-    append_static_cookie(
+pub(crate) fn expire_session_cookies(response: &mut Response) -> Result<(), Problem> {
+    append_set_cookie(
         response,
-        "__Host-olp_session=; Path=/; Max-Age=0; Secure; HttpOnly; SameSite=Lax",
-    );
-    append_static_cookie(
+        format!("{SESSION_COOKIE}=; Path=/; Max-Age=0; Secure; HttpOnly; SameSite=Lax"),
+    )?;
+    append_set_cookie(
         response,
-        "__Host-olp_csrf=; Path=/; Max-Age=0; Secure; SameSite=Lax",
-    );
-    clear_recent_auth_cookie(response);
+        format!("{CSRF_COOKIE}=; Path=/; Max-Age=0; Secure; SameSite=Lax"),
+    )?;
+    clear_recent_auth_cookie(response)
 }
 
 pub(crate) fn validate_session_cookie_ttl(ttl: chrono::Duration) -> Result<(), Problem> {
@@ -99,16 +99,10 @@ fn cookie_max_age(ttl: chrono::Duration) -> Result<i64, Problem> {
     Ok(seconds)
 }
 
-fn append_set_cookie(response: &mut Response, cookie: String) -> Result<(), Problem> {
+pub(crate) fn append_set_cookie(response: &mut Response, cookie: String) -> Result<(), Problem> {
     response.headers_mut().append(
         header::SET_COOKIE,
         HeaderValue::from_str(&cookie).map_err(|_| Problem::internal())?,
     );
     Ok(())
-}
-
-fn append_static_cookie(response: &mut Response, cookie: &'static str) {
-    response
-        .headers_mut()
-        .append(header::SET_COOKIE, HeaderValue::from_static(cookie));
 }

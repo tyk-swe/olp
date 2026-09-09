@@ -67,7 +67,7 @@ pub async fn get_route_drafts(
         .fetch_all(pool)
         .await?;
     let mut operations_map = BTreeMap::<Uuid, Vec<OperationKind>>::new();
-    for row in sqlx::query_as::<_, GetRouteDraftsRow2>(
+    for row in sqlx::query_as::<_, RouteDraftOperationRow>(
         "SELECT route_draft_id, operation FROM route_draft_operations \
              WHERE route_draft_id = ANY($1::uuid[]) ORDER BY route_draft_id, operation",
     )
@@ -450,8 +450,6 @@ async fn draft_targets(
     .await?)
 }
 
-/// `query_as!` fills fields positionally, so the draft key column sits in
-/// the struct; the remaining columns are exactly a [`RouteTargetRow`].
 #[derive(Debug, sqlx::FromRow)]
 struct RouteDraftTargetRow {
     route_draft_id: Uuid,
@@ -685,7 +683,7 @@ struct GetRouteDraftsRow {
 }
 
 #[derive(sqlx::FromRow)]
-struct GetRouteDraftsRow2 {
+struct RouteDraftOperationRow {
     route_draft_id: uuid::Uuid,
     operation: String,
 }

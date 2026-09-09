@@ -60,33 +60,42 @@ pub struct Page<T> {
     pub next_cursor: Option<String>,
 }
 
-pub(crate) fn checked_u16(value: i16, name: &str) -> Result<u16, Error> {
-    u16::try_from(value).map_err(|_| Error::Invalid(format!("stored {name} is invalid")))
+pub(crate) fn checked_u16<T>(value: T, name: &str) -> Result<u16, Error>
+where
+    u16: TryFrom<T>,
+{
+    u16::try_from(value).map_err(|_| invalid_stored(name))
 }
 
-pub(crate) fn optional_u16(value: Option<i32>, name: &str) -> Result<Option<u16>, Error> {
+pub(crate) fn optional_u16<T>(value: Option<T>, name: &str) -> Result<Option<u16>, Error>
+where
+    u16: TryFrom<T>,
+{
     value
         .map(u16::try_from)
         .transpose()
-        .map_err(|_| Error::Invalid(format!("stored {name} is invalid")))
+        .map_err(|_| invalid_stored(name))
 }
 
-pub(crate) fn checked_u64(value: i64, name: &str) -> Result<u64, Error> {
-    u64::try_from(value).map_err(|_| Error::Invalid(format!("stored {name} is invalid")))
+pub(crate) fn checked_u64<T>(value: T, name: &str) -> Result<u64, Error>
+where
+    u64: TryFrom<T>,
+{
+    u64::try_from(value).map_err(|_| invalid_stored(name))
 }
 
-pub(crate) fn optional_u64(value: Option<i64>, name: &str) -> Result<Option<u64>, Error> {
+pub(crate) fn optional_u64<T>(value: Option<T>, name: &str) -> Result<Option<u64>, Error>
+where
+    u64: TryFrom<T>,
+{
     value
         .map(u64::try_from)
         .transpose()
-        .map_err(|_| Error::Invalid(format!("stored {name} is invalid")))
+        .map_err(|_| invalid_stored(name))
 }
 
-pub(crate) fn optional_i32_u64(value: Option<i32>, name: &str) -> Result<Option<u64>, Error> {
-    value
-        .map(u64::try_from)
-        .transpose()
-        .map_err(|_| Error::Invalid(format!("stored {name} is invalid")))
+fn invalid_stored(name: &str) -> Error {
+    Error::Invalid(format!("stored {name} is invalid"))
 }
 
 pub(crate) fn trimmed_optional(value: Option<String>) -> Option<String> {

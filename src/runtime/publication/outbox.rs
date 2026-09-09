@@ -180,7 +180,7 @@ pub async fn runtime_outbox_status(pool: &sqlx::PgPool) -> Result<RuntimeOutboxS
     .await?;
     let pending_rows =
         u64::try_from(backlog.pending_rows).map_err(|_| Error::InvalidWorkerHealth)?;
-    let health = sqlx::query_as::<_, RuntimeOutboxStatusRow2>(
+    let health = sqlx::query_as::<_, RuntimeOutboxHealthRow>(
         "SELECT owner_active, claimed_rows, checked_at, last_progress_at, \
                     GREATEST(0, floor(extract(epoch FROM clock_timestamp() - checked_at)))::bigint \
                       AS \"heartbeat_age_seconds\", \
@@ -524,7 +524,7 @@ struct RuntimeOutboxStatusRow {
 }
 
 #[derive(sqlx::FromRow)]
-struct RuntimeOutboxStatusRow2 {
+struct RuntimeOutboxHealthRow {
     owner_active: bool,
     claimed_rows: i64,
     checked_at: chrono::DateTime<chrono::Utc>,

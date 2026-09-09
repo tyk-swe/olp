@@ -284,10 +284,7 @@ pub async fn update_local_password(
 ) -> Result<PasswordSessionRotation, Error> {
     let id = context.user_id;
     let now = Utc::now();
-    let expires_at = now
-        .checked_add_signed(session_ttl)
-        .filter(|expires_at| *expires_at > now)
-        .ok_or_else(|| Error::Invalid("session lifetime is invalid".to_owned()))?;
+    let expires_at = session_expiry(now, session_ttl)?;
     let mut transaction = pool.begin().await?;
     let current = lock_user(&mut transaction, id)
         .await?
@@ -304,26 +301,10 @@ pub async fn update_local_password(
     if current.etag != expected_etag {
         return Err(Error::PreconditionFailed);
     }
-    let etag = Uuid::now_v7();
-    let row = sqlx::query_as::<_, PasswordUserRow>(
-        "UPDATE users SET password_hash = $2, security_version = security_version + 1, \
-                 etag = $3, updated_at = $4 \
-             WHERE id = $1 \
-             RETURNING id, email, display_name, role::text AS \"role\", active, etag, \
-                       security_version, created_at, updated_at",
-    )
-    .bind(id)
-    .bind(password_hash)
-    .bind(etag)
-    .bind(now)
-    .fetch_one(&mut *transaction)
-    .await?;
-    let security_version = row.security_version;
-    let _revoked = revoke_user_sessions(&mut transaction, id).await?;
-    let session_id = insert_versioned_session(
+    let rotation = rotate_local_password(
         &mut transaction,
         id,
-        security_version,
+        password_hash,
         replacement,
         expires_at,
         now,
@@ -353,14 +334,11 @@ pub async fn update_local_password(
         id,
         "session.rotate_for_password_change",
         "session",
-        session_id,
+        rotation.session_id,
     )
     .await?;
     transaction.commit().await?;
-    Ok(PasswordSessionRotation {
-        user: user_from_row(row.into_user())?,
-        session_id,
-    })
+    Ok(rotation)
 }
 
 /// Adds the first local password to an OIDC-only account. The recent-auth
@@ -379,10 +357,7 @@ pub async fn enroll_local_password(
 ) -> Result<PasswordSessionRotation, Error> {
     let id = context.user_id;
     let now = Utc::now();
-    let expires_at = now
-        .checked_add_signed(session_ttl)
-        .filter(|expires_at| *expires_at > now)
-        .ok_or_else(|| Error::Invalid("session lifetime is invalid".to_owned()))?;
+    let expires_at = session_expiry(now, session_ttl)?;
     let mut transaction = pool.begin().await?;
     admit_password_enrollment(
         &mut transaction,
@@ -391,7 +366,39 @@ pub async fn enroll_local_password(
         recent_auth_token_digest,
     )
     .await?;
-    let etag = Uuid::now_v7();
+    let rotation = rotate_local_password(
+        &mut transaction,
+        id,
+        password_hash,
+        replacement,
+        expires_at,
+        now,
+    )
+    .await?;
+    record_password_enrollment(provenance, &mut transaction, id, rotation.session_id).await?;
+    transaction.commit().await?;
+    Ok(rotation)
+}
+
+fn session_expiry(
+    now: chrono::DateTime<Utc>,
+    session_ttl: chrono::Duration,
+) -> Result<chrono::DateTime<Utc>, Error> {
+    now.checked_add_signed(session_ttl)
+        .filter(|expires_at| *expires_at > now)
+        .ok_or_else(|| Error::Invalid("session lifetime is invalid".to_owned()))
+}
+
+/// Stores the new password hash, advances the security version so every
+/// existing session is invalidated, and issues the replacement session.
+async fn rotate_local_password(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    id: Uuid,
+    password_hash: &str,
+    replacement: &SessionMaterial,
+    expires_at: chrono::DateTime<Utc>,
+    now: chrono::DateTime<Utc>,
+) -> Result<PasswordSessionRotation, Error> {
     let row = sqlx::query_as::<_, PasswordUserRow>(
         "UPDATE users SET password_hash = $2, security_version = security_version + 1, \
                  etag = $3, updated_at = $4 \
@@ -401,29 +408,20 @@ pub async fn enroll_local_password(
     )
     .bind(id)
     .bind(password_hash)
-    .bind(etag)
+    .bind(Uuid::now_v7())
     .bind(now)
-    .fetch_one(&mut *transaction)
+    .fetch_one(&mut **transaction)
     .await?;
-    let security_version = row.security_version;
-    let _revoked = revoke_user_sessions(&mut transaction, id).await?;
+    let _revoked = revoke_user_sessions(transaction, id).await?;
     let session_id = insert_versioned_session(
-        &mut transaction,
+        transaction,
         id,
-        security_version,
+        row.security_version,
         replacement,
         expires_at,
         now,
     )
     .await?;
-    crate::access::identity::accounts::record_password_enrollment(
-        provenance,
-        &mut transaction,
-        id,
-        session_id,
-    )
-    .await?;
-    transaction.commit().await?;
     Ok(PasswordSessionRotation {
         user: user_from_row(row.into_user())?,
         session_id,

@@ -18,7 +18,8 @@ use crate::media::jobs::MediaJobOrder;
 use crate::media::jobs::MediaJobRecord;
 use crate::media::jobs::MediaJobState;
 
-const MEDIA_JOB_SELECT: &str = "SELECT j.id, j.upstream_job_id, j.api_key_id, j.provider_id,
+pub(super) const MEDIA_JOB_SELECT: &str =
+    "SELECT j.id, j.upstream_job_id, j.api_key_id, j.provider_id,
             p.name AS provider_name, j.provider_model, j.route_slug,
             j.operation, j.surface, j.state::text AS state, j.lifecycle_state,
             j.progress_percent::real AS progress_percent,
@@ -32,25 +33,13 @@ const MEDIA_JOB_SELECT: &str = "SELECT j.id, j.upstream_job_id, j.api_key_id, j.
      JOIN providers p ON p.id = j.provider_id";
 
 pub async fn media_job(pool: &sqlx::PgPool, id: Uuid) -> Result<MediaJobRecord, MediaJobError> {
-    let row = sqlx::query_as::<_, MediaJobRow>(
-        "SELECT j.id, j.upstream_job_id, j.api_key_id, j.provider_id,
-                    p.name AS provider_name, j.provider_model, j.route_slug,
-                    j.operation, j.surface, j.state::text AS \"state\", j.lifecycle_state,
-                    j.progress_percent::real AS \"progress_percent\",
-                    j.content_available, j.expires_at, j.error_class,
-                    j.completed_at, j.last_polled_at, j.reconciliation_error, j.deleted_at,
-                    j.runtime_generation_id, j.provider_revision_id, j.reconciliation_claim_id,
-                    j.reconciliation_attempts, j.next_reconciliation_at,
-                    j.last_reconciliation_at, j.etag,
-                    j.created_at, j.updated_at
-             FROM async_media_jobs j
-             JOIN providers p ON p.id = j.provider_id
-             WHERE j.id = $1",
-    )
-    .bind(id)
-    .fetch_optional(pool)
-    .await?
-    .ok_or(MediaJobError::NotFound)?;
+    let row = QueryBuilder::<Postgres>::new(MEDIA_JOB_SELECT)
+        .push(" WHERE j.id = ")
+        .push_bind(id)
+        .build_query_as::<MediaJobRow>()
+        .fetch_optional(pool)
+        .await?
+        .ok_or(MediaJobError::NotFound)?;
     media_job_from_row(row)
 }
 

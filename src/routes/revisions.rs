@@ -86,7 +86,7 @@ pub async fn get_route_revisions(
         .fetch_all(pool)
         .await?;
 
-    let operation_rows = sqlx::query_as::<_, GetRouteRevisionsRow2>(
+    let operation_rows = sqlx::query_as::<_, RouteRevisionOperationRow>(
         "SELECT route_revision_id, operation FROM route_revision_operations \
              WHERE route_revision_id = ANY($1::uuid[]) ORDER BY route_revision_id, operation",
     )
@@ -295,9 +295,6 @@ pub async fn restore_route_revision_as_draft(
     crate::routes::repository::get_route_draft(pool, id).await
 }
 
-/// `query_as!` fills fields positionally, so the revision key column that this
-/// read prepends has to sit in the struct rather than in a nested one. The
-/// remaining columns are exactly a [`RouteTargetRow`], which owns the mapping.
 #[derive(Debug, sqlx::FromRow)]
 struct RouteRevisionTargetRow {
     route_revision_id: Uuid,
@@ -379,7 +376,7 @@ struct GetRouteRevisionsRow {
 }
 
 #[derive(sqlx::FromRow)]
-struct GetRouteRevisionsRow2 {
+struct RouteRevisionOperationRow {
     route_revision_id: uuid::Uuid,
     operation: String,
 }

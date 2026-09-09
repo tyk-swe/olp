@@ -29,6 +29,7 @@ use utoipa::ToSchema;
 use uuid::Uuid;
 use zeroize::Zeroizing;
 
+use crate::access::cookies::append_set_cookie;
 use crate::access::cookies::clear_recent_auth_cookie;
 use crate::access::oidc::http::error::map_oidc;
 use crate::access::oidc::http::helpers::callback_url;
@@ -39,7 +40,6 @@ use crate::access::oidc::http::session::LOGIN_FLOW_COOKIE_VERSION;
 use crate::access::oidc::http::session::LoginFlowCookiePayload;
 use crate::access::oidc::http::session::OidcCallbackState;
 use crate::access::oidc::http::session::OidcFlowId;
-use crate::access::oidc::http::session::append_cookie;
 use crate::access::oidc::http::session::flow_cookie_evictions;
 use crate::access::oidc::http::session::flow_cookie_name;
 use crate::access::oidc::http::session::seal_login_flow_cookie;
@@ -209,7 +209,7 @@ pub(crate) async fn begin_link(
     .await?;
     // The server-side grant is consumed in the same transaction that persists
     // the redirect flow. Remove the now-useless browser bearer immediately.
-    clear_recent_auth_cookie(&mut response);
+    clear_recent_auth_cookie(&mut response)?;
     Ok(response)
 }
 
@@ -404,7 +404,7 @@ fn authorization_response(
     redirect: bool,
     flow_cookie_name: String,
     flow_cookie_value: String,
-    evictions: Vec<String>,
+    evictions: Vec<HeaderValue>,
 ) -> Result<Response, Problem> {
     let flow_cookie = format!(
         "{flow_cookie_name}={flow_cookie_value}; Path=/; Max-Age={}; Secure; HttpOnly; SameSite=Lax",
@@ -424,9 +424,9 @@ fn authorization_response(
         .into_response()
     };
     for eviction in evictions {
-        append_cookie(&mut response, eviction);
+        response.headers_mut().append(header::SET_COOKIE, eviction);
     }
-    append_cookie(&mut response, flow_cookie);
+    append_set_cookie(&mut response, flow_cookie)?;
     response
         .headers_mut()
         .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));

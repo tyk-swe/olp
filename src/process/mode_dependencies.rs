@@ -101,14 +101,14 @@ impl ProcessComposition {
     pub(crate) fn gateway_state_for_test(&self) -> GatewayState {
         let mut builder = self.clone();
         builder.mode = ApiMode::All;
-        test_dependencies(&builder).gateway_state_for_test()
+        builder.mode_dependencies().gateway_state_for_test()
     }
 
     #[cfg(test)]
     pub(crate) fn management_state_for_test(&self) -> ManagementState {
         let mut builder = self.clone();
         builder.mode = ApiMode::All;
-        match test_dependencies(&builder) {
+        match builder.mode_dependencies() {
             ModeDependencies::All { management, .. }
             | ModeDependencies::Control { management, .. } => *management,
             ModeDependencies::Gateway { .. } => unreachable!("test builder uses all mode"),
@@ -117,7 +117,7 @@ impl ProcessComposition {
 
     #[cfg(test)]
     pub(crate) fn observability_state_for_test(&self) -> ObservabilityState {
-        test_dependencies(self).observability()
+        self.mode_dependencies().observability()
     }
 }
 
@@ -129,11 +129,6 @@ impl ModeDependencies {
             Self::Control { .. } => unreachable!("test builder uses all mode"),
         }
     }
-}
-
-#[cfg(test)]
-fn test_dependencies(state: &ProcessComposition) -> ModeDependencies {
-    state.mode_dependencies()
 }
 
 /// A lazily connecting pool for compositions under unit test; nothing
