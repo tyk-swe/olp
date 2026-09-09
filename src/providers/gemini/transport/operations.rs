@@ -28,8 +28,7 @@ use crate::protocols::gemini::translate::encode::request as encode_request;
 use crate::protocols::gemini::translate::response::decode;
 use crate::protocols::gemini::translate::validation::validate_count_tokens_request;
 use crate::providers::runtime_model::ProviderKind;
-use crate::providers::transport_common::inject_trace_context;
-use crate::providers::transport_common::request_id_header;
+use crate::providers::transport_common::insert_json_request_headers;
 use ::http::HeaderMap;
 use ::http::HeaderValue;
 use ::http::StatusCode;
@@ -51,10 +50,7 @@ use crate::providers::transport_common::protocol_error;
 use crate::providers::transport_common::source_extensions;
 use crate::providers::transport_common::transport_error;
 use crate::providers::transport_common::upstream_response_error;
-use crate::providers::transport_io::ProviderResponseIo;
 use crate::providers::transport_io::bounded_duration;
-
-const RESPONSE_IO: ProviderResponseIo = ProviderResponseIo::new("Gemini");
 
 /// Validates the concrete canonical request with the production Gemini
 /// encoders before routing. This is especially important for cross-origin
@@ -300,23 +296,7 @@ impl Connector {
                 )
             })??;
         let first_byte_deadline = Instant::now() + self.config.timeouts.first_byte;
-        headers.insert(
-            header::CONTENT_TYPE,
-            HeaderValue::from_static("application/json"),
-        );
-        headers.insert(
-            header::ACCEPT,
-            HeaderValue::from_static(if streaming {
-                "text/event-stream"
-            } else {
-                "application/json"
-            }),
-        );
-        headers.insert(
-            "x-request-id",
-            request_id_header(request.metadata.request_id)?,
-        );
-        inject_trace_context(&mut headers, request.propagate_trace_context);
+        insert_json_request_headers(&mut headers, &request, streaming)?;
 
         let response = RESPONSE_IO
             .send_before(

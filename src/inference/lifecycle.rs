@@ -1,6 +1,7 @@
 use crate::ids::RouteSlug;
 use crate::protocols::canonical::events::Event;
 use crate::protocols::canonical::events::Kind;
+use crate::protocols::canonical::events::Usage;
 use crate::protocols::canonical::identity::OperationKind;
 use crate::protocols::canonical::identity::Surface;
 use crate::protocols::canonical::results::CanonicalResult;
@@ -462,24 +463,13 @@ impl UsageCapture {
         let Kind::Usage { usage } = &event.kind else {
             return;
         };
+        let tokens = TokenCapture::from_usage(usage);
         self.observed = true;
-        self.input_tokens = i64::try_from(usage.input_tokens).ok();
-        self.output_tokens = i64::try_from(usage.output_tokens).ok();
-        self.cached_input_tokens = usage
-            .cached_input_tokens
-            .and_then(|value| i64::try_from(value).ok());
-        self.reasoning_tokens = usage
-            .reasoning_tokens
-            .and_then(|value| i64::try_from(value).ok());
-        // Canonical `output_tokens` excludes `reasoning_tokens` (the two are
-        // disjoint on the wire). Providers bill and rate-limit thinking as
-        // generated output, so the stored and metered output count is the
-        // reasoning-inclusive sum; otherwise a reasoning response would be
-        // free of both charge and rate limit.
-        self.output_tokens = billable_output_tokens(self.output_tokens, self.reasoning_tokens);
-        self.complete = self.input_tokens.is_some()
-            && self.output_tokens.is_some()
-            && (usage.cached_input_tokens.is_none() || self.cached_input_tokens.is_some());
+        self.complete = tokens.complete;
+        self.input_tokens = tokens.input_tokens;
+        self.output_tokens = tokens.output_tokens;
+        self.cached_input_tokens = tokens.cached_input_tokens;
+        self.reasoning_tokens = tokens.reasoning_tokens;
     }
 
     pub fn observe_openai_media_event(&mut self, event: &Event) {
@@ -539,7 +529,7 @@ pub(crate) fn usage_from_result(result: &CanonicalResult) -> UsageCapture {
                 .and_then(|value| value.parse::<Decimal>().ok()),
         ),
         CanonicalResult::TokenCount(result) => (
-            Some(crate::protocols::canonical::events::Usage {
+            Some(Usage {
                 input_tokens: result.input_tokens,
                 output_tokens: 0,
                 total_tokens: result.input_tokens,
@@ -553,37 +543,56 @@ pub(crate) fn usage_from_result(result: &CanonicalResult) -> UsageCapture {
     if usage.is_none() && media_units.is_none() {
         return UsageCapture::default();
     }
-    let (input_tokens, output_tokens, cached_input_tokens, token_complete) =
-        usage.map_or((None, None, None, true), |usage| {
-            let input = i64::try_from(usage.input_tokens).ok();
-            let output = billable_output_tokens(
-                i64::try_from(usage.output_tokens).ok(),
-                usage
-                    .reasoning_tokens
-                    .and_then(|value| i64::try_from(value).ok()),
-            );
-            let cached = usage
-                .cached_input_tokens
-                .and_then(|value| i64::try_from(value).ok());
-            let complete = input.is_some()
-                && output.is_some()
-                && (usage.cached_input_tokens.is_none() || cached.is_some());
-            (input, output, cached, complete)
-        });
+    let tokens = usage.as_ref().map(TokenCapture::from_usage);
     UsageCapture {
         observed: true,
-        complete: token_complete,
+        complete: tokens.as_ref().is_none_or(|tokens| tokens.complete),
         // A canonical result is the whole answer; there is no stream to truncate.
         settled: true,
-        input_tokens,
-        output_tokens,
-        cached_input_tokens,
-        reasoning_tokens: usage.and_then(|usage| {
-            usage
-                .reasoning_tokens
-                .and_then(|value| i64::try_from(value).ok())
-        }),
+        input_tokens: tokens.as_ref().and_then(|tokens| tokens.input_tokens),
+        output_tokens: tokens.as_ref().and_then(|tokens| tokens.output_tokens),
+        cached_input_tokens: tokens
+            .as_ref()
+            .and_then(|tokens| tokens.cached_input_tokens),
+        reasoning_tokens: tokens.and_then(|tokens| tokens.reasoning_tokens),
         media_units,
+    }
+}
+
+/// Token counts as stored and metered, derived from one canonical usage report.
+struct TokenCapture {
+    input_tokens: Option<i64>,
+    output_tokens: Option<i64>,
+    cached_input_tokens: Option<i64>,
+    reasoning_tokens: Option<i64>,
+    complete: bool,
+}
+
+impl TokenCapture {
+    fn from_usage(usage: &Usage) -> Self {
+        let input_tokens = i64::try_from(usage.input_tokens).ok();
+        let cached_input_tokens = usage
+            .cached_input_tokens
+            .and_then(|value| i64::try_from(value).ok());
+        let reasoning_tokens = usage
+            .reasoning_tokens
+            .and_then(|value| i64::try_from(value).ok());
+        // Canonical `output_tokens` excludes `reasoning_tokens` (the two are
+        // disjoint on the wire). Providers bill and rate-limit thinking as
+        // generated output, so the stored and metered output count is the
+        // reasoning-inclusive sum; otherwise a reasoning response would be
+        // free of both charge and rate limit.
+        let output_tokens =
+            billable_output_tokens(i64::try_from(usage.output_tokens).ok(), reasoning_tokens);
+        Self {
+            input_tokens,
+            output_tokens,
+            cached_input_tokens,
+            reasoning_tokens,
+            complete: input_tokens.is_some()
+                && output_tokens.is_some()
+                && (usage.cached_input_tokens.is_none() || cached_input_tokens.is_some()),
+        }
     }
 }
 

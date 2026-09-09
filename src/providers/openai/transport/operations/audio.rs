@@ -4,6 +4,7 @@ use crate::inference::transport::TransportError;
 use crate::protocols::canonical::identity::TransportMode;
 use crate::protocols::canonical::requests::Operation;
 use crate::protocols::canonical::results::CanonicalResult;
+use crate::protocols::openai::audio::DEFAULT_AUDIO_UPLOAD_LIMIT;
 use crate::protocols::openai::audio::TranscriptionResponse;
 use crate::protocols::openai::audio::TranscriptionResponseFormat;
 use crate::protocols::openai::audio::decode_speech_body;
@@ -77,7 +78,8 @@ pub(crate) async fn execute_transcription(
     let spool = request.media.as_ref().ok_or_else(|| {
         protocol_body_error("OpenAI transcription requires a bounded media spool")
     })?;
-    let metadata = bounded_part(spool.as_ref(), &operation.audio, 25 * 1024 * 1024).await?;
+    let metadata =
+        bounded_part(spool.as_ref(), &operation.audio, DEFAULT_AUDIO_UPLOAD_LIMIT).await?;
     let wire = encode_transcription(operation, &request.attempt.upstream_model, |_| {
         Ok(metadata.clone())
     })

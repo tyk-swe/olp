@@ -8,8 +8,8 @@ use crate::providers::gemini::endpoint::Error;
 use crate::providers::transport_common;
 use crate::providers::transport_io::ProviderResponseIo;
 
-const PROVIDER: &str = "Gemini";
-const RESPONSE_IO: ProviderResponseIo = ProviderResponseIo::new(PROVIDER);
+pub(crate) const PROVIDER: &str = "Gemini";
+pub(crate) const RESPONSE_IO: ProviderResponseIo = ProviderResponseIo::new(PROVIDER);
 
 pub(crate) fn secret_header(api_key: &ApiKey) -> Result<HeaderValue, TransportError> {
     transport_common::secret_header(api_key.expose(), PROVIDER)

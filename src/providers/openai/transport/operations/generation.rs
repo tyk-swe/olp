@@ -11,15 +11,13 @@ use crate::protocols::openai::chat::CompletionRequest;
 use crate::protocols::openai::chat::encode;
 use crate::protocols::openai::responses::request::encode_response_create;
 use ::http::HeaderMap;
-use ::http::HeaderValue;
-use ::http::header;
 use tokio::time::Instant;
 use tokio::time::timeout;
 
 use crate::providers::openai::transport::Connector;
 use crate::providers::openai::transport::errors::*;
 use crate::providers::openai::transport::media::*;
-use crate::providers::transport_common::inject_trace_context;
+use crate::providers::transport_common::insert_json_request_headers;
 use crate::providers::transport_common::transport_error;
 use crate::providers::transport_io::bounded_duration;
 
@@ -171,30 +169,6 @@ fn generation_headers(
 ) -> Result<HeaderMap, TransportError> {
     let mut headers = HeaderMap::new();
     connector.attach_auth(&mut headers)?;
-    headers.insert(
-        header::CONTENT_TYPE,
-        HeaderValue::from_static("application/json"),
-    );
-    headers.insert(
-        header::ACCEPT,
-        HeaderValue::from_static(if streaming {
-            "text/event-stream"
-        } else {
-            "application/json"
-        }),
-    );
-    headers.insert(
-        "x-request-id",
-        HeaderValue::from_str(&request.metadata.request_id.to_string()).map_err(|_| {
-            transport_error(
-                TransportPhase::Connect,
-                AttemptFailureClass::Protocol,
-                false,
-                "request ID cannot be represented as an HTTP header",
-            )
-        })?,
-    );
-    inject_trace_context(&mut headers, request.propagate_trace_context);
-
+    insert_json_request_headers(&mut headers, request, streaming)?;
     Ok(headers)
 }

@@ -22,30 +22,9 @@ use crate::inference::error::Error as InferenceError;
 /// Removes targets that cannot encode this concrete request without semantic
 /// loss. Capability tuples are the coarse model boundary; this request-level
 /// check covers structured output, tools, source-scoped vendor fields, and
-/// media forms before credentials or transport are used.
-#[cfg(test)]
-pub(crate) fn select_representable_attempts(
-    snapshot: &Snapshot,
-    route_slug: &RouteSlug,
-    operation: &Operation,
-    surface: Surface,
-    mode: TransportMode,
-    affinity_key: &[u8],
-) -> Result<Vec<AttemptPlan>, InferenceError> {
-    select_representable_attempts_filtered(
-        snapshot,
-        route_slug,
-        operation,
-        surface,
-        mode,
-        affinity_key,
-        |_, _| true,
-    )
-}
-
-/// Applies runtime eligibility (circuit state or an async-job target pin)
-/// together with semantic validation before deterministic ordering and the
-/// route's maximum-attempt truncation.
+/// media forms before credentials or transport are used. Runtime eligibility
+/// (circuit state or an async-job target pin) is applied by `eligible` before
+/// deterministic ordering and the route's maximum-attempt truncation.
 pub fn select_representable_attempts_filtered(
     snapshot: &Snapshot,
     route_slug: &RouteSlug,
@@ -650,13 +629,14 @@ mod tests {
     #[test]
     fn semantic_filter_runs_before_route_attempt_limit() {
         let (snapshot, route_slug, operation, compatible) = semantic_filter_fixture();
-        let attempts = select_representable_attempts(
+        let attempts = select_representable_attempts_filtered(
             &snapshot,
             &route_slug,
             &operation,
             Surface::OpenAi,
             TransportMode::Unary,
             b"affinity",
+            |_, _| true,
         )
         .unwrap();
         assert_eq!(attempts.len(), 1);
@@ -690,13 +670,14 @@ mod tests {
             mime_type: "application/pdf".into(),
             filename: "brief.pdf".into(),
         }];
-        let invalid = select_representable_attempts(
+        let invalid = select_representable_attempts_filtered(
             &snapshot,
             &route_slug,
             &invalid_operation,
             Surface::OpenAi,
             TransportMode::Unary,
             b"affinity",
+            |_, _| true,
         )
         .unwrap_err();
         assert_eq!(

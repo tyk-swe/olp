@@ -4,8 +4,10 @@ use crate::inference::transport::ProviderOutput;
 use crate::inference::transport::ProviderRequest;
 use crate::inference::transport::TransportError;
 use crate::protocols::canonical::identity::TransportMode;
+use crate::protocols::canonical::requests::ImageOperation;
 use crate::protocols::canonical::requests::Operation;
 use crate::protocols::canonical::results::CanonicalResult;
+use crate::protocols::openai::images::DEFAULT_IMAGE_UPLOAD_LIMIT;
 use crate::protocols::openai::images::OpenAiImageResponse;
 use crate::protocols::openai::images::encode_image_edit;
 use crate::protocols::openai::images::encode_image_generation;
@@ -28,7 +30,7 @@ pub(crate) async fn execute(
         unreachable!("checked by caller")
     };
     let (path, body) = match operation {
-        crate::protocols::canonical::requests::ImageOperation::Generation(operation) => {
+        ImageOperation::Generation(operation) => {
             let wire = encode_image_generation(operation, &request.attempt.upstream_model)
                 .map_err(|error| protocol_encode_error("image generation", error))?;
             (
@@ -36,9 +38,8 @@ pub(crate) async fn execute(
                 serialize_wire("image generation", &wire)?,
             )
         }
-        crate::protocols::canonical::requests::ImageOperation::Edit(_)
-        | crate::protocols::canonical::requests::ImageOperation::Variation(_) => {
-            return execute_multipart(connector, request).await;
+        ImageOperation::Edit(_) | ImageOperation::Variation(_) => {
+            return execute_multipart(connector, &request, operation).await;
         }
     };
     let response = connector.post_raw_json(&request, path, body).await?;
@@ -62,23 +63,22 @@ pub(crate) async fn execute(
 
 async fn execute_multipart(
     connector: &Connector,
-    request: ProviderRequest,
+    request: &ProviderRequest,
+    operation: &ImageOperation,
 ) -> Result<ProviderOutput, TransportError> {
     let spool = request
         .media
         .as_ref()
         .ok_or_else(|| protocol_body_error("OpenAI image uploads require a bounded media spool"))?;
-    // The operation dispatcher routes only image requests into this module.
-    let Operation::Images(operation) = &*request.operation else {
-        unreachable!("checked by caller")
-    };
     let mut form = multipart::Form::new();
     let path;
     match operation {
-        crate::protocols::canonical::requests::ImageOperation::Edit(operation) => {
+        ImageOperation::Edit(operation) => {
             let mut parts = VecDeque::new();
             for handle in operation.images.iter().chain(operation.mask.iter()) {
-                parts.push_back(bounded_part(spool.as_ref(), handle, 50 * 1024 * 1024).await?);
+                parts.push_back(
+                    bounded_part(spool.as_ref(), handle, DEFAULT_IMAGE_UPLOAD_LIMIT).await?,
+                );
             }
             let wire = encode_image_edit(operation, &request.attempt.upstream_model, |_| {
                 parts.pop_front().ok_or_else(|| {
@@ -109,8 +109,9 @@ async fn execute_multipart(
             form = add_image_edit_fields(form, &wire);
             path = "images/edits";
         }
-        crate::protocols::canonical::requests::ImageOperation::Variation(operation) => {
-            let metadata = bounded_part(spool.as_ref(), &operation.image, 50 * 1024 * 1024).await?;
+        ImageOperation::Variation(operation) => {
+            let metadata =
+                bounded_part(spool.as_ref(), &operation.image, DEFAULT_IMAGE_UPLOAD_LIMIT).await?;
             let wire = encode_image_variation(operation, &request.attempt.upstream_model, |_| {
                 Ok(metadata.clone())
             })
@@ -132,7 +133,7 @@ async fn execute_multipart(
             path = "images/variations";
         }
         // The outer image dispatcher sends generation through the JSON path.
-        crate::protocols::canonical::requests::ImageOperation::Generation(_) => {
+        ImageOperation::Generation(_) => {
             unreachable!("generation uses JSON transport")
         }
     }

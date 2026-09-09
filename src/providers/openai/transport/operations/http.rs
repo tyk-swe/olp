@@ -1,6 +1,7 @@
 use crate::inference::transport::ProviderRequest;
 use crate::inference::transport::TransportError;
 use crate::inference::transport::TransportPhase;
+use ::http::HeaderMap;
 use ::http::HeaderValue;
 use ::http::header;
 use reqwest::Method;
@@ -12,7 +13,7 @@ use tokio::time::timeout;
 use crate::providers::openai::transport::Connector;
 use crate::providers::openai::transport::errors::*;
 use crate::providers::openai::transport::streams::*;
-use crate::providers::transport_common::request_id_header;
+use crate::providers::transport_common::insert_json_request_headers;
 use crate::providers::transport_common::upstream_response_error;
 use crate::providers::transport_io::bounded_duration;
 
@@ -229,16 +230,9 @@ impl Connector {
             .resource_url(path)
             .map_err(map_endpoint_error)?;
         let first_byte_deadline = Instant::now() + self.config.timeouts.first_byte;
-        let mut headers = self.base_headers(request)?;
-        headers.insert(
-            header::CONTENT_TYPE,
-            HeaderValue::from_static("application/json"),
-        );
-        headers.insert(header::ACCEPT, HeaderValue::from_static("application/json"));
-        headers.insert(
-            "x-request-id",
-            request_id_header(request.metadata.request_id)?,
-        );
+        let mut headers = HeaderMap::new();
+        self.attach_auth(&mut headers)?;
+        insert_json_request_headers(&mut headers, request, false)?;
         let response = RESPONSE_IO
             .send_before(
                 client.post(url).headers(headers).body(body),

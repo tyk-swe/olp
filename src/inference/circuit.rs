@@ -4,6 +4,7 @@ use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::sync::Arc;
 use std::sync::Mutex;
+use std::sync::MutexGuard;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
@@ -53,6 +54,14 @@ impl Default for Breaker {
 }
 
 impl Breaker {
+    /// Circuit entries are independent, so a panic while the lock was held
+    /// leaves nothing to repair; recovering keeps selection serving.
+    fn states(&self) -> MutexGuard<'_, BTreeMap<TargetId, CircuitState>> {
+        self.inner
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
     fn new(failure_threshold: u32, open_duration: Duration) -> Self {
         Self {
             inner: Arc::new(Mutex::new(BTreeMap::new())),
@@ -66,7 +75,7 @@ impl Breaker {
     /// [`Self::try_acquire`] immediately before transport execution.
     pub fn is_selectable(&self, target: TargetId) -> bool {
         let now = Instant::now();
-        let states = self.inner.lock().expect("circuit state lock poisoned");
+        let states = self.states();
         match states.get(&target) {
             None | Some(CircuitState::Closed { .. }) => true,
             Some(CircuitState::Open { until }) => now >= *until,
@@ -84,7 +93,7 @@ impl Breaker {
 
     pub(crate) fn try_acquire_permit(&self, target: TargetId) -> Option<CircuitPermit> {
         let now = Instant::now();
-        let mut states = self.inner.lock().expect("circuit state lock poisoned");
+        let mut states = self.states();
         match states.get(&target).copied() {
             None | Some(CircuitState::Closed { .. }) => Some(CircuitPermit {
                 probe_generation: None,
@@ -134,7 +143,7 @@ impl Breaker {
         let Some(probe_generation) = permit.probe_generation else {
             return;
         };
-        let mut states = self.inner.lock().expect("circuit state lock poisoned");
+        let mut states = self.states();
         if matches!(
             states.get(&target),
             Some(CircuitState::HalfOpen { generation, .. }) if *generation == probe_generation
@@ -149,10 +158,7 @@ impl Breaker {
     }
 
     pub fn retain_targets(&self, live: &BTreeSet<TargetId>) {
-        self.inner
-            .lock()
-            .expect("circuit state lock poisoned")
-            .retain(|target, _| live.contains(target));
+        self.states().retain(|target, _| live.contains(target));
     }
 
     pub fn record_failure(&self, target: TargetId, class: AttemptFailureClass) {
@@ -164,7 +170,7 @@ impl Breaker {
         target: TargetId,
         permit: Option<&CircuitPermit>,
     ) {
-        let mut states = self.inner.lock().expect("circuit state lock poisoned");
+        let mut states = self.states();
         if Self::permit_is_current(&states, target, permit) {
             states.remove(&target);
         }
@@ -181,7 +187,7 @@ impl Breaker {
             return;
         }
         let now = Instant::now();
-        let mut states = self.inner.lock().expect("circuit state lock poisoned");
+        let mut states = self.states();
         if !Self::permit_is_current(&states, target, permit) {
             return;
         }
@@ -231,9 +237,7 @@ impl Breaker {
 
     pub fn open_count(&self) -> usize {
         let now = Instant::now();
-        self.inner
-            .lock()
-            .expect("circuit state lock poisoned")
+        self.states()
             .values()
             .filter(|state| match state {
                 CircuitState::Open { until } => now < *until,

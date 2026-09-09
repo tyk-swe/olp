@@ -5,6 +5,7 @@ use std::fmt;
 use std::time::Duration;
 
 use crate::inference::transport::AttemptFailureClass;
+use crate::inference::transport::ProviderRequest;
 use crate::inference::transport::TransportError;
 use crate::inference::transport::TransportPhase;
 use crate::inference::transport::UpstreamSignal;
@@ -13,6 +14,7 @@ use crate::protocols::canonical::requests::SourceExtensions;
 use ::http::HeaderMap;
 use ::http::HeaderValue;
 use ::http::StatusCode;
+use ::http::header;
 use opentelemetry::global;
 use opentelemetry::propagation::Injector;
 use tracing_opentelemetry::OpenTelemetrySpanExt as _;
@@ -132,6 +134,33 @@ pub(crate) fn map_send_error(
             format!("{provider} request failed before response headers"),
         )
     }
+}
+
+/// The header set every JSON provider request carries: content negotiation,
+/// the upstream correlation ID, and outbound trace context when enabled.
+pub(crate) fn insert_json_request_headers(
+    headers: &mut HeaderMap,
+    request: &ProviderRequest,
+    streaming: bool,
+) -> Result<(), TransportError> {
+    headers.insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_static("application/json"),
+    );
+    headers.insert(
+        header::ACCEPT,
+        HeaderValue::from_static(if streaming {
+            "text/event-stream"
+        } else {
+            "application/json"
+        }),
+    );
+    headers.insert(
+        "x-request-id",
+        request_id_header(request.metadata.request_id)?,
+    );
+    inject_trace_context(headers, request.propagate_trace_context);
+    Ok(())
 }
 
 /// The `x-request-id` every provider request carries for upstream correlation.

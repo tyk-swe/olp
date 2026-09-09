@@ -21,6 +21,7 @@ use crate::http::streaming_response::protocol_streaming_response;
 use crate::inference::http::state::GatewayState;
 
 use crate::inference::http::error::InferenceError;
+use crate::inference::http::error::valid_json;
 use crate::inference::http::execution::execute_event_operation;
 use crate::inference::http::openai_chat_response::OpenAiChatCompletionStreamEncoder;
 use crate::inference::http::openai_chat_response::aggregate_chat_completion_response;
@@ -31,14 +32,7 @@ pub(crate) async fn chat_completions(
     Extension(principal): Extension<HttpRequestAdmission>,
     payload: Result<Json<CompletionRequest>, JsonRejection>,
 ) -> Result<Response, InferenceError> {
-    let Json(mut wire_request) = match payload {
-        Ok(payload) => payload,
-        Err(error) => {
-            return Err(InferenceError::invalid_request(format!(
-                "The JSON request is invalid: {error}"
-            )));
-        }
-    };
+    let Json(mut wire_request) = valid_json(payload)?;
     let admitted = admit_openai_chat(&state, &mut wire_request).await?;
     let streaming = wire_request.stream;
     // OpenAI only appends the trailing usage-only chunk when the client asked

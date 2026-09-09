@@ -13,6 +13,7 @@ use crate::protocols::canonical::identity::Surface;
 use crate::protocols::canonical::identity::TransportMode;
 use crate::protocols::canonical::requests::MediaHandle;
 use crate::protocols::canonical::results::CanonicalResult;
+use crate::protocols::openai::audio::DEFAULT_AUDIO_UPLOAD_LIMIT;
 use crate::protocols::openai::audio::SpeechRequest;
 use crate::protocols::openai::audio::TranscriptionRequest;
 use crate::protocols::openai::audio::decode_speech;
@@ -22,6 +23,7 @@ use crate::protocols::openai::audio::encode_transcription_response;
 use crate::protocols::openai::embeddings::EmbeddingRequest;
 use crate::protocols::openai::embeddings::decode_embedding_request;
 use crate::protocols::openai::embeddings::encode_embedding_response;
+use crate::protocols::openai::images::DEFAULT_IMAGE_UPLOAD_LIMIT;
 use crate::protocols::openai::images::OpenAiImageEditRequest;
 use crate::protocols::openai::images::OpenAiImageGenerationRequest;
 use crate::protocols::openai::images::OpenAiImageVariationRequest;
@@ -144,7 +146,8 @@ pub(crate) async fn image_edits(
     Extension(admission): Extension<MultipartRequestAdmission>,
     multipart: Multipart,
 ) -> Result<Response, InferenceError> {
-    let mut form = parse_multipart(&state, multipart, 50 * 1024 * 1024, 32, admission).await?;
+    let mut form =
+        parse_multipart(&state, multipart, DEFAULT_IMAGE_UPLOAD_LIMIT, 32, admission).await?;
     let images = form.take_files_with_prefix("image")?;
     let mask = form.take_single_file("mask")?;
     let request = OpenAiImageEditRequest {
@@ -188,7 +191,8 @@ pub(crate) async fn image_variations(
     Extension(admission): Extension<MultipartRequestAdmission>,
     multipart: Multipart,
 ) -> Result<Response, InferenceError> {
-    let mut form = parse_multipart(&state, multipart, 50 * 1024 * 1024, 1, admission).await?;
+    let mut form =
+        parse_multipart(&state, multipart, DEFAULT_IMAGE_UPLOAD_LIMIT, 1, admission).await?;
     let image = form
         .take_single_file("image")?
         .ok_or_else(|| InferenceError::invalid_request("The image file is required."))?;
@@ -268,7 +272,8 @@ pub(crate) async fn transcriptions(
     Extension(admission): Extension<MultipartRequestAdmission>,
     multipart: Multipart,
 ) -> Result<Response, InferenceError> {
-    let mut form = parse_multipart(&state, multipart, 25 * 1024 * 1024, 1, admission).await?;
+    let mut form =
+        parse_multipart(&state, multipart, DEFAULT_AUDIO_UPLOAD_LIMIT, 1, admission).await?;
     let file = form
         .take_single_file("file")?
         .ok_or_else(|| InferenceError::invalid_request("The audio file is required."))?;
