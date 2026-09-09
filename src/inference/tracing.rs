@@ -80,16 +80,12 @@ impl RequestTrace {
         key_id: uuid::Uuid,
         generation: uuid::Uuid,
     ) {
+        self.record_session_context(operation, route_slug, generation);
         if !self.record_request {
             return;
         }
         self.span.record("olp.surface", field::display(surface));
-        self.span.record("olp.operation", field::display(operation));
-        self.span
-            .record("olp.route_slug", field::display(route_slug));
         self.span.record("olp.key_id", field::display(key_id));
-        self.span
-            .record("olp.generation", field::display(generation));
     }
 
     pub(crate) fn record_session_context(

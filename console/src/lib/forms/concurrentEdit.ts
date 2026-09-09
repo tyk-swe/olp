@@ -56,11 +56,7 @@ export function markDirty(state: ConcurrentEditState): ConcurrentEditState {
   return state.dirty ? state : { ...state, dirty: true };
 }
 
-export function markSaved(
-  _state: ConcurrentEditState,
-  etag: string,
-  dirty: boolean
-): ConcurrentEditState {
+export function markSaved(etag: string, dirty: boolean): ConcurrentEditState {
   return {
     snapshotEtag: etag,
     remoteEtag: etag,

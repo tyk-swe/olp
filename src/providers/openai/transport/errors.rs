@@ -15,8 +15,8 @@ use crate::providers::transport_common;
 use crate::providers::transport_common::transport_error;
 use crate::providers::transport_io::ProviderResponseIo;
 
-const PROVIDER: &str = "OpenAI";
-const RESPONSE_IO: ProviderResponseIo = ProviderResponseIo::new(PROVIDER);
+pub(crate) const PROVIDER: &str = "OpenAI";
+pub(crate) const RESPONSE_IO: ProviderResponseIo = ProviderResponseIo::new(PROVIDER);
 
 pub(crate) fn serialize_wire<T: serde::Serialize>(
     operation: &'static str,
@@ -40,7 +40,7 @@ pub(crate) fn protocol_encode_error(
         TransportPhase::Connect,
         AttemptFailureClass::Protocol,
         false,
-        format!("cannot encode OpenAI {operation} request: {error}"),
+        format!("cannot encode {PROVIDER} {operation} request: {error}"),
     )
 }
 
@@ -52,7 +52,7 @@ pub(crate) fn protocol_decode_error(
         TransportPhase::Body,
         AttemptFailureClass::Protocol,
         false,
-        format!("OpenAI {operation} response is invalid: {error}"),
+        format!("{PROVIDER} {operation} response is invalid: {error}"),
     )
 }
 

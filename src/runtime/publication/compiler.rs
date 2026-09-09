@@ -223,7 +223,7 @@ async fn compile_snapshot(
             },
         );
     }
-    for row in sqlx::query_as::<_, CompileSnapshotRow2>(
+    for row in sqlx::query_as::<_, CertifiedCapabilityRow>(
         "SELECT pr.provider_id, prm.upstream_model, prc.operation, prc.surface, prc.mode \
          FROM provider_revision_capabilities prc \
          JOIN provider_revision_models prm ON prm.id = prc.provider_revision_model_id \
@@ -283,7 +283,7 @@ async fn compile_routes(
     let revision_ids: Vec<Uuid> = route_rows.iter().map(|row| row.revision_id).collect();
 
     let mut operations_map = BTreeMap::<Uuid, BTreeSet<OperationKind>>::new();
-    for row in sqlx::query_as::<_, CompileRoutesRow2>(
+    for row in sqlx::query_as::<_, RouteRevisionOperationRow>(
         "SELECT route_revision_id, operation FROM route_revision_operations \
          WHERE route_revision_id = ANY($1::uuid[]) ORDER BY route_revision_id, operation",
     )
@@ -299,7 +299,7 @@ async fn compile_routes(
 
     // Grouping in row order keeps each revision's targets in position order.
     let mut targets_map = BTreeMap::<Uuid, Vec<Target>>::new();
-    for row in sqlx::query_as::<_, CompileRoutesRow3>(
+    for row in sqlx::query_as::<_, RouteRevisionTargetRow>(
         "SELECT rt.route_revision_id, rt.id, rt.routing_id, pr.provider_id, prm.upstream_model, \
                 rt.priority, rt.weight, rt.timeout_ms \
          FROM route_revision_targets rt \
@@ -398,7 +398,7 @@ async fn compile_api_keys(
     let key_ids: Vec<Uuid> = key_rows.iter().map(|row| row.id).collect();
 
     let mut scopes_map = BTreeMap::<Uuid, BTreeSet<ApiKeyScope>>::new();
-    for row in sqlx::query_as::<_, CompileApiKeysRow2>(
+    for row in sqlx::query_as::<_, ApiKeyScopeRow>(
         "SELECT api_key_id, scope FROM api_key_scopes \
          WHERE api_key_id = ANY($1::uuid[]) ORDER BY api_key_id, scope",
     )
@@ -419,7 +419,7 @@ async fn compile_api_keys(
     }
 
     let mut allowlist_map = BTreeMap::<Uuid, BTreeSet<RouteSlug>>::new();
-    for row in sqlx::query_as::<_, CompileApiKeysRow3>(
+    for row in sqlx::query_as::<_, ApiKeyRouteAllowlistRow>(
         "SELECT api_key_id, route_slug FROM api_key_route_allowlist \
          WHERE api_key_id = ANY($1::uuid[]) ORDER BY api_key_id, route_slug",
     )
@@ -613,7 +613,7 @@ struct CompileSnapshotRow {
 }
 
 #[derive(sqlx::FromRow)]
-struct CompileSnapshotRow2 {
+struct CertifiedCapabilityRow {
     provider_id: uuid::Uuid,
     upstream_model: String,
     operation: String,
@@ -632,13 +632,13 @@ struct CompileRoutesRow {
 }
 
 #[derive(sqlx::FromRow)]
-struct CompileRoutesRow2 {
+struct RouteRevisionOperationRow {
     route_revision_id: uuid::Uuid,
     operation: String,
 }
 
 #[derive(sqlx::FromRow)]
-struct CompileRoutesRow3 {
+struct RouteRevisionTargetRow {
     route_revision_id: uuid::Uuid,
     id: uuid::Uuid,
     routing_id: uuid::Uuid,
@@ -663,13 +663,13 @@ struct CompileApiKeysRow {
 }
 
 #[derive(sqlx::FromRow)]
-struct CompileApiKeysRow2 {
+struct ApiKeyScopeRow {
     api_key_id: uuid::Uuid,
     scope: String,
 }
 
 #[derive(sqlx::FromRow)]
-struct CompileApiKeysRow3 {
+struct ApiKeyRouteAllowlistRow {
     api_key_id: uuid::Uuid,
     route_slug: String,
 }

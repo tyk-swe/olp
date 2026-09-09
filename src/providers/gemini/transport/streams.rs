@@ -5,12 +5,10 @@ use crate::protocols::gemini::stream::Decoder;
 use reqwest::Response;
 use tokio::time::Instant;
 
-use crate::providers::transport_io::ProviderResponseIo;
+use crate::providers::gemini::transport::errors::RESPONSE_IO;
 use crate::providers::transport_io::event_stream::CanonicalEventDecoder;
 
 use crate::providers::gemini::transport::operations::Connector;
-
-const RESPONSE_IO: ProviderResponseIo = ProviderResponseIo::new("Gemini");
 
 impl CanonicalEventDecoder for Decoder {
     type Error = crate::protocols::gemini::stream::Error;

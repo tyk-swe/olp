@@ -141,7 +141,7 @@
         etag && etag !== 'new' ? etag : undefined
       );
       clientSecret = '';
-      sync = markSaved(sync, updated.etag, false);
+      sync = markSaved(updated.etag, false);
       queryClient.setQueryData(oidcKeys.configuration(), updated);
       notice = updated.enabled
         ? 'OIDC configuration validated and enabled.'

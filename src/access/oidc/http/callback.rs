@@ -18,6 +18,7 @@ use axum::extract::Query;
 use axum::extract::State;
 use axum::extract::rejection::QueryRejection;
 use axum::http::HeaderMap;
+use axum::http::header;
 use axum::response::IntoResponse;
 use axum::response::Response;
 use jsonwebtoken::jwk::JwkSet;
@@ -48,7 +49,6 @@ use crate::access::oidc::http::session::CallbackSecret;
 use crate::access::oidc::http::session::FlowSecretPayload;
 use crate::access::oidc::http::session::OidcCallbackState;
 use crate::access::oidc::http::session::RECENT_AUTH_TTL;
-use crate::access::oidc::http::session::append_cookie;
 use crate::access::oidc::http::session::authenticated_redirect;
 use crate::access::oidc::http::session::clear_flow_cookie;
 use crate::access::oidc::http::session::consume_login_flow_cookie;
@@ -140,7 +140,9 @@ pub(crate) async fn callback(
     };
     if !preserve_flow_cookie {
         for name in cookies_to_clear {
-            append_cookie(&mut response, clear_flow_cookie(&name));
+            response
+                .headers_mut()
+                .append(header::SET_COOKIE, clear_flow_cookie(&name));
         }
     }
     response

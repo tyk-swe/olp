@@ -28,7 +28,7 @@ export async function signInAsOwner(page: Page): Promise<void> {
 /// Reads the one-time secret out of the reveal dialog.
 export async function takeSecret(dialog: Locator): Promise<string> {
   const secret = (
-    await dialog.locator('.secret-value, code, pre').first().textContent()
+    await dialog.locator('.secret-row code').textContent()
   )?.trim();
   return secret ?? '';
 }

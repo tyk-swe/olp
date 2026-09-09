@@ -58,13 +58,16 @@ impl MediaJobs {
         );
     }
 }
+const ATTACH_ATTEMPTS: u64 = 3;
+
 pub(crate) async fn attach_media_job_with_retry(
     pool: &sqlx::PgPool,
     id: uuid::Uuid,
     upstream_job_id: &str,
     update: MediaJobUpdate,
 ) -> Result<MediaJobRecord, MediaJobError> {
-    for attempt in 0..3 {
+    let mut attempt = 0_u64;
+    loop {
         match crate::media::jobs::lifecycle::attach_media_job_upstream(
             pool,
             id,
@@ -74,13 +77,13 @@ pub(crate) async fn attach_media_job_with_retry(
         .await
         {
             Ok(record) => return Ok(record),
-            Err(MediaJobError::Database(_)) if attempt < 2 => {
-                tokio::time::sleep(Duration::from_millis(25 * (attempt + 1))).await;
+            Err(MediaJobError::Database(_)) if attempt + 1 < ATTACH_ATTEMPTS => {
+                attempt += 1;
+                tokio::time::sleep(Duration::from_millis(25 * attempt)).await;
             }
             Err(error) => return Err(error),
         }
     }
-    unreachable!("bounded attach retry returns on every final attempt")
 }
 
 pub(crate) async fn media_job_deletion_finalized(

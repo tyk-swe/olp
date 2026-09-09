@@ -617,7 +617,7 @@ async fn lock_oidc_link_authority(
     if !current_session {
         return Err(OidcError::SessionUnavailable);
     }
-    let existing_subject = sqlx::query_as::<_, LockOidcLinkAuthorityRow2>(
+    let existing_subject = sqlx::query_as::<_, OidcSubjectOwnerRow>(
         "SELECT user_id FROM oidc_identities WHERE issuer = $1 AND subject = $2",
     )
     .bind(input.issuer)
@@ -660,6 +660,6 @@ struct UnlinkOidcIdentityRow {
 }
 
 #[derive(sqlx::FromRow)]
-struct LockOidcLinkAuthorityRow2 {
+struct OidcSubjectOwnerRow {
     user_id: uuid::Uuid,
 }

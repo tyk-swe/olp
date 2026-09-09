@@ -46,13 +46,12 @@ pub fn encode_messages_response(
     // Consumed into the encoded usage below, so it must not also be replayed as
     // an extension onto a field that now exists.
     let cache_creation_input_tokens = take_cache_creation_input_tokens(&mut aggregate.extensions);
-    if aggregate.outputs.len() != 1 || !aggregate.outputs.contains_key(&0) {
+    if aggregate.outputs.len() != 1 {
         return Err(Error::CandidateCount);
     }
-    let output = aggregate
-        .outputs
-        .get(&0)
-        .expect("candidate count was checked");
+    let Some(output) = aggregate.outputs.get(&0) else {
+        return Err(Error::CandidateCount);
+    };
 
     let mut content = Vec::new();
     if !output.text.is_empty() {

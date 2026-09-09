@@ -27,12 +27,9 @@ use tokio::time::Instant;
 use crate::providers::openai::transport::Connector;
 use crate::providers::openai::transport::errors::*;
 use crate::providers::transport_common::transport_error;
-use crate::providers::transport_io::ProviderResponseIo;
 use crate::providers::transport_io::event_stream::CanonicalEventDecoder;
 use crate::providers::transport_io::event_stream::DeadlineByteStream;
 use crate::providers::transport_io::event_stream::DecodedEventStream;
-
-pub(crate) const RESPONSE_IO: ProviderResponseIo = ProviderResponseIo::new("OpenAI");
 
 pub(crate) struct DeadlineResponse {
     pub(crate) response: Response,

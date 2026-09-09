@@ -92,7 +92,8 @@ pub(crate) async fn exercise(world: &World, gateway: &GatewayProcess) -> Result<
         corrupt_sequence > lkg.generation,
         "corrupt generation did not advance the runtime sequence"
     );
-    tokio::time::sleep(Duration::from_millis(5_200)).await;
+    // One runtime refresh interval plus a margin for the poll itself.
+    tokio::time::sleep(five_seconds + Duration::from_millis(200)).await;
     for public in &public {
         let status = gateway_status(&http, public, &lkg.secret, None).await?;
         crate::require!(

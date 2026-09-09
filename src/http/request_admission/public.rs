@@ -253,7 +253,7 @@ pub(crate) async fn admit_public_request(
     };
     let permit = match state.admission.try_acquire(surface) {
         Ok(permit) => permit,
-        Err(()) => return overload_response(surface, endpoint, request.uri()),
+        Err(()) => return overload_response(endpoint, request.uri()),
     };
 
     let response = match state.tracing {
@@ -264,19 +264,13 @@ pub(crate) async fn admit_public_request(
     Response::from_parts(parts, Body::new(AdmissionBody::new(body, permit)))
 }
 
-fn overload_response(
-    admission_surface: AdmissionSurface,
-    endpoint: Option<InferenceEndpoint>,
-    uri: &axum::http::Uri,
-) -> Response {
-    let mut response = match (admission_surface, endpoint) {
-        (AdmissionSurface::Inference, Some(endpoint)) => {
-            gateway::protocol_error::inference_error_response(
-                endpoint.surface(),
-                gateway::error::InferenceError::overloaded(),
-            )
-        }
-        (AdmissionSurface::Management, _) => Problem::new(
+fn overload_response(endpoint: Option<InferenceEndpoint>, uri: &axum::http::Uri) -> Response {
+    let mut response = match endpoint {
+        Some(endpoint) => gateway::protocol_error::inference_error_response(
+            endpoint.surface(),
+            gateway::error::InferenceError::overloaded(),
+        ),
+        None => Problem::new(
             axum::http::StatusCode::SERVICE_UNAVAILABLE,
             "request_admission_overloaded",
             "Service unavailable",
@@ -284,9 +278,6 @@ fn overload_response(
         )
         .with_instance(uri)
         .into_response(),
-        (AdmissionSurface::Inference, None) => {
-            unreachable!("inference admission requires a classified endpoint")
-        }
     };
     response.headers_mut().insert(
         header::RETRY_AFTER,

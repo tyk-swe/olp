@@ -202,7 +202,6 @@ export class RouteDraftEditorState {
         buildReplaceRouteDraftInput(this.editorValues)
       );
       this.sync = markSaved(
-        this.sync,
         updated.etag,
         this.editVersion !== submittedVersion
       );

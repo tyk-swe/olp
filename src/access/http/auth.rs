@@ -528,7 +528,7 @@ pub(crate) async fn logout(
         }
         Err(problem) => problem.into_response(),
     };
-    expire_session_cookies(&mut response);
+    expire_session_cookies(&mut response)?;
     prevent_sensitive_response_caching(&mut response);
     Ok(response)
 }
@@ -559,7 +559,7 @@ pub(crate) fn session_response(
     )
         .into_response();
     append_session_cookies(&mut response, material, session_ttl)?;
-    clear_recent_auth_cookie(&mut response);
+    clear_recent_auth_cookie(&mut response)?;
     prevent_sensitive_response_caching(&mut response);
     Ok(response)
 }

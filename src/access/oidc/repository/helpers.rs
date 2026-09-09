@@ -65,12 +65,10 @@ pub(crate) async fn require_current_enabled_configuration(
     .await?;
     match enabled {
         Some(true) => {
-            sqlx::query_as::<_, RequireCurrentEnabledConfigurationRow>(
-                "SELECT set_config('olp.oidc_configuration_etag', $1, true)",
-            )
-            .bind(configuration_etag.to_string())
-            .fetch_one(&mut **transaction)
-            .await?;
+            sqlx::query("SELECT set_config('olp.oidc_configuration_etag', $1, true)")
+                .bind(configuration_etag.to_string())
+                .execute(&mut **transaction)
+                .await?;
             Ok(())
         }
         Some(false) => Err(OidcError::Disabled),
@@ -166,6 +164,3 @@ pub(crate) const fn role_rank(role: Role) -> u8 {
         Role::Viewer => 3,
     }
 }
-
-#[derive(sqlx::FromRow)]
-struct RequireCurrentEnabledConfigurationRow {}

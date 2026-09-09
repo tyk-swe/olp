@@ -190,33 +190,29 @@ const fn native_openai_discovery_contract(capability: CompatibleCapability) -> b
     )
 }
 
-fn generation_probe_operation(
-    mode: TransportMode,
-    responses: bool,
-) -> Result<Operation, CompatibleCapabilityCertificationError> {
-    if !matches!(mode, TransportMode::Unary | TransportMode::Streaming) {
-        return Err(CompatibleCapabilityCertificationError::Unsupported);
+pub(crate) const PROBE_PROMPT: &str = "OLP capability probe";
+
+pub(crate) fn probe_route() -> RouteSlug {
+    RouteSlug::parse("capability-probe").expect("the capability probe route slug is valid")
+}
+
+pub(crate) fn probe_text() -> ContentPart {
+    ContentPart::Text {
+        text: PROBE_PROMPT.to_owned(),
     }
-    let route = RouteSlug::parse("capability-probe")
-        .map_err(|_| CompatibleCapabilityCertificationError::InvalidResult)?;
-    let extensions = if responses {
-        SourceExtensions::new(
-            Surface::OpenAi,
-            BTreeMap::from([(
-                OPENAI_ENDPOINT_EXTENSION.to_owned(),
-                Value::String("responses".to_owned()),
-            )]),
-        )
-    } else {
-        SourceExtensions::default()
-    };
-    Ok(Operation::Generation(GenerationRequest {
-        route,
+}
+
+/// The minimal generation every probe sends: one user turn, one output token,
+/// deterministic sampling.
+pub(crate) fn probe_generation_request(
+    mode: TransportMode,
+    extensions: SourceExtensions,
+) -> GenerationRequest {
+    GenerationRequest {
+        route: probe_route(),
         messages: vec![Message {
             role: MessageRole::User,
-            content: vec![ContentPart::Text {
-                text: "OLP capability probe".to_owned(),
-            }],
+            content: vec![probe_text()],
             name: None,
             tool_call_id: None,
             tool_calls: Vec::new(),
@@ -231,7 +227,30 @@ fn generation_probe_operation(
         tool_choice: None,
         response_format: None,
         extensions,
-    }))
+    }
+}
+
+fn generation_probe_operation(
+    mode: TransportMode,
+    responses: bool,
+) -> Result<Operation, CompatibleCapabilityCertificationError> {
+    if !matches!(mode, TransportMode::Unary | TransportMode::Streaming) {
+        return Err(CompatibleCapabilityCertificationError::Unsupported);
+    }
+    let extensions = if responses {
+        SourceExtensions::new(
+            Surface::OpenAi,
+            BTreeMap::from([(
+                OPENAI_ENDPOINT_EXTENSION.to_owned(),
+                Value::String("responses".to_owned()),
+            )]),
+        )
+    } else {
+        SourceExtensions::default()
+    };
+    Ok(Operation::Generation(probe_generation_request(
+        mode, extensions,
+    )))
 }
 
 fn probe_operations(
@@ -240,8 +259,7 @@ fn probe_operations(
     if capability.surface != Surface::OpenAi {
         return Err(CompatibleCapabilityCertificationError::Unsupported);
     }
-    let route = RouteSlug::parse("capability-probe")
-        .map_err(|_| CompatibleCapabilityCertificationError::InvalidResult)?;
+    let route = probe_route();
     match (capability.operation, capability.mode) {
         (OperationKind::Generation, TransportMode::Unary | TransportMode::Streaming) => {
             // One capability gates both OpenAI generation entry points. Prove
@@ -255,7 +273,7 @@ fn probe_operations(
         (OperationKind::Embeddings, TransportMode::Unary) => {
             Ok(vec![Operation::Embeddings(EmbeddingsRequest {
                 route,
-                input: vec![EmbeddingInput::Text("OLP capability probe".to_owned())],
+                input: vec![EmbeddingInput::Text(PROBE_PROMPT.to_owned())],
                 dimensions: None,
                 extensions: SourceExtensions::default(),
             })])
@@ -263,18 +281,14 @@ fn probe_operations(
         (OperationKind::TokenCount, TransportMode::Unary) => {
             Ok(vec![Operation::TokenCount(TokenCountRequest {
                 route,
-                input: vec![ContentPart::Text {
-                    text: "OLP capability probe".to_owned(),
-                }],
+                input: vec![probe_text()],
                 extensions: SourceExtensions::default(),
             })])
         }
         (OperationKind::Moderation, TransportMode::Unary) => {
             Ok(vec![Operation::Moderation(ModerationRequest {
                 route,
-                input: vec![ContentPart::Text {
-                    text: "OLP capability probe".to_owned(),
-                }],
+                input: vec![probe_text()],
                 extensions: SourceExtensions::default(),
             })])
         }

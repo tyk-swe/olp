@@ -35,22 +35,25 @@ pub struct SettingRecord {
     pub updated_at: DateTime<Utc>,
 }
 
+impl From<SettingsRow> for SettingRecord {
+    fn from(row: SettingsRow) -> Self {
+        Self {
+            key: row.key,
+            value: row.value,
+            etag: row.etag,
+            updated_by: row.updated_by,
+            updated_at: row.updated_at,
+        }
+    }
+}
+
 pub async fn settings(pool: &sqlx::PgPool) -> Result<Vec<SettingRecord>, Error> {
     let rows = sqlx::query_as::<_, SettingsRow>(
         "SELECT key, value, etag, updated_by, updated_at FROM settings ORDER BY key",
     )
     .fetch_all(pool)
     .await?;
-    Ok(rows
-        .into_iter()
-        .map(|row| SettingRecord {
-            key: row.key,
-            value: row.value,
-            etag: row.etag,
-            updated_by: row.updated_by,
-            updated_at: row.updated_at,
-        })
-        .collect())
+    Ok(rows.into_iter().map(SettingRecord::from).collect())
 }
 
 pub async fn limits_valkey_unavailable_policy(
@@ -140,13 +143,7 @@ pub async fn update_setting(
     )
     .await?;
     transaction.commit().await?;
-    Ok(SettingRecord {
-        key: row.key,
-        value: row.value,
-        etag: row.etag,
-        updated_by: row.updated_by,
-        updated_at: row.updated_at,
-    })
+    Ok(row.into())
 }
 
 #[derive(sqlx::FromRow)]

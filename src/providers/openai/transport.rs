@@ -105,7 +105,7 @@ impl Connector {
         self.attach_auth(&mut headers)?;
         headers.insert(header::ACCEPT, HeaderValue::from_static("application/json"));
         let first_byte_deadline = Instant::now() + self.config.timeouts.first_byte;
-        let response = streams::RESPONSE_IO
+        let response = errors::RESPONSE_IO
             .send_before(
                 client.get(url).headers(headers),
                 first_byte_deadline,

@@ -9,7 +9,6 @@ use crate::database::cursor::Error;
 use crate::database::cursor::Timestamp;
 use crate::database::cursor::checked_u16;
 use crate::database::cursor::checked_u64;
-use crate::database::cursor::optional_i32_u64;
 use crate::database::cursor::optional_u16;
 use crate::database::cursor::optional_u64;
 use crate::database::cursor::trimmed_optional;
@@ -55,28 +54,28 @@ fn stored_number_conversions_cover_boundaries_and_name_invalid_fields() {
     assert_eq!(optional_u16(Some(65_535), "value").unwrap(), Some(u16::MAX));
     assert_eq!(checked_u16(i16::MAX, "value").unwrap(), 32_767);
     assert_eq!(
-        optional_i32_u64(Some(i32::MAX), "value").unwrap(),
+        optional_u64(Some(i32::MAX), "value").unwrap(),
         Some(i32::MAX as u64)
     );
     assert_eq!(checked_u64(i64::MAX, "value").unwrap(), i64::MAX as u64);
 
     for absent in [
-        optional_u16(None, "value").map(|value| value.map(u64::from)),
-        optional_u64(None, "value"),
-        optional_i32_u64(None, "value"),
+        optional_u16(None::<i32>, "value").map(|value| value.map(u64::from)),
+        optional_u64(None::<i64>, "value"),
+        optional_u64(None::<i32>, "value"),
     ] {
         assert_eq!(absent.unwrap(), None);
     }
     for invalid in [
-        checked_u16(-1, "value").map(u64::from),
-        checked_u64(-1, "value"),
+        checked_u16(-1_i16, "value").map(u64::from),
+        checked_u64(-1_i64, "value"),
     ] {
         assert_invalid(invalid, "stored value is invalid");
     }
     for invalid in [
-        optional_u16(Some(65_536), "value").map(|value| value.map(u64::from)),
-        optional_u64(Some(-1), "value"),
-        optional_i32_u64(Some(-1), "value"),
+        optional_u16(Some(65_536_i32), "value").map(|value| value.map(u64::from)),
+        optional_u64(Some(-1_i64), "value"),
+        optional_u64(Some(-1_i32), "value"),
     ] {
         assert_invalid(invalid, "stored value is invalid");
     }

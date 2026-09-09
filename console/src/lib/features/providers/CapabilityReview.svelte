@@ -187,7 +187,7 @@
       // post-save provider state; adopt it as the next save's baseline so a
       // second consecutive save does not send the stale ETag.
       hydratedProviderEtag = providerEtag;
-      sync = markSaved(sync, signature(model, providerEtag), false);
+      sync = markSaved(signature(model, providerEtag), false);
     }
   }
 

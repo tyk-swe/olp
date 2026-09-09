@@ -199,7 +199,7 @@ pub async fn publish_outbox_batch<P: RuntimeHintPublication>(
     leader: &mut RuntimeOutboxLeader,
     publisher: &mut P,
     shutdown: &mut watch::Receiver<bool>,
-) -> Result<OutboxBatchOutcome, Box<dyn std::error::Error + Send + Sync>> {
+) -> AppResult<OutboxBatchOutcome> {
     let records = leader.pending(OUTBOX_BATCH_SIZE).await?;
     let mut published = 0_usize;
     for record in records {

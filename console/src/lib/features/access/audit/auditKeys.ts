@@ -1,4 +1,6 @@
+import type { AuditQuery } from '$lib/features/access/audit/auditListState';
+
 export const auditKeys = {
-  page: (applied: unknown, cursor?: string) =>
+  page: (applied: AuditQuery, cursor?: string) =>
     ['audit', 'page', applied, cursor ?? 'first'] as const
 };

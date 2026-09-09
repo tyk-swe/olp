@@ -1,15 +1,9 @@
-use crate::ids::RouteSlug;
 use crate::inference::transport::ProviderTransport;
 use crate::protocols::canonical::identity::OperationKind;
 use crate::protocols::canonical::identity::Surface;
 use crate::protocols::canonical::identity::TransportMode;
-use crate::protocols::canonical::requests::ContentPart;
 use crate::protocols::canonical::requests::EmbeddingInput;
 use crate::protocols::canonical::requests::EmbeddingsRequest;
-use crate::protocols::canonical::requests::GenerationParameters;
-use crate::protocols::canonical::requests::GenerationRequest;
-use crate::protocols::canonical::requests::Message;
-use crate::protocols::canonical::requests::MessageRole;
 use crate::protocols::canonical::requests::ModerationRequest;
 use crate::protocols::canonical::requests::Operation;
 use crate::protocols::canonical::requests::SourceExtensions;
@@ -19,7 +13,11 @@ use crate::providers::runtime_model::ProviderKind;
 use crate::providers::openai::certification::CompatibleCapability;
 use crate::providers::openai::certification::CompatibleCapabilityCertificationError;
 use crate::providers::openai::certification::NativeOpenAiCertificationEvidence;
+use crate::providers::openai::certification::PROBE_PROMPT;
 use crate::providers::openai::certification::execute_capability_probe;
+use crate::providers::openai::certification::probe_generation_request;
+use crate::providers::openai::certification::probe_route;
+use crate::providers::openai::certification::probe_text;
 
 use crate::providers::connectors::ProviderConnector;
 
@@ -154,8 +152,7 @@ pub(crate) fn native_probe_operation(
     provider_kind: ProviderKind,
     capability: CompatibleCapability,
 ) -> Result<Operation, CompatibleCapabilityCertificationError> {
-    let route = RouteSlug::parse("capability-probe")
-        .map_err(|_| CompatibleCapabilityCertificationError::InvalidResult)?;
+    let route = probe_route();
     let extensions = || SourceExtensions::new(capability.surface, Default::default());
     match (provider_kind, capability.operation, capability.mode) {
         (
@@ -166,28 +163,10 @@ pub(crate) fn native_probe_operation(
             | ProviderKind::Bedrock,
             OperationKind::Generation,
             TransportMode::Unary | TransportMode::Streaming,
-        ) => Ok(Operation::Generation(GenerationRequest {
-            route,
-            messages: vec![Message {
-                role: MessageRole::User,
-                content: vec![ContentPart::Text {
-                    text: "OLP capability probe".to_owned(),
-                }],
-                name: None,
-                tool_call_id: None,
-                tool_calls: Vec::new(),
-            }],
-            parameters: GenerationParameters {
-                max_output_tokens: Some(1),
-                temperature: Some(0.0),
-                stream: capability.mode == TransportMode::Streaming,
-                ..GenerationParameters::default()
-            },
-            tools: Vec::new(),
-            tool_choice: None,
-            response_format: None,
-            extensions: extensions(),
-        })),
+        ) => Ok(Operation::Generation(probe_generation_request(
+            capability.mode,
+            extensions(),
+        ))),
         (
             ProviderKind::OpenAi
             | ProviderKind::Anthropic
@@ -198,9 +177,7 @@ pub(crate) fn native_probe_operation(
             TransportMode::Unary,
         ) => Ok(Operation::TokenCount(TokenCountRequest {
             route,
-            input: vec![ContentPart::Text {
-                text: "OLP capability probe".to_owned(),
-            }],
+            input: vec![probe_text()],
             extensions: extensions(),
         })),
         (ProviderKind::OpenAi, OperationKind::Embeddings, TransportMode::Unary)
@@ -208,7 +185,7 @@ pub(crate) fn native_probe_operation(
         {
             Ok(Operation::Embeddings(EmbeddingsRequest {
                 route,
-                input: vec![EmbeddingInput::Text("OLP capability probe".to_owned())],
+                input: vec![EmbeddingInput::Text(PROBE_PROMPT.to_owned())],
                 dimensions: None,
                 extensions: extensions(),
             }))
@@ -218,9 +195,7 @@ pub(crate) fn native_probe_operation(
         {
             Ok(Operation::Moderation(ModerationRequest {
                 route,
-                input: vec![ContentPart::Text {
-                    text: "OLP capability probe".to_owned(),
-                }],
+                input: vec![probe_text()],
                 extensions: extensions(),
             }))
         }

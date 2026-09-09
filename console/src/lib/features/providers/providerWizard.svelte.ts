@@ -1,5 +1,5 @@
 import { providerKeys } from '$lib/features/providers/providerKeys';
-import { createQuery, useQueryClient } from '@tanstack/svelte-query';
+import { createQuery, skipToken, useQueryClient } from '@tanstack/svelte-query';
 import { onDestroy } from 'svelte';
 import {
   errorMessage as message,
@@ -193,9 +193,10 @@ export class ProviderWizardState {
     });
   };
   discoverWizardProvider = async () => {
-    if (!this.wizardProvider) return;
+    const provider = this.wizardProvider;
+    if (!provider) return;
     await this.run('discover', async () => {
-      const discovered = await discoverProviderModels(this.wizardProvider!);
+      const discovered = await discoverProviderModels(provider);
       if (discovered.model_count === 0) {
         throw new Error(
           discovered.configuration.kind === 'openai_compatible'
@@ -213,14 +214,15 @@ export class ProviderWizardState {
     });
   };
   declareWizardModels = async () => {
-    if (!this.wizardProvider) return;
+    const provider = this.wizardProvider;
+    if (!provider) return;
     const names = parseManualModelNames(this.manualModelNames);
     if (!names.length) {
       this.errorMessage = 'Enter at least one upstream model identifier.';
       return;
     }
     await this.run('declare-models', async () => {
-      await declareProviderModels(this.wizardProvider!, names);
+      await declareProviderModels(provider, names);
       this.clearCertificationResults();
       this.manualModelNames = '';
       resetCursor(this.wizardModelPagination);
@@ -237,10 +239,11 @@ export class ProviderWizardState {
     capabilities: CapabilityDeclaration[],
     providerEtag: string
   ): Promise<boolean> => {
-    if (!this.wizardProvider) return false;
+    const provider = this.wizardProvider;
+    if (!provider) return false;
     return this.run(`model-${modelId}`, async () => {
       await setProviderModel(
-        { ...this.wizardProvider!, etag: providerEtag },
+        { ...provider, etag: providerEtag },
         modelId,
         enabled,
         capabilities
@@ -254,14 +257,17 @@ export class ProviderWizardState {
     });
   };
   certifyWizardModel = async (modelId: string) => {
-    if (!this.wizardProvider) return;
+    const current = this.wizardProvider;
+    if (!current) return;
     await this.run(`certify-${modelId}`, async () => {
-      if (!certificationPrerequisiteReady(this.wizardProvider!)) {
-        this.probe = await probeProvider(this.wizardProvider!);
+      let provider = current;
+      if (!certificationPrerequisiteReady(provider)) {
+        this.probe = await probeProvider(provider);
         if (!this.probe.succeeded) throw new Error(this.probe.detail);
-        await this.refetchWizardModels();
+        // The probe advances the provider ETag, so certify the refreshed record.
+        provider = (await this.refetchWizardModels()).provider;
       }
-      const result = await certifyProviderModel(this.wizardProvider!, modelId);
+      const result = await certifyProviderModel(provider, modelId);
       this.certificationResults = {
         ...this.certificationResults,
         [modelId]: result
@@ -275,18 +281,20 @@ export class ProviderWizardState {
     });
   };
   testWizardDraftForActivation = async () => {
-    if (!this.wizardProvider) return;
+    const provider = this.wizardProvider;
+    if (!provider) return;
     await this.run('final-probe', async () => {
-      this.probe = await probeProvider(this.wizardProvider!);
+      this.probe = await probeProvider(provider);
       if (!this.probe.succeeded) throw new Error(this.probe.detail);
       await this.refetchWizardModels();
       this.notice = `Final draft test passed: ${probeSummary(this.probe)}`;
     });
   };
   activateWizardProvider = async () => {
-    if (!this.wizardProvider) return;
+    const provider = this.wizardProvider;
+    if (!provider) return;
     await this.run('activate', async () => {
-      const generation = await activateProvider(this.wizardProvider!);
+      const generation = await activateProvider(provider);
       await this.refetchWizardModels();
       this.wizardStep = 3;
       this.notice = `Provider activated in runtime generation ${generation}.`;
@@ -318,17 +326,16 @@ export class ProviderWizardState {
         ),
       enabled: Boolean(this.providerId)
     }));
-    this.capabilityOptions = createQuery(() => ({
-      queryKey: providerKeys.capabilityOptions(
-        this.wizardProvider?.configuration.kind ?? ''
-      ),
-      queryFn: ({ signal }) =>
-        getProviderCapabilityOptions(
-          this.wizardProvider!.configuration.kind,
-          signal
-        ),
-      enabled: Boolean(this.wizardProvider)
-    }));
+    this.capabilityOptions = createQuery(() => {
+      const kind = this.wizardProvider?.configuration.kind;
+      return {
+        queryKey: providerKeys.capabilityOptions(kind ?? ''),
+        queryFn: kind
+          ? ({ signal }: { signal: AbortSignal }) =>
+              getProviderCapabilityOptions(kind, signal)
+          : skipToken
+      };
+    });
     $effect(() => {
       const first = this.providerKinds.data?.[0];
       if (!this.draft && first) this.draft = createProviderDraft(first);

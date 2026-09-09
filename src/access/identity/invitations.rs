@@ -407,7 +407,7 @@ async fn lock_redeemable_invitation(
     // was minted from. Sessions are revoked when a user is demoted or
     // deactivated; this token must not survive that either, or a former
     // owner's pending invitation still redeems into a live owner.
-    let inviter = sqlx::query_as::<_, LockRedeemableInvitationRow2>(
+    let inviter = sqlx::query_as::<_, InviterAuthorityRow>(
         "SELECT role::text AS \"role\", active FROM users WHERE id = $1",
     )
     .bind(invitation.invited_by)
@@ -518,7 +518,7 @@ struct LockRedeemableInvitationRow {
 }
 
 #[derive(sqlx::FromRow)]
-struct LockRedeemableInvitationRow2 {
+struct InviterAuthorityRow {
     role: String,
     active: bool,
 }

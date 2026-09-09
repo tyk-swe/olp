@@ -5,12 +5,10 @@ use crate::protocols::canonical::events::Event;
 use reqwest::Response;
 use tokio::time::Instant;
 
-use crate::providers::transport_io::ProviderResponseIo;
+use crate::providers::anthropic::transport::errors::RESPONSE_IO;
 use crate::providers::transport_io::event_stream::CanonicalEventDecoder;
 
 use crate::providers::anthropic::transport::operations::Connector;
-
-const RESPONSE_IO: ProviderResponseIo = ProviderResponseIo::new("Anthropic");
 
 impl CanonicalEventDecoder for Decoder {
     type Error = crate::protocols::anthropic::stream::Error;
