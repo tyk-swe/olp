@@ -56,10 +56,7 @@ happy path works. Keep the single-package feature ownership and immutable
 publication model; do not add speculative services, tenant abstractions or
 optimization gates to satisfy a review checklist.
 
-CI compares the generated management OpenAPI contract with the latest published
-stable 3.x release using oasdiff. The first 3.x release establishes that baseline;
-a missing contract on an existing 3.x release fails qualification. Publish the
-generated contract with every release. Breaking changes require an explicit
-new compatibility/versioning decision, not silently updating a fixture. Weekly
-released-image scans retain a digest-specific vulnerability report; triage
+Publish the generated management OpenAPI contract with every release. Breaking
+changes require an explicit compatibility/versioning decision, not silently
+updating a fixture. Weekly released-image scans retain a digest-specific vulnerability report; triage
 findings through SECURITY.md and update the supported patch release.
