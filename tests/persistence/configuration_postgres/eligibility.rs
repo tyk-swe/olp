@@ -20,6 +20,7 @@ pub(super) async fn exercise(
             model_id: Some(adc_model_id),
             name: "vertex-workload-identity".to_owned(),
             configuration: olp::providers::configuration::ProviderConfiguration {
+                options: Default::default(),
                 kind: ProviderKind::VertexAi,
                 endpoint: None,
                 cloud_region: Some("us-central1".to_owned()),
@@ -79,7 +80,8 @@ pub(super) async fn exercise(
     )
     .await
     .unwrap();
-    let adc_runtime: Snapshot = serde_json::from_slice(&adc_activated.release.payload).unwrap();
+    let adc_runtime: Snapshot =
+        Snapshot::from_persisted_slice(&adc_activated.release.payload).unwrap();
     let active = olp::providers::runtime::runtime_provider_configurations(pool, &adc_runtime)
         .await
         .unwrap();
@@ -167,7 +169,8 @@ pub(super) async fn exercise(
     .await
     .unwrap();
     let disabled_release = disabled.release.as_ref().unwrap();
-    let disabled_runtime: Snapshot = serde_json::from_slice(&disabled_release.payload).unwrap();
+    let disabled_runtime: Snapshot =
+        Snapshot::from_persisted_slice(&disabled_release.payload).unwrap();
     assert!(
         !disabled_runtime
             .providers
@@ -278,6 +281,7 @@ pub(super) async fn exercise(
             model_id: Some(compatible_model_id),
             name: "compatible-draft".to_owned(),
             configuration: olp::providers::configuration::ProviderConfiguration {
+                options: Default::default(),
                 kind: ProviderKind::OpenAiCompatible,
                 endpoint: Some("https://compatible.example/v1/".to_owned()),
                 cloud_region: None,
@@ -543,6 +547,7 @@ pub(super) async fn exercise(
         &UpdateProvider {
             name: "compatible-renamed".to_owned(),
             configuration: olp::providers::configuration::ProviderConfiguration {
+                options: Default::default(),
                 endpoint: Some("https://compatible.example/v1/".to_owned()),
                 cloud_region: None,
                 cloud_project: None,
@@ -587,6 +592,7 @@ pub(super) async fn exercise(
         &UpdateProvider {
             name: "compatible-draft".to_owned(),
             configuration: olp::providers::configuration::ProviderConfiguration {
+                options: Default::default(),
                 endpoint: Some("https://compatible-v2.example/v1/".to_owned()),
                 cloud_region: None,
                 cloud_project: None,

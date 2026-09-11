@@ -155,6 +155,13 @@ fn attempt(
             mode,
         },
         attempt: AttemptPlan {
+            connection_limits: None,
+            credential_limits: None,
+            attempt_limit: None,
+            routing_policy: None,
+            credential_slot_id: None,
+            credential_version_id: None,
+            pricing_revision_id: None,
             generation_id: RuntimeGenerationId::new(),
             route_id: RouteId::new(),
             target_id: TargetId::new(),
@@ -276,6 +283,32 @@ async fn collect(connector: &Connector, request: ProviderRequest) -> Vec<Event> 
         events.push(event.unwrap());
     }
     events
+}
+
+#[tokio::test]
+async fn token_defaults_fill_omitted_limits_and_preserve_explicit_limits() {
+    for explicit in [None, Some(32)] {
+        let body = br#"{"id":"msg_1","type":"message","role":"assistant","content":[{"type":"text","text":"reply"}],"model":"claude-sonnet-4-5","stop_reason":"end_turn","stop_sequence":null,"usage":{"input_tokens":2,"output_tokens":2}}"#;
+        let (base, captured) = spawn_mock(MockResponse {
+            chunks: vec![(Duration::ZERO, response("application/json", body))],
+        })
+        .await;
+        let options = crate::providers::options::ConnectionOptions {
+            parameter_defaults: BTreeMap::from([("max_tokens".into(), serde_json::json!(64))]),
+            ..Default::default()
+        };
+        let connector = connector(&base).with_options(options);
+        let mut request = generation(false);
+        let Operation::Generation(generation) = Arc::make_mut(&mut request.operation) else {
+            unreachable!()
+        };
+        generation.parameters.max_output_tokens = explicit;
+        collect(&connector, request).await;
+        let wire = String::from_utf8(captured.await.unwrap()).unwrap();
+        let body: serde_json::Value =
+            serde_json::from_str(wire.split_once("\r\n\r\n").unwrap().1).unwrap();
+        assert_eq!(body["max_tokens"], explicit.unwrap_or(64));
+    }
 }
 
 #[tokio::test]

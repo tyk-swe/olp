@@ -49,6 +49,15 @@ pub(crate) async fn execute(
 
     let streaming = request.metadata.mode == TransportMode::Streaming;
     let body = encode_generation_body(&request, generation, responses_endpoint, streaming).await?;
+    let body = crate::providers::http_options::request_body(
+        &connector.options,
+        if responses_endpoint {
+            "responses"
+        } else {
+            "chat/completions"
+        },
+        body,
+    )?;
 
     let started = Instant::now();
     let attempt_deadline = started + request.attempt.timeout.as_duration();

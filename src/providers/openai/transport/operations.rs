@@ -14,7 +14,7 @@ use crate::providers::transport_common::transport_error;
 impl Connector {
     pub(crate) async fn execute_request(
         &self,
-        request: ProviderRequest,
+        mut request: ProviderRequest,
     ) -> Result<ProviderOutput, TransportError> {
         let provider_kind_matches = match self.auth_style {
             AuthStyle::Bearer => matches!(
@@ -45,6 +45,20 @@ impl Connector {
             ));
         }
         validate_transport_mode(&request)?;
+        let translated = crate::providers::profiles::operation(
+            &request.operation,
+            &self.options,
+            request.attempt.provider_kind,
+        );
+        crate::providers::profiles::validate(&request.operation, &self.options)
+            .map_err(crate::providers::transport_common::protocol_error)?;
+        if let std::borrow::Cow::Owned(operation) = translated {
+            request.operation = std::sync::Arc::new(operation);
+        }
+        let model = self.dispatched_model(&request.attempt.upstream_model);
+        if model != request.attempt.upstream_model {
+            request.attempt.upstream_model = model.to_owned();
+        }
 
         // This dispatcher owns the operation narrowing contract used by each
         // operation module's infallible destructuring below.

@@ -79,9 +79,9 @@ fn validated_route_draft_input(route: &NewRouteDraft) -> Result<(RouteSlug, i32)
             "at least one target is required".to_owned(),
         ));
     }
-    if route.max_attempts == 0 || usize::from(route.max_attempts) > route.targets.len() {
+    if route.max_attempts == 0 || route.max_attempts > i16::MAX as u16 {
         return Err(Error::InvalidRoute(
-            "max_attempts must be between one and the target count".to_owned(),
+            "max_attempts must be between 1 and 32767".to_owned(),
         ));
     }
     let overall_timeout_ms = i32::try_from(route.overall_timeout_ms)
@@ -374,6 +374,8 @@ pub async fn activate_route_draft(
     .bind(actor)
         .execute(&mut *transaction)
         .await?;
+    sqlx::query("UPDATE route_revisions SET routing_policy = (SELECT routing_policy FROM route_drafts WHERE id = $1) WHERE id = $2")
+        .bind(draft_id).bind(revision_id).execute(&mut *transaction).await?;
     populate_route_revision(&mut transaction, draft_id, revision_id).await?;
     let draft_etag = consume_route_draft(&mut transaction, draft_id, expected_etag).await?;
     record_success(

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import RoutingPolicyEditor from '$lib/features/routes/RoutingPolicyEditor.svelte';
   import { apiKeyQueries } from '$lib/features/access/api-keys/apiKeyQueries';
 
   import { goto } from '$app/navigation';
@@ -32,6 +33,8 @@
   const canManage = $derived(access.can('api_keys.manage'));
   let editing = $state<ApiKey | null>(null);
   let busy = $state('');
+  let policyDirty = $state(false);
+  let policyBusy = $state(false);
   let submitError = $state('');
   let notice = $state('');
   let secret = $state<ApiKeySecret | null>(null);
@@ -50,17 +53,20 @@
   });
 
   function edit(key: ApiKey) {
+    policyDirty = policyBusy = false;
     editing = key;
     submitError = notice = '';
   }
 
   function cancelEdit() {
+    if (busy || policyBusy) return;
     editing = null;
+    policyDirty = false;
     submitError = '';
   }
 
   async function submit(input: ApiKeyPolicyInput, route?: string) {
-    if (!canManage) return false;
+    if (!canManage || busy || policyDirty || policyBusy) return false;
     busy = editing ? 'update' : 'create';
     submitError = notice = '';
     try {
@@ -113,7 +119,8 @@
 {#if isForm}
   <ApiKeyPolicyForm
     {editing}
-    {busy}
+    busy={busy || (policyBusy ? 'routing' : '')}
+    publicationBlocked={policyDirty || policyBusy}
     {submitError}
     canManage={canChangeForm}
     onSubmit={submit}
@@ -130,3 +137,17 @@
     onSecret={showRotatedSecret}
   />
 {/if}
+
+{#if editing}<RoutingPolicyEditor
+    scope="api-key"
+    id={editing.id}
+    resourceEtag={editing.etag}
+    canManage={canManage && !busy}
+    bind:dirty={policyDirty}
+    bind:busy={policyBusy}
+    onSaved={(etag, previousEtag) => {
+      if (editing?.etag === previousEtag) {
+        editing = { ...editing, etag };
+      }
+    }}
+  />{/if}

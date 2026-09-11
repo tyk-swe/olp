@@ -188,7 +188,12 @@ pub(crate) async fn models(
     let lease = reserve_model_limits(&state, &principal)
         .await
         .map_err(ProtocolError::anthropic)?;
-    let result = models_response(runtime, key, query);
+    let result = models_response(
+        runtime,
+        key,
+        query,
+        &principal.principal().routing_preferences,
+    );
     release_model_limits(&state, lease).await;
     result
 }
@@ -197,6 +202,7 @@ fn models_response(
     runtime: &Bundle,
     key: &ApiKey,
     query: ModelsQuery,
+    preferences: &crate::routes::policy::RoutingPreferences,
 ) -> Result<Response, ProtocolError> {
     let limit = query.limit.unwrap_or(20);
     if !(1..=1_000).contains(&limit) || (query.before_id.is_some() && query.after_id.is_some()) {
@@ -205,7 +211,7 @@ fn models_response(
             "Model pagination parameters are invalid.",
         ));
     }
-    let all = visible_routes(runtime, key, Surface::Anthropic);
+    let all = visible_routes(runtime, key, Surface::Anthropic, preferences);
     let (selected, has_more) = model_page(&all, &query, limit)?;
     let models = selected
         .iter()
@@ -256,8 +262,14 @@ pub(crate) async fn model(
     let lease = reserve_model_limits(&state, &principal)
         .await
         .map_err(ProtocolError::anthropic)?;
-    let result = visible_route(runtime, key, &id, Surface::Anthropic)
-        .map(|slug| (StatusCode::OK, Json(model_object(runtime, &slug))).into_response());
+    let result = visible_route(
+        runtime,
+        key,
+        &id,
+        Surface::Anthropic,
+        &principal.principal().routing_preferences,
+    )
+    .map(|slug| (StatusCode::OK, Json(model_object(runtime, &slug))).into_response());
     release_model_limits(&state, lease).await;
     result
 }

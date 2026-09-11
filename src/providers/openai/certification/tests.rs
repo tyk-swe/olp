@@ -9,6 +9,37 @@ use crate::providers::openai::ConnectorConfig;
 use crate::providers::openai::Timeouts;
 use crate::providers::openai::certification::*;
 
+#[test]
+fn media_discovery_evidence_must_cover_the_dispatched_deployment() {
+    let mut options = crate::providers::options::ConnectionOptions::default();
+    options.models.insert(
+        "listed-model".into(),
+        crate::providers::options::ModelMetadata {
+            deployment: Some("actual-deployment".into()),
+            ..Default::default()
+        },
+    );
+    let connector = connector("http://127.0.0.1:1/v1").with_options(options, None);
+    let discovered = |model: &str| {
+        vec![crate::inference::transport::DiscoveredProviderModel {
+            id: model.into(),
+            display_name: model.into(),
+        }]
+    };
+    assert_eq!(
+        connector
+            .validate_discovered_model("listed-model", &discovered("listed-model"))
+            .unwrap_err(),
+        CompatibleCapabilityCertificationError::ModelNotDiscovered
+    );
+    connector
+        .validate_discovered_model("listed-model", &discovered("actual-deployment"))
+        .unwrap();
+    connector
+        .validate_discovered_model("ordinary-model", &discovered("ordinary-model"))
+        .unwrap();
+}
+
 #[tokio::test]
 async fn genuine_unary_generation_probe_uses_inference_codec() {
     let body = serde_json::to_vec(&serde_json::json!({
@@ -219,66 +250,28 @@ async fn cross_protocol_and_media_tuples_fail_without_network_calls() {
 }
 
 #[tokio::test]
-async fn native_media_contracts_require_exact_credentialed_discovery() {
-    for capability in [
-        CompatibleCapability {
-            operation: OperationKind::ImageGeneration,
-            surface: Surface::OpenAi,
-            mode: TransportMode::Streaming,
-        },
-        CompatibleCapability {
-            operation: OperationKind::VideoContent,
-            surface: Surface::OpenAi,
-            mode: TransportMode::Unary,
-        },
+async fn custom_endpoints_do_not_inherit_official_native_media_contracts() {
+    let connector = connector("http://127.0.0.1:9/v1/");
+    for operation in [
+        OperationKind::ImageGeneration,
+        OperationKind::VideoContent,
+        OperationKind::Speech,
     ] {
-        let body = serde_json::to_vec(&serde_json::json!({
-            "object": "list",
-            "data": [
-                {"id": "other-model", "object": "model"},
-                {"id": "exact-native-model", "object": "model"}
-            ]
-        }))
-        .unwrap();
-        let (base_url, request) = spawn_json_response(body).await;
-        let evidence = connector(&base_url)
-            .certify_native_openai_capability("exact-native-model", capability)
-            .await
-            .unwrap();
         assert_eq!(
-            evidence,
-            NativeOpenAiCertificationEvidence::ModelDiscoveryAndConnectorContract
-        );
-        let request = utf8(request.await.unwrap());
-        assert!(request.starts_with("GET /v1/models "));
-        assert!(
-            request
-                .to_ascii_lowercase()
-                .contains("authorization: bearer upstream-secret")
+            connector
+                .certify_native_openai_capability(
+                    "exact-native-model",
+                    CompatibleCapability {
+                        operation,
+                        surface: Surface::OpenAi,
+                        mode: TransportMode::Unary
+                    }
+                )
+                .await
+                .unwrap_err(),
+            CompatibleCapabilityCertificationError::Unsupported
         );
     }
-
-    let body = serde_json::to_vec(&serde_json::json!({
-        "object": "list",
-        "data": [{"id": "different-model", "object": "model"}]
-    }))
-    .unwrap();
-    let (base_url, request) = spawn_json_response(body).await;
-    assert_eq!(
-        connector(&base_url)
-            .certify_native_openai_capability(
-                "exact-native-model",
-                CompatibleCapability {
-                    operation: OperationKind::Speech,
-                    surface: Surface::OpenAi,
-                    mode: TransportMode::Unary,
-                },
-            )
-            .await
-            .unwrap_err(),
-        CompatibleCapabilityCertificationError::ModelNotDiscovered
-    );
-    assert!(utf8(request.await.unwrap()).starts_with("GET /v1/models "));
 }
 
 #[tokio::test]

@@ -91,7 +91,7 @@ const compatibleSpec: ProviderKindCapability = {
       label: 'Groq',
       description:
         "Low-latency inference through Groq's OpenAI-compatible API.",
-      endpoint: 'https://api.groq.com/v1',
+      endpoint: 'https://api.groq.com/openai/v1',
       auth_mode: 'api_key',
       maintainer: 'Groq',
       documentation_label: 'OpenAI Compatibility',
@@ -181,15 +181,16 @@ describe('provider editor capability policy', () => {
     );
     expect(draft).toMatchObject({
       presetId: 'groq',
-      endpoint: 'https://api.groq.com/v1',
+      endpoint: 'https://api.groq.com/openai/v1',
       authMode: 'api_key'
     });
     const input = buildCreateProviderInput(draft, compatibleSpec);
     expect(input.configuration).toMatchObject({
       kind: 'openai_compatible',
-      endpoint: 'https://api.groq.com/v1',
+      endpoint: 'https://api.groq.com/openai/v1',
       auth_mode: 'api_key'
     });
+    expect(input.configuration.options?.vendor_id).toBe('groq');
     expect(input).not.toHaveProperty('preset_id');
 
     expect(selectProviderPreset(draft, compatibleSpec, '')).toBeNull();
@@ -274,6 +275,13 @@ describe('provider editor API mappings', () => {
       model: 'deployment-probe',
       display_name: 'production-azure',
       configuration: {
+        options: {
+          vendor_id: null,
+          limits: null,
+          credential_headers: [],
+          parameter_defaults: {},
+          models: {}
+        },
         kind: 'azure_openai',
         endpoint: 'https://resource.openai.azure.com',
         api_version: '2026-01-01',

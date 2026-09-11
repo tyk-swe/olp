@@ -79,15 +79,32 @@ enum ResponseKind {
 }
 
 pub struct Connector {
+    options: crate::providers::options::ConnectionOptions,
+    custom_headers: Option<HeaderMap>,
     pub(crate) config: ConnectorConfig,
     pub(crate) credential: ConnectorCredential,
     pub(crate) provider_kind: ProviderKind,
 }
 
 impl Connector {
+    pub(crate) fn with_options(
+        mut self,
+        options: crate::providers::options::ConnectionOptions,
+    ) -> Self {
+        self.options = options;
+        self
+    }
+
+    pub(crate) fn with_headers(mut self, headers: Option<HeaderMap>) -> Self {
+        self.custom_headers = headers;
+        self
+    }
+
     #[must_use]
     pub fn new(config: ConnectorConfig, api_key: ApiKey) -> Self {
         Self {
+            custom_headers: None,
+            options: Default::default(),
             config,
             credential: ConnectorCredential::ApiKey(api_key),
             provider_kind: ProviderKind::Gemini,
@@ -103,6 +120,8 @@ impl Connector {
         provider: std::sync::Arc<dyn BearerTokenProvider>,
     ) -> Self {
         Self {
+            custom_headers: None,
+            options: Default::default(),
             config,
             credential: ConnectorCredential::Bearer(provider),
             provider_kind,
@@ -265,10 +284,29 @@ impl Connector {
 
     async fn execute_request(
         &self,
-        request: ProviderRequest,
+        mut request: ProviderRequest,
     ) -> Result<ProviderOutput, TransportError> {
         validate_request_envelope(&request, self.provider_kind)?;
+        if let Some(deployment) = self
+            .options
+            .models
+            .get(&request.attempt.upstream_model)
+            .and_then(|m| m.deployment.as_ref())
+        {
+            request.attempt.upstream_model = deployment.clone();
+        }
         let (url, body, response_kind, streaming) = self.encode_request(&request).await?;
+        let body = crate::providers::http_options::request_body(
+            &self.options,
+            if request.metadata.operation
+                == crate::protocols::canonical::identity::OperationKind::Generation
+            {
+                "generation"
+            } else {
+                "token_count"
+            },
+            body,
+        )?;
         let attempt_deadline = Instant::now() + request.attempt.timeout.as_duration();
         let connect_timeout = bounded_duration(
             self.config.timeouts.connect,
@@ -467,6 +505,7 @@ impl Connector {
         attempt_deadline: Instant,
     ) -> TransportError {
         let status = response.status();
+        let mut mapped_status = status;
         let headers = response.headers().clone();
         let deadline = Instant::now() + self.config.timeouts.first_byte;
         let message = match RESPONSE_IO
@@ -479,28 +518,59 @@ impl Connector {
             )
             .await
         {
-            Ok(body) => self.safe_upstream_error_message(status, &body),
+            Ok(body) => {
+                if matches!(status, StatusCode::BAD_REQUEST | StatusCode::FORBIDDEN)
+                    && serde_json::from_slice::<serde_json::Value>(&body).is_ok_and(|value| {
+                        value
+                            .pointer("/error/details")
+                            .and_then(serde_json::Value::as_array)
+                            .is_some_and(|details| {
+                                details.iter().any(|detail| {
+                                    detail["@type"] == "type.googleapis.com/google.rpc.ErrorInfo"
+                                        && detail["reason"] == "API_KEY_INVALID"
+                                })
+                            })
+                    })
+                {
+                    mapped_status = StatusCode::UNAUTHORIZED;
+                }
+                self.safe_upstream_error_message(status, &body)
+            }
             Err(_) => format!("Gemini returned HTTP {status}"),
         };
-        upstream_response_error(TransportPhase::FirstByte, status, &headers, message)
+        upstream_response_error(TransportPhase::FirstByte, mapped_status, &headers, message)
     }
 
     async fn insert_authentication_header(
         &self,
         headers: &mut HeaderMap,
     ) -> Result<(), TransportError> {
+        if let Some(custom) = &self.custom_headers {
+            headers.extend(custom.clone());
+            return Ok(());
+        }
         match &self.credential {
             ConnectorCredential::ApiKey(api_key) => {
                 headers.insert("x-goog-api-key", secret_header(api_key)?);
             }
             ConnectorCredential::Bearer(provider) => {
-                let token = provider.token().await.map_err(|_| {
-                    transport_error(
+                let token = provider.token().await.map_err(|error| match error {
+                    crate::providers::gemini::BearerTokenError::Authentication => {
+                        // Token rejection precedes inference dispatch. Normalize
+                        // it to the credential failure signal used by slot failover.
+                        upstream_response_error(
+                            TransportPhase::Connect,
+                            StatusCode::UNAUTHORIZED,
+                            &HeaderMap::new(),
+                            "Google OAuth credential was rejected",
+                        )
+                    }
+                    crate::providers::gemini::BearerTokenError::Unavailable => transport_error(
                         TransportPhase::Connect,
                         AttemptFailureClass::Connect,
                         false,
                         "Google OAuth bearer token acquisition failed",
-                    )
+                    ),
                 })?;
                 headers.insert(header::AUTHORIZATION, bearer_header(&token)?);
             }
@@ -509,6 +579,9 @@ impl Connector {
     }
 
     fn safe_upstream_error_message(&self, status: StatusCode, body: &[u8]) -> String {
+        if self.custom_headers.is_some() {
+            return format!("Google provider returned HTTP {status}");
+        }
         match &self.credential {
             ConnectorCredential::ApiKey(api_key) => {
                 safe_upstream_error_message(status, body, api_key.expose())
@@ -536,7 +609,12 @@ impl ProviderTransport for Connector {
         &'a self,
         request: ProviderRequest,
     ) -> crate::inference::transport::BoxFuture<'a, Result<ProviderOutput, TransportError>> {
-        Box::pin(async move { self.execute_request(request).await })
+        Box::pin(async move {
+            crate::providers::http_options::redact_output_errors(
+                self.execute_request(request).await,
+                self.custom_headers.is_some(),
+            )
+        })
     }
 }
 

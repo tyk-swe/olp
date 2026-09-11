@@ -30,6 +30,8 @@ struct Fixture {
 #[derive(Clone, Copy, Debug)]
 enum Mutation {
     Endpoint,
+    Options,
+    Quota,
     Credential,
     Model,
     Capability,
@@ -118,6 +120,7 @@ impl Fixture {
 
     fn reservation(&self) -> NewMediaJobReservation {
         NewMediaJobReservation {
+            credential_version_id: None,
             id: Uuid::now_v7(),
             runtime_generation_id: self.generation_id,
             api_key_id: self.api_key_id,
@@ -139,6 +142,14 @@ impl Fixture {
             .await
             .unwrap();
         match mutation {
+            Mutation::Quota => {
+                sqlx::query("UPDATE providers SET options = '{\"limits\":{\"requests_per_minute\":1}}' WHERE id = $1")
+                    .bind(self.provider_id).execute(&self.pool).await.unwrap();
+            }
+            Mutation::Options => {
+                sqlx::query("UPDATE providers SET options = '{\"models\":{\"video-model\":{\"deployment\":\"new-deployment\"}}}' WHERE id = $1")
+                    .bind(self.provider_id).execute(&self.pool).await.unwrap();
+            }
             Mutation::Endpoint => {
                 sqlx::query(
                     "UPDATE providers SET endpoint = 'https://new.example.test/v1/' WHERE id = $1",
@@ -264,6 +275,7 @@ async fn create_provider(pool: &PgPool, actor: Uuid, provider_id: Uuid, model_id
             model_id: Some(model_id),
             name: "media-provider".to_owned(),
             configuration: olp::providers::configuration::ProviderConfiguration {
+                options: Default::default(),
                 kind: "openai".parse().unwrap(),
                 endpoint: Some("https://old.example.test/v1/".to_owned()),
                 cloud_region: None,
@@ -326,11 +338,13 @@ async fn blocked_backend(pool: &PgPool, blocker: i32) -> i32 {
 async fn reservation_first_blocks_incompatible_activation_and_disable() {
     for mutation in [
         Mutation::Endpoint,
+        Mutation::Options,
         Mutation::Credential,
         Mutation::Model,
         Mutation::Capability,
         Mutation::Disable,
         Mutation::Compatible,
+        Mutation::Quota,
     ] {
         let (db, mut fixture) = Fixture::create().await;
         fixture.stage(mutation).await;
@@ -361,8 +375,64 @@ async fn reservation_first_blocks_incompatible_activation_and_disable() {
                 matches!(result, Err(Error::InUse)),
                 "{mutation:?}: {result:?}"
             );
-        } else if matches!(mutation, Mutation::Compatible) {
+        } else if matches!(
+            mutation,
+            Mutation::Compatible | Mutation::Credential | Mutation::Quota
+        ) {
             assert!(result.is_ok(), "{mutation:?}: {result:?}");
+            if matches!(mutation, Mutation::Credential) {
+                let old = job
+                    .credential_version_id
+                    .expect("reservation pins the original credential");
+                let current: Uuid = sqlx::query_scalar(
+                    "SELECT active_credential_version_id FROM providers WHERE id=$1",
+                )
+                .bind(fixture.provider_id)
+                .fetch_one(&fixture.pool)
+                .await
+                .unwrap();
+                assert_ne!(old, current);
+                let revoked: bool = sqlx::query_scalar(
+                    "SELECT revoked_at IS NOT NULL FROM provider_credential_versions WHERE id=$1",
+                )
+                .bind(old)
+                .fetch_one(&fixture.pool)
+                .await
+                .unwrap();
+                assert!(
+                    !revoked,
+                    "live media credentials remain recoverable after rotation"
+                );
+                let release = olp::runtime::publication::releases::valid_runtime_release(
+                    &fixture.pool,
+                    fixture.generation_id,
+                )
+                .await
+                .unwrap();
+                let snapshot = olp::runtime::manager::Manager::decode_persisted_release(
+                    &release.activation_candidate(),
+                )
+                .unwrap();
+                let recovered = olp::providers::runtime::media_job_runtime_provider_configuration(
+                    &fixture.pool,
+                    &snapshot,
+                    olp::ids::ProviderId::from_uuid(fixture.provider_id),
+                    fixture.revision_id,
+                    Some(old),
+                )
+                .await
+                .unwrap();
+                assert_eq!(recovered.credential_id, Some(old));
+                assert_eq!(
+                    &*MasterKey::new(1, [17; 32])
+                        .open(
+                            recovered.encrypted_credential.as_ref().unwrap(),
+                            &credential(fixture.provider_id, old, 1)
+                        )
+                        .unwrap(),
+                    b"original-test-secret"
+                );
+            }
         } else {
             assert!(
                 matches!(result, Err(Error::ProviderMediaJobIncompatible { job_id }) if job_id == job.id),
@@ -379,11 +449,13 @@ async fn reservation_first_blocks_incompatible_activation_and_disable() {
 async fn mutation_first_rejects_incompatible_pins_and_preserves_compatible_older_authority() {
     for mutation in [
         Mutation::Endpoint,
+        Mutation::Options,
         Mutation::Credential,
         Mutation::Model,
         Mutation::Capability,
         Mutation::Disable,
         Mutation::Compatible,
+        Mutation::Quota,
     ] {
         let (db, mut fixture) = Fixture::create().await;
         fixture.stage(mutation).await;
@@ -409,7 +481,7 @@ async fn mutation_first_rejects_incompatible_pins_and_preserves_compatible_older
         barrier.commit().await.unwrap();
         mutation_task.await.unwrap().unwrap();
         let result = reservation.await.unwrap();
-        if matches!(mutation, Mutation::Compatible) {
+        if matches!(mutation, Mutation::Compatible | Mutation::Quota) {
             let job = result.unwrap();
             assert_eq!(job.provider_revision_id, fixture.revision_id);
             assert_eq!(job.runtime_generation_id, fixture.generation_id);
@@ -420,6 +492,16 @@ async fn mutation_first_rejects_incompatible_pins_and_preserves_compatible_older
                     .await
                     .unwrap();
             assert_ne!(current, fixture.revision_id);
+            assert!(
+                olp::providers::runtime::runtime_provider_authority_is_current(
+                    &fixture.pool,
+                    fixture.generation_id,
+                    fixture.provider_id,
+                    fixture.revision_id,
+                )
+                .await
+                .unwrap()
+            );
         } else {
             assert!(
                 matches!(result, Err(MediaJobError::Invalid(_))),

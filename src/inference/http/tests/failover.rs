@@ -1,5 +1,66 @@
 use crate::inference::http::tests::*;
 
+#[tokio::test]
+async fn disabling_fallbacks_keeps_the_selected_single_attempt_budget() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    struct Unreachable(Arc<AtomicUsize>);
+    impl ProviderTransport for Unreachable {
+        fn execute(
+            &self,
+            _: ProviderRequest,
+        ) -> BoxFuture<'_, Result<ProviderOutput, TransportError>> {
+            self.0.fetch_add(1, Ordering::SeqCst);
+            Box::pin(async {
+                Err(TransportError {
+                    phase: crate::inference::transport::TransportPhase::Connect,
+                    class: crate::inference::transport::AttemptFailureClass::Connect,
+                    response_committed: false,
+                    message: "connection failed".into(),
+                    upstream: Default::default(),
+                })
+            })
+        }
+    }
+    for (no_fallbacks, expected) in [(true, 1), (false, 2)] {
+        let (state, key) = test_state(false);
+        let pinned = state.runtime().pin();
+        let mut snapshot = Snapshot::clone(&pinned);
+        snapshot.generation.id = RuntimeGenerationId::new();
+        snapshot.generation.ordinal += 1;
+        snapshot.routes.values_mut().next().unwrap().max_attempts = NonZeroU16::new(3).unwrap();
+        let provider = *snapshot.providers.keys().next().unwrap();
+        let calls = Arc::new(AtomicUsize::new(0));
+        state
+            .runtime()
+            .install(
+                snapshot,
+                BTreeMap::from([(
+                    provider,
+                    Arc::new(Unreachable(calls.clone())) as Arc<dyn ProviderTransport>,
+                )]),
+            )
+            .unwrap();
+        let mut request = Request::post("/v1/chat/completions")
+            .header(header::AUTHORIZATION, format!("Bearer {key}"))
+            .header(header::CONTENT_TYPE, "application/json");
+        if no_fallbacks {
+            request = request.header("x-olp-routing", r#"{"allow_fallbacks":false}"#);
+        }
+        let response = crate::http::router::gateway_router_for_test(state)
+            .oneshot(
+                request
+                    .body(Body::from(
+                        r#"{"model":"default","messages":[{"role":"user","content":"hello"}]}"#,
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
+        assert_eq!(calls.load(Ordering::SeqCst), expected);
+    }
+}
+
 fn install_hard_limits(state: &GatewayState) {
     let pinned = state.runtime().pin();
     let mut api_keys = pinned.api_keys.clone();
@@ -61,6 +122,7 @@ async fn required_target_unavailability_is_normalized_by_shared_execution_kernel
         operation,
         TransportMode::Unary,
         Some(RequiredTarget {
+            credential_version_id: None,
             provider_id: uuid::Uuid::now_v7(),
             upstream_model: "unavailable-model".to_owned(),
         }),

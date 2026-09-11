@@ -147,7 +147,8 @@
           >{[
             revisionDiff.slug_changed && 'slug',
             revisionDiff.timeout_changed && 'deadline',
-            revisionDiff.max_attempts_changed && 'attempts'
+            revisionDiff.max_attempts_changed && 'attempts',
+            revisionDiff.routing_policy_changed && 'routing policy'
           ]
             .filter(Boolean)
             .join(', ') || 'unchanged'}</strong
@@ -192,6 +193,27 @@
             >None</strong
           >{/if}
       </article>
+      {#if revisionDiff.routing_policy_changed}<article
+          class="card policy-diff"
+        >
+          <p>Routing policy changes</p>
+          <details open>
+            <summary>Before · Revision {revisionDiff.from_revision}</summary>
+            <pre>{JSON.stringify(
+                revisionDiff.routing_policy_before,
+                null,
+                2
+              )}</pre>
+          </details>
+          <details open>
+            <summary>After · Revision {revisionDiff.to_revision}</summary>
+            <pre>{JSON.stringify(
+                revisionDiff.routing_policy_after,
+                null,
+                2
+              )}</pre>
+          </details>
+        </article>{/if}
     </section>
   {/if}
   <div class="table-shell revision-table-shell">
@@ -210,7 +232,11 @@
                 >{revision.id}</code
               ><br /><small
                 >From draft <code>{revision.source_draft_id}</code></small
-              ></td
+              >
+              <details>
+                <summary>Routing policy</summary>
+                <pre>{JSON.stringify(revision.routing_policy, null, 2)}</pre>
+              </details></td
             ><td data-label="Activated"
               >{formatDate(revision.activated_at)}<br /><small
                 >By {revision.activated_by}</small
@@ -237,6 +263,17 @@
 {/if}
 
 <style>
+  .policy-diff {
+    grid-column: 1 / -1;
+  }
+  pre {
+    max-width: 40rem;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+  summary {
+    cursor: pointer;
+  }
   h2 {
     margin: 0 0 0.75rem;
     font-size: 1.15rem;

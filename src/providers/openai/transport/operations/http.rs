@@ -24,6 +24,7 @@ impl Connector {
         path: &str,
         body: Vec<u8>,
     ) -> Result<DeadlineResponse, TransportError> {
+        let body = crate::providers::http_options::request_body(&self.options, path, body)?;
         let started = Instant::now();
         let attempt_deadline = started + request.attempt.timeout.as_duration();
         let connect_timeout = bounded_duration(
@@ -141,6 +142,7 @@ impl Connector {
         headers.insert(header::ACCEPT, HeaderValue::from_static(accept));
         let mut builder = client.request(method, url).headers(headers);
         if let Some(body) = body {
+            let body = crate::providers::http_options::request_body(&self.options, path, body)?;
             builder = builder
                 .header(header::CONTENT_TYPE, "application/json")
                 .body(body);
@@ -212,6 +214,7 @@ impl Connector {
         path: &str,
         body: Vec<u8>,
     ) -> Result<Vec<u8>, TransportError> {
+        let body = crate::providers::http_options::request_body(&self.options, path, body)?;
         let started = Instant::now();
         let attempt_deadline = started + request.attempt.timeout.as_duration();
         let connect_timeout = bounded_duration(
@@ -272,6 +275,7 @@ impl Connector {
         )
         .await
         {
+            Ok(_) if self.custom_headers.is_some() => format!("Provider returned HTTP {status}"),
             Ok(body) => safe_upstream_error_message(status, &body, self.api_key.expose()),
             Err(_) => format!("OpenAI returned HTTP {status}"),
         };

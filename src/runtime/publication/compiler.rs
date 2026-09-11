@@ -89,13 +89,37 @@ pub async fn compile_and_publish_runtime(
 pub async fn current_runtime_api_keys(
     pool: &sqlx::PgPool,
 ) -> Result<BTreeMap<ApiKeyLookupId, ApiKey>, RuntimeCompileError> {
+    Ok(current_runtime_authority(pool).await?.api_keys)
+}
+
+pub(crate) struct CurrentRuntimeAuthority {
+    pub api_keys: BTreeMap<ApiKeyLookupId, ApiKey>,
+    pub installation: crate::routes::policy::RoutingPolicy,
+    pub routes: BTreeMap<RouteSlug, crate::routes::policy::RoutingPolicy>,
+    pub credentials: BTreeMap<ProviderId, Vec<crate::providers::pool::CredentialSlot>>,
+    pub connection_limits: BTreeMap<ProviderId, crate::providers::options::ConnectionLimits>,
+}
+pub(crate) async fn current_runtime_authority(
+    pool: &sqlx::PgPool,
+) -> Result<CurrentRuntimeAuthority, RuntimeCompileError> {
     let mut transaction = pool
         .begin_with("BEGIN ISOLATION LEVEL READ COMMITTED")
         .await?;
     prepare_runtime_mutation(&mut transaction).await?;
     let api_keys = compile_api_keys(&mut transaction).await?;
+    let installation = crate::routes::policy_store::installation_policy(&mut transaction).await?;
+    let routes = crate::routes::policy_store::route_policies(&mut transaction).await?;
+    let credentials = crate::routes::policy_store::credential_slots(&mut transaction).await?;
+    let connection_limits =
+        crate::routes::policy_store::connection_limits(&mut transaction).await?;
     transaction.commit().await?;
-    Ok(api_keys)
+    Ok(CurrentRuntimeAuthority {
+        api_keys,
+        installation,
+        routes,
+        credentials,
+        connection_limits,
+    })
 }
 
 pub(crate) async fn prepare_runtime_mutation(
@@ -128,7 +152,7 @@ pub(crate) async fn compile_and_publish_runtime_in_transaction(
     snapshot
         .validate()
         .map_err(|error| RuntimeCompileError::InvalidConfiguration(error.to_string()))?;
-    let preliminary_payload = serde_json::to_vec(&snapshot)?;
+    let preliminary_payload = snapshot.to_persisted_vec()?;
     let preliminary_sha: [u8; 32] = Sha256::digest(&preliminary_payload).into();
     let generation_id = snapshot.generation.id.as_uuid();
     let now = Utc::now();
@@ -147,9 +171,9 @@ pub(crate) async fn compile_and_publish_runtime_in_transaction(
     sqlx::query(
         "INSERT INTO runtime_generation_provider_configs \
          (runtime_generation_id, provider_id, kind, endpoint, cloud_region, cloud_project, \
-          deployment, api_version, auth_mode, active_credential_version_id, provider_revision_id) \
+          deployment, api_version, auth_mode, options, active_credential_version_id, provider_revision_id) \
          SELECT $1, p.id, pr.kind, pr.endpoint, pr.cloud_region, pr.cloud_project, pr.deployment, \
-                pr.api_version, pr.auth_mode, pr.credential_version_id, pr.id \
+                pr.api_version, pr.auth_mode, pr.options, pr.credential_version_id, pr.id \
          FROM providers p JOIN provider_revisions pr ON pr.id = p.active_revision_id \
          WHERE p.state <> 'disabled'::provider_state",
     )
@@ -162,7 +186,7 @@ pub(crate) async fn compile_and_publish_runtime_in_transaction(
         )
     })?;
     snapshot.generation.activated_at = now;
-    let payload = serde_json::to_vec(&snapshot)?;
+    let payload = snapshot.to_persisted_vec()?;
     let sha256: [u8; 32] = Sha256::digest(&payload).into();
     sqlx::query(
         "UPDATE runtime_generations SET compiled_release = $1, release_sha256 = $2 WHERE id = $3",
@@ -196,7 +220,7 @@ pub(crate) async fn compile_and_publish_runtime_in_transaction(
     })
 }
 
-async fn compile_snapshot(
+pub(crate) async fn compile_snapshot(
     transaction: &mut Transaction<'_, Postgres>,
 ) -> Result<Snapshot, RuntimeCompileError> {
     let mut providers = BTreeMap::new();
@@ -253,6 +277,7 @@ async fn compile_snapshot(
     let api_keys = compile_api_keys(transaction).await?;
 
     Ok(Snapshot {
+        routing: crate::routes::policy_store::load(transaction).await?,
         generation: RuntimeGeneration {
             id: RuntimeGenerationId::new(),
             ordinal: 0,
@@ -386,7 +411,7 @@ async fn compile_api_keys(
     transaction: &mut Transaction<'_, Postgres>,
 ) -> Result<BTreeMap<ApiKeyLookupId, ApiKey>, RuntimeCompileError> {
     let key_rows = sqlx::query_as::<_, CompileApiKeysRow>(
-        "SELECT id, lookup_id, secret_digest, expires_at, requests_per_minute, \
+        "SELECT id, lookup_id, secret_digest, expires_at, routing_policy, requests_per_minute, \
                 tokens_per_minute, max_concurrency, daily_cost_limit, monthly_cost_limit \
          FROM api_keys WHERE revoked_at IS NULL AND (expires_at IS NULL OR expires_at > now()) \
          ORDER BY lookup_id",
@@ -452,6 +477,7 @@ async fn compile_api_keys(
         api_keys.insert(
             lookup_id.clone(),
             ApiKey {
+                routing_policy: row.routing_policy.0,
                 id: ApiKeyId::from_uuid(id),
                 lookup_id,
                 digest: ApiKeyDigest::new(digest),
@@ -651,6 +677,7 @@ struct RouteRevisionTargetRow {
 
 #[derive(sqlx::FromRow)]
 struct CompileApiKeysRow {
+    routing_policy: sqlx::types::Json<crate::routes::policy::RoutingPolicy>,
     id: uuid::Uuid,
     lookup_id: String,
     secret_digest: Vec<u8>,

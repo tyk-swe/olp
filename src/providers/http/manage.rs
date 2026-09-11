@@ -35,7 +35,6 @@ use crate::http::control::preconditions::with_etag;
 use crate::http::control::state::ManagementState;
 use crate::http::problem::FieldErrors;
 use crate::http::problem::Problem;
-use crate::providers::connect::provider_connector;
 
 use crate::http::control::provenance::Provenance;
 use crate::providers::http::credentials::ProviderMutationResponse;
@@ -43,6 +42,7 @@ use crate::providers::http::record_violations;
 
 #[derive(Clone, Debug, Serialize, ToSchema)]
 pub(crate) struct ProviderSummaryResponse {
+    pub vendor_id: Option<String>,
     pub id: Uuid,
     pub name: String,
     pub kind: ProviderKind,
@@ -70,6 +70,12 @@ impl From<ProviderDetailResponse> for ProviderSummaryResponse {
         Self {
             id: value.id,
             name: value.name,
+            vendor_id: crate::providers::catalog::effective_vendor(
+                value.configuration.options.vendor_id.as_deref(),
+                value.configuration.kind,
+                value.configuration.endpoint.as_deref(),
+            )
+            .map(str::to_owned),
             kind: value.configuration.kind,
             state: value.state,
             connector_ready: value.connector_ready,
@@ -169,12 +175,21 @@ pub(crate) struct ProviderListResponse {
     pub next_cursor: Option<String>,
 }
 
+#[derive(Debug, Deserialize, utoipa::IntoParams)]
+#[into_params(parameter_in=Query)]
+pub(crate) struct ProviderListQuery {
+    cursor: Option<String>,
+    #[param(minimum = 1, maximum = 200)]
+    limit: Option<u16>,
+    search: Option<String>,
+}
+
 #[utoipa::path(
     get,
     path = "/api/v3/providers",
     tag = "providers",
     params(
-        PageQuery,
+        ProviderListQuery,
     ),
     responses(
         (status = 200, body = ProviderListResponse),
@@ -185,15 +200,29 @@ pub(crate) struct ProviderListResponse {
     security(("sessionCookie" = [])))]
 pub(crate) async fn list_providers(
     State(state): State<ManagementState>,
-    Query(query): Query<PageQuery>,
+    Query(query): Query<ProviderListQuery>,
     ReadPrincipal(principal): ReadPrincipal,
 ) -> Result<Json<ProviderListResponse>, Problem> {
     require_permission(&principal, Permission::ReadConfiguration)?;
-    let (cursor, limit) = page(query)?;
-    let page =
-        crate::providers::repository::list_providers(&state.request_boundary.pool, cursor, limit)
-            .await
-            .map_err(map_configuration)?;
+    let search = query.search.unwrap_or_default();
+    if search.len() > 200 {
+        return Err(Problem::field_validation(
+            "search",
+            "Search must be at most 200 bytes",
+        ));
+    }
+    let (cursor, limit) = page(PageQuery {
+        cursor: query.cursor,
+        limit: query.limit,
+    })?;
+    let page = crate::providers::repository::list_providers(
+        &state.request_boundary.pool,
+        cursor,
+        limit,
+        &search,
+    )
+    .await
+    .map_err(map_configuration)?;
     Ok(Json(ProviderListResponse {
         items: page.items.into_iter().map(Into::into).collect(),
         next_cursor: page.next_cursor.map(|value| value.to_string()),
@@ -464,7 +493,7 @@ pub(crate) async fn probe_provider(
     require_permission(&principal, Permission::ManageProviders)?;
     let pool = &state.request_boundary.pool;
     let expected_etag = if_match(&headers)?;
-    let provider = crate::providers::repository::get_provider(pool, provider_id)
+    let mut provider = crate::providers::repository::get_provider(pool, provider_id)
         .await
         .map_err(map_configuration)?;
     if provider.etag != expected_etag {
@@ -472,11 +501,93 @@ pub(crate) async fn probe_provider(
             crate::providers::error::Error::PreconditionFailed,
         ));
     }
-    let connector = provider_connector(&state, provider_id).await?;
+    let slots = crate::providers::pool_store::list(pool, provider_id)
+        .await
+        .map_err(map_configuration)?;
+    let selected = slots
+        .iter()
+        .find(|slot| slot.id == provider_id && slot.enabled)
+        .or_else(|| slots.iter().find(|slot| slot.enabled));
+    if let Some(model) = selected.and_then(|slot| slot.allowed_models.first()) {
+        provider.configuration.probe_model = Some(model.clone());
+    }
+    let connector = crate::providers::connect::provider_connector_for_model(
+        &state,
+        provider_id,
+        provider.configuration.probe_model.as_deref(),
+    )
+    .await?;
     // Configuration-only checks are intentionally not accepted as activation
     // evidence. A probe always performs a bounded credentialed upstream call,
     // and persistence binds the result to the exact ETag captured above.
-    let probe = connector.discover_models().await;
+    let manual_vendor = provider
+        .configuration
+        .options
+        .vendor_id
+        .as_deref()
+        .and_then(crate::providers::catalog::vendor)
+        .filter(|vendor| !vendor.discovery);
+    let probe = if let Some(vendor) = manual_vendor {
+        let model = provider
+            .configuration
+            .probe_model
+            .as_deref()
+            .ok_or_else(|| {
+                Problem::field_validation("model", "Add a model before testing this provider")
+            })?;
+        let operation = if vendor.id == "voyage" {
+            crate::protocols::canonical::identity::OperationKind::Embeddings
+        } else {
+            crate::protocols::canonical::identity::OperationKind::Generation
+        };
+        let capability = crate::providers::openai::certification::CompatibleCapability {
+            operation,
+            surface: crate::protocols::canonical::identity::Surface::OpenAi,
+            mode: crate::protocols::canonical::identity::TransportMode::Unary,
+        };
+        let result = connector.certify_capability(model, capability).await;
+        let result = if vendor.id == "cohere" && result.is_err() {
+            connector
+                .certify_capability(
+                    model,
+                    crate::providers::openai::certification::CompatibleCapability {
+                        operation: crate::protocols::canonical::identity::OperationKind::Embeddings,
+                        ..capability
+                    },
+                )
+                .await
+        } else {
+            result
+        };
+        result.map(|_| Vec::new()).map_err(|e| e.to_string())
+    } else {
+        connector.discover_models().await
+    };
+    let probe = match probe {
+        Ok(models) => {
+            if let Some(default) = slots.iter().find(|slot| {
+                slot.id == provider_id && slot.enabled && slot.credential_version_id.is_some()
+            }) {
+                // Seed declarations may precede model review. Activation requires
+                // every enabled tuple to be certified; certification itself checks
+                // current credentials, and this probe rechecks existing contracts
+                // after rotation without blocking initial connection setup.
+                crate::providers::pool_store::validate_model_access(
+                    pool,
+                    provider_id,
+                    &default.allowed_models,
+                    &connector,
+                    true,
+                )
+                .await
+                .map(|_| models)
+                .map_err(|error| error.to_string())
+            } else {
+                Ok(models)
+            }
+        }
+        Err(error) => Err(error),
+    };
     let (succeeded, detail, discovered_models) = match probe {
         Ok(models) => (
             true,
@@ -498,6 +609,15 @@ pub(crate) async fn probe_provider(
     .map_err(map_configuration)?;
     if !succeeded {
         return Err(Problem::field_validation("provider", detail));
+    }
+    if let Some(backend) = state.request_boundary.inference.limiter.current() {
+        crate::providers::pool_transport::clear_cooldowns(
+            backend.as_ref(),
+            provider_id,
+            provider_id,
+            provider.draft_credential_id,
+        )
+        .await;
     }
     with_etag(
         Json(ProbeResponse {

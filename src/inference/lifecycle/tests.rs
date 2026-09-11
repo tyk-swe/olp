@@ -30,6 +30,10 @@ struct RecordingLease {
 }
 
 impl LimitLease for RecordingLease {
+    fn refund(&self) -> BoxFuture<'_, Result<(), LimitError>> {
+        Box::pin(async { panic!("This fixture does not refund provider admission") })
+    }
+
     fn reconcile(&self, actual_tokens: i64) -> BoxFuture<'_, Result<(), LimitError>> {
         self.effects
             .reconciled_tokens
@@ -169,6 +173,7 @@ async fn cleanup_reconciles_full_usage_against_the_only_existing_reservation() {
 fn final_streaming_usage_is_attached_to_the_final_attempt() {
     let mut attempt = uncertain_attempt();
     let usage = UsageCapture {
+        first_output_at: None,
         observed: true,
         complete: true,
         settled: true,
@@ -227,6 +232,7 @@ fn a_stream_that_never_reached_done_is_priced_as_an_estimate() {
     let mut attempt = uncertain_attempt();
     let error = Some("client_cancelled".to_owned());
     let usage = UsageCapture {
+        first_output_at: None,
         observed: true,
         complete: true,
         settled: false,
@@ -349,6 +355,7 @@ async fn a_request_without_upstream_work_refunds_its_whole_reservation() {
 fn uncertain_attempt() -> RequestAttemptMetadata {
     let now = Utc::now();
     RequestAttemptMetadata {
+        routing: None,
         id: Uuid::now_v7(),
         ordinal: 1,
         provider_id: Uuid::now_v7(),

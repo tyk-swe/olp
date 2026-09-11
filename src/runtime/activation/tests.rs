@@ -36,6 +36,7 @@ impl ProviderTransport for UnusedTransport {
 
 fn activator() -> RuntimeActivator {
     RuntimeActivator {
+        limiter: Default::default(),
         runtime: Arc::new(Manager::empty()),
         pool: PgPoolOptions::new()
             .connect_lazy("postgres://localhost/activation_unit_test")
@@ -55,6 +56,7 @@ fn snapshot(ordinal: u64, target_ids: &[TargetId]) -> Snapshot {
     let provider_id = ProviderId::new();
     let slug = RouteSlug::parse("activation-test").unwrap();
     Snapshot {
+        routing: Default::default(),
         generation: RuntimeGeneration {
             id: RuntimeGenerationId::new(),
             ordinal,

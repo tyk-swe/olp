@@ -117,6 +117,19 @@ const API_KEY_AUTH: [ProviderAuthModeSpec; 1] = [ProviderAuthModeSpec {
     label: "Stored API key",
     credential: CredentialRequirement::Required,
 }];
+const HTTP_AUTH: [ProviderAuthModeSpec; 3] = [
+    API_KEY_AUTH[0],
+    ProviderAuthModeSpec {
+        mode: ProviderAuthMode::None,
+        label: "No authentication (custom endpoint)",
+        credential: CredentialRequirement::Forbidden,
+    },
+    ProviderAuthModeSpec {
+        mode: ProviderAuthMode::Headers,
+        label: "Encrypted header values (JSON)",
+        credential: CredentialRequirement::Required,
+    },
+];
 const VERTEX_AUTH: [ProviderAuthModeSpec; 2] = [
     ProviderAuthModeSpec {
         mode: ProviderAuthMode::ApplicationDefault,
@@ -147,7 +160,14 @@ const MODEL_FIELD: ProviderFieldSpec = ProviderFieldSpec {
     label: "Seed model",
     required: false,
 };
-const COMMON_FIELDS: [ProviderFieldSpec; 1] = [MODEL_FIELD];
+const COMMON_FIELDS: [ProviderFieldSpec; 2] = [
+    MODEL_FIELD,
+    ProviderFieldSpec {
+        field: Field::Endpoint,
+        label: "Custom endpoint (optional)",
+        required: false,
+    },
+];
 const COMPATIBLE_FIELDS: [ProviderFieldSpec; 2] = [
     ProviderFieldSpec {
         field: Field::Endpoint,
@@ -201,12 +221,12 @@ const AZURE_FIELDS: [ProviderFieldSpec; 4] = [
 ];
 
 const NO_PRESETS: [ProviderPresetSpec; 0] = [];
-const OPENAI_COMPATIBLE_PRESETS: [ProviderPresetSpec; 6] = [
+const OPENAI_COMPATIBLE_PRESETS: [ProviderPresetSpec; 13] = [
     ProviderPresetSpec {
         id: "groq",
         label: "Groq",
         description: "Low-latency inference through Groq's OpenAI-compatible API.",
-        endpoint: "https://api.groq.com/v1",
+        endpoint: "https://api.groq.com/openai/v1",
         auth_mode: ProviderAuthMode::ApiKey,
         maintainer: "Groq",
         documentation_label: "OpenAI Compatibility",
@@ -256,11 +276,81 @@ const OPENAI_COMPATIBLE_PRESETS: [ProviderPresetSpec; 6] = [
         id: "openrouter",
         label: "OpenRouter",
         description: "Multi-provider model access through OpenRouter's OpenAI-compatible API.",
-        endpoint: "https://openrouter.ai/api/v3",
+        endpoint: "https://openrouter.ai/api/v1",
         auth_mode: ProviderAuthMode::ApiKey,
         maintainer: "OpenRouter",
         documentation_label: "API Reference Overview",
         documentation_url: "https://openrouter.ai/docs/api/reference/overview",
+    },
+    ProviderPresetSpec {
+        id: "deepseek",
+        label: "DeepSeek",
+        description: "DeepSeek API connection.",
+        endpoint: "https://api.deepseek.com/v1",
+        auth_mode: ProviderAuthMode::ApiKey,
+        maintainer: "DeepSeek",
+        documentation_label: "API documentation",
+        documentation_url: "https://api-docs.deepseek.com/",
+    },
+    ProviderPresetSpec {
+        id: "fireworks",
+        label: "Fireworks AI",
+        description: "Fireworks AI API connection.",
+        endpoint: "https://api.fireworks.ai/inference/v1",
+        auth_mode: ProviderAuthMode::ApiKey,
+        maintainer: "Fireworks AI",
+        documentation_label: "API documentation",
+        documentation_url: "https://docs.fireworks.ai/tools-sdks/openai-compatibility",
+    },
+    ProviderPresetSpec {
+        id: "deepinfra",
+        label: "DeepInfra",
+        description: "DeepInfra API connection.",
+        endpoint: "https://api.deepinfra.com/v1/openai",
+        auth_mode: ProviderAuthMode::ApiKey,
+        maintainer: "DeepInfra",
+        documentation_label: "API documentation",
+        documentation_url: "https://docs.deepinfra.com/quickstart",
+    },
+    ProviderPresetSpec {
+        id: "huggingface",
+        label: "Hugging Face",
+        description: "Hugging Face API connection.",
+        endpoint: "https://router.huggingface.co/v1",
+        auth_mode: ProviderAuthMode::ApiKey,
+        maintainer: "Hugging Face",
+        documentation_label: "API documentation",
+        documentation_url: "https://huggingface.co/docs/inference-providers/en/index",
+    },
+    ProviderPresetSpec {
+        id: "perplexity",
+        label: "Perplexity",
+        description: "Perplexity API connection.",
+        endpoint: "https://api.perplexity.ai",
+        auth_mode: ProviderAuthMode::ApiKey,
+        maintainer: "Perplexity",
+        documentation_label: "API documentation",
+        documentation_url: "https://docs.perplexity.ai/docs/sonar/quickstart",
+    },
+    ProviderPresetSpec {
+        id: "cohere",
+        label: "Cohere",
+        description: "Cohere API connection.",
+        endpoint: "https://api.cohere.ai/compatibility/v1",
+        auth_mode: ProviderAuthMode::ApiKey,
+        maintainer: "Cohere",
+        documentation_label: "API documentation",
+        documentation_url: "https://docs.cohere.com/docs/compatibility-api",
+    },
+    ProviderPresetSpec {
+        id: "voyage",
+        label: "Voyage AI",
+        description: "Voyage AI API connection.",
+        endpoint: "https://api.voyageai.com/v1",
+        auth_mode: ProviderAuthMode::ApiKey,
+        maintainer: "Voyage AI",
+        documentation_label: "API documentation",
+        documentation_url: "https://docs.voyageai.com/reference/embeddings-api",
     },
 ];
 
@@ -271,7 +361,7 @@ const PROVIDER_KIND_SPECS: [ProviderKindSpec; 7] = [
         description: "Official OpenAI HTTPS API",
         seed_surface: Some(Surface::OpenAi),
         default_auth_mode: ProviderAuthMode::ApiKey,
-        auth_modes: &API_KEY_AUTH,
+        auth_modes: &HTTP_AUTH,
         fields: &COMMON_FIELDS,
         presets: &NO_PRESETS,
     },
@@ -281,7 +371,7 @@ const PROVIDER_KIND_SPECS: [ProviderKindSpec; 7] = [
         description: "Native Messages API",
         seed_surface: Some(Surface::Anthropic),
         default_auth_mode: ProviderAuthMode::ApiKey,
-        auth_modes: &API_KEY_AUTH,
+        auth_modes: &HTTP_AUTH,
         fields: &COMMON_FIELDS,
         presets: &NO_PRESETS,
     },
@@ -291,7 +381,7 @@ const PROVIDER_KIND_SPECS: [ProviderKindSpec; 7] = [
         description: "Google AI API key",
         seed_surface: Some(Surface::Gemini),
         default_auth_mode: ProviderAuthMode::ApiKey,
-        auth_modes: &API_KEY_AUTH,
+        auth_modes: &HTTP_AUTH,
         fields: &COMMON_FIELDS,
         presets: &NO_PRESETS,
     },
@@ -331,7 +421,7 @@ const PROVIDER_KIND_SPECS: [ProviderKindSpec; 7] = [
         description: "Explicit custom HTTPS endpoint",
         seed_surface: Some(Surface::OpenAi),
         default_auth_mode: ProviderAuthMode::ApiKey,
-        auth_modes: &API_KEY_AUTH,
+        auth_modes: &HTTP_AUTH,
         fields: &COMPATIBLE_FIELDS,
         presets: &OPENAI_COMPATIBLE_PRESETS,
     },
@@ -433,6 +523,20 @@ pub fn validate(
     let spec = provider_kind_spec(configuration.kind);
     let mut violations = Vec::new();
 
+    if matches!(
+        configuration.auth_mode,
+        ProviderAuthMode::None | ProviderAuthMode::Headers
+    ) && configuration
+        .endpoint
+        .as_ref()
+        .is_none_or(|value| value.trim().is_empty())
+    {
+        violations.push(Violation {
+            field: ProviderViolationField::Endpoint,
+            code: ProviderViolationCode::Required,
+            detail: "Custom authentication requires an explicit endpoint.",
+        });
+    }
     let auth = spec.auth_mode(configuration.auth_mode);
     if auth.is_none() {
         violations.push(Violation {
@@ -569,6 +673,8 @@ const fn forbidden_field_detail(kind: ProviderKind, field: Field) -> &'static st
 
 const fn forbidden_credential_detail(mode: ProviderAuthMode) -> &'static str {
     match mode {
+        ProviderAuthMode::None => "Do not submit a credential with authentication disabled.",
+        ProviderAuthMode::Headers => "Supply encrypted header values as JSON.",
         ProviderAuthMode::ApplicationDefault => "Do not submit a credential when using Vertex ADC.",
         ProviderAuthMode::DefaultChain => {
             "Do not submit a credential when using the AWS default chain."
@@ -598,6 +704,7 @@ mod tests {
 
     fn validate(input: Configuration<'_>) -> Vec<Violation> {
         let config = crate::providers::configuration::ProviderConfiguration {
+            options: Default::default(),
             kind: input.kind,
             auth_mode: input.auth_mode,
             endpoint: input.endpoint.map(str::to_owned),
@@ -619,10 +726,13 @@ mod tests {
         Configuration {
             kind,
             auth_mode,
-            endpoint: matches!(
+            endpoint: (matches!(
                 kind,
                 ProviderKind::OpenAiCompatible | ProviderKind::AzureOpenAi
-            )
+            ) || matches!(
+                auth_mode,
+                ProviderAuthMode::None | ProviderAuthMode::Headers
+            ))
             .then_some("https://example.test"),
             cloud_region: matches!(kind, ProviderKind::VertexAi | ProviderKind::Bedrock)
                 .then_some("region"),
@@ -632,7 +742,9 @@ mod tests {
             model: (kind == ProviderKind::VertexAi).then_some("model"),
             credential_present: Some(!matches!(
                 auth_mode,
-                ProviderAuthMode::ApplicationDefault | ProviderAuthMode::DefaultChain
+                ProviderAuthMode::ApplicationDefault
+                    | ProviderAuthMode::DefaultChain
+                    | ProviderAuthMode::None
             )),
         }
     }

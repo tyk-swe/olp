@@ -259,6 +259,7 @@ async fn operations_http_contract_is_authorized_paginated_exact_and_metadata_onl
             usage_complete: true,
             unpriced: false,
             attempts: vec![RequestAttemptMetadata {
+                routing: None,
                 id: Uuid::now_v7(),
                 ordinal: 1,
                 provider_id,
@@ -436,8 +437,8 @@ async fn operations_http_contract_is_authorized_paginated_exact_and_metadata_onl
         ready_body["request_metadata_duplicate_persistence_total"],
         1
     );
-    assert_eq!(ready_body["runtime_outbox"], "healthy");
-    assert_eq!(ready_body["runtime_outbox_pending_rows"], 0);
+    assert_eq!(ready_body["runtime_outbox"], "backlogged");
+    assert_eq!(ready_body["runtime_outbox_pending_rows"], 2);
     assert_eq!(ready_body["runtime_outbox_owner_active"], false);
     assert_eq!(ready_body["runtime_outbox_claimed_rows"], 0);
 
@@ -495,7 +496,7 @@ async fn operations_http_contract_is_authorized_paginated_exact_and_metadata_onl
     assert!(metrics.contains("olp_request_metadata_persistence_duplicates_total 1"));
     assert!(metrics.contains("# HELP olp_runtime_outbox_pending_rows "));
     assert!(metrics.contains("# TYPE olp_runtime_outbox_pending_rows gauge"));
-    assert!(metrics.contains("olp_runtime_outbox_pending_rows 0"));
+    assert!(metrics.contains("olp_runtime_outbox_pending_rows 2"));
     assert!(metrics.contains("olp_async_plane_current 0"));
     assert!(metrics.contains("olp_async_plane_healthy 0"));
     assert!(metrics.contains("olp_operational_metrics_available 1"));

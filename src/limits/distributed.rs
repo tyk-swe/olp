@@ -1,5 +1,6 @@
 use std::fmt;
 use std::sync::Arc;
+use std::sync::LazyLock;
 use std::time::Duration;
 
 use crate::inference::transport::BoxFuture;
@@ -25,6 +26,27 @@ const RESERVE_COST_SCRIPT: &str = include_str!("reserve_cost.lua");
 const RECONCILE_COST_SCRIPT: &str = include_str!("reconcile_cost.lua");
 const RELEASE_SCRIPT: &str = include_str!("release_concurrency.lua");
 const RECONCILE_SCRIPT: &str = include_str!("reconcile_limits.lua");
+const REFUND_SCRIPT: &str = include_str!("refund_limits.lua");
+/// Current-minute request and token counters plus live concurrency for one
+/// quota scope.
+static PROVIDER_USAGE_SCRIPT: LazyLock<Script> = LazyLock::new(|| {
+    Script::new(
+        "local t=redis.call('TIME'); local w=math.floor(tonumber(t[1])/60); \
+         local now=tonumber(t[1])*1000+math.floor(tonumber(t[2])/1000); \
+         local r=redis.call('HMGET',KEYS[1],'window','rpm','tpm'); local rpm=0; local tpm=0; \
+         if tonumber(r[1])==w then rpm=tonumber(r[2]) or 0; tpm=tonumber(r[3]) or 0; end; \
+         return {rpm,tpm,redis.call('ZCOUNT',KEYS[2],'('..now,'+inf')}",
+    )
+});
+/// Extends a cooldown only when the requested window outlasts the current one.
+static PROVIDER_COOLDOWN_SCRIPT: LazyLock<Script> = LazyLock::new(|| {
+    Script::new(
+        "local current=redis.call('PTTL',KEYS[1]); local wanted=tonumber(ARGV[1]); \
+         if current == -2 or (current >= 0 and current < wanted) then \
+           redis.call('SET',KEYS[1],'1','PX',wanted); \
+         end; return 1",
+    )
+});
 const SCRIPT_RESPONSE_VERSION: i64 = 1;
 const FIXED_WINDOW_MS: i64 = 60_000;
 const DAY_MS: i64 = 86_400_000;
@@ -93,6 +115,7 @@ impl DistributedLimiter {
                     rate_window_id: window_id,
                     reserved_tokens: request.requested_tokens,
                     has_token_reservation: request.tokens_per_minute.is_some(),
+                    has_request_reservation: request.requests_per_minute.is_some(),
                     concurrency_expires_at_ms,
                 })
             }
@@ -147,6 +170,25 @@ impl DistributedLimiter {
             .key(&lease.rate_key)
             .arg(lease.rate_window_id)
             .arg(adjustment)
+            .arg(&lease.lease_id)
+            .invoke_async(&mut connection)
+            .await
+            .map_err(LimitError::service)?;
+        Ok(())
+    }
+
+    pub async fn refund(&self, lease: &DistributedLimitLease) -> Result<(), LimitError> {
+        let mut connection = self.connection.clone();
+        let _: i64 = Script::new(REFUND_SCRIPT)
+            .key(&lease.rate_key)
+            .key(&lease.concurrency_key)
+            .arg(lease.rate_window_id)
+            .arg(i64::from(lease.has_request_reservation))
+            .arg(if lease.has_token_reservation {
+                lease.reserved_tokens
+            } else {
+                0
+            })
             .arg(&lease.lease_id)
             .invoke_async(&mut connection)
             .await
@@ -211,6 +253,9 @@ struct ValkeyLimitLease {
 }
 
 impl LimitLeasePort for ValkeyLimitLease {
+    fn refund(&self) -> BoxFuture<'_, Result<(), LimitError>> {
+        Box::pin(self.limiter.refund(&self.lease))
+    }
     fn reconcile(&self, actual_tokens: i64) -> BoxFuture<'_, Result<(), LimitError>> {
         Box::pin(self.limiter.reconcile(&self.lease, actual_tokens))
     }
@@ -221,6 +266,59 @@ impl LimitLeasePort for ValkeyLimitLease {
 }
 
 impl LimitBackend for DistributedLimiter {
+    fn provider_usage<'a>(
+        &'a self,
+        id: Uuid,
+        lookup: &'a str,
+    ) -> BoxFuture<'a, Result<Option<crate::limits::admission::ProviderQuotaUsage>, LimitError>>
+    {
+        Box::pin(async move {
+            let keys = self.keys_for(lookup, id);
+            let mut connection = self.connection.clone();
+            let (rpm, tpm, concurrent): (u64, u64, u64) = PROVIDER_USAGE_SCRIPT
+                .key(keys.rate)
+                .key(keys.concurrency)
+                .invoke_async(&mut connection)
+                .await
+                .map_err(LimitError::service)?;
+            Ok(Some(crate::limits::admission::ProviderQuotaUsage {
+                requests_this_minute: rpm,
+                tokens_this_minute: tpm,
+                concurrent_requests: concurrent,
+            }))
+        })
+    }
+
+    fn provider_cooldown<'a>(
+        &'a self,
+        scope: &'a str,
+        duration: Option<std::time::Duration>,
+    ) -> crate::inference::transport::BoxFuture<'a, Result<bool, LimitError>> {
+        Box::pin(async move {
+            let key = format!("{}:provider-cooldown:{}", self.namespace, scope);
+            let mut connection = self.connection.clone();
+            if duration.is_some_and(|duration| duration.is_zero()) {
+                let _: usize = connection.del(&key).await.map_err(LimitError::service)?;
+                return Ok(false);
+            }
+            if let Some(duration) = duration {
+                let _: i64 = PROVIDER_COOLDOWN_SCRIPT
+                    .key(&key)
+                    .arg(duration.as_millis().clamp(1, 86_400_000) as u64)
+                    .invoke_async(&mut connection)
+                    .await
+                    .map_err(LimitError::service)?;
+                Ok(true)
+            } else {
+                redis::cmd("EXISTS")
+                    .arg(&key)
+                    .query_async(&mut connection)
+                    .await
+                    .map_err(LimitError::service)
+            }
+        })
+    }
+
     fn reserve<'a>(
         &'a self,
         request: LimitRequest<'a>,
@@ -276,6 +374,7 @@ pub struct DistributedLimitLease {
     rate_window_id: i64,
     reserved_tokens: i64,
     has_token_reservation: bool,
+    has_request_reservation: bool,
     concurrency_expires_at_ms: Option<i64>,
 }
 
@@ -459,6 +558,7 @@ mod tests {
             rate_window_id: 1,
             reserved_tokens: 2,
             has_token_reservation: true,
+            has_request_reservation: true,
             concurrency_expires_at_ms: Some(3),
         };
         let debug = format!("{lease:?}");

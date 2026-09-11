@@ -93,13 +93,19 @@ where
         }
     }
     validate_initial_provider_records(&provider)?;
+    provider
+        .configuration
+        .options
+        .validate(provider.configuration.kind)
+        .map_err(Error::Invalid)?;
     let now = chrono::Utc::now();
     let etag = Uuid::now_v7();
     sqlx::query(
         "INSERT INTO providers \
              (id, name, kind, state, endpoint, cloud_region, cloud_project, deployment, \
-              api_version, auth_mode, connector_ready, etag, created_by, created_at, updated_at) \
-             VALUES ($1, $2, $3, 'draft'::provider_state, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $13)",
+              api_version, auth_mode, options, connector_ready, etag, created_by, created_at, \
+              updated_at) \
+             VALUES ($1, $2, $3, 'draft'::provider_state, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $14)",
     )
     .bind(provider.provider_id)
     .bind(provider.name.trim())
@@ -110,13 +116,20 @@ where
     .bind(provider.configuration.deployment.as_deref())
     .bind(provider.configuration.api_version.as_deref())
     .bind(provider.configuration.auth_mode.as_str())
+    .bind(sqlx::types::Json(&provider.configuration.options))
     .bind(provider.connector_ready)
     .bind(etag)
     .bind(provider.actor)
     .bind(now)
-        .execute(&mut *transaction)
-        .await?;
+    .execute(&mut *transaction)
+    .await?;
+    sqlx::query("INSERT INTO provider_credential_slots(id, provider_id, name, is_default) VALUES ($1, $1, 'Default', true)")
+        .bind(provider.provider_id).execute(&mut *transaction).await?;
     insert_initial_provider_credential(&mut transaction, &provider, now).await?;
+    sqlx::query("UPDATE provider_credential_slots SET selected_version_id = $1 WHERE provider_id = $2 AND is_default")
+        .bind(provider.credential_id).bind(provider.provider_id).execute(&mut *transaction).await?;
+    sqlx::query("UPDATE provider_credential_versions SET slot_id = $1 WHERE provider_id = $1 AND slot_id IS NULL")
+        .bind(provider.provider_id).execute(&mut *transaction).await?;
     insert_initial_provider_model(&mut transaction, &provider, now).await?;
     record_success_at(
         &mut *transaction,
@@ -198,6 +211,7 @@ pub async fn activate_provider(
         &provider,
     )
     .await?;
+    crate::providers::pool_store::snapshot(&mut transaction, provider_id, revision_id).await?;
     reject_incompatible_media_jobs(&mut transaction, provider_id, revision_id).await?;
     reject_unroutable_activation(&mut transaction, provider_id, revision_id).await?;
     sqlx::query(
@@ -216,7 +230,11 @@ pub async fn activate_provider(
     if previous_credential.is_some() && previous_credential != activated_credential {
         sqlx::query(
             "UPDATE provider_credential_versions SET revoked_at = COALESCE(revoked_at, now()) \
-                 WHERE id = $1 AND provider_id = $2",
+                 WHERE id = $1 AND provider_id = $2 AND NOT EXISTS (
+                   SELECT 1 FROM async_media_jobs j JOIN provider_revisions pr ON pr.id=j.provider_revision_id
+                   WHERE j.provider_id=$2 AND j.lifecycle_state <> 'deleted'
+                     AND COALESCE(j.credential_version_id,pr.credential_version_id)=$1
+                 )",
         )
         .bind(previous_credential)
         .bind(provider_id)
@@ -259,6 +277,7 @@ struct ActivationSource {
     deployment: Option<String>,
     api_version: Option<String>,
     auth_mode: String,
+    options: sqlx::types::Json<crate::providers::options::ConnectionOptions>,
     connector_ready: bool,
     active_credential_version_id: Option<Uuid>,
     previously_activated_credential_id: Option<Uuid>,
@@ -271,12 +290,14 @@ async fn lock_activatable_provider(
 ) -> Result<ActivationSource, Error> {
     let provider = sqlx::query_as::<_, LockActivatableProviderRow>(
         "SELECT p.name, p.kind, p.state::text AS \"state\", p.endpoint, p.cloud_region, \
-                p.cloud_project, p.deployment, p.api_version, p.auth_mode, \
+                p.cloud_project, p.deployment, p.api_version, p.auth_mode, p.options, \
                 p.connector_ready, p.etag, p.active_credential_version_id, \
                 ar.credential_version_id AS \"previously_activated_credential_id\", \
                 (p.last_probe_status = 'succeeded' AND p.last_probe_at IS NOT NULL \
                  AND p.last_probe_at >= p.updated_at) AS \"probe_ready\", \
-                ((p.auth_mode IN ('adc', 'default_chain') \
+                (EXISTS (SELECT 1 FROM provider_credential_slots s \
+                         WHERE s.provider_id = p.id AND s.is_default AND NOT s.enabled) OR \
+                 (p.auth_mode IN ('adc', 'default_chain', 'none') \
                   AND p.active_credential_version_id IS NULL) OR EXISTS ( \
                      SELECT 1 FROM provider_credential_versions cv \
                      WHERE cv.id = p.active_credential_version_id \
@@ -320,6 +341,7 @@ async fn lock_activatable_provider(
         deployment: provider.deployment,
         api_version: provider.api_version,
         auth_mode: provider.auth_mode,
+        options: provider.options,
         connector_ready: provider.connector_ready,
         active_credential_version_id: provider.active_credential_version_id,
         previously_activated_credential_id: provider.previously_activated_credential_id,
@@ -341,9 +363,9 @@ async fn snapshot_provider_revision(
     sqlx::query(
         "INSERT INTO provider_revisions \
          (id, provider_id, revision, name, kind, endpoint, cloud_region, cloud_project, \
-          deployment, api_version, auth_mode, connector_ready, credential_version_id, \
-          source_etag, activated_by) \
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)",
+          deployment, api_version, auth_mode, options, connector_ready, \
+          credential_version_id, source_etag, activated_by) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)",
     )
     .bind(revision_id)
     .bind(provider_id)
@@ -356,6 +378,7 @@ async fn snapshot_provider_revision(
     .bind(&provider.deployment)
     .bind(&provider.api_version)
     .bind(&provider.auth_mode)
+    .bind(&provider.options)
     .bind(provider.connector_ready)
     .bind(provider.active_credential_version_id)
     .bind(expected_etag)
@@ -408,8 +431,9 @@ async fn reject_incompatible_media_jobs(
              OR authority.cloud_project IS DISTINCT FROM candidate.cloud_project
              OR authority.deployment IS DISTINCT FROM candidate.deployment
              OR authority.api_version IS DISTINCT FROM candidate.api_version
+             OR ($3::jsonb || authority.options) - 'limits'
+                  IS DISTINCT FROM ($3::jsonb || candidate.options) - 'limits'
              OR authority.auth_mode IS DISTINCT FROM candidate.auth_mode
-             OR authority.credential_version_id IS DISTINCT FROM candidate.credential_version_id
              OR NOT EXISTS (
                SELECT 1 FROM provider_revision_models prm
                WHERE prm.provider_revision_id = candidate.id
@@ -432,6 +456,9 @@ async fn reject_incompatible_media_jobs(
     )
     .bind(provider_id)
     .bind(revision_id)
+    .bind(sqlx::types::Json(
+        crate::providers::options::ConnectionOptions::default(),
+    ))
     .fetch_optional(&mut **transaction)
     .await?;
     if let Some(job_id) = incompatible_media_job {
@@ -475,10 +502,9 @@ async fn reject_unroutable_activation(
     if uncovered_route_operation.is_some() {
         return Err(Error::ProviderIncomplete);
     }
-    // Operation coverage is not enough. The runtime compiler drops any
-    // target whose model is absent or disabled in the provider's activated
-    // revision, and Route::validate then rejects max_attempts > targets.
-    // Reject here instead, naming the route and target that would vanish.
+    // Preserve explicitly published targets even when another target covers
+    // the operation. Require a reviewed route edit before a model disappears
+    // from its provider's active revision.
     let orphaned_route_target = sqlx::query_as::<_, RejectUnroutableActivationRow>(
         "SELECT r.slug AS \"route_slug\", \
                 concat(p.name, '/', pm.upstream_model) AS \"target\" \
@@ -561,15 +587,25 @@ async fn insert_initial_provider_model(
         .await?;
     }
     if let (Some(surface), Some(model_id)) = (&provider.surface, provider.model_id) {
-        for mode in ["unary", "streaming"] {
+        let embeddings = provider.configuration.options.vendor_id.as_deref() == Some("voyage");
+        for mode in if embeddings {
+            &["unary"][..]
+        } else {
+            &["unary", "streaming"][..]
+        } {
             sqlx::query(
                 "INSERT INTO model_capabilities \
                  (provider_model_id, operation, surface, mode, source, certified_at) \
-                 VALUES ($1, 'generation', $2, $3, 'declared', NULL)",
+                 VALUES ($1, $4, $2, $3, 'declared', NULL)",
             )
             .bind(model_id)
             .bind(surface.as_str())
-            .bind(mode)
+            .bind(*mode)
+            .bind(if embeddings {
+                "embeddings"
+            } else {
+                "generation"
+            })
             .execute(&mut **transaction)
             .await?;
         }
@@ -588,6 +624,7 @@ struct LockActivatableProviderRow {
     deployment: Option<String>,
     api_version: Option<String>,
     auth_mode: String,
+    options: sqlx::types::Json<crate::providers::options::ConnectionOptions>,
     connector_ready: bool,
     etag: uuid::Uuid,
     active_credential_version_id: Option<uuid::Uuid>,

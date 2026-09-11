@@ -42,6 +42,7 @@ pub(crate) struct RuntimeActivator {
     master_key: Option<Arc<MasterKey>>,
     egress_policy: Arc<EgressPolicy>,
     response_limits: ResponseLimits,
+    limiter: crate::limits::admission::ReloadableLimiter,
     activation_lock: Arc<Mutex<()>>,
     #[cfg(test)]
     after_publication: Option<Arc<tokio::sync::Barrier>>,
@@ -50,6 +51,7 @@ pub(crate) struct RuntimeActivator {
 }
 
 impl RuntimeActivator {
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         runtime: Arc<Manager>,
         pool: PgPool,
@@ -58,6 +60,7 @@ impl RuntimeActivator {
         master_key: Option<Arc<MasterKey>>,
         egress_policy: Arc<EgressPolicy>,
         response_limits: ResponseLimits,
+        limiter: crate::limits::admission::ReloadableLimiter,
     ) -> Self {
         Self {
             runtime,
@@ -67,6 +70,7 @@ impl RuntimeActivator {
             master_key,
             egress_policy,
             response_limits,
+            limiter,
             activation_lock: Arc::new(Mutex::new(())),
             #[cfg(test)]
             after_publication: None,
@@ -164,18 +168,18 @@ impl RuntimeActivator {
     pub(crate) async fn activate(&self) -> AppResult<bool> {
         let _activation = self.activation_lock.lock().await;
         let authority_read_started = std::time::Instant::now();
-        let (current_api_keys, latest_sequence) = tokio::join!(
-            crate::runtime::publication::compiler::current_runtime_api_keys(&self.pool),
+        let (current_authority, latest_sequence) = tokio::join!(
+            crate::runtime::publication::compiler::current_runtime_authority(&self.pool),
             crate::runtime::publication::releases::latest_runtime_generation_sequence(&self.pool),
         );
-        let current_api_keys = current_api_keys?;
+        let current_authority = current_authority?;
         #[cfg(test)]
         if let Some(barrier) = &self.after_authority_read {
             barrier.wait().await;
             barrier.wait().await;
         }
         self.runtime
-            .refresh_api_keys(current_api_keys.clone(), authority_read_started)?;
+            .refresh_current_authority(&current_authority, authority_read_started)?;
         if let Some(sequence) = latest_sequence? {
             self.runtime
                 .observe_desired_generation(u64::try_from(sequence)?);
@@ -191,16 +195,24 @@ impl RuntimeActivator {
         }
         let mut rejected = Vec::new();
         for release in releases {
-            let snapshot = match self
-                .runtime
-                .decode_release_candidate(release.activation_candidate(), &current_api_keys)
-            {
+            let mut snapshot = match self.runtime.decode_release_candidate(
+                release.activation_candidate(),
+                &current_authority.api_keys,
+            ) {
                 Ok(snapshot) => snapshot,
                 Err(error) => {
                     rejected.push(format!("{}: {error}", release.sequence));
                     continue;
                 }
             };
+            snapshot.routing.installation = current_authority.installation.clone();
+            snapshot.routing.credential_authority = Some(current_authority.credentials.clone());
+            snapshot.routing.connection_limit_authority =
+                Some(current_authority.connection_limits.clone());
+            snapshot
+                .routing
+                .routes
+                .extend(current_authority.routes.clone());
             // Provider transports are assembled from normalized secret storage, not
             // the public runtime payload. Require the release-time sidecar to match
             // every current transport-affecting field before accepting an LKG.
@@ -217,16 +229,16 @@ impl RuntimeActivator {
                     }
                 };
             let mut candidate_transports = self.transports.snapshot();
-            if let Some(master_key) = self.master_key.as_deref()
-                && let Err(error) = load_runtime_transports(
-                    &provider_configurations,
-                    master_key,
-                    &snapshot,
-                    &mut candidate_transports,
-                    &self.egress_policy,
-                    self.response_limits,
-                )
-                .await
+            if let Err(error) = load_runtime_transports(
+                &provider_configurations,
+                self.master_key.as_deref(),
+                &snapshot,
+                &mut candidate_transports,
+                &self.egress_policy,
+                self.response_limits,
+                &self.limiter,
+            )
+            .await
             {
                 rejected.push(format!("{}: {error}", release.sequence));
                 continue;

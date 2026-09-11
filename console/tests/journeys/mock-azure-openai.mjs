@@ -98,6 +98,8 @@ function rejectPayload(response, item, detail) {
 function expectedTokenLimit(prompt) {
   if (prompt === 'OLP capability probe') return 1;
   if (prompt === 'Connection test') return 16;
+  if (prompt === 'Confirm provider pool routing.') return 16;
+  if (prompt === 'Use the enabled credential.') return 16;
   return null;
 }
 

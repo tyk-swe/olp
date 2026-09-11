@@ -29,6 +29,13 @@ use std::time::Duration;
 
 fn plan(target_id: TargetId) -> AttemptPlan {
     AttemptPlan {
+        connection_limits: None,
+        credential_limits: None,
+        attempt_limit: None,
+        routing_policy: None,
+        credential_slot_id: None,
+        credential_version_id: None,
+        pricing_revision_id: None,
         generation_id: RuntimeGenerationId::new(),
         route_id: RouteId::new(),
         target_id,
@@ -230,6 +237,13 @@ fn billing_uncertainty_starts_after_a_request_may_reach_the_provider() {
 fn elapsed_deadline_records_attempt_without_penalizing_closed_circuit() {
     let target_id = TargetId::new();
     let attempt = AttemptPlan {
+        connection_limits: None,
+        credential_limits: None,
+        attempt_limit: None,
+        routing_policy: None,
+        credential_slot_id: None,
+        credential_version_id: None,
+        pricing_revision_id: None,
         generation_id: RuntimeGenerationId::new(),
         route_id: RouteId::new(),
         target_id,
@@ -243,6 +257,7 @@ fn elapsed_deadline_records_attempt_without_penalizing_closed_circuit() {
     };
     let circuits = Breaker::default();
     let mut record = AttemptRecord {
+        mode: crate::protocols::canonical::identity::TransportMode::Unary,
         plan: &attempt,
         circuit_permit: circuits
             .try_acquire_permit(target_id)
@@ -564,6 +579,7 @@ mod execute {
                 targets.push(Target { plan, calls });
             }
             let snapshot = Snapshot {
+                routing: Default::default(),
                 generation: RuntimeGeneration {
                     id: RuntimeGenerationId::new(),
                     ordinal: 1,

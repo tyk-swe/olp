@@ -213,6 +213,8 @@ fn provider_kind_capability_response(spec: &ProviderKindSpec) -> ProviderKindCap
 #[derive(Debug, Deserialize, IntoParams, ToSchema)]
 #[into_params(parameter_in = Query)]
 pub(crate) struct ProviderModelInventoryQuery {
+    pub search: Option<String>,
+    pub surface: Option<crate::protocols::canonical::identity::Surface>,
     /// Opaque cursor returned by the previous page.
     pub cursor: Option<String>,
     /// Page size, from 1 to 200. Defaults to 50.
@@ -275,6 +277,8 @@ pub(crate) struct ProviderModelListResponse {
 
 #[derive(Clone, Debug, Serialize, ToSchema)]
 pub(crate) struct ProviderModelInventoryResponse {
+    pub available: bool,
+    pub metadata: crate::providers::options::ModelMetadata,
     pub provider_id: Uuid,
     pub provider_name: String,
     pub provider_kind: ProviderKind,
@@ -284,6 +288,8 @@ pub(crate) struct ProviderModelInventoryResponse {
 impl From<ProviderModelInventoryRecord> for ProviderModelInventoryResponse {
     fn from(value: ProviderModelInventoryRecord) -> Self {
         Self {
+            available: value.available,
+            metadata: value.metadata,
             provider_id: value.provider_id,
             provider_name: value.provider_name,
             provider_kind: value.provider_kind,
@@ -319,11 +325,13 @@ pub(crate) async fn list_provider_model_inventory(
         cursor: query.cursor,
         limit: query.limit,
     })?;
-    let page = crate::providers::models::list_provider_model_inventory(
+    let page = crate::providers::models::list_provider_model_inventory_filtered(
         &state.request_boundary.pool,
         cursor,
         limit,
         enabled,
+        query.search.as_deref().unwrap_or_default(),
+        query.surface.as_ref().map(|s| s.as_str()),
     )
     .await
     .map_err(map_configuration)?;
@@ -610,7 +618,12 @@ pub(crate) async fn certify_provider_model(
         ));
     }
     let upstream_model = model.upstream_model;
-    let connector = provider_connector(&state, provider_id).await?;
+    let connector = crate::providers::connect::provider_connector_for_model(
+        &state,
+        provider_id,
+        Some(&upstream_model),
+    )
+    .await?;
     let results = stream::iter(model.capabilities.into_iter().map(|capability| {
         let connector = &connector;
         let upstream_model = &upstream_model;

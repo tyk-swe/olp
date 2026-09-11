@@ -92,6 +92,7 @@ fn inference_state(limited: bool) -> (ProcessComposition, String) {
     runtime
         .install(
             Snapshot {
+                routing: Default::default(),
                 generation: RuntimeGeneration {
                     id: RuntimeGenerationId::new(),
                     ordinal: 1,
@@ -102,6 +103,7 @@ fn inference_state(limited: bool) -> (ProcessComposition, String) {
                 api_keys: BTreeMap::from([(
                     lookup_id.clone(),
                     ApiKey {
+                        routing_policy: Default::default(),
                         id: ApiKeyId::new(),
                         lookup_id,
                         digest: ApiKeyDigest::new(material.digest),

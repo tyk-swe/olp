@@ -1,8 +1,12 @@
 <script lang="ts">
+  import { createQuery } from '@tanstack/svelte-query';
+  import { apiClient } from '$lib/api/client';
+  import { result } from '$lib/api/http';
   import ProviderConnectionFields from './ProviderConnectionFields.svelte';
   import NavIcon from '$lib/components/NavIcon.svelte';
   import type { ProviderKindCapability } from '$lib/features/providers/models';
   import {
+    emptyProviderOptions,
     requiresCredential,
     requiresSeedModel,
     selectProviderPreset,
@@ -27,10 +31,35 @@
     onSubmit: (event: SubmitEvent) => void | Promise<void>;
   } = $props();
 
+  const vendors = createQuery(() => ({
+    queryKey: ['provider-vendors'],
+    queryFn: async () => {
+      const response = await apiClient.GET('/api/v3/provider-vendors');
+      return result(response.data, response.error, response.response);
+    }
+  }));
+  function chooseVendor(event: Event) {
+    const id = (event.currentTarget as HTMLSelectElement).value;
+    const vendor = vendors.data?.find((vendor) => vendor.id === id);
+    const kind = vendor?.connector ?? 'openai_compatible';
+    const spec = providerKinds.find((spec) => spec.kind === kind);
+    if (!spec) return;
+    setProviderDraftKind(draft, kind);
+    draft.authMode = spec.default_auth_mode;
+    if (kind === 'openai_compatible') selectProviderPreset(draft, spec, id);
+    else {
+      draft.presetId = '';
+      draft.options = { ...emptyProviderOptions(), vendor_id: id || null };
+    }
+  }
+
   const credentialRequired = $derived(
     requiresCredential(selectedSpec, draft.authMode)
   );
-  const seedModelRequired = $derived(requiresSeedModel(selectedSpec));
+  const seedModelRequired = $derived(
+    requiresSeedModel(selectedSpec) ||
+      ['voyage', 'perplexity', 'cohere'].includes(draft.presetId)
+  );
   const selectedPreset = $derived(
     selectedSpec.presets.find((preset) => preset.id === draft.presetId)
   );
@@ -58,7 +87,27 @@
   novalidate
 >
   <fieldset disabled={lockKind}>
-    <legend>Choose a connector</legend>
+    <legend>Choose a vendor</legend>
+    <label for="provider-vendor">Vendor</label><select
+      id="provider-vendor"
+      value={draft.presetId || draft.options?.vendor_id || ''}
+      onchange={chooseVendor}
+      ><option value="">Custom connection</option
+      >{#each vendors.data ?? [] as vendor (vendor.id)}<option value={vendor.id}
+          >{vendor.name}</option
+        >{/each}</select
+    >
+    {#if vendors.isError}<p role="alert">
+        Vendor catalog unavailable. <button
+          type="button"
+          onclick={() => vendors.refetch()}>Retry</button
+        >
+      </p>{/if}
+    <p>
+      Each connection can have its own account, endpoint, region, and credential
+      pool.
+    </p>
+    <p class="connector-label">Connector protocol</p>
     <div class="connector-grid">
       {#each providerKinds as option (option.kind)}
         <label class:selected={draft.kind === option.kind}>
@@ -86,7 +135,7 @@
       spec={selectedSpec}
       idPrefix="provider"
       authEditable
-      endpointReadonly={Boolean(selectedPreset)}
+      endpointReadonly={false}
     />
     {#if draft.kind === 'openai_compatible'}<div class="form-field full">
         <label for="compatible-provider">Compatible provider</label><select
@@ -119,7 +168,9 @@
     <div class="form-field">
       <label for="initial-model"
         >{seedModelRequired
-          ? 'Vertex probe model'
+          ? draft.kind === 'vertex_ai'
+            ? 'Vertex probe model'
+            : 'Probe model'
           : 'Seed model (optional)'}</label
       ><input
         id="initial-model"
@@ -127,15 +178,26 @@
         autocomplete="off"
         bind:value={draft.model}
         placeholder={seedModelRequired
-          ? 'publishers/google/models/gemini-2.5-pro'
+          ? draft.kind === 'vertex_ai'
+            ? 'publishers/google/models/gemini-2.5-pro'
+            : 'Exact upstream model ID'
           : 'gpt-5.4'}
         required={seedModelRequired}
       /><small id="initial-model-help"
         >{seedModelRequired
-          ? 'Vertex requires a publisher model because it has no global model-list operation.'
+          ? 'This provider needs an explicit model to test credentials.'
           : 'Used for the initial connector probe; upstream discovery follows.'}</small
       >
     </div>
+    {#if draft.authMode === 'headers'}<label class="form-field full"
+        >Credential header names<input
+          bind:value={draft.credentialHeaders}
+          placeholder="authorization, x-account-id"
+        /><small
+          >Supply a JSON object with these names and their secret values in
+          Credential.</small
+        ></label
+      >{/if}
     {#if credentialRequired}<div class="form-field full">
         <label for="provider-secret">Credential</label><input
           id="provider-secret"
@@ -150,8 +212,9 @@
         >
       </div>{:else}<div class="identity-note full">
         <strong>No stored credential</strong><span
-          >This provider uses the workload identity available to the OLP
-          process.</span
+          >{draft.authMode === 'none'
+            ? 'No authentication will be sent to this endpoint.'
+            : 'This provider uses the workload identity available to the OLP process.'}</span
         >
       </div>{/if}
   </div>

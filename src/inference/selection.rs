@@ -1,80 +1,12 @@
-use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use crate::ids::RouteSlug;
 use crate::protocols::canonical::identity::Surface;
-use crate::protocols::canonical::identity::TransportMode;
 use crate::protocols::canonical::requests::ImageOperation;
 use crate::protocols::canonical::requests::OPENAI_ENDPOINT_EXTENSION;
 use crate::protocols::canonical::requests::Operation;
 use crate::protocols::canonical::requests::VideoOperation;
 use crate::protocols::openai;
-use crate::providers::runtime_model::Provider;
 use crate::providers::runtime_model::ProviderKind;
-use crate::routes::model::Target;
-use crate::routes::selection::AttemptPlan;
-use crate::routes::selection::RoutingError;
-use crate::routes::selection::select_attempts_filtered;
-use crate::runtime::snapshot::Snapshot;
-
-use crate::inference::error::Error as InferenceError;
-
-/// Removes targets that cannot encode this concrete request without semantic
-/// loss. Capability tuples are the coarse model boundary; this request-level
-/// check covers structured output, tools, source-scoped vendor fields, and
-/// media forms before credentials or transport are used. Runtime eligibility
-/// (circuit state or an async-job target pin) is applied by `eligible` before
-/// deterministic ordering and the route's maximum-attempt truncation.
-pub fn select_representable_attempts_filtered(
-    snapshot: &Snapshot,
-    route_slug: &RouteSlug,
-    operation: &Operation,
-    surface: Surface,
-    mode: TransportMode,
-    affinity_key: &[u8],
-    mut eligible: impl FnMut(&Provider, &Target) -> bool,
-) -> Result<Vec<AttemptPlan>, InferenceError> {
-    let mut capability_matched = false;
-    let mut representable_matched = false;
-    let mut provider_representability = BTreeMap::new();
-    let selected = select_attempts_filtered(
-        snapshot,
-        route_slug,
-        operation.kind(),
-        surface,
-        mode,
-        affinity_key,
-        |provider, target| {
-            capability_matched = true;
-            // Keyed on both inputs the validation reads, so two targets of the
-            // same kind but different models keep independent verdicts.
-            let representable = *provider_representability
-                .entry((provider.kind, target.upstream_model.clone()))
-                .or_insert_with(|| {
-                    validate_for_provider(operation, provider.kind, &target.upstream_model).is_ok()
-                });
-            if !representable {
-                return false;
-            }
-            representable_matched = true;
-            eligible(provider, target)
-        },
-    );
-    match selected {
-        Ok(attempts) => Ok(attempts),
-        Err(RoutingError::NoEligibleTargets { .. })
-            if capability_matched && !representable_matched =>
-        {
-            Err(InferenceError::invalid_request(
-                "No route target can represent this request without semantic loss.",
-            ))
-        }
-        Err(RoutingError::NoEligibleTargets { .. }) if representable_matched => {
-            Err(InferenceError::unavailable("no_eligible_provider"))
-        }
-        Err(error) => Err(InferenceError::not_found(error.to_string())),
-    }
-}
 
 /// Removes delivery-only hints before a canonical request crosses into a
 /// different provider protocol. These hints choose an adapter endpoint; they
@@ -88,40 +20,31 @@ pub fn operation_for_provider(
         provider_kind,
         ProviderKind::OpenAi | ProviderKind::AzureOpenAi | ProviderKind::OpenAiCompatible
     );
-    let carries_hint = matches!(
-        &**operation,
-        Operation::Generation(request)
-            if request.extensions.values.contains_key(OPENAI_ENDPOINT_EXTENSION)
-    );
-    if openai_family || !carries_hint {
+    if openai_family || !carries_endpoint_hint(operation) {
         // Nothing to strip: every attempt shares the one canonical request
         // rather than deep-copying the prompt per provider.
         return Arc::clone(operation);
     }
     let mut stripped = Operation::clone(operation);
-    if let Operation::Generation(request) = &mut stripped {
-        request.extensions.values.remove(OPENAI_ENDPOINT_EXTENSION);
-    }
+    strip_endpoint_hint(&mut stripped);
     Arc::new(stripped)
 }
 
-#[cfg(test)]
-fn retain_representable_attempts(
-    operation: &Operation,
-    attempts: &mut Vec<AttemptPlan>,
-) -> Result<(), InferenceError> {
-    attempts.retain(|attempt| {
-        validate_for_provider(operation, attempt.provider_kind, &attempt.upstream_model).is_ok()
-    });
-    if attempts.is_empty() {
-        return Err(InferenceError::invalid_request(
-            "No route target can represent this request without semantic loss.",
-        ));
-    }
-    Ok(())
+pub(crate) fn carries_endpoint_hint(operation: &Operation) -> bool {
+    matches!(
+        operation,
+        Operation::Generation(request)
+            if request.extensions.values.contains_key(OPENAI_ENDPOINT_EXTENSION)
+    )
 }
 
-fn validate_for_provider(
+pub(crate) fn strip_endpoint_hint(operation: &mut Operation) {
+    if let Operation::Generation(request) = operation {
+        request.extensions.values.remove(OPENAI_ENDPOINT_EXTENSION);
+    }
+}
+
+pub(crate) fn validate_for_provider(
     operation: &Operation,
     provider_kind: ProviderKind,
     upstream_model: &str,
@@ -289,7 +212,25 @@ mod tests {
     use chrono::Utc;
     use serde_json::json;
 
+    use crate::inference::error::Error as InferenceError;
     use crate::inference::selection::*;
+    use crate::protocols::canonical::identity::TransportMode;
+    use crate::routes::selection::AttemptPlan;
+
+    fn retain_representable_attempts(
+        operation: &Operation,
+        attempts: &mut Vec<AttemptPlan>,
+    ) -> Result<(), InferenceError> {
+        attempts.retain(|attempt| {
+            validate_for_provider(operation, attempt.provider_kind, &attempt.upstream_model).is_ok()
+        });
+        if attempts.is_empty() {
+            return Err(InferenceError::invalid_request(
+                "No route target can represent this request without semantic loss.",
+            ));
+        }
+        Ok(())
+    }
 
     fn generation(source: Surface) -> Operation {
         Operation::Generation(GenerationRequest {
@@ -316,6 +257,13 @@ mod tests {
 
     fn attempt(kind: ProviderKind) -> AttemptPlan {
         AttemptPlan {
+            connection_limits: None,
+            credential_limits: None,
+            attempt_limit: None,
+            routing_policy: None,
+            credential_slot_id: None,
+            credential_version_id: None,
+            pricing_revision_id: None,
             generation_id: RuntimeGenerationId::new(),
             route_id: RouteId::new(),
             target_id: TargetId::new(),
@@ -586,6 +534,7 @@ mod tests {
         };
         (
             Snapshot {
+                routing: Default::default(),
                 generation: RuntimeGeneration {
                     id: RuntimeGenerationId::new(),
                     ordinal: 1,
@@ -626,19 +575,31 @@ mod tests {
         )
     }
 
-    #[test]
-    fn semantic_filter_runs_before_route_attempt_limit() {
-        let (snapshot, route_slug, operation, compatible) = semantic_filter_fixture();
-        let attempts = select_representable_attempts_filtered(
-            &snapshot,
-            &route_slug,
-            &operation,
+    fn select(
+        snapshot: &Snapshot,
+        route_slug: &RouteSlug,
+        operation: &Operation,
+        eligible: impl FnMut(&Provider, &Target) -> bool,
+    ) -> Result<crate::inference::provider_selection::Selection, InferenceError> {
+        crate::inference::provider_selection::select(
+            snapshot,
+            route_slug,
+            operation,
             Surface::OpenAi,
             TransportMode::Unary,
             b"affinity",
-            |_, _| true,
+            None,
+            &Default::default(),
+            eligible,
         )
-        .unwrap();
+    }
+
+    #[test]
+    fn semantic_filter_runs_before_route_attempt_limit() {
+        let (snapshot, route_slug, operation, compatible) = semantic_filter_fixture();
+        let attempts = select(&snapshot, &route_slug, &operation, |_, _| true)
+            .unwrap()
+            .attempts;
         assert_eq!(attempts.len(), 1);
         assert_eq!(attempts[0].provider_id, compatible);
     }
@@ -646,16 +607,9 @@ mod tests {
     #[test]
     fn semantic_filter_preserves_unavailable_and_invalid_request_classification() {
         let (snapshot, route_slug, operation, _) = semantic_filter_fixture();
-        let unavailable = select_representable_attempts_filtered(
-            &snapshot,
-            &route_slug,
-            &operation,
-            Surface::OpenAi,
-            TransportMode::Unary,
-            b"affinity",
-            |_, _| false,
-        )
-        .unwrap_err();
+        let unavailable = select(&snapshot, &route_slug, &operation, |_, _| false)
+            .err()
+            .expect("no eligible provider");
         assert_eq!(
             unavailable.kind(),
             crate::inference::error::Kind::Unavailable
@@ -670,16 +624,9 @@ mod tests {
             mime_type: "application/pdf".into(),
             filename: "brief.pdf".into(),
         }];
-        let invalid = select_representable_attempts_filtered(
-            &snapshot,
-            &route_slug,
-            &invalid_operation,
-            Surface::OpenAi,
-            TransportMode::Unary,
-            b"affinity",
-            |_, _| true,
-        )
-        .unwrap_err();
+        let invalid = select(&snapshot, &route_slug, &invalid_operation, |_, _| true)
+            .err()
+            .expect("unrepresentable request");
         assert_eq!(
             invalid.kind(),
             crate::inference::error::Kind::InvalidRequest

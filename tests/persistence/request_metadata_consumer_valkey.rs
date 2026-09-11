@@ -143,6 +143,7 @@ fn event(fixture: &Fixture) -> Event {
         usage_complete: true,
         unpriced: true,
         attempts: vec![RequestAttemptMetadata {
+            routing: None,
             id: Uuid::now_v7(),
             ordinal: 1,
             provider_id: fixture.provider_id,

@@ -415,6 +415,7 @@ fn attempt(
     usage: RequestAttemptUsageMetadata,
 ) -> RequestAttemptMetadata {
     RequestAttemptMetadata {
+        routing: None,
         id: Uuid::now_v7(),
         ordinal,
         provider_id,

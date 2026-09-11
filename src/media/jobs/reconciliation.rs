@@ -85,7 +85,7 @@ pub async fn claim_media_reconciliation_jobs(
                     c.progress_percent::real AS \"progress_percent\",
                     c.content_available, c.expires_at, c.error_class,
                     c.completed_at, c.last_polled_at, c.reconciliation_error, c.deleted_at,
-                    c.runtime_generation_id, c.provider_revision_id, c.reconciliation_claim_id,
+                    c.runtime_generation_id, c.provider_revision_id, c.credential_version_id, c.reconciliation_claim_id,
                     c.reconciliation_attempts, c.next_reconciliation_at,
                     c.last_reconciliation_at, c.etag, c.created_at, c.updated_at
              FROM claimed c JOIN providers p ON p.id = c.provider_id

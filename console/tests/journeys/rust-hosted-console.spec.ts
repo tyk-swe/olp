@@ -7,6 +7,7 @@ import {
 } from './fixtures';
 import { verifyConsolePolish } from './console-polish';
 import { verifyDraftSave } from './draft-saving';
+import { verifyProviderRouting } from './provider-routing';
 import { expectFact, refreshUntilRequestCount } from './request-history';
 import { readFileSync } from 'node:fs';
 import AxeBuilder from '@axe-core/playwright';
@@ -351,7 +352,7 @@ test.describe('Rust-hosted console integration', () => {
         page.getByRole('heading', { name: 'Attempt explanation' })
       ).toBeVisible();
       await expect(
-        page.getByText('Eligible in priority group 1')
+        page.getByText('Priority 1 · weighted routing')
       ).toBeVisible();
     }
     await page.getByRole('button', { name: 'Validate draft' }).click();
@@ -730,6 +731,13 @@ test.describe('Rust-hosted console integration', () => {
     } finally {
       await otherTab.close();
     }
+  });
+  test('operators duplicate connections, validate pools, and explain policy routing', async ({
+    page
+  }) => {
+    test.setTimeout(180_000);
+    await signInAsOwner(page);
+    await verifyProviderRouting(page, test.info());
   });
 });
 

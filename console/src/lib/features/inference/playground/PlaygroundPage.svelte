@@ -1,4 +1,7 @@
 <script lang="ts">
+  import RoutingPreferencesForm from '$lib/features/routes/RoutingPreferencesForm.svelte';
+  import RoutingDecisions from '$lib/features/routes/RoutingDecisions.svelte';
+  let routing = $state('{}');
   import { routeKeys } from '$lib/features/routes/routeKeys';
 
   import { createMutation, createQuery } from '@tanstack/svelte-query';
@@ -56,6 +59,7 @@
     let request: PlaygroundRequest;
     try {
       request = {
+        routing: JSON.parse(routing),
         model: model.trim(),
         input,
         surface,
@@ -103,6 +107,11 @@
 
 <div class="playground-grid">
   <form class="card composer" onsubmit={submit}>
+    <RoutingPreferencesForm
+      bind:value={routing}
+      id="playground-routing"
+      disabled={mutation.isPending}
+    />
     <SegmentedRadioGroup
       label="Test mode"
       name="playground-mode"
@@ -317,6 +326,11 @@
       </div>{/if}
   </section>
 </div>
+
+{#if mutation.data?.routing?.length}<section class="card composer">
+    <h2>Routing explanation</h2>
+    <RoutingDecisions decisions={mutation.data.routing} />
+  </section>{/if}
 
 <style>
   .privacy-note {

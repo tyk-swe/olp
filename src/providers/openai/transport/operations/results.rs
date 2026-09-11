@@ -73,6 +73,20 @@ pub(crate) async fn execute(
     let response = connector.post_unary_json(&request, path, body).await?;
     let result = match result_kind {
         ResultKind::Embeddings => {
+            let response = if connector.options.vendor_id.as_deref() == Some("voyage") {
+                let mut value: serde_json::Value = parse_wire("embeddings", &response)?;
+                if let Some(usage) = value
+                    .get_mut("usage")
+                    .and_then(serde_json::Value::as_object_mut)
+                    && let Some(tokens) = usage.get("total_tokens").cloned()
+                {
+                    usage.insert("prompt_tokens".into(), tokens);
+                }
+                serde_json::to_vec(&value)
+                    .map_err(|error| protocol_encode_error("embeddings", error))?
+            } else {
+                response
+            };
             let wire: EmbeddingResponse = parse_wire("embeddings", &response)?;
             CanonicalResult::Embeddings(
                 decode_embedding_response(wire)

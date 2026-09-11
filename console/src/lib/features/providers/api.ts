@@ -24,10 +24,13 @@ export async function listProviders(
 
 export async function listProviderPage(
   cursor?: string,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  search?: string
 ): Promise<CursorPage<ProviderSummary>> {
   const response = await apiClient.GET('/api/v3/providers', {
-    params: { query: { limit: PROVIDER_PAGE_SIZE, cursor } },
+    params: {
+      query: { limit: PROVIDER_PAGE_SIZE, cursor, search: search || undefined }
+    },
     signal
   });
   return pageResult(result(response.data, response.error, response.response));

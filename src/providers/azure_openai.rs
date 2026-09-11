@@ -137,6 +137,7 @@ impl fmt::Debug for ApiKey {
 }
 
 pub struct Connector {
+    overrides: std::collections::BTreeMap<String, (String, OpenAiConnector)>,
     resource_endpoint: Url,
     deployment: String,
     api_version: String,
@@ -150,11 +151,43 @@ impl Connector {
             .expect("Azure key validation is at least as strict as OpenAI key validation");
         let inner = OpenAiConnector::new_with_api_key_header(config.inner, inference_key);
         Self {
+            overrides: Default::default(),
             resource_endpoint: config.resource_endpoint,
             deployment: config.deployment,
             api_version: config.api_version,
             inner,
         }
+    }
+
+    pub(crate) fn configured(
+        config: ConnectorConfig,
+        api_key: ApiKey,
+        mut options: crate::providers::options::ConnectionOptions,
+        policy: &EgressPolicy,
+        limits: crate::providers::connector::ResponseLimits,
+    ) -> Result<Self, ConnectorBuildError> {
+        let mappings = std::mem::take(&mut options.models);
+        let mut overrides = std::collections::BTreeMap::new();
+        for (model, metadata) in mappings {
+            if let Some(deployment) = metadata.deployment {
+                let mapped = ConnectorConfig::new_with_policy(
+                    config.resource_endpoint.as_str(),
+                    deployment.clone(),
+                    config.api_version.clone(),
+                    policy,
+                )?
+                .with_response_limits(limits)?;
+                let key =
+                    OpenAiApiKey::new(api_key.0.as_str().to_owned()).expect("validated Azure key");
+                let inner = OpenAiConnector::new_with_api_key_header(mapped.inner, key)
+                    .with_options(options.clone(), None);
+                overrides.insert(model, (deployment, inner));
+            }
+        }
+        let mut connector = Self::new(config, api_key);
+        connector.inner = connector.inner.with_options(options, None);
+        connector.overrides = overrides;
+        Ok(connector)
     }
 
     /// Proves the exact deployment path, API version, and credential with
@@ -200,18 +233,22 @@ impl Connector {
         upstream_model: &str,
         capability: CompatibleCapability,
     ) -> Result<(), CompatibleCapabilityCertificationError> {
-        if upstream_model != self.deployment {
-            return Err(CompatibleCapabilityCertificationError::InvalidResult);
-        }
+        let (upstream_model, inner) =
+            if let Some((deployment, inner)) = self.overrides.get(upstream_model) {
+                (deployment.as_str(), inner)
+            } else if upstream_model == self.deployment {
+                (upstream_model, &self.inner)
+            } else {
+                return Err(CompatibleCapabilityCertificationError::InvalidResult);
+            };
         if capability.operation == OperationKind::Generation
             && capability.surface != Surface::OpenAi
         {
-            return self
-                .inner
+            return inner
                 .certify_chat_completions_capability(upstream_model, capability.mode)
                 .await;
         }
-        self.inner
+        inner
             .certify_compatible_capability(
                 upstream_model,
                 CompatibleCapability {
@@ -261,7 +298,7 @@ impl fmt::Debug for Connector {
 impl ProviderTransport for Connector {
     fn execute<'a>(
         &'a self,
-        request: ProviderRequest,
+        mut request: ProviderRequest,
     ) -> crate::inference::transport::BoxFuture<'a, Result<ProviderOutput, TransportError>> {
         if request.attempt.provider_kind
             != crate::providers::runtime_model::ProviderKind::AzureOpenAi
@@ -275,6 +312,10 @@ impl ProviderTransport for Connector {
                     message: "Azure OpenAI connector received a different provider kind".into(),
                 })
             });
+        }
+        if let Some((deployment, inner)) = self.overrides.get(&request.attempt.upstream_model) {
+            request.attempt.upstream_model = deployment.clone();
+            return inner.execute(request);
         }
         self.inner.execute(request)
     }

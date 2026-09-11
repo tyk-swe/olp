@@ -68,6 +68,7 @@ async fn staged_provider_changes_do_not_leak_until_reactivation() {
             model_id: Some(model_id),
             name: "revision-provider".to_owned(),
             configuration: olp::providers::configuration::ProviderConfiguration {
+                options: Default::default(),
                 kind: olp::providers::runtime_model::ProviderKind::OpenAi,
                 endpoint: Some("https://old.example.test/v1/".to_owned()),
                 cloud_region: None,
@@ -176,6 +177,7 @@ async fn staged_provider_changes_do_not_leak_until_reactivation() {
     olp::media::jobs::lifecycle::reserve_media_job(
         &pool,
         NewMediaJobReservation {
+            credential_version_id: None,
             id: live_media_job_id,
             runtime_generation_id: first_activation.release.generation_id,
             api_key_id: media_api_key_id,
@@ -269,6 +271,7 @@ async fn staged_provider_changes_do_not_leak_until_reactivation() {
         &UpdateProvider {
             name: "revision-provider-next".to_owned(),
             configuration: olp::providers::configuration::ProviderConfiguration {
+                options: Default::default(),
                 endpoint: Some("https://new.example.test/v1/".to_owned()),
                 cloud_region: None,
                 cloud_project: None,
@@ -397,7 +400,7 @@ async fn staged_provider_changes_do_not_leak_until_reactivation() {
         panic!("new key creation must execute");
     };
     let staged_publication: Snapshot =
-        serde_json::from_slice(&key_creation.release.payload).unwrap();
+        Snapshot::from_persisted_slice(&key_creation.release.payload).unwrap();
     let staged_provider = staged_publication.providers.values().next().unwrap();
     assert_eq!(staged_provider.name, "revision-provider");
     assert_eq!(
@@ -475,7 +478,8 @@ async fn staged_provider_changes_do_not_leak_until_reactivation() {
     )
     .await
     .unwrap();
-    let activated: Snapshot = serde_json::from_slice(&second_activation.release.payload).unwrap();
+    let activated: Snapshot =
+        Snapshot::from_persisted_slice(&second_activation.release.payload).unwrap();
     let activated_configuration = olp::providers::repository::get_provider(&pool, provider_id)
         .await
         .unwrap();
@@ -529,6 +533,7 @@ async fn staged_provider_changes_do_not_leak_until_reactivation() {
         &staged_publication,
         ProviderId::from_uuid(provider_id),
         live_media_job.provider_revision_id,
+        None,
     )
     .await
     .unwrap();

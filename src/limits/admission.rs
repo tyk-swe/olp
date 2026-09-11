@@ -157,10 +157,37 @@ pub trait LimitLease: Send + Sync {
     fn reconcile(&self, actual_tokens: i64) -> BoxFuture<'_, Result<(), LimitError>>;
 
     fn release(&self) -> BoxFuture<'_, Result<(), LimitError>>;
+
+    /// Undo an admission that never reached dispatch, including RPM and TPM.
+    /// Refunds must be retry-safe, like reconciliation and release.
+    fn refund(&self) -> BoxFuture<'_, Result<(), LimitError>>;
 }
 
 /// Storage-independent distributed limiter used by the inference engine.
+#[derive(Clone, Debug, serde::Serialize, utoipa::ToSchema)]
+pub struct ProviderQuotaUsage {
+    pub requests_this_minute: u64,
+    pub tokens_this_minute: u64,
+    pub concurrent_requests: u64,
+}
+
 pub trait LimitBackend: Send + Sync {
+    fn provider_usage<'a>(
+        &'a self,
+        _id: uuid::Uuid,
+        _lookup: &'a str,
+    ) -> BoxFuture<'a, Result<Option<ProviderQuotaUsage>, LimitError>> {
+        Box::pin(async { Ok(None) })
+    }
+
+    fn provider_cooldown<'a>(
+        &'a self,
+        _scope: &'a str,
+        _duration: Option<Duration>,
+    ) -> BoxFuture<'a, Result<bool, LimitError>> {
+        Box::pin(async { Ok(false) })
+    }
+
     fn reserve<'a>(
         &'a self,
         request: LimitRequest<'a>,
@@ -199,6 +226,19 @@ async fn release_distributed_limit(lease: &dyn LimitLease) {
             Ok(Err(_)) | Err(_) => {
                 tokio::time::sleep(Duration::from_millis(25_u64 << attempt)).await;
             }
+        }
+    }
+}
+
+async fn refund_distributed_limit(lease: &dyn LimitLease) {
+    for attempt in 0..LIMIT_CLEANUP_ATTEMPTS {
+        match tokio::time::timeout(LIMIT_CLEANUP_TIMEOUT, lease.refund()).await {
+            Ok(Ok(())) => return,
+            Ok(Err(error)) => warn!(%error, "failed to refund provider admission"),
+            Err(_) => warn!("timed out refunding provider admission"),
+        }
+        if attempt + 1 < LIMIT_CLEANUP_ATTEMPTS {
+            tokio::time::sleep(Duration::from_millis(25_u64 << attempt)).await;
         }
     }
 }
@@ -263,6 +303,23 @@ impl Reservation {
         if let Some(release) = self.start_release() {
             let _ = release.await;
         }
+    }
+
+    pub async fn refund(self) {
+        let reconciliation = self
+            .inner
+            .reconcile
+            .lock()
+            .expect("inference reservation reconciliation mutex is not poisoned")
+            .take();
+        if let Some(reconciliation) = reconciliation {
+            // Cleanup continues if the caller is cancelled while waiting.
+            let _ = tokio::spawn(async move {
+                refund_distributed_limit(reconciliation.lease.as_ref()).await;
+            })
+            .await;
+        }
+        self.release().await;
     }
 
     pub fn spawn_release(&self) {
@@ -568,7 +625,15 @@ fn has_cost_budget(key: &ApiKey) -> bool {
     key.limits.daily_cost_limit.is_some() || key.limits.monthly_cost_limit.is_some()
 }
 
-fn estimate_tokens(operation: &Operation) -> i64 {
+pub(crate) fn estimate_tokens(operation: &Operation) -> i64 {
+    estimate_tokens_with_defaults(operation, None, None)
+}
+
+pub(crate) fn estimate_tokens_with_defaults(
+    operation: &Operation,
+    max_output_tokens: Option<u32>,
+    candidate_count: Option<u32>,
+) -> i64 {
     let estimate = match operation {
         Operation::Generation(request) => {
             let messages = request
@@ -608,9 +673,25 @@ fn estimate_tokens(operation: &Operation) -> i64 {
                 .sum::<usize>();
             // Omitting the output cap must not make TPM effectively input-only.
             // 4k is a conservative portable default across launch connectors.
-            let output = usize::try_from(request.parameters.max_output_tokens.unwrap_or(4_096))
-                .unwrap_or(usize::MAX)
-                .saturating_mul(usize::from(request.parameters.candidate_count.unwrap_or(1)));
+            let output = usize::try_from(
+                request
+                    .parameters
+                    .max_output_tokens
+                    .or(max_output_tokens)
+                    .unwrap_or(4_096),
+            )
+            .unwrap_or(usize::MAX)
+            .saturating_mul(
+                usize::try_from(
+                    request
+                        .parameters
+                        .candidate_count
+                        .map(u32::from)
+                        .or(candidate_count)
+                        .unwrap_or(1),
+                )
+                .unwrap_or(usize::MAX),
+            );
             messages.saturating_add(tools).saturating_add(output)
         }
         Operation::Embeddings(request) => request

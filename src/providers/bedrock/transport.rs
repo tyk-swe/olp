@@ -636,11 +636,14 @@ where
     let upstream = match error {
         SdkError::ServiceError(service) => {
             let observed = service.raw().upstream_signal();
+            let modeled_status = service_code_status(service.err().code());
             UpstreamSignal {
-                status: observed
-                    .status
-                    .filter(|status| *status >= 400)
-                    .or_else(|| service_code_status(service.err().code())),
+                // AWS returns some credential rejections as HTTP 403. Keep
+                // their authentication identity for slot failover and cooldowns.
+                status: modeled_status
+                    .filter(|status| *status == 401)
+                    .or_else(|| observed.status.filter(|status| *status >= 400))
+                    .or(modeled_status),
                 retry_after: observed.retry_after,
             }
         }

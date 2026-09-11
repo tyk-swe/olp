@@ -55,6 +55,7 @@ pub struct ReplaceRouteDraftInput {
 
 #[derive(Clone, Debug)]
 pub struct RouteRevisionRecord {
+    pub routing_policy: crate::routes::policy::RoutingPolicy,
     pub id: Uuid,
     pub routing_id: Uuid,
     pub route_id: Uuid,
@@ -83,6 +84,7 @@ pub struct RouteRecord {
 
 #[derive(Clone, Debug)]
 pub struct RouteSimulationTarget {
+    pub decision: Option<crate::inference::provider_selection::RoutingDecision>,
     pub target_id: Uuid,
     pub provider_id: Uuid,
     pub provider_name: String,
@@ -104,6 +106,9 @@ pub struct RouteSimulation {
 
 #[derive(Clone, Debug)]
 pub struct RouteRevisionDiff {
+    pub routing_policy_changed: bool,
+    pub routing_policy_before: crate::routes::policy::RoutingPolicy,
+    pub routing_policy_after: crate::routes::policy::RoutingPolicy,
     pub from_revision: i32,
     pub to_revision: i32,
     pub slug_changed: bool,

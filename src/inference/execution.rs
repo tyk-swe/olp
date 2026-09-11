@@ -23,7 +23,6 @@ use crate::inference::lifecycle::RequestMetadataFinalizer;
 use crate::inference::lifecycle::RequestOutcome;
 use crate::inference::lifecycle::usage_from_result;
 use crate::inference::principal::Principal;
-use crate::inference::selection::select_representable_attempts_filtered;
 use crate::inference::telemetry::elapsed_ms;
 use crate::inference::tracing::RequestTrace;
 use crate::limits::admission::Reservation;
@@ -77,6 +76,7 @@ impl RequestAdmission {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RequiredTarget {
+    pub credential_version_id: Option<uuid::Uuid>,
     pub provider_id: uuid::Uuid,
     pub upstream_model: String,
 }
@@ -444,11 +444,15 @@ impl Executor {
                         started_at,
                         started,
                     );
+                    accounting.record_attempt_routing(attempt);
                 };
             execute(
                 Context {
                     runtime,
-                    overall_timeout: route.overall_timeout.as_duration(),
+                    overall_timeout: route
+                        .overall_timeout
+                        .as_duration()
+                        .saturating_sub(context.request_started.elapsed()),
                     max_attempts: route.max_attempts,
                     media_spool: self.media_spool.clone(),
                     max_inline_media_bytes: self.max_inline_media_bytes,
@@ -499,20 +503,25 @@ impl Executor {
             None,
             None,
         );
-        let attempts = match select_representable_attempts_filtered(
+        let attempts = match crate::inference::provider_selection::select(
             runtime,
             &context.route_slug,
             &operation,
             surface,
             TransportMode::Unary,
             context.request_id.as_uuid().as_bytes(),
+            None,
+            &crate::routes::policy::RoutingPreferences {
+                required_credential_version: required_target.credential_version_id,
+                ..Default::default()
+            },
             |_, target| {
                 self.circuits.is_selectable(target.routing_id)
                     && target.provider_id.as_uuid() == required_target.provider_id
                     && target.upstream_model == required_target.upstream_model
             },
         ) {
-            Ok(attempts) => attempts,
+            Ok(selection) => selection.attempts,
             Err(error) => {
                 let failure = if error.code() == "no_eligible_provider" {
                     InferenceError::unavailable("media_job_target_unavailable")
@@ -653,7 +662,7 @@ impl Executor {
         Ok(context)
     }
 
-    fn select_operation_attempts(
+    async fn select_operation_attempts(
         &self,
         principal: &Principal,
         context: &ExecutionContext,
@@ -661,13 +670,25 @@ impl Executor {
         mode: TransportMode,
         required_target: &Option<RequiredTarget>,
     ) -> Result<Vec<crate::routes::selection::AttemptPlan>, InferenceError> {
-        match select_representable_attempts_filtered(
+        let mut preferences = self
+            .routing_preferences(
+                principal.runtime(),
+                &context.route_slug,
+                &principal.routing_preferences,
+            )
+            .await;
+        preferences.required_credential_version = required_target
+            .as_ref()
+            .and_then(|target| target.credential_version_id);
+        match crate::inference::provider_selection::select(
             principal.runtime(),
             &context.route_slug,
             operation,
             principal.surface(),
             mode,
             context.request_id.as_uuid().as_bytes(),
+            Some(principal.key()),
+            &preferences,
             |_, target| {
                 self.circuits.is_selectable(target.routing_id)
                     && required_target.as_ref().is_none_or(|required| {
@@ -676,7 +697,7 @@ impl Executor {
                     })
             },
         ) {
-            Ok(attempts) => Ok(attempts),
+            Ok(selection) => Ok(selection.attempts),
             Err(error) => {
                 if required_target.is_some() && error.code() == "no_eligible_provider" {
                     Err(InferenceError::unavailable("media_job_target_unavailable"))
@@ -716,11 +737,15 @@ impl Executor {
                         started_at,
                         started,
                     );
+                    accounting.record_attempt_routing(attempt);
                 };
             execute(
                 Context {
                     runtime: principal.runtime(),
-                    overall_timeout: route.overall_timeout.as_duration(),
+                    overall_timeout: route
+                        .overall_timeout
+                        .as_duration()
+                        .saturating_sub(context.request_started.elapsed()),
                     max_attempts: route.max_attempts,
                     media_spool: self.media_spool.clone(),
                     max_inline_media_bytes: self.max_inline_media_bytes,
@@ -816,13 +841,10 @@ impl Executor {
             admission.reservation.take(),
             admission.reserved_tokens,
         );
-        let attempts = match self.select_operation_attempts(
-            principal,
-            &context,
-            &operation,
-            mode,
-            &required_target,
-        ) {
+        let attempts = match self
+            .select_operation_attempts(principal, &context, &operation, mode, &required_target)
+            .await
+        {
             Ok(attempts) => attempts,
             Err(failure) => {
                 accounting.finish(RequestOutcome::from_error(&failure));

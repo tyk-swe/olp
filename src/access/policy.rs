@@ -218,6 +218,8 @@ impl ApiKeyLimits {
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct ApiKey {
+    #[serde(default)]
+    pub routing_policy: crate::routes::policy::RoutingPolicy,
     pub id: ApiKeyId,
     pub lookup_id: ApiKeyLookupId,
     pub digest: ApiKeyDigest,

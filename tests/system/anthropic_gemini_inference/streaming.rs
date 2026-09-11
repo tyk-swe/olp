@@ -57,6 +57,7 @@ async fn streaming_never_fails_over_after_the_first_canonical_event() {
     let fixture = test_gateway();
     let snapshot = fixture.state.runtime().pin();
     let mut snapshot = Snapshot {
+        routing: Default::default(),
         generation: RuntimeGeneration {
             id: RuntimeGenerationId::new(),
             ordinal: snapshot.generation.ordinal + 1,
@@ -181,6 +182,7 @@ async fn client_disconnect_drops_the_upstream_stream() {
     let fixture = test_gateway();
     let snapshot = fixture.state.runtime().pin();
     let mut snapshot = Snapshot {
+        routing: Default::default(),
         generation: RuntimeGeneration {
             id: RuntimeGenerationId::new(),
             ordinal: snapshot.generation.ordinal + 1,

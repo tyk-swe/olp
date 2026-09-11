@@ -22,6 +22,7 @@
     busy,
     submitError,
     canManage,
+    publicationBlocked = false,
     onSubmit,
     onCancel,
     onClearError
@@ -30,6 +31,7 @@
     busy: string;
     submitError: string;
     canManage: boolean;
+    publicationBlocked?: boolean;
     onSubmit: (
       input: ApiKeyPolicyInput,
       preferredRoute?: string
@@ -77,7 +79,7 @@
     const root =
       (event.currentTarget as HTMLFormElement).closest('main') ??
       (event.currentTarget as HTMLFormElement);
-    if (!canManage) return;
+    if (!canManage || busy || publicationBlocked) return;
     onClearError();
     formError = '';
     errors = validateApiKey({
@@ -126,6 +128,7 @@
   {#if editing}<button
       class="button button-secondary"
       type="button"
+      disabled={Boolean(busy)}
       onclick={onCancel}>Cancel</button
     >{:else}<a class="button button-secondary" href={resolve('/api-keys')}
       >Cancel</a
@@ -381,11 +384,14 @@
       </div>
     {/if}
   </section>
+  {#if publicationBlocked}<p class="section-help" role="status">
+      Save the routing policy before publishing this key.
+    </p>{/if}
   {#if canManage || !editing}<div class="form-actions">
       <button
         class="button button-primary"
         type="submit"
-        disabled={!canManage || Boolean(busy)}
+        disabled={!canManage || Boolean(busy) || publicationBlocked}
         >{busy === 'create'
           ? 'Creating securely…'
           : busy === 'update'

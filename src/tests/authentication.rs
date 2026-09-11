@@ -253,6 +253,7 @@ async fn revoked_and_expired_keys_are_rejected_by_admission() {
             .runtime
             .install(
                 Snapshot {
+                    routing: Default::default(),
                     generation: RuntimeGeneration {
                         id: RuntimeGenerationId::new(),
                         ordinal: pinned.generation.ordinal + 1,

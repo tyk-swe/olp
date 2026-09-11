@@ -206,8 +206,8 @@ async fn insert_request_metadata_rows(
         sqlx::query(
             "INSERT INTO attempts \
              (id, request_id, request_started_at, ordinal, provider_id, upstream_model, \
-              started_at, completed_at, status_code, error_class, committed, latency_ms, first_byte_ms) \
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) \
+              started_at, completed_at, status_code, error_class, committed, latency_ms, first_byte_ms, routing) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14) \
              ON CONFLICT (request_id, ordinal) DO NOTHING",
         )
     .bind(attempt.event.id)
@@ -223,6 +223,7 @@ async fn insert_request_metadata_rows(
     .bind(attempt.event.committed)
     .bind(attempt.latency_ms)
     .bind(attempt.first_byte_ms)
+    .bind(attempt.event.routing.as_ref().map(sqlx::types::Json))
         .execute(&mut **transaction)
         .await?;
     }

@@ -80,7 +80,7 @@ pub async fn get_route_revisions(
 
     let revision_rows = sqlx::query_as::<_, GetRouteRevisionsRow>(
         "SELECT id, routing_id, route_id, revision, slug, overall_timeout_ms, max_attempts, source_draft_id, \
-                    activated_by, activated_at FROM route_revisions WHERE id = ANY($1::uuid[])",
+                    activated_by, activated_at, routing_policy FROM route_revisions WHERE id = ANY($1::uuid[])",
     )
     .bind(revision_ids)
         .fetch_all(pool)
@@ -137,6 +137,7 @@ pub async fn get_route_revisions(
         revisions.insert(
             rev_id,
             RouteRevisionRecord {
+                routing_policy: row.routing_policy.0,
                 id: rev_id,
                 routing_id: row.routing_id,
                 route_id: row.route_id,
@@ -183,6 +184,9 @@ pub async fn diff_route_revisions(
     let from_targets = revision_target_map(&from.targets);
     let to_targets = revision_target_map(&to.targets);
     Ok(RouteRevisionDiff {
+        routing_policy_changed: from.routing_policy != to.routing_policy,
+        routing_policy_before: from.routing_policy,
+        routing_policy_after: to.routing_policy,
         from_revision: from.revision,
         to_revision: to.revision,
         slug_changed: from.slug != to.slug,
@@ -256,6 +260,7 @@ pub async fn restore_route_revision_as_draft(
     .bind(actor)
         .execute(&mut *transaction)
         .await?;
+    sqlx::query("UPDATE route_drafts SET routing_policy=(SELECT routing_policy FROM route_revisions WHERE id=$2) WHERE id=$1").bind(id).bind(revision_id).execute(&mut *transaction).await?;
     sqlx::query(
         "INSERT INTO route_draft_operations (route_draft_id, operation) \
              SELECT $1, operation FROM route_revision_operations WHERE route_revision_id = $2",
@@ -363,6 +368,7 @@ fn revision_target_map(targets: &[RouteTargetRecord]) -> BTreeMap<String, (i32, 
 
 #[derive(sqlx::FromRow)]
 struct GetRouteRevisionsRow {
+    routing_policy: sqlx::types::Json<crate::routes::policy::RoutingPolicy>,
     id: uuid::Uuid,
     routing_id: uuid::Uuid,
     route_id: uuid::Uuid,

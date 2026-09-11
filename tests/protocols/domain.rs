@@ -119,6 +119,7 @@ fn snapshot(targets: Vec<(Provider, Target)>, max_attempts: u16) -> Snapshot {
     };
 
     Snapshot {
+        routing: Default::default(),
         generation: RuntimeGeneration {
             id: RuntimeGenerationId::from_uuid(id(600)),
             ordinal: 7,
@@ -384,15 +385,9 @@ fn snapshot_eligibility_is_operation_specific_but_surface_agnostic() {
 }
 
 #[test]
-fn route_attempt_budget_cannot_exceed_target_count() {
+fn route_attempt_budget_can_include_multiple_credentials_per_target() {
     let runtime = snapshot(vec![provider(1, 11, 0, 1)], 2);
-    assert!(matches!(
-        runtime.validate(),
-        Err(SnapshotValidationError::InvalidRoute {
-            source: RouteValidationError::AttemptsExceedTargets,
-            ..
-        })
-    ));
+    assert_eq!(runtime.validate(), Ok(()));
 }
 
 #[test]
@@ -494,6 +489,7 @@ fn canonical_event_sequences_require_order_and_exactly_one_terminal_done() {
 
 fn api_key(status: ApiKeyStatus, expires_at: Option<chrono::DateTime<Utc>>) -> ApiKey {
     ApiKey {
+        routing_policy: Default::default(),
         id: ApiKeyId::from_uuid(id(900)),
         lookup_id: ApiKeyLookupId::parse("lookup_123").unwrap(),
         digest: ApiKeyDigest::new([7; 32]),

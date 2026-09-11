@@ -24,6 +24,7 @@ pub(super) async fn exercise(
         observed_at - Duration::days(3),
         &[
             PriceInput {
+                vendor_id: None,
                 provider_kind: olp::providers::runtime_model::ProviderKind::OpenAi,
                 provider_id: None,
                 model: "mock-model".to_owned(),
@@ -35,6 +36,7 @@ pub(super) async fn exercise(
                 currency: "USD".to_owned(),
             },
             PriceInput {
+                vendor_id: None,
                 provider_kind: olp::providers::runtime_model::ProviderKind::OpenAi,
                 provider_id: Some(provider_id),
                 model: "mock-model".to_owned(),
@@ -46,6 +48,7 @@ pub(super) async fn exercise(
                 currency: "USD".to_owned(),
             },
             PriceInput {
+                vendor_id: None,
                 provider_kind: olp::providers::runtime_model::ProviderKind::OpenAi,
                 provider_id: None,
                 model: "mock-model".to_owned(),
@@ -126,6 +129,7 @@ pub(super) async fn exercise(
             usage_complete: true,
             unpriced: true,
             attempts: vec![RequestAttemptMetadata {
+                routing: None,
                 id: Uuid::now_v7(),
                 ordinal: 1,
                 provider_id,
@@ -619,6 +623,7 @@ pub(super) async fn exercise(
             usage_complete: true,
             unpriced: true,
             attempts: vec![RequestAttemptMetadata {
+                routing: None,
                 id: Uuid::now_v7(),
                 ordinal: 1,
                 provider_id,
@@ -669,7 +674,17 @@ pub(super) async fn exercise(
     let generations = olp::runtime::history::runtime_generations(pool, None, 50)
         .await
         .unwrap();
-    assert_eq!(generations.items[0].id, generation_id);
+    assert_ne!(
+        generations.items[0].id, generation_id,
+        "pricing publishes a new runtime price book"
+    );
+    assert!(
+        generations
+            .items
+            .iter()
+            .any(|generation| generation.id == generation_id),
+        "historical request generations remain visible"
+    );
     assert!(
         !olp::access::audit::audit_events(pool, None, 50, &AuditFilters::default())
             .await

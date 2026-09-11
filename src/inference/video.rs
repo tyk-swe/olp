@@ -5,7 +5,6 @@ use crate::inference::error::Error as InferenceError;
 use crate::inference::execution::RequiredTarget;
 use crate::inference::executor::Executor;
 use crate::inference::principal::Principal;
-use crate::inference::selection::select_representable_attempts_filtered;
 use crate::protocols::canonical::identity::OperationKind;
 use crate::protocols::canonical::identity::Surface;
 use crate::protocols::canonical::identity::TransportMode;
@@ -13,7 +12,7 @@ use crate::protocols::canonical::requests::Operation;
 use crate::providers::runtime_model::Provider;
 use std::collections::BTreeSet;
 impl Executor {
-    pub fn select_video_create_target(
+    pub async fn select_video_create_target(
         &self,
         principal: &Principal,
         operation: &Operation,
@@ -30,15 +29,20 @@ impl Executor {
             .routes
             .get(&route_slug)
             .ok_or_else(|| InferenceError::resource_not_found("route_not_found"))?;
-        let attempt = select_representable_attempts_filtered(
+        let preferences = self
+            .routing_preferences(snapshot, &route_slug, &principal.routing_preferences)
+            .await;
+        let attempt = crate::inference::provider_selection::select(
             snapshot,
             &route_slug,
             operation,
             Surface::OpenAi,
             TransportMode::Async,
             local_job_id.as_bytes(),
+            Some(key),
+            &preferences,
             |provider, target| {
-                self.circuits.is_selectable(target.id)
+                self.circuits.is_selectable(target.routing_id)
                     && video_lifecycle_supported(
                         &route.operations,
                         provider,
@@ -46,6 +50,7 @@ impl Executor {
                     )
             },
         )?
+        .attempts
         .into_iter()
         .next()
         .ok_or_else(|| InferenceError::unavailable("no_eligible_provider"))?;
@@ -53,6 +58,7 @@ impl Executor {
             key.clone(),
             route_slug,
             RequiredTarget {
+                credential_version_id: attempt.credential_version_id,
                 provider_id: attempt.provider_id.as_uuid(),
                 upstream_model: attempt.upstream_model,
             },

@@ -236,6 +236,7 @@ fn test_gateway() -> TestGateway {
         ],
     };
     let snapshot = Snapshot {
+        routing: Default::default(),
         generation: RuntimeGeneration {
             id: RuntimeGenerationId::new(),
             ordinal: 9,
@@ -271,6 +272,7 @@ fn test_gateway() -> TestGateway {
         api_keys: BTreeMap::from([(
             lookup.clone(),
             ApiKey {
+                routing_policy: Default::default(),
                 id: ApiKeyId::new(),
                 lookup_id: lookup,
                 digest: ApiKeyDigest::new(material.digest),

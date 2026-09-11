@@ -71,6 +71,7 @@ fn install_event_stream(
         .unwrap()
         .operations = BTreeSet::from([operation]);
     let snapshot = Snapshot {
+        routing: Default::default(),
         generation: RuntimeGeneration {
             id: RuntimeGenerationId::new(),
             ordinal: pinned.generation.ordinal + 1,

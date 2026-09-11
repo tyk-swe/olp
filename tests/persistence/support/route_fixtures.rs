@@ -25,7 +25,7 @@ pub(crate) async fn insert_provider(pool: &PgPool, actor: Uuid, name: &str) -> P
         "INSERT INTO providers \
          (id, name, kind, state, endpoint, auth_mode, etag, created_by) \
          VALUES ($1, $2, 'openai', 'active', 'https://api.example.test/v1/', \
-                 'api_key', $3, $4)",
+                 'none', $3, $4)",
     )
     .bind(provider.provider_id)
     .bind(name)
@@ -34,6 +34,8 @@ pub(crate) async fn insert_provider(pool: &PgPool, actor: Uuid, name: &str) -> P
     .execute(pool)
     .await
     .unwrap();
+    sqlx::query("INSERT INTO provider_credential_slots(id,provider_id,name,is_default) VALUES($1,$1,'Default',true)")
+        .bind(provider.provider_id).execute(pool).await.unwrap();
     sqlx::query(
         "INSERT INTO provider_models \
          (id, provider_id, upstream_model, display_name, enabled, discovered_at) \
@@ -112,6 +114,11 @@ pub(crate) async fn insert_provider_revision(
         .await
         .unwrap();
     }
+    let mut transaction = pool.begin().await.unwrap();
+    olp::providers::pool_store::snapshot(&mut transaction, provider.provider_id, revision_id)
+        .await
+        .unwrap();
+    transaction.commit().await.unwrap();
     revision_id
 }
 

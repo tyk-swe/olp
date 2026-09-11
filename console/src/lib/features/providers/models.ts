@@ -70,10 +70,14 @@ export async function listProviderModelPage(
 export async function listProviderModelInventoryPage(
   cursor?: string,
   enabled?: boolean,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  search?: string,
+  surface?: components['schemas']['Surface']
 ): Promise<CursorPage<ProviderModelInventory>> {
   const response = await apiClient.GET('/api/v3/provider-models', {
-    params: { query: { limit: PROVIDER_PAGE_SIZE, cursor, enabled } },
+    params: {
+      query: { limit: PROVIDER_PAGE_SIZE, cursor, enabled, search, surface }
+    },
     signal
   });
   return pageResult(result(response.data, response.error, response.response));

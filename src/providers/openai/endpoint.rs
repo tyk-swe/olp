@@ -41,6 +41,10 @@ impl Default for Endpoint {
 }
 
 impl Endpoint {
+    pub(crate) fn is_official(&self) -> bool {
+        self.core.url().as_str() == DEFAULT_OPENAI_BASE_URL
+    }
+
     pub(crate) fn parse(value: &str) -> Result<Self, Error> {
         Self::parse_with_policy(value, &EgressPolicy::default())
     }

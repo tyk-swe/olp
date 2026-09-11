@@ -37,6 +37,7 @@ function openAIClient(baseURL, options = {}) {
   return new OpenAI({
     apiKey,
     baseURL,
+    defaultHeaders: { 'X-OLP-Routing': JSON.stringify({ strategy: 'weighted' }) },
     fetch: localOnlyFetch,
     maxRetries: 0,
     timeout: 5_000,
@@ -48,6 +49,7 @@ function anthropicClient(clientApiKey = apiKey) {
   return new Anthropic({
     apiKey: clientApiKey,
     baseURL: `${origin}/anthropic`,
+    defaultHeaders: { 'X-OLP-Routing': JSON.stringify({ strategy: 'weighted' }) },
     fetch: localOnlyFetch,
     maxRetries: 0,
     timeout: 5_000
@@ -61,6 +63,7 @@ function googleClient(clientApiKey = apiKey, retryOptions) {
     httpOptions: {
       baseUrl: `${origin}/gemini`,
       apiVersion: 'v1beta',
+      headers: { 'X-OLP-Routing': JSON.stringify({ strategy: 'weighted' }) },
       timeout: 5_000,
       ...(retryOptions && { retryOptions })
     }
@@ -214,6 +217,9 @@ async function errorContractOpenAI(baseURL, label) {
 }
 
 async function directNegativeContracts() {
+  const malformedRouting = await rejection('malformed OLP preferences', () => openAIClient(`${origin}/v1`, { defaultHeaders: { 'X-OLP-Routing': '{"max_attempts":999}' } }).chat.completions.create({ model: routeSlug, messages: [{ role: 'user', content: 'routing rejection' }] }));
+  assert.equal(malformedRouting.status, 400, 'request preferences cannot increase the attempt budget');
+
   const retiredAuth = await localOnlyFetch(`${origin}/v1/models`, {
     headers: { 'x-litellm-api-key': apiKey }
   });

@@ -44,6 +44,9 @@
       <a class="button button-primary" href={resolve('/routes/new')}
         >Build default route <NavIcon name="arrow" /></a
       >
+      <a class="button button-secondary" href={resolve('/providers/new')}
+        >Add another connection</a
+      >
       <a
         class="button button-secondary"
         href={resolve(`/providers/${provider?.id}`)}>View provider</a

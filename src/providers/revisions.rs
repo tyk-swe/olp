@@ -58,7 +58,7 @@ pub async fn list_provider_revisions(
     let rows = sqlx::query_as::<_, ProviderRevisionRow>(
         "SELECT pr.id, pr.provider_id, pr.revision, pr.name, pr.kind, pr.endpoint, \
                     pr.cloud_region, pr.cloud_project, pr.deployment, pr.api_version, \
-                    pr.auth_mode, pr.connector_ready, pr.credential_version_id, \
+                    pr.auth_mode, pr.options, pr.connector_ready, pr.credential_version_id, \
                     cv.version AS \"credential_version\", pr.source_etag, pr.activated_by, \
                     pr.activated_at, stats.model_count AS \"model_count\", \
                     stats.enabled_model_count AS \"enabled_model_count\", \
@@ -107,7 +107,7 @@ pub async fn get_provider_revision(
     let row = sqlx::query_as::<_, ProviderRevisionRow>(
         "SELECT pr.id, pr.provider_id, pr.revision, pr.name, pr.kind, pr.endpoint, \
                     pr.cloud_region, pr.cloud_project, pr.deployment, pr.api_version, \
-                    pr.auth_mode, pr.connector_ready, pr.credential_version_id, \
+                    pr.auth_mode, pr.options, pr.connector_ready, pr.credential_version_id, \
                     cv.version AS \"credential_version\", pr.source_etag, pr.activated_by, \
                     pr.activated_at, stats.model_count AS \"model_count\", \
                     stats.enabled_model_count AS \"enabled_model_count\", \
@@ -275,6 +275,16 @@ pub async fn diff_provider_revisions(
     let to_models = provider_revision_model_map(&to_model_records);
     let from_capabilities = provider_revision_capability_set(&from_model_records);
     let to_capabilities = provider_revision_capability_set(&to_model_records);
+    let pool_changed: bool = sqlx::query_scalar(
+        "SELECT COALESCE((SELECT jsonb_agg(configuration ORDER BY slot_id)
+             FROM provider_revision_credentials WHERE provider_revision_id=$1),'[]'::jsonb)
+         IS DISTINCT FROM COALESCE((SELECT jsonb_agg(configuration ORDER BY slot_id)
+             FROM provider_revision_credentials WHERE provider_revision_id=$2),'[]'::jsonb)",
+    )
+    .bind(from_id)
+    .bind(to_id)
+    .fetch_one(pool)
+    .await?;
     Ok(ProviderRevisionDiff {
         from_revision: from.revision,
         to_revision: to.revision,
@@ -285,9 +295,10 @@ pub async fn diff_provider_revisions(
         deployment_changed: from.configuration.deployment != to.configuration.deployment,
         api_version_changed: from.configuration.api_version != to.configuration.api_version,
         connector_changed: from.configuration.kind != to.configuration.kind
+            || from.configuration.options != to.configuration.options
             || from.configuration.auth_mode != to.configuration.auth_mode
             || from.connector_ready != to.connector_ready,
-        credential_changed: from.credential_version_id != to.credential_version_id,
+        credential_changed: from.credential_version_id != to.credential_version_id || pool_changed,
         models_added: to_models
             .keys()
             .filter(|model| !from_models.contains_key(*model))
@@ -389,6 +400,12 @@ pub async fn restore_provider_revision_as_draft(
     .bind(provider_id)
     .execute(&mut *transaction)
     .await?;
+    sqlx::query("UPDATE providers SET options = $1 WHERE id = $2")
+        .bind(sqlx::types::Json(&revision.configuration.options))
+        .bind(provider_id)
+        .execute(&mut *transaction)
+        .await?;
+    crate::providers::pool_store::restore(&mut transaction, provider_id, revision_id).await?;
     restore_revision_models(&mut transaction, provider_id, revision_id).await?;
     record_success(
         &mut *transaction,

@@ -68,7 +68,7 @@ async fn fresh_installations_migrate_idempotently_and_have_distinct_namespaces()
             .fetch_one(&first_pool)
             .await
             .unwrap();
-    assert_eq!(applied, 1);
+    assert_eq!(applied, 5);
     first_pool.close().await;
     second_pool.close().await;
 }

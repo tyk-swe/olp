@@ -73,7 +73,7 @@
       >
     </article>
     <article class="card metric-card">
-      <p>First byte (TTFT)</p>
+      <p>First byte</p>
       <strong
         >{detail.data.first_byte_ms == null
           ? '—'
@@ -223,6 +223,49 @@
                 <dd>{attempt.committed ? 'Yes — failover stopped' : 'No'}</dd>
               </div>
             </dl>
+            {#if attempt.routing}
+              <dl aria-label="Credential and routing provenance">
+                {#if attempt.routing.policy}<div>
+                    <dt>Routing policy</dt>
+                    <dd class="mono">
+                      {attempt.routing.policy.strategy} · {attempt.routing
+                        .policy.digest}
+                    </dd>
+                  </div>{/if}
+                <div>
+                  <dt>Credential slot</dt>
+                  <dd class="mono">
+                    {attempt.routing.credential_slot_id ??
+                      'Connection authentication'}
+                  </dd>
+                </div>
+                <div>
+                  <dt>Credential version</dt>
+                  <dd class="mono">
+                    {attempt.routing.credential_version_id ?? 'None'}
+                  </dd>
+                </div>
+                <div>
+                  <dt>Provider revision</dt>
+                  <dd class="mono">{attempt.routing.provider_revision_id}</dd>
+                </div>
+                <div>
+                  <dt>Selected price revision</dt>
+                  <dd class="mono">
+                    {attempt.routing.pricing_revision_id ??
+                      'Unpriced at dispatch'}
+                  </dd>
+                </div>
+                <div>
+                  <dt>First meaningful output</dt>
+                  <dd>
+                    {attempt.routing.first_output_ms == null
+                      ? 'Unknown'
+                      : `${attempt.routing.first_output_ms} ms`}
+                  </dd>
+                </div>
+              </dl>
+            {/if}
             {#if attempt.charge_status == null}
               <p>No usage or pricing facts were recorded.</p>
             {:else}

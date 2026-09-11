@@ -40,6 +40,13 @@ fn provider_request() -> ProviderRequest {
             mode: TransportMode::Unary,
         },
         attempt: AttemptPlan {
+            connection_limits: None,
+            credential_limits: None,
+            attempt_limit: None,
+            routing_policy: None,
+            credential_slot_id: None,
+            credential_version_id: None,
+            pricing_revision_id: None,
             generation_id: RuntimeGenerationId::new(),
             route_id: RouteId::new(),
             target_id: TargetId::new(),
@@ -431,6 +438,37 @@ async fn official_sdk_performs_no_hidden_retry() {
     let error = connector.execute(provider_request()).await.unwrap_err();
     assert_eq!(error.class, AttemptFailureClass::UpstreamServer);
     assert_eq!(server.await.unwrap(), 1);
+}
+
+#[tokio::test]
+async fn credential_error_codes_override_http_forbidden_for_slot_failover() {
+    use crate::providers::mock_server::{MockResponse, spawn_mock};
+    for (code, authentication) in [
+        ("ExpiredTokenException", true),
+        ("UnrecognizedClientException", true),
+        ("InvalidSignatureException", true),
+        ("AccessDeniedException", false),
+    ] {
+        let body = br#"{"message":"request rejected"}"#;
+        let mut response = format!(
+            "HTTP/1.1 403 Forbidden\r\ncontent-type: application/json\r\nx-amzn-errortype: {code}\r\ncontent-length: {}\r\nconnection: close\r\n\r\n",
+            body.len(),
+        ).into_bytes();
+        response.extend_from_slice(body);
+        let (endpoint, _) = spawn_mock("", MockResponse::immediate(response)).await;
+        let error = mock_connector(&endpoint)
+            .await
+            .execute(provider_request())
+            .await
+            .unwrap_err();
+        assert_eq!(error.class, AttemptFailureClass::UpstreamClient, "{code}");
+        assert_eq!(
+            error.upstream.status,
+            Some(if authentication { 401 } else { 403 }),
+            "{code}"
+        );
+        assert_eq!(error.allows_failover(), authentication, "{code}");
+    }
 }
 
 #[tokio::test]

@@ -6,7 +6,6 @@ use crate::ids::RouteSlug;
 use crate::inference::execution::RequiredTarget;
 use crate::inference::http::error::InferenceError;
 use crate::inference::http::execution::authorize_principal;
-use crate::inference::http::execution::execute_internal_routed_result;
 use crate::inference::http::state::GatewayState;
 use crate::media::jobs::MediaJobError;
 use crate::media::jobs::MediaJobLifecycle;
@@ -34,17 +33,8 @@ pub(crate) async fn refresh_video_list_record(
     if set_video_route(&mut operation, &record.route_slug).is_err() {
         return record;
     }
-    let Ok(mut executed) = execute_internal_routed_result(
-        state,
-        principal,
-        operation,
-        TransportMode::Unary,
-        Some(RequiredTarget {
-            provider_id: record.provider_id,
-            upstream_model: record.upstream_model.clone(),
-        }),
-    )
-    .await
+    let Ok(mut executed) =
+        execute_media_job_result(state, principal, &record, operation, true).await
     else {
         return record;
     };
@@ -71,6 +61,57 @@ pub(crate) async fn refresh_video_list_record(
     .unwrap_or(record);
     executed.mark_success();
     updated
+}
+
+pub(crate) async fn execute_media_job_result(
+    state: &GatewayState,
+    admission: &HttpRequestAdmission,
+    record: &MediaJobRecord,
+    operation: crate::protocols::canonical::requests::Operation,
+    internal: bool,
+) -> Result<crate::inference::execution::RoutedUnaryResult, InferenceError> {
+    let historical = crate::media::service::media_job_runtime(&state.media_jobs, record)
+        .await
+        .map_err(InferenceError::unavailable)?;
+    let mut snapshot = crate::runtime::snapshot::Snapshot::clone(&historical);
+    let current = admission.principal().runtime();
+    snapshot.api_keys = current.api_keys.clone();
+    snapshot.routing.installation = current.routing.installation.clone();
+    snapshot.routing.routes = current.routing.routes.clone();
+    let provider = crate::ids::ProviderId::from_uuid(record.provider_id);
+    let transport = historical
+        .transport(provider)
+        .ok_or_else(|| InferenceError::unavailable("media_job_target_unavailable"))?;
+    let runtime =
+        crate::runtime::manager::Manager::reconciliation_bundle(snapshot, provider, transport)
+            .map_err(|_| InferenceError::unavailable("media_job_runtime_unavailable"))?;
+    let mut principal = crate::inference::principal::Principal::new(
+        runtime,
+        admission.principal().lookup_id().clone(),
+        admission.principal().surface(),
+        admission.principal().gateway_capability(),
+    );
+    principal.routing_preferences = admission.principal().routing_preferences.clone();
+    state
+        .request_boundary
+        .inference
+        .execute_result(
+            &principal,
+            operation,
+            TransportMode::Unary,
+            Some(RequiredTarget {
+                credential_version_id: record.credential_version_id,
+                provider_id: record.provider_id,
+                upstream_model: record.upstream_model.clone(),
+            }),
+            if internal {
+                admission.internal_engine_admission()
+            } else {
+                admission.engine_admission()
+            },
+        )
+        .await
+        .map_err(Into::into)
 }
 
 pub(crate) async fn owned_media_job(
@@ -148,6 +189,7 @@ mod tests {
     fn record(state: MediaJobState) -> MediaJobRecord {
         let created_at = Utc.with_ymd_and_hms(2025, 2, 3, 4, 5, 6).unwrap();
         MediaJobRecord {
+            credential_version_id: None,
             id: uuid::Uuid::from_u128(1),
             upstream_job_id: Some("upstream-1".to_owned()),
             api_key_id: uuid::Uuid::from_u128(2),

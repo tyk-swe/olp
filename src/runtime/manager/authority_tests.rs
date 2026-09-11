@@ -40,6 +40,7 @@ impl ProviderTransport for PinnedTransport {
 
 fn historical_key() -> ApiKey {
     ApiKey {
+        routing_policy: Default::default(),
         id: ApiKeyId::new(),
         lookup_id: ApiKeyLookupId::parse("authority_refresh").unwrap(),
         digest: ApiKeyDigest::new([1; 32]),
@@ -277,4 +278,120 @@ fn stale_authority_refuses_new_pins_without_interrupting_existing_work() {
         .unwrap();
     assert!(manager.pin_current_authority().unwrap().api_keys.is_empty());
     assert!(!pinned.api_keys.is_empty());
+}
+
+#[test]
+fn credential_authority_refresh_preserves_transports_and_inflight_permissions() {
+    let key = historical_key();
+    let manager = installed_manager(key.clone());
+    let provider = *manager.pin().providers.keys().next().unwrap();
+    let slot = crate::providers::pool::CredentialSlot {
+        id: uuid::Uuid::now_v7(),
+        name: "active slot".into(),
+        ..Default::default()
+    };
+    let mut authority = crate::runtime::publication::compiler::CurrentRuntimeAuthority {
+        api_keys: BTreeMap::from([(key.lookup_id.clone(), key)]),
+        installation: Default::default(),
+        routes: BTreeMap::new(),
+        credentials: BTreeMap::from([(provider, vec![slot])]),
+        connection_limits: BTreeMap::from([(
+            provider,
+            crate::providers::options::ConnectionLimits {
+                requests_per_minute: Some(10),
+                ..Default::default()
+            },
+        )]),
+    };
+    manager
+        .refresh_current_authority(&authority, Instant::now())
+        .unwrap();
+    let pinned = manager.pin();
+    authority
+        .connection_limits
+        .get_mut(&provider)
+        .unwrap()
+        .requests_per_minute = Some(1);
+    manager
+        .refresh_current_authority(&authority, Instant::now())
+        .unwrap();
+    assert_eq!(
+        manager
+            .pin()
+            .routing
+            .connection_limit_authority
+            .as_ref()
+            .unwrap()[&provider]
+            .requests_per_minute,
+        Some(1)
+    );
+    assert_eq!(
+        pinned.routing.connection_limit_authority.as_ref().unwrap()[&provider].requests_per_minute,
+        Some(10)
+    );
+    authority.credentials.get_mut(&provider).unwrap()[0].enabled = false;
+    manager
+        .refresh_current_authority(&authority, Instant::now())
+        .unwrap();
+    let refreshed = manager.pin();
+    assert!(pinned.routing.credential_authority.as_ref().unwrap()[&provider][0].enabled);
+    assert!(!refreshed.routing.credential_authority.as_ref().unwrap()[&provider][0].enabled);
+    assert_eq!(refreshed.generation.id, pinned.generation.id);
+    assert!(Arc::ptr_eq(
+        &refreshed.transport(provider).unwrap(),
+        &pinned.transport(provider).unwrap()
+    ));
+}
+
+#[test]
+fn current_routing_constraints_apply_while_retaining_transports_and_inflight_snapshots() {
+    let key = historical_key();
+    let manager = installed_manager(key.clone());
+    let pinned = manager.pin();
+    let slug = RouteSlug::parse("retained-route").unwrap();
+    let provider = *pinned.providers.keys().next().unwrap();
+    let mut installation = crate::routes::policy::RoutingPolicy::default();
+    installation.constraints.require_zero_data_retention = true;
+    let mut route = crate::routes::policy::RoutingPolicy::default();
+    route
+        .constraints
+        .ignore
+        .push(format!("provider:{provider}"));
+    manager
+        .refresh_current_authority(
+            &crate::runtime::publication::compiler::CurrentRuntimeAuthority {
+                api_keys: BTreeMap::from([(key.lookup_id.clone(), key)]),
+                installation,
+                routes: BTreeMap::from([(slug.clone(), route)]),
+                credentials: BTreeMap::new(),
+                connection_limits: BTreeMap::new(),
+            },
+            Instant::now(),
+        )
+        .unwrap();
+    let refreshed = manager.pin();
+    assert!(
+        refreshed
+            .routing
+            .installation
+            .constraints
+            .require_zero_data_retention
+    );
+    assert_eq!(
+        refreshed.routing.routes[&slug].constraints.ignore,
+        vec![format!("provider:{provider}")]
+    );
+    assert!(
+        !pinned
+            .routing
+            .installation
+            .constraints
+            .require_zero_data_retention
+    );
+    assert!(pinned.routing.routes.is_empty());
+    assert_eq!(refreshed.generation.id, pinned.generation.id);
+    assert!(Arc::ptr_eq(
+        &refreshed.transport(provider).unwrap(),
+        &pinned.transport(provider).unwrap()
+    ));
 }

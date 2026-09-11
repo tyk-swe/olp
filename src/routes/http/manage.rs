@@ -285,6 +285,8 @@ pub(crate) async fn delete_route_draft(
 
 #[derive(Debug, Deserialize, ToSchema)]
 pub(crate) struct SimulateRouteRequest {
+    #[serde(default)]
+    pub preferences: crate::routes::policy::RoutingPreferences,
     pub operation: String,
     pub surface: String,
     pub mode: String,
@@ -293,6 +295,7 @@ pub(crate) struct SimulateRouteRequest {
 
 #[derive(Debug, Serialize, ToSchema)]
 pub(crate) struct RouteSimulationTargetResponse {
+    pub decision: Option<crate::inference::provider_selection::RoutingDecision>,
     pub target_id: Uuid,
     pub provider_id: Uuid,
     pub provider_name: String,
@@ -306,6 +309,7 @@ pub(crate) struct RouteSimulationTargetResponse {
 impl From<RouteSimulationTarget> for RouteSimulationTargetResponse {
     fn from(value: RouteSimulationTarget) -> Self {
         Self {
+            decision: value.decision,
             target_id: value.target_id,
             provider_id: value.provider_id,
             provider_name: value.provider_name,
@@ -371,6 +375,7 @@ pub(crate) async fn simulate_route_draft(
             .parse()
             .map_err(|_| Problem::field_validation("mode", "The transport mode is invalid."))?,
         &request.seed,
+        &request.preferences,
     )
     .await
     .map_err(map_configuration)?;
@@ -379,6 +384,7 @@ pub(crate) async fn simulate_route_draft(
 
 #[derive(Clone, Debug, Serialize, ToSchema)]
 pub(crate) struct RouteRevisionResponse {
+    pub routing_policy: crate::routes::policy::RoutingPolicy,
     pub id: Uuid,
     pub route_id: Uuid,
     pub revision: i32,
@@ -395,6 +401,7 @@ pub(crate) struct RouteRevisionResponse {
 impl From<RouteRevisionRecord> for RouteRevisionResponse {
     fn from(value: RouteRevisionRecord) -> Self {
         Self {
+            routing_policy: value.routing_policy,
             id: value.id,
             route_id: value.route_id,
             revision: value.revision,
@@ -560,6 +567,9 @@ pub(crate) async fn get_route_revision(
 
 #[derive(Debug, Serialize, ToSchema)]
 pub(crate) struct RouteRevisionDiffResponse {
+    pub routing_policy_changed: bool,
+    pub routing_policy_before: crate::routes::policy::RoutingPolicy,
+    pub routing_policy_after: crate::routes::policy::RoutingPolicy,
     pub from_revision: i32,
     pub to_revision: i32,
     pub slug_changed: bool,
@@ -575,6 +585,9 @@ pub(crate) struct RouteRevisionDiffResponse {
 impl From<RouteRevisionDiff> for RouteRevisionDiffResponse {
     fn from(value: RouteRevisionDiff) -> Self {
         Self {
+            routing_policy_changed: value.routing_policy_changed,
+            routing_policy_before: value.routing_policy_before,
+            routing_policy_after: value.routing_policy_after,
             from_revision: value.from_revision,
             to_revision: value.to_revision,
             slug_changed: value.slug_changed,

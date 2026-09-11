@@ -293,6 +293,7 @@ async fn execute_media_reconciliation_result(
             Operation::Video(operation),
             Surface::OpenAi,
             RequiredTarget {
+                credential_version_id: record.credential_version_id,
                 provider_id: record.provider_id,
                 upstream_model: record.upstream_model.clone(),
             },
@@ -301,7 +302,7 @@ async fn execute_media_reconciliation_result(
         .map_err(|failure| failure.code())
 }
 
-async fn media_job_runtime(
+pub(crate) async fn media_job_runtime(
     state: &MediaJobs,
     record: &MediaJobRecord,
 ) -> Result<Arc<Bundle>, &'static str> {
@@ -311,14 +312,16 @@ async fn media_job_runtime(
         crate::runtime::publication::releases::valid_runtime_release(&state.pool, generation_id)
             .await
             .map_err(|_| "media_job_runtime_unavailable")?;
-    let snapshot = Manager::decode_persisted_release(&release.activation_candidate())
+    let mut snapshot = Manager::decode_persisted_release(&release.activation_candidate())
         .map_err(|_| "media_job_runtime_unavailable")?;
     let provider_id = ProviderId::from_uuid(record.provider_id);
+    refresh_media_quotas(&state.pool, &mut snapshot, provider_id).await?;
     let provider = crate::providers::runtime::media_job_runtime_provider_configuration(
         &state.pool,
         &snapshot,
         provider_id,
         provider_revision_id,
+        record.credential_version_id,
     )
     .await
     .map_err(|_| "media_job_runtime_unavailable")?;
@@ -336,6 +339,13 @@ async fn media_job_runtime(
         .await
         .map_err(|_| "media_job_runtime_unavailable")?
     } else {
+        if provider.credential_id
+            != snapshot.providers[&provider_id]
+                .active_credential
+                .map(|credential| credential.as_uuid())
+        {
+            return Err("media_job_runtime_unavailable");
+        }
         let current = crate::providers::runtime::runtime_provider_authority_is_current(
             &state.pool,
             generation_id,
@@ -353,10 +363,116 @@ async fn media_job_runtime(
             .remove(&provider_id)
             .ok_or("media_job_runtime_unavailable")?
     };
+    let mut pool = crate::providers::pool_transport::PoolTransport::for_provider(
+        &snapshot,
+        provider_id,
+        provider.configuration.options.clone(),
+        provider.credential_id,
+        &state.inference.limiter,
+    );
+    pool.transports.insert(provider.credential_id, transport);
+    let transport = Arc::new(pool);
     Manager::reconciliation_bundle(snapshot, provider_id, transport)
         .map_err(|_| "media_job_runtime_unavailable")
 }
 
 pub mod creation;
 
+/// HTTP media operations and background reconciliation share this runtime
+/// builder. Read both quota scopes from one current revision while retaining
+/// the job's historical transport configuration and secret version.
+async fn refresh_media_quotas(
+    pool: &PgPool,
+    snapshot: &mut crate::runtime::snapshot::Snapshot,
+    provider: ProviderId,
+) -> Result<(), &'static str> {
+    let (limits, slots) = sqlx::query_as::<_, (
+        sqlx::types::Json<Option<crate::providers::options::ConnectionLimits>>,
+        sqlx::types::Json<Vec<crate::providers::pool::CredentialSlot>>,
+    )>(
+        "SELECT COALESCE(pr.options->'limits','null'::jsonb), \
+         COALESCE((SELECT jsonb_agg(pc.configuration ORDER BY pc.slot_id) \
+                   FROM provider_revision_credentials pc WHERE pc.provider_revision_id=pr.id),'[]'::jsonb) \
+         FROM providers p JOIN provider_revisions pr ON pr.id=p.active_revision_id WHERE p.id=$1",
+    ).bind(provider.as_uuid()).fetch_optional(pool).await
+        .map_err(|_| "media_job_quota_authority_unavailable")?
+        .ok_or("media_job_quota_authority_unavailable")?;
+    snapshot.routing.connection_limit_authority =
+        Some(BTreeMap::from([(provider, limits.0.unwrap_or_default())]));
+    snapshot.routing.credential_authority = Some(BTreeMap::from([(provider, slots.0)]));
+    Ok(())
+}
+
 pub mod results;
+
+#[cfg(test)]
+mod quota_tests {
+    use super::*;
+    #[tokio::test]
+    #[ignore = "requires PostgreSQL via make integration"]
+    async fn historical_media_runtime_uses_current_quotas_without_rebinding_the_secret() {
+        let db = crate::test_support::TestDb::create_migrated("media_quotas").await;
+        let pool = db.pool(2).await;
+        let actor = uuid::Uuid::now_v7();
+        let provider = ProviderId::new();
+        sqlx::query("INSERT INTO users(id,email,display_name,role) VALUES($1,'media-quotas@test.example','Owner','owner')").bind(actor).execute(&pool).await.unwrap();
+        sqlx::query("INSERT INTO providers(id,name,kind,auth_mode,state,etag,created_by) VALUES($1,'media','openai','api_key','active',$2,$3)").bind(provider.as_uuid()).bind(uuid::Uuid::now_v7()).bind(actor).execute(&pool).await.unwrap();
+        sqlx::query("INSERT INTO provider_credential_slots(id,provider_id,name,is_default) VALUES($1,$1,'Default',true)").bind(provider.as_uuid()).execute(&pool).await.unwrap();
+        let master = crate::crypto::envelope::MasterKey::new(1, [62; 32]);
+        let mut historical_slot = None;
+        for version in 1..=2 {
+            let credential = uuid::Uuid::now_v7();
+            let encrypted = master
+                .seal(
+                    b"media-secret",
+                    &crate::crypto::aad::credential(provider.as_uuid(), credential, version),
+                )
+                .unwrap();
+            sqlx::query("INSERT INTO provider_credential_versions(id,provider_id,slot_id,version,ciphertext,nonce,master_key_version,created_by) VALUES($1,$2,$2,$3,$4,$5,1,$6)").bind(credential).bind(provider.as_uuid()).bind(version as i32).bind(encrypted.ciphertext).bind(encrypted.nonce.to_vec()).bind(actor).execute(&pool).await.unwrap();
+            let revision = uuid::Uuid::now_v7();
+            let rpm = if version == 1 { 10 } else { 1 };
+            sqlx::query("INSERT INTO provider_revisions(id,provider_id,revision,name,kind,auth_mode,connector_ready,credential_version_id,source_etag,activated_by,options) VALUES($1,$2,$3,'media','openai','api_key',true,$4,$5,$6,$7)").bind(revision).bind(provider.as_uuid()).bind(version as i32).bind(credential).bind(uuid::Uuid::now_v7()).bind(actor).bind(serde_json::json!({"limits":{"requests_per_minute":rpm}})).execute(&pool).await.unwrap();
+            let slot = crate::providers::pool::CredentialSlot {
+                id: provider.as_uuid(),
+                name: "Default".into(),
+                credential_version_id: Some(credential),
+                requests_per_minute: Some(rpm),
+                ..Default::default()
+            };
+            sqlx::query("INSERT INTO provider_revision_credentials(provider_revision_id,slot_id,credential_version_id,configuration) VALUES($1,$2,$3,$4)").bind(revision).bind(provider.as_uuid()).bind(credential).bind(sqlx::types::Json(&slot)).execute(&pool).await.unwrap();
+            sqlx::query("UPDATE providers SET active_revision_id=$2,active_credential_version_id=$3 WHERE id=$1").bind(provider.as_uuid()).bind(revision).bind(credential).execute(&pool).await.unwrap();
+            if version == 1 {
+                historical_slot = Some(slot);
+            }
+        }
+        let historical_slot = historical_slot.unwrap();
+        let mut snapshot = crate::runtime::snapshot::Snapshot::clone(&Manager::empty().pin());
+        snapshot
+            .routing
+            .credentials
+            .insert(provider, vec![historical_slot.clone()]);
+        refresh_media_quotas(&pool, &mut snapshot, provider)
+            .await
+            .unwrap();
+        assert_eq!(snapshot.routing.credentials[&provider][0], historical_slot);
+        assert_eq!(
+            snapshot.routing.credential_authority.as_ref().unwrap()[&provider][0]
+                .requests_per_minute,
+            Some(1)
+        );
+        assert_ne!(
+            snapshot.routing.credential_authority.as_ref().unwrap()[&provider][0]
+                .credential_version_id,
+            historical_slot.credential_version_id
+        );
+        assert_eq!(
+            snapshot
+                .routing
+                .connection_limit_authority
+                .as_ref()
+                .unwrap()[&provider]
+                .requests_per_minute,
+            Some(1)
+        );
+    }
+}

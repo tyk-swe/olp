@@ -90,6 +90,20 @@ pub enum CredentialKind {
 
 pub fn credential_kind(config: &ProviderConfiguration) -> Result<CredentialKind, Error> {
     match (config.kind, config.auth_mode) {
+        (
+            ProviderKind::OpenAi
+            | ProviderKind::OpenAiCompatible
+            | ProviderKind::Anthropic
+            | ProviderKind::Gemini,
+            ProviderAuthMode::None,
+        ) => Ok(CredentialKind::None),
+        (
+            ProviderKind::OpenAi
+            | ProviderKind::OpenAiCompatible
+            | ProviderKind::Anthropic
+            | ProviderKind::Gemini,
+            ProviderAuthMode::Headers,
+        ) => Ok(CredentialKind::ApiKey),
         (ProviderKind::VertexAi, ProviderAuthMode::ApplicationDefault)
         | (ProviderKind::Bedrock, ProviderAuthMode::DefaultChain) => Ok(CredentialKind::None),
         (ProviderKind::VertexAi, ProviderAuthMode::ServiceAccount) => {
@@ -149,6 +163,13 @@ pub(crate) fn validate_connector_credential(
     config: &ProviderConfiguration,
     credential: BorrowedCredential<'_>,
 ) -> Result<(), Error> {
+    if matches!(
+        config.auth_mode,
+        ProviderAuthMode::None | ProviderAuthMode::Headers
+    ) {
+        crate::providers::http_options::headers(config, credential)?;
+        return Ok(());
+    }
     match config.kind {
         ProviderKind::OpenAi | ProviderKind::OpenAiCompatible => OpenAiApiKey::new(
             text_credential(credential, "OpenAI provider credential is missing")?.to_owned(),
@@ -254,6 +275,10 @@ pub(crate) fn connector_configuration_with_policy(
     policy: &EgressPolicy,
     limits: ResponseLimits,
 ) -> Result<ConnectorConfiguration, Error> {
+    config
+        .options
+        .validate(config.kind)
+        .map_err(Error::configuration)?;
     let (max_response_bytes, max_event_bytes) = (limits.max_response_bytes, limits.max_event_bytes);
     match config.kind {
         ProviderKind::OpenAi => {

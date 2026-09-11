@@ -67,3 +67,19 @@ pub mod validation;
 pub mod vertex;
 
 pub mod configuration;
+
+pub mod catalog;
+pub mod options;
+
+pub(crate) mod http_options;
+
+pub mod pool;
+
+pub mod pool_store;
+
+pub mod pool_transport;
+
+pub(crate) mod profiles;
+
+#[cfg(test)]
+mod profiles_tests;

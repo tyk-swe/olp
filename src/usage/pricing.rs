@@ -23,6 +23,7 @@ const PRICING_LOCK_ID: i64 = 0x4f4c_505f_5052; // "OLP_PR"
 
 #[derive(Clone, Debug)]
 pub struct PriceInput {
+    pub vendor_id: Option<String>,
     pub provider_kind: ProviderKind,
     pub provider_id: Option<Uuid>,
     pub model: String,
@@ -86,6 +87,9 @@ where
         }
     }
     validate_prices(prices)?;
+    crate::runtime::publication::compiler::prepare_runtime_mutation(&mut transaction)
+        .await
+        .map_err(|e| Error::Invalid(e.to_string()))?;
     sqlx::query("SELECT pg_advisory_xact_lock($1)")
         .bind(PRICING_LOCK_ID)
         .fetch_one(&mut *transaction)
@@ -129,6 +133,12 @@ where
         created_at: now,
         prices: prices.to_vec(),
     };
+    crate::runtime::publication::compiler::compile_and_publish_runtime_in_transaction(
+        &mut transaction,
+        actor,
+    )
+    .await
+    .map_err(|e| Error::Invalid(e.to_string()))?;
     let response = build_response(&record)?;
     complete_replayable_idempotency(
         &mut transaction,
@@ -158,7 +168,7 @@ pub async fn pricing_revisions_page(
         .map_err(|_| Error::InvalidCursor)?;
     let page_size = limit.clamp(1, MAX_PAGE_SIZE);
     let rows = sqlx::query_as::<_, PricingRevisionsPageRow>(
-        "SELECT r.id, r.revision, r.effective_at, r.created_by, r.created_at, \
+        "SELECT r.id, r.revision, r.effective_at, r.created_by, r.created_at, p.vendor_id, \
                     p.provider_kind AS \"provider_kind\", p.provider_id AS \"provider_id\", \
                     p.model AS \"model\", p.operation AS \"operation\", \
                     p.input_per_million::text AS \"input_per_million\", \
@@ -196,6 +206,7 @@ pub async fn pricing_revisions_page(
                 .last_mut()
                 .ok_or_else(|| Error::Invalid("pricing revision grouping is invalid".to_owned()))?;
             revision.prices.push(PriceInput {
+                vendor_id: row.vendor_id,
                 provider_kind: provider_kind.parse().map_err(|_| {
                     Error::Invalid("stored pricing provider kind is invalid".to_owned())
                 })?,
@@ -240,6 +251,14 @@ pub(crate) fn validate_prices(prices: &[PriceInput]) -> Result<(), Error> {
     let mut dimensions = HashSet::with_capacity(prices.len());
     let mut revision_currency: Option<String> = None;
     for price in prices {
+        if let Some(vendor) = &price.vendor_id
+            && crate::providers::catalog::vendor(vendor)
+                .is_none_or(|v| v.connector != price.provider_kind)
+        {
+            return Err(Error::Invalid(
+                "Pricing vendor must match the connector".into(),
+            ));
+        }
         let currency = price.currency.trim();
         if price.model.trim().is_empty()
             || currency.len() != 3
@@ -269,6 +288,7 @@ pub(crate) fn validate_prices(prices: &[PriceInput]) -> Result<(), Error> {
         if !dimensions.insert((
             price.provider_kind,
             price.provider_id,
+            price.vendor_id.as_deref(),
             price.model.trim(),
             price.operation,
         )) {
@@ -350,9 +370,9 @@ async fn insert_revision_prices(
             "INSERT INTO prices \
                  (pricing_revision_id, provider_kind, provider_id, model, operation, \
                   input_per_million, cached_input_per_million, output_per_million, \
-                  unit_price, currency) \
+                  unit_price, currency, vendor_id) \
                  VALUES ($1, $2, $3, $4, $5, $6::numeric, $7::numeric, $8::numeric, \
-                         $9::numeric, $10)",
+                         $9::numeric, $10, $11)",
         )
         .bind(id)
         .bind(price.provider_kind.as_str())
@@ -364,6 +384,7 @@ async fn insert_revision_prices(
         .bind(output_per_million)
         .bind(unit_price)
         .bind(price.currency.trim().to_uppercase())
+        .bind(&price.vendor_id)
         .execute(&mut **transaction)
         .await?;
     }
@@ -402,6 +423,7 @@ async fn validate_installation_currency(
 
 #[derive(sqlx::FromRow)]
 struct PricingRevisionsPageRow {
+    vendor_id: Option<String>,
     id: uuid::Uuid,
     revision: i32,
     effective_at: chrono::DateTime<chrono::Utc>,

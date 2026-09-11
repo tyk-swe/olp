@@ -112,6 +112,22 @@ describe('Route Studio model eligibility', () => {
   it('normalizes provider inventory without losing capability provenance', () => {
     const inventory: ProviderModelInventory[] = [
       {
+        available: true,
+        metadata: {
+          canonical_model: null,
+          context_length: null,
+          data_collection: null,
+          deployment: null,
+          input_modalities: [],
+          max_output_tokens: null,
+          observed_at: null,
+          output_modalities: [],
+          quantization: null,
+          region: null,
+          source: null,
+          supported_parameters: null,
+          zero_data_retention: null
+        },
         provider_id: 'provider-a',
         provider_name: 'Primary',
         provider_kind: 'openai',
@@ -196,16 +212,26 @@ describe('Route Studio editor validation', () => {
     );
   });
 
-  it.each([0, 2])(
+  it('permits multiple credential attempts per target and priority zero', () => {
+    expect(
+      validateRouteEditor({
+        ...validEditor,
+        maxAttempts: 3,
+        targets: [{ ...target, priority: 0 }]
+      })
+    ).toBeNull();
+  });
+
+  it.each([0, 32768])(
     'rejects maximum attempt count %s for one target',
     (maxAttempts) => {
       expect(validateRouteEditor({ ...validEditor, maxAttempts })).toContain(
-        'between 1 and the number of targets'
+        'between 1 and 32767'
       );
     }
   );
 
-  it.each([{ priority: 0 }, { weight: 0 }, { timeoutMs: 99 }])(
+  it.each([{ priority: -1 }, { weight: 0 }, { timeoutMs: 99 }])(
     'rejects an invalid target bound: %o',
     (override) => {
       expect(
@@ -213,7 +239,9 @@ describe('Route Studio editor validation', () => {
           ...validEditor,
           targets: [{ ...target, ...override }]
         })
-      ).toBe('Every target needs a positive priority, weight, and timeout.');
+      ).toBe(
+        'Every target needs a priority from 0 to 65535, a positive weight, and a timeout of at least 100 ms.'
+      );
     }
   );
 });

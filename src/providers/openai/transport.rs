@@ -21,9 +21,11 @@ use crate::providers::openai::transport::streams::read_bounded_body;
 use crate::providers::transport_common::protocol_body_error;
 
 pub struct Connector {
-    config: ConnectorConfig,
+    pub(crate) config: ConnectorConfig,
     api_key: ApiKey,
     auth_style: AuthStyle,
+    pub(crate) custom_headers: Option<HeaderMap>,
+    options: crate::providers::options::ConnectionOptions,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -33,11 +35,31 @@ enum AuthStyle {
 }
 
 impl Connector {
+    pub(super) fn dispatched_model<'a>(&'a self, model: &'a str) -> &'a str {
+        self.options
+            .models
+            .get(model)
+            .and_then(|metadata| metadata.deployment.as_deref())
+            .unwrap_or(model)
+    }
+
+    pub(crate) fn with_options(
+        mut self,
+        options: crate::providers::options::ConnectionOptions,
+        headers: Option<HeaderMap>,
+    ) -> Self {
+        self.options = options;
+        self.custom_headers = headers;
+        self
+    }
+
     #[must_use]
     pub fn new(config: ConnectorConfig, api_key: ApiKey) -> Self {
         Self {
             config,
             api_key,
+            custom_headers: None,
+            options: Default::default(),
             auth_style: AuthStyle::Bearer,
         }
     }
@@ -50,6 +72,8 @@ impl Connector {
         Self {
             config,
             api_key,
+            custom_headers: None,
+            options: Default::default(),
             auth_style: AuthStyle::ApiKeyHeader,
         }
     }
@@ -71,6 +95,10 @@ impl Connector {
     }
 
     fn attach_auth(&self, headers: &mut HeaderMap) -> Result<(), TransportError> {
+        if let Some(custom) = &self.custom_headers {
+            headers.extend(custom.clone());
+            return Ok(());
+        }
         match self.auth_style {
             AuthStyle::Bearer => {
                 headers.insert(header::AUTHORIZATION, bearer_header(&self.api_key)?);
@@ -165,7 +193,12 @@ impl ProviderTransport for Connector {
         &'a self,
         request: ProviderRequest,
     ) -> crate::inference::transport::BoxFuture<'a, Result<ProviderOutput, TransportError>> {
-        Box::pin(self.execute_request(request))
+        Box::pin(async move {
+            crate::providers::http_options::redact_output_errors(
+                self.execute_request(request).await,
+                self.custom_headers.is_some(),
+            )
+        })
     }
 }
 

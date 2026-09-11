@@ -1,4 +1,5 @@
 import type { PlaygroundRequest } from '$lib/features/inference/playground/api';
+import { isJsonObject } from '$lib/forms/json';
 
 type PlaygroundTool = NonNullable<PlaygroundRequest['tools']>[number];
 
@@ -52,14 +53,14 @@ export function parseResponseSchema(value: string):
   | undefined {
   if (!value.trim()) return undefined;
   const schema = parseJson(value);
-  if (typeof schema !== 'object' || schema === null || Array.isArray(schema)) {
+  if (!isJsonObject(schema)) {
     throw new Error('The response schema must be a JSON object.');
   }
   return {
     type: 'json_schema',
     name: 'playground_response',
     strict: true,
-    schema: schema as Record<string, unknown>
+    schema
   };
 }
 

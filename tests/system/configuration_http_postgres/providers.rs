@@ -749,6 +749,7 @@ async fn reserve_media_activation_blocker(
     olp::media::jobs::lifecycle::reserve_media_job(
         pool,
         NewMediaJobReservation {
+            credential_version_id: None,
             id: job_id,
             runtime_generation_id: generation_id,
             api_key_id,

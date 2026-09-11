@@ -70,18 +70,33 @@ pub async fn list_provider_model_inventory(
     limit: i64,
     enabled: Option<bool>,
 ) -> Result<ConfigurationPage<ProviderModelInventoryRecord>, Error> {
+    list_provider_model_inventory_filtered(pool, cursor, limit, enabled, "", None).await
+}
+
+pub async fn list_provider_model_inventory_filtered(
+    pool: &sqlx::PgPool,
+    cursor: Option<Uuid>,
+    limit: i64,
+    enabled: Option<bool>,
+    search: &str,
+    surface: Option<&str>,
+) -> Result<ConfigurationPage<ProviderModelInventoryRecord>, Error> {
     let limit = checked_limit(limit)?;
     let rows = sqlx::query_as::<_, ProviderInventoryRow>(
         "SELECT pm.id, pm.upstream_model, pm.display_name, pm.enabled, pm.discovered_at, \
-                    p.id AS provider_id, p.name AS provider_name, p.kind AS provider_kind \
+                    EXISTS(SELECT 1 FROM provider_revision_models prm WHERE prm.provider_revision_id=p.active_revision_id AND prm.source_provider_model_id=pm.id AND prm.enabled AND p.state <> 'disabled') AS available, COALESCE(p.options->'models'->pm.upstream_model,'{}'::jsonb) AS metadata, p.id AS provider_id, p.name AS provider_name, p.kind AS provider_kind \
              FROM provider_models pm JOIN providers p ON p.id = pm.provider_id \
              WHERE ($1::uuid IS NULL OR pm.id > $1) \
                AND ($2::boolean IS NULL OR pm.enabled = $2) \
+               AND ($4 = '' OR strpos(lower(p.name || ' ' || pm.upstream_model || ' ' || pm.display_name || ' ' || COALESCE(p.options->>'vendor_id','') || ' ' || COALESCE(p.options->'models'->pm.upstream_model->>'canonical_model','') || ' ' || COALESCE(p.options->'models'->pm.upstream_model->>'region','')), lower($4)) > 0) \
+               AND ($5::text IS NULL OR EXISTS(SELECT 1 FROM model_capabilities mc WHERE mc.provider_model_id=pm.id AND mc.surface=$5)) \
              ORDER BY pm.id LIMIT $3",
     )
     .bind(cursor)
     .bind(enabled)
     .bind(limit + 1)
+    .bind(search)
+    .bind(surface)
     .fetch_all(pool)
     .await?;
     let (rows, next_cursor) = split_page(rows, limit as usize, |row| row.id);
@@ -91,6 +106,8 @@ pub async fn list_provider_model_inventory(
             Ok((
                 row.id,
                 (
+                    row.available,
+                    row.metadata.0.clone(),
                     row.provider_id,
                     row.provider_name.clone(),
                     row.provider_kind
@@ -105,13 +122,14 @@ pub async fn list_provider_model_inventory(
         .await?
         .into_iter()
         .map(|model| {
-            let (provider_id, provider_name, provider_kind) =
-                providers
-                    .remove(&model.id)
-                    .ok_or(PersistenceError::InvalidStoredValue(
-                        "provider metadata for model",
-                    ))?;
+            let (available, metadata, provider_id, provider_name, provider_kind) = providers
+                .remove(&model.id)
+                .ok_or(PersistenceError::InvalidStoredValue(
+                    "provider metadata for model",
+                ))?;
             Ok(ProviderModelInventoryRecord {
+                available,
+                metadata,
                 provider_id,
                 provider_name,
                 provider_kind,
@@ -475,6 +493,8 @@ impl ModelCapabilityRow {
 
 #[derive(Debug, sqlx::FromRow)]
 struct ProviderInventoryRow {
+    available: bool,
+    metadata: sqlx::types::Json<crate::providers::options::ModelMetadata>,
     id: Uuid,
     upstream_model: String,
     display_name: String,

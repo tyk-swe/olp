@@ -57,12 +57,12 @@ export async function getRouteDraft(
 
 export async function createRouteDraft(
   input: CreateRouteDraftInput
-): Promise<string> {
+): Promise<RouteDraftValidation> {
   const response = await apiClient.POST('/api/v3/route-drafts', {
     params: { header: { 'Idempotency-Key': crypto.randomUUID() } },
     body: input
   });
-  return result(response.data, response.error, response.response).id;
+  return result(response.data, response.error, response.response);
 }
 
 export async function replaceRouteDraft(
@@ -117,7 +117,7 @@ export async function validateRoute(
 }
 
 export async function activateRoute(
-  draft: RouteDraft
+  draft: Pick<RouteDraft, 'id' | 'etag'>
 ): Promise<RouteActivation> {
   const response = await apiClient.POST(
     '/api/v3/route-drafts/{draft_id}/activate',

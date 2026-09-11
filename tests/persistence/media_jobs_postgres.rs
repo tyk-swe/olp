@@ -125,6 +125,7 @@ async fn media_job_lifecycle_is_paginated_metadata_only_and_transition_checked()
     let reservation = olp::media::jobs::lifecycle::reserve_media_job(
         &pool,
         NewMediaJobReservation {
+            credential_version_id: None,
             id: first_id,
             runtime_generation_id,
             api_key_id,
@@ -160,6 +161,7 @@ async fn media_job_lifecycle_is_paginated_metadata_only_and_transition_checked()
     olp::media::jobs::lifecycle::reserve_media_job(
         &pool,
         NewMediaJobReservation {
+            credential_version_id: None,
             id: second_id,
             runtime_generation_id,
             api_key_id,
@@ -371,6 +373,7 @@ async fn media_job_lifecycle_is_paginated_metadata_only_and_transition_checked()
     olp::media::jobs::lifecycle::reserve_media_job(
         &pool,
         NewMediaJobReservation {
+            credential_version_id: None,
             id: cleanup_id,
             runtime_generation_id,
             api_key_id,

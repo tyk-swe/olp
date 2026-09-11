@@ -36,7 +36,14 @@ pub(crate) async fn list_models(
         .routes
         .keys()
         .filter(|slug| key.allowed_routes.is_empty() || key.allowed_routes.contains(*slug))
-        .filter(|slug| route_is_visible(runtime, slug))
+        .filter(|slug| {
+            route_is_visible(
+                runtime,
+                slug,
+                key,
+                &principal.principal().routing_preferences,
+            )
+        })
         .map(|slug| ModelObject::new(slug.as_str(), created))
         .collect();
 
@@ -64,7 +71,12 @@ pub(crate) async fn get_model(
             .map_err(|_| OpenAiModelError::model_not_found(&model_id))?;
         if !runtime.routes.contains_key(&slug)
             || (!key.allowed_routes.is_empty() && !key.allowed_routes.contains(&slug))
-            || !route_is_visible(runtime, &slug)
+            || !route_is_visible(
+                runtime,
+                &slug,
+                key,
+                &principal.principal().routing_preferences,
+            )
         {
             return Err(OpenAiModelError::model_not_found(&model_id));
         }
@@ -78,27 +90,45 @@ pub(crate) async fn get_model(
     result
 }
 
-fn route_is_visible(runtime: &Bundle, slug: &RouteSlug) -> bool {
+fn route_is_visible(
+    runtime: &Bundle,
+    slug: &RouteSlug,
+    key: &crate::access::policy::ApiKey,
+    preferences: &crate::routes::policy::RoutingPreferences,
+) -> bool {
     let Some(route) = runtime.routes.get(slug) else {
         return false;
     };
-    route.targets.iter().any(|target| {
-        runtime
-            .providers
-            .get(&target.provider_id)
-            .is_some_and(|provider| {
-                provider.enabled
-                    && provider.capabilities.iter().any(|capability| {
-                        capability.model == target.upstream_model
-                            && capability.surface == Surface::OpenAi
-                            && route.operations.contains(&capability.operation)
-                            && !matches!(
-                                capability.operation,
-                                OperationKind::ModelList | OperationKind::ModelGet
-                            )
-                    })
+    route
+        .operations
+        .iter()
+        .filter(|operation| {
+            !matches!(
+                operation,
+                OperationKind::ModelList | OperationKind::ModelGet
+            )
+        })
+        .any(|operation| {
+            [
+                crate::protocols::canonical::identity::TransportMode::Unary,
+                crate::protocols::canonical::identity::TransportMode::Streaming,
+                crate::protocols::canonical::identity::TransportMode::Async,
+            ]
+            .into_iter()
+            .any(|mode| {
+                crate::inference::provider_selection::explain_capability(
+                    runtime,
+                    slug,
+                    *operation,
+                    Surface::OpenAi,
+                    mode,
+                    b"model-list",
+                    Some(key),
+                    preferences,
+                )
+                .is_ok_and(|s| !s.attempts.is_empty())
             })
-    })
+        })
 }
 
 #[derive(Debug, Serialize)]
@@ -265,6 +295,7 @@ mod tests {
             )
         };
         let snapshot = Snapshot {
+            routing: Default::default(),
             generation: RuntimeGeneration {
                 id: RuntimeGenerationId::new(),
                 ordinal: 7,
@@ -303,6 +334,7 @@ mod tests {
             api_keys: BTreeMap::from([(
                 lookup.clone(),
                 ApiKey {
+                    routing_policy: Default::default(),
                     id: ApiKeyId::new(),
                     lookup_id: lookup,
                     digest: ApiKeyDigest::new(material.digest),

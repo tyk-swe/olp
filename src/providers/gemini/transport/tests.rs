@@ -149,6 +149,13 @@ fn attempt(
             mode,
         },
         attempt: AttemptPlan {
+            connection_limits: None,
+            credential_limits: None,
+            attempt_limit: None,
+            routing_policy: None,
+            credential_slot_id: None,
+            credential_version_id: None,
+            pricing_revision_id: None,
             generation_id: RuntimeGenerationId::new(),
             route_id: RouteId::new(),
             target_id: TargetId::new(),
@@ -522,6 +529,38 @@ async fn upstream_statuses_and_unary_body_contracts_are_classified() {
         let (base, _) = spawn_mock(MockResponse::immediate(response(content_type, body))).await;
         let error = connector(&base).execute(request).await.err().unwrap();
         assert_eq!(error.class, AttemptFailureClass::Protocol);
+    }
+}
+
+#[tokio::test]
+async fn invalid_api_key_error_details_enable_credential_failover() {
+    for (status, invalid_key, expected) in [
+        ("400 Bad Request", true, 401),
+        ("403 Forbidden", true, 401),
+        ("400 Bad Request", false, 400),
+        ("403 Forbidden", false, 403),
+    ] {
+        let body = serde_json::json!({"error":{
+            "message":"upstream-secret was rejected",
+            "details":[{
+                "@type":"type.googleapis.com/google.rpc.ErrorInfo",
+                "reason":if invalid_key { "API_KEY_INVALID" } else { "OTHER_REASON" }
+            }]
+        }});
+        let (base, _) = spawn_mock(MockResponse::immediate(status_response(
+            status,
+            "application/json",
+            body.to_string(),
+        )))
+        .await;
+        let error = connector(&base)
+            .execute(generation(false))
+            .await
+            .unwrap_err();
+        assert_eq!(error.class, AttemptFailureClass::UpstreamClient);
+        assert_eq!(error.upstream.status, Some(expected));
+        assert_eq!(error.allows_failover(), invalid_key);
+        assert!(!error.message.contains("upstream-secret"));
     }
 }
 

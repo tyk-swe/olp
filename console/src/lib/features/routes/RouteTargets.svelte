@@ -49,8 +49,8 @@
             <label for={`priority-${index}`}>Priority</label><input
               id={`priority-${index}`}
               type="number"
-              min="1"
-              max="100"
+              min="0"
+              max="65535"
               bind:value={target.priority}
               oninput={editor.touch}
               disabled={!editor.canManage}

@@ -3,18 +3,23 @@ use crate::ids::RouteSlug;
 use crate::protocols::canonical::identity::OperationKind;
 use crate::protocols::canonical::identity::Surface;
 use crate::protocols::canonical::identity::TransportMode;
-use crate::routes::selection::select_attempts;
+use crate::routes::policy::RoutingPreferences;
 
 use crate::runtime::manager::Bundle;
 
 use crate::inference::http::protocol_error::ProtocolError;
 
-pub(crate) fn visible_routes(runtime: &Bundle, key: &ApiKey, surface: Surface) -> Vec<RouteSlug> {
+pub(crate) fn visible_routes(
+    runtime: &Bundle,
+    key: &ApiKey,
+    surface: Surface,
+    preferences: &RoutingPreferences,
+) -> Vec<RouteSlug> {
     runtime
         .routes
         .keys()
         .filter(|slug| key.allowed_routes.is_empty() || key.allowed_routes.contains(*slug))
-        .filter(|slug| route_is_visible(runtime, slug, surface))
+        .filter(|slug| route_is_visible(runtime, slug, surface, key, preferences))
         .cloned()
         .collect()
 }
@@ -24,6 +29,7 @@ pub(crate) fn visible_route(
     key: &ApiKey,
     id: &str,
     surface: Surface,
+    preferences: &RoutingPreferences,
 ) -> Result<RouteSlug, ProtocolError> {
     let slug = RouteSlug::parse(id.to_owned()).map_err(|_| {
         ProtocolError::not_found(
@@ -33,7 +39,7 @@ pub(crate) fn visible_route(
     })?;
     if (!key.allowed_routes.is_empty() && !key.allowed_routes.contains(&slug))
         || !runtime.routes.contains_key(&slug)
-        || !route_is_visible(runtime, &slug, surface)
+        || !route_is_visible(runtime, &slug, surface, key, preferences)
     {
         return Err(ProtocolError::not_found(
             surface,
@@ -78,6 +84,8 @@ pub(crate) fn supported_operations(
     runtime: &Bundle,
     slug: &RouteSlug,
     surface: Surface,
+    key: &ApiKey,
+    preferences: &RoutingPreferences,
 ) -> Vec<OperationKind> {
     let Some(route) = runtime.routes.get(slug) else {
         return Vec::new();
@@ -93,14 +101,30 @@ pub(crate) fn supported_operations(
                 &[TransportMode::Unary]
             };
             modes.iter().any(|mode| {
-                select_attempts(runtime, slug, *operation, surface, *mode, &[0; 16]).is_ok()
+                crate::inference::provider_selection::explain_capability(
+                    runtime,
+                    slug,
+                    *operation,
+                    surface,
+                    *mode,
+                    b"model-list",
+                    Some(key),
+                    preferences,
+                )
+                .is_ok_and(|selection| !selection.attempts.is_empty())
             })
         })
         .collect()
 }
 
-fn route_is_visible(runtime: &Bundle, slug: &RouteSlug, surface: Surface) -> bool {
-    !supported_operations(runtime, slug, surface).is_empty()
+fn route_is_visible(
+    runtime: &Bundle,
+    slug: &RouteSlug,
+    surface: Surface,
+    key: &ApiKey,
+    preferences: &RoutingPreferences,
+) -> bool {
+    !supported_operations(runtime, slug, surface, key, preferences).is_empty()
 }
 
 #[cfg(test)]

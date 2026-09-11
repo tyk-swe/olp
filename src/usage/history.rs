@@ -57,6 +57,7 @@ pub struct RequestRecord {
 
 #[derive(Clone, Debug)]
 pub struct AttemptRecord {
+    pub routing: Option<crate::usage::emitter::AttemptRoutingMetadata>,
     pub id: Uuid,
     pub ordinal: u16,
     pub provider_id: Uuid,
@@ -114,6 +115,7 @@ struct RequestRow {
 
 #[derive(Debug, sqlx::FromRow)]
 struct AttemptRow {
+    routing: Option<sqlx::types::Json<crate::usage::emitter::AttemptRoutingMetadata>>,
     id: Uuid,
     ordinal: i16,
     provider_id: Uuid,
@@ -221,7 +223,7 @@ pub async fn request_detail(pool: &sqlx::PgPool, id: Uuid) -> Result<RequestDeta
     .ok_or(Error::NotFound)?;
     let request = request_from_row(row)?;
     let rows = sqlx::query_as::<_, AttemptRow>(
-        "SELECT a.id, a.ordinal, a.provider_id, p.name AS provider_name, a.upstream_model, \
+        "SELECT a.id, a.routing, a.ordinal, a.provider_id, p.name AS provider_name, a.upstream_model, \
                     a.started_at, a.completed_at, a.status_code, a.error_class, a.committed, \
                     a.latency_ms, a.first_byte_ms, f.charge_status::text AS \"charge_status\", \
                     f.usage_observed AS \"usage_observed\", \
@@ -324,6 +326,7 @@ fn request_from_row(row: RequestRow) -> Result<RequestRecord, Error> {
 
 fn attempt_from_row(row: AttemptRow) -> Result<AttemptRecord, Error> {
     Ok(AttemptRecord {
+        routing: row.routing.map(|r| r.0),
         id: row.id,
         ordinal: checked_u16(row.ordinal, "attempt ordinal")?,
         provider_id: row.provider_id,

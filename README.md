@@ -50,7 +50,9 @@ The console walks through connection, model discovery and capability
 certification, then activation. Create a route targeting activated provider
 models, publish it, and issue an API key with the required scope and route
 allowlist. Credentials are write-only. Provider and route changes use ETags,
-immutable revisions, and explicit activation.
+immutable revisions, and explicit activation. [Provider routing](docs/provider-routing.md)
+adds vendor-based connections, credential pools, bulk model validation and route
+creation, and bounded price, latency, throughput, and privacy preferences.
 
 For production, see [deployment](docs/deployment.md),
 [configuration](docs/configuration.md), and [operations](docs/operations.md).
@@ -105,6 +107,7 @@ excludes prompts, outputs, credentials, and uploaded content.
 
 | Guide | Covers |
 | --- | --- |
+| [Provider routing](docs/provider-routing.md) | Vendors, credential pools, model facts, policies, and coordinated upgrade |
 | [Concepts](docs/concepts.md) | Routes, provider revisions, keys, usage, and privacy |
 | [Compatibility](docs/compatibility.md) | Supported endpoints and translation limits |
 | [Deployment](docs/deployment.md) | Production topology, secrets, and capacity |

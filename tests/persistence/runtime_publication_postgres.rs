@@ -120,7 +120,7 @@ async fn replayable_key_creation_takes_its_snapshot_after_the_publication_lock()
     let Outcome::Executed { value, .. } = creation.await.unwrap() else {
         panic!("fresh key creation unexpectedly replayed");
     };
-    let snapshot: Snapshot = serde_json::from_slice(&value.release.payload).unwrap();
+    let snapshot: Snapshot = Snapshot::from_persisted_slice(&value.release.payload).unwrap();
     assert!(
         snapshot
             .api_keys
@@ -253,7 +253,7 @@ async fn batched_compilation_keeps_targets_ordered_and_key_sets_separate() {
     let release = olp::runtime::publication::compiler::compile_and_publish_runtime(&pool, actor)
         .await
         .unwrap();
-    let runtime: Snapshot = serde_json::from_slice(&release.payload).unwrap();
+    let runtime: Snapshot = Snapshot::from_persisted_slice(&release.payload).unwrap();
     let targets = |slug: &str| {
         runtime.routes[&RouteSlug::parse(slug).unwrap()]
             .targets

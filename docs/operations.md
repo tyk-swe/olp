@@ -4,6 +4,11 @@ Availability, monitoring, recovery, upgrade, incident, and key-rotation
 procedures for production OpenLLMProxy. Keep this runbook with the deployed
 release; deployment topology is in [`deployment.md`](deployment.md).
 
+For the provider-pool and routing-policy schema upgrade, follow the
+[coordinated 3.x procedure](provider-routing.md#coordinated-3x-upgrade).
+Drain older gateways before migrating; mixed binaries cannot enforce the same
+policy and release format.
+
 ## Objectives and monitoring
 
 Measure availability and added latency at the client-facing listener. Define

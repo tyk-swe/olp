@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { untrack } from 'svelte';
+  import BulkRouteCreation from './BulkRouteCreation.svelte';
   import { providerKeys } from '$lib/features/providers/providerKeys';
 
   import { resolve } from '$app/paths';
@@ -23,12 +25,25 @@
   const canManage = $derived(access.can('providers.manage'));
   const queryClient = useQueryClient();
   const pagination = $state(emptyCursorHistory());
-  const models = createQuery(() => ({
-    queryKey: providerKeys.modelInventory(pagination.cursor),
-    queryFn: () => listProviderModelInventoryPage(pagination.cursor)
-  }));
   let search = $state('');
   let surface = $state('all');
+  const models = createQuery(() => ({
+    queryKey: [
+      ...providerKeys.modelInventory(pagination.cursor),
+      search,
+      surface
+    ],
+    queryFn: () =>
+      listProviderModelInventoryPage(
+        pagination.cursor,
+        undefined,
+        undefined,
+        search,
+        surface === 'all'
+          ? undefined
+          : (surface as 'openai' | 'anthropic' | 'gemini')
+      )
+  }));
   let busyModel = $state('');
   // Bumped whenever a toggle fails so the eligibility checkboxes are rebuilt
   // from stored state; the browser already flipped them optimistically, and a
@@ -37,21 +52,16 @@
   let mutationError = $state('');
   let notice = $state('');
 
+  $effect(() => {
+    void search;
+    void surface;
+    untrack(() => {
+      pagination.cursor = undefined;
+      pagination.history = [];
+    });
+  });
   const inventory = $derived(models.data?.items ?? []);
-  const filtered = $derived(
-    inventory.filter(({ provider_name, model }) => {
-      const needle = search.trim().toLowerCase();
-      const matchesText =
-        !needle ||
-        `${provider_name} ${model.display_name} ${model.upstream_model}`
-          .toLowerCase()
-          .includes(needle);
-      const matchesSurface =
-        surface === 'all' ||
-        model.capabilities.some((capability) => capability.surface === surface);
-      return matchesText && matchesSurface;
-    })
-  );
+  const filtering = $derived(Boolean(search) || surface !== 'all');
   const enabledCount = $derived(
     inventory.filter(({ model }) => model.enabled).length
   );
@@ -164,6 +174,8 @@
   >
 </div>
 
+<BulkRouteCreation models={inventory} {canManage} />
+
 {#if models.isPending}
   <div class="loading-state" role="status">Loading certified models…</div>
 {:else if models.isError}
@@ -175,7 +187,7 @@
       onclick={() => models.refetch()}>Retry</button
     >
   </div>
-{:else if inventory.length === 0}
+{:else if inventory.length === 0 && !filtering}
   <section class="card empty-state">
     <div>
       <h2>No models discovered</h2>
@@ -185,11 +197,10 @@
       >
     </div>
   </section>
-{:else if filtered.length === 0}
-  <!-- The inventory endpoint has no search or surface parameters, so filtering is per page. -->
+{:else if inventory.length === 0}
   <section class="card empty-state">
     <div>
-      <h2>No matches on this page</h2>
+      <h2>No matching models</h2>
       <p>
         Clear the filters, or use the pagination below to search another page.
       </p>
@@ -212,7 +223,7 @@
           ><th>Route eligibility</th></tr
         ></thead
       ><tbody>
-        {#each filtered as entry (`${entry.provider_id}-${entry.model.id}`)}
+        {#each inventory as entry (`${entry.provider_id}-${entry.model.id}`)}
           <tr>
             <td
               ><strong>{entry.model.display_name}</strong><br /><code

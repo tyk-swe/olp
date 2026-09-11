@@ -12,6 +12,7 @@ use crate::runtime::publication::releases::verify_release_envelope;
 
 fn snapshot() -> Snapshot {
     Snapshot {
+        routing: Default::default(),
         generation: RuntimeGeneration {
             id: RuntimeGenerationId::new(),
             ordinal: 7,
@@ -26,7 +27,7 @@ fn snapshot() -> Snapshot {
 #[test]
 fn release_envelope_binds_payload_id_and_sequence() {
     let snapshot = snapshot();
-    let payload = serde_json::to_vec(&snapshot).unwrap();
+    let payload = snapshot.to_persisted_vec().unwrap();
     let id = snapshot.generation.id.as_uuid();
     assert!(verify_release_envelope(&payload, id, 7).is_ok());
     assert!(verify_release_envelope(&payload, Uuid::now_v7(), 7).is_err());

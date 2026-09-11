@@ -66,10 +66,17 @@ export class RouteDraftEditorState {
   maxAttempts = $state(2);
   targets = $state<EditableTarget[]>([]);
   sync = $state(initialConcurrentEdit());
+  policyDirty = $state(false);
+  policyBusy = $state(false);
+  hasUnsavedChanges = $derived(this.sync.dirty || this.policyDirty);
   private editVersion = 0;
   busy = $state('');
+  publicationBlocked = $derived(
+    Boolean(this.busy) || this.policyBusy || this.hasUnsavedChanges
+  );
   errorMessage = $state('');
   notice = $state('');
+  routingPreferences = $state('{}');
   seed = $state('setup-preview');
   simulationOperation = $state('generation');
   simulationSurface = $state('openai');
@@ -84,7 +91,9 @@ export class RouteDraftEditorState {
       this.simulationOperation,
       this.simulationSurface,
       this.simulationMode,
-      this.seed
+      this.seed,
+      this.policyDirty,
+      this.routingPreferences
     ])
   );
   activation = $state<RouteActivation | null>(null);
@@ -135,6 +144,13 @@ export class RouteDraftEditorState {
       this.sync = beginReload(this.sync);
     });
   };
+  policySaved = async (etag: string, previousEtag: string) => {
+    if (this.sync.snapshotEtag === previousEtag) {
+      this.sync = acceptRemote(this.sync, etag);
+    }
+    this.invalidateSimulation();
+    await this.draft.refetch();
+  };
   toggleOperation = (operation: string, checked: boolean) => {
     this.operations = checked
       ? [...new SvelteSet([...this.operations, operation])]
@@ -174,7 +190,7 @@ export class RouteDraftEditorState {
       return;
     }
     await this.run('save', async () => {
-      const id = await createRouteDraft(
+      const { id } = await createRouteDraft(
         buildCreateRouteDraftInput(this.editorValues, this.modelOptions)
       );
       await this.queryClient.invalidateQueries({
@@ -212,7 +228,7 @@ export class RouteDraftEditorState {
     });
   };
   simulate = async (current: RouteDraft) => {
-    if (!this.canManage || this.busy || this.sync.dirty) return;
+    if (!this.canManage || this.publicationBlocked) return;
     this.invalidateSimulation();
     const version = this.simulationVersion;
     await this.run('simulate', async () => {
@@ -222,7 +238,8 @@ export class RouteDraftEditorState {
           operation: this.simulationOperation,
           surface: this.simulationSurface,
           mode: this.simulationMode,
-          seed: this.seed || 'preview'
+          seed: this.seed || 'preview',
+          preferences: JSON.parse(this.routingPreferences)
         });
       } catch (error) {
         if (version === this.simulationVersion) throw error;
@@ -234,7 +251,7 @@ export class RouteDraftEditorState {
     });
   };
   validate = async (current: RouteDraft) => {
-    if (!this.canManage || this.busy || this.sync.dirty) return;
+    if (!this.canManage || this.publicationBlocked) return;
     await this.run('validate', async () => {
       const validation = await validateRoute(current);
       this.sync = acceptRemote(this.sync, validation.etag);
@@ -247,7 +264,7 @@ export class RouteDraftEditorState {
     });
   };
   activate = async (current: RouteDraft) => {
-    if (!this.canManage || this.busy || this.sync.dirty) return;
+    if (!this.canManage || this.publicationBlocked) return;
     await this.run('activate', async () => {
       this.activation = await activateRoute(current);
       // Activation returns the draft to `draft` under a fresh ETag. Adopting it

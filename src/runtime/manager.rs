@@ -87,6 +87,7 @@ impl Manager {
         Self {
             bundle: ArcSwap::from_pointee(Bundle {
                 snapshot: Snapshot {
+                    routing: Default::default(),
                     generation: RuntimeGeneration {
                         id: RuntimeGenerationId::new(),
                         ordinal: 0,
@@ -188,17 +189,51 @@ impl Manager {
         api_keys: BTreeMap<ApiKeyLookupId, ApiKey>,
         read_started_at: Instant,
     ) -> Result<(), Error> {
+        self.refresh_authority(api_keys, None, read_started_at)
+    }
+
+    pub(crate) fn refresh_current_authority(
+        &self,
+        authority: &crate::runtime::publication::compiler::CurrentRuntimeAuthority,
+        read_started_at: Instant,
+    ) -> Result<(), Error> {
+        self.refresh_authority(authority.api_keys.clone(), Some(authority), read_started_at)
+    }
+
+    fn refresh_authority(
+        &self,
+        api_keys: BTreeMap<ApiKeyLookupId, ApiKey>,
+        authority: Option<&crate::runtime::publication::compiler::CurrentRuntimeAuthority>,
+        read_started_at: Instant,
+    ) -> Result<(), Error> {
         let _install = self
             .install_lock
             .lock()
             .expect("runtime install lock poisoned");
         let current = self.bundle.load_full();
-        if current.snapshot.api_keys == api_keys {
+        if current.snapshot.api_keys == api_keys
+            && authority.is_none_or(|authority| {
+                current.routing.installation == authority.installation
+                    && current.routing.credential_authority.as_ref() == Some(&authority.credentials)
+                    && current.routing.connection_limit_authority.as_ref()
+                        == Some(&authority.connection_limits)
+                    && authority
+                        .routes
+                        .iter()
+                        .all(|(slug, policy)| current.routing.routes.get(slug) == Some(policy))
+            })
+        {
             self.record_authority_refresh(read_started_at);
             return Ok(());
         }
         let mut snapshot = current.snapshot.clone();
         snapshot.api_keys = api_keys;
+        if let Some(authority) = authority {
+            snapshot.routing.installation = authority.installation.clone();
+            snapshot.routing.routes.extend(authority.routes.clone());
+            snapshot.routing.credential_authority = Some(authority.credentials.clone());
+            snapshot.routing.connection_limit_authority = Some(authority.connection_limits.clone());
+        }
         snapshot.validate()?;
         self.bundle.store(Arc::new(Bundle {
             snapshot,
@@ -328,6 +363,7 @@ mod tests {
         let manager = Manager::empty();
         let provider_id = ProviderId::new();
         let snapshot = |ordinal| Snapshot {
+            routing: Default::default(),
             generation: RuntimeGeneration {
                 id: RuntimeGenerationId::new(),
                 ordinal,
@@ -371,6 +407,7 @@ mod tests {
         let generation_id = RuntimeGenerationId::new();
         let transport: Arc<dyn ProviderTransport> = Arc::new(MarkerTransport);
         let snapshot = Snapshot {
+            routing: Default::default(),
             generation: RuntimeGeneration {
                 id: generation_id,
                 ordinal: 7,
@@ -409,6 +446,7 @@ mod tests {
         let lookup_id = ApiKeyLookupId::parse("lookup_same_key").unwrap();
         let key_id = ApiKeyId::new();
         let historical_key = ApiKey {
+            routing_policy: Default::default(),
             id: key_id,
             lookup_id: lookup_id.clone(),
             digest: ApiKeyDigest::new([1; 32]),
@@ -420,6 +458,7 @@ mod tests {
         };
         let generation_id = RuntimeGenerationId::new();
         let historical = Snapshot {
+            routing: Default::default(),
             generation: RuntimeGeneration {
                 id: generation_id,
                 ordinal: 9,
@@ -429,7 +468,7 @@ mod tests {
             routes: BTreeMap::new(),
             api_keys: BTreeMap::from([(lookup_id.clone(), historical_key)]),
         };
-        let release_payload = serde_json::to_vec(&historical).unwrap();
+        let release_payload = historical.to_persisted_vec().unwrap();
         let release = ReleaseCandidate {
             generation_id: generation_id.as_uuid(),
             sequence: 9,
@@ -438,6 +477,7 @@ mod tests {
         let expires_at = Utc::now() + Duration::minutes(10);
         let route = RouteSlug::parse("restricted").unwrap();
         let current_key = ApiKey {
+            routing_policy: Default::default(),
             id: key_id,
             lookup_id: lookup_id.clone(),
             digest: ApiKeyDigest::new([2; 32]),

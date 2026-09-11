@@ -32,7 +32,14 @@ pub(super) async fn verify(app: &Router, cookie: &str, csrf: &str) {
             "together_ai",
             "xai",
             "cerebras",
-            "openrouter"
+            "openrouter",
+            "deepseek",
+            "fireworks",
+            "deepinfra",
+            "huggingface",
+            "perplexity",
+            "cohere",
+            "voyage"
         ]
     );
     assert!(kinds.iter().all(|kind| {

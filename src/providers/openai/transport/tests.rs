@@ -250,6 +250,13 @@ fn fixture_request(streaming: bool) -> ProviderRequest {
             },
         },
         attempt: AttemptPlan {
+            connection_limits: None,
+            credential_limits: None,
+            attempt_limit: None,
+            routing_policy: None,
+            credential_slot_id: None,
+            credential_version_id: None,
+            pricing_revision_id: None,
             generation_id: RuntimeGenerationId::new(),
             route_id: RouteId::new(),
             target_id: TargetId::new(),

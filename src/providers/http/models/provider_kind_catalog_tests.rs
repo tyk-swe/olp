@@ -22,7 +22,14 @@ fn management_metadata_exposes_presets_only_on_the_compatible_kind() {
             "together_ai",
             "xai",
             "cerebras",
-            "openrouter"
+            "openrouter",
+            "deepseek",
+            "fireworks",
+            "deepinfra",
+            "huggingface",
+            "perplexity",
+            "cohere",
+            "voyage"
         ]
     );
     assert!(compatible.presets.iter().all(|preset| {

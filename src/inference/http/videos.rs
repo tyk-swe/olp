@@ -16,7 +16,6 @@ use crate::media::jobs::MediaJobRecord;
 use crate::media::jobs::NewMediaJobReservation;
 use crate::protocols::canonical::identity::OperationKind;
 use crate::protocols::canonical::identity::Surface;
-use crate::protocols::canonical::identity::TransportMode;
 use crate::protocols::canonical::requests::Operation;
 use crate::protocols::canonical::results::CanonicalResult;
 use crate::protocols::openai::video::OpenAiVideoContentQuery;
@@ -48,12 +47,12 @@ use crate::inference::http::state::GatewayState;
 use crate::inference::http::error::InferenceError;
 use crate::inference::http::execution::authorize_principal;
 use crate::inference::http::execution::defer_unary_outcome_to_body;
-use crate::inference::http::execution::execute_routed_result;
 use crate::inference::http::execution::incompatible_result;
 use crate::inference::http::execution::mark_unary_outcome;
 use crate::inference::http::execution::mark_unary_outcome_with_status;
 use crate::inference::http::media::open_response_media;
 use crate::inference::http::media::response_from_opened_media;
+use crate::inference::http::media_jobs::execute_media_job_result;
 use crate::inference::http::media_jobs::media_job_error;
 use crate::inference::http::media_jobs::owned_media_job;
 use crate::inference::http::media_jobs::refresh_video_list_record;
@@ -87,10 +86,12 @@ pub(crate) async fn video_create(
     let (key, route_slug, required_target) = state
         .request_boundary
         .inference
-        .select_video_create_target(principal.principal(), &operation, local_job_id)?;
+        .select_video_create_target(principal.principal(), &operation, local_job_id)
+        .await?;
     let reserved = crate::media::jobs::lifecycle::reserve_media_job(
         &state.request_boundary.pool,
         NewMediaJobReservation {
+            credential_version_id: required_target.credential_version_id,
             id: local_job_id,
             runtime_generation_id: principal.runtime().generation.id.as_uuid(),
             api_key_id: key.id.as_uuid(),
@@ -263,17 +264,8 @@ pub(crate) async fn video_get(
         .ok_or_else(|| InferenceError::unavailable("media_job_upstream_id_unavailable"))?;
     let mut operation = decode_video_get(upstream_id);
     set_video_route(&mut operation, &record.route_slug)?;
-    let mut executed = execute_routed_result(
-        &state,
-        &principal,
-        operation,
-        TransportMode::Unary,
-        Some(RequiredTarget {
-            provider_id: record.provider_id,
-            upstream_model: record.upstream_model.clone(),
-        }),
-    )
-    .await?;
+    let mut executed =
+        execute_media_job_result(&state, &principal, &record, operation, false).await?;
     debug_assert_eq!(executed.api_key_id, key.id.as_uuid());
     let mut result = match executed.result.as_ref() {
         CanonicalResult::VideoJob(result) => result.clone(),
@@ -328,17 +320,8 @@ pub(crate) async fn video_content(
     let mut operation = decode_video_content_with_query(upstream_id, query)
         .map_err(|error| InferenceError::invalid_request(error.to_string()))?;
     set_video_route(&mut operation, &record.route_slug)?;
-    let mut executed = execute_routed_result(
-        &state,
-        &principal,
-        operation,
-        TransportMode::Unary,
-        Some(RequiredTarget {
-            provider_id: record.provider_id,
-            upstream_model: record.upstream_model.clone(),
-        }),
-    )
-    .await?;
+    let mut executed =
+        execute_media_job_result(&state, &principal, &record, operation, false).await?;
     let result = match executed.result.as_ref() {
         CanonicalResult::VideoContent(result) => result.clone(),
         _ => {
@@ -398,17 +381,8 @@ pub(crate) async fn video_delete(
     let mut operation = decode_video_delete(upstream_id);
     set_video_route(&mut operation, &record.route_slug)?;
     mark_missing_delete_as_success(&mut operation)?;
-    let mut executed = execute_routed_result(
-        &state,
-        &principal,
-        operation,
-        TransportMode::Unary,
-        Some(RequiredTarget {
-            provider_id: record.provider_id,
-            upstream_model: record.upstream_model.clone(),
-        }),
-    )
-    .await?;
+    let mut executed =
+        execute_media_job_result(&state, &principal, &record, operation, false).await?;
     let mut result = match executed.result.as_ref() {
         CanonicalResult::VideoDelete(result) => result.clone(),
         _ => {

@@ -171,6 +171,7 @@ mod tests {
     ) -> RequestAttemptMetadata {
         let completed_at = Utc::now();
         RequestAttemptMetadata {
+            routing: None,
             id: Uuid::now_v7(),
             ordinal,
             provider_id,

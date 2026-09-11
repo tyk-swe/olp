@@ -230,7 +230,10 @@ pub(crate) async fn rotate_provider_credential(
     idempotency_http_response(result)
 }
 
-fn validate_rotated_credential(provider: &ProviderRecord, credential: &str) -> Result<(), String> {
+pub(crate) fn validate_rotated_credential(
+    provider: &ProviderRecord,
+    credential: &str,
+) -> Result<(), String> {
     let config = &provider.configuration;
     let credential = provider_credential(config, Some(credential.as_bytes()))
         .map_err(|error| error.to_string())?;

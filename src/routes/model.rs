@@ -44,9 +44,6 @@ impl Route {
         if self.targets.is_empty() {
             return Err(Error::NoTargets);
         }
-        if usize::from(self.max_attempts.get()) > self.targets.len() {
-            return Err(Error::AttemptsExceedTargets);
-        }
 
         let mut target_ids = HashSet::with_capacity(self.targets.len());
         let mut target_routing_ids = HashSet::with_capacity(self.targets.len());
@@ -80,8 +77,6 @@ impl Route {
 pub enum Error {
     #[error("route must contain at least one target")]
     NoTargets,
-    #[error("route maximum attempts cannot exceed its target count")]
-    AttemptsExceedTargets,
     #[error("route overall timeout must be greater than zero")]
     ZeroOverallTimeout,
     #[error("target {target_id} timeout must be greater than zero")]

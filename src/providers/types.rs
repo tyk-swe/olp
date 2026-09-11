@@ -46,6 +46,8 @@ closed_string_enum! {
 closed_string_enum! {
     pub enum ProviderAuthMode {
         ApiKey => "api_key",
+        None => "none",
+        Headers => "headers",
         ApplicationDefault => "adc",
         ServiceAccount => "service_account",
         DefaultChain => "default_chain",

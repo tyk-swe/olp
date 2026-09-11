@@ -238,8 +238,8 @@ async fn media_job_management_views_are_session_authorized_and_metadata_only() {
     let api_key_id = Uuid::now_v7();
     sqlx::query(
         "INSERT INTO providers
-         (id, name, kind, state, auth_mode, etag, created_by)
-         VALUES ($1, 'media-provider', 'openai', 'active', 'api_key', $2, $3)",
+         (id, name, kind, state, auth_mode, etag, created_by, endpoint)
+         VALUES ($1, 'media-provider', 'openai', 'active', 'none', $2, $3, 'https://media.example.test/v1/')",
     )
     .bind(provider_id)
     .bind(provider_etag)
@@ -247,6 +247,8 @@ async fn media_job_management_views_are_session_authorized_and_metadata_only() {
     .execute(&pool)
     .await
     .unwrap();
+    sqlx::query("INSERT INTO provider_credential_slots(id,provider_id,name,is_default) VALUES($1,$1,'Default',true)")
+        .bind(provider_id).execute(&pool).await.unwrap();
     sqlx::query(
         "INSERT INTO api_keys
          (id, lookup_id, secret_digest, name, created_by)
@@ -325,8 +327,8 @@ async fn media_job_management_views_are_session_authorized_and_metadata_only() {
     sqlx::query(
         "INSERT INTO provider_revisions \
          (id, provider_id, revision, name, kind, auth_mode, connector_ready, \
-          source_etag, activated_by) \
-         VALUES ($1, $2, 1, 'media-provider', 'openai', 'api_key', true, $3, $4)",
+          source_etag, activated_by, endpoint) \
+         VALUES ($1, $2, 1, 'media-provider', 'openai', 'none', true, $3, $4, 'https://media.example.test/v1/')",
     )
     .bind(provider_revision_id)
     .bind(provider_id)
@@ -341,6 +343,11 @@ async fn media_job_management_views_are_session_authorized_and_metadata_only() {
         .execute(&pool)
         .await
         .unwrap();
+    let mut transaction = pool.begin().await.unwrap();
+    olp::providers::pool_store::snapshot(&mut transaction, provider_id, provider_revision_id)
+        .await
+        .unwrap();
+    transaction.commit().await.unwrap();
     sqlx::query(
         "WITH model AS (
              INSERT INTO provider_models
@@ -382,6 +389,7 @@ async fn media_job_management_views_are_session_authorized_and_metadata_only() {
     .await
     .unwrap();
     let snapshot = Snapshot {
+        routing: Default::default(),
         generation: RuntimeGeneration {
             id: generation_id,
             ordinal: u64::try_from(generation_sequence).unwrap(),
@@ -422,6 +430,7 @@ async fn media_job_management_views_are_session_authorized_and_metadata_only() {
         api_keys: BTreeMap::from([(
             lookup_id.clone(),
             ApiKey {
+                routing_policy: Default::default(),
                 id: ApiKeyId::from_uuid(api_key_id),
                 lookup_id,
                 digest: ApiKeyDigest::new(material.digest),
@@ -433,7 +442,7 @@ async fn media_job_management_views_are_session_authorized_and_metadata_only() {
             },
         )]),
     };
-    let payload = serde_json::to_vec(&snapshot).unwrap();
+    let payload = snapshot.to_persisted_vec().unwrap();
     let release_sha256: [u8; 32] = Sha256::digest(&payload).into();
     sqlx::query(
         "UPDATE runtime_generations SET compiled_release = $1, release_sha256 = $2 \
@@ -447,8 +456,8 @@ async fn media_job_management_views_are_session_authorized_and_metadata_only() {
     .unwrap();
     sqlx::query(
         "INSERT INTO runtime_generation_provider_configs \
-         (runtime_generation_id, provider_id, kind, auth_mode, provider_revision_id) \
-         VALUES ($1, $2, 'openai', 'api_key', $3)",
+         (runtime_generation_id, provider_id, kind, auth_mode, provider_revision_id, endpoint) \
+         VALUES ($1, $2, 'openai', 'none', $3, 'https://media.example.test/v1/')",
     )
     .bind(generation_id.as_uuid())
     .bind(provider_id)
@@ -460,6 +469,7 @@ async fn media_job_management_views_are_session_authorized_and_metadata_only() {
     olp::media::jobs::lifecycle::reserve_media_job(
         &pool,
         NewMediaJobReservation {
+            credential_version_id: None,
             id: job_id,
             runtime_generation_id: generation_id.as_uuid(),
             api_key_id,
@@ -603,6 +613,44 @@ async fn media_job_management_views_are_session_authorized_and_metadata_only() {
     assert_eq!(status["id"], video_id);
     assert_eq!(status["model"], "video-default");
     assert_eq!(status["status"], "completed");
+
+    // Mounted media dispatch uses current quotas while retaining the job's
+    // historical transport. Each scope must fail closed without a limiter.
+    for connection_quota in [true, false] {
+        let options = if connection_quota {
+            json!({"limits":{"requests_per_minute":1}})
+        } else {
+            serde_json::to_value(olp::providers::options::ConnectionOptions::default()).unwrap()
+        };
+        sqlx::query("UPDATE provider_revisions SET options=$2 WHERE id=$1")
+            .bind(provider_revision_id)
+            .bind(options)
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("UPDATE provider_revision_credentials SET configuration=jsonb_set(configuration,'{requests_per_minute}',$2) WHERE provider_revision_id=$1")
+            .bind(provider_revision_id)
+            .bind(if connection_quota { Value::Null } else { json!(1) })
+            .execute(&pool).await.unwrap();
+        let limited = gateway
+            .clone()
+            .oneshot(
+                Request::get(format!("/v1/videos/{video_id}/content"))
+                    .header(header::AUTHORIZATION, &authorization)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let status = limited.status();
+        let body: Value =
+            serde_json::from_slice(&limited.into_body().collect().await.unwrap().to_bytes())
+                .unwrap();
+        assert_eq!(status, StatusCode::TOO_MANY_REQUESTS, "{body}");
+        assert_eq!(body["error"]["message"], "provider_limits_unavailable");
+    }
+    sqlx::query("UPDATE provider_revision_credentials SET configuration=configuration-'requests_per_minute' WHERE provider_revision_id=$1")
+        .bind(provider_revision_id).execute(&pool).await.unwrap();
 
     let content = gateway
         .clone()
@@ -812,6 +860,7 @@ async fn media_job_management_views_are_session_authorized_and_metadata_only() {
     runtime
         .install(
             Snapshot {
+                routing: Default::default(),
                 generation: RuntimeGeneration {
                     id: RuntimeGenerationId::new(),
                     ordinal: 2,

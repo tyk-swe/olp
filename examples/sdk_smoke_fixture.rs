@@ -156,6 +156,7 @@ fn generation_events(text: &str, upstream_model: &str) -> Vec<Event> {
 
 fn fixture_api_key(lookup_id: ApiKeyLookupId, digest: ApiKeyDigest) -> ApiKey {
     ApiKey {
+        routing_policy: Default::default(),
         id: ApiKeyId::new(),
         lookup_id,
         digest,
@@ -288,6 +289,7 @@ fn fixture_snapshot(
         }],
     };
     Snapshot {
+        routing: Default::default(),
         generation: RuntimeGeneration {
             id: RuntimeGenerationId::new(),
             ordinal: 1,

@@ -91,6 +91,13 @@ fn envelope(operation: Operation, mode: TransportMode) -> ProviderRequest {
             mode,
         },
         attempt: AttemptPlan {
+            connection_limits: None,
+            credential_limits: None,
+            attempt_limit: None,
+            routing_policy: None,
+            credential_slot_id: None,
+            credential_version_id: None,
+            pricing_revision_id: None,
             generation_id: RuntimeGenerationId::new(),
             route_id: RouteId::new(),
             target_id: TargetId::new(),
@@ -253,6 +260,66 @@ async fn rejected_deployment_or_api_version_never_becomes_probe_evidence() {
         String::from_utf8_lossy(request).contains("/openai/deployments/team-chat/")
             && String::from_utf8_lossy(request).contains("api-version=2024-10-21")
     }));
+}
+
+#[tokio::test]
+async fn certification_does_not_confuse_an_override_value_with_a_model_key() {
+    let body = r#"{"id":"chatcmpl-probe","object":"chat.completion","created":1,"model":"ignored","choices":[{"index":0,"message":{"role":"assistant","content":"OK"},"finish_reason":"stop"}],"usage":{"prompt_tokens":3,"completion_tokens":1,"total_tokens":4}}"#;
+    let (origin, captured) = spawn_response_sequence(vec![
+        response("application/json", body),
+        response("application/json", body),
+    ])
+    .await;
+    let policy = EgressPolicy::unsafe_test_targets();
+    let limits = crate::providers::connector::ResponseLimits::default();
+    let options = crate::providers::options::ConnectionOptions {
+        models: BTreeMap::from([(
+            "alias".into(),
+            crate::providers::options::ModelMetadata {
+                deployment: Some("fast".into()),
+                ..Default::default()
+            },
+        )]),
+        ..Default::default()
+    };
+    let connector = Connector::configured(
+        ConnectorConfig::for_local_test(&origin, "base", "2024-10-21", Timeouts::default()),
+        ApiKey::new("azure-secret").unwrap(),
+        options,
+        &policy,
+        limits,
+    )
+    .unwrap();
+    let capability = CompatibleCapability {
+        operation: OperationKind::Generation,
+        surface: Surface::Anthropic,
+        mode: TransportMode::Unary,
+    };
+    assert_eq!(
+        connector
+            .certify_deployment_capability("fast", capability)
+            .await
+            .unwrap_err(),
+        CompatibleCapabilityCertificationError::InvalidResult
+    );
+    connector
+        .certify_deployment_capability("alias", capability)
+        .await
+        .unwrap();
+    connector
+        .certify_deployment_capability("base", capability)
+        .await
+        .unwrap();
+    let requests = captured.await.unwrap();
+    assert_eq!(requests.len(), 2);
+    assert!(
+        String::from_utf8_lossy(&requests[0])
+            .starts_with("POST /openai/deployments/fast/chat/completions?")
+    );
+    assert!(
+        String::from_utf8_lossy(&requests[1])
+            .starts_with("POST /openai/deployments/base/chat/completions?")
+    );
 }
 
 #[tokio::test]

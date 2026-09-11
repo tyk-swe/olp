@@ -103,6 +103,7 @@ fn two_charge_event(
             .into_iter()
             .enumerate()
             .map(|(index, (input, output, cached))| RequestAttemptMetadata {
+                routing: None,
                 id: Uuid::now_v7(),
                 ordinal: u16::try_from(index + 1).unwrap(),
                 provider_id: provider,

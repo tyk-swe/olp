@@ -22,19 +22,45 @@ use chrono::Utc;
 use std::collections::BTreeMap;
 use uuid::Uuid;
 
+/// Lists providers in id order; an empty `search` matches every provider.
 pub async fn list_providers(
     pool: &sqlx::PgPool,
     cursor: Option<Uuid>,
     limit: i64,
+    search: &str,
 ) -> Result<ConfigurationPage<ProviderRecord>, Error> {
     let limit = checked_limit(limit)?;
-    let rows = sqlx::query_as::<_, ListProvidersRow>(
-        "SELECT id FROM providers WHERE ($1::uuid IS NULL OR id > $1) ORDER BY id LIMIT $2",
-    )
-    .bind(cursor)
-    .bind(limit + 1)
-    .fetch_all(pool)
-    .await?;
+    let search = search.to_lowercase();
+    let batch_size = if search.is_empty() {
+        limit + 1
+    } else {
+        i64::from(crate::database::reads::MAX_PAGE_SIZE)
+    };
+    let mut after = cursor;
+    let mut rows = Vec::new();
+    loop {
+        let candidates = sqlx::query_as::<_, ListProvidersRow>(
+            "SELECT id, name, kind, endpoint, options->>'vendor_id' AS vendor_id
+             FROM providers WHERE ($1::uuid IS NULL OR id > $1) ORDER BY id LIMIT $2",
+        )
+        .bind(after)
+        .bind(batch_size)
+        .fetch_all(pool)
+        .await?;
+        let exhausted = candidates.len() < batch_size as usize;
+        after = candidates.last().map(|row| row.id);
+        for row in candidates {
+            if search.is_empty() || row.matches_search(&search)? {
+                rows.push(row);
+                if rows.len() > limit as usize {
+                    break;
+                }
+            }
+        }
+        if rows.len() > limit as usize || exhausted {
+            break;
+        }
+    }
     let (rows, next_cursor) = split_page(rows, limit as usize, |row| row.id);
     let ids: Vec<Uuid> = rows.into_iter().map(|row| row.id).collect();
     let items =
@@ -54,7 +80,7 @@ pub async fn get_providers(
     let rows = sqlx::query_as::<_, ProviderRow>(
         "SELECT p.id AS \"id\", p.name AS \"name\", p.kind AS \"kind\", \
                     p.state::text AS \"state\", p.endpoint, p.cloud_region, \
-                    p.cloud_project, p.deployment, p.api_version, p.auth_mode AS \"auth_mode\", \
+                    p.cloud_project, p.deployment, p.api_version, p.auth_mode AS \"auth_mode\", p.options, \
                     p.connector_ready AS \"connector_ready\", \
                     p.etag AS \"etag\", ar.revision AS \"active_revision\", \
                     (p.state = 'draft'::provider_state AND p.active_revision_id IS NOT NULL) \
@@ -123,6 +149,11 @@ pub async fn update_provider(
     actor: Uuid,
 ) -> Result<Uuid, Error> {
     validate_provider_update(update)?;
+    update
+        .configuration
+        .options
+        .validate(update.configuration.kind)
+        .map_err(Error::Invalid)?;
     let etag = Uuid::now_v7();
     let mut transaction = pool.begin().await?;
     let current = lock_provider(&mut transaction, provider_id)
@@ -138,10 +169,11 @@ pub async fn update_provider(
         replace_provider_transport(&mut transaction, provider_id, update, etag).await?;
     } else {
         sqlx::query(
-            "UPDATE providers SET name = $1, state = 'draft'::provider_state, etag = $2 \
-                 WHERE id = $3",
+            "UPDATE providers SET name = $1, options = $2, state = 'draft'::provider_state, \
+                 etag = $3 WHERE id = $4",
         )
         .bind(update.name.trim())
+        .bind(sqlx::types::Json(&update.configuration.options))
         .bind(etag)
         .bind(provider_id)
         .execute(&mut *transaction)
@@ -457,13 +489,13 @@ async fn replace_provider_transport(
 ) -> Result<(), Error> {
     sqlx::query(
         "UPDATE providers SET name = $1, endpoint = $2, cloud_region = $3, cloud_project = $4, \
-                deployment = $5, api_version = $6, auth_mode = $7, \
+                deployment = $5, api_version = $6, auth_mode = $7, options = $8, \
                 active_credential_version_id = CASE \
-                  WHEN $7 IN ('adc', 'default_chain') THEN NULL \
+                  WHEN $7 IN ('adc', 'default_chain', 'none') THEN NULL \
                   ELSE active_credential_version_id END, \
-                state = 'draft'::provider_state, etag = $8, updated_at = now(), \
+                state = 'draft'::provider_state, etag = $9, updated_at = now(), \
                 last_probe_at = NULL, last_probe_status = NULL, last_probe_detail = NULL \
-         WHERE id = $9",
+         WHERE id = $10",
     )
     .bind(update.name.trim())
     .bind(update.configuration.endpoint.as_deref().map(str::trim))
@@ -472,6 +504,7 @@ async fn replace_provider_transport(
     .bind(update.configuration.deployment.as_deref().map(str::trim))
     .bind(update.configuration.api_version.as_deref().map(str::trim))
     .bind(update.configuration.auth_mode.as_str())
+    .bind(sqlx::types::Json(&update.configuration.options))
     .bind(etag)
     .bind(provider_id)
     .execute(&mut **transaction)
@@ -490,9 +523,108 @@ async fn replace_provider_transport(
 #[derive(sqlx::FromRow)]
 struct ListProvidersRow {
     id: uuid::Uuid,
+    name: String,
+    kind: String,
+    endpoint: Option<String>,
+    vendor_id: Option<String>,
+}
+
+impl ListProvidersRow {
+    fn matches_search(&self, search: &str) -> Result<bool, Error> {
+        let kind = self
+            .kind
+            .parse()
+            .map_err(|_| PersistenceError::InvalidStoredValue("provider kind"))?;
+        let vendor = crate::providers::catalog::effective_vendor(
+            self.vendor_id.as_deref(),
+            kind,
+            self.endpoint.as_deref(),
+        );
+        Ok(
+            format!("{} {} {}", self.name, self.kind, vendor.unwrap_or_default())
+                .to_lowercase()
+                .contains(search),
+        )
+    }
 }
 
 #[derive(sqlx::FromRow)]
 struct RestoreProviderAsDraftRow {
     etag: uuid::Uuid,
+}
+
+#[cfg(test)]
+mod search_tests {
+    use super::*;
+
+    #[tokio::test]
+    #[ignore = "requires PostgreSQL via make integration"]
+    async fn inferred_vendor_search_filters_before_pagination() {
+        let db = crate::test_support::TestDb::create_migrated("provider_vendor_search").await;
+        let pool = db.pool(2).await;
+        let actor = Uuid::now_v7();
+        sqlx::query("INSERT INTO users(id,email,display_name,role) VALUES($1,'vendor-search@test.example','Owner','owner')")
+            .bind(actor).execute(&pool).await.unwrap();
+        let fixtures = [
+            ("gemini", Some("https://custom.example.test"), None),
+            ("openai", None, None),
+            ("gemini", None, None),
+            ("vertex_ai", None, None),
+            (
+                "openai_compatible",
+                Some("https://openrouter.ai/api/v1/"),
+                None,
+            ),
+            (
+                "gemini",
+                Some("https://custom.example.test"),
+                Some("google"),
+            ),
+            (
+                "openai_compatible",
+                Some("https://openrouter.ai/api/v1/"),
+                Some("deepseek"),
+            ),
+        ];
+        let mut ids = Vec::new();
+        for (index, (kind, endpoint, vendor)) in fixtures.into_iter().enumerate() {
+            let id = Uuid::from_u128(index as u128 + 1);
+            ids.push(id);
+            let options = vendor.map_or_else(
+                || serde_json::json!({}),
+                |vendor| serde_json::json!({"vendor_id":vendor}),
+            );
+            sqlx::query("INSERT INTO providers(id,name,kind,endpoint,auth_mode,etag,created_by,options) VALUES($1,$2,$3,$4,$5,$6,$7,$8)")
+                .bind(id).bind(format!("connection-{index}")).bind(kind).bind(endpoint)
+                .bind(if kind == "vertex_ai" { "adc" } else { "api_key" })
+                .bind(Uuid::now_v7()).bind(actor).bind(options).execute(&pool).await.unwrap();
+        }
+        // Unmatched rows can span several scan batches before a search result.
+        sqlx::query("INSERT INTO providers(id,name,kind,auth_mode,etag,created_by) SELECT uuidv7(),'unmatched-'||n,'openai','api_key',uuidv7(),$1 FROM generate_series(1,$2) AS n")
+            .bind(actor).bind(i32::from(crate::database::reads::MAX_PAGE_SIZE) + 1)
+            .execute(&pool).await.unwrap();
+        let last = Uuid::from_u128(u128::MAX);
+        sqlx::query("INSERT INTO providers(id,name,kind,auth_mode,etag,created_by) VALUES($1,'last-connection','gemini','api_key',$2,$3)")
+            .bind(last).bind(Uuid::now_v7()).bind(actor).execute(&pool).await.unwrap();
+
+        let mut cursor = None;
+        for (index, expected) in [ids[2], ids[3], ids[5], last].into_iter().enumerate() {
+            let page = list_providers(&pool, cursor, 1, "GOOGLE").await.unwrap();
+            assert_eq!(page.items.len(), 1);
+            assert_eq!(page.items[0].id, expected);
+            assert_eq!(page.next_cursor.is_some(), index < 3);
+            cursor = page.next_cursor;
+        }
+        for (search, expected) in [("openrouter", ids[4]), ("deepseek", ids[6])] {
+            let page = list_providers(&pool, None, 1, search).await.unwrap();
+            assert_eq!(page.items.len(), 1);
+            assert_eq!(page.items[0].id, expected);
+            assert!(page.next_cursor.is_none());
+        }
+        let page = list_providers(&pool, None, 1, "absent-vendor")
+            .await
+            .unwrap();
+        assert!(page.items.is_empty());
+        assert!(page.next_cursor.is_none());
+    }
 }

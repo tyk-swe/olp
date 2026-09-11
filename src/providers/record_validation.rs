@@ -17,7 +17,8 @@ pub(crate) fn transport_changed(current: &LockedProvider, update: &UpdateProvide
     fn trimmed(value: &Option<String>) -> Option<&str> {
         value.as_deref().map(str::trim)
     }
-    trimmed(&update.configuration.endpoint) != current.configuration.endpoint.as_deref()
+    update.configuration.options != current.configuration.options
+        || trimmed(&update.configuration.endpoint) != current.configuration.endpoint.as_deref()
         || trimmed(&update.configuration.cloud_region)
             != current.configuration.cloud_region.as_deref()
         || trimmed(&update.configuration.cloud_project)
@@ -111,10 +112,7 @@ pub(crate) fn validate_route_input(
             "route operations and targets cannot be empty".to_owned(),
         ));
     }
-    if overall_timeout_ms <= 0
-        || max_attempts <= 0
-        || usize::try_from(max_attempts).unwrap_or(usize::MAX) > targets.len()
-    {
+    if overall_timeout_ms <= 0 || max_attempts <= 0 {
         return Err(Error::Invalid(
             "route deadlines or maximum attempts are invalid".to_owned(),
         ));
@@ -197,6 +195,7 @@ mod tests {
         UpdateProvider {
             name: "Provider".to_owned(),
             configuration: crate::providers::configuration::ProviderConfiguration {
+                options: Default::default(),
                 endpoint: Some("https://api.example.test".to_owned()),
                 cloud_region: None,
                 cloud_project: None,
@@ -230,6 +229,7 @@ mod tests {
             etag: Uuid::nil(),
             state: "draft".to_owned(),
             configuration: crate::providers::configuration::ProviderConfiguration {
+                options: Default::default(),
                 kind: ProviderKind::OpenAiCompatible,
                 endpoint: Some("https://api.example.test".to_owned()),
                 cloud_region: None,
@@ -334,17 +334,16 @@ mod tests {
         let operation = OperationKind::Generation;
         let valid_target = (provider, 0, 1, 500);
         validate_route_input("primary", &[operation], 1_000, 1, &[valid_target]).unwrap();
+        validate_route_input("primary", &[operation], 1_000, 2, &[valid_target]).unwrap();
 
         assert!(
             validate_route_input("INVALID SLUG", &[operation], 1_000, 1, &[valid_target]).is_err()
         );
         assert!(validate_route_input("primary", &[], 1_000, 1, &[valid_target]).is_err());
         assert!(validate_route_input("primary", &[operation], 1_000, 1, &[]).is_err());
-        for (overall, attempts, targets) in [
-            (0, 1, vec![valid_target]),
-            (1_000, 0, vec![valid_target]),
-            (1_000, 2, vec![valid_target]),
-        ] {
+        for (overall, attempts, targets) in
+            [(0, 1, vec![valid_target]), (1_000, 0, vec![valid_target])]
+        {
             assert!(
                 validate_route_input("primary", &[operation], overall, attempts, &targets).is_err()
             );

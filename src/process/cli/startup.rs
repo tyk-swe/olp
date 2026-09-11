@@ -72,6 +72,7 @@ pub(crate) async fn serve(
         state.master_key.clone(),
         Arc::clone(&state.provider_egress_policy),
         state.provider_response_limits,
+        state.limiter.clone(),
     );
     activate_initial_runtime(&activator).await;
     let listener = TcpListener::bind(args.listen_addr).await?;
@@ -341,6 +342,12 @@ async fn spawn_background_plane(
         tasks: Vec::new(),
         request_metadata_writer_status: None,
     };
+    plane
+        .tasks
+        .push(tokio::spawn(crate::inference::performance::supervise(
+            pool.clone(),
+            shutdown.clone(),
+        )));
     plane
         .tasks
         .push(spawn_runtime_poller(activator.clone(), shutdown.clone()));

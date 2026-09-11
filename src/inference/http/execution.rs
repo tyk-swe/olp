@@ -92,24 +92,6 @@ pub(crate) async fn execute_routed_result(
     .await
 }
 
-pub(crate) async fn execute_internal_routed_result(
-    state: &GatewayState,
-    admission: &HttpRequestAdmission,
-    operation: Operation,
-    mode: TransportMode,
-    required_target: Option<RequiredTarget>,
-) -> Result<RoutedUnaryResult, InferenceError> {
-    execute_result_with_admission(
-        state,
-        admission,
-        operation,
-        mode,
-        required_target,
-        admission.internal_engine_admission(),
-    )
-    .await
-}
-
 async fn execute_result_with_admission(
     state: &GatewayState,
     admission: &HttpRequestAdmission,

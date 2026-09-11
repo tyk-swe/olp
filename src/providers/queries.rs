@@ -67,7 +67,7 @@ pub(crate) async fn lock_provider(
 ) -> Result<Option<LockedProvider>, sqlx::Error> {
     sqlx::query_as::<_, LockedProvider>(
         "SELECT etag, state::text AS \"state\", kind, endpoint, cloud_region, cloud_project, \
-                deployment, api_version, auth_mode, active_credential_version_id, \
+                deployment, api_version, auth_mode, options, active_credential_version_id, \
                 updated_at, last_probe_at, last_probe_status \
          FROM providers WHERE id = $1 FOR UPDATE",
     )

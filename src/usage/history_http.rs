@@ -106,6 +106,7 @@ pub(crate) struct RequestListResponse {
 
 #[derive(Debug, Serialize, ToSchema)]
 pub(crate) struct AttemptResponse {
+    routing: Option<crate::usage::emitter::AttemptRoutingMetadata>,
     #[schema(value_type = String, format = Uuid)]
     id: Uuid,
     ordinal: u16,
@@ -137,6 +138,7 @@ pub(crate) struct AttemptResponse {
 impl From<AttemptRecord> for AttemptResponse {
     fn from(record: AttemptRecord) -> Self {
         Self {
+            routing: record.routing,
             id: record.id,
             ordinal: record.ordinal,
             provider_id: record.provider_id,

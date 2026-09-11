@@ -423,7 +423,7 @@ async fn bounded_http_connectors_reject_oversized_streaming_events() {
 }
 
 #[tokio::test]
-async fn every_reviewed_capability_tuple_executes_its_certification_contract() {
+async fn every_reviewed_capability_tuple_honors_endpoint_scoped_certification() {
     for kind in ProviderKind::ALL {
         for (operation, surface, mode) in super::matrix::expected_certifiable_capabilities(kind) {
             let capability = CompatibleCapability {
@@ -440,19 +440,31 @@ async fn every_reviewed_capability_tuple_executes_its_certification_contract() {
             } else {
                 MODEL
             };
-            provider
+            let result = provider
                 .certify_capability(upstream_model, capability)
-                .await
-                .unwrap_or_else(|error| {
+                .await;
+            let official_media = kind == ProviderKind::OpenAi
+                && !matches!(
+                    operation,
+                    OperationKind::Generation
+                        | OperationKind::Embeddings
+                        | OperationKind::TokenCount
+                        | OperationKind::Moderation
+                );
+            if official_media {
+                assert_eq!(result.unwrap_err(),olp::providers::openai::certification::CompatibleCapabilityCertificationError::Unsupported,"custom endpoints cannot inherit official OpenAI media certification");
+            } else {
+                result.unwrap_or_else(|error| {
                     panic!(
                         "{kind:?} {operation:?} {surface:?} {mode:?} certification failed: {error}"
                     )
                 });
+            }
             shutdown.send(()).unwrap();
             let captured = server.await.unwrap();
             assert!(
-                !captured.is_empty(),
-                "{kind:?} {operation:?} {surface:?} {mode:?} made no certification probe"
+                captured.is_empty() == official_media,
+                "{kind:?} {operation:?} {surface:?} {mode:?} did not honor endpoint-scoped certification"
             );
         }
     }

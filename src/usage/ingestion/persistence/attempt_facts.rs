@@ -46,7 +46,7 @@ async fn price_attempt(
                                  + COALESCE($6::numeric * selected.output_per_million / 1000000, 0) \
                                  + COALESCE($7::numeric * selected.unit_price, 0)) \
                              ELSE NULL END AS \"estimated_cost\" \
-                 FROM providers provider \
+                 FROM providers provider LEFT JOIN provider_revisions provider_revision ON provider_revision.id=COALESCE($11::uuid, provider.active_revision_id) \
                  LEFT JOIN LATERAL ( \
                      SELECT revision.id AS pricing_revision_id, price.input_per_million, \
                             price.cached_input_per_million, \
@@ -55,10 +55,12 @@ async fn price_attempt(
                      FROM pricing_revisions revision \
                      JOIN prices price ON price.pricing_revision_id = revision.id \
                      WHERE revision.effective_at <= $4 \
-                       AND price.provider_kind = provider.kind \
+                       AND (NOT $12::boolean OR revision.id = $10) \
+                       AND price.provider_kind = COALESCE(provider_revision.kind,provider.kind) \
+                       AND (price.vendor_id IS NULL OR price.vendor_id = CASE WHEN $12::boolean THEN $13::text ELSE COALESCE(provider_revision.options->>'vendor_id',provider.options->>'vendor_id',CASE COALESCE(provider_revision.kind,provider.kind) WHEN 'gemini' THEN 'google' WHEN 'vertex_ai' THEN 'google-vertex' WHEN 'bedrock' THEN 'amazon-bedrock' WHEN 'azure_openai' THEN 'azure' ELSE COALESCE(provider_revision.kind,provider.kind) END) END) \
                        AND (price.provider_id IS NULL OR price.provider_id = provider.id) \
                        AND price.model = $2 AND price.operation = $3 \
-                     ORDER BY (price.provider_id IS NOT NULL) DESC, \
+                     ORDER BY (price.provider_id IS NOT NULL) DESC, (price.vendor_id IS NOT NULL) DESC, \
                               revision.effective_at DESC, revision.revision DESC LIMIT 1 \
                  ) selected ON true \
                  WHERE provider.id = $1",
@@ -72,6 +74,10 @@ async fn price_attempt(
     .bind(attempt.usage.media_units)
     .bind(attempt.usage.complete)
     .bind(attempt.usage.cached_input_tokens)
+    .bind(attempt.event.routing.as_ref().and_then(|r|r.pricing_revision_id))
+    .bind(attempt.event.routing.as_ref().map(|r|r.provider_revision_id))
+    .bind(attempt.event.routing.as_ref().is_some_and(|r|r.pricing_revision_id.is_some() || r.policy.as_ref().is_some_and(|p|p.pricing_pinned)))
+    .bind(attempt.event.routing.as_ref().and_then(|r|r.policy.as_ref()).and_then(|p|p.vendor_id.as_deref()))
             .fetch_one(&mut **transaction)
             .await?;
     Ok(AttemptPricing {

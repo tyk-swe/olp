@@ -11,6 +11,7 @@ use crate::runtime::manager::Bundle;
 /// performed credential verification.
 #[derive(Clone)]
 pub struct Principal {
+    pub routing_preferences: crate::routes::policy::RoutingPreferences,
     runtime: Arc<Bundle>,
     lookup_id: ApiKeyLookupId,
     surface: Surface,
@@ -26,6 +27,7 @@ impl Principal {
         gateway_capability: Option<GatewayCapability>,
     ) -> Self {
         Self {
+            routing_preferences: Default::default(),
             runtime,
             lookup_id,
             surface,

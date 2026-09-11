@@ -148,16 +148,19 @@ export function validateRouteEditor(values: RouteEditorValues): string | null {
     return 'Select at least one supported operation.';
   if (!values.targets.length)
     return 'Add at least one eligible provider model target.';
-  if (values.maxAttempts < 1 || values.maxAttempts > values.targets.length) {
-    return 'Maximum attempts must be between 1 and the number of targets.';
+  if (values.maxAttempts < 1 || values.maxAttempts > 32767) {
+    return 'Maximum attempts must be between 1 and 32767; each credential attempt counts.';
   }
   if (
     values.targets.some(
       (target) =>
-        target.weight < 1 || target.timeoutMs < 100 || target.priority < 1
+        target.weight < 1 ||
+        target.timeoutMs < 100 ||
+        target.priority < 0 ||
+        target.priority > 65535
     )
   ) {
-    return 'Every target needs a positive priority, weight, and timeout.';
+    return 'Every target needs a priority from 0 to 65535, a positive weight, and a timeout of at least 100 ms.';
   }
   return null;
 }

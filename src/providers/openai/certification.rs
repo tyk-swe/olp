@@ -109,7 +109,10 @@ impl Connector {
                 .await?;
             return Ok(NativeOpenAiCertificationEvidence::LiveProbe);
         }
-        if !native_openai_discovery_contract(capability) {
+        if !self.config.endpoint.is_official()
+            || self.custom_headers.is_some()
+            || !native_openai_discovery_contract(capability)
+        {
             return Err(CompatibleCapabilityCertificationError::Unsupported);
         }
         let discovered = self.discover_models().await.map_err(|error| {
@@ -118,10 +121,21 @@ impl Connector {
                 class: error.class,
             }
         })?;
-        if !discovered.iter().any(|model| model.id == upstream_model) {
-            return Err(CompatibleCapabilityCertificationError::ModelNotDiscovered);
-        }
+        self.validate_discovered_model(upstream_model, &discovered)?;
         Ok(NativeOpenAiCertificationEvidence::ModelDiscoveryAndConnectorContract)
+    }
+
+    fn validate_discovered_model(
+        &self,
+        upstream_model: &str,
+        discovered: &[crate::inference::transport::DiscoveredProviderModel],
+    ) -> Result<(), CompatibleCapabilityCertificationError> {
+        let dispatched_model = self.dispatched_model(upstream_model);
+        if discovered.iter().any(|model| model.id == dispatched_model) {
+            Ok(())
+        } else {
+            Err(CompatibleCapabilityCertificationError::ModelNotDiscovered)
+        }
     }
 
     /// Proves only the Chat Completions transport for a canonical generation
@@ -202,8 +216,8 @@ pub(crate) fn probe_text() -> ContentPart {
     }
 }
 
-/// The minimal generation every probe sends: one user turn, one output token,
-/// deterministic sampling.
+/// Minimal access probe: one user turn and one output token. Optional sampling
+/// parameters remain unset so models with fixed sampling can qualify.
 pub(crate) fn probe_generation_request(
     mode: TransportMode,
     extensions: SourceExtensions,
@@ -219,7 +233,7 @@ pub(crate) fn probe_generation_request(
         }],
         parameters: GenerationParameters {
             max_output_tokens: Some(1),
-            temperature: Some(0.0),
+            temperature: None,
             stream: mode == TransportMode::Streaming,
             ..GenerationParameters::default()
         },
@@ -311,6 +325,13 @@ pub(crate) async fn execute_capability_probe(
             mode: capability.mode,
         },
         attempt: AttemptPlan {
+            connection_limits: None,
+            credential_limits: None,
+            attempt_limit: None,
+            routing_policy: None,
+            credential_slot_id: None,
+            credential_version_id: None,
+            pricing_revision_id: None,
             generation_id: RuntimeGenerationId::new(),
             route_id: RouteId::new(),
             target_id: TargetId::new(),

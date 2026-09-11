@@ -25,6 +25,8 @@ fn model_inventory_conversion_preserves_nested_capability_metadata() {
     let capability_record = capability();
     let certified_at = capability_record.certified_at;
     let response = ProviderModelInventoryResponse::from(ProviderModelInventoryRecord {
+        available: true,
+        metadata: Default::default(),
         provider_id,
         provider_name: "production".to_owned(),
         provider_kind: ProviderKind::OpenAiCompatible,

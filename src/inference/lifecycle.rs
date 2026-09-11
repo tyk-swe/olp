@@ -85,6 +85,7 @@ pub(crate) struct RequestContext {
 }
 
 struct ActiveRequestAttempt {
+    routing: Option<crate::usage::emitter::AttemptRoutingMetadata>,
     ordinal: u16,
     provider_id: uuid::Uuid,
     upstream_model: String,
@@ -206,6 +207,11 @@ impl RequestLifecycle {
         }
     }
 
+    pub(crate) fn record_attempt_routing(&mut self, plan: &crate::routes::selection::AttemptPlan) {
+        if let Some(active) = self.active_attempt.as_mut() {
+            active.routing = Some(plan.into());
+        }
+    }
     pub(crate) fn record_attempt_started(
         &mut self,
         completed: &[RequestAttemptMetadata],
@@ -217,6 +223,7 @@ impl RequestLifecycle {
     ) {
         self.attempts = completed.to_vec();
         self.active_attempt = Some(ActiveRequestAttempt {
+            routing: None,
             ordinal,
             provider_id,
             upstream_model: upstream_model.to_owned(),
@@ -318,6 +325,7 @@ impl RequestLifecycle {
         let mut attempts = std::mem::take(&mut self.attempts);
         if let Some(active) = self.active_attempt.take() {
             attempts.push(RequestAttemptMetadata {
+                routing: active.routing,
                 id: uuid::Uuid::now_v7(),
                 ordinal: active.ordinal,
                 provider_id: active.provider_id,
@@ -408,6 +416,7 @@ impl RequestMetadataFinalizer {
 
 #[derive(Clone, Default)]
 pub struct UsageCapture {
+    first_output_at: Option<tokio::time::Instant>,
     observed: bool,
     complete: bool,
     /// Whether the provider stream actually reached its terminal event. A
@@ -456,6 +465,18 @@ impl UsageCapture {
     }
 
     pub fn observe(&mut self, event: &Event) {
+        let meaningful = match &event.kind {
+            Kind::TextDelta { text, .. } | Kind::RefusalDelta { text, .. } => !text.is_empty(),
+            Kind::ToolCallDelta {
+                name,
+                arguments_delta,
+                ..
+            } => name.is_some() || !arguments_delta.is_empty(),
+            _ => false,
+        };
+        if meaningful && self.first_output_at.is_none() {
+            self.first_output_at = Some(tokio::time::Instant::now());
+        }
         if matches!(event.kind, Kind::Done) {
             self.settled = true;
             return;
@@ -545,6 +566,7 @@ pub(crate) fn usage_from_result(result: &CanonicalResult) -> UsageCapture {
     }
     let tokens = usage.as_ref().map(TokenCapture::from_usage);
     UsageCapture {
+        first_output_at: None,
         observed: true,
         complete: tokens.as_ref().is_none_or(|tokens| tokens.complete),
         // A canonical result is the whole answer; there is no stream to truncate.
@@ -631,6 +653,17 @@ fn update_final_attempt(attempt: &mut RequestAttemptMetadata, update: FinalAttem
     attempt.committed = update.committed;
     attempt.latency_ms = elapsed_ms(update.started.elapsed());
     attempt.first_byte_ms = update.first_byte_ms;
+    if let Some(routing) = &mut attempt.routing {
+        routing.streamed_output_tokens = update
+            .usage
+            .output_tokens
+            .and_then(|tokens| tokens.checked_sub(update.usage.reasoning_tokens.unwrap_or(0)))
+            .and_then(|tokens| tokens.try_into().ok());
+        routing.first_output_ms = update
+            .usage
+            .first_output_at
+            .map(|at| elapsed_ms(at.saturating_duration_since(update.started)));
+    }
     if update.usage.observed {
         // A stream that never reached its terminal event reports whatever the
         // last usage frame said, which is not the total the provider will bill

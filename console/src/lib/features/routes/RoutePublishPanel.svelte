@@ -1,4 +1,5 @@
 <script lang="ts">
+  import RoutingPreferencesForm from './RoutingPreferencesForm.svelte';
   import { resolve } from '$app/paths';
   import { modesFor, surfacesFor } from '$lib/features/routes/routeEditor';
   import type { RouteDraftEditorState } from '$lib/features/routes/routeDraftEditor.svelte';
@@ -12,6 +13,10 @@
     Saving changes invalidates prior validation. Unsaved edits must be saved
     before you can simulate or validate them.
   </p>
+  {#if editor.policyDirty}<p role="status">
+      Save or reload the routing policy before previewing or activating this
+      route.
+    </p>{/if}
   <button
     class="button button-secondary"
     type="submit"
@@ -42,27 +47,32 @@
           value={mode}>{mode}</option
         >{/each}</select
     >
+    <RoutingPreferencesForm
+      bind:value={editor.routingPreferences}
+      id="simulation-routing"
+      disabled={Boolean(editor.busy)}
+    />
     <label for="simulation-seed">Dry-run seed</label>
     <input id="simulation-seed" bind:value={editor.seed} />
     <button
       class="button button-secondary"
       type="button"
       onclick={() => editor.simulate(editor.draft.data!)}
-      disabled={!editor.canManage || Boolean(editor.busy) || editor.sync.dirty}
+      disabled={!editor.canManage || editor.publicationBlocked}
       >{editor.busy === 'simulate' ? 'Simulating…' : 'Simulate order'}</button
     >
     <button
       class="button button-secondary"
       type="button"
       onclick={() => editor.validate(editor.draft.data!)}
-      disabled={!editor.canManage || Boolean(editor.busy) || editor.sync.dirty}
+      disabled={!editor.canManage || editor.publicationBlocked}
       >{editor.busy === 'validate' ? 'Validating…' : 'Validate draft'}</button
     >
     <button
       class="button button-primary"
       type="button"
       onclick={() => editor.activate(editor.draft.data!)}
-      disabled={!editor.canManage || Boolean(editor.busy) || editor.sync.dirty}
+      disabled={!editor.canManage || editor.publicationBlocked}
       >{editor.busy === 'activate' ? 'Activating…' : 'Activate route'}</button
     >
   {/if}

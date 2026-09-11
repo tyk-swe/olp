@@ -15,6 +15,7 @@ pub(crate) fn record_violations(violations: Vec<Violation>, errors: &mut FieldEr
 }
 
 pub mod create;
+pub mod pool;
 
 pub mod credentials;
 
@@ -27,6 +28,10 @@ pub mod revisions;
 pub(crate) fn router()
 -> utoipa_axum::router::OpenApiRouter<crate::http::control::state::ManagementState> {
     utoipa_axum::router::OpenApiRouter::new()
+        .routes(utoipa_axum::routes!(pool::provider_vendors))
+        .routes(utoipa_axum::routes!(pool::credential_slots))
+        .routes(utoipa_axum::routes!(pool::put_credential_slot))
+        .routes(utoipa_axum::routes!(pool::validate_credential_slot))
         .routes(utoipa_axum::routes!(
             crate::providers::http::create::activate_provider
         ))

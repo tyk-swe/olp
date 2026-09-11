@@ -91,6 +91,40 @@ async fn release_twice(limiter: &DistributedLimiter, lease: &DistributedLimitLea
 
 #[tokio::test]
 #[ignore = "requires Valkey in OLP_VALKEY_URL"]
+async fn refunds_are_idempotent_and_cannot_change_a_successor_window() {
+    let namespace = namespace("refund");
+    let lookup = "refund_lease";
+    let limiter = DistributedLimiter::connect(&valkey_url(), &namespace)
+        .await
+        .unwrap();
+    let mut connection = connection().await;
+    settle_in_minute(&mut connection).await;
+    let first = limiter.reserve(request(lookup)).await.unwrap();
+    let second = limiter.reserve(request(lookup)).await.unwrap();
+    limiter.refund(&first).await.unwrap();
+    limiter.refund(&first).await.unwrap();
+    limiter.reconcile(&first, 100).await.unwrap();
+    let (rate, concurrency) = keys(&namespace, lookup);
+    let state = rate_state(&mut connection, &rate).await;
+    assert_eq!(state["rpm"], 1);
+    assert_eq!(state["tpm"], 5);
+    assert_eq!(connection.zcard::<_, usize>(&concurrency).await.unwrap(), 1);
+    let _: () = connection
+        .hset_multiple(
+            &rate,
+            &[("window", state["window"] + 1), ("rpm", 7), ("tpm", 35)],
+        )
+        .await
+        .unwrap();
+    limiter.refund(&second).await.unwrap();
+    let state = rate_state(&mut connection, &rate).await;
+    assert_eq!(state["rpm"], 7);
+    assert_eq!(state["tpm"], 35);
+    assert_eq!(connection.zcard::<_, usize>(&concurrency).await.unwrap(), 0);
+}
+
+#[tokio::test]
+#[ignore = "requires Valkey in OLP_VALKEY_URL"]
 async fn server_time_unifies_callers() {
     let namespace = namespace("server_time");
     let lookup_id = "lookup_01";
@@ -768,4 +802,109 @@ async fn concurrent_replicas_enforce_one_atomic_limit() {
         return;
     }
     panic!("all concurrency attempts crossed a UTC minute boundary");
+}
+
+#[tokio::test]
+#[ignore = "requires Valkey in OLP_VALKEY_URL"]
+async fn cooldowns_keep_the_longest_expiry_across_replicas_until_explicitly_cleared() {
+    use olp::limits::admission::LimitBackend;
+    let namespace = namespace("cooldown_max");
+    let a = DistributedLimiter::connect(&valkey_url(), &namespace)
+        .await
+        .unwrap();
+    let b = DistributedLimiter::connect(&valkey_url(), &namespace)
+        .await
+        .unwrap();
+    let scope = format!("slot:{}", Uuid::now_v7());
+    let key = format!("{namespace}:provider-cooldown:{scope}");
+    let mut connection = connection().await;
+    let writes = [1, 120, 4, 60].into_iter().map(|seconds| {
+        let backend = if seconds % 2 == 0 { &a } else { &b };
+        backend.provider_cooldown(&scope, Some(Duration::from_secs(seconds)))
+    });
+    for result in join_all(writes).await {
+        assert!(result.unwrap());
+    }
+    assert!(connection.pttl::<_, i64>(&key).await.unwrap() > 110_000);
+    b.provider_cooldown(&scope, Some(Duration::from_secs(1)))
+        .await
+        .unwrap();
+    assert!(connection.pttl::<_, i64>(&key).await.unwrap() > 110_000);
+    assert!(
+        !a.provider_cooldown(&scope, Some(Duration::ZERO))
+            .await
+            .unwrap()
+    );
+    assert!(!b.provider_cooldown(&scope, None).await.unwrap());
+}
+
+#[tokio::test]
+#[ignore = "requires Valkey in OLP_VALKEY_URL"]
+async fn provider_slots_share_quota_identity_and_version_cooldowns_across_gateways() {
+    use olp::limits::admission::LimitBackend;
+    let namespace = namespace("provider_pool");
+    let a = DistributedLimiter::connect(&valkey_url(), &namespace)
+        .await
+        .unwrap();
+    let b = DistributedLimiter::connect(&valkey_url(), &namespace)
+        .await
+        .unwrap();
+    let slot = Uuid::now_v7();
+    let lookup = format!("ps_{}", slot.simple());
+    let first = a
+        .reserve(LimitRequest {
+            api_key_id: slot,
+            requests_per_minute: Some(10),
+            max_concurrency: Some(1),
+            ..request(&lookup)
+        })
+        .await
+        .unwrap();
+    assert!(matches!(
+        b.reserve(LimitRequest {
+            api_key_id: slot,
+            requests_per_minute: Some(10),
+            max_concurrency: Some(1),
+            ..request(&lookup)
+        })
+        .await,
+        Err(LimitError::Exceeded {
+            dimension: LimitDimension::Concurrency,
+            ..
+        })
+    ));
+    let usage = LimitBackend::provider_usage(&b, slot, &lookup)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(usage.concurrent_requests, 1);
+    assert_eq!(usage.requests_this_minute, 1);
+    a.release(&first).await.unwrap();
+    let rotated = b
+        .reserve(LimitRequest {
+            api_key_id: slot,
+            requests_per_minute: Some(10),
+            max_concurrency: Some(1),
+            ..request(&lookup)
+        })
+        .await
+        .unwrap();
+    let usage = LimitBackend::provider_usage(&a, slot, &lookup)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(usage.requests_this_minute, 2);
+    let old = format!("{}:{}", Uuid::now_v7(), Uuid::now_v7());
+    assert!(
+        a.provider_cooldown(&old, Some(Duration::from_secs(2)))
+            .await
+            .unwrap()
+    );
+    assert!(b.provider_cooldown(&old, None).await.unwrap());
+    assert!(
+        !b.provider_cooldown(&format!("{}:{}", slot, Uuid::now_v7()), None)
+            .await
+            .unwrap()
+    );
+    b.release(&rotated).await.unwrap();
 }

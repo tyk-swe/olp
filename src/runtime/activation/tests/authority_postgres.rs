@@ -360,12 +360,144 @@ async fn add_provider(fixture: &mut Fixture) -> ProviderId {
     sqlx::query("UPDATE providers SET active_revision_id = $1, active_credential_version_id = $2 WHERE id = $3")
         .bind(revision_id).bind(credential_id).bind(provider_id)
         .execute(pool).await.unwrap();
+    let mut transaction = pool.begin().await.unwrap();
+    crate::providers::pool_store::snapshot(&mut transaction, provider_id, revision_id)
+        .await
+        .unwrap();
+    transaction.commit().await.unwrap();
     crate::runtime::publication::compiler::compile_and_publish_runtime(pool, fixture.actor)
         .await
         .unwrap();
     fixture.activator.master_key = Some(master_key);
     assert!(fixture.activator.activate().await.unwrap());
     ProviderId::from_uuid(provider_id)
+}
+
+#[tokio::test]
+#[ignore = "requires PostgreSQL via make integration"]
+async fn mounted_transports_enforce_pool_limits_and_reject_named_slots() {
+    use crate::protocols::canonical::identity::{
+        OperationKind, RequestMetadata, Surface, TransportMode,
+    };
+    use crate::protocols::canonical::requests::Operation;
+    use crate::routes::selection::AttemptPlan;
+
+    let mut fixture = fixture().await;
+    let provider_id = add_provider(&mut fixture).await;
+    let master_key = fixture.activator.master_key.take().unwrap();
+    fixture
+        .activator
+        .transports
+        .register(provider_id, Arc::new(UnusedTransport));
+    let pool = &fixture.activator.pool;
+    let pinned = fixture.activator.runtime.pin();
+    let provider = &pinned.providers[&provider_id];
+    let credential_id = provider.active_credential.unwrap().as_uuid();
+    for connection_limit in [true, false] {
+        let options = if connection_limit {
+            serde_json::json!({"limits":{"requests_per_minute":1}})
+        } else {
+            serde_json::json!({})
+        };
+        sqlx::query("UPDATE provider_revisions SET options=$2 WHERE id=$1")
+            .bind(provider.revision_id)
+            .bind(options)
+            .execute(pool)
+            .await
+            .unwrap();
+        sqlx::query("UPDATE provider_revision_credentials SET configuration=jsonb_set(configuration,'{requests_per_minute}',$2) WHERE provider_revision_id=$1")
+            .bind(provider.revision_id)
+            .bind(if connection_limit { serde_json::Value::Null } else { serde_json::json!(1) })
+            .execute(pool).await.unwrap();
+        crate::runtime::publication::compiler::compile_and_publish_runtime(pool, fixture.actor)
+            .await
+            .unwrap();
+        assert!(fixture.activator.activate().await.unwrap());
+        let active = fixture.activator.runtime.pin();
+        let request = ProviderRequest {
+            metadata: RequestMetadata {
+                request_id: crate::ids::RequestId::new(),
+                operation: OperationKind::Generation,
+                surface: Surface::OpenAi,
+                mode: TransportMode::Unary,
+            },
+            attempt: AttemptPlan {
+                connection_limits: None,
+                credential_limits: None,
+                attempt_limit: None,
+                routing_policy: None,
+                credential_slot_id: Some(provider_id.as_uuid()),
+                credential_version_id: Some(credential_id),
+                pricing_revision_id: None,
+                generation_id: active.generation.id,
+                route_id: RouteId::new(),
+                target_id: TargetId::new(),
+                routing_id: TargetId::new(),
+                provider_id,
+                provider_revision_id: provider.revision_id,
+                provider_kind: provider.kind,
+                upstream_model: "mounted-model".into(),
+                timeout: DurationMs::new(1000),
+                priority: 0,
+            },
+            operation: Arc::new(Operation::Generation(
+                crate::providers::openai::certification::probe_generation_request(
+                    TransportMode::Unary,
+                    Default::default(),
+                ),
+            )),
+            media: None,
+            max_inline_media_bytes: 1024,
+            propagate_trace_context: false,
+        };
+        let error = active
+            .transport(provider_id)
+            .unwrap()
+            .execute(request)
+            .await
+            .unwrap_err();
+        assert_eq!(error.message, "provider_limits_unavailable");
+    }
+
+    let slot = Uuid::now_v7();
+    let named_secret = Uuid::now_v7();
+    let encrypted = master_key
+        .seal(
+            b"mounted-named-secret",
+            &credential(provider_id.as_uuid(), named_secret, 2),
+        )
+        .unwrap();
+    sqlx::query("INSERT INTO provider_credential_slots(id,provider_id,name) VALUES($1,$2,'Named')")
+        .bind(slot)
+        .bind(provider_id.as_uuid())
+        .execute(pool)
+        .await
+        .unwrap();
+    sqlx::query("INSERT INTO provider_credential_versions(id,provider_id,slot_id,version,ciphertext,nonce,master_key_version,created_by) VALUES($1,$2,$3,2,$4,$5,1,$6)")
+        .bind(named_secret).bind(provider_id.as_uuid()).bind(slot)
+        .bind(encrypted.ciphertext).bind(encrypted.nonce.to_vec()).bind(fixture.actor)
+        .execute(pool).await.unwrap();
+    sqlx::query("INSERT INTO provider_revision_credentials(provider_revision_id,slot_id,credential_version_id,configuration) VALUES($1,$2,$3,$4)")
+        .bind(provider.revision_id).bind(slot).bind(named_secret)
+        .bind(sqlx::types::Json(crate::providers::pool::CredentialSlot {
+            id: slot,
+            name: "Named".into(),
+            credential_version_id: Some(named_secret),
+            ..Default::default()
+        })).execute(pool).await.unwrap();
+    let previous = fixture.activator.runtime.active_generation_ordinal();
+    crate::runtime::publication::compiler::compile_and_publish_runtime(pool, fixture.actor)
+        .await
+        .unwrap();
+    let error = fixture.activator.activate().await.unwrap_err().to_string();
+    assert!(
+        error.contains("OLP_MASTER_KEY_FILE is required for named credential slots"),
+        "{error}"
+    );
+    assert_eq!(
+        fixture.activator.runtime.active_generation_ordinal(),
+        previous
+    );
 }
 
 #[tokio::test]

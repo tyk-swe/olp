@@ -408,6 +408,7 @@ async fn remaining_management_mutations_exactly_replay_without_double_execution(
 
     let effective_at = Utc::now() - Duration::hours(1);
     let prices = vec![PriceInput {
+        vendor_id: None,
         provider_kind: olp::providers::runtime_model::ProviderKind::OpenAi,
         provider_id: None,
         model: "replay-model".to_owned(),
@@ -546,6 +547,7 @@ fn provider_input(
         model_id: Some(model_id),
         name: name.to_owned(),
         configuration: olp::providers::configuration::ProviderConfiguration {
+            options: Default::default(),
             kind: ProviderKind::OpenAi,
             endpoint: Some("https://api.openai.com/v1/".to_owned()),
             cloud_region: None,

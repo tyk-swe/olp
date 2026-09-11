@@ -40,7 +40,7 @@ key's permissions, and in the console under Routes.
 A provider is edited as a draft, and draft edits never affect the revision
 that is serving traffic. Activation turns the draft into an immutable,
 numbered revision holding the endpoint and cloud context, the credential
-version, the enabled models, and the certified capabilities as they stood at
+pool with exact secret versions, the enabled models, and the certified capabilities as they stood at
 that moment. Between two activations, nothing a running request sees about a
 provider changes.
 
@@ -58,9 +58,12 @@ asynchronous, and cross-protocol claims fail closed.
 Re-reviewing a set of tuples is a per-tuple diff: removed tuples lose their
 evidence, unchanged tuples keep it, and newly added tuples start as
 declared. Only transport edits — endpoint, region, project, deployment, API
-version, authentication mode — reset every tuple to declared and clear the
+version, authentication mode, and connection options — reset every tuple to declared and clear the
 stored probe. Renaming a provider and rotating its credential do not,
 although a rotation still requires a fresh probe before the next activation.
+
+For vendor identity, credential selection, model metadata, routing constraints,
+and performance strategies, see [provider routing](provider-routing.md).
 
 ## Runtime generations and pinning
 

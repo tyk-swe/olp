@@ -41,6 +41,8 @@ use crate::inference::http::error::InferenceError;
 
 #[derive(Deserialize, ToSchema)]
 struct PlaygroundRequest {
+    #[serde(default)]
+    routing: crate::routes::policy::RoutingPreferences,
     model: String,
     input: String,
     #[serde(default = "default_surface")]
@@ -98,6 +100,7 @@ impl From<PlaygroundResponseFormat> for ResponseFormat {
 
 #[derive(Serialize, ToSchema)]
 struct PlaygroundResponse {
+    routing: Vec<crate::inference::provider_selection::RoutingDecision>,
     #[schema(value_type = String, format = Uuid)]
     id: Uuid,
     model: String,
@@ -178,11 +181,20 @@ async fn execute_playground(
 ) -> Result<Response, Problem> {
     require_permission(&principal, Permission::UsePlayground)?;
     let request = json_payload(payload)?;
+    let routing = request.routing.clone();
+    routing
+        .validate()
+        .map_err(|e| Problem::field_validation("routing", e))?;
     let (operation, surface, structured) = playground_operation(request)?;
     let execution = state
         .request_boundary
         .inference
-        .execute_session_generation(operation, surface, trace.map(|Extension(trace)| trace))
+        .execute_session_generation(
+            operation,
+            surface,
+            trace.map(|Extension(trace)| trace),
+            &routing,
+        )
         .await
         .map_err(InferenceError::from)
         .map_err(InferenceError::into_problem)?;
@@ -238,6 +250,7 @@ async fn execute_playground(
     let tool_calls = finish_tool_calls(tool_calls)?;
     let structured_output = structured_output(structured, &output_text)?;
     let mut response = Json(PlaygroundResponse {
+        routing: execution.decisions,
         id: execution.request_id.as_uuid(),
         model: execution.route_slug.to_string(),
         provider_model,
@@ -447,6 +460,7 @@ mod tests {
 
     fn request() -> PlaygroundRequest {
         PlaygroundRequest {
+            routing: Default::default(),
             model: "default".to_owned(),
             input: "Return a small JSON object.".to_owned(),
             surface: "anthropic".to_owned(),

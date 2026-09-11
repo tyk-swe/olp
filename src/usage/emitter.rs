@@ -57,6 +57,8 @@ pub struct Event {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RequestAttemptMetadata {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub routing: Option<AttemptRoutingMetadata>,
     pub id: Uuid,
     pub ordinal: u16,
     pub provider_id: Uuid,
@@ -340,6 +342,7 @@ mod tests {
             usage_complete: true,
             unpriced: true,
             attempts: vec![RequestAttemptMetadata {
+                routing: None,
                 id: Uuid::now_v7(),
                 ordinal: 1,
                 provider_id,
@@ -546,5 +549,35 @@ mod tests {
             crate::usage::ingestion::validation::ValidatedRequestMetadata::validate(&decoded)
                 .is_err()
         );
+    }
+}
+
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize, utoipa::ToSchema)]
+pub struct AttemptRoutingMetadata {
+    #[serde(default)]
+    pub policy: Option<crate::routes::policy::AppliedRoutingPolicy>,
+    #[serde(default)]
+    pub mode: Option<crate::protocols::canonical::identity::TransportMode>,
+    #[serde(default)]
+    pub first_output_ms: Option<u64>,
+    #[serde(default)]
+    pub streamed_output_tokens: Option<u64>,
+    pub credential_slot_id: Option<Uuid>,
+    pub credential_version_id: Option<Uuid>,
+    pub provider_revision_id: Uuid,
+    pub pricing_revision_id: Option<Uuid>,
+}
+impl From<&crate::routes::selection::AttemptPlan> for AttemptRoutingMetadata {
+    fn from(plan: &crate::routes::selection::AttemptPlan) -> Self {
+        Self {
+            policy: plan.routing_policy.clone(),
+            mode: None,
+            first_output_ms: None,
+            streamed_output_tokens: None,
+            credential_slot_id: plan.credential_slot_id,
+            credential_version_id: plan.credential_version_id,
+            provider_revision_id: plan.provider_revision_id,
+            pricing_revision_id: plan.pricing_revision_id,
+        }
     }
 }

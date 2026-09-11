@@ -167,7 +167,7 @@ async fn clone_rejected_release(
     .fetch_one(&mut **transaction)
     .await
     .map_err(|error| format!("authority fixture source release read failed: {error}"))?;
-    let mut snapshot: olp::runtime::snapshot::Snapshot = serde_json::from_slice(&payload)
+    let mut snapshot = olp::runtime::snapshot::Snapshot::from_persisted_slice(&payload)
         .map_err(|error| format!("authority fixture source release was invalid: {error}"))?;
     let id = uuid::Uuid::now_v7();
     let sequence: i64 = sqlx::query_scalar(
@@ -185,7 +185,8 @@ async fn clone_rejected_release(
     snapshot.generation.activated_at = chrono::Utc::now();
     snapshot.generation.ordinal = u64::try_from(sequence)
         .map_err(|error| format!("authority fixture sequence was invalid: {error}"))?;
-    let payload = serde_json::to_vec(&snapshot)
+    let payload = snapshot
+        .to_persisted_vec()
         .map_err(|error| format!("authority fixture serialization failed: {error}"))?;
     sqlx::query(
         "UPDATE runtime_generations SET compiled_release = $1, \

@@ -108,6 +108,10 @@ struct CleanupEffects {
 struct GatedLease(Arc<CleanupEffects>);
 
 impl LimitLease for GatedLease {
+    fn refund(&self) -> BoxFuture<'_, Result<(), LimitError>> {
+        Box::pin(async { panic!("This fixture does not refund provider admission") })
+    }
+
     fn reconcile(&self, actual_tokens: i64) -> BoxFuture<'_, Result<(), LimitError>> {
         self.0.reconciles.fetch_add(1, Ordering::Relaxed);
         self.0.actual_tokens.store(actual_tokens, Ordering::Relaxed);
@@ -257,6 +261,7 @@ async fn reconciliation_uses_the_supplied_historical_bundle() {
         targets: vec![target],
     };
     let snapshot = Snapshot {
+        routing: Default::default(),
         generation: RuntimeGeneration {
             id: generation_id,
             ordinal: 1,
@@ -299,6 +304,7 @@ async fn reconciliation_uses_the_supplied_historical_bundle() {
             operation,
             Surface::OpenAi,
             RequiredTarget {
+                credential_version_id: None,
                 provider_id: provider_id.as_uuid(),
                 upstream_model: "video-model".into(),
             },

@@ -39,6 +39,7 @@ fn public_factory_covers_every_provider_authentication_pairing() {
     let cases = [
         (
             ProviderConfiguration {
+                options: Default::default(),
                 kind: crate::providers::runtime_model::ProviderKind::OpenAi,
                 endpoint: None,
                 ..ProviderConfiguration::new(crate::providers::runtime_model::ProviderKind::OpenAi)
@@ -47,6 +48,7 @@ fn public_factory_covers_every_provider_authentication_pairing() {
         ),
         (
             ProviderConfiguration {
+                options: Default::default(),
                 kind: crate::providers::runtime_model::ProviderKind::OpenAiCompatible,
                 endpoint: Some("https://provider.example.test/v1".to_owned()),
                 ..ProviderConfiguration::new(
@@ -57,6 +59,7 @@ fn public_factory_covers_every_provider_authentication_pairing() {
         ),
         (
             ProviderConfiguration {
+                options: Default::default(),
                 kind: crate::providers::runtime_model::ProviderKind::Anthropic,
                 endpoint: None,
                 api_version: None,
@@ -68,6 +71,7 @@ fn public_factory_covers_every_provider_authentication_pairing() {
         ),
         (
             ProviderConfiguration {
+                options: Default::default(),
                 kind: crate::providers::runtime_model::ProviderKind::Gemini,
                 endpoint: None,
                 ..ProviderConfiguration::new(crate::providers::runtime_model::ProviderKind::Gemini)
@@ -76,6 +80,7 @@ fn public_factory_covers_every_provider_authentication_pairing() {
         ),
         (
             ProviderConfiguration {
+                options: Default::default(),
                 kind: crate::providers::runtime_model::ProviderKind::VertexAi,
                 cloud_project: Some("project".to_owned()),
                 cloud_region: Some("us-central1".to_owned()),
@@ -89,6 +94,7 @@ fn public_factory_covers_every_provider_authentication_pairing() {
         ),
         (
             ProviderConfiguration {
+                options: Default::default(),
                 kind: crate::providers::runtime_model::ProviderKind::VertexAi,
                 cloud_project: Some("project".to_owned()),
                 cloud_region: Some("us-central1".to_owned()),
@@ -102,6 +108,7 @@ fn public_factory_covers_every_provider_authentication_pairing() {
         ),
         (
             ProviderConfiguration {
+                options: Default::default(),
                 kind: crate::providers::runtime_model::ProviderKind::Bedrock,
                 cloud_region: Some("us-east-1".to_owned()),
                 auth_mode: ProviderAuthMode::DefaultChain,
@@ -111,6 +118,7 @@ fn public_factory_covers_every_provider_authentication_pairing() {
         ),
         (
             ProviderConfiguration {
+                options: Default::default(),
                 kind: crate::providers::runtime_model::ProviderKind::Bedrock,
                 cloud_region: Some("us-east-1".to_owned()),
                 auth_mode: ProviderAuthMode::Static,
@@ -120,6 +128,7 @@ fn public_factory_covers_every_provider_authentication_pairing() {
         ),
         (
             ProviderConfiguration {
+                options: Default::default(),
                 kind: crate::providers::runtime_model::ProviderKind::AzureOpenAi,
                 endpoint: Some("https://resource.openai.azure.com".to_owned()),
                 deployment: Some("deployment".to_owned()),
@@ -148,6 +157,7 @@ fn semantic_credentials_are_redacted_and_mismatches_are_rejected() {
     assert!(!debug.contains("very-secret"));
 
     let config = ProviderConfiguration {
+        options: Default::default(),
         kind: crate::providers::runtime_model::ProviderKind::Bedrock,
         cloud_region: Some("us-east-1".to_owned()),
         auth_mode: ProviderAuthMode::Static,
@@ -248,6 +258,7 @@ fn certification_probe_override_is_available_for_native_and_compatible_providers
 #[test]
 fn bedrock_static_credential_validation_accepts_bytes() {
     let config = ProviderConfiguration {
+        options: Default::default(),
         kind: crate::providers::runtime_model::ProviderKind::Bedrock,
         cloud_region: Some("us-east-1".to_owned()),
         auth_mode: ProviderAuthMode::Static,
@@ -381,6 +392,7 @@ fn private_http_policy() -> EgressPolicy {
 #[test]
 fn default_policy_rejects_private_plain_http_endpoints_that_an_allowlist_accepts() {
     let compat = ProviderConfiguration {
+        options: Default::default(),
         kind: crate::providers::runtime_model::ProviderKind::OpenAiCompatible,
         endpoint: Some("http://10.1.2.3:8000/v1".to_owned()),
         ..ProviderConfiguration::new(
@@ -415,6 +427,7 @@ fn default_policy_rejects_private_plain_http_endpoints_that_an_allowlist_accepts
         .is_err()
     );
     let other_host = ProviderConfiguration {
+        options: Default::default(),
         kind: crate::providers::runtime_model::ProviderKind::OpenAiCompatible,
         endpoint: Some("http://10.1.2.4:8000/v1".to_owned()),
         ..ProviderConfiguration::new(
@@ -430,6 +443,7 @@ fn default_policy_rejects_private_plain_http_endpoints_that_an_allowlist_accepts
     );
 
     let azure = ProviderConfiguration {
+        options: Default::default(),
         kind: crate::providers::runtime_model::ProviderKind::AzureOpenAi,
         endpoint: Some("http://10.1.2.3".to_owned()),
         deployment: Some("deployment".to_owned()),
@@ -450,6 +464,7 @@ fn default_policy_rejects_private_plain_http_endpoints_that_an_allowlist_accepts
     .unwrap();
 
     let loopback = ProviderConfiguration {
+        options: Default::default(),
         kind: crate::providers::runtime_model::ProviderKind::OpenAiCompatible,
         endpoint: Some("http://127.0.0.1:9/v1".to_owned()),
         ..ProviderConfiguration::new(
@@ -473,6 +488,7 @@ fn default_policy_rejects_private_plain_http_endpoints_that_an_allowlist_accepts
 #[tokio::test]
 async fn allowlisted_private_endpoints_assemble_transports_without_network_io() {
     let compat = ProviderConfiguration {
+        options: Default::default(),
         kind: crate::providers::runtime_model::ProviderKind::OpenAiCompatible,
         endpoint: Some("http://10.1.2.3:8000/v1".to_owned()),
         ..ProviderConfiguration::new(
@@ -500,6 +516,7 @@ async fn allowlisted_private_endpoints_assemble_transports_without_network_io() 
     .unwrap();
 
     let azure = ProviderConfiguration {
+        options: Default::default(),
         kind: crate::providers::runtime_model::ProviderKind::AzureOpenAi,
         endpoint: Some("http://10.1.2.3".to_owned()),
         deployment: Some("deployment".to_owned()),
@@ -524,22 +541,26 @@ async fn response_limits_reach_every_http_connector_and_reject_zero() {
     };
     for config in [
         ProviderConfiguration {
+            options: Default::default(),
             kind: crate::providers::runtime_model::ProviderKind::OpenAi,
             endpoint: None,
             ..ProviderConfiguration::new(crate::providers::runtime_model::ProviderKind::OpenAi)
         },
         ProviderConfiguration {
+            options: Default::default(),
             kind: crate::providers::runtime_model::ProviderKind::Anthropic,
             endpoint: None,
             api_version: None,
             ..ProviderConfiguration::new(crate::providers::runtime_model::ProviderKind::Anthropic)
         },
         ProviderConfiguration {
+            options: Default::default(),
             kind: crate::providers::runtime_model::ProviderKind::Gemini,
             endpoint: None,
             ..ProviderConfiguration::new(crate::providers::runtime_model::ProviderKind::Gemini)
         },
         ProviderConfiguration {
+            options: Default::default(),
             kind: crate::providers::runtime_model::ProviderKind::AzureOpenAi,
             endpoint: Some("https://example.openai.azure.com".to_owned()),
             deployment: Some("deployment".to_owned()),
@@ -547,6 +568,7 @@ async fn response_limits_reach_every_http_connector_and_reject_zero() {
             ..ProviderConfiguration::new(crate::providers::runtime_model::ProviderKind::AzureOpenAi)
         },
         ProviderConfiguration {
+            options: Default::default(),
             kind: crate::providers::runtime_model::ProviderKind::VertexAi,
             cloud_project: Some("project".to_owned()),
             cloud_region: Some("us-central1".to_owned()),
@@ -568,6 +590,7 @@ async fn response_limits_reach_every_http_connector_and_reject_zero() {
         );
     }
     let bedrock = ProviderConfiguration {
+        options: Default::default(),
         kind: crate::providers::runtime_model::ProviderKind::Bedrock,
         cloud_region: Some("us-east-1".to_owned()),
         auth_mode: ProviderAuthMode::DefaultChain,

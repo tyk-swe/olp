@@ -138,17 +138,27 @@ async fn image_generation_and_video_creation_use_current_paths() {
         )],
     })
     .await;
-    let connector = test_connector(&base_url, Timeouts::default());
+    let connector = test_connector(&base_url, Timeouts::default()).with_options(
+        crate::providers::options::ConnectionOptions {
+            parameter_defaults: BTreeMap::from([(
+                "response_format".into(),
+                serde_json::json!({"type":"text"}),
+            )]),
+            ..Default::default()
+        },
+        None,
+    );
     let output = connector.execute(image_request(false)).await.unwrap();
     assert!(matches!(
         output,
         ProviderOutput::Result(result) if matches!(*result, CanonicalResult::Images(_))
     ));
-    assert!(
-        String::from_utf8(captured_image.await.unwrap())
-            .unwrap()
-            .starts_with("POST /v1/images/generations ")
-    );
+    let request = String::from_utf8(captured_image.await.unwrap()).unwrap();
+    assert!(request.starts_with("POST /v1/images/generations "));
+    let (_, body) = request.split_once("\r\n\r\n").unwrap();
+    let image: crate::protocols::openai::images::OpenAiImageGenerationRequest =
+        serde_json::from_str(body).unwrap();
+    assert!(image.response_format.is_none());
 
     let video_body = serde_json::to_vec(&serde_json::json!({
         "id": "video_123",

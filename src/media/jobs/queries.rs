@@ -25,7 +25,7 @@ pub(super) const MEDIA_JOB_SELECT: &str =
             j.progress_percent::real AS progress_percent,
             j.content_available, j.expires_at, j.error_class,
             j.completed_at, j.last_polled_at, j.reconciliation_error, j.deleted_at,
-            j.runtime_generation_id, j.provider_revision_id, j.reconciliation_claim_id,
+            j.runtime_generation_id, j.provider_revision_id, j.credential_version_id, j.reconciliation_claim_id,
             j.reconciliation_attempts, j.next_reconciliation_at,
             j.last_reconciliation_at, j.etag,
             j.created_at, j.updated_at
@@ -193,6 +193,7 @@ fn push_filters(query: &mut QueryBuilder<Postgres>, filters: &MediaJobFilters) {
 
 #[derive(Debug, FromRow)]
 pub(crate) struct MediaJobRow {
+    pub(crate) credential_version_id: Option<Uuid>,
     pub(crate) id: Uuid,
     pub(crate) upstream_job_id: Option<String>,
     pub(crate) api_key_id: Uuid,
@@ -225,6 +226,7 @@ pub(crate) struct MediaJobRow {
 
 pub(crate) fn media_job_from_row(row: MediaJobRow) -> Result<MediaJobRecord, MediaJobError> {
     Ok(MediaJobRecord {
+        credential_version_id: row.credential_version_id,
         id: row.id,
         upstream_job_id: row.upstream_job_id,
         api_key_id: row.api_key_id,

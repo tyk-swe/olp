@@ -480,7 +480,7 @@ async fn enforce_request_limits_inner(
     } = body_admission;
 
     let endpoint_capability = endpoint.and_then(InferenceEndpoint::capability);
-    let principal = endpoint
+    let mut principal = endpoint
         .map(|endpoint| {
             authenticate_inference_headers(
                 state,
@@ -490,6 +490,12 @@ async fn enforce_request_limits_inner(
             )
         })
         .transpose()?;
+    if let Some(principal) = principal.as_mut() {
+        principal.routing_preferences =
+            crate::routes::policy::RoutingPreferences::from_headers(request.headers())
+                .map_err(|detail| Problem::bad_request("invalid_routing_preferences", detail))?;
+        request.headers_mut().remove("x-olp-routing");
+    }
     if let Some(principal) = principal.clone() {
         request.extensions_mut().insert(principal);
     }

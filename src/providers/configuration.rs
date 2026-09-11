@@ -9,6 +9,9 @@ use crate::providers::{runtime_model::ProviderKind, types::ProviderAuthMode};
 pub struct ProviderConfiguration {
     #[sqlx(try_from = "String")]
     pub kind: ProviderKind,
+    #[serde(default)]
+    #[sqlx(json, default)]
+    pub options: crate::providers::options::ConnectionOptions,
     pub endpoint: Option<String>,
     pub cloud_region: Option<String>,
     pub cloud_project: Option<String>,
@@ -26,6 +29,7 @@ impl ProviderConfiguration {
     pub fn new(kind: ProviderKind) -> Self {
         Self {
             kind,
+            options: Default::default(),
             auth_mode: crate::providers::validation::provider_kind_spec(kind).default_auth_mode,
             probe_model: None,
             endpoint: None,

@@ -82,6 +82,12 @@ async fn fallback_uses_current_keys_and_release_exact_provider_transport_config(
     .await
     .unwrap();
 
+    let mut transaction = pool.begin().await.unwrap();
+    olp::providers::pool_store::snapshot(&mut transaction, provider_id, provider_revision_id)
+        .await
+        .unwrap();
+    transaction.commit().await.unwrap();
+
     let key_id = Uuid::now_v7();
     let expires_at = Utc::now() + Duration::days(30);
     sqlx::query(
@@ -106,7 +112,7 @@ async fn fallback_uses_current_keys_and_release_exact_provider_transport_config(
     let release = olp::runtime::publication::compiler::compile_and_publish_runtime(&pool, actor)
         .await
         .unwrap();
-    let historical: Snapshot = serde_json::from_slice(&release.payload).unwrap();
+    let historical: Snapshot = Snapshot::from_persisted_slice(&release.payload).unwrap();
     let historical_key = historical.api_keys.values().next().unwrap();
     assert_eq!(historical_key.digest.as_bytes(), &[1; 32]);
     assert_eq!(historical_key.scopes, [ApiKeyScope::Inference].into());

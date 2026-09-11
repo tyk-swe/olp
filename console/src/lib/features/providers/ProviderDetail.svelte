@@ -1,4 +1,7 @@
 <script lang="ts">
+  import ProviderBulkModels from './ProviderBulkModels.svelte';
+  import ProviderCredentialPool from './ProviderCredentialPool.svelte';
+  import ProviderOptions from './ProviderOptions.svelte';
   import { focusErrorSummary } from '$lib/forms/focusError';
   import { providerKeys } from '$lib/features/providers/providerKeys';
 
@@ -335,6 +338,22 @@
       onNotice={reportNotice}
     />
   </div>
+  {#if canManage}<a
+      class="button button-secondary"
+      href={`${resolve('/providers/new')}?copy=${current.id}`}
+      >Duplicate connection</a
+    >{/if}
+  <ProviderCredentialPool
+    provider={current}
+    {canManage}
+    onChanged={providerChanged}
+  />
+  <ProviderOptions provider={current} {canManage} onChanged={providerChanged} />
+  <ProviderBulkModels
+    provider={current}
+    {canManage}
+    onChanged={providerChanged}
+  />
   <ProviderModelsSection
     modelSnapshot={snapshot.data}
     loading={snapshot.isPending}

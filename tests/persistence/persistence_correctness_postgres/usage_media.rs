@@ -284,6 +284,7 @@ async fn a_polled_media_job_is_neither_stale_nor_backed_off() {
     olp::media::jobs::lifecycle::reserve_media_job(
         &pool,
         NewMediaJobReservation {
+            credential_version_id: None,
             id: job_id,
             runtime_generation_id: generation_id,
             api_key_id,

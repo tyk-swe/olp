@@ -10,6 +10,7 @@ async fn activate_runtime_inside_handler(
         .runtime()
         .install(
             Snapshot {
+                routing: Default::default(),
                 generation: RuntimeGeneration {
                     id: RuntimeGenerationId::new(),
                     ordinal: pinned_before_activation.generation.ordinal + 1,
@@ -219,6 +220,7 @@ async fn spawned_inference_task_inherits_the_http_execution_context() {
         .runtime()
         .install(
             Snapshot {
+                routing: Default::default(),
                 generation: RuntimeGeneration {
                     id: RuntimeGenerationId::new(),
                     ordinal: principal.runtime().generation.ordinal + 1,

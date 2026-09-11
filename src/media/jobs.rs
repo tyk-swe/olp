@@ -114,6 +114,7 @@ impl MediaJobState {
 
 #[derive(Clone, Debug)]
 pub struct NewMediaJobReservation {
+    pub credential_version_id: Option<Uuid>,
     pub id: Uuid,
     /// Runtime generation pinned before the upstream side effect. Production
     /// releases resolve this to an immutable provider revision in PostgreSQL.
@@ -150,6 +151,7 @@ pub enum MediaJobOrder {
 
 #[derive(Clone, Debug)]
 pub struct MediaJobRecord {
+    pub credential_version_id: Option<Uuid>,
     pub id: Uuid,
     pub upstream_job_id: Option<String>,
     pub api_key_id: Uuid,

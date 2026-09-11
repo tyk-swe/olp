@@ -18,7 +18,6 @@ use crate::routes::records::RouteRecord;
 use crate::routes::records::RouteSimulation;
 use crate::routes::records::RouteSimulationTarget;
 use crate::routes::records::RouteTargetRecord;
-use crate::routes::selection::weighted_rendezvous_score;
 use chrono::DateTime;
 use chrono::Utc;
 use std::collections::BTreeMap;
@@ -251,6 +250,7 @@ pub async fn delete_route_draft(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn simulate_route_draft(
     pool: &sqlx::PgPool,
     draft_id: Uuid,
@@ -258,53 +258,50 @@ pub async fn simulate_route_draft(
     surface: Surface,
     mode: TransportMode,
     seed: &str,
+    preferences: &crate::routes::policy::RoutingPreferences,
 ) -> Result<RouteSimulation, Error> {
     if seed.is_empty() || seed.len() > 256 {
         return Err(Error::Invalid(
-            "simulation seed must contain 1-256 bytes".to_owned(),
+            "simulation seed must contain 1-256 bytes".into(),
         ));
     }
-    let draft = crate::routes::repository::get_route_draft(pool, draft_id).await?;
-    if !draft.operations.contains(&operation) {
-        return Err(Error::Invalid(format!(
-            "route does not support {operation}"
-        )));
-    }
-    let scoring_route_id = RouteId::from_uuid(draft.routing_id);
-    let maximum = usize::try_from(draft.max_attempts).unwrap_or_default();
-    let mut ranked: BTreeMap<i32, Vec<(f64, RouteTargetRecord)>> = BTreeMap::new();
-    let mut ineligible = Vec::new();
-    for target in draft.targets {
-        if crate::routes::repository::target_has_certified_capability(
-            pool, &target, operation, surface, mode,
-        )
-        .await?
-        {
-            let weight = u32::try_from(target.weight)
-                .ok()
-                .and_then(NonZeroU32::new)
-                .ok_or_else(|| Error::Invalid("route target weight is invalid".to_owned()))?;
-            let score = weighted_rendezvous_score(
-                scoring_route_id,
-                TargetId::from_uuid(target.routing_id),
-                weight,
-                operation,
-                surface,
-                mode,
-                seed.as_bytes(),
-            );
-            ranked
-                .entry(target.priority)
-                .or_default()
-                .push((score, target));
-        } else {
-            ineligible.push(ineligible_simulation_target(target));
-        }
-    }
-    let mut targets = rank_simulation_targets(ranked, maximum);
-    targets.extend(ineligible);
+    let (snapshot, draft) = draft_snapshot(pool, draft_id).await?;
+    let slug = crate::ids::RouteSlug::parse(draft.slug.clone())
+        .map_err(|e| Error::Invalid(e.to_string()))?;
+    let selection = crate::inference::provider_selection::explain_capability(
+        &snapshot,
+        &slug,
+        operation,
+        surface,
+        mode,
+        seed.as_bytes(),
+        None,
+        preferences,
+    )
+    .map_err(|e| Error::Invalid(e.message().into()))?;
+    let mut targets = selection
+        .decisions
+        .into_iter()
+        .map(|decision| RouteSimulationTarget {
+            target_id: decision.target_id,
+            provider_id: decision.provider_id,
+            provider_name: draft
+                .targets
+                .iter()
+                .find(|t| t.id == decision.target_id)
+                .map(|t| t.provider_name.clone())
+                .unwrap_or_default(),
+            upstream_model: decision.upstream_model.clone(),
+            priority: i32::from(decision.priority),
+            eligible: decision.eligible,
+            reason: decision.reason.clone(),
+            attempt: decision.attempt,
+            decision: Some(decision),
+        })
+        .collect::<Vec<_>>();
+    targets.sort_by_key(|t| t.attempt.unwrap_or(usize::MAX));
     Ok(RouteSimulation {
-        deterministic_seed: seed.to_owned(),
+        deterministic_seed: seed.into(),
         operation,
         surface,
         mode,
@@ -312,29 +309,58 @@ pub async fn simulate_route_draft(
     })
 }
 
-pub(crate) async fn target_has_certified_capability(
+pub(crate) async fn draft_snapshot(
     pool: &sqlx::PgPool,
-    target: &RouteTargetRecord,
-    operation: OperationKind,
-    surface: Surface,
-    mode: TransportMode,
-) -> Result<bool, Error> {
-    let capability: bool = sqlx::query_scalar::<_, bool>(
-        "SELECT EXISTS (SELECT 1 FROM providers p \
-             JOIN provider_revision_models prm ON prm.provider_revision_id = p.active_revision_id \
-             JOIN provider_revision_capabilities prc \
-               ON prc.provider_revision_model_id = prm.id \
-             WHERE prm.source_provider_model_id = $1 AND prc.operation = $2 \
-               AND prc.surface = $3 AND prc.mode = $4 AND prm.enabled \
-               AND prc.source = 'certified' AND p.state <> 'disabled'::provider_state) AS \"value\"",
+    draft_id: Uuid,
+) -> Result<(crate::runtime::snapshot::Snapshot, RouteDraftRecord), Error> {
+    let draft = get_route_draft(pool, draft_id).await?;
+    let mut tx = pool.begin().await?;
+    let mut snapshot = crate::runtime::publication::compiler::compile_snapshot(&mut tx)
+        .await
+        .map_err(|e| Error::Invalid(e.to_string()))?;
+    let policy = sqlx::query_scalar::<_, sqlx::types::Json<crate::routes::policy::RoutingPolicy>>(
+        "SELECT routing_policy FROM route_drafts WHERE id=$1",
     )
-    .bind(target.provider_model_id)
-    .bind(operation.as_str())
-    .bind(surface.as_str())
-    .bind(mode.as_str())
-        .fetch_one(pool)
-        .await?;
-    Ok(capability)
+    .bind(draft_id)
+    .fetch_one(&mut *tx)
+    .await?;
+    tx.commit().await?;
+    let slug = crate::ids::RouteSlug::parse(draft.slug.clone())
+        .map_err(|e| Error::Invalid(e.to_string()))?;
+    let targets = draft
+        .targets
+        .iter()
+        .map(|t| {
+            Ok(crate::routes::model::Target {
+                id: TargetId::from_uuid(t.id),
+                routing_id: TargetId::from_uuid(t.routing_id),
+                provider_id: crate::ids::ProviderId::from_uuid(t.provider_id),
+                upstream_model: t.upstream_model.clone(),
+                priority: t
+                    .priority
+                    .try_into()
+                    .map_err(|_| Error::Invalid("Invalid target priority".into()))?,
+                weight: NonZeroU32::new(t.weight as u32)
+                    .ok_or_else(|| Error::Invalid("Invalid target weight".into()))?,
+                timeout: crate::ids::DurationMs::new(t.timeout_ms as u64),
+            })
+        })
+        .collect::<Result<Vec<_>, Error>>()?;
+    snapshot.routes.insert(
+        slug.clone(),
+        crate::routes::model::Route {
+            id: RouteId::from_uuid(draft.id),
+            routing_id: RouteId::from_uuid(draft.routing_id),
+            slug: slug.clone(),
+            operations: draft.operations.iter().copied().collect(),
+            overall_timeout: crate::ids::DurationMs::new(draft.overall_timeout_ms as u64),
+            max_attempts: std::num::NonZeroU16::new(draft.max_attempts as u16)
+                .ok_or_else(|| Error::Invalid("Invalid attempt count".into()))?,
+            targets,
+        },
+    );
+    snapshot.routing.routes.insert(slug, policy.0);
+    Ok((snapshot, draft))
 }
 
 pub async fn list_routes(
@@ -541,52 +567,6 @@ impl From<RouteTargetRow> for RouteTargetRecord {
             position: row.position,
         }
     }
-}
-
-fn ineligible_simulation_target(target: RouteTargetRecord) -> RouteSimulationTarget {
-    RouteSimulationTarget {
-        target_id: target.id,
-        provider_id: target.provider_id,
-        provider_name: target.provider_name,
-        upstream_model: target.upstream_model,
-        priority: target.priority,
-        eligible: false,
-        reason: Some("missing exact capability or provider/model is disabled".to_owned()),
-        attempt: None,
-    }
-}
-
-/// Orders eligible targets by priority, then by descending rendezvous score
-/// with routing id as the tie-break, numbering attempts up to `maximum`.
-fn rank_simulation_targets(
-    ranked: BTreeMap<i32, Vec<(f64, RouteTargetRecord)>>,
-    maximum: usize,
-) -> Vec<RouteSimulationTarget> {
-    let mut targets = Vec::new();
-    for (_, mut group) in ranked {
-        group.sort_by(|left, right| {
-            right
-                .0
-                .total_cmp(&left.0)
-                .then_with(|| left.1.routing_id.cmp(&right.1.routing_id))
-        });
-        for (_, target) in group {
-            let attempt = (targets.len() < maximum).then_some(targets.len() + 1);
-            targets.push(RouteSimulationTarget {
-                target_id: target.id,
-                provider_id: target.provider_id,
-                provider_name: target.provider_name,
-                upstream_model: target.upstream_model,
-                priority: target.priority,
-                eligible: true,
-                reason: attempt
-                    .is_none()
-                    .then(|| "eligible but beyond max_attempts".to_owned()),
-                attempt,
-            });
-        }
-    }
-    targets
 }
 
 async fn replace_draft_targets(

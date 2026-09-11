@@ -17,23 +17,95 @@ use std::sync::Arc;
 use zeroize::Zeroizing;
 pub(crate) async fn load_runtime_transports(
     providers: &[RuntimeProvider],
-    master_key: &MasterKey,
+    master_key: Option<&MasterKey>,
     snapshot: &Snapshot,
     transports: &mut BTreeMap<ProviderId, Arc<dyn ProviderTransport>>,
     egress_policy: &EgressPolicy,
     response_limits: ResponseLimits,
+    limiter: &crate::limits::admission::ReloadableLimiter,
 ) -> AppResult<()> {
-    for provider in providers {
-        let config = runtime_provider_config(provider, snapshot)?;
-        let credential = runtime_provider_credential(provider, &config, master_key)?;
-        let transport = crate::providers::connectors::transport(
-            config,
-            credential,
-            egress_policy,
-            response_limits,
+    if master_key.is_none()
+        && snapshot
+            .routing
+            .credentials
+            .iter()
+            .any(|(provider, slots)| {
+                slots
+                    .iter()
+                    .any(|slot| slot.enabled && slot.id != provider.as_uuid())
+            })
+    {
+        return Err(std::io::Error::other(
+            "OLP_MASTER_KEY_FILE is required for named credential slots",
         )
-        .await?;
-        transports.insert(provider.provider_id, transport);
+        .into());
+    }
+    let mut pools = BTreeMap::<ProviderId, crate::providers::pool_transport::PoolTransport>::new();
+    for provider in providers {
+        let transport = if let Some(master_key) = master_key {
+            let config = runtime_provider_config(provider, snapshot)?;
+            let credential = runtime_provider_credential(provider, &config, master_key)?;
+            crate::providers::connectors::transport(
+                config,
+                credential,
+                egress_policy,
+                response_limits,
+            )
+            .await?
+        } else {
+            transports
+                .get(&provider.provider_id)
+                .cloned()
+                .ok_or_else(|| {
+                    std::io::Error::other(format!(
+                        "Mounted transport is missing for provider {}",
+                        provider.provider_id
+                    ))
+                })?
+        };
+        pools
+            .entry(provider.provider_id)
+            .or_insert_with(|| {
+                crate::providers::pool_transport::PoolTransport::for_provider(
+                    snapshot,
+                    provider.provider_id,
+                    provider.configuration.options.clone(),
+                    snapshot
+                        .providers
+                        .get(&provider.provider_id)
+                        .and_then(|p| p.active_credential.map(|c| c.as_uuid())),
+                    limiter,
+                )
+            })
+            .transports
+            .insert(provider.credential_id, transport);
+    }
+    // A published empty pool still needs a transport entry so the release can
+    // install, but must never reconstruct a disabled credential as a fallback.
+    for provider in snapshot.providers.values() {
+        if let Some(slots) = snapshot.routing.credentials.get(&provider.id)
+            && !slots.iter().any(|slot| slot.enabled)
+        {
+            pools.entry(provider.id).or_insert_with(|| {
+                crate::providers::pool_transport::PoolTransport::for_provider(
+                    snapshot,
+                    provider.id,
+                    snapshot
+                        .routing
+                        .providers
+                        .get(&provider.id)
+                        .cloned()
+                        .unwrap_or_default(),
+                    provider
+                        .active_credential
+                        .map(|credential| credential.as_uuid()),
+                    limiter,
+                )
+            });
+        }
+    }
+    for (id, pool) in pools {
+        transports.insert(id, Arc::new(pool));
     }
     Ok(())
 }
@@ -167,6 +239,7 @@ mod tests {
             provider_id,
             provider_revision_id: uuid::Uuid::now_v7(),
             configuration: crate::providers::configuration::ProviderConfiguration {
+                options: Default::default(),
                 kind: ProviderKind::OpenAi,
                 endpoint: None,
                 cloud_region: None,
@@ -196,6 +269,7 @@ mod tests {
             })
             .collect::<BTreeSet<_>>();
         Snapshot {
+            routing: Default::default(),
             generation: RuntimeGeneration {
                 id: RuntimeGenerationId::new(),
                 ordinal: 1,
@@ -349,6 +423,7 @@ mod tests {
             Some(encrypted),
         );
         let config = ProviderConfiguration {
+            options: Default::default(),
             kind: crate::providers::runtime_model::ProviderKind::OpenAi,
             endpoint: None,
             ..ProviderConfiguration::new(crate::providers::runtime_model::ProviderKind::OpenAi)
@@ -371,6 +446,7 @@ mod tests {
         default_chain.configuration.kind = ProviderKind::Bedrock;
         default_chain.configuration.auth_mode = ProviderAuthMode::DefaultChain;
         let default_config = ProviderConfiguration {
+            options: Default::default(),
             kind: crate::providers::runtime_model::ProviderKind::Bedrock,
             cloud_region: Some("us-east-1".to_owned()),
             auth_mode: ProviderAuthMode::DefaultChain,
@@ -387,6 +463,7 @@ mod tests {
             (
                 ProviderKind::VertexAi,
                 ProviderConfiguration {
+                    options: Default::default(),
                     kind: crate::providers::runtime_model::ProviderKind::VertexAi,
                     cloud_project: Some("project".to_owned()),
                     cloud_region: Some("location".to_owned()),
@@ -401,6 +478,7 @@ mod tests {
             (
                 ProviderKind::Bedrock,
                 ProviderConfiguration {
+                    options: Default::default(),
                     kind: crate::providers::runtime_model::ProviderKind::Bedrock,
                     cloud_region: Some("us-east-1".to_owned()),
                     auth_mode: ProviderAuthMode::ApiKey,

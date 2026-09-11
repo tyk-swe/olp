@@ -33,7 +33,7 @@ pub async fn reserve_media_job(
         .await?;
     let inserted = sqlx::query(
         "WITH authority AS (
-                SELECT rpc.runtime_generation_id, rpc.provider_revision_id
+                SELECT rpc.runtime_generation_id, rpc.provider_revision_id, COALESCE($9::uuid,rpc.active_credential_version_id) AS credential_version_id
                 FROM runtime_generation_provider_configs rpc
                 JOIN providers provider ON provider.id = rpc.provider_id
                 JOIN provider_revisions current ON current.id = provider.active_revision_id
@@ -45,8 +45,11 @@ pub async fn reserve_media_job(
                   AND rpc.deployment IS NOT DISTINCT FROM current.deployment
                   AND rpc.api_version IS NOT DISTINCT FROM current.api_version
                   AND rpc.auth_mode IS NOT DISTINCT FROM current.auth_mode
+                  AND ($10::jsonb || rpc.options) - 'limits'
+                      IS NOT DISTINCT FROM ($10::jsonb || current.options) - 'limits'
                   AND rpc.active_credential_version_id
                       IS NOT DISTINCT FROM current.credential_version_id
+                  AND ($9::uuid IS NULL OR EXISTS(SELECT 1 FROM provider_revision_credentials pc WHERE pc.provider_revision_id=rpc.provider_revision_id AND pc.credential_version_id=$9))
                   AND EXISTS (
                     SELECT 1 FROM provider_revision_models prm
                     WHERE prm.provider_revision_id = current.id
@@ -67,10 +70,10 @@ pub async fn reserve_media_job(
              INSERT INTO async_media_jobs (
                 id, upstream_job_id, api_key_id, provider_id, provider_model,
                 route_slug, operation, surface, state, lifecycle_state,
-                runtime_generation_id, provider_revision_id
+                runtime_generation_id, provider_revision_id, credential_version_id
              )
              SELECT $1, NULL, $2, $3, $4, $5, $6, $7, 'queued', 'creating',
-                    authority.runtime_generation_id, authority.provider_revision_id
+                    authority.runtime_generation_id, authority.provider_revision_id, authority.credential_version_id
              FROM authority
              WHERE EXISTS (SELECT 1 FROM providers
                            WHERE id = $3 AND state <> 'disabled'::provider_state)",
@@ -83,6 +86,10 @@ pub async fn reserve_media_job(
     .bind(input.operation.as_str())
     .bind(input.surface.as_str())
     .bind(input.runtime_generation_id)
+    .bind(input.credential_version_id)
+    .bind(sqlx::types::Json(
+        crate::providers::options::ConnectionOptions::default(),
+    ))
     .execute(&mut *transaction)
     .await?;
     if inserted.rows_affected() != 1 {
@@ -128,7 +135,7 @@ pub async fn attach_media_job_upstream(
                     j.progress_percent::real AS \"progress_percent\",
                     j.content_available, j.expires_at, j.error_class,
                     j.completed_at, j.last_polled_at, j.reconciliation_error, j.deleted_at,
-                    j.runtime_generation_id, j.provider_revision_id, j.reconciliation_claim_id,
+                    j.runtime_generation_id, j.provider_revision_id, j.credential_version_id, j.reconciliation_claim_id,
                     j.reconciliation_attempts, j.next_reconciliation_at,
                     j.last_reconciliation_at, j.etag,
                     j.created_at, j.updated_at

@@ -133,22 +133,32 @@ file; leave them empty to keep the binary defaults.
 
 The release-owned wizard catalog resolves a reviewed HTTPS endpoint and
 `api_key` authentication into ordinary `openai_compatible` fields. The record
-stores resolved values, not a catalog reference:
+stores the vendor ID separately from its editable resolved connection values:
 
 | ID | Provider | Endpoint |
 |---|---|---|
-| `groq` | Groq | `https://api.groq.com/v1` |
+| `groq` | Groq | `https://api.groq.com/openai/v1` |
 | `mistral_ai` | Mistral AI | `https://api.mistral.ai/v1` |
 | `together_ai` | Together AI | `https://api.together.ai/v1` |
 | `xai` | xAI | `https://api.x.ai/v1` |
 | `cerebras` | Cerebras | `https://api.cerebras.ai/v1` |
-| `openrouter` | OpenRouter | `https://openrouter.ai/api/v3` |
+| `openrouter` | OpenRouter | `https://openrouter.ai/api/v1` |
+| `deepseek` | DeepSeek | `https://api.deepseek.com/v1` |
+| `fireworks` | Fireworks AI | `https://api.fireworks.ai/inference/v1` |
+| `deepinfra` | DeepInfra | `https://api.deepinfra.com/v1/openai` |
+| `huggingface` | Hugging Face | `https://router.huggingface.co/v1` |
+| `perplexity` | Perplexity | `https://api.perplexity.ai` |
+| `cohere` | Cohere | `https://api.cohere.ai/compatibility/v1` |
+| `voyage` | Voyage | `https://api.voyageai.com/v1` |
 
 A preset is not provider or model certification. Creation and edits still
 run HTTPS, public-egress, SSRF, and reachability checks unless the host or
 address is exempted by the egress allowlists below; only live exact-tuple
 certification makes a capability eligible for activation. Use **Custom
-endpoint** for another Bearer-key-compatible service.
+endpoint** for another compatible service, including explicitly configured
+private HTTP and unauthenticated endpoints. See [provider routing](provider-routing.md)
+for encrypted custom headers, defaults, model facts, credential pools, quotas,
+and installation/route/key/request policies.
 
 ## Body size caps
 
@@ -223,6 +233,11 @@ management API, and references an optional `credential_file`. Vertex entries
 also select a probe `model`. Credential files must have restricted permissions;
 ADC and the AWS default chain reject stored credentials. The former separate
 vendor lists are not accepted by 3.0.
+
+Without `OLP_MASTER_KEY_FILE`, each mounted connector serves the published
+default credential slot and enforces its slot and connection limits. Releases
+with enabled named slots require the master key so each attempt can use its
+published credential version.
 
 Production Compose can generate database credentials and their encoded URL using
 `scripts/prepare-compose-production.sh`; see [deployment.md](deployment.md).

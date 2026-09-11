@@ -60,6 +60,7 @@ pub(crate) struct ExecutionFailure {
 }
 
 struct AttemptRecord<'a> {
+    mode: crate::protocols::canonical::identity::TransportMode,
     plan: &'a AttemptPlan,
     circuit_permit: CircuitPermit,
     ordinal: u16,
@@ -135,6 +136,9 @@ impl AttemptRecord<'_> {
             self.started_at,
             self.started,
         ));
+        if let Some(routing) = traces.last_mut().and_then(|a| a.routing.as_mut()) {
+            routing.mode = Some(self.mode);
+        }
     }
 
     fn record_deadline_elapsed(
@@ -344,6 +348,7 @@ pub(crate) async fn execute(
         let attempt_started_at = Utc::now();
         let attempt_started = tokio::time::Instant::now();
         let mut record = AttemptRecord {
+            mode: metadata.mode,
             plan: attempt,
             circuit_permit,
             ordinal,
@@ -403,6 +408,10 @@ fn with_sole_target_retry(
     mut attempts: Vec<AttemptPlan>,
     max_attempts: NonZeroU16,
 ) -> Vec<AttemptPlan> {
+    let max_attempts = attempts
+        .iter()
+        .filter_map(|attempt| attempt.attempt_limit)
+        .fold(max_attempts, std::cmp::min);
     if let [only] = attempts.as_slice()
         && max_attempts.get() > 1
     {
@@ -448,7 +457,8 @@ fn plan_retry(
     failures: &FailureHistory,
     route_deadline: tokio::time::Instant,
 ) -> Option<Duration> {
-    let same_target = previous.routing_id == next.routing_id;
+    let same_target = previous.routing_id == next.routing_id
+        && previous.credential_version_id == next.credential_version_id;
     if same_target && !failures.permits_same_target_retry() {
         return None;
     }
@@ -546,12 +556,21 @@ fn finish_attempt_with_first_event(
         return Err(record.record_terminal_failure(traces, circuits, error, gateway));
     }
     let initial_failure = if let Kind::Error { error } = &first.kind {
-        if error.retryable
-            && can_retry_canonical
-            && let Some(class) = canonical_error_circuit_class(error.class)
-        {
+        let authentication =
+            error.class == crate::protocols::canonical::events::ErrorClass::Authentication;
+        let retry_class = if authentication {
+            Some(AttemptFailureClass::UpstreamClient)
+        } else if error.retryable {
+            canonical_error_circuit_class(error.class)
+        } else {
+            None
+        };
+        if can_retry_canonical && let Some(class) = retry_class {
             let transport_error = TransportError {
-                upstream: Default::default(),
+                upstream: crate::inference::transport::UpstreamSignal {
+                    status: authentication.then_some(401),
+                    retry_after: None,
+                },
                 phase: crate::inference::transport::TransportPhase::FirstByte,
                 class,
                 response_committed: false,
@@ -743,6 +762,7 @@ fn successful_attempt(
     started: tokio::time::Instant,
 ) -> RequestAttemptMetadata {
     RequestAttemptMetadata {
+        routing: Some(attempt.into()),
         id: uuid::Uuid::now_v7(),
         ordinal,
         provider_id: attempt.provider_id.as_uuid(),
@@ -775,6 +795,7 @@ fn failed_attempt(
 ) -> RequestAttemptMetadata {
     let mapped = InferenceError::from_transport(error.clone());
     RequestAttemptMetadata {
+        routing: Some(attempt.into()),
         id: uuid::Uuid::now_v7(),
         ordinal,
         provider_id: attempt.provider_id.as_uuid(),

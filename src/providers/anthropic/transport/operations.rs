@@ -74,14 +74,34 @@ enum ResponseKind {
 }
 
 pub struct Connector {
+    options: crate::providers::options::ConnectionOptions,
+    custom_headers: Option<HeaderMap>,
     pub(crate) config: ConnectorConfig,
     pub(crate) api_key: ApiKey,
 }
 
 impl Connector {
+    pub(crate) fn with_options(
+        mut self,
+        options: crate::providers::options::ConnectionOptions,
+    ) -> Self {
+        self.options = options;
+        self
+    }
+
+    pub(crate) fn with_headers(mut self, headers: Option<HeaderMap>) -> Self {
+        self.custom_headers = headers;
+        self
+    }
+
     #[must_use]
     pub fn new(config: ConnectorConfig, api_key: ApiKey) -> Self {
-        Self { config, api_key }
+        Self {
+            config,
+            api_key,
+            custom_headers: None,
+            options: Default::default(),
+        }
     }
 
     /// Lists the upstream model catalog through the same pinned-DNS and
@@ -113,7 +133,11 @@ impl Connector {
                 }
             }
             let mut headers = HeaderMap::new();
-            headers.insert("x-api-key", secret_header(&self.api_key)?);
+            if let Some(custom) = &self.custom_headers {
+                headers.extend(custom.clone());
+            } else {
+                headers.insert("x-api-key", secret_header(&self.api_key)?);
+            }
             headers.insert(
                 "anthropic-version",
                 HeaderValue::from_str(&self.config.api_version).map_err(|_| {
@@ -155,10 +179,36 @@ impl Connector {
 
     async fn execute_request(
         &self,
-        request: ProviderRequest,
+        mut request: ProviderRequest,
     ) -> Result<ProviderOutput, TransportError> {
         validate_request_envelope(&request)?;
+        if let std::borrow::Cow::Owned(operation) = crate::providers::profiles::operation(
+            &request.operation,
+            &self.options,
+            ProviderKind::Anthropic,
+        ) {
+            request.operation = std::sync::Arc::new(operation);
+        }
+        if let Some(deployment) = self
+            .options
+            .models
+            .get(&request.attempt.upstream_model)
+            .and_then(|m| m.deployment.as_ref())
+        {
+            request.attempt.upstream_model = deployment.clone();
+        }
         let (url, body, response_kind, streaming) = self.encode_request(&request).await?;
+        let body = crate::providers::http_options::request_body(
+            &self.options,
+            if request.metadata.operation
+                == crate::protocols::canonical::identity::OperationKind::Generation
+            {
+                "generation"
+            } else {
+                "token_count"
+            },
+            body,
+        )?;
 
         let attempt_deadline = Instant::now() + request.attempt.timeout.as_duration();
         let connect_timeout = bounded_duration(
@@ -175,7 +225,11 @@ impl Connector {
 
         let first_byte_deadline = Instant::now() + self.config.timeouts.first_byte;
         let mut headers = HeaderMap::new();
-        headers.insert("x-api-key", secret_header(&self.api_key)?);
+        if let Some(custom) = &self.custom_headers {
+            headers.extend(custom.clone());
+        } else {
+            headers.insert("x-api-key", secret_header(&self.api_key)?);
+        }
         headers.insert(
             "anthropic-version",
             HeaderValue::from_str(&self.config.api_version).map_err(|_| {
@@ -354,6 +408,7 @@ impl Connector {
             )
             .await
         {
+            Ok(_) if self.custom_headers.is_some() => format!("Provider returned HTTP {status}"),
             Ok(body) => safe_upstream_error_message(status, &body, self.api_key.expose()),
             Err(_) => format!("Anthropic returned HTTP {status}"),
         };
@@ -376,7 +431,12 @@ impl ProviderTransport for Connector {
         &'a self,
         request: ProviderRequest,
     ) -> crate::inference::transport::BoxFuture<'a, Result<ProviderOutput, TransportError>> {
-        Box::pin(async move { self.execute_request(request).await })
+        Box::pin(async move {
+            crate::providers::http_options::redact_output_errors(
+                self.execute_request(request).await,
+                self.custom_headers.is_some(),
+            )
+        })
     }
 }
 

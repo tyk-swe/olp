@@ -150,10 +150,11 @@ async fn unauthenticated_password_work_remains_bounded_after_request_cancellatio
 }
 
 #[test]
-fn native_provider_create_shape_rejects_custom_and_cloud_fields() {
+fn native_provider_create_shape_accepts_custom_endpoints_but_rejects_cloud_fields() {
     let request = CreateProviderRequest {
         name: "native".to_owned(),
         configuration: crate::providers::configuration::ProviderConfiguration {
+            options: Default::default(),
             kind: ProviderKind::OpenAi,
             endpoint: Some("https://proxy.example.test/v1".to_owned()),
             cloud_region: Some("region".to_owned()),
@@ -170,7 +171,7 @@ fn native_provider_create_shape_rejects_custom_and_cloud_fields() {
     };
     let errors = validate(&request.configuration, Some(request.credential.is_some()));
     assert!(
-        errors
+        !errors
             .iter()
             .any(|error| error.field.as_str() == "endpoint")
     );

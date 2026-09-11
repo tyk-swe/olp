@@ -50,6 +50,7 @@ pub async fn local_provider(
     let connector = match kind {
         ProviderKind::OpenAi => {
             api_key_connector(ProviderConfiguration {
+                options: Default::default(),
                 kind: crate::providers::runtime_model::ProviderKind::OpenAi,
                 endpoint: Some(format!("{origin}/v1")),
                 ..ProviderConfiguration::new(crate::providers::runtime_model::ProviderKind::OpenAi)
@@ -58,6 +59,7 @@ pub async fn local_provider(
         }
         ProviderKind::OpenAiCompatible => {
             api_key_connector(ProviderConfiguration {
+                options: Default::default(),
                 kind: crate::providers::runtime_model::ProviderKind::OpenAiCompatible,
                 endpoint: Some(format!("{origin}/v1")),
                 ..ProviderConfiguration::new(
@@ -68,6 +70,7 @@ pub async fn local_provider(
         }
         ProviderKind::Anthropic => {
             api_key_connector(ProviderConfiguration {
+                options: Default::default(),
                 kind: crate::providers::runtime_model::ProviderKind::Anthropic,
                 endpoint: Some(format!("{origin}/v1/")),
                 api_version: None,
@@ -79,6 +82,7 @@ pub async fn local_provider(
         }
         ProviderKind::Gemini => {
             api_key_connector(ProviderConfiguration {
+                options: Default::default(),
                 kind: crate::providers::runtime_model::ProviderKind::Gemini,
                 endpoint: Some(format!("{origin}/v1beta/")),
                 ..ProviderConfiguration::new(crate::providers::runtime_model::ProviderKind::Gemini)
@@ -87,6 +91,7 @@ pub async fn local_provider(
         }
         ProviderKind::AzureOpenAi => {
             api_key_connector(ProviderConfiguration {
+                options: Default::default(),
                 kind: crate::providers::runtime_model::ProviderKind::AzureOpenAi,
                 endpoint: Some(origin.to_owned()),
                 deployment: Some("conformance-deployment".to_owned()),

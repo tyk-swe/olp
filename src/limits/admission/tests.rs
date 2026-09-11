@@ -59,6 +59,10 @@ struct FakeLease {
 }
 
 impl LimitLease for FakeLease {
+    fn refund(&self) -> BoxFuture<'_, Result<(), LimitError>> {
+        Box::pin(async { panic!("This fixture does not refund provider admission") })
+    }
+
     fn reconcile(&self, actual_tokens: i64) -> BoxFuture<'_, Result<(), LimitError>> {
         self.calls.reconciles.fetch_add(1, Ordering::Relaxed);
         self.calls
@@ -138,6 +142,7 @@ fn backend(calls: &Arc<BackendCalls>, behavior: BackendBehavior) -> FakeBackend 
 
 fn api_key(limits: ApiKeyLimits) -> ApiKey {
     ApiKey {
+        routing_policy: Default::default(),
         id: ApiKeyId::new(),
         lookup_id: ApiKeyLookupId::parse("lookup_01").unwrap(),
         digest: ApiKeyDigest::new([7; 32]),

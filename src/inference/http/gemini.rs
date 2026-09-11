@@ -249,7 +249,12 @@ pub(crate) async fn models(
     let lease = reserve_model_limits(&state, &principal)
         .await
         .map_err(ProtocolError::gemini)?;
-    let result = models_response(runtime, key, query);
+    let result = models_response(
+        runtime,
+        key,
+        query,
+        &principal.principal().routing_preferences,
+    );
     release_model_limits(&state, lease).await;
     result
 }
@@ -258,6 +263,7 @@ fn models_response(
     runtime: &Bundle,
     key: &ApiKey,
     query: ModelsQuery,
+    preferences: &crate::routes::policy::RoutingPreferences,
 ) -> Result<Response, ProtocolError> {
     let limit = query.page_size.unwrap_or(50);
     if !(1..=1_000).contains(&limit) {
@@ -266,7 +272,7 @@ fn models_response(
             "pageSize must be between 1 and 1000.",
         ));
     }
-    let all = visible_routes(runtime, key, Surface::Gemini);
+    let all = visible_routes(runtime, key, Surface::Gemini, preferences);
     let after = query
         .page_token
         .as_deref()
@@ -283,7 +289,7 @@ fn models_response(
     let models = remaining
         .iter()
         .take(limit)
-        .map(|slug| model_object(runtime, slug))
+        .map(|slug| model_object(runtime, slug, key, preferences))
         .collect::<Vec<_>>();
     let next_page_token = has_more
         .then(|| {
@@ -318,28 +324,56 @@ pub(crate) async fn model(
             "The requested Gemini model does not exist.",
         ))
     } else {
-        visible_route(runtime, key, &resource, Surface::Gemini)
-            .map(|slug| (StatusCode::OK, Json(model_object(runtime, &slug))).into_response())
+        visible_route(
+            runtime,
+            key,
+            &resource,
+            Surface::Gemini,
+            &principal.principal().routing_preferences,
+        )
+        .map(|slug| {
+            (
+                StatusCode::OK,
+                Json(model_object(
+                    runtime,
+                    &slug,
+                    key,
+                    &principal.principal().routing_preferences,
+                )),
+            )
+                .into_response()
+        })
     };
     release_model_limits(&state, lease).await;
     result
 }
 
-fn model_object(runtime: &Bundle, slug: &RouteSlug) -> Model {
+fn model_object(
+    runtime: &Bundle,
+    slug: &RouteSlug,
+    key: &ApiKey,
+    preferences: &crate::routes::policy::RoutingPreferences,
+) -> Model {
     Model {
         name: format!("models/{slug}"),
         base_model_id: slug.to_string(),
         version: runtime.generation.ordinal.to_string(),
         display_name: slug.to_string(),
         description: "OpenLLMProxy route".to_owned(),
-        supported_generation_methods: supported_operations(runtime, slug, Surface::Gemini)
-            .into_iter()
-            .filter_map(|operation| match operation {
-                OperationKind::Generation => Some("generateContent"),
-                OperationKind::TokenCount => Some("countTokens"),
-                _ => None,
-            })
-            .collect(),
+        supported_generation_methods: supported_operations(
+            runtime,
+            slug,
+            Surface::Gemini,
+            key,
+            preferences,
+        )
+        .into_iter()
+        .filter_map(|operation| match operation {
+            OperationKind::Generation => Some("generateContent"),
+            OperationKind::TokenCount => Some("countTokens"),
+            _ => None,
+        })
+        .collect(),
     }
 }
 

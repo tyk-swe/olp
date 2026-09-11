@@ -248,16 +248,14 @@ impl Breaker {
     }
 }
 
-/// A rate limit carrying a `Retry-After` header counts toward opening the
-/// circuit, while a bare 429 does not. This accepts the tradeoff that a per-key
-/// 429 that happens to carry `Retry-After` will now count, so a single noisy
-/// key can still open a shared target for the 30s `DEFAULT_OPEN_DURATION`.
-const fn counts_toward_circuit(class: AttemptFailureClass, retry_after: Option<Duration>) -> bool {
+/// Authentication and quota failures belong to credential health. Only
+/// connection, timeout, and server failures affect the endpoint circuit.
+const fn counts_toward_circuit(class: AttemptFailureClass, _retry_after: Option<Duration>) -> bool {
     match class {
         AttemptFailureClass::Connect
         | AttemptFailureClass::Timeout
         | AttemptFailureClass::UpstreamServer => true,
-        AttemptFailureClass::RateLimit => retry_after.is_some(),
+        AttemptFailureClass::RateLimit => false,
         AttemptFailureClass::UpstreamClient
         | AttemptFailureClass::Protocol
         | AttemptFailureClass::Cancelled
@@ -315,7 +313,7 @@ mod tests {
     }
 
     #[test]
-    fn upstream_rate_limits_with_retry_after_open_the_shared_target_circuit() {
+    fn upstream_rate_limits_leave_endpoint_available_for_other_credentials() {
         let breaker = Breaker::new(2, Duration::from_secs(30));
         let target = TargetId::new();
         let rate_limited = |breaker: &Breaker| {
@@ -330,9 +328,9 @@ mod tests {
         assert!(breaker.is_selectable(target));
         assert!(breaker.try_acquire(target));
         rate_limited(&breaker);
-        assert!(!breaker.is_selectable(target));
-        assert!(!breaker.try_acquire(target));
-        assert_eq!(breaker.open_count(), 1);
+        assert!(breaker.is_selectable(target));
+        assert!(breaker.try_acquire(target));
+        assert_eq!(breaker.open_count(), 0);
     }
 
     #[test]

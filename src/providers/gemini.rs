@@ -118,8 +118,12 @@ pub struct SecretBearerToken(Zeroizing<String>);
 
 impl SecretBearerToken {
     pub fn new(value: impl Into<String>) -> Result<Self, BearerTokenError> {
-        crate::providers::connector::visible_secret(value, BearerTokenError, BearerTokenError)
-            .map(Self)
+        crate::providers::connector::visible_secret(
+            value,
+            BearerTokenError::Unavailable,
+            BearerTokenError::Unavailable,
+        )
+        .map(Self)
     }
 
     pub(crate) fn expose(&self) -> &str {
@@ -140,8 +144,12 @@ pub trait BearerTokenProvider: Send + Sync + fmt::Debug {
 }
 
 #[derive(Clone, Copy, Debug, thiserror::Error)]
-#[error("Google OAuth bearer token acquisition failed")]
-pub struct BearerTokenError;
+pub enum BearerTokenError {
+    #[error("Google OAuth bearer token acquisition failed")]
+    Unavailable,
+    #[error("Google OAuth credential was rejected")]
+    Authentication,
+}
 
 pub(crate) enum ConnectorCredential {
     ApiKey(ApiKey),

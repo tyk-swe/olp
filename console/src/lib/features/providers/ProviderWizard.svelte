@@ -1,4 +1,5 @@
 <script lang="ts">
+  import ProviderBulkModels from './ProviderBulkModels.svelte';
   import { focusErrorSummary, focusFormError } from '$lib/forms/focusError';
   import { resolve } from '$app/paths';
   import ConflictNotice from '$lib/components/ConflictNotice.svelte';
@@ -114,6 +115,13 @@
       busy={wizard.busy}
       onDiscover={wizard.discoverWizardProvider}
       onDeclareModels={wizard.declareWizardModels}
+    />
+    <ProviderBulkModels
+      provider={wizard.wizardProvider}
+      canManage={wizard.canManage}
+      onChanged={async () => {
+        await wizard.refetchWizardModels();
+      }}
     />
     <section class="card stage wide" aria-labelledby="capability-heading">
       <ProviderCapabilityReviewStage

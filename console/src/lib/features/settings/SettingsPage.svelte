@@ -1,4 +1,7 @@
 <script lang="ts">
+  import { apiClient } from '$lib/api/client';
+  import { result } from '$lib/api/http';
+  import RoutingPolicyEditor from '$lib/features/routes/RoutingPolicyEditor.svelte';
   import { providerKeys } from '$lib/features/providers/providerKeys';
   import { settingsKeys } from '$lib/features/settings/settingsKeys';
   import { pricingKeys } from '$lib/features/usage/pricingKeys';
@@ -45,6 +48,14 @@
 
   let providerKind = $state<ProviderKind | null>(null);
   let providerId = $state('');
+  let vendorId = $state('');
+  const providerVendors = createQuery(() => ({
+    queryKey: ['provider-vendors'],
+    queryFn: async () => {
+      const response = await apiClient.GET('/api/v3/provider-vendors');
+      return result(response.data, response.error, response.response);
+    }
+  }));
   let model = $state('');
   let operation = $state<(typeof operationKinds)[number]>('generation');
   let inputPrice = $state('');
@@ -129,6 +140,7 @@
     try {
       const price: PriceDraft = {
         provider_kind: providerKind,
+        vendor_id: vendorId || null,
         provider_id: providerId || null,
         model: model.trim(),
         operation,
@@ -275,6 +287,9 @@
         <label for="provider-kind">Provider kind</label><select
           id="provider-kind"
           bind:value={providerKind}
+          onchange={() => {
+            vendorId = '';
+          }}
           disabled={!canEditPricing ||
             providerKinds.isPending ||
             providerKinds.isError}
@@ -287,6 +302,17 @@
             >Provider capabilities are unavailable; pricing changes are
             disabled.</small
           >{/if}
+      </div>
+      <div class="form-field">
+        <label for="price-vendor">Vendor scope</label><select
+          id="price-vendor"
+          bind:value={vendorId}
+          disabled={!canEditPricing}
+          ><option value="">All vendors using this connector</option
+          >{#each (providerVendors.data ?? []).filter((vendor) => vendor.connector === providerKind) as vendor (vendor.id)}<option
+              value={vendor.id}>{vendor.name}</option
+            >{/each}</select
+        >
       </div>
       <div class="form-field">
         <label for="provider-id">Provider ID override</label><input
@@ -436,9 +462,9 @@
               <tbody
                 >{#each revision.prices as price, priceIndex (`${price.provider_kind}:${price.model}:${price.operation}:${priceIndex}`)}<tr
                     ><td
-                      ><strong>{price.provider_kind}</strong><small
-                        >{price.model}</small
-                      ></td
+                      ><strong>{price.vendor_id ?? price.provider_kind}</strong
+                      >{#if price.provider_id}<small>{price.provider_id}</small
+                        >{/if}<small>{price.model}</small></td
                     ><td>{price.operation}</td><td
                       >{price.input_per_million ?? '—'}</td
                     ><td
@@ -459,6 +485,12 @@
     />
   {/if}
 </section>
+
+<RoutingPolicyEditor
+  scope="installation"
+  id="00000000-0000-0000-0000-000000000000"
+  canManage={canEditSettings}
+/>
 
 <style>
   .settings-section {

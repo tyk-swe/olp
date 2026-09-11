@@ -1,4 +1,5 @@
 <script lang="ts">
+  import RoutingPolicyEditor from './RoutingPolicyEditor.svelte';
   import { focusErrorSummary, focusFormError } from '$lib/forms/focusError';
   import RouteTargets from '$lib/features/routes/RouteTargets.svelte';
   import RoutePublishPanel from '$lib/features/routes/RoutePublishPanel.svelte';
@@ -16,6 +17,13 @@
     routeId?: string;
   } = $props();
   const editor = new RouteDraftEditorState(() => routeId);
+  const loading = $derived.by(() => {
+    // Observe both queries before either can complete; short-circuiting here
+    // can miss the other observer's pending-to-success notification.
+    const draftPending = editor.draft.isPending;
+    const modelsPending = editor.providerModels.isPending;
+    return (!editor.isNew && draftPending) || modelsPending;
+  });
 </script>
 
 <svelte:head><title>Routes · OpenLLMProxy</title></svelte:head>
@@ -97,7 +105,7 @@
     >
   </div>
 {/if}
-{#if (!editor.isNew && editor.draft.isPending) || editor.providerModels.isPending}
+{#if loading}
   <div class="loading-state" role="status">Loading Route Studio…</div>
 {:else if (!editor.isNew && !editor.draft.data) || editor.providerModels.isError}
   <!-- Nothing editable can be rendered without a draft or an inventory. -->
@@ -179,10 +187,10 @@
           <summary>Exactly when will OLP try another target?</summary>
           <p>
             Only before response bytes are committed, and only for
-            connection/transport failures, configured timeouts, HTTP 429, or
-            HTTP 5xx. There are no hidden SDK retries, hedges, nested routes, or
-            retries after bytes reach the client. Weighted rendezvous ordering
-            is deterministic inside each priority group.
+            connection/transport failures, configured timeouts, HTTP 401, HTTP
+            429, or HTTP 5xx. There are no hidden SDK retries, hedges, nested
+            routes, or retries after bytes reach the client. Weighted rendezvous
+            ordering is deterministic inside each priority group.
           </p>
         </details>
       </section>
@@ -191,6 +199,16 @@
   </form>
   <RouteSimulation {editor} />
 {/if}
+
+{#if editor.draft.data}<RoutingPolicyEditor
+    scope="route-draft"
+    id={editor.draft.data.id}
+    resourceEtag={editor.draft.data.etag}
+    canManage={editor.canManage && !editor.busy}
+    bind:dirty={editor.policyDirty}
+    bind:busy={editor.policyBusy}
+    onSaved={editor.policySaved}
+  />{/if}
 
 <style>
   h2 {

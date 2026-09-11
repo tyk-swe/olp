@@ -1,5 +1,3 @@
-use std::cmp::Ordering;
-use std::collections::BTreeMap;
 use std::num::NonZeroU32;
 
 use sha2::Digest;
@@ -16,13 +14,21 @@ use crate::protocols::canonical::identity::OperationKind;
 use crate::protocols::canonical::identity::Surface;
 use crate::protocols::canonical::identity::TransportMode;
 
-use crate::providers::runtime_model::Provider;
 use crate::providers::runtime_model::ProviderKind;
-use crate::routes::model::Target;
 use crate::runtime::snapshot::Snapshot;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AttemptPlan {
+    /// Effective bound after routing preferences narrow the route's budget.
+    pub attempt_limit: Option<std::num::NonZeroU16>,
+    /// Current published quotas pinned for this request. Standalone probes can
+    /// leave these absent and use the connector's release-time configuration.
+    pub connection_limits: Option<crate::providers::options::ConnectionLimits>,
+    pub credential_limits: Option<crate::providers::options::ConnectionLimits>,
+    pub routing_policy: Option<crate::routes::policy::AppliedRoutingPolicy>,
+    pub credential_slot_id: Option<uuid::Uuid>,
+    pub credential_version_id: Option<uuid::Uuid>,
+    pub pricing_revision_id: Option<uuid::Uuid>,
     pub generation_id: RuntimeGenerationId,
     pub route_id: RouteId,
     pub target_id: TargetId,
@@ -38,6 +44,8 @@ pub struct AttemptPlan {
     pub priority: u16,
 }
 
+/// Selects deterministic attempts for a capability probe: default routing
+/// preferences, no API key, and no request-level eligibility predicate.
 pub fn select_attempts(
     snapshot: &Snapshot,
     route_slug: &RouteSlug,
@@ -46,118 +54,35 @@ pub fn select_attempts(
     mode: TransportMode,
     affinity_key: &[u8],
 ) -> Result<Vec<AttemptPlan>, RoutingError> {
-    select_attempts_filtered(
-        snapshot,
-        route_slug,
-        operation,
-        surface,
-        mode,
-        affinity_key,
-        |_, _| true,
-    )
-}
-
-/// Selects deterministic attempts after applying a concrete request-level
-/// eligibility predicate. The predicate runs before priority/weight ordering
-/// and `max_attempts`, so an unrepresentable high-ranked target cannot hide a
-/// representable lower-ranked target.
-pub fn select_attempts_filtered(
-    snapshot: &Snapshot,
-    route_slug: &RouteSlug,
-    operation: OperationKind,
-    surface: Surface,
-    mode: TransportMode,
-    affinity_key: &[u8],
-    mut eligible: impl FnMut(&Provider, &Target) -> bool,
-) -> Result<Vec<AttemptPlan>, RoutingError> {
     let route = snapshot
         .routes
         .get(route_slug)
         .ok_or_else(|| RoutingError::RouteNotFound(route_slug.clone()))?;
-
     if !route.operations.contains(&operation) {
         return Err(RoutingError::OperationNotSupported {
             route: route_slug.clone(),
             operation,
         });
     }
-
-    let mut groups: BTreeMap<u16, Vec<RankedTarget<'_>>> = BTreeMap::new();
-    for target in &route.targets {
-        let Some(provider) = snapshot.providers.get(&target.provider_id) else {
-            continue;
-        };
-        if !provider.supports(&target.upstream_model, operation, surface, mode) {
-            continue;
-        }
-        if !eligible(provider, target) {
-            continue;
-        }
-
-        groups
-            .entry(target.priority)
-            .or_default()
-            .push(RankedTarget {
-                target,
-                provider,
-                score: weighted_rendezvous_score(
-                    route.routing_id,
-                    target.routing_id,
-                    target.weight,
-                    operation,
-                    surface,
-                    mode,
-                    affinity_key,
-                ),
-            });
-    }
-
-    let maximum = usize::from(route.max_attempts.get());
-    let mut attempts = Vec::with_capacity(maximum);
-    for (priority, mut group) in groups {
-        group.sort_by(|left, right| {
-            right
-                .score
-                .partial_cmp(&left.score)
-                .unwrap_or(Ordering::Equal)
-                .then_with(|| left.target.routing_id.cmp(&right.target.routing_id))
-        });
-
-        for ranked in group {
-            attempts.push(AttemptPlan {
-                generation_id: snapshot.generation.id,
-                route_id: route.id,
-                target_id: ranked.target.id,
-                routing_id: ranked.target.routing_id,
-                provider_id: ranked.provider.id,
-                provider_revision_id: ranked.provider.revision_id,
-                provider_kind: ranked.provider.kind,
-                upstream_model: ranked.target.upstream_model.clone(),
-                timeout: ranked.target.timeout,
-                priority,
-            });
-            if attempts.len() == maximum {
-                return Ok(attempts);
-            }
-        }
-    }
-
-    if attempts.is_empty() {
-        return Err(RoutingError::NoEligibleTargets {
-            route: route_slug.clone(),
-            operation,
-            surface,
-            mode,
-        });
-    }
-
-    Ok(attempts)
-}
-
-struct RankedTarget<'a> {
-    target: &'a Target,
-    provider: &'a Provider,
-    score: f64,
+    crate::inference::provider_selection::explain_capability(
+        snapshot,
+        route_slug,
+        operation,
+        surface,
+        mode,
+        affinity_key,
+        None,
+        &crate::routes::policy::RoutingPreferences::default(),
+    )
+    .ok()
+    .filter(|selection| !selection.attempts.is_empty())
+    .map(|selection| selection.attempts)
+    .ok_or(RoutingError::NoEligibleTargets {
+        route: route_slug.clone(),
+        operation,
+        surface,
+        mode,
+    })
 }
 
 /// Returns the deterministic weighted-rendezvous score used for route target

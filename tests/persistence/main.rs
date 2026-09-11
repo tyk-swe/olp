@@ -30,3 +30,5 @@ mod runtime_publication_postgres;
 mod spend_controls_postgres;
 mod spend_recovery_postgres;
 mod worker_ha_postgres;
+
+mod provider_flexibility_postgres;

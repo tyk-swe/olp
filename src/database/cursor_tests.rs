@@ -108,6 +108,7 @@ fn validates_exact_non_negative_decimal_prices() {
 #[test]
 fn rejects_duplicate_pricing_dimensions_within_a_scope() {
     let price = PriceInput {
+        vendor_id: None,
         provider_kind: ProviderKind::OpenAi,
         provider_id: None,
         model: "model".to_owned(),
@@ -128,6 +129,7 @@ fn rejects_duplicate_pricing_dimensions_within_a_scope() {
 #[test]
 fn accepts_unit_only_media_pricing() {
     validate_prices(&[PriceInput {
+        vendor_id: None,
         provider_kind: ProviderKind::OpenAi,
         provider_id: None,
         model: "image-model".to_owned(),

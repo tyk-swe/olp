@@ -81,6 +81,7 @@ fn install_two_target_streams(
     manager
         .install(
             Snapshot {
+                routing: Default::default(),
                 generation: RuntimeGeneration {
                     id: RuntimeGenerationId::new(),
                     ordinal: 1,
@@ -285,57 +286,63 @@ fn post_connect_failure_obeys_media_ambiguity_policy() {
 }
 
 #[tokio::test]
-async fn retryable_first_canonical_error_fails_over_before_commit() {
-    let second_calls = Arc::new(AtomicUsize::new(0));
-    let (runtime, attempts) = install_two_target_streams(
-        OperationKind::Generation,
-        Arc::new(CountingFiniteTransport {
-            calls: Arc::new(AtomicUsize::new(0)),
-            events: vec![
-                Event::new(
-                    0,
-                    Kind::Error {
-                        error: Error {
-                            class: ErrorClass::RateLimit,
-                            message: "provider throttled the request".to_owned(),
-                            provider_code: Some("rate_limit".to_owned()),
-                            retryable: true,
+async fn retryable_and_authentication_first_errors_fail_over_before_commit() {
+    for (class, retryable, error_class, status) in [
+        (ErrorClass::RateLimit, true, "rate_limit", 429),
+        (ErrorClass::Authentication, false, "upstream_client", 502),
+    ] {
+        let second_calls = Arc::new(AtomicUsize::new(0));
+        let (runtime, attempts) = install_two_target_streams(
+            OperationKind::Generation,
+            Arc::new(CountingFiniteTransport {
+                calls: Arc::new(AtomicUsize::new(0)),
+                events: vec![
+                    Event::new(
+                        0,
+                        Kind::Error {
+                            error: Error {
+                                class,
+                                message: "provider rejected the request".to_owned(),
+                                provider_code: Some(error_class.to_owned()),
+                                retryable,
+                            },
                         },
-                    },
-                ),
-                Event::new(1, Kind::Done),
-            ],
-        }),
-        Arc::new(CountingFiniteTransport {
-            calls: second_calls.clone(),
-            events: generation_stream_events("recovered"),
-        }),
-    );
-    let success = match execute(
-        Context {
-            runtime: &runtime,
-            overall_timeout: Duration::from_millis(200),
-            max_attempts: std::num::NonZeroU16::new(2).unwrap(),
-            media_spool: Arc::new(UnavailableSpool),
-            max_inline_media_bytes: 1024 * 1024,
-            circuits: &Breaker::default(),
-            on_attempt_started: None,
-            trace: None,
-        },
-        attempts,
-        streaming_request_metadata(OperationKind::Generation),
-        streaming_generation_operation(),
-    )
-    .await
-    {
-        Ok(success) => success,
-        Err(_) => panic!("retryable pre-commit canonical error must use the next target"),
-    };
-    assert_eq!(success.attempts.len(), 2);
-    assert_eq!(
-        success.attempts[0].error_class.as_deref(),
-        Some("rate_limit")
-    );
-    assert!(!success.attempts[0].committed);
-    assert_eq!(second_calls.load(Ordering::SeqCst), 1);
+                    ),
+                    Event::new(1, Kind::Done),
+                ],
+            }),
+            Arc::new(CountingFiniteTransport {
+                calls: second_calls.clone(),
+                events: generation_stream_events("recovered"),
+            }),
+        );
+        let success = match execute(
+            Context {
+                runtime: &runtime,
+                overall_timeout: Duration::from_millis(200),
+                max_attempts: std::num::NonZeroU16::new(2).unwrap(),
+                media_spool: Arc::new(UnavailableSpool),
+                max_inline_media_bytes: 1024 * 1024,
+                circuits: &Breaker::default(),
+                on_attempt_started: None,
+                trace: None,
+            },
+            attempts,
+            streaming_request_metadata(OperationKind::Generation),
+            streaming_generation_operation(),
+        )
+        .await
+        {
+            Ok(success) => success,
+            Err(_) => panic!("retryable pre-commit canonical error must use the next target"),
+        };
+        assert_eq!(success.attempts.len(), 2);
+        assert_eq!(
+            success.attempts[0].error_class.as_deref(),
+            Some(error_class)
+        );
+        assert!(!success.attempts[0].committed);
+        assert_eq!(second_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(success.attempts[0].status_code, Some(status));
+    }
 }

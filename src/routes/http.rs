@@ -1,10 +1,14 @@
 pub mod create;
+pub mod policy;
 
 pub mod manage;
 
 pub(crate) fn router()
 -> utoipa_axum::router::OpenApiRouter<crate::http::control::state::ManagementState> {
     utoipa_axum::router::OpenApiRouter::new()
+        .routes(utoipa_axum::routes!(policy::get_routing_policy))
+        .routes(utoipa_axum::routes!(policy::put_routing_policy))
+        .routes(utoipa_axum::routes!(policy::simulate_routing))
         .routes(utoipa_axum::routes!(
             crate::routes::http::create::activate_route_draft
         ))

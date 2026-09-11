@@ -141,10 +141,13 @@ async fn build_connector(
     let connector = match connector_configuration_with_policy(config, policy, limits)? {
         ConnectorConfiguration::OpenAi(configuration) => {
             let key = OpenAiApiKey::new(
-                text_credential(credential, "OpenAI provider credential is missing")?.to_owned(),
+                crate::providers::http_options::key_text(config, credential)?.to_owned(),
             )
             .map_err(Error::credential)?;
-            let connector = Arc::new(OpenAiConnector::new(configuration, key));
+            let connector = Arc::new(OpenAiConnector::new(configuration, key).with_options(
+                config.options.clone(),
+                crate::providers::http_options::headers(config, credential)?,
+            ));
             if kind == crate::providers::runtime_model::ProviderKind::OpenAiCompatible {
                 ProviderConnector::OpenAiCompatible(connector)
             } else {
@@ -153,17 +156,25 @@ async fn build_connector(
         }
         ConnectorConfiguration::Anthropic(configuration) => {
             let key = AnthropicApiKey::new(
-                text_credential(credential, "Anthropic provider credential is missing")?.to_owned(),
+                crate::providers::http_options::key_text(config, credential)?.to_owned(),
             )
             .map_err(Error::credential)?;
-            ProviderConnector::Anthropic(Arc::new(AnthropicConnector::new(configuration, key)))
+            ProviderConnector::Anthropic(Arc::new(
+                AnthropicConnector::new(configuration, key)
+                    .with_options(config.options.clone())
+                    .with_headers(crate::providers::http_options::headers(config, credential)?),
+            ))
         }
         ConnectorConfiguration::Gemini(configuration) => {
             let key = GeminiApiKey::new(
-                text_credential(credential, "Gemini provider credential is missing")?.to_owned(),
+                crate::providers::http_options::key_text(config, credential)?.to_owned(),
             )
             .map_err(Error::credential)?;
-            ProviderConnector::Gemini(Arc::new(GeminiConnector::new(configuration, key)))
+            ProviderConnector::Gemini(Arc::new(
+                GeminiConnector::new(configuration, key)
+                    .with_options(config.options.clone())
+                    .with_headers(crate::providers::http_options::headers(config, credential)?),
+            ))
         }
         ConnectorConfiguration::Vertex {
             configuration,
@@ -214,7 +225,16 @@ async fn build_connector(
                 text_credential(credential, "Azure OpenAI credential is missing")?.to_owned(),
             )
             .map_err(Error::credential)?;
-            ProviderConnector::AzureOpenAi(Arc::new(AzureOpenAiConnector::new(*configuration, key)))
+            ProviderConnector::AzureOpenAi(Arc::new(
+                AzureOpenAiConnector::configured(
+                    *configuration,
+                    key,
+                    config.options.clone(),
+                    policy,
+                    limits,
+                )
+                .map_err(Error::configuration)?,
+            ))
         }
     };
     Ok(connector)

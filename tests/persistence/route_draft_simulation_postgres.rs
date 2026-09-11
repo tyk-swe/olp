@@ -120,6 +120,7 @@ async fn route_draft_simulation_matches_activated_runtime_attempts() {
         "openai".parse().unwrap(),
         "unary".parse().unwrap(),
         seed,
+        &Default::default(),
     )
     .await
     .unwrap();
@@ -220,7 +221,7 @@ async fn route_draft_simulation_matches_activated_runtime_attempts() {
     let compiled = olp::runtime::publication::compiler::compile_and_publish_runtime(&pool, actor)
         .await
         .unwrap();
-    let runtime: Snapshot = serde_json::from_slice(&compiled.payload).unwrap();
+    let runtime: Snapshot = Snapshot::from_persisted_slice(&compiled.payload).unwrap();
     let route_slug = RouteSlug::parse("simulation").unwrap();
     let route = runtime.routes.get(&route_slug).unwrap();
     assert_eq!(route.id.as_uuid(), second_activation.route_id);

@@ -62,6 +62,7 @@ async fn certified_cross_protocol_tuple_is_runtime_reachable_without_semantic_lo
     let fixture = test_gateway();
     let pinned = fixture.state.runtime().pin();
     let mut snapshot = Snapshot {
+        routing: Default::default(),
         generation: RuntimeGeneration {
             id: RuntimeGenerationId::new(),
             ordinal: pinned.generation.ordinal + 1,

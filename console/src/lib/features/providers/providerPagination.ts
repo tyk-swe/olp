@@ -4,4 +4,9 @@ import {
   type CursorHistory
 } from '$lib/lists/pagination';
 
-export const providerList = listState<CursorHistory>(emptyCursorHistory);
+export type ProviderListState = CursorHistory & { search: string };
+
+export const providerList = listState<ProviderListState>(() => ({
+  ...emptyCursorHistory(),
+  search: ''
+}));

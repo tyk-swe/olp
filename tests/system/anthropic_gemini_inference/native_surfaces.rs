@@ -1,6 +1,105 @@
 use super::*;
 
 #[tokio::test]
+async fn native_model_discovery_applies_request_and_operator_routing_constraints() {
+    for layer in ["request", "installation", "key", "credential"] {
+        let fixture = test_gateway();
+        if layer != "request" {
+            let runtime = fixture.state.runtime().pin();
+            let mut snapshot = (**runtime).clone();
+            snapshot.generation.ordinal += 1;
+            snapshot.generation.id = RuntimeGenerationId::new();
+            match layer {
+                "installation" => {
+                    snapshot
+                        .routing
+                        .installation
+                        .constraints
+                        .require_zero_data_retention = true
+                }
+                "key" => {
+                    snapshot
+                        .api_keys
+                        .values_mut()
+                        .next()
+                        .unwrap()
+                        .routing_policy
+                        .constraints
+                        .require_zero_data_retention = true
+                }
+                "credential" => {
+                    for id in snapshot.providers.keys() {
+                        snapshot.routing.credentials.insert(
+                            *id,
+                            vec![olp::providers::pool::CredentialSlot {
+                                id: uuid::Uuid::now_v7(),
+                                name: "restricted".into(),
+                                allowed_routes: vec!["other-route".into()],
+                                ..Default::default()
+                            }],
+                        );
+                    }
+                }
+                _ => unreachable!(),
+            }
+            let transports = snapshot
+                .providers
+                .keys()
+                .map(|id| (*id, runtime.transport(*id).unwrap()))
+                .collect();
+            fixture
+                .state
+                .runtime()
+                .install(snapshot, transports)
+                .unwrap();
+        }
+        let app = gateway_router_for_test(fixture.state.clone());
+        for (prefix, header, collection) in [
+            ("/anthropic/v1/models", "x-api-key", "data"),
+            ("/gemini/v1/models", "x-goog-api-key", "models"),
+            ("/gemini/v1beta/models", "x-goog-api-key", "models"),
+        ] {
+            for single in [false, true] {
+                let uri = if single {
+                    format!("{prefix}/team-default")
+                } else {
+                    prefix.to_owned()
+                };
+                let mut request = Request::get(uri).header(header, &fixture.key);
+                if layer == "request" {
+                    request =
+                        request.header("x-olp-routing", r#"{"require_zero_data_retention":true}"#);
+                }
+                let response = app
+                    .clone()
+                    .oneshot(request.body(Body::empty()).unwrap())
+                    .await
+                    .unwrap();
+                assert_eq!(
+                    response.status(),
+                    if single {
+                        StatusCode::NOT_FOUND
+                    } else {
+                        StatusCode::OK
+                    },
+                    "{layer} {prefix}"
+                );
+                if !single {
+                    assert!(
+                        body_json(response).await[collection]
+                            .as_array()
+                            .unwrap()
+                            .is_empty(),
+                        "{layer} {prefix}"
+                    );
+                }
+            }
+        }
+        assert!(fixture.calls.lock().unwrap().is_empty());
+    }
+}
+
+#[tokio::test]
 async fn anthropic_unary_count_models_and_native_errors_use_the_shared_pipeline() {
     let fixture = test_gateway();
     let app = gateway_router_for_test(fixture.state.clone());

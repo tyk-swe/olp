@@ -23,6 +23,7 @@ pub(super) async fn exercise(pool: &PgPool, actor: Uuid, master_key: &MasterKey)
             model_id: Some(model_id),
             name: "primary-openai".to_owned(),
             configuration: olp::providers::configuration::ProviderConfiguration {
+                options: Default::default(),
                 kind: ProviderKind::OpenAi,
                 endpoint: Some("https://api.openai.com/v1/".to_owned()),
                 cloud_region: None,
@@ -48,7 +49,7 @@ pub(super) async fn exercise(pool: &PgPool, actor: Uuid, master_key: &MasterKey)
     .await
     .unwrap()
     .expect_executed();
-    let listed = olp::providers::repository::list_providers(pool, None, 10)
+    let listed = olp::providers::repository::list_providers(pool, None, 10, "")
         .await
         .unwrap();
     assert_eq!(listed.items.len(), 1);
@@ -77,6 +78,7 @@ pub(super) async fn exercise(pool: &PgPool, actor: Uuid, master_key: &MasterKey)
             model_id: Some(Uuid::now_v7()),
             name: "vertex-draft".to_owned(),
             configuration: olp::providers::configuration::ProviderConfiguration {
+                options: Default::default(),
                 kind: ProviderKind::VertexAi,
                 endpoint: None,
                 cloud_region: Some("us-central1".to_owned()),
@@ -261,7 +263,8 @@ pub(super) async fn exercise(pool: &PgPool, actor: Uuid, master_key: &MasterKey)
         .await,
         Err(olp::providers::error::Error::IdempotencyConflict)
     ));
-    let initial_runtime: Snapshot = serde_json::from_slice(&activated.release.payload).unwrap();
+    let initial_runtime: Snapshot =
+        Snapshot::from_persisted_slice(&activated.release.payload).unwrap();
     let initial_secrets =
         olp::providers::runtime::runtime_provider_configurations(pool, &initial_runtime)
             .await
@@ -357,7 +360,8 @@ pub(super) async fn exercise(pool: &PgPool, actor: Uuid, master_key: &MasterKey)
         olp::providers::runtime::runtime_provider_configurations(pool, &initial_runtime).await,
         Err(Error::InvalidCredential)
     ));
-    let rotated_runtime: Snapshot = serde_json::from_slice(&rotation_release.payload).unwrap();
+    let rotated_runtime: Snapshot =
+        Snapshot::from_persisted_slice(&rotation_release.payload).unwrap();
     let rotated_secrets =
         olp::providers::runtime::runtime_provider_configurations(pool, &rotated_runtime)
             .await
@@ -433,6 +437,7 @@ pub(super) async fn exercise(pool: &PgPool, actor: Uuid, master_key: &MasterKey)
         "openai".parse().unwrap(),
         "streaming".parse().unwrap(),
         "stable-affinity",
+        &Default::default(),
     )
     .await
     .unwrap();
@@ -679,7 +684,8 @@ pub(super) async fn exercise(pool: &PgPool, actor: Uuid, master_key: &MasterKey)
     assert_eq!(key_record.daily_cost_limit, Some(Decimal::new(10, 2)));
     assert_eq!(key_record.monthly_cost_limit, None);
     assert_eq!(key_record.etag, key_update.etag);
-    let updated_runtime: Snapshot = serde_json::from_slice(&key_update.release.payload).unwrap();
+    let updated_runtime: Snapshot =
+        Snapshot::from_persisted_slice(&key_update.release.payload).unwrap();
     let updated_runtime_key = updated_runtime
         .api_keys
         .values()
@@ -798,7 +804,7 @@ pub(super) async fn exercise(pool: &PgPool, actor: Uuid, master_key: &MasterKey)
     );
 
     let mut historical_runtime: Snapshot =
-        serde_json::from_slice(&key_creation_release.payload).unwrap();
+        Snapshot::from_persisted_slice(&key_creation_release.payload).unwrap();
     assert!(
         historical_runtime
             .api_keys

@@ -10,7 +10,6 @@ use crate::inference::failover::Context;
 use crate::inference::failover::ExecutionOutput;
 use crate::inference::failover::execute;
 use crate::inference::lifecycle::UsageCapture;
-use crate::inference::selection::select_representable_attempts_filtered;
 use crate::inference::telemetry::elapsed_ms;
 use crate::inference::tracing::AttemptTrace;
 use crate::inference::tracing::RequestTrace;
@@ -31,6 +30,7 @@ use crate::usage::emitter::Emitter;
 const PLAYGROUND_GENERATION_ONLY: &str = "The playground supports generation only.";
 
 pub struct SessionGenerationExecution {
+    pub decisions: Vec<crate::inference::provider_selection::RoutingDecision>,
     pub events: Vec<Event>,
     pub request_id: RequestId,
     pub route_slug: RouteSlug,
@@ -200,13 +200,14 @@ impl Executor {
         operation: Operation,
         surface: Surface,
         trace: Option<RequestTrace>,
+        preferences: &crate::routes::policy::RoutingPreferences,
     ) -> Result<SessionGenerationExecution, InferenceError> {
         let request_media = RequestMediaGuard::new(
             Arc::clone(&self.media_spool),
             operation_media_handles(&operation),
         );
         let result = self
-            .execute_session_generation_inner(operation, surface, trace)
+            .execute_session_generation_inner(operation, surface, trace, preferences)
             .await;
         request_media.cleanup().await;
         result
@@ -217,6 +218,7 @@ impl Executor {
         operation: Operation,
         surface: Surface,
         trace: Option<RequestTrace>,
+        preferences: &crate::routes::policy::RoutingPreferences,
     ) -> Result<SessionGenerationExecution, InferenceError> {
         if operation.kind() != OperationKind::Generation {
             return Err(InferenceError::invalid_request(PLAYGROUND_GENERATION_ONLY));
@@ -234,13 +236,18 @@ impl Executor {
                 snapshot.generation.id.as_uuid(),
             );
         }
-        let attempts = select_representable_attempts_filtered(
+        let preferences = self
+            .routing_preferences(&snapshot, &route_slug, preferences)
+            .await;
+        let selection = crate::inference::provider_selection::select(
             &snapshot,
             &route_slug,
             &operation,
             surface,
             TransportMode::Unary,
             request_id.as_uuid().as_bytes(),
+            None,
+            &preferences,
             |_, target| self.circuits.is_selectable(target.routing_id),
         )?;
         let route = snapshot
@@ -259,7 +266,7 @@ impl Executor {
                 on_attempt_started: None,
                 trace: trace.as_ref(),
             },
-            attempts,
+            selection.attempts,
             RequestMetadata {
                 request_id,
                 operation: OperationKind::Generation,
@@ -303,10 +310,82 @@ impl Executor {
         .await?;
         session_trace.finish(None);
         Ok(SessionGenerationExecution {
+            decisions: selection.decisions,
             events,
             request_id,
             route_slug,
             latency_ms: elapsed_ms(started.elapsed()),
         })
+    }
+}
+
+impl Executor {
+    pub(crate) async fn routing_preferences(
+        &self,
+        snapshot: &crate::runtime::snapshot::Snapshot,
+        route_slug: &RouteSlug,
+        preferences: &crate::routes::policy::RoutingPreferences,
+    ) -> crate::routes::policy::RoutingPreferences {
+        let mut preferences = preferences.clone();
+        let Some(backend) = self.limiter.current() else {
+            return preferences;
+        };
+        let Some(route) = snapshot.routes.get(route_slug) else {
+            return preferences;
+        };
+        let providers = route
+            .targets
+            .iter()
+            .map(|t| t.provider_id)
+            .collect::<std::collections::BTreeSet<_>>();
+        let credentials = providers
+            .iter()
+            .filter_map(|id| snapshot.providers.get(id))
+            .flat_map(|provider| {
+                snapshot
+                    .routing
+                    .credentials
+                    .get(&provider.id)
+                    .map(|slots| {
+                        slots
+                            .iter()
+                            .map(|s| (provider.id.as_uuid(), s.id, s.credential_version_id))
+                            .collect::<Vec<_>>()
+                    })
+                    .unwrap_or_else(|| {
+                        vec![(
+                            provider.id.as_uuid(),
+                            provider.id.as_uuid(),
+                            provider.active_credential.map(|id| id.as_uuid()),
+                        )]
+                    })
+            })
+            .collect::<Vec<_>>();
+        use futures::{StreamExt, stream};
+        let mut checks = stream::iter(credentials.into_iter().map(|(provider, slot, version)| {
+            let backend = backend.clone();
+            async move {
+                (
+                    slot,
+                    crate::providers::pool_transport::is_cooling(
+                        backend.as_ref(),
+                        provider,
+                        slot,
+                        version,
+                    )
+                    .await,
+                )
+            }
+        }))
+        .buffer_unordered(16);
+        let deadline = tokio::time::Instant::now()
+            + (route.overall_timeout.as_duration() / 10).min(std::time::Duration::from_millis(250));
+        while let Ok(Some((slot, cooling))) = tokio::time::timeout_at(deadline, checks.next()).await
+        {
+            if cooling == Some(true) {
+                preferences.cooling_slots.insert(slot);
+            }
+        }
+        preferences
     }
 }

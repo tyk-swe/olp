@@ -25,9 +25,12 @@ export type ProviderDraft = {
   model: string;
   /** Console-only selection; creation persists the resolved ordinary fields. */
   presetId: string;
+  credentialHeaders?: string;
+  options?: Provider['configuration']['options'];
 };
 
 export type ProviderEditValues = {
+  options?: Provider['configuration']['options'];
   name: string;
   endpoint: string;
   apiVersion: string;
@@ -55,6 +58,19 @@ export type ProviderStatusValue = Pick<ProviderReadiness, 'state'> & {
 
 /** Badge class for a provider status line. */
 export type ProviderStatusTone = 'success' | 'warning' | 'danger';
+
+/** Connection options for a provider with no vendor, limits, or model metadata. */
+export function emptyProviderOptions(): NonNullable<
+  Provider['configuration']['options']
+> {
+  return {
+    vendor_id: null,
+    limits: null,
+    credential_headers: [],
+    parameter_defaults: {},
+    models: {}
+  };
+}
 
 export function createProviderDraft(
   spec: ProviderKindCapability
@@ -85,6 +101,8 @@ export function setProviderDraftKind(
   // operator never chose for it, and a secret typed for one upstream must never
   // be submitted as another upstream's credential.
   draft.presetId = '';
+  draft.options = undefined;
+  draft.credentialHeaders = '';
   draft.credential = '';
   draft.endpoint = '';
   draft.apiVersion = '';
@@ -99,6 +117,11 @@ export function selectProviderPreset(
   spec: ProviderKindCapability,
   presetId: string
 ): ProviderPreset | null {
+  if (draft.presetId !== presetId) {
+    draft.options = undefined;
+    draft.credential = '';
+    draft.credentialHeaders = '';
+  }
   if (!presetId) {
     draft.presetId = '';
     draft.endpoint = '';
@@ -181,6 +204,11 @@ export function validateProviderDraft(
     .map((field) => field.label.toLowerCase());
   if (!draft.name.trim()) missing.unshift('name');
   if (
+    ['voyage', 'perplexity', 'cohere'].includes(draft.presetId) &&
+    !draft.model.trim()
+  )
+    missing.push('probe model');
+  if (
     !options.credentialAlreadyStored &&
     requiresCredential(spec, draft.authMode) &&
     !draft.credential.trim()
@@ -201,6 +229,16 @@ export function buildCreateProviderInput(
     name: draft.name.trim(),
     configuration: {
       kind: draft.kind,
+      options: {
+        ...emptyProviderOptions(),
+        ...draft.options,
+        vendor_id: draft.presetId || draft.options?.vendor_id || null,
+        credential_headers:
+          draft.credentialHeaders
+            ?.split(/[\n,]/)
+            .map((s) => s.trim())
+            .filter(Boolean) ?? []
+      },
       auth_mode: draft.authMode,
       endpoint: hasCustomEndpoint(spec) ? draft.endpoint.trim() || null : null,
       api_version: hasApiVersion(spec) ? draft.apiVersion.trim() || null : null,
@@ -225,6 +263,7 @@ export function providerEditValues(
   spec: ProviderKindCapability
 ): ProviderEditValues {
   return {
+    options: current.configuration.options,
     name: current.name,
     endpoint: hasCustomEndpoint(spec)
       ? (current.configuration.endpoint ?? '')
@@ -253,6 +292,7 @@ export function buildUpdateProviderInput(
     name: values.name.trim(),
     configuration: {
       kind: spec.kind,
+      options: values.options,
       endpoint: hasCustomEndpoint(spec) ? values.endpoint.trim() || null : null,
       api_version: hasApiVersion(spec)
         ? values.apiVersion.trim() || null

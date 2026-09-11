@@ -64,7 +64,7 @@ impl BearerTokenProvider for ApplicationDefaultTokenProvider {
                 .credentials
                 .access_token()
                 .await
-                .map_err(|_| BearerTokenError)?;
+                .map_err(|_| BearerTokenError::Unavailable)?;
             SecretBearerToken::new(token.token)
         })
     }
@@ -143,7 +143,7 @@ impl ServiceAccountTokenProvider {
     async fn refresh(&self) -> Result<CachedToken, BearerTokenError> {
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .map_err(|_| BearerTokenError)?
+            .map_err(|_| BearerTokenError::Unavailable)?
             .as_secs();
         let claims = ServiceAccountClaims {
             iss: &self.credential.client_email,
@@ -155,14 +155,15 @@ impl ServiceAccountTokenProvider {
         let mut header = Header::new(Algorithm::RS256);
         header.kid = Some(self.credential.private_key_id.clone());
         let key = EncodingKey::from_rsa_pem(self.credential.private_key.as_bytes())
-            .map_err(|_| BearerTokenError)?;
-        let assertion =
-            Zeroizing::new(encode(&header, &claims, &key).map_err(|_| BearerTokenError)?);
+            .map_err(|_| BearerTokenError::Unavailable)?;
+        let assertion = Zeroizing::new(
+            encode(&header, &claims, &key).map_err(|_| BearerTokenError::Unavailable)?,
+        );
         let client = self
             .endpoint
             .pinned_client(Duration::from_secs(5))
             .await
-            .map_err(|_| BearerTokenError)?;
+            .map_err(|_| BearerTokenError::Unavailable)?;
         let response = timeout(
             Duration::from_secs(10),
             client
@@ -175,10 +176,36 @@ impl ServiceAccountTokenProvider {
                 .send(),
         )
         .await
-        .map_err(|_| BearerTokenError)?
-        .map_err(|_| BearerTokenError)?;
+        .map_err(|_| BearerTokenError::Unavailable)?
+        .map_err(|_| BearerTokenError::Unavailable)?;
         if response.status() != StatusCode::OK {
-            return Err(BearerTokenError);
+            if matches!(
+                response.status(),
+                StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN
+            ) {
+                return Err(BearerTokenError::Authentication);
+            }
+            if response.status() == StatusCode::BAD_REQUEST {
+                let body = read_bounded_token_response(response).await?;
+                let rejected =
+                    serde_json::from_slice::<TokenErrorResponse>(&body).is_ok_and(|error| {
+                        matches!(
+                            error.error.as_str(),
+                            "invalid_grant"
+                                | "invalid_client"
+                                | "unauthorized_client"
+                                | "deleted_client"
+                                | "disabled_client"
+                                | "access_denied"
+                                | "admin_policy_enforced"
+                                | "org_internal"
+                        )
+                    });
+                if rejected {
+                    return Err(BearerTokenError::Authentication);
+                }
+            }
+            return Err(BearerTokenError::Unavailable);
         }
         let content_type_ok = response
             .headers()
@@ -187,16 +214,16 @@ impl ServiceAccountTokenProvider {
             .and_then(|value| value.split(';').next())
             .is_some_and(|value| value.trim().eq_ignore_ascii_case("application/json"));
         if !content_type_ok {
-            return Err(BearerTokenError);
+            return Err(BearerTokenError::Unavailable);
         }
         let bytes = read_bounded_token_response(response).await?;
         let response: TokenResponse =
-            serde_json::from_slice(&bytes).map_err(|_| BearerTokenError)?;
+            serde_json::from_slice(&bytes).map_err(|_| BearerTokenError::Unavailable)?;
         if response.token_type != "Bearer"
             || response.expires_in < 30
             || response.access_token.trim().is_empty()
         {
-            return Err(BearerTokenError);
+            return Err(BearerTokenError::Unavailable);
         }
         Ok(CachedToken {
             value: Zeroizing::new(response.access_token),
@@ -220,7 +247,7 @@ fn token_refresh_deadline(expires_in: u64) -> Result<Instant, BearerTokenError> 
         .checked_add(Duration::from_secs(
             expires_in.saturating_sub(refresh_margin),
         ))
-        .ok_or(BearerTokenError)
+        .ok_or(BearerTokenError::Unavailable)
 }
 
 impl fmt::Debug for ServiceAccountTokenProvider {
@@ -264,6 +291,11 @@ struct TokenResponse {
     access_token: String,
     token_type: String,
     expires_in: u64,
+}
+
+#[derive(Deserialize)]
+struct TokenErrorResponse {
+    error: String,
 }
 
 fn deserialize_zeroizing_string<'de, D>(deserializer: D) -> Result<Zeroizing<String>, D::Error>
@@ -355,16 +387,16 @@ async fn read_bounded_token_response(
     let mut output = Vec::new();
     while let Some(chunk) = timeout(Duration::from_secs(10), source.next())
         .await
-        .map_err(|_| BearerTokenError)?
+        .map_err(|_| BearerTokenError::Unavailable)?
     {
-        let chunk = chunk.map_err(|_| BearerTokenError)?;
+        let chunk = chunk.map_err(|_| BearerTokenError::Unavailable)?;
         if output.len().saturating_add(chunk.len()) > MAX_TOKEN_RESPONSE_BYTES {
-            return Err(BearerTokenError);
+            return Err(BearerTokenError::Unavailable);
         }
         output.extend_from_slice(&chunk);
     }
     if output.is_empty() {
-        return Err(BearerTokenError);
+        return Err(BearerTokenError::Unavailable);
     }
     Ok(output)
 }

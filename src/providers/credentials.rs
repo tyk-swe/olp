@@ -146,12 +146,15 @@ pub async fn list_provider_credentials(
     };
     let items = sqlx::query_as::<_, ListProviderCredentialsRow>(
         "SELECT cv.id, cv.version, \
-                    COALESCE(cv.id = ar.credential_version_id, false) AS \"active\", \
-                    COALESCE(p.state = 'draft'::provider_state \
-                     AND cv.id = p.active_credential_version_id, false) AS \"draft_selected\", \
+                    EXISTS (SELECT 1 FROM provider_revision_credentials pc \
+                            WHERE pc.provider_revision_id = p.active_revision_id \
+                              AND pc.credential_version_id = cv.id) AS \"active\", \
+                    (p.state = 'draft'::provider_state AND EXISTS ( \
+                       SELECT 1 FROM provider_credential_slots s \
+                       WHERE s.provider_id = p.id AND s.enabled \
+                         AND s.selected_version_id = cv.id)) AS \"draft_selected\", \
                     cv.created_at, cv.revoked_at FROM provider_credential_versions cv \
              JOIN providers p ON p.id = cv.provider_id \
-             LEFT JOIN provider_revisions ar ON ar.id = p.active_revision_id \
              WHERE cv.provider_id = $1 \
              AND ($2::int IS NULL OR cv.version < $2) \
              ORDER BY cv.version DESC LIMIT $3",
@@ -228,22 +231,16 @@ pub async fn revoke_provider_credential(
     {
         return Err(Error::IdempotencyConflict);
     }
-    let provider = sqlx::query_as::<_, RevokeProviderCredentialRow>(
-        "SELECT p.etag, p.active_credential_version_id, \
-                    ar.credential_version_id AS \"activated_credential_version_id\" \
-             FROM providers p LEFT JOIN provider_revisions ar ON ar.id = p.active_revision_id \
-             WHERE p.id = $1 FOR UPDATE OF p",
-    )
-    .bind(provider_id)
-    .fetch_optional(&mut *transaction)
-    .await?
-    .ok_or(Error::NotFound)?;
-    if provider.etag != expected_etag {
+    let etag = sqlx::query_scalar::<_, Uuid>("SELECT etag FROM providers WHERE id = $1 FOR UPDATE")
+        .bind(provider_id)
+        .fetch_optional(&mut *transaction)
+        .await?
+        .ok_or(Error::NotFound)?;
+    if etag != expected_etag {
         return Err(Error::PreconditionFailed);
     }
-    if provider.active_credential_version_id == Some(credential_id)
-        || provider.activated_credential_version_id == Some(credential_id)
-    {
+    let used_by_pool: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM provider_revision_credentials pc JOIN providers p ON p.active_revision_id=pc.provider_revision_id WHERE p.id=$1 AND pc.credential_version_id=$2) OR EXISTS(SELECT 1 FROM provider_credential_slots s WHERE s.provider_id=$1 AND s.selected_version_id=$2 AND s.enabled)").bind(provider_id).bind(credential_id).fetch_one(&mut *transaction).await?;
+    if used_by_pool {
         return Err(Error::InUse);
     }
     // Historic jobs carry their immutable provider revision. Even an
@@ -254,7 +251,7 @@ pub async fn revoke_provider_credential(
                SELECT 1 FROM async_media_jobs j
                JOIN provider_revisions pr ON pr.id = j.provider_revision_id
                WHERE j.provider_id = $1 AND j.lifecycle_state <> 'deleted'
-                 AND pr.credential_version_id = $2
+                 AND (j.credential_version_id = $2 OR (j.credential_version_id IS NULL AND pr.credential_version_id = $2))
              ) AS \"value\"",
     )
     .bind(provider_id)
@@ -389,11 +386,4 @@ struct ActiveProviderCredentialSecretRow {
     ciphertext: Vec<u8>,
     nonce: Vec<u8>,
     master_key_version: i32,
-}
-
-#[derive(sqlx::FromRow)]
-struct RevokeProviderCredentialRow {
-    etag: uuid::Uuid,
-    active_credential_version_id: Option<uuid::Uuid>,
-    activated_credential_version_id: Option<uuid::Uuid>,
 }

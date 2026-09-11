@@ -177,6 +177,7 @@ fn test_state(streaming: bool) -> (GatewayState, String) {
         }],
     };
     let snapshot = Snapshot {
+        routing: Default::default(),
         generation: RuntimeGeneration {
             id: RuntimeGenerationId::new(),
             ordinal: 1,
@@ -187,6 +188,7 @@ fn test_state(streaming: bool) -> (GatewayState, String) {
         api_keys: BTreeMap::from([(
             lookup.clone(),
             ApiKey {
+                routing_policy: Default::default(),
                 id: ApiKeyId::new(),
                 lookup_id: lookup,
                 digest: ApiKeyDigest::new(material.digest),
@@ -274,6 +276,7 @@ fn test_principal(
 fn reinstall_api_keys(state: &GatewayState, api_keys: BTreeMap<ApiKeyLookupId, ApiKey>) {
     let pinned = state.runtime().pin();
     let snapshot = Snapshot {
+        routing: Default::default(),
         generation: RuntimeGeneration {
             id: RuntimeGenerationId::new(),
             ordinal: pinned.generation.ordinal + 1,
@@ -307,6 +310,7 @@ fn install_result(state: &GatewayState, operation: OperationKind, result: Canoni
         .unwrap();
     route.operations = BTreeSet::from([operation]);
     let snapshot = Snapshot {
+        routing: Default::default(),
         generation: RuntimeGeneration {
             id: RuntimeGenerationId::new(),
             ordinal: pinned.generation.ordinal + 1,
@@ -327,6 +331,7 @@ fn install_transport(state: &GatewayState, transport: Arc<dyn ProviderTransport>
     let pinned = state.runtime().pin();
     let provider_id = *pinned.providers.keys().next().unwrap();
     let snapshot = Snapshot {
+        routing: Default::default(),
         generation: RuntimeGeneration {
             id: RuntimeGenerationId::new(),
             ordinal: pinned.generation.ordinal + 1,

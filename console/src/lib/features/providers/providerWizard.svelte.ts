@@ -1,6 +1,7 @@
 import { providerKeys } from '$lib/features/providers/providerKeys';
 import { createQuery, skipToken, useQueryClient } from '@tanstack/svelte-query';
 import { onDestroy } from 'svelte';
+import { SvelteURLSearchParams } from 'svelte/reactivity';
 import {
   errorMessage as message,
   fieldIssues,
@@ -9,6 +10,7 @@ import {
 } from '$lib/api/http';
 import { emptyCursorHistory, resetCursor } from '$lib/lists/pagination';
 import {
+  getProvider,
   activateProvider,
   createProvider,
   probeProvider,
@@ -30,7 +32,6 @@ import { rotateProviderCredential } from '$lib/features/providers/credentials';
 import {
   authOptionsFor,
   buildCreateProviderInput,
-  buildUpdateProviderInput,
   certificationPrerequisiteReady,
   createProviderDraft,
   parseManualModelNames,
@@ -49,6 +50,7 @@ export class ProviderWizardState {
   providerKinds;
   draft = $state<ProviderDraft | null>(null);
   providerId = $state('');
+  copyLoaded = false;
   wizardProvider = $derived.by(() => this.wizardModels.data?.provider ?? null);
   wizardStep = $state(1);
   wizardModelPagination = $state(emptyCursorHistory());
@@ -151,30 +153,19 @@ export class ProviderWizardState {
       return;
     }
     await this.run('create', async () => {
+      const input = buildCreateProviderInput(current, spec);
       let id: string;
       if (existing) {
-        const updated = await updateProvider(
-          existing.id,
-          existing.etag,
-          buildUpdateProviderInput(
-            {
-              name: current.name,
-              endpoint: current.endpoint,
-              apiVersion: current.apiVersion,
-              cloudRegion: current.cloudRegion,
-              cloudProject: current.cloudProject,
-              deployment: current.deployment,
-              authMode: current.authMode
-            },
-            spec
-          )
-        );
+        const updated = await updateProvider(existing.id, existing.etag, {
+          name: input.name,
+          configuration: input.configuration
+        });
         if (current.credential) {
           await rotateProviderCredential(updated, current.credential);
         }
         id = updated.id;
       } else {
-        id = await createProvider(buildCreateProviderInput(current, spec));
+        id = await createProvider(input);
       }
       current.credential = '';
       this.providerId = id;
@@ -346,6 +337,39 @@ export class ProviderWizardState {
         current.authMode = spec.default_auth_mode;
       }
       if (!this.credentialRequired) current.credential = '';
+    });
+    $effect(() => {
+      const copy = globalThis.location
+        ? new SvelteURLSearchParams(globalThis.location.search).get('copy')
+        : null;
+      if (!copy || this.copyLoaded || !this.providerKinds.data) return;
+      this.copyLoaded = true;
+      void getProvider(copy)
+        .then((source) => {
+          const spec = this.providerKinds.data?.find(
+            (kind) => kind.kind === source.configuration.kind
+          );
+          if (!spec) return;
+          this.draft = {
+            ...createProviderDraft(spec),
+            name: `${source.name} copy`,
+            endpoint: source.configuration.endpoint ?? '',
+            cloudRegion: source.configuration.cloud_region ?? '',
+            cloudProject: source.configuration.cloud_project ?? '',
+            deployment: source.configuration.deployment ?? '',
+            apiVersion: source.configuration.api_version ?? '',
+            authMode: source.configuration.auth_mode,
+            presetId: source.configuration.options?.vendor_id ?? '',
+            options: source.configuration.options,
+            credentialHeaders:
+              source.configuration.options?.credential_headers?.join(', ') ??
+              '',
+            credential: ''
+          };
+        })
+        .catch((error) => {
+          this.errorMessage = message(error);
+        });
     });
     onDestroy(() => {
       void this.queryClient.cancelQueries({

@@ -218,13 +218,14 @@ impl TransportError {
     #[must_use]
     pub const fn allows_failover(&self) -> bool {
         !self.response_committed
-            && matches!(
-                self.class,
-                AttemptFailureClass::Connect
-                    | AttemptFailureClass::Timeout
-                    | AttemptFailureClass::RateLimit
-                    | AttemptFailureClass::UpstreamServer
-            )
+            && (matches!(self.upstream.status, Some(401))
+                || matches!(
+                    self.class,
+                    AttemptFailureClass::Connect
+                        | AttemptFailureClass::Timeout
+                        | AttemptFailureClass::RateLimit
+                        | AttemptFailureClass::UpstreamServer
+                ))
     }
 }
 

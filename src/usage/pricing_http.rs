@@ -80,6 +80,7 @@ impl From<PriceOperation> for OperationKind {
 
 #[derive(Debug, Deserialize, Serialize, ToSchema)]
 pub(crate) struct PriceRequest {
+    vendor_id: Option<String>,
     provider_kind: ProviderKind,
     #[schema(value_type = Option<String>, format = Uuid)]
     provider_id: Option<Uuid>,
@@ -97,6 +98,7 @@ pub(crate) struct PriceRequest {
 impl From<PriceRequest> for PriceInput {
     fn from(price: PriceRequest) -> Self {
         Self {
+            vendor_id: price.vendor_id,
             provider_kind: price.provider_kind,
             provider_id: price.provider_id,
             model: price.model,
@@ -118,6 +120,7 @@ pub(crate) struct PricingRevisionRequest {
 
 #[derive(Clone, Debug, Serialize, ToSchema)]
 pub(crate) struct PriceResponse {
+    vendor_id: Option<String>,
     provider_kind: ProviderKind,
     #[schema(value_type = Option<String>, format = Uuid)]
     provider_id: Option<Uuid>,
@@ -135,6 +138,7 @@ pub(crate) struct PriceResponse {
 impl From<PriceInput> for PriceResponse {
     fn from(price: PriceInput) -> Self {
         Self {
+            vendor_id: price.vendor_id,
             provider_kind: price.provider_kind,
             provider_id: price.provider_id,
             model: price.model,

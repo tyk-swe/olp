@@ -62,6 +62,8 @@ pub struct ProviderModelRecord {
 
 #[derive(Clone, Debug)]
 pub struct ProviderModelInventoryRecord {
+    pub available: bool,
+    pub metadata: crate::providers::options::ModelMetadata,
     pub provider_id: Uuid,
     pub provider_name: String,
     pub provider_kind: ProviderKind,
