@@ -21,11 +21,23 @@
     items: NavigationItem[];
   };
 
+  type NavigationEntry = {
+    label: string;
+    href: string;
+    items: NavigationItem[];
+  };
+
   let {
     role,
+    variant = 'list',
     label = 'Primary',
     onNavigate
-  }: { role: FixedRole; label?: string; onNavigate?: () => void } = $props();
+  }: {
+    role: FixedRole;
+    variant?: 'bar' | 'subnav' | 'list';
+    label?: string;
+    onNavigate?: () => void;
+  } = $props();
 
   const groups: NavigationGroup[] = [
     { items: [{ label: 'Overview', href: resolve('/'), icon: 'overview' }] },
@@ -141,86 +153,213 @@
       (excluded) => path === excluded || path.startsWith(`${excluded}/`)
     );
   }
+
+  // The top bar shows one link per group. Unlabelled groups, and groups the
+  // role trims to a single page, surface that page directly: a developer sees
+  // "API Keys" rather than an "Access" group that only contains it.
+  const entries = $derived.by<NavigationEntry[]>(() =>
+    groups.flatMap((group) => {
+      const items = group.items.filter(visible);
+      if (!items.length) return [];
+      if (!group.label || items.length === 1) {
+        return items.map((item) => ({
+          label: item.label,
+          href: item.href,
+          items: [item]
+        }));
+      }
+      return [{ label: group.label, href: items[0].href, items }];
+    })
+  );
+
+  const activeEntry = $derived(
+    entries.find((entry) => entry.items.some((item) => isActive(item.href)))
+  );
 </script>
 
-<nav aria-label={label}>
-  {#each groups as group (group)}
-    {@const visibleItems = group.items.filter(visible)}
-    {#if visibleItems.length}
-      <div class="nav-group">
-        {#if group.label}<p class="nav-label">{group.label}</p>{/if}
-        <ul>
-          {#each visibleItems as item (item.href)}
-            <li>
-              <a
-                class:active={isActive(item.href)}
-                href={item.href}
-                aria-current={isActive(item.href) ? 'page' : undefined}
-                onclick={onNavigate}
-              >
-                <NavIcon name={item.icon} />
-                <span>{item.label}</span>
-              </a>
-            </li>
-          {/each}
-        </ul>
-      </div>
-    {/if}
-  {/each}
-</nav>
+{#if variant === 'bar'}
+  <nav class="bar" aria-label={label}>
+    <ul>
+      {#each entries as entry (entry.href)}
+        {@const current = entry.href === activeEntry?.href}
+        <li>
+          <a
+            class:active={current}
+            href={entry.href}
+            aria-current={current
+              ? entry.items.length > 1
+                ? 'true'
+                : 'page'
+              : undefined}
+            onclick={onNavigate}>{entry.label}</a
+          >
+        </li>
+      {/each}
+    </ul>
+  </nav>
+{:else if variant === 'subnav'}
+  {#if activeEntry && activeEntry.items.length > 1}
+    <nav class="subnav" aria-label={activeEntry.label}>
+      <ul>
+        {#each activeEntry.items as item (item.href)}
+          <li>
+            <a
+              class:active={isActive(item.href)}
+              href={item.href}
+              aria-current={isActive(item.href) ? 'page' : undefined}
+              onclick={onNavigate}>{item.label}</a
+            >
+          </li>
+        {/each}
+      </ul>
+    </nav>
+  {/if}
+{:else}
+  <nav class="list" aria-label={label}>
+    {#each groups as group (group)}
+      {@const visibleItems = group.items.filter(visible)}
+      {#if visibleItems.length}
+        <div class="nav-group">
+          {#if group.label}<p class="nav-label">{group.label}</p>{/if}
+          <ul>
+            {#each visibleItems as item (item.href)}
+              <li>
+                <a
+                  class:active={isActive(item.href)}
+                  href={item.href}
+                  aria-current={isActive(item.href) ? 'page' : undefined}
+                  onclick={onNavigate}
+                >
+                  <NavIcon name={item.icon} />
+                  <span>{item.label}</span>
+                </a>
+              </li>
+            {/each}
+          </ul>
+        </div>
+      {/if}
+    {/each}
+  </nav>
+{/if}
 
 <style>
-  nav {
-    display: flex;
-    flex-direction: column;
-    gap: 1.1rem;
-  }
-  .nav-group {
-    display: grid;
-    gap: 0.2rem;
-  }
-  .nav-label {
-    margin: 0 0 0.15rem;
-    padding: 0 0.55rem;
-    color: var(--sidebar-label);
-    font-size: 0.6563rem;
-    font-weight: 760;
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
-  }
   ul {
-    display: grid;
-    gap: 0.125rem;
     margin: 0;
     padding: 0;
     list-style: none;
   }
+
   a {
+    color: var(--foreground-muted);
+    text-decoration: none;
+    transition:
+      background-color var(--motion),
+      border-color var(--motion),
+      color var(--motion);
+  }
+
+  /* Top bar and sub-row: text links with a hairline rule under the current one. */
+  .bar,
+  .subnav {
+    min-width: 0;
+  }
+
+  .bar ul,
+  .subnav ul {
     display: flex;
-    min-height: 2.375rem;
+    gap: 0.25rem;
+  }
+
+  .bar a,
+  .subnav a {
+    display: inline-flex;
+    min-height: 2.5rem;
+    align-items: center;
+    padding: 0 0.625rem;
+    border-bottom: 1px solid transparent;
+    font-size: 0.875rem;
+    white-space: nowrap;
+  }
+
+  .bar a {
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+  }
+
+  .subnav {
+    display: flex;
+    min-height: 3rem;
+    align-items: center;
+    border-top: 1px solid var(--border-hairline);
+  }
+
+  .bar a:hover,
+  .subnav a:hover {
+    color: var(--foreground);
+  }
+
+  .bar a.active,
+  .subnav a.active {
+    border-bottom-color: var(--foreground);
+    color: var(--foreground);
+  }
+
+  /* Drawer list: grouped pages with icons under mono group labels. */
+  .list {
+    display: flex;
+    flex-direction: column;
+    gap: 1.25rem;
+  }
+  .nav-group {
+    display: grid;
+    gap: 0.25rem;
+  }
+  .nav-label {
+    margin: 0 0 0.25rem;
+    padding: 0 0.5rem;
+    color: var(--foreground-subtle);
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    font-weight: 400;
+    letter-spacing: -0.24px;
+    line-height: 1;
+    text-transform: uppercase;
+  }
+  .list ul {
+    display: grid;
+    gap: 0.125rem;
+  }
+  .list a {
+    display: flex;
+    min-height: 2.5rem;
     align-items: center;
     gap: 0.65rem;
-    padding: 0.45rem 0.55rem;
-    border-radius: 0.375rem;
-    color: var(--sidebar-foreground);
-    font-size: 0.8125rem;
-    font-weight: 620;
-    text-decoration: none;
+    padding: 0.45rem 0.5rem;
+    border-radius: var(--radius-control);
+    font-size: 0.875rem;
   }
-  a:hover {
-    background: var(--sidebar-hover);
-    color: var(--sidebar-foreground-strong);
+  .list a:hover {
+    background: var(--surface-hover);
+    color: var(--foreground);
   }
-  a.active {
-    background: var(--sidebar-active);
-    color: #ffffff;
-    font-weight: 680;
+  .list a.active {
+    background: var(--surface-raised);
+    color: var(--foreground);
   }
+
+  @media (max-width: 62rem) {
+    .bar,
+    .subnav {
+      display: none;
+    }
+  }
+
   @media (max-width: 62rem), (pointer: coarse) {
-    a {
+    .list a {
       min-height: 2.75rem;
     }
   }
+
   @media (forced-colors: active) {
     a.active,
     a:hover {

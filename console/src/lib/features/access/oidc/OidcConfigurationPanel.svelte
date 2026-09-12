@@ -369,18 +369,11 @@
 {/if}
 
 <style>
-  .success-banner {
-    margin: 1rem 0;
-    padding: 0.85rem 1rem;
-    border: 1px solid color-mix(in srgb, var(--success) 45%, var(--border));
-    border-radius: 0.375rem;
-    background: var(--success-soft);
-    color: var(--success);
-  }
   h2 {
     margin: 0;
-    font-size: 1.15rem;
-    letter-spacing: -0.025em;
+    font-size: 1rem;
+    font-weight: 500;
+    letter-spacing: -0.02em;
   }
   .muted {
     color: var(--foreground-muted);
@@ -392,7 +385,10 @@
   }
   .oidc-form,
   .mapping-form {
-    padding: clamp(1.15rem, 3vw, 1.5rem);
+    display: grid;
+    align-content: start;
+    gap: 1rem;
+    padding: 1.5rem;
   }
   .section-heading {
     display: flex;
@@ -405,12 +401,7 @@
     min-height: 2.75rem;
     align-items: center;
     gap: 0.45rem;
-    font-weight: 700;
-  }
-  .mapping-form {
-    display: grid;
-    align-content: start;
-    gap: 1rem;
+    font-weight: 500;
   }
   .mapping-form h2,
   .mapping-form p {
@@ -422,9 +413,7 @@
     gap: 0.65rem;
   }
   code {
-    font:
-      0.72rem 'JetBrains Mono Variable',
-      monospace;
+    font-size: var(--text-caption);
   }
   @media (max-width: 64rem) {
     .oidc-grid {

@@ -100,22 +100,39 @@
 <style>
   fieldset {
     margin: 1rem 0;
-    border: 1px solid var(--border);
-    border-radius: 0.75rem;
+    border: 1px solid var(--border-hairline);
+    border-radius: var(--radius-card);
     padding: 1rem;
   }
   legend {
-    font-weight: 700;
+    font-weight: 500;
   }
   label {
     display: block;
     margin: 0.65rem 0 0.25rem;
     font-size: 0.85rem;
   }
+  /* These controls sit outside .form-field, so the shared control recipe is
+     restated here. */
   input:not([type='checkbox']),
   select,
   textarea {
     width: 100%;
+    min-height: 2.5rem;
+    padding: 0.5rem 0.75rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-control);
+    background: transparent;
+    color: var(--foreground);
+    transition: border-color var(--motion);
+  }
+  input:not([type='checkbox']):hover,
+  select:hover,
+  textarea:hover {
+    border-color: var(--border-strong);
+  }
+  input::placeholder {
+    color: var(--foreground-muted);
   }
   .check {
     display: flex;
@@ -132,7 +149,9 @@
     cursor: pointer;
   }
   textarea {
-    font-family: monospace;
+    min-height: 7rem;
+    font-family: var(--font-mono);
+    resize: vertical;
   }
   p {
     color: var(--foreground-muted);

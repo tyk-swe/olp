@@ -9,6 +9,11 @@ semantic versioning and match `Cargo.toml`, `console/package.json`,
 
 ### Changed
 
+- The console adopts a dark, single-theme "Factory" design: Geist and Geist
+  Mono type, bone-on-obsidian surfaces with orange and green reserved for live
+  status and data, and a sticky top navigation bar with contextual
+  sub-navigation in place of the sidebar. The light theme and theme toggle are
+  removed.
 - 3.0 requires a fresh installation. Existing 2.x storage is refused before
   modification; PostgreSQL uses `olp_v3` and Valkey uses installation-specific
   `olp:3` namespaces. Historical migration and internal compatibility paths are

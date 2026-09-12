@@ -180,7 +180,7 @@
     padding: 1.5rem;
   }
   summary {
-    font-weight: 700;
+    font-weight: 500;
     cursor: pointer;
   }
   p,

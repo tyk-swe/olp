@@ -35,14 +35,19 @@
     gap: 1rem;
     margin-top: 1.25rem;
     padding: 0.9rem 1rem;
-    border: 1px solid color-mix(in srgb, var(--warning) 45%, var(--border));
-    border-radius: 0.375rem;
+    border: 1px solid var(--warning);
+    border-radius: var(--radius-control);
     background: var(--warning-soft);
+    color: var(--foreground);
+  }
+  .completeness strong {
     color: var(--warning);
   }
   .completeness.danger {
     border-color: var(--danger);
     background: var(--danger-soft);
+  }
+  .completeness.danger strong {
     color: var(--danger);
   }
   .completeness p {
@@ -53,7 +58,15 @@
     min-height: 2.75rem;
     flex: none;
     align-items: center;
-    font-weight: 700;
+    color: var(--foreground);
+    font-weight: 400;
+    text-decoration: underline;
+    text-decoration-color: var(--border-strong);
+    text-underline-offset: 4px;
+    transition: text-decoration-color var(--motion);
+  }
+  .completeness a:hover {
+    text-decoration-color: currentColor;
   }
   .complete-banner {
     display: flex;
@@ -61,7 +74,7 @@
     gap: 0.5rem;
     margin: 1.25rem 0 0;
     color: var(--success);
-    font-weight: 700;
+    font-weight: 400;
   }
   @media (max-width: 40rem) {
     .completeness {

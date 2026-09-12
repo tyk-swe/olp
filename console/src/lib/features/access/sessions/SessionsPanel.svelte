@@ -150,40 +150,34 @@
 {/if}
 
 <style>
-  .success-banner {
-    margin: 1rem 0;
-    padding: 0.85rem 1rem;
-    border: 1px solid color-mix(in srgb, var(--success) 45%, var(--border));
-    border-radius: 0.375rem;
-    background: var(--success-soft);
-    color: var(--success);
-  }
   h2 {
     margin: 0;
-    font-size: 1.15rem;
-    letter-spacing: -0.025em;
+    font-size: 1rem;
+    font-weight: 500;
+    letter-spacing: -0.02em;
   }
   .session-filter {
     display: grid;
-    gap: 0.3rem;
-    color: var(--foreground-muted);
-    font-size: 0.72rem;
-    font-weight: 700;
+    gap: 0.4rem;
+    font-weight: 500;
   }
   .session-filter select {
     min-height: 2.5rem;
-    padding: 0.5rem 0.65rem;
-    border: 1px solid var(--border-strong);
-    border-radius: 0.375rem;
-    background: var(--surface);
+    padding: 0.5rem 0.75rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-control);
+    background: transparent;
     color: var(--foreground);
+    font-weight: 400;
+    transition: border-color var(--motion);
+  }
+  .session-filter select:hover {
+    border-color: var(--border-strong);
   }
   .danger-button {
     color: var(--danger);
   }
   code {
-    font:
-      0.72rem 'JetBrains Mono Variable',
-      monospace;
+    font-size: var(--text-caption);
   }
 </style>

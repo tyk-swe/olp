@@ -407,19 +407,20 @@
 <style>
   h2 {
     margin: 0 0 0.75rem;
-    font-size: 1.15rem;
-    letter-spacing: -0.025em;
+    font-size: 1rem;
+    font-weight: 500;
+    letter-spacing: -0.02em;
   }
   .key-form {
     display: grid;
     max-width: 66rem;
     gap: 2rem;
     margin-top: 1.5rem;
-    padding: clamp(1.2rem, 3vw, 2rem);
+    padding: 1.5rem;
   }
   .key-form section + section {
     padding-top: 1.5rem;
-    border-top: 1px solid var(--border);
+    border-top: 1px solid var(--border-hairline);
   }
   .checks {
     display: flex;
@@ -432,7 +433,7 @@
   .checks legend {
     width: 100%;
     margin-bottom: 0.4rem;
-    font-weight: 700;
+    font-weight: 500;
   }
   .checks label {
     display: inline-flex;
@@ -443,9 +444,9 @@
   .checks.routes {
     display: grid;
     margin-top: 1rem;
-    padding: 0.8rem;
-    border: 1px solid var(--border);
-    border-radius: 0.375rem;
+    padding: 1rem;
+    border-radius: var(--radius-control);
+    background: var(--surface-raised);
   }
   .checks.routes p,
   .section-help {
@@ -467,28 +468,39 @@
   }
   .budget-detail div {
     display: grid;
-    gap: 0.2rem;
-    padding: 0.85rem;
-    border: 1px solid var(--border);
-    border-radius: 0.375rem;
+    gap: 0.35rem;
+    padding: 1rem;
+    border-radius: var(--radius-control);
+    background: var(--surface-raised);
   }
-  .budget-detail span,
+  .budget-detail span {
+    color: var(--foreground-subtle);
+    font-family: var(--font-mono);
+    font-size: var(--text-caption);
+    font-weight: 400;
+    letter-spacing: -0.02em;
+    text-transform: uppercase;
+  }
+  .budget-detail strong {
+    font-size: 1.25rem;
+    font-weight: 400;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.02em;
+    line-height: 1.2;
+  }
   .budget-detail small {
     color: var(--foreground-muted);
-    font-size: 0.78rem;
+    font-size: var(--text-caption);
   }
   .field-error {
-    color: var(--danger) !important;
-    font-weight: 700;
+    color: var(--danger);
   }
   .form-actions {
     display: flex;
     justify-content: flex-end;
   }
   code {
-    font:
-      0.72rem 'JetBrains Mono Variable',
-      monospace;
+    font-size: var(--text-caption);
   }
   @media (max-width: 48rem) {
     .limits,

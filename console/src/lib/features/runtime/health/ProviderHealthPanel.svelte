@@ -128,7 +128,8 @@
   h3 {
     margin: 0;
     font-size: 1rem;
-    letter-spacing: -0.025em;
+    font-weight: 500;
+    letter-spacing: -0.02em;
   }
   .section-link {
     margin: 0.6rem 0 0;
@@ -151,21 +152,30 @@
   .window-select {
     display: grid;
     gap: 0.25rem;
-    color: var(--foreground-muted);
-    font-size: 0.7rem;
-    font-weight: 700;
+    color: var(--foreground-subtle);
+    font-family: var(--font-mono);
+    font-size: var(--text-caption);
+    font-weight: 400;
+    letter-spacing: -0.02em;
+    text-transform: uppercase;
   }
-  /* The label is deliberately small and bold; the chosen window is content and
-     keeps a readable control size. */
+  /* The label is a mono caption; the select inside it resets to the sans
+     control recipe so the chosen window stays a readable control. */
   .window-select select {
     min-height: 2.5rem;
-    padding: 0.35rem 0.6rem;
-    border: 1px solid var(--border-strong);
-    border-radius: 0.375rem;
-    background: var(--surface);
+    padding: 0.5rem 0.75rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-control);
+    background: transparent;
     color: var(--foreground);
-    font-size: 0.8125rem;
-    font-weight: 600;
+    transition: border-color var(--motion);
+    font-family: var(--font-sans);
+    font-size: var(--text-body-sm);
+    letter-spacing: normal;
+    text-transform: none;
+  }
+  .window-select select:hover {
+    border-color: var(--border-strong);
   }
   .provider-grid {
     display: grid;
@@ -173,12 +183,12 @@
     gap: 0.85rem;
   }
   .provider-card {
-    padding: 1rem;
+    padding: 1.25rem;
   }
   .provider-heading p {
     margin: 0.15rem 0 0;
     color: var(--foreground-muted);
-    font-size: 0.75rem;
+    font-size: var(--text-caption);
   }
   dl {
     display: grid;
@@ -187,21 +197,24 @@
     margin: 1rem 0 0;
   }
   dt {
-    color: var(--foreground-muted);
-    font-size: 0.7rem;
-    font-weight: 700;
+    color: var(--foreground-subtle);
+    font-family: var(--font-mono);
+    font-size: var(--text-caption);
+    font-weight: 400;
+    letter-spacing: -0.02em;
+    text-transform: uppercase;
   }
   dd {
-    margin: 0.1rem 0 0;
-    font-weight: 700;
+    margin: 0.25rem 0 0;
+    font-weight: 400;
     overflow-wrap: anywhere;
   }
   .probe {
     margin: 1rem 0 0;
     padding-top: 0.8rem;
-    border-top: 1px solid var(--border);
+    border-top: 1px solid var(--border-hairline);
     color: var(--foreground-muted);
-    font-size: 0.75rem;
+    font-size: var(--text-caption);
     overflow-wrap: anywhere;
   }
   @media (max-width: 60rem) {

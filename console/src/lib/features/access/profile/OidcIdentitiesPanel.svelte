@@ -126,7 +126,7 @@
   .panel {
     display: grid;
     gap: 1rem;
-    padding: 1.25rem;
+    padding: 1.5rem;
   }
   .oidc-panel {
     grid-column: 1 / -1;
@@ -141,9 +141,9 @@
     align-items: center;
     justify-content: space-between;
     gap: 1rem;
-    padding: 0.8rem;
-    border: 1px solid var(--border);
-    border-radius: 0.375rem;
+    padding: 1rem;
+    border-radius: var(--radius-control);
+    background: var(--surface-raised);
   }
   .identity-row > div {
     display: grid;
@@ -156,24 +156,25 @@
   }
   h2 {
     margin: 0;
-    font-size: 1.2rem;
+    font-size: 1rem;
+    font-weight: 500;
+    letter-spacing: -0.02em;
   }
   .field-error {
     margin: 0;
     color: var(--danger);
-    font-weight: 700;
   }
   .security-note {
     margin: 0;
     color: var(--foreground-muted);
-    font-size: 0.75rem;
+    font-size: var(--text-caption);
   }
   .danger-button {
     color: var(--danger);
   }
   @media (max-width: 40rem) {
     .panel {
-      padding: 0.85rem;
+      padding: 1rem;
     }
     .identity-row {
       display: grid;

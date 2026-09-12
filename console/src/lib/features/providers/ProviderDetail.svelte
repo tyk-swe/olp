@@ -384,32 +384,27 @@
 {/if}
 
 <style>
-  .success-banner {
-    margin: 1rem 0;
-    padding: 0.85rem 1rem;
-    border: 1px solid color-mix(in srgb, var(--success) 45%, var(--border));
-    border-radius: 0.375rem;
-    background: var(--success-soft);
-    color: var(--success);
-  }
   .pending-banner {
     display: grid;
     gap: 0.2rem;
     margin: 1rem 0;
     padding: 0.9rem 1rem;
-    border: 1px solid color-mix(in srgb, var(--warning) 55%, var(--border));
-    border-radius: 0.375rem;
+    border: 1px solid var(--warning);
+    border-radius: var(--radius-control);
     background: var(--warning-soft);
     color: var(--foreground);
   }
+  .pending-banner strong {
+    color: var(--warning);
+  }
   .pending-banner span {
     color: var(--foreground-muted);
-    font-size: 0.82rem;
+    font-size: var(--text-body-sm);
   }
   .provider-meta {
     margin: 0.35rem 0 0;
     color: var(--foreground-muted);
-    font-size: 0.78rem;
+    font-size: var(--text-body-sm);
   }
   .detail-grid {
     display: grid;

@@ -168,13 +168,13 @@
   .editor {
     max-width: 66rem;
     margin-top: 1.25rem;
-    padding: clamp(1.15rem, 3vw, 1.75rem);
+    padding: 1.5rem;
   }
   h2 {
-    margin: 0 0 0.85rem;
-    font-size: 1.15rem;
-    font-weight: 750;
-    letter-spacing: -0.025em;
+    margin: 0 0 0.75rem;
+    font-size: 1rem;
+    font-weight: 500;
+    letter-spacing: -0.02em;
   }
   .muted,
   .locked-note,
@@ -183,7 +183,7 @@
   }
   .locked-note {
     margin: 0.75rem 0 0;
-    font-size: 0.8rem;
+    font-size: var(--text-body-sm);
   }
   .credential-form {
     display: flex;
@@ -194,11 +194,18 @@
     min-width: 0;
     min-height: 2.5rem;
     flex: 1;
-    padding: 0.5rem 0.7rem;
-    border: 1px solid var(--border-strong);
-    border-radius: 0.375rem;
-    background: var(--surface);
+    padding: 0.5rem 0.75rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-control);
+    background: transparent;
     color: var(--foreground);
+    transition: border-color var(--motion);
+  }
+  .credential-form input:hover {
+    border-color: var(--border-strong);
+  }
+  .credential-form input::placeholder {
+    color: var(--foreground-muted);
   }
   .credential-list {
     margin: 1rem 0 0;
@@ -210,7 +217,7 @@
     min-height: 3.5rem;
     align-items: center;
     gap: 0.6rem;
-    border-top: 1px solid var(--border);
+    border-top: 1px solid var(--border-hairline);
   }
   .credential-list li > span:first-child {
     display: grid;
@@ -220,11 +227,11 @@
     display: grid;
     gap: 0.15rem;
     padding: 0.8rem;
-    border: 1px solid var(--border);
-    border-radius: 0.375rem;
-    background: var(--surface-subtle);
+    border: 0;
+    border-radius: var(--radius-control);
+    background: var(--surface-raised);
     color: var(--foreground-muted);
-    font-size: 0.78rem;
+    font-size: var(--text-body-sm);
   }
   .identity-note strong {
     color: var(--foreground);

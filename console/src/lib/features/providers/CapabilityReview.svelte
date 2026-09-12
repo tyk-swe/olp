@@ -335,18 +335,19 @@
     min-height: 2.75rem;
     align-items: center;
     gap: 0.45rem;
-    font-weight: 720;
+    font-weight: 500;
   }
   .empty,
   .error {
     margin: 0;
     padding: 0.65rem;
-    border-radius: 0.375rem;
-    background: var(--surface-subtle);
+    border-radius: var(--radius-control);
+    background: var(--surface-raised);
     color: var(--foreground-muted);
-    font-size: 0.75rem;
+    font-size: var(--text-caption);
   }
   .error {
+    border: 1px solid var(--danger);
     background: var(--danger-soft);
     color: var(--danger);
   }
@@ -357,13 +358,16 @@
   }
   .evidence span {
     padding: 0.3rem 0.45rem;
-    border-radius: 0.25rem;
-    background: var(--warning-soft);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-control);
     color: var(--warning);
-    font-size: 0.68rem;
+    font-family: var(--font-mono);
+    font-size: var(--text-caption);
+    font-weight: 400;
+    letter-spacing: -0.02em;
+    text-transform: uppercase;
   }
   .evidence span.certified {
-    background: var(--success-soft);
     color: var(--success);
   }
   .certification-results {
@@ -371,7 +375,7 @@
     padding-left: 1.25rem;
     list-style: disc;
     color: var(--danger);
-    font-size: 0.8rem;
+    font-size: var(--text-body-sm);
   }
   .capability-list {
     display: grid;
@@ -388,26 +392,31 @@
     width: 100%;
     min-height: 2.5rem;
     padding: 0.5rem;
-    border: 1px solid var(--border-strong);
-    border-radius: 0.375rem;
-    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-control);
+    background: transparent;
     color: var(--foreground);
+    transition: border-color var(--motion);
+  }
+  select:hover:not(:disabled) {
+    border-color: var(--border-strong);
   }
   .remove {
     width: 2.5rem;
     height: 2.5rem;
     border: 1px solid var(--border);
-    border-radius: 0.375rem;
-    background: var(--surface);
+    border-radius: var(--radius-control);
+    background: transparent;
     color: var(--danger);
     font-size: 1.2rem;
+    transition: border-color var(--motion);
+  }
+  .remove:hover:not(:disabled) {
+    border-color: var(--danger);
   }
   .review-footer {
     color: var(--foreground-muted);
-    font-size: 0.72rem;
-  }
-  code {
-    font-family: 'JetBrains Mono Variable', monospace;
+    font-size: var(--text-caption);
   }
   @media (max-width: 58rem) {
     .review {

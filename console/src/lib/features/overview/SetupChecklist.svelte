@@ -7,7 +7,10 @@
     $props();
 </script>
 
-<section class="card checklist" aria-labelledby="setup-checklist-title">
+<section
+  class="card card-light checklist"
+  aria-labelledby="setup-checklist-title"
+>
   <div class="card-heading">
     <div>
       <p class="eyebrow">Getting started</p>
@@ -73,13 +76,15 @@
 </section>
 
 <style>
+  .checklist {
+    padding: 1.5rem;
+    border-radius: var(--radius-panel);
+  }
+
   .complete-summary {
     margin-top: 1rem;
     color: var(--foreground-muted);
-  }
-
-  .checklist {
-    padding: clamp(1.15rem, 3vw, 1.5rem);
+    line-height: 1.5;
   }
 
   .card-heading {
@@ -91,34 +96,36 @@
 
   h2 {
     margin: 0;
-    font-size: 1.2rem;
-    font-weight: 720;
-    letter-spacing: -0.025em;
+    font-size: 1.25rem;
+    font-weight: 400;
+    letter-spacing: -0.02em;
   }
 
   .completion {
     flex: none;
-    padding: 0.3rem 0.55rem;
-    border-radius: 0.25rem;
-    background: var(--accent-soft);
-    color: var(--accent-strong);
-    font-size: 0.72rem;
-    font-weight: 760;
+    padding: 0.3rem 0.5rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-control);
+    color: var(--foreground-subtle);
+    font-family: var(--font-mono);
+    font-size: var(--text-caption);
+    font-weight: 400;
+    letter-spacing: -0.02em;
+    line-height: 1;
+    text-transform: uppercase;
   }
 
   .progress {
-    height: 0.3rem;
-    margin: 1.15rem 0 0.5rem;
+    height: 2px;
+    margin: 1.25rem 0 0.5rem;
     overflow: hidden;
-    border-radius: 999px;
-    background: var(--surface-subtle);
+    background: var(--border-hairline);
   }
 
   .progress span {
     display: block;
     height: 100%;
-    border-radius: inherit;
-    background: var(--accent);
+    background: var(--metric);
   }
 
   .progress-0 {
@@ -143,29 +150,25 @@
   .check-error {
     margin-top: 0.75rem;
     padding: 0.65rem 0.75rem;
-    border-radius: 0.375rem;
+    border: 1px solid var(--danger);
+    border-radius: var(--radius-control);
     background: var(--danger-soft);
-    color: var(--danger);
-    font-size: 0.75rem;
+    color: var(--foreground);
+    font-size: var(--text-body-sm);
   }
 
   .check-error button {
     min-height: 2.75rem;
+    padding: 0 0.25rem;
     border: 0;
     background: transparent;
     color: inherit;
-    font-weight: 750;
+    font-weight: 400;
     text-decoration: underline;
-  }
-
-  ol {
-    margin: 0;
-    padding: 0;
-    list-style: none;
+    text-underline-offset: 4px;
   }
 
   li {
-    position: relative;
     display: grid;
     grid-template-columns: 2rem minmax(0, 1fr);
     gap: 0.75rem;
@@ -173,7 +176,7 @@
   }
 
   li + li {
-    border-top: 1px solid var(--border);
+    border-top: 1px solid var(--border-hairline);
   }
 
   .step-marker {
@@ -181,24 +184,24 @@
     width: 2rem;
     height: 2rem;
     place-items: center;
-    border: 1px solid var(--border-strong);
-    border-radius: 50%;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-control);
     color: var(--foreground-subtle);
-    font-family: 'JetBrains Mono Variable', monospace;
-    font-size: 0.72rem;
-    font-weight: 750;
+    font-family: var(--font-mono);
+    font-size: var(--text-caption);
+    font-weight: 400;
+    letter-spacing: -0.02em;
   }
 
   li.complete .step-marker {
-    border-color: transparent;
-    background: var(--success-soft);
-    color: var(--success);
+    border-color: var(--metric);
+    background: var(--metric);
+    color: var(--foreground);
   }
 
   li.current .step-marker {
-    border-color: var(--accent);
-    background: var(--accent-soft);
-    color: var(--accent-strong);
+    border-color: var(--foreground);
+    color: var(--foreground);
   }
 
   a {
@@ -207,19 +210,23 @@
     align-items: center;
     gap: 0.45rem;
     color: var(--foreground);
-    font-weight: 690;
+    font-family: var(--font-mono);
+    font-size: var(--text-caption);
+    font-weight: 400;
+    letter-spacing: -0.02em;
     text-decoration: none;
+    text-transform: uppercase;
   }
 
   a:hover {
-    color: var(--accent-strong);
     text-decoration: underline;
-    text-underline-offset: 0.2rem;
+    text-underline-offset: 4px;
   }
 
   li p {
     margin: 0.2rem 0 0;
     color: var(--foreground-muted);
-    font-size: 0.79rem;
+    font-size: var(--text-body-sm);
+    line-height: 1.5;
   }
 </style>

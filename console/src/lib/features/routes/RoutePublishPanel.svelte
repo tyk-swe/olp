@@ -89,22 +89,20 @@
 <style>
   h2 {
     margin: 0 0 0.75rem;
-    font-size: 1.15rem;
-    letter-spacing: -0.025em;
+    font-size: 1rem;
+    font-weight: 500;
+    letter-spacing: -0.02em;
   }
 
-  .publish-panel {
-    padding: clamp(1.1rem, 2.5vw, 1.5rem);
-  }
-
-  .publish-panel p {
-    color: var(--foreground-muted);
-  }
   .publish-panel {
     position: sticky;
     top: 5rem;
     display: grid;
     gap: 0.65rem;
+    padding: clamp(1.1rem, 2.5vw, 1.5rem);
+  }
+  .publish-panel p {
+    color: var(--foreground-muted);
   }
   .publish-panel h2,
   .publish-panel p {
@@ -114,29 +112,47 @@
     width: 100%;
     margin: 0.5rem 0;
     border: 0;
-    border-top: 1px solid var(--border);
+    border-top: 1px solid var(--border-hairline);
   }
+  /* These controls sit outside .form-field, so the shared control recipe is
+     restated here. */
   .publish-panel > :is(input, select) {
     min-height: 2.5rem;
-    padding: 0.5rem 0.65rem;
-    border: 1px solid var(--border-strong);
-    border-radius: 0.375rem;
-    background: var(--surface);
+    padding: 0.5rem 0.75rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-control);
+    background: transparent;
     color: var(--foreground);
+    transition: border-color var(--motion);
+  }
+  .publish-panel > :is(input, select):hover {
+    border-color: var(--border-strong);
   }
   .activation {
     display: grid;
     gap: 0.2rem;
     padding: 0.75rem;
-    border-radius: 0.375rem;
+    border: 1px solid var(--success);
+    border-radius: var(--radius-control);
     background: var(--success-soft);
-    color: var(--success);
+    color: var(--foreground);
     font-size: 0.78rem;
+  }
+  .activation strong {
+    color: var(--success);
   }
   .activation a {
     min-height: 2.75rem;
     padding-top: 0.65rem;
-    font-weight: 750;
+    color: var(--foreground);
+    font-weight: 400;
+    text-decoration: underline;
+    text-decoration-color: var(--border-strong);
+    text-underline-offset: 4px;
+    transition: text-decoration-color var(--motion);
+  }
+  .activation a:hover {
+    text-decoration-color: currentColor;
   }
 
   @media (max-width: 76rem) {

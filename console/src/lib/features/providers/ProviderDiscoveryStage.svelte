@@ -66,34 +66,35 @@
 
 <style>
   .stage {
-    padding: clamp(1.15rem, 3vw, 1.75rem);
+    padding: 1.5rem;
   }
   h2 {
-    margin: 0 0 0.85rem;
-    font-size: 1.15rem;
-    font-weight: 750;
-    letter-spacing: -0.025em;
+    margin: 0 0 0.75rem;
+    font-size: 1rem;
+    font-weight: 500;
+    letter-spacing: -0.02em;
   }
-  .stage > p {
+  .stage > p:not(.eyebrow) {
     color: var(--foreground-muted);
   }
-  .success-line {
-    color: var(--success) !important;
-    font-weight: 700;
+  .stage > .success-line {
+    color: var(--success);
+    font-weight: 500;
   }
   .manual-fallback {
     margin-top: 1rem;
     padding: 0.75rem;
-    border: 1px solid var(--border);
-    border-radius: 0.375rem;
+    border: 0;
+    border-radius: var(--radius-control);
+    background: var(--surface-raised);
   }
   .manual-fallback summary {
     min-height: 2.75rem;
-    font-weight: 720;
+    font-weight: 500;
   }
   .manual-fallback p {
     color: var(--foreground-muted);
-    font-size: 0.78rem;
+    font-size: var(--text-body-sm);
   }
   .manual-fallback textarea {
     min-height: 5rem;

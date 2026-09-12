@@ -64,20 +64,30 @@
     gap: 0.25rem;
     margin: 1.5rem 0;
     overflow-x: auto;
-    border-bottom: 1px solid var(--border);
+    border-bottom: 1px solid var(--border-hairline);
   }
   .tabs button {
     min-height: 2.75rem;
     padding: 0.65rem 0.85rem;
     border: 0;
-    border-bottom: 2px solid transparent;
+    border-bottom: 1px solid transparent;
     background: transparent;
-    color: var(--foreground-muted);
+    color: var(--foreground-subtle);
+    font-family: var(--font-mono);
+    font-size: var(--text-caption);
+    font-weight: 400;
+    letter-spacing: -0.02em;
+    text-transform: uppercase;
     white-space: nowrap;
+    transition:
+      border-color var(--motion),
+      color var(--motion);
+  }
+  .tabs button:hover {
+    color: var(--foreground);
   }
   .tabs button.active {
-    border-color: var(--accent);
-    color: var(--accent-strong);
-    font-weight: 750;
+    border-color: var(--foreground);
+    color: var(--foreground);
   }
 </style>

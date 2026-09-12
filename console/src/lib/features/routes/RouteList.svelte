@@ -212,8 +212,9 @@
 <style>
   h2 {
     margin: 0 0 0.75rem;
-    font-size: 1.15rem;
-    letter-spacing: -0.025em;
+    font-size: 1rem;
+    font-weight: 500;
+    letter-spacing: -0.02em;
   }
   .compact {
     min-height: 6rem;
@@ -233,16 +234,21 @@
     margin: 0;
   }
   .route-link {
-    color: var(--accent-strong);
-    font-weight: 750;
-    text-underline-offset: 0.18rem;
+    color: var(--foreground);
+    font-weight: 400;
+    text-decoration: underline;
+    text-decoration-color: var(--border-strong);
+    text-underline-offset: 4px;
+    transition: text-decoration-color var(--motion);
+  }
+  .route-link:hover {
+    text-decoration-color: currentColor;
   }
   td small {
     color: var(--foreground-muted);
   }
   code {
-    font:
-      0.7rem 'JetBrains Mono Variable',
-      monospace;
+    font-family: var(--font-mono);
+    font-size: var(--text-caption);
   }
 </style>

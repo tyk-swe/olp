@@ -300,7 +300,7 @@
 <style>
   .filters {
     margin-top: 1.5rem;
-    padding: 1rem;
+    padding: 1.5rem;
   }
   .filter-grid {
     display: grid;
@@ -310,18 +310,37 @@
   label {
     display: grid;
     gap: 0.35rem;
-    color: var(--foreground-muted);
-    font-size: 0.75rem;
-    font-weight: 700;
+    color: var(--foreground-subtle);
+    font-family: var(--font-mono);
+    font-size: var(--text-caption);
+    font-weight: 400;
+    letter-spacing: -0.02em;
+    text-transform: uppercase;
   }
+  /* Inputs sit inside their caption label and outside .form-field, so the
+     caption typography is reset and the shared control recipe restated. */
   input {
     width: 100%;
     min-height: 2.5rem;
-    padding: 0.5rem 0.7rem;
-    border: 1px solid var(--border-strong);
-    border-radius: 0.375rem;
-    background: var(--surface);
+    padding: 0.5rem 0.75rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-control);
+    background: transparent;
     color: var(--foreground);
+    transition: border-color var(--motion);
+    font-family: var(--font-sans);
+    font-size: var(--text-body-sm);
+    letter-spacing: normal;
+    text-transform: none;
+  }
+  input.mono {
+    font-family: var(--font-mono);
+  }
+  input:hover {
+    border-color: var(--border-strong);
+  }
+  input::placeholder {
+    color: var(--foreground-muted);
   }
   .filter-actions {
     display: flex;
@@ -334,9 +353,6 @@
   }
   .text-button {
     padding: 0.4rem 0.65rem;
-  }
-  .text-button:hover {
-    text-decoration: underline;
   }
   td strong,
   td small {
@@ -354,8 +370,15 @@
     display: inline-flex;
     min-height: 2.75rem;
     align-items: center;
-    color: var(--accent-strong);
-    font-weight: 700;
+    color: var(--foreground);
+    font-weight: 400;
+    text-decoration: underline;
+    text-decoration-color: var(--border-strong);
+    text-underline-offset: 4px;
+    transition: text-decoration-color var(--motion);
+  }
+  .row-link:hover {
+    text-decoration-color: currentColor;
   }
   .mobile-results {
     display: none;
@@ -364,7 +387,7 @@
     list-style: none;
   }
   .mobile-results li {
-    padding: 1rem;
+    padding: 1.25rem;
   }
   .mobile-results li > .button {
     width: 100%;
@@ -405,13 +428,16 @@
     min-width: 0;
   }
   dt {
-    color: var(--foreground-muted);
-    font-size: 0.72rem;
-    font-weight: 700;
+    color: var(--foreground-subtle);
+    font-family: var(--font-mono);
+    font-size: var(--text-caption);
+    font-weight: 400;
+    letter-spacing: -0.02em;
+    text-transform: uppercase;
   }
   dd {
     overflow-wrap: anywhere;
-    margin: 0.2rem 0 0;
+    margin: 0.25rem 0 0;
   }
 
   @media (max-width: 72rem) {
@@ -440,7 +466,7 @@
       grid-template-columns: repeat(2, minmax(0, 1fr));
     }
     .filters {
-      padding: 0.85rem;
+      padding: 1rem;
     }
     .pagination {
       justify-content: space-between;

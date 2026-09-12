@@ -494,89 +494,97 @@
 
 <style>
   .settings-section {
-    margin-top: 2rem;
+    margin-top: 2.5rem;
   }
   .section-heading {
-    margin-bottom: 0.8rem;
+    margin-bottom: 1rem;
   }
   h2 {
     margin: 0;
-    font-size: 1.2rem;
+    font-size: 1rem;
+    font-weight: 500;
+    letter-spacing: -0.02em;
   }
   .section-heading p:last-child {
-    margin: 0.3rem 0 0;
+    max-width: 44rem;
+    margin: 0.5rem 0 0;
     color: var(--foreground-muted);
-  }
-  .success-message {
-    margin: 1rem 0 0;
-    padding: 0.8rem 1rem;
-    border-radius: 0.375rem;
-    background: var(--success-soft);
-    color: var(--success);
-    font-weight: 700;
+    line-height: 1.5;
   }
   .settings-list {
     display: grid;
-    gap: 0.7rem;
+    gap: 0.75rem;
   }
   .setting-row {
     display: grid;
     grid-template-columns: minmax(18rem, 1fr) minmax(20rem, 0.8fr);
     gap: 1rem;
     align-items: center;
-    padding: 1rem;
+    padding: 1.25rem;
   }
   .setting-row label {
-    font-weight: 750;
+    font-weight: 500;
   }
-  .setting-row p,
+  .setting-row p {
+    margin: 0.25rem 0 0;
+    color: var(--foreground-muted);
+    line-height: 1.5;
+  }
   .setting-row small {
     display: block;
-    margin: 0.2rem 0 0;
+    margin: 0.25rem 0 0;
     color: var(--foreground-muted);
-    font-size: 0.75rem;
+    font-size: var(--text-caption);
   }
   .setting-control {
     display: flex;
-    gap: 0.6rem;
+    gap: 0.5rem;
   }
-  .setting-control input {
+  .setting-control input,
+  .setting-control select {
     min-width: 0;
     flex: 1;
     min-height: 2.5rem;
-    padding: 0.5rem 0.7rem;
-    border: 1px solid var(--border-strong);
-    border-radius: 0.375rem;
-    background: var(--surface);
+    padding: 0.5rem 0.75rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-control);
+    background: transparent;
     color: var(--foreground);
+    transition: border-color var(--motion);
+  }
+  .setting-control input:hover,
+  .setting-control select:hover {
+    border-color: var(--border-strong);
   }
   .price-form {
-    padding: 1.25rem;
+    padding: 1.5rem;
   }
   .price-form .button {
     margin-top: 1rem;
   }
-  .form-field input,
-  .form-field select {
-    width: 100%;
-  }
   .form-field small {
     display: block;
     margin-top: 0.25rem;
-    color: var(--foreground-muted);
-    font-size: 0.7rem;
+    font-size: var(--text-caption);
   }
   summary .mono {
-    font-size: 0.7rem;
+    font-size: var(--text-caption);
     overflow-wrap: anywhere;
   }
   .revision-list {
     display: grid;
-    gap: 0.7rem;
+    gap: 0.75rem;
     margin-top: 1rem;
   }
   details {
     overflow: hidden;
+  }
+  /* The price table sits flush inside its revision card; the hairline on top
+     separates it from the summary instead of stacking a second frame. */
+  details .table-shell {
+    border: 0;
+    border-top: 1px solid var(--border-hairline);
+    border-radius: 0;
   }
   summary {
     display: flex;
@@ -584,7 +592,7 @@
     align-items: center;
     justify-content: space-between;
     gap: 1rem;
-    padding: 0.8rem 1rem;
+    padding: 0.75rem 1.25rem;
     cursor: pointer;
   }
   summary strong,
@@ -605,7 +613,7 @@
   @media (max-width: 36rem) {
     .setting-row,
     .price-form {
-      padding: 0.85rem;
+      padding: 1rem;
     }
     .setting-control {
       display: grid;

@@ -256,10 +256,10 @@
 
   h2 {
     margin: 0;
-    font-size: clamp(1.75rem, 4vw, 2.25rem);
-    font-weight: 730;
-    letter-spacing: -0.04em;
-    line-height: 1.12;
+    font-size: 1.75rem;
+    font-weight: 400;
+    letter-spacing: -0.031em;
+    line-height: 1.1;
   }
 
   .heading > p:last-child {
@@ -272,10 +272,14 @@
     gap: 0.15rem;
     margin-bottom: 1rem;
     padding: 0.75rem 0.85rem;
-    border: 1px solid color-mix(in srgb, var(--danger) 40%, var(--border));
-    border-radius: 0.375rem;
+    border: 1px solid var(--danger);
+    border-radius: var(--radius-control);
     background: var(--danger-soft);
-    font-size: 0.8125rem;
+    color: var(--foreground);
+  }
+
+  .form-alert strong {
+    color: var(--danger);
   }
 
   form {
@@ -285,27 +289,26 @@
 
   .field {
     display: grid;
-    gap: 0.35rem;
+    gap: 0.4rem;
   }
 
   label {
-    font-size: 0.8125rem;
-    font-weight: 700;
+    font-weight: 500;
   }
 
   input {
     width: 100%;
     min-height: 2.5rem;
-    padding: 0.5rem 0.7rem;
-    border: 1px solid var(--border-strong);
-    border-radius: 0.375rem;
-    background: var(--surface);
+    padding: 0.5rem 0.75rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-control);
+    background: transparent;
     color: var(--foreground);
-    box-shadow: inset 0 1px 1px rgb(13 31 58 / 4%);
+    transition: border-color var(--motion);
   }
 
   input:hover:not(:disabled) {
-    border-color: var(--foreground-subtle);
+    border-color: var(--border-strong);
   }
 
   input[aria-invalid='true'] {
@@ -315,7 +318,7 @@
   .field-hint,
   .field-error {
     margin: 0;
-    font-size: 0.75rem;
+    font-size: var(--text-caption);
   }
 
   .field-hint {
@@ -324,7 +327,6 @@
 
   .field-error {
     color: var(--danger);
-    font-weight: 650;
   }
 
   .submit {
@@ -335,7 +337,7 @@
   .privacy-note {
     margin: 1.15rem 0 0;
     color: var(--foreground-muted);
-    font-size: 0.72rem;
+    font-size: var(--text-caption);
     text-align: center;
   }
 </style>

@@ -181,12 +181,14 @@
 
 <style>
   .heading {
-    margin-bottom: 1.6rem;
+    margin-bottom: 1.5rem;
   }
   h1 {
     margin: 0;
-    font-size: clamp(1.8rem, 4vw, 2.2rem);
-    letter-spacing: -0.035em;
+    font-size: 1.75rem;
+    font-weight: 400;
+    letter-spacing: -0.031em;
+    line-height: 1.1;
   }
   .heading > p:last-child {
     margin: 0.6rem 0 0;
@@ -198,15 +200,19 @@
   }
   label {
     margin-top: 0.4rem;
-    font-weight: 700;
+    font-weight: 500;
   }
   input {
     min-height: 2.5rem;
-    padding: 0.5rem 0.7rem;
-    border: 1px solid var(--border-strong);
-    border-radius: 0.375rem;
-    background: var(--surface);
+    padding: 0.5rem 0.75rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-control);
+    background: transparent;
     color: var(--foreground);
+    transition: border-color var(--motion);
+  }
+  input:hover:not(:disabled) {
+    border-color: var(--border-strong);
   }
   form .button {
     margin-top: 0.85rem;
@@ -215,7 +221,7 @@
     margin-bottom: 1rem;
     padding: 0.7rem 0.8rem;
     border: 1px solid var(--danger);
-    border-radius: 0.375rem;
+    border-radius: var(--radius-control);
     background: var(--danger-soft);
     color: var(--danger);
   }
@@ -226,10 +232,10 @@
   .session-notice {
     margin: 0 0 1rem;
     padding: 0.7rem 0.8rem;
-    border: 1px solid var(--border-strong);
-    border-radius: 0.375rem;
-    background: var(--surface-subtle);
-    color: var(--foreground-muted);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-control);
+    background: var(--warning-soft);
+    color: var(--foreground);
   }
   .divider {
     display: flex;

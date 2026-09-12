@@ -218,38 +218,44 @@
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
     align-items: end;
-    gap: 0.8rem;
+    gap: 1rem;
     margin: 1.25rem 0;
-    padding: 1rem;
+    padding: 1.5rem;
   }
   .filters label {
     display: grid;
     min-width: 0;
-    gap: 0.3rem;
-    color: var(--foreground-muted);
-    font-size: 0.72rem;
-    font-weight: 700;
+    gap: 0.4rem;
+    font-weight: 500;
   }
-  /* Operator-typed values are content, not labels: they keep the body size and
-     weight instead of inheriting the label's small bold. */
+  /* Operator-typed values are content, not labels: they keep the body weight
+     instead of inheriting the label's emphasis. */
   .filters input,
   .filters select {
     width: 100%;
     min-height: 2.5rem;
-    padding: 0.5rem 0.7rem;
-    border: 1px solid var(--border-strong);
-    border-radius: 0.375rem;
-    background: var(--surface);
+    padding: 0.5rem 0.75rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-control);
+    background: transparent;
     color: var(--foreground);
-    font-size: 0.875rem;
     font-weight: 400;
+    transition: border-color var(--motion);
+  }
+  .filters input:hover,
+  .filters select:hover {
+    border-color: var(--border-strong);
+  }
+  .filters input::placeholder {
+    color: var(--foreground-muted);
+  }
+  .filters input[aria-invalid='true'] {
+    border-color: var(--danger);
   }
   .range-error {
     grid-column: 1 / -1;
     margin: 0;
     color: var(--danger);
-    font-size: 0.8rem;
-    font-weight: 650;
   }
   .filter-actions {
     display: flex;
@@ -260,8 +266,8 @@
     margin-top: 1.5rem;
   }
   code {
-    font-family: 'JetBrains Mono Variable', monospace;
-    font-size: 0.75rem;
+    font-family: var(--font-mono);
+    font-size: var(--text-caption);
   }
   td strong,
   td small {

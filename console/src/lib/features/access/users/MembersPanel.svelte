@@ -207,14 +207,6 @@
 {/if}
 
 <style>
-  .success-banner {
-    margin: 1rem 0;
-    padding: 0.85rem 1rem;
-    border: 1px solid color-mix(in srgb, var(--success) 45%, var(--border));
-    border-radius: 0.375rem;
-    background: var(--success-soft);
-    color: var(--success);
-  }
   .role-guide {
     display: grid;
     grid-template-columns: repeat(4, 1fr);
@@ -226,10 +218,9 @@
     align-content: start;
     gap: 0.45rem;
     min-height: 5.5rem;
-    padding: 0.8rem;
-    border: 1px solid var(--border);
-    border-radius: 0.375rem;
-    background: var(--surface);
+    padding: 1rem;
+    border: 1px solid var(--border-hairline);
+    border-radius: var(--radius-card);
   }
   .role-guide .badge {
     justify-self: start;
@@ -240,11 +231,15 @@
   }
   .role-select {
     min-height: 2.5rem;
-    padding: 0.5rem 0.65rem;
-    border: 1px solid var(--border-strong);
-    border-radius: 0.375rem;
-    background: var(--surface);
+    padding: 0.5rem 0.75rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-control);
+    background: transparent;
     color: var(--foreground);
+    transition: border-color var(--motion);
+  }
+  .role-select:hover:not(:disabled) {
+    border-color: var(--border-strong);
   }
   .danger-button {
     color: var(--danger);

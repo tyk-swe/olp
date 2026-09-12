@@ -69,14 +69,13 @@
   .panel {
     display: grid;
     gap: 1rem;
-    padding: 1.25rem;
+    padding: 1.5rem;
   }
   h2 {
     margin: 0;
-    font-size: 1.2rem;
-  }
-  .form-field input {
-    width: 100%;
+    font-size: 1rem;
+    font-weight: 500;
+    letter-spacing: -0.02em;
   }
   dl {
     display: grid;
@@ -85,21 +84,23 @@
     margin: 0;
   }
   dt {
-    color: var(--foreground-muted);
-    font-size: 0.7rem;
-    font-weight: 700;
+    color: var(--foreground-subtle);
+    font-family: var(--font-mono);
+    font-size: var(--text-caption);
+    font-weight: 400;
+    letter-spacing: -0.02em;
+    text-transform: uppercase;
   }
   dd {
-    margin: 0.1rem 0 0;
+    margin: 0.35rem 0 0;
   }
   .field-error {
     margin: 0;
     color: var(--danger);
-    font-weight: 700;
   }
   @media (max-width: 40rem) {
     .panel {
-      padding: 0.85rem;
+      padding: 1rem;
     }
   }
 </style>

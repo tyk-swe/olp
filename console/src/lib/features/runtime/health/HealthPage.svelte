@@ -192,6 +192,6 @@
   .refresh-note {
     margin: 1rem 0 0;
     color: var(--foreground-muted);
-    font-size: 0.75rem;
+    font-size: var(--text-caption);
   }
 </style>

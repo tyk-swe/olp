@@ -213,8 +213,9 @@
 <style>
   h2 {
     margin: 0 0 0.75rem;
-    font-size: 1.15rem;
-    letter-spacing: -0.025em;
+    font-size: 1rem;
+    font-weight: 500;
+    letter-spacing: -0.02em;
   }
 
   .studio {
@@ -238,25 +239,26 @@
   }
   .operations legend {
     margin-bottom: 0.4rem;
-    font-weight: 700;
+    font-weight: 500;
   }
   .operations label {
     display: flex;
     min-height: 2.75rem;
     align-items: center;
     gap: 0.45rem;
-    font-weight: 600;
+    font-weight: 400;
   }
 
   .advanced details {
     margin-top: 1rem;
     padding: 0.8rem;
-    border: 1px solid var(--border);
-    border-radius: 0.375rem;
+    border: 0;
+    border-radius: var(--radius-control);
+    background: var(--surface-raised);
   }
   .advanced summary {
     min-height: 2.75rem;
-    font-weight: 700;
+    font-weight: 500;
   }
   .advanced details p {
     color: var(--foreground-muted);
@@ -266,14 +268,13 @@
     color: var(--danger);
   }
   code {
-    font:
-      0.7rem 'JetBrains Mono Variable',
-      monospace;
+    font-family: var(--font-mono);
+    font-size: var(--text-caption);
   }
   .draft-meta {
     margin: 0.4rem 0 0;
     color: var(--foreground-muted);
-    font-size: 0.75rem;
+    font-size: var(--text-caption);
   }
   @media (max-width: 76rem) {
     .studio {

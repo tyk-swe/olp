@@ -279,14 +279,6 @@
 </aside>
 
 <style>
-  .success-banner {
-    margin: 1rem 0;
-    padding: 0.85rem 1rem;
-    border: 1px solid color-mix(in srgb, var(--success) 45%, var(--border));
-    border-radius: 0.375rem;
-    background: var(--success-soft);
-    color: var(--success);
-  }
   .toolbar {
     gap: 1rem;
   }
@@ -302,18 +294,25 @@
     align-items: center;
     gap: 0.6rem;
     color: var(--foreground-muted);
-    font-size: 0.78rem;
-    font-weight: 700;
+    font-size: var(--text-body-sm);
+    font-weight: 500;
   }
   code {
-    font:
-      0.75rem 'JetBrains Mono Variable',
-      monospace;
+    font-size: var(--text-caption);
   }
   td a {
-    color: var(--accent-strong);
-    font-weight: 720;
-    text-underline-offset: 0.18rem;
+    color: var(--foreground);
+    font-weight: 400;
+    text-decoration: underline;
+    text-decoration-color: var(--border-strong);
+    text-underline-offset: 4px;
+    transition:
+      color var(--motion),
+      text-decoration-color var(--motion);
+  }
+  td a:hover {
+    color: var(--foreground-hover);
+    text-decoration-color: currentColor;
   }
   .capabilities {
     display: flex;
@@ -323,20 +322,20 @@
   }
   .capabilities .badge {
     gap: 0.25rem;
-    font-weight: 600;
   }
   .eligibility {
     display: inline-flex;
     min-height: 2.75rem;
     align-items: center;
     gap: 0.5rem;
-    font-weight: 700;
+    font-weight: 500;
   }
   .policy-note {
     margin-top: 1rem;
     padding: 1rem;
-    border-left: 3px solid var(--accent);
-    background: var(--accent-soft);
+    border: 0;
+    border-radius: var(--radius-control);
+    background: var(--surface-raised);
     color: var(--foreground-muted);
   }
   .policy-note strong {

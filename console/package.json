@@ -20,8 +20,8 @@
     "verify": "pnpm format:check && pnpm check && pnpm test"
   },
   "dependencies": {
-    "@fontsource-variable/inter": "^5.3.0",
-    "@fontsource-variable/jetbrains-mono": "^5.3.0",
+    "@fontsource-variable/geist": "^5.3.0",
+    "@fontsource-variable/geist-mono": "^5.3.0",
     "@tanstack/svelte-query": "^6.1.48",
     "openapi-fetch": "^0.17.0"
   },

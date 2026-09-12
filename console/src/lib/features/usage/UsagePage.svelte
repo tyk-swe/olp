@@ -441,7 +441,7 @@
 <style>
   .filters {
     margin-top: 1.5rem;
-    padding: 1rem;
+    padding: 1.5rem;
   }
   .filter-grid {
     display: grid;
@@ -451,19 +451,39 @@
   label {
     display: grid;
     gap: 0.35rem;
-    color: var(--foreground-muted);
-    font-size: 0.75rem;
-    font-weight: 700;
+    color: var(--foreground-subtle);
+    font-family: var(--font-mono);
+    font-size: var(--text-caption);
+    font-weight: 400;
+    letter-spacing: -0.02em;
+    text-transform: uppercase;
   }
+  /* Controls sit inside their caption label and outside .form-field, so the
+     caption typography is reset and the shared control recipe restated. */
   input,
   select {
     width: 100%;
     min-height: 2.5rem;
-    padding: 0.5rem 0.7rem;
-    border: 1px solid var(--border-strong);
-    border-radius: 0.375rem;
-    background: var(--surface);
+    padding: 0.5rem 0.75rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-control);
+    background: transparent;
     color: var(--foreground);
+    transition: border-color var(--motion);
+    font-family: var(--font-sans);
+    font-size: var(--text-body-sm);
+    letter-spacing: normal;
+    text-transform: none;
+  }
+  input.mono {
+    font-family: var(--font-mono);
+  }
+  input:hover,
+  select:hover {
+    border-color: var(--border-strong);
+  }
+  input::placeholder {
+    color: var(--foreground-muted);
   }
   .filter-actions {
     display: flex;
@@ -479,6 +499,12 @@
       grid-template-columns: repeat(auto-fit, minmax(10.5rem, 1fr));
     }
   }
+  .usage-metrics small {
+    display: block;
+    margin-top: 0.5rem;
+    color: var(--foreground-muted);
+    font-size: var(--text-caption);
+  }
   .pipeline-grid {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
@@ -490,18 +516,26 @@
     grid-template-columns: repeat(4, minmax(0, 1fr));
     gap: 1rem;
     margin-top: 1rem;
-    padding: 1rem;
+    padding: 1.5rem;
   }
   .budget-line > div {
     display: grid;
     align-content: start;
     gap: 0.2rem;
   }
-  .budget-line p,
+  .budget-line p {
+    margin: 0;
+    color: var(--foreground-subtle);
+    font-family: var(--font-mono);
+    font-size: var(--text-caption);
+    font-weight: 400;
+    letter-spacing: -0.02em;
+    text-transform: uppercase;
+  }
   .budget-line span {
     margin: 0;
     color: var(--foreground-muted);
-    font-size: 0.75rem;
+    font-size: var(--text-caption);
   }
   .budget-key .mono {
     overflow-wrap: anywhere;
@@ -509,22 +543,26 @@
   .pipeline-card {
     display: grid;
     gap: 0.2rem;
-    padding: 0.9rem 1rem;
+    padding: 1rem 1.25rem;
   }
-  .pipeline-card p,
+  .pipeline-card p {
+    margin: 0;
+    color: var(--foreground-subtle);
+    font-family: var(--font-mono);
+    font-size: var(--text-caption);
+    font-weight: 400;
+    letter-spacing: -0.02em;
+    text-transform: uppercase;
+  }
   .pipeline-card span {
     margin: 0;
     color: var(--foreground-muted);
-  }
-  .pipeline-card p {
-    font-size: 0.75rem;
-    font-weight: 700;
+    font-size: 0.78rem;
   }
   .pipeline-card strong {
-    font-size: 1.1rem;
-  }
-  .pipeline-card span {
-    font-size: 0.78rem;
+    font-size: 1.25rem;
+    font-weight: 400;
+    letter-spacing: -0.02em;
   }
   .danger-text {
     color: var(--danger);
@@ -544,7 +582,9 @@
   }
   h2 {
     margin: 0;
-    font-size: 1.2rem;
+    font-size: 1rem;
+    font-weight: 500;
+    letter-spacing: -0.02em;
   }
   @media (max-width: 68rem) {
     .filter-grid,
@@ -560,7 +600,7 @@
       grid-template-columns: 1fr;
     }
     .filters {
-      padding: 0.85rem;
+      padding: 1rem;
     }
   }
 </style>

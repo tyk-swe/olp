@@ -186,13 +186,13 @@
 
 <style>
   .bulk {
-    padding: clamp(1.15rem, 3vw, 1.75rem);
+    padding: 1.5rem;
   }
   h2 {
-    margin: 0 0 0.85rem;
-    font-size: 1.15rem;
-    font-weight: 750;
-    letter-spacing: -0.025em;
+    margin: 0 0 0.75rem;
+    font-size: 1rem;
+    font-weight: 500;
+    letter-spacing: -0.02em;
   }
   .description,
   .status,

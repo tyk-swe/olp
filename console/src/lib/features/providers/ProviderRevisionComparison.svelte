@@ -77,13 +77,15 @@
   .revision-diff {
     margin: 1rem 0;
     padding: 1rem;
-    border: 1px solid var(--border);
-    border-radius: 0.375rem;
-    background: var(--surface-subtle);
+    border: 0;
+    border-radius: var(--radius-control);
+    background: var(--surface-raised);
   }
   .revision-diff h3 {
     margin: 0;
     font-size: 1rem;
+    font-weight: 500;
+    letter-spacing: -0.02em;
   }
   .diff-flags {
     display: flex;
@@ -103,14 +105,8 @@
   .diff-columns li {
     overflow-wrap: anywhere;
   }
-
-  /* Viewing a revision is the incidental action next to Restore, so it reads
-     as a quiet control rather than a second bordered button. */
-
   code {
-    font:
-      0.75rem 'JetBrains Mono Variable',
-      monospace;
+    font-size: var(--text-caption);
   }
   @media (max-width: 64rem) {
     .diff-columns {

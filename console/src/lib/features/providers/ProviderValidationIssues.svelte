@@ -37,10 +37,8 @@
   code {
     margin-left: 0.35rem;
     padding: 0.05rem 0.3rem;
-    border-radius: 0.25rem;
-    background: color-mix(in srgb, currentcolor 12%, transparent);
-    font:
-      0.7rem 'JetBrains Mono Variable',
-      monospace;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-control);
+    font-size: var(--text-caption);
   }
 </style>

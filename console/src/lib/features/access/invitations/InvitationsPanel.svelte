@@ -276,18 +276,11 @@
 {/if}
 
 <style>
-  .success-banner {
-    margin: 1rem 0;
-    padding: 0.85rem 1rem;
-    border: 1px solid color-mix(in srgb, var(--success) 45%, var(--border));
-    border-radius: 0.375rem;
-    background: var(--success-soft);
-    color: var(--success);
-  }
   h2 {
     margin: 0;
-    font-size: 1.15rem;
-    letter-spacing: -0.025em;
+    font-size: 1rem;
+    font-weight: 500;
+    letter-spacing: -0.02em;
   }
   .invite-panel {
     display: flex;
@@ -295,9 +288,9 @@
     justify-content: space-between;
     gap: 2rem;
     margin-bottom: 1rem;
-    padding: 1.25rem;
+    padding: 1.5rem;
   }
-  .invite-panel p {
+  .invite-panel h2 + p {
     margin: 0.4rem 0 0;
     color: var(--foreground-muted);
   }
@@ -308,19 +301,26 @@
   }
   .invite-panel label {
     display: grid;
-    gap: 0.3rem;
-    color: var(--foreground-muted);
-    font-size: 0.72rem;
-    font-weight: 700;
+    gap: 0.4rem;
+    font-weight: 500;
   }
   .invite-panel input,
   .invite-panel select {
     min-height: 2.5rem;
-    padding: 0.5rem 0.65rem;
-    border: 1px solid var(--border-strong);
-    border-radius: 0.375rem;
-    background: var(--surface);
+    padding: 0.5rem 0.75rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-control);
+    background: transparent;
     color: var(--foreground);
+    font-weight: 400;
+    transition: border-color var(--motion);
+  }
+  .invite-panel input:hover,
+  .invite-panel select:hover {
+    border-color: var(--border-strong);
+  }
+  .invite-panel input::placeholder {
+    color: var(--foreground-muted);
   }
   .danger-button {
     color: var(--danger);
@@ -332,12 +332,11 @@
     display: block;
     overflow-x: auto;
     padding: 0.85rem;
-    border: 1px solid var(--border);
-    border-radius: 0.375rem;
-    background: var(--surface-subtle);
-    font:
-      0.72rem 'JetBrains Mono Variable',
-      monospace;
+    border-radius: var(--radius-control);
+    background: var(--code-bg);
+    color: var(--code-foreground);
+    font-family: var(--font-mono);
+    font-size: var(--text-caption);
   }
   .dialog-actions {
     display: flex;

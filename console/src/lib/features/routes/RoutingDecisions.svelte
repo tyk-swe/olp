@@ -58,7 +58,7 @@
 
 <style>
   article {
-    border-top: 1px solid var(--border);
+    border-top: 1px solid var(--border-hairline);
     padding: 1rem 0;
   }
   .decision-heading {

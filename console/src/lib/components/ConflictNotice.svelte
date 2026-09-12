@@ -48,13 +48,13 @@
     gap: 1rem;
     margin: 1rem 0;
     padding: 0.85rem 1rem;
-    border: 1px solid color-mix(in srgb, var(--warning) 45%, var(--border));
-    border-radius: 0.375rem;
+    border: 1px solid var(--warning);
+    border-radius: var(--radius-control);
     background: var(--warning-soft);
     color: var(--warning);
   }
   .concurrent-notice.conflict {
-    border-color: color-mix(in srgb, var(--danger) 45%, var(--border));
+    border-color: var(--danger);
     background: var(--danger-soft);
     color: var(--danger);
   }

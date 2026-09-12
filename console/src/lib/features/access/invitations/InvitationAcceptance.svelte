@@ -202,9 +202,10 @@
   }
   h1 {
     margin: 0;
-    font-size: clamp(1.7rem, 4vw, 2.1rem);
-    letter-spacing: -0.03em;
-    line-height: 1.12;
+    font-size: 1.75rem;
+    font-weight: 400;
+    letter-spacing: -0.031em;
+    line-height: 1.1;
   }
   .heading > p:last-child,
   .state p,
@@ -217,27 +218,34 @@
   }
   form label {
     margin-top: 0.55rem;
-    font-weight: 700;
+    font-weight: 500;
   }
   form input {
     min-height: 2.5rem;
-    padding: 0.5rem 0.7rem;
-    border: 1px solid var(--border-strong);
-    border-radius: 0.375rem;
-    background: var(--surface);
+    padding: 0.5rem 0.75rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-control);
+    background: transparent;
     color: var(--foreground);
+    transition: border-color var(--motion);
+  }
+  form input:hover:not(:disabled) {
+    border-color: var(--border-strong);
+  }
+  form input[aria-invalid='true'] {
+    border-color: var(--danger);
   }
   form .button {
     margin-top: 1rem;
   }
-  .field-error {
+  form .field-error {
     color: var(--danger);
   }
   .form-alert {
     margin-bottom: 1rem;
     padding: 0.7rem 0.8rem;
     border: 1px solid var(--danger);
-    border-radius: 0.375rem;
+    border-radius: var(--radius-control);
     background: var(--danger-soft);
     color: var(--danger);
   }

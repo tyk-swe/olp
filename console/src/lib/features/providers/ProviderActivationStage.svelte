@@ -34,7 +34,7 @@
 
 {#if activated}
   <section
-    class="card stage complete-panel"
+    class="card card-light stage complete-panel"
     aria-labelledby="activated-heading"
   >
     <span class="complete-mark" aria-hidden="true">✓</span>
@@ -115,21 +115,21 @@
 
 <style>
   .stage {
-    padding: clamp(1.15rem, 3vw, 1.75rem);
+    padding: 1.5rem;
   }
   h2 {
-    margin: 0 0 0.85rem;
-    font-size: 1.15rem;
-    font-weight: 750;
-    letter-spacing: -0.025em;
+    margin: 0 0 0.75rem;
+    font-size: 1rem;
+    font-weight: 500;
+    letter-spacing: -0.02em;
   }
-  .stage > p,
+  .stage > p:not(.eyebrow),
   .audit-note {
     color: var(--foreground-muted);
   }
   .audit-note {
     margin-top: 1rem;
-    font-size: 0.8rem;
+    font-size: var(--text-body-sm);
   }
   .form-actions {
     display: flex;
@@ -144,29 +144,38 @@
     padding: 0;
     list-style: none;
     color: var(--foreground-muted);
-    font-size: 0.8rem;
+    font-size: var(--text-body-sm);
   }
   .activation-checklist li {
     min-height: 1.5rem;
   }
   .activation-checklist li.complete {
     color: var(--success);
-    font-weight: 700;
+    font-weight: 500;
   }
+  /* The one bright card in the wizard: `card-light` re-maps every token for
+     the bone surface, so nothing below may assume a dark background. */
   .complete-panel {
+    padding: 1.5rem;
+    border-radius: var(--radius-panel);
     text-align: center;
+  }
+  .complete-panel h2 {
+    font-size: 1.25rem;
+    font-weight: 400;
   }
   .complete-mark {
     display: grid;
-    width: 3rem;
-    height: 3rem;
+    width: 2.5rem;
+    height: 2.5rem;
     place-items: center;
     margin: 0 auto 1rem;
+    border: 1px solid var(--metric);
     border-radius: 50%;
-    background: var(--success-soft);
-    color: var(--success);
-    font-size: 1.4rem;
-    font-weight: 800;
+    background: transparent;
+    color: var(--metric);
+    font-size: 1rem;
+    font-weight: 500;
   }
   .complete-panel .form-actions {
     justify-content: center;

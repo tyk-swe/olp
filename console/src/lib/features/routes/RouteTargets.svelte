@@ -134,8 +134,9 @@
 <style>
   h2 {
     margin: 0 0 0.75rem;
-    font-size: 1.15rem;
-    letter-spacing: -0.025em;
+    font-size: 1rem;
+    font-weight: 500;
+    letter-spacing: -0.02em;
   }
 
   .editor {
@@ -161,9 +162,9 @@
     gap: 0.65rem;
     align-items: end;
     padding: 0.75rem;
-    border: 1px solid var(--border);
-    border-radius: 0.375rem;
-    background: var(--surface-subtle);
+    border: 0;
+    border-radius: var(--radius-control);
+    background: var(--surface-raised);
   }
   .target-number {
     display: grid;
@@ -171,10 +172,13 @@
     height: 2rem;
     place-items: center;
     margin-bottom: 0.35rem;
+    border: 1px solid var(--border);
     border-radius: 50%;
-    background: var(--accent-soft);
-    color: var(--accent-strong);
-    font: 750 0.72rem 'JetBrains Mono Variable';
+    background: transparent;
+    color: var(--foreground);
+    font-family: var(--font-mono);
+    font-size: var(--text-caption);
+    font-weight: 400;
   }
   .target-fields {
     display: grid;
@@ -188,8 +192,8 @@
     width: 2.5rem;
     height: 2.5rem;
     border: 1px solid var(--border);
-    border-radius: 0.375rem;
-    background: var(--surface);
+    border-radius: var(--radius-control);
+    background: transparent;
     color: var(--danger);
     font-size: 1.3rem;
   }
@@ -198,7 +202,7 @@
     grid-column: 2 / -1;
     gap: 0.2rem;
     color: var(--success);
-    font-size: 0.72rem;
+    font-size: var(--text-caption);
   }
   .target-eligibility.warning {
     color: var(--warning);
@@ -208,19 +212,29 @@
     gap: 0.2rem;
     margin-top: 0.75rem;
     padding: 0.75rem;
-    border: 1px solid color-mix(in srgb, var(--warning) 45%, var(--border));
-    border-radius: 0.375rem;
+    border: 1px solid var(--warning);
+    border-radius: var(--radius-control);
     background: var(--warning-soft);
-    color: var(--warning);
+    color: var(--foreground);
     font-size: 0.78rem;
+  }
+  .eligibility-warning strong {
+    color: var(--warning);
   }
 
   .compact {
     min-height: 6rem;
   }
   .compact a {
-    color: var(--accent-strong);
-    font-weight: 700;
+    color: var(--foreground);
+    font-weight: 400;
+    text-decoration: underline;
+    text-decoration-color: var(--border-strong);
+    text-underline-offset: 4px;
+    transition: text-decoration-color var(--motion);
+  }
+  .compact a:hover {
+    text-decoration-color: currentColor;
   }
 
   @media (max-width: 76rem) {

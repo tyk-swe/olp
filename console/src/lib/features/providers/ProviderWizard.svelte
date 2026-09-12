@@ -169,9 +169,12 @@
   .step-progress {
     display: none;
     margin: 2rem 0 0;
-    color: var(--foreground-muted);
-    font-size: 0.78rem;
-    font-weight: 700;
+    color: var(--foreground-subtle);
+    font-family: var(--font-mono);
+    font-size: var(--text-caption);
+    font-weight: 400;
+    letter-spacing: -0.02em;
+    text-transform: uppercase;
   }
   .wizard-body {
     display: grid;
@@ -183,6 +186,8 @@
     flex-wrap: wrap;
     gap: 0.65rem;
   }
+  /* The step list shares the wizard body's 66rem column so the stages line
+     up beneath it. */
   .steps {
     display: grid;
     grid-template-columns: repeat(3, 1fr);
@@ -195,38 +200,35 @@
     display: flex;
     min-height: 2.75rem;
     align-items: center;
-    gap: 0.45rem;
-    border-bottom: 2px solid var(--border);
-    color: var(--foreground-muted);
-    font-size: 0.78rem;
-    font-weight: 700;
+    gap: 0.5rem;
+    border-bottom: 1px solid var(--border-hairline);
+    color: var(--foreground-subtle);
+    font-family: var(--font-mono);
+    font-size: var(--text-caption);
+    font-weight: 400;
+    letter-spacing: -0.02em;
+    text-transform: uppercase;
   }
   .steps li span {
-    display: grid;
-    width: 1.6rem;
-    height: 1.6rem;
-    place-items: center;
-    border: 1px solid var(--border-strong);
-    border-radius: 50%;
-    font: 700 0.68rem 'JetBrains Mono Variable';
+    min-width: 1.25rem;
+    font-variant-numeric: tabular-nums;
   }
-  .steps li.current,
-  .steps li.complete {
-    border-color: var(--accent);
+  .steps li.current {
     color: var(--foreground);
   }
-  .steps li.current span {
-    border-color: var(--accent);
-    background: var(--accent-soft);
-    color: var(--accent-strong);
+  .steps li.current::before {
+    content: '';
+    width: 6px;
+    height: 6px;
+    flex: none;
+    border-radius: 50%;
+    background: var(--signal);
   }
-  .steps li.complete span {
-    border-color: transparent;
-    background: var(--success-soft);
-    color: var(--success);
+  .steps li.complete {
+    color: var(--metric);
   }
   .stage {
-    padding: clamp(1.15rem, 3vw, 1.75rem);
+    padding: 1.5rem;
   }
 
   @media (max-width: 42rem) {
@@ -239,6 +241,13 @@
     }
     .steps li:not(.current) {
       display: none;
+    }
+  }
+
+  @media (forced-colors: active) {
+    .steps li.current::before {
+      border: 1px solid CanvasText;
+      background: CanvasText;
     }
   }
 </style>

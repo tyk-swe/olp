@@ -496,14 +496,6 @@
 {/if}
 
 <style>
-  .success-message {
-    margin: 1rem 0 0;
-    padding: 0.8rem 1rem;
-    border-radius: 0.375rem;
-    background: var(--success-soft);
-    color: var(--success);
-    font-weight: 700;
-  }
   .profile-grid {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
