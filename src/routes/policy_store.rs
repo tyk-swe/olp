@@ -148,6 +148,19 @@ pub async fn connection_limits(
         .collect())
 }
 
+/// Credential versions an operator has explicitly revoked. Unlike ordinary
+/// rotation, revocation must reach releases that still pin the version.
+pub async fn revoked_credential_versions(
+    transaction: &mut Transaction<'_, Postgres>,
+) -> Result<std::collections::BTreeSet<uuid::Uuid>, sqlx::Error> {
+    let rows: Vec<uuid::Uuid> = sqlx::query_scalar(
+        "SELECT id FROM provider_credential_versions WHERE revoked_at IS NOT NULL",
+    )
+    .fetch_all(&mut **transaction)
+    .await?;
+    Ok(rows.into_iter().collect())
+}
+
 /// Current published credential slots, excluding draft-only changes.
 pub async fn credential_slots(
     transaction: &mut Transaction<'_, Postgres>,

@@ -78,6 +78,10 @@ pub struct RoutingConfiguration {
     #[serde(skip)]
     pub credential_authority:
         Option<BTreeMap<ProviderId, Vec<crate::providers::pool::CredentialSlot>>>,
+    /// Explicitly revoked credential versions. A retained release keeps its
+    /// pinned version and transport, but selection refuses the revoked version.
+    #[serde(skip)]
+    pub revoked_credential_versions: BTreeSet<uuid::Uuid>,
     #[serde(skip)]
     pub connection_limit_authority:
         Option<BTreeMap<ProviderId, crate::providers::options::ConnectionLimits>>,

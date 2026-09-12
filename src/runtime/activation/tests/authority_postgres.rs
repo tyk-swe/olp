@@ -549,3 +549,58 @@ async fn revoked_authority_applies_when_a_new_transport_cannot_be_constructed() 
         &pinned.transport(provider).unwrap()
     ));
 }
+
+/// Explicit credential-version revocation is authority, not routing: it must
+/// reach a retained release whose transports cannot be rebuilt, so selection
+/// on the running runtime agrees with a cold load (which excludes revoked
+/// versions).
+#[tokio::test]
+#[ignore = "requires OLP_TEST_DATABASE_ADMIN_URL and OLP_TEST_DATABASE_URL_PREFIX"]
+async fn revoked_credential_versions_reach_a_retained_release_without_a_new_transport() {
+    let mut fixture = fixture().await;
+    let provider = add_provider(&mut fixture).await;
+    let pinned = fixture.activator.runtime.pin();
+    let pool = &fixture.activator.pool;
+    let credential = pinned.providers[&provider]
+        .active_credential
+        .unwrap()
+        .as_uuid();
+    assert!(pinned.routing.revoked_credential_versions.is_empty());
+    let rejected_sequence = corrupt_newest_release(&fixture).await;
+    sqlx::query("UPDATE provider_credential_versions SET revoked_at = now() WHERE id = $1")
+        .bind(credential)
+        .execute(pool)
+        .await
+        .unwrap();
+
+    assert!(!fixture.activator.activate().await.unwrap());
+    let refreshed = fixture.activator.runtime.pin();
+    assert!(
+        refreshed
+            .routing
+            .revoked_credential_versions
+            .contains(&credential)
+    );
+    assert_eq!(refreshed.generation.id, pinned.generation.id);
+    assert!(i64::try_from(refreshed.generation.ordinal).unwrap() < rejected_sequence);
+    assert!(Arc::ptr_eq(
+        &refreshed.transport(provider).unwrap(),
+        &pinned.transport(provider).unwrap()
+    ));
+
+    sqlx::query("UPDATE provider_credential_versions SET revoked_at = NULL WHERE id = $1")
+        .bind(credential)
+        .execute(pool)
+        .await
+        .unwrap();
+    assert!(!fixture.activator.activate().await.unwrap());
+    assert!(
+        fixture
+            .activator
+            .runtime
+            .pin()
+            .routing
+            .revoked_credential_versions
+            .is_empty()
+    );
+}

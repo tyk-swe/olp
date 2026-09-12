@@ -98,6 +98,9 @@ pub(crate) struct CurrentRuntimeAuthority {
     pub routes: BTreeMap<RouteSlug, crate::routes::policy::RoutingPolicy>,
     pub credentials: BTreeMap<ProviderId, Vec<crate::providers::pool::CredentialSlot>>,
     pub connection_limits: BTreeMap<ProviderId, crate::providers::options::ConnectionLimits>,
+    /// Credential versions explicitly revoked by an operator. Retained releases
+    /// still pin these versions in their slots; selection must refuse them.
+    pub revoked_credential_versions: std::collections::BTreeSet<uuid::Uuid>,
 }
 pub(crate) async fn current_runtime_authority(
     pool: &sqlx::PgPool,
@@ -112,6 +115,8 @@ pub(crate) async fn current_runtime_authority(
     let credentials = crate::routes::policy_store::credential_slots(&mut transaction).await?;
     let connection_limits =
         crate::routes::policy_store::connection_limits(&mut transaction).await?;
+    let revoked_credential_versions =
+        crate::routes::policy_store::revoked_credential_versions(&mut transaction).await?;
     transaction.commit().await?;
     Ok(CurrentRuntimeAuthority {
         api_keys,
@@ -119,6 +124,7 @@ pub(crate) async fn current_runtime_authority(
         routes,
         credentials,
         connection_limits,
+        revoked_credential_versions,
     })
 }
 

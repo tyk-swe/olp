@@ -307,6 +307,16 @@ fn explain_inner(
             let credential_version_id = slot
                 .and_then(|s| s.credential_version_id)
                 .or_else(|| provider.active_credential.map(|c| c.as_uuid()));
+            // Explicit revocation reaches retained releases through the current
+            // authority and applies even to a pinned (media-resume) version.
+            let revoked = credential_version_id
+                .is_some_and(|version| {
+                    snapshot
+                        .routing
+                        .revoked_credential_versions
+                        .contains(&version)
+                })
+                .then_some("credential_revoked");
             let pinned_reason = preferences
                 .required_credential_version
                 .filter(|required| credential_version_id != Some(*required))
@@ -323,6 +333,7 @@ fn explain_inner(
                 )
             };
             let reason = reason
+                .or(revoked)
                 .or(pinned_reason)
                 .or(cooling)
                 .or(pool_empty.then_some("credential_unavailable"))
@@ -1353,6 +1364,64 @@ mod tests {
                 .attempts[0]
                 .provider_id,
             ids[1]
+        );
+    }
+
+    #[test]
+    fn explicitly_revoked_credential_versions_are_refused_even_when_pinned() {
+        let (mut snapshot, operation, ids) = fixture();
+        let version_a = uuid::Uuid::now_v7();
+        let slot = CredentialSlot {
+            id: uuid::Uuid::now_v7(),
+            name: "retained".into(),
+            credential_version_id: Some(version_a),
+            ..Default::default()
+        };
+        snapshot
+            .routing
+            .credentials
+            .insert(ids[0], vec![slot.clone()]);
+        // Ordinary rotation: the current slot selects version B, but the retained
+        // release keeps serving its unrevoked historical version A.
+        let mut current = slot.clone();
+        current.credential_version_id = Some(uuid::Uuid::now_v7());
+        snapshot.routing.credential_authority = Some(BTreeMap::from([(ids[0], vec![current])]));
+        let selection = run(&snapshot, &operation, &Default::default()).unwrap();
+        assert_eq!(selection.attempts[0].provider_id, ids[0]);
+        assert_eq!(selection.attempts[0].credential_version_id, Some(version_a));
+        // Explicit revocation of A reaches the retained release through the
+        // authority view and excludes it from new attempt selection.
+        snapshot
+            .routing
+            .revoked_credential_versions
+            .insert(version_a);
+        let selection = run(&snapshot, &operation, &Default::default()).unwrap();
+        assert_eq!(selection.attempts[0].provider_id, ids[1]);
+        assert_eq!(
+            selection.decisions[0].reason.as_deref(),
+            Some("credential_revoked")
+        );
+        // A media-resume pin on the revoked version must not bypass revocation.
+        let pinned = RoutingPreferences {
+            required_credential_version: Some(version_a),
+            ..Default::default()
+        };
+        let explained = explain(
+            &snapshot,
+            operation.route().unwrap(),
+            &operation,
+            Surface::OpenAi,
+            TransportMode::Unary,
+            &[],
+            None,
+            &pinned,
+            |_, _| true,
+        )
+        .unwrap();
+        assert!(explained.attempts.is_empty());
+        assert_eq!(
+            explained.decisions[0].reason.as_deref(),
+            Some("credential_revoked")
         );
     }
 
