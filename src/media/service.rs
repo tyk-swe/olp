@@ -59,6 +59,13 @@ impl MediaJobs {
     }
 }
 const ATTACH_ATTEMPTS: u64 = 3;
+/// Reconciliation jobs run concurrently per pass. Claims are taken in chunks
+/// of this size so every claimed lease starts running immediately.
+pub(crate) const RECONCILIATION_CONCURRENCY: usize = 4;
+/// Extra lease time beyond the route deadline for persistence work around
+/// the upstream call (mirrors the admission lease sizing).
+const RECONCILIATION_LEASE_SLACK: chrono::Duration = chrono::Duration::seconds(60);
+const RECONCILIATION_CLAIM_LOST: &str = "reconciliation_claim_lost";
 
 pub(crate) async fn attach_media_job_with_retry(
     pool: &sqlx::PgPool,
@@ -103,34 +110,70 @@ pub async fn reconcile_media_jobs_once(
     state: &MediaJobs,
     limit: u16,
 ) -> Result<MediaReconciliationPass, MediaJobError> {
-    let records = crate::media::jobs::reconciliation::claim_media_reconciliation_jobs(
-        &state.pool,
-        Utc::now(),
-        limit,
-    )
-    .await?;
-    let claimed = u16::try_from(records.len()).unwrap_or(u16::MAX);
-    let outcomes = stream::iter(records)
-        .map(|record| reconcile_claimed_media_job(state, record))
-        .buffer_unordered(4)
-        .collect::<Vec<_>>()
-        .await;
-    let completed =
-        u16::try_from(outcomes.iter().filter(|value| **value).count()).unwrap_or(u16::MAX);
+    let chunk = u16::try_from(RECONCILIATION_CONCURRENCY).unwrap_or(u16::MAX);
+    let mut claimed: u16 = 0;
+    let mut completed: u16 = 0;
+    let mut handed_off: u16 = 0;
+    // Claim only what can run now: a lease starts ticking at claim time, so a
+    // job queued behind running work would otherwise burn its lease waiting.
+    while claimed < limit {
+        let wanted = chunk.min(limit - claimed);
+        let records = crate::media::jobs::reconciliation::claim_media_reconciliation_jobs(
+            &state.pool,
+            Utc::now(),
+            wanted,
+        )
+        .await?;
+        let count = u16::try_from(records.len()).unwrap_or(u16::MAX);
+        claimed = claimed.saturating_add(count);
+        let outcomes = stream::iter(records)
+            .map(|record| reconcile_claimed_media_job(state, record))
+            .buffer_unordered(RECONCILIATION_CONCURRENCY)
+            .collect::<Vec<_>>()
+            .await;
+        for outcome in outcomes {
+            match outcome {
+                ReconciliationOutcome::Completed => completed = completed.saturating_add(1),
+                ReconciliationOutcome::HandedOff => handed_off = handed_off.saturating_add(1),
+                ReconciliationOutcome::Failed => {}
+            }
+        }
+        if count < wanted {
+            break;
+        }
+    }
     Ok(MediaReconciliationPass {
         claimed,
         completed,
-        failed: claimed.saturating_sub(completed),
+        failed: claimed.saturating_sub(completed).saturating_sub(handed_off),
     })
 }
 
-async fn reconcile_claimed_media_job(state: &MediaJobs, mut record: MediaJobRecord) -> bool {
+enum ReconciliationOutcome {
+    Completed,
+    Failed,
+    /// Another worker reclaimed the job before its upstream call; nothing was
+    /// executed or checkpointed here.
+    HandedOff,
+}
+
+async fn reconcile_claimed_media_job(
+    state: &MediaJobs,
+    mut record: MediaJobRecord,
+) -> ReconciliationOutcome {
     let Some(claim_id) = record.reconciliation_claim_id else {
         state.record_media_reconciliation_gap();
-        return false;
+        return ReconciliationOutcome::Failed;
     };
     let pool = &state.pool;
-    let outcome = reconcile_media_job_operation(state, &mut record).await;
+    let outcome = reconcile_media_job_operation(state, &mut record, claim_id).await;
+    if outcome == Err(RECONCILIATION_CLAIM_LOST) {
+        tracing::info!(
+            job_id = %record.id,
+            "autonomous media reconciliation claim was reassigned before the upstream call"
+        );
+        return ReconciliationOutcome::HandedOff;
+    }
     let now = Utc::now();
     let (next_attempt_at, error_class) = match outcome {
         Ok(()) => {
@@ -160,19 +203,20 @@ async fn reconcile_claimed_media_job(state: &MediaJobs, mut record: MediaJobReco
     {
         state.record_media_reconciliation_gap();
         error!(job_id = %record.id, %error, "failed to checkpoint autonomous media reconciliation");
-        return false;
+        return ReconciliationOutcome::Failed;
     }
     if let Some(code) = error_class {
         warn!(job_id = %record.id, error_class = code, "autonomous media reconciliation will retry");
-        false
+        ReconciliationOutcome::Failed
     } else {
-        true
+        ReconciliationOutcome::Completed
     }
 }
 
 async fn reconcile_media_job_operation(
     state: &MediaJobs,
     record: &mut MediaJobRecord,
+    claim_id: uuid::Uuid,
 ) -> Result<(), &'static str> {
     let pool = &state.pool;
     match record.lifecycle {
@@ -227,7 +271,7 @@ async fn reconcile_media_job_operation(
             .map_err(|_| "persistence_unavailable")?;
     }
 
-    let result = execute_media_reconciliation_result(state, record).await?;
+    let result = execute_media_reconciliation_result(state, record, claim_id).await?;
     if record.lifecycle == MediaJobLifecycle::Active {
         let CanonicalResult::VideoJob(result) = result.as_ref() else {
             return Err("provider_protocol_error");
@@ -263,6 +307,7 @@ async fn reconcile_media_job_operation(
 async fn execute_media_reconciliation_result(
     state: &MediaJobs,
     record: &MediaJobRecord,
+    claim_id: uuid::Uuid,
 ) -> Result<Box<CanonicalResult>, &'static str> {
     let upstream_id = record
         .upstream_job_id
@@ -270,6 +315,7 @@ async fn execute_media_reconciliation_result(
         .filter(|value| valid_upstream_media_job_id(value))
         .ok_or("media_job_upstream_id_unavailable")?;
     let route = RouteSlug::parse(&record.route_slug).map_err(|_| "media_job_route_invalid")?;
+    let record_route = route.clone();
     let mut request = VideoJobRequest {
         route: Some(route),
         job_id: upstream_id,
@@ -285,6 +331,28 @@ async fn execute_media_reconciliation_result(
         VideoOperation::Delete(request)
     };
     let runtime = media_job_runtime(state, record).await?;
+    // Revalidate ownership and bound the lease across the whole upstream call.
+    // Another replica may have reclaimed this row; if so, stop before issuing
+    // a duplicate poll or delete.
+    let deadline = runtime
+        .routes
+        .get(&record_route)
+        .map(|route| route.overall_timeout.as_duration())
+        .ok_or("media_job_route_invalid")?;
+    let lease_until = Utc::now()
+        + chrono::Duration::from_std(deadline).unwrap_or(RECONCILIATION_LEASE_SLACK)
+        + RECONCILIATION_LEASE_SLACK;
+    let owned = crate::media::jobs::reconciliation::extend_media_reconciliation_claim(
+        &state.pool,
+        record.id,
+        claim_id,
+        lease_until,
+    )
+    .await
+    .map_err(|_| "persistence_unavailable")?;
+    if !owned {
+        return Err(RECONCILIATION_CLAIM_LOST);
+    }
     state
         .inference
         .execute_reconciliation_result(
