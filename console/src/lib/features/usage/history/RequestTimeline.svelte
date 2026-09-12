@@ -347,9 +347,6 @@
   .text-button {
     padding: 0.4rem 0.65rem;
   }
-  .text-button:hover {
-    text-decoration: underline;
-  }
 
   .unpriced {
     color: var(--warning);
@@ -357,12 +354,13 @@
 
   .request-facts {
     margin-top: 1rem;
-    padding: 1.25rem;
+    padding: 1.5rem;
   }
   h2 {
     margin: 0;
-    font-size: 1.2rem;
-    letter-spacing: -0.025em;
+    font-size: 1rem;
+    font-weight: 500;
+    letter-spacing: -0.02em;
   }
   dl {
     display: grid;
@@ -374,13 +372,16 @@
     min-width: 0;
   }
   dt {
-    color: var(--foreground-muted);
-    font-size: 0.72rem;
-    font-weight: 700;
+    color: var(--foreground-subtle);
+    font-family: var(--font-mono);
+    font-size: var(--text-caption);
+    font-weight: 400;
+    letter-spacing: -0.02em;
+    text-transform: uppercase;
   }
   dd {
     overflow-wrap: anywhere;
-    margin: 0.2rem 0 0;
+    margin: 0.25rem 0 0;
   }
   .timeline-section {
     margin-top: 2rem;
@@ -402,8 +403,10 @@
   .timeline li {
     position: relative;
     margin-left: 1.4rem;
-    padding: 1rem 1rem 1rem 1.5rem;
+    padding: 1.25rem 1.25rem 1.25rem 1.5rem;
   }
+  /* The marker straddles the card edge, so it needs the opaque canvas behind
+     it to mask the hairline it crosses. */
   .timeline-marker {
     position: absolute;
     top: 0.85rem;
@@ -412,11 +415,13 @@
     width: 2rem;
     height: 2rem;
     place-items: center;
-    border-radius: 999px;
-    background: var(--accent);
-    color: white;
-    font-size: 0.75rem;
-    font-weight: 800;
+    border: 1px solid var(--border);
+    border-radius: 50%;
+    background: var(--canvas);
+    color: var(--foreground);
+    font-family: var(--font-mono);
+    font-size: var(--text-caption);
+    font-weight: 400;
   }
   .attempt-heading strong,
   .attempt-heading .mono {

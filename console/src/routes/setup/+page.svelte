@@ -81,7 +81,9 @@
   .status-card h2 {
     margin: 1.25rem 0 0;
     font-size: 1.75rem;
-    letter-spacing: -0.035em;
+    font-weight: 400;
+    letter-spacing: -0.031em;
+    line-height: 1.1;
   }
 
   .status-card p {
@@ -95,21 +97,21 @@
     width: 2.5rem;
     height: 2.5rem;
     place-items: center;
-    border-radius: 0.5rem;
+    border-radius: var(--radius-control);
   }
 
   .spinner {
-    border: 3px solid var(--border);
-    border-top-color: var(--accent);
+    border: 2px solid var(--border);
+    border-top-color: var(--signal);
     border-radius: 50%;
     animation: spin 700ms linear infinite;
   }
 
   .error-symbol {
-    background: var(--danger-soft);
+    border: 1px solid var(--danger);
     color: var(--danger);
     font-size: 1.25rem;
-    font-weight: 800;
+    font-weight: 500;
   }
 
   @keyframes spin {

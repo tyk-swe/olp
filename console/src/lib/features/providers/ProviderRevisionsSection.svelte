@@ -391,13 +391,13 @@
 <style>
   .editor {
     margin-top: 1.25rem;
-    padding: clamp(1.15rem, 3vw, 1.75rem);
+    padding: 1.5rem;
   }
   h2 {
-    margin: 0 0 0.85rem;
-    font-size: 1.15rem;
-    font-weight: 750;
-    letter-spacing: -0.025em;
+    margin: 0 0 0.75rem;
+    font-size: 1rem;
+    font-weight: 500;
+    letter-spacing: -0.02em;
   }
   .muted {
     color: var(--foreground-muted);
@@ -422,16 +422,20 @@
     display: grid;
     gap: 0.3rem;
     color: var(--foreground-muted);
-    font-size: 0.72rem;
-    font-weight: 700;
+    font-size: var(--text-body-sm);
+    font-weight: 500;
   }
   .revision-compare select {
     min-height: 2.5rem;
-    padding: 0.5rem 0.65rem;
-    border: 1px solid var(--border-strong);
-    border-radius: 0.375rem;
-    background: var(--surface);
+    padding: 0.5rem 0.75rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-control);
+    background: transparent;
     color: var(--foreground);
+    transition: border-color var(--motion);
+  }
+  .revision-compare select:hover {
+    border-color: var(--border-strong);
   }
 
   .revision-list {
@@ -444,8 +448,9 @@
     justify-content: space-between;
     gap: 1rem;
     padding: 0.85rem;
-    border: 1px solid var(--border);
-    border-radius: 0.375rem;
+    border: 0;
+    border-radius: var(--radius-control);
+    background: var(--surface-raised);
   }
   .revision-row > div {
     display: grid;
@@ -466,7 +471,7 @@
   }
   .revision-actions .view-button:hover:not(:disabled) {
     border-color: transparent;
-    background: var(--surface-hover);
+    background: none;
     color: var(--foreground-hover);
   }
   .revision-fields {
@@ -476,9 +481,12 @@
     margin: 0;
   }
   .revision-fields dt {
-    color: var(--foreground-muted);
-    font-size: 0.72rem;
-    font-weight: 700;
+    color: var(--foreground-subtle);
+    font-family: var(--font-mono);
+    font-size: var(--text-caption);
+    font-weight: 400;
+    letter-spacing: -0.02em;
+    text-transform: uppercase;
   }
   .revision-fields dd {
     margin: 0.15rem 0 0;
@@ -487,6 +495,8 @@
   .revision-models-heading {
     margin: 1.35rem 0 0.5rem;
     font-size: 1rem;
+    font-weight: 500;
+    letter-spacing: -0.02em;
   }
   .revision-models {
     display: grid;
@@ -499,8 +509,9 @@
     display: grid;
     gap: 0.3rem;
     padding: 0.75rem;
-    border: 1px solid var(--border);
-    border-radius: 0.375rem;
+    border: 0;
+    border-radius: var(--radius-control);
+    background: var(--surface-raised);
   }
   .revision-model-name {
     display: flex;
@@ -513,20 +524,19 @@
     flex-wrap: wrap;
     gap: 0.35rem;
   }
-  .revision-capabilities span {
+  .revision-capabilities span:not(.muted) {
     padding: 0.3rem 0.45rem;
-    border-radius: 0.25rem;
-    background: var(--warning-soft);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-control);
     color: var(--warning);
-    font-size: 0.68rem;
+    font-family: var(--font-mono);
+    font-size: var(--text-caption);
+    font-weight: 400;
+    letter-spacing: -0.02em;
+    text-transform: uppercase;
   }
   .revision-capabilities span.certified {
-    background: var(--success-soft);
     color: var(--success);
-  }
-  .revision-capabilities span.muted {
-    background: none;
-    color: var(--foreground-muted);
   }
   .dialog-actions {
     display: flex;
@@ -538,9 +548,7 @@
     overflow-wrap: anywhere;
   }
   code {
-    font:
-      0.75rem 'JetBrains Mono Variable',
-      monospace;
+    font-size: var(--text-caption);
   }
 
   @media (max-width: 42rem) {

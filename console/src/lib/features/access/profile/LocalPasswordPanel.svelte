@@ -125,28 +125,26 @@
   .panel {
     display: grid;
     gap: 1rem;
-    padding: 1.25rem;
+    padding: 1.5rem;
   }
   h2 {
     margin: 0;
-    font-size: 1.2rem;
-  }
-  .form-field input {
-    width: 100%;
+    font-size: 1rem;
+    font-weight: 500;
+    letter-spacing: -0.02em;
   }
   .field-error {
     margin: 0;
     color: var(--danger);
-    font-weight: 700;
   }
   .security-note {
     margin: 0;
     color: var(--foreground-muted);
-    font-size: 0.75rem;
+    font-size: var(--text-caption);
   }
   @media (max-width: 40rem) {
     .panel {
-      padding: 0.85rem;
+      padding: 1rem;
     }
   }
 </style>

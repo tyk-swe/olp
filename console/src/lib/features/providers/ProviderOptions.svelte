@@ -90,7 +90,7 @@
   }
   summary {
     cursor: pointer;
-    font-weight: 700;
+    font-weight: 500;
   }
   p {
     color: var(--foreground-muted);
@@ -98,7 +98,16 @@
   textarea {
     display: block;
     width: 100%;
-    font-family: monospace;
     margin: 0.5rem 0 1rem;
+    padding: 0.5rem 0.75rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-control);
+    background: transparent;
+    color: var(--foreground);
+    font-family: var(--font-mono);
+    transition: border-color var(--motion);
+  }
+  textarea:hover {
+    border-color: var(--border-strong);
   }
 </style>

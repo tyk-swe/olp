@@ -233,7 +233,7 @@
   }
   .live-note {
     margin: 1rem 0 0;
-    font-size: 0.8rem;
+    font-size: var(--text-body-sm);
   }
   .form-actions {
     display: flex;
@@ -248,14 +248,14 @@
     padding: 0;
     list-style: none;
     color: var(--foreground-muted);
-    font-size: 0.8rem;
+    font-size: var(--text-body-sm);
   }
   .activation-checklist li {
     min-height: 1.5rem;
   }
   .activation-checklist li.complete {
     color: var(--success);
-    font-weight: 700;
+    font-weight: 500;
   }
   .activation-checklist.compact {
     margin-top: 1.1rem;

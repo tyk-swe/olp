@@ -317,13 +317,13 @@
 <style>
   .editor {
     margin-top: 1.25rem;
-    padding: clamp(1.15rem, 3vw, 1.75rem);
+    padding: 1.5rem;
   }
   h2 {
-    margin: 0 0 0.85rem;
-    font-size: 1.15rem;
-    font-weight: 750;
-    letter-spacing: -0.025em;
+    margin: 0 0 0.75rem;
+    font-size: 1rem;
+    font-weight: 500;
+    letter-spacing: -0.02em;
   }
   .muted,
   .audit-note,
@@ -332,7 +332,7 @@
   }
   .locked-note {
     margin: 1rem 0 0;
-    font-size: 0.8rem;
+    font-size: var(--text-body-sm);
   }
   .section-heading {
     display: flex;
@@ -352,13 +352,13 @@
     gap: 0.6rem;
     margin-top: 0.75rem;
     padding-top: 0.75rem;
-    border-top: 1px solid var(--border);
+    border-top: 1px solid var(--border-hairline);
     color: var(--foreground-muted);
-    font-size: 0.75rem;
+    font-size: var(--text-body-sm);
   }
   .discovered {
     color: var(--foreground-muted);
-    font-size: 0.7rem;
+    font-size: var(--text-caption);
   }
   .models {
     max-width: none;
@@ -366,24 +366,23 @@
   .manual-fallback {
     margin-top: 1rem;
     padding: 0.75rem;
-    border: 1px solid var(--border);
-    border-radius: 0.375rem;
+    border: 0;
+    border-radius: var(--radius-control);
+    background: var(--surface-raised);
   }
   .manual-fallback summary {
     min-height: 2.75rem;
-    font-weight: 720;
+    font-weight: 500;
   }
   .manual-fallback p {
     color: var(--foreground-muted);
-    font-size: 0.78rem;
+    font-size: var(--text-body-sm);
   }
   .manual-fallback textarea {
     min-height: 5rem;
   }
   code {
-    font:
-      0.75rem 'JetBrains Mono Variable',
-      monospace;
+    font-size: var(--text-caption);
   }
   @media (max-width: 42rem) {
     .discovery-row {

@@ -232,11 +232,11 @@
   .connector-locked {
     margin: 0.6rem 0 0;
     color: var(--foreground-muted);
-    font-size: 0.78rem;
+    font-size: var(--text-body-sm);
   }
 
   .editor {
-    padding: clamp(1.15rem, 3vw, 1.75rem);
+    padding: 1.5rem;
   }
   fieldset {
     margin: 0 0 1.5rem;
@@ -244,14 +244,14 @@
     border: 0;
   }
   legend {
-    margin: 0 0 0.85rem;
-    font-size: 1.15rem;
-    font-weight: 750;
-    letter-spacing: -0.025em;
+    margin: 0 0 0.75rem;
+    font-size: 1rem;
+    font-weight: 500;
+    letter-spacing: -0.02em;
   }
   .connector-label {
     margin: 1.1rem 0 0.45rem;
-    font-weight: 700;
+    font-weight: 500;
   }
   .connector-grid {
     display: grid;
@@ -266,15 +266,19 @@
     gap: 0.2rem;
     padding: 0.8rem;
     border: 1px solid var(--border);
-    border-radius: 0.375rem;
+    border-radius: var(--radius-control);
+    transition: border-color var(--motion);
+  }
+  .connector-grid label:hover {
+    border-color: var(--border-strong);
   }
   .connector-grid label:has(input:focus-visible) {
     outline: 2px solid var(--focus);
     outline-offset: 2px;
   }
   .connector-grid label.selected {
-    border-color: var(--accent);
-    background: var(--accent-soft);
+    border-color: var(--foreground);
+    background: transparent;
   }
   .connector-grid input {
     position: absolute;
@@ -293,11 +297,11 @@
     display: grid;
     gap: 0.15rem;
     padding: 0.8rem;
-    border: 1px solid var(--border);
-    border-radius: 0.375rem;
-    background: var(--surface-subtle);
+    border: 0;
+    border-radius: var(--radius-control);
+    background: var(--surface-raised);
     color: var(--foreground-muted);
-    font-size: 0.78rem;
+    font-size: var(--text-body-sm);
   }
   .identity-note strong {
     color: var(--foreground);
@@ -309,27 +313,34 @@
     display: grid;
     gap: 0.3rem;
     padding: 0.85rem;
-    border: 1px solid var(--border);
-    border-radius: 0.375rem;
-    background: var(--surface-subtle);
+    border: 0;
+    border-radius: var(--radius-control);
+    background: var(--surface-raised);
     color: var(--foreground-muted);
-    font-size: 0.78rem;
+    font-size: var(--text-body-sm);
   }
   .preset-note strong {
     color: var(--foreground);
-    font-size: 0.9rem;
   }
   .preset-note code {
     color: var(--foreground);
   }
   .preset-note a {
-    color: var(--accent-strong);
-    font-weight: 700;
+    color: var(--foreground);
+    font-weight: 400;
+    text-decoration: underline;
+    text-decoration-color: var(--border-strong);
+    text-underline-offset: 4px;
+    transition:
+      color var(--motion),
+      text-decoration-color var(--motion);
+  }
+  .preset-note a:hover {
+    color: var(--foreground-hover);
+    text-decoration-color: currentColor;
   }
   code {
-    font:
-      0.75rem 'JetBrains Mono Variable',
-      monospace;
+    font-size: var(--text-caption);
   }
   @media (max-width: 64rem) {
     .connector-grid {

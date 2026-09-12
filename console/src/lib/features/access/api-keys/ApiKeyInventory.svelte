@@ -343,29 +343,42 @@
 {/if}
 
 <style>
-  h2 {
-    margin: 0 0 0.75rem;
-    font-size: 1.15rem;
-    letter-spacing: -0.025em;
-  }
-  .success-message {
-    margin: 1rem 0;
-    padding: 0.8rem 1rem;
-    border-radius: 0.375rem;
-    background: var(--success-soft);
-    color: var(--success);
-    font-weight: 700;
-  }
   .issuer-filter {
-    padding: 1rem;
+    display: grid;
+    gap: 0.75rem;
+    margin-top: 1.5rem;
+    padding: 1.5rem;
+  }
+  .field {
+    display: grid;
+    gap: 0.4rem;
+    font-weight: 500;
+  }
+  .field input {
+    min-height: 2.5rem;
+    padding: 0.5rem 0.75rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-control);
+    background: transparent;
+    color: var(--foreground);
+    font-weight: 400;
+    transition: border-color var(--motion);
+  }
+  .field input:hover {
+    border-color: var(--border-strong);
+  }
+  .field input::placeholder {
+    color: var(--foreground-muted);
+  }
+  .issuer-filter p {
+    margin: 0;
+    color: var(--foreground-muted);
   }
   .key-table {
     margin-top: 1.5rem;
   }
   code {
-    font:
-      0.72rem 'JetBrains Mono Variable',
-      monospace;
+    font-size: var(--text-caption);
   }
   td small {
     color: var(--foreground-muted);

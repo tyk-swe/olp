@@ -407,7 +407,7 @@
     align-items: flex-start;
     gap: 1rem;
     margin-top: 1rem;
-    padding: 1.25rem;
+    padding: 1.5rem;
   }
   .health-icon {
     display: grid;
@@ -415,19 +415,20 @@
     height: 2.5rem;
     flex: none;
     place-items: center;
-    border-radius: 0.375rem;
-    background: var(--danger-soft);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-control);
+    background: transparent;
     color: var(--danger);
-    font-weight: 900;
+    font-weight: 500;
   }
   .health-icon.ok {
-    background: var(--success-soft);
     color: var(--success);
   }
   .persistence h2 {
     margin: 0;
-    font-size: 1.2rem;
-    letter-spacing: -0.025em;
+    font-size: 1rem;
+    font-weight: 500;
+    letter-spacing: -0.02em;
   }
   .persistence p:last-child {
     margin: 0.35rem 0 0;
@@ -449,27 +450,30 @@
     grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
     gap: 1rem;
     margin: 0;
-    padding: 1.1rem 1.25rem;
+    padding: 1.25rem 1.5rem;
   }
   .facts div {
     min-width: 0;
   }
   dt {
-    color: var(--foreground-muted);
-    font-size: 0.7rem;
-    font-weight: 700;
+    color: var(--foreground-subtle);
+    font-family: var(--font-mono);
+    font-size: var(--text-caption);
+    font-weight: 400;
+    letter-spacing: -0.02em;
+    text-transform: uppercase;
   }
   dd {
-    margin: 0.1rem 0 0;
-    font-weight: 700;
+    margin: 0.25rem 0 0;
+    font-weight: 400;
     overflow-wrap: anywhere;
   }
   dd small {
     display: block;
     margin-top: 0.15rem;
     color: var(--foreground-muted);
-    font-size: 0.7rem;
-    font-weight: 500;
+    font-size: var(--text-caption);
+    font-weight: 400;
   }
   .warning-text {
     color: var(--warning);

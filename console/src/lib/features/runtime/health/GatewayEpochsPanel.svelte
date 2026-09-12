@@ -177,9 +177,8 @@
     font-size: 0.8rem;
   }
   code {
-    font:
-      0.72rem 'JetBrains Mono Variable',
-      monospace;
+    font-family: var(--font-mono);
+    font-size: var(--text-caption);
     overflow-wrap: anywhere;
   }
   td small,
@@ -187,7 +186,7 @@
     display: block;
     margin-top: 0.15rem;
     color: var(--foreground-muted);
-    font-size: 0.7rem;
-    font-weight: 500;
+    font-size: var(--text-caption);
+    font-weight: 400;
   }
 </style>

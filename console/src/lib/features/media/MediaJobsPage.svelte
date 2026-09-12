@@ -381,29 +381,33 @@
     display: flex;
     flex-wrap: wrap;
     align-items: end;
-    gap: 0.65rem;
-    margin: 1.25rem 0;
-    padding: 1rem;
+    gap: 0.75rem;
+    margin: 1.5rem 0;
+    padding: 1.25rem;
   }
   .filters label {
     display: grid;
-    gap: 0.3rem;
-    color: var(--foreground-muted);
-    font-size: 0.72rem;
-    font-weight: 700;
+    gap: 0.4rem;
+    font-size: var(--text-body-sm);
+    font-weight: 500;
   }
-  /* Operator-typed values are content, not labels: they keep the body size and
-     weight instead of inheriting the label's small bold. */
+  /* Operator-typed values are content, not labels: they keep the body weight
+     instead of inheriting the label's emphasis. */
   .filters input,
   .filters select {
     min-height: 2.5rem;
-    padding: 0.5rem 0.7rem;
-    border: 1px solid var(--border-strong);
-    border-radius: 0.375rem;
-    background: var(--surface);
+    padding: 0.5rem 0.75rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-control);
+    background: transparent;
     color: var(--foreground);
-    font-size: 0.875rem;
+    font-size: var(--text-body-sm);
     font-weight: 400;
+    transition: border-color var(--motion);
+  }
+  .filters input:hover,
+  .filters select:hover {
+    border-color: var(--border-strong);
   }
   .filter-actions {
     display: flex;
@@ -421,7 +425,7 @@
   .job-detail {
     max-width: 64rem;
     margin-top: 1.5rem;
-    padding: 1.25rem;
+    padding: 1.5rem;
   }
   .section-heading {
     display: flex;
@@ -431,27 +435,35 @@
   }
   h2 {
     margin: 0;
+    font-size: 1.25rem;
+    font-weight: 400;
+    letter-spacing: -0.02em;
   }
   dl {
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 0.75rem;
+    margin-top: 1.25rem;
   }
   dl div,
   .identifiers p {
     min-width: 0;
-    padding: 0.75rem;
-    border-radius: 0.375rem;
-    background: var(--surface-subtle);
+    padding: 0.75rem 1rem;
+    border: 0;
+    border-radius: var(--radius-control);
+    background: var(--surface-raised);
   }
-  dt {
-    color: var(--foreground-muted);
-    font-size: 0.7rem;
-    font-weight: 700;
+  dt,
+  .identifiers strong {
+    color: var(--foreground-subtle);
+    font-family: var(--font-mono);
+    font-size: var(--text-caption);
+    font-weight: 400;
+    letter-spacing: -0.02em;
+    text-transform: uppercase;
   }
   dd {
-    margin: 0.15rem 0 0;
-    font-weight: 700;
+    margin: 0.35rem 0 0;
     overflow-wrap: anywhere;
   }
   .identifiers {
@@ -461,14 +473,13 @@
   }
   .identifiers p {
     display: grid;
-    gap: 0.25rem;
+    gap: 0.35rem;
     margin: 0;
   }
   .identifiers code {
     overflow-wrap: anywhere;
-    font:
-      0.72rem 'JetBrains Mono Variable',
-      monospace;
+    font-family: var(--font-mono);
+    font-size: var(--text-caption);
   }
   /* Eight columns still cannot fit a phone. Left as a scrolling table, the row
      width also pushes mobile browsers into shrinking the whole page. */
@@ -483,7 +494,6 @@
       overflow: visible;
       border: 0;
       background: transparent;
-      box-shadow: none;
     }
     .job-table,
     .job-table tbody {
@@ -503,10 +513,9 @@
       grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
       gap: 0.75rem;
       padding: 1rem;
-      border: 1px solid var(--border);
-      border-radius: 0.375rem;
-      background: var(--surface);
-      box-shadow: var(--shadow-sm);
+      border: 1px solid var(--border-hairline);
+      border-radius: var(--radius-card);
+      background: transparent;
     }
     .job-table tbody td {
       display: block;
@@ -518,12 +527,13 @@
     }
     .job-table tbody td::before {
       display: block;
-      margin-bottom: 0.2rem;
-      color: var(--foreground-muted);
+      margin-bottom: 0.25rem;
+      color: var(--foreground-subtle);
       content: attr(data-label);
-      font-size: 0.68rem;
-      font-weight: 760;
-      letter-spacing: 0.045em;
+      font-family: var(--font-mono);
+      font-size: var(--text-caption);
+      font-weight: 400;
+      letter-spacing: -0.02em;
       text-transform: uppercase;
     }
     .job-table tbody td:first-child,

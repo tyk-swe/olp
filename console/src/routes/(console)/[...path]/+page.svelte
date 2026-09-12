@@ -29,13 +29,15 @@
     height: 2.75rem;
     flex: none;
     place-items: center;
-    border-radius: 0.375rem;
-    background: var(--accent-soft);
-    color: var(--accent-strong);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-control);
+    color: var(--foreground);
   }
   .not-found h2 {
     margin: 0;
-    font-size: 1.2rem;
+    font-size: 1rem;
+    font-weight: 500;
+    letter-spacing: -0.02em;
   }
   .not-found p {
     margin: 0.5rem 0 1rem;

@@ -42,7 +42,7 @@
   }
   legend {
     margin-bottom: 0.4rem;
-    font-weight: 700;
+    font-weight: 500;
   }
   .segmented-root {
     display: flex;
@@ -68,23 +68,26 @@
     justify-content: center;
     padding: 0.5rem;
     border: 1px solid var(--border);
-    border-radius: 0.375rem;
-    background: var(--surface);
+    border-radius: var(--radius-control);
+    background: transparent;
     color: var(--foreground-muted);
-    font-weight: 700;
+    transition:
+      background-color var(--motion),
+      border-color var(--motion),
+      color var(--motion);
   }
   .segmented-item:hover span {
     background: var(--surface-hover);
     color: var(--foreground-hover);
   }
   input:focus-visible + span {
-    outline: 2px solid var(--accent);
+    outline: 2px solid var(--focus);
     outline-offset: 2px;
   }
   input:checked + span {
-    border-color: var(--accent);
-    background: var(--accent-soft);
-    color: var(--accent-strong);
+    border-color: var(--foreground);
+    background: var(--surface-raised);
+    color: var(--foreground);
   }
   @media (max-width: 38rem) {
     .segmented-root {

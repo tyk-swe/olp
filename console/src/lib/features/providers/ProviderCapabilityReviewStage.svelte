@@ -140,17 +140,17 @@
 
 <style>
   h2 {
-    margin: 0 0 0.85rem;
-    font-size: 1.15rem;
-    font-weight: 750;
-    letter-spacing: -0.025em;
+    margin: 0 0 0.75rem;
+    font-size: 1rem;
+    font-weight: 500;
+    letter-spacing: -0.02em;
   }
   .description {
     color: var(--foreground-muted);
   }
   .discovered {
     color: var(--foreground-muted);
-    font-size: 0.7rem;
+    font-size: var(--text-caption);
   }
   .certification-action {
     display: flex;
@@ -159,13 +159,11 @@
     gap: 0.6rem;
     margin-top: 0.75rem;
     padding-top: 0.75rem;
-    border-top: 1px solid var(--border);
+    border-top: 1px solid var(--border-hairline);
     color: var(--foreground-muted);
-    font-size: 0.75rem;
+    font-size: var(--text-body-sm);
   }
   code {
-    font:
-      0.75rem 'JetBrains Mono Variable',
-      monospace;
+    font-size: var(--text-caption);
   }
 </style>

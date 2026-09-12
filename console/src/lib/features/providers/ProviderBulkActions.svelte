@@ -104,7 +104,7 @@
 
 <style>
   .bulk-actions {
-    padding: 1rem;
+    padding: 1.5rem;
     margin: 1rem 0;
   }
   .actions {

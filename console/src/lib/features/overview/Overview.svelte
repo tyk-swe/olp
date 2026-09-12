@@ -325,7 +325,7 @@
   .status-grid {
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 0.85rem;
+    gap: 1rem;
     margin-top: 2rem;
   }
 
@@ -333,8 +333,12 @@
     display: flex;
     min-width: 0;
     align-items: center;
-    gap: 0.85rem;
-    padding: 1rem;
+    gap: 1rem;
+    padding: 1.25rem;
+  }
+
+  .status-card > div {
+    min-width: 0;
   }
 
   .status-icon {
@@ -343,39 +347,42 @@
     height: 2.25rem;
     flex: none;
     place-items: center;
-    border-radius: 0.375rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-control);
+    background: transparent;
   }
 
   .status-icon.neutral {
-    background: var(--surface-subtle);
     color: var(--foreground-muted);
   }
 
   .status-icon.ready {
-    background: var(--success-soft);
-    color: var(--success);
+    color: var(--metric);
   }
 
   .status-card p {
-    margin: 0 0 0.1rem;
-    color: var(--foreground-muted);
-    font-size: 0.72rem;
+    margin: 0 0 0.5rem;
+    color: var(--foreground-subtle);
+    font-family: var(--font-mono);
+    font-size: var(--text-caption);
+    font-weight: 400;
+    letter-spacing: -0.02em;
+    line-height: 1;
+    text-transform: uppercase;
   }
 
   .status-card .text-button {
     min-height: 2.2rem;
     padding: 0;
-    border: 0;
-    background: transparent;
-    color: var(--accent-strong);
-    font-size: 0.72rem;
-    font-weight: 720;
+    font-size: var(--text-caption);
   }
 
   .status-card strong {
     display: block;
     overflow: hidden;
-    font-size: 0.86rem;
+    font-size: 1rem;
+    font-weight: 500;
+    letter-spacing: -0.02em;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
@@ -404,40 +411,41 @@
 
   .endpoint-card,
   .privacy-card {
-    padding: clamp(1.15rem, 3vw, 1.5rem);
+    padding: 1.5rem;
   }
 
   h2 {
     margin: 0;
-    font-size: 1.15rem;
-    font-weight: 720;
-    letter-spacing: -0.025em;
+    font-size: 1rem;
+    font-weight: 500;
+    letter-spacing: -0.02em;
   }
 
   .endpoint-card > p:not(.eyebrow),
   .privacy-card p {
-    margin: 0.55rem 0 0;
+    margin: 0.5rem 0 0;
     color: var(--foreground-muted);
-    font-size: 0.83rem;
+    font-size: var(--text-body-sm);
+    line-height: 1.5;
   }
 
   .endpoint-row {
     display: flex;
     align-items: stretch;
-    margin-top: 1.15rem;
-    overflow: hidden;
-    border: 1px solid var(--border);
-    border-radius: 0.375rem;
-    background: var(--surface-subtle);
+    gap: 0.5rem;
+    margin-top: 1rem;
   }
 
-  code {
+  .endpoint-row code {
     min-width: 0;
     flex: 1;
     overflow-wrap: anywhere;
     padding: 0.75rem;
-    font-family: 'JetBrains Mono Variable', monospace;
-    font-size: 0.72rem;
+    border-radius: var(--radius-control);
+    background: var(--code-bg);
+    color: var(--code-foreground);
+    font-family: var(--font-mono);
+    font-size: var(--text-caption);
     white-space: normal;
   }
 
@@ -445,23 +453,22 @@
     margin-top: 1rem;
   }
 
-  .recent-table code {
-    padding: 0;
-  }
-
   .endpoint-row button {
     min-width: 4.5rem;
     min-height: 2.75rem;
-    border: 0;
-    border-left: 1px solid var(--border);
-    background: var(--surface);
-    color: var(--accent-strong);
-    font-size: 0.75rem;
-    font-weight: 750;
+    flex: none;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-control);
+    background: transparent;
+    color: var(--foreground);
+    font-size: var(--text-body-sm);
+    transition:
+      border-color var(--motion),
+      color var(--motion);
   }
 
   .endpoint-row button:hover {
-    background: var(--surface-hover);
+    border-color: var(--foreground-hover);
     color: var(--foreground-hover);
   }
 
@@ -471,22 +478,26 @@
     min-height: 2.75rem;
     align-items: center;
     gap: 0.4rem;
-    margin-top: 0.65rem;
-    color: var(--accent-strong);
-    font-size: 0.78rem;
-    font-weight: 720;
-    text-decoration: none;
+    margin-top: 0.5rem;
+    color: var(--foreground);
+    font-size: var(--text-body-sm);
+    text-decoration: underline;
+    text-decoration-color: var(--border-strong);
+    text-underline-offset: 4px;
+    transition:
+      color var(--motion),
+      text-decoration-color var(--motion);
   }
 
   .endpoint-card > a:hover,
   .activity-heading > a:hover {
-    text-decoration: underline;
-    text-underline-offset: 0.2rem;
+    color: var(--foreground-hover);
+    text-decoration-color: currentColor;
   }
 
   .privacy-card {
     display: flex;
-    gap: 0.9rem;
+    gap: 1rem;
   }
 
   .privacy-mark {
@@ -495,14 +506,14 @@
     height: 2.25rem;
     flex: none;
     place-items: center;
-    border-radius: 0.375rem;
-    background: var(--success-soft);
-    color: var(--success);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-control);
+    color: var(--foreground-muted);
   }
 
   .activity {
     margin-top: 1rem;
-    padding: clamp(1.15rem, 3vw, 1.5rem);
+    padding: 1.5rem;
   }
 
   .activity-heading {
@@ -517,33 +528,24 @@
     margin-top: 0;
   }
 
-  .empty-state {
-    display: grid;
-    min-height: 12rem;
-    place-items: center;
-    align-content: center;
-    margin-top: 1rem;
-    padding: 2rem;
-    border: 1px dashed var(--border-strong);
-    border-radius: 0.375rem;
-    text-align: center;
-  }
-
   .empty-state > span {
     display: grid;
     width: 2.75rem;
     height: 2.75rem;
     place-items: center;
-    margin-bottom: 0.7rem;
-    border-radius: 0.375rem;
-    background: var(--surface-subtle);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-control);
     color: var(--foreground-muted);
   }
 
+  .empty-state strong {
+    color: var(--foreground);
+  }
+
   .empty-state p {
-    margin: 0.25rem 0 0;
-    color: var(--foreground-muted);
-    font-size: 0.8rem;
+    max-width: 34rem;
+    margin: 0;
+    font-size: var(--text-body-sm);
   }
 
   @media (max-width: 72rem) {

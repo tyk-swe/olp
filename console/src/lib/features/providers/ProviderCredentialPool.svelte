@@ -308,7 +308,7 @@
     align-items: center;
     gap: 0.65rem;
     padding: 0.85rem 0;
-    border-top: 1px solid var(--border);
+    border-top: 1px solid var(--border-hairline);
   }
   li div {
     display: grid;

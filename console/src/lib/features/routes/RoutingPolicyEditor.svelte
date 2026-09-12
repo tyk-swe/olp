@@ -212,6 +212,12 @@
     padding: 1.5rem;
     margin-top: 1.5rem;
   }
+  h2 {
+    margin: 0 0 0.75rem;
+    font-size: 1rem;
+    font-weight: 500;
+    letter-spacing: -0.02em;
+  }
   p {
     color: var(--foreground-muted);
   }
@@ -219,14 +225,27 @@
     border: 0;
     padding: 0;
   }
+  /* The textarea sits outside .form-field, so the shared control recipe is
+     restated here. */
   textarea {
     display: block;
     width: 100%;
+    min-height: 7rem;
     margin-top: 0.5rem;
-    font-family: monospace;
+    padding: 0.5rem 0.75rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-control);
+    background: transparent;
+    color: var(--foreground);
+    font-family: var(--font-mono);
+    resize: vertical;
+    transition: border-color var(--motion);
+  }
+  textarea:hover {
+    border-color: var(--border-strong);
   }
   .help {
     font-size: 0.85rem;
-    line-height: 1.6;
+    line-height: 1.5;
   }
 </style>

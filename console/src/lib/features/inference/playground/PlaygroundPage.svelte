@@ -339,9 +339,14 @@
     gap: 0.75rem;
     margin-top: 1.25rem;
     padding: 0.85rem 1rem;
-    border: 1px solid color-mix(in srgb, var(--success) 35%, var(--border));
-    border-radius: 0.375rem;
+    border: 1px solid var(--success);
+    border-radius: var(--radius-control);
     background: var(--success-soft);
+    color: var(--foreground);
+    line-height: 1.5;
+  }
+  .privacy-note span,
+  .privacy-note strong {
     color: var(--success);
   }
   .privacy-note p {
@@ -356,24 +361,11 @@
   }
   .composer,
   .result {
-    padding: 1.25rem;
+    padding: 1.5rem;
   }
   .composer {
     display: grid;
     gap: 1rem;
-  }
-  .form-field input,
-  .form-field textarea {
-    width: 100%;
-  }
-  .form-field select {
-    width: 100%;
-    min-height: 2.5rem;
-    padding: 0.5rem 0.7rem;
-    border: 1px solid var(--border-strong);
-    border-radius: 0.375rem;
-    background: var(--surface);
-    color: var(--foreground);
   }
   .route-grid {
     display: grid;
@@ -383,20 +375,21 @@
   .field-error {
     margin: 0;
     color: var(--danger);
-    font-weight: 700;
   }
   .form-field small {
     display: block;
     margin-top: 0.25rem;
-    color: var(--foreground-muted);
-    font-size: 0.7rem;
+    font-size: var(--text-caption);
   }
   .refusal {
     margin-top: 1rem;
     padding: 0.85rem 1rem;
-    border: 1px solid color-mix(in srgb, var(--warning) 45%, var(--border));
-    border-radius: 0.375rem;
+    border: 1px solid var(--warning);
+    border-radius: var(--radius-control);
     background: var(--warning-soft);
+    color: var(--foreground);
+  }
+  .refusal strong {
     color: var(--warning);
   }
   .refusal p {
@@ -408,16 +401,20 @@
     align-items: flex-start;
     gap: 1rem;
   }
-  h2,
-  h3 {
-    margin: 0;
-  }
   h2 {
-    font-size: 1.2rem;
+    margin: 0;
+    font-size: 1rem;
+    font-weight: 500;
+    letter-spacing: -0.02em;
   }
   h3 {
-    margin-bottom: 0.4rem;
-    font-size: 0.85rem;
+    margin: 0 0 0.5rem;
+    color: var(--foreground-subtle);
+    font-family: var(--font-mono);
+    font-size: var(--text-caption);
+    font-weight: 400;
+    letter-spacing: -0.02em;
+    text-transform: uppercase;
   }
   .output {
     margin-top: 1rem;
@@ -427,11 +424,11 @@
     margin: 0;
     overflow: auto;
     padding: 1rem;
-    border: 1px solid var(--border);
-    border-radius: 0.375rem;
-    background: var(--surface-subtle);
-    font-family: 'JetBrains Mono Variable', monospace;
-    font-size: 0.78rem;
+    border-radius: var(--radius-control);
+    background: var(--surface-raised);
+    font-family: var(--font-mono);
+    font-size: var(--text-caption);
+    line-height: 1.5;
     white-space: pre-wrap;
     overflow-wrap: anywhere;
   }
@@ -441,15 +438,18 @@
     gap: 0.75rem;
     margin: 1rem 0 0;
     padding-top: 1rem;
-    border-top: 1px solid var(--border);
+    border-top: 1px solid var(--border-hairline);
   }
   dt {
-    color: var(--foreground-muted);
-    font-size: 0.7rem;
-    font-weight: 700;
+    color: var(--foreground-subtle);
+    font-family: var(--font-mono);
+    font-size: var(--text-caption);
+    font-weight: 400;
+    letter-spacing: -0.02em;
+    text-transform: uppercase;
   }
   dd {
-    margin: 0.15rem 0 0;
+    margin: 0.25rem 0 0;
     overflow-wrap: anywhere;
   }
   @media (max-width: 68rem) {
@@ -460,7 +460,7 @@
   @media (max-width: 38rem) {
     .composer,
     .result {
-      padding: 0.85rem;
+      padding: 1rem;
     }
     .route-grid {
       display: grid;

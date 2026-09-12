@@ -151,7 +151,10 @@ test.describe('Rust-hosted console integration', () => {
     ).toBeVisible();
     expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
 
-    await page.getByRole('link', { name: 'Providers' }).click();
+    await page
+      .getByRole('navigation', { name: 'Primary' })
+      .getByRole('link', { name: 'Gateway', exact: true })
+      .click();
     await expect(page).toHaveURL(/\/providers$/);
     await expect(
       page.getByRole('heading', { name: 'Providers', exact: true })
@@ -160,7 +163,16 @@ test.describe('Rust-hosted console integration', () => {
       page.getByRole('heading', { name: 'No providers configured' })
     ).toBeVisible();
 
-    await page.getByRole('link', { name: 'Access', exact: true }).click();
+    await page
+      .getByRole('navigation', { name: 'Primary' })
+      .getByRole('link', { name: 'Access', exact: true })
+      .click();
+    await expect(page).toHaveURL(/\/api-keys$/);
+    await page
+      .getByRole('navigation', { name: 'Access' })
+      .getByRole('link', { name: 'Access', exact: true })
+      .click();
+    await expect(page).toHaveURL(/\/access$/);
     await page.getByRole('button', { name: 'Invite member' }).click();
     await page
       .getByLabel('Email address')

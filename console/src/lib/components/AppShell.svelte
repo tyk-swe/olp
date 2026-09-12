@@ -7,7 +7,6 @@
   import BrandMark from '$lib/components/BrandMark.svelte';
   import NavIcon from '$lib/components/NavIcon.svelte';
   import Navigation from '$lib/components/Navigation.svelte';
-  import ThemeToggle from '$lib/components/ThemeToggle.svelte';
 
   let {
     children,
@@ -94,25 +93,8 @@
 <a class="skip-link" href="#main-content">Skip to main content</a>
 
 <div class="shell">
-  <aside class="desktop-sidebar">
-    <a
-      bind:this={desktopBrand}
-      class="brand"
-      href={resolve('/')}
-      aria-label="OpenLLMProxy overview"
-    >
-      <BrandMark />
-      <span>OpenLLMProxy</span>
-    </a>
-    <Navigation role={user.role} />
-    <div class="sidebar-footer">
-      <span class="environment-dot" aria-hidden="true"></span>
-      <span>Self-hosted</span>
-    </div>
-  </aside>
-
-  <div class="workspace">
-    <header class="topbar">
+  <header class="topbar">
+    <div class="topbar-row">
       <button
         class="menu-button"
         type="button"
@@ -126,9 +108,18 @@
         <NavIcon name="menu" />
       </button>
 
-      <div class="mobile-brand" aria-hidden="true">
-        <BrandMark size={28} />
-        <span>OpenLLMProxy</span>
+      <a
+        bind:this={desktopBrand}
+        class="brand"
+        href={resolve('/')}
+        aria-label="OpenLLMProxy overview"
+      >
+        <BrandMark size={22} />
+        <span class="wordmark">OpenLLMProxy</span>
+      </a>
+
+      <div class="primary-nav">
+        <Navigation role={user.role} variant="bar" />
       </div>
 
       <div class="topbar-actions">
@@ -137,7 +128,6 @@
             class="edition-name">{installationLabel}</span
           ></span
         >
-        <ThemeToggle />
         <details
           class="account-menu"
           bind:this={accountMenu}
@@ -175,25 +165,27 @@
           </div>
         </details>
       </div>
-    </header>
+    </div>
 
-    <main id="main-content" tabindex="-1">
-      {#if signOutError}
-        <div class="problem-banner" role="alert">
-          <div>
-            <strong>Sign out failed</strong>
-            <p>{signOutError} Your session may still be active.</p>
-          </div>
-          <button
-            class="button button-secondary"
-            type="button"
-            onclick={onSignOut}>Try again</button
-          >
+    <Navigation role={user.role} variant="subnav" />
+  </header>
+
+  <main id="main-content" tabindex="-1">
+    {#if signOutError}
+      <div class="problem-banner" role="alert">
+        <div>
+          <strong>Sign out failed</strong>
+          <p>{signOutError} Your session may still be active.</p>
         </div>
-      {/if}
-      {@render children()}
-    </main>
-  </div>
+        <button
+          class="button button-secondary"
+          type="button"
+          onclick={onSignOut}>Try again</button
+        >
+      </div>
+    {/if}
+    {@render children()}
+  </main>
 </div>
 
 <dialog
@@ -212,8 +204,8 @@
         aria-label="OpenLLMProxy overview"
         onclick={closeNavigation}
       >
-        <BrandMark />
-        <span>OpenLLMProxy</span>
+        <BrandMark size={22} />
+        <span class="wordmark">OpenLLMProxy</span>
       </a>
       <button
         type="button"
@@ -232,111 +224,87 @@
 
 <style>
   .shell {
-    display: grid;
+    display: flex;
     min-height: 100dvh;
-    grid-template-columns: 15.5rem minmax(0, 1fr);
+    flex-direction: column;
   }
 
-  .desktop-sidebar {
+  /* The header spans the full viewport so long installation and account names
+     truncate inside it instead of pushing the page wider. */
+  .topbar {
     position: sticky;
+    z-index: 20;
     top: 0;
+    padding: 0 1.5rem;
+    border-bottom: 1px solid var(--border-hairline);
+    background: var(--canvas);
+  }
+
+  .topbar-row {
     display: flex;
-    width: 15.5rem;
-    height: 100dvh;
-    flex-direction: column;
-    gap: 1.25rem;
-    overflow-y: auto;
-    padding: 1rem 0.75rem;
-    border-right: 1px solid var(--sidebar-border);
-    background: var(--sidebar-bg);
+    min-height: 4rem;
+    align-items: center;
+    gap: 1rem;
   }
 
   .brand {
     display: inline-flex;
     min-height: 2.75rem;
+    flex: none;
     align-items: center;
-    gap: 0.7rem;
-    padding: 0 0.4rem;
-    color: var(--sidebar-foreground-strong);
-    font-size: 0.975rem;
-    font-weight: 730;
-    letter-spacing: -0.015em;
+    gap: 0.6rem;
+    color: var(--foreground);
     text-decoration: none;
   }
 
-  .desktop-sidebar .brand,
-  .mobile-drawer .brand {
-    --accent: #4d8bfd;
-  }
-
-  .sidebar-footer {
-    display: flex;
-    min-height: 2.75rem;
-    align-items: center;
-    gap: 0.5rem;
-    margin-top: auto;
-    padding: 0.65rem 0.4rem 0;
-    border-top: 1px solid var(--sidebar-border);
-    color: var(--sidebar-foreground);
-    font-size: 0.75rem;
-  }
-
-  .environment-dot,
-  .edition-dot {
-    width: 0.5rem;
-    height: 0.5rem;
-    flex: none;
-    border-radius: 999px;
-    background: var(--success);
-  }
-
-  .workspace {
+  .primary-nav {
     min-width: 0;
+    flex: 1 1 auto;
+    overflow-x: auto;
+    scrollbar-width: none;
   }
 
-  .topbar {
-    position: sticky;
-    z-index: 20;
-    top: 0;
-    display: flex;
-    height: 3.5rem;
-    align-items: center;
-    justify-content: flex-end;
-    padding: 0 1.75rem;
-    border-bottom: 1px solid var(--border);
-    background: color-mix(in srgb, var(--surface) 94%, transparent);
-    backdrop-filter: blur(14px);
+  .primary-nav::-webkit-scrollbar {
+    display: none;
   }
 
   .topbar-actions {
-    min-width: 0;
     display: flex;
+    min-width: 0;
+    flex: none;
     align-items: center;
-    gap: 0.35rem;
+    gap: 0.5rem;
+    margin-left: auto;
   }
 
   .edition {
     display: inline-flex;
-    /* An operator may name the installation with up to 100 characters, and the
-       topbar is a fixed 3.5rem row: the name is truncated with its full text
-       kept in the tooltip rather than pushing the account menu off the edge. */
+    /* An operator may name the installation with up to 100 characters: the
+       name is truncated with its full text kept in the tooltip rather than
+       pushing the account menu off the edge. */
     overflow: hidden;
-    max-width: 18rem;
+    max-width: 14rem;
     min-height: 1.75rem;
     flex: 0 1 auto;
     align-items: center;
-    gap: 0.45rem;
-    margin-right: 0.5rem;
-    padding: 0.15rem 0.55rem;
+    gap: 0.5rem;
+    padding: 0 0.6rem;
     border: 1px solid var(--border);
-    border-radius: 0.25rem;
-    background: var(--surface-subtle);
-    color: var(--foreground-muted);
-    font-size: 0.6875rem;
-    font-weight: 700;
-    letter-spacing: 0.045em;
+    border-radius: var(--radius-control);
+    color: var(--foreground-subtle);
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    letter-spacing: -0.24px;
     text-transform: uppercase;
     white-space: nowrap;
+  }
+
+  .edition-dot {
+    width: 6px;
+    height: 6px;
+    flex: none;
+    border-radius: 50%;
+    background: var(--signal);
   }
 
   .edition-name {
@@ -346,7 +314,7 @@
 
   .account-label {
     overflow: hidden;
-    max-width: 12rem;
+    max-width: 10rem;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
@@ -361,11 +329,13 @@
     align-items: center;
     gap: 0.5rem;
     padding: 0.25rem 0.4rem;
-    border-radius: 0.375rem;
+    border-radius: var(--radius-control);
     color: var(--foreground-muted);
     cursor: pointer;
-    font-weight: 650;
     list-style: none;
+    transition:
+      background-color var(--motion),
+      color var(--motion);
   }
 
   .account-menu summary::-webkit-details-marker {
@@ -379,54 +349,56 @@
 
   .avatar {
     display: grid;
-    width: 2rem;
-    height: 2rem;
+    width: 1.75rem;
+    height: 1.75rem;
     place-items: center;
-    border-radius: 0.375rem;
-    background: var(--sidebar-bg);
-    color: #fff;
+    border-radius: var(--radius-control);
+    background: var(--foreground);
+    color: var(--canvas);
+    font-family: var(--font-mono);
     font-size: 0.75rem;
-    font-weight: 800;
   }
 
   .account-popover {
     position: absolute;
     z-index: 30;
-    top: calc(100% + 0.45rem);
+    top: calc(100% + 0.5rem);
     right: 0;
     display: grid;
     width: 14rem;
-    padding: 0.3rem;
+    padding: 0.25rem;
     border: 1px solid var(--border);
-    border-radius: 0.5rem;
-    background: var(--surface);
-    box-shadow: var(--shadow-md);
+    border-radius: var(--radius-card);
+    background: var(--surface-raised);
   }
 
   .account-popover a,
   .account-popover button {
     width: 100%;
     min-height: 2.5rem;
-    padding: 0.55rem 0.65rem;
+    padding: 0.5rem 0.75rem;
     border: 0;
-    border-radius: 0.3rem;
+    border-radius: var(--radius-control);
     background: transparent;
     color: inherit;
     text-align: left;
     text-decoration: none;
+    transition:
+      background-color var(--motion),
+      color var(--motion);
   }
 
   .account-popover a:hover,
   .account-popover button:hover {
-    background: var(--surface-hover);
+    background: color-mix(in srgb, var(--foreground) 8%, var(--surface-raised));
     color: var(--foreground-hover);
   }
 
   main {
     width: 100%;
-    max-width: 98rem;
+    max-width: var(--page-max);
     margin: 0 auto;
-    padding: clamp(1.5rem, 3.5vw, 3rem);
+    padding: 2rem 1.5rem 6rem;
   }
 
   .menu-button,
@@ -436,18 +408,9 @@
     height: 2.75rem;
     place-items: center;
     border: 1px solid transparent;
-    border-radius: 0.375rem;
+    border-radius: var(--radius-control);
     background: transparent;
     color: var(--foreground);
-  }
-
-  .mobile-brand {
-    flex-shrink: 0;
-    display: none;
-    align-items: center;
-    gap: 0.55rem;
-    font-weight: 730;
-    letter-spacing: -0.015em;
   }
 
   .mobile-dialog {
@@ -462,8 +425,7 @@
   }
 
   .mobile-dialog::backdrop {
-    background: rgb(4 12 26 / 62%);
-    backdrop-filter: blur(2px);
+    background: rgb(16 16 16 / 72%);
   }
 
   .mobile-drawer {
@@ -471,20 +433,15 @@
     height: 100dvh;
     overflow-y: auto;
     padding: 1rem 0.75rem;
-    border-right: 1px solid var(--sidebar-border);
-    background: var(--sidebar-bg);
-    box-shadow: var(--shadow-md);
-  }
-
-  .mobile-drawer .close-button {
-    color: var(--sidebar-foreground-strong);
+    border-right: 1px solid var(--border);
+    background: var(--canvas);
   }
 
   .drawer-heading {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    margin-bottom: 1.25rem;
+    margin-bottom: 1.5rem;
   }
 
   .close-button {
@@ -493,37 +450,37 @@
     line-height: 1;
   }
 
-  @media (max-width: 62rem) {
-    .shell {
-      display: block;
-    }
-
-    .desktop-sidebar {
+  @media (max-width: 80rem) {
+    .edition {
       display: none;
     }
+  }
 
+  @media (max-width: 62rem) {
     .topbar {
-      justify-content: space-between;
       padding: 0 1rem;
     }
 
+    .topbar-row {
+      min-height: 3.5rem;
+      gap: 0.5rem;
+    }
+
+    .primary-nav {
+      display: none;
+    }
+
+    .menu-button {
+      display: grid;
+    }
+
     .edition {
+      display: inline-flex;
       max-width: 10rem;
     }
 
     .account-label {
       max-width: 7rem;
-    }
-
-    .menu-button,
-    .mobile-brand {
-      display: grid;
-    }
-
-    .mobile-brand {
-      display: flex;
-      margin-right: auto;
-      margin-left: 0.5rem;
     }
   }
 
@@ -538,17 +495,16 @@
       padding: 0 0.75rem;
     }
 
-    main {
-      padding: 1.25rem 1rem 2rem;
+    .brand .wordmark {
+      display: none;
     }
 
-    .mobile-brand span {
-      display: none;
+    main {
+      padding: 1.25rem 1rem 3rem;
     }
   }
 
   @media (forced-colors: active) {
-    .environment-dot,
     .edition-dot {
       border: 1px solid CanvasText;
       background: CanvasText;

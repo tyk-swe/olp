@@ -161,11 +161,10 @@
 <style>
   .usage-chart {
     margin: 1rem 0 0;
-    padding: 1.25rem;
-    border: 1px solid var(--border);
-    border-radius: 0.5rem;
-    background: var(--surface);
-    box-shadow: var(--shadow-sm);
+    padding: 1.5rem;
+    border: 1px solid var(--border-hairline);
+    border-radius: var(--radius-card);
+    background: transparent;
   }
   figcaption {
     display: flex;
@@ -175,7 +174,9 @@
   }
   h2 {
     margin: 0;
-    font-size: 1.05rem;
+    font-size: 1rem;
+    font-weight: 500;
+    letter-spacing: -0.02em;
   }
   figcaption p {
     margin: 0.25rem 0 0;
@@ -186,20 +187,22 @@
     display: inline-flex;
     align-items: center;
     gap: 0.4rem;
-    color: var(--foreground-muted);
-    font-size: 0.75rem;
+    color: var(--foreground-subtle);
+    font-family: var(--font-mono);
+    font-size: var(--text-caption);
+    font-weight: 400;
+    letter-spacing: -0.02em;
+    text-transform: uppercase;
   }
   .legend span {
     width: 1rem;
-    height: 0.2rem;
-    border-radius: 1rem;
-    background: var(--accent);
+    height: 1px;
+    background: var(--metric);
   }
   .chart {
     width: 100%;
     height: 20rem;
     margin-top: 1rem;
-    color: var(--foreground-muted);
   }
   svg {
     width: 100%;
@@ -207,24 +210,27 @@
     overflow: visible;
   }
   .grid {
-    stroke: var(--border);
+    stroke: var(--border-hairline);
     stroke-width: 1;
     vector-effect: non-scaling-stroke;
   }
   .series {
     fill: none;
-    stroke: var(--accent);
-    stroke-width: 2.5;
+    stroke: var(--metric);
+    stroke-width: 1;
     stroke-linejoin: round;
     stroke-linecap: round;
     vector-effect: non-scaling-stroke;
   }
   .point {
-    fill: var(--accent);
+    fill: var(--metric);
   }
   .axis-label {
-    fill: currentColor;
-    font-size: 11px;
+    fill: var(--foreground-subtle);
+    font-family: var(--font-mono);
+    font-size: var(--text-caption);
+    letter-spacing: -0.02em;
+    text-transform: uppercase;
   }
   details {
     margin-top: 0.5rem;
@@ -233,13 +239,20 @@
     display: inline-flex;
     min-height: 2.75rem;
     align-items: center;
-    color: var(--accent-strong);
-    font-weight: 700;
+    color: var(--foreground);
+    font-weight: 400;
+    text-decoration: underline;
+    text-decoration-color: var(--border-strong);
+    text-underline-offset: 4px;
+    transition: text-decoration-color var(--motion);
     cursor: pointer;
+  }
+  summary:hover {
+    text-decoration-color: currentColor;
   }
   @media (max-width: 36rem) {
     .usage-chart {
-      padding: 0.85rem;
+      padding: 1rem;
     }
     .chart {
       height: 15rem;

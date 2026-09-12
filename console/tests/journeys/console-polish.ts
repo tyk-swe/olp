@@ -19,7 +19,7 @@ export async function verifyConsolePolish(page: Page, info: TestInfo) {
   await trigger.click();
   await page.setViewportSize({ width: 1440, height: 900 });
   await expect(navigation).toBeHidden();
-  await expect(page.locator('.desktop-sidebar .brand')).toBeFocused();
+  await expect(page.locator('.topbar .brand')).toBeFocused();
 
   await page.goto('/api-keys/new');
   await page.getByRole('button', { name: /Create and show key/ }).click();
@@ -59,71 +59,67 @@ export async function verifyConsolePolish(page: Page, info: TestInfo) {
     ['/api-keys', 'API Keys'],
     ['/api-keys/new', 'Create a proxy key.']
   ] as const;
-  for (const theme of ['light', 'dark'] as const) {
-    await page.emulateMedia({ colorScheme: theme, reducedMotion: 'reduce' });
-    for (const width of [320, 768, 1440]) {
-      await page.setViewportSize({ width, height: 900 });
-      for (const [path, heading] of screens) {
-        await page.goto(path);
-        await expect(
-          page.getByRole('heading', { name: heading, exact: true })
-        ).toBeVisible();
-        await expect(page.locator('.loading-state')).toHaveCount(0);
-        if (path === '/providers/new')
-          await expect(page.locator('form.editor')).toBeVisible();
-        if (path === '/routes/new')
-          await expect(page.locator('form.studio')).toBeVisible();
-        if (path === '/api-keys/new')
-          await expect(page.locator('form.key-form')).toBeVisible();
-        if (path === '/') {
-          // Stress intrinsic sizing without changing the installation or account.
-          const original = await page.evaluate(() => {
-            return [
-              '.account-label',
-              '.edition-name',
-              '.endpoint-row code'
-            ].map((selector) => {
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  for (const width of [320, 768, 1440]) {
+    await page.setViewportSize({ width, height: 900 });
+    for (const [path, heading] of screens) {
+      await page.goto(path);
+      await expect(
+        page.getByRole('heading', { name: heading, exact: true })
+      ).toBeVisible();
+      await expect(page.locator('.loading-state')).toHaveCount(0);
+      if (path === '/providers/new')
+        await expect(page.locator('form.editor')).toBeVisible();
+      if (path === '/routes/new')
+        await expect(page.locator('form.studio')).toBeVisible();
+      if (path === '/api-keys/new')
+        await expect(page.locator('form.key-form')).toBeVisible();
+      if (path === '/') {
+        // Stress intrinsic sizing without changing the installation or account.
+        const original = await page.evaluate(() => {
+          return ['.account-label', '.edition-name', '.endpoint-row code'].map(
+            (selector) => {
               const node = document.querySelector(selector)!;
               const text = node.textContent;
               node.textContent = 'LongName'.repeat(20);
               return { selector, text };
-            });
-          });
-          expect
-            .soft(
-              await page.evaluate(
-                () => document.documentElement.scrollWidth - window.innerWidth
-              ),
-              `Long names and endpoint at ${width}px in ${theme} theme`
-            )
-            .toBeLessThanOrEqual(0);
-          await page.evaluate((entries) => {
-            for (const { selector, text } of entries)
-              document.querySelector(selector)!.textContent = text;
-          }, original);
-        }
+            }
+          );
+        });
         expect
           .soft(
             await page.evaluate(
               () => document.documentElement.scrollWidth - window.innerWidth
             ),
-            `${path} at ${width}px in ${theme} theme must not widen the page`
+            `Long names and endpoint at ${width}px`
           )
           .toBeLessThanOrEqual(0);
-        if (width === 320 || width === 1440) {
-          expect
-            .soft(
-              (await new AxeBuilder({ page }).analyze()).violations,
-              `${path} accessibility at ${width}px in ${theme} theme`
-            )
-            .toEqual([]);
-          await page.screenshot({
-            path: info.outputPath(
-              `polish-${path.slice(1).replaceAll('/', '-') || 'overview'}-${theme}-${width}.png`
-            ),
-            fullPage: true
-          });
-        }
+        await page.evaluate((entries) => {
+          for (const { selector, text } of entries)
+            document.querySelector(selector)!.textContent = text;
+        }, original);
+      }
+      expect
+        .soft(
+          await page.evaluate(
+            () => document.documentElement.scrollWidth - window.innerWidth
+          ),
+          `${path} at ${width}px must not widen the page`
+        )
+        .toBeLessThanOrEqual(0);
+      if (width === 320 || width === 1440) {
+        expect
+          .soft(
+            (await new AxeBuilder({ page }).analyze()).violations,
+            `${path} accessibility at ${width}px`
+          )
+          .toEqual([]);
+        await page.screenshot({
+          path: info.outputPath(
+            `polish-${path.slice(1).replaceAll('/', '-') || 'overview'}-${width}.png`
+          ),
+          fullPage: true
+        });
       }
     }
   }

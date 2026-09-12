@@ -249,25 +249,25 @@
     height: 2.75rem;
     place-items: center;
     margin-bottom: 1rem;
-    border-radius: 0.375rem;
-    background: var(--success-soft);
-    color: var(--success);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-control);
+    color: var(--foreground);
   }
   .secret-row {
     display: flex;
     align-items: stretch;
     margin: 1rem 0;
     overflow: hidden;
-    border: 1px solid var(--border-strong);
-    border-radius: 0.375rem;
-    background: var(--surface-subtle);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-control);
+    background: transparent;
   }
   .secret-row code {
     min-width: 0;
     flex: 1;
     overflow-x: auto;
     padding: 0.8rem;
-    font-size: 0.82rem;
+    font-size: var(--text-body-sm);
   }
   .secret-row .button {
     border-width: 0 0 0 1px;
@@ -289,50 +289,60 @@
   .tabs {
     display: flex;
     gap: 0.25rem;
+    border-bottom: 1px solid var(--border-hairline);
   }
   .tabs button {
     min-height: 2.5rem;
     padding: 0.5rem 0.65rem;
     border: 0;
-    border-radius: 0.375rem;
+    border-bottom: 1px solid transparent;
     background: transparent;
-    color: var(--foreground-muted);
+    color: var(--foreground-subtle);
+    font-family: var(--font-mono);
+    font-size: var(--text-caption);
+    font-weight: 400;
+    letter-spacing: -0.02em;
+    text-transform: uppercase;
+    white-space: nowrap;
+    transition:
+      border-color var(--motion),
+      color var(--motion);
+  }
+  .tabs button:hover {
+    color: var(--foreground);
   }
   .tabs button.active {
-    background: var(--accent-soft);
-    color: var(--accent-strong);
-    font-weight: 700;
+    border-color: var(--foreground);
+    color: var(--foreground);
   }
   pre {
     max-height: 18rem;
     overflow: auto;
     padding: 1rem;
-    border-radius: 0.375rem;
+    border-radius: var(--radius-control);
     background: var(--code-bg);
     color: var(--code-foreground);
   }
   pre code {
-    font-size: 0.76rem;
+    font-size: var(--text-caption);
     white-space: pre;
   }
   code {
-    font:
-      0.72rem 'JetBrains Mono Variable',
-      monospace;
+    font-size: var(--text-caption);
   }
   .key-test-result {
     margin-top: 0.65rem;
     padding: 0.7rem 0.8rem;
-    border: 1px solid currentColor;
-    border-radius: 0.375rem;
-    font-size: 0.78rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-control);
+    color: var(--foreground);
   }
   .key-test-result.success {
-    color: var(--success);
+    border-color: var(--success);
     background: var(--success-soft);
   }
   .key-test-result.danger {
-    color: var(--danger);
+    border-color: var(--danger);
     background: var(--danger-soft);
   }
   .secret-actions {

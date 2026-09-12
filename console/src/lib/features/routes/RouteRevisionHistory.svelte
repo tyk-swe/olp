@@ -276,13 +276,13 @@
   }
   h2 {
     margin: 0 0 0.75rem;
-    font-size: 1.15rem;
-    letter-spacing: -0.025em;
+    font-size: 1rem;
+    font-weight: 500;
+    letter-spacing: -0.02em;
   }
   code {
-    font:
-      0.7rem 'JetBrains Mono Variable',
-      monospace;
+    font-family: var(--font-mono);
+    font-size: var(--text-caption);
   }
   .revision-table small {
     color: var(--foreground-muted);
@@ -303,16 +303,30 @@
   .revision-compare label {
     display: grid;
     gap: 0.3rem;
-    font-size: 0.72rem;
-    font-weight: 700;
+    color: var(--foreground-subtle);
+    font-family: var(--font-mono);
+    font-size: var(--text-caption);
+    font-weight: 400;
+    letter-spacing: -0.02em;
+    text-transform: uppercase;
   }
+  /* The select sits inside its caption label, so the control typography is
+     reset here. */
   .revision-compare select {
     min-height: 2.5rem;
-    padding: 0.5rem 0.65rem;
-    border: 1px solid var(--border-strong);
-    border-radius: 0.375rem;
-    background: var(--surface);
+    padding: 0.5rem 0.75rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-control);
+    background: transparent;
     color: var(--foreground);
+    transition: border-color var(--motion);
+    font-family: var(--font-sans);
+    font-size: var(--text-body-sm);
+    letter-spacing: normal;
+    text-transform: none;
+  }
+  .revision-compare select:hover {
+    border-color: var(--border-strong);
   }
   .diff-grid {
     display: grid;
@@ -322,12 +336,16 @@
   }
   .diff-grid article {
     min-width: 0;
-    padding: 1rem;
+    padding: 1.25rem;
   }
   .diff-grid p {
     margin: 0;
-    color: var(--foreground-muted);
-    font-size: 0.75rem;
+    color: var(--foreground-subtle);
+    font-family: var(--font-mono);
+    font-size: var(--text-caption);
+    font-weight: 400;
+    letter-spacing: -0.02em;
+    text-transform: uppercase;
   }
   .diff-grid p:not(:first-child) {
     margin-top: 0.8rem;
@@ -354,7 +372,6 @@
       overflow: visible;
       border: 0;
       background: transparent;
-      box-shadow: none;
     }
     .revision-table,
     .revision-table tbody {
@@ -373,11 +390,10 @@
       display: grid;
       grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
       gap: 0.75rem;
-      padding: 1rem;
-      border: 1px solid var(--border);
-      border-radius: 0.375rem;
-      background: var(--surface);
-      box-shadow: var(--shadow-sm);
+      padding: 1.25rem;
+      border: 1px solid var(--border-hairline);
+      border-radius: var(--radius-card);
+      background: transparent;
     }
     .revision-table tbody td {
       display: block;
@@ -390,11 +406,12 @@
     .revision-table tbody td::before {
       display: block;
       margin-bottom: 0.2rem;
-      color: var(--foreground-muted);
       content: attr(data-label);
-      font-size: 0.68rem;
-      font-weight: 760;
-      letter-spacing: 0.045em;
+      color: var(--foreground-subtle);
+      font-family: var(--font-mono);
+      font-size: var(--text-caption);
+      font-weight: 400;
+      letter-spacing: -0.02em;
       text-transform: uppercase;
     }
     .revision-table tbody td:first-child,

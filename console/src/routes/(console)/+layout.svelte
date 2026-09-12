@@ -147,8 +147,8 @@
   .session-gate > p span {
     width: 0.9rem;
     height: 0.9rem;
-    border: 2px solid var(--border-strong);
-    border-top-color: var(--accent);
+    border: 2px solid var(--border);
+    border-top-color: var(--signal);
     border-radius: 50%;
     animation: session-spin 700ms linear infinite;
   }

@@ -131,6 +131,12 @@
     gap: 1rem;
     margin-bottom: 0.8rem;
   }
+  h2 {
+    margin: 0;
+    font-size: 1rem;
+    font-weight: 500;
+    letter-spacing: -0.02em;
+  }
   .section-heading p:last-child {
     margin: 0.3rem 0 0;
     color: var(--foreground-muted);
@@ -147,7 +153,7 @@
     padding: 1rem;
   }
   .session-icon {
-    color: var(--success);
+    color: var(--signal);
   }
   .session-heading {
     display: flex;
@@ -160,14 +166,6 @@
     margin: 0.2rem 0 0;
     color: var(--foreground-muted);
     overflow-wrap: anywhere;
-  }
-  .success-message {
-    margin: 0 0 1rem;
-    padding: 0.8rem 1rem;
-    border-radius: 0.375rem;
-    background: var(--success-soft);
-    color: var(--success);
-    font-weight: 700;
   }
   @media (max-width: 40rem) {
     .session-row {

@@ -171,10 +171,11 @@
 {/if}
 
 <style>
+  /* Vendor group rows read as a band between the column headers and the
+     connections they group; the heading itself keeps the mono caption. */
   .vendor-group th {
-    background: var(--surface-subtle);
-    text-transform: none;
-    padding: 0.85rem 1rem;
+    border-bottom-color: var(--border-hairline);
+    background: var(--surface-raised);
   }
   #provider-search {
     max-width: 30rem;
@@ -185,19 +186,22 @@
     display: block;
     color: var(--foreground-muted);
   }
-  h2 {
-    margin: 0 0 0.85rem;
-    font-size: 1.15rem;
-    font-weight: 750;
-    letter-spacing: -0.025em;
-  }
   .provider-table {
     margin-top: 1.5rem;
   }
   .table-link {
     min-height: 2.75rem;
-    color: var(--accent-strong);
-    font-weight: 750;
-    text-underline-offset: 0.18rem;
+    color: var(--foreground);
+    font-weight: 400;
+    text-decoration: underline;
+    text-decoration-color: var(--border-strong);
+    text-underline-offset: 4px;
+    transition:
+      color var(--motion),
+      text-decoration-color var(--motion);
+  }
+  .table-link:hover {
+    color: var(--foreground-hover);
+    text-decoration-color: currentColor;
   }
 </style>

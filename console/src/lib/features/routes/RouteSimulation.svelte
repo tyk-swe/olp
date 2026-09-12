@@ -34,8 +34,13 @@
   }
   h2 {
     margin: 0.3rem 0 1rem;
+    font-size: 1rem;
+    font-weight: 500;
+    letter-spacing: -0.02em;
   }
   code {
-    font: 0.75rem monospace;
+    color: var(--foreground-subtle);
+    font-family: var(--font-mono);
+    font-size: var(--text-caption);
   }
 </style>

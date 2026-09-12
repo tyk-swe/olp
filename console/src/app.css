@@ -1,69 +1,91 @@
-@import '@fontsource-variable/inter';
-@import '@fontsource-variable/jetbrains-mono';
+@import '@fontsource-variable/geist';
+@import '@fontsource-variable/geist-mono';
 
 #svelte-root {
   display: contents;
 }
 
+/* Factory palette. The console is dark-only: one canvas, one raised surface,
+   two hairline greys, bone text, and two functional accents (orange for live
+   status, green for positive metrics) plus a single restrained red for
+   failures. Components consume the semantic tokens below, never the raw
+   colours, so light cards can re-map them for their descendants. */
 :root {
-  color-scheme: light dark;
-  --canvas: light-dark(#f2f5f9, #0a1120);
-  --surface: light-dark(#ffffff, #0f1a2d);
-  --surface-subtle: light-dark(#edf1f7, #142239);
-  --surface-hover: light-dark(#e4ebf5, #1a2b47);
-  --foreground: light-dark(#101b2e, #ecf1f9);
-  --foreground-hover: var(--foreground);
-  --foreground-muted: light-dark(#49576f, #a2b0c7);
-  --foreground-subtle: light-dark(#64728c, #7d8eaa);
-  --border: light-dark(#d6dde8, #21314d);
-  --border-strong: light-dark(#b4c0d2, #32456a);
-  --accent: light-dark(#0f5cbf, #6f9cf2);
-  --accent-strong: light-dark(#0b4a9c, #96b6f6);
-  --accent-soft: light-dark(#e6f0fc, #16294a);
-  --success: light-dark(#0b7a62, #4ec2ab);
-  --success-soft: light-dark(#e0f3ee, #11332f);
-  --warning: light-dark(#8a5a0a, #e6b55f);
-  --warning-soft: light-dark(#fcf0d4, #382d15);
-  --danger: light-dark(#b2273b, #f28ea0);
-  --danger-soft: light-dark(#fcebec, #3f1f28);
-  --focus: light-dark(#0f5cbf, #96b6f6);
-  --code-bg: light-dark(#0d1f3a, #091426);
-  --code-foreground: #d9e5f6;
-  --sidebar-bg: #0a1930;
-  --sidebar-bg-subtle: #10224a;
-  --sidebar-hover: #14295a;
-  --sidebar-border: rgb(148 173 213 / 16%);
-  --sidebar-foreground: #a7bad6;
-  --sidebar-foreground-strong: #ffffff;
-  --sidebar-label: #7d90b1;
-  --sidebar-active: #1767cf;
-  --shadow-sm: light-dark(
-    0 1px 2px rgb(13 31 58 / 5%),
-    0 1px 2px rgb(0 0 0 / 30%)
+  color-scheme: dark;
+  --color-obsidian-canvas: #101010;
+  --color-carbon-lift: #1d1a18;
+  --color-ash-stroke: #3d3a39;
+  --color-graphite-mid: #4d4947;
+  --color-warm-granite: #8a8380;
+  --color-pale-stone: #b8b3b0;
+  --color-bone: #eeeeee;
+  --color-chalk: #fafafa;
+  --color-signal-orange: #ee6018;
+  --color-metric-green: #a0ca92;
+  --color-ember-red: #f07a6e;
+
+  --canvas: var(--color-obsidian-canvas);
+  --surface: var(--color-obsidian-canvas);
+  --surface-subtle: var(--color-carbon-lift);
+  --surface-hover: var(--color-carbon-lift);
+  --surface-raised: var(--color-carbon-lift);
+  --foreground: var(--color-bone);
+  --foreground-hover: var(--color-chalk);
+  --foreground-muted: var(--color-warm-granite);
+  --foreground-subtle: var(--color-pale-stone);
+  --border: var(--color-ash-stroke);
+  --border-hairline: var(--color-carbon-lift);
+  --border-strong: var(--color-graphite-mid);
+  --accent: var(--color-bone);
+  --accent-strong: var(--color-chalk);
+  --accent-soft: var(--color-carbon-lift);
+  --signal: var(--color-signal-orange);
+  --metric: var(--color-metric-green);
+  --success: var(--color-metric-green);
+  --success-soft: color-mix(
+    in srgb,
+    var(--color-metric-green) 10%,
+    var(--color-obsidian-canvas)
   );
-  --shadow-md: light-dark(
-    0 16px 40px rgb(10 25 48 / 16%),
-    0 18px 44px rgb(0 0 0 / 42%)
+  --warning: var(--color-signal-orange);
+  --warning-soft: color-mix(
+    in srgb,
+    var(--color-signal-orange) 10%,
+    var(--color-obsidian-canvas)
   );
-  font-family:
-    'Inter Variable',
-    Inter,
-    ui-sans-serif,
-    system-ui,
-    -apple-system,
-    BlinkMacSystemFont,
-    'Segoe UI',
-    sans-serif;
+  --danger: var(--color-ember-red);
+  --danger-soft: color-mix(
+    in srgb,
+    var(--color-ember-red) 10%,
+    var(--color-obsidian-canvas)
+  );
+  --focus: var(--color-bone);
+  --code-bg: var(--color-carbon-lift);
+  --code-foreground: var(--color-bone);
+  --button-fill: var(--color-chalk);
+  --button-fill-hover: var(--color-bone);
+  --button-fill-text: var(--color-obsidian-canvas);
+
+  --font-sans: 'Geist Variable', Geist, ui-sans-serif, system-ui, sans-serif;
+  --font-mono:
+    'Geist Mono Variable', 'Geist Mono', ui-monospace, SFMono-Regular, Menlo,
+    Consolas, monospace;
+  --text-caption: 0.75rem;
+  --text-body-sm: 0.875rem;
+  --text-body: 1rem;
+  --text-heading: 2.25rem;
+  --text-heading-lg: 2.75rem;
+  --text-display: 4.5rem;
+  --radius-control: 3px;
+  --radius-card: 10px;
+  --radius-panel: 20px;
+  --motion: 150ms cubic-bezier(0.4, 0, 0.2, 1);
+  --page-max: 75rem;
+
+  font-family: var(--font-sans);
   font-synthesis: none;
   text-rendering: optimizeLegibility;
-}
-
-:root[data-theme='light'] {
-  color-scheme: light;
-}
-
-:root[data-theme='dark'] {
-  color-scheme: dark;
+  -webkit-font-smoothing: antialiased;
 }
 
 *,
@@ -94,9 +116,22 @@ small {
   font-size: 80%;
 }
 
+strong,
+b {
+  font-weight: 500;
+}
+
+code,
+kbd,
+samp,
+pre {
+  font-family: var(--font-mono);
+}
+
 html {
   min-width: 20rem;
   background: var(--canvas);
+  scroll-padding-top: 7.5rem;
   scrollbar-gutter: stable;
 }
 
@@ -107,14 +142,60 @@ body {
   background: var(--canvas);
   color: var(--foreground);
   font-size: 0.875rem;
-  line-height: 1.5;
+  font-weight: 400;
+  line-height: 1.43;
+}
+
+/* Light cards are the only bright objects on the canvas. Re-mapping the
+   semantic tokens here restyles every descendant (inputs, buttons, banners)
+   for the bone surface without per-component overrides. Orange and green stay
+   non-text inside: neither clears 4.5:1 on bone. */
+.card-light {
+  --canvas: var(--color-bone);
+  --surface: var(--color-bone);
+  --surface-subtle: #e2e0df;
+  --surface-hover: #e2e0df;
+  --surface-raised: var(--color-chalk);
+  --foreground: var(--color-obsidian-canvas);
+  --foreground-hover: var(--color-obsidian-canvas);
+  --foreground-muted: var(--color-graphite-mid);
+  --foreground-subtle: var(--color-graphite-mid);
+  --border: var(--color-pale-stone);
+  --border-hairline: #d6d3d1;
+  --border-strong: var(--color-warm-granite);
+  --accent: var(--color-obsidian-canvas);
+  --accent-strong: var(--color-obsidian-canvas);
+  --accent-soft: #e2e0df;
+  --success: var(--color-obsidian-canvas);
+  --success-soft: color-mix(
+    in srgb,
+    var(--color-metric-green) 16%,
+    var(--color-bone)
+  );
+  --warning: var(--color-obsidian-canvas);
+  --warning-soft: color-mix(
+    in srgb,
+    var(--color-signal-orange) 12%,
+    var(--color-bone)
+  );
+  --danger: #a3261f;
+  --danger-soft: color-mix(in srgb, #a3261f 10%, var(--color-bone));
+  --focus: var(--color-obsidian-canvas);
+  --code-bg: var(--color-obsidian-canvas);
+  --code-foreground: var(--color-bone);
+  --button-fill: var(--color-obsidian-canvas);
+  --button-fill-hover: var(--color-carbon-lift);
+  --button-fill-text: var(--color-bone);
+  border-color: var(--border-hairline);
+  background: var(--color-bone);
+  color: var(--color-obsidian-canvas);
 }
 
 .page-header {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 1.25rem;
+  gap: 1.5rem;
 }
 
 .page-actions,
@@ -123,22 +204,32 @@ body {
   min-height: 2.75rem;
   flex-wrap: wrap;
   align-items: center;
-  gap: 0.6rem;
+  gap: 0.5rem;
 }
 
 .toolbar {
   justify-content: space-between;
-  margin: 1.25rem 0 0.65rem;
+  margin: 1.5rem 0 0.75rem;
+}
+
+.card {
+  border: 1px solid var(--border-hairline);
+  border-radius: var(--radius-card);
+  background: transparent;
+}
+
+/* Declared after `.card` so the bone surface wins at equal specificity. */
+.card.card-light {
+  background: var(--color-bone);
 }
 
 .table-shell {
   /* Keep absolutely positioned screen-reader labels inside the scroll area. */
   position: relative;
   overflow-x: auto;
-  border: 1px solid var(--border);
-  border-radius: 0.5rem;
-  background: var(--surface);
-  box-shadow: var(--shadow-sm);
+  border: 1px solid var(--border-hairline);
+  border-radius: var(--radius-card);
+  background: transparent;
 }
 
 .data-table {
@@ -151,17 +242,19 @@ body {
 .data-table th,
 .data-table td {
   min-height: 2.5rem;
-  padding: 0.55rem 0.75rem;
-  border-bottom: 1px solid var(--border);
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid var(--border-hairline);
   vertical-align: middle;
 }
 
 .data-table th {
-  background: var(--surface-subtle);
-  color: var(--foreground-muted);
-  font-size: 0.6875rem;
-  font-weight: 750;
-  letter-spacing: 0.055em;
+  border-bottom-color: var(--border);
+  background: transparent;
+  color: var(--foreground-subtle);
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  font-weight: 400;
+  letter-spacing: -0.24px;
   text-transform: uppercase;
 }
 
@@ -174,41 +267,81 @@ body {
   color: var(--foreground-hover);
 }
 
+/* Status tag: mono caption, hairline outline, a 6px dot carrying the tone. */
 .badge {
   display: inline-flex;
   min-height: 1.5rem;
   align-items: center;
-  gap: 0.35rem;
-  padding: 0.15rem 0.45rem;
+  gap: 0.4rem;
+  padding: 0.2rem 0.5rem;
   border: 1px solid var(--border);
-  border-radius: 0.25rem;
-  background: var(--surface-subtle);
-  color: var(--foreground-muted);
-  font-size: 0.72rem;
-  font-weight: 720;
-  letter-spacing: 0.015em;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--foreground-subtle);
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  font-weight: 400;
+  letter-spacing: -0.24px;
+  line-height: 1;
+  text-transform: uppercase;
   white-space: nowrap;
 }
 
+.badge.success::before,
+.badge.warning::before,
+.badge.danger::before,
+.badge.accent::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--foreground-muted);
+}
+
 .badge.success {
-  border-color: color-mix(in srgb, var(--success) 35%, var(--border));
-  background: var(--success-soft);
   color: var(--success);
 }
+.badge.success::before {
+  background: var(--metric);
+}
 .badge.warning {
-  border-color: color-mix(in srgb, var(--warning) 35%, var(--border));
-  background: var(--warning-soft);
   color: var(--warning);
 }
+.badge.warning::before {
+  background: var(--signal);
+}
 .badge.danger {
-  border-color: color-mix(in srgb, var(--danger) 35%, var(--border));
-  background: var(--danger-soft);
+  border-color: color-mix(in srgb, var(--danger) 50%, var(--border));
   color: var(--danger);
 }
+.badge.danger::before {
+  background: var(--danger);
+}
 .badge.accent {
-  border-color: color-mix(in srgb, var(--accent) 35%, var(--border));
-  background: var(--accent-soft);
-  color: var(--accent-strong);
+  border-color: var(--foreground-muted);
+  color: var(--foreground);
+}
+.badge.accent::before {
+  background: var(--foreground);
+}
+
+.status-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--signal);
+}
+.status-dot.metric {
+  background: var(--metric);
+}
+.status-dot.idle {
+  background: var(--foreground-muted);
+}
+.status-dot.danger {
+  background: var(--danger);
 }
 
 .empty-state,
@@ -224,20 +357,20 @@ body {
 .form-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0.9rem;
+  gap: 1rem;
 }
 
 .form-field {
   display: grid;
   align-content: start;
-  gap: 0.35rem;
+  gap: 0.4rem;
 }
 
 .form-field.full {
   grid-column: 1 / -1;
 }
 .form-field label {
-  font-weight: 700;
+  font-weight: 500;
 }
 .form-field small {
   color: var(--foreground-muted);
@@ -247,11 +380,25 @@ body {
 .form-field textarea,
 .filter-control {
   min-height: 2.5rem;
-  padding: 0.5rem 0.7rem;
-  border: 1px solid var(--border-strong);
-  border-radius: 0.375rem;
-  background: var(--surface);
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: transparent;
   color: var(--foreground);
+  transition: border-color var(--motion);
+}
+
+.form-field input:hover,
+.form-field select:hover,
+.form-field textarea:hover,
+.filter-control:hover {
+  border-color: var(--border-strong);
+}
+
+.form-field input::placeholder,
+.form-field textarea::placeholder,
+.filter-control::placeholder {
+  color: var(--foreground-muted);
 }
 
 .form-field textarea {
@@ -259,27 +406,45 @@ body {
   resize: vertical;
 }
 
+input {
+  accent-color: var(--foreground);
+}
+
+/* Metric tiles: no fill, hairline dividers, a mono label over a 36px value. */
 .metric-grid {
   display: grid;
+  overflow: hidden;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 0.75rem;
-  margin-top: 1.25rem;
+  gap: 1px;
+  margin-top: 1.5rem;
+  border: 1px solid var(--border-hairline);
+  border-radius: var(--radius-card);
+  background: var(--border-hairline);
 }
 
 .metric-card {
-  padding: 0.85rem 1rem;
+  padding: 1.25rem;
+  border: 0;
+  border-radius: 0;
+  background: var(--canvas);
 }
 .metric-card p {
   margin: 0;
-  color: var(--foreground-muted);
+  color: var(--foreground-subtle);
+  font-family: var(--font-mono);
   font-size: 0.75rem;
+  letter-spacing: -0.24px;
+  line-height: 1;
+  text-transform: uppercase;
 }
 .metric-card strong {
   display: block;
-  margin-top: 0.2rem;
-  font-size: 1.3rem;
+  margin-top: 0.75rem;
+  font-size: var(--text-heading);
+  font-weight: 400;
   font-variant-numeric: tabular-nums;
-  letter-spacing: -0.02em;
+  letter-spacing: -0.031em;
+  line-height: 1;
 }
 
 .read-only-note {
@@ -289,9 +454,9 @@ body {
 
 .inline-problem {
   margin: 1rem 0;
-  padding: 0.75rem 0.9rem;
-  border: 1px solid color-mix(in srgb, var(--danger) 45%, var(--border));
-  border-radius: 0.375rem;
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--danger);
+  border-radius: var(--radius-control);
   background: var(--danger-soft);
   color: var(--danger);
 }
@@ -303,7 +468,7 @@ body {
    every heading in the console. The base rule sits above the 36rem override
    below, which stacks the heading row. */
 .section {
-  margin-top: 2rem;
+  margin-top: 2.5rem;
 }
 
 .section .section-heading {
@@ -311,23 +476,36 @@ body {
   align-items: flex-start;
   justify-content: space-between;
   gap: 1rem;
-  margin-bottom: 0.75rem;
+  margin-bottom: 1rem;
 }
 
 .section h2 {
   margin: 0;
-  font-size: 1.2rem;
-  letter-spacing: -0.025em;
+  font-size: 1rem;
+  font-weight: 500;
+  letter-spacing: -0.02em;
 }
 
 /* A button that reads as a link: used for refresh and reveal affordances that
    would be too loud as a filled button. */
 .text-button {
   min-height: 2.75rem;
+  padding: 0 0.25rem;
   border: 0;
   background: transparent;
-  color: var(--accent-strong);
-  font-weight: 700;
+  color: var(--foreground);
+  font-weight: 400;
+  text-decoration: underline;
+  text-decoration-color: var(--border-strong);
+  text-underline-offset: 4px;
+  transition:
+    color var(--motion),
+    text-decoration-color var(--motion);
+}
+
+.text-button:hover:not(:disabled) {
+  color: var(--foreground-hover);
+  text-decoration-color: currentColor;
 }
 
 @media (max-width: 56rem) {
@@ -385,8 +563,8 @@ button:not(:disabled),
 }
 
 ::selection {
-  background: var(--accent-soft);
-  color: var(--foreground);
+  background: var(--foreground);
+  color: var(--canvas);
 }
 
 .sr-only {
@@ -408,12 +586,11 @@ button:not(:disabled),
   left: 0.75rem;
   min-height: 2.75rem;
   padding: 0.65rem 1rem;
-  border-radius: 0.375rem;
-  background: var(--foreground);
-  color: var(--canvas);
-  font-weight: 700;
+  border-radius: var(--radius-control);
+  background: var(--color-chalk);
+  color: var(--color-obsidian-canvas);
   transform: translateY(-160%);
-  transition: transform 120ms ease;
+  transition: transform var(--motion);
 }
 
 .skip-link:focus {
@@ -426,83 +603,97 @@ button:not(:disabled),
   align-items: center;
   justify-content: center;
   gap: 0.5rem;
-  padding: 0.5rem 0.9rem;
+  padding: 0.5rem 0.875rem;
   border: 1px solid transparent;
-  border-radius: 0.375rem;
-  font-weight: 680;
+  border-radius: var(--radius-control);
+  font-size: 0.875rem;
+  font-weight: 400;
   line-height: 1.2;
   text-decoration: none;
   transition:
-    background-color 140ms ease,
-    border-color 140ms ease,
-    color 140ms ease,
-    transform 140ms ease;
-}
-
-.button:active:not(:disabled) {
-  transform: translateY(1px);
+    background-color var(--motion),
+    border-color var(--motion),
+    color var(--motion);
 }
 
 .button:disabled {
   cursor: not-allowed;
-  opacity: 0.58;
+  opacity: 0.5;
 }
 
 .button-primary {
-  background: var(--accent);
-  color: light-dark(#fff, #0a1424);
+  border-color: var(--button-fill);
+  background: var(--button-fill);
+  color: var(--button-fill-text);
 }
 
 .button-primary:hover:not(:disabled) {
-  background: var(--accent-strong);
+  border-color: var(--button-fill-hover);
+  background: var(--button-fill-hover);
 }
 
 .button-secondary {
-  border-color: var(--border-strong);
-  background: var(--surface);
+  border-color: var(--border);
+  background: transparent;
   color: var(--foreground);
 }
 
 .button-secondary:hover:not(:disabled) {
-  border-color: var(--accent);
-  background: var(--surface-hover);
+  border-color: var(--foreground-hover);
   color: var(--foreground-hover);
 }
 
-.card {
-  border: 1px solid var(--border);
-  border-radius: 0.5rem;
-  background: var(--surface);
-  box-shadow: var(--shadow-sm);
+.eyebrow {
+  margin: 0 0 0.5rem;
+  color: var(--foreground-subtle);
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  font-weight: 400;
+  letter-spacing: -0.24px;
+  line-height: 1;
+  text-transform: uppercase;
 }
 
-.eyebrow {
-  margin: 0 0 0.4rem;
-  color: var(--accent);
-  font-size: 0.6875rem;
-  font-weight: 780;
-  letter-spacing: 0.09em;
+/* An eyebrow for sections that report live state carries the signal dot. */
+.eyebrow-live::before {
+  content: '';
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-right: 0.5rem;
+  border-radius: 50%;
+  background: var(--signal);
+  vertical-align: middle;
+}
+
+.wordmark {
+  color: var(--foreground);
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  font-weight: 400;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
 }
 
 .page-title {
   max-width: 48rem;
   margin: 0;
-  font-size: clamp(1.45rem, 2.4vw, 1.75rem);
-  font-weight: 730;
-  letter-spacing: -0.025em;
-  line-height: 1.15;
+  font-size: clamp(1.75rem, 4vw, 2.25rem);
+  font-weight: 400;
+  letter-spacing: -0.031em;
+  line-height: 1.1;
 }
 
 .page-description {
   max-width: 44rem;
-  margin: 0.6rem 0 0;
+  margin: 0.75rem 0 0;
   color: var(--foreground-muted);
-  font-size: 0.9375rem;
+  font-size: 1rem;
+  line-height: 1.5;
 }
 
 .mono {
-  font-family: 'JetBrains Mono Variable', 'SFMono-Regular', Consolas, monospace;
+  font-family: var(--font-mono);
   font-variant-ligatures: none;
 }
 
@@ -511,12 +702,16 @@ button:not(:disabled),
   align-items: flex-start;
   justify-content: space-between;
   gap: 1rem;
-  margin-bottom: 1.25rem;
-  padding: 0.8rem 0.9rem;
-  border: 1px solid color-mix(in srgb, var(--danger) 42%, var(--border));
-  border-radius: 0.375rem;
+  margin-bottom: 1.5rem;
+  padding: 0.85rem 1rem;
+  border: 1px solid var(--danger);
+  border-radius: var(--radius-control);
   background: var(--danger-soft);
   color: var(--foreground);
+}
+
+.problem-banner strong {
+  color: var(--danger);
 }
 
 .problem-banner p {
@@ -536,21 +731,25 @@ button:not(:disabled),
 
 @media (forced-colors: active) {
   :root,
-  :root[data-theme] {
+  .card-light {
     color-scheme: light;
     --canvas: Canvas;
     --surface: Canvas;
     --surface-subtle: Canvas;
     --surface-hover: Canvas;
+    --surface-raised: Canvas;
     --foreground: CanvasText;
     --foreground-hover: CanvasText;
     --foreground-muted: CanvasText;
     --foreground-subtle: CanvasText;
     --border: ButtonBorder;
+    --border-hairline: ButtonBorder;
     --border-strong: ButtonText;
     --accent: LinkText;
     --accent-strong: LinkText;
     --accent-soft: Canvas;
+    --signal: CanvasText;
+    --metric: CanvasText;
     --success: CanvasText;
     --success-soft: Canvas;
     --warning: CanvasText;
@@ -560,14 +759,14 @@ button:not(:disabled),
     --focus: Highlight;
     --code-bg: Canvas;
     --code-foreground: CanvasText;
-    --sidebar-bg: Canvas;
-    --sidebar-bg-subtle: Canvas;
-    --sidebar-hover: Canvas;
-    --sidebar-border: ButtonBorder;
-    --sidebar-foreground: CanvasText;
-    --sidebar-foreground-strong: CanvasText;
-    --sidebar-label: CanvasText;
-    --sidebar-active: Canvas;
+    --button-fill: ButtonFace;
+    --button-fill-hover: ButtonFace;
+    --button-fill-text: ButtonText;
+  }
+
+  .card-light {
+    background: Canvas;
+    color: CanvasText;
   }
 
   .data-table tbody tr:hover {
@@ -587,6 +786,13 @@ button:not(:disabled),
   .button-primary {
     background: ButtonFace;
     color: ButtonText;
+  }
+
+  .status-dot,
+  .eyebrow-live::before,
+  .badge::before {
+    border: 1px solid CanvasText;
+    background: CanvasText;
   }
 }
 
@@ -651,8 +857,9 @@ button:not(:disabled),
 .empty-state h2 {
   margin: 0;
   color: var(--foreground);
-  font-size: 1.15rem;
-  font-weight: 720;
+  font-size: 1rem;
+  font-weight: 500;
+  letter-spacing: -0.02em;
 }
 
 .empty-state p {
@@ -685,9 +892,14 @@ button:not(:disabled),
 .success-message {
   margin: 1rem 0;
   padding: 0.85rem 1rem;
-  border: 1px solid color-mix(in srgb, var(--success) 45%, var(--border));
-  border-radius: 0.375rem;
+  border: 1px solid var(--success);
+  border-radius: var(--radius-control);
   background: var(--success-soft);
+  color: var(--foreground);
+}
+
+.success-banner strong,
+.success-message strong {
   color: var(--success);
 }
 

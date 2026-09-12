@@ -36,7 +36,7 @@
 </script>
 
 <dialog
-  class="secret-dialog card"
+  class="secret-dialog card card-light"
   class:wide={size === 'wide'}
   bind:this={dialog}
   aria-labelledby="secret-dialog-title"
@@ -63,8 +63,7 @@
   }
 
   .secret-dialog::backdrop {
-    background: rgb(11 17 30 / 62%);
-    backdrop-filter: blur(4px);
+    background: rgb(16 16 16 / 78%);
   }
 
   .secret-dialog {
@@ -75,8 +74,8 @@
     margin: 0 auto;
     overflow-y: auto;
     padding: clamp(1.25rem, 4vw, 2rem);
+    border-radius: var(--radius-panel);
     color: var(--foreground);
-    box-shadow: var(--shadow-md);
   }
 
   .secret-dialog.wide {
@@ -85,10 +84,10 @@
 
   .dialog-title {
     margin: 0;
-    font-size: clamp(1.5rem, 4vw, 2rem);
-    font-weight: 730;
-    letter-spacing: -0.035em;
-    line-height: 1.15;
+    font-size: clamp(1.75rem, 4vw, 2.25rem);
+    font-weight: 400;
+    letter-spacing: -0.031em;
+    line-height: 1.1;
   }
 
   .dialog-description {
@@ -109,7 +108,7 @@
     flex: none;
     margin: -0.5rem -0.5rem 0 0;
     border: 0;
-    border-radius: 0.375rem;
+    border-radius: var(--radius-control);
     background: transparent;
     color: var(--foreground-muted);
     font-size: 1.4rem;
