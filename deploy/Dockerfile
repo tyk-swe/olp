@@ -1,17 +1,29 @@
 # syntax=docker/dockerfile:1
-FROM rust:1.98-trixie@sha256:620dbcd124499c59e2406d3741574b5c5838cf9eb9656f0c3a03948f79b02959 AS rust-build
-ARG BUILDKIT_SBOM_SCAN_STAGE=true
+FROM rust:1.98-trixie@sha256:620dbcd124499c59e2406d3741574b5c5838cf9eb9656f0c3a03948f79b02959 AS chef
 WORKDIR /src
-COPY Cargo.toml Cargo.lock rust-toolchain.toml rustfmt.toml ./
+COPY rust-toolchain.toml ./
+RUN cargo install --locked --version 0.1.78 cargo-chef
+
+FROM chef AS rust-plan
+COPY Cargo.toml Cargo.lock ./
 COPY src ./src
-COPY migrations ./migrations
 COPY examples ./examples
 COPY benches ./benches
 COPY tests ./tests
-RUN --mount=type=cache,target=/usr/local/cargo/registry \
-    --mount=type=cache,target=/usr/local/cargo/git \
-    cargo build --locked --release --bin olp --example export_openapi
-RUN mkdir -p openapi && target/release/examples/export_openapi > openapi/management.json
+RUN cargo chef prepare --recipe-path recipe.json
+
+FROM chef AS rust-deps
+COPY --from=rust-plan /src/recipe.json ./recipe.json
+# Keep Cargo sources and compiled dependencies in exportable image layers.
+RUN cargo chef cook --locked --release --bin olp --bin export_openapi --recipe-path recipe.json
+
+FROM rust-deps AS rust-build
+ARG BUILDKIT_SBOM_SCAN_STAGE=true
+COPY Cargo.toml Cargo.lock ./
+COPY src ./src
+COPY migrations ./migrations
+RUN cargo build --locked --release --bin olp --bin export_openapi
+RUN mkdir -p openapi && target/release/export_openapi > openapi/management.json
 
 FROM node:26-alpine@sha256:2d984a15c9b54fd0aeb608b8e0d0d83529eb34d2966db27a1fb4f1edc3d298a3 AS console-build
 ARG BUILDKIT_SBOM_SCAN_STAGE=true

@@ -7,6 +7,12 @@ rust-version = "1.98"
 license = "AGPL-3.0-only"
 repository = "https://github.com/tyk-swe/olp"
 autotests = false
+default-run = "olp"
+
+[[bin]]
+name = "export_openapi"
+test = false
+bench = false
 
 [features]
 test-util = []

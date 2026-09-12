@@ -16,7 +16,7 @@ dev: ## Start local services, Rust, and Vite with hot reload
 
 api: ## Generate OpenAPI and the TypeScript client
 	mkdir -p openapi
-	cargo run --locked --all-features --example export_openapi > openapi/management.json
+	cargo run --locked --all-features --bin export_openapi > openapi/management.json
 	pnpm --dir console api:generate
 
 check: api ## Required PR check
@@ -31,8 +31,12 @@ test: ## Run Rust unit and protocol tests
 integration: api ## Run service integration and Chromium journeys
 	./scripts/integration.sh
 
-build: api ## Build the release binary and console
-	cargo build --locked --release
+build: ## Build the release binary and console
+	cargo build --locked --release --bin olp --bin export_openapi
+	mkdir -p openapi
+	source scripts/lib/cargo-target-dir.sh; \
+		"$$(cargo_target_dir "$(CURDIR)")/release/export_openapi" > openapi/management.json
+	pnpm --dir console api:generate
 	pnpm --dir console build
 
 fmt: ## Format Rust and console source

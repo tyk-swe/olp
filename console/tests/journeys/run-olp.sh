@@ -30,7 +30,7 @@ fi
 if [[ -z ${OLP_CONSOLE_E2E_BIN:-} ]]; then
   (
     cd -- "$repo_dir"
-    cargo build --locked -p olp --features test-util
+    cargo build --locked -p olp --features test-util --bin olp
   )
 fi
 [[ -x $olp_bin ]] || {
