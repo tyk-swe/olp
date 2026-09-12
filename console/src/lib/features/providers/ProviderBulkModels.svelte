@@ -115,20 +115,23 @@
   }
 </script>
 
-<section class="card bulk">
-  <h2>Validate models in bulk</h2>
-  <p>
+<section class="card bulk" aria-labelledby="bulk-heading">
+  <p class="eyebrow">Bulk validation</p>
+  <h2 id="bulk-heading">Validate models in bulk</h2>
+  <p class="description">
     Select the models to enable. Validation uses bounded upstream requests and
     records a result for each capability.
   </p>
-  {#if models.isError}<p role="alert">
+  {#if models.isError}<div class="inline-problem" role="alert">
       Models could not be loaded. <button
+        class="button button-secondary"
         type="button"
         onclick={() => models.refetch()}>Retry</button
       >
-    </p>{/if}
-  <label class="validation-operation"
-    >Capabilities to validate<select
+    </div>{/if}
+  <div class="form-field">
+    <label for="bulk-operation">Capabilities to validate</label><select
+      id="bulk-operation"
       bind:value={operation}
       disabled={busy || !canManage}
       ><option value="configured">Keep configured capabilities</option><option
@@ -136,8 +139,8 @@
       ><option value="embeddings">Embeddings</option><option value="token_count"
         >Token count</option
       ></select
-    ></label
-  >
+    >
+  </div>
   <div class="model-list">
     {#each models.data ?? [] as model (model.id)}<label
         ><input
@@ -149,29 +152,31 @@
         ></label
       >{/each}
   </div>
-  {#if canManage}<button
-      class="button button-primary"
-      type="button"
-      disabled={busy || !selected.length}
-      onclick={validateSelected}
-      >Validate {selected.length} selected models</button
-    >{/if}
-  {#if failed.length && !busy}<button
-      class="button button-secondary"
-      type="button"
-      onclick={() => {
-        selected = [...failed];
-        void validateSelected();
-      }}>Retry {failed.length} failed models</button
-    >{/if}
-  {#if busy}<button
-      class="button button-secondary"
-      type="button"
-      onclick={() => {
-        cancelled = true;
-      }}>Stop after current model</button
-    >{/if}
-  {#if status}<p role="status">{status}</p>{/if}
+  <div class="form-actions">
+    {#if canManage}<button
+        class="button button-primary"
+        type="button"
+        disabled={busy || !selected.length}
+        onclick={validateSelected}
+        >Validate {selected.length} selected models</button
+      >{/if}
+    {#if failed.length && !busy}<button
+        class="button button-secondary"
+        type="button"
+        onclick={() => {
+          selected = [...failed];
+          void validateSelected();
+        }}>Retry {failed.length} failed models</button
+      >{/if}
+    {#if busy}<button
+        class="button button-secondary"
+        type="button"
+        onclick={() => {
+          cancelled = true;
+        }}>Stop after current model</button
+      >{/if}
+  </div>
+  {#if status}<p class="status" role="status">{status}</p>{/if}
   {#if failures.length}<ul class="inline-problem" role="alert">
       {#each failures as failure (failure.message)}<li>
           {failure.message}
@@ -181,12 +186,29 @@
 
 <style>
   .bulk {
-    padding: 1.5rem;
-    margin-top: 1.5rem;
+    padding: clamp(1.15rem, 3vw, 1.75rem);
   }
-  p,
+  h2 {
+    margin: 0 0 0.85rem;
+    font-size: 1.15rem;
+    font-weight: 750;
+    letter-spacing: -0.025em;
+  }
+  .description,
+  .status,
   small {
     color: var(--foreground-muted);
+  }
+  .description {
+    margin-bottom: 1rem;
+  }
+  .status {
+    margin-top: 1rem;
+  }
+  .form-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.65rem;
   }
   .model-list {
     max-height: 20rem;
@@ -196,7 +218,7 @@
     grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
     gap: 0.5rem;
   }
-  label {
+  .model-list label {
     display: flex;
     align-items: start;
     gap: 0.5rem;

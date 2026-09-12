@@ -134,6 +134,22 @@ export class ProviderWizardState {
   goBack = () => {
     if (this.wizardStep > 1) this.wizardStep -= 1;
   };
+  /** Return to a blank step 1 without leaving the route; the draft effect
+   * recreates the connection form from the first provider kind. */
+  startAnother = () => {
+    this.providerId = '';
+    this.draft = null;
+    this.wizardStep = 1;
+    this.probe = null;
+    this.manualModelNames = '';
+    this.busy = '';
+    this.errorMessage = '';
+    this.validationIssues = [];
+    this.notice = '';
+    this.certificationResults = {};
+    this.wizardConflict = false;
+    resetCursor(this.wizardModelPagination);
+  };
   createDraft = async (event: SubmitEvent) => {
     event.preventDefault();
     if (!this.draft || !this.selectedSpec) return;
