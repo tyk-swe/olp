@@ -15,7 +15,7 @@ OpenLLMProxy 3.0 is one Rust 2024 package and a SvelteKit console. Install the R
 
 `check`, `integration`, and `dependencies` are the CI qualification jobs; configure repository branch protections to require them. Run integration locally when changing persistence, inference, authentication, runtime publication, distributed limits, or browser journeys. SQLx queries do not require offline metadata preparation.
 
-`openapi/management.json` and `console/src/lib/api/schema.d.ts` are ignored outputs. Setup, development, checking, integration, and builds use `make api`. Change the handler's `#[utoipa::path]` annotation and its feature's `utoipa_axum::routes!` registration together; generation obtains paths and schemas from the router. Do not hand-edit generated files.
+`openapi/management.json` and `console/src/lib/api/schema.d.ts` are ignored outputs. Setup, development, checking, and integration use `make api`, which runs the `export_openapi` binary in the development profile. `make build` compiles `olp` and `export_openapi` together in the release profile with default features, runs that exporter, and generates the TypeScript contract before building the console. It honors `CARGO_TARGET_DIR` for the exporter location. Change the handler's `#[utoipa::path]` annotation and its feature's `utoipa_axum::routes!` registration together; generation obtains paths and schemas from the router. Do not hand-edit generated files.
 
 ## Local development
 
@@ -46,6 +46,13 @@ required checks. Tags require source qualification and packaged candidate
 qualification on both published architectures. Candidate tags are provisional;
 production consumes only promoted, attested digests. Paid provider tests remain
 manual, main-branch-only and receive only the selected provider's credentials.
+
+Release images build on native amd64 and arm64 runners. Each build exports its
+compiled dependency layers to the matching `buildcache-amd64` or
+`buildcache-arm64` tag in the image's GHCR repository, so later release tags can
+reuse them. The Docker build uses cargo-chef to cache dependencies separately
+from application source. The platform digests are assembled into the candidate
+index before packaged qualification; promotion uses that same index digest.
 
 A provider, protocol or media feature is not release-ready until its review
 includes native conformance, unsupported/lossy semantics, body/time/admission

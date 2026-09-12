@@ -4,7 +4,7 @@ cd "$(dirname "$0")/.."
 docker compose -f deploy/compose.dev.yaml up -d --wait
 source scripts/local-env.sh
 make setup
-cargo build --locked
+cargo build --locked --bin olp
 ./target/debug/olp migrate
 
 pids=()
