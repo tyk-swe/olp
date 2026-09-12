@@ -139,9 +139,18 @@ Authentication failures cool down that version; HTTP 429 honors Retry-After
 for the logical slot, so rotation does not reset an account cooldown. Successful
 credential validation can clear the cooldown. Connection/transport and server
 failures affect endpoint health; a credential failure does not disable other
-slots. Media jobs retain their original connection and secret through rotation,
-restart, polling, and deletion. Their credentials cannot be explicitly revoked
-until the jobs have durable deletion records.
+slots. While an endpoint is recovering, a credential-only outcome (401, 429, a
+local slot quota) completes the half-open probe without penalising the endpoint,
+so a sibling slot can probe immediately. Explicit credential-version revocation
+is authority, not routing: it reaches every retained release on the next
+authority poll, including a gateway that cannot install a newer release, and
+selection refuses a revoked version even when a request pins it. Media jobs
+retain their original connection and secret through rotation, restart, polling,
+and deletion. Their credentials cannot be explicitly revoked until the jobs have
+durable deletion records. Autonomous media reconciliation claims only as many
+jobs as it runs at once, revalidates its claim and bounds its lease to the route
+deadline immediately before each upstream poll or delete, and hands off silently
+when another replica has reclaimed the job.
 
 ![Credential slots with validation, priority, and shared quota usage](assets/screenshots/provider-credential-pool.png)
 

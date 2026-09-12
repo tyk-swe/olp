@@ -588,6 +588,10 @@ fn finish_attempt_with_first_event(
                 class,
                 None,
             );
+        } else {
+            // Credential/request-scoped errors do not touch endpoint health but
+            // must still release a half-open probe held by this attempt.
+            circuits.abandon_probe(record.plan.routing_id, record.circuit_permit);
         }
         true
     } else {

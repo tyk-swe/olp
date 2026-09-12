@@ -217,6 +217,8 @@ impl Manager {
                     && current.routing.credential_authority.as_ref() == Some(&authority.credentials)
                     && current.routing.connection_limit_authority.as_ref()
                         == Some(&authority.connection_limits)
+                    && current.routing.revoked_credential_versions
+                        == authority.revoked_credential_versions
                     && authority
                         .routes
                         .iter()
@@ -233,6 +235,8 @@ impl Manager {
             snapshot.routing.routes.extend(authority.routes.clone());
             snapshot.routing.credential_authority = Some(authority.credentials.clone());
             snapshot.routing.connection_limit_authority = Some(authority.connection_limits.clone());
+            snapshot.routing.revoked_credential_versions =
+                authority.revoked_credential_versions.clone();
         }
         snapshot.validate()?;
         self.bundle.store(Arc::new(Bundle {

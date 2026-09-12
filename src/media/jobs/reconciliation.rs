@@ -100,6 +100,30 @@ pub async fn claim_media_reconciliation_jobs(
     rows.into_iter().map(media_job_from_row).collect()
 }
 
+/// Revalidates ownership of a claimed job and extends its lease so it covers
+/// the upstream call that is about to start. Returns `false` when the claim
+/// no longer owns the row (the lease expired and another worker reclaimed it).
+pub async fn extend_media_reconciliation_claim(
+    pool: &sqlx::PgPool,
+    id: Uuid,
+    claim_id: Uuid,
+    until: DateTime<Utc>,
+) -> Result<bool, MediaJobError> {
+    let result = sqlx::query(
+        "UPDATE async_media_jobs SET
+                reconciliation_claimed_until = GREATEST(reconciliation_claimed_until, $3),
+                next_reconciliation_at = GREATEST(next_reconciliation_at, $3),
+                etag = uuidv7()
+             WHERE id = $1 AND reconciliation_claim_id = $2",
+    )
+    .bind(id)
+    .bind(claim_id)
+    .bind(until)
+    .execute(pool)
+    .await?;
+    Ok(result.rows_affected() == 1)
+}
+
 /// Releases one reconciliation lease and records only a bounded error
 /// class. Provider bodies and request content are never accepted here.
 pub async fn finish_media_reconciliation(

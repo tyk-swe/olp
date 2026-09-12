@@ -209,6 +209,8 @@ impl RuntimeActivator {
             snapshot.routing.credential_authority = Some(current_authority.credentials.clone());
             snapshot.routing.connection_limit_authority =
                 Some(current_authority.connection_limits.clone());
+            snapshot.routing.revoked_credential_versions =
+                current_authority.revoked_credential_versions.clone();
             snapshot
                 .routing
                 .routes

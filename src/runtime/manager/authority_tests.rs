@@ -302,6 +302,7 @@ fn credential_authority_refresh_preserves_transports_and_inflight_permissions() 
                 ..Default::default()
             },
         )]),
+        revoked_credential_versions: Default::default(),
     };
     manager
         .refresh_current_authority(&authority, Instant::now())
@@ -344,6 +345,46 @@ fn credential_authority_refresh_preserves_transports_and_inflight_permissions() 
 }
 
 #[test]
+fn credential_revocation_refresh_reaches_retained_release_without_replacing_transports() {
+    let key = historical_key();
+    let manager = installed_manager(key.clone());
+    let provider = *manager.pin().providers.keys().next().unwrap();
+    let revoked_version = uuid::Uuid::now_v7();
+    let mut authority = crate::runtime::publication::compiler::CurrentRuntimeAuthority {
+        api_keys: BTreeMap::from([(key.lookup_id.clone(), key)]),
+        installation: Default::default(),
+        routes: BTreeMap::new(),
+        credentials: BTreeMap::new(),
+        connection_limits: BTreeMap::new(),
+        revoked_credential_versions: Default::default(),
+    };
+    manager
+        .refresh_current_authority(&authority, Instant::now())
+        .unwrap();
+    let pinned = manager.pin();
+    assert!(pinned.routing.revoked_credential_versions.is_empty());
+    authority
+        .revoked_credential_versions
+        .insert(revoked_version);
+    manager
+        .refresh_current_authority(&authority, Instant::now())
+        .unwrap();
+    let refreshed = manager.pin();
+    assert!(
+        refreshed
+            .routing
+            .revoked_credential_versions
+            .contains(&revoked_version)
+    );
+    assert!(pinned.routing.revoked_credential_versions.is_empty());
+    assert_eq!(refreshed.generation.id, pinned.generation.id);
+    assert!(Arc::ptr_eq(
+        &refreshed.transport(provider).unwrap(),
+        &pinned.transport(provider).unwrap()
+    ));
+}
+
+#[test]
 fn current_routing_constraints_apply_while_retaining_transports_and_inflight_snapshots() {
     let key = historical_key();
     let manager = installed_manager(key.clone());
@@ -365,6 +406,7 @@ fn current_routing_constraints_apply_while_retaining_transports_and_inflight_sna
                 routes: BTreeMap::from([(slug.clone(), route)]),
                 credentials: BTreeMap::new(),
                 connection_limits: BTreeMap::new(),
+                revoked_credential_versions: Default::default(),
             },
             Instant::now(),
         )

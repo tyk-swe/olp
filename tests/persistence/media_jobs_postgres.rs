@@ -433,6 +433,42 @@ async fn media_job_lifecycle_is_paginated_metadata_only_and_transition_checked()
             .unwrap();
     let second_claim_id = reclaimed.reconciliation_claim_id.unwrap();
     assert_ne!(first_claim_id, second_claim_id);
+
+    // Before its upstream call a worker revalidates ownership and bounds its
+    // lease to the route deadline: the superseded claim learns it lost the
+    // row, the current owner extends past the original two-minute lease.
+    let lease_until = claim_at + Duration::seconds(150);
+    assert!(
+        !olp::media::jobs::reconciliation::extend_media_reconciliation_claim(
+            &pool,
+            cleanup_id,
+            first_claim_id,
+            lease_until,
+        )
+        .await
+        .unwrap()
+    );
+    assert!(
+        olp::media::jobs::reconciliation::extend_media_reconciliation_claim(
+            &pool,
+            cleanup_id,
+            second_claim_id,
+            lease_until,
+        )
+        .await
+        .unwrap()
+    );
+    let claimed_until: Option<chrono::DateTime<Utc>> = sqlx::query_scalar(
+        "SELECT reconciliation_claimed_until FROM async_media_jobs WHERE id = $1",
+    )
+    .bind(cleanup_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        claimed_until.map(|value| value.timestamp_micros()),
+        Some(lease_until.timestamp_micros())
+    );
     olp::media::jobs::reconciliation::finish_media_reconciliation(
         &pool,
         cleanup_id,
