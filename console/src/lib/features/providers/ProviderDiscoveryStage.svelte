@@ -66,8 +66,6 @@
 
 <style>
   .stage {
-    max-width: 48rem;
-    margin-top: 1.25rem;
     padding: clamp(1.15rem, 3vw, 1.75rem);
   }
   h2 {

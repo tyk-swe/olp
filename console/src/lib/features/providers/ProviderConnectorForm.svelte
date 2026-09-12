@@ -88,25 +88,27 @@
 >
   <fieldset disabled={lockKind}>
     <legend>Choose a vendor</legend>
-    <label for="provider-vendor">Vendor</label><select
-      id="provider-vendor"
-      value={draft.presetId || draft.options?.vendor_id || ''}
-      onchange={chooseVendor}
-      ><option value="">Custom connection</option
-      >{#each vendors.data ?? [] as vendor (vendor.id)}<option value={vendor.id}
-          >{vendor.name}</option
-        >{/each}</select
-    >
-    {#if vendors.isError}<p role="alert">
+    <div class="form-field">
+      <label for="provider-vendor">Vendor</label><select
+        id="provider-vendor"
+        value={draft.presetId || draft.options?.vendor_id || ''}
+        onchange={chooseVendor}
+        ><option value="">Custom connection</option
+        >{#each vendors.data ?? [] as vendor (vendor.id)}<option
+            value={vendor.id}>{vendor.name}</option
+          >{/each}</select
+      ><small
+        >Each connection can have its own account, endpoint, region, and
+        credential pool.</small
+      >
+    </div>
+    {#if vendors.isError}<div class="inline-problem" role="alert">
         Vendor catalog unavailable. <button
+          class="button button-secondary"
           type="button"
           onclick={() => vendors.refetch()}>Retry</button
         >
-      </p>{/if}
-    <p>
-      Each connection can have its own account, endpoint, region, and credential
-      pool.
-    </p>
+      </div>{/if}
     <p class="connector-label">Connector protocol</p>
     <div class="connector-grid">
       {#each providerKinds as option (option.kind)}
@@ -234,8 +236,6 @@
   }
 
   .editor {
-    max-width: 66rem;
-    margin-top: 1.25rem;
     padding: clamp(1.15rem, 3vw, 1.75rem);
   }
   fieldset {
@@ -249,12 +249,17 @@
     font-weight: 750;
     letter-spacing: -0.025em;
   }
+  .connector-label {
+    margin: 1.1rem 0 0.45rem;
+    font-weight: 700;
+  }
   .connector-grid {
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 0.6rem;
   }
   .connector-grid label {
+    position: relative;
     display: grid;
     min-height: 5.6rem;
     align-content: center;

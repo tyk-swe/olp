@@ -43,121 +43,127 @@
   {/each}
 </ol>
 
-{#if !wizard.canManage}
-  <ReadOnlyNote>
-    Your role can view providers but not connect or activate them.
-  </ReadOnlyNote>
-{/if}
-{#if wizard.canManage && wizard.wizardStep >= 2 && wizard.wizardStep <= 3}
-  <div class="wizard-back">
-    <button
-      class="button button-secondary"
-      type="button"
-      onclick={wizard.goBack}
-      disabled={Boolean(wizard.busy)}>Back</button
+<div class="wizard-body">
+  {#if !wizard.canManage}
+    <ReadOnlyNote>
+      Your role can view providers but not connect or activate them.
+    </ReadOnlyNote>
+  {/if}
+  {#if wizard.errorMessage}<div
+      class="inline-problem"
+      role="alert"
+      tabindex="-1"
+      data-error-summary
+      use:focusErrorSummary
     >
-  </div>
-{/if}
-{#if wizard.errorMessage}<div
-    class="inline-problem"
-    role="alert"
-    tabindex="-1"
-    data-error-summary
-    use:focusErrorSummary
-  >
-    {wizard.errorMessage}
-    <ProviderValidationIssues issues={wizard.validationIssues} />
-  </div>{/if}
-{#if wizard.notice}<div class="success-banner" role="status">
-    {wizard.notice}
-  </div>{/if}
-<p class="sr-only" role="status">
-  {wizard.busy ? 'Operation in progress. Please wait.' : ''}
-</p>
-<ConflictNotice
-  notice={wizard.wizardConflict ? 'conflict' : null}
-  onReload={wizard.reloadWizard}
-  disabled={Boolean(wizard.busy)}
-/>
+      {wizard.errorMessage}
+      <ProviderValidationIssues issues={wizard.validationIssues} />
+    </div>{/if}
+  {#if wizard.notice}<div class="success-banner" role="status">
+      {wizard.notice}
+    </div>{/if}
+  <p class="sr-only" role="status">
+    {wizard.busy ? 'Operation in progress. Please wait.' : ''}
+  </p>
+  <ConflictNotice
+    notice={wizard.wizardConflict ? 'conflict' : null}
+    onReload={wizard.reloadWizard}
+    disabled={Boolean(wizard.busy)}
+  />
 
-{#if wizard.canManage}
-  {#if wizard.wizardStep === 1}
-    {#if wizard.providerKinds.isPending}
-      <div class="card stage" role="status">Loading provider capabilities…</div>
-    {:else if wizard.providerKinds.isError}
-      <div class="inline-problem" role="alert">
-        Provider capabilities could not be loaded. Retry before configuring a
-        provider. <button
-          class="button button-secondary"
-          type="button"
-          onclick={() => wizard.providerKinds.refetch()}>Retry</button
-        >
-      </div>
-    {:else if wizard.draft && wizard.selectedSpec}
-      <ProviderConnectorForm
-        bind:draft={wizard.draft}
-        providerKinds={wizard.providerKinds.data ?? []}
-        selectedSpec={wizard.selectedSpec}
+  {#if wizard.canManage}
+    {#if wizard.wizardStep === 1}
+      {#if wizard.providerKinds.isPending}
+        <div class="card stage" role="status">
+          Loading provider capabilities…
+        </div>
+      {:else if wizard.providerKinds.isError}
+        <div class="inline-problem" role="alert">
+          Provider capabilities could not be loaded. Retry before configuring a
+          provider. <button
+            class="button button-secondary"
+            type="button"
+            onclick={() => wizard.providerKinds.refetch()}>Retry</button
+          >
+        </div>
+      {:else if wizard.draft && wizard.selectedSpec}
+        <ProviderConnectorForm
+          bind:draft={wizard.draft}
+          providerKinds={wizard.providerKinds.data ?? []}
+          selectedSpec={wizard.selectedSpec}
+          busy={wizard.busy}
+          lockKind={Boolean(wizard.wizardProvider)}
+          onSubmit={async (event) => {
+            const root = (event.currentTarget as HTMLFormElement).closest(
+              'main'
+            );
+            await wizard.createDraft(event);
+            if (root) await focusFormError(root);
+          }}
+        />
+      {/if}
+    {:else if wizard.wizardStep === 2 && wizard.wizardProvider}
+      <ProviderDiscoveryStage
+        provider={wizard.wizardProvider}
+        probe={wizard.probe}
+        bind:manualModelNames={wizard.manualModelNames}
         busy={wizard.busy}
-        lockKind={Boolean(wizard.wizardProvider)}
-        onSubmit={async (event) => {
-          const root = (event.currentTarget as HTMLFormElement).closest('main');
-          await wizard.createDraft(event);
-          if (root) await focusFormError(root);
+        onDiscover={wizard.discoverWizardProvider}
+        onDeclareModels={wizard.declareWizardModels}
+      />
+      <ProviderBulkModels
+        provider={wizard.wizardProvider}
+        canManage={wizard.canManage}
+        onChanged={async () => {
+          await wizard.refetchWizardModels();
         }}
       />
-    {/if}
-  {:else if wizard.wizardStep === 2 && wizard.wizardProvider}
-    <ProviderDiscoveryStage
-      provider={wizard.wizardProvider}
-      probe={wizard.probe}
-      bind:manualModelNames={wizard.manualModelNames}
-      busy={wizard.busy}
-      onDiscover={wizard.discoverWizardProvider}
-      onDeclareModels={wizard.declareWizardModels}
-    />
-    <ProviderBulkModels
-      provider={wizard.wizardProvider}
-      canManage={wizard.canManage}
-      onChanged={async () => {
-        await wizard.refetchWizardModels();
-      }}
-    />
-    <section class="card stage wide" aria-labelledby="capability-heading">
-      <ProviderCapabilityReviewStage
+      <section class="card stage" aria-labelledby="capability-heading">
+        <ProviderCapabilityReviewStage
+          provider={wizard.wizardProvider}
+          models={wizard.wizardModels.data?.items ?? []}
+          modelsPending={wizard.wizardModels.isPending}
+          modelsError={wizard.wizardModels.isError}
+          capabilityOptions={wizard.capabilityOptions.data?.capabilities ?? []}
+          optionsPending={wizard.capabilityOptions.isPending}
+          optionsError={wizard.capabilityOptions.isError}
+          busy={wizard.busy}
+          reloadVersion={wizard.wizardModelReloadVersion}
+          certificationResults={wizard.certificationResults}
+          pagination={wizard.wizardModelPagination}
+          nextCursor={wizard.wizardModels.data?.nextCursor}
+          onSave={wizard.reviewWizardModel}
+          onCertify={wizard.certifyWizardModel}
+          onRetryModels={() => wizard.refetchWizardModels()}
+        />
+      </section>
+      <div class="wizard-actions">
+        <button
+          class="button button-secondary"
+          type="button"
+          onclick={wizard.goBack}
+          disabled={Boolean(wizard.busy)}>Back</button
+        >
+        <button
+          class="button button-primary"
+          type="button"
+          disabled={Boolean(wizard.busy)}
+          onclick={() => (wizard.wizardStep = 3)}>Continue to activation</button
+        >
+      </div>
+    {:else if wizard.wizardStep === 3 && wizard.wizardProvider}
+      <ProviderActivationStage
         provider={wizard.wizardProvider}
-        models={wizard.wizardModels.data?.items ?? []}
-        modelsPending={wizard.wizardModels.isPending}
-        modelsError={wizard.wizardModels.isError}
-        capabilityOptions={wizard.capabilityOptions.data?.capabilities ?? []}
-        optionsPending={wizard.capabilityOptions.isPending}
-        optionsError={wizard.capabilityOptions.isError}
+        activated={wizard.wizardProvider.state === 'active'}
         busy={wizard.busy}
-        reloadVersion={wizard.wizardModelReloadVersion}
-        certificationResults={wizard.certificationResults}
-        pagination={wizard.wizardModelPagination}
-        nextCursor={wizard.wizardModels.data?.nextCursor}
-        onSave={wizard.reviewWizardModel}
-        onCertify={wizard.certifyWizardModel}
-        onRetryModels={() => wizard.refetchWizardModels()}
+        onBack={wizard.goBack}
+        onTest={wizard.testWizardDraftForActivation}
+        onActivate={wizard.activateWizardProvider}
+        onAddAnother={wizard.startAnother}
       />
-      <button
-        class="button button-primary"
-        type="button"
-        disabled={Boolean(wizard.busy)}
-        onclick={() => (wizard.wizardStep = 3)}>Continue to activation</button
-      >
-    </section>
-  {:else if wizard.wizardStep === 3 && wizard.wizardProvider}
-    <ProviderActivationStage
-      provider={wizard.wizardProvider}
-      activated={wizard.wizardProvider.state === 'active'}
-      busy={wizard.busy}
-      onTest={wizard.testWizardDraftForActivation}
-      onActivate={wizard.activateWizardProvider}
-    />
+    {/if}
   {/if}
-{/if}
+</div>
 
 <style>
   .step-progress {
@@ -167,13 +173,20 @@
     font-size: 0.78rem;
     font-weight: 700;
   }
-  .wizard-back {
-    margin-top: 1rem;
+  .wizard-body {
+    display: grid;
+    gap: 1rem;
+    max-width: 66rem;
+  }
+  .wizard-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.65rem;
   }
   .steps {
     display: grid;
     grid-template-columns: repeat(3, 1fr);
-    max-width: 58rem;
+    max-width: 66rem;
     margin: 2rem 0 1.25rem;
     padding: 0;
     list-style: none;
@@ -213,12 +226,7 @@
     color: var(--success);
   }
   .stage {
-    margin-top: 1.25rem;
     padding: clamp(1.15rem, 3vw, 1.75rem);
-    max-width: 48rem;
-  }
-  .stage.wide {
-    max-width: none;
   }
 
   @media (max-width: 42rem) {

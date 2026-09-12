@@ -12,14 +12,18 @@
     provider,
     activated = false,
     busy,
+    onBack,
     onTest,
-    onActivate
+    onActivate,
+    onAddAnother
   }: {
     provider: Provider | null;
     activated?: boolean;
     busy: string;
+    onBack?: () => void;
     onTest: () => void | Promise<void>;
     onActivate: () => void | Promise<void>;
+    onAddAnother?: () => void;
   } = $props();
 
   const certified = $derived(capabilitiesCertified(provider));
@@ -44,9 +48,11 @@
       <a class="button button-primary" href={resolve('/routes/new')}
         >Build default route <NavIcon name="arrow" /></a
       >
-      <a class="button button-secondary" href={resolve('/providers/new')}
-        >Add another connection</a
-      >
+      {#if onAddAnother}<button
+          class="button button-secondary"
+          type="button"
+          onclick={onAddAnother}>Add another connection</button
+        >{/if}
       <a
         class="button button-secondary"
         href={resolve(`/providers/${provider?.id}`)}>View provider</a
@@ -54,48 +60,61 @@
     </div>
   </section>
 {:else}
-  <ol
-    class="activation-checklist"
-    aria-label="Provider activation requirements"
-  >
-    <li class:complete={certified}>
-      {certified ? '✓' : '1'} Every enabled capability is server-certified
-    </li>
-    <li class:complete={tested}>
-      {tested ? '✓' : '2'} Completed draft passed an ETag-bound connection test
-    </li>
-  </ol>
-  <div class="form-actions">
-    <button
-      class="button button-secondary"
-      type="button"
-      onclick={onTest}
-      disabled={disabled || !certified}
-      >{busy === 'final-probe'
-        ? 'Testing completed draft…'
-        : 'Test completed draft'}</button
-    >
-    <button
-      class="button button-primary"
-      type="button"
-      onclick={onActivate}
-      disabled={disabled || !ready}
-      >{busy === 'activate' ? 'Activating…' : 'Activate provider'}</button
-    >
-  </div>
-  {#if !ready}
-    <p class="audit-note">
-      Activation stays disabled until every tuple has server-owned certification
-      and the completed draft passes a fresh connection test. Any configuration,
-      credential, discovery, or capability change invalidates that evidence.
+  <section class="card stage" aria-labelledby="activation-heading">
+    <p class="eyebrow">Activation</p>
+    <h2 id="activation-heading">Activate the provider</h2>
+    <p>
+      Activation publishes an immutable runtime generation. Both requirements
+      must hold for this exact draft.
     </p>
-  {/if}
+    <ol
+      class="activation-checklist"
+      aria-label="Provider activation requirements"
+    >
+      <li class:complete={certified}>
+        {certified ? '✓' : '1'} Every enabled capability is server-certified
+      </li>
+      <li class:complete={tested}>
+        {tested ? '✓' : '2'} Completed draft passed an ETag-bound connection test
+      </li>
+    </ol>
+    <div class="form-actions">
+      {#if onBack}<button
+          class="button button-secondary"
+          type="button"
+          onclick={onBack}
+          {disabled}>Back</button
+        >{/if}
+      <button
+        class="button button-secondary"
+        type="button"
+        onclick={onTest}
+        disabled={disabled || !certified}
+        >{busy === 'final-probe'
+          ? 'Testing completed draft…'
+          : 'Test completed draft'}</button
+      >
+      <button
+        class="button button-primary"
+        type="button"
+        onclick={onActivate}
+        disabled={disabled || !ready}
+        >{busy === 'activate' ? 'Activating…' : 'Activate provider'}</button
+      >
+    </div>
+    {#if !ready}
+      <p class="audit-note">
+        Activation stays disabled until every tuple has server-owned
+        certification and the completed draft passes a fresh connection test.
+        Any configuration, credential, discovery, or capability change
+        invalidates that evidence.
+      </p>
+    {/if}
+  </section>
 {/if}
 
 <style>
   .stage {
-    max-width: 48rem;
-    margin-top: 1.25rem;
     padding: clamp(1.15rem, 3vw, 1.75rem);
   }
   h2 {
@@ -107,6 +126,10 @@
   .stage > p,
   .audit-note {
     color: var(--foreground-muted);
+  }
+  .audit-note {
+    margin-top: 1rem;
+    font-size: 0.8rem;
   }
   .form-actions {
     display: flex;
