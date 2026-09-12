@@ -88,6 +88,8 @@ pub(crate) fn circuit_accounted_event_stream_with_permit(
                                     class,
                                     None,
                                 );
+                            } else if let Some(permit) = permit {
+                                circuits.abandon_probe(target, permit);
                             }
                             failed = true;
                         }

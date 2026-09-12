@@ -62,7 +62,7 @@ impl Breaker {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
-    fn new(failure_threshold: u32, open_duration: Duration) -> Self {
+    pub(crate) fn new(failure_threshold: u32, open_duration: Duration) -> Self {
         Self {
             inner: Arc::new(Mutex::new(BTreeMap::new())),
             next_probe_generation: Arc::new(AtomicU64::new(1)),
@@ -183,12 +183,18 @@ impl Breaker {
         class: AttemptFailureClass,
         retry_after: Option<Duration>,
     ) {
-        if !counts_toward_circuit(class, retry_after) {
-            return;
-        }
         let now = Instant::now();
         let mut states = self.states();
         if !Self::permit_is_current(&states, target, permit) {
+            return;
+        }
+        if !counts_toward_circuit(class, retry_after) {
+            // A credential-scoped outcome says nothing about the endpoint, but
+            // it still completes the half-open probe. Release it without a new
+            // recovery interval so a sibling credential can probe immediately.
+            if permit.is_some_and(|permit| permit.probe_generation.is_some()) {
+                states.insert(target, CircuitState::Open { until: now });
+            }
             return;
         }
         let failures = match states.get(&target) {
@@ -250,6 +256,8 @@ impl Breaker {
 
 /// Authentication and quota failures belong to credential health. Only
 /// connection, timeout, and server failures affect the endpoint circuit.
+/// Classes that do not count still resolve an outstanding half-open probe
+/// (see `record_failure_for_optional_permit`) so they never block siblings.
 const fn counts_toward_circuit(class: AttemptFailureClass, _retry_after: Option<Duration>) -> bool {
     match class {
         AttemptFailureClass::Connect
@@ -356,6 +364,85 @@ mod tests {
         assert!(breaker.is_selectable(target));
         assert!(breaker.try_acquire(target));
         assert!(!breaker.try_acquire(target));
+    }
+
+    /// A credential-only outcome (401/429/local quota) does not count against
+    /// the endpoint, but it must still complete the half-open probe so a
+    /// sibling credential slot can probe the same target immediately.
+    #[test]
+    fn credential_scoped_failure_releases_the_half_open_probe_without_penalty() {
+        for (class, retry_after) in [
+            (
+                AttemptFailureClass::RateLimit,
+                Some(Duration::from_secs(30)),
+            ),
+            (AttemptFailureClass::RateLimit, None),
+            (AttemptFailureClass::UpstreamClient, None),
+        ] {
+            let breaker = Breaker::new(1, Duration::from_secs(30));
+            let target = TargetId::new();
+            breaker
+                .inner
+                .lock()
+                .expect("circuit state lock poisoned")
+                .insert(
+                    target,
+                    CircuitState::Open {
+                        until: Instant::now(),
+                    },
+                );
+            let probe = breaker
+                .try_acquire_permit(target)
+                .expect("expired open circuit admits a probe");
+            assert!(!breaker.try_acquire(target), "probe is single-flight");
+
+            breaker.record_failure_for_optional_permit(target, Some(&probe), class, retry_after);
+
+            assert!(breaker.is_selectable(target), "{class:?} must not reopen");
+            let sibling = breaker
+                .try_acquire_permit(target)
+                .expect("sibling credential can probe immediately");
+            assert_ne!(sibling.probe_generation, probe.probe_generation);
+            assert!(!breaker.try_acquire(target));
+        }
+    }
+
+    #[test]
+    fn stale_credential_scoped_failure_cannot_release_a_newer_probe() {
+        let breaker = Breaker::new(1, Duration::from_millis(5));
+        let target = TargetId::new();
+        breaker
+            .inner
+            .lock()
+            .expect("circuit state lock poisoned")
+            .insert(
+                target,
+                CircuitState::Open {
+                    until: Instant::now(),
+                },
+            );
+        let stale = breaker
+            .try_acquire_permit(target)
+            .expect("expired open circuit admits a probe");
+        std::thread::sleep(Duration::from_millis(8));
+        let current = breaker
+            .try_acquire_permit(target)
+            .expect("a probe past open_duration is superseded");
+
+        breaker.record_failure_for_optional_permit(
+            target,
+            Some(&stale),
+            AttemptFailureClass::RateLimit,
+            None,
+        );
+        assert!(!breaker.try_acquire(target));
+        breaker.record_failure_for_optional_permit(
+            target,
+            Some(&current),
+            AttemptFailureClass::UpstreamClient,
+            None,
+        );
+        assert!(breaker.try_acquire(target));
     }
 
     #[test]

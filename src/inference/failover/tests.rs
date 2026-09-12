@@ -760,6 +760,63 @@ mod execute {
         assert_eq!(fixture.calls(0), 1);
     }
 
+    /// Two credential slots of one target share its `routing_id`. When the
+    /// endpoint circuit is recovering, a credential-only failure on the first
+    /// slot must release the half-open probe so the sibling can attempt now.
+    async fn sibling_credential_probes_after_credential_scoped_failure(first: TransportError) {
+        let mut fixture = Fixture::new(vec![vec![Err(first)], vec![Ok(success_events())]]);
+        let shared = fixture.targets[0].plan.routing_id;
+        fixture.targets[1].plan.routing_id = shared;
+        for target in &mut fixture.targets {
+            target.plan.credential_slot_id = Some(uuid::Uuid::now_v7());
+            target.plan.credential_version_id = Some(uuid::Uuid::now_v7());
+        }
+        // The breaker keeps wall-clock time, so use a short open window and
+        // let it lapse: the endpoint is then recovering (half-open).
+        fixture.circuits = Breaker::new(1, Duration::from_millis(20));
+        fixture
+            .circuits
+            .record_failure(shared, AttemptFailureClass::Connect);
+        std::thread::sleep(Duration::from_millis(40));
+        assert!(fixture.circuits.is_selectable(shared));
+
+        let (outcome, _) = fixture.run(Duration::from_secs(30), 2).await;
+
+        succeeded(outcome, "the sibling credential slot serves the request");
+        assert_eq!(fixture.calls(0), 1);
+        assert_eq!(fixture.calls(1), 1);
+        // The sibling now owns the (single-flight) probe until its stream ends.
+        assert!(!fixture.circuits.try_acquire(shared));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_local_credential_rejection_does_not_hold_the_half_open_probe() {
+        // Shape of `pool_transport::limit_error`: rejected before any upstream call.
+        sibling_credential_probes_after_credential_scoped_failure(TransportError {
+            upstream: crate::inference::transport::UpstreamSignal {
+                status: None,
+                retry_after: Some(Duration::from_secs(20)),
+            },
+            ..failure(TransportPhase::Connect, AttemptFailureClass::RateLimit)
+        })
+        .await;
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn an_upstream_credential_failure_does_not_hold_the_half_open_probe() {
+        sibling_credential_probes_after_credential_scoped_failure(TransportError {
+            upstream: crate::inference::transport::UpstreamSignal {
+                status: Some(401),
+                retry_after: None,
+            },
+            ..failure(
+                TransportPhase::FirstByte,
+                AttemptFailureClass::UpstreamClient,
+            )
+        })
+        .await;
+    }
+
     #[tokio::test(start_paused = true)]
     async fn a_circuit_open_next_target_is_skipped_without_sleeping() {
         let fixture = Fixture::new(vec![
