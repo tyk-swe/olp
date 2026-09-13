@@ -15,6 +15,15 @@ export type ProviderSummary = Schemas['ProviderSummaryResponse'];
 export type CreateProviderInput = Schemas['CreateProviderRequest'];
 export type UpdateProviderInput = Schemas['UpdateProviderRequest'];
 export type ProviderProbe = Schemas['ProbeResponse'];
+/** Reviewed connection facts for one known vendor, independent of protocol. */
+export type ProviderVendor = Schemas['Vendor'];
+
+export async function listProviderVendors(
+  signal?: AbortSignal
+): Promise<ProviderVendor[]> {
+  const response = await apiClient.GET('/api/v3/provider-vendors', { signal });
+  return result(response.data, response.error, response.response);
+}
 
 export async function listProviders(
   signal?: AbortSignal

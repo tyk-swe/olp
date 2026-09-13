@@ -1,6 +1,4 @@
 <script lang="ts">
-  import { apiClient } from '$lib/api/client';
-  import { result } from '$lib/api/http';
   import RoutingPolicyEditor from '$lib/features/routes/RoutingPolicyEditor.svelte';
   import { providerKeys } from '$lib/features/providers/providerKeys';
   import { settingsKeys } from '$lib/features/settings/settingsKeys';
@@ -27,13 +25,19 @@
   } from '$lib/features/settings/api';
   import { dateTimeLocalValue, formatDate, stateLabel } from '$lib/format';
   import { listProviderKinds } from '$lib/features/providers/models';
-  import { type ProviderKind } from '$lib/features/providers/api';
+  import {
+    listProviderVendors,
+    type ProviderKind
+  } from '$lib/features/providers/api';
   import {
     LIMITS_OUTAGE_POLICIES,
+    RETENTION_MAX_DAYS,
+    RETENTION_MIN_DAYS,
     isLimitsOutagePolicy,
+    isRetentionKey,
     optionalDecimal
   } from '$lib/features/settings/validation';
-  import { errorMessage } from '$lib/api/http';
+  import { applyServerFieldErrors, errorMessage } from '$lib/api/http';
   import { operationKinds } from '$lib/features/usage/history/api';
   import { useRole } from '$lib/features/access/session/useRole.svelte';
 
@@ -42,6 +46,7 @@
   const canEditSettings = $derived(access.can('settings.update'));
   const canEditPricing = $derived(access.can('pricing.update'));
   let values = $state<Record<string, string>>({});
+  let fieldErrors = $state<Record<string, string>>({});
   let savingKey = $state('');
   let status = $state('');
   let error = $state('');
@@ -51,10 +56,7 @@
   let vendorId = $state('');
   const providerVendors = createQuery(() => ({
     queryKey: ['provider-vendors'],
-    queryFn: async () => {
-      const response = await apiClient.GET('/api/v3/provider-vendors');
-      return result(response.data, response.error, response.response);
-    }
+    queryFn: () => listProviderVendors()
   }));
   let model = $state('');
   let operation = $state<(typeof operationKinds)[number]>('generation');
@@ -98,12 +100,8 @@
   function settingHelp(key: string) {
     if (key === LIMITS_OUTAGE_KEY)
       return 'What rate/concurrency-only API keys get while Valkey is unreachable: fail_closed rejects them with 503; fail_open bypasses those limits and counts olp_limits_fail_open_total. Budgeted keys always fail closed. Gateways apply a change within 15 seconds.';
-    if (key.includes('retention'))
-      return 'Number of days before detailed records are removed; hourly aggregates remain retained.';
-    if (key.includes('origin'))
-      return 'Exact browser origin allowed for session mutations.';
-    if (key.includes('oidc'))
-      return 'Installation-level OIDC behavior; identity linking remains explicit.';
+    if (isRetentionKey(key))
+      return 'Number of days before detailed records are removed; hourly aggregates remain retained. Must be a whole number of days between 1 and 3650.';
     return 'Installation setting stored transactionally in PostgreSQL.';
   }
 
@@ -111,6 +109,7 @@
     if (!canEditSettings) return;
     savingKey = setting.key;
     status = error = '';
+    delete fieldErrors[setting.key];
     try {
       const updated = await updateSetting(
         setting,
@@ -122,7 +121,9 @@
       delete values[setting.key];
       status = `${settingLabel(setting.key)} saved.`;
     } catch (cause) {
-      error = errorMessage(cause);
+      const fields = applyServerFieldErrors(cause, { request: 'value' });
+      if (fields.value) fieldErrors[setting.key] = fields.value;
+      else error = errorMessage(cause);
     } finally {
       savingKey = '';
     }
@@ -219,9 +220,9 @@
         >Your role can view installation settings but not change them.</ReadOnlyNote
       >{/if}
     <div class="settings-list">
-      {#each settings.data ?? [] as setting (setting.key)}<article
-          class="card setting-row"
-        >
+      {#each settings.data ?? [] as setting (setting.key)}{@const fieldProblem =
+          fieldErrors[setting.key]}
+        <article class="card setting-row">
           <div>
             <label for={`setting-${setting.key}`}
               >{settingLabel(setting.key)}</label
@@ -243,15 +244,38 @@
                 onchange={(event) =>
                   (values[setting.key] = event.currentTarget.value)}
                 disabled={!canEditSettings}
+                aria-invalid={fieldProblem ? 'true' : undefined}
+                aria-describedby={fieldProblem
+                  ? `setting-${setting.key}-error`
+                  : undefined}
                 >{#each LIMITS_OUTAGE_POLICIES as policy (policy)}<option
                     value={policy}>{policy}</option
                   >{/each}</select
-              >{:else}<input
+              >{:else if isRetentionKey(setting.key)}<input
+                id={`setting-${setting.key}`}
+                type="number"
+                inputmode="numeric"
+                min={RETENTION_MIN_DAYS}
+                max={RETENTION_MAX_DAYS}
+                step="1"
+                value={values[setting.key] ?? setting.value}
+                oninput={(event) =>
+                  (values[setting.key] = event.currentTarget.value)}
+                readonly={!canEditSettings}
+                aria-invalid={fieldProblem ? 'true' : undefined}
+                aria-describedby={fieldProblem
+                  ? `setting-${setting.key}-error`
+                  : undefined}
+              />{:else}<input
                 id={`setting-${setting.key}`}
                 value={values[setting.key] ?? setting.value}
                 oninput={(event) =>
                   (values[setting.key] = event.currentTarget.value)}
                 readonly={!canEditSettings}
+                aria-invalid={fieldProblem ? 'true' : undefined}
+                aria-describedby={fieldProblem
+                  ? `setting-${setting.key}-error`
+                  : undefined}
               />{/if}<button
               class="button button-secondary"
               type="button"
@@ -260,7 +284,11 @@
                 savingKey === setting.key ||
                 (values[setting.key] ?? setting.value) === setting.value}
               >{savingKey === setting.key ? 'Saving…' : 'Save'}</button
-            >
+            >{#if fieldProblem}<small
+                class="field-error"
+                id={`setting-${setting.key}-error`}
+                role="alert">{fieldProblem}</small
+              >{/if}
           </div>
         </article>{/each}
     </div>{/if}
@@ -538,7 +566,13 @@
   }
   .setting-control {
     display: flex;
+    flex-wrap: wrap;
     gap: 0.5rem;
+  }
+  .setting-control .field-error {
+    flex-basis: 100%;
+    color: var(--danger);
+    font-size: var(--text-caption);
   }
   .setting-control input,
   .setting-control select {

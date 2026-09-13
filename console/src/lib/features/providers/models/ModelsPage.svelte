@@ -18,7 +18,8 @@
     type ProviderModelInventory
   } from '$lib/features/providers/models';
   import { errorMessage } from '$lib/api/http';
-  import { stateLabel } from '$lib/format';
+  import { formatInteger, stateLabel } from '$lib/format';
+  import { metadataFacts } from '$lib/features/providers/models/modelMetadata';
   import { useRole } from '$lib/features/access/session/useRole.svelte';
 
   const access = useRole();
@@ -27,16 +28,18 @@
   const pagination = $state(emptyCursorHistory());
   let search = $state('');
   let surface = $state('all');
+  let eligibility = $state('all');
   const models = createQuery(() => ({
     queryKey: [
       ...providerKeys.modelInventory(pagination.cursor),
       search,
-      surface
+      surface,
+      eligibility
     ],
     queryFn: () =>
       listProviderModelInventoryPage(
         pagination.cursor,
-        undefined,
+        eligibility === 'all' ? undefined : eligibility === 'enabled',
         undefined,
         search,
         surface === 'all'
@@ -55,13 +58,16 @@
   $effect(() => {
     void search;
     void surface;
+    void eligibility;
     untrack(() => {
       pagination.cursor = undefined;
       pagination.history = [];
     });
   });
   const inventory = $derived(models.data?.items ?? []);
-  const filtering = $derived(Boolean(search) || surface !== 'all');
+  const filtering = $derived(
+    Boolean(search) || surface !== 'all' || eligibility !== 'all'
+  );
   const enabledCount = $derived(
     inventory.filter(({ model }) => model.enabled).length
   );
@@ -161,7 +167,7 @@
       placeholder="Search models or providers"
     /></label
   >
-  <label class="surface"
+  <label class="filter-choice"
     ><span>Client surface</span><select
       class="filter-control"
       bind:value={surface}
@@ -170,6 +176,15 @@
       ><option value="anthropic">Anthropic</option><option value="gemini"
         >Gemini</option
       ></select
+    ></label
+  >
+  <label class="filter-choice"
+    ><span>Route eligibility</span><select
+      class="filter-control"
+      bind:value={eligibility}
+      ><option value="all">Any eligibility</option><option value="enabled"
+        >Enabled</option
+      ><option value="disabled">Disabled</option></select
     ></label
   >
 </div>
@@ -210,6 +225,7 @@
         onclick={() => {
           search = '';
           surface = 'all';
+          eligibility = 'all';
         }}>Clear filters</button
       >
     </div>
@@ -219,16 +235,26 @@
     <table class="data-table">
       <thead
         ><tr
-          ><th>Model</th><th>Provider</th><th>Capability tuples / provenance</th
+          ><th>Model</th><th>Provider</th><th>Context</th><th>Max output</th><th
+            >Capability tuples / provenance</th
           ><th>Route eligibility</th></tr
         ></thead
       ><tbody>
         {#each inventory as entry (`${entry.provider_id}-${entry.model.id}`)}
+          {@const facts = metadataFacts(entry.metadata)}
           <tr>
             <td
               ><strong>{entry.model.display_name}</strong><br /><code
                 >{entry.model.upstream_model}</code
-              ></td
+              >{#if facts.length}<details class="model-facts">
+                  <summary>Upstream metadata</summary>
+                  <dl>
+                    {#each facts as fact (fact.label)}<div>
+                        <dt>{fact.label}</dt>
+                        <dd>{fact.value}</dd>
+                      </div>{/each}
+                  </dl>
+                </details>{/if}</td
             >
             <td
               ><a href={resolve(`/providers/${entry.provider_id}`)}
@@ -236,6 +262,8 @@
               ><br /><span class="badge">{stateLabel(entry.provider_kind)}</span
               ></td
             >
+            <td>{formatInteger(entry.metadata.context_length)}</td>
+            <td>{formatInteger(entry.metadata.max_output_tokens)}</td>
             <td
               ><div class="capabilities">
                 {#each entry.model.capabilities as capability (`${capability.operation}-${capability.surface}-${capability.mode}`)}<span
@@ -288,7 +316,7 @@
   .search input {
     width: min(100%, 30rem);
   }
-  .surface {
+  .filter-choice {
     display: flex;
     min-height: 2.75rem;
     align-items: center;
@@ -299,6 +327,35 @@
   }
   code {
     font-size: var(--text-caption);
+  }
+  .model-facts {
+    margin-top: 0.4rem;
+    max-width: 22rem;
+  }
+  .model-facts summary {
+    cursor: pointer;
+    color: var(--foreground-muted);
+    font-size: var(--text-caption);
+  }
+  .model-facts dl {
+    display: grid;
+    margin: 0.5rem 0 0;
+    gap: 0.3rem;
+  }
+  .model-facts div {
+    display: grid;
+    grid-template-columns: minmax(0, 9rem) minmax(0, 1fr);
+    gap: 0.5rem;
+  }
+  .model-facts dt {
+    color: var(--foreground-muted);
+    font-size: var(--text-caption);
+  }
+  .model-facts dd {
+    margin: 0;
+    font-family: var(--font-mono);
+    font-size: var(--text-caption);
+    overflow-wrap: anywhere;
   }
   td a {
     color: var(--foreground);
@@ -354,7 +411,7 @@
     .search input {
       width: 100%;
     }
-    .surface {
+    .filter-choice {
       display: grid;
     }
   }

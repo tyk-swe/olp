@@ -9,7 +9,36 @@ export type EditableTarget = {
   priority: number;
   weight: number;
   timeoutMs: number;
+  /**
+   * Facts the API reported for a target the draft already stores. A stored
+   * target stays in the draft after its provider is disabled or its model
+   * leaves the provider's activated revision, and then it is no longer in the
+   * enabled-model inventory the picker offers — so the editor keeps its own
+   * copy of the identity to render instead of dropping it. Absent on rows the
+   * operator has just added.
+   */
+  stored?: {
+    providerModelId: string;
+    available: boolean;
+    providerName: string;
+    providerModel: string;
+  };
 };
+
+/** Label for a stored target the enabled-model inventory no longer offers. */
+export function storedTargetLabel(target: EditableTarget): string {
+  if (target.stored?.providerModelId !== target.providerModelId)
+    return 'Unknown model';
+  return `${target.stored.providerName} · ${target.stored.providerModel}`;
+}
+
+/** True when the API flagged the stored target as no longer routable. */
+export function targetUnavailable(target: EditableTarget): boolean {
+  return (
+    target.stored?.providerModelId === target.providerModelId &&
+    target.stored.available === false
+  );
+}
 
 export type RouteModelOption = {
   id: string;

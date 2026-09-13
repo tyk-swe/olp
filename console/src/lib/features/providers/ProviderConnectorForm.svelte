@@ -1,9 +1,9 @@
 <script lang="ts">
   import { createQuery } from '@tanstack/svelte-query';
-  import { apiClient } from '$lib/api/client';
-  import { result } from '$lib/api/http';
   import ProviderConnectionFields from './ProviderConnectionFields.svelte';
   import NavIcon from '$lib/components/NavIcon.svelte';
+  import { stateLabel } from '$lib/format';
+  import { listProviderVendors } from '$lib/features/providers/api';
   import type { ProviderKindCapability } from '$lib/features/providers/models';
   import {
     emptyProviderOptions,
@@ -33,11 +33,16 @@
 
   const vendors = createQuery(() => ({
     queryKey: ['provider-vendors'],
-    queryFn: async () => {
-      const response = await apiClient.GET('/api/v3/provider-vendors');
-      return result(response.data, response.error, response.response);
-    }
+    queryFn: ({ signal }) => listProviderVendors(signal)
   }));
+  const vendorId = $derived(draft.presetId || draft.options?.vendor_id || '');
+  const selectedVendor = $derived(
+    vendors.data?.find((vendor) => vendor.id === vendorId)
+  );
+  // The last name this form suggested. A name the operator typed is never
+  // replaced; only an untouched suggestion follows a later vendor choice.
+  let suggestedName = $state('');
+
   function chooseVendor(event: Event) {
     const id = (event.currentTarget as HTMLSelectElement).value;
     const vendor = vendors.data?.find((vendor) => vendor.id === id);
@@ -50,6 +55,10 @@
     else {
       draft.presetId = '';
       draft.options = { ...emptyProviderOptions(), vendor_id: id || null };
+    }
+    if (vendor && (!draft.name.trim() || draft.name === suggestedName)) {
+      draft.name = vendor.name;
+      suggestedName = vendor.name;
     }
   }
 
@@ -153,20 +162,35 @@
           >Presets fill reviewed connector values. Custom endpoint preserves the
           fully manual path.</small
         >
-      </div>
-      {#if selectedPreset}<div class="preset-note full" aria-live="polite">
-          <strong>{selectedPreset.label}</strong>
-          <span>{selectedPreset.description}</span>
-          <code>{selectedPreset.endpoint}</code>
-          <span
-            >Maintained by {selectedPreset.maintainer}. Verified against
-            <a
-              href={selectedPreset.documentation_url}
-              target="_blank"
-              rel="noreferrer noopener">{selectedPreset.documentation_label}</a
-            >.</span
-          >
-        </div>{/if}{/if}
+      </div>{/if}
+    {#if selectedVendor}<div class="vendor-note full" aria-live="polite">
+        <strong>{selectedVendor.name}</strong>
+        {#if selectedPreset}<span>{selectedPreset.description}</span>{/if}
+        {#if selectedVendor.endpoint}<code>{selectedVendor.endpoint}</code>{/if}
+        <span
+          >Operations: {selectedVendor.operations.map(stateLabel).join(', ')}.
+          Reviewed parameters: {selectedVendor.parameters
+            .map(stateLabel)
+            .join(', ')}.</span
+        >
+        <span
+          >{selectedVendor.discovery
+            ? 'Upstream model discovery is available once the connection is tested.'
+            : 'This vendor publishes no model list, so models are declared by hand and a probe model is required.'}</span
+        >
+        <span
+          >{#if selectedPreset}Maintained by {selectedPreset.maintainer}.
+          {/if}Verified against
+          <a
+            href={selectedPreset?.documentation_url ??
+              selectedVendor.documentation_url}
+            target="_blank"
+            rel="noreferrer noopener"
+            >{selectedPreset?.documentation_label ??
+              `${selectedVendor.name} documentation`}</a
+          >.</span
+        >
+      </div>{/if}
     <div class="form-field">
       <label for="initial-model"
         >{seedModelRequired
@@ -309,7 +333,7 @@
   .identity-note.full {
     grid-column: 1 / -1;
   }
-  .preset-note {
+  .vendor-note {
     display: grid;
     gap: 0.3rem;
     padding: 0.85rem;
@@ -319,13 +343,13 @@
     color: var(--foreground-muted);
     font-size: var(--text-body-sm);
   }
-  .preset-note strong {
+  .vendor-note strong {
     color: var(--foreground);
   }
-  .preset-note code {
+  .vendor-note code {
     color: var(--foreground);
   }
-  .preset-note a {
+  .vendor-note a {
     color: var(--foreground);
     font-weight: 400;
     text-decoration: underline;
@@ -335,7 +359,7 @@
       color var(--motion),
       text-decoration-color var(--motion);
   }
-  .preset-note a:hover {
+  .vendor-note a:hover {
     color: var(--foreground-hover);
     text-decoration-color: currentColor;
   }

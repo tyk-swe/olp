@@ -202,6 +202,56 @@ pub(super) async fn exercise(
     assert_eq!(route_detail.status(), StatusCode::OK);
     assert_eq!(response_json(route_detail).await["slug"], "default");
 
+    // The console's routing dry run sends OLP's canonical operation envelope,
+    // which the OpenAPI contract can only describe as an open object. Pin the
+    // exact payload `simulateRouting` in console/src/lib/features/routes/api.ts
+    // builds, so a protocol change fails here instead of in the browser.
+    let routing_simulation = send(
+        app,
+        Method::POST,
+        "/api/v3/routing/simulate",
+        Some(json!({
+            "operation": {
+                "operation": "generation",
+                "request": {
+                    "route": "default",
+                    "messages": [{
+                        "role": "user",
+                        "content": [{ "type": "text", "text": "Hello" }]
+                    }],
+                    "parameters": { "stream": false },
+                    "tools": []
+                }
+            },
+            "surface": "openai",
+            "mode": "unary",
+            "preferences": {},
+            "api_key_id": null,
+            "seed": "console-dry-run"
+        })),
+        Some(cookie),
+        Some(csrf),
+        None,
+        None,
+    )
+    .await;
+    // This harness runs on `Manager::empty()`, so no runtime carries the route
+    // and the simulation cannot return decisions. Reaching route resolution is
+    // the part worth pinning: it proves the canonical envelope deserialized. A
+    // payload the protocol no longer accepts fails the body assertion with a
+    // parse problem instead.
+    let routing_status = routing_simulation.status();
+    let routing_body = response_json(routing_simulation).await;
+    assert_eq!(
+        routing_status,
+        StatusCode::BAD_REQUEST,
+        "unexpected simulate status: {routing_body}"
+    );
+    assert_eq!(
+        routing_body["type"], "https://openllmproxy.dev/problems/route_not_found",
+        "the canonical operation envelope was not accepted: {routing_body}"
+    );
+
     let active_draft = send(
         app,
         Method::GET,

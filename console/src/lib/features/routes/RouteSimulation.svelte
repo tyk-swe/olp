@@ -1,5 +1,6 @@
 <script lang="ts">
   import RoutingDecisions from './RoutingDecisions.svelte';
+  import { simulationRows } from '$lib/features/routes/routingExplanation';
   import type { RouteDraftEditorState } from '$lib/features/routes/routeDraftEditor.svelte';
   let { editor }: { editor: RouteDraftEditorState } = $props();
 </script>
@@ -13,13 +14,12 @@
         <p class="eyebrow">Deterministic dry run</p>
         <h2 id="simulation-heading">Attempt explanation</h2>
       </div>
-      <code>seed: {editor.simulation.deterministic_seed}</code>
+      <code
+        >{editor.simulation.operation} · {editor.simulation.surface} · {editor
+          .simulation.mode} · seed: {editor.simulation.deterministic_seed}</code
+      >
     </div>
-    <RoutingDecisions
-      decisions={editor.simulation.targets.flatMap((target) =>
-        target.decision ? [target.decision] : []
-      )}
-    />
+    <RoutingDecisions rows={simulationRows(editor.simulation.targets)} />
   </section>{/if}
 
 <style>

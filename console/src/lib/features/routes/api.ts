@@ -101,6 +101,65 @@ export async function simulateRoute(
   return result(response.data, response.error, response.response);
 }
 
+export type RoutingDecision = Schemas['RoutingDecision'];
+export type RoutingPreferences = Schemas['RoutingPreferences'];
+
+export type RoutingSimulationInput = Pick<
+  Schemas['PlaygroundRequest'],
+  'temperature' | 'max_output_tokens' | 'tools' | 'response_format'
+> & {
+  route: string;
+  surface: Schemas['Surface'];
+  mode: Schemas['TransportMode'];
+  preferences?: RoutingPreferences;
+  apiKeyId?: string | null;
+  seed?: string;
+};
+
+/**
+ * Explains routing against the published runtime without spending a provider
+ * call, which is what separates this from the playground. The endpoint accepts
+ * OLP's canonical operation envelope rather than a console request shape, and
+ * the generated contract types that field as an open object, so the envelope is
+ * assembled here and nowhere else, and `tests/system/configuration_http_postgres/routes.rs`
+ * pins the same payload from the backend side so a protocol change fails there
+ * rather than silently at runtime. The envelope is a generation request because
+ * that is what the playground composes; a route that serves only another
+ * operation will report no eligible attempt.
+ */
+export async function simulateRouting(
+  input: RoutingSimulationInput,
+  signal?: AbortSignal
+): Promise<RoutingDecision[]> {
+  const operation = {
+    operation: 'generation',
+    request: {
+      route: input.route,
+      // Provider validation requires a real message shape even for a dry run.
+      messages: [{ role: 'user', content: [{ type: 'text', text: 'Hello' }] }],
+      parameters: {
+        stream: false,
+        temperature: input.temperature,
+        max_output_tokens: input.max_output_tokens
+      },
+      tools: input.tools ?? [],
+      response_format: input.response_format
+    }
+  } as unknown as Schemas['SimulationRequest']['operation'];
+  const response = await apiClient.POST('/api/v3/routing/simulate', {
+    body: {
+      operation,
+      surface: input.surface,
+      mode: input.mode,
+      preferences: input.preferences,
+      api_key_id: input.apiKeyId ?? null,
+      seed: input.seed ?? ''
+    },
+    signal
+  });
+  return result(response.data, response.error, response.response);
+}
+
 export async function validateRoute(
   draft: RouteDraft
 ): Promise<RouteDraftValidation> {

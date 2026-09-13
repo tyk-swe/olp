@@ -1,12 +1,19 @@
 <script lang="ts">
   import RoutingPreferencesForm from '$lib/features/routes/RoutingPreferencesForm.svelte';
   import RoutingDecisions from '$lib/features/routes/RoutingDecisions.svelte';
+  import { decisionRows } from '$lib/features/routes/routingExplanation';
   let routing = $state('{}');
   import { routeKeys } from '$lib/features/routes/routeKeys';
 
   import { createMutation, createQuery } from '@tanstack/svelte-query';
   import { errorMessage } from '$lib/api/http';
-  import { listRoutes } from '$lib/features/routes/api';
+  import {
+    listRoutes,
+    simulateRouting,
+    type RoutingSimulationInput
+  } from '$lib/features/routes/api';
+  import { listApiKeys } from '$lib/features/access/api-keys/api';
+  import { apiKeyQueries } from '$lib/features/access/api-keys/apiKeyQueries';
   import {
     runPlayground,
     type PlaygroundRequest
@@ -38,7 +45,64 @@
     queryKey: routeKeys.all(),
     queryFn: ({ signal }) => listRoutes(signal)
   }));
+  const apiKeys = createQuery(() => ({
+    queryKey: apiKeyQueries.list(),
+    queryFn: ({ signal }) => listApiKeys(signal)
+  }));
   const mutation = createMutation(() => ({ mutationFn: runPlayground }));
+  const simulation = createMutation(() => ({
+    // Wrapped so the mutation context is not passed as the abort signal.
+    mutationFn: (input: RoutingSimulationInput) => simulateRouting(input)
+  }));
+
+  let simulateKeyId = $state('');
+  let simulateSeed = $state('');
+  let simulationError = $state('');
+
+  // A dry run is always the most recent action when it has data, because
+  // submitting a real test resets it.
+  const explanation = $derived(
+    simulation.data?.length
+      ? { dryRun: true, decisions: simulation.data }
+      : mutation.data?.routing?.length
+        ? { dryRun: false, decisions: mutation.data.routing }
+        : null
+  );
+
+  function requestControls() {
+    return {
+      temperature: parseTemperature(temperature),
+      max_output_tokens: parseMaxOutputTokens(maxOutputTokens),
+      tools: mode === 'tools' ? parseTools(toolsJson) : undefined,
+      response_format:
+        mode === 'structured' ? parseResponseSchema(schemaJson) : undefined
+    };
+  }
+
+  async function explain() {
+    simulationError = '';
+    if (!model.trim()) {
+      simulationError = 'Enter an active route slug.';
+      return;
+    }
+    try {
+      await simulation.mutateAsync({
+        route: model.trim(),
+        surface,
+        // Match the unary operation used by the playground endpoint.
+        mode: 'unary',
+        preferences: JSON.parse(routing),
+        ...requestControls(),
+        apiKeyId: simulateKeyId || null,
+        seed: simulateSeed
+      });
+    } catch (error) {
+      simulationError = errorMessage(
+        error,
+        'The routing explanation could not be produced.'
+      );
+    }
+  }
   const modes = [
     { value: 'text', label: 'Text' },
     { value: 'tools', label: 'Tools' },
@@ -48,6 +112,10 @@
   async function submit(event: SubmitEvent) {
     event.preventDefault();
     validationError = '';
+    // The run that follows produces its own explanation, so the dry run stops
+    // competing for the panel.
+    simulation.reset();
+    simulationError = '';
     if (!model.trim()) {
       validationError = 'Enter an active route slug.';
       return;
@@ -63,11 +131,7 @@
         model: model.trim(),
         input,
         surface,
-        temperature: parseTemperature(temperature),
-        max_output_tokens: parseMaxOutputTokens(maxOutputTokens),
-        tools: mode === 'tools' ? parseTools(toolsJson) : undefined,
-        response_format:
-          mode === 'structured' ? parseResponseSchema(schemaJson) : undefined
+        ...requestControls()
       };
     } catch (error) {
       validationError = errorMessage(error, 'Check the request fields.');
@@ -219,6 +283,54 @@
     {#if validationError}<p class="field-error" role="alert">
         {validationError}
       </p>{/if}
+    <details class="dry-run">
+      <summary>Explain routing without running</summary>
+      <p class="dry-run-help">
+        Ranks the attempts the published runtime would make for a generation on
+        this route, honouring circuit-breaker state, without sending a request
+        to any provider. Nothing is billed and no prompt is needed.
+      </p>
+      <div class="route-grid">
+        <div class="form-field">
+          <label for="playground-simulate-key">Evaluate as API key</label
+          ><select
+            id="playground-simulate-key"
+            bind:value={simulateKeyId}
+            aria-describedby="simulate-key-help"
+          >
+            <option value="">No key restriction</option>
+            {#each apiKeys.data ?? [] as key (key.id)}
+              {#if !key.revoked_at}<option value={key.id}>{key.name}</option
+                >{/if}
+            {/each}
+          </select><small id="simulate-key-help"
+            >Applies that key's route allowlist and scopes to the explanation.</small
+          >
+        </div>
+        <div class="form-field">
+          <label for="playground-simulate-seed">Seed</label><input
+            id="playground-simulate-seed"
+            bind:value={simulateSeed}
+            autocomplete="off"
+            maxlength="256"
+            placeholder="Any stable value"
+            aria-describedby="simulate-seed-help"
+          /><small id="simulate-seed-help"
+            >Fixes weighted tie-breaks so the order is reproducible.</small
+          >
+        </div>
+      </div>
+      {#if simulationError}<p class="field-error" role="alert">
+          {simulationError}
+        </p>{/if}
+      <button
+        class="button button-secondary"
+        type="button"
+        disabled={simulation.isPending}
+        onclick={explain}
+        >{simulation.isPending ? 'Explaining…' : 'Explain routing'}</button
+      >
+    </details>
     <button
       class="button button-primary"
       type="submit"
@@ -327,12 +439,35 @@
   </section>
 </div>
 
-{#if mutation.data?.routing?.length}<section class="card composer">
+{#if explanation}<section class="card composer">
     <h2>Routing explanation</h2>
-    <RoutingDecisions decisions={mutation.data.routing} />
+    <p class="explanation-source">
+      {explanation.dryRun
+        ? 'Dry run against the published runtime. No provider request was sent.'
+        : 'From the request that just ran.'}
+    </p>
+    <RoutingDecisions rows={decisionRows(explanation.decisions)} />
   </section>{/if}
 
 <style>
+  .explanation-source {
+    margin: 0 0 1rem;
+    color: var(--foreground-muted);
+    font-size: var(--text-caption);
+  }
+  .dry-run {
+    margin-top: 1rem;
+    padding-top: 0.75rem;
+    border-top: 1px solid var(--border-hairline);
+  }
+  .dry-run summary {
+    cursor: pointer;
+  }
+  .dry-run-help {
+    margin: 0.5rem 0 0;
+    color: var(--foreground-muted);
+    font-size: var(--text-caption);
+  }
   .privacy-note {
     display: flex;
     align-items: flex-start;

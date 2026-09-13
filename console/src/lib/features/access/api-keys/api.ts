@@ -2,6 +2,7 @@ import type { components } from '$lib/api/schema';
 import { apiClient } from '$lib/api/client';
 import { ApiProblem, pageResult, result } from '$lib/api/http';
 import { type CursorPage } from '$lib/api/http';
+import { collectCursorPages } from '$lib/api/pagination';
 
 type Schemas = components['schemas'];
 
@@ -33,6 +34,11 @@ export async function hasNonrevokedApiKey(
     }
   } while (cursor);
   return false;
+}
+
+/** Every key, for pickers that must offer the whole inventory at once. */
+export async function listApiKeys(signal?: AbortSignal): Promise<ApiKey[]> {
+  return collectCursorPages((cursor) => listApiKeyPage(cursor, signal));
 }
 
 export async function listApiKeyPage(

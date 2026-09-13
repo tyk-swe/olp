@@ -15,3 +15,16 @@ export function isLimitsOutagePolicy(
 ): value is LimitsOutagePolicy {
   return (LIMITS_OUTAGE_POLICIES as readonly string[]).includes(value);
 }
+
+/** Retention keys the control API validates as whole days in 1..=3650. */
+export const RETENTION_KEYS = [
+  'retention.requests_days',
+  'retention.usage_days',
+  'retention.audit_days'
+] as const;
+export const RETENTION_MIN_DAYS = 1;
+export const RETENTION_MAX_DAYS = 3650;
+
+export function isRetentionKey(key: string): boolean {
+  return (RETENTION_KEYS as readonly string[]).includes(key);
+}

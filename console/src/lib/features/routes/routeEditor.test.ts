@@ -10,6 +10,8 @@ import {
   operationOptions,
   routeEligibilityWarnings,
   surfacesFor,
+  storedTargetLabel,
+  targetUnavailable,
   toRouteModelOptions,
   validateRouteEditor,
   type EditableTarget,
@@ -303,5 +305,43 @@ describe('Route Studio API payloads', () => {
         }
       ]
     });
+  });
+});
+
+describe('stored target availability', () => {
+  it('only applies stored facts to the original model, including after reselecting it', () => {
+    const edited: EditableTarget = {
+      ...target,
+      stored: {
+        providerModelId: target.providerModelId,
+        available: false,
+        providerName: 'Disabled provider',
+        providerModel: 'Old model'
+      }
+    };
+    expect(targetUnavailable(edited)).toBe(true);
+    expect(storedTargetLabel(edited)).toBe('Disabled provider · Old model');
+
+    edited.providerModelId = 'model-b';
+    expect(targetUnavailable(edited)).toBe(false);
+    expect(storedTargetLabel(edited)).toBe('Unknown model');
+
+    edited.providerModelId = target.providerModelId;
+    expect(targetUnavailable(edited)).toBe(true);
+  });
+
+  it('does not mark new or available stored targets unavailable', () => {
+    expect(targetUnavailable(target)).toBe(false);
+    expect(
+      targetUnavailable({
+        ...target,
+        stored: {
+          providerModelId: target.providerModelId,
+          available: true,
+          providerName: 'Primary',
+          providerModel: 'Model A'
+        }
+      })
+    ).toBe(false);
   });
 });

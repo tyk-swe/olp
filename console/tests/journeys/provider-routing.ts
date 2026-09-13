@@ -109,8 +109,10 @@ export async function verifyProviderRouting(page: Page, info: TestInfo) {
   await expect(policy.getByText(/Routing policy staged/)).toBeVisible();
   await page.getByRole('button', { name: 'Simulate order' }).click();
   const explanation = page.getByLabel('Routing explanation');
+  // Excluded targets are now listed alongside attempted ones, so more than one
+  // row can carry the same exclusion reason.
   await expect(
-    explanation.getByText('provider not allowed', { exact: true })
+    explanation.getByText('provider not allowed', { exact: true }).first()
   ).toBeVisible();
   await expect(explanation.getByText(/^Attempt 2/)).toBeVisible();
   await explanation.screenshot({

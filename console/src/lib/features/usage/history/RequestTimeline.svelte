@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { resolve } from '$app/paths';
+
   import { errorMessage } from '$lib/api/http';
 
   import {
@@ -85,6 +87,9 @@
       <strong class:unpriced={detail.data.unpriced}
         >{formatCost(detail.data.estimated_cost, detail.data.currency)}</strong
       >
+      {#if detail.data.unpriced}<small class="unpriced"
+          >Unpriced — no published price covered part of this request.</small
+        >{/if}
       {#if detail.data.estimated_cost != null}<details>
           <summary>Exact amount</summary>
           <p>{detail.data.estimated_cost} {detail.data.currency ?? ''}</p>
@@ -162,11 +167,17 @@
         <p class="eyebrow">Upstream</p>
         <h2 id="attempts-title">Attempt timeline</h2>
       </div>
-      <span class="badge">{detail.data.attempts.length} attempts</span>
+      <span class="badge">{detail.data.attempt_count} attempts</span>
     </div>
     {#if detail.data.attempts.length === 0}
       <div class="card empty-state">No attempt metadata was recorded.</div>
     {:else}
+      {#if detail.data.attempts.length < detail.data.attempt_count}
+        <p class="partial-attempts" role="status">
+          Showing {detail.data.attempts.length} of {detail.data.attempt_count} attempts.
+          The rest were not recorded or have been retained out.
+        </p>
+      {/if}
       <ol class="timeline">
         {#each detail.data.attempts as attempt (attempt.id)}
           <li class="card">
@@ -175,9 +186,13 @@
             >
             <div class="attempt-heading">
               <div>
-                <strong>{attempt.provider_name}</strong><span class="mono"
-                  >{attempt.upstream_model}</span
-                >
+                <strong
+                  ><a
+                    class="provider-link"
+                    href={resolve(`/providers/${attempt.provider_id}`)}
+                    >{attempt.provider_name}</a
+                  ></strong
+                ><span class="mono">{attempt.upstream_model}</span>
               </div>
               <span
                 class="badge {statusTone(
@@ -231,7 +246,23 @@
                       {attempt.routing.policy.strategy} · {attempt.routing
                         .policy.digest}
                     </dd>
+                  </div>
+                  <div>
+                    <dt>Vendor pin</dt>
+                    <dd class="mono">
+                      {attempt.routing.policy.vendor_id ?? 'Any vendor'}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>Pricing snapshot pinned</dt>
+                    <dd>
+                      {attempt.routing.policy.pricing_pinned ? 'Yes' : 'No'}
+                    </dd>
                   </div>{/if}
+                <div>
+                  <dt>Transport mode</dt>
+                  <dd>{attempt.routing.mode ?? 'Not recorded'}</dd>
+                </div>
                 <div>
                   <dt>Credential slot</dt>
                   <dd class="mono">
@@ -262,6 +293,12 @@
                     {attempt.routing.first_output_ms == null
                       ? 'Unknown'
                       : `${attempt.routing.first_output_ms} ms`}
+                  </dd>
+                </div>
+                <div>
+                  <dt>Streamed output tokens</dt>
+                  <dd>
+                    {formatInteger(attempt.routing.streamed_output_tokens)}
                   </dd>
                 </div>
               </dl>
@@ -351,6 +388,16 @@
   .unpriced {
     color: var(--warning);
   }
+  small.unpriced {
+    display: block;
+    margin-top: 0.3rem;
+    font-size: var(--text-caption);
+  }
+  .partial-attempts {
+    margin: 0.75rem 0 0;
+    color: var(--warning);
+    font-size: var(--text-caption);
+  }
 
   .request-facts {
     margin-top: 1rem;
@@ -431,6 +478,15 @@
     margin-top: 0.15rem;
     color: var(--foreground-muted);
     font-size: 0.78rem;
+  }
+  .provider-link {
+    text-decoration: underline;
+    text-decoration-color: var(--border-strong);
+    text-underline-offset: 4px;
+    transition: text-decoration-color var(--motion);
+  }
+  .provider-link:hover {
+    text-decoration-color: currentColor;
   }
   .timeline dl {
     grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));

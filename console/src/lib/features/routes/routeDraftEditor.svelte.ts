@@ -319,7 +319,13 @@ export class RouteDraftEditorState {
         providerModelId: target.provider_model_id,
         priority: target.priority,
         weight: target.weight,
-        timeoutMs: target.timeout_ms
+        timeoutMs: target.timeout_ms,
+        stored: {
+          providerModelId: target.provider_model_id,
+          available: target.available,
+          providerName: target.provider_name,
+          providerModel: target.provider_model
+        }
       }));
     });
     $effect(() => {

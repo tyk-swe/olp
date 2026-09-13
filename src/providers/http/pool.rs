@@ -38,6 +38,10 @@ pub(crate) struct SlotHealth {
     pub active_credential_version_id: Option<Uuid>,
     pub cooling_down: Option<bool>,
     pub usage: Option<crate::limits::admission::ProviderQuotaUsage>,
+    /// True when the credential version this slot would present has been
+    /// revoked. Selection refuses a revoked version, so the slot cannot serve
+    /// traffic until a replacement secret is staged and activated.
+    pub revoked: bool,
 }
 async fn slot_list(
     state: &ManagementState,
@@ -47,12 +51,22 @@ async fn slot_list(
     let items = crate::providers::pool_store::list(&state.request_boundary.pool, provider)
         .await
         .map_err(map_configuration)?;
-    let rows = sqlx::query_as::<_, (Uuid, Option<chrono::DateTime<chrono::Utc>>, Option<Uuid>)>(
+    let rows = sqlx::query_as::<
+        _,
+        (
+            Uuid,
+            Option<chrono::DateTime<chrono::Utc>>,
+            Option<Uuid>,
+            bool,
+        ),
+    >(
         "SELECT s.id,CASE WHEN s.is_default AND s.enabled AND p.last_probe_status='succeeded' \
             THEN p.last_probe_at WHEN NOT s.is_default THEN s.validated_at \
-            END,pc.credential_version_id FROM provider_credential_slots s JOIN providers p ON \
-            p.id=s.provider_id LEFT JOIN provider_revision_credentials pc ON \
-            pc.provider_revision_id=p.active_revision_id AND pc.slot_id=s.id WHERE s.provider_id=$1",
+            END,pc.credential_version_id,v.revoked_at IS NOT NULL FROM provider_credential_slots s \
+            JOIN providers p ON p.id=s.provider_id LEFT JOIN provider_revision_credentials pc ON \
+            pc.provider_revision_id=p.active_revision_id AND pc.slot_id=s.id LEFT JOIN \
+            provider_credential_versions v ON \
+            v.id=COALESCE(pc.credential_version_id,s.selected_version_id) WHERE s.provider_id=$1",
     )
     .bind(provider)
     .fetch_all(&state.request_boundary.pool)
@@ -62,7 +76,7 @@ async fn slot_list(
     let backend = backend.as_deref();
     let items_ref = &items;
     let slot_health = rows.into_iter().map(
-        |(id, validated_at, active_credential_version_id)| async move {
+        |(id, validated_at, active_credential_version_id, revoked)| async move {
             let (cooling_down, usage) = match backend {
                 Some(backend) => {
                     let selected = items_ref
@@ -97,6 +111,7 @@ async fn slot_list(
                     active_credential_version_id,
                     cooling_down,
                     usage,
+                    revoked,
                 },
             )
         },

@@ -2,7 +2,9 @@
   import { resolve } from '$app/paths';
   import {
     eligibleTargetTuples,
-    missingTargetOperations
+    missingTargetOperations,
+    storedTargetLabel,
+    targetUnavailable
   } from '$lib/features/routes/routeEditor';
   import type { RouteDraftEditorState } from '$lib/features/routes/routeDraftEditor.svelte';
   let { editor }: { editor: RouteDraftEditorState } = $props();
@@ -40,7 +42,10 @@
               bind:value={target.providerModelId}
               onchange={editor.touch}
               disabled={!editor.canManage}
-              >{#each editor.modelOptions as option (option.id)}<option
+              >{#if !editor.modelOptions.some((option) => option.id === target.providerModelId)}<option
+                  value={target.providerModelId}
+                  >{storedTargetLabel(target)} — unavailable</option
+                >{/if}{#each editor.modelOptions as option (option.id)}<option
                   value={option.id}>{option.label}</option
                 >{/each}</select
             >
@@ -86,13 +91,19 @@
           disabled={!editor.canManage}>×</button
         >
         <div
-          class:warning={missingTargetOperations(
-            target,
-            editor.modelOptions,
-            editor.operations
-          ).length > 0}
+          class:warning={targetUnavailable(target) ||
+            missingTargetOperations(
+              target,
+              editor.modelOptions,
+              editor.operations
+            ).length > 0}
           class="target-eligibility"
         >
+          {#if targetUnavailable(target)}<span
+              ><strong>Unavailable:</strong> the connection was disabled, or this
+              model left its activated revision. The target stays in the route until
+              you remove it.</span
+            >{/if}
           {#if eligibleTargetTuples(target, editor.modelOptions, editor.operations).length}
             <span
               ><strong>Certified tuples:</strong>

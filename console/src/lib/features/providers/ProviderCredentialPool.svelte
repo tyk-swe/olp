@@ -150,12 +150,17 @@
             Weight {slot.weight}</span
           >{#if pool.data?.health?.[slot.id]}{@const health =
               pool.data.health[slot.id]}<small
-              >{health.active_credential_version_id ===
-                slot.credential_version_id && slot.credential_version_id
-                ? 'Active'
-                : health.active_credential_version_id
-                  ? 'Change staged'
-                  : 'Draft'} · {health.cooling_down
+              ><span class:revoked={health.revoked}
+                >{health.revoked
+                  ? 'Revoked — stage a replacement secret'
+                  : health.active_credential_version_id ===
+                        slot.credential_version_id && slot.credential_version_id
+                    ? 'Active'
+                    : health.active_credential_version_id
+                      ? 'Change staged'
+                      : 'Draft'}</span
+              >
+              · {health.cooling_down
                 ? 'Cooling down'
                 : health.cooling_down === false
                   ? 'Available'
@@ -292,6 +297,9 @@
   .pool {
     padding: 1.5rem;
     margin-top: 1.5rem;
+  }
+  .revoked {
+    color: var(--warning);
   }
   p,
   span,
