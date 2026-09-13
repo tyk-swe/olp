@@ -31,7 +31,7 @@ jobs:
       - run: ./scripts/check-go-contracts.sh
       - run: pnpm --dir console exec playwright install --with-deps chromium
       - run: ./scripts/go-without-rust.sh make go-integration
-      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:
           name: go-access-browser
@@ -55,7 +55,7 @@ jobs:
           docker build --progress=plain --platform linux/${{ matrix.arch }} -f deploy/go.Dockerfile -t olp-go:candidate . 2>&1 | tee .local/evidence/build.log
       - name: Qualify native candidate
         run: ./scripts/go-image-smoke.sh olp-go:candidate ${{ matrix.arch }} 2>&1 | tee .local/evidence/smoke.log
-      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:
           name: go-native-${{ matrix.arch }}
