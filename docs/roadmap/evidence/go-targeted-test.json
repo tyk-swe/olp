@@ -1,0 +1,115 @@
+{
+  "language": "go",
+  "scenario": "targeted-test",
+  "ref": "working",
+  "started": "2026-09-13T07:48:24.343Z",
+  "machine": {
+    "platform": "linux",
+    "release": "7.0.0-31-generic",
+    "arch": "x64",
+    "cpu": "Intel Core Processor (Haswell, no TSX)",
+    "logicalCPUs": 8,
+    "memoryBytes": 24598114304,
+    "freeMemoryBytes": 17877217280
+  },
+  "cache": {
+    "downloads": "prefetched; measured separately",
+    "compilation": "private cache populated by explicit warmup",
+    "sharedOSPageCache": true
+  },
+  "runs": [
+    {
+      "command": [
+        "go",
+        "test",
+        "-count=1",
+        "./internal/protocols/sse"
+      ],
+      "seconds": 0.6358322929999994,
+      "status": 0,
+      "log": "run-1.log"
+    },
+    {
+      "command": [
+        "go",
+        "test",
+        "-count=1",
+        "./internal/protocols/sse"
+      ],
+      "seconds": 0.6421258099999977,
+      "status": 0,
+      "log": "run-2.log"
+    },
+    {
+      "command": [
+        "go",
+        "test",
+        "-count=1",
+        "./internal/protocols/sse"
+      ],
+      "seconds": 0.6533845870000005,
+      "status": 0,
+      "log": "run-3.log"
+    },
+    {
+      "command": [
+        "go",
+        "test",
+        "-count=1",
+        "./internal/protocols/sse"
+      ],
+      "seconds": 0.6803756429999994,
+      "status": 0,
+      "log": "run-4.log"
+    },
+    {
+      "command": [
+        "go",
+        "test",
+        "-count=1",
+        "./internal/protocols/sse"
+      ],
+      "seconds": 0.6348539789999995,
+      "status": 0,
+      "log": "run-5.log"
+    }
+  ],
+  "sourceSHA256": "d2a8dbca81492fd01eb6dacca5e56f85808d4a449e16d4b879a0fd39eb51d294",
+  "baseCommit": "37de4ee41536094feb802af7adf3ca416cecc81c",
+  "toolchains": {
+    "go": "go version go1.27.1 linux/amd64",
+    "cc": "cc (Ubuntu 15.2.0-16ubuntu1) 15.2.0\nCopyright (C) 2025 Free Software Foundation, Inc.\nThis is free software; see the source for copying conditions.  There is NO\nwarranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.",
+    "node": "v26.8.1",
+    "pnpm": "11.24.0"
+  },
+  "prefetch": {
+    "command": [
+      "go",
+      "mod",
+      "download"
+    ],
+    "seconds": 0.024420863000000053,
+    "status": 0,
+    "stdout": "",
+    "stderr": ""
+  },
+  "warmup": {
+    "command": [
+      "go",
+      "test",
+      "-count=1",
+      "./internal/protocols/sse"
+    ],
+    "seconds": 17.422099436999996,
+    "status": 0,
+    "stdout": "ok  \tgithub.com/tyk-swe/olp/internal/protocols/sse\t0.061s\n",
+    "stderr": ""
+  },
+  "summary": {
+    "successfulRuns": 5,
+    "medianSeconds": 0.6421258099999977,
+    "minSeconds": 0.6348539789999995,
+    "maxSeconds": 0.6803756429999994
+  },
+  "finished": "2026-09-13T07:48:47.024Z"
+}

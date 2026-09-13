@@ -5,6 +5,21 @@ script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 console_dir=$(cd -- "$script_dir/../.." && pwd)
 repo_dir=$(cd -- "$console_dir/.." && pwd)
 
+if [[ ${OLP_CONSOLE_E2E_BACKEND:-rust} == go ]]; then
+  if [[ -n ${OLP_CONSOLE_E2E_IMAGE:-} ]]; then
+    echo 'Use scripts/go-image-smoke.sh for Go image qualification' >&2
+    exit 64
+  fi
+  olp_bin=${OLP_CONSOLE_E2E_BIN:-$repo_dir/.local/bin/olp}
+  [[ $olp_bin == /* ]] || olp_bin="$repo_dir/$olp_bin"
+  if [[ -z ${OLP_CONSOLE_E2E_BIN:-} ]]; then
+    (cd -- "$repo_dir"; mkdir -p .local/bin; go build -o "$olp_bin" ./cmd/olp)
+  fi
+  [[ -x $olp_bin ]] || { echo 'Go console binary is missing' >&2; exit 1; }
+  cd -- "$repo_dir"
+  exec "$olp_bin" all
+fi
+
 if [[ -n ${OLP_CONSOLE_E2E_IMAGE:-} ]]; then
   # shellcheck source=scripts/lib/image-container.sh
   source "$repo_dir/scripts/lib/image-container.sh"

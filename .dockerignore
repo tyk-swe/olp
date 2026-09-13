@@ -47,7 +47,6 @@ console/playwright-report
 console/test-results
 console/tests
 console/src/lib/api/schema.d.ts
-openapi/management.json
 deploy/helm
 deploy/secrets
 docs

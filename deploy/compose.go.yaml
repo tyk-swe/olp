@@ -1,0 +1,32 @@
+name: olp-go-dev
+services:
+  postgres:
+    image: postgres:18
+    environment:
+      POSTGRES_USER: olp_go
+      POSTGRES_PASSWORD: olp-go-local
+      POSTGRES_DB: olp_go
+    ports:
+      - '127.0.0.1:${OLP_GO_POSTGRES_PORT:-54321}:5432'
+    volumes:
+      - postgres-go:/var/lib/postgresql
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U olp_go -d olp_go']
+      interval: 1s
+      timeout: 3s
+      retries: 60
+  valkey:
+    image: valkey/valkey:9
+    command: ['valkey-server', '--appendonly', 'yes', '--requirepass', 'olp-go-local']
+    ports:
+      - '127.0.0.1:${OLP_GO_VALKEY_PORT:-63791}:6379'
+    volumes:
+      - valkey-go:/data
+    healthcheck:
+      test: ['CMD', 'valkey-cli', '-a', 'olp-go-local', 'ping']
+      interval: 1s
+      timeout: 3s
+      retries: 60
+volumes:
+  postgres-go:
+  valkey-go:

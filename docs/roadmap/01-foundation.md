@@ -2,7 +2,11 @@
 
 [Roadmap](README.md) | [Next: access and control](02-access-and-control.md)
 
-**Status:** Not started. **Prerequisites:** None.
+**Status:** Implemented; native arm64 qualification pending. **Prerequisites:** None.
+
+[Implementation and decisions](evidence/foundation.md) ·
+[Validation and measurements](evidence/validation.md) ·
+[Frozen operation inventory](evidence/management-operations.md)
 
 Establish a small, runnable Go application and prove the build path before
 porting features. This milestone produces the measurements, contracts, and
@@ -12,7 +16,7 @@ test infrastructure used by the remaining six milestones.
 
 ### M1-01
 
-- [ ] **Freeze the behavioral reference and capability inventory.**
+- [x] **Freeze the behavioral reference and capability inventory.**
 
 **Depends on:** None.
 
@@ -32,7 +36,7 @@ Preserve JSON/SSE fixtures independently of their Rust runners.
 
 ### M1-02
 
-- [ ] **Record reproducible build and dependency baselines.**
+- [x] **Record reproducible build and dependency baselines.**
 
 **Depends on:** [M1-01](#m1-01).
 
@@ -51,7 +55,7 @@ with their counting definitions. Missing results remain explicitly unmeasured.
 
 ### M1-03
 
-- [ ] **Create the Go module and dependency boundaries.**
+- [x] **Create the Go module and dependency boundaries.**
 
 **Depends on:** [M1-01](#m1-01).
 
@@ -71,7 +75,7 @@ Each nonstandard dependency has a documented use and build impact.
 
 ### M1-04
 
-- [ ] **Implement configuration, process composition, and listeners.**
+- [x] **Implement configuration, process composition, and listeners.**
 
 **Depends on:** [M1-03](#m1-03).
 
@@ -94,6 +98,10 @@ deadline. Unimplemented commands return an explicit error.
 
 - [ ] **Qualify PostgreSQL and GLIDE integration.**
 
+Implemented and qualified on native amd64, including TLS and repeated
+cancel/close regression checks under the race detector. Native arm64 build/link
+execution remains pending in the [architecture job](../../.github/workflows/go-foundation.yml).
+
 **Depends on:** [M1-03](#m1-03), [M1-04](#m1-04).
 
 **Deliver:** Add concrete pgx/GLIDE client lifecycle code and disposable-service
@@ -113,7 +121,7 @@ later reservation and ingestion code can handle retries safely.
 
 ### M1-06
 
-- [ ] **Make management contracts independent of gateway compilation.**
+- [x] **Make management contracts independent of gateway compilation.**
 
 **Depends on:** [M1-01](#m1-01), [M1-03](#m1-03).
 
@@ -139,7 +147,7 @@ an M7 gate; placeholder handlers must never return a fabricated success.
 
 ### M1-07
 
-- [ ] **Create reusable Go behavioral and process harnesses.**
+- [x] **Create reusable Go behavioral and process harnesses.**
 
 **Depends on:** [M1-03](#m1-03), [M1-05](#m1-05), [M1-06](#m1-06).
 
@@ -161,7 +169,7 @@ own milestones; a fixture scaffold alone does not count as protocol parity.
 
 ### M1-08
 
-- [ ] **Provide a complete Go development workflow.**
+- [x] **Provide a complete Go development workflow.**
 
 **Depends on:** [M1-04](#m1-04), [M1-06](#m1-06), [M1-07](#m1-07).
 
@@ -182,6 +190,10 @@ fast; service and browser suites have explicit integration entrypoints.
 ### M1-09
 
 - [ ] **Build and smoke-test the first native Go images.**
+
+The native amd64 candidate passes all four mode checks without a Rust toolchain.
+Both native CI runners are configured; this workspace cannot execute the arm64
+job. This ticket and the milestone remain open until its build/smoke artifact passes.
 
 **Depends on:** [M1-02](#m1-02), [M1-05](#m1-05), [M1-08](#m1-08).
 

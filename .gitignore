@@ -33,7 +33,6 @@ Thumbs.db
 /.codex/runtime/
 /.claude/settings.local.json
 
-/openapi/management.json
 /console/src/lib/api/schema.d.ts
 /.local/
 

@@ -1,0 +1,106 @@
+{
+  "language": "rust",
+  "scenario": "backend-clean",
+  "ref": "6c21dfb917c9019161348ea24b532a77b6612e6e",
+  "started": "2026-09-13T07:22:51.341Z",
+  "machine": {
+    "platform": "linux",
+    "release": "7.0.0-31-generic",
+    "arch": "x64",
+    "cpu": "Intel Core Processor (Haswell, no TSX)",
+    "logicalCPUs": 8,
+    "memoryBytes": 24598114304,
+    "freeMemoryBytes": 22476980224
+  },
+  "cache": {
+    "downloads": "prefetched; measured separately",
+    "compilation": "empty private cache for every run",
+    "sharedOSPageCache": true
+  },
+  "runs": [
+    {
+      "command": [
+        "cargo",
+        "build",
+        "--locked",
+        "--bin",
+        "olp"
+      ],
+      "seconds": 234.55152064199999,
+      "status": 0,
+      "log": "run-1.log"
+    },
+    {
+      "command": [
+        "cargo",
+        "build",
+        "--locked",
+        "--bin",
+        "olp"
+      ],
+      "seconds": 228.06198349299999,
+      "status": 0,
+      "log": "run-2.log"
+    },
+    {
+      "command": [
+        "cargo",
+        "build",
+        "--locked",
+        "--bin",
+        "olp"
+      ],
+      "seconds": 227.03547124700003,
+      "status": 0,
+      "log": "run-3.log"
+    },
+    {
+      "command": [
+        "cargo",
+        "build",
+        "--locked",
+        "--bin",
+        "olp"
+      ],
+      "seconds": 226.766314242,
+      "status": 0,
+      "log": "run-4.log"
+    },
+    {
+      "command": [
+        "cargo",
+        "build",
+        "--locked",
+        "--bin",
+        "olp"
+      ],
+      "seconds": 231.85191602700004,
+      "status": 0,
+      "log": "run-5.log"
+    }
+  ],
+  "commit": "6c21dfb917c9019161348ea24b532a77b6612e6e",
+  "toolchains": {
+    "rustc": "rustc 1.98.1 (48a229cea 2026-09-01)",
+    "cargo": "cargo 1.98.1 (797e8a9bc 2026-08-05)",
+    "cc": "cc (Ubuntu 15.2.0-16ubuntu1) 15.2.0\nCopyright (C) 2025 Free Software Foundation, Inc.\nThis is free software; see the source for copying conditions.  There is NO\nwarranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE."
+  },
+  "prefetch": {
+    "command": [
+      "cargo",
+      "fetch",
+      "--locked"
+    ],
+    "seconds": 0.613735535,
+    "status": 0,
+    "stdout": "",
+    "stderr": ""
+  },
+  "summary": {
+    "successfulRuns": 5,
+    "medianSeconds": 228.06198349299999,
+    "minSeconds": 226.766314242,
+    "maxSeconds": 234.55152064199999
+  },
+  "finished": "2026-09-13T07:42:04.787Z"
+}

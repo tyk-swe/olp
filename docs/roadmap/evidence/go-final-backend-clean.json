@@ -1,0 +1,113 @@
+{
+  "language": "go",
+  "scenario": "backend-clean",
+  "ref": "working",
+  "started": "2026-09-13T07:54:07.743Z",
+  "machine": {
+    "platform": "linux",
+    "release": "7.0.0-31-generic",
+    "arch": "x64",
+    "cpu": "Intel Core Processor (Haswell, no TSX)",
+    "logicalCPUs": 8,
+    "memoryBytes": 24598114304,
+    "freeMemoryBytes": 21997641728
+  },
+  "cache": {
+    "downloads": "prefetched; measured separately",
+    "compilation": "empty private cache for every run",
+    "sharedOSPageCache": true
+  },
+  "runs": [
+    {
+      "command": [
+        "go",
+        "build",
+        "-trimpath",
+        "-o",
+        "/tmp/olp-build-t4hJvr/olp",
+        "./cmd/olp"
+      ],
+      "seconds": 30.886217329000004,
+      "status": 0,
+      "log": "run-1.log"
+    },
+    {
+      "command": [
+        "go",
+        "build",
+        "-trimpath",
+        "-o",
+        "/tmp/olp-build-t4hJvr/olp",
+        "./cmd/olp"
+      ],
+      "seconds": 28.777959264999996,
+      "status": 0,
+      "log": "run-2.log"
+    },
+    {
+      "command": [
+        "go",
+        "build",
+        "-trimpath",
+        "-o",
+        "/tmp/olp-build-t4hJvr/olp",
+        "./cmd/olp"
+      ],
+      "seconds": 28.181070133999995,
+      "status": 0,
+      "log": "run-3.log"
+    },
+    {
+      "command": [
+        "go",
+        "build",
+        "-trimpath",
+        "-o",
+        "/tmp/olp-build-t4hJvr/olp",
+        "./cmd/olp"
+      ],
+      "seconds": 29.445563009000004,
+      "status": 0,
+      "log": "run-4.log"
+    },
+    {
+      "command": [
+        "go",
+        "build",
+        "-trimpath",
+        "-o",
+        "/tmp/olp-build-t4hJvr/olp",
+        "./cmd/olp"
+      ],
+      "seconds": 28.437825418000006,
+      "status": 0,
+      "log": "run-5.log"
+    }
+  ],
+  "sourceSHA256": "ec8e90073a26ff55293026eb7ba0ac34c365f612e4413ee097309259bb459af2",
+  "baseCommit": "37de4ee41536094feb802af7adf3ca416cecc81c",
+  "toolchains": {
+    "go": "go version go1.27.1 linux/amd64",
+    "cc": "cc (Ubuntu 15.2.0-16ubuntu1) 15.2.0\nCopyright (C) 2025 Free Software Foundation, Inc.\nThis is free software; see the source for copying conditions.  There is NO\nwarranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.",
+    "node": "v26.8.1",
+    "pnpm": "11.24.0"
+  },
+  "prefetch": {
+    "command": [
+      "go",
+      "mod",
+      "download"
+    ],
+    "seconds": 0.016899451,
+    "status": 0,
+    "stdout": "",
+    "stderr": ""
+  },
+  "summary": {
+    "successfulRuns": 5,
+    "medianSeconds": 28.777959264999996,
+    "minSeconds": 28.181070133999995,
+    "maxSeconds": 30.886217329000004
+  },
+  "finished": "2026-09-13T07:56:35.660Z"
+}

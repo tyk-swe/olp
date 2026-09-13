@@ -1,0 +1,132 @@
+#0 building with "default" instance using docker driver
+
+#1 [internal] load build definition from go.Dockerfile
+#1 transferring dockerfile: 2.31kB done
+#1 DONE 0.0s
+
+#2 resolve image config for docker-image://docker.io/docker/dockerfile:1
+#2 DONE 0.5s
+
+#3 docker-image://docker.io/docker/dockerfile:1@sha256:ecfaec9ed6d810b56388c508f4121597bfbba70d41a6dfeee4d8cad5f295fc32
+#3 resolve docker.io/docker/dockerfile:1@sha256:ecfaec9ed6d810b56388c508f4121597bfbba70d41a6dfeee4d8cad5f295fc32 0.0s done
+#3 CACHED
+
+#4 [internal] load metadata for gcr.io/distroless/cc-debian13:nonroot@sha256:c31ff9abcb1910f3ab25c7957bdaf0bfe12a01eb546e8df2282f1c8f682b606c
+#4 ...
+
+#5 [internal] load metadata for docker.io/library/node:26-alpine@sha256:2d984a15c9b54fd0aeb608b8e0d0d83529eb34d2966db27a1fb4f1edc3d298a3
+#5 DONE 0.0s
+
+#6 [internal] load metadata for docker.io/library/golang:1.27.1-trixie@sha256:9baa6b4187bbb98d240372a8a235ac0bb6b5ddd52bba1431dc2f7c0705862728
+#6 DONE 0.0s
+
+#4 [internal] load metadata for gcr.io/distroless/cc-debian13:nonroot@sha256:c31ff9abcb1910f3ab25c7957bdaf0bfe12a01eb546e8df2282f1c8f682b606c
+#4 DONE 0.2s
+
+#7 [internal] load .dockerignore
+#7 transferring context: 780B done
+#7 DONE 0.0s
+
+#8 [stage-2 1/5] FROM gcr.io/distroless/cc-debian13:nonroot@sha256:c31ff9abcb1910f3ab25c7957bdaf0bfe12a01eb546e8df2282f1c8f682b606c
+#8 resolve gcr.io/distroless/cc-debian13:nonroot@sha256:c31ff9abcb1910f3ab25c7957bdaf0bfe12a01eb546e8df2282f1c8f682b606c 0.0s done
+#8 DONE 0.0s
+
+#9 [console-build  1/10] FROM docker.io/library/node:26-alpine@sha256:2d984a15c9b54fd0aeb608b8e0d0d83529eb34d2966db27a1fb4f1edc3d298a3
+#9 resolve docker.io/library/node:26-alpine@sha256:2d984a15c9b54fd0aeb608b8e0d0d83529eb34d2966db27a1fb4f1edc3d298a3 0.0s done
+#9 DONE 0.0s
+
+#10 [go-build  1/11] FROM docker.io/library/golang:1.27.1-trixie@sha256:9baa6b4187bbb98d240372a8a235ac0bb6b5ddd52bba1431dc2f7c0705862728
+#10 resolve docker.io/library/golang:1.27.1-trixie@sha256:9baa6b4187bbb98d240372a8a235ac0bb6b5ddd52bba1431dc2f7c0705862728 0.0s done
+#10 DONE 0.0s
+
+#11 [internal] load build context
+#11 transferring context: 164.57kB 0.1s done
+#11 DONE 0.1s
+
+#12 [go-build  4/11] COPY go.mod go.sum ./
+#12 CACHED
+
+#13 [go-build  5/11] RUN go mod download
+#13 CACHED
+
+#14 [go-build  2/11] WORKDIR /src
+#14 CACHED
+
+#15 [go-build  3/11] RUN test "$(go env GOARCH)" = "amd64" && ! command -v cargo && ! command -v rustc
+#15 CACHED
+
+#16 [go-build  6/11] COPY cmd ./cmd
+#16 CACHED
+
+#17 [go-build  7/11] COPY internal ./internal
+#17 DONE 0.0s
+
+#18 [go-build  8/11] COPY openapi ./openapi
+#18 DONE 0.0s
+
+#19 [go-build  9/11] RUN mkdir -p /out && time go build -mod=readonly -trimpath -ldflags='-s -w' -o /out/olp ./cmd/olp
+#19 39.54 
+#19 39.54 real	0m39.310s
+#19 39.54 user	1m57.955s
+#19 39.54 sys	0m19.665s
+#19 DONE 39.8s
+
+#20 [go-build 10/11] RUN go version -m /out/olp > /out/go-build-info.txt && ldd /out/olp > /out/native-link.txt
+#20 DONE 0.4s
+
+#21 [go-build 11/11] RUN glide_dir="$(go list -m -f '{{.Dir}}' github.com/valkey-io/valkey-glide/go/v2)" &&     cp "$glide_dir/LICENSE" /out/GLIDE-LICENSE &&     cp "$glide_dir/THIRD_PARTY_LICENSES_GO" /out/GLIDE-THIRD-PARTY-LICENSES
+#21 DONE 0.3s
+
+#8 [stage-2 1/5] FROM gcr.io/distroless/cc-debian13:nonroot@sha256:c31ff9abcb1910f3ab25c7957bdaf0bfe12a01eb546e8df2282f1c8f682b606c
+#8 CACHED
+
+#22 [stage-2 2/5] COPY --from=go-build /out/olp /usr/local/bin/olp
+#22 DONE 0.1s
+
+#23 [console-build  9/10] COPY openapi/management.json ./openapi/management.json
+#23 CACHED
+
+#24 [console-build  4/10] COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
+#24 CACHED
+
+#25 [console-build  2/10] WORKDIR /src
+#25 CACHED
+
+#26 [console-build  3/10] RUN npm install --global pnpm@11.24.0
+#26 CACHED
+
+#27 [console-build  5/10] COPY console/package.json ./console/package.json
+#27 CACHED
+
+#28 [console-build  6/10] COPY tests/sdk-smoke/package.json ./tests/sdk-smoke/package.json
+#28 CACHED
+
+#29 [console-build  7/10] RUN --mount=type=cache,target=/pnpm/store pnpm install --frozen-lockfile --store-dir /pnpm/store
+#29 CACHED
+
+#30 [console-build  8/10] COPY console ./console
+#30 CACHED
+
+#31 [console-build 10/10] RUN pnpm --dir console api:generate && pnpm --dir console build
+#31 CACHED
+
+#32 [stage-2 3/5] COPY --from=go-build /out/*LICENSE* /out/*txt /usr/share/doc/openllmproxy/
+#32 DONE 0.1s
+
+#33 [stage-2 4/5] COPY --from=console-build /src/console/build /opt/olp/console
+#33 DONE 0.1s
+
+#34 [stage-2 5/5] COPY LICENSE /usr/share/doc/openllmproxy/
+#34 DONE 0.0s
+
+#35 exporting to image
+#35 exporting layers
+#35 exporting layers 2.5s done
+#35 exporting manifest sha256:d6396f41a2c4c1bcbdbb7361e6b30eb0c96f807650dcefdfc78b36dea84a85f2 done
+#35 exporting config sha256:d82df6d29f6acb003562a3ce396f41eabf0f20a9c2f501d6239837ba258bea24 0.0s done
+#35 exporting attestation manifest sha256:23c891675497923ab78aa7be5eedfde176a39d9bc69091d6acce01ff79818b99 0.0s done
+#35 exporting manifest list sha256:ca4e0fdea4ac3afbf31a12920ef4b95d4cdcb29ca377cad9bd4a9357e1be9250 0.0s done
+#35 naming to docker.io/library/olp-go:foundation done
+#35 unpacking to docker.io/library/olp-go:foundation
+#35 unpacking to docker.io/library/olp-go:foundation 0.5s done
+#35 DONE 3.2s

@@ -15,7 +15,53 @@ OpenLLMProxy 3.0 is one Rust 2024 package and a SvelteKit console. Install the R
 
 `check`, `integration`, and `dependencies` are the CI qualification jobs; configure repository branch protections to require them. Run integration locally when changing persistence, inference, authentication, runtime publication, distributed limits, or browser journeys. SQLx queries do not require offline metadata preparation.
 
-`openapi/management.json` and `console/src/lib/api/schema.d.ts` are ignored outputs. Setup, development, checking, and integration use `make api`, which runs the `export_openapi` binary in the development profile. `make build` compiles `olp` and `export_openapi` together in the release profile with default features, runs that exporter, and generates the TypeScript contract before building the console. It honors `CARGO_TARGET_DIR` for the exporter location. Change the handler's `#[utoipa::path]` annotation and its feature's `utoipa_axum::routes!` registration together; generation obtains paths and schemas from the router. Do not hand-edit generated files.
+The Go rewrite checks in `openapi/management.json`, initially captured from the
+frozen Rust reference. `console/src/lib/api/schema.d.ts` remains a generated,
+ignored output. The Rust `make api`/`make build` workflows still export their
+router contract; review any resulting change to the checked-in definition.
+Change Rust handlers' `#[utoipa::path]` annotations and their feature's
+`utoipa_axum::routes!` registration together. Go contract generation uses the
+checked-in definition independently. Do not hand-edit generated Go or TypeScript.
+
+## Go foundation development
+
+Install Go 1.27.1, a C compiler/linker, glibc development headers, Node.js 26,
+pnpm 11.24.0, Docker Compose, OpenSSL, curl, and ripgrep. GLIDE ships its Rust
+core as a pinned native archive: Go commands need no Rust compiler. Linux
+amd64/arm64 are the supported release platforms. macOS and musl are unqualified.
+
+| Command | Purpose |
+| --- | --- |
+| `make go-setup` | Download pinned modules, install console packages, generate contracts |
+| `make go-dev` | Start isolated services, Go on 8082/private 9092, Vite on 5173 |
+| `make go-api` | Generate Go transport types and TypeScript without services |
+| `make go-test` | Unit/protocol fixtures without containers |
+| `make go-check` | gofmt, vet, Go tests, existing console checks |
+| `make go-integration` | Disposable TLS/authenticated services, process modes, SDK metadata, Chromium |
+| `make go-build` | Native `.local/bin/olp` and `console/build` |
+| `make go-fmt` | Format Go and console source |
+
+`go-dev` uses its own Compose project and volumes, database `olp_go`, and service
+ports 54321/63791. Vite forwards same-origin APIs to Go; editing console files
+does not rebuild Go. Restart after Go edits. Stop services with
+`docker compose -f deploy/compose.go.yaml stop`. Integration uses unique projects,
+ephemeral ports/certificates, and removes containers, networks, and volumes on
+failure. Install Chromium once with
+`pnpm --dir console exec playwright install --with-deps chromium`.
+
+M1 serves the existing console shell and contract. Product APIs explicitly return
+501 until their owning milestones land; sign-in and inference are not available
+yet. No application schema is created in M1. Never use Rust's database/Valkey
+installation for Go; separate migration history and storage rejection arrive in
+M2. The [foundation evidence](docs/roadmap/evidence/foundation.md) records exact
+scope, qualifications, and remaining architecture gates.
+
+Use `OLP_SDK_SMOKE_BACKEND=go tests/sdk-smoke/run.sh node
+tests/sdk-smoke/smoke.mjs --check-metadata` to qualify the SDK launch boundary.
+The same selector reaches the Python launcher. Full SDK inference suites remain
+owned by M3/M5. `OLP_CONSOLE_E2E_BACKEND=go` selects the Go browser launcher before
+any Cargo lookup. `scripts/go-without-rust.sh <command>` catches accidental Rust
+invocations; native image stages contain no Rust toolchain.
 
 ## Local development
 

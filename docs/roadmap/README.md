@@ -6,8 +6,8 @@ storage and change management contracts without building migration adapters.
 All current product capabilities must be restored by milestone 7. The existing
 SvelteKit console will be reused and simplified as each backend feature lands.
 
-This directory is the implementation backlog. All milestones and tickets start
-uncompleted; creating these documents does not implement the rewrite.
+This directory is the implementation backlog. Ticket status and linked
+qualification evidence record progress; a milestone closes only after its gates pass.
 
 ## Decisions
 
@@ -37,7 +37,7 @@ initial packaging choice. [GLIDE Go documentation](https://github.com/valkey-io/
 
 | ID | Milestone | Required predecessor | Status |
 | --- | --- | --- | --- |
-| M1 | [Go foundation and build economics](01-foundation.md) | None | Not started |
+| M1 | [Go foundation and build economics](01-foundation.md) | None | Implemented; native arm64 qualification pending |
 | M2 | [Installation, identity, and management](02-access-and-control.md) | M1 | Not started |
 | M3 | [Complete OpenAI request path](03-core-gateway.md) | M2 | Not started |
 | M4 | [Distributed limits, pricing, and recovery](04-limits-and-accounting.md) | M3 | Not started |
@@ -79,8 +79,9 @@ The Rust reference and the Go application never share a writable installation.
 
 ## Capability ownership
 
-This maps existing behavior to its completion milestone. M1 expands the map
-into links to concrete endpoint, fixture, and journey evidence. The existing
+This maps existing behavior to its completion milestone. The M1
+[frozen inventory](evidence/reference-inventory.json) adds concrete endpoint,
+fixture, and journey evidence. The existing
 compatibility tables remain the operation/provider support matrix.
 
 | Existing capability and source | Completion owner |
@@ -111,7 +112,9 @@ compatibility tables remain the operation/provider support matrix.
 
 ## Build and dependency scorecard
 
-The observed baseline below comes from the frozen source, not a timing run.
+The [M1 measurement record](evidence/validation.md) contains timing samples,
+commands, machine/cache details, and native build evidence. Dependency counts
+below come from the frozen source.
 There are 50 direct production dependencies in `Cargo.toml` and 467 resolved
 package entries in `Cargo.lock`; the latter includes transitive and development
 dependencies. API generation currently compiles the Rust exporter through
@@ -120,14 +123,14 @@ dependencies. API generation currently compiles the Rust exporter through
 
 | Measurement | Rust baseline | Go completion target or evidence |
 | --- | --- | --- |
-| Clean backend development build | Unmeasured | Median at most 50% of the recorded Rust median |
-| Rebuild after a small backend implementation edit | Unmeasured | Median at most 50% of the recorded Rust median |
-| Targeted behavioral test | Unmeasured | Record elapsed time and startup/linking cost |
-| API contract generation | Unmeasured; invokes Cargo | No gateway compilation, service startup, or Cargo invocation |
+| Clean backend development build | 228.062 s median (226.766–234.552) | M1: 28.778 s (28.181–30.886); full-capability M7 target remains at most 50% of Rust |
+| Rebuild after a small backend implementation edit | 21.121 s median (20.086–21.916) | M1: 4.145 s (4.025–4.232); full-capability M7 target remains at most 50% of Rust |
+| Targeted behavioral test | Unmeasured | M1 SSE: 0.642 s median (0.635–0.680), including startup/link checks |
+| API contract generation | Unmeasured; invokes Cargo | M1: 3.749 s median (3.216–5.510); no gateway compilation, services, or Rust |
 | Console build, complete checks, integration, and release image build | Unmeasured | Record separately so backend gains do not conceal shifted work |
-| Direct production dependency inventory | 50 Rust crates | List Go modules with purpose and dependency/build impact |
-| Transitive and development inventory | 467 resolved Cargo package entries in total | Separate production, test, and tooling graphs |
-| Native dependencies and artifact size | Unmeasured | Include GLIDE's native component, libc requirements, image size, and licenses |
+| Direct production dependency inventory | 50 Rust crates | Four direct library requirements; nine external modules imported by the current executable; [purposes and impact](evidence/foundation.md#dependency-and-native-inventory) |
+| Transitive and development inventory | 467 resolved Cargo package entries in total | [Separate Go graphs and 425 native workspace lock entries](evidence/dependencies.json) |
+| Native dependencies and artifact size | Unmeasured | amd64 image: 92,038,070 bytes; [GLIDE, glibc, archives and licenses](evidence/validation.md) |
 | Ordinary development requires a Rust compiler | Yes | No |
 
 M1 records the runner CPU, memory, OS/architecture, toolchains, commands, source
