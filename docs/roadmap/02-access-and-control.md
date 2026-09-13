@@ -3,7 +3,12 @@
 [Roadmap](README.md) | [Previous: foundation](01-foundation.md) |
 [Next: core gateway](03-core-gateway.md)
 
-**Status:** Not started. **Prerequisites:** M1 complete.
+**Status:** Implemented and qualified on Linux amd64. **Prerequisites:** M1 implementation is present; its native arm64 qualification remains open.
+
+[M2 evidence and screenshots](evidence/access-and-control.md) | [Operations guide](../go-access.md)
+
+All M2 tickets and exit scenarios pass. Milestone closure still inherits the
+open M1 native arm64 gate; this implementation does not claim that qualification.
 
 Make the Go installation manageable through the reused console. Complete the
 identity and management boundaries before routing requests or storing provider
@@ -13,7 +18,9 @@ credentials.
 
 ### M2-01
 
-- [ ] **Implement the fresh Go database and migration runner.**
+[Implementation and qualification](evidence/access-and-control.md#m2-01).
+
+- [x] **Implement the fresh Go database and migration runner.**
 
 **Depends on:** Milestone prerequisites.
 
@@ -33,7 +40,9 @@ database and Valkey namespace cannot be confused with the reference installation
 
 ### M2-02
 
-- [ ] **Restore secret storage and key lifecycle.**
+[Implementation and qualification](evidence/access-and-control.md#m2-02).
+
+- [x] **Restore secret storage and key lifecycle.**
 
 **Depends on:** [M2-01](#m2-01).
 
@@ -53,7 +62,9 @@ The maintenance CLI exercises the same key lifecycle as the application.
 
 ### M2-03
 
-- [ ] **Implement common management authorization and mutation rules.**
+[Implementation and qualification](evidence/access-and-control.md#m2-03).
+
+- [x] **Implement common management authorization and mutation rules.**
 
 **Depends on:** [M2-01](#m2-01), [M2-02](#m2-02).
 
@@ -74,7 +85,9 @@ APIs use no-store and audit records expose only permitted metadata.
 
 ### M2-04
 
-- [ ] **Restore bootstrap, membership, and invitations.**
+[Implementation and qualification](evidence/access-and-control.md#m2-04).
+
+- [x] **Restore bootstrap, membership, and invitations.**
 
 **Depends on:** [M2-03](#m2-03).
 
@@ -95,7 +108,9 @@ Mutation results and audit provenance agree under concurrent requests.
 
 ### M2-05
 
-- [ ] **Restore sessions and profile management.**
+[Implementation and qualification](evidence/access-and-control.md#m2-05).
+
+- [x] **Restore sessions and profile management.**
 
 **Depends on:** [M2-04](#m2-04).
 
@@ -115,7 +130,9 @@ identity-partitioned query state.
 
 ### M2-06
 
-- [ ] **Restore gateway-key management and authority records.**
+[Implementation and qualification](evidence/access-and-control.md#m2-06).
+
+- [x] **Restore gateway-key management and authority records.**
 
 **Depends on:** [M2-04](#m2-04), [M2-05](#m2-05).
 
@@ -135,7 +152,9 @@ it is acknowledged. Unimplemented enforcement is not presented as active.
 
 ### M2-07
 
-- [ ] **Restore OIDC and linked identities.**
+[Implementation and qualification](evidence/access-and-control.md#m2-07).
+
+- [x] **Restore OIDC and linked identities.**
 
 **Depends on:** [M2-02](#m2-02), [M2-04](#m2-04), [M2-05](#m2-05).
 
@@ -156,7 +175,9 @@ the local mock issuer supports repeatable browser and persistence tests.
 
 ### M2-08
 
-- [ ] **Connect settings and access pages to the Go contracts.**
+[Implementation and qualification](evidence/access-and-control.md#m2-08).
+
+- [x] **Connect settings and access pages to the Go contracts.**
 
 **Depends on:** [M2-03](#m2-03), [M2-05](#m2-05), [M2-06](#m2-06), [M2-07](#m2-07).
 
@@ -176,7 +197,9 @@ Rust API or on a hand-edited generated contract.
 
 ### M2-09
 
-- [ ] **Qualify the identity and management boundary.**
+[Implementation and qualification](evidence/access-and-control.md#m2-09).
+
+- [x] **Qualify the identity and management boundary.**
 
 **Depends on:** [M2-01](#m2-01), [M2-02](#m2-02), [M2-08](#m2-08).
 

@@ -62,6 +62,10 @@ beforeEach(() => {
   client = new QueryClient({
     defaultOptions: { queries: { retry: false, staleTime: Infinity } }
   });
+  client.setQueryData(['service-capabilities'], {
+    local_login_enabled: true,
+    oidc_login_enabled: false
+  });
   client.setQueryData(routeKeys.draft(draft.id), draft);
   client.setQueryData(providerKeys.enabledModels(), []);
   client.setQueryData(providerKeys.kinds(), [providerSpec]);

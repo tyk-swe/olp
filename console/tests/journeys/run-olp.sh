@@ -17,6 +17,7 @@ if [[ ${OLP_CONSOLE_E2E_BACKEND:-rust} == go ]]; then
   fi
   [[ -x $olp_bin ]] || { echo 'Go console binary is missing' >&2; exit 1; }
   cd -- "$repo_dir"
+  "$olp_bin" migrate
   exec "$olp_bin" all
 fi
 

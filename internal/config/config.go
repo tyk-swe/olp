@@ -9,9 +9,10 @@ import (
 	"log/slog"
 	"net/netip"
 	"net/url"
-	"os"
 	"strings"
 	"time"
+
+	"github.com/tyk-swe/olp/internal/secrets"
 )
 
 type Mode string
@@ -40,6 +41,7 @@ type Config struct {
 	AuthHMACKeyFile         string
 	BootstrapTokenFile      string
 	MasterKeyFile           string
+	RuntimeDatabaseRole     string
 	LogLevel                slog.Level
 	RequestTimeout          time.Duration
 	StartupTimeout          time.Duration
@@ -72,9 +74,10 @@ func Parse(args []string, getenv func(string) string, output io.Writer) (Config,
 	f.StringVar(&c.ObservabilityListenAddr, "observability-listen-addr", "127.0.0.1:9090", "private health listener")
 	f.StringVar(&c.PublicOrigin, "public-origin", "http://127.0.0.1:8080", "browser origin")
 	f.StringVar(&c.ConsoleDir, "console-dir", "console/build", "static console directory")
-	f.StringVar(&c.AuthHMACKeyFile, "auth-hmac-key-file", "", "mounted authentication key (M2)")
-	f.StringVar(&c.BootstrapTokenFile, "bootstrap-token-file", "", "mounted bootstrap token (M2)")
-	f.StringVar(&c.MasterKeyFile, "master-key-file", "", "mounted master key/keyring (M2)")
+	f.StringVar(&c.AuthHMACKeyFile, "auth-hmac-key-file", "", "mounted hex/base64 authentication key")
+	f.StringVar(&c.BootstrapTokenFile, "bootstrap-token-file", "", "mounted first-owner bootstrap token")
+	f.StringVar(&c.MasterKeyFile, "master-key-file", "", "mounted JSON master key ring")
+	f.StringVar(&c.RuntimeDatabaseRole, "runtime-role", "", "existing runtime role granted access by migrate")
 	f.StringVar(&level, "log-level", "info", "debug, info, warn, or error (OLP_LOG_LEVEL)")
 	f.DurationVar(&c.RequestTimeout, "dependency-request-timeout", 2*time.Second, "dependency request deadline")
 	f.DurationVar(&c.StartupTimeout, "startup-timeout", 10*time.Second, "startup deadline")
@@ -101,6 +104,9 @@ func Parse(args []string, getenv func(string) string, output io.Writer) (Config,
 	})
 	if envErr != nil {
 		return c, envErr
+	}
+	if getenv("OLP_OIDC_ALLOW_INSECURE_TEST_ISSUER") != "" || getenv("OLP_OIDC_ALLOW_PRIVATE_NETWORK") != "" {
+		return c, errors.New("OIDC egress cannot be weakened by environment flags; use an explicit oidctest build for local issuer tests")
 	}
 	var err error
 	if c.DatabaseURL, err = secretURL(c.DatabaseURL, databaseFile, "OLP_DATABASE_URL"); err != nil {
@@ -132,18 +138,9 @@ func secretURL(value, path, name string) (string, error) {
 	if value != "" {
 		return "", fmt.Errorf("set only one of %s and %s_FILE", name, name)
 	}
-	f, err := os.Open(path)
+	data, err := secrets.ReadFile(path)
 	if err != nil {
-		return "", fmt.Errorf("cannot read %s_FILE", name)
-	}
-	defer f.Close()
-	info, err := f.Stat()
-	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0007 != 0 {
-		return "", fmt.Errorf("%s_FILE must be a regular file inaccessible to other users", name)
-	}
-	data, err := io.ReadAll(io.LimitReader(f, 65537))
-	if err != nil || len(data) > 65536 || strings.TrimSpace(string(data)) == "" {
-		return "", fmt.Errorf("%s_FILE must contain a nonempty value of at most 64 KiB", name)
+		return "", fmt.Errorf("%s_FILE: %w", name, err)
 	}
 	return strings.TrimSpace(string(data)), nil
 }

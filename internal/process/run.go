@@ -12,11 +12,13 @@ import (
 	"sync"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/config"
 	"github.com/tyk-swe/olp/internal/console"
 	"github.com/tyk-swe/olp/internal/coordination"
 	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/management"
+	"github.com/tyk-swe/olp/internal/secrets"
 )
 
 func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
@@ -65,6 +67,21 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 		return err
 	}
 	defer pool.Close()
+	installation, err := database.Installation(startup, pool)
+	if err != nil {
+		return err
+	}
+	if c.Mode.Management() {
+		auth, keys, bootstrap, err := loadSecrets(c, installation)
+		if err != nil {
+			return err
+		}
+		control, err := access.New(startup, pool, installation, c.PublicOrigin, auth, keys, bootstrap)
+		if err != nil {
+			return err
+		}
+		control.Register(public)
+	}
 	if openValkey != nil {
 		vk, err = openValkey(startup)
 		if err != nil {
@@ -128,6 +145,36 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 		return nil
 	}
 	return serveErr
+}
+
+func loadSecrets(c config.Config, installation string) (*secrets.AuthKey, *secrets.KeyRing, string, error) {
+	if c.AuthHMACKeyFile == "" || c.MasterKeyFile == "" {
+		return nil, nil, "", errors.New("management requires OLP_AUTH_HMAC_KEY_FILE and OLP_MASTER_KEY_FILE")
+	}
+	raw, err := secrets.ReadFile(c.AuthHMACKeyFile)
+	if err != nil {
+		return nil, nil, "", err
+	}
+	key, err := secrets.DecodeKey(string(raw))
+	if err != nil {
+		return nil, nil, "", err
+	}
+	keys, err := secrets.LoadRing(c.MasterKeyFile)
+	if err != nil {
+		return nil, nil, "", err
+	}
+	var bootstrap string
+	if c.BootstrapTokenFile != "" {
+		data, err := secrets.ReadFile(c.BootstrapTokenFile)
+		if err != nil {
+			return nil, nil, "", err
+		}
+		bootstrap = string(data)
+		if len(bootstrap) < 32 || len(bootstrap) > 256 {
+			return nil, nil, "", errors.New("bootstrap token must have 32–256 bytes")
+		}
+	}
+	return secrets.NewAuthKey(key, installation), keys, bootstrap, nil
 }
 
 func healthHandler(process context.Context, timeout time.Duration, pingDB func(context.Context) error, vk *coordination.Client) http.Handler {

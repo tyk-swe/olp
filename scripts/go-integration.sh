@@ -36,8 +36,16 @@ export OLP_TEST_VALKEY_TLS_URL="rediss://:olp-go-local@$valkey_tls/0"
 export OLP_TEST_CA_FILE="$OLP_GO_TEST_TLS_DIR/ca.crt"
 export OLP_TEST_BINARY="$PWD/.local/bin/olp"
 make go-build
-go test -race -tags=integration -count=1 -timeout=2m -v ./tests/integration
+source scripts/go-secrets.sh "$scratch/secrets"
+OLP_DATABASE_URL="$OLP_TEST_DATABASE_URL" "$OLP_TEST_BINARY" migrate
+go test -race -tags=integration,oidctest -count=1 -timeout=5m -v ./tests/integration
 OLP_SDK_SMOKE_BACKEND=go ./tests/sdk-smoke/run.sh node tests/sdk-smoke/smoke.mjs --check-metadata
 export OLP_DATABASE_URL="$OLP_TEST_DATABASE_URL" OLP_VALKEY_URL="$OLP_TEST_VALKEY_URL"
-export OLP_CONSOLE_E2E_BACKEND=go OLP_CONSOLE_E2E_BIN="$OLP_TEST_BINARY"
+# Browser OIDC uses a separate, explicitly test-only binary. Release builds
+# never allow loopback identity issuers.
+go build -tags=oidctest -o .local/bin/olp-identity-test ./cmd/olp
+for database in olp_go_packaged olp_go_vite; do
+  "${compose[@]}" exec -T postgres createdb -U olp_go "$database"
+done
+export OLP_CONSOLE_E2E_BACKEND=go OLP_CONSOLE_E2E_BIN="$PWD/.local/bin/olp-identity-test"
 pnpm --dir console exec playwright test --config playwright.go.config.ts

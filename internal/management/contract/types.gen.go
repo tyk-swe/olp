@@ -307,9 +307,12 @@ type AcceptInvitationRequest struct {
 
 // ApiKeyBudgetResponse defines model for ApiKeyBudgetResponse.
 type ApiKeyBudgetResponse struct {
-	Daily            ApiKeyBudgetWindowResponse `json:"daily"`
-	Monthly          ApiKeyBudgetWindowResponse `json:"monthly"`
-	UnpricedAttempts int64                      `json:"unpriced_attempts"`
+	Daily ApiKeyBudgetWindowResponse `json:"daily"`
+
+	// EnforcementActive False when the amounts are stored policy only; accrued values are not live accounting.
+	EnforcementActive *bool                      `json:"enforcement_active,omitempty"`
+	Monthly           ApiKeyBudgetWindowResponse `json:"monthly"`
+	UnpricedAttempts  int64                      `json:"unpriced_attempts"`
 }
 
 // ApiKeyBudgetWindowResponse defines model for ApiKeyBudgetWindowResponse.
@@ -428,8 +431,16 @@ type AuditListResponse struct {
 
 // AuthenticationCapabilities defines model for AuthenticationCapabilities.
 type AuthenticationCapabilities struct {
-	LocalLoginEnabled bool `json:"local_login_enabled"`
-	OidcLoginEnabled  bool `json:"oidc_login_enabled"`
+	// GatewayAvailable Whether routing, provider configuration, and inference are available. Omitted by the reference backend.
+	GatewayAvailable *bool `json:"gateway_available,omitempty"`
+
+	// LimitsEnforced Whether stored API key limits and cost budgets are enforced.
+	LimitsEnforced    *bool `json:"limits_enforced,omitempty"`
+	LocalLoginEnabled bool  `json:"local_login_enabled"`
+	OidcLoginEnabled  bool  `json:"oidc_login_enabled"`
+
+	// RetentionEnforced Whether stored retention policies are applied by workers.
+	RetentionEnforced *bool `json:"retention_enforced,omitempty"`
 }
 
 // BTreeMap defines model for BTreeMap.

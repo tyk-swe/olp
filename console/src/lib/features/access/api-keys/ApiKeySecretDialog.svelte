@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { useServiceCapabilities } from '$lib/features/access/session/serviceCapabilities.svelte';
+  const services = useServiceCapabilities();
   import { routeKeys } from '$lib/features/routes/routeKeys';
 
   import { onMount } from 'svelte';
@@ -36,6 +38,7 @@
   let testMessage = $state('');
   const routes = createQuery(() => ({
     queryKey: routeKeys.all(),
+    enabled: services.gatewayAvailable,
     queryFn: ({ signal }) => listRoutes(signal)
   }));
   const routeSlug = $derived(
@@ -179,60 +182,69 @@
     {#if copyError}<div class="inline-problem" role="alert">
         {copyError}
       </div>{/if}
-    <div class="snippet-heading">
-      <div>
-        <strong>Test with a vendor SDK</strong><small
-          >Route slugs are sent as the model.</small
-        >
+    {#if services.gatewayAvailable}
+      <div class="snippet-heading">
+        <div>
+          <strong>Test with a vendor SDK</strong><small
+            >Route slugs are sent as the model.</small
+          >
+        </div>
+        <div class="tabs" role="tablist" aria-label="SDK language">
+          {#each SDK_OPTIONS as option, index (option)}<button
+              id={`sdk-tab-${option}`}
+              class:active={sdk === option}
+              role="tab"
+              aria-selected={sdk === option}
+              aria-controls={`sdk-panel-${option}`}
+              tabindex={sdk === option ? 0 : -1}
+              type="button"
+              onclick={() => selectSdk(option)}
+              onkeydown={(event) => moveSdkTab(event, index)}
+              >{option === 'openai'
+                ? 'OpenAI Python'
+                : option === 'anthropic'
+                  ? 'Anthropic TS'
+                  : 'Gemini TS'}</button
+            >{/each}
+        </div>
       </div>
-      <div class="tabs" role="tablist" aria-label="SDK language">
-        {#each SDK_OPTIONS as option, index (option)}<button
-            id={`sdk-tab-${option}`}
-            class:active={sdk === option}
-            role="tab"
-            aria-selected={sdk === option}
-            aria-controls={`sdk-panel-${option}`}
-            tabindex={sdk === option ? 0 : -1}
-            type="button"
-            onclick={() => selectSdk(option)}
-            onkeydown={(event) => moveSdkTab(event, index)}
-            >{option === 'openai'
-              ? 'OpenAI Python'
-              : option === 'anthropic'
-                ? 'Anthropic TS'
-                : 'Gemini TS'}</button
-          >{/each}
-      </div>
-    </div>
-    <div
-      id={`sdk-panel-${sdk}`}
-      role="tabpanel"
-      aria-labelledby={`sdk-tab-${sdk}`}
-    >
-      <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
-      <pre tabindex="0"><code>{snippet}</code></pre>
-    </div>
-    {#if testMessage}<div
-        class:success={testState === 'passed'}
-        class:danger={testState === 'failed'}
-        class="key-test-result"
-        role={testState === 'failed' ? 'alert' : 'status'}
+      <div
+        id={`sdk-panel-${sdk}`}
+        role="tabpanel"
+        aria-labelledby={`sdk-tab-${sdk}`}
       >
-        {testMessage}
-      </div>{/if}
+        <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+        <pre tabindex="0"><code>{snippet}</code></pre>
+      </div>
+      {#if testMessage}<div
+          class:success={testState === 'passed'}
+          class:danger={testState === 'failed'}
+          class="key-test-result"
+          role={testState === 'failed' ? 'alert' : 'status'}
+        >
+          {testMessage}
+        </div>{/if}
+    {/if}
+    {#if !services.gatewayAvailable}<p class="muted">
+        The key is saved. Gateway requests are not available on this
+        installation yet.
+      </p>{/if}
     <div class="secret-actions">
-      <button
-        class="button button-secondary"
-        type="button"
-        onclick={() => copy(snippet, 'snippet')}
-        >{copied === 'snippet' ? 'Snippet copied' : 'Copy snippet'}</button
-      ><button
-        class="button button-secondary"
-        type="button"
-        onclick={testGeneratedKey}
-        disabled={testState === 'running'}
-        >{testState === 'running' ? 'Testing…' : 'Run connection test'}</button
-      ><button
+      {#if services.gatewayAvailable}
+        <button
+          class="button button-secondary"
+          type="button"
+          onclick={() => copy(snippet, 'snippet')}
+          >{copied === 'snippet' ? 'Snippet copied' : 'Copy snippet'}</button
+        ><button
+          class="button button-secondary"
+          type="button"
+          onclick={testGeneratedKey}
+          disabled={testState === 'running'}
+          >{testState === 'running'
+            ? 'Testing…'
+            : 'Run connection test'}</button
+        >{/if}<button
         class="button button-primary"
         type="button"
         data-autofocus

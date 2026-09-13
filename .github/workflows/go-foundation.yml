@@ -34,8 +34,8 @@ jobs:
       - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         if: always()
         with:
-          name: go-foundation-browser
-          path: console/test-results/go-foundation
+          name: go-access-browser
+          path: console/test-results/go-access
   native:
     strategy:
       fail-fast: false

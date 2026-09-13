@@ -23,7 +23,7 @@ Change Rust handlers' `#[utoipa::path]` annotations and their feature's
 `utoipa_axum::routes!` registration together. Go contract generation uses the
 checked-in definition independently. Do not hand-edit generated Go or TypeScript.
 
-## Go foundation development
+## Go development
 
 Install Go 1.27.1, a C compiler/linker, glibc development headers, Node.js 26,
 pnpm 11.24.0, Docker Compose, OpenSSL, curl, and ripgrep. GLIDE ships its Rust
@@ -49,12 +49,15 @@ ephemeral ports/certificates, and removes containers, networks, and volumes on
 failure. Install Chromium once with
 `pnpm --dir console exec playwright install --with-deps chromium`.
 
-M1 serves the existing console shell and contract. Product APIs explicitly return
-501 until their owning milestones land; sign-in and inference are not available
-yet. No application schema is created in M1. Never use Rust's database/Valkey
-installation for Go; separate migration history and storage rejection arrive in
-M2. The [foundation evidence](docs/roadmap/evidence/foundation.md) records exact
-scope, qualifications, and remaining architecture gates.
+Go supports setup, local/OIDC sign-in, membership, invitations, sessions,
+profiles, keys, settings, and audit. `go-dev` creates missing private secrets in
+`.local/go-secrets`, runs Go migrations, and prints the bootstrap-token file
+location. Use that token once in owner setup. Other product APIs return 501
+until their milestones land; saved key limits and retention policies are not
+enforced yet. Never share Rust installation storage. See
+[Go access operations](docs/go-access.md) for separate database roles, secret
+files, OIDC, and resumable master-key rotation, and the
+[foundation evidence](docs/roadmap/evidence/foundation.md) for architecture gates.
 
 Use `OLP_SDK_SMOKE_BACKEND=go tests/sdk-smoke/run.sh node
 tests/sdk-smoke/smoke.mjs --check-metadata` to qualify the SDK launch boundary.

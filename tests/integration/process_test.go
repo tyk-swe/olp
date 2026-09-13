@@ -26,7 +26,9 @@ func TestProcessModesPrivateProbesAndShutdown(t *testing.T) {
 	}
 	for _, mode := range []string{"all", "gateway", "control", "worker"} {
 		t.Run(mode, func(t *testing.T) {
-			env := map[string]string{"OLP_DATABASE_URL": required(t, "OLP_TEST_DATABASE_URL"), "OLP_VALKEY_URL": required(t, "OLP_TEST_VALKEY_URL"), "OLP_LISTEN_ADDR": "127.0.0.1:0", "OLP_OBSERVABILITY_LISTEN_ADDR": "127.0.0.1:0", "OLP_CONSOLE_DIR": assets, "OLP_SHUTDOWN_TIMEOUT": "1s"}
+			env := map[string]string{"OLP_DATABASE_URL": required(t, "OLP_TEST_DATABASE_URL"),
+				"OLP_AUTH_HMAC_KEY_FILE": required(t, "OLP_AUTH_HMAC_KEY_FILE"),
+				"OLP_MASTER_KEY_FILE":    required(t, "OLP_MASTER_KEY_FILE"), "OLP_VALKEY_URL": required(t, "OLP_TEST_VALKEY_URL"), "OLP_LISTEN_ADDR": "127.0.0.1:0", "OLP_OBSERVABILITY_LISTEN_ADDR": "127.0.0.1:0", "OLP_CONSOLE_DIR": assets, "OLP_SHUTDOWN_TIMEOUT": "1s"}
 			p := testutil.StartProcess(t, binary, mode, env)
 			httpClient := &http.Client{Timeout: 3 * time.Second}
 			get := func(origin, path string, status int) []byte {

@@ -38,7 +38,7 @@ initial packaging choice. [GLIDE Go documentation](https://github.com/valkey-io/
 | ID | Milestone | Required predecessor | Status |
 | --- | --- | --- | --- |
 | M1 | [Go foundation and build economics](01-foundation.md) | None | Implemented; native arm64 qualification pending |
-| M2 | [Installation, identity, and management](02-access-and-control.md) | M1 | Not started |
+| M2 | [Installation, identity, and management](02-access-and-control.md) | M1 | Implemented and qualified on amd64; inherits open M1 arm64 gate |
 | M3 | [Complete OpenAI request path](03-core-gateway.md) | M2 | Not started |
 | M4 | [Distributed limits, pricing, and recovery](04-limits-and-accounting.md) | M3 | Not started |
 | M5 | [Remaining protocols, providers, and routing](05-provider-and-routing-parity.md) | M4 | Not started |
@@ -87,11 +87,11 @@ compatibility tables remain the operation/provider support matrix.
 | Existing capability and source | Completion owner |
 | --- | --- |
 | [Process configuration, listeners, lifecycle, and mode composition](../../src/process/) | M1 foundation; M7 qualification |
-| [Database transactions, migrations, pagination, and idempotency](../../src/database.rs) | M2 |
-| [Bootstrap, local accounts, roles, invitations, sessions, profiles, and API keys](../../src/access/) | M2 |
-| [OIDC configuration, login, role mappings, and linked identities](../../src/access/oidc/) | M2 |
-| [Secret files, hashing, encryption, and master-key rotation](../../src/crypto/) | M2 |
-| [Management contracts and response policies](../../src/http/control/) and [settings](../../src/settings/) | M2 |
+| [Database transactions, migrations, pagination, and idempotency](../../src/database.rs) | M2 implemented; [Go code and qualification](evidence/access-and-control.md) |
+| [Bootstrap, local accounts, roles, invitations, sessions, profiles, and API keys](../../src/access/) | M2 implemented; [Go code and qualification](evidence/access-and-control.md) |
+| [OIDC configuration, login, role mappings, and linked identities](../../src/access/oidc/) | M2 implemented; [Go code and qualification](evidence/access-and-control.md) |
+| [Secret files, hashing, encryption, and master-key rotation](../../src/crypto/) | M2 implemented; [Go code and qualification](evidence/access-and-control.md) |
+| [Management contracts and response policies](../../src/http/control/) and [settings](../../src/settings/) | M2 implemented; [Go code and qualification](evidence/access-and-control.md) |
 | [Provider drafts, discovery, certification, revisions, and credential pools](../../src/providers/) | M3 core; M5 remaining connectors/options |
 | [Route drafts, publication, history, and weighted selection](../../src/routes/) | M3 |
 | [Atomic runtime publication, pinned snapshots, and independent authority refresh](../../src/runtime/) | M3 |
@@ -128,9 +128,9 @@ dependencies. API generation currently compiles the Rust exporter through
 | Targeted behavioral test | Unmeasured | M1 SSE: 0.642 s median (0.635–0.680), including startup/link checks |
 | API contract generation | Unmeasured; invokes Cargo | M1: 3.749 s median (3.216–5.510); no gateway compilation, services, or Rust |
 | Console build, complete checks, integration, and release image build | Unmeasured | Record separately so backend gains do not conceal shifted work |
-| Direct production dependency inventory | 50 Rust crates | Four direct library requirements; nine external modules imported by the current executable; [purposes and impact](evidence/foundation.md#dependency-and-native-inventory) |
-| Transitive and development inventory | 467 resolved Cargo package entries in total | [Separate Go graphs and 425 native workspace lock entries](evidence/dependencies.json) |
-| Native dependencies and artifact size | Unmeasured | amd64 image: 92,038,070 bytes; [GLIDE, glibc, archives and licenses](evidence/validation.md) |
+| Direct production dependency inventory | 50 Rust crates | M2: eight production library requirements plus one test requirement; 14 external modules imported by the executable; [purposes and impact](evidence/access-and-control.md#dependencies) |
+| Transitive and development inventory | 467 resolved Cargo package entries in total | M2: [134 resolved external Go modules, including test/tool graphs](evidence/access-dependencies.json); [unchanged GLIDE native inventory](evidence/dependencies.json) |
+| Native dependencies and artifact size | Unmeasured | M2 amd64 image: 93,278,120 bytes; [qualification](evidence/access-and-control.md#validation); [GLIDE, glibc and licenses](evidence/validation.md) |
 | Ordinary development requires a Rust compiler | Yes | No |
 
 M1 records the runner CPU, memory, OS/architecture, toolchains, commands, source

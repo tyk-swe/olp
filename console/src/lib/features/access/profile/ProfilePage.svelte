@@ -1,5 +1,6 @@
 <script lang="ts">
   import { profileKeys } from '$lib/features/access/profile/profileKeys';
+  import { authLifecycle } from '$lib/features/access/session/lifecycle';
 
   import { onMount } from 'svelte';
   import { replaceState } from '$app/navigation';
@@ -291,6 +292,7 @@
       profileSync = markSaved(updated.etag, false);
       queryClient.setQueryData(profileKeys.current(), updated);
       message = 'Profile updated.';
+      await authLifecycle.validateSession();
     } catch (cause) {
       if (isEtagMismatch(cause)) profileSync = markConflict(profileSync);
       else

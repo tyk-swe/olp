@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { useServiceCapabilities } from '$lib/features/access/session/serviceCapabilities.svelte';
+  const services = useServiceCapabilities();
   import { page } from '$app/state';
   import { resolve } from '$app/paths';
   import {
@@ -135,7 +137,17 @@
   ];
 
   function visible(item: NavigationItem) {
-    return !item.capability || can(role, item.capability);
+    const controlPaths: string[] = [
+      resolve('/'),
+      resolve('/api-keys'),
+      resolve('/access'),
+      resolve('/audit'),
+      resolve('/settings')
+    ];
+    return (
+      (services.gatewayAvailable || controlPaths.includes(item.href)) &&
+      (!item.capability || can(role, item.capability))
+    );
   }
 
   // Settings owns /settings but not the personal profile beneath it, which has

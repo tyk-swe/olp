@@ -17,6 +17,9 @@ func Configuration(rawURL string, maxConnections int, timeout time.Duration) (*p
 	c.MaxConns = int32(maxConnections)
 	c.ConnConfig.ConnectTimeout = timeout
 	c.ConnConfig.RuntimeParams["application_name"] = "olp-go"
+	c.ConnConfig.RuntimeParams["statement_timeout"] = "10000"
+	c.ConnConfig.RuntimeParams["lock_timeout"] = "10000"
+	c.ConnConfig.RuntimeParams["idle_in_transaction_session_timeout"] = "15000"
 	return c, nil
 }
 

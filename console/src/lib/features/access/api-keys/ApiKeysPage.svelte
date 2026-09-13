@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { useServiceCapabilities } from '$lib/features/access/session/serviceCapabilities.svelte';
+  const services = useServiceCapabilities();
   import RoutingPolicyEditor from '$lib/features/routes/RoutingPolicyEditor.svelte';
   import { apiKeyQueries } from '$lib/features/access/api-keys/apiKeyQueries';
 
@@ -74,7 +76,9 @@
         const keyName = editing.name;
         await updateApiKey(editing, input);
         editing = null;
-        notice = `${keyName} policy updated. Gateways will converge on the new runtime generation.`;
+        notice = services.gatewayAvailable
+          ? `${keyName} policy updated. Gateways will converge on the new runtime generation.`
+          : `${keyName} policy saved.`;
       } else {
         secret = await createApiKey(input);
         secretContext = 'created';
@@ -138,7 +142,7 @@
   />
 {/if}
 
-{#if editing}<RoutingPolicyEditor
+{#if editing && services.gatewayAvailable}<RoutingPolicyEditor
     scope="api-key"
     id={editing.id}
     resourceEtag={editing.etag}

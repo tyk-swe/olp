@@ -1,5 +1,5 @@
 <script lang="ts">
-  import Overview from '$lib/features/overview/Overview.svelte';
+  import Overview from '$lib/features/overview/OverviewPage.svelte';
 </script>
 
 <svelte:head>
@@ -10,4 +10,4 @@
   />
 </svelte:head>
 
-<Overview controlConnected />
+<Overview />

@@ -55,3 +55,7 @@ docs
 **/.DS_Store
 
 .local
+
+# Go cryptographic implementation source; mounted secret material stays excluded.
+!internal/secrets
+!internal/secrets/*.go

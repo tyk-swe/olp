@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { useServiceCapabilities } from '$lib/features/access/session/serviceCapabilities.svelte';
+  const services = useServiceCapabilities();
   import RoutingPolicyEditor from '$lib/features/routes/RoutingPolicyEditor.svelte';
   import { providerKeys } from '$lib/features/providers/providerKeys';
   import { settingsKeys } from '$lib/features/settings/settingsKeys';
@@ -37,7 +39,11 @@
     isRetentionKey,
     optionalDecimal
   } from '$lib/features/settings/validation';
-  import { applyServerFieldErrors, errorMessage } from '$lib/api/http';
+  import {
+    applyServerFieldErrors,
+    errorMessage,
+    isEtagMismatch
+  } from '$lib/api/http';
   import { operationKinds } from '$lib/features/usage/history/api';
   import { useRole } from '$lib/features/access/session/useRole.svelte';
 
@@ -46,6 +52,21 @@
   const canEditSettings = $derived(access.can('settings.update'));
   const canEditPricing = $derived(access.can('pricing.update'));
   let values = $state<Record<string, string>>({});
+  let editEtags = $state<Record<string, string>>({});
+  let conflictKey = $state('');
+  function setValue(setting: Setting, value: string) {
+    editEtags[setting.key] ??= setting.etag;
+    values[setting.key] = value;
+  }
+  async function reloadConflict() {
+    const result = await settings.refetch();
+    if (result.isSuccess) {
+      delete values[conflictKey];
+      delete editEtags[conflictKey];
+      delete fieldErrors[conflictKey];
+      conflictKey = error = '';
+    }
+  }
   let fieldErrors = $state<Record<string, string>>({});
   let savingKey = $state('');
   let status = $state('');
@@ -56,6 +77,7 @@
   let vendorId = $state('');
   const providerVendors = createQuery(() => ({
     queryKey: ['provider-vendors'],
+    enabled: services.gatewayAvailable,
     queryFn: () => listProviderVendors()
   }));
   let model = $state('');
@@ -76,6 +98,7 @@
 
   const providerKinds = createQuery(() => ({
     queryKey: providerKeys.kinds(),
+    enabled: services.gatewayAvailable,
     queryFn: ({ signal }) => listProviderKinds(signal)
   }));
 
@@ -86,10 +109,23 @@
 
   const pricing = createQuery(() => ({
     queryKey: pricingKeys.page(pricingPagination.cursor),
+    enabled: services.gatewayAvailable,
     queryFn: () => listPricing(pricingPagination.cursor)
   }));
 
   function settingLabel(key: string) {
+    switch (key) {
+      case 'auth.local_login_enabled':
+        return 'Local password sign-in';
+      case 'limits.valkey_unavailable':
+        return 'Limit service outage policy';
+      case 'retention.audit_days':
+        return 'Audit retention (days)';
+      case 'retention.requests_days':
+        return 'Request retention (days)';
+      case 'retention.usage_days':
+        return 'Usage retention (days)';
+    }
     return stateLabel(key).replace(/\b\w/g, (character) =>
       character.toUpperCase()
     );
@@ -98,6 +134,12 @@
   const LIMITS_OUTAGE_KEY = 'limits.valkey_unavailable';
 
   function settingHelp(key: string) {
+    if (key === 'auth.local_login_enabled')
+      return 'Allow members to sign in with local passwords. Only an owner can change this; keep a usable owner sign-in method.';
+    if (key === LIMITS_OUTAGE_KEY && !services.limitsEnforced)
+      return 'Saved outage policy for future limit enforcement. No request limits are enforced yet.';
+    if (isRetentionKey(key) && !services.retentionEnforced)
+      return 'Saved retention policy. Automatic record cleanup is not enabled yet.';
     if (key === LIMITS_OUTAGE_KEY)
       return 'What rate/concurrency-only API keys get while Valkey is unreachable: fail_closed rejects them with 503; fail_open bypasses those limits and counts olp_limits_fail_open_total. Budgeted keys always fail closed. Gateways apply a change within 15 seconds.';
     if (isRetentionKey(key))
@@ -106,22 +148,32 @@
   }
 
   async function save(setting: Setting) {
-    if (!canEditSettings) return;
+    if (
+      !canEditSettings ||
+      (setting.key === 'auth.local_login_enabled' &&
+        !access.can('users.manage'))
+    )
+      return;
     savingKey = setting.key;
     status = error = '';
     delete fieldErrors[setting.key];
     try {
       const updated = await updateSetting(
-        setting,
+        { ...setting, etag: editEtags[setting.key] ?? setting.etag },
         values[setting.key] ?? setting.value
       );
       queryClient.setQueryData<Setting[]>(settingsKeys.all(), (current) =>
         current?.map((item) => (item.key === updated.key ? updated : item))
       );
       delete values[setting.key];
+      delete editEtags[setting.key];
       status = `${settingLabel(setting.key)} saved.`;
     } catch (cause) {
-      const fields = applyServerFieldErrors(cause, { request: 'value' });
+      if (isEtagMismatch(cause)) conflictKey = setting.key;
+      const fields = applyServerFieldErrors(cause, {
+        request: 'value',
+        value: 'value'
+      });
       if (fields.value) fieldErrors[setting.key] = fields.value;
       else error = errorMessage(cause);
     } finally {
@@ -185,8 +237,10 @@
     <p class="eyebrow">Installation</p>
     <h1 class="page-title">Settings</h1>
     <p class="page-description">
-      Retention, installation defaults, and versioned pricing. Personal details
-      live in your profile.
+      {services.gatewayAvailable
+        ? 'Retention, installation defaults, and versioned pricing.'
+        : 'Installation access and saved policies.'} Personal details live in your
+      profile.
     </p>
   </div>
   <a class="button button-secondary" href={resolve('/settings/profile')}
@@ -196,6 +250,11 @@
 
 {#if status}<p class="success-message" role="status">{status}</p>{/if}
 {#if error}<p class="inline-problem" role="alert">{error}</p>{/if}
+{#if conflictKey}<button
+    class="button button-secondary"
+    onclick={reloadConflict}
+    >Discard this edit and reload the current setting</button
+  >{/if}
 
 <section class="settings-section" aria-labelledby="installation-title">
   <div class="section-heading">
@@ -234,7 +293,18 @@
             >
           </div>
           <div class="setting-control">
-            {#if setting.key === LIMITS_OUTAGE_KEY}<select
+            {#if setting.key === 'auth.local_login_enabled'}<select
+                id={`setting-${setting.key}`}
+                value={values[setting.key] ?? setting.value}
+                onchange={(event) =>
+                  setValue(setting, event.currentTarget.value)}
+                disabled={!access.can('users.manage')}
+              >
+                <option value="true">Enabled</option><option value="false"
+                  >Disabled</option
+                >
+              </select>
+            {:else if setting.key === LIMITS_OUTAGE_KEY}<select
                 id={`setting-${setting.key}`}
                 value={isLimitsOutagePolicy(
                   values[setting.key] ?? setting.value
@@ -242,7 +312,7 @@
                   ? (values[setting.key] ?? setting.value)
                   : 'fail_closed'}
                 onchange={(event) =>
-                  (values[setting.key] = event.currentTarget.value)}
+                  setValue(setting, event.currentTarget.value)}
                 disabled={!canEditSettings}
                 aria-invalid={fieldProblem ? 'true' : undefined}
                 aria-describedby={fieldProblem
@@ -260,7 +330,7 @@
                 step="1"
                 value={values[setting.key] ?? setting.value}
                 oninput={(event) =>
-                  (values[setting.key] = event.currentTarget.value)}
+                  setValue(setting, event.currentTarget.value)}
                 readonly={!canEditSettings}
                 aria-invalid={fieldProblem ? 'true' : undefined}
                 aria-describedby={fieldProblem
@@ -270,7 +340,7 @@
                 id={`setting-${setting.key}`}
                 value={values[setting.key] ?? setting.value}
                 oninput={(event) =>
-                  (values[setting.key] = event.currentTarget.value)}
+                  setValue(setting, event.currentTarget.value)}
                 readonly={!canEditSettings}
                 aria-invalid={fieldProblem ? 'true' : undefined}
                 aria-describedby={fieldProblem
@@ -281,6 +351,8 @@
               type="button"
               onclick={() => save(setting)}
               disabled={!canEditSettings ||
+                (setting.key === 'auth.local_login_enabled' &&
+                  !access.can('users.manage')) ||
                 savingKey === setting.key ||
                 (values[setting.key] ?? setting.value) === setting.value}
               >{savingKey === setting.key ? 'Saving…' : 'Save'}</button
@@ -294,231 +366,237 @@
     </div>{/if}
 </section>
 
-<section class="settings-section" aria-labelledby="pricing-title">
-  <div class="section-heading">
-    <div>
-      <p class="eyebrow">Cost estimates</p>
-      <h2 id="pricing-title">Pricing revisions</h2>
-      <p>
-        Prices are exact decimals. A missing price remains visibly unpriced and
-        is never treated as zero. An empty cached input rate bills cached tokens
-        at the full input rate.
-      </p>
-    </div>
-  </div>
-  {#if !canEditPricing}<ReadOnlyNote
-      >Your role can view pricing revisions but not create them.</ReadOnlyNote
-    >{/if}
-  <form class="card price-form" onsubmit={addPricing}>
-    <div class="form-grid">
-      <div class="form-field">
-        <label for="provider-kind">Provider kind</label><select
-          id="provider-kind"
-          bind:value={providerKind}
-          onchange={() => {
-            vendorId = '';
-          }}
-          disabled={!canEditPricing ||
-            providerKinds.isPending ||
-            providerKinds.isError}
-          >{#each providerKinds.data ?? [] as option (option.kind)}<option
-              value={option.kind}>{option.label}</option
-            >{/each}</select
-        >{#if providerKinds.isPending}<small
-            >Loading provider capabilities…</small
-          >{:else if providerKinds.isError}<small class="inline-problem"
-            >Provider capabilities are unavailable; pricing changes are
-            disabled.</small
-          >{/if}
-      </div>
-      <div class="form-field">
-        <label for="price-vendor">Vendor scope</label><select
-          id="price-vendor"
-          bind:value={vendorId}
-          disabled={!canEditPricing}
-          ><option value="">All vendors using this connector</option
-          >{#each (providerVendors.data ?? []).filter((vendor) => vendor.connector === providerKind) as vendor (vendor.id)}<option
-              value={vendor.id}>{vendor.name}</option
-            >{/each}</select
-        >
-      </div>
-      <div class="form-field">
-        <label for="provider-id">Provider ID override</label><input
-          id="provider-id"
-          bind:value={providerId}
-          class="mono"
-          placeholder="Optional UUID"
-          disabled={!canEditPricing}
-        />
-      </div>
-      <div class="form-field">
-        <label for="price-model">Upstream model</label><input
-          id="price-model"
-          bind:value={model}
-          required
-          disabled={!canEditPricing}
-        />
-      </div>
-      <div class="form-field">
-        <label for="price-operation">Operation</label><select
-          id="price-operation"
-          bind:value={operation}
-          disabled={!canEditPricing}
-          >{#each operationKinds as option (option)}<option value={option}
-              >{option}</option
-            >{/each}</select
-        >
-      </div>
-      <div class="form-field">
-        <label for="input-price">Input / million</label><input
-          id="input-price"
-          bind:value={inputPrice}
-          inputmode="decimal"
-          placeholder="2.50"
-          disabled={!canEditPricing}
-        />
-      </div>
-      <div class="form-field">
-        <label for="cached-input-price">Cached input / million</label><input
-          id="cached-input-price"
-          bind:value={cachedInputPrice}
-          inputmode="decimal"
-          placeholder="0.25"
-          disabled={!canEditPricing}
-        /><small
-          >Leave empty to bill cached tokens at the full input rate.</small
-        >
-      </div>
-      <div class="form-field">
-        <label for="output-price">Output / million</label><input
-          id="output-price"
-          bind:value={outputPrice}
-          inputmode="decimal"
-          placeholder="10.00"
-          disabled={!canEditPricing}
-        />
-      </div>
-      <div class="form-field">
-        <label for="unit-price">Media unit price</label><input
-          id="unit-price"
-          bind:value={unitPrice}
-          inputmode="decimal"
-          placeholder="0.04"
-          disabled={!canEditPricing}
-        />
-      </div>
-      <div class="form-field">
-        <label for="currency">Currency</label><input
-          id="currency"
-          bind:value={currency}
-          maxlength="3"
-          required
-          disabled={!canEditPricing}
-        />
-      </div>
-      <div class="form-field full">
-        <label for="effective-at">Effective at</label><input
-          id="effective-at"
-          bind:value={effectiveAt}
-          type="datetime-local"
-          required
-          disabled={!canEditPricing}
-        />
+{#if services.gatewayAvailable}
+  <section class="settings-section" aria-labelledby="pricing-title">
+    <div class="section-heading">
+      <div>
+        <p class="eyebrow">Cost estimates</p>
+        <h2 id="pricing-title">Pricing revisions</h2>
+        <p>
+          Prices are exact decimals. A missing price remains visibly unpriced
+          and is never treated as zero. An empty cached input rate bills cached
+          tokens at the full input rate.
+        </p>
       </div>
     </div>
-    <button
-      class="button button-primary"
-      type="submit"
-      disabled={!canEditPricing ||
-        savingPrice ||
-        !providerKind ||
-        providerKinds.isError}
-      >{savingPrice ? 'Creating…' : 'Create pricing revision'}</button
-    >
-  </form>
-
-  {#if pricing.isPending}<div class="loading-state" role="status">
-      Loading revisions…
-    </div>
-  {:else if pricing.isError}<div class="inline-problem" role="alert">
-      {errorMessage(pricing.error)}
-      <button class="text-button" onclick={() => pricing.refetch()}
-        >Try again</button
+    {#if !canEditPricing}<ReadOnlyNote
+        >Your role can view pricing revisions but not create them.</ReadOnlyNote
+      >{/if}
+    <form class="card price-form" onsubmit={addPricing}>
+      <div class="form-grid">
+        <div class="form-field">
+          <label for="provider-kind">Provider kind</label><select
+            id="provider-kind"
+            bind:value={providerKind}
+            onchange={() => {
+              vendorId = '';
+            }}
+            disabled={!canEditPricing ||
+              providerKinds.isPending ||
+              providerKinds.isError}
+            >{#each providerKinds.data ?? [] as option (option.kind)}<option
+                value={option.kind}>{option.label}</option
+              >{/each}</select
+          >{#if providerKinds.isPending}<small
+              >Loading provider capabilities…</small
+            >{:else if providerKinds.isError}<small class="inline-problem"
+              >Provider capabilities are unavailable; pricing changes are
+              disabled.</small
+            >{/if}
+        </div>
+        <div class="form-field">
+          <label for="price-vendor">Vendor scope</label><select
+            id="price-vendor"
+            bind:value={vendorId}
+            disabled={!canEditPricing}
+            ><option value="">All vendors using this connector</option
+            >{#each (providerVendors.data ?? []).filter((vendor) => vendor.connector === providerKind) as vendor (vendor.id)}<option
+                value={vendor.id}>{vendor.name}</option
+              >{/each}</select
+          >
+        </div>
+        <div class="form-field">
+          <label for="provider-id">Provider ID override</label><input
+            id="provider-id"
+            bind:value={providerId}
+            class="mono"
+            placeholder="Optional UUID"
+            disabled={!canEditPricing}
+          />
+        </div>
+        <div class="form-field">
+          <label for="price-model">Upstream model</label><input
+            id="price-model"
+            bind:value={model}
+            required
+            disabled={!canEditPricing}
+          />
+        </div>
+        <div class="form-field">
+          <label for="price-operation">Operation</label><select
+            id="price-operation"
+            bind:value={operation}
+            disabled={!canEditPricing}
+            >{#each operationKinds as option (option)}<option value={option}
+                >{option}</option
+              >{/each}</select
+          >
+        </div>
+        <div class="form-field">
+          <label for="input-price">Input / million</label><input
+            id="input-price"
+            bind:value={inputPrice}
+            inputmode="decimal"
+            placeholder="2.50"
+            disabled={!canEditPricing}
+          />
+        </div>
+        <div class="form-field">
+          <label for="cached-input-price">Cached input / million</label><input
+            id="cached-input-price"
+            bind:value={cachedInputPrice}
+            inputmode="decimal"
+            placeholder="0.25"
+            disabled={!canEditPricing}
+          /><small
+            >Leave empty to bill cached tokens at the full input rate.</small
+          >
+        </div>
+        <div class="form-field">
+          <label for="output-price">Output / million</label><input
+            id="output-price"
+            bind:value={outputPrice}
+            inputmode="decimal"
+            placeholder="10.00"
+            disabled={!canEditPricing}
+          />
+        </div>
+        <div class="form-field">
+          <label for="unit-price">Media unit price</label><input
+            id="unit-price"
+            bind:value={unitPrice}
+            inputmode="decimal"
+            placeholder="0.04"
+            disabled={!canEditPricing}
+          />
+        </div>
+        <div class="form-field">
+          <label for="currency">Currency</label><input
+            id="currency"
+            bind:value={currency}
+            maxlength="3"
+            required
+            disabled={!canEditPricing}
+          />
+        </div>
+        <div class="form-field full">
+          <label for="effective-at">Effective at</label><input
+            id="effective-at"
+            bind:value={effectiveAt}
+            type="datetime-local"
+            required
+            disabled={!canEditPricing}
+          />
+        </div>
+      </div>
+      <button
+        class="button button-primary"
+        type="submit"
+        disabled={!canEditPricing ||
+          savingPrice ||
+          !providerKind ||
+          providerKinds.isError}
+        >{savingPrice ? 'Creating…' : 'Create pricing revision'}</button
       >
-    </div>
-  {:else if pricing.data?.items.length === 0 && pricingPagination.history.length === 0}<div
-      class="card empty-state"
-    >
-      No pricing revisions. Usage cost will be marked unpriced.
-    </div>
-  {:else}
-    <div class="revision-list">
-      {#each pricing.data?.items ?? [] as revision (revision.id)}
-        <details class="card">
-          <summary
-            ><span
-              ><strong>Revision {revision.revision}</strong><small
-                >Effective {formatDate(revision.effective_at)}</small
-              ><small
-                >Created {formatDate(revision.created_at)} by
-                <span class="mono">{revision.created_by}</span></small
-              ></span
-            ><span class="badge">{revision.prices.length} entries</span
-            ></summary
-          >
-          <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
-          <div
-            class="table-shell"
-            tabindex="0"
-            role="region"
-            aria-label={`Prices in revision ${revision.revision}`}
-          >
-            <table class="data-table">
-              <caption class="sr-only"
-                >Prices in revision {revision.revision}</caption
-              >
-              <thead
-                ><tr
-                  ><th scope="col">Provider / model</th><th scope="col"
-                    >Operation</th
-                  ><th scope="col">Input / million</th><th scope="col"
-                    >Cached input / million</th
-                  ><th scope="col">Output / million</th><th scope="col">Unit</th
-                  ><th scope="col">Currency</th></tr
-                ></thead
-              >
-              <tbody
-                >{#each revision.prices as price, priceIndex (`${price.provider_kind}:${price.model}:${price.operation}:${priceIndex}`)}<tr
-                    ><td
-                      ><strong>{price.vendor_id ?? price.provider_kind}</strong
-                      >{#if price.provider_id}<small>{price.provider_id}</small
-                        >{/if}<small>{price.model}</small></td
-                    ><td>{price.operation}</td><td
-                      >{price.input_per_million ?? '—'}</td
-                    ><td
-                      >{price.cached_input_per_million ?? 'Billed as input'}</td
-                    ><td>{price.output_per_million ?? '—'}</td><td
-                      >{price.unit_price ?? '—'}</td
-                    ><td>{price.currency}</td></tr
-                  >{/each}</tbody
-              >
-            </table>
-          </div>
-        </details>
-      {/each}
-    </div>
-    <CursorPagination
-      {...cursorPaginationProps(pricingPagination, pricing.data?.nextCursor)}
-      label="Pricing revision pages"
-    />
-  {/if}
-</section>
+    </form>
 
-<RoutingPolicyEditor
-  scope="installation"
-  id="00000000-0000-0000-0000-000000000000"
-  canManage={canEditSettings}
-/>
+    {#if pricing.isPending}<div class="loading-state" role="status">
+        Loading revisions…
+      </div>
+    {:else if pricing.isError}<div class="inline-problem" role="alert">
+        {errorMessage(pricing.error)}
+        <button class="text-button" onclick={() => pricing.refetch()}
+          >Try again</button
+        >
+      </div>
+    {:else if pricing.data?.items.length === 0 && pricingPagination.history.length === 0}<div
+        class="card empty-state"
+      >
+        No pricing revisions. Usage cost will be marked unpriced.
+      </div>
+    {:else}
+      <div class="revision-list">
+        {#each pricing.data?.items ?? [] as revision (revision.id)}
+          <details class="card">
+            <summary
+              ><span
+                ><strong>Revision {revision.revision}</strong><small
+                  >Effective {formatDate(revision.effective_at)}</small
+                ><small
+                  >Created {formatDate(revision.created_at)} by
+                  <span class="mono">{revision.created_by}</span></small
+                ></span
+              ><span class="badge">{revision.prices.length} entries</span
+              ></summary
+            >
+            <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+            <div
+              class="table-shell"
+              tabindex="0"
+              role="region"
+              aria-label={`Prices in revision ${revision.revision}`}
+            >
+              <table class="data-table">
+                <caption class="sr-only"
+                  >Prices in revision {revision.revision}</caption
+                >
+                <thead
+                  ><tr
+                    ><th scope="col">Provider / model</th><th scope="col"
+                      >Operation</th
+                    ><th scope="col">Input / million</th><th scope="col"
+                      >Cached input / million</th
+                    ><th scope="col">Output / million</th><th scope="col"
+                      >Unit</th
+                    ><th scope="col">Currency</th></tr
+                  ></thead
+                >
+                <tbody
+                  >{#each revision.prices as price, priceIndex (`${price.provider_kind}:${price.model}:${price.operation}:${priceIndex}`)}<tr
+                      ><td
+                        ><strong
+                          >{price.vendor_id ?? price.provider_kind}</strong
+                        >{#if price.provider_id}<small
+                            >{price.provider_id}</small
+                          >{/if}<small>{price.model}</small></td
+                      ><td>{price.operation}</td><td
+                        >{price.input_per_million ?? '—'}</td
+                      ><td
+                        >{price.cached_input_per_million ??
+                          'Billed as input'}</td
+                      ><td>{price.output_per_million ?? '—'}</td><td
+                        >{price.unit_price ?? '—'}</td
+                      ><td>{price.currency}</td></tr
+                    >{/each}</tbody
+                >
+              </table>
+            </div>
+          </details>
+        {/each}
+      </div>
+      <CursorPagination
+        {...cursorPaginationProps(pricingPagination, pricing.data?.nextCursor)}
+        label="Pricing revision pages"
+      />
+    {/if}
+  </section>
+
+  <RoutingPolicyEditor
+    scope="installation"
+    id="00000000-0000-0000-0000-000000000000"
+    canManage={canEditSettings}
+  />
+{/if}
 
 <style>
   .settings-section {

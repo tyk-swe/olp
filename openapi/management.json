@@ -34,6 +34,10 @@
             "format": "int64",
             "minimum": 0,
             "type": "integer"
+          },
+          "enforcement_active": {
+            "type": "boolean",
+            "description": "False when the amounts are stored policy only; accrued values are not live accounting."
           }
         },
         "required": [
@@ -545,6 +549,18 @@
           },
           "oidc_login_enabled": {
             "type": "boolean"
+          },
+          "gateway_available": {
+            "type": "boolean",
+            "description": "Whether routing, provider configuration, and inference are available. Omitted by the reference backend."
+          },
+          "limits_enforced": {
+            "type": "boolean",
+            "description": "Whether stored API key limits and cost budgets are enforced."
+          },
+          "retention_enforced": {
+            "type": "boolean",
+            "description": "Whether stored retention policies are applied by workers."
           }
         },
         "required": [
@@ -5748,7 +5764,7 @@
         "type": "string"
       },
       "UpdateApiKeyRequest": {
-        "description": "A merge patch: every field is optional, an omitted field keeps the stored\nvalue, and an explicit `null` clears one. Writing absent fields through\nwould silently widen a key's privileges — a rename would drop the route\nallowlist, the rate limits, and the expiry.",
+        "description": "A merge patch: every field is optional, an omitted field keeps the stored\nvalue, and an explicit `null` clears one. Writing absent fields through\nwould silently widen a key's privileges \u2014 a rename would drop the route\nallowlist, the rate limits, and the expiry.",
         "properties": {
           "allowed_routes": {
             "description": "Omit to keep the stored allowlist. Send `[]` to clear it; an empty\nallowlist places no route restriction on the key.",

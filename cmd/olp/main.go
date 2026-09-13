@@ -35,13 +35,24 @@ func run(ctx context.Context, args []string) error {
 	if len(args) > 0 {
 		switch args[0] {
 		case "version", "--version":
-			fmt.Println("olp 3.0.0 Go foundation")
+			fmt.Println("olp 3.0.0 Go access and control")
 			return nil
 		case "help", "--help", "-h":
-			fmt.Println("usage: olp <all|gateway|control|worker|health-probe> [flags]\nReserved: migrate, doctor, master-key (not yet implemented)")
+			fmt.Println("usage: olp <all|gateway|control|worker|migrate|doctor|health-probe> [flags]\n       olp master-key <status|reencrypt> [flags]")
 			return nil
 		case "migrate", "doctor", "master-key":
-			return fmt.Errorf("%s is not implemented in the Go foundation", args[0])
+			command, options := args[0], args[1:]
+			if command == "master-key" {
+				if len(options) == 0 || (options[0] != "status" && options[0] != "reencrypt") {
+					return errors.New("usage: olp master-key <status|reencrypt> [flags]")
+				}
+				command, options = options[0], options[1:]
+			}
+			c, err := config.Parse(append([]string{"all"}, options...), os.Getenv, os.Stderr)
+			if err != nil {
+				return err
+			}
+			return process.Maintenance(ctx, c, command, os.Stdout)
 		case "health-probe":
 			if len(args) != 1 {
 				return errors.New("health-probe takes no arguments")

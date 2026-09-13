@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { useServiceCapabilities } from '$lib/features/access/session/serviceCapabilities.svelte';
+  const services = useServiceCapabilities();
   import { focusFormError, focusErrorSummary } from '$lib/forms/focusError';
   import { routeKeys } from '$lib/features/routes/routeKeys';
 
@@ -47,6 +49,7 @@
   let initialized = $state(false);
   const routes = createQuery(() => ({
     queryKey: routeKeys.all(),
+    enabled: services.gatewayAvailable,
     queryFn: ({ signal }) => listRoutes(signal)
   }));
 
@@ -120,9 +123,11 @@
         : 'Create a proxy key.'}
     </h1>
     <p class="page-description">
-      {editing
-        ? 'Update scopes, route access, expiry, and shared hard limits. The key secret does not change.'
-        : 'Scope access, restrict route slugs, and apply shared hard limits. The secret is displayed once.'}
+      {!services.limitsEnforced
+        ? 'Save scopes, route access, expiry, and limit policies. Limits and budgets are not enforced on this installation.'
+        : editing
+          ? 'Update scopes, route access, expiry, and shared hard limits. The key secret does not change.'
+          : 'Scope access, restrict route slugs, and apply shared hard limits. The secret is displayed once.'}
     </p>
   </div>
   {#if editing}<button
@@ -211,8 +216,33 @@
     </fieldset>
     <fieldset class="checks routes">
       <legend>Allowed route slugs</legend>
-      <p>Leave every route unchecked to allow all current and future routes.</p>
-      {#if routes.isPending}<span role="status">Loading routes…</span
+      <p>
+        {services.gatewayAvailable
+          ? 'Leave every route unchecked to allow all current and future routes.'
+          : 'Leave blank to allow all current and future routes.'}
+      </p>
+      {#if !services.gatewayAvailable}
+        <label for="allowed-routes">Route slugs (comma separated)</label>
+        <input
+          id="allowed-routes"
+          value={form.allowedRoutes.join(', ')}
+          disabled={!canManage}
+          onchange={(event) => {
+            form.allowedRoutes = [
+              ...new Set(
+                event.currentTarget.value
+                  .split(',')
+                  .map((slug) => slug.trim())
+                  .filter(Boolean)
+              )
+            ];
+            touch();
+          }}
+        />
+        <span
+          >Save planned route restrictions. Routing is not available yet.</span
+        >
+      {:else if routes.isPending}<span role="status">Loading routes…</span
         >{:else if routes.isError}<span class="inline-problem" role="alert"
           >Routes are unavailable, so route restrictions cannot be reviewed.
           <button
@@ -238,11 +268,16 @@
     </fieldset>
   </section>
   <section aria-labelledby="limits-heading">
-    <p class="eyebrow">Distributed limits</p>
-    <h2 id="limits-heading">Hard runtime limits</h2>
+    <p class="eyebrow">
+      {services.limitsEnforced ? 'Distributed limits' : 'Limit policy'}
+    </p>
+    <h2 id="limits-heading">
+      {services.limitsEnforced ? 'Hard runtime limits' : 'Saved limit policy'}
+    </h2>
     <p class="section-help">
-      These limits follow the installation's Valkey outage policy. Leave blank
-      for no limit.
+      {services.limitsEnforced
+        ? "These limits follow the installation's Valkey outage policy. Leave blank for no limit."
+        : 'These values are saved for future enforcement. They do not restrict requests yet. Leave blank for no limit.'}
     </p>
     <div class="form-grid limits">
       <div class="form-field">
@@ -302,11 +337,13 @@
     <p class="eyebrow">Spend controls</p>
     <h2 id="budget-heading">Cost budgets</h2>
     <p class="section-help">
-      Amounts use the installation pricing currency. Daily and monthly windows
-      reset at midnight UTC. Budgeted requests are refused when Valkey is
-      unavailable. These are accrued-cost thresholds: accepted concurrent work
-      can exceed them, and unpriced attempts accrue no cost. Leave blank for no
-      cost budget.
+      {#if services.limitsEnforced}Amounts use the installation pricing
+        currency. Daily and monthly windows reset at midnight UTC. Budgeted
+        requests are refused when Valkey is unavailable. These are accrued-cost
+        thresholds: accepted concurrent work can exceed them, and unpriced
+        attempts accrue no cost. Leave blank for no cost budget.{:else}Save
+        daily and monthly budget amounts for future enforcement. Spending is not
+        measured or restricted yet.{/if}
     </p>
     <div class="form-grid budget-inputs">
       <div class="form-field">
@@ -342,7 +379,7 @@
           >{/if}
       </div>
     </div>
-    {#if editing}
+    {#if editing && services.limitsEnforced}
       <div
         class="budget-detail"
         role="region"
@@ -395,9 +432,11 @@
         >{busy === 'create'
           ? 'Creating securely…'
           : busy === 'update'
-            ? 'Publishing policy…'
+            ? 'Saving policy…'
             : editing
-              ? 'Save and publish'
+              ? services.gatewayAvailable
+                ? 'Save and publish'
+                : 'Save policy'
               : 'Create and show key'}
         <NavIcon name="arrow" /></button
       >

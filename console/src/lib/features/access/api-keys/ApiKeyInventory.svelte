@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { useServiceCapabilities } from '$lib/features/access/session/serviceCapabilities.svelte';
+  const services = useServiceCapabilities();
   import { apiKeyQueries } from '$lib/features/access/api-keys/apiKeyQueries';
 
   import { goto } from '$app/navigation';
@@ -86,7 +88,9 @@
   async function rotate(key: ApiKey) {
     if (
       !confirm(
-        `Rotate “${key.name}”? Existing clients stop authenticating when revocation converges.`
+        services.gatewayAvailable
+          ? `Rotate “${key.name}”? Existing clients stop authenticating when revocation converges.`
+          : `Rotate “${key.name}”? Its current secret will become invalid.`
       )
     )
       return;
@@ -131,6 +135,9 @@
       href={resolve('/api-keys/new')}>Create key <NavIcon name="arrow" /></a
     >{/if}
 </div>
+{#if !services.limitsEnforced}<p class="muted" role="status">
+    Limit and budget policies are saved but not enforced yet.
+  </p>{/if}
 {#if !canManage}
   <ReadOnlyNote>
     Your role can view API keys but not create, edit, rotate, or revoke them.
@@ -194,7 +201,7 @@
       <p>
         {createdBy
           ? 'Choose another issuer or clear the filter to review all keys.'
-          : 'Create a scoped key after activating your first route.'}
+          : 'Create a scoped key for your clients.'}
       </p>
       {#if createdBy}<button
           class="button button-secondary"
@@ -273,7 +280,10 @@
               ></td
             >
             <td>
-              {#if key.budget.daily.limit !== null || key.budget.monthly.limit !== null}
+              {#if !services.limitsEnforced}<small
+                  >Saved policy · not enforced</small
+                >
+              {:else if key.budget.daily.limit !== null || key.budget.monthly.limit !== null}
                 <small>
                   {#if key.budget.daily.limit !== null}Daily {formatBudget(
                       key.budget.daily.accrued
@@ -297,11 +307,11 @@
             >
             <td
               ><div class="row-actions">
-                <a
-                  class="button button-secondary"
-                  href={resolve(`/usage?api_key_id=${key.id}`)}
-                  aria-label={`Usage for ${key.name}`}>Usage</a
-                >
+                {#if services.gatewayAvailable}<a
+                    class="button button-secondary"
+                    href={resolve(`/usage?api_key_id=${key.id}`)}
+                    aria-label={`Usage for ${key.name}`}>Usage</a
+                  >{/if}
                 <button
                   class="button button-secondary"
                   type="button"

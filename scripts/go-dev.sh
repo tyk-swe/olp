@@ -11,6 +11,9 @@ export OLP_LISTEN_ADDR=127.0.0.1:8082
 export OLP_OBSERVABILITY_LISTEN_ADDR=127.0.0.1:9092
 export OLP_PUBLIC_ORIGIN=http://127.0.0.1:5173
 export OLP_DEV_API_ORIGIN=http://127.0.0.1:8082
+source scripts/go-secrets.sh "$PWD/.local/go-secrets"
+.local/bin/olp migrate
+echo "Bootstrap token file: $OLP_BOOTSTRAP_TOKEN_FILE"
 pids=()
 cleanup() {
   trap - EXIT INT TERM

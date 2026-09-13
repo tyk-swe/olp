@@ -1,0 +1,138 @@
+package access
+
+import (
+	"net/http"
+	"strconv"
+	"strings"
+	"time"
+)
+
+func (s *Server) settings(r *http.Request) (reply, error) {
+	if _, err := s.principal(r, s.Pool, "read"); err != nil {
+		return reply{}, err
+	}
+	rows, err := s.Pool.Query(r.Context(), "SELECT to_jsonb(s) FROM olp_go.settings s ORDER BY key")
+	if err != nil {
+		return reply{}, err
+	}
+	items, err := jsonRows(rows)
+	return ok(map[string]any{"items": items}), err
+}
+func (s *Server) setting(r *http.Request) (reply, error) {
+	if _, err := s.principal(r, s.Pool, "read"); err != nil {
+		return reply{}, err
+	}
+	var data []byte
+	var etag string
+	err := s.Pool.QueryRow(r.Context(), "SELECT to_jsonb(s),etag::text FROM olp_go.settings s WHERE key=$1", r.PathValue("key")).Scan(&data, &etag)
+	return detail(rawJSON(data), etag), err
+}
+func (s *Server) updateSetting(r *http.Request) (reply, error) {
+	var input struct {
+		Value string `json:"value"`
+	}
+	if err := decode(r, &input); err != nil {
+		return reply{}, err
+	}
+	key := r.PathValue("key")
+	switch key {
+	case "retention.requests_days", "retention.usage_days", "retention.audit_days":
+		n, err := strconv.Atoi(input.Value)
+		if err != nil || n < 1 || n > 3650 {
+			return reply{}, invalid("value", "Use an integer from 1 to 3650.")
+		}
+	case "limits.valkey_unavailable":
+		if input.Value != "fail_open" && input.Value != "fail_closed" {
+			return reply{}, invalid("value", "Use fail_open or fail_closed.")
+		}
+	case "auth.local_login_enabled":
+		if input.Value != "true" && input.Value != "false" {
+			return reply{}, invalid("value", "Use true or false.")
+		}
+	default:
+		return reply{}, fail(404, "not_found", "This setting does not exist.")
+	}
+	tx, err := s.begin(r)
+	if err != nil {
+		return reply{}, err
+	}
+	defer tx.Rollback(r.Context())
+	p, err := s.principal(r, tx, "settings")
+	if err != nil {
+		return reply{}, err
+	}
+	if key == "auth.local_login_enabled" && p.Role != "owner" {
+		return reply{}, forbidden()
+	}
+	var etag string
+	if err = tx.QueryRow(r.Context(), "SELECT etag::text FROM olp_go.settings WHERE key=$1", key).Scan(&etag); err != nil {
+		return reply{}, err
+	}
+	if err = match(r, etag); err != nil {
+		return reply{}, err
+	}
+	etag = newID()
+	if _, err = tx.Exec(r.Context(), "UPDATE olp_go.settings SET value=$1,etag=$2,updated_by=$3,updated_at=now() WHERE key=$4", input.Value, etag, p.ID, key); err != nil {
+		return reply{}, err
+	}
+	if key == "auth.local_login_enabled" {
+		if err = usableOwner(r, tx); err != nil {
+			return reply{}, err
+		}
+	}
+	if err = audit(r.Context(), tx, r, p.ID, "setting.update", "setting", key, "success"); err != nil {
+		return reply{}, err
+	}
+	var data []byte
+	if err = tx.QueryRow(r.Context(), "SELECT to_jsonb(s) FROM olp_go.settings s WHERE key=$1", key).Scan(&data); err != nil {
+		return reply{}, err
+	}
+	return commit(r, tx, detail(rawJSON(data), etag))
+}
+func (s *Server) auditEvents(r *http.Request) (reply, error) {
+	if _, err := s.principal(r, s.Pool, "read"); err != nil {
+		return reply{}, err
+	}
+	p, err := page(r)
+	if err != nil {
+		return reply{}, err
+	}
+	q := r.URL.Query()
+	outcome := q.Get("outcome")
+	if outcome != "" && outcome != "success" && outcome != "failure" {
+		return reply{}, invalid("outcome", "Use success or failure.")
+	}
+	var actor, after, before any
+	if raw := q.Get("actor_user_id"); raw != "" {
+		actor, err = parseUUID(raw)
+		if err != nil {
+			return reply{}, err
+		}
+	}
+	for key, target := range map[string]*any{"occurred_after": &after, "occurred_before": &before} {
+		if raw := q.Get(key); raw != "" {
+			v, err := time.Parse(time.RFC3339, raw)
+			if err != nil {
+				return reply{}, invalid(key, "Use an RFC3339 date and time.")
+			}
+			*target = v
+		}
+	}
+	if after != nil && before != nil && after.(time.Time).After(before.(time.Time)) {
+		return reply{}, invalid("occurred_before", "The end must follow the start.")
+	}
+	for _, key := range []string{"action", "resource_type", "resource_id"} {
+		if len(q.Get(key)) > 200 || strings.ContainsAny(q.Get(key), "\r\n") {
+			return reply{}, invalid(key, "Invalid audit filter.")
+		}
+	}
+	rows, err := s.Pool.Query(r.Context(), `SELECT jsonb_build_object('id',a.id,'actor_user_id',a.actor_user_id,'actor_email',u.email,'action',a.action,'resource_type',a.resource_type,'resource_id',a.resource_id,'outcome',a.outcome,'source_ip',a.source_ip,'user_agent_family',a.user_agent_family,'occurred_at',a.occurred_at)
+        FROM olp_go.audit a LEFT JOIN olp_go.users u ON u.id=a.actor_user_id
+        WHERE a.id<$1 AND ($2='' OR a.action=$2) AND ($3='' OR a.resource_type=$3) AND ($4='' OR a.resource_id=$4) AND ($5::uuid IS NULL OR a.actor_user_id=$5) AND ($6='' OR a.outcome=$6) AND ($7::timestamptz IS NULL OR a.occurred_at>=$7) AND ($8::timestamptz IS NULL OR a.occurred_at<=$8)
+        ORDER BY a.id DESC LIMIT $9`, p.Before, q.Get("action"), q.Get("resource_type"), q.Get("resource_id"), actor, outcome, after, before, p.Limit+1)
+	if err != nil {
+		return reply{}, err
+	}
+	items, err := jsonRows(rows)
+	return listReply(items, p), err
+}
