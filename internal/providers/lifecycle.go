@@ -176,13 +176,11 @@ func (s *Server) createProvider(r *http.Request) (access.Reply, error) {
 	return access.Commit(r, tx, result)
 }
 
-// invalidateEvidence downgrades every certified capability to declared and
-// clears slot validations after a transport change.
+// invalidateEvidence downgrades every certified capability after a transport
+// change. Slot evidence is already bound to the transport fingerprint; retaining
+// it lets a restored draft reuse validation only when all inputs match again.
 func invalidateEvidence(ctx context.Context, tx pgx.Tx, providerID string) error {
-	if _, err := tx.Exec(ctx, "UPDATE olp_go.provider_models SET capabilities=(SELECT coalesce(jsonb_agg(c||'{\"source\":\"declared\",\"certified_at\":null}'::jsonb),'[]'::jsonb) FROM jsonb_array_elements(capabilities) c) WHERE provider_id=$1", providerID); err != nil {
-		return err
-	}
-	_, err := tx.Exec(ctx, "UPDATE olp_go.provider_slots SET validated_at=NULL,validated_fingerprint=NULL WHERE provider_id=$1", providerID)
+	_, err := tx.Exec(ctx, "UPDATE olp_go.provider_models SET capabilities=(SELECT coalesce(jsonb_agg(c||'{\"source\":\"declared\",\"certified_at\":null}'::jsonb),'[]'::jsonb) FROM jsonb_array_elements(capabilities) c) WHERE provider_id=$1", providerID)
 	return err
 }
 
@@ -287,11 +285,12 @@ func (s *Server) mutation(r *http.Request, action string, fn func(ctx context.Co
 }
 
 type storedCapability struct {
-	Operation   string     `json:"operation"`
-	Surface     string     `json:"surface"`
-	Mode        string     `json:"mode"`
-	Source      string     `json:"source"`
-	CertifiedAt *time.Time `json:"certified_at"`
+	Operation             string     `json:"operation"`
+	Surface               string     `json:"surface"`
+	Mode                  string     `json:"mode"`
+	Source                string     `json:"source"`
+	CertifiedAt           *time.Time `json:"certified_at"`
+	CredentialFingerprint string     `json:"credential_fingerprint,omitempty"`
 }
 
 type storedModel struct {
@@ -423,6 +422,14 @@ func (s *Server) activateProvider(r *http.Request) (access.Reply, error) {
 		revisionSlots := make([]runtime.RevisionSlot, 0, len(slots))
 		for i := range slots {
 			slot := slots[i].published(current.Configuration.AuthMode)
+			if slot.Enabled && current.Configuration.credentialRequired() && slots[i].validationFingerprint(&current.Configuration, models) != "" {
+				if slot.CredentialID == nil {
+					return access.Reply{}, access.Fail(422, "credential_required", "Slot "+slot.Name+" has no credential.")
+				}
+				if slots[i].validationTime(&current.Configuration, models) == nil {
+					return access.Reply{}, access.Fail(422, "slot_validation_required", "Validate slot "+slot.Name+" for its enabled models before activating.")
+				}
+			}
 			if slot.Default {
 				credentialVersion = slot.CredentialVersion
 			}

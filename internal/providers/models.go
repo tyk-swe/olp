@@ -378,6 +378,16 @@ func (s *Server) certify(r *http.Request) (access.Reply, error) {
 	if len(m.Capabilities) == 0 {
 		return access.Reply{}, access.Fail(422, "no_capabilities", "Declare at least one capability before certifying.")
 	}
+	slots, err := loadSlots(r.Context(), a.Pool, id)
+	if err != nil {
+		return access.Reply{}, err
+	}
+	var defaultSlot slotRow
+	for _, row := range slots {
+		if row.Default {
+			defaultSlot = row
+		}
+	}
 	at := time.Now().UTC()
 	results := make([]map[string]any, 0, len(m.Capabilities))
 	certified := 0
@@ -388,10 +398,12 @@ func (s *Server) certify(r *http.Request) (access.Reply, error) {
 		if err == nil {
 			certified++
 			c.Source, c.CertifiedAt = "certified", &at
+			c.CredentialFingerprint = defaultSlot.credentialFingerprint(&current.Configuration)
 		} else {
 			pe := classify(err)
 			item["detail"], item["error_code"] = pe.Detail, pe.Code
 			c.Source, c.CertifiedAt = "declared", nil
+			c.CredentialFingerprint = ""
 		}
 		results = append(results, item)
 	}
@@ -421,6 +433,16 @@ func (s *Server) certify(r *http.Request) (access.Reply, error) {
 	encoded, _ := json.Marshal(m.Capabilities)
 	if _, err = tx.Exec(r.Context(), "UPDATE olp_go.provider_models SET capabilities=$3 WHERE provider_id=$1 AND id=$2", id, modelID, encoded); err != nil {
 		return access.Reply{}, err
+	}
+	models, err := loadModels(r.Context(), tx, id, true)
+	if err != nil {
+		return access.Reply{}, err
+	}
+	if validatedAt := defaultSlot.certificationTime(&current.Configuration, models); validatedAt != nil {
+		fingerprint := defaultSlot.validationFingerprint(&current.Configuration, models)
+		if _, err = tx.Exec(r.Context(), "UPDATE olp_go.provider_slots SET validated_at=$2,validated_fingerprint=$3 WHERE id=$1", defaultSlot.ID, validatedAt, fingerprint); err != nil {
+			return access.Reply{}, err
+		}
 	}
 	detail := fmt.Sprintf("Certified %d of %d capabilities for %s.", certified, len(m.Capabilities), m.UpstreamModel)
 	if _, err = tx.Exec(r.Context(), "UPDATE olp_go.providers SET last_probe_at=$2,last_probe_status=$3,last_probe_detail=$4 WHERE id=$1", id, at, probeStatus(certified > 0), detail); err != nil {

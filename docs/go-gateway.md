@@ -84,9 +84,9 @@ authentication mode is `none`, a credential. The console wizard then:
    work, including saving the evidence. Only certified tuples of enabled
    models are published to the runtime and are eligible for routes.
 5. **Activates** the draft (`POST /providers/{id}/activate`), which validates
-   the configuration, requires a usable credential and at least one enabled,
-   fully certified model, writes an immutable revision, and publishes a new
-   runtime generation.
+   the configuration, requires current validation for each selectable
+   credential slot and at least one enabled, fully certified model, writes
+   an immutable revision, and publishes a new runtime generation.
 
 Draft edits never change serving traffic: they mark the provider as having a
 pending activation, and the runtime keeps using the active revision. Changing
@@ -106,11 +106,24 @@ Credentials are write-only. Each provider has a default slot and up to 64
 slots in total; a slot carries a priority, a weight, an enabled flag,
 optional model, route, and key allowlists, and stored (not yet enforced)
 limits. Rotation (`POST /providers/{id}/credentials`) validates the new secret
-against the upstream model list before storing a new version and selecting it
-for the draft; the active revision keeps the version it was activated with
-until the provider is activated again. Slot validation
-(`POST /providers/{id}/credential-slots/{slot_id}/validate`) checks that one
-slot's credential works without affecting sibling slots.
+against the upstream model list and the default slot's allowed enabled model
+capabilities before storing a new version and selecting it for the draft.
+The active revision keeps the version it was activated with until the provider
+is activated again. Slot validation
+(`POST /providers/{id}/credential-slots/{slot_id}/validate`) probes every allowed
+enabled model capability with that slot's credential, including unary and
+streaming generation. Model-list access alone does not validate generation
+access. Validation and rotation requests allow 45 seconds overall, with a
+15-second limit per upstream probe.
+
+Evidence is tied to the credential version, transport configuration, and
+allowed enabled model capabilities. Changing those inputs requires matching
+validation before activation; edits made during a probe cause its result to
+be rejected. Certifying all required models with the current default
+credential also validates the default slot. Newly added or rotated pool slots
+must be validated separately. Disabled slots and slots with no allowed enabled
+models cannot be selected and do not block activation. Connections using
+`auth_mode: none` do not require credential evidence.
 
 Revoking a credential version (`POST /providers/{id}/credentials/{credential_id}/revoke`)
 is authority state: gateways learn about it through the same five-second

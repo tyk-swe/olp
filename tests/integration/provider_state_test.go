@@ -124,6 +124,10 @@ func TestCredentialSlotRotationReplaysAndReportsPublishedCredential(t *testing.T
 	if len(serving) != 1 || *serving[0].CredentialID != originalCredential {
 		t.Fatalf("draft slot edits changed serving credentials: %+v", serving)
 	}
+	up.accept("replacement")
+	for _, id := range []string{slotID, newSlot} {
+		h.want(owner, "POST", listPath+"/"+id+"/validate", nil, nil, 200)
+	}
 	detail = h.want(owner, "GET", providerPath, nil, nil, 200)
 	h.want(owner, "POST", providerPath+"/activate", nil, withMatch(detail, map[string]string{"Idempotency-Key": "activate-rotation"}), 200)
 	active := h.want(owner, "GET", listPath, nil, nil, 200)
@@ -138,6 +142,8 @@ func TestCredentialHistoryTracksEveryDraftAndPublishedSlot(t *testing.T) {
 	h := newAccessHarness(t)
 	owner := h.owner()
 	up := newVendor(t)
+	up.accept(vendorRotated)
+	up.accept("replacement")
 	created := h.want(owner, "POST", "/api/v3/providers", map[string]any{
 		"name": "Credential history", "model": vendorModel, "credential": vendorSecret,
 		"configuration": map[string]any{"kind": "openai_compatible", "auth_mode": "api_key", "endpoint": up.URL + "/v1"},
@@ -188,6 +194,7 @@ func TestCredentialHistoryTracksEveryDraftAndPublishedSlot(t *testing.T) {
 		detail := h.want(owner, "GET", path, nil, nil, 200)
 		h.want(owner, "POST", path+"/activate", nil, withMatch(detail, map[string]string{"Idempotency-Key": key}), 200)
 	}
+	h.want(owner, "POST", path+"/credential-slots/"+poolSlot+"/validate", nil, nil, 200)
 	publish("publish-pool")
 	assertFlags(map[string][2]bool{defaultCredential: {true, true}, poolCredential: {true, true}})
 	slots = h.want(owner, "GET", path+"/credential-slots", nil, nil, 200)
@@ -195,8 +202,12 @@ func TestCredentialHistoryTracksEveryDraftAndPublishedSlot(t *testing.T) {
 	replacement := credentialFor(poolSlot)
 	assertFlags(map[string][2]bool{defaultCredential: {true, true}, poolCredential: {true, false}, replacement: {false, true}})
 	// Sharing a credential across slots must still produce one history row.
-	slots = h.want(owner, "PUT", path+"/credential-slots/"+uuid.NewString(), map[string]any{"slot": map[string]any{"name": "shared", "credential_version_id": replacement}}, withMatch(slots, map[string]string{"Idempotency-Key": "shared"}), 200)
+	sharedSlot := uuid.NewString()
+	slots = h.want(owner, "PUT", path+"/credential-slots/"+sharedSlot, map[string]any{"slot": map[string]any{"name": "shared", "credential_version_id": replacement}}, withMatch(slots, map[string]string{"Idempotency-Key": "shared"}), 200)
 	assertFlags(map[string][2]bool{defaultCredential: {true, true}, poolCredential: {true, false}, replacement: {false, true}})
+	for _, id := range []string{poolSlot, sharedSlot} {
+		h.want(owner, "POST", path+"/credential-slots/"+id+"/validate", nil, nil, 200)
+	}
 	publish("publish-rotation")
 	assertFlags(map[string][2]bool{defaultCredential: {true, true}, poolCredential: {false, false}, replacement: {true, true}})
 }
@@ -270,6 +281,9 @@ func TestProviderInventoryAvailabilityTracksPublishedModels(t *testing.T) {
 	detail = h.want(owner, "GET", providerPath, nil, nil, 200)
 	detail = h.want(owner, "PATCH", providerPath+"/models/"+firstID, map[string]any{"enabled": false}, etagHeader(detail), 200)
 	assertAvailability(map[string]bool{"first": true, "second": false})
+	slots := h.want(owner, "GET", providerPath+"/credential-slots", nil, nil, 200)
+	slotID := slots["items"].([]any)[0].(map[string]any)["id"].(string)
+	h.want(owner, "POST", providerPath+"/credential-slots/"+slotID+"/validate", nil, nil, 200)
 	h.want(owner, "POST", providerPath+"/activate", nil, withMatch(detail, map[string]string{"Idempotency-Key": "publish-second"}), 200)
 	assertAvailability(map[string]bool{"first": false, "second": true})
 	// A route can keep serving the active model while an older provider
