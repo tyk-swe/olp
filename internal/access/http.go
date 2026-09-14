@@ -39,8 +39,23 @@ type Server struct {
 	Keys                 *secrets.KeyRing
 	Bootstrap            string
 	OIDCClient           *http.Client
-	passwordSlots        chan struct{}
-	dummyPassword        string
+	// LimitsEnforced is true where the process has the shared state that
+	// admission needs, so stored request, token, concurrency and cost limits
+	// are actually applied. The console shows stored amounts either way and
+	// uses this to say whether they bind. It is set during composition,
+	// before the first request is served, and never changes afterwards.
+	LimitsEnforced bool
+	// RetentionEnforced is true where this installation is configured with the
+	// shared coordination state (OLP_VALKEY_URL) the worker plane requires, so
+	// retention and aggregation run in its worker and all processes. A control
+	// process cannot observe a separate worker replica, so this reports the
+	// installation's configuration rather than a worker's liveness: the console
+	// uses it to say whether stored retention policies are applied at all, not
+	// whether a pass ran. It is set during composition, before the first
+	// request is served, and never changes afterwards.
+	RetentionEnforced bool
+	passwordSlots     chan struct{}
+	dummyPassword     string
 }
 
 func New(ctx context.Context, pool *pgxpool.Pool, installation, origin string, auth *secrets.AuthKey, keys *secrets.KeyRing, bootstrap string) (*Server, error) {

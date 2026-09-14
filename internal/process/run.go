@@ -19,12 +19,20 @@ import (
 	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/gateway"
+	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/management"
 	"github.com/tyk-swe/olp/internal/providers"
 	"github.com/tyk-swe/olp/internal/routes"
 	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/internal/secrets"
+	"github.com/tyk-swe/olp/internal/usage"
 )
+
+// metadataBuffer is how many request metadata events one inference replica may
+// hold while the stream writer catches up. Beyond it events are dropped and
+// counted as loss, so a slow or unreachable stream costs completeness rather
+// than memory or inference latency.
+const metadataBuffer = 8192
 
 func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 	ctx, stop := context.WithCancel(ctx)
@@ -83,6 +91,28 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 	if err != nil {
 		return err
 	}
+	// Shared state comes up before anything that admits or accounts for
+	// traffic, because both the gateway and the console are told at
+	// composition time whether this installation has a limiter at all.
+	prefix := database.ValkeyNamespace(installation)
+	var limiter *limits.Limiter
+	var outage *outagePolicy
+	if openValkey != nil {
+		vk, err = openValkey(startup)
+		if err != nil {
+			return err
+		}
+		defer vk.Close()
+		if limiter, err = limits.New(vk, prefix+"limits"); err != nil {
+			return err
+		}
+		if c.Mode.Inference() {
+			if outage, err = newOutagePolicy(startup, pool, log); err != nil {
+				return err
+			}
+		}
+	}
+	var emitter *usage.Emitter
 	var rt *runtime.Manager
 	if c.Mode.Management() || c.Mode.Inference() {
 		auth, keys, bootstrap, err := loadSecrets(c, installation)
@@ -99,6 +129,14 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 			TrustedProxies:   c.TrustedProxyCIDRs,
 		}, log)
 		if c.Mode.Inference() {
+			// Without shared state there is no admission backend at all: the
+			// gateway then refuses traffic that carries hard limits rather
+			// than serving it unmetered, and keeps logging its metadata.
+			if limiter != nil {
+				gw.Admission = gateway.NewAdmission(limiter, outage.Policy, log)
+				emitter = usage.NewEmitter(metadataBuffer)
+				gw.Sink = &gateway.AccountingSink{Emitter: emitter, Log: log}
+			}
 			gw.Register(public)
 		}
 		if c.Mode.Management() {
@@ -106,20 +144,27 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 			if err != nil {
 				return err
 			}
+			control.LimitsEnforced = limiter != nil
+			// The worker plane that applies retention runs only where shared
+			// state is configured, and a control process cannot see whether a
+			// separate worker replica is alive, so the console is told what
+			// this installation is configured for.
+			control.RetentionEnforced = limiter != nil
 			control.Register(public)
 			catalogue := providers.New(control, &policy)
 			catalogue.Health = gw.Health()
+			catalogue.Log = log
+			if limiter != nil {
+				catalogue.Quotas = limiter
+			}
 			catalogue.Register(public)
 			routes.New(control).Register(public)
 			(&gateway.Playground{Access: control, Gateway: gw}).Register(public)
+			// Usage, pricing, request history and recovery reporting are part
+			// of the management surface; their patterns are more specific than
+			// its catch-all, which answers everything no surface claims.
+			(&usage.Server{Access: control, VendorKind: providers.VendorKind}).Register(public)
 		}
-	}
-	if openValkey != nil {
-		vk, err = openValkey(startup)
-		if err != nil {
-			return err
-		}
-		defer vk.Close()
 	}
 	if err := startup.Err(); err != nil {
 		return err
@@ -131,6 +176,41 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 		authority = func() bool {
 			status := rt.Authority()
 			return status.Loaded && !status.Stale
+		}
+	}
+	// The delivery plane outlives the listeners: it is cancelled only once the
+	// gateway has drained, so every event a served request emitted is written
+	// and this gateway's epoch is closed against what it actually delivered.
+	delivery, stopDelivery := context.WithCancel(context.WithoutCancel(ctx))
+	defer stopDelivery()
+	var delivered sync.WaitGroup
+	if emitter != nil {
+		stream, instance := usage.StreamName(prefix), usage.GatewayInstance()
+		delivered.Go(func() { emitter.RunWriter(delivery, vk, stream, log) })
+		delivered.Go(func() { usage.RunLossReporter(delivery, pool, emitter, instance, log) })
+	}
+	if outage != nil {
+		go outage.run(ctx)
+	}
+	// The worker plane is cancelled last of all, because the consumer it runs
+	// is what turns the events the delivery plane just flushed into accounting.
+	workers, stopWorkers := context.WithCancel(context.WithoutCancel(ctx))
+	defer stopWorkers()
+	var workersStopped func()
+	if c.Mode == config.Worker || c.Mode == config.All {
+		if limiter != nil {
+			// The consumer reads its stream with a blocking XREADGROUP, and a
+			// client answers one connection in order: on the shared client a
+			// second spent blocking is a second every admission decision and
+			// every emitted event waits behind. The consumer gets its own.
+			reader, err := openValkey(startup)
+			if err != nil {
+				return err
+			}
+			defer reader.Close()
+			workersStopped = startWorkers(workers, pool, reader, limiter, usage.StreamName(prefix), log)
+		} else {
+			log.Warn("worker plane skipped: no shared state is configured", "mode", c.Mode)
 		}
 	}
 	private := healthHandler(ctx, c.RequestTimeout, pool.Ping, vk, authority)
@@ -181,11 +261,40 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 		})
 	}
 	wg.Wait()
+	// Nothing serves any longer, so the emitter holds every event this process
+	// will ever produce: the writer drains it and the loss reporter closes the
+	// epoch before the workers that read the stream are told to stop.
+	stopDelivery()
+	awaitPlane(c.ShutdownTimeout, delivered.Wait, log, "request metadata delivery")
+	stopWorkers()
+	if workersStopped != nil {
+		awaitPlane(c.ShutdownTimeout, workersStopped, log, "worker plane")
+	}
 	log.Info("process stopped", "mode", c.Mode)
 	if errors.Is(serveErr, http.ErrServerClosed) {
 		return nil
 	}
 	return serveErr
+}
+
+// awaitPlane waits for one background plane to close after it has been
+// cancelled. Each plane gets the configured shutdown budget of its own, because
+// draining buffered request metadata is what keeps an orderly stop from
+// becoming a completeness gap; a plane that outlives its budget is left to the
+// bounded cleanup it does on its own rather than holding the process open.
+func awaitPlane(budget time.Duration, wait func(), log *slog.Logger, plane string) {
+	done := make(chan struct{})
+	go func() {
+		wait()
+		close(done)
+	}()
+	timer := time.NewTimer(budget)
+	defer timer.Stop()
+	select {
+	case <-done:
+	case <-timer.C:
+		log.Warn("shutdown budget reached before the plane closed", "plane", plane)
+	}
 }
 
 func loadSecrets(c config.Config, installation string) (*secrets.AuthKey, *secrets.KeyRing, string, error) {

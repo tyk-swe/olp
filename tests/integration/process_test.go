@@ -10,9 +10,13 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/tyk-swe/olp/internal/testutil"
 	"github.com/tyk-swe/olp/openapi"
@@ -29,6 +33,7 @@ func TestProcessModesPrivateProbesAndShutdown(t *testing.T) {
 			env := map[string]string{"OLP_DATABASE_URL": required(t, "OLP_TEST_DATABASE_URL"),
 				"OLP_AUTH_HMAC_KEY_FILE": required(t, "OLP_AUTH_HMAC_KEY_FILE"),
 				"OLP_MASTER_KEY_FILE":    required(t, "OLP_MASTER_KEY_FILE"), "OLP_VALKEY_URL": required(t, "OLP_TEST_VALKEY_URL"), "OLP_LISTEN_ADDR": "127.0.0.1:0", "OLP_OBSERVABILITY_LISTEN_ADDR": "127.0.0.1:0", "OLP_CONSOLE_DIR": assets, "OLP_SHUTDOWN_TIMEOUT": "1s"}
+			started := time.Now().UTC()
 			p := testutil.StartProcess(t, binary, mode, env)
 			httpClient := &http.Client{Timeout: 3 * time.Second}
 			get := func(origin, path string, status int) []byte {
@@ -52,6 +57,11 @@ func TestProcessModesPrivateProbesAndShutdown(t *testing.T) {
 			if output, err := probe.CombinedOutput(); err != nil {
 				t.Fatalf("health-probe: %v %s", err, output)
 			}
+			if mode == "worker" {
+				// Serving nothing is the point of this mode: what it owes the
+				// installation is a recovery plane that checks in.
+				awaitWorkerPlane(t, started)
+			}
 			if mode != "worker" {
 				for _, path := range []string{"/health/live", "/health/ready", "/metrics"} {
 					get(p.PublicOrigin, path, 404)
@@ -63,6 +73,10 @@ func TestProcessModesPrivateProbesAndShutdown(t *testing.T) {
 						t.Fatal("served contract differs")
 					}
 					get(p.PublicOrigin, "/api/v3/bootstrap", 501)
+					// Usage, pricing and request history must claim their own
+					// paths ahead of the catch-all that answers 501 for every
+					// management path no surface owns.
+					get(p.PublicOrigin, "/api/v3/usage/summary", 401)
 					get(p.PublicOrigin, "/health", 200)
 					get(p.PublicOrigin, "/providers", 200)
 				} else {
@@ -108,6 +122,43 @@ func TestInvalidConfigurationFailsBeforeBinding(t *testing.T) {
 		cancel()
 		if err == nil || strings.Contains(string(output), "secret") || strings.Contains(string(output), "bind") {
 			t.Fatalf("invalid configuration: %v %s", err, output)
+		}
+	}
+}
+
+// awaitWorkerPlane waits until every worker task has recorded liveness against
+// this run. The health rows outlive the processes that wrote them, so only a
+// checkpoint written since this process started proves its plane is running.
+func awaitWorkerPlane(t *testing.T, since time.Time) {
+	t.Helper()
+	pool, err := pgxpool.New(t.Context(), required(t, "OLP_TEST_DATABASE_URL"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+	wanted := []string{"cost_reconciliation", "maintenance", "request_metadata_consumer",
+		"request_metadata_gateway_epoch_detection"}
+	deadline := time.Now().Add(20 * time.Second)
+	for {
+		rows, err := pool.Query(t.Context(),
+			"SELECT task FROM olp_go.worker_task_health WHERE checked_at>=$1 ORDER BY task", since)
+		if err != nil {
+			t.Fatal(err)
+		}
+		reported, err := pgx.CollectRows(rows, pgx.RowTo[string])
+		if err != nil {
+			t.Fatal(err)
+		}
+		if slices.Equal(reported, wanted) {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("worker tasks that checkpointed since startup: %v, want %v", reported, wanted)
+		}
+		select {
+		case <-t.Context().Done():
+			t.Fatal(t.Context().Err())
+		case <-time.After(250 * time.Millisecond):
 		}
 	}
 }
