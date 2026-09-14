@@ -20,6 +20,10 @@ func Configuration(rawURL string, maxConnections int, timeout time.Duration) (*p
 	c.ConnConfig.RuntimeParams["statement_timeout"] = "10000"
 	c.ConnConfig.RuntimeParams["lock_timeout"] = "10000"
 	c.ConnConfig.RuntimeParams["idle_in_transaction_session_timeout"] = "15000"
+	// Calendar-unit interval arithmetic on timestamptz (retention cutoffs, the
+	// replay horizon) follows the session time zone; pin it so every session
+	// computes the same UTC instants regardless of the server default.
+	c.ConnConfig.RuntimeParams["TimeZone"] = "UTC"
 	return c, nil
 }
 
