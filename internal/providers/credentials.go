@@ -4,12 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/runtime"
 )
 
@@ -280,7 +282,68 @@ func (s *Server) slotList(ctx context.Context, q access.Queryer, current *record
 		validated := row.validationTime(&current.Configuration, models)
 		health[row.ID] = map[string]any{"revoked": row.CredentialRevoked, "active_credential_version_id": activeCredentials[row.ID], "cooling_down": nil, "validated_at": validated, "usage": nil}
 	}
-	return access.Detail(map[string]any{"items": items, "health": health, "etag": current.SlotsETag, "connection_usage": nil}, current.SlotsETag), nil
+	connection := s.quotas(ctx, current.ID, slots, activeCredentials, health)
+	return access.Detail(map[string]any{"items": items, "health": health, "etag": current.SlotsETag, "connection_usage": connection}, current.SlotsETag), nil
+}
+
+// quotaTimeout bounds one console read of shared quota state. Valkey holds no
+// part of the stored slot list, so a slow store costs the page its live
+// counters rather than the page itself.
+const quotaTimeout = 2 * time.Second
+
+// quotaUsage renders one shared usage snapshot as the management contract's
+// ProviderQuotaUsage.
+func quotaUsage(u limits.Usage) map[string]any {
+	return map[string]any{"requests_this_minute": u.RequestsThisMinute, "tokens_this_minute": u.TokensThisMinute, "concurrent_requests": u.ConcurrentRequests}
+}
+
+// quotas fills the live per-slot counters into health and returns the counters
+// of the shared provider connection. Every field it cannot read stays null:
+// the stored list is complete without them, so an unreachable or malformed
+// quota store is reported to the operator and shown to the console as unknown,
+// never as an idle zero and never as a failed request.
+func (s *Server) quotas(ctx context.Context, providerID string, slots []slotRow, published map[string]*string, health map[string]any) any {
+	if s.Quotas == nil {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(ctx, quotaTimeout)
+	defer cancel()
+	connection, err := s.Quotas.ProviderUsage(ctx, limits.ConnectionLookup(providerID))
+	if err != nil {
+		s.quotaUnavailable(err)
+		return nil
+	}
+	for _, row := range slots {
+		entry, ok := health[row.ID].(map[string]any)
+		if !ok {
+			continue
+		}
+		usage, err := s.Quotas.ProviderUsage(ctx, limits.SlotLookup(row.ID))
+		if err != nil {
+			s.quotaUnavailable(err)
+			break
+		}
+		// The cooldown is asked of the credential version the published
+		// revision dispatches with, because that is the scope the gateway
+		// penalises, and of the slot itself.
+		cooling, err := s.Quotas.Cooling(ctx, limits.CredentialScope(providerID, published[row.ID]), limits.SlotScope(row.ID))
+		if err != nil {
+			s.quotaUnavailable(err)
+			break
+		}
+		entry["usage"], entry["cooling_down"] = quotaUsage(usage), cooling
+	}
+	return quotaUsage(connection)
+}
+
+// quotaUnavailable reports a quota read that failed without changing what the
+// caller answers.
+func (s *Server) quotaUnavailable(err error) {
+	log := s.Log
+	if log == nil {
+		log = slog.Default()
+	}
+	log.Warn("shared provider quota state is unavailable", "error", err)
 }
 
 func (s *Server) slots(r *http.Request) (access.Reply, error) {

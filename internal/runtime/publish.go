@@ -41,7 +41,9 @@ type Configuration struct {
 	Endpoint string `json:"endpoint"`
 	Options  struct {
 		CredentialHeaders []string                   `json:"credential_headers"`
+		Limits            *Limits                    `json:"limits"`
 		ParameterDefaults map[string]json.RawMessage `json:"parameter_defaults"`
+		VendorID          string                     `json:"vendor_id"`
 	} `json:"options"`
 }
 
@@ -120,6 +122,8 @@ func Compile(ctx context.Context, tx pgx.Tx) (*Snapshot, error) {
 		provider.Endpoint = cfg.Endpoint
 		provider.CredentialHeaders = cfg.Options.CredentialHeaders
 		provider.ParameterDefaults = cfg.Options.ParameterDefaults
+		provider.VendorID = cfg.Options.VendorID
+		provider.Limits = publishedLimits(cfg.Options.Limits)
 		for _, model := range revisionModels {
 			for _, c := range model.Capabilities {
 				if c.Source == "certified" {
@@ -165,6 +169,15 @@ func Compile(ctx context.Context, tx pgx.Tx) (*Snapshot, error) {
 		snapshot.Routes[route.Slug] = route
 	}
 	return snapshot, rows.Err()
+}
+
+// publishedLimits drops a connection quota that bounds nothing so clearing
+// every limit publishes the same snapshot as never setting one.
+func publishedLimits(l *Limits) *Limits {
+	if l == nil || (l.RequestsPerMinute == nil && l.TokensPerMinute == nil && l.MaxConcurrency == nil) {
+		return nil
+	}
+	return l
 }
 
 // PublishedTarget is the stored shape of one route revision target. The

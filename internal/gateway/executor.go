@@ -7,6 +7,7 @@ import (
 	"io"
 	"mime"
 	"net/http"
+	"net/http/httptrace"
 	"sort"
 	"strconv"
 	"strings"
@@ -17,6 +18,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/tyk-swe/olp/internal/egress"
+	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
 	"github.com/tyk-swe/olp/internal/runtime"
 )
@@ -32,6 +34,12 @@ const (
 	classCredential     = "credential"
 	classProtocol       = "protocol"
 	classCancelled      = "cancelled"
+)
+
+// The only operation and surface this gateway serves.
+const (
+	operationGeneration = "generation"
+	surfaceOpenAI       = "openai"
 )
 
 // failoverAllowed reports whether a failure class may select another
@@ -66,9 +74,32 @@ type execution struct {
 	attempts []runtime.Attempt
 	budget   int
 	emit     openai.Emit // streaming only
+	estimate int64       // tokens reserved before the request is served
 
-	once  sync.Once
-	facts []AttemptFact
+	once       sync.Once
+	facts      []AttemptFact
+	failure    *Error         // terminal error decided before the attempt loop ran
+	firstByte  *time.Duration // request start to the first payload byte the client received
+	lease      *limits.Lease  // the API key reservation, settled once the request ends
+	dispatched bool           // at least one attempt was handed to a provider
+}
+
+// usage is the metering evidence the request ends with: the usage of the
+// attempt that served it, which is the last one recorded.
+func (x *execution) usage() *openai.Usage {
+	if len(x.facts) == 0 {
+		return nil
+	}
+	return x.facts[len(x.facts)-1].Usage
+}
+
+// delivered records when the first byte of the response payload reached the
+// client. Later deliveries keep the first one.
+func (x *execution) delivered(at time.Time) {
+	if x.firstByte == nil {
+		elapsed := at.Sub(x.request.startedAt)
+		x.firstByte = &elapsed
+	}
 }
 
 // outcome is the terminal result of the attempt loop.
@@ -85,7 +116,34 @@ type attemptFailure struct {
 	committed  bool
 	retryAfter time.Duration
 	upstream   *openai.UpstreamError
-	overall    bool // the route deadline, not the attempt deadline, expired
+	overall    bool   // the route deadline, not the attempt deadline, expired
+	dispatched bool   // the request reached the upstream before the failure
+	quota      string // a quota this gateway enforces rejected the attempt
+}
+
+// The quotas that can reject an attempt before it is dispatched.
+const (
+	quotaConnection = "connection"
+	quotaSlot       = "slot"
+)
+
+// billingUncertain reports whether the upstream may have served and billed
+// work this attempt cannot account for. Anything already delivered to the
+// client was served, and a request that reached the upstream may have been
+// processed in full even though its result never came back. A rejection the
+// upstream stated — a bad request, an exhausted quota, a refused credential —
+// costs nothing, and neither does a failure that never left this gateway.
+// The phase, not the class, decides: classConnect covers every transport
+// failure here, including a connection lost long after the request was sent.
+func (f *attemptFailure) billingUncertain() bool {
+	if f.committed {
+		return true
+	}
+	switch f.class {
+	case classRateLimit, classUpstreamClient, classCredential:
+		return false
+	}
+	return f.dispatched
 }
 
 func (f *attemptFailure) toError() *Error {
@@ -97,6 +155,14 @@ func (f *attemptFailure) toError() *Error {
 	case classConnect:
 		return serverError(http.StatusBadGateway, "upstream_unavailable", "The upstream provider could not be reached.")
 	case classRateLimit:
+		// A quota this gateway enforces was never the upstream's decision, and
+		// saying so would send the caller looking at the wrong system.
+		switch f.quota {
+		case quotaConnection:
+			return &Error{Status: http.StatusTooManyRequests, Type: "rate_limit_error", Code: "rate_limit_exceeded", Message: "The provider connection limit was exceeded.", RetryAfter: f.retryAfter}
+		case quotaSlot:
+			return &Error{Status: http.StatusTooManyRequests, Type: "rate_limit_error", Code: "rate_limit_exceeded", Message: "The provider credential limit was exceeded.", RetryAfter: f.retryAfter}
+		}
 		return &Error{Status: http.StatusTooManyRequests, Type: "rate_limit_error", Code: "upstream_rate_limit", Message: "The upstream provider is rate limiting requests.", RetryAfter: f.retryAfter}
 	case classUpstreamServer:
 		return serverError(http.StatusBadGateway, "upstream_unavailable", "The upstream provider failed with HTTP "+strconv.Itoa(f.status)+".")
@@ -136,8 +202,10 @@ func (s *Server) execute(ctx context.Context, x *execution) *outcome {
 	overall := time.Duration(x.route.OverallTimeout) * time.Millisecond
 	ctx, cancel := context.WithTimeout(ctx, overall)
 	defer cancel()
+	deadline, _ := ctx.Deadline()
 	snapshot := x.request.release.Snapshot
 	used := 0
+	unmeterable := false
 	var last *attemptFailure
 	for _, attempt := range x.attempts {
 		if used >= x.budget || ctx.Err() != nil {
@@ -160,8 +228,46 @@ func (s *Server) execute(ctx context.Context, x *execution) *outcome {
 			if provider.AuthMode != "none" && s.Runtime.Revoked(*slot.CredentialID) {
 				continue
 			}
+			// The provider quotas are reserved for exactly as long as the
+			// attempt may run.
+			timeout := min(attempt.Timeout, time.Until(deadline))
+			if timeout <= 0 {
+				// The route deadline is spent, so there is no window left to
+				// reserve and nothing further to try.
+				return &outcome{err: (&attemptFailure{class: classTimeout}).toError()}
+			}
+			// A cooldown another replica recorded is read here rather than while
+			// the slots are ranked, so a limiter answering slowly costs one round
+			// trip per slot actually tried instead of one per candidate slot.
+			if s.Admission.cooling(ctx, provider.ID, &slot) {
+				continue
+			}
+			reservation, rejection, skip := s.Admission.reserveTarget(ctx, &provider, &slot, x.estimate, timeout)
+			if skip {
+				unmeterable = true
+				continue
+			}
+			if rejection != nil {
+				// The quota rejected the attempt before the provider was
+				// called, so it cost the upstream nothing and a sibling
+				// target may still serve this request.
+				used++
+				x.facts = append(x.facts, s.rejectedFact(x, attempt, slot, used, rejection))
+				last = rejection
+				if rejection.quota == quotaConnection {
+					break // every credential shares the connection quota
+				}
+				continue
+			}
 			used++
 			fact, completion, failure := s.attempt(ctx, x, attempt, &provider, slot, used)
+			// Only an attempt that reached the upstream spent the key's window.
+			// An attempt that died inside this gateway — an endpoint outside the
+			// egress policy, a body that would not encode, a credential that
+			// would not apply — cost no provider anything, so the request stays
+			// refundable.
+			x.dispatched = x.dispatched || failure == nil || failure.dispatched
+			reservation.settle(ctx, totalTokens(fact.Usage))
 			x.facts = append(x.facts, fact)
 			s.health.record(provider.ID, fact)
 			if failure == nil {
@@ -177,8 +283,10 @@ func (s *Server) execute(ctx context.Context, x *execution) *outcome {
 			switch failure.class {
 			case classCredential:
 				s.health.cooldown(provider.ID, slot.ID, credentialCooldown)
+				s.Admission.cooldown(ctx, provider.ID, &slot, credentialCooldown)
 			case classRateLimit:
 				s.health.cooldown(provider.ID, slot.ID, failure.retryAfter)
+				s.Admission.cooldown(ctx, provider.ID, &slot, cooldownDuration(failure.retryAfter))
 			default:
 				next = true // the provider itself failed; sibling credentials would too
 			}
@@ -194,6 +302,10 @@ func (s *Server) execute(ctx context.Context, x *execution) *outcome {
 		return &outcome{err: (&attemptFailure{class: classCancelled}).toError(), cancelled: true}
 	case last != nil:
 		return &outcome{err: last.toError()}
+	case unmeterable:
+		// Every eligible target had a quota that could not be consulted.
+		// Serving unmetered would spend a budget nobody can account for.
+		return &outcome{err: limitsUnavailable()}
 	}
 	return &outcome{err: serverError(http.StatusServiceUnavailable, "upstream_unavailable", "No provider is currently able to serve `"+x.route.Slug+"`.")}
 }
@@ -222,7 +334,7 @@ func (s *Server) slots(x *execution, attempt runtime.Attempt, provider *runtime.
 		score := 0.0
 		if routeID, err := uuid.Parse(x.route.ID); err == nil {
 			if slotID, err := uuid.Parse(slot.ID); err == nil {
-				score = runtime.Score(routeID, slotID, slot.Weight, "generation", "openai", x.mode, x.affinity)
+				score = runtime.Score(routeID, slotID, slot.Weight, operationGeneration, surfaceOpenAI, x.mode, x.affinity)
 			}
 		}
 		usable = append(usable, ranked{slot, score})
@@ -242,8 +354,24 @@ func (s *Server) slots(x *execution, attempt runtime.Attempt, provider *runtime.
 
 // attemptState tracks why an attempt context ended.
 type attemptState struct {
-	parent context.Context
-	reason atomic.Int32 // 1 first-byte deadline, 2 idle deadline, 3 stream cap
+	parent     context.Context
+	reason     atomic.Int32 // 1 first-byte deadline, 2 idle deadline, 3 stream cap
+	dispatched atomic.Bool
+}
+
+// trace marks the attempt dispatched once the request has been handed to the
+// upstream, either because it was written in full or because the upstream has
+// already started answering. Everything before that is the connect phase,
+// where a failure cannot have been served.
+func (st *attemptState) trace() *httptrace.ClientTrace {
+	return &httptrace.ClientTrace{
+		WroteRequest: func(info httptrace.WroteRequestInfo) {
+			if info.Err == nil {
+				st.dispatched.Store(true)
+			}
+		},
+		GotFirstResponseByte: func() { st.dispatched.Store(true) },
+	}
 }
 
 func (st *attemptState) classify(err error, committed bool) string {
@@ -274,8 +402,8 @@ func endpointPath(family openai.Family) string {
 	return "/chat/completions"
 }
 
-// attempt performs one upstream call with one credential.
-func (s *Server) attempt(ctx context.Context, x *execution, a runtime.Attempt, provider *runtime.Provider, slot runtime.Slot, ordinal int) (AttemptFact, *openai.Completion, *attemptFailure) {
+// newFact opens the record of one attempt against one credential slot.
+func (s *Server) newFact(x *execution, a runtime.Attempt, slot runtime.Slot, ordinal int) AttemptFact {
 	fact := AttemptFact{
 		Ordinal:            ordinal,
 		TargetID:           a.TargetID,
@@ -283,6 +411,7 @@ func (s *Server) attempt(ctx context.Context, x *execution, a runtime.Attempt, p
 		ProviderRevisionID: a.ProviderRevisionID,
 		UpstreamModel:      a.UpstreamModel,
 		SlotID:             slot.ID,
+		Mode:               x.mode,
 		StartedAt:          s.now(),
 	}
 	if slot.CredentialID != nil {
@@ -291,14 +420,41 @@ func (s *Server) attempt(ctx context.Context, x *execution, a runtime.Attempt, p
 	if slot.CredentialVersion != nil {
 		fact.CredentialVersion = *slot.CredentialVersion
 	}
+	return fact
+}
+
+// rejectedFact records an attempt a quota refused. Nothing was sent, so the
+// attempt carries no status and cannot have been billed by anyone.
+func (s *Server) rejectedFact(x *execution, a runtime.Attempt, slot runtime.Slot, ordinal int, rejection *attemptFailure) AttemptFact {
+	fact := s.newFact(x, a, slot, ordinal)
+	fact.Class = rejection.class
+	fact.Duration = s.now().Sub(fact.StartedAt)
+	if rejection.retryAfter > 0 {
+		retry := rejection.retryAfter
+		fact.RetryAfter = &retry
+	}
+	fact.recordEvidence(false)
+	return fact
+}
+
+// attempt performs one upstream call with one credential.
+func (s *Server) attempt(ctx context.Context, x *execution, a runtime.Attempt, provider *runtime.Provider, slot runtime.Slot, ordinal int) (AttemptFact, *openai.Completion, *attemptFailure) {
+	fact := s.newFact(x, a, slot, ordinal)
+	st := &attemptState{parent: ctx}
 	fail := func(class string, f *attemptFailure) (AttemptFact, *openai.Completion, *attemptFailure) {
 		if f == nil {
 			f = &attemptFailure{}
 		}
 		f.class = class
+		f.dispatched = st.dispatched.Load()
 		fact.Class = class
 		fact.Committed = f.committed
 		fact.Duration = s.now().Sub(fact.StartedAt)
+		if f.retryAfter > 0 {
+			retry := f.retryAfter
+			fact.RetryAfter = &retry
+		}
+		fact.recordEvidence(f.billingUncertain())
 		return fact, nil, f
 	}
 
@@ -317,13 +473,12 @@ func (s *Server) attempt(ctx context.Context, x *execution, a runtime.Attempt, p
 	}
 	timeout := min(a.Timeout, remaining)
 
-	st := &attemptState{parent: ctx}
 	actx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	firstByte := time.AfterFunc(timeout, func() { st.reason.CompareAndSwap(0, 1); cancel() })
 	defer firstByte.Stop()
 
-	req, err := http.NewRequestWithContext(actx, http.MethodPost, endpoint.String()+endpointPath(x.family), bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(httptrace.WithClientTrace(actx, st.trace()), http.MethodPost, endpoint.String()+endpointPath(x.family), bytes.NewReader(body))
 	if err != nil {
 		return fail(classConnect, nil)
 	}
@@ -357,6 +512,9 @@ func (s *Server) attempt(ctx context.Context, x *execution, a runtime.Attempt, p
 		return fail(st.classify(err, false), nil)
 	}
 	defer resp.Body.Close()
+	// The response status is the first thing the upstream sends back.
+	received := s.now().Sub(fact.StartedAt)
+	fact.FirstByte = &received
 	fact.Status = resp.StatusCode
 	if resp.StatusCode != http.StatusOK {
 		raw, _ := io.ReadAll(io.LimitReader(resp.Body, errorBodyLimit))
@@ -434,6 +592,9 @@ func (s *Server) attempt(ctx context.Context, x *execution, a runtime.Attempt, p
 	fact.Class = classSuccess
 	fact.Committed = committed
 	fact.Duration = s.now().Sub(fact.StartedAt)
+	// A success carrying no usage was still served and billed upstream, with
+	// nothing this gateway can meter.
+	fact.recordEvidence(true)
 	return fact, completion, nil
 }
 
@@ -497,29 +658,42 @@ func retryAfter(value string, now time.Time) time.Duration {
 // finish emits the terminal envelope exactly once.
 func (s *Server) finish(x *execution, out *outcome, status int) {
 	x.once.Do(func() {
+		completedAt := s.now()
 		env := Envelope{
-			RequestID: x.request.id,
-			ClientIP:  x.request.clientIP,
-			Actor:     x.actor,
-			KeyID:     x.keyID,
-			UserID:    x.userID,
-			Family:    string(x.family),
-			Mode:      x.mode,
-			Outcome:   "failure",
-			Status:    status,
-			StartedAt: x.request.startedAt,
-			Duration:  s.now().Sub(x.request.startedAt),
-			Attempts:  x.facts,
+			RequestID:    x.request.id,
+			AccountingID: x.request.accountingID(),
+			ClientIP:     x.request.clientIP,
+			Actor:        x.actor,
+			KeyID:        x.keyID,
+			UserID:       x.userID,
+			Family:       string(x.family),
+			Mode:         x.mode,
+			Operation:    operationGeneration,
+			Surface:      surfaceOpenAI,
+			Outcome:      "failure",
+			Status:       status,
+			StartedAt:    x.request.startedAt,
+			CompletedAt:  completedAt,
+			Duration:     completedAt.Sub(x.request.startedAt),
+			FirstByte:    x.firstByte,
+			Attempts:     x.facts,
 		}
 		if x.request.release != nil {
 			env.ReleaseSequence = x.request.release.Sequence
+			if x.request.release.Snapshot != nil {
+				env.RuntimeGenerationID = x.request.release.Snapshot.Generation.ID
+			}
 		}
 		if x.route != nil {
 			env.Route = x.route.Slug
 			env.RouteRevisionID = x.route.RevisionID
 		}
-		if len(x.facts) > 0 {
-			env.Usage = x.facts[len(x.facts)-1].Usage
+		env.Usage = x.usage()
+		switch {
+		case out != nil && out.err != nil:
+			env.ErrorClass = out.err.Code
+		case out == nil && x.failure != nil:
+			env.ErrorClass = x.failure.Code
 		}
 		if out != nil {
 			env.Committed = out.committed

@@ -3,6 +3,7 @@ package providers
 import (
 	"context"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -10,6 +11,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/egress"
+	"github.com/tyk-swe/olp/internal/limits"
 )
 
 // HealthStats summarises gateway attempts against one provider.
@@ -29,11 +31,22 @@ type HealthSource interface {
 	ProviderHealth(window time.Duration) map[string]HealthStats
 }
 
+// QuotaSource reports the shared quota state a provider connection and its
+// credential slots are in right now. *limits.Limiter implements it. The field
+// stays nil where no Valkey is configured, and the console is then told the
+// live counters are unknown rather than shown a zero it would read as idle.
+type QuotaSource interface {
+	ProviderUsage(ctx context.Context, lookup string) (limits.Usage, error)
+	Cooling(ctx context.Context, scopes ...string) (bool, error)
+}
+
 // Server serves the provider management surface.
 type Server struct {
 	Access *access.Server
 	Egress *egress.Policy
 	Health HealthSource
+	Quotas QuotaSource
+	Log    *slog.Logger
 	client *http.Client
 	probes chan struct{}
 }
