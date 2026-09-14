@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
@@ -22,6 +23,7 @@ type Process struct {
 	done          chan struct{}
 	result        error
 	logPath       string
+	killed        atomic.Bool
 }
 
 func Environment(values map[string]string) []string {
@@ -106,7 +108,29 @@ func StartProcess(t testing.TB, binary, mode string, env map[string]string) *Pro
 
 func (p *Process) Log() string { data, _ := os.ReadFile(p.logPath); return string(data) }
 
+// Kill terminates the process the way a lost machine does, without giving it
+// the chance to drain, and waits for it to be reaped. A process stopped this
+// way exited uncleanly on purpose, so Stop no longer reports its exit status as
+// a shutdown failure.
+func (p *Process) Kill() error {
+	select {
+	case <-p.done:
+		return fmt.Errorf("process had already exited before it was killed: %v", p.result)
+	default:
+	}
+	p.killed.Store(true)
+	if err := p.cmd.Process.Signal(syscall.SIGKILL); err != nil {
+		return err
+	}
+	<-p.done
+	return nil
+}
+
 func (p *Process) Stop(timeout time.Duration) error {
+	if p.killed.Load() {
+		<-p.done
+		return nil
+	}
 	select {
 	case <-p.done:
 		return p.result

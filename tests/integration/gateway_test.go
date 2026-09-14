@@ -235,12 +235,38 @@ func (h *accessHarness) stream(key string) (string, bool, int) {
 	return text, done, resp.StatusCode
 }
 
+// TestCapabilitiesReportConfiguredEnforcement proves the two capability flags
+// the console gates its enforced branches on report what this installation is
+// composed with instead of asserting enforcement. Without shared state
+// admission has no backend and the worker plane that applies retention and
+// aggregation never starts, so both are false; an installation configured with
+// it reports both as true. Neither flag claims a worker replica is alive: a
+// control process cannot observe one.
+func TestCapabilitiesReportConfiguredEnforcement(t *testing.T) {
+	unconfigured := newAccessHarness(t)
+	caps := unconfigured.want(nil, "GET", "/api/v3/auth/capabilities", nil, nil, 200)
+	if caps["limits_enforced"] != false || caps["retention_enforced"] != false {
+		t.Fatalf("capabilities without shared state: %v", caps)
+	}
+	// Both flags are decided during composition, before anything is served,
+	// which is what setting them on a fresh harness stands in for here.
+	configured := newAccessHarness(t)
+	configured.Server.LimitsEnforced, configured.Server.RetentionEnforced = true, true
+	caps = configured.want(nil, "GET", "/api/v3/auth/capabilities", nil, nil, 200)
+	if caps["limits_enforced"] != true || caps["retention_enforced"] != true {
+		t.Fatalf("capabilities with shared state: %v", caps)
+	}
+}
+
 func TestGatewayFromEmptyInstallationToSDKTraffic(t *testing.T) {
 	h := newAccessHarness(t)
 	owner := h.owner()
 	up := newVendor(t)
+	// This harness composes the surfaces without the shared state that
+	// admission and the worker plane both need, so neither stored limits nor
+	// retention are reported as enforced here.
 	caps := h.want(nil, "GET", "/api/v3/auth/capabilities", nil, nil, 200)
-	if caps["gateway_available"] != true || caps["limits_enforced"] != false {
+	if caps["gateway_available"] != true || caps["limits_enforced"] != false || caps["retention_enforced"] != false {
 		t.Fatalf("capabilities %v", caps)
 	}
 	if h.want(owner, "GET", "/api/v3/provider-kinds/openai_compatible/capabilities", nil, nil, 200)["provider_kind"] != "openai_compatible" {
