@@ -67,13 +67,21 @@ func (h *healthTracker) coolingDown(providerID, slotID string) bool {
 }
 
 func (h *healthTracker) cooldown(providerID, slotID string, d time.Duration) {
-	if d <= 0 {
-		d = rateLimitCooldown
-	}
-	d = min(d, maxCooldown)
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	h.provider(providerID).cooldowns[slotID] = h.now().Add(d)
+	h.provider(providerID).cooldowns[slotID] = h.now().Add(cooldownDuration(d))
+}
+
+// cooldownDuration bounds how long one rejection sidelines a credential slot.
+// An upstream that named no delay gets the default wait, and one that named an
+// implausible delay is not believed past the cap: a slot that never comes back
+// is a slot that silently shrinks the pool. The shared cooldown every replica
+// reads is written for the same span as the local one.
+func cooldownDuration(d time.Duration) time.Duration {
+	if d <= 0 {
+		return rateLimitCooldown
+	}
+	return min(d, maxCooldown)
 }
 
 // record folds one attempt into the circuit and the health window.

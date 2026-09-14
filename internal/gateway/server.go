@@ -46,6 +46,10 @@ type Runtime interface {
 type Server struct {
 	Runtime Runtime
 	Sink    Sink
+	// Admission enforces the budgets shared by every replica. A nil Admission
+	// means none were configured: keys and targets that bound nothing are
+	// served, and anything that must be metered fails closed.
+	Admission *Admission
 
 	log       *slog.Logger
 	cfg       Config
@@ -91,17 +95,30 @@ var requestIDPattern = regexp.MustCompile(`^[A-Za-z0-9._-]{1,128}$`)
 
 // request carries per-request identity shared by handlers.
 type request struct {
-	id        string
+	id string
+	// minted records that this gateway chose the request id. A caller may name
+	// its own, and nothing stops two callers from naming the same one.
+	minted    bool
 	clientIP  string
 	startedAt time.Time
 	release   *runtime.Release
+}
+
+// accountingID is the identity durable records are stored under: the request
+// id when this gateway minted it, and a fresh one when the caller named it.
+func (r request) accountingID() string {
+	if r.minted {
+		return r.id
+	}
+	return uuid.Must(uuid.NewV7()).String()
 }
 
 // begin assigns the request identity, pins the release, and sets the
 // headers every inference response carries.
 func (s *Server) begin(w http.ResponseWriter, r *http.Request) request {
 	id := r.Header.Get("X-Request-Id")
-	if !requestIDPattern.MatchString(id) {
+	minted := !requestIDPattern.MatchString(id)
+	if minted {
 		id = uuid.Must(uuid.NewV7()).String()
 	}
 	h := w.Header()
@@ -109,7 +126,7 @@ func (s *Server) begin(w http.ResponseWriter, r *http.Request) request {
 	h.Set("Cache-Control", "no-store")
 	h.Set("X-Content-Type-Options", "nosniff")
 	s.cors(w, r)
-	return request{id: id, clientIP: ClientIP(r, s.cfg.TrustedProxies), startedAt: s.now(), release: s.Runtime.Release()}
+	return request{id: id, minted: minted, clientIP: ClientIP(r, s.cfg.TrustedProxies), startedAt: s.now(), release: s.Runtime.Release()}
 }
 
 // cors allows browser SDK clients from any origin: the surface authenticates
@@ -317,29 +334,37 @@ func (s *Server) inference(family openai.Family) http.HandlerFunc {
 		x := &execution{request: s.begin(w, r), family: family, actor: "api_key"}
 		status := http.StatusInternalServerError
 		var out *outcome
-		defer func() { s.finish(x, out, status) }()
+		defer func() {
+			s.finish(x, out, status)
+			// The budgets this request reserved are settled even when the
+			// client is gone: a concurrency slot nobody releases is a slot
+			// every replica keeps counting.
+			settleKey(r.Context(), x.lease, x.dispatched, totalTokens(x.usage()), s.log)
+		}()
 		// A context timeout alone cannot interrupt a blocked socket read.
 		rc := http.NewResponseController(w)
 		if err := rc.SetReadDeadline(time.Now().Add(requestBodyTimeout)); err != nil {
-			writeError(w, serverError(http.StatusInternalServerError, "internal_error", "The request could not be read."))
+			e := serverError(http.StatusInternalServerError, "internal_error", "The request could not be read.")
+			x.failure, status = e, e.Status
+			writeError(w, e)
 			return
 		}
 		if !s.admit() {
-			status = overloaded.Status
+			x.failure, status = overloaded, overloaded.Status
 			writeError(w, overloaded)
 			return
 		}
 		defer s.release()
 		authority, e := s.authenticate(r, "inference")
 		if e != nil {
-			status = e.Status
+			x.failure, status = e, e.Status
 			writeError(w, e)
 			return
 		}
 		x.keyID, x.affinity = authority.ID, []byte(authority.ID)
 		body, e := s.readBody(r)
 		if e != nil {
-			status = e.Status
+			x.failure, status = e, e.Status
 			writeError(w, e)
 			return
 		}
@@ -349,24 +374,40 @@ func (s *Server) inference(family openai.Family) http.HandlerFunc {
 		parsed, err := openai.Parse(family, body)
 		if err != nil {
 			e = requestError(err)
-			status = e.Status
+			x.failure, status = e, e.Status
 			writeError(w, e)
 			return
 		}
 		x.parsed = parsed
 		if e := s.prepare(x, func(slug string) bool { return authority.Allows("inference", slug, s.now()) }); e != nil {
-			status = e.Status
+			x.failure, status = e, e.Status
 			writeError(w, e)
 			return
 		}
 		if x.budget, e = attemptBudget(r, x.route); e != nil {
-			status = e.Status
+			x.failure, status = e, e.Status
+			writeError(w, e)
+			return
+		}
+		// Admission happens once the request is understood and before any
+		// provider is called, so a rejected request costs an upstream nothing.
+		// The lease outlives the route deadline it is sized against: it is the
+		// backstop for a replica that dies mid-request, not the deadline.
+		x.estimate = estimateTokens(parsed)
+		if x.lease, e = s.Admission.reserveKey(r.Context(), authority, x.estimate, time.Duration(x.route.OverallTimeout)*time.Millisecond); e != nil {
+			x.failure, status = e, e.Status
 			writeError(w, e)
 			return
 		}
 		if parsed.Stream {
 			sw := &streamWriter{w: w, family: family}
-			x.emit = sw.emit
+			x.emit = func(frame []byte) error {
+				err := sw.emit(frame)
+				if err == nil {
+					x.delivered(s.now())
+				}
+				return err
+			}
 			out = s.execute(r.Context(), x)
 			status = sw.finish(out)
 			return
@@ -397,6 +438,8 @@ func (s *Server) inference(family openai.Family) http.HandlerFunc {
 		if err != nil {
 			out.err = (&attemptFailure{class: classCancelled}).toError()
 			out.cancelled = true
+		} else {
+			x.delivered(s.now())
 		}
 	}
 }
@@ -417,7 +460,7 @@ func (s *Server) prepare(x *execution, permitted func(slug string) bool) *Error 
 	if !permitted(route.Slug) {
 		return permissionError("route_forbidden", "This API key is not allowed to use the model `"+route.Slug+"`.")
 	}
-	attempts, err := runtime.Select(snapshot, route.Slug, "generation", "openai", x.mode, x.affinity)
+	attempts, err := runtime.Select(snapshot, route.Slug, operationGeneration, surfaceOpenAI, x.mode, x.affinity)
 	if err != nil {
 		return selectionError(err, route.Slug)
 	}

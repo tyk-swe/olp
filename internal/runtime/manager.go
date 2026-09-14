@@ -193,10 +193,9 @@ func (m *Manager) refreshAuthority(ctx context.Context) error {
 		return fmt.Errorf("authority: %w", err)
 	}
 	for rows.Next() {
-		var lookup string
 		var policy []byte
 		record := keyRecord{}
-		if err = rows.Scan(&record.authority.ID, &lookup, &record.authority.Issuer, &record.digest, &policy, &record.authority.ExpiresAt, &record.authority.RevokedAt); err != nil {
+		if err = rows.Scan(&record.authority.ID, &record.authority.LookupID, &record.authority.Issuer, &record.digest, &policy, &record.authority.ExpiresAt, &record.authority.RevokedAt); err != nil {
 			rows.Close()
 			return fmt.Errorf("authority: %w", err)
 		}
@@ -204,7 +203,7 @@ func (m *Manager) refreshAuthority(ctx context.Context) error {
 			rows.Close()
 			return fmt.Errorf("authority: key %s policy: %w", record.authority.ID, err)
 		}
-		state.keys[lookup] = record
+		state.keys[record.authority.LookupID] = record
 	}
 	rows.Close()
 	if err = rows.Err(); err != nil {

@@ -13,6 +13,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/secrets"
 )
 
@@ -97,8 +98,24 @@ func AdvanceAuthority(r *http.Request, tx pgx.Tx) (any, error) {
 	return map[string]any{"id": id, "sequence": sequence}, err
 }
 
-const keyJSON = `jsonb_build_object('id',k.id,'lookup_id',k.lookup_id,'name',k.name,'created_by',k.created_by,'created_by_email',u.email,'etag',k.etag,'created_at',k.created_at,'expires_at',k.expires_at,'revoked_at',k.revoked_at,'rotated_at',k.rotated_at,'scopes',k.policy->'scopes','allowed_routes',k.policy->'allowed_routes','requests_per_minute',k.policy->'requests_per_minute','tokens_per_minute',k.policy->'tokens_per_minute','max_concurrency',k.policy->'max_concurrency','budget',jsonb_build_object('enforcement_active',false,'daily',jsonb_build_object('limit',k.policy->'daily_cost_limit','accrued','0','window_ends_at',date_trunc('day',now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'+interval '1 day'),'monthly',jsonb_build_object('limit',k.policy->'monthly_cost_limit','accrued','0','window_ends_at',date_trunc('month',now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'+interval '1 month'),'unpriced_attempts',0))`
+const keyFields = `'id',k.id,'lookup_id',k.lookup_id,'name',k.name,'created_by',k.created_by,'created_by_email',u.email,'etag',k.etag,'created_at',k.created_at,'expires_at',k.expires_at,'revoked_at',k.revoked_at,'rotated_at',k.rotated_at,'scopes',k.policy->'scopes','allowed_routes',k.policy->'allowed_routes','requests_per_minute',k.policy->'requests_per_minute','tokens_per_minute',k.policy->'tokens_per_minute','max_concurrency',k.policy->'max_concurrency'`
 const keyFrom = " FROM olp_go.api_keys k JOIN olp_go.users u ON u.id=k.created_by"
+
+// keyJSON renders one API key row, whose alias must be k, as the management
+// contract's key detail. The budget is live accounting: accrued spend and
+// unpriced attempts are summed from the recorded facts and their retained
+// rollups, the amounts they are measured against come from the stored policy,
+// and enforcement_active tells the console whether this installation admits
+// requests against them at all.
+func (s *Server) keyJSON() string {
+	enforcement := "false"
+	if s.LimitsEnforced {
+		enforcement = "true"
+	}
+	return `jsonb_build_object(` + keyFields + `,'budget',jsonb_set(jsonb_set(` + limits.BudgetSQL +
+		`||jsonb_build_object('enforcement_active',` + enforcement +
+		`),'{daily,limit}',COALESCE(k.policy->'daily_cost_limit','null'::jsonb)),'{monthly,limit}',COALESCE(k.policy->'monthly_cost_limit','null'::jsonb)))`
+}
 
 func (s *Server) apiKeys(r *http.Request) (Reply, error) {
 	if _, err := s.Principal(r, s.Pool, "read"); err != nil {
@@ -115,7 +132,7 @@ func (s *Server) apiKeys(r *http.Request) (Reply, error) {
 			return Reply{}, err
 		}
 	}
-	rows, err := s.Pool.Query(r.Context(), "SELECT "+keyJSON+keyFrom+" WHERE k.id<$1 AND ($2::uuid IS NULL OR k.created_by=$2) ORDER BY k.id DESC LIMIT $3", p.Before, issuer, p.Limit+1)
+	rows, err := s.Pool.Query(r.Context(), "SELECT "+s.keyJSON()+keyFrom+" WHERE k.id<$1 AND ($2::uuid IS NULL OR k.created_by=$2) ORDER BY k.id DESC LIMIT $3", p.Before, issuer, p.Limit+1)
 	if err != nil {
 		return Reply{}, err
 	}
@@ -132,7 +149,7 @@ func (s *Server) apiKey(r *http.Request) (Reply, error) {
 	}
 	var data []byte
 	var etag string
-	err = s.Pool.QueryRow(r.Context(), "SELECT "+keyJSON+",k.etag::text"+keyFrom+" WHERE k.id=$1", id).Scan(&data, &etag)
+	err = s.Pool.QueryRow(r.Context(), "SELECT "+s.keyJSON()+",k.etag::text"+keyFrom+" WHERE k.id=$1", id).Scan(&data, &etag)
 	return Detail(RawJSON(data), etag), err
 }
 func (s *Server) createAPIKey(r *http.Request) (Reply, error) {
@@ -361,8 +378,10 @@ func (s *Server) transitionKey(r *http.Request, rotate bool) (Reply, error) {
 
 // Authority is durable input for M3's independent runtime refresh. Lookup never
 // grants one positive scope through the other or applies unenforced limits.
+// LookupID is the public lookup segment of the secret, which identifies the key
+// in shared state that must never carry the key's internal identifier.
 type Authority struct {
-	ID, Issuer           string
+	ID, Issuer, LookupID string
 	Policy               KeyPolicy
 	ExpiresAt, RevokedAt *time.Time
 }
@@ -374,7 +393,7 @@ func (s *Server) LookupAuthority(ctx context.Context, secret string) (Authority,
 		return a, errors.New("invalid API key")
 	}
 	var digest, data []byte
-	err := s.Pool.QueryRow(ctx, "SELECT id::text,created_by::text,digest,policy,expires_at,revoked_at FROM olp_go.api_keys WHERE lookup_id=$1", parts[1]).Scan(&a.ID, &a.Issuer, &digest, &data, &a.ExpiresAt, &a.RevokedAt)
+	err := s.Pool.QueryRow(ctx, "SELECT id::text,lookup_id,created_by::text,digest,policy,expires_at,revoked_at FROM olp_go.api_keys WHERE lookup_id=$1", parts[1]).Scan(&a.ID, &a.LookupID, &a.Issuer, &digest, &data, &a.ExpiresAt, &a.RevokedAt)
 	if err != nil || !hmac.Equal(digest, s.Auth.Digest("api_key", secret)) {
 		return a, errors.New("invalid API key")
 	}

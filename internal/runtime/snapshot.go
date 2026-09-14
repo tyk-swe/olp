@@ -60,6 +60,17 @@ func (s *Slot) Allows(model, route, keyID string) bool {
 		(len(s.AllowedAPIKeys) == 0 || (keyID != "" && slices.Contains(s.AllowedAPIKeys, keyID)))
 }
 
+// Limits is the connection-level quota published for one provider. A nil
+// Limits means the connection publishes no quota of its own and a nil member
+// means that dimension is unbounded; slots carry their own limits separately.
+// Every member is omitted from the serving JSON when unset so a snapshot
+// published before connection quotas existed keeps its digest.
+type Limits struct {
+	RequestsPerMinute *int64 `json:"requests_per_minute,omitempty"`
+	TokensPerMinute   *int64 `json:"tokens_per_minute,omitempty"`
+	MaxConcurrency    *int64 `json:"max_concurrency,omitempty"`
+}
+
 // Provider is the serving view of one active provider revision.
 type Provider struct {
 	ID                string                     `json:"id"`
@@ -73,7 +84,12 @@ type Provider struct {
 	AuthMode          string                     `json:"auth_mode,omitempty"`
 	CredentialHeaders []string                   `json:"credential_headers,omitempty"`
 	ParameterDefaults map[string]json.RawMessage `json:"parameter_defaults,omitempty"`
-	Slots             []Slot                     `json:"slots,omitempty"`
+	// VendorID is the upstream vendor this connection speaks to. It groups
+	// connections that share one upstream account for accounting and limits.
+	VendorID string `json:"vendor_id,omitempty"`
+	// Limits is the quota shared by every slot of this connection.
+	Limits *Limits `json:"limits,omitempty"`
+	Slots  []Slot  `json:"slots,omitempty"`
 }
 
 // Target is one route attempt candidate.

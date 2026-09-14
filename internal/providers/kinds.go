@@ -123,6 +123,19 @@ var capabilityOptions = []capabilityInput{
 	{Operation: OperationGeneration, Surface: SurfaceOpenAI, Mode: ModeStreaming},
 }
 
+// VendorKind maps a catalogue vendor identifier to the connector kind that
+// serves it. Prices are published per vendor while every recorded attempt
+// carries the kind of the provider that served it, so pricing selection
+// applies a vendor-scoped price only where the two agree.
+func VendorKind(vendor string) (string, bool) {
+	for i := range vendors {
+		if vendors[i].ID == vendor {
+			return vendors[i].Connector, true
+		}
+	}
+	return "", false
+}
+
 func kindByName(name string) *kindCapability {
 	for i := range kinds {
 		if kinds[i].Kind == name {
