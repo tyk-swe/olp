@@ -242,6 +242,13 @@
     <div class="loading-state" role="status">
       Loading recent request metadata…
     </div>
+  {:else if services.error}
+    <div class="inline-problem" role="alert">
+      Request history capabilities are unavailable.
+      <button class="text-button" type="button" onclick={() => services.retry()}
+        >Try again</button
+      >
+    </div>
   {:else if !services.retentionEnforced}
     <div class="empty-state" role="status">
       <span aria-hidden="true"><NavIcon name="request" size={24} /></span>

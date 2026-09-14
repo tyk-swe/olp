@@ -115,7 +115,10 @@ test('setup, invitations, key policy, profile, settings, audit, and OIDC work th
   await expect(
     page.getByText('Browser application', { exact: true })
   ).toBeVisible();
-  await expect(page.getByText('Saved policy · not enforced')).toBeVisible();
+  // Valkey is configured for this installation, so limit policies are live
+  // accounting rather than saved intent: the inventory reports this key's
+  // budget state instead of the not-enforced note.
+  await expect(page.getByText('No cost budget')).toBeVisible();
   await page.screenshot({ path: info.outputPath('keys.png'), fullPage: true });
 
   await page.goto('/settings/profile');

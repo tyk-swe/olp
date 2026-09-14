@@ -455,12 +455,23 @@ test('a browser user configures an OpenAI-compatible route and reaches unary and
     await expect(
       page.getByText('Request history capabilities are unavailable.')
     ).toBeVisible({ timeout: 15_000 });
+    expect(historyRequests).toEqual([]);
   } finally {
     await page.unroute(capabilitiesPattern);
   }
+  // Once the capability answer arrives, retention is enforced here, so the
+  // explorer queries retained metadata instead of disclaiming it.
+  const listed = page.waitForResponse(
+    (response) =>
+      response.request().method() === 'GET' &&
+      new URL(response.url()).pathname === '/api/v3/requests'
+  );
   await page.getByRole('button', { name: 'Try again', exact: true }).click();
+  expect((await listed).status()).toBe(200);
+  await expect(
+    page.getByRole('button', { name: 'Apply filters' })
+  ).toBeVisible();
   await expect(
     page.getByText(/Request history is not retained by this installation/)
-  ).toBeVisible();
-  expect(historyRequests).toEqual([]);
+  ).toHaveCount(0);
 });

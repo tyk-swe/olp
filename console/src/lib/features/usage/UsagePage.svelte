@@ -12,6 +12,10 @@
     usageSummary
   } from '$lib/api/usage';
   import { getApiKey } from '$lib/features/access/api-keys/api';
+  import {
+    budgetStateNote,
+    budgetWindowState
+  } from '$lib/features/access/api-keys/budgetPresentation';
   import UsageChart from '$lib/features/usage/UsageChart.svelte';
   import UsageCompletenessStatus from '$lib/features/usage/UsageCompletenessStatus.svelte';
   import { errorMessage } from '$lib/api/http';
@@ -203,6 +207,12 @@
   <UsageCompletenessStatus completeness={usage.data.completeness} />
 
   {#if usage.data.apiKey}
+    {@const budget = usage.data.apiKey.budget}
+    {@const currency = usage.data.summary.currency}
+    {@const daily = budgetWindowState(budget, 'daily')}
+    {@const monthly = budgetWindowState(budget, 'monthly')}
+    {@const dailyNote = budgetStateNote(daily)}
+    {@const monthlyNote = budgetStateNote(monthly)}
     <section class="card budget-line" aria-label="Filtered API key budget">
       <div class="budget-key">
         <p>API key budget</p>
@@ -211,46 +221,34 @@
       </div>
       <div>
         <p>Daily accrued / limit</p>
-        <strong
-          >{formatBudget(
-            usage.data.apiKey.budget.daily.accrued,
-            usage.data.summary.currency
-          )} / {usage.data.apiKey.budget.daily.limit === null
+        <strong class:danger-text={daily === 'exhausted'}
+          >{formatBudget(budget.daily.accrued, currency)} / {budget.daily
+            .limit === null
             ? 'No limit'
-            : formatBudget(
-                usage.data.apiKey.budget.daily.limit,
-                usage.data.summary.currency
-              )}</strong
+            : formatBudget(budget.daily.limit, currency)}</strong
         >
-        <span
-          >Window ends {formatDate(
-            usage.data.apiKey.budget.daily.window_ends_at
-          )}</span
-        >
+        <span>Window ends {formatDate(budget.daily.window_ends_at)}</span>
+        {#if dailyNote}<span class:danger-text={daily === 'exhausted'}
+            >{dailyNote}</span
+          >{/if}
       </div>
       <div>
         <p>Monthly accrued / limit</p>
-        <strong
-          >{formatBudget(
-            usage.data.apiKey.budget.monthly.accrued,
-            usage.data.summary.currency
-          )} / {usage.data.apiKey.budget.monthly.limit === null
+        <strong class:danger-text={monthly === 'exhausted'}
+          >{formatBudget(budget.monthly.accrued, currency)} / {budget.monthly
+            .limit === null
             ? 'No limit'
-            : formatBudget(
-                usage.data.apiKey.budget.monthly.limit,
-                usage.data.summary.currency
-              )}</strong
+            : formatBudget(budget.monthly.limit, currency)}</strong
         >
-        <span
-          >Window ends {formatDate(
-            usage.data.apiKey.budget.monthly.window_ends_at
-          )}</span
-        >
+        <span>Window ends {formatDate(budget.monthly.window_ends_at)}</span>
+        {#if monthlyNote}<span class:danger-text={monthly === 'exhausted'}
+            >{monthlyNote}</span
+          >{/if}
       </div>
       <div>
         <p>Unpriced attempts this UTC month</p>
-        <strong
-          >{formatInteger(usage.data.apiKey.budget.unpriced_attempts)}</strong
+        <strong class:unpriced={budget.unpriced_attempts > 0}
+          >{formatInteger(budget.unpriced_attempts)}</strong
         >
         <span>Unpriced attempts accrue 0.</span>
       </div>
@@ -539,6 +537,10 @@
   }
   .budget-key .mono {
     overflow-wrap: anywhere;
+  }
+  /* Wins over the muted caption colour the notes would otherwise inherit. */
+  .budget-line .danger-text {
+    color: var(--danger);
   }
   .pipeline-card {
     display: grid;

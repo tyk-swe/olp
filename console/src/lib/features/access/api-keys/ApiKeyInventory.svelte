@@ -20,6 +20,10 @@
   import NavIcon from '$lib/components/NavIcon.svelte';
   import ReadOnlyNote from '$lib/components/ReadOnlyNote.svelte';
   import { formatBudget, formatDate } from '$lib/format';
+  import {
+    budgetState,
+    budgetStateLabel
+  } from '$lib/features/access/api-keys/budgetPresentation';
   import type { ApiKeyListState } from '$lib/features/access/api-keys/apiKeyListState';
 
   let {
@@ -233,6 +237,7 @@
       >
       <tbody>
         {#each keys.data?.items ?? [] as key (key.id)}
+          {@const budget = budgetState(key.budget)}
           <tr>
             <td
               ><strong>{key.name}</strong><br /><code>{key.lookup_id}</code></td
@@ -280,7 +285,7 @@
               ></td
             >
             <td>
-              {#if !services.limitsEnforced}<small
+              {#if !services.limitsEnforced || budget === 'policy'}<small
                   >Saved policy · not enforced</small
                 >
               {:else if key.budget.daily.limit !== null || key.budget.monthly.limit !== null}
@@ -294,6 +299,12 @@
                       key.budget.monthly.accrued
                     )} / {formatBudget(key.budget.monthly.limit)}{/if}
                 </small>
+                {#if budget === 'exhausted' || budget === 'unknown'}<br /><span
+                    class="badge"
+                    class:danger={budget === 'exhausted'}
+                    class:warning={budget === 'unknown'}
+                    >{budgetStateLabel(budget)}</span
+                  >{/if}
               {:else}
                 <small>No cost budget</small>
               {/if}
