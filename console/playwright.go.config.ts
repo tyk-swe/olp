@@ -12,7 +12,7 @@ function database(name: string) {
 
 export default defineConfig({
   testDir: './tests',
-  testMatch: '**/{access,foundation}/**/*.spec.ts',
+  testMatch: '**/{access,foundation,gateway}/**/*.spec.ts',
   timeout: 90_000,
   outputDir: 'test-results/go-access',
   workers: 1,
@@ -40,7 +40,9 @@ export default defineConfig({
         OLP_PUBLIC_ORIGIN: 'http://127.0.0.1:4182',
         OLP_LISTEN_ADDR: '127.0.0.1:4182',
         OLP_OBSERVABILITY_LISTEN_ADDR: '127.0.0.1:9182',
-        OLP_CONSOLE_DIR: 'console/build'
+        OLP_CONSOLE_DIR: 'console/build',
+        OLP_PROVIDER_EGRESS_ALLOW_CIDRS: '127.0.0.0/8',
+        OLP_PROVIDER_EGRESS_ALLOW_HTTP_HOSTS: '127.0.0.1'
       }
     },
     {
@@ -53,12 +55,19 @@ export default defineConfig({
         OLP_PUBLIC_ORIGIN: 'http://127.0.0.1:4183',
         OLP_LISTEN_ADDR: '127.0.0.1:4184',
         OLP_OBSERVABILITY_LISTEN_ADDR: '127.0.0.1:9184',
-        OLP_CONSOLE_DIR: 'console/build'
+        OLP_CONSOLE_DIR: 'console/build',
+        OLP_PROVIDER_EGRESS_ALLOW_CIDRS: '127.0.0.0/8',
+        OLP_PROVIDER_EGRESS_ALLOW_HTTP_HOSTS: '127.0.0.1'
       }
     },
     {
       command: 'node tests/access/mock-oidc.mjs',
       url: 'http://127.0.0.1:4186/.well-known/openid-configuration',
+      reuseExistingServer: false
+    },
+    {
+      command: 'node tests/gateway/mock-openai.mjs',
+      url: 'http://127.0.0.1:4187/health',
       reuseExistingServer: false
     },
     {

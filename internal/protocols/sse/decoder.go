@@ -18,6 +18,15 @@ type Frame struct {
 	RetryMS *uint64 `json:"retry_ms"`
 }
 
+// DecodeError identifies invalid SSE framing without classifying reader or
+// emit errors, which belong to the transport and consumer respectively.
+type DecodeError struct{ Detail string }
+
+func (e *DecodeError) Error() string { return e.Detail }
+
+// ErrEventTooLarge marks an event whose wire bytes exceed the decoder limit.
+var ErrEventTooLarge = &DecodeError{Detail: "SSE event exceeds byte limit"}
+
 // Decode handles CR/LF/CRLF, comments, a leading BOM and UTF-8 fragmented at
 // arbitrary byte boundaries. EOF does not dispatch an unterminated event.
 func Decode(r io.Reader, maxEventBytes int, emit func(Frame) error) error {
@@ -35,7 +44,7 @@ func Decode(r io.Reader, maxEventBytes int, emit func(Frame) error) error {
 	for scanner.Scan() {
 		line := scanner.Text()
 		if !utf8.ValidString(line) {
-			return errors.New("invalid UTF-8 in SSE stream")
+			return &DecodeError{Detail: "invalid UTF-8 in SSE stream"}
 		}
 		if line == "" {
 			if len(data) > 0 {
@@ -113,7 +122,7 @@ func lines(maxEventBytes int) bufio.SplitFunc {
 				n++
 			}
 			if n > maxEventBytes-size {
-				return 0, nil, errors.New("SSE event exceeds byte limit")
+				return 0, nil, ErrEventTooLarge
 			}
 			if trailingCR {
 				// Dispatch now if a possible LF also fits. Only the exact
@@ -132,7 +141,7 @@ func lines(maxEventBytes int) bufio.SplitFunc {
 			return advance + n, data[:i], nil
 		}
 		if len(data) > maxEventBytes-size {
-			return 0, nil, errors.New("SSE event exceeds byte limit")
+			return 0, nil, ErrEventTooLarge
 		}
 		if eof && len(data) > 0 {
 			return advance + len(data), data, nil

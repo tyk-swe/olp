@@ -19,6 +19,10 @@ assert.notEqual(conflictApiKey, apiKey, 'fixture keys must be distinct for confl
 
 if (process.argv.includes('--check-metadata')) process.exit(0);
 
+// The Go backend gains surfaces milestone by milestone; a run names the ones
+// its fixture serves, defaulting to every surface.
+const surfaces = new Set((process.env.OLP_SDK_SMOKE_SURFACES ?? 'openai,anthropic,gemini').split(','));
+
 const [{ default: Anthropic }, { GoogleGenAI }, { default: OpenAI }] = await Promise.all([
   import('@anthropic-ai/sdk'),
   import('@google/genai'),
@@ -277,13 +281,17 @@ async function errorContractGoogle() {
   );
 }
 
-for (const [label, baseURL] of openAIBaseURLs) await smokeOpenAI(baseURL, label);
-await smokeAnthropic();
-await smokeGoogle();
-for (const [label, baseURL] of openAIBaseURLs) await errorContractOpenAI(baseURL, label);
-await directNegativeContracts();
-await errorContractAnthropic();
-await errorContractGoogle();
+if (surfaces.has('openai')) {
+  for (const [label, baseURL] of openAIBaseURLs) await smokeOpenAI(baseURL, label);
+}
+if (surfaces.has('anthropic')) await smokeAnthropic();
+if (surfaces.has('gemini')) await smokeGoogle();
+if (surfaces.has('openai')) {
+  for (const [label, baseURL] of openAIBaseURLs) await errorContractOpenAI(baseURL, label);
+  await directNegativeContracts();
+}
+if (surfaces.has('anthropic')) await errorContractAnthropic();
+if (surfaces.has('gemini')) await errorContractGoogle();
 process.stdout.write(
-  'Official OpenAI, Anthropic, and Google GenAI SDK success and error contracts passed.\n'
+  `Official SDK success and error contracts passed for ${[...surfaces].join(', ')}.\n`
 );

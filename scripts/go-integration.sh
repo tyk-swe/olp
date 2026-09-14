@@ -39,7 +39,7 @@ make go-build
 source scripts/go-secrets.sh "$scratch/secrets"
 OLP_DATABASE_URL="$OLP_TEST_DATABASE_URL" "$OLP_TEST_BINARY" migrate
 go test -race -tags=integration,oidctest -count=1 -timeout=5m -v ./tests/integration
-OLP_SDK_SMOKE_BACKEND=go ./tests/sdk-smoke/run.sh node tests/sdk-smoke/smoke.mjs --check-metadata
+OLP_SDK_SMOKE_BACKEND=go OLP_SDK_SMOKE_SURFACES=openai ./tests/sdk-smoke/run.sh
 export OLP_DATABASE_URL="$OLP_TEST_DATABASE_URL" OLP_VALKEY_URL="$OLP_TEST_VALKEY_URL"
 # Browser OIDC uses a separate, explicitly test-only binary. Release builds
 # never allow loopback identity issuers.

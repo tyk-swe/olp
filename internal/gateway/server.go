@@ -1,0 +1,548 @@
+package gateway
+
+import (
+	"compress/gzip"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"log/slog"
+	"mime"
+	"net"
+	"net/http"
+	"net/netip"
+	"regexp"
+	"slices"
+	"strings"
+	"time"
+
+	"github.com/google/uuid"
+
+	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/egress"
+	"github.com/tyk-swe/olp/internal/protocols/openai"
+	"github.com/tyk-swe/olp/internal/providers"
+	"github.com/tyk-swe/olp/internal/runtime"
+)
+
+// Config bounds the inference surface.
+type Config struct {
+	MaxInFlight      int
+	MaxBodyBytes     int64
+	MaxResponseBytes int64
+	MaxEventBytes    int64
+	TrustedProxies   []netip.Prefix
+}
+
+// Runtime is the pinned authority and release source. *runtime.Manager
+// implements it; fixtures and tests supply static releases.
+type Runtime interface {
+	Release() *runtime.Release
+	Authenticate(secret string) (access.Authority, error)
+	Revoked(credentialID string) bool
+}
+
+// Server serves the native OpenAI surface from pinned runtime releases.
+type Server struct {
+	Runtime Runtime
+	Sink    Sink
+
+	log       *slog.Logger
+	cfg       Config
+	egress    *egress.Policy
+	client    *http.Client
+	admission chan struct{}
+	health    *healthTracker
+	now       func() time.Time
+}
+
+// upstreamHeaderTimeout caps the wait for upstream response headers; the
+// per-attempt deadline is normally tighter.
+const upstreamHeaderTimeout = 5 * time.Minute
+
+func New(rt Runtime, policy *egress.Policy, cfg Config, log *slog.Logger) *Server {
+	return &Server{
+		Runtime:   rt,
+		Sink:      LogSink{Log: log},
+		log:       log,
+		cfg:       cfg,
+		egress:    policy,
+		client:    policy.Client(upstreamHeaderTimeout),
+		admission: make(chan struct{}, max(cfg.MaxInFlight, 1)),
+		health:    newHealthTracker(time.Now),
+		now:       time.Now,
+	}
+}
+
+// Health exposes windowed attempt statistics for the management API.
+func (s *Server) Health() providers.HealthSource { return s.health }
+
+// Register mounts the OpenAI surface on the public mux.
+func (s *Server) Register(mux *http.ServeMux) {
+	mux.HandleFunc("POST /v1/chat/completions", s.inference(openai.FamilyChat))
+	mux.HandleFunc("POST /v1/responses", s.inference(openai.FamilyResponses))
+	mux.HandleFunc("GET /v1/models", s.models)
+	mux.HandleFunc("GET /v1/models/{model}", s.model)
+	mux.HandleFunc("OPTIONS /v1/", s.preflight)
+	mux.HandleFunc("/v1/", s.unknown)
+}
+
+var requestIDPattern = regexp.MustCompile(`^[A-Za-z0-9._-]{1,128}$`)
+
+// request carries per-request identity shared by handlers.
+type request struct {
+	id        string
+	clientIP  string
+	startedAt time.Time
+	release   *runtime.Release
+}
+
+// begin assigns the request identity, pins the release, and sets the
+// headers every inference response carries.
+func (s *Server) begin(w http.ResponseWriter, r *http.Request) request {
+	id := r.Header.Get("X-Request-Id")
+	if !requestIDPattern.MatchString(id) {
+		id = uuid.Must(uuid.NewV7()).String()
+	}
+	h := w.Header()
+	h.Set("X-Request-Id", id)
+	h.Set("Cache-Control", "no-store")
+	h.Set("X-Content-Type-Options", "nosniff")
+	s.cors(w, r)
+	return request{id: id, clientIP: ClientIP(r, s.cfg.TrustedProxies), startedAt: s.now(), release: s.Runtime.Release()}
+}
+
+// cors allows browser SDK clients from any origin: the surface authenticates
+// with bearer keys only, never cookies, so no credentialed access exists.
+func (s *Server) cors(w http.ResponseWriter, r *http.Request) {
+	if r.Header.Get("Origin") == "" {
+		return
+	}
+	h := w.Header()
+	h.Set("Access-Control-Allow-Origin", "*")
+	h.Add("Vary", "Origin")
+	h.Set("Access-Control-Expose-Headers", "X-Request-Id, Retry-After")
+}
+
+func (s *Server) preflight(w http.ResponseWriter, r *http.Request) {
+	s.cors(w, r)
+	h := w.Header()
+	h.Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+	h.Set("Access-Control-Allow-Headers", "Authorization, Content-Type, X-Request-Id, X-OLP-Routing, OpenAI-Organization, OpenAI-Project, OpenAI-Beta, X-Stainless-Lang, X-Stainless-Package-Version, X-Stainless-OS, X-Stainless-Arch, X-Stainless-Runtime, X-Stainless-Runtime-Version, X-Stainless-Retry-Count, X-Stainless-Timeout, X-Stainless-Helper-Method")
+	h.Set("Access-Control-Max-Age", "600")
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) unknown(w http.ResponseWriter, r *http.Request) {
+	s.begin(w, r)
+	writeError(w, notFoundError("not_found", "Unknown endpoint "+r.Method+" "+r.URL.Path+"."))
+}
+
+// ClientIP returns the address of the calling client, honouring
+// X-Forwarded-For only from configured trusted proxies.
+func ClientIP(r *http.Request, trusted []netip.Prefix) string {
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		host = r.RemoteAddr
+	}
+	addr, err := netip.ParseAddr(host)
+	if err != nil {
+		return host
+	}
+	isTrusted := func(a netip.Addr) bool {
+		return slices.ContainsFunc(trusted, func(p netip.Prefix) bool { return p.Contains(a.Unmap()) })
+	}
+	if !isTrusted(addr) {
+		return addr.String()
+	}
+	chain := strings.Split(strings.Join(r.Header.Values("X-Forwarded-For"), ","), ",")
+	for i := len(chain) - 1; i >= 0; i-- {
+		hop, err := netip.ParseAddr(strings.TrimSpace(chain[i]))
+		if err != nil {
+			break
+		}
+		if !isTrusted(hop) {
+			return hop.String()
+		}
+		addr = hop
+	}
+	return addr.String()
+}
+
+func (s *Server) admit() bool {
+	select {
+	case s.admission <- struct{}{}:
+		return true
+	default:
+		return false
+	}
+}
+
+func (s *Server) release() { <-s.admission }
+
+// authenticate resolves the bearer key against the pinned authority and
+// checks the scope the endpoint needs.
+func (s *Server) authenticate(r *http.Request, scope string) (access.Authority, *Error) {
+	header := r.Header.Get("Authorization")
+	if len(header) < 7 || !strings.EqualFold(header[:7], "Bearer ") {
+		return access.Authority{}, authenticationError("invalid_api_key", "Provide an API key as a bearer token in the Authorization header.")
+	}
+	token := strings.TrimSpace(header[7:])
+	authority, err := s.Runtime.Authenticate(token)
+	switch {
+	case errors.Is(err, runtime.ErrStaleAuthority):
+		return access.Authority{}, serverError(http.StatusServiceUnavailable, "authority_unavailable", "Key authority is unavailable; retry shortly.")
+	case err != nil:
+		return access.Authority{}, authenticationError("invalid_api_key", "Incorrect API key provided.")
+	case authority.RevokedAt != nil:
+		return access.Authority{}, authenticationError("invalid_api_key", "This API key has been revoked.")
+	case authority.ExpiresAt != nil && !authority.ExpiresAt.After(s.now()):
+		return access.Authority{}, authenticationError("invalid_api_key", "This API key has expired.")
+	case !slices.Contains(authority.Policy.Scopes, scope):
+		return access.Authority{}, permissionError("permission_denied", "This API key does not have the "+scope+" scope.")
+	}
+	return authority, nil
+}
+
+// readBody bounds both the encoded and decoded body before parsing.
+func (s *Server) readBody(r *http.Request) ([]byte, *Error) {
+	mediaType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
+	if err != nil || mediaType != "application/json" {
+		return nil, &Error{Status: http.StatusUnsupportedMediaType, Type: "invalid_request_error", Code: "unsupported_media_type", Message: "Request bodies must be application/json."}
+	}
+	limit := s.cfg.MaxBodyBytes
+	encoded := &io.LimitedReader{R: r.Body, N: limit + 1}
+	var reader io.Reader = encoded
+	switch strings.ToLower(strings.TrimSpace(r.Header.Get("Content-Encoding"))) {
+	case "", "identity":
+	case "gzip":
+		gz, err := gzip.NewReader(reader)
+		if encoded.N == 0 {
+			return nil, bodyTooLarge()
+		}
+		if err != nil {
+			return nil, bodyReadError(err)
+		}
+		defer gz.Close()
+		reader = io.LimitReader(gz, limit+1)
+	default:
+		return nil, &Error{Status: http.StatusUnsupportedMediaType, Type: "invalid_request_error", Code: "unsupported_content_encoding", Message: "Only identity and gzip request encodings are supported."}
+	}
+	data, err := io.ReadAll(reader)
+	// Check the wire cap even when gzip has decoded a smaller body or reports
+	// truncation after reaching the encoded limit.
+	if encoded.N == 0 || int64(len(data)) > limit {
+		return nil, bodyTooLarge()
+	}
+	if err != nil {
+		return nil, bodyReadError(err)
+	}
+	return data, nil
+}
+
+func bodyTooLarge() *Error {
+	return &Error{Status: http.StatusRequestEntityTooLarge, Type: "invalid_request_error", Code: "request_too_large", Message: "The request body exceeds the configured limit."}
+}
+
+func bodyReadError(err error) *Error {
+	var timeout net.Error
+	if errors.As(err, &timeout) && timeout.Timeout() {
+		return &Error{Status: http.StatusRequestTimeout, Type: "invalid_request_error", Code: "request_timeout", Message: "The request body was not received within the deadline."}
+	}
+	return invalidRequest("invalid_request", "The request body could not be read.", nil)
+}
+
+// routingHeader carries per-request routing preferences. Only the weighted
+// strategy exists, and the attempt budget can only be lowered below the
+// route's published maximum.
+const routingHeader = "X-OLP-Routing"
+
+func attemptBudget(r *http.Request, route *runtime.Route) (int, *Error) {
+	raw := r.Header.Get(routingHeader)
+	if raw == "" {
+		return route.MaxAttempts, nil
+	}
+	param := routingHeader
+	var overrides *struct {
+		Strategy    *string `json:"strategy"`
+		MaxAttempts *int    `json:"max_attempts"`
+	}
+	dec := json.NewDecoder(strings.NewReader(raw))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&overrides); err != nil || overrides == nil || dec.Decode(new(any)) != io.EOF {
+		return 0, invalidRequest("invalid_request", "The X-OLP-Routing header must be a JSON object with supported overrides.", &param)
+	}
+	if overrides.Strategy != nil && *overrides.Strategy != "weighted" {
+		return 0, invalidRequest("invalid_request", "Only the weighted routing strategy is available.", &param)
+	}
+	budget := route.MaxAttempts
+	if overrides.MaxAttempts != nil {
+		if *overrides.MaxAttempts < 1 || *overrides.MaxAttempts > route.MaxAttempts {
+			return 0, invalidRequest("invalid_request", "max_attempts must be between 1 and the route's published maximum.", &param)
+		}
+		budget = *overrides.MaxAttempts
+	}
+	return budget, nil
+}
+
+func requestError(err error) *Error {
+	var re *openai.RequestError
+	if errors.As(err, &re) {
+		var param *string
+		if re.Param != "" {
+			param = &re.Param
+		}
+		return invalidRequest(re.Code, re.Message, param)
+	}
+	return invalidRequest("invalid_request", err.Error(), nil)
+}
+
+func selectionError(err error, model string) *Error {
+	var se *runtime.SelectionError
+	if errors.As(err, &se) {
+		switch se.Code {
+		case runtime.RouteNotFound:
+			return modelNotFound(model)
+		case runtime.OperationNotSupported:
+			return invalidRequest("invalid_request", "The model `"+model+"` does not allow generation requests.", nil)
+		}
+	}
+	return serverError(http.StatusServiceUnavailable, "upstream_unavailable", "No provider is currently eligible to serve `"+model+"`.")
+}
+
+const requestBodyTimeout = 15 * time.Second
+
+func (s *Server) inference(family openai.Family) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		x := &execution{request: s.begin(w, r), family: family, actor: "api_key"}
+		status := http.StatusInternalServerError
+		var out *outcome
+		defer func() { s.finish(x, out, status) }()
+		// A context timeout alone cannot interrupt a blocked socket read.
+		rc := http.NewResponseController(w)
+		if err := rc.SetReadDeadline(time.Now().Add(requestBodyTimeout)); err != nil {
+			writeError(w, serverError(http.StatusInternalServerError, "internal_error", "The request could not be read."))
+			return
+		}
+		if !s.admit() {
+			status = overloaded.Status
+			writeError(w, overloaded)
+			return
+		}
+		defer s.release()
+		authority, e := s.authenticate(r, "inference")
+		if e != nil {
+			status = e.Status
+			writeError(w, e)
+			return
+		}
+		x.keyID, x.affinity = authority.ID, []byte(authority.ID)
+		body, e := s.readBody(r)
+		if e != nil {
+			status = e.Status
+			writeError(w, e)
+			return
+		}
+		// Keep the deadline on failed reads so HTTP/1 body draining stays
+		// bounded; successful uploads must not limit the inference stream.
+		rc.SetReadDeadline(time.Time{})
+		parsed, err := openai.Parse(family, body)
+		if err != nil {
+			e = requestError(err)
+			status = e.Status
+			writeError(w, e)
+			return
+		}
+		x.parsed = parsed
+		if e := s.prepare(x, func(slug string) bool { return authority.Allows("inference", slug, s.now()) }); e != nil {
+			status = e.Status
+			writeError(w, e)
+			return
+		}
+		if x.budget, e = attemptBudget(r, x.route); e != nil {
+			status = e.Status
+			writeError(w, e)
+			return
+		}
+		if parsed.Stream {
+			sw := &streamWriter{w: w, family: family}
+			x.emit = sw.emit
+			out = s.execute(r.Context(), x)
+			status = sw.finish(out)
+			return
+		}
+		out = s.execute(r.Context(), x)
+		if out.err != nil {
+			status = out.err.Status
+			if out.err.Status > 0 {
+				writeError(w, out.err)
+			}
+			return
+		}
+		if err := rc.SetWriteDeadline(time.Now().Add(responseWriteTimeout)); err != nil {
+			out.err = serverError(http.StatusInternalServerError, "internal_error", "The response could not be written.")
+			status = out.err.Status
+			writeError(w, out.err)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		status = http.StatusOK
+		w.WriteHeader(http.StatusOK)
+		out.committed = true
+		_, err = w.Write(out.completion.Body)
+		if err == nil {
+			// Flush buffered responses before recording successful delivery.
+			err = rc.Flush()
+		}
+		if err != nil {
+			out.err = (&attemptFailure{class: classCancelled}).toError()
+			out.cancelled = true
+		}
+	}
+}
+
+// prepare resolves the route, checks the caller's route permission, and
+// ranks the eligible attempts against the pinned snapshot.
+func (s *Server) prepare(x *execution, permitted func(slug string) bool) *Error {
+	x.mode = "unary"
+	if x.parsed.Stream {
+		x.mode = "streaming"
+	}
+	snapshot := x.request.release.Snapshot
+	route, ok := snapshot.Routes[x.parsed.Route]
+	if !ok {
+		return modelNotFound(x.parsed.Route)
+	}
+	x.route = &route
+	if !permitted(route.Slug) {
+		return permissionError("route_forbidden", "This API key is not allowed to use the model `"+route.Slug+"`.")
+	}
+	attempts, err := runtime.Select(snapshot, route.Slug, "generation", "openai", x.mode, x.affinity)
+	if err != nil {
+		return selectionError(err, route.Slug)
+	}
+	x.attempts = attempts
+	x.budget = route.MaxAttempts
+	return nil
+}
+
+// modelObject renders a route as an OpenAI model object.
+func modelObject(route *runtime.Route) map[string]any {
+	return map[string]any{
+		"id":       route.Slug,
+		"object":   "model",
+		"created":  route.PublishedAt.Unix(),
+		"owned_by": "openllmproxy",
+	}
+}
+
+func (s *Server) models(w http.ResponseWriter, r *http.Request) {
+	req := s.begin(w, r)
+	authority, e := s.authenticate(r, "models_read")
+	if e != nil {
+		writeError(w, e)
+		return
+	}
+	now := s.now()
+	data := []map[string]any{}
+	for _, slug := range slices.Sorted(mapsKeys(req.release.Snapshot.Routes)) {
+		if authority.Allows("models_read", slug, now) {
+			route := req.release.Snapshot.Routes[slug]
+			data = append(data, modelObject(&route))
+		}
+	}
+	writeJSON(w, map[string]any{"object": "list", "data": data})
+}
+
+func (s *Server) model(w http.ResponseWriter, r *http.Request) {
+	req := s.begin(w, r)
+	authority, e := s.authenticate(r, "models_read")
+	if e != nil {
+		writeError(w, e)
+		return
+	}
+	slug := r.PathValue("model")
+	route, ok := req.release.Snapshot.Routes[slug]
+	if !ok || !authority.Allows("models_read", slug, s.now()) {
+		writeError(w, modelNotFound(slug))
+		return
+	}
+	writeJSON(w, modelObject(&route))
+}
+
+func mapsKeys[V any](m map[string]V) func(func(string) bool) {
+	return func(yield func(string) bool) {
+		for k := range m {
+			if !yield(k) {
+				return
+			}
+		}
+	}
+}
+
+func writeJSON(w http.ResponseWriter, body any) {
+	data, _ := json.Marshal(body)
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	w.Write(data)
+}
+
+// streamWriter commits the client response on the first upstream frame and
+// applies a per-frame write deadline so slow readers cannot pin upstream
+// work forever.
+type streamWriter struct {
+	w         http.ResponseWriter
+	family    openai.Family
+	committed bool
+}
+
+// responseWriteTimeout bounds unary delivery and each streamed frame.
+const responseWriteTimeout = 30 * time.Second
+
+// errClientWrite marks a frame the client could not or would not read; the
+// executor classifies it as client cancellation rather than provider failure.
+var errClientWrite = errors.New("client write failed")
+
+func (sw *streamWriter) emit(frame []byte) error {
+	rc := http.NewResponseController(sw.w)
+	if !sw.committed {
+		h := sw.w.Header()
+		h.Set("Content-Type", "text/event-stream; charset=utf-8")
+		h.Set("X-Accel-Buffering", "no")
+		sw.w.WriteHeader(http.StatusOK)
+		sw.committed = true
+	}
+	rc.SetWriteDeadline(time.Now().Add(responseWriteTimeout))
+	if _, err := sw.w.Write(frame); err != nil {
+		return fmt.Errorf("%w: %v", errClientWrite, err)
+	}
+	if err := rc.Flush(); err != nil {
+		return fmt.Errorf("%w: %v", errClientWrite, err)
+	}
+	return nil
+}
+
+// finish completes the client response and returns the status it carried.
+func (sw *streamWriter) finish(out *outcome) int {
+	if out.err == nil {
+		return http.StatusOK
+	}
+	if out.cancelled {
+		return 0 // the client is gone; nothing more can be delivered
+	}
+	if !sw.committed {
+		if out.err.Status > 0 {
+			writeError(sw.w, out.err)
+		}
+		return out.err.Status
+	}
+	// The response is committed: signal the failure in-band the way the
+	// official SDKs detect it, then end the stream without a completion
+	// marker so the client cannot mistake it for success.
+	frame := "data: " + string(out.err.body()) + "\n\n"
+	if sw.family == openai.FamilyResponses {
+		frame = "event: error\n" + frame
+	}
+	sw.emit([]byte(frame))
+	return http.StatusOK
+}

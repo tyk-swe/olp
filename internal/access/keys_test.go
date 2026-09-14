@@ -58,7 +58,7 @@ func TestKeyBudgetFormats(t *testing.T) {
 					}
 					return
 				}
-				var p *problem
+				var p *Problem
 				if !errors.As(err, &p) || p.Status != 422 || p.Field != field {
 					t.Fatalf("budget %q: got %v, want a validation error for %s", tc.value, err, field)
 				}
@@ -87,7 +87,7 @@ func TestKeyLimitRanges(t *testing.T) {
 					}
 					return
 				}
-				var p *problem
+				var p *Problem
 				if !errors.As(err, &p) || p.Status != 422 || p.Field != field {
 					t.Fatalf("got %v, want a validation error for %s", err, field)
 				}

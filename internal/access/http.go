@@ -8,7 +8,9 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/mail"
@@ -96,23 +98,23 @@ func New(ctx context.Context, pool *pgxpool.Pool, installation, origin string, a
 	return s, nil
 }
 
-type problem struct {
+type Problem struct {
 	Status              int
 	Code, Detail, Field string
 }
 
-func (p *problem) Error() string { return p.Code }
-func fail(status int, code, detail string) error {
-	return &problem{Status: status, Code: code, Detail: detail}
+func (p *Problem) Error() string { return p.Code }
+func Fail(status int, code, detail string) error {
+	return &Problem{Status: status, Code: code, Detail: detail}
 }
-func invalid(field, detail string) error {
-	return &problem{Status: 422, Code: "validation_failed", Detail: detail, Field: field}
+func Invalid(field, detail string) error {
+	return &Problem{Status: 422, Code: "validation_failed", Detail: detail, Field: field}
 }
-func forbidden() error {
-	return fail(403, "permission_denied", "The current role cannot perform this operation.")
+func Forbidden() error {
+	return Fail(403, "permission_denied", "The current role cannot perform this operation.")
 }
 
-type reply struct {
+type Reply struct {
 	Status   int            `json:"status"`
 	Body     any            `json:"body"`
 	ETag     string         `json:"etag,omitempty"`
@@ -121,38 +123,50 @@ type reply struct {
 	CSRF     string         `json:"-"`
 }
 
-func ok(body any) reply                  { return reply{Status: 200, Body: body} }
-func detail(body any, etag string) reply { return reply{Status: 200, Body: body, ETag: etag} }
+func OK(body any) Reply                  { return Reply{Status: 200, Body: body} }
+func Detail(body any, etag string) Reply { return Reply{Status: 200, Body: body, ETag: etag} }
 
-func (s *Server) handle(fn func(*http.Request) (reply, error)) http.HandlerFunc {
+func (s *Server) Handle(fn func(*http.Request) (Reply, error)) http.HandlerFunc {
+	return s.HandleWith(65536, fn)
+}
+
+// HandleWith is Handle with an explicit request-body limit for the few
+// operations whose documented payloads exceed the default.
+func (s *Server) HandleWith(maxBody int64, fn func(*http.Request) (Reply, error)) http.HandlerFunc {
+	return s.HandleTimeout(maxBody, 15*time.Second, fn)
+}
+
+// HandleTimeout is HandleWith with an explicit request deadline for
+// operations that legitimately outlive the default management budget.
+func (s *Server) HandleTimeout(maxBody int64, timeout time.Duration, fn func(*http.Request) (Reply, error)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("Referrer-Policy", "no-referrer")
 		w.Header().Set("Cross-Origin-Resource-Policy", "same-origin")
-		ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+		ctx, cancel := context.WithTimeout(r.Context(), timeout)
 		defer cancel()
 		// Context cancellation cannot interrupt a blocked request-body read.
 		deadline, _ := ctx.Deadline()
 		if err := http.NewResponseController(w).SetReadDeadline(deadline); err != nil {
-			writeProblem(w, err)
+			WriteProblem(w, err)
 			return
 		}
 		r = r.WithContext(ctx)
-		r.Body = http.MaxBytesReader(w, r.Body, 65536)
-		var result reply
+		r.Body = http.MaxBytesReader(w, r.Body, maxBody)
+		var result Reply
 		err := checkCookies(r)
 		if err == nil && r.Method != "GET" && r.Method != "HEAD" && r.Header.Get("Origin") != s.Origin {
-			err = fail(403, "origin_denied", "Use the configured console origin.")
+			err = Fail(403, "origin_denied", "Use the configured console origin.")
 		}
 		if err == nil && r.Header.Get("Sec-Fetch-Site") == "cross-site" && r.URL.Path != "/api/v3/oidc/callback" {
-			err = fail(403, "origin_denied", "Cross-site access is not allowed.")
+			err = Fail(403, "origin_denied", "Cross-site access is not allowed.")
 		}
 		if err == nil {
 			result, err = fn(r)
 		}
 		if err != nil {
-			writeProblem(w, err)
+			WriteProblem(w, err)
 			return
 		}
 		if result.ETag != "" {
@@ -180,16 +194,24 @@ func (s *Server) handle(fn func(*http.Request) (reply, error)) http.HandlerFunc 
 	}
 }
 
-func writeProblem(w http.ResponseWriter, err error) {
-	p := &problem{Status: 503, Code: "service_unavailable", Detail: "The operation could not be completed. Retry shortly."}
-	var known *problem
+func WriteProblem(w http.ResponseWriter, err error) {
+	p := &Problem{Status: 503, Code: "service_unavailable", Detail: "The operation could not be completed. Retry shortly."}
+	var known *Problem
 	var pg *pgconn.PgError
 	if errors.As(err, &known) {
 		p = known
 	} else if errors.Is(err, pgx.ErrNoRows) {
-		p = &problem{Status: 404, Code: "not_found", Detail: "The resource was not found."}
+		p = &Problem{Status: 404, Code: "not_found", Detail: "The resource was not found."}
 	} else if errors.As(err, &pg) && pg.Code == "23505" {
-		p = &problem{Status: 409, Code: "already_exists", Detail: "This record already exists."}
+		p = &Problem{Status: 409, Code: "already_exists", Detail: "This record already exists."}
+	} else {
+		// Driver and wrapped errors can contain SQL values or credentials.
+		// Log the category, never the error text.
+		args := []any{"error_type", fmt.Sprintf("%T", err)}
+		if pg != nil {
+			args = append(args, "sqlstate", pg.Code)
+		}
+		slog.Error("management request failed", args...)
 	}
 	body := map[string]any{"type": "https://openllmproxy.dev/problems/" + p.Code, "title": http.StatusText(p.Status), "status": p.Status, "detail": p.Detail}
 	if p.Field != "" {
@@ -203,18 +225,18 @@ func writeProblem(w http.ResponseWriter, err error) {
 	json.NewEncoder(w).Encode(body)
 }
 
-func decode(r *http.Request, v any) error {
+func Decode(r *http.Request, v any) error {
 	if !strings.HasPrefix(r.Header.Get("Content-Type"), "application/json") {
-		return fail(415, "unsupported_media_type", "Send an application/json request.")
+		return Fail(415, "unsupported_media_type", "Send an application/json request.")
 	}
 	d := json.NewDecoder(r.Body)
 	d.DisallowUnknownFields()
 	if err := d.Decode(v); err != nil {
-		return fail(400, "invalid_json", "The request body is not valid for this operation.")
+		return Fail(400, "invalid_json", "The request body is not valid for this operation.")
 	}
 	var extra any
 	if d.Decode(&extra) != io.EOF {
-		return fail(400, "invalid_json", "Send one JSON document.")
+		return Fail(400, "invalid_json", "Send one JSON document.")
 	}
 	return nil
 }
@@ -223,7 +245,7 @@ func checkCookies(r *http.Request) error {
 	for _, c := range r.Cookies() {
 		if strings.HasPrefix(c.Name, "__Host-olp_") {
 			if value, ok := seen[c.Name]; ok && value != c.Value {
-				return fail(400, "conflicting_cookie_values", "Conflicting authentication cookies were supplied.")
+				return Fail(400, "conflicting_cookie_values", "Conflicting authentication cookies were supplied.")
 			}
 			seen[c.Name] = c.Value
 		}
@@ -241,26 +263,27 @@ func cookie(name, value string, ttl time.Duration, httpOnly bool) *http.Cookie {
 	return &http.Cookie{Name: name, Value: value, Path: "/", Secure: true, HttpOnly: httpOnly, SameSite: http.SameSiteLaxMode, MaxAge: int(ttl.Seconds())}
 }
 func clearCookie(name string) *http.Cookie { c := cookie(name, "", 0, true); c.MaxAge = -1; return c }
-func match(r *http.Request, etag string) error {
+func Match(r *http.Request, etag string) error {
 	value := r.Header.Get("If-Match")
 	if value == "" {
-		return fail(428, "precondition_required", "Reload the record and send its ETag in If-Match.")
+		return Fail(428, "precondition_required", "Reload the record and send its ETag in If-Match.")
 	}
 	if value != `"`+etag+`"` {
-		return fail(412, "etag_mismatch", "This record changed. Reload it before saving.")
+		return Fail(412, "etag_mismatch", "This record changed. Reload it before saving.")
 	}
 	return nil
 }
-func idParam(r *http.Request, name string) (string, error) {
+func IDParam(r *http.Request, name string) (string, error) {
 	v := r.PathValue(name)
-	if _, err := uuid.Parse(v); err != nil {
-		return "", fail(400, "invalid_identifier", "Use a valid UUID.")
+	id, err := uuid.Parse(v)
+	if err != nil {
+		return "", Fail(400, "invalid_identifier", "Use a valid UUID.")
 	}
-	return v, nil
+	return id.String(), nil
 }
-func validText(field, value string, max int) error {
+func ValidText(field, value string, max int) error {
 	if strings.TrimSpace(value) == "" || utf8.RuneCountInString(value) > max {
-		return invalid(field, "Use 1–"+strconv.Itoa(max)+" characters.")
+		return Invalid(field, "Use 1–"+strconv.Itoa(max)+" characters.")
 	}
 	return nil
 }
@@ -268,21 +291,21 @@ func email(value string) (string, error) {
 	value = strings.ToLower(strings.TrimSpace(value))
 	a, err := mail.ParseAddress(value)
 	if err != nil || a.Address != value || len(value) > 254 {
-		return "", invalid("email", "Enter a valid email address.")
+		return "", Invalid("email", "Enter a valid email address.")
 	}
 	return value, nil
 }
 func password(value string) error {
 	n := utf8.RuneCountInString(value)
 	if n < 12 || n > 1024 {
-		return invalid("password", "Use 12–1024 characters.")
+		return Invalid("password", "Use 12–1024 characters.")
 	}
 	return nil
 }
 func validRole(role string) bool {
 	return role == "owner" || role == "operator" || role == "developer" || role == "viewer"
 }
-func permission(role, operation string) bool {
+func Permission(role, operation string) bool {
 	if !validRole(role) {
 		return false
 	}
@@ -290,15 +313,15 @@ func permission(role, operation string) bool {
 		return true
 	}
 	switch operation {
-	case "access_read", "settings":
+	case "access_read", "settings", "configure":
 		return role == "operator"
-	case "keys":
+	case "keys", "playground":
 		return role == "operator" || role == "developer"
 	}
 	return false
 }
 
-type queryer interface {
+type Queryer interface {
 	QueryRow(context.Context, string, ...any) pgx.Row
 	Query(context.Context, string, ...any) (pgx.Rows, error)
 }
@@ -312,7 +335,7 @@ type User struct {
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
 }
-type principal struct {
+type Principal struct {
 	User
 	SessionID, Token string
 }
@@ -324,28 +347,28 @@ func scanUser(row pgx.Row) (User, error) {
 	err := row.Scan(&u.ID, &u.Email, &u.DisplayName, &u.Role, &u.Active, &u.ETag, &u.CreatedAt, &u.UpdatedAt)
 	return u, err
 }
-func (s *Server) principal(r *http.Request, q queryer, operation string) (principal, error) {
-	var p principal
+func (s *Server) Principal(r *http.Request, q Queryer, operation string) (Principal, error) {
+	var p Principal
 	p.Token = cookieValue(r, sessionCookie)
 	err := q.QueryRow(r.Context(), "SELECT "+userColumns+",s.id::text FROM olp_go.sessions s JOIN olp_go.users u ON u.id=s.user_id WHERE s.digest=$1 AND s.expires_at>now() AND u.active", s.Auth.Digest("session", p.Token)).Scan(&p.ID, &p.Email, &p.DisplayName, &p.Role, &p.Active, &p.ETag, &p.CreatedAt, &p.UpdatedAt, &p.SessionID)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return p, fail(401, "authentication_required", "Sign in to continue.")
+		return p, Fail(401, "authentication_required", "Sign in to continue.")
 	}
 	if err != nil {
 		return p, err
 	}
-	if !permission(p.Role, operation) {
-		return p, forbidden()
+	if !Permission(p.Role, operation) {
+		return p, Forbidden()
 	}
 	if r.Method != "GET" && !hmac.Equal([]byte(r.Header.Get(csrfHeader)), []byte(s.csrf(p.Token))) {
-		return p, fail(403, "csrf_invalid", "Reload the console before trying again.")
+		return p, Fail(403, "csrf_invalid", "Reload the console before trying again.")
 	}
 	return p, nil
 }
 func (s *Server) csrf(token string) string {
 	return base64.RawURLEncoding.EncodeToString(s.Auth.Digest("csrf", token))
 }
-func (s *Server) begin(r *http.Request) (pgx.Tx, error) {
+func (s *Server) Begin(r *http.Request) (pgx.Tx, error) {
 	tx, err := s.Pool.Begin(r.Context())
 	if err != nil {
 		return nil, err
@@ -356,7 +379,7 @@ func (s *Server) begin(r *http.Request) (pgx.Tx, error) {
 	}
 	return tx, nil
 }
-func audit(ctx context.Context, tx pgx.Tx, r *http.Request, actor, action, resource, id, outcome string) error {
+func Audit(ctx context.Context, tx pgx.Tx, r *http.Request, actor, action, resource, id, outcome string) error {
 	source, _, _ := net.SplitHostPort(r.RemoteAddr)
 	family := "other"
 	agent := r.UserAgent()
@@ -370,52 +393,57 @@ func audit(ctx context.Context, tx pgx.Tx, r *http.Request, actor, action, resou
 	if actor != "" {
 		actorID = actor
 	}
-	_, err := tx.Exec(ctx, "INSERT INTO olp_go.audit(id,actor_user_id,action,resource_type,resource_id,outcome,source_ip,user_agent_family) VALUES($1,$2,$3,$4,$5,$6,$7,$8)", newID(), actorID, action, resource, id, outcome, source, family)
+	_, err := tx.Exec(ctx, "INSERT INTO olp_go.Audit(id,actor_user_id,action,resource_type,resource_id,outcome,source_ip,user_agent_family) VALUES($1,$2,$3,$4,$5,$6,$7,$8)", NewID(), actorID, action, resource, id, outcome, source, family)
 	return err
 }
-func commit(r *http.Request, tx pgx.Tx, result reply) (reply, error) {
+func Commit(r *http.Request, tx pgx.Tx, result Reply) (Reply, error) {
 	return result, tx.Commit(r.Context())
 }
 
-type pagination struct {
+type Pagination struct {
 	Limit  int
 	Before string
 }
 
-func page(r *http.Request) (pagination, error) {
-	p := pagination{Limit: 50, Before: "ffffffff-ffff-ffff-ffff-ffffffffffff"}
+func Page(r *http.Request) (Pagination, error) {
+	p := Pagination{Limit: 50, Before: "ffffffff-ffff-ffff-ffff-ffffffffffff"}
 	if raw := r.URL.Query().Get("limit"); raw != "" {
 		n, err := strconv.Atoi(raw)
 		if err != nil || n < 1 || n > 200 {
-			return p, invalid("limit", "Use a page size from 1 to 200.")
+			return p, Invalid("limit", "Use a page size from 1 to 200.")
 		}
 		p.Limit = n
 	}
 	if raw := r.URL.Query().Get("cursor"); raw != "" {
 		b, err := base64.RawURLEncoding.DecodeString(raw)
 		if err != nil {
-			return p, invalid("cursor", "Invalid pagination cursor.")
+			return p, Invalid("cursor", "Invalid pagination cursor.")
 		}
 		v, err := uuid.Parse(string(b))
 		if err != nil {
-			return p, invalid("cursor", "Invalid pagination cursor.")
+			return p, Invalid("cursor", "Invalid pagination cursor.")
 		}
 		p.Before = v.String()
 	}
 	return p, nil
 }
-func listReply(items []map[string]any, p pagination) reply {
+func ListReply(items []map[string]any, p Pagination) Reply {
+	return ListReplyBy(items, p, func(item map[string]any) string { return item["id"].(string) })
+}
+
+// ListReplyBy paginates records using the identifier ordered by their query.
+func ListReplyBy(items []map[string]any, p Pagination, id func(map[string]any) string) Reply {
 	var next any
 	if len(items) > p.Limit {
 		items = items[:p.Limit]
-		next = base64.RawURLEncoding.EncodeToString([]byte(items[len(items)-1]["id"].(string)))
+		next = base64.RawURLEncoding.EncodeToString([]byte(id(items[len(items)-1])))
 	}
 	if items == nil {
 		items = []map[string]any{}
 	}
-	return ok(map[string]any{"items": items, "next_cursor": next})
+	return OK(map[string]any{"items": items, "next_cursor": next})
 }
-func jsonRows(rows pgx.Rows) ([]map[string]any, error) {
+func JSONRows(rows pgx.Rows) ([]map[string]any, error) {
 	defer rows.Close()
 	items := []map[string]any{}
 	for rows.Next() {

@@ -81,11 +81,18 @@ export async function verifyDraftSave(
       })
     ).toHaveCount(0);
     await expect(input).toHaveValue(original);
-    const persisted = await page.request.get(endpoint);
-    expect(persisted.ok()).toBe(true);
-    expect((await persisted.json())[kind === 'route' ? 'slug' : 'name']).toBe(
-      original
-    );
+    // Read back through the page so the session cookie applies at every
+    // origin, including loopback addresses the request context treats as
+    // insecure.
+    const persisted = await page.evaluate(async (url) => {
+      const response = await fetch(url);
+      return {
+        ok: response.ok,
+        body: (await response.json()) as Record<string, unknown>
+      };
+    }, endpoint);
+    expect(persisted.ok).toBe(true);
+    expect(persisted.body[kind === 'route' ? 'slug' : 'name']).toBe(original);
   } finally {
     release.resolve();
     await page.unroute(pattern);

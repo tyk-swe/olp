@@ -8,8 +8,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
 	"net/url"
 	"os"
 	"os/exec"
@@ -24,7 +26,12 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/database"
+	"github.com/tyk-swe/olp/internal/egress"
+	"github.com/tyk-swe/olp/internal/gateway"
 	"github.com/tyk-swe/olp/internal/management"
+	"github.com/tyk-swe/olp/internal/providers"
+	"github.com/tyk-swe/olp/internal/routes"
+	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/internal/secrets"
 	"github.com/tyk-swe/olp/internal/testutil"
 )
@@ -76,6 +83,8 @@ type accessHarness struct {
 	Bootstrap string
 	Ring      string
 	AuthHex   string
+	Runtime   *runtime.Manager
+	Gateway   *gateway.Server
 }
 
 func newAccessHarness(t *testing.T) *accessHarness {
@@ -101,14 +110,29 @@ func newAccessHarness(t *testing.T) *accessHarness {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The gateway and the catalogue share one process here, exactly as the
+	// "all" mode does; provider egress is opened to loopback for the mock vendor.
+	policy := egress.Policy{AllowedNetworks: []netip.Prefix{netip.MustParsePrefix("127.0.0.0/8")}, PlainHTTPHosts: []string{"127.0.0.1"}}
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	rt := runtime.NewManager(pool, installation, secrets.NewAuthKey(auth, installation), ring, log)
+	gw := gateway.New(rt, &policy, gateway.Config{MaxInFlight: 16, MaxBodyBytes: 1 << 20, MaxResponseBytes: 1 << 20, MaxEventBytes: 1 << 16}, log)
+	catalogue := providers.New(server, &policy)
+	catalogue.Health = gw.Health()
 	mux := http.NewServeMux()
 	management.Register(mux)
 	server.Register(mux)
+	catalogue.Register(mux)
+	routes.New(server).Register(mux)
+	(&gateway.Playground{Access: server, Gateway: gw}).Register(mux)
+	gw.Register(mux)
 	httpServer := httptest.NewServer(mux)
 	t.Cleanup(httpServer.Close)
-	return &accessHarness{t, pool, dbURL, server, httpServer, bootstrap, ringJSON, authHex}
+	return &accessHarness{t, pool, dbURL, server, httpServer, bootstrap, ringJSON, authHex, rt, gw}
 }
-func (h *accessHarness) request(b *browser, method, path string, body any, headers map[string]string) (int, map[string]any, http.Header) {
+
+// do performs one management request as the browser and returns the response
+// with its fully read body.
+func (h *accessHarness) do(b *browser, method, path string, body any, headers map[string]string) (*http.Response, []byte) {
 	h.t.Helper()
 	var data []byte
 	if body != nil {
@@ -140,19 +164,39 @@ func (h *accessHarness) request(b *browser, method, path string, body any, heade
 		h.t.Fatal(err)
 	}
 	defer response.Body.Close()
-	out := map[string]any{}
 	raw, err := io.ReadAll(response.Body)
 	if err != nil {
 		h.t.Fatal(err)
 	}
-	if len(raw) > 0 {
-		if err = json.Unmarshal(raw, &out); err != nil {
-			h.t.Fatal("invalid JSON response", err)
-		}
-		validateManagementResponse(h.t, method, r.URL.Path, response.StatusCode, out)
-	}
 	if response.Header.Get("Cache-Control") != "no-store" {
 		h.t.Fatal("missing no-store")
+	}
+	return response, raw
+}
+
+// list performs a request whose successful body is a bare JSON array.
+func (h *accessHarness) list(b *browser, method, path string, body any, headers map[string]string, status int) []any {
+	h.t.Helper()
+	response, raw := h.do(b, method, path, body, headers)
+	if response.StatusCode != status {
+		h.t.Fatalf("%s %s: status %d, want %d; body %s", method, path, response.StatusCode, status, raw)
+	}
+	var out []any
+	if err := json.Unmarshal(raw, &out); err != nil {
+		h.t.Fatal("invalid JSON list response", err)
+	}
+	return out
+}
+
+func (h *accessHarness) request(b *browser, method, path string, body any, headers map[string]string) (int, map[string]any, http.Header) {
+	h.t.Helper()
+	response, raw := h.do(b, method, path, body, headers)
+	out := map[string]any{}
+	if len(raw) > 0 {
+		if err := json.Unmarshal(raw, &out); err != nil {
+			h.t.Fatal("invalid JSON response", err)
+		}
+		validateManagementResponse(h.t, method, response.Request.URL.Path, response.StatusCode, out)
 	}
 	if response.StatusCode == http.StatusSeeOther && response.Header.Get("Location") == "" {
 		h.t.Fatal("redirect is missing its destination")

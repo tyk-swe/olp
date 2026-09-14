@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -16,10 +17,11 @@ import (
 )
 
 type responseContract struct {
-	method string
-	path   *regexp.Regexp
-	status int
-	schema *jsonschema.Schema
+	method     string
+	path       *regexp.Regexp
+	parameters int
+	status     int
+	schema     *jsonschema.Schema
 }
 
 var managementContracts = sync.OnceValues(func() ([]responseContract, error) {
@@ -60,11 +62,19 @@ var managementContracts = sync.OnceValues(func() ([]responseContract, error) {
 					}
 					code, _ := strconv.Atoi(status)
 					pattern := "^" + parameter.ReplaceAllString(path, "[^/]+") + "$"
-					result = append(result, responseContract{strings.ToUpper(method), regexp.MustCompile(pattern), code, compiled})
+					result = append(result, responseContract{strings.ToUpper(method), regexp.MustCompile(pattern), len(parameter.FindAllString(path, -1)), code, compiled})
 				}
 			}
 		}
 	}
+	// Literal segments win over templated ones, so /revisions/diff is matched
+	// by its own contract rather than by /revisions/{revision_id}.
+	sort.SliceStable(result, func(i, j int) bool {
+		if result[i].parameters != result[j].parameters {
+			return result[i].parameters < result[j].parameters
+		}
+		return result[i].path.String() < result[j].path.String()
+	})
 	return result, nil
 })
 

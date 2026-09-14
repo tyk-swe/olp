@@ -12,7 +12,7 @@ func TestReadinessReflectsDependenciesAndShutdown(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	var failure error
-	h := healthHandler(ctx, time.Second, func(context.Context) error { return failure }, nil)
+	h := healthHandler(ctx, time.Second, func(context.Context) error { return failure }, nil, nil)
 	for _, status := range []int{200, 503, 503} {
 		w := httptest.NewRecorder()
 		h.ServeHTTP(w, httptest.NewRequest("GET", "/health/ready", nil))

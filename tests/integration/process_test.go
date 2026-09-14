@@ -69,11 +69,16 @@ func TestProcessModesPrivateProbesAndShutdown(t *testing.T) {
 					get(p.PublicOrigin, "/api/v3/openapi.json", 404)
 					get(p.PublicOrigin, "/", 404)
 				}
-				status := 501
 				if mode == "control" {
-					status = 404
+					get(p.PublicOrigin, "/v1/models", 404)
+				} else {
+					// The gateway owns /v1 and answers with native OpenAI errors;
+					// the other native surfaces stay explicit placeholders.
+					if body := get(p.PublicOrigin, "/v1/models", 401); !strings.Contains(string(body), `"invalid_api_key"`) {
+						t.Fatalf("unauthenticated model listing: %s", body)
+					}
+					get(p.PublicOrigin, "/anthropic/v1/messages", 501)
 				}
-				get(p.PublicOrigin, "/v1/chat/completions", status)
 				// An idle connection cannot prevent the shared shutdown deadline.
 				idle, err := net.Dial("tcp", strings.TrimPrefix(p.PublicOrigin, "http://"))
 				if err != nil {

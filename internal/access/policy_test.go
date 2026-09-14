@@ -33,17 +33,17 @@ func TestIndependentKeyScopesAndRouteRestrictions(t *testing.T) {
 }
 func TestRoleMatrixAndStrongPreconditions(t *testing.T) {
 	for _, role := range []string{"owner", "operator", "developer", "viewer", "unknown"} {
-		if permission(role, "access") != (role == "owner") {
+		if Permission(role, "access") != (role == "owner") {
 			t.Fatal("membership permission", role)
 		}
-		if permission(role, "keys") != (role == "owner" || role == "operator" || role == "developer") {
+		if Permission(role, "keys") != (role == "owner" || role == "operator" || role == "developer") {
 			t.Fatal("key permission", role)
 		}
 	}
 	for _, value := range []string{"", "W/\"etag\"", "*", "etag", "\"other\""} {
 		r := httptest.NewRequest("PATCH", "/", nil)
 		r.Header.Set("If-Match", value)
-		if match(r, "etag") == nil {
+		if Match(r, "etag") == nil {
 			t.Fatalf("accepted precondition %q", value)
 		}
 	}
@@ -90,7 +90,7 @@ func TestStaleWritesUseTheConsoleConflictProblem(t *testing.T) {
 	r := httptest.NewRequest("PATCH", "/", nil)
 	r.Header.Set("If-Match", `"stale"`)
 	w := httptest.NewRecorder()
-	writeProblem(w, match(r, "current"))
+	WriteProblem(w, Match(r, "current"))
 	var body struct {
 		Type   string `json:"type"`
 		Status int    `json:"status"`

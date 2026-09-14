@@ -8,6 +8,7 @@
   import { applyListSearch } from '$lib/lists/urlSync.svelte';
   import { createQuery } from '@tanstack/svelte-query';
   import { getRequest, listRequests } from '$lib/features/usage/history/api';
+  import { useServiceCapabilities } from '$lib/features/access/session/serviceCapabilities.svelte';
 
   import {
     requestFilters,
@@ -26,6 +27,7 @@
     listState: RequestListState;
   } = $props();
 
+  const services = useServiceCapabilities();
   let validation = $state<string | null>(null);
   const urlForm = $derived(readRequestForm(page.url.searchParams));
   const urlFilters = $derived(requestFilters(urlForm));
@@ -45,14 +47,14 @@
       queryKey: requestKeys.page(applied, cursor),
       queryFn: () => listRequests({ ...applied, cursor }),
       placeholderData: (previous) => previous,
-      enabled: !requestId && !urlProblem
+      enabled: !requestId && !urlProblem && services.retentionEnforced
     };
   });
 
   const detail = createQuery(() => ({
     queryKey: requestKeys.detail(requestId),
     queryFn: () => getRequest(requestId),
-    enabled: Boolean(requestId)
+    enabled: Boolean(requestId) && services.retentionEnforced
   }));
 
   function applyFilters(event: SubmitEvent) {
@@ -92,7 +94,23 @@
     >{/if}
 </div>
 
-{#if requestId}<RequestTimeline {detail} />{:else}<RequestResults
+{#if services.pending}<div class="loading-state" role="status">
+    Loading request history…
+  </div>
+{:else if services.error}<div class="inline-problem" role="alert">
+    Request history capabilities are unavailable.
+    <button class="text-button" type="button" onclick={() => services.retry()}
+      >Try again</button
+    >
+  </div>
+{:else if !services.retentionEnforced}<div
+    class="card empty-state"
+    role="status"
+  >
+    Request history is not retained by this installation yet, so request
+    metadata cannot be explored here.
+  </div>
+{:else if requestId}<RequestTimeline {detail} />{:else}<RequestResults
     {requests}
     bind:listState
     {applyFilters}

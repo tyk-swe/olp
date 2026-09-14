@@ -10,7 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-type replayClaim struct {
+type ReplayClaim struct {
 	Key         string
 	Fingerprint []byte
 	Actor       string
@@ -19,10 +19,10 @@ type replayClaim struct {
 // Call only after current authorization, inside the feature's mutation
 // transaction. The actor, operation, target, precondition, and canonical input
 // bind a replay; its encrypted response lives for at most 24 hours.
-func (s *Server) replay(r *http.Request, tx pgx.Tx, p principal, input any) (replayClaim, *reply, error) {
-	c := replayClaim{Key: r.Header.Get("Idempotency-Key"), Actor: p.ID}
+func (s *Server) Replay(r *http.Request, tx pgx.Tx, p Principal, input any) (ReplayClaim, *Reply, error) {
+	c := ReplayClaim{Key: r.Header.Get("Idempotency-Key"), Actor: p.ID}
 	if len(c.Key) < 1 || len(c.Key) > 200 {
-		return c, nil, fail(400, "idempotency_key_required", "Send an Idempotency-Key of 1–200 characters.")
+		return c, nil, Fail(400, "idempotency_key_required", "Send an Idempotency-Key of 1–200 characters.")
 	}
 	data, err := json.Marshal([]any{r.Method, r.URL.Path, r.Header.Get("If-Match"), input})
 	if err != nil {
@@ -42,27 +42,27 @@ func (s *Server) replay(r *http.Request, tx pgx.Tx, p principal, input any) (rep
 		return c, nil, err
 	}
 	if !hmac.Equal(stored, c.Fingerprint) {
-		return c, nil, fail(409, "idempotency_conflict", "This Idempotency-Key belongs to a different request.")
+		return c, nil, Fail(409, "idempotency_conflict", "This Idempotency-Key belongs to a different request.")
 	}
 	data, err = s.Keys.Read(r.Context(), tx, s.Installation, id, "mutation_replay")
 	if err != nil {
 		return c, nil, err
 	}
-	var response reply
+	var response Reply
 	if err = json.Unmarshal(data, &response); err != nil {
 		return c, nil, err
 	}
 	return c, &response, nil
 }
-func (s *Server) completeReplay(r *http.Request, tx pgx.Tx, c replayClaim, result reply) error {
+func (s *Server) CompleteReplay(r *http.Request, tx pgx.Tx, c ReplayClaim, result Reply) error {
 	data, err := json.Marshal(result)
 	if err != nil {
 		return err
 	}
-	if len(data) > 65536 {
-		return errors.New("mutation response exceeds replay limit")
-	}
-	id := newID()
+	// Feature request and collection limits bound replies. Aggregated responses
+	// (such as a 64-slot credential pool) can exceed a single request's byte limit
+	// and must remain replayable in full for an otherwise valid write to commit.
+	id := NewID()
 	expires := time.Now().Add(24 * time.Hour)
 	if err = s.Keys.Store(r.Context(), tx, s.Installation, id, "mutation_replay", data, &expires); err != nil {
 		return err
