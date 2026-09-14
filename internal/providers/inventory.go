@@ -199,11 +199,11 @@ func (s *Server) Register(mux *http.ServeMux) {
 	certifyTimeout := time.Duration(len(capabilityOptions)+1) * probeTimeout
 	mux.HandleFunc("POST /api/v3/providers/{provider_id}/models/{model_id}/certify", s.Access.HandleTimeout(65536, certifyTimeout, s.certify))
 	mux.HandleFunc("GET /api/v3/providers/{provider_id}/credentials", h(s.credentials))
-	mux.HandleFunc("POST /api/v3/providers/{provider_id}/credentials", h(s.rotate))
+	mux.HandleFunc("POST /api/v3/providers/{provider_id}/credentials", s.Access.HandleTimeout(65536, certifyTimeout, s.rotate))
 	mux.HandleFunc("POST /api/v3/providers/{provider_id}/credentials/{credential_id}/revoke", h(s.revoke))
 	mux.HandleFunc("GET /api/v3/providers/{provider_id}/credential-slots", h(s.slots))
 	mux.HandleFunc("PUT /api/v3/providers/{provider_id}/credential-slots/{slot_id}", h(s.writeSlot))
-	mux.HandleFunc("POST /api/v3/providers/{provider_id}/credential-slots/{slot_id}/validate", h(s.validateSlot))
+	mux.HandleFunc("POST /api/v3/providers/{provider_id}/credential-slots/{slot_id}/validate", s.Access.HandleTimeout(65536, certifyTimeout, s.validateSlot))
 	mux.HandleFunc("GET /api/v3/providers/{provider_id}/revisions", h(s.revisions))
 	mux.HandleFunc("GET /api/v3/providers/{provider_id}/revisions/diff", h(s.revisionDiff))
 	mux.HandleFunc("GET /api/v3/providers/{provider_id}/revisions/{revision_id}", h(s.revision))

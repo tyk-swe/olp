@@ -100,25 +100,53 @@ func DecodeChat(body []byte, route string) (*Completion, error) {
 	c := &Completion{}
 	c.UpstreamID, _ = stringField(fields, "id")
 	c.ProviderModel, _ = stringField(fields, "model")
-	choice, err := object(choices[0])
-	if err != nil {
-		return nil, &ProtocolError{Detail: "choice is not an object"}
-	}
-	c.FinishReason, _ = stringField(choice, "finish_reason")
-	if raw, present := choice["message"]; present && !isNull(raw) {
-		message, err := object(raw)
+	seen := make(map[int64]bool, len(choices))
+	for i, raw := range choices {
+		choice, err := object(raw)
 		if err != nil {
-			return nil, &ProtocolError{Detail: "message is not an object"}
+			return nil, &ProtocolError{Detail: "choice is not an object"}
 		}
-		c.OutputText, _ = stringField(message, "content")
-		c.Refusal, _ = stringField(message, "refusal")
-		if calls, ok := arrayField(message, "tool_calls"); ok {
+		index, ok := int64Field(choice, "index")
+		if !ok || seen[index] {
+			return nil, &ProtocolError{Detail: "choice index must be a unique non-negative integer"}
+		}
+		seen[index] = true
+		finish, ok := stringField(choice, "finish_reason")
+		if !ok || finish == "" {
+			return nil, &ProtocolError{Detail: "choice has no terminal finish reason"}
+		}
+		message, err := object(choice["message"])
+		if err != nil {
+			return nil, &ProtocolError{Detail: "choice message is not an object"}
+		}
+		if role, _ := stringField(message, "role"); role != "assistant" {
+			return nil, &ProtocolError{Detail: "choice message role is not assistant"}
+		}
+		for _, field := range []string{"content", "refusal"} {
+			if value, present := message[field]; present && !isNull(value) {
+				if _, ok := stringField(message, field); !ok {
+					return nil, &ProtocolError{Detail: "message " + field + " is not a string or null"}
+				}
+			}
+		}
+		if i == 0 {
+			c.FinishReason = finish
+			c.OutputText, _ = stringField(message, "content")
+			c.Refusal, _ = stringField(message, "refusal")
+		}
+		if value, present := message["tool_calls"]; present && !isNull(value) {
+			calls, ok := arrayField(message, "tool_calls")
+			if !ok {
+				return nil, &ProtocolError{Detail: "message tool_calls is not an array"}
+			}
 			for _, raw := range calls {
 				call, err := object(raw)
 				if err != nil {
 					return nil, &ProtocolError{Detail: "tool call is not an object"}
 				}
-				c.ToolCalls = append(c.ToolCalls, chatToolCall(call))
+				if i == 0 {
+					c.ToolCalls = append(c.ToolCalls, chatToolCall(call))
+				}
 			}
 		}
 	}

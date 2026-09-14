@@ -97,6 +97,20 @@ func (s *Server) rotate(r *http.Request) (access.Reply, error) {
 	if err = current.Configuration.validate(s.Egress); err != nil {
 		return access.Reply{}, err
 	}
+	models, err := loadModels(r.Context(), tx, id, true)
+	if err != nil {
+		return access.Reply{}, err
+	}
+	slots, err := loadSlots(r.Context(), tx, id)
+	if err != nil {
+		return access.Reply{}, err
+	}
+	var defaultSlot slotRow
+	for _, row := range slots {
+		if row.Default {
+			defaultSlot = row
+		}
+	}
 	// Do not hold the installation mutation lock during the upstream probe.
 	// The commit transaction rechecks authority, replay, and the draft ETag.
 	if err = tx.Rollback(r.Context()); err != nil {
@@ -104,6 +118,13 @@ func (s *Server) rotate(r *http.Request) (access.Reply, error) {
 	}
 	if _, err = s.listModels(r.Context(), &current.Configuration, []byte(input.Credential)); err != nil {
 		return access.Reply{}, access.Fail(422, "credential_invalid", "The new credential was not accepted by the upstream: "+classify(err).Detail)
+	}
+	var validatedAt *time.Time
+	if defaultSlot.validationFingerprint(&current.Configuration, models) != "" {
+		if err = s.validateModelAccess(r.Context(), &current.Configuration, []byte(input.Credential), &defaultSlot, models); err != nil {
+			return access.Reply{}, access.Fail(422, "credential_invalid", "The new credential cannot access the enabled models: "+classify(err).Detail)
+		}
+		validatedAt = ptr(time.Now().UTC())
 	}
 	tx, err = a.Begin(r)
 	if err != nil {
@@ -132,8 +153,9 @@ func (s *Server) rotate(r *http.Request) (access.Reply, error) {
 	if err != nil {
 		return access.Reply{}, err
 	}
-	fingerprint := current.Configuration.transportFingerprint() + ":" + credentialID
-	if _, err = tx.Exec(r.Context(), "UPDATE olp_go.provider_slots SET credential_id=$2,validated_at=now(),validated_fingerprint=$3 WHERE provider_id=$1 AND is_default", id, credentialID, fingerprint); err != nil {
+	defaultSlot.CredentialID = &credentialID
+	fingerprint := defaultSlot.validationFingerprint(&current.Configuration, models)
+	if _, err = tx.Exec(r.Context(), "UPDATE olp_go.provider_slots SET credential_id=$2,validated_at=$4,validated_fingerprint=$3 WHERE provider_id=$1 AND is_default", id, credentialID, fingerprint, validatedAt); err != nil {
 		return access.Reply{}, err
 	}
 	etag, err := touch(r.Context(), tx, id)
@@ -247,18 +269,15 @@ func (s *Server) slotList(ctx context.Context, q access.Queryer, current *record
 			activeCredentials[slot.ID] = slot.CredentialID
 		}
 	}
-	transport := current.Configuration.transportFingerprint()
+	models, err := loadModels(ctx, q, current.ID, true)
+	if err != nil {
+		return access.Reply{}, err
+	}
 	items := make([]map[string]any, 0, len(slots))
 	health := map[string]any{}
 	for _, row := range slots {
 		items = append(items, slotJSON(row))
-		var validated *time.Time
-		if row.ValidatedFingerprint != nil && row.CredentialID != nil && *row.ValidatedFingerprint == transport+":"+*row.CredentialID {
-			validated = row.ValidatedAt
-		}
-		if row.ValidatedFingerprint != nil && row.CredentialID == nil && *row.ValidatedFingerprint == transport+":" {
-			validated = row.ValidatedAt
-		}
+		validated := row.validationTime(&current.Configuration, models)
 		health[row.ID] = map[string]any{"revoked": row.CredentialRevoked, "active_credential_version_id": activeCredentials[row.ID], "cooling_down": nil, "validated_at": validated, "usage": nil}
 	}
 	return access.Detail(map[string]any{"items": items, "health": health, "etag": current.SlotsETag, "connection_usage": nil}, current.SlotsETag), nil
@@ -481,44 +500,80 @@ func (s *Server) validateSlot(r *http.Request) (access.Reply, error) {
 	if err != nil {
 		return access.Reply{}, err
 	}
+	defer tx.Rollback(r.Context())
 	current, err := load(r.Context(), tx, id, false)
 	if err != nil {
-		tx.Rollback(r.Context())
 		return access.Reply{}, err
 	}
-	var credentialID *string
-	var revoked *bool
-	err = tx.QueryRow(r.Context(), "SELECT s.credential_id::text,c.revoked_at IS NOT NULL FROM olp_go.provider_slots s LEFT JOIN olp_go.provider_credentials c ON c.id=s.credential_id WHERE s.id=$1 AND s.provider_id=$2", slotID, id).Scan(&credentialID, &revoked)
+	slots, err := loadSlots(r.Context(), tx, id)
 	if err != nil {
-		tx.Rollback(r.Context())
+		return access.Reply{}, err
+	}
+	var slot *slotRow
+	for i := range slots {
+		if slots[i].ID == slotID {
+			slot = &slots[i]
+		}
+	}
+	if slot == nil {
+		return access.Reply{}, pgx.ErrNoRows
+	}
+	models, err := loadModels(r.Context(), tx, id, true)
+	if err != nil {
 		return access.Reply{}, err
 	}
 	var credential []byte
 	if current.Configuration.credentialRequired() {
-		if credentialID == nil {
-			tx.Rollback(r.Context())
+		if slot.CredentialID == nil {
 			return access.Reply{}, access.Fail(422, "credential_required", "This slot has no credential to validate.")
 		}
-		if revoked != nil && *revoked {
-			tx.Rollback(r.Context())
+		if slot.CredentialRevoked {
 			return access.Reply{}, access.Fail(422, "credential_revoked", "This slot references a revoked credential.")
 		}
-		if credential, err = a.Keys.Read(r.Context(), tx, a.Installation, *credentialID, "provider_credential"); err != nil {
-			tx.Rollback(r.Context())
+		if credential, err = a.Keys.Read(r.Context(), tx, a.Installation, *slot.CredentialID, "provider_credential"); err != nil {
 			return access.Reply{}, err
 		}
 	}
-	tx.Rollback(r.Context())
+	if err = tx.Rollback(r.Context()); err != nil {
+		return access.Reply{}, err
+	}
 	if err = current.Configuration.validate(s.Egress); err != nil {
 		return access.Reply{}, err
 	}
-	if _, err = s.listModels(r.Context(), &current.Configuration, credential); err != nil {
-		a.Pool.Exec(r.Context(), "UPDATE olp_go.provider_slots SET validated_at=NULL,validated_fingerprint=NULL WHERE id=$1", slotID)
-		return access.Reply{}, access.Fail(422, "slot_validation_failed", classify(err).Detail)
-	}
-	fingerprint := current.Configuration.transportFingerprint() + ":" + deref(credentialID)
-	if _, err = a.Pool.Exec(r.Context(), "UPDATE olp_go.provider_slots SET validated_at=now(),validated_fingerprint=$2 WHERE id=$1", slotID, fingerprint); err != nil {
+	probeErr := s.validateModelAccess(r.Context(), &current.Configuration, credential, slot, models)
+	// Probes run without mutation locks. Only save evidence if its complete
+	// input (credential, transport, restrictions, and models) is still current.
+	tx, err = a.Begin(r)
+	if err != nil {
 		return access.Reply{}, err
 	}
-	return s.slotList(r.Context(), a.Pool, current)
+	defer tx.Rollback(r.Context())
+	if _, err = a.Principal(r, tx, "configure"); err != nil {
+		return access.Reply{}, err
+	}
+	locked, err := load(r.Context(), tx, id, true)
+	if err != nil {
+		return access.Reply{}, err
+	}
+	if locked.ETag != current.ETag {
+		return access.Reply{}, access.Fail(412, "etag_mismatch", "The connection changed during validation; reload and retry.")
+	}
+	var validatedAt *time.Time
+	var fingerprint *string
+	if probeErr == nil {
+		validatedAt = ptr(time.Now().UTC())
+		fingerprint = ptr(slot.validationFingerprint(&current.Configuration, models))
+	}
+	if _, err = tx.Exec(r.Context(), "UPDATE olp_go.provider_slots SET validated_at=$2,validated_fingerprint=$3 WHERE id=$1", slotID, validatedAt, fingerprint); err != nil {
+		return access.Reply{}, err
+	}
+	result, err := s.slotList(r.Context(), tx, locked)
+	if err != nil {
+		return access.Reply{}, err
+	}
+	result, err = access.Commit(r, tx, result)
+	if err == nil && probeErr != nil {
+		err = access.Fail(422, "slot_validation_failed", classify(probeErr).Detail)
+	}
+	return result, err
 }
