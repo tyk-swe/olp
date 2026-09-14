@@ -511,7 +511,22 @@
       >
     </form>
 
-    {#if !services.limitsEnforced}<div class="card empty-state" role="status">
+    {#if services.pending}<div class="loading-state" role="status">
+        Loading installation capabilities…
+      </div>
+    {:else if services.error}<div class="inline-problem" role="alert">
+        Installation capabilities are unavailable, so pricing revisions cannot
+        be listed.
+        <button
+          class="text-button"
+          type="button"
+          onclick={() => services.retry()}>Try again</button
+        >
+      </div>
+    {:else if !services.limitsEnforced}<div
+        class="card empty-state"
+        role="status"
+      >
         Pricing revisions become available once limits and accounting are
         enforced by this installation.
       </div>

@@ -11,6 +11,10 @@
   import NavIcon from '$lib/components/NavIcon.svelte';
   import ReadOnlyNote from '$lib/components/ReadOnlyNote.svelte';
   import { formatBudget, formatDate, formatInteger } from '$lib/format';
+  import {
+    budgetStateNote,
+    budgetWindowState
+  } from '$lib/features/access/api-keys/budgetPresentation';
   import { guardUnsavedChanges } from '$lib/forms/unsavedChanges';
   import { validateApiKey } from '$lib/features/access/api-keys/keyValidation';
   import {
@@ -381,6 +385,10 @@
       </div>
     </div>
     {#if editing && services.limitsEnforced}
+      {@const daily = budgetWindowState(editing.budget, 'daily')}
+      {@const monthly = budgetWindowState(editing.budget, 'monthly')}
+      {@const dailyNote = budgetStateNote(daily)}
+      {@const monthlyNote = budgetStateNote(monthly)}
       <div
         class="budget-detail"
         role="region"
@@ -388,7 +396,7 @@
       >
         <div>
           <span>Daily accrued / limit</span>
-          <strong
+          <strong class:danger-text={daily === 'exhausted'}
             >{formatBudget(editing.budget.daily.accrued)} / {editing.budget
               .daily.limit === null
               ? 'No limit'
@@ -399,10 +407,13 @@
               editing.budget.daily.window_ends_at
             )}</small
           >
+          {#if dailyNote}<small class:danger-text={daily === 'exhausted'}
+              >{dailyNote}</small
+            >{/if}
         </div>
         <div>
           <span>Monthly accrued / limit</span>
-          <strong
+          <strong class:danger-text={monthly === 'exhausted'}
             >{formatBudget(editing.budget.monthly.accrued)} / {editing.budget
               .monthly.limit === null
               ? 'No limit'
@@ -413,6 +424,9 @@
               editing.budget.monthly.window_ends_at
             )}</small
           >
+          {#if monthlyNote}<small class:danger-text={monthly === 'exhausted'}
+              >{monthlyNote}</small
+            >{/if}
         </div>
         <div>
           <span>Unpriced attempts this UTC month</span>
@@ -531,6 +545,9 @@
   .budget-detail small {
     color: var(--foreground-muted);
     font-size: var(--text-caption);
+  }
+  .budget-detail .danger-text {
+    color: var(--danger);
   }
   .field-error {
     color: var(--danger);
