@@ -40,7 +40,7 @@ initial packaging choice. [GLIDE Go documentation](https://github.com/valkey-io/
 | M1 | [Go foundation and build economics](01-foundation.md) | None | Implemented; native arm64 qualification pending |
 | M2 | [Installation, identity, and management](02-access-and-control.md) | M1 | Implemented and qualified on amd64; inherits open M1 arm64 gate |
 | M3 | [Complete OpenAI request path](03-core-gateway.md) | M2 | Implemented and qualified on amd64; inherits open M1 arm64 gate |
-| M4 | [Distributed limits, pricing, and recovery](04-limits-and-accounting.md) | M3 | Not started |
+| M4 | [Distributed limits, pricing, and recovery](04-limits-and-accounting.md) | M3 | Implemented and qualified on amd64; inherits open M1 arm64 gate |
 | M5 | [Remaining protocols, providers, and routing](05-provider-and-routing-parity.md) | M4 | Not started |
 | M6 | [Media and operational completeness](06-media-and-console-parity.md) | M5 | Not started |
 | M7 | [Release qualification and Rust retirement](07-release-and-rust-retirement.md) | M6 | Not started |
@@ -98,16 +98,16 @@ compatibility tables remain the operation/provider support matrix.
 | [OpenAI Chat Completions, Responses, and model discovery](../../src/inference/http/endpoint_policy/registry.rs) | M3 implemented; [Go code and qualification](evidence/core-gateway.md) |
 | [Admission, bounded execution, retries, circuit health, cancellation, and SSE](../../src/inference/) | M3 implemented; [Go code and qualification](evidence/core-gateway.md) |
 | [Egress validation and DNS pinning](../../src/net/) and [HTTP resource limits](../../src/http/) | M3 implemented; [Go code and qualification](evidence/core-gateway.md); media extensions M6 |
-| [Key, connection, and slot limits and spend controls](../../src/limits/) | M4 |
-| [Pricing, accounting, ingestion, history, reports, completeness, and retention](../../src/usage/) | M4 |
-| [Distributed recovery and multiple-installation isolation](../../tests/ha/) | M4; final process qualification M7 |
+| [Key, connection, and slot limits and spend controls](../../src/limits/) | M4 implemented as [`internal/limits/`](../../internal/limits/); [Go code and qualification](evidence/limits-and-accounting.md) |
+| [Pricing, accounting, ingestion, history, reports, completeness, and retention](../../src/usage/) | M4 implemented as [`internal/usage/`](../../internal/usage/); [Go code and qualification](evidence/limits-and-accounting.md) |
+| [Distributed recovery and multiple-installation isolation](../../tests/ha/) | M4 implemented as the [`tests/integration/m4_*` process suites](../../tests/integration/); [Go code and qualification](evidence/limits-and-accounting.md); final process qualification M7 |
 | [Anthropic/Gemini surfaces, translations, token counting, embeddings, and moderation](../compatibility.md) | M5 |
 | [Azure, Vertex, Bedrock, and compatible-vendor profiles](../../src/providers/) | M5 |
 | [Custom endpoints/auth, mounted connectors, model facts, bulk workflows, policies, and routing preferences](../provider-routing.md) | M5 |
 | [Images, audio, uploads, video jobs, historical credentials, and reconciliation](../../src/media/) | M6 |
 | [Metrics, optional OTLP tracing, health, and worker diagnostics](../../src/observability/) | M1/M3 foundations; M6 complete |
 | [Console access/settings](../../console/src/lib/features/access/), [providers](../../console/src/lib/features/providers/), [routes](../../console/src/lib/features/routes/), and [playground](../../console/src/lib/features/inference/) | M2 and M3 implemented; [Go code and qualification](evidence/core-gateway.md); M5 alongside its APIs |
-| [Console usage/history](../../console/src/lib/features/usage/), [media](../../console/src/lib/features/media/), [overview](../../console/src/lib/features/overview/), and [health](../../console/src/lib/features/runtime/) | M4 and M6 |
+| [Console usage/history](../../console/src/lib/features/usage/), [media](../../console/src/lib/features/media/), [overview](../../console/src/lib/features/overview/), and [health](../../console/src/lib/features/runtime/) | Usage, history, budgets, and overview implemented in M4; [Go code and qualification](evidence/limits-and-accounting.md); media and health M6 |
 | [Compose/Helm](../../deploy/), [backup/restore and qualification scripts](../../scripts/), [CI/releases](../../.github/workflows/), and [operations](../operations.md) | M7 |
 
 ## Build and dependency scorecard
@@ -128,7 +128,7 @@ dependencies. API generation currently compiles the Rust exporter through
 | Targeted behavioral test | Unmeasured | M1 SSE: 0.642 s median (0.635–0.680), including startup/link checks |
 | API contract generation | Unmeasured; invokes Cargo | M1: 3.749 s median (3.216–5.510); no gateway compilation, services, or Rust |
 | Console build, complete checks, integration, and release image build | Unmeasured | Record separately so backend gains do not conceal shifted work |
-| Direct production dependency inventory | 50 Rust crates | M2: eight production library requirements plus one test requirement; 14 external modules imported by the executable; [purposes and impact](evidence/access-and-control.md#dependencies) |
+| Direct production dependency inventory | 50 Rust crates | M2: eight production library requirements plus one test requirement; 14 external modules imported by the executable; [purposes and impact](evidence/access-and-control.md#dependencies). M3 and M4 added none: distributed limits, pricing, accounting, ingestion, and retention use the standard library, pgx, and the existing GLIDE client, and `go.mod` is unchanged |
 | Transitive and development inventory | 467 resolved Cargo package entries in total | M2: [134 resolved external Go modules, including test/tool graphs](evidence/access-dependencies.json); [unchanged GLIDE native inventory](evidence/dependencies.json) |
 | Native dependencies and artifact size | Unmeasured | M2 amd64 image: 93,278,120 bytes; [qualification](evidence/access-and-control.md#validation); [GLIDE, glibc and licenses](evidence/validation.md) |
 | Ordinary development requires a Rust compiler | Yes | No |
