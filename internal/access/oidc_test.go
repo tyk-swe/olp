@@ -67,7 +67,7 @@ func TestOIDCDiscoveryValidatesAdvertisedAddresses(t *testing.T) {
 					}
 					return
 				}
-				var p *problem
+				var p *Problem
 				if !errors.As(err, &p) || p.Status != 422 || p.Field != "discovery_url" || provider != nil || oauth != nil {
 					t.Fatalf("got %v, want unsafe discovery endpoint rejection", err)
 				}

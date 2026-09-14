@@ -12,6 +12,7 @@
   import { setupProgress } from './setupProgress';
   import SetupChecklist from '$lib/features/overview/SetupChecklist.svelte';
   import { useRole } from '$lib/features/access/session/useRole.svelte';
+  import { useServiceCapabilities } from '$lib/features/access/session/serviceCapabilities.svelte';
   import { copyText } from '$lib/clipboard';
   import { listProviders } from '$lib/features/providers/api';
   import { listRoutes } from '$lib/features/routes/api';
@@ -25,6 +26,7 @@
   let copyError = $state('');
   let copyTimer: ReturnType<typeof setTimeout> | undefined;
   const access = useRole();
+  const services = useServiceCapabilities();
   const playgroundAllowed = $derived(access.can('playground.use'));
   const providers = createQuery(() => ({
     queryKey: providerKeys.all(),
@@ -37,7 +39,7 @@
   const recentRequests = createQuery(() => ({
     queryKey: requestKeys.overview(),
     queryFn: () => listRequests({ limit: 5 }),
-    enabled: controlConnected
+    enabled: controlConnected && services.retentionEnforced
   }));
   const activeProviders = $derived(
     providers.data?.filter((provider) => provider.active_revision != null)
@@ -236,7 +238,20 @@
       >Explore requests <NavIcon name="arrow" size={17} /></a
     >
   </div>
-  {#if recentRequests.isPending}
+  {#if services.pending}
+    <div class="loading-state" role="status">
+      Loading recent request metadata…
+    </div>
+  {:else if !services.retentionEnforced}
+    <div class="empty-state" role="status">
+      <span aria-hidden="true"><NavIcon name="request" size={24} /></span>
+      <strong>Request history is not retained yet</strong>
+      <p>
+        This installation does not store request metadata, so recent requests
+        cannot be listed here.
+      </p>
+    </div>
+  {:else if recentRequests.isPending}
     <div class="loading-state" role="status">
       Loading recent request metadata…
     </div>

@@ -2,6 +2,10 @@ import { readFileSync } from 'node:fs';
 import { expect, test, type Page } from '@playwright/test';
 
 const password = 'a long browser test password';
+// With the Go gateway available, every signed-in role lands on the overview;
+// only roles that can manage providers see the onboarding heading.
+const ownerLanding = 'Bring your first model route online.';
+const viewerLanding = 'Gateway overview';
 
 async function changeRemote(
   page: Page,
@@ -60,9 +64,7 @@ test('setup, invitations, key policy, profile, settings, audit, and OIDC work th
     .getByLabel('Setup token')
     .fill(readFileSync(process.env.OLP_BOOTSTRAP_TOKEN_FILE!, 'utf8').trim());
   await page.getByRole('button', { name: 'Create owner account' }).click();
-  await expect(
-    page.getByRole('heading', { name: 'Access and control' })
-  ).toBeVisible();
+  await expect(page.getByRole('heading', { name: ownerLanding })).toBeVisible();
   await page.screenshot({
     path: info.outputPath('overview.png'),
     fullPage: true
@@ -90,7 +92,7 @@ test('setup, invitations, key policy, profile, settings, audit, and OIDC work th
   await invited.getByLabel('Confirm password').fill(password);
   await invited.getByRole('button', { name: 'Accept invitation' }).click();
   await expect(
-    invited.getByRole('heading', { name: 'Access and control' })
+    invited.getByRole('heading', { name: viewerLanding })
   ).toBeVisible();
   expect(
     await invited.evaluate(async () => (await fetch('/api/v3/users')).status)
@@ -99,7 +101,7 @@ test('setup, invitations, key policy, profile, settings, audit, and OIDC work th
 
   await page.goto('/api-keys/new');
   await page.getByLabel('Key name').fill('Browser application');
-  await page.getByLabel('Route slugs (comma separated)').fill('planned-route');
+  await expect(page.getByText('No routes are configured yet.')).toBeVisible();
   await page.getByLabel('Requests per minute').fill('60');
   await page
     .getByRole('button', { name: 'Create and show key', exact: true })
@@ -108,7 +110,7 @@ test('setup, invitations, key policy, profile, settings, audit, and OIDC work th
   await expect(secret).toBeVisible();
   await expect(
     secret.getByRole('button', { name: 'Run connection test' })
-  ).toHaveCount(0);
+  ).toBeVisible();
   await secret.getByRole('button', { name: 'I have saved the key' }).click();
   await expect(
     page.getByText('Browser application', { exact: true })
@@ -246,7 +248,7 @@ test('setup, invitations, key policy, profile, settings, audit, and OIDC work th
   await signOut(page);
   await page.getByRole('link', { name: /single sign-on|OIDC/ }).click();
   await expect(
-    page.getByRole('heading', { name: 'Access and control' })
+    page.getByRole('heading', { name: viewerLanding })
   ).toBeVisible();
   await page.goto('/settings/profile');
   await expect(page.getByLabel('Display name')).toHaveValue('SSO Member');
@@ -260,7 +262,7 @@ test('setup, invitations, key policy, profile, settings, audit, and OIDC work th
   await page.getByLabel('Password', { exact: true }).fill(password);
   await page.getByRole('button', { name: 'Sign in', exact: true }).click();
   await expect(
-    page.getByRole('heading', { name: 'Access and control' })
+    page.getByRole('heading', { name: viewerLanding })
   ).toBeVisible();
   await page.goto('/api-keys');
   await expect(page.getByRole('link', { name: 'Create key' })).toHaveCount(0);

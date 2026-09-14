@@ -18,11 +18,11 @@ func TestAccessBodyReadDeadline(t *testing.T) {
 			t.Parallel()
 			finished := make(chan error, 1)
 			s := &Server{Origin: "https://console.test"}
-			server := httptest.NewServer(s.handle(func(r *http.Request) (reply, error) {
+			server := httptest.NewServer(s.Handle(func(r *http.Request) (Reply, error) {
 				var body map[string]any
-				err := decode(r, &body)
+				err := Decode(r, &body)
 				finished <- err
-				return ok(body), err
+				return OK(body), err
 			}))
 			defer server.Close()
 			conn, err := net.DialTimeout("tcp", server.Listener.Addr().String(), time.Second)
@@ -59,10 +59,10 @@ func TestAccessBodyReadDeadline(t *testing.T) {
 
 func TestAccessBodyReadDeadlineAllowsKeepAlive(t *testing.T) {
 	s := &Server{Origin: "https://console.test"}
-	server := httptest.NewServer(s.handle(func(r *http.Request) (reply, error) {
+	server := httptest.NewServer(s.Handle(func(r *http.Request) (Reply, error) {
 		var body map[string]any
-		err := decode(r, &body)
-		return ok(body), err
+		err := Decode(r, &body)
+		return OK(body), err
 	}))
 	defer server.Close()
 	conn, err := net.DialTimeout("tcp", server.Listener.Addr().String(), time.Second)

@@ -13,10 +13,10 @@ import (
 	"github.com/tyk-swe/olp/internal/secrets"
 )
 
-func newID() string { return uuid.Must(uuid.NewV7()).String() }
+func NewID() string { return uuid.Must(uuid.NewV7()).String() }
 
 func (s *Server) Register(mux *http.ServeMux) {
-	routes := map[string]func(*http.Request) (reply, error){
+	routes := map[string]func(*http.Request) (Reply, error){
 		"GET /api/v3/setup/status": s.setupStatus, "POST /api/v3/setup": s.setup,
 		"GET /api/v3/auth/capabilities": s.capabilities,
 		"POST /api/v3/sessions":         s.login, "GET /api/v3/sessions": s.sessions,
@@ -40,19 +40,19 @@ func (s *Server) Register(mux *http.ServeMux) {
 		"DELETE /api/v3/oidc/identities/{identity_id}": s.unlinkOIDCIdentity,
 	}
 	for pattern, fn := range routes {
-		mux.HandleFunc(pattern, s.handle(fn))
+		mux.HandleFunc(pattern, s.Handle(fn))
 	}
 }
 
-func (s *Server) setupStatus(r *http.Request) (reply, error) {
+func (s *Server) setupStatus(r *http.Request) (Reply, error) {
 	var complete bool
 	err := s.Pool.QueryRow(r.Context(), "SELECT setup_complete FROM olp_go.installation WHERE singleton").Scan(&complete)
-	return ok(map[string]bool{"setup_required": !complete}), err
+	return OK(map[string]bool{"setup_required": !complete}), err
 }
-func (s *Server) capabilities(r *http.Request) (reply, error) {
+func (s *Server) capabilities(r *http.Request) (Reply, error) {
 	var local, oidc bool
 	err := s.Pool.QueryRow(r.Context(), `SELECT COALESCE((SELECT value='true' FROM olp_go.settings WHERE key='auth.local_login_enabled'),true),COALESCE((SELECT (document->>'enabled')::boolean FROM olp_go.oidc_configuration WHERE singleton),false)`).Scan(&local, &oidc)
-	return ok(map[string]bool{"local_login_enabled": local, "oidc_login_enabled": oidc, "gateway_available": false, "limits_enforced": false, "retention_enforced": false}), err
+	return OK(map[string]bool{"local_login_enabled": local, "oidc_login_enabled": oidc, "gateway_available": true, "limits_enforced": false, "retention_enforced": false}), err
 }
 
 func (s *Server) passwordWork(r *http.Request, work func()) error {
@@ -62,7 +62,7 @@ func (s *Server) passwordWork(r *http.Request, work func()) error {
 		work()
 		return r.Context().Err()
 	default:
-		return fail(429, "authentication_busy", "Authentication is busy. Try again shortly.")
+		return Fail(429, "authentication_busy", "Authentication is busy. Try again shortly.")
 	}
 }
 
@@ -110,17 +110,17 @@ func (s *Server) admit(r *http.Request, action, target string) error {
 		return err
 	}
 	if !admitted {
-		return fail(429, "authentication_rate_limited", "Too many attempts. Try again in a minute.")
+		return Fail(429, "authentication_rate_limited", "Too many attempts. Try again in a minute.")
 	}
 	return nil
 }
 
-func (s *Server) setup(r *http.Request) (reply, error) {
+func (s *Server) setup(r *http.Request) (Reply, error) {
 	if err := s.admit(r, "setup", ""); err != nil {
-		return reply{}, err
+		return Reply{}, err
 	}
 	if s.Bootstrap == "" || !hmac.Equal([]byte(s.Bootstrap), []byte(r.Header.Get("X-OLP-Setup-Token"))) {
-		return reply{}, fail(403, "setup_token_invalid", "The bootstrap token is invalid.")
+		return Reply{}, Fail(403, "setup_token_invalid", "The bootstrap token is invalid.")
 	}
 	var input struct {
 		Email       string `json:"email"`
@@ -128,122 +128,122 @@ func (s *Server) setup(r *http.Request) (reply, error) {
 		DisplayName string `json:"display_name"`
 		Name        string `json:"installation_name"`
 	}
-	if err := decode(r, &input); err != nil {
-		return reply{}, err
+	if err := Decode(r, &input); err != nil {
+		return Reply{}, err
 	}
 	address, err := email(input.Email)
 	if err != nil {
-		return reply{}, err
+		return Reply{}, err
 	}
 	if err = password(input.Password); err != nil {
-		return reply{}, err
+		return Reply{}, err
 	}
-	if err = validText("display_name", input.DisplayName, 100); err != nil {
-		return reply{}, err
+	if err = ValidText("display_name", input.DisplayName, 100); err != nil {
+		return Reply{}, err
 	}
 	if input.Name == "" {
 		input.Name = "OpenLLMProxy"
 	}
-	if err = validText("installation_name", input.Name, 100); err != nil {
-		return reply{}, err
+	if err = ValidText("installation_name", input.Name, 100); err != nil {
+		return Reply{}, err
 	}
 	var hash string
 	if err = s.passwordWork(r, func() { hash = secrets.HashPassword(input.Password) }); err != nil {
-		return reply{}, err
+		return Reply{}, err
 	}
-	tx, err := s.begin(r)
+	tx, err := s.Begin(r)
 	if err != nil {
-		return reply{}, err
+		return Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
 	var complete bool
 	if err = tx.QueryRow(r.Context(), "SELECT setup_complete FROM olp_go.installation WHERE singleton").Scan(&complete); err != nil {
-		return reply{}, err
+		return Reply{}, err
 	}
 	if complete {
-		return reply{}, fail(409, "setup_complete", "This installation already has an owner.")
+		return Reply{}, Fail(409, "setup_complete", "This installation already has an owner.")
 	}
-	id := newID()
-	if _, err = tx.Exec(r.Context(), "INSERT INTO olp_go.users(id,email,display_name,password_hash,role,etag) VALUES($1,$2,$3,$4,'owner',$5)", id, address, strings.TrimSpace(input.DisplayName), hash, newID()); err != nil {
-		return reply{}, err
+	id := NewID()
+	if _, err = tx.Exec(r.Context(), "INSERT INTO olp_go.users(id,email,display_name,password_hash,role,etag) VALUES($1,$2,$3,$4,'owner',$5)", id, address, strings.TrimSpace(input.DisplayName), hash, NewID()); err != nil {
+		return Reply{}, err
 	}
 	if _, err = tx.Exec(r.Context(), "UPDATE olp_go.installation SET name=$1,setup_complete=true WHERE singleton", strings.TrimSpace(input.Name)); err != nil {
-		return reply{}, err
+		return Reply{}, err
 	}
 	for key, value := range map[string]string{"retention.requests_days": "30", "retention.usage_days": "90", "retention.audit_days": "365", "limits.valkey_unavailable": "fail_closed", "auth.local_login_enabled": "true"} {
-		if _, err = tx.Exec(r.Context(), "INSERT INTO olp_go.settings(key,value,etag,updated_by) VALUES($1,$2,$3,$4)", key, value, newID(), id); err != nil {
-			return reply{}, err
+		if _, err = tx.Exec(r.Context(), "INSERT INTO olp_go.settings(key,value,etag,updated_by) VALUES($1,$2,$3,$4)", key, value, NewID(), id); err != nil {
+			return Reply{}, err
 		}
 	}
-	if err = audit(r.Context(), tx, r, id, "installation.setup", "installation", s.Installation, "success"); err != nil {
-		return reply{}, err
+	if err = Audit(r.Context(), tx, r, id, "installation.setup", "installation", s.Installation, "success"); err != nil {
+		return Reply{}, err
 	}
 	response, err := s.newSession(r, tx, id)
 	if err != nil {
-		return reply{}, err
+		return Reply{}, err
 	}
-	return commit(r, tx, response)
+	return Commit(r, tx, response)
 }
 
-func (s *Server) users(r *http.Request) (reply, error) {
-	if _, err := s.principal(r, s.Pool, "access_read"); err != nil {
-		return reply{}, err
+func (s *Server) users(r *http.Request) (Reply, error) {
+	if _, err := s.Principal(r, s.Pool, "access_read"); err != nil {
+		return Reply{}, err
 	}
-	p, err := page(r)
+	p, err := Page(r)
 	if err != nil {
-		return reply{}, err
+		return Reply{}, err
 	}
 	rows, err := s.Pool.Query(r.Context(), "SELECT to_jsonb(u)-'password_hash' FROM olp_go.users u WHERE id<$1 ORDER BY id DESC LIMIT $2", p.Before, p.Limit+1)
 	if err != nil {
-		return reply{}, err
+		return Reply{}, err
 	}
-	items, err := jsonRows(rows)
-	return listReply(items, p), err
+	items, err := JSONRows(rows)
+	return ListReply(items, p), err
 }
-func (s *Server) user(r *http.Request) (reply, error) {
-	if _, err := s.principal(r, s.Pool, "access_read"); err != nil {
-		return reply{}, err
+func (s *Server) user(r *http.Request) (Reply, error) {
+	if _, err := s.Principal(r, s.Pool, "access_read"); err != nil {
+		return Reply{}, err
 	}
-	id, err := idParam(r, "user_id")
+	id, err := IDParam(r, "user_id")
 	if err != nil {
-		return reply{}, err
+		return Reply{}, err
 	}
 	u, err := scanUser(s.Pool.QueryRow(r.Context(), "SELECT "+userColumns+" FROM olp_go.users u WHERE id=$1", id))
-	return detail(u, u.ETag), err
+	return Detail(u, u.ETag), err
 }
-func (s *Server) updateUser(r *http.Request) (reply, error) {
+func (s *Server) updateUser(r *http.Request) (Reply, error) {
 	var input struct {
 		Role   *string `json:"role"`
 		Active *bool   `json:"active"`
 	}
-	if err := decode(r, &input); err != nil {
-		return reply{}, err
+	if err := Decode(r, &input); err != nil {
+		return Reply{}, err
 	}
 	if input.Role == nil && input.Active == nil {
-		return reply{}, invalid("user", "Provide a role or active status.")
+		return Reply{}, Invalid("user", "Provide a role or active status.")
 	}
 	if input.Role != nil && !validRole(*input.Role) {
-		return reply{}, invalid("role", "Use owner, operator, developer, or viewer.")
+		return Reply{}, Invalid("role", "Use owner, operator, developer, or viewer.")
 	}
-	id, err := idParam(r, "user_id")
+	id, err := IDParam(r, "user_id")
 	if err != nil {
-		return reply{}, err
+		return Reply{}, err
 	}
-	tx, err := s.begin(r)
+	tx, err := s.Begin(r)
 	if err != nil {
-		return reply{}, err
+		return Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := s.principal(r, tx, "access")
+	p, err := s.Principal(r, tx, "access")
 	if err != nil {
-		return reply{}, err
+		return Reply{}, err
 	}
 	u, err := scanUser(tx.QueryRow(r.Context(), "SELECT "+userColumns+" FROM olp_go.users u WHERE id=$1", id))
 	if err != nil {
-		return reply{}, err
+		return Reply{}, err
 	}
-	if err = match(r, u.ETag); err != nil {
-		return reply{}, err
+	if err = Match(r, u.ETag); err != nil {
+		return Reply{}, err
 	}
 	if input.Role != nil {
 		u.Role = *input.Role
@@ -252,36 +252,36 @@ func (s *Server) updateUser(r *http.Request) (reply, error) {
 		u.Active = *input.Active
 	}
 	if id == p.ID && (!u.Active || u.Role != p.Role) {
-		return reply{}, fail(409, "cannot_change_current_user_access", "Ask another owner to change your access.")
+		return Reply{}, Fail(409, "cannot_change_current_user_access", "Ask another owner to change your access.")
 	}
-	u.ETag = newID()
+	u.ETag = NewID()
 	if _, err = tx.Exec(r.Context(), "UPDATE olp_go.users SET role=$1,active=$2,etag=$3,updated_at=now() WHERE id=$4", u.Role, u.Active, u.ETag, id); err != nil {
-		return reply{}, err
+		return Reply{}, err
 	}
 	if err = usableOwner(r, tx); err != nil {
-		return reply{}, err
+		return Reply{}, err
 	}
 	if _, err = tx.Exec(r.Context(), "DELETE FROM olp_go.sessions WHERE user_id=$1", id); err != nil {
-		return reply{}, err
+		return Reply{}, err
 	}
 	if !u.Active || u.Role != "owner" {
 		if err = retireIssuedInvitations(r, tx, id, p.ID); err != nil {
-			return reply{}, err
+			return Reply{}, err
 		}
 	}
 	// Issuance is installation-scoped. Existing keys retain their issuer and
 	// policy across account role changes and disabling, as in the reference.
-	if _, err = advanceAuthority(r, tx); err != nil {
-		return reply{}, err
+	if _, err = AdvanceAuthority(r, tx); err != nil {
+		return Reply{}, err
 	}
-	if err = audit(r.Context(), tx, r, p.ID, "user.update", "user", id, "success"); err != nil {
-		return reply{}, err
+	if err = Audit(r.Context(), tx, r, p.ID, "user.update", "user", id, "success"); err != nil {
+		return Reply{}, err
 	}
 	u, err = scanUser(tx.QueryRow(r.Context(), "SELECT "+userColumns+" FROM olp_go.users u WHERE id=$1", id))
 	if err != nil {
-		return reply{}, err
+		return Reply{}, err
 	}
-	return commit(r, tx, detail(u, u.ETag))
+	return Commit(r, tx, Detail(u, u.ETag))
 }
 
 func usableOwner(r *http.Request, tx pgx.Tx) error {
@@ -294,7 +294,7 @@ func usableOwner(r *http.Request, tx pgx.Tx) error {
 	if exists {
 		return nil
 	}
-	missing := fail(409, "last_usable_owner", "Keep at least one active owner with a usable sign-in method and an owner role after sign-in.")
+	missing := Fail(409, "last_usable_owner", "Keep at least one active owner with a usable sign-in method and an owner role after sign-in.")
 	c, err := loadOIDC(r, tx)
 	if errors.Is(err, pgx.ErrNoRows) || err == nil && !c.Enabled {
 		return missing
@@ -341,192 +341,192 @@ func retireIssuedInvitations(r *http.Request, tx pgx.Tx, issuer, actor string) e
 	if result.RowsAffected() == 0 {
 		return nil
 	}
-	return audit(r.Context(), tx, r, actor, "invitation.revoke_for_access_loss", "user", issuer, "success")
+	return Audit(r.Context(), tx, r, actor, "invitation.revoke_for_access_loss", "user", issuer, "success")
 }
 
 const invitationJSON = `jsonb_build_object('id',i.id,'email',i.email,'role',i.role,'invited_by',i.invited_by,'invited_by_email',inviter.email,'accepted_by_email',accepted.email,'revoked_by_email',revoker.email,'accepted_at',i.accepted_at,'revoked_at',i.revoked_at,'expires_at',i.expires_at,'created_at',i.created_at,'status',CASE WHEN i.accepted_at IS NOT NULL THEN 'accepted' WHEN i.revoked_at IS NOT NULL THEN 'revoked' WHEN i.expires_at<=now() THEN 'expired' ELSE 'pending' END)`
 const invitationFrom = ` FROM olp_go.invitations i LEFT JOIN olp_go.users inviter ON inviter.id=i.invited_by LEFT JOIN olp_go.users accepted ON accepted.id=i.accepted_by LEFT JOIN olp_go.users revoker ON revoker.id=i.revoked_by`
 
-func (s *Server) invitations(r *http.Request) (reply, error) {
-	if _, err := s.principal(r, s.Pool, "access_read"); err != nil {
-		return reply{}, err
+func (s *Server) invitations(r *http.Request) (Reply, error) {
+	if _, err := s.Principal(r, s.Pool, "access_read"); err != nil {
+		return Reply{}, err
 	}
-	p, err := page(r)
+	p, err := Page(r)
 	if err != nil {
-		return reply{}, err
+		return Reply{}, err
 	}
 	rows, err := s.Pool.Query(r.Context(), "SELECT "+invitationJSON+invitationFrom+" WHERE i.id<$1 ORDER BY i.id DESC LIMIT $2", p.Before, p.Limit+1)
 	if err != nil {
-		return reply{}, err
+		return Reply{}, err
 	}
-	items, err := jsonRows(rows)
-	return listReply(items, p), err
+	items, err := JSONRows(rows)
+	return ListReply(items, p), err
 }
 func invitation(r *http.Request, tx pgx.Tx, id string) (any, error) {
 	var data []byte
 	err := tx.QueryRow(r.Context(), "SELECT "+invitationJSON+invitationFrom+" WHERE i.id=$1", id).Scan(&data)
-	return rawJSON(data), err
+	return RawJSON(data), err
 }
-func (s *Server) createInvitation(r *http.Request) (reply, error) {
+func (s *Server) createInvitation(r *http.Request) (Reply, error) {
 	var input struct {
 		Email string `json:"email"`
 		Role  string `json:"role"`
 		Hours *int   `json:"expires_in_hours"`
 	}
-	if err := decode(r, &input); err != nil {
-		return reply{}, err
+	if err := Decode(r, &input); err != nil {
+		return Reply{}, err
 	}
 	address, err := email(input.Email)
 	if err != nil {
-		return reply{}, err
+		return Reply{}, err
 	}
 	if !validRole(input.Role) {
-		return reply{}, invalid("role", "Use owner, operator, developer, or viewer.")
+		return Reply{}, Invalid("role", "Use owner, operator, developer, or viewer.")
 	}
 	hours := 168
 	if input.Hours != nil {
 		hours = *input.Hours
 	}
 	if hours < 1 || hours > 720 {
-		return reply{}, invalid("expires_in_hours", "Use 1–720 hours.")
+		return Reply{}, Invalid("expires_in_hours", "Use 1–720 hours.")
 	}
-	tx, err := s.begin(r)
+	tx, err := s.Begin(r)
 	if err != nil {
-		return reply{}, err
+		return Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := s.principal(r, tx, "access")
+	p, err := s.Principal(r, tx, "access")
 	if err != nil {
-		return reply{}, err
+		return Reply{}, err
 	}
-	claim, replayed, err := s.replay(r, tx, p, input)
+	claim, replayed, err := s.Replay(r, tx, p, input)
 	if err != nil {
-		return reply{}, err
+		return Reply{}, err
 	}
 	if replayed != nil {
-		return commit(r, tx, *replayed)
+		return Commit(r, tx, *replayed)
 	}
 	var exists bool
 	if err = tx.QueryRow(r.Context(), "SELECT EXISTS(SELECT 1 FROM olp_go.users WHERE email=$1)", address).Scan(&exists); err != nil {
-		return reply{}, err
+		return Reply{}, err
 	}
 	if exists {
-		return reply{}, fail(409, "user_exists", "This email already belongs to a member.")
+		return Reply{}, Fail(409, "user_exists", "This email already belongs to a member.")
 	}
-	id, token := newID(), secrets.Token()
+	id, token := NewID(), secrets.Token()
 	if _, err = tx.Exec(r.Context(), "UPDATE olp_go.invitations SET revoked_at=now(),revoked_by=$2 WHERE email=$1 AND accepted_at IS NULL AND revoked_at IS NULL", address, p.ID); err != nil {
-		return reply{}, err
+		return Reply{}, err
 	}
 	if _, err = tx.Exec(r.Context(), "INSERT INTO olp_go.invitations(id,email,role,digest,invited_by,expires_at) VALUES($1,$2,$3,$4,$5,$6)", id, address, input.Role, s.Auth.Digest("invitation", token), p.ID, time.Now().Add(time.Duration(hours)*time.Hour)); err != nil {
-		return reply{}, err
+		return Reply{}, err
 	}
 	body, err := invitation(r, tx, id)
 	if err != nil {
-		return reply{}, err
+		return Reply{}, err
 	}
-	result := reply{Status: 201, Body: map[string]any{"invitation": body, "token": token}, Location: "/api/v3/invitations/" + id}
-	if err = audit(r.Context(), tx, r, p.ID, "invitation.create", "invitation", id, "success"); err != nil {
-		return reply{}, err
+	result := Reply{Status: 201, Body: map[string]any{"invitation": body, "token": token}, Location: "/api/v3/invitations/" + id}
+	if err = Audit(r.Context(), tx, r, p.ID, "invitation.create", "invitation", id, "success"); err != nil {
+		return Reply{}, err
 	}
-	if err = s.completeReplay(r, tx, claim, result); err != nil {
-		return reply{}, err
+	if err = s.CompleteReplay(r, tx, claim, result); err != nil {
+		return Reply{}, err
 	}
-	return commit(r, tx, result)
+	return Commit(r, tx, result)
 }
-func (s *Server) retireInvitation(r *http.Request) (reply, error) {
-	id, err := idParam(r, "invitation_id")
+func (s *Server) retireInvitation(r *http.Request) (Reply, error) {
+	id, err := IDParam(r, "invitation_id")
 	if err != nil {
-		return reply{}, err
+		return Reply{}, err
 	}
-	tx, err := s.begin(r)
+	tx, err := s.Begin(r)
 	if err != nil {
-		return reply{}, err
+		return Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := s.principal(r, tx, "access")
+	p, err := s.Principal(r, tx, "access")
 	if err != nil {
-		return reply{}, err
+		return Reply{}, err
 	}
-	claim, replayed, err := s.replay(r, tx, p, nil)
+	claim, replayed, err := s.Replay(r, tx, p, nil)
 	if err != nil {
-		return reply{}, err
+		return Reply{}, err
 	}
 	if replayed != nil {
-		return commit(r, tx, *replayed)
+		return Commit(r, tx, *replayed)
 	}
 	var accepted, revoked *time.Time
 	if err = tx.QueryRow(r.Context(), "SELECT accepted_at,revoked_at FROM olp_go.invitations WHERE id=$1", id).Scan(&accepted, &revoked); err != nil {
-		return reply{}, err
+		return Reply{}, err
 	}
 	if accepted != nil {
-		return reply{}, fail(409, "invitation_accepted", "An accepted invitation cannot be revoked.")
+		return Reply{}, Fail(409, "invitation_accepted", "An accepted invitation cannot be revoked.")
 	}
 	if revoked == nil {
 		if _, err = tx.Exec(r.Context(), "UPDATE olp_go.invitations SET revoked_at=now(),revoked_by=$2 WHERE id=$1", id, p.ID); err != nil {
-			return reply{}, err
+			return Reply{}, err
 		}
-		if err = audit(r.Context(), tx, r, p.ID, "invitation.revoke", "invitation", id, "success"); err != nil {
-			return reply{}, err
+		if err = Audit(r.Context(), tx, r, p.ID, "invitation.revoke", "invitation", id, "success"); err != nil {
+			return Reply{}, err
 		}
 	}
 	body, err := invitation(r, tx, id)
 	if err != nil {
-		return reply{}, err
+		return Reply{}, err
 	}
-	result := ok(body)
-	if err = s.completeReplay(r, tx, claim, result); err != nil {
-		return reply{}, err
+	result := OK(body)
+	if err = s.CompleteReplay(r, tx, claim, result); err != nil {
+		return Reply{}, err
 	}
-	return commit(r, tx, result)
+	return Commit(r, tx, result)
 }
-func (s *Server) acceptInvitation(r *http.Request) (reply, error) {
+func (s *Server) acceptInvitation(r *http.Request) (Reply, error) {
 	var input struct {
 		Token       string `json:"token"`
 		DisplayName string `json:"display_name"`
 		Password    string `json:"password"`
 	}
-	if err := decode(r, &input); err != nil {
-		return reply{}, err
+	if err := Decode(r, &input); err != nil {
+		return Reply{}, err
 	}
 	if err := s.admit(r, "invitation", input.Token); err != nil {
-		return reply{}, err
+		return Reply{}, err
 	}
 	if err := password(input.Password); err != nil {
-		return reply{}, err
+		return Reply{}, err
 	}
-	if err := validText("display_name", input.DisplayName, 100); err != nil {
-		return reply{}, err
+	if err := ValidText("display_name", input.DisplayName, 100); err != nil {
+		return Reply{}, err
 	}
 	var hash string
 	if err := s.passwordWork(r, func() { hash = secrets.HashPassword(input.Password) }); err != nil {
-		return reply{}, err
+		return Reply{}, err
 	}
-	tx, err := s.begin(r)
+	tx, err := s.Begin(r)
 	if err != nil {
-		return reply{}, err
+		return Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
 	var id, address, role string
 	err = tx.QueryRow(r.Context(), "SELECT id::text,email,role FROM olp_go.invitations WHERE digest=$1 AND expires_at>now() AND accepted_at IS NULL AND revoked_at IS NULL", s.Auth.Digest("invitation", input.Token)).Scan(&id, &address, &role)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return reply{}, fail(410, "invitation_invalid", "The invitation is expired, retired, or already used.")
+		return Reply{}, Fail(410, "invitation_invalid", "The invitation is expired, retired, or already used.")
 	}
 	if err != nil {
-		return reply{}, err
+		return Reply{}, err
 	}
-	userID := newID()
-	if _, err = tx.Exec(r.Context(), "INSERT INTO olp_go.users(id,email,display_name,password_hash,role,etag) VALUES($1,$2,$3,$4,$5,$6)", userID, address, strings.TrimSpace(input.DisplayName), hash, role, newID()); err != nil {
-		return reply{}, err
+	userID := NewID()
+	if _, err = tx.Exec(r.Context(), "INSERT INTO olp_go.users(id,email,display_name,password_hash,role,etag) VALUES($1,$2,$3,$4,$5,$6)", userID, address, strings.TrimSpace(input.DisplayName), hash, role, NewID()); err != nil {
+		return Reply{}, err
 	}
 	if _, err = tx.Exec(r.Context(), "UPDATE olp_go.invitations SET accepted_at=now(),accepted_by=$2 WHERE id=$1", id, userID); err != nil {
-		return reply{}, err
+		return Reply{}, err
 	}
-	if err = audit(r.Context(), tx, r, userID, "invitation.accept", "invitation", id, "success"); err != nil {
-		return reply{}, err
+	if err = Audit(r.Context(), tx, r, userID, "invitation.accept", "invitation", id, "success"); err != nil {
+		return Reply{}, err
 	}
 	response, err := s.newSession(r, tx, userID)
 	if err != nil {
-		return reply{}, err
+		return Reply{}, err
 	}
-	return commit(r, tx, response)
+	return Commit(r, tx, response)
 }

@@ -2,7 +2,8 @@
 
 The Go control plane supports owner setup, local and OIDC sign-in, membership,
 invitations, sessions, profiles, gateway-key policy, installation settings, and
-metadata-only audit reads. Gateway inference, routing, distributed limits, and
+metadata-only audit reads. Provider connections, routes, and OpenAI inference
+are described in the [Go gateway guide](go-gateway.md); distributed limits and
 retention workers belong to later milestones. The console reports these
 capabilities and labels configured limits as saved policy.
 
@@ -50,7 +51,8 @@ health and metrics endpoints belong on a private listener/network.
 
 ## Mounted secrets
 
-Management modes require these private regular files, mode 0600 or 0640:
+Management and inference modes require these private regular files, mode 0600
+or 0640 (`gateway` needs the first two):
 
 | Environment variable | File contents |
 | --- | --- |
@@ -160,7 +162,9 @@ retains the ETag from the edit baseline and offers an explicit reload after a
 conflict. Key creation/revocation/rotation and invitation creation/retirement
 require `Idempotency-Key`. Replays bind actor, method, path, precondition, and
 request body, are reauthorized before reading, and encrypt responses for 24
-hours with a 64 KiB bound. Lists use validated cursors and limits up to 200.
+hours. Feature request and collection limits bound response sizes; aggregate
+responses such as credential pools are replayed in full even above 64 KiB.
+Lists use validated cursors and limits up to 200.
 
 Public authentication admission is shared through PostgreSQL: 10,000 requests
 per action globally per minute, 60 per directly connected source (30 for

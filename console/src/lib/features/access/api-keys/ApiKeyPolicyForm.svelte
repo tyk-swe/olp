@@ -221,7 +221,8 @@
           ? 'Leave every route unchecked to allow all current and future routes.'
           : 'Leave blank to allow all current and future routes.'}
       </p>
-      {#if !services.gatewayAvailable}
+      {#if services.pending}<span role="status">Loading routes…</span>
+      {:else if !services.gatewayAvailable}
         <label for="allowed-routes">Route slugs (comma separated)</label>
         <input
           id="allowed-routes"

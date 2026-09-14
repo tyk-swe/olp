@@ -1,0 +1,536 @@
+package gateway
+
+import (
+	"bytes"
+	"context"
+	"errors"
+	"io"
+	"mime"
+	"net/http"
+	"sort"
+	"strconv"
+	"strings"
+	"sync"
+	"sync/atomic"
+	"time"
+
+	"github.com/google/uuid"
+
+	"github.com/tyk-swe/olp/internal/egress"
+	"github.com/tyk-swe/olp/internal/protocols/openai"
+	"github.com/tyk-swe/olp/internal/runtime"
+)
+
+// Failure classes shared with the routing retry taxonomy fixture.
+const (
+	classSuccess        = "success"
+	classConnect        = "connect"
+	classTimeout        = "timeout"
+	classRateLimit      = "rate_limit"
+	classUpstreamServer = "upstream_server"
+	classUpstreamClient = "upstream_client"
+	classCredential     = "credential"
+	classProtocol       = "protocol"
+	classCancelled      = "cancelled"
+)
+
+// failoverAllowed reports whether a failure class may select another
+// attempt when nothing has been committed to the client.
+func failoverAllowed(class string, committed bool) bool {
+	if committed {
+		return false
+	}
+	switch class {
+	case classConnect, classTimeout, classRateLimit, classUpstreamServer, classCredential:
+		return true
+	}
+	return false
+}
+
+const (
+	maxStreamDuration = time.Hour
+	errorBodyLimit    = 64 * 1024
+)
+
+// execution is one inference request flowing through the attempt loop.
+type execution struct {
+	request  request
+	family   openai.Family
+	parsed   *openai.Request
+	actor    string
+	keyID    string
+	userID   string
+	affinity []byte
+	route    *runtime.Route
+	mode     string
+	attempts []runtime.Attempt
+	budget   int
+	emit     openai.Emit // streaming only
+
+	once  sync.Once
+	facts []AttemptFact
+}
+
+// outcome is the terminal result of the attempt loop.
+type outcome struct {
+	completion *openai.Completion
+	err        *Error
+	committed  bool
+	cancelled  bool
+}
+
+type attemptFailure struct {
+	class      string
+	status     int
+	committed  bool
+	retryAfter time.Duration
+	upstream   *openai.UpstreamError
+	overall    bool // the route deadline, not the attempt deadline, expired
+}
+
+func (f *attemptFailure) toError() *Error {
+	switch f.class {
+	case classCancelled:
+		return &Error{Status: 0, Code: "client_cancelled", Message: "The client went away."}
+	case classTimeout:
+		return serverError(http.StatusGatewayTimeout, "gateway_timeout", "The upstream provider did not respond within the configured deadline.")
+	case classConnect:
+		return serverError(http.StatusBadGateway, "upstream_unavailable", "The upstream provider could not be reached.")
+	case classRateLimit:
+		return &Error{Status: http.StatusTooManyRequests, Type: "rate_limit_error", Code: "upstream_rate_limit", Message: "The upstream provider is rate limiting requests.", RetryAfter: f.retryAfter}
+	case classUpstreamServer:
+		return serverError(http.StatusBadGateway, "upstream_unavailable", "The upstream provider failed with HTTP "+strconv.Itoa(f.status)+".")
+	case classCredential:
+		code := "upstream_authentication_failed"
+		if f.status == http.StatusForbidden {
+			code = "upstream_permission_denied"
+		}
+		return serverError(http.StatusBadGateway, code, "The upstream provider rejected the configured credential.")
+	case classProtocol:
+		return serverError(http.StatusBadGateway, "provider_protocol_error", "The upstream provider returned a malformed response.")
+	case classUpstreamClient:
+		message := "The upstream provider rejected the request."
+		if f.upstream != nil && f.upstream.Message != "" {
+			message = f.upstream.Message
+		}
+		if forwardable(f.status) {
+			return &Error{Status: f.status, Type: "invalid_request_error", Code: "upstream_rejected", Message: message}
+		}
+		return serverError(http.StatusBadGateway, "upstream_rejected", message)
+	}
+	return serverError(http.StatusBadGateway, "upstream_unavailable", "The upstream provider failed.")
+}
+
+// forwardable reports whether an upstream client-error status is returned to
+// the caller unchanged; every other upstream rejection is a gateway failure.
+func forwardable(status int) bool {
+	switch status {
+	case 400, 404, 405, 409, 413, 415, 422:
+		return true
+	}
+	return false
+}
+
+// execute runs the bounded attempt loop against the pinned release.
+func (s *Server) execute(ctx context.Context, x *execution) *outcome {
+	overall := time.Duration(x.route.OverallTimeout) * time.Millisecond
+	ctx, cancel := context.WithTimeout(ctx, overall)
+	defer cancel()
+	snapshot := x.request.release.Snapshot
+	used := 0
+	var last *attemptFailure
+	for _, attempt := range x.attempts {
+		if used >= x.budget || ctx.Err() != nil {
+			break
+		}
+		provider, ok := snapshot.Providers[attempt.ProviderID]
+		if !ok || s.health.open(provider.ID) {
+			continue
+		}
+		slots := s.slots(x, attempt, &provider)
+		if len(slots) == 0 {
+			continue
+		}
+		next := false
+		for _, slot := range slots {
+			if used >= x.budget || ctx.Err() != nil {
+				break
+			}
+			// Authority can change while an earlier credential attempt is pending.
+			if provider.AuthMode != "none" && s.Runtime.Revoked(*slot.CredentialID) {
+				continue
+			}
+			used++
+			fact, completion, failure := s.attempt(ctx, x, attempt, &provider, slot, used)
+			x.facts = append(x.facts, fact)
+			s.health.record(provider.ID, fact)
+			if failure == nil {
+				return &outcome{completion: completion, committed: fact.Committed}
+			}
+			if failure.overall || failure.class == classCancelled {
+				return &outcome{err: failure.toError(), committed: failure.committed, cancelled: failure.class == classCancelled}
+			}
+			if !failoverAllowed(failure.class, failure.committed) {
+				return &outcome{err: failure.toError(), committed: failure.committed}
+			}
+			last = failure
+			switch failure.class {
+			case classCredential:
+				s.health.cooldown(provider.ID, slot.ID, credentialCooldown)
+			case classRateLimit:
+				s.health.cooldown(provider.ID, slot.ID, failure.retryAfter)
+			default:
+				next = true // the provider itself failed; sibling credentials would too
+			}
+			if next {
+				break
+			}
+		}
+	}
+	switch {
+	case ctx.Err() != nil && errors.Is(context.Cause(ctx), context.DeadlineExceeded):
+		return &outcome{err: (&attemptFailure{class: classTimeout}).toError()}
+	case ctx.Err() != nil:
+		return &outcome{err: (&attemptFailure{class: classCancelled}).toError(), cancelled: true}
+	case last != nil:
+		return &outcome{err: last.toError()}
+	}
+	return &outcome{err: serverError(http.StatusServiceUnavailable, "upstream_unavailable", "No provider is currently able to serve `"+x.route.Slug+"`.")}
+}
+
+// slots returns the credential slots usable for this attempt, ordered by
+// priority then by deterministic weighted rendezvous on the request's
+// affinity so sibling keys spread across a pool.
+func (s *Server) slots(x *execution, attempt runtime.Attempt, provider *runtime.Provider) []runtime.Slot {
+	type ranked struct {
+		slot  runtime.Slot
+		score float64
+	}
+	var usable []ranked
+	for _, slot := range provider.Slots {
+		if !slot.Allows(attempt.UpstreamModel, x.route.Slug, x.keyID) || s.health.coolingDown(provider.ID, slot.ID) {
+			continue
+		}
+		if provider.AuthMode != "none" {
+			if slot.CredentialID == nil || s.Runtime.Revoked(*slot.CredentialID) {
+				continue
+			}
+			if _, ok := x.request.release.Credential(*slot.CredentialID); !ok {
+				continue
+			}
+		}
+		score := 0.0
+		if routeID, err := uuid.Parse(x.route.ID); err == nil {
+			if slotID, err := uuid.Parse(slot.ID); err == nil {
+				score = runtime.Score(routeID, slotID, slot.Weight, "generation", "openai", x.mode, x.affinity)
+			}
+		}
+		usable = append(usable, ranked{slot, score})
+	}
+	sort.SliceStable(usable, func(i, j int) bool {
+		if usable[i].slot.Priority != usable[j].slot.Priority {
+			return usable[i].slot.Priority < usable[j].slot.Priority
+		}
+		return usable[i].score > usable[j].score
+	})
+	out := make([]runtime.Slot, 0, len(usable))
+	for _, r := range usable {
+		out = append(out, r.slot)
+	}
+	return out
+}
+
+// attemptState tracks why an attempt context ended.
+type attemptState struct {
+	parent context.Context
+	reason atomic.Int32 // 1 first-byte deadline, 2 idle deadline, 3 stream cap
+}
+
+func (st *attemptState) classify(err error, committed bool) string {
+	switch {
+	case st.parent.Err() != nil:
+		if errors.Is(st.parent.Err(), context.DeadlineExceeded) {
+			return classTimeout
+		}
+		return classCancelled
+	case st.reason.Load() != 0:
+		return classTimeout
+	case errors.Is(err, errClientWrite):
+		return classCancelled
+	case committed:
+		return classProtocol
+	}
+	var pe *openai.ProtocolError
+	if errors.As(err, &pe) || errors.Is(err, openai.ErrEventTooLarge) {
+		return classProtocol
+	}
+	return classConnect
+}
+
+func endpointPath(family openai.Family) string {
+	if family == openai.FamilyResponses {
+		return "/responses"
+	}
+	return "/chat/completions"
+}
+
+// attempt performs one upstream call with one credential.
+func (s *Server) attempt(ctx context.Context, x *execution, a runtime.Attempt, provider *runtime.Provider, slot runtime.Slot, ordinal int) (AttemptFact, *openai.Completion, *attemptFailure) {
+	fact := AttemptFact{
+		Ordinal:            ordinal,
+		TargetID:           a.TargetID,
+		ProviderID:         a.ProviderID,
+		ProviderRevisionID: a.ProviderRevisionID,
+		UpstreamModel:      a.UpstreamModel,
+		SlotID:             slot.ID,
+		StartedAt:          s.now(),
+	}
+	if slot.CredentialID != nil {
+		fact.CredentialID = *slot.CredentialID
+	}
+	if slot.CredentialVersion != nil {
+		fact.CredentialVersion = *slot.CredentialVersion
+	}
+	fail := func(class string, f *attemptFailure) (AttemptFact, *openai.Completion, *attemptFailure) {
+		if f == nil {
+			f = &attemptFailure{}
+		}
+		f.class = class
+		fact.Class = class
+		fact.Committed = f.committed
+		fact.Duration = s.now().Sub(fact.StartedAt)
+		return fact, nil, f
+	}
+
+	endpoint, err := s.egress.ValidateEndpoint(provider.Endpoint)
+	if err != nil {
+		return fail(classConnect, nil)
+	}
+	body, err := x.parsed.Encode(a.UpstreamModel, provider.ParameterDefaults)
+	if err != nil {
+		return fail(classProtocol, nil)
+	}
+	deadline, _ := ctx.Deadline()
+	remaining := time.Until(deadline)
+	if remaining <= 0 {
+		return fail(classTimeout, &attemptFailure{overall: true})
+	}
+	timeout := min(a.Timeout, remaining)
+
+	st := &attemptState{parent: ctx}
+	actx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	firstByte := time.AfterFunc(timeout, func() { st.reason.CompareAndSwap(0, 1); cancel() })
+	defer firstByte.Stop()
+
+	req, err := http.NewRequestWithContext(actx, http.MethodPost, endpoint.String()+endpointPath(x.family), bytes.NewReader(body))
+	if err != nil {
+		return fail(classConnect, nil)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("User-Agent", "olp-go/gateway")
+	req.Header.Set("Accept", "application/json")
+	if x.parsed.Stream {
+		req.Header.Set("Accept", "text/event-stream")
+	}
+	var credentialValues []string
+	if slot.CredentialID != nil {
+		secret, _ := x.request.release.Credential(*slot.CredentialID)
+		switch provider.AuthMode {
+		case "headers":
+			if err := egress.ApplyCredentialHeaders(req.Header, provider.CredentialHeaders, secret); err != nil {
+				return fail(classCredential, nil)
+			}
+			credentialValues = append(credentialValues, string(secret))
+			for _, name := range provider.CredentialHeaders {
+				credentialValues = append(credentialValues, req.Header.Values(name)...)
+			}
+		case "none":
+		default:
+			req.Header.Set("Authorization", "Bearer "+string(secret))
+			credentialValues = append(credentialValues, string(secret))
+		}
+	}
+
+	resp, err := s.client.Do(req)
+	if err != nil {
+		return fail(st.classify(err, false), nil)
+	}
+	defer resp.Body.Close()
+	fact.Status = resp.StatusCode
+	if resp.StatusCode != http.StatusOK {
+		raw, _ := io.ReadAll(io.LimitReader(resp.Body, errorBodyLimit))
+		f := &attemptFailure{status: resp.StatusCode, upstream: openai.ParseErrorBody(raw)}
+		if f.upstream != nil {
+			f.upstream.Message = redactCredentials(f.upstream.Message, credentialValues)
+		}
+		switch {
+		case resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden:
+			return fail(classCredential, f)
+		case resp.StatusCode == http.StatusTooManyRequests:
+			f.retryAfter = retryAfter(resp.Header.Get("Retry-After"), s.now())
+			return fail(classRateLimit, f)
+		case resp.StatusCode >= 500:
+			return fail(classUpstreamServer, f)
+		}
+		return fail(classUpstreamClient, f)
+	}
+
+	var completion *openai.Completion
+	committed := false
+	if x.parsed.Stream {
+		mediaType, _, _ := mime.ParseMediaType(resp.Header.Get("Content-Type"))
+		if mediaType != "text/event-stream" {
+			return fail(classProtocol, &attemptFailure{status: resp.StatusCode})
+		}
+		streamCap := time.AfterFunc(maxStreamDuration, func() { st.reason.CompareAndSwap(0, 3); cancel() })
+		defer streamCap.Stop()
+		var watchdog *time.Timer
+		defer func() {
+			if watchdog != nil {
+				watchdog.Stop()
+			}
+		}()
+		emit := func(frame []byte) error {
+			if !committed {
+				committed = true
+				firstByte.Stop()
+				watchdog = time.AfterFunc(a.Timeout, func() { st.reason.CompareAndSwap(0, 2); cancel() })
+			} else {
+				watchdog.Reset(a.Timeout)
+			}
+			return x.emit(frame)
+		}
+		completion, err = openai.StreamMetadata(x.family, resp.Body, int(s.cfg.MaxEventBytes), x.route.Slug, x.parsed.IncludeUsage, emit)
+	} else {
+		limited := &countingReader{r: resp.Body, limit: s.cfg.MaxResponseBytes}
+		raw, readErr := io.ReadAll(limited)
+		if readErr != nil {
+			err = readErr
+		} else if x.family == openai.FamilyResponses {
+			completion, err = openai.DecodeResponse(raw, x.route.Slug)
+		} else {
+			completion, err = openai.DecodeChat(raw, x.route.Slug)
+		}
+	}
+	if completion != nil {
+		fact.Usage = completion.Usage
+	}
+	if err != nil {
+		f := &attemptFailure{status: resp.StatusCode, committed: committed}
+		var ue *openai.UpstreamError
+		switch {
+		case errors.Is(err, errResponseTooLarge):
+			return fail(classProtocol, f)
+		case errors.As(err, &ue):
+			f.upstream = ue
+			if committed {
+				return fail(classProtocol, f)
+			}
+			return fail(classUpstreamServer, f)
+		}
+		return fail(st.classify(err, committed), f)
+	}
+	fact.Class = classSuccess
+	fact.Committed = committed
+	fact.Duration = s.now().Sub(fact.StartedAt)
+	return fact, completion, nil
+}
+
+// countingReader enforces the buffered unary response byte limit.
+type countingReader struct {
+	r        io.Reader
+	limit    int64
+	read     int64
+	exceeded bool
+}
+
+var errResponseTooLarge = errors.New("upstream response exceeds byte limit")
+
+func (c *countingReader) Read(p []byte) (int, error) {
+	if len(p) == 0 {
+		return 0, nil
+	}
+	if c.exceeded {
+		return 0, errResponseTooLarge
+	}
+	if c.read == c.limit {
+		// Reaching the limit is valid if the upstream ends here. Read at most
+		// one additional byte to distinguish EOF from an oversized response.
+		var extra [1]byte
+		n, err := c.r.Read(extra[:])
+		if n > 0 {
+			c.exceeded = true
+			return 0, errResponseTooLarge
+		}
+		return 0, err
+	}
+	if int64(len(p)) > c.limit-c.read {
+		p = p[:c.limit-c.read]
+	}
+	n, err := c.r.Read(p)
+	c.read += int64(n)
+	return n, err
+}
+
+// retryAfter parses a Retry-After header as seconds or an HTTP date.
+func retryAfter(value string, now time.Time) time.Duration {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return 0
+	}
+	if seconds, err := strconv.ParseUint(value, 10, 64); err == nil || errors.Is(err, strconv.ErrRange) {
+		for _, c := range value {
+			if c < '0' || c > '9' {
+				return 0
+			}
+		}
+		const maxSeconds = uint64((1<<63 - 1) / time.Second)
+		return time.Duration(min(seconds, maxSeconds)) * time.Second
+	}
+	if at, err := http.ParseTime(value); err == nil {
+		return max(at.Sub(now), 0)
+	}
+	return 0
+}
+
+// finish emits the terminal envelope exactly once.
+func (s *Server) finish(x *execution, out *outcome, status int) {
+	x.once.Do(func() {
+		env := Envelope{
+			RequestID: x.request.id,
+			ClientIP:  x.request.clientIP,
+			Actor:     x.actor,
+			KeyID:     x.keyID,
+			UserID:    x.userID,
+			Family:    string(x.family),
+			Mode:      x.mode,
+			Outcome:   "failure",
+			Status:    status,
+			StartedAt: x.request.startedAt,
+			Duration:  s.now().Sub(x.request.startedAt),
+			Attempts:  x.facts,
+		}
+		if x.request.release != nil {
+			env.ReleaseSequence = x.request.release.Sequence
+		}
+		if x.route != nil {
+			env.Route = x.route.Slug
+			env.RouteRevisionID = x.route.RevisionID
+		}
+		if len(x.facts) > 0 {
+			env.Usage = x.facts[len(x.facts)-1].Usage
+		}
+		if out != nil {
+			env.Committed = out.committed
+			switch {
+			case out.cancelled:
+				env.Outcome = "cancelled"
+				env.Status = 0
+			case out.err == nil:
+				env.Outcome = "success"
+			}
+		}
+		s.Sink.Terminal(env)
+	})
+}

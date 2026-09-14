@@ -15,7 +15,7 @@ const svelteWarningMarkers = [
 ];
 
 export const test = base.extend({
-  page: async ({ page }, use) => {
+  page: async ({ page, baseURL }, use) => {
     const runtimeFailures: string[] = [];
     page.on('pageerror', (error) => {
       runtimeFailures.push(`Uncaught page error: ${error.message}`);
@@ -35,7 +35,7 @@ export const test = base.extend({
     page.on('response', (response) => {
       const url = new URL(response.url());
       if (
-        url.origin === 'http://localhost:4175' &&
+        url.origin === new URL(baseURL ?? page.url()).origin &&
         ['/api/', '/v1/', '/openai/', '/anthropic/', '/gemini/'].some(
           (prefix) => url.pathname.startsWith(prefix)
         ) &&

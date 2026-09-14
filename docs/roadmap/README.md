@@ -39,7 +39,7 @@ initial packaging choice. [GLIDE Go documentation](https://github.com/valkey-io/
 | --- | --- | --- | --- |
 | M1 | [Go foundation and build economics](01-foundation.md) | None | Implemented; native arm64 qualification pending |
 | M2 | [Installation, identity, and management](02-access-and-control.md) | M1 | Implemented and qualified on amd64; inherits open M1 arm64 gate |
-| M3 | [Complete OpenAI request path](03-core-gateway.md) | M2 | Not started |
+| M3 | [Complete OpenAI request path](03-core-gateway.md) | M2 | Implemented and qualified on amd64; inherits open M1 arm64 gate |
 | M4 | [Distributed limits, pricing, and recovery](04-limits-and-accounting.md) | M3 | Not started |
 | M5 | [Remaining protocols, providers, and routing](05-provider-and-routing-parity.md) | M4 | Not started |
 | M6 | [Media and operational completeness](06-media-and-console-parity.md) | M5 | Not started |
@@ -92,12 +92,12 @@ compatibility tables remain the operation/provider support matrix.
 | [OIDC configuration, login, role mappings, and linked identities](../../src/access/oidc/) | M2 implemented; [Go code and qualification](evidence/access-and-control.md) |
 | [Secret files, hashing, encryption, and master-key rotation](../../src/crypto/) | M2 implemented; [Go code and qualification](evidence/access-and-control.md) |
 | [Management contracts and response policies](../../src/http/control/) and [settings](../../src/settings/) | M2 implemented; [Go code and qualification](evidence/access-and-control.md) |
-| [Provider drafts, discovery, certification, revisions, and credential pools](../../src/providers/) | M3 core; M5 remaining connectors/options |
-| [Route drafts, publication, history, and weighted selection](../../src/routes/) | M3 |
-| [Atomic runtime publication, pinned snapshots, and independent authority refresh](../../src/runtime/) | M3 |
-| [OpenAI Chat Completions, Responses, and model discovery](../../src/inference/http/endpoint_policy/registry.rs) | M3 |
-| [Admission, bounded execution, retries, circuit health, cancellation, and SSE](../../src/inference/) | M3 |
-| [Egress validation and DNS pinning](../../src/net/) and [HTTP resource limits](../../src/http/) | M3; media extensions M6 |
+| [Provider drafts, discovery, certification, revisions, and credential pools](../../src/providers/) | M3 implemented for OpenAI-compatible connections; [Go code and qualification](evidence/core-gateway.md); M5 remaining connectors/options |
+| [Route drafts, publication, history, and weighted selection](../../src/routes/) | M3 implemented; [Go code and qualification](evidence/core-gateway.md) |
+| [Atomic runtime publication, pinned snapshots, and independent authority refresh](../../src/runtime/) | M3 implemented; [Go code and qualification](evidence/core-gateway.md) |
+| [OpenAI Chat Completions, Responses, and model discovery](../../src/inference/http/endpoint_policy/registry.rs) | M3 implemented; [Go code and qualification](evidence/core-gateway.md) |
+| [Admission, bounded execution, retries, circuit health, cancellation, and SSE](../../src/inference/) | M3 implemented; [Go code and qualification](evidence/core-gateway.md) |
+| [Egress validation and DNS pinning](../../src/net/) and [HTTP resource limits](../../src/http/) | M3 implemented; [Go code and qualification](evidence/core-gateway.md); media extensions M6 |
 | [Key, connection, and slot limits and spend controls](../../src/limits/) | M4 |
 | [Pricing, accounting, ingestion, history, reports, completeness, and retention](../../src/usage/) | M4 |
 | [Distributed recovery and multiple-installation isolation](../../tests/ha/) | M4; final process qualification M7 |
@@ -106,7 +106,7 @@ compatibility tables remain the operation/provider support matrix.
 | [Custom endpoints/auth, mounted connectors, model facts, bulk workflows, policies, and routing preferences](../provider-routing.md) | M5 |
 | [Images, audio, uploads, video jobs, historical credentials, and reconciliation](../../src/media/) | M6 |
 | [Metrics, optional OTLP tracing, health, and worker diagnostics](../../src/observability/) | M1/M3 foundations; M6 complete |
-| [Console access/settings](../../console/src/lib/features/access/), [providers](../../console/src/lib/features/providers/), [routes](../../console/src/lib/features/routes/), and [playground](../../console/src/lib/features/inference/) | M2, M3, and M5 alongside their APIs |
+| [Console access/settings](../../console/src/lib/features/access/), [providers](../../console/src/lib/features/providers/), [routes](../../console/src/lib/features/routes/), and [playground](../../console/src/lib/features/inference/) | M2 and M3 implemented; [Go code and qualification](evidence/core-gateway.md); M5 alongside its APIs |
 | [Console usage/history](../../console/src/lib/features/usage/), [media](../../console/src/lib/features/media/), [overview](../../console/src/lib/features/overview/), and [health](../../console/src/lib/features/runtime/) | M4 and M6 |
 | [Compose/Helm](../../deploy/), [backup/restore and qualification scripts](../../scripts/), [CI/releases](../../.github/workflows/), and [operations](../operations.md) | M7 |
 

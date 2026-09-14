@@ -109,7 +109,7 @@
 
   const pricing = createQuery(() => ({
     queryKey: pricingKeys.page(pricingPagination.cursor),
-    enabled: services.gatewayAvailable,
+    enabled: services.limitsEnforced,
     queryFn: () => listPricing(pricingPagination.cursor)
   }));
 
@@ -503,6 +503,7 @@
         class="button button-primary"
         type="submit"
         disabled={!canEditPricing ||
+          !services.limitsEnforced ||
           savingPrice ||
           !providerKind ||
           providerKinds.isError}
@@ -510,7 +511,11 @@
       >
     </form>
 
-    {#if pricing.isPending}<div class="loading-state" role="status">
+    {#if !services.limitsEnforced}<div class="card empty-state" role="status">
+        Pricing revisions become available once limits and accounting are
+        enforced by this installation.
+      </div>
+    {:else if pricing.isPending}<div class="loading-state" role="status">
         Loading revisions…
       </div>
     {:else if pricing.isError}<div class="inline-problem" role="alert">

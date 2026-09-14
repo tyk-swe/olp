@@ -17,7 +17,12 @@ import (
 	"github.com/tyk-swe/olp/internal/console"
 	"github.com/tyk-swe/olp/internal/coordination"
 	"github.com/tyk-swe/olp/internal/database"
+	"github.com/tyk-swe/olp/internal/egress"
+	"github.com/tyk-swe/olp/internal/gateway"
 	"github.com/tyk-swe/olp/internal/management"
+	"github.com/tyk-swe/olp/internal/providers"
+	"github.com/tyk-swe/olp/internal/routes"
+	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/internal/secrets"
 )
 
@@ -53,10 +58,17 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 		public.Handle("/health", assets)
 	}
 	// These prefixes must never fall through to the SPA, in any public mode.
+	// The gateway owns /v1/ when inference is enabled; the Anthropic and
+	// Gemini surfaces arrive with M5 and stay honestly unimplemented.
 	for _, prefix := range []string{"/api/", "/v1/", "/anthropic/", "/gemini/", "/v1beta/", "/openai/", "/health/", "/metrics"} {
 		handler := http.HandlerFunc(http.NotFound)
-		if c.Mode.Inference() && (prefix == "/v1/" || prefix == "/anthropic/" || prefix == "/gemini/") {
-			handler = management.Unimplemented
+		if c.Mode.Inference() {
+			switch prefix {
+			case "/v1/":
+				continue
+			case "/anthropic/", "/gemini/":
+				handler = management.Unimplemented
+			}
 		}
 		public.Handle(prefix, handler)
 	}
@@ -71,16 +83,36 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 	if err != nil {
 		return err
 	}
-	if c.Mode.Management() {
+	var rt *runtime.Manager
+	if c.Mode.Management() || c.Mode.Inference() {
 		auth, keys, bootstrap, err := loadSecrets(c, installation)
 		if err != nil {
 			return err
 		}
-		control, err := access.New(startup, pool, installation, c.PublicOrigin, auth, keys, bootstrap)
-		if err != nil {
-			return err
+		policy := egress.Policy{AllowedNetworks: c.ProviderEgressAllowCIDRs, PlainHTTPHosts: c.ProviderEgressAllowHTTPHosts}
+		rt = runtime.NewManager(pool, installation, auth, keys, log)
+		gw := gateway.New(rt, &policy, gateway.Config{
+			MaxInFlight:      c.MaxInFlightInference,
+			MaxBodyBytes:     c.MaxJSONBodyBytes,
+			MaxResponseBytes: c.ProviderMaxResponseBytes,
+			MaxEventBytes:    c.ProviderMaxEventBytes,
+			TrustedProxies:   c.TrustedProxyCIDRs,
+		}, log)
+		if c.Mode.Inference() {
+			gw.Register(public)
 		}
-		control.Register(public)
+		if c.Mode.Management() {
+			control, err := access.New(startup, pool, installation, c.PublicOrigin, auth, keys, bootstrap)
+			if err != nil {
+				return err
+			}
+			control.Register(public)
+			catalogue := providers.New(control, &policy)
+			catalogue.Health = gw.Health()
+			catalogue.Register(public)
+			routes.New(control).Register(public)
+			(&gateway.Playground{Access: control, Gateway: gw}).Register(public)
+		}
 	}
 	if openValkey != nil {
 		vk, err = openValkey(startup)
@@ -92,7 +124,16 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 	if err := startup.Err(); err != nil {
 		return err
 	}
-	private := healthHandler(ctx, c.RequestTimeout, pool.Ping, vk)
+	var authority func() bool
+	if rt != nil {
+		rt.Start(ctx)
+		defer rt.Stop()
+		authority = func() bool {
+			status := rt.Authority()
+			return status.Loaded && !status.Stale
+		}
+	}
+	private := healthHandler(ctx, c.RequestTimeout, pool.Ping, vk, authority)
 	listeners := []struct {
 		name, address string
 		handler       http.Handler
@@ -149,7 +190,7 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 
 func loadSecrets(c config.Config, installation string) (*secrets.AuthKey, *secrets.KeyRing, string, error) {
 	if c.AuthHMACKeyFile == "" || c.MasterKeyFile == "" {
-		return nil, nil, "", errors.New("management requires OLP_AUTH_HMAC_KEY_FILE and OLP_MASTER_KEY_FILE")
+		return nil, nil, "", errors.New("management and inference require OLP_AUTH_HMAC_KEY_FILE and OLP_MASTER_KEY_FILE")
 	}
 	raw, err := secrets.ReadFile(c.AuthHMACKeyFile)
 	if err != nil {
@@ -177,7 +218,7 @@ func loadSecrets(c config.Config, installation string) (*secrets.AuthKey, *secre
 	return secrets.NewAuthKey(key, installation), keys, bootstrap, nil
 }
 
-func healthHandler(process context.Context, timeout time.Duration, pingDB func(context.Context) error, vk *coordination.Client) http.Handler {
+func healthHandler(process context.Context, timeout time.Duration, pingDB func(context.Context) error, vk *coordination.Client, authority func() bool) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health/live", func(w http.ResponseWriter, r *http.Request) {
 		writeHealth(w, http.StatusOK, map[string]any{"live": true})
@@ -190,7 +231,11 @@ func healthHandler(process context.Context, timeout time.Duration, pingDB func(c
 		if vk != nil {
 			valkeyReady = vk.Ping(ctx) == nil
 		}
-		ready := process.Err() == nil && dbReady && valkeyReady
+		authorityReady := true
+		if authority != nil {
+			authorityReady = authority()
+		}
+		ready := process.Err() == nil && dbReady && valkeyReady && authorityReady
 		status := http.StatusOK
 		if !ready {
 			status = http.StatusServiceUnavailable
@@ -198,6 +243,9 @@ func healthHandler(process context.Context, timeout time.Duration, pingDB func(c
 		dependencies := map[string]bool{"postgres": dbReady}
 		if vk != nil {
 			dependencies["valkey"] = valkeyReady
+		}
+		if authority != nil {
+			dependencies["authority"] = authorityReady
 		}
 		writeHealth(w, status, map[string]any{"ready": ready, "dependencies": dependencies})
 	})

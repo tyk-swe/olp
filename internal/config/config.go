@@ -46,6 +46,14 @@ type Config struct {
 	RequestTimeout          time.Duration
 	StartupTimeout          time.Duration
 	ShutdownTimeout         time.Duration
+	// Inference and provider egress bounds; names mirror the reference settings.
+	TrustedProxyCIDRs            []netip.Prefix
+	ProviderEgressAllowCIDRs     []netip.Prefix
+	ProviderEgressAllowHTTPHosts []string
+	MaxInFlightInference         int
+	MaxJSONBodyBytes             int64
+	ProviderMaxResponseBytes     int64
+	ProviderMaxEventBytes        int64
 }
 
 // Parse gives flags precedence over environment variables. File-backed URLs are
@@ -82,6 +90,14 @@ func Parse(args []string, getenv func(string) string, output io.Writer) (Config,
 	f.DurationVar(&c.RequestTimeout, "dependency-request-timeout", 2*time.Second, "dependency request deadline")
 	f.DurationVar(&c.StartupTimeout, "startup-timeout", 10*time.Second, "startup deadline")
 	f.DurationVar(&c.ShutdownTimeout, "shutdown-timeout", 5*time.Second, "total shutdown deadline")
+	var trustedProxies, egressCIDRs, egressHosts string
+	f.StringVar(&trustedProxies, "trusted-proxy-cidrs", "", "comma-separated CIDRs allowed to supply X-Forwarded-For")
+	f.StringVar(&egressCIDRs, "provider-egress-allow-cidrs", "", "comma-separated CIDRs exempt from the non-public provider egress denylist")
+	f.StringVar(&egressHosts, "provider-egress-allow-http-hosts", "", "comma-separated hosts whose provider endpoints may use plain HTTP")
+	f.IntVar(&c.MaxInFlightInference, "http-max-in-flight-inference-requests", 256, "inference work admission")
+	f.Int64Var(&c.MaxJSONBodyBytes, "http-max-json-body-bytes", 2097152, "largest JSON request body, before and after gzip inflation")
+	f.Int64Var(&c.ProviderMaxResponseBytes, "provider-max-response-bytes", 16777216, "largest buffered provider response body")
+	f.Int64Var(&c.ProviderMaxEventBytes, "provider-max-event-bytes", 1048576, "largest single streamed provider event")
 	if err := f.Parse(args[1:]); err != nil {
 		return c, err
 	}
@@ -122,6 +138,17 @@ func Parse(args []string, getenv func(string) string, output io.Writer) (Config,
 			}
 		}
 	}
+	if c.TrustedProxyCIDRs, err = parseCIDRs("OLP_TRUSTED_PROXY_CIDRS", trustedProxies); err != nil {
+		return c, err
+	}
+	if c.ProviderEgressAllowCIDRs, err = parseCIDRs("OLP_PROVIDER_EGRESS_ALLOW_CIDRS", egressCIDRs); err != nil {
+		return c, err
+	}
+	for _, host := range strings.Split(egressHosts, ",") {
+		if host = strings.ToLower(strings.TrimSpace(host)); host != "" {
+			c.ProviderEgressAllowHTTPHosts = append(c.ProviderEgressAllowHTTPHosts, host)
+		}
+	}
 	if err = c.LogLevel.UnmarshalText([]byte(level)); err != nil {
 		return c, errors.New("OLP_LOG_LEVEL must be debug, info, warn, or error")
 	}
@@ -129,6 +156,20 @@ func Parse(args []string, getenv func(string) string, output io.Writer) (Config,
 		return c, errors.New("OLP_LOG_LEVEL must be debug, info, warn, or error")
 	}
 	return c, c.Validate()
+}
+
+func parseCIDRs(name, raw string) ([]netip.Prefix, error) {
+	var prefixes []netip.Prefix
+	for _, item := range strings.Split(raw, ",") {
+		if item = strings.TrimSpace(item); item != "" {
+			prefix, err := netip.ParsePrefix(item)
+			if err != nil {
+				return nil, fmt.Errorf("%s must list CIDR prefixes", name)
+			}
+			prefixes = append(prefixes, prefix.Masked())
+		}
+	}
+	return prefixes, nil
 }
 
 func secretURL(value, path, name string) (string, error) {
@@ -180,6 +221,18 @@ func (c Config) Validate() error {
 	u, err = url.Parse(c.PublicOrigin)
 	if err != nil || u == nil || (u.Scheme != "http" && u.Scheme != "https") || u.Hostname() == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || (u.Path != "" && u.Path != "/") {
 		return errors.New("OLP_PUBLIC_ORIGIN must be an HTTP(S) origin")
+	}
+	if c.MaxInFlightInference < 1 || c.MaxInFlightInference > 100000 {
+		return errors.New("OLP_HTTP_MAX_IN_FLIGHT_INFERENCE_REQUESTS must be between 1 and 100000")
+	}
+	if c.MaxJSONBodyBytes < 65536 || c.MaxJSONBodyBytes > 64<<20 {
+		return errors.New("OLP_HTTP_MAX_JSON_BODY_BYTES must be between 64 KiB and 64 MiB")
+	}
+	if c.ProviderMaxResponseBytes < 1<<20 || c.ProviderMaxResponseBytes > 256<<20 {
+		return errors.New("OLP_PROVIDER_MAX_RESPONSE_BYTES must be between 1 MiB and 256 MiB")
+	}
+	if c.ProviderMaxEventBytes < 65536 || c.ProviderMaxEventBytes > c.ProviderMaxResponseBytes {
+		return errors.New("OLP_PROVIDER_MAX_EVENT_BYTES must be between 64 KiB and the response cap")
 	}
 	for _, setting := range []struct {
 		name       string

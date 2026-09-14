@@ -3,17 +3,27 @@
 [Roadmap](README.md) | [Previous: access and control](02-access-and-control.md) |
 [Next: limits and accounting](04-limits-and-accounting.md)
 
-**Status:** Not started. **Prerequisites:** M2 complete.
+**Status:** Implemented and qualified on Linux amd64. **Prerequisites:** M2
+complete.
+
+[M3 evidence and screenshots](evidence/core-gateway.md) |
+[Operations guide](../go-gateway.md)
 
 Deliver a usable Go gateway: configure an OpenAI connection, certify models,
 publish a route, issue a key, and make unary and streaming SDK requests.
 Distributed quotas and durable accounting complete in M4.
 
+Every ticket below is implemented under `internal/` with unit, integration,
+SDK, and browser qualification recorded in the evidence document. The
+milestone inherits the open M1 native arm64 qualification gate. Routing
+policies, non-OpenAI surfaces, and other provider kinds remain M5 work and
+are reported as unavailable rather than partially served.
+
 ## Backlog
 
 ### M3-01
 
-- [ ] **Implement bounded ingress and outbound HTTP.**
+- [x] **Implement bounded ingress and outbound HTTP.**
 
 **Depends on:** Milestone prerequisites.
 
@@ -34,7 +44,7 @@ backpressure explicit instead of applying a unary timeout to every response.
 
 ### M3-02
 
-- [ ] **Implement OpenAI generation codecs and transport.**
+- [x] **Implement OpenAI generation codecs and transport.**
 
 **Depends on:** [M3-01](#m3-01).
 
@@ -54,7 +64,7 @@ oversized events, and unsupported stateful resource references.
 
 ### M3-03
 
-- [ ] **Restore provider drafts, discovery, and certification.**
+- [x] **Restore provider drafts, discovery, and certification.**
 
 **Depends on:** [M3-02](#m3-02).
 
@@ -75,7 +85,7 @@ content never enters persistent diagnostics. Unimplemented media remains unavail
 
 ### M3-04
 
-- [ ] **Restore credential pools and exact version references.**
+- [x] **Restore credential pools and exact version references.**
 
 **Depends on:** [M3-03](#m3-03).
 
@@ -96,7 +106,7 @@ state independent of a new provider activation. Media-specific retention joins i
 
 ### M3-05
 
-- [ ] **Restore route drafts, publication, and history.**
+- [x] **Restore route drafts, publication, and history.**
 
 **Depends on:** [M3-03](#m3-03), [M3-04](#m3-04).
 
@@ -117,7 +127,7 @@ not equal the number of distinct targets. Stale edits cannot overwrite newer dra
 
 ### M3-06
 
-- [ ] **Restore atomic runtime publication and authority refresh.**
+- [x] **Restore atomic runtime publication and authority refresh.**
 
 **Depends on:** [M3-04](#m3-04), [M3-05](#m3-05).
 
@@ -139,7 +149,7 @@ Revoked credential versions cannot be selected from retained releases.
 
 ### M3-07
 
-- [ ] **Implement the request lifecycle, failover, and cancellation.**
+- [x] **Implement the request lifecycle, failover, and cancellation.**
 
 **Depends on:** [M3-02](#m3-02), [M3-06](#m3-06).
 
@@ -160,7 +170,7 @@ distinct. Cancellation closes upstream work and releases local resources once.
 
 ### M3-08
 
-- [ ] **Emit bounded request and attempt facts.**
+- [x] **Emit bounded request and attempt facts.**
 
 **Depends on:** [M3-07](#m3-07).
 
@@ -182,7 +192,7 @@ M4 owns durable delivery and pricing guarantees.
 
 ### M3-09
 
-- [ ] **Connect and qualify the complete console-to-SDK workflow.**
+- [x] **Connect and qualify the complete console-to-SDK workflow.**
 
 **Depends on:** [M3-03](#m3-03), [M3-04](#m3-04), [M3-05](#m3-05),
 [M3-06](#m3-06), [M3-07](#m3-07), [M3-08](#m3-08).
