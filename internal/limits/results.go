@@ -105,6 +105,10 @@ func parseReservation(value any) (scriptResult, error) {
 // the day and month windows the script measured against.
 func parseCostReservation(value any) (scriptResult, error) {
 	status, detail, retry, day, month, ok := tuple(value)
+	if ok && status == -1 && retry == 0 && day == 0 && month == 0 &&
+		(detail == "invalid_arguments" || detail == "invalid_server_time") {
+		return scriptResult{kind: resultScriptFailure}, nil
+	}
 	if !ok || day < 1 || month < 1 {
 		return scriptResult{}, ErrUnexpectedResponse
 	}
@@ -121,9 +125,6 @@ func parseCostReservation(value any) (scriptResult, error) {
 	case status == -1 && retry == 0 &&
 		(detail == "malformed_daily_cost_state" || detail == "malformed_monthly_cost_state"):
 		return scriptResult{kind: resultMalformed}, nil
-	case status == -1 && retry == 0 &&
-		(detail == "invalid_arguments" || detail == "invalid_server_time"):
-		return scriptResult{kind: resultScriptFailure}, nil
 	default:
 		return scriptResult{}, ErrUnexpectedResponse
 	}

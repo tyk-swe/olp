@@ -89,6 +89,7 @@ const priceAttemptSQL = `SELECT selected.pricing_revision_id::text,
     FROM olp_go.providers provider
     LEFT JOIN olp_go.provider_revisions provider_revision
         ON provider_revision.id = COALESCE($11::uuid, provider.active_revision_id)
+       AND provider_revision.provider_id = provider.id
     LEFT JOIN LATERAL (
         SELECT revision.id AS pricing_revision_id, price.input_per_million,
                price.cached_input_per_million, price.output_per_million, price.unit_price,
@@ -96,11 +97,13 @@ const priceAttemptSQL = `SELECT selected.pricing_revision_id::text,
         FROM olp_go.pricing_revisions revision
         JOIN olp_go.prices price ON price.pricing_revision_id = revision.id
         WHERE revision.effective_at <= $4
+          AND ($11::uuid IS NULL OR provider_revision.id IS NOT NULL)
           AND (NOT $12::boolean OR revision.id = $10::uuid)
           AND price.provider_kind = COALESCE(provider_revision.configuration->>'kind', provider.kind)
           AND (price.vendor_id IS NULL OR price.vendor_id = CASE WHEN $12::boolean THEN $13::text
-                ELSE COALESCE(provider_revision.configuration->'options'->>'vendor_id',
-                              provider.configuration->'options'->>'vendor_id',
+                ELSE COALESCE(CASE WHEN provider_revision.id IS NOT NULL
+                                  THEN provider_revision.configuration->'options'->>'vendor_id'
+                                  ELSE provider.configuration->'options'->>'vendor_id' END,
                               CASE COALESCE(provider_revision.configuration->>'kind', provider.kind)
                                   WHEN 'gemini' THEN 'google'
                                   WHEN 'vertex_ai' THEN 'google-vertex'

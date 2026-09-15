@@ -1,15 +1,28 @@
--- Report the live quota usage of one lookup without reserving anything.
+-- Report live quota usage without turning malformed counters into idle zeros.
 -- KEYS: stable rate hash, concurrency zset (same cluster hash tag).
--- Counters from an older fixed UTC minute read as zero, and only leases that
--- have not yet expired against the server clock count as concurrent.
-local t = redis.call('TIME')
+local MAX_SAFE_INTEGER_TEXT = "9007199254740991"
+local function unsigned(raw)
+  if type(raw) ~= "string" or string.match(raw, "^%d+$") == nil then return nil end
+  local normalized = string.gsub(raw, "^0+", "")
+  if normalized == "" then normalized = "0" end
+  if #normalized > #MAX_SAFE_INTEGER_TEXT
+      or (#normalized == #MAX_SAFE_INTEGER_TEXT and normalized > MAX_SAFE_INTEGER_TEXT) then
+    return nil
+  end
+  return tonumber(normalized)
+end
+
+local t = redis.call("TIME")
 local w = math.floor(tonumber(t[1]) / 60)
 local now = tonumber(t[1]) * 1000 + math.floor(tonumber(t[2]) / 1000)
-local r = redis.call('HMGET', KEYS[1], 'window', 'rpm', 'tpm')
-local rpm = 0
-local tpm = 0
-if tonumber(r[1]) == w then
-  rpm = tonumber(r[2]) or 0
-  tpm = tonumber(r[3]) or 0
+local r = redis.call("HMGET", KEYS[1], "window", "rpm", "tpm")
+local rpm, tpm = 0, 0
+if r[1] ~= false or r[2] ~= false or r[3] ~= false then
+  local window = unsigned(r[1])
+  local requests, tokens = unsigned(r[2]), unsigned(r[3])
+  if window == nil or requests == nil or tokens == nil or window > w then
+    return redis.error_reply("invalid rate state")
+  end
+  if window == w then rpm, tpm = requests, tokens end
 end
-return {rpm, tpm, redis.call('ZCOUNT', KEYS[2], '(' .. now, '+inf')}
+return {rpm, tpm, redis.call("ZCOUNT", KEYS[2], "(" .. now, "+inf")}

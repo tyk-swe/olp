@@ -100,6 +100,10 @@ local rpm = 0
 local tpm = 0
 
 if rate_enabled then
+  local kind = redis.call("TYPE", KEYS[1]).ok
+  if kind ~= "none" and kind ~= "hash" then
+    return {RESPONSE_VERSION, -1, "malformed_rate_state", 0, window_id, 0}
+  end
   local state = redis.call("HMGET", KEYS[1], "window", "rpm", "tpm")
   local present = 0
   for index = 1, 3 do
@@ -141,6 +145,10 @@ end
 local concurrency = 0
 local newest_concurrency_expiry = 0
 if concurrency_limit > 0 then
+  local kind = redis.call("TYPE", KEYS[2]).ok
+  if kind ~= "none" and kind ~= "zset" then
+    return {RESPONSE_VERSION, -1, "malformed_concurrency_state", 0, window_id, 0}
+  end
   redis.call("ZREMRANGEBYSCORE", KEYS[2], "-inf", now_ms)
   concurrency = tonumber(redis.call("ZCARD", KEYS[2]))
   if concurrency > 0 then

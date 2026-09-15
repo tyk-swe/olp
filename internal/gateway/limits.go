@@ -139,7 +139,7 @@ func (a *Admission) reserveKey(ctx context.Context, authority access.Authority, 
 		return nil, nil
 	}
 	if !a.ready() {
-		return nil, a.outage(authority.ID, request.HasCostBudget(), errors.New("no limiter configured"))
+		return nil, limitsUnavailable()
 	}
 	if request.TokensPerMinute != nil && estimate > *request.TokensPerMinute {
 		// No window will ever hold this request: answer now rather than make
@@ -164,7 +164,8 @@ func (a *Admission) reserveKey(ctx context.Context, authority access.Authority, 
 // always fails closed; rate and concurrency limits follow the policy the
 // installation configured.
 func (a *Admission) outage(keyID string, costBudget bool, cause error) *Error {
-	if costBudget || a == nil || a.policy == nil || a.policy() != limits.FailOpen {
+	var service *limits.ServiceError
+	if !errors.As(cause, &service) || costBudget || a == nil || a.policy == nil || a.policy() != limits.FailOpen {
 		return limitsUnavailable()
 	}
 	a.failOpen.Add(1)
@@ -209,12 +210,12 @@ type targetReservation struct {
 }
 
 // settle reconciles and releases both leases once the attempt has ended.
-func (t *targetReservation) settle(ctx context.Context, actual *int64) {
+func (t *targetReservation) settle(ctx context.Context, dispatched bool, actual *int64) {
 	if t == nil {
 		return
 	}
-	settleKey(ctx, t.connection, true, actual, t.log)
-	settleKey(ctx, t.slot, true, actual, t.log)
+	settleKey(ctx, t.connection, dispatched, actual, t.log)
+	settleKey(ctx, t.slot, dispatched, actual, t.log)
 }
 
 // connectionRequest describes the quota shared by every attempt that flows
@@ -354,27 +355,51 @@ const (
 // deliberately generous — a reservation is reconciled against the real usage
 // as soon as the attempt ends, and admitting work that cannot fit in the
 // window is worse than deferring work that would have.
-func estimateTokens(parsed *openai.Request) int64 {
+func estimateTokens(parsed *openai.Request, defaults ...map[string]json.RawMessage) int64 {
+	// Match Encode's precedence, including explicit null opting out of a
+	// default and either chat token-bound alias overriding the other.
+	field := func(name string) json.RawMessage {
+		if parsed != nil {
+			if raw := parsed.Field(name); len(raw) > 0 {
+				return raw
+			}
+			if parsed.Family == openai.FamilyChat &&
+				((name == "max_tokens" && len(parsed.Field("max_completion_tokens")) > 0) ||
+					(name == "max_completion_tokens" && len(parsed.Field("max_tokens")) > 0)) {
+				return nil
+			}
+		}
+		if len(defaults) > 0 {
+			return defaults[0][name]
+		}
+		return nil
+	}
 	input := int64(0)
 	if parsed != nil {
 		switch parsed.Family {
 		case openai.FamilyChat:
-			input = estimateItems(parsed.Field("messages"))
+			input = estimateItems(field("messages"))
 		case openai.FamilyResponses:
-			input = estimateItems(parsed.Field("input"))
+			input = addBounded(estimateItems(field("input")), estimateText(field("instructions")))
 		}
-		input = addBounded(input, estimateTools(parsed.Field("tools")))
+		input = addBounded(input, estimateTools(field("tools")))
 	}
 	output := int64(defaultOutputTokens)
-	for _, field := range [...]string{"max_completion_tokens", "max_tokens", "max_output_tokens"} {
-		if value, ok := integerField(parsed, field); ok {
+	outputFields := []string{"max_completion_tokens", "max_tokens"}
+	if parsed != nil && parsed.Family == openai.FamilyResponses {
+		outputFields = []string{"max_output_tokens"}
+	}
+	for _, name := range outputFields {
+		if value, ok := integerValue(field(name)); ok {
 			output = value
 			break
 		}
 	}
 	candidates := int64(1)
-	if value, ok := integerField(parsed, "n"); ok {
-		candidates = value
+	if parsed == nil || parsed.Family == openai.FamilyChat {
+		if value, ok := integerValue(field("n")); ok {
+			candidates = value
+		}
 	}
 	return max(addBounded(input, multiplyBounded(max(output, 1), max(candidates, 1))), 1)
 }
@@ -523,21 +548,40 @@ func jsonObject(raw json.RawMessage) map[string]json.RawMessage {
 	return fields
 }
 
-// integerField reads one top-level request field as an integer. A field that
-// is absent, null, or not an integer leaves the estimate on its default.
-func integerField(parsed *openai.Request, name string) (int64, bool) {
-	if parsed == nil {
+// integerValue distinguishes null from an explicit integer.
+func integerValue(raw json.RawMessage) (int64, bool) {
+	var value *int64
+	if len(raw) == 0 || json.Unmarshal(raw, &value) != nil || value == nil {
 		return 0, false
 	}
-	raw := parsed.Field(name)
-	if len(raw) == 0 {
-		return 0, false
+	return *value, true
+}
+
+// requestEstimate covers any provider the pinned route may select. Connection
+// defaults affect what is actually sent, even when the client omitted a bound.
+func requestEstimate(x *execution) int64 {
+	var estimate int64
+	for _, attempt := range x.attempts {
+		provider := x.request.release.Snapshot.Providers[attempt.ProviderID]
+		estimate = max(estimate, estimateTokens(x.parsed, provider.ParameterDefaults))
 	}
-	var value int64
-	if err := json.Unmarshal(raw, &value); err != nil {
-		return 0, false
+	return max(estimate, 1)
+}
+
+// settledTokens accounts for every attempted provider, not just the last one.
+// Uncertain attempts retain an estimate rather than refunding unknown work.
+func (x *execution) settledTokens() *int64 {
+	var total int64
+	for _, fact := range x.facts {
+		actual := totalTokens(fact.Usage)
+		switch {
+		case actual != nil:
+			total = addBounded(total, *actual)
+		case fact.BillingUncertain || fact.UsageObserved:
+			total = addBounded(total, x.estimate)
+		}
 	}
-	return value, true
+	return &total
 }
 
 // multiplyBounded and addBounded saturate at the largest integer the limiter
@@ -564,13 +608,12 @@ func totalTokens(usage *openai.Usage) *int64 {
 	if usage == nil {
 		return nil
 	}
-	total := usage.TotalTokens
-	if total <= 0 {
-		total = usage.InputTokens + usage.OutputTokens
-	}
-	if total < 0 {
+	if usage.InputTokens < 0 || usage.OutputTokens < 0 {
 		return nil
 	}
-	total = min(total, maxEstimate)
+	// Do not overflow before saturating, or trust a contradictory smaller
+	// total over the input and output the same response reported.
+	total := addBounded(min(usage.InputTokens, maxEstimate), min(usage.OutputTokens, maxEstimate))
+	total = max(total, min(usage.TotalTokens, maxEstimate))
 	return &total
 }

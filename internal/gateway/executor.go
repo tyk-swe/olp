@@ -228,9 +228,9 @@ func (s *Server) execute(ctx context.Context, x *execution) *outcome {
 			if provider.AuthMode != "none" && s.Runtime.Revoked(*slot.CredentialID) {
 				continue
 			}
-			// The provider quotas are reserved for exactly as long as the
-			// attempt may run.
-			timeout := min(attempt.Timeout, time.Until(deadline))
+			// attempt.Timeout bounds first-byte/idle waits, not the lifetime
+			// of a stream. Hold concurrency through the overall deadline.
+			timeout := time.Until(deadline)
 			if timeout <= 0 {
 				// The route deadline is spent, so there is no window left to
 				// reserve and nothing further to try.
@@ -242,7 +242,8 @@ func (s *Server) execute(ctx context.Context, x *execution) *outcome {
 			if s.Admission.cooling(ctx, provider.ID, &slot) {
 				continue
 			}
-			reservation, rejection, skip := s.Admission.reserveTarget(ctx, &provider, &slot, x.estimate, timeout)
+			estimate := estimateTokens(x.parsed, provider.ParameterDefaults)
+			reservation, rejection, skip := s.Admission.reserveTarget(ctx, &provider, &slot, estimate, timeout)
 			if skip {
 				unmeterable = true
 				continue
@@ -266,8 +267,9 @@ func (s *Server) execute(ctx context.Context, x *execution) *outcome {
 			// egress policy, a body that would not encode, a credential that
 			// would not apply — cost no provider anything, so the request stays
 			// refundable.
-			x.dispatched = x.dispatched || failure == nil || failure.dispatched
-			reservation.settle(ctx, totalTokens(fact.Usage))
+			dispatched := failure == nil || failure.dispatched
+			x.dispatched = x.dispatched || dispatched
+			reservation.settle(ctx, dispatched, totalTokens(fact.Usage))
 			x.facts = append(x.facts, fact)
 			s.health.record(provider.ID, fact)
 			if failure == nil {
@@ -359,12 +361,13 @@ type attemptState struct {
 	dispatched atomic.Bool
 }
 
-// trace marks the attempt dispatched once the request has been handed to the
-// upstream, either because it was written in full or because the upstream has
-// already started answering. Everything before that is the connect phase,
-// where a failure cannot have been served.
+// trace conservatively marks dispatch once writing has begun or a response
+// arrives. A body write failure does not prove that the upstream saw nothing;
+// only a failure before writing is safely refundable.
 func (st *attemptState) trace() *httptrace.ClientTrace {
 	return &httptrace.ClientTrace{
+		// A failed body write can still leave work at the upstream.
+		WroteHeaders: func() { st.dispatched.Store(true) },
 		WroteRequest: func(info httptrace.WroteRequestInfo) {
 			if info.Err == nil {
 				st.dispatched.Store(true)

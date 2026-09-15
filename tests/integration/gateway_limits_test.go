@@ -31,7 +31,7 @@ type glFixture struct {
 
 // glSeed provisions one provider, one route, and the admission that enforces
 // the budgets the scenario sets.
-func glSeed(t *testing.T, limiter *limits.Limiter, policy limits.OutagePolicy) *glFixture {
+func glSeed(t *testing.T, limiter *limits.Limiter, policy limits.OutagePolicy, targetTimeout ...int) *glFixture {
 	t.Helper()
 	h := newAccessHarness(t)
 	owner := h.owner()
@@ -52,9 +52,13 @@ func glSeed(t *testing.T, limiter *limits.Limiter, policy limits.OutagePolicy) *
 		t.Fatalf("certification failed: %v", certified)
 	}
 	f.activate("activate-initial")
+	timeout := 8000
+	if len(targetTimeout) > 0 {
+		timeout = targetTimeout[0]
+	}
 	draft := h.want(owner, "POST", "/api/v3/route-drafts", map[string]any{
 		"slug": routeSlug, "overall_timeout_ms": 10000, "max_attempts": 1,
-		"targets": []any{map[string]any{"provider_id": f.provider, "provider_model": vendorModel, "priority": 0, "weight": 1, "timeout_ms": 8000}},
+		"targets": []any{map[string]any{"provider_id": f.provider, "provider_model": vendorModel, "priority": 0, "weight": 1, "timeout_ms": timeout}},
 	}, map[string]string{"Idempotency-Key": "draft"}, 201)
 	draftPath := "/api/v3/route-drafts/" + draft["id"].(string)
 	validated := h.want(owner, "POST", draftPath+"/validate", nil, etagHeader(draft), 200)
@@ -323,6 +327,13 @@ func TestGatewayEnforcesProviderQuotas(t *testing.T) {
 func TestGatewayRefundsRequestsThatReachedNoProvider(t *testing.T) {
 	c := limClient(t)
 	f := glSeed(t, limLimiter(t, c, limNamespace(t, c, "gateway-refund")), limits.FailClosed)
+	listPath := f.path + "/credential-slots"
+	slots := f.h.want(f.owner, "GET", listPath, nil, nil, 200)
+	slotID := slots["items"].([]any)[0].(map[string]any)["id"].(string)
+	f.h.want(f.owner, "PUT", listPath+"/"+slotID, map[string]any{
+		"slot": map[string]any{"name": "default", "enabled": true, "requests_per_minute": 1},
+	}, withMatch(slots, map[string]string{"Idempotency-Key": "refund-slot"}), 200)
+	f.activate("activate-refund-slot")
 	_, secret := f.key("refund", map[string]any{"requests_per_minute": 1})
 	// The upstream is gone: every attempt now fails before a byte is written.
 	served := f.vendor.chats.Load()

@@ -128,14 +128,21 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 			MaxEventBytes:    c.ProviderMaxEventBytes,
 			TrustedProxies:   c.TrustedProxyCIDRs,
 		}, log)
+		if limiter != nil {
+			var policy func() limits.OutagePolicy
+			if outage != nil {
+				policy = outage.Policy
+			}
+			// Control-only processes also execute playground requests.
+			gw.Admission = gateway.NewAdmission(limiter, policy, log)
+		}
 		if c.Mode.Inference() {
 			// Without shared state there is no admission backend at all: the
 			// gateway then refuses traffic that carries hard limits rather
 			// than serving it unmetered, and keeps logging its metadata.
 			if limiter != nil {
-				gw.Admission = gateway.NewAdmission(limiter, outage.Policy, log)
 				emitter = usage.NewEmitter(metadataBuffer)
-				gw.Sink = &gateway.AccountingSink{Emitter: emitter, Log: log}
+				gw.Sink = &gateway.AccountingSink{Emitter: emitter, Log: log, Next: gw.Sink}
 			}
 			gw.Register(public)
 		}
@@ -184,9 +191,20 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 	delivery, stopDelivery := context.WithCancel(context.WithoutCancel(ctx))
 	defer stopDelivery()
 	var delivered sync.WaitGroup
+	var writerDone chan struct{}
 	if emitter != nil {
 		stream, instance := usage.StreamName(prefix), usage.GatewayInstance()
-		delivered.Go(func() { emitter.RunWriter(delivery, vk, stream, log) })
+		// Register before listeners bind: even a crash before the first tick
+		// must leave an epoch that recovery can detect.
+		if _, err := usage.CheckpointEpoch(startup, pool, instance, emitter.Snapshot(), false); err != nil {
+			return err
+		}
+		log.Info("request metadata gateway registered", "gateway_instance", instance)
+		writerDone = make(chan struct{})
+		delivered.Go(func() {
+			defer close(writerDone)
+			emitter.RunWriter(delivery, vk, stream, log)
+		})
 		delivered.Go(func() { usage.RunLossReporter(delivery, pool, emitter, instance, log) })
 	}
 	if outage != nil {
@@ -250,20 +268,27 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 	stop()
 	shutdown, cancel := context.WithTimeout(context.Background(), c.ShutdownTimeout)
 	defer cancel()
-	// Both listeners drain against the same deadline, then connections are forced
-	// closed. Only after handlers finish do the concrete clients close.
+	// Both listeners drain against the same deadline. Forced connection closure
+	// does not prove that every handler has finished producing metadata.
 	var wg sync.WaitGroup
-	for _, server := range servers {
+	for i, server := range servers {
 		wg.Go(func() {
 			if err := server.Shutdown(shutdown); err != nil {
+				if emitter != nil && listeners[i].name == "public" {
+					emitter.MarkUnclean()
+				}
 				server.Close()
 			}
 		})
 	}
 	wg.Wait()
-	// Nothing serves any longer, so the emitter holds every event this process
-	// will ever produce: the writer drains it and the loss reporter closes the
-	// epoch before the workers that read the stream are told to stop.
+	// Stop intake and flush accepted events before stopping the workers. If
+	// HTTP draining was forced, the epoch stays open to report the uncertainty
+	// from handlers that could still finish after intake closes.
+	if emitter != nil {
+		emitter.Close()
+		awaitPlane(c.ShutdownTimeout, func() { <-writerDone }, log, "request metadata flush")
+	}
 	stopDelivery()
 	awaitPlane(c.ShutdownTimeout, delivered.Wait, log, "request metadata delivery")
 	stopWorkers()
@@ -277,8 +302,8 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 	return serveErr
 }
 
-// awaitPlane waits for one background plane to close after it has been
-// cancelled. Each plane gets the configured shutdown budget of its own, because
+// awaitPlane waits for a plane to finish after intake is closed or its context
+// is cancelled. Each plane gets the configured shutdown budget of its own, because
 // draining buffered request metadata is what keeps an orderly stop from
 // becoming a completeness gap; a plane that outlives its budget is left to the
 // bounded cleanup it does on its own rather than holding the process open.

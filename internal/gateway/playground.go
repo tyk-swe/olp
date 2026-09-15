@@ -156,15 +156,13 @@ func (p *Playground) handle(r *http.Request) (access.Reply, error) {
 		actor:    "playground",
 		userID:   principal.ID,
 		affinity: []byte(principal.ID),
-		// The playground carries no API key budget, but the provider quotas it
-		// consumes are the same ones inference traffic reserves.
-		estimate: estimateTokens(parsed),
 	}
 	if e := s.prepare(x, func(string) bool { return true }); e != nil {
 		x.failure = e
 		s.finish(x, nil, e.Status)
 		return access.Reply{}, access.Fail(e.Status, e.Code, e.Message)
 	}
+	x.estimate = requestEstimate(x)
 	x.budget = in.Routing.Budget(x.budget)
 	if !s.admit() {
 		x.failure = overloaded

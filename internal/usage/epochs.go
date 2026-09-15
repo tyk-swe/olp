@@ -367,25 +367,28 @@ func RunLossReporter(ctx context.Context, pool *pgxpool.Pool, emitter *Emitter,
 
 func closeEpoch(ctx context.Context, pool *pgxpool.Pool, emitter *Emitter,
 	gatewayInstance string, log *slog.Logger) {
-	cleanup := context.WithoutCancel(ctx)
-	// Give the writer a moment to close its intake and account for whatever it
-	// could not deliver; a graceful close is only accepted once it has.
-	time.Sleep(100 * time.Millisecond)
-	deadline := time.Now().Add(4 * time.Second)
+	cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 4*time.Second)
+	defer cancel()
 	for {
 		snapshot := emitter.Snapshot()
-		report, err := CheckpointEpoch(cleanup, pool, gatewayInstance, snapshot, true)
+		// Forced HTTP shutdown may leave emitters in flight. Record final
+		// counters, but leave the epoch for detection rather than claiming a
+		// clean close whose last events have not yet been observed.
+		report, err := CheckpointEpoch(cleanup, pool, gatewayInstance, snapshot, !snapshot.Unclean)
 		if err == nil {
 			logLossReport(log, report)
 			return
 		}
-		if !time.Now().Before(deadline) {
+		if cleanup.Err() != nil {
 			log.Error("request metadata epoch could not be closed",
 				"error", err, "lost", snapshot.Lost())
 			return
 		}
 		log.Warn("request metadata epoch close failed; retrying", "error", err)
-		time.Sleep(200 * time.Millisecond)
+		if waitForRetry(cleanup, 200*time.Millisecond) {
+			log.Error("request metadata epoch could not be closed", "error", cleanup.Err())
+			return
+		}
 	}
 }
 

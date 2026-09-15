@@ -12,8 +12,11 @@ and the [production contracts](../../production-guarantees.md).
 
 All shared state is namespaced `olp:go:v1:<installation>:` by
 [the installation namespace](../../../internal/database/migrate.go), and the
-durable schema is one forward-only migration,
+durable schema starts with
 [`0005_accounting.sql`](../../../internal/database/migrations/0005_accounting.sql).
+[`0006_receipt_identity.sql`](../../../internal/database/migrations/0006_receipt_identity.sql)
+adds independent event and request identity constraints for concurrent replay
+and for receipts whose raw facts have already been retained as aggregates.
 
 ## M4-01
 
@@ -33,7 +36,8 @@ format and one script.
 [Gateway admission](../../../internal/gateway/limits.go) reserves the API key
 budgets once the request is authenticated, parsed, and routed, with the route's
 overall deadline as the lease TTL, and reserves the provider connection quota
-and then the credential slot quota before each attempt leaves
+and then the credential slot quota, with leases lasting through the remaining
+overall deadline rather than only the first-byte timeout, before each attempt leaves
 [the executor](../../../internal/gateway/executor.go). A slot rejection refunds
 the connection lease it already took, is recorded as a rate-limit attempt
 failure with its Retry-After, and failover continues to the next target. A

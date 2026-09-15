@@ -256,7 +256,9 @@ key's tokens-per-minute limit is refused immediately with
 never fit.
 
 Each attempt then reserves the provider connection quota and the credential
-slot quota, sized by that attempt's timeout. A rejected slot refunds the
+slot quota, with concurrency leases covering the remaining overall route
+deadline. An attempt's first-byte or idle timeout does not bound a stream's
+total lifetime. A rejected slot refunds the
 connection reservation it already took, the attempt is recorded as a rate-limit
 failure with its `Retry-After`, and failover continues to the next target. When
 a request ends, a reservation that dispatched nothing is refunded in full;
@@ -353,10 +355,12 @@ and detail under `/api/v3/requests`, pricing revisions under
 bucket as approximate and report what they excluded, and carry gap evidence and
 consumer health so incompleteness stays visible after aggregation.
 
-Shutdown is ordered so nothing served is lost: the listeners stop accepting and
-drain first, then the metadata writer flushes the buffer and the loss reporter
-closes this process's epoch against what it actually delivered, and only then
-are the workers that read the stream cancelled. Each stage gets the
+Shutdown stops the listeners and drains their handlers first, then closes
+metadata intake and gives the writer a bounded opportunity to flush the buffer.
+Only afterwards are delivery and worker contexts cancelled. An expired flush
+budget records undelivered events as loss; a forced HTTP shutdown leaves the
+gateway epoch open for detection because handlers may still emit metadata.
+A clean drain closes the epoch against what was actually delivered. Each stage gets the
 `OLP_SHUTDOWN_TIMEOUT` budget (5 seconds by default, 10 minutes at most); a
 stage that outlives it is logged and left to its own bounded cleanup.
 

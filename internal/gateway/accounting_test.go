@@ -224,7 +224,8 @@ func TestAccountingSkipsRequestsWithoutAnOwner(t *testing.T) {
 
 func TestAccountingSinkDropsInvalidEvents(t *testing.T) {
 	emitter := usage.NewEmitter(4)
-	sink := &AccountingSink{Emitter: emitter}
+	next := &capture{}
+	sink := &AccountingSink{Emitter: emitter, Next: next}
 	good := accountingEnvelope(t)
 	sink.Terminal(good)
 	if got := emitter.Snapshot().Accepted; got != 1 {
@@ -241,6 +242,12 @@ func TestAccountingSinkDropsInvalidEvents(t *testing.T) {
 	sink.Terminal(Envelope{RequestID: "no-key"})
 	if got := emitter.Snapshot().Accepted; got != 1 {
 		t.Fatalf("accepted = %d after an unaccountable request, want 1", got)
+	}
+	if got := emitter.Snapshot().Dropped; got != 1 {
+		t.Fatalf("invalid event loss = %d, want 1", got)
+	}
+	if len(next.envs) != 3 {
+		t.Fatalf("diagnostic envelopes = %d, want all three", len(next.envs))
 	}
 }
 
@@ -261,6 +268,9 @@ func TestAccountingEventFromServedRequests(t *testing.T) {
 	}
 	if _, err := usage.Validate(event); err != nil {
 		t.Fatalf("served request is not accountable: %v", err)
+	}
+	if !event.Committed || !event.Attempts[len(event.Attempts)-1].Committed {
+		t.Fatal("delivered unary response was recorded as uncommitted")
 	}
 	if event.RequestID == served.RequestID {
 		t.Error("a caller-named request id became the durable identity")

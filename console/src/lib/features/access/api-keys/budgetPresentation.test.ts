@@ -58,6 +58,9 @@ describe('compareDecimalStrings', () => {
       '',
       ' 1',
       '1 ',
+      '1\n',
+      '1\r',
+      '1\r\n',
       '1e3',
       '-1',
       '+1',
@@ -216,7 +219,7 @@ describe('budget state wording', () => {
 
   it('explains only the states that need explaining', () => {
     expect(budgetStateNote('exhausted')).toMatch(/refused until the window/);
-    expect(budgetStateNote('policy')).toMatch(/not live spend/);
+    expect(budgetStateNote('policy')).toMatch(/enforcement is inactive/);
     expect(budgetStateNote('unknown')).toMatch(/cannot compare/);
     expect(budgetStateNote('within')).toBeNull();
     expect(budgetStateNote('unlimited')).toBeNull();

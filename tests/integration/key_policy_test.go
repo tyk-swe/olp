@@ -10,13 +10,14 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/tyk-swe/olp/internal/limits"
 )
 
 func TestAPIKeyListingsPreserveIntegerPrecision(t *testing.T) {
 	h := newAccessHarness(t)
 	owner := h.owner()
 	expected := map[string]*int64{}
-	for _, tokens := range []int64{math.MaxInt64, 1<<53 + 1, 0} {
+	for _, tokens := range []int64{limits.MaxCounter, limits.MaxCounter - 1, 0} {
 		input := map[string]any{"name": "precise token limit"}
 		var limit *int64
 		if tokens != 0 {
@@ -93,8 +94,8 @@ func TestAPIKeyBudgetAndTokenLimitContract(t *testing.T) {
 		if budget["daily"].(map[string]any)["limit"] != daily || budget["monthly"].(map[string]any)["limit"] != monthly {
 			t.Fatal("the API did not preserve the budget amounts")
 		}
-		// Read the durable authority as int64: the HTTP harness decodes numbers
-		// into float64, which cannot distinguish values near MaxInt64.
+		// Read durable authority as int64, independently of the HTTP harness's
+		// floating-point JSON decoder.
 		authority, err := h.Server.LookupAuthority(t.Context(), secret)
 		if err != nil {
 			t.Fatal(err)
@@ -112,12 +113,14 @@ func TestAPIKeyBudgetAndTokenLimitContract(t *testing.T) {
 	record := assertPolicy("01.50", "1.000000000001", int64(math.MaxInt32)+1)
 	h.want(owner, "PATCH", path, map[string]any{
 		"daily_cost_limit": "000000000001.000000000001", "monthly_cost_limit": "999999999999.999999999999",
-		"tokens_per_minute": int64(math.MaxInt64),
+		"tokens_per_minute": limits.MaxCounter,
 	}, etagHeader(record), 200)
-	record = assertPolicy("000000000001.000000000001", "999999999999.999999999999", math.MaxInt64)
+	record = assertPolicy("000000000001.000000000001", "999999999999.999999999999", limits.MaxCounter)
 	for _, patch := range []map[string]any{
 		{"tokens_per_minute": 0},
 		{"tokens_per_minute": -1},
+		{"tokens_per_minute": limits.MaxCounter + 1},
+		{"tokens_per_minute": math.MaxInt64},
 		{"tokens_per_minute": uint64(math.MaxInt64) + 1},
 		{"requests_per_minute": int64(math.MaxInt32) + 1},
 		{"max_concurrency": int64(math.MaxInt32) + 1},
@@ -126,7 +129,7 @@ func TestAPIKeyBudgetAndTokenLimitContract(t *testing.T) {
 		{"daily_cost_limit": "1.0000000000001"},
 	} {
 		h.want(owner, "PATCH", path, patch, etagHeader(record), 422)
-		if current := assertPolicy("000000000001.000000000001", "999999999999.999999999999", math.MaxInt64); current["etag"] != record["etag"] {
+		if current := assertPolicy("000000000001.000000000001", "999999999999.999999999999", limits.MaxCounter); current["etag"] != record["etag"] {
 			t.Fatal("an invalid policy changed the key")
 		}
 	}
@@ -136,7 +139,7 @@ func TestAPIKeyBudgetAndTokenLimitContract(t *testing.T) {
 		"daily_cost_limit": " 08 ", "monthly_cost_limit": "0.000000000001",
 	}, headers, 200)
 	secret = rotated["secret"].(string)
-	record = assertPolicy("08", "0.000000000001", math.MaxInt64)
+	record = assertPolicy("08", "0.000000000001", limits.MaxCounter)
 	h.want(owner, "PATCH", path, map[string]any{
 		"daily_cost_limit": nil, "monthly_cost_limit": nil, "tokens_per_minute": nil,
 	}, etagHeader(record), 200)

@@ -6,6 +6,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/tyk-swe/olp/internal/limits"
 )
 
 func TestKeyBudgetFormats(t *testing.T) {
@@ -69,7 +71,7 @@ func TestKeyBudgetFormats(t *testing.T) {
 
 func TestKeyLimitRanges(t *testing.T) {
 	for _, field := range []string{"requests_per_minute", "tokens_per_minute", "max_concurrency"} {
-		for _, value := range []int64{math.MinInt64, -1, 0, 1, math.MaxInt32, math.MaxInt32 + 1, math.MaxInt64} {
+		for _, value := range []int64{math.MinInt64, -1, 0, 1, math.MaxInt32, math.MaxInt32 + 1, limits.MaxCounter, limits.MaxCounter + 1, math.MaxInt64} {
 			t.Run(field+"/"+strconv.FormatInt(value, 10), func(t *testing.T) {
 				input := keyInput{Name: "limits", KeyPolicy: KeyPolicy{Scopes: []string{"inference"}, AllowedRoutes: []string{}}}
 				switch field {
@@ -81,7 +83,7 @@ func TestKeyLimitRanges(t *testing.T) {
 					input.MaxConcurrency = &value
 				}
 				err := validateKey(input, false)
-				if value > 0 && (field == "tokens_per_minute" || value <= math.MaxInt32) {
+				if value > 0 && value <= limits.MaxCounter && (field == "tokens_per_minute" || value <= math.MaxInt32) {
 					if err != nil {
 						t.Fatalf("rejected supported limit: %v", err)
 					}

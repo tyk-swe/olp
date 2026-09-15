@@ -10,6 +10,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/egress"
+	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
 )
 
@@ -130,13 +131,25 @@ func (c *Configuration) validate(policy *egress.Policy) error {
 		return access.Invalid("configuration.options.parameter_defaults", err.Error())
 	}
 	if c.Options.Limits != nil {
-		for _, v := range []*int64{c.Options.Limits.MaxConcurrency, c.Options.Limits.RequestsPerMinute, c.Options.Limits.TokensPerMinute} {
-			if v != nil && *v < 0 {
-				return access.Invalid("configuration.options.limits", "Limits must be zero or positive.")
-			}
+		if !validQuota(*c.Options.Limits) {
+			return access.Invalid("configuration.options.limits", "Use positive limits: requests and concurrency at most 2147483647, tokens at most 9007199254740991.")
 		}
 	}
 	return nil
+}
+
+// validQuota uses the same integer bounds as the shared limiter and reference
+// contract. Absence, not zero, disables a dimension.
+func validQuota(q Limits) bool {
+	for _, bound := range []struct {
+		value *int64
+		max   int64
+	}{{q.RequestsPerMinute, 2147483647}, {q.MaxConcurrency, 2147483647}, {q.TokensPerMinute, limits.MaxCounter}} {
+		if bound.value != nil && (*bound.value < 1 || *bound.value > bound.max) {
+			return false
+		}
+	}
+	return true
 }
 
 func validHeaderName(name string) bool {

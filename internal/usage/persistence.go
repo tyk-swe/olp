@@ -70,15 +70,18 @@ const rejectReceiptSQL = `INSERT INTO olp_go.request_metadata_event_receipts
 const rejectedGapSQL = `INSERT INTO olp_go.request_metadata_ingestion_gaps
         (id, gateway_instance, event_count, reason, certainty, first_observed_at, last_observed_at)
     VALUES ($1, 'request-metadata-consumer', 0,
-            'request_metadata_event_outside_replay_window', 'lower_bound', now(), now())`
+            'request_metadata_event_outside_replay_window', 'lower_bound',
+            LEAST($2::timestamptz, now()), LEAST($2::timestamptz, now()))`
 
 const raceReceiptSQL = `SELECT EXISTS (
         SELECT 1 FROM olp_go.request_metadata_event_receipts
         WHERE event_id = $1::uuid AND request_id = $2::uuid
-          AND (event_sha256 IS NULL OR event_sha256 = $3)
+          AND event_sha256 = $3
         UNION ALL
         SELECT 1 FROM olp_go.attempt_usage_facts
-        WHERE event_id = $1::uuid AND request_id = $2::uuid)`
+        WHERE event_id = $1::uuid AND request_id = $2::uuid
+          AND NOT EXISTS (SELECT 1 FROM olp_go.request_metadata_event_receipts
+                          WHERE event_id = $1::uuid OR request_id = $2::uuid))`
 
 const markReceiptPersistedSQL = `UPDATE olp_go.request_metadata_event_receipts
        SET status = 'fact_persisted'
@@ -282,10 +285,10 @@ func admitReceipt(ctx context.Context, tx pgx.Tx, ev *Event, digest []byte) (rec
 	// carrying different bytes is not, and must never overwrite what was
 	// already accounted for.
 	exact := receiptExists && storedDigest != nil && string(storedDigest) == string(digest)
-	if exact || factExists {
+	if exact || (!receiptExists && factExists) {
 		return receiptDuplicate, nil
 	}
-	if !outsideWindow {
+	if receiptExists || !outsideWindow {
 		return 0, fmt.Errorf("%w: event conflicts with an accounted request", ErrInvalidEvent)
 	}
 	return rejectExpiredReceipt(ctx, tx, ev, digest)
@@ -300,7 +303,7 @@ func rejectExpiredReceipt(ctx context.Context, tx pgx.Tx, ev *Event, digest []by
 		Scan(&rejected)
 	switch {
 	case err == nil:
-		if _, err = tx.Exec(ctx, rejectedGapSQL, uuid7()); err != nil {
+		if _, err = tx.Exec(ctx, rejectedGapSQL, uuid7(), ev.ObservedAt); err != nil {
 			return 0, fmt.Errorf("record expired request metadata receipt: %w", err)
 		}
 		return receiptRejected, nil
