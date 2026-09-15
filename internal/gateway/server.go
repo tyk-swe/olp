@@ -400,7 +400,8 @@ func (s *Server) inference(family openai.Family) http.HandlerFunc {
 		// full deadline afterwards could outlive the concurrency reservation.
 		ctx, cancel := context.WithTimeout(r.Context(), overall)
 		defer cancel()
-		if x.lease, e = s.Admission.reserveKey(ctx, authority, x.estimate, overall); e != nil {
+		reservationEstimate := keyReservationEstimate(x.estimate, s.dispatchableAttempts(x))
+		if x.lease, e = s.Admission.reserveKey(ctx, authority, reservationEstimate, overall); e != nil {
 			x.failure, status = e, e.Status
 			writeError(w, e)
 			return

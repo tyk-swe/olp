@@ -568,6 +568,14 @@ func requestEstimate(x *execution) int64 {
 	return max(estimate, 1)
 }
 
+// keyReservationEstimate covers every upstream attempt the route may dispatch.
+// Settlement charges every attempt, including a conservative estimate when an
+// upstream may have billed work without reporting usage, so admission must hold
+// the same worst-case capacity before any provider is called.
+func keyReservationEstimate(perAttempt int64, attempts int) int64 {
+	return multiplyBounded(perAttempt, int64(max(attempts, 1)))
+}
+
 // settledTokens accounts for every attempted provider, not just the last one.
 // Uncertain attempts retain an estimate rather than refunding unknown work.
 func (x *execution) settledTokens() *int64 {

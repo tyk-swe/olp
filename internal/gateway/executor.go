@@ -74,7 +74,7 @@ type execution struct {
 	attempts []runtime.Attempt
 	budget   int
 	emit     openai.Emit // streaming only
-	estimate int64       // tokens reserved before the request is served
+	estimate int64       // per-attempt token estimate used for admission and settlement
 
 	once       sync.Once
 	facts      []AttemptFact
@@ -108,6 +108,29 @@ type outcome struct {
 	err        *Error
 	committed  bool
 	cancelled  bool
+}
+
+// dispatchableAttempts returns the most attempts this request can hand to a
+// provider, capped by its requested budget. Each target may be tried through
+// each of its usable credential slots.
+func (s *Server) dispatchableAttempts(x *execution) int {
+	remaining := x.budget
+	available := 0
+	for _, attempt := range x.attempts {
+		provider, ok := x.request.release.Snapshot.Providers[attempt.ProviderID]
+		if !ok {
+			continue
+		}
+		for i := range provider.Slots {
+			if s.slotAvailable(x, attempt, &provider.Slots[i]) {
+				available++
+			}
+			if available == remaining {
+				return available
+			}
+		}
+	}
+	return available
 }
 
 type attemptFailure struct {
@@ -322,16 +345,8 @@ func (s *Server) slots(x *execution, attempt runtime.Attempt, provider *runtime.
 	}
 	var usable []ranked
 	for _, slot := range provider.Slots {
-		if !slot.Allows(attempt.UpstreamModel, x.route.Slug, x.keyID) || s.health.coolingDown(provider.ID, slot.ID) {
+		if !s.slotAvailable(x, attempt, &slot) || s.health.coolingDown(provider.ID, slot.ID) {
 			continue
-		}
-		if provider.AuthMode != "none" {
-			if slot.CredentialID == nil || s.Runtime.Revoked(*slot.CredentialID) {
-				continue
-			}
-			if _, ok := x.request.release.Credential(*slot.CredentialID); !ok {
-				continue
-			}
 		}
 		score := 0.0
 		if routeID, err := uuid.Parse(x.route.ID); err == nil {
@@ -352,6 +367,21 @@ func (s *Server) slots(x *execution, attempt runtime.Attempt, provider *runtime.
 		out = append(out, r.slot)
 	}
 	return out
+}
+
+func (s *Server) slotAvailable(x *execution, attempt runtime.Attempt, slot *runtime.Slot) bool {
+	if !slot.Allows(attempt.UpstreamModel, x.route.Slug, x.keyID) {
+		return false
+	}
+	provider := x.request.release.Snapshot.Providers[attempt.ProviderID]
+	if provider.AuthMode == "none" {
+		return true
+	}
+	if slot.CredentialID == nil || s.Runtime.Revoked(*slot.CredentialID) {
+		return false
+	}
+	_, ok := x.request.release.Credential(*slot.CredentialID)
+	return ok
 }
 
 // attemptState tracks why an attempt context ended.

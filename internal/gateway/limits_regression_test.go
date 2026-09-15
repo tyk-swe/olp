@@ -75,6 +75,42 @@ func TestKeyEstimateCoversEveryCandidate(t *testing.T) {
 	}
 }
 
+func TestKeyReservationCoversEveryAllowedAttempt(t *testing.T) {
+	if got := keyReservationEstimate(101, 3); got != 303 {
+		t.Fatalf("key reservation = %d, want one estimate per allowed attempt", got)
+	}
+	if got := keyReservationEstimate(101, 0); got != 101 {
+		t.Fatalf("key reservation = %d, want a valid minimum reservation", got)
+	}
+	if got := keyReservationEstimate(maxEstimate, 2); got != maxEstimate {
+		t.Fatalf("overflowing key reservation = %d, want saturation", got)
+	}
+}
+
+func TestKeyReservationCapsAtDispatchableAttempts(t *testing.T) {
+	h := newHarness(t, Config{})
+	snapshot := h.rt.release.Snapshot
+	route := snapshot.Routes[routeSlug]
+	attempts, err := runtime.Select(snapshot, routeSlug, operationGeneration, surfaceOpenAI, "unary", []byte(h.keyID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	x := &execution{
+		request:  request{release: h.rt.release},
+		keyID:    h.keyID,
+		route:    &route,
+		attempts: attempts[:1],
+		budget:   3,
+	}
+	got := h.gateway.dispatchableAttempts(x)
+	if got != 1 {
+		t.Fatalf("dispatchable attempts = %d, want the one target/credential candidate", got)
+	}
+	if reservation := keyReservationEstimate(101, got); reservation != 101 {
+		t.Fatalf("key reservation = %d, want one candidate estimate", reservation)
+	}
+}
+
 func TestKeySettlementPreservesAllAttemptUsage(t *testing.T) {
 	x := &execution{estimate: 100, facts: []AttemptFact{
 		{Usage: &openai.Usage{InputTokens: 2, OutputTokens: 3}, UsageObserved: true},
