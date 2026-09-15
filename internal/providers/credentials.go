@@ -398,10 +398,8 @@ func validSlot(in *slotInput, slotID string) error {
 			return err
 		}
 	}
-	for _, v := range []*int64{in.MaxConcurrency, in.RequestsPerMinute, in.TokensPerMinute} {
-		if v != nil && *v < 0 {
-			return access.Invalid("slot", "Limits must be zero or positive.")
-		}
+	if !validQuota(Limits{MaxConcurrency: in.MaxConcurrency, RequestsPerMinute: in.RequestsPerMinute, TokensPerMinute: in.TokensPerMinute}) {
+		return access.Invalid("slot", "Use positive limits: requests and concurrency at most 2147483647, tokens at most 9007199254740991.")
 	}
 	if in.CredentialVersionID != nil {
 		id, err := access.ParseUUID(*in.CredentialVersionID)

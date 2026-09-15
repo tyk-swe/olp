@@ -132,6 +132,7 @@ func (l LogSink) Terminal(e Envelope) {
 	}
 	args := []any{
 		slog.String("request_id", e.RequestID),
+		slog.String("accounting_id", e.AccountingID),
 		slog.String("client_ip", e.ClientIP),
 		slog.String("route_revision_id", e.RouteRevisionID),
 		slog.Time("started_at", e.StartedAt),

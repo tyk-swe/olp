@@ -173,19 +173,19 @@ func ListRequests(ctx context.Context, q access.Queryer, f RequestFilters, curso
 }
 
 // push appends the explorer's filters. Provider and model are attempt
-// properties, so they are matched with EXISTS over this request's facts.
+// properties, so they are matched against retained attempts, not expiring usage facts.
 func (f RequestFilters) push(q *filterQuery) {
 	if f.Route != nil {
 		q.pushBind(" AND r.route_slug = ", *f.Route)
 	}
 	if f.ProviderID != nil || f.Model != nil {
-		q.push(" AND EXISTS (SELECT 1 FROM olp_go.attempt_usage_facts filter_fact" +
-			" WHERE filter_fact.request_id = r.id AND filter_fact.request_started_at = r.started_at")
+		q.push(" AND EXISTS (SELECT 1 FROM olp_go.attempts filter_attempt" +
+			" WHERE filter_attempt.request_id = r.id AND filter_attempt.request_started_at = r.started_at")
 		if f.ProviderID != nil {
-			q.pushBind(" AND filter_fact.provider_id = ", *f.ProviderID)
+			q.pushBind(" AND filter_attempt.provider_id = ", *f.ProviderID)
 		}
 		if f.Model != nil {
-			q.pushBind(" AND filter_fact.upstream_model = ", *f.Model)
+			q.pushBind(" AND filter_attempt.upstream_model = ", *f.Model)
 		}
 		q.push(")")
 	}

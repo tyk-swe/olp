@@ -224,11 +224,11 @@ func sanitizeConsumerHost(host string) string {
 	return out.String()
 }
 
-// GatewayInstance labels this process in gateway epoch rows and ingestion gaps.
-// The label is stored and shown to operators, so it is trimmed, stripped of
-// control characters and bounded to the 200 bytes the epoch checkpoint accepts;
-// an installation without a hostname reports as "olp".
-func GatewayInstance() string { return gatewayInstanceLabel(os.Getenv("HOSTNAME")) }
+// GatewayInstance distinguishes live processes even when they share a host
+// or have no HOSTNAME. Restarts leave their old epochs for stale detection.
+func GatewayInstance() string {
+	return consumerName(gatewayInstanceLabel(os.Getenv("HOSTNAME")), os.Getpid(), uuid.Must(uuid.NewV7()))
+}
 
 func gatewayInstanceLabel(host string) string {
 	var out strings.Builder

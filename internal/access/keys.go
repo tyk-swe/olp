@@ -67,8 +67,8 @@ func validateKey(input keyInput, expirationChanged bool) error {
 			return Invalid(field, "Use a positive integer of at most 2147483647.")
 		}
 	}
-	if input.TokensPerMinute != nil && *input.TokensPerMinute < 1 {
-		return Invalid("tokens_per_minute", "Use a positive integer of at most 9223372036854775807.")
+	if input.TokensPerMinute != nil && (*input.TokensPerMinute < 1 || *input.TokensPerMinute > limits.MaxCounter) {
+		return Invalid("tokens_per_minute", "Use a positive integer of at most 9007199254740991.")
 	}
 	for field, value := range map[string]*string{"daily_cost_limit": input.DailyCostLimit, "monthly_cost_limit": input.MonthlyCostLimit} {
 		if value != nil {

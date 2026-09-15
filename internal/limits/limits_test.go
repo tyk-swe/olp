@@ -162,7 +162,7 @@ func TestParseCostReservationAcceptsTheScriptContract(t *testing.T) {
 		},
 		{
 			"invalid arguments",
-			reply(int64(1), int64(-1), "invalid_arguments", int64(0), int64(20_000), int64(24_000)),
+			reply(int64(1), int64(-1), "invalid_arguments", int64(0), int64(0), int64(0)),
 			scriptResult{kind: resultScriptFailure},
 		},
 	} {

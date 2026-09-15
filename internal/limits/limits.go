@@ -45,10 +45,11 @@ var providerUsageScript string
 var providerCooldownScript string
 
 const (
-	// maxLuaInteger is the largest integer Lua 5.1 represents exactly. Every
+	// MaxCounter is the largest integer Lua 5.1 represents exactly. Every
 	// counter and identifier the scripts handle must stay within it, so values
 	// beyond it are rejected before they reach Valkey.
-	maxLuaInteger = int64(1)<<53 - 1
+	MaxCounter    = int64(1)<<53 - 1
+	maxLuaInteger = MaxCounter
 	// scriptResponseVersion is the reply contract the scripts and this package
 	// share. A different version means the deployed script is not this one.
 	scriptResponseVersion = 1

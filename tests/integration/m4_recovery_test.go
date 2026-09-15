@@ -450,8 +450,8 @@ func TestM4BudgetsRecoverFromLostSpendState(t *testing.T) {
 func TestM4GatewayEpochsRecordAndResolveLostReplicas(t *testing.T) {
 	in := m4Provisioned(t)
 	_, secret := in.key("epochs", nil)
-	const lostInstance, keptInstance = "m4-epoch-lost", "m4-epoch-kept"
-	lost := in.replica(lostInstance)
+	lost := in.replica("m4-epoch-lost")
+	lostInstance := lost.GatewayInstance
 	worker := in.worker("m4-epoch-worker")
 
 	const requests = 2
@@ -525,7 +525,8 @@ func TestM4GatewayEpochsRecordAndResolveLostReplicas(t *testing.T) {
 
 	// A replica that stops properly closes its own epoch, so nothing is left
 	// for the detector to find.
-	kept := in.replica(keptInstance)
+	kept := in.replica("m4-epoch-kept")
+	keptInstance := kept.GatewayInstance
 	if status, code, _ := m4Chat(t, kept.PublicOrigin, secret); status != 200 {
 		t.Fatalf("inference against the replica that stops cleanly: %d %s", status, code)
 	}

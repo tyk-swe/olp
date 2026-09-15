@@ -17,13 +17,14 @@ import (
 )
 
 type Process struct {
-	PublicOrigin  string
-	PrivateOrigin string
-	cmd           *exec.Cmd
-	done          chan struct{}
-	result        error
-	logPath       string
-	killed        atomic.Bool
+	PublicOrigin    string
+	PrivateOrigin   string
+	GatewayInstance string
+	cmd             *exec.Cmd
+	done            chan struct{}
+	result          error
+	logPath         string
+	killed          atomic.Bool
 }
 
 func Environment(values map[string]string) []string {
@@ -74,10 +75,14 @@ func StartProcess(t testing.TB, binary, mode string, env map[string]string) *Pro
 		scanner := bufio.NewScanner(f)
 		for scanner.Scan() {
 			var event struct {
-				Listener string `json:"listener"`
-				Address  string `json:"address"`
+				Listener        string `json:"listener"`
+				Address         string `json:"address"`
+				GatewayInstance string `json:"gateway_instance"`
 			}
 			if json.Unmarshal(scanner.Bytes(), &event) == nil {
+				if event.GatewayInstance != "" {
+					p.GatewayInstance = event.GatewayInstance
+				}
 				if event.Listener == "public" {
 					p.PublicOrigin = "http://" + event.Address
 				}
@@ -118,10 +123,10 @@ func (p *Process) Kill() error {
 		return fmt.Errorf("process had already exited before it was killed: %v", p.result)
 	default:
 	}
-	p.killed.Store(true)
 	if err := p.cmd.Process.Signal(syscall.SIGKILL); err != nil {
 		return err
 	}
+	p.killed.Store(true)
 	<-p.done
 	return nil
 }

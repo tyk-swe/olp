@@ -156,8 +156,9 @@ func TestGatewayInstanceIsBoundedAndLogSafe(t *testing.T) {
 
 func TestGatewayInstanceReadsTheHostname(t *testing.T) {
 	t.Setenv("HOSTNAME", " gateway-2 ")
-	if got := GatewayInstance(); got != "gateway-2" {
-		t.Errorf("instance = %q, want %q", got, "gateway-2")
+	first, second := GatewayInstance(), GatewayInstance()
+	if !strings.HasPrefix(first, "gateway-2-") || first == second || len(first) > 200 {
+		t.Errorf("process labels = %q / %q, want distinct bounded host labels", first, second)
 	}
 }
 

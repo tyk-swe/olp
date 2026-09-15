@@ -4,8 +4,6 @@ import (
 	"context"
 	"log/slog"
 	"time"
-
-	"github.com/tyk-swe/olp/internal/coordination"
 )
 
 const (
@@ -16,14 +14,15 @@ const (
 	writerRetryCeiling = 5 * time.Second
 )
 
-// RunWriter drains the emitter into the request metadata stream until ctx is
-// done, then closes the intake and accounts for whatever is left. It is the
-// only reader of the buffer, so exactly one goroutine per emitter runs it.
-//
-// The context belongs to the process, not to a request: cancelling it is the
-// shutdown signal, and everything still buffered at that point is reported as
-// lost rather than silently forgotten.
-func (e *Emitter) RunWriter(ctx context.Context, client *coordination.Client, stream string, log *slog.Logger) {
+// StreamWriter is the command surface needed to append metadata.
+type StreamWriter interface {
+	Do(context.Context, ...string) (any, error)
+}
+
+// RunWriter drains until Close has stopped intake and the buffer is empty.
+// Cancelling ctx aborts the drain and records everything left as loss.
+// Exactly one goroutine per emitter runs it.
+func (e *Emitter) RunWriter(ctx context.Context, client StreamWriter, stream string, log *slog.Logger) {
 	for {
 		if ctx.Err() != nil {
 			e.abandonAndDrain(0)
@@ -33,7 +32,10 @@ func (e *Emitter) RunWriter(ctx context.Context, client *coordination.Client, st
 		case <-ctx.Done():
 			e.abandonAndDrain(0)
 			return
-		case event := <-e.events:
+		case event, ok := <-e.events:
+			if !ok {
+				return
+			}
 			payload, err := Encode(&event)
 			if err != nil {
 				// One unencodable event (a routing policy that is no longer
@@ -54,7 +56,7 @@ func (e *Emitter) RunWriter(ctx context.Context, client *coordination.Client, st
 
 // write retries one event until Valkey accepts it or the process is shutting
 // down. It reports whether the event reached the stream.
-func (e *Emitter) write(ctx context.Context, client *coordination.Client, stream string, payload []byte, log *slog.Logger) bool {
+func (e *Emitter) write(ctx context.Context, client StreamWriter, stream string, payload []byte, log *slog.Logger) bool {
 	backoff := writerRetryFloor
 	for {
 		// The write deliberately outlives a cancelled ctx: an XADD abandoned in

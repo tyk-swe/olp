@@ -40,6 +40,7 @@ type Emitter struct {
 	dropped     atomic.Int64
 	abandoned   atomic.Int64
 	retrying    atomic.Bool
+	unclean     atomic.Bool
 	firstLossMS atomic.Int64
 	lastLossMS  atomic.Int64
 }
@@ -80,6 +81,17 @@ func (e *Emitter) Emit(ev Event) error {
 	}
 }
 
+// Close stops intake without discarding queued events. RunWriter drains them;
+// cancelling its context is reserved for an expired shutdown budget.
+func (e *Emitter) Close() { e.closeIntake() }
+
+// MarkUnclean keeps the epoch open when HTTP handlers exceeded their drain
+// budget: some may still emit after the writer stops accepting events.
+func (e *Emitter) MarkUnclean() { e.unclean.Store(true) }
+
+// Drop records an accountable event rejected before it could enter the buffer.
+func (e *Emitter) Drop() { e.recordLoss(&e.dropped, 1) }
+
 // Snapshot is the emitter's accounting at one instant: what was accepted, what
 // reached the stream, and what was lost on the way.
 type Snapshot struct {
@@ -94,6 +106,7 @@ type Snapshot struct {
 	// Abandoned are events that entered the buffer but never reached Valkey.
 	Abandoned int64
 	Retrying  bool
+	Unclean   bool
 	// Closed says the writer has stopped accepting events.
 	Closed      bool
 	FirstLossAt *time.Time
@@ -111,12 +124,12 @@ func (s Snapshot) Lost() int64 { return s.Dropped + s.Abandoned }
 // Complete says every accepted event reached the stream and delivery is not
 // currently degraded. A pending backlog is not loss, but a retry is a warning.
 func (s Snapshot) Complete() bool {
-	return s.Dropped == 0 && s.Abandoned == 0 && !s.Retrying && !s.Closed
+	return s.Dropped == 0 && s.Abandoned == 0 && !s.Retrying && !s.Closed && !s.Unclean
 }
 
-// GracefullyDrained says the writer stopped with nothing outstanding, which is
-// the only state in which an epoch may be closed cleanly.
-func (s Snapshot) GracefullyDrained() bool { return s.Closed && s.Pending() == 0 }
+// GracefullyDrained requires both a drained writer and a clean HTTP shutdown;
+// otherwise late terminal events could be missing from a supposedly closed epoch.
+func (s Snapshot) GracefullyDrained() bool { return s.Closed && s.Pending() == 0 && !s.Unclean }
 
 // Snapshot reads the counters. Persisted and abandoned are lower bounds on
 // accepted (Emit counts an event after handing it over), so accepted is raised
@@ -136,6 +149,7 @@ func (e *Emitter) Snapshot() Snapshot {
 		Dropped:      e.dropped.Load(),
 		Abandoned:    abandoned,
 		Retrying:     e.retrying.Load(),
+		Unclean:      e.unclean.Load(),
 		Closed:       closed,
 		FirstLossAt:  lossTime(e.firstLossMS.Load()),
 		LastLossAt:   lossTime(e.lastLossMS.Load()),

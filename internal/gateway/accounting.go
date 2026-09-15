@@ -17,10 +17,14 @@ import (
 type AccountingSink struct {
 	Emitter *usage.Emitter
 	Log     *slog.Logger
+	Next    Sink
 }
 
 // Terminal records one finished request.
 func (a *AccountingSink) Terminal(e Envelope) {
+	if a.Next != nil {
+		a.Next.Terminal(e)
+	}
 	if a.Emitter == nil {
 		return
 	}
@@ -29,6 +33,7 @@ func (a *AccountingSink) Terminal(e Envelope) {
 		return
 	}
 	if _, err := usage.Validate(event); err != nil {
+		a.Emitter.Drop()
 		a.logger().Warn("usage event dropped", "request_id", e.RequestID, "error", err.Error())
 		return
 	}

@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"strings"
 	"testing"
@@ -191,21 +192,29 @@ func TestAdmissionWithoutLimiter(t *testing.T) {
 	}
 }
 
-func TestAdmissionFailsOpenOnlyForRateLimits(t *testing.T) {
-	rpm, cost := int64(10), "5.00"
+func TestAdmissionFailsOpenOnlyForServiceOutages(t *testing.T) {
 	open := NewAdmission(nil, func() limits.OutagePolicy { return limits.FailOpen }, slog.New(slog.DiscardHandler))
-	if lease, e := open.reserveKey(context.Background(), admissionAuthority(access.KeyPolicy{RequestsPerMinute: &rpm}), 10, time.Second); lease != nil || e != nil {
-		t.Fatalf("rate limited key not admitted: lease %v error %v", lease, e)
+	rpm := int64(10)
+	if _, e := open.reserveKey(context.Background(), admissionAuthority(access.KeyPolicy{RequestsPerMinute: &rpm}), 10, time.Second); e == nil {
+		t.Fatal("no configured limiter is not an eligible fail-open outage")
+	}
+	for _, cause := range []error{
+		limits.ErrMalformedState, limits.ErrUnexpectedResponse,
+		&limits.InvalidRequestError{Reason: "invalid quota"},
+	} {
+		if e := open.outage("key", false, cause); e == nil || e.Status != 503 {
+			t.Fatalf("semantic error admitted: %v", cause)
+		}
+	}
+	outage := &limits.ServiceError{Err: errors.New("unreachable")}
+	if e := open.outage("key", false, outage); e != nil {
+		t.Fatalf("eligible outage failed closed: %v", e)
+	}
+	if e := open.outage("key", true, outage); e == nil || e.Status != 503 {
+		t.Fatal("cost budget failed open")
 	}
 	if got := open.FailOpenTotal(); got != 1 {
 		t.Fatalf("fail open total = %d, want 1", got)
-	}
-	budgeted := admissionAuthority(access.KeyPolicy{RequestsPerMinute: &rpm, MonthlyCostLimit: &cost})
-	if _, e := open.reserveKey(context.Background(), budgeted, 10, time.Second); e == nil || e.Status != 503 {
-		t.Fatalf("cost budget admitted while the limiter was down: %v", e)
-	}
-	if got := open.FailOpenTotal(); got != 1 {
-		t.Fatalf("fail open total = %d, want 1 after a budgeted key failed closed", got)
 	}
 }
 
@@ -213,7 +222,7 @@ func TestSettleKeyWithoutLease(t *testing.T) {
 	// Nothing to settle must stay silent rather than panic on a nil lease.
 	settleKey(context.Background(), nil, true, nil, slog.New(slog.DiscardHandler))
 	var reservation *targetReservation
-	reservation.settle(context.Background(), nil)
+	reservation.settle(context.Background(), false, nil)
 }
 
 func TestTotalTokens(t *testing.T) {

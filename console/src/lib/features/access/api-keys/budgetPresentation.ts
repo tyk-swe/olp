@@ -8,8 +8,8 @@ export type BudgetWindowName = 'daily' | 'monthly';
 /**
  * What the console is allowed to claim about one budget window.
  *
- * `policy` means the amounts are configuration rather than accounting, so an
- * accrued amount of zero says nothing about spend. `unknown` keeps the console
+ * `policy` means enforcement is inactive; recorded amounts can still exist,
+ * but may omit traffic sent without accounting. `unknown` keeps the console
  * from ordering amounts it cannot compare exactly; it never claims headroom it
  * has not proven.
  */
@@ -19,7 +19,7 @@ export type BudgetState =
 const DECIMAL = /^\d+(?:\.\d+)?$/;
 
 function split(value: string): [string, string] | null {
-  if (!DECIMAL.test(value)) return null;
+  if (value.trim() !== value || !DECIMAL.test(value)) return null;
   const [integer, fraction = ''] = value.split('.');
   return [integer.replace(/^0+(?=\d)/, ''), fraction];
 }
@@ -97,7 +97,7 @@ export function budgetStateLabel(state: BudgetState): string {
 export function budgetStateNote(state: BudgetState): string | null {
   switch (state) {
     case 'policy':
-      return 'Accrued amounts are stored policy on this installation, not live spend.';
+      return 'Budget enforcement is inactive on this installation. Accrued amounts may omit traffic sent without accounting.';
     case 'exhausted':
       return 'Requests with this key are refused until the window resets.';
     case 'unknown':

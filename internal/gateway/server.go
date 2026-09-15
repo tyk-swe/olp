@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"compress/gzip"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -339,7 +340,7 @@ func (s *Server) inference(family openai.Family) http.HandlerFunc {
 			// The budgets this request reserved are settled even when the
 			// client is gone: a concurrency slot nobody releases is a slot
 			// every replica keeps counting.
-			settleKey(r.Context(), x.lease, x.dispatched, totalTokens(x.usage()), s.log)
+			settleKey(r.Context(), x.lease, x.dispatched, x.settledTokens(), s.log)
 		}()
 		// A context timeout alone cannot interrupt a blocked socket read.
 		rc := http.NewResponseController(w)
@@ -393,8 +394,13 @@ func (s *Server) inference(family openai.Family) http.HandlerFunc {
 		// provider is called, so a rejected request costs an upstream nothing.
 		// The lease outlives the route deadline it is sized against: it is the
 		// backstop for a replica that dies mid-request, not the deadline.
-		x.estimate = estimateTokens(parsed)
-		if x.lease, e = s.Admission.reserveKey(r.Context(), authority, x.estimate, time.Duration(x.route.OverallTimeout)*time.Millisecond); e != nil {
+		x.estimate = requestEstimate(x)
+		overall := time.Duration(x.route.OverallTimeout) * time.Millisecond
+		// Admission is part of the same deadline as execution; starting a new
+		// full deadline afterwards could outlive the concurrency reservation.
+		ctx, cancel := context.WithTimeout(r.Context(), overall)
+		defer cancel()
+		if x.lease, e = s.Admission.reserveKey(ctx, authority, x.estimate, overall); e != nil {
 			x.failure, status = e, e.Status
 			writeError(w, e)
 			return
@@ -408,11 +414,11 @@ func (s *Server) inference(family openai.Family) http.HandlerFunc {
 				}
 				return err
 			}
-			out = s.execute(r.Context(), x)
+			out = s.execute(ctx, x)
 			status = sw.finish(out)
 			return
 		}
-		out = s.execute(r.Context(), x)
+		out = s.execute(ctx, x)
 		if out.err != nil {
 			status = out.err.Status
 			if out.err.Status > 0 {
@@ -430,6 +436,7 @@ func (s *Server) inference(family openai.Family) http.HandlerFunc {
 		status = http.StatusOK
 		w.WriteHeader(http.StatusOK)
 		out.committed = true
+		x.facts[len(x.facts)-1].Committed = true
 		_, err = w.Write(out.completion.Body)
 		if err == nil {
 			// Flush buffered responses before recording successful delivery.
