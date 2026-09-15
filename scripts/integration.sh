@@ -4,6 +4,9 @@ cd "$(dirname "$0")/.."
 docker compose -f deploy/compose.dev.yaml --profile integration up -d --wait
 export OLP_LOCAL_DIR="$PWD/.local/integration"
 source scripts/local-env.sh
+# shellcheck source=scripts/lib/cargo-target-dir.sh
+source scripts/lib/cargo-target-dir.sh
+target_dir=$(cargo_target_dir "$PWD")
 export OLP_TEST_DATABASE_OWNER=olp
 export OLP_TEST_RUN_TOKEN="$(openssl rand -hex 5)"
 export OLP_TEST_VALKEY_URL="$OLP_VALKEY_URL"
@@ -41,7 +44,7 @@ trap 'exit 130' INT
 trap 'exit 143' TERM
 
 cargo build --locked --features test-util --bin olp --example sdk_smoke_fixture
-export OLP_E2E_BIN="$PWD/target/debug/olp"
+export OLP_E2E_BIN="$target_dir/debug/olp"
 cargo test --locked --all-features --lib --test persistence --test system -- --ignored --skip live_provider --test-threads=4
 cargo test --locked --all-features --test contract --test ha -- --ignored --test-threads=1
 ./tests/sdk-smoke/run.sh

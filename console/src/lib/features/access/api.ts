@@ -2,6 +2,7 @@ import type { components } from '$lib/api/schema';
 import { apiClient } from '$lib/api/client';
 import { ensureSuccess, pageResult, result } from '$lib/api/http';
 import type { CursorPage } from '$lib/api/http';
+import { collectCursorPages } from '$lib/api/pagination';
 
 type Schemas = components['schemas'];
 
@@ -20,6 +21,10 @@ export async function listUserPage(
     signal
   });
   return pageResult(result(response.data, response.error, response.response));
+}
+
+export async function listUsers(signal?: AbortSignal): Promise<User[]> {
+  return collectCursorPages((cursor) => listUserPage(cursor, signal));
 }
 
 export async function updateUser(user: User, patch: UserPatch): Promise<User> {

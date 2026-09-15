@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ApiProblem } from '$lib/api/http';
-import { listUserPage } from '$lib/features/access/api';
+import { listUserPage, listUsers } from '$lib/features/access/api';
 import { listApiKeyPage } from '$lib/features/access/api-keys/api';
 import { getOidcConfiguration } from '$lib/features/access/oidc/api';
 import { listProviderPage, listProviders } from '$lib/features/providers/api';
@@ -76,6 +76,29 @@ describe('management resources', () => {
     await expect(listProviders(controller.signal)).resolves.toEqual([
       'provider-1',
       'provider-2'
+    ]);
+    expect(requests).toHaveLength(2);
+    expect(new URL(requests[0]!.url).searchParams.get('cursor')).toBeNull();
+    expect(new URL(requests[1]!.url).searchParams.get('cursor')).toBe('page-2');
+
+    controller.abort();
+
+    expect(requests.every((request) => request.signal.aborted)).toBe(true);
+  });
+
+  it('collects every user page for full-roster selectors', async () => {
+    const controller = new AbortController();
+    const requests = captureRequests((_request, index) =>
+      jsonResponse(
+        index === 0
+          ? { items: [{ id: 'user-1' }], next_cursor: 'page-2' }
+          : { items: [{ id: 'user-2' }], next_cursor: null }
+      )
+    );
+
+    await expect(listUsers(controller.signal)).resolves.toEqual([
+      { id: 'user-1' },
+      { id: 'user-2' }
     ]);
     expect(requests).toHaveLength(2);
     expect(new URL(requests[0]!.url).searchParams.get('cursor')).toBeNull();

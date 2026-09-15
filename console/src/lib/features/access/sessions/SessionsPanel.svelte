@@ -5,7 +5,7 @@
   import { logout } from '$lib/features/access/session/auth';
   import {
     listSessionPage,
-    listUserPage,
+    listUsers,
     revokeSession
   } from '$lib/features/access/api';
   import { authLifecycle } from '$lib/features/access/session/lifecycle';
@@ -28,8 +28,8 @@
   let notice = $state('');
 
   const users = createQuery(() => ({
-    queryKey: userKeys.page(),
-    queryFn: () => listUserPage(),
+    queryKey: userKeys.roster,
+    queryFn: ({ signal }) => listUsers(signal),
     // Only the member filter needs the roster, and only managers see it.
     enabled: canManage
   }));
@@ -87,7 +87,7 @@
         onchange={(event) => selectMember(event.currentTarget.value)}
       >
         <option value="">My sessions</option>
-        {#each users.data?.items ?? [] as user (user.id)}<option value={user.id}
+        {#each users.data ?? [] as user (user.id)}<option value={user.id}
             >{user.display_name}</option
           >{/each}
       </select>

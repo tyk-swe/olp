@@ -721,6 +721,10 @@ func repPrice(kind, model, operation string) map[string]any {
 
 func TestPricingRevisionsOverHTTP(t *testing.T) {
 	f := repSetup(t)
+	generic := repPrice("openai_compatible", "m2", "embeddings")
+	delete(generic, "input_per_million")
+	delete(generic, "output_per_million")
+	generic["unit_price"] = "0.000200000000"
 	vendor := repPrice("openai_compatible", "m2", "embeddings")
 	vendor["vendor_id"] = "acme"
 	vendor["currency"] = "usd"
@@ -729,7 +733,8 @@ func TestPricingRevisionsOverHTTP(t *testing.T) {
 	vendor["unit_price"] = "0.000100000000"
 	body := map[string]any{
 		"effective_at": f.Base.Format(time.RFC3339),
-		"prices":       []any{repPrice("openai", "m1", "generation"), vendor},
+		// Insert the vendor override first so reads must impose a stable scope order.
+		"prices": []any{repPrice("openai", "m1", "generation"), vendor, generic},
 	}
 	headers := map[string]string{"Idempotency-Key": "pricing-first"}
 	created := f.h.want(f.Owner, http.MethodPost, "/api/v3/pricing/revisions", body, headers, 201)
@@ -740,7 +745,7 @@ func TestPricingRevisionsOverHTTP(t *testing.T) {
 		t.Fatalf("created by = %v, want the owner", created["created_by"])
 	}
 	prices := created["prices"].([]any)
-	if len(prices) != 2 {
+	if len(prices) != 3 {
 		t.Fatalf("prices = %v", prices)
 	}
 	for _, entry := range prices {
@@ -763,8 +768,12 @@ func TestPricingRevisionsOverHTTP(t *testing.T) {
 
 	listed := f.h.want(f.Owner, http.MethodGet, "/api/v3/pricing/revisions", nil, nil, 200)
 	items := listed["items"].([]any)
-	if len(items) != 1 || len(items[0].(map[string]any)["prices"].([]any)) != 2 {
+	if len(items) != 1 || len(items[0].(map[string]any)["prices"].([]any)) != 3 {
 		t.Fatalf("listed revisions = %v", items)
+	}
+	listedPrices := items[0].(map[string]any)["prices"].([]any)
+	if first, second := listedPrices[1].(map[string]any), listedPrices[2].(map[string]any); first["vendor_id"] != nil || second["vendor_id"] != "acme" {
+		t.Fatalf("scope order = %v, want generic before vendor-specific", listedPrices)
 	}
 	if listed["next_cursor"] != nil {
 		t.Fatalf("next cursor = %v, want none", listed["next_cursor"])

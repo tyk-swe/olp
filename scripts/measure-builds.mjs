@@ -157,7 +157,7 @@ try {
   }
   const env =
     language === 'rust'
-      // The frozen integration launcher uses <source>/target/debug/olp.
+      // Keep measured Rust artifacts in the disposable source tree.
       ? { CARGO_TARGET_DIR: join(source, 'target') }
       : { GOCACHE: join(scratch, 'cache'), CGO_ENABLED: '1' };
   data.toolchains = Object.fromEntries(

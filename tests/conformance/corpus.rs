@@ -22,10 +22,13 @@ fn visit(directory: &Path, files: &mut Vec<std::path::PathBuf>) {
 }
 
 #[test]
-fn corpus_is_bounded_and_all_json_is_well_formed() {
+fn corpus_is_bounded_and_well_formed() {
     let root = fixture_root();
     let mut files = Vec::new();
     visit(&root, &mut files);
+    // Go's embed package must live beside the files it embeds. It packages the
+    // shared corpus for Go tests but is not itself fixture data.
+    files.retain(|path| path != &root.join("fixtures.go"));
     assert!(!files.is_empty(), "fixture corpus must not be empty");
 
     let allowed_extensions = BTreeSet::from(["json", "sse"]);

@@ -247,11 +247,11 @@ any provider is called. The gateway estimates the tokens the request may use —
 text at four characters per token across messages, tool calls, and tool schemas,
 a flat charge per inline image or media part, plus the largest reply the caller
 allowed (`max_completion_tokens`, `max_tokens`, or `max_output_tokens`, 4096 by
-default, times `n`) — and reserves the key's requests-per-minute,
-tokens-per-minute, and concurrency windows and its cost budgets together. The
-lease is sized by the route's overall deadline; it is the backstop for a replica
-that dies mid-request, not the request deadline. An estimate larger than the
-key's tokens-per-minute limit is refused immediately with
+default, times `n`) — for every attempt the request permits, and reserves the
+key's requests-per-minute, tokens-per-minute, and concurrency windows and its
+cost budgets together. The lease is sized by the route's overall deadline; it
+is the backstop for a replica that dies mid-request, not the request deadline.
+An estimate larger than the key's tokens-per-minute limit is refused immediately with
 `400 request_exceeds_token_limit` rather than sent to retry into a window it can
 never fit.
 

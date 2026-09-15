@@ -150,23 +150,30 @@
   async function save(setting: Setting) {
     if (
       !canEditSettings ||
+      savingKey ||
+      savingPrice ||
       (setting.key === 'auth.local_login_enabled' &&
         !access.can('users.manage'))
     )
       return;
+    const submittedValue = values[setting.key] ?? setting.value;
     savingKey = setting.key;
     status = error = '';
     delete fieldErrors[setting.key];
     try {
       const updated = await updateSetting(
         { ...setting, etag: editEtags[setting.key] ?? setting.etag },
-        values[setting.key] ?? setting.value
+        submittedValue
       );
       queryClient.setQueryData<Setting[]>(settingsKeys.all(), (current) =>
         current?.map((item) => (item.key === updated.key ? updated : item))
       );
-      delete values[setting.key];
-      delete editEtags[setting.key];
+      if ((values[setting.key] ?? setting.value) === submittedValue) {
+        delete values[setting.key];
+        delete editEtags[setting.key];
+      } else {
+        editEtags[setting.key] = updated.etag;
+      }
       status = `${settingLabel(setting.key)} saved.`;
     } catch (cause) {
       if (isEtagMismatch(cause)) conflictKey = setting.key;
@@ -183,25 +190,38 @@
 
   async function addPricing(event: SubmitEvent) {
     event.preventDefault();
-    if (!canEditPricing) return;
+    if (!canEditPricing || savingPrice || savingKey) return;
     error = status = '';
     if (!providerKind || !model.trim() || !operation.trim()) {
       error = 'Provider kind, model, and operation are required.';
       return;
     }
+    const submitted = {
+      providerKind,
+      vendorId,
+      providerId,
+      model,
+      operation,
+      inputPrice,
+      cachedInputPrice,
+      outputPrice,
+      unitPrice,
+      currency,
+      effectiveAt
+    };
     savingPrice = true;
     try {
       const price: PriceDraft = {
-        provider_kind: providerKind,
-        vendor_id: vendorId || null,
-        provider_id: providerId || null,
-        model: model.trim(),
-        operation,
-        input_per_million: optionalDecimal(inputPrice),
-        cached_input_per_million: optionalDecimal(cachedInputPrice),
-        output_per_million: optionalDecimal(outputPrice),
-        unit_price: optionalDecimal(unitPrice),
-        currency: currency.trim().toUpperCase()
+        provider_kind: submitted.providerKind,
+        vendor_id: submitted.vendorId || null,
+        provider_id: submitted.providerId || null,
+        model: submitted.model.trim(),
+        operation: submitted.operation,
+        input_per_million: optionalDecimal(submitted.inputPrice),
+        cached_input_per_million: optionalDecimal(submitted.cachedInputPrice),
+        output_per_million: optionalDecimal(submitted.outputPrice),
+        unit_price: optionalDecimal(submitted.unitPrice),
+        currency: submitted.currency.trim().toUpperCase()
       };
       if (
         !price.input_per_million &&
@@ -209,17 +229,21 @@
         !price.unit_price
       )
         throw new Error('Enter at least one price.');
-      await createPricingRevision(new Date(effectiveAt).toISOString(), [price]);
+      await createPricingRevision(
+        new Date(submitted.effectiveAt).toISOString(),
+        [price]
+      );
       status =
         'Pricing revision created. New usage will use the effective revision.';
-      model =
-        inputPrice =
-        cachedInputPrice =
-        outputPrice =
-        unitPrice =
-        providerId =
-          '';
-      effectiveAt = dateTimeLocalValue(new Date());
+      if (model === submitted.model) model = '';
+      if (inputPrice === submitted.inputPrice) inputPrice = '';
+      if (cachedInputPrice === submitted.cachedInputPrice)
+        cachedInputPrice = '';
+      if (outputPrice === submitted.outputPrice) outputPrice = '';
+      if (unitPrice === submitted.unitPrice) unitPrice = '';
+      if (providerId === submitted.providerId) providerId = '';
+      if (effectiveAt === submitted.effectiveAt)
+        effectiveAt = dateTimeLocalValue(new Date());
       resetCursor(pricingPagination);
       await pricing.refetch();
     } catch (cause) {
@@ -353,7 +377,8 @@
               disabled={!canEditSettings ||
                 (setting.key === 'auth.local_login_enabled' &&
                   !access.can('users.manage')) ||
-                savingKey === setting.key ||
+                Boolean(savingKey) ||
+                savingPrice ||
                 (values[setting.key] ?? setting.value) === setting.value}
               >{savingKey === setting.key ? 'Saving…' : 'Save'}</button
             >{#if fieldProblem}<small
@@ -504,6 +529,7 @@
         type="submit"
         disabled={!canEditPricing ||
           !services.limitsEnforced ||
+          Boolean(savingKey) ||
           savingPrice ||
           !providerKind ||
           providerKinds.isError}

@@ -10,4 +10,4 @@ services:
 
 secrets:
   olp_bootstrap_token:
-    file: ./secrets/olp_bootstrap_token
+    file: "${OLP_COMPOSE_SECRETS_DIR:-./secrets}/olp_bootstrap_token"

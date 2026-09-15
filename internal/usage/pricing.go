@@ -317,7 +317,8 @@ const revisionColumns = `SELECT r.id::text, r.revision, r.effective_at, r.create
     FROM olp_go.pricing_revisions r LEFT JOIN olp_go.prices p ON p.pricing_revision_id = r.id
     WHERE r.id IN (SELECT id FROM olp_go.pricing_revisions
                     WHERE ($1::int IS NULL OR revision < $1) ORDER BY revision DESC LIMIT $2)
-    ORDER BY r.revision DESC, p.provider_kind, p.provider_id NULLS FIRST, p.model, p.operation`
+    ORDER BY r.revision DESC, p.provider_kind, p.provider_id NULLS FIRST, p.model, p.operation,
+        p.vendor_id NULLS FIRST`
 
 // ListRevisions pages revisions newest first, each with its full price list.
 // The cursor is the revision number, which is dense and immutable.

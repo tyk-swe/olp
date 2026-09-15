@@ -431,6 +431,15 @@ pub struct UsageCapture {
 }
 
 impl UsageCapture {
+    /// Records media units known from the validated request before streamed
+    /// token usage arrives. Token frames update only their own dimensions, so
+    /// the unit count remains attached to the final attempt.
+    pub(crate) fn seed_media_units(&mut self, media_units: Decimal) {
+        self.observed = true;
+        self.complete = true;
+        self.media_units = Some(media_units);
+    }
+
     pub(crate) fn record_trace(&self, trace: &AttemptTrace) {
         trace.record_usage(
             self.input_tokens,

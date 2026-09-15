@@ -140,9 +140,9 @@ services:
 
 secrets:
   olp_master_key:
-    file: ./secrets/olp_master_key
+    file: "${OLP_COMPOSE_SECRETS_DIR:-./secrets}/olp_master_key"
   olp_auth_hmac_key:
-    file: ./secrets/olp_auth_hmac_key
+    file: "${OLP_COMPOSE_SECRETS_DIR:-./secrets}/olp_auth_hmac_key"
 
 volumes:
   postgres-data:

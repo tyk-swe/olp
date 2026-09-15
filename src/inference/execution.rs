@@ -35,11 +35,13 @@ use crate::protocols::canonical::identity::OperationKind;
 use crate::protocols::canonical::identity::RequestMetadata;
 use crate::protocols::canonical::identity::Surface;
 use crate::protocols::canonical::identity::TransportMode;
+use crate::protocols::canonical::requests::ImageOperation;
 use crate::protocols::canonical::requests::Operation;
 use crate::protocols::canonical::results::CanonicalResult;
 use crate::runtime::manager::Bundle;
 use crate::usage::emitter::RequestAttemptMetadata;
 use chrono::Utc;
+use rust_decimal::Decimal;
 
 /// Reservation already made by delivery-boundary request admission. The core
 /// uses it to avoid double charging and to reconcile actual token usage.
@@ -113,6 +115,24 @@ struct CompletedExecution {
     context: ExecutionContext,
     success: ExecutionSuccess,
     accounting: RequestLifecycle,
+}
+
+fn streaming_image_units(operation: &Operation, mode: TransportMode) -> Option<Decimal> {
+    if mode != TransportMode::Streaming {
+        return None;
+    }
+    let count = match operation {
+        Operation::Images(ImageOperation::Generation(request)) => request.count.unwrap_or(1),
+        Operation::Images(ImageOperation::Edit(request)) => request
+            .extensions
+            .values
+            .get("/n")
+            .and_then(serde_json::Value::as_u64)
+            .and_then(|value| u16::try_from(value).ok())
+            .unwrap_or(1),
+        _ => return None,
+    };
+    Some(Decimal::from(count))
 }
 
 pub struct RoutedEvents {
@@ -328,6 +348,7 @@ impl Executor {
         mode: TransportMode,
         admission: RequestAdmission,
     ) -> Result<RoutedEvents, InferenceError> {
+        let media_units = streaming_image_units(&operation, mode);
         let CompletedExecution {
             context,
             success,
@@ -358,6 +379,9 @@ impl Executor {
             accounting.finish(RequestOutcome::from_error(&failure));
             return Err(failure);
         };
+        if let Some(media_units) = media_units {
+            accounting.usage_mut().seed_media_units(media_units);
+        }
         Ok(RoutedEvents {
             first,
             events,

@@ -1,9 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
+cd "$(dirname "$0")/.."
 
 # Run only after the initialized `olp` service has been recreated from the
 # base Compose file. The marker prevents the preparation helper from silently
 # generating a new, meaningless token during later maintenance.
+if [[ -n ${OLP_COMPOSE_SECRETS_DIR:-} && $OLP_COMPOSE_SECRETS_DIR != /* ]]; then
+  echo "OLP_COMPOSE_SECRETS_DIR must be an absolute path" >&2
+  exit 2
+fi
 secrets_dir=${OLP_COMPOSE_SECRETS_DIR:-deploy/secrets}
 token="$secrets_dir/olp_bootstrap_token"
 marker="$secrets_dir/.olp_bootstrap_retired"

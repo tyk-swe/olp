@@ -1,8 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
+cd "$(dirname "$0")/.."
 
 # Generate the local Docker Compose secrets exactly once. Existing operator
 # supplied material is preserved, including a versioned master-key keyring.
+if [[ -n ${OLP_COMPOSE_SECRETS_DIR:-} && $OLP_COMPOSE_SECRETS_DIR != /* ]]; then
+  echo "OLP_COMPOSE_SECRETS_DIR must be an absolute path" >&2
+  exit 2
+fi
 secrets_dir=${OLP_COMPOSE_SECRETS_DIR:-deploy/secrets}
 bootstrap_retired_marker="$secrets_dir/.olp_bootstrap_retired"
 command -v openssl >/dev/null || {

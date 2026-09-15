@@ -53,6 +53,7 @@
   let defaultRole = $state('viewer');
   let emailMappings = $state('');
   let groupMappings = $state('');
+  let editVersion = 0;
   let busy = $state('');
   let error = $state('');
   let notice = $state('');
@@ -102,6 +103,7 @@
   });
 
   function touch() {
+    editVersion += 1;
     sync = markDirty(sync);
   }
 
@@ -113,7 +115,7 @@
 
   async function save(event: SubmitEvent) {
     event.preventDefault();
-    if (!canManage) return;
+    if (!canManage || busy) return;
     error = notice = '';
     if (!discoveryUrl || !issuer || !clientId) {
       error = 'Issuer, discovery URL, and client ID are required.';
@@ -135,17 +137,22 @@
         email_role_mappings: parseRoleMappings(emailMappings),
         group_role_mappings: parseRoleMappings(groupMappings)
       };
+      const submittedVersion = editVersion;
+      const submittedClientSecret = clientSecret;
       const etag = sync.snapshotEtag;
       const updated = await putOidcConfiguration(
         input,
         etag && etag !== 'new' ? etag : undefined
       );
-      clientSecret = '';
-      sync = markSaved(updated.etag, false);
+      if (clientSecret === submittedClientSecret) clientSecret = '';
+      sync = markSaved(updated.etag, editVersion !== submittedVersion);
       queryClient.setQueryData(oidcKeys.configuration(), updated);
-      notice = updated.enabled
+      const savedNotice = updated.enabled
         ? 'OIDC configuration validated and enabled.'
         : 'OIDC configuration saved but disabled.';
+      notice = sync.dirty
+        ? `${savedNotice} You have additional unsaved changes.`
+        : savedNotice;
     } catch (cause) {
       if (isEtagMismatch(cause)) sync = markConflict(sync);
       else error = errorMessage(cause);

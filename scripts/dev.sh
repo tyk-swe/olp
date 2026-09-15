@@ -3,9 +3,12 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 docker compose -f deploy/compose.dev.yaml up -d --wait
 source scripts/local-env.sh
+# shellcheck source=scripts/lib/cargo-target-dir.sh
+source scripts/lib/cargo-target-dir.sh
+target_dir=$(cargo_target_dir "$PWD")
 make setup
 cargo build --locked --bin olp
-./target/debug/olp migrate
+"$target_dir/debug/olp" migrate
 
 pids=()
 cleanup() {
@@ -19,7 +22,7 @@ trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
-./target/debug/olp all &
+"$target_dir/debug/olp" all &
 pids+=("$!")
 pnpm --dir console dev --host localhost --port 5173 --strictPort &
 pids+=("$!")

@@ -15,6 +15,12 @@ The helper creates only missing files, preserves operator material, applies
 restrictive permissions, and never copies secrets into the image. Compose runs
 as `1000:1000`; set `OLP_UID` and `OLP_GID` when the host user differs.
 
+To store secrets elsewhere, set `OLP_COMPOSE_SECRETS_DIR` to an absolute path
+for every preparation, retirement, and Docker Compose command. The helpers
+reject relative overrides because shell commands and Compose files resolve
+relative paths from different directories. When unset, the directory remains
+`deploy/secrets`.
+
 3.0 uses a JSON master-key ring and a separate authentication HMAC key. Provision
 new 3.0 storage independently of 2.x. Preserve these files when restoring a 3.0
 backup or rotating keys within an installation.

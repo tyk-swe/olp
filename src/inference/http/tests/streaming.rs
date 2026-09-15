@@ -328,7 +328,7 @@ async fn image_speech_and_transcription_stream_native_sse_and_usage_through_rout
         &state,
         &key,
         "/v1/images/generations",
-        r#"{"model":"default","prompt":"fox","stream":true}"#,
+        r#"{"model":"default","prompt":"fox","stream":true,"n":3}"#,
     )
     .await;
     let body = response_text(response).await;
@@ -337,6 +337,57 @@ async fn image_speech_and_transcription_stream_native_sse_and_usage_through_rout
     let event = request_metadata.recv_next().await.unwrap();
     assert_eq!(event.operation, OperationKind::ImageGeneration);
     assert_eq!(event.input_tokens, Some(4));
+    assert_eq!(event.media_units, Some(rust_decimal::Decimal::from(3)));
+    assert_eq!(
+        event.attempts[0].usage.as_ref().unwrap().media_units,
+        Some(rust_decimal::Decimal::from(3))
+    );
+    assert!(event.usage_complete);
+
+    install_event_stream(
+        &state,
+        OperationKind::ImageEdit,
+        vec![
+            raw_media_event(
+                0,
+                "image_edit.partial_image",
+                json!({"type":"image_edit.partial_image","partial_image_index":0,"b64_json":"YQ=="}),
+            ),
+            raw_media_event(
+                1,
+                "image_edit.completed",
+                json!({"type":"image_edit.completed"}),
+            ),
+            Event::new(2, Kind::Done),
+        ],
+        false,
+    );
+    let response = post_multipart(
+        &state,
+        &key,
+        "/v1/images/edits",
+        multipart(
+            &[
+                ("model", "default"),
+                ("prompt", "make it brighter"),
+                ("stream", "true"),
+                ("n", "2"),
+            ],
+            "image",
+            "image-bytes",
+        ),
+    )
+    .await;
+    let body = response_text(response).await;
+    assert!(body.contains("event: image_edit.partial_image"));
+    assert!(body.contains("event: image_edit.completed"));
+    let event = request_metadata.recv_next().await.unwrap();
+    assert_eq!(event.operation, OperationKind::ImageEdit);
+    assert_eq!(event.media_units, Some(rust_decimal::Decimal::from(2)));
+    assert_eq!(
+        event.attempts[0].usage.as_ref().unwrap().media_units,
+        Some(rust_decimal::Decimal::from(2))
+    );
     assert!(event.usage_complete);
 
     install_event_stream(

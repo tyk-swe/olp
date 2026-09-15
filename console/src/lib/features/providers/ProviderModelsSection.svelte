@@ -116,14 +116,15 @@
 
   async function declareModels() {
     if (!canManage || editingLocked) return;
-    const names = parseManualModelNames(manualModelNames);
+    const submittedModelNames = manualModelNames;
+    const names = parseManualModelNames(submittedModelNames);
     if (!names.length) {
       onError('Enter at least one upstream model identifier.');
       return;
     }
     await run('detail-declare', async () => {
       const updated = await declareProviderModels(current, names);
-      manualModelNames = '';
+      if (manualModelNames === submittedModelNames) manualModelNames = '';
       certificationResults = {};
       await refresh(true);
       await queryClient.invalidateQueries({

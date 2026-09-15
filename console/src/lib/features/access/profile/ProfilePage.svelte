@@ -1,5 +1,6 @@
 <script lang="ts">
   import { profileKeys } from '$lib/features/access/profile/profileKeys';
+  import { userKeys } from '$lib/features/access/users/userKeys';
   import { authLifecycle } from '$lib/features/access/session/lifecycle';
 
   import { onMount } from 'svelte';
@@ -75,6 +76,7 @@
   let reauthenticationError = $state('');
   let enrollmentGrantReady = $state(false);
   let enrollmentGrantExpiry: ReturnType<typeof setTimeout> | undefined;
+  let profileEditVersion = 0;
   let profileSync = $state(initialConcurrentEdit());
   const profileConcurrentNotice = $derived(conflictNotice(profileSync));
   const queryClient = useQueryClient();
@@ -260,6 +262,7 @@
 
   function changeDisplayName(value: string) {
     displayName = value;
+    profileEditVersion += 1;
     profileSync = markDirty(profileSync);
     try {
       validateDisplayName(value);
@@ -271,7 +274,7 @@
 
   async function saveProfile(event: SubmitEvent) {
     event.preventDefault();
-    if (!profile.data) return;
+    if (!profile.data || savingProfile) return;
     let normalizedDisplayName: string;
     try {
       normalizedDisplayName = validateDisplayName(displayName);
@@ -285,13 +288,19 @@
     try {
       if (!profileSync.snapshotEtag)
         throw new Error('Reload your profile before saving.');
+      const submittedVersion = profileEditVersion;
       const updated = await updateProfile(
         { ...profile.data, etag: profileSync.snapshotEtag },
         { display_name: normalizedDisplayName }
       );
-      profileSync = markSaved(updated.etag, false);
+      const hasInterveningEdits = profileEditVersion !== submittedVersion;
+      profileSync = markSaved(updated.etag, hasInterveningEdits);
+      if (!hasInterveningEdits) displayName = updated.display_name;
       queryClient.setQueryData(profileKeys.current(), updated);
-      message = 'Profile updated.';
+      await queryClient.invalidateQueries({ queryKey: userKeys.root });
+      message = hasInterveningEdits
+        ? 'Profile updated. You have additional unsaved changes.'
+        : 'Profile updated.';
       await authLifecycle.validateSession();
     } catch (cause) {
       if (isEtagMismatch(cause)) profileSync = markConflict(profileSync);

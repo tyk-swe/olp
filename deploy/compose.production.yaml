@@ -11,4 +11,4 @@ services:
     mem_limit: 4g
 secrets:
   olp_database_password:
-    file: ./secrets/olp_database_password
+    file: "${OLP_COMPOSE_SECRETS_DIR:-./secrets}/olp_database_password"

@@ -57,9 +57,10 @@
   async function rotate(event: SubmitEvent) {
     event.preventDefault();
     if (!credentialValue || !canManage || editingLocked) return;
+    const submittedCredential = credentialValue;
     await run('rotate-credential', async () => {
-      await rotateProviderCredential(current, credentialValue);
-      credentialValue = '';
+      await rotateProviderCredential(current, submittedCredential);
+      if (credentialValue === submittedCredential) credentialValue = '';
       await credentials.refetch();
       onResetModelPage();
       await onProviderChanged();

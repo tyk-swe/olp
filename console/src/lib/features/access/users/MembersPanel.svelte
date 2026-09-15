@@ -48,10 +48,10 @@
     }
   }
 
-  /** Role changes and deactivation revoke sessions server-side. */
-  async function refreshSessionViews() {
+  /** Role changes and deactivation update the user and revoke sessions. */
+  async function refreshUserViews() {
     await queryClient.invalidateQueries({
-      queryKey: userKeys.sessionsRoot
+      queryKey: userKeys.root
     });
   }
 
@@ -76,7 +76,7 @@
     const saved = await run(`role-${user.id}`, async () => {
       const updated = await updateUser(user, { role });
       updateCachedUser(updated);
-      await refreshSessionViews();
+      await refreshUserViews();
       notice = `${updated.display_name} is now ${updated.role}. Existing sessions were revoked.`;
     });
     if (!saved) select.value = user.role;
@@ -95,7 +95,7 @@
     await run(`active-${user.id}`, async () => {
       const updated = await updateUser(user, { active });
       updateCachedUser(updated);
-      await refreshSessionViews();
+      await refreshUserViews();
       notice = active
         ? `${updated.display_name} can sign in again.`
         : `${updated.display_name} was deactivated and existing sessions were revoked. Next: review API Keys for keys attributed to this member; installation-scoped keys are not automatically revoked.`;
