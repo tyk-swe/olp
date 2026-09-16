@@ -3,7 +3,12 @@
 [Roadmap](README.md) | [Previous: limits and accounting](04-limits-and-accounting.md) |
 [Next: media and console parity](06-media-and-console-parity.md)
 
-**Status:** Not started. **Prerequisites:** M4 complete.
+**Status:** Implemented and qualified on Linux amd64 (2026-09-16).
+**Prerequisites:** M4 complete. Inherits the open M1 native arm64 qualification gate.
+
+[Qualification evidence](evidence/provider-and-routing-parity.md) covers all ten
+tickets, service and SDK contracts, browser journeys, dependency review, and
+five-run build measurements.
 
 Complete the existing non-media compatibility matrix and advanced routing
 workflows. Reuse M3 execution and M4 accounting for each connector so retries,
@@ -13,7 +18,7 @@ limits, privacy, and pricing retain one behavioral implementation.
 
 ### M5-01
 
-- [ ] **Complete shared operations and cross-protocol codecs.**
+- [x] **Complete shared operations and cross-protocol codecs.**
 
 **Depends on:** Milestone prerequisites.
 
@@ -34,7 +39,7 @@ stream sequencing, and existing provider-owned resource restrictions.
 
 ### M5-02
 
-- [ ] **Implement native Anthropic and Gemini connectors and surfaces.**
+- [x] **Implement native Anthropic and Gemini connectors and surfaces.**
 
 **Depends on:** [M5-01](#m5-01).
 
@@ -55,7 +60,7 @@ not make previously unsupported combinations eligible.
 
 ### M5-03
 
-- [ ] **Restore Azure OpenAI and Vertex AI.**
+- [x] **Restore Azure OpenAI and Vertex AI.**
 
 **Depends on:** [M5-01](#m5-01).
 
@@ -76,7 +81,7 @@ multiply the executor's attempt budget or bypass its deadline.
 
 ### M5-04
 
-- [ ] **Restore Bedrock with an explicit dependency budget.**
+- [x] **Restore Bedrock with an explicit dependency budget.**
 
 **Depends on:** [M5-01](#m5-01).
 
@@ -99,7 +104,7 @@ Re-measure backend builds after adding the cloud dependency graph.
 
 ### M5-05
 
-- [ ] **Restore every existing compatible-vendor profile.**
+- [x] **Restore every existing compatible-vendor profile.**
 
 **Depends on:** [M5-01](#m5-01).
 
@@ -120,7 +125,7 @@ OpenAI media support or cross-protocol certification.
 
 ### M5-06
 
-- [ ] **Complete token counting, embeddings, and moderation.**
+- [x] **Complete token counting, embeddings, and moderation.**
 
 **Depends on:** [M5-02](#m5-02), [M5-03](#m5-03), [M5-04](#m5-04), [M5-05](#m5-05).
 
@@ -141,7 +146,7 @@ cannot accidentally grant inference or model-read permissions.
 
 ### M5-07
 
-- [ ] **Restore custom connections and mounted configuration.**
+- [x] **Restore custom connections and mounted configuration.**
 
 **Depends on:** [M5-02](#m5-02), [M5-03](#m5-03), [M5-05](#m5-05).
 
@@ -163,7 +168,7 @@ database-managed configuration obey their existing ownership rules.
 
 ### M5-08
 
-- [ ] **Restore model facts, bulk workflows, and routing policies.**
+- [x] **Restore model facts, bulk workflows, and routing policies.**
 
 **Depends on:** [M5-06](#m5-06), [M5-07](#m5-07).
 
@@ -185,7 +190,7 @@ the raw routing header is never forwarded upstream or persisted.
 
 ### M5-09
 
-- [ ] **Restore advanced selection, cooldowns, and simulation.**
+- [x] **Restore advanced selection, cooldowns, and simulation.**
 
 **Depends on:** [M5-08](#m5-08).
 
@@ -207,7 +212,7 @@ Each real credential attempt consumes the attempt budget.
 
 ### M5-10
 
-- [ ] **Complete provider/routing console workflows and conformance.**
+- [x] **Complete provider/routing console workflows and conformance.**
 
 **Depends on:** [M5-06](#m5-06), [M5-07](#m5-07), [M5-08](#m5-08), [M5-09](#m5-09).
 

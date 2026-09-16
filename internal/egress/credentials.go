@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/textproto"
 	"slices"
+	"strings"
 )
 
 // ApplyCredentialHeaders decodes the secret header values and requires an exact,
@@ -20,7 +21,7 @@ func ApplyCredentialHeaders(header http.Header, names []string, credential []byt
 	}
 	normalized := make(map[string]string, len(values))
 	for name, value := range values {
-		if value == nil {
+		if value == nil || strings.ContainsAny(*value, "\r\n\x00") {
 			return errors.New("Credential header values must be strings.")
 		}
 		name = textproto.CanonicalMIMEHeaderKey(name)

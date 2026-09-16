@@ -374,6 +374,20 @@ describe('provider editor activation policy', () => {
       activationReady({ ...readyDraft, last_probe_at: '2026-07-12T11:59:00Z' })
     ).toBe(false);
     expect(activationReady({ ...readyDraft, state: 'active' })).toBe(false);
+    expect(
+      activationReady({
+        ...readyDraft,
+        state: 'active',
+        pending_activation: true
+      })
+    ).toBe(true);
+    expect(
+      activationReady({
+        ...readyDraft,
+        state: 'disabled',
+        pending_activation: true
+      })
+    ).toBe(false);
     expect(activationReady({ ...readyDraft, state: 'disabled' })).toBe(false);
   });
 

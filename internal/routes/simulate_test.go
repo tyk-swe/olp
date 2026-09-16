@@ -1,10 +1,9 @@
 package routes
 
 import (
-	"testing"
-
 	"github.com/google/uuid"
 	"github.com/tyk-swe/olp/internal/runtime"
+	"testing"
 )
 
 func TestSimulationSkipsUnusableSlotsWithoutConsumingAttempts(t *testing.T) {
@@ -20,21 +19,27 @@ func TestSimulationSkipsUnusableSlotsWithoutConsumingAttempts(t *testing.T) {
 		{"key excluded", runtime.Slot{Enabled: true, CredentialID: &credential, AllowedAPIKeys: []string{uuid.NewString()}}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			snapshot := &runtime.Snapshot{Providers: map[string]runtime.Provider{}, Routes: map[string]runtime.Route{}}
 			first, second := uuid.NewString(), uuid.NewString()
-			targets := []runtime.PublishedTarget{{ID: uuid.NewString(), ProviderModelID: first, Weight: 1}, {ID: uuid.NewString(), ProviderModelID: second, Priority: 1, Weight: 1}}
-			live := map[string]*resolved{}
-			for _, id := range []string{first, second} {
-				live[id] = &resolved{ProviderState: "active", ProviderModel: "model", Published: true, Certified: map[string]bool{"generation/openai/unary": true}, AuthMode: "api_key", Slots: []runtime.Slot{{Enabled: true, CredentialID: &credential}}}
+			targets := []runtime.PublishedTarget{}
+			for i, id := range []string{first, second} {
+				modelID := uuid.NewString()
+				targets = append(targets, runtime.PublishedTarget{ID: uuid.NewString(), ProviderID: id, ProviderModelID: modelID, ProviderModel: "model", Priority: i, Weight: 1})
+				snapshot.Providers[id] = runtime.Provider{ID: id, Kind: "openai", Enabled: true, AuthMode: "api_key", Capabilities: []runtime.Capability{{Model: "model", Operation: "generation", Surface: "openai", Mode: "unary"}}, Slots: []runtime.Slot{{ID: uuid.NewString(), Enabled: true, Weight: 1, CredentialID: &credential}}}
 			}
-			live[first].Slots = []runtime.Slot{tc.slot}
-			order := rank(uuid.NewString(), "route", uuid.NewString(), targets, live, "generation", "openai", "unary", []byte("seed"), 1)
-			if order[0].target.ProviderModelID != second || !order[0].eligible || order[0].attempt != 1 || order[1].eligible || order[1].attempt != 0 || order[1].reason != "no_eligible_credentials" {
-				t.Fatalf("ineligible slot consumed the attempt budget: first=%+v second=%+v", order[0], order[1])
+			p := snapshot.Providers[first]
+			tc.slot.ID = uuid.NewString()
+			p.Slots = []runtime.Slot{tc.slot}
+			snapshot.Providers[first] = p
+			snapshot.Routes["route"] = simulationRoute(uuid.NewString(), "route", []string{"generation"}, 3000, 1, targets)
+			plan, err := runtime.PlanRequest(snapshot, "route", "generation", "openai", "unary", []byte("seed"), runtime.SelectionOptions{KeyID: uuid.NewString(), CheckSlots: true})
+			if err != nil || len(plan.Decisions) != 2 {
+				t.Fatal(plan, err)
+			}
+			order := plan.Decisions
+			if order[0].ProviderID != second || !order[0].Eligible || order[0].Attempt == nil || *order[0].Attempt != 1 || order[1].Eligible || order[1].Attempt != nil || order[1].Reason == nil || *order[1].Reason != "no_eligible_credentials" {
+				t.Fatalf("ineligible slot consumed attempt budget: %+v", order)
 			}
 		})
-	}
-	noAuth := &resolved{AuthMode: "none", Slots: []runtime.Slot{{Enabled: true}}}
-	if !noAuth.hasCredential("route", "") {
-		t.Fatal("no-auth provider requires a credential")
 	}
 }

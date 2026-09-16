@@ -5198,76 +5198,127 @@
         "type": "object"
       },
       "RoutingPreferences": {
-        "allOf": [
-          {
-            "default": {
-              "deny_data_collection": false,
-              "ignore": [],
-              "max_price": null,
-              "only": null,
-              "quantizations": null,
-              "regions": null,
-              "require_parameters": false,
-              "require_zero_data_retention": false
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "deny_data_collection": {
+            "default": false,
+            "type": "boolean"
+          },
+          "ignore": {
+            "default": [],
+            "items": {
+              "type": "string"
             },
+            "type": "array"
+          },
+          "max_price": {
+            "default": null,
             "oneOf": [
               {
-                "$ref": "#/components/schemas/RoutingConstraints"
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/PriceCeiling"
               }
             ]
           },
-          {
-            "properties": {
-              "allow_fallbacks": {
-                "default": null,
-                "type": [
-                  "boolean",
-                  "null"
-                ]
-              },
-              "order": {
-                "default": null,
-                "items": {
-                  "type": "string"
-                },
-                "type": [
-                  "array",
-                  "null"
-                ]
-              },
-              "preferred_max_latency_ms": {
-                "default": null,
-                "format": "int64",
-                "minimum": 0,
-                "type": [
-                  "integer",
-                  "null"
-                ]
-              },
-              "preferred_min_throughput": {
-                "default": null,
-                "format": "int64",
-                "minimum": 0,
-                "type": [
-                  "integer",
-                  "null"
-                ]
-              },
-              "strategy": {
-                "default": null,
-                "oneOf": [
-                  {
-                    "type": "null"
-                  },
-                  {
-                    "$ref": "#/components/schemas/RoutingStrategy"
-                  }
-                ]
-              }
+          "only": {
+            "default": null,
+            "items": {
+              "type": "string"
             },
-            "type": "object"
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "quantizations": {
+            "default": null,
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ],
+            "uniqueItems": true
+          },
+          "regions": {
+            "default": null,
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ],
+            "uniqueItems": true
+          },
+          "require_parameters": {
+            "default": false,
+            "type": "boolean"
+          },
+          "require_zero_data_retention": {
+            "default": false,
+            "type": "boolean"
+          },
+          "allow_fallbacks": {
+            "default": null,
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "order": {
+            "default": null,
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "preferred_max_latency_ms": {
+            "default": null,
+            "format": "int64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "preferred_min_throughput": {
+            "default": null,
+            "format": "int64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "strategy": {
+            "default": null,
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/RoutingStrategy"
+              }
+            ]
+          },
+          "max_attempts": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 1,
+            "maximum": 32767,
+            "description": "Optional request ceiling; cannot exceed the published route budget."
           }
-        ]
+        }
       },
       "RoutingPrice": {
         "properties": {

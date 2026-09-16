@@ -96,6 +96,7 @@ function rejectPayload(response, item, detail) {
 }
 
 function expectedTokenLimit(prompt) {
+  if (prompt === 'Reply with OK.') return 16;
   if (prompt === 'OLP capability probe') return 1;
   if (prompt === 'Connection test') return 16;
   if (prompt === 'Confirm provider pool routing.') return 16;
@@ -113,6 +114,8 @@ function validateTokenLimit(prompt, actualLimit, label) {
 }
 
 function validateResponsesPayload(body) {
+  if (typeof body.input === 'string')
+    return validateTokenLimit(body.input, body.max_output_tokens, 'Responses');
   if (
     !Array.isArray(body.input) ||
     body.input.length !== 1 ||
@@ -143,7 +146,7 @@ function validateChatPayload(body) {
   }
   return validateTokenLimit(
     body.messages[0].content,
-    body.max_completion_tokens,
+    body.max_completion_tokens ?? body.max_tokens,
     'Chat Completions'
   );
 }

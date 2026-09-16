@@ -72,6 +72,8 @@ func accountingEnvelope(t *testing.T) Envelope {
 
 func TestAccountingEventIsAccountable(t *testing.T) {
 	envelope := accountingEnvelope(t)
+	firstOutput := 100 * time.Millisecond
+	envelope.Attempts[1].FirstOutput = &firstOutput
 	event := accountingEvent(envelope)
 	if event == nil {
 		t.Fatal("no event for a served request")
@@ -145,8 +147,7 @@ func TestAccountingEventIsAccountable(t *testing.T) {
 	if routing.Mode == nil || *routing.Mode != "streaming" {
 		t.Fatalf("mode = %v", routing.Mode)
 	}
-	// The first byte the client saw arrived 120ms into a request whose serving
-	// attempt started at 20ms.
+	// Meaningful output is measured independently of protocol setup frames.
 	if routing.FirstOutputMS == nil || *routing.FirstOutputMS != 100 {
 		t.Fatalf("first output = %v", routing.FirstOutputMS)
 	}

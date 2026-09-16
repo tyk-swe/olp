@@ -144,6 +144,14 @@ func (s *Server) activateDraft(r *http.Request) (access.Reply, error) {
 	if _, err = tx.Exec(r.Context(), "INSERT INTO olp_go.route_revisions(id,route_id,revision,slug,operations,overall_timeout_ms,max_attempts,targets,source_draft_id,activated_by) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)", revisionID, routeID, revision, current.Slug, operations, current.OverallTimeoutMS, current.MaxAttempts, targets, current.ID, p.ID); err != nil {
 		return access.Reply{}, err
 	}
+	policy, _, err := loadPolicy(r.Context(), tx, "route-draft", current.ID, false)
+	if err != nil {
+		return access.Reply{}, err
+	}
+	encodedPolicy, _ := json.Marshal(policy)
+	if _, err = tx.Exec(r.Context(), "UPDATE olp_go.route_revisions SET routing_policy=$2 WHERE id=$1", revisionID, encodedPolicy); err != nil {
+		return access.Reply{}, err
+	}
 	if _, err = tx.Exec(r.Context(), "UPDATE olp_go.routes SET latest_revision=$2,latest_revision_id=$3 WHERE id=$1", routeID, revision, revisionID); err != nil {
 		return access.Reply{}, err
 	}
@@ -177,14 +185,15 @@ type revisionRow struct {
 	SourceDraftID    string
 	ActivatedBy      string
 	ActivatedAt      time.Time
+	Policy           *runtime.Policy
 }
 
-const revisionColumns = "v.id::text,v.route_id::text,v.revision,v.slug,v.operations,v.overall_timeout_ms,v.max_attempts,v.targets,v.source_draft_id::text,v.activated_by::text,v.activated_at"
+const revisionColumns = "v.id::text,v.route_id::text,v.revision,v.slug,v.operations,v.overall_timeout_ms,v.max_attempts,v.targets,v.source_draft_id::text,v.activated_by::text,v.activated_at,v.routing_policy"
 
 func scanRevision(row pgx.Row) (*revisionRow, error) {
 	var v revisionRow
-	var operations, targets []byte
-	if err := row.Scan(&v.ID, &v.RouteID, &v.Revision, &v.Slug, &operations, &v.OverallTimeoutMS, &v.MaxAttempts, &targets, &v.SourceDraftID, &v.ActivatedBy, &v.ActivatedAt); err != nil {
+	var operations, targets, policy []byte
+	if err := row.Scan(&v.ID, &v.RouteID, &v.Revision, &v.Slug, &operations, &v.OverallTimeoutMS, &v.MaxAttempts, &targets, &v.SourceDraftID, &v.ActivatedBy, &v.ActivatedAt, &policy); err != nil {
 		return nil, err
 	}
 	if err := json.Unmarshal(operations, &v.Operations); err != nil {
@@ -192,6 +201,11 @@ func scanRevision(row pgx.Row) (*revisionRow, error) {
 	}
 	if err := json.Unmarshal(targets, &v.Targets); err != nil {
 		return nil, err
+	}
+	if len(policy) > 0 {
+		if err := json.Unmarshal(policy, &v.Policy); err != nil {
+			return nil, err
+		}
 	}
 	v.ActivatedAt = v.ActivatedAt.UTC()
 	return &v, nil
@@ -209,7 +223,7 @@ func loadRevision(ctx context.Context, q access.Queryer, routeID, ref string) (*
 }
 
 func (v *revisionRow) json(live map[string]*resolved) map[string]any {
-	return map[string]any{"id": v.ID, "route_id": v.RouteID, "revision": v.Revision, "slug": v.Slug, "overall_timeout_ms": v.OverallTimeoutMS, "max_attempts": v.MaxAttempts, "source_draft_id": v.SourceDraftID, "activated_by": v.ActivatedBy, "activated_at": v.ActivatedAt, "operations": v.Operations, "targets": targetsJSON(v.Targets, live), "routing_policy": defaultPolicy()}
+	return map[string]any{"id": v.ID, "route_id": v.RouteID, "revision": v.Revision, "slug": v.Slug, "overall_timeout_ms": v.OverallTimeoutMS, "max_attempts": v.MaxAttempts, "source_draft_id": v.SourceDraftID, "activated_by": v.ActivatedBy, "activated_at": v.ActivatedAt, "operations": v.Operations, "targets": targetsJSON(v.Targets, live), "routing_policy": policyJSON(v.Policy)}
 }
 
 type routeRow struct {
@@ -234,8 +248,8 @@ const routeColumns = "r.id::text,r.slug,r.created_at,r.latest_revision,u.email,"
 func scanRoute(row pgx.Row) (*routeRow, error) {
 	var r routeRow
 	var v revisionRow
-	var operations, targets []byte
-	if err := row.Scan(&r.ID, &r.Slug, &r.CreatedAt, &r.RevisionCount, &r.CreatedByEmail, &v.ID, &v.RouteID, &v.Revision, &v.Slug, &operations, &v.OverallTimeoutMS, &v.MaxAttempts, &targets, &v.SourceDraftID, &v.ActivatedBy, &v.ActivatedAt); err != nil {
+	var operations, targets, policy []byte
+	if err := row.Scan(&r.ID, &r.Slug, &r.CreatedAt, &r.RevisionCount, &r.CreatedByEmail, &v.ID, &v.RouteID, &v.Revision, &v.Slug, &operations, &v.OverallTimeoutMS, &v.MaxAttempts, &targets, &v.SourceDraftID, &v.ActivatedBy, &v.ActivatedAt, &policy); err != nil {
 		return nil, err
 	}
 	if err := json.Unmarshal(operations, &v.Operations); err != nil {
@@ -243,6 +257,11 @@ func scanRoute(row pgx.Row) (*routeRow, error) {
 	}
 	if err := json.Unmarshal(targets, &v.Targets); err != nil {
 		return nil, err
+	}
+	if len(policy) > 0 {
+		if err := json.Unmarshal(policy, &v.Policy); err != nil {
+			return nil, err
+		}
 	}
 	v.ActivatedAt = v.ActivatedAt.UTC()
 	r.Latest = &v
@@ -431,7 +450,7 @@ func (s *Server) revisionDiff(r *http.Request) (access.Reply, error) {
 		"slug_changed": from.Slug != to.Slug, "timeout_changed": from.OverallTimeoutMS != to.OverallTimeoutMS, "max_attempts_changed": from.MaxAttempts != to.MaxAttempts,
 		"operations_added": opsAdded, "operations_removed": opsRemoved,
 		"targets_added": added, "targets_removed": removed, "targets_changed": changed,
-		"routing_policy_changed": false, "routing_policy_before": defaultPolicy(), "routing_policy_after": defaultPolicy(),
+		"routing_policy_changed": !samePolicy(from.Policy, to.Policy), "routing_policy_before": policyJSON(from.Policy), "routing_policy_after": policyJSON(to.Policy),
 	}), nil
 }
 
@@ -471,6 +490,12 @@ func (s *Server) restoreRevision(r *http.Request) (access.Reply, error) {
 	encoded, _ := json.Marshal(targets)
 	if _, err = tx.Exec(r.Context(), "INSERT INTO olp_go.route_drafts(id,slug,state,operations,overall_timeout_ms,max_attempts,targets,based_on_revision_id,etag,created_by) VALUES($1,$2,'draft',$3,$4,$5,$6,$7,$8,$9)", draftID, v.Slug, operations, v.OverallTimeoutMS, v.MaxAttempts, encoded, v.ID, etag, p.ID); err != nil {
 		return access.Reply{}, err
+	}
+	if v.Policy != nil {
+		policy, _ := json.Marshal(v.Policy)
+		if _, err = tx.Exec(r.Context(), "INSERT INTO olp_go.routing_policies(scope,scope_id,policy,etag,updated_by) VALUES('route-draft',$1,$2,$3,$4)", draftID, policy, etag, p.ID); err != nil {
+			return access.Reply{}, err
+		}
 	}
 	if err = access.Audit(r.Context(), tx, r, p.ID, "route_draft.restore", "route_draft", draftID, "success"); err != nil {
 		return access.Reply{}, err

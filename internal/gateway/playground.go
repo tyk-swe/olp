@@ -7,8 +7,11 @@ import (
 	"time"
 
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/protocols"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
 	"github.com/tyk-swe/olp/internal/routes"
+	"github.com/tyk-swe/olp/internal/runtime"
+	"slices"
 )
 
 // playgroundTimeout bounds one console playground call end to end.
@@ -97,8 +100,8 @@ func (in *playgroundRequest) validate() error {
 		return access.Invalid("model", "model is required")
 	case in.Input == "":
 		return access.Invalid("input", "input is required")
-	case in.Surface != nil && *in.Surface != "openai":
-		return access.Invalid("surface", "only the openai surface is available")
+	case in.Surface != nil && !slices.Contains([]string{"openai", "anthropic", "gemini"}, *in.Surface):
+		return access.Invalid("surface", "surface must be openai, anthropic, or gemini")
 	case in.Temperature != nil && (*in.Temperature < 0 || *in.Temperature > 2):
 		return access.Invalid("temperature", "temperature must be between 0 and 2")
 	case in.MaxOutputTokens != nil && (*in.MaxOutputTokens < 1 || *in.MaxOutputTokens > 1<<20):
@@ -148,14 +151,34 @@ func (p *Playground) handle(r *http.Request) (access.Reply, error) {
 	if err != nil {
 		return access.Reply{}, access.Fail(http.StatusUnprocessableEntity, "validation_failed", err.Error())
 	}
+	family := openai.FamilyChat
+	if in.Surface != nil && (*in.Surface == "anthropic" || *in.Surface == "gemini") {
+		kind := *in.Surface
+		if in.MaxOutputTokens == nil {
+			fields := parsed.Document()
+			fields["max_completion_tokens"] = json.RawMessage("4096")
+			body, _ = json.Marshal(fields)
+			parsed, _ = openai.Parse(openai.FamilyChat, body)
+		}
+		encoded, wire, e := protocols.Encode(parsed, kind, kind, in.Model, nil)
+		if e != nil {
+			return access.Reply{}, access.Invalid("input", e.Error())
+		}
+		parsed, e = protocols.Parse(wire, encoded, in.Model)
+		if e != nil {
+			return access.Reply{}, access.Invalid("input", e.Error())
+		}
+		family = wire
+	}
 	s := p.Gateway
 	x := &execution{
-		request:  request{id: uuidString(), minted: true, clientIP: ClientIP(r, s.cfg.TrustedProxies), startedAt: s.now(), release: s.Runtime.Release()},
-		family:   openai.FamilyChat,
-		parsed:   parsed,
-		actor:    "playground",
-		userID:   principal.ID,
-		affinity: []byte(principal.ID),
+		request:     request{id: uuidString(), minted: true, clientIP: ClientIP(r, s.cfg.TrustedProxies), startedAt: s.now(), release: s.Runtime.Release()},
+		family:      family,
+		preferences: in.Routing,
+		parsed:      parsed,
+		actor:       "playground",
+		userID:      principal.ID,
+		affinity:    []byte(principal.ID),
 	}
 	if e := s.prepare(x, func(string) bool { return true }); e != nil {
 		x.failure = e
@@ -163,7 +186,6 @@ func (p *Playground) handle(r *http.Request) (access.Reply, error) {
 		return access.Reply{}, access.Fail(e.Status, e.Code, e.Message)
 	}
 	x.estimate = requestEstimate(x)
-	x.budget = in.Routing.Budget(x.budget)
 	if !s.admit() {
 		x.failure = overloaded
 		s.finish(x, nil, overloaded.Status)
@@ -191,13 +213,21 @@ func (p *Playground) response(x *execution, out *outcome, in playgroundRequest) 
 	}
 	routing := []map[string]any{}
 	for _, fact := range x.facts {
+		var evidence runtime.Decision
+		for _, decision := range x.decisions {
+			if decision.TargetID == fact.TargetID && decision.CredentialSlotID != nil && *decision.CredentialSlotID == fact.SlotID {
+				evidence = decision
+				break
+			}
+		}
 		routing = append(routing, map[string]any{
-			"target_id":          fact.TargetID,
-			"provider_id":        fact.ProviderID,
-			"upstream_model":     fact.UpstreamModel,
-			"eligible":           true,
-			"priority":           attemptPriority(x, fact.TargetID),
-			"strategy":           "weighted",
+			"target_id":      fact.TargetID,
+			"provider_id":    fact.ProviderID,
+			"upstream_model": fact.UpstreamModel,
+			"eligible":       true,
+			"priority":       attemptPriority(x, fact.TargetID),
+			"strategy":       fact.Strategy,
+			"price":          fact.Price, "vendor_id": fact.VendorID, "performance": evidence.Performance, "metadata_observed_at": evidence.MetadataObservedAt,
 			"attempt":            fact.Ordinal,
 			"credential_slot_id": fact.SlotID,
 			"reason":             fact.Class,

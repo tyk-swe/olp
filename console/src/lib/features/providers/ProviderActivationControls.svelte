@@ -47,6 +47,10 @@
   const queryClient = useQueryClient();
   let referenceConflict = $state('');
   const editingLocked = $derived(providerDisabled(current));
+  const hasDraft = $derived(
+    current.state === 'draft' ||
+      (current.state === 'active' && current.pending_activation)
+  );
 
   // Every action clears the reference conflict, so a later success never
   // renders beside the red banner the previous disable attempt left behind.
@@ -83,7 +87,7 @@
     await runAction('detail-probe', async () => {
       const probe = await probeProvider(current);
       if (!probe.succeeded) throw new Error(probe.detail);
-      onProviderChanged();
+      await onProviderChanged();
       await queryClient.invalidateQueries({
         queryKey: providerKeys.summaries
       });
@@ -140,7 +144,7 @@
   }
 </script>
 
-{#if current.state === 'draft'}
+{#if hasDraft}
   <ol
     class="activation-checklist compact"
     aria-label="Provider activation requirements"
@@ -176,7 +180,7 @@
     disabled={!canManage || Boolean(busy) || !canSave || editingLocked}
     >Save draft</button
   >
-  {#if canManage && current.state === 'draft'}
+  {#if canManage && hasDraft}
     <button
       class="button button-secondary"
       type="button"

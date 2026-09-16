@@ -41,7 +41,7 @@ initial packaging choice. [GLIDE Go documentation](https://github.com/valkey-io/
 | M2 | [Installation, identity, and management](02-access-and-control.md) | M1 | Implemented and qualified on amd64; inherits open M1 arm64 gate |
 | M3 | [Complete OpenAI request path](03-core-gateway.md) | M2 | Implemented and qualified on amd64; inherits open M1 arm64 gate |
 | M4 | [Distributed limits, pricing, and recovery](04-limits-and-accounting.md) | M3 | Implemented and qualified on amd64; inherits open M1 arm64 gate |
-| M5 | [Remaining protocols, providers, and routing](05-provider-and-routing-parity.md) | M4 | Not started |
+| M5 | [Remaining protocols, providers, and routing](05-provider-and-routing-parity.md) | M4 | Implemented and qualified on amd64; inherits open M1 arm64 gate |
 | M6 | [Media and operational completeness](06-media-and-console-parity.md) | M5 | Not started |
 | M7 | [Release qualification and Rust retirement](07-release-and-rust-retirement.md) | M6 | Not started |
 

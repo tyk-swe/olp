@@ -1,33 +1,39 @@
-# Go gateway: providers, routes, keys, and OpenAI inference
+# Go gateway: providers, native protocols, and routing
 
-The Go gateway serves the OpenAI Chat Completions and Responses endpoints, the
-model list, and the console playground against OpenAI and OpenAI-compatible
-connections. Operators configure a connection, certify its models, publish a
-route, and issue a key; SDK clients then use the route slug as the model name.
-Shared limits, accrued-cost budgets, exact pricing, and durable usage
-accounting are enforced and recorded; Anthropic and Gemini surfaces, other
-provider kinds, media, and routing policies arrive later.
-Installation and identity are covered in [Go installation and access
-control](go-access.md).
+The Go gateway serves OpenAI, Anthropic, and Gemini non-media protocols through
+one executor. Operators configure a connection, certify its models, publish a
+route, and issue a key; SDK clients use the route slug as the model name.
+Distributed limits, accrued-cost budgets, exact pricing, durable accounting,
+and policy-constrained routing apply across every surface. Installation and
+identity are covered in [Go installation and access control](go-access.md).
 
 ## What is available
 
-| Area | Available now | Deferred |
-|---|---|---|
-| Surfaces | `POST /v1/chat/completions`, `POST /v1/responses`, `GET /v1/models`, `GET /v1/models/{model}` | `/anthropic/v1/*` and `/gemini/*` return `501` until M5 |
-| Provider kinds | `openai`, `openai_compatible` (`api_key`, `headers`, or `none` authentication) | Other kinds return `422 provider_kind_unavailable` |
-| Operations | `generation` on the `openai` surface, unary and streaming | Other operations return `422 operation_unavailable`; media in M6 |
-| Routing | Priority tiers with deterministic weighted selection, attempt budgets, deadlines | Routing policies read as defaults; writes return `501` until M5 |
-| Limits | Key, connection, and credential-slot request/token/concurrency limits and daily/monthly cost budgets, enforced across replicas through Valkey | `olp_limits_fail_open_total` is counted in process but not exported until the metrics listener in M6 |
-| Accounting | Durable requests and attempts, priced usage facts, request history, usage reports, completeness, pricing revisions, and retention | Media unit prices can be configured, but media operations arrive in M6 |
+| Area | Available now |
+|---|---|
+| OpenAI | Chat Completions, Responses, Responses input counting, embeddings, moderation, and gateway-owned models under `/v1` |
+| Anthropic | Messages, streaming, counting, and gateway-owned models under `/anthropic/v1` |
+| Gemini | Generation, streaming, counting, and gateway-owned models under both `/gemini/v1` and `/gemini/v1beta` |
+| Providers | OpenAI, compatible vendors, Anthropic, Gemini, Azure OpenAI, Vertex AI, and Bedrock; native/cloud authentication and custom endpoints |
+| Routing | Installation, route, key, and request policies; priority/order tiers; weighted, price, latency, and throughput strategies; credential pools and shared previews |
+| Limits | Key, connection, and slot request/token/concurrency limits and daily/monthly accrued-cost budgets across replicas |
+| Accounting | Durable requests/attempts, exact prices, completeness, history/reports, retention, and recovery |
+
+The [compatibility matrix](compatibility.md) specifies certified combinations
+and translation refusals. Media and the remaining observability listener work
+belong to M6. Deterministic SDK/cloud/browser and build evidence is recorded in
+[M5 qualification](roadmap/evidence/provider-and-routing-parity.md).
 
 ## Process modes
 
 `all` serves both the management API and the inference endpoints. `control`
-serves management only and answers `/v1/*` with `404`. `gateway` serves
-inference only; it still needs the database, `OLP_AUTH_HMAC_KEY_FILE`, and
-`OLP_MASTER_KEY_FILE` because it reads key authority and decrypts provider
-credentials itself. `worker` publishes no public listener and runs only the
+serves management only. `gateway` serves inference only and needs the database
+and `OLP_AUTH_HMAC_KEY_FILE` for authority. Database-encrypted provider
+credentials also require `OLP_MASTER_KEY_FILE`. A gateway using
+`OLP_CONNECTOR_CONFIG_FILE` may omit the master key for mounted default-slot
+credentials; enabled named pools require it. Mounted releases must contain the
+published default-slot ID; republish older Go releases before enabling this mode.
+`worker` publishes no public listener and runs only the
 accounting and recovery plane described below, which `all` also runs; an
 installation that serves traffic with `gateway` and `control` needs at least
 one `worker` replica for accounting, budget reconciliation, and retention to
@@ -53,6 +59,7 @@ startup.
 | Variable | Default | Purpose |
 |---|---|---|
 | `OLP_VALKEY_URL` | unset | Shared limits, cooldowns, and the request metadata stream. Required by `worker`; without it a gateway refuses every key or target that carries a limit and records no durable accounting. |
+| `OLP_CONNECTOR_CONFIG_FILE` | unset | Shared providers-list configuration with restricted credential files; preserves published capabilities, quotas, and default-slot restrictions. |
 | `OLP_TRUSTED_PROXY_CIDRS` | empty | Proxies whose `X-Forwarded-For` supplies the client address recorded in diagnostics. |
 | `OLP_PROVIDER_EGRESS_ALLOW_CIDRS` | empty | Destination networks exempt from the non-public egress denylist. |
 | `OLP_PROVIDER_EGRESS_ALLOW_HTTP_HOSTS` | empty | Hostnames or IP literals whose endpoints may use plain HTTP. |
@@ -83,10 +90,11 @@ newer, bounded dial and handshake timeouts, and a 32 KiB header limit.
 ## Provider lifecycle
 
 A provider is created as a draft with its configuration and, unless the
-authentication mode is `none`, a credential. The console wizard then:
+authentication mode is `none`, `adc`, or `default_chain`, a credential. The console wizard then:
 
 1. **Probes** the connection (`POST /providers/{id}/probe`), which lists
-   upstream models with bounded time, concurrency, and body size. Probe results
+   upstream models or proves a configured deployment/model when that vendor
+   has no model-list API, with bounded time, concurrency, and body size. Probe results
    store only a status, a timestamp, and a sanitized detail; upstream bodies
    never enter persistent diagnostics.
 2. **Discovers** models (`POST /providers/{id}/discovery`), either from the
@@ -95,10 +103,11 @@ authentication mode is `none`, a credential. The console wizard then:
 3. **Reviews** capabilities (`PATCH /providers/{id}/models/{model_id}`),
    which records *declared* tuples of operation, surface, and mode.
 4. **Certifies** each model (`POST /providers/{id}/models/{model_id}/certify`),
-   which sends a minimal generation request per tuple and marks the tuples
-   that succeed as *certified*. Each probe has a 15-second budget; the
-   certification request allows 45 seconds for both probes and management
-   work, including saving the evidence. Only certified tuples of enabled
+   which proves each operation/surface/mode tuple and marks successful tuples
+   as *certified*. An OpenAI-surface generation capability proves both Chat
+   and Responses unless the vendor profile explicitly translates Responses
+   through Chat. Each probe has a 15-second budget, within a one-minute
+   model-certification deadline. Only certified tuples of enabled
    models are published to the runtime and are eligible for routes.
 5. **Activates** the draft (`POST /providers/{id}/activate`), which validates
    the configuration, requires current validation for each selectable
@@ -107,7 +116,8 @@ authentication mode is `none`, a credential. The console wizard then:
 
 Draft edits never change serving traffic: they mark the provider as having a
 pending activation, and the runtime keeps using the active revision. Changing
-transport details (kind, authentication mode, endpoint, credential headers)
+transport or semantic details (kind, authentication mode, endpoint, cloud
+addressing, credential headers, parameter defaults, model facts, vendor)
 invalidates certification evidence and slot validation, so tuples must be
 certified again before the next activation. Revisions can be listed, read,
 compared, and restored as a new draft; restoring copies the recorded models
@@ -131,17 +141,20 @@ is activated again. Slot validation
 (`POST /providers/{id}/credential-slots/{slot_id}/validate`) probes every allowed
 enabled model capability with that slot's credential, including unary and
 streaming generation. Model-list access alone does not validate generation
-access. Validation and rotation requests allow 45 seconds overall, with a
-15-second limit per upstream probe.
+access. Applicable-model validation has a one-minute bound, with a 15-second limit
+per upstream probe.
 
 Evidence is tied to the credential version, transport configuration, and
 allowed enabled model capabilities. Changing those inputs requires matching
 validation before activation; edits made during a probe cause its result to
-be rejected. Certifying all required models with the current default
-credential also validates the default slot. Newly added or rotated pool slots
+be rejected. Certification prefers an enabled default slot, then another
+enabled usable slot; its evidence binds the actual selected credential.
+Certifying all applicable models validates that selected slot. Newly added or rotated pool slots
 must be validated separately. Disabled slots and slots with no allowed enabled
 models cannot be selected and do not block activation. Connections using
-`auth_mode: none` do not require credential evidence.
+`auth_mode: none`, `adc`, or `default_chain` do not require stored secrets.
+A disabled default does not prevent an independently validated named slot
+from serving.
 
 Revoking a credential version (`POST /providers/{id}/credentials/{credential_id}/revoke`)
 is authority state: gateways learn about it through the same five-second
@@ -150,7 +163,8 @@ even from retained releases, without waiting for a new provider activation.
 
 ## Routes
 
-Route drafts carry a slug, the allowed operations (`generation`), an overall
+Route drafts carry a slug, allowed operations (default `generation`; explicit
+`token_count`, `embeddings`, and `moderation` are also supported), an overall
 deadline, a maximum attempt count, and ordered targets with priority, weight,
 and per-attempt timeout. Every target must reference a published model with
 certified support for each allowed operation; validation and activation reject
@@ -163,6 +177,33 @@ Revisions can be compared and restored as new drafts. The simulation endpoints
 (`POST /route-drafts/{id}/simulate` and `POST /routing/simulate`) explain the
 deterministic attempt order for a given seed or key without contacting any
 provider.
+
+## Routing policies and evidence
+
+`GET/PUT /api/v3/routing-policies/{scope}/{id}` owns installation (nil UUID),
+route-draft, and API-key policy. Installation/key writes publish immediately;
+route policy stays staged until activation and belongs to the immutable route
+revision. ETags, scope permissions, audit, and idempotency apply.
+
+Hard constraints intersect every scope, including defaults and request:
+provider/vendor allow/ignore lists, regions, quantizations, price ceilings,
+required parameters, data-collection denial, and zero-data-retention evidence.
+Unknown facts fail affirmative requirements. Allowed strategies intersect;
+preference precedence is request, key, route, installation.
+
+Price ordering uses exact decimal M4 rates and pins the selected revision or
+explicit unpriced state. Successful persisted attempts from the last five
+minutes supply latency/throughput after twenty qualifying samples. Streaming
+latency starts at meaningful output; throughput excludes reasoning tokens and
+needs twenty known output counts. Inputs refresh every ten seconds and expire
+after sixty seconds without refresh. Unknown prices/measurements sort last;
+equal or wholly unknown evidence falls back to weighted order.
+
+Both simulators, playground, and execution share this selection engine.
+Preview enumerates credential-slot attempts within the route budget and
+explains constraints, strategy, prices, measurements, and current revocation.
+Live cooldown/capacity can change after preview. See [provider routing](provider-routing.md)
+for exact selector and preference semantics.
 
 ## Runtime publication and authority
 
@@ -181,10 +222,12 @@ requests already admitted keep the snapshot and policy they were pinned to.
 
 ## Request path
 
-Requests authenticate with `Authorization: Bearer <key>`; the key needs the
-`inference` scope for generation and `models_read` for model listing, and a
-route allowlist restricts both. The `model` field must be a published route
-slug; the model list and retrieval expose only routes the key may use.
+Requests authenticate with `Authorization: Bearer <key>`, Anthropic
+`X-Api-Key`, or Gemini `X-Goog-Api-Key` (the Gemini query-key form is also
+accepted). Every inference operation needs `inference`; model reads need
+`models_read`. A route allowlist restricts both. The body model, or Gemini
+URL model, must be a published route slug. Model list/get expose only those
+routes the key may use.
 
 Each request receives an `X-Request-Id` (a client-supplied value is kept when
 it is a safe token), a no-store cache policy, and permissive CORS headers so
@@ -193,27 +236,34 @@ optionally gzip-compressed, and within the JSON body limit before and after
 inflation. Uploads have a 15-second read deadline; incomplete bodies receive
 `408 request_timeout` and release their admission slot. The upload deadline
 ends when the body is read, before the route's inference deadline starts.
-The optional `X-OLP-Routing` header accepts
-`{"strategy":"weighted","max_attempts":N}`; other strategies and preferences
-return `400` until M5.
+The optional `X-OLP-Routing` header accepts one JSON object, for example
+`{"strategy":"price","allow_fallbacks":false,"max_attempts":1}`.
+It can narrow constraints and attempts within published policy, never expand
+access or deadlines. Unknown controls, invalid selectors, and budget increases
+are refused. Raw header values are never forwarded or persisted.
 
-Attempts follow the route's priority tiers and deterministic weighted order,
-seeded by the key so the same key sees a stable order. Each attempt consumes
+Attempts follow priority and preferred-order tiers, then the selected strategy.
+Weighted ties are seeded by the key so the same key sees a stable order. Each attempt consumes
 the budget, uses the target's timeout within the route's overall deadline,
 injects the selected slot's credential, and rewrites the model to the
-upstream identifier while preserving unknown request fields. Failover to the
+upstream identifier. Native calls preserve unknown request fields; translation
+refuses semantic extensions it cannot represent. Failover to the
 next eligible attempt happens only before any response bytes have been sent
 to the client and only for connect, timeout, rate-limit, credential, and
 upstream server failures; upstream client errors, protocol errors, and
 cancellations are terminal. A committed stream never restarts on another
 provider: a later failure is reported in-band as an error event and the
-stream ends without `[DONE]`. Stream forwarding retains no cumulative output or
-tool arguments. Distinct chat-choice tracking is bounded to
-`max(1, OLP_PROVIDER_MAX_EVENT_BYTES / 16)` entries per stream.
+stream ends without a success marker. Translation and native tool validation
+bound retained text/tool state by the event-size limit. Distinct native Chat
+choice tracking is bounded to `max(1, OLP_PROVIDER_MAX_EVENT_BYTES / 16)`
+entries. Bedrock advertised event lengths are checked before SDK allocation,
+and the SDK still verifies event CRCs.
 
 Provider health is tracked per gateway: five counted failures within 30
-seconds open a provider's circuit for 30 seconds, a credential rejection
-cools the slot for 60 seconds, and a rate limit cools it for the upstream
+seconds open a provider's circuit for 30 seconds. One half-open probe may
+proceed; credential-only failure releases it without penalizing siblings.
+A credential rejection cools that credential version for 60 seconds; a rate
+limit cools the logical slot across rotation for the upstream
 `Retry-After` (10 seconds when absent, at most 60 seconds). Client
 cancellation and disconnects close the upstream request and release admission
 once. Unary response writes and individual stream frames have a 30-second
@@ -266,11 +316,11 @@ otherwise the token reservation is reconciled against the usage the upstream
 reported and the concurrency lease is released. Settlement ignores client
 cancellation, so a caller that hangs up still returns its slot.
 
-Rate-limit and credential failures also record a cooldown for the credential
-version and for the slot in Valkey, so other replicas skip a target the upstream
-just rejected instead of each learning it alone. The per-gateway circuit and
-cooldowns described above still apply. An unreadable cooldown is treated as
-absent.
+Credential failures record a version-scoped cooldown in Valkey; rate limits
+record a logical-slot cooldown that survives rotation. Shared cooldown state
+is authoritative when available, and successful credential validation clears
+it. Without shared coordination, the gateway uses its local cooldowns. An
+unreadable shared cooldown is treated as absent.
 
 Cost budgets are accrued-spend, not reserved-spend: daily and monthly windows
 use UTC boundaries and exact decimals, concurrent admitted work can exceed a
@@ -379,14 +429,16 @@ above.
 
 ## Local development and qualification
 
-`make go-check` runs formatting, vet, the Go unit suites (egress corpus,
-OpenAI codecs, runtime selection, and gateway lifecycle scenarios), and the
-console checks. `make go-integration` builds the binary and runs the
-PostgreSQL-backed scenario that walks from an empty installation to SDK
-traffic, the official OpenAI SDK smoke checks against the Go fixture, and the
-browser journeys at the packaged and Vite origins. The integration suites
-include the Valkey limit scenarios, accounting and consumer recovery, and the
-two-replica and two-installation process scenarios; the browser journeys include
-the accounting journey, which prices real gateway traffic and reads back the
-request explorer, usage reports, and a key's accrued spend. Both browser
-journeys use `console/tests/gateway/mock-openai.mjs` as their upstream.
+`make go-check` runs formatting, vet, Go unit/protocol suites, and console
+checks. `make go-integration` builds the binary, runs real PostgreSQL/Valkey
+and process scenarios, exercises all seven connector kinds and every retained
+non-media tuple/refusal, runs the official OpenAI/Anthropic/Google GenAI SDKs,
+and runs Chromium journeys at packaged and Vite origins. Identity and provider
+responses are deterministic local fixtures, not paid cloud qualification.
+
+The browser journeys include accounting plus cloud configuration, bulk model
+certification, grouped routes, credential pools, policy exclusions, preview,
+publication, and playground execution. They use the existing local OpenAI and
+Azure fixtures. [M5 evidence](roadmap/evidence/provider-and-routing-parity.md)
+records pinned SDKs, qualification results, screenshots, and build/dependency
+measurements.

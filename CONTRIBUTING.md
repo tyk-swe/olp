@@ -37,7 +37,7 @@ amd64/arm64 are the supported release platforms. macOS and musl are unqualified.
 | `make go-api` | Generate Go transport types and TypeScript without services |
 | `make go-test` | Unit/protocol fixtures without containers |
 | `make go-check` | gofmt, vet, Go tests, existing console checks |
-| `make go-integration` | Disposable TLS/authenticated services, process modes, SDK metadata, Chromium |
+| `make go-integration` | Disposable TLS/authenticated services, process modes, official SDKs, Chromium |
 | `make go-build` | Native `.local/bin/olp` and `console/build` |
 | `make go-fmt` | Format Go and console source |
 
@@ -49,20 +49,22 @@ ephemeral ports/certificates, and removes containers, networks, and volumes on
 failure. Install Chromium once with
 `pnpm --dir console exec playwright install --with-deps chromium`.
 
-Go supports setup, local/OIDC sign-in, membership, invitations, sessions,
-profiles, keys, settings, and audit. `go-dev` creates missing private secrets in
+Go supports access management, provider and credential pools, immutable route
+publication, OpenAI/Anthropic/Gemini non-media inference, cloud and compatible
+connectors, routing policies and previews, distributed limits, pricing,
+accounting, retention, and recovery. `go-dev` creates missing private secrets in
 `.local/go-secrets`, runs Go migrations, and prints the bootstrap-token file
-location. Use that token once in owner setup. Other product APIs return 501
-until their milestones land; saved key limits and retention policies are not
-enforced yet. Never share Rust installation storage. See
-[Go access operations](docs/go-access.md) for separate database roles, secret
-files, OIDC, and resumable master-key rotation, and the
-[foundation evidence](docs/roadmap/evidence/foundation.md) for architecture gates.
+location. Use that token once in owner setup. Never share Rust installation
+storage. See [Go gateway operations](docs/go-gateway.md),
+[Go access operations](docs/go-access.md), and the
+[M5 evidence](docs/roadmap/evidence/provider-and-routing-parity.md) for the
+qualified surface and remaining platform gates. Media work remains in M6.
 
-Use `OLP_SDK_SMOKE_BACKEND=go tests/sdk-smoke/run.sh node
-tests/sdk-smoke/smoke.mjs --check-metadata` to qualify the SDK launch boundary.
-The same selector reaches the Python launcher. Full SDK inference suites remain
-owned by M3/M5. `OLP_CONSOLE_E2E_BACKEND=go` selects the Go browser launcher before
+Use `OLP_SDK_SMOKE_BACKEND=go tests/sdk-smoke/run.sh` to exercise the pinned
+OpenAI, Anthropic, and Google GenAI JavaScript SDK success and typed-error
+contracts against deterministic local providers. The same backend selector
+reaches the Python launcher. These fixtures do not make paid cloud calls or
+certify a production deployment. `OLP_CONSOLE_E2E_BACKEND=go` selects the Go browser launcher before
 any Cargo lookup. `scripts/go-without-rust.sh <command>` catches accidental Rust
 invocations; native image stages contain no Rust toolchain.
 

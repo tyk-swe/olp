@@ -1,13 +1,19 @@
 // Package providers owns provider connections: configuration drafts, model
 // discovery and certification, credential pools, activation into immutable
-// revisions, and history. Only OpenAI-compatible connections serve in this
-// milestone; other kinds and media stay unavailable rather than pretending.
+// revisions, and history for the non-media connector matrix.
 package providers
+
+import "github.com/tyk-swe/olp/internal/connectors"
 
 // Kind names accepted by the gateway.
 const (
 	KindOpenAI           = "openai"
 	KindOpenAICompatible = "openai_compatible"
+	KindAnthropic        = "anthropic"
+	KindGemini           = "gemini"
+	KindAzure            = "azure_openai"
+	KindVertex           = "vertex_ai"
+	KindBedrock          = "bedrock"
 )
 
 // Auth modes accepted by the gateway.
@@ -146,3 +152,99 @@ func kindByName(name string) *kindCapability {
 }
 
 func ptr[T any](v T) *T { return &v }
+
+func init() {
+	custom := []authCapability{{Mode: AuthAPIKey, Label: "API key", Credential: "required"}, {Mode: AuthHeaders, Label: "Encrypted headers", Credential: "required"}, {Mode: AuthNone, Label: "No credential", Credential: "forbidden"}}
+	kinds[0].AuthModes = custom
+	for _, entry := range []struct{ kind, label string }{{KindAnthropic, "Anthropic"}, {KindGemini, "Google Gemini"}} {
+		kinds = append(kinds, kindCapability{Kind: entry.kind, Label: entry.label, Description: "Native API, including custom endpoints.", DefaultAuthMode: AuthAPIKey, AuthModes: custom, Fields: []fieldCapability{{Field: "endpoint", Label: "Endpoint"}}, Presets: []preset{}})
+	}
+	kinds = append(kinds,
+		kindCapability{Kind: KindAzure, Label: "Azure OpenAI", Description: "Azure deployment API.", DefaultAuthMode: AuthAPIKey, AuthModes: []authCapability{custom[0]}, Fields: []fieldCapability{{Field: "endpoint", Label: "Resource origin", Required: true}, {Field: "deployment", Label: "Deployment", Required: true}, {Field: "api_version", Label: "API version", Required: true}}, Presets: []preset{}},
+		kindCapability{Kind: KindVertex, Label: "Google Vertex AI", Description: "Vertex publisher generation API.", DefaultAuthMode: "adc", AuthModes: []authCapability{{Mode: "adc", Label: "Application default credentials", Credential: "forbidden"}, {Mode: "service_account", Label: "Service account JSON", Credential: "required"}}, Fields: []fieldCapability{{Field: "cloud_project", Label: "Project", Required: true}, {Field: "cloud_region", Label: "Location", Required: true}, {Field: "endpoint", Label: "Endpoint"}}, Presets: []preset{}},
+		kindCapability{Kind: KindBedrock, Label: "Amazon Bedrock", Description: "Converse, ConverseStream and CountTokens.", DefaultAuthMode: "default_chain", AuthModes: []authCapability{{Mode: "default_chain", Label: "AWS credential chain", Credential: "forbidden"}, {Mode: "static", Label: "AWS credential JSON", Credential: "required"}}, Fields: []fieldCapability{{Field: "cloud_region", Label: "Region", Required: true}, {Field: "endpoint", Label: "Endpoint"}}, Presets: []preset{}},
+	)
+	for _, entry := range []struct {
+		id, name, endpoint, docs string
+		discovery                bool
+		operations               []string
+	}{
+		{"deepseek", "DeepSeek", "https://api.deepseek.com/v1", "https://api-docs.deepseek.com", true, []string{"generation"}},
+		{"fireworks", "Fireworks", "https://api.fireworks.ai/inference/v1", "https://docs.fireworks.ai", true, []string{"generation"}},
+		{"deepinfra", "DeepInfra", "https://api.deepinfra.com/v1/openai", "https://deepinfra.com/docs", true, []string{"generation"}},
+		{"huggingface", "Hugging Face", "https://router.huggingface.co/v1", "https://huggingface.co/docs/inference-providers", true, []string{"generation"}},
+		{"perplexity", "Perplexity", "https://api.perplexity.ai", "https://docs.perplexity.ai", false, []string{"generation"}},
+		{"cohere", "Cohere", "https://api.cohere.ai/compatibility/v1", "https://docs.cohere.com", false, []string{"generation", "embeddings"}},
+		{"voyage", "Voyage AI", "https://api.voyageai.com/v1", "https://docs.voyageai.com", false, []string{"embeddings"}},
+	} {
+		kinds[1].Presets = append(kinds[1].Presets, preset{ID: entry.id, Label: entry.name, Description: entry.name + " compatible API.", Endpoint: entry.endpoint, AuthMode: AuthAPIKey, Maintainer: entry.name, DocumentationLabel: entry.name + " API", DocumentationURL: entry.docs})
+		vendors = append(vendors, vendor{ID: entry.id, Name: entry.name, Connector: KindOpenAICompatible, Discovery: entry.discovery, Operations: entry.operations, Authentication: []string{AuthAPIKey, AuthHeaders, AuthNone}, Parameters: generationParameters, DocumentationURL: entry.docs, Endpoint: ptr(entry.endpoint)})
+	}
+	for _, preset := range kinds[1].Presets {
+		found := false
+		for _, v := range vendors {
+			found = found || v.ID == preset.ID
+		}
+		if !found {
+			vendors = append(vendors, vendor{ID: preset.ID, Name: preset.Label, Connector: KindOpenAICompatible, Discovery: true, Operations: []string{"generation"}, Authentication: []string{AuthAPIKey, AuthHeaders, AuthNone}, Parameters: generationParameters, DocumentationURL: preset.DocumentationURL, Endpoint: ptr(preset.Endpoint)})
+		}
+	}
+	for _, entry := range []struct{ id, kind, label, docs string }{{"anthropic", KindAnthropic, "Anthropic", "https://docs.anthropic.com"}, {"google", KindGemini, "Google Gemini", "https://ai.google.dev"}, {"google-vertex", KindVertex, "Google Vertex AI", "https://cloud.google.com/vertex-ai"}, {"amazon-bedrock", KindBedrock, "Amazon Bedrock", "https://docs.aws.amazon.com/bedrock"}, {"azure", KindAzure, "Azure OpenAI", "https://learn.microsoft.com/azure/ai-services/openai"}} {
+		auth := []string{}
+		for _, m := range kindByName(entry.kind).AuthModes {
+			auth = append(auth, m.Mode)
+		}
+		endpoint := connectors.DefaultEndpoint(entry.kind, "", "")
+		var ep *string
+		if entry.kind == KindGemini || entry.kind == KindAnthropic {
+			ep = &endpoint
+		}
+		vendors = append(vendors, vendor{ID: entry.id, Name: entry.label, Connector: entry.kind, Discovery: entry.kind != KindVertex, Operations: []string{"generation", "token_count"}, Authentication: auth, Parameters: generationParameters, DocumentationURL: entry.docs, Endpoint: ep})
+	}
+	vendors[0].Operations = []string{"generation", "embeddings", "token_count", "moderation"}
+	vendors[1].Operations = vendors[0].Operations
+	for i := range vendors {
+		switch vendors[i].ID {
+		case "azure":
+			vendors[i].Operations = []string{"generation", "embeddings", "token_count", "moderation"}
+		case "cohere":
+			vendors[i].Parameters = []string{"temperature", "max_output_tokens", "top_p", "stop", "seed", "tools", "response_format", "encoding_format"}
+		case "voyage":
+			vendors[i].Parameters = []string{"dimensions", "input_type", "truncation", "output_dtype", "encoding_format"}
+		}
+	}
+
+	for _, surface := range []string{"openai", "anthropic", "gemini"} {
+		for _, mode := range []string{"unary", "streaming"} {
+			if surface != "openai" {
+				capabilityOptions = append(capabilityOptions, capabilityInput{Operation: "generation", Surface: surface, Mode: mode})
+			}
+		}
+		capabilityOptions = append(capabilityOptions, capabilityInput{Operation: "token_count", Surface: surface, Mode: "unary"})
+	}
+	for _, operation := range []string{"embeddings", "moderation"} {
+		capabilityOptions = append(capabilityOptions, capabilityInput{Operation: operation, Surface: "openai", Mode: "unary"})
+	}
+}
+func defaultVendor(kind string) string {
+	switch kind {
+	case KindGemini:
+		return "google"
+	case KindVertex:
+		return "google-vertex"
+	case KindBedrock:
+		return "amazon-bedrock"
+	case KindAzure:
+		return "azure"
+	}
+	return kind
+}
+func capabilitiesFor(kind, vendor string) []capabilityInput {
+	out := []capabilityInput{}
+	for _, c := range capabilityOptions {
+		if connectors.Supports(kind, vendor, c.Operation, c.Surface, c.Mode) {
+			out = append(out, c)
+		}
+	}
+	return out
+}

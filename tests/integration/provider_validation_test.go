@@ -112,6 +112,10 @@ func TestSlotValidationProbesAllowedEnabledCapabilities(t *testing.T) {
 			http.Error(w, "generation denied", http.StatusForbidden)
 			return
 		}
+		if r.URL.Path == "/v1/responses" {
+			writeResponsesFixture(w, input.Model, "OK", input.Stream)
+			return
+		}
 		if input.Stream {
 			w.Header().Set("Content-Type", "text/event-stream")
 			io.WriteString(w, "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"OK\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n")
@@ -158,7 +162,7 @@ func TestSlotValidationProbesAllowedEnabledCapabilities(t *testing.T) {
 	mu.Lock()
 	observed := append([]string(nil), probes...)
 	mu.Unlock()
-	if fmt.Sprint(observed) != "[Bearer limited/allowed/false Bearer limited/allowed/true]" {
+	if fmt.Sprint(observed) != "[Bearer limited/allowed/false Bearer limited/allowed/false Bearer limited/allowed/true Bearer limited/allowed/true]" {
 		t.Fatalf("validation did not honor enabled models and restrictions: %v", observed)
 	}
 	detail = h.want(owner, "GET", path, nil, nil, 200)
@@ -260,6 +264,10 @@ func TestCertificationRejectsMalformedUnaryChoices(t *testing.T) {
 					Stream bool `json:"stream"`
 				}
 				json.NewDecoder(r.Body).Decode(&input)
+				if r.URL.Path == "/v1/responses" {
+					writeResponsesFixture(w, vendorModel, "OK", input.Stream)
+					return
+				}
 				if input.Stream {
 					w.Header().Set("Content-Type", "text/event-stream")
 					io.WriteString(w, "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"OK\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n")

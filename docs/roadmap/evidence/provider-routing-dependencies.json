@@ -1,0 +1,1439 @@
+{
+  "generated_at": "2026-09-16T15:22:15.240754+00:00",
+  "go": "go version go1.27.1 linux/amd64",
+  "platform": "linux/amd64",
+  "method": "go list -deps for cmd/olp, internal tests, and the existing oapi-codegen tool; module-graph-only does not imply linked code",
+  "package_counts": {
+    "production": 448,
+    "tests": 505,
+    "tools": 288
+  },
+  "production_module_count": 35,
+  "test_only_module_count": 3,
+  "generator_only_module_count": 15,
+  "module_graph_sha256": "d7a7341eba9495b2681155d8e0f0ebc302f88c11489949851321813b0a9f35cb",
+  "native_dependency": "GLIDE 2.5.2 uses the existing pinned platform archive, CGO and glibc; normal builds do not compile Rust. See foundation dependencies.json for archive provenance and the separate upstream native dependency graph.",
+  "modules": [
+    {
+      "module": "cloud.google.com/go/auth",
+      "version": "v0.23.2",
+      "direct": true,
+      "roles": [
+        "production",
+        "tests"
+      ]
+    },
+    {
+      "module": "cloud.google.com/go/compute/metadata",
+      "version": "v0.9.0",
+      "direct": false,
+      "roles": [
+        "production",
+        "tests"
+      ]
+    },
+    {
+      "module": "github.com/BurntSushi/toml",
+      "version": "v1.3.2",
+      "direct": false,
+      "roles": [
+        "module-graph-only"
+      ]
+    },
+    {
+      "module": "github.com/CloudyKit/fastprinter",
+      "version": "v0.0.0-20200109182630-33d98a066a53",
+      "direct": false,
+      "roles": [
+        "module-graph-only"
+      ]
+    },
+    {
+      "module": "github.com/CloudyKit/jet/v6",
+      "version": "v6.2.0",
+      "direct": false,
+      "roles": [
+        "module-graph-only"
+      ]
+    },
+    {
+      "module": "github.com/Joker/jade",
+      "version": "v1.1.3",
+      "direct": false,
+      "roles": [
+        "module-graph-only"
+      ]
+    },
+    {
+      "module": "github.com/RaveNoX/go-jsoncommentstrip",
+      "version": "v1.0.0",
+      "direct": false,
+      "roles": [
+        "module-graph-only"
+      ]
+    },
+    {
+      "module": "github.com/Shopify/goreferrer",
+      "version": "v0.0.0-20220729165902-8cddb4f5de06",
+      "direct": false,
+      "roles": [
+        "module-graph-only"
+      ]
+    },
+    {
+      "module": "github.com/andybalholm/brotli",
+      "version": "v1.1.0",
+      "direct": false,
+      "roles": [
+        "module-graph-only"
+      ]
+    },
+    {
+      "module": "github.com/apapsch/go-jsonmerge/v2",
+      "version": "v2.0.0",
+      "direct": false,
+      "roles": [
+        "tests"
+      ]
+    },
+    {
+      "module": "github.com/aws/aws-sdk-go-v2",
+      "version": "v1.47.0",
+      "direct": true,
+      "roles": [
+        "production",
+        "tests"
+      ]
+    },
+    {
+      "module": "github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream",
+      "version": "v1.7.20",
+      "direct": true,
+      "roles": [
+        "production",
+        "tests"
+      ]
+    },
+    {
+      "module": "github.com/aws/aws-sdk-go-v2/config",
+      "version": "v1.33.5",
+      "direct": true,
+      "roles": [
+        "production",
+        "tests"
+      ]
+    },
+    {
+      "module": "github.com/aws/aws-sdk-go-v2/credentials",
+      "version": "v1.20.5",
+      "direct": true,
+      "roles": [
+        "production",
+        "tests"
+      ]
+    },
+    {
+      "module": "github.com/aws/aws-sdk-go-v2/feature/ec2/imds",
+      "version": "v1.20.0",
+      "direct": false,
+      "roles": [
+        "production",
+        "tests"
+      ]
+    },
+    {
+      "module": "github.com/aws/aws-sdk-go-v2/internal/configsources",
+      "version": "v1.5.3",
+      "direct": false,
+      "roles": [
+        "production",
+        "tests"
+      ]
+    },
+    {
+      "module": "github.com/aws/aws-sdk-go-v2/internal/endpoints/v2",
+      "version": "v2.8.3",
+      "direct": false,
+      "roles": [
+        "production",
+        "tests"
+      ]
+    },
+    {
+      "module": "github.com/aws/aws-sdk-go-v2/internal/v4a",
+      "version": "v1.5.3",
+      "direct": false,
+      "roles": [
+        "production",
+        "tests"
+      ]
+    },
+    {
+      "module": "github.com/aws/aws-sdk-go-v2/service/bedrock",
+      "version": "v1.73.0",
+      "direct": true,
+      "roles": [
+        "production",
+        "tests"
+      ]
+    },
+    {
+      "module": "github.com/aws/aws-sdk-go-v2/service/bedrockruntime",
+      "version": "v1.63.0",
+      "direct": true,
+      "roles": [
+        "production",
+        "tests"
+      ]
+    },
+    {
+      "module": "github.com/aws/aws-sdk-go-v2/service/internal/accept-encoding",
+      "version": "v1.13.19",
+      "direct": false,
+      "roles": [
+        "production",
+        "tests"
+      ]
+    },
+    {
+      "module": "github.com/aws/aws-sdk-go-v2/service/internal/presigned-url",
+      "version": "v1.14.3",
+      "direct": false,
+      "roles": [
+        "production",
+        "tests"
+      ]
+    },
+    {
+      "module": "github.com/aws/aws-sdk-go-v2/service/signin",
+      "version": "v1.10.0",
+      "direct": false,
+      "roles": [
+        "production",
+        "tests"
+      ]
+    },
+    {
+      "module": "github.com/aws/aws-sdk-go-v2/service/sso",
+      "version": "v1.38.0",
+      "direct": true,
+      "roles": [
+        "production",
+        "tests"
+      ]
+    },
+    {
+      "module": "github.com/aws/aws-sdk-go-v2/service/ssooidc",
+      "version": "v1.43.0",
+      "direct": false,
+      "roles": [
+        "production",
+        "tests"
+      ]
+    },
+    {
+      "module": "github.com/aws/aws-sdk-go-v2/service/sts",
+      "version": "v1.51.0",
+      "direct": false,
+      "roles": [
+        "production",
+        "tests"
+      ]
+    },
+    {
+      "module": "github.com/aws/smithy-go",
+      "version": "v1.28.1",
+      "direct": false,
+      "roles": [
+        "production",
+        "tests"
+      ]
+    },
+    {
+      "module": "github.com/aymerick/douceur",
+      "version": "v0.2.0",
+      "direct": false,
+      "roles": [
+        "module-graph-only"
+      ]
+    },
+    {
+      "module": "github.com/blackwell-systems/gcf-go",
+      "version": "v1.2.2",
+      "direct": false,
+      "roles": [
+        "module-graph-only"
+      ]
+    },
+    {
+      "module": "github.com/bmatcuk/doublestar",
+      "version": "v1.1.1",
+      "direct": false,
+      "roles": [
+        "module-graph-only"
+      ]
+    },
+    {
+      "module": "github.com/bytedance/sonic",
+      "version": "v1.11.6",
+      "direct": false,
+      "roles": [
+        "module-graph-only"
+      ]
+    },
+    {
+      "module": "github.com/bytedance/sonic/loader",
+      "version": "v0.1.1",
+      "direct": false,
+      "roles": [
+        "module-graph-only"
+      ]
+    },
+    {
+      "module": "github.com/cespare/xxhash/v2",
+      "version": "v2.3.0",
+      "direct": false,
+      "roles": [
+        "module-graph-only"
+      ]
+    },
+    {
+      "module": "github.com/chzyer/logex",
+      "version": "v1.1.10",
+      "direct": false,
+      "roles": [
+        "module-graph-only"
+      ]
+    },
+    {
+      "module": "github.com/chzyer/readline",
+      "version": "v0.0.0-20180603132655-2972be24d48e",
+      "direct": false,
+      "roles": [
+        "module-graph-only"
+      ]
+    },
+    {
+      "module": "github.com/chzyer/test",
+      "version": "v0.0.0-20180213035817-a1ea475d72b1",
+      "direct": false,
+      "roles": [
+        "module-graph-only"
+      ]
+    },
+    {
+      "module": "github.com/cloudwego/base64x",
+      "version": "v0.1.4",
+      "direct": false,
+      "roles": [
+        "module-graph-only"
+      ]
+    },
+    {
+      "module": "github.com/cloudwego/iasm",
+      "version": "v0.2.0",
+      "direct": false,
+      "roles": [
+        "module-graph-only"
+      ]
+    },
+    {
+      "module": "github.com/coreos/go-oidc/v3",
+      "version": "v3.21.0",
+      "direct": true,
+      "roles": [
+        "production",
+        "tests"
+      ]
+    },
+    {
+      "module": "github.com/davecgh/go-spew",
+      "version": "v1.1.2-0.20180830191138-d8f796af33cc",
+      "direct": false,
+      "roles": [
+        "module-graph-only"
+      ]
+    },
+    {
+      "module": "github.com/dlclark/regexp2",
+      "version": "v1.11.4",
+      "direct": false,
+      "roles": [
+        "module-graph-only"
+      ]
+    },
+    {
+      "module": "github.com/dprotaso/go-yit",
+      "version": "v0.0.0-20220510233725-9ba8df137936",
+      "direct": false,
+      "roles": [
+        "tools"
+      ]
+    },
+    {
+      "module": "github.com/fatih/structs",
+      "version": "v1.1.0",
+      "direct": false,
+      "roles": [
+        "module-graph-only"
+      ]
+    },
+    {
+      "module": "github.com/felixge/httpsnoop",
+      "version": "v1.0.4",
+      "direct": false,
+      "roles": [
+        "module-graph-only"
+      ]
+    },
+    {
+      "module": "github.com/flosch/pongo2/v4",
+      "version": "v4.0.2",
+      "direct": false,
+      "roles": [
+        "module-graph-only"
+      ]
+    },
+    {
+      "module": "github.com/fsnotify/fsnotify",
+      "version": "v1.4.9",
+      "direct": false,
+      "roles": [
+        "module-graph-only"
+      ]
+    },
+    {
+      "module": "github.com/gabriel-vasile/mimetype",
+      "version": "v1.4.3",
+      "direct": false,
+      "roles": [
+        "module-graph-only"
+      ]
+    },
+    {
+      "module": "github.com/getkin/kin-openapi",
+      "version": "v0.142.0",
+      "direct": false,
+      "roles": [
+        "tools"
+      ]
+    },
+    {
+      "module": "github.com/gin-contrib/sse",
+      "version": "v0.1.0",
+      "direct": false,
+      "roles": [
+        "module-graph-only"
+      ]
+    },
+    {
+      "module": "github.com/gin-gonic/gin",
+      "version": "v1.10.1",
+      "direct": false,
+      "roles": [
+        "module-graph-only"
+      ]
+    },
+    {
+      "module": "github.com/go-jose/go-jose/v4",
+      "version": "v4.1.4",
+      "direct": false,
+      "roles": [
+        "production",
+        "tests"
+      ]
+    },
+    {
+      "module": "github.com/go-logr/logr",
+      "version": "v1.4.3",
+      "direct": false,
+      "roles": [
+        "module-graph-only"
+      ]
+    },
+    {
+      "module": "github.com/go-logr/stdr",
+      "version": "v1.2.2",
+      "direct": false,
+      "roles": [
+        "module-graph-only"
+      ]
+    },
+    {
+      "module": "github.com/go-openapi/jsonpointer",
+      "version": "v0.23.1",
+      "direct": false,
+      "roles": [
+        "tools"
+      ]
+    },
+    {
+      "module": "github.com/go-openapi/swag/jsonname",
+      "version": "v0.26.0",
+      "direct": false,
+      "roles": [
+        "tools"
+      ]
+    },
+    {
+      "module": "github.com/go-openapi/testify/v2",
+      "version": "v2.4.2",
+      "direct": false,
+      "roles": [
+        "module-graph-only"
+      ]
+    },
+    {
+      "module": "github.com/go-playground/locales",
+      "version": "v0.14.1",
+      "direct": false,
+      "roles": [
+        "module-graph-only"
+      ]
+    },
+    {
+      "module": "github.com/go-playground/universal-translator",
+      "version": "v0.18.1",
+      "direct": false,
+      "roles": [
+        "module-graph-only"
+      ]
+    },
+    {
+      "module": "github.com/go-playground/validator/v10",
+      "version": "v10.20.0",
+      "direct": false,
+      "roles": [
+        "module-graph-only"
+      ]
+    },
+    {
+      "module": "github.com/go-task/slim-sprig",
+      "version": "v0.0.0-20210107165309-348f09dbbbc0",
+      "direct": false,
+      "roles": [
+        "module-graph-only"
+      ]
+    },
+    {
+      "module": "github.com/goccy/go-json",
+      "version": "v0.10.2",
+      "direct": false,
+      "roles": [
+        "module-graph-only"
+      ]
+    },
+    {
+      "module": "github.com/golang/protobuf",
+      "version": "v1.5.2",
+      "direct": false,
+      "roles": [
+        "module-graph-only"
+      ]
+    },
+    {
+      "module": "github.com/golang/snappy",
+      "version": "v0.0.4",
+      "direct": false,
+      "roles": [
+        "module-graph-only"
+      ]
+    },
+    {
+      "module": "github.com/gomarkdown/markdown",
+      "version": "v0.0.0-20240328165702-4d01890c35c0",
+      "direct": false,
+      "roles": [
+        "module-graph-only"
+      ]
+    },
+    {
+      "module": "github.com/google/go-cmp",
+      "version": "v0.7.0",
+      "direct": false,
+      "roles": [
+        "module-graph-only"
+      ]
+    },
+    {
+      "module": "github.com/google/go-pkcs11",
+      "version": "v0.3.0",
+      "direct": false,
+      "roles": [
+        "module-graph-only"
+      ]
+    },
+    {
+      "module": "github.com/google/pprof",
+      "version": "v0.0.0-20210407192527-94a9f03dee38",
+      "direct": false,
+      "roles": [
+        "module-graph-only"
+      ]
+    },
+    {
+      "module": "github.com/google/s2a-go",
+      "version": "v0.1.9",
+      "direct": false,
+      "roles": [
+        "module-graph-only"
+      ]
+    },
+    {
+      "module": "github.com/google/uuid",
+      "version": "v1.6.0",
+      "direct": true,
+      "roles": [
+        "production",
+        "tests"
+      ]
+    },
+    {
+      "module": "github.com/googleapis/enterprise-certificate-proxy",
+      "version": "v0.3.17",
+      "direct": false,
+      "roles": [
+        "production",
+        "tests"
+      ]
+    },
+    {
+      "module": "github.com/googleapis/gax-go/v2",
+      "version": "v2.23.0",
+      "direct": false,
+      "roles": [
+        "production",
+        "tests"
+      ]
+    },
+    {
+      "module": "github.com/gorilla/css",
+      "version": "v1.0.0",
+      "direct": false,
+      "roles": [
+        "module-graph-only"
+      ]
+    },
+    {
+      "module": "github.com/gorilla/mux",
+      "version": "v1.8.0",
+      "direct": false,
+      "roles": [
+        "module-graph-only"
+      ]
+    },
+    {
+      "module": "github.com/hpcloud/tail",
+      "version": "v1.0.0",
+      "direct": false,
+      "roles": [
+        "module-graph-only"
+      ]
+    },
+    {
+      "module": "github.com/ianlancetaylor/demangle",
+      "version": "v0.0.0-20200824232613-28f6c0f3b639",
+      "direct": false,
+      "roles": [
+        "module-graph-only"
+      ]
+    },
+    {
+      "module": "github.com/iris-contrib/schema",
+      "version": "v0.0.6",
+      "direct": false,
+      "roles": [
+        "module-graph-only"
+      ]
+    },
+    {
+      "module": "github.com/jackc/pgpassfile",
+      "version": "v1.0.0",
+      "direct": false,
+      "roles": [
+        "production",
+        "tests"
+      ]
+    },
+    {
+      "module": "github.com/jackc/pgservicefile",
+      "version": "v0.0.0-20240606120523-5a60cdf6a761",
+      "direct": false,
+      "roles": [
+        "production",
+        "tests"
+      ]
+    },
+    {
+      "module": "github.com/jackc/pgx/v5",
+      "version": "v5.11.0",
+      "direct": true,
+      "roles": [
+        "production",
+        "tests"
+      ]
+    },
+    {
+      "module": "github.com/jackc/puddle/v2",
+      "version": "v2.2.2",
+      "direct": false,
+      "roles": [
+        "production",
+        "tests"
+      ]
+    },
+    {
+      "module": "github.com/josharian/intern",
+      "version": "v1.0.0",
+      "direct": false,
+      "roles": [
+        "module-graph-only"
+      ]
+    },
+    {
+      "module": "github.com/json-iterator/go",
+      "version": "v1.1.12",
+      "direct": false,
+      "roles": [
+        "module-graph-only"
+      ]
+    },
+    {
+      "module": "github.com/juju/gnuflag",
+      "version": "v0.0.0-20171113085948-2ce1bb71843d",
+      "direct": false,
+      "roles": [
+        "module-graph-only"
+      ]
+    },
+    {
+      "module": "github.com/kataras/blocks",
+      "version": "v0.0.8",
+      "direct": false,
+      "roles": [
+        "module-graph-only"
+      ]
+    },
+    {
+      "module": "github.com/kataras/golog",
+      "version": "v0.1.11",
+      "direct": false,
+      "roles": [
+        "module-graph-only"
+      ]
+    },
+    {
+      "module": "github.com/kataras/iris/v12",
+      "version": "v12.2.11",
+      "direct": false,
+      "roles": [
+        "module-graph-only"
+      ]
+    },
+    {
+      "module": "github.com/kataras/pio",
+      "version": "v0.0.13",
+      "direct": false,
+      "roles": [
+        "module-graph-only"
+      ]
+    },
+    {
+      "module": "github.com/kataras/sitemap",
+      "version": "v0.0.6",
+      "direct": false,
+      "roles": [
+        "module-graph-only"
+      ]
+    },
+    {
+      "module": "github.com/kataras/tunnel",
+      "version": "v0.0.4",
+      "direct": false,
+      "roles": [
+        "module-graph-only"
+      ]
+    },
+    {
+      "module": "github.com/klauspost/compress",
+      "version": "v1.17.7",
+      "direct": false,
+      "roles": [
+        "module-graph-only"
+      ]
+    },
+    {
+      "module": "github.com/klauspost/cpuid/v2",
+      "version": "v2.2.7",
+      "direct": false,
+      "roles": [
+        "module-graph-only"
+      ]
+    },
+    {
+      "module": "github.com/kr/pretty",
+      "version": "v0.3.1",
+      "direct": false,
+      "roles": [
+        "module-graph-only"
+      ]
+    },
+    {
+      "module": "github.com/kr/pty",
+      "version": "v1.1.1",
+      "direct": false,
+      "roles": [
+        "module-graph-only"
+      ]
+    },
+    {
+      "module": "github.com/kr/text",
+      "version": "v0.2.0",
+      "direct": false,
+      "roles": [
+        "module-graph-only"
+      ]
+    },
+    {
+      "module": "github.com/labstack/echo/v4",
+      "version": "v4.15.1",
+      "direct": false,
+      "roles": [
+        "module-graph-only"
+      ]
+    },
+    {
+      "module": "github.com/labstack/gommon",
+      "version": "v0.4.2",
+      "direct": false,
+      "roles": [
+        "module-graph-only"
+      ]
+    },
+    {
+      "module": "github.com/leodido/go-urn",
+      "version": "v1.4.0",
+      "direct": false,
+      "roles": [
+        "module-graph-only"
+      ]
+    },
+    {
+      "module": "github.com/mailgun/raymond/v2",
+      "version": "v2.0.48",
+      "direct": false,
+      "roles": [
+        "module-graph-only"
+      ]
+    },
+    {
+      "module": "github.com/mailru/easyjson",
+      "version": "v0.7.7",
+      "direct": false,
+      "roles": [
+        "module-graph-only"
+      ]
+    },
+    {
+      "module": "github.com/mattn/go-colorable",
+      "version": "v0.1.14",
+      "direct": false,
+      "roles": [
+        "module-graph-only"
+      ]
+    },
+    {
+      "module": "github.com/mattn/go-isatty",
+      "version": "v0.0.20",
+      "direct": false,
+      "roles": [
+        "module-graph-only"
+      ]
+    },
+    {
+      "module": "github.com/microcosm-cc/bluemonday",
+      "version": "v1.0.26",
+      "direct": false,
+      "roles": [
+        "module-graph-only"
+      ]
+    },
+    {
+      "module": "github.com/modern-go/concurrent",
+      "version": "v0.0.0-20180306012644-bacd9c7ef1dd",
+      "direct": false,
+      "roles": [
+        "module-graph-only"
+      ]
+    },
+    {
+      "module": "github.com/modern-go/reflect2",
+      "version": "v1.0.2",
+      "direct": false,
+      "roles": [
+        "module-graph-only"
+      ]
+    },
+    {
+      "module": "github.com/nxadm/tail",
+      "version": "v1.4.8",
+      "direct": false,
+      "roles": [
+        "module-graph-only"
+      ]
+    },
+    {
+      "module": "github.com/oapi-codegen/nullable",
+      "version": "v1.2.0",
+      "direct": true,
+      "roles": [
+        "tests"
+      ]
+    },
+    {
+      "module": "github.com/oapi-codegen/oapi-codegen/v2",
+      "version": "v2.8.0",
+      "direct": false,
+      "roles": [
+        "tools"
+      ]
+    },
+    {
+      "module": "github.com/oapi-codegen/runtime",
+      "version": "v1.7.0",
+      "direct": true,
+      "roles": [
+        "tests"
+      ]
+    },
+    {
+      "module": "github.com/oasdiff/yaml",
+      "version": "v0.1.1",
+      "direct": false,
+      "roles": [
+        "tools"
+      ]
+    },
+    {
+      "module": "github.com/oasdiff/yaml3",
+      "version": "v0.0.14",
+      "direct": false,
+      "roles": [
+        "tools"
+      ]
+    },
+    {
+      "module": "github.com/onsi/ginkgo",
+      "version": "v1.16.4",
+      "direct": false,
+      "roles": [
+        "module-graph-only"
+      ]
+    },
+    {
+      "module": "github.com/onsi/ginkgo/v2",
+      "version": "v2.1.3",
+      "direct": false,
+      "roles": [
+        "module-graph-only"
+      ]
+    },
+    {
+      "module": "github.com/onsi/gomega",
+      "version": "v1.19.0",
+      "direct": false,
+      "roles": [
+        "module-graph-only"
+      ]
+    },
+    {
+      "module": "github.com/pelletier/go-toml/v2",
+      "version": "v2.2.2",
+      "direct": false,
+      "roles": [
+        "module-graph-only"
+      ]
+    },
+    {
+      "module": "github.com/pmezard/go-difflib",
+      "version": "v1.0.1-0.20181226105442-5d4384ee4fb2",
+      "direct": false,
+      "roles": [
+        "module-graph-only"
+      ]
+    },
+    {
+      "module": "github.com/rogpeppe/go-internal",
+      "version": "v1.14.1",
+      "direct": false,
+      "roles": [
+        "module-graph-only"
+      ]
+    },
+    {
+      "module": "github.com/russross/blackfriday/v2",
+      "version": "v2.1.0",
+      "direct": false,
+      "roles": [
+        "module-graph-only"
+      ]
+    },
+    {
+      "module": "github.com/santhosh-tekuri/jsonschema/v6",
+      "version": "v6.0.2",
+      "direct": true,
+      "roles": [
+        "tools"
+      ]
+    },
+    {
+      "module": "github.com/schollz/closestmatch",
+      "version": "v2.1.0+incompatible",
+      "direct": false,
+      "roles": [
+        "module-graph-only"
+      ]
+    },
+    {
+      "module": "github.com/sergi/go-diff",
+      "version": "v1.1.0",
+      "direct": false,
+      "roles": [
+        "module-graph-only"
+      ]
+    },
+    {
+      "module": "github.com/sirupsen/logrus",
+      "version": "v1.9.1",
+      "direct": false,
+      "roles": [
+        "module-graph-only"
+      ]
+    },
+    {
+      "module": "github.com/speakeasy-api/jsonpath",
+      "version": "v0.6.3",
+      "direct": false,
+      "roles": [
+        "tools"
+      ]
+    },
+    {
+      "module": "github.com/speakeasy-api/openapi",
+      "version": "v1.24.0",
+      "direct": false,
+      "roles": [
+        "tools"
+      ]
+    },
+    {
+      "module": "github.com/spkg/bom",
+      "version": "v0.0.0-20160624110644-59b7046e48ad",
+      "direct": false,
+      "roles": [
+        "module-graph-only"
+      ]
+    },
+    {
+      "module": "github.com/stretchr/objx",
+      "version": "v0.1.0",
+      "direct": false,
+      "roles": [
+        "module-graph-only"
+      ]
+    },
+    {
+      "module": "github.com/stretchr/testify",
+      "version": "v1.11.1",
+      "direct": false,
+      "roles": [
+        "module-graph-only"
+      ]
+    },
+    {
+      "module": "github.com/tdewolff/minify/v2",
+      "version": "v2.20.19",
+      "direct": false,
+      "roles": [
+        "module-graph-only"
+      ]
+    },
+    {
+      "module": "github.com/tdewolff/parse/v2",
+      "version": "v2.7.12",
+      "direct": false,
+      "roles": [
+        "module-graph-only"
+      ]
+    },
+    {
+      "module": "github.com/twitchyliquid64/golang-asm",
+      "version": "v0.15.1",
+      "direct": false,
+      "roles": [
+        "module-graph-only"
+      ]
+    },
+    {
+      "module": "github.com/ugorji/go/codec",
+      "version": "v1.2.12",
+      "direct": false,
+      "roles": [
+        "module-graph-only"
+      ]
+    },
+    {
+      "module": "github.com/valkey-io/valkey-glide/go/v2",
+      "version": "v2.5.2",
+      "direct": true,
+      "roles": [
+        "production",
+        "tests"
+      ]
+    },
+    {
+      "module": "github.com/valyala/bytebufferpool",
+      "version": "v1.0.0",
+      "direct": false,
+      "roles": [
+        "module-graph-only"
+      ]
+    },
+    {
+      "module": "github.com/valyala/fasttemplate",
+      "version": "v1.2.2",
+      "direct": false,
+      "roles": [
+        "module-graph-only"
+      ]
+    },
+    {
+      "module": "github.com/vmihailenco/msgpack/v5",
+      "version": "v5.4.1",
+      "direct": false,
+      "roles": [
+        "module-graph-only"
+      ]
+    },
+    {
+      "module": "github.com/vmihailenco/tagparser/v2",
+      "version": "v2.0.0",
+      "direct": false,
+      "roles": [
+        "module-graph-only"
+      ]
+    },
+    {
+      "module": "github.com/vmware-labs/yaml-jsonpath",
+      "version": "v0.3.2",
+      "direct": false,
+      "roles": [
+        "tools"
+      ]
+    },
+    {
+      "module": "github.com/yosssi/ace",
+      "version": "v0.0.5",
+      "direct": false,
+      "roles": [
+        "module-graph-only"
+      ]
+    },
+    {
+      "module": "github.com/yuin/goldmark",
+      "version": "v1.4.13",
+      "direct": false,
+      "roles": [
+        "module-graph-only"
+      ]
+    },
+    {
+      "module": "go.opentelemetry.io/auto/sdk",
+      "version": "v1.2.1",
+      "direct": false,
+      "roles": [
+        "module-graph-only"
+      ]
+    },
+    {
+      "module": "go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc",
+      "version": "v0.67.0",
+      "direct": false,
+      "roles": [
+        "module-graph-only"
+      ]
+    },
+    {
+      "module": "go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp",
+      "version": "v0.67.0",
+      "direct": false,
+      "roles": [
+        "module-graph-only"
+      ]
+    },
+    {
+      "module": "go.opentelemetry.io/otel",
+      "version": "v1.44.0",
+      "direct": false,
+      "roles": [
+        "module-graph-only"
+      ]
+    },
+    {
+      "module": "go.opentelemetry.io/otel/metric",
+      "version": "v1.44.0",
+      "direct": false,
+      "roles": [
+        "module-graph-only"
+      ]
+    },
+    {
+      "module": "go.opentelemetry.io/otel/sdk",
+      "version": "v1.44.0",
+      "direct": false,
+      "roles": [
+        "module-graph-only"
+      ]
+    },
+    {
+      "module": "go.opentelemetry.io/otel/sdk/metric",
+      "version": "v1.44.0",
+      "direct": false,
+      "roles": [
+        "module-graph-only"
+      ]
+    },
+    {
+      "module": "go.opentelemetry.io/otel/trace",
+      "version": "v1.44.0",
+      "direct": false,
+      "roles": [
+        "module-graph-only"
+      ]
+    },
+    {
+      "module": "go.yaml.in/yaml/v3",
+      "version": "v3.0.4",
+      "direct": false,
+      "roles": [
+        "tools"
+      ]
+    },
+    {
+      "module": "golang.org/x/arch",
+      "version": "v0.8.0",
+      "direct": false,
+      "roles": [
+        "module-graph-only"
+      ]
+    },
+    {
+      "module": "golang.org/x/crypto",
+      "version": "v0.57.0",
+      "direct": true,
+      "roles": [
+        "production",
+        "tests"
+      ]
+    },
+    {
+      "module": "golang.org/x/exp",
+      "version": "v0.0.0-20240404231335-c0f41cb1a7a0",
+      "direct": false,
+      "roles": [
+        "module-graph-only"
+      ]
+    },
+    {
+      "module": "golang.org/x/mod",
+      "version": "v0.41.0",
+      "direct": false,
+      "roles": [
+        "tools"
+      ]
+    },
+    {
+      "module": "golang.org/x/net",
+      "version": "v0.58.0",
+      "direct": false,
+      "roles": [
+        "module-graph-only"
+      ]
+    },
+    {
+      "module": "golang.org/x/oauth2",
+      "version": "v0.37.0",
+      "direct": true,
+      "roles": [
+        "production",
+        "tests"
+      ]
+    },
+    {
+      "module": "golang.org/x/sync",
+      "version": "v0.23.0",
+      "direct": false,
+      "roles": [
+        "production",
+        "tests",
+        "tools"
+      ]
+    },
+    {
+      "module": "golang.org/x/sys",
+      "version": "v0.48.0",
+      "direct": false,
+      "roles": [
+        "production",
+        "tests"
+      ]
+    },
+    {
+      "module": "golang.org/x/telemetry",
+      "version": "v0.0.0-20260811182544-a038080d80e5",
+      "direct": false,
+      "roles": [
+        "module-graph-only"
+      ]
+    },
+    {
+      "module": "golang.org/x/term",
+      "version": "v0.46.0",
+      "direct": false,
+      "roles": [
+        "module-graph-only"
+      ]
+    },
+    {
+      "module": "golang.org/x/text",
+      "version": "v0.42.0",
+      "direct": false,
+      "roles": [
+        "production",
+        "tests",
+        "tools"
+      ]
+    },
+    {
+      "module": "golang.org/x/time",
+      "version": "v0.15.0",
+      "direct": false,
+      "roles": [
+        "module-graph-only"
+      ]
+    },
+    {
+      "module": "golang.org/x/tools",
+      "version": "v0.49.0",
+      "direct": false,
+      "roles": [
+        "tools"
+      ]
+    },
+    {
+      "module": "golang.org/x/xerrors",
+      "version": "v0.0.0-20200804184101-5ec99f83aff1",
+      "direct": false,
+      "roles": [
+        "module-graph-only"
+      ]
+    },
+    {
+      "module": "google.golang.org/api",
+      "version": "v0.287.1",
+      "direct": false,
+      "roles": [
+        "module-graph-only"
+      ]
+    },
+    {
+      "module": "google.golang.org/genproto",
+      "version": "v0.0.0-20260319201613-d00831a3d3e7",
+      "direct": false,
+      "roles": [
+        "module-graph-only"
+      ]
+    },
+    {
+      "module": "google.golang.org/genproto/googleapis/api",
+      "version": "v0.0.0-20260630182238-925bb5da69e7",
+      "direct": false,
+      "roles": [
+        "module-graph-only"
+      ]
+    },
+    {
+      "module": "google.golang.org/genproto/googleapis/rpc",
+      "version": "v0.0.0-20260630182238-925bb5da69e7",
+      "direct": false,
+      "roles": [
+        "module-graph-only"
+      ]
+    },
+    {
+      "module": "google.golang.org/grpc",
+      "version": "v1.82.1",
+      "direct": false,
+      "roles": [
+        "module-graph-only"
+      ]
+    },
+    {
+      "module": "google.golang.org/protobuf",
+      "version": "v1.36.11",
+      "direct": false,
+      "roles": [
+        "production",
+        "tests"
+      ]
+    },
+    {
+      "module": "gopkg.in/check.v1",
+      "version": "v1.0.0-20201130134442-10cb98267c6c",
+      "direct": false,
+      "roles": [
+        "module-graph-only"
+      ]
+    },
+    {
+      "module": "gopkg.in/fsnotify.v1",
+      "version": "v1.4.7",
+      "direct": false,
+      "roles": [
+        "module-graph-only"
+      ]
+    },
+    {
+      "module": "gopkg.in/ini.v1",
+      "version": "v1.67.0",
+      "direct": false,
+      "roles": [
+        "module-graph-only"
+      ]
+    },
+    {
+      "module": "gopkg.in/tomb.v1",
+      "version": "v1.0.0-20141024135613-dd632973f1e7",
+      "direct": false,
+      "roles": [
+        "module-graph-only"
+      ]
+    },
+    {
+      "module": "gopkg.in/yaml.v2",
+      "version": "v2.4.0",
+      "direct": false,
+      "roles": [
+        "module-graph-only"
+      ]
+    },
+    {
+      "module": "gopkg.in/yaml.v3",
+      "version": "v3.0.1",
+      "direct": false,
+      "roles": [
+        "tools"
+      ]
+    }
+  ]
+}

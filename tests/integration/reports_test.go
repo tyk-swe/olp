@@ -322,6 +322,7 @@ func repSeedReports(f *repFixture) {
 	clean := access.NewID()
 	f.request(repRequest{ID: clean, StartedAt: base.Add(4 * time.Hour), Route: "gamma",
 		Operation: "generation", Surface: "openai", StatusCode: repInt(200), AttemptCount: 1})
+	f.attempt(repAttempt{RequestID: clean, StartedAt: base.Add(4 * time.Hour), Ordinal: 1, ProviderID: f.P1, Model: "m3", Committed: true, StatusCode: repInt(200)})
 	f.fact(repFact{RequestID: clean, StartedAt: base.Add(4 * time.Hour), Ordinal: 1,
 		ObservedAt: base.Add(4*time.Hour + 15*time.Minute), Route: "gamma", ProviderID: f.P1,
 		Model: "m3", Operation: "generation", Surface: "openai", Charge: "billable",

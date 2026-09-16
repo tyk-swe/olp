@@ -31,6 +31,7 @@ type providerHealth struct {
 	failures     int
 	firstFailure time.Time
 	openUntil    time.Time
+	probing      bool
 	cooldowns    map[string]time.Time
 }
 
@@ -56,7 +57,8 @@ func (h *healthTracker) provider(id string) *providerHealth {
 func (h *healthTracker) open(providerID string) bool {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	return h.now().Before(h.provider(providerID).openUntil)
+	p := h.provider(providerID)
+	return p.probing || h.now().Before(p.openUntil)
 }
 
 // coolingDown reports whether a credential slot is paused after a failure.
@@ -90,6 +92,8 @@ func (h *healthTracker) record(providerID string, fact AttemptFact) {
 	defer h.mu.Unlock()
 	now := h.now()
 	p := h.provider(providerID)
+	wasProbe := p.probing
+	p.probing = false
 	p.last = now
 	minute := now.Unix() / 60
 	b := p.buckets[minute]
@@ -108,6 +112,7 @@ func (h *healthTracker) record(providerID string, fact AttemptFact) {
 	case "success":
 		b.successes++
 		p.failures = 0
+		p.openUntil = time.Time{}
 		return
 	case "rate_limit":
 		b.rateLimits++
@@ -117,6 +122,11 @@ func (h *healthTracker) record(providerID string, fact AttemptFact) {
 	case "connect", "timeout", "protocol":
 		b.transportErrors++
 	default:
+		return
+	}
+	if wasProbe {
+		p.openUntil = now.Add(circuitOpenFor)
+		p.failures = 0
 		return
 	}
 	if p.failures == 0 || now.Sub(p.firstFailure) > circuitWindow {
@@ -156,4 +166,19 @@ func (h *healthTracker) ProviderHealth(window time.Duration) map[string]provider
 		}
 	}
 	return out
+}
+
+// claim reserves the one half-open endpoint probe. Credential-only outcomes
+// release it in record without charging an endpoint failure.
+func (h *healthTracker) claim(id string) bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	p := h.provider(id)
+	if p.probing || h.now().Before(p.openUntil) {
+		return false
+	}
+	if !p.openUntil.IsZero() {
+		p.probing = true
+	}
+	return true
 }

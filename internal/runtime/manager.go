@@ -17,6 +17,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/secrets"
+	"github.com/tyk-swe/olp/internal/usage"
 )
 
 // Production guarantees: authority is polled every five seconds and a read
@@ -93,12 +94,14 @@ type Manager struct {
 	installation string
 	auth         *secrets.AuthKey
 	keys         *secrets.KeyRing
+	Mounted      map[string]MountedProvider
 	log          *slog.Logger
 
 	mu        sync.RWMutex
 	authority authorityState
 	release   *Release
 	failed    int64
+	inputs    *usage.RoutingInputs
 
 	stop chan struct{}
 	wg   sync.WaitGroup
@@ -163,7 +166,7 @@ func (m *Manager) Stop() {
 func (m *Manager) Refresh(ctx context.Context) error {
 	ctx, cancel := context.WithTimeout(ctx, PollInterval)
 	defer cancel()
-	return errors.Join(m.refreshAuthority(ctx), m.refreshRelease(ctx))
+	return errors.Join(m.refreshAuthority(ctx), m.refreshRelease(ctx), m.refreshInputs(ctx))
 }
 
 func (m *Manager) refreshAuthority(ctx context.Context) error {
@@ -289,6 +292,14 @@ func (m *Manager) install(ctx context.Context, id string, sequence int64, digest
 		return nil, errors.New("snapshot digest mismatch")
 	}
 	release := &Release{ID: id, Sequence: sequence, Digest: digest, Snapshot: snapshot, InstalledAt: time.Now(), credentials: map[string][]byte{}}
+	if m.keys == nil {
+		credentials, err := installMounted(snapshot, m.Mounted)
+		if err != nil {
+			return nil, err
+		}
+		release.credentials = credentials
+		return release, nil
+	}
 	tx, err := m.pool.BeginTx(ctx, pgx.TxOptions{AccessMode: pgx.ReadOnly})
 	if err != nil {
 		return nil, err
@@ -356,4 +367,25 @@ func (m *Manager) Authority() AuthorityStatus {
 	defer m.mu.RUnlock()
 	a := m.authority
 	return AuthorityStatus{Loaded: a.loaded, ID: a.id, Sequence: a.sequence, ReadAt: a.readAt, Stale: !a.loaded || time.Since(a.readAt) > AuthorityStaleAfter}
+}
+
+func (m *Manager) RoutingInputs() *usage.RoutingInputs {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.inputs
+}
+func (m *Manager) refreshInputs(ctx context.Context) error {
+	now := time.Now()
+	current := m.RoutingInputs()
+	if current != nil && now.Sub(current.RefreshedAt) < usage.RoutingRefreshInterval {
+		return nil
+	}
+	inputs, err := usage.LoadRoutingInputs(ctx, m.pool, now)
+	if err != nil {
+		return fmt.Errorf("routing measurements: %w", err)
+	}
+	m.mu.Lock()
+	m.inputs = inputs
+	m.mu.Unlock()
+	return nil
 }

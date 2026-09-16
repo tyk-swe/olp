@@ -148,7 +148,7 @@ export async function verifyProviderRouting(page: Page, info: TestInfo) {
   await page.goto(`/providers/${providerId}`);
   const defaultSlot = pool
     .getByRole('listitem')
-    .filter({ has: page.getByText('Default', { exact: true }) });
+    .filter({ has: page.getByText(/^default$/i) });
   await defaultSlot.getByRole('button', { name: 'Edit / rotate' }).click();
   await pool
     .getByLabel('Credential', { exact: true })

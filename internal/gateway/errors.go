@@ -64,7 +64,8 @@ func (e *Error) body() []byte {
 	return data
 }
 
-func writeError(w http.ResponseWriter, e *Error) {
+func writeError(w http.ResponseWriter, e *Error) { writeSurfaceError(w, e, "openai") }
+func writeSurfaceError(w http.ResponseWriter, e *Error, surface string) {
 	http.NewResponseController(w).SetWriteDeadline(time.Now().Add(responseWriteTimeout))
 	h := w.Header()
 	h.Set("Content-Type", "application/json")
@@ -72,7 +73,7 @@ func writeError(w http.ResponseWriter, e *Error) {
 		h.Set("Retry-After", strconv.FormatInt(int64(math.Ceil(e.RetryAfter.Seconds())), 10))
 	}
 	w.WriteHeader(e.Status)
-	w.Write(e.body())
+	w.Write(e.surfaceBody(surface))
 }
 
 func invalidRequest(code, message string, param *string) *Error {
@@ -105,4 +106,46 @@ var overloaded = &Error{
 	Code:       "request_admission_overloaded",
 	Message:    "The gateway is at its in-flight request limit. Retry shortly.",
 	RetryAfter: time.Second,
+}
+
+func (e *Error) surfaceBody(surface string) []byte {
+	if surface == "anthropic" {
+		kind := e.Type
+		switch e.Status {
+		case 404:
+			kind = "not_found_error"
+		case 413:
+			kind = "request_too_large"
+		case 429:
+			kind = "rate_limit_error"
+		case 500, 502, 504:
+			kind = "api_error"
+		case 503:
+			kind = "overloaded_error"
+		}
+		b, _ := json.Marshal(map[string]any{"type": "error", "error": map[string]string{"type": kind, "message": e.Message}})
+		return b
+	}
+	if surface == "gemini" {
+		status := "INTERNAL"
+		switch e.Status {
+		case 400, 413, 415, 422:
+			status = "INVALID_ARGUMENT"
+		case 401:
+			status = "UNAUTHENTICATED"
+		case 403:
+			status = "PERMISSION_DENIED"
+		case 404:
+			status = "NOT_FOUND"
+		case 429:
+			status = "RESOURCE_EXHAUSTED"
+		case 503:
+			status = "UNAVAILABLE"
+		case 504:
+			status = "DEADLINE_EXCEEDED"
+		}
+		b, _ := json.Marshal(map[string]any{"error": map[string]any{"code": e.Status, "message": e.Message, "status": status}})
+		return b
+	}
+	return e.body()
 }

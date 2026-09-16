@@ -41,6 +41,7 @@ type Config struct {
 	AuthHMACKeyFile         string
 	BootstrapTokenFile      string
 	MasterKeyFile           string
+	ConnectorConfigFile     string
 	RuntimeDatabaseRole     string
 	LogLevel                slog.Level
 	RequestTimeout          time.Duration
@@ -84,6 +85,7 @@ func Parse(args []string, getenv func(string) string, output io.Writer) (Config,
 	f.StringVar(&c.ConsoleDir, "console-dir", "console/build", "static console directory")
 	f.StringVar(&c.AuthHMACKeyFile, "auth-hmac-key-file", "", "mounted hex/base64 authentication key")
 	f.StringVar(&c.BootstrapTokenFile, "bootstrap-token-file", "", "mounted first-owner bootstrap token")
+	f.StringVar(&c.ConnectorConfigFile, "connector-config-file", "", "mounted provider transport configuration")
 	f.StringVar(&c.MasterKeyFile, "master-key-file", "", "mounted JSON master key ring")
 	f.StringVar(&c.RuntimeDatabaseRole, "runtime-role", "", "existing runtime role granted access by migrate")
 	f.StringVar(&level, "log-level", "info", "debug, info, warn, or error (OLP_LOG_LEVEL)")

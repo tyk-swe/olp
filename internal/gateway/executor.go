@@ -8,17 +8,15 @@ import (
 	"mime"
 	"net/http"
 	"net/http/httptrace"
-	"sort"
 	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
-	"github.com/google/uuid"
-
-	"github.com/tyk-swe/olp/internal/egress"
+	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/limits"
+	"github.com/tyk-swe/olp/internal/protocols"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
 	"github.com/tyk-swe/olp/internal/runtime"
 )
@@ -36,7 +34,7 @@ const (
 	classCancelled      = "cancelled"
 )
 
-// The only operation and surface this gateway serves.
+// Canonical defaults retained by existing accounting fixtures.
 const (
 	operationGeneration = "generation"
 	surfaceOpenAI       = "openai"
@@ -62,19 +60,22 @@ const (
 
 // execution is one inference request flowing through the attempt loop.
 type execution struct {
-	request  request
-	family   openai.Family
-	parsed   *openai.Request
-	actor    string
-	keyID    string
-	userID   string
-	affinity []byte
-	route    *runtime.Route
-	mode     string
-	attempts []runtime.Attempt
-	budget   int
-	emit     openai.Emit // streaming only
-	estimate int64       // per-attempt token estimate used for admission and settlement
+	request     request
+	family      openai.Family
+	parsed      *openai.Request
+	actor       string
+	keyID       string
+	userID      string
+	affinity    []byte
+	route       *runtime.Route
+	mode        string
+	attempts    []runtime.Attempt
+	budget      int
+	preferences *runtime.Preferences
+	decisions   []runtime.Decision
+	policy      runtime.EffectivePolicy
+	emit        openai.Emit // streaming only
+	estimate    int64       // per-attempt token estimate used for admission and settlement
 
 	once       sync.Once
 	facts      []AttemptFact
@@ -248,7 +249,7 @@ func (s *Server) execute(ctx context.Context, x *execution) *outcome {
 				break
 			}
 			// Authority can change while an earlier credential attempt is pending.
-			if provider.AuthMode != "none" && s.Runtime.Revoked(*slot.CredentialID) {
+			if connectors.SecretRequired(provider.AuthMode) && slot.CredentialID != nil && s.Runtime.Revoked(*slot.CredentialID) {
 				continue
 			}
 			// attempt.Timeout bounds first-byte/idle waits, not the lifetime
@@ -283,6 +284,10 @@ func (s *Server) execute(ctx context.Context, x *execution) *outcome {
 				}
 				continue
 			}
+			if !s.health.claim(provider.ID) {
+				reservation.settle(ctx, false, nil)
+				break
+			}
 			used++
 			fact, completion, failure := s.attempt(ctx, x, attempt, &provider, slot, used)
 			// Only an attempt that reached the upstream spent the key's window.
@@ -298,6 +303,16 @@ func (s *Server) execute(ctx context.Context, x *execution) *outcome {
 			if failure == nil {
 				return &outcome{completion: completion, committed: fact.Committed}
 			}
+			switch failure.class {
+			case classCredential:
+				s.health.cooldown(provider.ID, credentialHealthKey(&slot), credentialCooldown)
+				s.Admission.cooldown(ctx, provider.ID, &slot, credentialCooldown, true)
+			case classRateLimit:
+				s.health.cooldown(provider.ID, slot.ID, failure.retryAfter)
+				s.Admission.cooldown(ctx, provider.ID, &slot, cooldownDuration(failure.retryAfter), false)
+			default:
+				next = true
+			}
 			if failure.overall || failure.class == classCancelled {
 				return &outcome{err: failure.toError(), committed: failure.committed, cancelled: failure.class == classCancelled}
 			}
@@ -305,16 +320,6 @@ func (s *Server) execute(ctx context.Context, x *execution) *outcome {
 				return &outcome{err: failure.toError(), committed: failure.committed}
 			}
 			last = failure
-			switch failure.class {
-			case classCredential:
-				s.health.cooldown(provider.ID, slot.ID, credentialCooldown)
-				s.Admission.cooldown(ctx, provider.ID, &slot, credentialCooldown)
-			case classRateLimit:
-				s.health.cooldown(provider.ID, slot.ID, failure.retryAfter)
-				s.Admission.cooldown(ctx, provider.ID, &slot, cooldownDuration(failure.retryAfter))
-			default:
-				next = true // the provider itself failed; sibling credentials would too
-			}
 			if next {
 				break
 			}
@@ -339,33 +344,15 @@ func (s *Server) execute(ctx context.Context, x *execution) *outcome {
 // priority then by deterministic weighted rendezvous on the request's
 // affinity so sibling keys spread across a pool.
 func (s *Server) slots(x *execution, attempt runtime.Attempt, provider *runtime.Provider) []runtime.Slot {
-	type ranked struct {
-		slot  runtime.Slot
-		score float64
-	}
-	var usable []ranked
-	for _, slot := range provider.Slots {
-		if !s.slotAvailable(x, attempt, &slot) || s.health.coolingDown(provider.ID, slot.ID) {
+	ordered := runtime.SelectSlots(*provider, attempt.UpstreamModel, *x.route, x.keyID, x.family.Operation(), x.family.Surface(), x.mode, x.affinity)
+	out := make([]runtime.Slot, 0, len(ordered))
+	for _, slot := range ordered {
+		if !s.slotAvailable(x, attempt, &slot) || (!s.Admission.ready() && (s.health.coolingDown(provider.ID, slot.ID) || s.health.coolingDown(provider.ID, credentialHealthKey(&slot)))) {
 			continue
 		}
-		score := 0.0
-		if routeID, err := uuid.Parse(x.route.ID); err == nil {
-			if slotID, err := uuid.Parse(slot.ID); err == nil {
-				score = runtime.Score(routeID, slotID, slot.Weight, operationGeneration, surfaceOpenAI, x.mode, x.affinity)
-			}
-		}
-		usable = append(usable, ranked{slot, score})
+		out = append(out, slot)
 	}
-	sort.SliceStable(usable, func(i, j int) bool {
-		if usable[i].slot.Priority != usable[j].slot.Priority {
-			return usable[i].slot.Priority < usable[j].slot.Priority
-		}
-		return usable[i].score > usable[j].score
-	})
-	out := make([]runtime.Slot, 0, len(usable))
-	for _, r := range usable {
-		out = append(out, r.slot)
-	}
+
 	return out
 }
 
@@ -374,7 +361,7 @@ func (s *Server) slotAvailable(x *execution, attempt runtime.Attempt, slot *runt
 		return false
 	}
 	provider := x.request.release.Snapshot.Providers[attempt.ProviderID]
-	if provider.AuthMode == "none" {
+	if !connectors.SecretRequired(provider.AuthMode) {
 		return true
 	}
 	if slot.CredentialID == nil || s.Runtime.Revoked(*slot.CredentialID) {
@@ -438,6 +425,7 @@ func endpointPath(family openai.Family) string {
 // newFact opens the record of one attempt against one credential slot.
 func (s *Server) newFact(x *execution, a runtime.Attempt, slot runtime.Slot, ordinal int) AttemptFact {
 	fact := AttemptFact{
+		Strategy: a.Strategy, PolicyDigest: a.PolicyDigest, VendorID: a.VendorID, Price: a.Price,
 		Ordinal:            ordinal,
 		TargetID:           a.TargetID,
 		ProviderID:         a.ProviderID,
@@ -491,11 +479,12 @@ func (s *Server) attempt(ctx context.Context, x *execution, a runtime.Attempt, p
 		return fact, nil, f
 	}
 
-	endpoint, err := s.egress.ValidateEndpoint(provider.Endpoint)
+	_, err := s.egress.ValidateEndpoint(provider.Endpoint)
 	if err != nil {
 		return fail(classConnect, nil)
 	}
-	body, err := x.parsed.Encode(a.UpstreamModel, provider.ParameterDefaults)
+	cfg := provider.Connector()
+	body, wire, err := protocols.Encode(x.parsed, provider.Kind, provider.VendorID, cfg.Model(a.UpstreamModel), provider.ParameterDefaults)
 	if err != nil {
 		return fail(classProtocol, nil)
 	}
@@ -511,7 +500,11 @@ func (s *Server) attempt(ctx context.Context, x *execution, a runtime.Attempt, p
 	firstByte := time.AfterFunc(timeout, func() { st.reason.CompareAndSwap(0, 1); cancel() })
 	defer firstByte.Stop()
 
-	req, err := http.NewRequestWithContext(httptrace.WithClientTrace(actx, st.trace()), http.MethodPost, endpoint.String()+endpointPath(x.family), bytes.NewReader(body))
+	endpoint, err := cfg.URL(wire, a.UpstreamModel, x.parsed.Stream)
+	if err != nil {
+		return fail(classProtocol, nil)
+	}
+	req, err := http.NewRequestWithContext(httptrace.WithClientTrace(actx, st.trace()), http.MethodPost, endpoint, bytes.NewReader(body))
 	if err != nil {
 		return fail(classConnect, nil)
 	}
@@ -520,24 +513,20 @@ func (s *Server) attempt(ctx context.Context, x *execution, a runtime.Attempt, p
 	req.Header.Set("Accept", "application/json")
 	if x.parsed.Stream {
 		req.Header.Set("Accept", "text/event-stream")
-	}
-	var credentialValues []string
-	if slot.CredentialID != nil {
-		secret, _ := x.request.release.Credential(*slot.CredentialID)
-		switch provider.AuthMode {
-		case "headers":
-			if err := egress.ApplyCredentialHeaders(req.Header, provider.CredentialHeaders, secret); err != nil {
-				return fail(classCredential, nil)
-			}
-			credentialValues = append(credentialValues, string(secret))
-			for _, name := range provider.CredentialHeaders {
-				credentialValues = append(credentialValues, req.Header.Values(name)...)
-			}
-		case "none":
-		default:
-			req.Header.Set("Authorization", "Bearer "+string(secret))
-			credentialValues = append(credentialValues, string(secret))
+		if wire == "bedrock" {
+			req.Header.Set("Accept", "application/vnd.amazon.eventstream")
 		}
+	}
+	var secret []byte
+	if slot.CredentialID != nil {
+		secret, _ = x.request.release.Credential(*slot.CredentialID)
+	}
+	credentialValues, err := s.auth.Apply(actx, req, cfg, secret, body)
+	if err != nil {
+		if actx.Err() != nil {
+			return fail(st.classify(err, false), nil)
+		}
+		return fail(classCredential, nil)
 	}
 
 	resp, err := s.client.Do(req)
@@ -571,7 +560,7 @@ func (s *Server) attempt(ctx context.Context, x *execution, a runtime.Attempt, p
 	committed := false
 	if x.parsed.Stream {
 		mediaType, _, _ := mime.ParseMediaType(resp.Header.Get("Content-Type"))
-		if mediaType != "text/event-stream" {
+		if mediaType != "text/event-stream" && !(wire == "bedrock" && mediaType == "application/vnd.amazon.eventstream") {
 			return fail(classProtocol, &attemptFailure{status: resp.StatusCode})
 		}
 		streamCap := time.AfterFunc(maxStreamDuration, func() { st.reason.CompareAndSwap(0, 3); cancel() })
@@ -590,22 +579,31 @@ func (s *Server) attempt(ctx context.Context, x *execution, a runtime.Attempt, p
 			} else {
 				watchdog.Reset(a.Timeout)
 			}
-			return x.emit(frame)
+			if len(frame) > int(s.cfg.MaxEventBytes) {
+				return openai.ErrEventTooLarge
+			}
+			err := x.emit(frame)
+			if err == nil && fact.FirstOutput == nil && protocols.MeaningfulFrame(x.family, frame) {
+				elapsed := s.now().Sub(fact.StartedAt)
+				fact.FirstOutput = &elapsed
+			}
+			return err
 		}
-		completion, err = openai.StreamMetadata(x.family, resp.Body, int(s.cfg.MaxEventBytes), x.route.Slug, x.parsed.IncludeUsage, emit)
+		completion, err = protocols.Stream(wire, x.family, resp.Body, int(s.cfg.MaxEventBytes), x.route.Slug, x.parsed.IncludeUsage, emit)
 	} else {
 		limited := &countingReader{r: resp.Body, limit: s.cfg.MaxResponseBytes}
 		raw, readErr := io.ReadAll(limited)
 		if readErr != nil {
 			err = readErr
-		} else if x.family == openai.FamilyResponses {
-			completion, err = openai.DecodeResponse(raw, x.route.Slug)
 		} else {
-			completion, err = openai.DecodeChat(raw, x.route.Slug)
+			completion, err = protocols.Decode(wire, x.family, raw, x.route.Slug, protocols.EmbeddingEncoding(x.parsed, provider.ParameterDefaults))
 		}
 	}
 	if completion != nil {
 		fact.Usage = completion.Usage
+		if !x.parsed.Stream && (wire != x.family || x.family == openai.FamilyEmbeddings) && int64(len(completion.Body)) > s.cfg.MaxResponseBytes {
+			err = errResponseTooLarge
+		}
 	}
 	if err != nil {
 		f := &attemptFailure{status: resp.StatusCode, committed: committed}
@@ -615,10 +613,10 @@ func (s *Server) attempt(ctx context.Context, x *execution, a runtime.Attempt, p
 			return fail(classProtocol, f)
 		case errors.As(err, &ue):
 			f.upstream = ue
-			if committed {
-				return fail(classProtocol, f)
-			}
-			return fail(classUpstreamServer, f)
+			ue.Message = redactCredentials(ue.Message, credentialValues)
+			class, status := inBandFailure(ue, committed)
+			f.status = status
+			return fail(class, f)
 		}
 		return fail(st.classify(err, committed), f)
 	}
@@ -701,8 +699,8 @@ func (s *Server) finish(x *execution, out *outcome, status int) {
 			UserID:       x.userID,
 			Family:       string(x.family),
 			Mode:         x.mode,
-			Operation:    operationGeneration,
-			Surface:      surfaceOpenAI,
+			Operation:    x.family.Operation(),
+			Surface:      x.family.Surface(),
 			Outcome:      "failure",
 			Status:       status,
 			StartedAt:    x.request.startedAt,
@@ -740,4 +738,11 @@ func (s *Server) finish(x *execution, out *outcome, status int) {
 		}
 		s.Sink.Terminal(env)
 	})
+}
+
+func credentialHealthKey(slot *runtime.Slot) string {
+	if slot.CredentialID != nil {
+		return "credential:" + *slot.CredentialID
+	}
+	return "credential:ambient"
 }

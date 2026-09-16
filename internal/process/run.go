@@ -121,6 +121,12 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 		}
 		policy := egress.Policy{AllowedNetworks: c.ProviderEgressAllowCIDRs, PlainHTTPHosts: c.ProviderEgressAllowHTTPHosts}
 		rt = runtime.NewManager(pool, installation, auth, keys, log)
+		if c.ConnectorConfigFile != "" {
+			rt.Mounted, err = providers.LoadMounted(c.ConnectorConfigFile, &policy)
+			if err != nil {
+				return err
+			}
+		}
 		gw := gateway.New(rt, &policy, gateway.Config{
 			MaxInFlight:      c.MaxInFlightInference,
 			MaxBodyBytes:     c.MaxJSONBodyBytes,
@@ -165,7 +171,9 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 				catalogue.Quotas = limiter
 			}
 			catalogue.Register(public)
-			routes.New(control).Register(public)
+			routeServer := routes.New(control)
+			routeServer.Inputs = rt.RoutingInputs
+			routeServer.Register(public)
 			(&gateway.Playground{Access: control, Gateway: gw}).Register(public)
 			// Usage, pricing, request history and recovery reporting are part
 			// of the management surface; their patterns are more specific than
@@ -323,7 +331,7 @@ func awaitPlane(budget time.Duration, wait func(), log *slog.Logger, plane strin
 }
 
 func loadSecrets(c config.Config, installation string) (*secrets.AuthKey, *secrets.KeyRing, string, error) {
-	if c.AuthHMACKeyFile == "" || c.MasterKeyFile == "" {
+	if c.AuthHMACKeyFile == "" || c.MasterKeyFile == "" && (c.Mode.Management() || c.ConnectorConfigFile == "") {
 		return nil, nil, "", errors.New("management and inference require OLP_AUTH_HMAC_KEY_FILE and OLP_MASTER_KEY_FILE")
 	}
 	raw, err := secrets.ReadFile(c.AuthHMACKeyFile)
@@ -334,9 +342,12 @@ func loadSecrets(c config.Config, installation string) (*secrets.AuthKey, *secre
 	if err != nil {
 		return nil, nil, "", err
 	}
-	keys, err := secrets.LoadRing(c.MasterKeyFile)
-	if err != nil {
-		return nil, nil, "", err
+	var keys *secrets.KeyRing
+	if c.MasterKeyFile != "" {
+		keys, err = secrets.LoadRing(c.MasterKeyFile)
+		if err != nil {
+			return nil, nil, "", err
+		}
 	}
 	var bootstrap string
 	if c.BootstrapTokenFile != "" {

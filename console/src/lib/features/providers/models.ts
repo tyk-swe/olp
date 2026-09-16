@@ -153,11 +153,13 @@ export async function setProviderModel(
 
 export async function certifyProviderModel(
   provider: Provider,
-  modelId: string
+  modelId: string,
+  signal?: AbortSignal
 ): Promise<CapabilityCertification> {
   const response = await apiClient.POST(
     '/api/v3/providers/{provider_id}/models/{model_id}/certify',
     {
+      signal,
       params: {
         path: { provider_id: provider.id, model_id: modelId },
         header: { 'If-Match': provider.etag }

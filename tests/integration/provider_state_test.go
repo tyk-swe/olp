@@ -224,6 +224,10 @@ func TestProviderInventoryAvailabilityTracksPublishedModels(t *testing.T) {
 			http.Error(w, "invalid request", http.StatusBadRequest)
 			return
 		}
+		if r.URL.Path == "/v1/responses" {
+			writeResponsesFixture(w, input.Model, "ok", false)
+			return
+		}
 		w.Header().Set("Content-Type", "application/json")
 		fmt.Fprintf(w, `{"id":"chatcmpl-1","object":"chat.completion","model":%q,"choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}`, input.Model)
 	}))

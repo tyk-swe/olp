@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/tyk-swe/olp/internal/protocols/openai"
+	"github.com/tyk-swe/olp/internal/usage"
 )
 
 // Envelope is the single terminal, metadata-only record of one inference
@@ -26,8 +27,8 @@ type Envelope struct {
 	ReleaseSequence int64
 	Family          string
 	Mode            string // unary or streaming
-	Operation       string // always generation on this surface
-	Surface         string // always openai on this surface
+	Operation       string // shared operation
+	Surface         string // client wire protocol
 	Outcome         string // success, failure, or cancelled
 	Status          int    // status sent to the client; 0 when nothing was sent
 	// ErrorClass is the terminal failure code the client was given, such as
@@ -52,6 +53,11 @@ type Envelope struct {
 
 // AttemptFact records one credential attempt against one target.
 type AttemptFact struct {
+	FirstOutput        *time.Duration
+	Strategy           string
+	PolicyDigest       string
+	VendorID           string
+	Price              *usage.RoutingPrice
 	Ordinal            int
 	TargetID           string
 	ProviderID         string

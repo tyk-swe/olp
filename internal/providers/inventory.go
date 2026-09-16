@@ -25,7 +25,7 @@ func (s *Server) kindCapabilities(r *http.Request) (access.Reply, error) {
 	if kindByName(kind) == nil {
 		return access.Reply{}, access.Fail(400, "invalid_provider_kind", "This provider kind is not available.")
 	}
-	return access.OK(map[string]any{"provider_kind": kind, "capabilities": capabilityOptions}), nil
+	return access.OK(map[string]any{"provider_kind": kind, "capabilities": capabilitiesFor(kind, defaultVendor(kind))}), nil
 }
 
 func (s *Server) vendors(r *http.Request) (access.Reply, error) {
@@ -87,7 +87,11 @@ func (s *Server) inventory(r *http.Request) (access.Reply, error) {
 		if err = json.Unmarshal(capabilities, &m.Capabilities); err != nil {
 			return access.Reply{}, err
 		}
-		items = append(items, map[string]any{"available": available, "metadata": json.RawMessage(metadata), "provider_id": providerID, "provider_name": providerName, "provider_kind": providerKind, "model": modelJSON(m)})
+		facts, metadataErr := metadataJSON(metadata)
+		if metadataErr != nil {
+			return access.Reply{}, metadataErr
+		}
+		items = append(items, map[string]any{"available": available, "metadata": facts, "provider_id": providerID, "provider_name": providerName, "provider_kind": providerKind, "model": modelJSON(m)})
 	}
 	if err = rows.Err(); err != nil {
 		return access.Reply{}, err

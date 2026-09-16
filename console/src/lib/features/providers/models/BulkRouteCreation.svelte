@@ -1,5 +1,6 @@
 <script lang="ts">
   import { resolve } from '$app/paths';
+  import { onDestroy } from 'svelte';
   import {
     createRouteDraft,
     activateRoute,
@@ -15,6 +16,10 @@
     []
   );
   let busy = $state(false);
+  let cancelled = $state(false);
+  onDestroy(() => {
+    cancelled = true;
+  });
   let published = $state<string[]>([]);
   let errors = $state<string[]>([]);
   let created = $state<RouteDraftValidation[]>([]);
@@ -37,10 +42,12 @@
   async function create(event: SubmitEvent) {
     event.preventDefault();
     busy = true;
+    cancelled = false;
     errors = [];
     try {
       const groups = Map.groupBy(chosen, (item) => item.slug);
       for (const [slug, items] of groups) {
+        if (cancelled) break;
         if (created.some((item) => item.slug === slug)) continue;
         const operations = [
           ...new Set(
@@ -86,8 +93,10 @@
   }
   async function publish() {
     busy = true;
+    cancelled = false;
     errors = [];
     for (const route of created) {
+      if (cancelled) break;
       if (published.includes(route.id)) continue;
       try {
         await activateRoute(route);
@@ -152,6 +161,14 @@
           >{busy ? 'Creating…' : 'Create reviewed route drafts'}</button
         >
       </form>{/if}
+    {#if busy}<button
+        class="button button-secondary"
+        type="button"
+        disabled={cancelled}
+        onclick={() => {
+          cancelled = true;
+        }}>{cancelled ? 'Stopping…' : 'Stop after current route'}</button
+      >{/if}
     {#if errors.length}<ul class="inline-problem" role="alert">
         {#each errors as error (error)}<li>{error}</li>{/each}
       </ul>{/if}

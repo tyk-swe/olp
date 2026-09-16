@@ -137,6 +137,10 @@ func TestCertificationAllowsBothProbeBudgetsAndPersistsEvidence(t *testing.T) {
 		case <-r.Context().Done():
 			return
 		}
+		if r.URL.Path == "/v1/responses" {
+			writeResponsesFixture(w, vendorModel, "OK", input.Stream)
+			return
+		}
 		if input.Stream {
 			w.Header().Set("Content-Type", "text/event-stream")
 			io.WriteString(w, "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"OK\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n")
@@ -154,8 +158,8 @@ func TestCertificationAllowsBothProbeBudgetsAndPersistsEvidence(t *testing.T) {
 	models := h.want(owner, "GET", path+"/models", nil, nil, 200)
 	modelID := models["items"].([]any)[0].(map[string]any)["id"].(string)
 	certified := h.want(owner, "POST", path+"/models/"+modelID+"/certify", nil, etagHeader(created), 200)
-	if certified["status"] != "certified" || certified["certified_count"] != float64(2) || calls.Load() != 2 {
-		t.Fatalf("both probes should succeed: %v; upstream calls=%d", certified, calls.Load())
+	if certified["status"] != "certified" || certified["certified_count"] != float64(2) || calls.Load() != 4 {
+		t.Fatalf("both endpoint and mode probes should succeed: %v; upstream calls=%d", certified, calls.Load())
 	}
 	models = h.want(owner, "GET", path+"/models", nil, nil, 200)
 	capabilities := models["items"].([]any)[0].(map[string]any)["capabilities"].([]any)

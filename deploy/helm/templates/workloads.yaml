@@ -158,6 +158,10 @@ spec:
             - name: OLP_GATEWAY_CORS_ALLOWED_ORIGINS
               value: {{ $gatewayCorsAllowedOrigins | quote }}
             {{- end }}
+            {{- if $root.Values.config.connectorConfigFile }}
+            - name: OLP_CONNECTOR_CONFIG_FILE
+              value: {{ $root.Values.config.connectorConfigFile | quote }}
+            {{- end }}
             {{- if $providerEgressAllowCidrs }}
             - name: OLP_PROVIDER_EGRESS_ALLOW_CIDRS
               value: {{ $providerEgressAllowCidrs | quote }}

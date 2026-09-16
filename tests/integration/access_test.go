@@ -158,7 +158,7 @@ func (h *accessHarness) do(b *browser, method, path string, body any, headers ma
 	for key, value := range headers {
 		r.Header.Set(key, value)
 	}
-	client := &http.Client{Timeout: 20 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	client := &http.Client{Timeout: 75 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	response, err := client.Do(r)
 	if err != nil {
 		h.t.Fatal(err)

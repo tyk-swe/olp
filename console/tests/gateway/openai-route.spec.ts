@@ -2,6 +2,8 @@ import { readFileSync } from 'node:fs';
 import { expect, test, type APIRequestContext, type Page } from '../playwright';
 import { takeSecret, waitForRoutePublication } from '../journeys/fixtures';
 import { verifyDraftSave } from '../journeys/draft-saving';
+import { vertical } from '../journeys/fixtures';
+import { verifyProviderRouting } from '../journeys/provider-routing';
 
 // The owner created by tests/access/control.spec.ts; a run that starts on an
 // empty installation performs the setup itself.
@@ -194,7 +196,9 @@ test('a browser user configures an OpenAI-compatible route and reaches unary and
   await page.getByRole('radio', { name: /OpenAI-compatible/ }).check();
   await page.getByLabel('Provider name').fill('Compatible upstream');
   await page.getByLabel('Authentication').selectOption('api_key');
-  await page.getByLabel('Endpoint').fill(upstream.endpoint);
+  await page
+    .getByRole('textbox', { name: 'Endpoint', exact: true })
+    .fill(upstream.endpoint);
   await page.getByLabel('Seed model (optional)').fill(upstream.model);
   await page
     .getByLabel('Credential', { exact: true })
@@ -218,11 +222,11 @@ test('a browser user configures an OpenAI-compatible route and reaches unary and
     page.getByText(upstream.model, { exact: true }).first()
   ).toBeVisible();
   // The seed model arrives with both supported tuples declared, so the review
-  // only confirms them; the add button stays disabled once nothing is unused.
+  // confirms them; auxiliary operations remain available for an explicit review.
   await expect(page.getByLabel(/Operation \d+/)).toHaveCount(2);
   await expect(
     page.getByRole('button', { name: 'Add capability' })
-  ).toBeDisabled();
+  ).toBeEnabled();
   await page.getByLabel('Operation 1').selectOption('generation');
   await page.getByLabel('Client surface 1').selectOption('openai');
   await page.getByLabel('Mode 1').selectOption('unary');
@@ -474,4 +478,39 @@ test('a browser user configures an OpenAI-compatible route and reaches unary and
   await expect(
     page.getByText(/Request history is not retained by this installation/)
   ).toHaveCount(0);
+});
+
+test('cloud connections support bulk model review, credential pools and policy routing', async ({
+  page
+}, info) => {
+  test.setTimeout(240_000);
+  await signIn(page);
+  await page.goto('/providers/new');
+  await page.getByRole('radio', { name: /Azure OpenAI/ }).check();
+  await page.getByLabel('Provider name').fill('Concurrent provider name');
+  await page.getByLabel('Seed model (optional)').fill(vertical.deployment);
+  await page.getByLabel('Azure resource endpoint').fill(vertical.endpoint);
+  await page.getByLabel('API version').fill(vertical.apiVersion);
+  await page.getByLabel('Cloud deployment').fill(vertical.deployment);
+  await page
+    .getByLabel('Credential', { exact: true })
+    .fill(vertical.credential);
+  await page.getByRole('button', { name: /Save and test connection/ }).click();
+  const bulk = page.locator('section').filter({
+    has: page.getByRole('heading', { name: 'Validate models in bulk' })
+  });
+  await bulk.getByRole('checkbox').check();
+  await bulk.getByLabel('Capabilities to validate').selectOption('generation');
+  await bulk
+    .getByRole('button', { name: 'Validate 1 selected models' })
+    .click();
+  await expect(bulk.getByText(/Checked 1 models/)).toBeVisible();
+  await page.getByRole('button', { name: 'Continue to activation' }).click();
+  await page.getByRole('button', { name: 'Test completed draft' }).click();
+  await expect(page.getByText(/Final draft test passed/)).toBeVisible();
+  await page.getByRole('button', { name: 'Activate provider' }).click();
+  await expect(
+    page.getByRole('heading', { name: 'Now build a stable route slug.' })
+  ).toBeVisible();
+  await verifyProviderRouting(page, info);
 });

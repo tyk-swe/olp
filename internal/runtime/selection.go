@@ -4,10 +4,10 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"math"
-	"sort"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/tyk-swe/olp/internal/usage"
 )
 
 // Attempt is one candidate in deterministic order.
@@ -20,6 +20,11 @@ type Attempt struct {
 	Timeout            time.Duration
 	Priority           int
 	Score              float64
+	Strategy           string
+	PolicyDigest       string
+	VendorID           string
+	Price              *usage.RoutingPrice
+	Performance        *usage.Performance
 }
 
 // SelectionError names why no attempt could be planned.
@@ -38,52 +43,14 @@ const (
 // exact (model, operation, surface, mode), ordered by priority tier and then
 // by weighted rendezvous score keyed on the affinity bytes.
 func Select(s *Snapshot, slug, operation, surface, mode string, affinity []byte) ([]Attempt, error) {
-	route, ok := s.Routes[slug]
-	if !ok {
-		return nil, &SelectionError{Code: RouteNotFound}
-	}
-	supported := false
-	for _, declared := range route.Operations {
-		supported = supported || declared == operation
-	}
-	if !supported {
-		return nil, &SelectionError{Code: OperationNotSupported}
-	}
-	routeID, err := uuid.Parse(route.RoutingID)
+	plan, err := PlanRequest(s, slug, operation, surface, mode, affinity, SelectionOptions{})
 	if err != nil {
+		return nil, err
+	}
+	if len(plan.Attempts) == 0 {
 		return nil, &SelectionError{Code: NoEligibleTargets}
 	}
-	var attempts []Attempt
-	for _, target := range route.Targets {
-		provider, ok := s.Providers[target.ProviderID]
-		if !ok || !provider.Enabled || !provider.Supports(target.ProviderModel, operation, surface, mode) {
-			continue
-		}
-		targetID, err := uuid.Parse(target.RoutingID)
-		if err != nil {
-			continue
-		}
-		attempts = append(attempts, Attempt{
-			TargetID:           target.ID,
-			ProviderID:         provider.ID,
-			ProviderRevisionID: provider.RevisionID,
-			ProviderKind:       provider.Kind,
-			UpstreamModel:      target.ProviderModel,
-			Timeout:            time.Duration(target.Timeout) * time.Millisecond,
-			Priority:           target.Priority,
-			Score:              Score(routeID, targetID, target.Weight, operation, surface, mode, affinity),
-		})
-	}
-	if len(attempts) == 0 {
-		return nil, &SelectionError{Code: NoEligibleTargets}
-	}
-	sort.SliceStable(attempts, func(i, j int) bool {
-		if attempts[i].Priority != attempts[j].Priority {
-			return attempts[i].Priority < attempts[j].Priority
-		}
-		return attempts[i].Score > attempts[j].Score
-	})
-	return attempts, nil
+	return plan.Attempts, nil
 }
 
 // Score is the weighted rendezvous score shared by live routing and

@@ -94,7 +94,7 @@ func (s *Server) rotate(r *http.Request) (access.Reply, error) {
 		return access.Reply{}, err
 	}
 	if !current.Configuration.credentialRequired() {
-		return access.Reply{}, access.Fail(422, "credential_forbidden", "The none authentication mode takes no credential.")
+		return access.Reply{}, access.Fail(422, "credential_forbidden", "This authentication mode takes no stored credential.")
 	}
 	if err = current.Configuration.validate(s.Egress); err != nil {
 		return access.Reply{}, err
@@ -117,6 +117,9 @@ func (s *Server) rotate(r *http.Request) (access.Reply, error) {
 	// The commit transaction rechecks authority, replay, and the draft ETag.
 	if err = tx.Rollback(r.Context()); err != nil {
 		return access.Reply{}, err
+	}
+	for _, model := range models {
+		current.Configuration.ProbeModels = append(current.Configuration.ProbeModels, model.UpstreamModel)
 	}
 	if _, err = s.listModels(r.Context(), &current.Configuration, []byte(input.Credential)); err != nil {
 		return access.Reply{}, access.Fail(422, "credential_invalid", "The new credential was not accepted by the upstream: "+classify(err).Detail)
@@ -479,14 +482,11 @@ func (s *Server) writeSlot(r *http.Request) (access.Reply, error) {
 	if input.Slot.Weight != nil {
 		weight = *input.Slot.Weight
 	}
-	if existing != nil && existing.Default && !enabled {
-		return access.Reply{}, access.Fail(422, "default_slot_required", "The default slot stays enabled; disable the connection instead.")
-	}
 	var credentialID *string
 	switch {
 	case input.Credential != nil:
 		if !current.Configuration.credentialRequired() {
-			return access.Reply{}, access.Fail(422, "credential_forbidden", "The none authentication mode takes no credential.")
+			return access.Reply{}, access.Fail(422, "credential_forbidden", "This authentication mode takes no stored credential.")
 		}
 		stored, _, err := s.storeCredential(r.Context(), tx, id, *input.Credential)
 		if err != nil {
@@ -633,6 +633,9 @@ func (s *Server) validateSlot(r *http.Request) (access.Reply, error) {
 		return access.Reply{}, err
 	}
 	result, err = access.Commit(r, tx, result)
+	if err == nil && probeErr == nil {
+		s.clearValidatedCooldowns(r.Context(), id, *slot)
+	}
 	if err == nil && probeErr != nil {
 		err = access.Fail(422, "slot_validation_failed", classify(probeErr).Detail)
 	}

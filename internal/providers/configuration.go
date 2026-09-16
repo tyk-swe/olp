@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
@@ -33,21 +34,24 @@ type Options struct {
 // Configuration is the stored connection configuration; it is the contract's
 // ProviderConfiguration verbatim.
 type Configuration struct {
-	Kind         string  `json:"kind"`
-	AuthMode     string  `json:"auth_mode"`
-	Endpoint     *string `json:"endpoint"`
-	CloudRegion  *string `json:"cloud_region"`
-	CloudProject *string `json:"cloud_project"`
-	Deployment   *string `json:"deployment"`
-	APIVersion   *string `json:"api_version"`
-	Options      Options `json:"options"`
+	ProbeModels  []string `json:"-"`
+	Kind         string   `json:"kind"`
+	AuthMode     string   `json:"auth_mode"`
+	Endpoint     *string  `json:"endpoint"`
+	CloudRegion  *string  `json:"cloud_region"`
+	CloudProject *string  `json:"cloud_project"`
+	Deployment   *string  `json:"deployment"`
+	APIVersion   *string  `json:"api_version"`
+	Options      Options  `json:"options"`
 }
 
 // normalize applies defaults and canonical forms so equal configurations
 // compare equal and every stored document is complete.
 func (c *Configuration) normalize() {
-	if c.Kind == KindOpenAI && (c.Endpoint == nil || *c.Endpoint == "") {
-		c.Endpoint = ptr(DefaultOpenAIEndpoint)
+	if c.Endpoint == nil || *c.Endpoint == "" {
+		if endpoint := connectors.DefaultEndpoint(c.Kind, value(c.CloudRegion), value(c.CloudProject)); endpoint != "" {
+			c.Endpoint = ptr(endpoint)
+		}
 	}
 	if c.Options.CredentialHeaders == nil {
 		c.Options.CredentialHeaders = []string{}
@@ -62,7 +66,7 @@ func (c *Configuration) normalize() {
 		c.Options.ParameterDefaults = map[string]json.RawMessage{}
 	}
 	if c.VendorMissing() {
-		c.Options.VendorID = ptr(c.Kind)
+		c.Options.VendorID = ptr(defaultVendor(c.Kind))
 	}
 }
 
@@ -73,9 +77,13 @@ func (c *Configuration) VendorMissing() bool {
 
 // validate rejects configurations this gateway cannot serve.
 func (c *Configuration) validate(policy *egress.Policy) error {
+	options, err := json.Marshal(c.Options)
+	if err != nil || len(options) > 1<<20 {
+		return access.Invalid("configuration.options", "Connection options must fit within 1 MiB")
+	}
 	kind := kindByName(c.Kind)
 	if kind == nil {
-		return access.Fail(422, "provider_kind_unavailable", "Only openai and openai_compatible connections are available in this release.")
+		return access.Fail(422, "provider_kind_unavailable", "Unknown provider connector kind.")
 	}
 	modeAllowed := false
 	for _, m := range kind.AuthModes {
@@ -94,7 +102,7 @@ func (c *Configuration) validate(policy *egress.Policy) error {
 		return access.Invalid("configuration.options.credential_headers", "Use at most 16 credential headers.")
 	}
 	for _, h := range c.Options.CredentialHeaders {
-		if h == "" || !validHeaderName(h) || h == "Host" || h == "Content-Length" || h == "Transfer-Encoding" || h == "Connection" {
+		if h == "" || !validHeaderName(h) || reservedHeader(h) {
 			return access.Invalid("configuration.options.credential_headers", "Use valid header names other than hop-by-hop or framing headers.")
 		}
 	}
@@ -104,13 +112,11 @@ func (c *Configuration) validate(policy *egress.Policy) error {
 	if c.AuthMode != AuthHeaders && len(c.Options.CredentialHeaders) != 0 {
 		return access.Invalid("configuration.options.credential_headers", "Credential headers apply only to the headers authentication mode.")
 	}
-	for _, field := range []struct {
-		name  string
-		value *string
-	}{{"cloud_region", c.CloudRegion}, {"cloud_project", c.CloudProject}, {"deployment", c.Deployment}, {"api_version", c.APIVersion}} {
-		if field.value != nil && *field.value != "" {
-			return access.Invalid("configuration."+field.name, "This field does not apply to OpenAI-compatible connections.")
-		}
+	if err := c.transport().Validate(policy); err != nil {
+		return access.Invalid("configuration", err.Error())
+	}
+	if kind, ok := VendorKind(value(c.Options.VendorID)); !ok || kind != c.Kind {
+		return access.Invalid("configuration.options.vendor_id", "Vendor does not support this connector")
 	}
 	if len(c.Options.Models) > 2000 {
 		return access.Invalid("configuration.options.models", "Use at most 2000 model metadata entries.")
@@ -120,8 +126,11 @@ func (c *Configuration) validate(policy *egress.Policy) error {
 			return access.Invalid("configuration.options.models", "Model names must be 1–200 characters.")
 		}
 		var metadata map[string]any
-		if err := json.Unmarshal(raw, &metadata); err != nil {
+		if err := json.Unmarshal(raw, &metadata); err != nil || metadata == nil {
 			return access.Invalid("configuration.options.models", "Model metadata must be an object.")
+		}
+		if err := validateMetadata(raw); err != nil {
+			return access.Invalid("configuration.options.models", err.Error())
 		}
 	}
 	if len(c.Options.ParameterDefaults) > 64 {
@@ -165,14 +174,14 @@ func validHeaderName(name string) bool {
 }
 
 // credentialRequired reports whether the auth mode needs a secret.
-func (c *Configuration) credentialRequired() bool { return c.AuthMode != AuthNone }
+func (c *Configuration) credentialRequired() bool { return connectors.SecretRequired(c.AuthMode) }
 
 // transportFingerprint identifies everything that affects how the gateway
 // reaches the upstream. Certification evidence is retained only while it is
 // unchanged.
 func (c *Configuration) transportFingerprint() string {
 	h := sha256.New()
-	encoded, _ := json.Marshal([]any{c.Kind, c.AuthMode, c.Endpoint, c.CloudRegion, c.CloudProject, c.Deployment, c.APIVersion, c.Options.CredentialHeaders})
+	encoded, _ := json.Marshal([]any{c.Kind, c.AuthMode, c.Endpoint, c.CloudRegion, c.CloudProject, c.Deployment, c.APIVersion, c.Options.CredentialHeaders, c.Options.ParameterDefaults, c.Options.Models, c.Options.VendorID})
 	h.Write(encoded)
 	return hex.EncodeToString(h.Sum(nil))[:32]
 }
@@ -186,4 +195,25 @@ func (c *Configuration) applyCredential(req *http.Request, credential []byte) er
 		return egress.ApplyCredentialHeaders(req.Header, c.Options.CredentialHeaders, credential)
 	}
 	return nil
+}
+
+func value(v *string) string {
+	if v == nil {
+		return ""
+	}
+	return *v
+}
+func (c *Configuration) transport() connectors.Config {
+	return connectors.Config{Kind: c.Kind, AuthMode: c.AuthMode, Endpoint: value(c.Endpoint), CloudRegion: value(c.CloudRegion), CloudProject: value(c.CloudProject), Deployment: value(c.Deployment), APIVersion: value(c.APIVersion), VendorID: value(c.Options.VendorID), CredentialHeaders: c.Options.CredentialHeaders, Models: c.Options.Models}
+}
+func reservedHeader(h string) bool {
+	h = strings.ToLower(h)
+	if strings.HasPrefix(h, "x-olp-") {
+		return true
+	}
+	switch h {
+	case "host", "content-length", "transfer-encoding", "connection", "cookie", "proxy-authorization", "proxy-connection", "upgrade", "te", "trailer", "content-type", "content-encoding", "accept", "traceparent", "tracestate", "x-request-id":
+		return true
+	}
+	return false
 }

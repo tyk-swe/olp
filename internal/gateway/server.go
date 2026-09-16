@@ -20,7 +20,9 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/egress"
+	"github.com/tyk-swe/olp/internal/protocols"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
 	"github.com/tyk-swe/olp/internal/providers"
 	"github.com/tyk-swe/olp/internal/runtime"
@@ -56,6 +58,7 @@ type Server struct {
 	cfg       Config
 	egress    *egress.Policy
 	client    *http.Client
+	auth      *connectors.Auth
 	admission chan struct{}
 	health    *healthTracker
 	now       func() time.Time
@@ -73,6 +76,7 @@ func New(rt Runtime, policy *egress.Policy, cfg Config, log *slog.Logger) *Serve
 		cfg:       cfg,
 		egress:    policy,
 		client:    policy.Client(upstreamHeaderTimeout),
+		auth:      connectors.NewAuth(policy),
 		admission: make(chan struct{}, max(cfg.MaxInFlight, 1)),
 		health:    newHealthTracker(time.Now),
 		now:       time.Now,
@@ -84,6 +88,7 @@ func (s *Server) Health() providers.HealthSource { return s.health }
 
 // Register mounts the OpenAI surface on the public mux.
 func (s *Server) Register(mux *http.ServeMux) {
+	s.registerNative(mux)
 	mux.HandleFunc("POST /v1/chat/completions", s.inference(openai.FamilyChat))
 	mux.HandleFunc("POST /v1/responses", s.inference(openai.FamilyResponses))
 	mux.HandleFunc("GET /v1/models", s.models)
@@ -146,7 +151,7 @@ func (s *Server) preflight(w http.ResponseWriter, r *http.Request) {
 	s.cors(w, r)
 	h := w.Header()
 	h.Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-	h.Set("Access-Control-Allow-Headers", "Authorization, Content-Type, X-Request-Id, X-OLP-Routing, OpenAI-Organization, OpenAI-Project, OpenAI-Beta, X-Stainless-Lang, X-Stainless-Package-Version, X-Stainless-OS, X-Stainless-Arch, X-Stainless-Runtime, X-Stainless-Runtime-Version, X-Stainless-Retry-Count, X-Stainless-Timeout, X-Stainless-Helper-Method")
+	h.Set("Access-Control-Allow-Headers", "Authorization, X-Api-Key, X-Goog-Api-Key, X-Goog-Api-Client, Anthropic-Version, Anthropic-Beta, Anthropic-Dangerous-Direct-Browser-Access, Content-Type, X-Request-Id, X-OLP-Routing, OpenAI-Organization, OpenAI-Project, OpenAI-Beta, X-Stainless-Lang, X-Stainless-Package-Version, X-Stainless-OS, X-Stainless-Arch, X-Stainless-Runtime, X-Stainless-Runtime-Version, X-Stainless-Retry-Count, X-Stainless-Timeout, X-Stainless-Helper-Method")
 	h.Set("Access-Control-Max-Age", "600")
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -202,6 +207,22 @@ func (s *Server) release() { <-s.admission }
 // checks the scope the endpoint needs.
 func (s *Server) authenticate(r *http.Request, scope string) (access.Authority, *Error) {
 	header := r.Header.Get("Authorization")
+	if header == "" {
+		switch requestSurface(r) {
+		case "anthropic":
+			if key := r.Header.Get("X-Api-Key"); key != "" {
+				header = "Bearer " + key
+			}
+		case "gemini":
+			key := r.Header.Get("X-Goog-Api-Key")
+			if key == "" {
+				key = r.URL.Query().Get("key")
+			}
+			if key != "" {
+				header = "Bearer " + key
+			}
+		}
+	}
 	if len(header) < 7 || !strings.EqualFold(header[:7], "Bearer ") {
 		return access.Authority{}, authenticationError("invalid_api_key", "Provide an API key as a bearer token in the Authorization header.")
 	}
@@ -275,32 +296,30 @@ func bodyReadError(err error) *Error {
 // route's published maximum.
 const routingHeader = "X-OLP-Routing"
 
+func routingPreferences(r *http.Request) (*runtime.Preferences, *Error) {
+	values := r.Header.Values("X-OLP-Routing")
+	if len(values) == 0 {
+		return nil, nil
+	}
+	param := "X-OLP-Routing"
+	if len(values) != 1 {
+		return nil, invalidRequest("invalid_request", "Provide exactly one X-OLP-Routing header.", &param)
+	}
+	p, err := runtime.ParsePreferences([]byte(values[0]))
+	if err != nil {
+		return nil, invalidRequest("invalid_request", err.Error(), &param)
+	}
+	return p, nil
+}
 func attemptBudget(r *http.Request, route *runtime.Route) (int, *Error) {
-	raw := r.Header.Get(routingHeader)
-	if raw == "" {
-		return route.MaxAttempts, nil
+	p, err := routingPreferences(r)
+	if err != nil {
+		return 0, err
 	}
-	param := routingHeader
-	var overrides *struct {
-		Strategy    *string `json:"strategy"`
-		MaxAttempts *int    `json:"max_attempts"`
+	if p != nil && p.MaxAttempts != nil && *p.MaxAttempts > route.MaxAttempts {
+		return 0, invalidRequest("invalid_request", "max_attempts cannot increase the published route budget.", nil)
 	}
-	dec := json.NewDecoder(strings.NewReader(raw))
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(&overrides); err != nil || overrides == nil || dec.Decode(new(any)) != io.EOF {
-		return 0, invalidRequest("invalid_request", "The X-OLP-Routing header must be a JSON object with supported overrides.", &param)
-	}
-	if overrides.Strategy != nil && *overrides.Strategy != "weighted" {
-		return 0, invalidRequest("invalid_request", "Only the weighted routing strategy is available.", &param)
-	}
-	budget := route.MaxAttempts
-	if overrides.MaxAttempts != nil {
-		if *overrides.MaxAttempts < 1 || *overrides.MaxAttempts > route.MaxAttempts {
-			return 0, invalidRequest("invalid_request", "max_attempts must be between 1 and the route's published maximum.", &param)
-		}
-		budget = *overrides.MaxAttempts
-	}
-	return budget, nil
+	return p.Budget(route.MaxAttempts), nil
 }
 
 func requestError(err error) *Error {
@@ -322,7 +341,7 @@ func selectionError(err error, model string) *Error {
 		case runtime.RouteNotFound:
 			return modelNotFound(model)
 		case runtime.OperationNotSupported:
-			return invalidRequest("invalid_request", "The model `"+model+"` does not allow generation requests.", nil)
+			return invalidRequest("invalid_request", "The model `"+model+"` does not allow this operation.", nil)
 		}
 	}
 	return serverError(http.StatusServiceUnavailable, "upstream_unavailable", "No provider is currently eligible to serve `"+model+"`.")
@@ -332,6 +351,7 @@ const requestBodyTimeout = 15 * time.Second
 
 func (s *Server) inference(family openai.Family) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		writeError := func(w http.ResponseWriter, e *Error) { writeSurfaceError(w, e, family.Surface()) }
 		x := &execution{request: s.begin(w, r), family: family, actor: "api_key"}
 		status := http.StatusInternalServerError
 		var out *outcome
@@ -372,7 +392,7 @@ func (s *Server) inference(family openai.Family) http.HandlerFunc {
 		// Keep the deadline on failed reads so HTTP/1 body draining stays
 		// bounded; successful uploads must not limit the inference stream.
 		rc.SetReadDeadline(time.Time{})
-		parsed, err := openai.Parse(family, body)
+		parsed, err := protocols.Parse(family, body, r.PathValue("model"))
 		if err != nil {
 			e = requestError(err)
 			x.failure, status = e, e.Status
@@ -380,16 +400,17 @@ func (s *Server) inference(family openai.Family) http.HandlerFunc {
 			return
 		}
 		x.parsed = parsed
+		if x.preferences, e = routingPreferences(r); e != nil {
+			x.failure, status = e, e.Status
+			writeError(w, e)
+			return
+		}
 		if e := s.prepare(x, func(slug string) bool { return authority.Allows("inference", slug, s.now()) }); e != nil {
 			x.failure, status = e, e.Status
 			writeError(w, e)
 			return
 		}
-		if x.budget, e = attemptBudget(r, x.route); e != nil {
-			x.failure, status = e, e.Status
-			writeError(w, e)
-			return
-		}
+
 		// Admission happens once the request is understood and before any
 		// provider is called, so a rejected request costs an upstream nothing.
 		// The lease outlives the route deadline it is sized against: it is the
@@ -468,12 +489,37 @@ func (s *Server) prepare(x *execution, permitted func(slug string) bool) *Error 
 	if !permitted(route.Slug) {
 		return permissionError("route_forbidden", "This API key is not allowed to use the model `"+route.Slug+"`.")
 	}
-	attempts, err := runtime.Select(snapshot, route.Slug, operationGeneration, surfaceOpenAI, x.mode, x.affinity)
+	var semantic error
+	plan, err := runtime.PlanRequest(snapshot, route.Slug, x.family.Operation(), x.family.Surface(), x.mode, x.affinity, runtime.SelectionOptions{
+		KeyID: x.keyID, Preferences: x.preferences, Parameters: protocols.ParameterNames(x.parsed), Inputs: s.routingInputs(), Now: s.now(), CheckSlots: true, CredentialRevoked: s.Runtime.Revoked,
+		Accept: func(p runtime.Provider, t runtime.Target) error {
+			cfg := p.Connector()
+			if !connectors.Supports(p.Kind, p.VendorID, x.family.Operation(), x.family.Surface(), x.mode) {
+				return errors.New("connector capability unavailable")
+			}
+			_, _, e := protocols.Encode(x.parsed, p.Kind, p.VendorID, cfg.Model(t.ProviderModel), p.ParameterDefaults)
+			if e != nil {
+				semantic = e
+			}
+			return e
+		}})
 	if err != nil {
-		return selectionError(err, route.Slug)
+		var se *runtime.SelectionError
+		if errors.As(err, &se) && se.Code != runtime.NoEligibleTargets && se.Code != "attempt_budget_increase_forbidden" {
+			return selectionError(err, route.Slug)
+		}
+		return requestError(err)
 	}
-	x.attempts = attempts
-	x.budget = route.MaxAttempts
+	x.decisions = plan.Decisions
+	x.policy = plan.Policy
+	x.attempts = plan.Attempts
+	x.budget = plan.Budget
+	if len(plan.Attempts) == 0 {
+		if semantic != nil {
+			return requestError(semantic)
+		}
+		return selectionError(&runtime.SelectionError{Code: runtime.NoEligibleTargets}, route.Slug)
+	}
 	return nil
 }
 
@@ -583,15 +629,15 @@ func (sw *streamWriter) finish(out *outcome) int {
 	}
 	if !sw.committed {
 		if out.err.Status > 0 {
-			writeError(sw.w, out.err)
+			writeSurfaceError(sw.w, out.err, sw.family.Surface())
 		}
 		return out.err.Status
 	}
 	// The response is committed: signal the failure in-band the way the
 	// official SDKs detect it, then end the stream without a completion
 	// marker so the client cannot mistake it for success.
-	frame := "data: " + string(out.err.body()) + "\n\n"
-	if sw.family == openai.FamilyResponses {
+	frame := "data: " + string(out.err.surfaceBody(sw.family.Surface())) + "\n\n"
+	if sw.family == openai.FamilyResponses || sw.family.Surface() == "anthropic" {
 		frame = "event: error\n" + frame
 	}
 	sw.emit([]byte(frame))

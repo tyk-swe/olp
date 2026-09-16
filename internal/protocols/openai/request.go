@@ -12,6 +12,7 @@ import (
 	"regexp"
 	"sort"
 	"strconv"
+	"strings"
 )
 
 // OperationGeneration is the gateway operation both codecs map to.
@@ -21,9 +22,39 @@ const OperationGeneration = "generation"
 type Family string
 
 const (
-	FamilyChat      Family = "chat"
-	FamilyResponses Family = "responses"
+	FamilyChat           Family = "chat"
+	FamilyResponses      Family = "responses"
+	FamilyInputTokens    Family = "input_tokens"
+	FamilyEmbeddings     Family = "embeddings"
+	FamilyModeration     Family = "moderation"
+	FamilyAnthropic      Family = "anthropic"
+	FamilyAnthropicCount Family = "anthropic_count"
+	FamilyGemini         Family = "gemini"
+	FamilyGeminiStream   Family = "gemini_stream"
+	FamilyGeminiCount    Family = "gemini_count"
 )
+
+func (f Family) Operation() string {
+	switch f {
+	case FamilyInputTokens, FamilyAnthropicCount, FamilyGeminiCount:
+		return "token_count"
+	case FamilyEmbeddings:
+		return "embeddings"
+	case FamilyModeration:
+		return "moderation"
+	}
+	return OperationGeneration
+}
+
+func (f Family) Surface() string {
+	switch f {
+	case FamilyAnthropic, FamilyAnthropicCount:
+		return "anthropic"
+	case FamilyGemini, FamilyGeminiStream, FamilyGeminiCount:
+		return "gemini"
+	}
+	return "openai"
+}
 
 // RouteSlug is the published-route identifier carried in the model field.
 var RouteSlug = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,99}$`)
@@ -56,6 +87,20 @@ type Request struct {
 // Field returns a top-level field verbatim, or nil when absent.
 func (r *Request) Field(name string) json.RawMessage { return r.fields[name] }
 
+// Document returns a copy of the source envelope for a codec to rewrite.
+func (r *Request) Document() map[string]json.RawMessage {
+	out := make(map[string]json.RawMessage, len(r.fields))
+	for k, v := range r.fields {
+		out[k] = v
+	}
+	return out
+}
+
+// NewEnvelope is used by native codecs after validating their own wire grammar.
+func NewEnvelope(family Family, route string, stream bool, fields map[string]json.RawMessage) *Request {
+	return &Request{Family: family, Route: route, Stream: stream, fields: fields}
+}
+
 // Parse validates the gateway envelope of one request document.
 func Parse(family Family, data []byte) (*Request, error) {
 	fields, err := object(data)
@@ -86,11 +131,38 @@ func parseFields(family Family, fields map[string]json.RawMessage) (*Request, er
 		err = r.validateChat()
 	case FamilyResponses:
 		err = validateResponses(fields)
+	case FamilyInputTokens:
+		err = validateResponses(fields)
+	case FamilyEmbeddings, FamilyModeration:
+		if raw, ok := fields["input"]; !ok || isNull(raw) {
+			err = invalid("input", "input is required.")
+		} else if _, ok := stringField(fields, "input"); !ok {
+			if items, ok := arrayField(fields, "input"); !ok || len(items) == 0 {
+				err = invalid("input", "input must be text or a non-empty array.")
+			}
+		}
+		if family == FamilyEmbeddings {
+			if !validEmbeddingInput(fields["input"]) {
+				err = invalid("input", "Embedding input must be text, text arrays, token IDs, or batches of token IDs.")
+			}
+			if e := integerField(fields, "dimensions", true); e != nil {
+				err = e
+			}
+			if raw, present := fields["encoding_format"]; present && !isNull(raw) {
+				format, ok := stringField(fields, "encoding_format")
+				if !ok || (format != "float" && format != "base64") {
+					err = invalid("encoding_format", "encoding_format must be float or base64.")
+				}
+			}
+		}
 	default:
 		return nil, errors.New("unknown request family")
 	}
 	if err != nil {
 		return nil, err
+	}
+	if family.Operation() != OperationGeneration && r.Stream {
+		return nil, invalid("stream", "This operation supports unary requests only.")
 	}
 	if raw, present := fields["top_logprobs"]; present && !isNull(raw) {
 		n, ok := int64Field(fields, "top_logprobs")
@@ -304,9 +376,12 @@ func ValidateDefaults(defaults map[string]json.RawMessage) error {
 		"input":    json.RawMessage(`"check"`),
 	}
 	for name, value := range defaults {
+		if strings.HasPrefix(name, "/") || len(value) > 8192 {
+			return invalid(name, "Invalid default name or oversized value.")
+		}
 		switch name {
-		case "", "model", "stream", "messages", "input":
-			return invalid(name, "Defaults cannot set the model, stream, messages, or input fields.")
+		case "", "model", "stream", "messages", "input", "contents", "system", "systemInstruction", "generateContentRequest", "routing", "provider", "route", "headers", "tools", "functions":
+			return invalid(name, "Defaults cannot set transport, routing, or input envelope fields.")
 		}
 		fields[name] = value
 	}

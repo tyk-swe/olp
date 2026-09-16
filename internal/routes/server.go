@@ -15,11 +15,13 @@ import (
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/runtime"
+	"github.com/tyk-swe/olp/internal/usage"
 )
 
 // Server serves the route management surface.
 type Server struct {
 	Access *access.Server
+	Inputs func() *usage.RoutingInputs
 }
 
 // New prepares the route surface.
@@ -33,7 +35,7 @@ const (
 	maxTargetWeight = 1000000
 )
 
-var supportedOperations = []string{"generation"}
+var supportedOperations = []string{"generation", "token_count", "embeddings", "moderation"}
 
 type draft struct {
 	ID               string
@@ -205,7 +207,7 @@ func validateInput(ctx context.Context, q access.Queryer, in *draftInput, existi
 		return nil, access.Invalid("slug", "Use 1–100 lowercase letters, digits, dots, underscores, or hyphens, starting with a letter or digit.")
 	}
 	if len(in.Operations) == 0 {
-		in.Operations = slices.Clone(supportedOperations)
+		in.Operations = []string{"generation"}
 	}
 	for _, op := range in.Operations {
 		if !slices.Contains(supportedOperations, op) {

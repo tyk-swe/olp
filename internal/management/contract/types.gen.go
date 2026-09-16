@@ -5,7 +5,6 @@ package contract
 
 import (
 	"encoding/json"
-	"fmt"
 	"time"
 
 	"github.com/oapi-codegen/nullable"
@@ -1684,12 +1683,22 @@ type RoutingPolicy_Defaults struct {
 
 // RoutingPreferences defines model for RoutingPreferences.
 type RoutingPreferences struct {
-	AllowFallbacks         nullable.Nullable[bool]            `json:"allow_fallbacks,omitempty"`
-	Order                  nullable.Nullable[[]string]        `json:"order,omitempty"`
-	PreferredMaxLatencyMs  nullable.Nullable[int64]           `json:"preferred_max_latency_ms,omitempty"`
-	PreferredMinThroughput nullable.Nullable[int64]           `json:"preferred_min_throughput,omitempty"`
-	Strategy               nullable.Nullable[RoutingStrategy] `json:"strategy,omitempty"`
-	union                  json.RawMessage
+	AllowFallbacks     nullable.Nullable[bool] `json:"allow_fallbacks,omitempty"`
+	DenyDataCollection *bool                   `json:"deny_data_collection,omitempty"`
+	Ignore             *[]string               `json:"ignore,omitempty"`
+
+	// MaxAttempts Optional request ceiling; cannot exceed the published route budget.
+	MaxAttempts              nullable.Nullable[int]             `json:"max_attempts,omitempty"`
+	MaxPrice                 nullable.Nullable[PriceCeiling]    `json:"max_price,omitempty"`
+	Only                     nullable.Nullable[[]string]        `json:"only,omitempty"`
+	Order                    nullable.Nullable[[]string]        `json:"order,omitempty"`
+	PreferredMaxLatencyMs    nullable.Nullable[int64]           `json:"preferred_max_latency_ms,omitempty"`
+	PreferredMinThroughput   nullable.Nullable[int64]           `json:"preferred_min_throughput,omitempty"`
+	Quantizations            nullable.Nullable[[]string]        `json:"quantizations,omitempty"`
+	Regions                  nullable.Nullable[[]string]        `json:"regions,omitempty"`
+	RequireParameters        *bool                              `json:"require_parameters,omitempty"`
+	RequireZeroDataRetention *bool                              `json:"require_zero_data_retention,omitempty"`
+	Strategy                 nullable.Nullable[RoutingStrategy] `json:"strategy,omitempty"`
 }
 
 // RoutingPrice defines model for RoutingPrice.
@@ -2756,131 +2765,5 @@ func (t RoutingPolicy_Defaults) MarshalJSON() ([]byte, error) {
 
 func (t *RoutingPolicy_Defaults) UnmarshalJSON(b []byte) error {
 	err := t.union.UnmarshalJSON(b)
-	return err
-}
-
-// AsRoutingConstraints returns the union data inside the RoutingPreferences as a RoutingConstraints
-func (t RoutingPreferences) AsRoutingConstraints() (RoutingConstraints, error) {
-	var body RoutingConstraints
-	err := json.Unmarshal(t.union, &body)
-	return body, err
-}
-
-// FromRoutingConstraints overwrites any union data inside the RoutingPreferences as the provided RoutingConstraints
-func (t *RoutingPreferences) FromRoutingConstraints(v RoutingConstraints) error {
-	b, err := json.Marshal(v)
-	t.union = b
-	return err
-}
-
-// MergeRoutingConstraints performs a merge with any union data inside the RoutingPreferences, using the provided RoutingConstraints
-func (t *RoutingPreferences) MergeRoutingConstraints(v RoutingConstraints) error {
-	b, err := json.Marshal(v)
-	if err != nil {
-		return err
-	}
-
-	merged, err := runtime.JSONMerge(t.union, b)
-	t.union = merged
-	return err
-}
-
-func (t RoutingPreferences) MarshalJSON() ([]byte, error) {
-	b, err := t.union.MarshalJSON()
-	if err != nil {
-		return nil, err
-	}
-	object := make(map[string]json.RawMessage)
-	if t.union != nil {
-		err = json.Unmarshal(b, &object)
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	if t.AllowFallbacks != nil {
-		object["allow_fallbacks"], err = json.Marshal(t.AllowFallbacks)
-		if err != nil {
-			return nil, fmt.Errorf("error marshaling 'allow_fallbacks': %w", err)
-		}
-	}
-
-	if t.Order != nil {
-		object["order"], err = json.Marshal(t.Order)
-		if err != nil {
-			return nil, fmt.Errorf("error marshaling 'order': %w", err)
-		}
-	}
-
-	if t.PreferredMaxLatencyMs != nil {
-		object["preferred_max_latency_ms"], err = json.Marshal(t.PreferredMaxLatencyMs)
-		if err != nil {
-			return nil, fmt.Errorf("error marshaling 'preferred_max_latency_ms': %w", err)
-		}
-	}
-
-	if t.PreferredMinThroughput != nil {
-		object["preferred_min_throughput"], err = json.Marshal(t.PreferredMinThroughput)
-		if err != nil {
-			return nil, fmt.Errorf("error marshaling 'preferred_min_throughput': %w", err)
-		}
-	}
-
-	if t.Strategy != nil {
-		object["strategy"], err = json.Marshal(t.Strategy)
-		if err != nil {
-			return nil, fmt.Errorf("error marshaling 'strategy': %w", err)
-		}
-	}
-	b, err = json.Marshal(object)
-	return b, err
-}
-
-func (t *RoutingPreferences) UnmarshalJSON(b []byte) error {
-	err := t.union.UnmarshalJSON(b)
-	if err != nil {
-		return err
-	}
-	object := make(map[string]json.RawMessage)
-	err = json.Unmarshal(b, &object)
-	if err != nil {
-		return err
-	}
-
-	if raw, found := object["allow_fallbacks"]; found {
-		err = json.Unmarshal(raw, &t.AllowFallbacks)
-		if err != nil {
-			return fmt.Errorf("error reading 'allow_fallbacks': %w", err)
-		}
-	}
-
-	if raw, found := object["order"]; found {
-		err = json.Unmarshal(raw, &t.Order)
-		if err != nil {
-			return fmt.Errorf("error reading 'order': %w", err)
-		}
-	}
-
-	if raw, found := object["preferred_max_latency_ms"]; found {
-		err = json.Unmarshal(raw, &t.PreferredMaxLatencyMs)
-		if err != nil {
-			return fmt.Errorf("error reading 'preferred_max_latency_ms': %w", err)
-		}
-	}
-
-	if raw, found := object["preferred_min_throughput"]; found {
-		err = json.Unmarshal(raw, &t.PreferredMinThroughput)
-		if err != nil {
-			return fmt.Errorf("error reading 'preferred_min_throughput': %w", err)
-		}
-	}
-
-	if raw, found := object["strategy"]; found {
-		err = json.Unmarshal(raw, &t.Strategy)
-		if err != nil {
-			return fmt.Errorf("error reading 'strategy': %w", err)
-		}
-	}
-
 	return err
 }

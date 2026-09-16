@@ -1,0 +1,264 @@
+package runtime
+
+import (
+	"encoding/json"
+	"slices"
+	"sort"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/tyk-swe/olp/internal/usage"
+)
+
+type SelectionOptions struct {
+	KeyID             string
+	Preferences       *Preferences
+	Parameters        []string
+	Inputs            *usage.RoutingInputs
+	Now               time.Time
+	CheckSlots        bool
+	CredentialRevoked func(string) bool
+	Accept            func(Provider, Target) error
+}
+type Decision struct {
+	TargetID           string              `json:"target_id"`
+	ProviderID         string              `json:"provider_id"`
+	UpstreamModel      string              `json:"upstream_model"`
+	Eligible           bool                `json:"eligible"`
+	Priority           int                 `json:"priority"`
+	Strategy           string              `json:"strategy"`
+	Attempt            *int                `json:"attempt"`
+	CredentialSlotID   *string             `json:"credential_slot_id"`
+	Reason             *string             `json:"reason"`
+	Price              *usage.RoutingPrice `json:"price"`
+	Performance        *usage.Performance  `json:"performance"`
+	VendorID           *string             `json:"vendor_id"`
+	MetadataObservedAt *time.Time          `json:"metadata_observed_at"`
+}
+type Plan struct {
+	Attempts  []Attempt
+	Decisions []Decision
+	Policy    EffectivePolicy
+	Budget    int
+}
+type rankedCandidate struct {
+	slots      []Slot
+	attempt    Attempt
+	decision   Decision
+	order      int
+	preference int
+}
+
+func PlanRequest(s *Snapshot, slug, operation, surface, mode string, affinity []byte, options SelectionOptions) (Plan, error) {
+	plan := Plan{Attempts: []Attempt{}, Decisions: []Decision{}}
+	route, ok := s.Routes[slug]
+	if !ok {
+		return plan, &SelectionError{Code: RouteNotFound}
+	}
+	if !slices.Contains(route.Operations, operation) {
+		return plan, &SelectionError{Code: OperationNotSupported}
+	}
+	policy, e := ResolvePolicy(s.InstallationPolicy, route.Policy, s.KeyPolicies[options.KeyID], options.Preferences)
+	if e != nil {
+		return plan, e
+	}
+	plan.Policy = policy
+	if options.Preferences != nil && options.Preferences.MaxAttempts != nil && *options.Preferences.MaxAttempts > route.MaxAttempts {
+		return plan, unsupportedBudget()
+	}
+	plan.Budget = policy.Preferences.Budget(route.MaxAttempts)
+	now := options.Now
+	if now.IsZero() {
+		now = time.Now()
+	}
+	routeID, e := uuid.Parse(route.RoutingID)
+	if e != nil {
+		return plan, &SelectionError{Code: NoEligibleTargets}
+	}
+	rows := make([]rankedCandidate, 0, len(route.Targets))
+	for _, target := range route.Targets {
+		provider, exists := s.Providers[target.ProviderID]
+		row := rankedCandidate{decision: Decision{TargetID: target.ID, ProviderID: target.ProviderID, UpstreamModel: target.ProviderModel, Priority: target.Priority, Strategy: policy.Strategy}, order: len(policy.Preferences.Order)}
+		if provider.VendorID != "" {
+			row.decision.VendorID = &provider.VendorID
+		}
+		var metadata ModelMetadata
+		_ = json.Unmarshal(provider.Models[target.ProviderModel], &metadata)
+		row.decision.MetadataObservedAt = metadata.ObservedAt
+		row.decision.Price = options.Inputs.Price(provider.Kind, provider.ID, provider.VendorID, target.ProviderModel, operation, now)
+		row.decision.Performance = options.Inputs.Metrics(provider.ID, target.ProviderModel, operation, mode, now)
+		reason := ""
+		switch {
+		case !exists:
+			reason = "target_unknown"
+		case !provider.Enabled:
+			reason = "provider_not_active"
+		case !provider.Supports(target.ProviderModel, operation, surface, mode):
+			reason = "capability_not_certified"
+		}
+		if reason == "" {
+			reason = constraintReason(policy, provider, metadata, row.decision.Price, options.Parameters)
+		}
+		for index, selector := range policy.Preferences.Order {
+			if selectorMatches(selector, provider) {
+				row.order = index
+				break
+			}
+		}
+		if reason == "" && policy.Preferences.AllowFallbacks != nil && !*policy.Preferences.AllowFallbacks && len(policy.Preferences.Order) > 0 && row.order == len(policy.Preferences.Order) {
+			reason = "outside_preferred_order"
+		}
+		if reason == "" && options.CheckSlots {
+			row.slots = SelectSlots(provider, target.ProviderModel, route, options.KeyID, operation, surface, mode, affinity)
+			if options.CredentialRevoked != nil {
+				row.slots = slices.DeleteFunc(row.slots, func(slot Slot) bool { return slot.CredentialID != nil && options.CredentialRevoked(*slot.CredentialID) })
+			}
+			if len(row.slots) == 0 {
+				reason = "no_eligible_credentials"
+			}
+		}
+
+		if reason == "" && options.Accept != nil {
+			if e := options.Accept(provider, target); e != nil {
+				reason = "unsupported_request_semantics"
+			}
+		}
+		targetID, e := uuid.Parse(target.RoutingID)
+		if e != nil {
+			reason = "target_unknown"
+		}
+		if reason != "" {
+			row.decision.Reason = &reason
+		} else {
+			row.decision.Eligible = true
+		}
+		row.attempt = Attempt{TargetID: target.ID, ProviderID: target.ProviderID, ProviderRevisionID: provider.RevisionID, ProviderKind: provider.Kind, UpstreamModel: target.ProviderModel, Timeout: time.Duration(target.Timeout) * time.Millisecond, Priority: target.Priority, Score: Score(routeID, targetID, target.Weight, operation, surface, mode, affinity), Strategy: policy.Strategy, PolicyDigest: policy.Digest, Price: row.decision.Price, Performance: row.decision.Performance, VendorID: provider.VendorID}
+		perf := row.decision.Performance
+		if policy.Strategy == "latency" && policy.Preferences.PreferredMaxLatencyMS != nil && (perf == nil || perf.LatencyMS > float64(*policy.Preferences.PreferredMaxLatencyMS)) {
+			row.preference = 1
+		}
+		if policy.Strategy == "throughput" && policy.Preferences.PreferredMinThroughput != nil && (perf == nil || perf.Throughput == nil || *perf.Throughput < float64(*policy.Preferences.PreferredMinThroughput)) {
+			row.preference = 1
+		}
+		rows = append(rows, row)
+	}
+	sort.SliceStable(rows, func(i, j int) bool {
+		a, b := rows[i], rows[j]
+		if a.decision.Eligible != b.decision.Eligible {
+			return a.decision.Eligible
+		}
+		if a.attempt.Priority != b.attempt.Priority {
+			return a.attempt.Priority < b.attempt.Priority
+		}
+		if a.order != b.order {
+			return a.order < b.order
+		}
+		if a.preference != b.preference {
+			return a.preference < b.preference
+		}
+		switch policy.Strategy {
+		case "price":
+			ap, bp := a.decision.Price.Scalar(operation), b.decision.Price.Scalar(operation)
+			if (ap == nil) != (bp == nil) {
+				return ap != nil
+			}
+			if ap != nil && ap.Cmp(bp) != 0 {
+				return ap.Cmp(bp) < 0
+			}
+		case "latency", "throughput":
+			ap, bp := a.decision.Performance, b.decision.Performance
+			if policy.Strategy == "throughput" {
+				if ap != nil && ap.Throughput == nil {
+					ap = nil
+				}
+				if bp != nil && bp.Throughput == nil {
+					bp = nil
+				}
+			}
+			if (ap == nil) != (bp == nil) {
+				return ap != nil
+			}
+			if ap != nil {
+				if policy.Strategy == "latency" && ap.LatencyMS != bp.LatencyMS {
+					return ap.LatencyMS < bp.LatencyMS
+				}
+				if policy.Strategy == "throughput" && *ap.Throughput != *bp.Throughput {
+					return *ap.Throughput > *bp.Throughput
+				}
+			}
+		}
+		return a.attempt.Score > b.attempt.Score
+	})
+	ordinal := 0
+	for _, row := range rows {
+		if !row.decision.Eligible {
+			plan.Decisions = append(plan.Decisions, row.decision)
+			continue
+		}
+		plan.Attempts = append(plan.Attempts, row.attempt)
+		count := len(row.slots)
+		if !options.CheckSlots {
+			count = 1
+		}
+		for i := 0; i < count; i++ {
+			decision := row.decision
+			if options.CheckSlots {
+				id := row.slots[i].ID
+				decision.CredentialSlotID = &id
+			}
+			ordinal++
+			if ordinal <= plan.Budget {
+				n := ordinal
+				decision.Attempt = &n
+			} else {
+				decision.Eligible = false
+				reason := "attempt_budget_exhausted"
+				decision.Reason = &reason
+			}
+			plan.Decisions = append(plan.Decisions, decision)
+		}
+	}
+
+	return plan, nil
+}
+func constraintReason(policy EffectivePolicy, p Provider, m ModelMetadata, price *usage.RoutingPrice, parameters []string) string {
+	for _, c := range policy.Constraints {
+		if c.Only != nil && !anySelector(c.Only, p) {
+			return "provider_not_allowed"
+		}
+		if anySelector(c.Ignore, p) {
+			return "provider_ignored"
+		}
+		if !factAllowed(c.Regions, m.Region) {
+			return "region_not_allowed"
+		}
+		if !factAllowed(c.Quantizations, m.Quantization) {
+			return "quantization_not_allowed"
+		}
+		if required(c.DenyDataCollection) && (m.DataCollection == nil || *m.DataCollection || m.Source == nil || m.ObservedAt == nil) {
+			return "data_collection_not_allowed"
+		}
+		if required(c.RequireZeroDataRetention) && (m.ZeroDataRetention == nil || !*m.ZeroDataRetention || m.Source == nil || m.ObservedAt == nil) {
+			return "zero_data_retention_required"
+		}
+		if required(c.RequireParameters) && len(parameters) > 0 {
+			if m.SupportedParameters == nil {
+				return "parameters_unknown"
+			}
+			for _, name := range parameters {
+				if !slices.Contains(*m.SupportedParameters, name) {
+					return "parameter_not_supported"
+				}
+			}
+		}
+		if len(c.MaxPrice) > 0 && string(c.MaxPrice) != "null" {
+			var ceiling PriceCeiling
+			_ = json.Unmarshal(c.MaxPrice, &ceiling)
+			if price == nil || !lessOrEqual(price.InputPerMillion, ceiling.Input) || !lessOrEqual(price.OutputPerMillion, ceiling.Output) || !lessOrEqual(price.UnitPrice, ceiling.Unit) {
+				return "price_ceiling_exceeded_or_unknown"
+			}
+		}
+	}
+	return ""
+}
+func unsupportedBudget() error { return &SelectionError{Code: "attempt_budget_increase_forbidden"} }

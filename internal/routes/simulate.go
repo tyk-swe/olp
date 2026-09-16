@@ -1,46 +1,20 @@
 package routes
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
-	"maps"
 	"net/http"
 	"slices"
-	"sort"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
 	"github.com/tyk-swe/olp/internal/access"
-	"github.com/tyk-swe/olp/internal/management"
+	"github.com/tyk-swe/olp/internal/protocols"
 	"github.com/tyk-swe/olp/internal/runtime"
+	"github.com/tyk-swe/olp/internal/usage"
 )
-
-const policyETag = "00000000-0000-0000-0000-000000000000"
-
-// defaultPolicy is the only routing policy this release applies: weighted
-// rendezvous selection without constraints. Policy editing arrives in M5.
-func defaultPolicy() map[string]any {
-	constraints := map[string]any{"deny_data_collection": false, "ignore": []string{}, "max_price": nil, "only": nil, "quantizations": nil, "regions": nil, "require_parameters": false, "require_zero_data_retention": false}
-	// The contract composes RoutingPreferences from the closed RoutingConstraints
-	// schema, so defaults carry only constraint fields; the preference fields
-	// (strategy, order, allow_fallbacks, latency and throughput targets) are
-	// optional and stay unset until M5 introduces routing strategies.
-	return map[string]any{"allowed_strategies": nil, "constraints": constraints, "defaults": maps.Clone(constraints)}
-}
-
-func (s *Server) policy(r *http.Request) (access.Reply, error) {
-	if _, err := s.Access.Principal(r, s.Access.Pool, "read"); err != nil {
-		return access.Reply{}, err
-	}
-	switch r.PathValue("scope") {
-	case "installation", "route-draft", "api-key":
-	default:
-		return access.Reply{}, access.Fail(404, "not_found", "Unknown policy scope.")
-	}
-	return access.Detail(map[string]any{"policy": defaultPolicy(), "etag": policyETag}, policyETag), nil
-}
 
 type simulateDraftRequest struct {
 	Operation   string       `json:"operation"`
@@ -54,98 +28,13 @@ func validTuple(operation, surface, mode string) error {
 	if !slices.Contains(supportedOperations, operation) {
 		return access.Fail(422, "operation_unavailable", "The "+operation+" operation is not available in this release.")
 	}
-	if surface != "openai" {
-		return access.Fail(422, "surface_unavailable", "Only the openai surface is available in this release.")
+	if !slices.Contains([]string{"openai", "anthropic", "gemini"}, surface) {
+		return access.Fail(422, "surface_unavailable", "Use the openai, anthropic, or gemini surface.")
 	}
-	if mode != "unary" && mode != "streaming" {
+	if mode != "unary" && mode != "streaming" || operation != "generation" && mode != "unary" {
 		return access.Fail(422, "mode_unavailable", "Use the unary or streaming mode.")
 	}
 	return nil
-}
-
-type candidate struct {
-	target   runtime.PublishedTarget
-	live     *resolved
-	reason   string
-	score    float64
-	attempt  int
-	eligible bool
-}
-
-// rank orders eligible targets the way the gateway will: priority ascending,
-// rendezvous score descending, and assigns attempt numbers within the budget.
-func rank(routingID, slug, keyID string, targets []runtime.PublishedTarget, live map[string]*resolved, operation, surface, mode string, seed []byte, budget int) []*candidate {
-	routeID := uuid.MustParse(routingID)
-	out := make([]*candidate, 0, len(targets))
-	for _, t := range targets {
-		c := &candidate{target: t, live: live[t.ProviderModelID]}
-		switch {
-		case c.live == nil:
-			c.reason = "target_unknown"
-		case c.live.ProviderState != "active":
-			c.reason = "provider_not_active"
-		case !c.live.Published:
-			c.reason = "model_not_published"
-		case !c.live.Certified[operation+"/"+surface+"/"+mode]:
-			c.reason = "capability_not_certified"
-		case !c.live.hasCredential(slug, keyID):
-			c.reason = "no_eligible_credentials"
-		default:
-			c.eligible = true
-			c.score = runtime.Score(routeID, uuid.MustParse(t.ProviderModelID), t.Weight, operation, surface, mode, seed)
-		}
-		out = append(out, c)
-	}
-	order := slices.Clone(out)
-	sort.SliceStable(order, func(i, j int) bool {
-		a, b := order[i], order[j]
-		if a.eligible != b.eligible {
-			return a.eligible
-		}
-		if a.target.Priority != b.target.Priority {
-			return a.target.Priority < b.target.Priority
-		}
-		return a.score > b.score
-	})
-	attempt := 0
-	for _, c := range order {
-		if !c.eligible {
-			continue
-		}
-		attempt++
-		if attempt <= budget {
-			c.attempt = attempt
-		} else {
-			c.eligible, c.reason = false, "attempt_budget_exhausted"
-		}
-	}
-	return order
-}
-
-func (r *resolved) hasCredential(slug, keyID string) bool {
-	for _, slot := range r.Slots {
-		if slot.Allows(r.ProviderModel, slug, keyID) && (r.AuthMode == "none" || slot.CredentialID != nil) {
-			return true
-		}
-	}
-	return false
-}
-
-func (c *candidate) decision() map[string]any {
-	var attempt any
-	if c.attempt > 0 {
-		attempt = c.attempt
-	}
-	var reason any
-	if c.reason != "" {
-		reason = c.reason
-	}
-	providerID := c.target.ProviderID
-	model := c.target.ProviderModel
-	if c.live != nil {
-		providerID, model = c.live.ProviderID, c.live.ProviderModel
-	}
-	return map[string]any{"target_id": c.target.ID, "provider_id": providerID, "upstream_model": model, "eligible": c.eligible, "priority": c.target.Priority, "strategy": "weighted", "attempt": attempt, "credential_slot_id": nil, "reason": reason, "price": nil, "performance": nil, "vendor_id": nil, "metadata_observed_at": nil}
 }
 
 func (s *Server) simulateDraft(r *http.Request) (access.Reply, error) {
@@ -181,23 +70,48 @@ func (s *Server) simulateDraft(r *http.Request) (access.Reply, error) {
 	if err = s.Access.Pool.QueryRow(r.Context(), "SELECT id::text FROM olp_go.routes WHERE slug=$1", d.Slug).Scan(&routingID); err != nil && !isNoRows(err) {
 		return access.Reply{}, err
 	}
+	tx, err := s.Access.Pool.Begin(r.Context())
+	if err != nil {
+		return access.Reply{}, err
+	}
+	defer tx.Rollback(r.Context())
+	snapshot, err := runtime.Compile(r.Context(), tx)
+	if err != nil {
+		return access.Reply{}, err
+	}
+	route := simulationRoute(routingID, d.Slug, d.Operations, d.OverallTimeoutMS, d.MaxAttempts, d.Targets)
+	route.Policy, _, err = loadPolicy(r.Context(), tx, "route-draft", d.ID, false)
+	if err != nil {
+		return access.Reply{}, err
+	}
+	snapshot.Routes[d.Slug] = route
+	inputs, err := s.routingInputs(r, tx)
+	if err != nil {
+		return access.Reply{}, err
+	}
+	revoked, err := routeRevocations(r.Context(), tx, snapshot, route)
+	if err != nil {
+		return access.Reply{}, err
+	}
+	plan, err := runtime.PlanRequest(snapshot, d.Slug, input.Operation, input.Surface, input.Mode, []byte(input.Seed), runtime.SelectionOptions{Preferences: input.Preferences, Inputs: inputs, CheckSlots: true, CredentialRevoked: revoked})
+	if err != nil {
+		return access.Reply{}, err
+	}
 	targets := []map[string]any{}
-	for _, c := range rank(routingID, d.Slug, "", d.Targets, live, input.Operation, input.Surface, input.Mode, []byte(input.Seed), input.Preferences.Budget(d.MaxAttempts)) {
-		decision := c.decision()
-		var attempt any
-		if c.attempt > 0 {
-			attempt = c.attempt
+	for _, decision := range plan.Decisions {
+		var name string
+		for _, t := range d.Targets {
+			if t.ID == decision.TargetID {
+				name = t.ProviderName
+				if l := live[t.ProviderModelID]; l != nil {
+					name = l.ProviderName
+				}
+				break
+			}
 		}
-		targets = append(targets, map[string]any{"target_id": c.target.ID, "provider_id": decision["provider_id"], "provider_name": providerName(c), "provider_model": decision["upstream_model"], "priority": c.target.Priority, "eligible": c.eligible, "attempt": attempt, "reason": decision["reason"], "decision": decision})
+		targets = append(targets, map[string]any{"target_id": decision.TargetID, "provider_id": decision.ProviderID, "provider_name": name, "provider_model": decision.UpstreamModel, "priority": decision.Priority, "eligible": decision.Eligible, "attempt": decision.Attempt, "reason": decision.Reason, "decision": decision})
 	}
 	return access.OK(map[string]any{"deterministic_seed": input.Seed, "operation": input.Operation, "surface": input.Surface, "mode": input.Mode, "targets": targets}), nil
-}
-
-func providerName(c *candidate) string {
-	if c.live != nil {
-		return c.live.ProviderName
-	}
-	return c.target.ProviderName
 }
 
 func isNoRows(err error) bool { return errors.Is(err, pgx.ErrNoRows) }
@@ -280,26 +194,41 @@ func (s *Server) simulateRouting(r *http.Request) (access.Reply, error) {
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	var routeID string
-	var targets []byte
-	var budget int
-	if err = tx.QueryRow(r.Context(), "SELECT r.id::text,v.targets,v.max_attempts FROM olp_go.routes r JOIN olp_go.route_revisions v ON v.id=r.latest_revision_id WHERE r.slug=$1", slug).Scan(&routeID, &targets, &budget); err != nil {
-		return access.Reply{}, err
-	}
-	var published []runtime.PublishedTarget
-	if err = json.Unmarshal(targets, &published); err != nil {
-		return access.Reply{}, err
-	}
-	live, err := resolve(r.Context(), tx, published)
+	snapshot, err := runtime.Compile(r.Context(), tx)
 	if err != nil {
 		return access.Reply{}, err
 	}
-	decisions := []map[string]any{}
-	for _, c := range rank(routeID, slug, keyID, published, live, operation, input.Surface, input.Mode, []byte(input.Seed), input.Preferences.Budget(budget)) {
-		if keyReason != "" {
-			c.eligible, c.attempt, c.reason = false, 0, keyReason
+	inputs, err := s.routingInputs(r, tx)
+	if err != nil {
+		return access.Reply{}, err
+	}
+	revoked, err := routeRevocations(r.Context(), tx, snapshot, snapshot.Routes[slug])
+	if err != nil {
+		return access.Reply{}, err
+	}
+	options := runtime.SelectionOptions{KeyID: keyID, Preferences: input.Preferences, Inputs: inputs, CheckSlots: true, CredentialRevoked: revoked}
+	parsed, err := protocols.SimulationRequest(input.Operation["request"], operation, input.Surface, input.Mode, slug)
+	if err != nil {
+		return access.Reply{}, access.Invalid("operation.request", err.Error())
+	}
+	options.Parameters = protocols.ParameterNames(parsed)
+	options.Accept = func(p runtime.Provider, t runtime.Target) error {
+		_, _, err := protocols.Encode(parsed, p.Kind, p.VendorID, p.Connector().Model(t.ProviderModel), p.ParameterDefaults)
+		return err
+	}
+
+	plan, err := runtime.PlanRequest(snapshot, slug, operation, input.Surface, input.Mode, []byte(input.Seed), options)
+	if err != nil {
+		return access.Reply{}, err
+	}
+	decisions := plan.Decisions
+	if keyReason != "" {
+		for i := range decisions {
+			d := &decisions[i]
+			d.Eligible = false
+			d.Attempt = nil
+			d.Reason = &keyReason
 		}
-		decisions = append(decisions, c.decision())
 	}
 	return access.OK(decisions), nil
 }
@@ -322,6 +251,52 @@ func (s *Server) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v3/routes/{route_id}/revisions/{revision_id}", h(s.revision))
 	mux.HandleFunc("POST /api/v3/routes/{route_id}/revisions/{revision_id}/restore-as-draft", h(s.restoreRevision))
 	mux.HandleFunc("GET /api/v3/routing-policies/{scope}/{id}", h(s.policy))
-	mux.HandleFunc("PUT /api/v3/routing-policies/{scope}/{id}", management.Unimplemented)
+	mux.HandleFunc("PUT /api/v3/routing-policies/{scope}/{id}", h(s.putPolicy))
 	mux.HandleFunc("POST /api/v3/routing/simulate", s.Access.HandleWith(1<<20, s.simulateRouting))
+}
+
+func simulationRoute(id, slug string, operations []string, timeout, budget int, targets []runtime.PublishedTarget) runtime.Route {
+	r := runtime.Route{ID: id, RoutingID: id, Slug: slug, Operations: operations, OverallTimeout: int64(timeout), MaxAttempts: budget}
+	for _, t := range targets {
+		r.Targets = append(r.Targets, runtime.Target{ID: t.ID, ProviderID: t.ProviderID, ProviderModel: t.ProviderModel, Priority: t.Priority, Weight: t.Weight, Timeout: t.TimeoutMS, RoutingID: t.ProviderModelID})
+	}
+	return r
+}
+func (s *Server) routingInputs(r *http.Request, q access.Queryer) (*usage.RoutingInputs, error) {
+	if s.Inputs != nil {
+		return s.Inputs(), nil
+	}
+	return usage.LoadRoutingInputs(r.Context(), q, time.Now())
+}
+
+// A credential revocation is authoritative without publishing a new route or
+// provider revision. Apply it to previews just as the executor does at dispatch.
+func routeRevocations(ctx context.Context, q access.Queryer, snapshot *runtime.Snapshot, route runtime.Route) (func(string) bool, error) {
+	ids := []string{}
+	for _, target := range route.Targets {
+		for _, slot := range snapshot.Providers[target.ProviderID].Slots {
+			if slot.CredentialID != nil {
+				ids = append(ids, *slot.CredentialID)
+			}
+		}
+	}
+	revoked := map[string]bool{}
+	if len(ids) > 0 {
+		rows, err := q.Query(ctx, "SELECT id::text FROM olp_go.provider_credentials WHERE id=ANY($1::uuid[]) AND revoked_at IS NOT NULL", ids)
+		if err != nil {
+			return nil, err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var id string
+			if err = rows.Scan(&id); err != nil {
+				return nil, err
+			}
+			revoked[id] = true
+		}
+		if err = rows.Err(); err != nil {
+			return nil, err
+		}
+	}
+	return func(id string) bool { return revoked[id] }, nil
 }

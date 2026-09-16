@@ -36,10 +36,15 @@ type RevisionSlot struct {
 
 // Configuration is the subset of a provider configuration the gateway needs.
 type Configuration struct {
-	Kind     string `json:"kind"`
-	AuthMode string `json:"auth_mode"`
-	Endpoint string `json:"endpoint"`
-	Options  struct {
+	Kind         string `json:"kind"`
+	AuthMode     string `json:"auth_mode"`
+	Endpoint     string `json:"endpoint"`
+	CloudRegion  string `json:"cloud_region"`
+	CloudProject string `json:"cloud_project"`
+	Deployment   string `json:"deployment"`
+	APIVersion   string `json:"api_version"`
+	Options      struct {
+		Models            map[string]json.RawMessage `json:"models"`
 		CredentialHeaders []string                   `json:"credential_headers"`
 		Limits            *Limits                    `json:"limits"`
 		ParameterDefaults map[string]json.RawMessage `json:"parameter_defaults"`
@@ -120,6 +125,8 @@ func Compile(ctx context.Context, tx pgx.Tx) (*Snapshot, error) {
 		provider.Kind = cfg.Kind
 		provider.AuthMode = cfg.AuthMode
 		provider.Endpoint = cfg.Endpoint
+		provider.CloudRegion, provider.CloudProject, provider.Deployment, provider.APIVersion = cfg.CloudRegion, cfg.CloudProject, cfg.Deployment, cfg.APIVersion
+		provider.Models = cfg.Options.Models
 		provider.CredentialHeaders = cfg.Options.CredentialHeaders
 		provider.ParameterDefaults = cfg.Options.ParameterDefaults
 		provider.VendorID = cfg.Options.VendorID
@@ -135,6 +142,7 @@ func Compile(ctx context.Context, tx pgx.Tx) (*Snapshot, error) {
 			provider.Slots = append(provider.Slots, slot.Slot)
 			if slot.Default {
 				provider.ActiveCredential = slot.CredentialID
+				provider.DefaultSlotID = slot.ID
 			}
 		}
 		snapshot.Providers[provider.ID] = provider
@@ -143,15 +151,15 @@ func Compile(ctx context.Context, tx pgx.Tx) (*Snapshot, error) {
 	if err = rows.Err(); err != nil {
 		return nil, err
 	}
-	rows, err = tx.Query(ctx, "SELECT r.id::text,r.slug,v.id::text,v.revision,v.operations,v.overall_timeout_ms,v.max_attempts,v.targets,v.activated_at FROM olp_go.routes r JOIN olp_go.route_revisions v ON v.id=r.latest_revision_id")
+	rows, err = tx.Query(ctx, "SELECT r.id::text,r.slug,v.id::text,v.revision,v.operations,v.overall_timeout_ms,v.max_attempts,v.targets,v.activated_at,v.routing_policy FROM olp_go.routes r JOIN olp_go.route_revisions v ON v.id=r.latest_revision_id")
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	for rows.Next() {
-		var operations, targets []byte
+		var operations, targets, policy []byte
 		route := Route{}
-		if err = rows.Scan(&route.ID, &route.Slug, &route.RevisionID, &route.Revision, &operations, &route.OverallTimeout, &route.MaxAttempts, &targets, &route.PublishedAt); err != nil {
+		if err = rows.Scan(&route.ID, &route.Slug, &route.RevisionID, &route.Revision, &operations, &route.OverallTimeout, &route.MaxAttempts, &targets, &route.PublishedAt, &policy); err != nil {
 			return nil, err
 		}
 		var published []PublishedTarget
@@ -161,12 +169,45 @@ func Compile(ctx context.Context, tx pgx.Tx) (*Snapshot, error) {
 		if err != nil {
 			return nil, fmt.Errorf("route %s revision: %w", route.Slug, err)
 		}
+		if len(policy) > 0 {
+			if err = json.Unmarshal(policy, &route.Policy); err != nil {
+				return nil, err
+			}
+		}
 		route.RoutingID = route.ID
 		route.PublishedAt = route.PublishedAt.UTC()
 		for _, t := range published {
 			route.Targets = append(route.Targets, Target{ID: t.ID, ProviderID: t.ProviderID, ProviderModel: t.ProviderModel, Priority: t.Priority, Weight: t.Weight, Timeout: t.TimeoutMS, RoutingID: t.ProviderModelID})
 		}
 		snapshot.Routes[route.Slug] = route
+	}
+	rows.Close()
+	if err = rows.Err(); err != nil {
+		return nil, err
+	}
+	rows, err = tx.Query(ctx, "SELECT scope,scope_id::text,policy FROM olp_go.routing_policies WHERE scope IN ('installation','api-key')")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var scope, id string
+		var raw []byte
+		if err = rows.Scan(&scope, &id, &raw); err != nil {
+			return nil, err
+		}
+		var p Policy
+		if err = json.Unmarshal(raw, &p); err != nil {
+			return nil, err
+		}
+		if scope == "installation" {
+			snapshot.InstallationPolicy = &p
+		} else {
+			if snapshot.KeyPolicies == nil {
+				snapshot.KeyPolicies = map[string]*Policy{}
+			}
+			snapshot.KeyPolicies[id] = &p
+		}
 	}
 	return snapshot, rows.Err()
 }

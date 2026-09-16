@@ -1,0 +1,174 @@
+{
+  "generated_at": "2026-09-16T15:27:23.518061+00:00",
+  "scope": "Linux amd64 M5; five runs per case with the cloud and regional endpoint dependency graph present",
+  "method": "scripts/measure-builds.mjs; disposable source snapshots; prefetched downloads; private compilation cache emptied for each clean run; explicit warmup and owned backend edit for incremental runs; shared OS page cache; CGO_ENABLED=1; go build -trimpath",
+  "measurements": {
+    "clean": {
+      "summary": {
+        "successfulRuns": 5,
+        "medianSeconds": 41.31825649999999,
+        "minSeconds": 40.566819888,
+        "maxSeconds": 47.326304576
+      },
+      "machine": {
+        "platform": "linux",
+        "release": "7.0.0-31-generic",
+        "arch": "x64",
+        "cpu": "Intel Core Processor (Haswell, no TSX)",
+        "logicalCPUs": 8,
+        "memoryBytes": 24598130688,
+        "freeMemoryBytes": 21987725312
+      },
+      "toolchains": {
+        "go": "go version go1.27.1 linux/amd64",
+        "cc": "cc (Ubuntu 15.2.0-16ubuntu1) 15.2.0\nCopyright (C) 2025 Free Software Foundation, Inc.\nThis is free software; see the source for copying conditions.  There is NO\nwarranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.",
+        "node": "v26.8.2",
+        "pnpm": "11.24.0"
+      },
+      "started": "2026-09-16T15:16:56.236Z",
+      "finished": "2026-09-16T15:20:33.111Z",
+      "raw_results": "provider-routing-builds.tar.gz:go-clean/results.json"
+    },
+    "edit": {
+      "summary": {
+        "successfulRuns": 5,
+        "medianSeconds": 6.087863055000009,
+        "minSeconds": 5.799111413999999,
+        "maxSeconds": 6.678981618999998
+      },
+      "machine": {
+        "platform": "linux",
+        "release": "7.0.0-31-generic",
+        "arch": "x64",
+        "cpu": "Intel Core Processor (Haswell, no TSX)",
+        "logicalCPUs": 8,
+        "memoryBytes": 24598130688,
+        "freeMemoryBytes": 21666672640
+      },
+      "toolchains": {
+        "go": "go version go1.27.1 linux/amd64",
+        "cc": "cc (Ubuntu 15.2.0-16ubuntu1) 15.2.0\nCopyright (C) 2025 Free Software Foundation, Inc.\nThis is free software; see the source for copying conditions.  There is NO\nwarranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.",
+        "node": "v26.8.2",
+        "pnpm": "11.24.0"
+      },
+      "started": "2026-09-16T15:20:33.346Z",
+      "finished": "2026-09-16T15:22:01.003Z",
+      "raw_results": "provider-routing-builds.tar.gz:go-edit/results.json"
+    }
+  },
+  "previous": {
+    "rust-backend-clean": {
+      "language": "rust",
+      "scenario": "backend-clean",
+      "started": "2026-09-13T07:22:51.341Z",
+      "finished": "2026-09-13T07:42:04.787Z",
+      "machine": {
+        "platform": "linux",
+        "release": "7.0.0-31-generic",
+        "arch": "x64",
+        "cpu": "Intel Core Processor (Haswell, no TSX)",
+        "logicalCPUs": 8,
+        "memoryBytes": 24598114304,
+        "freeMemoryBytes": 22476980224
+      },
+      "toolchains": {
+        "rustc": "rustc 1.98.1 (48a229cea 2026-09-01)",
+        "cargo": "cargo 1.98.1 (797e8a9bc 2026-08-05)",
+        "cc": "cc (Ubuntu 15.2.0-16ubuntu1) 15.2.0\nCopyright (C) 2025 Free Software Foundation, Inc.\nThis is free software; see the source for copying conditions.  There is NO\nwarranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE."
+      },
+      "summary": {
+        "successfulRuns": 5,
+        "medianSeconds": 228.06198349299999,
+        "minSeconds": 226.766314242,
+        "maxSeconds": 234.55152064199999
+      }
+    },
+    "rust-backend-edit": {
+      "language": "rust",
+      "scenario": "backend-edit",
+      "started": "2026-09-13T07:42:51.882Z",
+      "finished": "2026-09-13T07:51:16.683Z",
+      "machine": {
+        "platform": "linux",
+        "release": "7.0.0-31-generic",
+        "arch": "x64",
+        "cpu": "Intel Core Processor (Haswell, no TSX)",
+        "logicalCPUs": 8,
+        "memoryBytes": 24598114304,
+        "freeMemoryBytes": 21529026560
+      },
+      "toolchains": {
+        "rustc": "rustc 1.98.1 (48a229cea 2026-09-01)",
+        "cargo": "cargo 1.98.1 (797e8a9bc 2026-08-05)",
+        "cc": "cc (Ubuntu 15.2.0-16ubuntu1) 15.2.0\nCopyright (C) 2025 Free Software Foundation, Inc.\nThis is free software; see the source for copying conditions.  There is NO\nwarranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE."
+      },
+      "summary": {
+        "successfulRuns": 5,
+        "medianSeconds": 21.12076416099997,
+        "minSeconds": 20.08612180600001,
+        "maxSeconds": 21.916144038999978
+      }
+    },
+    "go-final-backend-clean": {
+      "language": "go",
+      "scenario": "backend-clean",
+      "started": "2026-09-13T07:54:07.743Z",
+      "finished": "2026-09-13T07:56:35.660Z",
+      "machine": {
+        "platform": "linux",
+        "release": "7.0.0-31-generic",
+        "arch": "x64",
+        "cpu": "Intel Core Processor (Haswell, no TSX)",
+        "logicalCPUs": 8,
+        "memoryBytes": 24598114304,
+        "freeMemoryBytes": 21997641728
+      },
+      "toolchains": {
+        "go": "go version go1.27.1 linux/amd64",
+        "cc": "cc (Ubuntu 15.2.0-16ubuntu1) 15.2.0\nCopyright (C) 2025 Free Software Foundation, Inc.\nThis is free software; see the source for copying conditions.  There is NO\nwarranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.",
+        "node": "v26.8.1",
+        "pnpm": "11.24.0"
+      },
+      "summary": {
+        "successfulRuns": 5,
+        "medianSeconds": 28.777959264999996,
+        "minSeconds": 28.181070133999995,
+        "maxSeconds": 30.886217329000004
+      }
+    },
+    "go-final-backend-edit": {
+      "language": "go",
+      "scenario": "backend-edit",
+      "started": "2026-09-13T07:56:35.808Z",
+      "finished": "2026-09-13T07:57:29.276Z",
+      "machine": {
+        "platform": "linux",
+        "release": "7.0.0-31-generic",
+        "arch": "x64",
+        "cpu": "Intel Core Processor (Haswell, no TSX)",
+        "logicalCPUs": 8,
+        "memoryBytes": 24598114304,
+        "freeMemoryBytes": 21945946112
+      },
+      "toolchains": {
+        "go": "go version go1.27.1 linux/amd64",
+        "cc": "cc (Ubuntu 15.2.0-16ubuntu1) 15.2.0\nCopyright (C) 2025 Free Software Foundation, Inc.\nThis is free software; see the source for copying conditions.  There is NO\nwarranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.",
+        "node": "v26.8.1",
+        "pnpm": "11.24.0"
+      },
+      "summary": {
+        "successfulRuns": 5,
+        "medianSeconds": 4.144787073,
+        "minSeconds": 4.024634276000004,
+        "maxSeconds": 4.232343152000001
+      }
+    }
+  },
+  "comparison_note": "The earlier Go foundation has fewer features, so its difference is not an isolated cloud-authentication cost. Frozen Rust uses the same recorded host class and C toolchain. Native arm64 is still the inherited release qualification gate.",
+  "native_binary": {
+    "command": "scripts/go-without-rust.sh go build -trimpath -o .local/bin/olp ./cmd/olp",
+    "bytes": 50455672,
+    "sha256": "3433fdac74962d93c1a7381f1586c47f0d63c11c8314cb4aa0091e9a1b8fb568",
+    "metadata": "provider-routing-go-build-info.txt"
+  }
+}

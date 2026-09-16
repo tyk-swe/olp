@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/limits"
 )
@@ -48,13 +49,14 @@ type Server struct {
 	Quotas QuotaSource
 	Log    *slog.Logger
 	client *http.Client
+	auth   *connectors.Auth
 	probes chan struct{}
 }
 
 // New prepares the provider surface with a bounded upstream client and at
 // most four concurrent probes.
 func New(a *access.Server, policy *egress.Policy) *Server {
-	return &Server{Access: a, Egress: policy, client: policy.Client(probeTimeout), probes: make(chan struct{}, 4)}
+	return &Server{Access: a, Egress: policy, client: policy.Client(probeTimeout), auth: connectors.NewAuth(policy), probes: make(chan struct{}, 4)}
 }
 
 type record struct {
@@ -161,7 +163,7 @@ const detailQuery = "SELECT " + recordColumns + ",u.email," +
 	"(SELECT count(*) FROM olp_go.provider_models m WHERE m.provider_id=p.id AND m.enabled)," +
 	"(SELECT coalesce(sum(jsonb_array_length(m.capabilities)),0) FROM olp_go.provider_models m WHERE m.provider_id=p.id)," +
 	"(SELECT count(*) FROM olp_go.provider_models m,jsonb_array_elements(m.capabilities) c WHERE m.provider_id=p.id AND c->>'source'='certified')," +
-	"d.credential_id::text,dc.version,dc.revoked_at IS NOT NULL,rc.id::text,rc.version" +
+	"d.credential_id::text,dc.version,EXISTS(SELECT 1 FROM olp_go.provider_slots available JOIN olp_go.provider_credentials secret ON secret.id=available.credential_id WHERE available.provider_id=p.id AND available.enabled AND secret.revoked_at IS NULL),rc.id::text,rc.version" +
 	" FROM olp_go.providers p JOIN olp_go.users u ON u.id=p.created_by" +
 	" LEFT JOIN olp_go.provider_slots d ON d.provider_id=p.id AND d.is_default" +
 	" LEFT JOIN olp_go.provider_credentials dc ON dc.id=d.credential_id" +
@@ -173,9 +175,10 @@ func (s *Server) scanDetail(row pgx.Row) (*detail, error) {
 	var configuration []byte
 	var d detail
 	var draft credentialState
+	var usableCredential bool
 	err := row.Scan(&p.ID, &p.Name, &p.Kind, &p.State, &configuration, &p.ETag, &p.SlotsETag, &p.DraftDirty, &p.ActiveRevision, &p.ActiveRevisionID, &p.LastProbeAt, &p.LastProbeStatus, &p.LastProbeDetail, &p.CreatedBy, &p.CreatedAt, &p.UpdatedAt,
 		&d.CreatedByEmail, &d.ModelCount, &d.EnabledModelCount, &d.CapabilityCount, &d.CertifiedCapabilityCount,
-		&draft.ID, &draft.Version, &draft.Revoked, &d.RuntimeCredentialID, &d.RuntimeCredentialVersion)
+		&draft.ID, &draft.Version, &usableCredential, &d.RuntimeCredentialID, &d.RuntimeCredentialVersion)
 	if err != nil {
 		return nil, err
 	}
@@ -191,7 +194,7 @@ func (s *Server) scanDetail(row pgx.Row) (*detail, error) {
 	d.DraftCredentialID, d.DraftCredentialVersion = draft.ID, draft.Version
 	d.LastProbeAt, d.LastProbeStatus, d.LastProbeDetail = p.LastProbeAt, p.LastProbeStatus, p.LastProbeDetail
 	d.CreatedAt, d.UpdatedAt = p.CreatedAt.UTC(), p.UpdatedAt.UTC()
-	d.ConnectorReady = p.Configuration.validate(s.Egress) == nil && (!p.Configuration.credentialRequired() || (draft.ID != nil && !draft.Revoked))
+	d.ConnectorReady = p.Configuration.validate(s.Egress) == nil && (!p.Configuration.credentialRequired() || usableCredential)
 	return &d, nil
 }
 

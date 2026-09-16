@@ -95,6 +95,25 @@ func newVendor(t *testing.T) *vendor {
 		}
 		fmt.Fprintf(w, "data: {\"id\":\"chatcmpl-1\",\"object\":\"chat.completion.chunk\",\"created\":1,\"model\":%q,\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":4,\"completion_tokens\":6,\"total_tokens\":10}}\n\ndata: [DONE]\n\n", vendorModel)
 	})
+	mux.HandleFunc("POST /v1/responses", func(w http.ResponseWriter, r *http.Request) {
+		if !v.authorized(r) {
+			http.Error(w, `{"error":{"message":"bad key","code":"invalid_api_key"}}`, http.StatusUnauthorized)
+			return
+		}
+		if v.fail.Load() {
+			http.Error(w, `{"error":{"message":"boom","type":"server_error"}}`, http.StatusInternalServerError)
+			return
+		}
+		var input struct {
+			Model  string `json:"model"`
+			Stream bool   `json:"stream"`
+		}
+		if json.NewDecoder(r.Body).Decode(&input) != nil || input.Model != vendorModel {
+			http.Error(w, "unknown model", http.StatusNotFound)
+			return
+		}
+		writeResponsesFixture(w, input.Model, vendorAnswer, input.Stream)
+	})
 	v.Server = httptest.NewServer(mux)
 	t.Cleanup(v.Close)
 	return v
@@ -272,7 +291,7 @@ func TestGatewayFromEmptyInstallationToSDKTraffic(t *testing.T) {
 	if h.want(owner, "GET", "/api/v3/provider-kinds/openai_compatible/capabilities", nil, nil, 200)["provider_kind"] != "openai_compatible" {
 		t.Fatal("kind capabilities")
 	}
-	h.want(owner, "GET", "/api/v3/provider-kinds/bedrock/capabilities", nil, nil, 400)
+	h.want(owner, "GET", "/api/v3/provider-kinds/bedrock/capabilities", nil, nil, 200)
 
 	// Unsafe egress is rejected at configuration time without any dispatch.
 	configuration := func(endpoint string) map[string]any {
@@ -282,7 +301,7 @@ func TestGatewayFromEmptyInstallationToSDKTraffic(t *testing.T) {
 	if problemCode(t, unsafe) != "validation_failed" {
 		t.Fatalf("unsafe endpoint: %v", unsafe)
 	}
-	h.want(owner, "POST", "/api/v3/providers", map[string]any{"name": "Anthropic", "configuration": map[string]any{"kind": "anthropic", "auth_mode": "api_key"}, "credential": "x"}, map[string]string{"Idempotency-Key": "anthropic"}, 422)
+	h.want(owner, "POST", "/api/v3/providers", map[string]any{"name": "Unsupported", "configuration": map[string]any{"kind": "unsupported", "auth_mode": "api_key"}, "credential": "x"}, map[string]string{"Idempotency-Key": "unsupported"}, 422)
 
 	// Certification and inference must agree on a base URL with a trailing slash.
 	created := h.want(owner, "POST", "/api/v3/providers", map[string]any{"name": "Fixture vendor", "configuration": configuration(up.URL + "/v1/"), "credential": vendorSecret}, map[string]string{"Idempotency-Key": "provider"}, 201)
@@ -322,7 +341,7 @@ func TestGatewayFromEmptyInstallationToSDKTraffic(t *testing.T) {
 	}
 	modelPath := providerPath + "/models/" + modelID
 	capabilities := []any{map[string]any{"operation": "generation", "surface": "openai", "mode": "unary"}, map[string]any{"operation": "generation", "surface": "openai", "mode": "streaming"}}
-	if problemCode(t, h.want(owner, "PATCH", modelPath, map[string]any{"enabled": true, "capabilities": []any{map[string]any{"operation": "embeddings", "surface": "openai", "mode": "unary"}}}, etagHeader(detail), 422)) != "capability_unavailable" {
+	if problemCode(t, h.want(owner, "PATCH", modelPath, map[string]any{"enabled": true, "capabilities": []any{map[string]any{"operation": "image_generation", "surface": "openai", "mode": "unary"}}}, etagHeader(detail), 422)) != "capability_unavailable" {
 		t.Fatal("unimplemented operation must stay unavailable")
 	}
 	detail = h.want(owner, "PATCH", modelPath, map[string]any{"enabled": true, "capabilities": capabilities}, etagHeader(detail), 200)
@@ -462,16 +481,12 @@ func TestGatewayFromEmptyInstallationToSDKTraffic(t *testing.T) {
 		t.Fatalf("stream %q done=%v status=%d", text, done, status)
 	}
 	responses := map[string]any{"model": routeSlug, "input": "hi"}
-	// The fixture vendor does not implement /responses: the upstream 404 is a
-	// forwardable rejection, typed and terminal, and never retried elsewhere.
-	if status, body, _ := h.gateway("POST", "/v1/responses", secret, responses); status != 404 || h.gatewayCode(status, body) != "upstream_rejected" {
-		t.Fatalf("responses against a chat-only vendor: %d %v", status, body)
+	if status, body, _ := h.gateway("POST", "/v1/responses", secret, responses); status != 200 || body["status"] != "completed" || body["model"] != routeSlug {
+		t.Fatalf("certified Responses request: %d %v", status, body)
 	}
 
 	// Playground uses the same runtime through the console session.
-	// The console always sends routing preferences; only the weighted strategy
-	// and the fallback switch act before M5, other constraints are refused.
-	h.want(owner, "POST", "/api/v3/playground", map[string]any{"model": routeSlug, "input": "hi", "routing": map[string]any{"strategy": "price"}}, nil, 422)
+	h.want(owner, "POST", "/api/v3/playground", map[string]any{"model": routeSlug, "input": "hi", "routing": map[string]any{"strategy": "unknown"}}, nil, 422)
 	h.want(owner, "POST", "/api/v3/playground", map[string]any{"model": routeSlug, "input": "hi", "routing": map[string]any{"only": []string{"vendor"}}}, nil, 422)
 	play := h.want(owner, "POST", "/api/v3/playground", map[string]any{"model": routeSlug, "input": "hi", "routing": map[string]any{"strategy": "weighted", "allow_fallbacks": false}}, nil, 200)
 	validateManagementResponse(t, "POST", "/api/v3/playground", 200, play)

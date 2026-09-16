@@ -301,13 +301,17 @@ func settleTargetRefund(ctx context.Context, reservation *targetReservation) {
 // cooldown records a shared cooldown for the credential and for the slot, so
 // every replica avoids a target the upstream just rejected instead of each
 // learning it alone.
-func (a *Admission) cooldown(ctx context.Context, providerID string, slot *runtime.Slot, d time.Duration) {
+func (a *Admission) cooldown(ctx context.Context, providerID string, slot *runtime.Slot, d time.Duration, credential bool) {
 	if !a.ready() || d <= 0 {
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), coordinationTimeout)
 	defer cancel()
-	for _, scope := range [...]string{limits.CredentialScope(providerID, slot.CredentialID), limits.SlotScope(slot.ID)} {
+	scope := limits.SlotScope(slot.ID)
+	if credential {
+		scope = limits.CredentialScope(providerID, slot.CredentialID)
+	}
+	{
 		if err := a.limiter.Cooldown(ctx, scope, d); err != nil {
 			a.logger().Warn("shared cooldown not recorded", "provider_id", providerID, "slot_id", slot.ID, "error", err.Error())
 		}
@@ -379,10 +383,25 @@ func estimateTokens(parsed *openai.Request, defaults ...map[string]json.RawMessa
 		switch parsed.Family {
 		case openai.FamilyChat:
 			input = estimateItems(field("messages"))
-		case openai.FamilyResponses:
+		case openai.FamilyEmbeddings:
+			input = estimateEmbeddingInput(field("input"))
+		case openai.FamilyResponses, openai.FamilyInputTokens, openai.FamilyModeration:
 			input = addBounded(estimateItems(field("input")), estimateText(field("instructions")))
 		}
-		input = addBounded(input, estimateTools(field("tools")))
+		if parsed.Family.Surface() != "openai" {
+			input = addBounded(estimateNative(field("messages")), estimateNative(field("system")))
+			input = addBounded(input, estimateNative(field("contents")))
+			input = addBounded(input, estimateNative(field("systemInstruction")))
+			input = addBounded(input, estimateNative(field("generateContentRequest")))
+		}
+		if parsed.Family.Surface() != "openai" {
+			input = addBounded(input, estimateSchema(field("tools")))
+		} else {
+			input = addBounded(input, estimateTools(field("tools")))
+		}
+		if parsed.Family.Operation() != "generation" {
+			return max(input, 1)
+		}
 	}
 	output := int64(defaultOutputTokens)
 	outputFields := []string{"max_completion_tokens", "max_tokens"}
@@ -396,6 +415,16 @@ func estimateTokens(parsed *openai.Request, defaults ...map[string]json.RawMessa
 		}
 	}
 	candidates := int64(1)
+	if parsed != nil && parsed.Family.Surface() == "gemini" {
+		config := jsonObject(field("generationConfig"))
+		if v, ok := integerValue(config["maxOutputTokens"]); ok {
+			output = v
+		}
+		if v, ok := integerValue(config["candidateCount"]); ok {
+			candidates = v
+		}
+	}
+
 	if parsed == nil || parsed.Family == openai.FamilyChat {
 		if value, ok := integerValue(field("n")); ok {
 			candidates = value
@@ -624,4 +653,50 @@ func totalTokens(usage *openai.Usage) *int64 {
 	total := addBounded(min(usage.InputTokens, maxEstimate), min(usage.OutputTokens, maxEstimate))
 	total = max(total, min(usage.TotalTokens, maxEstimate))
 	return &total
+}
+
+// Native content uses the same text/media reservation units as OpenAI. Blob
+// bytes are never mistaken for text tokens.
+func estimateNative(raw json.RawMessage) int64 {
+	if n, ok := textTokens(raw); ok {
+		return n
+	}
+	var items []json.RawMessage
+	if json.Unmarshal(raw, &items) == nil {
+		var n int64
+		for _, item := range items {
+			n = addBounded(n, estimateNative(item))
+		}
+		return n
+	}
+	f := jsonObject(raw)
+	if f == nil {
+		return 0
+	}
+	if f["inlineData"] != nil || f["fileData"] != nil || string(f["type"]) == `"image"` {
+		return imageTokens
+	}
+	var n int64
+	for _, key := range []string{"text", "content", "parts", "contents", "systemInstruction", "functionResponse", "functionCall", "input", "output"} {
+		if value := f[key]; value != nil {
+			n = addBounded(n, estimateNative(value))
+		}
+	}
+	return n
+}
+
+func estimateEmbeddingInput(raw json.RawMessage) int64 {
+	if value, ok := textTokens(raw); ok {
+		return value
+	}
+	total := int64(0)
+	for _, item := range jsonArray(raw) {
+		var token uint32
+		if json.Unmarshal(item, &token) == nil {
+			total = addBounded(total, 1)
+		} else {
+			total = addBounded(total, estimateEmbeddingInput(item))
+		}
+	}
+	return total
 }

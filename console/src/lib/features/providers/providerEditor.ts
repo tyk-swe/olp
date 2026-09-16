@@ -42,6 +42,7 @@ export type ProviderEditValues = {
 
 export type ProviderReadiness = {
   state: string;
+  pending_activation?: boolean;
   connector_ready: boolean;
   enabled_model_count: number;
   capability_count: number;
@@ -373,7 +374,8 @@ export function activationReady(
   current: ProviderReadiness | null | undefined
 ): boolean {
   return Boolean(
-    current?.state === 'draft' &&
+    (current?.state === 'draft' ||
+      (current?.state === 'active' && current.pending_activation)) &&
     current.connector_ready &&
     capabilitiesCertified(current) &&
     probeReady(current)

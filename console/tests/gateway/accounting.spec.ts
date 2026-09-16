@@ -72,7 +72,9 @@ async function provisionRoute(page: Page): Promise<void> {
   await page.getByRole('radio', { name: /OpenAI-compatible/ }).check();
   await page.getByLabel('Provider name').fill(provider);
   await page.getByLabel('Authentication').selectOption('api_key');
-  await page.getByLabel('Endpoint').fill(upstream.endpoint);
+  await page
+    .getByRole('textbox', { name: 'Endpoint', exact: true })
+    .fill(upstream.endpoint);
   await page.getByLabel('Seed model (optional)').fill(upstream.model);
   await page
     .getByLabel('Credential', { exact: true })
@@ -300,6 +302,46 @@ test('a browser user prices gateway traffic and reads the accounting it produced
     path: info.outputPath('go-pricing-revision.png'),
     fullPage: true
   });
+
+  // Execution pins the same refreshed price evidence used by preview. Wait
+  // for that evidence instead of sending traffic against the preceding snapshot.
+  await expect
+    .poll(
+      async () =>
+        page.evaluate(async (routeSlug) => {
+          const session = await (
+            await fetch('/api/v3/sessions/current')
+          ).json();
+          const response = await fetch('/api/v3/routing/simulate', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'X-CSRF-Token': session.csrf_token
+            },
+            body: JSON.stringify({
+              operation: { kind: 'generation', request: { route: routeSlug } },
+              surface: 'openai',
+              mode: 'unary',
+              seed: 'pricing-refresh'
+            })
+          });
+          if (!response.ok)
+            throw new Error(`Routing preview returned ${response.status}`);
+          const preview = await response.json();
+          return preview.some(
+            (decision: {
+              eligible: boolean;
+              price?: { revision: number } | null;
+            }) => decision.eligible && decision.price?.revision === 1
+          );
+        }, route),
+      {
+        timeout: 30_000,
+        message:
+          'routing should observe pricing revision 1 before requests pin it'
+      }
+    )
+    .toBe(true);
 
   const unaryCall = await sendChat(page, secret, false);
   expect(unaryCall.status).toBe(200);

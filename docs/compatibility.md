@@ -11,6 +11,12 @@ DeepInfra, Hugging Face, Perplexity, Cohere, and Voyage contracts and OLP routin
 preferences. Custom native endpoints require live certification; they do not
 inherit the official OpenAI media discovery contract.
 
+The Go implementation serves the non-media rows in this matrix, including
+both Gemini versions, through one bounded executor. Its deterministic provider,
+SDK, and browser evidence is recorded in
+[M5 qualification](roadmap/evidence/provider-and-routing-parity.md). Media
+parity remains M6; the media rows below describe the retained Rust reference.
+
 ## Legend
 
 | Cell | Meaning |

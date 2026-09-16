@@ -151,7 +151,7 @@ func fixtureRelease(endpoint string) (*runtime.Release, error) {
 		Routes: map[string]runtime.Route{routeSlug: {
 			ID:             routeID,
 			Slug:           routeSlug,
-			Operations:     []string{"generation"},
+			Operations:     []string{"generation", "token_count"},
 			OverallTimeout: 5000,
 			MaxAttempts:    2,
 			Targets:        []runtime.Target{{ID: targetID, ProviderID: providerID, ProviderModel: upstreamModel, Weight: 1, Timeout: 4000, RoutingID: targetID}},
@@ -161,7 +161,25 @@ func fixtureRelease(endpoint string) (*runtime.Release, error) {
 			PublishedAt:    now,
 		}},
 	}
-	return runtime.NewRelease(uuid.NewString(), 1, snapshot, map[string][]byte{credentialID: []byte(credential)})
+	secrets := map[string][]byte{credentialID: []byte(credential)}
+	for _, kind := range []string{"anthropic", "gemini"} {
+		id, secretID, slot := uuid.NewString(), uuid.NewString(), uuid.NewString()
+		p := runtime.Provider{ID: id, Name: kind, Kind: kind, VendorID: kind, Enabled: true, RevisionID: uuid.NewString(), Endpoint: strings.TrimSuffix(endpoint, "/v1") + "/" + kind + "/v1", AuthMode: "api_key", ActiveCredential: &secretID, Slots: []runtime.Slot{{ID: slot, Name: "default", Enabled: true, Weight: 1, CredentialID: &secretID, CredentialVersion: &version}}}
+		if kind == "gemini" {
+			p.Endpoint += "beta"
+		}
+		for _, mode := range []string{"unary", "streaming"} {
+			p.Capabilities = append(p.Capabilities, runtime.Capability{Model: upstreamModel, Operation: "generation", Surface: kind, Mode: mode})
+		}
+		p.Capabilities = append(p.Capabilities, runtime.Capability{Model: upstreamModel, Operation: "token_count", Surface: kind, Mode: "unary"})
+		snapshot.Providers[id] = p
+		secrets[secretID] = []byte(credential)
+		route := snapshot.Routes[routeSlug]
+		target := uuid.NewString()
+		route.Targets = append(route.Targets, runtime.Target{ID: target, ProviderID: id, ProviderModel: upstreamModel, Weight: 1, Timeout: 4000, RoutingID: target})
+		snapshot.Routes[routeSlug] = route
+	}
+	return runtime.NewRelease(uuid.NewString(), 1, snapshot, secrets)
 }
 
 // mockUpstream answers like an OpenAI-compatible vendor for the fixture
@@ -243,10 +261,76 @@ func mockUpstream() http.Handler {
 			"usage": map[string]any{"input_tokens": 4, "output_tokens": 5, "total_tokens": 9},
 		})
 	})
+	registerNativeMock(mux)
 	return mux
 }
 
 func writeJSON(w http.ResponseWriter, body any) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(body)
+}
+
+func registerNativeMock(mux *http.ServeMux) {
+	mux.HandleFunc("POST /anthropic/v1/messages/count_tokens", func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("X-Api-Key") != credential {
+			w.WriteHeader(401)
+			return
+		}
+		writeJSON(w, map[string]any{"input_tokens": 13})
+	})
+	mux.HandleFunc("POST /anthropic/v1/messages", func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("X-Api-Key") != credential || r.Header.Get("Anthropic-Version") == "" {
+			w.WriteHeader(401)
+			return
+		}
+		var body struct {
+			Model  string `json:"model"`
+			Stream bool   `json:"stream"`
+		}
+		if json.NewDecoder(r.Body).Decode(&body) != nil || body.Model != upstreamModel {
+			w.WriteHeader(400)
+			return
+		}
+		text := "official anthropic sdk reached " + routeSlug
+		message := map[string]any{"id": "msg_fixture", "type": "message", "role": "assistant", "model": upstreamModel, "content": []any{map[string]any{"type": "text", "text": text}}, "stop_reason": "end_turn", "stop_sequence": nil, "usage": map[string]int{"input_tokens": 13, "output_tokens": 5}}
+		if !body.Stream {
+			writeJSON(w, message)
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		message["content"] = []any{}
+		message["stop_reason"] = nil
+		message["usage"] = map[string]int{"input_tokens": 13, "output_tokens": 0}
+		frames := []map[string]any{{"type": "message_start", "message": message}, {"type": "content_block_start", "index": 0, "content_block": map[string]any{"type": "text", "text": ""}}, {"type": "content_block_delta", "index": 0, "delta": map[string]any{"type": "text_delta", "text": text}}, {"type": "content_block_stop", "index": 0}, {"type": "message_delta", "delta": map[string]any{"stop_reason": "end_turn", "stop_sequence": nil}, "usage": map[string]int{"output_tokens": 5}}, {"type": "message_stop"}}
+		for _, frame := range frames {
+			data, _ := json.Marshal(frame)
+			fmt.Fprintf(w, "event: %s\ndata: %s\n\n", frame["type"], data)
+			_ = http.NewResponseController(w).Flush()
+		}
+	})
+	mux.HandleFunc("POST /gemini/v1beta/models/{action}", func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("X-Goog-Api-Key") != credential {
+			w.WriteHeader(401)
+			return
+		}
+		model, action, ok := strings.Cut(r.PathValue("action"), ":")
+		if !ok || model != upstreamModel {
+			w.WriteHeader(400)
+			return
+		}
+		if action == "countTokens" {
+			writeJSON(w, map[string]int{"totalTokens": 13})
+			return
+		}
+		text := "official gemini sdk reached " + routeSlug
+		body := map[string]any{"responseId": "gemini_fixture", "modelVersion": upstreamModel, "candidates": []any{map[string]any{"index": 0, "content": map[string]any{"role": "model", "parts": []any{map[string]string{"text": text}}}, "finishReason": "STOP"}}, "usageMetadata": map[string]int{"promptTokenCount": 13, "candidatesTokenCount": 5, "totalTokenCount": 18}}
+		if action == "streamGenerateContent" {
+			w.Header().Set("Content-Type", "text/event-stream")
+			encoded, _ := json.Marshal(body)
+			fmt.Fprintf(w, "data: %s\n\n", encoded)
+			_ = http.NewResponseController(w).Flush()
+		} else {
+			writeJSON(w, body)
+		}
+	})
 }

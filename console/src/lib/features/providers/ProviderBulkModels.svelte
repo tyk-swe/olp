@@ -25,8 +25,10 @@
   let busy = $state(false);
   let cancelled = $state(false);
   let status = $state('');
+  let controller: AbortController | undefined;
   onDestroy(() => {
     cancelled = true;
+    controller?.abort();
   });
   let failures = $state<{ id: string | null; message: string }[]>([]);
   const failed = $derived(
@@ -39,6 +41,7 @@
   }));
   async function validateSelected() {
     busy = true;
+    controller = new AbortController();
     cancelled = false;
     failures = [];
     let completed = 0;
@@ -86,7 +89,12 @@
               ? model.capabilities
               : suggested
           );
-          const outcome = await certifyProviderModel(current, id);
+          if (cancelled) break;
+          const outcome = await certifyProviderModel(
+            current,
+            id,
+            controller.signal
+          );
           if (
             !outcome.results.length ||
             !outcome.results.every((item) => item.succeeded)
@@ -173,7 +181,8 @@
         type="button"
         onclick={() => {
           cancelled = true;
-        }}>Stop after current model</button
+          controller?.abort();
+        }}>Stop validation</button
       >{/if}
   </div>
   {#if status}<p class="status" role="status">{status}</p>{/if}

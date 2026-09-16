@@ -13,10 +13,11 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/runtime"
 )
 
-const maxCredentialBytes = 8192
+const maxCredentialBytes = 65536
 
 type createRequest struct {
 	Name          string        `json:"name"`
@@ -32,8 +33,8 @@ type updateRequest struct {
 }
 
 func validCredential(value string) error {
-	if len(value) == 0 || len(value) > maxCredentialBytes || strings.ContainsAny(value, "\r\n\x00") {
-		return access.Invalid("credential", "Use a credential of 1–8192 characters without line breaks.")
+	if len(value) == 0 || len(value) > maxCredentialBytes || strings.ContainsRune(value, 0) || strings.ContainsAny(value, "\r\n") && !json.Valid([]byte(value)) {
+		return access.Invalid("credential", "Use a credential of 1–65536 bytes; multiline credentials must be JSON.")
 	}
 	return nil
 }
@@ -123,7 +124,7 @@ func (s *Server) createProvider(r *http.Request) (access.Reply, error) {
 		return access.Reply{}, access.Invalid("credential", "This authentication mode requires a credential.")
 	}
 	if !input.Configuration.credentialRequired() && input.Credential != nil {
-		return access.Reply{}, access.Invalid("credential", "The none authentication mode takes no credential.")
+		return access.Reply{}, access.Invalid("credential", "This authentication mode takes no stored credential.")
 	}
 	if input.Credential != nil {
 		if err = validCredential(*input.Credential); err != nil {
@@ -161,7 +162,21 @@ func (s *Server) createProvider(r *http.Request) (access.Reply, error) {
 		return access.Reply{}, err
 	}
 	if input.Model != nil {
-		declared, _ := json.Marshal([]storedCapability{{Operation: OperationGeneration, Surface: SurfaceOpenAI, Mode: ModeUnary, Source: "declared"}, {Operation: OperationGeneration, Surface: SurfaceOpenAI, Mode: ModeStreaming, Source: "declared"}})
+		surface, operation := "openai", "generation"
+		switch input.Configuration.Kind {
+		case KindAnthropic:
+			surface = "anthropic"
+		case KindGemini, KindVertex:
+			surface = "gemini"
+		}
+		if value(input.Configuration.Options.VendorID) == "voyage" {
+			operation = "embeddings"
+		}
+		capabilities := []storedCapability{{Operation: operation, Surface: surface, Mode: ModeUnary, Source: "declared"}}
+		if operation == "generation" {
+			capabilities = append(capabilities, storedCapability{Operation: operation, Surface: surface, Mode: ModeStreaming, Source: "declared"})
+		}
+		declared, _ := json.Marshal(capabilities)
 		if _, err = tx.Exec(r.Context(), "INSERT INTO olp_go.provider_models(id,provider_id,upstream_model,display_name,enabled,capabilities) VALUES($1,$2,$3,$4,true,$5)", access.NewID(), id, *input.Model, *input.DisplayName, declared); err != nil {
 			return access.Reply{}, err
 		}
@@ -377,7 +392,7 @@ func loadSlots(ctx context.Context, q access.Queryer, providerID string) ([]slot
 
 func (row *slotRow) published(authMode string) runtime.RevisionSlot {
 	slot := runtime.Slot{ID: row.ID, Name: row.Name, Enabled: row.Enabled, Priority: row.Priority, Weight: row.Weight, AllowedModels: row.Restrictions.AllowedModels, AllowedRoutes: row.Restrictions.AllowedRoutes, AllowedAPIKeys: row.Restrictions.AllowedAPIKeys, RequestsPerMinute: row.Limits.RequestsPerMinute, TokensPerMinute: row.Limits.TokensPerMinute, MaxConcurrency: row.Limits.MaxConcurrency}
-	if authMode != AuthNone {
+	if connectors.SecretRequired(authMode) {
 		slot.Enabled = slot.Enabled && !row.CredentialRevoked
 		slot.CredentialID = row.CredentialID
 		slot.CredentialVersion = row.CredentialVersion

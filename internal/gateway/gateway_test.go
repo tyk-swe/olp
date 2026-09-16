@@ -391,7 +391,7 @@ func TestRateLimitPropagatesRetryAfterWhenExhausted(t *testing.T) {
 	}
 }
 
-func TestCredentialFailureCoolsSlotAndFailsOver(t *testing.T) {
+func TestCredentialFailureCoolsVersionAndFailsOver(t *testing.T) {
 	h := newHarness(t, Config{})
 	h.mock.set("a", status(http.StatusUnauthorized, `{"error":{"message":"bad key","type":"invalid_request_error","code":"invalid_api_key"}}`))
 	resp, _ := h.chat(fullKey, nil)
@@ -402,8 +402,8 @@ func TestCredentialFailureCoolsSlotAndFailsOver(t *testing.T) {
 	if env.Attempts[0].Class != classCredential || env.Attempts[1].Class != classSuccess {
 		t.Fatalf("attempts %+v", env.Attempts)
 	}
-	if !h.gateway.health.coolingDown(env.Attempts[0].ProviderID, h.slotA) {
-		t.Fatal("slot a should be cooling down")
+	if !h.gateway.health.coolingDown(env.Attempts[0].ProviderID, "credential:"+env.Attempts[0].CredentialID) {
+		t.Fatal("rejected credential version should be cooling down")
 	}
 }
 
@@ -426,7 +426,7 @@ func TestAttemptBudgetAndRoutingHeader(t *testing.T) {
 	if resp.StatusCode != http.StatusBadGateway || errorCode(t, body) != "upstream_unavailable" || h.mock.count("b") != 0 {
 		t.Fatalf("status %d body %v calls b=%d", resp.StatusCode, body, h.mock.count("b"))
 	}
-	for _, header := range []string{`{"max_attempts":999}`, `{"strategy":"price"}`, `{"unknown":1}`, `not json`} {
+	for _, header := range []string{`{"max_attempts":999}`, `{"strategy":"unknown"}`, `{"unknown":1}`, `not json`} {
 		resp, body := h.chat(fullKey, map[string]string{routingHeader: header})
 		if resp.StatusCode != http.StatusBadRequest || errorCode(t, body) != "invalid_request" {
 			t.Fatalf("%s: status %d body %v", header, resp.StatusCode, body)

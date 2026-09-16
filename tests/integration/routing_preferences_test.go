@@ -44,13 +44,11 @@ func TestRoutingSimulationsHonorAvailablePreferences(t *testing.T) {
 	}
 	for _, path := range []string{draftPath + "/simulate", "/api/v3/routing/simulate", "/api/v3/playground"} {
 		t.Run(path, func(t *testing.T) {
+			before := up.chats.Load()
 			for _, preferences := range []map[string]any{
 				{"strategy": "ordered"}, {"order": []string{"provider"}},
-				{"preferred_max_latency_ms": 0}, {"preferred_min_throughput": 0},
-				{"deny_data_collection": true}, {"ignore": []string{"provider"}},
-				{"max_price": map[string]any{}}, {"only": []string{"provider"}},
-				{"quantizations": []string{"fp16"}}, {"regions": []string{"eu"}},
-				{"require_parameters": true}, {"require_zero_data_retention": true},
+				{"ignore": []string{"provider"}}, {"only": []string{"provider"}},
+				{"max_price": map[string]any{"input_per_million": "1e9"}},
 			} {
 				result := h.want(owner, "POST", path, input(path, "unary", preferences), nil, 422)
 				if problemCode(t, result) != "validation_failed" {
@@ -71,7 +69,14 @@ func TestRoutingSimulationsHonorAvailablePreferences(t *testing.T) {
 					{nil, 2}, {map[string]any{}, 2},
 					{map[string]any{"strategy": "weighted", "allow_fallbacks": true}, 2},
 					{map[string]any{"allow_fallbacks": false}, 1},
-					{map[string]any{"order": []any{}, "ignore": []any{}, "only": nil, "max_price": nil, "regions": []any{}, "quantizations": []any{}, "require_parameters": false, "deny_data_collection": false, "require_zero_data_retention": false}, 2},
+					{map[string]any{"strategy": "price"}, 2},
+					{map[string]any{"strategy": "latency", "preferred_max_latency_ms": 0}, 2},
+					{map[string]any{"strategy": "throughput", "preferred_min_throughput": 0}, 2},
+					{map[string]any{"regions": []string{"eu"}}, 0},
+					{map[string]any{"require_zero_data_retention": true}, 0},
+					{map[string]any{"deny_data_collection": true}, 0},
+					{map[string]any{"only": []any{}}, 0},
+					{map[string]any{"order": []any{}, "ignore": []any{}, "only": nil, "max_price": nil, "regions": nil, "quantizations": nil, "require_parameters": false, "deny_data_collection": false, "require_zero_data_retention": false}, 2},
 				} {
 					var decisions []any
 					if path == "/api/v3/routing/simulate" {
@@ -91,6 +96,12 @@ func TestRoutingSimulationsHonorAvailablePreferences(t *testing.T) {
 							attempt = float64(i + 1)
 						} else {
 							reason = "attempt_budget_exhausted"
+							if tc.attempts == 0 {
+								reason = decision["reason"]
+								if reason == nil {
+									t.Fatal("constraint exclusion lacks a reason")
+								}
+							}
 						}
 						if decision["eligible"] != eligible || decision["attempt"] != attempt || decision["reason"] != reason {
 							t.Fatalf("preferences %v were ignored in %s: %v", tc.preferences, mode, decision)
@@ -98,9 +109,9 @@ func TestRoutingSimulationsHonorAvailablePreferences(t *testing.T) {
 					}
 				}
 			}
+			if up.chats.Load() != before {
+				t.Fatal("simulation dispatched upstream")
+			}
 		})
-	}
-	if up.chats.Load() != 4 {
-		t.Fatalf("simulation or rejected playground preferences dispatched upstream: calls=%d", up.chats.Load())
 	}
 }

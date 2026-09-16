@@ -66,6 +66,11 @@ export default defineConfig({
       reuseExistingServer: false
     },
     {
+      command: 'node tests/journeys/mock-azure-openai.mjs',
+      url: 'http://127.0.0.1:4178/health',
+      reuseExistingServer: false
+    },
+    {
       command: 'node tests/gateway/mock-openai.mjs',
       url: 'http://127.0.0.1:4187/health',
       reuseExistingServer: false

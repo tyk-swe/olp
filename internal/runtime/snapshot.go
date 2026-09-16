@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/tyk-swe/olp/internal/connectors"
 )
 
 // RouteSlug is the published-route identifier carried in model fields.
@@ -77,6 +78,7 @@ type Provider struct {
 	Name              string                     `json:"name"`
 	Kind              string                     `json:"kind"`
 	Enabled           bool                       `json:"enabled"`
+	DefaultSlotID     string                     `json:"default_slot_id,omitempty"`
 	ActiveCredential  *string                    `json:"active_credential"`
 	Capabilities      []Capability               `json:"capabilities"`
 	RevisionID        string                     `json:"revision_id"`
@@ -84,6 +86,11 @@ type Provider struct {
 	AuthMode          string                     `json:"auth_mode,omitempty"`
 	CredentialHeaders []string                   `json:"credential_headers,omitempty"`
 	ParameterDefaults map[string]json.RawMessage `json:"parameter_defaults,omitempty"`
+	CloudRegion       string                     `json:"cloud_region,omitempty"`
+	CloudProject      string                     `json:"cloud_project,omitempty"`
+	Deployment        string                     `json:"deployment,omitempty"`
+	APIVersion        string                     `json:"api_version,omitempty"`
+	Models            map[string]json.RawMessage `json:"models,omitempty"`
 	// VendorID is the upstream vendor this connection speaks to. It groups
 	// connections that share one upstream account for accounting and limits.
 	VendorID string `json:"vendor_id,omitempty"`
@@ -115,13 +122,16 @@ type Route struct {
 	RevisionID     string    `json:"revision_id,omitempty"`
 	Revision       int       `json:"revision,omitempty"`
 	PublishedAt    time.Time `json:"published_at,omitempty"`
+	Policy         *Policy   `json:"policy,omitempty"`
 }
 
 // Snapshot is the complete immutable serving configuration.
 type Snapshot struct {
-	Generation Generation          `json:"generation"`
-	Providers  map[string]Provider `json:"providers"`
-	Routes     map[string]Route    `json:"routes"`
+	Generation         Generation          `json:"generation"`
+	Providers          map[string]Provider `json:"providers"`
+	Routes             map[string]Route    `json:"routes"`
+	InstallationPolicy *Policy             `json:"installation_policy,omitempty"`
+	KeyPolicies        map[string]*Policy  `json:"key_policies,omitempty"`
 }
 
 // Digest returns the SHA-256 of the canonical JSON encoding of the serving
@@ -129,9 +139,11 @@ type Snapshot struct {
 // configuration yields the same digest.
 func (s *Snapshot) Digest() (string, error) {
 	encoded, err := json.Marshal(struct {
-		Providers map[string]Provider `json:"providers"`
-		Routes    map[string]Route    `json:"routes"`
-	}{s.Providers, s.Routes})
+		Providers          map[string]Provider `json:"providers"`
+		Routes             map[string]Route    `json:"routes"`
+		InstallationPolicy *Policy             `json:"installation_policy,omitempty"`
+		KeyPolicies        map[string]*Policy  `json:"key_policies,omitempty"`
+	}{s.Providers, s.Routes, s.InstallationPolicy, s.KeyPolicies})
 	if err != nil {
 		return "", err
 	}
@@ -197,4 +209,12 @@ func (s *Snapshot) Validate() error {
 func validUUID(value string) bool {
 	_, err := uuid.Parse(value)
 	return err == nil && len(value) == 36
+}
+
+func (p *Provider) Connector() connectors.Config {
+	mode := p.AuthMode
+	if mode == "" {
+		mode = "api_key"
+	}
+	return connectors.Config{Kind: p.Kind, AuthMode: mode, Endpoint: p.Endpoint, CloudRegion: p.CloudRegion, CloudProject: p.CloudProject, Deployment: p.Deployment, APIVersion: p.APIVersion, VendorID: p.VendorID, CredentialHeaders: p.CredentialHeaders, Models: p.Models}
 }

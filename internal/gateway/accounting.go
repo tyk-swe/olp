@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"encoding/json"
 	"log/slog"
 	"time"
 
@@ -89,6 +90,9 @@ func accountingEvent(e Envelope) *usage.Event {
 		event.UsageComplete = fact.UsageObserved && fact.UsageComplete
 		if fact.UsageObserved {
 			event.InputTokens, event.OutputTokens, event.CachedInputTokens = accountingTokens(fact)
+			if e.Operation == "embeddings" {
+				event.OutputTokens = nil
+			}
 		}
 	}
 	return event
@@ -122,17 +126,27 @@ func accountingAttempt(e Envelope, index int) usage.Attempt {
 			ProviderRevisionID:  fact.ProviderRevisionID,
 		},
 	}
+	if fact.PolicyDigest != "" {
+		policy, _ := json.Marshal(map[string]any{"digest": fact.PolicyDigest, "strategy": fact.Strategy, "pricing_pinned": true, "vendor_id": fact.VendorID})
+		rawPolicy := json.RawMessage(policy)
+		attempt.Routing.Policy = &rawPolicy
+		if fact.Price != nil {
+			attempt.Routing.PricingRevisionID = &fact.Price.RevisionID
+		}
+	}
 	if fact.Class != classSuccess {
 		attempt.ErrorClass = optionalText(fact.Class)
 	}
 	if fact.UsageObserved {
 		attempt.Usage.InputTokens, attempt.Usage.OutputTokens, attempt.Usage.CachedInputTokens = accountingTokens(fact)
 		attempt.Routing.StreamedOutputTokens = streamedTokens(fact)
+		if e.Operation == "embeddings" {
+			attempt.Usage.OutputTokens = nil
+			attempt.Routing.StreamedOutputTokens = nil
+		}
 	}
-	// The first byte the client received came from the attempt that committed
-	// the response, which is the one this request ended on.
-	if index == len(e.Attempts)-1 && fact.Committed && e.FirstByte != nil {
-		output := milliseconds(*e.FirstByte - fact.StartedAt.Sub(e.StartedAt))
+	if fact.FirstOutput != nil {
+		output := milliseconds(*fact.FirstOutput)
 		attempt.Routing.FirstOutputMS = &output
 	}
 	return attempt

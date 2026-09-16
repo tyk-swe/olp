@@ -9,6 +9,7 @@ import (
 	"unicode"
 
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/connectors"
 )
 
 func modelJSON(m storedModel) map[string]any {
@@ -32,7 +33,7 @@ func validModelName(field, value string) error {
 }
 
 // prepare reads what an upstream call needs without holding the installation
-// lock: the provider, its etag precondition, and the default credential.
+// lock: the provider, its etag precondition, and the enabled probe credential.
 func (s *Server) prepare(r *http.Request, id string) (*record, []byte, error) {
 	tx, err := s.Access.Pool.Begin(r.Context())
 	if err != nil {
@@ -53,6 +54,21 @@ func (s *Server) prepare(r *http.Request, id string) (*record, []byte, error) {
 	if err != nil {
 		return nil, nil, err
 	}
+	rows, err := tx.Query(r.Context(), "SELECT upstream_model FROM olp_go.provider_models WHERE provider_id=$1 ORDER BY enabled DESC,upstream_model LIMIT 2000", id)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var model string
+		if err := rows.Scan(&model); err != nil {
+			return nil, nil, err
+		}
+		current.Configuration.ProbeModels = append(current.Configuration.ProbeModels, model)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, nil, err
+	}
 	return current, credential, nil
 }
 
@@ -69,7 +85,7 @@ func (s *Server) probe(r *http.Request) (access.Reply, error) {
 		return access.Reply{}, err
 	}
 	at := time.Now().UTC()
-	models, err := s.listModels(r.Context(), &current.Configuration, credential)
+	models, err := s.listModelFacts(r.Context(), &current.Configuration, credential)
 	var discovered any
 	succeeded, detail := err == nil, ""
 	if succeeded {
@@ -122,7 +138,10 @@ func (s *Server) discover(r *http.Request) (access.Reply, error) {
 	if len(input.Models) > 2000 {
 		return access.Reply{}, access.Invalid("models", "Declare at most 2000 models per request.")
 	}
-	type declared struct{ upstream, display string }
+	type declared struct {
+		upstream, display string
+		metadata          map[string]json.RawMessage
+	}
 	var models []declared
 	seen := map[string]bool{}
 	for _, m := range input.Models {
@@ -137,7 +156,7 @@ func (s *Server) discover(r *http.Request) (access.Reply, error) {
 		}
 		if !seen[m.UpstreamModel] {
 			seen[m.UpstreamModel] = true
-			models = append(models, declared{m.UpstreamModel, m.DisplayName})
+			models = append(models, declared{m.UpstreamModel, m.DisplayName, nil})
 		}
 	}
 	current, credential, err := s.prepare(r, id)
@@ -147,14 +166,14 @@ func (s *Server) discover(r *http.Request) (access.Reply, error) {
 	upstream := len(models) == 0
 	at := time.Now().UTC()
 	if upstream {
-		listed, err := s.listModels(r.Context(), &current.Configuration, credential)
+		listed, err := s.listModelFacts(r.Context(), &current.Configuration, credential)
 		if err != nil {
 			pe := classify(err)
 			a.Pool.Exec(r.Context(), "UPDATE olp_go.providers SET last_probe_at=$2,last_probe_status='failed',last_probe_detail=$3 WHERE id=$1", id, at, pe.Detail)
 			return access.Reply{}, access.Fail(422, "discovery_failed", pe.Detail)
 		}
 		for _, name := range listed {
-			models = append(models, declared{name, name})
+			models = append(models, declared{name.Name, name.Display, name.Metadata})
 		}
 	}
 	tx, err := a.Begin(r)
@@ -174,9 +193,26 @@ func (s *Server) discover(r *http.Request) (access.Reply, error) {
 		return access.Reply{}, access.Fail(412, "etag_mismatch", "The connection changed during discovery; reload and retry.")
 	}
 	for _, m := range models {
+		facts := m.metadata
+		if facts == nil {
+			facts = map[string]json.RawMessage{}
+		}
+		var existing map[string]json.RawMessage
+		_ = json.Unmarshal(locked.Configuration.Options.Models[m.upstream], &existing)
+		for k, v := range existing {
+			facts[k] = v
+		}
+		if len(facts) > 0 {
+			encoded, _ := json.Marshal(facts)
+			locked.Configuration.Options.Models[m.upstream] = encoded
+		}
 		if _, err = tx.Exec(r.Context(), "INSERT INTO olp_go.provider_models(id,provider_id,upstream_model,display_name,enabled,capabilities,discovered_at) VALUES($1,$2,$3,$4,false,'[]',$5) ON CONFLICT(provider_id,upstream_model) DO UPDATE SET display_name=excluded.display_name,discovered_at=excluded.discovered_at", access.NewID(), id, m.upstream, m.display, at); err != nil {
 			return access.Reply{}, err
 		}
+	}
+	config, _ := json.Marshal(locked.Configuration)
+	if _, err = tx.Exec(r.Context(), "UPDATE olp_go.providers SET configuration=$2 WHERE id=$1", id, config); err != nil {
+		return access.Reply{}, err
 	}
 	if upstream {
 		if _, err = tx.Exec(r.Context(), "UPDATE olp_go.providers SET last_probe_at=$2,last_probe_status='succeeded',last_probe_detail=$3 WHERE id=$1", id, at, fmt.Sprintf("Discovered %d models.", len(models))); err != nil {
@@ -330,6 +366,9 @@ func (s *Server) setModel(r *http.Request) (access.Reply, error) {
 		}
 		capabilities = make([]storedCapability, 0, len(requested))
 		for _, c := range requested {
+			if !connectors.Supports(current.Kind, value(current.Configuration.Options.VendorID), c.Operation, c.Surface, c.Mode) {
+				return access.Reply{}, access.Fail(422, "capability_unavailable", "This connector cannot certify the requested tuple.")
+			}
 			if kept, ok := existing[c]; ok {
 				capabilities = append(capabilities, kept)
 				continue
@@ -355,6 +394,9 @@ func (s *Server) setModel(r *http.Request) (access.Reply, error) {
 }
 
 func (s *Server) certify(r *http.Request) (access.Reply, error) {
+	ctx, cancel := context.WithTimeout(r.Context(), time.Minute)
+	defer cancel()
+	r = r.WithContext(ctx)
 	a := s.Access
 	if _, err := a.Principal(r, a.Pool, "configure"); err != nil {
 		return access.Reply{}, err
@@ -382,18 +424,18 @@ func (s *Server) certify(r *http.Request) (access.Reply, error) {
 	if err != nil {
 		return access.Reply{}, err
 	}
-	var defaultSlot slotRow
-	for _, row := range slots {
-		if row.Default {
-			defaultSlot = row
-		}
+	selected := selectProbeSlot(slots, &current.Configuration)
+	if selected == nil {
+		return access.Reply{}, access.Fail(422, "credential_required", "Enable a credential slot before certifying.")
 	}
+	defaultSlot := *selected
+
 	at := time.Now().UTC()
 	results := make([]map[string]any, 0, len(m.Capabilities))
 	certified := 0
 	for i := range m.Capabilities {
 		c := &m.Capabilities[i]
-		err := s.certifyTuple(r.Context(), &current.Configuration, credential, m.UpstreamModel, c.Mode, probeBodyLimit)
+		err := s.certifyTuple(r.Context(), &current.Configuration, credential, m.UpstreamModel, capabilityInput{c.Operation, c.Surface, c.Mode}, probeBodyLimit)
 		item := map[string]any{"operation": c.Operation, "surface": c.Surface, "mode": c.Mode, "succeeded": err == nil, "detail": "Certified.", "error_code": nil}
 		if err == nil {
 			certified++
@@ -456,5 +498,9 @@ func (s *Server) certify(r *http.Request) (access.Reply, error) {
 		return access.Reply{}, err
 	}
 	result := access.Detail(map[string]any{"provider_id": id, "model_id": modelID, "status": status, "checked_at": at, "certified_count": certified, "attempted_count": len(m.Capabilities), "results": results}, etag)
-	return access.Commit(r, tx, result)
+	reply, err := access.Commit(r, tx, result)
+	if err == nil && certified == len(m.Capabilities) {
+		s.clearValidatedCooldowns(r.Context(), id, defaultSlot)
+	}
+	return reply, err
 }
