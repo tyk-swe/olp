@@ -13,7 +13,8 @@ import (
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
-// startWorkers runs the recovery plane of one replica: the consumer that turns
+// startWorkers runs the recovery plane of one replica: the media reconciler
+// that polls durable video jobs to completion, the consumer that turns
 // emitted request metadata into accounting, the detector that turns an unclean
 // gateway shutdown into a recorded completeness gap, the maintenance loop that
 // rolls up and expires stored usage, and the cost reconciliation leader that

@@ -23,7 +23,7 @@ const (
 	AuthNone    = "none"
 )
 
-// Capability tuple vocabulary served in this milestone.
+// Capability tuple vocabulary shared across providers.
 const (
 	OperationGeneration = "generation"
 	SurfaceOpenAI       = "openai"

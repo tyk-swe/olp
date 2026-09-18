@@ -15,7 +15,7 @@ import (
 	"github.com/tyk-swe/olp/internal/protocols/openai"
 )
 
-// Limits is the connection quota configuration persisted for M4 enforcement.
+// Limits is the connection quota configuration persisted for distributed limits enforcement.
 type Limits struct {
 	MaxConcurrency    *int64 `json:"max_concurrency"`
 	RequestsPerMinute *int64 `json:"requests_per_minute"`

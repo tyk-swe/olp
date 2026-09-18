@@ -3,7 +3,7 @@
 [Roadmap](README.md) | [Previous: providers and routing](05-provider-and-routing-parity.md) |
 [Next: release and Rust retirement](07-release-and-rust-retirement.md)
 
-**Status:** In progress; media regression fixes and release qualification underway. **Prerequisites:** M5 complete.
+**Status:** In progress; implementation complete, media failure-path qualification (M6-09) and product evidence underway. **Prerequisites:** M5 complete.
 
 Complete current product capabilities with bounded image/audio operations,
 durable video jobs, operational diagnostics, and the remaining console

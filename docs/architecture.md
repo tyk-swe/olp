@@ -2,6 +2,8 @@
 
 One Rust package owns production code in `src/`. `src/main.rs` starts the process CLI; `src/lib.rs` names the feature owners. The console mirrors these owners under `console/src/lib/features/`.
 
+The Go rewrite in `internal/` mirrors the same feature ownership (`internal/access/`, `internal/providers/`, `internal/routes/`, `internal/gateway/`, `internal/limits/`, `internal/usage/`, `internal/media/`, `internal/observability/`); `cmd/olp` is its entrypoint and `docs/roadmap/` tracks parity. Rust remains the production owner until M7 retires it.
+
 | Change | Start here |
 | --- | --- |
 | Provider configuration, models, credentials, certification, revisions | `src/providers/` and `console/src/lib/features/providers/` |

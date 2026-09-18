@@ -50,15 +50,18 @@ failure. Install Chromium once with
 `pnpm --dir console exec playwright install --with-deps chromium`.
 
 Go supports access management, provider and credential pools, immutable route
-publication, OpenAI/Anthropic/Gemini non-media inference, cloud and compatible
+publication, OpenAI/Anthropic/Gemini inference, cloud and compatible
 connectors, routing policies and previews, distributed limits, pricing,
-accounting, retention, and recovery. `go-dev` creates missing private secrets in
+accounting, retention, and recovery, plus bounded media uploads, image and
+audio operations, durable video jobs, and the private health/metrics listener
+with optional OTLP tracing. `go-dev` creates missing private secrets in
 `.local/go-secrets`, runs Go migrations, and prints the bootstrap-token file
 location. Use that token once in owner setup. Never share Rust installation
 storage. See [Go gateway operations](docs/go-gateway.md),
 [Go access operations](docs/go-access.md), and the
 [M5 evidence](docs/roadmap/evidence/provider-and-routing-parity.md) for the
-qualified surface and remaining platform gates. Media work remains in M6.
+qualified surface and remaining platform gates. Media failure-path and release
+qualification remain in [M6-09 and M7](docs/roadmap/README.md).
 
 Use `OLP_SDK_SMOKE_BACKEND=go tests/sdk-smoke/run.sh` to exercise the pinned
 OpenAI, Anthropic, and Google GenAI JavaScript SDK success and typed-error

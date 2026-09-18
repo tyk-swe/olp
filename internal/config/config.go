@@ -104,7 +104,7 @@ func Parse(args []string, getenv func(string) string, output io.Writer) (Config,
 	f.StringVar(&level, "log-level", "info", "debug, info, warn, or error (OLP_LOG_LEVEL)")
 	f.DurationVar(&c.RequestTimeout, "dependency-request-timeout", 2*time.Second, "dependency request deadline")
 	f.DurationVar(&c.StartupTimeout, "startup-timeout", 10*time.Second, "startup deadline")
-	f.DurationVar(&c.ShutdownTimeout, "shutdown-timeout", 5*time.Second, "total shutdown deadline")
+	f.DurationVar(&c.ShutdownTimeout, "shutdown-timeout", 5*time.Second, "per-stage shutdown deadline")
 	var trustedProxies, egressCIDRs, egressHosts string
 	f.StringVar(&trustedProxies, "trusted-proxy-cidrs", "", "comma-separated CIDRs allowed to supply X-Forwarded-For")
 	f.StringVar(&egressCIDRs, "provider-egress-allow-cidrs", "", "comma-separated CIDRs exempt from the non-public provider egress denylist")

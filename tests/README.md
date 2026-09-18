@@ -14,6 +14,15 @@ services to exercise setup, provider activation, routing, inference, history,
 OIDC, and conflicts. Each installation has its own
 database and Valkey namespace.
 
+The Go rewrite has its own suites. `make go-test` runs `go test ./...` —
+unit and protocol fixtures without containers — and `make go-check` adds
+gofmt/vet and the existing console checks. `make go-integration` provisions
+disposable TLS/authenticated PostgreSQL and Valkey services and runs the
+`integration/` process suites (access races, authority lifecycle, limits,
+accounting recovery, provider parity, OIDC, migration recovery), the official
+SDK checks, and Chromium journeys at packaged and Vite origins against the
+Go backend.
+
 For a focused run after installing dependencies:
 
 ```sh

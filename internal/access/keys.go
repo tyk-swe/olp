@@ -376,7 +376,7 @@ func (s *Server) transitionKey(r *http.Request, rotate bool) (Reply, error) {
 	return Commit(r, tx, result)
 }
 
-// Authority is durable input for M3's independent runtime refresh. Lookup never
+// Authority is durable input for the independent runtime authority refresh. Lookup never
 // grants one positive scope through the other or applies unenforced limits.
 // LookupID is the public lookup segment of the secret, which identifies the key
 // in shared state that must never carry the key's internal identifier.

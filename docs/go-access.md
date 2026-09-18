@@ -2,9 +2,9 @@
 
 The Go control plane supports owner setup, local and OIDC sign-in, membership,
 invitations, sessions, profiles, gateway-key policy, installation settings, and
-metadata-only audit reads. Provider connections, routes, and OpenAI inference
-are described in the [Go gateway guide](go-gateway.md); distributed limits and
-retention workers belong to later milestones. The console reports these
+metadata-only audit reads. Provider connections, routes, inference, media,
+distributed limits, and the retention workers are described in the
+[Go gateway guide](go-gateway.md). The console reports these
 capabilities and labels configured limits as saved policy.
 
 ## Local development
@@ -24,8 +24,10 @@ same-origin requests to the backend. Restart Go after backend edits.
 Use a fresh, separate database. Go owns schema `olp_go` and its checksum history;
 it rejects Rust schemas and preexisting public tables before writing. The
 installation UUID survives repeated and concurrent migrations. Valkey names
-are reserved under `olp:go:v1:<installation UUID>:`; M2 does not publish runtime
-coordination keys yet. Never share a Rust installation's database or Valkey data.
+are reserved under `olp:go:v1:<installation UUID>:`, the namespace the limits,
+cooldown, and request-metadata keys documented in the
+[gateway guide](go-gateway.md#shared-state-in-valkey) live under. Never share a
+Rust installation's database or Valkey data.
 
 Provision a database owner for migration and a separate, existing login role for
 runtime use. Using the migration connection, run:

@@ -35,7 +35,7 @@ func run(ctx context.Context, args []string) error {
 	if len(args) > 0 {
 		switch args[0] {
 		case "version", "--version":
-			fmt.Println("olp 3.0.0 Go access and control")
+			fmt.Println("olp 3.0.0 Go")
 			return nil
 		case "help", "--help", "-h":
 			fmt.Println("usage: olp <all|gateway|control|worker|migrate|doctor|health-probe> [flags]\n       olp master-key <status|reencrypt> [flags]")

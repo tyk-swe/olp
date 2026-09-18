@@ -52,7 +52,7 @@ func TestUnionAllOfAndExtensionMap(t *testing.T) {
 
 func TestClosedObjectsNeedStrictHandlerDecoding(t *testing.T) {
 	// Generated structs express fields, but encoding/json permits unknown fields
-	// by default. M2 handlers must explicitly enforce additionalProperties:false.
+	// by default. Management handlers must explicitly enforce additionalProperties:false.
 	decoder := json.NewDecoder(strings.NewReader(`{"name":"x","configuration":{"kind":"openai","auth_mode":"bearer"},"unexpected":true}`))
 	decoder.DisallowUnknownFields()
 	var value contract.CreateProviderRequest

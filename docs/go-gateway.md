@@ -1,28 +1,33 @@
 # Go gateway: providers, native protocols, and routing
 
-The Go gateway serves OpenAI, Anthropic, and Gemini non-media protocols through
-one executor. Operators configure a connection, certify its models, publish a
-route, and issue a key; SDK clients use the route slug as the model name.
-Distributed limits, accrued-cost budgets, exact pricing, durable accounting,
-and policy-constrained routing apply across every surface. Installation and
-identity are covered in [Go installation and access control](go-access.md).
+The Go gateway serves the OpenAI, Anthropic, and Gemini protocols through
+one executor, including bounded media uploads, image and audio operations,
+and durable video jobs. Operators configure a connection, certify its models,
+publish a route, and issue a key; SDK clients use the route slug as the model
+name. Distributed limits, accrued-cost budgets, exact pricing, durable
+accounting, and policy-constrained routing apply across every surface.
+Installation and identity are covered in
+[Go installation and access control](go-access.md).
 
 ## What is available
 
 | Area | Available now |
 |---|---|
-| OpenAI | Chat Completions, Responses, Responses input counting, embeddings, moderation, and gateway-owned models under `/v1` |
+| OpenAI | Chat Completions, Responses, Responses input counting, embeddings, moderation, images, audio, durable videos, and gateway-owned models under `/v1` |
 | Anthropic | Messages, streaming, counting, and gateway-owned models under `/anthropic/v1` |
 | Gemini | Generation, streaming, counting, and gateway-owned models under both `/gemini/v1` and `/gemini/v1beta` |
 | Providers | OpenAI, compatible vendors, Anthropic, Gemini, Azure OpenAI, Vertex AI, and Bedrock; native/cloud authentication and custom endpoints |
 | Routing | Installation, route, key, and request policies; priority/order tiers; weighted, price, latency, and throughput strategies; credential pools and shared previews |
 | Limits | Key, connection, and slot request/token/concurrency limits and daily/monthly accrued-cost budgets across replicas |
 | Accounting | Durable requests/attempts, exact prices, completeness, history/reports, retention, and recovery |
+| Media | Image generation, editing, and variation; speech and transcription; durable video jobs with polling, content, and deletion; bounded multipart and spool admission |
+| Observability | Private `/health/live`, `/health/ready`, and `/metrics` listener, worker and media checkpoints, optional OTLP/HTTP tracing, and management health reads |
 
 The [compatibility matrix](compatibility.md) specifies certified combinations
-and translation refusals. Media and the remaining observability listener work
-belong to M6. Deterministic SDK/cloud/browser and build evidence is recorded in
-[M5 qualification](roadmap/evidence/provider-and-routing-parity.md).
+and translation refusals. Deterministic SDK/cloud/browser and build evidence is
+recorded in [M5 qualification](roadmap/evidence/provider-and-routing-parity.md);
+media failure-path and product evidence closes with M6-09 in the
+[roadmap](roadmap/06-media-and-console-parity.md).
 
 ## Process modes
 
@@ -33,13 +38,13 @@ credentials also require `OLP_MASTER_KEY_FILE`. A gateway using
 `OLP_CONNECTOR_CONFIG_FILE` may omit the master key for mounted default-slot
 credentials; enabled named pools require it. Mounted releases must contain the
 published default-slot ID; republish older Go releases before enabling this mode.
-`worker` publishes no public listener and runs only the
-accounting and recovery plane described below, which `all` also runs; an
+`worker` publishes no public listener and runs only the accounting, media
+reconciliation, and recovery plane described below, which `all` also runs; an
 installation that serves traffic with `gateway` and `control` needs at least
-one `worker` replica for accounting, budget reconciliation, and retention to
-happen at all. `GET /health/ready` on the private listener reports an
-`authority` dependency alongside PostgreSQL and Valkey; readiness fails while
-the authority snapshot is missing or stale.
+one `worker` replica for accounting, budget reconciliation, retention, and
+media job polling to happen at all. `GET /health/ready` on the private
+listener reports an `authority` dependency alongside PostgreSQL and Valkey;
+readiness fails while the authority snapshot is missing or stale.
 
 `GET /api/v3/auth/capabilities` answers `limits_enforced` and
 `retention_enforced` from that same composition: both are true where
@@ -53,20 +58,45 @@ the flags to say whether stored limits and retention policies bind at all.
 
 ## Configuration
 
-Every variable also exists as a flag (`olp --help`). Bounds are validated at
-startup.
+Every variable also exists as a flag (`olp <mode> --help`). Bounds are
+validated at startup.
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `OLP_VALKEY_URL` | unset | Shared limits, cooldowns, and the request metadata stream. Required by `worker`; without it a gateway refuses every key or target that carries a limit and records no durable accounting. |
+| `OLP_DATABASE_URL` | required | PostgreSQL URL; `OLP_DATABASE_URL_FILE` reads it from a mounted file instead. |
+| `OLP_DATABASE_MAX_CONNECTIONS` | `20` | PostgreSQL pool capacity (1–10000). |
+| `OLP_VALKEY_URL` | unset | Shared limits, cooldowns, and the request metadata stream. Required by `worker`; without it a gateway refuses every key or target that carries a limit and records no durable accounting. `OLP_VALKEY_URL_FILE` reads it from a mounted file instead. |
+| `OLP_VALKEY_TLS_CA_FILE` | unset | PEM trust roots for Valkey TLS; requires `OLP_VALKEY_URL`. |
+| `OLP_LISTEN_ADDR` | `127.0.0.1:8080` | Public listener; must not overlap the observability listener. |
+| `OLP_OBSERVABILITY_LISTEN_ADDR` | `127.0.0.1:9090` | Private health and metrics listener. |
+| `OLP_PUBLIC_ORIGIN` | `http://127.0.0.1:8080` | Exact browser origin for OIDC and generated links. |
+| `OLP_CONSOLE_DIR` | `console/build` | Static console directory. |
+| `OLP_LOG_LEVEL` | `info` | `debug`, `info`, `warn`, or `error` for the JSON log stream. |
 | `OLP_CONNECTOR_CONFIG_FILE` | unset | Shared providers-list configuration with restricted credential files; preserves published capabilities, quotas, and default-slot restrictions. |
 | `OLP_TRUSTED_PROXY_CIDRS` | empty | Proxies whose `X-Forwarded-For` supplies the client address recorded in diagnostics. |
 | `OLP_PROVIDER_EGRESS_ALLOW_CIDRS` | empty | Destination networks exempt from the non-public egress denylist. |
 | `OLP_PROVIDER_EGRESS_ALLOW_HTTP_HOSTS` | empty | Hostnames or IP literals whose endpoints may use plain HTTP. |
 | `OLP_HTTP_MAX_IN_FLIGHT_INFERENCE_REQUESTS` | `256` | Inference work admission (1–100000); excess requests receive `503`. |
+| `OLP_HTTP_MAX_IN_FLIGHT_MANAGEMENT_REQUESTS` | `32` | Management and console work admission (1–100000). |
 | `OLP_HTTP_MAX_JSON_BODY_BYTES` | `2097152` | Largest JSON request body before and after gzip inflation (64 KiB–64 MiB). |
+| `OLP_HTTP_MAX_MEDIA_BODY_BYTES` | `67108864` | Largest raw or multipart media request body (1 MiB–1 GiB); must stay within half of the spool capacity. |
+| `OLP_MEDIA_SPOOL_DIR` | unset | Bounded media staging directory; defaults to the system temp directory. |
+| `OLP_MEDIA_SPOOL_CAPACITY_BYTES` | `1073741824` | Media spool capacity (at least 256 MiB). |
 | `OLP_PROVIDER_MAX_RESPONSE_BYTES` | `16777216` | Largest buffered unary provider response (1 MiB–256 MiB). |
 | `OLP_PROVIDER_MAX_EVENT_BYTES` | `1048576` | Largest single streamed provider event (64 KiB up to the response cap). |
+| `OLP_OTLP_TRACES_ENDPOINT` | unset | Complete OTLP/HTTP traces endpoint; unset disables tracing. |
+| `OLP_OTLP_HEADERS_FILE` | unset | Mounted JSON object of OTLP exporter headers, read only when tracing is enabled. |
+| `OLP_TRACE_SAMPLE_RATIO` | `1.0` | Sampling ratio from `0.0` through `1.0` for locally rooted traces. |
+| `OLP_TRACE_PROPAGATE_UPSTREAM` | `true` | Inject the current W3C trace context into provider attempts. |
+| `OLP_TRACE_ACCEPT_INBOUND` | `true` | Accept a valid inbound W3C trace context as the request parent. |
+| `OLP_DEPENDENCY_REQUEST_TIMEOUT` | `2s` | Dependency request deadline (1ms–1m). |
+| `OLP_STARTUP_TIMEOUT` | `10s` | Startup deadline (1ms–1m). |
+| `OLP_SHUTDOWN_TIMEOUT` | `5s` | Per-stage shutdown deadline (1ms–10m). |
+
+The mounted secrets (`OLP_AUTH_HMAC_KEY_FILE`, `OLP_MASTER_KEY_FILE`,
+`OLP_BOOTSTRAP_TOKEN_FILE`) and the `migrate`, `doctor`, and `master-key`
+commands are covered in
+[Go installation and access control](go-access.md).
 
 The browser and integration harnesses allow loopback egress and plain HTTP for
 `127.0.0.1` so mock upstreams can be reached. Export the same two exceptions
@@ -164,7 +194,9 @@ even from retained releases, without waiting for a new provider activation.
 ## Routes
 
 Route drafts carry a slug, allowed operations (default `generation`; explicit
-`token_count`, `embeddings`, and `moderation` are also supported), an overall
+`token_count`, `embeddings`, `moderation`, `image_generation`, `image_edit`,
+`image_variation`, `speech`, `transcription`, `video_create`, `video_list`,
+`video_get`, `video_content`, and `video_delete` are also supported), an overall
 deadline, a maximum attempt count, and ordered targets with priority, weight,
 and per-attempt timeout. Every target must reference a published model with
 certified support for each allowed operation; validation and activation reject
@@ -191,7 +223,7 @@ required parameters, data-collection denial, and zero-data-retention evidence.
 Unknown facts fail affirmative requirements. Allowed strategies intersect;
 preference precedence is request, key, route, installation.
 
-Price ordering uses exact decimal M4 rates and pins the selected revision or
+Price ordering uses exact decimal rates and pins the selected revision or
 explicit unpriced state. Successful persisted attempts from the last five
 minutes supply latency/throughput after twenty qualifying samples. Streaming
 latency starts at meaningful output; throughput excludes reasoning tokens and
@@ -233,7 +265,9 @@ Each request receives an `X-Request-Id` (a client-supplied value is kept when
 it is a safe token), a no-store cache policy, and permissive CORS headers so
 browser SDKs can call the gateway. Bodies must be `application/json`,
 optionally gzip-compressed, and within the JSON body limit before and after
-inflation. Uploads have a 15-second read deadline; incomplete bodies receive
+inflation; the media endpoints also accept raw and `multipart/form-data`
+bodies bounded by `OLP_HTTP_MAX_MEDIA_BODY_BYTES` and the spool's per-endpoint
+reservations. Uploads have a 15-second read deadline; incomplete bodies receive
 `408 request_timeout` and release their admission slot. The upload deadline
 ends when the body is read, before the route's inference deadline starts.
 The optional `X-OLP-Routing` header accepts one JSON object, for example
@@ -282,6 +316,30 @@ successful delivery is recorded only after the response has been flushed.
 | 502 | `upstream_unavailable`, `upstream_rejected`, `upstream_authentication_failed`, `upstream_permission_denied`, `provider_protocol_error` | Upstream or transport failures after the budget is spent. |
 | 503 | `authority_unavailable`, `request_admission_overloaded`, `distributed_limits_unavailable`, `upstream_unavailable` | Stale authority, admission limit, limits that cannot be enforced, or no eligible target. |
 | 504 | `gateway_timeout` | Route deadline reached before commitment. |
+
+## Media and durable video jobs
+
+The media endpoints — `/v1/images/generations`, `/v1/images/edits`,
+`/v1/images/variations`, `/v1/audio/speech`, `/v1/audio/transcriptions`, and
+the `/v1/videos` family — share the same authentication, route-slug, limits,
+and accounting contracts as generation. Multipart and raw uploads reserve
+capacity inside `OLP_HTTP_MAX_MEDIA_BODY_BYTES` and per-endpoint fractions of
+the spool; oversized bodies, excessive parts, and insufficient capacity fail
+predictably, and cancellation releases the reservation and its files. Restart
+cleanup never removes live work, and uploaded content stays inside its bounded
+operational lifetime — it never enters persistent request diagnostics.
+
+Video creation is asynchronous: an admitted request writes a durable job
+record pinning the route, provider, slot, credential, and price revisions, so
+a client disconnect cannot erase upstream work and an ambiguous create never
+triggers a blind retry or duplicate. Jobs cannot cross API-key ownership
+boundaries. The worker plane's media reconciler polls claimed jobs to
+completion, resolves the pinned historical credential through rotation and
+provider changes, obeys explicit revocation guards, and finishes accounting.
+`GET /v1/videos`, `GET /v1/videos/{video_id}`,
+`GET /v1/videos/{video_id}/content`, and `DELETE /v1/videos/{video_id}` expose
+the durable record, which the management `/api/v3/media-jobs` reads mirror for
+operators.
 
 ## Limits and budgets
 
@@ -342,7 +400,7 @@ every 15 seconds, and an unreadable setting keeps the policy already in force.
 A target whose configured quota cannot be consulted is skipped so a sibling can
 serve; a request that exhausts every target that way ends
 `503 distributed_limits_unavailable`. Fail-open admissions are counted in
-process, but no metrics endpoint exports the count yet.
+`olp_limits_fail_open_total` on the private `/metrics` listener.
 
 ## Shared state in Valkey
 
@@ -372,9 +430,14 @@ the buffer never blocks a request, and an overflow is counted as loss rather
 than paid for in latency. Events carry identifiers, timing, token counts, and
 per-attempt evidence only — never prompts, outputs, tool data, or headers.
 
-`worker` and `all` processes run four tasks, each checkpointing its own liveness
+`worker` and `all` processes run five tasks, each checkpointing its own liveness
 into the worker health table:
 
+- **Media reconciliation.** Claims durable video jobs in turn, polls their
+  upstream provider through the pinned historical credential and connection,
+  records completion or deletion evidence, and finishes the job's accounting.
+  It checks the live credential-revocation authority before each upstream call
+  and survives worker restarts by re-claiming pending jobs.
 - **Request metadata consumer.** Reads the stream on its own Valkey connection,
   replays its own pending entries before reclaiming another consumer's idle
   deliveries, and acknowledges and deletes an entry only after the event is
@@ -423,18 +486,32 @@ response was committed, timing, observed usage when the upstream reported it,
 and one record per attempt with target, provider revision, slot, credential
 version, status class, and timing. Prompts, outputs, tool data, headers, and
 credentials are never included. `GET /api/v3/provider-health` summarizes the
-same facts per provider for the requested window. The same envelope is the
+same facts per provider for the requested window, `GET /api/v3/health/ready`
+serves the cached readiness snapshot, and `GET /api/v3/media-jobs` lists
+and reads durable video jobs. The same envelope is the
 source of the durable request, attempt, and priced usage records described
 above.
+
+The private observability listener (default `127.0.0.1:9090`) serves
+`GET /health/live`, `GET /health/ready`, and `GET /metrics`. Readiness reports
+each configured dependency — PostgreSQL, Valkey, the authority snapshot,
+provider transport validity, worker checkpoints, and media reconciliation
+gaps — and stays honest about stale or absent data rather than reporting a
+healthy unknown. `olp health-probe` exits nonzero unless readiness passes.
+When `OLP_OTLP_TRACES_ENDPOINT` is set, requests and provider attempts also
+emit bounded OTLP/HTTP spans carrying identifier, classification, timing,
+usage, and pricing attributes only; exporter headers come from the mounted
+headers file and never reach providers. Keep this listener private.
 
 ## Local development and qualification
 
 `make go-check` runs formatting, vet, Go unit/protocol suites, and console
 checks. `make go-integration` builds the binary, runs real PostgreSQL/Valkey
-and process scenarios, exercises all seven connector kinds and every retained
-non-media tuple/refusal, runs the official OpenAI/Anthropic/Google GenAI SDKs,
-and runs Chromium journeys at packaged and Vite origins. Identity and provider
-responses are deterministic local fixtures, not paid cloud qualification.
+and process scenarios, exercises all seven connector kinds and the retained
+tuples and refusals including media, runs the official OpenAI, Anthropic, and
+Google GenAI SDKs, and runs Chromium journeys at packaged and Vite origins.
+Identity and provider responses are deterministic local fixtures, not paid
+cloud qualification.
 
 The browser journeys include accounting plus cloud configuration, bulk model
 certification, grouped routes, credential pools, policy exclusions, preview,

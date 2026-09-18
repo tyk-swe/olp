@@ -1,7 +1,8 @@
 # OpenLLMProxy console
 
-The console is a client-only SvelteKit application. Rust serves its static
-`build/` output with `index.html` as the SPA fallback. See
+The console is a client-only SvelteKit application. The backend serves its
+static `build/` output with `index.html` as the SPA fallback — Rust through
+`make dev`, the Go rewrite through `make go-dev`. See
 [CONTRIBUTING.md](../CONTRIBUTING.md) for the toolchain and repository setup.
 
 ## Local development

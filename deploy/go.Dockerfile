@@ -31,7 +31,7 @@ RUN pnpm --dir console api:generate && pnpm --dir console build
 
 FROM gcr.io/distroless/cc-debian13:nonroot@sha256:c31ff9abcb1910f3ab25c7957bdaf0bfe12a01eb546e8df2282f1c8f682b606c
 LABEL org.opencontainers.image.source="https://github.com/tyk-swe/olp" \
-      org.opencontainers.image.title="OpenLLMProxy Go access and control candidate" \
+      org.opencontainers.image.title="OpenLLMProxy Go candidate" \
       org.opencontainers.image.licenses="AGPL-3.0-only"
 COPY --from=go-build /out/olp /usr/local/bin/olp
 COPY --from=go-build /out/*LICENSE* /out/*txt /usr/share/doc/openllmproxy/

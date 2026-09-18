@@ -99,8 +99,9 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 		public.Handle("/health", assets)
 	}
 	// These prefixes must never fall through to the SPA, in any public mode.
-	// The gateway owns /v1/ when inference is enabled; the Anthropic and
-	// Gemini surfaces arrive with M5 and stay honestly unimplemented.
+	// When inference is enabled the gateway registers its own, more specific
+	// handlers under /v1/, /anthropic/, and /gemini/; anything left over is
+	// answered honestly instead of reaching the console.
 	for _, prefix := range []string{"/api/", "/v1/", "/anthropic/", "/gemini/", "/v1beta/", "/openai/", "/health/", "/metrics"} {
 		handler := http.HandlerFunc(http.NotFound)
 		if c.Mode.Inference() {
