@@ -73,12 +73,21 @@ func (c *capture) Terminal(e Envelope) { c.mu.Lock(); defer c.mu.Unlock(); c.env
 
 func (c *capture) last(t *testing.T) Envelope {
 	t.Helper()
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if len(c.envs) == 0 {
-		t.Fatal("no envelope emitted")
+	// Reading a known-length HTTP response can finish before the serving
+	// goroutine records its terminal event. Await that event explicitly.
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		c.mu.Lock()
+		if len(c.envs) != 0 {
+			event := c.envs[len(c.envs)-1]
+			c.mu.Unlock()
+			return event
+		}
+		c.mu.Unlock()
+		time.Sleep(time.Millisecond)
 	}
-	return c.envs[len(c.envs)-1]
+	t.Fatal("no envelope emitted within one second")
+	return Envelope{}
 }
 
 // mock is the upstream: one handler per provider prefix, swappable per test.

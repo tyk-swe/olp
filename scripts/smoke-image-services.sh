@@ -31,6 +31,8 @@ trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 "${compose[@]}" up -d --wait --wait-timeout 90
+version=$(python3 -c 'import json; print(json.load(open("package.json"))["version"])')
+[[ $(docker run --rm "$image" --version) == "olp $version Go" ]]
 [[ $(docker image inspect --format '{{.Config.User}}' "$image") == '65532:65532' ]]
 # Use the already pulled PostgreSQL image only to assign disposable volume ownership.
 docker run --rm --user 0 -v "$scratch/secrets:/secrets" postgres:18 chown 65532:65532 /secrets/auth.key /secrets/master.json /secrets/bootstrap.token
@@ -72,7 +74,7 @@ for mode in all gateway control worker; do
   fi
   if [[ $mode == all || $mode == control ]]; then
     curl --fail --silent "http://$public/api/v3/openapi.json" | cmp - openapi/management.json
-    curl --fail --silent "http://$public/login" | rg -q 'svelte-root'
+    curl --fail --silent "http://$public/login" | grep -q 'svelte-root'
   fi
   if [[ $mode != worker ]]; then
     [[ $(curl --silent --output /dev/null --write-out '%{http_code}' "http://$public/health/ready") == 404 ]]

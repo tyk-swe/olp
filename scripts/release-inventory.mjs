@@ -20,7 +20,9 @@ const behavior = {
   M6: ['internal/gateway/media_system_test.go', 'internal/gateway/media_restore_test.go', 'internal/media/capacity_system_test.go']
 };
 // Fail on renamed evidence instead of publishing dangling qualification claims.
-const files = execFileSync('rg', ['--files', 'internal', 'tests/integration'], { encoding: 'utf8' }).trim().split('\n');
+const files = ['internal', 'tests/integration'].flatMap((root) =>
+  readdirSync(root, { recursive: true }).filter((path) => path.endsWith('_test.go')).map((path) => `${root}/${path}`)
+);
 for (const path of Object.values(behavior).flat()) if (!existsSync(path)) throw new Error(`Missing evidence: ${path}`);
 const coverage = (owner) => [...new Set((owner.match(/M[1-6]/g) ?? []).flatMap((milestone) => behavior[milestone]))];
 const management = frozen.management.map((item) => {

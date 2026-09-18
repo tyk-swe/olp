@@ -50,7 +50,7 @@ OLP_SDK_SMOKE_SURFACES=openai,anthropic,gemini ./tests/sdk-smoke/run.sh
 export OLP_DATABASE_URL="$OLP_TEST_DATABASE_URL" OLP_VALKEY_URL="$OLP_TEST_VALKEY_URL"
 # Browser OIDC uses a separate, explicitly test-only binary. Release builds
 # never allow loopback identity issuers.
-go build -tags=oidctest -o .local/bin/olp-identity-test ./cmd/olp
+go build -tags=oidctest -ldflags "-X github.com/tyk-swe/olp/internal/process.Version=$(node -p 'require("./package.json").version')" -o .local/bin/olp-identity-test ./cmd/olp
 for database in olp_go_packaged olp_go_vite; do
   "${compose[@]}" exec -T postgres createdb -U olp_go "$database"
 done

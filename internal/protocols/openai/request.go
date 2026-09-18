@@ -440,6 +440,16 @@ func (r *Request) Encode(upstreamModel string, defaults map[string]json.RawMessa
 		return nil, err
 	}
 	out["model"] = model
+	// Keep the established Responses wire normalization while preserving
+	// array inputs and native extension fields without translation.
+	if r.Family == FamilyResponses || r.Family == FamilyInputTokens {
+		if text, ok := stringField(out, "input"); ok {
+			out["input"], _ = json.Marshal([]map[string]any{{
+				"type": "message", "role": "user",
+				"content": []map[string]string{{"type": "input_text", "text": text}},
+			}})
+		}
+	}
 	if r.Stream && r.Family == FamilyChat {
 		options := map[string]json.RawMessage{}
 		if raw, present := out["stream_options"]; present && !isNull(raw) {

@@ -32,9 +32,10 @@ func TestResponsesRejectAccountScopedInputReferences(t *testing.T) {
 	}
 }
 
+// Scalar text containing reference-like words is covered by the exact message
+// envelope assertion in TestResponsesTextUsesMessageEnvelopeWithoutLosingNativeExtensions.
 func TestResponsesPreserveInlineInputsAndToolResults(t *testing.T) {
 	for _, input := range []string{
-		`"item_reference file_id file_private"`,
 		`[{"type":"message","id":"msg_inline","role":"assistant","content":[{"type":"output_text","text":"previous answer","annotations":[]}]},{"role":"user","content":"continue"}]`,
 		`[{"role":"user","content":[{"type":"input_file","filename":"notes.txt","file_data":"data:text/plain;base64,aGk="},{"type":"input_file","file_url":"https://example.com/notes.pdf"},{"type":"input_image","image_url":"data:image/png;base64,aGk=","file_id":null}]}]`,
 		`[{"type":"function_call","id":"fc_inline","call_id":"call_1","name":"read","arguments":"{}"},{"type":"function_call_output","id":"fco_inline","call_id":"call_1","output":"{\"type\":\"item_reference\",\"id\":\"data\"}"}]`,
