@@ -16,11 +16,11 @@ Use Go 1.27.1, a C compiler/linker and glibc headers, Node.js 26, pnpm 11, Docke
 | Command | Purpose |
 | --- | --- |
 | `make setup` | Install workspace dependencies and generate API contracts. |
-| `make dev` | Start PostgreSQL, Valkey, Go, and Vite at localhost:5173. |
+| `make dev` | Start PostgreSQL, Valkey, Go, and Vite at http://127.0.0.1:5173. |
 | `make check` | Run gofmt, vet, Go tests, ESLint, Svelte/type checks, and Vitest. |
 | `make test` | Run Go unit and protocol tests. |
 | `make integration` | Run disposable-service, recovery, SDK, and Chromium suites. |
-| `make api` | Regenerate OpenAPI and TypeScript contracts. |
+| `make api` | Generate Go and TypeScript types from the checked-in OpenAPI contract. |
 | `make build` | Build the release binary and static console. |
 | `make fmt` | Format Go and console source. |
 
@@ -30,7 +30,13 @@ Go code uses standard `gofmt` formatting and `go vet` cleanliness. Console code 
 
 ## Testing Guidelines
 
-Place Go unit tests beside their feature and register new integration targets in `Cargo.toml` (`autotests = false`); Go unit tests sit beside their package as `*_test.go`, and process/service suites live in `tests/integration/` and run under `make integration`. Use descriptive behavior names, Vitest `*.test.ts`/`*.svelte.test.ts`, and Playwright `*.spec.ts`. Run console tests with `pnpm --dir console test` and Go tests with `go test ./...`. No numeric coverage threshold is configured; preserve meaningful fixtures and cover changed behavior. Run integration checks for service or browser changes.
+Place Go unit tests beside their feature as `*_test.go`. Process and service
+suites live in `tests/integration/`, use the `integration` build tag, and run
+under `make integration`. Use descriptive behavior names, Vitest
+`*.test.ts`/`*.svelte.test.ts`, and Playwright `*.spec.ts`. Run console tests with
+`pnpm --dir console test` and Go tests with `go test ./...`. No numeric coverage
+threshold is configured; preserve meaningful fixtures and cover changed behavior.
+Run integration checks for service or browser changes.
 
 ## Commit & Pull Request Guidelines
 

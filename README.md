@@ -7,8 +7,8 @@ OpenAI, and reviewed OpenAI-compatible endpoints.
 
 The Go release requires a fresh installation. Rust 2.x and 3.x databases
 are rejected before any migration runs. Storage uses `olp_go`; there is no
-Rust-to-Go data migration. Provision a separate database and keep the old installation
-and its backups until you have verified the replacement.
+Rust-to-Go data migration. Provision a separate database and keep the old
+installation and its backups until you have verified the replacement.
 
 ## Develop locally
 
@@ -20,7 +20,7 @@ make setup
 make dev
 ```
 
-Open http://localhost:5173. Use the token in `.local/go-secrets/bootstrap.token` to
+Open http://127.0.0.1:5173. Use the token in `.local/go-secrets/bootstrap.token` to
 create the first owner. Vite serves the console with hot reload and proxies API,
 OIDC callback, and streaming requests through that same origin. PostgreSQL and
 Valkey use isolated development volumes and loopback ports 54321 and 63791.
@@ -71,7 +71,7 @@ import OpenAI from 'openai';
 
 const client = new OpenAI({
   apiKey: process.env.OLP_API_KEY,
-  baseURL: 'http://localhost:5173/v1'
+  baseURL: 'http://127.0.0.1:5173/v1'
 });
 const response = await client.responses.create({
   model: 'assistant',
@@ -98,7 +98,7 @@ moderation, image generation and editing, speech and transcription, and durable
 video jobs, subject to the selected provider's certified capabilities. Routes
 control eligibility, priorities, weighted selection, attempt limits, and
 timeouts. API keys control permissions, rate limits, concurrency, and exact
-daily and monthly cost budgets.
+daily and monthly accrued-cost budgets.
 
 The console includes provider and route history, access and OIDC management,
 usage and pricing, request metadata, media jobs, and health. Persisted telemetry

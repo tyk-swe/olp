@@ -25,7 +25,8 @@ with `make api`. Never edit generated Go or TypeScript files by hand.
 
 ## Local development
 
-Open http://localhost:5173 after `make dev`. The one-time bootstrap token is in
+Open http://127.0.0.1:5173 after `make dev`. Use this configured origin for browser
+access so management requests pass the origin check. The one-time bootstrap token is in
 `.local/go-secrets/bootstrap.token`. Vite proxies management, OIDC callbacks,
 and inference through the browser origin. Console edits use hot reload;
 restart after backend edits. Development services use isolated volumes and
