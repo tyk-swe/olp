@@ -11,6 +11,7 @@ import (
 	"github.com/tyk-swe/olp/internal/protocols/openai"
 	"github.com/tyk-swe/olp/internal/routes"
 	"github.com/tyk-swe/olp/internal/runtime"
+	"github.com/tyk-swe/olp/internal/telemetry"
 	"slices"
 )
 
@@ -172,7 +173,7 @@ func (p *Playground) handle(r *http.Request) (access.Reply, error) {
 	}
 	s := p.Gateway
 	x := &execution{
-		request:     request{id: uuidString(), minted: true, clientIP: ClientIP(r, s.cfg.TrustedProxies), startedAt: s.now(), release: s.Runtime.Release()},
+		request:     request{id: uuidString(), minted: true, clientIP: ClientIP(r, s.cfg.TrustedProxies), startedAt: s.now(), release: s.Runtime.Release(), trace: telemetry.RequestFromContext(r.Context())},
 		family:      family,
 		preferences: in.Routing,
 		parsed:      parsed,
@@ -186,12 +187,12 @@ func (p *Playground) handle(r *http.Request) (access.Reply, error) {
 		return access.Reply{}, access.Fail(e.Status, e.Code, e.Message)
 	}
 	x.estimate = requestEstimate(x)
-	if !s.admit() {
+	if !s.admit(r.Context()) {
 		x.failure = overloaded
 		s.finish(x, nil, overloaded.Status)
 		return access.Reply{}, access.Fail(overloaded.Status, overloaded.Code, overloaded.Message)
 	}
-	defer s.release()
+	defer s.release(r.Context())
 	out := s.execute(r.Context(), x)
 	if out.err != nil {
 		s.finish(x, out, out.err.Status)

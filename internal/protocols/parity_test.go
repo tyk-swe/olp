@@ -98,8 +98,35 @@ func TestMaintainedNonMediaRequestMatrix(t *testing.T) {
 				}
 			}
 		}
-		if connectors.Supports(kind, kind, "image_generation", "openai", "unary") {
-			t.Fatal("media capability broadened")
+		for _, operation := range []string{"image_generation", "image_edit", "speech", "transcription"} {
+			want := kind == "openai" || kind == "openai_compatible" || kind == "azure_openai"
+			for _, mode := range []string{"unary", "streaming"} {
+				if connectors.Supports(kind, kind, operation, "openai", mode) != want {
+					t.Fatal(kind, operation, mode)
+				}
+			}
+			for _, surface := range []string{"anthropic", "gemini"} {
+				if connectors.Supports(kind, kind, operation, surface, "unary") {
+					t.Fatal("non-native media operation broadened")
+				}
+			}
+		}
+		if connectors.Supports(kind, kind, "image_generation", "openai", "async") {
+			t.Fatal("image generation admitted async mode")
+		}
+		want := kind == "openai" || kind == "openai_compatible" || kind == "azure_openai"
+		if connectors.Supports(kind, kind, "image_variation", "openai", "unary") != want ||
+			connectors.Supports(kind, kind, "image_variation", "openai", "streaming") {
+			t.Fatal(kind, "image_variation")
+		}
+		if connectors.Supports(kind, kind, "video_create", "openai", "async") != want ||
+			connectors.Supports(kind, kind, "video_create", "openai", "unary") {
+			t.Fatal(kind, "video_create")
+		}
+		for _, operation := range []string{"video_list", "video_get", "video_content", "video_delete"} {
+			if connectors.Supports(kind, kind, operation, "openai", "unary") != want {
+				t.Fatal(kind, operation)
+			}
 		}
 	}
 }

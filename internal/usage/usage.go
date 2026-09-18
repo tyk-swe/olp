@@ -75,6 +75,9 @@ const (
 	TaskCostReconciliation Task = "cost_reconciliation"
 	// TaskEpochDetection confirms gateway epochs that stopped checkpointing.
 	TaskEpochDetection Task = "request_metadata_gateway_epoch_detection"
+	// TaskMediaReconciliation advances durable media jobs toward a terminal
+	// state and retires orphaned upstream objects.
+	TaskMediaReconciliation Task = "media_reconciliation"
 )
 
 // Outcome is what one worker pass achieved.

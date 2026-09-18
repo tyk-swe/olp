@@ -32,6 +32,18 @@ const (
 	FamilyGemini         Family = "gemini"
 	FamilyGeminiStream   Family = "gemini_stream"
 	FamilyGeminiCount    Family = "gemini_count"
+	// Media families name their operation tag directly so the accounting
+	// envelope and selection registry agree on the operation string.
+	FamilyImageGeneration Family = "image_generation"
+	FamilyImageEdit       Family = "image_edit"
+	FamilyImageVariation  Family = "image_variation"
+	FamilySpeech          Family = "speech"
+	FamilyTranscription   Family = "transcription"
+	FamilyVideoCreate     Family = "video_create"
+	FamilyVideoList       Family = "video_list"
+	FamilyVideoGet        Family = "video_get"
+	FamilyVideoContent    Family = "video_content"
+	FamilyVideoDelete     Family = "video_delete"
 )
 
 func (f Family) Operation() string {
@@ -42,6 +54,10 @@ func (f Family) Operation() string {
 		return "embeddings"
 	case FamilyModeration:
 		return "moderation"
+	case FamilyImageGeneration, FamilyImageEdit, FamilyImageVariation, FamilySpeech,
+		FamilyTranscription, FamilyVideoCreate, FamilyVideoList, FamilyVideoGet,
+		FamilyVideoContent, FamilyVideoDelete:
+		return string(f)
 	}
 	return OperationGeneration
 }

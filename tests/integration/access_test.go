@@ -29,6 +29,7 @@ import (
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/gateway"
 	"github.com/tyk-swe/olp/internal/management"
+	"github.com/tyk-swe/olp/internal/observability"
 	"github.com/tyk-swe/olp/internal/providers"
 	"github.com/tyk-swe/olp/internal/routes"
 	"github.com/tyk-swe/olp/internal/runtime"
@@ -117,11 +118,11 @@ func newAccessHarness(t *testing.T) *accessHarness {
 	rt := runtime.NewManager(pool, installation, secrets.NewAuthKey(auth, installation), ring, log)
 	gw := gateway.New(rt, &policy, gateway.Config{MaxInFlight: 16, MaxBodyBytes: 1 << 20, MaxResponseBytes: 1 << 20, MaxEventBytes: 1 << 16}, log)
 	catalogue := providers.New(server, &policy)
-	catalogue.Health = gw.Health()
 	mux := http.NewServeMux()
 	management.Register(mux)
 	server.Register(mux)
 	catalogue.Register(mux)
+	(&observability.Management{Access: server, Cache: observability.NewCache(), Pool: pool}).Register(mux)
 	routes.New(server).Register(mux)
 	(&gateway.Playground{Access: server, Gateway: gw}).Register(mux)
 	gw.Register(mux)

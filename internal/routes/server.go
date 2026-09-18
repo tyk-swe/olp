@@ -35,7 +35,11 @@ const (
 	maxTargetWeight = 1000000
 )
 
-var supportedOperations = []string{"generation", "token_count", "embeddings", "moderation"}
+var supportedOperations = []string{
+	"generation", "token_count", "embeddings", "moderation",
+	"image_generation", "image_edit", "image_variation", "speech", "transcription",
+	"video_create", "video_list", "video_get", "video_content", "video_delete",
+}
 
 type draft struct {
 	ID               string

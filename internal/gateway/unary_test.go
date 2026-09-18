@@ -62,8 +62,8 @@ func TestInferenceErrorDeliveryHasWriteDeadline(t *testing.T) {
 				}
 			}
 			h.gateway.inference(openai.FamilyChat)(w, r)
-			if !wrote || w.Code != tc.status || len(h.gateway.admission) != 0 {
-				t.Fatalf("error delivery: wrote=%t status=%d admission=%d", wrote, w.Code, len(h.gateway.admission))
+			if !wrote || w.Code != tc.status || h.gateway.admission.Admitted() != 0 {
+				t.Fatalf("error delivery: wrote=%t status=%d admission=%d", wrote, w.Code, h.gateway.admission.Admitted())
 			}
 		})
 	}
@@ -99,8 +99,8 @@ func TestUnaryDeliveryDeterminesTerminalOutcome(t *testing.T) {
 					}
 				}
 				h.gateway.inference(family)(w, r)
-				if len(h.sink.envs) != 1 || len(h.gateway.admission) != 0 {
-					t.Fatalf("terminal envelopes=%d admission=%d", len(h.sink.envs), len(h.gateway.admission))
+				if len(h.sink.envs) != 1 || h.gateway.admission.Admitted() != 0 {
+					t.Fatalf("terminal envelopes=%d admission=%d", len(h.sink.envs), h.gateway.admission.Admitted())
 				}
 				env := h.sink.last(t)
 				wantOutcome, wantStatus := "success", http.StatusOK
@@ -153,8 +153,8 @@ func TestUnreadUnaryResponseReleasesAdmission(t *testing.T) {
 		t.Fatal("an unread unary response retained admission past the write deadline")
 	}
 	env := h.sink.last(t)
-	if env.Outcome != "cancelled" || env.Status != 0 || !env.Committed || len(h.gateway.admission) != 0 {
-		t.Fatalf("unread response: envelope=%+v admission=%d", env, len(h.gateway.admission))
+	if env.Outcome != "cancelled" || env.Status != 0 || !env.Committed || h.gateway.admission.Admitted() != 0 {
+		t.Fatalf("unread response: envelope=%+v admission=%d", env, h.gateway.admission.Admitted())
 	}
 	if h.mock.count("b") != 0 {
 		t.Fatal("a write timeout triggered failover")

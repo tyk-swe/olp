@@ -10,6 +10,7 @@ import (
 	"maps"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -102,6 +103,7 @@ type Manager struct {
 	release   *Release
 	failed    int64
 	inputs    *usage.RoutingInputs
+	desired   atomic.Int64
 
 	stop chan struct{}
 	wg   sync.WaitGroup
@@ -246,6 +248,12 @@ func (m *Manager) refreshRelease(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("release: %w", err)
 	}
+	for {
+		current := m.desired.Load()
+		if sequence <= current || m.desired.CompareAndSwap(current, sequence) {
+			break
+		}
+	}
 	m.mu.RLock()
 	current := m.release.Sequence
 	m.mu.RUnlock()
@@ -367,6 +375,26 @@ func (m *Manager) Authority() AuthorityStatus {
 	defer m.mu.RUnlock()
 	a := m.authority
 	return AuthorityStatus{Loaded: a.loaded, ID: a.id, Sequence: a.sequence, ReadAt: a.readAt, Stale: !a.loaded || time.Since(a.readAt) > AuthorityStaleAfter}
+}
+
+// DesiredGeneration is the newest release ordinal observed in storage; it
+// leads the installed release when the newest one failed to install.
+func (m *Manager) DesiredGeneration() int64 { return m.desired.Load() }
+
+// HasHardLimits reports whether any key in the pinned authority carries a
+// limit the distributed limiter enforces. A limiter outage only degrades
+// traffic when such a key exists.
+func (m *Manager) HasHardLimits() bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	for _, record := range m.authority.keys {
+		p := record.authority.Policy
+		if p.RequestsPerMinute != nil || p.TokensPerMinute != nil || p.MaxConcurrency != nil ||
+			p.DailyCostLimit != nil || p.MonthlyCostLimit != nil {
+			return true
+		}
+	}
+	return false
 }
 
 func (m *Manager) RoutingInputs() *usage.RoutingInputs {

@@ -1,34 +1,40 @@
 package process
 
 import (
-	"context"
-	"errors"
+	"encoding/json"
+	"net/http"
 	"net/http/httptest"
 	"testing"
-	"time"
 )
 
-func TestReadinessReflectsDependenciesAndShutdown(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	var failure error
-	h := healthHandler(ctx, time.Second, func(context.Context) error { return failure }, nil, nil)
-	for _, status := range []int{200, 503, 503} {
-		w := httptest.NewRecorder()
-		h.ServeHTTP(w, httptest.NewRequest("GET", "/health/ready", nil))
-		if w.Code != status {
-			t.Fatalf("readiness: %d; want %d", w.Code, status)
-		}
-		if failure == nil {
-			failure = errors.New("offline")
-		} else {
-			failure = nil
-			cancel()
-		}
-	}
+func TestRejectPublicShapesSurfaceError(t *testing.T) {
 	w := httptest.NewRecorder()
-	h.ServeHTTP(w, httptest.NewRequest("GET", "/health/live", nil))
-	if w.Code != 200 {
-		t.Fatalf("liveness depends on services: %d", w.Code)
+	rejectPublic(w, httptest.NewRequest("POST", "/api/v3/routes", nil), "management")
+	if w.Code != http.StatusServiceUnavailable {
+		t.Fatalf("management rejection: %d", w.Code)
+	}
+	if w.Header().Get("Content-Type") != "application/problem+json" {
+		t.Fatalf("management rejection must be a problem document: %s", w.Header().Get("Content-Type"))
+	}
+	var problem map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &problem); err != nil {
+		t.Fatalf("problem body: %v", err)
+	}
+	if problem["type"] != "https://openllmproxy.dev/problems/request_admission_overloaded" {
+		t.Fatalf("problem code: %v", problem["type"])
+	}
+
+	w = httptest.NewRecorder()
+	rejectPublic(w, httptest.NewRequest("POST", "/v1/chat/completions", nil), "openai")
+	if w.Code != http.StatusServiceUnavailable {
+		t.Fatalf("inference rejection: %d", w.Code)
+	}
+	var body map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("inference body: %v", err)
+	}
+	failure, ok := body["error"].(map[string]any)
+	if !ok || failure["type"] != "server_error" || failure["code"] != "request_admission_overloaded" {
+		t.Fatalf("inference rejection must reuse the gateway envelope: %v", body)
 	}
 }

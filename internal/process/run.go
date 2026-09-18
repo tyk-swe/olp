@@ -3,17 +3,20 @@ package process
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
+	"os"
+	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/config"
+	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/console"
 	"github.com/tyk-swe/olp/internal/coordination"
 	"github.com/tyk-swe/olp/internal/database"
@@ -21,12 +24,18 @@ import (
 	"github.com/tyk-swe/olp/internal/gateway"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/management"
+	"github.com/tyk-swe/olp/internal/media"
+	"github.com/tyk-swe/olp/internal/observability"
 	"github.com/tyk-swe/olp/internal/providers"
 	"github.com/tyk-swe/olp/internal/routes"
 	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/internal/secrets"
+	"github.com/tyk-swe/olp/internal/telemetry"
 	"github.com/tyk-swe/olp/internal/usage"
 )
+
+// mediaUpstreamHeaderTimeout mirrors the gateway's upstream header wait bound.
+const mediaUpstreamHeaderTimeout = 5 * time.Minute
 
 // metadataBuffer is how many request metadata events one inference replica may
 // hold while the stream writer catches up. Beyond it events are dropped and
@@ -34,12 +43,36 @@ import (
 // than memory or inference latency.
 const metadataBuffer = 8192
 
+// Version is the build identity recorded on exported traces.
+const Version = "3.0.0"
+
 func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 	ctx, stop := context.WithCancel(ctx)
 	defer stop()
 	if err := c.Validate(); err != nil {
 		return err
 	}
+	// Tracing is installed before any listener binds: an invalid endpoint or
+	// header file must stop startup rather than trace half a process.
+	traces, err := telemetry.Install(telemetry.Config{
+		Endpoint:          c.OTLPTracesEndpoint,
+		HeadersFile:       c.OTLPHeadersFile,
+		SampleRatio:       c.TraceSampleRatio,
+		PropagateUpstream: c.TracePropagateUpstream,
+		AcceptInbound:     c.TraceAcceptInbound,
+		Mode:              string(c.Mode),
+		Version:           Version,
+	})
+	if err != nil {
+		return err
+	}
+	defer func() {
+		shutdown, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := traces.Shutdown(shutdown); err != nil {
+			log.Warn("trace export did not flush cleanly", "error", err)
+		}
+	}()
 	pgConfig, err := database.Configuration(c.DatabaseURL, c.DatabaseMaxConnections, c.RequestTimeout)
 	if err != nil {
 		return err
@@ -114,12 +147,28 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 	}
 	var emitter *usage.Emitter
 	var rt *runtime.Manager
-	if c.Mode.Management() || c.Mode.Inference() {
+	var gw *gateway.Server
+	var mediaService *media.Service
+	var mediaSpool *media.Spool
+	var policy egress.Policy
+	// The public listener's process-local admission pools. The inference pool
+	// is shared with the gateway so middleware and direct handler calls bound
+	// one capacity; media reconciliation gaps and durable metadata loss are
+	// process counters the metrics endpoint renders.
+	inferencePool := observability.NewPool(c.MaxInFlightInference)
+	managementPool := observability.NewPool(c.MaxInFlightManagement)
+	lossCounters := &usage.LossCounters{}
+	var mediaGapsTotal atomic.Uint64
+	obsCache := observability.NewCache()
+	// Worker replicas also need the runtime manager and the key ring: media
+	// reconciliation serves jobs against their pinned historical providers and
+	// checks the live credential revocation authority.
+	if c.Mode.Management() || c.Mode.Inference() || c.Mode == config.Worker {
 		auth, keys, bootstrap, err := loadSecrets(c, installation)
 		if err != nil {
 			return err
 		}
-		policy := egress.Policy{AllowedNetworks: c.ProviderEgressAllowCIDRs, PlainHTTPHosts: c.ProviderEgressAllowHTTPHosts}
+		policy = egress.Policy{AllowedNetworks: c.ProviderEgressAllowCIDRs, PlainHTTPHosts: c.ProviderEgressAllowHTTPHosts}
 		rt = runtime.NewManager(pool, installation, auth, keys, log)
 		if c.ConnectorConfigFile != "" {
 			rt.Mounted, err = providers.LoadMounted(c.ConnectorConfigFile, &policy)
@@ -127,22 +176,54 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 				return err
 			}
 		}
-		gw := gateway.New(rt, &policy, gateway.Config{
-			MaxInFlight:      c.MaxInFlightInference,
-			MaxBodyBytes:     c.MaxJSONBodyBytes,
-			MaxResponseBytes: c.ProviderMaxResponseBytes,
-			MaxEventBytes:    c.ProviderMaxEventBytes,
-			TrustedProxies:   c.TrustedProxyCIDRs,
-		}, log)
-		if limiter != nil {
-			var policy func() limits.OutagePolicy
-			if outage != nil {
-				policy = outage.Policy
+		if c.Mode.Management() || c.Mode.Inference() {
+			gw = gateway.New(rt, &policy, gateway.Config{
+				MaxInFlight:       c.MaxInFlightInference,
+				MaxBodyBytes:      c.MaxJSONBodyBytes,
+				MaxMediaBodyBytes: c.MaxMediaBodyBytes,
+				MaxResponseBytes:  c.ProviderMaxResponseBytes,
+				MaxEventBytes:     c.ProviderMaxEventBytes,
+				TrustedProxies:    c.TrustedProxyCIDRs,
+				AdmissionPool:     inferencePool,
+			}, log)
+			if limiter != nil {
+				var policy func() limits.OutagePolicy
+				if outage != nil {
+					policy = outage.Policy
+				}
+				// Control-only processes also execute playground requests.
+				gw.Admission = gateway.NewAdmission(limiter, policy, log)
 			}
-			// Control-only processes also execute playground requests.
-			gw.Admission = gateway.NewAdmission(limiter, policy, log)
+		}
+		if c.Mode.Inference() || c.Mode == config.Worker {
+			spoolDir := c.MediaSpoolDir
+			if spoolDir == "" {
+				spoolDir = filepath.Join(os.TempDir(), "olp-media-spool")
+			}
+			spool, err := media.NewSpool(spoolDir, c.MediaSpoolCapacityBytes, log)
+			if err != nil {
+				return err
+			}
+			mediaSpool = spool
+			defer spool.Close()
+			mediaService = &media.Service{
+				Pool:         pool,
+				Keys:         keys,
+				Installation: installation,
+				Gaps:         &mediaGapsTotal,
+				Transport: &media.Transport{
+					Client:           policy.Client(mediaUpstreamHeaderTimeout),
+					Auth:             connectors.NewAuth(&policy),
+					Egress:           &policy,
+					Spool:            spool,
+					MaxResponseBytes: c.ProviderMaxResponseBytes,
+				},
+				Revoked: rt.Revoked,
+				Log:     log,
+			}
 		}
 		if c.Mode.Inference() {
+			gw.Media = &gateway.MediaDeps{Jobs: mediaService, Admission: media.NewAdmissionState(c.MediaSpoolCapacityBytes)}
 			// Without shared state there is no admission backend at all: the
 			// gateway then refuses traffic that carries hard limits rather
 			// than serving it unmetered, and keeps logging its metadata.
@@ -165,7 +246,6 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 			control.RetentionEnforced = limiter != nil
 			control.Register(public)
 			catalogue := providers.New(control, &policy)
-			catalogue.Health = gw.Health()
 			catalogue.Log = log
 			if limiter != nil {
 				catalogue.Quotas = limiter
@@ -175,6 +255,8 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 			routeServer.Inputs = rt.RoutingInputs
 			routeServer.Register(public)
 			(&gateway.Playground{Access: control, Gateway: gw}).Register(public)
+			(&media.Management{Access: control, Pool: pool}).Register(public)
+			(&observability.Management{Access: control, Cache: obsCache, Pool: pool}).Register(public)
 			// Usage, pricing, request history and recovery reporting are part
 			// of the management surface; their patterns are more specific than
 			// its catch-all, which answers everything no surface claims.
@@ -184,15 +266,72 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 	if err := startup.Err(); err != nil {
 		return err
 	}
-	var authority func() bool
 	if rt != nil {
 		rt.Start(ctx)
 		defer rt.Stop()
-		authority = func() bool {
+	}
+	// The observability collectors probe only what this process composes: an
+	// unconfigured dependency is reported as absent, never as failed.
+	obsState := &observability.State{
+		Pool:          pool,
+		PingDB:        pool.Ping,
+		ServesGateway: c.Mode.Inference(),
+		Limiter: func(ctx context.Context) (configured, healthy bool) {
+			return vk != nil, vk != nil && vk.Ping(ctx) == nil
+		},
+		MediaGaps:    func() int64 { return int64(mediaGapsTotal.Load()) },
+		LossCounters: lossCounters.Totals,
+	}
+	if rt != nil {
+		obsState.Runtime = func() observability.RuntimeProbe {
+			probe := observability.RuntimeProbe{AllTransports: true}
 			status := rt.Authority()
-			return status.Loaded && !status.Stale
+			probe.AuthorityStale = status.Stale
+			if status.Loaded && !status.ReadAt.IsZero() {
+				age := time.Since(status.ReadAt)
+				probe.AuthorityAge = &age
+			}
+			release := rt.Release()
+			if release != nil && release.ID != "" && release.Snapshot != nil {
+				ordinal := release.Snapshot.Generation.Ordinal
+				probe.Generation = &ordinal
+				for _, provider := range release.Snapshot.Providers {
+					p := provider
+					if err := p.Connector().Validate(&policy); err != nil {
+						probe.AllTransports = false
+						break
+					}
+				}
+			}
+			return probe
+		}
+		obsState.HardLimits = rt.HasHardLimits
+	}
+	if gw != nil {
+		obsState.Circuits = gw.OpenCircuits
+		if gw.Admission != nil {
+			admission := gw.Admission
+			obsState.LimiterCounts = func() (failOpen, daily, monthly int64) {
+				return admission.FailOpenTotal(),
+					admission.BudgetRejections(limits.DimensionDailyCost),
+					admission.BudgetRejections(limits.DimensionMonthlyCost)
+			}
 		}
 	}
+	if emitter != nil {
+		obsState.Emitter = func() *usage.Snapshot {
+			snapshot := emitter.Snapshot()
+			return &snapshot
+		}
+	}
+	if mediaSpool != nil {
+		spool := mediaSpool
+		obsState.Spool = func() (capacity, used *int64) {
+			capacityBytes, usedBytes := spool.CapacityBytes(), spool.UsedBytes()
+			return &capacityBytes, &usedBytes
+		}
+	}
+	go obsCache.Run(ctx, obsState, log)
 	// The delivery plane outlives the listeners: it is cancelled only once the
 	// gateway has drained, so every event a served request emitted is written
 	// and this gateway's epoch is closed against what it actually delivered.
@@ -213,7 +352,7 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 			defer close(writerDone)
 			emitter.RunWriter(delivery, vk, stream, log)
 		})
-		delivered.Go(func() { usage.RunLossReporter(delivery, pool, emitter, instance, log) })
+		delivered.Go(func() { usage.RunLossReporter(delivery, pool, emitter, instance, lossCounters, log) })
 	}
 	if outage != nil {
 		go outage.run(ctx)
@@ -224,31 +363,69 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 	defer stopWorkers()
 	var workersStopped func()
 	if c.Mode == config.Worker || c.Mode == config.All {
+		// The consumer reads its stream with a blocking XREADGROUP, and a
+		// client answers one connection in order: on the shared client a
+		// second spent blocking is a second every admission decision and
+		// every emitted event waits behind. The consumer gets its own.
+		var reader *coordination.Client
+		var stream string
 		if limiter != nil {
-			// The consumer reads its stream with a blocking XREADGROUP, and a
-			// client answers one connection in order: on the shared client a
-			// second spent blocking is a second every admission decision and
-			// every emitted event waits behind. The consumer gets its own.
-			reader, err := openValkey(startup)
+			var err error
+			reader, err = openValkey(startup)
 			if err != nil {
 				return err
 			}
 			defer reader.Close()
-			workersStopped = startWorkers(workers, pool, reader, limiter, usage.StreamName(prefix), log)
-		} else {
+			stream = usage.StreamName(prefix)
+		}
+		// Media reconciliation needs only PostgreSQL and the provider egress
+		// client, so it runs even when no shared state backend is configured.
+		// It is started exactly once, inside the single worker plane.
+		if mediaService == nil && limiter == nil {
 			log.Warn("worker plane skipped: no shared state is configured", "mode", c.Mode)
+		} else {
+			workersStopped = startWorkers(workers, pool, reader, limiter, stream, mediaService, log)
 		}
 	}
-	private := healthHandler(ctx, c.RequestTimeout, pool.Ping, vk, authority)
+	liveMetrics := &observability.LiveMetrics{
+		InferenceAdmission:  inferencePool,
+		ManagementAdmission: managementPool,
+	}
+	if rt != nil {
+		liveMetrics.AuthorityAge = func() *float64 {
+			status := rt.Authority()
+			if !status.Loaded || status.ReadAt.IsZero() {
+				return nil
+			}
+			age := time.Since(status.ReadAt).Seconds()
+			return &age
+		}
+		liveMetrics.DesiredGeneration = rt.DesiredGeneration
+	}
+	private := observability.NewHandler(obsCache, liveMetrics).ServeMux()
 	listeners := []struct {
 		name, address string
 		handler       http.Handler
 	}{{"private", c.ObservabilityListenAddr, private}}
 	if c.Mode.Public() {
+		// Every public request is charged against its surface's pool before
+		// routing: a full pool rejects without queueing, and tracing spans
+		// open only for admitted requests.
+		admission := &observability.PublicAdmission{
+			Inference:        inferencePool,
+			Management:       managementPool,
+			InferenceEnabled: c.Mode.Inference(),
+			Reject:           rejectPublic,
+			Tracer:           traces.Tracer(),
+		}
+		if runtimeConfig := traces.Runtime(); runtimeConfig != nil {
+			request := runtimeConfig.ForInstallation(installation)
+			admission.Tracing = &request
+		}
 		listeners = append(listeners, struct {
 			name, address string
 			handler       http.Handler
-		}{"public", c.ListenAddr, public})
+		}{"public", c.ListenAddr, admission.Wrap(public)})
 	}
 	var servers []*http.Server
 	var sockets []net.Listener
@@ -363,43 +540,14 @@ func loadSecrets(c config.Config, installation string) (*secrets.AuthKey, *secre
 	return secrets.NewAuthKey(key, installation), keys, bootstrap, nil
 }
 
-func healthHandler(process context.Context, timeout time.Duration, pingDB func(context.Context) error, vk *coordination.Client, authority func() bool) http.Handler {
-	mux := http.NewServeMux()
-	mux.HandleFunc("GET /health/live", func(w http.ResponseWriter, r *http.Request) {
-		writeHealth(w, http.StatusOK, map[string]any{"live": true})
-	})
-	mux.HandleFunc("GET /health/ready", func(w http.ResponseWriter, r *http.Request) {
-		ctx, cancel := context.WithTimeout(r.Context(), timeout)
-		defer cancel()
-		dbReady := pingDB(ctx) == nil
-		valkeyReady := true
-		if vk != nil {
-			valkeyReady = vk.Ping(ctx) == nil
-		}
-		authorityReady := true
-		if authority != nil {
-			authorityReady = authority()
-		}
-		ready := process.Err() == nil && dbReady && valkeyReady && authorityReady
-		status := http.StatusOK
-		if !ready {
-			status = http.StatusServiceUnavailable
-		}
-		dependencies := map[string]bool{"postgres": dbReady}
-		if vk != nil {
-			dependencies["valkey"] = valkeyReady
-		}
-		if authority != nil {
-			dependencies["authority"] = authorityReady
-		}
-		writeHealth(w, status, map[string]any{"ready": ready, "dependencies": dependencies})
-	})
-	return mux
-}
-
-func writeHealth(w http.ResponseWriter, status int, body any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Cache-Control", "no-store")
-	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(body)
+// rejectPublic answers a public request its surface's pool could not admit.
+// Inference surfaces share the gateway's error shape so clients see the same
+// envelope as every other overload; management requests get the problem
+// document the console's handlers produce.
+func rejectPublic(w http.ResponseWriter, r *http.Request, surface string) {
+	if surface == "management" {
+		access.WriteProblem(w, access.Fail(http.StatusServiceUnavailable, "request_admission_overloaded", "The service is temporarily overloaded."))
+		return
+	}
+	gateway.WriteAdmissionOverload(w, r)
 }

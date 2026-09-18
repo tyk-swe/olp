@@ -38,6 +38,8 @@ type Config struct {
 	ObservabilityListenAddr string
 	PublicOrigin            string
 	ConsoleDir              string
+	MediaSpoolDir           string
+	MediaSpoolCapacityBytes int64
 	AuthHMACKeyFile         string
 	BootstrapTokenFile      string
 	MasterKeyFile           string
@@ -52,9 +54,18 @@ type Config struct {
 	ProviderEgressAllowCIDRs     []netip.Prefix
 	ProviderEgressAllowHTTPHosts []string
 	MaxInFlightInference         int
+	MaxInFlightManagement        int
 	MaxJSONBodyBytes             int64
+	MaxMediaBodyBytes            int64
 	ProviderMaxResponseBytes     int64
 	ProviderMaxEventBytes        int64
+	// Optional OTLP/HTTP trace export. Credentials live only in the headers
+	// file; ambient OTEL_* header variables are rejected at install time.
+	OTLPTracesEndpoint     string
+	OTLPHeadersFile        string
+	TraceSampleRatio       float64
+	TracePropagateUpstream bool
+	TraceAcceptInbound     bool
 }
 
 // Parse gives flags precedence over environment variables. File-backed URLs are
@@ -83,6 +94,8 @@ func Parse(args []string, getenv func(string) string, output io.Writer) (Config,
 	f.StringVar(&c.ObservabilityListenAddr, "observability-listen-addr", "127.0.0.1:9090", "private health listener")
 	f.StringVar(&c.PublicOrigin, "public-origin", "http://127.0.0.1:8080", "browser origin")
 	f.StringVar(&c.ConsoleDir, "console-dir", "console/build", "static console directory")
+	f.StringVar(&c.MediaSpoolDir, "media-spool-dir", "", "directory for bounded media staging; defaults to the system temp directory")
+	f.Int64Var(&c.MediaSpoolCapacityBytes, "media-spool-capacity-bytes", 1073741824, "media spool capacity in bytes")
 	f.StringVar(&c.AuthHMACKeyFile, "auth-hmac-key-file", "", "mounted hex/base64 authentication key")
 	f.StringVar(&c.BootstrapTokenFile, "bootstrap-token-file", "", "mounted first-owner bootstrap token")
 	f.StringVar(&c.ConnectorConfigFile, "connector-config-file", "", "mounted provider transport configuration")
@@ -97,7 +110,14 @@ func Parse(args []string, getenv func(string) string, output io.Writer) (Config,
 	f.StringVar(&egressCIDRs, "provider-egress-allow-cidrs", "", "comma-separated CIDRs exempt from the non-public provider egress denylist")
 	f.StringVar(&egressHosts, "provider-egress-allow-http-hosts", "", "comma-separated hosts whose provider endpoints may use plain HTTP")
 	f.IntVar(&c.MaxInFlightInference, "http-max-in-flight-inference-requests", 256, "inference work admission")
+	f.IntVar(&c.MaxInFlightManagement, "http-max-in-flight-management-requests", 32, "management and console request admission")
+	f.StringVar(&c.OTLPTracesEndpoint, "otlp-traces-endpoint", "", "OTLP/HTTP trace export URL")
+	f.StringVar(&c.OTLPHeadersFile, "otlp-headers-file", "", "mounted JSON object of OTLP exporter headers")
+	f.Float64Var(&c.TraceSampleRatio, "trace-sample-ratio", 1.0, "trace sampling ratio")
+	f.BoolVar(&c.TracePropagateUpstream, "trace-propagate-upstream", true, "inject W3C trace context into provider requests")
+	f.BoolVar(&c.TraceAcceptInbound, "trace-accept-inbound", true, "accept inbound W3C trace context")
 	f.Int64Var(&c.MaxJSONBodyBytes, "http-max-json-body-bytes", 2097152, "largest JSON request body, before and after gzip inflation")
+	f.Int64Var(&c.MaxMediaBodyBytes, "http-max-media-body-bytes", 67108864, "largest raw or multipart media request body")
 	f.Int64Var(&c.ProviderMaxResponseBytes, "provider-max-response-bytes", 16777216, "largest buffered provider response body")
 	f.Int64Var(&c.ProviderMaxEventBytes, "provider-max-event-bytes", 1048576, "largest single streamed provider event")
 	if err := f.Parse(args[1:]); err != nil {
@@ -227,14 +247,29 @@ func (c Config) Validate() error {
 	if c.MaxInFlightInference < 1 || c.MaxInFlightInference > 100000 {
 		return errors.New("OLP_HTTP_MAX_IN_FLIGHT_INFERENCE_REQUESTS must be between 1 and 100000")
 	}
+	if c.MaxInFlightManagement < 1 || c.MaxInFlightManagement > 100000 {
+		return errors.New("OLP_HTTP_MAX_IN_FLIGHT_MANAGEMENT_REQUESTS must be between 1 and 100000")
+	}
 	if c.MaxJSONBodyBytes < 65536 || c.MaxJSONBodyBytes > 64<<20 {
 		return errors.New("OLP_HTTP_MAX_JSON_BODY_BYTES must be between 64 KiB and 64 MiB")
+	}
+	if c.MediaSpoolCapacityBytes < 256<<20 {
+		return errors.New("OLP_MEDIA_SPOOL_CAPACITY_BYTES must be at least 256 MiB")
+	}
+	if c.MaxMediaBodyBytes < 1<<20 || c.MaxMediaBodyBytes > 1024<<20 {
+		return errors.New("OLP_HTTP_MAX_MEDIA_BODY_BYTES must be between 1 MiB and 1 GiB")
+	}
+	if c.MaxMediaBodyBytes > c.MediaSpoolCapacityBytes/2 {
+		return errors.New("OLP_HTTP_MAX_MEDIA_BODY_BYTES must stay within half of the media spool capacity")
 	}
 	if c.ProviderMaxResponseBytes < 1<<20 || c.ProviderMaxResponseBytes > 256<<20 {
 		return errors.New("OLP_PROVIDER_MAX_RESPONSE_BYTES must be between 1 MiB and 256 MiB")
 	}
 	if c.ProviderMaxEventBytes < 65536 || c.ProviderMaxEventBytes > c.ProviderMaxResponseBytes {
 		return errors.New("OLP_PROVIDER_MAX_EVENT_BYTES must be between 64 KiB and the response cap")
+	}
+	if c.TraceSampleRatio < 0 || c.TraceSampleRatio > 1 {
+		return errors.New("OLP_TRACE_SAMPLE_RATIO must be between 0.0 and 1.0")
 	}
 	for _, setting := range []struct {
 		name       string

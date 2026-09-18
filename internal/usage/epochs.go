@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync/atomic"
 	"time"
 	"unicode"
 
@@ -77,6 +78,27 @@ type LossReport struct {
 	ReportedDropped     int64
 	ReportedAbandoned   int64
 	ProcessEpochChanged bool
+}
+
+// LossCounters are the process-wide totals of request-metadata loss the
+// reporter has durably recorded in PostgreSQL. The loss reporter owns the
+// increments and the metrics endpoint renders them.
+type LossCounters struct {
+	events    atomic.Int64
+	dropped   atomic.Int64
+	abandoned atomic.Int64
+}
+
+// Record folds one durable checkpoint into the process totals.
+func (c *LossCounters) Record(report LossReport) {
+	c.events.Add(report.ReportedEvents)
+	c.dropped.Add(report.ReportedDropped)
+	c.abandoned.Add(report.ReportedAbandoned)
+}
+
+// Totals is the durable loss this process has reported so far.
+func (c *LossCounters) Totals() (events, dropped, abandoned int64) {
+	return c.events.Load(), c.dropped.Load(), c.abandoned.Load()
 }
 
 const uncleanGapSQL = `INSERT INTO olp_go.request_metadata_ingestion_gaps
@@ -344,13 +366,13 @@ func lossWindowStart(s Snapshot, processEpochChanged bool, previousCheckpoint ti
 // shutdown by the detector, and a process that shut down cleanly should not
 // leave that scar.
 func RunLossReporter(ctx context.Context, pool *pgxpool.Pool, emitter *Emitter,
-	gatewayInstance string, log *slog.Logger) {
+	gatewayInstance string, counters *LossCounters, log *slog.Logger) {
 	ticker := time.NewTicker(lossReporterInterval)
 	defer ticker.Stop()
 	for {
 		select {
 		case <-ctx.Done():
-			closeEpoch(ctx, pool, emitter, gatewayInstance, log)
+			closeEpoch(ctx, pool, emitter, gatewayInstance, counters, log)
 			return
 		case <-ticker.C:
 			report, err := CheckpointEpoch(ctx, pool, gatewayInstance, emitter.Snapshot(), false)
@@ -360,13 +382,22 @@ func RunLossReporter(ctx context.Context, pool *pgxpool.Pool, emitter *Emitter,
 				}
 				continue
 			}
+			recordLossCheckpoint(counters, report)
 			logLossReport(log, report)
 		}
 	}
 }
 
+// recordLossCheckpoint folds a successful checkpoint into the process's
+// durable-loss counters, which the metrics endpoint renders.
+func recordLossCheckpoint(counters *LossCounters, report LossReport) {
+	if counters != nil {
+		counters.Record(report)
+	}
+}
+
 func closeEpoch(ctx context.Context, pool *pgxpool.Pool, emitter *Emitter,
-	gatewayInstance string, log *slog.Logger) {
+	gatewayInstance string, counters *LossCounters, log *slog.Logger) {
 	cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 4*time.Second)
 	defer cancel()
 	for {
@@ -376,6 +407,7 @@ func closeEpoch(ctx context.Context, pool *pgxpool.Pool, emitter *Emitter,
 		// clean close whose last events have not yet been observed.
 		report, err := CheckpointEpoch(cleanup, pool, gatewayInstance, snapshot, !snapshot.Unclean)
 		if err == nil {
+			recordLossCheckpoint(counters, report)
 			logLossReport(log, report)
 			return
 		}

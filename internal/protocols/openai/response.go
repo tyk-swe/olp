@@ -12,6 +12,10 @@ type Usage struct {
 	TotalTokens       int64  `json:"total_tokens"`
 	CachedInputTokens *int64 `json:"cached_input_tokens,omitempty"`
 	ReasoningTokens   *int64 `json:"reasoning_tokens,omitempty"`
+	// MediaUnits is the provider-metered media quantity — images returned or
+	// seconds processed — carried as decimal text so it survives the usage
+	// event wire shape unchanged.
+	MediaUnits *string `json:"media_units,omitempty"`
 }
 
 // ToolCall is a function call requested by the model.

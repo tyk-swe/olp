@@ -40,6 +40,8 @@ func Environment(values map[string]string) []string {
 	return env
 }
 
+// StartProcess waits for the listeners to be live. A fresh installation can
+// start successfully before a runtime is published and inference is ready.
 func StartProcess(t testing.TB, binary, mode string, env map[string]string) *Process {
 	t.Helper()
 	p := &Process{cmd: exec.Command(binary, mode), done: make(chan struct{}), logPath: filepath.Join(t.TempDir(), "process.log")}
@@ -93,7 +95,7 @@ func StartProcess(t testing.TB, binary, mode string, env map[string]string) *Pro
 		}
 		f.Close()
 		if p.PrivateOrigin != "" && (mode == "worker" || p.PublicOrigin != "") {
-			resp, err := client.Get(p.PrivateOrigin + "/health/ready")
+			resp, err := client.Get(p.PrivateOrigin + "/health/live")
 			if err == nil {
 				resp.Body.Close()
 				if resp.StatusCode == 200 {
@@ -103,7 +105,7 @@ func StartProcess(t testing.TB, binary, mode string, env map[string]string) *Pro
 		}
 		select {
 		case <-p.done:
-			t.Fatalf("process exited before readiness: %v\n%s", p.result, p.Log())
+			t.Fatalf("process exited before liveness: %v\n%s", p.result, p.Log())
 		case <-ctx.Done():
 			t.Fatalf("process startup timed out\n%s", p.Log())
 		case <-ticker.C:

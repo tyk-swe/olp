@@ -30,6 +30,7 @@ postgres=$("${compose[@]}" port postgres 5432)
 valkey=$("${compose[@]}" port valkey 6379)
 valkey_tls=$("${compose[@]}" port valkey 6380)
 export OLP_TEST_DATABASE_URL="postgres://olp_go:olp-go-local@$postgres/olp_go?sslmode=disable"
+export OLP_TEST_DATABASE_ADMIN_URL="postgres://olp_go:olp-go-local@$postgres/postgres?sslmode=disable"
 export OLP_TEST_DATABASE_TLS_URL="postgres://olp_go:olp-go-local@$postgres/olp_go?sslmode=verify-full&sslrootcert=$OLP_GO_TEST_TLS_DIR/ca.crt"
 export OLP_TEST_VALKEY_URL="redis://:olp-go-local@$valkey/0"
 export OLP_TEST_VALKEY_TLS_URL="rediss://:olp-go-local@$valkey_tls/0"
@@ -38,7 +39,7 @@ export OLP_TEST_BINARY="$PWD/.local/bin/olp"
 make go-build
 source scripts/go-secrets.sh "$scratch/secrets"
 OLP_DATABASE_URL="$OLP_TEST_DATABASE_URL" "$OLP_TEST_BINARY" migrate
-go test -race -tags=integration,oidctest -count=1 -timeout=30m -v ./tests/integration
+go test -race -tags=integration,oidctest -count=1 -timeout=30m -v ./tests/integration ./internal/gateway ./internal/providers
 OLP_SDK_SMOKE_BACKEND=go OLP_SDK_SMOKE_SURFACES=openai,anthropic,gemini ./tests/sdk-smoke/run.sh
 export OLP_DATABASE_URL="$OLP_TEST_DATABASE_URL" OLP_VALKEY_URL="$OLP_TEST_VALKEY_URL"
 # Browser OIDC uses a separate, explicitly test-only binary. Release builds

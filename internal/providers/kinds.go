@@ -1,6 +1,6 @@
 // Package providers owns provider connections: configuration drafts, model
 // discovery and certification, credential pools, activation into immutable
-// revisions, and history for the non-media connector matrix.
+// revisions, and history for the connector matrix.
 package providers
 
 import "github.com/tyk-swe/olp/internal/connectors"
@@ -225,6 +225,16 @@ func init() {
 	for _, operation := range []string{"embeddings", "moderation"} {
 		capabilityOptions = append(capabilityOptions, capabilityInput{Operation: operation, Surface: "openai", Mode: "unary"})
 	}
+	for _, operation := range []string{"image_generation", "image_edit", "speech", "transcription"} {
+		for _, mode := range []string{"unary", "streaming"} {
+			capabilityOptions = append(capabilityOptions, capabilityInput{Operation: operation, Surface: "openai", Mode: mode})
+		}
+	}
+	for _, operation := range []string{"image_variation", "video_list", "video_get", "video_content", "video_delete"} {
+		capabilityOptions = append(capabilityOptions, capabilityInput{Operation: operation, Surface: "openai", Mode: "unary"})
+	}
+	capabilityOptions = append(capabilityOptions, capabilityInput{Operation: "video_create", Surface: "openai", Mode: "async"})
+
 }
 func defaultVendor(kind string) string {
 	switch kind {
@@ -242,9 +252,23 @@ func defaultVendor(kind string) string {
 func capabilitiesFor(kind, vendor string) []capabilityInput {
 	out := []capabilityInput{}
 	for _, c := range capabilityOptions {
-		if connectors.Supports(kind, vendor, c.Operation, c.Surface, c.Mode) {
+		if certifiable(kind, vendor, c) {
 			out = append(out, c)
 		}
 	}
 	return out
+}
+
+// Custom endpoints need a safe live probe; native media instead relies on the
+// official connector contract and authenticated discovery, as in the Rust gateway.
+func certifiable(kind, vendor string, c capabilityInput) bool {
+	if !connectors.Supports(kind, vendor, c.Operation, c.Surface, c.Mode) {
+		return false
+	}
+	switch c.Operation {
+	case "generation", "token_count", "embeddings", "moderation":
+		return true
+	default:
+		return kind == KindOpenAI
+	}
 }

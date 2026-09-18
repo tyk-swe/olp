@@ -27,6 +27,7 @@ import (
 	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/management"
+	"github.com/tyk-swe/olp/internal/observability"
 	"github.com/tyk-swe/olp/internal/providers"
 	"github.com/tyk-swe/olp/internal/routes"
 	"github.com/tyk-swe/olp/internal/testutil"
@@ -79,8 +80,8 @@ func m4Console(t *testing.T) *accessHarness {
 	management.Register(mux)
 	h.Server.Register(mux)
 	catalogue := providers.New(h.Server, &policy)
-	catalogue.Health = h.Gateway.Health()
 	catalogue.Register(mux)
+	(&observability.Management{Access: h.Server, Cache: observability.NewCache(), Pool: h.Pool}).Register(mux)
 	routes.New(h.Server).Register(mux)
 	(&usage.Server{Access: h.Server, VendorKind: providers.VendorKind}).Register(mux)
 	server := httptest.NewServer(mux)

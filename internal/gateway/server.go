@@ -22,19 +22,27 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/egress"
+	"github.com/tyk-swe/olp/internal/observability"
 	"github.com/tyk-swe/olp/internal/protocols"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
 	"github.com/tyk-swe/olp/internal/providers"
 	"github.com/tyk-swe/olp/internal/runtime"
+	"github.com/tyk-swe/olp/internal/telemetry"
 )
 
 // Config bounds the inference surface.
 type Config struct {
-	MaxInFlight      int
-	MaxBodyBytes     int64
-	MaxResponseBytes int64
-	MaxEventBytes    int64
-	TrustedProxies   []netip.Prefix
+	MaxInFlight       int
+	MaxBodyBytes      int64
+	MaxMediaBodyBytes int64
+	MaxResponseBytes  int64
+	MaxEventBytes     int64
+	TrustedProxies    []netip.Prefix
+	// AdmissionPool, when set, is the process-local inference admission pool
+	// the server falls back to for direct handler calls; process composition
+	// shares it with the public admission middleware so both bound the same
+	// capacity and the metrics endpoint reads one truth.
+	AdmissionPool *observability.Pool
 }
 
 // Runtime is the pinned authority and release source. *runtime.Manager
@@ -53,13 +61,16 @@ type Server struct {
 	// means none were configured: keys and targets that bound nothing are
 	// served, and anything that must be metered fails closed.
 	Admission *Admission
+	// Media wires the bounded media substrate into the public surface. A nil
+	// Media leaves the media routes unregistered.
+	Media *MediaDeps
 
 	log       *slog.Logger
 	cfg       Config
 	egress    *egress.Policy
 	client    *http.Client
 	auth      *connectors.Auth
-	admission chan struct{}
+	admission *observability.Pool
 	health    *healthTracker
 	now       func() time.Time
 }
@@ -69,6 +80,13 @@ type Server struct {
 const upstreamHeaderTimeout = 5 * time.Minute
 
 func New(rt Runtime, policy *egress.Policy, cfg Config, log *slog.Logger) *Server {
+	if cfg.MaxMediaBodyBytes <= 0 {
+		cfg.MaxMediaBodyBytes = 64 << 20
+	}
+	pool := cfg.AdmissionPool
+	if pool == nil {
+		pool = observability.NewPool(max(cfg.MaxInFlight, 1))
+	}
 	return &Server{
 		Runtime:   rt,
 		Sink:      LogSink{Log: log},
@@ -77,7 +95,7 @@ func New(rt Runtime, policy *egress.Policy, cfg Config, log *slog.Logger) *Serve
 		egress:    policy,
 		client:    policy.Client(upstreamHeaderTimeout),
 		auth:      connectors.NewAuth(policy),
-		admission: make(chan struct{}, max(cfg.MaxInFlight, 1)),
+		admission: pool,
 		health:    newHealthTracker(time.Now),
 		now:       time.Now,
 	}
@@ -86,9 +104,17 @@ func New(rt Runtime, policy *egress.Policy, cfg Config, log *slog.Logger) *Serve
 // Health exposes windowed attempt statistics for the management API.
 func (s *Server) Health() providers.HealthSource { return s.health }
 
+// AdmissionPool exposes the process-local inference admission pool the
+// metrics endpoint renders.
+func (s *Server) AdmissionPool() *observability.Pool { return s.admission }
+
+// OpenCircuits counts provider circuits currently open or half-open.
+func (s *Server) OpenCircuits() int64 { return s.health.openCircuits() }
+
 // Register mounts the OpenAI surface on the public mux.
 func (s *Server) Register(mux *http.ServeMux) {
 	s.registerNative(mux)
+	s.registerMedia(mux)
 	mux.HandleFunc("POST /v1/chat/completions", s.inference(openai.FamilyChat))
 	mux.HandleFunc("POST /v1/responses", s.inference(openai.FamilyResponses))
 	mux.HandleFunc("GET /v1/models", s.models)
@@ -108,6 +134,8 @@ type request struct {
 	clientIP  string
 	startedAt time.Time
 	release   *runtime.Release
+	// trace is the request's observability span; a no-op when tracing is off.
+	trace *telemetry.RequestTrace
 }
 
 // accountingID is the identity durable records are stored under: the request
@@ -132,7 +160,7 @@ func (s *Server) begin(w http.ResponseWriter, r *http.Request) request {
 	h.Set("Cache-Control", "no-store")
 	h.Set("X-Content-Type-Options", "nosniff")
 	s.cors(w, r)
-	return request{id: id, minted: minted, clientIP: ClientIP(r, s.cfg.TrustedProxies), startedAt: s.now(), release: s.Runtime.Release()}
+	return request{id: id, minted: minted, clientIP: ClientIP(r, s.cfg.TrustedProxies), startedAt: s.now(), release: s.Runtime.Release(), trace: telemetry.RequestFromContext(r.Context())}
 }
 
 // cors allows browser SDK clients from any origin: the surface authenticates
@@ -192,16 +220,27 @@ func ClientIP(r *http.Request, trusted []netip.Prefix) string {
 	return addr.String()
 }
 
-func (s *Server) admit() bool {
-	select {
-	case s.admission <- struct{}{}:
+// admit takes an inference slot. When the public admission middleware already
+// charged this request the context carries its permit and no second slot is
+// taken; otherwise the server's own pool bounds the call, so direct handler
+// use (and any composition that skips the middleware) stays bounded.
+func (s *Server) admit(ctx context.Context) bool {
+	if observability.PermitFromContext(ctx) != nil {
 		return true
-	default:
-		return false
 	}
+	return s.admission.Acquire()
 }
 
-func (s *Server) release() { <-s.admission }
+// release returns the slot admit took, whether that was the outer permit or
+// the local pool. Release is idempotent on the permit: media handlers hand
+// their slot back once uploads finish staging, before the upstream call.
+func (s *Server) release(ctx context.Context) {
+	if permit := observability.PermitFromContext(ctx); permit != nil {
+		permit.Release()
+		return
+	}
+	s.admission.Release()
+}
 
 // authenticate resolves the bearer key against the pinned authority and
 // checks the scope the endpoint needs.
@@ -370,12 +409,12 @@ func (s *Server) inference(family openai.Family) http.HandlerFunc {
 			writeError(w, e)
 			return
 		}
-		if !s.admit() {
+		if !s.admit(r.Context()) {
 			x.failure, status = overloaded, overloaded.Status
 			writeError(w, overloaded)
 			return
 		}
-		defer s.release()
+		defer s.release(r.Context())
 		authority, e := s.authenticate(r, "inference")
 		if e != nil {
 			x.failure, status = e, e.Status
@@ -575,6 +614,13 @@ func mapsKeys[V any](m map[string]V) func(func(string) bool) {
 			}
 		}
 	}
+}
+
+// WriteAdmissionOverload renders the surface's 503 rejection. The public
+// admission middleware calls it before routing, so the request context is the
+// only state available — writeSurfaceError applies the write deadline itself.
+func WriteAdmissionOverload(w http.ResponseWriter, r *http.Request) {
+	writeSurfaceError(w, overloaded, requestSurface(r))
 }
 
 func writeJSON(w http.ResponseWriter, body any) {

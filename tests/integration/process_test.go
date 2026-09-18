@@ -51,11 +51,32 @@ func TestProcessModesPrivateProbesAndShutdown(t *testing.T) {
 			}
 			get(p.PrivateOrigin, "/health/live", 200)
 			get(p.PrivateOrigin, "/api/v3/openapi.json", 404)
+			// This installation has no published runtime. Only modes serving
+			// inference must stay unready; management and workers can operate.
+			readyStatus := http.StatusOK
+			if mode == "all" || mode == "gateway" {
+				readyStatus = http.StatusServiceUnavailable
+			}
+			deadline := time.Now().Add(10 * time.Second)
+			for {
+				resp, err := httpClient.Get(p.PrivateOrigin + "/health/ready")
+				if err == nil {
+					io.Copy(io.Discard, resp.Body)
+					resp.Body.Close()
+					if resp.StatusCode == readyStatus {
+						break
+					}
+				}
+				if time.Now().After(deadline) {
+					t.Fatalf("readiness did not reach HTTP %d: %v\n%s", readyStatus, err, p.Log())
+				}
+				time.Sleep(20 * time.Millisecond)
+			}
 			env["OLP_OBSERVABILITY_LISTEN_ADDR"] = strings.TrimPrefix(p.PrivateOrigin, "http://")
 			probe := exec.Command(binary, "health-probe")
 			probe.Env = testutil.Environment(env)
-			if output, err := probe.CombinedOutput(); err != nil {
-				t.Fatalf("health-probe: %v %s", err, output)
+			if output, err := probe.CombinedOutput(); (err == nil) != (readyStatus == http.StatusOK) {
+				t.Fatalf("health-probe for readiness HTTP %d: %v %s", readyStatus, err, output)
 			}
 			if mode == "worker" {
 				// Serving nothing is the point of this mode: what it owes the
@@ -137,7 +158,7 @@ func awaitWorkerPlane(t *testing.T, since time.Time) {
 		t.Fatal(err)
 	}
 	defer pool.Close()
-	wanted := []string{"cost_reconciliation", "maintenance", "request_metadata_consumer",
+	wanted := []string{"cost_reconciliation", "maintenance", "media_reconciliation", "request_metadata_consumer",
 		"request_metadata_gateway_epoch_detection"}
 	deadline := time.Now().Add(20 * time.Second)
 	for {

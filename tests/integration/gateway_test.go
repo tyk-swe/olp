@@ -4,9 +4,11 @@ package integration_test
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -15,6 +17,9 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/tyk-swe/olp/internal/gateway"
+	"github.com/tyk-swe/olp/internal/usage"
 )
 
 const (
@@ -279,6 +284,9 @@ func TestCapabilitiesReportConfiguredEnforcement(t *testing.T) {
 
 func TestGatewayFromEmptyInstallationToSDKTraffic(t *testing.T) {
 	h := newAccessHarness(t)
+	emitter := usage.NewEmitter(128)
+	originalSink := h.Gateway.Sink
+	h.Gateway.Sink = &gateway.AccountingSink{Emitter: emitter, Next: originalSink}
 	owner := h.owner()
 	up := newVendor(t)
 	// This harness composes the surfaces without the shared state that
@@ -492,6 +500,16 @@ func TestGatewayFromEmptyInstallationToSDKTraffic(t *testing.T) {
 	validateManagementResponse(t, "POST", "/api/v3/playground", 200, play)
 	if play["output_text"] != vendorAnswer || play["model"] != routeSlug || len(play["routing"].([]any)) != 1 {
 		t.Fatalf("playground %v", play)
+	}
+	// Health reads durable attempt facts. Drain this fixture's accounting
+	// events directly into PostgreSQL; distributed delivery is covered by M4.
+	h.Gateway.Sink = originalSink
+	emitter.Close()
+	flush, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	emitter.RunWriter(flush, persistedUsageStream{h.Pool}, "fixture", slog.Default())
+	cancel()
+	if snapshot := emitter.Snapshot(); snapshot.Persisted < 3 || snapshot.Lost() != 0 {
+		t.Fatalf("health accounting did not persist: %+v", snapshot)
 	}
 	health := h.want(owner, "GET", "/api/v3/provider-health", nil, nil, 200)
 	validateManagementResponse(t, "GET", "/api/v3/provider-health", 200, health)

@@ -23,10 +23,12 @@ import (
 // *Admission means no limiter was configured at all, which admits keys and
 // targets that bound nothing and fails everything else closed.
 type Admission struct {
-	limiter  *limits.Limiter
-	policy   func() limits.OutagePolicy
-	log      *slog.Logger
-	failOpen atomic.Int64
+	limiter                 *limits.Limiter
+	policy                  func() limits.OutagePolicy
+	log                     *slog.Logger
+	failOpen                atomic.Int64
+	dailyBudgetRejections   atomic.Int64
+	monthlyBudgetRejections atomic.Int64
 }
 
 // NewAdmission binds a limiter to the outage policy of the installation. The
@@ -38,15 +40,39 @@ func NewAdmission(limiter *limits.Limiter, policy func() limits.OutagePolicy, lo
 
 // FailOpenTotal counts the requests admitted without a reservation because the
 // limiter could not answer and the installation chose to fail open. It is the
-// source of the olp_limits_fail_open_total metric, which this build does not
-// export yet: the Prometheus surface arrives with the observability milestone
-// (docs/roadmap/06-media-and-console-parity.md), and until it does the only
-// per-request trace is the warning outage logs.
+// source of the olp_limits_fail_open_total metric.
 func (a *Admission) FailOpenTotal() int64 {
 	if a == nil {
 		return 0
 	}
 	return a.failOpen.Load()
+}
+
+// BudgetRejections counts the requests a cost budget rejected in the given
+// window. It is the source of the olp_key_budget_rejections_total metric.
+func (a *Admission) BudgetRejections(dimension limits.Dimension) int64 {
+	if a == nil {
+		return 0
+	}
+	switch dimension {
+	case limits.DimensionDailyCost:
+		return a.dailyBudgetRejections.Load()
+	case limits.DimensionMonthlyCost:
+		return a.monthlyBudgetRejections.Load()
+	}
+	return 0
+}
+
+// recordRejection counts the windows Prometheus reports. Rate and concurrency
+// rejections are per-request churn; cost budget rejections are the durable
+// evidence that a budget stopped spend.
+func (a *Admission) recordRejection(dimension limits.Dimension) {
+	switch dimension {
+	case limits.DimensionDailyCost:
+		a.dailyBudgetRejections.Add(1)
+	case limits.DimensionMonthlyCost:
+		a.monthlyBudgetRejections.Add(1)
+	}
 }
 
 const (
@@ -154,6 +180,7 @@ func (a *Admission) reserveKey(ctx context.Context, authority access.Authority, 
 	}
 	var exceeded *limits.ExceededError
 	if errors.As(err, &exceeded) {
+		a.recordRejection(exceeded.Dimension)
 		return nil, rateLimited(exceeded.Dimension, exceeded.RetryAfter)
 	}
 	return nil, a.outage(authority.ID, request.HasCostBudget(), err)

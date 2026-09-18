@@ -38,7 +38,7 @@ func TestEveryEarlyInferenceFailureEmitsOneTerminalEnvelope(t *testing.T) {
 			}},
 			{"stale authority", "authority_unavailable", 503, false, func(h *harness, _ *http.Request) { h.rt.stale = true }},
 			{"admission full", "request_admission_overloaded", 503, false, func(h *harness, _ *http.Request) {
-				for h.gateway.admit() {
+				for h.gateway.admission.Acquire() {
 				}
 			}},
 			{"media type", "unsupported_media_type", 415, true, func(_ *harness, r *http.Request) { r.Header.Set("Content-Type", "text/plain") }},
@@ -67,7 +67,7 @@ func TestEveryEarlyInferenceFailureEmitsOneTerminalEnvelope(t *testing.T) {
 				r.Header.Set("Content-Type", "application/json")
 				r.Header.Set("X-Request-Id", "early-failure")
 				tc.change(h, r)
-				admitted := len(h.gateway.admission)
+				admitted := h.gateway.admission.Admitted()
 				w := &unaryResponseWriter{ResponseRecorder: httptest.NewRecorder(), beforeDelivery: func() {}}
 				h.gateway.inference(family)(w, r)
 				if w.Code != tc.status || !strings.Contains(w.Body.String(), `"code":"`+tc.code+`"`) {
@@ -84,7 +84,7 @@ func TestEveryEarlyInferenceFailureEmitsOneTerminalEnvelope(t *testing.T) {
 				if tc.authed {
 					keyID = h.keyID
 				}
-				if env.KeyID != keyID || len(env.Attempts) != 0 || env.Usage != nil || env.Committed || h.mock.count("a") != 0 || h.mock.count("b") != 0 || len(h.gateway.admission) != admitted {
+				if env.KeyID != keyID || len(env.Attempts) != 0 || env.Usage != nil || env.Committed || h.mock.count("a") != 0 || h.mock.count("b") != 0 || h.gateway.admission.Admitted() != admitted {
 					t.Fatalf("early failure dispatched work or lost identity/admission: %+v", env)
 				}
 			})

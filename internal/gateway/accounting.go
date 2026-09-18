@@ -90,6 +90,7 @@ func accountingEvent(e Envelope) *usage.Event {
 		event.UsageComplete = fact.UsageObserved && fact.UsageComplete
 		if fact.UsageObserved {
 			event.InputTokens, event.OutputTokens, event.CachedInputTokens = accountingTokens(fact)
+			event.MediaUnits = accountingMediaUnits(fact)
 			if e.Operation == "embeddings" {
 				event.OutputTokens = nil
 			}
@@ -139,6 +140,7 @@ func accountingAttempt(e Envelope, index int) usage.Attempt {
 	}
 	if fact.UsageObserved {
 		attempt.Usage.InputTokens, attempt.Usage.OutputTokens, attempt.Usage.CachedInputTokens = accountingTokens(fact)
+		attempt.Usage.MediaUnits = accountingMediaUnits(fact)
 		attempt.Routing.StreamedOutputTokens = streamedTokens(fact)
 		if e.Operation == "embeddings" {
 			attempt.Usage.OutputTokens = nil
@@ -165,6 +167,16 @@ func accountingTokens(fact *AttemptFact) (input, output, cached *int64) {
 		cached = &hit
 	}
 	return &in, &out, cached
+}
+
+// accountingMediaUnits is the media quantity an attempt disclosed, carried as
+// the same decimal text the usage event validates and stores.
+func accountingMediaUnits(fact *AttemptFact) *string {
+	if fact.Usage == nil || fact.Usage.MediaUnits == nil {
+		return nil
+	}
+	value := *fact.Usage.MediaUnits
+	return &value
 }
 
 // streamedTokens is the output this attempt actually streamed: everything the

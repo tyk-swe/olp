@@ -101,64 +101,6 @@ func (s *Server) inventory(r *http.Request) (access.Reply, error) {
 	}), nil
 }
 
-func (s *Server) health(r *http.Request) (access.Reply, error) {
-	if _, err := s.Access.Principal(r, s.Access.Pool, "read"); err != nil {
-		return access.Reply{}, err
-	}
-	page, err := access.Page(r)
-	if err != nil {
-		return access.Reply{}, err
-	}
-	window := 15
-	if raw := r.URL.Query().Get("window_minutes"); raw != "" {
-		if window, err = strconv.Atoi(raw); err != nil || window < 1 || window > 1440 {
-			return access.Reply{}, access.Fail(400, "invalid_query", "window_minutes must be from 1 to 1440.")
-		}
-	}
-	var stats map[string]HealthStats
-	if s.Health != nil {
-		stats = s.Health.ProviderHealth(time.Duration(window) * time.Minute)
-	}
-	rows, err := s.Access.Pool.Query(r.Context(), "SELECT id::text,name,kind,state,last_probe_at,last_probe_status,last_probe_detail FROM olp_go.providers WHERE id<$1 ORDER BY id DESC LIMIT $2", page.Before, page.Limit+1)
-	if err != nil {
-		return access.Reply{}, err
-	}
-	defer rows.Close()
-	items := []map[string]any{}
-	for rows.Next() {
-		var id, name, kind, state string
-		var probeAt *time.Time
-		var probeStatus, probeDetail *string
-		if err = rows.Scan(&id, &name, &kind, &state, &probeAt, &probeStatus, &probeDetail); err != nil {
-			return access.Reply{}, err
-		}
-		st := stats[id]
-		status := "idle"
-		var average any
-		var last any
-		if st.Attempts > 0 {
-			average = float64(st.TotalLatency.Milliseconds()) / float64(st.Attempts)
-			last = st.LastAttemptAt.UTC()
-			failures := st.Attempts - st.Successes
-			switch {
-			case failures == 0:
-				status = "healthy"
-			case failures*2 >= st.Attempts:
-				status = "unhealthy"
-			default:
-				status = "degraded"
-			}
-		}
-		items = append(items, map[string]any{"provider_id": id, "provider_name": name, "provider_kind": kind, "provider_state": state, "status": status, "attempt_count": st.Attempts, "success_count": st.Successes, "rate_limit_count": st.RateLimits, "server_error_count": st.ServerErrors, "transport_error_count": st.TransportErrors, "average_latency_ms": average, "last_attempt_at": last, "last_probe_at": probeAt, "last_probe_status": probeStatus, "last_probe_detail": probeDetail})
-	}
-	if err = rows.Err(); err != nil {
-		return access.Reply{}, err
-	}
-	reply := access.ListReplyBy(items, page, func(item map[string]any) string { return item["provider_id"].(string) })
-	reply.Body.(map[string]any)["window_minutes"] = window
-	return reply, nil
-}
-
 func (s *Server) generations(r *http.Request) (access.Reply, error) {
 	if _, err := s.Access.Principal(r, s.Access.Pool, "read"); err != nil {
 		return access.Reply{}, err
@@ -185,7 +127,6 @@ func (s *Server) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v3/provider-kinds/{provider_kind}/capabilities", h(s.kindCapabilities))
 	mux.HandleFunc("GET /api/v3/provider-vendors", h(s.vendors))
 	mux.HandleFunc("GET /api/v3/provider-models", h(s.inventory))
-	mux.HandleFunc("GET /api/v3/provider-health", h(s.health))
 	mux.HandleFunc("GET /api/v3/runtime-generations", h(s.generations))
 	mux.HandleFunc("GET /api/v3/providers", h(s.providers))
 	mux.HandleFunc("POST /api/v3/providers", s.Access.HandleWith(1<<20, s.createProvider))

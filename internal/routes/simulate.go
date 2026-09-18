@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/protocols"
 	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/internal/usage"
@@ -31,8 +32,8 @@ func validTuple(operation, surface, mode string) error {
 	if !slices.Contains([]string{"openai", "anthropic", "gemini"}, surface) {
 		return access.Fail(422, "surface_unavailable", "Use the openai, anthropic, or gemini surface.")
 	}
-	if mode != "unary" && mode != "streaming" || operation != "generation" && mode != "unary" {
-		return access.Fail(422, "mode_unavailable", "Use the unary or streaming mode.")
+	if !connectors.Supports("openai", "openai", operation, surface, mode) {
+		return access.Fail(422, "mode_unavailable", "This operation does not support the requested surface and mode.")
 	}
 	return nil
 }

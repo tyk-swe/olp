@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -84,10 +85,19 @@ func TestProviderAndNativeSurfaceParity(t *testing.T) {
 			if probe["succeeded"] != true {
 				t.Fatalf("native discovery/proof: %v", probe)
 			}
+			operations := []string{"generation", "token_count"}
+			if kind == "openai" || kind == "openai_compatible" || kind == "azure_openai" {
+				operations = append(operations, "embeddings", "moderation")
+			}
 			options := h.want(owner, "GET", "/api/v3/provider-kinds/"+kind+"/capabilities", nil, nil, 200)["capabilities"].([]any)
 			capabilities := []any{}
 			for _, option := range options {
 				v := option.(map[string]any)
+				// This local fixture implements non-media operations. Native media
+				// discovery is exercised by TestMediaManagementSetupPublishesUsableRoutes.
+				if !slices.Contains(operations, v["operation"].(string)) {
+					continue
+				}
 				capabilities = append(capabilities, map[string]any{"operation": v["operation"], "surface": v["surface"], "mode": v["mode"]})
 			}
 			models := h.want(owner, "GET", path+"/models", nil, nil, 200)
@@ -99,10 +109,6 @@ func TestProviderAndNativeSurfaceParity(t *testing.T) {
 			}
 			detail = h.want(owner, "GET", path, nil, nil, 200)
 			h.want(owner, "POST", path+"/activate", nil, withMatch(detail, map[string]string{"Idempotency-Key": uuid.NewString()}), 200)
-			operations := []string{"generation", "token_count"}
-			if kind == "openai" || kind == "openai_compatible" || kind == "azure_openai" {
-				operations = append(operations, "embeddings", "moderation")
-			}
 			draft := h.want(owner, "POST", "/api/v3/route-drafts", map[string]any{"slug": routeSlug, "operations": operations, "overall_timeout_ms": 10000, "max_attempts": 1, "targets": []any{map[string]any{"provider_id": detail["id"], "provider_model": vendorModel, "priority": 0, "weight": 1, "timeout_ms": 5000}}}, map[string]string{"Idempotency-Key": uuid.NewString()}, 201)
 			h.want(owner, "POST", "/api/v3/route-drafts/"+draft["id"].(string)+"/activate", nil, withMatch(draft, map[string]string{"Idempotency-Key": uuid.NewString()}), 200)
 			key := h.want(owner, "POST", "/api/v3/api-keys", map[string]any{"name": "native inference", "scopes": []string{"inference", "models_read"}, "allowed_routes": []string{routeSlug}}, map[string]string{"Idempotency-Key": uuid.NewString()}, 201)

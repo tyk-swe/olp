@@ -9,6 +9,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/coordination"
 	"github.com/tyk-swe/olp/internal/limits"
+	"github.com/tyk-swe/olp/internal/media"
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
@@ -21,8 +22,14 @@ import (
 // returned function waits for all of them to have stopped.
 // vk is the consumer's own Valkey client: its blocking stream reads would
 // otherwise stall every command the gateway sends on a shared connection.
-func startWorkers(ctx context.Context, pool *pgxpool.Pool, vk *coordination.Client, limiter *limits.Limiter, stream string, log *slog.Logger) func() {
+func startWorkers(ctx context.Context, pool *pgxpool.Pool, vk *coordination.Client, limiter *limits.Limiter, stream string, mediaService *media.Service, log *slog.Logger) func() {
 	var wg sync.WaitGroup
+	if mediaService != nil {
+		wg.Go(func() { mediaService.RunReconciler(ctx) })
+	}
+	if limiter == nil {
+		return wg.Wait
+	}
 	wg.Go(func() {
 		// The consumer identity is stable for this process and unique among
 		// live ones, so a restart reclaims exactly its own deliveries.

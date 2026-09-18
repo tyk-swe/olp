@@ -9,7 +9,6 @@ import (
 	"unicode"
 
 	"github.com/tyk-swe/olp/internal/access"
-	"github.com/tyk-swe/olp/internal/connectors"
 )
 
 func modelJSON(m storedModel) map[string]any {
@@ -366,7 +365,7 @@ func (s *Server) setModel(r *http.Request) (access.Reply, error) {
 		}
 		capabilities = make([]storedCapability, 0, len(requested))
 		for _, c := range requested {
-			if !connectors.Supports(current.Kind, value(current.Configuration.Options.VendorID), c.Operation, c.Surface, c.Mode) {
+			if !certifiable(current.Kind, value(current.Configuration.Options.VendorID), c) {
 				return access.Reply{}, access.Fail(422, "capability_unavailable", "This connector cannot certify the requested tuple.")
 			}
 			if kept, ok := existing[c]; ok {

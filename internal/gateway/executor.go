@@ -16,6 +16,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/limits"
+	"github.com/tyk-swe/olp/internal/media"
 	"github.com/tyk-swe/olp/internal/protocols"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
 	"github.com/tyk-swe/olp/internal/runtime"
@@ -32,6 +33,10 @@ const (
 	classCredential     = "credential"
 	classProtocol       = "protocol"
 	classCancelled      = "cancelled"
+	// classAmbiguous marks a side-effecting attempt whose upstream outcome the
+	// gateway cannot prove; it never fails over.
+	classAmbiguous         = "ambiguous"
+	classLimitsUnavailable = "limits_unavailable"
 )
 
 // Canonical defaults retained by existing accounting fixtures.
@@ -63,6 +68,7 @@ type execution struct {
 	request     request
 	family      openai.Family
 	parsed      *openai.Request
+	media       *media.Request
 	actor       string
 	keyID       string
 	userID      string
@@ -172,6 +178,10 @@ func (f *attemptFailure) billingUncertain() bool {
 
 func (f *attemptFailure) toError() *Error {
 	switch f.class {
+	case classLimitsUnavailable:
+		return limitsUnavailable()
+	case classAmbiguous:
+		return serverError(http.StatusBadGateway, "ambiguous_upstream_result", "The upstream provider may have applied this request; its result could not be confirmed.")
 	case classCancelled:
 		return &Error{Status: 0, Code: "client_cancelled", Message: "The client went away."}
 	case classTimeout:
@@ -462,6 +472,16 @@ func (s *Server) rejectedFact(x *execution, a runtime.Attempt, slot runtime.Slot
 func (s *Server) attempt(ctx context.Context, x *execution, a runtime.Attempt, provider *runtime.Provider, slot runtime.Slot, ordinal int) (AttemptFact, *openai.Completion, *attemptFailure) {
 	fact := s.newFact(x, a, slot, ordinal)
 	st := &attemptState{parent: ctx}
+	attemptCtx, atr := x.request.trace.Attempt(ctx, provider.Kind, a.ProviderRevisionID, a.UpstreamModel)
+	finishTrace := func() {
+		if atr == nil {
+			return
+		}
+		if u := fact.Usage; u != nil {
+			atr.RecordUsage(&u.InputTokens, &u.OutputTokens, u.CachedInputTokens, u.MediaUnits)
+		}
+		atr.Finish(fact.Class, fact.Status)
+	}
 	fail := func(class string, f *attemptFailure) (AttemptFact, *openai.Completion, *attemptFailure) {
 		if f == nil {
 			f = &attemptFailure{}
@@ -476,6 +496,7 @@ func (s *Server) attempt(ctx context.Context, x *execution, a runtime.Attempt, p
 			fact.RetryAfter = &retry
 		}
 		fact.recordEvidence(f.billingUncertain())
+		finishTrace()
 		return fact, nil, f
 	}
 
@@ -495,7 +516,7 @@ func (s *Server) attempt(ctx context.Context, x *execution, a runtime.Attempt, p
 	}
 	timeout := min(a.Timeout, remaining)
 
-	actx, cancel := context.WithCancel(ctx)
+	actx, cancel := context.WithCancel(attemptCtx)
 	defer cancel()
 	firstByte := time.AfterFunc(timeout, func() { st.reason.CompareAndSwap(0, 1); cancel() })
 	defer firstByte.Stop()
@@ -508,6 +529,7 @@ func (s *Server) attempt(ctx context.Context, x *execution, a runtime.Attempt, p
 	if err != nil {
 		return fail(classConnect, nil)
 	}
+	atr.InjectUpstream(req.Header, x.request.trace.PropagateUpstream())
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", "olp-go/gateway")
 	req.Header.Set("Accept", "application/json")
@@ -626,6 +648,7 @@ func (s *Server) attempt(ctx context.Context, x *execution, a runtime.Attempt, p
 	// A success carrying no usage was still served and billed upstream, with
 	// nothing this gateway can meter.
 	fact.recordEvidence(true)
+	finishTrace()
 	return fact, completion, nil
 }
 
@@ -735,6 +758,15 @@ func (s *Server) finish(x *execution, out *outcome, status int) {
 			case out.err == nil:
 				env.Outcome = "success"
 			}
+		}
+		if x.request.trace != nil {
+			var firstByte, total time.Duration
+			if x.firstByte != nil {
+				firstByte = *x.firstByte
+			}
+			total = env.Duration
+			x.request.trace.RecordInferenceContext(env.Surface, env.Operation, env.Route, env.KeyID, env.RuntimeGenerationID)
+			x.request.trace.RecordTerminal(env.Status, env.ErrorClass, len(x.facts), firstByte, total)
 		}
 		s.Sink.Terminal(env)
 	})

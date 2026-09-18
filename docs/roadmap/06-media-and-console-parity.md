@@ -3,7 +3,7 @@
 [Roadmap](README.md) | [Previous: providers and routing](05-provider-and-routing-parity.md) |
 [Next: release and Rust retirement](07-release-and-rust-retirement.md)
 
-**Status:** Not started. **Prerequisites:** M5 complete.
+**Status:** In progress; media regression fixes and release qualification underway. **Prerequisites:** M5 complete.
 
 Complete current product capabilities with bounded image/audio operations,
 durable video jobs, operational diagnostics, and the remaining console
@@ -14,7 +14,7 @@ as generation while retaining its durable ownership requirements.
 
 ### M6-01
 
-- [ ] **Restore multipart and spool admission.**
+- [x] **Restore multipart and spool admission.**
 
 **Depends on:** Milestone prerequisites.
 
@@ -36,7 +36,7 @@ never enters persistent request diagnostics.
 
 ### M6-02
 
-- [ ] **Restore image generation, editing, and variation.**
+- [x] **Restore image generation, editing, and variation.**
 
 **Depends on:** [M6-01](#m6-01).
 
@@ -56,7 +56,7 @@ Media accounting and missing-usage treatment use M4's shared implementation.
 
 ### M6-03
 
-- [ ] **Restore speech and transcription.**
+- [x] **Restore speech and transcription.**
 
 **Depends on:** [M6-01](#m6-01).
 
@@ -76,7 +76,7 @@ support and incomplete pricing/usage remain explicit.
 
 ### M6-04
 
-- [ ] **Restore durable video admission and job ownership.**
+- [x] **Restore durable video admission and job ownership.**
 
 **Depends on:** [M6-01](#m6-01).
 
@@ -97,7 +97,7 @@ Admission races and crash points preserve the evidence needed for reconciliation
 
 ### M6-05
 
-- [ ] **Restore media reconciliation and historical credentials.**
+- [x] **Restore media reconciliation and historical credentials.**
 
 **Depends on:** [M6-04](#m6-04).
 
@@ -119,7 +119,7 @@ durable provider-owned job reference.
 
 ### M6-06
 
-- [ ] **Connect media management and console workflows.**
+- [x] **Connect media management and console workflows.**
 
 **Depends on:** [M6-02](#m6-02), [M6-03](#m6-03), [M6-05](#m6-05).
 
@@ -140,7 +140,7 @@ never appear in history or ordinary management payloads.
 
 ### M6-07
 
-- [ ] **Complete metrics, tracing, readiness, and worker health.**
+- [x] **Complete metrics, tracing, readiness, and worker health.**
 
 **Depends on:** [M6-05](#m6-05).
 
@@ -162,7 +162,7 @@ workers. Traces/metrics/logs contain no payloads or secret header values.
 
 ### M6-08
 
-- [ ] **Close console parity and accessibility gaps.**
+- [x] **Close console parity and accessibility gaps.**
 
 **Depends on:** [M6-06](#m6-06), [M6-07](#m6-07).
 

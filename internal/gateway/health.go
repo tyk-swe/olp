@@ -61,6 +61,20 @@ func (h *healthTracker) open(providerID string) bool {
 	return p.probing || h.now().Before(p.openUntil)
 }
 
+// openCircuits counts providers whose circuit is open or half-open right now.
+// It is the source of the olp_open_target_circuits metric.
+func (h *healthTracker) openCircuits() int64 {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	var count int64
+	for _, p := range h.providers {
+		if p.probing || h.now().Before(p.openUntil) {
+			count++
+		}
+	}
+	return count
+}
+
 // coolingDown reports whether a credential slot is paused after a failure.
 func (h *healthTracker) coolingDown(providerID, slotID string) bool {
 	h.mu.Lock()

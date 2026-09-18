@@ -314,10 +314,15 @@ func decodeModels(body []byte) ([]string, error) {
 	return models, nil
 }
 
-// certifyTuple performs the smallest real generation for one capability.
+// certifyTuple uses a bounded live probe or authenticated native media discovery.
 func (s *Server) certifyTuple(ctx context.Context, cfg *Configuration, credential []byte, model string, tuple capabilityInput, maxEventBytes int) error {
-	if !connectors.Supports(cfg.Kind, value(cfg.Options.VendorID), tuple.Operation, tuple.Surface, tuple.Mode) {
+	if !certifiable(cfg.Kind, value(cfg.Options.VendorID), tuple) {
 		return &probeError{Code: "capability_unavailable", Detail: "This connector cannot certify the requested tuple."}
+	}
+	switch tuple.Operation {
+	case "generation", "token_count", "embeddings", "moderation":
+	default:
+		return s.certifyNativeMedia(ctx, cfg, credential, model)
 	}
 	family := openai.FamilyChat
 	payload := map[string]any{"model": "certification", "messages": []map[string]string{{"role": "user", "content": "Reply with OK."}}, "max_tokens": 16}
@@ -443,4 +448,29 @@ func selectProbeSlot(slots []slotRow, cfg *Configuration) *slotRow {
 		}
 	}
 	return best
+}
+
+// Media certification must not create billable images, audio or video jobs.
+// Discovery proves access to the exact mapped model; the official OpenAI
+// connector supplies the closed media wire contract. Custom hosts cannot use
+// unrelated chat success or a self-reported model list as media evidence.
+func (s *Server) certifyNativeMedia(ctx context.Context, cfg *Configuration, credential []byte, model string) error {
+	endpoint, err := url.Parse(value(cfg.Endpoint))
+	if err != nil || cfg.Kind != KindOpenAI || cfg.AuthMode != AuthAPIKey || len(credential) == 0 ||
+		len(cfg.Options.CredentialHeaders) != 0 || endpoint.Scheme != "https" ||
+		endpoint.Hostname() != "api.openai.com" || (endpoint.Port() != "" && endpoint.Port() != "443") ||
+		strings.TrimRight(endpoint.EscapedPath(), "/") != "/v1" {
+		return &probeError{Code: "capability_unavailable", Detail: "Media certification requires the official OpenAI endpoint and an API key."}
+	}
+	models, err := s.listModels(ctx, cfg, credential)
+	if err != nil {
+		return err
+	}
+	expected := cfg.transport().Model(model)
+	for _, discovered := range models {
+		if discovered == expected {
+			return nil
+		}
+	}
+	return &probeError{Code: "model_unavailable", Detail: "The credential cannot discover the requested media model."}
 }

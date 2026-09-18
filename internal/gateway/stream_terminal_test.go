@@ -43,7 +43,7 @@ func TestTerminalStreamReleasesAdmissionAndRecordsSuccessWithoutEOF(t *testing.T
 			if len(h.sink.envs) != 1 || env.Outcome != "success" || !env.Committed || env.Usage == nil || env.Usage.TotalTokens != 5 || len(env.Attempts) != 1 || env.Attempts[0].Class != classSuccess {
 				t.Fatalf("terminal accounting: %+v", env)
 			}
-			if len(h.gateway.admission) != 0 {
+			if h.gateway.admission.Admitted() != 0 {
 				t.Fatal("terminal stream retained admission")
 			}
 			select {

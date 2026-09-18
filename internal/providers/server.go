@@ -45,7 +45,6 @@ type QuotaSource interface {
 type Server struct {
 	Access *access.Server
 	Egress *egress.Policy
-	Health HealthSource
 	Quotas QuotaSource
 	Log    *slog.Logger
 	client *http.Client

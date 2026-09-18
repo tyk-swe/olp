@@ -32,7 +32,7 @@ export default defineConfig({
   webServer: [
     {
       command: './tests/journeys/run-olp.sh',
-      url: 'http://127.0.0.1:9182/health/ready',
+      url: 'http://127.0.0.1:9182/health/live',
       reuseExistingServer: false,
       env: {
         OLP_CONSOLE_E2E_BACKEND: 'go',
@@ -47,7 +47,7 @@ export default defineConfig({
     },
     {
       command: './tests/journeys/run-olp.sh',
-      url: 'http://127.0.0.1:9184/health/ready',
+      url: 'http://127.0.0.1:9184/health/live',
       reuseExistingServer: false,
       env: {
         OLP_CONSOLE_E2E_BACKEND: 'go',

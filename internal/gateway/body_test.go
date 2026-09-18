@@ -56,7 +56,7 @@ func TestIncompleteBodiesReleaseAdmission(t *testing.T) {
 			if resp.StatusCode != http.StatusRequestTimeout || errorCode(t, body) != "request_timeout" {
 				t.Fatalf("status %d body %v", resp.StatusCode, body)
 			}
-			if h.mock.count("a") != 0 || h.mock.count("b") != 0 || len(h.gateway.admission) != 0 {
+			if h.mock.count("a") != 0 || h.mock.count("b") != 0 || h.gateway.admission.Admitted() != 0 {
 				t.Fatal("unfinished upload dispatched upstream or retained admission")
 			}
 			if resp, body := h.chat(fullKey, nil); resp.StatusCode != http.StatusOK {

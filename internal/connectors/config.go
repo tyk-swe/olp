@@ -173,3 +173,48 @@ func (c Config) URL(wire openai.Family, model string, stream bool) (string, erro
 	}
 	return base + path, nil
 }
+
+// MediaURL resolves an OpenAI-family media resource path — images, audio, and
+// videos — against the connector endpoint. Azure deployments keep their
+// address prefix and fixed api-version query exactly as generation URLs do.
+// The path is a fixed relative resource from the media dispatch table; job
+// identifiers are validated by the caller before reaching it.
+func (c Config) MediaURL(path, model string, query url.Values) (string, error) {
+	if strings.HasPrefix(path, "/") || strings.Contains(path, "..") || strings.ContainsAny(path, "\\?#") {
+		return "", errors.New("invalid upstream resource path")
+	}
+	base := strings.TrimRight(c.Endpoint, "/")
+	if c.Kind == "azure_openai" {
+		deployment := c.Model(model)
+		if deployment != c.Deployment {
+			var metadata struct {
+				Deployment string `json:"deployment"`
+			}
+			found := false
+			for _, v := range c.Models {
+				metadata.Deployment = ""
+				_ = json.Unmarshal(v, &metadata)
+				if metadata.Deployment == deployment {
+					found = true
+					break
+				}
+			}
+			if !found {
+				return "", errors.New("model has no configured Azure deployment")
+			}
+		}
+		base += "/openai/deployments/" + url.PathEscape(deployment)
+	}
+	u := base + "/" + path
+	merged := url.Values{}
+	if c.Kind == "azure_openai" {
+		merged.Set("api-version", c.APIVersion)
+	}
+	for name, values := range query {
+		merged[name] = append([]string{}, values...)
+	}
+	if len(merged) > 0 {
+		u += "?" + merged.Encode()
+	}
+	return u, nil
+}
