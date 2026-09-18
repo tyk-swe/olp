@@ -1,0 +1,201 @@
+{
+  "sourceCommit": "ccd138f288a99f66a2bb1145eb75d5ce57398416",
+  "run": "https://github.com/tyk-swe/olp/actions/runs/35334054213",
+  "applicationVersion": "3.0.0",
+  "stablePromotion": "Manual dispatch qualifies candidates only. Tag-push promotion reuses the qualified digest without rebuilding.",
+  "jobs": [
+    {
+      "name": "qualification / native (ubuntu-24.04, amd64)",
+      "databaseId": 105564714737,
+      "conclusion": "success",
+      "url": "https://github.com/tyk-swe/olp/actions/runs/35334054213/job/105564714737",
+      "startedAt": "2026-09-18T10:18:55Z",
+      "completedAt": "2026-09-18T10:20:44Z"
+    },
+    {
+      "name": "qualification / check",
+      "databaseId": 105564714862,
+      "conclusion": "success",
+      "url": "https://github.com/tyk-swe/olp/actions/runs/35334054213/job/105564714862",
+      "startedAt": "2026-09-18T10:18:55Z",
+      "completedAt": "2026-09-18T10:23:29Z"
+    },
+    {
+      "name": "qualification / native (ubuntu-24.04-arm, arm64)",
+      "databaseId": 105564714924,
+      "conclusion": "success",
+      "url": "https://github.com/tyk-swe/olp/actions/runs/35334054213/job/105564714924",
+      "startedAt": "2026-09-18T10:18:58Z",
+      "completedAt": "2026-09-18T10:20:29Z"
+    },
+    {
+      "name": "qualification / dependencies",
+      "databaseId": 105564714936,
+      "conclusion": "success",
+      "url": "https://github.com/tyk-swe/olp/actions/runs/35334054213/job/105564714936",
+      "startedAt": "2026-09-18T10:18:55Z",
+      "completedAt": "2026-09-18T10:20:11Z"
+    },
+    {
+      "name": "qualification / integration",
+      "databaseId": 105564714958,
+      "conclusion": "success",
+      "url": "https://github.com/tyk-swe/olp/actions/runs/35334054213/job/105564714958",
+      "startedAt": "2026-09-18T10:18:55Z",
+      "completedAt": "2026-09-18T10:34:36Z"
+    },
+    {
+      "name": "candidate-build (ubuntu-24.04-arm, linux/arm64, arm64)",
+      "databaseId": 105568885291,
+      "conclusion": "success",
+      "url": "https://github.com/tyk-swe/olp/actions/runs/35334054213/job/105568885291",
+      "startedAt": "2026-09-18T10:34:41Z",
+      "completedAt": "2026-09-18T10:36:56Z"
+    },
+    {
+      "name": "candidate-build (ubuntu-24.04, linux/amd64, amd64)",
+      "databaseId": 105568885295,
+      "conclusion": "success",
+      "url": "https://github.com/tyk-swe/olp/actions/runs/35334054213/job/105568885295",
+      "startedAt": "2026-09-18T10:34:39Z",
+      "completedAt": "2026-09-18T10:37:34Z"
+    },
+    {
+      "name": "candidate",
+      "databaseId": 105569665706,
+      "conclusion": "success",
+      "url": "https://github.com/tyk-swe/olp/actions/runs/35334054213/job/105569665706",
+      "startedAt": "2026-09-18T10:37:37Z",
+      "completedAt": "2026-09-18T10:37:54Z"
+    },
+    {
+      "name": "packaged (ubuntu-24.04-arm, linux/arm64)",
+      "databaseId": 105569753356,
+      "conclusion": "success",
+      "url": "https://github.com/tyk-swe/olp/actions/runs/35334054213/job/105569753356",
+      "startedAt": "2026-09-18T10:37:59Z",
+      "completedAt": "2026-09-18T10:42:22Z"
+    },
+    {
+      "name": "packaged (ubuntu-24.04, linux/amd64)",
+      "databaseId": 105569753372,
+      "conclusion": "success",
+      "url": "https://github.com/tyk-swe/olp/actions/runs/35334054213/job/105569753372",
+      "startedAt": "2026-09-18T10:37:57Z",
+      "completedAt": "2026-09-18T10:42:24Z"
+    },
+    {
+      "name": "promote",
+      "databaseId": 105570928037,
+      "conclusion": "skipped",
+      "url": "https://github.com/tyk-swe/olp/actions/runs/35334054213/job/105570928037",
+      "startedAt": "2026-09-18T10:42:24Z",
+      "completedAt": "2026-09-18T10:42:24Z"
+    }
+  ],
+  "scans": {
+    "amd64": [
+      {
+        "file": "release-image-scans/amd64/native-rust-vulnerabilities.json",
+        "sha256": "10eb121f6950875c4315981282861b6f4918c1b1eb9ab34f9c815daf00c6e026",
+        "highCriticalFindings": 0
+      },
+      {
+        "file": "release-image-scans/amd64/runtime-vulnerabilities.json",
+        "sha256": "c27f53102665e95f089b9da70bad799da5733faf63916d244d48c1289776c4a9",
+        "highCriticalFindings": 0
+      },
+      {
+        "file": "release-image-scans/amd64/sbom-1-vulnerabilities.json",
+        "sha256": "fd1624baada7b512186fc352d43cda573afa19c25a0df9a388fb217d8e3c6111",
+        "highCriticalFindings": 0
+      },
+      {
+        "file": "release-image-scans/amd64/sbom-2-vulnerabilities.json",
+        "sha256": "b11f29f6f29ddd4036982d5d54ee2b34c562c85849aa240afd25f0814f74298e",
+        "highCriticalFindings": 0
+      },
+      {
+        "file": "release-image-scans/amd64/sbom-3-vulnerabilities.json",
+        "sha256": "d01aec555e47b4c7dd6e2bdd1f85ec1b278c2674867e580afd7abfa1c5e4fafc",
+        "highCriticalFindings": 0
+      },
+      {
+        "file": "release-image-scans/amd64/sbom-4-vulnerabilities.json",
+        "sha256": "b6483ff6c1734ae653d8c9f53bbf5d4353f3cde532b366aa7db72c1b7aa33ac2",
+        "highCriticalFindings": 0
+      },
+      {
+        "file": "release-image-scans/amd64/sbom-5-vulnerabilities.json",
+        "sha256": "80e02d2f3641489768ddb53417ee2393d3188e878fc7a578caec543e1e264b45",
+        "highCriticalFindings": 0
+      },
+      {
+        "file": "release-image-scans/amd64/sbom-6-vulnerabilities.json",
+        "sha256": "7a38c63043366cf4340519f15492d4d74791b47da13e135f7a01851c120b4339",
+        "highCriticalFindings": 0
+      }
+    ],
+    "arm64": [
+      {
+        "file": "release-image-scans/arm64/native-rust-vulnerabilities.json",
+        "sha256": "1264c5204bd0c52db7b4ff36965576b6cdfc007f9d5201a16a01690d0db8efb8",
+        "highCriticalFindings": 0
+      },
+      {
+        "file": "release-image-scans/arm64/runtime-vulnerabilities.json",
+        "sha256": "c6ec026339f31677d240a7770cec5aaa418be02c8a16f046ec89e6bf9dba01bd",
+        "highCriticalFindings": 0
+      },
+      {
+        "file": "release-image-scans/arm64/sbom-1-vulnerabilities.json",
+        "sha256": "fecef434a931a04c1a32a591bfe4631d691c75b1bc57ef3c28e1da751713268a",
+        "highCriticalFindings": 0
+      },
+      {
+        "file": "release-image-scans/arm64/sbom-2-vulnerabilities.json",
+        "sha256": "244421a0c85ffc802f63378de52b3b2fb927b531c4bb44619b8e9a49714a540e",
+        "highCriticalFindings": 0
+      },
+      {
+        "file": "release-image-scans/arm64/sbom-3-vulnerabilities.json",
+        "sha256": "1a2193c008fcdd0bb3220a37a4e255501be58f6f300431e05c66275b883dc908",
+        "highCriticalFindings": 0
+      },
+      {
+        "file": "release-image-scans/arm64/sbom-4-vulnerabilities.json",
+        "sha256": "9666fc05e12c29ca408d821dc26eecaff5eb600237b5429e3a62a0ab39214189",
+        "highCriticalFindings": 0
+      },
+      {
+        "file": "release-image-scans/arm64/sbom-5-vulnerabilities.json",
+        "sha256": "71c363add8c40140f97b5b02afeedae68aa098713c7563420293923d17372ceb",
+        "highCriticalFindings": 0
+      },
+      {
+        "file": "release-image-scans/arm64/sbom-6-vulnerabilities.json",
+        "sha256": "1356fc17e84d48d2c21be85f2ccccc631cc0bc1a616a8ea09cd19cadaf451638",
+        "highCriticalFindings": 0
+      }
+    ]
+  },
+  "image": "ghcr.io/tyk-swe/olp@sha256:0c7495977bf5a837c7d3d0fa9d21c557a7ddbabb5eb08213ec51d45a458de09d",
+  "artifacts": {
+    "openllmproxy-3.0.0.tgz": {
+      "sha256": "1ff3db742cab189a9f054abf66fb47bfc1a8694c52ce6a3560ea8a196092e43f",
+      "bytes": 25076,
+      "source": "fresh ccd138f checkout"
+    },
+    "management.json": {
+      "sha256": "f4d2f4743efd64631201cd7ff9f68e3297f3563511cd04aa43c0197d46462ca9",
+      "bytes": 337388,
+      "source": "fresh ccd138f checkout"
+    }
+  },
+  "sbom": {
+    "file": "release-image-sbom.json.gz",
+    "encoding": "gzip",
+    "sha256": "40318e9a383afba7fb536326544f4f457e121db9f721fd648bb40d3cc7c0c102",
+    "uncompressedSha256": "97fe0b0cd8c6378482915c3d972050e9d4648943058d23a846aef093e46b55c1"
+  }
+}

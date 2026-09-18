@@ -2,8 +2,9 @@
 
 [Roadmap](README.md) | [Previous: media and console parity](06-media-and-console-parity.md)
 
-**Status:** In progress — implementation and retirement are in place; final
-qualification is being recorded in [release evidence](evidence/release-qualification.md).. **Prerequisites:** M6 complete.
+**Status:** Complete (2026-09-18). **Prerequisites:** M6 complete.
+
+[Final qualification and native evidence](evidence/release-qualification.md).
 
 Qualify the full Go replacement, switch the development and release workflows,
 and retire the Rust application. Feature parity is already required at entry;
@@ -13,7 +14,9 @@ this milestone cannot hide unfinished providers, console pages, or media work.
 
 ### M7-01
 
-- [ ] **Close the behavioral evidence inventory.**
+- [x] **Close the behavioral evidence inventory.**
+
+**Evidence:** [Completed qualification](evidence/release-qualification.md#capability-and-dependency-reconciliation).
 
 **Depends on:** Milestone prerequisites.
 
@@ -33,7 +36,9 @@ and the optional Python launcher runs against the same Go fixture without Cargo.
 
 ### M7-02
 
-- [ ] **Qualify installation, maintenance, and replacement restore.**
+- [x] **Qualify installation, maintenance, and replacement restore.**
+
+**Evidence:** [Completed qualification](evidence/release-qualification.md#recovery-and-process-behavior).
 
 **Depends on:** [M7-01](#m7-01).
 
@@ -54,7 +59,9 @@ Recovery evidence includes interrupted migration/rotation and retained media job
 
 ### M7-03
 
-- [ ] **Qualify process lifecycle, load, and dependency outages.**
+- [x] **Qualify process lifecycle, load, and dependency outages.**
+
+**Evidence:** [Completed qualification](evidence/release-qualification.md#recovery-and-process-behavior).
 
 **Depends on:** [M7-01](#m7-01).
 
@@ -76,7 +83,9 @@ an untested production SLO or recovery RPO.
 
 ### M7-04
 
-- [ ] **Switch canonical developer commands and required CI to Go.**
+- [x] **Switch canonical developer commands and required CI to Go.**
+
+**Evidence:** [Completed qualification](evidence/release-qualification.md#verification).
 
 **Depends on:** [M7-01](#m7-01).
 
@@ -98,7 +107,9 @@ Rust reference. Remove temporary `go-*` targets once callers use canonical ones.
 
 ### M7-05
 
-- [ ] **Finish Go image, Compose, Helm, and release wiring.**
+- [x] **Finish Go image, Compose, Helm, and release wiring.**
+
+**Evidence:** [Completed qualification](evidence/release-qualification.md#candidate).
 
 **Depends on:** [M7-02](#m7-02), [M7-03](#m7-03), [M7-04](#m7-04).
 
@@ -121,7 +132,9 @@ storage incompatibility are explicit in release metadata.
 
 ### M7-06
 
-- [ ] **Prove the final build and dependency outcome.**
+- [x] **Prove the final build and dependency outcome.**
+
+**Evidence:** [Completed qualification](evidence/release-qualification.md#build-and-dependency-results).
 
 **Depends on:** [M7-04](#m7-04), [M7-05](#m7-05).
 
@@ -143,7 +156,9 @@ measurement cannot close it.
 
 ### M7-07
 
-- [ ] **Update contributor and operator documentation.**
+- [x] **Update contributor and operator documentation.**
+
+**Evidence:** [Completed qualification](evidence/release-qualification.md#verification).
 
 **Depends on:** [M7-02](#m7-02), [M7-03](#m7-03), [M7-05](#m7-05), [M7-06](#m7-06).
 
@@ -164,7 +179,9 @@ resolve to the frozen revision once their working-tree paths retire.
 
 ### M7-08
 
-- [ ] **Retire the Rust application and obsolete tooling.**
+- [x] **Retire the Rust application and obsolete tooling.**
+
+**Evidence:** [Completed qualification](evidence/release-qualification.md#capability-and-dependency-reconciliation).
 
 **Depends on:** [M7-01](#m7-01), [M7-04](#m7-04), [M7-05](#m7-05),
 [M7-06](#m7-06), [M7-07](#m7-07).
@@ -186,7 +203,9 @@ dependency. Removal does not discard any retained behavior or qualification fixt
 
 ### M7-09
 
-- [ ] **Qualify the final replacement from a fresh checkout.**
+- [x] **Qualify the final replacement from a fresh checkout.**
+
+**Evidence:** [Completed qualification](evidence/release-qualification.md#verification).
 
 **Depends on:** [M7-08](#m7-08).
 

@@ -3,12 +3,13 @@
 [Roadmap](README.md) | [Previous: foundation](01-foundation.md) |
 [Next: core gateway](03-core-gateway.md)
 
-**Status:** Implemented and qualified on Linux amd64. **Prerequisites:** M1 implementation is present; its native arm64 qualification remains open.
+**Status:** Complete (2026-09-18). **Prerequisites:** M1 complete.
+
+[Final qualification and native evidence](evidence/release-qualification.md).
 
 [M2 evidence and screenshots](evidence/access-and-control.md) | [Operations guide](../go-access.md)
 
-All M2 tickets and exit scenarios pass. Milestone closure still inherits the
-open M1 native arm64 gate; this implementation does not claim that qualification.
+All M2 tickets and exit scenarios pass. M7 also closes the native arm64 gate.
 
 Make the Go installation manageable through the reused console. Complete the
 identity and management boundaries before routing requests or storing provider
@@ -193,7 +194,7 @@ Rust API or on a hand-edited generated contract.
 **References:** [Settings](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/settings),
 [access console](../../console/src/lib/features/access/),
 [settings console](../../console/src/lib/features/settings/),
-[browser journeys](../../console/tests/journeys/rust-hosted-console.spec.ts).
+[browser journeys](../../console/tests/journeys/hosted-console.spec.ts).
 
 ### M2-09
 

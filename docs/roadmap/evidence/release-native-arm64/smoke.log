@@ -1,0 +1,249 @@
+ valkey Pulling 
+ postgres Pulling 
+ bf7af0229701 Pulling fs layer 
+ 6437d6ec8fee Pulling fs layer 
+ 3e1f39995a92 Pulling fs layer 
+ ebe3b74b62b8 Pulling fs layer 
+ 1a59b8215a09 Pulling fs layer 
+ 93eeac19656f Pulling fs layer 
+ 4f28b201a80c Pulling fs layer 
+ 4e582dc1d360 Pulling fs layer 
+ ab1e9043b37f Pulling fs layer 
+ a3089dfdc569 Pulling fs layer 
+ 521aece6b33d Pulling fs layer 
+ bc5ea3235db8 Pulling fs layer 
+ dc0e071a4d07 Pulling fs layer 
+ ab1e9043b37f Waiting 
+ a3089dfdc569 Waiting 
+ 521aece6b33d Waiting 
+ bc5ea3235db8 Waiting 
+ dc0e071a4d07 Waiting 
+ 93eeac19656f Waiting 
+ 4f28b201a80c Waiting 
+ 4e582dc1d360 Waiting 
+ ebe3b74b62b8 Waiting 
+ 1a59b8215a09 Waiting 
+ bf7af0229701 Pulling fs layer 
+ e077facd3b8c Pulling fs layer 
+ feab9acad268 Pulling fs layer 
+ 4292f56f8932 Pulling fs layer 
+ d45bd6741e24 Pulling fs layer 
+ 4f4fb700ef54 Pulling fs layer 
+ e077facd3b8c Waiting 
+ 35cc2b56e875 Pulling fs layer 
+ feab9acad268 Waiting 
+ 4292f56f8932 Waiting 
+ d45bd6741e24 Waiting 
+ 35cc2b56e875 Waiting 
+ 4f4fb700ef54 Waiting 
+ 3e1f39995a92 Downloading [>                                                  ]  64.94kB/6.235MB
+ 6437d6ec8fee Downloading [==================================================>]  1.171kB/1.171kB
+ 6437d6ec8fee Verifying Checksum 
+ 6437d6ec8fee Download complete 
+ bf7af0229701 Downloading [>                                                  ]  310.7kB/30.16MB
+ bf7af0229701 Downloading [>                                                  ]  310.7kB/30.16MB
+ 3e1f39995a92 Downloading [================================>                  ]  3.997MB/6.235MB
+ 3e1f39995a92 Verifying Checksum 
+ 3e1f39995a92 Download complete 
+ bf7af0229701 Downloading [=======>                                           ]  4.669MB/30.16MB
+ bf7af0229701 Downloading [=======>                                           ]  4.669MB/30.16MB
+ ebe3b74b62b8 Downloading [>                                                  ]  15.77kB/1.21MB
+ bf7af0229701 Verifying Checksum 
+ bf7af0229701 Download complete 
+ bf7af0229701 Verifying Checksum 
+ bf7af0229701 Download complete 
+ ebe3b74b62b8 Downloading [==================================================>]   1.21MB/1.21MB
+ ebe3b74b62b8 Verifying Checksum 
+ ebe3b74b62b8 Download complete 
+ bf7af0229701 Extracting [>                                                  ]  327.7kB/30.16MB
+ bf7af0229701 Extracting [>                                                  ]  327.7kB/30.16MB
+ 1a59b8215a09 Downloading [>                                                  ]  97.69kB/8.204MB
+ bf7af0229701 Extracting [===========>                                       ]  7.209MB/30.16MB
+ bf7af0229701 Extracting [===========>                                       ]  7.209MB/30.16MB
+ 1a59b8215a09 Downloading [==========================>                        ]  4.423MB/8.204MB
+ 93eeac19656f Downloading [>                                                  ]  15.81kB/1.221MB
+ 1a59b8215a09 Verifying Checksum 
+ 1a59b8215a09 Download complete 
+ 4f28b201a80c Downloading [==================================================>]     116B/116B
+ 4f28b201a80c Download complete 
+ 93eeac19656f Verifying Checksum 
+ 93eeac19656f Download complete 
+ bf7af0229701 Extracting [===================>                               ]  11.47MB/30.16MB
+ bf7af0229701 Extracting [===================>                               ]  11.47MB/30.16MB
+ 4e582dc1d360 Downloading [==================================================>]  3.143kB/3.143kB
+ 4e582dc1d360 Verifying Checksum 
+ 4e582dc1d360 Download complete 
+ bf7af0229701 Extracting [=================================>                 ]  19.99MB/30.16MB
+ bf7af0229701 Extracting [=================================>                 ]  19.99MB/30.16MB
+ a3089dfdc569 Downloading [=========>                                         ]   3.53kB/19.42kB
+ a3089dfdc569 Downloading [==================================================>]  19.42kB/19.42kB
+ a3089dfdc569 Download complete 
+ ab1e9043b37f Downloading [>                                                  ]  533.6kB/114MB
+ 521aece6b33d Downloading [==================================================>]     127B/127B
+ 521aece6b33d Verifying Checksum 
+ 521aece6b33d Download complete 
+ bf7af0229701 Extracting [==========================================>        ]  25.89MB/30.16MB
+ bf7af0229701 Extracting [==========================================>        ]  25.89MB/30.16MB
+ ab1e9043b37f Downloading [=====>                                             ]  12.85MB/114MB
+ bc5ea3235db8 Downloading [==================================================>]  6.108kB/6.108kB
+ bc5ea3235db8 Verifying Checksum 
+ bc5ea3235db8 Download complete 
+ bf7af0229701 Extracting [===========================================>       ]  26.21MB/30.16MB
+ bf7af0229701 Extracting [===========================================>       ]  26.21MB/30.16MB
+ ab1e9043b37f Downloading [=======================>                           ]  53.95MB/114MB
+ dc0e071a4d07 Downloading [==================================================>]     186B/186B
+ dc0e071a4d07 Verifying Checksum 
+ dc0e071a4d07 Download complete 
+ e077facd3b8c Downloading [==================================================>]  1.108kB/1.108kB
+ e077facd3b8c Verifying Checksum 
+ e077facd3b8c Download complete 
+ bf7af0229701 Extracting [===============================================>   ]  28.84MB/30.16MB
+ bf7af0229701 Extracting [===============================================>   ]  28.84MB/30.16MB
+ ab1e9043b37f Downloading [=========================================>         ]  94.43MB/114MB
+ ab1e9043b37f Verifying Checksum 
+ ab1e9043b37f Download complete 
+ feab9acad268 Downloading [>                                                  ]  48.58kB/3.694MB
+ bf7af0229701 Extracting [================================================>  ]  29.49MB/30.16MB
+ bf7af0229701 Extracting [================================================>  ]  29.49MB/30.16MB
+ 4292f56f8932 Downloading [>                                                  ]  146.9kB/14.57MB
+ bf7af0229701 Extracting [==================================================>]  30.16MB/30.16MB
+ bf7af0229701 Extracting [==================================================>]  30.16MB/30.16MB
+ feab9acad268 Downloading [========================================>          ]  2.998MB/3.694MB
+ d45bd6741e24 Downloading [==================================================>]     138B/138B
+ d45bd6741e24 Verifying Checksum 
+ d45bd6741e24 Download complete 
+ feab9acad268 Verifying Checksum 
+ feab9acad268 Download complete 
+ bf7af0229701 Pull complete 
+ bf7af0229701 Pull complete 
+ e077facd3b8c Extracting [==================================================>]  1.108kB/1.108kB
+ 6437d6ec8fee Extracting [==================================================>]  1.171kB/1.171kB
+ 6437d6ec8fee Extracting [==================================================>]  1.171kB/1.171kB
+ e077facd3b8c Extracting [==================================================>]  1.108kB/1.108kB
+ 4292f56f8932 Downloading [==========>                                        ]  3.096MB/14.57MB
+ 4292f56f8932 Verifying Checksum 
+ 4292f56f8932 Download complete 
+ 4f4fb700ef54 Downloading [==================================================>]      32B/32B
+ 4f4fb700ef54 Verifying Checksum 
+ 4f4fb700ef54 Download complete 
+ 35cc2b56e875 Downloading [==================================================>]     670B/670B
+ 35cc2b56e875 Verifying Checksum 
+ 35cc2b56e875 Download complete 
+ 6437d6ec8fee Pull complete 
+ e077facd3b8c Pull complete 
+ 3e1f39995a92 Extracting [>                                                  ]  65.54kB/6.235MB
+ feab9acad268 Extracting [>                                                  ]  65.54kB/3.694MB
+ feab9acad268 Extracting [==================================================>]  3.694MB/3.694MB
+ 3e1f39995a92 Extracting [========================================>          ]  5.112MB/6.235MB
+ feab9acad268 Pull complete 
+ 3e1f39995a92 Extracting [=================================================> ]   6.16MB/6.235MB
+ 4292f56f8932 Extracting [>                                                  ]  163.8kB/14.57MB
+ 3e1f39995a92 Extracting [==================================================>]  6.235MB/6.235MB
+ 4292f56f8932 Extracting [=======================================>           ]  11.63MB/14.57MB
+ 4292f56f8932 Extracting [==================================================>]  14.57MB/14.57MB
+ 4292f56f8932 Extracting [==================================================>]  14.57MB/14.57MB
+ 3e1f39995a92 Pull complete 
+ 4292f56f8932 Pull complete 
+ ebe3b74b62b8 Extracting [=>                                                 ]  32.77kB/1.21MB
+ d45bd6741e24 Extracting [==================================================>]     138B/138B
+ d45bd6741e24 Extracting [==================================================>]     138B/138B
+ d45bd6741e24 Pull complete 
+ 4f4fb700ef54 Extracting [==================================================>]      32B/32B
+ 4f4fb700ef54 Extracting [==================================================>]      32B/32B
+ ebe3b74b62b8 Extracting [==================================================>]   1.21MB/1.21MB
+ 4f4fb700ef54 Pull complete 
+ 35cc2b56e875 Extracting [==================================================>]     670B/670B
+ 35cc2b56e875 Extracting [==================================================>]     670B/670B
+ 35cc2b56e875 Pull complete 
+ ebe3b74b62b8 Pull complete 
+ 1a59b8215a09 Extracting [>                                                  ]   98.3kB/8.204MB
+ valkey Pulled 
+ 1a59b8215a09 Extracting [============================>                      ]  4.719MB/8.204MB
+ 1a59b8215a09 Extracting [============================================>      ]  7.274MB/8.204MB
+ 1a59b8215a09 Extracting [==================================================>]  8.204MB/8.204MB
+ 1a59b8215a09 Pull complete 
+ 93eeac19656f Extracting [=>                                                 ]  32.77kB/1.221MB
+ 93eeac19656f Extracting [==================================================>]  1.221MB/1.221MB
+ 93eeac19656f Pull complete 
+ 4f28b201a80c Extracting [==================================================>]     116B/116B
+ 4f28b201a80c Extracting [==================================================>]     116B/116B
+ 4f28b201a80c Pull complete 
+ 4e582dc1d360 Extracting [==================================================>]  3.143kB/3.143kB
+ 4e582dc1d360 Extracting [==================================================>]  3.143kB/3.143kB
+ 4e582dc1d360 Pull complete 
+ ab1e9043b37f Extracting [>                                                  ]  557.1kB/114MB
+ ab1e9043b37f Extracting [====>                                              ]  10.58MB/114MB
+ ab1e9043b37f Extracting [===========>                                       ]  25.62MB/114MB
+ ab1e9043b37f Extracting [===============>                                   ]  35.09MB/114MB
+ ab1e9043b37f Extracting [===================>                               ]  45.12MB/114MB
+ ab1e9043b37f Extracting [=========================>                         ]  58.49MB/114MB
+ ab1e9043b37f Extracting [===============================>                   ]  72.42MB/114MB
+ ab1e9043b37f Extracting [=================================>                 ]  76.87MB/114MB
+ ab1e9043b37f Extracting [====================================>              ]     83MB/114MB
+ ab1e9043b37f Extracting [======================================>            ]  87.46MB/114MB
+ ab1e9043b37f Extracting [========================================>          ]  93.03MB/114MB
+ ab1e9043b37f Extracting [===========================================>       ]  99.16MB/114MB
+ ab1e9043b37f Extracting [=============================================>     ]  103.1MB/114MB
+ ab1e9043b37f Extracting [==============================================>    ]    107MB/114MB
+ ab1e9043b37f Extracting [===============================================>   ]  109.2MB/114MB
+ ab1e9043b37f Extracting [================================================>  ]  110.9MB/114MB
+ ab1e9043b37f Extracting [=================================================> ]  112.5MB/114MB
+ ab1e9043b37f Extracting [==================================================>]    114MB/114MB
+ ab1e9043b37f Pull complete 
+ a3089dfdc569 Extracting [==================================================>]  19.42kB/19.42kB
+ a3089dfdc569 Extracting [==================================================>]  19.42kB/19.42kB
+ a3089dfdc569 Pull complete 
+ 521aece6b33d Extracting [==================================================>]     127B/127B
+ 521aece6b33d Extracting [==================================================>]     127B/127B
+ 521aece6b33d Pull complete 
+ bc5ea3235db8 Extracting [==================================================>]  6.108kB/6.108kB
+ bc5ea3235db8 Extracting [==================================================>]  6.108kB/6.108kB
+ bc5ea3235db8 Pull complete 
+ dc0e071a4d07 Extracting [==================================================>]     186B/186B
+ dc0e071a4d07 Extracting [==================================================>]     186B/186B
+ dc0e071a4d07 Pull complete 
+ postgres Pulled 
+ Network olp-go-image-7209-1396_default  Creating
+ Network olp-go-image-7209-1396_default  Created
+ Volume "olp-go-image-7209-1396_postgres-go"  Creating
+ Volume "olp-go-image-7209-1396_postgres-go"  Created
+ Volume "olp-go-image-7209-1396_valkey-go"  Creating
+ Volume "olp-go-image-7209-1396_valkey-go"  Created
+ Container olp-go-image-7209-1396-valkey-1  Creating
+ Container olp-go-image-7209-1396-postgres-1  Creating
+ Container olp-go-image-7209-1396-valkey-1  Created
+ Container olp-go-image-7209-1396-postgres-1  Created
+ Container olp-go-image-7209-1396-valkey-1  Starting
+ Container olp-go-image-7209-1396-postgres-1  Starting
+ Container olp-go-image-7209-1396-postgres-1  Started
+ Container olp-go-image-7209-1396-valkey-1  Started
+ Container olp-go-image-7209-1396-valkey-1  Waiting
+ Container olp-go-image-7209-1396-postgres-1  Waiting
+ Container olp-go-image-7209-1396-valkey-1  Healthy
+ Container olp-go-image-7209-1396-postgres-1  Healthy
+{"migration":"complete"}
+olp: readiness probe returned 503
+{"BlockIO":"0B / 0B","CPUPerc":"0.08%","Container":"olp-go-image-7209-1396-all","ID":"8ce0e5c02957","MemPerc":"0.47%","MemUsage":"75.03MiB / 15.57GiB","Name":"olp-go-image-7209-1396-all","NetIO":"28.6kB / 397kB","PIDs":"14"}
+qualified arm64 all: dependencies, private health, listener ownership, shutdown
+olp: readiness probe returned 503
+{"BlockIO":"0B / 0B","CPUPerc":"0.08%","Container":"olp-go-image-7209-1396-gateway","ID":"40b01d67e247","MemPerc":"0.06%","MemUsage":"9.047MiB / 15.57GiB","Name":"olp-go-image-7209-1396-gateway","NetIO":"15.9kB / 25.6kB","PIDs":"12"}
+qualified arm64 gateway: dependencies, private health, listener ownership, shutdown
+{"BlockIO":"0B / 0B","CPUPerc":"0.00%","Container":"olp-go-image-7209-1396-control","ID":"444c3968e3d9","MemPerc":"0.46%","MemUsage":"73.69MiB / 15.57GiB","Name":"olp-go-image-7209-1396-control","NetIO":"15kB / 362kB","PIDs":"12"}
+qualified arm64 control: dependencies, private health, listener ownership, shutdown
+{"BlockIO":"0B / 0B","CPUPerc":"0.06%","Container":"olp-go-image-7209-1396-worker","ID":"f945c753008a","MemPerc":"0.06%","MemUsage":"9.879MiB / 15.57GiB","Name":"olp-go-image-7209-1396-worker","NetIO":"22.8kB / 48.2kB","PIDs":"13"}
+qualified arm64 worker: dependencies, private health, listener ownership, shutdown
+{"Id":"sha256:1bc5c501cf8c55fb306cd5f004ab420a7b7811e7fc6bb5cdd212d245784f51bb","RepoTags":["olp-go:candidate"],"RepoDigests":[],"Parent":"","Comment":"buildkit.dockerfile.v0","Created":"2026-09-18T10:20:07.949815359Z","DockerVersion":"","Author":"","Config":{"Hostname":"","Domainname":"","User":"65532:65532","AttachStdin":false,"AttachStdout":false,"AttachStderr":false,"ExposedPorts":{"8080/tcp":{},"9090/tcp":{}},"Tty":false,"OpenStdin":false,"StdinOnce":false,"Env":["PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin","SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt","OLP_CONSOLE_DIR=/opt/olp/console","OLP_LISTEN_ADDR=0.0.0.0:8080","OLP_OBSERVABILITY_LISTEN_ADDR=0.0.0.0:9090"],"Cmd":["all"],"ArgsEscaped":true,"Image":"","Volumes":null,"WorkingDir":"/home/nonroot","Entrypoint":["/usr/local/bin/olp"],"OnBuild":null,"Labels":{"io.openllmproxy.fresh-install":"required-for-rust-replacement","io.openllmproxy.storage":"olp-go-v1","org.opencontainers.image.licenses":"AGPL-3.0-only","org.opencontainers.image.source":"https://github.com/tyk-swe/olp","org.opencontainers.image.title":"OpenLLMProxy","org.opencontainers.image.version":"3.0.0"},"StopSignal":"SIGTERM"},"Architecture":"arm64","Os":"linux","Size":83113034,"GraphDriver":{"Data":{"LowerDir":"/var/lib/docker/overlay2/m0zvkctwmpxx0tdx35zh8yx7f/diff:/var/lib/docker/overlay2/uiavituy9y4spcv107g4ke4x5/diff:/var/lib/docker/overlay2/p2blyx12er38a8pd1pyujifpg/diff:/var/lib/docker/overlay2/2w60uadqh6e1iy59ty8iku8h8/diff:/var/lib/docker/overlay2/43a5b0c47cbd6de8bd0144ab819e8d940592e21760c473d1b2e1c1963a5a3571/diff:/var/lib/docker/overlay2/9b5b25bec2ff897430dcb8abdc4cfc857c5c2bf94becf2afcb73d47917035ac5/diff:/var/lib/docker/overlay2/f99b040a8c94e6d17bb1655ce17e878deab47bc42770fc6630c94a9cc1c54f50/diff:/var/lib/docker/overlay2/2e0d283fa38208337544f3da54b99cde41b76d2f5a2b1d6800df06f635f91f5c/diff:/var/lib/docker/overlay2/6789e9c6186b36f3c46ea48d0a656c3e1e10851ff32e603150e26882f7495972/diff:/var/lib/docker/overlay2/d8fd2cc2eb13de1b264cafed394c43933256f3678c0a613ef55ef64d6221a1ed/diff:/var/lib/docker/overlay2/f61fcc485a5ba0f060a9fb6c8e7658a4d25fe4983b2fbb46767ceddfedf593aa/diff:/var/lib/docker/overlay2/d168fb1350f5a62adf528e500cd1969207d2d2d052d6d1e59abf628579cdb3ff/diff:/var/lib/docker/overlay2/0e7beea4e1fb87de9d9d2997d2e54c1dfebe5f72fefaae208a50c21296587420/diff:/var/lib/docker/overlay2/9904b2cb02a4adfceece54e7fa276bf51afb7b413137937b441b07d2633b495b/diff:/var/lib/docker/overlay2/ad41caedf5ca0f2f39ae3e20ac03a65b710e01f6f2b15e57fb16767b0aebe01d/diff:/var/lib/docker/overlay2/c3238f433564a6b6adfa46db83a5449cd032703f270d1470034ecb87a82526a2/diff:/var/lib/docker/overlay2/6f7aabf1a2d80d9cbd590e03f87def838ab2ac9f6f97ebd9939a473094ea859c/diff:/var/lib/docker/overlay2/6a4fcd36d56ef6c0878f501cfb5b0ae74234824e69780b8859c871774eb39450/diff:/var/lib/docker/overlay2/cb26ccb27d0a14ba8d74b44fd3768e470b744b6a38f7727ac6b3c8a91ae4d712/diff:/var/lib/docker/overlay2/6df334ce0766a13f701fdbd0a7d66f2760754b55302fdf1fb4959e0602d82803/diff:/var/lib/docker/overlay2/6f91b30801522e21287bb9f5b09aa018f6c6ff4d6780b20399dbde38a8699bef/diff:/var/lib/docker/overlay2/aa1e29d5e25872f09cf2a4a3da0e1a0237c3346ed79bd0b5ac4d944611544041/diff:/var/lib/docker/overlay2/910a8496d7972bf3535648c03e7dd37c44ce3b9c80980696337dd1685333bb33/diff:/var/lib/docker/overlay2/307edd20a9f9d9be6c5496b7550b5f4d753feed1df37c0717e648ce086092806/diff:/var/lib/docker/overlay2/85235df12ad387dbe848163528d2865b01e7b6f0f4923babdf1c99a55d6c765d/diff","MergedDir":"/var/lib/docker/overlay2/y4w8z7uraumk3ummknoua15ym/merged","UpperDir":"/var/lib/docker/overlay2/y4w8z7uraumk3ummknoua15ym/diff","WorkDir":"/var/lib/docker/overlay2/y4w8z7uraumk3ummknoua15ym/work"},"Name":"overlay2"},"RootFS":{"Type":"layers","Layers":["sha256:169cc3415d0f5be1ca6f533fd91057bb5c58d213161f4990c87fcb12d0bc251b","sha256:621c35e751a51a9a9dc3e80aa0b7fe8be2a93402ea6ccd307d30852cd7776cda","sha256:c8b007d0206e4b10ed4d3b3d99dfeab47c2648e82011989fd78a5731baf33fc3","sha256:bec7e6bb35e05d1284f28b10d2150c259717d91c658c4c10c08424bb9466caba","sha256:275a30dd8ce958b21daa9ad962c6fbc09f98306ee2f486b65c9075dc257b1412","sha256:4d049f83d9cf21d1f5cc0e11deaf36df02790d0e60c1a3829538fb4b61685368","sha256:af5aa97ebe6ce1604747ec1e21af7136ded391bcabe4acef882e718a87c86bcc","sha256:6f1cdceb6a3146f0ccb986521156bef8a422cdbb0863396f7f751f575ba308f4","sha256:bd3cdfae1d3fdd83a2231d608969b38b82349777c2fff9a7c12d54f8ac5c9b38","sha256:4cde6b0bb6f50a5f255eef7b2a42162c661cf776b803225dcac9a659e396bb6b","sha256:ad51d0769d16ba578106a177987dfe3d2e02c1668c852b795b2f6b024068242a","sha256:187cfc6d1e3e8a40a5e64653bcd3239c140807dcf1c09e48021178705a5a6139","sha256:f2392a9484bf6b18f06beaf705b994e31dbb2716c99cf7d03c9c495cd107f364","sha256:5c729492ffc6d588d59ee068eaa7910f2c76fd99a7fc21ccb6d408351f48d428","sha256:d5653c936aa120141ef21c40fbded7622368c620112e049806ef2fe7a0ee7cab","sha256:91213e6dc2fda431a0de4541602a933c7a48206a0bf487217fa681260fccdc23","sha256:7b57942929394e731b49e8f1863a4da2cbd1b9fda48d9f1e75a0a28b2d89d01a","sha256:7578331450f7cd6e1f6f28caf2ce9af93ea935a049132bb63ed523dcbda068e4","sha256:323c2be748e4417f7ab7b05b33d6c1a52df0788e779143555109ddcd5325c76c","sha256:fcb0c313318aac64dde0e0574b4df3394902929eb62d43e8b6c47ec4562f170d","sha256:30884b21b6a1362fbcdb60743280a138148b6d0ac50a3f8ee3e9f213b371c9e7","sha256:5b9b4c41dfe230dc16edf6b29c20a85662ad17c213eb5ff621e801290e5ccf16","sha256:94608497f655c9dd8db5ae9f22cdb8ab128715e298bc2440752e58abf0405ec8","sha256:8982cc006f97954847fc852b04d10c260e2005a3970384d01a584f7a5ee15c35","sha256:0c75b0333411738c08adb48547ace0b4f18bc1936c0f0bd32ccf43c20dcd4f35","sha256:4b3d1880a12fb8c9f04fe0baeb2c6c436729a3dca08a62074163b69f8790f86a"]},"Metadata":{"LastTagTime":"2026-09-18T10:20:08.078324713Z"}}
+ Container olp-go-image-7209-1396-postgres-1  Stopping
+ Container olp-go-image-7209-1396-valkey-1  Stopping
+ Container olp-go-image-7209-1396-valkey-1  Stopped
+ Container olp-go-image-7209-1396-valkey-1  Removing
+ Container olp-go-image-7209-1396-valkey-1  Removed
+ Container olp-go-image-7209-1396-postgres-1  Stopped
+ Container olp-go-image-7209-1396-postgres-1  Removing
+ Container olp-go-image-7209-1396-postgres-1  Removed
+ Volume olp-go-image-7209-1396_valkey-go  Removing
+ Volume olp-go-image-7209-1396_postgres-go  Removing
+ Network olp-go-image-7209-1396_default  Removing
+ Volume olp-go-image-7209-1396_postgres-go  Removed
+ Volume olp-go-image-7209-1396_valkey-go  Removed
+ Network olp-go-image-7209-1396_default  Removed

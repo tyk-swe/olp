@@ -1,0 +1,61 @@
+./scripts/api.sh
+✨ openapi-typescript 7.13.0
+🚀 ../openapi/management.json → src/lib/api/schema.d.ts [389.3ms]
+go vet ./...
+make test
+make[1]: Entering directory '/tmp/olp-build-tdBdEZ/source'
+go test ./...
+?   	github.com/tyk-swe/olp/cmd/olp	[no test files]
+ok  	github.com/tyk-swe/olp/internal/access	(cached)
+ok  	github.com/tyk-swe/olp/internal/config	(cached)
+ok  	github.com/tyk-swe/olp/internal/connectors	(cached)
+ok  	github.com/tyk-swe/olp/internal/console	(cached)
+?   	github.com/tyk-swe/olp/internal/coordination	[no test files]
+?   	github.com/tyk-swe/olp/internal/database	[no test files]
+ok  	github.com/tyk-swe/olp/internal/egress	(cached)
+ok  	github.com/tyk-swe/olp/internal/gateway	(cached)
+ok  	github.com/tyk-swe/olp/internal/limits	(cached)
+?   	github.com/tyk-swe/olp/internal/management	[no test files]
+ok  	github.com/tyk-swe/olp/internal/management/contract	(cached)
+ok  	github.com/tyk-swe/olp/internal/media	(cached)
+ok  	github.com/tyk-swe/olp/internal/observability	(cached)
+ok  	github.com/tyk-swe/olp/internal/process	(cached)
+ok  	github.com/tyk-swe/olp/internal/protocols	(cached)
+ok  	github.com/tyk-swe/olp/internal/protocols/openai	(cached)
+ok  	github.com/tyk-swe/olp/internal/protocols/sse	(cached)
+ok  	github.com/tyk-swe/olp/internal/providers	(cached)
+ok  	github.com/tyk-swe/olp/internal/routes	(cached)
+ok  	github.com/tyk-swe/olp/internal/runtime	(cached)
+ok  	github.com/tyk-swe/olp/internal/secrets	(cached)
+ok  	github.com/tyk-swe/olp/internal/telemetry	(cached)
+?   	github.com/tyk-swe/olp/internal/testutil	[no test files]
+ok  	github.com/tyk-swe/olp/internal/usage	(cached)
+?   	github.com/tyk-swe/olp/openapi	[no test files]
+?   	github.com/tyk-swe/olp/tests/fixtures	[no test files]
+?   	github.com/tyk-swe/olp/tests/sdkfixture	[no test files]
+make[1]: Leaving directory '/tmp/olp-build-tdBdEZ/source'
+pnpm --dir console verify
+Checking formatting...
+All matched files use Prettier code style!
+Loading svelte-check in workspace: /tmp/olp-build-tdBdEZ/source/console
+Getting Svelte diagnostics...
+
+svelte-check found 0 errors and 0 warnings
+
+ RUN  v5.0.0 /tmp/olp-build-tdBdEZ/source/console
+
+
+ Test Files  55 passed (55)
+      Tests  480 passed (480)
+   Start at  10:32:32
+   Duration  11.48s (transform 53%, environment 22%, import 13%, tests 11%, worker 1%)
+
+Environment  |client| jsdom was created 11 times · 14.36s total, 29% of tracked time
+             create it once per worker with pool: 'vmThreads' (keeps per-file isolation) or isolate: false (shares it across files)
+             learn more: https://vitest.dev/guide/improving-performance#test-environments
+
+$ openapi-typescript ../openapi/management.json -o src/lib/api/schema.d.ts
+$ pnpm format:check && pnpm check && pnpm test
+$ prettier --check .
+$ svelte-kit sync && svelte-check --tsconfig ./tsconfig.json && eslint .
+$ vitest run

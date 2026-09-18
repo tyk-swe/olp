@@ -1,0 +1,63 @@
+go mod download
+pnpm install --frozen-lockfile
+Scope: all 3 workspace projects
+✓ Lockfile passes supply-chain policies (verified 56m ago)
+Lockfile is up to date, resolution step is skipped
+Progress: resolved 1, reused 0, downloaded 0, added 0
+Packages: +300
+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+Packages are hard linked from the content-addressable store to the virtual store.
+  Content-addressable store is at: /tmp/.pnpm-store/v11
+  Virtual store is at:             node_modules/.pnpm
+Progress: resolved 300, reused 300, downloaded 0, added 300, done
+
+Done in 1.5s using pnpm v11.24.0
+make api
+make[1]: Entering directory '/tmp/olp-m7-checkout.1qhMdi93'
+./scripts/api.sh
+$ openapi-typescript ../openapi/management.json -o src/lib/api/schema.d.ts
+✨ openapi-typescript 7.13.0
+🚀 ../openapi/management.json → src/lib/api/schema.d.ts [365.9ms]
+make[1]: Leaving directory '/tmp/olp-m7-checkout.1qhMdi93'
+Using CPython 3.14.4 interpreter at: /usr/bin/python3
+Creating virtual environment at: tests/sdk-smoke-python/.venv
+warning: Failed to hardlink files; falling back to full copy. This may lead to degraded performance.
+         If the cache and target directories are on different filesystems, hardlinking may not be supported.
+         If this is intentional, set `export UV_LINK_MODE=copy` or use `--link-mode=copy` to suppress this warning.
+Installed 32 packages in 510ms
+ + annotated-types==0.8.0
+ + anthropic==1.4.0
+ + anyio==4.15.1
+ + certifi==2026.7.22
+ + cffi==2.1.1
+ + charset-normalizer==3.5.1
+ + cryptography==50.0.1
+ + distro==1.9.0
+ + docstring-parser==0.18.0
+ + google-auth==2.57.1
+ + google-genai==2.22.0
+ + h11==0.16.0
+ + httpcore==1.0.9
+ + httpcore2==2.12.0
+ + httpx==0.28.1
+ + httpx2==2.12.0
+ + idna==3.19
+ + jiter==0.16.0
+ + openai==3.8.0
+ + pyasn1==0.6.4
+ + pyasn1-modules==0.4.2
+ + pycparser==3.0
+ + pydantic==2.13.5
+ + pydantic-core==2.46.5
+ + requests==2.34.2
+ + sniffio==1.3.1
+ + tenacity==9.1.4
+ + truststore==0.10.4
+ + typing-extensions==4.16.0
+ + typing-inspection==0.4.4
+ + urllib3==2.7.0
+ + websockets==16.1.1
+Direct use of automatic function calling (AFC) in Models.generate_content is not recommended. Instead, we recommend to use AFC in Chat.send_message. Similarly, direct use of AFC in Models.generate_content_stream is not recommended. Instead, we recommend to use AFC in Chat.send_message_stream.
+Official Python OpenAI, Anthropic, and Google GenAI SDK contracts passed.
+Successfully packaged chart and saved it to: /home/ubuntu/code/olp/1/olp/.local/release-artifacts/openllmproxy-3.0.0.tgz
+Fresh candidate checkout: setup, Vite proxy, private liveness, embedded version and chart package passed.

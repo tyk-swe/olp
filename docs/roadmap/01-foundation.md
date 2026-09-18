@@ -2,7 +2,9 @@
 
 [Roadmap](README.md) | [Next: access and control](02-access-and-control.md)
 
-**Status:** Implemented; native arm64 qualification pending. **Prerequisites:** None.
+**Status:** Complete (2026-09-18). **Prerequisites:** None.
+
+[Final qualification and native evidence](evidence/release-qualification.md).
 
 [Implementation and decisions](evidence/foundation.md) ·
 [Validation and measurements](evidence/validation.md) ·
@@ -96,11 +98,11 @@ deadline. Unimplemented commands return an explicit error.
 
 ### M1-05
 
-- [ ] **Qualify PostgreSQL and GLIDE integration.**
+- [x] **Qualify PostgreSQL and GLIDE integration.**
 
-Implemented and qualified on native amd64, including TLS and repeated
-cancel/close regression checks under the race detector. Native arm64 build/link
-execution remains pending in the [architecture job](../../.github/workflows/go-foundation.yml).
+PostgreSQL/GLIDE TLS, cancellation and recovery pass in the final service suite.
+Both native architectures build/link and execute all four modes; see the
+[release qualification](evidence/release-qualification.md#verification).
 
 **Depends on:** [M1-03](#m1-03), [M1-04](#m1-04).
 
@@ -169,6 +171,8 @@ own milestones; a fixture scaffold alone does not count as protocol parity.
 
 ### M1-08
 
+The foundation targets below were superseded by canonical `make` commands in M7.
+
 - [x] **Provide a complete Go development workflow.**
 
 **Depends on:** [M1-04](#m1-04), [M1-06](#m1-06), [M1-07](#m1-07).
@@ -189,11 +193,11 @@ fast; service and browser suites have explicit integration entrypoints.
 
 ### M1-09
 
-- [ ] **Build and smoke-test the first native Go images.**
+- [x] **Build and smoke-test the first native Go images.**
 
-The native amd64 candidate passes all four mode checks without a Rust toolchain.
-Both native CI runners are configured; this workspace cannot execute the arm64
-job. This ticket and the milestone remain open until its build/smoke artifact passes.
+Both native architecture jobs pass build, four-mode service smoke, and packaged
+browser/restore qualification without a Rust toolchain. See the
+[exact candidate and logs](evidence/release-candidate.json).
 
 **Depends on:** [M1-02](#m1-02), [M1-05](#m1-05), [M1-08](#m1-08).
 

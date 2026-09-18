@@ -3,8 +3,9 @@
 [Roadmap](README.md) | [Previous: core gateway](03-core-gateway.md) |
 [Next: providers and routing](05-provider-and-routing-parity.md)
 
-**Status:** Implemented and qualified on Linux amd64. **Prerequisites:** M3
-complete.
+**Status:** Complete (2026-09-18). **Prerequisites:** M3 complete.
+
+[Final qualification and native evidence](evidence/release-qualification.md).
 
 [M4 evidence](evidence/limits-and-accounting.md) |
 [Operations guide](../go-gateway.md)
@@ -16,15 +17,10 @@ owns durable facts and spend; GLIDE connects to Valkey for coordination.
 Every ticket below is implemented under `internal/limits/`, `internal/usage/`,
 and the gateway, access, and process packages, with unit, integration,
 multi-process, and browser qualification recorded in the evidence document.
-The milestone adds no third-party dependency: `go.mod` and `go.sum` are
-unchanged. It inherits the open M1 native arm64 qualification gate.
-
-Two limitations are recorded rather than closed. `olp_limits_fail_open_total`
-is counted in process but not exported: the Prometheus surface arrives with
-[M6](06-media-and-console-parity.md), so the fail-open criterion of
-[M4-01](#m4-01) is met in behaviour and not yet in telemetry. The two TLS
-integration tests still need the container service stack and were skipped in
-the local qualification run, unchanged from M3.
+M4 added no third-party dependency. M7 closes the native arm64 gate and
+qualifies the complete dependency graph. The formerly deferred
+`olp_limits_fail_open_total` counter is now exported by M6 observability, and
+both PostgreSQL and Valkey TLS tests pass in the final service run.
 
 ## Backlog
 

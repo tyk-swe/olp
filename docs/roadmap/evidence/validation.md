@@ -2,7 +2,7 @@
 
 Recorded on 2026-09-13, Linux amd64. The implementation is complete; M1 remains
 open for **native arm64 execution**. This workspace has no native arm64 runner.
-The [native CI matrix](../../../.github/workflows/go-foundation.yml) builds and
+The [native CI matrix](../../../.github/workflows/ci.yml) builds and
 smokes both architectures; its arm64 artifact must pass before M1-05/M1-09 close.
 Emulation is explicitly rejected by the image qualification script.
 

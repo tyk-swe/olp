@@ -1,0 +1,113 @@
+{
+  "language": "go",
+  "scenario": "api",
+  "ref": "ccd138f",
+  "started": "2026-09-18T10:25:44.070Z",
+  "machine": {
+    "platform": "linux",
+    "release": "7.0.0-31-generic",
+    "arch": "x64",
+    "cpu": "Intel Core Processor (Haswell, no TSX)",
+    "logicalCPUs": 8,
+    "memoryBytes": 24598122496,
+    "freeMemoryBytes": 22587392000
+  },
+  "cache": {
+    "downloads": "prefetched; measured separately",
+    "compilation": "private cache populated by explicit warmup",
+    "sharedOSPageCache": true
+  },
+  "runs": [
+    {
+      "command": [
+        "make",
+        "api"
+      ],
+      "seconds": 2.303881034000002,
+      "status": 0,
+      "log": "release-build-logs/api/run-1.log"
+    },
+    {
+      "command": [
+        "make",
+        "api"
+      ],
+      "seconds": 2.360511203000002,
+      "status": 0,
+      "log": "release-build-logs/api/run-2.log"
+    },
+    {
+      "command": [
+        "make",
+        "api"
+      ],
+      "seconds": 2.1830032920000013,
+      "status": 0,
+      "log": "release-build-logs/api/run-3.log"
+    },
+    {
+      "command": [
+        "make",
+        "api"
+      ],
+      "seconds": 2.361408043999996,
+      "status": 0,
+      "log": "release-build-logs/api/run-4.log"
+    },
+    {
+      "command": [
+        "make",
+        "api"
+      ],
+      "seconds": 2.2464261729999997,
+      "status": 0,
+      "log": "release-build-logs/api/run-5.log"
+    }
+  ],
+  "commit": "ccd138f288a99f66a2bb1145eb75d5ce57398416",
+  "toolchains": {
+    "go": "go version go1.27.1 linux/amd64",
+    "cc": "cc (Ubuntu 15.2.0-16ubuntu1) 15.2.0\nCopyright (C) 2025 Free Software Foundation, Inc.\nThis is free software; see the source for copying conditions.  There is NO\nwarranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.",
+    "node": "v26.8.2",
+    "pnpm": "11.24.0"
+  },
+  "prefetch": {
+    "command": [
+      "go",
+      "mod",
+      "download"
+    ],
+    "seconds": 0.03392860099999996,
+    "status": 0,
+    "stdout": "",
+    "stderr": ""
+  },
+  "consolePrefetch": {
+    "command": [
+      "pnpm",
+      "install",
+      "--frozen-lockfile"
+    ],
+    "seconds": 3.0858076429999994,
+    "status": 0,
+    "stdout": "Scope: all 3 workspace projects\n\u2713 Lockfile passes supply-chain policies (verified 38m ago)\nLockfile is up to date, resolution step is skipped\nProgress: resolved 1, reused 0, downloaded 0, added 0\nPackages: +300\n++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++\nPackages are hard linked from the content-addressable store to the virtual store.\n  Content-addressable store is at: /tmp/.pnpm-store/v11\n  Virtual store is at:             node_modules/.pnpm\nProgress: resolved 300, reused 0, downloaded 61, added 4\nProgress: resolved 300, reused 0, downloaded 300, added 300, done\n\nDone in 2.9s using pnpm v11.24.0\n",
+    "stderr": ""
+  },
+  "warmup": {
+    "command": [
+      "make",
+      "api"
+    ],
+    "seconds": 20.971987445000003,
+    "status": 0,
+    "stdout": "./scripts/api.sh\n\u2728 openapi-typescript 7.13.0\n\ud83d\ude80 ../openapi/management.json \u2192 src/lib/api/schema.d.ts [422.5ms]\n",
+    "stderr": "$ openapi-typescript ../openapi/management.json -o src/lib/api/schema.d.ts\n"
+  },
+  "summary": {
+    "successfulRuns": 5,
+    "medianSeconds": 2.303881034000002,
+    "minSeconds": 2.1830032920000013,
+    "maxSeconds": 2.361408043999996
+  },
+  "finished": "2026-09-18T10:26:21.820Z"
+}

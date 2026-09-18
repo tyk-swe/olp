@@ -87,11 +87,16 @@ const data = {
     freeMemoryBytes: freemem()
   },
   cache: {
-    downloads: 'prefetched; measured separately',
+    downloads:
+      scenario === 'image'
+        ? 'host metadata prefetched separately; downloads inside Docker included'
+        : 'prefetched; measured separately',
     compilation:
       scenario === 'backend-clean'
         ? 'empty private cache for every run'
-        : 'private cache populated by explicit warmup',
+        : scenario === 'image'
+          ? 'Docker layer reuse disabled; explicit BuildKit Go cache mount retained'
+          : 'private cache populated by explicit warmup',
     sharedOSPageCache: true
   },
   runs: []

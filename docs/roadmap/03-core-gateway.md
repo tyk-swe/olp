@@ -3,8 +3,9 @@
 [Roadmap](README.md) | [Previous: access and control](02-access-and-control.md) |
 [Next: limits and accounting](04-limits-and-accounting.md)
 
-**Status:** Implemented and qualified on Linux amd64. **Prerequisites:** M2
-complete.
+**Status:** Complete (2026-09-18). **Prerequisites:** M2 complete.
+
+[Final qualification and native evidence](evidence/release-qualification.md).
 
 [M3 evidence and screenshots](evidence/core-gateway.md) |
 [Operations guide](../go-gateway.md)
@@ -15,9 +16,8 @@ Distributed quotas and durable accounting complete in M4.
 
 Every ticket below is implemented under `internal/` with unit, integration,
 SDK, and browser qualification recorded in the evidence document. The
-milestone inherits the open M1 native arm64 qualification gate. Routing
-policies, non-OpenAI surfaces, and other provider kinds remain M5 work and
-are reported as unavailable rather than partially served.
+native arm64 gate is closed by M7. Routing policies, non-OpenAI surfaces and
+other provider kinds were subsequently completed and qualified in M5.
 
 ## Backlog
 

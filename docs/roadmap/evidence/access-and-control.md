@@ -143,7 +143,7 @@ The [service suite](../../../tests/integration/) and
 complete installation-to-member flow, successful and denied access, competing
 mutations, callback replay, secret rotation, populated migration, profile/session
 changes, role-aware controls, and audit. The
-[Go integration driver](../../../scripts/go-integration.sh) provisions disposable
+[Go integration driver](../../../scripts/integration.sh) provisions disposable
 TLS services, private secrets, separate browser databases, the production binary,
 and the explicitly tagged identity-test binary without compiling Rust.
 

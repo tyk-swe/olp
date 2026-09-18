@@ -111,10 +111,10 @@ fail during startup before a listener is bound; database-managed credentials req
 
 | Variable | Required by | Purpose |
 |---|---|---|
-| `OLP_MASTER_KEY_FILE` | `all`, `control`, a `gateway` loading database-encrypted credentials, `doctor`, `master-key` | Versioned envelope-encryption keyring. |
-| `OLP_AUTH_HMAC_KEY_FILE` | `all`, `gateway`, `control`, `doctor` | Session and authentication HMAC key. |
+| `OLP_MASTER_KEY_FILE` | `all`, `control`, `worker`, a `gateway` loading database-encrypted credentials, `doctor`, `master-key` | Versioned envelope-encryption keyring. |
+| `OLP_AUTH_HMAC_KEY_FILE` | `all`, `gateway`, `control`, `worker`, `doctor`, `master-key` | Session and authentication HMAC key. |
 | `OLP_BOOTSTRAP_TOKEN_FILE` | first `all` or `control` run | One-time owner-setup token. |
-| `OLP_OTLP_HEADERS_FILE` | traced `all`, `gateway`, or `control` | Optional JSON object of OTLP exporter headers. |
+| `OLP_OTLP_HEADERS_FILE` | traced `all`, `gateway`, `control`, or `worker` | Optional JSON object of OTLP exporter headers. |
 
 Generate and rotate these through
 [`deploy/secrets/README.md`](../deploy/secrets/README.md). Preserve the HMAC key

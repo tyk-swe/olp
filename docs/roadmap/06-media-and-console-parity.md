@@ -3,7 +3,9 @@
 [Roadmap](README.md) | [Previous: providers and routing](05-provider-and-routing-parity.md) |
 [Next: release and Rust retirement](07-release-and-rust-retirement.md)
 
-**Status:** In progress; implementation complete, media failure-path qualification (M6-09) and product evidence underway. **Prerequisites:** M5 complete.
+**Status:** Complete (2026-09-18). **Prerequisites:** M5 complete.
+
+[Final qualification and native evidence](evidence/release-qualification.md).
 
 Complete current product capabilities with bounded image/audio operations,
 durable video jobs, operational diagnostics, and the remaining console
@@ -183,7 +185,11 @@ session transitions pass the retained checks. Record screenshots for visible cha
 
 ### M6-09
 
-- [ ] **Qualify media failure paths and complete product evidence.**
+- [x] **Qualify media failure paths and complete product evidence.**
+
+**Evidence:** [Final service/browser and resource qualification](evidence/release-qualification.md#recovery-and-process-behavior),
+[measurements](evidence/release-media-capacity.json), and
+[retained-media screenshots](evidence/release-qualification.md#verification).
 
 **Depends on:** [M6-08](#m6-08).
 

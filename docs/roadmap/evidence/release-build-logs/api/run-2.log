@@ -1,0 +1,4 @@
+./scripts/api.sh
+✨ openapi-typescript 7.13.0
+🚀 ../openapi/management.json → src/lib/api/schema.d.ts [374.7ms]
+$ openapi-typescript ../openapi/management.json -o src/lib/api/schema.d.ts

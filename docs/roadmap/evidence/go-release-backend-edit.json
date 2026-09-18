@@ -1,8 +1,8 @@
 {
   "language": "go",
   "scenario": "backend-edit",
-  "ref": "working",
-  "started": "2026-09-18T09:13:35.726Z",
+  "ref": "ccd138f",
+  "started": "2026-09-18T10:24:04.039Z",
   "machine": {
     "platform": "linux",
     "release": "7.0.0-31-generic",
@@ -10,7 +10,7 @@
     "cpu": "Intel Core Processor (Haswell, no TSX)",
     "logicalCPUs": 8,
     "memoryBytes": 24598122496,
-    "freeMemoryBytes": 22767210496
+    "freeMemoryBytes": 22701015040
   },
   "cache": {
     "downloads": "prefetched; measured separately",
@@ -24,12 +24,12 @@
         "build",
         "-trimpath",
         "-o",
-        "/tmp/olp-build-jfqviB/olp",
+        "/tmp/olp-build-E293bS/olp",
         "./cmd/olp"
       ],
-      "seconds": 5.942032295999997,
+      "seconds": 5.7907768580000045,
       "status": 0,
-      "log": "run-1.log"
+      "log": "release-build-logs/backend-edit/run-1.log"
     },
     {
       "command": [
@@ -37,12 +37,12 @@
         "build",
         "-trimpath",
         "-o",
-        "/tmp/olp-build-jfqviB/olp",
+        "/tmp/olp-build-E293bS/olp",
         "./cmd/olp"
       ],
-      "seconds": 5.982144351000002,
+      "seconds": 5.799194663000002,
       "status": 0,
-      "log": "run-2.log"
+      "log": "release-build-logs/backend-edit/run-2.log"
     },
     {
       "command": [
@@ -50,12 +50,12 @@
         "build",
         "-trimpath",
         "-o",
-        "/tmp/olp-build-jfqviB/olp",
+        "/tmp/olp-build-E293bS/olp",
         "./cmd/olp"
       ],
-      "seconds": 5.877222273999999,
+      "seconds": 5.553056292999994,
       "status": 0,
-      "log": "run-3.log"
+      "log": "release-build-logs/backend-edit/run-3.log"
     },
     {
       "command": [
@@ -63,12 +63,12 @@
         "build",
         "-trimpath",
         "-o",
-        "/tmp/olp-build-jfqviB/olp",
+        "/tmp/olp-build-E293bS/olp",
         "./cmd/olp"
       ],
-      "seconds": 6.365009476999999,
+      "seconds": 5.678514614,
       "status": 0,
-      "log": "run-4.log"
+      "log": "release-build-logs/backend-edit/run-4.log"
     },
     {
       "command": [
@@ -76,16 +76,15 @@
         "build",
         "-trimpath",
         "-o",
-        "/tmp/olp-build-jfqviB/olp",
+        "/tmp/olp-build-E293bS/olp",
         "./cmd/olp"
       ],
-      "seconds": 6.176905999999988,
+      "seconds": 5.932784488999998,
       "status": 0,
-      "log": "run-5.log"
+      "log": "release-build-logs/backend-edit/run-5.log"
     }
   ],
-  "sourceSHA256": "c203d7b96452d64367f7a7076e4988e95c7e6aa81b853c8451ddb784a5299a2f",
-  "baseCommit": "da48f2a958a13d2250d6c910ce792bb7e8031d29",
+  "commit": "ccd138f288a99f66a2bb1145eb75d5ce57398416",
   "toolchains": {
     "go": "go version go1.27.1 linux/amd64",
     "cc": "cc (Ubuntu 15.2.0-16ubuntu1) 15.2.0\nCopyright (C) 2025 Free Software Foundation, Inc.\nThis is free software; see the source for copying conditions.  There is NO\nwarranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.",
@@ -98,7 +97,7 @@
       "mod",
       "download"
     ],
-    "seconds": 0.037676122000000076,
+    "seconds": 0.024827039999999898,
     "status": 0,
     "stdout": "",
     "stderr": ""
@@ -109,10 +108,10 @@
       "build",
       "-trimpath",
       "-o",
-      "/tmp/olp-build-jfqviB/olp",
+      "/tmp/olp-build-E293bS/olp",
       "./cmd/olp"
     ],
-    "seconds": 49.622388005,
+    "seconds": 47.198283715,
     "status": 0,
     "stdout": "",
     "stderr": ""
@@ -123,9 +122,9 @@
   },
   "summary": {
     "successfulRuns": 5,
-    "medianSeconds": 5.982144351000002,
-    "minSeconds": 5.877222273999999,
-    "maxSeconds": 6.365009476999999
+    "medianSeconds": 5.7907768580000045,
+    "minSeconds": 5.553056292999994,
+    "maxSeconds": 5.932784488999998
   },
-  "finished": "2026-09-18T09:14:58.125Z"
+  "finished": "2026-09-18T10:25:22.368Z"
 }

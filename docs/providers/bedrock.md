@@ -1,10 +1,10 @@
 # Amazon Bedrock connector
 
-The Bedrock provider uses the official AWS SDK for Rust: Bedrock
-Runtime for `Converse`, `ConverseStream`, and `CountTokens`, and the
-control-plane client for foundation-model discovery. The SDK owns SigV4,
-credential resolution, and event framing; model IDs and supported ARNs pass
-through unchanged.
+The Bedrock provider uses AWS SDK for Go v2 credential providers, SigV4 signing,
+partition-aware endpoint resolution and event-stream decoding. Native
+`Converse`, `ConverseStream`, `CountTokens` and foundation-model discovery use
+OLP's bounded HTTP transport. Model IDs and supported ARNs pass through
+unchanged.
 
 ## Authentication
 
@@ -13,26 +13,31 @@ through unchanged.
 | `default_chain` | AWS environment, profile, web identity, ECS, or EC2 providers |
 | `static` | JSON `access_key_id`, `secret_access_key`, optional `session_token` |
 
-SDK retries are disabled so inference owns retry/failover policy. Streaming
+OLP owns retry/failover policy; the connector does not create an SDK inference
+client with a separate retry loop. Streaming
 calls enforce setup, overall, and event-idle deadlines; unary calls use the
-attempt deadline and SDK connection/socket-read timeouts. Error mapping treats
+attempt deadline and bounded HTTP connection/response timeouts. Error mapping treats
 malformed bodies and missing error codes as provider failures rather than
 successful empty responses.
 
 ## Testing
 
-Run the focused Cargo filter or the full gate from the repository root:
+Run focused protocol/connector tests or the complete local suite:
 
 ```sh
-cargo test --locked --all-features bedrock
+go test ./internal/connectors ./internal/protocols -run Bedrock
 make test
 ```
 
-Ignored live tests use the default AWS credential chain:
+Opt-in paid live qualification uses the default AWS credential chain:
 
 ```sh
+OLP_LIVE_PROVIDER=bedrock \
 OLP_BEDROCK_LIVE_REGION=us-east-1 \
 OLP_BEDROCK_LIVE_MODEL=amazon.nova-micro-v1:0 \
-cargo test --locked --all-features --lib \
-  providers::bedrock::transport::tests::live_provider -- --ignored
+go test -tags=liveproviders -count=1 -timeout=2m ./internal/connectors \
+  -run TestLiveProviderNativeGeneration
 ```
+
+The manual `live-providers` workflow runs the same credential-scoped Go test.
+Deterministic protocol, routing and SigV4 checks remain in ordinary qualification.

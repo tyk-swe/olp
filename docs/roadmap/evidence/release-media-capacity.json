@@ -10,5 +10,19 @@
   "held_rss_kib": 52824,
   "held_open_fds": 8,
   "seconds": 0.45030206,
-  "meaning": "Observed Go heap/RSS and file reservations at the held-upload checkpoint, not a process or cgroup peak. Disk page cache and tmpfs memory are not included in process RSS. No production SLO is inferred."
+  "meaning": "Observed Go heap/RSS and file reservations at the held-upload checkpoint, not a process or cgroup peak. Disk page cache and tmpfs memory are not included in process RSS. No production SLO is inferred.",
+  "final_source_ci_observation": {
+    "source_commit": "ccd138f",
+    "run": "https://github.com/tyk-swe/olp/actions/runs/35334054213",
+    "capacity_bytes": 1073741824,
+    "concurrency": 8,
+    "elapsed_seconds": 1.105476578,
+    "fds_held": 10,
+    "final_reserved_bytes": 0,
+    "heap_before": 2944032,
+    "heap_held": 3044296,
+    "held_bytes": 536870912,
+    "resident_held": "67008 kB",
+    "upload_bytes": 67108864
+  }
 }

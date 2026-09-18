@@ -1,13 +1,11 @@
 # Go + SvelteKit rewrite roadmap
 
-OLP will replace its Rust gateway with Go to reduce compile time and dependency
-maintenance. The project has zero users, so the rewrite can start with fresh
-storage and change management contracts without building migration adapters.
-All current product capabilities must be restored by milestone 7. The existing
-SvelteKit console will be reused and simplified as each backend feature lands.
-
-This directory is the implementation backlog. Ticket status and linked
-qualification evidence record progress; a milestone closes only after its gates pass.
+OLP has replaced its Rust gateway with Go and retained the SvelteKit console.
+All seven milestones are complete. [Final release qualification](evidence/release-qualification.md)
+records the exact source/candidate, both native architectures, recovery and SDK/
+browser evidence, dependency scans, and five-sample build results. Rust storage
+is incompatible; Go deployments start with fresh storage. This directory retains
+the original ticket IDs, acceptance criteria and historical milestone evidence.
 
 ## Decisions
 
@@ -37,13 +35,13 @@ initial packaging choice. [GLIDE Go documentation](https://github.com/valkey-io/
 
 | ID | Milestone | Required predecessor | Status |
 | --- | --- | --- | --- |
-| M1 | [Go foundation and build economics](01-foundation.md) | None | Implemented; native arm64 qualification pending |
-| M2 | [Installation, identity, and management](02-access-and-control.md) | M1 | Implemented and qualified on amd64; inherits open M1 arm64 gate |
-| M3 | [Complete OpenAI request path](03-core-gateway.md) | M2 | Implemented and qualified on amd64; inherits open M1 arm64 gate |
-| M4 | [Distributed limits, pricing, and recovery](04-limits-and-accounting.md) | M3 | Implemented and qualified on amd64; inherits open M1 arm64 gate |
-| M5 | [Remaining protocols, providers, and routing](05-provider-and-routing-parity.md) | M4 | Implemented and qualified on amd64; inherits open M1 arm64 gate |
-| M6 | [Media and operational completeness](06-media-and-console-parity.md) | M5 | In progress; implementation complete, media qualification (M6-09) underway |
-| M7 | [Release qualification and Rust retirement](07-release-and-rust-retirement.md) | M6 | Not started |
+| M1 | [Go foundation and build economics](01-foundation.md) | None | Complete; [final evidence](evidence/release-qualification.md) |
+| M2 | [Installation, identity, and management](02-access-and-control.md) | M1 | Complete; [final evidence](evidence/release-qualification.md) |
+| M3 | [Complete OpenAI request path](03-core-gateway.md) | M2 | Complete; [final evidence](evidence/release-qualification.md) |
+| M4 | [Distributed limits, pricing, and recovery](04-limits-and-accounting.md) | M3 | Complete; [final evidence](evidence/release-qualification.md) |
+| M5 | [Remaining protocols, providers, and routing](05-provider-and-routing-parity.md) | M4 | Complete; [final evidence](evidence/release-qualification.md) |
+| M6 | [Media and operational completeness](06-media-and-console-parity.md) | M5 | Complete; [final evidence](evidence/release-qualification.md) |
+| M7 | [Release qualification and Rust retirement](07-release-and-rust-retirement.md) | M6 | Complete; [final evidence](evidence/release-qualification.md) |
 
 M3 provides the first usable Go inference path. M4 supplies the accounting and
 measurements that advanced routing needs in M5. M6 completes product parity;
@@ -72,10 +70,9 @@ M7 converts links to retired files into links to that revision. The existing
 [architecture map](../architecture.md), [compatibility tables](../compatibility.md),
 and [behavioral suites](../../tests/README.md) are the starting inventory.
 
-Temporary `make go-*` commands will isolate rewrite work from Cargo starting in
-M1. Rust may be run explicitly for baseline measurements or differential
-investigation. M7 replaces the canonical Make targets with the Go workflows.
-The Rust reference and the Go application never share a writable installation.
+Canonical `make setup/dev/check/test/integration/api/build/fmt` commands use Go.
+Rust sources are retained only through the frozen reference; the two storage
+formats must never share a writable installation.
 
 ## Capability ownership
 
@@ -104,57 +101,51 @@ compatibility tables remain the operation/provider support matrix.
 | [Anthropic/Gemini surfaces, translations, token counting, embeddings, and moderation](../compatibility.md) | M5 |
 | [Azure, Vertex, Bedrock, and compatible-vendor profiles](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/providers) | M5 |
 | [Custom endpoints/auth, mounted connectors, model facts, bulk workflows, policies, and routing preferences](../provider-routing.md) | M5 |
-| [Images, audio, uploads, video jobs, historical credentials, and reconciliation](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/media) | M6 implemented as [`internal/media/`](../../internal/media/) and the gateway media handlers; failure-path qualification remains in M6-09 |
+| [Images, audio, uploads, video jobs, historical credentials, and reconciliation](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/media) | M6 implemented as [`internal/media/`](../../internal/media/) and the gateway media handlers; M6-09 failure/resource/browser qualification is complete |
 | [Metrics, optional OTLP tracing, health, and worker diagnostics](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/observability) | M1/M3 foundations; M6 implemented as [`internal/observability/`](../../internal/observability/) and [`internal/telemetry/`](../../internal/telemetry/) |
 | [Console access/settings](../../console/src/lib/features/access/), [providers](../../console/src/lib/features/providers/), [routes](../../console/src/lib/features/routes/), and [playground](../../console/src/lib/features/inference/) | M2 and M3 implemented; [Go code and qualification](evidence/core-gateway.md); M5 alongside its APIs |
 | [Console usage/history](../../console/src/lib/features/usage/), [media](../../console/src/lib/features/media/), [overview](../../console/src/lib/features/overview/), and [health](../../console/src/lib/features/runtime/) | Usage, history, budgets, and overview implemented in M4; [Go code and qualification](evidence/limits-and-accounting.md); media and health implemented in M6 |
-| [Compose/Helm](../../deploy/), [backup/restore and qualification scripts](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/scripts), [CI/releases](../../.github/workflows/), and [operations](../operations.md) | M7 |
+| [Compose/Helm](../../deploy/), [backup/restore and qualification scripts](../../scripts/), [CI/releases](../../.github/workflows/), and [operations](../operations.md) | M7 |
 
 ## Build and dependency scorecard
 
-The [M1 measurement record](evidence/validation.md) contains timing samples,
-commands, machine/cache details, and native build evidence. Dependency counts
-below come from the frozen source.
-There are 50 direct production dependencies in [Cargo.toml](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/Cargo.toml) and 467 resolved
-package entries in [Cargo.lock](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/Cargo.lock); the latter includes transitive and development
-dependencies. API generation currently compiles the Rust exporter through
-`make api`. [Build commands](../../Makefile), [manifest](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/Cargo.toml),
-[lockfile](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/Cargo.lock)
+The [complete M7 scorecard](evidence/release-build-scorecard.json) records five
+successful measurements of source `ccd138f` on the same runner class/cache
+procedure as the frozen Rust baseline. These are full-application measurements.
 
-| Measurement | Rust baseline | Go completion target or evidence |
+| Measurement | Frozen Rust median (range), seconds | Go M7 median (range), seconds |
 | --- | --- | --- |
-| Clean backend development build | 228.062 s median (226.766–234.552) | M1: 28.778 s (28.181–30.886); full-capability M7 target remains at most 50% of Rust |
-| Rebuild after a small backend implementation edit | 21.121 s median (20.086–21.916) | M1: 4.145 s (4.025–4.232); full-capability M7 target remains at most 50% of Rust |
-| Targeted behavioral test | Unmeasured | M1 SSE: 0.642 s median (0.635–0.680), including startup/link checks |
-| API contract generation | Unmeasured; invokes Cargo | M1: 3.749 s median (3.216–5.510); no gateway compilation, services, or Rust |
-| Console build, complete checks, integration, and release image build | Unmeasured | Record separately so backend gains do not conceal shifted work |
-| Direct production dependency inventory | 50 Rust crates | M2: eight production library requirements plus one test requirement; 14 external modules imported by the executable; [purposes and impact](evidence/access-and-control.md#dependencies). M3 and M4 added none: distributed limits, pricing, accounting, ingestion, and retention use the standard library, pgx, and the existing GLIDE client, and `go.mod` is unchanged |
-| Transitive and development inventory | 467 resolved Cargo package entries in total | M2: [134 resolved external Go modules, including test/tool graphs](evidence/access-dependencies.json); [unchanged GLIDE native inventory](evidence/dependencies.json) |
-| Native dependencies and artifact size | Unmeasured | M2 amd64 image: 93,278,120 bytes; [qualification](evidence/access-and-control.md#validation); [GLIDE, glibc and licenses](evidence/validation.md) |
-| Ordinary development requires a Rust compiler | Yes | No |
+| Clean backend build | 228.062 (226.766–234.552) | 46.214 (43.621–49.054) |
+| Actual implementation edit rebuild | 21.121 (20.086–21.916) | 5.791 (5.553–5.933) |
+| Uncached targeted SSE test | Unmeasured | 0.682 (0.660–0.787) |
+| API generation | Unmeasured | 2.304 (2.183–2.361) |
+| Console build | Unmeasured | 10.583 (10.296–11.092) |
+| Complete checks | Unmeasured | 56.801 (56.402–59.422) |
+| Image build | Unmeasured | 70.231 (68.592–70.962) |
 
-M1 records the runner CPU, memory, OS/architecture, toolchains, commands, source
-revisions, cache states, and at least five successful measurements per timing
-case. Report medians and ranges. Prefetch dependencies and measure downloads
-separately. A clean build uses an empty compilation cache; a warm rebuild uses
-populated caches and a repeatable small implementation edit in a disposable
-checkout. A no-op build is not the rebuild measurement. Include CGO linking.
-Measure the backend binary alone and report API/console work separately.
+Both required backend medians are below 50% of Rust: 20.26% clean and 27.42%
+with an implementation edit. API generation uses checked OpenAPI and pinned Go/
+TypeScript generators without compiling the gateway. Image builds disable layer
+reuse while retaining the explicit BuildKit Go cache mount; Docker-internal
+downloads are included. Uncompressed local amd64 images measure approximately
+111.50 MB. CI separately qualifies integration rather than presenting it as a
+five-sample timing case.
 
-The two build targets are initial acceptance targets, not measured speedup
-claims. Re-run the same procedure against the complete M7 application.
-The dependency inventory is reviewed after adding cloud connectors and
-observability as well as at release: module counts across languages are not
-equivalent measurements. Every additional runtime dependency needs a concrete
-capability, a reason the standard library or an existing dependency does not
-suffice, and recorded direct/transitive/native impact.
+[Dependencies](evidence/release-dependencies.json) contain 23 direct Go module
+requirements and 216 resolved modules, including tests/tools. The frozen Rust
+baseline has 50 direct production crates and 467 resolved entries; these are not
+equivalent maintenance metrics. GLIDE's prebuilt native component is separately
+inventoried and scanned, including its conservative 376-crate FFI lock. See the
+[release report](evidence/release-qualification.md#build-and-dependency-results)
+for raw samples, commands, toolchains, linking, native libraries, licenses and
+resource-observation limits. Ordinary development requires no Rust compiler.
 
 ## Completion evidence
 
-Reuse the language-neutral JSON/SSE corpus, official JavaScript SDK checks,
-optional Python SDK checks, and browser journeys. Replace their Rust launchers
-as the relevant Go implementation lands. Use disposable PostgreSQL, Valkey,
-and fault-injection services for persistence and recovery scenarios.
+The replacement reuses the neutral JSON/SSE corpus, official JavaScript SDKs,
+optional Python SDKs and browser journeys through Go launchers. Disposable
+PostgreSQL, Valkey and controlled dependency failures qualify persistence and
+recovery behavior.
 
 Preserve the [production contracts](../production-guarantees.md): authority
 expiry, accrued-cost budget semantics, metadata privacy, egress restrictions,
@@ -162,7 +153,6 @@ queue-loss visibility, and installation identity during restore. Deterministic
 fixtures establish tested compatibility. Paid live-provider qualification
 remains optional, credential-scoped, and separately recorded.
 
-M7 requires the completed capability map, passing feature and process evidence,
-both native image qualifications, fresh-install and restore journeys, the
-completed build scorecard, and a working development/release path without the
-Rust toolchain.
+M7 closes with the linked capability map, passing feature/process evidence,
+both native image qualifications, fresh-install and restore journeys, completed
+build scorecard, and canonical development/release workflows without Rust.

@@ -1,0 +1,696 @@
+﻿2026-09-18T10:18:56.5044565Z Current runner version: '2.337.0'
+2026-09-18T10:18:56.5063000Z ##[group]Runner Image Provisioner
+2026-09-18T10:18:56.5063689Z Hosted Compute Agent
+2026-09-18T10:18:56.5064233Z Version: 20260828.587
+2026-09-18T10:18:56.5064659Z Commit: abac92662cab4cc7352de4f9f9d2e2419aad9c29
+2026-09-18T10:18:56.5065093Z Build Date: 2026-08-28T16:44:25Z
+2026-09-18T10:18:56.5065523Z Worker ID: {92b697b4-617f-4a5c-b1e0-7d0cad13596b}
+2026-09-18T10:18:56.5065990Z Azure Region: westus3
+2026-09-18T10:18:56.5066341Z ##[endgroup]
+2026-09-18T10:18:56.5067259Z ##[group]Operating System
+2026-09-18T10:18:56.5067641Z Ubuntu
+2026-09-18T10:18:56.5067991Z 24.04.5
+2026-09-18T10:18:56.5068369Z LTS
+2026-09-18T10:18:56.5068678Z ##[endgroup]
+2026-09-18T10:18:56.5069032Z ##[group]Runner Image
+2026-09-18T10:18:56.5069437Z Image: ubuntu-24.04
+2026-09-18T10:18:56.5069780Z Version: 20260907.300.1
+2026-09-18T10:18:56.5070578Z Included Software: https://github.com/actions/runner-images/blob/ubuntu24/20260907.300/images/ubuntu/Ubuntu2404-Readme.md
+2026-09-18T10:18:56.5071476Z Image Release: https://github.com/actions/runner-images/releases/tag/ubuntu24%2F20260907.300
+2026-09-18T10:18:56.5072080Z ##[endgroup]
+2026-09-18T10:18:56.5072775Z ##[group]GITHUB_TOKEN Permissions
+2026-09-18T10:18:56.5074165Z Contents: read
+2026-09-18T10:18:56.5074514Z Metadata: read
+2026-09-18T10:18:56.5074908Z ##[endgroup]
+2026-09-18T10:18:56.5076329Z Secret source: Actions
+2026-09-18T10:18:56.5077275Z Cache mode: write
+2026-09-18T10:18:56.5077701Z Prepare workflow directory
+2026-09-18T10:18:56.5330087Z Prepare all required actions
+2026-09-18T10:18:56.5362642Z Getting action download info
+2026-09-18T10:18:56.8277768Z Download action repository 'actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1' (SHA:3d3c42e5aac5ba805825da76410c181273ba90b1)
+2026-09-18T10:18:56.9489964Z Download action repository 'azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310' (SHA:9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310)
+2026-09-18T10:18:57.3803597Z Download action repository 'actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f' (SHA:b7c566a772e6b6bfb58ed0dc250532a479d7789f)
+2026-09-18T10:18:57.7365328Z Uses: tyk-swe/olp/.github/workflows/ci.yml@refs/heads/tyk/go-release-retirement (ccd138f288a99f66a2bb1145eb75d5ce57398416)
+2026-09-18T10:18:57.7368136Z Complete job name: qualification / check
+2026-09-18T10:18:57.7837572Z ##[group]Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+2026-09-18T10:18:57.7838128Z with:
+2026-09-18T10:18:57.7838371Z   repository: tyk-swe/olp
+2026-09-18T10:18:57.7840682Z   token: ***
+2026-09-18T10:18:57.7840921Z   ssh-strict: true
+2026-09-18T10:18:57.7841169Z   ssh-user: git
+2026-09-18T10:18:57.7841423Z   persist-credentials: true
+2026-09-18T10:18:57.7841696Z   clean: true
+2026-09-18T10:18:57.7841944Z   sparse-checkout-cone-mode: true
+2026-09-18T10:18:57.7842235Z   fetch-depth: 1
+2026-09-18T10:18:57.7842480Z   fetch-tags: false
+2026-09-18T10:18:57.7842739Z   show-progress: true
+2026-09-18T10:18:57.7843003Z   lfs: false
+2026-09-18T10:18:57.7843239Z   submodules: false
+2026-09-18T10:18:57.7843517Z   set-safe-directory: true
+2026-09-18T10:18:57.7843805Z   allow-unsafe-pr-checkout: false
+2026-09-18T10:18:57.7844342Z ##[endgroup]
+2026-09-18T10:18:57.8473688Z Syncing repository: tyk-swe/olp
+2026-09-18T10:18:57.8475468Z ##[group]Getting Git version info
+2026-09-18T10:18:57.8476151Z Working directory is '/home/runner/work/olp/olp'
+2026-09-18T10:18:57.8477082Z [command]/usr/bin/git version
+2026-09-18T10:18:57.8884955Z git version 2.55.0
+2026-09-18T10:18:57.8897757Z ##[endgroup]
+2026-09-18T10:18:57.8905847Z Temporarily overriding HOME='/home/runner/work/_temp/fdf4654a-f916-4d31-b453-5d618127794a' before making global git config changes
+2026-09-18T10:18:57.8907101Z Adding repository directory to the temporary git global config as a safe directory
+2026-09-18T10:18:57.8909709Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/olp/olp
+2026-09-18T10:18:57.8956231Z Deleting the contents of '/home/runner/work/olp/olp'
+2026-09-18T10:18:57.8958635Z ##[group]Determining repository object format
+2026-09-18T10:18:57.8959501Z ##[endgroup]
+2026-09-18T10:18:57.8960054Z ##[group]Initializing the repository
+2026-09-18T10:18:57.8962174Z [command]/usr/bin/git init /home/runner/work/olp/olp
+2026-09-18T10:18:57.9074132Z hint: Using 'master' as the name for the initial branch. This default branch name
+2026-09-18T10:18:57.9074714Z hint: will change to "main" in Git 3.0. To configure the initial branch name
+2026-09-18T10:18:57.9075600Z hint: to use in all of your new repositories, which will suppress this warning,
+2026-09-18T10:18:57.9076012Z hint: call:
+2026-09-18T10:18:57.9076238Z hint:
+2026-09-18T10:18:57.9076582Z hint: 	git config --global init.defaultBranch <name>
+2026-09-18T10:18:57.9077018Z hint:
+2026-09-18T10:18:57.9077454Z hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
+2026-09-18T10:18:57.9077995Z hint: 'development'. The just-created branch can be renamed via this command:
+2026-09-18T10:18:57.9078413Z hint:
+2026-09-18T10:18:57.9078710Z hint: 	git branch -m <name>
+2026-09-18T10:18:57.9079153Z hint:
+2026-09-18T10:18:57.9079591Z hint: Disable this message with "git config set advice.defaultBranchName false"
+2026-09-18T10:18:57.9080378Z Initialized empty Git repository in /home/runner/work/olp/olp/.git/
+2026-09-18T10:18:57.9084782Z [command]/usr/bin/git remote add origin https://github.com/tyk-swe/olp
+2026-09-18T10:18:57.9125786Z ##[endgroup]
+2026-09-18T10:18:57.9126275Z ##[group]Disabling automatic garbage collection
+2026-09-18T10:18:57.9127833Z [command]/usr/bin/git config --local gc.auto 0
+2026-09-18T10:18:57.9155503Z ##[endgroup]
+2026-09-18T10:18:57.9156025Z ##[group]Setting up auth
+2026-09-18T10:18:57.9156350Z Removing SSH command configuration
+2026-09-18T10:18:57.9160561Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-09-18T10:18:57.9189349Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-09-18T10:18:58.0419503Z Removing HTTP extra header
+2026-09-18T10:18:58.0424523Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-09-18T10:18:58.0455905Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-09-18T10:18:58.0624853Z Removing includeIf entries pointing to credentials config files
+2026-09-18T10:18:58.0629352Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-09-18T10:18:58.0658774Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-09-18T10:18:58.0838498Z [command]/usr/bin/git config --file /home/runner/work/_temp/git-credentials-91103ca7-83a3-42a5-b382-438cb8c6bfde.config http.https://github.com/.extraheader AUTHORIZATION: basic ***
+2026-09-18T10:18:58.0869885Z [command]/usr/bin/git config --local includeIf.gitdir:/home/runner/work/olp/olp/.git.path /home/runner/work/_temp/git-credentials-91103ca7-83a3-42a5-b382-438cb8c6bfde.config
+2026-09-18T10:18:58.0895802Z [command]/usr/bin/git config --local includeIf.gitdir:/home/runner/work/olp/olp/.git/worktrees/*.path /home/runner/work/_temp/git-credentials-91103ca7-83a3-42a5-b382-438cb8c6bfde.config
+2026-09-18T10:18:58.0925088Z [command]/usr/bin/git config --local includeIf.gitdir:/github/workspace/.git.path /github/runner_temp/git-credentials-91103ca7-83a3-42a5-b382-438cb8c6bfde.config
+2026-09-18T10:18:58.0952467Z [command]/usr/bin/git config --local includeIf.gitdir:/github/workspace/.git/worktrees/*.path /github/runner_temp/git-credentials-91103ca7-83a3-42a5-b382-438cb8c6bfde.config
+2026-09-18T10:18:58.0977222Z ##[endgroup]
+2026-09-18T10:18:58.0977666Z ##[group]Fetching the repository
+2026-09-18T10:18:58.0981448Z [command]/usr/bin/git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --depth=1 origin +ccd138f288a99f66a2bb1145eb75d5ce57398416:refs/remotes/origin/tyk/go-release-retirement
+2026-09-18T10:19:00.1732789Z From https://github.com/tyk-swe/olp
+2026-09-18T10:19:00.1733522Z  * [new ref]         ccd138f288a99f66a2bb1145eb75d5ce57398416 -> origin/tyk/go-release-retirement
+2026-09-18T10:19:00.1747657Z [command]/usr/bin/git branch --list --remote origin/tyk/go-release-retirement
+2026-09-18T10:19:00.1767213Z   origin/tyk/go-release-retirement
+2026-09-18T10:19:00.1772699Z [command]/usr/bin/git rev-parse refs/remotes/origin/tyk/go-release-retirement
+2026-09-18T10:19:00.1794316Z ccd138f288a99f66a2bb1145eb75d5ce57398416
+2026-09-18T10:19:00.1796903Z ##[endgroup]
+2026-09-18T10:19:00.1797232Z ##[group]Determining the checkout info
+2026-09-18T10:19:00.1797687Z ##[endgroup]
+2026-09-18T10:19:00.1799865Z [command]/usr/bin/git sparse-checkout disable
+2026-09-18T10:19:00.1841467Z [command]/usr/bin/git config --local --unset-all extensions.worktreeConfig
+2026-09-18T10:19:00.1867221Z ##[group]Checking out the ref
+2026-09-18T10:19:00.1869585Z [command]/usr/bin/git checkout --progress --force -B tyk/go-release-retirement refs/remotes/origin/tyk/go-release-retirement
+2026-09-18T10:19:00.2395361Z Switched to a new branch 'tyk/go-release-retirement'
+2026-09-18T10:19:00.2398220Z branch 'tyk/go-release-retirement' set up to track 'origin/tyk/go-release-retirement'.
+2026-09-18T10:19:00.2405685Z ##[endgroup]
+2026-09-18T10:19:00.2446950Z [command]/usr/bin/git log -1 --format=%H
+2026-09-18T10:19:00.2470744Z ccd138f288a99f66a2bb1145eb75d5ce57398416
+2026-09-18T10:19:00.2682831Z Prepare all required actions
+2026-09-18T10:19:00.2683229Z Getting action download info
+2026-09-18T10:19:00.4019650Z Download action repository 'actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16' (SHA:924ae3a1cded613372ab5595356fb5720e22ba16)
+2026-09-18T10:19:01.1619936Z Download action repository 'pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413' (SHA:ea17c68df8912ef543352723c149a84f56e3d413)
+2026-09-18T10:19:01.7879162Z Download action repository 'actions/setup-node@820762786026740c76f36085b0efc47a31fe5020' (SHA:820762786026740c76f36085b0efc47a31fe5020)
+2026-09-18T10:19:02.0424982Z ##[group]Run ./.github/actions/setup
+2026-09-18T10:19:02.0425149Z with:
+2026-09-18T10:19:02.0425257Z   services: false
+2026-09-18T10:19:02.0425370Z ##[endgroup]
+2026-09-18T10:19:02.0462296Z ##[start-action display=Run actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16;id=__self.__actions_setup-go]
+2026-09-18T10:19:02.0506285Z ##[group]Run actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16
+2026-09-18T10:19:02.0506510Z with:
+2026-09-18T10:19:02.0506657Z   go-version-file: go.mod
+2026-09-18T10:19:02.0506783Z   check-latest: false
+2026-09-18T10:19:02.0508145Z   token: ***
+2026-09-18T10:19:02.0508250Z   cache: true
+2026-09-18T10:19:02.0508358Z ##[endgroup]
+2026-09-18T10:19:02.1298205Z Setup go version spec 1.27.1
+2026-09-18T10:19:02.1304845Z Attempting to download 1.27.1...
+2026-09-18T10:19:03.0267179Z matching 1.27.1...
+2026-09-18T10:19:03.0282928Z Acquiring 1.27.1 from https://github.com/actions/go-versions/releases/download/1.27.1-33583469715/go-1.27.1-linux-x64.tar.gz
+2026-09-18T10:19:03.5325453Z Extracting Go...
+2026-09-18T10:19:03.5398103Z [command]/usr/bin/tar xz --warning=no-unknown-keyword --overwrite -C /home/runner/work/_temp/01a6501b-7780-45e2-a120-152925a95c36 -f /home/runner/work/_temp/7b58d37c-a435-4691-90e1-4fce3d0e2f89
+2026-09-18T10:19:04.7576569Z Successfully extracted go to /home/runner/work/_temp/01a6501b-7780-45e2-a120-152925a95c36
+2026-09-18T10:19:04.7577022Z Adding to the cache ...
+2026-09-18T10:19:08.7548378Z Successfully cached go to /opt/hostedtoolcache/go/1.27.1/x64
+2026-09-18T10:19:08.7549858Z Added go to the path
+2026-09-18T10:19:08.7551604Z Successfully set up Go version 1.27.1
+2026-09-18T10:19:08.7714382Z [command]/opt/hostedtoolcache/go/1.27.1/x64/bin/go env GOMODCACHE
+2026-09-18T10:19:08.7742802Z [command]/opt/hostedtoolcache/go/1.27.1/x64/bin/go env GOCACHE
+2026-09-18T10:19:08.7772523Z /home/runner/go/pkg/mod
+2026-09-18T10:19:08.7785899Z /home/runner/.cache/go-build
+2026-09-18T10:19:08.9796346Z Cache is not found
+2026-09-18T10:19:08.9815649Z go version go1.27.1 linux/amd64
+2026-09-18T10:19:08.9815782Z 
+2026-09-18T10:19:08.9815957Z ##[group]go env
+2026-09-18T10:19:09.2135494Z AR='ar'
+2026-09-18T10:19:09.2135723Z CC='gcc'
+2026-09-18T10:19:09.2135871Z CGO_CFLAGS='-O2 -g'
+2026-09-18T10:19:09.2136011Z CGO_CPPFLAGS=''
+2026-09-18T10:19:09.2136137Z CGO_CXXFLAGS='-O2 -g'
+2026-09-18T10:19:09.2136268Z CGO_ENABLED='1'
+2026-09-18T10:19:09.2136414Z CGO_FFLAGS='-O2 -g'
+2026-09-18T10:19:09.2136531Z CGO_LDFLAGS='-O2 -g'
+2026-09-18T10:19:09.2136645Z CXX='g++'
+2026-09-18T10:19:09.2136757Z GCCGO='gccgo'
+2026-09-18T10:19:09.2136870Z GO111MODULE=''
+2026-09-18T10:19:09.2136977Z GOAMD64='v1'
+2026-09-18T10:19:09.2137083Z GOARCH='amd64'
+2026-09-18T10:19:09.2137188Z GOAUTH='netrc'
+2026-09-18T10:19:09.2137337Z GOBIN='/home/runner/go/bin'
+2026-09-18T10:19:09.2137491Z GOCACHE='/home/runner/.cache/go-build'
+2026-09-18T10:19:09.2137654Z GOCACHEPROG=''
+2026-09-18T10:19:09.2137763Z GODEBUG=''
+2026-09-18T10:19:09.2137881Z GOENV='/home/runner/.config/go/env'
+2026-09-18T10:19:09.2138021Z GOEXE=''
+2026-09-18T10:19:09.2138124Z GOEXPERIMENT=''
+2026-09-18T10:19:09.2138234Z GOFIPS140='off'
+2026-09-18T10:19:09.2138342Z GOFLAGS=''
+2026-09-18T10:19:09.2138733Z GOGCCFLAGS='-fPIC -m64 -pthread -Wl,--no-gc-sections -fmessage-length=0 -ffile-prefix-map=/tmp/go-build348690369=/tmp/go-build -gno-record-gcc-switches'
+2026-09-18T10:19:09.2139094Z GOHOSTARCH='amd64'
+2026-09-18T10:19:09.2139452Z GOHOSTOS='linux'
+2026-09-18T10:19:09.2139578Z GOINSECURE=''
+2026-09-18T10:19:09.2139728Z GOMOD='/home/runner/work/olp/olp/go.mod'
+2026-09-18T10:19:09.2139894Z GOMODCACHE='/home/runner/go/pkg/mod'
+2026-09-18T10:19:09.2140035Z GONOPROXY=''
+2026-09-18T10:19:09.2140141Z GONOSUMDB=''
+2026-09-18T10:19:09.2140242Z GOOS='linux'
+2026-09-18T10:19:09.2140349Z GOPACKAGESDRIVER=''
+2026-09-18T10:19:09.2140472Z GOPATH='/home/runner/go'
+2026-09-18T10:19:09.2140595Z GOPRIVATE=''
+2026-09-18T10:19:09.2140753Z GOPROXY='https://proxy.golang.org,direct'
+2026-09-18T10:19:09.2140941Z GOROOT='/opt/hostedtoolcache/go/1.27.1/x64'
+2026-09-18T10:19:09.2141102Z GOSUMDB='sum.golang.org'
+2026-09-18T10:19:09.2141229Z GOTELEMETRY='local'
+2026-09-18T10:19:09.2141374Z GOTELEMETRYDIR='/home/runner/.config/go/telemetry'
+2026-09-18T10:19:09.2141540Z GOTMPDIR=''
+2026-09-18T10:19:09.2141647Z GOTOOLCHAIN='local'
+2026-09-18T10:19:09.2141822Z GOTOOLDIR='/opt/hostedtoolcache/go/1.27.1/x64/pkg/tool/linux_amd64'
+2026-09-18T10:19:09.2142010Z GOVCS=''
+2026-09-18T10:19:09.2142151Z GOVERSION='go1.27.1'
+2026-09-18T10:19:09.2142268Z GOWORK=''
+2026-09-18T10:19:09.2142383Z PKG_CONFIG='pkg-config'
+2026-09-18T10:19:09.2142463Z 
+2026-09-18T10:19:09.2142726Z ##[endgroup]
+2026-09-18T10:19:09.2281155Z ##[end-action id=__self.__actions_setup-go;outcome=success;conclusion=success;duration_ms=7181]
+2026-09-18T10:19:09.2283098Z ##[start-action display=Run sudo apt-get update;id=__self.__run]
+2026-09-18T10:19:09.2304253Z ##[group]Run sudo apt-get update
+2026-09-18T10:19:09.2304478Z sudo apt-get update
+2026-09-18T10:19:09.2304672Z sudo apt-get install -y build-essential ca-certificates
+2026-09-18T10:19:09.2304872Z go mod download
+2026-09-18T10:19:09.2337929Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+2026-09-18T10:19:09.2338117Z env:
+2026-09-18T10:19:09.2338246Z   GOTOOLCHAIN: local
+2026-09-18T10:19:09.2338370Z ##[endgroup]
+2026-09-18T10:19:09.2975976Z Get:1 file:/etc/apt/apt-mirrors.txt Mirrorlist [144 B]
+2026-09-18T10:19:09.3225284Z Get:6 https://packages.microsoft.com/ubuntu/24.04/prod noble InRelease [3600 B]
+2026-09-18T10:19:09.3347060Z Hit:2 http://azure.archive.ubuntu.com/ubuntu noble InRelease
+2026-09-18T10:19:09.3356761Z Get:3 http://azure.archive.ubuntu.com/ubuntu noble-updates InRelease [126 kB]
+2026-09-18T10:19:09.3416268Z Get:4 http://azure.archive.ubuntu.com/ubuntu noble-backports InRelease [126 kB]
+2026-09-18T10:19:09.3433036Z Get:5 http://azure.archive.ubuntu.com/ubuntu noble-security InRelease [126 kB]
+2026-09-18T10:19:09.3817752Z Get:7 https://packages.microsoft.com/ubuntu/24.04/prod noble/main amd64 Packages [476 kB]
+2026-09-18T10:19:09.3937604Z Get:8 https://packages.microsoft.com/ubuntu/24.04/prod noble/main arm64 Packages [427 kB]
+2026-09-18T10:19:09.3946678Z Get:9 https://dl.google.com/linux/chrome-stable/deb stable InRelease [2548 B]
+2026-09-18T10:19:09.4600237Z Get:10 http://azure.archive.ubuntu.com/ubuntu noble-updates/main amd64 Packages [1275 kB]
+2026-09-18T10:19:09.4675154Z Get:11 http://azure.archive.ubuntu.com/ubuntu noble-updates/main Translation-en [294 kB]
+2026-09-18T10:19:09.4687899Z Get:12 http://azure.archive.ubuntu.com/ubuntu noble-updates/main amd64 Components [181 kB]
+2026-09-18T10:19:09.4714892Z Get:13 http://azure.archive.ubuntu.com/ubuntu noble-updates/universe amd64 Packages [1689 kB]
+2026-09-18T10:19:09.4774388Z Get:14 http://azure.archive.ubuntu.com/ubuntu noble-updates/universe Translation-en [338 kB]
+2026-09-18T10:19:09.4794655Z Get:15 http://azure.archive.ubuntu.com/ubuntu noble-updates/universe amd64 Components [388 kB]
+2026-09-18T10:19:09.4816749Z Get:16 http://azure.archive.ubuntu.com/ubuntu noble-updates/restricted amd64 Packages [1580 kB]
+2026-09-18T10:19:09.4879093Z Get:17 http://azure.archive.ubuntu.com/ubuntu noble-updates/restricted Translation-en [359 kB]
+2026-09-18T10:19:09.4901344Z Get:18 http://azure.archive.ubuntu.com/ubuntu noble-updates/multiverse amd64 Packages [45.7 kB]
+2026-09-18T10:19:09.4914043Z Get:19 http://azure.archive.ubuntu.com/ubuntu noble-updates/multiverse Translation-en [13.1 kB]
+2026-09-18T10:19:09.5359085Z Get:20 http://azure.archive.ubuntu.com/ubuntu noble-updates/multiverse amd64 Components [940 B]
+2026-09-18T10:19:09.5374267Z Get:21 http://azure.archive.ubuntu.com/ubuntu noble-backports/main amd64 Packages [65.9 kB]
+2026-09-18T10:19:09.5380571Z Get:22 http://azure.archive.ubuntu.com/ubuntu noble-backports/main amd64 Components [5748 B]
+2026-09-18T10:19:09.5389528Z Get:23 http://azure.archive.ubuntu.com/ubuntu noble-backports/universe amd64 Packages [34.6 kB]
+2026-09-18T10:19:09.5401435Z Get:24 http://azure.archive.ubuntu.com/ubuntu noble-backports/universe Translation-en [18.7 kB]
+2026-09-18T10:19:09.5418775Z Get:25 http://azure.archive.ubuntu.com/ubuntu noble-backports/universe amd64 Components [12.6 kB]
+2026-09-18T10:19:09.5444438Z Get:26 http://azure.archive.ubuntu.com/ubuntu noble-security/main amd64 Packages [1009 kB]
+2026-09-18T10:19:09.5465842Z Get:27 http://azure.archive.ubuntu.com/ubuntu noble-security/main Translation-en [214 kB]
+2026-09-18T10:19:09.5484837Z Get:28 http://azure.archive.ubuntu.com/ubuntu noble-security/main amd64 Components [46.4 kB]
+2026-09-18T10:19:09.5494474Z Get:29 http://azure.archive.ubuntu.com/ubuntu noble-security/universe amd64 Packages [1208 kB]
+2026-09-18T10:19:09.5544706Z Get:30 http://azure.archive.ubuntu.com/ubuntu noble-security/universe Translation-en [243 kB]
+2026-09-18T10:19:09.5557421Z Get:31 http://azure.archive.ubuntu.com/ubuntu noble-security/universe amd64 Components [76.2 kB]
+2026-09-18T10:19:09.5571107Z Get:32 http://azure.archive.ubuntu.com/ubuntu noble-security/restricted amd64 Packages [1449 kB]
+2026-09-18T10:19:09.5634907Z Get:33 http://azure.archive.ubuntu.com/ubuntu noble-security/restricted Translation-en [336 kB]
+2026-09-18T10:19:09.6099551Z Get:34 http://azure.archive.ubuntu.com/ubuntu noble-security/multiverse Translation-en [11.3 kB]
+2026-09-18T10:19:09.6138345Z Get:35 https://dl.google.com/linux/chrome-stable/deb stable/main amd64 Packages [1408 B]
+2026-09-18T10:19:13.9813824Z Fetched 12.2 MB in 1s (12.5 MB/s)
+2026-09-18T10:19:14.4751135Z Reading package lists...
+2026-09-18T10:19:14.5706369Z Reading package lists...
+2026-09-18T10:19:14.7220025Z Building dependency tree...
+2026-09-18T10:19:14.7225460Z Reading state information...
+2026-09-18T10:19:14.9898103Z ca-certificates is already the newest version (20260601~24.04.1).
+2026-09-18T10:19:14.9898650Z The following NEW packages will be installed:
+2026-09-18T10:19:14.9904606Z   build-essential
+2026-09-18T10:19:15.0038271Z 0 upgraded, 1 newly installed, 0 to remove and 73 not upgraded.
+2026-09-18T10:19:15.0038524Z Need to get 4928 B of archives.
+2026-09-18T10:19:15.0038726Z After this operation, 17.4 kB of additional disk space will be used.
+2026-09-18T10:19:15.0039019Z Get:1 file:/etc/apt/apt-mirrors.txt Mirrorlist [144 B]
+2026-09-18T10:19:15.0738822Z Get:2 http://azure.archive.ubuntu.com/ubuntu noble/main amd64 build-essential amd64 12.10ubuntu1 [4928 B]
+2026-09-18T10:19:15.2534232Z Fetched 4928 B in 0s (62.9 kB/s)
+2026-09-18T10:19:15.3641411Z Selecting previously unselected package build-essential.
+2026-09-18T10:19:15.3945371Z (Reading database ... 
+2026-09-18T10:19:15.3945689Z (Reading database ... 5%
+2026-09-18T10:19:15.3945972Z (Reading database ... 10%
+2026-09-18T10:19:15.3946278Z (Reading database ... 15%
+2026-09-18T10:19:15.3946556Z (Reading database ... 20%
+2026-09-18T10:19:15.3946803Z (Reading database ... 25%
+2026-09-18T10:19:15.3947056Z (Reading database ... 30%
+2026-09-18T10:19:15.3947500Z (Reading database ... 35%
+2026-09-18T10:19:15.3947918Z (Reading database ... 40%
+2026-09-18T10:19:15.3948230Z (Reading database ... 45%
+2026-09-18T10:19:15.3948533Z (Reading database ... 50%
+2026-09-18T10:19:15.3995467Z (Reading database ... 55%
+2026-09-18T10:19:15.8815983Z (Reading database ... 60%
+2026-09-18T10:19:16.0896841Z (Reading database ... 65%
+2026-09-18T10:19:16.4168327Z (Reading database ... 70%
+2026-09-18T10:19:16.6880582Z (Reading database ... 75%
+2026-09-18T10:19:17.0523338Z (Reading database ... 80%
+2026-09-18T10:19:17.6710730Z (Reading database ... 85%
+2026-09-18T10:19:17.9339548Z (Reading database ... 90%
+2026-09-18T10:19:18.4171301Z (Reading database ... 95%
+2026-09-18T10:19:18.4171599Z (Reading database ... 100%
+2026-09-18T10:19:18.4171913Z (Reading database ... 201818 files and directories currently installed.)
+2026-09-18T10:19:18.4208080Z Preparing to unpack .../build-essential_12.10ubuntu1_amd64.deb ...
+2026-09-18T10:19:18.4227714Z Unpacking build-essential (12.10ubuntu1) ...
+2026-09-18T10:19:18.4515287Z Setting up build-essential (12.10ubuntu1) ...
+2026-09-18T10:19:19.3856058Z 
+2026-09-18T10:19:19.3858699Z Running kernel seems to be up-to-date.
+2026-09-18T10:19:19.3858872Z 
+2026-09-18T10:19:19.3858943Z No services need to be restarted.
+2026-09-18T10:19:19.3859039Z 
+2026-09-18T10:19:19.3859103Z No containers need to be restarted.
+2026-09-18T10:19:19.3859198Z 
+2026-09-18T10:19:19.3859279Z No user sessions are running outdated binaries.
+2026-09-18T10:19:19.3859395Z 
+2026-09-18T10:19:19.3859542Z No VM guests are running outdated hypervisor (qemu) binaries on this host.
+2026-09-18T10:19:23.7659579Z ##[end-action id=__self.__run;outcome=success;conclusion=success;duration_ms=14537]
+2026-09-18T10:19:23.7661569Z ##[start-action display=Run pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413;id=__self.__pnpm_action-setup]
+2026-09-18T10:19:23.7698733Z ##[group]Run pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413
+2026-09-18T10:19:23.7698934Z with:
+2026-09-18T10:19:23.7699041Z   dest: ~/setup-pnpm
+2026-09-18T10:19:23.7699161Z   run_install: null
+2026-09-18T10:19:23.7699268Z   cache: false
+2026-09-18T10:19:23.7699384Z   cache_dependency_path: pnpm-lock.yaml
+2026-09-18T10:19:23.7699535Z   package_json_file: package.json
+2026-09-18T10:19:23.7699667Z   standalone: false
+2026-09-18T10:19:23.7699772Z env:
+2026-09-18T10:19:23.7699871Z   GOTOOLCHAIN: local
+2026-09-18T10:19:23.7699980Z ##[endgroup]
+2026-09-18T10:19:23.8592876Z ##[group]Running self-installer...
+2026-09-18T10:19:25.2592081Z 
+2026-09-18T10:19:25.2592789Z added 1 package, and audited 2 packages in 886ms
+2026-09-18T10:19:25.2593035Z 
+2026-09-18T10:19:25.2593145Z 1 package is looking for funding
+2026-09-18T10:19:25.2593420Z   run `npm fund` for details
+2026-09-18T10:19:25.2597229Z 
+2026-09-18T10:19:25.2597460Z found 0 vulnerabilities
+2026-09-18T10:19:25.6366938Z Checking for updates...
+2026-09-18T10:19:25.7787877Z Switching pnpm from v11.25.0 to v11.24.0...
+2026-09-18T10:19:27.1411798Z .../v11/a42-1a0b407378e-baed844742a89f72 | Progress: resolved 1, reused 0, downloaded 0, added 0
+2026-09-18T10:19:27.1423326Z .../v11/a42-1a0b407378e-baed844742a89f72 |   +1 +
+2026-09-18T10:19:27.3144217Z .../v11/a42-1a0b407378e-baed844742a89f72 | Progress: resolved 1, reused 0, downloaded 1, added 1, done
+2026-09-18T10:19:27.7287618Z [WARN] Detected a pnpm v10 installation layout at PNPM_HOME. The pnpm shims at PNPM_HOME have been refreshed so the new version is active, but pnpm v11 expects bins in PNPM_HOME/bin. Run "pnpm setup" to migrate your PATH to the v11 layout.
+2026-09-18T10:19:27.7326737Z Successfully updated pnpm to v11.24.0
+2026-09-18T10:19:27.7561055Z ##[endgroup]
+2026-09-18T10:19:27.7561315Z Installation Completed!
+2026-09-18T10:19:27.7636182Z ##[end-action id=__self.__pnpm_action-setup;outcome=success;conclusion=success;duration_ms=3997]
+2026-09-18T10:19:27.7638789Z ##[start-action display=Run actions/setup-node@820762786026740c76f36085b0efc47a31fe5020;id=__self.__actions_setup-node]
+2026-09-18T10:19:27.7678803Z ##[group]Run actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+2026-09-18T10:19:27.7679019Z with:
+2026-09-18T10:19:27.7679126Z   node-version: 26
+2026-09-18T10:19:27.7679233Z   cache: pnpm
+2026-09-18T10:19:27.7679339Z   check-latest: false
+2026-09-18T10:19:27.7680716Z   token: ***
+2026-09-18T10:19:27.7680828Z   package-manager-cache: true
+2026-09-18T10:19:27.7680958Z env:
+2026-09-18T10:19:27.7681056Z   GOTOOLCHAIN: local
+2026-09-18T10:19:27.7681200Z   PNPM_HOME: /home/runner/setup-pnpm/node_modules/.bin
+2026-09-18T10:19:27.7681364Z ##[endgroup]
+2026-09-18T10:19:27.8486557Z Attempting to download 26...
+2026-09-18T10:19:28.8410857Z Acquiring 26.9.0 - x64 from https://github.com/actions/node-versions/releases/download/26.9.0-35174947414/node-26.9.0-linux-x64.tar.gz
+2026-09-18T10:19:29.3666010Z Extracting ...
+2026-09-18T10:19:29.3755164Z [command]/usr/bin/tar xz --strip 1 --warning=no-unknown-keyword --overwrite -C /home/runner/work/_temp/e31f8a89-bf5e-44bb-9c27-9f5f90556e71 -f /home/runner/work/_temp/3719d38c-026e-44f1-a0df-996d7e646459
+2026-09-18T10:19:30.3571861Z Adding to the cache ...
+2026-09-18T10:19:33.0661533Z ##[group]Environment details
+2026-09-18T10:19:33.2441987Z node: v26.9.0
+2026-09-18T10:19:33.2442232Z npm: 11.19.1
+2026-09-18T10:19:33.2442397Z yarn: 1.22.22
+2026-09-18T10:19:33.2442732Z ##[endgroup]
+2026-09-18T10:19:33.2454268Z [command]/home/runner/setup-pnpm/node_modules/.bin/bin/pnpm store path --silent
+2026-09-18T10:19:33.5999599Z /home/runner/setup-pnpm/node_modules/.bin/store/v11
+2026-09-18T10:19:33.8020106Z pnpm cache is not found
+2026-09-18T10:19:33.8131944Z ##[end-action id=__self.__actions_setup-node;outcome=success;conclusion=success;duration_ms=6049]
+2026-09-18T10:19:33.8133576Z ##[start-action display=Run pnpm install --frozen-lockfile;id=__self.__run_2]
+2026-09-18T10:19:33.8146929Z ##[group]Run pnpm install --frozen-lockfile
+2026-09-18T10:19:33.8147123Z pnpm install --frozen-lockfile
+2026-09-18T10:19:33.8176891Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+2026-09-18T10:19:33.8177069Z env:
+2026-09-18T10:19:33.8177190Z   GOTOOLCHAIN: local
+2026-09-18T10:19:33.8177335Z   PNPM_HOME: /home/runner/setup-pnpm/node_modules/.bin
+2026-09-18T10:19:33.8177500Z ##[endgroup]
+2026-09-18T10:19:34.0761678Z Scope: all 3 workspace projects
+2026-09-18T10:19:34.1022656Z ? Verifying lockfile against supply-chain policies (325 entries)...
+2026-09-18T10:19:34.1064321Z Lockfile is up to date, resolution step is skipped
+2026-09-18T10:19:34.1664176Z Progress: resolved 1, reused 0, downloaded 0, added 0
+2026-09-18T10:19:34.1967262Z Packages: +300
+2026-09-18T10:19:34.1967950Z ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+2026-09-18T10:19:34.8513441Z Packages are hard linked from the content-addressable store to the virtual store.
+2026-09-18T10:19:34.8514955Z   Content-addressable store is at: /home/runner/setup-pnpm/node_modules/.bin/store/v11
+2026-09-18T10:19:34.8515596Z   Virtual store is at:             node_modules/.pnpm
+2026-09-18T10:19:35.1732506Z Progress: resolved 300, reused 0, downloaded 107, added 7
+2026-09-18T10:19:36.1606244Z Progress: resolved 300, reused 0, downloaded 300, added 300, done
+2026-09-18T10:19:36.5506097Z ✓ Lockfile passes supply-chain policies (325 entries in 2.4s)
+2026-09-18T10:19:36.7246577Z 
+2026-09-18T10:19:36.8462516Z Done in 3s using pnpm v11.24.0
+2026-09-18T10:19:37.0701109Z ##[end-action id=__self.__run_2;outcome=success;conclusion=success;duration_ms=3256]
+2026-09-18T10:19:37.0702898Z ##[start-action display=Run sudo apt-get update;id=__self.__run_3]
+2026-09-18T10:19:37.0710047Z ##[end-action id=__self.__run_3;outcome=skipped;conclusion=skipped;duration_ms=0]
+2026-09-18T10:19:37.0736315Z ##[group]Run ./scripts/without-rust.sh make check
+2026-09-18T10:19:37.0736544Z ./scripts/without-rust.sh make check
+2026-09-18T10:19:37.0767825Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+2026-09-18T10:19:37.0768011Z env:
+2026-09-18T10:19:37.0768125Z   GOTOOLCHAIN: local
+2026-09-18T10:19:37.0768280Z   PNPM_HOME: /home/runner/setup-pnpm/node_modules/.bin
+2026-09-18T10:19:37.0768473Z ##[endgroup]
+2026-09-18T10:19:37.1365233Z ./scripts/api.sh
+2026-09-18T10:19:51.1943685Z $ openapi-typescript ../openapi/management.json -o src/lib/api/schema.d.ts
+2026-09-18T10:19:51.4579999Z ✨ openapi-typescript 7.13.0
+2026-09-18T10:19:51.6129831Z 🚀 ../openapi/management.json → src/lib/api/schema.d.ts [156.3ms]
+2026-09-18T10:19:51.7153976Z go vet ./...
+2026-09-18T10:20:16.4194591Z make test
+2026-09-18T10:20:16.4216327Z make[1]: Entering directory '/home/runner/work/olp/olp'
+2026-09-18T10:20:16.4429420Z go test ./...
+2026-09-18T10:20:21.3745509Z ?   	github.com/tyk-swe/olp/cmd/olp	[no test files]
+2026-09-18T10:20:37.1735277Z ok  	github.com/tyk-swe/olp/internal/access	15.526s
+2026-09-18T10:20:37.1735717Z ok  	github.com/tyk-swe/olp/internal/config	0.004s
+2026-09-18T10:20:37.1736104Z ok  	github.com/tyk-swe/olp/internal/connectors	0.164s
+2026-09-18T10:20:37.1736471Z ok  	github.com/tyk-swe/olp/internal/console	0.047s
+2026-09-18T10:20:37.1736777Z ?   	github.com/tyk-swe/olp/internal/coordination	[no test files]
+2026-09-18T10:20:37.1737095Z ?   	github.com/tyk-swe/olp/internal/database	[no test files]
+2026-09-18T10:20:37.1737334Z ok  	github.com/tyk-swe/olp/internal/egress	0.014s
+2026-09-18T10:21:10.9871648Z ok  	github.com/tyk-swe/olp/internal/gateway	46.078s
+2026-09-18T10:21:10.9872074Z ok  	github.com/tyk-swe/olp/internal/limits	0.004s
+2026-09-18T10:21:10.9872463Z ?   	github.com/tyk-swe/olp/internal/management	[no test files]
+2026-09-18T10:21:10.9872884Z ok  	github.com/tyk-swe/olp/internal/management/contract	0.003s
+2026-09-18T10:21:10.9873290Z ok  	github.com/tyk-swe/olp/internal/media	1.246s
+2026-09-18T10:21:10.9873558Z ok  	github.com/tyk-swe/olp/internal/observability	0.006s
+2026-09-18T10:21:10.9875623Z ok  	github.com/tyk-swe/olp/internal/process	0.323s
+2026-09-18T10:21:10.9875968Z ok  	github.com/tyk-swe/olp/internal/protocols	0.013s
+2026-09-18T10:21:10.9876394Z ok  	github.com/tyk-swe/olp/internal/protocols/openai	0.075s
+2026-09-18T10:21:10.9876753Z ok  	github.com/tyk-swe/olp/internal/protocols/sse	0.078s
+2026-09-18T10:21:10.9877129Z ok  	github.com/tyk-swe/olp/internal/providers	0.009s
+2026-09-18T10:21:10.9877461Z ok  	github.com/tyk-swe/olp/internal/routes	0.005s
+2026-09-18T10:21:10.9877828Z ok  	github.com/tyk-swe/olp/internal/runtime	0.007s
+2026-09-18T10:21:10.9878160Z ok  	github.com/tyk-swe/olp/internal/secrets	0.264s
+2026-09-18T10:21:10.9878500Z ok  	github.com/tyk-swe/olp/internal/telemetry	0.008s
+2026-09-18T10:21:10.9878873Z ?   	github.com/tyk-swe/olp/internal/testutil	[no test files]
+2026-09-18T10:21:10.9879226Z ok  	github.com/tyk-swe/olp/internal/usage	0.033s
+2026-09-18T10:21:10.9879545Z ?   	github.com/tyk-swe/olp/openapi	[no test files]
+2026-09-18T10:21:10.9879890Z ?   	github.com/tyk-swe/olp/tests/fixtures	[no test files]
+2026-09-18T10:21:10.9880264Z ?   	github.com/tyk-swe/olp/tests/sdkfixture	[no test files]
+2026-09-18T10:21:11.0466304Z make[1]: Leaving directory '/home/runner/work/olp/olp'
+2026-09-18T10:21:11.0467661Z pnpm --dir console verify
+2026-09-18T10:21:11.2978102Z $ pnpm format:check && pnpm check && pnpm test
+2026-09-18T10:21:11.5289605Z $ prettier --check .
+2026-09-18T10:21:11.5852114Z Checking formatting...
+2026-09-18T10:21:14.9131569Z All matched files use Prettier code style!
+2026-09-18T10:21:15.1968782Z $ svelte-kit sync && svelte-check --tsconfig ./tsconfig.json && eslint .
+2026-09-18T10:21:21.0051569Z Loading svelte-check in workspace: /home/runner/work/olp/olp/console
+2026-09-18T10:21:21.0051979Z Getting Svelte diagnostics...
+2026-09-18T10:21:21.0052078Z 
+2026-09-18T10:21:21.0067583Z svelte-check found 0 errors and 0 warnings
+2026-09-18T10:21:25.8632385Z $ vitest run
+2026-09-18T10:21:26.6378094Z 
+2026-09-18T10:21:26.6379304Z  RUN  v5.0.0 /home/runner/work/olp/olp/console
+2026-09-18T10:21:26.6379601Z 
+2026-09-18T10:21:27.9021805Z  ✓  client  src/lib/components/ReauthenticateDialog.svelte.test.ts (5 tests) 49ms
+2026-09-18T10:21:28.6476755Z  ✓  client  src/lib/features/overview/Overview.svelte.test.ts (4 tests) 209ms
+2026-09-18T10:21:28.9715193Z  ✓  client  src/lib/features/providers/models/BulkRouteCreation.svelte.test.ts (2 tests) 216ms
+2026-09-18T10:21:29.6061164Z stderr | src/lib/forms/draftSaving.svelte.test.ts > opens Route Studio when the model inventory finishes before the draft
+2026-09-18T10:21:29.6062686Z Avoid using `history.pushState(...)` and `history.replaceState(...)` as these will conflict with SvelteKit's router. Use the `pushState` and `replaceState` imports from `$app/navigation` instead.
+2026-09-18T10:21:29.6063295Z 
+2026-09-18T10:21:29.7984463Z  ✓  client  src/lib/features/access/profile/ProfilePage.svelte.test.ts (1 test) 140ms
+2026-09-18T10:21:29.9893732Z  ✓  client  src/lib/features/settings/SettingsPage.svelte.test.ts (1 test) 146ms
+2026-09-18T10:21:30.5952660Z  ✓  client  src/lib/features/access/oidc/OidcConfigurationPanel.svelte.test.ts (1 test) 130ms
+2026-09-18T10:21:30.6278380Z  ✓  client  src/lib/features/access/session/useRole.svelte.test.ts (5 tests) 33ms
+2026-09-18T10:21:31.3618756Z  ✓  client  src/lib/features/routes/RoutingPreferencesForm.svelte.test.ts (14 tests) 107ms
+2026-09-18T10:21:31.5082288Z  ✓  client  src/lib/features/providers/ProviderList.svelte.test.ts (2 tests) 139ms
+2026-09-18T10:21:31.7033396Z  ✓  client  src/lib/forms/draftSaving.svelte.test.ts (26 tests) 2278ms
+2026-09-18T10:21:31.8688747Z  ✓  unit  src/lib/features/providers/providerEditor.test.ts (23 tests) 8ms
+2026-09-18T10:21:32.0058197Z  ✓  unit  src/lib/features/routes/routeEditor.test.ts (35 tests) 8ms
+2026-09-18T10:21:32.0320545Z  ✓  client  src/lib/forms/focusError.svelte.test.ts (3 tests) 26ms
+2026-09-18T10:21:32.2420108Z  ✓  unit  src/lib/features/access/audit/auditListState.test.ts (17 tests) 8ms
+2026-09-18T10:21:32.2777292Z  ✓  unit  src/lib/api/resource-apis.test.ts (10 tests) 34ms
+2026-09-18T10:21:32.3246492Z  ✓  unit  src/lib/features/access/session/lifecycle.test.ts (22 tests) 149ms
+2026-09-18T10:21:32.3615620Z  ✓  unit  src/lib/features/access/api-keys/budgetPresentation.test.ts (16 tests) 7ms
+2026-09-18T10:21:32.4716463Z  ✓  unit  src/lib/features/usage/completenessPresentation.test.ts (13 tests) 5ms
+2026-09-18T10:21:32.4801557Z  ✓  unit  src/lib/features/media/mediaJobListState.test.ts (15 tests) 10ms
+2026-09-18T10:21:32.5421344Z  ✓  unit  src/lib/features/providers/api.test.ts (6 tests) 14ms
+2026-09-18T10:21:32.5971494Z  ✓  unit  src/lib/forms/concurrentEdit.test.ts (10 tests) 6ms
+2026-09-18T10:21:32.7253663Z  ✓  unit  src/lib/features/access/session/auth.test.ts (12 tests) 23ms
+2026-09-18T10:21:32.7649183Z  ✓  unit  src/lib/api/client.test.ts (4 tests) 14ms
+2026-09-18T10:21:32.8462458Z  ✓  unit  src/lib/api/management/management.test.ts (5 tests) 18ms
+2026-09-18T10:21:32.9136217Z  ✓  unit  src/lib/format.test.ts (13 tests) 8ms
+2026-09-18T10:21:33.0158539Z  ✓  unit  src/lib/features/runtime/health/staleness.test.ts (13 tests) 13ms
+2026-09-18T10:21:33.0394631Z  ✓  unit  src/lib/features/usage/history/requestListState.test.ts (12 tests) 10ms
+2026-09-18T10:21:33.0945248Z  ✓  unit  src/lib/features/usage/usageState.test.ts (10 tests) 7ms
+2026-09-18T10:21:33.2415909Z  ✓  unit  src/lib/features/access/api-keys/api.test.ts (7 tests) 19ms
+2026-09-18T10:21:33.2937794Z  ✓  unit  src/lib/features/access/setup/api.test.ts (3 tests) 11ms
+2026-09-18T10:21:33.3590068Z  ✓  unit  src/routes/filesystem-routing.test.ts (27 tests) 9ms
+2026-09-18T10:21:33.4058545Z  ✓  unit  src/lib/features/inference/playground/validation.test.ts (8 tests) 7ms
+2026-09-18T10:21:33.4516126Z  ✓  unit  src/lib/features/routes/api.test.ts (2 tests) 15ms
+2026-09-18T10:21:33.4945507Z  ✓  unit  src/lib/api/http.test.ts (4 tests) 24ms
+2026-09-18T10:21:33.5274751Z  ✓  unit  src/lib/features/overview/setupProgress.test.ts (7 tests) 4ms
+2026-09-18T10:21:33.5664331Z  ✓  unit  src/lib/features/access/api-keys/keyValidation.test.ts (6 tests) 6ms
+2026-09-18T10:21:33.6229174Z  ✓  unit  src/lib/features/access/session/authorization.test.ts (15 tests) 5ms
+2026-09-18T10:21:33.6316305Z  ✓  unit  src/lib/features/access/api-keys/apiKeyPolicy.test.ts (3 tests) 5ms
+2026-09-18T10:21:33.6993283Z  ✓  unit  src/lib/features/access/session/requestPolicy.test.ts (23 tests) 24ms
+2026-09-18T10:21:33.7603076Z  ✓  unit  src/lib/features/providers/models/modelMetadata.test.ts (3 tests) 4ms
+2026-09-18T10:21:33.7757565Z  ✓  unit  src/lib/formatBudget.test.ts (6 tests) 6ms
+2026-09-18T10:21:33.8387690Z  ✓  unit  src/lib/lists/pagination.test.ts (3 tests) 4ms
+2026-09-18T10:21:33.8666897Z  ✓  unit  src/lib/features/access/session/state.test.ts (3 tests) 4ms
+2026-09-18T10:21:33.8876226Z  ✓  unit  src/lib/features/access/oidc/mappings.test.ts (5 tests) 5ms
+2026-09-18T10:21:33.9711986Z  ✓  unit  src/lib/features/access/setup/ownerValidation.test.ts (4 tests) 4ms
+2026-09-18T10:21:33.9817744Z  ✓  unit  src/lib/features/access/session/relativeReturnTo.test.ts (27 tests) 8ms
+2026-09-18T10:21:34.0088263Z  ✓  unit  src/lib/features/access/session/sessionFreshness.test.ts (4 tests) 4ms
+2026-09-18T10:21:34.0979150Z  ✓  unit  src/lib/features/access/profile/validation.test.ts (3 tests) 3ms
+2026-09-18T10:21:34.1229644Z  ✓  unit  src/lib/features/settings/validation.test.ts (3 tests) 4ms
+2026-09-18T10:21:34.1366272Z  ✓  unit  src/lib/features/access/session/queryPartition.test.ts (2 tests) 4ms
+2026-09-18T10:21:34.2316104Z  ✓  unit  src/lib/features/access/invitations/invitationValidation.test.ts (3 tests) 3ms
+2026-09-18T10:21:34.2465571Z  ✓  unit  src/lib/features/runtime/health/spool.test.ts (3 tests) 3ms
+2026-09-18T10:21:34.2548740Z  ✓  unit  src/lib/lists/filters.test.ts (2 tests) 3ms
+2026-09-18T10:21:34.3232936Z  ✓  unit  src/lib/features/access/profile/recentAuthentication.test.ts (1 test) 3ms
+2026-09-18T10:21:34.3400591Z  ✓  unit  src/lib/features/access/api-keys/sdkExamples.test.ts (3 tests) 2ms
+2026-09-18T10:21:34.3425881Z 
+2026-09-18T10:21:34.3437216Z  Test Files  55 passed (55)
+2026-09-18T10:21:34.3437751Z       Tests  480 passed (480)
+2026-09-18T10:21:34.3438197Z    Start at  10:21:26
+2026-09-18T10:21:34.3438793Z    Duration  7.69s (transform 29%, environment 29%, tests 23%, import 17%, worker 1%)
+2026-09-18T10:21:34.3442692Z 
+2026-09-18T10:21:34.3443616Z Environment   client  jsdom was created 11 times · 5.19s total, 37% of tracked time
+2026-09-18T10:21:34.3445053Z              create it once per worker with pool: 'vmThreads' (keeps per-file isolation) or isolate: false (shares it across files)
+2026-09-18T10:21:34.3446093Z              learn more: https://vitest.dev/guide/improving-performance#test-environments
+2026-09-18T10:21:34.3446457Z 
+2026-09-18T10:21:34.4554079Z ##[group]Run ./scripts/check-contracts.sh
+2026-09-18T10:21:34.4554415Z ./scripts/check-contracts.sh
+2026-09-18T10:21:34.4585934Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+2026-09-18T10:21:34.4586326Z env:
+2026-09-18T10:21:34.4586444Z   GOTOOLCHAIN: local
+2026-09-18T10:21:34.4586597Z   PNPM_HOME: /home/runner/setup-pnpm/node_modules/.bin
+2026-09-18T10:21:34.4586767Z ##[endgroup]
+2026-09-18T10:21:34.4958550Z ./scripts/api.sh
+2026-09-18T10:21:34.9008392Z $ openapi-typescript ../openapi/management.json -o src/lib/api/schema.d.ts
+2026-09-18T10:21:35.1531849Z ✨ openapi-typescript 7.13.0
+2026-09-18T10:21:35.3269087Z 🚀 ../openapi/management.json → src/lib/api/schema.d.ts [174.8ms]
+2026-09-18T10:21:35.3838599Z ./scripts/api.sh
+2026-09-18T10:21:35.7828323Z $ openapi-typescript ../openapi/management.json -o src/lib/api/schema.d.ts
+2026-09-18T10:21:36.0389631Z ✨ openapi-typescript 7.13.0
+2026-09-18T10:21:36.1916196Z 🚀 ../openapi/management.json → src/lib/api/schema.d.ts [153.6ms]
+2026-09-18T10:21:36.2474071Z ##[group]Run node scripts/check-release-version.mjs
+2026-09-18T10:21:36.2474461Z node scripts/check-release-version.mjs
+2026-09-18T10:21:36.2506087Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+2026-09-18T10:21:36.2506275Z env:
+2026-09-18T10:21:36.2506386Z   GOTOOLCHAIN: local
+2026-09-18T10:21:36.2506539Z   PNPM_HOME: /home/runner/setup-pnpm/node_modules/.bin
+2026-09-18T10:21:36.2506711Z ##[endgroup]
+2026-09-18T10:21:36.2762634Z Release version: 3.0.0
+2026-09-18T10:21:36.2863325Z ##[group]Run node scripts/release-inventory.mjs
+2026-09-18T10:21:36.2863567Z node scripts/release-inventory.mjs
+2026-09-18T10:21:36.2870451Z git diff --exit-code -- docs/roadmap/evidence/release-inventory.json docs/roadmap/evidence/release-dependencies.json docs/roadmap/evidence/release-module-graph.txt
+2026-09-18T10:21:36.2951358Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+2026-09-18T10:21:36.2951549Z env:
+2026-09-18T10:21:36.2951665Z   GOTOOLCHAIN: local
+2026-09-18T10:21:36.2951819Z   PNPM_HOME: /home/runner/setup-pnpm/node_modules/.bin
+2026-09-18T10:21:36.2951993Z ##[endgroup]
+2026-09-18T10:21:36.9291662Z Reconciled 100 management operations, 77 inference tuples, 18 unchanged fixtures and 216 modules.
+2026-09-18T10:21:36.9396563Z ##[group]Run go test -race ./...
+2026-09-18T10:21:36.9396752Z go test -race ./...
+2026-09-18T10:21:36.9427766Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+2026-09-18T10:21:36.9427955Z env:
+2026-09-18T10:21:36.9428065Z   GOTOOLCHAIN: local
+2026-09-18T10:21:36.9428221Z   PNPM_HOME: /home/runner/setup-pnpm/node_modules/.bin
+2026-09-18T10:21:36.9428394Z ##[endgroup]
+2026-09-18T10:22:22.7071511Z ?   	github.com/tyk-swe/olp/cmd/olp	[no test files]
+2026-09-18T10:22:39.2394900Z ok  	github.com/tyk-swe/olp/internal/access	16.529s
+2026-09-18T10:22:39.2395200Z ok  	github.com/tyk-swe/olp/internal/config	1.012s
+2026-09-18T10:22:39.2395427Z ok  	github.com/tyk-swe/olp/internal/connectors	1.120s
+2026-09-18T10:22:39.2395649Z ok  	github.com/tyk-swe/olp/internal/console	1.015s
+2026-09-18T10:22:39.2395900Z ?   	github.com/tyk-swe/olp/internal/coordination	[no test files]
+2026-09-18T10:22:39.2396193Z ?   	github.com/tyk-swe/olp/internal/database	[no test files]
+2026-09-18T10:22:39.2396471Z ok  	github.com/tyk-swe/olp/internal/egress	1.011s
+2026-09-18T10:23:15.5167206Z ok  	github.com/tyk-swe/olp/internal/gateway	49.700s
+2026-09-18T10:23:15.5167507Z ok  	github.com/tyk-swe/olp/internal/limits	1.010s
+2026-09-18T10:23:15.5167766Z ?   	github.com/tyk-swe/olp/internal/management	[no test files]
+2026-09-18T10:23:15.5168046Z ok  	github.com/tyk-swe/olp/internal/management/contract	1.007s
+2026-09-18T10:23:15.5168281Z ok  	github.com/tyk-swe/olp/internal/media	3.491s
+2026-09-18T10:23:15.5168515Z ok  	github.com/tyk-swe/olp/internal/observability	1.023s
+2026-09-18T10:23:15.5168748Z ok  	github.com/tyk-swe/olp/internal/process	1.327s
+2026-09-18T10:23:15.5168972Z ok  	github.com/tyk-swe/olp/internal/protocols	1.093s
+2026-09-18T10:23:15.5169313Z ok  	github.com/tyk-swe/olp/internal/protocols/openai	1.927s
+2026-09-18T10:23:15.5169586Z ok  	github.com/tyk-swe/olp/internal/protocols/sse	1.609s
+2026-09-18T10:23:15.5170119Z ok  	github.com/tyk-swe/olp/internal/providers	1.045s
+2026-09-18T10:23:15.5170359Z ok  	github.com/tyk-swe/olp/internal/routes	1.018s
+2026-09-18T10:23:15.5170576Z ok  	github.com/tyk-swe/olp/internal/runtime	1.025s
+2026-09-18T10:23:15.5170792Z ok  	github.com/tyk-swe/olp/internal/secrets	1.587s
+2026-09-18T10:23:15.5171009Z ok  	github.com/tyk-swe/olp/internal/telemetry	1.020s
+2026-09-18T10:23:15.5171247Z ?   	github.com/tyk-swe/olp/internal/testutil	[no test files]
+2026-09-18T10:23:15.5171474Z ok  	github.com/tyk-swe/olp/internal/usage	1.061s
+2026-09-18T10:23:15.5171683Z ?   	github.com/tyk-swe/olp/openapi	[no test files]
+2026-09-18T10:23:15.5171947Z ?   	github.com/tyk-swe/olp/tests/fixtures	[no test files]
+2026-09-18T10:23:15.5172217Z ?   	github.com/tyk-swe/olp/tests/sdkfixture	[no test files]
+2026-09-18T10:23:15.6977013Z ##[group]Run azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310
+2026-09-18T10:23:15.6977237Z with:
+2026-09-18T10:23:15.6977348Z   version: latest
+2026-09-18T10:23:15.6978865Z   token: ***
+2026-09-18T10:23:15.6978992Z   downloadBaseURL: https://get.helm.sh
+2026-09-18T10:23:15.6979140Z env:
+2026-09-18T10:23:15.6979247Z   GOTOOLCHAIN: local
+2026-09-18T10:23:15.6979396Z   PNPM_HOME: /home/runner/setup-pnpm/node_modules/.bin
+2026-09-18T10:23:15.6979569Z ##[endgroup]
+2026-09-18T10:23:15.8289830Z ##[group]Installing v4.3.0
+2026-09-18T10:23:15.8330005Z Downloading 'v4.3.0' from 'https://get.helm.sh'
+2026-09-18T10:23:15.9244696Z [command]/usr/bin/tar xz --warning=no-unknown-keyword --overwrite -C /home/runner/work/_temp/8f1c3eaf-46fa-40f6-acfc-b7090ede699d -f /home/runner/work/_temp/83e795af-b1e8-4e5d-92ca-6416d28ac6b3
+2026-09-18T10:23:16.5995604Z ##[endgroup]
+2026-09-18T10:23:16.5997508Z Helm tool version 'v4.3.0' has been cached at /opt/hostedtoolcache/helm/4.3.0/x64/linux-amd64/helm
+2026-09-18T10:23:16.6124900Z ##[group]Run ./scripts/check-helm.sh
+2026-09-18T10:23:16.6125233Z ./scripts/check-helm.sh
+2026-09-18T10:23:16.6161670Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+2026-09-18T10:23:16.6161878Z env:
+2026-09-18T10:23:16.6161991Z   GOTOOLCHAIN: local
+2026-09-18T10:23:16.6162149Z   PNPM_HOME: /home/runner/setup-pnpm/node_modules/.bin
+2026-09-18T10:23:16.6162324Z ##[endgroup]
+2026-09-18T10:23:16.6622890Z ==> Linting deploy/helm
+2026-09-18T10:23:16.6630614Z [INFO] Chart.yaml: icon is recommended
+2026-09-18T10:23:16.6630754Z 
+2026-09-18T10:23:16.6630852Z 1 chart(s) linted, 0 chart(s) failed
+2026-09-18T10:23:16.7111166Z ==> Linting deploy/helm
+2026-09-18T10:23:16.7111460Z [INFO] Chart.yaml: icon is recommended
+2026-09-18T10:23:16.7111590Z 
+2026-09-18T10:23:16.7111683Z 1 chart(s) linted, 0 chart(s) failed
+2026-09-18T10:23:17.7042149Z Unable to find image 'ghcr.io/yannh/kubeconform@sha256:faffaf43f95aa6425306e1ab8d6fcad72acb9049158f38e574c085ea1ec0f64e' locally
+2026-09-18T10:23:18.7269448Z ghcr.io/yannh/kubeconform@sha256:faffaf43f95aa6425306e1ab8d6fcad72acb9049158f38e574c085ea1ec0f64e: Pulling from yannh/kubeconform
+2026-09-18T10:23:19.2966378Z 4e2b705e3bec: Pulling fs layer
+2026-09-18T10:23:19.2966679Z db0f07ce641d: Pulling fs layer
+2026-09-18T10:23:19.2966844Z be8b6fa8070b: Pulling fs layer
+2026-09-18T10:23:19.5554993Z 4e2b705e3bec: Verifying Checksum
+2026-09-18T10:23:19.5555363Z 4e2b705e3bec: Download complete
+2026-09-18T10:23:19.6254187Z be8b6fa8070b: Download complete
+2026-09-18T10:23:19.6254441Z 4e2b705e3bec: Pull complete
+2026-09-18T10:23:19.6378469Z db0f07ce641d: Verifying Checksum
+2026-09-18T10:23:19.6378776Z db0f07ce641d: Download complete
+2026-09-18T10:23:20.4427520Z db0f07ce641d: Pull complete
+2026-09-18T10:23:20.5336320Z be8b6fa8070b: Pull complete
+2026-09-18T10:23:20.5372914Z Digest: sha256:faffaf43f95aa6425306e1ab8d6fcad72acb9049158f38e574c085ea1ec0f64e
+2026-09-18T10:23:20.5381076Z Status: Downloaded newer image for ghcr.io/yannh/kubeconform@sha256:faffaf43f95aa6425306e1ab8d6fcad72acb9049158f38e574c085ea1ec0f64e
+2026-09-18T10:23:21.9255510Z Summary: 22 resources found parsing stdin - Valid: 18, Invalid: 0, Errors: 0, Skipped: 4
+2026-09-18T10:23:22.2931395Z Helm profiles and invalid-input checks passed.
+2026-09-18T10:23:22.2990469Z ##[group]Run actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
+2026-09-18T10:23:22.2990695Z with:
+2026-09-18T10:23:22.2990812Z   name: management-contract
+2026-09-18T10:23:22.2990955Z   path: openapi/management.json
+2026-09-18T10:23:22.2991099Z   if-no-files-found: error
+2026-09-18T10:23:22.2991233Z   compression-level: 6
+2026-09-18T10:23:22.2991354Z   overwrite: false
+2026-09-18T10:23:22.2991474Z   include-hidden-files: false
+2026-09-18T10:23:22.2991603Z env:
+2026-09-18T10:23:22.2991721Z   GOTOOLCHAIN: local
+2026-09-18T10:23:22.2991871Z   PNPM_HOME: /home/runner/setup-pnpm/node_modules/.bin
+2026-09-18T10:23:22.2992041Z ##[endgroup]
+2026-09-18T10:23:22.4022066Z With the provided path, there will be 1 file uploaded
+2026-09-18T10:23:22.4025341Z Artifact name is valid!
+2026-09-18T10:23:22.4025987Z Root directory input is valid!
+2026-09-18T10:23:22.7401496Z Beginning upload of artifact content to blob storage
+2026-09-18T10:23:23.0258576Z Uploaded bytes 21912
+2026-09-18T10:23:23.0852676Z Finished uploading artifact content to blob storage!
+2026-09-18T10:23:23.0853400Z SHA256 digest of uploaded artifact zip is 77fe857bc4e07d0ec7427c9e1a955073326eb2efcb0ccf6dde5a4944e1cfbffe
+2026-09-18T10:23:23.0854181Z Finalizing artifact upload
+2026-09-18T10:23:23.4878982Z Artifact management-contract.zip successfully finalized. Artifact ID 10542376134
+2026-09-18T10:23:23.4879740Z Artifact management-contract has been successfully uploaded! Final size is 21912 bytes. Artifact ID is 10542376134
+2026-09-18T10:23:23.4882714Z Artifact download URL: https://github.com/tyk-swe/olp/actions/runs/35334054213/artifacts/10542376134
+2026-09-18T10:23:23.5021386Z Post job cleanup.
+2026-09-18T10:23:23.5024563Z ##[start-action display=Run actions/setup-node@820762786026740c76f36085b0efc47a31fe5020;id=__f02e2edf-54d4-4b07-bfaf-0d3cbc53936d.__actions_setup-node]
+2026-09-18T10:23:23.5047221Z Post job cleanup.
+2026-09-18T10:23:23.5862941Z [command]/usr/bin/tar --posix -cf cache.tzst --exclude cache.tzst -P -C /home/runner/work/olp/olp --files-from manifest.txt --use-compress-program zstdmt
+2026-09-18T10:23:24.4303096Z Failed to save: Unable to reserve cache with key node-cache-Linux-x64-pnpm-9f58594c242bf5e569eea53d3e37b4ccf49bca194ccaae07d92574d4dca62533, another job may be creating this cache.
+2026-09-18T10:23:24.4413351Z ##[end-action id=__f02e2edf-54d4-4b07-bfaf-0d3cbc53936d.__actions_setup-node;outcome=success;conclusion=success;duration_ms=938]
+2026-09-18T10:23:24.4415524Z ##[start-action display=Run pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413;id=__f02e2edf-54d4-4b07-bfaf-0d3cbc53936d.__pnpm_action-setup]
+2026-09-18T10:23:24.4437419Z Post job cleanup.
+2026-09-18T10:23:24.5335186Z Pruning is unnecessary.
+2026-09-18T10:23:24.5417074Z ##[end-action id=__f02e2edf-54d4-4b07-bfaf-0d3cbc53936d.__pnpm_action-setup;outcome=success;conclusion=success;duration_ms=100]
+2026-09-18T10:23:24.5419854Z ##[start-action display=Run actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16;id=__f02e2edf-54d4-4b07-bfaf-0d3cbc53936d.__actions_setup-go]
+2026-09-18T10:23:24.5453606Z Post job cleanup.
+2026-09-18T10:23:24.6266924Z [command]/opt/hostedtoolcache/go/1.27.1/x64/bin/go env GOMODCACHE
+2026-09-18T10:23:24.6298507Z [command]/opt/hostedtoolcache/go/1.27.1/x64/bin/go env GOCACHE
+2026-09-18T10:23:24.6337399Z /home/runner/.cache/go-build
+2026-09-18T10:23:24.6338356Z /home/runner/go/pkg/mod
+2026-09-18T10:23:24.6481578Z [command]/usr/bin/tar --posix -cf cache.tzst --exclude cache.tzst -P -C /home/runner/work/olp/olp --files-from manifest.txt --use-compress-program zstdmt
+2026-09-18T10:23:26.9923141Z Failed to save: Unable to reserve cache with key setup-go-Linux-x64-ubuntu24-go-1.27.1-6907cd9f6b0643e4f370533693c6212e6e01d21c485d39d220f91f38f43c10b0, another job may be creating this cache.
+2026-09-18T10:23:27.0281265Z ##[end-action id=__f02e2edf-54d4-4b07-bfaf-0d3cbc53936d.__actions_setup-go;outcome=success;conclusion=success;duration_ms=2486]
+2026-09-18T10:23:27.0336813Z Post job cleanup.
+2026-09-18T10:23:27.0939051Z [command]/usr/bin/git version
+2026-09-18T10:23:27.0981596Z git version 2.55.0
+2026-09-18T10:23:27.1006619Z Temporarily overriding HOME='/home/runner/work/_temp/ed62b2eb-5bbf-45bf-84c2-4264d86d275a' before making global git config changes
+2026-09-18T10:23:27.1007369Z Adding repository directory to the temporary git global config as a safe directory
+2026-09-18T10:23:27.1009966Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/olp/olp
+2026-09-18T10:23:27.1038055Z Removing SSH command configuration
+2026-09-18T10:23:27.1042784Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-09-18T10:23:27.1069744Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-09-18T10:23:27.1272637Z Removing HTTP extra header
+2026-09-18T10:23:27.1277206Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-09-18T10:23:27.1307213Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-09-18T10:23:27.1515942Z Removing includeIf entries pointing to credentials config files
+2026-09-18T10:23:27.1517641Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-09-18T10:23:27.1547537Z includeif.gitdir:/home/runner/work/olp/olp/.git.path
+2026-09-18T10:23:27.1548000Z includeif.gitdir:/home/runner/work/olp/olp/.git/worktrees/*.path
+2026-09-18T10:23:27.1548402Z includeif.gitdir:/github/workspace/.git.path
+2026-09-18T10:23:27.1548784Z includeif.gitdir:/github/workspace/.git/worktrees/*.path
+2026-09-18T10:23:27.1553734Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/home/runner/work/olp/olp/.git.path
+2026-09-18T10:23:27.1575461Z /home/runner/work/_temp/git-credentials-91103ca7-83a3-42a5-b382-438cb8c6bfde.config
+2026-09-18T10:23:27.1582050Z [command]/usr/bin/git config --local --unset includeif.gitdir:/home/runner/work/olp/olp/.git.path \/home\/runner\/work\/_temp\/git\-credentials\-91103ca7\-83a3\-42a5\-b382\-438cb8c6bfde\.config
+2026-09-18T10:23:27.1614292Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/home/runner/work/olp/olp/.git/worktrees/*.path
+2026-09-18T10:23:27.1636759Z /home/runner/work/_temp/git-credentials-91103ca7-83a3-42a5-b382-438cb8c6bfde.config
+2026-09-18T10:23:27.1642726Z [command]/usr/bin/git config --local --unset includeif.gitdir:/home/runner/work/olp/olp/.git/worktrees/*.path \/home\/runner\/work\/_temp\/git\-credentials\-91103ca7\-83a3\-42a5\-b382\-438cb8c6bfde\.config
+2026-09-18T10:23:27.1677892Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/github/workspace/.git.path
+2026-09-18T10:23:27.1699418Z /github/runner_temp/git-credentials-91103ca7-83a3-42a5-b382-438cb8c6bfde.config
+2026-09-18T10:23:27.1704736Z [command]/usr/bin/git config --local --unset includeif.gitdir:/github/workspace/.git.path \/github\/runner_temp\/git\-credentials\-91103ca7\-83a3\-42a5\-b382\-438cb8c6bfde\.config
+2026-09-18T10:23:27.1732462Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/github/workspace/.git/worktrees/*.path
+2026-09-18T10:23:27.1754292Z /github/runner_temp/git-credentials-91103ca7-83a3-42a5-b382-438cb8c6bfde.config
+2026-09-18T10:23:27.1760362Z [command]/usr/bin/git config --local --unset includeif.gitdir:/github/workspace/.git/worktrees/*.path \/github\/runner_temp\/git\-credentials\-91103ca7\-83a3\-42a5\-b382\-438cb8c6bfde\.config
+2026-09-18T10:23:27.1790303Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-09-18T10:23:27.1965651Z Removing credentials config '/home/runner/work/_temp/git-credentials-91103ca7-83a3-42a5-b382-438cb8c6bfde.config'
+2026-09-18T10:23:27.2103460Z Cleaning up orphan processes

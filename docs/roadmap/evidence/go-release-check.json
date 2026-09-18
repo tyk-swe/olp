@@ -1,0 +1,113 @@
+{
+  "language": "go",
+  "scenario": "check",
+  "ref": "ccd138f",
+  "started": "2026-09-18T10:27:51.564Z",
+  "machine": {
+    "platform": "linux",
+    "release": "7.0.0-31-generic",
+    "arch": "x64",
+    "cpu": "Intel Core Processor (Haswell, no TSX)",
+    "logicalCPUs": 8,
+    "memoryBytes": 24598122496,
+    "freeMemoryBytes": 22072684544
+  },
+  "cache": {
+    "downloads": "prefetched; measured separately",
+    "compilation": "private cache populated by explicit warmup",
+    "sharedOSPageCache": true
+  },
+  "runs": [
+    {
+      "command": [
+        "make",
+        "check"
+      ],
+      "seconds": 56.402345052000015,
+      "status": 0,
+      "log": "release-build-logs/check/run-1.log"
+    },
+    {
+      "command": [
+        "make",
+        "check"
+      ],
+      "seconds": 59.42245613399998,
+      "status": 0,
+      "log": "release-build-logs/check/run-2.log"
+    },
+    {
+      "command": [
+        "make",
+        "check"
+      ],
+      "seconds": 56.80143177900003,
+      "status": 0,
+      "log": "release-build-logs/check/run-3.log"
+    },
+    {
+      "command": [
+        "make",
+        "check"
+      ],
+      "seconds": 57.655099669000016,
+      "status": 0,
+      "log": "release-build-logs/check/run-4.log"
+    },
+    {
+      "command": [
+        "make",
+        "check"
+      ],
+      "seconds": 56.591555070000005,
+      "status": 0,
+      "log": "release-build-logs/check/run-5.log"
+    }
+  ],
+  "commit": "ccd138f288a99f66a2bb1145eb75d5ce57398416",
+  "toolchains": {
+    "go": "go version go1.27.1 linux/amd64",
+    "cc": "cc (Ubuntu 15.2.0-16ubuntu1) 15.2.0\nCopyright (C) 2025 Free Software Foundation, Inc.\nThis is free software; see the source for copying conditions.  There is NO\nwarranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.",
+    "node": "v26.8.2",
+    "pnpm": "11.24.0"
+  },
+  "prefetch": {
+    "command": [
+      "go",
+      "mod",
+      "download"
+    ],
+    "seconds": 0.033562220000000025,
+    "status": 0,
+    "stdout": "",
+    "stderr": ""
+  },
+  "consolePrefetch": {
+    "command": [
+      "pnpm",
+      "install",
+      "--frozen-lockfile"
+    ],
+    "seconds": 1.9404085219999998,
+    "status": 0,
+    "stdout": "Scope: all 3 workspace projects\n\u2713 Lockfile passes supply-chain policies (verified 40m ago)\nLockfile is up to date, resolution step is skipped\nProgress: resolved 1, reused 0, downloaded 0, added 0\nPackages: +300\n++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++\nPackages are hard linked from the content-addressable store to the virtual store.\n  Content-addressable store is at: /tmp/.pnpm-store/v11\n  Virtual store is at:             node_modules/.pnpm\nProgress: resolved 300, reused 300, downloaded 0, added 300, done\n\nDone in 1.7s using pnpm v11.24.0\n",
+    "stderr": ""
+  },
+  "warmup": {
+    "command": [
+      "make",
+      "check"
+    ],
+    "seconds": 172.69353843999997,
+    "status": 0,
+    "stdout": "./scripts/api.sh\n\u2728 openapi-typescript 7.13.0\n\ud83d\ude80 ../openapi/management.json \u2192 src/lib/api/schema.d.ts [395.5ms]\ngo vet ./...\nmake test\nmake[1]: Entering directory '/tmp/olp-build-tdBdEZ/source'\ngo test ./...\n?   \tgithub.com/tyk-swe/olp/cmd/olp\t[no test files]\nok  \tgithub.com/tyk-swe/olp/internal/access\t15.545s\nok  \tgithub.com/tyk-swe/olp/internal/config\t0.009s\nok  \tgithub.com/tyk-swe/olp/internal/connectors\t0.282s\nok  \tgithub.com/tyk-swe/olp/internal/console\t0.013s\n?   \tgithub.com/tyk-swe/olp/internal/coordination\t[no test files]\n?   \tgithub.com/tyk-swe/olp/internal/database\t[no test files]\nok  \tgithub.com/tyk-swe/olp/internal/egress\t0.015s\nok  \tgithub.com/tyk-swe/olp/internal/gateway\t46.524s\nok  \tgithub.com/tyk-swe/olp/internal/limits\t0.014s\n?   \tgithub.com/tyk-swe/olp/internal/management\t[no test files]\nok  \tgithub.com/tyk-swe/olp/internal/management/contract\t0.013s\nok  \tgithub.com/tyk-swe/olp/internal/media\t1.425s\nok  \tgithub.com/tyk-swe/olp/internal/observability\t0.039s\nok  \tgithub.com/tyk-swe/olp/internal/process\t0.346s\nok  \tgithub.com/tyk-swe/olp/internal/protocols\t0.051s\nok  \tgithub.com/tyk-swe/olp/internal/protocols/openai\t0.239s\nok  \tgithub.com/tyk-swe/olp/internal/protocols/sse\t0.105s\nok  \tgithub.com/tyk-swe/olp/internal/providers\t0.090s\nok  \tgithub.com/tyk-swe/olp/internal/routes\t0.051s\nok  \tgithub.com/tyk-swe/olp/internal/runtime\t0.087s\nok  \tgithub.com/tyk-swe/olp/internal/secrets\t1.055s\nok  \tgithub.com/tyk-swe/olp/internal/telemetry\t0.038s\n?   \tgithub.com/tyk-swe/olp/internal/testutil\t[no test files]\nok  \tgithub.com/tyk-swe/olp/internal/usage\t0.065s\n?   \tgithub.com/tyk-swe/olp/openapi\t[no test files]\n?   \tgithub.com/tyk-swe/olp/tests/fixtures\t[no test files]\n?   \tgithub.com/tyk-swe/olp/tests/sdkfixture\t[no test files]\nmake[1]: Leaving directory '/tmp/olp-build-tdBdEZ/source'\npnpm --dir console verify\nChecking formatting...\nAll matched files use Prettier code style!\nLoading svelte-check in workspace: /tmp/olp-build-tdBdEZ/source/console\nGetting Svelte diagnostics...\n\nsvelte-check found 0 errors and 0 warnings\n\n RUN  v5.0.0 /tmp/olp-build-tdBdEZ/source/console\n\n\n Test Files  55 passed (55)\n      Tests  480 passed (480)\n   Start at  10:30:37\n   Duration  11.37s (transform 52%, environment 22%, import 14%, tests 11%, worker 1%)\n\nEnvironment  |client| jsdom was created 11 times \u00b7 13.93s total, 30% of tracked time\n             create it once per worker with pool: 'vmThreads' (keeps per-file isolation) or isolate: false (shares it across files)\n             learn more: https://vitest.dev/guide/improving-performance#test-environments\n\n",
+    "stderr": "$ openapi-typescript ../openapi/management.json -o src/lib/api/schema.d.ts\n$ pnpm format:check && pnpm check && pnpm test\n$ prettier --check .\n$ svelte-kit sync && svelte-check --tsconfig ./tsconfig.json && eslint .\n$ vitest run\n"
+  },
+  "summary": {
+    "successfulRuns": 5,
+    "medianSeconds": 56.80143177900003,
+    "minSeconds": 56.402345052000015,
+    "maxSeconds": 59.42245613399998
+  },
+  "finished": "2026-09-18T10:35:35.525Z"
+}

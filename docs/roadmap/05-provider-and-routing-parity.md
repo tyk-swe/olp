@@ -3,8 +3,9 @@
 [Roadmap](README.md) | [Previous: limits and accounting](04-limits-and-accounting.md) |
 [Next: media and console parity](06-media-and-console-parity.md)
 
-**Status:** Implemented and qualified on Linux amd64 (2026-09-16).
-**Prerequisites:** M4 complete. Inherits the open M1 native arm64 qualification gate.
+**Status:** Complete (2026-09-18). **Prerequisites:** M4 complete.
+
+[Final qualification and native evidence](evidence/release-qualification.md).
 
 [Qualification evidence](evidence/provider-and-routing-parity.md) covers all ten
 tickets, service and SDK contracts, browser journeys, dependency review, and
