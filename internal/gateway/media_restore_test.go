@@ -19,8 +19,10 @@ import (
 )
 
 func TestReplacementRestoreRetainsMediaJobsAndRotatedCredentials(t *testing.T) {
-	if os.Getenv("OLP_TEST_RESTORE_VALKEY_URL") == "" {
-		t.Skip("requires isolated recovery Valkey")
+	for _, name := range []string{"OLP_TEST_RESTORE_VALKEY_URL", "OLP_TEST_BINARY"} {
+		if os.Getenv(name) == "" {
+			t.Fatalf("%s is required; run make integration", name)
+		}
 	}
 	f := seedMediaFixture(t, "api_key", true)
 	resp := f.call(t, http.MethodPost, "/v1/videos", videoCreateContentType, strings.NewReader(videoCreateBody))

@@ -19,6 +19,7 @@ export default defineConfig({
   },
   plugins: [sveltekit()],
   test: {
+    allowOnly: false,
     clearMocks: true,
     restoreMocks: true,
     // Local-time conversions are asserted as literal instants, which only means

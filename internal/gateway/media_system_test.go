@@ -1,3 +1,5 @@
+//go:build integration
+
 package gateway
 
 import (
@@ -29,15 +31,14 @@ import (
 )
 
 // mediaSystemEnv names a PostgreSQL admin connection the test creates and
-// drops a scratch database on. Without it these tests skip: the durable media
-// lifecycle cannot be qualified against a fake.
+// drops a scratch database on. The integration suite requires this service.
 const mediaSystemEnv = "OLP_TEST_DATABASE_ADMIN_URL"
 
 func systemPool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
 	admin := os.Getenv(mediaSystemEnv)
 	if admin == "" {
-		t.Skipf("%s unset; skipping postgres-backed media system test", mediaSystemEnv)
+		t.Fatalf("%s is required; run make integration", mediaSystemEnv)
 	}
 	cfg, err := pgxpool.ParseConfig(admin)
 	if err != nil {

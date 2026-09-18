@@ -17,8 +17,12 @@ Use Go 1.27.1, a C compiler/linker and glibc headers, Node.js 26, pnpm 11, Docke
 | --- | --- |
 | `make setup` | Install workspace dependencies and generate API contracts. |
 | `make dev` | Start PostgreSQL, Valkey, Go, and Vite at http://127.0.0.1:5173. |
-| `make check` | Run gofmt, vet, Go tests, ESLint, Svelte/type checks, and Vitest. |
-| `make test` | Run Go unit and protocol tests. |
+| `make check` | Run gofmt, vet, ESLint, Svelte/type checks, and all local tests. |
+| `make test` | Run Go, console unit/component, and script tests without containers. |
+| `make test-go` | Run Go unit and protocol tests. |
+| `make test-console` | Run console unit and component tests. |
+| `make test-scripts` | Run automation script tests. |
+| `make test-race` | Run uncached Go tests with race detection. |
 | `make integration` | Run disposable-service, recovery, SDK, and Chromium suites. |
 | `make api` | Generate Go and TypeScript types from the checked-in OpenAPI contract. |
 | `make build` | Build the release binary and static console. |
@@ -31,10 +35,12 @@ Go code uses standard `gofmt` formatting and `go vet` cleanliness. Console code 
 ## Testing Guidelines
 
 Place Go unit tests beside their feature as `*_test.go`. Process and service
-suites live in `tests/integration/`, use the `integration` build tag, and run
-under `make integration`. Use descriptive behavior names, Vitest
+suites live in `tests/integration/` or beside their feature, use the
+`integration` build tag, and run under `make integration`. Missing service
+configuration must fail an explicitly selected integration test. Use descriptive behavior names, Vitest
 `*.test.ts`/`*.svelte.test.ts`, and Playwright `*.spec.ts`. Run console tests with
-`pnpm --dir console test` and Go tests with `go test ./...`. No numeric coverage
+`make test-console` and Go tests with `make test-go`. See `tests/README.md`
+for filtering, timeout, and coverage options. No numeric coverage
 threshold is configured; preserve meaningful fixtures and cover changed behavior.
 Run integration checks for service or browser changes.
 

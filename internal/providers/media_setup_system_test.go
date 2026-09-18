@@ -1,3 +1,5 @@
+//go:build integration
+
 package providers
 
 import (
@@ -25,7 +27,7 @@ import (
 func TestMediaManagementSetupPublishesUsableRoutes(t *testing.T) {
 	adminURL := os.Getenv("OLP_TEST_DATABASE_ADMIN_URL")
 	if adminURL == "" {
-		t.Skip("OLP_TEST_DATABASE_ADMIN_URL unset")
+		t.Fatal("OLP_TEST_DATABASE_ADMIN_URL is required; run make integration")
 	}
 	cfg, err := pgxpool.ParseConfig(adminURL)
 	if err != nil {

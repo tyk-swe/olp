@@ -25,7 +25,7 @@ func required(t *testing.T, name string) string {
 	t.Helper()
 	value := os.Getenv(name)
 	if value == "" {
-		t.Fatalf("%s is required; run make go-integration", name)
+		t.Fatalf("%s is required; run make integration", name)
 	}
 	return value
 }

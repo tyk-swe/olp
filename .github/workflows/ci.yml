@@ -29,7 +29,7 @@ jobs:
         run: |
           node scripts/release-inventory.mjs
           git diff --exit-code -- docs/roadmap/evidence/release-inventory.json docs/roadmap/evidence/release-dependencies.json docs/roadmap/evidence/release-module-graph.txt
-      - run: go test -race ./...
+      - run: make test-race
       - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
       - run: ./scripts/check-helm.sh
       - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6

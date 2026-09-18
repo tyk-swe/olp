@@ -25,8 +25,9 @@ create the first owner. Vite serves the console with hot reload and proxies API,
 OIDC callback, and streaming requests through that same origin. PostgreSQL and
 Valkey use isolated development volumes and loopback ports 54321 and 63791.
 
-`make check` runs the required local checks. `make integration` runs the
-service, recovery, SDK, and Chromium journey suites. CI also qualifies
+`make test` runs Go, console, and script tests without containers. `make check`
+adds contract generation and static checks; `make test-race` checks Go races.
+`make integration` runs the service, recovery, SDK, and Chromium journey suites. CI also qualifies
 dependencies. See
 [CONTRIBUTING.md](CONTRIBUTING.md) for commands and the TypeScript 6.0 support
 exception, and [the architecture map](docs/architecture.md) for feature ownership.

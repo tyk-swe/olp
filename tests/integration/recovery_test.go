@@ -20,9 +20,8 @@ import (
 // The shell entrypoints are the same ones operators use. Failure assertions
 // inspect the destination, not just exit codes, so a partial restore cannot pass.
 func TestReplacementRestoreIsAtomicAndAuthenticatesKeys(t *testing.T) {
-	if os.Getenv("OLP_TEST_RESTORE_VALKEY_URL") == "" {
-		t.Skip("requires isolated recovery Valkey")
-	}
+	restoreValkey := required(t, "OLP_TEST_RESTORE_VALKEY_URL")
+	binary := required(t, "OLP_TEST_BINARY")
 	h := newAccessHarness(t)
 	h.owner()
 	secretID := uuid.NewString()
@@ -65,7 +64,7 @@ func TestReplacementRestoreIsAtomicAndAuthenticatesKeys(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(assets, "index.html"), []byte("<html>recovery</html>"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	env := map[string]string{"OLP_DATABASE_URL": h.DBURL, "OLP_VALKEY_URL": os.Getenv("OLP_TEST_RESTORE_VALKEY_URL"), "OLP_RESTORE_VALKEY_ISOLATED": "true", "OLP_BACKUP_TRAFFIC_QUIESCED": "true", "OLP_AUTH_HMAC_KEY_FILE": auth, "OLP_MASTER_KEY_FILE": master, "OLP_BOOTSTRAP_TOKEN_FILE": bootstrap, "OLP_CONSOLE_DIR": assets, "OLP_MAINTENANCE_BIN": os.Getenv("OLP_TEST_BINARY")}
+	env := map[string]string{"OLP_DATABASE_URL": h.DBURL, "OLP_VALKEY_URL": restoreValkey, "OLP_RESTORE_VALKEY_ISOLATED": "true", "OLP_BACKUP_TRAFFIC_QUIESCED": "true", "OLP_AUTH_HMAC_KEY_FILE": auth, "OLP_MASTER_KEY_FILE": master, "OLP_BOOTSTRAP_TOKEN_FILE": bootstrap, "OLP_CONSOLE_DIR": assets, "OLP_MAINTENANCE_BIN": binary}
 	run := func(script string, args ...string) ([]byte, error) {
 		c := exec.CommandContext(t.Context(), filepath.Join(root, "scripts", script), args...)
 		c.Dir = root

@@ -10,8 +10,12 @@ Release platforms are native Linux amd64 and arm64. macOS and musl are unqualifi
 | --- | --- |
 | `make setup` | Download modules, install the pnpm workspace, generate contracts |
 | `make dev` | Start PostgreSQL, Valkey, Go on 8082/private 9092, and Vite on 5173 |
-| `make check` | gofmt, vet, unit/protocol tests, ESLint, Svelte/type checks, Vitest |
-| `make test` | Go unit and protocol suites without containers |
+| `make check` | gofmt, vet, ESLint, Svelte/type checks, and all local tests |
+| `make test` | Go, console unit/component, and script suites without containers |
+| `make test-go` | Go unit and protocol suites |
+| `make test-console` | Console unit and component suites |
+| `make test-scripts` | Automation script tests |
+| `make test-race` | Uncached Go tests with race detection, also required in CI |
 | `make integration` | Disposable services, race/process/recovery/SDK/Chromium suites |
 | `make api` | Generate Go and TypeScript types without building the gateway |
 | `make build` | Versioned `.local/bin/olp` plus separate `console/build` assets |
@@ -42,7 +46,14 @@ its own version and retain it until the independent replacement is verified.
 
 Keep feature types, validation, SQL, handlers and workflows together. See the
 [architecture map](docs/architecture.md). Unit tests live beside their owners;
-service suites live under `tests/integration`. Run `make integration` for
+service suites live under `tests/integration` or beside their owners with the
+`integration` build tag. Run `make test` after setup for all container-free
+behavioral checks; `make check` adds contract generation and static checks.
+Neither command installs dependencies or starts services. Go-only targets need
+Go and its native prerequisites, without Node or pnpm. See
+[tests/README.md](tests/README.md) for focused runs, timeouts, and coverage.
+
+Run `make integration` for
 persistence, authentication, inference, runtime publication, limits or browser
 changes. It provisions disposable TLS/authenticated services and runs the full
 console journey and replacement restore at packaged and Vite origins. Install

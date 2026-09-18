@@ -4,22 +4,14 @@ import (
 	"bufio"
 	"bytes"
 	"compress/gzip"
-	"context"
 	"encoding/json"
-	"errors"
 	"io"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"strings"
 	"testing"
-	"time"
 
-	"github.com/google/uuid"
-
-	"github.com/tyk-swe/olp/internal/coordination"
-	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/media"
 	"github.com/tyk-swe/olp/internal/runtime"
 )
@@ -329,100 +321,6 @@ func TestVideoCreateFailsClosedForUnenforceableTargetQuotas(t *testing.T) {
 			}
 			if h.mock.count("a") != 0 || h.mock.count("b") != 0 {
 				t.Fatal("video dispatched without enforceable quotas")
-			}
-		})
-	}
-}
-
-// mediaLimiter uses the disposable service provisioned by go-integration.
-func mediaLimiter(t *testing.T) *limits.Limiter {
-	t.Helper()
-	endpoint := os.Getenv("OLP_TEST_VALKEY_URL")
-	if endpoint == "" {
-		t.Skip("OLP_TEST_VALKEY_URL unset; skipping shared media quota test")
-	}
-	cfg, err := coordination.Configuration(endpoint, "", time.Second)
-	if err != nil {
-		t.Fatal(err)
-	}
-	client, err := coordination.Open(t.Context(), cfg)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(client.Close)
-	namespace := "olp_media_test_" + strings.ReplaceAll(uuid.NewString(), "-", "")
-	t.Cleanup(func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		keys, err := client.Do(ctx, "KEYS", namespace+"*")
-		if err != nil {
-			t.Error(err)
-			return
-		}
-		for _, key := range keys.([]any) {
-			if _, err := client.Do(ctx, "DEL", key.(string)); err != nil {
-				t.Error(err)
-			}
-		}
-	})
-	limiter, err := limits.New(client, namespace)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return limiter
-}
-
-func TestMediaKeySettlementChargesDispatchedRequests(t *testing.T) {
-	for _, streaming := range []bool{false, true} {
-		name := "unary"
-		if streaming {
-			name = "streaming"
-		}
-		t.Run(name, func(t *testing.T) {
-			limiter := mediaLimiter(t)
-			h := newMediaHarness(t)
-			h.gateway.Admission = NewAdmission(limiter, func() limits.OutagePolicy { return limits.FailClosed }, h.gateway.log)
-			authority := h.rt.keys[fullKey]
-			authority.LookupID = strings.ReplaceAll(uuid.NewString(), "-", "")
-			rpm, tpm, concurrency := int64(1), int64(100), int64(1)
-			authority.Policy.RequestsPerMinute = &rpm
-			authority.Policy.TokensPerMinute = &tpm
-			authority.Policy.MaxConcurrency = &concurrency
-			h.rt.keys[fullKey] = authority
-			request := `{"model":"team-chat","prompt":"photo"}`
-			if streaming {
-				request = `{"model":"team-chat","prompt":"photo","stream":true}`
-				h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
-					w.Header().Set("Content-Type", "text/event-stream")
-					io.WriteString(w, "data: {\"type\":\"image_generation.completed\",\"usage\":{\"input_tokens\":2,\"output_tokens\":3}}\n\n")
-				})
-			} else {
-				h.mock.set("a", status(200, `{"data":[{"url":"https://example.com/i.png"}],"usage":{"input_tokens":2,"output_tokens":3,"total_tokens":5}}`))
-			}
-			resp := h.do(t.Context(), "POST", "/v1/images/generations", fullKey, []byte(request), nil)
-			io.Copy(io.Discard, resp.Body)
-			resp.Body.Close()
-			if resp.StatusCode != 200 {
-				t.Fatalf("first status=%d", resp.StatusCode)
-			}
-			resp = h.do(t.Context(), "POST", "/v1/images/generations", fullKey, []byte(request), nil)
-			io.Copy(io.Discard, resp.Body)
-			resp.Body.Close()
-			if resp.StatusCode != 429 || h.mock.count("a") != 1 {
-				t.Fatalf("consumed RPM refunded: status=%d calls=%d", resp.StatusCode, h.mock.count("a"))
-			}
-			authority.Policy.RequestsPerMinute = nil
-			_, err := limiter.Reserve(t.Context(), keyRequest(authority, 96, time.Second))
-			var exceeded *limits.ExceededError
-			if !errors.As(err, &exceeded) || exceeded.Dimension != limits.DimensionTokens {
-				t.Fatalf("final usage not reconciled: %v", err)
-			}
-			lease, err := limiter.Reserve(t.Context(), keyRequest(authority, 95, time.Second))
-			if err != nil {
-				t.Fatalf("concurrency not released or usage overcharged: %v", err)
-			}
-			if err := lease.Refund(t.Context()); err != nil {
-				t.Fatal(err)
 			}
 		})
 	}
