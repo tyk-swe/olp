@@ -23,7 +23,7 @@ RUN glide_dir="$(go list -m -f '{{.Dir}}' github.com/valkey-io/valkey-glide/go/v
     cp "$glide_dir/LICENSE" /out/GLIDE-LICENSE && \
     cp "$glide_dir/THIRD_PARTY_LICENSES_GO" /out/GLIDE-THIRD-PARTY-LICENSES
 
-FROM node:26.8.2-alpine@sha256:ef24c5053d50fdc3e4e56eb4e7ddb7861874ab0fdc797046ba897581deb8e868 AS console-build
+FROM node:26.9.0-alpine@sha256:dbaa92e5758cbbcf85d65d5403fdb530fe3442cbe8c6dbfb7ef23365450d5070 AS console-build
 ARG BUILDKIT_SBOM_SCAN_STAGE=true
 ENV CI=true
 WORKDIR /src
