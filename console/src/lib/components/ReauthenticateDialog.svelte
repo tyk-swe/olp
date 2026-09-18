@@ -53,7 +53,7 @@
 </script>
 
 <dialog
-  class="reauth-dialog card card-light"
+  class="reauth-dialog card"
   bind:this={dialog}
   aria-labelledby="reauth-title"
   aria-describedby="reauth-description"
@@ -95,7 +95,9 @@
 
 <style>
   .reauth-dialog::backdrop {
-    background: rgb(16 16 16 / 78%);
+    background: rgb(0 0 0 / 75%);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
   }
 
   .reauth-dialog {
@@ -104,14 +106,17 @@
     width: min(calc(100% - 2rem), 28rem);
     margin: 0 auto;
     padding: clamp(1.25rem, 4vw, 1.75rem);
+    border: 1px solid var(--border);
     border-radius: var(--radius-panel);
+    background: var(--surface-raised);
     color: var(--foreground);
+    box-shadow: 0 16px 48px rgb(0 0 0 / 60%);
   }
 
   h2 {
     margin: 0;
     font-size: 1.5rem;
-    font-weight: 400;
+    font-weight: 500;
     letter-spacing: -0.02em;
     line-height: 1.1;
   }

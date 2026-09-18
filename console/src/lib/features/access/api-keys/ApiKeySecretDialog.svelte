@@ -272,7 +272,7 @@
     overflow: hidden;
     border: 1px solid var(--border);
     border-radius: var(--radius-control);
-    background: transparent;
+    background: var(--canvas);
   }
   .secret-row code {
     min-width: 0;
@@ -331,8 +331,9 @@
     max-height: 18rem;
     overflow: auto;
     padding: 1rem;
+    border: 1px solid var(--border-hairline);
     border-radius: var(--radius-control);
-    background: var(--code-bg);
+    background: var(--canvas);
     color: var(--code-foreground);
   }
   pre code {

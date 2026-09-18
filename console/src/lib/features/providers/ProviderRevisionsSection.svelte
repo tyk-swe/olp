@@ -509,9 +509,9 @@
     display: grid;
     gap: 0.3rem;
     padding: 0.75rem;
-    border: 0;
+    border: 1px solid var(--border-hairline);
     border-radius: var(--radius-control);
-    background: var(--surface-raised);
+    background: var(--canvas);
   }
   .revision-model-name {
     display: flex;

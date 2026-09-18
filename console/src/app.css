@@ -13,7 +13,11 @@
 :root {
   color-scheme: dark;
   --color-obsidian-canvas: #101010;
-  --color-carbon-lift: #1d1a18;
+  --color-carbon-lift: #161514;
+  --color-surface-card: #161514;
+  --color-surface-hover: #221f1d;
+  --color-surface-raised: #1e1c1a;
+  --color-hairline: #282624;
   --color-ash-stroke: #3d3a39;
   --color-graphite-mid: #4d4947;
   --color-warm-granite: #8a8380;
@@ -25,20 +29,20 @@
   --color-ember-red: #f07a6e;
 
   --canvas: var(--color-obsidian-canvas);
-  --surface: var(--color-obsidian-canvas);
-  --surface-subtle: var(--color-carbon-lift);
-  --surface-hover: var(--color-carbon-lift);
-  --surface-raised: var(--color-carbon-lift);
+  --surface: var(--color-surface-card);
+  --surface-subtle: #1c1a18;
+  --surface-hover: var(--color-surface-hover);
+  --surface-raised: var(--color-surface-raised);
   --foreground: var(--color-bone);
   --foreground-hover: var(--color-chalk);
   --foreground-muted: var(--color-warm-granite);
   --foreground-subtle: var(--color-pale-stone);
   --border: var(--color-ash-stroke);
-  --border-hairline: var(--color-carbon-lift);
+  --border-hairline: var(--color-hairline);
   --border-strong: var(--color-graphite-mid);
   --accent: var(--color-bone);
   --accent-strong: var(--color-chalk);
-  --accent-soft: var(--color-carbon-lift);
+  --accent-soft: var(--surface-subtle);
   --signal: var(--color-signal-orange);
   --metric: var(--color-metric-green);
   --success: var(--color-metric-green);
@@ -215,7 +219,7 @@ body {
 .card {
   border: 1px solid var(--border-hairline);
   border-radius: var(--radius-card);
-  background: transparent;
+  background: var(--surface);
 }
 
 /* Declared after `.card` so the bone surface wins at equal specificity. */
@@ -229,7 +233,7 @@ body {
   overflow-x: auto;
   border: 1px solid var(--border-hairline);
   border-radius: var(--radius-card);
-  background: transparent;
+  background: var(--surface);
 }
 
 .data-table {
@@ -248,18 +252,24 @@ body {
 }
 
 .data-table th {
-  border-bottom-color: var(--border);
-  background: transparent;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--canvas) 40%, var(--surface));
   color: var(--foreground-subtle);
   font-family: var(--font-mono);
   font-size: 0.75rem;
-  font-weight: 400;
+  font-weight: 500;
   letter-spacing: -0.24px;
   text-transform: uppercase;
 }
 
 .data-table tbody tr:last-child td {
   border-bottom: 0;
+}
+
+.data-table tbody tr {
+  transition:
+    background-color var(--motion),
+    color var(--motion);
 }
 
 .data-table tbody tr:hover {
@@ -276,7 +286,7 @@ body {
   padding: 0.2rem 0.5rem;
   border: 1px solid var(--border);
   border-radius: var(--radius-control);
-  background: transparent;
+  background: color-mix(in srgb, var(--foreground-muted) 10%, transparent);
   color: var(--foreground-subtle);
   font-family: var(--font-mono);
   font-size: 0.75rem;
@@ -300,12 +310,16 @@ body {
 }
 
 .badge.success {
+  border-color: color-mix(in srgb, var(--metric) 40%, var(--border));
+  background: color-mix(in srgb, var(--metric) 12%, transparent);
   color: var(--success);
 }
 .badge.success::before {
   background: var(--metric);
 }
 .badge.warning {
+  border-color: color-mix(in srgb, var(--signal) 40%, var(--border));
+  background: color-mix(in srgb, var(--signal) 12%, transparent);
   color: var(--warning);
 }
 .badge.warning::before {
@@ -313,6 +327,7 @@ body {
 }
 .badge.danger {
   border-color: color-mix(in srgb, var(--danger) 50%, var(--border));
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
   color: var(--danger);
 }
 .badge.danger::before {
@@ -320,6 +335,7 @@ body {
 }
 .badge.accent {
   border-color: var(--foreground-muted);
+  background: color-mix(in srgb, var(--foreground) 10%, transparent);
   color: var(--foreground);
 }
 .badge.accent::before {
@@ -381,11 +397,13 @@ body {
 .filter-control {
   min-height: 2.5rem;
   padding: 0.5rem 0.75rem;
-  border: 1px solid var(--border);
+  border: 1px solid var(--border-hairline);
   border-radius: var(--radius-control);
-  background: transparent;
+  background: var(--canvas);
   color: var(--foreground);
-  transition: border-color var(--motion);
+  transition:
+    border-color var(--motion),
+    box-shadow var(--motion);
 }
 
 .form-field input:hover,
@@ -426,7 +444,7 @@ input {
   padding: 1.25rem;
   border: 0;
   border-radius: 0;
-  background: var(--canvas);
+  background: var(--surface);
 }
 .metric-card p {
   margin: 0;
@@ -441,7 +459,7 @@ input {
   display: block;
   margin-top: 0.75rem;
   font-size: var(--text-heading);
-  font-weight: 400;
+  font-weight: 500;
   font-variant-numeric: tabular-nums;
   letter-spacing: -0.031em;
   line-height: 1;
@@ -679,7 +697,7 @@ button:not(:disabled),
   max-width: 48rem;
   margin: 0;
   font-size: clamp(1.75rem, 4vw, 2.25rem);
-  font-weight: 400;
+  font-weight: 500;
   letter-spacing: -0.031em;
   line-height: 1.1;
 }

@@ -237,7 +237,9 @@
     top: 0;
     padding: 0 1.5rem;
     border-bottom: 1px solid var(--border-hairline);
-    background: var(--canvas);
+    background: color-mix(in srgb, var(--canvas) 85%, transparent);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
   }
 
   .topbar-row {
@@ -425,7 +427,9 @@
   }
 
   .mobile-dialog::backdrop {
-    background: rgb(16 16 16 / 72%);
+    background: rgb(16 16 16 / 78%);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
   }
 
   .mobile-drawer {
@@ -433,8 +437,9 @@
     height: 100dvh;
     overflow-y: auto;
     padding: 1rem 0.75rem;
-    border-right: 1px solid var(--border);
-    background: var(--canvas);
+    border-right: 1px solid var(--border-hairline);
+    background: var(--surface);
+    box-shadow: 4px 0 24px rgb(0 0 0 / 40%);
   }
 
   .drawer-heading {

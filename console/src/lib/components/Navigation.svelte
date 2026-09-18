@@ -288,7 +288,7 @@
     min-height: 2.5rem;
     align-items: center;
     padding: 0 0.625rem;
-    border-bottom: 1px solid transparent;
+    border-bottom: 2px solid transparent;
     font-size: 0.875rem;
     white-space: nowrap;
   }
