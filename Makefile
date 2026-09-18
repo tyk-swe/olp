@@ -24,6 +24,7 @@ check: api ## Check formatting, vet, Go behavior, and the console
 	@test -z "$$(gofmt -l cmd internal openapi/*.go tests/fixtures/*.go tests/integration tests/sdkfixture)" || { gofmt -l cmd internal openapi/*.go tests/fixtures/*.go tests/integration tests/sdkfixture; exit 1; }
 	go vet ./...
 	$(MAKE) test
+	node --test scripts/release-inventory.test.mjs
 	pnpm --dir console verify
 
 test: ## Run Go unit and protocol tests without containers

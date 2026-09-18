@@ -125,15 +125,26 @@ durable provider-owned job reference.
 
 **Depends on:** [M6-02](#m6-02), [M6-03](#m6-03), [M6-05](#m6-05).
 
-**Deliver:** Complete management reads/actions, media job list/detail/content/
-delete pages, applicable playground operations, media capability selection,
-and request/history presentation. Regenerate contracts and reuse existing
-upload and job-state components.
+**Deliver:** Preserve the metadata-only management list/detail APIs and console
+pages, filters, manual refresh, media capability selection, and request/history
+presentation. Content retrieval and deletion remain API-key-owned inference
+operations exercised through the media SDK endpoints.
 
-**Accept:** UI polling, cancellation, authorization, pending/failed/deleted
+**Accept:** Authorization, filtering, manual refresh, pending/failed/deleted
 states, and reconciliation warnings agree with durable records. Current media
 SDK endpoints work through the Go fixture. Media content and provider secrets
-never appear in history or ordinary management payloads.
+never appear in the console, history, or ordinary management payloads.
+
+**Scope correction (2026-09-18):** The original ticket promised console content/
+delete pages, automatic polling, cancellation, and media playground controls.
+Those were not workflows in the frozen console and are not implemented by the
+Go rewrite. This ticket closes preservation of the existing inspection surface;
+adding those controls would be separate product work. Backend reconciliation
+polling and inference cancellation remain covered by M6-03 through M6-05.
+
+**Evidence:** [Management routes](../../internal/media/manage.go),
+[console inspection and refresh](../../console/src/lib/features/media/MediaJobsPage.svelte),
+and [retained media browser qualification](evidence/release-qualification.md#verification).
 
 **References:** [Media HTTP](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/media/http.rs),
 [media console](../../console/src/lib/features/media/),

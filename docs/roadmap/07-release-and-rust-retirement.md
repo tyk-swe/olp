@@ -18,6 +18,14 @@ this milestone cannot hide unfinished providers, console pages, or media work.
 
 **Evidence:** [Completed qualification](evidence/release-qualification.md#capability-and-dependency-reconciliation).
 
+**Reconciliation follow-up (2026-09-18):** The
+[reviewed behavior map](evidence/release-behaviors.json) names successor tests
+for each frozen suite and explains retirement of Rust-only harness code.
+Inventory generation rejects unmapped/stale entries and missing test symbols,
+and executes the independent frozen-versus-Go certification matrix check before
+marking inference tuples implemented. Passing execution remains recorded in CI;
+the presence of a mapping alone does not establish a passing scenario.
+
 **Depends on:** Milestone prerequisites.
 
 **Deliver:** Reconcile the M1 capability/endpoint inventory with all completed

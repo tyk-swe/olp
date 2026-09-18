@@ -499,12 +499,27 @@ func TestFreshMigrationsIsolationPrivilegesAndRotationCLI(t *testing.T) {
 	write("index.html", "<!doctype html><title>Maintenance fixture</title>")
 	env := map[string]string{"OLP_DATABASE_URL": h.DBURL, "OLP_AUTH_HMAC_KEY_FILE": write("auth", h.AuthHex), "OLP_MASTER_KEY_FILE": write("ring", ring2), "OLP_CONSOLE_DIR": dir}
 	binary := required(t, "OLP_TEST_BINARY")
-	for _, args := range [][]string{{"master-key", "reencrypt"}, {"master-key", "reencrypt"}, {"doctor"}} {
-		cmd := exec.CommandContext(t.Context(), binary, args...)
+	for _, step := range []struct {
+		args    []string
+		wantErr bool
+	}{
+		{[]string{"master-key", "status"}, false},
+		{[]string{"master-key", "verify-retirement", "1"}, true},
+		{[]string{"master-key", "reencrypt"}, false},
+		{[]string{"master-key", "reencrypt"}, false},
+		{[]string{"master-key", "verify-retirement", "1"}, false},
+		{[]string{"master-key", "verify-retirement", "2"}, true},
+		{[]string{"master-key", "status"}, false},
+		{[]string{"doctor"}, false},
+	} {
+		cmd := exec.CommandContext(t.Context(), binary, step.args...)
 		cmd.Env = testutil.Environment(env)
 		output, err := cmd.CombinedOutput()
-		if err != nil {
-			t.Fatalf("maintenance %v: %v %s", args, err, output)
+		if (err != nil) != step.wantErr {
+			t.Fatalf("maintenance %v: %v %s", step.args, err, output)
+		}
+		if step.wantErr && !bytes.Contains(output, []byte("active or still referenced")) {
+			t.Fatalf("retirement failed for the wrong reason: %s", output)
 		}
 		if bytes.Contains(output, []byte(created["secret"].(string))) {
 			t.Fatal("CLI exposed secret")

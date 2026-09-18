@@ -5,8 +5,8 @@ Completed on 2026-09-18 for source
 [Release run 35334054213](https://github.com/tyk-swe/olp/actions/runs/35334054213) passed canonical CI, both native
 image builds, vulnerability scans, packaged browser journeys and replacement
 restore. [Machine-readable candidate record](release-candidate.json) links every
-job, scan report and artifact checksum. Later evidence/documentation commits do
-not change the qualified application.
+job, scan report and artifact checksum. Later evidence, documentation and test
+changes do not change the application code qualified here.
 
 ## Candidate
 
@@ -38,10 +38,21 @@ are time-dependent; the scheduled released-image scanner remains enabled.
 ## Capability and dependency reconciliation
 
 [Release inventory](release-inventory.json) reconciles 100 frozen management
-operations, 77 inference tuples, all retained suites by behavior group and 18
-unchanged neutral fixtures. Actual all/control processes exercise every management
-operation to reject missing handlers and server failures; authorized feature
-suites validate behavior and OpenAPI response schemas.
+operations, 77 inference tuples, 133 reference suite files and 18 unchanged
+neutral fixtures. The [reviewed behavior map](release-behaviors.json) replaces
+the original filename/milestone heuristics with explicit source paths, retained
+behaviors, named Go successor tests and reasons for retiring Rust-only harness
+code. Accounting, query and retention suites have separate mappings.
+
+The reconciliation follow-up on 2026-09-18 adds checks for missing/stale mappings
+and missing test symbols to `make check`. Inventory generation also runs
+`TestFrozenCertificationMatrix` against the independent frozen inventory and
+Go's public certification capabilities, including the media restrictions.
+These checks supplement the original candidate's qualification; they do not
+claim that mapping a test proves it passed in that historical run. Actual
+all/control processes exercise every management operation to reject missing
+handlers and server failures; authorized feature suites validate behavior and
+OpenAPI response schemas.
 
 [Dependency inventory](release-dependencies.json) and [module graph](release-module-graph.txt)
 record 23 direct module requirements and 216 resolved modules, including test and

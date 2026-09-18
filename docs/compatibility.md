@@ -103,8 +103,10 @@ and Gemini request fixtures in `tests/fixtures/protocols/` cover preservation
 of fields such as `cache_control`, `metadata`, `topK`, and `safetySettings`.
 
 `tests/fixtures/protocols/selected-operation-families.json` covers every operation
-family and surface. Keep these tables aligned with `tests/conformance/` when
-semantics change.
+family and surface. Keep these tables aligned with the
+[Go protocol suites](../internal/protocols/parity_test.go) and the
+[frozen certification check](../internal/providers/frozen_capabilities_test.go)
+when semantics change.
 
 ### Anthropic providers
 
@@ -148,19 +150,26 @@ a pass-through.
 
 ### Bedrock providers
 
-Bedrock translates on every surface and carries the most exemptions. The
-constants in [tests/conformance/provider_connectors/matrix.rs](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/tests/conformance/provider_connectors/matrix.rs)
-name each one: `NO_BEDROCK_STRUCTURED_OUTPUT` (Converse rejects non-text
-response formats), `NO_BEDROCK_CACHED_USAGE` (the supported Converse token
-usage model has no cached-input field, so cached-token accounting is
-unavailable), `NO_BEDROCK_REQUEST_ID` (Converse exposes no canonical response
-ID and the AWS SDK owns outbound metadata, so no provider request ID is
-surfaced), `NO_BEDROCK_RESPONSE_BOUND` (response bodies are owned by the AWS
-SDK, so the connector applies no byte limit of its own), and `NO_BEDROCK_MEDIA`
-(the Converse encoder accepts canonical text and tool parts but no media
-content part).
+Bedrock translates on every surface. Non-text structured response formats,
+cached-input token accounting, and canonical provider response IDs remain
+unsupported. The Go connector uses OLP's HTTP transport for inference: unary
+responses have the shared response-byte limit, and stream event lengths are
+checked before AWS event-stream decoding allocates the advertised body.
 
-[src/providers/bedrock/translate.rs](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/providers/bedrock/translate.rs) refuses, with an
+Generation and token-count inputs accept inline base64 PNG, JPEG, GIF, and WebP
+images. Remote image URLs, explicit image-detail controls, unsupported formats,
+invalid base64, and images in system instructions or tool results are refused.
+The shared inline-media admission limits also apply. Image/audio/video operation
+endpoints remain unavailable for Bedrock; image parts inside generation inputs
+do not grant those separate capabilities.
+
+These are explicit changes from the frozen Rust reference: its
+`NO_BEDROCK_RESPONSE_BOUND` and `NO_BEDROCK_MEDIA` exemptions described unbounded
+SDK-owned response bodies and refusal of image input parts, respectively.
+See the [exception reconciliation](roadmap/evidence/provider-and-routing-parity.md#cloud-dependencies-and-bounds-m5-03-and-m5-04)
+and [image-input tests](../internal/protocols/bedrock_test.go).
+
+The [Go Converse encoder](../internal/protocols/bedrock.go) refuses, with an
 explicit protocol error, a request that asks for more than one candidate, sets
 a deterministic seed, sets parallel tool-call selection, asks for a structured
 response format other than text, puts a name or tool-call metadata on a system
@@ -172,9 +181,9 @@ the request and must be short, ASCII, and free of punctuation other than `_`
 and `-`; a named tool choice must exist in the tool list, and a tool choice of
 "none" cannot be combined with a non-empty tool list. Non-finite temperature or
 `top_p` values and non-finite JSON numbers inside tool arguments are refused
-too. [src/providers/bedrock/transport.rs](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/providers/bedrock/transport.rs) adds the
-unary-only rule for token counting, the asynchronous-mode refusal for
-generation, and validation of the model ID or ARN.
+too. The [capability rules](../internal/connectors/capabilities.go) keep token
+counting unary and refuse asynchronous generation; the
+[request builder](../internal/connectors/config.go) validates the model ID or ARN.
 
 See the [Bedrock connector guide](providers/bedrock.md) for authentication,
 SDK retry policy, deadlines, and live tests.
