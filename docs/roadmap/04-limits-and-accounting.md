@@ -45,9 +45,9 @@ harmless, cancellation releases held concurrency, and abandoned leases expire.
 Configured provider quotas fail closed; preserve the documented installation
 override for eligible key rate/concurrency limits only.
 
-**References:** [Distributed limits](../../src/limits/distributed.rs),
-[Lua scripts](../../src/limits/),
-[Valkey limit tests](../../tests/persistence/distributed_limits_valkey.rs),
+**References:** [Distributed limits](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/limits/distributed.rs),
+[Lua scripts](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/limits),
+[Valkey limit tests](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/tests/persistence/distributed_limits_valkey.rs),
 [configuration](../configuration.md).
 
 ### M4-02
@@ -66,10 +66,10 @@ Fractional prices, cached-input usage, missing components, and all retained
 unit types have fixtures. Binary floating-point rounding cannot alter budget
 or price-ceiling decisions. Missing usage/pricing stays visible as unpriced.
 
-**References:** [Pricing](../../src/usage/pricing.rs),
-[pricing API](../../src/usage/pricing_http.rs),
+**References:** [Pricing](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/usage/pricing.rs),
+[pricing API](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/usage/pricing_http.rs),
 [concepts](../concepts.md),
-[attempt accounting tests](../../tests/persistence/operations_postgres/attempt_accounting.rs).
+[attempt accounting tests](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/tests/persistence/operations_postgres/attempt_accounting.rs).
 
 ### M4-03
 
@@ -86,10 +86,10 @@ usage or cost. Failed/retried attempts and partial stream usage remain attached
 to their own identities. Missing usage remains incomplete; no usage or price
 is fabricated to close an event. Durable facts and aggregate changes agree.
 
-**References:** [Ingestion persistence](../../src/usage/ingestion/persistence.rs),
-[attempt facts](../../src/usage/ingestion/persistence/attempt_facts.rs),
-[batched writes](../../tests/persistence/batched_writes_postgres.rs),
-[attempt HTTP tests](../../tests/system/operations_http_postgres/attempts.rs).
+**References:** [Ingestion persistence](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/usage/ingestion/persistence.rs),
+[attempt facts](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/usage/ingestion/persistence/attempt_facts.rs),
+[batched writes](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/tests/persistence/batched_writes_postgres.rs),
+[attempt HTTP tests](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/tests/system/operations_http_postgres/attempts.rs).
 
 ### M4-04
 
@@ -108,10 +108,10 @@ follow an explicit recorded-loss policy. Queue acknowledgements are never
 described as an fsync guarantee. Separate installations sharing Valkey cannot
 consume or acknowledge one another's events.
 
-**References:** [Queue](../../src/usage/queue/),
-[ingestion](../../src/usage/ingestion/),
-[consumer tests](../../tests/persistence/request_metadata_consumer_valkey/),
-[shared Valkey](../../tests/ha/shared_valkey.rs).
+**References:** [Queue](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/usage/queue),
+[ingestion](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/usage/ingestion),
+[consumer tests](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/tests/persistence/request_metadata_consumer_valkey),
+[shared Valkey](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/tests/ha/shared_valkey.rs).
 
 ### M4-05
 
@@ -129,8 +129,8 @@ unknown spend to zero. Exhaustion returns 429; unavailable valid state returns
 503. Concurrent admitted work may exceed accrued thresholds, and unpriced work
 accrues no money; the API and UI preserve these documented limitations.
 
-**References:** [Budget admission](../../src/limits/budgets.rs),
-[spend controls](../../tests/persistence/spend_controls_postgres.rs),
+**References:** [Budget admission](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/limits/budgets.rs),
+[spend controls](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/tests/persistence/spend_controls_postgres.rs),
 [budget recovery](../spend-budget-recovery.md),
 [production contracts](../production-guarantees.md).
 
@@ -151,10 +151,10 @@ valid spend. An errored leader relinquishes ownership without returning a
 locked connection to the pool. Follower skips do not claim successful repair,
 and inflated valid counters remain a reported repair condition.
 
-**References:** [Cost reconciliation](../../src/limits/distributed/cost_reconciliation.rs),
-[reconciliation worker](../../src/usage/ingestion/reconciliation.rs),
-[spend recovery tests](../../tests/persistence/spend_recovery_postgres.rs),
-[worker HA](../../tests/persistence/worker_ha_postgres.rs).
+**References:** [Cost reconciliation](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/limits/distributed/cost_reconciliation.rs),
+[reconciliation worker](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/usage/ingestion/reconciliation.rs),
+[spend recovery tests](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/tests/persistence/spend_recovery_postgres.rs),
+[worker HA](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/tests/persistence/worker_ha_postgres.rs).
 
 ### M4-07
 
@@ -172,9 +172,9 @@ visible as distinct attempts. Gaps, unpriced work, and incomplete usage stay
 visible after aggregation. Retention respects durable media/reference needs
 and does not invalidate current spend reconstruction or worker recovery.
 
-**References:** [History](../../src/usage/history.rs),
-[reports](../../src/usage/reports/), [retention](../../src/usage/retention.rs),
-[query tests](../../tests/persistence/operations_postgres/query_contracts.rs).
+**References:** [History](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/usage/history.rs),
+[reports](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/usage/reports), [retention](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/usage/retention.rs),
+[query tests](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/tests/persistence/operations_postgres/query_contracts.rs).
 
 ### M4-08
 
@@ -212,9 +212,9 @@ duplicate delivery, lost connections, cancellation, expired leases, UTC
 boundaries, and leader death. Prove no duplicate attribution or cross-installation
 consumption, and report irrecoverable gaps honestly. All M4 UI journeys pass.
 
-**References:** [Distributed process tests](../../tests/contract/distributed_limits.rs),
-[durable contracts](../../tests/contract/durable.rs),
-[HA recovery](../../tests/ha/worker_recovery.rs),
+**References:** [Distributed process tests](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/tests/contract/distributed_limits.rs),
+[durable contracts](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/tests/contract/durable.rs),
+[HA recovery](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/tests/ha/worker_recovery.rs),
 [fault injection](../../deploy/toxiproxy.integration.json).
 
 ## Exit scenarios

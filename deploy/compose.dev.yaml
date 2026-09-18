@@ -1,43 +1,32 @@
-name: olp-v3-dev
+name: olp-go-dev
 services:
   postgres:
     image: postgres:18
     environment:
-      POSTGRES_USER: olp
-      POSTGRES_PASSWORD: olp-local
-      POSTGRES_DB: olp_dev
-    ports: ["127.0.0.1:54320:5432"]
-    volumes: ["postgres:/var/lib/postgresql"]
+      POSTGRES_USER: olp_go
+      POSTGRES_PASSWORD: olp-go-local
+      POSTGRES_DB: olp_go
+    ports:
+      - '127.0.0.1:${OLP_GO_POSTGRES_PORT:-54321}:5432'
+    volumes:
+      - postgres-go:/var/lib/postgresql
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U olp -d olp_dev"]
-      interval: 2s
+      test: ['CMD-SHELL', 'pg_isready -U olp_go -d olp_go']
+      interval: 1s
       timeout: 3s
-      retries: 30
+      retries: 60
   valkey:
     image: valkey/valkey:9
-    ports: ["127.0.0.1:63790:6379"]
-    volumes: ["valkey:/data"]
-    command: ["valkey-server", "--appendonly", "yes"]
-    healthcheck:
-      test: ["CMD", "valkey-cli", "ping"]
-      interval: 2s
-      timeout: 3s
-      retries: 30
-  toxiproxy:
-    profiles: [integration]
-    image: ghcr.io/shopify/toxiproxy:2.12.0
-    command: ["-host", "0.0.0.0", "-config", "/etc/toxiproxy.json"]
+    command: ['valkey-server', '--appendonly', 'yes', '--requirepass', 'olp-go-local']
     ports:
-      - "127.0.0.1:58474:8474"
-      - "127.0.0.1:55432:5432"
-      - "127.0.0.1:56379:6379"
-    volumes: ["./toxiproxy.integration.json:/etc/toxiproxy.json:ro"]
+      - '127.0.0.1:${OLP_GO_VALKEY_PORT:-63791}:6379'
+    volumes:
+      - valkey-go:/data
     healthcheck:
-      test: ["CMD", "/toxiproxy-cli", "list"]
-      interval: 2s
+      test: ['CMD', 'valkey-cli', '-a', 'olp-go-local', 'ping']
+      interval: 1s
       timeout: 3s
-      retries: 30
-
+      retries: 60
 volumes:
-  postgres:
-  valkey:
+  postgres-go:
+  valkey-go:

@@ -1,43 +1,32 @@
 # Behavioral validation
 
-`make test` runs the Rust unit tests and protocol conformance corpus. Fixtures
-under `fixtures/` cover every retained connector, unary and streaming replies,
-malformed input, timeouts, cancellation, failover, and egress restrictions.
-Add meaningful cases without replacing valid expectations.
+`make test` runs Go unit tests and the language-neutral protocol corpus under
+`fixtures/`. Keep valid expectations for unary/streaming replies, malformed
+input, cancellation, timeouts, failover, egress, media and pricing.
 
-`make integration` starts disposable PostgreSQL and Valkey services, runs the
-persistence and HTTP suites, real-process contracts and HA recovery with
-Toxiproxy dependency outages, official JavaScript SDK checks, then Chromium
-journeys against packaged and development origins, including replacement
-restore. The process suites share `contract/harness`; the browser uses the same
-services to exercise setup, provider activation, routing, inference, history,
-OIDC, and conflicts. Each installation has its own
-database and Valkey namespace.
-
-The Go rewrite has its own suites. `make go-test` runs `go test ./...` —
-unit and protocol fixtures without containers — and `make go-check` adds
-gofmt/vet and the existing console checks. `make go-integration` provisions
-disposable TLS/authenticated PostgreSQL and Valkey services and runs the
-`integration/` process suites (access races, authority lifecycle, limits,
-accounting recovery, provider parity, OIDC, migration recovery), the official
-SDK checks, and Chromium journeys at packaged and Vite origins against the
-Go backend.
-
-For a focused run after installing dependencies:
+`make integration` provisions disposable TLS/authenticated PostgreSQL and
+Valkey, then runs race-enabled process/service/provider/media scenarios,
+official JavaScript SDKs, and Chromium journeys at packaged and Vite origins.
+Both origins run replacement recovery into an empty database with a separate
+Valkey service. Failure-path restores assert that the destination stays empty.
+Each test installation has an independent database and installation namespace.
 
 ```sh
-cargo test --locked --all-features --test conformance
+go test ./internal/protocols/... ./internal/gateway
 ./tests/sdk-smoke/run.sh
 ./tests/sdk-smoke-python/run.sh
 ```
 
-The optional Python suite uses uv and the Python version declared in its
-project. Both SDK suites use the same local Rust fixture, disable retries, and
-cover native OpenAI, Anthropic, and Gemini success and typed error contracts.
-They also verify that the retired OpenAI prefix and LiteLLM authentication
-header are unavailable.
+Both SDK launchers use `tests/sdkfixture`, disable retries and exercise native
+OpenAI, Anthropic and Gemini success/typed-error contracts. Python is optional
+and uses the pinned uv project. Recovery journeys additionally call the
+restored gateway through the official OpenAI SDK.
 
-Live provider tests are optional and require explicitly supplied credentials.
-Run `cargo test --locked --all-features --lib live_provider -- --ignored`
-or dispatch the `live-providers` workflow for one provider. Its configuration
-lists the required secrets and cloud identity variables. Live calls can consume provider quota.
+Paid provider checks require explicit credentials and are excluded from normal
+CI. Set `OLP_LIVE_PROVIDER` and run
+`go test -tags=liveproviders -count=1 ./internal/connectors`, or dispatch the
+main-branch `live-providers` workflow. Its configuration lists required secrets
+and cloud identity variables. Live calls consume provider quota.
+
+The retired Rust scenario inventory and its Go replacements are preserved in
+[release evidence](../docs/roadmap/evidence/release-qualification.md).

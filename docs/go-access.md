@@ -9,7 +9,7 @@ capabilities and labels configured limits as saved policy.
 
 ## Local development
 
-Run `make go-dev` with the prerequisites in [CONTRIBUTING](../CONTRIBUTING.md).
+Run `make dev` with the prerequisites in [CONTRIBUTING](../CONTRIBUTING.md).
 It provisions isolated PostgreSQL/Valkey services, private secrets under
 `.local/go-secrets`, and the Go schema before starting the application. Existing
 files and database contents are retained across restarts. Open
@@ -64,7 +64,7 @@ or 0640 (`gateway` needs the first two):
 
 Database and Valkey URLs also support their corresponding `_FILE` options.
 Inline and file-based URL settings are mutually exclusive. The local/test
-helper `source scripts/go-secrets.sh <private-directory>` creates missing secret
+helper `source scripts/secrets.sh <private-directory>` creates missing secret
 files without printing their contents; production secret distribution remains
 the operator's responsibility.
 
@@ -97,7 +97,9 @@ and purpose authenticated as associated data.
    destination-version records before committing any batches.
 4. Run `olp master-key status` and `olp doctor`. They authenticate stored
    ciphertext and emit only installation/version/count metadata. Remove an old
-   key only after no stored rows use it and backup retention permits removal.
+   key only after `olp master-key verify-retirement VERSION` succeeds and backup
+   retention permits removal. `olp master-key reencrypt --dry-run` authenticates
+   records without changing them.
 5. Restart management processes with the new ring. Existing sessions and API
    credentials retain their HMAC identity; encrypted replayed credentials retain
    their original response. Rotation records a metadata-only audit event.

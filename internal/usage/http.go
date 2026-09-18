@@ -24,7 +24,7 @@ type Server struct {
 }
 
 // Register mounts the accounting routes. The patterns are more specific than
-// the management catch-all, so they take precedence over its 501.
+// the management catch-all, so they take precedence over its 404.
 func (s *Server) Register(mux *http.ServeMux) {
 	h := s.Access.Handle
 	mux.HandleFunc("GET /api/v3/usage/summary", h(s.usageSummary))

@@ -29,36 +29,44 @@ func (m Mode) Management() bool { return m == All || m == Control }
 func (m Mode) Inference() bool  { return m == All || m == Gateway }
 
 type Config struct {
-	Mode                    Mode
-	DatabaseURL             string
-	DatabaseMaxConnections  int
-	ValkeyURL               string
-	ValkeyCAFile            string
-	ListenAddr              string
-	ObservabilityListenAddr string
-	PublicOrigin            string
-	ConsoleDir              string
-	MediaSpoolDir           string
-	MediaSpoolCapacityBytes int64
-	AuthHMACKeyFile         string
-	BootstrapTokenFile      string
-	MasterKeyFile           string
-	ConnectorConfigFile     string
-	RuntimeDatabaseRole     string
-	LogLevel                slog.Level
-	RequestTimeout          time.Duration
-	StartupTimeout          time.Duration
-	ShutdownTimeout         time.Duration
+	Mode                      Mode
+	DatabaseURL               string
+	DatabaseMaxConnections    int
+	ValkeyURL                 string
+	ValkeyCAFile              string
+	ListenAddr                string
+	ObservabilityListenAddr   string
+	PublicOrigin              string
+	LocalLoginEnabled         bool
+	GatewayCORSAllowedOrigins []string
+	MaxInlineMediaItems       int
+	MaxInlineMediaItemBytes   int64
+	MaxInlineMediaTotalBytes  int64
+	ConsoleDir                string
+	MediaSpoolDir             string
+	MediaSpoolCapacityBytes   int64
+	AuthHMACKeyFile           string
+	BootstrapTokenFile        string
+	MasterKeyFile             string
+	ConnectorConfigFile       string
+	RuntimeDatabaseRole       string
+	LogLevel                  slog.Level
+	RequestTimeout            time.Duration
+	StartupTimeout            time.Duration
+	ShutdownTimeout           time.Duration
 	// Inference and provider egress bounds; names mirror the reference settings.
-	TrustedProxyCIDRs            []netip.Prefix
-	ProviderEgressAllowCIDRs     []netip.Prefix
-	ProviderEgressAllowHTTPHosts []string
-	MaxInFlightInference         int
-	MaxInFlightManagement        int
-	MaxJSONBodyBytes             int64
-	MaxMediaBodyBytes            int64
-	ProviderMaxResponseBytes     int64
-	ProviderMaxEventBytes        int64
+	TrustedProxyCIDRs             []netip.Prefix
+	ProviderEgressAllowCIDRs      []netip.Prefix
+	ProviderEgressAllowHTTPHosts  []string
+	MaxConnections                int
+	ConnectionMaxAgeSeconds       int
+	ConnectionDrainTimeoutSeconds int
+	MaxInFlightInference          int
+	MaxInFlightManagement         int
+	MaxJSONBodyBytes              int64
+	MaxMediaBodyBytes             int64
+	ProviderMaxResponseBytes      int64
+	ProviderMaxEventBytes         int64
 	// Optional OTLP/HTTP trace export. Credentials live only in the headers
 	// file; ambient OTEL_* header variables are rejected at install time.
 	OTLPTracesEndpoint     string
@@ -104,11 +112,19 @@ func Parse(args []string, getenv func(string) string, output io.Writer) (Config,
 	f.StringVar(&level, "log-level", "info", "debug, info, warn, or error (OLP_LOG_LEVEL)")
 	f.DurationVar(&c.RequestTimeout, "dependency-request-timeout", 2*time.Second, "dependency request deadline")
 	f.DurationVar(&c.StartupTimeout, "startup-timeout", 10*time.Second, "startup deadline")
-	f.DurationVar(&c.ShutdownTimeout, "shutdown-timeout", 5*time.Second, "per-stage shutdown deadline")
-	var trustedProxies, egressCIDRs, egressHosts string
+	f.DurationVar(&c.ShutdownTimeout, "shutdown-timeout", 30*time.Second, "total shutdown deadline")
+	var trustedProxies, egressCIDRs, egressHosts, corsOrigins string
+	f.BoolVar(&c.LocalLoginEnabled, "local-login-enabled", true, "allow password sign-in")
+	f.StringVar(&corsOrigins, "gateway-cors-allowed-origins", "", "comma-separated origins allowed to call the inference API")
+	f.IntVar(&c.MaxInlineMediaItems, "http-max-inline-media-items", 4, "maximum inline media items")
+	f.Int64Var(&c.MaxInlineMediaItemBytes, "http-max-inline-media-item-bytes", 1048576, "maximum decoded bytes per inline media item")
+	f.Int64Var(&c.MaxInlineMediaTotalBytes, "http-max-inline-media-total-bytes", 2097152, "maximum decoded inline media bytes per request")
 	f.StringVar(&trustedProxies, "trusted-proxy-cidrs", "", "comma-separated CIDRs allowed to supply X-Forwarded-For")
 	f.StringVar(&egressCIDRs, "provider-egress-allow-cidrs", "", "comma-separated CIDRs exempt from the non-public provider egress denylist")
 	f.StringVar(&egressHosts, "provider-egress-allow-http-hosts", "", "comma-separated hosts whose provider endpoints may use plain HTTP")
+	f.IntVar(&c.MaxConnections, "http-max-connections", 1024, "maximum accepted connections per listener")
+	f.IntVar(&c.ConnectionMaxAgeSeconds, "http-connection-max-age-seconds", 300, "connection lifetime before graceful drain")
+	f.IntVar(&c.ConnectionDrainTimeoutSeconds, "http-connection-drain-timeout-seconds", 30, "maximum age drain time")
 	f.IntVar(&c.MaxInFlightInference, "http-max-in-flight-inference-requests", 256, "inference work admission")
 	f.IntVar(&c.MaxInFlightManagement, "http-max-in-flight-management-requests", 32, "management and console request admission")
 	f.StringVar(&c.OTLPTracesEndpoint, "otlp-traces-endpoint", "", "OTLP/HTTP trace export URL")
@@ -145,6 +161,11 @@ func Parse(args []string, getenv func(string) string, output io.Writer) (Config,
 	}
 	if getenv("OLP_OIDC_ALLOW_INSECURE_TEST_ISSUER") != "" || getenv("OLP_OIDC_ALLOW_PRIVATE_NETWORK") != "" {
 		return c, errors.New("OIDC egress cannot be weakened by environment flags; use an explicit oidctest build for local issuer tests")
+	}
+	for _, origin := range strings.Split(corsOrigins, ",") {
+		if origin = strings.TrimSpace(origin); origin != "" {
+			c.GatewayCORSAllowedOrigins = append(c.GatewayCORSAllowedOrigins, origin)
+		}
 	}
 	var err error
 	if c.DatabaseURL, err = secretURL(c.DatabaseURL, databaseFile, "OLP_DATABASE_URL"); err != nil {
@@ -244,11 +265,23 @@ func (c Config) Validate() error {
 	if err != nil || u == nil || (u.Scheme != "http" && u.Scheme != "https") || u.Hostname() == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || (u.Path != "" && u.Path != "/") {
 		return errors.New("OLP_PUBLIC_ORIGIN must be an HTTP(S) origin")
 	}
+	if c.MaxConnections < 1 || c.MaxConnections > 100000 || c.ConnectionMaxAgeSeconds < 1 || c.ConnectionMaxAgeSeconds > 86400 || c.ConnectionDrainTimeoutSeconds < 1 || c.ConnectionDrainTimeoutSeconds > 600 {
+		return errors.New("invalid HTTP connection capacity, maximum age, or drain timeout")
+	}
 	if c.MaxInFlightInference < 1 || c.MaxInFlightInference > 100000 {
 		return errors.New("OLP_HTTP_MAX_IN_FLIGHT_INFERENCE_REQUESTS must be between 1 and 100000")
 	}
 	if c.MaxInFlightManagement < 1 || c.MaxInFlightManagement > 100000 {
 		return errors.New("OLP_HTTP_MAX_IN_FLIGHT_MANAGEMENT_REQUESTS must be between 1 and 100000")
+	}
+	for _, origin := range c.GatewayCORSAllowedOrigins {
+		u, err := url.Parse(origin)
+		if err != nil || u.Hostname() == "" || (u.Scheme != "https" && u.Scheme != "http") || u.User != nil || u.RawQuery != "" || u.Fragment != "" || u.Path != "" || strings.Contains(origin, "*") {
+			return errors.New("OLP_GATEWAY_CORS_ALLOWED_ORIGINS must contain exact HTTP(S) origins without paths or wildcards")
+		}
+	}
+	if c.MaxInlineMediaItems < 1 || c.MaxInlineMediaItems > 64 || c.MaxInlineMediaItemBytes < 1024 || c.MaxInlineMediaItemBytes > c.MaxInlineMediaTotalBytes || c.MaxInlineMediaTotalBytes > 64<<20 {
+		return errors.New("invalid inline media limits: require 1–64 items and 1 KiB <= item <= total <= 64 MiB")
 	}
 	if c.MaxJSONBodyBytes < 65536 || c.MaxJSONBodyBytes > 64<<20 {
 		return errors.New("OLP_HTTP_MAX_JSON_BODY_BYTES must be between 64 KiB and 64 MiB")

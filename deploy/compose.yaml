@@ -1,4 +1,4 @@
-name: openllmproxy-v3
+name: openllmproxy-go-v1
 
 x-database-environment: &database-environment
   OLP_DATABASE_URL: ${OLP_DATABASE_URL:-postgres://olp:${POSTGRES_PASSWORD_URL_ENCODED:-olp}@postgres:5432/olp}
@@ -36,7 +36,7 @@ x-application-environment: &application-environment
   OLP_MEDIA_SPOOL_CAPACITY_BYTES: ${OLP_MEDIA_SPOOL_CAPACITY_BYTES:-1073741824}
   OLP_MASTER_KEY_FILE: /run/secrets/olp_master_key
   OLP_AUTH_HMAC_KEY_FILE: /run/secrets/olp_auth_hmac_key
-  RUST_LOG: ${RUST_LOG:-olp=info,tower_http=info}
+  OLP_LOG_LEVEL: ${OLP_LOG_LEVEL:-info}
 
 x-olp-container: &olp-container
   image: ${OLP_IMAGE:-ghcr.io/tyk-swe/olp:3.0.0}

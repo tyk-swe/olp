@@ -93,9 +93,10 @@ func TestProcessModesPrivateProbesAndShutdown(t *testing.T) {
 					if string(body) != string(openapi.Document) {
 						t.Fatal("served contract differs")
 					}
-					get(p.PublicOrigin, "/api/v3/bootstrap", 501)
+					get(p.PublicOrigin, "/api/v3/bootstrap", 404)
+					assertConcreteManagementHandlers(t, p.PublicOrigin)
 					// Usage, pricing and request history must claim their own
-					// paths ahead of the catch-all that answers 501 for every
+					// paths ahead of the catch-all that answers 404 for every
 					// management path no surface owns.
 					get(p.PublicOrigin, "/api/v3/usage/summary", 401)
 					get(p.PublicOrigin, "/health", 200)

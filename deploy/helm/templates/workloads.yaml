@@ -26,7 +26,7 @@
 {{- if and $root.Values.ingress.enabled (empty $trustedProxyCidrs) -}}
 {{- fail "config.trustedProxyCidrs is required when ingress is enabled" -}}
 {{- end -}}
-{{- range $componentName := list "gateway" "control" -}}
+{{- range $componentName := list "gateway" "control" "worker" -}}
 {{- $component := index $root.Values $componentName -}}
 {{- if $component.enabled }}
 {{ $mediaSpoolCapacity := int64 $root.Values.mediaSpool.capacityBytes -}}
@@ -41,10 +41,14 @@ spec:
   replicas: {{ $component.replicas }}
   revisionHistoryLimit: {{ $root.Values.revisionHistoryLimit }}
   strategy:
+    {{- if eq $componentName "worker" }}
+    type: Recreate
+    {{- else }}
     type: RollingUpdate
     rollingUpdate:
       maxUnavailable: 0
       maxSurge: 1
+    {{- end }}
   selector:
     matchLabels:
       {{- include "olp.selectorLabels" (dict "root" $root "component" $componentName) | nindent 6 }}
@@ -75,13 +79,17 @@ spec:
           imagePullPolicy: {{ $root.Values.image.pullPolicy }}
           args: [{{ $componentName | quote }}]
           ports:
+            {{- if ne $componentName "worker" }}
             - name: http
               containerPort: 8080
               protocol: TCP
+            {{- end }}
             - name: observability
               containerPort: 9090
               protocol: TCP
           env:
+            - name: OLP_LOG_LEVEL
+              value: {{ $root.Values.config.logLevel | quote }}
             - name: OLP_LISTEN_ADDR
               value: "0.0.0.0:8080"
             - name: OLP_OBSERVABILITY_LISTEN_ADDR
@@ -101,11 +109,11 @@ spec:
             {{- end }}
             {{- end }}
             - name: OLP_HTTP_MAX_CONNECTIONS
-              value: {{ $component.httpMaxConnections | quote }}
+              value: {{ default 1024 $component.httpMaxConnections | quote }}
             - name: OLP_HTTP_MAX_IN_FLIGHT_INFERENCE_REQUESTS
-              value: {{ $component.httpMaxInFlightInferenceRequests | quote }}
+              value: {{ default 256 $component.httpMaxInFlightInferenceRequests | quote }}
             - name: OLP_HTTP_MAX_IN_FLIGHT_MANAGEMENT_REQUESTS
-              value: {{ $component.httpMaxInFlightManagementRequests | quote }}
+              value: {{ default 32 $component.httpMaxInFlightManagementRequests | quote }}
             - name: OLP_HTTP_CONNECTION_MAX_AGE_SECONDS
               value: {{ $root.Values.config.httpConnectionMaxAgeSeconds | quote }}
             - name: OLP_HTTP_CONNECTION_DRAIN_TIMEOUT_SECONDS
@@ -290,99 +298,4 @@ spec:
       {{- end }}
 ---
 {{- end }}
-{{- end }}
-
-{{- if .Values.worker.enabled }}
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: {{ include "olp.componentFullname" (dict "root" . "component" "worker") }}
-  labels:
-    {{- include "olp.labels" . | nindent 4 }}
-    app.kubernetes.io/component: worker
-spec:
-  replicas: {{ .Values.worker.replicas }}
-  revisionHistoryLimit: {{ .Values.revisionHistoryLimit }}
-  strategy:
-    type: Recreate
-  selector:
-    matchLabels:
-      {{- include "olp.selectorLabels" (dict "root" . "component" "worker") | nindent 6 }}
-  template:
-    metadata:
-      labels:
-        {{- include "olp.selectorLabels" (dict "root" . "component" "worker") | nindent 8 }}
-        {{- with .Values.podLabels }}
-        {{- toYaml . | nindent 8 }}
-        {{- end }}
-      {{- with .Values.podAnnotations }}
-      annotations:
-        {{- toYaml . | nindent 8 }}
-      {{- end }}
-    spec:
-      serviceAccountName: {{ include "olp.serviceAccountName" . }}
-      automountServiceAccountToken: {{ .Values.serviceAccount.automountServiceAccountToken }}
-      securityContext:
-        {{- toYaml .Values.podSecurityContext | nindent 8 }}
-      terminationGracePeriodSeconds: {{ .Values.terminationGracePeriodSeconds }}
-      {{- with .Values.imagePullSecrets }}
-      imagePullSecrets:
-        {{- toYaml . | nindent 8 }}
-      {{- end }}
-      containers:
-        - name: olp
-          image: {{ include "olp.image" . | quote }}
-          imagePullPolicy: {{ .Values.image.pullPolicy }}
-          args: ["worker"]
-          env:
-            - name: OLP_DATABASE_MAX_CONNECTIONS
-              value: {{ .Values.config.databaseMaxConnections | quote }}
-            - name: OLP_DATABASE_URL
-              valueFrom:
-                secretKeyRef:
-                  name: {{ required "config.databaseSecretName is required" .Values.config.databaseSecretName | quote }}
-                  key: {{ required "config.databaseSecretKey is required" .Values.config.databaseSecretKey | quote }}
-            - name: OLP_VALKEY_URL
-              valueFrom:
-                secretKeyRef:
-                  name: {{ required "config.valkeySecretName is required" .Values.config.valkeySecretName | quote }}
-                  key: {{ required "config.valkeySecretKey is required" .Values.config.valkeySecretKey | quote }}
-          resources:
-            {{- toYaml .Values.worker.resources | nindent 12 }}
-          securityContext:
-            {{- toYaml .Values.containerSecurityContext | nindent 12 }}
-          volumeMounts:
-            - name: tmp
-              mountPath: /tmp
-      volumes:
-        - name: tmp
-          emptyDir:
-            medium: Memory
-            sizeLimit: 64Mi
-      {{- with .Values.nodeSelector }}
-      nodeSelector:
-        {{- toYaml . | nindent 8 }}
-      {{- end }}
-      {{- with .Values.affinity }}
-      affinity:
-        {{- toYaml . | nindent 8 }}
-      {{- end }}
-      {{- with .Values.tolerations }}
-      tolerations:
-        {{- toYaml . | nindent 8 }}
-      {{- end }}
-      {{- if or .Values.worker.topologySpread.enabled .Values.topologySpreadConstraints }}
-      topologySpreadConstraints:
-        {{- if .Values.worker.topologySpread.enabled }}
-        - maxSkew: {{ .Values.worker.topologySpread.maxSkew }}
-          topologyKey: {{ .Values.worker.topologySpread.topologyKey | quote }}
-          whenUnsatisfiable: {{ .Values.worker.topologySpread.whenUnsatisfiable }}
-          labelSelector:
-            matchLabels:
-              {{- include "olp.selectorLabels" (dict "root" . "component" "worker") | nindent 14 }}
-        {{- end }}
-        {{- with .Values.topologySpreadConstraints }}
-        {{- toYaml . | nindent 8 }}
-        {{- end }}
-      {{- end }}
 {{- end }}

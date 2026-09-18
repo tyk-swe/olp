@@ -1,0 +1,113 @@
+import { defineConfig, devices } from '@playwright/test';
+
+const packaged = process.env.OLP_CONSOLE_E2E_PACKAGED === 'true';
+const candidate = process.env.OLP_CONSOLE_E2E_CANDIDATE === 'true';
+const phase =
+  process.env.OLP_CONSOLE_E2E_RESTORED === 'true' ? 'restored' : 'fresh';
+const originMode = candidate
+  ? 'candidate'
+  : packaged
+    ? 'packaged'
+    : 'development';
+
+const databaseUrl = process.env.OLP_CONSOLE_E2E_DATABASE_URL;
+const masterKeyFile = process.env.OLP_CONSOLE_E2E_MASTER_KEY_FILE;
+const authHmacKeyFile = process.env.OLP_CONSOLE_E2E_AUTH_HMAC_KEY_FILE;
+const bootstrapTokenFile = process.env.OLP_CONSOLE_E2E_BOOTSTRAP_TOKEN_FILE;
+const valkeyUrl = process.env.OLP_VALKEY_URL;
+if (!databaseUrl) {
+  throw new Error(
+    'OLP_CONSOLE_E2E_DATABASE_URL is required for the Go-hosted console integration'
+  );
+}
+if (!masterKeyFile) {
+  throw new Error(
+    'OLP_CONSOLE_E2E_MASTER_KEY_FILE is required for invitation integration'
+  );
+}
+if (!authHmacKeyFile) {
+  throw new Error(
+    'OLP_CONSOLE_E2E_AUTH_HMAC_KEY_FILE is required for control-plane authentication'
+  );
+}
+if (!bootstrapTokenFile) {
+  throw new Error(
+    'OLP_CONSOLE_E2E_BOOTSTRAP_TOKEN_FILE is required for first-run setup'
+  );
+}
+if (!valkeyUrl) {
+  throw new Error(
+    'OLP_VALKEY_URL is required for the complete gateway integration'
+  );
+}
+
+export default defineConfig({
+  outputDir: `test-results/${originMode}-${phase}`,
+  reporter: process.env.CI ? [['github'], ['html', { open: 'never' }]] : 'list',
+  testDir: './tests/journeys',
+  testMatch: ['**/hosted-console.spec.ts', '**/recovery.spec.ts'],
+  fullyParallel: false,
+  // One explicit serial suite owns the disposable database and installation.
+  // First-run setup is true exactly once, and retries against mutated state
+  // would no longer exercise the same journey.
+  workers: 1,
+  forbidOnly: true,
+  // The test mutates a real database. Retrying against that same database
+  // would no longer prove the first-run setup path and could mask a failure.
+  retries: 0,
+  use: {
+    reducedMotion: 'reduce',
+    trace: 'retain-on-failure',
+    actionTimeout: 10_000,
+    // Browsers apply the Secure exception for localhost. This lets the test
+    // prove that real cookie storage accepts the __Host- contract while the
+    // Go listener remains loopback-only.
+    baseURL: 'http://localhost:4175'
+  },
+  projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
+  webServer: [
+    ...(!packaged
+      ? [
+          {
+            command: 'pnpm dev --host localhost --port 4175 --strictPort',
+            url: 'http://localhost:4175',
+            reuseExistingServer: false,
+            env: { OLP_DEV_API_ORIGIN: 'http://127.0.0.1:4179' }
+          }
+        ]
+      : []),
+    {
+      command: 'node tests/journeys/mock-oidc.mjs',
+      url: 'http://127.0.0.1:4176/.well-known/openid-configuration',
+      reuseExistingServer: false,
+      timeout: 10_000
+    },
+    {
+      command: 'node tests/journeys/mock-azure-openai.mjs',
+      url: 'http://127.0.0.1:4178/health',
+      reuseExistingServer: false,
+      timeout: 10_000
+    },
+    {
+      command: 'tests/journeys/run-olp.sh',
+      url: 'http://127.0.0.1:4177/health/live',
+      reuseExistingServer: false,
+      timeout: 180_000,
+      gracefulShutdown: { signal: 'SIGTERM', timeout: 30_000 },
+      env: {
+        ...process.env,
+        OLP_DATABASE_URL: databaseUrl,
+        OLP_LISTEN_ADDR: packaged ? '127.0.0.1:4175' : '127.0.0.1:4179',
+        OLP_OBSERVABILITY_LISTEN_ADDR: '127.0.0.1:4177',
+        OLP_PUBLIC_ORIGIN: 'http://localhost:4175',
+        OLP_CONSOLE_DIR: process.env.OLP_CONSOLE_E2E_ASSETS ?? 'console/build',
+        OLP_MASTER_KEY_FILE: masterKeyFile,
+        OLP_AUTH_HMAC_KEY_FILE: authHmacKeyFile,
+        OLP_BOOTSTRAP_TOKEN_FILE: bootstrapTokenFile,
+        OLP_VALKEY_URL: valkeyUrl,
+        OLP_PROVIDER_EGRESS_ALLOW_CIDRS: '127.0.0.0/8,::1/128',
+        OLP_PROVIDER_EGRESS_ALLOW_HTTP_HOSTS: '127.0.0.1,localhost'
+      }
+    }
+  ]
+});

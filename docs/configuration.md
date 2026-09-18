@@ -1,8 +1,8 @@
 # Configuration reference
 
 Application configuration is environment-driven; each application setting
-also has a CLI flag in `olp <subcommand> --help`. Logging uses `RUST_LOG`. The
-source of truth is `src/process/cli/config.rs`. Secrets are file
+also has a CLI flag in `olp <subcommand> --help`. Logging uses `OLP_LOG_LEVEL` (`debug`, `info`, `warn`, `error`); the retired
+`RUST_LOG` filter no longer applies. The source of truth is `internal/config/config.go`. Secrets are file
 paths, never inline values.
 
 ## Runtime variables
@@ -11,7 +11,7 @@ paths, never inline values.
 |---|---|---|
 | `OLP_DATABASE_URL` | required | PostgreSQL URL. |
 | `OLP_DATABASE_MAX_CONNECTIONS` | `20` | Pool size. |
-| `OLP_VALKEY_URL` | optional for `all`, `gateway`, `control`; required for `worker`, `migrate`, `doctor` | Valkey for installation-scoped limits, hints, and streams. |
+| `OLP_VALKEY_URL` | optional for `all`, `gateway`, `control`; required for `worker` | Valkey for installation-scoped limits, hints, and streams. |
 | `OLP_LISTEN_ADDR` | `127.0.0.1:8080` | Public listener; containers override to `0.0.0.0:8080`. |
 | `OLP_OBSERVABILITY_LISTEN_ADDR` | `127.0.0.1:9090` | Private health and metrics listener. |
 | `OLP_OTLP_TRACES_ENDPOINT` | unset | Complete HTTP or HTTPS OTLP traces endpoint. Unset disables tracing. |
@@ -23,7 +23,7 @@ paths, never inline values.
 | `OLP_HTTP_MAX_IN_FLIGHT_INFERENCE_REQUESTS` | `256` | Inference work admission. |
 | `OLP_HTTP_MAX_IN_FLIGHT_MANAGEMENT_REQUESTS` | `32` | Management work admission. |
 | `OLP_HTTP_CONNECTION_MAX_AGE_SECONDS` | `300` | Age at which HTTP/2 connections receive GOAWAY (1–86400). |
-| `OLP_HTTP_CONNECTION_DRAIN_TIMEOUT_SECONDS` | `30` | Grace period for draining connections (1–3600). |
+| `OLP_HTTP_CONNECTION_DRAIN_TIMEOUT_SECONDS` | `30` | Grace period for draining connections (1–600). |
 | `OLP_PUBLIC_ORIGIN` | `http://127.0.0.1:8080` | OIDC redirects and generated links. |
 | `OLP_LOCAL_LOGIN_ENABLED` | `true` | Keep local sign-in available after setup. |
 | `OLP_TRUSTED_PROXY_CIDRS` | empty | Proxies allowed to supply `X-Forwarded-For`. |
@@ -41,15 +41,17 @@ paths, never inline values.
 | `OLP_MEDIA_SPOOL_DIR` | unset | On-disk media spool. |
 | `OLP_MEDIA_SPOOL_CAPACITY_BYTES` | `1073741824` | Spool capacity (1 GiB). |
 | `OLP_CONNECTOR_CONFIG_FILE` | unset | Optional file-backed connector mapping. |
-| `RUST_LOG` | unset | Tracing filter, for example `olp=info,tower_http=info`. |
+| `OLP_LOG_LEVEL` | `info` | JSON log severity: debug, info, warn, error. |
+| `OLP_SHUTDOWN_TIMEOUT` | `30s` | Shared HTTP, metadata, delivery and worker shutdown budget. |
+| `OLP_DEPENDENCY_REQUEST_TIMEOUT` | `2s` | Per-request dependency deadline. |
+| `OLP_STARTUP_TIMEOUT` | `10s` | Startup and ordinary maintenance deadline. |
 
-The connection age only applies to HTTP/2 connections so clients rebalance
-across replicas; HTTP/1 connections serve one response and are never cut short.
-A draining connection is never force-closed while a response body is still
-streaming: the drain timeout is re-armed until the stream ends, up to a fixed
-one-hour ceiling. Keep the drain timeout below the Helm
-`terminationGracePeriodSeconds − preStopDelaySeconds` budget, otherwise the
-kubelet kills the pod before the listener finishes draining.
+At maximum connection age the server stops admitting requests on that
+connection and sends HTTP/2 GOAWAY. Existing streams have the configured drain
+interval to finish; expiration closes the connection. SIGTERM stops admission
+and gives HTTP, metadata delivery and workers one shared shutdown budget.
+Keep `OLP_SHUTDOWN_TIMEOUT` below the deployment termination grace minus its
+pre-stop delay. Forced termination can leave accounting completeness gaps.
 
 The CLI loopback default is intentional; Compose and Helm set their container
 listener explicitly. Keep the observability listener private and set trusted
@@ -98,11 +100,9 @@ seconds and load it once before binding the listener; an unconfigured Valkey
 never fails open, and over-limit rejections are unaffected. The master key is
 required wherever database-managed
 provider or OIDC credentials and encrypted management replays are used.
-`worker`, `migrate`, and `doctor` require both backing services but publish no
-public listener. CLI flags override environment values. CLI-required settings
-fail during startup before a listener is bound; omitting the master key instead
-leaves database-encrypted runtime activation and control-plane operations
-unavailable.
+`worker` requires Valkey and exposes only the private health/metrics listener.
+`migrate` and `doctor` expose no listener; doctor checks Valkey when configured. CLI flags override environment values. CLI-required settings
+fail during startup before a listener is bound; database-managed credentials require the master key before startup.
 
 ## File-based secrets
 
@@ -163,8 +163,8 @@ and installation/route/key/request policies.
 ## Body size caps
 
 The JSON, media, and inline-media caps are validated together at startup:
-an inline item must fit inside the inline total, the inline total must not
-exceed the JSON cap, and the media cap must not exceed half of
+an inline item must fit inside the inline total, both stay within 64 MiB,
+and the media cap must not exceed half of
 `OLP_MEDIA_SPOOL_CAPACITY_BYTES`. Multipart admission budgets half the spool
 for untrusted parsers, so a larger media cap would make every multipart
 request fail with `503`. Raise the spool capacity (and its volume) before
@@ -174,8 +174,7 @@ transcriptions 30/64, and video creation 25/64 of it. Header count and size
 caps stay fixed.
 
 The provider response caps apply to OpenAI-compatible, Anthropic, Gemini,
-Azure OpenAI, and Vertex AI connectors; Bedrock speaks the AWS SDK and has no
-byte cap. The response cap also bounds the events buffered while collecting
+Azure OpenAI, Vertex AI and Bedrock connectors. The response cap also bounds the events buffered while collecting
 a non-streaming generation.
 
 ## Provider egress policy
@@ -205,8 +204,8 @@ endpoint checks.
 
 ## Test and harness variables
 
-`OLP_ALLOW_INSECURE_OIDC_FOR_TESTS=test-only` permits HTTP OIDC issuers in
-debug builds. Never set it in production; release builds reject it.
+Loopback OIDC is available only in an explicitly compiled `-tags=oidctest`
+test binary. Release binaries contain no environment-controlled OIDC bypass.
 
 The e2e and console integration harnesses point providers at loopback mock
 upstreams through the ordinary egress allowlists

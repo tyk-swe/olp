@@ -12,6 +12,7 @@ import (
 	"net/netip"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -35,24 +36,38 @@ func run(ctx context.Context, args []string) error {
 	if len(args) > 0 {
 		switch args[0] {
 		case "version", "--version":
-			fmt.Println("olp 3.0.0 Go")
+			fmt.Printf("olp %s Go\n", process.Version)
 			return nil
 		case "help", "--help", "-h":
-			fmt.Println("usage: olp <all|gateway|control|worker|migrate|doctor|health-probe> [flags]\n       olp master-key <status|reencrypt> [flags]")
+			fmt.Println("usage: olp <all|gateway|control|worker|migrate|doctor|health-probe> [flags]\n       olp master-key <status|reencrypt|verify-retirement> [flags]")
 			return nil
 		case "migrate", "doctor", "master-key":
 			command, options := args[0], args[1:]
+			var maintenance process.MaintenanceOptions
 			if command == "master-key" {
-				if len(options) == 0 || (options[0] != "status" && options[0] != "reencrypt") {
-					return errors.New("usage: olp master-key <status|reencrypt> [flags]")
+				if len(options) == 0 || (options[0] != "status" && options[0] != "reencrypt" && options[0] != "verify-retirement") {
+					return errors.New("usage: olp master-key <status|reencrypt|verify-retirement> [flags]")
 				}
 				command, options = options[0], options[1:]
+				if command == "verify-retirement" {
+					if len(options) == 0 {
+						return errors.New("usage: olp master-key verify-retirement VERSION [flags]")
+					}
+					version, err := strconv.Atoi(options[0])
+					if err != nil || version < 1 {
+						return errors.New("retirement version must be a positive integer")
+					}
+					maintenance.RetirementVersion, options = version, options[1:]
+				}
+				if command == "reencrypt" && len(options) > 0 && options[0] == "--dry-run" {
+					maintenance.DryRun, options = true, options[1:]
+				}
 			}
 			c, err := config.Parse(append([]string{"all"}, options...), os.Getenv, os.Stderr)
 			if err != nil {
 				return err
 			}
-			return process.Maintenance(ctx, c, command, os.Stdout)
+			return process.Maintenance(ctx, c, command, maintenance, os.Stdout)
 		case "health-probe":
 			if len(args) != 1 {
 				return errors.New("health-probe takes no arguments")

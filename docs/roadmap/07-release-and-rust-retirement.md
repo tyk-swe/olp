@@ -2,7 +2,8 @@
 
 [Roadmap](README.md) | [Previous: media and console parity](06-media-and-console-parity.md)
 
-**Status:** Not started. **Prerequisites:** M6 complete.
+**Status:** In progress — implementation and retirement are in place; final
+qualification is being recorded in [release evidence](evidence/release-qualification.md).. **Prerequisites:** M6 complete.
 
 Qualify the full Go replacement, switch the development and release workflows,
 and retire the Rust application. Feature parity is already required at entry;
@@ -26,8 +27,8 @@ implementation-specific test has a recorded replacement or reason; valid
 behavioral expectations are preserved. All official JavaScript SDK suites pass,
 and the optional Python launcher runs against the same Go fixture without Cargo.
 
-**References:** [System suites](../../tests/system/),
-[contract suites](../../tests/contract/), [HA suites](../../tests/ha/),
+**References:** [System suites](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/tests/system),
+[contract suites](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/tests/contract), [HA suites](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/tests/ha),
 [Python SDK launcher](../../tests/sdk-smoke-python/run.sh).
 
 ### M7-02
@@ -49,7 +50,7 @@ Recovery evidence includes interrupted migration/rotation and retained media job
 
 **References:** [Backup](../../scripts/backup.sh), [restore](../../scripts/restore.sh),
 [restore journey](../../console/tests/journeys/recovery.spec.ts),
-[maintenance CLI](../../src/process/cli/), [operations](../operations.md).
+[maintenance CLI](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/process/cli), [operations](../operations.md).
 
 ### M7-03
 
@@ -68,7 +69,7 @@ Connection, goroutine/native-worker, memory, and spool observations fit the
 tested configuration. Record measured capacity and limits without inventing
 an untested production SLO or recovery RPO.
 
-**References:** [Listener tests](../../src/http/listener/tests.rs),
+**References:** [Listener tests](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/http/listener/tests.rs),
 [mode smoke checks](../../scripts/smoke-image-modes.sh),
 [service smoke checks](../../scripts/smoke-image-services.sh),
 [capacity contract](../production-guarantees.md).
@@ -180,8 +181,8 @@ recorded commit. GLIDE's prebuilt native core remains an explicitly inventoried
 dependency. Removal does not discard any retained behavior or qualification fixture.
 
 **References:** [Frozen baseline](README.md#using-the-backlog),
-[Rust manifest](../../Cargo.toml), [Cargo path helper](../../scripts/lib/cargo-target-dir.sh),
-[Rust exporter](../../src/bin/export_openapi.rs), [protocol fixtures](../../tests/fixtures/).
+[Rust manifest](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/Cargo.toml), [Cargo path helper](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/scripts/lib/cargo-target-dir.sh),
+[Rust exporter](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/bin/export_openapi.rs), [protocol fixtures](../../tests/fixtures/).
 
 ### M7-09
 

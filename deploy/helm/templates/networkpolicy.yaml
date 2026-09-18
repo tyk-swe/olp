@@ -28,7 +28,7 @@
 {{- if $prometheus.podLabels -}}
 {{- $_ := set $prometheusPeer "podSelector" (dict "matchLabels" $prometheus.podLabels) -}}
 {{- end -}}
-{{- range $componentName := list "gateway" "control" -}}
+{{- range $componentName := list "gateway" "control" "worker" -}}
 {{- $component := index $root.Values $componentName -}}
 {{- if $component.enabled }}
 apiVersion: networking.k8s.io/v1
@@ -44,11 +44,13 @@ spec:
       {{- include "olp.selectorLabels" (dict "root" $root "component" $componentName) | nindent 6 }}
   policyTypes: [Ingress, Egress]
   ingress:
+    {{- if ne $componentName "worker" }}
     - from:
         {{- toYaml $edgePeers | nindent 8 }}
       ports:
         - port: 8080
           protocol: TCP
+    {{- end }}
     {{- if $prometheusPeer }}
     - from:
         {{- list $prometheusPeer | toYaml | nindent 8 }}
@@ -61,7 +63,7 @@ spec:
 ---
 {{- end }}
 {{- end }}
-{{- range $componentName := list "worker" "migration" -}}
+{{- range $componentName := list "migration" -}}
 {{- $component := index $root.Values $componentName -}}
 {{- if $component.enabled }}
 apiVersion: networking.k8s.io/v1

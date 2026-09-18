@@ -86,40 +86,40 @@ compatibility tables remain the operation/provider support matrix.
 
 | Existing capability and source | Completion owner |
 | --- | --- |
-| [Process configuration, listeners, lifecycle, and mode composition](../../src/process/) | M1 foundation; M7 qualification |
-| [Database transactions, migrations, pagination, and idempotency](../../src/database.rs) | M2 implemented; [Go code and qualification](evidence/access-and-control.md) |
-| [Bootstrap, local accounts, roles, invitations, sessions, profiles, and API keys](../../src/access/) | M2 implemented; [Go code and qualification](evidence/access-and-control.md) |
-| [OIDC configuration, login, role mappings, and linked identities](../../src/access/oidc/) | M2 implemented; [Go code and qualification](evidence/access-and-control.md) |
-| [Secret files, hashing, encryption, and master-key rotation](../../src/crypto/) | M2 implemented; [Go code and qualification](evidence/access-and-control.md) |
-| [Management contracts and response policies](../../src/http/control/) and [settings](../../src/settings/) | M2 implemented; [Go code and qualification](evidence/access-and-control.md) |
-| [Provider drafts, discovery, certification, revisions, and credential pools](../../src/providers/) | M3 implemented for OpenAI-compatible connections; [Go code and qualification](evidence/core-gateway.md); M5 remaining connectors/options |
-| [Route drafts, publication, history, and weighted selection](../../src/routes/) | M3 implemented; [Go code and qualification](evidence/core-gateway.md) |
-| [Atomic runtime publication, pinned snapshots, and independent authority refresh](../../src/runtime/) | M3 implemented; [Go code and qualification](evidence/core-gateway.md) |
-| [OpenAI Chat Completions, Responses, and model discovery](../../src/inference/http/endpoint_policy/registry.rs) | M3 implemented; [Go code and qualification](evidence/core-gateway.md) |
-| [Admission, bounded execution, retries, circuit health, cancellation, and SSE](../../src/inference/) | M3 implemented; [Go code and qualification](evidence/core-gateway.md) |
-| [Egress validation and DNS pinning](../../src/net/) and [HTTP resource limits](../../src/http/) | M3 implemented; [Go code and qualification](evidence/core-gateway.md); media extensions implemented in M6 |
-| [Key, connection, and slot limits and spend controls](../../src/limits/) | M4 implemented as [`internal/limits/`](../../internal/limits/); [Go code and qualification](evidence/limits-and-accounting.md) |
-| [Pricing, accounting, ingestion, history, reports, completeness, and retention](../../src/usage/) | M4 implemented as [`internal/usage/`](../../internal/usage/); [Go code and qualification](evidence/limits-and-accounting.md) |
-| [Distributed recovery and multiple-installation isolation](../../tests/ha/) | M4 implemented as the [`tests/integration/m4_*` process suites](../../tests/integration/); [Go code and qualification](evidence/limits-and-accounting.md); final process qualification M7 |
+| [Process configuration, listeners, lifecycle, and mode composition](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/process) | M1 foundation; M7 qualification |
+| [Database transactions, migrations, pagination, and idempotency](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/database.rs) | M2 implemented; [Go code and qualification](evidence/access-and-control.md) |
+| [Bootstrap, local accounts, roles, invitations, sessions, profiles, and API keys](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/access) | M2 implemented; [Go code and qualification](evidence/access-and-control.md) |
+| [OIDC configuration, login, role mappings, and linked identities](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/access/oidc) | M2 implemented; [Go code and qualification](evidence/access-and-control.md) |
+| [Secret files, hashing, encryption, and master-key rotation](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/crypto) | M2 implemented; [Go code and qualification](evidence/access-and-control.md) |
+| [Management contracts and response policies](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/http/control) and [settings](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/settings) | M2 implemented; [Go code and qualification](evidence/access-and-control.md) |
+| [Provider drafts, discovery, certification, revisions, and credential pools](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/providers) | M3 implemented for OpenAI-compatible connections; [Go code and qualification](evidence/core-gateway.md); M5 remaining connectors/options |
+| [Route drafts, publication, history, and weighted selection](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/routes) | M3 implemented; [Go code and qualification](evidence/core-gateway.md) |
+| [Atomic runtime publication, pinned snapshots, and independent authority refresh](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/runtime) | M3 implemented; [Go code and qualification](evidence/core-gateway.md) |
+| [OpenAI Chat Completions, Responses, and model discovery](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/inference/http/endpoint_policy/registry.rs) | M3 implemented; [Go code and qualification](evidence/core-gateway.md) |
+| [Admission, bounded execution, retries, circuit health, cancellation, and SSE](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/inference) | M3 implemented; [Go code and qualification](evidence/core-gateway.md) |
+| [Egress validation and DNS pinning](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/net) and [HTTP resource limits](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/http) | M3 implemented; [Go code and qualification](evidence/core-gateway.md); media extensions implemented in M6 |
+| [Key, connection, and slot limits and spend controls](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/limits) | M4 implemented as [`internal/limits/`](../../internal/limits/); [Go code and qualification](evidence/limits-and-accounting.md) |
+| [Pricing, accounting, ingestion, history, reports, completeness, and retention](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/usage) | M4 implemented as [`internal/usage/`](../../internal/usage/); [Go code and qualification](evidence/limits-and-accounting.md) |
+| [Distributed recovery and multiple-installation isolation](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/tests/ha) | M4 implemented as the [`tests/integration/m4_*` process suites](../../tests/integration/); [Go code and qualification](evidence/limits-and-accounting.md); final process qualification M7 |
 | [Anthropic/Gemini surfaces, translations, token counting, embeddings, and moderation](../compatibility.md) | M5 |
-| [Azure, Vertex, Bedrock, and compatible-vendor profiles](../../src/providers/) | M5 |
+| [Azure, Vertex, Bedrock, and compatible-vendor profiles](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/providers) | M5 |
 | [Custom endpoints/auth, mounted connectors, model facts, bulk workflows, policies, and routing preferences](../provider-routing.md) | M5 |
-| [Images, audio, uploads, video jobs, historical credentials, and reconciliation](../../src/media/) | M6 implemented as [`internal/media/`](../../internal/media/) and the gateway media handlers; failure-path qualification remains in M6-09 |
-| [Metrics, optional OTLP tracing, health, and worker diagnostics](../../src/observability/) | M1/M3 foundations; M6 implemented as [`internal/observability/`](../../internal/observability/) and [`internal/telemetry/`](../../internal/telemetry/) |
+| [Images, audio, uploads, video jobs, historical credentials, and reconciliation](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/media) | M6 implemented as [`internal/media/`](../../internal/media/) and the gateway media handlers; failure-path qualification remains in M6-09 |
+| [Metrics, optional OTLP tracing, health, and worker diagnostics](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/observability) | M1/M3 foundations; M6 implemented as [`internal/observability/`](../../internal/observability/) and [`internal/telemetry/`](../../internal/telemetry/) |
 | [Console access/settings](../../console/src/lib/features/access/), [providers](../../console/src/lib/features/providers/), [routes](../../console/src/lib/features/routes/), and [playground](../../console/src/lib/features/inference/) | M2 and M3 implemented; [Go code and qualification](evidence/core-gateway.md); M5 alongside its APIs |
 | [Console usage/history](../../console/src/lib/features/usage/), [media](../../console/src/lib/features/media/), [overview](../../console/src/lib/features/overview/), and [health](../../console/src/lib/features/runtime/) | Usage, history, budgets, and overview implemented in M4; [Go code and qualification](evidence/limits-and-accounting.md); media and health implemented in M6 |
-| [Compose/Helm](../../deploy/), [backup/restore and qualification scripts](../../scripts/), [CI/releases](../../.github/workflows/), and [operations](../operations.md) | M7 |
+| [Compose/Helm](../../deploy/), [backup/restore and qualification scripts](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/scripts), [CI/releases](../../.github/workflows/), and [operations](../operations.md) | M7 |
 
 ## Build and dependency scorecard
 
 The [M1 measurement record](evidence/validation.md) contains timing samples,
 commands, machine/cache details, and native build evidence. Dependency counts
 below come from the frozen source.
-There are 50 direct production dependencies in `Cargo.toml` and 467 resolved
-package entries in `Cargo.lock`; the latter includes transitive and development
+There are 50 direct production dependencies in [Cargo.toml](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/Cargo.toml) and 467 resolved
+package entries in [Cargo.lock](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/Cargo.lock); the latter includes transitive and development
 dependencies. API generation currently compiles the Rust exporter through
-`make api`. [Build commands](../../Makefile), [manifest](../../Cargo.toml),
-[lockfile](../../Cargo.lock)
+`make api`. [Build commands](../../Makefile), [manifest](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/Cargo.toml),
+[lockfile](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/Cargo.lock)
 
 | Measurement | Rust baseline | Go completion target or evidence |
 | --- | --- | --- |

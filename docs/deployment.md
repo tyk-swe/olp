@@ -166,9 +166,8 @@ networkPolicy:
 `edge.cidrs` adds raw peers for an edge load balancer or node range, and some
 CNIs need the kubelet probe CIDRs there as well. The `prometheus` block is
 separate from `monitoring.*`, which only places the ServiceMonitor object:
-leaving both `prometheus` maps empty denies every scrape of 9090. Worker and
-migration pods have no listener, so they receive a default-deny ingress
-policy and their egress rules only.
+leaving both `prometheus` maps empty denies every scrape of 9090. Workers expose only private health/metrics on 9090; the Prometheus peer may
+reach that port. Migration pods have no listener and deny ingress.
 
 Egress defaults to allow-all. Provider endpoints are arbitrary public HTTPS
 hosts, and the chart never sees the PostgreSQL or Valkey addresses —
@@ -276,7 +275,7 @@ spooling but remains a single-host deployment, not an HA profile.
 The operational assumptions and evidence are in
 [production-guarantees.md](production-guarantees.md).
 
-The image includes SPDX attestations for the runtime plus Rust and console build
+The image includes SPDX attestations for the runtime plus Go and console build
 stages. Inspect them with `docker buildx imagetools inspect IMAGE@DIGEST --format
 '{{json .SBOM}}'`. Candidate qualification and the weekly release scan evaluate
 both the image and those inventories; missing inventory is a failure. Downloaded

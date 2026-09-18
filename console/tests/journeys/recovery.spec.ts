@@ -1,3 +1,5 @@
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { expect, test } from '../playwright';
 import {
   vertical,
@@ -52,6 +54,20 @@ test('restored installation preserves identity, credentials and request history'
     { secret, model: vertical.route }
   );
   expect(result).toEqual({ status: 200, output: vertical.reply });
+  await promisify(execFile)(
+    process.execPath,
+    ['../tests/sdk-smoke/recovery.mjs'],
+    {
+      env: {
+        ...process.env,
+        OLP_RECOVERY_ORIGIN: new URL(page.url()).origin,
+        OLP_RECOVERY_API_KEY: secret,
+        OLP_RECOVERY_MODEL: vertical.route,
+        OLP_RECOVERY_REPLY: vertical.reply
+      },
+      timeout: 30_000
+    }
+  );
   await dialog.getByRole('button', { name: 'I have saved the key' }).click();
   await page.goto('/playground');
   await page.getByLabel('Route slug').fill(vertical.route);

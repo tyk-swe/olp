@@ -42,15 +42,7 @@ func TestMigrationDDLFailureRollsBackAndRecovers(t *testing.T) {
 
 func TestPopulatedInstallationAppliesForwardMigration(t *testing.T) {
 	h := newAccessHarness(t)
-	// Reconstruct the prior Go baseline in this disposable fixture. Product
-	// migrations remain forward-only; no downgrade command is provided.
-	_, err := h.Pool.Exec(t.Context(), `DROP INDEX olp_go.sessions_expiry,olp_go.secrets_expiry,
-        olp_go.auth_admission_expiry,olp_go.invitations_email;
-        ALTER TABLE olp_go.oidc_identities DROP COLUMN role_claims;
-        DELETE FROM olp_go.migrations WHERE version IN ('0002_cleanup_indexes.sql','0003_oidc_role_claims.sql')`)
-	if err != nil {
-		t.Fatal(err)
-	}
+	var err error
 	owner := h.owner()
 	profile := h.want(owner, "GET", "/api/v3/profile", nil, nil, 200)
 	if _, err = h.Pool.Exec(t.Context(), `INSERT INTO olp_go.oidc_identities(id,user_id,issuer,subject,email_at_link)
@@ -60,6 +52,13 @@ func TestPopulatedInstallationAppliesForwardMigration(t *testing.T) {
 	input := map[string]any{"name": "survives forward migration"}
 	headers := map[string]string{"Idempotency-Key": "forward-migration"}
 	issued := h.want(owner, "POST", "/api/v3/api-keys", input, headers, 201)
+	// Reconstruct the immediately preceding sequential Go release. Removing
+	// only migrations 0002/0003 while retaining later history would model a
+	// corrupt installation, not a supported forward upgrade.
+	if _, err = h.Pool.Exec(t.Context(), `ALTER TABLE olp_go.media_jobs DROP COLUMN slot_id;
+	    DELETE FROM olp_go.migrations WHERE version='0009_media_job_slot.sql'`); err != nil {
+		t.Fatal(err)
+	}
 	if _, err = database.Installation(t.Context(), h.Pool); err == nil {
 		t.Fatal("startup accepted a pending migration")
 	}
@@ -79,5 +78,19 @@ func TestPopulatedInstallationAppliesForwardMigration(t *testing.T) {
 	if err = h.Pool.QueryRow(t.Context(), `SELECT role_claims IS NULL AND subject='existing-subject' AND email_at_link='owner@example.com'
         FROM olp_go.oidc_identities WHERE user_id=$1`, profile["id"]).Scan(&retained); err != nil || !retained {
 		t.Fatal("forward migration changed the identity or invented verified role inputs")
+	}
+}
+
+func TestMigrationRejectsNonSequentialHistory(t *testing.T) {
+	h := newAccessHarness(t)
+	if _, err := h.Pool.Exec(t.Context(), "DELETE FROM olp_go.migrations WHERE version='0003_oidc_role_claims.sql'"); err != nil {
+		t.Fatal(err)
+	}
+	if database.Migrate(t.Context(), h.Pool) == nil {
+		t.Fatal("accepted a hole in migration history")
+	}
+	var missing bool
+	if err := h.Pool.QueryRow(t.Context(), "SELECT NOT EXISTS(SELECT 1 FROM olp_go.migrations WHERE version='0003_oidc_role_claims.sql')").Scan(&missing); err != nil || !missing {
+		t.Fatal("failed migration changed history", err)
 	}
 }

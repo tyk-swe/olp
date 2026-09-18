@@ -31,7 +31,7 @@ including documented unsupported combinations and translation exceptions.
 Preserve JSON/SSE fixtures independently of their Rust runners.
 
 **References:** [Architecture](../architecture.md),
-[endpoint registry](../../src/inference/http/endpoint_policy/registry.rs),
+[endpoint registry](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/inference/http/endpoint_policy/registry.rs),
 [compatibility](../compatibility.md), [tests](../../tests/README.md).
 
 ### M1-02
@@ -50,7 +50,7 @@ median and range. Rebuild measurements contain an actual implementation edit.
 Record the 50 direct production crates and 467 resolved Cargo package entries
 with their counting definitions. Missing results remain explicitly unmeasured.
 
-**References:** [Makefile](../../Makefile), [Cargo manifest](../../Cargo.toml),
+**References:** [Makefile](../../Makefile), [Cargo manifest](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/Cargo.toml),
 [Docker build](../../deploy/Dockerfile), [CI](../../.github/workflows/ci.yml).
 
 ### M1-03
@@ -70,7 +70,7 @@ repository framework, ORM, service container, or second application module.
 Each nonstandard dependency has a documented use and build impact.
 
 **References:** [Feature ownership](../architecture.md),
-[current composition](../../src/lib.rs),
+[current composition](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/lib.rs),
 [pgx](https://github.com/jackc/pgx).
 
 ### M1-04
@@ -90,9 +90,9 @@ owned listeners and initialize only needed dependencies. Readiness reports
 actual dependency state, and shutdown closes owned resources within a bounded
 deadline. Unimplemented commands return an explicit error.
 
-**References:** [CLI](../../src/process/cli.rs),
-[mode dependencies](../../src/process/mode_dependencies.rs),
-[configuration](../configuration.md), [observability](../../src/observability.rs).
+**References:** [CLI](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/process/cli.rs),
+[mode dependencies](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/process/mode_dependencies.rs),
+[configuration](../configuration.md), [observability](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/observability.rs).
 
 ### M1-05
 
@@ -115,8 +115,8 @@ prerequisites and linking cost. Repeated disconnect/shutdown scenarios terminate
 without abandoned work; ambiguous command outcomes are exposed to callers so
 later reservation and ingestion code can handle retries safely.
 
-**References:** [Valkey integration](../../src/limits/valkey.rs),
-[queue protocol](../../src/usage/queue/protocol.rs),
+**References:** [Valkey integration](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/limits/valkey.rs),
+[queue protocol](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/usage/queue/protocol.rs),
 [GLIDE Go documentation](https://github.com/valkey-io/valkey-glide/blob/main/go/README.md).
 
 ### M1-06
@@ -140,7 +140,7 @@ implemented operation against the definition as handlers land, and track
 remaining operations in the capability inventory. Full operation coverage is
 an M7 gate; placeholder handlers must never return a fabricated success.
 
-**References:** [Current exporter](../../src/bin/export_openapi.rs),
+**References:** [Current exporter](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/bin/export_openapi.rs),
 [console client](../../console/src/lib/api/client.ts),
 [console tooling](../../console/package.json),
 [oapi-codegen](https://github.com/oapi-codegen/oapi-codegen).
@@ -163,7 +163,7 @@ launching invoke no Cargo command. Feature suites join these harnesses in their
 own milestones; a fixture scaffold alone does not count as protocol parity.
 
 **References:** [Fixtures](../../tests/fixtures/),
-[process harness](../../tests/contract/harness.rs),
+[process harness](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/tests/contract/harness.rs),
 [SDK launcher](../../tests/sdk-smoke/run.sh),
 [browser launcher](../../console/tests/journeys/run-olp.sh).
 

@@ -5,22 +5,6 @@ script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 console_dir=$(cd -- "$script_dir/../.." && pwd)
 repo_dir=$(cd -- "$console_dir/.." && pwd)
 
-if [[ ${OLP_CONSOLE_E2E_BACKEND:-rust} == go ]]; then
-  if [[ -n ${OLP_CONSOLE_E2E_IMAGE:-} ]]; then
-    echo 'Use scripts/go-image-smoke.sh for Go image qualification' >&2
-    exit 64
-  fi
-  olp_bin=${OLP_CONSOLE_E2E_BIN:-$repo_dir/.local/bin/olp}
-  [[ $olp_bin == /* ]] || olp_bin="$repo_dir/$olp_bin"
-  if [[ -z ${OLP_CONSOLE_E2E_BIN:-} ]]; then
-    (cd -- "$repo_dir"; mkdir -p .local/bin; go build -o "$olp_bin" ./cmd/olp)
-  fi
-  [[ -x $olp_bin ]] || { echo 'Go console binary is missing' >&2; exit 1; }
-  cd -- "$repo_dir"
-  "$olp_bin" migrate
-  exec "$olp_bin" all
-fi
-
 if [[ -n ${OLP_CONSOLE_E2E_IMAGE:-} ]]; then
   # shellcheck source=scripts/lib/image-container.sh
   source "$repo_dir/scripts/lib/image-container.sh"
@@ -35,25 +19,9 @@ if [[ -n ${OLP_CONSOLE_E2E_IMAGE:-} ]]; then
   exec docker run "${container_args[@]}" "$OLP_CONSOLE_E2E_IMAGE" all
 fi
 
-# shellcheck source=scripts/lib/cargo-target-dir.sh
-source "$repo_dir/scripts/lib/cargo-target-dir.sh"
-target_dir=$(cargo_target_dir "$repo_dir")
-olp_bin=${OLP_CONSOLE_E2E_BIN:-$target_dir/debug/olp}
-if [[ $olp_bin != /* ]]; then
-  olp_bin="$repo_dir/$olp_bin"
-fi
-
-if [[ -z ${OLP_CONSOLE_E2E_BIN:-} ]]; then
-  (
-    cd -- "$repo_dir"
-    cargo build --locked -p olp --features test-util --bin olp
-  )
-fi
-[[ -x $olp_bin ]] || {
-  echo "Rust-hosted console integration binary is missing: $olp_bin" >&2
-  exit 1
-}
-
-cd -- "$console_dir"
+olp_bin=${OLP_CONSOLE_E2E_BIN:-$repo_dir/.local/bin/olp}
+[[ $olp_bin == /* ]] || olp_bin="$repo_dir/$olp_bin"
+[[ -x $olp_bin ]] || { echo 'Run make build before browser qualification.' >&2; exit 1; }
+cd -- "$repo_dir"
 "$olp_bin" migrate
 exec "$olp_bin" all

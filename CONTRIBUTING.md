@@ -1,112 +1,89 @@
 # Contributing
 
-OpenLLMProxy 3.0 is one Rust 2024 package and a SvelteKit console. Install the Rust toolchain from `rust-toolchain.toml`, Node.js 26, pnpm 11, Docker Compose, PostgreSQL 18 client tools, OpenSSL, curl, and jq. Run commands from the repository root.
+Install Go 1.27.1, a C compiler/linker and glibc development headers, Node.js 26,
+pnpm 11.24.0, Docker Compose, PostgreSQL 18 client tools, OpenSSL, curl, jq,
+Python 3 and ripgrep. Run commands from the repository root. GLIDE ships a pinned
+prebuilt native core; normal development requires CGO but no Rust compiler.
+Release platforms are native Linux amd64 and arm64. macOS and musl are unqualified.
 
 | Command | Purpose |
 | --- | --- |
-| `make setup` | Install the pnpm workspace and generate API contracts |
-| `make dev` | Start PostgreSQL, Valkey, Rust, and Vite |
-| `make check` | Formatting, Clippy, Rust tests, ESLint, Svelte/type checks, and Vitest |
-| `make test` | Rust unit and protocol tests using `cargo test` |
-| `make integration` | PostgreSQL/Valkey, gateway contracts, recovery, SDKs, and Chromium journeys |
-| `make api` | Generate OpenAPI and the TypeScript client |
-| `make build` | Build the release binary and static console |
-| `make fmt` | Format Rust and console source |
+| `make setup` | Download modules, install the pnpm workspace, generate contracts |
+| `make dev` | Start PostgreSQL, Valkey, Go on 8082/private 9092, and Vite on 5173 |
+| `make check` | gofmt, vet, unit/protocol tests, ESLint, Svelte/type checks, Vitest |
+| `make test` | Go unit and protocol suites without containers |
+| `make integration` | Disposable services, race/process/recovery/SDK/Chromium suites |
+| `make api` | Generate Go and TypeScript types without building the gateway |
+| `make build` | Versioned `.local/bin/olp` plus separate `console/build` assets |
+| `make fmt` | Format Go and console source |
 
-`check`, `integration`, and `dependencies` are the CI qualification jobs; configure repository branch protections to require them. Run integration locally when changing persistence, inference, authentication, runtime publication, distributed limits, or browser journeys. SQLx queries do not require offline metadata preparation.
-
-The Go rewrite checks in `openapi/management.json`, initially captured from the
-frozen Rust reference. `console/src/lib/api/schema.d.ts` remains a generated,
-ignored output. The Rust `make api`/`make build` workflows still export their
-router contract; review any resulting change to the checked-in definition.
-Change Rust handlers' `#[utoipa::path]` annotations and their feature's
-`utoipa_axum::routes!` registration together. Go contract generation uses the
-checked-in definition independently. Do not hand-edit generated Go or TypeScript.
-
-## Go development
-
-Install Go 1.27.1, a C compiler/linker, glibc development headers, Node.js 26,
-pnpm 11.24.0, Docker Compose, OpenSSL, curl, and ripgrep. GLIDE ships its Rust
-core as a pinned native archive: Go commands need no Rust compiler. Linux
-amd64/arm64 are the supported release platforms. macOS and musl are unqualified.
-
-| Command | Purpose |
-| --- | --- |
-| `make go-setup` | Download pinned modules, install console packages, generate contracts |
-| `make go-dev` | Start isolated services, Go on 8082/private 9092, Vite on 5173 |
-| `make go-api` | Generate Go transport types and TypeScript without services |
-| `make go-test` | Unit/protocol fixtures without containers |
-| `make go-check` | gofmt, vet, Go tests, existing console checks |
-| `make go-integration` | Disposable TLS/authenticated services, process modes, official SDKs, Chromium |
-| `make go-build` | Native `.local/bin/olp` and `console/build` |
-| `make go-fmt` | Format Go and console source |
-
-`go-dev` uses its own Compose project and volumes, database `olp_go`, and service
-ports 54321/63791. Vite forwards same-origin APIs to Go; editing console files
-does not rebuild Go. Restart after Go edits. Stop services with
-`docker compose -f deploy/compose.go.yaml stop`. Integration uses unique projects,
-ephemeral ports/certificates, and removes containers, networks, and volumes on
-failure. Install Chromium once with
-`pnpm --dir console exec playwright install --with-deps chromium`.
-
-Go supports access management, provider and credential pools, immutable route
-publication, OpenAI/Anthropic/Gemini inference, cloud and compatible
-connectors, routing policies and previews, distributed limits, pricing,
-accounting, retention, and recovery, plus bounded media uploads, image and
-audio operations, durable video jobs, and the private health/metrics listener
-with optional OTLP tracing. `go-dev` creates missing private secrets in
-`.local/go-secrets`, runs Go migrations, and prints the bootstrap-token file
-location. Use that token once in owner setup. Never share Rust installation
-storage. See [Go gateway operations](docs/go-gateway.md),
-[Go access operations](docs/go-access.md), and the
-[M5 evidence](docs/roadmap/evidence/provider-and-routing-parity.md) for the
-qualified surface and remaining platform gates. Media failure-path and release
-qualification remain in [M6-09 and M7](docs/roadmap/README.md).
-
-Use `OLP_SDK_SMOKE_BACKEND=go tests/sdk-smoke/run.sh` to exercise the pinned
-OpenAI, Anthropic, and Google GenAI JavaScript SDK success and typed-error
-contracts against deterministic local providers. The same backend selector
-reaches the Python launcher. These fixtures do not make paid cloud calls or
-certify a production deployment. `OLP_CONSOLE_E2E_BACKEND=go` selects the Go browser launcher before
-any Cargo lookup. `scripts/go-without-rust.sh <command>` catches accidental Rust
-invocations; native image stages contain no Rust toolchain.
+Required CI includes `check`, `integration`, `dependencies`, and both native
+image jobs. Contract generation is reproducible; `openapi/management.json` is
+the checked-in source of truth. Update it alongside handlers and regenerate
+with `make api`. Never edit generated Go or TypeScript files by hand.
+`scripts/without-rust.sh COMMAND` catches accidental Cargo/rustc invocations.
 
 ## Local development
 
-Open http://localhost:5173 after `make dev`. The bootstrap token is in `.local/dev/bootstrap-token`; the console asks for it once when creating the first owner. Credentials and the master key stay in `.local/dev`. Vite proxies API, OIDC callback, and inference traffic to Rust on port 8081, preserving the browser origin and cookies. Console edits use hot reload. Restart `make dev` after Rust changes.
+Open http://localhost:5173 after `make dev`. The one-time bootstrap token is in
+`.local/go-secrets/bootstrap.token`. Vite proxies management, OIDC callbacks,
+and inference through the browser origin. Console edits use hot reload;
+restart after backend edits. Development services use isolated volumes and
+loopback ports 54321/63791. Stop them with
+`docker compose -f deploy/compose.dev.yaml stop`.
 
-Development services bind to loopback ports 54320 and 63790. `docker compose -f deploy/compose.dev.yaml stop` stops them. Their named volumes preserve the development installation. Use a distinct database for other installations. Never point development or integration commands at customer storage.
+Go uses schema `olp_go` and Valkey namespace `olp:go:v1:<installation UUID>:`.
+Provision fresh storage when replacing any Rust release, including Rust 3.0.
+Startup rejects Rust schemas before writes. Back up the old installation with
+its own version and retain it until the independent replacement is verified.
 
-3.0 requires a fresh database. Startup rejects 2.x storage before modifying it. PostgreSQL objects live in `olp_v3`, and Valkey keys include the 3.0 prefix and durable installation UUID. There is no in-place 2.x upgrade. Back up 2.x with its own version before retiring it, and provision 3.0 independently. Future 3.x schema changes use forward-only sequential migrations.
+## Tests and changes
 
-## Making changes
+Keep feature types, validation, SQL, handlers and workflows together. See the
+[architecture map](docs/architecture.md). Unit tests live beside their owners;
+service suites live under `tests/integration`. Run `make integration` for
+persistence, authentication, inference, runtime publication, limits or browser
+changes. It provisions disposable TLS/authenticated services and runs the full
+console journey and replacement restore at packaged and Vite origins. Install
+Chromium with `pnpm --dir console exec playwright install --with-deps chromium`.
+Preserve meaningful fixture expectations. Include validation and screenshots
+for visible console changes in PRs.
 
-See [the architecture map](docs/architecture.md) for feature ownership. Keep types, validation, SQL, handlers, and workflows together. Use concrete PostgreSQL pools and transactions; pass audit provenance explicitly to mutations. Retain traits for real connector implementations and meaningful test substitutions. Prefer descriptive names, direct control flow, and small functions. Do not add compatibility without an explicit supported contract.
-
-Tests assert behavior and keep meaningful protocol fixtures. Unit tests belong beside their owner. Service tests use disposable installations, and the Chromium suite exercises both the development proxy and the packaged Rust origin, followed by replacement restore. Do not replace valid fixture expectations merely to make a failure pass. Include the checks run and screenshots for visible console changes in PR descriptions.
+`tests/sdk-smoke/run.sh` runs all pinned JavaScript SDKs against the Go fixture.
+`tests/sdk-smoke-python/run.sh` uses the same fixture with uv/Python 3.14. These
+checks use deterministic local providers. Paid cloud checks are separate:
+`OLP_LIVE_PROVIDER=... go test -tags=liveproviders ./internal/connectors` or the
+manual main-branch `live-providers` workflow with selected-provider credentials.
 
 ## Dependency policy
 
-Use current stable dependencies and update the lockfiles through Cargo and pnpm. The JavaScript projects share one workspace and lockfile. Python/uv is only used for the optional Python SDK test: `tests/sdk-smoke-python/run.sh`.
+Use current stable dependencies and update `go.mod`, `go.sum` and the pnpm
+workspace lockfile with the relevant package managers. Runtime dependencies,
+API-generation tools, GLIDE's native archive and native notices are inventoried
+separately. `scripts/check-dependencies.sh` checks reachable Go vulnerabilities,
+licenses and production JavaScript packages. Candidate image qualification also
+scans runtime/build-stage SBOMs and retains the native linking/license inventory.
 
 TypeScript stays on the newest 6.0 patch. The [TypeScript ESLint support range](https://typescript-eslint.io/users/dependency-versions/) excludes 7.x, and the Svelte toolchain must support the same compiler. Remove this exception when both support TypeScript 7 and the console passes `make check` and the Chromium journey. Other version exceptions require a concrete incompatibility or regression and a stated removal condition.
 
 ## Release evidence
 
-The release tag, Cargo, workspace/console package versions, chart version and
-appVersion use the same stable 3.x version; `scripts/check-release-version.mjs`
-checks them before candidate publication. The pinned Rust toolchain is used in
-required checks. Tags require source qualification and packaged candidate
-qualification on both published architectures. Candidate tags are provisional;
-production consumes only promoted, attested digests. Paid provider tests remain
-manual, main-branch-only and receive only the selected provider's credentials.
+Root `package.json` owns the stable 3.x version. The console package, chart
+version/appVersion, binary linker value, image label and release tag must agree;
+`scripts/check-release-version.mjs` enforces this. Build images natively on
+amd64 and arm64. Dependency layers are cached independently of application
+source; static assets remain separate from the Go binary. Native GLIDE code
+and CA libraries ship in a nonroot distroless image.
 
-Release images build on native amd64 and arm64 runners. Each build exports its
-compiled dependency layers to the matching `buildcache-amd64` or
-`buildcache-arm64` tag in the image's GHCR repository, so later release tags can
-reuse them. The Docker build uses cargo-chef to cache dependencies separately
-from application source. The platform digests are assembled into the candidate
-index before packaged qualification; promotion uses that same index digest.
+Candidate platform digests form one multi-architecture index. Packaged browser,
+SDK and recovery qualification consumes that exact index; promotion only tags
+and attests it and never rebuilds. A manual release-workflow dispatch qualifies
+a candidate without publishing stable version tags. Only a `v3.*` push can
+promote. Fresh storage requirements are recorded in release metadata.
+
+The [release evidence](docs/roadmap/evidence/release-qualification.md) records
+actual qualification and full-application five-sample build measurements. A
+missing platform result or missed build target keeps its release gate open.
 
 A provider, protocol or media feature is not release-ready until its review
 includes native conformance, unsupported/lossy semantics, body/time/admission

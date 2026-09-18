@@ -152,6 +152,7 @@ tracing:
   acceptInbound: true
 
 config:
+  logLevel: info
   databaseSecretName: olp-postgresql
   databaseSecretKey: url
   valkeySecretName: olp-valkey

@@ -1,28 +1,29 @@
 # OpenLLMProxy
 
-OpenLLMProxy is a self-hosted AI gateway and control plane built with Rust,
+OpenLLMProxy is a self-hosted AI gateway and control plane built with Go,
 SvelteKit, PostgreSQL, and Valkey. It routes native OpenAI, Anthropic, and Gemini
 SDK requests across OpenAI, Anthropic, Gemini, Vertex AI, Amazon Bedrock, Azure
 OpenAI, and reviewed OpenAI-compatible endpoints.
 
-3.0 requires a fresh installation. Existing 2.x databases are rejected before
-any migration runs. Provision a separate database and keep the old installation
+The Go release requires a fresh installation. Rust 2.x and 3.x databases
+are rejected before any migration runs. Storage uses `olp_go`; there is no
+Rust-to-Go data migration. Provision a separate database and keep the old installation
 and its backups until you have verified the replacement.
 
 ## Develop locally
 
-Install the toolchain from `rust-toolchain.toml`, Node.js 26, pnpm 11, Docker
-Compose, and a PostgreSQL client, then run:
+Install Go 1.27.1, a C compiler/linker and glibc headers, Node.js 26, pnpm 11,
+Docker Compose, and PostgreSQL 18 client tools, then run:
 
 ```sh
 make setup
 make dev
 ```
 
-Open http://localhost:5173. Use the token in `.local/dev/bootstrap-token` to
+Open http://localhost:5173. Use the token in `.local/go-secrets/bootstrap.token` to
 create the first owner. Vite serves the console with hot reload and proxies API,
 OIDC callback, and streaming requests through that same origin. PostgreSQL and
-Valkey use isolated development volumes and loopback ports 54320 and 63790.
+Valkey use isolated development volumes and loopback ports 54321 and 63791.
 
 `make check` runs the required local checks. `make integration` runs the
 service, recovery, SDK, and Chromium journey suites. CI also qualifies
@@ -33,7 +34,7 @@ exception, and [the architecture map](docs/architecture.md) for feature ownershi
 ## Install
 
 Build the image locally, or select a published 3.x image through `OLP_IMAGE`.
-Do not reuse 2.x storage volumes.
+Use fresh PostgreSQL and Valkey storage; do not reuse Rust storage volumes.
 
 ```sh
 cp .env.example .env
@@ -125,12 +126,14 @@ Back up a drained 3.0 installation and restore into an empty database:
 
 ```sh
 OLP_DATABASE_URL=postgres://... OLP_BACKUP_TRAFFIC_QUIESCED=true ./scripts/backup.sh backups
-OLP_RESTORE_DATABASE_URL=postgres://... ./scripts/restore.sh /path/printed/by/backup.sh
+OLP_RESTORE_DATABASE_URL=postgres://... OLP_RESTORE_VALKEY_ISOLATED=true ./scripts/restore.sh /path/printed/by/backup.sh
 ```
 
 Pass the dump path printed by the backup script to restore. Backups include a
 checksum and manifest and preserve the installation identity.
-Retain the installation's master-key ring and authentication HMAC key separately.
+Mount the original master-key ring and authentication HMAC key, configure a
+separate empty Valkey service, and use a database role with CREATEDB for restore
+validation. Retain the keys separately from the backup.
 See [operations](docs/operations.md) for quiescing, recovery, and key rotation.
 
 OpenLLMProxy is licensed under AGPL-3.0-only. Report vulnerabilities through

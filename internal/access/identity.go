@@ -52,7 +52,7 @@ func (s *Server) setupStatus(r *http.Request) (Reply, error) {
 func (s *Server) capabilities(r *http.Request) (Reply, error) {
 	var local, oidc bool
 	err := s.Pool.QueryRow(r.Context(), `SELECT COALESCE((SELECT value='true' FROM olp_go.settings WHERE key='auth.local_login_enabled'),true),COALESCE((SELECT (document->>'enabled')::boolean FROM olp_go.oidc_configuration WHERE singleton),false)`).Scan(&local, &oidc)
-	return OK(map[string]bool{"local_login_enabled": local, "oidc_login_enabled": oidc, "gateway_available": true, "limits_enforced": s.LimitsEnforced, "retention_enforced": s.RetentionEnforced}), err
+	return OK(map[string]bool{"local_login_enabled": local && !s.LocalLoginDisabled, "oidc_login_enabled": oidc, "gateway_available": true, "limits_enforced": s.LimitsEnforced, "retention_enforced": s.RetentionEnforced}), err
 }
 
 func (s *Server) passwordWork(r *http.Request, work func()) error {

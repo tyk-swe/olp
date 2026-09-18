@@ -11,6 +11,9 @@
 {{- if $controlMonitored -}}
 {{- $observabilityServiceNames = append $observabilityServiceNames $controlService -}}
 {{- end -}}
+{{- if .Values.worker.enabled -}}
+{{- $observabilityServiceNames = append $observabilityServiceNames (include "olp.observabilityServiceFullname" (dict "root" . "component" "worker")) -}}
+{{- end -}}
 {{- $observabilityServices := join "|" $observabilityServiceNames -}}
 {{- $readinessExpressions := list -}}
 {{- range $service := $observabilityServiceNames -}}
@@ -19,9 +22,9 @@
 {{- $readinessExpressions = append $readinessExpressions (printf "(absent_over_time(olp_ready{namespace=%q,service=%q}[5m]) == 1)" $root.Release.Namespace $service) -}}
 {{- end -}}
 {{- $workerAlertsEnabled := and .Values.worker.enabled (gt (int .Values.worker.replicas) 0) (gt (len $observabilityServiceNames) 0) -}}
-{{- range $componentName := list "gateway" "control" -}}
+{{- range $componentName := list "gateway" "control" "worker" -}}
 {{- $component := index $root.Values $componentName -}}
-{{- if and $component.enabled $component.service.enabled }}
+{{- if and $component.enabled (or (eq $componentName "worker") $component.service.enabled) }}
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:

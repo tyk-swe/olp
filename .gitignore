@@ -2,7 +2,6 @@ node_modules/
 __pycache__/
 *.py[cod]
 .venv/
-/target/
 /console/build/
 /console/node_modules/
 /console/.svelte-kit/

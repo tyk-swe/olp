@@ -3,6 +3,7 @@ on:
   pull_request:
   push:
     branches: [main]
+  workflow_dispatch:
   workflow_call:
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -18,7 +19,10 @@ jobs:
       - uses: ./.github/actions/setup
         with:
           services: false
-      - run: make check
+      - run: ./scripts/without-rust.sh make check
+      - run: ./scripts/check-contracts.sh
+      - run: node scripts/check-release-version.mjs
+      - run: go test -race ./...
       - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
       - run: ./scripts/check-helm.sh
       - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
@@ -32,10 +36,37 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/setup
-      - run: make integration
+      - run: ./scripts/without-rust.sh make integration
   dependencies:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2
+      - uses: ./.github/actions/setup
+        with:
+          services: false
+      - run: ./scripts/check-dependencies.sh
+  native:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            arch: amd64
+          - runner: ubuntu-24.04-arm
+            arch: arm64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Build native candidate without Rust
+        run: |
+          mkdir -p .local/evidence
+          docker build --progress=plain --platform linux/${{ matrix.arch }} -f deploy/Dockerfile -t olp-go:candidate . 2>&1 | tee .local/evidence/build.log
+      - name: Qualify native candidate
+        run: ./scripts/smoke-image-services.sh olp-go:candidate ${{ matrix.arch }} 2>&1 | tee .local/evidence/smoke.log
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        if: always()
+        with:
+          name: go-native-${{ matrix.arch }}
+          path: .local/evidence

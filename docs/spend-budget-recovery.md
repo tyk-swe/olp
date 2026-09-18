@@ -43,7 +43,7 @@ before enabling budgeted traffic; repeated timeouts are not successful repair.
 The reconciler does not lower inflated but otherwise valid counters. Correcting
 those requires a reviewed data repair; do not edit migration history, suppress
 checksum validation, or reset counters to zero. The 3.0 schema starts at
-`migrations/0001_initial.sql` and requires a fresh installation. Future schema
+[migrations/0001_initial.sql](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/migrations/0001_initial.sql) and requires a fresh installation. Future schema
 changes use forward-only migrations; see [Contributing](../CONTRIBUTING.md).
 
 Resume budgeted traffic after authoritative initialization and reconciliation

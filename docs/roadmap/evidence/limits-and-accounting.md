@@ -332,7 +332,7 @@ matrix, private probes, and shutdown ordering honest.
 - **Dependency inventory and capability map:** no new module is required —
   `go.mod` and `go.sum` are unchanged by this milestone — and the
   [capability map](../README.md#capability-ownership) now records
-  `src/limits`, `src/usage`, and `tests/ha` against their Go packages.
+  [src/limits](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/limits), [src/usage](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/usage), and `tests/ha` against their Go packages.
 
 ## Validation
 

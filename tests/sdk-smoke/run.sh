@@ -5,12 +5,6 @@ script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 repo_dir=$(cd -- "$script_dir/../.." && pwd)
 ready_timeout_seconds=${OLP_SDK_SMOKE_READY_TIMEOUT_SECONDS:-60}
 smoke_timeout_seconds=${OLP_SDK_SMOKE_TIMEOUT_SECONDS:-120}
-backend=${OLP_SDK_SMOKE_BACKEND:-rust}
-case "$backend" in
-  go) compiler=go ;;
-  rust) compiler=cargo ;;
-  *) echo 'OLP_SDK_SMOKE_BACKEND must be go or rust' >&2; exit 64 ;;
-esac
 
 if (( $# == 0 )); then
   smoke_command=(node "$script_dir/smoke.mjs")
@@ -31,7 +25,7 @@ for setting in \
   fi
 done
 
-for command in "$compiler" timeout "${smoke_command[0]}"; do
+for command in go timeout "${smoke_command[0]}"; do
   command -v "$command" >/dev/null 2>&1 || {
     echo "required command is unavailable: $command" >&2
     exit 1
@@ -85,16 +79,8 @@ trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
-if [[ $backend == go ]]; then
-  fixture_bin="$repo_dir/.local/bin/sdkfixture"
-  (cd -- "$repo_dir"; mkdir -p .local/bin; go build -o "$fixture_bin" ./tests/sdkfixture)
-else
-  (cd -- "$repo_dir"; cargo build --locked -p olp --example sdk_smoke_fixture --features test-util)
-  # shellcheck source=scripts/lib/cargo-target-dir.sh
-  source "$repo_dir/scripts/lib/cargo-target-dir.sh"
-  target_dir=$(cargo_target_dir "$repo_dir")
-  fixture_bin="$target_dir/debug/examples/sdk_smoke_fixture"
-fi
+fixture_bin="$repo_dir/.local/bin/sdkfixture"
+(cd -- "$repo_dir"; mkdir -p .local/bin; go build -o "$fixture_bin" ./tests/sdkfixture)
 [[ -x $fixture_bin ]] || {
   echo "SDK smoke fixture binary is missing after compilation: $fixture_bin" >&2
   exit 1

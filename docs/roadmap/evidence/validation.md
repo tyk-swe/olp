@@ -58,7 +58,7 @@ Go backend samples ran sequentially after native and integration builds ended.
 These load differences and the different application capabilities prevent a
 controlled speedup claim. Re-run the procedure against the complete M7 product.
 
-Rust edit samples change `BACKGROUND_SHUTDOWN_TIMEOUT` in `src/process/cli.rs`
+Rust edit samples change `BACKGROUND_SHUTDOWN_TIMEOUT` in [src/process/cli.rs](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/process/cli.rs)
 on every run. Go edit samples change `ReadHeaderTimeout` in
 `internal/process/run.go`; neither is a no-op rebuild. Go records hash their
 uncommitted source snapshots and record base HEAD; timing artifacts correspond

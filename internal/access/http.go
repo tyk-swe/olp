@@ -44,7 +44,8 @@ type Server struct {
 	// are actually applied. The console shows stored amounts either way and
 	// uses this to say whether they bind. It is set during composition,
 	// before the first request is served, and never changes afterwards.
-	LimitsEnforced bool
+	LimitsEnforced     bool
+	LocalLoginDisabled bool
 	// RetentionEnforced is true where this installation is configured with the
 	// shared coordination state (OLP_VALKEY_URL) the worker plane requires, so
 	// retention and aggregation run in its worker and all processes. A control

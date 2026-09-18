@@ -201,8 +201,8 @@ For a production recovery point:
 
 The script requires a zero, at-most-30-second-old durable checkpoint and an
 explicit quiescence assertion. It exports one PostgreSQL snapshot and creates
-an `olp3` manifest containing the checksum, installation identity, migration
-count, and runtime generation. Only the `olp_v3` schema is backed up.
+an `olp-go-v1` manifest containing the checksum, installation identity, migration
+count, and runtime generation. Only the `olp_go` schema is backed up.
 
 The dump contains password hashes, session and API-key digests, and encrypted
 provider/OIDC credentials. Keep master-key rings and authentication HMAC files
@@ -211,18 +211,23 @@ versions while records still reference them.
 
 Run `scripts/restore.sh BACKUP` using the dump path printed by the backup
 script, with `OLP_RESTORE_DATABASE_URL` identifying an empty isolated database.
-The command validates the 3.0 manifest and checksum,
-restores in one transaction, and checks the restored identity, migrations, and
-generation. Start the restored installation with its original keys and a fresh
+Set `OLP_RESTORE_VALKEY_ISOLATED=true`, point `OLP_VALKEY_URL` at a separate
+empty Valkey service, and mount the original master and auth key files. The
+restore role needs CREATEDB: the command first restores to a disposable staging
+database, verifies the manifest/checksum/history/identity, applies supported
+Go migrations, and authenticates every encrypted record with `olp doctor`.
+Only then does one transaction recheck and populate the empty destination.
+Failure removes staging and leaves the destination unchanged. Set
+`OLP_MAINTENANCE_BIN` to the qualified binary when using a nondefault path. Start the restored installation with its original keys and a fresh
 Valkey service. A restored installation retains its namespace; run it as a
 replacement, or isolate its Valkey service from the source installation.
 
 ## Installation and upgrades
 
-3.0 does not upgrade 2.x. Back up the existing installation with its own
+Go does not upgrade Rust 2.x or Rust 3.x storage. Back up the existing installation with its own
 version, provision an independent 3.0 database and secrets, and verify providers,
 routes, permissions, SDK requests, usage, and recovery before redirecting
-traffic. Existing 2.x schemas are refused before any 3.0 objects are created.
+traffic. Existing Rust schemas are refused before any Go objects are created.
 There is no legacy Stream rename or historical migration replay.
 
 For subsequent 3.x releases, review forward-only migrations, rehearse against
@@ -247,11 +252,9 @@ rolled back safely.
 
 ## Database deadlines and privileges
 
-Runtime connections set a 30-second statement deadline, five-second lock
-wait and 60-second idle-transaction deadline when the role/session setting is
-otherwise unlimited. Explicit nonzero deployment settings take precedence.
-Migration connections close after use and have a separate five-minute
-statement and ten-second lock budget. Backup requires a dedicated read role with access to migration history and all
+Go pool connections set a ten-second statement deadline, ten-second lock wait
+and fifteen-second idle-transaction deadline. Commands additionally obey the
+startup/dependency deadlines in the configuration reference. Backup requires a dedicated read role with access to migration history and all
 backed-up tables; the restricted runtime login deliberately lacks that access.
 Large maintenance/export operations should use their own role and explicitly chosen deadlines, not an unlimited
 interactive account. PostgreSQL classifies statement cancellation as `57014`

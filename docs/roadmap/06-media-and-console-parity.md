@@ -29,10 +29,10 @@ release local reservations and files. Restart cleanup does not remove live
 work. Uploaded content is confined to its bounded operational lifetime and
 never enters persistent request diagnostics.
 
-**References:** [Multipart handling](../../src/inference/http/multipart.rs),
-[media spool](../../src/media/spool.rs),
-[spool tests](../../src/media/spool/tests.rs),
-[endpoint body policy](../../src/inference/http/endpoint_policy/registry.rs).
+**References:** [Multipart handling](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/inference/http/multipart.rs),
+[media spool](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/media/spool.rs),
+[spool tests](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/media/spool/tests.rs),
+[endpoint body policy](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/inference/http/endpoint_policy/registry.rs).
 
 ### M6-02
 
@@ -49,9 +49,9 @@ oversized responses, cancellation, and routing constraints have fixtures.
 Only currently supported provider tuples can activate these operations.
 Media accounting and missing-usage treatment use M4's shared implementation.
 
-**References:** [Image codecs](../../src/protocols/openai/images.rs),
-[image transport](../../src/providers/openai/transport/operations/images.rs),
-[media conformance](../../src/providers/openai/transport/tests/media_ops.rs),
+**References:** [Image codecs](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/protocols/openai/images.rs),
+[image transport](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/providers/openai/transport/operations/images.rs),
+[media conformance](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/providers/openai/transport/tests/media_ops.rs),
 [compatibility](../compatibility.md).
 
 ### M6-03
@@ -69,10 +69,10 @@ parameters, truncated/oversized output, timeouts, and client disconnects.
 Audio delivery cannot leave leases or files behind. Provider-specific media
 support and incomplete pricing/usage remain explicit.
 
-**References:** [Audio codecs](../../src/protocols/openai/audio.rs),
-[audio transport](../../src/providers/openai/transport/operations/audio.rs),
-[audio tests](../../src/providers/openai/transport/tests/audio.rs),
-[media HTTP](../../src/inference/http/media.rs).
+**References:** [Audio codecs](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/protocols/openai/audio.rs),
+[audio transport](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/providers/openai/transport/operations/audio.rs),
+[audio tests](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/providers/openai/transport/tests/audio.rs),
+[media HTTP](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/inference/http/media.rs).
 
 ### M6-04
 
@@ -90,10 +90,10 @@ release durable work prematurely. An ambiguous creation cannot trigger blind
 failover or a duplicate create. Jobs cannot cross API-key ownership boundaries.
 Admission races and crash points preserve the evidence needed for reconciliation.
 
-**References:** [Video execution](../../src/inference/video.rs),
-[media creation](../../src/media/service/creation.rs),
-[job lifecycle](../../src/media/jobs/lifecycle.rs),
-[reservation tests](../../tests/persistence/media_jobs_postgres/reservation.rs).
+**References:** [Video execution](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/inference/video.rs),
+[media creation](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/media/service/creation.rs),
+[job lifecycle](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/media/jobs/lifecycle.rs),
+[reservation tests](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/tests/persistence/media_jobs_postgres/reservation.rs).
 
 ### M6-05
 
@@ -112,10 +112,10 @@ revocation obeys durable deletion/reference guards. Uncertain remote deletion
 and reconciliation gaps remain visible. Local spool loss does not erase a
 durable provider-owned job reference.
 
-**References:** [Media service](../../src/media/service/),
-[job reconciliation](../../src/media/jobs/reconciliation.rs),
-[worker](../../src/media/worker.rs),
-[media persistence](../../tests/persistence/media_jobs_postgres.rs).
+**References:** [Media service](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/media/service),
+[job reconciliation](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/media/jobs/reconciliation.rs),
+[worker](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/media/worker.rs),
+[media persistence](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/tests/persistence/media_jobs_postgres.rs).
 
 ### M6-06
 
@@ -133,10 +133,10 @@ states, and reconciliation warnings agree with durable records. Current media
 SDK endpoints work through the Go fixture. Media content and provider secrets
 never appear in history or ordinary management payloads.
 
-**References:** [Media HTTP](../../src/media/http.rs),
+**References:** [Media HTTP](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/media/http.rs),
 [media console](../../console/src/lib/features/media/),
 [playground](../../console/src/lib/features/inference/playground/),
-[media HTTP tests](../../tests/system/media_jobs_http_postgres.rs).
+[media HTTP tests](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/tests/system/media_jobs_http_postgres.rs).
 
 ### M6-07
 
@@ -155,10 +155,10 @@ follow the existing validation rules; exporter headers never reach providers.
 Health is bounded, role-aware, and honest about stale snapshots or failed
 workers. Traces/metrics/logs contain no payloads or secret header values.
 
-**References:** [Observability](../../src/observability/),
+**References:** [Observability](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/observability),
 [trace configuration](../configuration.md),
-[OTLP contracts](../../tests/contract/otlp.rs),
-[telemetry contracts](../../tests/contract/telemetry.rs).
+[OTLP contracts](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/tests/contract/otlp.rs),
+[telemetry contracts](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/tests/contract/telemetry.rs).
 
 ### M6-08
 
@@ -197,8 +197,8 @@ remain correct across failures. Record memory/spool observations against the
 configured limits. All current feature families have passing Go evidence;
 remaining M7 work is release/process qualification and retirement.
 
-**References:** [Media spool tests](../../src/media/spool/tests.rs),
-[media lifecycle tests](../../src/media/jobs/tests.rs),
+**References:** [Media spool tests](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/media/spool/tests.rs),
+[media lifecycle tests](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/media/jobs/tests.rs),
 [operation corpus](../../tests/fixtures/protocols/selected-operation-families.json),
 [production capacity contract](../production-guarantees.md).
 

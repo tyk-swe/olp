@@ -37,8 +37,8 @@ and streaming wherever it is available at all; token counting is unary only.
 Video creation is asynchronous. A cell shows `—` only when no transport mode
 of that operation can be certified for that provider kind.
 
-Endpoint registration lives in `src/inference/http/endpoint_policy/registry.rs`;
-certification policy lives in `src/providers/connectors/certification.rs`.
+Endpoint registration lives in [src/inference/http/endpoint_policy/registry.rs](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/inference/http/endpoint_policy/registry.rs);
+certification policy lives in [src/providers/connectors/certification.rs](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/providers/connectors/certification.rs).
 The conformance corpus and SDK suites exercise these behaviors.
 
 ## Surfaces and operations
@@ -110,7 +110,7 @@ semantics change.
 
 Structured output is the one shared contract Anthropic opts out of. The
 exemption `NO_ANTHROPIC_STRUCTURED_OUTPUT` in
-`tests/conformance/provider_connectors/matrix.rs` records
+[tests/conformance/provider_connectors/matrix.rs](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/tests/conformance/provider_connectors/matrix.rs) records
 why: the canonical encoder rejects `response_format` rather than advertising
 support it does not have. Cached-input usage, provider request IDs, media
 parts, and oversized-response bounds are all held to the shared contract.
@@ -121,9 +121,9 @@ candidate, a tool-result message without its tool-call ID, an image with an
 explicit detail level, or an input audio, input file, or refusal content part.
 A missing maximum output token count is also refused, because Anthropic
 requires one. The variants are enumerated in
-`src/protocols/anthropic/translate/errors.rs` and turned into
+[src/protocols/anthropic/translate/errors.rs](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/protocols/anthropic/translate/errors.rs) and turned into
 protocol errors by
-`src/providers/anthropic/transport/operations.rs`, which also
+[src/providers/anthropic/transport/operations.rs](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/providers/anthropic/transport/operations.rs), which also
 refuses token counting in streaming mode and any request whose stream flag
 disagrees with the selected transport mode.
 
@@ -135,8 +135,8 @@ appears after the conversation has started, a tool result whose content is not
 text, and — as with Anthropic — input audio, input file, and refusal parts, or
 an image with an explicit detail level. An image without a MIME type is refused
 rather than guessed. The variants live in
-`src/protocols/gemini/translate/errors.rs`;
-`src/providers/gemini/transport/operations.rs` adds the
+[src/protocols/gemini/translate/errors.rs](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/protocols/gemini/translate/errors.rs);
+[src/providers/gemini/transport/operations.rs](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/providers/gemini/transport/operations.rs) adds the
 unary-only rule for token counting, the asynchronous-mode refusal, and the
 requirement that a preserved `countTokens` request still validate after the
 model is rewritten.
@@ -149,7 +149,7 @@ a pass-through.
 ### Bedrock providers
 
 Bedrock translates on every surface and carries the most exemptions. The
-constants in `tests/conformance/provider_connectors/matrix.rs`
+constants in [tests/conformance/provider_connectors/matrix.rs](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/tests/conformance/provider_connectors/matrix.rs)
 name each one: `NO_BEDROCK_STRUCTURED_OUTPUT` (Converse rejects non-text
 response formats), `NO_BEDROCK_CACHED_USAGE` (the supported Converse token
 usage model has no cached-input field, so cached-token accounting is
@@ -160,7 +160,7 @@ SDK, so the connector applies no byte limit of its own), and `NO_BEDROCK_MEDIA`
 (the Converse encoder accepts canonical text and tool parts but no media
 content part).
 
-`src/providers/bedrock/translate.rs` refuses, with an
+[src/providers/bedrock/translate.rs](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/providers/bedrock/translate.rs) refuses, with an
 explicit protocol error, a request that asks for more than one candidate, sets
 a deterministic seed, sets parallel tool-call selection, asks for a structured
 response format other than text, puts a name or tool-call metadata on a system
@@ -172,7 +172,7 @@ the request and must be short, ASCII, and free of punctuation other than `_`
 and `-`; a named tool choice must exist in the tool list, and a tool choice of
 "none" cannot be combined with a non-empty tool list. Non-finite temperature or
 `top_p` values and non-finite JSON numbers inside tool arguments are refused
-too. `src/providers/bedrock/transport.rs` adds the
+too. [src/providers/bedrock/transport.rs](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/providers/bedrock/transport.rs) adds the
 unary-only rule for token counting, the asynchronous-mode refusal for
 generation, and validation of the model ID or ARN.
 
@@ -188,7 +188,7 @@ surface, so the other surfaces and every media operation are refused. Azure
 OpenAI can be certified for the same four operations, but on any surface, so it
 appears as `translated` on the Anthropic and Gemini surfaces and `—` for the
 media, image, audio, and video operations. Certification eligibility is defined in
-`src/providers/connectors/certification.rs`; update this table when it changes.
+[src/providers/connectors/certification.rs](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/providers/connectors/certification.rs); update this table when it changes.
 
 ## Qualification records
 

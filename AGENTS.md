@@ -2,37 +2,35 @@
 
 ## Project Structure & Module Organization
 
-OpenLLMProxy combines a Rust 2024 gateway with a client-only SvelteKit console, plus an in-progress Go rewrite (`internal/`, `cmd/olp`, `go.mod`) tracked in `docs/roadmap/`.
+OpenLLMProxy combines a Go gateway with a client-only SvelteKit console. The retired Rust reference is frozen in `docs/roadmap/`.
 
-- `src/`: Rust backend feature modules, including `providers/`, `routes/`, `access/`, `inference/`, and `protocols/`. Keep each feature's types, SQL, handlers, and workflows together.
-- `internal/`: Go feature packages mirroring the same ownership (e.g. `access/`, `providers/`, `routes/`, `gateway/`, `media/`, `observability/`); `cmd/olp` is the Go binary entrypoint, and `openapi/document.go` holds the generated management contract.
+- `internal/`: backend feature packages (`access/`, `providers/`, `routes/`, `gateway/`, `media/`, `observability/`); keep types, SQL, handlers and workflows together. `cmd/olp` is the binary entrypoint; `openapi/management.json` owns the management contract and `openapi/document.go` embeds it.
 - `console/src/lib/features/`: matching console features; shared UI lives in `console/src/lib/components/`, pages in `console/src/routes/`, and static assets in `console/static/`.
-- `tests/`: Rust integration/protocol suites, fixtures, and SDK smoke tests; `tests/integration/`: Go process and service suites; `console/tests/journeys/`: browser journeys; `benches/`: Criterion benchmarks.
-- `migrations/`: Rust database changes (`internal/database/migrations/` for Go); `deploy/`: Compose and Helm configuration; `scripts/`: automation; `docs/`: architecture and operations guides.
+- `tests/fixtures/`: language-neutral protocol corpus; `tests/integration/`: process and service suites; `tests/sdk*`: official SDK qualification; `console/tests/`: browser journeys.
+- `internal/database/migrations/`: forward-only Go SQL history; `deploy/`: Compose and Helm configuration; `scripts/`: automation; `docs/`: architecture and operations guides.
 
 ## Build, Test, and Development Commands
 
-Use the pinned `rust-toolchain.toml`, Node.js 26, pnpm 11, Docker Compose, and prerequisites in `CONTRIBUTING.md`. Run from the repository root:
+Use Go 1.27.1, a C compiler/linker and glibc headers, Node.js 26, pnpm 11, Docker Compose, and prerequisites in `CONTRIBUTING.md`. Run from the repository root:
 
 | Command | Purpose |
 | --- | --- |
 | `make setup` | Install workspace dependencies and generate API contracts. |
-| `make dev` | Start PostgreSQL, Valkey, Rust, and Vite at localhost:5173. |
-| `make check` | Run formatting, Clippy, Rust tests, ESLint, Svelte/type checks, and Vitest. |
-| `make test` | Run Rust unit and protocol tests. |
+| `make dev` | Start PostgreSQL, Valkey, Go, and Vite at localhost:5173. |
+| `make check` | Run gofmt, vet, Go tests, ESLint, Svelte/type checks, and Vitest. |
+| `make test` | Run Go unit and protocol tests. |
 | `make integration` | Run disposable-service, recovery, SDK, and Chromium suites. |
 | `make api` | Regenerate OpenAPI and TypeScript contracts. |
 | `make build` | Build the release binary and static console. |
-| `make fmt` | Format Rust and console source. |
-| `make go-dev` / `go-check` / `go-test` / `go-integration` / `go-api` / `go-build` | Same workflow for the Go rewrite (Go 1.27.1, isolated ports 8082/9092 and services). |
+| `make fmt` | Format Go and console source. |
 
 ## Coding Style & Naming Conventions
 
-Rust uses four-space indentation, a 100-column rustfmt limit, `snake_case` functions/modules, and `PascalCase` types. Go code uses standard `gofmt` formatting and `go vet` cleanliness. Console code uses two-space indentation, single quotes, and no trailing commas through Prettier; use `camelCase` helpers and `PascalCase.svelte` components. Follow Clippy and ESLint; keep route components thin.
+Go code uses standard `gofmt` formatting and `go vet` cleanliness. Console code uses two-space indentation, single quotes, and no trailing commas through Prettier; use `camelCase` helpers and `PascalCase.svelte` components. Follow go vet and ESLint; keep route components thin.
 
 ## Testing Guidelines
 
-Place Rust unit tests beside their feature and register new integration targets in `Cargo.toml` (`autotests = false`); Go unit tests sit beside their package as `*_test.go`, and process/service suites live in `tests/integration/` and run under `make go-integration`. Use descriptive behavior names, Vitest `*.test.ts`/`*.svelte.test.ts`, and Playwright `*.spec.ts`. Run console tests with `pnpm --dir console test` and Go tests with `go test ./...`. No numeric coverage threshold is configured; preserve meaningful fixtures and cover changed behavior. Run integration checks for service or browser changes.
+Place Go unit tests beside their feature and register new integration targets in `Cargo.toml` (`autotests = false`); Go unit tests sit beside their package as `*_test.go`, and process/service suites live in `tests/integration/` and run under `make integration`. Use descriptive behavior names, Vitest `*.test.ts`/`*.svelte.test.ts`, and Playwright `*.spec.ts`. Run console tests with `pnpm --dir console test` and Go tests with `go test ./...`. No numeric coverage threshold is configured; preserve meaningful fixtures and cover changed behavior. Run integration checks for service or browser changes.
 
 ## Commit & Pull Request Guidelines
 

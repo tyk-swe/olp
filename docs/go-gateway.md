@@ -91,7 +91,7 @@ validated at startup.
 | `OLP_TRACE_ACCEPT_INBOUND` | `true` | Accept a valid inbound W3C trace context as the request parent. |
 | `OLP_DEPENDENCY_REQUEST_TIMEOUT` | `2s` | Dependency request deadline (1ms–1m). |
 | `OLP_STARTUP_TIMEOUT` | `10s` | Startup deadline (1ms–1m). |
-| `OLP_SHUTDOWN_TIMEOUT` | `5s` | Per-stage shutdown deadline (1ms–10m). |
+| `OLP_SHUTDOWN_TIMEOUT` | `30s` | Shared shutdown deadline (1ms–10m). |
 
 The mounted secrets (`OLP_AUTH_HMAC_KEY_FILE`, `OLP_MASTER_KEY_FILE`,
 `OLP_BOOTSTRAP_TOKEN_FILE`) and the `migrate`, `doctor`, and `master-key`
@@ -100,7 +100,7 @@ commands are covered in
 
 The browser and integration harnesses allow loopback egress and plain HTTP for
 `127.0.0.1` so mock upstreams can be reached. Export the same two exceptions
-before `make go-dev` to develop against a local mock; production deployments
+before `make dev` to develop against a local mock; production deployments
 should leave both empty.
 
 ## Provider egress
@@ -473,9 +473,10 @@ metadata intake and gives the writer a bounded opportunity to flush the buffer.
 Only afterwards are delivery and worker contexts cancelled. An expired flush
 budget records undelivered events as loss; a forced HTTP shutdown leaves the
 gateway epoch open for detection because handlers may still emit metadata.
-A clean drain closes the epoch against what was actually delivered. Each stage gets the
-`OLP_SHUTDOWN_TIMEOUT` budget (5 seconds by default, 10 minutes at most); a
-stage that outlives it is logged and left to its own bounded cleanup.
+A clean drain closes the epoch against what was actually delivered. HTTP,
+metadata, delivery, workers and trace flushing share `OLP_SHUTDOWN_TIMEOUT`
+(30 seconds by default). Forced closure records uncertainty instead of
+extending the deployment termination budget.
 
 ## Diagnostics
 
@@ -505,8 +506,8 @@ headers file and never reach providers. Keep this listener private.
 
 ## Local development and qualification
 
-`make go-check` runs formatting, vet, Go unit/protocol suites, and console
-checks. `make go-integration` builds the binary, runs real PostgreSQL/Valkey
+`make check` runs formatting, vet, Go unit/protocol suites, and console
+checks. `make integration` builds the binary, runs real PostgreSQL/Valkey
 and process scenarios, exercises all seven connector kinds and the retained
 tuples and refusals including media, runs the official OpenAI, Anthropic, and
 Google GenAI SDKs, and runs Chromium journeys at packaged and Vite origins.

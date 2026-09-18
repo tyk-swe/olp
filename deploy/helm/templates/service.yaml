@@ -1,7 +1,8 @@
 {{- $root := . -}}
-{{- range $componentName := list "gateway" "control" -}}
+{{- range $componentName := list "gateway" "control" "worker" -}}
 {{- $component := index $root.Values $componentName -}}
-{{- if and $component.enabled $component.service.enabled }}
+{{- if and $component.enabled (or (eq $componentName "worker") $component.service.enabled) }}
+{{- if ne $componentName "worker" }}
 apiVersion: v1
 kind: Service
 metadata:
@@ -24,6 +25,7 @@ spec:
       targetPort: http
       appProtocol: http
 ---
+{{- end }}
 apiVersion: v1
 kind: Service
 metadata:

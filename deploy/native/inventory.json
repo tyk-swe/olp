@@ -1,0 +1,21 @@
+{
+  "module": "github.com/valkey-io/valkey-glide/go/v2",
+  "version": "v2.5.2",
+  "upstreamCommit": "a2165cc9d752818a9912c4aafe1cd7235ed2d5bc",
+  "source": "https://github.com/valkey-io/valkey-glide/blob/a2165cc9d752818a9912c4aafe1cd7235ed2d5bc/ffi/Cargo.lock",
+  "lockSHA256": "4522b40a547a93c97cba051c96a93029aa44c2b3a4590e06098886f16213d8a1",
+  "lockedPackages": 376,
+  "scope": "Conservative upstream FFI lock inventory, including optional/build/dev crates",
+  "artifacts": {
+    "rustbin/aarch64-apple-darwin/libglide_ffi.a": "51e12ab5f3d61dda93bf5e5cf013842db848e254931d2651ebe3584e47a2c3ec",
+    "rustbin/aarch64-unknown-linux-gnu/libglide_ffi.a": "410d3e7205e85abef2228617ce916ae0c974a5333647e3936dad3d766560cafb",
+    "rustbin/aarch64-unknown-linux-musl/libglide_ffi.a": "7398e770436511744eea031d581edbb5dd3b123b4f90e417b971e51b3294ed29",
+    "rustbin/x86_64-apple-darwin/libglide_ffi.a": "9657653b23cdefc183645be71ef9098996ab12c00e0df1089c7fd0ce35d0fa4a",
+    "rustbin/x86_64-unknown-linux-gnu/libglide_ffi.a": "b6ae24f800360d3f3ca1bb7aa0e62fc7d4d6d8dc8277a18f8513695c897f0dff",
+    "rustbin/x86_64-unknown-linux-musl/libglide_ffi.a": "8b7197161d900e64c1f245fb7350c5d6f425f633f1486898f683e2bbbf94482d"
+  },
+  "notices": {
+    "LICENSE": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",
+    "THIRD_PARTY_LICENSES_GO": "4cadebe1966fcdf3fdf990cb3203f1238c60360418555dd092542e5ddc74dbdc"
+  }
+}

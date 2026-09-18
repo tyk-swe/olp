@@ -34,8 +34,8 @@ Concurrent migrators serialize; failed migrations have a tested recovery path.
 Existing Rust installations are detected and rejected before writes. The Go
 database and Valkey namespace cannot be confused with the reference installation.
 
-**References:** [Database](../../src/database.rs), [migrations](../../migrations/),
-[migrate command](../../src/process/cli/migrate.rs),
+**References:** [Database](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/database.rs), [migrations](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/migrations),
+[migrate command](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/process/cli/migrate.rs),
 [runtime grants](../../scripts/grant-runtime-database-role.sql).
 
 ### M2-02
@@ -56,9 +56,9 @@ decryptability and can resume after interruption. Invalid secret permissions
 fail startup; secrets never enter normal reads, logs, errors, or audit payloads.
 The maintenance CLI exercises the same key lifecycle as the application.
 
-**References:** [Crypto](../../src/crypto/),
-[master-key command](../../src/process/cli/master_key.rs),
-[reencryption tests](../../tests/persistence/master_key_reencryption_postgres.rs).
+**References:** [Crypto](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/crypto),
+[master-key command](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/process/cli/master_key.rs),
+[reencryption tests](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/tests/persistence/master_key_reencryption_postgres.rs).
 
 ### M2-03
 
@@ -78,10 +78,10 @@ replays do not repeat side effects, and different requests cannot reuse a replay
 as authorization. One-time secrets in replays remain encrypted and bounded.
 APIs use no-store and audit records expose only permitted metadata.
 
-**References:** [Management HTTP](../../src/http/control/),
-[permissions](../../src/access/permissions.rs),
-[audit](../../src/access/audit.rs),
-[idempotency tests](../../tests/persistence/management_idempotency_replay_postgres.rs).
+**References:** [Management HTTP](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/http/control),
+[permissions](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/access/permissions.rs),
+[audit](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/access/audit.rs),
+[idempotency tests](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/tests/persistence/management_idempotency_replay_postgres.rs).
 
 ### M2-04
 
@@ -101,10 +101,10 @@ already-used invitations cannot grant access. Role/member changes cannot
 remove the last usable owner, and disabled accounts lose new access.
 Mutation results and audit provenance agree under concurrent requests.
 
-**References:** [Identity workflows](../../src/access/identity/),
-[public auth admission](../../src/access/identity/auth_admission.rs),
-[identity persistence](../../tests/persistence/identity_postgres.rs),
-[invitation retirement](../../tests/persistence/invitation_retirement_postgres.rs).
+**References:** [Identity workflows](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/access/identity),
+[public auth admission](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/access/identity/auth_admission.rs),
+[identity persistence](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/tests/persistence/identity_postgres.rs),
+[invitation retirement](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/tests/persistence/invitation_retirement_postgres.rs).
 
 ### M2-05
 
@@ -123,9 +123,9 @@ attempts and unsafe return URLs fail. Sensitive profile changes require the
 proper recent proof, and changing identity or signing out clears the console's
 identity-partitioned query state.
 
-**References:** [Authentication](../../src/access/authentication/),
-[session HTTP](../../src/access/http/sessions.rs),
-[profile HTTP](../../src/access/http/profile.rs),
+**References:** [Authentication](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/access/authentication),
+[session HTTP](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/access/http/sessions.rs),
+[profile HTTP](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/access/http/profile.rs),
 [console session lifecycle](../../console/src/lib/features/access/session/).
 
 ### M2-06
@@ -146,9 +146,9 @@ Key secrets cannot be recovered through list/detail endpoints. Ownership and
 issuer transitions follow existing behavior, and revocation is durable before
 it is acknowledged. Unimplemented enforcement is not presented as active.
 
-**References:** [API keys](../../src/access/api_keys/),
-[key policies](../../src/access/api_keys/http/policy.rs),
-[issuer tests](../../tests/persistence/configuration_postgres/api_key_issuers.rs).
+**References:** [API keys](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/access/api_keys),
+[key policies](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/access/api_keys/http/policy.rs),
+[issuer tests](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/tests/persistence/configuration_postgres/api_key_issuers.rs).
 
 ### M2-07
 
@@ -168,9 +168,9 @@ identity-link races are rejected. Provider egress exceptions do not authorize
 OIDC destinations. Production refuses test-only insecure configuration, while
 the local mock issuer supports repeatable browser and persistence tests.
 
-**References:** [OIDC](../../src/access/oidc/),
-[OIDC persistence](../../tests/persistence/oidc_flow_postgres.rs),
-[OIDC system suite](../../tests/system/oidc_http_postgres.rs),
+**References:** [OIDC](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/access/oidc),
+[OIDC persistence](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/tests/persistence/oidc_flow_postgres.rs),
+[OIDC system suite](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/tests/system/oidc_http_postgres.rs),
 [mock issuer](../../console/tests/journeys/mock-oidc.mjs).
 
 ### M2-08
@@ -190,7 +190,7 @@ Vite proxy. Role-aware navigation, loading/errors, one-time-secret handling,
 conflict messages, and session expiry behave correctly. No page relies on a
 Rust API or on a hand-edited generated contract.
 
-**References:** [Settings](../../src/settings/),
+**References:** [Settings](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/settings),
 [access console](../../console/src/lib/features/access/),
 [settings console](../../console/src/lib/features/settings/),
 [browser journeys](../../console/tests/journeys/rust-hosted-console.spec.ts).
@@ -212,10 +212,10 @@ mutations, typed errors, stale ETags, session expiry, and secret redaction.
 Schema migrations and key rotation preserve populated Go data. Attach
 screenshots for visible console changes and update the capability map.
 
-**References:** [Management contracts](../../tests/contract/management_contract.rs),
-[management failures](../../tests/contract/management_failures.rs),
-[data safety](../../tests/contract/data_safety.rs),
-[identity HTTP](../../tests/system/identity_http_postgres.rs).
+**References:** [Management contracts](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/tests/contract/management_contract.rs),
+[management failures](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/tests/contract/management_failures.rs),
+[data safety](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/tests/contract/data_safety.rs),
+[identity HTTP](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/tests/system/identity_http_postgres.rs).
 
 ## Exit scenarios
 

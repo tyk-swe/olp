@@ -32,9 +32,9 @@ request semantics fail explicitly; documented response-extension drops remain
 bounded and tested. Preserve tool-call completion behavior, usage completeness,
 stream sequencing, and existing provider-owned resource restrictions.
 
-**References:** [Canonical operations](../../src/protocols/canonical/),
-[Anthropic codecs](../../src/protocols/anthropic/),
-[Gemini codecs](../../src/protocols/gemini/),
+**References:** [Canonical operations](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/protocols/canonical),
+[Anthropic codecs](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/protocols/anthropic),
+[Gemini codecs](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/protocols/gemini),
 [translation limits](../compatibility.md).
 
 ### M5-02
@@ -53,9 +53,9 @@ gateway. Connectors use the existing attempt lifecycle, bounds, and accounting.
 Cross-protocol calls preserve the support matrix; adding a native surface does
 not make previously unsupported combinations eligible.
 
-**References:** [Anthropic connector](../../src/providers/anthropic/),
-[Gemini connector](../../src/providers/gemini/),
-[native surface tests](../../tests/system/anthropic_gemini_inference/native_surfaces.rs),
+**References:** [Anthropic connector](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/providers/anthropic),
+[Gemini connector](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/providers/gemini),
+[native surface tests](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/tests/system/anthropic_gemini_inference/native_surfaces.rs),
 [SDK suite](../../tests/sdk-smoke/smoke.mjs).
 
 ### M5-03
@@ -74,10 +74,10 @@ generation/streaming, token counting, and typed errors pass. Authentication
 requests are bounded and secrets are redacted. Cloud client retries cannot
 multiply the executor's attempt budget or bypass its deadline.
 
-**References:** [Azure connector](../../src/providers/azure_openai.rs),
-[Vertex connector](../../src/providers/vertex.rs),
-[Vertex auth](../../src/providers/vertex/oauth.rs),
-[connector conformance](../../tests/conformance/provider_connectors/).
+**References:** [Azure connector](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/providers/azure_openai.rs),
+[Vertex connector](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/providers/vertex.rs),
+[Vertex auth](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/providers/vertex/oauth.rs),
+[connector conformance](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/tests/conformance/provider_connectors).
 
 ### M5-04
 
@@ -98,9 +98,9 @@ any stronger new bound must be tested, and no exception silently disappears.
 Re-measure backend builds after adding the cloud dependency graph.
 
 **References:** [Bedrock guide](../providers/bedrock.md),
-[Bedrock implementation](../../src/providers/bedrock/),
-[connector exceptions](../../tests/conformance/provider_connectors/matrix.rs),
-[current dependencies](../../Cargo.toml).
+[Bedrock implementation](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/providers/bedrock),
+[connector exceptions](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/tests/conformance/provider_connectors/matrix.rs),
+[current dependencies](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/Cargo.toml).
 
 ### M5-05
 
@@ -118,9 +118,9 @@ parameters, Cohere embedding restrictions, and Voyage dimensions/truncation/
 encoding behavior. A generic compatible endpoint does not inherit official
 OpenAI media support or cross-protocol certification.
 
-**References:** [Profiles](../../src/providers/profiles.rs),
-[profile tests](../../src/providers/profiles_tests.rs),
-[catalog](../../src/providers/catalog.rs),
+**References:** [Profiles](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/providers/profiles.rs),
+[profile tests](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/providers/profiles_tests.rs),
+[catalog](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/providers/catalog.rs),
 [provider routing](../provider-routing.md).
 
 ### M5-06
@@ -139,9 +139,9 @@ deterministic evidence. Unsupported modes/providers are refused before dispatch.
 Model reads remain gateway-owned and key-filtered. New operation registration
 cannot accidentally grant inference or model-read permissions.
 
-**References:** [Endpoint registry](../../src/inference/http/endpoint_policy/registry.rs),
+**References:** [Endpoint registry](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/inference/http/endpoint_policy/registry.rs),
 [selected operations](../../tests/fixtures/protocols/selected-operation-families.json),
-[operation conformance](../../tests/conformance/selected_operations.rs),
+[operation conformance](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/tests/conformance/selected_operations.rs),
 [compatibility](../compatibility.md).
 
 ### M5-07
@@ -161,10 +161,10 @@ and custom headers are write-only; private/HTTP endpoints require explicit
 exceptions, with DNS pinning and redirect refusal retained. Mounted and
 database-managed configuration obey their existing ownership rules.
 
-**References:** [HTTP options](../../src/providers/http_options.rs),
-[configuration overrides](../../src/providers/connectors/overrides.rs),
-[mounted connectors](../../src/providers/mounted.rs),
-[flexibility tests](../../tests/persistence/provider_flexibility_postgres.rs).
+**References:** [HTTP options](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/providers/http_options.rs),
+[configuration overrides](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/providers/connectors/overrides.rs),
+[mounted connectors](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/providers/mounted.rs),
+[flexibility tests](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/tests/persistence/provider_flexibility_postgres.rs).
 
 ### M5-08
 
@@ -183,9 +183,9 @@ intersect; unknown facts cannot satisfy a requirement. Request preferences
 cannot expand access, targets, deadlines, attempts, or allowed strategies, and
 the raw routing header is never forwarded upstream or persisted.
 
-**References:** [Routing policy](../../src/routes/policy.rs),
-[key policy](../../src/access/api_keys/http/policy.rs),
-[provider options](../../src/providers/options.rs),
+**References:** [Routing policy](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/routes/policy.rs),
+[key policy](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/access/api_keys/http/policy.rs),
+[provider options](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/providers/options.rs),
 [routing contract](../provider-routing.md).
 
 ### M5-09
@@ -205,10 +205,10 @@ preview and execution. Unknown/stale facts follow the documented ordering.
 and credential-only outcomes do not penalize sibling endpoint probes.
 Each real credential attempt consumes the attempt budget.
 
-**References:** [Provider selection](../../src/inference/provider_selection.rs),
-[performance](../../src/inference/performance.rs),
-[pool transport](../../src/providers/pool_transport.rs),
-[simulation tests](../../tests/persistence/route_draft_simulation_postgres.rs).
+**References:** [Provider selection](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/inference/provider_selection.rs),
+[performance](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/inference/performance.rs),
+[pool transport](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/providers/pool_transport.rs),
+[simulation tests](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/tests/persistence/route_draft_simulation_postgres.rs).
 
 ### M5-10
 
@@ -230,7 +230,7 @@ versions and distinguish fixture qualification from paid live-provider results.
 **References:** [Provider console](../../console/src/lib/features/providers/),
 [route console](../../console/src/lib/features/routes/),
 [routing journeys](../../console/tests/journeys/provider-routing.ts),
-[conformance suites](../../tests/conformance/).
+[conformance suites](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/tests/conformance).
 
 ## Exit scenarios
 

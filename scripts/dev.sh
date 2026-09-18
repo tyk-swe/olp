@@ -2,18 +2,22 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 docker compose -f deploy/compose.dev.yaml up -d --wait
-source scripts/local-env.sh
-# shellcheck source=scripts/lib/cargo-target-dir.sh
-source scripts/lib/cargo-target-dir.sh
-target_dir=$(cargo_target_dir "$PWD")
 make setup
-cargo build --locked --bin olp
-"$target_dir/debug/olp" migrate
-
+mkdir -p .local/bin
+CGO_ENABLED=1 go build -ldflags "-X github.com/tyk-swe/olp/internal/process.Version=$(node -p 'require("./package.json").version')" -o .local/bin/olp ./cmd/olp
+export OLP_DATABASE_URL="postgres://olp_go:olp-go-local@127.0.0.1:${OLP_GO_POSTGRES_PORT:-54321}/olp_go?sslmode=disable"
+export OLP_VALKEY_URL="redis://:olp-go-local@127.0.0.1:${OLP_GO_VALKEY_PORT:-63791}/0"
+export OLP_LISTEN_ADDR=127.0.0.1:8082
+export OLP_OBSERVABILITY_LISTEN_ADDR=127.0.0.1:9092
+export OLP_PUBLIC_ORIGIN=http://127.0.0.1:5173
+export OLP_DEV_API_ORIGIN=http://127.0.0.1:8082
+source scripts/secrets.sh "$PWD/.local/go-secrets"
+.local/bin/olp migrate
+echo "Bootstrap token file: $OLP_BOOTSTRAP_TOKEN_FILE"
 pids=()
 cleanup() {
   trap - EXIT INT TERM
-  if ((${#pids[@]})); then
+  if (( ${#pids[@]} )); then
     kill "${pids[@]}" 2>/dev/null || true
     wait "${pids[@]}" 2>/dev/null || true
   fi
@@ -21,10 +25,8 @@ cleanup() {
 trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
-
-"$target_dir/debug/olp" all &
+.local/bin/olp all &
 pids+=("$!")
-pnpm --dir console dev --host localhost --port 5173 --strictPort &
+pnpm --dir console dev --host 127.0.0.1 &
 pids+=("$!")
-printf 'Development console: %s\nBootstrap token file: %s\n' "$OLP_PUBLIC_ORIGIN" "$OLP_BOOTSTRAP_TOKEN_FILE"
 wait -n "${pids[@]}"

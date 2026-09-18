@@ -38,6 +38,9 @@ func (s *Server) newSession(r *http.Request, tx pgx.Tx, userID string) (Reply, e
 	return Reply{Status: 201, Body: body, CSRF: s.csrf(token), Cookies: []*http.Cookie{cookie(sessionCookie, token, sessionTTL, true), cookie(csrfCookie, s.csrf(token), sessionTTL, false), clearCookie(recentCookie)}}, err
 }
 func (s *Server) login(r *http.Request) (Reply, error) {
+	if s.LocalLoginDisabled {
+		return Reply{}, Fail(404, "local_login_disabled", "Password-based local sign-in is disabled for this installation.")
+	}
 	var input struct {
 		Email    string `json:"email"`
 		Password string `json:"password"`

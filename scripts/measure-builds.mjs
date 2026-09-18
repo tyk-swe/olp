@@ -229,19 +229,19 @@ try {
       language === 'rust'
         ? ['cargo', 'test', '--locked', '--test', 'sse']
         : ['go', 'test', '-count=1', './internal/protocols/sse'],
-    api: ['make', language === 'rust' ? 'api' : 'go-api'],
+    api: ['make', 'api'],
     console: ['pnpm', '--dir', 'console', 'build'],
-    check: ['make', language === 'rust' ? 'check' : 'go-check'],
+    check: ['make', 'check'],
     integration: [
       'make',
-      language === 'rust' ? 'integration' : 'go-integration'
+      'integration'
     ],
     image: [
       'docker',
       'build',
       '--no-cache',
       '-f',
-      language === 'rust' ? 'deploy/Dockerfile' : 'deploy/go.Dockerfile',
+      'deploy/Dockerfile',
       '.'
     ]
   };
@@ -254,12 +254,12 @@ try {
       env
     );
     if (scenario === 'console')
-      required(['make', language === 'rust' ? 'api' : 'go-api'], source, env);
+      required(['make', 'api'], source, env);
   }
   if (scenario !== 'backend-clean') data.warmup = required(argv, source, env);
   const editFile = join(
     source,
-    language === 'rust' ? 'src/process/cli.rs' : 'internal/process/run.go'
+    language === 'rust' ? 'src/process/cli.rs' : 'internal/process/listener.go'
   );
   const original = existsSync(editFile) ? readFileSync(editFile, 'utf8') : '';
   for (let i = 0; i < count; i++) {

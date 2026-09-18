@@ -43,6 +43,7 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool) error {
 		return err
 	}
 	known := make([]string, 0, len(entries))
+	missingSeen := false
 	for _, entry := range entries {
 		name := entry.Name()
 		known = append(known, name)
@@ -54,6 +55,9 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool) error {
 		var stored []byte
 		err = tx.QueryRow(ctx, "SELECT checksum FROM olp_go.migrations WHERE version=$1", name).Scan(&stored)
 		if err == nil {
+			if missingSeen {
+				return errors.New("Go migration history is not a sequential prefix")
+			}
 			if !slices.Equal(stored, checksum[:]) {
 				return fmt.Errorf("migration checksum mismatch: %s", name)
 			}
@@ -62,6 +66,7 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool) error {
 		if !errors.Is(err, pgx.ErrNoRows) {
 			return err
 		}
+		missingSeen = true
 		if _, err = tx.Exec(ctx, string(sql)); err != nil {
 			return fmt.Errorf("migration %s failed; transaction rolled back", name)
 		}

@@ -53,7 +53,7 @@ result=$("$psql_command" "$OLP_DATABASE_URL" -X --no-psqlrc --set=ON_ERROR_STOP=
   --set=certainty="$certainty" \
   --tuples-only --no-align <<'SQL'
 BEGIN;
-SET LOCAL search_path = olp_v3, pg_catalog;
+SET LOCAL search_path = olp_go, pg_catalog;
 SET LOCAL TimeZone = 'UTC';
 SELECT pg_advisory_xact_lock(hashtextextended(:'reason', 0));
 WITH inserted AS (
@@ -61,12 +61,12 @@ WITH inserted AS (
     (id, gateway_instance, event_count, reason, certainty,
      first_observed_at, last_observed_at)
   SELECT uuidv7(), 'disaster-recovery', :'event_count'::bigint,
-         :'reason', :'certainty'::request_metadata_gap_certainty,
+         :'reason', :'certainty'::text,
          :'first_at'::timestamptz, :'last_at'::timestamptz
   WHERE NOT EXISTS (SELECT 1 FROM request_metadata_ingestion_gaps WHERE reason = :'reason')
   RETURNING id
 )
-INSERT INTO audit_events
+INSERT INTO audit
   (id, actor_user_id, action, resource_type, resource_id, outcome, occurred_at)
 SELECT uuidv7(), NULL, 'request_metadata.stream_loss_recorded', 'incident',
        :'incident_id', 'success', now()

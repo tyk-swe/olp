@@ -38,9 +38,9 @@ redirects, and disallowed destinations fail before unbounded work or dispatch.
 Timeout and cancellation close upstream bodies. Keep streaming deadlines and
 backpressure explicit instead of applying a unary timeout to every response.
 
-**References:** [Request admission](../../src/http/request_admission/),
-[listener](../../src/http/listener.rs), [egress](../../src/net/egress/),
-[egress corpus](../../tests/conformance/ssrf.rs).
+**References:** [Request admission](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/http/request_admission),
+[listener](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/http/listener.rs), [egress](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/net/egress),
+[egress corpus](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/tests/conformance/ssrf.rs).
 
 ### M3-02
 
@@ -58,9 +58,9 @@ extensions while validating the gateway envelope. Unary and streaming golden
 fixtures pass, including tools, malformed/truncated events, missing usage,
 oversized events, and unsupported stateful resource references.
 
-**References:** [OpenAI codecs](../../src/protocols/openai/),
-[OpenAI transport](../../src/providers/openai/transport/),
-[SSE](../../src/protocols/sse.rs), [protocol tests](../../tests/protocols/).
+**References:** [OpenAI codecs](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/protocols/openai),
+[OpenAI transport](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/providers/openai/transport),
+[SSE](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/protocols/sse.rs), [protocol tests](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/tests/protocols).
 
 ### M3-03
 
@@ -78,10 +78,10 @@ completed draft and exact model/operation support. Transport changes invalidate
 affected evidence, probes respect concurrency/time/body bounds, and probe
 content never enters persistent diagnostics. Unimplemented media remains unavailable.
 
-**References:** [Provider lifecycle](../../src/providers/lifecycle.rs),
-[model handlers](../../src/providers/http/models/),
-[certification](../../src/providers/connectors/certification.rs),
-[revision tests](../../tests/persistence/provider_revisions_postgres.rs).
+**References:** [Provider lifecycle](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/providers/lifecycle.rs),
+[model handlers](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/providers/http/models),
+[certification](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/providers/connectors/certification.rs),
+[revision tests](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/tests/persistence/provider_revisions_postgres.rs).
 
 ### M3-04
 
@@ -99,9 +99,9 @@ and does not silently substitute it into a pinned revision. Slot failures do
 not make sibling credentials unusable. Version revocation is durable authority
 state independent of a new provider activation. Media-specific retention joins in M6.
 
-**References:** [Pool model](../../src/providers/pool.rs),
-[pool transport](../../src/providers/pool_transport.rs),
-[credential HTTP](../../src/providers/http/credentials.rs),
+**References:** [Pool model](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/providers/pool.rs),
+[pool transport](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/providers/pool_transport.rs),
+[credential HTTP](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/providers/http/credentials.rs),
 [provider routing](../provider-routing.md).
 
 ### M3-05
@@ -120,9 +120,9 @@ retrieval expose only routes permitted by the key's explicit scopes/allowlist.
 Every actual credential attempt consumes the attempt budget; the count need
 not equal the number of distinct targets. Stale edits cannot overwrite newer drafts.
 
-**References:** [Route drafts](../../src/routes/drafts.rs),
-[revisions](../../src/routes/revisions.rs),
-[selection](../../src/inference/provider_selection.rs),
+**References:** [Route drafts](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/routes/drafts.rs),
+[revisions](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/routes/revisions.rs),
+[selection](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/inference/provider_selection.rs),
 [routing fixtures](../../tests/fixtures/routing/).
 
 ### M3-06
@@ -142,10 +142,10 @@ staleness cutoff measured monotonically from the read's start. Stale authority
 stops new admissions; already admitted streams retain their pinned policy.
 Revoked credential versions cannot be selected from retained releases.
 
-**References:** [Runtime](../../src/runtime/),
-[authority tests](../../src/runtime/manager/authority_tests.rs),
-[activation authority](../../src/runtime/activation/tests/authority_postgres.rs),
-[HA authority](../../tests/ha/authority.rs).
+**References:** [Runtime](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/runtime),
+[authority tests](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/runtime/manager/authority_tests.rs),
+[activation authority](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/runtime/activation/tests/authority_postgres.rs),
+[HA authority](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/tests/ha/authority.rs).
 
 ### M3-07
 
@@ -163,10 +163,10 @@ attempt within the original budget/deadline. A committed stream cannot restart
 on another provider. Retry-After and credential/endpoint failure classes remain
 distinct. Cancellation closes upstream work and releases local resources once.
 
-**References:** [Executor](../../src/inference/executor.rs),
-[lifecycle](../../src/inference/lifecycle.rs),
-[failover](../../src/inference/failover/),
-[HTTP scenarios](../../src/inference/http/tests/).
+**References:** [Executor](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/inference/executor.rs),
+[lifecycle](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/inference/lifecycle.rs),
+[failover](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/inference/failover),
+[HTTP scenarios](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/inference/http/tests).
 
 ### M3-08
 
@@ -185,10 +185,10 @@ and failed attempts remain observable. Prompts, outputs, tool data, uploaded
 content, raw headers, and credentials never enter the envelope.
 M4 owns durable delivery and pricing guarantees.
 
-**References:** [Events](../../src/inference/events.rs),
-[telemetry](../../src/inference/telemetry.rs),
-[usage emitter](../../src/usage/emitter.rs),
-[data safety](../../tests/contract/data_safety.rs).
+**References:** [Events](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/inference/events.rs),
+[telemetry](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/inference/telemetry.rs),
+[usage emitter](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/usage/emitter.rs),
+[data safety](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/tests/contract/data_safety.rs).
 
 ### M3-09
 

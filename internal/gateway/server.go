@@ -32,12 +32,14 @@ import (
 
 // Config bounds the inference surface.
 type Config struct {
-	MaxInFlight       int
-	MaxBodyBytes      int64
-	MaxMediaBodyBytes int64
-	MaxResponseBytes  int64
-	MaxEventBytes     int64
-	TrustedProxies    []netip.Prefix
+	MaxInFlight        int
+	MaxBodyBytes       int64
+	MaxMediaBodyBytes  int64
+	MaxResponseBytes   int64
+	MaxEventBytes      int64
+	TrustedProxies     []netip.Prefix
+	CORSAllowedOrigins []string
+	InlineMedia        protocols.InlineMediaLimits
 	// AdmissionPool, when set, is the process-local inference admission pool
 	// the server falls back to for direct handler calls; process composition
 	// shares it with the public admission middleware so both bound the same
@@ -82,6 +84,9 @@ const upstreamHeaderTimeout = 5 * time.Minute
 func New(rt Runtime, policy *egress.Policy, cfg Config, log *slog.Logger) *Server {
 	if cfg.MaxMediaBodyBytes <= 0 {
 		cfg.MaxMediaBodyBytes = 64 << 20
+	}
+	if cfg.InlineMedia.Items == 0 {
+		cfg.InlineMedia = protocols.InlineMediaLimits{Items: 4, ItemBytes: 1 << 20, TotalBytes: 2 << 20}
 	}
 	pool := cfg.AdmissionPool
 	if pool == nil {
@@ -163,14 +168,13 @@ func (s *Server) begin(w http.ResponseWriter, r *http.Request) request {
 	return request{id: id, minted: minted, clientIP: ClientIP(r, s.cfg.TrustedProxies), startedAt: s.now(), release: s.Runtime.Release(), trace: telemetry.RequestFromContext(r.Context())}
 }
 
-// cors allows browser SDK clients from any origin: the surface authenticates
-// with bearer keys only, never cookies, so no credentialed access exists.
+// cors permits browser SDK clients only from explicitly configured origins.
 func (s *Server) cors(w http.ResponseWriter, r *http.Request) {
-	if r.Header.Get("Origin") == "" {
+	if !slices.Contains(s.cfg.CORSAllowedOrigins, r.Header.Get("Origin")) {
 		return
 	}
 	h := w.Header()
-	h.Set("Access-Control-Allow-Origin", "*")
+	h.Set("Access-Control-Allow-Origin", r.Header.Get("Origin"))
 	h.Add("Vary", "Origin")
 	h.Set("Access-Control-Expose-Headers", "X-Request-Id, Retry-After")
 }
@@ -178,7 +182,7 @@ func (s *Server) cors(w http.ResponseWriter, r *http.Request) {
 func (s *Server) preflight(w http.ResponseWriter, r *http.Request) {
 	s.cors(w, r)
 	h := w.Header()
-	h.Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+	h.Set("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
 	h.Set("Access-Control-Allow-Headers", "Authorization, X-Api-Key, X-Goog-Api-Key, X-Goog-Api-Client, Anthropic-Version, Anthropic-Beta, Anthropic-Dangerous-Direct-Browser-Access, Content-Type, X-Request-Id, X-OLP-Routing, OpenAI-Organization, OpenAI-Project, OpenAI-Beta, X-Stainless-Lang, X-Stainless-Package-Version, X-Stainless-OS, X-Stainless-Arch, X-Stainless-Runtime, X-Stainless-Runtime-Version, X-Stainless-Retry-Count, X-Stainless-Timeout, X-Stainless-Helper-Method")
 	h.Set("Access-Control-Max-Age", "600")
 	w.WriteHeader(http.StatusNoContent)
@@ -433,6 +437,12 @@ func (s *Server) inference(family openai.Family) http.HandlerFunc {
 		rc.SetReadDeadline(time.Time{})
 		parsed, err := protocols.Parse(family, body, r.PathValue("model"))
 		if err != nil {
+			e = requestError(err)
+			x.failure, status = e, e.Status
+			writeError(w, e)
+			return
+		}
+		if err := protocols.ValidateInlineMedia(parsed, s.cfg.InlineMedia); err != nil {
 			e = requestError(err)
 			x.failure, status = e, e.Status
 			writeError(w, e)

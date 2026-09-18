@@ -496,7 +496,8 @@ func TestFreshMigrationsIsolationPrivilegesAndRotationCLI(t *testing.T) {
 		return path
 	}
 	ring2 := `{"active_version":2,"keys":[{"version":1,"key":"` + strings.Repeat("ab", 32) + `"},{"version":2,"key":"` + strings.Repeat("ef", 32) + `"}]}`
-	env := map[string]string{"OLP_DATABASE_URL": h.DBURL, "OLP_AUTH_HMAC_KEY_FILE": write("auth", h.AuthHex), "OLP_MASTER_KEY_FILE": write("ring", ring2)}
+	write("index.html", "<!doctype html><title>Maintenance fixture</title>")
+	env := map[string]string{"OLP_DATABASE_URL": h.DBURL, "OLP_AUTH_HMAC_KEY_FILE": write("auth", h.AuthHex), "OLP_MASTER_KEY_FILE": write("ring", ring2), "OLP_CONSOLE_DIR": dir}
 	binary := required(t, "OLP_TEST_BINARY")
 	for _, args := range [][]string{{"master-key", "reencrypt"}, {"master-key", "reencrypt"}, {"doctor"}} {
 		cmd := exec.CommandContext(t.Context(), binary, args...)

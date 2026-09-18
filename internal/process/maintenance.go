@@ -6,14 +6,27 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log/slog"
+	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/config"
+	"github.com/tyk-swe/olp/internal/console"
+	"github.com/tyk-swe/olp/internal/coordination"
 	"github.com/tyk-swe/olp/internal/database"
+	"github.com/tyk-swe/olp/internal/egress"
+	"github.com/tyk-swe/olp/internal/media"
+	"github.com/tyk-swe/olp/internal/providers"
 )
 
-func Maintenance(ctx context.Context, c config.Config, command string, output io.Writer) error {
+type MaintenanceOptions struct {
+	DryRun            bool
+	RetirementVersion int
+}
+
+func Maintenance(ctx context.Context, c config.Config, command string, options MaintenanceOptions, output io.Writer) error {
 	timeout := c.StartupTimeout
 	if command == "reencrypt" {
 		timeout = 30 * time.Minute
@@ -68,7 +81,7 @@ func Maintenance(ctx context.Context, c config.Config, command string, output io
 		return errors.New("authentication key does not match the Go installation")
 	}
 	rotated := 0
-	if command == "reencrypt" {
+	if command == "reencrypt" && !options.DryRun {
 		if active == nil {
 			return errors.New("start the installation before rotating master keys")
 		}
@@ -98,5 +111,49 @@ func Maintenance(ctx context.Context, c config.Config, command string, output io
 	if err = rows.Err(); err != nil {
 		return errors.New("cannot inspect encrypted records")
 	}
-	return json.NewEncoder(output).Encode(map[string]any{"installation_id": installation, "valkey_namespace": database.ValkeyNamespace(installation), "active_version": keys.Active, "stored_versions": versions, "reencrypted": rotated})
+	if command == "verify-retirement" {
+		if options.RetirementVersion == keys.Active || active == nil || *active != keys.Active || versions[options.RetirementVersion] != 0 {
+			return errors.New("master-key version is active or still referenced; finish rotation before retirement")
+		}
+	}
+	if command == "doctor" {
+		if c.ValkeyURL != "" {
+			vc, err := coordination.Configuration(c.ValkeyURL, c.ValkeyCAFile, c.RequestTimeout)
+			if err != nil {
+				return err
+			}
+			client, err := coordination.Open(ctx, vc)
+			if err != nil {
+				return err
+			}
+			defer client.Close()
+			if err = client.Ping(ctx); err != nil {
+				return err
+			}
+		}
+		if _, err := os.Stat(filepath.Join(c.ConsoleDir, "index.html")); err != nil {
+			return errors.New("console index.html is unavailable")
+		}
+		_, closeAssets, err := console.Handler(c.ConsoleDir)
+		if err != nil {
+			return err
+		}
+		closeAssets()
+		if c.ConnectorConfigFile != "" {
+			policy := egress.Policy{AllowedNetworks: c.ProviderEgressAllowCIDRs, PlainHTTPHosts: c.ProviderEgressAllowHTTPHosts}
+			if _, err = providers.LoadMounted(c.ConnectorConfigFile, &policy); err != nil {
+				return err
+			}
+		}
+		spoolDir := c.MediaSpoolDir
+		if spoolDir == "" {
+			spoolDir = filepath.Join(os.TempDir(), "olp-media-spool")
+		}
+		spool, err := media.NewSpool(spoolDir, c.MediaSpoolCapacityBytes, slog.New(slog.NewJSONHandler(io.Discard, nil)))
+		if err != nil {
+			return err
+		}
+		spool.Close()
+	}
+	return json.NewEncoder(output).Encode(map[string]any{"ok": true, "installation_id": installation, "valkey_namespace": database.ValkeyNamespace(installation), "active_version": keys.Active, "stored_versions": versions, "reencrypted": rotated, "dry_run": options.DryRun})
 }

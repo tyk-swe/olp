@@ -264,7 +264,10 @@ func (s *Server) putOIDCConfiguration(r *http.Request) (Reply, error) {
 	return Commit(r, tx, Detail(c, c.ETag))
 }
 
-type oidcFlow struct{ Kind, State, Nonce, Verifier, ReturnTo, UserID, SessionID, Purpose, ResourceID string }
+type oidcFlow struct {
+	ID                                                                             string `json:"-"` // Authoritative row ID, used only to address the browser binding cookie.
+	Kind, State, Nonce, Verifier, ReturnTo, UserID, SessionID, Purpose, ResourceID string
+}
 
 func (s *Server) beginOIDCLogin(r *http.Request) (Reply, error) { return s.beginOIDC(r, "login") }
 func (s *Server) beginOIDCLink(r *http.Request) (Reply, error)  { return s.beginOIDC(r, "link") }
@@ -368,7 +371,7 @@ func (s *Server) beginOIDC(r *http.Request, kind string) (Reply, error) {
 		options = append(options, oauth2.SetAuthURLParam("prompt", "login"), oauth2.SetAuthURLParam("max_age", "0"))
 	}
 	authorizationURL := oauth.AuthCodeURL(flow.State, options...)
-	response := Reply{Status: 200, Body: map[string]string{"authorization_url": authorizationURL}, Cookies: []*http.Cookie{cookie("__Host-olp_oidc_login_"+flow.State, cookieToken, 10*time.Minute, true)}}
+	response := Reply{Status: 200, Body: map[string]string{"authorization_url": authorizationURL}, Cookies: []*http.Cookie{cookie("__Host-olp_oidc_login_"+id, cookieToken, 10*time.Minute, true)}}
 	if kind == "link" {
 		response.Cookies = append(response.Cookies, clearCookie(recentCookie))
 	}
@@ -400,7 +403,7 @@ func (s *Server) consumeFlow(r *http.Request) (oidcFlow, oidcConfiguration, erro
 	if err != nil {
 		return flow, config, err
 	}
-	if !hmac.Equal(digest, s.Auth.Digest("oidc_cookie", cookieValue(r, "__Host-olp_oidc_login_"+state))) {
+	if !hmac.Equal(digest, s.Auth.Digest("oidc_cookie", cookieValue(r, "__Host-olp_oidc_login_"+id))) {
 		return flow, config, Fail(403, "oidc_flow_invalid", "The sign-in request belongs to a different browser.")
 	}
 	data, err := s.Keys.Read(r.Context(), tx, s.Installation, id, "oidc_flow")
@@ -410,6 +413,7 @@ func (s *Server) consumeFlow(r *http.Request) (oidcFlow, oidcConfiguration, erro
 	if err = json.Unmarshal(data, &flow); err != nil {
 		return flow, config, err
 	}
+	flow.ID = id
 	config, err = loadOIDC(r, tx)
 	if err != nil {
 		return flow, config, err
@@ -520,7 +524,7 @@ func (s *Server) oidcCallback(r *http.Request) (Reply, error) {
 			return Reply{}, err
 		}
 	}
-	response := Reply{Status: 303, Location: flow.ReturnTo, Cookies: []*http.Cookie{clearCookie("__Host-olp_oidc_login_" + flow.State)}}
+	response := Reply{Status: 303, Location: flow.ReturnTo, Cookies: []*http.Cookie{clearCookie("__Host-olp_oidc_login_" + flow.ID)}}
 	if flow.Kind != "login" {
 		p, err := s.Principal(r, tx, "read")
 		if err != nil {

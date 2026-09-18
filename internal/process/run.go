@@ -26,6 +26,7 @@ import (
 	"github.com/tyk-swe/olp/internal/management"
 	"github.com/tyk-swe/olp/internal/media"
 	"github.com/tyk-swe/olp/internal/observability"
+	"github.com/tyk-swe/olp/internal/protocols"
 	"github.com/tyk-swe/olp/internal/providers"
 	"github.com/tyk-swe/olp/internal/routes"
 	"github.com/tyk-swe/olp/internal/runtime"
@@ -44,7 +45,7 @@ const mediaUpstreamHeaderTimeout = 5 * time.Minute
 const metadataBuffer = 8192
 
 // Version is the build identity recorded on exported traces.
-const Version = "3.0.0"
+var Version = "dev"
 
 func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 	ctx, stop := context.WithCancel(ctx)
@@ -66,8 +67,12 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 	if err != nil {
 		return err
 	}
+	var shutdownDeadline time.Time
 	defer func() {
-		shutdown, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		if shutdownDeadline.IsZero() {
+			shutdownDeadline = time.Now().Add(5 * time.Second)
+		}
+		shutdown, cancel := context.WithDeadline(context.Background(), shutdownDeadline)
 		defer cancel()
 		if err := traces.Shutdown(shutdown); err != nil {
 			log.Warn("trace export did not flush cleanly", "error", err)
@@ -109,7 +114,7 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 			case "/v1/":
 				continue
 			case "/anthropic/", "/gemini/":
-				handler = management.Unimplemented
+				handler = management.NotFound
 			}
 		}
 		public.Handle(prefix, handler)
@@ -179,13 +184,15 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 		}
 		if c.Mode.Management() || c.Mode.Inference() {
 			gw = gateway.New(rt, &policy, gateway.Config{
-				MaxInFlight:       c.MaxInFlightInference,
-				MaxBodyBytes:      c.MaxJSONBodyBytes,
-				MaxMediaBodyBytes: c.MaxMediaBodyBytes,
-				MaxResponseBytes:  c.ProviderMaxResponseBytes,
-				MaxEventBytes:     c.ProviderMaxEventBytes,
-				TrustedProxies:    c.TrustedProxyCIDRs,
-				AdmissionPool:     inferencePool,
+				MaxInFlight:        c.MaxInFlightInference,
+				CORSAllowedOrigins: c.GatewayCORSAllowedOrigins,
+				InlineMedia:        protocols.InlineMediaLimits{Items: c.MaxInlineMediaItems, ItemBytes: c.MaxInlineMediaItemBytes, TotalBytes: c.MaxInlineMediaTotalBytes},
+				MaxBodyBytes:       c.MaxJSONBodyBytes,
+				MaxMediaBodyBytes:  c.MaxMediaBodyBytes,
+				MaxResponseBytes:   c.ProviderMaxResponseBytes,
+				MaxEventBytes:      c.ProviderMaxEventBytes,
+				TrustedProxies:     c.TrustedProxyCIDRs,
+				AdmissionPool:      inferencePool,
 			}, log)
 			if limiter != nil {
 				var policy func() limits.OutagePolicy
@@ -239,6 +246,7 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 			if err != nil {
 				return err
 			}
+			control.LocalLoginDisabled = !c.LocalLoginEnabled
 			control.LimitsEnforced = limiter != nil
 			// The worker plane that applies retention runs only where shared
 			// state is configured, and a control process cannot see whether a
@@ -428,7 +436,9 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 			handler       http.Handler
 		}{"public", c.ListenAddr, admission.Wrap(public)})
 	}
-	var servers []*http.Server
+	requestContext, cancelRequests := context.WithCancel(context.WithoutCancel(ctx))
+	defer cancelRequests()
+	var servers []*listenerServer
 	var sockets []net.Listener
 	for _, listener := range listeners {
 		socket, err := (&net.ListenConfig{}).Listen(startup, "tcp", listener.address)
@@ -439,7 +449,7 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 			return fmt.Errorf("bind %s listener: %w", listener.name, err)
 		}
 		sockets = append(sockets, socket)
-		servers = append(servers, &http.Server{Handler: listener.handler, ReadHeaderTimeout: 5 * time.Second, IdleTimeout: time.Minute, MaxHeaderBytes: 32 * 1024, BaseContext: func(net.Listener) context.Context { return ctx }})
+		servers = append(servers, &listenerServer{handler: listener.handler, limit: c.MaxConnections, age: time.Duration(c.ConnectionMaxAgeSeconds) * time.Second, drain: time.Duration(c.ConnectionDrainTimeoutSeconds) * time.Second, requests: requestContext})
 	}
 	errorsCh := make(chan error, len(servers))
 	for i, server := range servers {
@@ -452,7 +462,8 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 	case serveErr = <-errorsCh:
 	}
 	stop()
-	shutdown, cancel := context.WithTimeout(context.Background(), c.ShutdownTimeout)
+	shutdownDeadline = time.Now().Add(c.ShutdownTimeout)
+	shutdown, cancel := context.WithDeadline(context.Background(), shutdownDeadline)
 	defer cancel()
 	// Both listeners drain against the same deadline. Forced connection closure
 	// does not prove that every handler has finished producing metadata.
@@ -463,23 +474,23 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 				if emitter != nil && listeners[i].name == "public" {
 					emitter.MarkUnclean()
 				}
-				server.Close()
 			}
 		})
 	}
 	wg.Wait()
+	cancelRequests()
 	// Stop intake and flush accepted events before stopping the workers. If
 	// HTTP draining was forced, the epoch stays open to report the uncertainty
 	// from handlers that could still finish after intake closes.
 	if emitter != nil {
 		emitter.Close()
-		awaitPlane(c.ShutdownTimeout, func() { <-writerDone }, log, "request metadata flush")
+		awaitPlane(shutdown, func() { <-writerDone }, log, "request metadata flush")
 	}
 	stopDelivery()
-	awaitPlane(c.ShutdownTimeout, delivered.Wait, log, "request metadata delivery")
+	awaitPlane(shutdown, delivered.Wait, log, "request metadata delivery")
 	stopWorkers()
 	if workersStopped != nil {
-		awaitPlane(c.ShutdownTimeout, workersStopped, log, "worker plane")
+		awaitPlane(shutdown, workersStopped, log, "worker plane")
 	}
 	log.Info("process stopped", "mode", c.Mode)
 	if errors.Is(serveErr, http.ErrServerClosed) {
@@ -489,21 +500,18 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 }
 
 // awaitPlane waits for a plane to finish after intake is closed or its context
-// is cancelled. Each plane gets the configured shutdown budget of its own, because
-// draining buffered request metadata is what keeps an orderly stop from
-// becoming a completeness gap; a plane that outlives its budget is left to the
-// bounded cleanup it does on its own rather than holding the process open.
-func awaitPlane(budget time.Duration, wait func(), log *slog.Logger, plane string) {
+// is cancelled. All planes share one deadline, including HTTP draining.
+// A plane that outlives it records a completeness gap rather than extending
+// the deployment grace period.
+func awaitPlane(ctx context.Context, wait func(), log *slog.Logger, plane string) {
 	done := make(chan struct{})
 	go func() {
 		wait()
 		close(done)
 	}()
-	timer := time.NewTimer(budget)
-	defer timer.Stop()
 	select {
 	case <-done:
-	case <-timer.C:
+	case <-ctx.Done():
 		log.Warn("shutdown budget reached before the plane closed", "plane", plane)
 	}
 }
