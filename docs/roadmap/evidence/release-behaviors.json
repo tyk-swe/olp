@@ -1,0 +1,888 @@
+{
+  "description": "Reviewed behavior-to-test mapping for the frozen Rust inventory. Every source path is explicit; test symbols are checked by release-inventory.mjs. Passing qualification remains a separate CI record. Harness retirement records do not claim scenario coverage.",
+  "behaviors": [
+    {
+      "id": "console",
+      "behavior": "Retained setup, session, provider/route drafts, request history, accessibility and replacement recovery journeys; hosted journey renamed after Rust retirement.",
+      "referenceSuites": [
+        "console/tests/journeys/console-polish.ts",
+        "console/tests/journeys/draft-saving.ts",
+        "console/tests/journeys/fixtures.ts",
+        "console/tests/journeys/provider-routing.ts",
+        "console/tests/journeys/recovery.spec.ts",
+        "console/tests/journeys/request-history.ts",
+        "console/tests/journeys/rust-hosted-console.spec.ts"
+      ],
+      "tests": [
+        "console/tests/journeys/console-polish.ts",
+        "console/tests/journeys/draft-saving.ts",
+        "console/tests/journeys/fixtures.ts",
+        "console/tests/journeys/provider-routing.ts",
+        "console/tests/journeys/recovery.spec.ts",
+        "console/tests/journeys/request-history.ts",
+        "console/tests/journeys/hosted-console.spec.ts"
+      ],
+      "disposition": "retained"
+    },
+    {
+      "id": "javascript-sdk",
+      "behavior": "Official JavaScript clients exercise the Go fixture using the retained launcher and pinned dependencies.",
+      "referenceSuites": [
+        "tests/sdk-smoke/package.json",
+        "tests/sdk-smoke/run.sh",
+        "tests/sdk-smoke/smoke.mjs"
+      ],
+      "tests": [
+        "tests/sdk-smoke/package.json",
+        "tests/sdk-smoke/run.sh",
+        "tests/sdk-smoke/smoke.mjs"
+      ],
+      "disposition": "retained"
+    },
+    {
+      "id": "python-sdk",
+      "behavior": "Optional official Python clients use the Go fixture and pinned dependency lock.",
+      "referenceSuites": [
+        "tests/sdk-smoke-python/pyproject.toml",
+        "tests/sdk-smoke-python/run.sh",
+        "tests/sdk-smoke-python/smoke.py",
+        "tests/sdk-smoke-python/uv.lock"
+      ],
+      "tests": [
+        "tests/sdk-smoke-python/pyproject.toml",
+        "tests/sdk-smoke-python/run.sh",
+        "tests/sdk-smoke-python/smoke.py",
+        "tests/sdk-smoke-python/uv.lock"
+      ],
+      "disposition": "retained"
+    },
+    {
+      "id": "rust-module-wiring",
+      "behavior": "Rust test entrypoints and module declarations are replaced by Go package discovery and the integration launcher.",
+      "referenceSuites": [
+        "tests/conformance/main.rs",
+        "tests/conformance/provider_connectors/mod.rs",
+        "tests/persistence/main.rs",
+        "tests/system/main.rs",
+        "tests/protocols/anthropic_messages.rs",
+        "tests/protocols/openai_operations.rs"
+      ],
+      "tests": [
+        "Makefile",
+        "scripts/integration.sh"
+      ],
+      "disposition": "replaced harness",
+      "reason": "These files wire Rust test modules together. Their behavioral modules are mapped separately; retaining Cargo test entrypoints would reintroduce the retired build."
+    },
+    {
+      "id": "fixture-harness",
+      "behavior": "Process, HTTP, database and provider fixture setup is shared by Go service suites; neutral payload files remain byte-identical.",
+      "referenceSuites": [
+        "tests/conformance/provider_connectors/fixtures.rs",
+        "tests/conformance/provider_connectors/support.rs",
+        "tests/conformance/support.rs",
+        "tests/contract/harness/support.rs",
+        "tests/contract/harness/valkey.rs",
+        "tests/contract/mock_upstream.rs",
+        "tests/contract/world.rs",
+        "tests/contract/world/fixture.rs",
+        "tests/contract/world/management.rs",
+        "tests/persistence/support/mod.rs",
+        "tests/persistence/support/route_fixtures.rs",
+        "tests/protocols/anthropic_messages/common.rs",
+        "tests/protocols/openai_operations/common.rs",
+        "tests/system/common/mod.rs",
+        "tests/system/configuration_http_postgres/support.rs",
+        "tests/system/oidc_http_postgres/support.rs"
+      ],
+      "tests": [
+        "internal/testutil/process.go",
+        "tests/integration/contracts_test.go",
+        "tests/integration/provider_parity_test.go",
+        "tests/fixtures/fixtures.go"
+      ],
+      "disposition": "replaced harness",
+      "reason": "Rust-only fixture builders and process helpers are replaced by Go test helpers. The calling scenario suites have explicit successor mappings below."
+    },
+    {
+      "id": "neutral-corpus",
+      "behavior": "Protocol fixtures decode and preserve native extensions; operation families and routing/security corpora remain exercised.",
+      "referenceSuites": [
+        "tests/conformance/corpus.rs",
+        "tests/conformance/protocols.rs"
+      ],
+      "tests": [
+        "internal/protocols/parity_test.go#TestNativeExtensionsSurviveAndTranslationRefuses",
+        "internal/protocols/openai/openai_test.go#TestChatRequestFixture",
+        "internal/protocols/openai/openai_test.go#TestSelectedOperationFamilies"
+      ]
+    },
+    {
+      "id": "certification-matrix",
+      "behavior": "The independent frozen tuple set equals current public certification capabilities, including the narrower media certification boundary.",
+      "referenceSuites": [
+        "tests/conformance/provider_connectors/matrix.rs"
+      ],
+      "tests": [
+        "internal/providers/frozen_capabilities_test.go#TestFrozenCertificationMatrix",
+        "internal/providers/media_certification_test.go#TestNativeMediaCapabilitiesCanBeDeclaredAndCertified",
+        "internal/providers/media_certification_test.go#TestMediaCertificationDoesNotBorrowChatEvidence"
+      ],
+      "managementOperations": [
+        "list_provider_kind_capabilities"
+      ]
+    },
+    {
+      "id": "connector-generation",
+      "behavior": "Every provider kind serves native/translated generation and token counts with reviewed authentication, model rewriting, usage and refusals.",
+      "referenceSuites": [
+        "tests/conformance/provider_connectors/generation.rs",
+        "tests/system/anthropic_gemini_inference.rs",
+        "tests/system/anthropic_gemini_inference/native_surfaces.rs"
+      ],
+      "tests": [
+        "tests/integration/provider_parity_test.go#TestProviderAndNativeSurfaceParity",
+        "internal/protocols/parity_test.go#TestMaintainedNonMediaRequestMatrix",
+        "internal/protocols/parity_test.go#TestExplicitTranslationRefusals",
+        "internal/connectors/auth_test.go#TestNativeCloudURLAndAuthentication"
+      ],
+      "inferenceOperations": [
+        "Generation",
+        "TokenCount"
+      ]
+    },
+    {
+      "id": "connector-failures",
+      "behavior": "Deadlines, disconnects, malformed/oversized replies, stream commit boundaries and credential redaction are enforced by the shared executor.",
+      "referenceSuites": [
+        "tests/conformance/provider_connectors/reliability.rs"
+      ],
+      "tests": [
+        "internal/gateway/gateway_test.go#TestClientCancellationClosesUpstream",
+        "internal/gateway/gateway_test.go#TestPostCommitFailureCannotRestart",
+        "internal/gateway/gateway_test.go#TestOversizedUnaryResponseRejected",
+        "internal/gateway/gateway_test.go#TestOversizedEventFailsBeforeCommit",
+        "internal/gateway/credential_redaction_test.go#TestUpstreamClientErrorsRedactAttemptedCredentials",
+        "internal/protocols/parity_test.go#TestGeminiToolsNormalizeStopAndBedrockBoundPrecedesAllocation",
+        "internal/protocols/inline_media_test.go#TestInlineMediaBoundsAcrossNativeFamilies",
+        "internal/protocols/bedrock_test.go#TestBedrockInlineImagesAcrossSurfaces",
+        "internal/protocols/bedrock_test.go#TestBedrockImageFormatsAndRefusals"
+      ]
+    },
+    {
+      "id": "routing-retry",
+      "behavior": "Published target ordering, capability filtering and retry taxonomy preserve pre-commit failover and attempt budgets.",
+      "referenceSuites": [
+        "tests/conformance/routing_retry.rs",
+        "tests/protocols/domain.rs"
+      ],
+      "tests": [
+        "internal/runtime/selection_test.go#TestAttemptOrderCorpus",
+        "internal/runtime/selection_test.go#TestValidateRejectsDanglingTargets",
+        "internal/runtime/plan_parity_test.go#TestPreviewEnumeratesCredentialAttemptsWithinOneBudget",
+        "internal/gateway/gateway_test.go#TestRetryTaxonomyFixture",
+        "internal/gateway/gateway_test.go#TestPostCommitFailureCannotRestart",
+        "internal/gateway/gateway_test.go#TestAuthenticationAndAuthorization"
+      ]
+    },
+    {
+      "id": "selected-operations",
+      "behavior": "Embeddings/moderation and selected operation envelopes preserve supported formats and explicit translation refusals.",
+      "referenceSuites": [
+        "tests/conformance/selected_operations.rs",
+        "tests/protocols/openai_operations/operations.rs",
+        "tests/protocols/domain_codecs.rs"
+      ],
+      "tests": [
+        "internal/protocols/openai/openai_test.go#TestSelectedOperationFamilies",
+        "internal/protocols/parity_test.go#TestMaintainedNonMediaRequestMatrix",
+        "internal/protocols/stream_parity_test.go#TestRefusalAndEmbeddingEncodingArePreserved",
+        "internal/media/wire_test.go#TestDecodeImageGenerationValidation",
+        "internal/media/wire_test.go#TestDecodeSpeechValidation",
+        "internal/media/wire_test.go#TestDecodeVideoCreateValidation"
+      ],
+      "inferenceOperations": [
+        "Embeddings",
+        "Moderation"
+      ]
+    },
+    {
+      "id": "ssrf",
+      "behavior": "Literal and resolved private endpoints, redirects and credential headers obey the current egress policy at dispatch.",
+      "referenceSuites": [
+        "tests/conformance/ssrf.rs"
+      ],
+      "tests": [
+        "internal/egress/egress_test.go#TestValidateEndpointCorpus",
+        "internal/egress/egress_test.go#TestResolveRejectsUnsafeAnswers",
+        "internal/egress/egress_test.go#TestClientRefusesRedirectsAndPinsDial",
+        "internal/gateway/endpoint_test.go#TestInferenceChecksCurrentEndpointPolicy"
+      ]
+    },
+    {
+      "id": "streams",
+      "behavior": "Fragmented Unicode, SSE framing, terminal sequencing, tool identities and truncated streams preserve each client protocol.",
+      "referenceSuites": [
+        "tests/conformance/streaming.rs",
+        "tests/protocols/sse.rs",
+        "tests/contract/sse.rs",
+        "tests/system/anthropic_gemini_inference/streaming.rs",
+        "tests/protocols/openai_operations/stream.rs"
+      ],
+      "tests": [
+        "internal/protocols/openai/openai_test.go#TestChatStreamFixture",
+        "internal/protocols/openai/openai_test.go#TestChatStreamProtocolErrors",
+        "internal/protocols/openai/openai_test.go#TestResponsesStream",
+        "internal/protocols/parity_test.go#TestNativeAndTranslatedStreams",
+        "internal/protocols/stream_parity_test.go#TestTranslatedToolIdentityArgumentsAndCompletionSequence",
+        "internal/protocols/stream_parity_test.go#TestBedrockStreamTranslationAndAggregateToolBound",
+        "internal/gateway/stream_test.go#TestPrematureDoneReturnsAnErrorWithoutASuccessMarker",
+        "internal/gateway/stream_test.go#TestMalformedSSEDoesNotFailOver"
+      ]
+    },
+    {
+      "id": "protocol-semantics",
+      "behavior": "Native extensions survive; cross-protocol unrepresentable fields fail; tools, usage, refusals and multiple candidates retain their semantics.",
+      "referenceSuites": [
+        "tests/protocols/anthropic_messages/count_documents_passthrough.rs",
+        "tests/protocols/anthropic_messages/request.rs",
+        "tests/protocols/anthropic_messages/response_stream.rs",
+        "tests/protocols/gemini_generate_content.rs",
+        "tests/protocols/codec_properties.rs",
+        "tests/system/anthropic_gemini_inference/semantics.rs"
+      ],
+      "tests": [
+        "internal/protocols/parity_test.go#TestNativeExtensionsSurviveAndTranslationRefuses",
+        "internal/protocols/parity_test.go#TestResponseNativePreservationAndUsageCompleteness",
+        "internal/protocols/parity_test.go#TestMaintainedNonMediaRequestMatrix",
+        "internal/protocols/stream_parity_test.go#TestChatGeminiMultipleCandidatesSurviveUnaryAndStreaming",
+        "internal/protocols/stream_parity_test.go#TestCountingKeepsBedrockToolsAndInvalidGeneratedArgumentsRefuseTranslation",
+        "internal/protocols/stream_parity_test.go#TestGeminiParallelResultsKeepDistinctCallRelationships",
+        "tests/integration/provider_parity_test.go#TestProviderAndNativeSurfaceParity"
+      ]
+    },
+    {
+      "id": "openai-semantics",
+      "behavior": "Chat and Responses preserve stateless inputs, tools and native extensions, and reject malformed parameters, stateful references and incomplete success.",
+      "referenceSuites": [
+        "tests/protocols/openai_chat.rs",
+        "tests/protocols/openai_operations/responses.rs"
+      ],
+      "tests": [
+        "internal/protocols/openai/openai_test.go#TestRequestRejections",
+        "internal/protocols/openai/openai_test.go#TestUnaryDecoding",
+        "internal/protocols/openai/openai_test.go#TestResponsesStream",
+        "internal/protocols/openai/response_references_test.go#TestResponsesRejectAccountScopedInputReferences",
+        "internal/protocols/openai/response_references_test.go#TestResponsesPreserveInlineInputsAndToolResults",
+        "internal/protocols/openai/request_normalization_test.go#TestResponsesTextUsesMessageEnvelopeWithoutLosingNativeExtensions",
+        "internal/protocols/openai/boundaries_test.go#TestUnaryResponsesRequireTerminalSuccess"
+      ]
+    },
+    {
+      "id": "process-contract",
+      "behavior": "Process modes isolate inference, management and private probes, reject invalid configuration and shut down within the shared deadline. All/control exercise every management handler.",
+      "referenceSuites": [
+        "tests/contract.rs",
+        "tests/contract/harness.rs",
+        "tests/contract/public_interfaces.rs"
+      ],
+      "tests": [
+        "tests/integration/process_test.go#TestProcessModesPrivateProbesAndShutdown",
+        "tests/integration/process_test.go#TestInvalidConfigurationFailsBeforeBinding",
+        "internal/process/listener_test.go#TestHTTP2ConnectionAgeSendsGOAWAYAndPreservesAdmittedStream",
+        "internal/process/listener_test.go#TestConnectionCapacityAndForcedShutdownAreBounded"
+      ],
+      "managementOperations": [
+        "openapi"
+      ],
+      "commands": [
+        "all",
+        "gateway",
+        "control",
+        "worker",
+        "health-probe"
+      ]
+    },
+    {
+      "id": "management-contract",
+      "behavior": "Authorized management replies validate against OpenAPI, and conflict/idempotency/error paths retain authentication and privacy.",
+      "referenceSuites": [
+        "tests/contract/management_contract.rs",
+        "tests/contract/management_failures.rs"
+      ],
+      "tests": [
+        "tests/integration/access_test.go#TestAccessTransactionsReplayAndSecretSafety",
+        "tests/integration/gateway_test.go#TestGatewayFromEmptyInstallationToSDKTraffic",
+        "tests/integration/process_test.go#TestProcessModesPrivateProbesAndShutdown"
+      ]
+    },
+    {
+      "id": "gateway-workflow",
+      "behavior": "Fresh installation through discovery, certification, publication, inference, playground and history works through real HTTP and SDK clients.",
+      "referenceSuites": [
+        "tests/contract/gateway_surfaces.rs",
+        "tests/contract/provider_lifecycle.rs",
+        "tests/system/configuration_http_postgres.rs",
+        "tests/persistence/configuration_postgres.rs"
+      ],
+      "tests": [
+        "tests/integration/gateway_test.go#TestGatewayFromEmptyInstallationToSDKTraffic",
+        "tests/integration/provider_parity_test.go#TestProviderAndNativeSurfaceParity"
+      ],
+      "managementOperations": [
+        "execute_playground",
+        "list_provider_kinds",
+        "provider_vendors",
+        "list_providers",
+        "create_provider",
+        "get_provider",
+        "update_provider",
+        "activate_provider",
+        "disable_provider",
+        "discover_provider_models",
+        "list_provider_models",
+        "set_provider_model",
+        "certify_provider_model",
+        "probe_provider",
+        "restore_provider_as_draft",
+        "list_provider_revisions",
+        "diff_provider_revisions",
+        "get_provider_revision",
+        "list_provider_revision_models",
+        "restore_provider_revision",
+        "list_route_drafts",
+        "create_route_draft",
+        "delete_route_draft",
+        "get_route_draft",
+        "replace_route_draft",
+        "activate_route_draft",
+        "simulate_route_draft",
+        "validate_route_draft",
+        "list_routes",
+        "get_route",
+        "list_route_revisions",
+        "diff_route_revisions",
+        "get_route_revision",
+        "restore_route_revision",
+        "list_runtime_generations"
+      ]
+    },
+    {
+      "id": "data-safety",
+      "behavior": "Terminal facts and logs contain operational metadata without payloads or credential echoes.",
+      "referenceSuites": [
+        "tests/contract/data_safety.rs"
+      ],
+      "tests": [
+        "internal/usage/event_test.go#TestSerializedEventCarriesNoContentFields",
+        "internal/access/diagnostics_test.go#TestUnexpectedErrorsDoNotLogRequestContent",
+        "tests/integration/provider_regressions_test.go#TestProviderDiagnosticsDoNotPersistUpstreamCredentialEchoes"
+      ]
+    },
+    {
+      "id": "otlp",
+      "behavior": "OTLP exports bounded metadata with validated trace parent propagation and visible queue loss without blocking inference.",
+      "referenceSuites": [
+        "tests/contract/otlp.rs"
+      ],
+      "tests": [
+        "internal/telemetry/tracing_test.go#TestOTLPExportsMetadataAndPreservesTraceParentWithoutSecrets",
+        "internal/telemetry/tracing_test.go#TestFullTraceQueueNeverBlocksInferenceAndCountsLoss"
+      ]
+    },
+    {
+      "id": "health",
+      "behavior": "Readiness uses cached dependency/runtime state, liveness is dependency-free, and metrics expose operational snapshots.",
+      "referenceSuites": [
+        "tests/contract/telemetry.rs",
+        "tests/system/operations_http_postgres/metrics.rs",
+        "tests/persistence/persistence_correctness_postgres/runtime_health.rs"
+      ],
+      "tests": [
+        "internal/observability/handler_test.go#TestReadinessServesCachedSnapshot",
+        "internal/observability/handler_test.go#TestLivenessNeverChecksDependencies",
+        "internal/observability/handler_test.go#TestMetricsRenderSnapshotAndLiveSeries",
+        "internal/gateway/health_parity_test.go#TestCredentialRotationClears401ButRetains429",
+        "tests/integration/gateway_test.go#TestGatewayFromEmptyInstallationToSDKTraffic"
+      ],
+      "managementOperations": [
+        "management_readiness",
+        "provider_health"
+      ]
+    },
+    {
+      "id": "distributed-limits",
+      "behavior": "Atomic shared key/provider/slot quotas, server-time windows, idempotent reconciliation and outage policy hold across replicas.",
+      "referenceSuites": [
+        "tests/contract/distributed_limits.rs",
+        "tests/persistence/distributed_limits_valkey.rs"
+      ],
+      "tests": [
+        "tests/integration/limits_test.go#TestLimitsConcurrentReplicasEnforceOneAtomicLimit",
+        "tests/integration/limits_test.go#TestLimitsProviderSlotsShareQuotaAndCooldownsAcrossGateways",
+        "tests/integration/limits_test.go#TestLimitsTokenReconciliationMatchesActualUsage",
+        "tests/integration/limits_test.go#TestLimitsRefundsAreIdempotentAndCannotChangeASuccessorWindow",
+        "tests/integration/limits_test.go#TestLimitsServerTimeUnifiesCallers",
+        "tests/integration/gateway_limits_test.go#TestGatewayEnforcesKeyBudgets",
+        "tests/integration/gateway_limits_test.go#TestGatewayEnforcesProviderQuotas",
+        "tests/integration/gateway_limits_test.go#TestGatewayLimitOutagePolicy"
+      ]
+    },
+    {
+      "id": "replica-authority",
+      "behavior": "Independent authority invalidation and shared admission/accounting converge across process replicas.",
+      "referenceSuites": [
+        "tests/ha.rs",
+        "tests/ha/authority.rs",
+        "tests/ha/convergence.rs"
+      ],
+      "tests": [
+        "tests/integration/gateway_test.go#TestGatewayFromEmptyInstallationToSDKTraffic",
+        "tests/integration/m4_process_test.go#TestM4ReplicasShareOneAdmissionDecision",
+        "tests/integration/m4_process_test.go#TestM4AccountingIsDurableAcrossReplicas",
+        "tests/integration/authority_lifecycle_test.go#TestOutstandingInvitationsLoseIssuerAuthority"
+      ]
+    },
+    {
+      "id": "installation-isolation",
+      "behavior": "Installations sharing Valkey retain independent streams, limits and recovery leadership.",
+      "referenceSuites": [
+        "tests/ha/shared_valkey.rs"
+      ],
+      "tests": [
+        "tests/integration/m4_isolation_test.go#TestM4SharedValkeyIsolatesInstallations"
+      ]
+    },
+    {
+      "id": "worker-recovery",
+      "behavior": "Lost workers are replaced, pending delivery replays safely, and reconciliation leadership survives failover.",
+      "referenceSuites": [
+        "tests/ha/worker_recovery.rs",
+        "tests/persistence/worker_ha_postgres.rs"
+      ],
+      "tests": [
+        "tests/integration/m4_recovery_test.go#TestM4CrashBeforeAcknowledgementReplaysAsDuplicate",
+        "tests/integration/m4_recovery_test.go#TestM4PendingDeliveriesAreReclaimedAfterAWorkerIsLost",
+        "tests/integration/m4_recovery_test.go#TestM4CostReconciliationSurvivesLeaderLoss",
+        "tests/integration/m4_recovery_test.go#TestM4ReconciliationLeadershipIsScopedToTheInstallation"
+      ]
+    },
+    {
+      "id": "accounting",
+      "behavior": "Transactions persist priced attempts once, bind immutable pricing provenance, reject changed replay payloads and retain deduplication receipts.",
+      "referenceSuites": [
+        "tests/contract/durable.rs",
+        "tests/persistence/batched_writes_postgres.rs",
+        "tests/persistence/operations_postgres.rs",
+        "tests/persistence/operations_postgres/attempt_accounting.rs"
+      ],
+      "tests": [
+        "tests/integration/accounting_test.go#TestAccountingPersistsPricedAttemptsAndIsReplaySafe",
+        "tests/integration/accounting_test.go#TestAccountingPricingProvenance",
+        "tests/integration/accounting_test.go#TestAccountingRefusesToPriceCachedTokensWithoutTheirTotal",
+        "tests/integration/accounting_regression_test.go#TestAccountingRejectsConcurrentIdentityReuse",
+        "tests/integration/accounting_regression_test.go#TestAccountingDoesNotHideChangedPayloadBehindFacts",
+        "tests/integration/accounting_regression_test.go#TestReceiptsProtectRequestsWithNoRemainingFacts",
+        "tests/integration/accounting_regression_test.go#TestPricingUsesTheRecordedRevisionVendor"
+      ]
+    },
+    {
+      "id": "reports-history",
+      "behavior": "History filtering, cursor paging, request details and scoped usage aggregates agree with durable facts and report partial buckets honestly.",
+      "referenceSuites": [
+        "tests/persistence/operations_postgres/query_contracts.rs",
+        "tests/system/operations_http_postgres.rs",
+        "tests/system/operations_http_postgres/attempts.rs"
+      ],
+      "tests": [
+        "tests/integration/reports_test.go#TestRequestHistoryPagesAndDetails",
+        "tests/integration/reports_test.go#TestReportsAgreeWithSeededUsage",
+        "tests/integration/reports_test.go#TestReportsCountScopeFollowsTheFilter",
+        "tests/integration/reports_test.go#TestReportsExcludePartialBucketsAndSaySo",
+        "tests/integration/reports_test.go#TestReportsGroupByDimensionAndBucket",
+        "tests/integration/reports_test.go#TestUsageReportsOverHTTP",
+        "tests/integration/reports_test.go#TestPricingRevisionsOverHTTP"
+      ],
+      "managementOperations": [
+        "list_requests",
+        "get_request",
+        "usage_breakdown",
+        "usage_completeness",
+        "usage_summary",
+        "usage_time_series",
+        "list_pricing_revisions",
+        "create_pricing_revision"
+      ]
+    },
+    {
+      "id": "retention",
+      "behavior": "Rollup/purge preserves retained aggregates and request filters while expiring facts and old replay evidence within configured windows.",
+      "referenceSuites": [
+        "tests/persistence/operations_postgres/retention.rs"
+      ],
+      "tests": [
+        "tests/integration/reports_test.go#TestUsageMaintenanceRollsUpAndPurges",
+        "tests/integration/reports_test.go#TestUsageRetentionHonoursTheConfiguredWindow",
+        "tests/integration/accounting_regression_test.go#TestRequestFiltersSurviveUsageFactRetention",
+        "tests/integration/accounting_regression_test.go#TestReceiptsProtectRequestsWithNoRemainingFacts",
+        "tests/integration/accounting_regression_test.go#TestExpiredEventGapCoversItsHistoricalWindow",
+        "tests/integration/accounting_test.go#TestAccountingRejectsEventsOutsideTheReplayWindow"
+      ]
+    },
+    {
+      "id": "spend-controls",
+      "behavior": "Exact UTC daily/monthly accrued spend fails closed without reconciled state and recovers durable totals after Valkey loss.",
+      "referenceSuites": [
+        "tests/persistence/distributed_cost_limits_valkey.rs",
+        "tests/persistence/distributed_cost_recovery_valkey.rs",
+        "tests/persistence/spend_controls_postgres.rs",
+        "tests/persistence/spend_recovery_postgres.rs"
+      ],
+      "tests": [
+        "tests/integration/limits_test.go#TestLimitsCostBudgetsFailClosedUntilReconciled",
+        "tests/integration/limits_test.go#TestLimitsMonthlyBudgetExhaustionRejectsWithItsOwnWindow",
+        "tests/integration/limits_test.go#TestLimitsDurableSpendReconcilesIntoValkey",
+        "tests/integration/limits_test.go#TestLimitsBudgetWindowsIgnoreTheSessionTimeZone",
+        "tests/integration/m4_recovery_test.go#TestM4BudgetsRecoverFromLostSpendState",
+        "tests/integration/m4_recovery_test.go#TestM4CostReconciliationSurvivesLeaderLoss"
+      ]
+    },
+    {
+      "id": "metadata-consumer",
+      "behavior": "Shared stream consumers distribute work, reclaim pending events, deduplicate committed replay, retain unsupported versions and record lost/malformed delivery gaps.",
+      "referenceSuites": [
+        "tests/persistence/request_metadata_consumer_valkey.rs",
+        "tests/persistence/request_metadata_consumer_valkey/distribution.rs",
+        "tests/persistence/request_metadata_consumer_valkey/gaps.rs",
+        "tests/persistence/request_metadata_consumer_valkey/recovery.rs"
+      ],
+      "tests": [
+        "tests/integration/consumer_test.go#TestRequestMetadataConsumerDrainsTheGroupAcrossWorkers",
+        "tests/integration/consumer_test.go#TestRequestMetadataConsumerReclaimsADeadOwnersDeliveries",
+        "tests/integration/consumer_test.go#TestRequestMetadataConsumerRecordsUnusableDeliveriesAsGaps",
+        "tests/integration/consumer_test.go#TestRequestMetadataConsumerLeavesUnsupportedVersionsPending",
+        "tests/integration/consumer_test.go#TestRequestMetadataConsumerReplaysACommittedEventAsADuplicate",
+        "tests/integration/consumer_test.go#TestRequestMetadataConsumerRebuildsAGroupLostWithItsStream"
+      ]
+    },
+    {
+      "id": "metadata-health",
+      "behavior": "Gateway epochs and consumer checkpoints expose loss, stale workers and acknowledged gaps without double counting.",
+      "referenceSuites": [
+        "tests/persistence/request_metadata_consumer_health_postgres.rs"
+      ],
+      "tests": [
+        "tests/integration/epochs_test.go#TestGatewayEpochCheckpointsBufferLossExactly",
+        "tests/integration/epochs_test.go#TestGatewayEpochDetectionConfirmsEachStaleEpochOnce",
+        "tests/integration/epochs_test.go#TestRequestMetadataGapsAreReportedOnlyOnce",
+        "tests/integration/epochs_test.go#TestConsumerHealthKeepsTheFreshestSample",
+        "tests/integration/reports_test.go#TestGatewayEpochsOverHTTP"
+      ],
+      "managementOperations": [
+        "list_request_metadata_gateway_epochs",
+        "acknowledge_request_metadata_gateway_epoch"
+      ]
+    },
+    {
+      "id": "identity",
+      "behavior": "Setup, invitation acceptance, usable-owner invariants, password/session transitions, profile, roles, settings and audit enforce access transactions.",
+      "referenceSuites": [
+        "tests/persistence/identity_postgres.rs",
+        "tests/persistence/persistence_correctness_postgres/auth_identity.rs",
+        "tests/system/identity_http_postgres.rs"
+      ],
+      "tests": [
+        "tests/integration/access_test.go#TestAccessTransactionsReplayAndSecretSafety",
+        "tests/integration/access_test.go#TestConcurrentSetupInvitationsAndPasswordSessionTransitions",
+        "tests/integration/access_races_test.go#TestConcurrentOwnerChangesKeepUsableAuthority",
+        "tests/integration/session_expiry_test.go#TestExpiredSessionCannotReadOrMutate"
+      ],
+      "managementOperations": [
+        "list_audit_events",
+        "authentication_capabilities",
+        "list_invitations",
+        "create_invitation",
+        "accept_invitation",
+        "revoke_invitation",
+        "profile",
+        "update_profile",
+        "change_password",
+        "enroll_password",
+        "recent_authentication",
+        "list_sessions",
+        "login",
+        "logout",
+        "current_session",
+        "revoke_session",
+        "list_settings",
+        "get_setting",
+        "update_setting",
+        "setup",
+        "setup_status",
+        "list_users",
+        "get_user",
+        "update_user_role"
+      ]
+    },
+    {
+      "id": "issuer-authority",
+      "behavior": "API keys and outstanding invitations lose issuer authority when roles, sessions or identities no longer permit issuance.",
+      "referenceSuites": [
+        "tests/persistence/configuration_postgres/api_key_issuers.rs",
+        "tests/persistence/invitation_retirement_postgres.rs",
+        "tests/system/configuration_http_postgres/api_key_issuers.rs"
+      ],
+      "tests": [
+        "tests/integration/authority_lifecycle_test.go#TestOutstandingInvitationsLoseIssuerAuthority",
+        "tests/integration/access_test.go#TestAccessTransactionsReplayAndSecretSafety"
+      ]
+    },
+    {
+      "id": "api-keys",
+      "behavior": "Scoped key create/update/revoke/rotate operations preserve route allowlists, exact budget limits and issuer authority.",
+      "referenceSuites": [
+        "tests/system/configuration_http_postgres/api_keys.rs"
+      ],
+      "tests": [
+        "tests/integration/access_test.go#TestAPIKeyRouteAllowlistsRejectNull",
+        "tests/integration/access_test.go#TestAccessTransactionsReplayAndSecretSafety",
+        "tests/integration/key_policy_test.go#TestAPIKeyListingsPreserveIntegerPrecision",
+        "tests/integration/key_policy_test.go#TestAPIKeyBudgetAndTokenLimitContract"
+      ],
+      "managementOperations": [
+        "list_api_keys",
+        "create_api_key",
+        "get_api_key",
+        "update_api_key",
+        "revoke_api_key",
+        "rotate_api_key"
+      ]
+    },
+    {
+      "id": "idempotency",
+      "behavior": "Replayed management mutations return the original response, including expired keys and large credential pools, without duplicate writes.",
+      "referenceSuites": [
+        "tests/persistence/idempotency_replay_postgres.rs",
+        "tests/persistence/management_idempotency_replay_postgres.rs"
+      ],
+      "tests": [
+        "tests/integration/access_test.go#TestAccessTransactionsReplayAndSecretSafety",
+        "tests/integration/key_replay_expiry_test.go#TestExpiredKeyCreationStillReplaysItsOriginalResult",
+        "tests/integration/credential_pool_replay_test.go#TestLargeCredentialPoolWritesReplayOriginalResponse"
+      ]
+    },
+    {
+      "id": "migrations-rotation",
+      "behavior": "Fresh incompatible storage is rejected safely; forward migrations and authenticated master-key rotation resume after interruption without partial writes.",
+      "referenceSuites": [
+        "tests/persistence/master_key_reencryption_postgres.rs",
+        "tests/persistence/persistence_correctness_postgres.rs"
+      ],
+      "tests": [
+        "tests/integration/access_test.go#TestFreshMigrationsIsolationPrivilegesAndRotationCLI",
+        "tests/integration/access_races_test.go#TestInterruptedRotationResumesAndRejectsStaleWriters",
+        "tests/integration/access_races_test.go#TestFailedMigrationLeavesNoPartialInstallationAndRecovers",
+        "tests/integration/master_key_rotation_test.go#TestRotationAuthenticatesEveryDestinationSecretBeforeWriting",
+        "tests/integration/migration_recovery_test.go#TestMigrationDDLFailureRollsBackAndRecovers",
+        "tests/integration/migration_recovery_test.go#TestPopulatedInstallationAppliesForwardMigration"
+      ],
+      "commands": [
+        "migrate",
+        "doctor",
+        "master-key status",
+        "master-key reencrypt",
+        "master-key verify-retirement"
+      ]
+    },
+    {
+      "id": "oidc",
+      "behavior": "OIDC verifier binding, one-time consumption, linking/enrollment, discovery and usable-owner protection preserve current identity authority.",
+      "referenceSuites": [
+        "tests/persistence/oidc_flow_postgres.rs",
+        "tests/system/oidc_http_postgres.rs"
+      ],
+      "tests": [
+        "tests/integration/oidc_test.go#TestOIDCVerifierFlowBindingLinkingAndEnrollment",
+        "tests/integration/oidc_test.go#TestOIDCDiscoverySelectsTokenAuthentication",
+        "tests/integration/oidc_test.go#TestOIDCLoginPreservesEncodedReturnURLs",
+        "tests/integration/oidc_test.go#TestOIDCMappingUniquenessMatchesClaimComparison",
+        "tests/integration/oidc_races_test.go#TestConcurrentOIDCConsumptionAndIdentityLinking",
+        "tests/integration/oidc_races_test.go#TestOIDCRoleSyncRetiresSessionsAndOutstandingGrants",
+        "tests/integration/oidc_owner_protection_test.go#TestOIDCConfigurationPreservesTheLastMappedOwner",
+        "tests/integration/oidc_owner_protection_test.go#TestOIDCSecretRemovalRequiresAnIndependentOwnerSignIn",
+        "tests/integration/oidc_unlink_test.go#TestOIDCUnlinkPreservesAnIdentityAuthorizedByCurrentMappings"
+      ],
+      "managementOperations": [
+        "callback",
+        "get_configuration",
+        "put_configuration",
+        "list_identities",
+        "unlink_identity",
+        "begin_link",
+        "begin_login",
+        "begin_login_post",
+        "begin_reauthentication"
+      ]
+    },
+    {
+      "id": "provider-publication",
+      "behavior": "Certification and activation use current draft/credential evidence, preserve published history and enforce disabled and eligibility guards.",
+      "referenceSuites": [
+        "tests/persistence/configuration_postgres/disabled_guards.rs",
+        "tests/persistence/configuration_postgres/eligibility.rs",
+        "tests/persistence/configuration_postgres/lifecycle.rs",
+        "tests/persistence/configuration_postgres/model_snapshot.rs",
+        "tests/persistence/provider_revisions_postgres.rs",
+        "tests/system/configuration_http_postgres/providers.rs"
+      ],
+      "tests": [
+        "tests/integration/provider_validation_test.go#TestActivationRequiresCurrentCredentialSlotValidation",
+        "tests/integration/provider_validation_test.go#TestSlotValidationProbesAllowedEnabledCapabilities",
+        "tests/integration/provider_validation_test.go#TestSlotValidationRejectsDraftChangesDuringTheProbe",
+        "tests/integration/provider_validation_test.go#TestCertificationRejectsMalformedUnaryChoices",
+        "tests/integration/provider_state_test.go#TestCredentialSlotWritesRequireCurrentETag",
+        "tests/integration/provider_state_test.go#TestCredentialSlotRotationReplaysAndReportsPublishedCredential",
+        "tests/integration/provider_state_test.go#TestCredentialHistoryTracksEveryDraftAndPublishedSlot",
+        "tests/integration/provider_state_test.go#TestProviderInventoryAvailabilityTracksPublishedModels",
+        "tests/integration/gateway_test.go#TestGatewayFromEmptyInstallationToSDKTraffic"
+      ],
+      "managementOperations": [
+        "credential_slots",
+        "put_credential_slot",
+        "validate_credential_slot",
+        "list_provider_credentials",
+        "rotate_provider_credential",
+        "revoke_provider_credential",
+        "list_provider_model_inventory"
+      ]
+    },
+    {
+      "id": "provider-flexibility",
+      "behavior": "Custom/native/cloud profiles, discovery metadata, deployment mapping and mounted defaults preserve published ownership and credential restrictions.",
+      "referenceSuites": [
+        "tests/persistence/provider_flexibility_postgres.rs",
+        "tests/system/configuration_http_postgres/provider_kinds.rs"
+      ],
+      "tests": [
+        "tests/integration/provider_parity_test.go#TestProviderAndNativeSurfaceParity",
+        "tests/integration/mounted_parity_test.go#TestMountedDefaultsServeWithoutMasterKeyAndKeepPublishedOwnership",
+        "tests/integration/credential_routing_test.go#TestCustomHeaderAuthenticationAndSimulationMatchLiveCredentialRestrictions",
+        "internal/providers/discovery_parity_test.go#TestNativeDiscoveryFollowsBoundedPagesAndPreservesFacts",
+        "internal/providers/deployment_parity_test.go#TestDeploymentCertificationKeepsBodyAndPathOnTheSameSingleMapping"
+      ]
+    },
+    {
+      "id": "route-publication",
+      "behavior": "Route drafts, revision history, activation validation, policy intersection and simulation preserve immutable published targets and key authorization.",
+      "referenceSuites": [
+        "tests/persistence/route_activation_revalidation_postgres.rs",
+        "tests/persistence/route_draft_simulation_postgres.rs",
+        "tests/persistence/persistence_correctness_postgres/route_history.rs",
+        "tests/system/configuration_http_postgres/routes.rs"
+      ],
+      "tests": [
+        "tests/integration/gateway_test.go#TestGatewayFromEmptyInstallationToSDKTraffic",
+        "tests/integration/routing_policy_parity_test.go#TestRoutingPolicyPublicationIntersectionAndProvenance",
+        "tests/integration/routing_preferences_test.go#TestRoutingSimulationsHonorAvailablePreferences",
+        "tests/integration/simulation_authorization_test.go#TestRoutingSimulationMatchesInferenceKeyAuthorization",
+        "tests/integration/routing_measurements_test.go#TestRoutingMeasurementsRequireEnoughFreshSuccessfulSamples"
+      ],
+      "managementOperations": [
+        "get_routing_policy",
+        "put_routing_policy",
+        "simulate_routing"
+      ]
+    },
+    {
+      "id": "runtime-publication",
+      "behavior": "Runtime publication keeps the last valid snapshot, refreshes authority independently and converges after missed hints.",
+      "referenceSuites": [
+        "tests/persistence/runtime_fallback_postgres.rs",
+        "tests/persistence/runtime_publication_postgres.rs",
+        "tests/system/runtime_outbox_postgres.rs"
+      ],
+      "tests": [
+        "tests/integration/gateway_test.go#TestGatewayFromEmptyInstallationToSDKTraffic",
+        "internal/runtime/plan_parity_test.go#TestMountedTransportPreservesPublishedOwnership",
+        "internal/runtime/plan_parity_test.go#TestPoliciesIntersectUnknownFactsAndPublishedLimits"
+      ]
+    },
+    {
+      "id": "media-inference",
+      "behavior": "Image/audio inference uses bounded multipart/spool inputs, native response formats, honest missing usage and terminal delivery/cancellation accounting.",
+      "referenceSuites": [],
+      "tests": [
+        "internal/gateway/media_test.go#TestMediaStreamCompletesBeforeAttemptSettlement",
+        "internal/gateway/media_test.go#TestMediaStreamRejectsIncompleteAndOversizedResponses",
+        "internal/gateway/media_test.go#TestMediaSpeechMissingUsageRemainsUncertain",
+        "internal/gateway/media_test.go#TestMediaMultipartBoundsAndAdmission",
+        "internal/gateway/media_failure_test.go#TestMediaStreamCancellationAndDeadline",
+        "internal/gateway/media_failure_test.go#TestMediaImageDeliveryFailureCleansEveryArtifact",
+        "internal/media/upstream_test.go#TestTransportDecodesJSONImageResponse",
+        "internal/media/upstream_test.go#TestTransportStagesBinaryResponse",
+        "internal/media/upstream_test.go#TestTransportBoundsOversizedResponse",
+        "internal/media/capacity_system_test.go#TestMediaCapacityWithSlowReadersAndMassDisconnects"
+      ],
+      "inferenceOperations": [
+        "ImageGeneration",
+        "ImageEdit",
+        "ImageVariation",
+        "Speech",
+        "Transcription"
+      ]
+    },
+    {
+      "id": "video-jobs",
+      "behavior": "Durable video ownership, ambiguous create/delete, reconciliation, quotas and historical credentials survive rotation and replacement restore.",
+      "referenceSuites": [
+        "tests/persistence/media_jobs_postgres.rs",
+        "tests/persistence/media_jobs_postgres/reservation.rs",
+        "tests/persistence/persistence_correctness_postgres/usage_media.rs"
+      ],
+      "tests": [
+        "internal/gateway/media_system_test.go#TestVideoJobLifecycleEndToEnd",
+        "internal/gateway/media_system_test.go#TestVideoDeleteAmbiguityRetainsIntent",
+        "internal/gateway/media_system_test.go#TestVideoCreateAttachFailureCompensates",
+        "internal/gateway/media_system_test.go#TestMediaReconciliationRefreshesAndExpires",
+        "internal/gateway/media_system_test.go#TestMediaJobCredentialRevocation",
+        "internal/gateway/media_system_test.go#TestVideoConcurrentCreates",
+        "internal/gateway/media_quota_system_test.go#TestVideoCreateReservesAndSettlesSharedQuotas",
+        "internal/gateway/media_quota_system_test.go#TestVideoLifecycleReservesAndSettlesSharedQuotas",
+        "internal/gateway/media_restore_test.go#TestReplacementRestoreRetainsMediaJobsAndRotatedCredentials"
+      ],
+      "inferenceOperations": [
+        "VideoCreate",
+        "VideoList",
+        "VideoGet",
+        "VideoContent",
+        "VideoDelete"
+      ]
+    },
+    {
+      "id": "media-inspection",
+      "behavior": "Session-authorized management exposes metadata-only job list/detail, filters and lifecycle records; vendor content/delete stays API-key-owned.",
+      "referenceSuites": [
+        "tests/system/media_jobs_http_postgres.rs"
+      ],
+      "tests": [
+        "internal/gateway/media_system_test.go#TestMediaJobManagementSessionAuthorized",
+        "console/tests/gateway/accounting.spec.ts"
+      ],
+      "managementOperations": [
+        "list_media_jobs",
+        "get_media_job"
+      ]
+    },
+    {
+      "id": "packaged-cli",
+      "behavior": "The packaged internal pre-stop command runs without services and exits within its configured delay.",
+      "referenceSuites": [],
+      "tests": [
+        "scripts/smoke-image-modes.sh"
+      ],
+      "commands": [
+        "internal-pre-stop"
+      ]
+    }
+  ]
+}

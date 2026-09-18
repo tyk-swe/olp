@@ -5,7 +5,7 @@ All seven milestones are complete. [Final release qualification](evidence/releas
 records the exact source/candidate, both native architectures, recovery and SDK/
 browser evidence, dependency scans, and five-sample build results. Rust storage
 is incompatible; Go deployments start with fresh storage. This directory retains
-the original ticket IDs, acceptance criteria and historical milestone evidence.
+the original ticket IDs, explicit scope corrections and historical milestone evidence.
 
 ## Decisions
 

@@ -97,7 +97,9 @@ inference. Regional resolution is covered by
 checks that Chat and Responses certification retain the same single deployment
 mapping in both request bodies and paths. These are local identity fixtures, not live cloud qualification.
 
-The retained Bedrock exceptions are explicit:
+The Bedrock exception reconciliation below includes a scope correction recorded
+on 2026-09-18. The frozen media exception concerned image parts inside generation
+inputs, not the separate image/audio/video operation tuples.
 
 | Reference exception | Go evidence and disposition |
 | --- | --- |
@@ -105,11 +107,15 @@ The retained Bedrock exceptions are explicit:
 | `NO_BEDROCK_CACHED_USAGE` | Input/output/total usage is retained; cached-input breakdown is not invented |
 | `NO_BEDROCK_REQUEST_ID` | AWS transport request IDs are not substituted for a protocol completion ID |
 | `NO_BEDROCK_RESPONSE_BOUND` | Strengthened: unary HTTP bodies use the executor bound; event advertised lengths are checked before SDK allocation, SDK CRC checks remain, translated frames and aggregate retained tool state are bounded |
-| `NO_BEDROCK_MEDIA` | Media tuples remain unavailable; no discovery/certification grant |
+| `NO_BEDROCK_MEDIA` | Changed: Go accepts inline base64 PNG/JPEG/GIF/WebP image parts in generation and token-count inputs; remote URLs, image-detail controls, invalid base64, other formats, and system/tool-result images are refused. Separate media operation tuples remain unavailable. |
 
-Bedrock remains translated on every client surface. Images inside supported
-generation inputs and tool schemas/results follow the retained Converse
-constraints. CountTokens preserves tools in its converse input. The advertised
+Bedrock remains translated on every client surface. Inline image support is an
+explicit extension of the frozen text/tool-only encoder, qualified by
+[`bedrock_test.go`](../../../internal/protocols/bedrock_test.go); shared input
+bounds are covered by
+[`inline_media_test.go`](../../../internal/protocols/inline_media_test.go).
+Tool schemas/results retain the Converse constraints. CountTokens preserves
+tools in its converse input. The advertised
 one-GiB event fixture is rejected before allocation, corrupt CRCs and truncated
 streams fail, and no success marker follows a failed translation.
 
