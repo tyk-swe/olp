@@ -134,9 +134,7 @@ func (m *Manager) Start(ctx context.Context) {
 	if err := m.Refresh(ctx); err != nil {
 		m.log.Warn("runtime refresh failed", "error", err.Error())
 	}
-	m.wg.Add(1)
-	go func() {
-		defer m.wg.Done()
+	m.wg.Go(func() {
 		ticker := time.NewTicker(PollInterval)
 		defer ticker.Stop()
 		for {
@@ -151,7 +149,7 @@ func (m *Manager) Start(ctx context.Context) {
 				}
 			}
 		}
-	}()
+	})
 }
 
 // Stop ends polling and waits for the loop to exit.

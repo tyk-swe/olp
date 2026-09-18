@@ -15,7 +15,7 @@ func TestConfigurationRejectsInvalidDefaults(t *testing.T) {
 		`{"background":true}`, `{"max_tokens":1,"max_completion_tokens":2}`,
 		`{"max_output_tokens":"10"}`, `{"stream":true}`, `{"input":"hidden"}`,
 	} {
-		cfg := Configuration{Kind: KindOpenAICompatible, AuthMode: AuthNone, Endpoint: ptr("https://example.com/v1")}
+		cfg := Configuration{Kind: KindOpenAICompatible, AuthMode: AuthNone, Endpoint: new("https://example.com/v1")}
 		cfg.normalize()
 		if err := json.Unmarshal([]byte(raw), &cfg.Options.ParameterDefaults); err != nil {
 			t.Fatal(err)

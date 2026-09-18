@@ -163,7 +163,7 @@ func Parse(args []string, getenv func(string) string, output io.Writer) (Config,
 	if getenv("OLP_OIDC_ALLOW_INSECURE_TEST_ISSUER") != "" || getenv("OLP_OIDC_ALLOW_PRIVATE_NETWORK") != "" {
 		return c, errors.New("OIDC egress cannot be weakened by environment flags; use an explicit oidctest build for local issuer tests")
 	}
-	for _, origin := range strings.Split(corsOrigins, ",") {
+	for origin := range strings.SplitSeq(corsOrigins, ",") {
 		if origin = strings.TrimSpace(origin); origin != "" {
 			c.GatewayCORSAllowedOrigins = append(c.GatewayCORSAllowedOrigins, origin)
 		}
@@ -192,7 +192,7 @@ func Parse(args []string, getenv func(string) string, output io.Writer) (Config,
 	if c.ProviderEgressAllowCIDRs, err = parseCIDRs("OLP_PROVIDER_EGRESS_ALLOW_CIDRS", egressCIDRs); err != nil {
 		return c, err
 	}
-	for _, host := range strings.Split(egressHosts, ",") {
+	for host := range strings.SplitSeq(egressHosts, ",") {
 		if host = strings.ToLower(strings.TrimSpace(host)); host != "" {
 			c.ProviderEgressAllowHTTPHosts = append(c.ProviderEgressAllowHTTPHosts, host)
 		}
@@ -208,7 +208,7 @@ func Parse(args []string, getenv func(string) string, output io.Writer) (Config,
 
 func parseCIDRs(name, raw string) ([]netip.Prefix, error) {
 	var prefixes []netip.Prefix
-	for _, item := range strings.Split(raw, ",") {
+	for item := range strings.SplitSeq(raw, ",") {
 		if item = strings.TrimSpace(item); item != "" {
 			prefix, err := netip.ParsePrefix(item)
 			if err != nil {

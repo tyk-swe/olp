@@ -212,9 +212,8 @@ func (s *Server) HandleTimeout(maxBody int64, timeout time.Duration, fn func(*ht
 
 func WriteProblem(w http.ResponseWriter, err error) {
 	p := &Problem{Status: 503, Code: "service_unavailable", Detail: "The operation could not be completed. Retry shortly."}
-	var known *Problem
 	var pg *pgconn.PgError
-	if errors.As(err, &known) {
+	if known, ok := errors.AsType[*Problem](err); ok {
 		p = known
 	} else if errors.Is(err, pgx.ErrNoRows) {
 		p = &Problem{Status: 404, Code: "not_found", Detail: "The resource was not found."}
@@ -448,14 +447,14 @@ func ListReply(items []map[string]any, p Pagination) Reply {
 }
 
 // ListReplyBy paginates records using the identifier ordered by their query.
-func ListReplyBy(items []map[string]any, p Pagination, id func(map[string]any) string) Reply {
+func ListReplyBy[T any](items []T, p Pagination, id func(T) string) Reply {
 	var next any
 	if len(items) > p.Limit {
 		items = items[:p.Limit]
 		next = base64.RawURLEncoding.EncodeToString([]byte(id(items[len(items)-1])))
 	}
 	if items == nil {
-		items = []map[string]any{}
+		items = []T{}
 	}
 	return OK(map[string]any{"items": items, "next_cursor": next})
 }

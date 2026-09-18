@@ -53,11 +53,11 @@ func TestNativeMediaCapabilitiesCanBeDeclaredAndCertified(t *testing.T) {
 
 func TestMediaCertificationDoesNotBorrowChatEvidence(t *testing.T) {
 	for _, cfg := range []Configuration{
-		{Kind: KindOpenAI, AuthMode: AuthAPIKey, Endpoint: ptr("https://custom.example/v1")},
+		{Kind: KindOpenAI, AuthMode: AuthAPIKey, Endpoint: new("https://custom.example/v1")},
 		{Kind: KindOpenAI, AuthMode: AuthNone},
-		{Kind: KindOpenAI, AuthMode: AuthAPIKey, Endpoint: ptr("https://api.openai.com/custom")},
-		{Kind: KindOpenAICompatible, AuthMode: AuthAPIKey, Endpoint: ptr(DefaultOpenAIEndpoint)},
-		{Kind: KindAzure, AuthMode: AuthAPIKey, Endpoint: ptr("https://example.openai.azure.com")},
+		{Kind: KindOpenAI, AuthMode: AuthAPIKey, Endpoint: new("https://api.openai.com/custom")},
+		{Kind: KindOpenAICompatible, AuthMode: AuthAPIKey, Endpoint: new(DefaultOpenAIEndpoint)},
+		{Kind: KindAzure, AuthMode: AuthAPIKey, Endpoint: new("https://example.openai.azure.com")},
 	} {
 		t.Run(cfg.Kind+"/"+cfg.AuthMode+"/"+value(cfg.Endpoint), func(t *testing.T) {
 			cfg.normalize()

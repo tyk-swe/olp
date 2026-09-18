@@ -338,10 +338,7 @@ func readinessResponse(s *State, now time.Time, generation *int64, probe *storeP
 		h.MediaReconciliation = "unknown"
 	}
 	if consumer.OldestPendingAt != nil {
-		age := int64(now.Sub(*consumer.OldestPendingAt) / time.Second)
-		if age < 0 {
-			age = 0
-		}
+		age := max(int64(now.Sub(*consumer.OldestPendingAt)/time.Second), 0)
 		h.RequestMetadataConsumerOldestPendingAgeSec = &age
 	}
 	if counters != nil {

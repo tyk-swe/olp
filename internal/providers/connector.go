@@ -9,7 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"sort"
+	"slices"
 	"strings"
 	"time"
 
@@ -37,8 +37,7 @@ type probeError struct {
 func (e *probeError) Error() string { return e.Detail }
 
 func classify(err error) *probeError {
-	var pe *probeError
-	if errors.As(err, &pe) {
+	if pe, ok := errors.AsType[*probeError](err); ok {
 		return pe
 	}
 	switch {
@@ -170,7 +169,7 @@ func (s *Server) listModelFacts(ctx context.Context, cfg *Configuration, credent
 		for name := range cfg.Options.Models {
 			names = append(names, name)
 		}
-		sort.Strings(names)
+		slices.Sort(names)
 		if len(names) == 0 {
 			return nil, &probeError{Code: "model_required", Detail: "Declare a model before probing this vendor."}
 		}
@@ -467,10 +466,8 @@ func (s *Server) certifyNativeMedia(ctx context.Context, cfg *Configuration, cre
 		return err
 	}
 	expected := cfg.transport().Model(model)
-	for _, discovered := range models {
-		if discovered == expected {
-			return nil
-		}
+	if slices.Contains(models, expected) {
+		return nil
 	}
 	return &probeError{Code: "model_unavailable", Detail: "The credential cannot discover the requested media model."}
 }

@@ -116,45 +116,35 @@ type credentialState struct {
 	Revoked bool
 }
 
+type providerSummary struct {
+	ID                       string     `json:"id"`
+	Name                     string     `json:"name"`
+	Kind                     string     `json:"kind"`
+	VendorID                 *string    `json:"vendor_id"`
+	State                    string     `json:"state"`
+	ConnectorReady           bool       `json:"connector_ready"`
+	ETag                     string     `json:"etag"`
+	PendingActivation        bool       `json:"pending_activation"`
+	ActiveRevision           *int       `json:"active_revision"`
+	CreatedByEmail           *string    `json:"created_by_email"`
+	LastProbeAt              *time.Time `json:"last_probe_at"`
+	LastProbeStatus          *string    `json:"last_probe_status"`
+	CreatedAt                time.Time  `json:"created_at"`
+	UpdatedAt                time.Time  `json:"updated_at"`
+	ModelCount               int64      `json:"model_count"`
+	EnabledModelCount        int64      `json:"enabled_model_count"`
+	CapabilityCount          int64      `json:"capability_count"`
+	CertifiedCapabilityCount int64      `json:"certified_capability_count"`
+}
+
 type detail struct {
-	ID                       string        `json:"id"`
-	Name                     string        `json:"name"`
-	Kind                     string        `json:"kind"`
-	VendorID                 *string       `json:"vendor_id"`
+	providerSummary
 	Configuration            Configuration `json:"configuration"`
-	State                    string        `json:"state"`
-	ConnectorReady           bool          `json:"connector_ready"`
-	ETag                     string        `json:"etag"`
-	PendingActivation        bool          `json:"pending_activation"`
-	ActiveRevision           *int          `json:"active_revision"`
-	CreatedByEmail           *string       `json:"created_by_email"`
 	DraftCredentialID        *string       `json:"draft_credential_id"`
 	DraftCredentialVersion   *int          `json:"draft_credential_version"`
 	RuntimeCredentialID      *string       `json:"runtime_credential_id"`
 	RuntimeCredentialVersion *int          `json:"runtime_credential_version"`
-	LastProbeAt              *time.Time    `json:"last_probe_at"`
-	LastProbeStatus          *string       `json:"last_probe_status"`
 	LastProbeDetail          *string       `json:"last_probe_detail"`
-	CreatedAt                time.Time     `json:"created_at"`
-	UpdatedAt                time.Time     `json:"updated_at"`
-	ModelCount               int64         `json:"model_count"`
-	EnabledModelCount        int64         `json:"enabled_model_count"`
-	CapabilityCount          int64         `json:"capability_count"`
-	CertifiedCapabilityCount int64         `json:"certified_capability_count"`
-}
-
-// summary drops the configuration document for list views.
-func (d *detail) summary() map[string]any {
-	encoded, _ := json.Marshal(d)
-	var m map[string]any
-	json.Unmarshal(encoded, &m)
-	delete(m, "configuration")
-	delete(m, "draft_credential_id")
-	delete(m, "draft_credential_version")
-	delete(m, "runtime_credential_id")
-	delete(m, "runtime_credential_version")
-	delete(m, "last_probe_detail")
-	return m
 }
 
 const detailQuery = "SELECT " + recordColumns + ",u.email," +

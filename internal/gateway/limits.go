@@ -178,8 +178,7 @@ func (a *Admission) reserveKey(ctx context.Context, authority access.Authority, 
 	if err == nil {
 		return lease, nil
 	}
-	var exceeded *limits.ExceededError
-	if errors.As(err, &exceeded) {
+	if exceeded, ok := errors.AsType[*limits.ExceededError](err); ok {
 		a.recordRejection(exceeded.Dimension)
 		return nil, rateLimited(exceeded.Dimension, exceeded.RetryAfter)
 	}
@@ -309,8 +308,7 @@ func (a *Admission) reserveTarget(ctx context.Context, provider *runtime.Provide
 		// Whatever was taken for this attempt is given back before the target
 		// is abandoned: the attempt never happened.
 		settleTargetRefund(ctx, reservation)
-		var exceeded *limits.ExceededError
-		if errors.As(err, &exceeded) {
+		if exceeded, ok := errors.AsType[*limits.ExceededError](err); ok {
 			return nil, &attemptFailure{class: classRateLimit, quota: step.quota, retryAfter: retryHint(exceeded.Dimension, exceeded.RetryAfter)}, false
 		}
 		a.logger().Warn("skipping target with unenforceable quotas", "provider_id", provider.ID, "slot_id", slot.ID, "error", err.Error())

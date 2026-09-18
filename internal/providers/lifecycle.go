@@ -66,18 +66,18 @@ func (s *Server) providers(r *http.Request) (access.Reply, error) {
 		return access.Reply{}, err
 	}
 	defer rows.Close()
-	items := []map[string]any{}
+	var items []providerSummary
 	for rows.Next() {
 		d, err := s.scanDetail(rows)
 		if err != nil {
 			return access.Reply{}, err
 		}
-		items = append(items, d.summary())
+		items = append(items, d.providerSummary)
 	}
 	if err = rows.Err(); err != nil {
 		return access.Reply{}, err
 	}
-	return access.ListReply(items, page), nil
+	return access.ListReplyBy(items, page, func(item providerSummary) string { return item.ID }), nil
 }
 
 func (s *Server) provider(r *http.Request) (access.Reply, error) {
@@ -425,7 +425,7 @@ func (s *Server) activateProvider(r *http.Request) (access.Reply, error) {
 				if c.Source != "certified" {
 					return access.Reply{}, access.Fail(422, "certification_required", "Model "+m.UpstreamModel+" has an uncertified "+c.Operation+"/"+c.Surface+"/"+c.Mode+" capability.")
 				}
-				rm.Capabilities = append(rm.Capabilities, runtime.RevisionCapabilty{Operation: c.Operation, Surface: c.Surface, Mode: c.Mode, Source: c.Source, CertifiedAt: c.CertifiedAt})
+				rm.Capabilities = append(rm.Capabilities, runtime.RevisionCapability{Operation: c.Operation, Surface: c.Surface, Mode: c.Mode, Source: c.Source, CertifiedAt: c.CertifiedAt})
 			}
 			published = append(published, rm)
 		}
@@ -643,7 +643,7 @@ func (s *Server) revisionModels(r *http.Request) (access.Reply, error) {
 	return access.ListReply(items, page), nil
 }
 
-func capabilityKey(model string, c runtime.RevisionCapabilty) string {
+func capabilityKey(model string, c runtime.RevisionCapability) string {
 	return model + ":" + c.Operation + "/" + c.Surface + "/" + c.Mode
 }
 

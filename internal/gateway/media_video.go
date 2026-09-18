@@ -428,8 +428,8 @@ func (s *Server) videoList(w http.ResponseWriter, r *http.Request) {
 	page, err := media.JobsAfterID(r.Context(), s.Media.Jobs.Pool, media.Filters{
 		APIKeyID:   &authority.ID,
 		RouteSlugs: authority.Policy.AllowedRoutes,
-		Operation:  strPtr(media.OpVideoCreate),
-		Surface:    strPtr("openai"),
+		Operation:  new(media.OpVideoCreate),
+		Surface:    new("openai"),
 	}, cursorUUID(query.After), query.Order, query.Limit)
 	if err != nil {
 		s.mediaFail(x, w, mediaError(media.JobHTTPError(err)))
@@ -795,5 +795,3 @@ func cursorUUID(value *uuid.UUID) *string {
 	s := value.String()
 	return &s
 }
-
-func strPtr(value string) *string { return &value }

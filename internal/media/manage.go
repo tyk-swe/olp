@@ -175,8 +175,7 @@ func jobItem(record *JobRecord) contract.MediaJobItem {
 
 // mapJobError translates durable job errors into management problems.
 func mapJobError(err error) error {
-	var jobErr *JobError
-	if errors.As(err, &jobErr) {
+	if jobErr, ok := errors.AsType[*JobError](err); ok {
 		switch jobErr.Kind {
 		case JobErrorNotFound:
 			return access.Fail(http.StatusNotFound, "not_found", "The media job does not exist.")

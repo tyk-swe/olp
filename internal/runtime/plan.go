@@ -1,9 +1,9 @@
 package runtime
 
 import (
+	"cmp"
 	"encoding/json"
 	"slices"
-	"sort"
 	"time"
 
 	"github.com/google/uuid"
@@ -142,28 +142,33 @@ func PlanRequest(s *Snapshot, slug, operation, surface, mode string, affinity []
 		}
 		rows = append(rows, row)
 	}
-	sort.SliceStable(rows, func(i, j int) bool {
-		a, b := rows[i], rows[j]
+	slices.SortStableFunc(rows, func(a, b rankedCandidate) int {
 		if a.decision.Eligible != b.decision.Eligible {
-			return a.decision.Eligible
+			if a.decision.Eligible {
+				return -1
+			}
+			return 1
 		}
-		if a.attempt.Priority != b.attempt.Priority {
-			return a.attempt.Priority < b.attempt.Priority
+		if order := cmp.Compare(a.attempt.Priority, b.attempt.Priority); order != 0 {
+			return order
 		}
-		if a.order != b.order {
-			return a.order < b.order
+		if order := cmp.Compare(a.order, b.order); order != 0 {
+			return order
 		}
-		if a.preference != b.preference {
-			return a.preference < b.preference
+		if order := cmp.Compare(a.preference, b.preference); order != 0 {
+			return order
 		}
 		switch policy.Strategy {
 		case "price":
 			ap, bp := a.decision.Price.Scalar(operation), b.decision.Price.Scalar(operation)
 			if (ap == nil) != (bp == nil) {
-				return ap != nil
+				if ap != nil {
+					return -1
+				}
+				return 1
 			}
 			if ap != nil && ap.Cmp(bp) != 0 {
-				return ap.Cmp(bp) < 0
+				return ap.Cmp(bp)
 			}
 		case "latency", "throughput":
 			ap, bp := a.decision.Performance, b.decision.Performance
@@ -176,18 +181,21 @@ func PlanRequest(s *Snapshot, slug, operation, surface, mode string, affinity []
 				}
 			}
 			if (ap == nil) != (bp == nil) {
-				return ap != nil
+				if ap != nil {
+					return -1
+				}
+				return 1
 			}
 			if ap != nil {
 				if policy.Strategy == "latency" && ap.LatencyMS != bp.LatencyMS {
-					return ap.LatencyMS < bp.LatencyMS
+					return cmp.Compare(ap.LatencyMS, bp.LatencyMS)
 				}
 				if policy.Strategy == "throughput" && *ap.Throughput != *bp.Throughput {
-					return *ap.Throughput > *bp.Throughput
+					return cmp.Compare(*bp.Throughput, *ap.Throughput)
 				}
 			}
 		}
-		return a.attempt.Score > b.attempt.Score
+		return cmp.Compare(b.attempt.Score, a.attempt.Score)
 	})
 	ordinal := 0
 	for _, row := range rows {

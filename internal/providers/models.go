@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"net/http"
 	"time"
 	"unicode"
@@ -198,9 +199,7 @@ func (s *Server) discover(r *http.Request) (access.Reply, error) {
 		}
 		var existing map[string]json.RawMessage
 		_ = json.Unmarshal(locked.Configuration.Options.Models[m.upstream], &existing)
-		for k, v := range existing {
-			facts[k] = v
-		}
+		maps.Copy(facts, existing)
 		if len(facts) > 0 {
 			encoded, _ := json.Marshal(facts)
 			locked.Configuration.Options.Models[m.upstream] = encoded

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptrace"
@@ -152,9 +153,7 @@ func (t *Transport) Do(ctx context.Context, target Target, call *UpstreamCall, r
 	if call.Stream {
 		req.Header.Set("Accept", "text/event-stream")
 	}
-	for name, values := range call.Inject {
-		req.Header[name] = values
-	}
+	maps.Copy(req.Header, call.Inject)
 
 	credentialValues, err := t.Auth.Apply(ctx, req, target.Config, target.Secret, call.JSON)
 	if err != nil {

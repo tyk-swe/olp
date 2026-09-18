@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	"strings"
 
 	"github.com/tyk-swe/olp/internal/protocols/openai"
@@ -183,9 +184,7 @@ func Encode(r *openai.Request, kind, vendor, model string, defaults Object) ([]b
 			return nil, wire, requestError("dimensions", "Use only one embedding dimension parameter")
 		}
 		copyDefaults := Object{}
-		for k, v := range sourceDefaults {
-			copyDefaults[k] = v
-		}
+		maps.Copy(copyDefaults, sourceDefaults)
 		sourceDefaults = copyDefaults
 		if len(r.Field("dimensions")) > 0 {
 			delete(sourceDefaults, "output_dimension")
@@ -246,9 +245,7 @@ func Encode(r *openai.Request, kind, vendor, model string, defaults Object) ([]b
 		return nil, wire, err
 	}
 	targetDefaults := Object{}
-	for k, v := range defaults {
-		targetDefaults[k] = v
-	}
+	maps.Copy(targetDefaults, defaults)
 	if present(c.Parameters["max_output_tokens"]) {
 		delete(targetDefaults, "max_tokens")
 		delete(targetDefaults, "max_completion_tokens")

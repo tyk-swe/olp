@@ -1,9 +1,11 @@
 package runtime
 
 import (
+	"cmp"
+	"slices"
+
 	"github.com/google/uuid"
 	"github.com/tyk-swe/olp/internal/connectors"
-	"sort"
 )
 
 // SelectSlots is shared by previews and execution. Live revocations, cooldowns
@@ -28,11 +30,11 @@ func SelectSlots(provider Provider, model string, route Route, keyID, operation,
 		}
 		rows = append(rows, ranked{slot, Score(routeID, id, slot.Weight, operation, surface, mode, affinity)})
 	}
-	sort.SliceStable(rows, func(i, j int) bool {
-		if rows[i].slot.Priority != rows[j].slot.Priority {
-			return rows[i].slot.Priority < rows[j].slot.Priority
+	slices.SortStableFunc(rows, func(a, b ranked) int {
+		if order := cmp.Compare(a.slot.Priority, b.slot.Priority); order != 0 {
+			return order
 		}
-		return rows[i].score > rows[j].score
+		return cmp.Compare(b.score, a.score)
 	})
 	out := make([]Slot, 0, len(rows))
 	for _, row := range rows {

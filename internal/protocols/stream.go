@@ -4,7 +4,8 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"sort"
+	"maps"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -77,8 +78,7 @@ func streamError(err error) error {
 	if errors.Is(err, sse.ErrEventTooLarge) {
 		return openai.ErrEventTooLarge
 	}
-	var framing *sse.DecodeError
-	if errors.As(err, &framing) {
+	if framing, ok := errors.AsType[*sse.DecodeError](err); ok {
 		return protocolError(framing.Detail)
 	}
 	return err
@@ -125,9 +125,7 @@ func streamAnthropic(r io.Reader, limit int, route string, emit openai.Emit) (*o
 			if u, e := optionalObject(m["usage"]); e != nil {
 				return e
 			} else {
-				for k, v := range u {
-					usage[k] = v
-				}
+				maps.Copy(usage, u)
 			}
 			m["model"] = raw(route)
 			f["message"] = raw(m)
@@ -229,9 +227,7 @@ func streamAnthropic(r io.Reader, limit int, route string, emit openai.Emit) (*o
 				return e
 			} else {
 				delete(usage, "output_tokens")
-				for k, v := range u {
-					usage[k] = v
-				}
+				maps.Copy(usage, u)
 			}
 			c.Usage, e = nativeUsage(usage, "anthropic")
 			if e != nil {
@@ -647,7 +643,7 @@ func (t *streamTranslator) finish(c *openai.Completion) error {
 	for i := range t.calls {
 		indices = append(indices, i)
 	}
-	sort.Ints(indices)
+	slices.Sort(indices)
 	for _, i := range indices {
 		call := t.calls[i]
 		if call.ID == "" || call.Name == "" {

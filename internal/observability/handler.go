@@ -146,10 +146,7 @@ func boolMetric(v bool) string {
 }
 
 func ageSeconds(at, now time.Time) string {
-	age := now.Sub(at)
-	if age < 0 {
-		age = 0
-	}
+	age := max(now.Sub(at), 0)
 	return strconvInt(int64(age / time.Second))
 }
 

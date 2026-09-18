@@ -1,7 +1,6 @@
 package access
 
 import (
-	"encoding/json"
 	"errors"
 	"net/http"
 	"strings"
@@ -11,7 +10,6 @@ import (
 	"github.com/tyk-swe/olp/internal/secrets"
 )
 
-func RawJSON(data []byte) any { return json.RawMessage(data) }
 func (s *Server) sessionBody(r *http.Request, q Queryer, u User, token string) (any, error) {
 	var name string
 	err := q.QueryRow(r.Context(), "SELECT name FROM olp_go.installation WHERE singleton").Scan(&name)

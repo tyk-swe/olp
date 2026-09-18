@@ -5,6 +5,7 @@ import (
 	"crypto/hmac"
 	"encoding/json"
 	"errors"
+	"maps"
 	"net/http"
 	"regexp"
 	"slices"
@@ -150,7 +151,7 @@ func (s *Server) apiKey(r *http.Request) (Reply, error) {
 	var data []byte
 	var etag string
 	err = s.Pool.QueryRow(r.Context(), "SELECT "+s.keyJSON()+",k.etag::text"+keyFrom+" WHERE k.id=$1", id).Scan(&data, &etag)
-	return Detail(RawJSON(data), etag), err
+	return Detail(json.RawMessage(data), etag), err
 }
 func (s *Server) createAPIKey(r *http.Request) (Reply, error) {
 	input := keyInput{KeyPolicy: KeyPolicy{Scopes: []string{"inference"}, AllowedRoutes: []string{}}}
@@ -245,9 +246,7 @@ func (s *Server) updateAPIKey(r *http.Request) (Reply, error) {
 	if err = json.Unmarshal(data, &merged); err != nil {
 		return Reply{}, err
 	}
-	for field, value := range patch {
-		merged[field] = value
-	}
+	maps.Copy(merged, patch)
 	data, err = json.Marshal(merged)
 	if err != nil {
 		return Reply{}, err
@@ -331,9 +330,7 @@ func (s *Server) transitionKey(r *http.Request, rotate bool) (Reply, error) {
 		if err = json.Unmarshal(data, &policy); err != nil {
 			return Reply{}, err
 		}
-		for field, value := range input {
-			policy[field] = value
-		}
+		maps.Copy(policy, input)
 		data, err = json.Marshal(policy)
 		if err != nil {
 			return Reply{}, err

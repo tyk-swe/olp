@@ -119,8 +119,8 @@ func validDecimal(value string) bool {
 		return false
 	}
 	integer, fraction := value, ""
-	if dot := strings.IndexByte(value, '.'); dot >= 0 {
-		integer, fraction = value[:dot], value[dot+1:]
+	if before, after, ok := strings.Cut(value, "."); ok {
+		integer, fraction = before, after
 		if len(fraction) < 1 || len(fraction) > 12 {
 			return false
 		}

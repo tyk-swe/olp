@@ -9,8 +9,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"regexp"
-	"sort"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -106,9 +107,7 @@ func (r *Request) Field(name string) json.RawMessage { return r.fields[name] }
 // Document returns a copy of the source envelope for a codec to rewrite.
 func (r *Request) Document() map[string]json.RawMessage {
 	out := make(map[string]json.RawMessage, len(r.fields))
-	for k, v := range r.fields {
-		out[k] = v
-	}
+	maps.Copy(out, r.fields)
 	return out
 }
 
@@ -414,12 +413,8 @@ func ValidateDefaults(defaults map[string]json.RawMessage) error {
 // for chat streams so accounting never depends on client options.
 func (r *Request) Encode(upstreamModel string, defaults map[string]json.RawMessage) ([]byte, error) {
 	out := make(map[string]json.RawMessage, len(r.fields)+len(defaults))
-	for name, value := range defaults {
-		out[name] = value
-	}
-	for name, value := range r.fields {
-		out[name] = value
-	}
+	maps.Copy(out, defaults)
+	maps.Copy(out, r.fields)
 	if r.Family == FamilyChat {
 		// Either explicit token limit overrides the same setting under its alias,
 		// including an explicit null that opts out of the provider default.
@@ -474,7 +469,7 @@ func (r *Request) Extensions() []string {
 		known = responsesKnown
 	}
 	walk(r.fields, "", known, &paths)
-	sort.Strings(paths)
+	slices.Sort(paths)
 	return paths
 }
 

@@ -119,7 +119,7 @@ var kinds = []kindCapability{
 var generationParameters = []string{"temperature", "top_p", "max_tokens", "max_completion_tokens", "max_output_tokens", "stop", "tools", "tool_choice", "response_format", "seed", "presence_penalty", "frequency_penalty", "logit_bias", "n", "user", "reasoning", "reasoning_effort"}
 
 var vendors = []vendor{
-	{ID: KindOpenAI, Name: "OpenAI", Connector: KindOpenAI, Discovery: true, Operations: []string{OperationGeneration}, Authentication: []string{AuthAPIKey}, Parameters: generationParameters, DocumentationURL: "https://platform.openai.com/docs/api-reference", Endpoint: ptr(DefaultOpenAIEndpoint)},
+	{ID: KindOpenAI, Name: "OpenAI", Connector: KindOpenAI, Discovery: true, Operations: []string{OperationGeneration}, Authentication: []string{AuthAPIKey}, Parameters: generationParameters, DocumentationURL: "https://platform.openai.com/docs/api-reference", Endpoint: new(DefaultOpenAIEndpoint)},
 	{ID: KindOpenAICompatible, Name: "OpenAI-compatible", Connector: KindOpenAICompatible, Discovery: true, Operations: []string{OperationGeneration}, Authentication: []string{AuthAPIKey, AuthHeaders, AuthNone}, Parameters: generationParameters, DocumentationURL: "https://platform.openai.com/docs/api-reference/chat", Endpoint: nil},
 }
 
@@ -151,8 +151,6 @@ func kindByName(name string) *kindCapability {
 	return nil
 }
 
-func ptr[T any](v T) *T { return &v }
-
 func init() {
 	custom := []authCapability{{Mode: AuthAPIKey, Label: "API key", Credential: "required"}, {Mode: AuthHeaders, Label: "Encrypted headers", Credential: "required"}, {Mode: AuthNone, Label: "No credential", Credential: "forbidden"}}
 	kinds[0].AuthModes = custom
@@ -178,7 +176,7 @@ func init() {
 		{"voyage", "Voyage AI", "https://api.voyageai.com/v1", "https://docs.voyageai.com", false, []string{"embeddings"}},
 	} {
 		kinds[1].Presets = append(kinds[1].Presets, preset{ID: entry.id, Label: entry.name, Description: entry.name + " compatible API.", Endpoint: entry.endpoint, AuthMode: AuthAPIKey, Maintainer: entry.name, DocumentationLabel: entry.name + " API", DocumentationURL: entry.docs})
-		vendors = append(vendors, vendor{ID: entry.id, Name: entry.name, Connector: KindOpenAICompatible, Discovery: entry.discovery, Operations: entry.operations, Authentication: []string{AuthAPIKey, AuthHeaders, AuthNone}, Parameters: generationParameters, DocumentationURL: entry.docs, Endpoint: ptr(entry.endpoint)})
+		vendors = append(vendors, vendor{ID: entry.id, Name: entry.name, Connector: KindOpenAICompatible, Discovery: entry.discovery, Operations: entry.operations, Authentication: []string{AuthAPIKey, AuthHeaders, AuthNone}, Parameters: generationParameters, DocumentationURL: entry.docs, Endpoint: new(entry.endpoint)})
 	}
 	for _, preset := range kinds[1].Presets {
 		found := false
@@ -186,7 +184,7 @@ func init() {
 			found = found || v.ID == preset.ID
 		}
 		if !found {
-			vendors = append(vendors, vendor{ID: preset.ID, Name: preset.Label, Connector: KindOpenAICompatible, Discovery: true, Operations: []string{"generation"}, Authentication: []string{AuthAPIKey, AuthHeaders, AuthNone}, Parameters: generationParameters, DocumentationURL: preset.DocumentationURL, Endpoint: ptr(preset.Endpoint)})
+			vendors = append(vendors, vendor{ID: preset.ID, Name: preset.Label, Connector: KindOpenAICompatible, Discovery: true, Operations: []string{"generation"}, Authentication: []string{AuthAPIKey, AuthHeaders, AuthNone}, Parameters: generationParameters, DocumentationURL: preset.DocumentationURL, Endpoint: new(preset.Endpoint)})
 		}
 	}
 	for _, entry := range []struct{ id, kind, label, docs string }{{"anthropic", KindAnthropic, "Anthropic", "https://docs.anthropic.com"}, {"google", KindGemini, "Google Gemini", "https://ai.google.dev"}, {"google-vertex", KindVertex, "Google Vertex AI", "https://cloud.google.com/vertex-ai"}, {"amazon-bedrock", KindBedrock, "Amazon Bedrock", "https://docs.aws.amazon.com/bedrock"}, {"azure", KindAzure, "Azure OpenAI", "https://learn.microsoft.com/azure/ai-services/openai"}} {

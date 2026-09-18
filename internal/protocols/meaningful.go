@@ -8,7 +8,7 @@ import (
 // MeaningfulFrame distinguishes model output from protocol setup, heartbeats,
 // and usage-only events. Performance measurements use delivered output only.
 func MeaningfulFrame(family openai.Family, frame []byte) bool {
-	for _, line := range bytes.Split(frame, []byte("\n")) {
+	for line := range bytes.SplitSeq(frame, []byte("\n")) {
 		if !bytes.HasPrefix(line, []byte("data:")) {
 			continue
 		}

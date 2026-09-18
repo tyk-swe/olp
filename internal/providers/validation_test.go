@@ -6,14 +6,14 @@ import (
 )
 
 func TestCredentialValidationTracksUpstreamAccess(t *testing.T) {
-	cfg := Configuration{Kind: "openai_compatible", AuthMode: AuthAPIKey, Endpoint: ptr("https://example.com/v1")}
-	row := slotRow{CredentialID: ptr("original")}
+	cfg := Configuration{Kind: "openai_compatible", AuthMode: AuthAPIKey, Endpoint: new("https://example.com/v1")}
+	row := slotRow{CredentialID: new("original")}
 	models := []storedModel{
 		{UpstreamModel: "a", Enabled: true, Capabilities: []storedCapability{{Operation: "generation", Surface: "openai", Mode: "unary"}}},
 		{UpstreamModel: "b", Enabled: true, Capabilities: []storedCapability{{Operation: "generation", Surface: "openai", Mode: "streaming"}}},
 	}
-	row.ValidatedAt = ptr(time.Now().UTC())
-	row.ValidatedFingerprint = ptr(row.validationFingerprint(&cfg, models))
+	row.ValidatedAt = new(time.Now().UTC())
+	row.ValidatedFingerprint = new(row.validationFingerprint(&cfg, models))
 	if row.validationTime(&cfg, models) == nil {
 		t.Fatal("matching validation was lost")
 	}
@@ -23,8 +23,8 @@ func TestCredentialValidationTracksUpstreamAccess(t *testing.T) {
 		t.Fatal("routing preferences or ordering invalidated upstream access")
 	}
 	for _, mutate := range []func(*Configuration, *slotRow, []storedModel){
-		func(c *Configuration, _ *slotRow, _ []storedModel) { c.Endpoint = ptr("https://other.example.com/v1") },
-		func(_ *Configuration, s *slotRow, _ []storedModel) { s.CredentialID = ptr("rotated") },
+		func(c *Configuration, _ *slotRow, _ []storedModel) { c.Endpoint = new("https://other.example.com/v1") },
+		func(_ *Configuration, s *slotRow, _ []storedModel) { s.CredentialID = new("rotated") },
 		func(_ *Configuration, s *slotRow, _ []storedModel) { s.Restrictions.AllowedModels = []string{"a"} },
 		func(_ *Configuration, _ *slotRow, m []storedModel) { m[1].Enabled = false },
 		func(_ *Configuration, _ *slotRow, m []storedModel) { m[1].UpstreamModel = "new-model" },
@@ -42,8 +42,8 @@ func TestCredentialValidationTracksUpstreamAccess(t *testing.T) {
 }
 
 func TestDefaultCertificationCannotCombineCredentialVersions(t *testing.T) {
-	cfg := Configuration{Kind: "openai_compatible", AuthMode: AuthAPIKey, Endpoint: ptr("https://example.com/v1")}
-	row := slotRow{Default: true, CredentialID: ptr("current")}
+	cfg := Configuration{Kind: "openai_compatible", AuthMode: AuthAPIKey, Endpoint: new("https://example.com/v1")}
+	row := slotRow{Default: true, CredentialID: new("current")}
 	at := time.Now().UTC()
 	capability := storedCapability{Operation: "generation", Surface: "openai", Mode: "unary", Source: "certified", CertifiedAt: &at, CredentialFingerprint: row.credentialFingerprint(&cfg)}
 	models := []storedModel{

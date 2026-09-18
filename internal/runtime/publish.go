@@ -13,14 +13,14 @@ import (
 // RevisionModel is the published shape of one enabled model inside a provider
 // revision. Provider activation writes it; publication reads it.
 type RevisionModel struct {
-	ID            string              `json:"id"`
-	UpstreamModel string              `json:"upstream_model"`
-	DisplayName   string              `json:"display_name"`
-	Capabilities  []RevisionCapabilty `json:"capabilities"`
+	ID            string               `json:"id"`
+	UpstreamModel string               `json:"upstream_model"`
+	DisplayName   string               `json:"display_name"`
+	Capabilities  []RevisionCapability `json:"capabilities"`
 }
 
-// RevisionCapabilty records whether a tuple was certified when activated.
-type RevisionCapabilty struct {
+// RevisionCapability records whether a tuple was certified when activated.
+type RevisionCapability struct {
 	Operation   string     `json:"operation"`
 	Surface     string     `json:"surface"`
 	Mode        string     `json:"mode"`

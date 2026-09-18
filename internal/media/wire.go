@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -249,7 +250,7 @@ func extraFields(fields []Field, extra map[string]any) []Field {
 	for name := range extra {
 		names = append(names, name)
 	}
-	sortStrings(names)
+	slices.Sort(names)
 	for _, name := range names {
 		value := extra[name]
 		if values, ok := value.([]any); ok {
@@ -279,14 +280,6 @@ func extraText(value any) string {
 			return fmt.Sprint(value)
 		}
 		return string(data)
-	}
-}
-
-func sortStrings(values []string) {
-	for i := 1; i < len(values); i++ {
-		for j := i; j > 0 && values[j] < values[j-1]; j-- {
-			values[j], values[j-1] = values[j-1], values[j]
-		}
 	}
 }
 
@@ -675,13 +668,7 @@ func DecodeTranscription(form *Form) (*Request, *Error) {
 
 func allOf(values []string, allowed ...string) bool {
 	for _, value := range values {
-		ok := false
-		for _, a := range allowed {
-			if value == a {
-				ok = true
-				break
-			}
-		}
+		ok := slices.Contains(allowed, value)
 		if !ok {
 			return false
 		}
@@ -954,7 +941,7 @@ func encodeTranscription(r *Request, model string) (*UpstreamCall, *Error) {
 		fields = textValue(fields, "timestamp_granularities[]", value)
 	}
 	if len(r.ChunkingStrategy) > 0 {
-		fields = append(fields, Field{Name: "chunking_strategy", Text: stringPtr(string(r.ChunkingStrategy))})
+		fields = append(fields, Field{Name: "chunking_strategy", Text: new(string(r.ChunkingStrategy))})
 	}
 	for i, name := range r.KnownSpeakerNames {
 		fields = textValue(fields, "known_speaker_names[]", name)
@@ -1085,8 +1072,6 @@ func int64Ptr(value *int) *int64 {
 	return &v
 }
 
-func stringPtr(value string) *string { return &value }
-
 // ImageResult is the decoded unary image response. Base64 payloads are
 // already staged in the spool and referenced by handle.
 type ImageResult struct {
@@ -1181,13 +1166,7 @@ func DecodeImageResponse(body []byte, stage func(b64 string, index int) (*Artifa
 func diffFields(doc map[string]any, known ...string) map[string]any {
 	var extra map[string]any
 	for name, value := range doc {
-		keep := false
-		for _, k := range known {
-			if name == k {
-				keep = true
-				break
-			}
-		}
+		keep := slices.Contains(known, name)
 		if !keep {
 			if extra == nil {
 				extra = map[string]any{}

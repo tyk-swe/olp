@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -35,21 +36,11 @@ var priceOperations = []string{"generation", "embeddings", "token_count", "image
 	"video_get", "video_content", "video_delete", "moderation", "model_list", "model_get"}
 
 func validOperation(value string) bool {
-	for _, operation := range priceOperations {
-		if operation == value {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(priceOperations, value)
 }
 
 func validProviderKind(value string) bool {
-	for _, kind := range providerKinds {
-		if kind == value {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(providerKinds, value)
 }
 
 // Price is one rate in a pricing revision. Rates are exact decimal strings:

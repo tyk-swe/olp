@@ -262,7 +262,7 @@ func validateInput(ctx context.Context, q access.Queryer, in *draftInput, existi
 			return nil, access.Invalid("targets", "Name each target by provider_model_id or by provider_id and provider_model.")
 		}
 		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, access.Invalid("targets."+itoa(i)+".provider_model", "Target "+itoa(i)+" names a model this installation does not know.")
+			return nil, access.Invalid("targets."+strconv.Itoa(i)+".provider_model", "Target "+strconv.Itoa(i)+" names a model this installation does not know.")
 		}
 		if err != nil {
 			return nil, err
@@ -279,8 +279,6 @@ func validateInput(ctx context.Context, q access.Queryer, in *draftInput, existi
 	}
 	return targets, nil
 }
-
-func itoa(i int) string { return strconv.Itoa(i) }
 
 func (s *Server) drafts(r *http.Request) (access.Reply, error) {
 	if _, err := s.Access.Principal(r, s.Access.Pool, "read"); err != nil {

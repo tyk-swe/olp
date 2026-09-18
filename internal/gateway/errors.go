@@ -1,11 +1,12 @@
 package gateway
 
 import (
+	"cmp"
 	"encoding/json"
 	"math"
 	"net/http"
 	"net/textproto"
-	"sort"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -45,7 +46,7 @@ func redactCredentials(message string, values []string) string {
 		encoded := unescaped.String()
 		secrets = append(secrets, encoded[1:len(encoded)-2]) // quotes and trailing newline
 	}
-	sort.SliceStable(secrets, func(i, j int) bool { return len(secrets[i]) > len(secrets[j]) })
+	slices.SortStableFunc(secrets, func(a, b string) int { return cmp.Compare(len(b), len(a)) })
 	pairs := make([]string, 0, 2*len(secrets))
 	for _, secret := range secrets {
 		pairs = append(pairs, secret, "[REDACTED]")

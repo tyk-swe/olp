@@ -211,8 +211,8 @@ func ClientIP(r *http.Request, trusted []netip.Prefix) string {
 		return addr.String()
 	}
 	chain := strings.Split(strings.Join(r.Header.Values("X-Forwarded-For"), ","), ",")
-	for i := len(chain) - 1; i >= 0; i-- {
-		hop, err := netip.ParseAddr(strings.TrimSpace(chain[i]))
+	for _, c := range slices.Backward(chain) {
+		hop, err := netip.ParseAddr(strings.TrimSpace(c))
 		if err != nil {
 			break
 		}
@@ -366,8 +366,7 @@ func attemptBudget(r *http.Request, route *runtime.Route) (int, *Error) {
 }
 
 func requestError(err error) *Error {
-	var re *openai.RequestError
-	if errors.As(err, &re) {
+	if re, ok := errors.AsType[*openai.RequestError](err); ok {
 		var param *string
 		if re.Param != "" {
 			param = &re.Param
@@ -378,8 +377,7 @@ func requestError(err error) *Error {
 }
 
 func selectionError(err error, model string) *Error {
-	var se *runtime.SelectionError
-	if errors.As(err, &se) {
+	if se, ok := errors.AsType[*runtime.SelectionError](err); ok {
 		switch se.Code {
 		case runtime.RouteNotFound:
 			return modelNotFound(model)

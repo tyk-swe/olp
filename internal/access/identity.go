@@ -2,6 +2,7 @@ package access
 
 import (
 	"crypto/hmac"
+	"encoding/json"
 	"errors"
 	"net"
 	"net/http"
@@ -365,7 +366,7 @@ func (s *Server) invitations(r *http.Request) (Reply, error) {
 func invitation(r *http.Request, tx pgx.Tx, id string) (any, error) {
 	var data []byte
 	err := tx.QueryRow(r.Context(), "SELECT "+invitationJSON+invitationFrom+" WHERE i.id=$1", id).Scan(&data)
-	return RawJSON(data), err
+	return json.RawMessage(data), err
 }
 func (s *Server) createInvitation(r *http.Request) (Reply, error) {
 	var input struct {

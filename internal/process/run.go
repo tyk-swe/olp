@@ -4,9 +4,7 @@ package process
 import (
 	"context"
 	"errors"
-	"fmt"
 	"log/slog"
-	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -30,7 +28,6 @@ import (
 	"github.com/tyk-swe/olp/internal/observability"
 	"github.com/tyk-swe/olp/internal/protocols"
 	"github.com/tyk-swe/olp/internal/providers"
-	"github.com/tyk-swe/olp/internal/routes"
 	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/internal/secrets"
 	"github.com/tyk-swe/olp/internal/telemetry"
@@ -255,23 +252,7 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 			// separate worker replica is alive, so the console is told what
 			// this installation is configured for.
 			control.RetentionEnforced = limiter != nil
-			control.Register(public)
-			catalogue := providers.New(control, &policy)
-			catalogue.Log = log
-			if limiter != nil {
-				catalogue.Quotas = limiter
-			}
-			catalogue.Register(public)
-			routeServer := routes.New(control)
-			routeServer.Inputs = rt.RoutingInputs
-			routeServer.Register(public)
-			(&gateway.Playground{Access: control, Gateway: gw}).Register(public)
-			(&media.Management{Access: control, Pool: pool}).Register(public)
-			(&observability.Management{Access: control, Cache: obsCache, Pool: pool}).Register(public)
-			// Usage, pricing, request history and recovery reporting are part
-			// of the management surface; their patterns are more specific than
-			// its catch-all, which answers everything no surface claims.
-			(&usage.Server{Access: control, VendorKind: providers.VendorKind}).Register(public)
+			registerManagement(public, control, &policy, limiter, rt, gw, obsCache, log)
 		}
 	}
 	if err := startup.Err(); err != nil {
@@ -293,55 +274,7 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 		MediaGaps:    func() int64 { return int64(mediaGapsTotal.Load()) },
 		LossCounters: lossCounters.Totals,
 	}
-	if rt != nil {
-		obsState.Runtime = func() observability.RuntimeProbe {
-			probe := observability.RuntimeProbe{AllTransports: true}
-			status := rt.Authority()
-			probe.AuthorityStale = status.Stale
-			if status.Loaded && !status.ReadAt.IsZero() {
-				age := time.Since(status.ReadAt)
-				probe.AuthorityAge = &age
-			}
-			release := rt.Release()
-			if release != nil && release.ID != "" && release.Snapshot != nil {
-				ordinal := release.Snapshot.Generation.Ordinal
-				probe.Generation = &ordinal
-				for _, provider := range release.Snapshot.Providers {
-					p := provider
-					if err := p.Connector().Validate(&policy); err != nil {
-						probe.AllTransports = false
-						break
-					}
-				}
-			}
-			return probe
-		}
-		obsState.HardLimits = rt.HasHardLimits
-	}
-	if gw != nil {
-		obsState.Circuits = gw.OpenCircuits
-		if gw.Admission != nil {
-			admission := gw.Admission
-			obsState.LimiterCounts = func() (failOpen, daily, monthly int64) {
-				return admission.FailOpenTotal(),
-					admission.BudgetRejections(limits.DimensionDailyCost),
-					admission.BudgetRejections(limits.DimensionMonthlyCost)
-			}
-		}
-	}
-	if emitter != nil {
-		obsState.Emitter = func() *usage.Snapshot {
-			snapshot := emitter.Snapshot()
-			return &snapshot
-		}
-	}
-	if mediaSpool != nil {
-		spool := mediaSpool
-		obsState.Spool = func() (capacity, used *int64) {
-			capacityBytes, usedBytes := spool.CapacityBytes(), spool.UsedBytes()
-			return &capacityBytes, &usedBytes
-		}
-	}
+	configureObservability(obsState, rt, gw, emitter, mediaSpool, &policy)
 	go obsCache.Run(ctx, obsState, log)
 	// The delivery plane outlives the listeners: it is cancelled only once the
 	// gateway has drained, so every event a served request emitted is written
@@ -398,26 +331,9 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 			workersStopped = startWorkers(workers, pool, reader, limiter, stream, mediaService, log)
 		}
 	}
-	liveMetrics := &observability.LiveMetrics{
-		InferenceAdmission:  inferencePool,
-		ManagementAdmission: managementPool,
-	}
-	if rt != nil {
-		liveMetrics.AuthorityAge = func() *float64 {
-			status := rt.Authority()
-			if !status.Loaded || status.ReadAt.IsZero() {
-				return nil
-			}
-			age := time.Since(status.ReadAt).Seconds()
-			return &age
-		}
-		liveMetrics.DesiredGeneration = rt.DesiredGeneration
-	}
+	liveMetrics := newLiveMetrics(rt, inferencePool, managementPool)
 	private := observability.NewHandler(obsCache, liveMetrics).ServeMux()
-	listeners := []struct {
-		name, address string
-		handler       http.Handler
-	}{{"private", c.ObservabilityListenAddr, private}}
+	listenerConfigs := []listenerConfig{{name: "private", address: c.ObservabilityListenAddr, handler: private}}
 	if c.Mode.Public() {
 		// Every public request is charged against its surface's pool before
 		// routing: a full pool rejects without queueing, and tracing spans
@@ -433,53 +349,20 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 			request := runtimeConfig.ForInstallation(installation)
 			admission.Tracing = &request
 		}
-		listeners = append(listeners, struct {
-			name, address string
-			handler       http.Handler
-		}{"public", c.ListenAddr, admission.Wrap(public)})
+		listenerConfigs = append(listenerConfigs, listenerConfig{name: "public", address: c.ListenAddr, handler: admission.Wrap(public)})
 	}
 	requestContext, cancelRequests := context.WithCancel(context.WithoutCancel(ctx))
 	defer cancelRequests()
-	var servers []*listenerServer
-	var sockets []net.Listener
-	for _, listener := range listeners {
-		socket, err := (&net.ListenConfig{}).Listen(startup, "tcp", listener.address)
-		if err != nil {
-			for _, s := range sockets {
-				s.Close()
-			}
-			return fmt.Errorf("bind %s listener: %w", listener.name, err)
-		}
-		sockets = append(sockets, socket)
-		servers = append(servers, &listenerServer{handler: listener.handler, limit: c.MaxConnections, age: time.Duration(c.ConnectionMaxAgeSeconds) * time.Second, drain: time.Duration(c.ConnectionDrainTimeoutSeconds) * time.Second, requests: requestContext})
+	listeners, err := bindListeners(startup, listenerConfigs, c, requestContext)
+	if err != nil {
+		return err
 	}
-	errorsCh := make(chan error, len(servers))
-	for i, server := range servers {
-		go func() { errorsCh <- server.Serve(sockets[i]) }()
-		log.Info("listener started", "mode", c.Mode, "listener", listeners[i].name, "address", sockets[i].Addr().String())
-	}
-	var serveErr error
-	select {
-	case <-ctx.Done():
-	case serveErr = <-errorsCh:
-	}
+	serveErr := serveListeners(ctx, listeners, c.Mode, log)
 	stop()
 	shutdownDeadline = time.Now().Add(c.ShutdownTimeout)
 	shutdown, cancel := context.WithDeadline(context.Background(), shutdownDeadline)
 	defer cancel()
-	// Both listeners drain against the same deadline. Forced connection closure
-	// does not prove that every handler has finished producing metadata.
-	var wg sync.WaitGroup
-	for i, server := range servers {
-		wg.Go(func() {
-			if err := server.Shutdown(shutdown); err != nil {
-				if emitter != nil && listeners[i].name == "public" {
-					emitter.MarkUnclean()
-				}
-			}
-		})
-	}
-	wg.Wait()
+	drainListeners(shutdown, listeners, emitter)
 	cancelRequests()
 	// Stop intake and flush accepted events before stopping the workers. If
 	// HTTP draining was forced, the epoch stays open to report the uncertainty

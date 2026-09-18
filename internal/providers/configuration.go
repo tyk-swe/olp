@@ -50,7 +50,7 @@ type Configuration struct {
 func (c *Configuration) normalize() {
 	if c.Endpoint == nil || *c.Endpoint == "" {
 		if endpoint := connectors.DefaultEndpoint(c.Kind, value(c.CloudRegion), value(c.CloudProject)); endpoint != "" {
-			c.Endpoint = ptr(endpoint)
+			c.Endpoint = new(endpoint)
 		}
 	}
 	if c.Options.CredentialHeaders == nil {
@@ -66,7 +66,7 @@ func (c *Configuration) normalize() {
 		c.Options.ParameterDefaults = map[string]json.RawMessage{}
 	}
 	if c.VendorMissing() {
-		c.Options.VendorID = ptr(defaultVendor(c.Kind))
+		c.Options.VendorID = new(defaultVendor(c.Kind))
 	}
 }
 

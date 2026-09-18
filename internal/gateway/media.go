@@ -738,7 +738,7 @@ func (s *Server) streamMediaEvents(ctx context.Context, w http.ResponseWriter, x
 		if frame.Event != nil && *frame.Event != "" {
 			buf.WriteString("event: " + *frame.Event + "\n")
 		}
-		for _, line := range strings.Split(frame.Data, "\n") {
+		for line := range strings.SplitSeq(frame.Data, "\n") {
 			buf.WriteString("data: " + line + "\n")
 		}
 		buf.WriteByte('\n')
@@ -803,8 +803,7 @@ func mediaError(failure *media.Error) *Error {
 }
 
 func mediaErr(err error) *media.Error {
-	var failure *media.Error
-	if errors.As(err, &failure) {
+	if failure, ok := errors.AsType[*media.Error](err); ok {
 		return failure
 	}
 	return media.Fail(http.StatusBadRequest, "invalid_request", err.Error())

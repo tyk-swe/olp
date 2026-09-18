@@ -1,6 +1,7 @@
 package access
 
 import (
+	"encoding/json"
 	"net/http"
 	"strconv"
 	"strings"
@@ -25,7 +26,7 @@ func (s *Server) setting(r *http.Request) (Reply, error) {
 	var data []byte
 	var etag string
 	err := s.Pool.QueryRow(r.Context(), "SELECT to_jsonb(s),etag::text FROM olp_go.settings s WHERE key=$1", r.PathValue("key")).Scan(&data, &etag)
-	return Detail(RawJSON(data), etag), err
+	return Detail(json.RawMessage(data), etag), err
 }
 func (s *Server) updateSetting(r *http.Request) (Reply, error) {
 	var input struct {
@@ -87,7 +88,7 @@ func (s *Server) updateSetting(r *http.Request) (Reply, error) {
 	if err = tx.QueryRow(r.Context(), "SELECT to_jsonb(s) FROM olp_go.settings s WHERE key=$1", key).Scan(&data); err != nil {
 		return Reply{}, err
 	}
-	return Commit(r, tx, Detail(RawJSON(data), etag))
+	return Commit(r, tx, Detail(json.RawMessage(data), etag))
 }
 func (s *Server) auditEvents(r *http.Request) (Reply, error) {
 	if _, err := s.Principal(r, s.Pool, "read"); err != nil {

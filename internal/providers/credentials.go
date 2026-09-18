@@ -129,7 +129,7 @@ func (s *Server) rotate(r *http.Request) (access.Reply, error) {
 		if err = s.validateModelAccess(r.Context(), &current.Configuration, []byte(input.Credential), &defaultSlot, models); err != nil {
 			return access.Reply{}, access.Fail(422, "credential_invalid", "The new credential cannot access the enabled models: "+classify(err).Detail)
 		}
-		validatedAt = ptr(time.Now().UTC())
+		validatedAt = new(time.Now().UTC())
 	}
 	tx, err = a.Begin(r)
 	if err != nil {
@@ -622,8 +622,8 @@ func (s *Server) validateSlot(r *http.Request) (access.Reply, error) {
 	var validatedAt *time.Time
 	var fingerprint *string
 	if probeErr == nil {
-		validatedAt = ptr(time.Now().UTC())
-		fingerprint = ptr(slot.validationFingerprint(&current.Configuration, models))
+		validatedAt = new(time.Now().UTC())
+		fingerprint = new(slot.validationFingerprint(&current.Configuration, models))
 	}
 	if _, err = tx.Exec(r.Context(), "UPDATE olp_go.provider_slots SET validated_at=$2,validated_fingerprint=$3 WHERE id=$1", slotID, validatedAt, fingerprint); err != nil {
 		return access.Reply{}, err

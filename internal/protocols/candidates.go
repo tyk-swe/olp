@@ -2,7 +2,8 @@ package protocols
 
 import (
 	"encoding/json"
-	"sort"
+	"maps"
+	"slices"
 	"strings"
 
 	"github.com/tyk-swe/olp/internal/protocols/openai"
@@ -135,9 +136,7 @@ func (m *candidateStream) frame(frame []byte) error {
 			}
 			item["index"] = raw(0)
 			single := Object{}
-			for k, v := range f {
-				single[k] = v
-			}
+			maps.Copy(single, f)
 			single[field] = raw([]Object{item})
 			if err := child.frame(eventFrame("", single)); err != nil {
 				return err
@@ -154,7 +153,7 @@ func (m *candidateStream) finish(c *openai.Completion) error {
 	for i := range m.children {
 		indices = append(indices, i)
 	}
-	sort.Ints(indices)
+	slices.Sort(indices)
 	for i, index := range indices {
 		summary := *c
 		summary.Usage = nil

@@ -63,10 +63,7 @@ func ReadConsumerStatus(ctx context.Context, q access.Queryer, now time.Time) (C
 	if pending < 0 || lag < 0 {
 		return ConsumerStatus{}, errors.New("stored request metadata consumer health is invalid")
 	}
-	age := int64(now.Sub(checked) / time.Second)
-	if age < 0 {
-		age = 0
-	}
+	age := max(int64(now.Sub(checked)/time.Second), 0)
 	// The comparison stays in seconds: converting a very old heartbeat back to a
 	// Duration could overflow and make a silent consumer look healthy.
 	state := ConsumerHealthy

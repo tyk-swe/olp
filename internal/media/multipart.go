@@ -9,6 +9,7 @@ import (
 	"mime"
 	"mime/multipart"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -380,7 +381,9 @@ func (f *Form) TakeFilesWithPrefix(prefix string) ([]Part, *Error) {
 		}
 		keys = append(keys, orderedPart{order: order, name: name})
 	}
-	sortOrderedParts(keys)
+	slices.SortStableFunc(keys, func(a, b orderedPart) int {
+		return slices.Compare(a.order[:], b.order[:])
+	})
 	var parts []Part
 	for _, key := range keys {
 		parts = append(parts, f.files[key.name]...)
@@ -392,18 +395,6 @@ func (f *Form) TakeFilesWithPrefix(prefix string) ([]Part, *Error) {
 type orderedPart struct {
 	order [2]int
 	name  string
-}
-
-func sortOrderedParts(keys []orderedPart) {
-	for i := 1; i < len(keys); i++ {
-		for j := i; j > 0; j-- {
-			left, right := keys[j-1].order, keys[j].order
-			if left[0] < right[0] || (left[0] == right[0] && left[1] <= right[1]) {
-				break
-			}
-			keys[j-1], keys[j] = keys[j], keys[j-1]
-		}
-	}
 }
 
 func fileArrayOrder(name, prefix string) ([2]int, *Error) {
@@ -506,8 +497,7 @@ func ParseMultipart(ctx context.Context, r *http.Request, spool *Spool, admissio
 }
 
 func multipartReadError(err error) *Error {
-	var bodyLimit *http.MaxBytesError
-	if errors.As(err, &bodyLimit) {
+	if _, ok := errors.AsType[*http.MaxBytesError](err); ok {
 		return payloadTooLarge("media_too_large")
 	}
 	return invalidRequest(fmt.Sprintf("The multipart request is invalid: %v", err))
@@ -640,13 +630,7 @@ func storeMultipartText(part *multipart.Part, name string, admission *Admission,
 			}
 			*authorizedModelSeen = true
 		case RouteRequireAuthorizedModel:
-			allowed := false
-			for _, route := range admission.Route.Allowed {
-				if route == text {
-					allowed = true
-					break
-				}
-			}
+			allowed := slices.Contains(admission.Route.Allowed, text)
 			if !allowed {
 				return Fail(http.StatusForbidden, "forbidden",
 					"The API key is not authorized for the multipart model route.")

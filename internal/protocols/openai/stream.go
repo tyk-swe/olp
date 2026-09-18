@@ -51,8 +51,7 @@ func stream(family Family, r io.Reader, maxEventBytes int, route string, include
 		if errors.Is(err, sse.ErrEventTooLarge) {
 			return completion, ErrEventTooLarge
 		}
-		var framing *sse.DecodeError
-		if errors.As(err, &framing) {
+		if framing, ok := errors.AsType[*sse.DecodeError](err); ok {
 			return completion, &ProtocolError{Detail: framing.Detail}
 		}
 		return completion, err

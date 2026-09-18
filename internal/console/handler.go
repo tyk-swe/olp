@@ -37,12 +37,13 @@ func Handler(directory string) (http.Handler, func() error, error) {
 		root.Close()
 		return nil, nil, errors.New("cannot inspect console index")
 	}
-	scriptPolicy := "'self'"
+	var scriptPolicy strings.Builder
+	scriptPolicy.WriteString("'self'")
 	for _, script := range regexp.MustCompile(`(?s)<script(?:\s[^>]*)?>(.*?)</script>`).FindAllSubmatch(index, -1) {
 		hash := sha256.Sum256(script[1])
-		scriptPolicy += " 'sha256-" + base64.StdEncoding.EncodeToString(hash[:]) + "'"
+		scriptPolicy.WriteString(" 'sha256-" + base64.StdEncoding.EncodeToString(hash[:]) + "'")
 	}
-	csp := "default-src 'self'; script-src " + scriptPolicy + "; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'"
+	csp := "default-src 'self'; script-src " + scriptPolicy.String() + "; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'"
 	files := http.FileServerFS(assets)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet && r.Method != http.MethodHead {

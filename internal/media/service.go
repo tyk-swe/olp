@@ -73,8 +73,6 @@ func (s *Service) RecordGap() {
 	}
 }
 
-func (s *Service) recordGap() { s.RecordGap() }
-
 // checkpoint records one reconciliation pass in worker_task_health.
 func (s *Service) checkpoint(ctx context.Context, outcome usage.Outcome, progress bool) {
 	if s.Pool == nil {
@@ -243,12 +241,9 @@ func (s *Service) ReconcileOnce(ctx context.Context, limit int) (*Pass, error) {
 		var wg sync.WaitGroup
 		results := make(chan reconciliationOutcome, len(records))
 		for _, record := range records {
-			record := record
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
+			wg.Go(func() {
 				results <- s.reconcileClaimed(ctx, record)
-			}()
+			})
 		}
 		wg.Wait()
 		close(results)
@@ -284,7 +279,7 @@ func (e reconciliationError) Error() string { return string(e) }
 // reconcileClaimed runs one claimed job and checkpoints the result.
 func (s *Service) reconcileClaimed(ctx context.Context, record JobRecord) reconciliationOutcome {
 	if record.ReconciliationClaimID == nil {
-		s.recordGap()
+		s.RecordGap()
 		return outcomeFailed
 	}
 	claimID := *record.ReconciliationClaimID
@@ -312,7 +307,7 @@ func (s *Service) reconcileClaimed(ctx context.Context, record JobRecord) reconc
 		next = now.Add(time.Duration(min(int64(5)*(int64(1)<<exponent), 300)) * time.Second)
 	}
 	if err := FinishReconciliation(ctx, s.Pool, record.ID, claimID, next, errorClass); err != nil {
-		s.recordGap()
+		s.RecordGap()
 		s.log().Error("media reconciliation checkpoint failed", "job_id", record.ID, "error", err)
 		return outcomeFailed
 	}
@@ -446,7 +441,7 @@ func (s *Service) confirmDeletion(ctx context.Context, record *JobRecord) error 
 		return reconciliationError("persistence_unavailable")
 	}
 	if !finalized {
-		s.recordGap()
+		s.RecordGap()
 		return reconciliationError("persistence_unavailable")
 	}
 	record.Lifecycle = LifecycleDeleted
