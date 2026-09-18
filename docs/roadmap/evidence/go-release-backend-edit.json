@@ -1,0 +1,131 @@
+{
+  "language": "go",
+  "scenario": "backend-edit",
+  "ref": "working",
+  "started": "2026-09-18T09:13:35.726Z",
+  "machine": {
+    "platform": "linux",
+    "release": "7.0.0-31-generic",
+    "arch": "x64",
+    "cpu": "Intel Core Processor (Haswell, no TSX)",
+    "logicalCPUs": 8,
+    "memoryBytes": 24598122496,
+    "freeMemoryBytes": 22767210496
+  },
+  "cache": {
+    "downloads": "prefetched; measured separately",
+    "compilation": "private cache populated by explicit warmup",
+    "sharedOSPageCache": true
+  },
+  "runs": [
+    {
+      "command": [
+        "go",
+        "build",
+        "-trimpath",
+        "-o",
+        "/tmp/olp-build-jfqviB/olp",
+        "./cmd/olp"
+      ],
+      "seconds": 5.942032295999997,
+      "status": 0,
+      "log": "run-1.log"
+    },
+    {
+      "command": [
+        "go",
+        "build",
+        "-trimpath",
+        "-o",
+        "/tmp/olp-build-jfqviB/olp",
+        "./cmd/olp"
+      ],
+      "seconds": 5.982144351000002,
+      "status": 0,
+      "log": "run-2.log"
+    },
+    {
+      "command": [
+        "go",
+        "build",
+        "-trimpath",
+        "-o",
+        "/tmp/olp-build-jfqviB/olp",
+        "./cmd/olp"
+      ],
+      "seconds": 5.877222273999999,
+      "status": 0,
+      "log": "run-3.log"
+    },
+    {
+      "command": [
+        "go",
+        "build",
+        "-trimpath",
+        "-o",
+        "/tmp/olp-build-jfqviB/olp",
+        "./cmd/olp"
+      ],
+      "seconds": 6.365009476999999,
+      "status": 0,
+      "log": "run-4.log"
+    },
+    {
+      "command": [
+        "go",
+        "build",
+        "-trimpath",
+        "-o",
+        "/tmp/olp-build-jfqviB/olp",
+        "./cmd/olp"
+      ],
+      "seconds": 6.176905999999988,
+      "status": 0,
+      "log": "run-5.log"
+    }
+  ],
+  "sourceSHA256": "c203d7b96452d64367f7a7076e4988e95c7e6aa81b853c8451ddb784a5299a2f",
+  "baseCommit": "da48f2a958a13d2250d6c910ce792bb7e8031d29",
+  "toolchains": {
+    "go": "go version go1.27.1 linux/amd64",
+    "cc": "cc (Ubuntu 15.2.0-16ubuntu1) 15.2.0\nCopyright (C) 2025 Free Software Foundation, Inc.\nThis is free software; see the source for copying conditions.  There is NO\nwarranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.",
+    "node": "v26.8.2",
+    "pnpm": "11.24.0"
+  },
+  "prefetch": {
+    "command": [
+      "go",
+      "mod",
+      "download"
+    ],
+    "seconds": 0.037676122000000076,
+    "status": 0,
+    "stdout": "",
+    "stderr": ""
+  },
+  "warmup": {
+    "command": [
+      "go",
+      "build",
+      "-trimpath",
+      "-o",
+      "/tmp/olp-build-jfqviB/olp",
+      "./cmd/olp"
+    ],
+    "seconds": 49.622388005,
+    "status": 0,
+    "stdout": "",
+    "stderr": ""
+  },
+  "edit": {
+    "file": "internal/process/listener.go",
+    "description": "Increase HTTP read-header timeout on every run"
+  },
+  "summary": {
+    "successfulRuns": 5,
+    "medianSeconds": 5.982144351000002,
+    "minSeconds": 5.877222273999999,
+    "maxSeconds": 6.365009476999999
+  },
+  "finished": "2026-09-18T09:14:58.125Z"
+}

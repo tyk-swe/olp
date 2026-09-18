@@ -12,6 +12,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"strings"
@@ -20,12 +21,15 @@ import (
 func ReadFile(path string) ([]byte, error) {
 	f, err := os.Open(path)
 	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, fmt.Errorf("cannot read secret file: %w", os.ErrNotExist)
+		}
 		return nil, errors.New("cannot read secret file")
 	}
 	defer f.Close()
 	info, err := f.Stat()
-	if err != nil || !info.Mode().IsRegular() || (info.Mode().Perm() != 0600 && info.Mode().Perm() != 0640) {
-		return nil, errors.New("secret file must be regular with mode 0600 or 0640")
+	if err != nil || !info.Mode().IsRegular() || (info.Mode().Perm() != 0400 && info.Mode().Perm() != 0440 && info.Mode().Perm() != 0600 && info.Mode().Perm() != 0640) {
+		return nil, errors.New("secret file must be regular with mode 0400, 0440, 0600, or 0640")
 	}
 	data, err := io.ReadAll(io.LimitReader(f, 65537))
 	if err != nil || len(data) > 65536 || len(strings.TrimSpace(string(data))) == 0 {

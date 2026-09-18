@@ -53,6 +53,7 @@ export async function verifyConsolePolish(page: Page, info: TestInfo) {
   const screens = [
     ['/', 'Gateway overview'],
     ['/providers', 'Providers'],
+    ['/media-jobs', 'Media Jobs'],
     ['/providers/new', 'Connect an upstream provider.'],
     ['/routes', 'Routes'],
     ['/routes/new', 'Build a route draft.'],

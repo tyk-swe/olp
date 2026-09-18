@@ -33,7 +33,7 @@
     },
     {
       "path": "github.com/GoogleCloudPlatform/opentelemetry-operations-go/detectors/gcp",
-      "version": "v1.34.0",
+      "version": "v1.33.0",
       "indirect": true
     },
     {
@@ -793,7 +793,7 @@
     },
     {
       "path": "github.com/spiffe/go-spiffe/v2",
-      "version": "v2.8.1",
+      "version": "v2.7.0",
       "indirect": true
     },
     {
@@ -1023,7 +1023,7 @@
     },
     {
       "path": "google.golang.org/api",
-      "version": "v0.278.0",
+      "version": "v0.274.0",
       "indirect": true
     },
     {
@@ -1043,7 +1043,7 @@
     },
     {
       "path": "google.golang.org/grpc",
-      "version": "v1.84.0",
+      "version": "v1.83.2",
       "indirect": true
     },
     {

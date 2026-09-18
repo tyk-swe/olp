@@ -35,7 +35,7 @@ version=$(python3 -c 'import json; print(json.load(open("package.json"))["versio
 [[ $(docker run --rm "$image" --version) == "olp $version Go" ]]
 [[ $(docker image inspect --format '{{.Config.User}}' "$image") == '65532:65532' ]]
 # Use the already pulled PostgreSQL image only to assign disposable volume ownership.
-docker run --rm --user 0 -v "$scratch/secrets:/secrets" postgres:18 chown 65532:65532 /secrets/auth.key /secrets/master.json /secrets/bootstrap.token
+docker run --rm --user 0 -v "$scratch/secrets:/secrets" postgres:18 sh -c 'chown 65532:65532 /secrets/* && chmod 0440 /secrets/*'
 secret_args=(-v "$scratch/secrets:/secrets:ro"
   -e OLP_AUTH_HMAC_KEY_FILE=/secrets/auth.key
   -e OLP_MASTER_KEY_FILE=/secrets/master.json
@@ -81,6 +81,8 @@ for mode in all gateway control worker; do
   else
     if curl --silent --max-time 1 "http://$public/" >/dev/null; then echo 'worker exposed a public listener' >&2; exit 1; fi
   fi
+  # An observed startup snapshot, not a capacity or latency guarantee.
+  docker stats --no-stream --format '{{json .}}' "$container"
   docker stop --time 40 "$container" >/dev/null
   [[ $(docker inspect --format '{{.State.ExitCode}}' "$container") == 0 ]]
   echo "qualified $expected_arch $mode: dependencies, private health, listener ownership, shutdown"

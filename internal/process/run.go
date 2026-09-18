@@ -14,6 +14,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
+
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/config"
 	"github.com/tyk-swe/olp/internal/connectors"
@@ -170,7 +172,7 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 	// reconciliation serves jobs against their pinned historical providers and
 	// checks the live credential revocation authority.
 	if c.Mode.Management() || c.Mode.Inference() || c.Mode == config.Worker {
-		auth, keys, bootstrap, err := loadSecrets(c, installation)
+		auth, keys, bootstrap, err := loadSecrets(startup, pool, c, installation)
 		if err != nil {
 			return err
 		}
@@ -516,9 +518,9 @@ func awaitPlane(ctx context.Context, wait func(), log *slog.Logger, plane string
 	}
 }
 
-func loadSecrets(c config.Config, installation string) (*secrets.AuthKey, *secrets.KeyRing, string, error) {
-	if c.AuthHMACKeyFile == "" || c.MasterKeyFile == "" && (c.Mode.Management() || c.ConnectorConfigFile == "") {
-		return nil, nil, "", errors.New("management and inference require OLP_AUTH_HMAC_KEY_FILE and OLP_MASTER_KEY_FILE")
+func loadSecrets(ctx context.Context, pool *pgxpool.Pool, c config.Config, installation string) (*secrets.AuthKey, *secrets.KeyRing, string, error) {
+	if c.AuthHMACKeyFile == "" || c.MasterKeyFile == "" && (c.Mode.Management() || c.Mode == config.Worker || c.ConnectorConfigFile == "") {
+		return nil, nil, "", errors.New("this mode requires OLP_AUTH_HMAC_KEY_FILE and OLP_MASTER_KEY_FILE")
 	}
 	raw, err := secrets.ReadFile(c.AuthHMACKeyFile)
 	if err != nil {
@@ -538,12 +540,21 @@ func loadSecrets(c config.Config, installation string) (*secrets.AuthKey, *secre
 	var bootstrap string
 	if c.BootstrapTokenFile != "" {
 		data, err := secrets.ReadFile(c.BootstrapTokenFile)
-		if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			var complete bool
+			if err := pool.QueryRow(ctx, "SELECT setup_complete FROM olp_go.installation WHERE singleton").Scan(&complete); err != nil {
+				return nil, nil, "", errors.New("cannot inspect installation setup state")
+			}
+			if !complete {
+				return nil, nil, "", errors.New("bootstrap token file is required until setup is complete")
+			}
+		} else if err != nil {
 			return nil, nil, "", err
-		}
-		bootstrap = string(data)
-		if len(bootstrap) < 32 || len(bootstrap) > 256 {
-			return nil, nil, "", errors.New("bootstrap token must have 32–256 bytes")
+		} else {
+			bootstrap = string(data)
+			if len(bootstrap) < 32 || len(bootstrap) > 256 {
+				return nil, nil, "", errors.New("bootstrap token must have 32–256 bytes")
+			}
 		}
 	}
 	return secrets.NewAuthKey(key, installation), keys, bootstrap, nil

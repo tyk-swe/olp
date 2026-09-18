@@ -3,7 +3,10 @@
 Application configuration is environment-driven; each application setting
 also has a CLI flag in `olp <subcommand> --help`. Logging uses `OLP_LOG_LEVEL` (`debug`, `info`, `warn`, `error`); the retired
 `RUST_LOG` filter no longer applies. The source of truth is `internal/config/config.go`. Secrets are file
-paths, never inline values.
+paths, never inline values. Secret files may use modes `0400`, `0440`, `0600`,
+or `0640`; group-write and world permissions are rejected. A configured bootstrap
+file may be absent after installation setup completes. Workers require both the
+authentication key and master key, including with mounted connector configuration.
 
 ## Runtime variables
 

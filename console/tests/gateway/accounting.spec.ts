@@ -1,3 +1,7 @@
+import AxeBuilder from '@axe-core/playwright';
+import { execFile } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
+import { promisify } from 'node:util';
 import { readFileSync } from 'node:fs';
 import {
   expect,
@@ -14,6 +18,8 @@ import {
 
 // The owner created by tests/access/control.spec.ts; a run that starts on an
 // empty installation performs the setup itself.
+test.describe.configure({ mode: 'serial' });
+
 const owner = {
   email: 'owner@example.com',
   password: 'a long browser test password'
@@ -447,4 +453,106 @@ test('a browser user prices gateway traffic and reads the accounting it produced
   const keyBudget = page.getByRole('region', { name: 'Current spend budget' });
   await expect(keyBudget).toContainText('0.04 / 5.00');
   await expect(keyBudget).toContainText('Window ends (local time)');
+});
+
+test('retained media records expose metadata, filters, and accessible details', async ({
+  page,
+  request
+}, info) => {
+  await signIn(page);
+  // Seed terminal history against the preceding journey's actual published
+  // provider, key, and generation. Creation/reconciliation/content are covered
+  // by the gateway service suites; every read here uses the real Go API.
+  const database = new URL(process.env.OLP_DATABASE_URL!);
+  database.pathname =
+    info.project.name === 'go-packaged' ? '/olp_go_packaged' : '/olp_go_vite';
+  const succeeded = randomUUID();
+  const failed = randomUUID();
+  const seed = await promisify(execFile)('psql', [
+    database.toString(),
+    '-XAtq',
+    '-v',
+    'ON_ERROR_STOP=1',
+    '-c',
+    `
+    WITH refs AS (
+      SELECT p.id AS provider_id, p.active_revision_id AS revision_id,
+        (SELECT id FROM olp_go.api_keys WHERE name='Accounting budget key' LIMIT 1) AS key_id,
+        (SELECT id FROM olp_go.runtime_releases ORDER BY sequence DESC LIMIT 1) AS generation_id
+      FROM olp_go.providers p WHERE p.name='Accounting upstream'
+    )
+    INSERT INTO olp_go.media_jobs(id,upstream_job_id,api_key_id,provider_id,provider_model,
+      route_slug,operation,state,lifecycle_state,progress_percent,completed_at,deleted_at,
+      etag,runtime_generation_id,provider_revision_id)
+    SELECT v.id::uuid,'terminal-fixture-'||v.id,key_id,provider_id,'archived-video-model',
+      v.route,'video_create',v.state,'deleted',100,now(),now(),gen_random_uuid(),generation_id,revision_id
+    FROM refs CROSS JOIN (VALUES
+      ('${succeeded}','retained-video-success','succeeded'),
+      ('${failed}','retained-video-failure','failed')
+    ) AS v(id,route,state) RETURNING id
+  `
+  ]);
+  expect(seed.stdout.trim().split('\n').sort()).toEqual(
+    [succeeded, failed].sort()
+  );
+  await page.goto('/media-jobs?route=retained-video-success');
+  await expect(
+    page.getByRole('heading', { name: 'Media Jobs', exact: true })
+  ).toBeVisible();
+  await expect(page.locator('.job-table tbody tr')).toHaveCount(1);
+  await expect(page.locator('.job-table')).toContainText('succeeded');
+  await page.getByRole('link', { name: 'View', exact: true }).click();
+  await expect(
+    page.getByRole('heading', { name: 'Media job detail' })
+  ).toBeVisible();
+  await expect(page.locator('.job-detail')).toContainText(succeeded);
+  await expect(page.locator('.job-detail')).toContainText('Deleted');
+  await expect(page.locator('.job-detail')).toContainText('Not available');
+  await expect(
+    page.locator('.job-detail audio, .job-detail video, .job-detail img')
+  ).toHaveCount(0);
+  const detail = await page.evaluate(async (id) => {
+    const response = await fetch(`/api/v3/media-jobs/${id}`);
+    if (!response.ok)
+      throw new Error(`Media metadata failed: ${response.status}`);
+    return response.json();
+  }, succeeded);
+  expect(detail.id).toBe(succeeded);
+  for (const field of ['prompt', 'content', 'credential', 'raw_response'])
+    expect(detail).not.toHaveProperty(field);
+  expect(JSON.stringify(detail)).not.toContain(upstream.credential);
+  expect((await request.get(`/api/v3/media-jobs/${succeeded}`)).status()).toBe(
+    401
+  );
+  for (const width of [320, 1440]) {
+    await page.setViewportSize({ width, height: 900 });
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth - innerWidth
+      )
+    ).toBeLessThanOrEqual(0);
+    expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+    await page.screenshot({
+      path: info.outputPath(`go-retained-media-${width}.png`),
+      fullPage: true
+    });
+  }
+  await page.getByRole('link', { name: 'All media jobs' }).click();
+  await expect(page.getByLabel('Route', { exact: true })).toHaveValue(
+    'retained-video-success'
+  );
+  await page.getByLabel('Route', { exact: true }).fill('');
+  await page.getByRole('combobox', { name: /^State/ }).selectOption('failed');
+  await page.getByRole('button', { name: 'Apply filters' }).click();
+  await expect(page.locator('.job-table tbody tr')).toHaveCount(1);
+  await expect(page.locator('.job-table')).toContainText(
+    'retained-video-failure'
+  );
+  await page.reload();
+  await expect(page.getByRole('combobox', { name: /^State/ })).toHaveValue(
+    'failed'
+  );
+  await expect(page.locator('.job-table')).toContainText(
+    'retained-video-failure'
+  );
 });

@@ -1,0 +1,14 @@
+{
+  "source": "TestMediaCapacityWithSlowReadersAndMassDisconnects",
+  "upload_bytes": 67108864,
+  "concurrency": 8,
+  "spool_capacity_bytes": 1073741824,
+  "held_bytes": 536870912,
+  "final_reserved_bytes": 0,
+  "heap_before_bytes": 2993576,
+  "heap_held_bytes": 2951024,
+  "held_rss_kib": 52824,
+  "held_open_fds": 8,
+  "seconds": 0.45030206,
+  "meaning": "Observed Go heap/RSS and file reservations at the held-upload checkpoint, not a process or cgroup peak. Disk page cache and tmpfs memory are not included in process RSS. No production SLO is inferred."
+}

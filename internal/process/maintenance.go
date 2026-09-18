@@ -68,7 +68,7 @@ func Maintenance(ctx context.Context, c config.Config, command string, options M
 	if err != nil {
 		return err
 	}
-	auth, keys, _, err := loadSecrets(c, installation)
+	auth, keys, _, err := loadSecrets(ctx, pool, c, installation)
 	if err != nil {
 		return err
 	}

@@ -4,11 +4,13 @@ package integration_test
 
 import (
 	"encoding/json"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/tyk-swe/olp/internal/database"
@@ -52,6 +54,10 @@ func TestReplacementRestoreIsAtomicAndAuthenticatesKeys(t *testing.T) {
 	auth := write("auth.key", h.AuthHex)
 	master := write("master.json", `{"active_version":1,"keys":[{"version":1,"key":"`+strings.Repeat("ab", 32)+`"}]}`)
 	bootstrap := write("bootstrap.token", strings.Repeat("b", 48))
+	// Completed installations retain their long-lived keys after bootstrap retirement.
+	if err := os.Remove(bootstrap); err != nil {
+		t.Fatal(err)
+	}
 	assets := filepath.Join(dir, "console")
 	if err := os.Mkdir(assets, 0700); err != nil {
 		t.Fatal(err)
@@ -79,6 +85,20 @@ func TestReplacementRestoreIsAtomicAndAuthenticatesKeys(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Run("fresh_installation_requires_configured_bootstrap", func(t *testing.T) {
+		fresh, freshURL := accessDatabase(t)
+		if err := database.Migrate(t.Context(), fresh); err != nil {
+			t.Fatal(err)
+		}
+		check := exec.CommandContext(t.Context(), os.Getenv("OLP_TEST_BINARY"), "doctor")
+		checkEnv := maps.Clone(env)
+		checkEnv["OLP_DATABASE_URL"] = freshURL
+		check.Env = testutil.Environment(checkEnv)
+		out, err := check.CombinedOutput()
+		if err == nil || !strings.Contains(string(out), "bootstrap token file is required") {
+			t.Fatalf("missing bootstrap was accepted: %v: %s", err, out)
+		}
+	})
 	for _, failure := range []string{"incomplete", "corrupt", "incompatible", "wrong-key", "initialized", "valid"} {
 		t.Run(failure, func(t *testing.T) {
 			target, url := accessDatabase(t)
@@ -121,6 +141,15 @@ func TestReplacementRestoreIsAtomicAndAuthenticatesKeys(t *testing.T) {
 				plain, err := h.Server.Keys.Read(t.Context(), read, id, secretID, "oidc_client")
 				if err != nil || string(plain) != "retained credential" {
 					t.Fatalf("credential lost: %v", err)
+				}
+				restartEnv := maps.Clone(env)
+				restartEnv["OLP_DATABASE_URL"] = url
+				restartEnv["OLP_LISTEN_ADDR"] = "127.0.0.1:0"
+				restartEnv["OLP_OBSERVABILITY_LISTEN_ADDR"] = "127.0.0.1:0"
+				restartEnv["OLP_SHUTDOWN_TIMEOUT"] = "2s"
+				process := testutil.StartProcess(t, os.Getenv("OLP_TEST_BINARY"), "all", restartEnv)
+				if err := process.Stop(5 * time.Second); err != nil {
+					t.Fatal(err)
 				}
 				return
 			}

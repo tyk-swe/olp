@@ -23,7 +23,8 @@ done
 jq -e '[.. | objects | .name? // empty | select(test("valkey-glide"))] | length > 0' \
   "$reports/sboms.json" >/dev/null
 container=$(docker create "$image")
-docker cp "$container:/usr/share/doc/openllmproxy" "$reports/native-inventory"
+mkdir -p "$reports/native-inventory"
+docker cp "$container:/usr/share/doc/openllmproxy/." "$reports/native-inventory"
 docker rm "$container" >/dev/null
 test -s "$reports/native-inventory/GLIDE-THIRD-PARTY-LICENSES"
 test -s "$reports/native-inventory/native-link.txt"
@@ -41,5 +42,11 @@ docker run "${args[@]}" "$scanner" sbom --cache-dir /reports/cache \
   --severity HIGH,CRITICAL --exit-code 1 --format json \
   --output /reports/native-rust-vulnerabilities.json \
   /reports/native-inventory/native/valkey-glide.spdx.json || status=$?
+if (( status != 0 )); then
+  for report in "$reports"/*vulnerabilities.json; do
+    [[ -f $report ]] || continue
+    jq -r '.Results[]?.Vulnerabilities[]? | [.VulnerabilityID, .PkgName, .InstalledVersion, .FixedVersion, .Severity] | @tsv' "$report"
+  done
+fi
 printf 'Scanned %s, %s build inventories, and the native FFI inventory.\n' "$image" "$count"
 exit "$status"

@@ -20,15 +20,12 @@ gha-creds-*.json
 **/*.pfx
 **/*.dump
 **/*.dump.*
-**/**/target/**
 **/node_modules
 **/node_modules/**
 **/.venv
 **/.venv/**
 backups
 backups/**
-*.profraw
-*.profdata
 lcov.info
 **/*.spdx.json
 **/*.sarif
@@ -57,3 +54,6 @@ docs
 # Go cryptographic implementation source; mounted secret material stays excluded.
 !internal/secrets
 !internal/secrets/*.go
+
+# This checked inventory is an input shipped with the native GLIDE archive.
+!deploy/native/valkey-glide.spdx.json

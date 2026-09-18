@@ -42,19 +42,22 @@ Completed local observations so far:
   and initialized-destination rejection, preserved identity/credentials, and
   retained video retrieval/download/deletion after master-key rotation.
 - Official JavaScript OpenAI/Anthropic/Gemini and optional Python equivalents pass.
-- Ten access, gateway, accounting and provider browser scenarios pass at packaged
-  and Vite origins. The complete original journeys and browser restore are still
-  being qualified; their behavioral assertions are retained.
-- The local native amd64 image passes all four modes with nonroot, read-only root,
+- Access, gateway, accounting and provider browser scenarios pass at packaged
+  and Vite origins. The six original journeys and replacement recovery also pass
+  at both origins, retaining their behavioral assertions. Four further accounting
+  and retained-media browser checks pass, including mobile layout, accessibility,
+  filtering and metadata privacy.
+- Native amd64 and arm64 images pass all four modes with nonroot, read-only root,
   private health, listener ownership, PostgreSQL/Valkey and bounded shutdown.
 - Real OTLP/HTTP export passes metadata/privacy/parent propagation checks; a stalled
   collector test verifies a bounded queue drops observably without blocking requests.
 - Go vulnerability and license checks pass after upgrading gRPC/OpenTelemetry.
   Native-crate and final candidate image scans remain required.
 
-Native arm64, the final immutable candidate on both platforms, fresh-checkout
-checks, complete browser restore and the full five-sample build scorecard remain
-open. They must pass before marking any dependent release gate complete.
+Final immutable candidate qualification on both platforms and the final
+five-sample build scorecard rerun remain open. The prior full-source CI run
+passed canonical checks, integration and both native mode suites; candidate scans
+identified dependency patches now applied to this source. They must pass before marking any dependent release gate complete.
 
 ## Operational scope
 
@@ -69,6 +72,9 @@ mounted keys in a disposable staging database before a single transactional writ
 to the still-empty destination. The restore role needs CREATEDB; the replacement
 needs a separate empty Valkey service. A bootstrap-retirement drill verifies that
 preparation never regenerates long-lived keys or the retired bootstrap secret.
+A completed installation restores and restarts with its configured bootstrap
+file absent; a fresh installation still rejects that absence. Secret readers
+accept Helm read-only 0400/0440 mounts and private 0600/0640 files.
 
 Resource observations are bounded fixture evidence. They do not establish fleet
 throughput, latency, availability, invoice-cap accuracy, or a recovery-point

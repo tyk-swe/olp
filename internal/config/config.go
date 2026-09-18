@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/netip"
 	"net/url"
+	"os"
 	"strings"
 	"time"
 
@@ -177,6 +178,10 @@ func Parse(args []string, getenv func(string) string, output io.Writer) (Config,
 	for name, path := range map[string]string{"OLP_AUTH_HMAC_KEY": c.AuthHMACKeyFile, "OLP_BOOTSTRAP_TOKEN": c.BootstrapTokenFile, "OLP_MASTER_KEY": c.MasterKeyFile} {
 		if path != "" {
 			if _, err := secretURL("", path, name); err != nil {
+				// The installation owns whether a retired bootstrap token may be absent.
+				if name == "OLP_BOOTSTRAP_TOKEN" && errors.Is(err, os.ErrNotExist) {
+					continue
+				}
 				return c, err
 			}
 		}

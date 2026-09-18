@@ -2,6 +2,7 @@ package secrets
 
 import (
 	"bytes"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -44,12 +45,12 @@ func TestSecretPermissionsAndDomainSeparatedDigests(t *testing.T) {
 	if err := os.WriteFile(path, []byte("value"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	for _, mode := range []os.FileMode{0600, 0640, 0660, 0644} {
+	for _, mode := range []os.FileMode{0400, 0440, 0600, 0640, 0660, 0644, 0700} {
 		if err := os.Chmod(path, mode); err != nil {
 			t.Fatal(err)
 		}
 		_, err := ReadFile(path)
-		if (err == nil) != (mode == 0600 || mode == 0640) {
+		if (err == nil) != (mode == 0400 || mode == 0440 || mode == 0600 || mode == 0640) {
 			t.Fatalf("permission %o: %v", mode, err)
 		}
 	}
@@ -66,5 +67,12 @@ func TestPasswordsAreSaltedAndVerificationIsBounded(t *testing.T) {
 	}
 	if VerifyPassword("a long secure password", strings.Replace(first, "m=65536", "m=999999999", 1)) {
 		t.Fatal("accepted unbounded parameters")
+	}
+}
+
+func TestMissingSecretFilePreservesClassificationWithoutPath(t *testing.T) {
+	_, err := ReadFile(filepath.Join(t.TempDir(), "private-path-must-not-leak"))
+	if !errors.Is(err, os.ErrNotExist) || strings.Contains(err.Error(), "private-path-must-not-leak") {
+		t.Fatalf("missing-file classification or redaction failed: %v", err)
 	}
 }
