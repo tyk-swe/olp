@@ -3,6 +3,7 @@ package telemetry
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -143,5 +144,76 @@ func TestFullTraceQueueNeverBlocksInferenceAndCountsLoss(t *testing.T) {
 	}
 	if got := e.exported.Load(); got != 3 {
 		t.Errorf("exported=%d, want 3", got)
+	}
+}
+
+func TestForceFlushExportsPartialBatch(t *testing.T) {
+	e := &stalledExporter{entered: make(chan struct{}, 1), release: make(chan struct{})}
+	p := NewBoundedSpanProcessor(e, 8, 4, time.Hour)
+	provider := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(p), sdktrace.WithSampler(sdktrace.AlwaysSample()))
+	tracer := provider.Tracer("flush-test")
+	for range 3 {
+		_, span := tracer.Start(context.Background(), "partial")
+		span.End()
+	}
+	flushed := make(chan error, 1)
+	go func() { flushed <- p.ForceFlush(context.Background()) }()
+	select {
+	case <-e.entered:
+	case <-time.After(time.Second):
+		t.Fatal("flush never reached the exporter")
+	}
+	close(e.release)
+	select {
+	case err := <-flushed:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("flush never returned")
+	}
+	if got := e.exported.Load(); got != 3 {
+		t.Errorf("exported=%d, want 3", got)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if err := provider.Shutdown(ctx); err != nil {
+		t.Fatal(err)
+	}
+}
+
+type failingExporter struct {
+	calls chan struct{}
+}
+
+func (e *failingExporter) ExportSpans(context.Context, []sdktrace.ReadOnlySpan) error {
+	e.calls <- struct{}{}
+	return errors.New("export failed")
+}
+func (e *failingExporter) Shutdown(context.Context) error { return nil }
+
+func TestFailedExportCountsDroppedSpans(t *testing.T) {
+	e := &failingExporter{calls: make(chan struct{}, 4)}
+	p := NewBoundedSpanProcessor(&countingExporter{inner: e}, 8, 2, time.Hour)
+	provider := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(p), sdktrace.WithSampler(sdktrace.AlwaysSample()))
+	tracer := provider.Tracer("drop-test")
+	before := ExportDroppedTotal()
+	for range 3 {
+		_, span := tracer.Start(context.Background(), "dropped")
+		span.End()
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if err := p.ForceFlush(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if dropped := ExportDroppedTotal() - before; dropped != 3 {
+		t.Errorf("dropped=%d, want 3", dropped)
+	}
+	if calls := len(e.calls); calls != 2 {
+		t.Errorf("export calls=%d, want a full batch and a partial flush", calls)
+	}
+	if err := provider.Shutdown(ctx); err != nil {
+		t.Fatal(err)
 	}
 }

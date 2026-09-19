@@ -15,17 +15,20 @@ import (
 
 const policyETag = "00000000-0000-0000-0000-000000000000"
 
-func policyJSON(p *runtime.Policy) map[string]any {
+func policyOrDefault(p *runtime.Policy) *runtime.Policy {
 	if p == nil {
-		p = &runtime.Policy{}
+		return &runtime.Policy{}
 	}
-	body, _ := json.Marshal(p)
+	return p
+}
+func normalizedPolicy(p *runtime.Policy) map[string]any {
+	body, _ := json.Marshal(policyOrDefault(p))
 	var result map[string]any
 	_ = json.Unmarshal(body, &result)
 	return result
 }
 func samePolicy(a, b *runtime.Policy) bool {
-	return reflect.DeepEqual(policyJSON(a), policyJSON(b))
+	return reflect.DeepEqual(normalizedPolicy(a), normalizedPolicy(b))
 }
 func policyScope(r *http.Request) (string, string, string, error) {
 	scope := r.PathValue("scope")
@@ -95,7 +98,7 @@ func (s *Server) policy(r *http.Request) (access.Reply, error) {
 	if err != nil {
 		return access.Reply{}, err
 	}
-	return access.Detail(map[string]any{"policy": policyJSON(policy), "etag": etag}, etag), nil
+	return access.Detail(map[string]any{"policy": policyOrDefault(policy), "etag": etag}, etag), nil
 }
 func (s *Server) putPolicy(r *http.Request) (access.Reply, error) {
 	scope, id, permission, err := policyScope(r)
@@ -155,7 +158,7 @@ func (s *Server) putPolicy(r *http.Request) (access.Reply, error) {
 	if err = access.Audit(r.Context(), tx, r, principal.ID, "routing_policy.update", scope, id, "success"); err != nil {
 		return access.Reply{}, err
 	}
-	reply := access.Detail(map[string]any{"policy": policyJSON(&policy), "etag": etag}, etag)
+	reply := access.Detail(map[string]any{"policy": &policy, "etag": etag}, etag)
 	if err = a.CompleteReplay(r, tx, claim, reply); err != nil {
 		return access.Reply{}, err
 	}

@@ -223,7 +223,7 @@ func loadRevision(ctx context.Context, q access.Queryer, routeID, ref string) (*
 }
 
 func (v *revisionRow) json(live map[string]*resolved) map[string]any {
-	return map[string]any{"id": v.ID, "route_id": v.RouteID, "revision": v.Revision, "slug": v.Slug, "overall_timeout_ms": v.OverallTimeoutMS, "max_attempts": v.MaxAttempts, "source_draft_id": v.SourceDraftID, "activated_by": v.ActivatedBy, "activated_at": v.ActivatedAt, "operations": v.Operations, "targets": targetsJSON(v.Targets, live), "routing_policy": policyJSON(v.Policy)}
+	return map[string]any{"id": v.ID, "route_id": v.RouteID, "revision": v.Revision, "slug": v.Slug, "overall_timeout_ms": v.OverallTimeoutMS, "max_attempts": v.MaxAttempts, "source_draft_id": v.SourceDraftID, "activated_by": v.ActivatedBy, "activated_at": v.ActivatedAt, "operations": v.Operations, "targets": targetsJSON(v.Targets, live), "routing_policy": policyOrDefault(v.Policy)}
 }
 
 type routeRow struct {
@@ -450,7 +450,7 @@ func (s *Server) revisionDiff(r *http.Request) (access.Reply, error) {
 		"slug_changed": from.Slug != to.Slug, "timeout_changed": from.OverallTimeoutMS != to.OverallTimeoutMS, "max_attempts_changed": from.MaxAttempts != to.MaxAttempts,
 		"operations_added": opsAdded, "operations_removed": opsRemoved,
 		"targets_added": added, "targets_removed": removed, "targets_changed": changed,
-		"routing_policy_changed": !samePolicy(from.Policy, to.Policy), "routing_policy_before": policyJSON(from.Policy), "routing_policy_after": policyJSON(to.Policy),
+		"routing_policy_changed": !samePolicy(from.Policy, to.Policy), "routing_policy_before": policyOrDefault(from.Policy), "routing_policy_after": policyOrDefault(to.Policy),
 	}), nil
 }
 

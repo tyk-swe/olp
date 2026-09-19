@@ -2,6 +2,7 @@ package routes
 
 import (
 	"encoding/json"
+	"reflect"
 	"testing"
 
 	"github.com/tyk-swe/olp/internal/runtime"
@@ -79,6 +80,39 @@ func TestSamePolicy(t *testing.T) {
 			}
 			if got := samePolicy(left, right); got != tc.want {
 				t.Errorf("samePolicy(%s, %s) = %t, want %t", tc.left, tc.right, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestPolicyResponseEncoding(t *testing.T) {
+	maxAttempts := 2
+	for _, tc := range []struct {
+		name   string
+		policy *runtime.Policy
+	}{
+		{name: "missing policy", policy: nil},
+		{name: "empty policy", policy: &runtime.Policy{}},
+		{
+			name: "populated policy",
+			policy: &runtime.Policy{
+				AllowedStrategies: []string{"price"},
+				Constraints:       runtime.Preferences{Ignore: []string{"vendor:openai"}},
+				Defaults:          runtime.Preferences{MaxAttempts: &maxAttempts},
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			data, err := json.Marshal(policyOrDefault(tc.policy))
+			if err != nil {
+				t.Fatal(err)
+			}
+			var got any
+			if err := json.Unmarshal(data, &got); err != nil {
+				t.Fatal(err)
+			}
+			if want := normalizedPolicy(tc.policy); !reflect.DeepEqual(got, want) {
+				t.Fatalf("response encoding = %s, want %v", data, want)
 			}
 		})
 	}

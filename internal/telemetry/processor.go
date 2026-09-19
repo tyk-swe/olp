@@ -136,61 +136,58 @@ func (w *exportWorker) run() {
 		case span := <-w.spans:
 			w.push(span)
 		case <-ticker.C:
-			w.exportPending(context.Background())
+			w.exportPending()
 		}
 	}
 }
 
 // handle answers one control message; a false return ends the worker.
 func (w *exportWorker) handle(control processorControl) bool {
-	ack := control.ack
 	var err error
 	switch control.kind {
 	case controlFlush:
-		err = w.flushQueued()
+		w.flushQueued()
 	case controlShutdown:
 		err = w.shutdownExporter()
 	}
-	ack <- err
+	control.ack <- err
 	return control.kind == controlFlush
 }
 
 func (w *exportWorker) push(span sdktrace.ReadOnlySpan) {
 	w.pending = append(w.pending, span)
 	if len(w.pending) >= w.batchSize {
-		w.exportPending(context.Background())
+		w.exportPending()
 	}
 }
 
-// exportPending drains pending in batchSize chunks.
-func (w *exportWorker) exportPending(ctx context.Context) {
-	for len(w.pending) > 0 {
-		n := min(w.batchSize, len(w.pending))
-		batch := w.pending[:n:n]
-		w.pending = w.pending[n:]
-		if err := w.exporter.ExportSpans(ctx, batch); err != nil {
-			// The counting exporter already accounted for this batch's loss.
-			break
-		}
+// exportPending exports the pending batch; push keeps it below batchSize. A
+// failed batch is already counted as dropped by the counting exporter.
+func (w *exportWorker) exportPending() {
+	if len(w.pending) == 0 {
+		return
 	}
+	batch := w.pending
+	w.pending = nil
+	_ = w.exporter.ExportSpans(context.Background(), batch)
 }
 
-// flushQueued drains every queued span, exports what remains pending, then
-// forces the exporter's own buffers out.
-func (w *exportWorker) flushQueued() error {
+// flushQueued drains every queued span and exports what remains pending.
+func (w *exportWorker) flushQueued() {
 	for {
 		select {
 		case span := <-w.spans:
 			w.push(span)
 		default:
-			w.exportPending(context.Background())
-			return nil
+			w.exportPending()
+			return
 		}
 	}
 }
 
-// shutdownExporter drains the queue, exports, and stops the exporter. Anything
-// left pending counts as dropped so the metric stays honest.
+// shutdownExporter drains the queue, exports every remaining batch, and stops
+// the exporter. Failed batches are counted as dropped by the counting
+// exporter.
 func (w *exportWorker) shutdownExporter() error {
 	ctx, cancel := context.WithTimeout(context.Background(), exportTimeout)
 	defer cancel()
@@ -199,7 +196,6 @@ func (w *exportWorker) shutdownExporter() error {
 		case span := <-w.spans:
 			w.pending = append(w.pending, span)
 		default:
-			dropped := len(w.pending)
 			var first error
 			for len(w.pending) > 0 {
 				n := min(w.batchSize, len(w.pending))
@@ -208,10 +204,6 @@ func (w *exportWorker) shutdownExporter() error {
 				if err := w.exporter.ExportSpans(ctx, batch); err != nil && first == nil {
 					first = err
 				}
-			}
-			if first != nil && dropped > 0 {
-				// Batches that failed export were already counted by the
-				// counting exporter; nothing further is owed.
 			}
 			if err := w.exporter.Shutdown(ctx); err != nil && first == nil {
 				first = err
