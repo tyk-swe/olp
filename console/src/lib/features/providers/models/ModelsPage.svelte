@@ -1,6 +1,6 @@
 <script lang="ts">
-  import { untrack } from 'svelte';
   import BulkRouteCreation from './BulkRouteCreation.svelte';
+  import { overviewKeys } from '$lib/features/overview/overviewKeys';
   import { providerKeys } from '$lib/features/providers/providerKeys';
 
   import { resolve } from '$app/paths';
@@ -9,8 +9,10 @@
   import ReadOnlyNote from '$lib/components/ReadOnlyNote.svelte';
   import {
     cursorPaginationProps,
-    emptyCursorHistory
+    emptyCursorHistory,
+    resetCursor
   } from '$lib/lists/pagination';
+  import { debouncedSearch } from '$lib/lists/search.svelte';
   import { getProvider } from '$lib/features/providers/api';
   import {
     listProviderModelInventoryPage,
@@ -29,24 +31,60 @@
   let search = $state('');
   let surface = $state('all');
   let eligibility = $state('all');
-  const models = createQuery(() => ({
-    queryKey: [
-      ...providerKeys.modelInventory(pagination.cursor),
-      search,
-      surface,
-      eligibility
-    ],
-    queryFn: () =>
-      listProviderModelInventoryPage(
-        pagination.cursor,
-        eligibility === 'all' ? undefined : eligibility === 'enabled',
-        undefined,
-        search,
-        surface === 'all'
-          ? undefined
-          : (surface as 'openai' | 'anthropic' | 'gemini')
-      )
-  }));
+  /// The filters the current page request reflects. They move together with
+  /// the cursor reset so a request never pairs a new filter with an old page.
+  const applied = $state({ search: '', surface: 'all', eligibility: 'all' });
+
+  function applyFilters() {
+    if (
+      applied.search === search &&
+      applied.surface === surface &&
+      applied.eligibility === eligibility
+    )
+      return;
+    applied.search = search;
+    applied.surface = surface;
+    applied.eligibility = eligibility;
+    resetCursor(pagination);
+  }
+  const debounce = debouncedSearch(applyFilters);
+
+  function clearFilters() {
+    search = '';
+    surface = 'all';
+    eligibility = 'all';
+    debounce.applyNow();
+  }
+
+  const models = createQuery(() => {
+    const cursor = pagination.cursor;
+    const enabled =
+      applied.eligibility === 'all'
+        ? undefined
+        : applied.eligibility === 'enabled';
+    const text = applied.search;
+    const surfaceFilter =
+      applied.surface === 'all'
+        ? undefined
+        : (applied.surface as 'openai' | 'anthropic' | 'gemini');
+    return {
+      queryKey: [
+        ...providerKeys.modelInventory(cursor),
+        applied.search,
+        applied.surface,
+        applied.eligibility
+      ],
+      queryFn: ({ signal }) =>
+        listProviderModelInventoryPage(
+          cursor,
+          enabled,
+          signal,
+          text,
+          surfaceFilter
+        ),
+      placeholderData: (previous) => previous
+    };
+  });
   let busyModel = $state('');
   // Bumped whenever a toggle fails so the eligibility checkboxes are rebuilt
   // from stored state; the browser already flipped them optimistically, and a
@@ -55,18 +93,11 @@
   let mutationError = $state('');
   let notice = $state('');
 
-  $effect(() => {
-    void search;
-    void surface;
-    void eligibility;
-    untrack(() => {
-      pagination.cursor = undefined;
-      pagination.history = [];
-    });
-  });
   const inventory = $derived(models.data?.items ?? []);
   const filtering = $derived(
-    Boolean(search) || surface !== 'all' || eligibility !== 'all'
+    Boolean(applied.search) ||
+      applied.surface !== 'all' ||
+      applied.eligibility !== 'all'
   );
   const enabledCount = $derived(
     inventory.filter(({ model }) => model.enabled).length
@@ -99,7 +130,8 @@
         }),
         queryClient.invalidateQueries({
           queryKey: providerKeys.modelCatalog
-        })
+        }),
+        queryClient.invalidateQueries({ queryKey: overviewKeys.root })
       ]);
       notice = `Model eligibility staged. Activate ${entry.provider_name} to apply the change.`;
     } catch (error) {
@@ -164,6 +196,10 @@
       class="filter-control"
       type="search"
       bind:value={search}
+      oninput={() => {
+        if (search === '') debounce.applyNow();
+        else debounce.schedule();
+      }}
       placeholder="Search models or providers"
     /></label
   >
@@ -171,6 +207,7 @@
     ><span>Client surface</span><select
       class="filter-control"
       bind:value={surface}
+      onchange={debounce.applyNow}
       ><option value="all">All surfaces</option><option value="openai"
         >OpenAI</option
       ><option value="anthropic">Anthropic</option><option value="gemini"
@@ -182,6 +219,7 @@
     ><span>Route eligibility</span><select
       class="filter-control"
       bind:value={eligibility}
+      onchange={debounce.applyNow}
       ><option value="all">Any eligibility</option><option value="enabled"
         >Enabled</option
       ><option value="disabled">Disabled</option></select
@@ -189,7 +227,11 @@
   >
 </div>
 
-<BulkRouteCreation models={inventory} {canManage} />
+<BulkRouteCreation
+  models={inventory}
+  {canManage}
+  outdated={models.isPlaceholderData}
+/>
 
 {#if models.isPending}
   <div class="loading-state" role="status">Loading certified models…</div>
@@ -222,16 +264,15 @@
       <button
         class="button button-secondary"
         type="button"
-        onclick={() => {
-          search = '';
-          surface = 'all';
-          eligibility = 'all';
-        }}>Clear filters</button
+        onclick={clearFilters}>Clear filters</button
       >
     </div>
   </section>
 {:else}
-  <div class="table-shell">
+  {#if models.isPlaceholderData}
+    <p class="updating" role="status">Updating…</p>
+  {/if}
+  <div class="table-shell" aria-busy={models.isPlaceholderData}>
     <table class="data-table">
       <thead
         ><tr
@@ -280,7 +321,9 @@
                 >{#key `${entry.model.id}:${eligibilityVersion}`}<input
                     type="checkbox"
                     checked={entry.model.enabled}
-                    disabled={!canManage || Boolean(busyModel)}
+                    disabled={!canManage ||
+                      Boolean(busyModel) ||
+                      models.isPlaceholderData}
                     onchange={(event) =>
                       toggle(entry, event.currentTarget.checked)}
                   />{/key}<span
@@ -296,7 +339,10 @@
 {/if}
 
 {#if !models.isPending && !models.isError}<CursorPagination
-    {...cursorPaginationProps(pagination, models.data?.nextCursor)}
+    {...cursorPaginationProps(
+      pagination,
+      models.isPlaceholderData ? null : models.data?.nextCursor
+    )}
     label="Model inventory pages"
   />{/if}
 
@@ -309,6 +355,11 @@
 <style>
   .toolbar {
     gap: 1rem;
+  }
+  .updating {
+    margin: 0 0 0.5rem;
+    color: var(--foreground-muted);
+    font-size: var(--text-body-sm);
   }
   .search {
     flex: 1;

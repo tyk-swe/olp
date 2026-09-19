@@ -3,6 +3,7 @@
   import ProviderCredentialPool from './ProviderCredentialPool.svelte';
   import ProviderOptions from './ProviderOptions.svelte';
   import { focusErrorSummary } from '$lib/forms/focusError';
+  import { overviewKeys } from '$lib/features/overview/overviewKeys';
   import { providerKeys } from '$lib/features/providers/providerKeys';
 
   import { guardUnsavedChanges } from '$lib/forms/unsavedChanges';
@@ -135,6 +136,7 @@
     await queryClient.invalidateQueries({
       queryKey: providerKeys.modelCatalog
     });
+    await queryClient.invalidateQueries({ queryKey: overviewKeys.root });
   }
 
   function reportError(message: string) {
@@ -210,6 +212,7 @@
       await queryClient.invalidateQueries({
         queryKey: providerKeys.summaries
       });
+      await queryClient.invalidateQueries({ queryKey: overviewKeys.root });
     } catch (error) {
       saveRefreshError = providerDetailError(error);
     }

@@ -2166,6 +2166,41 @@
         ],
         "type": "object"
       },
+      "OverviewResponse": {
+        "additionalProperties": false,
+        "description": "Aggregate counts the console overview needs; one round-trip instead of paginating every collection.",
+        "properties": {
+          "active_providers": {
+            "description": "Providers with a published active revision.",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "active_routes": {
+            "description": "Published routes serving inference traffic.",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "enabled_models": {
+            "description": "Provider models marked eligible for routes.",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "usable_api_key": {
+            "description": "Whether at least one API key has not been revoked, including expired keys.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "active_providers",
+          "active_routes",
+          "enabled_models",
+          "usable_api_key"
+        ],
+        "type": "object"
+      },
       "PlaygroundRequest": {
         "properties": {
           "input": {
@@ -8259,6 +8294,51 @@
           }
         },
         "security": []
+      }
+    },
+    "/api/v3/overview": {
+      "get": {
+        "operationId": "overview",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OverviewResponse"
+                }
+              }
+            },
+            "description": "Aggregate provider, model, route, and API-key counts for the console overview"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Authentication required"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Insufficient role"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "tags": [
+          "setup"
+        ]
       }
     },
     "/api/v3/playground": {

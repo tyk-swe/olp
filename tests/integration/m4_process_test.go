@@ -81,6 +81,7 @@ func m4Console(t *testing.T) *accessHarness {
 	h.Server.Register(mux)
 	catalogue := providers.New(h.Server, &policy)
 	catalogue.Register(mux)
+	(&management.Overview{Access: h.Server}).Register(mux)
 	(&observability.Management{Access: h.Server, Cache: observability.NewCache(), Pool: h.Pool}).Register(mux)
 	routes.New(h.Server).Register(mux)
 	(&usage.Server{Access: h.Server, VendorKind: providers.VendorKind}).Register(mux)

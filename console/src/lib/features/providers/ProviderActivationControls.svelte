@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { overviewKeys } from '$lib/features/overview/overviewKeys';
   import { providerKeys } from '$lib/features/providers/providerKeys';
 
   import { useQueryClient } from '@tanstack/svelte-query';
@@ -79,7 +80,8 @@
       }),
       queryClient.invalidateQueries({
         queryKey: providerKeys.revisionsOf(current.id)
-      })
+      }),
+      queryClient.invalidateQueries({ queryKey: overviewKeys.root })
     ]);
   }
 

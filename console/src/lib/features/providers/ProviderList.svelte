@@ -2,14 +2,17 @@
   import ProviderBulkActions from './ProviderBulkActions.svelte';
   import { providerKeys } from '$lib/features/providers/providerKeys';
 
+  import { overviewKeys } from '$lib/features/overview/overviewKeys';
+
   import { resolve } from '$app/paths';
-  import { createQuery } from '@tanstack/svelte-query';
+  import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { errorMessage as message } from '$lib/api/http';
   import NavIcon from '$lib/components/NavIcon.svelte';
   import CursorPagination from '$lib/components/CursorPagination.svelte';
   import ReadOnlyNote from '$lib/components/ReadOnlyNote.svelte';
   import { listProviderPage } from '$lib/features/providers/api';
   import { cursorPaginationProps, resetCursor } from '$lib/lists/pagination';
+  import { debouncedSearch } from '$lib/lists/search.svelte';
   import type { ProviderListState } from './providerPagination';
   import { useRole } from '$lib/features/access/session/useRole.svelte';
   import { formatDate, stateLabel } from '$lib/format';
@@ -21,13 +24,31 @@
   let { listState = $bindable() }: { listState: ProviderListState } = $props();
   const access = useRole();
   const canManage = $derived(access.can('providers.manage'));
+  const queryClient = useQueryClient();
   let selectedIds = $state<string[]>([]);
   const selectedSet = $derived(new Set(selectedIds));
-  const providers = createQuery(() => ({
-    queryKey: [...providerKeys.page(listState.cursor), listState.search],
-    queryFn: ({ signal }) =>
-      listProviderPage(listState.cursor, signal, listState.search)
-  }));
+
+  function applySearch() {
+    if (listState.search === listState.applied) return;
+    listState.applied = listState.search;
+    resetCursor(listState);
+    selectedIds = [];
+  }
+  const search = debouncedSearch(applySearch);
+  // A detail visit during the debounce window leaves typed text unapplied;
+  // resume the pause on return so the input the operator sees is the search
+  // that runs instead of being dropped or applied eagerly.
+  if (listState.search !== listState.applied) search.schedule();
+
+  const providers = createQuery(() => {
+    const cursor = listState.cursor;
+    const applied = listState.applied;
+    return {
+      queryKey: [...providerKeys.page(cursor), applied],
+      queryFn: ({ signal }) => listProviderPage(cursor, signal, applied),
+      placeholderData: (previous) => previous
+    };
+  });
   const groups = $derived(
     [
       ...Map.groupBy(
@@ -66,8 +87,8 @@
   id="provider-search"
   bind:value={listState.search}
   oninput={() => {
-    resetCursor(listState);
-    selectedIds = [];
+    if (listState.search === '') search.applyNow();
+    else search.schedule();
   }}
   placeholder="Name or vendor"
   type="search"
@@ -76,6 +97,7 @@
     {selected}
     onChanged={async () => {
       await providers.refetch();
+      await queryClient.invalidateQueries({ queryKey: overviewKeys.root });
       selectedIds = [];
     }}
   />{/if}
@@ -103,12 +125,16 @@
     </div>
   </section>
 {:else}
+  {#if providers.isPlaceholderData}
+    <p class="updating" role="status">Updating…</p>
+  {/if}
   <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
   <div
     class="table-shell provider-table"
     tabindex="0"
     role="region"
     aria-label="Providers"
+    aria-busy={providers.isPlaceholderData}
   >
     <table class="data-table">
       <thead
@@ -131,6 +157,7 @@
                     type="checkbox"
                     aria-label="Select {item.name}"
                     checked={selectedSet.has(item.id)}
+                    disabled={providers.isPlaceholderData}
                     onchange={(e) => {
                       selectedIds = e.currentTarget.checked
                         ? [...selectedIds, item.id]
@@ -165,7 +192,11 @@
     </table>
   </div>
   <CursorPagination
-    {...cursorPaginationProps(listState, providers.data?.nextCursor)}
+    {...cursorPaginationProps(
+      listState,
+      providers.isPlaceholderData ? null : providers.data?.nextCursor,
+      () => (selectedIds = [])
+    )}
     label="Provider pages"
   />
 {/if}
@@ -182,12 +213,20 @@
     display: block;
     margin: 0.5rem 0 1rem;
   }
+  .updating {
+    margin: 0 0 0.5rem;
+    color: var(--foreground-muted);
+    font-size: var(--text-body-sm);
+  }
   .connector-name {
     display: block;
     color: var(--foreground-muted);
   }
   .provider-table {
     margin-top: 1.5rem;
+  }
+  .updating + .provider-table {
+    margin-top: 0;
   }
   .table-link {
     min-height: 2.75rem;

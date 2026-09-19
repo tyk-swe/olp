@@ -10,11 +10,24 @@
   import { errorMessage, isEtagMismatch } from '$lib/api/http';
   let {
     models,
-    canManage
-  }: { models: ProviderModelInventory[]; canManage: boolean } = $props();
+    canManage,
+    outdated = false
+  }: {
+    models: ProviderModelInventory[];
+    canManage: boolean;
+    outdated?: boolean;
+  } = $props();
   let chosen = $state<Array<{ entry: ProviderModelInventory; slug: string }>>(
     []
   );
+  // Choices reference the displayed rows; a replacement page swaps in new
+  // entry objects, so anything pointing at rows the page no longer shows is
+  // dropped instead of creating routes from superseded data.
+  $effect(() => {
+    const shown = new Set(models.map((entry) => entry.model.id));
+    const kept = chosen.filter((item) => shown.has(item.entry.model.id));
+    if (kept.length !== chosen.length) chosen = kept;
+  });
   let busy = $state(false);
   let cancelled = $state(false);
   onDestroy(() => {
@@ -129,7 +142,10 @@
             checked={chosen.some(
               (item) => item.entry.model.id === entry.model.id
             )}
-            disabled={busy || !entry.model.enabled || !entry.available}
+            disabled={busy ||
+              outdated ||
+              !entry.model.enabled ||
+              !entry.available}
             onchange={(event) => choose(entry, event.currentTarget.checked)}
           />{entry.provider_name} · {entry.model.display_name}<small
             >{entry.available ? 'Published' : 'Activate connection first'} · Context:

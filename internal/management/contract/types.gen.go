@@ -859,6 +859,21 @@ type OidcRoleMappingResponse struct {
 	Role       string `json:"role"`
 }
 
+// OverviewResponse Aggregate counts the console overview needs; one round-trip instead of paginating every collection.
+type OverviewResponse struct {
+	// ActiveProviders Providers with a published active revision.
+	ActiveProviders int64 `json:"active_providers"`
+
+	// ActiveRoutes Published routes serving inference traffic.
+	ActiveRoutes int64 `json:"active_routes"`
+
+	// EnabledModels Provider models marked eligible for routes.
+	EnabledModels int64 `json:"enabled_models"`
+
+	// UsableApiKey Whether at least one API key has not been revoked, including expired keys.
+	UsableApiKey bool `json:"usable_api_key"`
+}
+
 // PlaygroundRequest defines model for PlaygroundRequest.
 type PlaygroundRequest struct {
 	Input           string                                      `json:"input"`

@@ -122,6 +122,7 @@ func newAccessHarness(t *testing.T) *accessHarness {
 	management.Register(mux)
 	server.Register(mux)
 	catalogue.Register(mux)
+	(&management.Overview{Access: server}).Register(mux)
 	(&observability.Management{Access: server, Cache: observability.NewCache(), Pool: pool}).Register(mux)
 	routes.New(server).Register(mux)
 	(&gateway.Playground{Access: server, Gateway: gw}).Register(mux)

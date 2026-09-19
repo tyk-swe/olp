@@ -3,6 +3,7 @@
   const services = useServiceCapabilities();
   import RoutingPolicyEditor from '$lib/features/routes/RoutingPolicyEditor.svelte';
   import { apiKeyQueries } from '$lib/features/access/api-keys/apiKeyQueries';
+  import { overviewKeys } from '$lib/features/overview/overviewKeys';
 
   import { goto } from '$app/navigation';
   import { resolve } from '$app/paths';
@@ -85,7 +86,8 @@
         preferredRoute = route;
       }
       await Promise.all([
-        queryClient.invalidateQueries({ queryKey: apiKeyQueries.root })
+        queryClient.invalidateQueries({ queryKey: apiKeyQueries.root }),
+        queryClient.invalidateQueries({ queryKey: overviewKeys.root })
       ]);
       return true;
     } catch (error) {

@@ -1,21 +1,17 @@
 <script lang="ts">
-  import { providerKeys } from '$lib/features/providers/providerKeys';
-  import { routeKeys } from '$lib/features/routes/routeKeys';
+  import { overviewKeys } from '$lib/features/overview/overviewKeys';
   import { requestKeys } from '$lib/features/usage/history/requestKeys';
 
   import { resolve } from '$app/paths';
   import { createQuery } from '@tanstack/svelte-query';
   import { onMount } from 'svelte';
   import NavIcon from '$lib/components/NavIcon.svelte';
-  import { apiKeyQueries } from '$lib/features/access/api-keys/apiKeyQueries';
-  import { hasNonrevokedApiKey } from '$lib/features/access/api-keys/api';
   import { setupProgress } from './setupProgress';
   import SetupChecklist from '$lib/features/overview/SetupChecklist.svelte';
   import { useRole } from '$lib/features/access/session/useRole.svelte';
   import { useServiceCapabilities } from '$lib/features/access/session/serviceCapabilities.svelte';
   import { copyText } from '$lib/clipboard';
-  import { listProviders } from '$lib/features/providers/api';
-  import { listRoutes } from '$lib/features/routes/api';
+  import { getOverview } from '$lib/features/overview/api';
   import { listRequests } from '$lib/features/usage/history/api';
   import { errorMessage } from '$lib/api/http';
   import { formatDate, statusLabel, statusTone } from '$lib/format';
@@ -28,45 +24,32 @@
   const access = useRole();
   const services = useServiceCapabilities();
   const playgroundAllowed = $derived(access.can('playground.use'));
-  const providers = createQuery(() => ({
-    queryKey: providerKeys.all(),
-    queryFn: ({ signal }) => listProviders(signal)
-  }));
-  const routes = createQuery(() => ({
-    queryKey: routeKeys.all(),
-    queryFn: ({ signal }) => listRoutes(signal)
+  const overview = createQuery(() => ({
+    queryKey: overviewKeys.summary(),
+    queryFn: ({ signal }) => getOverview(signal)
   }));
   const recentRequests = createQuery(() => ({
     queryKey: requestKeys.overview(),
     queryFn: () => listRequests({ limit: 5 }),
     enabled: controlConnected && services.retentionEnforced
   }));
-  const activeProviders = $derived(
-    providers.data?.filter((provider) => provider.active_revision != null)
-      .length ?? 0
-  );
-  const readyRoutes = $derived(routes.data?.length ?? 0);
+  const activeProviders = $derived(overview.data?.active_providers ?? 0);
+  const readyRoutes = $derived(overview.data?.active_routes ?? 0);
 
-  const keys = createQuery(() => ({
-    queryKey: apiKeyQueries.hasNonrevoked(),
-    queryFn: ({ signal }) => hasNonrevokedApiKey(signal)
-  }));
   const progress = $derived(
     setupProgress({
-      loading: providers.isPending || routes.isPending || keys.isPending,
-      failed: providers.isError || routes.isError || keys.isError,
+      loading: overview.isPending,
+      failed: overview.isError,
       activeProvider: activeProviders > 0,
-      enabledModels: Boolean(
-        providers.data?.some((provider) => provider.enabled_model_count > 0)
-      ),
+      enabledModels: (overview.data?.enabled_models ?? 0) > 0,
       activeRoute: readyRoutes > 0,
-      apiKey: Boolean(keys.data),
+      apiKey: Boolean(overview.data?.usable_api_key),
       role: access.role
     })
   );
 
   function refreshSetup() {
-    void Promise.all([providers.refetch(), routes.refetch(), keys.refetch()]);
+    void overview.refetch();
   }
 
   onMount(() => {
@@ -115,51 +98,51 @@
 <section class="status-grid" aria-label="Gateway readiness">
   <article class="card status-card">
     <span
-      class:ready={activeProviders > 0 && !providers.isError}
-      class:neutral={activeProviders === 0 || providers.isError}
+      class:ready={activeProviders > 0 && !overview.isError}
+      class:neutral={activeProviders === 0 || overview.isError}
       class="status-icon"
       aria-hidden="true"><NavIcon name="provider" /></span
     >
     <div>
       <p>Providers</p>
       <strong
-        >{providers.isError
+        >{overview.isError
           ? 'Unavailable'
-          : providers.isPending
+          : overview.isPending
             ? 'Checking…'
             : activeProviders
               ? `${activeProviders} active`
               : 'Not configured'}</strong
       >
-      {#if providers.isError}<button
+      {#if overview.isError}<button
           class="text-button"
           type="button"
-          onclick={() => providers.refetch()}>Try again</button
+          onclick={() => overview.refetch()}>Try again</button
         >{/if}
     </div>
   </article>
   <article class="card status-card">
     <span
-      class:ready={readyRoutes > 0 && !routes.isError}
-      class:neutral={readyRoutes === 0 || routes.isError}
+      class:ready={readyRoutes > 0 && !overview.isError}
+      class:neutral={readyRoutes === 0 || overview.isError}
       class="status-icon"
       aria-hidden="true"><NavIcon name="route" /></span
     >
     <div>
       <p>Active routes</p>
       <strong
-        >{routes.isError
+        >{overview.isError
           ? 'Unavailable'
-          : routes.isPending
+          : overview.isPending
             ? 'Checking…'
             : readyRoutes
               ? `${readyRoutes} active`
               : 'Awaiting activation'}</strong
       >
-      {#if routes.isError}<button
+      {#if overview.isError}<button
           class="text-button"
           type="button"
-          onclick={() => routes.refetch()}>Try again</button
+          onclick={() => overview.refetch()}>Try again</button
         >{/if}
     </div>
   </article>

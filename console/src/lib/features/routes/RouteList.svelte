@@ -17,14 +17,22 @@
   const access = useRole();
   const canManage = $derived(access.can('routes.manage'));
 
-  const drafts = createQuery(() => ({
-    queryKey: routeKeys.draftPage(listState.draft.cursor),
-    queryFn: () => listRouteDraftPage(listState.draft.cursor)
-  }));
-  const activeRoutes = createQuery(() => ({
-    queryKey: routeKeys.page(listState.route.cursor),
-    queryFn: () => listRoutePage(listState.route.cursor)
-  }));
+  const drafts = createQuery(() => {
+    const cursor = listState.draft.cursor;
+    return {
+      queryKey: routeKeys.draftPage(cursor),
+      queryFn: ({ signal }) => listRouteDraftPage(cursor, signal),
+      placeholderData: (previous) => previous
+    };
+  });
+  const activeRoutes = createQuery(() => {
+    const cursor = listState.route.cursor;
+    return {
+      queryKey: routeKeys.page(cursor),
+      queryFn: ({ signal }) => listRoutePage(cursor, signal),
+      placeholderData: (previous) => previous
+    };
+  });
 </script>
 
 <svelte:head><title>Routes · OpenLLMProxy</title></svelte:head>
@@ -88,12 +96,16 @@
         <p>No active routes on this page.</p>
       </div>
     {:else}
+      {#if activeRoutes.isPlaceholderData}
+        <p class="updating" role="status">Updating…</p>
+      {/if}
       <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
       <div
         class="table-shell"
         tabindex="0"
         role="region"
         aria-label="Active routes table"
+        aria-busy={activeRoutes.isPlaceholderData}
       >
         <table class="data-table">
           <thead
@@ -128,7 +140,7 @@
     {#if !activeRoutes.isError}<CursorPagination
         {...cursorPaginationProps(
           listState.route,
-          activeRoutes.data?.nextCursor
+          activeRoutes.isPlaceholderData ? null : activeRoutes.data?.nextCursor
         )}
         label="Active route pages"
       />{/if}
@@ -156,12 +168,16 @@
         <p>No unpublished drafts on this page.</p>
       </div>
     {:else}
+      {#if drafts.isPlaceholderData}
+        <p class="updating" role="status">Updating…</p>
+      {/if}
       <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
       <div
         class="table-shell"
         tabindex="0"
         role="region"
         aria-label="Route drafts table"
+        aria-busy={drafts.isPlaceholderData}
       >
         <table class="data-table">
           <thead
@@ -203,7 +219,10 @@
       </div>
     {/if}
     {#if !drafts.isError}<CursorPagination
-        {...cursorPaginationProps(listState.draft, drafts.data?.nextCursor)}
+        {...cursorPaginationProps(
+          listState.draft,
+          drafts.isPlaceholderData ? null : drafts.data?.nextCursor
+        )}
         label="Route draft pages"
       />{/if}
   </section>
@@ -218,6 +237,11 @@
   }
   .compact {
     min-height: 6rem;
+  }
+  .updating {
+    margin: 0 0 0.5rem;
+    color: var(--foreground-muted);
+    font-size: var(--text-body-sm);
   }
   .route-section {
     margin-top: 1.5rem;

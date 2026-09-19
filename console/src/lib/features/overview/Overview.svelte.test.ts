@@ -3,10 +3,8 @@ import { QueryClient } from '@tanstack/svelte-query';
 import { afterEach, beforeEach, expect, it } from 'vitest';
 import { authLifecycle } from '$lib/features/access/session/lifecycle';
 import type { FixedRole } from '$lib/features/access/session/authorization';
-import { providerKeys } from '$lib/features/providers/providerKeys';
-import { routeKeys } from '$lib/features/routes/routeKeys';
+import { overviewKeys } from '$lib/features/overview/overviewKeys';
 import { requestKeys } from '$lib/features/usage/history/requestKeys';
-import { apiKeyQueries } from '$lib/features/access/api-keys/apiKeyQueries';
 import OverviewProbe from './test/OverviewProbe.svelte';
 
 let host: HTMLElement;
@@ -25,15 +23,20 @@ function establish(role: FixedRole) {
   });
 }
 
+const emptySummary = {
+  active_providers: 0,
+  active_routes: 0,
+  enabled_models: 0,
+  usable_api_key: false
+};
+
 beforeEach(() => {
   host = document.createElement('div');
   document.body.append(host);
   client = new QueryClient({
     defaultOptions: { queries: { staleTime: Infinity, retry: false } }
   });
-  client.setQueryData(providerKeys.all(), []);
-  client.setQueryData(routeKeys.all(), []);
-  client.setQueryData(apiKeyQueries.hasNonrevoked(), false);
+  client.setQueryData(overviewKeys.summary(), emptySummary);
   client.setQueryData(requestKeys.overview(), { items: [] });
   establish('owner');
 });
@@ -65,11 +68,12 @@ it('updates setup actions and viewing links when the mounted principal changes',
 });
 
 it('shows a compact completion summary and requests action for a configured gateway', () => {
-  client.setQueryData(providerKeys.all(), [
-    { active_revision: 1, enabled_model_count: 1 }
-  ]);
-  client.setQueryData(routeKeys.all(), [{ id: 'route' }]);
-  client.setQueryData(apiKeyQueries.hasNonrevoked(), true);
+  client.setQueryData(overviewKeys.summary(), {
+    active_providers: 1,
+    active_routes: 1,
+    enabled_models: 2,
+    usable_api_key: true
+  });
   component = mount(OverviewProbe, { target: host, props: { client } });
   flushSync();
   expect(host.querySelector('h1')?.textContent).toBe('Gateway overview');
@@ -84,7 +88,7 @@ it('keeps setup actions indeterminate while required data is loading', () => {
   client.setDefaultOptions({
     queries: { enabled: false, retry: false, staleTime: Infinity }
   });
-  client.removeQueries({ queryKey: providerKeys.all() });
+  client.removeQueries({ queryKey: overviewKeys.root });
   component = mount(OverviewProbe, { target: host, props: { client } });
   flushSync();
   expect(host.querySelector('.page-heading a')).toBeNull();
@@ -100,7 +104,7 @@ it('offers retry without presenting stale setup data as complete', () => {
   });
   client
     .getQueryCache()
-    .find({ queryKey: providerKeys.all() })!
+    .find({ queryKey: overviewKeys.summary() })!
     .setState({ status: 'error', error: new Error('Unavailable') });
   component = mount(OverviewProbe, { target: host, props: { client } });
   flushSync();

@@ -1,3 +1,4 @@
+import { overviewKeys } from '$lib/features/overview/overviewKeys';
 import { providerKeys } from '$lib/features/providers/providerKeys';
 import { createQuery, skipToken, useQueryClient } from '@tanstack/svelte-query';
 import { onDestroy } from 'svelte';
@@ -260,6 +261,7 @@ export class ProviderWizardState {
       await this.queryClient.invalidateQueries({
         queryKey: providerKeys.modelCatalog
       });
+      await this.queryClient.invalidateQueries({ queryKey: overviewKeys.root });
       this.notice = 'Capability review saved with declared provenance.';
     });
   };
@@ -311,7 +313,8 @@ export class ProviderWizardState {
         }),
         this.queryClient.invalidateQueries({
           queryKey: providerKeys.modelCatalog
-        })
+        }),
+        this.queryClient.invalidateQueries({ queryKey: overviewKeys.root })
       ]);
     });
   };

@@ -1,3 +1,4 @@
+import { overviewKeys } from '$lib/features/overview/overviewKeys';
 import { providerKeys } from '$lib/features/providers/providerKeys';
 import { routeKeys } from '$lib/features/routes/routeKeys';
 import { untrack } from 'svelte';
@@ -278,7 +279,8 @@ export class RouteDraftEditorState {
       this.notice = `Route activated as revision ${this.activation.revision} in runtime generation ${this.activation.runtime_generation.sequence}.`;
       await Promise.all([
         this.draft.refetch(),
-        this.queryClient.invalidateQueries({ queryKey: routeKeys.lists })
+        this.queryClient.invalidateQueries({ queryKey: routeKeys.lists }),
+        this.queryClient.invalidateQueries({ queryKey: overviewKeys.root })
       ]);
     });
   };

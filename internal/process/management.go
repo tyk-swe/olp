@@ -8,6 +8,7 @@ import (
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/gateway"
 	"github.com/tyk-swe/olp/internal/limits"
+	"github.com/tyk-swe/olp/internal/management"
 	"github.com/tyk-swe/olp/internal/media"
 	"github.com/tyk-swe/olp/internal/observability"
 	"github.com/tyk-swe/olp/internal/providers"
@@ -29,6 +30,7 @@ func registerManagement(mux *http.ServeMux, control *access.Server, policy *egre
 	routeServer.Register(mux)
 	(&gateway.Playground{Access: control, Gateway: gw}).Register(mux)
 	(&media.Management{Access: control, Pool: control.Pool}).Register(mux)
+	(&management.Overview{Access: control}).Register(mux)
 	(&observability.Management{Access: control, Cache: cache, Pool: control.Pool}).Register(mux)
 	// Usage, pricing, request history and recovery reporting are part
 	// of the management surface; their patterns are more specific than

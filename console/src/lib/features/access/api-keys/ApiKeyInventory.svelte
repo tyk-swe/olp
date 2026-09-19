@@ -2,6 +2,7 @@
   import { useServiceCapabilities } from '$lib/features/access/session/serviceCapabilities.svelte';
   const services = useServiceCapabilities();
   import { apiKeyQueries } from '$lib/features/access/api-keys/apiKeyQueries';
+  import { overviewKeys } from '$lib/features/overview/overviewKeys';
 
   import { goto } from '$app/navigation';
   import { page } from '$app/state';
@@ -117,6 +118,7 @@
     try {
       await revokeApiKey(key);
       await queryClient.invalidateQueries({ queryKey: apiKeyQueries.root });
+      await queryClient.invalidateQueries({ queryKey: overviewKeys.root });
     } catch (error) {
       mutationError = errorMessage(error);
     } finally {
