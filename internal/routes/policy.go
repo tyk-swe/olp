@@ -1,11 +1,11 @@
 package routes
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
+	"reflect"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -24,11 +24,8 @@ func policyJSON(p *runtime.Policy) map[string]any {
 	_ = json.Unmarshal(body, &result)
 	return result
 }
-func defaultPolicy() map[string]any { return policyJSON(nil) }
 func samePolicy(a, b *runtime.Policy) bool {
-	left, _ := json.Marshal(policyJSON(a))
-	right, _ := json.Marshal(policyJSON(b))
-	return bytes.Equal(left, right)
+	return reflect.DeepEqual(policyJSON(a), policyJSON(b))
 }
 func policyScope(r *http.Request) (string, string, string, error) {
 	scope := r.PathValue("scope")

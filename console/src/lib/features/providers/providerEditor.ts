@@ -12,23 +12,6 @@ import type {
 } from '$lib/features/providers/models';
 import { stateLabel } from '$lib/format';
 
-export type ProviderDraft = {
-  kind: ProviderKind;
-  name: string;
-  endpoint: string;
-  apiVersion: string;
-  cloudRegion: string;
-  cloudProject: string;
-  deployment: string;
-  authMode: ProviderAuthMode;
-  credential: string;
-  model: string;
-  /** Console-only selection; creation persists the resolved ordinary fields. */
-  presetId: string;
-  credentialHeaders?: string;
-  options?: Provider['configuration']['options'];
-};
-
 export type ProviderEditValues = {
   options?: Provider['configuration']['options'];
   name: string;
@@ -38,6 +21,15 @@ export type ProviderEditValues = {
   cloudProject: string;
   deployment: string;
   authMode: ProviderAuthMode;
+};
+
+export type ProviderDraft = ProviderEditValues & {
+  kind: ProviderKind;
+  credential: string;
+  model: string;
+  /** Console-only selection; creation persists the resolved ordinary fields. */
+  presetId: string;
+  credentialHeaders?: string;
 };
 
 export type ProviderReadiness = {
@@ -222,6 +214,24 @@ export function validateProviderDraft(
   return `${spec.label} requires ${missing.join(', ')}.`;
 }
 
+function buildConnectionFields(
+  values: ProviderEditValues,
+  spec: ProviderKindCapability
+): Omit<Provider['configuration'], 'kind' | 'options'> {
+  return {
+    auth_mode: values.authMode,
+    endpoint: hasCustomEndpoint(spec) ? values.endpoint.trim() || null : null,
+    api_version: hasApiVersion(spec) ? values.apiVersion.trim() || null : null,
+    cloud_region: hasCloudRegion(spec)
+      ? values.cloudRegion.trim() || null
+      : null,
+    cloud_project: hasCloudProject(spec)
+      ? values.cloudProject.trim() || null
+      : null,
+    deployment: hasDeployment(spec) ? values.deployment.trim() || null : null
+  };
+}
+
 export function buildCreateProviderInput(
   draft: ProviderDraft,
   spec: ProviderKindCapability
@@ -240,16 +250,7 @@ export function buildCreateProviderInput(
             .map((s) => s.trim())
             .filter(Boolean) ?? []
       },
-      auth_mode: draft.authMode,
-      endpoint: hasCustomEndpoint(spec) ? draft.endpoint.trim() || null : null,
-      api_version: hasApiVersion(spec) ? draft.apiVersion.trim() || null : null,
-      cloud_region: hasCloudRegion(spec)
-        ? draft.cloudRegion.trim() || null
-        : null,
-      cloud_project: hasCloudProject(spec)
-        ? draft.cloudProject.trim() || null
-        : null,
-      deployment: hasDeployment(spec) ? draft.deployment.trim() || null : null
+      ...buildConnectionFields(draft, spec)
     },
     credential: requiresCredential(spec, draft.authMode)
       ? draft.credential
@@ -294,18 +295,7 @@ export function buildUpdateProviderInput(
     configuration: {
       kind: spec.kind,
       options: values.options,
-      endpoint: hasCustomEndpoint(spec) ? values.endpoint.trim() || null : null,
-      api_version: hasApiVersion(spec)
-        ? values.apiVersion.trim() || null
-        : null,
-      cloud_region: hasCloudRegion(spec)
-        ? values.cloudRegion.trim() || null
-        : null,
-      cloud_project: hasCloudProject(spec)
-        ? values.cloudProject.trim() || null
-        : null,
-      deployment: hasDeployment(spec) ? values.deployment.trim() || null : null,
-      auth_mode: values.authMode
+      ...buildConnectionFields(values, spec)
     }
   };
 }

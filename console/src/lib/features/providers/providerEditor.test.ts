@@ -11,6 +11,7 @@ import {
   createProviderDraft,
   disableNotice,
   DISABLED_EDIT_NOTE,
+  emptyProviderOptions,
   hasApiVersion,
   hasCloudProject,
   hasCloudRegion,
@@ -291,6 +292,83 @@ describe('provider editor API mappings', () => {
         auth_mode: 'api_key'
       }
     });
+  });
+
+  it('merges creation options while applying the selected preset and header input', () => {
+    const input = buildCreateProviderInput(
+      {
+        ...createProviderDraft(compatibleSpec),
+        name: 'Compatible',
+        endpoint: 'https://api.groq.com/openai/v1',
+        credential: '  write-only-secret\n',
+        presetId: 'groq',
+        credentialHeaders: ' X-API-Key,\n , X-Secondary-Key \n',
+        options: {
+          ...emptyProviderOptions(),
+          vendor_id: 'previous-vendor',
+          credential_headers: ['Previous-Key'],
+          parameter_defaults: { temperature: 0.2 }
+        }
+      },
+      compatibleSpec
+    );
+
+    expect(input.credential).toBe('  write-only-secret\n');
+    expect(input.configuration.options).toEqual({
+      vendor_id: 'groq',
+      limits: null,
+      credential_headers: ['X-API-Key', 'X-Secondary-Key'],
+      parameter_defaults: { temperature: 0.2 },
+      models: {}
+    });
+    const payload = JSON.parse(JSON.stringify(input));
+    expect(payload).not.toHaveProperty('model');
+    expect(payload).not.toHaveProperty('display_name');
+  });
+
+  it('omits credentials when the authentication mode forbids them', () => {
+    const input = buildCreateProviderInput(
+      {
+        ...createProviderDraft(vertexSpec),
+        name: 'Vertex',
+        cloudProject: ' production ',
+        cloudRegion: ' us-central1 ',
+        model: 'gemini-2.5-flash',
+        credential: 'previous-secret'
+      },
+      vertexSpec
+    );
+
+    expect(input.configuration).toMatchObject({
+      auth_mode: 'adc',
+      cloud_project: 'production',
+      cloud_region: 'us-central1'
+    });
+    expect(JSON.parse(JSON.stringify(input))).not.toHaveProperty('credential');
+  });
+
+  it('preserves update options without applying creation defaults', () => {
+    const values: ProviderEditValues = {
+      ...createProviderDraft(compatibleSpec),
+      name: 'Compatible',
+      endpoint: ' ',
+      options: {
+        ...emptyProviderOptions(),
+        vendor_id: 'custom-vendor',
+        credential_headers: ['X-API-Key'],
+        parameter_defaults: { temperature: 0.4 }
+      }
+    };
+
+    const input = buildUpdateProviderInput(values, compatibleSpec);
+    expect(input.configuration.endpoint).toBeNull();
+    expect(input.configuration.options).toEqual(values.options);
+    expect(
+      buildUpdateProviderInput(
+        { ...values, options: undefined },
+        compatibleSpec
+      ).configuration.options
+    ).toBeUndefined();
   });
 
   it('never sends fields omitted by capability metadata', () => {
