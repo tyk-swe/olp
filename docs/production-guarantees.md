@@ -58,8 +58,8 @@ processes. PostgreSQL still needs CPU/I/O headroom even with separate pools.
 No throughput, SQL-plan, DNS-lock or serialization optimization is justified
 solely by an unmeasured performance hypothesis.
 
-The release qualification record contains measured resource observations for
+The September 18, 2026 candidate qualification contains resource observations for
 maximum-size concurrent uploads, slow reads, mass disconnects, connection aging
 and shutdown. Those fixture measurements are reproducible bounds checks, not
 a throughput target or a production availability guarantee. See
-[release evidence](roadmap/evidence/release-qualification.md).
+[historical qualification](roadmap/README.md), not a qualification of newer source.

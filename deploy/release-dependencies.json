@@ -1084,7 +1084,7 @@
   ],
   "directCount": 23,
   "resolvedCount": 216,
-  "native": "../../../deploy/native/inventory.json",
+  "native": "native/inventory.json",
   "javascriptSDKs": {
     "@anthropic-ai/sdk": "0.116.0",
     "@google/genai": "2.16.0",

@@ -53,8 +53,8 @@ export function reconcileEvidence(frozen, manifest) {
 }
 
 function main() {
-  const frozen = read('docs/roadmap/evidence/reference-inventory.json');
-  const mappingPath = 'docs/roadmap/evidence/release-behaviors.json';
+  const frozen = read('tests/fixtures/reference-inventory.json');
+  const mappingPath = 'tests/release-behaviors.json';
   const evidence = reconcileEvidence(frozen, read(mappingPath));
   const contract = read('openapi/management.json');
   const operations = Object.entries(contract.paths).flatMap(([path, methods]) =>
@@ -87,6 +87,7 @@ function main() {
     };
   });
   const output = {
+    generatedBy: 'node scripts/release-inventory.mjs',
     applicationVersion: read('package.json').version,
     frozenRustReference: frozen.reference,
     contract: { path: 'openapi/management.json', sha256: sha256('openapi/management.json'), operations: operations.length },
@@ -106,21 +107,21 @@ function main() {
     referenceSuites,
     goSuites: files.sort(),
     browserJourneys: ['console/playwright.config.ts', 'console/playwright.journeys.config.ts'],
-    qualification: 'release-qualification.md',
-    qualificationPolicy: 'Implemented records reconciled operations and certification tuples. Named successor tests and harness retirement reasons live in release-behaviors.json; their passing runs, candidate identity, platform and limitations are recorded separately. Paid provider tests are separate.'
+    historicalQualification: '../docs/roadmap/README.md',
+    qualificationPolicy: 'Current source inventory, not a test execution record. Implemented records reconcile the frozen operations and certification tuples; tests/release-behaviors.json names successor tests and explains harness retirements. Historical qualification applies only to its recorded source and image, not all source listed here. Current passing runs belong to their own CI results. Paid provider tests are separate.'
   };
-  writeFileSync('docs/roadmap/evidence/release-inventory.json', JSON.stringify(output, null, 2) + '\n');
+  writeFileSync('deploy/release-inventory.json', JSON.stringify(output, null, 2) + '\n');
   const modules = execFileSync('go', ['list', '-m', '-f', '{{if not .Main}}{{.Path}} {{.Version}} {{.Indirect}}{{end}}', 'all'], { encoding: 'utf8' }).trim().split('\n').filter(Boolean).map((line) => {
     const [path, version, indirect] = line.split(' '); return { path, version, indirect: indirect === 'true' };
   });
-  writeFileSync('docs/roadmap/evidence/release-dependencies.json', JSON.stringify({
+  writeFileSync('deploy/release-dependencies.json', JSON.stringify({
     counting: 'Whole Go module graph includes runtime, test and tool dependencies. Native FFI lock is a conservative superset, inventoried separately.',
     modules, directCount: modules.filter((m) => !m.indirect).length, resolvedCount: modules.length,
-    native: '../../../deploy/native/inventory.json',
+    native: 'native/inventory.json',
     javascriptSDKs: read('tests/sdk-smoke/package.json').dependencies,
     pythonSDKs: readFileSync('tests/sdk-smoke-python/pyproject.toml', 'utf8').match(/(?:anthropic|google-genai|openai)==[^"\s]+/g)
   }, null, 2) + '\n');
-  writeFileSync('docs/roadmap/evidence/release-module-graph.txt', execFileSync('go', ['mod', 'graph']));
+  writeFileSync('deploy/release-module-graph.txt', execFileSync('go', ['mod', 'graph']));
   console.log('Reconciled ' + management.length + ' management operations, ' + output.inference.length + ' inference tuples, ' + referenceSuites.length + ' explicit suite mappings, ' + frozen.fixtures.length + ' unchanged fixtures and ' + modules.length + ' modules.');
 }
 

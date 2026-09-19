@@ -13,7 +13,9 @@ authentication key and master key, including with mounted connector configuratio
 | Variable | Default | Purpose |
 |---|---|---|
 | `OLP_DATABASE_URL` | required | PostgreSQL URL. |
-| `OLP_DATABASE_MAX_CONNECTIONS` | `20` | Pool size. |
+| `OLP_DATABASE_MAX_CONNECTIONS` | `20` | Pool size (1–10000), excluding detached worker sessions; see [connection budget](deployment.md#production-example-and-connection-budget). |
+| `OLP_DATABASE_URL_FILE`, `OLP_VALKEY_URL_FILE` | unset | Read the corresponding URL from a mounted file; mutually exclusive with its inline setting. |
+| `OLP_VALKEY_TLS_CA_FILE` | unset | PEM trust roots for Valkey TLS; requires `OLP_VALKEY_URL`. |
 | `OLP_VALKEY_URL` | optional for `all`, `gateway`, `control`; required for `worker` | Valkey for installation-scoped limits, hints, and streams. |
 | `OLP_LISTEN_ADDR` | `127.0.0.1:8080` | Public listener; containers override to `0.0.0.0:8080`. |
 | `OLP_OBSERVABILITY_LISTEN_ADDR` | `127.0.0.1:9090` | Private health and metrics listener. |
@@ -23,8 +25,8 @@ authentication key and master key, including with mounted connector configuratio
 | `OLP_TRACE_PROPAGATE_UPSTREAM` | `true` | Inject the current W3C trace context into provider attempts. |
 | `OLP_TRACE_ACCEPT_INBOUND` | `true` | Accept a valid inbound W3C trace context as the request parent. |
 | `OLP_HTTP_MAX_CONNECTIONS` | `1024` | Admitted TCP connections. |
-| `OLP_HTTP_MAX_IN_FLIGHT_INFERENCE_REQUESTS` | `256` | Inference work admission. |
-| `OLP_HTTP_MAX_IN_FLIGHT_MANAGEMENT_REQUESTS` | `32` | Management work admission. |
+| `OLP_HTTP_MAX_IN_FLIGHT_INFERENCE_REQUESTS` | `256` | Inference work admission (1–100000); excess work receives 503. |
+| `OLP_HTTP_MAX_IN_FLIGHT_MANAGEMENT_REQUESTS` | `32` | Management and console work admission (1–100000). |
 | `OLP_HTTP_CONNECTION_MAX_AGE_SECONDS` | `300` | Age at which HTTP/2 connections receive GOAWAY (1–86400). |
 | `OLP_HTTP_CONNECTION_DRAIN_TIMEOUT_SECONDS` | `30` | Grace period for draining connections (1–600). |
 | `OLP_PUBLIC_ORIGIN` | `http://127.0.0.1:8080` | OIDC redirects and generated links. |
@@ -41,13 +43,13 @@ authentication key and master key, including with mounted connector configuratio
 | `OLP_PROVIDER_MAX_RESPONSE_BYTES` | `16777216` | Largest provider response body buffered for non-streaming operations (1 MiB–256 MiB). |
 | `OLP_PROVIDER_MAX_EVENT_BYTES` | `1048576` | Largest single streamed provider event (64 KiB up to the response cap). |
 | `OLP_CONSOLE_DIR` | `console/build` | Static console directory. |
-| `OLP_MEDIA_SPOOL_DIR` | unset | On-disk media spool. |
-| `OLP_MEDIA_SPOOL_CAPACITY_BYTES` | `1073741824` | Spool capacity (1 GiB). |
+| `OLP_MEDIA_SPOOL_DIR` | unset | On-disk media spool; defaults to the system temp directory. |
+| `OLP_MEDIA_SPOOL_CAPACITY_BYTES` | `1073741824` | Spool capacity (1 GiB; at least 256 MiB). |
 | `OLP_CONNECTOR_CONFIG_FILE` | unset | Optional file-backed connector mapping. |
 | `OLP_LOG_LEVEL` | `info` | JSON log severity: debug, info, warn, error. |
-| `OLP_SHUTDOWN_TIMEOUT` | `30s` | Shared HTTP, metadata, delivery and worker shutdown budget. |
-| `OLP_DEPENDENCY_REQUEST_TIMEOUT` | `2s` | Per-request dependency deadline. |
-| `OLP_STARTUP_TIMEOUT` | `10s` | Startup and ordinary maintenance deadline. |
+| `OLP_SHUTDOWN_TIMEOUT` | `30s` | Shared HTTP, metadata, delivery and worker shutdown budget (1ms–10m). |
+| `OLP_DEPENDENCY_REQUEST_TIMEOUT` | `2s` | Per-request dependency deadline (1ms–1m). |
+| `OLP_STARTUP_TIMEOUT` | `10s` | Startup and ordinary maintenance deadline (1ms–1m). |
 
 At maximum connection age the server stops admitting requests on that
 connection and sends HTTP/2 GOAWAY. Existing streams have the configured drain
@@ -182,7 +184,8 @@ a non-streaming generation.
 
 ## Provider egress policy
 
-Provider endpoints must use HTTPS and resolve only to public addresses:
+Provider endpoints must be absolute HTTPS URLs without credentials, query strings,
+or fragments, and resolve only to public addresses:
 literal hosts are checked before DNS, and every address in each DNS answer is
 checked again before a pinned client is built, on every revalidation. Two
 allowlists widen that policy for private or on-premises upstreams such as a
@@ -202,8 +205,10 @@ which keeps the public-only behaviour.
 A plain-HTTP endpoint on a private literal address needs both lists: the host
 in the HTTP allowlist and the address inside an allowed CIDR. The `all`,
 `gateway`, `control`, and `doctor` commands accept the settings; startup logs a
-warning whenever either list is non-empty. The allowlists never relax OIDC issuer or Vertex token
-endpoint checks.
+warning whenever either list is non-empty. Transports refuse redirects, use TLS 1.2 or newer, bound dial and handshake
+timeouts, and cap response headers at 32 KiB. Probes and inference use the same
+normalized endpoint and egress policy. The allowlists never relax OIDC issuer or
+Vertex token endpoint checks.
 
 ## Test and harness variables
 
@@ -239,7 +244,9 @@ vendor lists are not accepted by 3.0.
 Without `OLP_MASTER_KEY_FILE`, each mounted connector serves the published
 default credential slot and enforces its slot and connection limits. Releases
 with enabled named slots require the master key so each attempt can use its
-published credential version.
+published credential version. The published default-slot ID is required;
+republish older Go releases before enabling mounted mode. Database-encrypted
+revisions remain authoritative when the master key is configured.
 
 Production Compose can generate database credentials and their encoded URL using
 `scripts/prepare-compose-production.sh`; see [deployment.md](deployment.md).

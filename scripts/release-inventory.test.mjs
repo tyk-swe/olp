@@ -4,8 +4,8 @@ import test from 'node:test';
 import { reconcileEvidence } from './release-inventory.mjs';
 
 const read = (path) => JSON.parse(readFileSync(path, 'utf8'));
-const frozen = read('docs/roadmap/evidence/reference-inventory.json');
-const manifest = read('docs/roadmap/evidence/release-behaviors.json');
+const frozen = read('tests/fixtures/reference-inventory.json');
+const manifest = read('tests/release-behaviors.json');
 
 test('every frozen scope has explicit evidence and accounting points to persistence tests', () => {
   const result = reconcileEvidence(frozen, manifest);

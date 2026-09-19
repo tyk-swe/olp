@@ -12,7 +12,7 @@ import (
 // Supports alone is broader: Azure and generic OpenAI transports cannot certify
 // media, even though they share the OpenAI wire implementation.
 func TestFrozenCertificationMatrix(t *testing.T) {
-	data, err := os.ReadFile("../../docs/roadmap/evidence/reference-inventory.json")
+	data, err := os.ReadFile("../../tests/fixtures/reference-inventory.json")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -54,7 +54,7 @@ func TestFrozenCertificationMatrix(t *testing.T) {
 		}
 		for _, tuple := range got {
 			if !slices.Contains(want, tuple) {
-				t.Errorf("capability requires an explicit roadmap revision: %s", tuple)
+				t.Errorf("capability requires an explicit compatibility review: %s", tuple)
 			}
 		}
 		t.Fatalf("certifiable matrix differs from frozen reference: got %d tuples, want %d", len(got), len(want))

@@ -50,6 +50,46 @@ See [Cohere compatibility](https://docs.cohere.com/docs/compatibility-api).
 Paid-provider qualification remains an operator activity scoped to the actual
 account, model, region, and credential.
 
+## Provider lifecycle
+
+A provider is created as a draft with its configuration and, unless the
+authentication mode is `none`, `adc`, or `default_chain`, a credential. The console wizard then:
+
+1. **Probes** the connection (`POST /providers/{id}/probe`), which lists
+   upstream models or proves a configured deployment/model when that vendor
+   has no model-list API, with bounded time, concurrency, and body size. Probe results
+   store only a status, a timestamp, and a sanitized detail; upstream bodies
+   never enter persistent diagnostics.
+2. **Discovers** models (`POST /providers/{id}/discovery`), either from the
+   upstream list or from up to 2000 declared identifiers. Discovered models
+   start disabled with no capabilities.
+3. **Reviews** capabilities (`PATCH /providers/{id}/models/{model_id}`),
+   which records *declared* tuples of operation, surface, and mode.
+4. **Certifies** each model (`POST /providers/{id}/models/{model_id}/certify`),
+   which proves each operation/surface/mode tuple and marks successful tuples
+   as *certified*. An OpenAI-surface generation capability proves both Chat
+   and Responses unless the vendor profile explicitly translates Responses
+   through Chat. Each probe has a 15-second budget, within a one-minute
+   model-certification deadline. Only certified tuples of enabled
+   models are published to the runtime and are eligible for routes.
+5. **Activates** the draft (`POST /providers/{id}/activate`), which validates
+   the configuration, requires current validation for each selectable
+   credential slot and at least one enabled, fully certified model, writes
+   an immutable revision, and publishes a new runtime generation.
+
+Draft edits never change serving traffic: they mark the provider as having a
+pending activation, and the runtime keeps using the active revision. Changing
+transport or semantic details (kind, authentication mode, endpoint, cloud
+addressing, credential headers, parameter defaults, model facts, vendor)
+invalidates certification evidence and slot validation, so tuples must be
+certified again before the next activation. Revisions can be listed, read,
+compared, and restored as a new draft; restoring copies the recorded models
+and evidence but never a historical credential.
+
+Disabling a provider (`POST /providers/{id}/disable`) publishes a generation in
+which the provider is not selectable; streams that already started keep the
+snapshot they were admitted with.
+
 ## Private endpoints, headers, defaults, and model facts
 
 OpenAI, OpenAI-compatible, Anthropic, and Gemini connectors accept custom
@@ -111,7 +151,7 @@ IDs and encryption context. The existing `/credentials` endpoints remain
 available. Add, edit, rotate, and validate additional slots under
 `/api/v3/providers/{provider_id}/credential-slots` and in the provider detail
 page. Writes use ETags and idempotency keys; secrets remain encrypted and
-write-only. A connection supports up to 64 named slots.
+write-only. A connection supports up to 64 slots including the default.
 
 Default-slot restrictions and quotas also apply to connections using no stored
 secret (`none`, ADC, or the AWS default chain).
@@ -121,7 +161,20 @@ A slot has enabled state, priority, weight, and optional `allowed_models`,
 mean unrestricted within the published connection. Slots are ordered by lower
 priority first and weighted rendezvous within a priority. Every enabled slot
 must prove access to its allowed enabled model capabilities before activation.
-New model contracts invalidate this access evidence.
+New model contracts invalidate this access evidence. Validation has a one-minute
+bound and a 15-second deadline per upstream probe. Evidence binds the credential
+version, transport configuration, and allowed enabled capabilities; edits during
+a probe invalidate its result. Model-list access alone does not prove generation
+access. Disabled slots and slots with no allowed enabled models are not selected
+and do not block activation.
+
+Rotation validates the new credential against model discovery and the default
+slot's allowed enabled capabilities before selecting it for the draft. The
+active revision keeps its original credential until reactivation. Certification
+prefers an enabled usable default slot, then another enabled usable slot;
+certifying all applicable models validates that selected slot. Additional or
+rotated pool slots need their own validation. Disabling the default does not
+prevent an independently validated named slot from serving.
 
 Set `requests_per_minute`, `tokens_per_minute`, and `max_concurrency` on a slot
 or in `configuration.options.limits` for the whole connection. Both scopes
@@ -153,6 +206,25 @@ deadline immediately before each upstream poll or delete, and hands off silently
 when another replica has reclaimed the job.
 
 ![Credential slots with validation, priority, and shared quota usage](assets/screenshots/provider-credential-pool.png)
+
+## Routes
+
+Route drafts carry a slug, allowed operations (default `generation`; explicit
+`token_count`, `embeddings`, `moderation`, `image_generation`, `image_edit`,
+`image_variation`, `speech`, `transcription`, `video_create`, `video_list`,
+`video_get`, `video_content`, and `video_delete` are also supported), an overall
+deadline, a maximum attempt count, and ordered targets with priority, weight,
+and per-attempt timeout. Every target must reference a published model with
+certified support for each allowed operation; validation and activation reject
+unknown, inactive, unpublished, or uncertified targets. Drafts are versioned
+with ETags, so stale edits return `412` and the console offers a reload.
+
+Activating a draft writes an immutable route revision, makes it the latest
+revision of the route named by the slug, and publishes a runtime generation.
+Revisions can be compared and restored as new drafts. The simulation endpoints
+(`POST /route-drafts/{id}/simulate` and `POST /routing/simulate`) explain the
+deterministic attempt order for a given seed or key without contacting any
+provider.
 
 ## Policies and caller preferences
 
@@ -239,7 +311,7 @@ payloads are absent from persisted routing telemetry.
 
 1. Back up PostgreSQL and the existing encryption/HMAC keys, then drain all
    gateways and pause other old process roles.
-2. Run migrations with the new binary. Migrations after `0001_initial.sql`
+2. Run migrations with the new binary. Migrations after `0001_access.sql`
    backfill default slots without changing secret IDs or AAD, add policies and
    media pins, and wrap historical releases in the `olp-routing-v1` envelope.
    The envelope preserves snapshot identities and facts while preventing an

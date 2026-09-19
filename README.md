@@ -116,9 +116,9 @@ excludes prompts, outputs, credentials, and uploaded content.
 | [Configuration](docs/configuration.md) | Environment variables and CLI settings |
 | [Operations](docs/operations.md) | Monitoring, recovery, and upgrades |
 | [Production contracts](docs/production-guarantees.md) | Guarantees, assumptions, and qualification limits |
-| [Go gateway](docs/go-gateway.md) | Go providers, protocols, media, routing, and worker plane |
-| [Go access](docs/go-access.md) | Go installation, identity, and access control |
-| [Go roadmap](docs/roadmap/) | Go rewrite milestones and qualification status |
+| [Gateway execution](docs/gateway.md) | Request execution, limits, and durable media |
+| [Access control](docs/access.md) | Installation, identity, and access control |
+| [Completion record](docs/roadmap/README.md) | Dated rewrite qualification and immutable historical evidence |
 | [Contributing](CONTRIBUTING.md) | Development, checks, and releases |
 
 ## Operations

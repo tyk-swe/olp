@@ -29,4 +29,6 @@ PostgreSQL is authoritative. Valkey coordinates limits and delivers hints and ac
 
 Gateway, control, worker, and all-in-one process modes share feature implementations. The process module supplies only the dependencies and listeners required by each mode. Its `Run` function owns resource lifetimes and the shutdown sequence; management registration, observability wiring, and listener supervision live in separate package-local helpers. Listener draining, metadata delivery, and worker shutdown share one deadline. Production serves the static console; development uses Vite and proxies API traffic through the browser origin.
 
-See [CONTRIBUTING.md](../CONTRIBUTING.md) for setup, checks, integration, and the fresh-installation contract.
+See [gateway execution](gateway.md), [access control](access.md), and the
+[worker runbook](operations.md#replicated-worker-health) for their operational
+contracts. See [CONTRIBUTING.md](../CONTRIBUTING.md) for setup, checks, integration, and the fresh-installation contract.

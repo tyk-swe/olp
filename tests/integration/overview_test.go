@@ -5,6 +5,7 @@ package integration_test
 import (
 	"net/http"
 	"testing"
+	"time"
 )
 
 // Overview answers the console's setup-readiness aggregates in one round trip.
@@ -67,11 +68,20 @@ func TestOverviewCountsReadinessAggregates(t *testing.T) {
 		withMatch(validated, map[string]string{"Idempotency-Key": "route-activate"}), 200)
 	want(overview(), 1, 1, 1, false)
 
-	// A non-revoked key marks the installation usable; revoking it drops the flag.
+	// Setup counts non-revoked keys, including expired keys. This flag does
+	// not grant inference authority; revocation alone clears the setup step.
 	key := h.want(owner, http.MethodPost, "/api/v3/api-keys", map[string]any{
 		"name": "Overview key", "scopes": []string{"inference"}, "allowed_routes": []string{"overview-chat"},
 	}, map[string]string{"Idempotency-Key": "key"}, 201)
 	want(overview(), 1, 1, 1, true)
+	if _, err := h.Pool.Exec(t.Context(), "UPDATE olp_go.api_keys SET expires_at=$2 WHERE id=$1", key["id"], time.Now().Add(-time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	want(overview(), 1, 1, 1, true)
+	authority, err := h.Server.LookupAuthority(t.Context(), key["secret"].(string))
+	if err != nil || authority.Allows("inference", "overview-chat", time.Now()) {
+		t.Fatal("setup completion must not authorize an expired key", err)
+	}
 	keyRecord := h.want(owner, http.MethodGet, "/api/v3/api-keys/"+key["id"].(string), nil, nil, 200)
 	h.want(owner, http.MethodPost, "/api/v3/api-keys/"+key["id"].(string)+"/revoke", nil,
 		withMatch(keyRecord, map[string]string{"Idempotency-Key": "revoke"}), 200)

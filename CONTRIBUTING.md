@@ -33,8 +33,9 @@ Open http://127.0.0.1:5173 after `make dev`. Use this configured origin for brow
 access so management requests pass the origin check. The one-time bootstrap token is in
 `.local/go-secrets/bootstrap.token`. Vite proxies management, OIDC callbacks,
 and inference through the browser origin. Console edits use hot reload;
-restart after backend edits. Development services use isolated volumes and
-loopback ports 54321/63791. Stop them with
+restart after backend edits. `make dev` creates missing private secrets and
+initializes the schema; existing files and database contents survive restarts.
+Development services use isolated volumes and loopback ports 54321/63791. Stop them with
 `docker compose -f deploy/compose.dev.yaml stop`.
 
 Go uses schema `olp_go` and Valkey namespace `olp:go:v1:<installation UUID>:`.
@@ -93,9 +94,14 @@ and attests it and never rebuilds. A manual release-workflow dispatch qualifies
 a candidate without publishing stable version tags. Only a `v3.*` push can
 promote. Fresh storage requirements are recorded in release metadata.
 
-The [release evidence](docs/roadmap/evidence/release-qualification.md) records
-actual qualification and full-application five-sample build measurements. A
-missing platform result or missed build target keeps its release gate open.
+The [dated completion record](docs/roadmap/README.md) preserves qualification
+of the September 18, 2026 candidate, not newer source. Current inventories are
+`deploy/release-inventory.json`, `deploy/release-dependencies.json`, and
+`deploy/release-module-graph.txt`; regenerate them with
+`node scripts/release-inventory.mjs`. The frozen reference is never regenerated
+from the application being tested. CI checks these generated paths; qualification
+runs remain separate. A missing platform result or missed build target keeps
+that candidate's release gate open.
 
 A provider, protocol or media feature is not release-ready until its review
 includes native conformance, unsupported/lossy semantics, body/time/admission

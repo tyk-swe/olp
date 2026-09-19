@@ -20,8 +20,8 @@ Secrets before installing (names and keys are configurable through `config`):
 | Authentication HMAC key | `olp-auth-hmac-key` / `key` |
 | OTLP exporter headers (optional) | none / `headers`; set the name with `tracing.headersSecretName` |
 
-Provision fresh 3.0 PostgreSQL storage and a JSON master-key ring. Existing 2.x
-storage cannot be upgraded in place.
+Provision fresh 3.0 PostgreSQL storage and a JSON master-key ring. Rust 2.x and Rust 3.x
+storage cannot be upgraded in place; use isolated Valkey state as well.
 New installations also need a 32-byte base64 bootstrap-token Secret mounted
 only into control pods. Keep all secret values out of values files and shell
 history; the chart schema validates configured names and keys.
@@ -31,13 +31,15 @@ history; the chart schema validates configured names and keys.
 The PostgreSQL installation UUID supplies the Valkey namespace, so independent
 installations may share a logical database without key collisions. A restored
 database retains its identity and is a replacement, not a clone; use a fresh
-Valkey database for rehearsals and never run source and restore together.
+Valkey service for rehearsals; never let source and replacement share streams
+or leases. A writable independent clone is unsupported.
 
 The chart defaults to one worker for a small footprint. Production should use
 three replicas, a PodDisruptionBudget, and failure-domain spreading. Workers
-consume work concurrently; PostgreSQL advisory locking serializes runtime
-outbox publication and Valkey consumer groups reclaim metadata ownership. The
-worker Deployment uses `Recreate`: mixed-version workers are not supported
+consume work concurrently; PostgreSQL advisory locks serialize maintenance and
+cost reconciliation, and Valkey consumer groups reclaim metadata ownership.
+Runtime releases publish transactionally with their activating mutation, not
+through a worker outbox. The worker Deployment uses `Recreate`: mixed-version workers are not supported
 during schema changes.
 
 ## Release artifacts
@@ -138,7 +140,6 @@ explicit exception does not widen `config.providerEgressAllowCidrs` or
 `config.providerEgressAllowHttpHosts`, and provider endpoint checks are
 unchanged.
 
-
 ## Network policy
 
 `networkPolicy.enabled: true` renders one NetworkPolicy per enabled
@@ -228,10 +229,9 @@ helm upgrade --install olp \
 Before issuing a proxy key or sending traffic, require a successful migration
 Job, ready pods, runtime-generation convergence, and healthy observability
 targets. With replicated workers also require all five
-`olp_worker_task_healthy` series, zero request-metadata pending/lag, and zero
-runtime-outbox pending/claimed rows. Continue with the monitoring and recovery
-checks in [`operations.md`](operations.md).
-
+`olp_worker_task_healthy` series and zero request-metadata pending/lag.
+`runtime_outbox` is `not_configured`, not a drainage requirement. Continue with
+the monitoring and recovery checks in [`operations.md`](operations.md).
 
 ## Production example and connection budget
 
@@ -249,8 +249,11 @@ helm upgrade --install olp deploy/helm -f deploy/helm/values.production.yaml \
 
 The example runs three gateways, two control replicas and three workers with
 10 pooled connections per process: 80 pooled connections. Reserve two additional
-connections per worker for detached outbox/cost leadership sessions, which no
-longer count against pool capacity: 86 planned connections. With the chart's
+connections per worker: cost reconciliation detaches a session and holds its
+advisory lock between passes; maintenance detaches another for each pass and
+closes it afterward. Both cease counting against pool capacity. Reserving both
+for every replica conservatively covers leaders, contenders, and overlapping
+passes: 86 planned connections. With the chart's
 one-pod surge for each HTTP deployment and a ten-connection migration job, budget
 116 application connections during rollout. Reserve at least 20 more for
 monitoring, administrators, closing/orphaned sessions and recovery (round the

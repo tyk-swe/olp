@@ -1,5 +1,5 @@
-// Package fixtures preserves the language-neutral reference corpus. Provider
-// runners are attached as their owning milestones land.
+// Package fixtures preserves the language-neutral reference corpus used by
+// protocol, routing, and egress conformance tests.
 package fixtures
 
 import "embed"

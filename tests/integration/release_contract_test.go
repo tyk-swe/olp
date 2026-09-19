@@ -18,8 +18,9 @@ import (
 	"github.com/tyk-swe/olp/openapi"
 )
 
-// Every frozen operation must reach a concrete handler in the actual process.
+// Every operation in the current embedded contract must reach a concrete handler.
 // Feature suites exercise the authorized success and failure response schemas.
+// scripts/release-inventory.mjs independently checks frozen operation parity.
 func assertConcreteManagementHandlers(t *testing.T, origin string) {
 	t.Helper()
 	var document struct {
@@ -50,11 +51,11 @@ func assertConcreteManagementHandlers(t *testing.T, origin string) {
 				t.Fatal(err)
 			}
 			if resp.StatusCode >= 500 || strings.Contains(string(body), "The requested management operation does not exist.") {
-				t.Errorf("frozen operation %s %s has no concrete handler (status %d)", method, path, resp.StatusCode)
+				t.Errorf("current contract operation %s %s has no concrete handler (status %d)", method, path, resp.StatusCode)
 			}
 		}
 	}
-	t.Logf("validated registration of %d frozen management operations", count)
+	t.Logf("validated registration of %d current management operations", count)
 }
 
 func TestComposeSecretsSurviveBootstrapRetirement(t *testing.T) {

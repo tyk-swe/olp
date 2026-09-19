@@ -1,23 +1,16 @@
-# Go installation and access control
+# Installation and access control
 
-The Go control plane supports owner setup, local and OIDC sign-in, membership,
+The control plane supports owner setup, local and OIDC sign-in, membership,
 invitations, sessions, profiles, gateway-key policy, installation settings, and
 metadata-only audit reads. Provider connections, routes, inference, media,
 distributed limits, and the retention workers are described in the
-[Go gateway guide](go-gateway.md). The console reports these
+[gateway guide](gateway.md). The console reports these
 capabilities and labels configured limits as saved policy.
 
 ## Local development
 
-Run `make dev` with the prerequisites in [CONTRIBUTING](../CONTRIBUTING.md).
-It provisions isolated PostgreSQL/Valkey services, private secrets under
-`.local/go-secrets`, and the Go schema before starting the application. Existing
-files and database contents are retained across restarts. Open
-`http://127.0.0.1:5173` and use the token in
-`.local/go-secrets/bootstrap.token` once to create the first owner.
-
-The public backend listens on 8082, private probes on 9092, and Vite forwards
-same-origin requests to the backend. Restart Go after backend edits.
+Follow [CONTRIBUTING](../CONTRIBUTING.md#local-development) for local services,
+Vite proxying, private secret files, and the one-time owner bootstrap token.
 
 ## Deployment and database roles
 
@@ -26,7 +19,7 @@ it rejects Rust schemas and preexisting public tables before writing. The
 installation UUID survives repeated and concurrent migrations. Valkey names
 are reserved under `olp:go:v1:<installation UUID>:`, the namespace the limits,
 cooldown, and request-metadata keys documented in the
-[gateway guide](go-gateway.md#shared-state-in-valkey) live under. Never share a
+[operations runbook](operations.md#shared-state-in-valkey) live under. Never share a
 Rust installation's database or Valkey data.
 
 Provision a database owner for migration and a separate, existing login role for
@@ -53,8 +46,9 @@ health and metrics endpoints belong on a private listener/network.
 
 ## Mounted secrets
 
-Management and inference modes require these private regular files, mode 0600
-or 0640 (`gateway` needs the first two):
+Use private regular files with mode 0400, 0440, 0600, or 0640; group-write and
+world permissions are rejected. [Configuration](configuration.md#file-based-secrets)
+identifies which modes require each file and the mounted-connector exception:
 
 | Environment variable | File contents |
 | --- | --- |

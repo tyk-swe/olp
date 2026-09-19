@@ -1,158 +1,89 @@
-# Go + SvelteKit rewrite roadmap
+# Rewrite completion and qualification — 2026-09-18
 
-OLP has replaced its Rust gateway with Go and retained the SvelteKit console.
-All seven milestones are complete. [Final release qualification](evidence/release-qualification.md)
-records the exact source/candidate, both native architectures, recovery and SDK/
-browser evidence, dependency scans, and five-sample build results. Rust storage
-is incompatible; Go deployments start with fresh storage. This directory retains
-the original ticket IDs, explicit scope corrections and historical milestone evidence.
+The accepted Go rewrite closed all **64 tickets across M1–M7**. This is a
+historical completion record, not an active backlog or qualification of the
+current checkout. Current behavior belongs in the [architecture](../architecture.md),
+[access](../access.md), [gateway](../gateway.md), [compatibility](../compatibility.md),
+and [operations](../operations.md) guides.
 
-## Decisions
+## Qualified candidate
 
-| Area | Decision |
+- Source: `ccd138f288a99f66a2bb1145eb75d5ce57398416`.
+- Qualification completed **2026-09-18**; [release run 35334054213](https://github.com/tyk-swe/olp/actions/runs/35334054213).
+- Image: `ghcr.io/tyk-swe/olp@sha256:0c7495977bf5a837c7d3d0fa9d21c557a7ddbabb5eb08213ec51d45a458de09d`.
+- Native Linux amd64/arm64 builds, canonical CI, dependency/image scans,
+  packaged Chromium journeys and replacement restore passed for that candidate.
+  Local qualification included 480 console tests and 26 integration browser
+  scenarios; each packaged architecture ran six fresh-installation scenarios and
+  one restore scenario (history grew from four requests to six).
+- **Stable promotion was intentionally skipped. Paid live-provider tests were
+  not requested.** Deterministic provider fixtures do not certify paid accounts.
+- The candidate contract had 100 operations and SHA-256
+  `f4d2f4743efd64631201cd7ff9f68e3297f3563511cd04aa43c0197d46462ca9`.
+  Later contract, mapping, test, or documentation changes are not qualified by
+  those results. Current inventories and fresh CI execution are separate.
+
+Acceptance required **fresh Go PostgreSQL storage and isolated Valkey state**.
+Rust-storage migration, mixed Rust/Go writable deployments, and compatibility
+with old management payloads were excluded. The retained console media scope
+was metadata-only list/detail, filters, and manual refresh—not content/delete
+controls, automatic polling, cancellation workflows, or a media playground.
+Those remain separate product work, not missing migration parity.
+
+## Independent reference and current verification
+
+The frozen source is `6c21dfb917c9019161348ea24b532a77b6612e6e`.
+[`tests/fixtures/reference-inventory.json`](../../tests/fixtures/reference-inventory.json)
+preserves its 100 management tuples, 77 inference tuples, 133 suite sources,
+and hashes for 18 unchanged neutral fixtures.
+[`tests/release-behaviors.json`](../../tests/release-behaviors.json) contains the
+reviewed behavior-to-successor-test mappings and reasons for retired Rust-only
+harnesses. The September 18 follow-up replaced filename/milestone heuristics
+with explicit mappings and named-test existence checks; existence is not proof
+of historical execution. Never regenerate the reference from its Go successor.
+
+`node scripts/release-inventory.mjs` checks those inputs, fixture hashes,
+management tuple retention and the independent certification matrix, then
+regenerates current source/dependency inventories under `deploy/`.
+See [test commands](../../tests/README.md). GLIDE still includes a prebuilt Rust
+core through CGO: [native inventory and license hashes](../../deploy/native/inventory.json)
+and the no-Rust-build guard remain required; the product is not purely Go.
+
+## Historical measurements and retrieval
+
+Five successful samples supported each full-application build result below
+(seconds, median with range), on the recorded eight-CPU Haswell/~24.6 GB runner.
+Clean builds emptied a private Go cache; warm edit runs changed implementation
+and relinked. Image builds disabled layer reuse but retained the BuildKit Go
+cache and included downloads. Integration was not a timing benchmark.
+
+| Case | Median (range) |
 | --- | --- |
-| Backend | One Go module and application binary, with feature packages owning types, SQL, handlers, and workflows. Use concrete dependencies and interfaces at actual transport or test boundaries. |
-| Standard library | Prefer standard-library HTTP, routing, configuration, logging, and testing. Keep application composition explicit. |
-| Storage | PostgreSQL remains authoritative. Use pgx and direct SQL with feature-owned transactions. |
-| Coordination | Retain Valkey for distributed limits, hints, and event delivery; use GLIDE as the Go client. |
-| Console | Keep client-only SvelteKit, existing components and useful journeys, same-origin APIs, and separately built static assets. Vite remains the development server. |
-| Management contract | Keep `/api/v3` and its OpenAPI endpoint. A checked-in OpenAPI definition generates Go management types and the TypeScript contract independently of gateway compilation. Update changed shapes and console consumers together. |
-| Client protocols | Preserve `/v1`, `/anthropic/v1`, and both `/gemini/v1` and `/gemini/v1beta`, including native SDK authentication, errors, and streaming. |
-| Process topology | Retain `all`, `gateway`, `control`, and `worker` modes, a separate private observability listener, Compose, and Helm. |
-| Storage transition | Use a fresh Go installation with an isolated database and Valkey namespace. Keep a separate Go migration history, with forward-only sequential changes. Existing Rust storage must be rejected before mutation. |
-| Compatibility | Preserve product behavior and documented limitations. Old management payloads, Rust storage, and mixed Rust/Go deployments receive no compatibility layer. |
-| Release platforms | Retain native Linux amd64 and arm64 image builds. Qualify GLIDE and the runtime libraries on both platforms in M1. |
-| Scope | Full existing capabilities; no new tenancy model, provider families, SSR application, or infrastructure services are required. |
+| Clean backend | 46.214 (43.621–49.054) |
+| Backend edit | 5.791 (5.553–5.933) |
+| Targeted SSE test | 0.682 (0.660–0.787) |
+| API generation | 2.304 (2.183–2.361) |
+| Console | 10.583 (10.296–11.092) |
+| Checks | 56.801 (56.402–59.422) |
+| Image | 70.231 (68.592–70.962) |
 
-GLIDE's Go client uses CGO and a Rust core distributed as prebuilt static
-libraries. The build therefore needs a C toolchain and compatible native
-libraries. Normal OLP development must use those artifacts without compiling
-Rust; the release inventory must still account for their dependencies. Use
-glibc-based Linux build/runtime images and native architecture runners as the
-initial packaging choice. [GLIDE Go documentation](https://github.com/valkey-io/valkey-glide/blob/main/go/README.md)
+Clean/edit builds were 20.26%/27.42% of the frozen Rust medians
+(228.062/21.121 seconds), meeting both ≤50% gates. Eight held 64 MiB uploads
+reserved 512 MiB under a 1 GiB spool cap and cleaned up to zero; the held
+checkpoint recorded 67,008 KiB RSS, 3,044,296 heap bytes, and ten descriptors.
+These are fixture observations, not peak-memory, throughput, latency,
+availability, invoice-accuracy, or recovery-point guarantees.
 
-## Milestones
+Bulk evidence is retained in immutable Git commits, not solely Actions artifacts:
 
-| ID | Milestone | Required predecessor | Status |
-| --- | --- | --- | --- |
-| M1 | [Go foundation and build economics](01-foundation.md) | None | Complete; [final evidence](evidence/release-qualification.md) |
-| M2 | [Installation, identity, and management](02-access-and-control.md) | M1 | Complete; [final evidence](evidence/release-qualification.md) |
-| M3 | [Complete OpenAI request path](03-core-gateway.md) | M2 | Complete; [final evidence](evidence/release-qualification.md) |
-| M4 | [Distributed limits, pricing, and recovery](04-limits-and-accounting.md) | M3 | Complete; [final evidence](evidence/release-qualification.md) |
-| M5 | [Remaining protocols, providers, and routing](05-provider-and-routing-parity.md) | M4 | Complete; [final evidence](evidence/release-qualification.md) |
-| M6 | [Media and operational completeness](06-media-and-console-parity.md) | M5 | Complete; [final evidence](evidence/release-qualification.md) |
-| M7 | [Release qualification and Rust retirement](07-release-and-rust-retirement.md) | M6 | Complete; [final evidence](evidence/release-qualification.md) |
-
-M3 provides the first usable Go inference path. M4 supplies the accounting and
-measurements that advanced routing needs in M5. M6 completes product parity;
-M7 qualifies the complete replacement and removes the old build workflow.
-Milestones are completion gates, not calendar estimates.
-
-## Using the backlog
-
-Each ticket has a stable ID, checkbox, prerequisites, deliverable, acceptance
-criteria, and references. Tickets inherit their milestone's prerequisites;
-their explicit dependencies add ordering within the milestone. Preserve IDs
-when splitting work into issues, and link implementation PRs and validation
-evidence beside the ticket before checking it off.
-
-Tests and console changes belong with the feature they exercise. A milestone
-closes only when every ticket and its exit scenarios pass. Record measured
-results and remaining limitations; do not replace valid fixture expectations
-merely to make a port pass. A capability removal or weaker guarantee requires an
-explicit roadmap revision and cannot be recorded as completed parity.
-
-The frozen Rust reference is commit
-`6c21dfb917c9019161348ea24b532a77b6612e6e`. Source links in these files describe
-that baseline. If working-tree behavior later changes, inspect the reference
-with `git show 6c21dfb917c9019161348ea24b532a77b6612e6e:<path>`.
-M7 converts links to retired files into links to that revision. The existing
-[architecture map](../architecture.md), [compatibility tables](../compatibility.md),
-and [behavioral suites](../../tests/README.md) are the starting inventory.
-
-Canonical `make setup/dev/check/test/integration/api/build/fmt` commands use Go.
-Rust sources are retained only through the frozen reference; the two storage
-formats must never share a writable installation.
-
-## Capability ownership
-
-This maps existing behavior to its completion milestone. The M1
-[frozen inventory](evidence/reference-inventory.json) adds concrete endpoint,
-fixture, and journey evidence. The existing
-compatibility tables remain the operation/provider support matrix.
-
-| Existing capability and source | Completion owner |
-| --- | --- |
-| [Process configuration, listeners, lifecycle, and mode composition](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/process) | M1 foundation; M7 qualification |
-| [Database transactions, migrations, pagination, and idempotency](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/database.rs) | M2 implemented; [Go code and qualification](evidence/access-and-control.md) |
-| [Bootstrap, local accounts, roles, invitations, sessions, profiles, and API keys](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/access) | M2 implemented; [Go code and qualification](evidence/access-and-control.md) |
-| [OIDC configuration, login, role mappings, and linked identities](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/access/oidc) | M2 implemented; [Go code and qualification](evidence/access-and-control.md) |
-| [Secret files, hashing, encryption, and master-key rotation](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/crypto) | M2 implemented; [Go code and qualification](evidence/access-and-control.md) |
-| [Management contracts and response policies](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/http/control) and [settings](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/settings) | M2 implemented; [Go code and qualification](evidence/access-and-control.md) |
-| [Provider drafts, discovery, certification, revisions, and credential pools](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/providers) | M3 implemented for OpenAI-compatible connections; [Go code and qualification](evidence/core-gateway.md); M5 remaining connectors/options |
-| [Route drafts, publication, history, and weighted selection](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/routes) | M3 implemented; [Go code and qualification](evidence/core-gateway.md) |
-| [Atomic runtime publication, pinned snapshots, and independent authority refresh](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/runtime) | M3 implemented; [Go code and qualification](evidence/core-gateway.md) |
-| [OpenAI Chat Completions, Responses, and model discovery](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/inference/http/endpoint_policy/registry.rs) | M3 implemented; [Go code and qualification](evidence/core-gateway.md) |
-| [Admission, bounded execution, retries, circuit health, cancellation, and SSE](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/inference) | M3 implemented; [Go code and qualification](evidence/core-gateway.md) |
-| [Egress validation and DNS pinning](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/net) and [HTTP resource limits](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/http) | M3 implemented; [Go code and qualification](evidence/core-gateway.md); media extensions implemented in M6 |
-| [Key, connection, and slot limits and spend controls](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/limits) | M4 implemented as [`internal/limits/`](../../internal/limits/); [Go code and qualification](evidence/limits-and-accounting.md) |
-| [Pricing, accounting, ingestion, history, reports, completeness, and retention](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/usage) | M4 implemented as [`internal/usage/`](../../internal/usage/); [Go code and qualification](evidence/limits-and-accounting.md) |
-| [Distributed recovery and multiple-installation isolation](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/tests/ha) | M4 implemented as the [`tests/integration/m4_*` process suites](../../tests/integration/); [Go code and qualification](evidence/limits-and-accounting.md); final process qualification M7 |
-| [Anthropic/Gemini surfaces, translations, token counting, embeddings, and moderation](../compatibility.md) | M5 |
-| [Azure, Vertex, Bedrock, and compatible-vendor profiles](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/providers) | M5 |
-| [Custom endpoints/auth, mounted connectors, model facts, bulk workflows, policies, and routing preferences](../provider-routing.md) | M5 |
-| [Images, audio, uploads, video jobs, historical credentials, and reconciliation](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/media) | M6 implemented as [`internal/media/`](../../internal/media/) and the gateway media handlers; M6-09 failure/resource/browser qualification is complete |
-| [Metrics, optional OTLP tracing, health, and worker diagnostics](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/observability) | M1/M3 foundations; M6 implemented as [`internal/observability/`](../../internal/observability/) and [`internal/telemetry/`](../../internal/telemetry/) |
-| [Console access/settings](../../console/src/lib/features/access/), [providers](../../console/src/lib/features/providers/), [routes](../../console/src/lib/features/routes/), and [playground](../../console/src/lib/features/inference/) | M2 and M3 implemented; [Go code and qualification](evidence/core-gateway.md); M5 alongside its APIs |
-| [Console usage/history](../../console/src/lib/features/usage/), [media](../../console/src/lib/features/media/), [overview](../../console/src/lib/features/overview/), and [health](../../console/src/lib/features/runtime/) | Usage, history, budgets, and overview implemented in M4; [Go code and qualification](evidence/limits-and-accounting.md); media and health implemented in M6 |
-| [Compose/Helm](../../deploy/), [backup/restore and qualification scripts](../../scripts/), [CI/releases](../../.github/workflows/), and [operations](../operations.md) | M7 |
-
-## Build and dependency scorecard
-
-The [complete M7 scorecard](evidence/release-build-scorecard.json) records five
-successful measurements of source `ccd138f` on the same runner class/cache
-procedure as the frozen Rust baseline. These are full-application measurements.
-
-| Measurement | Frozen Rust median (range), seconds | Go M7 median (range), seconds |
-| --- | --- | --- |
-| Clean backend build | 228.062 (226.766–234.552) | 46.214 (43.621–49.054) |
-| Actual implementation edit rebuild | 21.121 (20.086–21.916) | 5.791 (5.553–5.933) |
-| Uncached targeted SSE test | Unmeasured | 0.682 (0.660–0.787) |
-| API generation | Unmeasured | 2.304 (2.183–2.361) |
-| Console build | Unmeasured | 10.583 (10.296–11.092) |
-| Complete checks | Unmeasured | 56.801 (56.402–59.422) |
-| Image build | Unmeasured | 70.231 (68.592–70.962) |
-
-Both required backend medians are below 50% of Rust: 20.26% clean and 27.42%
-with an implementation edit. API generation uses checked OpenAPI and pinned Go/
-TypeScript generators without compiling the gateway. Image builds disable layer
-reuse while retaining the explicit BuildKit Go cache mount; Docker-internal
-downloads are included. Uncompressed local amd64 images measure approximately
-111.50 MB. CI separately qualifies integration rather than presenting it as a
-five-sample timing case.
-
-[Dependencies](evidence/release-dependencies.json) contain 23 direct Go module
-requirements and 216 resolved modules, including tests/tools. The frozen Rust
-baseline has 50 direct production crates and 467 resolved entries; these are not
-equivalent maintenance metrics. GLIDE's prebuilt native component is separately
-inventoried and scanned, including its conservative 376-crate FFI lock. See the
-[release report](evidence/release-qualification.md#build-and-dependency-results)
-for raw samples, commands, toolchains, linking, native libraries, licenses and
-resource-observation limits. Ordinary development requires no Rust compiler.
-
-## Completion evidence
-
-The replacement reuses the neutral JSON/SSE corpus, official JavaScript SDKs,
-optional Python SDKs and browser journeys through Go launchers. Disposable
-PostgreSQL, Valkey and controlled dependency failures qualify persistence and
-recovery behavior.
-
-Preserve the [production contracts](../production-guarantees.md): authority
-expiry, accrued-cost budget semantics, metadata privacy, egress restrictions,
-queue-loss visibility, and installation identity during restore. Deterministic
-fixtures establish tested compatibility. Paid live-provider qualification
-remains optional, credential-scoped, and separately recorded.
-
-M7 closes with the linked capability map, passing feature/process evidence,
-both native image qualifications, fresh-install and restore journeys, completed
-build scorecard, and canonical development/release workflows without Rust.
+- [`7ecaebb6dacbf0406174edd87c26e178077424a8`](https://github.com/tyk-swe/olp/tree/7ecaebb6dacbf0406174edd87c26e178077424a8/docs/roadmap/evidence)
+  contains the original `release-qualification.md`, `release-candidate.json`,
+  native amd64/arm64 build/smoke/link logs, packaged-browser/restore evidence,
+  scans, SBOM, build scorecard, raw timings, screenshots and fresh-checkout log.
+  This evidence commit **follows** the qualified application commit. Candidate
+  scan/SBOM hashes were verified against its Git blobs before active-tree removal.
+- [`20ad3e6dd3056a3066938584583ea1bddb9a4ed2`](https://github.com/tyk-swe/olp/tree/20ad3e6dd3056a3066938584583ea1bddb9a4ed2/docs/roadmap)
+  contains the final accepted backlogs and all 149 pre-cleanup roadmap files,
+  including the later mapping reconciliation. Retrieval with `git archive` was
+  verified byte-for-byte against the pre-cleanup tree. For example:
+  `git show 20ad3e6dd3056a3066938584583ea1bddb9a4ed2:docs/roadmap/evidence/release-qualification.md`.

@@ -22,9 +22,9 @@ and probe `/health/live` and `/health/ready`. The public listener returns 404
 for these paths. Readiness snapshots refresh every five seconds and expensive
 rollups every fifteen. Page when readiness is absent for five minutes, events
 are dropped/abandoned, persistence is unavailable, hard-limited keys cannot
-reach Valkey, all asynchronous reporters are stale, or an outbox owner cannot
-be taken over. Warn when request-metadata or runtime-outbox backlog exceeds
-its threshold for ten minutes. The bundled Prometheus rules and per-component
+reach Valkey, worker checkpoints are stale, or cost reconciliation cannot acquire
+leadership. Warn when request-metadata backlog exceeds its threshold for ten
+minutes. The bundled Prometheus rules and per-component
 ServiceMonitors provide starting alerts; keep control and gateway alerts
 separate.
 
@@ -69,30 +69,71 @@ two `-f` arguments followed by `down`.
 
 ### Replicated worker health
 
-`/health/ready` and `/metrics` read PostgreSQL-backed fleet summaries; worker
-pods do not serve HTTP. `asynchronous_plane: healthy` means each fixed worker
-task has a current checkpoint and both the request-metadata group and runtime
-outbox are drained. It does not require one specific replica. Metadata, outbox,
-and gateway-epoch checkpoints become stale after 20 seconds; maintenance
-after 180 seconds. A released outbox session can be replaced during the
-20-second handoff. Run three workers across failure domains in production.
+Workers expose the private observability listener for `/health/live`,
+`/health/ready`, and `/metrics`; they have no public management or inference
+listener. Fleet health comes from PostgreSQL checkpoints, independent of which
+replica last performed a task. With Valkey configured, `worker` and `all` run:
+
+- **Media reconciliation:** claims durable video jobs, polls through pinned
+  historical credentials, checks current credential revocation before upstream
+  calls, records completion/deletion and finishes accounting. Claims survive
+  restart and hand off between workers.
+- **Request metadata consumer:** uses its own Valkey connection for blocking
+  reads. It replays its pending entries before reclaiming idle deliveries,
+  persists each event once, then acknowledges and deletes it. Unsupported wire
+  versions remain pending. Malformed/invalid payloads and missing deliveries
+  become explicit gaps before drainage. An acknowledgement is not an fsync
+  guarantee.
+- **Gateway epoch detection:** records an unclean gateway exit as a completeness
+  gap after two confirming passes.
+- **Maintenance:** every 60 seconds, uses a detached PostgreSQL session and
+  advisory lock to roll up usage before purging facts, preserving spend
+  reconstruction. It expires requests, receipts, audit, gaps, epochs, sessions,
+  invitations, replays, and OIDC flows under stored `retention.*` settings.
+  Closing the session after each pass releases the lock.
+- **Cost reconciliation:** every 60 seconds, repairs current UTC spend windows
+  from durable facts using a detached leadership session held between passes.
+  Followers record skips; failure, cancellation, or the 120-second pass deadline
+  closes the leader session. See [spend recovery](spend-budget-recovery.md).
+
+The first three tasks become stale after 20 seconds without a successful
+checkpoint; maintenance and cost reconciliation after 180 seconds. A skipped
+follower pass does not establish leader success. `asynchronous_plane: healthy`
+requires current expected tasks, a healthy/backlogged consumer checkpoint, and
+zero request-metadata pending and lag counts. A current fleet with pending work
+is `backlogged`; missing task evidence is `unknown`. This is metadata drainage,
+not a claim that every upstream video job has finished.
+
+Runtime publication is synchronous inside the activation transaction under the
+installation row lock (`internal/runtime/publish.go`). The retained readiness
+field `runtime_outbox` is `not_configured`; there is no outbox worker, takeover,
+or backlog to drain. Monitor runtime-generation convergence and independent
+key-authority freshness instead.
 
 Pending metadata is reclaimable after 30 seconds and scanned every five
-seconds; investigate if recovery has not begun within 35 seconds. PostgreSQL
-session loss releases outbox leadership. Use these content-free signals:
+seconds; investigate if recovery has not begun within 35 seconds. Run three
+workers across failure domains in production. Use these content-free signals:
 
 - `olp_request_metadata_consumer_pending_events`, lag, and oldest-pending age;
 - reclaimed/recovered and persistence-duplicate counters;
-- runtime-outbox pending/claimed/stale-owner and publication retry counters;
 - `olp_worker_task_healthy{task=...}` and
   `olp_worker_task_runs_total{task=...,outcome=...}`.
 
-Counters are additive PostgreSQL totals shared by replicas. If summaries cannot
-be read, readiness reports `null` and
-`olp_async_worker_observability_available` is zero; do not interpret missing
-series as a reset. Reclaims and duplicates show recovery, not necessarily an
-incident. Inspect the PostgreSQL advisory-lock session when failed takeover
-counts rise.
+Worker counters are additive PostgreSQL totals shared by replicas. When summary
+reads fail, `olp_async_worker_observability_available` is zero; missing series
+are not resets. Reclaims and duplicates show recovery, not necessarily an
+incident. Inspect advisory-lock sessions if maintenance or cost repair stalls.
+The consumer retries delivery failures internally; its outer process launcher
+has no restart supervisor. If it exits (currently only startup misconfiguration
+returns an error), correct the cause and restart the process.
+
+`GET /api/v3/auth/capabilities` reports `limits_enforced` and
+`retention_enforced` from configured Valkey, not live worker health. Configuring
+Valkey without running a worker still reports these flags as true. Use task
+checkpoints to confirm retention is running. Without Valkey, `all` starts only
+media reconciliation: epoch detection and maintenance also remain stopped,
+although readiness still expects their checkpoints and can stay degraded.
+Production accounting and retention require Valkey and a worker or `all` process.
 
 ### Spend-budget reconciliation
 
@@ -135,6 +176,52 @@ fail-closed during a Valkey outage even when
 `limits.valkey_unavailable=fail_open`; do not remove a budget to bypass that
 safety boundary.
 
+## Accounting delivery and shutdown
+
+Every request an API key owns produces one content-free metadata event;
+playground traffic has no key and is not accounted for. Inference
+processes buffer up to 8192 events and write them to the installation stream;
+the buffer never blocks a request, and an overflow is counted as loss rather
+than paid for in latency. Events carry identifiers, timing, token counts, and
+per-attempt evidence only — never prompts, outputs, tool data, or headers.
+
+Management processes serve the results: the usage summary, breakdown,
+time series, and completeness endpoints under `/api/v3/usage/`, request listing
+and detail under `/api/v3/requests`, pricing revisions under
+`/api/v3/pricing/revisions`, and gateway epochs and their acknowledgement under
+`/api/v3/request-metadata/gateway-epochs`. Reports mark a partial boundary
+bucket as approximate and report what they excluded, and carry gap evidence and
+consumer health so incompleteness stays visible after aggregation.
+
+Shutdown stops the listeners and drains their handlers first, then closes
+metadata intake and gives the writer a bounded opportunity to flush the buffer.
+Only afterwards are delivery and worker contexts cancelled. An expired flush
+budget records undelivered events as loss; a forced HTTP shutdown leaves the
+gateway epoch open for detection because handlers may still emit metadata.
+A clean drain closes the epoch against what was actually delivered. HTTP,
+metadata, delivery, workers and trace flushing share `OLP_SHUTDOWN_TIMEOUT`
+(30 seconds by default). Forced closure records uncertainty instead of
+extending the deployment termination budget.
+
+## Shared state in Valkey
+
+Every key is prefixed with the installation namespace
+`olp:go:v1:<installation>:`, so installations sharing one Valkey service never
+read, acknowledge, or reconcile one another's state.
+
+| Key | Contents |
+|---|---|
+| `<prefix>limits:{<lookup>}:rate` | Request and token windows for one lookup. |
+| `<prefix>limits:{<lookup>}:concurrency:v2` | Concurrency leases for one lookup. |
+| `<prefix>limits:{<api key>}:cost:day` and `:cost:month` | Accrued spend and unpriced attempt counts for the current UTC windows. |
+| `<prefix>limits:provider-cooldown:<scope>` | Credential-version and slot cooldowns. |
+| `<prefix>request-metadata` | The request metadata stream, read by consumer group `olp:persistence`. |
+
+A lookup is the key's lookup identifier, `pc_<provider uuid>` for a connection,
+or `ps_<slot uuid>` for a credential slot; the braces are the cluster hash tag,
+so one key's dimensions stay on one slot. Cost keys are tagged by the API key
+itself, so every lookup of one key meets the same balance.
+
 ## Routine checks
 
 1. Confirm pod readiness and one nonzero runtime generation across gateways.
@@ -147,9 +234,9 @@ safety boundary.
    narrows a page by `action`, `resource_type`, `resource_id`,
    `actor_user_id`, `outcome`, `occurred_after`, and `occurred_before`, so
    each category can be reviewed on its own. Session-driven actions also
-   record the client source address, resolved through the same
-   `OLP_TRUSTED_PROXY_CIDRS` rules the authentication boundary uses, and a
-   coarse user-agent family; the full user-agent string is never stored, and
+   record the direct peer address and a coarse user-agent family; forwarded
+   headers do not change authentication admission or audit attribution. The full
+   user-agent string is never stored, and
    background maintenance and reconciliation events leave both empty.
 5. Offboarding requires rotating or revoking installation-scoped keys;
    deactivating a user alone does not revoke them.
@@ -254,8 +341,9 @@ rolled back safely.
 
 Go pool connections set a ten-second statement deadline, ten-second lock wait
 and fifteen-second idle-transaction deadline. Commands additionally obey the
-startup/dependency deadlines in the configuration reference. Backup requires a dedicated read role with access to migration history and all
-backed-up tables; the restricted runtime login deliberately lacks that access.
+startup/dependency deadlines in the configuration reference. Backup should use a
+dedicated read role with access to migration history and all backed-up tables
+rather than sharing the runtime login.
 Large maintenance/export operations should use their own role and explicitly chosen deadlines, not an unlimited
 interactive account. PostgreSQL classifies statement cancellation as `57014`
 and lock expiry as `55P03`; a timeout does not imply a committed mutation.
@@ -263,14 +351,15 @@ and lock expiry as `55P03`; a timeout does not imply a committed mutation.
 Provision a non-superuser, non-owner runtime login and a separate migration
 owner. After migrations, run `scripts/grant-runtime-database-role.sql` as that
 owner with psql's `-v runtime_role=olp_runtime`. The script grants table DML and
-sequence usage, then removes migration-history access and installation-identity
-writes. Reapply after each migration; do not give the runtime role membership
-in the migration owner or schema/database CREATE privileges. Set both runtime
+sequence usage, then restricts migration history to SELECT. Feature-table DML
+includes installation-row updates used by management transactions; this is not a
+read-only installation-identity boundary. Reapply after each migration; do not
+give the runtime role membership in the migration owner or schema/database CREATE privileges. Set both runtime
 and migration URL Secrets before deploying the production Helm profile.
 
 ## Metric aggregation and incidents
 
-Database-derived request counts, provider samples, worker counters and outbox
+Database-derived request counts, provider samples, worker counters and metadata
 summaries are shared installation state exported by several replicas. Choose
 one current exporter or use `max` across replicas of the **same installation**;
 do not sum duplicated global values. Add a stable installation label at scrape

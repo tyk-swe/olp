@@ -11,12 +11,10 @@ DeepInfra, Hugging Face, Perplexity, Cohere, and Voyage contracts and OLP routin
 preferences. Custom native endpoints require live certification; they do not
 inherit the official OpenAI media discovery contract.
 
-The Go implementation serves this matrix, including both Gemini versions and
-the media rows, through one bounded executor. Its deterministic provider,
-SDK, and browser evidence is recorded in
-[M5 qualification](roadmap/evidence/provider-and-routing-parity.md); media
-failure-path evidence closes with M6-09 in the
-[roadmap](roadmap/06-media-and-console-parity.md).
+The [gateway](gateway.md) serves this matrix through one bounded executor.
+Current protocol, connector, SDK, and media tests are described in
+[tests/README.md](../tests/README.md). The [dated completion record](roadmap/README.md)
+links historical qualification; it does not qualify newer source.
 
 ## Legend
 
@@ -37,8 +35,8 @@ and streaming wherever it is available at all; token counting is unary only.
 Video creation is asynchronous. A cell shows `—` only when no transport mode
 of that operation can be certified for that provider kind.
 
-Endpoint registration lives in [src/inference/http/endpoint_policy/registry.rs](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/inference/http/endpoint_policy/registry.rs);
-certification policy lives in [src/providers/connectors/certification.rs](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/providers/connectors/certification.rs).
+Endpoint registration lives in [`internal/gateway/server.go`](../internal/gateway/server.go);
+certification policy lives in [`internal/providers/kinds.go`](../internal/providers/kinds.go).
 The conformance corpus and SDK suites exercise these behaviors.
 
 ## Surfaces and operations
@@ -110,24 +108,22 @@ when semantics change.
 
 ### Anthropic providers
 
-Structured output is the one shared contract Anthropic opts out of. The
-exemption `NO_ANTHROPIC_STRUCTURED_OUTPUT` in
-[tests/conformance/provider_connectors/matrix.rs](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/tests/conformance/provider_connectors/matrix.rs) records
-why: the canonical encoder rejects `response_format` rather than advertising
-support it does not have. Cached-input usage, provider request IDs, media
-parts, and oversized-response bounds are all held to the shared contract.
+Translation to Anthropic refuses `response_format` rather than advertising
+structured-output support it cannot express. This retains the frozen
+`NO_ANTHROPIC_STRUCTURED_OUTPUT` exception; current enforcement is in the
+[Anthropic encoder](../internal/protocols/canonical_anthropic.go). Cached-input
+usage, provider request IDs, media parts, and oversized-response bounds remain
+part of the shared contract.
 
 Beyond that, translating into Anthropic Messages refuses a request that uses a
 participant `name` on a message, a deterministic `seed`, more than one
 candidate, a tool-result message without its tool-call ID, an image with an
 explicit detail level, or an input audio, input file, or refusal content part.
 A missing maximum output token count is also refused, because Anthropic
-requires one. The variants are enumerated in
-[src/protocols/anthropic/translate/errors.rs](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/protocols/anthropic/translate/errors.rs) and turned into
-protocol errors by
-[src/providers/anthropic/transport/operations.rs](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/providers/anthropic/transport/operations.rs), which also
-refuses token counting in streaming mode and any request whose stream flag
-disagrees with the selected transport mode.
+requires one. These checks live in the
+[Anthropic encoder](../internal/protocols/canonical_anthropic.go). The
+[connector capability rules](../internal/connectors/capabilities.go) keep token
+counting unary and bind the selected transport mode.
 
 ### Gemini providers
 
@@ -136,12 +132,11 @@ parallel tool-call selection, a participant `name`, a system message that
 appears after the conversation has started, a tool result whose content is not
 text, and — as with Anthropic — input audio, input file, and refusal parts, or
 an image with an explicit detail level. An image without a MIME type is refused
-rather than guessed. The variants live in
-[src/protocols/gemini/translate/errors.rs](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/protocols/gemini/translate/errors.rs);
-[src/providers/gemini/transport/operations.rs](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/providers/gemini/transport/operations.rs) adds the
-unary-only rule for token counting, the asynchronous-mode refusal, and the
-requirement that a preserved `countTokens` request still validate after the
-model is rewritten.
+rather than guessed. These checks live in the
+[Gemini encoder](../internal/protocols/canonical_gemini.go); the
+[connector capability rules](../internal/connectors/capabilities.go) enforce
+unary token counting and refuse asynchronous generation. Preserved counting
+requests are validated after model rewriting as well.
 
 Gemini reports a `STOP` finish reason even when a candidate contains only
 function calls. The gateway corrects that to a tool-call finish reason so agent
@@ -166,8 +161,10 @@ do not grant those separate capabilities.
 These are explicit changes from the frozen Rust reference: its
 `NO_BEDROCK_RESPONSE_BOUND` and `NO_BEDROCK_MEDIA` exemptions described unbounded
 SDK-owned response bodies and refusal of image input parts, respectively.
-See the [exception reconciliation](roadmap/evidence/provider-and-routing-parity.md#cloud-dependencies-and-bounds-m5-03-and-m5-04)
-and [image-input tests](../internal/protocols/bedrock_test.go).
+The remaining frozen exceptions—`NO_BEDROCK_STRUCTURED_OUTPUT`,
+`NO_BEDROCK_CACHED_USAGE`, and `NO_BEDROCK_REQUEST_ID`—remain explicit above.
+See [image-input tests](../internal/protocols/bedrock_test.go) and
+[stream bounds tests](../internal/protocols/stream_parity_test.go).
 
 The [Go Converse encoder](../internal/protocols/bedrock.go) refuses, with an
 explicit protocol error, a request that asks for more than one candidate, sets
@@ -197,7 +194,7 @@ surface, so the other surfaces and every media operation are refused. Azure
 OpenAI can be certified for the same four operations, but on any surface, so it
 appears as `translated` on the Anthropic and Gemini surfaces and `—` for the
 media, image, audio, and video operations. Certification eligibility is defined in
-[src/providers/connectors/certification.rs](https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/src/providers/connectors/certification.rs); update this table when it changes.
+[`internal/providers/kinds.go`](../internal/providers/kinds.go); update this table when it changes.
 
 ## Qualification records
 

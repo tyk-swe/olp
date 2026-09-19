@@ -2,8 +2,8 @@
 
 All notable changes to OpenLLMProxy are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
-semantic versioning and match `Cargo.toml`, `console/package.json`,
-`deploy/helm/Chart.yaml` and `deploy/Dockerfile`.
+semantic versioning and take their source from root `package.json`;
+`console/package.json`, `deploy/helm/Chart.yaml` and the release image agree.
 
 ## [Unreleased]
 
@@ -14,20 +14,24 @@ semantic versioning and match `Cargo.toml`, `console/package.json`,
   status and data, and a sticky top navigation bar with contextual
   sub-navigation in place of the sidebar. The light theme and theme toggle are
   removed.
-- 3.0 requires a fresh installation. Existing 2.x storage is refused before
-  modification; PostgreSQL uses `olp_v3` and Valkey uses installation-specific
-  `olp:3` namespaces. Historical migration and internal compatibility paths are
-  removed.
-- One Rust package now groups management, SQL, runtime behavior, and workers by
-  product feature. Provider configuration has one typed model; inference owns
+- 3.0 requires a fresh installation. Rust 2.x and Rust 3.x storage is refused
+  before modification; PostgreSQL uses `olp_go` and Valkey keys use
+  `olp:go:v1:<installation UUID>:`. Provision fresh PostgreSQL storage and
+  isolated Valkey state; Rust data migration, mixed writable deployments, and
+  old management payload compatibility are not supported.
+- The Go application groups management, SQL, runtime behavior, and workers by
+  product feature under `internal/`. GLIDE still links a prebuilt Rust core
+  through CGO; ordinary application builds require C tooling, not Rust
+  compilation. Provider configuration has one typed model; inference owns
   request reservations, attempts, cancellation, accounting, and completion.
 - Management moves to `/api/v3`, with typed field errors and coherent
-  provider/model snapshots. Handler registration also generates OpenAPI and the
-  console's ignored API contract.
+  provider/model snapshots. The checked-in `openapi/management.json` is embedded
+  by the application; `make api` generates Go transport types and the console's
+  ignored TypeScript declarations without compiling the gateway.
 - Provider onboarding uses connection, models/capabilities, and activation.
   Console features own their API calls and query state.
-- `make dev` starts PostgreSQL, Valkey, Rust, and Vite with API proxying. One
-  required CI job runs `make check`; service, SDK, browser, and recovery checks
+- `make dev` starts PostgreSQL, Valkey, Go, and Vite with API proxying. CI runs
+  `make check`; service, SDK, browser, and recovery checks
   run explicitly through `make integration`.
 - Dependencies and toolchains are updated. TypeScript remains on supported 6.0;
   contributor documentation records when that exception can be removed.

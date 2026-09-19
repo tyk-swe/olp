@@ -35,6 +35,11 @@ official JavaScript SDKs, and Chromium journeys at packaged and Vite origins.
 Both origins run replacement recovery into an empty database with a separate
 Valkey service. Failure-path restores assert that the destination stays empty.
 Each test installation has an independent database and installation namespace.
+The hosted API-key lifecycle journey currently fails its accessibility check
+on dark-theme table helper text while the row is hovered: contrast is 4.39:1,
+below the required 4.5:1. This was reproduced on `bf46237fbc6f` on September 19,
+2026. Keep the assertion enabled; this unresolved UI issue prevents a complete
+browser qualification, including the later browser restore stages.
 Service-dependent Go tests require the `integration` build tag, even when
 they live beside feature code. They fail with setup guidance when their
 required service or recovery configuration is missing. Ordinary `make test`
@@ -56,5 +61,19 @@ CI. Set `OLP_LIVE_PROVIDER` and run
 main-branch `live-providers` workflow. Its configuration lists required secrets
 and cloud identity variables. Live calls consume provider quota.
 
-The retired Rust scenario inventory and its Go replacements are preserved in
-[release evidence](../docs/roadmap/evidence/release-qualification.md).
+The independent [frozen reference](fixtures/reference-inventory.json) preserves
+100 management tuples, 77 inference tuples, 133 suite sources, and SHA-256 hashes
+of the 18 neutral fixtures. [Behavior mappings](release-behaviors.json) explicitly
+name successor tests and explain retired Rust-only harnesses. Never regenerate
+the reference from current Go code. `node scripts/release-inventory.mjs` rejects
+changed fixtures, lost operation/capability tuples, missing mappings, and missing
+named tests, then writes current inventories under `deploy/`. Its script tests
+exercise negative mapping validation. The integration registration check walks
+the **current embedded contract**, which can include operations beyond the frozen
+baseline. Neither an inventory nor a named test's existence proves execution.
+
+The [September 18 qualification](../docs/roadmap/README.md) is historical and
+applies only to its recorded source and image. Use current CI results for current
+code. Browser journeys cover accounting, cloud configuration, bulk certification,
+grouped routes, pools, policy exclusions, preview, publication, playground, and
+replacement recovery through deterministic local providers, not paid accounts.
