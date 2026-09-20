@@ -258,78 +258,47 @@ func (s *Server) execute(ctx context.Context, x *execution) *outcome {
 			if used >= x.budget || ctx.Err() != nil {
 				break
 			}
-			// Authority can change while an earlier credential attempt is pending.
-			if connectors.SecretRequired(provider.AuthMode) && slot.CredentialID != nil && s.Runtime.Revoked(*slot.CredentialID) {
-				continue
-			}
-			// attempt.Timeout bounds first-byte/idle waits, not the lifetime
-			// of a stream. Hold concurrency through the overall deadline.
-			timeout := time.Until(deadline)
-			if timeout <= 0 {
-				// The route deadline is spent, so there is no window left to
-				// reserve and nothing further to try.
+			gate := s.gateSlot(ctx, &provider, &slot, estimateTokens(x.parsed, provider.ParameterDefaults), deadline)
+			switch gate.verdict {
+			case gateExpired:
 				return &outcome{err: (&attemptFailure{class: classTimeout}).toError()}
-			}
-			// A cooldown another replica recorded is read here rather than while
-			// the slots are ranked, so a limiter answering slowly costs one round
-			// trip per slot actually tried instead of one per candidate slot.
-			if s.Admission.cooling(ctx, provider.ID, &slot) {
-				continue
-			}
-			estimate := estimateTokens(x.parsed, provider.ParameterDefaults)
-			reservation, rejection, skip := s.Admission.reserveTarget(ctx, &provider, &slot, estimate, timeout)
-			if skip {
-				unmeterable = true
-				continue
-			}
-			if rejection != nil {
+			case gateDenied:
+				next = true
+			case gateRejected:
 				// The quota rejected the attempt before the provider was
 				// called, so it cost the upstream nothing and a sibling
 				// target may still serve this request.
 				used++
-				x.facts = append(x.facts, s.rejectedFact(x, attempt, slot, used, rejection))
-				last = rejection
-				if rejection.quota == quotaConnection {
-					break // every credential shares the connection quota
+				x.facts = append(x.facts, s.rejectedFact(x, attempt, slot, used, gate.rejection))
+				last = gate.rejection
+				next = gate.rejection.quota == quotaConnection // every credential shares the connection quota
+			case gateUnmeterable:
+				unmeterable = true
+			case gateAdmitted:
+				used++
+				fact, completion, failure := s.attempt(ctx, x, attempt, &provider, slot, used)
+				// Only an attempt that reached the upstream spent the key's
+				// window. An attempt that died inside this gateway — an
+				// endpoint outside the egress policy, a body that would not
+				// encode, a credential that would not apply — cost no provider
+				// anything, so the request stays refundable.
+				dispatched := failure == nil || failure.dispatched
+				x.dispatched = x.dispatched || dispatched
+				gate.hold.settle(ctx, dispatched, totalTokens(fact.Usage))
+				x.facts = append(x.facts, fact)
+				s.health.record(provider.ID, fact)
+				if failure == nil {
+					return &outcome{completion: completion, committed: fact.Committed}
 				}
-				continue
+				next = s.cooldownFailure(ctx, provider.ID, &slot, failure)
+				if failure.overall || failure.class == classCancelled {
+					return &outcome{err: failure.toError(), committed: failure.committed, cancelled: failure.class == classCancelled}
+				}
+				if !failoverAllowed(failure.class, failure.committed) {
+					return &outcome{err: failure.toError(), committed: failure.committed}
+				}
+				last = failure
 			}
-			if !s.health.claim(provider.ID) {
-				reservation.settle(ctx, false, nil)
-				break
-			}
-			used++
-			fact, completion, failure := s.attempt(ctx, x, attempt, &provider, slot, used)
-			// Only an attempt that reached the upstream spent the key's window.
-			// An attempt that died inside this gateway — an endpoint outside the
-			// egress policy, a body that would not encode, a credential that
-			// would not apply — cost no provider anything, so the request stays
-			// refundable.
-			dispatched := failure == nil || failure.dispatched
-			x.dispatched = x.dispatched || dispatched
-			reservation.settle(ctx, dispatched, totalTokens(fact.Usage))
-			x.facts = append(x.facts, fact)
-			s.health.record(provider.ID, fact)
-			if failure == nil {
-				return &outcome{completion: completion, committed: fact.Committed}
-			}
-			switch failure.class {
-			case classCredential:
-				s.health.cooldown(provider.ID, credentialHealthKey(&slot), credentialCooldown)
-				s.Admission.cooldown(ctx, provider.ID, &slot, credentialCooldown, true)
-			case classRateLimit:
-				s.health.cooldown(provider.ID, slot.ID, failure.retryAfter)
-				s.Admission.cooldown(ctx, provider.ID, &slot, cooldownDuration(failure.retryAfter), false)
-			default:
-				next = true
-			}
-			if failure.overall || failure.class == classCancelled {
-				return &outcome{err: failure.toError(), committed: failure.committed, cancelled: failure.class == classCancelled}
-			}
-			if !failoverAllowed(failure.class, failure.committed) {
-				return &outcome{err: failure.toError(), committed: failure.committed}
-			}
-			last = failure
 			if next {
 				break
 			}

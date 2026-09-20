@@ -16,11 +16,13 @@ func TestHalfOpenCredentialFailureReleasesSiblingProbe(t *testing.T) {
 		t.Fatal("endpoint circuit did not open")
 	}
 	now = now.Add(circuitOpenFor)
-	if !h.claim("provider") || h.claim("provider") {
+	_, first := h.claim("provider")
+	_, second := h.claim("provider")
+	if !first || second {
 		t.Fatal("half-open probes were not exclusive")
 	}
 	h.record("provider", AttemptFact{Class: classCredential})
-	if !h.claim("provider") {
+	if _, granted := h.claim("provider"); !granted {
 		t.Fatal("credential rejection penalized sibling endpoint probe")
 	}
 	h.record("provider", AttemptFact{Class: classSuccess})

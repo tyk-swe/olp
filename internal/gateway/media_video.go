@@ -56,12 +56,11 @@ func (s *Server) videoCreate(w http.ResponseWriter, r *http.Request) {
 		s.mediaFail(x, w, serverError(http.StatusServiceUnavailable, "upstream_unavailable", "No provider is currently able to serve `"+x.route.Slug+"`."))
 		return
 	}
-	slots := s.mediaSlots(x, attempt, &provider)
+	slots := s.slots(x, attempt, &provider)
 	if len(slots) == 0 {
 		s.mediaFail(x, w, serverError(http.StatusServiceUnavailable, "upstream_unavailable", "No provider credential is currently able to serve `"+x.route.Slug+"`."))
 		return
 	}
-	slot := slots[0]
 
 	overall := time.Duration(x.route.OverallTimeout) * time.Millisecond
 	ctx, cancel := context.WithTimeout(r.Context(), overall)
@@ -74,19 +73,12 @@ func (s *Server) videoCreate(w http.ResponseWriter, r *http.Request) {
 	defer func() { settleKey(ctx, x.lease, x.dispatched, x.settledTokens(), s.log) }()
 
 	deadline, _ := ctx.Deadline()
-	reservation, rejection, skip := s.Admission.reserveTarget(ctx, &provider, &slot, x.estimate, time.Until(deadline))
-	if skip {
-		s.mediaFail(x, w, limitsUnavailable())
+	hold, slot, e := s.admitVideoSlot(ctx, x, attempt, &provider, slots, deadline)
+	if hold == nil {
+		s.mediaFail(x, w, e)
 		return
 	}
-	if rejection != nil {
-		fact := s.rejectedFact(x, attempt, slot, 1, rejection)
-		x.facts = append(x.facts, fact)
-		s.health.record(provider.ID, fact)
-		s.mediaFail(x, w, rejection.toError())
-		return
-	}
-	defer func() { reservation.settle(ctx, x.dispatched, x.settledTokens()) }()
+	defer func() { hold.settle(ctx, x.dispatched, x.settledTokens()) }()
 
 	reserved, jobErr := media.ReserveJob(ctx, s.Media.Jobs.Pool, media.Reservation{
 		ID:                  localJobID,
@@ -102,6 +94,9 @@ func (s *Server) videoCreate(w http.ResponseWriter, r *http.Request) {
 		SlotID:              &slot.ID,
 	})
 	if jobErr != nil {
+		// A local persistence failure before dispatch refunds the quota
+		// reservation and returns any half-open probe it holds.
+		s.releaseHold(ctx, hold)
 		s.mediaFail(x, w, mediaError(media.JobHTTPError(jobErr)))
 		return
 	}
@@ -110,7 +105,7 @@ func (s *Server) videoCreate(w http.ResponseWriter, r *http.Request) {
 	// dispatch on a detached context bounded by the route deadline.
 	dispatchCtx, dispatchCancel := context.WithDeadline(context.WithoutCancel(ctx), deadline)
 	defer dispatchCancel()
-	fact, result, dispatchFailure := s.mediaAttempt(dispatchCtx, w, x, attempt, &provider, slot, 1)
+	fact, result, dispatchFailure := s.mediaAttempt(dispatchCtx, w, x, attempt, &provider, slot, len(x.facts)+1)
 	x.dispatched = dispatchFailure == nil || dispatchFailure.dispatched
 	x.facts = append(x.facts, fact)
 	s.health.record(provider.ID, fact)
@@ -129,6 +124,59 @@ func (s *Server) videoCreate(w http.ResponseWriter, r *http.Request) {
 	}
 	s.writeMediaResult(w, x, out)
 	s.finishMedia(x, out, out.status)
+}
+
+// admitVideoSlot gates the durable create's candidate slots through the
+// shared pre-dispatch boundary until one admits. The pinned single-dispatch
+// semantics are unchanged: only local pre-dispatch outcomes — a revoked or
+// cooling credential, an unmeterable target, a quota refusal — advance to a
+// sibling, and the first admitted slot is the one the durable reservation
+// pins. It returns the error to report when no slot admits.
+func (s *Server) admitVideoSlot(ctx context.Context, x *execution, attempt runtime.Attempt, provider *runtime.Provider, slots []runtime.Slot, deadline time.Time) (*dispatchHold, runtime.Slot, *Error) {
+	used := 0
+	unmeterable := false
+	var last *attemptFailure
+	for _, slot := range slots {
+		if used >= x.budget || ctx.Err() != nil {
+			break
+		}
+		gate := s.gateSlot(ctx, provider, &slot, x.estimate, deadline)
+		switch gate.verdict {
+		case gateExpired:
+			return nil, runtime.Slot{}, (&attemptFailure{class: classTimeout}).toError()
+		case gateDenied:
+			// The circuit refused the probe; siblings share the endpoint.
+			return nil, runtime.Slot{}, s.videoAdmissionError(ctx, x, last, unmeterable)
+		case gateRejected:
+			used++
+			x.facts = append(x.facts, s.rejectedFact(x, attempt, slot, used, gate.rejection))
+			last = gate.rejection
+			if gate.rejection.quota == quotaConnection {
+				return nil, runtime.Slot{}, s.videoAdmissionError(ctx, x, last, unmeterable)
+			}
+		case gateUnmeterable:
+			unmeterable = true
+		case gateAdmitted:
+			return gate.hold, slot, nil
+		}
+	}
+	return nil, runtime.Slot{}, s.videoAdmissionError(ctx, x, last, unmeterable)
+}
+
+// videoAdmissionError renders the terminal error when no candidate slot could
+// be admitted, matching the precedence the media attempt loop uses.
+func (s *Server) videoAdmissionError(ctx context.Context, x *execution, last *attemptFailure, unmeterable bool) *Error {
+	switch {
+	case ctx.Err() != nil && errors.Is(context.Cause(ctx), context.DeadlineExceeded):
+		return (&attemptFailure{class: classTimeout}).toError()
+	case ctx.Err() != nil:
+		return (&attemptFailure{class: classCancelled}).toError()
+	case last != nil:
+		return last.toError()
+	case unmeterable:
+		return limitsUnavailable()
+	}
+	return serverError(http.StatusServiceUnavailable, "upstream_unavailable", "No provider credential is currently able to serve `"+x.route.Slug+"`.")
 }
 
 // retireFailedCreate maps a failed create dispatch onto the reservation: an

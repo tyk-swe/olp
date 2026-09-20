@@ -182,17 +182,29 @@ func (h *healthTracker) ProviderHealth(window time.Duration) map[string]provider
 	return out
 }
 
-// claim reserves the one half-open endpoint probe. Credential-only outcomes
-// release it in record without charging an endpoint failure.
-func (h *healthTracker) claim(id string) bool {
+// claim reserves the one half-open endpoint probe. The first return value
+// reports whether the probe was acquired: record releases it once the attempt
+// lands, and releaseProbe returns it when a local step fails before dispatch.
+// Credential-only outcomes release it in record without charging an endpoint
+// failure.
+func (h *healthTracker) claim(id string) (probed, granted bool) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	p := h.provider(id)
 	if p.probing || h.now().Before(p.openUntil) {
-		return false
+		return false, false
 	}
-	if !p.openUntil.IsZero() {
+	probed = !p.openUntil.IsZero()
+	if probed {
 		p.probing = true
 	}
-	return true
+	return probed, true
+}
+
+// releaseProbe returns a claimed half-open probe whose attempt was abandoned
+// before dispatch, leaving the endpoint free for the next sibling.
+func (h *healthTracker) releaseProbe(id string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.provider(id).probing = false
 }

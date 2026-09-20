@@ -135,7 +135,8 @@ func (s *Server) parseMediaForm(w http.ResponseWriter, r *http.Request, keyID st
 	return form, nil
 }
 
-// mediaBegin runs the shared prelude: identity, admission, authentication.
+// mediaBegin runs the shared prelude: identity, admission, authentication,
+// and the routing header every route-planned media operation shares.
 func (s *Server) mediaBegin(w http.ResponseWriter, r *http.Request) (*execution, access.Authority, bool) {
 	x := &execution{request: s.begin(w, r), family: openai.FamilyChat, actor: "api_key"}
 	if !s.admit(r.Context()) {
@@ -144,6 +145,11 @@ func (s *Server) mediaBegin(w http.ResponseWriter, r *http.Request) (*execution,
 	}
 	authority, e := s.authenticate(r, "inference")
 	if e != nil {
+		s.release(r.Context())
+		s.mediaFail(x, w, e)
+		return x, access.Authority{}, true
+	}
+	if x.preferences, e = routingPreferences(r); e != nil {
 		s.release(r.Context())
 		s.mediaFail(x, w, e)
 		return x, access.Authority{}, true
@@ -232,7 +238,7 @@ func (s *Server) prepareMedia(x *execution, authority access.Authority) *Error {
 	}
 	var semantic error
 	plan, err := runtime.PlanRequest(snapshot, route.Slug, request.Op, "openai", x.mode, x.affinity, runtime.SelectionOptions{
-		KeyID: x.keyID, Preferences: x.preferences, Inputs: s.routingInputs(), Now: s.now(),
+		KeyID: x.keyID, Preferences: x.preferences, Parameters: mediaParameterNames(request), Inputs: s.routingInputs(), Now: s.now(),
 		CheckSlots: true, CredentialRevoked: s.Runtime.Revoked,
 		Accept: func(p runtime.Provider, t runtime.Target) error {
 			if !connectorsSupports(p, request.Op, x.mode) {
@@ -303,8 +309,9 @@ type mediaOutcome struct {
 }
 
 // executeMedia runs the bounded media attempt loop against the pinned
-// release. It mirrors execute: quota reservations, per-attempt deadlines,
-// slot selection, failover policy, health tracking, and attempt facts.
+// release. It mirrors execute: the shared pre-dispatch gate revalidates every
+// candidate slot, quota reservations, per-attempt deadlines, failover policy,
+// health tracking, and attempt facts.
 func (s *Server) executeMedia(ctx context.Context, w http.ResponseWriter, x *execution) *mediaOutcome {
 	deadline, _ := ctx.Deadline()
 	snapshot := x.request.release.Snapshot
@@ -319,51 +326,49 @@ func (s *Server) executeMedia(ctx context.Context, w http.ResponseWriter, x *exe
 		if !ok || s.health.open(provider.ID) {
 			continue
 		}
-		for _, slot := range s.mediaSlots(x, attempt, &provider) {
+		next := false
+		for _, slot := range s.slots(x, attempt, &provider) {
 			if used >= x.budget || ctx.Err() != nil {
 				break
 			}
-			used++
-			remaining := time.Until(deadline)
-			reservation, rejection, skip := s.Admission.reserveTarget(ctx, &provider, &slot, x.estimate, remaining)
-			if skip {
+			gate := s.gateSlot(ctx, &provider, &slot, x.estimate, deadline)
+			switch gate.verdict {
+			case gateExpired:
+				return &mediaOutcome{err: (&attemptFailure{class: classTimeout}).toError()}
+			case gateDenied:
+				next = true
+			case gateRejected:
+				// A quota refusal before dispatch cost the upstream nothing
+				// and is not provider evidence, so the circuit never sees it.
+				used++
+				x.facts = append(x.facts, s.rejectedFact(x, attempt, slot, used, gate.rejection))
+				last = gate.rejection
+				next = gate.rejection.quota == quotaConnection // every credential shares the connection quota
+			case gateUnmeterable:
 				unmeterable = true
-				continue
-			}
-			if rejection != nil {
-				fact := s.rejectedFact(x, attempt, slot, used, rejection)
+			case gateAdmitted:
+				used++
+				fact, result, failure := s.mediaAttempt(ctx, w, x, attempt, &provider, slot, used)
+				dispatched := failure == nil || failure.dispatched
+				x.dispatched = x.dispatched || dispatched
+				gate.hold.settle(ctx, dispatched, totalTokens(fact.Usage))
 				x.facts = append(x.facts, fact)
 				s.health.record(provider.ID, fact)
-				if !failoverAllowed(rejection.class, false) {
-					return &mediaOutcome{err: rejection.toError()}
+				if failure == nil {
+					return &mediaOutcome{result: result, committed: true, status: http.StatusOK}
 				}
-				last = rejection
-				continue
+				next = s.cooldownFailure(ctx, provider.ID, &slot, failure)
+				if failure.overall || failure.class == classCancelled || failure.class == classAmbiguous {
+					return &mediaOutcome{err: failure.toError(), committed: failure.committed, cancelled: failure.class == classCancelled}
+				}
+				if !failoverAllowed(failure.class, failure.committed) {
+					return &mediaOutcome{err: failure.toError(), committed: failure.committed}
+				}
+				last = failure
 			}
-			fact, result, failure := s.mediaAttempt(ctx, w, x, attempt, &provider, slot, used)
-			dispatched := failure == nil || failure.dispatched
-			x.dispatched = x.dispatched || dispatched
-			reservation.settle(ctx, dispatched, totalTokens(fact.Usage))
-			x.facts = append(x.facts, fact)
-			s.health.record(provider.ID, fact)
-			if failure == nil {
-				return &mediaOutcome{result: result, committed: true, status: http.StatusOK}
+			if next {
+				break
 			}
-			switch failure.class {
-			case classCredential:
-				s.health.cooldown(provider.ID, credentialHealthKey(&slot), credentialCooldown)
-				s.Admission.cooldown(ctx, provider.ID, &slot, credentialCooldown, true)
-			case classRateLimit:
-				s.health.cooldown(provider.ID, slot.ID, failure.retryAfter)
-				s.Admission.cooldown(ctx, provider.ID, &slot, cooldownDuration(failure.retryAfter), false)
-			}
-			if failure.overall || failure.class == classCancelled || failure.class == classAmbiguous {
-				return &mediaOutcome{err: failure.toError(), committed: failure.committed, cancelled: failure.class == classCancelled}
-			}
-			if !failoverAllowed(failure.class, failure.committed) {
-				return &mediaOutcome{err: failure.toError(), committed: failure.committed}
-			}
-			last = failure
 		}
 	}
 	switch {
@@ -379,17 +384,57 @@ func (s *Server) executeMedia(ctx context.Context, w http.ResponseWriter, x *exe
 	return &mediaOutcome{err: serverError(http.StatusServiceUnavailable, "upstream_unavailable", "No provider is currently able to serve `"+x.route.Slug+"`.")}
 }
 
-// mediaSlots returns the credential slots usable for this media attempt.
-func (s *Server) mediaSlots(x *execution, attempt runtime.Attempt, provider *runtime.Provider) []runtime.Slot {
-	ordered := runtime.SelectSlots(*provider, attempt.UpstreamModel, *x.route, x.keyID, x.media.Op, "openai", x.mode, x.affinity)
-	out := make([]runtime.Slot, 0, len(ordered))
-	for _, slot := range ordered {
-		if !s.slotAvailable(x, attempt, &slot) || (!s.Admission.ready() && (s.health.coolingDown(provider.ID, slot.ID) || s.health.coolingDown(provider.ID, credentialHealthKey(&slot)))) {
+// mediaParameterNames reports the canonical control names a media request
+// actually supplies, plus its semantic extensions, for strict
+// require_parameters filtering. Route and delivery fields — the model slug,
+// stream flags, upload payloads, job identities — and internal cleanup
+// markers never become routing requirements.
+func mediaParameterNames(r *media.Request) []string {
+	supplied := map[string]struct{}{}
+	add := func(name string, present bool) {
+		if present {
+			supplied[name] = struct{}{}
+		}
+	}
+	add("prompt", r.Prompt != "" || r.TextPrompt != nil)
+	add("input", r.Input != "")
+	add("voice", r.Voice != "")
+	add("n", r.Count != nil)
+	add("size", r.Size != nil)
+	add("response_format", r.Format != nil)
+	add("quality", r.Quality != nil)
+	add("style", r.Style != nil)
+	add("user", r.User != nil)
+	add("background", r.Background != nil)
+	add("moderation", r.Moderation != nil)
+	add("input_fidelity", r.InputFidelity != nil)
+	add("output_compression", r.OutputCompression != nil)
+	add("output_format", r.OutputFormat != nil)
+	add("partial_images", r.PartialImages != nil)
+	add("language", r.Language != nil)
+	add("temperature", r.Temperature != nil)
+	add("speed", r.Speed != nil)
+	add("instructions", r.Instructions != nil)
+	add("include", len(r.Include) > 0)
+	add("timestamp_granularities", len(r.TimestampGranularities) > 0)
+	add("chunking_strategy", len(r.ChunkingStrategy) > 0)
+	add("known_speaker_names", len(r.KnownSpeakerNames) > 0)
+	add("known_speaker_references", len(r.KnownSpeakerReferences) > 0)
+	add("seconds", r.Seconds != nil)
+	add("mask", r.Mask != nil)
+	add("input_reference", r.InputRef != nil)
+	for name := range r.Extra {
+		if strings.HasPrefix(name, "__olp_") {
 			continue
 		}
-		out = append(out, slot)
+		supplied[strings.TrimSuffix(name, "[]")] = struct{}{}
 	}
-	return out
+	names := make([]string, 0, len(supplied))
+	for name := range supplied {
+		names = append(names, name)
+	}
+	slices.Sort(names)
+	return names
 }
 
 // mediaAttempt performs one upstream media call with one credential.

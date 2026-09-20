@@ -81,6 +81,7 @@ type videoUpstream struct {
 	deleteCalls  atomic.Int64
 	failCleanup  atomic.Bool
 	delete404    atomic.Bool
+	createStatus atomic.Int64 // non-zero: create responds with this status
 	getStatus    atomic.Value // string
 }
 
@@ -90,6 +91,12 @@ func newVideoUpstream(t *testing.T) *videoUpstream {
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /v1/videos", func(w http.ResponseWriter, r *http.Request) {
 		ordinal := u.createCalls.Add(1)
+		if code := u.createStatus.Load(); code != 0 {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(int(code))
+			fmt.Fprintf(w, `{"error":{"message":"injected create failure","type":"server_error"}}`)
+			return
+		}
 		id := "upstream-video-created"
 		if ordinal > 1 {
 			id = fmt.Sprintf("upstream-video-created-%d", ordinal)
