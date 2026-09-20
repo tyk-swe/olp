@@ -252,7 +252,7 @@ func (s *Server) putOIDCConfiguration(r *http.Request) (Reply, error) {
 	if _, err = tx.Exec(r.Context(), "INSERT INTO olp_go.oidc_configuration(singleton,id,document,etag,updated_by) VALUES(true,$1,$2,$3,$4) ON CONFLICT(singleton) DO UPDATE SET document=excluded.document,etag=excluded.etag,updated_by=excluded.updated_by", c.ID, data, c.ETag, p.ID); err != nil {
 		return Reply{}, err
 	}
-	if err = usableOwner(r, tx); err != nil {
+	if err = s.usableOwner(r, tx); err != nil {
 		return Reply{}, err
 	}
 	if _, err = tx.Exec(r.Context(), "DELETE FROM olp_go.secrets WHERE purpose='oidc_flow'"); err != nil {
@@ -426,11 +426,19 @@ func (s *Server) consumeFlow(r *http.Request) (oidcFlow, oidcConfiguration, erro
 	}
 	return flow, config, tx.Commit(r.Context())
 }
-func (s *Server) oidcCallback(r *http.Request) (Reply, error) {
+func (s *Server) oidcCallback(r *http.Request) (reply Reply, callbackErr error) {
+	var flow oidcFlow
+	defer func() {
+		if callbackErr != nil && strings.Contains(r.Header.Get("Accept"), "text/html") && !strings.Contains(r.Header.Get("Accept"), "application/json") {
+			reply = oidcFailureRedirect(flow, callbackErr)
+			callbackErr = nil
+		}
+	}()
 	if err := s.admit(r, "oidc_callback", ""); err != nil {
 		return Reply{}, err
 	}
-	flow, c, err := s.consumeFlow(r)
+	consumed, c, err := s.consumeFlow(r)
+	flow = consumed
 	if err != nil {
 		return Reply{}, err
 	}
@@ -519,20 +527,46 @@ func (s *Server) oidcCallback(r *http.Request) (Reply, error) {
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return Reply{}, err
 	}
-	if identityID != "" {
-		if _, err = tx.Exec(r.Context(), "UPDATE olp_go.oidc_identities SET role_claims=$2,last_login_at=now() WHERE id=$1", identityID, roleClaims); err != nil {
-			return Reply{}, err
-		}
-	}
-	response := Reply{Status: 303, Location: flow.ReturnTo, Cookies: []*http.Cookie{clearCookie("__Host-olp_oidc_login_" + flow.ID)}}
+	// Check the initiating session and exact identity before applying a
+	// reauthentication result. Ordinary login is never a recent-auth proof.
+	var p Principal
 	if flow.Kind != "login" {
-		p, err := s.Principal(r, tx, "read")
+		p, err = s.Principal(r, tx, "read")
 		if err != nil {
 			return Reply{}, err
 		}
 		if p.ID != flow.UserID || p.SessionID != flow.SessionID {
 			return Reply{}, Fail(403, "oidc_session_changed", "The browser identity changed during authorization.")
 		}
+		if flow.Kind == "reauthenticate" && userID != p.ID {
+			return Reply{}, Fail(403, "oidc_identity_mismatch", "Use an identity already linked to this account.")
+		}
+	}
+	if identityID != "" {
+		if _, err = tx.Exec(r.Context(), "UPDATE olp_go.oidc_identities SET role_claims=$2,last_login_at=now() WHERE id=$1", identityID, roleClaims); err != nil {
+			return Reply{}, err
+		}
+	}
+	if identityID != "" && flow.Kind != "link" {
+		changed, allowed, err := syncOIDCAuthority(r, tx, userID, mappedRole(c, address, groups))
+		if err != nil {
+			return Reply{}, err
+		}
+		if !allowed || changed && flow.Kind == "reauthenticate" {
+			// Verified external deauthorization is authoritative even for the
+			// last owner. Commit it before returning an error; rollback must
+			// not preserve old sessions, recent-auth grants or invitations.
+			if err = tx.Commit(r.Context()); err != nil {
+				return Reply{}, err
+			}
+			if !allowed {
+				return Reply{}, Fail(403, "oidc_provisioning_denied", "No role mapping authorizes this identity.")
+			}
+			return Reply{}, Fail(403, "oidc_session_changed", "Your access changed. Sign in again before verifying your identity.")
+		}
+	}
+	response := Reply{Status: 303, Location: flow.ReturnTo, Cookies: []*http.Cookie{clearCookie("__Host-olp_oidc_login_" + flow.ID)}}
+	if flow.Kind != "login" {
 		if flow.Kind == "link" {
 			if userID != "" {
 				return Reply{}, Fail(409, "oidc_identity_linked", "This identity is already linked.")
@@ -589,7 +623,7 @@ func (s *Server) oidcCallback(r *http.Request) (Reply, error) {
 			if ValidText("display_name", name, 100) != nil {
 				name = address
 			}
-			if _, err = tx.Exec(r.Context(), "INSERT INTO olp_go.users(id,email,display_name,role,etag) VALUES($1,$2,$3,$4,$5)", userID, address, name, role, NewID()); err != nil {
+			if _, err = tx.Exec(r.Context(), "INSERT INTO olp_go.users(id,email,display_name,role,etag,role_management) VALUES($1,$2,$3,$4,$5,'oidc')", userID, address, name, role, NewID()); err != nil {
 				return Reply{}, err
 			}
 			if _, err = tx.Exec(r.Context(), "INSERT INTO olp_go.oidc_identities(id,user_id,issuer,subject,email_at_link,role_claims,last_login_at) VALUES($1,$2,$3,$4,$5,$6,now())", identityID, userID, c.Issuer, verified.Subject, address, roleClaims); err != nil {
@@ -602,39 +636,6 @@ func (s *Server) oidcCallback(r *http.Request) (Reply, error) {
 		}
 		if !active {
 			return Reply{}, Fail(403, "account_disabled", "This account is disabled.")
-		}
-		var local bool
-		var role string
-		if err = tx.QueryRow(r.Context(), "SELECT password_hash IS NOT NULL,role FROM olp_go.users WHERE id=$1", userID).Scan(&local, &role); err != nil {
-			return Reply{}, err
-		}
-		if !local {
-			mapped := mappedRole(c, address, groups)
-			if mapped == "" {
-				return Reply{}, Fail(403, "oidc_provisioning_denied", "No role mapping authorizes this identity.")
-			}
-			if mapped != role {
-				if _, err = tx.Exec(r.Context(), "UPDATE olp_go.users SET role=$2,etag=$3,updated_at=now() WHERE id=$1", userID, mapped, NewID()); err != nil {
-					return Reply{}, err
-				}
-				if err = usableOwner(r, tx); err != nil {
-					return Reply{}, err
-				}
-				if _, err = tx.Exec(r.Context(), "DELETE FROM olp_go.sessions WHERE user_id=$1", userID); err != nil {
-					return Reply{}, err
-				}
-				if mapped != "owner" {
-					if err = retireIssuedInvitations(r, tx, userID, ""); err != nil {
-						return Reply{}, err
-					}
-				}
-				if _, err = AdvanceAuthority(r, tx); err != nil {
-					return Reply{}, err
-				}
-				if err = Audit(r.Context(), tx, r, "", "user.role_sync_oidc", "user", userID, "success"); err != nil {
-					return Reply{}, err
-				}
-			}
 		}
 		session, err := s.newSession(r, tx, userID)
 		if err != nil {
@@ -671,7 +672,7 @@ func mappedRole(c oidcConfiguration, address string, groups []string) string {
 }
 
 // Callers restrict identities to the enabled issuer.
-func oidcSignInRole(c oidcConfiguration, local bool, role string, data []byte) (string, error) {
+func oidcSignInRole(c oidcConfiguration, locallyManaged bool, role string, data []byte) (string, error) {
 	// Both supported token authentication methods require the client secret.
 	if !c.HasClientSecret || data == nil {
 		return "", nil
@@ -695,7 +696,7 @@ func oidcSignInRole(c oidcConfiguration, local bool, role string, data []byte) (
 			return "", nil
 		}
 	}
-	if local {
+	if locallyManaged {
 		return role, nil
 	}
 	return mappedRole(c, claims.Email, claims.Groups), nil
@@ -737,11 +738,11 @@ func (s *Server) oidcIdentities(r *http.Request) (Reply, error) {
 	if err != nil {
 		return Reply{}, err
 	}
-	var local, localEnabled, enabled bool
-	if err = s.Pool.QueryRow(r.Context(), "SELECT password_hash IS NOT NULL,COALESCE((SELECT value='true' FROM olp_go.settings WHERE key='auth.local_login_enabled'),true),COALESCE((SELECT (document->>'enabled')::boolean FROM olp_go.oidc_configuration WHERE singleton),false) FROM olp_go.users WHERE id=$1", p.ID).Scan(&local, &localEnabled, &enabled); err != nil {
+	var local, localEnabled, enabled, locallyManaged bool
+	if err = s.Pool.QueryRow(r.Context(), "SELECT password_hash IS NOT NULL,COALESCE((SELECT value='true' FROM olp_go.settings WHERE key='auth.local_login_enabled'),true),COALESCE((SELECT (document->>'enabled')::boolean FROM olp_go.oidc_configuration WHERE singleton),false),role_management='local' FROM olp_go.users WHERE id=$1", p.ID).Scan(&local, &localEnabled, &enabled, &locallyManaged); err != nil {
 		return Reply{}, err
 	}
-	usable, err := usableOIDCIdentities(r, s.Pool, p, local)
+	usable, err := usableOIDCIdentities(r, s.Pool, p, locallyManaged)
 	if err != nil {
 		return Reply{}, err
 	}
@@ -761,9 +762,9 @@ func (s *Server) oidcIdentities(r *http.Request) (Reply, error) {
 		if usable[item["id"].(string)] {
 			remaining--
 		}
-		item["can_unlink"] = local && localEnabled || remaining > 0
+		item["can_unlink"] = local && locallyManaged && localEnabled && !s.LocalLoginDisabled || remaining > 0
 	}
-	return OK(map[string]any{"items": items, "linking_available": enabled, "has_local_password": local}), nil
+	return OK(map[string]any{"items": items, "linking_available": enabled, "has_local_password": local, "oidc_reauthentication_available": len(usable) > 0}), nil
 }
 func (s *Server) unlinkOIDCIdentity(r *http.Request) (Reply, error) {
 	id, err := IDParam(r, "identity_id")
@@ -792,12 +793,12 @@ func (s *Server) unlinkOIDCIdentity(r *http.Request) (Reply, error) {
 	if _, err = tx.Exec(r.Context(), "DELETE FROM olp_go.oidc_identities WHERE id=$1", id); err != nil {
 		return Reply{}, err
 	}
-	var local, localEnabled bool
-	if err = tx.QueryRow(r.Context(), `SELECT password_hash IS NOT NULL,COALESCE((SELECT value='true' FROM olp_go.settings WHERE key='auth.local_login_enabled'),true) FROM olp_go.users WHERE id=$1`, p.ID).Scan(&local, &localEnabled); err != nil {
+	var local, localEnabled, locallyManaged bool
+	if err = tx.QueryRow(r.Context(), `SELECT password_hash IS NOT NULL,COALESCE((SELECT value='true' FROM olp_go.settings WHERE key='auth.local_login_enabled'),true),role_management='local' FROM olp_go.users WHERE id=$1`, p.ID).Scan(&local, &localEnabled, &locallyManaged); err != nil {
 		return Reply{}, err
 	}
-	if !local || !localEnabled {
-		usable, err := usableOIDCIdentities(r, tx, p, local)
+	if !local || !locallyManaged || !localEnabled || s.LocalLoginDisabled {
+		usable, err := usableOIDCIdentities(r, tx, p, locallyManaged)
 		if err != nil {
 			return Reply{}, err
 		}
@@ -805,7 +806,7 @@ func (s *Server) unlinkOIDCIdentity(r *http.Request) (Reply, error) {
 			return Reply{}, Fail(409, "last_sign_in_method", "Keep at least one usable sign-in method.")
 		}
 	}
-	if err = usableOwner(r, tx); err != nil {
+	if err = s.usableOwner(r, tx); err != nil {
 		return Reply{}, err
 	}
 	if err = Audit(r.Context(), tx, r, p.ID, "oidc.unlink", "oidc_identity", id, "success"); err != nil {
@@ -830,4 +831,70 @@ func (s *Server) changeSignInMethod(r *http.Request, tx pgx.Tx, userID string) (
 		return Reply{}, err
 	}
 	return s.newSession(r, tx, userID)
+}
+
+// Only called after signature, claims, flow and configuration verification.
+// Administrative active status remains independent of external authorization.
+func syncOIDCAuthority(r *http.Request, tx pgx.Tx, userID, mapped string) (changed, allowed bool, err error) {
+	var management, role string
+	var authorized bool
+	err = tx.QueryRow(r.Context(), "SELECT role_management,role,oidc_authorized FROM olp_go.users WHERE id=$1", userID).Scan(&management, &role, &authorized)
+	if err != nil {
+		return false, false, err
+	}
+	if management == "local" {
+		return false, true, nil
+	}
+	allowed = mapped != ""
+	if allowed == authorized && (!allowed || mapped == role) {
+		return false, allowed, nil
+	}
+	if !allowed {
+		mapped = role
+	}
+	if _, err = tx.Exec(r.Context(), "UPDATE olp_go.users SET role=$2,oidc_authorized=$3,etag=$4,updated_at=now() WHERE id=$1", userID, mapped, allowed, NewID()); err != nil {
+		return false, false, err
+	}
+	if _, err = tx.Exec(r.Context(), "DELETE FROM olp_go.sessions WHERE user_id=$1", userID); err != nil {
+		return false, false, err
+	}
+	if !allowed || mapped != "owner" {
+		if err = retireIssuedInvitations(r, tx, userID, ""); err != nil {
+			return false, false, err
+		}
+	}
+	if _, err = AdvanceAuthority(r, tx); err != nil {
+		return false, false, err
+	}
+	err = Audit(r.Context(), tx, r, "", "user.role_sync_oidc", "user", userID, "success")
+	return true, allowed, err
+}
+
+func oidcFailureRedirect(flow oidcFlow, err error) Reply {
+	reason := "provider"
+	var problem *Problem
+	if errors.As(err, &problem) {
+		switch problem.Code {
+		case "oidc_authorization_denied":
+			reason = "cancelled"
+		case "oidc_flow_invalid", "oidc_session_changed", "oidc_recent_auth_required":
+			reason = "expired"
+		case "oidc_provisioning_denied", "account_disabled":
+			reason = "denied"
+		case "oidc_identity_linked", "oidc_link_required", "oidc_identity_mismatch":
+			reason = "link"
+		}
+	}
+	destination := "/login"
+	query := url.Values{"oidc_error": {reason}}
+	if flow.Kind == "link" || flow.Kind == "reauthenticate" {
+		destination = "/settings/profile"
+	} else if flow.ReturnTo != "" && safeReturn(flow.ReturnTo) {
+		query.Set("return_to", flow.ReturnTo)
+	}
+	reply := Reply{Status: 303, Location: destination + "?" + query.Encode()}
+	if flow.ID != "" {
+		reply.Cookies = []*http.Cookie{clearCookie("__Host-olp_oidc_login_" + flow.ID)}
+	}
+	return reply
 }

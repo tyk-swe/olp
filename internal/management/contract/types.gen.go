@@ -820,6 +820,9 @@ type OidcIdentityListResponse struct {
 	HasLocalPassword bool                   `json:"has_local_password"`
 	Items            []OidcIdentityResponse `json:"items"`
 	LinkingAvailable bool                   `json:"linking_available"`
+
+	// OidcReauthenticationAvailable A linked identity is usable with the current OIDC configuration. Reauthentication still verifies the exact identity and session.
+	OidcReauthenticationAvailable *bool `json:"oidc_reauthentication_available,omitempty"`
 }
 
 // OidcIdentityResponse defines model for OidcIdentityResponse.
@@ -1758,10 +1761,14 @@ type RuntimeGenerationResponse struct {
 
 // SessionDetailResponse defines model for SessionDetailResponse.
 type SessionDetailResponse struct {
-	CreatedAt  time.Time          `json:"created_at"`
-	Current    bool               `json:"current"`
-	ExpiresAt  time.Time          `json:"expires_at"`
-	Id         openapi_types.UUID `json:"id"`
+	// BrowserHint Coarse, untrusted browser/device display hint. Legacy sessions use Unknown browser.
+	BrowserHint *string            `json:"browser_hint,omitempty"`
+	CreatedAt   time.Time          `json:"created_at"`
+	Current     bool               `json:"current"`
+	ExpiresAt   time.Time          `json:"expires_at"`
+	Id          openapi_types.UUID `json:"id"`
+
+	// LastSeenAt Time of the last session verification, updated at most once per minute.
 	LastSeenAt time.Time          `json:"last_seen_at"`
 	UserId     openapi_types.UUID `json:"user_id"`
 }

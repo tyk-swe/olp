@@ -55,8 +55,9 @@ func TestPopulatedInstallationAppliesForwardMigration(t *testing.T) {
 	// Reconstruct the immediately preceding sequential Go release. Removing
 	// only migrations 0002/0003 while retaining later history would model a
 	// corrupt installation, not a supported forward upgrade.
-	if _, err = h.Pool.Exec(t.Context(), `ALTER TABLE olp_go.media_jobs DROP COLUMN slot_id;
-	    DELETE FROM olp_go.migrations WHERE version='0009_media_job_slot.sql'`); err != nil {
+	if _, err = h.Pool.Exec(t.Context(), `ALTER TABLE olp_go.users DROP COLUMN role_management, DROP COLUMN oidc_authorized;
+	    ALTER TABLE olp_go.sessions DROP COLUMN browser_hint;
+	    DELETE FROM olp_go.migrations WHERE version='0010_authentication_ownership.sql'`); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = database.Installation(t.Context(), h.Pool); err == nil {

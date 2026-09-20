@@ -110,14 +110,15 @@
     <table class="data-table">
       <thead
         ><tr
-          ><th>Session ID</th><th>Status</th><th>Created</th><th>Last seen</th
+          ><th>Browser / device</th><th>Status</th><th>Created</th><th
+            >Last session verification</th
           ><th>Expires</th><th><span class="sr-only">Actions</span></th></tr
         ></thead
       >
       <tbody>
         {#each sessions.data?.items ?? [] as session (session.id)}
           <tr>
-            <td><code>{session.id}</code></td><td
+            <td>{session.browser_hint || 'Unknown browser'}</td><td
               ><span class:accent={session.current} class="badge"
                 >{session.current ? 'current' : 'active'}</span
               ></td
@@ -176,8 +177,5 @@
   }
   .danger-button {
     color: var(--danger);
-  }
-  code {
-    font-size: var(--text-caption);
   }
 </style>

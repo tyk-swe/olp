@@ -1,4 +1,5 @@
 import type { components } from '$lib/api/schema';
+import { withAuthenticationDeadline } from './requestDeadline';
 import { apiClient } from '$lib/api/client';
 import { ApiProblem, ensureSuccess, result } from '$lib/api/http';
 import {
@@ -42,9 +43,9 @@ function sessionResult(
 export async function authenticationCapabilities(
   signal?: AbortSignal
 ): Promise<AuthenticationCapabilities> {
-  const { data, error, response } = await apiClient.GET(
-    '/api/v3/auth/capabilities',
-    { signal }
+  const { data, error, response } = await withAuthenticationDeadline(
+    (signal) => apiClient.GET('/api/v3/auth/capabilities', { signal }),
+    signal
   );
   const value = result(data, error, response);
   if (
@@ -93,9 +94,9 @@ export async function beginOidcLogin(
 export async function currentSession(
   signal?: AbortSignal
 ): Promise<CurrentSession> {
-  const { data, error, response } = await apiClient.GET(
-    '/api/v3/sessions/current',
-    { signal }
+  const { data, error, response } = await withAuthenticationDeadline(
+    (signal) => apiClient.GET('/api/v3/sessions/current', { signal }),
+    signal
   );
   return sessionResult(data, error, response);
 }

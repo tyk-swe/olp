@@ -1,6 +1,7 @@
 import { flushSync, mount, unmount } from 'svelte';
 import { QueryClient } from '@tanstack/svelte-query';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { authenticationCapabilities } from '$lib/features/access/session/auth';
 import {
   listSettings,
   updateSetting,
@@ -11,15 +12,8 @@ import SettingsPageProbe from './test/SettingsPageProbe.svelte';
 vi.mock('$lib/features/access/session/useRole.svelte', () => ({
   useRole: () => ({ can: () => true })
 }));
-vi.mock('$lib/features/access/session/serviceCapabilities.svelte', () => ({
-  useServiceCapabilities: () => ({
-    gatewayAvailable: false,
-    limitsEnforced: false,
-    retentionEnforced: false,
-    pending: false,
-    error: false,
-    retry: vi.fn()
-  })
+vi.mock('$lib/features/access/session/auth', () => ({
+  authenticationCapabilities: vi.fn()
 }));
 vi.mock('$lib/features/settings/api', async (original) => ({
   ...(await original<typeof import('$lib/features/settings/api')>()),
@@ -40,6 +34,13 @@ const requestSetting: Setting = {
   value: '30',
   etag: 'request-v1'
 };
+const capabilities = {
+  local_login_enabled: true,
+  oidc_login_enabled: true,
+  gateway_available: false,
+  limits_enforced: false,
+  retention_enforced: false
+};
 
 let host: HTMLElement;
 let client: QueryClient;
@@ -52,6 +53,7 @@ beforeEach(() => {
   client = new QueryClient({
     defaultOptions: { queries: { retry: false, staleTime: Infinity } }
   });
+  client.setQueryData(['service-capabilities'], capabilities);
   vi.mocked(listSettings).mockResolvedValue([auditSetting, requestSetting]);
 });
 
@@ -127,3 +129,51 @@ it('preserves edits made during a save and serializes setting saves', async () =
     '45'
   );
 });
+
+it.each([true, false])(
+  'refreshes cached capabilities after saving local sign-in as %s',
+  async (enabled) => {
+    const setting: Setting = {
+      ...auditSetting,
+      key: 'auth.local_login_enabled',
+      value: String(!enabled)
+    };
+    client.setQueryData(['service-capabilities'], {
+      ...capabilities,
+      local_login_enabled: !enabled
+    });
+    vi.mocked(listSettings).mockResolvedValue([setting]);
+    vi.mocked(updateSetting).mockResolvedValue({
+      ...setting,
+      value: String(enabled),
+      etag: 'setting-v2'
+    });
+    vi.mocked(authenticationCapabilities).mockResolvedValue({
+      ...capabilities,
+      local_login_enabled: enabled
+    });
+    component = mount(SettingsPageProbe, { target: host, props: { client } });
+    let field: HTMLSelectElement;
+    await vi.waitFor(() => {
+      const element = document.getElementById(`setting-${setting.key}`);
+      expect(element).toBeInstanceOf(HTMLSelectElement);
+      field = element as HTMLSelectElement;
+    });
+    expect(authenticationCapabilities).not.toHaveBeenCalled();
+
+    field!.value = String(enabled);
+    field!.dispatchEvent(new Event('change', { bubbles: true }));
+    flushSync();
+    field!.closest('article')!.querySelector('button')!.click();
+
+    await vi.waitFor(() => {
+      expect(host.textContent).toContain('Local password sign-in saved.');
+      expect(client.getQueryData(['service-capabilities'])).toEqual({
+        ...capabilities,
+        local_login_enabled: enabled
+      });
+    });
+    expect(updateSetting).toHaveBeenCalledWith(setting, String(enabled));
+    expect(authenticationCapabilities).toHaveBeenCalledTimes(1);
+  }
+);

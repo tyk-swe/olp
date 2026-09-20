@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { useServiceCapabilities } from '$lib/features/access/session/serviceCapabilities.svelte';
   import { invitationKeys } from '$lib/features/access/invitations/invitationKeys';
 
   import { onDestroy } from 'svelte';
@@ -38,6 +39,7 @@
     return invitation.invited_by_email ?? invitation.invited_by;
   }
 
+  const capabilities = useServiceCapabilities();
   const access = useRole();
   const canManage = $derived(access.can('users.manage'));
   const pagination = $state(emptyCursorHistory());
@@ -74,7 +76,7 @@
 
   async function invite(event: SubmitEvent) {
     event.preventDefault();
-    if (!canManage) return;
+    if (!canManage || !capabilities.localLoginEnabled) return;
     if (!email.trim() || !email.includes('@')) {
       error = 'Enter a valid email address.';
       return;
@@ -169,6 +171,23 @@
     <h2 id="invite-heading">Invite by email</h2>
     <p>The acceptance token is shown once. No email service is required.</p>
   </div>
+  {#if capabilities.pending}
+    <p role="status">Checking invitation availability…</p>
+  {:else if capabilities.error}
+    <div role="alert">
+      Invitation availability could not be checked.
+      <button
+        class="text-button"
+        type="button"
+        onclick={() => capabilities.retry()}>Retry</button
+      >
+    </div>
+  {:else if !capabilities.localLoginEnabled}
+    <p role="status">
+      Password invitations require local sign-in. Configure an OIDC role mapping
+      and ask the member to sign in with single sign-on.
+    </p>
+  {/if}
   <form onsubmit={invite} novalidate>
     <label
       ><span>Email address</span><input
@@ -176,11 +195,13 @@
         autocomplete="email"
         bind:value={email}
         placeholder="person@example.com"
-        disabled={!canManage}
+        disabled={!canManage || !capabilities.localLoginEnabled}
       /></label
     >
     <label
-      ><span>Role</span><select bind:value={role} disabled={!canManage}
+      ><span>Role</span><select
+        bind:value={role}
+        disabled={!canManage || !capabilities.localLoginEnabled}
         >{#each FIXED_ROLES as fixedRole (fixedRole)}<option value={fixedRole}
             >{fixedRole}</option
           >{/each}</select
@@ -189,7 +210,7 @@
     <label
       ><span>Expires in</span><select
         bind:value={expiresInHours}
-        disabled={!canManage}
+        disabled={!canManage || !capabilities.localLoginEnabled}
         >{#each expiryChoices as choice (choice.hours)}<option
             value={choice.hours}>{choice.label}</option
           >{/each}</select
@@ -198,7 +219,9 @@
     <button
       class="button button-primary"
       type="submit"
-      disabled={!canManage || busy === 'invite'}
+      disabled={!canManage ||
+        !capabilities.localLoginEnabled ||
+        busy === 'invite'}
       >{busy === 'invite' ? 'Creating…' : 'Create invitation'}</button
     >
   </form>

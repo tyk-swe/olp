@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { expect, test, type Page } from '@playwright/test';
 
 const password = 'a long browser test password';
+const rotatedPassword = 'a rotated browser test password';
 // With the Go gateway available, every signed-in role lands on the overview;
 // only roles that can manage providers see the onboarding heading.
 const ownerLanding = 'Bring your first model route online.';
@@ -97,6 +98,14 @@ test('setup, invitations, key policy, profile, settings, audit, and OIDC work th
   expect(
     await invited.evaluate(async () => (await fetch('/api/v3/users')).status)
   ).toBe(403);
+  // Invitation success must remain usable after the initial session ends.
+  await signOut(invited);
+  await invited.getByLabel('Email').fill('viewer@example.com');
+  await invited.getByLabel('Password', { exact: true }).fill(password);
+  await invited.getByRole('button', { name: 'Sign in', exact: true }).click();
+  await expect(
+    invited.getByRole('heading', { name: viewerLanding })
+  ).toBeVisible();
   await invitedContext.close();
 
   await page.goto('/api-keys/new');
@@ -142,6 +151,77 @@ test('setup, invitations, key policy, profile, settings, audit, and OIDC work th
   await expect(
     page.getByRole('button', { name: 'Open account menu' })
   ).toContainText('Updated Owner');
+  // Two pages share the actual session and CSRF cookies. A rotated password
+  // session must refresh its sibling before that sibling sends a mutation.
+  const sibling = await page.context().newPage();
+  await sibling.goto('/settings/profile');
+  await expect(sibling.getByLabel('Display name')).toHaveValue('Updated Owner');
+  const siblingVerified = sibling.waitForResponse(
+    (response) =>
+      response.url().endsWith('/api/v3/sessions/current') &&
+      response.status() === 200
+  );
+  await page.getByLabel('Current password', { exact: true }).fill(password);
+  await page.getByLabel('New password', { exact: true }).fill(rotatedPassword);
+  await page.getByLabel('Confirm new password').fill(rotatedPassword);
+  await page
+    .getByRole('button', { name: 'Change password', exact: true })
+    .click();
+  await siblingVerified;
+  await sibling.getByLabel('Display name').fill('Owner from sibling');
+  const siblingWrite = sibling.waitForResponse(
+    (response) =>
+      response.url().endsWith('/api/v3/profile') &&
+      response.request().method() === 'PATCH'
+  );
+  await sibling.getByRole('button', { name: 'Save profile' }).click();
+  // Rotation also changes the profile ETag. CSRF must pass, while the
+  // existing edit-conflict guard still requires an explicit reload.
+  expect((await siblingWrite).status()).toBe(412);
+  await expect(sibling.getByText('This item changed elsewhere.')).toBeVisible();
+  await expect(sibling.getByLabel('Display name')).toHaveValue(
+    'Owner from sibling'
+  );
+  await sibling.getByRole('button', { name: 'Reload', exact: true }).click();
+  await expect(sibling.getByLabel('Display name')).toHaveValue('Updated Owner');
+  await sibling.getByLabel('Display name').fill('Owner from sibling');
+  const refreshedWrite = sibling.waitForResponse(
+    (response) =>
+      response.url().endsWith('/api/v3/profile') &&
+      response.request().method() === 'PATCH'
+  );
+  await sibling.getByRole('button', { name: 'Save profile' }).click();
+  expect((await refreshedWrite).status()).toBe(200);
+  await expect(
+    sibling.getByText('Last session verification', { exact: false })
+  ).toBeVisible();
+  await expect(sibling.getByText(/Chrome on/)).toBeVisible();
+  // Restore the shared journey credential through the real UI, also exercising
+  // rotation in the other direction before cross-tab sign-out.
+  await sibling
+    .getByLabel('Current password', { exact: true })
+    .fill(rotatedPassword);
+  await sibling.getByLabel('New password', { exact: true }).fill(password);
+  await sibling.getByLabel('Confirm new password').fill(password);
+  await sibling
+    .getByRole('button', { name: 'Change password', exact: true })
+    .click();
+  await expect(
+    sibling.getByText(
+      'Password changed. All previous sessions were revoked and this browser was rotated.'
+    )
+  ).toBeVisible();
+  await signOut(sibling);
+  await expect(page).toHaveURL(/\/login/);
+  await page.getByLabel('Email').fill('owner@example.com');
+  await page.getByLabel('Password', { exact: true }).fill(password);
+  await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+  await expect(
+    page.getByRole('heading', { name: 'Personal profile' })
+  ).toBeVisible();
+  await expect(sibling).not.toHaveURL(/\/settings\/profile/);
+  await sibling.close();
+
   await page.goto('/settings');
   const retention = page
     .locator('.setting-row')
@@ -270,4 +350,104 @@ test('setup, invitations, key policy, profile, settings, audit, and OIDC work th
   await page.goto('/api-keys');
   await expect(page.getByRole('link', { name: 'Create key' })).toHaveCount(0);
   expect(failures).toEqual([]);
+});
+
+test('capabilities and passive verification recover without losing loaded content', async ({
+  page
+}, info) => {
+  let capabilitiesFailed = false;
+  await page.route('**/api/v3/auth/capabilities', async (route) => {
+    if (!capabilitiesFailed) {
+      capabilitiesFailed = true;
+      await route.fulfill({
+        status: 503,
+        contentType: 'application/problem+json',
+        body: JSON.stringify({
+          status: 503,
+          title: 'Sign-in discovery unavailable'
+        })
+      });
+    } else await route.continue();
+  });
+  await page.goto('/login');
+  await expect(page.getByRole('alert')).toContainText(
+    'Sign-in options could not be loaded'
+  );
+  await page.getByRole('button', { name: 'Retry', exact: true }).click();
+  await page.getByLabel('Email').fill('owner@example.com');
+  await page.getByLabel('Password', { exact: true }).fill(password);
+  await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+  await expect(page.getByRole('heading', { name: ownerLanding })).toBeVisible();
+  await page.goto('/settings/profile');
+  await expect(page.getByLabel('Display name')).toHaveValue(
+    'Owner from sibling'
+  );
+  let unavailable = true;
+  await page.route('**/api/v3/sessions/current', async (route) => {
+    if (unavailable && route.request().method() === 'GET')
+      await route.fulfill({
+        status: 503,
+        contentType: 'application/problem+json',
+        body: JSON.stringify({
+          status: 503,
+          title: 'Session service unavailable'
+        })
+      });
+    else await route.continue();
+  });
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+  const banner = page
+    .getByRole('alert')
+    .filter({ hasText: 'Session verification unavailable' });
+  await expect(banner).toBeVisible();
+  await expect(page.getByLabel('Display name')).toHaveValue(
+    'Owner from sibling'
+  );
+  let writes = 0;
+  page.on('request', (request) => {
+    if (
+      request.url().endsWith('/api/v3/profile') &&
+      request.method() === 'PATCH'
+    )
+      writes++;
+  });
+  await page.getByLabel('Display name').fill('Retained edit');
+  await page.getByRole('button', { name: 'Save profile' }).click();
+  await expect(page.locator('#profile-error')).toHaveText(
+    'Session service unavailable'
+  );
+  expect(writes).toBe(0);
+  await page.screenshot({
+    path: info.outputPath('verification-degraded.png'),
+    fullPage: true
+  });
+  unavailable = false;
+  await banner.getByRole('button', { name: 'Retry' }).click();
+  await expect(banner).toHaveCount(0);
+  await page.getByRole('button', { name: 'Save profile' }).click();
+  await expect(page.getByText('Profile updated.')).toBeVisible();
+  expect(writes).toBe(1);
+  // A CSRF rejection is an explicit retry, never an automatic replay.
+  await page.route('**/api/v3/profile', async (route) => {
+    if (route.request().method() === 'PATCH') {
+      await route.fulfill({
+        status: 403,
+        contentType: 'application/problem+json',
+        body: JSON.stringify({
+          status: 403,
+          title: 'CSRF invalid',
+          type: 'https://openllmproxy.dev/problems/csrf_invalid'
+        })
+      });
+      await page.unroute('**/api/v3/profile');
+    } else await route.continue();
+  });
+  await page.getByLabel('Display name').fill('Explicit retry');
+  await page.getByRole('button', { name: 'Save profile' }).click();
+  await expect(page.getByText(/Review your changes and retry/)).toBeVisible();
+  expect(writes).toBe(2);
+  await page.getByRole('button', { name: 'Save profile' }).click();
+  await expect(page.getByText('Profile updated.')).toBeVisible();
+  expect(writes).toBe(3);
+  await signOut(page);
 });

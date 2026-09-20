@@ -11,7 +11,7 @@ import {
   isMutationRequest,
   isSessionValidationEndpoint
 } from '$lib/features/access/session/requestPolicy';
-import { abortError, errorMessage } from '$lib/api/http';
+import { ApiProblem, abortError, errorMessage } from '$lib/api/http';
 import {
   sessionIsFresh,
   unauthorizedError
@@ -48,6 +48,7 @@ const SESSION_LOAD_FAILED = 'The current session could not be loaded.';
 export class AuthenticationLifecycle {
   private queries = new QueryPartition();
   private channel: BroadcastChannel | null = null;
+  private hasEstablishedSession = false;
 
   private boundary: Boundary | null = null;
   private boundaryGeneration = 0;
@@ -65,6 +66,17 @@ export class AuthenticationLifecycle {
     this.channel = channel;
     channel.onmessage = (event: MessageEvent<unknown>) => {
       if (event.data === 'changed') void this.refreshAfterTabChange();
+      if (event.data === 'rotated') {
+        this.abortSessionValidation();
+        this.authenticatedRequestGeneration++;
+        clearCsrfToken();
+        if (this.snapshotValue.phase === 'authenticated') {
+          this.setSnapshot({ ...this.snapshotValue, lastValidatedAt: 0 });
+          void this.validateSession({ passive: true });
+        } else if (this.snapshotValue.phase === 'checking') {
+          void this.validateSession();
+        }
+      }
     };
     return () => {
       channel.close();
@@ -156,6 +168,7 @@ export class AuthenticationLifecycle {
   }
 
   establishSession(session: AuthenticatedSession): void {
+    this.hasEstablishedSession = true;
     const partition = this.principalPartition(session.user);
     if (partition !== this.queries.current()) this.queries.use(partition);
     if (session.csrf_token) setCsrfToken(session.csrf_token);
@@ -208,7 +221,12 @@ export class AuthenticationLifecycle {
           clearCsrfToken();
           this.queries.use(nextPartition);
         }
+        // Full-page OIDC callbacks bypass response middleware. Announce only
+        // the first verified session in this document; sibling refreshes must
+        // never echo the notification.
+        const announceInitialSession = !this.hasEstablishedSession;
         this.establishSession(session);
+        if (announceInitialSession) this.channel?.postMessage('rotated');
         return session;
       } catch (error) {
         if (
@@ -272,6 +290,8 @@ export class AuthenticationLifecycle {
     }
     const startingPartition = this.queries.current();
     if (
+      !this.activeValidation &&
+      !this.snapshotValue.error &&
       sessionIsFresh(
         this.snapshotValue.lastValidatedAt,
         Boolean(getCsrfToken())
@@ -280,9 +300,9 @@ export class AuthenticationLifecycle {
       return;
     const session = await (this.activeValidation ?? this.validateSession());
     if (!session)
-      throw new DOMException(
-        'Session validation did not complete.',
-        'AbortError'
+      throw new Error(
+        this.snapshotValue.error ||
+          'Session verification was interrupted. Retry before making changes.'
       );
     if (startingPartition !== this.queries.current()) {
       throw new DOMException(
@@ -328,7 +348,48 @@ export class AuthenticationLifecycle {
     const requestGeneration = this.requestGenerations.get(request);
     if (requestGeneration === this.authenticatedRequestGeneration) {
       const rotatedCsrf = response.headers.get('x-csrf-token');
-      if (rotatedCsrf) setCsrfToken(rotatedCsrf);
+      if (response.ok && rotatedCsrf && rotatedCsrf !== getCsrfToken()) {
+        this.abortSessionValidation();
+        // Earlier responses, including validation and rotation replies, no
+        // longer describe the cookie installed by this response. Do not abort
+        // its body while the transport is still reading it.
+        this.authenticatedRequestGeneration++;
+        setCsrfToken(rotatedCsrf);
+        if (this.snapshotValue.phase === 'authenticated') {
+          this.setSnapshot({
+            ...this.snapshotValue,
+            lastValidatedAt: Date.now(),
+            error: ''
+          });
+        }
+        this.channel?.postMessage('rotated');
+      }
+      if (response.status === 403) {
+        const problem: unknown = await response
+          .clone()
+          .json()
+          .catch(() => null);
+        if (
+          requestGeneration === this.authenticatedRequestGeneration &&
+          problem &&
+          typeof problem === 'object' &&
+          'type' in problem &&
+          problem.type === 'https://openllmproxy.dev/problems/csrf_invalid'
+        ) {
+          this.abortSessionValidation();
+          this.authenticatedRequestGeneration++;
+          clearCsrfToken();
+          await this.validateSession();
+          throw new ApiProblem({
+            status: 403,
+            type: problem.type,
+            title: 'Session verification required',
+            detail:
+              this.snapshotValue.error ||
+              'Your session was refreshed. Review your changes and retry the action.'
+          });
+        }
+      }
     }
     if (response.status === 401) await this.handleUnauthorized(request);
   }

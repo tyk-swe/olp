@@ -246,6 +246,7 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 				return err
 			}
 			control.LocalLoginDisabled = !c.LocalLoginEnabled
+			control.ClientIP = func(r *http.Request) string { return gateway.ClientIP(r, c.TrustedProxyCIDRs) }
 			control.LimitsEnforced = limiter != nil
 			// The worker plane that applies retention runs only where shared
 			// state is configured, and a control process cannot see whether a

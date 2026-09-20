@@ -603,3 +603,313 @@ describe('authentication lifecycle', () => {
     });
   });
 });
+
+describe('rotation and required verification', () => {
+  it('restarts initial verification after a sibling rotation and ignores the canceled result', async () => {
+    const channels: Channel[] = [];
+    class Channel {
+      onmessage?: (event: { data: unknown }) => void;
+      postMessage = vi.fn();
+      close = vi.fn();
+      constructor() {
+        channels.push(this);
+      }
+    }
+    vi.stubGlobal('BroadcastChannel', Channel);
+    const lifecycle = new AuthenticationLifecycle();
+    const disconnect = lifecycle.connectTabs();
+    try {
+      const initialSession = deferred<AuthenticatedSession>();
+      const rotatedSession = deferred<AuthenticatedSession>();
+      const load = vi
+        .fn<(signal: AbortSignal) => Promise<AuthenticatedSession>>()
+        .mockReturnValueOnce(initialSession.promise)
+        .mockReturnValueOnce(rotatedSession.promise);
+      lifecycle.registerBoundary(boundary(load));
+      const initialValidation = lifecycle.validateSession();
+      expect(lifecycle.snapshot().phase).toBe('checking');
+
+      channels[0]!.onmessage!({ data: 'rotated' });
+
+      expect(load).toHaveBeenCalledTimes(2);
+      expect(load.mock.calls[0]![0].aborted).toBe(true);
+      expect(load.mock.calls[1]![0].aborted).toBe(false);
+      expect(lifecycle.snapshot().phase).toBe('checking');
+      rotatedSession.resolve(session('csrf-rotated'));
+      await vi.waitFor(() => {
+        expect(lifecycle.snapshot()).toMatchObject({
+          phase: 'authenticated',
+          user: session().user
+        });
+        expect(getCsrfToken()).toBe('csrf-rotated');
+      });
+
+      initialSession.resolve(sessionFor('stale-principal', 'csrf-stale'));
+      await initialValidation;
+
+      expect(lifecycle.snapshot()).toMatchObject({
+        phase: 'authenticated',
+        user: session().user
+      });
+      expect(getCsrfToken()).toBe('csrf-rotated');
+    } finally {
+      disconnect();
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('discards validation started before a rotation and sends the next mutation with the new CSRF', async () => {
+    const lifecycle = new AuthenticationLifecycle();
+    const pending = deferred<AuthenticatedSession>();
+    lifecycle.registerBoundary(boundary(async () => pending.promise));
+    lifecycle.establishSession(session('old'));
+    // The password mutation is already dispatched when a passive read begins.
+    const password = await lifecycle.prepareRequest(
+      new Request('https://console.test/api/v3/profile/password', {
+        method: 'POST'
+      })
+    );
+    const validation = lifecycle.validateSession({ passive: true });
+    await lifecycle.handleResponse(
+      password,
+      new Response(null, { headers: { 'X-CSRF-Token': 'rotated' } })
+    );
+    pending.resolve(session('old'));
+    await validation;
+    expect(getCsrfToken()).toBe('rotated');
+    const next = await lifecycle.prepareRequest(
+      new Request('https://console.test/api/v3/profile', { method: 'PATCH' })
+    );
+    expect(next.headers.get('X-CSRF-Token')).toBe('rotated');
+  });
+
+  it('waits for required validation even when an earlier snapshot is fresh', async () => {
+    const lifecycle = new AuthenticationLifecycle();
+    const pending = deferred<AuthenticatedSession>();
+    lifecycle.registerBoundary(boundary(async () => pending.promise));
+    lifecycle.establishSession(session());
+    const validation = lifecycle.validateSession({ passive: true });
+    const dispatched = vi.fn();
+    const mutation = lifecycle
+      .prepareRequest(
+        new Request('https://console.test/api/v3/profile', { method: 'PATCH' })
+      )
+      .then(dispatched);
+    await Promise.resolve();
+    expect(dispatched).not.toHaveBeenCalled();
+    pending.resolve(session('verified'));
+    await Promise.all([validation, mutation]);
+    expect(dispatched.mock.calls[0]![0].headers.get('X-CSRF-Token')).toBe(
+      'verified'
+    );
+  });
+
+  it('keeps content after 503, blocks writes with a useful error, recovers, and clears on 401', async () => {
+    const lifecycle = new AuthenticationLifecycle();
+    const load = vi
+      .fn()
+      .mockRejectedValue(
+        new ApiProblem({ status: 503, title: 'Verification unavailable' })
+      );
+    lifecycle.registerBoundary(boundary(load));
+    lifecycle.establishSession(session());
+    await lifecycle.validateSession({ passive: true });
+    expect(lifecycle.snapshot()).toMatchObject({
+      phase: 'authenticated',
+      user: session().user,
+      error: 'Verification unavailable'
+    });
+    await expect(
+      lifecycle.prepareRequest(
+        new Request('https://console.test/api/v3/profile', { method: 'PATCH' })
+      )
+    ).rejects.toThrow('Verification unavailable');
+    load.mockResolvedValue(session('recovered'));
+    await lifecycle.validateSession();
+    expect(lifecycle.snapshot().error).toBe('');
+    const mutation = await lifecycle.prepareRequest(
+      new Request('https://console.test/api/v3/profile', { method: 'PATCH' })
+    );
+    expect(mutation.headers.get('X-CSRF-Token')).toBe('recovered');
+    load.mockRejectedValue(unauthorizedProblem());
+    await lifecycle.validateSession({ passive: true });
+    expect(lifecycle.snapshot()).toMatchObject({
+      phase: 'transitioning',
+      user: null
+    });
+    expect(getCsrfToken()).toBeNull();
+  });
+
+  it('revalidates a specific CSRF rejection once without replaying or treating other 403s as logout', async () => {
+    const lifecycle = new AuthenticationLifecycle();
+    const load = vi.fn(async () => session('recovered'));
+    lifecycle.registerBoundary(boundary(load));
+    lifecycle.establishSession(session('old'));
+    const request = await lifecycle.prepareRequest(
+      new Request('https://console.test/api/v3/profile', { method: 'PATCH' })
+    );
+    await lifecycle.handleResponse(
+      request,
+      Response.json(
+        { type: 'https://openllmproxy.dev/problems/forbidden' },
+        { status: 403 }
+      )
+    );
+    expect(load).not.toHaveBeenCalled();
+    await expect(
+      lifecycle.handleResponse(
+        request,
+        Response.json(
+          { type: 'https://openllmproxy.dev/problems/csrf_invalid' },
+          { status: 403 }
+        )
+      )
+    ).rejects.toThrow('Review your changes and retry');
+    expect(load).toHaveBeenCalledOnce();
+    expect(lifecycle.snapshot().phase).toBe('authenticated');
+    const retry = await lifecycle.prepareRequest(new Request(request));
+    expect(retry.headers.get('X-CSRF-Token')).toBe('recovered');
+  });
+
+  it('broadcasts only invalidation, refreshes once for sibling rotation, and does not echo it', async () => {
+    const postMessage = vi.fn();
+    const close = vi.fn();
+    const channels: Channel[] = [];
+    class Channel {
+      onmessage?: (event: { data: unknown }) => void;
+      postMessage = postMessage;
+      close = close;
+      constructor() {
+        channels.push(this);
+      }
+    }
+    vi.stubGlobal('BroadcastChannel', Channel);
+    try {
+      const lifecycle = new AuthenticationLifecycle();
+      const disconnect = lifecycle.connectTabs();
+      const load = vi.fn(async () => session('sibling'));
+      lifecycle.registerBoundary(boundary(load));
+      lifecycle.establishSession(session('old'));
+      const request = await lifecycle.prepareRequest(
+        new Request('https://console.test/api/v3/profile/password', {
+          method: 'POST'
+        })
+      );
+      await lifecycle.handleResponse(
+        request,
+        new Response(null, { headers: { 'X-CSRF-Token': 'rotated-secret' } })
+      );
+      expect(postMessage).toHaveBeenCalledExactlyOnceWith('rotated');
+      channels[0]!.onmessage!({ data: 'rotated' });
+      const mutation = await lifecycle.prepareRequest(
+        new Request('https://console.test/api/v3/profile', { method: 'PATCH' })
+      );
+      expect(load).toHaveBeenCalledOnce();
+      expect(mutation.headers.get('X-CSRF-Token')).toBe('sibling');
+      expect(postMessage).toHaveBeenCalledOnce();
+      disconnect();
+      expect(close).toHaveBeenCalledOnce();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+});
+
+it('supersedes a pending old verification when the server rejects its CSRF', async () => {
+  const lifecycle = new AuthenticationLifecycle();
+  const old = deferred<AuthenticatedSession>();
+  const load = vi
+    .fn()
+    .mockReturnValueOnce(old.promise)
+    .mockResolvedValueOnce(session('new-cookie-csrf'));
+  lifecycle.registerBoundary(boundary(load));
+  lifecycle.establishSession(session('old-cookie-csrf'));
+  const request = await lifecycle.prepareRequest(
+    new Request('https://console.test/api/v3/profile', { method: 'PATCH' })
+  );
+  const validation = lifecycle.validateSession({ passive: true });
+  await expect(
+    lifecycle.handleResponse(
+      request,
+      Response.json(
+        { type: 'https://openllmproxy.dev/problems/csrf_invalid' },
+        { status: 403 }
+      )
+    )
+  ).rejects.toThrow('Review your changes and retry');
+  old.resolve(session('old-cookie-csrf'));
+  await validation;
+  expect(load).toHaveBeenCalledTimes(2);
+  expect(getCsrfToken()).toBe('new-cookie-csrf');
+});
+
+it('ignores a CSRF response whose body finishes after a new login', async () => {
+  const lifecycle = new AuthenticationLifecycle();
+  const load = vi.fn(async () => session('unexpected'));
+  lifecycle.registerBoundary(boundary(load));
+  lifecycle.establishSession(session('old'));
+  const request = await lifecycle.prepareRequest(
+    new Request('https://console.test/api/v3/profile', { method: 'PATCH' })
+  );
+  let body!: ReadableStreamDefaultController<Uint8Array>;
+  const response = new Response(
+    new ReadableStream<Uint8Array>({
+      start(controller) {
+        body = controller;
+      }
+    }),
+    { status: 403 }
+  );
+  const handled = lifecycle.handleResponse(request, response);
+  await lifecycle.authenticate(async () =>
+    sessionFor('new-user', 'new-secret')
+  );
+  body.enqueue(
+    new TextEncoder().encode(
+      JSON.stringify({ type: 'https://openllmproxy.dev/problems/csrf_invalid' })
+    )
+  );
+  body.close();
+  await handled;
+  expect(getCsrfToken()).toBe('new-secret');
+  expect(load).not.toHaveBeenCalled();
+});
+
+it('announces the first verified session after full-page navigation without echoing refreshes', async () => {
+  const postMessage = vi.fn();
+  const channels: Channel[] = [];
+  class Channel {
+    onmessage?: (event: { data: unknown }) => void;
+    postMessage = postMessage;
+    close = vi.fn();
+    constructor() {
+      channels.push(this);
+    }
+  }
+  vi.stubGlobal('BroadcastChannel', Channel);
+  try {
+    const lifecycle = new AuthenticationLifecycle();
+    const disconnect = lifecycle.connectTabs();
+    const verified = deferred<AuthenticatedSession>();
+    const load = vi
+      .fn()
+      .mockReturnValueOnce(verified.promise)
+      .mockResolvedValue(session('current-cookie'));
+    lifecycle.registerBoundary(boundary(load));
+    const initial = lifecycle.validateSession();
+    expect(postMessage).not.toHaveBeenCalled();
+    verified.resolve(session('current-cookie'));
+    await initial;
+    expect(postMessage).toHaveBeenCalledExactlyOnceWith('rotated');
+    channels[0]!.onmessage!({ data: 'rotated' });
+    const mutation = await lifecycle.prepareRequest(
+      new Request('https://console.test/api/v3/profile', { method: 'PATCH' })
+    );
+    expect(mutation.headers.get('X-CSRF-Token')).toBe('current-cookie');
+    expect(load).toHaveBeenCalledTimes(2);
+    expect(postMessage).toHaveBeenCalledOnce();
+    disconnect();
+  } finally {
+    vi.unstubAllGlobals();
+  }
+});

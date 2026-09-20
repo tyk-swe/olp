@@ -22,7 +22,8 @@ vi.mock('$lib/features/access/profile/api', async (original) => ({
   ...(await original<typeof import('$lib/features/access/profile/api')>()),
   getProfile: vi.fn(),
   listOidcIdentities: vi.fn(),
-  updateProfile: vi.fn()
+  updateProfile: vi.fn(),
+  beginOidcReauthentication: vi.fn()
 }));
 vi.mock('$lib/features/access/api', async (original) => ({
   ...(await original<typeof import('$lib/features/access/api')>()),
@@ -127,5 +128,56 @@ it('keeps a newer display name dirty after an earlier save completes', async () 
     2,
     expect.objectContaining({ etag: 'profile-v2' }),
     { display_name: 'Newest owner' }
+  );
+});
+
+it('offers linked OIDC reauthentication alongside an enrolled password with the same purpose and resource', async () => {
+  vi.spyOn(window, 'confirm').mockReturnValue(true);
+  const { beginOidcReauthentication } =
+    await import('$lib/features/access/profile/api');
+  vi.mocked(beginOidcReauthentication).mockRejectedValue(
+    new Error('Fresh provider flow unavailable')
+  );
+  Object.defineProperty(HTMLDialogElement.prototype, 'showModal', {
+    configurable: true,
+    value: vi.fn()
+  });
+  vi.mocked(listOidcIdentities).mockResolvedValue({
+    has_local_password: true,
+    linking_available: true,
+    oidc_reauthentication_available: true,
+    items: [
+      {
+        id: 'identity-a',
+        issuer: 'https://issuer.test',
+        email_at_link: 'owner@example.com',
+        created_at: profile.created_at,
+        last_login_at: null,
+        can_unlink: true
+      }
+    ]
+  });
+  component = mount(ProfilePageProbe, { target: host, props: { client } });
+  await vi.waitFor(() => expect(host.textContent).toContain('Unlink'));
+  [...host.querySelectorAll('button')]
+    .find((button) => button.textContent?.trim() === 'Unlink')!
+    .click();
+  await vi.waitFor(() =>
+    expect(host.textContent).toContain('Verify with single sign-on')
+  );
+  expect(host.querySelector('dialog input[type="password"]')).not.toBeNull();
+  [...host.querySelectorAll('button')]
+    .find(
+      (button) => button.textContent?.trim() === 'Verify with single sign-on'
+    )!
+    .click();
+  await vi.waitFor(() =>
+    expect(beginOidcReauthentication).toHaveBeenCalledWith(
+      'oidc_unlink',
+      'identity-a'
+    )
+  );
+  await vi.waitFor(() =>
+    expect(host.textContent).toContain('Fresh provider flow unavailable')
   );
 });

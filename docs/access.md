@@ -109,10 +109,39 @@ be removed, disabled, or stranded by authentication configuration changes.
 Disabling or changing a member's role revokes their sessions. Losing membership
 management authority retires outstanding invitations they issued. Existing API
 keys retain their issuer attribution and installation-scoped policy; revoke
-those keys explicitly when required. OIDC-only accounts follow current role
-mappings on sign-in, revoke old sessions on a role change, and lose outstanding
-invitations when owner authority is lost. Accounts with local passwords retain
-their locally managed roles.
+those keys explicitly when required.
+
+Role ownership is explicit: setup and invitation accounts are locally managed;
+OIDC-provisioned accounts remain OIDC-managed across password enrollment,
+password changes, and identity linking. Verified login and reauthentication
+synchronize OIDC-managed roles. Losing all mappings commits deauthorization,
+revokes all sessions and recent-auth grants, retires outstanding invitations,
+and advances authorization state before returning denial. This also applies to
+the last owner: administrative recovery protection never overrides verified
+external access loss. Password login cannot bypass established deauthorization.
+A later verified mapped login restores external authorization (not an
+administratively disabled account); old sessions and invitations stay revoked.
+Locally managed accounts retain their locally assigned role on OIDC sign-in.
+OIDC-managed accounts must keep a usable linked identity so self-service unlink
+cannot sever their authorization source.
+
+Local sign-in is usable only when both `OLP_LOCAL_LOGIN_ENABLED` and
+`auth.local_login_enabled` permit it. Capabilities, invitation issuance and
+acceptance, identity unlink, and last-owner configuration guards apply the same
+policy. Password invitations are unsupported while effective local sign-in is
+disabled: issue/accept returns actionable guidance before account creation or
+token consumption. Use mapped OIDC provisioning for SSO-only onboarding; email
+matching never implicitly links an existing account.
+
+Migration `0010_authentication_ownership.sql` classifies legacy accounts using
+provisioning evidence. Setup/accepted-invitation audit events or accepted
+invitation records preserve local ownership; remaining accounts with linked
+OIDC identities become OIDC-managed, including ambiguous mixed-method accounts
+whose original provisioning evidence has expired. Review these ambiguous
+accounts and ensure appropriate provider mappings before upgrading. The
+migration cannot infer ownership from a password added through enrollment.
+Accounts without OIDC identities remain locally managed. Role ownership is
+internal and cannot be changed by self-service credential operations.
 
 Owner protection evaluates proposed mappings against the latest verified email
 and group inputs stored privately for each identity. These inputs never appear
@@ -165,11 +194,39 @@ responses such as credential pools are replayed in full even above 64 KiB.
 Lists use validated cursors and limits up to 200.
 
 Public authentication admission is shared through PostgreSQL: 10,000 requests
-per action globally per minute, 60 per directly connected source (30 for
-invitation acceptance), and five per source/target when applicable. Rejected
-attempts commit their reached counters. Forwarded source headers are not trusted.
+per action globally per minute, 60 per resolved source (30 for invitation
+acceptance), five per source/target, and 30 per target across sources when a
+target is known. Targets and sources are HMAC digests. Windows are fixed at one
+minute, counts are capped, and denied attempts never extend a window or create
+a permanent account lockout. Management uses the same `OLP_TRUSTED_PROXY_CIDRS`
+resolver as inference: the direct peer is authoritative unless explicitly
+trusted, then `X-Forwarded-For` is walked from the right through configured
+trusted hops. Never configure untrusted clients as trusted proxies.
 
 Normal reads, errors, and audit records never expose password/token hashes,
 credential ciphertext, raw identity claims, or full user agents. Audit stores
 explicit actor/resource/action/outcome, time, direct peer IP, and a coarse user
 agent family. Automatic role synchronization uses no invented human actor.
+
+## Console authentication
+
+Session verification and sign-in capabilities requests have a 10-second console
+deadline, including response bodies. Navigation cancellation stays separate
+from timeout/service failure. A passive failure retains loaded content with a
+visible Retry notice and requires successful verification before writes.
+Session rotation invalidates older responses and sends a credential-free
+invalidation to sibling tabs. A specific `csrf_invalid` rejection refreshes
+verification and asks the user to review and retry; mutations are never replayed
+automatically. Other forbidden operations do not trigger logout.
+
+Browser OIDC callback failures redirect to local sign-in/profile pages with an
+allowlisted reason; raw provider errors and tokens are never included. Retry
+always starts a fresh flow. JSON clients retain problem responses. Profile
+reauthentication offers usable linked OIDC even with an enrolled password;
+existing session, purpose, resource, and exact identity bindings still apply.
+
+Session inventory labels `last_seen_at` as **Last session verification** (updated
+at most once a minute by session verification). A coarse browser/device hint
+helps distinguish sessions without retaining raw user agents. It is untrusted
+display metadata, not authentication evidence; legacy sessions show Unknown
+browser.

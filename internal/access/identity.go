@@ -75,7 +75,13 @@ func (s *Server) admit(r *http.Request, action, target string) error {
 		return err
 	}
 	defer tx.Rollback(r.Context())
-	source, _, _ := net.SplitHostPort(r.RemoteAddr)
+	source, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		source = r.RemoteAddr
+	}
+	if s.ClientIP != nil {
+		source = s.ClientIP(r)
+	}
 	sourceLimit := 60
 	if action == "invitation" {
 		sourceLimit = 30
@@ -88,7 +94,10 @@ func (s *Server) admit(r *http.Request, action, target string) error {
 		buckets = append(buckets, struct {
 			key   string
 			limit int
-		}{"target:" + source + ":" + target, 5})
+		}{"target:" + source + ":" + target, 5}, struct {
+			key   string
+			limit int
+		}{"account:" + target, 30})
 	}
 	admitted := true
 	for _, bucket := range buckets {
@@ -194,7 +203,7 @@ func (s *Server) users(r *http.Request) (Reply, error) {
 	if err != nil {
 		return Reply{}, err
 	}
-	rows, err := s.Pool.Query(r.Context(), "SELECT to_jsonb(u)-'password_hash' FROM olp_go.users u WHERE id<$1 ORDER BY id DESC LIMIT $2", p.Before, p.Limit+1)
+	rows, err := s.Pool.Query(r.Context(), "SELECT to_jsonb(u)-'password_hash'-'role_management'-'oidc_authorized' FROM olp_go.users u WHERE id<$1 ORDER BY id DESC LIMIT $2", p.Before, p.Limit+1)
 	if err != nil {
 		return Reply{}, err
 	}
@@ -259,7 +268,7 @@ func (s *Server) updateUser(r *http.Request) (Reply, error) {
 	if _, err = tx.Exec(r.Context(), "UPDATE olp_go.users SET role=$1,active=$2,etag=$3,updated_at=now() WHERE id=$4", u.Role, u.Active, u.ETag, id); err != nil {
 		return Reply{}, err
 	}
-	if err = usableOwner(r, tx); err != nil {
+	if err = s.usableOwner(r, tx); err != nil {
 		return Reply{}, err
 	}
 	if _, err = tx.Exec(r.Context(), "DELETE FROM olp_go.sessions WHERE user_id=$1", id); err != nil {
@@ -285,10 +294,10 @@ func (s *Server) updateUser(r *http.Request) (Reply, error) {
 	return Commit(r, tx, Detail(u, u.ETag))
 }
 
-func usableOwner(r *http.Request, tx pgx.Tx) error {
+func (s *Server) usableOwner(r *http.Request, tx pgx.Tx) error {
 	var exists bool
-	err := tx.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM olp_go.users WHERE active AND role='owner'
-        AND password_hash IS NOT NULL AND COALESCE((SELECT value='true' FROM olp_go.settings WHERE key='auth.local_login_enabled'),true))`).Scan(&exists)
+	err := tx.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM olp_go.users WHERE active AND oidc_authorized AND role='owner'
+        AND password_hash IS NOT NULL AND $1 AND COALESCE((SELECT value='true' FROM olp_go.settings WHERE key='auth.local_login_enabled'),true))`, !s.LocalLoginDisabled).Scan(&exists)
 	if err != nil {
 		return err
 	}
@@ -303,9 +312,9 @@ func usableOwner(r *http.Request, tx pgx.Tx) error {
 	if err != nil {
 		return err
 	}
-	rows, err := tx.Query(r.Context(), `SELECT u.password_hash IS NOT NULL,i.role_claims
+	rows, err := tx.Query(r.Context(), `SELECT u.role_management='local',i.role_claims
         FROM olp_go.users u JOIN olp_go.oidc_identities i ON i.user_id=u.id
-        WHERE u.active AND u.role='owner' AND i.issuer=$1`, c.Issuer)
+        WHERE u.active AND u.oidc_authorized AND u.role='owner' AND i.issuer=$1`, c.Issuer)
 	if err != nil {
 		return err
 	}
@@ -398,6 +407,9 @@ func (s *Server) createInvitation(r *http.Request) (Reply, error) {
 	defer tx.Rollback(r.Context())
 	p, err := s.Principal(r, tx, "access")
 	if err != nil {
+		return Reply{}, err
+	}
+	if err = s.requireInvitationLogin(r, tx); err != nil {
 		return Reply{}, err
 	}
 	claim, replayed, err := s.Replay(r, tx, p, input)
@@ -507,6 +519,9 @@ func (s *Server) acceptInvitation(r *http.Request) (Reply, error) {
 		return Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
+	if err = s.requireInvitationLogin(r, tx); err != nil {
+		return Reply{}, err
+	}
 	var id, address, role string
 	err = tx.QueryRow(r.Context(), "SELECT id::text,email,role FROM olp_go.invitations WHERE digest=$1 AND expires_at>now() AND accepted_at IS NULL AND revoked_at IS NULL", s.Auth.Digest("invitation", input.Token)).Scan(&id, &address, &role)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -530,4 +545,23 @@ func (s *Server) acceptInvitation(r *http.Request) (Reply, error) {
 		return Reply{}, err
 	}
 	return Commit(r, tx, response)
+}
+
+// The process switch is immutable after composition; database policy is read
+// inside the caller's installation transaction for protected mutations.
+func (s *Server) localLoginEnabled(r *http.Request, q Queryer) (bool, error) {
+	var enabled bool
+	err := q.QueryRow(r.Context(), "SELECT COALESCE((SELECT value='true' FROM olp_go.settings WHERE key='auth.local_login_enabled'),true)").Scan(&enabled)
+	return enabled && !s.LocalLoginDisabled, err
+}
+
+func (s *Server) requireInvitationLogin(r *http.Request, q Queryer) error {
+	enabled, err := s.localLoginEnabled(r, q)
+	if err != nil {
+		return err
+	}
+	if !enabled {
+		return Fail(409, "invitation_local_login_required", "Password invitations require local sign-in. Ask an owner to configure an OIDC role mapping, then sign in with single sign-on, or enable local sign-in before using this invitation.")
+	}
+	return nil
 }

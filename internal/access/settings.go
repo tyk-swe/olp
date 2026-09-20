@@ -77,7 +77,7 @@ func (s *Server) updateSetting(r *http.Request) (Reply, error) {
 		return Reply{}, err
 	}
 	if key == "auth.local_login_enabled" {
-		if err = usableOwner(r, tx); err != nil {
+		if err = s.usableOwner(r, tx); err != nil {
 			return Reply{}, err
 		}
 	}

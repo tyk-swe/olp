@@ -25,7 +25,7 @@ func (s *Server) newSession(r *http.Request, tx pgx.Tx, userID string) (Reply, e
 	if _, err := tx.Exec(r.Context(), "DELETE FROM olp_go.sessions WHERE id IN(SELECT id FROM olp_go.sessions WHERE user_id=$1 ORDER BY created_at DESC OFFSET 19)", userID); err != nil {
 		return Reply{}, err
 	}
-	if _, err := tx.Exec(r.Context(), "INSERT INTO olp_go.sessions(id,user_id,digest,expires_at) VALUES($1,$2,$3,$4)", id, userID, s.Auth.Digest("session", token), time.Now().Add(sessionTTL)); err != nil {
+	if _, err := tx.Exec(r.Context(), "INSERT INTO olp_go.sessions(id,user_id,digest,expires_at,browser_hint) VALUES($1,$2,$3,$4,$5)", id, userID, s.Auth.Digest("session", token), time.Now().Add(sessionTTL), browserHint(r.UserAgent())); err != nil {
 		return Reply{}, err
 	}
 	u, err := scanUser(tx.QueryRow(r.Context(), "SELECT "+userColumns+" FROM olp_go.users u WHERE id=$1", userID))
@@ -52,7 +52,7 @@ func (s *Server) login(r *http.Request) (Reply, error) {
 	}
 	var id string
 	var hash *string
-	err := s.Pool.QueryRow(r.Context(), "SELECT id::text,password_hash FROM olp_go.users WHERE email=$1 AND active", input.Email).Scan(&id, &hash)
+	err := s.Pool.QueryRow(r.Context(), "SELECT id::text,password_hash FROM olp_go.users WHERE email=$1 AND active AND oidc_authorized", input.Email).Scan(&id, &hash)
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return Reply{}, err
 	}
@@ -69,13 +69,13 @@ func (s *Server) login(r *http.Request) (Reply, error) {
 		return Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	var local bool
-	if err = tx.QueryRow(r.Context(), "SELECT COALESCE((SELECT value='true' FROM olp_go.settings WHERE key='auth.local_login_enabled'),true)").Scan(&local); err != nil {
+	local, err := s.localLoginEnabled(r, tx)
+	if err != nil {
 		return Reply{}, err
 	}
 	var current bool
 	if id != "" {
-		if err = tx.QueryRow(r.Context(), "SELECT EXISTS(SELECT 1 FROM olp_go.users WHERE id=$1 AND active AND password_hash=$2)", id, encoded).Scan(&current); err != nil {
+		if err = tx.QueryRow(r.Context(), "SELECT EXISTS(SELECT 1 FROM olp_go.users WHERE id=$1 AND active AND oidc_authorized AND password_hash=$2)", id, encoded).Scan(&current); err != nil {
 			return Reply{}, err
 		}
 	}
@@ -127,7 +127,7 @@ func (s *Server) sessions(r *http.Request) (Reply, error) {
 	if _, err := ParseUUID(userID); err != nil {
 		return Reply{}, err
 	}
-	rows, err := s.Pool.Query(r.Context(), "SELECT jsonb_build_object('id',id,'user_id',user_id,'current',id=$1,'expires_at',expires_at,'last_seen_at',last_seen_at,'created_at',created_at) FROM olp_go.sessions WHERE user_id=$2 AND expires_at>now() AND id<$3 ORDER BY id DESC LIMIT $4", p.SessionID, userID, pagination.Before, pagination.Limit+1)
+	rows, err := s.Pool.Query(r.Context(), "SELECT jsonb_build_object('id',id,'user_id',user_id,'current',id=$1,'expires_at',expires_at,'last_seen_at',last_seen_at,'browser_hint',browser_hint,'created_at',created_at) FROM olp_go.sessions WHERE user_id=$2 AND expires_at>now() AND id<$3 ORDER BY id DESC LIMIT $4", p.SessionID, userID, pagination.Before, pagination.Limit+1)
 	if err != nil {
 		return Reply{}, err
 	}
@@ -380,4 +380,24 @@ func (s *Server) consumeRecent(r *http.Request, tx pgx.Tx, p Principal, purpose,
 		return Fail(428, "reauthentication_required", "Confirm your identity again before this operation.")
 	}
 	return nil
+}
+
+func browserHint(agent string) string {
+	browser := "Unknown browser"
+	for _, entry := range []struct{ match, label string }{
+		{"Edg/", "Edge"}, {"Firefox/", "Firefox"}, {"Chrome/", "Chrome"}, {"Safari/", "Safari"}, {"curl/", "curl"},
+	} {
+		if strings.Contains(agent, entry.match) {
+			browser = entry.label
+			break
+		}
+	}
+	for _, entry := range []struct{ match, label string }{
+		{"Android", "Android"}, {"iPhone", "iPhone"}, {"iPad", "iPad"}, {"Windows", "Windows"}, {"Macintosh", "macOS"}, {"Linux", "Linux"},
+	} {
+		if strings.Contains(agent, entry.match) {
+			return browser + " on " + entry.label
+		}
+	}
+	return browser
 }

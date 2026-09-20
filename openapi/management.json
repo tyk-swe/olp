@@ -2057,6 +2057,10 @@
           },
           "linking_available": {
             "type": "boolean"
+          },
+          "oidc_reauthentication_available": {
+            "type": "boolean",
+            "description": "A linked identity is usable with the current OIDC configuration. Reauthentication still verifies the exact identity and session."
           }
         },
         "required": [
@@ -5519,11 +5523,16 @@
           },
           "last_seen_at": {
             "format": "date-time",
-            "type": "string"
+            "type": "string",
+            "description": "Time of the last session verification, updated at most once per minute."
           },
           "user_id": {
             "format": "uuid",
             "type": "string"
+          },
+          "browser_hint": {
+            "type": "string",
+            "description": "Coarse, untrusted browser/device display hint. Legacy sessions use Unknown browser."
           }
         },
         "required": [

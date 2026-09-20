@@ -91,11 +91,14 @@
                 >{/if}
             </div>
             <p>
-              Last active {formatDate(session.last_seen_at)} · Expires {formatDate(
-                session.expires_at
-              )}
+              Last session verification {formatDate(session.last_seen_at)} · Expires
+              {formatDate(session.expires_at)}
             </p>
-            <small class="mono">{session.id}</small>
+            <small
+              >{session.browser_hint || 'Unknown browser'} · Created {formatDate(
+                session.created_at
+              )}</small
+            >
           </div>
           <button
             class="button button-secondary"

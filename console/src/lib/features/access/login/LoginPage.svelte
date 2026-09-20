@@ -8,6 +8,7 @@
     login,
     type AuthenticationCapabilities
   } from '$lib/features/access/session/auth';
+  import { oidcFailureMessage } from '$lib/features/access/login/oidcFailure';
   import { errorMessage } from '$lib/api/http';
   import { authLifecycle } from '$lib/features/access/session/lifecycle';
   import { relativeReturnTo } from '$lib/features/access/session/relativeReturnTo';
@@ -18,6 +19,10 @@
   let busy = $state(false);
   let oidcBusy = $state(false);
   let capabilitiesLoading = $state(true);
+  let capabilitiesError = $state('');
+  const oidcError = $derived(
+    oidcFailureMessage(page.url.searchParams.get('oidc_error'))
+  );
   let capabilities = $state<AuthenticationCapabilities>({
     local_login_enabled: false,
     oidc_login_enabled: false
@@ -86,13 +91,18 @@
   }
 
   async function loadCapabilities() {
+    capabilitiesLoading = true;
+    capabilitiesError = '';
     try {
       capabilities = await authenticationCapabilities(
         publicAuthController.signal
       );
     } catch (error) {
       if (publicAuthController.signal.aborted) return;
-      message = errorMessage(error, 'Sign-in options could not be loaded.');
+      capabilitiesError = errorMessage(
+        error,
+        'Sign-in options could not be loaded.'
+      );
     } finally {
       if (!publicAuthController.signal.aborted) capabilitiesLoading = false;
     }
@@ -121,10 +131,21 @@
       Your session ended. Sign in to continue.
     </p>{/if}
 
+  {#if oidcError}<div class="form-alert" role="alert">{oidcError}</div>{/if}
+
   {#if message}<div class="form-alert" role="alert">{message}</div>{/if}
 
   {#if capabilitiesLoading}
     <p class="capabilities-status" role="status">Loading sign-in options…</p>
+  {:else if capabilitiesError}
+    <div class="form-alert" role="alert">
+      <p>Sign-in options could not be loaded. {capabilitiesError}</p>
+      <button
+        class="button button-secondary"
+        type="button"
+        onclick={loadCapabilities}>Retry</button
+      >
+    </div>
   {/if}
 
   {#if capabilities.local_login_enabled}
@@ -172,7 +193,7 @@
         ? 'Starting single sign-on…'
         : 'Continue with single sign-on'}</a
     >
-  {:else if !capabilitiesLoading && !capabilities.local_login_enabled && !message}
+  {:else if !capabilitiesLoading && !capabilitiesError && !capabilities.local_login_enabled}
     <div class="form-alert" role="alert">
       No sign-in method is currently available.
     </div>

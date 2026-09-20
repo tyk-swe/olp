@@ -174,6 +174,10 @@
       } else {
         editEtags[setting.key] = updated.etag;
       }
+      if (setting.key === 'auth.local_login_enabled')
+        await queryClient.invalidateQueries({
+          queryKey: ['service-capabilities']
+        });
       status = `${settingLabel(setting.key)} saved.`;
     } catch (cause) {
       if (isEtagMismatch(cause)) conflictKey = setting.key;

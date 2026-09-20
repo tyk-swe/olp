@@ -2,8 +2,15 @@
   import { goto, replaceState } from '$app/navigation';
   import { resolve } from '$app/paths';
   import { onDestroy, onMount } from 'svelte';
-  import { acceptInvitation } from '$lib/features/access/session/auth';
-  import { ApiProblem, applyServerFieldErrors } from '$lib/api/http';
+  import {
+    acceptInvitation,
+    authenticationCapabilities
+  } from '$lib/features/access/session/auth';
+  import {
+    ApiProblem,
+    applyServerFieldErrors,
+    errorMessage
+  } from '$lib/api/http';
   import { authLifecycle } from '$lib/features/access/session/lifecycle';
   import SetupFrame from '$lib/components/SetupFrame.svelte';
   import {
@@ -18,7 +25,9 @@
   } from '$lib/features/access/invitations/invitationValidation';
 
   let token = $state('');
-  let view = $state<'checking' | 'ready' | 'invalid' | 'expired'>('checking');
+  let view = $state<
+    'checking' | 'ready' | 'invalid' | 'expired' | 'blocked' | 'unavailable'
+  >('checking');
   let values = $state<InvitationAcceptanceValues>({
     displayName: '',
     password: '',
@@ -27,6 +36,22 @@
   let errors = $state<InvitationAcceptanceErrors>({});
   let message = $state('');
   let busy = $state(false);
+  const controller = new AbortController();
+
+  async function checkPolicy() {
+    view = 'checking';
+    try {
+      const capabilities = await authenticationCapabilities(controller.signal);
+      view = capabilities.local_login_enabled ? 'ready' : 'blocked';
+    } catch (error) {
+      if (controller.signal.aborted) return;
+      message = errorMessage(
+        error,
+        'Invitation availability could not be checked.'
+      );
+      view = 'unavailable';
+    }
+  }
 
   const serverFields: Record<string, keyof InvitationAcceptanceValues> = {
     display_name: 'displayName',
@@ -40,12 +65,14 @@
     token = fragment.get('token') ?? '';
     // Remove the one-time material before the invitee enters any data. The
     // token remains only in this component's memory until submission.
-    view = token ? 'ready' : 'invalid';
+    if (token) void checkPolicy();
+    else view = 'invalid';
     const scrub = window.setTimeout(
       () => replaceState(resolve('/invitations/accept'), {}),
       0
     );
     return () => {
+      controller.abort();
       window.clearTimeout(scrub);
       token = '';
       values.password = '';
@@ -59,7 +86,8 @@
     event.preventDefault();
     message = '';
     errors = validateInvitationAcceptance(values);
-    if (Object.keys(errors).length || !token) return;
+    if (Object.keys(errors).length || !token || view !== 'ready' || busy)
+      return;
     busy = true;
     try {
       await authLifecycle.authenticate((signal) =>
@@ -81,6 +109,11 @@
         if (error.problem.status === 410) {
           token = '';
           view = 'expired';
+        } else if (
+          error.problem.type ===
+          'https://openllmproxy.dev/problems/invitation_local_login_required'
+        ) {
+          view = 'blocked';
         } else {
           errors = applyServerFieldErrors(error, serverFields);
           if (!Object.keys(errors).length)
@@ -104,6 +137,33 @@
 <SetupFrame>
   {#if view === 'checking'}
     <div class="state" role="status"><h1>Opening invitation…</h1></div>
+  {:else if view === 'blocked'}
+    <div class="state" role="alert">
+      <h1>This invitation requires password sign-in.</h1>
+      <p>
+        Local sign-in is disabled. Ask an owner to configure an OIDC role
+        mapping and sign in with single sign-on, or enable local sign-in before
+        accepting this invitation. Your invitation has not been consumed.
+      </p>
+      <a class="button button-secondary" href={resolve('/login')}
+        >Go to sign in</a
+      >
+      <button
+        class="button button-secondary"
+        type="button"
+        onclick={checkPolicy}>Retry</button
+      >
+    </div>
+  {:else if view === 'unavailable'}
+    <div class="state" role="alert">
+      <h1>Invitation verification unavailable</h1>
+      <p>{message}</p>
+      <button
+        class="button button-secondary"
+        type="button"
+        onclick={checkPolicy}>Retry</button
+      >
+    </div>
   {:else if view === 'invalid'}
     <div class="state" role="alert">
       <p class="eyebrow">Invitation unavailable</p>

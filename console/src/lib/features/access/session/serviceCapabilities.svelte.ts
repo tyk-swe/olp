@@ -8,6 +8,9 @@ export function useServiceCapabilities() {
     staleTime: 60_000
   }));
   return {
+    get localLoginEnabled() {
+      return capabilities.isSuccess && capabilities.data.local_login_enabled;
+    },
     get gatewayAvailable() {
       return (
         capabilities.isSuccess &&

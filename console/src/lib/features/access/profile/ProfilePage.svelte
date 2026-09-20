@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { oidcFailureMessage } from '$lib/features/access/login/oidcFailure';
   import { profileKeys } from '$lib/features/access/profile/profileKeys';
   import { userKeys } from '$lib/features/access/users/userKeys';
   import { authLifecycle } from '$lib/features/access/session/lifecycle';
@@ -104,6 +105,9 @@
   });
 
   onMount(() => {
+    identityError = oidcFailureMessage(
+      new URLSearchParams(window.location.search).get('oidc_error')
+    );
     const callback = parseRecentAuthenticationCallback(window.location.search);
     if (callback) {
       replaceState(resolve('/settings/profile'), {});
@@ -205,6 +209,22 @@
     window.location.assign(
       await beginOidcReauthentication(purpose, resourceId)
     );
+  }
+
+  async function confirmWithOidc() {
+    const request = reauthenticationRequest;
+    if (!request) return;
+    reauthenticationBusy = true;
+    reauthenticationError = '';
+    try {
+      window.location.assign(
+        await beginOidcReauthentication(request.purpose, request.resourceId)
+      );
+    } catch (cause) {
+      reauthenticationError = errorMessage(cause, SECURITY_OPERATION_FAILED);
+    } finally {
+      reauthenticationBusy = false;
+    }
   }
 
   function cancelReauthentication() {
@@ -440,10 +460,13 @@
       ? 'Confirm the OIDC link'
       : 'Confirm the OIDC unlink'}
     description={reauthenticationRequest.purpose === 'oidc_link'
-      ? 'Linking an OIDC identity changes how you sign in, so confirm your current password first.'
-      : 'Unlinking an OIDC identity revokes every other session, so confirm your current password first.'}
+      ? 'Linking an OIDC identity changes how you sign in, so verify with your password or a usable linked identity.'
+      : 'Unlinking an OIDC identity revokes every other session, so verify with your password or a usable linked identity.'}
     busy={reauthenticationBusy}
     error={reauthenticationError}
+    onOidc={identities.data?.oidc_reauthentication_available
+      ? confirmWithOidc
+      : undefined}
     onConfirm={confirmReauthentication}
     onCancel={cancelReauthentication}
   />

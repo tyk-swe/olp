@@ -55,7 +55,10 @@ func TestOIDCUnlinkPreservesAnIdentityAuthorizedByCurrentMappings(t *testing.T) 
 			}
 			h.want(member, "GET", "/api/v3/sessions/current", nil, nil, 200)
 			authorize(&browser{}, "/api/v3/oidc/login", map[string]any{}, unmapped, 403)
-			authorize(&browser{}, "/api/v3/oidc/login", map[string]any{}, mapped, 303)
+			h.want(member, "GET", "/api/v3/sessions/current", nil, nil, 401)
+			authorize(member, "/api/v3/oidc/login", map[string]any{}, mapped, 303)
+			authorize(member, "/api/v3/oidc/reauthenticate", map[string]any{"purpose": "oidc_unlink", "resource_id": mappedID}, mapped, 303)
+			h.want(member, "DELETE", "/api/v3/oidc/identities/"+mappedID, nil, nil, 409)
 
 			// Eligibility follows the current mappings, not the role at link time.
 			configuration[mappingField] = []any{map[string]string{"claim_value": unmappedValue, "role": "viewer"}}

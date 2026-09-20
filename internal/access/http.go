@@ -46,6 +46,8 @@ type Server struct {
 	// before the first request is served, and never changes afterwards.
 	LimitsEnforced     bool
 	LocalLoginDisabled bool
+	// ClientIP is wired to the shared trusted-proxy resolver by the process.
+	ClientIP func(*http.Request) string
 	// RetentionEnforced is true where this installation is configured with the
 	// shared coordination state (OLP_VALKEY_URL) the worker plane requires, so
 	// retention and aggregation run in its worker and all processes. A control
@@ -365,7 +367,7 @@ func scanUser(row pgx.Row) (User, error) {
 func (s *Server) Principal(r *http.Request, q Queryer, operation string) (Principal, error) {
 	var p Principal
 	p.Token = cookieValue(r, sessionCookie)
-	err := q.QueryRow(r.Context(), "SELECT "+userColumns+",s.id::text FROM olp_go.sessions s JOIN olp_go.users u ON u.id=s.user_id WHERE s.digest=$1 AND s.expires_at>now() AND u.active", s.Auth.Digest("session", p.Token)).Scan(&p.ID, &p.Email, &p.DisplayName, &p.Role, &p.Active, &p.ETag, &p.CreatedAt, &p.UpdatedAt, &p.SessionID)
+	err := q.QueryRow(r.Context(), "SELECT "+userColumns+",s.id::text FROM olp_go.sessions s JOIN olp_go.users u ON u.id=s.user_id WHERE s.digest=$1 AND s.expires_at>now() AND u.active AND u.oidc_authorized", s.Auth.Digest("session", p.Token)).Scan(&p.ID, &p.Email, &p.DisplayName, &p.Role, &p.Active, &p.ETag, &p.CreatedAt, &p.UpdatedAt, &p.SessionID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return p, Fail(401, "authentication_required", "Sign in to continue.")
 	}

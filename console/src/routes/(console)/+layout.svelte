@@ -123,6 +123,22 @@
     signOutError={signOutError || authentication.principalExitError}
     onSignOut={signOut}
   >
+    {#if authentication.error}
+      <div class="problem-banner" role="alert">
+        <div>
+          <strong>Session verification unavailable</strong>
+          <p>
+            {authentication.error} Previously loaded content is shown. Changes require
+            successful verification.
+          </p>
+        </div>
+        <button
+          class="button button-secondary"
+          type="button"
+          onclick={() => authLifecycle.validateSession()}>Retry</button
+        >
+      </div>
+    {/if}
     {@render children()}
   </AppShell>
 {/if}

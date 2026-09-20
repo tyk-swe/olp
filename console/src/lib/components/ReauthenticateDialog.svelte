@@ -7,12 +7,14 @@
     busy = false,
     error = '',
     onConfirm,
+    onOidc,
     onCancel
   }: {
     title?: string;
     description: string;
     busy?: boolean;
     error?: string;
+    onOidc?: () => void | Promise<void>;
     onConfirm: (password: string) => void | Promise<void>;
     onCancel: () => void;
   } = $props();
@@ -79,6 +81,14 @@
     {#if localError || error}<p class="inline-problem" role="alert">
         {localError || error}
       </p>{/if}
+    {#if onOidc}
+      <button
+        class="button button-secondary"
+        type="button"
+        disabled={busy}
+        onclick={onOidc}>Verify with single sign-on</button
+      >
+    {/if}
     <div class="dialog-actions">
       <button
         class="button button-secondary"

@@ -162,3 +162,72 @@ describe('session API', () => {
     expect(getCsrfToken()).toBe('csrf-before-failed-logout');
   });
 });
+
+describe('bounded authentication reads', () => {
+  afterEach(() => vi.useRealTimers());
+
+  it.each(['session', 'capabilities'] as const)(
+    'times out a pending %s read and recovers on explicit retry',
+    async (kind) => {
+      vi.useFakeTimers();
+      const { authenticationCapabilities } = await import('./auth');
+      const { AUTHENTICATION_DEADLINE_MS } = await import('./requestDeadline');
+      let signal: AbortSignal | undefined;
+      vi.stubGlobal(
+        'fetch',
+        vi.fn((request: Request) => {
+          signal = request.signal;
+          return new Promise<Response>(() => {});
+        })
+      );
+      const load =
+        kind === 'session' ? currentSession : authenticationCapabilities;
+      const failure = load().catch((error: unknown) => error);
+      await vi.advanceTimersByTimeAsync(AUTHENTICATION_DEADLINE_MS);
+      expect(await failure).toMatchObject({
+        name: 'TimeoutError',
+        message: expect.stringContaining('timed out')
+      });
+      expect(signal?.aborted).toBe(true);
+      expect(vi.getTimerCount()).toBe(0);
+      captureRequests(() =>
+        jsonResponse(
+          kind === 'session'
+            ? sessionResponse('owner')
+            : { local_login_enabled: true, oidc_login_enabled: true }
+        )
+      );
+      await expect(load()).resolves.toBeDefined();
+      expect(vi.getTimerCount()).toBe(0);
+    }
+  );
+
+  it('distinguishes navigation cancellation and cleans up its deadline', async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => new Promise<Response>(() => {}))
+    );
+    const controller = new AbortController();
+    const failure = currentSession(controller.signal).catch(
+      (error: unknown) => error
+    );
+    controller.abort();
+    expect(await failure).toMatchObject({ name: 'AbortError' });
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('bounds a response whose headers arrived but body never completes', async () => {
+    vi.useFakeTimers();
+    captureRequests(
+      () =>
+        new Response(new ReadableStream({ start() {} }), {
+          headers: { 'Content-Type': 'application/json' }
+        })
+    );
+    const failure = currentSession().catch((error: unknown) => error);
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(await failure).toMatchObject({ name: 'TimeoutError' });
+    expect(vi.getTimerCount()).toBe(0);
+  });
+});
