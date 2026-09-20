@@ -623,24 +623,50 @@ func trimSpace(value string) string {
 	return value[start:end]
 }
 
+// updateLifecycle applies one lifecycle transition. When claimID is set the
+// transition lands only while that claim still owns the row, so a stale worker
+// cannot mutate a job another worker reclaimed.
 func updateLifecycle(ctx context.Context, q Querier, id string, lifecycle Lifecycle,
-	upstreamJobID *string, reconciliationError string, allowed []Lifecycle) (JobRecord, error) {
+	upstreamJobID *string, reconciliationError string, allowed []Lifecycle, claimID *string) (JobRecord, error) {
 	allowedStrings := make([]string, 0, len(allowed))
 	for _, value := range allowed {
 		allowedStrings = append(allowedStrings, string(value))
 	}
-	tag, err := q.Exec(ctx, `UPDATE olp_go.media_jobs SET lifecycle_state = $2,
+	query := `UPDATE olp_go.media_jobs SET lifecycle_state = $2,
 			upstream_job_id = COALESCE($3, upstream_job_id),
 			reconciliation_error = $4, next_reconciliation_at = now(), etag = $5
-		WHERE id = $1 AND lifecycle_state = ANY($6::text[])`,
-		id, string(lifecycle), upstreamJobID, reconciliationError, uuid.Must(uuid.NewV7()), allowedStrings)
+		WHERE id = $1 AND lifecycle_state = ANY($6::text[])`
+	args := []any{id, string(lifecycle), upstreamJobID, reconciliationError, uuid.Must(uuid.NewV7()), allowedStrings}
+	if claimID != nil {
+		args = append(args, *claimID)
+		query += " AND reconciliation_claim_id = $7"
+	}
+	tag, err := q.Exec(ctx, query, args...)
 	if err != nil {
 		return JobRecord{}, dbError(err)
 	}
 	if tag.RowsAffected() == 0 {
+		if claimID != nil {
+			return JobRecord{}, claimRefusal(ctx, q, id)
+		}
 		return JobRecord{}, missingOrChanged(ctx, q, id)
 	}
 	return Job(ctx, q, id)
+}
+
+// claimRefusal classifies a claim-fenced mutation that changed no row. A
+// genuinely missing row keeps missing-record reporting; any other refusal
+// means the claimed work item moved on — the lease changed hands or the
+// lifecycle drifted past the transition — and the worker hands off.
+func claimRefusal(ctx context.Context, q Querier, id string) error {
+	var exists bool
+	if err := q.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM olp_go.media_jobs WHERE id=$1)", id).Scan(&exists); err != nil {
+		return &JobError{Kind: JobErrorDatabase, Err: err}
+	}
+	if !exists {
+		return &JobError{Kind: JobErrorNotFound, Message: "media job was not found"}
+	}
+	return errClaimLost
 }
 
 func missingOrChanged(ctx context.Context, q Querier, id string) *JobError {
@@ -657,7 +683,14 @@ func missingOrChanged(ctx context.Context, q Querier, id string) *JobError {
 // MarkCreateAmbiguous records that the create outcome is unknown upstream.
 func MarkCreateAmbiguous(ctx context.Context, q Querier, id, reconciliationError string) (JobRecord, error) {
 	return updateLifecycle(ctx, q, id, LifecycleCreateAmbiguous, nil, reconciliationError,
-		[]Lifecycle{LifecycleCreating, LifecycleCreateAmbiguous})
+		[]Lifecycle{LifecycleCreating, LifecycleCreateAmbiguous}, nil)
+}
+
+// markCreateAmbiguousClaimed is MarkCreateAmbiguous fenced on the worker's
+// reconciliation claim.
+func markCreateAmbiguousClaimed(ctx context.Context, q Querier, id, claimID, reconciliationError string) (JobRecord, error) {
+	return updateLifecycle(ctx, q, id, LifecycleCreateAmbiguous, nil, reconciliationError,
+		[]Lifecycle{LifecycleCreating, LifecycleCreateAmbiguous}, &claimID)
 }
 
 // MarkCreateCleanupPending records an upstream identity whose attach failed;
@@ -667,7 +700,17 @@ func MarkCreateCleanupPending(ctx context.Context, q Querier, id, upstreamJobID,
 		return JobRecord{}, &JobError{Kind: JobErrorInvalid, Message: "upstream job ID cannot be empty"}
 	}
 	return updateLifecycle(ctx, q, id, LifecycleCreateCleanupPending, &upstreamJobID, reconciliationError,
-		[]Lifecycle{LifecycleCreating, LifecycleCreateAmbiguous, LifecycleCreateCleanupPending})
+		[]Lifecycle{LifecycleCreating, LifecycleCreateAmbiguous, LifecycleCreateCleanupPending}, nil)
+}
+
+// markCreateCleanupPendingClaimed is MarkCreateCleanupPending fenced on the
+// worker's reconciliation claim.
+func markCreateCleanupPendingClaimed(ctx context.Context, q Querier, id, claimID, upstreamJobID, reconciliationError string) (JobRecord, error) {
+	if trimSpace(upstreamJobID) == "" {
+		return JobRecord{}, &JobError{Kind: JobErrorInvalid, Message: "upstream job ID cannot be empty"}
+	}
+	return updateLifecycle(ctx, q, id, LifecycleCreateCleanupPending, &upstreamJobID, reconciliationError,
+		[]Lifecycle{LifecycleCreating, LifecycleCreateAmbiguous, LifecycleCreateCleanupPending}, &claimID)
 }
 
 // BeginDeletion persists delete intent before contacting the pinned upstream
@@ -688,6 +731,34 @@ func BeginDeletion(ctx context.Context, q Querier, id string) (JobRecord, error)
 		return record, nil
 	}
 	return JobRecord{}, &JobError{Kind: JobErrorPrecondition, Message: "media job changed; refresh and retry"}
+}
+
+// beginDeletionClaimed persists delete intent only while claimID owns the
+// job. A concurrent client delete may already have moved the claimed row to
+// delete_pending or deleted; that record is returned so the worker finishes
+// the upstream confirmation. Any other refusal hands the job off.
+func beginDeletionClaimed(ctx context.Context, q Querier, id, claimID string) (JobRecord, error) {
+	tag, err := q.Exec(ctx, `UPDATE olp_go.media_jobs SET lifecycle_state = 'delete_pending',
+			reconciliation_error = NULL, next_reconciliation_at = now(), etag = $3
+		WHERE id = $1 AND reconciliation_claim_id = $2 AND lifecycle_state = 'active'`,
+		id, claimID, uuid.Must(uuid.NewV7()))
+	if err != nil {
+		return JobRecord{}, dbError(err)
+	}
+	record, err := Job(ctx, q, id)
+	if err != nil {
+		return JobRecord{}, err
+	}
+	if tag.RowsAffected() == 1 {
+		return record, nil
+	}
+	if record.ReconciliationClaimID == nil || *record.ReconciliationClaimID != claimID {
+		return JobRecord{}, errClaimLost
+	}
+	if record.Lifecycle == LifecycleDeletePending || record.Lifecycle == LifecycleDeleted {
+		return record, nil
+	}
+	return JobRecord{}, errClaimLost
 }
 
 // AllowsRefreshTransition reports whether an upstream poll may move the
@@ -727,6 +798,20 @@ func validateUpdate(update JobUpdate) error {
 // stale results and state regressions are ignored while terminal states
 // remain immutable.
 func RefreshJob(ctx context.Context, pool *pgxpool.Pool, id string, update JobUpdate) (JobRecord, error) {
+	return refreshJob(ctx, pool, id, nil, update)
+}
+
+// refreshJobClaimed applies a poll result only while claimID owns the job, so
+// a stale worker's late response cannot overwrite the current owner's state.
+func refreshJobClaimed(ctx context.Context, pool *pgxpool.Pool, id, claimID string, update JobUpdate) (JobRecord, error) {
+	return refreshJob(ctx, pool, id, &claimID, update)
+}
+
+// refreshJob applies one poll result inside a single transaction: the row is
+// locked, the optional claim fence and the lifecycle are checked, and the
+// update lands under the same lock. Poll results only ever apply to an active
+// job — a late poll must not undo delete intent or rewrite a tombstone.
+func refreshJob(ctx context.Context, pool *pgxpool.Pool, id string, claimID *string, update JobUpdate) (JobRecord, error) {
 	if err := validateUpdate(update); err != nil {
 		return JobRecord{}, err
 	}
@@ -741,6 +826,19 @@ func RefreshJob(ctx context.Context, pool *pgxpool.Pool, id string, update JobUp
 	}
 	if err != nil {
 		return JobRecord{}, dbError(err)
+	}
+	if claimID != nil &&
+		(current.ReconciliationClaimID == nil || *current.ReconciliationClaimID != *claimID) {
+		return JobRecord{}, errClaimLost
+	}
+	if current.Lifecycle != LifecycleActive {
+		if claimID != nil {
+			return JobRecord{}, errClaimLost
+		}
+		if err = tx.Commit(ctx); err != nil {
+			return JobRecord{}, dbError(err)
+		}
+		return current, nil
 	}
 	stale := current.LastPolledAt != nil && current.LastPolledAt.After(update.LastPolledAt)
 	if stale || !AllowsRefreshTransition(current.State, update.State) {
@@ -790,6 +888,37 @@ func FinalizeDeletion(ctx context.Context, q Querier, id string) (bool, error) {
 		return false, dbError(err)
 	}
 	return tag.RowsAffected() == 1, nil
+}
+
+// finalizeDeletionClaimed applies the tombstone only while claimID owns the
+// job and its lifecycle still permits deletion, so a confirmed upstream
+// delete cannot be finalized by a worker that lost the lease. An existing
+// tombstone under the same claim is a successful no-op.
+func finalizeDeletionClaimed(ctx context.Context, q Querier, id, claimID string) error {
+	tag, err := q.Exec(ctx, `UPDATE olp_go.media_jobs
+		SET lifecycle_state = 'deleted', deleted_at = COALESCE(deleted_at, now()),
+			reconciliation_error = NULL, content_available = false, etag = $3
+		WHERE id = $1
+		  AND reconciliation_claim_id = $2
+		  AND lifecycle_state IN ('creating','create_ambiguous','create_cleanup_pending','delete_pending')`,
+		id, claimID, uuid.Must(uuid.NewV7()))
+	if err != nil {
+		return dbError(err)
+	}
+	if tag.RowsAffected() == 1 {
+		return nil
+	}
+	var lifecycle string
+	var currentClaim *string
+	err = q.QueryRow(ctx, `SELECT lifecycle_state, reconciliation_claim_id::text
+		FROM olp_go.media_jobs WHERE id = $1`, id).Scan(&lifecycle, &currentClaim)
+	if err != nil {
+		return dbError(err)
+	}
+	if currentClaim != nil && *currentClaim == claimID && lifecycle == string(LifecycleDeleted) {
+		return nil
+	}
+	return errClaimLost
 }
 
 // ClaimJobs claims a bounded cross-replica batch for autonomous lifecycle

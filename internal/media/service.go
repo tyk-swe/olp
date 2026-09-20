@@ -307,6 +307,12 @@ func (s *Service) reconcileClaimed(ctx context.Context, record JobRecord) reconc
 		next = now.Add(time.Duration(min(int64(5)*(int64(1)<<exponent), 300)) * time.Second)
 	}
 	if err := FinishReconciliation(ctx, s.Pool, record.ID, claimID, next, errorClass); err != nil {
+		var jobErr *JobError
+		if errors.As(err, &jobErr) && jobErr.Kind == JobErrorPrecondition {
+			// The lease moved to another worker during the operation; the
+			// rejected checkpoint is a benign handoff, not a gap.
+			return outcomeHandedOff
+		}
 		s.RecordGap()
 		s.log().Error("media reconciliation checkpoint failed", "job_id", record.ID, "error", err)
 		return outcomeFailed
@@ -318,22 +324,32 @@ func (s *Service) reconcileClaimed(ctx context.Context, record JobRecord) reconc
 	return outcomeCompleted
 }
 
+// mutationFailure maps a claim-fenced mutation result onto the reconciliation
+// outcome: a refused fence is a benign handoff while real database and
+// missing-record failures keep persistence reporting.
+func mutationFailure(err error) error {
+	if errors.Is(err, errClaimLost) {
+		return errClaimLost
+	}
+	return reconciliationError("persistence_unavailable")
+}
+
 // reconcileOperation performs the lifecycle transition or upstream call one
 // claimed job needs.
 func (s *Service) reconcileOperation(ctx context.Context, record *JobRecord, claimID string) error {
 	switch record.Lifecycle {
 	case LifecycleCreating:
 		if record.UpstreamJobID != nil {
-			updated, err := MarkCreateCleanupPending(ctx, s.Pool, record.ID, *record.UpstreamJobID,
+			updated, err := markCreateCleanupPendingClaimed(ctx, s.Pool, record.ID, claimID, *record.UpstreamJobID,
 				"stale_post_create_reservation")
 			if err != nil {
-				return reconciliationError("persistence_unavailable")
+				return mutationFailure(err)
 			}
 			*record = updated
 		} else {
-			if _, err := MarkCreateAmbiguous(ctx, s.Pool, record.ID,
+			if _, err := markCreateAmbiguousClaimed(ctx, s.Pool, record.ID, claimID,
 				"upstream_create_outcome_unknown_after_restart"); err != nil {
-				return reconciliationError("persistence_unavailable")
+				return mutationFailure(err)
 			}
 			return reconciliationError("upstream_create_outcome_unknown")
 		}
@@ -341,10 +357,10 @@ func (s *Service) reconcileOperation(ctx context.Context, record *JobRecord, cla
 		if record.UpstreamJobID == nil {
 			return reconciliationError("upstream_create_outcome_unknown")
 		}
-		updated, err := MarkCreateCleanupPending(ctx, s.Pool, record.ID, *record.UpstreamJobID,
+		updated, err := markCreateCleanupPendingClaimed(ctx, s.Pool, record.ID, claimID, *record.UpstreamJobID,
 			"ambiguous_create_has_cleanup_identity")
 		if err != nil {
-			return reconciliationError("persistence_unavailable")
+			return mutationFailure(err)
 		}
 		*record = updated
 	case LifecycleDeleted:
@@ -355,11 +371,16 @@ func (s *Service) reconcileOperation(ctx context.Context, record *JobRecord, cla
 	if record.Lifecycle == LifecycleActive &&
 		(record.ExpiresAt != nil && !record.ExpiresAt.After(s.now()) ||
 			record.CreatedAt.Before(s.now().Add(-30*24*time.Hour))) {
-		updated, err := BeginDeletion(ctx, s.Pool, record.ID)
+		updated, err := beginDeletionClaimed(ctx, s.Pool, record.ID, claimID)
 		if err != nil {
-			return reconciliationError("persistence_unavailable")
+			return mutationFailure(err)
 		}
 		*record = updated
+	}
+	// A concurrent client delete may have finished the tombstone while the
+	// claim was held; there is no upstream call left to confirm.
+	if record.Lifecycle == LifecycleDeleted {
+		return nil
 	}
 
 	return s.executeReconciliation(ctx, record, claimID)
@@ -403,7 +424,7 @@ func (s *Service) executeReconciliation(ctx context.Context, record *JobRecord, 
 	result, transportFailure := s.Transport.Do(callCtx, target.Target, call, nil)
 	if transportFailure != nil {
 		if isDelete && transportFailure.Status == 404 {
-			return s.confirmDeletion(ctx, record)
+			return s.confirmDeletion(ctx, record, claimID)
 		}
 		return reconciliationError(failureClassCode(transportFailure))
 	}
@@ -415,7 +436,7 @@ func (s *Service) executeReconciliation(ctx context.Context, record *JobRecord, 
 		if !ok {
 			return reconciliationError("provider_protocol_error")
 		}
-		updated, err := RefreshJob(ctx, s.Pool, record.ID, JobUpdate{
+		updated, err := refreshJobClaimed(ctx, s.Pool, record.ID, claimID, JobUpdate{
 			State:            state,
 			ProgressPercent:  result.Video.Progress,
 			ContentAvailable: result.Video.Status == "completed",
@@ -424,7 +445,7 @@ func (s *Service) executeReconciliation(ctx context.Context, record *JobRecord, 
 			LastPolledAt:     s.now(),
 		})
 		if err != nil {
-			return reconciliationError("persistence_unavailable")
+			return mutationFailure(err)
 		}
 		*record = updated
 		return nil
@@ -432,17 +453,12 @@ func (s *Service) executeReconciliation(ctx context.Context, record *JobRecord, 
 	if result.Deleted == nil || !result.Deleted.Deleted {
 		return reconciliationError("video_delete_not_confirmed")
 	}
-	return s.confirmDeletion(ctx, record)
+	return s.confirmDeletion(ctx, record, claimID)
 }
 
-func (s *Service) confirmDeletion(ctx context.Context, record *JobRecord) error {
-	finalized, err := s.FinalizeDeletion(ctx, record.ID)
-	if err != nil {
-		return reconciliationError("persistence_unavailable")
-	}
-	if !finalized {
-		s.RecordGap()
-		return reconciliationError("persistence_unavailable")
+func (s *Service) confirmDeletion(ctx context.Context, record *JobRecord, claimID string) error {
+	if err := finalizeDeletionClaimed(ctx, s.Pool, record.ID, claimID); err != nil {
+		return mutationFailure(err)
 	}
 	record.Lifecycle = LifecycleDeleted
 	return nil
