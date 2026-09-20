@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { untrack } from 'svelte';
+  import { onDestroy, untrack } from 'svelte';
   import { guardUnsavedChanges } from '$lib/forms/unsavedChanges';
   import { parseJsonObject } from '$lib/forms/json';
   import RoutingPreferencesForm from './RoutingPreferencesForm.svelte';
@@ -8,6 +8,7 @@
   import { result, errorMessage } from '$lib/api/http';
   import type { components } from '$lib/api/schema';
   type Policy = components['schemas']['RoutingPolicy'];
+  type Scope = 'installation' | 'route-draft' | 'api-key';
   let {
     scope,
     id,
@@ -17,7 +18,7 @@
     busy = $bindable(false),
     onSaved = () => {}
   }: {
-    scope: 'installation' | 'route-draft' | 'api-key';
+    scope: Scope;
     id: string;
     resourceEtag?: string;
     canManage: boolean;
@@ -32,20 +33,57 @@
   let conflict = $state(false);
   let loadedResource = $state('');
   let sections = $state({ constraints: '{}', defaults: '{}' });
+  // Action lifetime: each save/reload captures the resource it started on plus
+  // an action serial. A completion applies its result only while it still owns
+  // the editor — same scope:id, no newer action, component alive — so a slow
+  // save can never clear a newer operation's flags or call the callback a
+  // different resource is now bound to.
+  let destroyed = false;
+  let actionSerial = 0;
+  let busyAction = 0;
+  let editSerial = 0;
+  onDestroy(() => {
+    destroyed = true;
+    actionSerial += 1;
+    busyAction = 0;
+  });
   const invalidSections = $derived(
     Object.values(sections).some((value) => parseJsonObject(value) === null)
   );
   guardUnsavedChanges(() => dirty);
   const policy = createQuery(() => ({
     queryKey: ['routing-policy', scope, id, resourceEtag],
-    queryFn: async () => {
+    queryFn: async ({ queryKey, signal }) => {
+      const [, keyScope, keyId] = queryKey as [unknown, Scope, string, unknown];
       const response = await apiClient.GET(
         '/api/v3/routing-policies/{scope}/{id}',
-        { params: { path: { scope, id } } }
+        {
+          params: { path: { scope: keyScope, id: keyId } },
+          signal
+        }
       );
       return result(response.data, response.error, response.response);
     }
   }));
+  $effect(() => {
+    const resource = `${scope}:${id}`;
+    if (resource === loadedResource) return;
+    untrack(() => {
+      // The binding moved to another resource: retire in-flight actions and
+      // clear every field the previous resource owned. The new resource's own
+      // values land when its policy data hydrates.
+      actionSerial += 1;
+      busy = false;
+      busyAction = 0;
+      text = '{}';
+      baseline = '';
+      sections = { constraints: '{}', defaults: '{}' };
+      dirty = false;
+      error = '';
+      notice = '';
+      conflict = false;
+    });
+  });
   $effect(() => {
     const data = policy.data;
     const resource = `${scope}:${id}`;
@@ -65,7 +103,11 @@
     });
   });
   async function reload() {
+    const resource = `${scope}:${id}`;
+    const action = ++actionSerial;
     const response = await policy.refetch();
+    if (destroyed || action !== actionSerial || resource !== `${scope}:${id}`)
+      return;
     if (!response.data || response.error) return;
     text = JSON.stringify(response.data.policy, null, 2);
     syncSections();
@@ -84,6 +126,7 @@
   function section(key: 'constraints' | 'defaults', value: string) {
     sections[key] = value;
     dirty = true;
+    editSerial += 1;
     notice = '';
     try {
       const next = JSON.parse(text);
@@ -96,9 +139,23 @@
   }
   async function save(event: SubmitEvent) {
     event.preventDefault();
-    if (!policy.data || conflict || policy.isFetching || invalidSections)
+    if (
+      !policy.data ||
+      conflict ||
+      busy ||
+      policy.isFetching ||
+      invalidSections
+    )
       return;
+    const actionScope = scope;
+    const actionId = id;
+    const resource = `${actionScope}:${actionId}`;
+    const action = ++actionSerial;
+    const submittedEdit = editSerial;
+    const isCurrent = () =>
+      !destroyed && action === actionSerial && resource === `${scope}:${id}`;
     busy = true;
+    busyAction = action;
     error = '';
     notice = '';
     try {
@@ -107,7 +164,7 @@
       const response = await apiClient.PUT(
         '/api/v3/routing-policies/{scope}/{id}',
         {
-          params: { path: { scope, id } },
+          params: { path: { scope: actionScope, id: actionId } },
           headers: {
             'If-Match': previousEtag,
             'Idempotency-Key': crypto.randomUUID()
@@ -116,17 +173,29 @@
         }
       );
       const saved = result(response.data, response.error, response.response);
-      dirty = false;
+      // The mutation may have committed on the server even when this editor
+      // has moved on; never replay it, but also never apply its outcome to a
+      // resource the action no longer owns.
+      if (!isCurrent()) return;
+      dirty = editSerial !== submittedEdit;
+      baseline = JSON.stringify(saved.policy, null, 2);
       await onSaved(saved.etag, previousEtag);
+      if (!isCurrent()) return;
       await policy.refetch();
+      if (!isCurrent()) return;
       notice =
-        scope === 'route-draft'
+        actionScope === 'route-draft'
           ? 'Routing policy staged. Validate and publish the route to apply it.'
           : 'Routing policy published.';
     } catch (e) {
-      error = errorMessage(e, 'Enter a valid routing policy.');
+      if (isCurrent()) error = errorMessage(e, 'Enter a valid routing policy.');
     } finally {
-      busy = false;
+      // A stale save must not clear a newer action's busy flag, and a
+      // destroyed component must not write through the parent's binding.
+      if (!destroyed && busyAction === action) {
+        busy = false;
+        busyAction = 0;
+      }
     }
   }
 </script>
@@ -181,6 +250,7 @@
             oninput={(event) => {
               text = event.currentTarget.value;
               dirty = true;
+              editSerial += 1;
               notice = '';
               syncSections();
             }}

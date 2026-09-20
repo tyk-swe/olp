@@ -3,4 +3,6 @@
   import RouteDraftEditor from '$lib/features/routes/RouteDraftEditor.svelte';
 </script>
 
-<RouteDraftEditor routeId={page.params.routeId} />
+{#key page.params.routeId}
+  <RouteDraftEditor routeId={page.params.routeId} />
+{/key}

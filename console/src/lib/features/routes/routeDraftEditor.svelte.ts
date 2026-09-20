@@ -1,7 +1,7 @@
 import { overviewKeys } from '$lib/features/overview/overviewKeys';
 import { providerKeys } from '$lib/features/providers/providerKeys';
 import { routeKeys } from '$lib/features/routes/routeKeys';
-import { untrack } from 'svelte';
+import { onDestroy, untrack } from 'svelte';
 import { SvelteSet } from 'svelte/reactivity';
 import { goto } from '$app/navigation';
 import { guardUnsavedChanges } from '$lib/forms/unsavedChanges';
@@ -71,6 +71,14 @@ export class RouteDraftEditorState {
   policyBusy = $state(false);
   hasUnsavedChanges = $derived(this.sync.dirty || this.policyDirty);
   private editVersion = 0;
+  /**
+   * Ownership generation for asynchronous actions. It advances whenever the
+   * editor's resource identity changes, so a completion from another draft's
+   * lifetime is dropped instead of being applied to the resource on screen.
+   */
+  private ownerEpoch = 0;
+  private disposed = false;
+  private activeResource = '';
   busy = $state('');
   publicationBlocked = $derived(
     Boolean(this.busy) || this.policyBusy || this.hasUnsavedChanges
@@ -113,18 +121,58 @@ export class RouteDraftEditorState {
       this.operations
     )
   );
-  run = async (label: string, action: () => Promise<void>) => {
+  /**
+   * True while the captured epoch still owns this editor: the component is
+   * mounted and the resource identity has not moved on.
+   */
+  private current(epoch: number): boolean {
+    return !this.disposed && epoch === this.ownerEpoch;
+  }
+  /**
+   * Returns every form field, flag, and result to its initial value and
+   * invalidates every in-flight action captured under the previous resource.
+   */
+  private resetResource() {
+    this.ownerEpoch += 1;
+    this.slug = 'default';
+    this.operations = ['generation'];
+    this.overallTimeoutMs = 120000;
+    this.maxAttempts = 2;
+    this.targets = [];
+    this.sync = initialConcurrentEdit();
+    this.policyDirty = false;
+    this.policyBusy = false;
+    this.busy = '';
+    this.errorMessage = '';
+    this.notice = '';
+    this.routingPreferences = '{}';
+    this.seed = 'setup-preview';
+    this.simulationOperation = 'generation';
+    this.simulationSurface = 'openai';
+    this.simulationMode = 'streaming';
+    this.simulation = null;
+    this.simulationVersion += 1;
+    this.activation = null;
+  }
+  run = async (
+    label: string,
+    action: (isCurrent: () => boolean) => Promise<void>
+  ) => {
     if (this.busy) return;
+    const epoch = this.ownerEpoch;
+    const isCurrent = () => this.current(epoch);
     this.busy = label;
     this.errorMessage = '';
     this.notice = '';
     try {
-      await action();
+      await action(isCurrent);
     } catch (error) {
+      if (!isCurrent()) return;
       if (isEtagMismatch(error)) this.sync = markConflict(this.sync);
       else this.errorMessage = message(error);
     } finally {
-      this.busy = '';
+      // A stale action must not release a newer operation's busy state.
+      if (isCurrent()) this.busy = '';
     }
   };
   invalidateSimulation = () => {
@@ -138,14 +186,18 @@ export class RouteDraftEditorState {
     this.sync = markDirty(this.sync);
   };
   reload = async () => {
-    await this.run('reload', async () => {
+    await this.run('reload', async (isCurrent) => {
       const result = await this.draft.refetch();
+      if (!isCurrent()) return;
       if (result.error) throw result.error;
       if (!result.data) throw new Error('The route draft is unavailable.');
       this.sync = beginReload(this.sync);
     });
   };
   policySaved = async (etag: string, previousEtag: string) => {
+    // The routing-policy child only invokes this while it still owns its
+    // resource, but keep the disposal guard so a late callback is inert.
+    if (this.disposed) return;
     if (this.sync.snapshotEtag === previousEtag) {
       this.sync = acceptRemote(this.sync, etag);
     }
@@ -190,13 +242,16 @@ export class RouteDraftEditorState {
       this.errorMessage = issue;
       return;
     }
-    await this.run('save', async () => {
+    await this.run('save', async (isCurrent) => {
       const { id } = await createRouteDraft(
         buildCreateRouteDraftInput(this.editorValues, this.modelOptions)
       );
+      // The create already committed, so the list invalidation stays valid
+      // even if this editor has since been replaced or destroyed.
       await this.queryClient.invalidateQueries({
         queryKey: routeKeys.lists
       });
+      if (!isCurrent()) return;
       this.sync = initialConcurrentEdit();
       await goto(resolve(`/routes/${id}`));
     });
@@ -209,7 +264,7 @@ export class RouteDraftEditorState {
       return;
     }
     this.invalidateSimulation();
-    await this.run('save', async () => {
+    await this.run('save', async (isCurrent) => {
       if (!this.sync.snapshotEtag)
         throw new Error('Reload the draft before saving.');
       const submittedVersion = this.editVersion;
@@ -218,11 +273,14 @@ export class RouteDraftEditorState {
         this.sync.snapshotEtag,
         buildReplaceRouteDraftInput(this.editorValues)
       );
+      // The response is stored under the originating draft's key, which is
+      // correct regardless of which resource the editor now shows.
+      this.queryClient.setQueryData(routeKeys.draft(current.id), updated);
+      if (!isCurrent()) return;
       this.sync = markSaved(
         updated.etag,
         this.editVersion !== submittedVersion
       );
-      this.queryClient.setQueryData(routeKeys.draft(current.id), updated);
       this.notice = this.sync.dirty
         ? 'Draft saved. You have additional unsaved changes.'
         : 'Draft saved. Validate to preview, or activate directly; activation validates the saved draft.';
@@ -232,7 +290,7 @@ export class RouteDraftEditorState {
     if (!this.canManage || this.publicationBlocked) return;
     this.invalidateSimulation();
     const version = this.simulationVersion;
-    await this.run('simulate', async () => {
+    await this.run('simulate', async (isCurrent) => {
       let simulation: RouteSimulation;
       try {
         simulation = await simulateRoute(current.id, {
@@ -243,55 +301,63 @@ export class RouteDraftEditorState {
           preferences: JSON.parse(this.routingPreferences)
         });
       } catch (error) {
-        if (version === this.simulationVersion) throw error;
+        if (isCurrent() && version === this.simulationVersion) throw error;
         return;
       }
-      if (version !== this.simulationVersion) return;
+      if (!isCurrent() || version !== this.simulationVersion) return;
       this.simulation = simulation;
       this.notice = simulationNotice;
     });
   };
   validate = async (current: RouteDraft) => {
     if (!this.canManage || this.publicationBlocked) return;
-    await this.run('validate', async () => {
+    await this.run('validate', async (isCurrent) => {
       const validation = await validateRoute(current);
-      this.sync = acceptRemote(this.sync, validation.etag);
       this.queryClient.setQueryData<RouteDraft>(routeKeys.draft(current.id), {
         ...current,
         state: validation.state,
         etag: validation.etag
       });
+      if (!isCurrent()) return;
+      this.sync = acceptRemote(this.sync, validation.etag);
       this.notice = 'Validation passed. The saved draft is ready to activate.';
     });
   };
   activate = async (current: RouteDraft) => {
     if (!this.canManage || this.publicationBlocked) return;
-    await this.run('activate', async () => {
-      this.activation = await activateRoute(current);
-      // Activation returns the draft to `draft` under a fresh ETag. Adopting it
-      // here keeps the next save from failing its If-Match precondition.
-      this.sync = acceptRemote(this.sync, this.activation.draft_etag);
+    await this.run('activate', async (isCurrent) => {
+      const activation = await activateRoute(current);
+      // Adopt our activation's ETag before cache reconciliation can treat it
+      // as a remote change to edits made while activation was in flight.
+      if (isCurrent()) {
+        this.sync = acceptRemote(this.sync, activation.draft_etag);
+      }
       this.queryClient.setQueryData<RouteDraft>(routeKeys.draft(current.id), {
         ...current,
         state: 'draft',
-        etag: this.activation.draft_etag
+        etag: activation.draft_etag
       });
-      this.notice = `Route activated as revision ${this.activation.revision} in runtime generation ${this.activation.runtime_generation.sequence}.`;
       await Promise.all([
-        this.draft.refetch(),
+        this.queryClient.invalidateQueries({
+          queryKey: routeKeys.draft(current.id)
+        }),
         this.queryClient.invalidateQueries({ queryKey: routeKeys.lists }),
         this.queryClient.invalidateQueries({ queryKey: overviewKeys.root })
       ]);
+      if (!isCurrent()) return;
+      this.activation = activation;
+      this.notice = `Route activated as revision ${activation.revision} in runtime generation ${activation.runtime_generation.sequence}.`;
     });
   };
   remove = async (current: RouteDraft) => {
     if (!this.canManage || this.busy) return;
     if (!confirm(`Delete draft “${current.slug}”?`)) return;
-    await this.run('delete', async () => {
+    await this.run('delete', async (isCurrent) => {
       await deleteRouteDraft(current.id, current.etag);
       await this.queryClient.invalidateQueries({
         queryKey: routeKeys.lists
       });
+      if (!isCurrent()) return;
       this.sync = initialConcurrentEdit();
       await goto(resolve('/routes'));
     });
@@ -300,16 +366,35 @@ export class RouteDraftEditorState {
     this.readRouteId = readRouteId;
     this.draft = createQuery(() => ({
       queryKey: routeKeys.draft(this.resourceId),
-      queryFn: () => getRouteDraft(this.resourceId),
+      // Bind the fetch to the resolved key so a resource change cannot write
+      // one draft's payload under another draft's cache entry, and so a
+      // superseded observer's request is actually aborted.
+      queryFn: ({ queryKey, signal }) =>
+        getRouteDraft(queryKey[2] as string, signal),
       enabled: Boolean(this.resourceId)
     }));
     this.providerModels = createQuery(() => ({
       queryKey: providerKeys.enabledModels(),
-      queryFn: () => listProviderModelInventory(true)
+      queryFn: ({ signal }) => listProviderModelInventory(true, signal)
     }));
+    onDestroy(() => {
+      this.disposed = true;
+      this.ownerEpoch += 1;
+    });
     $effect(() => {
+      const resource = this.resourceId;
       const current = this.draft.data;
-      if (!current) return;
+      if (resource !== this.activeResource) {
+        // The editor moved to a different draft: nothing from the previous
+        // resource may carry over, and any action it still has in flight loses
+        // ownership here rather than at some later completion.
+        this.activeResource = resource;
+        untrack(() => this.resetResource());
+      }
+      // Only hydrate from a payload that belongs to the resource this editor
+      // currently owns; a lagging observer can briefly hold the previous
+      // draft's data while the key change propagates.
+      if (!current || current.id !== resource) return;
       const next = reconcile(this.sync, current.etag);
       if (next.state !== this.sync) this.sync = next.state;
       if (!next.hydrate) return;
