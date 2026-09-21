@@ -318,80 +318,26 @@ type mediaOutcome struct {
 	localJob  string
 }
 
-// executeMedia runs the bounded media attempt loop against the pinned
-// release. It mirrors execute: the shared pre-dispatch gate revalidates every
-// candidate slot, quota reservations, per-attempt deadlines, failover policy,
-// health tracking, and attempt facts.
+// executeMedia adapts media to shared attempt execution. Media transport
+// retains its absolute attempt deadline and side-effect ambiguity rules.
 func (s *Server) executeMedia(ctx context.Context, w http.ResponseWriter, x *execution) *mediaOutcome {
-	deadline, _ := ctx.Deadline()
-	snapshot := x.request.release.Snapshot
-	used := 0
-	unmeterable := false
-	var last *attemptFailure
-	for _, attempt := range x.attempts {
-		if used >= x.budget || ctx.Err() != nil {
-			break
-		}
-		provider, ok := snapshot.Providers[attempt.ProviderID]
-		if !ok || s.health.open(provider.ID) {
-			continue
-		}
-		next := false
-		for _, slot := range s.slots(x, attempt, &provider) {
-			if used >= x.budget || ctx.Err() != nil {
-				break
-			}
-			gate := s.gateSlot(ctx, &provider, &slot, x.estimate, deadline)
-			switch gate.verdict {
-			case gateExpired:
-				return &mediaOutcome{err: (&attemptFailure{class: classTimeout}).toError()}
-			case gateDenied:
-				next = true
-			case gateRejected:
-				// A quota refusal before dispatch cost the upstream nothing
-				// and is not provider evidence, so the circuit never sees it.
-				used++
-				x.facts = append(x.facts, s.rejectedFact(x, attempt, slot, used, gate.rejection))
-				last = gate.rejection
-				next = gate.rejection.quota == quotaConnection // every credential shares the connection quota
-			case gateUnmeterable:
-				unmeterable = true
-			case gateAdmitted:
-				used++
-				fact, result, failure := s.mediaAttempt(ctx, w, x, attempt, &provider, slot, used)
-				dispatched := failure == nil || failure.dispatched
-				x.dispatched = x.dispatched || dispatched
-				gate.hold.settle(ctx, dispatched, totalTokens(fact.Usage))
-				x.facts = append(x.facts, fact)
-				s.health.record(provider.ID, fact)
-				if failure == nil {
-					return &mediaOutcome{result: result, committed: true, status: http.StatusOK}
-				}
-				next = s.cooldownFailure(ctx, provider.ID, &slot, failure)
-				if failure.overall || failure.class == classCancelled || failure.class == classAmbiguous {
-					return &mediaOutcome{err: failure.toError(), committed: failure.committed, cancelled: failure.class == classCancelled}
-				}
-				if !failoverAllowed(failure.class, failure.committed) {
-					return &mediaOutcome{err: failure.toError(), committed: failure.committed}
-				}
-				last = failure
-			}
-			if next {
-				break
-			}
-		}
+	attempted := runAttempts(ctx, s, x, attemptAdapter[*media.Result]{
+		estimate: func(*runtime.Provider) int64 { return x.estimate },
+		dispatch: func(ctx context.Context, attempt runtime.Attempt, provider *runtime.Provider, slot runtime.Slot, ordinal int) (AttemptFact, *media.Result, *attemptFailure) {
+			return s.mediaAttempt(ctx, w, x, attempt, provider, slot, ordinal)
+		},
+	})
+	out := &mediaOutcome{
+		result:    attempted.result,
+		err:       attempted.err,
+		committed: attempted.committed,
+		cancelled: attempted.cancelled,
 	}
-	switch {
-	case ctx.Err() != nil && errors.Is(context.Cause(ctx), context.DeadlineExceeded):
-		return &mediaOutcome{err: (&attemptFailure{class: classTimeout}).toError()}
-	case ctx.Err() != nil:
-		return &mediaOutcome{err: (&attemptFailure{class: classCancelled}).toError(), cancelled: true}
-	case last != nil:
-		return &mediaOutcome{err: last.toError()}
-	case unmeterable:
-		return &mediaOutcome{err: limitsUnavailable()}
+	if out.err == nil {
+		out.committed = true
+		out.status = http.StatusOK
 	}
-	return &mediaOutcome{err: serverError(http.StatusServiceUnavailable, "upstream_unavailable", "No provider is currently able to serve `"+x.route.Slug+"`.")}
+	return out
 }
 
 // mediaParameterNames reports the canonical control names a media request

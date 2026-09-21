@@ -49,19 +49,6 @@ const (
 	surfaceOpenAI       = "openai"
 )
 
-// failoverAllowed reports whether a failure class may select another
-// attempt when nothing has been committed to the client.
-func failoverAllowed(class string, committed bool) bool {
-	if committed {
-		return false
-	}
-	switch class {
-	case classConnect, classTimeout, classRateLimit, classUpstreamServer, classCredential, classContextWindow:
-		return true
-	}
-	return false
-}
-
 const (
 	maxStreamDuration = time.Hour
 	errorBodyLimit    = 64 * 1024
@@ -246,92 +233,26 @@ func forwardable(status int) bool {
 	return false
 }
 
-// execute runs the bounded attempt loop against the pinned release.
+// execute adapts canonical inference to shared attempt execution. The
+// canonical transport retains its first-byte and streaming idle deadlines.
 func (s *Server) execute(ctx context.Context, x *execution) *outcome {
 	overall := time.Duration(x.route.OverallTimeout) * time.Millisecond
 	ctx, cancel := context.WithTimeout(ctx, overall)
 	defer cancel()
-	deadline, _ := ctx.Deadline()
-	snapshot := x.request.release.Snapshot
-	used := 0
-	unmeterable := false
-	var last *attemptFailure
-	for _, attempt := range x.attempts {
-		if used >= x.budget || ctx.Err() != nil {
-			break
-		}
-		provider, ok := snapshot.Providers[attempt.ProviderID]
-		if !ok || s.health.open(provider.ID) {
-			continue
-		}
-		slots := s.slots(x, attempt, &provider)
-		if len(slots) == 0 {
-			continue
-		}
-		next := false
-		for _, slot := range slots {
-			if used >= x.budget || ctx.Err() != nil {
-				break
-			}
-			gate := s.gateSlot(ctx, &provider, &slot, estimateTokens(x.parsed, provider.ParameterDefaults), deadline)
-			switch gate.verdict {
-			case gateExpired:
-				return &outcome{err: (&attemptFailure{class: classTimeout}).toError()}
-			case gateDenied:
-				next = true
-			case gateRejected:
-				// The quota rejected the attempt before the provider was
-				// called, so it cost the upstream nothing and a sibling
-				// target may still serve this request.
-				used++
-				x.facts = append(x.facts, s.rejectedFact(x, attempt, slot, used, gate.rejection))
-				last = gate.rejection
-				next = gate.rejection.quota == quotaConnection // every credential shares the connection quota
-			case gateUnmeterable:
-				unmeterable = true
-			case gateAdmitted:
-				used++
-				fact, completion, failure := s.attempt(ctx, x, attempt, &provider, slot, used)
-				// Only an attempt that reached the upstream spent the key's
-				// window. An attempt that died inside this gateway — an
-				// endpoint outside the egress policy, a body that would not
-				// encode, a credential that would not apply — cost no provider
-				// anything, so the request stays refundable.
-				dispatched := failure == nil || failure.dispatched
-				x.dispatched = x.dispatched || dispatched
-				gate.hold.settle(ctx, dispatched, totalTokens(fact.Usage))
-				x.facts = append(x.facts, fact)
-				s.health.record(provider.ID, fact)
-				if failure == nil {
-					return &outcome{completion: completion, committed: fact.Committed}
-				}
-				next = s.cooldownFailure(ctx, provider.ID, &slot, failure)
-				if failure.overall || failure.class == classCancelled {
-					return &outcome{err: failure.toError(), committed: failure.committed, cancelled: failure.class == classCancelled}
-				}
-				if !failoverAllowed(failure.class, failure.committed) {
-					return &outcome{err: failure.toError(), committed: failure.committed}
-				}
-				last = failure
-			}
-			if next {
-				break
-			}
-		}
+	out := runAttempts(ctx, s, x, attemptAdapter[*openai.Completion]{
+		estimate: func(provider *runtime.Provider) int64 {
+			return estimateTokens(x.parsed, provider.ParameterDefaults)
+		},
+		dispatch: func(ctx context.Context, attempt runtime.Attempt, provider *runtime.Provider, slot runtime.Slot, ordinal int) (AttemptFact, *openai.Completion, *attemptFailure) {
+			return s.attempt(ctx, x, attempt, provider, slot, ordinal)
+		},
+	})
+	return &outcome{
+		completion: out.result,
+		err:        out.err,
+		committed:  out.committed,
+		cancelled:  out.cancelled,
 	}
-	switch {
-	case ctx.Err() != nil && errors.Is(context.Cause(ctx), context.DeadlineExceeded):
-		return &outcome{err: (&attemptFailure{class: classTimeout}).toError()}
-	case ctx.Err() != nil:
-		return &outcome{err: (&attemptFailure{class: classCancelled}).toError(), cancelled: true}
-	case last != nil:
-		return &outcome{err: last.toError()}
-	case unmeterable:
-		// Every eligible target had a quota that could not be consulted.
-		// Serving unmetered would spend a budget nobody can account for.
-		return &outcome{err: limitsUnavailable()}
-	}
-	return &outcome{err: serverError(http.StatusServiceUnavailable, "upstream_unavailable", "No provider is currently able to serve `"+x.route.Slug+"`.")}
 }
 
 // slots returns the credential slots usable for this attempt, ordered by

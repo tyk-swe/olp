@@ -310,6 +310,12 @@ func seedMediaFixture(t *testing.T, authMode string, withCredential bool) *media
 			}},
 		}},
 	}
+	// Job authorization reads the durable route even after it is retired
+	// from the active snapshot.
+	route := f.snapshot.Routes["video-default"]
+	exec(`INSERT INTO olp_go.routes(id,slug,created_by,latest_revision,latest_revision_id,etag)
+		VALUES($1,$2,$3,$4,$5,$6)`,
+		route.ID, route.Slug, f.ownerID, route.Revision, route.RevisionID, uuid.NewString())
 	digest, err := f.snapshot.Digest()
 	if err != nil {
 		t.Fatal(err)

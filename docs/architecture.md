@@ -30,12 +30,13 @@ contract. `make api` generates Go transport types and ignored TypeScript
 declarations; `/api/v3/openapi.json` serves the embedded contract. Integration
 tests check handler/contract parity.
 
-Inference pins an immutable runtime snapshot. `internal/gateway/executor.go`
-owns canonical attempts, reservations, cancellation, streaming commitment, and
-completion; adjacent resource, media, Bedrock, and realtime paths handle their
-specific lifecycles. Protocol codecs live in `internal/protocols/`. Independent
-key-authority refresh prevents a failed activation from retaining revoked
-access.
+Inference pins an immutable runtime snapshot. `internal/gateway/attempts.go`
+owns shared attempt progression, reservations, settlement, health and failover
+for canonical inference and ordinary media. `executor.go` and `media.go` retain
+their transport deadlines, streaming commitment and delivery; adjacent resource,
+video, Bedrock, and realtime paths handle their specific lifecycles. Protocol
+codecs live in `internal/protocols/`. Independent key-authority refresh prevents
+a failed activation from retaining revoked access.
 
 PostgreSQL owns durable state. Valkey coordinates limits, hints, and accounting
 events; retries and deduplication support recovery. Durable media jobs and
