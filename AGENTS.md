@@ -64,3 +64,17 @@ behavior, record validation, and include screenshots for visible console
 changes. Regenerate affected API contracts rather than editing generated files.
 Keep migrations forward-only and sequential; update Helm values, schema, and
 templates together.
+
+## Agent skills
+
+### Issue tracker
+
+Issues and specs live in GitHub Issues. Read `docs/agents/issue-tracker.md` before tracker operations.
+
+### Triage labels
+
+Use the five default triage labels. Read `docs/agents/triage-labels.md` before assigning triage roles.
+
+### Domain docs
+
+Single-context: root `CONTEXT.md` and `docs/adr/`. Before exploring the codebase, read `docs/agents/domain.md`.
