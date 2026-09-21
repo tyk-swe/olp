@@ -9,6 +9,9 @@ const key = {
   id: '01980000-0000-7000-8000-000000000301',
   lookup_id: 'olp_live_abcd',
   name: 'production SDK',
+  project_id: null,
+  project_name: null,
+  budget_group_id: null,
   scopes: ['inference'],
   allowed_routes: ['default'],
   requests_per_minute: 120,
@@ -28,6 +31,8 @@ const key = {
     unpriced_attempts: 2
   },
   expires_at: '2027-01-01T12:30:00Z',
+  allow_provider_state: false,
+  allowed_attribution_keys: ['team'],
   revoked_at: null,
   rotated_at: null,
   etag: '01980000-0000-7000-8000-000000000302',
@@ -40,6 +45,8 @@ describe('API key form state', () => {
   it('starts a new key with optional limits empty', () => {
     expect(createApiKeyFormState()).toEqual({
       name: '',
+      projectId: '',
+      budgetGroupId: '',
       scopes: ['inference'],
       allowedRoutes: [],
       requestsPerMinute: '',
@@ -47,7 +54,9 @@ describe('API key form state', () => {
       maxConcurrency: '',
       dailyCostLimit: '',
       monthlyCostLimit: '',
-      expiresAt: ''
+      expiresAt: '',
+      allowProviderState: false,
+      allowedAttributionKeys: []
     });
   });
 
@@ -57,6 +66,7 @@ describe('API key form state', () => {
     expect(state).toMatchObject({
       name: 'production SDK',
       allowedRoutes: ['default'],
+      allowedAttributionKeys: ['team'],
       requestsPerMinute: '120',
       dailyCostLimit: '1.250000000001',
       monthlyCostLimit: '20.00'
@@ -64,6 +74,7 @@ describe('API key form state', () => {
     expect(buildApiKeyPolicyInput(state)).toMatchObject({
       name: 'production SDK',
       allowed_routes: ['default'],
+      allowed_attribution_keys: ['team'],
       requests_per_minute: 120,
       daily_cost_limit: '1.250000000001',
       monthly_cost_limit: '20.00'

@@ -20,7 +20,8 @@ function sessionFor(role: FixedRole): AuthenticatedSession {
       id: principalId,
       email: `${role}@example.com`,
       display_name: 'Test Principal',
-      role
+      role,
+      access_scope: 'global'
     },
     csrf_token: 'csrf-role-test'
   };

@@ -157,7 +157,7 @@ func TestEncodeBuildsExpectedPaths(t *testing.T) {
 		{OpVideoDelete, "videos/video_1", "DELETE"},
 	} {
 		r := &Request{Op: tc.op, Route: "route", Prompt: "p", Input: "in", Voice: "v", JobID: "video_1"}
-		call, failure := Encode(r, "upstream-model")
+		call, failure := Encode(r, "openai", "upstream-model")
 		if failure != nil {
 			t.Fatalf("%s: %v", tc.op, failure)
 		}

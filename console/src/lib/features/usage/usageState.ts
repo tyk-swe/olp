@@ -8,14 +8,17 @@ const dimensions = [
   'provider',
   'model',
   'api_key',
-  'operation'
+  'operation',
+  'attribution'
 ] as const;
 const resources = [
   'route',
   'model',
   'provider_id',
   'api_key_id',
-  'operation'
+  'operation',
+  'attribution_key',
+  'attribution_value'
 ] as const;
 
 export type UsageState = {
@@ -43,13 +46,24 @@ function urlInstant(value: string): string | undefined {
 }
 
 export function usageProblem(state: UsageState): string | null {
-  const { start, end, provider_id, api_key_id } = state.filters;
+  const {
+    start,
+    end,
+    provider_id,
+    api_key_id,
+    attribution_key,
+    attribution_value
+  } = state.filters;
   if (!urlInstant(start) || !urlInstant(end))
     return 'Enter valid start and end times.';
   if (new Date(start) >= new Date(end)) return 'End must be after start.';
   if (provider_id && !UUID.test(provider_id))
     return 'Provider ID must be a UUID.';
   if (api_key_id && !UUID.test(api_key_id)) return 'API key ID must be a UUID.';
+  if (attribution_value && !attribution_key)
+    return 'An attribution value needs its attribution key.';
+  if (state.dimension === 'attribution' && !attribution_key)
+    return 'The attribution breakdown needs an attribution key.';
   return null;
 }
 
@@ -99,6 +113,8 @@ export function usageDraft(state: UsageState): UsageDraft {
     provider_id: state.filters.provider_id ?? '',
     api_key_id: state.filters.api_key_id ?? '',
     operation: state.filters.operation ?? '',
+    attribution_key: state.filters.attribution_key ?? '',
+    attribution_value: state.filters.attribution_value ?? '',
     dimension: state.dimension,
     granularity: state.granularity
   };

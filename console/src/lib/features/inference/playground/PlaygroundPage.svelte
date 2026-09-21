@@ -6,19 +6,28 @@
   import { routeKeys } from '$lib/features/routes/routeKeys';
 
   import { createMutation, createQuery } from '@tanstack/svelte-query';
-  import { errorMessage } from '$lib/api/http';
   import {
     listRoutes,
     simulateRouting,
     type RoutingSimulationInput
   } from '$lib/features/routes/api';
+  import { hasOutputRules } from '$lib/features/routes/routeEditor';
   import { listApiKeys } from '$lib/features/access/api-keys/api';
   import { apiKeyQueries } from '$lib/features/access/api-keys/apiKeyQueries';
   import {
     runPlayground,
-    type PlaygroundRequest
+    streamPlayground,
+    type PlaygroundOperation,
+    type PlaygroundRequest,
+    type PlaygroundStreamDone
   } from '$lib/features/inference/playground/api';
+  import {
+    playgroundTemplates,
+    templateFor
+  } from '$lib/features/inference/playground/templates';
+  import { onDestroy } from 'svelte';
   import SegmentedRadioGroup from '$lib/components/SegmentedRadioGroup.svelte';
+  import { abortError, errorMessage } from '$lib/api/http';
   import { formatInteger } from '$lib/format';
   import {
     parseMaxOutputTokens,
@@ -28,10 +37,25 @@
   } from '$lib/features/inference/playground/validation';
 
   type Mode = 'text' | 'tools' | 'structured';
+  type Composer = 'basic' | 'advanced';
   let mode = $state<Mode>('text');
+  let composer = $state<Composer>('basic');
+  let operation = $state<PlaygroundOperation>('generation');
   let surface = $state<'openai' | 'anthropic' | 'gemini'>('openai');
   let model = $state('');
   let input = $state('');
+  let rawJson = $state(JSON.stringify(playgroundTemplates[0].request, null, 2));
+  let templateKey = $state(playgroundTemplates[0].key);
+  let streamEnabled = $state(false);
+  let streamCheck = $state<
+    'idle' | 'checking' | 'ok' | 'unsupported' | 'unknown'
+  >('idle');
+  let streamCheckMessage = $state('');
+  let streaming = $state(false);
+  let streamFrames = $state<string[]>([]);
+  let streamDone = $state<PlaygroundStreamDone | null>(null);
+  let streamProblem = $state<string | null>(null);
+  let streamAbort: AbortController | null = null;
   let temperature = $state('');
   let maxOutputTokens = $state('');
   let toolsJson = $state(
@@ -50,6 +74,115 @@
     queryFn: ({ signal }) => listApiKeys(signal)
   }));
   const mutation = createMutation(() => ({ mutationFn: runPlayground }));
+  const selectedRoute = $derived(
+    (routes.data ?? []).find((route) => route.slug === model.trim())
+  );
+  const outputPolicyActive = $derived(
+    hasOutputRules(selectedRoute?.latest_revision?.content_policy?.rules ?? [])
+  );
+  const routeOperations = $derived(
+    selectedRoute?.latest_revision?.operations ?? null
+  );
+  const operationKnown = $derived(
+    routeOperations == null || routeOperations.includes(operation)
+  );
+  const streamSelectable = $derived(
+    operation === 'generation' && !outputPolicyActive
+  );
+
+  const operations = [
+    { value: 'generation', label: 'Generation' },
+    { value: 'token_count', label: 'Token count' },
+    { value: 'embeddings', label: 'Embeddings' },
+    { value: 'moderation', label: 'Moderation' },
+    { value: 'rerank', label: 'Rerank' }
+  ];
+  const composerModes = [
+    { value: 'basic', label: 'Basic' },
+    { value: 'advanced', label: 'Advanced' }
+  ];
+
+  $effect(() => {
+    void model;
+    void surface;
+    void operation;
+    streamEnabled = false;
+    streamCheck = 'idle';
+    streamCheckMessage = '';
+  });
+
+  $effect(() => {
+    if (
+      operation !== 'generation' &&
+      operation !== 'token_count' &&
+      surface !== 'openai'
+    )
+      surface = 'openai';
+  });
+
+  function applyTemplate(key: string) {
+    templateKey = key;
+    const template = templateFor(key);
+    if (!template) return;
+    operation = template.operation;
+    if (template.surface) surface = template.surface;
+    rawJson = JSON.stringify(template.request, null, 2);
+  }
+
+  async function checkStreamCapability() {
+    streamCheckMessage = '';
+    if (!selectedRoute) {
+      streamCheck = 'unknown';
+      streamCheckMessage =
+        'The route slug is not an active route, so streaming support cannot be verified.';
+      return;
+    }
+    streamCheck = 'checking';
+    try {
+      const decisions = await simulateRouting({
+        route: model.trim(),
+        surface,
+        mode: 'streaming',
+        preferences: JSON.parse(routing || '{}')
+      });
+      if (decisions.some((decision) => decision.eligible)) {
+        streamCheck = 'ok';
+      } else {
+        streamCheck = 'unsupported';
+        streamCheckMessage =
+          'No published target reports streaming eligibility for this route and surface.';
+      }
+    } catch {
+      streamCheck = 'unknown';
+      streamCheckMessage =
+        'Streaming capability could not be verified; the route may reject the stream.';
+    }
+  }
+
+  function toggleStream(enabled: boolean) {
+    streamEnabled = enabled;
+    if (enabled) void checkStreamCapability();
+    else {
+      streamCheck = 'idle';
+      streamCheckMessage = '';
+    }
+  }
+
+  function cancelStream() {
+    streamAbort?.abort();
+  }
+
+  function clearResult() {
+    streamAbort?.abort();
+    streamFrames = [];
+    streamDone = null;
+    streamProblem = null;
+    mutation.reset();
+  }
+
+  onDestroy(() => {
+    streamAbort?.abort();
+  });
   const simulation = createMutation(() => ({
     // Wrapped so the mutation context is not passed as the abort signal.
     mutationFn: (input: RoutingSimulationInput) => simulateRouting(input)
@@ -109,6 +242,37 @@
     { value: 'structured', label: 'Structured output' }
   ];
 
+  async function runStream(request: PlaygroundRequest) {
+    streamAbort = new AbortController();
+    streaming = true;
+    streamFrames = [];
+    streamDone = null;
+    streamProblem = null;
+    try {
+      await streamPlayground(
+        request,
+        {
+          frame: (frame) => {
+            streamFrames = [...streamFrames, frame];
+          },
+          done: (meta) => {
+            streamDone = meta;
+          },
+          error: (problem) => {
+            streamProblem = problem.message ?? 'The playground stream failed.';
+          }
+        },
+        streamAbort.signal
+      );
+    } catch (error) {
+      if (!abortError(error))
+        streamProblem = errorMessage(error, 'The playground stream failed.');
+    } finally {
+      streaming = false;
+      streamAbort = null;
+    }
+  }
+
   async function submit(event: SubmitEvent) {
     event.preventDefault();
     validationError = '';
@@ -120,21 +284,54 @@
       validationError = 'Enter an active route slug.';
       return;
     }
-    if (!input.trim()) {
-      validationError = 'Enter a prompt.';
+    if (composer === 'advanced' && !operationKnown) {
+      validationError = `The route does not offer the ${operation} operation.`;
+      return;
+    }
+    if (streamEnabled && streamCheck !== 'ok') {
+      validationError =
+        'Streaming has not been verified as available for this route.';
       return;
     }
     let request: PlaygroundRequest;
     try {
-      request = {
-        routing: JSON.parse(routing),
-        model: model.trim(),
-        input,
-        surface,
-        ...requestControls()
-      };
+      if (composer === 'advanced') {
+        const raw: unknown = JSON.parse(rawJson);
+        if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+          validationError = 'The request document must be a JSON object.';
+          return;
+        }
+        request = {
+          routing: JSON.parse(routing),
+          model: model.trim(),
+          surface,
+          operation,
+          request: raw as Record<string, unknown>,
+          stream: streamEnabled ? true : undefined
+        };
+      } else {
+        if (!input.trim()) {
+          validationError = 'Enter a prompt.';
+          return;
+        }
+        request = {
+          routing: JSON.parse(routing),
+          model: model.trim(),
+          input,
+          surface,
+          stream: streamEnabled ? true : undefined,
+          ...requestControls()
+        };
+      }
     } catch (error) {
       validationError = errorMessage(error, 'Check the request fields.');
+      return;
+    }
+    streamFrames = [];
+    streamDone = null;
+    streamProblem = null;
+    if (streamEnabled) {
+      await runStream(request);
       return;
     }
     // A transport or route failure is rendered by the result panel; rethrowing
@@ -174,18 +371,63 @@
     <RoutingPreferencesForm
       bind:value={routing}
       id="playground-routing"
-      disabled={mutation.isPending}
+      disabled={mutation.isPending || streaming}
     />
     <SegmentedRadioGroup
-      label="Test mode"
-      name="playground-mode"
-      value={mode}
-      items={modes}
+      label="Composer"
+      name="playground-composer"
+      value={composer}
+      items={composerModes}
       onChange={(value) => {
-        if (value === 'text' || value === 'tools' || value === 'structured')
-          mode = value;
+        if (value === 'basic' || value === 'advanced') composer = value;
       }}
     />
+    {#if composer === 'advanced'}
+      <div class="route-grid">
+        <div class="form-field">
+          <label for="playground-operation">Operation</label><select
+            id="playground-operation"
+            bind:value={operation}
+          >
+            {#each operations as option (option.value)}<option
+                value={option.value}>{option.label}</option
+              >{/each}
+          </select>
+          {#if !operationKnown}<small class="field-error" role="alert"
+              >The selected route does not offer this operation.</small
+            >{:else if routeOperations == null}<small
+              class="policy-note"
+              role="status"
+              >Route capabilities are unknown until a matching active route is
+              entered — the route enforces the final decision.</small
+            >{/if}
+        </div>
+        <div class="form-field">
+          <label for="playground-template">Template</label><select
+            id="playground-template"
+            value={templateKey}
+            onchange={(event) => applyTemplate(event.currentTarget.value)}
+          >
+            {#each playgroundTemplates as template (template.key)}<option
+                value={template.key}>{template.label}</option
+              >{/each}
+          </select><small
+            >Loads a request document; tools are never executed.</small
+          >
+        </div>
+      </div>
+    {:else}
+      <SegmentedRadioGroup
+        label="Test mode"
+        name="playground-mode"
+        value={mode}
+        items={modes}
+        onChange={(value) => {
+          if (value === 'text' || value === 'tools' || value === 'structured')
+            mode = value;
+        }}
+      />
+    {/if}
     <div class="route-grid">
       <div class="form-field">
         <label for="playground-model">Route slug</label><input
@@ -204,6 +446,10 @@
         <small id="model-help"
           >Choose an active route suggestion or enter its public slug.</small
         >
+        {#if outputPolicyActive}<small class="policy-note" role="status"
+            >This route enforces an output content policy — streaming requests
+            are rejected. Playground runs are unary and still permitted.</small
+          >{/if}
         <div id="route-status">
           {#if routes.isPending}
             <small role="status">Loading active routes…</small>
@@ -229,57 +475,104 @@
         <label for="playground-surface">Client surface</label><select
           id="playground-surface"
           bind:value={surface}
+          disabled={composer === 'advanced' &&
+            operation !== 'generation' &&
+            operation !== 'token_count'}
           ><option value="openai">OpenAI</option><option value="anthropic"
             >Anthropic</option
           ><option value="gemini">Gemini</option></select
-        ><small>Capability filtering uses this originating protocol.</small>
+        ><small
+          >{composer === 'advanced' &&
+          operation !== 'generation' &&
+          operation !== 'token_count'
+            ? 'This operation is served on the OpenAI surface.'
+            : 'Capability filtering uses this originating protocol.'}</small
+        >
       </div>
     </div>
-    <div class="route-grid">
+    {#if composer === 'basic'}
+      <div class="route-grid">
+        <div class="form-field">
+          <label for="playground-temperature">Temperature</label><input
+            id="playground-temperature"
+            bind:value={temperature}
+            inputmode="decimal"
+            autocomplete="off"
+            placeholder="Provider default"
+            aria-describedby="temperature-help"
+          /><small id="temperature-help">0 through 2.</small>
+        </div>
+        <div class="form-field">
+          <label for="playground-max-output">Max output tokens</label><input
+            id="playground-max-output"
+            bind:value={maxOutputTokens}
+            inputmode="numeric"
+            autocomplete="off"
+            placeholder="Provider default"
+            aria-describedby="max-output-help"
+          /><small id="max-output-help">1 through 1000000.</small>
+        </div>
+      </div>
       <div class="form-field">
-        <label for="playground-temperature">Temperature</label><input
-          id="playground-temperature"
-          bind:value={temperature}
-          inputmode="decimal"
-          autocomplete="off"
-          placeholder="Provider default"
-          aria-describedby="temperature-help"
-        /><small id="temperature-help">0 through 2.</small>
+        <label for="playground-input">Prompt</label><textarea
+          id="playground-input"
+          bind:value={input}
+          rows="9"
+          placeholder="Ask the model something…"></textarea>
       </div>
+      {#if mode === 'tools'}<div class="form-field">
+          <label for="playground-tools">Tools JSON</label><textarea
+            id="playground-tools"
+            bind:value={toolsJson}
+            rows="12"
+            class="mono"
+            spellcheck="false"></textarea>
+        </div>{/if}
+      {#if mode === 'structured'}<div class="form-field">
+          <label for="playground-schema">JSON Schema</label><textarea
+            id="playground-schema"
+            bind:value={schemaJson}
+            rows="12"
+            class="mono"
+            spellcheck="false"></textarea>
+        </div>{/if}
+    {:else}
       <div class="form-field">
-        <label for="playground-max-output">Max output tokens</label><input
-          id="playground-max-output"
-          bind:value={maxOutputTokens}
-          inputmode="numeric"
-          autocomplete="off"
-          placeholder="Provider default"
-          aria-describedby="max-output-help"
-        /><small id="max-output-help">1 through 1000000.</small>
+        <label for="playground-raw">Request JSON</label><textarea
+          id="playground-raw"
+          bind:value={rawJson}
+          rows="16"
+          class="mono"
+          spellcheck="false"
+          aria-describedby="raw-help"></textarea>
+        <small id="raw-help"
+          >Raw public request body. The route slug above replaces its model
+          field — provider addresses cannot be set here.</small
+        >
       </div>
-    </div>
-    <div class="form-field">
-      <label for="playground-input">Prompt</label><textarea
-        id="playground-input"
-        bind:value={input}
-        rows="9"
-        placeholder="Ask the model something…"></textarea>
-    </div>
-    {#if mode === 'tools'}<div class="form-field">
-        <label for="playground-tools">Tools JSON</label><textarea
-          id="playground-tools"
-          bind:value={toolsJson}
-          rows="12"
-          class="mono"
-          spellcheck="false"></textarea>
-      </div>{/if}
-    {#if mode === 'structured'}<div class="form-field">
-        <label for="playground-schema">JSON Schema</label><textarea
-          id="playground-schema"
-          bind:value={schemaJson}
-          rows="12"
-          class="mono"
-          spellcheck="false"></textarea>
-      </div>{/if}
+    {/if}
+    {#if operation === 'generation'}
+      <div class="form-field stream-toggle">
+        <label class="checkbox-label"
+          ><input
+            type="checkbox"
+            checked={streamEnabled}
+            disabled={!streamSelectable || streaming}
+            onchange={(event) => toggleStream(event.currentTarget.checked)}
+          />
+          Stream the response</label
+        >
+        {#if outputPolicyActive}<small class="policy-note" role="status"
+            >Output content policy requires unary responses — streaming is
+            disabled.</small
+          >{:else if streamEnabled && streamCheck === 'checking'}<small
+            role="status">Checking streaming eligibility…</small
+          >{:else if streamEnabled && streamCheckMessage}<small
+            class="policy-note"
+            role="status">{streamCheckMessage}</small
+          >{/if}
+      </div>
+    {/if}
     {#if validationError}<p class="field-error" role="alert">
         {validationError}
       </p>{/if}
@@ -331,12 +624,26 @@
         >{simulation.isPending ? 'Explaining…' : 'Explain routing'}</button
       >
     </details>
-    <button
-      class="button button-primary"
-      type="submit"
-      disabled={mutation.isPending}
-      >{mutation.isPending ? 'Running…' : 'Run test'}</button
-    >
+    <div class="run-actions">
+      <button
+        class="button button-primary"
+        type="submit"
+        disabled={mutation.isPending ||
+          streaming ||
+          (composer === 'advanced' && !operationKnown)}
+        >{mutation.isPending || streaming ? 'Running…' : 'Run test'}</button
+      >
+      {#if streaming}<button
+          class="button button-secondary"
+          type="button"
+          onclick={cancelStream}>Cancel</button
+        >{/if}
+      {#if streamFrames.length > 0 || streamDone || streamProblem || mutation.data}<button
+          class="button button-secondary"
+          type="button"
+          onclick={clearResult}>Clear</button
+        >{/if}
+    </div>
   </form>
 
   <section
@@ -353,7 +660,40 @@
           >{mutation.data.latency_ms} ms</span
         >{/if}
     </div>
-    {#if mutation.isPending}<div class="loading-state" role="status">
+    {#if streaming || streamFrames.length > 0 || streamDone || streamProblem}
+      {#if streamProblem}<div class="inline-problem" role="alert">
+          {streamProblem}
+        </div>{/if}
+      {#if streamFrames.length > 0}<div class="output">
+          <h3>Frames</h3>
+          <pre data-testid="stream-frames">{streamFrames.join('')}</pre>
+        </div>{/if}
+      {#if streaming}<div class="loading-state" role="status">
+          Streaming response…
+        </div>{/if}
+      {#if streamDone}<dl>
+          <div>
+            <dt>Response ID</dt>
+            <dd class="mono">{streamDone.id ?? 'Not reported'}</dd>
+          </div>
+          <div>
+            <dt>Route</dt>
+            <dd>{streamDone.model ?? 'Not reported'}</dd>
+          </div>
+          <div>
+            <dt>Input tokens</dt>
+            <dd>{formatInteger(streamDone.usage?.input_tokens)}</dd>
+          </div>
+          <div>
+            <dt>Output tokens</dt>
+            <dd>{formatInteger(streamDone.usage?.output_tokens)}</dd>
+          </div>
+          <div>
+            <dt>Total tokens</dt>
+            <dd>{formatInteger(streamDone.usage?.total_tokens)}</dd>
+          </div>
+        </dl>{/if}
+    {:else if mutation.isPending}<div class="loading-state" role="status">
         Waiting for the route…
       </div>
     {:else if mutation.isError}<div class="inline-problem" role="alert">
@@ -364,7 +704,7 @@
           <strong>The model refused this request</strong>
           <p>{mutation.data.refusal}</p>
         </div>{/if}
-      {#if !mutation.data.refusal && !mutation.data.output_text && !mutation.data.tool_calls?.length && (mutation.data.structured_output === undefined || mutation.data.structured_output === null)}<div
+      {#if !mutation.data.refusal && !mutation.data.output_text && !mutation.data.tool_calls?.length && mutation.data.response === undefined && (mutation.data.structured_output === undefined || mutation.data.structured_output === null)}<div
           class="empty-state"
         >
           <div>
@@ -374,6 +714,10 @@
               output. The finish reason below says why.
             </p>
           </div>
+        </div>{/if}
+      {#if mutation.data.response !== undefined}<div class="output">
+          <h3>Operation result</h3>
+          <pre>{JSON.stringify(mutation.data.response, null, 2)}</pre>
         </div>{/if}
       {#if mutation.data.output_text}<div class="output">
           <h3>Text</h3>
@@ -510,6 +854,23 @@
   .field-error {
     margin: 0;
     color: var(--danger);
+  }
+  .run-actions {
+    display: flex;
+    gap: 0.5rem;
+  }
+  .stream-toggle {
+    margin: 0;
+  }
+  .checkbox-label {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-weight: 500;
+  }
+  .policy-note {
+    margin-top: 0.35rem;
+    color: var(--warning);
   }
   .form-field small {
     display: block;

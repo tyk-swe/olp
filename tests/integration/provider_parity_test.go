@@ -130,7 +130,9 @@ func TestProviderAndNativeSurfaceParity(t *testing.T) {
 							t.Fatalf("model-read key gained %s: %d", family.Operation(), status)
 						}
 						status, data, _ := parityCall(t, h, key["secret"].(string), clientPath, body, family.Surface())
-						if !connectors.Supports(kind, "", family.Operation(), family.Surface(), map[bool]string{false: "unary", true: "streaming"}[stream]) {
+						certified := slices.Contains(operations, family.Operation()) &&
+							connectors.Supports(kind, "", family.Operation(), family.Surface(), map[bool]string{false: "unary", true: "streaming"}[stream])
+						if !certified {
 							if status == 200 {
 								t.Fatalf("uncertified %s/%s succeeded", kind, family)
 							}

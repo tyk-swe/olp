@@ -75,21 +75,22 @@ type record struct {
 	CreatedBy        string
 	CreatedAt        time.Time
 	UpdatedAt        time.Time
+	ProjectID        *string
 }
 
-const recordColumns = "p.id::text,p.name,p.kind,p.state,p.configuration,p.etag::text,p.slots_etag::text,p.draft_dirty,p.active_revision,p.active_revision_id::text,p.last_probe_at,p.last_probe_status,p.last_probe_detail,p.created_by::text,p.created_at,p.updated_at"
+const recordColumns = "p.id::text,p.name,p.kind,p.state,p.configuration,p.etag::text,p.slots_etag::text,p.draft_dirty,p.active_revision,p.active_revision_id::text,p.last_probe_at,p.last_probe_status,p.last_probe_detail,p.created_by::text,p.created_at,p.updated_at,p.project_id::text"
 
 func scanRecord(row pgx.Row) (*record, error) {
 	var p record
 	var configuration []byte
-	err := row.Scan(&p.ID, &p.Name, &p.Kind, &p.State, &configuration, &p.ETag, &p.SlotsETag, &p.DraftDirty, &p.ActiveRevision, &p.ActiveRevisionID, &p.LastProbeAt, &p.LastProbeStatus, &p.LastProbeDetail, &p.CreatedBy, &p.CreatedAt, &p.UpdatedAt)
+	err := row.Scan(&p.ID, &p.Name, &p.Kind, &p.State, &configuration, &p.ETag, &p.SlotsETag, &p.DraftDirty, &p.ActiveRevision, &p.ActiveRevisionID, &p.LastProbeAt, &p.LastProbeStatus, &p.LastProbeDetail, &p.CreatedBy, &p.CreatedAt, &p.UpdatedAt, &p.ProjectID)
 	if err != nil {
 		return nil, err
 	}
 	if err = json.Unmarshal(configuration, &p.Configuration); err != nil {
 		return nil, err
 	}
-	p.Configuration.normalize()
+	p.Configuration.Normalize()
 	return &p, nil
 }
 
@@ -100,6 +101,17 @@ func load(ctx context.Context, q access.Queryer, id string, lock bool) (*record,
 		query += " FOR UPDATE"
 	}
 	return scanRecord(q.QueryRow(ctx, query, id))
+}
+
+func checkProvider(ctx context.Context, q access.Queryer, p access.Principal, id string, write bool) (*record, error) {
+	current, err := load(ctx, q, id, false)
+	if err != nil {
+		return nil, err
+	}
+	if !p.CanProject(current.ProjectID, write) {
+		return nil, pgx.ErrNoRows
+	}
+	return current, nil
 }
 
 // touch records a draft change and returns the new etag.
@@ -121,6 +133,8 @@ type providerSummary struct {
 	Name                     string     `json:"name"`
 	Kind                     string     `json:"kind"`
 	VendorID                 *string    `json:"vendor_id"`
+	ProjectID                *string    `json:"project_id"`
+	ProjectName              *string    `json:"project_name"`
 	State                    string     `json:"state"`
 	ConnectorReady           bool       `json:"connector_ready"`
 	ETag                     string     `json:"etag"`
@@ -147,13 +161,13 @@ type detail struct {
 	LastProbeDetail          *string       `json:"last_probe_detail"`
 }
 
-const detailQuery = "SELECT " + recordColumns + ",u.email," +
+const detailQuery = "SELECT " + recordColumns + ",pr.name,u.email," +
 	"(SELECT count(*) FROM olp_go.provider_models m WHERE m.provider_id=p.id)," +
 	"(SELECT count(*) FROM olp_go.provider_models m WHERE m.provider_id=p.id AND m.enabled)," +
 	"(SELECT coalesce(sum(jsonb_array_length(m.capabilities)),0) FROM olp_go.provider_models m WHERE m.provider_id=p.id)," +
 	"(SELECT count(*) FROM olp_go.provider_models m,jsonb_array_elements(m.capabilities) c WHERE m.provider_id=p.id AND c->>'source'='certified')," +
 	"d.credential_id::text,dc.version,EXISTS(SELECT 1 FROM olp_go.provider_slots available JOIN olp_go.provider_credentials secret ON secret.id=available.credential_id WHERE available.provider_id=p.id AND available.enabled AND secret.revoked_at IS NULL),rc.id::text,rc.version" +
-	" FROM olp_go.providers p JOIN olp_go.users u ON u.id=p.created_by" +
+	" FROM olp_go.providers p JOIN olp_go.users u ON u.id=p.created_by LEFT JOIN olp_go.projects pr ON pr.id=p.project_id" +
 	" LEFT JOIN olp_go.provider_slots d ON d.provider_id=p.id AND d.is_default" +
 	" LEFT JOIN olp_go.provider_credentials dc ON dc.id=d.credential_id" +
 	" LEFT JOIN olp_go.provider_revisions r ON r.id=p.active_revision_id" +
@@ -165,8 +179,8 @@ func (s *Server) scanDetail(row pgx.Row) (*detail, error) {
 	var d detail
 	var draft credentialState
 	var usableCredential bool
-	err := row.Scan(&p.ID, &p.Name, &p.Kind, &p.State, &configuration, &p.ETag, &p.SlotsETag, &p.DraftDirty, &p.ActiveRevision, &p.ActiveRevisionID, &p.LastProbeAt, &p.LastProbeStatus, &p.LastProbeDetail, &p.CreatedBy, &p.CreatedAt, &p.UpdatedAt,
-		&d.CreatedByEmail, &d.ModelCount, &d.EnabledModelCount, &d.CapabilityCount, &d.CertifiedCapabilityCount,
+	err := row.Scan(&p.ID, &p.Name, &p.Kind, &p.State, &configuration, &p.ETag, &p.SlotsETag, &p.DraftDirty, &p.ActiveRevision, &p.ActiveRevisionID, &p.LastProbeAt, &p.LastProbeStatus, &p.LastProbeDetail, &p.CreatedBy, &p.CreatedAt, &p.UpdatedAt, &p.ProjectID,
+		&d.ProjectName, &d.CreatedByEmail, &d.ModelCount, &d.EnabledModelCount, &d.CapabilityCount, &d.CertifiedCapabilityCount,
 		&draft.ID, &draft.Version, &usableCredential, &d.RuntimeCredentialID, &d.RuntimeCredentialVersion)
 	if err != nil {
 		return nil, err
@@ -174,8 +188,9 @@ func (s *Server) scanDetail(row pgx.Row) (*detail, error) {
 	if err = json.Unmarshal(configuration, &p.Configuration); err != nil {
 		return nil, err
 	}
-	p.Configuration.normalize()
+	p.Configuration.Normalize()
 	d.ID, d.Name, d.Kind, d.State, d.ETag = p.ID, p.Name, p.Kind, p.State, p.ETag
+	d.ProjectID = p.ProjectID
 	d.VendorID = p.Configuration.Options.VendorID
 	d.Configuration = p.Configuration
 	d.PendingActivation = p.DraftDirty
@@ -183,7 +198,7 @@ func (s *Server) scanDetail(row pgx.Row) (*detail, error) {
 	d.DraftCredentialID, d.DraftCredentialVersion = draft.ID, draft.Version
 	d.LastProbeAt, d.LastProbeStatus, d.LastProbeDetail = p.LastProbeAt, p.LastProbeStatus, p.LastProbeDetail
 	d.CreatedAt, d.UpdatedAt = p.CreatedAt.UTC(), p.UpdatedAt.UTC()
-	d.ConnectorReady = p.Configuration.validate(s.Egress) == nil && (!p.Configuration.credentialRequired() || usableCredential)
+	d.ConnectorReady = p.Configuration.Validate(s.Egress) == nil && (!p.Configuration.CredentialRequired() || usableCredential)
 	return &d, nil
 }
 

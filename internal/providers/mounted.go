@@ -44,11 +44,11 @@ func LoadMounted(path string, policy *egress.Policy) (map[string]runtime.Mounted
 		if _, exists := out[entry.ProviderID]; exists {
 			return nil, errors.New("duplicate mounted provider identifier")
 		}
-		entry.Configuration.normalize()
-		if err = entry.Configuration.validate(policy); err != nil {
+		entry.Configuration.Normalize()
+		if err = entry.Configuration.Validate(policy); err != nil {
 			return nil, err
 		}
-		required := entry.Configuration.credentialRequired()
+		required := entry.Configuration.CredentialRequired()
 		if required != (entry.CredentialFile != nil) {
 			return nil, errors.New("mounted credential file does not match authentication mode")
 		}
@@ -60,7 +60,7 @@ func LoadMounted(path string, policy *egress.Policy) (map[string]runtime.Mounted
 			}
 		}
 		if entry.Model != nil {
-			if err = validModelName("model", *entry.Model); err != nil {
+			if err = ValidModelName("model", *entry.Model); err != nil {
 				return nil, err
 			}
 		}

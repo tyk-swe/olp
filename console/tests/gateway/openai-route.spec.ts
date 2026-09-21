@@ -36,9 +36,26 @@ async function signIn(page: Page): Promise<void> {
       .fill(readFileSync(process.env.OLP_BOOTSTRAP_TOKEN_FILE!, 'utf8').trim());
     await page.getByRole('button', { name: 'Create owner account' }).click();
   } else {
-    await page.getByLabel('Email').fill(owner.email);
-    await page.getByLabel('Password').fill(owner.password);
-    await page.getByRole('button', { name: 'Sign in' }).click();
+    const deadline = Date.now() + 75_000;
+    while (true) {
+      await page.getByLabel('Email').fill(owner.email);
+      await page.getByLabel('Password').fill(owner.password);
+      const completed = page.waitForResponse(
+        (response) =>
+          response.request().method() === 'POST' &&
+          new URL(response.url()).pathname === '/api/v3/sessions'
+      );
+      await page.getByRole('button', { name: 'Sign in' }).click();
+      const response = await completed;
+      if (response.status() !== 429 || Date.now() >= deadline) {
+        expect(response.status()).toBe(201);
+        break;
+      }
+      const seconds = Number(response.headers()['retry-after'] ?? '1');
+      await new Promise((resolve) =>
+        setTimeout(resolve, Math.min(60, Math.max(1, seconds)) * 1000)
+      );
+    }
   }
   await expect(page).toHaveURL(/\/$/);
 }

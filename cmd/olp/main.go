@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -39,8 +40,18 @@ func run(ctx context.Context, args []string) error {
 			fmt.Printf("olp %s Go\n", process.Version)
 			return nil
 		case "help", "--help", "-h":
-			fmt.Println("usage: olp <all|gateway|control|worker|migrate|doctor|health-probe> [flags]\n       olp master-key <status|reencrypt|verify-retirement> [flags]")
+			fmt.Println("usage: olp <all|gateway|control|worker|migrate|doctor|health-probe> [flags]\n       olp master-key <status|reencrypt|verify-retirement> [flags]\n       olp account reset-password EMAIL PASSWORD_FILE [flags]")
 			return nil
+		case "account":
+			if len(args) < 4 || args[1] != "reset-password" || strings.HasPrefix(args[2], "-") || strings.HasPrefix(args[3], "-") {
+				return errors.New("usage: olp account reset-password EMAIL PASSWORD_FILE [flags]")
+			}
+			maintenance := process.MaintenanceOptions{AccountEmail: args[2], PasswordFile: args[3]}
+			c, err := config.Parse(append([]string{"all"}, args[4:]...), os.Getenv, os.Stderr)
+			if err != nil {
+				return err
+			}
+			return process.Maintenance(ctx, c, "reset-password", maintenance, os.Stdout)
 		case "migrate", "doctor", "master-key":
 			command, options := args[0], args[1:]
 			var maintenance process.MaintenanceOptions

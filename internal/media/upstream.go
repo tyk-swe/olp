@@ -357,7 +357,7 @@ func (t *Transport) decode(ctx context.Context, resp *http.Response, call *Upstr
 			return nil, failure
 		}
 		var stagedHandles []Handle
-		decoded, mErr := DecodeImageResponse(body, func(b64 string, index int) (*Artifact, *Error) {
+		stage := func(b64 string, index int) (*Artifact, *Error) {
 			raw, err := base64.StdEncoding.DecodeString(b64)
 			if err != nil {
 				return nil, protocolError("The provider image payload is not valid base64.")
@@ -373,7 +373,18 @@ func (t *Transport) decode(ctx context.Context, resp *http.Response, call *Upstr
 			}
 			stagedHandles = append(stagedHandles, staged.Handle)
 			return staged, nil
-		})
+		}
+		var decoded *ImageResult
+		var mErr *Error
+		if call.Native != "" {
+			expected := int64(1)
+			if request != nil && request.Count != nil {
+				expected = *request.Count
+			}
+			decoded, mErr = DecodeNativeImageResponse(call.Native, body, expected, stage)
+		} else {
+			decoded, mErr = DecodeImageResponse(body, stage)
+		}
 		if mErr != nil {
 			for _, handle := range stagedHandles {
 				t.Spool.Remove(handle)

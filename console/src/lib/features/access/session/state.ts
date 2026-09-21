@@ -5,6 +5,7 @@ export type AuthenticatedUser = {
   email: string;
   display_name: string;
   role: FixedRole;
+  access_scope: 'global' | 'assigned';
 };
 
 export type AuthenticatedSession = {

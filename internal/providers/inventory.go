@@ -141,7 +141,7 @@ func (s *Server) Register(mux *http.ServeMux) {
 	mux.HandleFunc("PATCH /api/v3/providers/{provider_id}/models/{model_id}", h(s.setModel))
 	// Each advertised capability can consume a full probe budget; reserve
 	// another management budget for preparation, queueing, and persistence.
-	certifyTimeout := time.Duration(len(capabilityOptions)+1) * probeTimeout
+	certifyTimeout := time.Duration(len(CapabilityOptions)+1) * probeTimeout
 	mux.HandleFunc("POST /api/v3/providers/{provider_id}/models/{model_id}/certify", s.Access.HandleTimeout(65536, certifyTimeout, s.certify))
 	mux.HandleFunc("GET /api/v3/providers/{provider_id}/credentials", h(s.credentials))
 	mux.HandleFunc("POST /api/v3/providers/{provider_id}/credentials", s.Access.HandleTimeout(65536, certifyTimeout, s.rotate))

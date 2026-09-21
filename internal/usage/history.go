@@ -7,21 +7,24 @@ import (
 	"time"
 
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/contentpolicy"
 )
 
 // RequestFilters narrow the request explorer. Every field is optional; the
 // provider and model filters match a request through its attempts, so a request
 // that failed over is found by either provider it touched.
 type RequestFilters struct {
-	Route         *string
-	ProviderID    *string
-	Model         *string
-	APIKey        *string
-	Operation     *string
-	StatusCode    *int
-	ErrorClass    *string
-	StartedAfter  *time.Time
-	StartedBefore *time.Time
+	Route           *string
+	ProviderID      *string
+	Model           *string
+	APIKey          *string
+	Operation       *string
+	StatusCode      *int
+	ErrorClass      *string
+	StartedAfter    *time.Time
+	StartedBefore   *time.Time
+	AllProjects     bool
+	AllowedProjects []string
 }
 
 // Cursor is a position in a list ordered by timestamp and identifier.
@@ -34,56 +37,64 @@ type Cursor struct {
 // metadata plus the usage its attempts accounted for. Token totals and money
 // are absent (null) when no fact exists yet, which is different from zero.
 type RequestSummary struct {
-	ID                  string     `json:"id"`
-	RuntimeGenerationID string     `json:"runtime_generation_id"`
-	APIKeyID            string     `json:"api_key_id"`
-	Route               string     `json:"route"`
-	Operation           string     `json:"operation"`
-	Surface             string     `json:"surface"`
-	StartedAt           time.Time  `json:"started_at"`
-	CompletedAt         *time.Time `json:"completed_at"`
-	StatusCode          *int32     `json:"status_code"`
-	ErrorClass          *string    `json:"error_class"`
-	TotalLatencyMS      *int64     `json:"total_latency_ms"`
-	FirstByteMS         *int64     `json:"first_byte_ms"`
-	AttemptCount        int32      `json:"attempt_count"`
-	InputTokens         *int64     `json:"input_tokens"`
-	OutputTokens        *int64     `json:"output_tokens"`
-	CachedInputTokens   *int64     `json:"cached_input_tokens"`
-	EstimatedCost       *string    `json:"estimated_cost"`
-	Currency            *string    `json:"currency"`
-	Unpriced            *bool      `json:"unpriced"`
-	UsageComplete       *bool      `json:"usage_complete"`
+	ID                      string                   `json:"id"`
+	RuntimeGenerationID     string                   `json:"runtime_generation_id"`
+	APIKeyID                string                   `json:"api_key_id"`
+	Route                   string                   `json:"route"`
+	Operation               string                   `json:"operation"`
+	Surface                 string                   `json:"surface"`
+	StartedAt               time.Time                `json:"started_at"`
+	CompletedAt             *time.Time               `json:"completed_at"`
+	StatusCode              *int32                   `json:"status_code"`
+	ErrorClass              *string                  `json:"error_class"`
+	TotalLatencyMS          *int64                   `json:"total_latency_ms"`
+	FirstByteMS             *int64                   `json:"first_byte_ms"`
+	AttemptCount            int32                    `json:"attempt_count"`
+	InputTokens             *int64                   `json:"input_tokens"`
+	OutputTokens            *int64                   `json:"output_tokens"`
+	CachedInputTokens       *int64                   `json:"cached_input_tokens"`
+	CacheWriteInputTokens   *int64                   `json:"cache_write_input_tokens"`
+	CacheWrite5MInputTokens *int64                   `json:"cache_write_5m_input_tokens"`
+	CacheWrite1HInputTokens *int64                   `json:"cache_write_1h_input_tokens"`
+	EstimatedCost           *string                  `json:"estimated_cost"`
+	Currency                *string                  `json:"currency"`
+	Unpriced                *bool                    `json:"unpriced"`
+	UsageComplete           *bool                    `json:"usage_complete"`
+	Attribution             map[string]string        `json:"attribution"`
+	PolicyDecisions         []contentpolicy.Decision `json:"policy_decisions"`
 }
 
 // AttemptDetail is one provider attempt of a request, with the routing
 // provenance that explains why this provider served it and the charge evidence
 // that explains what it cost.
 type AttemptDetail struct {
-	Routing           *Routing   `json:"routing"`
-	ID                string     `json:"id"`
-	Ordinal           int32      `json:"ordinal"`
-	ProviderID        string     `json:"provider_id"`
-	ProviderName      string     `json:"provider_name"`
-	UpstreamModel     string     `json:"upstream_model"`
-	StartedAt         time.Time  `json:"started_at"`
-	CompletedAt       *time.Time `json:"completed_at"`
-	StatusCode        *int32     `json:"status_code"`
-	ErrorClass        *string    `json:"error_class"`
-	Committed         bool       `json:"committed"`
-	LatencyMS         *int64     `json:"latency_ms"`
-	FirstByteMS       *int64     `json:"first_byte_ms"`
-	ChargeStatus      *string    `json:"charge_status"`
-	UsageObserved     *bool      `json:"usage_observed"`
-	UsageComplete     *bool      `json:"usage_complete"`
-	InputTokens       *int64     `json:"input_tokens"`
-	OutputTokens      *int64     `json:"output_tokens"`
-	CachedInputTokens *int64     `json:"cached_input_tokens"`
-	MediaUnits        *string    `json:"media_units"`
-	EstimatedCost     *string    `json:"estimated_cost"`
-	Currency          *string    `json:"currency"`
-	Unpriced          *bool      `json:"unpriced"`
-	PricingRevisionID *string    `json:"pricing_revision_id"`
+	Routing                 *Routing   `json:"routing"`
+	ID                      string     `json:"id"`
+	Ordinal                 int32      `json:"ordinal"`
+	ProviderID              string     `json:"provider_id"`
+	ProviderName            string     `json:"provider_name"`
+	UpstreamModel           string     `json:"upstream_model"`
+	StartedAt               time.Time  `json:"started_at"`
+	CompletedAt             *time.Time `json:"completed_at"`
+	StatusCode              *int32     `json:"status_code"`
+	ErrorClass              *string    `json:"error_class"`
+	Committed               bool       `json:"committed"`
+	LatencyMS               *int64     `json:"latency_ms"`
+	FirstByteMS             *int64     `json:"first_byte_ms"`
+	ChargeStatus            *string    `json:"charge_status"`
+	UsageObserved           *bool      `json:"usage_observed"`
+	UsageComplete           *bool      `json:"usage_complete"`
+	InputTokens             *int64     `json:"input_tokens"`
+	OutputTokens            *int64     `json:"output_tokens"`
+	CachedInputTokens       *int64     `json:"cached_input_tokens"`
+	CacheWriteInputTokens   *int64     `json:"cache_write_input_tokens"`
+	CacheWrite5MInputTokens *int64     `json:"cache_write_5m_input_tokens"`
+	CacheWrite1HInputTokens *int64     `json:"cache_write_1h_input_tokens"`
+	MediaUnits              *string    `json:"media_units"`
+	EstimatedCost           *string    `json:"estimated_cost"`
+	Currency                *string    `json:"currency"`
+	Unpriced                *bool      `json:"unpriced"`
+	PricingRevisionID       *string    `json:"pricing_revision_id"`
 }
 
 // RequestDetail is one request with its attempt timeline.
@@ -99,11 +110,15 @@ const requestColumns = `SELECT r.id::text, r.runtime_generation_id::text, r.api_
         r.route_slug, r.operation, r.surface, r.started_at, r.completed_at,
         r.status_code::int, r.error_class, r.total_latency_ms::bigint, r.first_byte_ms::bigint,
         r.attempt_count::int, u.input_tokens, u.output_tokens, u.cached_input_tokens,
-        u.estimated_cost, u.currency, u.unpriced, u.usage_complete
+        u.cache_write_input_tokens, u.cache_write_5m_input_tokens, u.cache_write_1h_input_tokens,
+        u.estimated_cost, u.currency, u.unpriced, u.usage_complete, r.attribution, r.policy_decisions
     FROM olp_go.requests r LEFT JOIN LATERAL (
       SELECT SUM(f.input_tokens)::bigint AS input_tokens,
              SUM(f.output_tokens)::bigint AS output_tokens,
              SUM(f.cached_input_tokens)::bigint AS cached_input_tokens,
+             SUM(f.cache_write_input_tokens)::bigint AS cache_write_input_tokens,
+             SUM(f.cache_write_5m_input_tokens)::bigint AS cache_write_5m_input_tokens,
+             SUM(f.cache_write_1h_input_tokens)::bigint AS cache_write_1h_input_tokens,
              SUM(f.estimated_cost)::text AS estimated_cost,
              btrim(MAX(f.currency)) AS currency, BOOL_OR(f.unpriced) AS unpriced,
              BOOL_AND(f.charge_status = 'not_billable' OR f.usage_complete) AS usage_complete
@@ -116,7 +131,8 @@ func (s *RequestSummary) scanTargets() []any {
 	return []any{&s.ID, &s.RuntimeGenerationID, &s.APIKeyID, &s.Route, &s.Operation, &s.Surface,
 		&s.StartedAt, &s.CompletedAt, &s.StatusCode, &s.ErrorClass, &s.TotalLatencyMS,
 		&s.FirstByteMS, &s.AttemptCount, &s.InputTokens, &s.OutputTokens, &s.CachedInputTokens,
-		&s.EstimatedCost, &s.Currency, &s.Unpriced, &s.UsageComplete}
+		&s.CacheWriteInputTokens, &s.CacheWrite5MInputTokens, &s.CacheWrite1HInputTokens,
+		&s.EstimatedCost, &s.Currency, &s.Unpriced, &s.UsageComplete, &s.Attribution, &s.PolicyDecisions}
 }
 
 // normalize pins the timestamps to UTC so the JSON always renders as Z.
@@ -175,6 +191,9 @@ func ListRequests(ctx context.Context, q access.Queryer, f RequestFilters, curso
 // push appends the explorer's filters. Provider and model are attempt
 // properties, so they are matched against retained attempts, not expiring usage facts.
 func (f RequestFilters) push(q *filterQuery) {
+	if !f.AllProjects {
+		q.push(" AND r.api_key_id IN (SELECT id FROM olp_go.api_keys WHERE project_id = ANY(" + q.bind(f.AllowedProjects) + "::uuid[]))")
+	}
 	if f.Route != nil {
 		q.pushBind(" AND r.route_slug = ", *f.Route)
 	}
@@ -213,6 +232,7 @@ const attemptColumns = `SELECT a.routing, a.id::text, a.ordinal::int, a.provider
         a.upstream_model, a.started_at, a.completed_at, a.status_code::int, a.error_class,
         a.committed, a.latency_ms::bigint, a.first_byte_ms::bigint, f.charge_status,
         f.usage_observed, f.usage_complete, f.input_tokens, f.output_tokens, f.cached_input_tokens,
+        f.cache_write_input_tokens, f.cache_write_5m_input_tokens, f.cache_write_1h_input_tokens,
         f.media_units::text, f.estimated_cost::text, btrim(f.currency), f.unpriced,
         f.pricing_revision_id::text
     FROM olp_go.attempts a JOIN olp_go.providers p ON p.id = a.provider_id
@@ -246,7 +266,9 @@ func GetRequest(ctx context.Context, q access.Queryer, id string) (RequestDetail
 			&attempt.StatusCode, &attempt.ErrorClass, &attempt.Committed, &attempt.LatencyMS,
 			&attempt.FirstByteMS, &attempt.ChargeStatus, &attempt.UsageObserved,
 			&attempt.UsageComplete, &attempt.InputTokens, &attempt.OutputTokens,
-			&attempt.CachedInputTokens, &attempt.MediaUnits, &attempt.EstimatedCost,
+			&attempt.CachedInputTokens, &attempt.CacheWriteInputTokens,
+			&attempt.CacheWrite5MInputTokens, &attempt.CacheWrite1HInputTokens,
+			&attempt.MediaUnits, &attempt.EstimatedCost,
 			&attempt.Currency, &attempt.Unpriced, &attempt.PricingRevisionID); err != nil {
 			return RequestDetail{}, fmt.Errorf("read request attempts: %w", err)
 		}

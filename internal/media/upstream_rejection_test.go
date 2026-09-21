@@ -34,7 +34,7 @@ func TestMultipartEarlyRejectionPreservesProviderStatus(t *testing.T) {
 			}
 			defer transport.Spool.Remove(artifact.Handle)
 			request := &Request{Op: OpImageEdit, Route: "images", Prompt: "photo", Images: []Part{{Handle: artifact.Handle}}}
-			call, e := Encode(request, "image-model")
+			call, e := Encode(request, "openai", "image-model")
 			if e != nil {
 				t.Fatal(e)
 			}

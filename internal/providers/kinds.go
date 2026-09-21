@@ -79,7 +79,7 @@ type vendor struct {
 	Endpoint         *string  `json:"endpoint"`
 }
 
-type capabilityInput struct {
+type CapabilityInput struct {
 	Operation string `json:"operation"`
 	Surface   string `json:"surface"`
 	Mode      string `json:"mode"`
@@ -123,8 +123,7 @@ var vendors = []vendor{
 	{ID: KindOpenAICompatible, Name: "OpenAI-compatible", Connector: KindOpenAICompatible, Discovery: true, Operations: []string{OperationGeneration}, Authentication: []string{AuthAPIKey, AuthHeaders, AuthNone}, Parameters: generationParameters, DocumentationURL: "https://platform.openai.com/docs/api-reference/chat", Endpoint: nil},
 }
 
-// capabilityOptions lists the tuples a kind may declare and certify.
-var capabilityOptions = []capabilityInput{
+var CapabilityOptions = []CapabilityInput{
 	{Operation: OperationGeneration, Surface: SurfaceOpenAI, Mode: ModeUnary},
 	{Operation: OperationGeneration, Surface: SurfaceOpenAI, Mode: ModeStreaming},
 }
@@ -158,7 +157,10 @@ func init() {
 		kinds = append(kinds, kindCapability{Kind: entry.kind, Label: entry.label, Description: "Native API, including custom endpoints.", DefaultAuthMode: AuthAPIKey, AuthModes: custom, Fields: []fieldCapability{{Field: "endpoint", Label: "Endpoint"}}, Presets: []preset{}})
 	}
 	kinds = append(kinds,
-		kindCapability{Kind: KindAzure, Label: "Azure OpenAI", Description: "Azure deployment API.", DefaultAuthMode: AuthAPIKey, AuthModes: []authCapability{custom[0]}, Fields: []fieldCapability{{Field: "endpoint", Label: "Resource origin", Required: true}, {Field: "deployment", Label: "Deployment", Required: true}, {Field: "api_version", Label: "API version", Required: true}}, Presets: []preset{}},
+		kindCapability{Kind: KindAzure, Label: "Azure OpenAI", Description: "Azure deployment API.", DefaultAuthMode: AuthAPIKey, AuthModes: []authCapability{custom[0],
+			{Mode: "azure_default", Label: "Microsoft Entra default credential", Credential: "forbidden"},
+			{Mode: "azure_client_secret", Label: "Microsoft Entra client secret", Credential: "required"}},
+			Fields: []fieldCapability{{Field: "endpoint", Label: "Resource origin", Required: true}, {Field: "deployment", Label: "Deployment", Required: true}, {Field: "api_version", Label: "API version", Required: true}}, Presets: []preset{}},
 		kindCapability{Kind: KindVertex, Label: "Google Vertex AI", Description: "Vertex publisher generation API.", DefaultAuthMode: "adc", AuthModes: []authCapability{{Mode: "adc", Label: "Application default credentials", Credential: "forbidden"}, {Mode: "service_account", Label: "Service account JSON", Credential: "required"}}, Fields: []fieldCapability{{Field: "cloud_project", Label: "Project", Required: true}, {Field: "cloud_region", Label: "Location", Required: true}, {Field: "endpoint", Label: "Endpoint"}}, Presets: []preset{}},
 		kindCapability{Kind: KindBedrock, Label: "Amazon Bedrock", Description: "Converse, ConverseStream and CountTokens.", DefaultAuthMode: "default_chain", AuthModes: []authCapability{{Mode: "default_chain", Label: "AWS credential chain", Credential: "forbidden"}, {Mode: "static", Label: "AWS credential JSON", Credential: "required"}}, Fields: []fieldCapability{{Field: "cloud_region", Label: "Region", Required: true}, {Field: "endpoint", Label: "Endpoint"}}, Presets: []preset{}},
 	)
@@ -172,8 +174,8 @@ func init() {
 		{"deepinfra", "DeepInfra", "https://api.deepinfra.com/v1/openai", "https://deepinfra.com/docs", true, []string{"generation"}},
 		{"huggingface", "Hugging Face", "https://router.huggingface.co/v1", "https://huggingface.co/docs/inference-providers", true, []string{"generation"}},
 		{"perplexity", "Perplexity", "https://api.perplexity.ai", "https://docs.perplexity.ai", false, []string{"generation"}},
-		{"cohere", "Cohere", "https://api.cohere.ai/compatibility/v1", "https://docs.cohere.com", false, []string{"generation", "embeddings"}},
-		{"voyage", "Voyage AI", "https://api.voyageai.com/v1", "https://docs.voyageai.com", false, []string{"embeddings"}},
+		{"cohere", "Cohere", "https://api.cohere.ai/compatibility/v1", "https://docs.cohere.com", false, []string{"generation", "embeddings", "rerank"}},
+		{"voyage", "Voyage AI", "https://api.voyageai.com/v1", "https://docs.voyageai.com", false, []string{"embeddings", "rerank"}},
 	} {
 		kinds[1].Presets = append(kinds[1].Presets, preset{ID: entry.id, Label: entry.name, Description: entry.name + " compatible API.", Endpoint: entry.endpoint, AuthMode: AuthAPIKey, Maintainer: entry.name, DocumentationLabel: entry.name + " API", DocumentationURL: entry.docs})
 		vendors = append(vendors, vendor{ID: entry.id, Name: entry.name, Connector: KindOpenAICompatible, Discovery: entry.discovery, Operations: entry.operations, Authentication: []string{AuthAPIKey, AuthHeaders, AuthNone}, Parameters: generationParameters, DocumentationURL: entry.docs, Endpoint: new(entry.endpoint)})
@@ -205,6 +207,12 @@ func init() {
 		switch vendors[i].ID {
 		case "azure":
 			vendors[i].Operations = []string{"generation", "embeddings", "token_count", "moderation"}
+		case "google":
+			vendors[i].Operations = []string{"generation", "embeddings", "token_count"}
+		case "google-vertex":
+			vendors[i].Operations = []string{"generation", "embeddings", "token_count", "image_generation"}
+		case "amazon-bedrock":
+			vendors[i].Operations = []string{"generation", "embeddings", "token_count", "image_generation"}
 		case "cohere":
 			vendors[i].Parameters = []string{"temperature", "max_output_tokens", "top_p", "stop", "seed", "tools", "response_format", "encoding_format"}
 		case "voyage":
@@ -215,23 +223,30 @@ func init() {
 	for _, surface := range []string{"openai", "anthropic", "gemini"} {
 		for _, mode := range []string{"unary", "streaming"} {
 			if surface != "openai" {
-				capabilityOptions = append(capabilityOptions, capabilityInput{Operation: "generation", Surface: surface, Mode: mode})
+				CapabilityOptions = append(CapabilityOptions, CapabilityInput{Operation: "generation", Surface: surface, Mode: mode})
 			}
 		}
-		capabilityOptions = append(capabilityOptions, capabilityInput{Operation: "token_count", Surface: surface, Mode: "unary"})
+		CapabilityOptions = append(CapabilityOptions, CapabilityInput{Operation: "token_count", Surface: surface, Mode: "unary"})
 	}
-	for _, operation := range []string{"embeddings", "moderation"} {
-		capabilityOptions = append(capabilityOptions, capabilityInput{Operation: operation, Surface: "openai", Mode: "unary"})
+	for _, operation := range []string{"embeddings", "moderation", "rerank"} {
+		CapabilityOptions = append(CapabilityOptions, CapabilityInput{Operation: operation, Surface: "openai", Mode: "unary"})
 	}
 	for _, operation := range []string{"image_generation", "image_edit", "speech", "transcription"} {
 		for _, mode := range []string{"unary", "streaming"} {
-			capabilityOptions = append(capabilityOptions, capabilityInput{Operation: operation, Surface: "openai", Mode: mode})
+			CapabilityOptions = append(CapabilityOptions, CapabilityInput{Operation: operation, Surface: "openai", Mode: mode})
 		}
 	}
 	for _, operation := range []string{"image_variation", "video_list", "video_get", "video_content", "video_delete"} {
-		capabilityOptions = append(capabilityOptions, capabilityInput{Operation: operation, Surface: "openai", Mode: "unary"})
+		CapabilityOptions = append(CapabilityOptions, CapabilityInput{Operation: operation, Surface: "openai", Mode: "unary"})
 	}
-	capabilityOptions = append(capabilityOptions, capabilityInput{Operation: "video_create", Surface: "openai", Mode: "async"})
+	CapabilityOptions = append(CapabilityOptions, CapabilityInput{Operation: "video_create", Surface: "openai", Mode: "async"})
+	CapabilityOptions = append(CapabilityOptions, CapabilityInput{Operation: "batch", Surface: "openai", Mode: "unary"})
+	CapabilityOptions = append(CapabilityOptions, CapabilityInput{Operation: "realtime", Surface: "openai", Mode: "realtime"})
+	for _, operation := range []string{"generation", "bedrock_invoke"} {
+		for _, mode := range []string{"unary", "streaming"} {
+			CapabilityOptions = append(CapabilityOptions, CapabilityInput{Operation: operation, Surface: "bedrock", Mode: mode})
+		}
+	}
 
 }
 func defaultVendor(kind string) string {
@@ -247,9 +262,9 @@ func defaultVendor(kind string) string {
 	}
 	return kind
 }
-func capabilitiesFor(kind, vendor string) []capabilityInput {
-	out := []capabilityInput{}
-	for _, c := range capabilityOptions {
+func capabilitiesFor(kind, vendor string) []CapabilityInput {
+	out := []CapabilityInput{}
+	for _, c := range CapabilityOptions {
 		if certifiable(kind, vendor, c) {
 			out = append(out, c)
 		}
@@ -259,13 +274,19 @@ func capabilitiesFor(kind, vendor string) []capabilityInput {
 
 // Custom endpoints need a safe live probe; native media instead relies on the
 // official connector contract and authenticated discovery, as in the Rust gateway.
-func certifiable(kind, vendor string, c capabilityInput) bool {
+func certifiable(kind, vendor string, c CapabilityInput) bool {
 	if !connectors.Supports(kind, vendor, c.Operation, c.Surface, c.Mode) {
 		return false
 	}
 	switch c.Operation {
-	case "generation", "token_count", "embeddings", "moderation":
+	case "generation", "token_count", "embeddings", "moderation", "rerank":
 		return true
+	case "batch", "realtime":
+		return kind == KindOpenAI || kind == KindAzure
+	case "bedrock_invoke":
+		return kind == KindBedrock
+	case "image_generation":
+		return kind == KindOpenAI || kind == KindVertex || kind == KindBedrock
 	default:
 		return kind == KindOpenAI
 	}

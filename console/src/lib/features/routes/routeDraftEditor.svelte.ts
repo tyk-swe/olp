@@ -35,11 +35,14 @@ import { useRole } from '$lib/features/access/session/useRole.svelte';
 import {
   buildCreateRouteDraftInput,
   buildReplaceRouteDraftInput,
+  hasOutputRules,
   modesFor,
+  policyRulesFrom,
   routeEligibilityWarnings as findRouteEligibilityWarnings,
   surfacesFor,
   toRouteModelOptions,
   validateRouteEditor,
+  type EditablePolicyRule,
   type EditableTarget
 } from '$lib/features/routes/routeEditor';
 
@@ -62,10 +65,13 @@ export class RouteDraftEditorState {
     toRouteModelOptions(this.providerModels.data ?? [])
   );
   slug = $state('default');
+  projectId = $state('');
   operations = $state<string[]>(['generation']);
   overallTimeoutMs = $state(120000);
   maxAttempts = $state(2);
   targets = $state<EditableTarget[]>([]);
+  policyRules = $state<EditablePolicyRule[]>([]);
+  outputPolicyActive = $derived(hasOutputRules(this.policyRules));
   sync = $state(initialConcurrentEdit());
   policyDirty = $state(false);
   policyBusy = $state(false);
@@ -111,7 +117,9 @@ export class RouteDraftEditorState {
     operations: this.operations,
     overallTimeoutMs: this.overallTimeoutMs,
     maxAttempts: this.maxAttempts,
-    targets: this.targets
+    targets: this.targets,
+    contentPolicyRules: this.policyRules,
+    projectId: this.projectId
   });
   concurrentNotice = $derived(conflictNotice(this.sync));
   routeEligibilityWarnings = $derived(
@@ -135,10 +143,12 @@ export class RouteDraftEditorState {
   private resetResource() {
     this.ownerEpoch += 1;
     this.slug = 'default';
+    this.projectId = '';
     this.operations = ['generation'];
     this.overallTimeoutMs = 120000;
     this.maxAttempts = 2;
     this.targets = [];
+    this.policyRules = [];
     this.sync = initialConcurrentEdit();
     this.policyDirty = false;
     this.policyBusy = false;
@@ -231,6 +241,25 @@ export class RouteDraftEditorState {
   removeTarget = (index: number) => {
     this.targets = this.targets.filter(
       (_, targetIndex) => targetIndex !== index
+    );
+    this.touch();
+  };
+  addPolicyRule = () => {
+    this.policyRules = [
+      ...this.policyRules,
+      {
+        id: `rule-${this.policyRules.length + 1}`,
+        phase: 'input',
+        action: 'redact',
+        pattern: '',
+        replacement: ''
+      }
+    ];
+    this.touch();
+  };
+  removePolicyRule = (index: number) => {
+    this.policyRules = this.policyRules.filter(
+      (_, ruleIndex) => ruleIndex !== index
     );
     this.touch();
   };
@@ -402,6 +431,7 @@ export class RouteDraftEditorState {
       this.operations = [...current.operations];
       this.overallTimeoutMs = current.overall_timeout_ms;
       this.maxAttempts = current.max_attempts;
+      this.policyRules = policyRulesFrom(current.content_policy);
       this.targets = current.targets.map((target) => ({
         providerModelId: target.provider_model_id,
         priority: target.priority,
@@ -425,6 +455,8 @@ export class RouteDraftEditorState {
       const modes = modesFor(this.simulationOperation);
       if (!modes.includes(this.simulationMode))
         this.simulationMode = modes[0] ?? 'unary';
+      if (this.outputPolicyActive && this.simulationMode === 'streaming')
+        this.simulationMode = 'unary';
     });
     $effect(() => {
       void this.simulationInputs;

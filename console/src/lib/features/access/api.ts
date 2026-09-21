@@ -95,3 +95,163 @@ export async function revokeSession(id: string): Promise<void> {
   });
   ensureSuccess(response.error, response.response);
 }
+
+export type ManagementToken = Schemas['ManagementTokenResponse'];
+export type ManagementTokenSecret = Schemas['CreateManagementTokenResponse'];
+
+export const MANAGEMENT_TOKEN_SCOPES = [
+  'read',
+  'access_read',
+  'access',
+  'settings',
+  'configure',
+  'keys',
+  'playground',
+  'usage'
+] as const;
+
+export type ManagementTokenScope = (typeof MANAGEMENT_TOKEN_SCOPES)[number];
+
+export async function listManagementTokenPage(
+  cursor?: string,
+  signal?: AbortSignal
+): Promise<CursorPage<ManagementToken>> {
+  const response = await apiClient.GET('/api/v3/management-tokens', {
+    params: { query: { limit: 50, cursor } },
+    signal
+  });
+  return pageResult(result(response.data, response.error, response.response));
+}
+
+export async function createManagementToken(
+  name: string,
+  scopes: ManagementTokenScope[],
+  expiresAt: string,
+  projectIds?: string[]
+): Promise<ManagementTokenSecret> {
+  const response = await apiClient.POST('/api/v3/management-tokens', {
+    params: { header: { 'Idempotency-Key': crypto.randomUUID() } },
+    body: {
+      name,
+      scopes,
+      expires_at: expiresAt,
+      ...(projectIds ? { project_ids: projectIds } : {})
+    }
+  });
+  return result(response.data, response.error, response.response);
+}
+
+export async function revokeManagementToken(
+  id: string,
+  etag: string
+): Promise<void> {
+  const response = await apiClient.POST(
+    '/api/v3/management-tokens/{management_token_id}/revoke',
+    {
+      params: {
+        path: { management_token_id: id },
+        header: {
+          'If-Match': etag,
+          'Idempotency-Key': crypto.randomUUID()
+        }
+      }
+    }
+  );
+  ensureSuccess(response.error, response.response);
+}
+
+export type Project = Schemas['ProjectDetailResponse'];
+export type ProjectMember = Schemas['ProjectMemberResponse'];
+export type ProjectMembership = Schemas['ProjectMembershipItem'];
+export type ProjectRole = ProjectMembership['role'];
+
+export async function listProjectPage(
+  cursor?: string,
+  signal?: AbortSignal
+): Promise<CursorPage<Project>> {
+  const response = await apiClient.GET('/api/v3/projects', {
+    params: { query: { limit: 50, cursor } },
+    signal
+  });
+  return pageResult(result(response.data, response.error, response.response));
+}
+
+export async function listProjectMemberships(
+  signal?: AbortSignal
+): Promise<ProjectMembership[]> {
+  const response = await apiClient.GET('/api/v3/project-memberships', {
+    signal
+  });
+  return result(response.data, response.error, response.response).items;
+}
+
+export async function createProject(name: string): Promise<Project> {
+  const response = await apiClient.POST('/api/v3/projects', {
+    params: { header: { 'Idempotency-Key': crypto.randomUUID() } },
+    body: { name }
+  });
+  return result(response.data, response.error, response.response);
+}
+
+export async function renameProject(
+  project: Project,
+  name: string
+): Promise<Project> {
+  const response = await apiClient.PATCH('/api/v3/projects/{project_id}', {
+    params: {
+      path: { project_id: project.id },
+      header: { 'If-Match': project.etag }
+    },
+    body: { name }
+  });
+  return result(response.data, response.error, response.response);
+}
+
+export async function listProjectMemberPage(
+  projectId: string,
+  cursor?: string,
+  signal?: AbortSignal
+): Promise<CursorPage<ProjectMember>> {
+  const response = await apiClient.GET(
+    '/api/v3/projects/{project_id}/members',
+    {
+      params: { path: { project_id: projectId }, query: { limit: 50, cursor } },
+      signal
+    }
+  );
+  return pageResult(result(response.data, response.error, response.response));
+}
+
+export async function putProjectMember(
+  project: Project,
+  userId: string,
+  role: ProjectRole
+): Promise<ProjectMember> {
+  const response = await apiClient.PUT(
+    '/api/v3/projects/{project_id}/members/{user_id}',
+    {
+      params: {
+        path: { project_id: project.id, user_id: userId },
+        header: { 'If-Match': project.etag }
+      },
+      body: { role }
+    }
+  );
+  return result(response.data, response.error, response.response);
+}
+
+export async function removeProjectMember(
+  project: Project,
+  userId: string
+): Promise<void> {
+  const response = await apiClient.DELETE(
+    '/api/v3/projects/{project_id}/members/{user_id}',
+    {
+      params: {
+        path: { project_id: project.id, user_id: userId },
+        header: { 'If-Match': project.etag }
+      }
+    }
+  );
+  ensureSuccess(response.error, response.response);
+}

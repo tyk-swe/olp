@@ -123,9 +123,9 @@ func (e *InvalidRequestError) Error() string { return e.Reason }
 // Request describes one admission decision. A nil limit means that dimension is
 // unlimited and no state is created for it.
 type Request struct {
-	// APIKeyID identifies the cost budget owner. Provider connections and slots
+	// CostOwnerID identifies the cost budget owner. Provider connections and slots
 	// pass their own identifier: cost keys are only used when a cost limit is set.
-	APIKeyID string
+	CostOwnerID string
 	// LookupID names the shared rate and concurrency counters.
 	LookupID          string
 	RequestsPerMinute *int64
@@ -160,8 +160,8 @@ func (r Request) Validate() error {
 	if !validLookup(r.LookupID) {
 		return &InvalidRequestError{Reason: "lookup ID must be 8-40 ASCII letters, digits, or underscores"}
 	}
-	if _, err := uuid.Parse(r.APIKeyID); err != nil {
-		return &InvalidRequestError{Reason: "API key ID must be a UUID"}
+	if _, err := uuid.Parse(r.CostOwnerID); err != nil {
+		return &InvalidRequestError{Reason: "cost owner ID must be a UUID"}
 	}
 	for _, limit := range [...]struct {
 		value *int64
@@ -282,7 +282,7 @@ func New(client *coordination.Client, namespace string) (*Limiter, error) {
 
 // keys holds the four keys one request can touch. The rate and concurrency keys
 // share the lookup as their cluster hash tag so one script sees both; the cost
-// keys share the API key ID so every lookup of one key meets the same balance.
+// keys share the cost owner ID so every lookup of one owner meets the same balance.
 type keys struct {
 	rate        string
 	concurrency string
@@ -290,9 +290,9 @@ type keys struct {
 	monthlyCost string
 }
 
-func (l *Limiter) keysFor(lookupID, apiKeyID string) keys {
+func (l *Limiter) keysFor(lookupID, costOwnerID string) keys {
 	rate, concurrency := l.rateKeys(lookupID)
-	daily, monthly := l.costKeys(apiKeyID)
+	daily, monthly := l.costKeys(costOwnerID)
 	return keys{rate: rate, concurrency: concurrency, dailyCost: daily, monthlyCost: monthly}
 }
 
@@ -318,6 +318,8 @@ func ConnectionLookup(providerID string) string { return "pc_" + simpleUUID(prov
 
 // SlotLookup names the quota shared by every attempt through one provider slot.
 func SlotLookup(slotID string) string { return "ps_" + simpleUUID(slotID) }
+
+func BudgetGroupLookup(id string) string { return "bg_" + simpleUUID(id) }
 
 // CredentialScope names the cooldown that follows one credential version, so a
 // rotation is not punished for the version it replaced.
@@ -365,7 +367,7 @@ func (l *Limiter) Reserve(ctx context.Context, r Request) (*Lease, error) {
 	if err := r.Validate(); err != nil {
 		return nil, err
 	}
-	scriptKeys := l.keysFor(r.LookupID, r.APIKeyID)
+	scriptKeys := l.keysFor(r.LookupID, r.CostOwnerID)
 	if r.HasCostBudget() {
 		if err := l.reserveCost(ctx, r, scriptKeys); err != nil {
 			return nil, err

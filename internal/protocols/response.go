@@ -14,6 +14,14 @@ import (
 // Decode validates a bounded upstream result. Native extensions survive model
 // rewriting; translated results contain only the shared, represented fields.
 func Decode(wire, target openai.Family, body []byte, route, encoding string) (*openai.Completion, error) {
+	return decode(wire, target, body, route, encoding, nil)
+}
+
+func DecodeRequest(wire, target openai.Family, body []byte, route, encoding string, request *openai.Request) (*openai.Completion, error) {
+	return decode(wire, target, body, route, encoding, request)
+}
+
+func decode(wire, target openai.Family, body []byte, route, encoding string, request *openai.Request) (*openai.Completion, error) {
 	var c *openai.Completion
 	var err error
 	switch wire {
@@ -54,6 +62,16 @@ func Decode(wire, target openai.Family, body []byte, route, encoding string) (*o
 		c = &openai.Completion{Body: raw(out), FinishReason: "stop", Usage: &openai.Usage{InputTokens: n, TotalTokens: n}}
 	case openai.FamilyEmbeddings:
 		c, err = decodeEmbeddings(body, route, encoding)
+	case openai.FamilyGeminiEmbeddings:
+		c, err = decodeGeminiEmbedding(body, route, encoding)
+	case openai.FamilyGeminiEmbeddingsBatch:
+		c, err = decodeGeminiEmbeddingBatch(body, route, encoding)
+	case openai.FamilyVertexEmbeddings:
+		c, err = decodeVertexEmbeddings(body, route, encoding)
+	case openai.FamilyBedrockEmbeddings:
+		c, err = decodeBedrockEmbedding(body, route, encoding)
+	case openai.FamilyRerank:
+		c, err = decodeRerank(body, route, request)
 	case openai.FamilyModeration:
 		f, e := object(body)
 		if e != nil {
@@ -168,11 +186,35 @@ func nativeUsage(f Object, family string) (*openai.Usage, error) {
 		}
 	}
 	if family == "anthropic" {
-		n, _ := count(f["cache_creation_input_tokens"])
+		n, hasCreation := count(f["cache_creation_input_tokens"])
+		if hasCreation {
+			u.CacheWriteInputTokens = &n
+		}
 		if n > math.MaxInt64-u.InputTokens-u.OutputTokens {
 			return nil, protocolError("usage count overflow")
 		}
 		u.InputTokens += n
+		creation, e := optionalObject(f["cache_creation"])
+		if e != nil {
+			return nil, e
+		}
+		if creation != nil {
+			detail := int64(0)
+			for field, slot := range map[string]**int64{
+				"ephemeral_5m_input_tokens": &u.CacheWrite5MInputTokens,
+				"ephemeral_1h_input_tokens": &u.CacheWrite1HInputTokens,
+			} {
+				if v, ok := count(creation[field]); ok {
+					*slot = &v
+					detail += v
+				} else if present(creation[field]) {
+					return nil, protocolError("invalid usage count")
+				}
+			}
+			if detail > n {
+				return nil, protocolError("cache write detail exceeds total")
+			}
+		}
 		u.TotalTokens = u.InputTokens + u.OutputTokens
 	}
 	if n, ok := count(f[reason]); ok {
@@ -509,15 +551,8 @@ func geminiUsage(u *openai.Usage) Object {
 	}
 	return f
 }
-func decodeEmbeddings(body []byte, route, encoding string) (*openai.Completion, error) {
-	f, e := object(body)
-	if e != nil {
-		return nil, protocolError("invalid embeddings result")
-	}
-	data := arr(f["data"])
-	if len(data) == 0 {
-		return nil, protocolError("missing embeddings")
-	}
+
+func embeddingItems(data []json.RawMessage, encoding string) ([]json.RawMessage, error) {
 	seen := map[int64]bool{}
 	for i, v := range data {
 		item, e := object(v)
@@ -546,6 +581,11 @@ func decodeEmbeddings(body []byte, route, encoding string) (*openai.Completion, 
 		} else if json.Unmarshal(item["embedding"], &values) != nil || len(values) == 0 {
 			return nil, protocolError("invalid embedding vector")
 		}
+		for _, value := range values {
+			if math.IsInf(value, 0) || math.IsNaN(value) {
+				return nil, protocolError("non-finite embedding")
+			}
+		}
 		if encoding == "float" {
 			item["embedding"] = raw(values)
 		}
@@ -562,6 +602,168 @@ func decodeEmbeddings(body []byte, route, encoding string) (*openai.Completion, 
 		}
 		item["object"] = raw("embedding")
 		data[i] = raw(item)
+	}
+	return data, nil
+}
+
+func nativeEmbeddingsCompletion(values [][]float64, route, encoding string, usage *openai.Usage) (*openai.Completion, error) {
+	data := make([]json.RawMessage, len(values))
+	for i, vector := range values {
+		data[i] = raw(Object{"index": raw(i), "embedding": raw(vector)})
+	}
+	checked, err := embeddingItems(data, encoding)
+	if err != nil {
+		return nil, err
+	}
+	f := Object{"data": raw(checked), "model": raw(route), "object": raw("list")}
+	if usage != nil {
+		f["usage"] = raw(Object{"prompt_tokens": raw(usage.InputTokens), "total_tokens": raw(usage.TotalTokens)})
+	}
+	c := &openai.Completion{Body: raw(f), FinishReason: "stop", Usage: usage}
+	return c, nil
+}
+
+func floatVector(raw json.RawMessage) ([]float64, error) {
+	var values []float64
+	if err := json.Unmarshal(raw, &values); err != nil || len(values) == 0 {
+		return nil, protocolError("invalid embedding vector")
+	}
+	return values, nil
+}
+
+func decodeGeminiEmbedding(body []byte, route, encoding string) (*openai.Completion, error) {
+	f, e := object(body)
+	if e != nil {
+		return nil, protocolError("invalid embeddings result")
+	}
+	if present(f["error"]) {
+		if upstream := openai.ParseErrorBody(body); upstream != nil {
+			return nil, upstream
+		}
+		return nil, protocolError("invalid native error envelope")
+	}
+	embedding, e := optionalObject(f["embedding"])
+	if e != nil {
+		return nil, e
+	}
+	values, err := floatVector(embedding["values"])
+	if err != nil {
+		return nil, err
+	}
+	return nativeEmbeddingsCompletion([][]float64{values}, route, encoding, nil)
+}
+
+func decodeGeminiEmbeddingBatch(body []byte, route, encoding string) (*openai.Completion, error) {
+	f, e := object(body)
+	if e != nil {
+		return nil, protocolError("invalid embeddings result")
+	}
+	if present(f["error"]) {
+		if upstream := openai.ParseErrorBody(body); upstream != nil {
+			return nil, upstream
+		}
+		return nil, protocolError("invalid native error envelope")
+	}
+	embeddings := arr(f["embeddings"])
+	if len(embeddings) == 0 {
+		return nil, protocolError("missing embeddings")
+	}
+	values := make([][]float64, len(embeddings))
+	for i, v := range embeddings {
+		item, e := object(v)
+		if e != nil {
+			return nil, protocolError("invalid embedding")
+		}
+		vector, err := floatVector(item["values"])
+		if err != nil {
+			return nil, err
+		}
+		values[i] = vector
+	}
+	return nativeEmbeddingsCompletion(values, route, encoding, nil)
+}
+
+func decodeVertexEmbeddings(body []byte, route, encoding string) (*openai.Completion, error) {
+	f, e := object(body)
+	if e != nil {
+		return nil, protocolError("invalid embeddings result")
+	}
+	if present(f["error"]) {
+		if upstream := openai.ParseErrorBody(body); upstream != nil {
+			return nil, upstream
+		}
+		return nil, protocolError("invalid native error envelope")
+	}
+	predictions := arr(f["predictions"])
+	if len(predictions) == 0 {
+		return nil, protocolError("missing embeddings")
+	}
+	values := make([][]float64, len(predictions))
+	var tokens int64
+	var usage *openai.Usage
+	for i, v := range predictions {
+		prediction, e := object(v)
+		if e != nil {
+			return nil, protocolError("invalid embedding")
+		}
+		embedding, e := optionalObject(prediction["embeddings"])
+		if e != nil {
+			return nil, e
+		}
+		vector, err := floatVector(embedding["values"])
+		if err != nil {
+			return nil, err
+		}
+		values[i] = vector
+		if statistics, e := optionalObject(embedding["statistics"]); e != nil {
+			return nil, e
+		} else if present(statistics["token_count"]) {
+			n, ok := count(statistics["token_count"])
+			if !ok {
+				return nil, protocolError("invalid embeddings usage")
+			}
+			tokens += n
+			usage = &openai.Usage{InputTokens: tokens, TotalTokens: tokens}
+		}
+	}
+	return nativeEmbeddingsCompletion(values, route, encoding, usage)
+}
+
+func decodeBedrockEmbedding(body []byte, route, encoding string) (*openai.Completion, error) {
+	f, e := object(body)
+	if e != nil {
+		return nil, protocolError("invalid embeddings result")
+	}
+	if present(f["message"]) && !present(f["embedding"]) {
+		if upstream := openai.ParseErrorBody(body); upstream != nil {
+			return nil, upstream
+		}
+		return nil, protocolError("invalid native error envelope")
+	}
+	values, err := floatVector(f["embedding"])
+	if err != nil {
+		return nil, err
+	}
+	n, ok := count(f["inputTextTokenCount"])
+	if !ok {
+		return nil, protocolError("invalid embeddings usage")
+	}
+	usage := &openai.Usage{InputTokens: n, TotalTokens: n}
+	return nativeEmbeddingsCompletion([][]float64{values}, route, encoding, usage)
+}
+
+func decodeEmbeddings(body []byte, route, encoding string) (*openai.Completion, error) {
+	f, e := object(body)
+	if e != nil {
+		return nil, protocolError("invalid embeddings result")
+	}
+	data := arr(f["data"])
+	if len(data) == 0 {
+		return nil, protocolError("missing embeddings")
+	}
+	data, err := embeddingItems(data, encoding)
+	if err != nil {
+		return nil, err
 	}
 	f["data"] = raw(data)
 	f["model"] = raw(route)

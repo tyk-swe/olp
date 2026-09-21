@@ -73,10 +73,14 @@ const modelEntry: ProviderModelInventory = {
 
 const activeRoute: ActiveRoute = {
   created_at: '2026-07-12T12:00:00Z',
+  project_id: null,
+  project_name: null,
+  etag: 'route-etag-a',
   id: 'route-active-a',
   latest_revision: {
     activated_at: '2026-07-12T12:00:00Z',
     activated_by: 'user-a',
+    content_policy: null,
     id: 'revision-a',
     max_attempts: 1,
     operations: ['generation'],
@@ -116,7 +120,10 @@ const activeRoute: ActiveRoute = {
     targets: []
   },
   revision_count: 1,
-  slug: 'active-route'
+  retired_at: null,
+  retired_by: null,
+  slug: 'active-route',
+  state: 'active'
 };
 
 function deferred<T>(value: T, ms = SERVER_DELAY): Promise<T> {

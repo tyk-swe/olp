@@ -16,7 +16,8 @@ function captureSimulation() {
       id: '01980000-0000-7000-8000-000000000401',
       email: 'operator@example.com',
       display_name: 'Operator',
-      role: 'operator'
+      role: 'operator',
+      access_scope: 'global'
     },
     csrf_token: 'csrf-routing-token'
   });

@@ -22,6 +22,9 @@
     createApiKeyFormState,
     type ApiKeyPolicyInput
   } from '$lib/features/access/api-keys/apiKeyPolicy';
+  import ProjectScopeField from '$lib/features/access/projects/ProjectScopeField.svelte';
+  import { listBudgetGroups } from '$lib/features/access/budget-groups/api';
+  import { budgetGroupKeys } from '$lib/features/access/budget-groups/budgetGroupKeys';
 
   let {
     editing,
@@ -56,6 +59,26 @@
     enabled: services.gatewayAvailable,
     queryFn: ({ signal }) => listRoutes(signal)
   }));
+  const groups = createQuery(() => ({
+    queryKey: budgetGroupKeys.list(),
+    queryFn: ({ signal }) => listBudgetGroups(signal)
+  }));
+  const formProject = $derived(
+    editing ? (editing.project_id ?? null) : form.projectId || null
+  );
+  const matchingGroups = $derived(
+    (groups.data ?? []).filter((group) => group.project_id === formProject)
+  );
+
+  $effect(() => {
+    if (
+      form.budgetGroupId &&
+      groups.data &&
+      !matchingGroups.some((group) => group.id === form.budgetGroupId)
+    ) {
+      form.budgetGroupId = '';
+    }
+  });
 
   $effect(() => {
     if (initialized) return;
@@ -107,10 +130,9 @@
       await focusFormError(root);
       return;
     }
-    const saved = await onSubmit(
-      buildApiKeyPolicyInput(form),
-      form.allowedRoutes[0]
-    );
+    const input = buildApiKeyPolicyInput(form);
+    if (editing) delete input.project_id;
+    const saved = await onSubmit(input, form.allowedRoutes[0]);
     if (saved) dirty = false;
     else await focusFormError(root);
   }
@@ -196,6 +218,15 @@
             >{errors.expiresAt}</small
           >{/if}
       </div>
+      {#if !editing}<ProjectScopeField
+          id="key-project"
+          bind:value={form.projectId}
+          disabled={!canManage}
+        />{:else}<div class="form-field">
+          <span class="scope-label">Project</span><span
+            >{editing.project_name ?? 'Installation-wide'}</span
+          >
+        </div>{/if}
     </div>
   </section>
   <section aria-labelledby="scope-heading">
@@ -217,6 +248,21 @@
           />
           {scope[1]}</label
         >{/each}
+    </fieldset>
+    <fieldset class="checks">
+      <legend>Provider state</legend>
+      <label
+        ><input
+          type="checkbox"
+          bind:checked={form.allowProviderState}
+          disabled={!canManage}
+        />
+        Allow provider-retained state</label
+      >
+      <p class="section-help">
+        Permits stored Responses, previous_response_id chains, and lifecycle
+        access. Provider state may retain user content at the upstream provider.
+      </p>
     </fieldset>
     <fieldset class="checks routes">
       <legend>Allowed route slugs</legend>
@@ -270,6 +316,34 @@
           >{/each}{#if !routes.data?.length}<span
             >No routes are configured yet.</span
           >{/if}{/if}
+    </fieldset>
+    <fieldset class="checks">
+      <legend>Allowed attribution keys</legend>
+      <p>
+        Callers may attach short machine-token labels under these keys in the
+        X-OLP-Attribution header. Labels are metadata only; leave blank to
+        reject every label.
+      </p>
+      <label for="allowed-attribution-keys"
+        >Attribution keys (comma separated)</label
+      >
+      <input
+        id="allowed-attribution-keys"
+        value={form.allowedAttributionKeys.join(', ')}
+        disabled={!canManage}
+        placeholder="team, env"
+        onchange={(event) => {
+          form.allowedAttributionKeys = [
+            ...new Set(
+              event.currentTarget.value
+                .split(',')
+                .map((key) => key.trim())
+                .filter(Boolean)
+            )
+          ];
+          touch();
+        }}
+      />
     </fieldset>
   </section>
   <section aria-labelledby="limits-heading">
@@ -351,6 +425,23 @@
         measured or restricted yet.{/if}
     </p>
     <div class="form-grid budget-inputs">
+      <div class="form-field">
+        <label for="budget-group">Shared budget group (optional)</label
+        >{#if groups.isPending}<span role="status">Loading groups…</span
+          >{:else}<select
+            id="budget-group"
+            bind:value={form.budgetGroupId}
+            disabled={!canManage}
+          >
+            <option value="">No shared group</option>
+            {#each matchingGroups as group (group.id)}<option value={group.id}
+                >{group.name}</option
+              >{/each}
+          </select><small
+            >All keys in the group share its cost budget and keep their own
+            limits.</small
+          >{/if}
+      </div>
       <div class="form-field">
         <label for="daily-budget">Daily cost budget (optional)</label><input
           id="daily-budget"
@@ -551,6 +642,12 @@
   }
   .field-error {
     color: var(--danger);
+  }
+  .scope-label {
+    display: block;
+    margin-bottom: 0.3rem;
+    color: var(--foreground-muted);
+    font-size: var(--text-caption);
   }
   .form-actions {
     display: flex;

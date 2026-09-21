@@ -25,10 +25,11 @@ func encodeBedrock(c *Generation, model, operation string) (Object, error) {
 	if n := c.Parameters["n"]; present(n) && string(n) != "1" {
 		return nil, unsupported("n")
 	}
+	var schemaFormat Object
 	if v := c.Parameters["response_format"]; present(v) {
-		f, e := object(v)
-		if e != nil || str(f["type"]) != "text" {
-			return nil, unsupported("response_format")
+		var e error
+		if schemaFormat, e = jsonSchemaFormat(v); e != nil {
+			return nil, e
 		}
 	}
 	inference := Object{}
@@ -120,6 +121,17 @@ func encodeBedrock(c *Generation, model, operation string) (Object, error) {
 	if len(system) > 0 {
 		f["system"] = raw(system)
 	}
+	if schemaFormat != nil {
+		var compact bytes.Buffer
+		if e := json.Compact(&compact, schemaFormat["schema"]); e != nil {
+			return nil, unsupported("response_format schema")
+		}
+		jsonSchema := Object{"schema": raw(compact.String()), "name": raw(str(schemaFormat["name"]))}
+		if d := schemaFormat["description"]; present(d) {
+			jsonSchema["description"] = d
+		}
+		f["outputConfig"] = raw(Object{"textFormat": raw(Object{"type": raw("json_schema"), "structure": raw(Object{"jsonSchema": raw(jsonSchema)})})})
+	}
 	if operation != "token_count" && len(inference) > 0 {
 		f["inferenceConfig"] = raw(inference)
 	}
@@ -188,6 +200,65 @@ func bedrockUsage(v json.RawMessage) (*openai.Usage, error) {
 	usage := &openai.Usage{InputTokens: in, OutputTokens: out, TotalTokens: in + out}
 	if n, ok := count(u["totalTokens"]); ok {
 		usage.TotalTokens = n
+	}
+	optional := func(key string) (*int64, error) {
+		if !present(u[key]) {
+			return nil, nil
+		}
+		n, ok := count(u[key])
+		if !ok {
+			return nil, protocolError("invalid Bedrock cache usage")
+		}
+		return &n, nil
+	}
+	var e2 error
+	if usage.CachedInputTokens, e2 = optional("cacheReadInputTokens"); e2 != nil {
+		return nil, e2
+	}
+	if usage.CacheWriteInputTokens, e2 = optional("cacheWriteInputTokens"); e2 != nil {
+		return nil, e2
+	}
+	if present(u["cacheDetails"]) {
+		details := arr(u["cacheDetails"])
+		if details == nil {
+			return nil, protocolError("invalid Bedrock cache details")
+		}
+		seen := map[string]bool{}
+		for _, raw := range details {
+			entry, e := object(raw)
+			if e != nil {
+				return nil, protocolError("invalid Bedrock cache detail")
+			}
+			ttl := str(entry["ttl"])
+			if ttl != "5m" && ttl != "1h" {
+				return nil, protocolError("unknown Bedrock cache TTL")
+			}
+			if seen[ttl] {
+				return nil, protocolError("duplicate Bedrock cache TTL")
+			}
+			seen[ttl] = true
+			n, ok := count(entry["inputTokens"])
+			if !ok {
+				return nil, protocolError("invalid Bedrock cache usage")
+			}
+			if ttl == "5m" {
+				usage.CacheWrite5MInputTokens = &n
+			} else {
+				usage.CacheWrite1HInputTokens = &n
+			}
+		}
+	}
+	value := func(v *int64) int64 {
+		if v == nil {
+			return 0
+		}
+		return *v
+	}
+	if value(usage.CacheWrite5MInputTokens)+value(usage.CacheWrite1HInputTokens) > value(usage.CacheWriteInputTokens) {
+		return nil, protocolError("Bedrock cache write detail exceeds total")
+	}
+	if value(usage.CachedInputTokens)+value(usage.CacheWriteInputTokens) > in {
+		return nil, protocolError("Bedrock cache usage exceeds input")
 	}
 	return usage, nil
 }

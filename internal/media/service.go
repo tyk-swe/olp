@@ -417,7 +417,7 @@ func (s *Service) executeReconciliation(ctx context.Context, record *JobRecord, 
 	}
 	callCtx, cancel := context.WithTimeout(ctx, routeTimeout+ReconciliationLeaseSlack)
 	defer cancel()
-	call, failure := Encode(&Request{Op: op, JobID: upstreamID, Route: record.RouteSlug}, record.UpstreamModel)
+	call, failure := Encode(&Request{Op: op, JobID: upstreamID, Route: record.RouteSlug}, "openai", record.UpstreamModel)
 	if failure != nil {
 		return reconciliationError("media_job_operation_invalid")
 	}
@@ -500,6 +500,101 @@ func failureClassCode(f *Failure) string {
 	default:
 		return "connect"
 	}
+}
+
+func refreshable(record *JobRecord, now time.Time) bool {
+	switch record.Lifecycle {
+	case LifecycleCreateAmbiguous, LifecycleCreateCleanupPending, LifecycleDeletePending:
+		return true
+	case LifecycleCreating:
+		return !record.UpdatedAt.Add(5 * time.Minute).After(now)
+	case LifecycleActive:
+		return record.UpstreamJobID != nil && (record.State == StateQueued || record.State == StateRunning)
+	}
+	return false
+}
+
+func (s *Service) RefreshJob(ctx context.Context, id string) (*JobRecord, error) {
+	record, err := Job(ctx, s.Pool, id)
+	if err != nil {
+		return nil, err
+	}
+	if !refreshable(&record, s.now()) {
+		return &record, nil
+	}
+	claimed, ok, err := ClaimJob(ctx, s.Pool, id, s.now())
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, &JobError{Kind: JobErrorBusy, Message: "media job is being reconciled by another worker"}
+	}
+	s.reconcileClaimed(ctx, claimed)
+	updated, err := Job(ctx, s.Pool, id)
+	if err != nil {
+		return nil, err
+	}
+	return &updated, nil
+}
+
+var ErrContentUnavailable = errors.New("media_content_unavailable")
+
+func (s *Service) JobContent(ctx context.Context, record *JobRecord, variant string) (*Result, error) {
+	if record == nil || record.Lifecycle != LifecycleActive || record.State != StateSucceeded ||
+		!record.ContentAvailable || record.UpstreamJobID == nil || !ValidUpstreamJobID(*record.UpstreamJobID) {
+		return nil, ErrContentUnavailable
+	}
+	target, routeTimeout, _ := s.JobTarget(ctx, record)
+	if target == nil {
+		return nil, ErrContentUnavailable
+	}
+	call, failure := Encode(&Request{Op: OpVideoContent, JobID: *record.UpstreamJobID, Variant: variant, Route: record.RouteSlug}, "openai", record.UpstreamModel)
+	if failure != nil {
+		return nil, ErrContentUnavailable
+	}
+	callCtx, cancel := context.WithTimeout(ctx, routeTimeout+ReconciliationLeaseSlack)
+	defer cancel()
+	result, transportFailure := s.Transport.Do(callCtx, target.Target, call, nil)
+	if transportFailure != nil || result.Artifact == nil {
+		return nil, ErrContentUnavailable
+	}
+	return result, nil
+}
+
+func (s *Service) DeleteJob(ctx context.Context, id string) (*JobRecord, error) {
+	record, err := Job(ctx, s.Pool, id)
+	if err != nil {
+		return nil, err
+	}
+	if record.Lifecycle == LifecycleDeleted {
+		return &record, nil
+	}
+	if record.Lifecycle == LifecycleCreating {
+		return nil, &JobError{Kind: JobErrorBusy, Message: "media job create is still in flight"}
+	}
+	claimed, ok, err := ClaimJob(ctx, s.Pool, id, s.now())
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, &JobError{Kind: JobErrorBusy, Message: "media job is being reconciled by another worker"}
+	}
+	record = claimed
+	if record.Lifecycle == LifecycleActive {
+		record, err = beginDeletionClaimed(ctx, s.Pool, id, *record.ReconciliationClaimID)
+		if errors.Is(err, errClaimLost) {
+			return nil, &JobError{Kind: JobErrorBusy, Message: "media job is being reconciled by another worker"}
+		}
+		if err != nil {
+			return nil, err
+		}
+	}
+	s.reconcileClaimed(ctx, record)
+	updated, err := Job(ctx, s.Pool, id)
+	if err != nil {
+		return nil, err
+	}
+	return &updated, nil
 }
 
 // RunReconciler is the autonomous reconciliation supervisor loop.

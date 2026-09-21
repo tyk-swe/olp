@@ -39,6 +39,7 @@ const capabilities = {
   oidc_login_enabled: true,
   gateway_available: false,
   limits_enforced: false,
+  notifications_active: false,
   retention_enforced: false
 };
 

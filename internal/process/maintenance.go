@@ -1,6 +1,7 @@
 package process
 
 import (
+	"bytes"
 	"context"
 	"crypto/hmac"
 	"encoding/json"
@@ -10,8 +11,10 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/config"
 	"github.com/tyk-swe/olp/internal/console"
 	"github.com/tyk-swe/olp/internal/coordination"
@@ -24,6 +27,38 @@ import (
 type MaintenanceOptions struct {
 	DryRun            bool
 	RetirementVersion int
+	AccountEmail      string
+	PasswordFile      string
+}
+
+func readPasswordFile(path string) (string, error) {
+	info, err := os.Stat(path)
+	if err != nil || !info.Mode().IsRegular() {
+		return "", errors.New("password file must be a regular file")
+	}
+	if info.Mode().Perm()&0o077 != 0 {
+		return "", errors.New("password file must not be accessible by group or others")
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		return "", errors.New("password file is unreadable")
+	}
+	defer file.Close()
+	data, err := io.ReadAll(io.LimitReader(file, 4098))
+	if err != nil {
+		return "", errors.New("password file is unreadable")
+	}
+	if len(data) > 4097 {
+		return "", errors.New("password file exceeds the 4097 byte limit")
+	}
+	if bytes.HasSuffix(data, []byte("\n")) {
+		data = bytes.TrimSuffix(data, []byte("\n"))
+		data = bytes.TrimSuffix(data, []byte("\r"))
+	}
+	if !utf8.Valid(data) {
+		return "", errors.New("password file is not valid UTF-8")
+	}
+	return string(data), nil
 }
 
 func Maintenance(ctx context.Context, c config.Config, command string, options MaintenanceOptions, output io.Writer) error {
@@ -42,6 +77,17 @@ func Maintenance(ctx context.Context, c config.Config, command string, options M
 		return err
 	}
 	defer pool.Close()
+	if command == "reset-password" {
+		password, err := readPasswordFile(options.PasswordFile)
+		if err != nil {
+			return err
+		}
+		result, err := access.RecoverPassword(ctx, pool, options.AccountEmail, password)
+		if err != nil {
+			return err
+		}
+		return json.NewEncoder(output).Encode(result)
+	}
 	if command == "migrate" {
 		if err = database.Migrate(ctx, pool); err != nil {
 			return err

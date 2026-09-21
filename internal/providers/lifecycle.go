@@ -25,6 +25,7 @@ type createRequest struct {
 	Credential    *string       `json:"credential"`
 	DisplayName   *string       `json:"display_name"`
 	Model         *string       `json:"model"`
+	ProjectID     *string       `json:"project_id"`
 }
 
 type updateRequest struct {
@@ -32,15 +33,14 @@ type updateRequest struct {
 	Configuration Configuration `json:"configuration"`
 }
 
-func validCredential(value string) error {
+func ValidCredential(value string) error {
 	if len(value) == 0 || len(value) > maxCredentialBytes || strings.ContainsRune(value, 0) || strings.ContainsAny(value, "\r\n") && !json.Valid([]byte(value)) {
 		return access.Invalid("credential", "Use a credential of 1–65536 bytes; multiline credentials must be JSON.")
 	}
 	return nil
 }
 
-// storeCredential records a new credential version and its sealed secret.
-func (s *Server) storeCredential(ctx context.Context, tx pgx.Tx, providerID, secret string) (id string, version int, err error) {
+func (s *Server) StoreCredential(ctx context.Context, tx pgx.Tx, providerID, secret string) (id string, version int, err error) {
 	id = access.NewID()
 	if err = tx.QueryRow(ctx, "INSERT INTO olp_go.provider_credentials(id,provider_id,version) VALUES($1,$2,(SELECT coalesce(max(version),0)+1 FROM olp_go.provider_credentials WHERE provider_id=$2)) RETURNING version", id, providerID).Scan(&version); err != nil {
 		return "", 0, err
@@ -50,7 +50,8 @@ func (s *Server) storeCredential(ctx context.Context, tx pgx.Tx, providerID, sec
 }
 
 func (s *Server) providers(r *http.Request) (access.Reply, error) {
-	if _, err := s.Access.Principal(r, s.Access.Pool, "read"); err != nil {
+	principal, err := s.Access.Principal(r, s.Access.Pool, "read")
+	if err != nil {
 		return access.Reply{}, err
 	}
 	page, err := access.Page(r)
@@ -61,7 +62,7 @@ func (s *Server) providers(r *http.Request) (access.Reply, error) {
 	if len(search) > 100 {
 		return access.Reply{}, access.Invalid("search", "Use at most 100 characters.")
 	}
-	rows, err := s.Access.Pool.Query(r.Context(), detailQuery+" WHERE p.id<$1 AND ($2='' OR p.name ILIKE '%'||$2||'%') ORDER BY p.id DESC LIMIT $3", page.Before, search, page.Limit+1)
+	rows, err := s.Access.Pool.Query(r.Context(), detailQuery+" WHERE p.id<$1 AND ($2='' OR p.name ILIKE '%'||$2||'%') AND ($3 OR p.project_id=ANY($4::uuid[])) ORDER BY p.id DESC LIMIT $5", page.Before, search, principal.AllProjects, principal.ProjectIDs(), page.Limit+1)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -81,11 +82,15 @@ func (s *Server) providers(r *http.Request) (access.Reply, error) {
 }
 
 func (s *Server) provider(r *http.Request) (access.Reply, error) {
-	if _, err := s.Access.Principal(r, s.Access.Pool, "read"); err != nil {
+	p, err := s.Access.Principal(r, s.Access.Pool, "read")
+	if err != nil {
 		return access.Reply{}, err
 	}
 	id, err := access.IDParam(r, "provider_id")
 	if err != nil {
+		return access.Reply{}, err
+	}
+	if _, err = checkProvider(r.Context(), s.Access.Pool, p, id, false); err != nil {
 		return access.Reply{}, err
 	}
 	return s.detailReply(r.Context(), s.Access.Pool, id)
@@ -116,43 +121,46 @@ func (s *Server) createProvider(r *http.Request) (access.Reply, error) {
 	if err = access.ValidText("name", input.Name, 100); err != nil {
 		return access.Reply{}, err
 	}
-	input.Configuration.normalize()
-	if err = input.Configuration.validate(s.Egress); err != nil {
+	input.Configuration.Normalize()
+	if err = input.Configuration.Validate(s.Egress); err != nil {
 		return access.Reply{}, err
 	}
-	if input.Configuration.credentialRequired() && input.Credential == nil {
+	if input.Configuration.CredentialRequired() && input.Credential == nil {
 		return access.Reply{}, access.Invalid("credential", "This authentication mode requires a credential.")
 	}
-	if !input.Configuration.credentialRequired() && input.Credential != nil {
+	if !input.Configuration.CredentialRequired() && input.Credential != nil {
 		return access.Reply{}, access.Invalid("credential", "This authentication mode takes no stored credential.")
 	}
 	if input.Credential != nil {
-		if err = validCredential(*input.Credential); err != nil {
+		if err = ValidCredential(*input.Credential); err != nil {
 			return access.Reply{}, err
 		}
 	}
 	if input.Model != nil {
-		if err = validModelName("model", *input.Model); err != nil {
+		if err = ValidModelName("model", *input.Model); err != nil {
 			return access.Reply{}, err
 		}
 		if input.DisplayName == nil || *input.DisplayName == "" {
 			input.DisplayName = input.Model
 		}
-		if err = validModelName("display_name", *input.DisplayName); err != nil {
+		if err = ValidModelName("display_name", *input.DisplayName); err != nil {
 			return access.Reply{}, err
 		}
+	}
+	if err = a.RequireProject(r.Context(), tx, p, input.ProjectID, true); err != nil {
+		return access.Reply{}, err
 	}
 	id, etag := access.NewID(), access.NewID()
 	configuration, err := json.Marshal(input.Configuration)
 	if err != nil {
 		return access.Reply{}, err
 	}
-	if _, err = tx.Exec(r.Context(), "INSERT INTO olp_go.providers(id,name,kind,state,configuration,etag,slots_etag,created_by) VALUES($1,$2,$3,'draft',$4,$5,$6,$7)", id, input.Name, input.Configuration.Kind, configuration, etag, access.NewID(), p.ID); err != nil {
+	if _, err = tx.Exec(r.Context(), "INSERT INTO olp_go.providers(id,name,kind,state,configuration,etag,slots_etag,created_by,project_id) VALUES($1,$2,$3,'draft',$4,$5,$6,$7,$8)", id, input.Name, input.Configuration.Kind, configuration, etag, access.NewID(), p.UserID(), input.ProjectID); err != nil {
 		return access.Reply{}, err
 	}
 	var credentialID *string
 	if input.Credential != nil {
-		stored, _, err := s.storeCredential(r.Context(), tx, id, *input.Credential)
+		stored, _, err := s.StoreCredential(r.Context(), tx, id, *input.Credential)
 		if err != nil {
 			return access.Reply{}, err
 		}
@@ -184,7 +192,7 @@ func (s *Server) createProvider(r *http.Request) (access.Reply, error) {
 	if err = access.Audit(r.Context(), tx, r, p.ID, "provider.create", "provider", id, "success"); err != nil {
 		return access.Reply{}, err
 	}
-	result := access.Reply{Status: 201, Location: "/api/v3/providers/" + id, ETag: etag, Body: map[string]any{"id": id, "name": input.Name, "kind": input.Configuration.Kind, "state": "draft", "etag": etag, "model": input.Model}}
+	result := access.Reply{Status: 201, Location: "/api/v3/providers/" + id, ETag: etag, Body: map[string]any{"id": id, "name": input.Name, "kind": input.Configuration.Kind, "state": "draft", "etag": etag, "model": input.Model, "project_id": input.ProjectID}}
 	if err = a.CompleteReplay(r, tx, claim, result); err != nil {
 		return access.Reply{}, err
 	}
@@ -222,14 +230,17 @@ func (s *Server) updateProvider(r *http.Request) (access.Reply, error) {
 	if err != nil {
 		return access.Reply{}, err
 	}
+	if err := access.ProjectAccess(p, current.ProjectID, true); err != nil {
+		return access.Reply{}, err
+	}
 	if err = access.Match(r, current.ETag); err != nil {
 		return access.Reply{}, err
 	}
 	if err = access.ValidText("name", input.Name, 100); err != nil {
 		return access.Reply{}, err
 	}
-	input.Configuration.normalize()
-	if err = input.Configuration.validate(s.Egress); err != nil {
+	input.Configuration.Normalize()
+	if err = input.Configuration.Validate(s.Egress); err != nil {
 		return access.Reply{}, err
 	}
 	if input.Configuration.transportFingerprint() != current.Configuration.transportFingerprint() {
@@ -281,6 +292,9 @@ func (s *Server) mutation(r *http.Request, action string, fn func(ctx context.Co
 	}
 	current, err := load(r.Context(), tx, id, true)
 	if err != nil {
+		return access.Reply{}, err
+	}
+	if err := access.ProjectAccess(p, current.ProjectID, true); err != nil {
 		return access.Reply{}, err
 	}
 	if err = access.Match(r, current.ETag); err != nil {
@@ -402,7 +416,7 @@ func (row *slotRow) published(authMode string) runtime.RevisionSlot {
 
 func (s *Server) activateProvider(r *http.Request) (access.Reply, error) {
 	return s.mutation(r, "provider.activate", func(ctx context.Context, tx pgx.Tx, p access.Principal, current *record) (access.Reply, error) {
-		if err := current.Configuration.validate(s.Egress); err != nil {
+		if err := current.Configuration.Validate(s.Egress); err != nil {
 			return access.Reply{}, err
 		}
 		if _, _, err := s.credentialFor(ctx, tx, current); err != nil {
@@ -437,7 +451,7 @@ func (s *Server) activateProvider(r *http.Request) (access.Reply, error) {
 		revisionSlots := make([]runtime.RevisionSlot, 0, len(slots))
 		for i := range slots {
 			slot := slots[i].published(current.Configuration.AuthMode)
-			if slot.Enabled && current.Configuration.credentialRequired() && slots[i].validationFingerprint(&current.Configuration, models) != "" {
+			if slot.Enabled && current.Configuration.CredentialRequired() && slots[i].validationFingerprint(&current.Configuration, models) != "" {
 				if slot.CredentialID == nil {
 					return access.Reply{}, access.Fail(422, "credential_required", "Slot "+slot.Name+" has no credential.")
 				}
@@ -455,13 +469,13 @@ func (s *Server) activateProvider(r *http.Request) (access.Reply, error) {
 		configuration, _ := json.Marshal(current.Configuration)
 		revisionID, etag := access.NewID(), access.NewID()
 		var revision int
-		if err = tx.QueryRow(ctx, "INSERT INTO olp_go.provider_revisions(id,provider_id,revision,name,configuration,models,slots,credential_version,source_etag,activated_by) VALUES($1,$2,(SELECT coalesce(max(revision),0)+1 FROM olp_go.provider_revisions WHERE provider_id=$2),$3,$4,$5,$6,$7,$8,$9) RETURNING revision", revisionID, current.ID, current.Name, configuration, modelsJSON, slotsJSON, credentialVersion, current.ETag, p.ID).Scan(&revision); err != nil {
+		if err = tx.QueryRow(ctx, "INSERT INTO olp_go.provider_revisions(id,provider_id,revision,name,configuration,models,slots,credential_version,source_etag,activated_by) VALUES($1,$2,(SELECT coalesce(max(revision),0)+1 FROM olp_go.provider_revisions WHERE provider_id=$2),$3,$4,$5,$6,$7,$8,$9) RETURNING revision", revisionID, current.ID, current.Name, configuration, modelsJSON, slotsJSON, credentialVersion, current.ETag, p.UserID()).Scan(&revision); err != nil {
 			return access.Reply{}, err
 		}
 		if _, err = tx.Exec(ctx, "UPDATE olp_go.providers SET state='active',active_revision=$2,active_revision_id=$3,draft_dirty=false,etag=$4,updated_at=now() WHERE id=$1", current.ID, revision, revisionID, etag); err != nil {
 			return access.Reply{}, err
 		}
-		generation, err := runtime.Publish(ctx, tx, p.ID)
+		generation, err := runtime.Publish(ctx, tx, p.UserID())
 		if err != nil {
 			return access.Reply{}, err
 		}
@@ -478,7 +492,7 @@ func (s *Server) disableProvider(r *http.Request) (access.Reply, error) {
 		if _, err := tx.Exec(ctx, "UPDATE olp_go.providers SET state='disabled',etag=$2,updated_at=now() WHERE id=$1", current.ID, etag); err != nil {
 			return access.Reply{}, err
 		}
-		generation, err := runtime.Publish(ctx, tx, p.ID)
+		generation, err := runtime.Publish(ctx, tx, p.UserID())
 		if err != nil {
 			return access.Reply{}, err
 		}
@@ -517,7 +531,7 @@ func scanRevision(row pgx.Row) (*revisionRow, error) {
 	if err := json.Unmarshal(slots, &v.Slots); err != nil {
 		return nil, err
 	}
-	v.Configuration.normalize()
+	v.Configuration.Normalize()
 	v.ActivatedAt = v.ActivatedAt.UTC()
 	return &v, nil
 }
@@ -561,7 +575,8 @@ func (v *revisionRow) detail() map[string]any {
 }
 
 func (s *Server) revisions(r *http.Request) (access.Reply, error) {
-	if _, err := s.Access.Principal(r, s.Access.Pool, "read"); err != nil {
+	p, err := s.Access.Principal(r, s.Access.Pool, "read")
+	if err != nil {
 		return access.Reply{}, err
 	}
 	id, err := access.IDParam(r, "provider_id")
@@ -572,7 +587,7 @@ func (s *Server) revisions(r *http.Request) (access.Reply, error) {
 	if err != nil {
 		return access.Reply{}, err
 	}
-	if _, err = load(r.Context(), s.Access.Pool, id, false); err != nil {
+	if _, err = checkProvider(r.Context(), s.Access.Pool, p, id, false); err != nil {
 		return access.Reply{}, err
 	}
 	rows, err := s.Access.Pool.Query(r.Context(), "SELECT "+revisionColumns+" FROM olp_go.provider_revisions WHERE provider_id=$1 AND id<$2 ORDER BY id DESC LIMIT $3", id, page.Before, page.Limit+1)
@@ -595,11 +610,15 @@ func (s *Server) revisions(r *http.Request) (access.Reply, error) {
 }
 
 func (s *Server) revision(r *http.Request) (access.Reply, error) {
-	if _, err := s.Access.Principal(r, s.Access.Pool, "read"); err != nil {
+	p, err := s.Access.Principal(r, s.Access.Pool, "read")
+	if err != nil {
 		return access.Reply{}, err
 	}
 	id, err := access.IDParam(r, "provider_id")
 	if err != nil {
+		return access.Reply{}, err
+	}
+	if _, err = checkProvider(r.Context(), s.Access.Pool, p, id, false); err != nil {
 		return access.Reply{}, err
 	}
 	v, err := loadRevision(r.Context(), s.Access.Pool, id, r.PathValue("revision_id"))
@@ -610,7 +629,8 @@ func (s *Server) revision(r *http.Request) (access.Reply, error) {
 }
 
 func (s *Server) revisionModels(r *http.Request) (access.Reply, error) {
-	if _, err := s.Access.Principal(r, s.Access.Pool, "read"); err != nil {
+	p, err := s.Access.Principal(r, s.Access.Pool, "read")
+	if err != nil {
 		return access.Reply{}, err
 	}
 	id, err := access.IDParam(r, "provider_id")
@@ -619,6 +639,9 @@ func (s *Server) revisionModels(r *http.Request) (access.Reply, error) {
 	}
 	page, err := access.Page(r)
 	if err != nil {
+		return access.Reply{}, err
+	}
+	if _, err = checkProvider(r.Context(), s.Access.Pool, p, id, false); err != nil {
 		return access.Reply{}, err
 	}
 	v, err := loadRevision(r.Context(), s.Access.Pool, id, r.PathValue("revision_id"))
@@ -648,11 +671,15 @@ func capabilityKey(model string, c runtime.RevisionCapability) string {
 }
 
 func (s *Server) revisionDiff(r *http.Request) (access.Reply, error) {
-	if _, err := s.Access.Principal(r, s.Access.Pool, "read"); err != nil {
+	p, err := s.Access.Principal(r, s.Access.Pool, "read")
+	if err != nil {
 		return access.Reply{}, err
 	}
 	id, err := access.IDParam(r, "provider_id")
 	if err != nil {
+		return access.Reply{}, err
+	}
+	if _, err = checkProvider(r.Context(), s.Access.Pool, p, id, false); err != nil {
 		return access.Reply{}, err
 	}
 	from, err := loadRevision(r.Context(), s.Access.Pool, id, r.URL.Query().Get("from"))

@@ -35,6 +35,7 @@ const (
 	JobErrorPrecondition
 	JobErrorUpstreamIdentityConflict
 	JobErrorInvalid
+	JobErrorBusy
 )
 
 // JobError is a durable media-job failure.
@@ -168,16 +169,18 @@ type JobUpdate struct {
 
 // Filters narrow management and client job listings.
 type Filters struct {
-	APIKeyID      *string
-	ProviderID    *string
-	RouteSlug     *string
-	RouteSlugs    []string
-	Operation     *string
-	Surface       *string
-	State         *State
-	Lifecycle     *Lifecycle
-	CreatedAfter  *time.Time
-	CreatedBefore *time.Time
+	APIKeyID        *string
+	ProviderID      *string
+	RouteSlug       *string
+	RouteSlugs      []string
+	Operation       *string
+	Surface         *string
+	State           *State
+	Lifecycle       *Lifecycle
+	CreatedAfter    *time.Time
+	CreatedBefore   *time.Time
+	AllProjects     bool
+	AllowedProjects []string
 }
 
 // Order controls client-visible job ordering.
@@ -273,6 +276,9 @@ func Jobs(ctx context.Context, q Querier, filters Filters, cursor *Cursor, limit
 	push := func(clause string, value any) {
 		args = append(args, value)
 		query += fmt.Sprintf(clause, len(args))
+	}
+	if !filters.AllProjects {
+		push(" AND j.api_key_id IN (SELECT id FROM olp_go.api_keys WHERE project_id = ANY($%d::uuid[]))", filters.AllowedProjects)
 	}
 	if filters.APIKeyID != nil {
 		push(" AND j.api_key_id = $%d", *filters.APIKeyID)
@@ -1023,6 +1029,32 @@ func FinishReconciliation(ctx context.Context, q Querier, id, claimID string, ne
 		return missingOrChanged(ctx, q, id)
 	}
 	return nil
+}
+
+func ClaimJob(ctx context.Context, q Querier, id string, now time.Time) (JobRecord, bool, error) {
+	claimID := uuid.Must(uuid.NewV7())
+	tag, err := q.Exec(ctx, `UPDATE olp_go.media_jobs SET
+			reconciliation_claim_id = $2,
+			reconciliation_claimed_until = $3 + interval '2 minutes',
+			last_reconciliation_at = $3,
+			next_reconciliation_at = $3 + interval '2 minutes',
+			reconciliation_attempts = reconciliation_attempts + 1,
+			etag = $4
+		WHERE id = $1
+		  AND lifecycle_state <> 'deleted'
+		  AND (reconciliation_claimed_until IS NULL OR reconciliation_claimed_until <= $3)`,
+		id, claimID, now, uuid.Must(uuid.NewV7()))
+	if err != nil {
+		return JobRecord{}, false, dbError(err)
+	}
+	if tag.RowsAffected() == 0 {
+		return JobRecord{}, false, nil
+	}
+	record, err := Job(ctx, q, id)
+	if err != nil {
+		return JobRecord{}, false, err
+	}
+	return record, true, nil
 }
 
 // ReconciliationSummary reports the backlog behind readiness reporting.

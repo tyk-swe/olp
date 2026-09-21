@@ -82,6 +82,18 @@
     if (!saved) select.value = user.role;
   }
 
+  async function changeScope(user: User, select: HTMLSelectElement) {
+    const access_scope = select.value as 'global' | 'assigned';
+    if (access_scope === user.access_scope) return;
+    const saved = await run(`scope-${user.id}`, async () => {
+      const updated = await updateUser(user, { access_scope });
+      updateCachedUser(updated);
+      await refreshUserViews();
+      notice = `${updated.display_name} now has ${updated.access_scope === 'assigned' ? 'project-scoped' : 'installation-wide'} access. Existing sessions were revoked.`;
+    });
+    if (!saved) select.value = user.access_scope;
+  }
+
   async function changeActive(user: User) {
     const active = !user.active;
     if (
@@ -135,9 +147,8 @@
     <table class="data-table">
       <thead
         ><tr
-          ><th>Member</th><th>Status</th><th>Fixed role</th><th>Joined</th><th
-            ><span class="sr-only">Actions</span></th
-          ></tr
+          ><th>Member</th><th>Status</th><th>Fixed role</th><th>Access scope</th
+          ><th>Joined</th><th><span class="sr-only">Actions</span></th></tr
         ></thead
       >
       <tbody>
@@ -170,6 +181,24 @@
                   {#each FIXED_ROLES as role (role)}<option value={role}
                       >{role}</option
                     >{/each}
+                </select>
+              </label>
+            </td>
+            <td>
+              <label>
+                <span class="sr-only">Access scope for {user.display_name}</span
+                >
+                <select
+                  class="role-select"
+                  value={user.access_scope}
+                  onchange={(event) => changeScope(user, event.currentTarget)}
+                  disabled={!canManage ||
+                    !user.active ||
+                    user.id === viewer?.id ||
+                    busy === `scope-${user.id}`}
+                >
+                  <option value="global">Installation-wide</option>
+                  <option value="assigned">Assigned projects</option>
                 </select>
               </label>
             </td>

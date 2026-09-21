@@ -26,6 +26,7 @@ import (
 	"github.com/tyk-swe/olp/internal/protocols"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
 	"github.com/tyk-swe/olp/internal/providers"
+	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/internal/telemetry"
 )
@@ -66,6 +67,10 @@ type Server struct {
 	// Media wires the bounded media substrate into the public surface. A nil
 	// Media leaves the media routes unregistered.
 	Media *MediaDeps
+
+	Resources *resources.Store
+
+	Resolver *resources.Resolver
 
 	log       *slog.Logger
 	cfg       Config
@@ -120,12 +125,15 @@ func (s *Server) OpenCircuits() int64 { return s.health.openCircuits() }
 func (s *Server) Register(mux *http.ServeMux) {
 	s.registerNative(mux)
 	s.registerMedia(mux)
+	s.registerState(mux)
 	mux.HandleFunc("POST /v1/chat/completions", s.inference(openai.FamilyChat))
 	mux.HandleFunc("POST /v1/responses", s.inference(openai.FamilyResponses))
 	mux.HandleFunc("GET /v1/models", s.models)
 	mux.HandleFunc("GET /v1/models/{model}", s.model)
 	mux.HandleFunc("OPTIONS /v1/", s.preflight)
+	mux.HandleFunc("OPTIONS /bedrock/", s.preflight)
 	mux.HandleFunc("/v1/", s.unknown)
+	mux.HandleFunc("/bedrock/", s.unknown)
 }
 
 var requestIDPattern = regexp.MustCompile(`^[A-Za-z0-9._-]{1,128}$`)
@@ -183,7 +191,7 @@ func (s *Server) preflight(w http.ResponseWriter, r *http.Request) {
 	s.cors(w, r)
 	h := w.Header()
 	h.Set("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
-	h.Set("Access-Control-Allow-Headers", "Authorization, X-Api-Key, X-Goog-Api-Key, X-Goog-Api-Client, Anthropic-Version, Anthropic-Beta, Anthropic-Dangerous-Direct-Browser-Access, Content-Type, X-Request-Id, X-OLP-Routing, OpenAI-Organization, OpenAI-Project, OpenAI-Beta, X-Stainless-Lang, X-Stainless-Package-Version, X-Stainless-OS, X-Stainless-Arch, X-Stainless-Runtime, X-Stainless-Runtime-Version, X-Stainless-Retry-Count, X-Stainless-Timeout, X-Stainless-Helper-Method")
+	h.Set("Access-Control-Allow-Headers", "Authorization, X-Api-Key, X-Goog-Api-Key, X-Goog-Api-Client, Anthropic-Version, Anthropic-Beta, Anthropic-Dangerous-Direct-Browser-Access, Content-Type, X-Request-Id, X-OLP-Routing, OpenAI-Organization, OpenAI-Project, OpenAI-Beta, X-OLP-API-Key, X-OLP-Route, X-OLP-Attribution, X-Stainless-Lang, X-Stainless-Package-Version, X-Stainless-OS, X-Stainless-Arch, X-Stainless-Runtime, X-Stainless-Runtime-Version, X-Stainless-Retry-Count, X-Stainless-Timeout, X-Stainless-Helper-Method")
 	h.Set("Access-Control-Max-Age", "600")
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -424,6 +432,13 @@ func (s *Server) inference(family openai.Family) http.HandlerFunc {
 			return
 		}
 		x.keyID, x.affinity = authority.ID, []byte(authority.ID)
+		x.budgetGroupID = authority.BudgetGroupID
+		x.authority = authority
+		if x.attribution, e = s.parseAttribution(r, authority); e != nil {
+			x.failure, status = e, e.Status
+			writeError(w, e)
+			return
+		}
 		body, e := s.readBody(r)
 		if e != nil {
 			x.failure, status = e, e.Status
@@ -447,12 +462,24 @@ func (s *Server) inference(family openai.Family) http.HandlerFunc {
 			return
 		}
 		x.parsed = parsed
+		if family == openai.FamilyResponses {
+			if e := s.responsesStateGate(r.Context(), x, authority, parsed); e != nil {
+				x.failure, status = e, e.Status
+				writeError(w, e)
+				return
+			}
+		}
 		if x.preferences, e = routingPreferences(r); e != nil {
 			x.failure, status = e, e.Status
 			writeError(w, e)
 			return
 		}
-		if e := s.prepare(x, func(slug string) bool { return authority.Allows("inference", slug, s.now()) }); e != nil {
+		if e := s.prepare(r.Context(), x, func(slug string) bool { return authority.Allows("inference", slug, s.now()) }); e != nil {
+			x.failure, status = e, e.Status
+			writeError(w, e)
+			return
+		}
+		if e := s.enforceContentPolicy(x); e != nil {
 			x.failure, status = e, e.Status
 			writeError(w, e)
 			return
@@ -502,6 +529,24 @@ func (s *Server) inference(family openai.Family) http.HandlerFunc {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
+		if family == openai.FamilyResponses && authority.Policy.AllowProviderState {
+			mapped, me := s.mapStoredResponse(r.Context(), x, authority, out.completion.Body)
+			if me != nil {
+				out.err = me
+				status = me.Status
+				writeError(w, me)
+				return
+			}
+			out.completion.Body = mapped
+		}
+		enforced, pe := s.enforceContentOutput(x, out.completion.Body)
+		if pe != nil {
+			out.err = pe
+			status = pe.Status
+			writeError(w, pe)
+			return
+		}
+		out.completion.Body = enforced
 		status = http.StatusOK
 		w.WriteHeader(http.StatusOK)
 		out.committed = true
@@ -522,7 +567,7 @@ func (s *Server) inference(family openai.Family) http.HandlerFunc {
 
 // prepare resolves the route, checks the caller's route permission, and
 // ranks the eligible attempts against the pinned snapshot.
-func (s *Server) prepare(x *execution, permitted func(slug string) bool) *Error {
+func (s *Server) prepare(ctx context.Context, x *execution, permitted func(slug string) bool) *Error {
 	x.mode = "unary"
 	if x.parsed.Stream {
 		x.mode = "streaming"
@@ -538,11 +583,23 @@ func (s *Server) prepare(x *execution, permitted func(slug string) bool) *Error 
 	}
 	var semantic error
 	plan, err := runtime.PlanRequest(snapshot, route.Slug, x.family.Operation(), x.family.Surface(), x.mode, x.affinity, runtime.SelectionOptions{
-		KeyID: x.keyID, Preferences: x.preferences, Parameters: protocols.ParameterNames(x.parsed), Inputs: s.routingInputs(), Now: s.now(), CheckSlots: true, CredentialRevoked: s.Runtime.Revoked,
+		KeyID: x.keyID, Preferences: x.preferences, Parameters: protocols.ParameterNames(x.parsed), Inputs: s.routingInputs(), TokenDemand: requestDemand(x.parsed), Now: s.now(), CheckSlots: true, CredentialRevoked: s.Runtime.Revoked,
 		Accept: func(p runtime.Provider, t runtime.Target) error {
 			cfg := p.Connector()
 			if !connectors.Supports(p.Kind, p.VendorID, x.family.Operation(), x.family.Surface(), x.mode) {
 				return errors.New("connector capability unavailable")
+			}
+			if x.providerState && !stateQualified(&p, t.ProviderModel, x.family.Operation(), x.mode) {
+				semantic = errors.New("provider-state capability unavailable")
+				return semantic
+			}
+			if protocols.StructuredOutputRequested(x.parsed) {
+				var metadata runtime.ModelMetadata
+				_ = json.Unmarshal(p.Models[t.ProviderModel], &metadata)
+				if metadata.SupportedParameters == nil || !slices.Contains(*metadata.SupportedParameters, "response_format") {
+					semantic = errors.New("model does not declare structured-output support")
+					return semantic
+				}
 			}
 			_, _, e := protocols.Encode(x.parsed, p.Kind, p.VendorID, cfg.Model(t.ProviderModel), p.ParameterDefaults)
 			if e != nil {
@@ -567,16 +624,17 @@ func (s *Server) prepare(x *execution, permitted func(slug string) bool) *Error 
 		}
 		return selectionError(&runtime.SelectionError{Code: runtime.NoEligibleTargets}, route.Slug)
 	}
-	return nil
+	return s.pinAttempts(ctx, x)
 }
 
 // modelObject renders a route as an OpenAI model object.
-func modelObject(route *runtime.Route) map[string]any {
+func modelObject(snapshot *runtime.Snapshot, route *runtime.Route) map[string]any {
 	return map[string]any{
-		"id":       route.Slug,
-		"object":   "model",
-		"created":  route.PublishedAt.Unix(),
-		"owned_by": "openllmproxy",
+		"id":           route.Slug,
+		"object":       "model",
+		"created":      route.PublishedAt.Unix(),
+		"owned_by":     "openllmproxy",
+		"capabilities": runtime.EffectiveCapabilities(snapshot, *route),
 	}
 }
 
@@ -592,7 +650,7 @@ func (s *Server) models(w http.ResponseWriter, r *http.Request) {
 	for _, slug := range slices.Sorted(mapsKeys(req.release.Snapshot.Routes)) {
 		if authority.Allows("models_read", slug, now) {
 			route := req.release.Snapshot.Routes[slug]
-			data = append(data, modelObject(&route))
+			data = append(data, modelObject(req.release.Snapshot, &route))
 		}
 	}
 	writeJSON(w, map[string]any{"object": "list", "data": data})
@@ -611,7 +669,7 @@ func (s *Server) model(w http.ResponseWriter, r *http.Request) {
 		writeError(w, modelNotFound(slug))
 		return
 	}
-	writeJSON(w, modelObject(&route))
+	writeJSON(w, modelObject(req.release.Snapshot, &route))
 }
 
 func mapsKeys[V any](m map[string]V) func(func(string) bool) {

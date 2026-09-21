@@ -25,16 +25,21 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/configuration"
+	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/gateway"
 	"github.com/tyk-swe/olp/internal/management"
+	"github.com/tyk-swe/olp/internal/media"
 	"github.com/tyk-swe/olp/internal/observability"
 	"github.com/tyk-swe/olp/internal/providers"
+	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/routes"
 	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/internal/secrets"
 	"github.com/tyk-swe/olp/internal/testutil"
+	"github.com/tyk-swe/olp/internal/usage"
 )
 
 func accessDatabase(t *testing.T) (*pgxpool.Pool, string) {
@@ -86,11 +91,17 @@ type accessHarness struct {
 	AuthHex   string
 	Runtime   *runtime.Manager
 	Gateway   *gateway.Server
+	Media     *media.Service
 }
 
 func newAccessHarness(t *testing.T) *accessHarness {
 	t.Helper()
 	pool, dbURL := accessDatabase(t)
+	return newAccessHarnessOn(t, pool, dbURL)
+}
+
+func newAccessHarnessOn(t *testing.T, pool *pgxpool.Pool, dbURL string) *accessHarness {
+	t.Helper()
 	if err := database.Migrate(t.Context(), pool); err != nil {
 		t.Fatal(err)
 	}
@@ -117,6 +128,26 @@ func newAccessHarness(t *testing.T) *accessHarness {
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	rt := runtime.NewManager(pool, installation, secrets.NewAuthKey(auth, installation), ring, log)
 	gw := gateway.New(rt, &policy, gateway.Config{MaxInFlight: 16, MaxBodyBytes: 1 << 20, MaxResponseBytes: 1 << 20, MaxEventBytes: 1 << 16}, log)
+	spool, err := media.NewSpool(t.TempDir(), media.MinCapacityBytes, log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { spool.Close() })
+	mediaJobs := &media.Service{
+		Pool: pool, Keys: ring, Installation: installation,
+		Transport: &media.Transport{
+			Client: policy.Client(30 * time.Second), Auth: connectors.NewAuth(&policy), Egress: &policy,
+			Spool: spool, MaxResponseBytes: 1 << 20,
+		},
+		Revoked: rt.Revoked,
+		Log:     log,
+	}
+	gw.Media = &gateway.MediaDeps{
+		Jobs:      mediaJobs,
+		Admission: media.NewAdmissionState(media.MinCapacityBytes),
+	}
+	gw.Resources = resources.New(pool)
+	gw.Resolver = resources.NewResolver(pool, installation, ring)
 	catalogue := providers.New(server, &policy)
 	mux := http.NewServeMux()
 	management.Register(mux)
@@ -124,12 +155,22 @@ func newAccessHarness(t *testing.T) *accessHarness {
 	catalogue.Register(mux)
 	(&management.Overview{Access: server}).Register(mux)
 	(&observability.Management{Access: server, Cache: observability.NewCache(), Pool: pool}).Register(mux)
+	(&resources.Management{Access: server, Pool: pool}).Register(mux)
 	routes.New(server).Register(mux)
+	(&configuration.Server{
+		Access: server, Egress: &policy, VendorKind: providers.VendorKind,
+		StoreCredential: func(ctx context.Context, tx pgx.Tx, providerID, secret string) (string, error) {
+			id, _, err := catalogue.StoreCredential(ctx, tx, providerID, secret)
+			return id, err
+		},
+	}).Register(mux)
+	(&media.Management{Access: server, Pool: pool, Jobs: mediaJobs, Log: log}).Register(mux)
 	(&gateway.Playground{Access: server, Gateway: gw}).Register(mux)
+	(&usage.Server{Access: server, VendorKind: providers.VendorKind}).Register(mux)
 	gw.Register(mux)
 	httpServer := httptest.NewServer(mux)
 	t.Cleanup(httpServer.Close)
-	return &accessHarness{t, pool, dbURL, server, httpServer, bootstrap, ringJSON, authHex, rt, gw}
+	return &accessHarness{t, pool, dbURL, server, httpServer, bootstrap, ringJSON, authHex, rt, gw, mediaJobs}
 }
 
 // do performs one management request as the browser and returns the response

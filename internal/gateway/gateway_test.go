@@ -418,7 +418,7 @@ func TestCredentialFailureCoolsVersionAndFailsOver(t *testing.T) {
 
 func TestUpstreamClientErrorIsTerminal(t *testing.T) {
 	h := newHarness(t, Config{})
-	h.mock.set("a", status(http.StatusBadRequest, `{"error":{"message":"context too long","type":"invalid_request_error","code":"context_length_exceeded"}}`))
+	h.mock.set("a", status(http.StatusBadRequest, `{"error":{"message":"context too long","type":"invalid_request_error","code":"invalid_value"}}`))
 	resp, body := h.chat(fullKey, nil)
 	if resp.StatusCode != http.StatusBadRequest || errorCode(t, body) != "upstream_rejected" {
 		t.Fatalf("status %d body %v", resp.StatusCode, body)
@@ -593,6 +593,73 @@ func TestModelsFilteredByKey(t *testing.T) {
 	}
 	if code, _ := list(fullKey, "/v1/not-enabled"); code != 404 {
 		t.Fatalf("unknown endpoint %d", code)
+	}
+	if code, body := list(fullKey, "/anthropic/v1/models"); code != 200 {
+		t.Fatalf("%d %v", code, body)
+	} else {
+		item := body["data"].([]any)[0].(map[string]any)
+		if item["id"] != routeSlug || item["capabilities"] == nil {
+			t.Fatalf("anthropic model %v", item)
+		}
+	}
+	if code, body := list(otherKey, "/anthropic/v1/models"); code != 200 || len(body["data"].([]any)) != 0 {
+		t.Fatalf("restricted key sees %v", body)
+	}
+	if code, body := list(fullKey, "/gemini/v1/models"); code != 200 {
+		t.Fatalf("%d %v", code, body)
+	} else {
+		item := body["models"].([]any)[0].(map[string]any)
+		if item["name"] != "models/"+routeSlug || item["capabilities"] == nil {
+			t.Fatalf("gemini model %v", item)
+		}
+	}
+	if code, body := list(otherKey, "/gemini/v1/models"); code != 200 || len(body["models"].([]any)) != 0 {
+		t.Fatalf("restricted key sees %v", body)
+	}
+}
+
+func TestModelListExposesEffectiveCapabilities(t *testing.T) {
+	h := newHarness(t, Config{})
+	snap := h.rt.release.Snapshot
+	for id, p := range snap.Providers {
+		metadata, err := json.Marshal(runtime.ModelMetadata{
+			InputModalities:     []string{"text"},
+			OutputModalities:    []string{"text"},
+			ContextLength:       ptrInt64(8000),
+			MaxOutputTokens:     ptrInt64(4000),
+			SupportedParameters: &[]string{"temperature"},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		p.Models = map[string]json.RawMessage{p.Capabilities[0].Model: metadata}
+		snap.Providers[id] = p
+	}
+	resp := h.do(t.Context(), http.MethodGet, "/v1/models/"+routeSlug, fullKey, nil, nil)
+	defer resp.Body.Close()
+	var body map[string]any
+	json.NewDecoder(resp.Body).Decode(&body)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("%d %v", resp.StatusCode, body)
+	}
+	capabilities, ok := body["capabilities"].(map[string]any)
+	if !ok {
+		t.Fatalf("model %v", body)
+	}
+	if got := capabilities["context_length"]; got != float64(8000) {
+		t.Fatalf("context_length %v", got)
+	}
+	if got := capabilities["max_output_tokens"]; got != float64(4000) {
+		t.Fatalf("max_output_tokens %v", got)
+	}
+	if operations, _ := capabilities["operations"].([]any); len(operations) != 1 || operations[0] != "generation" {
+		t.Fatalf("operations %v", capabilities["operations"])
+	}
+	if support, _ := capabilities["operation_support"].(map[string]any); support["generation"] != "guaranteed" {
+		t.Fatalf("operation_support %v", capabilities["operation_support"])
+	}
+	if unknown, _ := capabilities["unknown"].([]any); len(unknown) != 0 {
+		t.Fatalf("unknown %v", unknown)
 	}
 }
 

@@ -15,7 +15,7 @@ func (row *slotRow) allowsModel(model storedModel) bool {
 
 func (row *slotRow) credentialFingerprint(cfg *Configuration) string {
 	credential := ""
-	if cfg.credentialRequired() {
+	if cfg.CredentialRequired() {
 		credential = deref(row.CredentialID)
 	}
 	return cfg.transportFingerprint() + ":" + credential
@@ -86,7 +86,7 @@ func (s *Server) validateModelAccess(ctx context.Context, cfg *Configuration, cr
 			return &probeError{Code: "no_capabilities", Detail: "Declare capabilities for the slot's enabled models before validating."}
 		}
 		for _, capability := range model.Capabilities {
-			if err := s.certifyTuple(ctx, cfg, credential, model.UpstreamModel, capabilityInput{capability.Operation, capability.Surface, capability.Mode}, probeBodyLimit); err != nil {
+			if err := s.certifyTuple(ctx, cfg, credential, model.UpstreamModel, CapabilityInput{capability.Operation, capability.Surface, capability.Mode}, probeBodyLimit); err != nil {
 				return err
 			}
 			checked++

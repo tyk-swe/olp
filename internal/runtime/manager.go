@@ -191,14 +191,14 @@ func (m *Manager) refreshAuthority(ctx context.Context) error {
 		return nil
 	}
 	state := authorityState{loaded: true, readAt: start, id: id, sequence: sequence, keys: map[string]keyRecord{}, revoked: map[string]struct{}{}}
-	rows, err := tx.Query(ctx, "SELECT id::text,lookup_id,created_by::text,digest,policy,expires_at,revoked_at FROM olp_go.api_keys")
+	rows, err := tx.Query(ctx, "SELECT k.id::text,k.lookup_id,k.created_by::text,k.project_id::text,k.digest,k.policy,k.expires_at,k.revoked_at,k.budget_group_id::text,g.daily_cost_limit::text,g.monthly_cost_limit::text FROM olp_go.api_keys k LEFT JOIN olp_go.budget_groups g ON g.id=k.budget_group_id")
 	if err != nil {
 		return fmt.Errorf("authority: %w", err)
 	}
 	for rows.Next() {
 		var policy []byte
 		record := keyRecord{}
-		if err = rows.Scan(&record.authority.ID, &record.authority.LookupID, &record.authority.Issuer, &record.digest, &policy, &record.authority.ExpiresAt, &record.authority.RevokedAt); err != nil {
+		if err = rows.Scan(&record.authority.ID, &record.authority.LookupID, &record.authority.Issuer, &record.authority.ProjectID, &record.digest, &policy, &record.authority.ExpiresAt, &record.authority.RevokedAt, &record.authority.BudgetGroupID, &record.authority.BudgetGroupDailyCostLimit, &record.authority.BudgetGroupMonthlyCostLimit); err != nil {
 			rows.Close()
 			return fmt.Errorf("authority: %w", err)
 		}
@@ -388,7 +388,8 @@ func (m *Manager) HasHardLimits() bool {
 	for _, record := range m.authority.keys {
 		p := record.authority.Policy
 		if p.RequestsPerMinute != nil || p.TokensPerMinute != nil || p.MaxConcurrency != nil ||
-			p.DailyCostLimit != nil || p.MonthlyCostLimit != nil {
+			p.DailyCostLimit != nil || p.MonthlyCostLimit != nil ||
+			record.authority.BudgetGroupDailyCostLimit != nil || record.authority.BudgetGroupMonthlyCostLimit != nil {
 			return true
 		}
 	}

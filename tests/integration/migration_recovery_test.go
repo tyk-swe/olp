@@ -3,10 +3,49 @@
 package integration_test
 
 import (
+	"crypto/sha256"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/tyk-swe/olp/internal/database"
 )
+
+func applyMigrationPrefix(t *testing.T, pool *pgxpool.Pool, before string) {
+	t.Helper()
+	ctx := t.Context()
+	if _, err := pool.Exec(ctx, `CREATE SCHEMA IF NOT EXISTS olp_go;
+        REVOKE ALL ON SCHEMA olp_go FROM PUBLIC;
+        CREATE TABLE IF NOT EXISTS olp_go.migrations (
+            version text PRIMARY KEY, checksum bytea NOT NULL, applied_at timestamptz NOT NULL DEFAULT now()
+        )`); err != nil {
+		t.Fatal(err)
+	}
+	dir := filepath.Join("..", "..", "internal", "database", "migrations")
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		name := entry.Name()
+		if entry.IsDir() || !strings.HasSuffix(name, ".sql") || name >= before {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(dir, name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err = pool.Exec(ctx, string(data)); err != nil {
+			t.Fatalf("apply %s: %v", name, err)
+		}
+		checksum := sha256.Sum256(data)
+		if _, err = pool.Exec(ctx, "INSERT INTO olp_go.migrations(version,checksum) VALUES($1,$2)", name, checksum[:]); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
 
 func TestMigrationDDLFailureRollsBackAndRecovers(t *testing.T) {
 	pool, _ := accessDatabase(t)
@@ -52,12 +91,10 @@ func TestPopulatedInstallationAppliesForwardMigration(t *testing.T) {
 	input := map[string]any{"name": "survives forward migration"}
 	headers := map[string]string{"Idempotency-Key": "forward-migration"}
 	issued := h.want(owner, "POST", "/api/v3/api-keys", input, headers, 201)
-	// Reconstruct the immediately preceding sequential Go release. Removing
-	// only migrations 0002/0003 while retaining later history would model a
-	// corrupt installation, not a supported forward upgrade.
-	if _, err = h.Pool.Exec(t.Context(), `ALTER TABLE olp_go.users DROP COLUMN role_management, DROP COLUMN oidc_authorized;
-	    ALTER TABLE olp_go.sessions DROP COLUMN browser_hint;
-	    DELETE FROM olp_go.migrations WHERE version='0010_authentication_ownership.sql'`); err != nil {
+	if _, err = h.Pool.Exec(t.Context(), `ALTER TABLE olp_go.route_drafts DROP COLUMN content_policy;
+	    ALTER TABLE olp_go.route_revisions DROP COLUMN content_policy;
+	    ALTER TABLE olp_go.requests DROP COLUMN policy_decisions;
+	    DELETE FROM olp_go.migrations WHERE version='0021_content_policies.sql'`); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = database.Installation(t.Context(), h.Pool); err == nil {

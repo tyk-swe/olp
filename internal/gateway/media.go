@@ -155,6 +155,12 @@ func (s *Server) mediaBegin(w http.ResponseWriter, r *http.Request) (*execution,
 		return x, access.Authority{}, true
 	}
 	x.keyID, x.affinity = authority.ID, []byte(authority.ID)
+	x.budgetGroupID = authority.BudgetGroupID
+	if x.attribution, e = s.parseAttribution(r, authority); e != nil {
+		s.release(r.Context())
+		s.mediaFail(x, w, e)
+		return x, access.Authority{}, true
+	}
 	return x, authority, false
 }
 
@@ -177,6 +183,10 @@ func (s *Server) serveMedia(ctx context.Context, w http.ResponseWriter, x *execu
 	}
 	defer s.cleanupUploads(request)
 	if e := s.prepareMedia(x, authority); e != nil {
+		s.mediaFail(x, w, e)
+		return
+	}
+	if e := s.enforceMediaInput(x, request); e != nil {
 		s.mediaFail(x, w, e)
 		return
 	}
@@ -247,7 +257,7 @@ func (s *Server) prepareMedia(x *execution, authority access.Authority) *Error {
 			if request.Op == media.OpVideoCreate && !videoLifecycleProvider(&p, t.ProviderModel) {
 				return errors.New("video lifecycle capabilities unavailable")
 			}
-			if _, e := media.Encode(request, p.Connector().Model(t.ProviderModel)); e != nil {
+			if _, e := media.Encode(request, p.Kind, p.Connector().Model(t.ProviderModel)); e != nil {
 				semantic = errors.New(e.Message)
 				return semantic
 			}
@@ -467,7 +477,7 @@ func (s *Server) mediaAttempt(ctx context.Context, w http.ResponseWriter, x *exe
 		return fact, nil, f
 	}
 	cfg := provider.Connector()
-	call, mErr := media.Encode(x.media, cfg.Model(a.UpstreamModel))
+	call, mErr := media.Encode(x.media, cfg.Kind, cfg.Model(a.UpstreamModel))
 	if mErr != nil {
 		return fail(classProtocol, nil)
 	}

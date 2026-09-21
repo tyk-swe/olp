@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"maps"
+	"regexp"
 	"strings"
 
 	"github.com/tyk-swe/olp/internal/protocols/openai"
@@ -140,10 +141,19 @@ func WireFamily(kind, vendor string, source openai.Family) openai.Family {
 		if count {
 			return openai.FamilyGeminiCount
 		}
+		if source.Operation() == "embeddings" {
+			if kind == "vertex_ai" {
+				return openai.FamilyVertexEmbeddings
+			}
+			return openai.FamilyGeminiEmbeddings
+		}
 		return openai.FamilyGemini
 	case "bedrock":
 		if count {
 			return "bedrock_count"
+		}
+		if source.Operation() == "embeddings" {
+			return openai.FamilyBedrockEmbeddings
 		}
 		return "bedrock"
 	}
@@ -152,6 +162,9 @@ func WireFamily(kind, vendor string, source openai.Family) openai.Family {
 	}
 	if source.Operation() == "embeddings" {
 		return openai.FamilyEmbeddings
+	}
+	if source == openai.FamilyRerank {
+		return openai.FamilyRerank
 	}
 	if source.Operation() == "moderation" {
 		return openai.FamilyModeration
@@ -215,6 +228,10 @@ func Encode(r *openai.Request, kind, vendor, model string, defaults Object) ([]b
 			nested["model"] = raw("models/" + strings.TrimPrefix(model, "models/"))
 			f["generateContentRequest"] = raw(nested)
 		}
+		if r.Family == openai.FamilyRerank {
+			encoded, err := encodeRerank(vendor, f, model)
+			return encoded, wire, err
+		}
 		if vendor == "voyage" {
 			normalizeVoyage(f)
 		}
@@ -226,6 +243,9 @@ func Encode(r *openai.Request, kind, vendor, model string, defaults Object) ([]b
 		}
 		encoded, err := json.Marshal(f)
 		return encoded, wire, err
+	}
+	if r.Family == openai.FamilyEmbeddings {
+		return encodeNativeEmbeddings(wire, f, model)
 	}
 	c, err := decodeCanonical(r.Family, f)
 	if err != nil {
@@ -276,7 +296,7 @@ func Encode(r *openai.Request, kind, vendor, model string, defaults Object) ([]b
 }
 func validateProfile(vendor string, family openai.Family, f Object) error {
 	op := family.Operation()
-	if vendor == "voyage" && op != "embeddings" || vendor == "cohere" && op != "generation" && op != "embeddings" || ChatOnly(vendor) && vendor != "cohere" && op != "generation" {
+	if vendor == "voyage" && op != "embeddings" && op != "rerank" || vendor == "cohere" && op != "generation" && op != "embeddings" && op != "rerank" || ChatOnly(vendor) && vendor != "cohere" && op != "generation" {
 		return requestError("operation", "Operation is outside the configured vendor contract")
 	}
 	if vendor == "cohere" {
@@ -286,7 +306,7 @@ func validateProfile(vendor string, family openai.Family, f Object) error {
 			}
 		}
 	}
-	if vendor == "voyage" {
+	if vendor == "voyage" && op == "embeddings" {
 		if _, ok := textInput(f["input"]); !ok {
 			return requestError("input", "Voyage embeddings require text input")
 		}
@@ -335,6 +355,50 @@ func ParameterNames(r *openai.Request) []string {
 
 func unsupported(path string) error {
 	return requestError(path, fmt.Sprintf("The selected protocol cannot represent %s", path))
+}
+
+var schemaName = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
+
+func jsonSchemaFormat(v json.RawMessage) (Object, error) {
+	format, e := object(v)
+	if e != nil {
+		return nil, unsupported("response_format")
+	}
+	switch str(format["type"]) {
+	case "text":
+		return nil, nil
+	case "json_schema":
+		spec, e := object(format["json_schema"])
+		if e != nil {
+			return nil, unsupported("response_format")
+		}
+		if !schemaName.MatchString(str(spec["name"])) {
+			return nil, unsupported("response_format name")
+		}
+		if d := spec["description"]; present(d) {
+			var s string
+			if json.Unmarshal(d, &s) != nil {
+				return nil, unsupported("response_format description")
+			}
+		}
+		if s := spec["strict"]; present(s) && string(s) != "true" {
+			return nil, unsupported("response_format strict")
+		}
+		if _, e := object(spec["schema"]); e != nil {
+			return nil, unsupported("response_format schema")
+		}
+		return spec, nil
+	default:
+		return nil, unsupported("response_format")
+	}
+}
+
+func StructuredOutputRequested(r *openai.Request) bool {
+	if r == nil {
+		return false
+	}
+	format, err := object(r.Field("response_format"))
+	return err == nil && str(format["type"]) == "json_schema"
 }
 
 func mergeDefaults(fields, defaults Object) {

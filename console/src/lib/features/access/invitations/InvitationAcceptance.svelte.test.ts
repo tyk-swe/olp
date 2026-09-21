@@ -27,10 +27,12 @@ it('blocks unsupported SSO-only onboarding before submission and recovers when p
   vi.mocked(authenticationCapabilities)
     .mockResolvedValueOnce({
       local_login_enabled: false,
+      notifications_active: false,
       oidc_login_enabled: true
     })
     .mockResolvedValueOnce({
       local_login_enabled: true,
+      notifications_active: false,
       oidc_login_enabled: true
     });
   host = document.createElement('div');

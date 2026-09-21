@@ -21,7 +21,7 @@ type Config struct {
 }
 
 func SecretRequired(mode string) bool {
-	return mode != "none" && mode != "adc" && mode != "default_chain"
+	return mode != "none" && mode != "adc" && mode != "default_chain" && mode != "azure_default"
 }
 func DefaultEndpoint(kind, region, project string) string {
 	switch kind {
@@ -46,6 +46,9 @@ func DefaultEndpoint(kind, region, project string) string {
 	}
 	return ""
 }
+
+const coherePresetEndpoint = "https://api.cohere.ai/compatibility/v1"
+const cohereRerankEndpoint = "https://api.cohere.ai/v2/rerank"
 
 var identifier = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$`)
 var cloudIdentifier = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,127}$`)
@@ -152,6 +155,19 @@ func (c Config) URL(wire openai.Family, model string, stream bool) (string, erro
 		path = "/model/" + url.PathEscape(model) + "/" + operation
 	case "bedrock_count":
 		path = "/model/" + url.PathEscape(model) + "/count-tokens"
+	case openai.FamilyGeminiEmbeddings:
+		path = "/models/" + url.PathEscape(model) + ":embedContent"
+	case openai.FamilyGeminiEmbeddingsBatch:
+		path = "/models/" + url.PathEscape(model) + ":batchEmbedContents"
+	case openai.FamilyVertexEmbeddings:
+		path = "/models/" + url.PathEscape(model) + ":predict"
+	case openai.FamilyBedrockEmbeddings:
+		path = "/model/" + url.PathEscape(model) + "/invoke"
+	case openai.FamilyRerank:
+		if c.VendorID == "cohere" && base == coherePresetEndpoint {
+			return cohereRerankEndpoint, nil
+		}
+		path = "/rerank"
 	}
 	if c.Kind == "azure_openai" {
 		if model != c.Deployment {

@@ -89,6 +89,9 @@ func TestMaintainedNonMediaRequestMatrix(t *testing.T) {
 	for _, kind := range []string{"openai", "openai_compatible", "azure_openai", "anthropic", "gemini", "vertex_ai", "bedrock"} {
 		for _, operation := range []string{"embeddings", "moderation"} {
 			want := kind == "openai" || kind == "openai_compatible" || kind == "azure_openai"
+			if operation == "embeddings" {
+				want = want || kind == "gemini" || kind == "vertex_ai" || kind == "bedrock"
+			}
 			if connectors.Supports(kind, kind, operation, "openai", "unary") != want {
 				t.Fatal(kind, operation)
 			}
@@ -101,7 +104,11 @@ func TestMaintainedNonMediaRequestMatrix(t *testing.T) {
 		for _, operation := range []string{"image_generation", "image_edit", "speech", "transcription"} {
 			want := kind == "openai" || kind == "openai_compatible" || kind == "azure_openai"
 			for _, mode := range []string{"unary", "streaming"} {
-				if connectors.Supports(kind, kind, operation, "openai", mode) != want {
+				modeWant := want
+				if operation == "image_generation" && mode == "unary" {
+					modeWant = modeWant || kind == "vertex_ai" || kind == "bedrock"
+				}
+				if connectors.Supports(kind, kind, operation, "openai", mode) != modeWant {
 					t.Fatal(kind, operation, mode)
 				}
 			}

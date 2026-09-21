@@ -272,6 +272,7 @@ describe('provider editor API mappings', () => {
       )
     ).toEqual({
       name: 'production-azure',
+      project_id: null,
       credential: 'write-only-secret',
       model: 'deployment-probe',
       display_name: 'production-azure',

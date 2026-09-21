@@ -127,10 +127,10 @@
             ><tr
               ><th scope="col">Bucket</th><th scope="col">Requests</th><th
                 scope="col">Input tokens</th
-              ><th scope="col">Cached input</th><th scope="col"
-                >Output tokens</th
-              ><th scope="col">Estimated cost</th><th scope="col">Status</th
-              ></tr
+              ><th scope="col">Cached input</th><th scope="col">Cache write</th
+              ><th scope="col">Output tokens</th><th scope="col"
+                >Estimated cost</th
+              ><th scope="col">Status</th></tr
             ></thead
           >
           <tbody>
@@ -140,9 +140,9 @@
                   >{point.request_count}</td
                 ><td>{point.input_tokens}</td><td
                   >{point.cached_input_tokens ?? '—'}</td
-                ><td>{point.output_tokens}</td><td
-                  >{formatCost(point.estimated_cost, point.currency)}</td
-                ><td
+                ><td>{point.cache_write_input_tokens ?? '—'}</td><td
+                  >{point.output_tokens}</td
+                ><td>{formatCost(point.estimated_cost, point.currency)}</td><td
                   >{point.incomplete_count > 0
                     ? `${point.incomplete_count} incomplete`
                     : point.unpriced_count > 0

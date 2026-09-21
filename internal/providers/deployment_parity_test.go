@@ -39,8 +39,8 @@ func TestDeploymentCertificationKeepsBodyAndPathOnTheSameSingleMapping(t *testin
 	policy := &egress.Policy{AllowedNetworks: []netip.Prefix{netip.MustParsePrefix("127.0.0.0/8")}, PlainHTTPHosts: []string{"127.0.0.1"}}
 	deployment, version := "fallback", "2024-10-21"
 	cfg := Configuration{Kind: KindAzure, AuthMode: AuthAPIKey, Endpoint: &upstream.URL, Deployment: &deployment, APIVersion: &version, Options: Options{Models: map[string]json.RawMessage{"logical-a": json.RawMessage(`{"deployment":"wire-b"}`), "wire-b": json.RawMessage(`{"deployment":"wire-c"}`)}}}
-	cfg.normalize()
-	err := New(nil, policy).certifyTuple(t.Context(), &cfg, []byte("fixture-secret"), "logical-a", capabilityInput{Operation: "generation", Surface: "openai", Mode: ModeUnary}, 4096)
+	cfg.Normalize()
+	err := New(nil, policy).certifyTuple(t.Context(), &cfg, []byte("fixture-secret"), "logical-a", CapabilityInput{Operation: "generation", Surface: "openai", Mode: ModeUnary}, 4096)
 	if err != nil {
 		t.Fatal(err)
 	}

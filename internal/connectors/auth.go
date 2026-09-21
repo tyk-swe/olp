@@ -11,12 +11,17 @@ import (
 	"log/slog"
 	"net/http"
 	"net/netip"
+	"net/url"
+	"os"
 	"strings"
 	"sync"
 	"time"
 
 	cloudauth "cloud.google.com/go/auth"
 	googlecredentials "cloud.google.com/go/auth/credentials"
+	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
+	"github.com/Azure/azure-sdk-for-go/sdk/azcore/policy"
+	"github.com/Azure/azure-sdk-for-go/sdk/azidentity"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/aws/signer/v4"
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
@@ -35,9 +40,13 @@ type Auth struct {
 	mu           sync.Mutex
 	tokens       map[[32]byte]*cloudauth.Token
 	aws          map[[32]byte]aws.CredentialsProvider
+	azure        map[[32]byte]azcore.TokenCredential
+	azureTokens  map[[32]byte]azcore.AccessToken
 	client       *http.Client
 	googleClient *http.Client
+	azureClient  *http.Client
 	adc          chan credentialResult
+	azureFactory func(mode string, secret []byte) (azcore.TokenCredential, error)
 }
 
 func NewAuth(policy *egress.Policy) *Auth {
@@ -58,7 +67,73 @@ func NewAuth(policy *egress.Policy) *Auth {
 	googleClient := public.Client(authTimeout)
 	googleClient.Timeout = authTimeout
 	googleClient.Transport = boundedAuthTransport{base: googleClient.Transport, policy: public}
-	return &Auth{tokens: map[[32]byte]*cloudauth.Token{}, aws: map[[32]byte]aws.CredentialsProvider{}, client: client, googleClient: googleClient}
+
+	azurePolicy := *policy
+	azurePolicy.AllowedNetworks = append([]netip.Prefix{}, policy.AllowedNetworks...)
+	azurePolicy.PlainHTTPHosts = append([]string{}, policy.PlainHTTPHosts...)
+	imds := netip.MustParseAddr("169.254.169.254")
+	azurePolicy.AllowedNetworks = append(azurePolicy.AllowedNetworks, netip.PrefixFrom(imds, imds.BitLen()))
+	azurePolicy.PlainHTTPHosts = append(azurePolicy.PlainHTTPHosts, "169.254.169.254")
+	for _, name := range []string{"IDENTITY_ENDPOINT", "MSI_ENDPOINT", "IMDS_ENDPOINT"} {
+		raw := os.Getenv(name)
+		if raw == "" {
+			continue
+		}
+		endpoint, err := url.Parse(raw)
+		if err != nil || endpoint.Hostname() == "" {
+			continue
+		}
+		host := strings.ToLower(endpoint.Hostname())
+		if endpoint.Scheme == "http" {
+			azurePolicy.PlainHTTPHosts = append(azurePolicy.PlainHTTPHosts, host)
+		}
+		if address, err := netip.ParseAddr(strings.Trim(host, "[]")); err == nil {
+			azurePolicy.AllowedNetworks = append(azurePolicy.AllowedNetworks, netip.PrefixFrom(address.Unmap(), address.Unmap().BitLen()))
+		}
+	}
+	azureClient := azurePolicy.Client(authTimeout)
+	azureClient.Timeout = authTimeout
+	azureClient.Transport = azureIdentityTransport{base: boundedAuthTransport{base: azureClient.Transport, policy: &azurePolicy}}
+	return &Auth{tokens: map[[32]byte]*cloudauth.Token{}, aws: map[[32]byte]aws.CredentialsProvider{},
+		azure: map[[32]byte]azcore.TokenCredential{}, azureTokens: map[[32]byte]azcore.AccessToken{},
+		client: client, googleClient: googleClient, azureClient: azureClient}
+}
+
+var azureAuthorityHosts = map[string]bool{
+	"login.microsoftonline.com":              true,
+	"login.microsoftonline.us":               true,
+	"login.chinacloudapi.cn":                 true,
+	"login.microsoftonline.eaglex.ic.gov":    true,
+	"login.microsoftonline.microsoft.scloud": true,
+	"login.microsoft.com":                    true,
+}
+
+type azureIdentityTransport struct {
+	base http.RoundTripper
+}
+
+func (t azureIdentityTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	host := strings.ToLower(strings.TrimSuffix(r.URL.Hostname(), "."))
+	if !azureIdentityHost(host) {
+		return nil, ErrAuthentication
+	}
+	return t.base.RoundTrip(r)
+}
+
+func azureIdentityHost(host string) bool {
+	if azureAuthorityHosts[host] || host == "169.254.169.254" {
+		return true
+	}
+	for _, name := range []string{"IDENTITY_ENDPOINT", "MSI_ENDPOINT", "IMDS_ENDPOINT", "AZURE_AUTHORITY_HOST"} {
+		raw := os.Getenv(name)
+		if raw == "" {
+			continue
+		}
+		if endpoint, err := url.Parse(raw); err == nil && strings.EqualFold(endpoint.Hostname(), host) {
+			return true
+		}
+	}
+	return false
 }
 
 type boundedAuthTransport struct {
@@ -141,6 +216,13 @@ func (a *Auth) Apply(ctx context.Context, req *http.Request, c Config, secret, b
 		}
 		req.Header.Set("Authorization", "Bearer "+token.Value)
 		sensitive = append(sensitive, token.Value)
+	case "azure_default", "azure_client_secret":
+		token, e := a.azureToken(ctx, c, secret)
+		if e != nil {
+			return nil, ErrAuthentication
+		}
+		req.Header.Set("Authorization", "Bearer "+token.Token)
+		sensitive = append(sensitive, token.Token)
 	case "static", "default_chain":
 		creds, e := a.awsCredentials(ctx, c, secret)
 		if e != nil {
@@ -215,6 +297,82 @@ func (a *Auth) googleToken(ctx context.Context, c Config, secret []byte) (*cloud
 	a.mu.Unlock()
 	return token, nil
 }
+
+const azureScope = "https://cognitiveservices.azure.com/.default"
+
+func (a *Auth) azureToken(ctx context.Context, c Config, secret []byte) (azcore.AccessToken, error) {
+	key := cacheKey(c, secret)
+	a.mu.Lock()
+	cached := a.azureTokens[key]
+	a.mu.Unlock()
+	if cached.Token != "" && cached.ExpiresOn.After(time.Now().Add(30*time.Second)) {
+		return cached, nil
+	}
+	credential, e := a.azureCredential(c, secret, key)
+	if e != nil {
+		return azcore.AccessToken{}, ErrAuthentication
+	}
+	ctx, cancel := context.WithTimeout(ctx, authTimeout)
+	defer cancel()
+	token, err := credential.GetToken(ctx, policy.TokenRequestOptions{Scopes: []string{azureScope}})
+	if err != nil {
+		return azcore.AccessToken{}, ErrAuthentication
+	}
+	a.mu.Lock()
+	if len(a.azureTokens) >= 256 {
+		clear(a.azureTokens)
+	}
+	a.azureTokens[key] = token
+	a.mu.Unlock()
+	return token, nil
+}
+
+func (a *Auth) azureCredential(c Config, secret []byte, key [32]byte) (azcore.TokenCredential, error) {
+	a.mu.Lock()
+	credential := a.azure[key]
+	a.mu.Unlock()
+	if credential != nil {
+		return credential, nil
+	}
+	credential, err := a.newAzureCredential(c.AuthMode, secret)
+	if err != nil {
+		return nil, err
+	}
+	a.mu.Lock()
+	if len(a.azure) >= 256 {
+		clear(a.azure)
+	}
+	a.azure[key] = credential
+	a.mu.Unlock()
+	return credential, nil
+}
+
+func (a *Auth) newAzureCredential(mode string, secret []byte) (azcore.TokenCredential, error) {
+	if a.azureFactory != nil {
+		return a.azureFactory(mode, secret)
+	}
+	options := azcore.ClientOptions{Transport: a.azureClient}
+	switch mode {
+	case "azure_default":
+		return azidentity.NewDefaultAzureCredential(&azidentity.DefaultAzureCredentialOptions{ClientOptions: options})
+	case "azure_client_secret":
+		var v struct {
+			TenantID     string `json:"tenant_id"`
+			ClientID     string `json:"client_id"`
+			ClientSecret string `json:"client_secret"`
+		}
+		d := json.NewDecoder(bytes.NewReader(secret))
+		d.DisallowUnknownFields()
+		if len(secret) > 16384 || d.Decode(&v) != nil || d.Decode(new(any)) != io.EOF ||
+			!secretComponent(v.TenantID, 1, 128) || !secretComponent(v.ClientID, 1, 128) ||
+			!secretComponent(v.ClientSecret, 1, 1024) {
+			return nil, ErrAuthentication
+		}
+		return azidentity.NewClientSecretCredential(v.TenantID, v.ClientID, v.ClientSecret, &azidentity.ClientSecretCredentialOptions{ClientOptions: options})
+	}
+	return nil, ErrAuthentication
+}
+
 func (a *Auth) awsCredentials(ctx context.Context, c Config, secret []byte) (aws.Credentials, error) {
 	if c.AuthMode == "static" {
 		var v struct {

@@ -12,6 +12,7 @@ export type RequestAttempt = components['schemas']['AttemptResponse'];
 export const operationKinds = [
   'generation',
   'embeddings',
+  'rerank',
   'token_count',
   'image_generation',
   'image_edit',
@@ -25,7 +26,10 @@ export const operationKinds = [
   'video_delete',
   'moderation',
   'model_list',
-  'model_get'
+  'model_get',
+  'batch',
+  'realtime',
+  'bedrock_invoke'
 ] as const;
 
 export type RequestFilters = {

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/egress"
 )
 
 // Server exposes the read side of accounting — usage reports, request history,
@@ -21,6 +22,8 @@ type Server struct {
 	// Pricing takes it as a function so accounting never depends on the
 	// provider package.
 	VendorKind func(vendor string) (string, bool)
+
+	Egress *egress.Policy
 }
 
 // Register mounts the accounting routes. The patterns are more specific than
@@ -36,6 +39,15 @@ func (s *Server) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v3/pricing/revisions", h(s.listPricingRevisions))
 	// A revision may carry thousands of rates, well past the default body cap.
 	mux.HandleFunc("POST /api/v3/pricing/revisions", s.Access.HandleWith(1<<20, s.createPricingRevision))
+	mux.HandleFunc("GET /api/v3/pricing/sources", h(s.listPricingSources))
+	mux.HandleFunc("POST /api/v3/pricing/sources", h(s.createPricingSource))
+	mux.HandleFunc("GET /api/v3/pricing/sources/{pricing_source_id}", h(s.getPricingSource))
+	mux.HandleFunc("PATCH /api/v3/pricing/sources/{pricing_source_id}", h(s.updatePricingSource))
+	mux.HandleFunc("POST /api/v3/pricing/sources/{pricing_source_id}/refresh", h(s.refreshPricingSource))
+	mux.HandleFunc("GET /api/v3/pricing/sources/{pricing_source_id}/snapshots", h(s.listPricingSourceSnapshots))
+
+	mux.HandleFunc("POST /api/v3/pricing/source-snapshots/{pricing_source_snapshot_id}/publish",
+		s.Access.HandleWith(1<<20, s.publishPricingSourceSnapshot))
 	mux.HandleFunc("GET /api/v3/request-metadata/gateway-epochs", h(s.listGatewayEpochs))
 	mux.HandleFunc("POST /api/v3/request-metadata/gateway-epochs/{process_epoch}/acknowledge",
 		h(s.acknowledgeGatewayEpoch))
@@ -49,19 +61,20 @@ type list struct {
 
 // read authorises a console read. Operations reads are the lowest management
 // permission: every active role may see what the installation spent.
-func (s *Server) read(r *http.Request) error {
-	_, err := s.Access.Principal(r, s.Access.Pool, "read")
-	return err
+func (s *Server) read(r *http.Request) (access.Principal, error) {
+	return s.Access.Principal(r, s.Access.Pool, "usage")
 }
 
 func (s *Server) usageSummary(r *http.Request) (access.Reply, error) {
-	if err := s.read(r); err != nil {
+	p, err := s.read(r)
+	if err != nil {
 		return access.Reply{}, err
 	}
 	filters, err := usageFilters(r)
 	if err != nil {
 		return access.Reply{}, err
 	}
+	filters.AllProjects, filters.AllowedProjects = p.AllProjects, p.ProjectIDs()
 	summary, err := ReadSummary(r.Context(), s.Access.Pool, filters, time.Now())
 	if err != nil {
 		return access.Reply{}, err
@@ -70,13 +83,15 @@ func (s *Server) usageSummary(r *http.Request) (access.Reply, error) {
 }
 
 func (s *Server) usageCompleteness(r *http.Request) (access.Reply, error) {
-	if err := s.read(r); err != nil {
+	p, err := s.read(r)
+	if err != nil {
 		return access.Reply{}, err
 	}
 	filters, err := usageFilters(r)
 	if err != nil {
 		return access.Reply{}, err
 	}
+	filters.AllProjects, filters.AllowedProjects = p.AllProjects, p.ProjectIDs()
 	report, err := ReadCompleteness(r.Context(), s.Access.Pool, filters, time.Now())
 	if err != nil {
 		return access.Reply{}, err
@@ -85,13 +100,15 @@ func (s *Server) usageCompleteness(r *http.Request) (access.Reply, error) {
 }
 
 func (s *Server) usageBreakdown(r *http.Request) (access.Reply, error) {
-	if err := s.read(r); err != nil {
+	p, err := s.read(r)
+	if err != nil {
 		return access.Reply{}, err
 	}
 	filters, err := usageFilters(r)
 	if err != nil {
 		return access.Reply{}, err
 	}
+	filters.AllProjects, filters.AllowedProjects = p.AllProjects, p.ProjectIDs()
 	limit, err := limitParam(r.URL.Query())
 	if err != nil {
 		return access.Reply{}, err
@@ -105,13 +122,15 @@ func (s *Server) usageBreakdown(r *http.Request) (access.Reply, error) {
 }
 
 func (s *Server) usageTimeSeries(r *http.Request) (access.Reply, error) {
-	if err := s.read(r); err != nil {
+	p, err := s.read(r)
+	if err != nil {
 		return access.Reply{}, err
 	}
 	filters, err := usageFilters(r)
 	if err != nil {
 		return access.Reply{}, err
 	}
+	filters.AllProjects, filters.AllowedProjects = p.AllProjects, p.ProjectIDs()
 	granularity := GranularityHour
 	if raw := strings.TrimSpace(r.URL.Query().Get("granularity")); raw != "" {
 		granularity = raw
@@ -124,17 +143,19 @@ func (s *Server) usageTimeSeries(r *http.Request) (access.Reply, error) {
 }
 
 func (s *Server) listRequests(r *http.Request) (access.Reply, error) {
-	if err := s.read(r); err != nil {
+	p, err := s.read(r)
+	if err != nil {
 		return access.Reply{}, err
 	}
 	query := r.URL.Query()
 	filters := RequestFilters{
-		Route:      textParam(query, "route"),
-		Model:      textParam(query, "model"),
-		Operation:  textParam(query, "operation"),
-		ErrorClass: textParam(query, "error_class"),
+		Route:           textParam(query, "route"),
+		Model:           textParam(query, "model"),
+		Operation:       textParam(query, "operation"),
+		ErrorClass:      textParam(query, "error_class"),
+		AllProjects:     p.AllProjects,
+		AllowedProjects: p.ProjectIDs(),
 	}
-	var err error
 	if filters.ProviderID, err = uuidParam(query, "provider_id"); err != nil {
 		return access.Reply{}, err
 	}
@@ -169,7 +190,8 @@ func (s *Server) listRequests(r *http.Request) (access.Reply, error) {
 }
 
 func (s *Server) getRequest(r *http.Request) (access.Reply, error) {
-	if err := s.read(r); err != nil {
+	p, err := s.read(r)
+	if err != nil {
 		return access.Reply{}, err
 	}
 	id, err := access.IDParam(r, "request_id")
@@ -180,12 +202,23 @@ func (s *Server) getRequest(r *http.Request) (access.Reply, error) {
 	if err != nil {
 		return access.Reply{}, err
 	}
+	var keyProject *string
+	if err = s.Access.Pool.QueryRow(r.Context(), "SELECT project_id::text FROM olp_go.api_keys WHERE id=$1", detail.APIKeyID).Scan(&keyProject); err != nil {
+		return access.Reply{}, err
+	}
+	if !p.CanProject(keyProject, false) {
+		return access.Reply{}, access.Fail(404, "not_found", "The request does not exist.")
+	}
 	return access.OK(detail), nil
 }
 
 func (s *Server) listPricingRevisions(r *http.Request) (access.Reply, error) {
-	if err := s.read(r); err != nil {
+	p, err := s.read(r)
+	if err != nil {
 		return access.Reply{}, err
+	}
+	if !p.AllProjects {
+		return access.Reply{}, access.Forbidden()
 	}
 	query := r.URL.Query()
 	limit, err := limitParam(query)
@@ -240,7 +273,7 @@ func (s *Server) createPricingRevision(r *http.Request) (access.Reply, error) {
 	if replayed != nil {
 		return access.Commit(r, tx, *replayed)
 	}
-	revision, err := CreateRevision(r.Context(), tx, principal.ID, *input.EffectiveAt,
+	revision, err := CreateRevision(r.Context(), tx, principal.UserID(), *input.EffectiveAt,
 		input.Prices, s.VendorKind)
 	if err != nil {
 		return access.Reply{}, err
@@ -257,8 +290,12 @@ func (s *Server) createPricingRevision(r *http.Request) (access.Reply, error) {
 }
 
 func (s *Server) listGatewayEpochs(r *http.Request) (access.Reply, error) {
-	if err := s.read(r); err != nil {
+	p, err := s.read(r)
+	if err != nil {
 		return access.Reply{}, err
+	}
+	if !p.AllProjects {
+		return access.Reply{}, access.Forbidden()
 	}
 	query := r.URL.Query()
 	limit, err := limitParam(query)
@@ -291,7 +328,7 @@ func (s *Server) acknowledgeGatewayEpoch(r *http.Request) (access.Reply, error) 
 	if err != nil {
 		return access.Reply{}, err
 	}
-	acknowledgement, err := AcknowledgeGatewayEpoch(r.Context(), tx, epoch, principal.ID)
+	acknowledgement, err := AcknowledgeGatewayEpoch(r.Context(), tx, epoch, principal.UserID())
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -322,11 +359,13 @@ func usageFilters(r *http.Request) (Filters, error) {
 		return Filters{}, err
 	}
 	filters := Filters{
-		Start:     start,
-		End:       end,
-		Route:     textParam(query, "route"),
-		Model:     textParam(query, "model"),
-		Operation: textParam(query, "operation"),
+		Start:            start,
+		End:              end,
+		Route:            textParam(query, "route"),
+		Model:            textParam(query, "model"),
+		Operation:        textParam(query, "operation"),
+		AttributionKey:   textParam(query, "attribution_key"),
+		AttributionValue: textParam(query, "attribution_value"),
 	}
 	if filters.ProviderID, err = uuidParam(query, "provider_id"); err != nil {
 		return Filters{}, err

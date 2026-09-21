@@ -56,6 +56,20 @@
     "allows_failover": false
   },
   {
+    "name": "typed context rejection before commit",
+    "phase": "first_byte",
+    "class": "context_window",
+    "response_committed": false,
+    "allows_failover": true
+  },
+  {
+    "name": "context rejection after commit is terminal",
+    "phase": "body",
+    "class": "context_window",
+    "response_committed": true,
+    "allows_failover": false
+  },
+  {
     "name": "connect class after commit is terminal",
     "phase": "body",
     "class": "connect",

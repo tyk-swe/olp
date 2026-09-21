@@ -51,6 +51,18 @@ func policyScope(r *http.Request) (string, string, string, error) {
 	}
 	return scope, id, permission, nil
 }
+func policyProject(ctx context.Context, q access.Queryer, scope, id string) (*string, error) {
+	if scope == "installation" {
+		return nil, nil
+	}
+	table := "route_drafts"
+	if scope == "api-key" {
+		table = "api_keys"
+	}
+	var project *string
+	err := q.QueryRow(ctx, "SELECT project_id::text FROM olp_go."+table+" WHERE id=$1", id).Scan(&project)
+	return project, err
+}
 func loadPolicy(ctx context.Context, q access.Queryer, scope, id string, lock bool) (*runtime.Policy, string, error) {
 	etag := policyETag
 	if scope != "installation" {
@@ -87,12 +99,20 @@ func loadPolicy(ctx context.Context, q access.Queryer, scope, id string, lock bo
 	return &p, etag, err
 }
 func (s *Server) policy(r *http.Request) (access.Reply, error) {
-	if _, err := s.Access.Principal(r, s.Access.Pool, "read"); err != nil {
+	p, err := s.Access.Principal(r, s.Access.Pool, "read")
+	if err != nil {
 		return access.Reply{}, err
 	}
 	scope, id, _, err := policyScope(r)
 	if err != nil {
 		return access.Reply{}, err
+	}
+	project, err := policyProject(r.Context(), s.Access.Pool, scope, id)
+	if err != nil {
+		return access.Reply{}, err
+	}
+	if !p.CanProject(project, false) {
+		return access.Reply{}, pgx.ErrNoRows
 	}
 	policy, etag, err := loadPolicy(r.Context(), s.Access.Pool, scope, id, false)
 	if err != nil {
@@ -129,6 +149,13 @@ func (s *Server) putPolicy(r *http.Request) (access.Reply, error) {
 	if replayed != nil {
 		return access.Commit(r, tx, *replayed)
 	}
+	project, err := policyProject(r.Context(), tx, scope, id)
+	if err != nil {
+		return access.Reply{}, err
+	}
+	if err := access.ProjectAccess(principal, project, true); err != nil {
+		return access.Reply{}, err
+	}
 	_, etag, err := loadPolicy(r.Context(), tx, scope, id, true)
 	if err != nil {
 		return access.Reply{}, err
@@ -138,7 +165,7 @@ func (s *Server) putPolicy(r *http.Request) (access.Reply, error) {
 	}
 	etag = access.NewID()
 	data, _ := json.Marshal(policy)
-	if _, err = tx.Exec(r.Context(), `INSERT INTO olp_go.routing_policies(scope,scope_id,policy,etag,updated_by) VALUES($1,$2,$3,$4,$5) ON CONFLICT(scope,scope_id) DO UPDATE SET policy=excluded.policy,etag=excluded.etag,updated_by=excluded.updated_by,updated_at=now()`, scope, id, data, etag, principal.ID); err != nil {
+	if _, err = tx.Exec(r.Context(), `INSERT INTO olp_go.routing_policies(scope,scope_id,policy,etag,updated_by) VALUES($1,$2,$3,$4,$5) ON CONFLICT(scope,scope_id) DO UPDATE SET policy=excluded.policy,etag=excluded.etag,updated_by=excluded.updated_by,updated_at=now()`, scope, id, data, etag, principal.UserID()); err != nil {
 		return access.Reply{}, err
 	}
 	switch scope {
@@ -151,7 +178,7 @@ func (s *Server) putPolicy(r *http.Request) (access.Reply, error) {
 		return access.Reply{}, err
 	}
 	if scope != "route-draft" {
-		if _, err = runtime.Publish(r.Context(), tx, principal.ID); err != nil {
+		if _, err = runtime.Publish(r.Context(), tx, principal.UserID()); err != nil {
 			return access.Reply{}, err
 		}
 	}

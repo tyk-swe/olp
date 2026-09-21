@@ -20,7 +20,7 @@ func modelJSON(m storedModel) map[string]any {
 	return map[string]any{"id": m.ID, "upstream_model": m.UpstreamModel, "display_name": m.DisplayName, "enabled": m.Enabled, "capabilities": capabilities, "discovered_at": m.DiscoveredAt}
 }
 
-func validModelName(field, value string) error {
+func ValidModelName(field, value string) error {
 	if len(value) == 0 || len(value) > 200 {
 		return access.Invalid(field, "Use 1–200 characters.")
 	}
@@ -47,7 +47,7 @@ func (s *Server) prepare(r *http.Request, id string) (*record, []byte, error) {
 	if err = access.Match(r, current.ETag); err != nil {
 		return nil, nil, err
 	}
-	if err = current.Configuration.validate(s.Egress); err != nil {
+	if err = current.Configuration.Validate(s.Egress); err != nil {
 		return nil, nil, err
 	}
 	credential, _, err := s.credentialFor(r.Context(), tx, current)
@@ -73,7 +73,8 @@ func (s *Server) prepare(r *http.Request, id string) (*record, []byte, error) {
 }
 
 func (s *Server) probe(r *http.Request) (access.Reply, error) {
-	if _, err := s.Access.Principal(r, s.Access.Pool, "configure"); err != nil {
+	p, err := s.Access.Principal(r, s.Access.Pool, "configure")
+	if err != nil {
 		return access.Reply{}, err
 	}
 	id, err := access.IDParam(r, "provider_id")
@@ -82,6 +83,9 @@ func (s *Server) probe(r *http.Request) (access.Reply, error) {
 	}
 	current, credential, err := s.prepare(r, id)
 	if err != nil {
+		return access.Reply{}, err
+	}
+	if err := access.ProjectAccess(p, current.ProjectID, true); err != nil {
 		return access.Reply{}, err
 	}
 	at := time.Now().UTC()
@@ -124,7 +128,8 @@ type discoverRequest struct {
 
 func (s *Server) discover(r *http.Request) (access.Reply, error) {
 	a := s.Access
-	if _, err := a.Principal(r, a.Pool, "configure"); err != nil {
+	p, err := a.Principal(r, a.Pool, "configure")
+	if err != nil {
 		return access.Reply{}, err
 	}
 	id, err := access.IDParam(r, "provider_id")
@@ -145,13 +150,13 @@ func (s *Server) discover(r *http.Request) (access.Reply, error) {
 	var models []declared
 	seen := map[string]bool{}
 	for _, m := range input.Models {
-		if err = validModelName("models.upstream_model", m.UpstreamModel); err != nil {
+		if err = ValidModelName("models.upstream_model", m.UpstreamModel); err != nil {
 			return access.Reply{}, err
 		}
 		if m.DisplayName == "" {
 			m.DisplayName = m.UpstreamModel
 		}
-		if err = validModelName("models.display_name", m.DisplayName); err != nil {
+		if err = ValidModelName("models.display_name", m.DisplayName); err != nil {
 			return access.Reply{}, err
 		}
 		if !seen[m.UpstreamModel] {
@@ -161,6 +166,9 @@ func (s *Server) discover(r *http.Request) (access.Reply, error) {
 	}
 	current, credential, err := s.prepare(r, id)
 	if err != nil {
+		return access.Reply{}, err
+	}
+	if err := access.ProjectAccess(p, current.ProjectID, true); err != nil {
 		return access.Reply{}, err
 	}
 	upstream := len(models) == 0
@@ -181,7 +189,7 @@ func (s *Server) discover(r *http.Request) (access.Reply, error) {
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := a.Principal(r, tx, "configure")
+	p, err = a.Principal(r, tx, "configure")
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -231,7 +239,8 @@ func (s *Server) discover(r *http.Request) (access.Reply, error) {
 }
 
 func (s *Server) models(r *http.Request) (access.Reply, error) {
-	if _, err := s.Access.Principal(r, s.Access.Pool, "read"); err != nil {
+	p, err := s.Access.Principal(r, s.Access.Pool, "read")
+	if err != nil {
 		return access.Reply{}, err
 	}
 	id, err := access.IDParam(r, "provider_id")
@@ -240,6 +249,9 @@ func (s *Server) models(r *http.Request) (access.Reply, error) {
 	}
 	page, err := access.Page(r)
 	if err != nil {
+		return access.Reply{}, err
+	}
+	if _, err = checkProvider(r.Context(), s.Access.Pool, p, id, false); err != nil {
 		return access.Reply{}, err
 	}
 	d, err := s.detail(r.Context(), s.Access.Pool, id)
@@ -274,7 +286,7 @@ func (s *Server) models(r *http.Request) (access.Reply, error) {
 
 type setModelRequest struct {
 	Enabled      bool               `json:"enabled"`
-	Capabilities *[]capabilityInput `json:"capabilities"`
+	Capabilities *[]CapabilityInput `json:"capabilities"`
 }
 
 func loadModel(ctx context.Context, q access.Queryer, providerID, modelID string, lock bool) (*storedModel, error) {
@@ -296,15 +308,15 @@ func loadModel(ctx context.Context, q access.Queryer, providerID, modelID string
 	return &m, nil
 }
 
-func validCapabilities(inputs []capabilityInput) ([]capabilityInput, error) {
+func ValidCapabilities(inputs []CapabilityInput) ([]CapabilityInput, error) {
 	if len(inputs) > 64 {
 		return nil, access.Invalid("capabilities", "Declare at most 64 capabilities per model.")
 	}
-	var out []capabilityInput
-	seen := map[capabilityInput]bool{}
+	var out []CapabilityInput
+	seen := map[CapabilityInput]bool{}
 	for _, c := range inputs {
 		supported := false
-		for _, option := range capabilityOptions {
+		for _, option := range CapabilityOptions {
 			supported = supported || option == c
 		}
 		if !supported {
@@ -345,6 +357,9 @@ func (s *Server) setModel(r *http.Request) (access.Reply, error) {
 	if err != nil {
 		return access.Reply{}, err
 	}
+	if err := access.ProjectAccess(p, current.ProjectID, true); err != nil {
+		return access.Reply{}, err
+	}
 	if err = access.Match(r, current.ETag); err != nil {
 		return access.Reply{}, err
 	}
@@ -354,13 +369,13 @@ func (s *Server) setModel(r *http.Request) (access.Reply, error) {
 	}
 	capabilities := m.Capabilities
 	if input.Capabilities != nil {
-		requested, err := validCapabilities(*input.Capabilities)
+		requested, err := ValidCapabilities(*input.Capabilities)
 		if err != nil {
 			return access.Reply{}, err
 		}
-		existing := map[capabilityInput]storedCapability{}
+		existing := map[CapabilityInput]storedCapability{}
 		for _, c := range m.Capabilities {
-			existing[capabilityInput{c.Operation, c.Surface, c.Mode}] = c
+			existing[CapabilityInput{c.Operation, c.Surface, c.Mode}] = c
 		}
 		capabilities = make([]storedCapability, 0, len(requested))
 		for _, c := range requested {
@@ -396,7 +411,8 @@ func (s *Server) certify(r *http.Request) (access.Reply, error) {
 	defer cancel()
 	r = r.WithContext(ctx)
 	a := s.Access
-	if _, err := a.Principal(r, a.Pool, "configure"); err != nil {
+	p, err := a.Principal(r, a.Pool, "configure")
+	if err != nil {
 		return access.Reply{}, err
 	}
 	id, err := access.IDParam(r, "provider_id")
@@ -409,6 +425,9 @@ func (s *Server) certify(r *http.Request) (access.Reply, error) {
 	}
 	current, credential, err := s.prepare(r, id)
 	if err != nil {
+		return access.Reply{}, err
+	}
+	if err := access.ProjectAccess(p, current.ProjectID, true); err != nil {
 		return access.Reply{}, err
 	}
 	m, err := loadModel(r.Context(), a.Pool, id, modelID, false)
@@ -433,7 +452,7 @@ func (s *Server) certify(r *http.Request) (access.Reply, error) {
 	certified := 0
 	for i := range m.Capabilities {
 		c := &m.Capabilities[i]
-		err := s.certifyTuple(r.Context(), &current.Configuration, credential, m.UpstreamModel, capabilityInput{c.Operation, c.Surface, c.Mode}, probeBodyLimit)
+		err := s.certifyTuple(r.Context(), &current.Configuration, credential, m.UpstreamModel, CapabilityInput{c.Operation, c.Surface, c.Mode}, probeBodyLimit)
 		item := map[string]any{"operation": c.Operation, "surface": c.Surface, "mode": c.Mode, "succeeded": err == nil, "detail": "Certified.", "error_code": nil}
 		if err == nil {
 			certified++
@@ -459,7 +478,7 @@ func (s *Server) certify(r *http.Request) (access.Reply, error) {
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := a.Principal(r, tx, "configure")
+	p, err = a.Principal(r, tx, "configure")
 	if err != nil {
 		return access.Reply{}, err
 	}

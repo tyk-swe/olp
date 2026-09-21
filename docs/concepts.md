@@ -177,6 +177,14 @@ of reaching storage, and certification probes store no prompt or response
 content either. Nothing in the request or response body is recoverable from
 an installation's own records after the request has finished.
 
+Route content policies ([content policy](gateway.md#content-policy)) inspect
+request text before dispatch and buffered unary response text after
+accounting, entirely in memory: a redacted variant exists only as the copy
+sent to the provider or client, and a blocked payload is never written
+down. The only durable trace is a bounded list of
+`{rule_id, phase, action, outcome}` decisions on the request record — no
+matched text, offsets, patterns, or replacement strings.
+
 ## Request lifecycle
 
 1. Authenticate the key, check scope, route permission, and expiry, and enforce

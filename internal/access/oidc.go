@@ -249,7 +249,7 @@ func (s *Server) putOIDCConfiguration(r *http.Request) (Reply, error) {
 	if err != nil {
 		return Reply{}, err
 	}
-	if _, err = tx.Exec(r.Context(), "INSERT INTO olp_go.oidc_configuration(singleton,id,document,etag,updated_by) VALUES(true,$1,$2,$3,$4) ON CONFLICT(singleton) DO UPDATE SET document=excluded.document,etag=excluded.etag,updated_by=excluded.updated_by", c.ID, data, c.ETag, p.ID); err != nil {
+	if _, err = tx.Exec(r.Context(), "INSERT INTO olp_go.oidc_configuration(singleton,id,document,etag,updated_by) VALUES(true,$1,$2,$3,$4) ON CONFLICT(singleton) DO UPDATE SET document=excluded.document,etag=excluded.etag,updated_by=excluded.updated_by", c.ID, data, c.ETag, p.UserID()); err != nil {
 		return Reply{}, err
 	}
 	if err = s.usableOwner(r, tx); err != nil {
@@ -329,7 +329,7 @@ func (s *Server) beginOIDC(r *http.Request, kind string) (Reply, error) {
 		flow.ReturnTo = "/"
 	}
 	if kind != "login" {
-		p, err := s.Principal(r, tx, "read")
+		p, err := s.sessionPrincipal(r, tx, "read")
 		if err != nil {
 			return Reply{}, err
 		}
@@ -531,7 +531,7 @@ func (s *Server) oidcCallback(r *http.Request) (reply Reply, callbackErr error) 
 	// reauthentication result. Ordinary login is never a recent-auth proof.
 	var p Principal
 	if flow.Kind != "login" {
-		p, err = s.Principal(r, tx, "read")
+		p, err = s.sessionPrincipal(r, tx, "read")
 		if err != nil {
 			return Reply{}, err
 		}
@@ -734,7 +734,7 @@ func usableOIDCIdentities(r *http.Request, q Queryer, p Principal, local bool) (
 }
 
 func (s *Server) oidcIdentities(r *http.Request) (Reply, error) {
-	p, err := s.Principal(r, s.Pool, "read")
+	p, err := s.sessionPrincipal(r, s.Pool, "read")
 	if err != nil {
 		return Reply{}, err
 	}
@@ -776,7 +776,7 @@ func (s *Server) unlinkOIDCIdentity(r *http.Request) (Reply, error) {
 		return Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := s.Principal(r, tx, "read")
+	p, err := s.sessionPrincipal(r, tx, "read")
 	if err != nil {
 		return Reply{}, err
 	}
@@ -842,7 +842,7 @@ func syncOIDCAuthority(r *http.Request, tx pgx.Tx, userID, mapped string) (chang
 	if err != nil {
 		return false, false, err
 	}
-	if management == "local" {
+	if management != "oidc" {
 		return false, true, nil
 	}
 	allowed = mapped != ""
@@ -859,7 +859,7 @@ func syncOIDCAuthority(r *http.Request, tx pgx.Tx, userID, mapped string) (chang
 		return false, false, err
 	}
 	if !allowed || mapped != "owner" {
-		if err = retireIssuedInvitations(r, tx, userID, ""); err != nil {
+		if err = retireIssuedInvitations(r, tx, userID, "", ""); err != nil {
 			return false, false, err
 		}
 	}

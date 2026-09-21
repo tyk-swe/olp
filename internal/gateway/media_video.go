@@ -47,6 +47,11 @@ func (s *Server) videoCreate(w http.ResponseWriter, r *http.Request) {
 		s.mediaFail(x, w, e)
 		return
 	}
+	if e := s.enforceMediaInput(x, request); e != nil {
+		form.Cleanup()
+		s.mediaFail(x, w, e)
+		return
+	}
 	form.Disarm()
 	// The reservation pins exactly one provider target; create runs on that
 	// target alone because a second provider would mint a second job.
@@ -286,7 +291,7 @@ func (s *Server) compensateCreate(ctx context.Context, reserved media.JobRecord,
 	if target == nil {
 		return false
 	}
-	call, failure := media.Encode(&media.Request{Op: media.OpVideoDelete, JobID: upstreamID, Route: reserved.RouteSlug}, target.Model)
+	call, failure := media.Encode(&media.Request{Op: media.OpVideoDelete, JobID: upstreamID, Route: reserved.RouteSlug}, target.Target.Config.Kind, target.Model)
 	if failure != nil {
 		return false
 	}
@@ -339,6 +344,7 @@ func (s *Server) jobTarget(ctx context.Context, record *media.JobRecord) (*media
 // admitVideoRequest applies key budgets once, before job reads or mutations.
 func (s *Server) admitVideoRequest(parent context.Context, x *execution, authority access.Authority) (context.Context, func(), *Error) {
 	ttl := maxStreamDuration + media.ReconciliationLeaseSlack
+	x.budgetGroupID = authority.BudgetGroupID
 	ctx, cancel := context.WithTimeout(parent, ttl)
 	var e *Error
 	x.lease, e = s.Admission.reserveKey(ctx, authority, 0, ttl)
@@ -546,7 +552,7 @@ func (s *Server) refreshListRecord(ctx context.Context, x *execution, record med
 	if record.UpstreamJobID == nil || !media.ValidUpstreamJobID(*record.UpstreamJobID) {
 		return record, nil, false, nil
 	}
-	call, failure := media.Encode(&media.Request{Op: media.OpVideoGet, JobID: *record.UpstreamJobID, Route: record.RouteSlug}, record.UpstreamModel)
+	call, failure := media.Encode(&media.Request{Op: media.OpVideoGet, JobID: *record.UpstreamJobID, Route: record.RouteSlug}, "openai", record.UpstreamModel)
 	if failure != nil {
 		return record, nil, false, nil
 	}
@@ -604,7 +610,7 @@ func (s *Server) videoGet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	x.route = &runtime.Route{Slug: record.RouteSlug}
-	call, failure := media.Encode(&media.Request{Op: media.OpVideoGet, JobID: *record.UpstreamJobID, Route: record.RouteSlug}, record.UpstreamModel)
+	call, failure := media.Encode(&media.Request{Op: media.OpVideoGet, JobID: *record.UpstreamJobID, Route: record.RouteSlug}, "openai", record.UpstreamModel)
 	if failure != nil {
 		s.mediaFail(x, w, mediaError(failure))
 		return
@@ -680,7 +686,7 @@ func (s *Server) videoContent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	x.route = &runtime.Route{Slug: record.RouteSlug}
-	call, failure := media.Encode(&media.Request{Op: media.OpVideoContent, JobID: *record.UpstreamJobID, Variant: variant, Route: record.RouteSlug}, record.UpstreamModel)
+	call, failure := media.Encode(&media.Request{Op: media.OpVideoContent, JobID: *record.UpstreamJobID, Variant: variant, Route: record.RouteSlug}, "openai", record.UpstreamModel)
 	if failure != nil {
 		s.mediaFail(x, w, mediaError(failure))
 		return
@@ -737,7 +743,7 @@ func (s *Server) videoDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	x.route = &runtime.Route{Slug: record.RouteSlug}
-	call, failure := media.Encode(&media.Request{Op: media.OpVideoDelete, JobID: *record.UpstreamJobID, Route: record.RouteSlug}, record.UpstreamModel)
+	call, failure := media.Encode(&media.Request{Op: media.OpVideoDelete, JobID: *record.UpstreamJobID, Route: record.RouteSlug}, "openai", record.UpstreamModel)
 	if failure != nil {
 		s.mediaFail(x, w, mediaError(failure))
 		return

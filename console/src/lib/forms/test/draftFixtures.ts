@@ -5,6 +5,8 @@ import type { RouteDraft } from '$lib/features/routes/api';
 export const provider: Provider = {
   id: 'provider-a',
   name: 'Original provider',
+  project_id: null,
+  project_name: null,
   configuration: { kind: 'openai', auth_mode: 'api_key' },
   state: 'draft',
   connector_ready: false,
@@ -33,11 +35,14 @@ export const providerSpec: ProviderKindCapability = {
 export const draft: RouteDraft = {
   id: 'route-a',
   slug: 'original-route',
+  project_id: null,
+  project_name: null,
   state: 'draft',
   etag: 'v1',
   operations: ['generation'],
   overall_timeout_ms: 120000,
   max_attempts: 1,
+  content_policy: null,
   targets: [
     {
       id: 'target-a',

@@ -344,8 +344,9 @@ func repSeedReports(f *repFixture) {
 
 func repRange(f *repFixture, fromHours, toHours float64) usage.Filters {
 	return usage.Filters{
-		Start: f.Base.Add(time.Duration(fromHours * float64(time.Hour))),
-		End:   f.Base.Add(time.Duration(toHours * float64(time.Hour))),
+		Start:       f.Base.Add(time.Duration(fromHours * float64(time.Hour))),
+		End:         f.Base.Add(time.Duration(toHours * float64(time.Hour))),
+		AllProjects: true,
 	}
 }
 
@@ -1026,7 +1027,7 @@ func TestUsageMaintenanceRollsUpAndPurges(t *testing.T) {
 	f.request(repRequest{ID: live, StartedAt: now.Add(-time.Hour), Route: "alpha",
 		Operation: "generation", Surface: "openai", StatusCode: repInt(200)})
 
-	window := usage.Filters{Start: bucket, End: bucket.Add(time.Hour)}
+	window := usage.Filters{Start: bucket, End: bucket.Add(time.Hour), AllProjects: true}
 	before, err := usage.ReadSummary(ctx, f.pool, window, now)
 	if err != nil {
 		t.Fatalf("read summary: %v", err)

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import ContentPolicyEditor from './ContentPolicyEditor.svelte';
   import RoutingPolicyEditor from './RoutingPolicyEditor.svelte';
   import { focusErrorSummary, focusFormError } from '$lib/forms/focusError';
   import RouteTargets from '$lib/features/routes/RouteTargets.svelte';
@@ -11,6 +12,7 @@
   import { formatDate } from '$lib/format';
   import { operationOptions } from '$lib/features/routes/routeEditor';
   import { RouteDraftEditorState } from '$lib/features/routes/routeDraftEditor.svelte';
+  import ProjectScopeField from '$lib/features/access/projects/ProjectScopeField.svelte';
   let {
     routeId
   }: {
@@ -139,6 +141,15 @@
               addressing is unavailable.</small
             >
           </div>
+          {#if editor.isNew}<ProjectScopeField
+              id="route-project"
+              bind:value={editor.projectId}
+              disabled={!editor.canManage || Boolean(editor.busy)}
+            />{:else if editor.draft.data}<div class="form-field">
+              <span class="scope-label">Project</span><span
+                >{editor.draft.data.project_name ?? 'Installation-wide'}</span
+              >
+            </div>{/if}
           <fieldset class="form-field full operations">
             <legend>Supported operations</legend
             >{#each operationOptions as option (option[0])}<label
@@ -158,6 +169,7 @@
         </div>
       </section>
       <RouteTargets {editor} />
+      <ContentPolicyEditor {editor} />
       <section class="card editor advanced" aria-labelledby="advanced-heading">
         <p class="eyebrow">Advanced</p>
         <h2 id="advanced-heading">Deadline and failover</h2>
@@ -273,6 +285,12 @@
   }
   .draft-meta {
     margin: 0.4rem 0 0;
+    color: var(--foreground-muted);
+    font-size: var(--text-caption);
+  }
+  .scope-label {
+    display: block;
+    margin-bottom: 0.3rem;
     color: var(--foreground-muted);
     font-size: var(--text-caption);
   }

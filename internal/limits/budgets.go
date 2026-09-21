@@ -46,6 +46,32 @@ const BudgetSQL = `(SELECT jsonb_build_object(` +
 	` FROM olp_go.attempt_usage_hourly h` +
 	` WHERE h.api_key_id=k.id AND h.bucket>=w.monthly_start AND h.bucket<w.monthly_end) u) t)`
 
+const GroupBudgetSQL = `(SELECT jsonb_build_object(` +
+	`'daily',jsonb_build_object('accrued',t.daily_accrued::text,'limit',g.daily_cost_limit::text,` +
+	`'remaining',CASE WHEN g.daily_cost_limit IS NULL THEN NULL ELSE GREATEST(g.daily_cost_limit-t.daily_accrued,0)::text END,` +
+	`'reset_at',w.daily_end),` +
+	`'monthly',jsonb_build_object('accrued',t.monthly_accrued::text,'limit',g.monthly_cost_limit::text,` +
+	`'remaining',CASE WHEN g.monthly_cost_limit IS NULL THEN NULL ELSE GREATEST(g.monthly_cost_limit-t.monthly_accrued,0)::text END,` +
+	`'reset_at',w.monthly_end),` +
+	`'unpriced_attempts',t.unpriced_attempts)` +
+	` FROM (SELECT b.day AT TIME ZONE 'UTC' AS daily_start,` +
+	`(b.day+interval '1 day') AT TIME ZONE 'UTC' AS daily_end,` +
+	`b.month AT TIME ZONE 'UTC' AS monthly_start,` +
+	`(b.month+interval '1 month') AT TIME ZONE 'UTC' AS monthly_end` +
+	` FROM (SELECT date_trunc('day',now() AT TIME ZONE 'UTC') AS day,` +
+	`date_trunc('month',now() AT TIME ZONE 'UTC') AS month) b) w,` +
+	` LATERAL (SELECT COALESCE(SUM(u.cost) FILTER (WHERE u.observed_at>=w.daily_start` +
+	` AND u.observed_at<w.daily_end),0) AS daily_accrued,` +
+	`COALESCE(SUM(u.cost),0) AS monthly_accrued,` +
+	`COALESCE(SUM(u.unpriced_attempts),0)::bigint AS unpriced_attempts` +
+	` FROM (SELECT f.observed_at,COALESCE(f.estimated_cost,0)::numeric AS cost,` +
+	`CASE WHEN f.charge_status<>'not_billable' AND f.unpriced THEN 1 ELSE 0 END::bigint` +
+	` AS unpriced_attempts FROM olp_go.attempt_usage_facts f` +
+	` WHERE f.budget_group_id=g.id AND f.observed_at>=w.monthly_start AND f.observed_at<w.monthly_end` +
+	` UNION ALL SELECT h.bucket,COALESCE(h.estimated_cost,0)::numeric,h.unpriced_attempt_count` +
+	` FROM olp_go.attempt_usage_hourly h` +
+	` WHERE h.budget_group_id=g.id AND h.bucket>=w.monthly_start AND h.bucket<w.monthly_end) u) t)`
+
 // Windows are the fixed UTC day and month a cost budget is measured over.
 type Windows struct {
 	DailyStart   time.Time
@@ -81,7 +107,7 @@ func BudgetWindows(now time.Time) Windows {
 // CostSnapshot is the durable spend PostgreSQL holds for one API key in the
 // windows it names. Accrued totals are canonical decimal strings.
 type CostSnapshot struct {
-	APIKeyID         string
+	CostOwnerID      string
 	DailyWindowID    int64
 	DailyAccrued     string
 	MonthlyWindowID  int64
@@ -92,8 +118,8 @@ type CostSnapshot struct {
 // validate refuses a snapshot Valkey could not store exactly, which would
 // otherwise install a wrong balance that admits or denies spending silently.
 func (s CostSnapshot) validate() error {
-	if _, err := uuid.Parse(s.APIKeyID); err != nil {
-		return fmt.Errorf("cost snapshot API key ID %q is not a UUID", s.APIKeyID)
+	if _, err := uuid.Parse(s.CostOwnerID); err != nil {
+		return fmt.Errorf("cost snapshot owner ID %q is not a UUID", s.CostOwnerID)
 	}
 	if s.DailyWindowID < 0 || s.DailyWindowID > maxLuaInteger ||
 		s.MonthlyWindowID < 0 || s.MonthlyWindowID > maxLuaInteger {
@@ -140,8 +166,8 @@ func validDecimal(value string) bool {
 
 // costKeys addresses the balances of one API key. Both live under the key's own
 // cluster hash tag so every lookup that spends from it meets the same state.
-func (l *Limiter) costKeys(apiKeyID string) (string, string) {
-	prefix := l.namespace + ":{" + simpleUUID(apiKeyID) + "}:cost"
+func (l *Limiter) costKeys(costOwnerID string) (string, string) {
+	prefix := l.namespace + ":{" + simpleUUID(costOwnerID) + "}:cost"
 	return prefix + ":day", prefix + ":month"
 }
 
@@ -153,7 +179,7 @@ func (l *Limiter) ApplyCostSnapshot(ctx context.Context, s CostSnapshot) (bool, 
 	if err := s.validate(); err != nil {
 		return false, false, err
 	}
-	daily, monthly := l.costKeys(s.APIKeyID)
+	daily, monthly := l.costKeys(s.CostOwnerID)
 	value, err := l.eval(ctx, reconcileCostScript, []string{daily, monthly},
 		strconv.FormatInt(s.DailyWindowID, 10), s.DailyAccrued,
 		strconv.FormatInt(s.MonthlyWindowID, 10), s.MonthlyAccrued,
@@ -188,6 +214,25 @@ const addCostDeltaSQL = `WITH deltas (window_kind, window_id, accrued, unpriced_
          MAX(unpriced_attempts) FILTER (WHERE window_kind = 'month')::bigint
   FROM applied GROUP BY api_key_id`
 
+const addGroupCostDeltaSQL = `WITH deltas (window_kind,window_id,accrued,unpriced_attempts) AS (
+ VALUES ('day'::text,$2::bigint,$3::text::numeric,0::bigint),
+        ('month'::text,$4::bigint,$3::text::numeric,$5::bigint)
+), applied AS (
+ INSERT INTO olp_go.budget_group_cost_windows
+   (budget_group_id,window_kind,window_id,accrued,unpriced_attempts)
+ SELECT $1::uuid,window_kind,window_id,accrued,unpriced_attempts FROM deltas
+ ON CONFLICT (budget_group_id,window_kind,window_id) DO UPDATE SET
+   accrued=olp_go.budget_group_cost_windows.accrued+EXCLUDED.accrued,
+   unpriced_attempts=olp_go.budget_group_cost_windows.unpriced_attempts+EXCLUDED.unpriced_attempts
+ RETURNING budget_group_id,window_kind,window_id,accrued,unpriced_attempts
+) SELECT budget_group_id::text,
+ MAX(window_id) FILTER (WHERE window_kind='day')::bigint,
+ MAX(accrued) FILTER (WHERE window_kind='day')::text,
+ MAX(window_id) FILTER (WHERE window_kind='month')::bigint,
+ MAX(accrued) FILTER (WHERE window_kind='month')::text,
+ MAX(unpriced_attempts) FILTER (WHERE window_kind='month')::bigint
+ FROM applied GROUP BY budget_group_id`
+
 // AddCostDelta accumulates one attempt's cost inside the caller's transaction
 // and returns the API key's resulting balances, ready to hand to Valkey. cost
 // is a non-negative decimal string.
@@ -195,6 +240,17 @@ func AddCostDelta(ctx context.Context, tx pgx.Tx, apiKeyID string, observedAt ti
 	if _, err := uuid.Parse(apiKeyID); err != nil {
 		return CostSnapshot{}, fmt.Errorf("API key ID %q is not a UUID", apiKeyID)
 	}
+	return addOwnerDelta(ctx, tx, addCostDeltaSQL, apiKeyID, observedAt, cost, unpriced)
+}
+
+func AddGroupCostDelta(ctx context.Context, tx pgx.Tx, budgetGroupID string, observedAt time.Time, cost string, unpriced int64) (CostSnapshot, error) {
+	if _, err := uuid.Parse(budgetGroupID); err != nil {
+		return CostSnapshot{}, fmt.Errorf("budget group ID %q is not a UUID", budgetGroupID)
+	}
+	return addOwnerDelta(ctx, tx, addGroupCostDeltaSQL, budgetGroupID, observedAt, cost, unpriced)
+}
+
+func addOwnerDelta(ctx context.Context, tx pgx.Tx, query string, ownerID string, observedAt time.Time, cost string, unpriced int64) (CostSnapshot, error) {
 	if !validDecimal(cost) {
 		return CostSnapshot{}, fmt.Errorf("cost delta %q is not a non-negative decimal with at most 12 fractional digits", cost)
 	}
@@ -202,7 +258,7 @@ func AddCostDelta(ctx context.Context, tx pgx.Tx, apiKeyID string, observedAt ti
 		return CostSnapshot{}, fmt.Errorf("unpriced attempt count %d is out of range", unpriced)
 	}
 	windows := BudgetWindows(observedAt)
-	row := tx.QueryRow(ctx, addCostDeltaSQL, apiKeyID, windows.DailyID, cost, windows.MonthlyID, unpriced)
+	row := tx.QueryRow(ctx, query, ownerID, windows.DailyID, cost, windows.MonthlyID, unpriced)
 	return scanSnapshot(row)
 }
 
@@ -263,6 +319,45 @@ const reconciliationSnapshotsSQL = `WITH active_keys AS (
          MAX(unpriced_attempts) FILTER (WHERE window_kind = 'month')::bigint
   FROM reconciled GROUP BY api_key_id ORDER BY api_key_id`
 
+const reconciliationGroupSnapshotsSQL = `WITH active_groups AS (
+ SELECT id AS budget_group_id FROM olp_go.budget_groups
+ WHERE $1::timestamptz IS NOT NULL
+   AND (daily_cost_limit IS NOT NULL OR monthly_cost_limit IS NOT NULL)
+), usage AS (
+ SELECT fact.budget_group_id,fact.observed_at,COALESCE(fact.estimated_cost,0)::numeric AS cost,
+   CASE WHEN fact.charge_status<>'not_billable' AND fact.unpriced THEN 1 ELSE 0 END::bigint AS unpriced_attempts
+ FROM olp_go.attempt_usage_facts fact JOIN active_groups g USING (budget_group_id)
+ WHERE fact.observed_at >= $3::timestamptz AND fact.observed_at < $4::timestamptz
+ UNION ALL
+ SELECT hourly.budget_group_id,hourly.bucket,COALESCE(hourly.estimated_cost,0)::numeric,hourly.unpriced_attempt_count
+ FROM olp_go.attempt_usage_hourly hourly JOIN active_groups g USING (budget_group_id)
+ WHERE hourly.bucket >= $3::timestamptz AND hourly.bucket < $4::timestamptz
+), totals AS (
+ SELECT g.budget_group_id,
+  COALESCE(SUM(u.cost) FILTER (WHERE u.observed_at >= $2::timestamptz AND u.observed_at < $7::timestamptz),0) AS daily_accrued,
+  COALESCE(SUM(u.cost),0) AS monthly_accrued,
+  COALESCE(SUM(u.unpriced_attempts),0)::bigint AS unpriced_attempts
+ FROM active_groups g LEFT JOIN usage u USING (budget_group_id) GROUP BY g.budget_group_id
+), pruned AS (
+ DELETE FROM olp_go.budget_group_cost_windows
+ WHERE (window_kind='day' AND window_id<$5::bigint) OR (window_kind='month' AND window_id<$6::bigint) RETURNING 1
+), desired AS (
+ SELECT budget_group_id,'day'::text AS window_kind,$5::bigint AS window_id,daily_accrued AS accrued,0::bigint AS unpriced_attempts FROM totals
+ UNION ALL
+ SELECT budget_group_id,'month',$6::bigint,monthly_accrued,unpriced_attempts FROM totals
+), reconciled AS (
+ INSERT INTO olp_go.budget_group_cost_windows (budget_group_id,window_kind,window_id,accrued,unpriced_attempts)
+ SELECT budget_group_id,window_kind,window_id,accrued,unpriced_attempts FROM desired
+ ON CONFLICT (budget_group_id,window_kind,window_id) DO UPDATE SET
+  accrued=GREATEST(olp_go.budget_group_cost_windows.accrued,EXCLUDED.accrued),
+  unpriced_attempts=GREATEST(olp_go.budget_group_cost_windows.unpriced_attempts,EXCLUDED.unpriced_attempts)
+ RETURNING budget_group_id,window_kind,window_id,accrued,unpriced_attempts
+) SELECT budget_group_id::text,$5::bigint,
+ MAX(accrued) FILTER (WHERE window_kind='day')::text,$6::bigint,
+ MAX(accrued) FILTER (WHERE window_kind='month')::text,
+ MAX(unpriced_attempts) FILTER (WHERE window_kind='month')::bigint
+ FROM reconciled GROUP BY budget_group_id ORDER BY budget_group_id`
+
 // ReconciliationSnapshots recomputes every active key's durable spend for the
 // windows containing now and returns the snapshots to install in Valkey. It
 // writes, so it must run on the connection that holds the reconciliation lock.
@@ -286,6 +381,23 @@ func ReconciliationSnapshots(ctx context.Context, conn *pgx.Conn, now time.Time)
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
+	groupRows, err := conn.Query(ctx, reconciliationGroupSnapshotsSQL, now.UTC(), windows.DailyStart,
+		windows.MonthlyStart, windows.MonthlyEnd, windows.DailyID, windows.MonthlyID,
+		windows.DailyEnd)
+	if err != nil {
+		return nil, err
+	}
+	defer groupRows.Close()
+	for groupRows.Next() {
+		snapshot, err := scanSnapshot(groupRows)
+		if err != nil {
+			return nil, err
+		}
+		snapshots = append(snapshots, snapshot)
+	}
+	if err := groupRows.Err(); err != nil {
+		return nil, err
+	}
 	return snapshots, nil
 }
 
@@ -294,7 +406,7 @@ func ReconciliationSnapshots(ctx context.Context, conn *pgx.Conn, now time.Time)
 // rather than install a partial balance.
 func scanSnapshot(row pgx.Row) (CostSnapshot, error) {
 	var snapshot CostSnapshot
-	if err := row.Scan(&snapshot.APIKeyID, &snapshot.DailyWindowID, &snapshot.DailyAccrued,
+	if err := row.Scan(&snapshot.CostOwnerID, &snapshot.DailyWindowID, &snapshot.DailyAccrued,
 		&snapshot.MonthlyWindowID, &snapshot.MonthlyAccrued, &snapshot.UnpricedAttempts); err != nil {
 		return CostSnapshot{}, err
 	}

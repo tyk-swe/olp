@@ -1,6 +1,6 @@
 import type { components } from '$lib/api/schema';
 import { apiClient } from '$lib/api/client';
-import { pageResult, result } from '$lib/api/http';
+import { ApiProblem, ensureSuccess, pageResult, result } from '$lib/api/http';
 import type { CursorPage } from '$lib/api/http';
 import { compactQuery } from '$lib/api/query';
 
@@ -33,4 +33,60 @@ export async function getMediaJob(jobId: string): Promise<MediaJob> {
     { params: { path: { job_id: jobId } } }
   );
   return result(data, error, response);
+}
+
+export async function refreshMediaJob(jobId: string): Promise<MediaJob> {
+  const { data, error, response } = await apiClient.POST(
+    '/api/v3/media-jobs/{job_id}/refresh',
+    { params: { path: { job_id: jobId } } }
+  );
+  return result(data, error, response);
+}
+
+export async function deleteMediaJob(
+  jobId: string,
+  etag: string
+): Promise<void> {
+  const { error, response } = await apiClient.DELETE(
+    '/api/v3/media-jobs/{job_id}',
+    {
+      params: {
+        path: { job_id: jobId },
+        header: { 'If-Match': etag }
+      }
+    }
+  );
+  ensureSuccess(error, response);
+}
+
+export type MediaContentVariant = 'video' | 'thumbnail' | 'spritesheet';
+
+export async function downloadMediaJobContent(
+  jobId: string,
+  variant: MediaContentVariant
+): Promise<{ blob: Blob; filename: string }> {
+  const { data, error, response } = await apiClient.GET(
+    '/api/v3/media-jobs/{job_id}/content',
+    {
+      params: {
+        path: { job_id: jobId },
+        query: { variant }
+      },
+      parseAs: 'blob'
+    }
+  );
+  if (error || !(data instanceof Blob)) {
+    ensureSuccess(error ?? { message: 'invalid content' }, response);
+    throw new ApiProblem({
+      type: 'urn:olp:problem:invalid-api-response',
+      title: 'The media content response did not include a binary body',
+      status: 502
+    });
+  }
+  const disposition = response.headers.get('content-disposition') ?? '';
+  const match = /filename="([^"]+)"/.exec(disposition);
+  return {
+    blob: data as Blob,
+    filename: match?.[1] ?? `media-${jobId}-${variant}`
+  };
 }

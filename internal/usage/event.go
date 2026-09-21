@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
+	"github.com/tyk-swe/olp/internal/contentpolicy"
 )
 
 // WireVersion is the envelope version this build writes and accepts. A reader
@@ -19,31 +21,38 @@ const WireVersion = 1
 // Event is one request's content-free metadata. Every optional field is
 // serialized explicitly, so a reader can tell "absent" from "not yet known".
 type Event struct {
-	Version             int       `json:"version"`
-	EventID             string    `json:"event_id"`
-	RequestID           string    `json:"request_id"`
-	RuntimeGenerationID string    `json:"runtime_generation_id"`
-	APIKeyID            string    `json:"api_key_id"`
-	ProviderID          *string   `json:"provider_id"`
-	RouteSlug           string    `json:"route_slug"`
-	UpstreamModel       *string   `json:"upstream_model"`
-	Operation           string    `json:"operation"`
-	Surface             string    `json:"surface"`
-	RequestStartedAt    time.Time `json:"request_started_at"`
-	RequestCompletedAt  time.Time `json:"request_completed_at"`
-	ObservedAt          time.Time `json:"observed_at"`
-	StatusCode          *int      `json:"status_code"`
-	ErrorClass          *string   `json:"error_class"`
-	Committed           bool      `json:"committed"`
-	LatencyMS           int64     `json:"latency_ms"`
-	FirstByteMS         *int64    `json:"first_byte_ms"`
-	InputTokens         *int64    `json:"input_tokens"`
-	OutputTokens        *int64    `json:"output_tokens"`
-	CachedInputTokens   *int64    `json:"cached_input_tokens"`
-	MediaUnits          *string   `json:"media_units"`
-	UsageComplete       bool      `json:"usage_complete"`
-	Unpriced            bool      `json:"unpriced"`
-	Attempts            []Attempt `json:"attempts"`
+	Version             int               `json:"version"`
+	EventID             string            `json:"event_id"`
+	RequestID           string            `json:"request_id"`
+	RuntimeGenerationID string            `json:"runtime_generation_id"`
+	APIKeyID            string            `json:"api_key_id"`
+	Attribution         map[string]string `json:"attribution,omitempty"`
+
+	PolicyDecisions         []contentpolicy.Decision `json:"policy_decisions,omitempty"`
+	BudgetGroupID           *string                  `json:"budget_group_id"`
+	ProviderID              *string                  `json:"provider_id"`
+	RouteSlug               string                   `json:"route_slug"`
+	UpstreamModel           *string                  `json:"upstream_model"`
+	Operation               string                   `json:"operation"`
+	Surface                 string                   `json:"surface"`
+	RequestStartedAt        time.Time                `json:"request_started_at"`
+	RequestCompletedAt      time.Time                `json:"request_completed_at"`
+	ObservedAt              time.Time                `json:"observed_at"`
+	StatusCode              *int                     `json:"status_code"`
+	ErrorClass              *string                  `json:"error_class"`
+	Committed               bool                     `json:"committed"`
+	LatencyMS               int64                    `json:"latency_ms"`
+	FirstByteMS             *int64                   `json:"first_byte_ms"`
+	InputTokens             *int64                   `json:"input_tokens"`
+	OutputTokens            *int64                   `json:"output_tokens"`
+	CachedInputTokens       *int64                   `json:"cached_input_tokens"`
+	CacheWriteInputTokens   *int64                   `json:"cache_write_input_tokens"`
+	CacheWrite5MInputTokens *int64                   `json:"cache_write_5m_input_tokens"`
+	CacheWrite1HInputTokens *int64                   `json:"cache_write_1h_input_tokens"`
+	MediaUnits              *string                  `json:"media_units"`
+	UsageComplete           bool                     `json:"usage_complete"`
+	Unpriced                bool                     `json:"unpriced"`
+	Attempts                []Attempt                `json:"attempts"`
 }
 
 // Attempt is one provider attempt made while serving the request. Routing and
@@ -70,13 +79,16 @@ type Attempt struct {
 // is settled, and `BillingUncertain` says the attempt may have been charged
 // upstream without the evidence ever arriving.
 type AttemptUsage struct {
-	Observed          bool    `json:"observed"`
-	Complete          bool    `json:"complete"`
-	BillingUncertain  bool    `json:"billing_uncertain"`
-	InputTokens       *int64  `json:"input_tokens"`
-	OutputTokens      *int64  `json:"output_tokens"`
-	CachedInputTokens *int64  `json:"cached_input_tokens"`
-	MediaUnits        *string `json:"media_units"`
+	Observed                bool    `json:"observed"`
+	Complete                bool    `json:"complete"`
+	BillingUncertain        bool    `json:"billing_uncertain"`
+	InputTokens             *int64  `json:"input_tokens"`
+	OutputTokens            *int64  `json:"output_tokens"`
+	CachedInputTokens       *int64  `json:"cached_input_tokens"`
+	CacheWriteInputTokens   *int64  `json:"cache_write_input_tokens"`
+	CacheWrite5MInputTokens *int64  `json:"cache_write_5m_input_tokens"`
+	CacheWrite1HInputTokens *int64  `json:"cache_write_1h_input_tokens"`
+	MediaUnits              *string `json:"media_units"`
 }
 
 // Routing is the provenance of one attempt: which policy chose it, which
@@ -149,30 +161,36 @@ func Decode(payload []byte) (*Event, Decoded, error) {
 // The wire types mirror the event shape with every required field behind a
 // pointer, so an absent field is a decode failure instead of a zero value.
 type wireEvent struct {
-	EventID             *string        `json:"event_id"`
-	RequestID           *string        `json:"request_id"`
-	RuntimeGenerationID *string        `json:"runtime_generation_id"`
-	APIKeyID            *string        `json:"api_key_id"`
-	ProviderID          *string        `json:"provider_id"`
-	RouteSlug           *string        `json:"route_slug"`
-	UpstreamModel       *string        `json:"upstream_model"`
-	Operation           *string        `json:"operation"`
-	Surface             *string        `json:"surface"`
-	RequestStartedAt    *time.Time     `json:"request_started_at"`
-	RequestCompletedAt  *time.Time     `json:"request_completed_at"`
-	ObservedAt          *time.Time     `json:"observed_at"`
-	StatusCode          *uint16        `json:"status_code"`
-	ErrorClass          *string        `json:"error_class"`
-	Committed           *bool          `json:"committed"`
-	LatencyMS           *uint64        `json:"latency_ms"`
-	FirstByteMS         *uint64        `json:"first_byte_ms"`
-	InputTokens         *int64         `json:"input_tokens"`
-	OutputTokens        *int64         `json:"output_tokens"`
-	CachedInputTokens   *int64         `json:"cached_input_tokens"`
-	MediaUnits          *string        `json:"media_units"`
-	UsageComplete       *bool          `json:"usage_complete"`
-	Unpriced            *bool          `json:"unpriced"`
-	Attempts            *[]wireAttempt `json:"attempts"`
+	EventID                 *string            `json:"event_id"`
+	RequestID               *string            `json:"request_id"`
+	RuntimeGenerationID     *string            `json:"runtime_generation_id"`
+	APIKeyID                *string            `json:"api_key_id"`
+	Attribution             *map[string]string `json:"attribution"`
+	PolicyDecisions         *[]wireDecision    `json:"policy_decisions"`
+	BudgetGroupID           *string            `json:"budget_group_id"`
+	ProviderID              *string            `json:"provider_id"`
+	RouteSlug               *string            `json:"route_slug"`
+	UpstreamModel           *string            `json:"upstream_model"`
+	Operation               *string            `json:"operation"`
+	Surface                 *string            `json:"surface"`
+	RequestStartedAt        *time.Time         `json:"request_started_at"`
+	RequestCompletedAt      *time.Time         `json:"request_completed_at"`
+	ObservedAt              *time.Time         `json:"observed_at"`
+	StatusCode              *uint16            `json:"status_code"`
+	ErrorClass              *string            `json:"error_class"`
+	Committed               *bool              `json:"committed"`
+	LatencyMS               *uint64            `json:"latency_ms"`
+	FirstByteMS             *uint64            `json:"first_byte_ms"`
+	InputTokens             *int64             `json:"input_tokens"`
+	OutputTokens            *int64             `json:"output_tokens"`
+	CachedInputTokens       *int64             `json:"cached_input_tokens"`
+	CacheWriteInputTokens   *int64             `json:"cache_write_input_tokens"`
+	CacheWrite5MInputTokens *int64             `json:"cache_write_5m_input_tokens"`
+	CacheWrite1HInputTokens *int64             `json:"cache_write_1h_input_tokens"`
+	MediaUnits              *string            `json:"media_units"`
+	UsageComplete           *bool              `json:"usage_complete"`
+	Unpriced                *bool              `json:"unpriced"`
+	Attempts                *[]wireAttempt     `json:"attempts"`
 }
 
 type wireAttempt struct {
@@ -192,13 +210,23 @@ type wireAttempt struct {
 }
 
 type wireUsage struct {
-	Observed          *bool   `json:"observed"`
-	Complete          *bool   `json:"complete"`
-	BillingUncertain  *bool   `json:"billing_uncertain"`
-	InputTokens       *int64  `json:"input_tokens"`
-	OutputTokens      *int64  `json:"output_tokens"`
-	CachedInputTokens *int64  `json:"cached_input_tokens"`
-	MediaUnits        *string `json:"media_units"`
+	Observed                *bool   `json:"observed"`
+	Complete                *bool   `json:"complete"`
+	BillingUncertain        *bool   `json:"billing_uncertain"`
+	InputTokens             *int64  `json:"input_tokens"`
+	OutputTokens            *int64  `json:"output_tokens"`
+	CachedInputTokens       *int64  `json:"cached_input_tokens"`
+	CacheWriteInputTokens   *int64  `json:"cache_write_input_tokens"`
+	CacheWrite5MInputTokens *int64  `json:"cache_write_5m_input_tokens"`
+	CacheWrite1HInputTokens *int64  `json:"cache_write_1h_input_tokens"`
+	MediaUnits              *string `json:"media_units"`
+}
+
+type wireDecision struct {
+	RuleID  *string `json:"rule_id"`
+	Phase   *string `json:"phase"`
+	Action  *string `json:"action"`
+	Outcome *string `json:"outcome"`
 }
 
 type wireRouting struct {
@@ -219,11 +247,12 @@ var knownOperations = map[string]struct{}{
 	"generation": {}, "embeddings": {}, "token_count": {}, "image_generation": {},
 	"image_edit": {}, "image_variation": {}, "speech": {}, "transcription": {},
 	"video_create": {}, "video_list": {}, "video_get": {}, "video_content": {},
-	"video_delete": {}, "moderation": {}, "model_list": {}, "model_get": {},
+	"video_delete": {}, "moderation": {}, "model_list": {}, "model_get": {}, "rerank": {},
+	"file": {}, "batch": {}, "realtime": {}, "bedrock_invoke": {},
 }
 
 var knownSurfaces = map[string]struct{}{
-	"openai": {}, "anthropic": {}, "gemini": {}, "unknown": {},
+	"openai": {}, "anthropic": {}, "gemini": {}, "bedrock": {}, "unknown": {},
 }
 
 func (w wireEvent) decode() (*Event, error) {
@@ -239,6 +268,28 @@ func (w wireEvent) decode() (*Event, error) {
 		return nil, err
 	}
 	if event.APIKeyID, err = requiredUUID("api_key_id", w.APIKeyID); err != nil {
+		return nil, err
+	}
+	if w.Attribution != nil {
+		event.Attribution = *w.Attribution
+		if err := ValidateAttribution(event.Attribution); err != nil {
+			return nil, fmt.Errorf("request metadata field attribution is invalid: %w", err)
+		}
+	}
+	if w.PolicyDecisions != nil {
+		for i, d := range *w.PolicyDecisions {
+			if d.RuleID == nil || d.Phase == nil || d.Action == nil || d.Outcome == nil {
+				return nil, fmt.Errorf("request metadata field policy_decisions %d is incomplete", i)
+			}
+			event.PolicyDecisions = append(event.PolicyDecisions, contentpolicy.Decision{
+				RuleID: *d.RuleID, Phase: *d.Phase, Action: *d.Action, Outcome: *d.Outcome,
+			})
+		}
+		if err := contentpolicy.ValidateDecisions(event.PolicyDecisions); err != nil {
+			return nil, fmt.Errorf("request metadata field policy_decisions is invalid: %w", err)
+		}
+	}
+	if event.BudgetGroupID, err = optionalUUID("budget_group_id", w.BudgetGroupID); err != nil {
 		return nil, err
 	}
 	if event.ProviderID, err = optionalUUID("provider_id", w.ProviderID); err != nil {
@@ -277,6 +328,9 @@ func (w wireEvent) decode() (*Event, error) {
 	event.InputTokens = w.InputTokens
 	event.OutputTokens = w.OutputTokens
 	event.CachedInputTokens = w.CachedInputTokens
+	event.CacheWriteInputTokens = w.CacheWriteInputTokens
+	event.CacheWrite5MInputTokens = w.CacheWrite5MInputTokens
+	event.CacheWrite1HInputTokens = w.CacheWrite1HInputTokens
 	if event.MediaUnits, err = optionalDecimal("media_units", w.MediaUnits); err != nil {
 		return nil, err
 	}
@@ -349,9 +403,12 @@ func (w wireAttempt) decode() (*Attempt, error) {
 
 func (w wireUsage) decode() (*AttemptUsage, error) {
 	usage := &AttemptUsage{
-		InputTokens:       w.InputTokens,
-		OutputTokens:      w.OutputTokens,
-		CachedInputTokens: w.CachedInputTokens,
+		InputTokens:             w.InputTokens,
+		OutputTokens:            w.OutputTokens,
+		CachedInputTokens:       w.CachedInputTokens,
+		CacheWriteInputTokens:   w.CacheWriteInputTokens,
+		CacheWrite5MInputTokens: w.CacheWrite5MInputTokens,
+		CacheWrite1HInputTokens: w.CacheWrite1HInputTokens,
 	}
 	var err error
 	if usage.Observed, err = requiredField("usage.observed", w.Observed); err != nil {
@@ -562,7 +619,9 @@ func Validate(e *Event) (*Validated, error) {
 	emptyAttemptMetadataIsValid := hasAttempts ||
 		(e.ProviderID == nil && e.UpstreamModel == nil && !e.Committed &&
 			e.FirstByteMS == nil && e.InputTokens == nil && e.OutputTokens == nil &&
-			e.CachedInputTokens == nil && e.MediaUnits == nil && !e.UsageComplete)
+			e.CachedInputTokens == nil && e.CacheWriteInputTokens == nil &&
+			e.CacheWrite5MInputTokens == nil && e.CacheWrite1HInputTokens == nil &&
+			e.MediaUnits == nil && !e.UsageComplete)
 	switch {
 	case e.RequestCompletedAt.Before(e.RequestStartedAt):
 		return nil, fmt.Errorf("%w: request completed before it started", ErrInvalidEvent)
@@ -574,6 +633,16 @@ func Validate(e *Event) (*Validated, error) {
 		return nil, fmt.Errorf("%w: final attempt is not the reported target", ErrInvalidEvent)
 	case !emptyAttemptMetadataIsValid:
 		return nil, fmt.Errorf("%w: target metadata without an attempt", ErrInvalidEvent)
+	}
+	if err := ValidateAttribution(e.Attribution); err != nil {
+		return nil, fmt.Errorf("%w: attribution %w", ErrInvalidEvent, err)
+	}
+	if err := contentpolicy.ValidateDecisions(e.PolicyDecisions); err != nil {
+		return nil, fmt.Errorf("%w: policy decisions %w", ErrInvalidEvent, err)
+	}
+	if err := validateCacheCategories(e.InputTokens, e.CachedInputTokens, e.CacheWriteInputTokens,
+		e.CacheWrite5MInputTokens, e.CacheWrite1HInputTokens); err != nil {
+		return nil, fmt.Errorf("%w: request %w", ErrInvalidEvent, err)
 	}
 
 	validated := &Validated{HasAttempts: hasAttempts, StatusCode: narrowStatus(e.StatusCode)}
@@ -644,14 +713,21 @@ func validateUsage(usage *AttemptUsage, index int) (*AttemptUsage, error) {
 		return nil, fmt.Errorf("%w: attempt %d usage state is inconsistent", ErrInvalidEvent, index)
 	}
 	hasValues := usage.InputTokens != nil || usage.OutputTokens != nil ||
-		usage.CachedInputTokens != nil || usage.MediaUnits != nil
+		usage.CachedInputTokens != nil || usage.CacheWriteInputTokens != nil ||
+		usage.CacheWrite5MInputTokens != nil || usage.CacheWrite1HInputTokens != nil ||
+		usage.MediaUnits != nil
 	if !usage.Observed && hasValues {
 		return nil, fmt.Errorf("%w: attempt %d reports usage it never observed", ErrInvalidEvent, index)
 	}
-	for _, tokens := range [3]*int64{usage.InputTokens, usage.OutputTokens, usage.CachedInputTokens} {
+	for _, tokens := range [6]*int64{usage.InputTokens, usage.OutputTokens, usage.CachedInputTokens,
+		usage.CacheWriteInputTokens, usage.CacheWrite5MInputTokens, usage.CacheWrite1HInputTokens} {
 		if tokens != nil && *tokens < 0 {
 			return nil, fmt.Errorf("%w: attempt %d has a negative token count", ErrInvalidEvent, index)
 		}
+	}
+	if err := validateCacheCategories(usage.InputTokens, usage.CachedInputTokens, usage.CacheWriteInputTokens,
+		usage.CacheWrite5MInputTokens, usage.CacheWrite1HInputTokens); err != nil {
+		return nil, fmt.Errorf("%w: attempt %d %w", ErrInvalidEvent, index, err)
 	}
 	if usage.MediaUnits != nil {
 		negative, err := parseWireDecimal(*usage.MediaUnits)
@@ -663,6 +739,26 @@ func validateUsage(usage *AttemptUsage, index int) (*AttemptUsage, error) {
 		}
 	}
 	return usage, nil
+}
+
+func validateCacheCategories(input, read, write, write5m, write1h *int64) error {
+	hasCategory := read != nil || write != nil || write5m != nil || write1h != nil
+	if hasCategory && input == nil {
+		return errors.New("cache usage without input tokens")
+	}
+	count := func(value *int64) int64 {
+		if value == nil {
+			return 0
+		}
+		return *value
+	}
+	if input != nil && count(read)+count(write) > *input {
+		return errors.New("cache reads and writes exceed the input total")
+	}
+	if count(write5m)+count(write1h) > count(write) {
+		return errors.New("cache write detail exceeds the cache write total")
+	}
+	return nil
 }
 
 func validStatus(status *int) bool {

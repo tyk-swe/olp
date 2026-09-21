@@ -250,3 +250,69 @@ revisions remain authoritative when the master key is configured.
 
 Production Compose can generate database credentials and their encoded URL using
 `scripts/prepare-compose-production.sh`; see [deployment.md](deployment.md).
+
+## Configuration promotion artifacts
+
+`GET /api/v3/configuration/export` returns a secret-free desired-state
+artifact (`openllmproxy.dev/config/v1`) and its canonical digest: SHA-256
+lowercase hex of the canonical JSON with `exported_at` blanked and every
+collection sorted deterministically. Projects, providers, routes, and targets
+are identified by natural names — never UUIDs — and `project` carries a
+project name or `null` for installation-wide resources. Export reads the
+active provider revision when a provider is active and the current draft
+otherwise, the latest revision of every published route (including retired
+routes, marked `retired: true`), and the latest effective pricing revision.
+It never contains credential IDs, ciphertext, API keys, users, management
+tokens, usage, audit, request or media data, certification evidence, runtime
+IDs, or secret values. Slots that hold credential authority export a stable
+`credential_ref` of `provider-name/slot-name-or-default`; credentialless
+authentication modes export `null`. Slot `allowed_api_keys` restrictions are
+not portable — API keys are installation-local — so export always emits an
+empty list and import rejects a non-empty one; re-establish them on the
+destination after creating keys.
+
+`POST /api/v3/configuration/plan` validates an artifact and reports
+`{digest, actions, conflicts, blockers}` without mutating. Validation rejects
+unknown fields, oversized collections, duplicate natural identities
+(case-insensitive for projects and providers, exact for routes, models, and
+credential references), cross-project targets, bindings for refs the
+artifact does not declare, and secrets over 64 KiB. Plan reports
+`secret_binding_required` blockers for credential refs that do not already
+resolve to a current same-named slot credential on the destination.
+
+`POST /api/v3/configuration/apply` requires an Idempotency-Key and stages
+the desired state in one installation-serialized transaction:
+
+- Missing projects are created; existing case-insensitive names are reused.
+- Missing providers become drafts; existing providers get their draft
+  fields, models, and slots replaced and `draft_dirty` set — an active
+  revision is never mutated and keeps serving until local certification
+  and activation. A provider kind change is a `provider_kind_changed`
+  conflict. Imported capabilities are always stored `declared`, never
+  `certified`.
+- Routes become new or replaced non-activated drafts with their routing
+  policy staged; apply never activates or retires. A published same-slug
+  route in another project is a conflict; a lifecycle difference reports
+  `route_lifecycle_requires_activation` or
+  `route_lifecycle_requires_retirement`.
+- Pricing is a noop when the artifact's prices exactly equal the latest
+  revision; otherwise a new immutable revision is created and the runtime is
+  republished. A future `effective_at` is preserved, while a past or current
+  one is rebased to apply time (`effective_at_rebased`). Provider and route
+  drafts never alter runtime.
+
+`secret_bindings` maps `credential_ref` to the environment-specific secret.
+It is write-only: never echoed in responses, audited, logged, or replayed in
+plaintext — the replay fingerprint stores only the document digest plus
+sorted binding names and SHA-256 digests of their values. `expected_digest`
+compares against the destination's current export digest; a mismatch is a
+`configuration_changed` conflict. Apply returns `409
+configuration_not_applicable` with the same plan body whenever conflicts or
+blockers remain, and rolls back every write. A successful apply records one
+`configuration.apply` audit event with the artifact digest as its resource.
+
+All three endpoints require the `configure` operation and an all-projects
+principal, so assigned users and project-scoped machine tokens receive 403;
+all-project machine tokens with `read` and `configure` scopes can automate
+export, plan, and apply. The console exposes the workflow to global
+owner/operator sessions under **Settings → Configuration promotion**.

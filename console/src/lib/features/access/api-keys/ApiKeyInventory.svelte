@@ -242,7 +242,8 @@
           {@const budget = budgetState(key.budget)}
           <tr>
             <td
-              ><strong>{key.name}</strong><br /><code>{key.lookup_id}</code></td
+              ><strong>{key.name}</strong><br /><code>{key.lookup_id}</code><br
+              /><small>{key.project_name ?? 'Installation-wide'}</small></td
             >
             <td
               ><span

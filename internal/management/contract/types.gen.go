@@ -12,6 +12,225 @@ import (
 	openapi_types "github.com/oapi-codegen/runtime/types"
 )
 
+// Defines values for AuditEventResponseActorType.
+const (
+	ManagementToken AuditEventResponseActorType = "management_token"
+	System          AuditEventResponseActorType = "system"
+	User            AuditEventResponseActorType = "user"
+)
+
+// Valid indicates whether the value is a known member of the AuditEventResponseActorType enum.
+func (e AuditEventResponseActorType) Valid() bool {
+	switch e {
+	case ManagementToken:
+		return true
+	case System:
+		return true
+	case User:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for BudgetAlertDeliveryStatus.
+const (
+	BudgetAlertDeliveryStatusDelivered BudgetAlertDeliveryStatus = "delivered"
+	BudgetAlertDeliveryStatusFailed    BudgetAlertDeliveryStatus = "failed"
+	BudgetAlertDeliveryStatusPending   BudgetAlertDeliveryStatus = "pending"
+)
+
+// Valid indicates whether the value is a known member of the BudgetAlertDeliveryStatus enum.
+func (e BudgetAlertDeliveryStatus) Valid() bool {
+	switch e {
+	case BudgetAlertDeliveryStatusDelivered:
+		return true
+	case BudgetAlertDeliveryStatusFailed:
+		return true
+	case BudgetAlertDeliveryStatusPending:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for BudgetAlertRuleSubjectKind.
+const (
+	BudgetAlertRuleSubjectKindApiKey      BudgetAlertRuleSubjectKind = "api_key"
+	BudgetAlertRuleSubjectKindBudgetGroup BudgetAlertRuleSubjectKind = "budget_group"
+)
+
+// Valid indicates whether the value is a known member of the BudgetAlertRuleSubjectKind enum.
+func (e BudgetAlertRuleSubjectKind) Valid() bool {
+	switch e {
+	case BudgetAlertRuleSubjectKindApiKey:
+		return true
+	case BudgetAlertRuleSubjectKindBudgetGroup:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for BudgetAlertRuleWindowKind.
+const (
+	BudgetAlertRuleWindowKindDay   BudgetAlertRuleWindowKind = "day"
+	BudgetAlertRuleWindowKindMonth BudgetAlertRuleWindowKind = "month"
+)
+
+// Valid indicates whether the value is a known member of the BudgetAlertRuleWindowKind enum.
+func (e BudgetAlertRuleWindowKind) Valid() bool {
+	switch e {
+	case BudgetAlertRuleWindowKindDay:
+		return true
+	case BudgetAlertRuleWindowKindMonth:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ConfigurationCapabilityEntryMode.
+const (
+	ConfigurationCapabilityEntryModeStreaming ConfigurationCapabilityEntryMode = "streaming"
+	ConfigurationCapabilityEntryModeUnary     ConfigurationCapabilityEntryMode = "unary"
+)
+
+// Valid indicates whether the value is a known member of the ConfigurationCapabilityEntryMode enum.
+func (e ConfigurationCapabilityEntryMode) Valid() bool {
+	switch e {
+	case ConfigurationCapabilityEntryModeStreaming:
+		return true
+	case ConfigurationCapabilityEntryModeUnary:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ConfigurationDocumentApiVersion.
+const (
+	OpenllmproxyDevconfigv1 ConfigurationDocumentApiVersion = "openllmproxy.dev/config/v1"
+)
+
+// Valid indicates whether the value is a known member of the ConfigurationDocumentApiVersion enum.
+func (e ConfigurationDocumentApiVersion) Valid() bool {
+	switch e {
+	case OpenllmproxyDevconfigv1:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ContentPolicyRuleAction.
+const (
+	Block  ContentPolicyRuleAction = "block"
+	Redact ContentPolicyRuleAction = "redact"
+)
+
+// Valid indicates whether the value is a known member of the ContentPolicyRuleAction enum.
+func (e ContentPolicyRuleAction) Valid() bool {
+	switch e {
+	case Block:
+		return true
+	case Redact:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ContentPolicyRulePhase.
+const (
+	Input  ContentPolicyRulePhase = "input"
+	Output ContentPolicyRulePhase = "output"
+)
+
+// Valid indicates whether the value is a known member of the ContentPolicyRulePhase enum.
+func (e ContentPolicyRulePhase) Valid() bool {
+	switch e {
+	case Input:
+		return true
+	case Output:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for CreateBudgetAlertRuleRequestSubjectKind.
+const (
+	CreateBudgetAlertRuleRequestSubjectKindApiKey      CreateBudgetAlertRuleRequestSubjectKind = "api_key"
+	CreateBudgetAlertRuleRequestSubjectKindBudgetGroup CreateBudgetAlertRuleRequestSubjectKind = "budget_group"
+)
+
+// Valid indicates whether the value is a known member of the CreateBudgetAlertRuleRequestSubjectKind enum.
+func (e CreateBudgetAlertRuleRequestSubjectKind) Valid() bool {
+	switch e {
+	case CreateBudgetAlertRuleRequestSubjectKindApiKey:
+		return true
+	case CreateBudgetAlertRuleRequestSubjectKindBudgetGroup:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for CreateBudgetAlertRuleRequestWindowKind.
+const (
+	CreateBudgetAlertRuleRequestWindowKindDay   CreateBudgetAlertRuleRequestWindowKind = "day"
+	CreateBudgetAlertRuleRequestWindowKindMonth CreateBudgetAlertRuleRequestWindowKind = "month"
+)
+
+// Valid indicates whether the value is a known member of the CreateBudgetAlertRuleRequestWindowKind enum.
+func (e CreateBudgetAlertRuleRequestWindowKind) Valid() bool {
+	switch e {
+	case CreateBudgetAlertRuleRequestWindowKindDay:
+		return true
+	case CreateBudgetAlertRuleRequestWindowKindMonth:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for CreateManagementTokenRequestScopes.
+const (
+	Access     CreateManagementTokenRequestScopes = "access"
+	AccessRead CreateManagementTokenRequestScopes = "access_read"
+	Configure  CreateManagementTokenRequestScopes = "configure"
+	Keys       CreateManagementTokenRequestScopes = "keys"
+	Playground CreateManagementTokenRequestScopes = "playground"
+	Read       CreateManagementTokenRequestScopes = "read"
+	Settings   CreateManagementTokenRequestScopes = "settings"
+	Usage      CreateManagementTokenRequestScopes = "usage"
+)
+
+// Valid indicates whether the value is a known member of the CreateManagementTokenRequestScopes enum.
+func (e CreateManagementTokenRequestScopes) Valid() bool {
+	switch e {
+	case Access:
+		return true
+	case AccessRead:
+		return true
+	case Configure:
+		return true
+	case Keys:
+		return true
+	case Playground:
+		return true
+	case Read:
+		return true
+	case Settings:
+		return true
+	case Usage:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for CredentialRequirement.
 const (
 	Forbidden CredentialRequirement = "forbidden"
@@ -24,6 +243,33 @@ func (e CredentialRequirement) Valid() bool {
 	case Forbidden:
 		return true
 	case Required:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for PlaygroundRequestOperation.
+const (
+	PlaygroundRequestOperationEmbeddings PlaygroundRequestOperation = "embeddings"
+	PlaygroundRequestOperationGeneration PlaygroundRequestOperation = "generation"
+	PlaygroundRequestOperationModeration PlaygroundRequestOperation = "moderation"
+	PlaygroundRequestOperationRerank     PlaygroundRequestOperation = "rerank"
+	PlaygroundRequestOperationTokenCount PlaygroundRequestOperation = "token_count"
+)
+
+// Valid indicates whether the value is a known member of the PlaygroundRequestOperation enum.
+func (e PlaygroundRequestOperation) Valid() bool {
+	switch e {
+	case PlaygroundRequestOperationEmbeddings:
+		return true
+	case PlaygroundRequestOperationGeneration:
+		return true
+	case PlaygroundRequestOperationModeration:
+		return true
+	case PlaygroundRequestOperationRerank:
+		return true
+	case PlaygroundRequestOperationTokenCount:
 		return true
 	default:
 		return false
@@ -77,58 +323,106 @@ func (e PlaygroundResponseFormat2Type) Valid() bool {
 
 // Defines values for PriceOperation.
 const (
-	Embeddings      PriceOperation = "embeddings"
-	Generation      PriceOperation = "generation"
-	ImageEdit       PriceOperation = "image_edit"
-	ImageGeneration PriceOperation = "image_generation"
-	ImageVariation  PriceOperation = "image_variation"
-	ModelGet        PriceOperation = "model_get"
-	ModelList       PriceOperation = "model_list"
-	Moderation      PriceOperation = "moderation"
-	Speech          PriceOperation = "speech"
-	TokenCount      PriceOperation = "token_count"
-	Transcription   PriceOperation = "transcription"
-	VideoContent    PriceOperation = "video_content"
-	VideoCreate     PriceOperation = "video_create"
-	VideoDelete     PriceOperation = "video_delete"
-	VideoGet        PriceOperation = "video_get"
-	VideoList       PriceOperation = "video_list"
+	PriceOperationBatch           PriceOperation = "batch"
+	PriceOperationBedrockInvoke   PriceOperation = "bedrock_invoke"
+	PriceOperationEmbeddings      PriceOperation = "embeddings"
+	PriceOperationGeneration      PriceOperation = "generation"
+	PriceOperationImageEdit       PriceOperation = "image_edit"
+	PriceOperationImageGeneration PriceOperation = "image_generation"
+	PriceOperationImageVariation  PriceOperation = "image_variation"
+	PriceOperationModelGet        PriceOperation = "model_get"
+	PriceOperationModelList       PriceOperation = "model_list"
+	PriceOperationModeration      PriceOperation = "moderation"
+	PriceOperationRealtime        PriceOperation = "realtime"
+	PriceOperationRerank          PriceOperation = "rerank"
+	PriceOperationSpeech          PriceOperation = "speech"
+	PriceOperationTokenCount      PriceOperation = "token_count"
+	PriceOperationTranscription   PriceOperation = "transcription"
+	PriceOperationVideoContent    PriceOperation = "video_content"
+	PriceOperationVideoCreate     PriceOperation = "video_create"
+	PriceOperationVideoDelete     PriceOperation = "video_delete"
+	PriceOperationVideoGet        PriceOperation = "video_get"
+	PriceOperationVideoList       PriceOperation = "video_list"
 )
 
 // Valid indicates whether the value is a known member of the PriceOperation enum.
 func (e PriceOperation) Valid() bool {
 	switch e {
-	case Embeddings:
+	case PriceOperationBatch:
 		return true
-	case Generation:
+	case PriceOperationBedrockInvoke:
 		return true
-	case ImageEdit:
+	case PriceOperationEmbeddings:
 		return true
-	case ImageGeneration:
+	case PriceOperationGeneration:
 		return true
-	case ImageVariation:
+	case PriceOperationImageEdit:
 		return true
-	case ModelGet:
+	case PriceOperationImageGeneration:
 		return true
-	case ModelList:
+	case PriceOperationImageVariation:
 		return true
-	case Moderation:
+	case PriceOperationModelGet:
 		return true
-	case Speech:
+	case PriceOperationModelList:
 		return true
-	case TokenCount:
+	case PriceOperationModeration:
 		return true
-	case Transcription:
+	case PriceOperationRealtime:
 		return true
-	case VideoContent:
+	case PriceOperationRerank:
 		return true
-	case VideoCreate:
+	case PriceOperationSpeech:
 		return true
-	case VideoDelete:
+	case PriceOperationTokenCount:
 		return true
-	case VideoGet:
+	case PriceOperationTranscription:
 		return true
-	case VideoList:
+	case PriceOperationVideoContent:
+		return true
+	case PriceOperationVideoCreate:
+		return true
+	case PriceOperationVideoDelete:
+		return true
+	case PriceOperationVideoGet:
+		return true
+	case PriceOperationVideoList:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ProjectMemberResponseProjectRole.
+const (
+	ProjectMemberResponseProjectRoleManager ProjectMemberResponseProjectRole = "manager"
+	ProjectMemberResponseProjectRoleViewer  ProjectMemberResponseProjectRole = "viewer"
+)
+
+// Valid indicates whether the value is a known member of the ProjectMemberResponseProjectRole enum.
+func (e ProjectMemberResponseProjectRole) Valid() bool {
+	switch e {
+	case ProjectMemberResponseProjectRoleManager:
+		return true
+	case ProjectMemberResponseProjectRoleViewer:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ProjectMembershipItemRole.
+const (
+	ProjectMembershipItemRoleManager ProjectMembershipItemRole = "manager"
+	ProjectMembershipItemRoleViewer  ProjectMembershipItemRole = "viewer"
+)
+
+// Valid indicates whether the value is a known member of the ProjectMembershipItemRole enum.
+func (e ProjectMembershipItemRole) Valid() bool {
+	switch e {
+	case ProjectMembershipItemRoleManager:
+		return true
+	case ProjectMembershipItemRoleViewer:
 		return true
 	default:
 		return false
@@ -137,31 +431,37 @@ func (e PriceOperation) Valid() bool {
 
 // Defines values for ProviderAuthMode.
 const (
-	Adc            ProviderAuthMode = "adc"
-	ApiKey         ProviderAuthMode = "api_key"
-	DefaultChain   ProviderAuthMode = "default_chain"
-	Headers        ProviderAuthMode = "headers"
-	None           ProviderAuthMode = "none"
-	ServiceAccount ProviderAuthMode = "service_account"
-	Static         ProviderAuthMode = "static"
+	ProviderAuthModeAdc               ProviderAuthMode = "adc"
+	ProviderAuthModeApiKey            ProviderAuthMode = "api_key"
+	ProviderAuthModeAzureClientSecret ProviderAuthMode = "azure_client_secret"
+	ProviderAuthModeAzureDefault      ProviderAuthMode = "azure_default"
+	ProviderAuthModeDefaultChain      ProviderAuthMode = "default_chain"
+	ProviderAuthModeHeaders           ProviderAuthMode = "headers"
+	ProviderAuthModeNone              ProviderAuthMode = "none"
+	ProviderAuthModeServiceAccount    ProviderAuthMode = "service_account"
+	ProviderAuthModeStatic            ProviderAuthMode = "static"
 )
 
 // Valid indicates whether the value is a known member of the ProviderAuthMode enum.
 func (e ProviderAuthMode) Valid() bool {
 	switch e {
-	case Adc:
+	case ProviderAuthModeAdc:
 		return true
-	case ApiKey:
+	case ProviderAuthModeApiKey:
 		return true
-	case DefaultChain:
+	case ProviderAuthModeAzureClientSecret:
 		return true
-	case Headers:
+	case ProviderAuthModeAzureDefault:
 		return true
-	case None:
+	case ProviderAuthModeDefaultChain:
 		return true
-	case ServiceAccount:
+	case ProviderAuthModeHeaders:
 		return true
-	case Static:
+	case ProviderAuthModeNone:
+		return true
+	case ProviderAuthModeServiceAccount:
+		return true
+	case ProviderAuthModeStatic:
 		return true
 	default:
 		return false
@@ -231,6 +531,87 @@ func (e ProviderKind) Valid() bool {
 	}
 }
 
+// Defines values for ProviderResourceItemKind.
+const (
+	ProviderResourceItemKindBatch    ProviderResourceItemKind = "batch"
+	ProviderResourceItemKindFile     ProviderResourceItemKind = "file"
+	ProviderResourceItemKindResponse ProviderResourceItemKind = "response"
+)
+
+// Valid indicates whether the value is a known member of the ProviderResourceItemKind enum.
+func (e ProviderResourceItemKind) Valid() bool {
+	switch e {
+	case ProviderResourceItemKindBatch:
+		return true
+	case ProviderResourceItemKindFile:
+		return true
+	case ProviderResourceItemKindResponse:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ProvisionUserRequestRole.
+const (
+	ProvisionUserRequestRoleDeveloper ProvisionUserRequestRole = "developer"
+	ProvisionUserRequestRoleOperator  ProvisionUserRequestRole = "operator"
+	ProvisionUserRequestRoleOwner     ProvisionUserRequestRole = "owner"
+	ProvisionUserRequestRoleViewer    ProvisionUserRequestRole = "viewer"
+)
+
+// Valid indicates whether the value is a known member of the ProvisionUserRequestRole enum.
+func (e ProvisionUserRequestRole) Valid() bool {
+	switch e {
+	case ProvisionUserRequestRoleDeveloper:
+		return true
+	case ProvisionUserRequestRoleOperator:
+		return true
+	case ProvisionUserRequestRoleOwner:
+		return true
+	case ProvisionUserRequestRoleViewer:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for PutProjectMemberRequestRole.
+const (
+	PutProjectMemberRequestRoleManager PutProjectMemberRequestRole = "manager"
+	PutProjectMemberRequestRoleViewer  PutProjectMemberRequestRole = "viewer"
+)
+
+// Valid indicates whether the value is a known member of the PutProjectMemberRequestRole enum.
+func (e PutProjectMemberRequestRole) Valid() bool {
+	switch e {
+	case PutProjectMemberRequestRoleManager:
+		return true
+	case PutProjectMemberRequestRoleViewer:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for RouteDetailResponseState.
+const (
+	Active  RouteDetailResponseState = "active"
+	Retired RouteDetailResponseState = "retired"
+)
+
+// Valid indicates whether the value is a known member of the RouteDetailResponseState enum.
+func (e RouteDetailResponseState) Valid() bool {
+	switch e {
+	case Active:
+		return true
+	case Retired:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for RoutingStrategy.
 const (
 	Latency    RoutingStrategy = "latency"
@@ -258,6 +639,7 @@ func (e RoutingStrategy) Valid() bool {
 // Defines values for Surface.
 const (
 	SurfaceAnthropic Surface = "anthropic"
+	SurfaceBedrock   Surface = "bedrock"
 	SurfaceGemini    Surface = "gemini"
 	SurfaceOpenai    Surface = "openai"
 )
@@ -266,6 +648,8 @@ const (
 func (e Surface) Valid() bool {
 	switch e {
 	case SurfaceAnthropic:
+		return true
+	case SurfaceBedrock:
 		return true
 	case SurfaceGemini:
 		return true
@@ -278,19 +662,175 @@ func (e Surface) Valid() bool {
 
 // Defines values for TransportMode.
 const (
-	Async     TransportMode = "async"
-	Streaming TransportMode = "streaming"
-	Unary     TransportMode = "unary"
+	TransportModeAsync     TransportMode = "async"
+	TransportModeRealtime  TransportMode = "realtime"
+	TransportModeStreaming TransportMode = "streaming"
+	TransportModeUnary     TransportMode = "unary"
 )
 
 // Valid indicates whether the value is a known member of the TransportMode enum.
 func (e TransportMode) Valid() bool {
 	switch e {
-	case Async:
+	case TransportModeAsync:
 		return true
-	case Streaming:
+	case TransportModeRealtime:
 		return true
-	case Unary:
+	case TransportModeStreaming:
+		return true
+	case TransportModeUnary:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for UpdateBudgetAlertRuleRequestSubjectKind.
+const (
+	UpdateBudgetAlertRuleRequestSubjectKindApiKey      UpdateBudgetAlertRuleRequestSubjectKind = "api_key"
+	UpdateBudgetAlertRuleRequestSubjectKindBudgetGroup UpdateBudgetAlertRuleRequestSubjectKind = "budget_group"
+)
+
+// Valid indicates whether the value is a known member of the UpdateBudgetAlertRuleRequestSubjectKind enum.
+func (e UpdateBudgetAlertRuleRequestSubjectKind) Valid() bool {
+	switch e {
+	case UpdateBudgetAlertRuleRequestSubjectKindApiKey:
+		return true
+	case UpdateBudgetAlertRuleRequestSubjectKindBudgetGroup:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for UpdateBudgetAlertRuleRequestWindowKind.
+const (
+	UpdateBudgetAlertRuleRequestWindowKindDay   UpdateBudgetAlertRuleRequestWindowKind = "day"
+	UpdateBudgetAlertRuleRequestWindowKindMonth UpdateBudgetAlertRuleRequestWindowKind = "month"
+)
+
+// Valid indicates whether the value is a known member of the UpdateBudgetAlertRuleRequestWindowKind enum.
+func (e UpdateBudgetAlertRuleRequestWindowKind) Valid() bool {
+	switch e {
+	case UpdateBudgetAlertRuleRequestWindowKindDay:
+		return true
+	case UpdateBudgetAlertRuleRequestWindowKindMonth:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for UpdateUserRoleRequestAccessScope.
+const (
+	UpdateUserRoleRequestAccessScopeAssigned UpdateUserRoleRequestAccessScope = "assigned"
+	UpdateUserRoleRequestAccessScopeGlobal   UpdateUserRoleRequestAccessScope = "global"
+)
+
+// Valid indicates whether the value is a known member of the UpdateUserRoleRequestAccessScope enum.
+func (e UpdateUserRoleRequestAccessScope) Valid() bool {
+	switch e {
+	case UpdateUserRoleRequestAccessScopeAssigned:
+		return true
+	case UpdateUserRoleRequestAccessScopeGlobal:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for UserDetailResponseAccessScope.
+const (
+	UserDetailResponseAccessScopeAssigned UserDetailResponseAccessScope = "assigned"
+	UserDetailResponseAccessScopeGlobal   UserDetailResponseAccessScope = "global"
+)
+
+// Valid indicates whether the value is a known member of the UserDetailResponseAccessScope enum.
+func (e UserDetailResponseAccessScope) Valid() bool {
+	switch e {
+	case UserDetailResponseAccessScopeAssigned:
+		return true
+	case UserDetailResponseAccessScopeGlobal:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for UserResponseAccessScope.
+const (
+	UserResponseAccessScopeAssigned UserResponseAccessScope = "assigned"
+	UserResponseAccessScopeGlobal   UserResponseAccessScope = "global"
+)
+
+// Valid indicates whether the value is a known member of the UserResponseAccessScope enum.
+func (e UserResponseAccessScope) Valid() bool {
+	switch e {
+	case UserResponseAccessScopeAssigned:
+		return true
+	case UserResponseAccessScopeGlobal:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for DownloadMediaJobContentParamsVariant.
+const (
+	Spritesheet DownloadMediaJobContentParamsVariant = "spritesheet"
+	Thumbnail   DownloadMediaJobContentParamsVariant = "thumbnail"
+	Video       DownloadMediaJobContentParamsVariant = "video"
+)
+
+// Valid indicates whether the value is a known member of the DownloadMediaJobContentParamsVariant enum.
+func (e DownloadMediaJobContentParamsVariant) Valid() bool {
+	switch e {
+	case Spritesheet:
+		return true
+	case Thumbnail:
+		return true
+	case Video:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ListBudgetAlertDeliveriesParamsStatus.
+const (
+	ListBudgetAlertDeliveriesParamsStatusDelivered ListBudgetAlertDeliveriesParamsStatus = "delivered"
+	ListBudgetAlertDeliveriesParamsStatusFailed    ListBudgetAlertDeliveriesParamsStatus = "failed"
+	ListBudgetAlertDeliveriesParamsStatusPending   ListBudgetAlertDeliveriesParamsStatus = "pending"
+)
+
+// Valid indicates whether the value is a known member of the ListBudgetAlertDeliveriesParamsStatus enum.
+func (e ListBudgetAlertDeliveriesParamsStatus) Valid() bool {
+	switch e {
+	case ListBudgetAlertDeliveriesParamsStatusDelivered:
+		return true
+	case ListBudgetAlertDeliveriesParamsStatusFailed:
+		return true
+	case ListBudgetAlertDeliveriesParamsStatusPending:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ListProviderResourcesParamsKind.
+const (
+	ListProviderResourcesParamsKindBatch    ListProviderResourcesParamsKind = "batch"
+	ListProviderResourcesParamsKindFile     ListProviderResourcesParamsKind = "file"
+	ListProviderResourcesParamsKindResponse ListProviderResourcesParamsKind = "response"
+)
+
+// Valid indicates whether the value is a known member of the ListProviderResourcesParamsKind enum.
+func (e ListProviderResourcesParamsKind) Valid() bool {
+	switch e {
+	case ListProviderResourcesParamsKindBatch:
+		return true
+	case ListProviderResourcesParamsKindFile:
+		return true
+	case ListProviderResourcesParamsKindResponse:
 		return true
 	default:
 		return false
@@ -323,24 +863,38 @@ type ApiKeyBudgetWindowResponse struct {
 
 // ApiKeyDetailResponse defines model for ApiKeyDetailResponse.
 type ApiKeyDetailResponse struct {
-	AllowedRoutes []string             `json:"allowed_routes"`
-	Budget        ApiKeyBudgetResponse `json:"budget"`
-	CreatedAt     time.Time            `json:"created_at"`
+	// AllowProviderState Permits stateful provider resources (stored responses, background
+	// jobs, previous_response_id chains) under this key. Provider state may
+	// retain user content.
+	AllowProviderState bool `json:"allow_provider_state"`
+
+	// AllowedAttributionKeys Attribution keys this key may report via the X-OLP-Attribution header; at most 8, each a short machine token.
+	AllowedAttributionKeys []string             `json:"allowed_attribution_keys"`
+	AllowedRoutes          []string             `json:"allowed_routes"`
+	Budget                 ApiKeyBudgetResponse `json:"budget"`
+
+	// BudgetGroupId Shared budget group this key spends against; null means key-only budgets.
+	BudgetGroupId nullable.Nullable[openapi_types.UUID] `json:"budget_group_id"`
+	CreatedAt     time.Time                             `json:"created_at"`
 
 	// CreatedBy The operator who issued this installation-scoped key.
-	CreatedBy         openapi_types.UUID           `json:"created_by"`
-	CreatedByEmail    string                       `json:"created_by_email"`
-	Etag              openapi_types.UUID           `json:"etag"`
-	ExpiresAt         nullable.Nullable[time.Time] `json:"expires_at,omitempty"`
-	Id                openapi_types.UUID           `json:"id"`
-	LookupId          string                       `json:"lookup_id"`
-	MaxConcurrency    nullable.Nullable[int32]     `json:"max_concurrency,omitempty"`
-	Name              string                       `json:"name"`
-	RequestsPerMinute nullable.Nullable[int32]     `json:"requests_per_minute,omitempty"`
-	RevokedAt         nullable.Nullable[time.Time] `json:"revoked_at,omitempty"`
-	RotatedAt         nullable.Nullable[time.Time] `json:"rotated_at,omitempty"`
-	Scopes            []string                     `json:"scopes"`
-	TokensPerMinute   nullable.Nullable[int64]     `json:"tokens_per_minute,omitempty"`
+	CreatedBy      openapi_types.UUID           `json:"created_by"`
+	CreatedByEmail string                       `json:"created_by_email"`
+	Etag           openapi_types.UUID           `json:"etag"`
+	ExpiresAt      nullable.Nullable[time.Time] `json:"expires_at,omitempty"`
+	Id             openapi_types.UUID           `json:"id"`
+	LookupId       string                       `json:"lookup_id"`
+	MaxConcurrency nullable.Nullable[int32]     `json:"max_concurrency,omitempty"`
+	Name           string                       `json:"name"`
+
+	// ProjectId Owning project; null means installation-wide.
+	ProjectId         nullable.Nullable[openapi_types.UUID] `json:"project_id"`
+	ProjectName       nullable.Nullable[string]             `json:"project_name"`
+	RequestsPerMinute nullable.Nullable[int32]              `json:"requests_per_minute,omitempty"`
+	RevokedAt         nullable.Nullable[time.Time]          `json:"revoked_at,omitempty"`
+	RotatedAt         nullable.Nullable[time.Time]          `json:"rotated_at,omitempty"`
+	Scopes            []string                              `json:"scopes"`
+	TokensPerMinute   nullable.Nullable[int64]              `json:"tokens_per_minute,omitempty"`
 }
 
 // ApiKeyListResponse defines model for ApiKeyListResponse.
@@ -366,30 +920,33 @@ type AppliedRoutingPolicy struct {
 
 // AttemptResponse defines model for AttemptResponse.
 type AttemptResponse struct {
-	CachedInputTokens nullable.Nullable[int64]                  `json:"cached_input_tokens,omitempty"`
-	ChargeStatus      nullable.Nullable[string]                 `json:"charge_status,omitempty"`
-	Committed         bool                                      `json:"committed"`
-	CompletedAt       nullable.Nullable[time.Time]              `json:"completed_at,omitempty"`
-	Currency          nullable.Nullable[string]                 `json:"currency,omitempty"`
-	ErrorClass        nullable.Nullable[string]                 `json:"error_class,omitempty"`
-	EstimatedCost     nullable.Nullable[string]                 `json:"estimated_cost,omitempty"`
-	FirstByteMs       nullable.Nullable[int64]                  `json:"first_byte_ms,omitempty"`
-	Id                openapi_types.UUID                        `json:"id"`
-	InputTokens       nullable.Nullable[int64]                  `json:"input_tokens,omitempty"`
-	LatencyMs         nullable.Nullable[int64]                  `json:"latency_ms,omitempty"`
-	MediaUnits        nullable.Nullable[string]                 `json:"media_units,omitempty"`
-	Ordinal           int32                                     `json:"ordinal"`
-	OutputTokens      nullable.Nullable[int64]                  `json:"output_tokens,omitempty"`
-	PricingRevisionId nullable.Nullable[openapi_types.UUID]     `json:"pricing_revision_id,omitempty"`
-	ProviderId        openapi_types.UUID                        `json:"provider_id"`
-	ProviderName      string                                    `json:"provider_name"`
-	Routing           nullable.Nullable[AttemptRoutingMetadata] `json:"routing,omitempty"`
-	StartedAt         time.Time                                 `json:"started_at"`
-	StatusCode        nullable.Nullable[int32]                  `json:"status_code,omitempty"`
-	Unpriced          nullable.Nullable[bool]                   `json:"unpriced,omitempty"`
-	UpstreamModel     string                                    `json:"upstream_model"`
-	UsageComplete     nullable.Nullable[bool]                   `json:"usage_complete,omitempty"`
-	UsageObserved     nullable.Nullable[bool]                   `json:"usage_observed,omitempty"`
+	CacheWrite1hInputTokens nullable.Nullable[int64]                  `json:"cache_write_1h_input_tokens,omitempty"`
+	CacheWrite5mInputTokens nullable.Nullable[int64]                  `json:"cache_write_5m_input_tokens,omitempty"`
+	CacheWriteInputTokens   nullable.Nullable[int64]                  `json:"cache_write_input_tokens,omitempty"`
+	CachedInputTokens       nullable.Nullable[int64]                  `json:"cached_input_tokens,omitempty"`
+	ChargeStatus            nullable.Nullable[string]                 `json:"charge_status,omitempty"`
+	Committed               bool                                      `json:"committed"`
+	CompletedAt             nullable.Nullable[time.Time]              `json:"completed_at,omitempty"`
+	Currency                nullable.Nullable[string]                 `json:"currency,omitempty"`
+	ErrorClass              nullable.Nullable[string]                 `json:"error_class,omitempty"`
+	EstimatedCost           nullable.Nullable[string]                 `json:"estimated_cost,omitempty"`
+	FirstByteMs             nullable.Nullable[int64]                  `json:"first_byte_ms,omitempty"`
+	Id                      openapi_types.UUID                        `json:"id"`
+	InputTokens             nullable.Nullable[int64]                  `json:"input_tokens,omitempty"`
+	LatencyMs               nullable.Nullable[int64]                  `json:"latency_ms,omitempty"`
+	MediaUnits              nullable.Nullable[string]                 `json:"media_units,omitempty"`
+	Ordinal                 int32                                     `json:"ordinal"`
+	OutputTokens            nullable.Nullable[int64]                  `json:"output_tokens,omitempty"`
+	PricingRevisionId       nullable.Nullable[openapi_types.UUID]     `json:"pricing_revision_id,omitempty"`
+	ProviderId              openapi_types.UUID                        `json:"provider_id"`
+	ProviderName            string                                    `json:"provider_name"`
+	Routing                 nullable.Nullable[AttemptRoutingMetadata] `json:"routing,omitempty"`
+	StartedAt               time.Time                                 `json:"started_at"`
+	StatusCode              nullable.Nullable[int32]                  `json:"status_code,omitempty"`
+	Unpriced                nullable.Nullable[bool]                   `json:"unpriced,omitempty"`
+	UpstreamModel           string                                    `json:"upstream_model"`
+	UsageComplete           nullable.Nullable[bool]                   `json:"usage_complete,omitempty"`
+	UsageObserved           nullable.Nullable[bool]                   `json:"usage_observed,omitempty"`
 }
 
 // AttemptRoutingMetadata defines model for AttemptRoutingMetadata.
@@ -406,14 +963,19 @@ type AttemptRoutingMetadata struct {
 
 // AuditEventResponse defines model for AuditEventResponse.
 type AuditEventResponse struct {
-	Action       string                                `json:"action"`
-	ActorEmail   nullable.Nullable[string]             `json:"actor_email,omitempty"`
-	ActorUserId  nullable.Nullable[openapi_types.UUID] `json:"actor_user_id,omitempty"`
-	Id           openapi_types.UUID                    `json:"id"`
-	OccurredAt   time.Time                             `json:"occurred_at"`
-	Outcome      string                                `json:"outcome"`
-	ResourceId   nullable.Nullable[string]             `json:"resource_id,omitempty"`
-	ResourceType string                                `json:"resource_type"`
+	Action     string                    `json:"action"`
+	ActorEmail nullable.Nullable[string] `json:"actor_email,omitempty"`
+
+	// ActorLabel Actor display label: the user's email or the management token's name.
+	ActorLabel             nullable.Nullable[string]             `json:"actor_label,omitempty"`
+	ActorManagementTokenId nullable.Nullable[openapi_types.UUID] `json:"actor_management_token_id,omitempty"`
+	ActorType              AuditEventResponseActorType           `json:"actor_type"`
+	ActorUserId            nullable.Nullable[openapi_types.UUID] `json:"actor_user_id,omitempty"`
+	Id                     openapi_types.UUID                    `json:"id"`
+	OccurredAt             time.Time                             `json:"occurred_at"`
+	Outcome                string                                `json:"outcome"`
+	ResourceId             nullable.Nullable[string]             `json:"resource_id,omitempty"`
+	ResourceType           string                                `json:"resource_type"`
 
 	// SourceIp Source address recorded for the request, when the boundary supplied one.
 	SourceIp nullable.Nullable[string] `json:"source_ip,omitempty"`
@@ -421,6 +983,9 @@ type AuditEventResponse struct {
 	// UserAgentFamily Coarse user-agent family; the full user-agent string is never stored.
 	UserAgentFamily nullable.Nullable[string] `json:"user_agent_family,omitempty"`
 }
+
+// AuditEventResponseActorType defines model for AuditEventResponse.ActorType.
+type AuditEventResponseActorType string
 
 // AuditListResponse defines model for AuditListResponse.
 type AuditListResponse struct {
@@ -436,7 +1001,10 @@ type AuthenticationCapabilities struct {
 	// LimitsEnforced Whether stored API key limits and cost budgets are enforced.
 	LimitsEnforced    *bool `json:"limits_enforced,omitempty"`
 	LocalLoginEnabled bool  `json:"local_login_enabled"`
-	OidcLoginEnabled  bool  `json:"oidc_login_enabled"`
+
+	// NotificationsActive Whether the installation runs the budget alert delivery worker, so stored rules actually notify.
+	NotificationsActive bool `json:"notifications_active"`
+	OidcLoginEnabled    bool `json:"oidc_login_enabled"`
 
 	// RetentionEnforced Whether stored retention policies are applied by workers.
 	RetentionEnforced *bool `json:"retention_enforced,omitempty"`
@@ -446,6 +1014,119 @@ type AuthenticationCapabilities struct {
 type BTreeMap map[string][]struct {
 	Code    string `json:"code"`
 	Message string `json:"message"`
+}
+
+// BudgetAlertDelivery defines model for BudgetAlertDelivery.
+type BudgetAlertDelivery struct {
+	// Accrued The exact accrual that crossed the threshold, preserved from claim time.
+	Accrued       string                       `json:"accrued"`
+	Attempts      int32                        `json:"attempts"`
+	CreatedAt     time.Time                    `json:"created_at"`
+	Currency      nullable.Nullable[string]    `json:"currency"`
+	DeliveredAt   nullable.Nullable[time.Time] `json:"delivered_at"`
+	Id            openapi_types.UUID           `json:"id"`
+	LastAttemptAt nullable.Nullable[time.Time] `json:"last_attempt_at"`
+
+	// LastErrorCode Safe failure category only; raw errors are never stored.
+	LastErrorCode nullable.Nullable[string] `json:"last_error_code"`
+
+	// Limit The subject limit evaluated at claim time.
+	Limit            string                                `json:"limit"`
+	ProjectId        nullable.Nullable[openapi_types.UUID] `json:"project_id"`
+	RuleId           openapi_types.UUID                    `json:"rule_id"`
+	RuleName         string                                `json:"rule_name"`
+	Status           BudgetAlertDeliveryStatus             `json:"status"`
+	ThresholdPercent int32                                 `json:"threshold_percent"`
+	WindowId         int64                                 `json:"window_id"`
+}
+
+// BudgetAlertDeliveryStatus defines model for BudgetAlertDelivery.Status.
+type BudgetAlertDeliveryStatus string
+
+// BudgetAlertDeliveryListResponse defines model for BudgetAlertDeliveryListResponse.
+type BudgetAlertDeliveryListResponse struct {
+	Items      []BudgetAlertDelivery     `json:"items"`
+	NextCursor nullable.Nullable[string] `json:"next_cursor,omitempty"`
+}
+
+// BudgetAlertRule defines model for BudgetAlertRule.
+type BudgetAlertRule struct {
+	CreatedAt        time.Time                             `json:"created_at"`
+	CreatedBy        openapi_types.UUID                    `json:"created_by"`
+	CreatedByEmail   string                                `json:"created_by_email"`
+	DestinationId    openapi_types.UUID                    `json:"destination_id"`
+	DestinationName  string                                `json:"destination_name"`
+	Enabled          bool                                  `json:"enabled"`
+	Etag             openapi_types.UUID                    `json:"etag"`
+	Id               openapi_types.UUID                    `json:"id"`
+	Name             string                                `json:"name"`
+	ProjectId        nullable.Nullable[openapi_types.UUID] `json:"project_id"`
+	ProjectName      nullable.Nullable[string]             `json:"project_name"`
+	SubjectId        openapi_types.UUID                    `json:"subject_id"`
+	SubjectKind      BudgetAlertRuleSubjectKind            `json:"subject_kind"`
+	SubjectName      nullable.Nullable[string]             `json:"subject_name"`
+	ThresholdPercent int32                                 `json:"threshold_percent"`
+	UpdatedAt        time.Time                             `json:"updated_at"`
+	WindowKind       BudgetAlertRuleWindowKind             `json:"window_kind"`
+}
+
+// BudgetAlertRuleSubjectKind defines model for BudgetAlertRule.SubjectKind.
+type BudgetAlertRuleSubjectKind string
+
+// BudgetAlertRuleWindowKind defines model for BudgetAlertRule.WindowKind.
+type BudgetAlertRuleWindowKind string
+
+// BudgetAlertRuleListResponse defines model for BudgetAlertRuleListResponse.
+type BudgetAlertRuleListResponse struct {
+	Items      []BudgetAlertRule         `json:"items"`
+	NextCursor nullable.Nullable[string] `json:"next_cursor,omitempty"`
+}
+
+// BudgetGroupBudgetResponse defines model for BudgetGroupBudgetResponse.
+type BudgetGroupBudgetResponse struct {
+	Daily BudgetGroupBudgetWindowResponse `json:"daily"`
+
+	// EnforcementActive False when the amounts are stored policy only; accrued values are not live accounting.
+	EnforcementActive *bool                           `json:"enforcement_active,omitempty"`
+	Monthly           BudgetGroupBudgetWindowResponse `json:"monthly"`
+	UnpricedAttempts  int64                           `json:"unpriced_attempts"`
+}
+
+// BudgetGroupBudgetWindowResponse defines model for BudgetGroupBudgetWindowResponse.
+type BudgetGroupBudgetWindowResponse struct {
+	Accrued   string                    `json:"accrued"`
+	Limit     nullable.Nullable[string] `json:"limit"`
+	Remaining nullable.Nullable[string] `json:"remaining"`
+	ResetAt   time.Time                 `json:"reset_at"`
+}
+
+// BudgetGroupDetailResponse defines model for BudgetGroupDetailResponse.
+type BudgetGroupDetailResponse struct {
+	Budget           BudgetGroupBudgetResponse `json:"budget"`
+	CreatedAt        time.Time                 `json:"created_at"`
+	CreatedBy        openapi_types.UUID        `json:"created_by"`
+	CreatedByEmail   string                    `json:"created_by_email"`
+	DailyCostLimit   nullable.Nullable[string] `json:"daily_cost_limit"`
+	Etag             openapi_types.UUID        `json:"etag"`
+	Id               openapi_types.UUID        `json:"id"`
+	MonthlyCostLimit nullable.Nullable[string] `json:"monthly_cost_limit"`
+	Name             string                    `json:"name"`
+
+	// ProjectId Owning project; null means installation-wide.
+	ProjectId   nullable.Nullable[openapi_types.UUID] `json:"project_id"`
+	ProjectName nullable.Nullable[string]             `json:"project_name"`
+	UpdatedAt   time.Time                             `json:"updated_at"`
+}
+
+// BudgetGroupListResponse defines model for BudgetGroupListResponse.
+type BudgetGroupListResponse struct {
+	Items      []BudgetGroupDetailResponse `json:"items"`
+	NextCursor nullable.Nullable[string]   `json:"next_cursor,omitempty"`
+}
+
+// BudgetGroupMutationResponse defines model for BudgetGroupMutationResponse.
+type BudgetGroupMutationResponse struct {
+	Etag openapi_types.UUID `json:"etag"`
 }
 
 // CapabilityCertificationItemResponse defines model for CapabilityCertificationItemResponse.
@@ -491,6 +1172,171 @@ type ChangePasswordRequest struct {
 	NewPassword     *string `json:"new_password,omitempty"`
 }
 
+// ConfigurationCapabilityEntry defines model for ConfigurationCapabilityEntry.
+type ConfigurationCapabilityEntry struct {
+	Mode      ConfigurationCapabilityEntryMode `json:"mode"`
+	Operation string                           `json:"operation"`
+	Surface   string                           `json:"surface"`
+}
+
+// ConfigurationCapabilityEntryMode defines model for ConfigurationCapabilityEntry.Mode.
+type ConfigurationCapabilityEntryMode string
+
+// ConfigurationDocument Secret-free desired-state artifact identified by natural names, never UUIDs
+type ConfigurationDocument struct {
+	ApiVersion ConfigurationDocumentApiVersion `json:"api_version"`
+
+	// ExportedAt Informational only; excluded from the artifact digest
+	ExportedAt *time.Time                                   `json:"exported_at,omitempty"`
+	Pricing    nullable.Nullable[ConfigurationPricingEntry] `json:"pricing"`
+	Projects   []ConfigurationProjectEntry                  `json:"projects"`
+	Providers  []ConfigurationProviderEntry                 `json:"providers"`
+	Routes     []ConfigurationRouteEntry                    `json:"routes"`
+}
+
+// ConfigurationDocumentApiVersion defines model for ConfigurationDocument.ApiVersion.
+type ConfigurationDocumentApiVersion string
+
+// ConfigurationExportResponse defines model for ConfigurationExportResponse.
+type ConfigurationExportResponse struct {
+	// Digest SHA-256 lowercase hex of the canonical document
+	Digest string `json:"digest"`
+
+	// Document Secret-free desired-state artifact identified by natural names, never UUIDs
+	Document ConfigurationDocument `json:"document"`
+}
+
+// ConfigurationModelEntry defines model for ConfigurationModelEntry.
+type ConfigurationModelEntry struct {
+	Capabilities  []ConfigurationCapabilityEntry `json:"capabilities"`
+	DisplayName   string                         `json:"display_name"`
+	Enabled       bool                           `json:"enabled"`
+	UpstreamModel string                         `json:"upstream_model"`
+}
+
+// ConfigurationPlanItem defines model for ConfigurationPlanItem.
+type ConfigurationPlanItem struct {
+	Action string `json:"action"`
+	Detail string `json:"detail"`
+	Key    string `json:"key"`
+	Kind   string `json:"kind"`
+}
+
+// ConfigurationPlanResponse defines model for ConfigurationPlanResponse.
+type ConfigurationPlanResponse struct {
+	Actions   []ConfigurationPlanItem `json:"actions"`
+	Blockers  []ConfigurationPlanItem `json:"blockers"`
+	Conflicts []ConfigurationPlanItem `json:"conflicts"`
+	Digest    string                  `json:"digest"`
+}
+
+// ConfigurationPriceEntry defines model for ConfigurationPriceEntry.
+type ConfigurationPriceEntry struct {
+	CacheWrite1hInputPerMillion nullable.Nullable[string] `json:"cache_write_1h_input_per_million"`
+	CacheWrite5mInputPerMillion nullable.Nullable[string] `json:"cache_write_5m_input_per_million"`
+	CacheWriteInputPerMillion   nullable.Nullable[string] `json:"cache_write_input_per_million"`
+	CachedInputPerMillion       nullable.Nullable[string] `json:"cached_input_per_million"`
+	Currency                    string                    `json:"currency"`
+	InputPerMillion             nullable.Nullable[string] `json:"input_per_million"`
+	Model                       string                    `json:"model"`
+	Operation                   string                    `json:"operation"`
+	OutputPerMillion            nullable.Nullable[string] `json:"output_per_million"`
+
+	// Provider Provider name, or null for a provider-kind price
+	Provider     nullable.Nullable[string] `json:"provider"`
+	ProviderKind string                    `json:"provider_kind"`
+	UnitPrice    nullable.Nullable[string] `json:"unit_price"`
+	VendorId     nullable.Nullable[string] `json:"vendor_id"`
+}
+
+// ConfigurationPricingEntry defines model for ConfigurationPricingEntry.
+type ConfigurationPricingEntry struct {
+	EffectiveAt time.Time                 `json:"effective_at"`
+	Prices      []ConfigurationPriceEntry `json:"prices"`
+}
+
+// ConfigurationProjectEntry defines model for ConfigurationProjectEntry.
+type ConfigurationProjectEntry struct {
+	Name string `json:"name"`
+}
+
+// ConfigurationPromotionRequest defines model for ConfigurationPromotionRequest.
+type ConfigurationPromotionRequest struct {
+	// Document Secret-free desired-state artifact identified by natural names, never UUIDs
+	Document ConfigurationDocument `json:"document"`
+
+	// ExpectedDigest Digest the destination must still export for the apply to proceed
+	ExpectedDigest nullable.Nullable[string] `json:"expected_digest,omitempty"`
+
+	// SecretBindings Write-only map from credential_ref to secret; never echoed, audited, or replayed
+	SecretBindings *map[string]string `json:"secret_bindings,omitempty"`
+}
+
+// ConfigurationProviderEntry defines model for ConfigurationProviderEntry.
+type ConfigurationProviderEntry struct {
+	Configuration ProviderConfiguration     `json:"configuration"`
+	Models        []ConfigurationModelEntry `json:"models"`
+	Name          string                    `json:"name"`
+
+	// Project Project name, or null for an installation-wide provider
+	Project nullable.Nullable[string] `json:"project"`
+	Slots   []ConfigurationSlotEntry  `json:"slots"`
+}
+
+// ConfigurationRouteEntry defines model for ConfigurationRouteEntry.
+type ConfigurationRouteEntry struct {
+	ContentPolicy    nullable.Nullable[ContentPolicy] `json:"content_policy"`
+	MaxAttempts      int32                            `json:"max_attempts"`
+	Operations       []string                         `json:"operations"`
+	OverallTimeoutMs int32                            `json:"overall_timeout_ms"`
+
+	// Project Project name, or null for an installation-wide route
+	Project       nullable.Nullable[string]        `json:"project"`
+	Retired       *bool                            `json:"retired,omitempty"`
+	RoutingPolicy nullable.Nullable[RoutingPolicy] `json:"routing_policy"`
+	Slug          string                           `json:"slug"`
+	Targets       []ConfigurationRouteTarget       `json:"targets"`
+}
+
+// ConfigurationRouteTarget defines model for ConfigurationRouteTarget.
+type ConfigurationRouteTarget struct {
+	Priority int32 `json:"priority"`
+
+	// Provider Provider name
+	Provider      string `json:"provider"`
+	ProviderModel string `json:"provider_model"`
+	TimeoutMs     int32  `json:"timeout_ms"`
+	Weight        int32  `json:"weight"`
+}
+
+// ConfigurationSlotEntry defines model for ConfigurationSlotEntry.
+type ConfigurationSlotEntry struct {
+	// CredentialRef Stable 'provider-name/slot-name-or-default' reference; null for credentialless authentication
+	CredentialRef nullable.Nullable[string]     `json:"credential_ref"`
+	Enabled       bool                          `json:"enabled"`
+	IsDefault     bool                          `json:"is_default"`
+	Limits        ConfigurationSlotLimits       `json:"limits"`
+	Name          string                        `json:"name"`
+	Position      int32                         `json:"position"`
+	Priority      int32                         `json:"priority"`
+	Restrictions  ConfigurationSlotRestrictions `json:"restrictions"`
+	Weight        int32                         `json:"weight"`
+}
+
+// ConfigurationSlotLimits defines model for ConfigurationSlotLimits.
+type ConfigurationSlotLimits struct {
+	MaxConcurrency    nullable.Nullable[int64] `json:"max_concurrency"`
+	RequestsPerMinute nullable.Nullable[int64] `json:"requests_per_minute"`
+	TokensPerMinute   nullable.Nullable[int64] `json:"tokens_per_minute"`
+}
+
+// ConfigurationSlotRestrictions defines model for ConfigurationSlotRestrictions.
+type ConfigurationSlotRestrictions struct {
+	AllowedApiKeys []string `json:"allowed_api_keys"`
+	AllowedModels  []string `json:"allowed_models"`
+	AllowedRoutes  []string `json:"allowed_routes"`
+}
+
 // ConnectionLimits defines model for ConnectionLimits.
 type ConnectionLimits struct {
 	MaxConcurrency    nullable.Nullable[int32] `json:"max_concurrency,omitempty"`
@@ -508,17 +1354,53 @@ type ConnectionOptions struct {
 	VendorId          nullable.Nullable[string]           `json:"vendor_id,omitempty"`
 }
 
+// ContentPolicy Route content policy: ordered RE2 rules enforced on inspectable request and unary response text. Absent or null disables enforcement.
+type ContentPolicy struct {
+	Rules []ContentPolicyRule `json:"rules"`
+}
+
+// ContentPolicyRule defines model for ContentPolicyRule.
+type ContentPolicyRule struct {
+	Action ContentPolicyRuleAction `json:"action"`
+	Id     string                  `json:"id"`
+
+	// Pattern Go RE2 expression; must not match the empty string.
+	Pattern string                 `json:"pattern"`
+	Phase   ContentPolicyRulePhase `json:"phase"`
+
+	// Replacement Literal replacement for the redact action; defaults to [REDACTED]. No capture expansion.
+	Replacement *string `json:"replacement,omitempty"`
+}
+
+// ContentPolicyRuleAction defines model for ContentPolicyRule.Action.
+type ContentPolicyRuleAction string
+
+// ContentPolicyRulePhase defines model for ContentPolicyRule.Phase.
+type ContentPolicyRulePhase string
+
 // CreateApiKeyRequest defines model for CreateApiKeyRequest.
 type CreateApiKeyRequest struct {
-	AllowedRoutes     *[]string                    `json:"allowed_routes,omitempty"`
-	DailyCostLimit    nullable.Nullable[string]    `json:"daily_cost_limit,omitempty"`
-	ExpiresAt         nullable.Nullable[time.Time] `json:"expires_at,omitempty"`
-	MaxConcurrency    nullable.Nullable[int32]     `json:"max_concurrency,omitempty"`
-	MonthlyCostLimit  nullable.Nullable[string]    `json:"monthly_cost_limit,omitempty"`
-	Name              string                       `json:"name"`
-	RequestsPerMinute nullable.Nullable[int32]     `json:"requests_per_minute,omitempty"`
-	Scopes            *[]string                    `json:"scopes,omitempty"`
-	TokensPerMinute   nullable.Nullable[int64]     `json:"tokens_per_minute,omitempty"`
+	// AllowProviderState Permits stateful provider resources under this key. Provider state
+	// may retain user content; defaults to false.
+	AllowProviderState *bool `json:"allow_provider_state,omitempty"`
+
+	// AllowedAttributionKeys Attribution keys this key may report via the X-OLP-Attribution header; at most 8, each a short machine token.
+	AllowedAttributionKeys *[]string `json:"allowed_attribution_keys,omitempty"`
+	AllowedRoutes          *[]string `json:"allowed_routes,omitempty"`
+
+	// BudgetGroupId Shared budget group; must belong to the same project as the key (both may be null).
+	BudgetGroupId    nullable.Nullable[openapi_types.UUID] `json:"budget_group_id,omitempty"`
+	DailyCostLimit   nullable.Nullable[string]             `json:"daily_cost_limit,omitempty"`
+	ExpiresAt        nullable.Nullable[time.Time]          `json:"expires_at,omitempty"`
+	MaxConcurrency   nullable.Nullable[int32]              `json:"max_concurrency,omitempty"`
+	MonthlyCostLimit nullable.Nullable[string]             `json:"monthly_cost_limit,omitempty"`
+	Name             string                                `json:"name"`
+
+	// ProjectId Owning project; omit or null for an installation-wide key. Required for assigned principals.
+	ProjectId         nullable.Nullable[openapi_types.UUID] `json:"project_id,omitempty"`
+	RequestsPerMinute nullable.Nullable[int32]              `json:"requests_per_minute,omitempty"`
+	Scopes            *[]string                             `json:"scopes,omitempty"`
+	TokensPerMinute   nullable.Nullable[int64]              `json:"tokens_per_minute,omitempty"`
 }
 
 // CreateApiKeyResponse defines model for CreateApiKeyResponse.
@@ -529,6 +1411,44 @@ type CreateApiKeyResponse struct {
 
 	// Secret Returned only by this creation response.
 	Secret string `json:"secret"`
+}
+
+// CreateBudgetAlertRuleRequest defines model for CreateBudgetAlertRuleRequest.
+type CreateBudgetAlertRuleRequest struct {
+	DestinationId openapi_types.UUID `json:"destination_id"`
+
+	// Enabled Defaults to true.
+	Enabled *bool  `json:"enabled,omitempty"`
+	Name    string `json:"name"`
+
+	// ProjectId Owning project; subject and destination must belong to the same project.
+	ProjectId        nullable.Nullable[openapi_types.UUID]   `json:"project_id,omitempty"`
+	SubjectId        openapi_types.UUID                      `json:"subject_id"`
+	SubjectKind      CreateBudgetAlertRuleRequestSubjectKind `json:"subject_kind"`
+	ThresholdPercent int32                                   `json:"threshold_percent"`
+	WindowKind       CreateBudgetAlertRuleRequestWindowKind  `json:"window_kind"`
+}
+
+// CreateBudgetAlertRuleRequestSubjectKind defines model for CreateBudgetAlertRuleRequest.SubjectKind.
+type CreateBudgetAlertRuleRequestSubjectKind string
+
+// CreateBudgetAlertRuleRequestWindowKind defines model for CreateBudgetAlertRuleRequest.WindowKind.
+type CreateBudgetAlertRuleRequestWindowKind string
+
+// CreateBudgetGroupRequest defines model for CreateBudgetGroupRequest.
+type CreateBudgetGroupRequest struct {
+	DailyCostLimit   nullable.Nullable[string] `json:"daily_cost_limit,omitempty"`
+	MonthlyCostLimit nullable.Nullable[string] `json:"monthly_cost_limit,omitempty"`
+	Name             string                    `json:"name"`
+
+	// ProjectId Owning project; omit or null for an installation-wide group. Required for assigned principals.
+	ProjectId nullable.Nullable[openapi_types.UUID] `json:"project_id,omitempty"`
+}
+
+// CreateBudgetGroupResponse defines model for CreateBudgetGroupResponse.
+type CreateBudgetGroupResponse struct {
+	Etag openapi_types.UUID `json:"etag"`
+	Id   openapi_types.UUID `json:"id"`
 }
 
 // CreateInvitationRequest defines model for CreateInvitationRequest.
@@ -549,6 +1469,69 @@ type CreateInvitationResponse struct {
 	Token *string `json:"token,omitempty"`
 }
 
+// CreateManagementTokenRequest defines model for CreateManagementTokenRequest.
+type CreateManagementTokenRequest struct {
+	ExpiresAt time.Time `json:"expires_at"`
+	Name      string    `json:"name"`
+
+	// ProjectIds Projects the token may administer. Omit for all projects.
+	ProjectIds *[]openapi_types.UUID                `json:"project_ids,omitempty"`
+	Scopes     []CreateManagementTokenRequestScopes `json:"scopes"`
+}
+
+// CreateManagementTokenRequestScopes defines model for CreateManagementTokenRequest.Scopes.
+type CreateManagementTokenRequestScopes string
+
+// CreateManagementTokenResponse defines model for CreateManagementTokenResponse.
+type CreateManagementTokenResponse struct {
+	AllProjects    bool                         `json:"all_projects"`
+	CreatedAt      time.Time                    `json:"created_at"`
+	CreatedBy      openapi_types.UUID           `json:"created_by"`
+	CreatedByEmail string                       `json:"created_by_email"`
+	Etag           openapi_types.UUID           `json:"etag"`
+	ExpiresAt      time.Time                    `json:"expires_at"`
+	Id             openapi_types.UUID           `json:"id"`
+	LookupId       string                       `json:"lookup_id"`
+	Name           string                       `json:"name"`
+	ProjectIds     []openapi_types.UUID         `json:"project_ids"`
+	RevokedAt      nullable.Nullable[time.Time] `json:"revoked_at"`
+	Scopes         []string                     `json:"scopes"`
+
+	// Secret Returned only by this creation response.
+	Secret string `json:"secret"`
+}
+
+// CreateNotificationDestinationRequest defines model for CreateNotificationDestinationRequest.
+type CreateNotificationDestinationRequest struct {
+	// Enabled Defaults to true.
+	Enabled *bool  `json:"enabled,omitempty"`
+	Name    string `json:"name"`
+
+	// ProjectId Owning project; omit or null for an installation-wide destination.
+	ProjectId nullable.Nullable[openapi_types.UUID] `json:"project_id,omitempty"`
+
+	// Secret Optional HMAC-SHA256 signing secret. Write-only; never returned.
+	Secret nullable.Nullable[string] `json:"secret,omitempty"`
+
+	// Url Webhook URL validated by the installation egress policy.
+	Url string `json:"url"`
+}
+
+// CreatePricingSourceRequest defines model for CreatePricingSourceRequest.
+type CreatePricingSourceRequest struct {
+	// Enabled Defaults to true.
+	Enabled *bool  `json:"enabled,omitempty"`
+	Name    string `json:"name"`
+
+	// Url Document URL validated by the installation egress policy.
+	Url string `json:"url"`
+}
+
+// CreateProjectRequest defines model for CreateProjectRequest.
+type CreateProjectRequest struct {
+	Name string `json:"name"`
+}
+
 // CreateProviderRequest defines model for CreateProviderRequest.
 type CreateProviderRequest struct {
 	Configuration ProviderConfiguration     `json:"configuration"`
@@ -560,15 +1543,22 @@ type CreateProviderRequest struct {
 	// models after the draft is created.
 	Model nullable.Nullable[string] `json:"model,omitempty"`
 	Name  string                    `json:"name"`
+
+	// ProjectId Owning project; omit or null for an installation-wide provider. Required for assigned principals.
+	ProjectId nullable.Nullable[openapi_types.UUID] `json:"project_id,omitempty"`
 }
 
 // CreateRouteDraftRequest defines model for CreateRouteDraftRequest.
 type CreateRouteDraftRequest struct {
-	MaxAttempts      int32                `json:"max_attempts"`
-	Operations       *[]string            `json:"operations,omitempty"`
-	OverallTimeoutMs int64                `json:"overall_timeout_ms"`
-	Slug             string               `json:"slug"`
-	Targets          []RouteTargetRequest `json:"targets"`
+	ContentPolicy    nullable.Nullable[ContentPolicy] `json:"content_policy,omitempty"`
+	MaxAttempts      int32                            `json:"max_attempts"`
+	Operations       *[]string                        `json:"operations,omitempty"`
+	OverallTimeoutMs int64                            `json:"overall_timeout_ms"`
+
+	// ProjectId Owning project; omit or null for an installation-wide route. Required for assigned principals.
+	ProjectId nullable.Nullable[openapi_types.UUID] `json:"project_id,omitempty"`
+	Slug      string                                `json:"slug"`
+	Targets   []RouteTargetRequest                  `json:"targets"`
 }
 
 // CredentialListResponse defines model for CredentialListResponse.
@@ -713,6 +1703,34 @@ type LoginRequest struct {
 	Password *string `json:"password,omitempty"`
 }
 
+// ManagementTokenListResponse defines model for ManagementTokenListResponse.
+type ManagementTokenListResponse struct {
+	Items      []ManagementTokenResponse `json:"items"`
+	NextCursor nullable.Nullable[string] `json:"next_cursor,omitempty"`
+}
+
+// ManagementTokenResponse defines model for ManagementTokenResponse.
+type ManagementTokenResponse struct {
+	AllProjects    bool                         `json:"all_projects"`
+	CreatedAt      time.Time                    `json:"created_at"`
+	CreatedBy      openapi_types.UUID           `json:"created_by"`
+	CreatedByEmail string                       `json:"created_by_email"`
+	Etag           openapi_types.UUID           `json:"etag"`
+	ExpiresAt      time.Time                    `json:"expires_at"`
+	Id             openapi_types.UUID           `json:"id"`
+	LookupId       string                       `json:"lookup_id"`
+	Name           string                       `json:"name"`
+	ProjectIds     []openapi_types.UUID         `json:"project_ids"`
+	RevokedAt      nullable.Nullable[time.Time] `json:"revoked_at"`
+	Scopes         []string                     `json:"scopes"`
+}
+
+// ManagementTokenRevokeResponse defines model for ManagementTokenRevokeResponse.
+type ManagementTokenRevokeResponse struct {
+	Etag openapi_types.UUID `json:"etag"`
+	Id   openapi_types.UUID `json:"id"`
+}
+
 // Measurement defines model for Measurement.
 type Measurement struct {
 	LatencyMs             int64                    `json:"latency_ms"`
@@ -770,6 +1788,27 @@ type ModelMetadata struct {
 	// SupportedParameters None means unknown, an empty set means no optional parameters are supported.
 	SupportedParameters nullable.Nullable[[]string] `json:"supported_parameters,omitempty"`
 	ZeroDataRetention   nullable.Nullable[bool]     `json:"zero_data_retention,omitempty"`
+}
+
+// NotificationDestination defines model for NotificationDestination.
+type NotificationDestination struct {
+	CreatedAt      time.Time                             `json:"created_at"`
+	CreatedBy      openapi_types.UUID                    `json:"created_by"`
+	CreatedByEmail string                                `json:"created_by_email"`
+	Enabled        bool                                  `json:"enabled"`
+	Etag           openapi_types.UUID                    `json:"etag"`
+	Id             openapi_types.UUID                    `json:"id"`
+	Name           string                                `json:"name"`
+	ProjectId      nullable.Nullable[openapi_types.UUID] `json:"project_id"`
+	ProjectName    nullable.Nullable[string]             `json:"project_name"`
+	UpdatedAt      time.Time                             `json:"updated_at"`
+	Url            string                                `json:"url"`
+}
+
+// NotificationDestinationListResponse defines model for NotificationDestinationListResponse.
+type NotificationDestinationListResponse struct {
+	Items      []NotificationDestination `json:"items"`
+	NextCursor nullable.Nullable[string] `json:"next_cursor,omitempty"`
 }
 
 // OidcAuthorizationResponse defines model for OidcAuthorizationResponse.
@@ -879,25 +1918,36 @@ type OverviewResponse struct {
 
 // PlaygroundRequest defines model for PlaygroundRequest.
 type PlaygroundRequest struct {
-	Input           string                                      `json:"input"`
-	MaxOutputTokens nullable.Nullable[int32]                    `json:"max_output_tokens,omitempty"`
-	Model           string                                      `json:"model"`
-	ResponseFormat  nullable.Nullable[PlaygroundResponseFormat] `json:"response_format,omitempty"`
-	Routing         *RoutingPreferences                         `json:"routing,omitempty"`
-	Surface         *string                                     `json:"surface,omitempty"`
-	Temperature     nullable.Nullable[float32]                  `json:"temperature,omitempty"`
-	Tools           *[]PlaygroundToolRequest                    `json:"tools,omitempty"`
+	Input           *string                     `json:"input,omitempty"`
+	MaxOutputTokens nullable.Nullable[int32]    `json:"max_output_tokens,omitempty"`
+	Model           string                      `json:"model"`
+	Operation       *PlaygroundRequestOperation `json:"operation,omitempty"`
+
+	// Request Optional raw public request body; its model is replaced by the top-level route model and it cannot be combined with the legacy fields.
+	Request        *map[string]interface{}                     `json:"request,omitempty"`
+	ResponseFormat nullable.Nullable[PlaygroundResponseFormat] `json:"response_format,omitempty"`
+	Routing        *RoutingPreferences                         `json:"routing,omitempty"`
+	Stream         nullable.Nullable[bool]                     `json:"stream,omitempty"`
+	Surface        *string                                     `json:"surface,omitempty"`
+	Temperature    nullable.Nullable[float32]                  `json:"temperature,omitempty"`
+	Tools          *[]PlaygroundToolRequest                    `json:"tools,omitempty"`
 }
+
+// PlaygroundRequestOperation defines model for PlaygroundRequest.Operation.
+type PlaygroundRequestOperation string
 
 // PlaygroundResponse defines model for PlaygroundResponse.
 type PlaygroundResponse struct {
-	FinishReason     nullable.Nullable[string]          `json:"finish_reason,omitempty"`
-	Id               openapi_types.UUID                 `json:"id"`
-	LatencyMs        int64                              `json:"latency_ms"`
-	Model            string                             `json:"model"`
-	OutputText       string                             `json:"output_text"`
-	ProviderModel    nullable.Nullable[string]          `json:"provider_model,omitempty"`
-	Refusal          nullable.Nullable[string]          `json:"refusal,omitempty"`
+	FinishReason  nullable.Nullable[string] `json:"finish_reason,omitempty"`
+	Id            openapi_types.UUID        `json:"id"`
+	LatencyMs     int64                     `json:"latency_ms"`
+	Model         string                    `json:"model"`
+	OutputText    string                    `json:"output_text"`
+	ProviderModel nullable.Nullable[string] `json:"provider_model,omitempty"`
+	Refusal       nullable.Nullable[string] `json:"refusal,omitempty"`
+
+	// Response Parsed non-generation operation result (embeddings, moderation, rerank, token count).
+	Response         interface{}                        `json:"response,omitempty"`
 	Routing          []RoutingDecision                  `json:"routing"`
 	StructuredOutput interface{}                        `json:"structured_output,omitempty"`
 	ToolCalls        []PlaygroundToolCall               `json:"tool_calls"`
@@ -960,6 +2010,14 @@ type PlaygroundUsage struct {
 	TotalTokens       int64                    `json:"total_tokens"`
 }
 
+// PolicyDecision Metadata-only record of one content policy rule that matched; never carries matched text, offsets, pattern, or payload.
+type PolicyDecision struct {
+	Action  string `json:"action"`
+	Outcome string `json:"outcome"`
+	Phase   string `json:"phase"`
+	RuleId  string `json:"rule_id"`
+}
+
 // PolicyResponse defines model for PolicyResponse.
 type PolicyResponse struct {
 	Etag   openapi_types.UUID `json:"etag"`
@@ -978,6 +2036,18 @@ type PriceOperation string
 
 // PriceRequest defines model for PriceRequest.
 type PriceRequest struct {
+	// CacheWrite1hInputPerMillion Rate for the 1-hour TTL share of cache writes. Omit to bill
+	// it at the generic cache-write rate, then the input rate.
+	CacheWrite1hInputPerMillion nullable.Nullable[string] `json:"cache_write_1h_input_per_million,omitempty"`
+
+	// CacheWrite5mInputPerMillion Rate for the 5-minute TTL share of cache writes. Omit to bill
+	// it at the generic cache-write rate, then the input rate.
+	CacheWrite5mInputPerMillion nullable.Nullable[string] `json:"cache_write_5m_input_per_million,omitempty"`
+
+	// CacheWriteInputPerMillion Rate for the generic cache-write share of the input tokens.
+	// Omit to bill cache writes at the full input rate.
+	CacheWriteInputPerMillion nullable.Nullable[string] `json:"cache_write_input_per_million,omitempty"`
+
 	// CachedInputPerMillion Rate for the cached share of the input tokens. Omit to bill cached
 	// tokens at the full input rate.
 	CachedInputPerMillion nullable.Nullable[string]             `json:"cached_input_per_million,omitempty"`
@@ -994,6 +2064,18 @@ type PriceRequest struct {
 
 // PriceResponse defines model for PriceResponse.
 type PriceResponse struct {
+	// CacheWrite1hInputPerMillion Rate for the 1-hour TTL share of cache writes. Omit to bill
+	// it at the generic cache-write rate, then the input rate.
+	CacheWrite1hInputPerMillion nullable.Nullable[string] `json:"cache_write_1h_input_per_million,omitempty"`
+
+	// CacheWrite5mInputPerMillion Rate for the 5-minute TTL share of cache writes. Omit to bill
+	// it at the generic cache-write rate, then the input rate.
+	CacheWrite5mInputPerMillion nullable.Nullable[string] `json:"cache_write_5m_input_per_million,omitempty"`
+
+	// CacheWriteInputPerMillion Rate for the generic cache-write share of the input tokens.
+	// Omit to bill cache writes at the full input rate.
+	CacheWriteInputPerMillion nullable.Nullable[string] `json:"cache_write_input_per_million,omitempty"`
+
 	// CachedInputPerMillion Rate for the cached share of the input tokens. Omit to bill cached
 	// tokens at the full input rate.
 	CachedInputPerMillion nullable.Nullable[string]             `json:"cached_input_per_million,omitempty"`
@@ -1022,11 +2104,78 @@ type PricingRevisionResponse struct {
 	Id          openapi_types.UUID `json:"id"`
 	Prices      []PriceResponse    `json:"prices"`
 	Revision    int32              `json:"revision"`
+
+	// SourceName Pricing source this revision was published from, if any.
+	SourceName nullable.Nullable[string] `json:"source_name"`
+
+	// SourceSnapshotId Snapshot this revision was published from, if any.
+	SourceSnapshotId nullable.Nullable[openapi_types.UUID] `json:"source_snapshot_id"`
 }
 
 // PricingRevisionsResponse defines model for PricingRevisionsResponse.
 type PricingRevisionsResponse struct {
 	Items      []PricingRevisionResponse `json:"items"`
+	NextCursor nullable.Nullable[string] `json:"next_cursor,omitempty"`
+}
+
+// PricingSource defines model for PricingSource.
+type PricingSource struct {
+	CreatedAt time.Time          `json:"created_at"`
+	CreatedBy openapi_types.UUID `json:"created_by"`
+	Enabled   bool               `json:"enabled"`
+	Etag      openapi_types.UUID `json:"etag"`
+	Id        openapi_types.UUID `json:"id"`
+	Name      string             `json:"name"`
+	UpdatedAt time.Time          `json:"updated_at"`
+	Url       string             `json:"url"`
+}
+
+// PricingSourceDiff defines model for PricingSourceDiff.
+type PricingSourceDiff struct {
+	Added        []map[string]string `json:"added"`
+	AddedCount   int32               `json:"added_count"`
+	Changed      []map[string]string `json:"changed"`
+	ChangedCount int32               `json:"changed_count"`
+	Removed      []map[string]string `json:"removed"`
+	RemovedCount int32               `json:"removed_count"`
+}
+
+// PricingSourceDocument defines model for PricingSourceDocument.
+type PricingSourceDocument struct {
+	Currency    string                       `json:"currency"`
+	EffectiveAt nullable.Nullable[time.Time] `json:"effective_at,omitempty"`
+	Prices      []PriceRequest               `json:"prices"`
+}
+
+// PricingSourceListResponse defines model for PricingSourceListResponse.
+type PricingSourceListResponse struct {
+	Items      []PricingSource           `json:"items"`
+	NextCursor nullable.Nullable[string] `json:"next_cursor,omitempty"`
+}
+
+// PricingSourceRefreshResponse defines model for PricingSourceRefreshResponse.
+type PricingSourceRefreshResponse struct {
+	Diff     PricingSourceDiff     `json:"diff"`
+	Snapshot PricingSourceSnapshot `json:"snapshot"`
+	Source   PricingSource         `json:"source"`
+}
+
+// PricingSourceSnapshot defines model for PricingSourceSnapshot.
+type PricingSourceSnapshot struct {
+	Currency   string                `json:"currency"`
+	Document   PricingSourceDocument `json:"document"`
+	FetchedAt  time.Time             `json:"fetched_at"`
+	Id         openapi_types.UUID    `json:"id"`
+	PriceCount int32                 `json:"price_count"`
+
+	// Sha256 SHA-256 digest of the canonical document.
+	Sha256   string             `json:"sha256"`
+	SourceId openapi_types.UUID `json:"source_id"`
+}
+
+// PricingSourceSnapshotListResponse defines model for PricingSourceSnapshotListResponse.
+type PricingSourceSnapshotListResponse struct {
+	Items      []PricingSourceSnapshot   `json:"items"`
 	NextCursor nullable.Nullable[string] `json:"next_cursor,omitempty"`
 }
 
@@ -1050,6 +2199,61 @@ type Problem struct {
 	Status   int32                     `json:"status"`
 	Title    string                    `json:"title"`
 	Type     string                    `json:"type"`
+}
+
+// ProjectDetailResponse defines model for ProjectDetailResponse.
+type ProjectDetailResponse struct {
+	CreatedAt      time.Time          `json:"created_at"`
+	CreatedBy      openapi_types.UUID `json:"created_by"`
+	CreatedByEmail string             `json:"created_by_email"`
+	Etag           openapi_types.UUID `json:"etag"`
+	Id             openapi_types.UUID `json:"id"`
+	MemberCount    int64              `json:"member_count"`
+	Name           string             `json:"name"`
+	UpdatedAt      time.Time          `json:"updated_at"`
+}
+
+// ProjectListResponse defines model for ProjectListResponse.
+type ProjectListResponse struct {
+	Items      []ProjectDetailResponse   `json:"items"`
+	NextCursor nullable.Nullable[string] `json:"next_cursor,omitempty"`
+}
+
+// ProjectMemberListResponse defines model for ProjectMemberListResponse.
+type ProjectMemberListResponse struct {
+	Items      []ProjectMemberResponse   `json:"items"`
+	NextCursor nullable.Nullable[string] `json:"next_cursor,omitempty"`
+}
+
+// ProjectMemberResponse defines model for ProjectMemberResponse.
+type ProjectMemberResponse struct {
+	Active       bool                             `json:"active"`
+	AddedBy      openapi_types.UUID               `json:"added_by"`
+	AddedByEmail string                           `json:"added_by_email"`
+	CreatedAt    time.Time                        `json:"created_at"`
+	DisplayName  string                           `json:"display_name"`
+	Email        string                           `json:"email"`
+	ProjectRole  ProjectMemberResponseProjectRole `json:"project_role"`
+	Role         string                           `json:"role"`
+	UserId       openapi_types.UUID               `json:"user_id"`
+}
+
+// ProjectMemberResponseProjectRole defines model for ProjectMemberResponse.ProjectRole.
+type ProjectMemberResponseProjectRole string
+
+// ProjectMembershipItem defines model for ProjectMembershipItem.
+type ProjectMembershipItem struct {
+	Id   openapi_types.UUID        `json:"id"`
+	Name string                    `json:"name"`
+	Role ProjectMembershipItemRole `json:"role"`
+}
+
+// ProjectMembershipItemRole defines model for ProjectMembershipItem.Role.
+type ProjectMembershipItemRole string
+
+// ProjectMembershipsResponse defines model for ProjectMembershipsResponse.
+type ProjectMembershipsResponse struct {
+	Items []ProjectMembershipItem `json:"items"`
 }
 
 // ProviderActivationResponse defines model for ProviderActivationResponse.
@@ -1103,18 +2307,22 @@ type ProviderDetailResponse struct {
 	CreatedAt                time.Time                `json:"created_at"`
 
 	// CreatedByEmail Email of the operator who created the provider.
-	CreatedByEmail           nullable.Nullable[string]             `json:"created_by_email,omitempty"`
-	DraftCredentialId        nullable.Nullable[openapi_types.UUID] `json:"draft_credential_id,omitempty"`
-	DraftCredentialVersion   nullable.Nullable[int32]              `json:"draft_credential_version,omitempty"`
-	EnabledModelCount        int64                                 `json:"enabled_model_count"`
-	Etag                     openapi_types.UUID                    `json:"etag"`
-	Id                       openapi_types.UUID                    `json:"id"`
-	LastProbeAt              nullable.Nullable[time.Time]          `json:"last_probe_at,omitempty"`
-	LastProbeDetail          nullable.Nullable[string]             `json:"last_probe_detail,omitempty"`
-	LastProbeStatus          nullable.Nullable[string]             `json:"last_probe_status,omitempty"`
-	ModelCount               int64                                 `json:"model_count"`
-	Name                     string                                `json:"name"`
-	PendingActivation        bool                                  `json:"pending_activation"`
+	CreatedByEmail         nullable.Nullable[string]             `json:"created_by_email,omitempty"`
+	DraftCredentialId      nullable.Nullable[openapi_types.UUID] `json:"draft_credential_id,omitempty"`
+	DraftCredentialVersion nullable.Nullable[int32]              `json:"draft_credential_version,omitempty"`
+	EnabledModelCount      int64                                 `json:"enabled_model_count"`
+	Etag                   openapi_types.UUID                    `json:"etag"`
+	Id                     openapi_types.UUID                    `json:"id"`
+	LastProbeAt            nullable.Nullable[time.Time]          `json:"last_probe_at,omitempty"`
+	LastProbeDetail        nullable.Nullable[string]             `json:"last_probe_detail,omitempty"`
+	LastProbeStatus        nullable.Nullable[string]             `json:"last_probe_status,omitempty"`
+	ModelCount             int64                                 `json:"model_count"`
+	Name                   string                                `json:"name"`
+	PendingActivation      bool                                  `json:"pending_activation"`
+
+	// ProjectId Owning project; null means installation-wide.
+	ProjectId                nullable.Nullable[openapi_types.UUID] `json:"project_id"`
+	ProjectName              nullable.Nullable[string]             `json:"project_name"`
 	RuntimeCredentialId      nullable.Nullable[openapi_types.UUID] `json:"runtime_credential_id,omitempty"`
 	RuntimeCredentialVersion nullable.Nullable[int32]              `json:"runtime_credential_version,omitempty"`
 	State                    string                                `json:"state"`
@@ -1248,6 +2456,34 @@ type ProviderQuotaUsage struct {
 	TokensThisMinute   int64 `json:"tokens_this_minute"`
 }
 
+// ProviderResourceItem Metadata-only provider resource mapping. Rows never carry prompts, file bytes, response bodies, JSONL lines, tool payloads, audio, or output content.
+type ProviderResourceItem struct {
+	ApiKeyId   openapi_types.UUID           `json:"api_key_id"`
+	ApiKeyName string                       `json:"api_key_name"`
+	CreatedAt  time.Time                    `json:"created_at"`
+	ExpiresAt  nullable.Nullable[time.Time] `json:"expires_at"`
+
+	// Id Gateway-issued local identifier (kind_ plus a dash-free UUID).
+	Id            string                   `json:"id"`
+	Kind          ProviderResourceItemKind `json:"kind"`
+	ProviderId    openapi_types.UUID       `json:"provider_id"`
+	ProviderName  string                   `json:"provider_name"`
+	Route         string                   `json:"route"`
+	State         string                   `json:"state"`
+	UpdatedAt     time.Time                `json:"updated_at"`
+	UpstreamId    string                   `json:"upstream_id"`
+	UpstreamModel string                   `json:"upstream_model"`
+}
+
+// ProviderResourceItemKind defines model for ProviderResourceItem.Kind.
+type ProviderResourceItemKind string
+
+// ProviderResourceListResponse defines model for ProviderResourceListResponse.
+type ProviderResourceListResponse struct {
+	Items      []ProviderResourceItem    `json:"items"`
+	NextCursor nullable.Nullable[string] `json:"next_cursor"`
+}
+
 // ProviderResponse defines model for ProviderResponse.
 type ProviderResponse struct {
 	Etag  openapi_types.UUID        `json:"etag"`
@@ -1353,10 +2589,42 @@ type ProviderSummaryResponse struct {
 	ModelCount        int64                        `json:"model_count"`
 	Name              string                       `json:"name"`
 	PendingActivation bool                         `json:"pending_activation"`
-	State             string                       `json:"state"`
-	UpdatedAt         time.Time                    `json:"updated_at"`
-	VendorId          nullable.Nullable[string]    `json:"vendor_id,omitempty"`
+
+	// ProjectId Owning project; null means installation-wide.
+	ProjectId   nullable.Nullable[openapi_types.UUID] `json:"project_id"`
+	ProjectName nullable.Nullable[string]             `json:"project_name"`
+	State       string                                `json:"state"`
+	UpdatedAt   time.Time                             `json:"updated_at"`
+	VendorId    nullable.Nullable[string]             `json:"vendor_id,omitempty"`
 }
+
+// ProvisionUserRequest defines model for ProvisionUserRequest.
+type ProvisionUserRequest struct {
+	Active      bool                     `json:"active"`
+	DisplayName string                   `json:"display_name"`
+	Email       string                   `json:"email"`
+	Role        ProvisionUserRequestRole `json:"role"`
+}
+
+// ProvisionUserRequestRole defines model for ProvisionUserRequest.Role.
+type ProvisionUserRequestRole string
+
+// PublishPricingSourceRequest defines model for PublishPricingSourceRequest.
+type PublishPricingSourceRequest struct {
+	// EffectiveAt Defaults to now; must not be in the past.
+	EffectiveAt nullable.Nullable[time.Time] `json:"effective_at,omitempty"`
+
+	// Overrides Entries merged over the snapshot by exact scoped dimensions; an override with every rate null removes its entry.
+	Overrides *[]PriceRequest `json:"overrides,omitempty"`
+}
+
+// PutProjectMemberRequest defines model for PutProjectMemberRequest.
+type PutProjectMemberRequest struct {
+	Role PutProjectMemberRequestRole `json:"role"`
+}
+
+// PutProjectMemberRequestRole defines model for PutProjectMemberRequest.Role.
+type PutProjectMemberRequestRole string
 
 // RecentAuthenticationRequest defines model for RecentAuthenticationRequest.
 type RecentAuthenticationRequest struct {
@@ -1369,11 +2637,12 @@ type RecentAuthenticationRequest struct {
 
 // ReplaceRouteDraftRequest defines model for ReplaceRouteDraftRequest.
 type ReplaceRouteDraftRequest struct {
-	MaxAttempts      int32                       `json:"max_attempts"`
-	Operations       []string                    `json:"operations"`
-	OverallTimeoutMs int32                       `json:"overall_timeout_ms"`
-	Slug             string                      `json:"slug"`
-	Targets          []ReplaceRouteTargetRequest `json:"targets"`
+	ContentPolicy    nullable.Nullable[ContentPolicy] `json:"content_policy,omitempty"`
+	MaxAttempts      int32                            `json:"max_attempts"`
+	Operations       []string                         `json:"operations"`
+	OverallTimeoutMs int32                            `json:"overall_timeout_ms"`
+	Slug             string                           `json:"slug"`
+	Targets          []ReplaceRouteTargetRequest      `json:"targets"`
 }
 
 // ReplaceRouteTargetRequest defines model for ReplaceRouteTargetRequest.
@@ -1386,27 +2655,36 @@ type ReplaceRouteTargetRequest struct {
 
 // RequestDetailResponse defines model for RequestDetailResponse.
 type RequestDetailResponse struct {
-	ApiKeyId            openapi_types.UUID           `json:"api_key_id"`
-	AttemptCount        int32                        `json:"attempt_count"`
-	Attempts            []AttemptResponse            `json:"attempts"`
-	CachedInputTokens   nullable.Nullable[int64]     `json:"cached_input_tokens,omitempty"`
-	CompletedAt         nullable.Nullable[time.Time] `json:"completed_at,omitempty"`
-	Currency            nullable.Nullable[string]    `json:"currency,omitempty"`
-	ErrorClass          nullable.Nullable[string]    `json:"error_class,omitempty"`
-	EstimatedCost       nullable.Nullable[string]    `json:"estimated_cost,omitempty"`
-	FirstByteMs         nullable.Nullable[int64]     `json:"first_byte_ms,omitempty"`
-	Id                  openapi_types.UUID           `json:"id"`
-	InputTokens         nullable.Nullable[int64]     `json:"input_tokens,omitempty"`
-	Operation           string                       `json:"operation"`
-	OutputTokens        nullable.Nullable[int64]     `json:"output_tokens,omitempty"`
-	Route               string                       `json:"route"`
-	RuntimeGenerationId openapi_types.UUID           `json:"runtime_generation_id"`
-	StartedAt           time.Time                    `json:"started_at"`
-	StatusCode          nullable.Nullable[int32]     `json:"status_code,omitempty"`
-	Surface             string                       `json:"surface"`
-	TotalLatencyMs      nullable.Nullable[int64]     `json:"total_latency_ms,omitempty"`
-	Unpriced            nullable.Nullable[bool]      `json:"unpriced,omitempty"`
-	UsageComplete       nullable.Nullable[bool]      `json:"usage_complete,omitempty"`
+	ApiKeyId     openapi_types.UUID `json:"api_key_id"`
+	AttemptCount int32              `json:"attempt_count"`
+	Attempts     []AttemptResponse  `json:"attempts"`
+
+	// Attribution Bounded allowlisted labels reported with this request; never content.
+	Attribution             map[string]string            `json:"attribution"`
+	CacheWrite1hInputTokens nullable.Nullable[int64]     `json:"cache_write_1h_input_tokens,omitempty"`
+	CacheWrite5mInputTokens nullable.Nullable[int64]     `json:"cache_write_5m_input_tokens,omitempty"`
+	CacheWriteInputTokens   nullable.Nullable[int64]     `json:"cache_write_input_tokens,omitempty"`
+	CachedInputTokens       nullable.Nullable[int64]     `json:"cached_input_tokens,omitempty"`
+	CompletedAt             nullable.Nullable[time.Time] `json:"completed_at,omitempty"`
+	Currency                nullable.Nullable[string]    `json:"currency,omitempty"`
+	ErrorClass              nullable.Nullable[string]    `json:"error_class,omitempty"`
+	EstimatedCost           nullable.Nullable[string]    `json:"estimated_cost,omitempty"`
+	FirstByteMs             nullable.Nullable[int64]     `json:"first_byte_ms,omitempty"`
+	Id                      openapi_types.UUID           `json:"id"`
+	InputTokens             nullable.Nullable[int64]     `json:"input_tokens,omitempty"`
+	Operation               string                       `json:"operation"`
+	OutputTokens            nullable.Nullable[int64]     `json:"output_tokens,omitempty"`
+
+	// PolicyDecisions Metadata-only content policy decisions recorded for this request.
+	PolicyDecisions     []PolicyDecision         `json:"policy_decisions"`
+	Route               string                   `json:"route"`
+	RuntimeGenerationId openapi_types.UUID       `json:"runtime_generation_id"`
+	StartedAt           time.Time                `json:"started_at"`
+	StatusCode          nullable.Nullable[int32] `json:"status_code,omitempty"`
+	Surface             string                   `json:"surface"`
+	TotalLatencyMs      nullable.Nullable[int64] `json:"total_latency_ms,omitempty"`
+	Unpriced            nullable.Nullable[bool]  `json:"unpriced,omitempty"`
+	UsageComplete       nullable.Nullable[bool]  `json:"usage_complete,omitempty"`
 }
 
 // RequestListResponse defines model for RequestListResponse.
@@ -1464,32 +2742,43 @@ type RequestMetadataGatewayEpochResponse struct {
 
 // RequestSummary defines model for RequestSummary.
 type RequestSummary struct {
-	ApiKeyId            openapi_types.UUID           `json:"api_key_id"`
-	AttemptCount        int32                        `json:"attempt_count"`
-	CachedInputTokens   nullable.Nullable[int64]     `json:"cached_input_tokens,omitempty"`
-	CompletedAt         nullable.Nullable[time.Time] `json:"completed_at,omitempty"`
-	Currency            nullable.Nullable[string]    `json:"currency,omitempty"`
-	ErrorClass          nullable.Nullable[string]    `json:"error_class,omitempty"`
-	EstimatedCost       nullable.Nullable[string]    `json:"estimated_cost,omitempty"`
-	FirstByteMs         nullable.Nullable[int64]     `json:"first_byte_ms,omitempty"`
-	Id                  openapi_types.UUID           `json:"id"`
-	InputTokens         nullable.Nullable[int64]     `json:"input_tokens,omitempty"`
-	Operation           string                       `json:"operation"`
-	OutputTokens        nullable.Nullable[int64]     `json:"output_tokens,omitempty"`
-	Route               string                       `json:"route"`
-	RuntimeGenerationId openapi_types.UUID           `json:"runtime_generation_id"`
-	StartedAt           time.Time                    `json:"started_at"`
-	StatusCode          nullable.Nullable[int32]     `json:"status_code,omitempty"`
-	Surface             string                       `json:"surface"`
-	TotalLatencyMs      nullable.Nullable[int64]     `json:"total_latency_ms,omitempty"`
-	Unpriced            nullable.Nullable[bool]      `json:"unpriced,omitempty"`
-	UsageComplete       nullable.Nullable[bool]      `json:"usage_complete,omitempty"`
+	ApiKeyId     openapi_types.UUID `json:"api_key_id"`
+	AttemptCount int32              `json:"attempt_count"`
+
+	// Attribution Bounded allowlisted labels reported with this request; never content.
+	Attribution             map[string]string            `json:"attribution"`
+	CacheWrite1hInputTokens nullable.Nullable[int64]     `json:"cache_write_1h_input_tokens,omitempty"`
+	CacheWrite5mInputTokens nullable.Nullable[int64]     `json:"cache_write_5m_input_tokens,omitempty"`
+	CacheWriteInputTokens   nullable.Nullable[int64]     `json:"cache_write_input_tokens,omitempty"`
+	CachedInputTokens       nullable.Nullable[int64]     `json:"cached_input_tokens,omitempty"`
+	CompletedAt             nullable.Nullable[time.Time] `json:"completed_at,omitempty"`
+	Currency                nullable.Nullable[string]    `json:"currency,omitempty"`
+	ErrorClass              nullable.Nullable[string]    `json:"error_class,omitempty"`
+	EstimatedCost           nullable.Nullable[string]    `json:"estimated_cost,omitempty"`
+	FirstByteMs             nullable.Nullable[int64]     `json:"first_byte_ms,omitempty"`
+	Id                      openapi_types.UUID           `json:"id"`
+	InputTokens             nullable.Nullable[int64]     `json:"input_tokens,omitempty"`
+	Operation               string                       `json:"operation"`
+	OutputTokens            nullable.Nullable[int64]     `json:"output_tokens,omitempty"`
+
+	// PolicyDecisions Metadata-only content policy decisions recorded for this request.
+	PolicyDecisions     []PolicyDecision         `json:"policy_decisions"`
+	Route               string                   `json:"route"`
+	RuntimeGenerationId openapi_types.UUID       `json:"runtime_generation_id"`
+	StartedAt           time.Time                `json:"started_at"`
+	StatusCode          nullable.Nullable[int32] `json:"status_code,omitempty"`
+	Surface             string                   `json:"surface"`
+	TotalLatencyMs      nullable.Nullable[int64] `json:"total_latency_ms,omitempty"`
+	Unpriced            nullable.Nullable[bool]  `json:"unpriced,omitempty"`
+	UsageComplete       nullable.Nullable[bool]  `json:"usage_complete,omitempty"`
 }
 
 // RotateApiKeyRequest defines model for RotateApiKeyRequest.
 type RotateApiKeyRequest struct {
-	DailyCostLimit   nullable.Nullable[string] `json:"daily_cost_limit,omitempty"`
-	MonthlyCostLimit nullable.Nullable[string] `json:"monthly_cost_limit,omitempty"`
+	// BudgetGroupId Omit to keep the stored group; send null to clear it.
+	BudgetGroupId    nullable.Nullable[openapi_types.UUID] `json:"budget_group_id,omitempty"`
+	DailyCostLimit   nullable.Nullable[string]             `json:"daily_cost_limit,omitempty"`
+	MonthlyCostLimit nullable.Nullable[string]             `json:"monthly_cost_limit,omitempty"`
 }
 
 // RotateApiKeyResponse defines model for RotateApiKeyResponse.
@@ -1523,15 +2812,33 @@ type RouteDetailResponse struct {
 
 	// CreatedByEmail Email of the operator who created the route.
 	CreatedByEmail nullable.Nullable[string] `json:"created_by_email,omitempty"`
-	Id             openapi_types.UUID        `json:"id"`
-	LatestRevision RouteRevisionResponse     `json:"latest_revision"`
-	RevisionCount  int64                     `json:"revision_count"`
-	Slug           string                    `json:"slug"`
+
+	// Etag Optimistic-concurrency token for route mutations.
+	Etag           openapi_types.UUID    `json:"etag"`
+	Id             openapi_types.UUID    `json:"id"`
+	LatestRevision RouteRevisionResponse `json:"latest_revision"`
+
+	// ProjectId Owning project; null means installation-wide.
+	ProjectId   nullable.Nullable[openapi_types.UUID] `json:"project_id"`
+	ProjectName nullable.Nullable[string]             `json:"project_name"`
+	RetiredAt   nullable.Nullable[time.Time]          `json:"retired_at"`
+
+	// RetiredBy User who retired the route; null while active.
+	RetiredBy     nullable.Nullable[openapi_types.UUID] `json:"retired_by"`
+	RevisionCount int64                                 `json:"revision_count"`
+	Slug          string                                `json:"slug"`
+
+	// State Lifecycle state: active routes serve; retired routes remain readable but serve nothing.
+	State RouteDetailResponseState `json:"state"`
 }
+
+// RouteDetailResponseState Lifecycle state: active routes serve; retired routes remain readable but serve nothing.
+type RouteDetailResponseState string
 
 // RouteDraftDetailResponse defines model for RouteDraftDetailResponse.
 type RouteDraftDetailResponse struct {
 	BasedOnRevisionId nullable.Nullable[openapi_types.UUID] `json:"based_on_revision_id,omitempty"`
+	ContentPolicy     nullable.Nullable[ContentPolicy]      `json:"content_policy"`
 	CreatedAt         time.Time                             `json:"created_at"`
 
 	// CreatedByEmail Email of the operator who created the draft.
@@ -1541,10 +2848,14 @@ type RouteDraftDetailResponse struct {
 	MaxAttempts      int32                     `json:"max_attempts"`
 	Operations       []string                  `json:"operations"`
 	OverallTimeoutMs int32                     `json:"overall_timeout_ms"`
-	Slug             string                    `json:"slug"`
-	State            string                    `json:"state"`
-	Targets          []RouteTargetResponse     `json:"targets"`
-	UpdatedAt        time.Time                 `json:"updated_at"`
+
+	// ProjectId Owning project; null means installation-wide.
+	ProjectId   nullable.Nullable[openapi_types.UUID] `json:"project_id"`
+	ProjectName nullable.Nullable[string]             `json:"project_name"`
+	Slug        string                                `json:"slug"`
+	State       string                                `json:"state"`
+	Targets     []RouteTargetResponse                 `json:"targets"`
+	UpdatedAt   time.Time                             `json:"updated_at"`
 }
 
 // RouteDraftListResponse defines model for RouteDraftListResponse.
@@ -1555,10 +2866,13 @@ type RouteDraftListResponse struct {
 
 // RouteDraftResponse defines model for RouteDraftResponse.
 type RouteDraftResponse struct {
-	Etag  openapi_types.UUID `json:"etag"`
-	Id    openapi_types.UUID `json:"id"`
-	Slug  string             `json:"slug"`
-	State string             `json:"state"`
+	Etag openapi_types.UUID `json:"etag"`
+	Id   openapi_types.UUID `json:"id"`
+
+	// ProjectId Owning project; null means installation-wide.
+	ProjectId nullable.Nullable[openapi_types.UUID] `json:"project_id"`
+	Slug      string                                `json:"slug"`
+	State     string                                `json:"state"`
 }
 
 // RouteListResponse defines model for RouteListResponse.
@@ -1567,8 +2881,16 @@ type RouteListResponse struct {
 	NextCursor nullable.Nullable[string] `json:"next_cursor,omitempty"`
 }
 
+// RouteRetireResponse defines model for RouteRetireResponse.
+type RouteRetireResponse struct {
+	// Etag Fresh route ETag recorded with the retirement.
+	Etag              openapi_types.UUID        `json:"etag"`
+	RuntimeGeneration RuntimeGenerationResponse `json:"runtime_generation"`
+}
+
 // RouteRevisionDiffResponse defines model for RouteRevisionDiffResponse.
 type RouteRevisionDiffResponse struct {
+	ContentPolicyChanged bool          `json:"content_policy_changed"`
 	FromRevision         int32         `json:"from_revision"`
 	MaxAttemptsChanged   bool          `json:"max_attempts_changed"`
 	OperationsAdded      []string      `json:"operations_added"`
@@ -1592,18 +2914,19 @@ type RouteRevisionListResponse struct {
 
 // RouteRevisionResponse defines model for RouteRevisionResponse.
 type RouteRevisionResponse struct {
-	ActivatedAt      time.Time             `json:"activated_at"`
-	ActivatedBy      openapi_types.UUID    `json:"activated_by"`
-	Id               openapi_types.UUID    `json:"id"`
-	MaxAttempts      int32                 `json:"max_attempts"`
-	Operations       []string              `json:"operations"`
-	OverallTimeoutMs int32                 `json:"overall_timeout_ms"`
-	Revision         int32                 `json:"revision"`
-	RouteId          openapi_types.UUID    `json:"route_id"`
-	RoutingPolicy    RoutingPolicy         `json:"routing_policy"`
-	Slug             string                `json:"slug"`
-	SourceDraftId    openapi_types.UUID    `json:"source_draft_id"`
-	Targets          []RouteTargetResponse `json:"targets"`
+	ActivatedAt      time.Time                        `json:"activated_at"`
+	ActivatedBy      openapi_types.UUID               `json:"activated_by"`
+	ContentPolicy    nullable.Nullable[ContentPolicy] `json:"content_policy"`
+	Id               openapi_types.UUID               `json:"id"`
+	MaxAttempts      int32                            `json:"max_attempts"`
+	Operations       []string                         `json:"operations"`
+	OverallTimeoutMs int32                            `json:"overall_timeout_ms"`
+	Revision         int32                            `json:"revision"`
+	RouteId          openapi_types.UUID               `json:"route_id"`
+	RoutingPolicy    RoutingPolicy                    `json:"routing_policy"`
+	Slug             string                           `json:"slug"`
+	SourceDraftId    openapi_types.UUID               `json:"source_draft_id"`
+	Targets          []RouteTargetResponse            `json:"targets"`
 }
 
 // RouteSimulationResponse defines model for RouteSimulationResponse.
@@ -1667,19 +2990,23 @@ type RoutingConstraints struct {
 
 // RoutingDecision defines model for RoutingDecision.
 type RoutingDecision struct {
-	Attempt            nullable.Nullable[int]                `json:"attempt,omitempty"`
-	CredentialSlotId   nullable.Nullable[openapi_types.UUID] `json:"credential_slot_id,omitempty"`
-	Eligible           bool                                  `json:"eligible"`
-	MetadataObservedAt nullable.Nullable[time.Time]          `json:"metadata_observed_at,omitempty"`
-	Performance        nullable.Nullable[Measurement]        `json:"performance,omitempty"`
-	Price              nullable.Nullable[RoutingPrice]       `json:"price,omitempty"`
-	Priority           int32                                 `json:"priority"`
-	ProviderId         openapi_types.UUID                    `json:"provider_id"`
-	Reason             nullable.Nullable[string]             `json:"reason,omitempty"`
-	Strategy           RoutingStrategy                       `json:"strategy"`
-	TargetId           openapi_types.UUID                    `json:"target_id"`
-	UpstreamModel      string                                `json:"upstream_model"`
-	VendorId           nullable.Nullable[string]             `json:"vendor_id,omitempty"`
+	Attempt               nullable.Nullable[int]                `json:"attempt,omitempty"`
+	ContextLength         nullable.Nullable[int64]              `json:"context_length,omitempty"`
+	CredentialSlotId      nullable.Nullable[openapi_types.UUID] `json:"credential_slot_id,omitempty"`
+	Eligible              bool                                  `json:"eligible"`
+	EstimatedInputTokens  nullable.Nullable[int64]              `json:"estimated_input_tokens,omitempty"`
+	MaxOutputTokens       nullable.Nullable[int64]              `json:"max_output_tokens,omitempty"`
+	MetadataObservedAt    nullable.Nullable[time.Time]          `json:"metadata_observed_at,omitempty"`
+	Performance           nullable.Nullable[Measurement]        `json:"performance,omitempty"`
+	Price                 nullable.Nullable[RoutingPrice]       `json:"price,omitempty"`
+	Priority              int32                                 `json:"priority"`
+	ProviderId            openapi_types.UUID                    `json:"provider_id"`
+	Reason                nullable.Nullable[string]             `json:"reason,omitempty"`
+	RequestedOutputTokens nullable.Nullable[int64]              `json:"requested_output_tokens,omitempty"`
+	Strategy              RoutingStrategy                       `json:"strategy"`
+	TargetId              openapi_types.UUID                    `json:"target_id"`
+	UpstreamModel         string                                `json:"upstream_model"`
+	VendorId              nullable.Nullable[string]             `json:"vendor_id,omitempty"`
 }
 
 // RoutingPolicy defines model for RoutingPolicy.
@@ -1721,17 +3048,20 @@ type RoutingPreferences struct {
 
 // RoutingPrice defines model for RoutingPrice.
 type RoutingPrice struct {
-	Currency         string                    `json:"currency"`
-	EffectiveAt      time.Time                 `json:"effective_at"`
-	InputPerMillion  nullable.Nullable[string] `json:"input_per_million,omitempty"`
-	Model            string                    `json:"model"`
-	Operation        string                    `json:"operation"`
-	OutputPerMillion nullable.Nullable[string] `json:"output_per_million,omitempty"`
-	ProviderId       openapi_types.UUID        `json:"provider_id"`
-	Revision         int32                     `json:"revision"`
-	RevisionId       openapi_types.UUID        `json:"revision_id"`
-	ScopePriority    int32                     `json:"scope_priority"`
-	UnitPrice        nullable.Nullable[string] `json:"unit_price,omitempty"`
+	CacheWrite1hInputPerMillion nullable.Nullable[string] `json:"cache_write_1h_input_per_million,omitempty"`
+	CacheWrite5mInputPerMillion nullable.Nullable[string] `json:"cache_write_5m_input_per_million,omitempty"`
+	CacheWriteInputPerMillion   nullable.Nullable[string] `json:"cache_write_input_per_million,omitempty"`
+	Currency                    string                    `json:"currency"`
+	EffectiveAt                 time.Time                 `json:"effective_at"`
+	InputPerMillion             nullable.Nullable[string] `json:"input_per_million,omitempty"`
+	Model                       string                    `json:"model"`
+	Operation                   string                    `json:"operation"`
+	OutputPerMillion            nullable.Nullable[string] `json:"output_per_million,omitempty"`
+	ProviderId                  openapi_types.UUID        `json:"provider_id"`
+	Revision                    int32                     `json:"revision"`
+	RevisionId                  openapi_types.UUID        `json:"revision_id"`
+	ScopePriority               int32                     `json:"scope_priority"`
+	UnitPrice                   nullable.Nullable[string] `json:"unit_price,omitempty"`
 }
 
 // RoutingStrategy defines model for RoutingStrategy.
@@ -1827,21 +3157,25 @@ type SetupStatus struct {
 
 // SimulateRouteRequest defines model for SimulateRouteRequest.
 type SimulateRouteRequest struct {
-	Mode        string              `json:"mode"`
-	Operation   string              `json:"operation"`
-	Preferences *RoutingPreferences `json:"preferences,omitempty"`
-	Seed        string              `json:"seed"`
-	Surface     string              `json:"surface"`
+	EstimatedInputTokens nullable.Nullable[int64] `json:"estimated_input_tokens,omitempty"`
+	MaxOutputTokens      nullable.Nullable[int64] `json:"max_output_tokens,omitempty"`
+	Mode                 string                   `json:"mode"`
+	Operation            string                   `json:"operation"`
+	Preferences          *RoutingPreferences      `json:"preferences,omitempty"`
+	Seed                 string                   `json:"seed"`
+	Surface              string                   `json:"surface"`
 }
 
 // SimulationRequest defines model for SimulationRequest.
 type SimulationRequest struct {
-	ApiKeyId    nullable.Nullable[openapi_types.UUID] `json:"api_key_id,omitempty"`
-	Mode        TransportMode                         `json:"mode"`
-	Operation   map[string]interface{}                `json:"operation"`
-	Preferences *RoutingPreferences                   `json:"preferences,omitempty"`
-	Seed        *string                               `json:"seed,omitempty"`
-	Surface     Surface                               `json:"surface"`
+	ApiKeyId             nullable.Nullable[openapi_types.UUID] `json:"api_key_id,omitempty"`
+	EstimatedInputTokens nullable.Nullable[int64]              `json:"estimated_input_tokens,omitempty"`
+	MaxOutputTokens      nullable.Nullable[int64]              `json:"max_output_tokens,omitempty"`
+	Mode                 TransportMode                         `json:"mode"`
+	Operation            map[string]interface{}                `json:"operation"`
+	Preferences          *RoutingPreferences                   `json:"preferences,omitempty"`
+	Seed                 *string                               `json:"seed,omitempty"`
+	Surface              Surface                               `json:"surface"`
 }
 
 // SlotHealth defines model for SlotHealth.
@@ -1882,22 +3216,79 @@ type TransportMode string
 // would silently widen a key's privileges — a rename would drop the route
 // allowlist, the rate limits, and the expiry.
 type UpdateApiKeyRequest struct {
+	// AllowProviderState Permits stateful provider resources under this key. Provider state
+	// may retain user content.
+	AllowProviderState *bool `json:"allow_provider_state,omitempty"`
+
+	// AllowedAttributionKeys Attribution keys this key may report via the X-OLP-Attribution header; at most 8, each a short machine token.
+	AllowedAttributionKeys *[]string `json:"allowed_attribution_keys,omitempty"`
+
 	// AllowedRoutes Omit to keep the stored allowlist. Send `[]` to clear it; an empty
 	// allowlist places no route restriction on the key.
-	AllowedRoutes     *[]string                    `json:"allowed_routes,omitempty"`
-	DailyCostLimit    nullable.Nullable[string]    `json:"daily_cost_limit,omitempty"`
-	ExpiresAt         nullable.Nullable[time.Time] `json:"expires_at,omitempty"`
-	MaxConcurrency    nullable.Nullable[int32]     `json:"max_concurrency,omitempty"`
-	MonthlyCostLimit  nullable.Nullable[string]    `json:"monthly_cost_limit,omitempty"`
-	Name              *string                      `json:"name,omitempty"`
-	RequestsPerMinute nullable.Nullable[int32]     `json:"requests_per_minute,omitempty"`
-	Scopes            *[]string                    `json:"scopes,omitempty"`
-	TokensPerMinute   nullable.Nullable[int64]     `json:"tokens_per_minute,omitempty"`
+	AllowedRoutes *[]string `json:"allowed_routes,omitempty"`
+
+	// BudgetGroupId Omit to keep the stored group; send null to clear it.
+	BudgetGroupId     nullable.Nullable[openapi_types.UUID] `json:"budget_group_id,omitempty"`
+	DailyCostLimit    nullable.Nullable[string]             `json:"daily_cost_limit,omitempty"`
+	ExpiresAt         nullable.Nullable[time.Time]          `json:"expires_at,omitempty"`
+	MaxConcurrency    nullable.Nullable[int32]              `json:"max_concurrency,omitempty"`
+	MonthlyCostLimit  nullable.Nullable[string]             `json:"monthly_cost_limit,omitempty"`
+	Name              *string                               `json:"name,omitempty"`
+	RequestsPerMinute nullable.Nullable[int32]              `json:"requests_per_minute,omitempty"`
+	Scopes            *[]string                             `json:"scopes,omitempty"`
+	TokensPerMinute   nullable.Nullable[int64]              `json:"tokens_per_minute,omitempty"`
+}
+
+// UpdateBudgetAlertRuleRequest defines model for UpdateBudgetAlertRuleRequest.
+type UpdateBudgetAlertRuleRequest struct {
+	DestinationId    *openapi_types.UUID                      `json:"destination_id,omitempty"`
+	Enabled          *bool                                    `json:"enabled,omitempty"`
+	Name             *string                                  `json:"name,omitempty"`
+	SubjectId        *openapi_types.UUID                      `json:"subject_id,omitempty"`
+	SubjectKind      *UpdateBudgetAlertRuleRequestSubjectKind `json:"subject_kind,omitempty"`
+	ThresholdPercent *int32                                   `json:"threshold_percent,omitempty"`
+	WindowKind       *UpdateBudgetAlertRuleRequestWindowKind  `json:"window_kind,omitempty"`
+}
+
+// UpdateBudgetAlertRuleRequestSubjectKind defines model for UpdateBudgetAlertRuleRequest.SubjectKind.
+type UpdateBudgetAlertRuleRequestSubjectKind string
+
+// UpdateBudgetAlertRuleRequestWindowKind defines model for UpdateBudgetAlertRuleRequest.WindowKind.
+type UpdateBudgetAlertRuleRequestWindowKind string
+
+// UpdateBudgetGroupRequest A merge patch: every field is optional, an omitted field keeps the stored
+// value, and an explicit null clears a cost limit. project_id is immutable.
+type UpdateBudgetGroupRequest struct {
+	DailyCostLimit   nullable.Nullable[string] `json:"daily_cost_limit,omitempty"`
+	MonthlyCostLimit nullable.Nullable[string] `json:"monthly_cost_limit,omitempty"`
+	Name             *string                   `json:"name,omitempty"`
+}
+
+// UpdateNotificationDestinationRequest defines model for UpdateNotificationDestinationRequest.
+type UpdateNotificationDestinationRequest struct {
+	Enabled *bool   `json:"enabled,omitempty"`
+	Name    *string `json:"name,omitempty"`
+
+	// Secret A string replaces the signing secret, null removes it, absent keeps it.
+	Secret nullable.Nullable[string] `json:"secret,omitempty"`
+	Url    *string                   `json:"url,omitempty"`
+}
+
+// UpdatePricingSourceRequest defines model for UpdatePricingSourceRequest.
+type UpdatePricingSourceRequest struct {
+	Enabled *bool   `json:"enabled,omitempty"`
+	Name    *string `json:"name,omitempty"`
+	Url     *string `json:"url,omitempty"`
 }
 
 // UpdateProfileRequest defines model for UpdateProfileRequest.
 type UpdateProfileRequest struct {
 	DisplayName string `json:"display_name"`
+}
+
+// UpdateProjectRequest defines model for UpdateProjectRequest.
+type UpdateProjectRequest struct {
+	Name string `json:"name"`
 }
 
 // UpdateProviderRequest defines model for UpdateProviderRequest.
@@ -1913,22 +3304,29 @@ type UpdateSettingRequest struct {
 
 // UpdateUserRoleRequest defines model for UpdateUserRoleRequest.
 type UpdateUserRoleRequest struct {
-	Active nullable.Nullable[bool]   `json:"active,omitempty"`
-	Role   nullable.Nullable[string] `json:"role,omitempty"`
+	AccessScope nullable.Nullable[UpdateUserRoleRequestAccessScope] `json:"access_scope,omitempty"`
+	Active      nullable.Nullable[bool]                             `json:"active,omitempty"`
+	Role        nullable.Nullable[string]                           `json:"role,omitempty"`
 }
+
+// UpdateUserRoleRequestAccessScope defines model for UpdateUserRoleRequest.AccessScope.
+type UpdateUserRoleRequestAccessScope string
 
 // UsageBreakdownItem defines model for UsageBreakdownItem.
 type UsageBreakdownItem struct {
-	CachedInputTokens string                    `json:"cached_input_tokens"`
-	Currency          nullable.Nullable[string] `json:"currency,omitempty"`
-	Dimension         string                    `json:"dimension"`
-	EstimatedCost     nullable.Nullable[string] `json:"estimated_cost,omitempty"`
-	IncompleteCount   int64                     `json:"incomplete_count"`
-	InputTokens       string                    `json:"input_tokens"`
-	MediaUnits        string                    `json:"media_units"`
-	OutputTokens      string                    `json:"output_tokens"`
-	RequestCount      int64                     `json:"request_count"`
-	UnpricedCount     int64                     `json:"unpriced_count"`
+	CacheWrite1hInputTokens string                    `json:"cache_write_1h_input_tokens"`
+	CacheWrite5mInputTokens string                    `json:"cache_write_5m_input_tokens"`
+	CacheWriteInputTokens   string                    `json:"cache_write_input_tokens"`
+	CachedInputTokens       string                    `json:"cached_input_tokens"`
+	Currency                nullable.Nullable[string] `json:"currency,omitempty"`
+	Dimension               string                    `json:"dimension"`
+	EstimatedCost           nullable.Nullable[string] `json:"estimated_cost,omitempty"`
+	IncompleteCount         int64                     `json:"incomplete_count"`
+	InputTokens             string                    `json:"input_tokens"`
+	MediaUnits              string                    `json:"media_units"`
+	OutputTokens            string                    `json:"output_tokens"`
+	RequestCount            int64                     `json:"request_count"`
+	UnpricedCount           int64                     `json:"unpriced_count"`
 }
 
 // UsageBreakdownResponse defines model for UsageBreakdownResponse.
@@ -1954,16 +3352,19 @@ type UsageCompletenessResponse struct {
 
 // UsagePointResponse defines model for UsagePointResponse.
 type UsagePointResponse struct {
-	Bucket            time.Time                 `json:"bucket"`
-	CachedInputTokens string                    `json:"cached_input_tokens"`
-	Currency          nullable.Nullable[string] `json:"currency,omitempty"`
-	EstimatedCost     nullable.Nullable[string] `json:"estimated_cost,omitempty"`
-	IncompleteCount   int64                     `json:"incomplete_count"`
-	InputTokens       string                    `json:"input_tokens"`
-	MediaUnits        string                    `json:"media_units"`
-	OutputTokens      string                    `json:"output_tokens"`
-	RequestCount      int64                     `json:"request_count"`
-	UnpricedCount     int64                     `json:"unpriced_count"`
+	Bucket                  time.Time                 `json:"bucket"`
+	CacheWrite1hInputTokens string                    `json:"cache_write_1h_input_tokens"`
+	CacheWrite5mInputTokens string                    `json:"cache_write_5m_input_tokens"`
+	CacheWriteInputTokens   string                    `json:"cache_write_input_tokens"`
+	CachedInputTokens       string                    `json:"cached_input_tokens"`
+	Currency                nullable.Nullable[string] `json:"currency,omitempty"`
+	EstimatedCost           nullable.Nullable[string] `json:"estimated_cost,omitempty"`
+	IncompleteCount         int64                     `json:"incomplete_count"`
+	InputTokens             string                    `json:"input_tokens"`
+	MediaUnits              string                    `json:"media_units"`
+	OutputTokens            string                    `json:"output_tokens"`
+	RequestCount            int64                     `json:"request_count"`
+	UnpricedCount           int64                     `json:"unpriced_count"`
 }
 
 // UsageRangeCoverageResponse defines model for UsageRangeCoverageResponse.
@@ -1975,6 +3376,9 @@ type UsageRangeCoverageResponse struct {
 
 // UsageSummaryResponse defines model for UsageSummaryResponse.
 type UsageSummaryResponse struct {
+	CacheWrite1hInputTokens string                                `json:"cache_write_1h_input_tokens"`
+	CacheWrite5mInputTokens string                                `json:"cache_write_5m_input_tokens"`
+	CacheWriteInputTokens   string                                `json:"cache_write_input_tokens"`
 	CachedInputTokens       string                                `json:"cached_input_tokens"`
 	Complete                bool                                  `json:"complete"`
 	Coverage                UsageRangeCoverageResponse            `json:"coverage"`
@@ -2004,15 +3408,22 @@ type UsageTimeSeriesResponse struct {
 
 // UserDetailResponse defines model for UserDetailResponse.
 type UserDetailResponse struct {
-	Active      bool               `json:"active"`
-	CreatedAt   time.Time          `json:"created_at"`
-	DisplayName string             `json:"display_name"`
-	Email       string             `json:"email"`
-	Etag        openapi_types.UUID `json:"etag"`
-	Id          openapi_types.UUID `json:"id"`
-	Role        string             `json:"role"`
-	UpdatedAt   time.Time          `json:"updated_at"`
+	AccessScope UserDetailResponseAccessScope `json:"access_scope"`
+	Active      bool                          `json:"active"`
+	CreatedAt   time.Time                     `json:"created_at"`
+	DisplayName string                        `json:"display_name"`
+	Email       string                        `json:"email"`
+	Etag        openapi_types.UUID            `json:"etag"`
+	Id          openapi_types.UUID            `json:"id"`
+
+	// Projects Projects the user may reach, with the membership role in each. Present only on the profile response.
+	Projects  *[]ProjectMembershipItem `json:"projects,omitempty"`
+	Role      string                   `json:"role"`
+	UpdatedAt time.Time                `json:"updated_at"`
 }
+
+// UserDetailResponseAccessScope defines model for UserDetailResponse.AccessScope.
+type UserDetailResponseAccessScope string
 
 // UserListResponse defines model for UserListResponse.
 type UserListResponse struct {
@@ -2022,11 +3433,15 @@ type UserListResponse struct {
 
 // UserResponse defines model for UserResponse.
 type UserResponse struct {
-	DisplayName string             `json:"display_name"`
-	Email       string             `json:"email"`
-	Id          openapi_types.UUID `json:"id"`
-	Role        string             `json:"role"`
+	AccessScope UserResponseAccessScope `json:"access_scope"`
+	DisplayName string                  `json:"display_name"`
+	Email       string                  `json:"email"`
+	Id          openapi_types.UUID      `json:"id"`
+	Role        string                  `json:"role"`
 }
+
+// UserResponseAccessScope defines model for UserResponse.AccessScope.
+type UserResponseAccessScope string
 
 // Vendor defines model for Vendor.
 type Vendor struct {
@@ -2108,6 +3523,30 @@ type ListAuditEventsParams struct {
 	OccurredBefore *time.Time `form:"occurred_before,omitempty" json:"occurred_before,omitempty"`
 }
 
+// ListBudgetGroupsParams defines parameters for ListBudgetGroups.
+type ListBudgetGroupsParams struct {
+	Cursor *string `form:"cursor,omitempty" json:"cursor,omitempty"`
+	Limit  *int32  `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
+// CreateBudgetGroupParams defines parameters for CreateBudgetGroup.
+type CreateBudgetGroupParams struct {
+	// IdempotencyKey Unique mutation key
+	IdempotencyKey string `json:"Idempotency-Key"`
+}
+
+// UpdateBudgetGroupParams defines parameters for UpdateBudgetGroup.
+type UpdateBudgetGroupParams struct {
+	// IfMatch Current budget group ETag
+	IfMatch string `json:"If-Match"`
+}
+
+// ApplyConfigurationParams defines parameters for ApplyConfiguration.
+type ApplyConfigurationParams struct {
+	// IdempotencyKey Unique mutation key
+	IdempotencyKey string `json:"Idempotency-Key"`
+}
+
 // ListInvitationsParams defines parameters for ListInvitations.
 type ListInvitationsParams struct {
 	// Cursor Opaque cursor returned by the previous page.
@@ -2129,6 +3568,27 @@ type RevokeInvitationParams struct {
 	IdempotencyKey string `json:"Idempotency-Key"`
 }
 
+// ListManagementTokensParams defines parameters for ListManagementTokens.
+type ListManagementTokensParams struct {
+	Cursor *string `form:"cursor,omitempty" json:"cursor,omitempty"`
+	Limit  *int32  `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
+// CreateManagementTokenParams defines parameters for CreateManagementToken.
+type CreateManagementTokenParams struct {
+	// IdempotencyKey Unique mutation key
+	IdempotencyKey string `json:"Idempotency-Key"`
+}
+
+// RevokeManagementTokenParams defines parameters for RevokeManagementToken.
+type RevokeManagementTokenParams struct {
+	// IfMatch Current management-token ETag
+	IfMatch string `json:"If-Match"`
+
+	// IdempotencyKey Unique mutation key
+	IdempotencyKey string `json:"Idempotency-Key"`
+}
+
 // ListMediaJobsParams defines parameters for ListMediaJobs.
 type ListMediaJobsParams struct {
 	// Cursor Opaque cursor returned by the previous page.
@@ -2143,6 +3603,81 @@ type ListMediaJobsParams struct {
 	Lifecycle     *string             `form:"lifecycle,omitempty" json:"lifecycle,omitempty"`
 	CreatedAfter  *time.Time          `form:"created_after,omitempty" json:"created_after,omitempty"`
 	CreatedBefore *time.Time          `form:"created_before,omitempty" json:"created_before,omitempty"`
+}
+
+// DeleteMediaJobParams defines parameters for DeleteMediaJob.
+type DeleteMediaJobParams struct {
+	// IfMatch Current media-job ETag
+	IfMatch string `json:"If-Match"`
+}
+
+// DownloadMediaJobContentParams defines parameters for DownloadMediaJobContent.
+type DownloadMediaJobContentParams struct {
+	// Variant Content variant to download
+	Variant DownloadMediaJobContentParamsVariant `form:"variant" json:"variant"`
+}
+
+// DownloadMediaJobContentParamsVariant defines parameters for DownloadMediaJobContent.
+type DownloadMediaJobContentParamsVariant string
+
+// ListBudgetAlertDeliveriesParams defines parameters for ListBudgetAlertDeliveries.
+type ListBudgetAlertDeliveriesParams struct {
+	// Cursor Opaque cursor returned by the previous page.
+	Cursor *string `form:"cursor,omitempty" json:"cursor,omitempty"`
+
+	// Limit Page size, from 1 to 200. Defaults to 50.
+	Limit *int32 `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// RuleId Only deliveries of this rule.
+	RuleId *openapi_types.UUID `form:"rule_id,omitempty" json:"rule_id,omitempty"`
+
+	// Status Only deliveries in this status.
+	Status *ListBudgetAlertDeliveriesParamsStatus `form:"status,omitempty" json:"status,omitempty"`
+}
+
+// ListBudgetAlertDeliveriesParamsStatus defines parameters for ListBudgetAlertDeliveries.
+type ListBudgetAlertDeliveriesParamsStatus string
+
+// ListNotificationDestinationsParams defines parameters for ListNotificationDestinations.
+type ListNotificationDestinationsParams struct {
+	// Cursor Opaque cursor returned by the previous page.
+	Cursor *string `form:"cursor,omitempty" json:"cursor,omitempty"`
+
+	// Limit Page size, from 1 to 200. Defaults to 50.
+	Limit *int32 `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
+// CreateNotificationDestinationParams defines parameters for CreateNotificationDestination.
+type CreateNotificationDestinationParams struct {
+	// IdempotencyKey Unique mutation key
+	IdempotencyKey string `json:"Idempotency-Key"`
+}
+
+// UpdateNotificationDestinationParams defines parameters for UpdateNotificationDestination.
+type UpdateNotificationDestinationParams struct {
+	// IfMatch Concurrency token returned with the resource
+	IfMatch string `json:"If-Match"`
+}
+
+// ListBudgetAlertRulesParams defines parameters for ListBudgetAlertRules.
+type ListBudgetAlertRulesParams struct {
+	// Cursor Opaque cursor returned by the previous page.
+	Cursor *string `form:"cursor,omitempty" json:"cursor,omitempty"`
+
+	// Limit Page size, from 1 to 200. Defaults to 50.
+	Limit *int32 `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
+// CreateBudgetAlertRuleParams defines parameters for CreateBudgetAlertRule.
+type CreateBudgetAlertRuleParams struct {
+	// IdempotencyKey Unique mutation key
+	IdempotencyKey string `json:"Idempotency-Key"`
+}
+
+// UpdateBudgetAlertRuleParams defines parameters for UpdateBudgetAlertRule.
+type UpdateBudgetAlertRuleParams struct {
+	// IfMatch Concurrency token returned with the resource
+	IfMatch string `json:"If-Match"`
 }
 
 // CallbackParams defines parameters for Callback.
@@ -2184,6 +3719,42 @@ type CreatePricingRevisionParams struct {
 	IdempotencyKey string `json:"Idempotency-Key"`
 }
 
+// PublishPricingSourceSnapshotParams defines parameters for PublishPricingSourceSnapshot.
+type PublishPricingSourceSnapshotParams struct {
+	// IdempotencyKey Unique mutation key
+	IdempotencyKey string `json:"Idempotency-Key"`
+}
+
+// ListPricingSourcesParams defines parameters for ListPricingSources.
+type ListPricingSourcesParams struct {
+	// Cursor Opaque cursor returned by the previous page.
+	Cursor *string `form:"cursor,omitempty" json:"cursor,omitempty"`
+
+	// Limit Page size, from 1 to 200. Defaults to 50.
+	Limit *int32 `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
+// CreatePricingSourceParams defines parameters for CreatePricingSource.
+type CreatePricingSourceParams struct {
+	// IdempotencyKey Unique mutation key
+	IdempotencyKey string `json:"Idempotency-Key"`
+}
+
+// UpdatePricingSourceParams defines parameters for UpdatePricingSource.
+type UpdatePricingSourceParams struct {
+	// IfMatch Concurrency token returned with the resource
+	IfMatch string `json:"If-Match"`
+}
+
+// ListPricingSourceSnapshotsParams defines parameters for ListPricingSourceSnapshots.
+type ListPricingSourceSnapshotsParams struct {
+	// Cursor Opaque cursor returned by the previous page.
+	Cursor *string `form:"cursor,omitempty" json:"cursor,omitempty"`
+
+	// Limit Page size, from 1 to 200. Defaults to 50.
+	Limit *int32 `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
 // UpdateProfileParams defines parameters for UpdateProfile.
 type UpdateProfileParams struct {
 	// IfMatch Current profile ETag
@@ -2199,6 +3770,42 @@ type ChangePasswordParams struct {
 // EnrollPasswordParams defines parameters for EnrollPassword.
 type EnrollPasswordParams struct {
 	// IfMatch Current profile ETag
+	IfMatch string `json:"If-Match"`
+}
+
+// ListProjectsParams defines parameters for ListProjects.
+type ListProjectsParams struct {
+	Cursor *string `form:"cursor,omitempty" json:"cursor,omitempty"`
+	Limit  *int32  `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
+// CreateProjectParams defines parameters for CreateProject.
+type CreateProjectParams struct {
+	// IdempotencyKey Unique mutation key
+	IdempotencyKey string `json:"Idempotency-Key"`
+}
+
+// UpdateProjectParams defines parameters for UpdateProject.
+type UpdateProjectParams struct {
+	// IfMatch Current project ETag
+	IfMatch string `json:"If-Match"`
+}
+
+// ListProjectMembersParams defines parameters for ListProjectMembers.
+type ListProjectMembersParams struct {
+	Cursor *string `form:"cursor,omitempty" json:"cursor,omitempty"`
+	Limit  *int32  `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
+// DeleteProjectMemberParams defines parameters for DeleteProjectMember.
+type DeleteProjectMemberParams struct {
+	// IfMatch Current project ETag
+	IfMatch string `json:"If-Match"`
+}
+
+// PutProjectMemberParams defines parameters for PutProjectMember.
+type PutProjectMemberParams struct {
+	// IfMatch Current project ETag
 	IfMatch string `json:"If-Match"`
 }
 
@@ -2223,6 +3830,23 @@ type ListProviderModelInventoryParams struct {
 	// Enabled Optional enabled-state filter.
 	Enabled *bool `form:"enabled,omitempty" json:"enabled,omitempty"`
 }
+
+// ListProviderResourcesParams defines parameters for ListProviderResources.
+type ListProviderResourcesParams struct {
+	// Cursor Opaque cursor returned by the previous page.
+	Cursor *string `form:"cursor,omitempty" json:"cursor,omitempty"`
+
+	// Limit Page size, from 1 to 200. Defaults to 50.
+	Limit      *int32                           `form:"limit,omitempty" json:"limit,omitempty"`
+	Kind       *ListProviderResourcesParamsKind `form:"kind,omitempty" json:"kind,omitempty"`
+	ApiKeyId   *openapi_types.UUID              `form:"api_key_id,omitempty" json:"api_key_id,omitempty"`
+	ProviderId *openapi_types.UUID              `form:"provider_id,omitempty" json:"provider_id,omitempty"`
+	Route      *string                          `form:"route,omitempty" json:"route,omitempty"`
+	State      *string                          `form:"state,omitempty" json:"state,omitempty"`
+}
+
+// ListProviderResourcesParamsKind defines parameters for ListProviderResources.
+type ListProviderResourcesParamsKind string
 
 // ListProvidersParams defines parameters for ListProviders.
 type ListProvidersParams struct {
@@ -2371,6 +3995,12 @@ type ListRequestsParams struct {
 	ErrorClass    *string             `form:"error_class,omitempty" json:"error_class,omitempty"`
 	StartedAfter  *time.Time          `form:"started_after,omitempty" json:"started_after,omitempty"`
 	StartedBefore *time.Time          `form:"started_before,omitempty" json:"started_before,omitempty"`
+
+	// AttributionKey Only usage carrying this attribution key. Requires attribution_value outside breakdowns.
+	AttributionKey *string `form:"attribution_key,omitempty" json:"attribution_key,omitempty"`
+
+	// AttributionValue Only usage whose attribution_key carries this value. Requires attribution_key.
+	AttributionValue *string `form:"attribution_value,omitempty" json:"attribution_value,omitempty"`
 }
 
 // ListRouteDraftsParams defines parameters for ListRouteDrafts.
@@ -2420,6 +4050,12 @@ type ListRoutesParams struct {
 
 	// Limit Page size, from 1 to 200. Defaults to 50.
 	Limit *int32 `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
+// RetireRouteParams defines parameters for RetireRoute.
+type RetireRouteParams struct {
+	IfMatch        string `json:"If-Match"`
+	IdempotencyKey string `json:"Idempotency-Key"`
 }
 
 // ListRouteRevisionsParams defines parameters for ListRouteRevisions.
@@ -2485,11 +4121,17 @@ type UsageBreakdownParams struct {
 	ApiKeyId   *openapi_types.UUID `form:"api_key_id,omitempty" json:"api_key_id,omitempty"`
 	Operation  *string             `form:"operation,omitempty" json:"operation,omitempty"`
 
-	// Dimension Break down by route, provider, model, api_key, or operation
+	// Dimension Break down by route, provider, model, api_key, operation, or attribution (requires attribution_key).
 	Dimension string `form:"dimension" json:"dimension"`
 
 	// Limit Maximum number of breakdown rows
 	Limit *int32 `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// AttributionKey Only usage carrying this attribution key. Requires attribution_value outside breakdowns.
+	AttributionKey *string `form:"attribution_key,omitempty" json:"attribution_key,omitempty"`
+
+	// AttributionValue Only usage whose attribution_key carries this value. Requires attribution_key.
+	AttributionValue *string `form:"attribution_value,omitempty" json:"attribution_value,omitempty"`
 }
 
 // UsageCompletenessParams defines parameters for UsageCompleteness.
@@ -2512,6 +4154,12 @@ type UsageSummaryParams struct {
 	Model      *string             `form:"model,omitempty" json:"model,omitempty"`
 	ApiKeyId   *openapi_types.UUID `form:"api_key_id,omitempty" json:"api_key_id,omitempty"`
 	Operation  *string             `form:"operation,omitempty" json:"operation,omitempty"`
+
+	// AttributionKey Only usage carrying this attribution key. Requires attribution_value outside breakdowns.
+	AttributionKey *string `form:"attribution_key,omitempty" json:"attribution_key,omitempty"`
+
+	// AttributionValue Only usage whose attribution_key carries this value. Requires attribution_key.
+	AttributionValue *string `form:"attribution_value,omitempty" json:"attribution_value,omitempty"`
 }
 
 // UsageTimeSeriesParams defines parameters for UsageTimeSeries.
@@ -2526,6 +4174,12 @@ type UsageTimeSeriesParams struct {
 
 	// Granularity Bucket size: hour or day
 	Granularity *string `form:"granularity,omitempty" json:"granularity,omitempty"`
+
+	// AttributionKey Only usage carrying this attribution key. Requires attribution_value outside breakdowns.
+	AttributionKey *string `form:"attribution_key,omitempty" json:"attribution_key,omitempty"`
+
+	// AttributionValue Only usage whose attribution_key carries this value. Requires attribution_key.
+	AttributionValue *string `form:"attribution_value,omitempty" json:"attribution_value,omitempty"`
 }
 
 // ListUsersParams defines parameters for ListUsers.
@@ -2552,11 +4206,38 @@ type UpdateApiKeyJSONRequestBody = UpdateApiKeyRequest
 // RotateApiKeyJSONRequestBody defines body for RotateApiKey for application/json ContentType.
 type RotateApiKeyJSONRequestBody = RotateApiKeyJSONBody
 
+// CreateBudgetGroupJSONRequestBody defines body for CreateBudgetGroup for application/json ContentType.
+type CreateBudgetGroupJSONRequestBody = CreateBudgetGroupRequest
+
+// UpdateBudgetGroupJSONRequestBody defines body for UpdateBudgetGroup for application/json ContentType.
+type UpdateBudgetGroupJSONRequestBody = UpdateBudgetGroupRequest
+
+// ApplyConfigurationJSONRequestBody defines body for ApplyConfiguration for application/json ContentType.
+type ApplyConfigurationJSONRequestBody = ConfigurationPromotionRequest
+
+// PlanConfigurationJSONRequestBody defines body for PlanConfiguration for application/json ContentType.
+type PlanConfigurationJSONRequestBody = ConfigurationPromotionRequest
+
 // CreateInvitationJSONRequestBody defines body for CreateInvitation for application/json ContentType.
 type CreateInvitationJSONRequestBody = CreateInvitationRequest
 
 // AcceptInvitationJSONRequestBody defines body for AcceptInvitation for application/json ContentType.
 type AcceptInvitationJSONRequestBody = AcceptInvitationRequest
+
+// CreateManagementTokenJSONRequestBody defines body for CreateManagementToken for application/json ContentType.
+type CreateManagementTokenJSONRequestBody = CreateManagementTokenRequest
+
+// CreateNotificationDestinationJSONRequestBody defines body for CreateNotificationDestination for application/json ContentType.
+type CreateNotificationDestinationJSONRequestBody = CreateNotificationDestinationRequest
+
+// UpdateNotificationDestinationJSONRequestBody defines body for UpdateNotificationDestination for application/json ContentType.
+type UpdateNotificationDestinationJSONRequestBody = UpdateNotificationDestinationRequest
+
+// CreateBudgetAlertRuleJSONRequestBody defines body for CreateBudgetAlertRule for application/json ContentType.
+type CreateBudgetAlertRuleJSONRequestBody = CreateBudgetAlertRuleRequest
+
+// UpdateBudgetAlertRuleJSONRequestBody defines body for UpdateBudgetAlertRule for application/json ContentType.
+type UpdateBudgetAlertRuleJSONRequestBody = UpdateBudgetAlertRuleRequest
 
 // PutConfigurationJSONRequestBody defines body for PutConfiguration for application/json ContentType.
 type PutConfigurationJSONRequestBody = OidcConfigurationRequest
@@ -2570,8 +4251,20 @@ type BeginReauthenticationJSONRequestBody = OidcReauthenticationRequest
 // ExecutePlaygroundJSONRequestBody defines body for ExecutePlayground for application/json ContentType.
 type ExecutePlaygroundJSONRequestBody = PlaygroundRequest
 
+// StreamPlaygroundJSONRequestBody defines body for StreamPlayground for application/json ContentType.
+type StreamPlaygroundJSONRequestBody = PlaygroundRequest
+
 // CreatePricingRevisionJSONRequestBody defines body for CreatePricingRevision for application/json ContentType.
 type CreatePricingRevisionJSONRequestBody = PricingRevisionRequest
+
+// PublishPricingSourceSnapshotJSONRequestBody defines body for PublishPricingSourceSnapshot for application/json ContentType.
+type PublishPricingSourceSnapshotJSONRequestBody = PublishPricingSourceRequest
+
+// CreatePricingSourceJSONRequestBody defines body for CreatePricingSource for application/json ContentType.
+type CreatePricingSourceJSONRequestBody = CreatePricingSourceRequest
+
+// UpdatePricingSourceJSONRequestBody defines body for UpdatePricingSource for application/json ContentType.
+type UpdatePricingSourceJSONRequestBody = UpdatePricingSourceRequest
 
 // UpdateProfileJSONRequestBody defines body for UpdateProfile for application/json ContentType.
 type UpdateProfileJSONRequestBody = UpdateProfileRequest
@@ -2584,6 +4277,15 @@ type EnrollPasswordJSONRequestBody = EnrollPasswordRequest
 
 // RecentAuthenticationJSONRequestBody defines body for RecentAuthentication for application/json ContentType.
 type RecentAuthenticationJSONRequestBody = RecentAuthenticationRequest
+
+// CreateProjectJSONRequestBody defines body for CreateProject for application/json ContentType.
+type CreateProjectJSONRequestBody = CreateProjectRequest
+
+// UpdateProjectJSONRequestBody defines body for UpdateProject for application/json ContentType.
+type UpdateProjectJSONRequestBody = UpdateProjectRequest
+
+// PutProjectMemberJSONRequestBody defines body for PutProjectMember for application/json ContentType.
+type PutProjectMemberJSONRequestBody = PutProjectMemberRequest
 
 // CreateProviderJSONRequestBody defines body for CreateProvider for application/json ContentType.
 type CreateProviderJSONRequestBody = CreateProviderRequest
@@ -2602,6 +4304,9 @@ type DiscoverProviderModelsJSONRequestBody = DiscoverModelsRequest
 
 // SetProviderModelJSONRequestBody defines body for SetProviderModel for application/json ContentType.
 type SetProviderModelJSONRequestBody = SetModelRequest
+
+// ProvisionUserJSONRequestBody defines body for ProvisionUser for application/json ContentType.
+type ProvisionUserJSONRequestBody = ProvisionUserRequest
 
 // CreateRouteDraftJSONRequestBody defines body for CreateRouteDraft for application/json ContentType.
 type CreateRouteDraftJSONRequestBody = CreateRouteDraftRequest

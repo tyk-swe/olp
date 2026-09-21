@@ -13,7 +13,7 @@ import (
 func (s *Server) sessionBody(r *http.Request, q Queryer, u User, token string) (any, error) {
 	var name string
 	err := q.QueryRow(r.Context(), "SELECT name FROM olp_go.installation WHERE singleton").Scan(&name)
-	return map[string]any{"user": map[string]any{"id": u.ID, "email": u.Email, "display_name": u.DisplayName, "role": u.Role}, "installation_name": name, "csrf_token": s.csrf(token)}, err
+	return map[string]any{"user": map[string]any{"id": u.ID, "email": u.Email, "display_name": u.DisplayName, "role": u.Role, "access_scope": u.AccessScope}, "installation_name": name, "csrf_token": s.csrf(token)}, err
 }
 func (s *Server) newSession(r *http.Request, tx pgx.Tx, userID string) (Reply, error) {
 	token := secrets.Token()
@@ -98,18 +98,20 @@ func (s *Server) login(r *http.Request) (Reply, error) {
 	return Commit(r, tx, response)
 }
 func (s *Server) currentSession(r *http.Request) (Reply, error) {
-	p, err := s.Principal(r, s.Pool, "read")
+	p, err := s.sessionPrincipal(r, s.Pool, "read")
 	if err != nil {
 		return Reply{}, err
 	}
-	if _, err = s.Pool.Exec(r.Context(), "UPDATE olp_go.sessions SET last_seen_at=now() WHERE id=$1 AND last_seen_at<now()-interval '1 minute'", p.SessionID); err != nil {
-		return Reply{}, err
+	if p.SessionID != "" {
+		if _, err = s.Pool.Exec(r.Context(), "UPDATE olp_go.sessions SET last_seen_at=now() WHERE id=$1 AND last_seen_at<now()-interval '1 minute'", p.SessionID); err != nil {
+			return Reply{}, err
+		}
 	}
 	body, err := s.sessionBody(r, s.Pool, p.User, p.Token)
 	return OK(body), err
 }
 func (s *Server) sessions(r *http.Request) (Reply, error) {
-	p, err := s.Principal(r, s.Pool, "read")
+	p, err := s.sessionPrincipal(r, s.Pool, "read")
 	if err != nil {
 		return Reply{}, err
 	}
@@ -127,7 +129,11 @@ func (s *Server) sessions(r *http.Request) (Reply, error) {
 	if _, err := ParseUUID(userID); err != nil {
 		return Reply{}, err
 	}
-	rows, err := s.Pool.Query(r.Context(), "SELECT jsonb_build_object('id',id,'user_id',user_id,'current',id=$1,'expires_at',expires_at,'last_seen_at',last_seen_at,'browser_hint',browser_hint,'created_at',created_at) FROM olp_go.sessions WHERE user_id=$2 AND expires_at>now() AND id<$3 ORDER BY id DESC LIMIT $4", p.SessionID, userID, pagination.Before, pagination.Limit+1)
+	var sessionID any
+	if p.SessionID != "" {
+		sessionID = p.SessionID
+	}
+	rows, err := s.Pool.Query(r.Context(), "SELECT jsonb_build_object('id',id,'user_id',user_id,'current',id=$1,'expires_at',expires_at,'last_seen_at',last_seen_at,'browser_hint',browser_hint,'created_at',created_at) FROM olp_go.sessions WHERE user_id=$2 AND expires_at>now() AND id<$3 ORDER BY id DESC LIMIT $4", sessionID, userID, pagination.Before, pagination.Limit+1)
 	if err != nil {
 		return Reply{}, err
 	}
@@ -142,16 +148,20 @@ func (s *Server) deleteSession(r *http.Request, current bool) (Reply, error) {
 		return Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := s.Principal(r, tx, "read")
+	p, err := s.sessionPrincipal(r, tx, "read")
 	if err != nil {
 		return Reply{}, err
 	}
-	id := p.SessionID
+	session := p.SessionID
 	if !current {
-		id, err = IDParam(r, "session_id")
+		session, err = IDParam(r, "session_id")
 		if err != nil {
 			return Reply{}, err
 		}
+	}
+	var id any = session
+	if session == "" {
+		id = nil
 	}
 	var userID string
 	if err = tx.QueryRow(r.Context(), "SELECT user_id::text FROM olp_go.sessions WHERE id=$1", id).Scan(&userID); err != nil {
@@ -163,19 +173,55 @@ func (s *Server) deleteSession(r *http.Request, current bool) (Reply, error) {
 	if _, err = tx.Exec(r.Context(), "DELETE FROM olp_go.sessions WHERE id=$1", id); err != nil {
 		return Reply{}, err
 	}
-	if err = Audit(r.Context(), tx, r, p.ID, "session.revoke", "session", id, "success"); err != nil {
+	if err = Audit(r.Context(), tx, r, p.ID, "session.revoke", "session", session, "success"); err != nil {
 		return Reply{}, err
 	}
 	response := Reply{Status: 204}
-	if id == p.SessionID {
+	if session == p.SessionID {
 		response.Cookies = []*http.Cookie{clearCookie(sessionCookie), clearCookie(csrfCookie), clearCookie(recentCookie)}
 	}
 	return Commit(r, tx, response)
 }
 
 func (s *Server) profile(r *http.Request) (Reply, error) {
-	p, err := s.Principal(r, s.Pool, "read")
-	return Detail(p.User, p.ETag), err
+	p, err := s.sessionPrincipal(r, s.Pool, "read")
+	if err != nil {
+		return Reply{}, err
+	}
+	return s.profileBody(r, s.Pool, p)
+}
+
+type projectOption struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	Role string `json:"role"`
+}
+
+func (s *Server) profileBody(r *http.Request, q Queryer, p Principal) (Reply, error) {
+	var rows pgx.Rows
+	var err error
+	if p.AllProjects {
+		rows, err = q.Query(r.Context(), "SELECT id::text,name,'manager' FROM olp_go.projects ORDER BY lower(name)")
+	} else {
+		rows, err = q.Query(r.Context(), "SELECT p.id::text,p.name,m.role FROM olp_go.project_members m JOIN olp_go.projects p ON p.id=m.project_id WHERE m.user_id=$1 ORDER BY lower(p.name)", p.ID)
+	}
+	if err != nil {
+		return Reply{}, err
+	}
+	projects := []projectOption{}
+	for rows.Next() {
+		var option projectOption
+		if err = rows.Scan(&option.ID, &option.Name, &option.Role); err != nil {
+			rows.Close()
+			return Reply{}, err
+		}
+		projects = append(projects, option)
+	}
+	rows.Close()
+	if err = rows.Err(); err != nil {
+		return Reply{}, err
+	}
+	return Detail(map[string]any{"id": p.ID, "email": p.Email, "display_name": p.DisplayName, "role": p.Role, "active": p.Active, "access_scope": p.AccessScope, "etag": p.ETag, "created_at": p.CreatedAt, "updated_at": p.UpdatedAt, "projects": projects}, p.ETag), nil
 }
 func (s *Server) updateProfile(r *http.Request) (Reply, error) {
 	var input struct {
@@ -192,7 +238,7 @@ func (s *Server) updateProfile(r *http.Request) (Reply, error) {
 		return Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := s.Principal(r, tx, "read")
+	p, err := s.sessionPrincipal(r, tx, "read")
 	if err != nil {
 		return Reply{}, err
 	}
@@ -209,7 +255,12 @@ func (s *Server) updateProfile(r *http.Request) (Reply, error) {
 	if err != nil {
 		return Reply{}, err
 	}
-	return Commit(r, tx, Detail(u, u.ETag))
+	p.User = u
+	reply, err := s.profileBody(r, tx, p)
+	if err != nil {
+		return Reply{}, err
+	}
+	return Commit(r, tx, reply)
 }
 func (s *Server) changePassword(r *http.Request) (Reply, error) { return s.writePassword(r, false) }
 func (s *Server) enrollPassword(r *http.Request) (Reply, error) { return s.writePassword(r, true) }
@@ -224,7 +275,7 @@ func (s *Server) writePassword(r *http.Request, enroll bool) (Reply, error) {
 	if err := password(input.New); err != nil {
 		return Reply{}, err
 	}
-	p, err := s.Principal(r, s.Pool, "read")
+	p, err := s.sessionPrincipal(r, s.Pool, "read")
 	if err != nil {
 		return Reply{}, err
 	}
@@ -261,7 +312,7 @@ func (s *Server) writePassword(r *http.Request, enroll bool) (Reply, error) {
 		return Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err = s.Principal(r, tx, "read")
+	p, err = s.sessionPrincipal(r, tx, "read")
 	if err != nil {
 		return Reply{}, err
 	}
@@ -319,7 +370,7 @@ func (s *Server) reauthenticate(r *http.Request) (Reply, error) {
 	if err := validatePurpose(input.Purpose, input.Resource); err != nil {
 		return Reply{}, err
 	}
-	p, err := s.Principal(r, s.Pool, "read")
+	p, err := s.sessionPrincipal(r, s.Pool, "read")
 	if err != nil {
 		return Reply{}, err
 	}
@@ -345,7 +396,7 @@ func (s *Server) reauthenticate(r *http.Request) (Reply, error) {
 		return Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err = s.Principal(r, tx, "read")
+	p, err = s.sessionPrincipal(r, tx, "read")
 	if err != nil {
 		return Reply{}, err
 	}

@@ -17,6 +17,36 @@
       "indirect": true
     },
     {
+      "path": "github.com/Azure/azure-sdk-for-go/sdk/azcore",
+      "version": "v1.23.1",
+      "indirect": false
+    },
+    {
+      "path": "github.com/Azure/azure-sdk-for-go/sdk/azidentity",
+      "version": "v1.14.1",
+      "indirect": false
+    },
+    {
+      "path": "github.com/Azure/azure-sdk-for-go/sdk/azidentity/cache",
+      "version": "v0.4.0",
+      "indirect": true
+    },
+    {
+      "path": "github.com/Azure/azure-sdk-for-go/sdk/internal",
+      "version": "v1.12.0",
+      "indirect": true
+    },
+    {
+      "path": "github.com/AzureAD/microsoft-authentication-extensions-for-go/cache",
+      "version": "v0.1.1",
+      "indirect": true
+    },
+    {
+      "path": "github.com/AzureAD/microsoft-authentication-library-for-go",
+      "version": "v1.8.0",
+      "indirect": true
+    },
+    {
       "path": "github.com/BurntSushi/toml",
       "version": "v1.3.2",
       "indirect": true
@@ -209,6 +239,11 @@
     {
       "path": "github.com/cncf/xds/go",
       "version": "v0.0.0-20260202195803-dba9d589def2",
+      "indirect": true
+    },
+    {
+      "path": "github.com/coder/websocket",
+      "version": "v1.8.15",
       "indirect": true
     },
     {
@@ -457,6 +492,11 @@
       "indirect": true
     },
     {
+      "path": "github.com/golang-jwt/jwt/v5",
+      "version": "v5.3.1",
+      "indirect": true
+    },
+    {
       "path": "github.com/golang/glog",
       "version": "v1.2.5",
       "indirect": true
@@ -607,6 +647,11 @@
       "indirect": true
     },
     {
+      "path": "github.com/keybase/go-keychain",
+      "version": "v0.0.1",
+      "indirect": true
+    },
+    {
       "path": "github.com/klauspost/compress",
       "version": "v1.17.7",
       "indirect": true
@@ -629,6 +674,11 @@
     {
       "path": "github.com/kr/text",
       "version": "v0.2.0",
+      "indirect": true
+    },
+    {
+      "path": "github.com/kylelemons/godebug",
+      "version": "v1.1.0",
       "indirect": true
     },
     {
@@ -679,6 +729,11 @@
     {
       "path": "github.com/modern-go/reflect2",
       "version": "v1.0.2",
+      "indirect": true
+    },
+    {
+      "path": "github.com/montanaflynn/stats",
+      "version": "v0.7.0",
       "indirect": true
     },
     {
@@ -737,6 +792,11 @@
       "indirect": true
     },
     {
+      "path": "github.com/pkg/browser",
+      "version": "v0.0.0-20240102092130-5ac0b6a4141c",
+      "indirect": true
+    },
+    {
       "path": "github.com/planetscale/vtprotobuf",
       "version": "v0.6.1-0.20240319094008-0393e58bdf10",
       "indirect": true
@@ -774,6 +834,11 @@
     {
       "path": "github.com/sergi/go-diff",
       "version": "v1.1.0",
+      "indirect": true
+    },
+    {
+      "path": "github.com/shopspring/decimal",
+      "version": "v1.4.0",
       "indirect": true
     },
     {
@@ -1082,8 +1147,8 @@
       "indirect": true
     }
   ],
-  "directCount": 23,
-  "resolvedCount": 216,
+  "directCount": 25,
+  "resolvedCount": 229,
   "native": "native/inventory.json",
   "javascriptSDKs": {
     "@anthropic-ai/sdk": "0.116.0",

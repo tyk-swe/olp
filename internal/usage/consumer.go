@@ -470,13 +470,15 @@ func (r *consumerRun) processEntry(ctx context.Context, entry StreamEntry) (bool
 		r.log.Warn("request metadata event outside the replay window was recorded as a gap",
 			"stream_id", entry.ID)
 	}
-	if result.Outcome == PersistOutcomePersisted && result.CostSnapshot != nil && r.limiter != nil {
+	if result.Outcome == PersistOutcomePersisted && r.limiter != nil {
 		// Spend is already durable; the counters are a cache of it. A failure
 		// here is repaired by the reconciliation pass, so it never blocks the
 		// delivery from being acknowledged.
-		if _, _, err := r.limiter.ApplyCostSnapshot(ctx, *result.CostSnapshot); err != nil {
-			r.log.Warn("cost snapshot application failed; reconciliation will repair it",
-				"stream_id", entry.ID, "error", err)
+		for _, snapshot := range result.CostSnapshots {
+			if _, _, err := r.limiter.ApplyCostSnapshot(ctx, snapshot); err != nil {
+				r.log.Warn("cost snapshot application failed; reconciliation will repair it",
+					"stream_id", entry.ID, "error", err)
+			}
 		}
 	}
 	if err := r.acknowledge(ctx, entry.ID); err != nil {

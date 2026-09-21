@@ -11,7 +11,11 @@ type Usage struct {
 	OutputTokens      int64  `json:"output_tokens"`
 	TotalTokens       int64  `json:"total_tokens"`
 	CachedInputTokens *int64 `json:"cached_input_tokens,omitempty"`
-	ReasoningTokens   *int64 `json:"reasoning_tokens,omitempty"`
+
+	CacheWriteInputTokens   *int64 `json:"cache_write_input_tokens,omitempty"`
+	CacheWrite5MInputTokens *int64 `json:"cache_write_5m_input_tokens,omitempty"`
+	CacheWrite1HInputTokens *int64 `json:"cache_write_1h_input_tokens,omitempty"`
+	ReasoningTokens         *int64 `json:"reasoning_tokens,omitempty"`
 	// MediaUnits is the provider-metered media quantity — images returned or
 	// seconds processed — carried as decimal text so it survives the usage
 	// event wire shape unchanged.

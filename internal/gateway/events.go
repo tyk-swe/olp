@@ -4,6 +4,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/contentpolicy"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
 	"github.com/tyk-swe/olp/internal/usage"
 )
@@ -18,9 +19,15 @@ type Envelope struct {
 	// caller named its own: a client-supplied request id is echoed back for
 	// correlation, but two callers may name the same one, and durable records
 	// cannot be stored under a key their subject chooses.
-	AccountingID    string
-	Actor           string // api_key or playground
-	KeyID           string
+	AccountingID string
+	Actor        string
+	KeyID        string
+
+	BudgetGroupID *string
+
+	Attribution map[string]string
+
+	PolicyDecisions []contentpolicy.Decision
 	UserID          string
 	Route           string
 	RouteRevisionID string

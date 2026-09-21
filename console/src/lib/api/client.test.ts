@@ -13,7 +13,8 @@ const session = {
     id: '01980000-0000-7000-8000-000000000001',
     email: 'operator@example.com',
     display_name: 'Operator',
-    role: 'operator' as const
+    role: 'operator' as const,
+    access_scope: 'global' as const
   },
   csrf_token: 'csrf-boundary-token'
 };

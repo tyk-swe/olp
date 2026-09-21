@@ -1,7 +1,7 @@
 import { flushSync, mount, unmount } from 'svelte';
 import { QueryClient } from '@tanstack/svelte-query';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { listRouteDraftPage, listRoutePage } from './api';
+import { listRouteDraftPage, listRoutePage, retireRoute } from './api';
 import { draft } from '$lib/forms/test/draftFixtures';
 import type { ActiveRoute, RouteDraft } from './api';
 import RouteListProbe from './test/RouteListProbe.svelte';
@@ -12,7 +12,8 @@ vi.mock('$lib/features/access/session/useRole.svelte', () => ({
 vi.mock('./api', async (original) => ({
   ...(await original<typeof import('./api')>()),
   listRoutePage: vi.fn(),
-  listRouteDraftPage: vi.fn()
+  listRouteDraftPage: vi.fn(),
+  retireRoute: vi.fn()
 }));
 
 const SERVER_DELAY = 400;
@@ -23,10 +24,14 @@ let component: ReturnType<typeof mount>;
 
 const activeRoute: ActiveRoute = {
   created_at: '2026-07-12T12:00:00Z',
+  project_id: null,
+  project_name: null,
+  etag: 'route-etag-a',
   id: 'route-active-a',
   latest_revision: {
     activated_at: '2026-07-12T12:00:00Z',
     activated_by: 'user-a',
+    content_policy: null,
     id: 'revision-a',
     max_attempts: 1,
     operations: ['generation'],
@@ -66,7 +71,20 @@ const activeRoute: ActiveRoute = {
     targets: []
   },
   revision_count: 1,
-  slug: 'active-route'
+  retired_at: null,
+  retired_by: null,
+  slug: 'active-route',
+  state: 'active'
+};
+
+const retiredRoute: ActiveRoute = {
+  ...activeRoute,
+  etag: 'route-etag-b',
+  id: 'route-retired-b',
+  retired_at: '2026-07-13T12:00:00Z',
+  retired_by: 'user-a',
+  slug: 'retired-route',
+  state: 'retired'
 };
 
 function deferred<T>(value: T, ms = SERVER_DELAY): Promise<T> {
@@ -139,20 +157,20 @@ function button(label: string, section?: string) {
 describe('updating state', () => {
   it('keeps the active routes visible while a replacement page loads', async () => {
     await establish([routeItem(0)], 'route-page-two');
-    button('Next', 'active-routes-heading').click();
+    button('Next', 'published-routes-heading').click();
     flushSync();
     await vi.advanceTimersByTimeAsync(10);
     const section = host.querySelector<HTMLElement>(
-      '[aria-labelledby="active-routes-heading"]'
+      '[aria-labelledby="published-routes-heading"]'
     )!;
     expect(section.textContent).toContain('route-0');
     expect(section.textContent).toContain('Updating…');
     expect(
       section
-        .querySelector('[aria-label="Active routes table"]')
+        .querySelector('[aria-label="Published routes table"]')
         ?.getAttribute('aria-busy')
     ).toBe('true');
-    expect(button('Next', 'active-routes-heading').disabled).toBe(true);
+    expect(button('Next', 'published-routes-heading').disabled).toBe(true);
     // The draft section is unaffected by the active-route page change.
     const draftsSection = host.querySelector<HTMLElement>(
       '[aria-labelledby="draft-routes-heading"]'
@@ -208,7 +226,7 @@ describe('independent sections', () => {
     )!;
     expect(draftsSection.textContent).toContain('draft-0');
     const routesSection = host.querySelector<HTMLElement>(
-      '[aria-labelledby="active-routes-heading"]'
+      '[aria-labelledby="published-routes-heading"]'
     )!;
     expect(routesSection.textContent).toContain('routes down');
     expect(routesSection.textContent).toContain('Retry');
@@ -268,15 +286,57 @@ describe('cancellation', () => {
     await settle();
     // Move to the second page, then return while that request is still in
     // flight; the superseded request must abort.
-    button('Next', 'active-routes-heading').click();
+    button('Next', 'published-routes-heading').click();
     flushSync();
     await vi.advanceTimersByTimeAsync(10);
-    button('Previous', 'active-routes-heading').click();
+    button('Previous', 'published-routes-heading').click();
     flushSync();
     await vi.advanceTimersByTimeAsync(10);
     const pageTwo = calls.find((call) => call.cursor === 'route-page-two');
     expect(pageTwo).toBeDefined();
     expect(pageTwo!.signal.aborted).toBe(true);
     await settle();
+  });
+
+  it('marks retired routes and only offers retirement for active ones', async () => {
+    await establish([routeItem(0), retiredRoute]);
+    const rows = [
+      ...host.querySelectorAll<HTMLElement>(
+        '[aria-labelledby="published-routes-heading"] tbody tr'
+      )
+    ];
+    expect(rows).toHaveLength(2);
+    expect(rows[0].textContent).toContain('active');
+    expect(rows[1].textContent).toContain('retired');
+    const retireButtons = [...host.querySelectorAll('button')].filter(
+      (item) => item.textContent?.trim() === 'Retire'
+    );
+    expect(retireButtons).toHaveLength(1);
+  });
+
+  it('retires an active route with its etag and refreshes the lists', async () => {
+    await establish([routeItem(0)]);
+    vi.mocked(retireRoute).mockResolvedValue({
+      etag: 'route-etag-a2',
+      runtime_generation: { id: 'gen-2', sequence: 2 }
+    });
+    button('Retire', 'published-routes-heading').click();
+    flushSync();
+    await vi.advanceTimersByTimeAsync(10);
+    expect(retireRoute).toHaveBeenCalledWith('route-0', 'route-etag-a');
+    await settle();
+    expect(vi.mocked(listRoutePage).mock.calls.length).toBeGreaterThan(1);
+  });
+
+  it('reports a failed retirement without hiding the list', async () => {
+    await establish([routeItem(0)]);
+    vi.mocked(retireRoute).mockRejectedValue(new Error('etag mismatch'));
+    button('Retire', 'published-routes-heading').click();
+    flushSync();
+    await vi.advanceTimersByTimeAsync(10);
+    expect(host.querySelector('[role="alert"]')?.textContent).toContain(
+      'etag mismatch'
+    );
+    expect(host.textContent).toContain('route-0');
   });
 });

@@ -1,19 +1,24 @@
 import { describe, expect, it } from 'vitest';
 import type { ProviderModelInventory } from '$lib/features/providers/models';
 import {
+  buildContentPolicy,
   buildCreateRouteDraftInput,
   buildReplaceRouteDraftInput,
   certifiedCapabilities,
   eligibleTargetTuples,
+  hasOutputRules,
   missingTargetOperations,
   modesFor,
   operationOptions,
+  policyRulesFrom,
   routeEligibilityWarnings,
   surfacesFor,
   storedTargetLabel,
   targetUnavailable,
   toRouteModelOptions,
+  validateContentPolicy,
   validateRouteEditor,
+  type EditablePolicyRule,
   type EditableTarget,
   type RouteEditorValues,
   type RouteModelOption
@@ -31,7 +36,8 @@ const validEditor: RouteEditorValues = {
   operations: ['generation'],
   overallTimeoutMs: 120_000,
   maxAttempts: 1,
-  targets: [target]
+  targets: [target],
+  contentPolicyRules: []
 };
 
 const modelOptions: RouteModelOption[] = [
@@ -90,7 +96,7 @@ describe('Route Studio operation policy', () => {
   });
 
   it.each([
-    ['generation', ['openai', 'anthropic', 'gemini']],
+    ['generation', ['openai', 'anthropic', 'gemini', 'bedrock']],
     ['token_count', ['openai', 'anthropic', 'gemini']],
     ['embeddings', ['openai']],
     ['video_create', ['openai']]
@@ -262,9 +268,11 @@ describe('Route Studio API payloads', () => {
   it('maps new targets from inventory IDs to provider and upstream model identity', () => {
     expect(buildCreateRouteDraftInput(values, modelOptions)).toEqual({
       slug: 'support-chat-v2',
+      project_id: null,
       operations: ['generation', 'embeddings'],
       overall_timeout_ms: 120_000,
       max_attempts: 2,
+      content_policy: null,
       targets: [
         {
           provider_id: 'provider-a',
@@ -290,6 +298,7 @@ describe('Route Studio API payloads', () => {
       operations: ['generation', 'embeddings'],
       overall_timeout_ms: 120_000,
       max_attempts: 2,
+      content_policy: null,
       targets: [
         {
           provider_model_id: 'model-a',
@@ -343,5 +352,176 @@ describe('stored target availability', () => {
         }
       })
     ).toBe(false);
+  });
+});
+
+describe('Route Studio content policy', () => {
+  const rule: EditablePolicyRule = {
+    id: 'safe-id',
+    phase: 'input',
+    action: 'redact',
+    pattern: 'secret-[0-9]+',
+    replacement: ''
+  };
+
+  it('round-trips a stored policy into editable rules', () => {
+    expect(policyRulesFrom(null)).toEqual([]);
+    expect(
+      policyRulesFrom({
+        rules: [
+          { id: 'deny', phase: 'output', action: 'block', pattern: 'x' },
+          {
+            id: 'mask',
+            phase: 'input',
+            action: 'redact',
+            pattern: 'y',
+            replacement: 'gone'
+          }
+        ]
+      })
+    ).toEqual([
+      {
+        id: 'deny',
+        phase: 'output',
+        action: 'block',
+        pattern: 'x',
+        replacement: ''
+      },
+      {
+        id: 'mask',
+        phase: 'input',
+        action: 'redact',
+        pattern: 'y',
+        replacement: 'gone'
+      }
+    ]);
+  });
+
+  it('detects output rules for the streaming gate on editable and stored rules', () => {
+    expect(hasOutputRules([rule])).toBe(false);
+    expect(hasOutputRules([rule, { ...rule, phase: 'output' }])).toBe(true);
+    expect(
+      hasOutputRules(
+        policyRulesFrom({
+          rules: [
+            { id: 'deny', phase: 'output', action: 'block', pattern: 'x' }
+          ]
+        })
+      )
+    ).toBe(true);
+  });
+
+  it('accepts a valid mixed policy', () => {
+    expect(
+      validateContentPolicy([
+        rule,
+        { ...rule, id: 'deny', phase: 'output', action: 'block' }
+      ])
+    ).toBeNull();
+  });
+
+  it('rejects more than 64 rules', () => {
+    const rules = Array.from({ length: 65 }, (_, index) => ({
+      ...rule,
+      id: `rule-${index}`
+    }));
+    expect(validateContentPolicy(rules)).toContain('64');
+  });
+
+  it.each(['1bad', 'has space', '-leading', 'x'.repeat(65)])(
+    'rejects invalid rule id %j',
+    (id) => {
+      expect(validateContentPolicy([{ ...rule, id }])).toContain('Rule id');
+    }
+  );
+
+  it('rejects duplicate rule ids', () => {
+    expect(validateContentPolicy([rule, { ...rule }])).toContain(
+      'more than once'
+    );
+  });
+
+  it('rejects an empty or oversized pattern', () => {
+    expect(validateContentPolicy([{ ...rule, pattern: '' }])).toContain(
+      'RE2 pattern'
+    );
+    expect(
+      validateContentPolicy([{ ...rule, pattern: 'x'.repeat(513) }])
+    ).toContain('RE2 pattern');
+  });
+
+  it('rejects combined patterns over 16 KiB', () => {
+    const rules = Array.from({ length: 33 }, (_, index) => ({
+      ...rule,
+      id: `rule-${index}`,
+      pattern: 'x'.repeat(512)
+    }));
+    expect(validateContentPolicy(rules)).toContain('combined');
+  });
+
+  it('rejects a replacement on a block rule and an oversized replacement', () => {
+    expect(
+      validateContentPolicy([{ ...rule, action: 'block', replacement: 'x' }])
+    ).toContain('cannot carry a replacement');
+    expect(
+      validateContentPolicy([{ ...rule, replacement: 'x'.repeat(129) }])
+    ).toContain('128');
+  });
+
+  it('builds a nullable wire policy and omits the default replacement', () => {
+    expect(buildContentPolicy([])).toBeNull();
+    expect(buildContentPolicy([rule])).toEqual({
+      rules: [
+        {
+          id: 'safe-id',
+          phase: 'input',
+          pattern: 'secret-[0-9]+',
+          action: 'redact'
+        }
+      ]
+    });
+    expect(buildContentPolicy([{ ...rule, replacement: '[MASKED]' }])).toEqual({
+      rules: [
+        {
+          id: 'safe-id',
+          phase: 'input',
+          pattern: 'secret-[0-9]+',
+          action: 'redact',
+          replacement: '[MASKED]'
+        }
+      ]
+    });
+  });
+
+  it('sends content_policy in create and replace payloads', () => {
+    const values: RouteEditorValues = {
+      ...validEditor,
+      contentPolicyRules: [rule]
+    };
+    const expected = {
+      rules: [
+        {
+          id: 'safe-id',
+          phase: 'input',
+          pattern: 'secret-[0-9]+',
+          action: 'redact'
+        }
+      ]
+    };
+    expect(
+      buildCreateRouteDraftInput(values, modelOptions).content_policy
+    ).toEqual(expected);
+    expect(buildReplaceRouteDraftInput(values).content_policy).toEqual(
+      expected
+    );
+  });
+
+  it('validates the policy through the route editor gate', () => {
+    expect(
+      validateRouteEditor({
+        ...validEditor,
+        contentPolicyRules: [{ ...rule, pattern: '' }]
+      })
+    ).toContain('RE2 pattern');
   });
 });

@@ -3,6 +3,7 @@ package runtime
 import (
 	"cmp"
 	"encoding/json"
+	"math"
 	"slices"
 	"time"
 
@@ -10,30 +11,40 @@ import (
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
+type TokenDemand struct {
+	EstimatedInputTokens int64
+	MaxOutputTokens      *int64
+}
+
 type SelectionOptions struct {
 	KeyID             string
 	Preferences       *Preferences
 	Parameters        []string
 	Inputs            *usage.RoutingInputs
+	TokenDemand       *TokenDemand
 	Now               time.Time
 	CheckSlots        bool
 	CredentialRevoked func(string) bool
 	Accept            func(Provider, Target) error
 }
 type Decision struct {
-	TargetID           string              `json:"target_id"`
-	ProviderID         string              `json:"provider_id"`
-	UpstreamModel      string              `json:"upstream_model"`
-	Eligible           bool                `json:"eligible"`
-	Priority           int                 `json:"priority"`
-	Strategy           string              `json:"strategy"`
-	Attempt            *int                `json:"attempt"`
-	CredentialSlotID   *string             `json:"credential_slot_id"`
-	Reason             *string             `json:"reason"`
-	Price              *usage.RoutingPrice `json:"price"`
-	Performance        *usage.Performance  `json:"performance"`
-	VendorID           *string             `json:"vendor_id"`
-	MetadataObservedAt *time.Time          `json:"metadata_observed_at"`
+	TargetID              string              `json:"target_id"`
+	ProviderID            string              `json:"provider_id"`
+	UpstreamModel         string              `json:"upstream_model"`
+	Eligible              bool                `json:"eligible"`
+	Priority              int                 `json:"priority"`
+	Strategy              string              `json:"strategy"`
+	Attempt               *int                `json:"attempt"`
+	CredentialSlotID      *string             `json:"credential_slot_id"`
+	Reason                *string             `json:"reason"`
+	Price                 *usage.RoutingPrice `json:"price"`
+	Performance           *usage.Performance  `json:"performance"`
+	VendorID              *string             `json:"vendor_id"`
+	MetadataObservedAt    *time.Time          `json:"metadata_observed_at"`
+	EstimatedInputTokens  *int64              `json:"estimated_input_tokens"`
+	RequestedOutputTokens *int64              `json:"requested_output_tokens"`
+	ContextLength         *int64              `json:"context_length"`
+	MaxOutputTokens       *int64              `json:"max_output_tokens"`
 }
 type Plan struct {
 	Attempts  []Attempt
@@ -85,6 +96,13 @@ func PlanRequest(s *Snapshot, slug, operation, surface, mode string, affinity []
 		var metadata ModelMetadata
 		_ = json.Unmarshal(provider.Models[target.ProviderModel], &metadata)
 		row.decision.MetadataObservedAt = metadata.ObservedAt
+		row.decision.ContextLength = metadata.ContextLength
+		row.decision.MaxOutputTokens = metadata.MaxOutputTokens
+		if options.TokenDemand != nil {
+			input := options.TokenDemand.EstimatedInputTokens
+			row.decision.EstimatedInputTokens = &input
+			row.decision.RequestedOutputTokens = options.TokenDemand.MaxOutputTokens
+		}
 		row.decision.Price = options.Inputs.Price(provider.Kind, provider.ID, provider.VendorID, target.ProviderModel, operation, now)
 		row.decision.Performance = options.Inputs.Metrics(provider.ID, target.ProviderModel, operation, mode, now)
 		reason := ""
@@ -95,6 +113,9 @@ func PlanRequest(s *Snapshot, slug, operation, surface, mode string, affinity []
 			reason = "provider_not_active"
 		case !provider.Supports(target.ProviderModel, operation, surface, mode):
 			reason = "capability_not_certified"
+		}
+		if reason == "" {
+			reason = capacityReason(metadata, options.TokenDemand)
 		}
 		if reason == "" {
 			reason = constraintReason(policy, provider, metadata, row.decision.Price, options.Parameters)
@@ -229,6 +250,32 @@ func PlanRequest(s *Snapshot, slug, operation, surface, mode string, affinity []
 
 	return plan, nil
 }
+
+func capacityReason(m ModelMetadata, demand *TokenDemand) string {
+	if demand == nil {
+		return ""
+	}
+	if m.ContextLength != nil {
+		if demand.EstimatedInputTokens > *m.ContextLength {
+			return "context_length_exceeded"
+		}
+		if demand.MaxOutputTokens != nil && saturatingSum(demand.EstimatedInputTokens, *demand.MaxOutputTokens) > *m.ContextLength {
+			return "context_length_exceeded"
+		}
+	}
+	if m.MaxOutputTokens != nil && demand.MaxOutputTokens != nil && *demand.MaxOutputTokens > *m.MaxOutputTokens {
+		return "max_output_tokens_exceeded"
+	}
+	return ""
+}
+
+func saturatingSum(a, b int64) int64 {
+	if a > math.MaxInt64-b {
+		return math.MaxInt64
+	}
+	return a + b
+}
+
 func constraintReason(policy EffectivePolicy, p Provider, m ModelMetadata, price *usage.RoutingPrice, parameters []string) string {
 	for _, c := range policy.Constraints {
 		if c.Only != nil && !anySelector(c.Only, p) {

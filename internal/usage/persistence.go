@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/tyk-swe/olp/internal/contentpolicy"
 	"github.com/tyk-swe/olp/internal/limits"
 )
 
@@ -30,8 +31,8 @@ const (
 // Persisted is the result of one persistence attempt, with the spend snapshot
 // that the caller pushes back into the distributed cost counters.
 type Persisted struct {
-	Outcome      PersistOutcome
-	CostSnapshot *limits.CostSnapshot
+	Outcome       PersistOutcome
+	CostSnapshots []limits.CostSnapshot
 }
 
 // chargeStatus classifies what an attempt may be charged for.
@@ -88,10 +89,10 @@ const markReceiptPersistedSQL = `UPDATE olp_go.request_metadata_event_receipts
      WHERE event_id = $1::uuid AND request_id = $2::uuid AND status = 'pending'`
 
 const insertRequestSQL = `INSERT INTO olp_go.requests
-        (id, runtime_generation_id, api_key_id, route_slug, operation, surface,
+        (id, runtime_generation_id, api_key_id, budget_group_id, route_slug, operation, surface,
          started_at, completed_at, status_code, error_class, total_latency_ms, first_byte_ms,
-         attempt_count, created_at)
-    VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $8)
+         attempt_count, created_at, attribution, policy_decisions)
+    VALUES ($1::uuid, $2::uuid, $3::uuid, $14::uuid, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $8, $15::jsonb, $16::jsonb)
     ON CONFLICT (id, started_at) DO NOTHING`
 
 const insertAttemptSQL = `INSERT INTO olp_go.attempts
@@ -109,17 +110,19 @@ const insertAnchorSQL = `INSERT INTO olp_go.usage_request_anchors (request_id, r
 // twice under one scope.
 const insertFactSQL = `INSERT INTO olp_go.attempt_usage_facts
         (attempt_id, event_id, request_id, request_started_at, attempt_ordinal,
-         api_key_id, provider_id, route_slug, upstream_model, operation, surface,
+         api_key_id, budget_group_id, provider_id, route_slug, upstream_model, operation, surface,
          observed_at, charge_status, usage_observed, usage_complete, input_tokens,
-         output_tokens, cached_input_tokens, media_units, estimated_cost, unpriced,
+         output_tokens, cached_input_tokens, cache_write_input_tokens,
+         cache_write_5m_input_tokens, cache_write_1h_input_tokens,
+         media_units, estimated_cost, unpriced,
          pricing_revision_id, currency, request_counted, provider_request_counted,
          model_request_counted, target_request_counted, request_unpriced_counted,
          provider_unpriced_counted, model_unpriced_counted, target_unpriced_counted,
          request_incomplete_counted, provider_incomplete_counted,
-         model_incomplete_counted, target_incomplete_counted)
-    VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5, $6::uuid, $7::uuid, $8, $9, $10, $11, $12,
-            $13, $14, $15, $16, $17, $18, $19::numeric, $20::numeric, $21, $22::uuid, $23,
-            false, false, false, false, false, false, false, false, false, false, false, false)
+         model_incomplete_counted, target_incomplete_counted, attribution)
+    VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5, $6::uuid, $24::uuid, $7::uuid, $8, $9, $10, $11, $12,
+            $13, $14, $15, $16, $17, $18, $25, $26, $27, $19::numeric, $20::numeric, $21, $22::uuid, $23,
+            false, false, false, false, false, false, false, false, false, false, false, false, $28::jsonb)
     ON CONFLICT (request_id, attempt_ordinal) DO NOTHING`
 
 // factTotalsSQL sums exactly the facts this event inserted. The receipt
@@ -245,7 +248,7 @@ func PersistEvent(ctx context.Context, pool *pgxpool.Pool, ev *Event, payload []
 			return Persisted{}, err
 		}
 	}
-	snapshot, err := applyCostDelta(ctx, tx, ev)
+	snapshots, err := applyCostDelta(ctx, tx, ev)
 	if err != nil {
 		return Persisted{}, err
 	}
@@ -258,7 +261,7 @@ func PersistEvent(ctx context.Context, pool *pgxpool.Pool, ev *Event, payload []
 	if err = tx.Commit(ctx); err != nil {
 		return Persisted{}, fmt.Errorf("persist request metadata event: %w", err)
 	}
-	return Persisted{Outcome: PersistOutcomePersisted, CostSnapshot: snapshot}, nil
+	return Persisted{Outcome: PersistOutcomePersisted, CostSnapshots: snapshots}, nil
 }
 
 // admitReceipt claims the right to account for this event exactly once, inside
@@ -333,7 +336,8 @@ func insertRequestRows(ctx context.Context, tx pgx.Tx, ev *Event, validated *Val
 	if _, err := tx.Exec(ctx, insertRequestSQL, ev.RequestID, ev.RuntimeGenerationID, ev.APIKeyID,
 		ev.RouteSlug, ev.Operation, ev.Surface, ev.RequestStartedAt, ev.RequestCompletedAt,
 		validated.StatusCode, ev.ErrorClass, validated.LatencyMS, validated.FirstByteMS,
-		validated.AttemptCount); err != nil {
+		validated.AttemptCount, ev.BudgetGroupID, string(AttributionJSON(ev.Attribution)),
+		string(contentpolicy.DecisionsJSON(ev.PolicyDecisions))); err != nil {
 		return fmt.Errorf("persist request metadata request: %w", err)
 	}
 	for _, attempt := range validated.Attempts {
@@ -385,6 +389,8 @@ func insertFact(ctx context.Context, tx pgx.Tx, ev *Event, attempt ValidatedAtte
 		ev.Operation, ev.Surface, ev.ObservedAt, status, usage.Observed, usageComplete,
 		usage.InputTokens, usage.OutputTokens, usage.CachedInputTokens, usage.MediaUnits,
 		pricing.estimatedCost, unpriced, pricing.pricingRevisionID, pricing.currency,
+		ev.BudgetGroupID, usage.CacheWriteInputTokens, usage.CacheWrite5MInputTokens,
+		usage.CacheWrite1HInputTokens, string(AttributionJSON(ev.Attribution)),
 	); err != nil {
 		return fmt.Errorf("persist attempt usage fact: %w", err)
 	}
@@ -395,7 +401,7 @@ func insertFact(ctx context.Context, tx pgx.Tx, ev *Event, attempt ValidatedAtte
 // returns the reconstructed snapshot for the distributed counters. Unpriced
 // billable attempts accrue no money but are counted, so an operator can see
 // that a budget is being consumed by spend nobody can price.
-func applyCostDelta(ctx context.Context, tx pgx.Tx, ev *Event) (*limits.CostSnapshot, error) {
+func applyCostDelta(ctx context.Context, tx pgx.Tx, ev *Event) ([]limits.CostSnapshot, error) {
 	var facts, unpriced int64
 	var cost string
 	if err := tx.QueryRow(ctx, factTotalsSQL, ev.EventID).Scan(&facts, &cost, &unpriced); err != nil {
@@ -408,5 +414,13 @@ func applyCostDelta(ctx context.Context, tx pgx.Tx, ev *Event) (*limits.CostSnap
 	if err != nil {
 		return nil, fmt.Errorf("apply request metadata cost delta: %w", err)
 	}
-	return &snapshot, nil
+	snapshots := []limits.CostSnapshot{snapshot}
+	if ev.BudgetGroupID != nil {
+		group, err := limits.AddGroupCostDelta(ctx, tx, *ev.BudgetGroupID, ev.ObservedAt, cost, unpriced)
+		if err != nil {
+			return nil, fmt.Errorf("apply request metadata group cost delta: %w", err)
+		}
+		snapshots = append(snapshots, group)
+	}
+	return snapshots, nil
 }

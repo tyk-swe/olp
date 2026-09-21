@@ -136,7 +136,7 @@ func TestMediaManagementSetupPublishesUsableRoutes(t *testing.T) {
 	providerPath := "/api/v3/providers/" + created["id"].(string)
 	models := call("GET", providerPath+"/models", nil, "", 200)
 	modelID := models["items"].([]any)[0].(map[string]any)["id"].(string)
-	var tuples []capabilityInput
+	var tuples []CapabilityInput
 	for _, tuple := range capabilitiesFor(KindOpenAI, KindOpenAI) {
 		switch tuple.Operation {
 		case "generation", "token_count", "embeddings", "moderation":

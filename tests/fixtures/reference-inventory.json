@@ -1598,6 +1598,15 @@
       "source": "https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/tests/conformance/provider_connectors/matrix.rs"
     },
     {
+      "provider": "Gemini",
+      "operation": "Embeddings",
+      "surface": "OpenAi",
+      "transport": "Unary",
+      "owner": "M5",
+      "status": "deferred",
+      "source": "https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/tests/conformance/provider_connectors/matrix.rs"
+    },
+    {
       "provider": "VertexAi",
       "operation": "Generation",
       "surface": "OpenAi",
@@ -1679,6 +1688,24 @@
       "source": "https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/tests/conformance/provider_connectors/matrix.rs"
     },
     {
+      "provider": "VertexAi",
+      "operation": "Embeddings",
+      "surface": "OpenAi",
+      "transport": "Unary",
+      "owner": "M5",
+      "status": "deferred",
+      "source": "https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/tests/conformance/provider_connectors/matrix.rs"
+    },
+    {
+      "provider": "VertexAi",
+      "operation": "ImageGeneration",
+      "surface": "OpenAi",
+      "transport": "Unary",
+      "owner": "M5",
+      "status": "deferred",
+      "source": "https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/tests/conformance/provider_connectors/matrix.rs"
+    },
+    {
       "provider": "Bedrock",
       "operation": "Generation",
       "surface": "OpenAi",
@@ -1754,6 +1781,24 @@
       "provider": "Bedrock",
       "operation": "TokenCount",
       "surface": "Gemini",
+      "transport": "Unary",
+      "owner": "M5",
+      "status": "deferred",
+      "source": "https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/tests/conformance/provider_connectors/matrix.rs"
+    },
+    {
+      "provider": "Bedrock",
+      "operation": "Embeddings",
+      "surface": "OpenAi",
+      "transport": "Unary",
+      "owner": "M5",
+      "status": "deferred",
+      "source": "https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/tests/conformance/provider_connectors/matrix.rs"
+    },
+    {
+      "provider": "Bedrock",
+      "operation": "ImageGeneration",
+      "surface": "OpenAi",
       "transport": "Unary",
       "owner": "M5",
       "status": "deferred",
@@ -1900,6 +1945,78 @@
       "surface": "OpenAi",
       "transport": "Unary",
       "owner": "M5",
+      "status": "deferred",
+      "source": "https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/tests/conformance/provider_connectors/matrix.rs"
+    },
+    {
+      "provider": "OpenAi",
+      "operation": "Batch",
+      "surface": "OpenAi",
+      "transport": "Unary",
+      "owner": "M6",
+      "status": "deferred",
+      "source": "https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/tests/conformance/provider_connectors/matrix.rs"
+    },
+    {
+      "provider": "OpenAi",
+      "operation": "Realtime",
+      "surface": "OpenAi",
+      "transport": "Realtime",
+      "owner": "M6",
+      "status": "deferred",
+      "source": "https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/tests/conformance/provider_connectors/matrix.rs"
+    },
+    {
+      "provider": "AzureOpenAi",
+      "operation": "Batch",
+      "surface": "OpenAi",
+      "transport": "Unary",
+      "owner": "M6",
+      "status": "deferred",
+      "source": "https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/tests/conformance/provider_connectors/matrix.rs"
+    },
+    {
+      "provider": "AzureOpenAi",
+      "operation": "Realtime",
+      "surface": "OpenAi",
+      "transport": "Realtime",
+      "owner": "M6",
+      "status": "deferred",
+      "source": "https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/tests/conformance/provider_connectors/matrix.rs"
+    },
+    {
+      "provider": "Bedrock",
+      "operation": "Generation",
+      "surface": "Bedrock",
+      "transport": "Unary",
+      "owner": "M6",
+      "status": "deferred",
+      "source": "https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/tests/conformance/provider_connectors/matrix.rs"
+    },
+    {
+      "provider": "Bedrock",
+      "operation": "Generation",
+      "surface": "Bedrock",
+      "transport": "Streaming",
+      "owner": "M6",
+      "status": "deferred",
+      "source": "https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/tests/conformance/provider_connectors/matrix.rs"
+    },
+    {
+      "provider": "Bedrock",
+      "operation": "BedrockInvoke",
+      "surface": "Bedrock",
+      "transport": "Unary",
+      "owner": "M6",
+      "status": "deferred",
+      "source": "https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/tests/conformance/provider_connectors/matrix.rs"
+    },
+    {
+      "provider": "Bedrock",
+      "operation": "BedrockInvoke",
+      "surface": "Bedrock",
+      "transport": "Streaming",
+      "owner": "M6",
       "status": "deferred",
       "source": "https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/tests/conformance/provider_connectors/matrix.rs"
     }
@@ -2015,61 +2132,61 @@
       "path": "tests/fixtures/protocols/anthropic-messages-request.expected.json",
       "sha256": "0a962fa792db8130828bb0eca0b92666046ae13f0e5a8ae85e4d380cca0ffd53",
       "reference": "https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/tests/fixtures/protocols/anthropic-messages-request.expected.json",
-      "goCoverage": "retained JSON; semantic runners join in M3–M6"
+      "goCoverage": "retained JSON; semantic runners join in M3\u2013M6"
     },
     {
       "path": "tests/fixtures/protocols/anthropic-messages-request.json",
       "sha256": "c6e03f005bc7adfe7140d65fe67d19f401c024741b6c16f9638f901455f62607",
       "reference": "https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/tests/fixtures/protocols/anthropic-messages-request.json",
-      "goCoverage": "retained JSON; semantic runners join in M3–M6"
+      "goCoverage": "retained JSON; semantic runners join in M3\u2013M6"
     },
     {
       "path": "tests/fixtures/protocols/gemini-generate-content-request.expected.json",
       "sha256": "48e4fe31115b78c9360696818bf39a49918fa26dbd474e7d56d2cc1787811adf",
       "reference": "https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/tests/fixtures/protocols/gemini-generate-content-request.expected.json",
-      "goCoverage": "retained JSON; semantic runners join in M3–M6"
+      "goCoverage": "retained JSON; semantic runners join in M3\u2013M6"
     },
     {
       "path": "tests/fixtures/protocols/gemini-generate-content-request.json",
       "sha256": "2aabdc9fc3c3d3bc50bb3853549b56ad0fbdf2a8c526195443c27be404538d9d",
       "reference": "https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/tests/fixtures/protocols/gemini-generate-content-request.json",
-      "goCoverage": "retained JSON; semantic runners join in M3–M6"
+      "goCoverage": "retained JSON; semantic runners join in M3\u2013M6"
     },
     {
       "path": "tests/fixtures/protocols/openai-chat-request.expected.json",
       "sha256": "7bb99e97eb114e5c6a51768a230ce0ab11f68bed61596f0a41ce7ceafa600472",
       "reference": "https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/tests/fixtures/protocols/openai-chat-request.expected.json",
-      "goCoverage": "retained JSON; semantic runners join in M3–M6"
+      "goCoverage": "retained JSON; semantic runners join in M3\u2013M6"
     },
     {
       "path": "tests/fixtures/protocols/openai-chat-request.json",
       "sha256": "5d52773ddf211fdaa023162dace7435f3078d386efae7f74b00a17e8d601d1c6",
       "reference": "https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/tests/fixtures/protocols/openai-chat-request.json",
-      "goCoverage": "retained JSON; semantic runners join in M3–M6"
+      "goCoverage": "retained JSON; semantic runners join in M3\u2013M6"
     },
     {
       "path": "tests/fixtures/protocols/selected-operation-families.json",
-      "sha256": "4ea32094a4d4efad5025ca746747337f032bfa43ab2d595c884b5aa3333c8ae4",
+      "sha256": "1bf2837f4f24ea51a22c04abba6001b9f5e30ab12c8acc11b658221e0b583d20",
       "reference": "https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/tests/fixtures/protocols/selected-operation-families.json",
-      "goCoverage": "retained JSON; semantic runners join in M3–M6"
+      "goCoverage": "retained JSON; semantic runners join in M3\u2013M6"
     },
     {
       "path": "tests/fixtures/routing/attempt-order.json",
       "sha256": "dffed1e2d4d712b8f405b1ba7c3ecdb6bcef237be43f2fbcc45d3997ff7436a5",
       "reference": "https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/tests/fixtures/routing/attempt-order.json",
-      "goCoverage": "retained JSON; semantic runners join in M3–M6"
+      "goCoverage": "retained JSON; semantic runners join in M3\u2013M6"
     },
     {
       "path": "tests/fixtures/routing/retry-taxonomy.json",
-      "sha256": "034a813126ec7614689dbda2d62e02a3667005c80f37ee01c3ee823d9e169ba0",
+      "sha256": "2188eb510fa56ead1fc24c88374d726143cc965255635c772bd6d79b2b8e260e",
       "reference": "https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/tests/fixtures/routing/retry-taxonomy.json",
-      "goCoverage": "retained JSON; semantic runners join in M3–M6"
+      "goCoverage": "retained JSON; semantic runners join in M3\u2013M6"
     },
     {
       "path": "tests/fixtures/security/custom-endpoints.json",
       "sha256": "c9345ace8a5cc848905981533658fd7fb019a24de983fe72030ade200f822b1c",
       "reference": "https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/tests/fixtures/security/custom-endpoints.json",
-      "goCoverage": "retained JSON; semantic runners join in M3–M6"
+      "goCoverage": "retained JSON; semantic runners join in M3\u2013M6"
     },
     {
       "path": "tests/fixtures/streams/anthropic-messages.expected.json",

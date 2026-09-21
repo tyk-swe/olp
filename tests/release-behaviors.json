@@ -479,7 +479,7 @@
       "tests": [
         "tests/integration/accounting_test.go#TestAccountingPersistsPricedAttemptsAndIsReplaySafe",
         "tests/integration/accounting_test.go#TestAccountingPricingProvenance",
-        "tests/integration/accounting_test.go#TestAccountingRefusesToPriceCachedTokensWithoutTheirTotal",
+        "tests/integration/accounting_test.go#TestAccountingRejectsCachedTokensWithoutTheirTotal",
         "tests/integration/accounting_regression_test.go#TestAccountingRejectsConcurrentIdentityReuse",
         "tests/integration/accounting_regression_test.go#TestAccountingDoesNotHideChangedPayloadBehindFacts",
         "tests/integration/accounting_regression_test.go#TestReceiptsProtectRequestsWithNoRemainingFacts",
@@ -871,6 +871,21 @@
       "managementOperations": [
         "list_media_jobs",
         "get_media_job"
+      ]
+    },
+    {
+      "id": "provider-surfaces",
+      "behavior": "Batch file lifecycle, Bedrock invoke unary/streaming ingress, and realtime session ingress run through the resource and surface handlers with durable job and usage evidence.",
+      "referenceSuites": [],
+      "tests": [
+        "tests/integration/provider_resources_test.go#TestBatchLifecycle",
+        "tests/integration/provider_resources_test.go#TestBedrockIngress",
+        "tests/integration/provider_resources_test.go#TestRealtimeIngress"
+      ],
+      "inferenceOperations": [
+        "Batch",
+        "BedrockInvoke",
+        "Realtime"
       ]
     },
     {

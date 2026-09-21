@@ -30,6 +30,7 @@ const consolePages = [
   ['(console)/requests/[requestId]/+page.svelte', 'RequestsPage'],
   ['(console)/media-jobs/+page.svelte', 'MediaJobsPage'],
   ['(console)/media-jobs/[jobId]/+page.svelte', 'MediaJobsPage'],
+  ['(console)/provider-resources/+page.svelte', 'ProviderResourcesPage'],
   ['(console)/health/+page.svelte', 'HealthPage'],
   ['(console)/usage/+page.svelte', 'UsagePage'],
   ['(console)/audit/+page.svelte', 'AuditPage'],

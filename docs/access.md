@@ -181,6 +181,59 @@ Production builds reject insecure OIDC environment switches. Only the explicit
 `oidctest` build tag permits a loopback HTTP issuer, and the integration runner
 builds a separate test binary; release images never enable that tag.
 
+## Management tokens and provisioning
+
+Owners create management tokens from the Access console tab or
+`POST /api/v3/management-tokens`. A token carries 1–8 unique management
+operation scopes (`read`, `access_read`, `access`, `settings`, `configure`,
+`keys`, `playground`, `usage`), a name, and an expiry no more than 366 days
+ahead. The `olpm_` secret is displayed once; only its HMAC digest is stored.
+Bearer authentication authorizes exactly the operations in scope: a token with
+`read` and `configure` can read state and manage providers and routes but
+cannot mutate keys, members, settings, or pricing. Requests carrying an
+`olpm_` bearer credential are non-browser traffic: they do not send Origin or
+CSRF proofs and are authenticated by token digest, expiry, and revocation.
+Every other bearer or cookie request keeps the full browser defenses.
+Token administration itself — create, list, read, revoke — is always
+session-owner-only; no management token can manage tokens. Revocation and
+expiry take effect immediately and audit records attribute machine actions to
+the token rather than to a member.
+
+`PUT /api/v3/provisioning/{source}/users/{external_id}` reconciles a
+provisioned identity without waiting for a sign-in. An owner session or a
+management token with the `access` scope may call it. The body is the
+authoritative desired state (`email`, `display_name`, `role`, `active`):
+a missing `(source, external_id)` mapping creates a passwordless
+provisioned-managed user, and a mapped one is updated in place. Every
+reconciliation invalidates the member's sessions immediately, and
+deactivation also retires outstanding invitations they issued. A provisioned
+identity cannot take an email owned by another account, and the last usable
+owner cannot be deprovisioned. `DELETE` on the same path reconciles to
+inactive and returns 404 only when the mapping does not exist. This is a
+push-based reconciliation contract, not a polling or SCIM implementation.
+
+Lifecycle ownership transfers deliberately in one direction. When an owner
+changes a provisioned member's role or active state through ordinary user
+administration, the account becomes locally managed in the same transaction
+while its provisioning mapping is retained as the ownership record; a later
+external reconciliation for that identity is refused with
+`provisioning_ownership_changed` rather than silently reclaiming the account.
+
+## Account recovery
+
+`olp account reset-password EMAIL PASSWORD_FILE [flags]` is an offline
+operator command that resets the password of an existing active account. The
+password file must be a regular file readable only by the operator (no group
+or other permission bits), at most 4097 bytes, and valid UTF-8; one trailing
+line ending is removed and the usual 12–1024 character policy applies. A
+successful recovery invalidates all sessions and recent-authentication grants
+for the account, leaves role, active state, lifecycle ownership, and OIDC
+authorization untouched, and writes a system-attributed `user.password_recover`
+audit record. The command prints only the account id, email, and a
+`password_recovered` flag; it never echoes the password. A missing or inactive
+account fails with a generic recovery error that does not confirm whether the
+address exists.
+
 ## Mutation and audit boundaries
 
 Protected writes reauthorize inside their feature transaction. Versioned

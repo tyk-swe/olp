@@ -78,8 +78,8 @@ func TestCohereAndVoyageKeepTheirDifferentEmbeddingRefusals(t *testing.T) {
 		t.Fatal("Voyage accepted tokenized non-text input")
 	}
 	request, _ = Parse(openai.FamilyResponses, []byte(`{"model":"team-model","input":"hello","max_output_tokens":17,"previous_response_id":"owned-resource"}`), "")
-	if request != nil {
-		t.Fatal("Responses profile admitted a provider-owned resource reference")
+	if request == nil {
+		t.Fatal("Responses profile dropped the provider-state reference the gateway must resolve")
 	}
 	request, _ = Parse(openai.FamilyResponses, []byte(`{"model":"team-model","input":"hello","max_output_tokens":17,"metadata":{"private":"value"}}`), "")
 	if _, _, err := Encode(request, "openai_compatible", "deepseek", "wire-model", nil); err == nil || !strings.Contains(err.Error(), "metadata") {

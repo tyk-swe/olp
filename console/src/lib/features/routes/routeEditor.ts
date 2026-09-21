@@ -1,3 +1,4 @@
+import type { components } from '$lib/api/schema';
 import type {
   CreateRouteDraftInput,
   ReplaceRouteDraftInput
@@ -49,17 +50,30 @@ export type RouteModelOption = {
   capabilities: ProviderModelInventory['model']['capabilities'];
 };
 
+export type EditablePolicyRule = {
+  id: string;
+  phase: 'input' | 'output';
+  action: 'block' | 'redact';
+  pattern: string;
+  replacement: string;
+};
+
+export type ContentPolicy = components['schemas']['ContentPolicy'];
+
 export type RouteEditorValues = {
   slug: string;
   operations: string[];
   overallTimeoutMs: number;
   maxAttempts: number;
   targets: EditableTarget[];
+  contentPolicyRules: EditablePolicyRule[];
+  projectId?: string;
 };
 
 export const operationOptions = [
   ['generation', 'Text generation'],
   ['embeddings', 'Embeddings'],
+  ['rerank', 'Rerank'],
   ['token_count', 'Token counting'],
   ['image_generation', 'Image generation'],
   ['image_edit', 'Image editing'],
@@ -71,7 +85,10 @@ export const operationOptions = [
   ['video_get', 'Video status'],
   ['video_content', 'Video content'],
   ['video_delete', 'Delete video'],
-  ['moderation', 'Moderation']
+  ['moderation', 'Moderation'],
+  ['batch', 'Batches'],
+  ['realtime', 'Realtime sessions'],
+  ['bedrock_invoke', 'Bedrock InvokeModel']
 ] as const;
 
 export function toRouteModelOptions(
@@ -88,20 +105,24 @@ export function toRouteModelOptions(
 }
 
 export function surfacesFor(operation: string): string[] {
-  return ['generation', 'token_count'].includes(operation)
-    ? ['openai', 'anthropic', 'gemini']
-    : ['openai'];
+  if (operation === 'bedrock_invoke') return ['bedrock'];
+  if (operation === 'generation')
+    return ['openai', 'anthropic', 'gemini', 'bedrock'];
+  if (operation === 'token_count') return ['openai', 'anthropic', 'gemini'];
+  return ['openai'];
 }
 
 export function modesFor(operation: string): string[] {
   if (operation === 'video_create') return ['async'];
+  if (operation === 'realtime') return ['realtime'];
   if (
     [
       'generation',
       'image_generation',
       'image_edit',
       'speech',
-      'transcription'
+      'transcription',
+      'bedrock_invoke'
     ].includes(operation)
   ) {
     return ['unary', 'streaming'];
@@ -166,6 +187,76 @@ export function routeEligibilityWarnings(
   );
 }
 
+const policyRuleId = /^[A-Za-z][A-Za-z0-9_-]{0,63}$/;
+const POLICY_MAX_RULES = 64;
+const POLICY_MAX_PATTERN_BYTES = 512;
+const POLICY_MAX_PATTERN_TOTAL_BYTES = 16 * 1024;
+const POLICY_MAX_REPLACEMENT_CHARS = 128;
+
+export function policyRulesFrom(
+  policy: ContentPolicy | null | undefined
+): EditablePolicyRule[] {
+  return (policy?.rules ?? []).map((rule) => ({
+    id: rule.id,
+    phase: rule.phase,
+    action: rule.action,
+    pattern: rule.pattern,
+    replacement: rule.replacement ?? ''
+  }));
+}
+
+export function hasOutputRules(rules: { phase: string }[]): boolean {
+  return rules.some((rule) => rule.phase === 'output');
+}
+
+export function validateContentPolicy(
+  rules: EditablePolicyRule[]
+): string | null {
+  if (rules.length > POLICY_MAX_RULES)
+    return `At most ${POLICY_MAX_RULES} content policy rules are allowed.`;
+  const seen = new Set<string>();
+  const encoder = new TextEncoder();
+  let patternBytes = 0;
+  for (const rule of rules) {
+    if (!policyRuleId.test(rule.id))
+      return `Rule id “${rule.id || '?'}” must start with a letter and use at most 64 letters, digits, underscores, or hyphens.`;
+    if (seen.has(rule.id))
+      return `Rule id “${rule.id}” is used more than once.`;
+    seen.add(rule.id);
+    const patternLength = encoder.encode(rule.pattern).length;
+    if (patternLength < 1 || patternLength > POLICY_MAX_PATTERN_BYTES)
+      return `Rule “${rule.id}” needs a RE2 pattern of 1–${POLICY_MAX_PATTERN_BYTES} bytes.`;
+    patternBytes += patternLength;
+    if (rule.action === 'block' && rule.replacement)
+      return `Rule “${rule.id}” blocks, so it cannot carry a replacement.`;
+    if (
+      rule.action === 'redact' &&
+      [...rule.replacement].length > POLICY_MAX_REPLACEMENT_CHARS
+    )
+      return `Rule “${rule.id}” replacement is limited to ${POLICY_MAX_REPLACEMENT_CHARS} characters.`;
+  }
+  if (patternBytes > POLICY_MAX_PATTERN_TOTAL_BYTES)
+    return `Content policy patterns may not exceed ${POLICY_MAX_PATTERN_TOTAL_BYTES} bytes combined.`;
+  return null;
+}
+
+export function buildContentPolicy(
+  rules: EditablePolicyRule[]
+): ContentPolicy | null {
+  if (!rules.length) return null;
+  return {
+    rules: rules.map((rule) => ({
+      id: rule.id,
+      phase: rule.phase,
+      pattern: rule.pattern,
+      action: rule.action,
+      ...(rule.action === 'redact' && rule.replacement
+        ? { replacement: rule.replacement }
+        : {})
+    }))
+  };
+}
+
 export function validateRouteEditor(values: RouteEditorValues): string | null {
   const validSlug =
     /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(values.slug) &&
@@ -191,7 +282,7 @@ export function validateRouteEditor(values: RouteEditorValues): string | null {
   ) {
     return 'Every target needs a priority from 0 to 65535, a positive weight, and a timeout of at least 100 ms.';
   }
-  return null;
+  return validateContentPolicy(values.contentPolicyRules);
 }
 
 export function buildCreateRouteDraftInput(
@@ -200,9 +291,11 @@ export function buildCreateRouteDraftInput(
 ): CreateRouteDraftInput {
   return {
     slug: values.slug,
+    project_id: values.projectId || null,
     operations: values.operations,
     overall_timeout_ms: values.overallTimeoutMs,
     max_attempts: values.maxAttempts,
+    content_policy: buildContentPolicy(values.contentPolicyRules),
     targets: values.targets.map((target) => {
       const model = providerModel(target, modelOptions)!;
       return {
@@ -224,6 +317,7 @@ export function buildReplaceRouteDraftInput(
     operations: values.operations,
     overall_timeout_ms: values.overallTimeoutMs,
     max_attempts: values.maxAttempts,
+    content_policy: buildContentPolicy(values.contentPolicyRules),
     targets: values.targets.map((target) => ({
       provider_model_id: target.providerModelId,
       priority: target.priority,

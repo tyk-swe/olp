@@ -50,9 +50,24 @@ Use a base URL ending in `/v1` for native OpenAI SDK requests.
 | `POST /v1/chat/completions` | generation | native | translated | translated | translated | translated | native | native |
 | `POST /v1/responses` | generation | native | translated | translated | translated | translated | native | native |
 | `POST /v1/responses/input_tokens` | token_count | native | translated | translated | translated | translated | native | native |
-| `POST /v1/embeddings` | embeddings | native | — | — | — | — | native | native |
+| `POST /v1/embeddings` | embeddings | native | — | translated | translated | translated | native | native |
+| `POST /v1/rerank` | rerank | — | — | — | — | — | — | reviewed |
 | `POST /v1/moderations` | moderation | native | — | — | — | — | native | native |
-| `POST /v1/images/generations` | image_generation | native | — | — | — | — | — | — |
+| `POST /v1/files` | file | qualified | — | — | — | — | qualified | — |
+| `GET /v1/files` | file | qualified | — | — | — | — | qualified | — |
+| `GET /v1/files/{id}` | file | qualified | — | — | — | — | qualified | — |
+| `DELETE /v1/files/{id}` | file | qualified | — | — | — | — | qualified | — |
+| `GET /v1/files/{id}/content` | file | qualified | — | — | — | — | qualified | — |
+| `POST /v1/batches` | batch | qualified | — | — | — | — | qualified | — |
+| `GET /v1/batches` | batch | qualified | — | — | — | — | qualified | — |
+| `GET /v1/batches/{id}` | batch | qualified | — | — | — | — | qualified | — |
+| `POST /v1/batches/{id}/cancel` | batch | qualified | — | — | — | — | qualified | — |
+| `GET /v1/responses/{id}` | generation | qualified | — | — | — | — | qualified | — |
+| `DELETE /v1/responses/{id}` | generation | qualified | — | — | — | — | qualified | — |
+| `POST /v1/responses/{id}/cancel` | generation | qualified | — | — | — | — | qualified | — |
+| `GET /v1/responses/{id}/input_items` | generation | qualified | — | — | — | — | qualified | — |
+| `GET /v1/realtime` | realtime | qualified | — | — | — | — | qualified | — |
+| `POST /v1/images/generations` | image_generation | native | — | — | qualified | qualified | — | — |
 | `POST /v1/images/edits` | image_edit | native | — | — | — | — | — | — |
 | `POST /v1/images/variations` | image_variation | native | — | — | — | — | — | — |
 | `POST /v1/audio/speech` | speech | native | — | — | — | — | — | — |
@@ -64,6 +79,47 @@ Use a base URL ending in `/v1` for native OpenAI SDK requests.
 | `GET /v1/videos/{video_id}/content` | video_content | native | — | — | — | — | — | — |
 | `GET /v1/models` | model_list | gateway | gateway | gateway | gateway | gateway | gateway | gateway |
 | `GET /v1/models/{id}` | model_get | gateway | gateway | gateway | gateway | gateway | gateway | gateway |
+
+`rerank` is certified only for the reviewed OpenAI-compatible vendors Cohere
+and Voyage; other vendors are refused. Vertex `image_generation` qualifies
+`imagen-*` models and Bedrock qualifies `amazon.titan-image-generator-*`
+models; other models and every edit/variation/audio/video operation remain
+refused. Native embeddings accept only the canonical input shapes described
+per provider below.
+
+### Files, batches, realtime, and provider-retained state
+
+The file, batch, and realtime rows are qualified to official OpenAI and Azure
+OpenAI targets only. `POST /v1/files` carries no model field, so it requires
+an `X-OLP-Route` header naming a batch-enabled allowed route; every other
+endpoint resolves the route through the resource mapping or the `model` field.
+Uploads stream multipart bodies to the provider under the shared request and
+spool bounds; file bytes are never stored in the gateway. Every file, batch,
+and stored response gets a gateway-owned `file_`, `batch_`, or `resp_`
+identifier backed by a metadata-only `provider_resources` row pinned to the
+selected provider revision, slot, and credential. List, retrieve, content,
+delete, and cancel calls resolve that mapping, dispatch to the pinned
+credential, and rewrite identifiers between local and upstream forms; another
+key's identifier is indistinguishable from a missing one. No cross-provider
+fallback applies: a revoked pinned credential fails with
+`provider_resource_credential_unavailable` rather than rerouting.
+
+Stateful Responses fields (`store`, `background`, `previous_response_id`)
+additionally require the key policy `allow_provider_state`, because provider
+state may retain user content upstream. `previous_response_id` must reference
+a response stored under the same key and route and is rewritten to the pinned
+upstream identifier. Streaming terminal events are rewritten so callers only
+ever see gateway-owned response IDs.
+
+`GET /v1/realtime` is a WebSocket endpoint; WebRTC is not supported. The
+`model` query parameter is an OLP route slug, the route must allow `realtime`,
+and the target must hold a certified `openai`/`realtime` capability. Target
+and slot are selected and reserved once before the upgrade, with no failover
+afterwards. The relay enforces the configured maximum event size and a
+one-hour session bound, propagates ping/close frames, and rechecks the
+presented API key every five seconds, closing with a policy violation on
+revocation or expiry. Terminal usage events feed accounting when the provider
+sends them; sessions that end without usage are recorded as billing-uncertain.
 
 ### Anthropic surface
 
@@ -87,6 +143,33 @@ Replace `{version}` below with `v1` or `v1beta`.
 | `POST /gemini/{version}/models/{model}:streamGenerateContent` | generation | translated | translated | native | native | translated | translated | — |
 | `POST /gemini/{version}/models/{model}:countTokens` | token_count | translated | translated | native | native | translated | translated | — |
 
+### Bedrock surface
+
+The Bedrock surface accepts requests signed for the AWS Bedrock SDK shape at
+`{gateway}/bedrock`, but `{model}` in each path is always an OLP route slug,
+never a provider model ID. Incoming AWS SigV4 is not gateway authentication:
+clients must present `X-OLP-API-Key` (or an ordinary `Authorization: Bearer`
+key), and inbound `Authorization`/`X-Amz-*` headers are stripped before the
+gateway re-signs with the configured Bedrock credential.
+
+| Endpoint | Operation | openai | anthropic | gemini | vertex_ai | bedrock | azure_openai | openai_compatible |
+|---|---|---|---|---|---|---|---|---|
+| `POST /bedrock/model/{model}/converse` | generation | — | — | — | — | native | — | — |
+| `POST /bedrock/model/{model}/converse-stream` | generation | — | — | — | — | native | — | — |
+| `POST /bedrock/model/{model}/invoke` | bedrock_invoke | — | — | — | — | qualified | — | — |
+| `POST /bedrock/model/{model}/invoke-with-response-stream` | bedrock_invoke | — | — | — | — | qualified | — | — |
+
+Only native Bedrock targets holding the exact certified ingress mode qualify.
+Converse bodies are validated through the same decoder as translated Converse
+traffic before being returned verbatim. InvokeModel supports only the model
+families OLP already qualifies — Anthropic Claude generation, Titan
+embeddings, and Titan image generation — each with model-specific response
+validation; other model IDs fail with a clear protocol error. Streaming
+responses validate AWS event-stream CRC and frame size and re-encode each
+frame; a malformed or oversized frame terminates the stream rather than
+forwarding unchecked bytes. Usage is normalized from Bedrock metadata and
+provider terminal events into standard accounting.
+
 ## What translation drops or refuses
 
 The gateway prefers a clear refusal over a silent success with different
@@ -108,8 +191,12 @@ when semantics change.
 
 ### Anthropic providers
 
-Translation to Anthropic refuses `response_format` rather than advertising
-structured-output support it cannot express. This retains the frozen
+Translation to Anthropic maps a `json_schema` `response_format` — schema
+object required, `strict` honored only when set true — onto Anthropic's
+`output_config`, and treats `text` as no structured output. `json_object` and
+unknown formats are still refused, and whether a given model accepts the
+translated field is provider/model dependent: unsupported combinations fail
+clearly rather than silently degrading. This narrows the frozen
 `NO_ANTHROPIC_STRUCTURED_OUTPUT` exception; current enforcement is in the
 [Anthropic encoder](../internal/protocols/canonical_anthropic.go). Cached-input
 usage, provider request IDs, media parts, and oversized-response bounds remain
@@ -143,33 +230,57 @@ function calls. The gateway corrects that to a tool-call finish reason so agent
 loops keyed on tool calls do not stop early; this is a deliberate rewrite, not
 a pass-through.
 
+Gemini also serves embeddings natively: a single string input becomes an
+`embedContent` call and an array of strings becomes `batchEmbedContents`, with
+`dimensions` mapped to `outputDimensionality`. Token-array input, more than
+100 inputs, and unsupported encodings are refused. Vertex AI embeddings use
+the publisher `predict` endpoint with at most five text inputs and report the
+summed `statistics.token_count` as input usage when the upstream returns it.
+Both reject provider responses that do not carry a numeric embedding vector
+for every requested input.
+
 ### Bedrock providers
 
-Bedrock translates on every surface. Non-text structured response formats,
-cached-input token accounting, and canonical provider response IDs remain
-unsupported. The Go connector uses OLP's HTTP transport for inference: unary
+Bedrock translates on every surface. A `json_schema` `response_format` maps
+onto Converse `outputConfig` — the schema as compact JSON text plus the
+required schema name — for both Converse and ConverseStream, while
+`json_object` and unknown formats remain refused. Whether a given model honors
+the field is provider/model dependent; unsupported combinations still fail
+clearly. Cached-input token accounting and canonical provider response IDs
+remain unsupported. The Go connector uses OLP's HTTP transport for inference: unary
 responses have the shared response-byte limit, and stream event lengths are
 checked before AWS event-stream decoding allocates the advertised body.
 
 Generation and token-count inputs accept inline base64 PNG, JPEG, GIF, and WebP
 images. Remote image URLs, explicit image-detail controls, unsupported formats,
 invalid base64, and images in system instructions or tool results are refused.
-The shared inline-media admission limits also apply. Image/audio/video operation
-endpoints remain unavailable for Bedrock; image parts inside generation inputs
-do not grant those separate capabilities.
+The shared inline-media admission limits also apply. Image parts inside
+generation inputs do not grant separate media capabilities.
+
+Bedrock also serves two qualified native operations beyond Converse.
+`amazon.titan-embed-text-*` models accept a single string input via InvokeModel
+and must return `embedding` plus a nonnegative `inputTextTokenCount`.
+`amazon.titan-image-generator-*` models accept `image_generation` via
+`taskType: TEXT_IMAGE` with one to four images and the `1024x1024`, `768x768`,
+or `512x512` sizes only; `b64_json` is the only supported response format, and
+provider error fields, malformed base64, or an image-count mismatch fail the
+attempt. Other Bedrock models, and every edit/variation/audio/video operation,
+remain refused.
 
 These are explicit changes from the frozen Rust reference: its
 `NO_BEDROCK_RESPONSE_BOUND` and `NO_BEDROCK_MEDIA` exemptions described unbounded
 SDK-owned response bodies and refusal of image input parts, respectively.
-The remaining frozen exceptions—`NO_BEDROCK_STRUCTURED_OUTPUT`,
-`NO_BEDROCK_CACHED_USAGE`, and `NO_BEDROCK_REQUEST_ID`—remain explicit above.
+The remaining frozen exceptions—`NO_BEDROCK_CACHED_USAGE` and
+`NO_BEDROCK_REQUEST_ID`—remain explicit above; `NO_BEDROCK_STRUCTURED_OUTPUT`
+is narrowed to the formats that still refuse.
 See [image-input tests](../internal/protocols/bedrock_test.go) and
 [stream bounds tests](../internal/protocols/stream_parity_test.go).
 
 The [Go Converse encoder](../internal/protocols/bedrock.go) refuses, with an
 explicit protocol error, a request that asks for more than one candidate, sets
 a deterministic seed, sets parallel tool-call selection, asks for a structured
-response format other than text, puts a name or tool-call metadata on a system
+response format other than `text` or a well-formed `json_schema`, puts a name
+or tool-call metadata on a system
 instruction, or gives a maximum output token count that does not fit Bedrock's
 limits. Tool results have their own rules: a tool result must carry a tool-call
 ID and non-empty text content, must not carry tool calls of its own, and only a
@@ -190,11 +301,23 @@ SDK retry policy, deadlines, and live tests.
 Both are native on the OpenAI surface, but their certification path is
 narrower than OpenAI's own. An OpenAI-compatible provider can only be certified
 for generation, embeddings, token counting, and moderation on the OpenAI
-surface, so the other surfaces and every media operation are refused. Azure
+surface, plus rerank for the reviewed Cohere and Voyage vendors, so the other
+surfaces and every media operation are refused. Cohere rerank resolves to the
+official `/v2/rerank` endpoint for the reviewed preset; Voyage rerank posts to
+the configured base plus `/rerank`. Azure
 OpenAI can be certified for the same four operations, but on any surface, so it
 appears as `translated` on the Anthropic and Gemini surfaces and `—` for the
 media, image, audio, and video operations. Certification eligibility is defined in
 [`internal/providers/kinds.go`](../internal/providers/kinds.go); update this table when it changes.
+
+Azure OpenAI supports Microsoft Entra authentication alongside API keys:
+`azure_default` acquires tokens through the ambient Azure credential chain
+(managed, workload, or local developer identity) with no stored credential,
+and `azure_client_secret` stores a strict `{tenant_id, client_id,
+client_secret}` document. Both modes request the
+`https://cognitiveservices.azure.com/.default` scope, refresh thirty seconds
+before expiry, and send `Authorization: Bearer` rather than `Api-Key`. See the
+[Azure OpenAI connector guide](providers/azure.md).
 
 ## Qualification records
 

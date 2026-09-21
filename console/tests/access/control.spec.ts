@@ -36,6 +36,29 @@ async function changeRemote(
   expect(status).toBe(200);
 }
 
+async function signIn(page: Page, email: string) {
+  const deadline = Date.now() + 75_000;
+  while (true) {
+    await page.getByLabel('Email').fill(email);
+    await page.getByLabel('Password', { exact: true }).fill(password);
+    const completed = page.waitForResponse(
+      (response) =>
+        response.request().method() === 'POST' &&
+        new URL(response.url()).pathname === '/api/v3/sessions'
+    );
+    await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+    const response = await completed;
+    if (response.status() !== 429 || Date.now() >= deadline) {
+      expect(response.status()).toBe(201);
+      break;
+    }
+    const seconds = Number(response.headers()['retry-after'] ?? '1');
+    await new Promise((resolve) =>
+      setTimeout(resolve, Math.min(60, Math.max(1, seconds)) * 1000)
+    );
+  }
+}
+
 async function signOut(page: Page) {
   await page.getByRole('button', { name: 'Open account menu' }).click();
   await page
@@ -100,9 +123,7 @@ test('setup, invitations, key policy, profile, settings, audit, and OIDC work th
   ).toBe(403);
   // Invitation success must remain usable after the initial session ends.
   await signOut(invited);
-  await invited.getByLabel('Email').fill('viewer@example.com');
-  await invited.getByLabel('Password', { exact: true }).fill(password);
-  await invited.getByRole('button', { name: 'Sign in', exact: true }).click();
+  await signIn(invited, 'viewer@example.com');
   await expect(
     invited.getByRole('heading', { name: viewerLanding })
   ).toBeVisible();
@@ -122,7 +143,9 @@ test('setup, invitations, key policy, profile, settings, audit, and OIDC work th
   ).toBeVisible();
   await secret.getByRole('button', { name: 'I have saved the key' }).click();
   await expect(
-    page.getByText('Browser application', { exact: true })
+    page
+      .getByRole('region', { name: 'API keys' })
+      .getByText('Browser application', { exact: true })
   ).toBeVisible();
   // Valkey is configured for this installation, so limit policies are live
   // accounting rather than saved intent: the inventory reports this key's
@@ -213,9 +236,7 @@ test('setup, invitations, key policy, profile, settings, audit, and OIDC work th
   ).toBeVisible();
   await signOut(sibling);
   await expect(page).toHaveURL(/\/login/);
-  await page.getByLabel('Email').fill('owner@example.com');
-  await page.getByLabel('Password', { exact: true }).fill(password);
-  await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+  await signIn(page, 'owner@example.com');
   await expect(
     page.getByRole('heading', { name: 'Personal profile' })
   ).toBeVisible();
@@ -341,9 +362,7 @@ test('setup, invitations, key policy, profile, settings, audit, and OIDC work th
     fullPage: true
   });
   await signOut(page);
-  await page.getByLabel('Email').fill('viewer@example.com');
-  await page.getByLabel('Password', { exact: true }).fill(password);
-  await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+  await signIn(page, 'viewer@example.com');
   await expect(
     page.getByRole('heading', { name: viewerLanding })
   ).toBeVisible();
@@ -374,9 +393,7 @@ test('capabilities and passive verification recover without losing loaded conten
     'Sign-in options could not be loaded'
   );
   await page.getByRole('button', { name: 'Retry', exact: true }).click();
-  await page.getByLabel('Email').fill('owner@example.com');
-  await page.getByLabel('Password', { exact: true }).fill(password);
-  await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+  await signIn(page, 'owner@example.com');
   await expect(page.getByRole('heading', { name: ownerLanding })).toBeVisible();
   await page.goto('/settings/profile');
   await expect(page.getByLabel('Display name')).toHaveValue(

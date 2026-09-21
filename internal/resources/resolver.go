@@ -1,0 +1,151 @@
+package resources
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"slices"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/tyk-swe/olp/internal/runtime"
+	"github.com/tyk-swe/olp/internal/secrets"
+)
+
+var (
+	ErrUnavailable = errors.New("provider resource credential unavailable")
+
+	ErrNoRows = errors.New("provider resource revision unavailable")
+)
+
+type Resolver struct {
+	pool         *pgxpool.Pool
+	installation string
+	keys         *secrets.KeyRing
+}
+
+func NewResolver(pool *pgxpool.Pool, installation string, keys *secrets.KeyRing) *Resolver {
+	return &Resolver{pool: pool, installation: installation, keys: keys}
+}
+
+func (r *Resolver) Resolve(ctx context.Context, tx pgx.Tx, res *Resource, operation string) (*runtime.Provider, *runtime.Route, *runtime.Slot, []byte, error) {
+	var providerID string
+	var configuration, models, slots []byte
+	err := tx.QueryRow(ctx,
+		"SELECT provider_id::text,configuration,models,slots FROM olp_go.provider_revisions WHERE id=$1",
+		res.ProviderRevisionID).Scan(&providerID, &configuration, &models, &slots)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil, nil, nil, fmt.Errorf("provider revision %s: %w", res.ProviderRevisionID, ErrNoRows)
+	}
+	if err != nil {
+		return nil, nil, nil, nil, err
+	}
+	if providerID != res.ProviderID {
+		return nil, nil, nil, nil, fmt.Errorf("provider revision %s belongs to %s, not %s: %w",
+			res.ProviderRevisionID, providerID, res.ProviderID, ErrNoRows)
+	}
+
+	provider := &runtime.Provider{ID: providerID, RevisionID: res.ProviderRevisionID, Capabilities: []runtime.Capability{}}
+	var cfg runtime.Configuration
+	var revisionModels []runtime.RevisionModel
+	var revisionSlots []runtime.RevisionSlot
+	if err = json.Unmarshal(configuration, &cfg); err == nil {
+		err = json.Unmarshal(models, &revisionModels)
+	}
+	if err == nil {
+		err = json.Unmarshal(slots, &revisionSlots)
+	}
+	if err != nil {
+		return nil, nil, nil, nil, fmt.Errorf("provider %s revision: %w", providerID, err)
+	}
+	provider.Kind = cfg.Kind
+	provider.AuthMode = cfg.AuthMode
+	provider.Endpoint = cfg.Endpoint
+	provider.CloudRegion, provider.CloudProject, provider.Deployment, provider.APIVersion = cfg.CloudRegion, cfg.CloudProject, cfg.Deployment, cfg.APIVersion
+	provider.Models = cfg.Options.Models
+	provider.CredentialHeaders = cfg.Options.CredentialHeaders
+	provider.ParameterDefaults = cfg.Options.ParameterDefaults
+	provider.VendorID = cfg.Options.VendorID
+	for _, model := range revisionModels {
+		for _, c := range model.Capabilities {
+			if c.Source == "certified" {
+				provider.Capabilities = append(provider.Capabilities, runtime.Capability{Model: model.UpstreamModel, Operation: c.Operation, Surface: c.Surface, Mode: c.Mode})
+			}
+		}
+	}
+
+	var slot *runtime.Slot
+	for i := range revisionSlots {
+		if revisionSlots[i].ID == res.SlotID {
+			copied := revisionSlots[i].Slot
+			slot = &copied
+			break
+		}
+	}
+	if slot == nil {
+		return nil, nil, nil, nil, fmt.Errorf("slot %s absent from provider revision %s: %w", res.SlotID, res.ProviderRevisionID, ErrNoRows)
+	}
+	if (slot.CredentialID == nil) != (res.CredentialID == nil) ||
+		(slot.CredentialID != nil && *slot.CredentialID != *res.CredentialID) {
+		return nil, nil, nil, nil, fmt.Errorf("slot %s credential drifted: %w", res.SlotID, ErrNoRows)
+	}
+
+	route := &runtime.Route{RevisionID: res.RouteRevisionID}
+	var operations, targets, policy []byte
+	err = tx.QueryRow(ctx,
+		`SELECT v.route_id::text,v.slug,v.revision,v.operations,v.overall_timeout_ms,v.max_attempts,v.targets,v.activated_at,v.routing_policy,r.project_id::text
+         FROM olp_go.route_revisions v JOIN olp_go.routes r ON r.id=v.route_id WHERE v.id=$1`,
+		res.RouteRevisionID).Scan(&route.ID, &route.Slug, &route.Revision, &operations,
+		&route.OverallTimeout, &route.MaxAttempts, &targets, &route.PublishedAt, &policy, &route.ProjectID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil, nil, nil, fmt.Errorf("route revision %s: %w", res.RouteRevisionID, ErrNoRows)
+	}
+	if err != nil {
+		return nil, nil, nil, nil, err
+	}
+	if route.Slug != res.RouteSlug {
+		return nil, nil, nil, nil, fmt.Errorf("route revision %s is slug %s, not %s: %w",
+			res.RouteRevisionID, route.Slug, res.RouteSlug, ErrNoRows)
+	}
+	var published []runtime.PublishedTarget
+	if err = json.Unmarshal(operations, &route.Operations); err == nil {
+		err = json.Unmarshal(targets, &published)
+	}
+	if err != nil {
+		return nil, nil, nil, nil, fmt.Errorf("route %s revision: %w", route.Slug, err)
+	}
+	if len(policy) > 0 {
+		if err = json.Unmarshal(policy, &route.Policy); err != nil {
+			return nil, nil, nil, nil, fmt.Errorf("route %s policy: %w", route.Slug, err)
+		}
+	}
+	route.RoutingID = route.ID
+	route.PublishedAt = route.PublishedAt.UTC()
+	for _, t := range published {
+		route.Targets = append(route.Targets, runtime.Target{ID: t.ID, ProviderID: t.ProviderID, ProviderModel: t.ProviderModel, Priority: t.Priority, Weight: t.Weight, Timeout: t.TimeoutMS, RoutingID: t.ProviderModelID})
+	}
+	if !slices.Contains(route.Operations, operation) {
+		return nil, nil, nil, nil, fmt.Errorf("route %s revision does not allow %s: %w", route.Slug, operation, ErrNoRows)
+	}
+
+	var secret []byte
+	if res.CredentialID != nil {
+		var revoked bool
+		err = tx.QueryRow(ctx,
+			"SELECT revoked_at IS NOT NULL FROM olp_go.provider_credentials WHERE id=$1",
+			*res.CredentialID).Scan(&revoked)
+		if errors.Is(err, pgx.ErrNoRows) || (err == nil && revoked) {
+			return nil, nil, nil, nil, fmt.Errorf("credential %s: %w", *res.CredentialID, ErrUnavailable)
+		}
+		if err != nil {
+			return nil, nil, nil, nil, err
+		}
+		secret, err = r.keys.Read(ctx, tx, r.installation, *res.CredentialID, "provider_credential")
+		if err != nil {
+			return nil, nil, nil, nil, fmt.Errorf("credential %s: %w", *res.CredentialID, ErrUnavailable)
+		}
+	}
+	return provider, route, slot, secret, nil
+}

@@ -407,7 +407,7 @@ func TestM4BudgetsRecoverFromLostSpendState(t *testing.T) {
 	// A snapshot of a window that has already closed says nothing about today,
 	// so it may not initialize today's counters at any accrued amount.
 	windows := limits.BudgetWindows(time.Now().UTC())
-	stale := limits.CostSnapshot{APIKeyID: keyID,
+	stale := limits.CostSnapshot{CostOwnerID: keyID,
 		DailyWindowID: windows.DailyID - 1, DailyAccrued: "0.00",
 		MonthlyWindowID: windows.MonthlyID - 1, MonthlyAccrued: "0.00"}
 	daily, monthly, err := limiter.ApplyCostSnapshot(t.Context(), stale)

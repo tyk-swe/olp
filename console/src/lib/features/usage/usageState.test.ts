@@ -54,7 +54,15 @@ describe('usage report URL state', () => {
     ['start=2026-07-12T09:00:00', 'Enter valid start and end times.'],
     ['start=2026-07-13T12:00:00Z', 'End must be after start.'],
     ['provider_id=invalid', 'Provider ID must be a UUID.'],
-    ['api_key_id=invalid', 'API key ID must be a UUID.']
+    ['api_key_id=invalid', 'API key ID must be a UUID.'],
+    [
+      'attribution_value=core',
+      'An attribution value needs its attribution key.'
+    ],
+    [
+      'dimension=attribution',
+      'The attribution breakdown needs an attribution key.'
+    ]
   ])(
     'retains invalid URL state for visible validation: %s',
     (search, message) => {
@@ -63,6 +71,26 @@ describe('usage report URL state', () => {
       ).toBe(message);
     }
   );
+
+  it('round trips attribution filters and the attribution breakdown axis', () => {
+    const state = readUsageState(
+      new URLSearchParams(
+        'attribution_key=team&attribution_value=core&dimension=attribution'
+      ),
+      defaults
+    );
+    expect(state.filters.attribution_key).toBe('team');
+    expect(state.filters.attribution_value).toBe('core');
+    expect(state.dimension).toBe('attribution');
+    expect(usageProblem(state)).toBeNull();
+    const canonical = usageSearch(state);
+    expect(canonical).toContain('attribution_key=team');
+    expect(canonical).toContain('attribution_value=core');
+    expect(canonical).toContain('dimension=attribution');
+    expect(readUsageState(new URLSearchParams(canonical), defaults)).toEqual(
+      state
+    );
+  });
 
   it('keeps draft edits separate and validates incomplete or inverted local ranges', () => {
     const draft = usageDraft(defaults);

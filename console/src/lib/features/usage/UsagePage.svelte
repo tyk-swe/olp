@@ -166,12 +166,26 @@
       /></label
     >
     <label
+      >Attribution key <input
+        bind:value={draft.attribution_key}
+        placeholder="e.g. team"
+      /></label
+    >
+    <label
+      >Attribution value <input
+        bind:value={draft.attribution_value}
+        placeholder="Any value"
+      /></label
+    >
+    <label
       >Break down by <select bind:value={draft.dimension}
         ><option value="route">Route</option><option value="provider"
           >Provider</option
         ><option value="model">Model</option><option value="api_key"
           >API key</option
-        ><option value="operation">Operation</option></select
+        ><option value="operation">Operation</option><option value="attribution"
+          >Attribution</option
+        ></select
       ></label
     >
     <label
@@ -355,6 +369,17 @@
       <strong>{formatCompact(usage.data.summary.cached_input_tokens)}</strong>
     </article>
     <article class="card metric-card">
+      <p>Cache write tokens</p>
+      <strong
+        >{formatCompact(usage.data.summary.cache_write_input_tokens)}</strong
+      >
+      <small
+        >5m {formatCompact(usage.data.summary.cache_write_5m_input_tokens)} · 1h {formatCompact(
+          usage.data.summary.cache_write_1h_input_tokens
+        )}</small
+      >
+    </article>
+    <article class="card metric-card">
       <p>Media units</p>
       <strong>{formatCompact(usage.data.summary.media_units)}</strong>
     </article>
@@ -385,7 +410,11 @@
     <div class="section-heading">
       <div>
         <p class="eyebrow">Breakdown</p>
-        <h2 id="breakdown-title">By {applied.dimension.replace('_', ' ')}</h2>
+        <h2 id="breakdown-title">
+          By {applied.dimension === 'attribution'
+            ? `attribution: ${applied.filters.attribution_key ?? ''}`
+            : applied.dimension.replace('_', ' ')}
+        </h2>
       </div>
       <span class="badge">Top {usage.data.breakdown.length}</span>
     </div>
@@ -408,9 +437,10 @@
               ><th scope="col">{applied.dimension.replace('_', ' ')}</th><th
                 scope="col">Requests</th
               ><th scope="col">Input tokens</th><th scope="col">Cached input</th
-              ><th scope="col">Output tokens</th><th scope="col"
-                >Estimated cost</th
-              ><th scope="col">Completeness</th></tr
+              ><th scope="col">Cache write</th><th scope="col">Output tokens</th
+              ><th scope="col">Estimated cost</th><th scope="col"
+                >Completeness</th
+              ></tr
             ></thead
           >
           <tbody
@@ -419,9 +449,9 @@
                   >{formatCompact(row.request_count)}</td
                 ><td>{formatCompact(row.input_tokens)}</td><td
                   >{formatCompact(row.cached_input_tokens)}</td
-                ><td>{formatCompact(row.output_tokens)}</td><td
-                  >{formatCost(row.estimated_cost, row.currency)}</td
-                ><td
+                ><td>{formatCompact(row.cache_write_input_tokens)}</td><td
+                  >{formatCompact(row.output_tokens)}</td
+                ><td>{formatCost(row.estimated_cost, row.currency)}</td><td
                   >{#if row.incomplete_count > 0}<span class="badge danger"
                       >{row.incomplete_count} incomplete</span
                     >{:else if row.unpriced_count > 0}<span

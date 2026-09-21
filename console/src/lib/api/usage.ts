@@ -15,6 +15,8 @@ export type UsageFilters = {
   model?: string;
   api_key_id?: string;
   operation?: string;
+  attribution_key?: string;
+  attribution_value?: string;
 };
 
 type UsageSummary = components['schemas']['UsageSummaryResponse'];
@@ -46,7 +48,8 @@ export async function usageSeries(
 
 export async function usageBreakdown(
   filters: UsageFilters,
-  dimension: 'route' | 'provider' | 'model' | 'api_key' | 'operation'
+  dimension:
+    'route' | 'provider' | 'model' | 'api_key' | 'operation' | 'attribution'
 ): Promise<UsageBreakdownResult> {
   const { data, error, response } = await apiClient.GET(
     '/api/v3/usage/breakdown',

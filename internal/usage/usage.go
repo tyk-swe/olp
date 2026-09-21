@@ -78,6 +78,8 @@ const (
 	// TaskMediaReconciliation advances durable media jobs toward a terminal
 	// state and retires orphaned upstream objects.
 	TaskMediaReconciliation Task = "media_reconciliation"
+
+	TaskBudgetAlertDelivery Task = "budget_alert_delivery"
 )
 
 // Outcome is what one worker pass achieved.

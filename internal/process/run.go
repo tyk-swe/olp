@@ -28,6 +28,7 @@ import (
 	"github.com/tyk-swe/olp/internal/observability"
 	"github.com/tyk-swe/olp/internal/protocols"
 	"github.com/tyk-swe/olp/internal/providers"
+	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/internal/secrets"
 	"github.com/tyk-swe/olp/internal/telemetry"
@@ -168,8 +169,12 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 	// Worker replicas also need the runtime manager and the key ring: media
 	// reconciliation serves jobs against their pinned historical providers and
 	// checks the live credential revocation authority.
+	var keys *secrets.KeyRing
 	if c.Mode.Management() || c.Mode.Inference() || c.Mode == config.Worker {
-		auth, keys, bootstrap, err := loadSecrets(startup, pool, c, installation)
+		var auth *secrets.AuthKey
+		var bootstrap string
+		var err error
+		auth, keys, bootstrap, err = loadSecrets(startup, pool, c, installation)
 		if err != nil {
 			return err
 		}
@@ -202,7 +207,7 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 				gw.Admission = gateway.NewAdmission(limiter, policy, log)
 			}
 		}
-		if c.Mode.Inference() || c.Mode == config.Worker {
+		if c.Mode.Management() || c.Mode.Inference() || c.Mode == config.Worker {
 			spoolDir := c.MediaSpoolDir
 			if spoolDir == "" {
 				spoolDir = filepath.Join(os.TempDir(), "olp-media-spool")
@@ -231,6 +236,10 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 		}
 		if c.Mode.Inference() {
 			gw.Media = &gateway.MediaDeps{Jobs: mediaService, Admission: media.NewAdmissionState(c.MediaSpoolCapacityBytes)}
+			if pool != nil {
+				gw.Resources = resources.New(pool)
+				gw.Resolver = resources.NewResolver(pool, installation, keys)
+			}
 			// Without shared state there is no admission backend at all: the
 			// gateway then refuses traffic that carries hard limits rather
 			// than serving it unmetered, and keeps logging its metadata.
@@ -253,7 +262,8 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 			// separate worker replica is alive, so the console is told what
 			// this installation is configured for.
 			control.RetentionEnforced = limiter != nil
-			registerManagement(public, control, &policy, limiter, rt, gw, obsCache, log)
+			control.NotificationsActive = limiter != nil
+			registerManagement(public, control, &policy, limiter, rt, gw, mediaService, obsCache, log)
 		}
 	}
 	if err := startup.Err(); err != nil {
@@ -329,7 +339,7 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 		if mediaService == nil && limiter == nil {
 			log.Warn("worker plane skipped: no shared state is configured", "mode", c.Mode)
 		} else {
-			workersStopped = startWorkers(workers, pool, reader, limiter, stream, mediaService, log)
+			workersStopped = startWorkers(workers, pool, reader, limiter, stream, mediaService, keys, installation, &policy, log)
 		}
 	}
 	liveMetrics := newLiveMetrics(rt, inferencePool, managementPool)

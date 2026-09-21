@@ -86,7 +86,7 @@ func limPointer[T any](value T) *T { return &value }
 // the dimension it is about.
 func limRequest(lookup string) limits.Request {
 	return limits.Request{
-		APIKeyID:          limNilUUID,
+		CostOwnerID:       limNilUUID,
 		LookupID:          lookup,
 		RequestsPerMinute: limPointer(int64(10)),
 		TokensPerMinute:   limPointer(int64(1000)),
@@ -872,7 +872,7 @@ func TestLimitsCostBudgetsFailClosedUntilReconciled(t *testing.T) {
 	lookup := limLookup()
 	rateKey, _ := limRateKeys(namespace, lookup)
 	request := limRequest(lookup)
-	request.APIKeyID = apiKey
+	request.CostOwnerID = apiKey
 	request.DailyCostLimit = limPointer("1.000000000000")
 	request.MonthlyCostLimit = limPointer("10")
 
@@ -889,7 +889,7 @@ func TestLimitsCostBudgetsFailClosedUntilReconciled(t *testing.T) {
 
 	// A snapshot for a window other than the current one cannot initialise it.
 	stale := limits.CostSnapshot{
-		APIKeyID:        apiKey,
+		CostOwnerID:     apiKey,
 		DailyWindowID:   windows.DailyID - 1,
 		DailyAccrued:    "0",
 		MonthlyWindowID: windows.MonthlyID + 1,
@@ -909,7 +909,7 @@ func TestLimitsCostBudgetsFailClosedUntilReconciled(t *testing.T) {
 	}
 
 	current := limits.CostSnapshot{
-		APIKeyID:         apiKey,
+		CostOwnerID:      apiKey,
 		DailyWindowID:    windows.DailyID,
 		DailyAccrued:     "0.250000000000",
 		MonthlyWindowID:  windows.MonthlyID,
@@ -989,12 +989,12 @@ func TestLimitsMonthlyBudgetExhaustionRejectsWithItsOwnWindow(t *testing.T) {
 
 	apiKey := uuid.NewString()
 	request := limRequest(limLookup())
-	request.APIKeyID = apiKey
+	request.CostOwnerID = apiKey
 	request.DailyCostLimit = limPointer("1000")
 	request.MonthlyCostLimit = limPointer("5")
 
 	if _, _, err := limiter.ApplyCostSnapshot(t.Context(), limits.CostSnapshot{
-		APIKeyID:        apiKey,
+		CostOwnerID:     apiKey,
 		DailyWindowID:   windows.DailyID,
 		DailyAccrued:    "0",
 		MonthlyWindowID: windows.MonthlyID,
@@ -1215,7 +1215,7 @@ func TestLimitsDurableSpendReconcilesIntoValkey(t *testing.T) {
 	}
 	byKey := map[string]limits.CostSnapshot{}
 	for _, snapshot := range snapshots {
-		byKey[snapshot.APIKeyID] = snapshot
+		byKey[snapshot.CostOwnerID] = snapshot
 	}
 	if len(byKey) != 2 {
 		t.Fatalf("snapshots = %+v, want only the two live keys", snapshots)

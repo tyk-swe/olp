@@ -77,6 +77,18 @@ It can narrow constraints and attempts within published policy, never expand
 access or deadlines. Unknown controls, invalid selectors, and budget increases
 are refused. Raw header values are never forwarded or persisted.
 
+The optional `X-OLP-Attribution` header attaches caller-chosen labels to a
+request's usage records, for example `{"team":"core","env":"prod"}`. Exactly
+one header is accepted, at most 4096 bytes, decoding to a single JSON object
+with at most four entries. Every key must appear in the API key's configured
+`allowed_attribution_keys` allowlist, and every value must be a short machine
+token (`^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$`); nested values, numbers, nulls,
+free text, and control characters are refused with `invalid_attribution`
+before the request reaches a provider. Labels are metadata only: they never
+influence authentication, authorization, or routing, and they travel with the
+request's usage facts and hourly rollups so usage reports can filter and
+break down by them.
+
 Attempts follow priority and preferred-order tiers, then the selected strategy.
 Weighted ties are seeded by the key so the same key sees a stable order. Each attempt consumes
 the budget, uses the target's timeout within the route's overall deadline,
@@ -107,16 +119,72 @@ successful delivery is recorded only after the response has been flushed.
 
 | Status | `error.code` | Meaning |
 |---|---|---|
-| 400 | `invalid_json`, `missing_required_parameter`, `invalid_value`, `unsupported_parameter`, `unsupported_stateful_reference`, `request_exceeds_token_limit` | Request envelope problems, including unsupported Responses state references and an estimate larger than the key's tokens-per-minute limit. |
+| 400 | `invalid_json`, `missing_required_parameter`, `invalid_value`, `unsupported_parameter`, `unsupported_stateful_reference`, `request_exceeds_token_limit`, `content_policy_blocked` | Request envelope problems, including unsupported Responses state references, an estimate larger than the key's tokens-per-minute limit, or text blocked by a route content-policy rule. |
 | 401 | `invalid_api_key` | Missing, unknown, expired, or revoked key. |
 | 403 | `permission_denied`, `route_forbidden` | Scope missing or route outside the key's allowlist. |
 | 404 | `route_not_found`, `not_found` | Unknown route slug or endpoint. |
 | 408 | `request_timeout` | Request body not received within 15 seconds. |
 | 413 / 415 | `request_too_large`, `unsupported_media_type`, `unsupported_content_encoding` | Body limits and content negotiation. |
+| 422 | `content_policy_surface_unavailable`, `content_policy_streaming_requires_unary` | The request surface cannot be inspected by the route's content policy, or output rules require a buffered unary response instead of streaming. |
 | 429 | `rate_limit_exceeded`, `budget_exhausted`, `upstream_rate_limit` | The key's requests, tokens, or concurrency limit was exceeded; the key's daily or monthly cost budget is exhausted; or every attempt was rate limited upstream. `Retry-After` carries whole seconds. |
 | 502 | `upstream_unavailable`, `upstream_rejected`, `upstream_authentication_failed`, `upstream_permission_denied`, `provider_protocol_error` | Upstream or transport failures after the budget is spent. |
 | 503 | `authority_unavailable`, `request_admission_overloaded`, `distributed_limits_unavailable`, `upstream_unavailable` | Stale authority, admission limit, limits that cannot be enforced, or no eligible target. |
 | 504 | `gateway_timeout` | Route deadline reached before commitment. |
+
+## Content policy
+
+A route draft may carry an optional `content_policy`: an ordered list of
+local [RE2](https://github.com/google/re2/wiki/Syntax) rules validated and
+compiled inside the gateway — no external service, model, or timeout is
+involved. Each rule names a phase (`input` or `output`), an action (`block`
+or `redact`), a pattern, and an optional literal replacement (redact only;
+`$`-sequences are never expanded, so a replacement of `$1` inserts the text
+`$1`). Validation bounds the policy at 64 rules, 512 bytes per pattern,
+16 KiB of combined pattern bytes, and rejects patterns that match the empty
+string. Policies publish with the route revision, restore with it, and
+travel through configuration export and import.
+
+Input rules run before token estimation and before any provider call. The
+gateway walks only the supported textual fields of the canonical request —
+OpenAI Chat and Responses message content and instructions, Anthropic
+system and message content, Gemini contents and system instructions,
+embeddings and moderation inputs, rerank queries and documents, and the
+textual `prompt`/`input` fields of media requests. URLs, binary or
+base64 payloads, tool schemas and descriptions, and unrelated metadata are
+never inspected. Rules apply in document order: `redact` rewrites the
+in-memory request dispatched upstream, and `block` stops evaluation and
+answers `400 content_policy_blocked` without a provider call. The original
+client body and the transformed body are never logged or persisted.
+
+Output rules apply only to unary generation responses, after the upstream
+body is decoded and usage and cost are accounted, and before the response is
+written to the client. Only visible assistant text and textual refusals are
+inspected — reasoning, tool-call arguments, citations, and binary or media
+output are not. `redact` rewrites the response in the caller's OpenAI,
+Anthropic, or Gemini family format; `block` answers
+`400 content_policy_blocked` with no output payload while the provider
+attempt, usage, and cost remain accounted. Because output inspection needs
+the complete decoded response, a request with `stream: true` on a route with
+any output rule is rejected before dispatch with
+`422 content_policy_streaming_requires_unary`; input-only policies may
+stream after input enforcement.
+
+Surfaces where canonical text cannot be inspected refuse policy-equipped
+requests rather than bypassing the policy: raw Bedrock `InvokeModel`,
+Files/Batch JSONL, realtime events, stateful Responses, and other
+provider-native or background surfaces answer
+`422 content_policy_surface_unavailable` before dispatch. Bedrock Converse
+is inspectable only through the canonical decode path.
+
+Enforcement evidence is metadata only. Each matched rule records a
+`{rule_id, phase, action, outcome}` decision — `blocked` or `redacted` — on
+the durable request record (`requests.policy_decisions`) and the request
+history API. Matched text, offsets, patterns, replacement strings, and the
+request or response bodies are never recorded anywhere.
+
+Content policy is a deterministic text filter, not a security guarantee:
+it cannot promise universal safety, prompt-injection prevention, or coverage
+of fields a provider interprets outside the inspected surfaces.
 
 ## Media and durable video jobs
 

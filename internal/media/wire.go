@@ -76,6 +76,7 @@ type UpstreamCall struct {
 	Fields    []Field
 	Stream    bool
 	Kind      ResponseKind
+	Native    string
 	Ambiguous bool // the request is not idempotent; post-dispatch failure is ambiguous
 	// Inject carries W3C trace-context headers the caller allows upstream.
 	// Only request-path calls set it; reconciliation traffic does not
@@ -796,10 +797,10 @@ func ValidateVideoContentQuery(query url.Values) (string, *Error) {
 }
 
 // Encode builds the upstream HTTP request for a validated media operation.
-func Encode(r *Request, upstreamModel string) (*UpstreamCall, *Error) {
+func Encode(r *Request, kind, upstreamModel string) (*UpstreamCall, *Error) {
 	switch r.Op {
 	case OpImageGeneration:
-		return encodeImageGeneration(r, upstreamModel)
+		return encodeImageGeneration(r, kind, upstreamModel)
 	case OpImageEdit:
 		return encodeImageEdit(r, upstreamModel)
 	case OpImageVariation:
@@ -822,7 +823,13 @@ func Encode(r *Request, upstreamModel string) (*UpstreamCall, *Error) {
 	return nil, invalidMedia("The media operation is not supported.")
 }
 
-func encodeImageGeneration(r *Request, model string) (*UpstreamCall, *Error) {
+func encodeImageGeneration(r *Request, kind, model string) (*UpstreamCall, *Error) {
+	switch kind {
+	case "vertex_ai":
+		return encodeVertexImage(r, model)
+	case "bedrock":
+		return encodeBedrockImage(r, model)
+	}
 	fields := map[string]any{
 		"model":              model,
 		"prompt":             r.Prompt,
@@ -845,12 +852,12 @@ func encodeImageGeneration(r *Request, model string) (*UpstreamCall, *Error) {
 	if failure != nil {
 		return nil, failure
 	}
-	kind := ResponseImages
+	responseKind := ResponseImages
 	if r.Stream {
-		kind = ResponseSSE
+		responseKind = ResponseSSE
 	}
 	return &UpstreamCall{Method: "POST", Path: "images/generations", Accept: "application/json",
-		JSON: body, Stream: r.Stream, Kind: kind, Ambiguous: true}, nil
+		JSON: body, Stream: r.Stream, Kind: responseKind, Ambiguous: true}, nil
 }
 
 func encodeImageEdit(r *Request, model string) (*UpstreamCall, *Error) {
@@ -879,12 +886,12 @@ func encodeImageEdit(r *Request, model string) (*UpstreamCall, *Error) {
 	fields = textField(fields, "output_format", r.OutputFormat)
 	fields = textField(fields, "partial_images", int64Text(r.PartialImages))
 	fields = extraFields(fields, r.Extra)
-	kind := ResponseImages
+	responseKind := ResponseImages
 	if r.Stream {
-		kind = ResponseSSE
+		responseKind = ResponseSSE
 	}
 	return &UpstreamCall{Method: "POST", Path: "images/edits", Accept: "application/json",
-		Fields: fields, Stream: r.Stream, Kind: kind, Ambiguous: true}, nil
+		Fields: fields, Stream: r.Stream, Kind: responseKind, Ambiguous: true}, nil
 }
 
 func encodeImageVariation(r *Request, model string) (*UpstreamCall, *Error) {
@@ -918,12 +925,12 @@ func encodeSpeech(r *Request, model string) (*UpstreamCall, *Error) {
 	if failure != nil {
 		return nil, failure
 	}
-	kind := ResponseBinary
+	responseKind := ResponseBinary
 	if r.Stream {
-		kind = ResponseSSE
+		responseKind = ResponseSSE
 	}
 	return &UpstreamCall{Method: "POST", Path: "audio/speech", Accept: "application/json",
-		JSON: body, Stream: r.Stream, Kind: kind, Ambiguous: true}, nil
+		JSON: body, Stream: r.Stream, Kind: responseKind, Ambiguous: true}, nil
 }
 
 func encodeTranscription(r *Request, model string) (*UpstreamCall, *Error) {
@@ -949,12 +956,12 @@ func encodeTranscription(r *Request, model string) (*UpstreamCall, *Error) {
 	}
 	fields = textValue(fields, "stream", strconv.FormatBool(r.Stream))
 	fields = extraFields(fields, r.Extra)
-	kind := ResponseTranscription
+	responseKind := ResponseTranscription
 	if r.Stream {
-		kind = ResponseSSE
+		responseKind = ResponseSSE
 	}
 	return &UpstreamCall{Method: "POST", Path: "audio/transcriptions", Accept: "application/json",
-		Fields: fields, Stream: r.Stream, Kind: kind, Ambiguous: true}, nil
+		Fields: fields, Stream: r.Stream, Kind: responseKind, Ambiguous: true}, nil
 }
 
 func encodeVideoCreate(r *Request, model string) (*UpstreamCall, *Error) {
@@ -1158,6 +1165,61 @@ func DecodeImageResponse(body []byte, stage func(b64 string, index int) (*Artifa
 			OutputTokens: wire.Usage.OutputTokens,
 			TotalTokens:  wire.Usage.TotalTokens,
 		}
+	}
+	return result, nil
+}
+
+func DecodeNativeImageResponse(kind string, body []byte, expected int64, stage func(b64 string, index int) (*Artifact, *Error)) (*ImageResult, *Error) {
+	var wire struct {
+		Predictions []struct {
+			BytesBase64Encoded string `json:"bytesBase64Encoded"`
+			MIMEType           string `json:"mimeType"`
+		} `json:"predictions"`
+		Images []string `json:"images"`
+		Error  *string  `json:"error"`
+	}
+	decoder := json.NewDecoder(bytes.NewReader(body))
+	decoder.UseNumber()
+	if err := decoder.Decode(&wire); err != nil {
+		return nil, protocolError("The provider image response is not valid JSON.")
+	}
+	if wire.Error != nil && *wire.Error != "" {
+		return nil, protocolError("The provider returned an image error.")
+	}
+	var encoded []string
+	switch kind {
+	case "vertex_ai":
+		if wire.Predictions == nil {
+			return nil, protocolError("The provider image response has no predictions.")
+		}
+		for _, prediction := range wire.Predictions {
+			if prediction.MIMEType != "" && !strings.HasPrefix(prediction.MIMEType, "image/") {
+				return nil, protocolError("The provider image response carries an invalid MIME type.")
+			}
+			encoded = append(encoded, prediction.BytesBase64Encoded)
+		}
+	case "bedrock":
+		if wire.Images == nil {
+			return nil, protocolError("The provider image response has no images.")
+		}
+		encoded = wire.Images
+	default:
+		return nil, protocolError("The native image response kind is not supported.")
+	}
+	if int64(len(encoded)) != expected {
+		return nil, protocolError("The provider image response did not match the requested count.")
+	}
+	result := &ImageResult{CreatedAt: time.Now().Unix()}
+	for i, value := range encoded {
+		if value == "" {
+			return nil, protocolError("The provider image response carries an empty payload.")
+		}
+		staged, err := stage(value, i)
+		if err != nil {
+			return nil, err
+		}
+		handle := staged.Handle
+		result.Images = append(result.Images, ImageArtifact{Handle: &handle})
 	}
 	return result, nil
 }
@@ -1658,4 +1720,96 @@ func UnixTime(value *int64) *time.Time {
 	}
 	t := time.Unix(*value, 0).UTC()
 	return &t
+}
+
+func encodeVertexImage(r *Request, model string) (*UpstreamCall, *Error) {
+	if !strings.HasPrefix(model, "imagen-") {
+		return nil, invalidMedia("The configured model is not a qualified Vertex Imagen model.")
+	}
+	if err := rejectNativeImageFields(r); err != nil {
+		return nil, err
+	}
+	count := int64(1)
+	if r.Count != nil {
+		count = *r.Count
+	}
+	parameters := map[string]any{"sampleCount": count}
+	if r.Size != nil {
+		aspect, ok := map[string]string{"1024x1024": "1:1", "1536x1024": "3:2", "1024x1536": "2:3"}[*r.Size]
+		if !ok {
+			return nil, invalidMedia("The size is not supported by the Vertex Imagen target.")
+		}
+		parameters["aspectRatio"] = aspect
+	}
+	body, err := json.Marshal(map[string]any{
+		"instances":  []map[string]any{{"prompt": r.Prompt}},
+		"parameters": parameters,
+	})
+	if err != nil {
+		return nil, invalidMedia("The native image request could not be encoded.")
+	}
+	return &UpstreamCall{Method: http.MethodPost, Path: "models/" + url.PathEscape(model) + ":predict",
+		JSON: body, Kind: ResponseImages, Native: "vertex_ai", Ambiguous: true}, nil
+}
+
+func encodeBedrockImage(r *Request, model string) (*UpstreamCall, *Error) {
+	if !strings.HasPrefix(model, "amazon.titan-image-generator-") {
+		return nil, invalidMedia("The configured model is not a qualified Bedrock Titan image model.")
+	}
+	if err := rejectNativeImageFields(r); err != nil {
+		return nil, err
+	}
+	count := int64(1)
+	if r.Count != nil {
+		count = *r.Count
+	}
+	width, height := 1024, 1024
+	if r.Size != nil {
+		parts := strings.SplitN(*r.Size, "x", 2)
+		if len(parts) != 2 {
+			return nil, invalidMedia("The size is not supported by the Bedrock Titan target.")
+		}
+		parsed, parseErr := strconv.Atoi(parts[0])
+		parsedH, parseErrH := strconv.Atoi(parts[1])
+		if parseErr != nil || parseErrH != nil {
+			return nil, invalidMedia("The size is not supported by the Bedrock Titan target.")
+		}
+		width, height = parsed, parsedH
+		switch *r.Size {
+		case "1024x1024", "768x768", "512x512":
+		default:
+			return nil, invalidMedia("The size is not supported by the Bedrock Titan target.")
+		}
+	}
+	body, err := json.Marshal(map[string]any{
+		"taskType":          "TEXT_IMAGE",
+		"textToImageParams": map[string]any{"text": r.Prompt},
+		"imageGenerationConfig": map[string]any{
+			"numberOfImages": count,
+			"width":          width,
+			"height":         height,
+		},
+	})
+	if err != nil {
+		return nil, invalidMedia("The native image request could not be encoded.")
+	}
+	return &UpstreamCall{Method: http.MethodPost, Path: "model/" + url.PathEscape(model) + "/invoke",
+		JSON: body, Kind: ResponseImages, Native: "bedrock", Ambiguous: true}, nil
+}
+
+func rejectNativeImageFields(r *Request) *Error {
+	switch {
+	case r.Format != nil && *r.Format != "b64_json":
+		return invalidMedia("Native image targets only support b64_json responses.")
+	case r.Quality != nil, r.Style != nil, r.User != nil, r.Background != nil, r.Moderation != nil,
+		r.OutputCompression != nil, r.OutputFormat != nil, r.PartialImages != nil:
+		return invalidMedia("The native image target does not support the requested image parameters.")
+	case r.Stream:
+		return invalidMedia("The native image target does not support streaming.")
+	case r.Count != nil && (*r.Count < 1 || *r.Count > 4):
+		return invalidMedia("Native image targets support n from 1 to 4.")
+	case len(r.Extra) > 0:
+		return invalidMedia("The native image target does not support extension fields.")
+	}
+	return nil
 }

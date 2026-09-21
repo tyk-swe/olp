@@ -128,6 +128,19 @@
         <dd>{formatInteger(detail.data.cached_input_tokens)}</dd>
       </div>
       <div>
+        <dt>Cache write tokens</dt>
+        <dd>
+          {formatInteger(detail.data.cache_write_input_tokens)}
+          {#if detail.data.cache_write_5m_input_tokens || detail.data.cache_write_1h_input_tokens}
+            <small
+              >5m {formatInteger(detail.data.cache_write_5m_input_tokens)} · 1h {formatInteger(
+                detail.data.cache_write_1h_input_tokens
+              )}</small
+            >
+          {/if}
+        </dd>
+      </div>
+      <div>
         <dt>Output tokens</dt>
         <dd>{formatInteger(detail.data.output_tokens)}</dd>
       </div>
@@ -159,6 +172,20 @@
         </dd>
       </div>
     </dl>
+    {#if detail.data.policy_decisions.length}<div class="policy-decisions">
+        <p class="eyebrow">Content policy decisions</p>
+        <ul>
+          {#each detail.data.policy_decisions as decision (`${decision.rule_id}-${decision.phase}-${decision.outcome}`)}
+            <li>
+              <code>{decision.rule_id}</code>
+              {decision.phase} · {decision.action} · {decision.outcome}
+            </li>
+          {/each}
+        </ul>
+        <small
+          >Metadata only — matched request or response text is never stored.</small
+        >
+      </div>{/if}
   </section>
 
   <section class="timeline-section" aria-labelledby="attempts-title">
@@ -340,6 +367,20 @@
                   <dd>{formatInteger(attempt.cached_input_tokens)}</dd>
                 </div>
                 <div>
+                  <dt>Cache write tokens</dt>
+                  <dd>
+                    {formatInteger(attempt.cache_write_input_tokens)}
+                    {#if attempt.cache_write_5m_input_tokens || attempt.cache_write_1h_input_tokens}
+                      <small
+                        >5m {formatInteger(attempt.cache_write_5m_input_tokens)} ·
+                        1h {formatInteger(
+                          attempt.cache_write_1h_input_tokens
+                        )}</small
+                      >
+                    {/if}
+                  </dd>
+                </div>
+                <div>
                   <dt>Output tokens</dt>
                   <dd>{formatInteger(attempt.output_tokens)}</dd>
                 </div>
@@ -402,6 +443,22 @@
   .request-facts {
     margin-top: 1rem;
     padding: 1.5rem;
+  }
+  .policy-decisions {
+    margin-top: 1.25rem;
+    padding-top: 1rem;
+    border-top: 1px solid var(--border-hairline);
+  }
+  .policy-decisions ul {
+    margin: 0.4rem 0;
+    padding-left: 1rem;
+  }
+  .policy-decisions li {
+    overflow-wrap: anywhere;
+  }
+  .policy-decisions small {
+    color: var(--foreground-muted);
+    font-size: var(--text-caption);
   }
   h2 {
     margin: 0;

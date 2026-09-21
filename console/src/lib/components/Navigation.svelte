@@ -99,6 +99,12 @@
           capability: 'operations.read'
         },
         {
+          label: 'Provider Resources',
+          href: resolve('/provider-resources'),
+          icon: 'request',
+          capability: 'operations.read'
+        },
+        {
           label: 'Usage',
           href: resolve('/usage'),
           icon: 'usage',

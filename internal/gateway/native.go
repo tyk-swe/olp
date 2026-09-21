@@ -21,6 +21,7 @@ func requestSurface(r *http.Request) string {
 func (s *Server) registerNative(mux *http.ServeMux) {
 	mux.HandleFunc("POST /v1/responses/input_tokens", s.inference(openai.FamilyInputTokens))
 	mux.HandleFunc("POST /v1/embeddings", s.inference(openai.FamilyEmbeddings))
+	mux.HandleFunc("POST /v1/rerank", s.inference(openai.FamilyRerank))
 	mux.HandleFunc("POST /v1/moderations", s.inference(openai.FamilyModeration))
 	mux.HandleFunc("POST /anthropic/v1/messages", s.inference(openai.FamilyAnthropic))
 	mux.HandleFunc("POST /anthropic/v1/messages/count_tokens", s.inference(openai.FamilyAnthropicCount))
@@ -59,9 +60,10 @@ func (s *Server) registerNative(mux *http.ServeMux) {
 		}
 	}
 }
-func nativeModel(route runtime.Route, surface string) map[string]any {
+func nativeModel(snapshot *runtime.Snapshot, route runtime.Route, surface string) map[string]any {
+	capabilities := runtime.EffectiveCapabilities(snapshot, route)
 	if surface == "anthropic" {
-		return map[string]any{"id": route.Slug, "type": "model", "display_name": route.Slug, "created_at": route.PublishedAt.UTC().Format("2006-01-02T15:04:05Z")}
+		return map[string]any{"id": route.Slug, "type": "model", "display_name": route.Slug, "created_at": route.PublishedAt.UTC().Format("2006-01-02T15:04:05Z"), "capabilities": capabilities}
 	}
 	methods := []string{}
 	if slices.Contains(route.Operations, "generation") {
@@ -70,7 +72,7 @@ func nativeModel(route runtime.Route, surface string) map[string]any {
 	if slices.Contains(route.Operations, "token_count") {
 		methods = append(methods, "countTokens")
 	}
-	return map[string]any{"name": "models/" + route.Slug, "displayName": route.Slug, "supportedGenerationMethods": methods}
+	return map[string]any{"name": "models/" + route.Slug, "displayName": route.Slug, "supportedGenerationMethods": methods, "capabilities": capabilities}
 }
 func (s *Server) nativeModels(w http.ResponseWriter, r *http.Request) {
 	req := s.begin(w, r)
@@ -86,13 +88,13 @@ func (s *Server) nativeModels(w http.ResponseWriter, r *http.Request) {
 			writeSurfaceError(w, modelNotFound(slug), surface)
 			return
 		}
-		writeJSON(w, nativeModel(route, surface))
+		writeJSON(w, nativeModel(req.release.Snapshot, route, surface))
 		return
 	}
 	rows := []map[string]any{}
 	for _, slug := range slices.Sorted(mapsKeys(req.release.Snapshot.Routes)) {
 		if authority.Allows("models_read", slug, s.now()) {
-			rows = append(rows, nativeModel(req.release.Snapshot.Routes[slug], surface))
+			rows = append(rows, nativeModel(req.release.Snapshot, req.release.Snapshot.Routes[slug], surface))
 		}
 	}
 	if surface == "anthropic" {

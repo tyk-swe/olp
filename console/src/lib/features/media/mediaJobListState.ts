@@ -83,6 +83,33 @@ export const mediaJobLifecycles = [
   'deleted'
 ];
 
+const reconcilingLifecycles = new Set([
+  'creating',
+  'create_ambiguous',
+  'create_cleanup_pending',
+  'delete_pending'
+]);
+
+export function mediaJobPending(job: {
+  state: string;
+  lifecycle: string;
+}): boolean {
+  return (
+    job.state === 'queued' ||
+    job.state === 'running' ||
+    reconcilingLifecycles.has(job.lifecycle)
+  );
+}
+
+export function mediaJobPollInterval(
+  pending: boolean,
+  hidden = typeof document !== 'undefined' &&
+    document.visibilityState === 'hidden'
+): number | false {
+  if (hidden) return false;
+  return pending ? 3_000 : false;
+}
+
 export function mediaJobProblem(
   form: MediaJobForm,
   fromUrl = false,

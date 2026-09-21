@@ -13,8 +13,9 @@ func TestProviderSummaryPreservesListContract(t *testing.T) {
 		"pending_activation", "active_revision", "created_by_email", "last_probe_at",
 		"last_probe_status", "created_at", "updated_at", "model_count",
 		"enabled_model_count", "capability_count", "certified_capability_count",
+		"project_id", "project_name",
 	}
-	nullableFields := []string{"vendor_id", "active_revision", "created_by_email", "last_probe_at", "last_probe_status"}
+	nullableFields := []string{"vendor_id", "active_revision", "created_by_email", "last_probe_at", "last_probe_status", "project_id", "project_name"}
 	detailFields := []string{"configuration", "draft_credential_id", "draft_credential_version", "runtime_credential_id", "runtime_credential_version", "last_probe_detail"}
 	at := time.Date(2026, time.September, 18, 12, 0, 0, 0, time.UTC)
 	for _, populated := range []bool{false, true} {
@@ -38,6 +39,8 @@ func TestProviderSummaryPreservesListContract(t *testing.T) {
 			}
 			if populated {
 				d.VendorID = new("openai")
+				d.ProjectID = new("project")
+				d.ProjectName = new("Project")
 				d.ActiveRevision = new(1)
 				d.CreatedByEmail = new("operator@example.test")
 				d.LastProbeAt = &at

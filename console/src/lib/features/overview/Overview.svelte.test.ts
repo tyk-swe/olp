@@ -17,7 +17,8 @@ function establish(role: FixedRole) {
       id: 'overview-user',
       email: 'test@example.com',
       display_name: 'Test',
-      role
+      role,
+      access_scope: 'global'
     },
     csrf_token: 'overview-test'
   });

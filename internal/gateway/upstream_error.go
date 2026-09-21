@@ -5,10 +5,27 @@ import (
 	"strings"
 )
 
+var contextWindowCodes = map[string]bool{
+	"contextlengthexceeded":    true,
+	"contextwindowexceeded":    true,
+	"maxcontextlengthexceeded": true,
+	"prompttoolong":            true,
+}
+
+var contextCodeFold = strings.NewReplacer("_", "", "-", "", " ", "")
+
+func contextWindowError(e *openai.UpstreamError) bool {
+	if e == nil {
+		return false
+	}
+	return contextWindowCodes[contextCodeFold.Replace(strings.ToLower(e.Code))] ||
+		contextWindowCodes[contextCodeFold.Replace(strings.ToLower(e.Type))]
+}
+
 // Streaming providers report failures inside a successful HTTP response.
 // Classify their typed envelopes at the same attempt boundary as HTTP errors.
 func inBandFailure(e *openai.UpstreamError, committed bool) (string, int) {
-	kind := strings.NewReplacer("_", "", "-", "", " ", "").Replace(strings.ToLower(e.Type + " " + e.Code))
+	kind := contextCodeFold.Replace(strings.ToLower(e.Type + " " + e.Code))
 	has := func(names ...string) bool {
 		for _, name := range names {
 			if strings.Contains(kind, name) {
@@ -18,6 +35,8 @@ func inBandFailure(e *openai.UpstreamError, committed bool) (string, int) {
 		return false
 	}
 	switch {
+	case contextWindowError(e):
+		return classContextWindow, 400
 	case has("authentication", "unauthenticated", "invalidapikey", "accessdenied", "permissiondenied") || e.Code == "401" || e.Code == "403":
 		return classCredential, 401
 	case has("ratelimit", "resourceexhausted", "throttl") || e.Code == "429":

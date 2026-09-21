@@ -43,3 +43,21 @@ func TestSimulationSkipsUnusableSlotsWithoutConsumingAttempts(t *testing.T) {
 		})
 	}
 }
+
+func TestTokenDemandValidation(t *testing.T) {
+	negative := int64(-1)
+	if _, err := tokenDemand(&negative, nil); err == nil {
+		t.Error("negative input estimate accepted")
+	}
+	if _, err := tokenDemand(nil, &negative); err == nil {
+		t.Error("negative output bound accepted")
+	}
+	if demand, err := tokenDemand(nil, nil); demand != nil || err != nil {
+		t.Errorf("absent demand: %v %v", demand, err)
+	}
+	input, output := int64(100), int64(20)
+	demand, err := tokenDemand(&input, &output)
+	if err != nil || demand.EstimatedInputTokens != 100 || *demand.MaxOutputTokens != 20 {
+		t.Errorf("demand %+v %v", demand, err)
+	}
+}

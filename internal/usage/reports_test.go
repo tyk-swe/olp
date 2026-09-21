@@ -17,7 +17,7 @@ func usageFilterRange(t *testing.T, start, end string) Filters {
 	if err != nil {
 		t.Fatalf("parse %q: %v", end, err)
 	}
-	return Filters{Start: from.UTC(), End: to.UTC()}
+	return Filters{Start: from.UTC(), End: to.UTC(), AllProjects: true}
 }
 
 func TestUsageHourRoundingIsExactOnBothSidesOfTheEpoch(t *testing.T) {

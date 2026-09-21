@@ -6,12 +6,43 @@ import {
   readMediaJobForm,
   mediaJobList,
   mediaJobFilters,
+  mediaJobPending,
+  mediaJobPollInterval,
   type MediaJobListState
 } from '$lib/features/media/mediaJobListState';
 
 function state(changes: Partial<MediaJobListState> = {}): MediaJobListState {
   return { ...mediaJobList.empty(), ...changes };
 }
+
+describe('mediaJobPending', () => {
+  it.each([
+    ['queued', 'active', true],
+    ['running', 'active', true],
+    ['succeeded', 'creating', true],
+    ['failed', 'create_ambiguous', true],
+    ['cancelled', 'create_cleanup_pending', true],
+    ['succeeded', 'delete_pending', true],
+    ['succeeded', 'active', false],
+    ['failed', 'active', false],
+    ['cancelled', 'active', false],
+    ['succeeded', 'deleted', false]
+  ])('state %s lifecycle %s pending %s', (jobState, lifecycle, want) => {
+    expect(mediaJobPending({ state: jobState, lifecycle })).toBe(want);
+  });
+});
+
+describe('mediaJobPollInterval', () => {
+  it('polls pending work every three seconds', () => {
+    expect(mediaJobPollInterval(true)).toBe(3_000);
+  });
+
+  it('stops on terminal jobs and hidden tabs', () => {
+    expect(mediaJobPollInterval(false)).toBe(false);
+    expect(mediaJobPollInterval(true, true)).toBe(false);
+    expect(mediaJobPollInterval(false, false)).toBe(false);
+  });
+});
 
 describe('mediaJobFilters', () => {
   it('sends only the page size when nothing is filled in', () => {

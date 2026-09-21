@@ -2,17 +2,28 @@
   import { mediaJobKeys } from '$lib/features/media/mediaJobKeys';
 
   import { resolve } from '$app/paths';
+  import { goto } from '$app/navigation';
   import { page } from '$app/state';
   import { applyListSearch } from '$lib/lists/urlSync.svelte';
   import { timeInputType } from '$lib/lists/filters';
-  import { createQuery } from '@tanstack/svelte-query';
+  import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import CursorPagination from '$lib/components/CursorPagination.svelte';
-  import { getMediaJob, listMediaJobs } from '$lib/features/media/api';
+  import {
+    deleteMediaJob,
+    downloadMediaJobContent,
+    getMediaJob,
+    listMediaJobs,
+    refreshMediaJob,
+    type MediaContentVariant
+  } from '$lib/features/media/api';
   import { errorMessage } from '$lib/api/http';
   import { cursorPaginationProps } from '$lib/lists/pagination';
   import { formatDate, stateLabel } from '$lib/format';
+  import { useRole } from '$lib/features/access/session/useRole.svelte';
   import {
     mediaJobFilters,
+    mediaJobPending,
+    mediaJobPollInterval,
     mediaJobProblem,
     mediaJobSearch,
     mediaJobUrl,
@@ -39,6 +50,14 @@
     validation = null;
   });
 
+  const queryClient = useQueryClient();
+  const access = useRole();
+  const canOperate = $derived(access.can('media.manage'));
+
+  let actionBusy = $state<string | null>(null);
+  let actionError = $state<string | null>(null);
+  let downloadVariant = $state<MediaContentVariant>('video');
+
   const jobs = createQuery(() => {
     const applied = urlFilters;
     const cursor =
@@ -49,14 +68,82 @@
       queryKey: mediaJobKeys.page(applied, cursor),
       queryFn: () => listMediaJobs({ ...applied, cursor }),
       placeholderData: (previous) => previous,
-      enabled: !jobId && !urlProblem
+      enabled: !jobId && !urlProblem,
+      refetchInterval: (query) =>
+        mediaJobPollInterval(
+          query.state.data?.items.some(mediaJobPending) ?? false
+        )
     };
   });
   const detail = createQuery(() => ({
     queryKey: mediaJobKeys.detail(jobId),
     queryFn: () => getMediaJob(jobId),
-    enabled: Boolean(jobId)
+    enabled: Boolean(jobId),
+    refetchInterval: (query) =>
+      mediaJobPollInterval(
+        query.state.data != null && mediaJobPending(query.state.data)
+      )
   }));
+
+  async function refreshNow() {
+    if (actionBusy) return;
+    actionBusy = 'refresh';
+    actionError = null;
+    try {
+      const updated = await refreshMediaJob(jobId);
+      queryClient.setQueryData(mediaJobKeys.detail(jobId), updated);
+      void queryClient.invalidateQueries({ queryKey: mediaJobKeys.all });
+    } catch (error) {
+      actionError = errorMessage(error, 'The refresh could not be completed.');
+    } finally {
+      actionBusy = null;
+    }
+  }
+
+  async function download() {
+    if (actionBusy) return;
+    actionBusy = 'download';
+    actionError = null;
+    let url: string | null = null;
+    try {
+      const { blob, filename } = await downloadMediaJobContent(
+        jobId,
+        downloadVariant
+      );
+      url = URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = filename;
+      anchor.click();
+    } catch (error) {
+      actionError = errorMessage(error, 'The content could not be downloaded.');
+    } finally {
+      if (url) URL.revokeObjectURL(url);
+      actionBusy = null;
+    }
+  }
+
+  async function remove() {
+    const job = detail.data;
+    if (!job || actionBusy) return;
+    if (
+      !confirm(
+        'Delete the upstream artifact for this media job? This only removes provider-side content; it does not cancel a job.'
+      )
+    )
+      return;
+    actionBusy = 'delete';
+    actionError = null;
+    try {
+      await deleteMediaJob(jobId, job.etag);
+      await queryClient.invalidateQueries({ queryKey: mediaJobKeys.all });
+      await goto(resolve(`/media-jobs${page.url.search}`));
+    } catch (error) {
+      actionError = errorMessage(error, 'The job could not be deleted.');
+    } finally {
+      actionBusy = null;
+    }
+  }
 
   function apply(event: SubmitEvent) {
     event.preventDefault();
@@ -221,6 +308,50 @@
           <strong>Provider ID</strong><code>{detail.data.provider_id}</code>
         </p>
       </div>
+      {#if canOperate}
+        <div class="job-actions">
+          <button
+            class="button button-secondary"
+            type="button"
+            onclick={refreshNow}
+            disabled={actionBusy !== null}
+            >{actionBusy === 'refresh' ? 'Refreshing…' : 'Refresh now'}</button
+          >
+          {#if detail.data.content_available && detail.data.state === 'succeeded'}
+            <label class="variant-picker"
+              >Variant
+              <select bind:value={downloadVariant}>
+                <option value="video">Video</option>
+                <option value="thumbnail">Thumbnail</option>
+                <option value="spritesheet">Spritesheet</option>
+              </select></label
+            >
+            <button
+              class="button button-secondary"
+              type="button"
+              onclick={download}
+              disabled={actionBusy !== null}
+              >{actionBusy === 'download'
+                ? 'Downloading…'
+                : 'Download content'}</button
+            >
+          {/if}
+          {#if detail.data.lifecycle !== 'deleted'}
+            <button
+              class="button button-secondary danger-button"
+              type="button"
+              onclick={remove}
+              disabled={actionBusy !== null}
+              >{actionBusy === 'delete'
+                ? 'Deleting…'
+                : 'Delete content'}</button
+            >
+          {/if}
+        </div>
+      {/if}
+      {#if actionError}<div class="inline-problem" role="alert">
+          {actionError}
+        </div>{/if}
     </section>
   {/if}
 {:else}
@@ -480,6 +611,30 @@
     overflow-wrap: anywhere;
     font-family: var(--font-mono);
     font-size: var(--text-caption);
+  }
+  .job-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: end;
+    gap: 0.75rem;
+    margin-top: 1rem;
+  }
+  .variant-picker {
+    display: grid;
+    gap: 0.4rem;
+    font-size: var(--text-body-sm);
+    font-weight: 500;
+  }
+  .variant-picker select {
+    min-height: 2.5rem;
+    padding: 0.5rem 0.75rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-control);
+    background: transparent;
+    color: var(--foreground);
+  }
+  .danger-button {
+    color: var(--danger);
   }
   /* Eight columns still cannot fit a phone. Left as a scrolling table, the row
      width also pushes mobile browsers into shrinking the whole page. */

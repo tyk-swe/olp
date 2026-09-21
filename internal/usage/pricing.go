@@ -33,7 +33,8 @@ var providerKinds = []string{"openai", "anthropic", "gemini", "vertex_ai", "bedr
 // operations a usage filter may name.
 var priceOperations = []string{"generation", "embeddings", "token_count", "image_generation",
 	"image_edit", "image_variation", "speech", "transcription", "video_create", "video_list",
-	"video_get", "video_content", "video_delete", "moderation", "model_list", "model_get"}
+	"video_get", "video_content", "video_delete", "moderation", "model_list", "model_get", "rerank",
+	"batch", "realtime", "bedrock_invoke"}
 
 func validOperation(value string) bool {
 	return slices.Contains(priceOperations, value)
@@ -56,9 +57,33 @@ type Price struct {
 	// CachedInputPerMillion rates the cached share of the input tokens. Absent
 	// means cached tokens bill at the full input rate.
 	CachedInputPerMillion *string `json:"cached_input_per_million"`
-	OutputPerMillion      *string `json:"output_per_million"`
-	UnitPrice             *string `json:"unit_price"`
-	Currency              string  `json:"currency"`
+
+	CacheWriteInputPerMillion   *string `json:"cache_write_input_per_million"`
+	CacheWrite5MInputPerMillion *string `json:"cache_write_5m_input_per_million"`
+	CacheWrite1HInputPerMillion *string `json:"cache_write_1h_input_per_million"`
+	OutputPerMillion            *string `json:"output_per_million"`
+	UnitPrice                   *string `json:"unit_price"`
+	Currency                    string  `json:"currency"`
+}
+
+func (p Price) dimensionKey() string {
+	return p.ProviderKind + "\x00" + optional(p.ProviderID) + "\x00" +
+		optional(p.VendorID) + "\x00" + p.Model + "\x00" + p.Operation
+}
+
+func (p Price) dimensions() map[string]string {
+	dimensions := map[string]string{
+		"provider_kind": p.ProviderKind,
+		"model":         p.Model,
+		"operation":     p.Operation,
+	}
+	if p.ProviderID != nil {
+		dimensions["provider_id"] = *p.ProviderID
+	}
+	if p.VendorID != nil {
+		dimensions["vendor_id"] = *p.VendorID
+	}
+	return dimensions
 }
 
 // Revision is an immutable price list that takes effect at a point in time.
@@ -70,7 +95,10 @@ type Revision struct {
 	EffectiveAt time.Time `json:"effective_at"`
 	CreatedBy   string    `json:"created_by"`
 	CreatedAt   time.Time `json:"created_at"`
-	Prices      []Price   `json:"prices"`
+
+	SourceSnapshotID *string `json:"source_snapshot_id"`
+	SourceName       *string `json:"source_name"`
+	Prices           []Price `json:"prices"`
 }
 
 // CreateRevision validates and stores one pricing revision inside the caller's
@@ -158,11 +186,16 @@ func insertPrice(ctx context.Context, tx pgx.Tx, revisionID string, price Price)
 	_, err := tx.Exec(ctx, `INSERT INTO olp_go.prices
             (pricing_revision_id, provider_kind, provider_id, model, operation,
              input_per_million, cached_input_per_million, output_per_million,
+             cache_write_input_per_million, cache_write_5m_input_per_million,
+             cache_write_1h_input_per_million,
              unit_price, currency, vendor_id)
         VALUES ($1, $2, $3, $4, $5, $6::text::numeric, $7::text::numeric, $8::text::numeric,
-                $9::text::numeric, $10, $11)`,
+                $9::text::numeric, $10::text::numeric, $11::text::numeric, $12::text::numeric,
+                $13, $14)`,
 		revisionID, price.ProviderKind, price.ProviderID, price.Model, price.Operation,
 		price.InputPerMillion, price.CachedInputPerMillion, price.OutputPerMillion,
+		price.CacheWriteInputPerMillion, price.CacheWrite5MInputPerMillion,
+		price.CacheWrite1HInputPerMillion,
 		price.UnitPrice, price.Currency, price.VendorID)
 	if err != nil {
 		return fmt.Errorf("store price: %w", err)
@@ -190,8 +223,7 @@ func validatePrices(prices []Price, vendorKind func(vendor string) (string, bool
 		} else if currency != entry.Currency {
 			return nil, "", access.Invalid("prices", "A pricing revision cannot mix currencies.")
 		}
-		key := entry.ProviderKind + "\x00" + optional(entry.ProviderID) + "\x00" +
-			optional(entry.VendorID) + "\x00" + entry.Model + "\x00" + entry.Operation
+		key := entry.dimensionKey()
 		if dimensions[key] {
 			return nil, "", access.Invalid("prices",
 				"A pricing revision cannot repeat the same scoped dimensions.")
@@ -252,8 +284,14 @@ func normalizePrice(price Price, vendorKind func(vendor string) (string, bool)) 
 		return Price{}, access.Invalid("prices",
 			"A cached input rate requires an input rate to discount.")
 	}
+	if entry.InputPerMillion == nil && (entry.CacheWriteInputPerMillion != nil ||
+		entry.CacheWrite5MInputPerMillion != nil || entry.CacheWrite1HInputPerMillion != nil) {
+		return Price{}, access.Invalid("prices",
+			"A cache write rate requires an input rate.")
+	}
 	for _, amount := range []**string{&entry.InputPerMillion, &entry.CachedInputPerMillion,
-		&entry.OutputPerMillion, &entry.UnitPrice} {
+		&entry.OutputPerMillion, &entry.UnitPrice, &entry.CacheWriteInputPerMillion,
+		&entry.CacheWrite5MInputPerMillion, &entry.CacheWrite1HInputPerMillion} {
 		if *amount == nil {
 			continue
 		}
@@ -302,10 +340,15 @@ func priceDigits(value string) bool {
 }
 
 const revisionColumns = `SELECT r.id::text, r.revision, r.effective_at, r.created_by::text,
-        r.created_at, p.vendor_id, p.provider_kind, p.provider_id::text, p.model, p.operation,
+        r.created_at, r.source_snapshot_id::text, src.name, p.vendor_id, p.provider_kind, p.provider_id::text, p.model, p.operation,
         p.input_per_million::text, p.cached_input_per_million::text, p.output_per_million::text,
+        p.cache_write_input_per_million::text, p.cache_write_5m_input_per_million::text,
+        p.cache_write_1h_input_per_million::text,
         p.unit_price::text, btrim(p.currency)
-    FROM olp_go.pricing_revisions r LEFT JOIN olp_go.prices p ON p.pricing_revision_id = r.id
+    FROM olp_go.pricing_revisions r
+    LEFT JOIN olp_go.pricing_source_snapshots snap ON snap.id = r.source_snapshot_id
+    LEFT JOIN olp_go.pricing_sources src ON src.id = snap.source_id
+    LEFT JOIN olp_go.prices p ON p.pricing_revision_id = r.id
     WHERE r.id IN (SELECT id FROM olp_go.pricing_revisions
                     WHERE ($1::int IS NULL OR revision < $1) ORDER BY revision DESC LIMIT $2)
     ORDER BY r.revision DESC, p.provider_kind, p.provider_id NULLS FIRST, p.model, p.operation,
@@ -331,9 +374,12 @@ func ListRevisions(ctx context.Context, q access.Queryer, beforeRevision *int, l
 		var price Price
 		var kind, model, operation, currency *string
 		if err = rows.Scan(&revision.ID, &revision.Revision, &revision.EffectiveAt,
-			&revision.CreatedBy, &revision.CreatedAt, &price.VendorID, &kind, &price.ProviderID,
+			&revision.CreatedBy, &revision.CreatedAt, &revision.SourceSnapshotID, &revision.SourceName,
+			&price.VendorID, &kind, &price.ProviderID,
 			&model, &operation, &price.InputPerMillion, &price.CachedInputPerMillion,
-			&price.OutputPerMillion, &price.UnitPrice, &currency); err != nil {
+			&price.OutputPerMillion, &price.CacheWriteInputPerMillion,
+			&price.CacheWrite5MInputPerMillion, &price.CacheWrite1HInputPerMillion,
+			&price.UnitPrice, &currency); err != nil {
 			return nil, nil, fmt.Errorf("list pricing revisions: %w", err)
 		}
 		if len(items) == 0 || items[len(items)-1].ID != revision.ID {

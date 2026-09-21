@@ -47,6 +47,7 @@ type MaintenanceReport struct {
 	InvitationRows int64
 	ReplayRows     int64
 	OIDCFlowRows   int64
+	ResourceRows   int64
 }
 
 type cutoffs struct{ request, usage, audit time.Time }
@@ -88,6 +89,9 @@ func RunMaintenance(ctx context.Context, pool *pgxpool.Pool, now time.Time) (Mai
 		return MaintenanceReport{}, err
 	}
 	if err = purgeExpiringRecords(ctx, conn, now, windows, &report); err != nil {
+		return MaintenanceReport{}, err
+	}
+	if report.ResourceRows, err = drainInBatches(ctx, conn, purgeExpiredResourcesSQL, now, int64(retentionBatch)); err != nil {
 		return MaintenanceReport{}, err
 	}
 	return report, nil
@@ -173,6 +177,12 @@ const purgeRequestsSQL = `WITH expired AS (
     DELETE FROM olp_go.requests request USING expired
      WHERE request.id = expired.id AND request.started_at = expired.started_at`
 
+const purgeExpiredResourcesSQL = `WITH expired AS (
+      SELECT id FROM olp_go.provider_resources WHERE expires_at IS NOT NULL AND expires_at < $1
+      LIMIT $2 FOR UPDATE SKIP LOCKED
+    )
+    DELETE FROM olp_go.provider_resources WHERE id IN (SELECT id FROM expired)`
+
 func purgeExpiredRequests(ctx context.Context, conn *pgx.Conn, cutoff time.Time) (int64, error) {
 	return drainInBatches(ctx, conn, purgeRequestsSQL, cutoff, int64(retentionBatch))
 }
@@ -188,28 +198,39 @@ const rollupSQL = `WITH candidates AS (
       DELETE FROM olp_go.attempt_usage_facts fact USING candidates
        WHERE fact.ctid = candidates.ctid
       RETURNING route_slug, provider_id, upstream_model, operation, surface, api_key_id,
-                observed_at, input_tokens, output_tokens, cached_input_tokens, media_units,
+                budget_group_id, observed_at, input_tokens, output_tokens, cached_input_tokens,
+                cache_write_input_tokens, cache_write_5m_input_tokens, cache_write_1h_input_tokens,
+                media_units,
                 estimated_cost, currency, charge_status, unpriced,
                 request_counted, provider_request_counted, model_request_counted,
                 target_request_counted, request_unpriced_counted, provider_unpriced_counted,
                 model_unpriced_counted, target_unpriced_counted, request_incomplete_counted,
-                provider_incomplete_counted, model_incomplete_counted, target_incomplete_counted
+                provider_incomplete_counted, model_incomplete_counted, target_incomplete_counted,
+                attribution
     ), rolled AS (
       INSERT INTO olp_go.attempt_usage_hourly
         (bucket, route_slug, provider_id, upstream_model, operation, surface, api_key_id,
+         budget_group_id, attribution,
          request_count, provider_request_count, model_request_count, target_request_count,
-         input_tokens, output_tokens, cached_input_tokens, media_units, estimated_cost,
+         input_tokens, output_tokens, cached_input_tokens,
+         cache_write_input_tokens, cache_write_5m_input_tokens, cache_write_1h_input_tokens,
+         media_units, estimated_cost,
          request_unpriced_count, provider_unpriced_count, model_unpriced_count,
          target_unpriced_count, unpriced_attempt_count, request_incomplete_count,
          provider_incomplete_count, model_incomplete_count, target_incomplete_count, currency)
       SELECT date_trunc('hour', observed_at AT TIME ZONE 'UTC') AT TIME ZONE 'UTC',
              route_slug, provider_id, upstream_model, operation, surface, api_key_id,
+             budget_group_id, attribution,
              COUNT(*) FILTER (WHERE request_counted),
              COUNT(*) FILTER (WHERE provider_request_counted),
              COUNT(*) FILTER (WHERE model_request_counted),
              COUNT(*) FILTER (WHERE target_request_counted),
              COALESCE(SUM(input_tokens), 0), COALESCE(SUM(output_tokens), 0),
-             COALESCE(SUM(cached_input_tokens), 0), COALESCE(SUM(media_units), 0),
+             COALESCE(SUM(cached_input_tokens), 0),
+             COALESCE(SUM(cache_write_input_tokens), 0),
+             COALESCE(SUM(cache_write_5m_input_tokens), 0),
+             COALESCE(SUM(cache_write_1h_input_tokens), 0),
+             COALESCE(SUM(media_units), 0),
              SUM(estimated_cost),
              COUNT(*) FILTER (WHERE request_unpriced_counted),
              COUNT(*) FILTER (WHERE provider_unpriced_counted),
@@ -222,7 +243,8 @@ const rollupSQL = `WITH candidates AS (
              COUNT(*) FILTER (WHERE target_incomplete_counted), MAX(currency)
         FROM expired
        GROUP BY date_trunc('hour', observed_at AT TIME ZONE 'UTC') AT TIME ZONE 'UTC',
-                route_slug, provider_id, upstream_model, operation, surface, api_key_id
+                route_slug, provider_id, upstream_model, operation, surface, api_key_id,
+                budget_group_id, attribution
       ON CONFLICT ON CONSTRAINT attempt_usage_hourly_dimensions_key DO UPDATE SET
         request_count = attempt_usage_hourly.request_count + EXCLUDED.request_count,
         provider_request_count = attempt_usage_hourly.provider_request_count + EXCLUDED.provider_request_count,
@@ -231,6 +253,9 @@ const rollupSQL = `WITH candidates AS (
         input_tokens = attempt_usage_hourly.input_tokens + EXCLUDED.input_tokens,
         output_tokens = attempt_usage_hourly.output_tokens + EXCLUDED.output_tokens,
         cached_input_tokens = attempt_usage_hourly.cached_input_tokens + EXCLUDED.cached_input_tokens,
+        cache_write_input_tokens = attempt_usage_hourly.cache_write_input_tokens + EXCLUDED.cache_write_input_tokens,
+        cache_write_5m_input_tokens = attempt_usage_hourly.cache_write_5m_input_tokens + EXCLUDED.cache_write_5m_input_tokens,
+        cache_write_1h_input_tokens = attempt_usage_hourly.cache_write_1h_input_tokens + EXCLUDED.cache_write_1h_input_tokens,
         media_units = attempt_usage_hourly.media_units + EXCLUDED.media_units,
         estimated_cost = CASE
           WHEN attempt_usage_hourly.estimated_cost IS NULL AND EXCLUDED.estimated_cost IS NULL THEN NULL

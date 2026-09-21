@@ -23,12 +23,16 @@ const MaxUsageRangeDays = 366
 // Filters select the slice of usage a report covers. Start is inclusive and
 // End exclusive, so adjacent ranges tile without double counting.
 type Filters struct {
-	Start, End time.Time
-	Route      *string
-	ProviderID *string
-	Model      *string
-	APIKey     *string
-	Operation  *string
+	Start, End       time.Time
+	Route            *string
+	ProviderID       *string
+	Model            *string
+	APIKey           *string
+	Operation        *string
+	AttributionKey   *string
+	AttributionValue *string
+	AllProjects      bool
+	AllowedProjects  []string
 }
 
 // Coverage says how much of the requested range the totals actually describe.
@@ -45,15 +49,18 @@ type Coverage struct {
 // money are exact decimal strings: they are summed in PostgreSQL as `numeric`
 // and never pass through a float.
 type Totals struct {
-	RequestCount      int64   `json:"request_count"`
-	InputTokens       string  `json:"input_tokens"`
-	OutputTokens      string  `json:"output_tokens"`
-	CachedInputTokens string  `json:"cached_input_tokens"`
-	MediaUnits        string  `json:"media_units"`
-	EstimatedCost     *string `json:"estimated_cost"`
-	Currency          *string `json:"currency"`
-	UnpricedCount     int64   `json:"unpriced_count"`
-	IncompleteCount   int64   `json:"incomplete_count"`
+	RequestCount            int64   `json:"request_count"`
+	InputTokens             string  `json:"input_tokens"`
+	OutputTokens            string  `json:"output_tokens"`
+	CachedInputTokens       string  `json:"cached_input_tokens"`
+	CacheWriteInputTokens   string  `json:"cache_write_input_tokens"`
+	CacheWrite5MInputTokens string  `json:"cache_write_5m_input_tokens"`
+	CacheWrite1HInputTokens string  `json:"cache_write_1h_input_tokens"`
+	MediaUnits              string  `json:"media_units"`
+	EstimatedCost           *string `json:"estimated_cost"`
+	Currency                *string `json:"currency"`
+	UnpricedCount           int64   `json:"unpriced_count"`
+	IncompleteCount         int64   `json:"incomplete_count"`
 }
 
 // Summary is the totals for a range plus everything known about how much of the
@@ -106,11 +113,12 @@ type Series struct {
 
 // Breakdown dimensions accepted by the reports API.
 const (
-	DimensionRoute     = "route"
-	DimensionProvider  = "provider"
-	DimensionModel     = "model"
-	DimensionAPIKey    = "api_key"
-	DimensionOperation = "operation"
+	DimensionRoute       = "route"
+	DimensionProvider    = "provider"
+	DimensionModel       = "model"
+	DimensionAPIKey      = "api_key"
+	DimensionOperation   = "operation"
+	DimensionAttribution = "attribution"
 )
 
 // Time series bucket sizes accepted by the reports API.
@@ -181,12 +189,25 @@ func (f Filters) Validate() error {
 	if f.Operation != nil && !validOperation(*f.Operation) {
 		return access.Fail(400, "invalid_operation", "The operation filter is invalid.")
 	}
+	if f.AttributionValue != nil && f.AttributionKey == nil {
+		return access.Fail(400, "invalid_filter",
+			"The attribution_value filter requires attribution_key.")
+	}
+	if f.AttributionKey != nil && !AttributionKeyPattern.MatchString(*f.AttributionKey) {
+		return access.Fail(400, "invalid_filter", "The attribution_key filter is invalid.")
+	}
+	if f.AttributionValue != nil && !AttributionValuePattern.MatchString(*f.AttributionValue) {
+		return access.Fail(400, "invalid_filter", "The attribution_value filter is invalid.")
+	}
 	return nil
 }
 
 // dimensions appends the dimension filters, which are spelled identically in
 // the fact table, the hourly rollup and the boundary probe.
 func (f Filters) dimensions(q *filterQuery) {
+	if !f.AllProjects {
+		q.push(" AND api_key_id IN (SELECT id FROM olp_go.api_keys WHERE project_id = ANY(" + q.bind(f.AllowedProjects) + "::uuid[]))")
+	}
 	if f.Route != nil {
 		q.pushBind(" AND route_slug = ", *f.Route)
 	}
@@ -202,6 +223,12 @@ func (f Filters) dimensions(q *filterQuery) {
 	if f.Operation != nil {
 		q.pushBind(" AND operation = ", *f.Operation)
 	}
+	if f.AttributionKey != nil {
+		q.pushBind(" AND attribution ? ", *f.AttributionKey)
+	}
+	if f.AttributionValue != nil {
+		q.push(" AND attribution->>" + q.bind(*f.AttributionKey) + " = " + q.bind(*f.AttributionValue))
+	}
 }
 
 // usageRows opens the statement with the CTE both sources feed. Live facts are
@@ -209,10 +236,13 @@ func (f Filters) dimensions(q *filterQuery) {
 // whole bucket lies inside it, so no aggregate is ever cut in half.
 func (f Filters) usageRows(q *filterQuery, scope countScope) {
 	q.push("WITH usage_rows AS (SELECT observed_at, route_slug, provider_id, upstream_model," +
-		" api_key_id, operation, surface, CASE WHEN " + scope.count + " THEN 1 ELSE 0 END::bigint AS request_count," +
+		" api_key_id, operation, surface, attribution, CASE WHEN " + scope.count + " THEN 1 ELSE 0 END::bigint AS request_count," +
 		" COALESCE(input_tokens, 0)::numeric AS input_tokens," +
 		" COALESCE(output_tokens, 0)::numeric AS output_tokens," +
 		" COALESCE(cached_input_tokens, 0)::numeric AS cached_input_tokens," +
+		" COALESCE(cache_write_input_tokens, 0)::numeric AS cache_write_input_tokens," +
+		" COALESCE(cache_write_5m_input_tokens, 0)::numeric AS cache_write_5m_input_tokens," +
+		" COALESCE(cache_write_1h_input_tokens, 0)::numeric AS cache_write_1h_input_tokens," +
 		" COALESCE(media_units, 0)::numeric AS media_units, estimated_cost," +
 		" CASE WHEN " + scope.unpriced + " THEN 1 ELSE 0 END::bigint AS unpriced_count," +
 		" CASE WHEN " + scope.incomplete + " THEN 1 ELSE 0 END::bigint AS incomplete_count," +
@@ -221,8 +251,9 @@ func (f Filters) usageRows(q *filterQuery, scope countScope) {
 	q.pushBind(" AND observed_at < ", f.End)
 	f.dimensions(q)
 	q.push(" UNION ALL SELECT bucket AS observed_at, route_slug, provider_id, upstream_model," +
-		" api_key_id, operation, surface, " + scope.hourlyCount + ", input_tokens, output_tokens," +
-		" cached_input_tokens, media_units, estimated_cost, " + scope.hourlyUnpriced + ", " +
+		" api_key_id, operation, surface, attribution, " + scope.hourlyCount + ", input_tokens, output_tokens," +
+		" cached_input_tokens, cache_write_input_tokens, cache_write_5m_input_tokens," +
+		" cache_write_1h_input_tokens, media_units, estimated_cost, " + scope.hourlyUnpriced + ", " +
 		scope.hourlyIncomplete + ", currency::text AS currency FROM olp_go.attempt_usage_hourly WHERE true")
 	q.pushBind(" AND bucket >= ", ceilHour(f.Start))
 	q.pushBind(" AND bucket + interval '1 hour' <= ", f.End)
@@ -237,6 +268,9 @@ const totalsColumns = "COALESCE(SUM(request_count), 0)::bigint," +
 	" COALESCE(SUM(input_tokens), 0)::text," +
 	" COALESCE(SUM(output_tokens), 0)::text," +
 	" COALESCE(SUM(cached_input_tokens), 0)::text," +
+	" COALESCE(SUM(cache_write_input_tokens), 0)::text," +
+	" COALESCE(SUM(cache_write_5m_input_tokens), 0)::text," +
+	" COALESCE(SUM(cache_write_1h_input_tokens), 0)::text," +
 	" COALESCE(SUM(media_units), 0)::text," +
 	" SUM(estimated_cost)::text," +
 	" COALESCE(SUM(unpriced_count), 0)::bigint," +
@@ -247,6 +281,7 @@ const totalsColumns = "COALESCE(SUM(request_count), 0)::bigint," +
 // scanTargets lists the destinations for totalsColumns in its column order.
 func (t *Totals) scanTargets() []any {
 	return []any{&t.RequestCount, &t.InputTokens, &t.OutputTokens, &t.CachedInputTokens,
+		&t.CacheWriteInputTokens, &t.CacheWrite5MInputTokens, &t.CacheWrite1HInputTokens,
 		&t.MediaUnits, &t.EstimatedCost, &t.UnpricedCount, &t.IncompleteCount, &t.Currency}
 }
 
@@ -341,9 +376,15 @@ func ReadBreakdown(ctx context.Context, q access.Queryer, f Filters, dimension s
 		expression = "COALESCE(api_key_id::text, 'unknown')"
 	case DimensionOperation:
 		expression = "operation"
+	case DimensionAttribution:
+		if f.AttributionKey == nil {
+			return Breakdown{}, access.Fail(400, "invalid_filter",
+				"The attribution breakdown requires the attribution_key filter.")
+		}
+		expression = "attribution->>$attribution_key$"
 	default:
 		return Breakdown{}, access.Fail(400, "invalid_dimension",
-			"Dimension must be route, provider, model, api_key, or operation.")
+			"Dimension must be route, provider, model, api_key, operation, or attribution.")
 	}
 	if limit < 1 {
 		limit = 1
@@ -353,6 +394,9 @@ func ReadBreakdown(ctx context.Context, q access.Queryer, f Filters, dimension s
 	}
 	var query filterQuery
 	f.usageRows(&query, scope)
+	if dimension == DimensionAttribution {
+		expression = "attribution->>" + query.bind(*f.AttributionKey)
+	}
 	query.push(" SELECT " + expression + " AS dimension, " + totalsColumns + " FROM usage_rows" +
 		" GROUP BY dimension ORDER BY 2 DESC, dimension LIMIT ")
 	query.push(query.bind(int64(limit)))

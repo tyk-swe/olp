@@ -106,7 +106,7 @@ func TestRequestFiltersSurviveUsageFactRetention(t *testing.T) {
 	// Usage retention may remove facts before request/attempt history expires.
 	acctExec(t, f.Pool, "DELETE FROM olp_go.attempt_usage_facts WHERE request_id=$1", event.RequestID)
 	rows, _, err := usage.ListRequests(t.Context(), f.Pool,
-		usage.RequestFilters{ProviderID: &f.Provider, Model: &model}, nil, 10)
+		usage.RequestFilters{ProviderID: &f.Provider, Model: &model, AllProjects: true}, nil, 10)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -141,7 +141,7 @@ func TestExpiredEventGapCoversItsHistoricalWindow(t *testing.T) {
 	event := acctEvent(t, f, acctEventOptions{ObservedAt: at})
 	acctPersist(t, f, event)
 	summary, err := usage.ReadSummary(t.Context(), f.Pool,
-		usage.Filters{Start: at.Add(-time.Minute), End: at.Add(time.Minute)}, time.Now().UTC())
+		usage.Filters{Start: at.Add(-time.Minute), End: at.Add(time.Minute), AllProjects: true}, time.Now().UTC())
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -14,11 +14,14 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/connectors"
+	"github.com/tyk-swe/olp/internal/contentpolicy"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/media"
 	"github.com/tyk-swe/olp/internal/protocols"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
+	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/runtime"
 )
 
@@ -37,6 +40,7 @@ const (
 	// gateway cannot prove; it never fails over.
 	classAmbiguous         = "ambiguous"
 	classLimitsUnavailable = "limits_unavailable"
+	classContextWindow     = "context_window"
 )
 
 // Canonical defaults retained by existing accounting fixtures.
@@ -52,7 +56,7 @@ func failoverAllowed(class string, committed bool) bool {
 		return false
 	}
 	switch class {
-	case classConnect, classTimeout, classRateLimit, classUpstreamServer, classCredential:
+	case classConnect, classTimeout, classRateLimit, classUpstreamServer, classCredential, classContextWindow:
 		return true
 	}
 	return false
@@ -65,23 +69,34 @@ const (
 
 // execution is one inference request flowing through the attempt loop.
 type execution struct {
-	request     request
-	family      openai.Family
-	parsed      *openai.Request
-	media       *media.Request
-	actor       string
-	keyID       string
-	userID      string
-	affinity    []byte
-	route       *runtime.Route
-	mode        string
-	attempts    []runtime.Attempt
-	budget      int
-	preferences *runtime.Preferences
-	decisions   []runtime.Decision
-	policy      runtime.EffectivePolicy
-	emit        openai.Emit // streaming only
-	estimate    int64       // per-attempt token estimate used for admission and settlement
+	request       request
+	family        openai.Family
+	parsed        *openai.Request
+	media         *media.Request
+	actor         string
+	keyID         string
+	budgetGroupID *string
+	attribution   map[string]string
+	userID        string
+	affinity      []byte
+	authority     access.Authority
+	route         *runtime.Route
+	mode          string
+	attempts      []runtime.Attempt
+	budget        int
+	preferences   *runtime.Preferences
+	decisions     []runtime.Decision
+	policy        runtime.EffectivePolicy
+
+	policyDecisions []contentpolicy.Decision
+	emit            openai.Emit
+	estimate        int64
+
+	pin           *resources.Resource
+	pinnedSlot    *runtime.Slot
+	pinnedSecret  []byte
+	providerState bool
+	responseMap   map[string]string
 
 	once       sync.Once
 	facts      []AttemptFact
@@ -170,7 +185,7 @@ func (f *attemptFailure) billingUncertain() bool {
 		return true
 	}
 	switch f.class {
-	case classRateLimit, classUpstreamClient, classCredential:
+	case classRateLimit, classUpstreamClient, classCredential, classContextWindow:
 		return false
 	}
 	return f.dispatched
@@ -208,7 +223,7 @@ func (f *attemptFailure) toError() *Error {
 		return serverError(http.StatusBadGateway, code, "The upstream provider rejected the configured credential.")
 	case classProtocol:
 		return serverError(http.StatusBadGateway, "provider_protocol_error", "The upstream provider returned a malformed response.")
-	case classUpstreamClient:
+	case classUpstreamClient, classContextWindow:
 		message := "The upstream provider rejected the request."
 		if f.upstream != nil && f.upstream.Message != "" {
 			message = f.upstream.Message
@@ -323,6 +338,13 @@ func (s *Server) execute(ctx context.Context, x *execution) *outcome {
 // priority then by deterministic weighted rendezvous on the request's
 // affinity so sibling keys spread across a pool.
 func (s *Server) slots(x *execution, attempt runtime.Attempt, provider *runtime.Provider) []runtime.Slot {
+	if x.pinnedSlot != nil {
+
+		if !s.slotAvailable(x, attempt, x.pinnedSlot) {
+			return nil
+		}
+		return []runtime.Slot{*x.pinnedSlot}
+	}
 	ordered := runtime.SelectSlots(*provider, attempt.UpstreamModel, *x.route, x.keyID, x.family.Operation(), x.family.Surface(), x.mode, x.affinity)
 	out := make([]runtime.Slot, 0, len(ordered))
 	for _, slot := range ordered {
@@ -346,8 +368,10 @@ func (s *Server) slotAvailable(x *execution, attempt runtime.Attempt, slot *runt
 	if slot.CredentialID == nil || s.Runtime.Revoked(*slot.CredentialID) {
 		return false
 	}
-	_, ok := x.request.release.Credential(*slot.CredentialID)
-	return ok
+	if _, ok := x.request.release.Credential(*slot.CredentialID); ok {
+		return true
+	}
+	return x.pinnedSlot != nil && slot.ID == x.pinnedSlot.ID && x.pinnedSecret != nil
 }
 
 // attemptState tracks why an attempt context ended.
@@ -511,6 +535,9 @@ func (s *Server) attempt(ctx context.Context, x *execution, a runtime.Attempt, p
 	var secret []byte
 	if slot.CredentialID != nil {
 		secret, _ = x.request.release.Credential(*slot.CredentialID)
+		if secret == nil && x.pinnedSlot != nil && slot.ID == x.pinnedSlot.ID {
+			secret = x.pinnedSecret
+		}
 	}
 	credentialValues, err := s.auth.Apply(actx, req, cfg, secret, body)
 	if err != nil {
@@ -543,6 +570,8 @@ func (s *Server) attempt(ctx context.Context, x *execution, a runtime.Attempt, p
 			return fail(classRateLimit, f)
 		case resp.StatusCode >= 500:
 			return fail(classUpstreamServer, f)
+		case contextWindowError(f.upstream):
+			return fail(classContextWindow, f)
 		}
 		return fail(classUpstreamClient, f)
 	}
@@ -563,6 +592,13 @@ func (s *Server) attempt(ctx context.Context, x *execution, a runtime.Attempt, p
 			}
 		}()
 		emit := func(frame []byte) error {
+			if x.providerState {
+				mapped, mapErr := s.mapStreamResponseFrame(ctx, x, &fact, frame)
+				if mapErr != nil {
+					return mapErr
+				}
+				frame = mapped
+			}
 			if !committed {
 				committed = true
 				firstByte.Stop()
@@ -587,12 +623,12 @@ func (s *Server) attempt(ctx context.Context, x *execution, a runtime.Attempt, p
 		if readErr != nil {
 			err = readErr
 		} else {
-			completion, err = protocols.Decode(wire, x.family, raw, x.route.Slug, protocols.EmbeddingEncoding(x.parsed, provider.ParameterDefaults))
+			completion, err = protocols.DecodeRequest(wire, x.family, raw, x.route.Slug, protocols.EmbeddingEncoding(x.parsed, provider.ParameterDefaults), x.parsed)
 		}
 	}
 	if completion != nil {
 		fact.Usage = completion.Usage
-		if !x.parsed.Stream && (wire != x.family || x.family == openai.FamilyEmbeddings) && int64(len(completion.Body)) > s.cfg.MaxResponseBytes {
+		if !x.parsed.Stream && (wire != x.family || x.family == openai.FamilyEmbeddings || x.family == openai.FamilyRerank) && int64(len(completion.Body)) > s.cfg.MaxResponseBytes {
 			err = errResponseTooLarge
 		}
 	}
@@ -683,23 +719,26 @@ func (s *Server) finish(x *execution, out *outcome, status int) {
 	x.once.Do(func() {
 		completedAt := s.now()
 		env := Envelope{
-			RequestID:    x.request.id,
-			AccountingID: x.request.accountingID(),
-			ClientIP:     x.request.clientIP,
-			Actor:        x.actor,
-			KeyID:        x.keyID,
-			UserID:       x.userID,
-			Family:       string(x.family),
-			Mode:         x.mode,
-			Operation:    x.family.Operation(),
-			Surface:      x.family.Surface(),
-			Outcome:      "failure",
-			Status:       status,
-			StartedAt:    x.request.startedAt,
-			CompletedAt:  completedAt,
-			Duration:     completedAt.Sub(x.request.startedAt),
-			FirstByte:    x.firstByte,
-			Attempts:     x.facts,
+			RequestID:       x.request.id,
+			AccountingID:    x.request.accountingID(),
+			ClientIP:        x.request.clientIP,
+			Actor:           x.actor,
+			KeyID:           x.keyID,
+			BudgetGroupID:   x.budgetGroupID,
+			Attribution:     x.attribution,
+			PolicyDecisions: x.policyDecisions,
+			UserID:          x.userID,
+			Family:          string(x.family),
+			Mode:            x.mode,
+			Operation:       x.family.Operation(),
+			Surface:         x.family.Surface(),
+			Outcome:         "failure",
+			Status:          status,
+			StartedAt:       x.request.startedAt,
+			CompletedAt:     completedAt,
+			Duration:        completedAt.Sub(x.request.startedAt),
+			FirstByte:       x.firstByte,
+			Attempts:        x.facts,
 		}
 		if x.request.release != nil {
 			env.ReleaseSequence = x.request.release.Sequence

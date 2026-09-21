@@ -22,6 +22,8 @@ func SimulationRequest(data []byte, operation, surface, mode, route string) (*op
 		family = openai.FamilyEmbeddings
 	case "moderation":
 		family = openai.FamilyModeration
+	case "rerank":
+		family = openai.FamilyRerank
 	}
 	if !canonical {
 		if surface == "anthropic" {

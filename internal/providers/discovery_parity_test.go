@@ -41,7 +41,7 @@ func TestNativeDiscoveryFollowsBoundedPagesAndPreservesFacts(t *testing.T) {
 			defer server.Close()
 			policy := &egress.Policy{AllowedNetworks: []netip.Prefix{netip.MustParsePrefix("127.0.0.0/8")}, PlainHTTPHosts: []string{"127.0.0.1"}}
 			cfg := Configuration{Kind: kind, AuthMode: AuthAPIKey, Endpoint: new(server.URL)}
-			cfg.normalize()
+			cfg.Normalize()
 			models, e := New(nil, policy).listModelFacts(context.Background(), &cfg, []byte("secret"))
 			if e != nil || len(models) != 2 || calls != 2 {
 				t.Fatalf("discovery: %+v %v calls=%d", models, e, calls)

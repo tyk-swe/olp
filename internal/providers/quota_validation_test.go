@@ -25,8 +25,8 @@ func TestQuotaValidationMatchesEnforcement(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			cfg := Configuration{Kind: KindOpenAICompatible, AuthMode: AuthNone,
 				Endpoint: new("https://example.com/v1"), Options: Options{Limits: &tc.quota}}
-			cfg.normalize()
-			if err := cfg.validate(&egress.Policy{}); (err == nil) != tc.valid {
+			cfg.Normalize()
+			if err := cfg.Validate(&egress.Policy{}); (err == nil) != tc.valid {
 				t.Fatalf("connection quota: %v", err)
 			}
 			slot := slotInput{Name: "slot", RequestsPerMinute: tc.quota.RequestsPerMinute,

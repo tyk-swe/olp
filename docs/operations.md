@@ -95,6 +95,12 @@ replica last performed a task. With Valkey configured, `worker` and `all` run:
   from durable facts using a detached leadership session held between passes.
   Followers record skips; failure, cancellation, or the 120-second pass deadline
   closes the leader session. See [spend recovery](spend-budget-recovery.md).
+- **Budget alert delivery:** every 60 seconds under a transaction advisory
+  lock, evaluates enabled budget alert rules against the exact accrued window
+  totals and posts each crossed threshold once per rule and window to its
+  notification destination. Failed deliveries retry on later passes up to five
+  attempts with `2^(attempts-1)`-minute backoff. See
+  [budget notifications](#budget-threshold-notifications).
 
 The first three tasks become stale after 20 seconds without a successful
 checkpoint; maintenance and cost reconciliation after 180 seconds. A skipped
@@ -176,6 +182,34 @@ fail-closed during a Valkey outage even when
 `limits.valkey_unavailable=fail_open`; do not remove a budget to bypass that
 safety boundary.
 
+### Budget threshold notifications
+
+`GET/POST /api/v3/notifications/destinations` and
+`GET/PATCH /api/v3/notifications/destinations/{id}` manage webhook endpoints;
+`GET/POST /api/v3/notifications/rules` and
+`GET/PATCH /api/v3/notifications/rules/{id}` manage alert rules, and
+`GET /api/v3/notifications/deliveries` lists delivery metadata only.
+Installation-wide destinations and rules require settings permission;
+project-scoped ones require project-manager access, and a rule's subject
+(an API key or budget group) and destination must belong to the same project.
+
+A destination may carry a signing secret: it is write-only, stored encrypted
+in the keyring, and never returned by any read. When configured, deliveries
+sign the exact request body with HMAC-SHA256 in `X-OLP-Signature:
+sha256=<hex>`. The webhook payload is metadata only — the `budget.threshold`
+event, rule, subject, window, threshold, accrued, limit, and currency — and
+never contains prompts, outputs, or attribution labels. Destination URLs pass
+the egress policy at creation and again on every delivery dial; a five-second
+timeout applies and responses are drained bounded. Delivery failures persist
+only a safe category (`timeout`, `network`, `http_4xx`, `http_5xx`,
+`invalid_destination`), never response bodies or raw error text.
+
+The delivery worker runs only where Valkey-backed shared state exists.
+`GET /api/v3/auth/capabilities` reports `notifications_active`; when it is
+false, destinations and rules still save but nothing is delivered — monitor
+`olp_worker_task_healthy{task="budget_alert_delivery"}` and the
+`budget_alert_deliveries` status counters for live health.
+
 ## Accounting delivery and shutdown
 
 Every request an API key owns produces one content-free metadata event;
@@ -191,7 +225,27 @@ and detail under `/api/v3/requests`, pricing revisions under
 `/api/v3/pricing/revisions`, and gateway epochs and their acknowledgement under
 `/api/v3/request-metadata/gateway-epochs`. Reports mark a partial boundary
 bucket as approximate and report what they excluded, and carry gap evidence and
-consumer health so incompleteness stays visible after aggregation.
+consumer health so incompleteness stays visible after aggregation. Usage
+endpoints accept `attribution_key` with an optional `attribution_value` to
+restrict rows to labelled usage, and `dimension=attribution` groups the
+breakdown by one key's values (the key filter is required and rows without it
+are omitted). Request list and detail expose each request's stored labels.
+Project-scoped readers see only their own projects' rows in every report.
+
+Pricing can also come from managed sources rather than hand-entered
+revisions. `GET/POST /api/v3/pricing/sources` and
+`GET/PATCH /api/v3/pricing/sources/{id}` register an external price document;
+`POST /api/v3/pricing/sources/{id}/refresh` fetches it through the egress
+policy (bounded size, JSON schema, redirect validation), stores an immutable
+SHA-256-keyed snapshot, and returns a diff against the latest published
+revision without publishing anything. `GET
+/api/v3/pricing/sources/{id}/snapshots` lists retained snapshots and `POST
+/api/v3/pricing/source-snapshots/{id}/publish` mints a new immutable pricing
+revision from one snapshot, optionally merged with scoped per-entry overrides.
+A source is advisory: negotiated rates need publish-time overrides, because
+the published revision — not the raw source document — is what accounting
+prices against. Revisions record their source name and snapshot for
+provenance, and all entries share the installation's single pricing currency.
 
 Shutdown stops the listeners and drains their handlers first, then closes
 metadata intake and gives the writer a bounded opportunity to flush the buffer.

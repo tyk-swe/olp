@@ -3,6 +3,7 @@
 package routes
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -14,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/contentpolicy"
 	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/internal/usage"
 )
@@ -36,9 +38,10 @@ const (
 )
 
 var supportedOperations = []string{
-	"generation", "token_count", "embeddings", "moderation",
+	"generation", "token_count", "embeddings", "moderation", "rerank",
 	"image_generation", "image_edit", "image_variation", "speech", "transcription",
 	"video_create", "video_list", "video_get", "video_content", "video_delete",
+	"batch", "realtime", "bedrock_invoke",
 }
 
 type draft struct {
@@ -49,20 +52,24 @@ type draft struct {
 	OverallTimeoutMS int
 	MaxAttempts      int
 	Targets          []runtime.PublishedTarget
+	ContentPolicy    []byte
 	BasedOnRevision  *string
 	ETag             string
 	CreatedBy        string
 	CreatedAt        time.Time
 	UpdatedAt        time.Time
 	CreatedByEmail   *string
+	ProjectID        *string
+	ProjectName      *string
 }
 
-const draftColumns = "d.id::text,d.slug,d.state,d.operations,d.overall_timeout_ms,d.max_attempts,d.targets,d.based_on_revision_id::text,d.etag::text,d.created_by::text,d.created_at,d.updated_at,u.email"
+const draftColumns = "d.id::text,d.slug,d.state,d.operations,d.overall_timeout_ms,d.max_attempts,d.targets,d.content_policy,d.based_on_revision_id::text,d.etag::text,d.created_by::text,d.created_at,d.updated_at,u.email,d.project_id::text,pr.name"
+const draftFrom = " FROM olp_go.route_drafts d JOIN olp_go.users u ON u.id=d.created_by LEFT JOIN olp_go.projects pr ON pr.id=d.project_id"
 
 func scanDraft(row pgx.Row) (*draft, error) {
 	var d draft
 	var operations, targets []byte
-	if err := row.Scan(&d.ID, &d.Slug, &d.State, &operations, &d.OverallTimeoutMS, &d.MaxAttempts, &targets, &d.BasedOnRevision, &d.ETag, &d.CreatedBy, &d.CreatedAt, &d.UpdatedAt, &d.CreatedByEmail); err != nil {
+	if err := row.Scan(&d.ID, &d.Slug, &d.State, &operations, &d.OverallTimeoutMS, &d.MaxAttempts, &targets, &d.ContentPolicy, &d.BasedOnRevision, &d.ETag, &d.CreatedBy, &d.CreatedAt, &d.UpdatedAt, &d.CreatedByEmail, &d.ProjectID, &d.ProjectName); err != nil {
 		return nil, err
 	}
 	if err := json.Unmarshal(operations, &d.Operations); err != nil {
@@ -76,7 +83,7 @@ func scanDraft(row pgx.Row) (*draft, error) {
 }
 
 func loadDraft(ctx context.Context, q access.Queryer, id string, lock bool) (*draft, error) {
-	query := "SELECT " + draftColumns + " FROM olp_go.route_drafts d JOIN olp_go.users u ON u.id=d.created_by WHERE d.id=$1"
+	query := "SELECT " + draftColumns + draftFrom + " WHERE d.id=$1"
 	if lock {
 		query += " FOR UPDATE OF d"
 	}
@@ -172,11 +179,11 @@ func targetsJSON(targets []runtime.PublishedTarget, live map[string]*resolved) [
 }
 
 func (d *draft) summary() map[string]any {
-	return map[string]any{"id": d.ID, "slug": d.Slug, "state": d.State, "etag": d.ETag}
+	return map[string]any{"id": d.ID, "slug": d.Slug, "state": d.State, "etag": d.ETag, "project_id": d.ProjectID, "project_name": d.ProjectName}
 }
 
 func (d *draft) detail(live map[string]*resolved) map[string]any {
-	return map[string]any{"id": d.ID, "slug": d.Slug, "state": d.State, "overall_timeout_ms": d.OverallTimeoutMS, "max_attempts": d.MaxAttempts, "etag": d.ETag, "operations": d.Operations, "targets": targetsJSON(d.Targets, live), "created_at": d.CreatedAt, "updated_at": d.UpdatedAt, "based_on_revision_id": d.BasedOnRevision, "created_by_email": d.CreatedByEmail}
+	return map[string]any{"id": d.ID, "slug": d.Slug, "state": d.State, "overall_timeout_ms": d.OverallTimeoutMS, "max_attempts": d.MaxAttempts, "etag": d.ETag, "operations": d.Operations, "targets": targetsJSON(d.Targets, live), "content_policy": json.RawMessage(d.ContentPolicy), "created_at": d.CreatedAt, "updated_at": d.UpdatedAt, "based_on_revision_id": d.BasedOnRevision, "created_by_email": d.CreatedByEmail, "project_id": d.ProjectID, "project_name": d.ProjectName}
 }
 
 func (s *Server) draftDetail(ctx context.Context, q access.Queryer, d *draft) (access.Reply, error) {
@@ -187,7 +194,7 @@ func (s *Server) draftDetail(ctx context.Context, q access.Queryer, d *draft) (a
 	return access.Detail(d.detail(live), d.ETag), nil
 }
 
-type targetInput struct {
+type TargetInput struct {
 	ProviderID      *string `json:"provider_id"`
 	ProviderModel   *string `json:"provider_model"`
 	ProviderModelID *string `json:"provider_model_id"`
@@ -196,17 +203,24 @@ type targetInput struct {
 	TimeoutMS       int     `json:"timeout_ms"`
 }
 
-type draftInput struct {
-	Slug             string        `json:"slug"`
-	Operations       []string      `json:"operations"`
-	OverallTimeoutMS int           `json:"overall_timeout_ms"`
-	MaxAttempts      int           `json:"max_attempts"`
-	Targets          []targetInput `json:"targets"`
+type DraftInput struct {
+	Slug             string          `json:"slug"`
+	Operations       []string        `json:"operations"`
+	OverallTimeoutMS int             `json:"overall_timeout_ms"`
+	MaxAttempts      int             `json:"max_attempts"`
+	Targets          []TargetInput   `json:"targets"`
+	ContentPolicy    json.RawMessage `json:"content_policy"`
+	ProjectID        *string         `json:"project_id"`
 }
 
-// validateInput checks the envelope and resolves every target to a provider
-// model, keeping the caller's order as the stored position.
-func validateInput(ctx context.Context, q access.Queryer, in *draftInput, existing []runtime.PublishedTarget) ([]runtime.PublishedTarget, error) {
+func sameProject(a, b *string) bool {
+	if a == nil || b == nil {
+		return a == nil && b == nil
+	}
+	return *a == *b
+}
+
+func ValidateDraftInput(ctx context.Context, q access.Queryer, in *DraftInput, projectID *string, existing []runtime.PublishedTarget) ([]runtime.PublishedTarget, error) {
 	if !access.RouteSlug.MatchString(in.Slug) {
 		return nil, access.Invalid("slug", "Use 1–100 lowercase letters, digits, dots, underscores, or hyphens, starting with a letter or digit.")
 	}
@@ -225,6 +239,15 @@ func validateInput(ctx context.Context, q access.Queryer, in *draftInput, existi
 	}
 	if in.MaxAttempts < 1 || in.MaxAttempts > maxAttempts {
 		return nil, access.Invalid("max_attempts", "Use an attempt budget from 1 to 32767.")
+	}
+	if len(in.ContentPolicy) > 0 && !bytes.Equal(bytes.TrimSpace(in.ContentPolicy), []byte("null")) {
+		policy, err := contentpolicy.Decode(in.ContentPolicy)
+		if err != nil {
+			return nil, access.Invalid("content_policy", err.Error())
+		}
+		in.ContentPolicy, _ = json.Marshal(policy)
+	} else {
+		in.ContentPolicy = nil
 	}
 	if len(in.Targets) == 0 || len(in.Targets) > maxTargets {
 		return nil, access.Invalid("targets", "Use 1–64 targets.")
@@ -246,18 +269,19 @@ func validateInput(ctx context.Context, q access.Queryer, in *draftInput, existi
 			return nil, access.Invalid("targets.timeout_ms", "Use a target timeout from 1 millisecond up to the overall timeout.")
 		}
 		var modelID, providerID, providerName, providerModel string
+		var providerProject *string
 		var err error
 		switch {
 		case t.ProviderModelID != nil:
 			if modelID, err = access.ParseUUID(*t.ProviderModelID); err != nil {
 				return nil, access.Invalid("targets.provider_model_id", "Use a provider model identifier.")
 			}
-			err = q.QueryRow(ctx, "SELECT p.id::text,p.name,m.upstream_model FROM olp_go.provider_models m JOIN olp_go.providers p ON p.id=m.provider_id WHERE m.id=$1", modelID).Scan(&providerID, &providerName, &providerModel)
+			err = q.QueryRow(ctx, "SELECT p.id::text,p.name,m.upstream_model,p.project_id::text FROM olp_go.provider_models m JOIN olp_go.providers p ON p.id=m.provider_id WHERE m.id=$1", modelID).Scan(&providerID, &providerName, &providerModel, &providerProject)
 		case t.ProviderID != nil && t.ProviderModel != nil:
 			if providerID, err = access.ParseUUID(*t.ProviderID); err != nil {
 				return nil, access.Invalid("targets.provider_id", "Use a provider identifier.")
 			}
-			err = q.QueryRow(ctx, "SELECT m.id::text,p.name,m.upstream_model FROM olp_go.provider_models m JOIN olp_go.providers p ON p.id=m.provider_id WHERE p.id=$1 AND m.upstream_model=$2", providerID, *t.ProviderModel).Scan(&modelID, &providerName, &providerModel)
+			err = q.QueryRow(ctx, "SELECT m.id::text,p.name,m.upstream_model,p.project_id::text FROM olp_go.provider_models m JOIN olp_go.providers p ON p.id=m.provider_id WHERE p.id=$1 AND m.upstream_model=$2", providerID, *t.ProviderModel).Scan(&modelID, &providerName, &providerModel, &providerProject)
 		default:
 			return nil, access.Invalid("targets", "Name each target by provider_model_id or by provider_id and provider_model.")
 		}
@@ -266,6 +290,9 @@ func validateInput(ctx context.Context, q access.Queryer, in *draftInput, existi
 		}
 		if err != nil {
 			return nil, err
+		}
+		if !sameProject(providerProject, projectID) {
+			return nil, access.Fail(422, "target_project_mismatch", "Target "+strconv.Itoa(i)+" belongs to a different project than the draft.")
 		}
 		if seen[modelID] {
 			return nil, access.Invalid("targets", "Each provider model may appear once per route.")
@@ -281,14 +308,15 @@ func validateInput(ctx context.Context, q access.Queryer, in *draftInput, existi
 }
 
 func (s *Server) drafts(r *http.Request) (access.Reply, error) {
-	if _, err := s.Access.Principal(r, s.Access.Pool, "read"); err != nil {
+	p, err := s.Access.Principal(r, s.Access.Pool, "read")
+	if err != nil {
 		return access.Reply{}, err
 	}
 	page, err := access.Page(r)
 	if err != nil {
 		return access.Reply{}, err
 	}
-	rows, err := s.Access.Pool.Query(r.Context(), "SELECT "+draftColumns+" FROM olp_go.route_drafts d JOIN olp_go.users u ON u.id=d.created_by WHERE d.id<$1 ORDER BY d.id DESC LIMIT $2", page.Before, page.Limit+1)
+	rows, err := s.Access.Pool.Query(r.Context(), "SELECT "+draftColumns+draftFrom+" WHERE d.id<$1 AND ($2 OR d.project_id=ANY($3::uuid[])) ORDER BY d.id DESC LIMIT $4", page.Before, p.AllProjects, p.ProjectIDs(), page.Limit+1)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -319,7 +347,8 @@ func (s *Server) drafts(r *http.Request) (access.Reply, error) {
 }
 
 func (s *Server) draft(r *http.Request) (access.Reply, error) {
-	if _, err := s.Access.Principal(r, s.Access.Pool, "read"); err != nil {
+	p, err := s.Access.Principal(r, s.Access.Pool, "read")
+	if err != nil {
 		return access.Reply{}, err
 	}
 	id, err := access.IDParam(r, "draft_id")
@@ -330,12 +359,15 @@ func (s *Server) draft(r *http.Request) (access.Reply, error) {
 	if err != nil {
 		return access.Reply{}, err
 	}
+	if !p.CanProject(d.ProjectID, false) {
+		return access.Reply{}, pgx.ErrNoRows
+	}
 	return s.draftDetail(r.Context(), s.Access.Pool, d)
 }
 
 func (s *Server) createDraft(r *http.Request) (access.Reply, error) {
 	a := s.Access
-	var input draftInput
+	var input DraftInput
 	if err := access.Decode(r, &input); err != nil {
 		return access.Reply{}, err
 	}
@@ -355,20 +387,23 @@ func (s *Server) createDraft(r *http.Request) (access.Reply, error) {
 	if replayed != nil {
 		return access.Commit(r, tx, *replayed)
 	}
-	targets, err := validateInput(r.Context(), tx, &input, nil)
+	if err = a.RequireProject(r.Context(), tx, p, input.ProjectID, true); err != nil {
+		return access.Reply{}, err
+	}
+	targets, err := ValidateDraftInput(r.Context(), tx, &input, input.ProjectID, nil)
 	if err != nil {
 		return access.Reply{}, err
 	}
 	id, etag := access.NewID(), access.NewID()
 	operations, _ := json.Marshal(input.Operations)
 	encoded, _ := json.Marshal(targets)
-	if _, err = tx.Exec(r.Context(), "INSERT INTO olp_go.route_drafts(id,slug,state,operations,overall_timeout_ms,max_attempts,targets,etag,created_by) VALUES($1,$2,'draft',$3,$4,$5,$6,$7,$8)", id, input.Slug, operations, input.OverallTimeoutMS, input.MaxAttempts, encoded, etag, p.ID); err != nil {
+	if _, err = tx.Exec(r.Context(), "INSERT INTO olp_go.route_drafts(id,slug,state,operations,overall_timeout_ms,max_attempts,targets,content_policy,etag,created_by,project_id) VALUES($1,$2,'draft',$3,$4,$5,$6,$7,$8,$9,$10)", id, input.Slug, operations, input.OverallTimeoutMS, input.MaxAttempts, encoded, input.ContentPolicy, etag, p.UserID(), input.ProjectID); err != nil {
 		return access.Reply{}, err
 	}
 	if err = access.Audit(r.Context(), tx, r, p.ID, "route_draft.create", "route_draft", id, "success"); err != nil {
 		return access.Reply{}, err
 	}
-	result := access.Reply{Status: 201, Location: "/api/v3/route-drafts/" + id, ETag: etag, Body: map[string]any{"id": id, "slug": input.Slug, "state": "draft", "etag": etag}}
+	result := access.Reply{Status: 201, Location: "/api/v3/route-drafts/" + id, ETag: etag, Body: map[string]any{"id": id, "slug": input.Slug, "state": "draft", "etag": etag, "project_id": input.ProjectID}}
 	if err = a.CompleteReplay(r, tx, claim, result); err != nil {
 		return access.Reply{}, err
 	}
@@ -381,7 +416,7 @@ func (s *Server) replaceDraft(r *http.Request) (access.Reply, error) {
 	if err != nil {
 		return access.Reply{}, err
 	}
-	var input draftInput
+	var input DraftInput
 	if err = access.Decode(r, &input); err != nil {
 		return access.Reply{}, err
 	}
@@ -398,17 +433,23 @@ func (s *Server) replaceDraft(r *http.Request) (access.Reply, error) {
 	if err != nil {
 		return access.Reply{}, err
 	}
+	if err := access.ProjectAccess(p, current.ProjectID, true); err != nil {
+		return access.Reply{}, err
+	}
 	if err = access.Match(r, current.ETag); err != nil {
 		return access.Reply{}, err
 	}
-	targets, err := validateInput(r.Context(), tx, &input, current.Targets)
+	if input.ProjectID != nil && !sameProject(input.ProjectID, current.ProjectID) {
+		return access.Reply{}, access.Invalid("project_id", "The draft's project is set at creation and cannot change.")
+	}
+	targets, err := ValidateDraftInput(r.Context(), tx, &input, current.ProjectID, current.Targets)
 	if err != nil {
 		return access.Reply{}, err
 	}
 	etag := access.NewID()
 	operations, _ := json.Marshal(input.Operations)
 	encoded, _ := json.Marshal(targets)
-	if _, err = tx.Exec(r.Context(), "UPDATE olp_go.route_drafts SET slug=$2,state='draft',operations=$3,overall_timeout_ms=$4,max_attempts=$5,targets=$6,etag=$7,updated_at=now() WHERE id=$1", id, input.Slug, operations, input.OverallTimeoutMS, input.MaxAttempts, encoded, etag); err != nil {
+	if _, err = tx.Exec(r.Context(), "UPDATE olp_go.route_drafts SET slug=$2,state='draft',operations=$3,overall_timeout_ms=$4,max_attempts=$5,targets=$6,content_policy=$7,etag=$8,updated_at=now() WHERE id=$1", id, input.Slug, operations, input.OverallTimeoutMS, input.MaxAttempts, encoded, input.ContentPolicy, etag); err != nil {
 		return access.Reply{}, err
 	}
 	if err = access.Audit(r.Context(), tx, r, p.ID, "route_draft.update", "route_draft", id, "success"); err != nil {
@@ -442,6 +483,9 @@ func (s *Server) deleteDraft(r *http.Request) (access.Reply, error) {
 	}
 	current, err := loadDraft(r.Context(), tx, id, true)
 	if err != nil {
+		return access.Reply{}, err
+	}
+	if err := access.ProjectAccess(p, current.ProjectID, true); err != nil {
 		return access.Reply{}, err
 	}
 	if err = access.Match(r, current.ETag); err != nil {

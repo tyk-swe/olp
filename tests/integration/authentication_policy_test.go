@@ -9,8 +9,8 @@ import (
 	"net/netip"
 	"testing"
 
-	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/gateway"
+	"github.com/tyk-swe/olp/internal/secrets"
 )
 
 func TestEffectiveLocalPolicyPreservesTheOnlyOwner(t *testing.T) {
@@ -170,29 +170,62 @@ func TestManagementAdmissionUsesTrustedHopsAndBoundedAccountWindows(t *testing.T
 }
 
 func TestAuthenticationOwnershipUpgradeAndSessionHints(t *testing.T) {
-	h := newAccessHarness(t)
-	owner := h.owner()
-	member := h.invite(owner, "legacy@example.com", "viewer")
+	pool, dbURL := accessDatabase(t)
+	applyMigrationPrefix(t, pool, "0010_authentication_ownership.sql")
 	// Recreate the previous schema and apply the real forward migration to legacy
 	// rows: setup/invitation provenance survives; an ambiguous mixed row fails closed.
-	if _, err := h.Pool.Exec(t.Context(), `INSERT INTO olp_go.users(id,email,display_name,password_hash,role,etag) VALUES('01980000-0000-7000-8000-000000000099','ambiguous@example.com','Ambiguous','legacy-hash','viewer','01980000-0000-7000-8000-000000000098');
- INSERT INTO olp_go.oidc_identities(id,user_id,issuer,subject) SELECT gen_random_uuid(),id,'https://issuer.test',email FROM olp_go.users;
- ALTER TABLE olp_go.users DROP COLUMN role_management, DROP COLUMN oidc_authorized;
- ALTER TABLE olp_go.sessions DROP COLUMN browser_hint;
- DELETE FROM olp_go.migrations WHERE version='0010_authentication_ownership.sql'`); err != nil {
+	seedUser := func(email, passwordHash string) string {
+		t.Helper()
+		var id string
+		if err := pool.QueryRow(t.Context(), `INSERT INTO olp_go.users(id,email,display_name,password_hash,role,etag)
+            VALUES(gen_random_uuid(),$1,$1,$2,'viewer',gen_random_uuid()) RETURNING id::text`, email, passwordHash).Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	linkOIDC := func(userID string) {
+		t.Helper()
+		if _, err := pool.Exec(t.Context(), `INSERT INTO olp_go.oidc_identities(id,user_id,issuer,subject)
+            SELECT gen_random_uuid(),$1::uuid,'https://issuer.test',email FROM olp_go.users WHERE id=$1::uuid`, userID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ambiguous := seedUser("ambiguous@example.com", "legacy-hash")
+	linkOIDC(ambiguous)
+	retained := seedUser("retained@example.com", "legacy-hash")
+	linkOIDC(retained)
+	if _, err := pool.Exec(t.Context(), `INSERT INTO olp_go.audit(id,actor_user_id,action,resource_type,outcome)
+        VALUES(gen_random_uuid(),$1::uuid,'invitation.accept','user','success')`, retained); err != nil {
 		t.Fatal(err)
 	}
-	if err := database.Migrate(t.Context(), h.Pool); err != nil {
+	upgraded := seedUser("upgraded@example.com", secrets.HashPassword(accessPassword))
+	if _, err := pool.Exec(t.Context(), `INSERT INTO olp_go.sessions(id,user_id,digest,expires_at)
+        VALUES(gen_random_uuid(),$1::uuid,'\x02'::bytea,now()+interval '1 day')`, upgraded); err != nil {
 		t.Fatal(err)
 	}
-	for email, want := range map[string]string{"owner@example.com": "local", "legacy@example.com": "local", "ambiguous@example.com": "oidc"} {
+	h := newAccessHarnessOn(t, pool, dbURL)
+	owner := h.owner()
+	h.invite(owner, "legacy@example.com", "viewer")
+	for email, want := range map[string]string{"owner@example.com": "local", "legacy@example.com": "local", "retained@example.com": "local", "upgraded@example.com": "local", "ambiguous@example.com": "oidc"} {
 		var got string
 		if err := h.Pool.QueryRow(t.Context(), "SELECT role_management FROM olp_go.users WHERE email=$1", email).Scan(&got); err != nil || got != want {
 			t.Fatalf("%s management=%s want=%s err=%v", email, got, want, err)
 		}
 	}
-	sessions := h.want(member, "GET", "/api/v3/sessions", nil, nil, 200)["items"].([]any)
-	if sessions[0].(map[string]any)["browser_hint"] != "Unknown browser" {
+	upgradedBrowser := &browser{}
+	h.want(upgradedBrowser, "POST", "/api/v3/sessions", map[string]any{"email": "upgraded@example.com", "password": accessPassword}, nil, 201)
+	sessions := h.want(upgradedBrowser, "GET", "/api/v3/sessions", nil, nil, 200)["items"].([]any)
+	legacySeen := false
+	for _, item := range sessions {
+		row := item.(map[string]any)
+		if row["current"] != true {
+			legacySeen = true
+			if row["browser_hint"] != "Unknown browser" {
+				t.Fatalf("pre-upgrade session hint: %v", row)
+			}
+		}
+	}
+	if !legacySeen {
 		t.Fatal("legacy metadata not represented")
 	}
 	b := &browser{}

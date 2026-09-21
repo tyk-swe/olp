@@ -93,6 +93,8 @@ const priceAttemptSQL = `SELECT selected.pricing_revision_id::text,
     LEFT JOIN LATERAL (
         SELECT revision.id AS pricing_revision_id, price.input_per_million,
                price.cached_input_per_million, price.output_per_million, price.unit_price,
+               price.cache_write_input_per_million, price.cache_write_5m_input_per_million,
+               price.cache_write_1h_input_per_million,
                btrim(price.currency::text) AS currency
         FROM olp_go.pricing_revisions revision
         JOIN olp_go.prices price ON price.pricing_revision_id = revision.id
@@ -122,12 +124,13 @@ const priceAttemptSQL = `SELECT selected.pricing_revision_id::text,
                         OR ($5::bigint IS NOT NULL AND selected.input_per_million IS NOT NULL))
                    AND ($6::bigint IS NULL OR selected.output_per_million IS NOT NULL)
                    AND ($7::numeric IS NULL OR selected.unit_price IS NOT NULL) AS complete,
-               CASE WHEN selected.cached_input_per_million IS NULL
-                    THEN $5::numeric * selected.input_per_million
-                    ELSE ($5::numeric - LEAST(COALESCE($9::bigint, 0)::numeric, $5::numeric))
-                             * selected.input_per_million
-                         + LEAST(COALESCE($9::bigint, 0)::numeric, $5::numeric)
-                             * selected.cached_input_per_million
+               CASE WHEN $5::bigint IS NULL THEN NULL ELSE
+                     ($5::numeric-COALESCE($9::bigint,0)-COALESCE($14::bigint,0))*selected.input_per_million
+                    +COALESCE($9::bigint,0)*COALESCE(selected.cached_input_per_million,selected.input_per_million)
+                    +(COALESCE($14::bigint,0)-COALESCE($15::bigint,0)-COALESCE($16::bigint,0))
+                       *COALESCE(selected.cache_write_input_per_million,selected.input_per_million)
+                    +COALESCE($15::bigint,0)*COALESCE(selected.cache_write_5m_input_per_million,selected.cache_write_input_per_million,selected.input_per_million)
+                    +COALESCE($16::bigint,0)*COALESCE(selected.cache_write_1h_input_per_million,selected.cache_write_input_per_million,selected.input_per_million)
                END AS input_charge) priced
     WHERE provider.id = $1::uuid`
 
@@ -145,6 +148,8 @@ func priceAttempt(ctx context.Context, tx pgx.Tx, event *Event, attempt Validate
 		attempt.Usage.InputTokens, attempt.Usage.OutputTokens, attempt.Usage.MediaUnits,
 		attempt.Usage.Complete, attempt.Usage.CachedInputTokens,
 		pin.pricingRevisionID, pin.providerRevisionID, pin.pinned, pin.vendorID,
+		attempt.Usage.CacheWriteInputTokens, attempt.Usage.CacheWrite5MInputTokens,
+		attempt.Usage.CacheWrite1HInputTokens,
 	).Scan(&pricing.pricingRevisionID, &pricing.currency, &pricing.complete, &pricing.estimatedCost)
 	if err != nil {
 		return attemptPricing{}, fmt.Errorf("price attempt: %w", err)

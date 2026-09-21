@@ -142,7 +142,7 @@ func retryHint(dimension limits.Dimension, retryAfter time.Duration) time.Durati
 func keyRequest(authority access.Authority, estimate int64, ttl time.Duration) limits.Request {
 	policy := authority.Policy
 	return limits.Request{
-		APIKeyID:          authority.ID,
+		CostOwnerID:       authority.ID,
 		LookupID:          authority.LookupID,
 		RequestsPerMinute: policy.RequestsPerMinute,
 		TokensPerMinute:   policy.TokensPerMinute,
@@ -154,10 +154,40 @@ func keyRequest(authority access.Authority, estimate int64, ttl time.Duration) l
 	}
 }
 
+func groupRequest(authority access.Authority, ttl time.Duration) *limits.Request {
+	if authority.BudgetGroupID == nil ||
+		(authority.BudgetGroupDailyCostLimit == nil && authority.BudgetGroupMonthlyCostLimit == nil) {
+		return nil
+	}
+	return &limits.Request{
+		CostOwnerID:      *authority.BudgetGroupID,
+		LookupID:         limits.BudgetGroupLookup(*authority.BudgetGroupID),
+		DailyCostLimit:   authority.BudgetGroupDailyCostLimit,
+		MonthlyCostLimit: authority.BudgetGroupMonthlyCostLimit,
+		RequestedTokens:  0,
+		LeaseTTL:         ttl,
+	}
+}
+
 // reserveKey admits one request against the API key budgets. A nil lease with
 // a nil error admits the request without one: either the key bounds nothing,
 // or the limiter is unreachable and the installation chose to fail open.
 func (a *Admission) reserveKey(ctx context.Context, authority access.Authority, estimate int64, ttl time.Duration) (*limits.Lease, *Error) {
+	if group := groupRequest(authority, ttl); group != nil {
+		if !a.ready() {
+			return nil, limitsUnavailable()
+		}
+		decision, cancel := context.WithTimeout(ctx, reserveTimeout)
+		_, err := a.limiter.Reserve(decision, *group)
+		cancel()
+		if err != nil {
+			if exceeded, ok := errors.AsType[*limits.ExceededError](err); ok {
+				a.recordRejection(exceeded.Dimension)
+				return nil, rateLimited(exceeded.Dimension, exceeded.RetryAfter)
+			}
+			return nil, a.outage(authority.ID, true, err)
+		}
+	}
 	request := keyRequest(authority, estimate, ttl)
 	if !request.HasHardLimits() {
 		// Nothing to enforce, so nothing to store: a key without hard limits
@@ -248,7 +278,7 @@ func (t *targetReservation) settle(ctx context.Context, dispatched bool, actual 
 // through one provider connection.
 func connectionRequest(provider *runtime.Provider, estimate int64, ttl time.Duration) limits.Request {
 	request := limits.Request{
-		APIKeyID:        provider.ID,
+		CostOwnerID:     provider.ID,
 		LookupID:        limits.ConnectionLookup(provider.ID),
 		RequestedTokens: estimate,
 		LeaseTTL:        ttl,
@@ -264,7 +294,7 @@ func connectionRequest(provider *runtime.Provider, estimate int64, ttl time.Dura
 // slotRequest describes the quota of one credential slot.
 func slotRequest(slot *runtime.Slot, estimate int64, ttl time.Duration) limits.Request {
 	return limits.Request{
-		APIKeyID:          slot.ID,
+		CostOwnerID:       slot.ID,
 		LookupID:          limits.SlotLookup(slot.ID),
 		RequestsPerMinute: slot.RequestsPerMinute,
 		TokensPerMinute:   slot.TokensPerMinute,
@@ -376,6 +406,11 @@ const (
 	maxEstimate = 1<<53 - 1
 )
 
+func requestDemand(parsed *openai.Request) *runtime.TokenDemand {
+	input, output, _ := estimateParts(parsed)
+	return &runtime.TokenDemand{EstimatedInputTokens: input, MaxOutputTokens: output}
+}
+
 // estimateTokens is the tokens a request may consume, charged before the
 // upstream reports what it actually used. The prompt is walked rather than
 // weighed: text is charged at four characters per token, each media part at a
@@ -385,6 +420,18 @@ const (
 // as soon as the attempt ends, and admitting work that cannot fit in the
 // window is worse than deferring work that would have.
 func estimateTokens(parsed *openai.Request, defaults ...map[string]json.RawMessage) int64 {
+	input, output, candidates := estimateParts(parsed, defaults...)
+	if parsed != nil && parsed.Family.Operation() != "generation" {
+		return max(input, 1)
+	}
+	bound := int64(defaultOutputTokens)
+	if output != nil {
+		bound = *output
+	}
+	return max(addBounded(input, multiplyBounded(max(bound, 1), max(candidates, 1))), 1)
+}
+
+func estimateParts(parsed *openai.Request, defaults ...map[string]json.RawMessage) (input int64, output *int64, candidates int64) {
 	// Match Encode's precedence, including explicit null opting out of a
 	// default and either chat token-bound alias overriding the other.
 	field := func(name string) json.RawMessage {
@@ -403,7 +450,7 @@ func estimateTokens(parsed *openai.Request, defaults ...map[string]json.RawMessa
 		}
 		return nil
 	}
-	input := int64(0)
+	candidates = 1
 	if parsed != nil {
 		switch parsed.Family {
 		case openai.FamilyChat:
@@ -425,25 +472,23 @@ func estimateTokens(parsed *openai.Request, defaults ...map[string]json.RawMessa
 			input = addBounded(input, estimateTools(field("tools")))
 		}
 		if parsed.Family.Operation() != "generation" {
-			return max(input, 1)
+			return max(input, 1), nil, 1
 		}
 	}
-	output := int64(defaultOutputTokens)
 	outputFields := []string{"max_completion_tokens", "max_tokens"}
 	if parsed != nil && parsed.Family == openai.FamilyResponses {
 		outputFields = []string{"max_output_tokens"}
 	}
 	for _, name := range outputFields {
 		if value, ok := integerValue(field(name)); ok {
-			output = value
+			output = &value
 			break
 		}
 	}
-	candidates := int64(1)
 	if parsed != nil && parsed.Family.Surface() == "gemini" {
 		config := jsonObject(field("generationConfig"))
 		if v, ok := integerValue(config["maxOutputTokens"]); ok {
-			output = v
+			output = &v
 		}
 		if v, ok := integerValue(config["candidateCount"]); ok {
 			candidates = v
@@ -455,7 +500,7 @@ func estimateTokens(parsed *openai.Request, defaults ...map[string]json.RawMessa
 			candidates = value
 		}
 	}
-	return max(addBounded(input, multiplyBounded(max(output, 1), max(candidates, 1))), 1)
+	return input, output, candidates
 }
 
 // estimateItems charges the conversation one request carries: the messages of

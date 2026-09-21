@@ -20,7 +20,8 @@ function sessionResponse(role: string, csrfToken = `csrf-${role}`) {
       id: '01980000-0000-7000-8000-000000000001',
       email: `${role}@example.com`,
       display_name: 'Session User',
-      role
+      role,
+      access_scope: 'global'
     },
     csrf_token: csrfToken
   };

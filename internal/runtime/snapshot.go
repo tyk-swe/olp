@@ -15,6 +15,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/tyk-swe/olp/internal/connectors"
+	"github.com/tyk-swe/olp/internal/contentpolicy"
 )
 
 // RouteSlug is the published-route identifier carried in model fields.
@@ -93,7 +94,8 @@ type Provider struct {
 	Models            map[string]json.RawMessage `json:"models,omitempty"`
 	// VendorID is the upstream vendor this connection speaks to. It groups
 	// connections that share one upstream account for accounting and limits.
-	VendorID string `json:"vendor_id,omitempty"`
+	VendorID  string  `json:"vendor_id,omitempty"`
+	ProjectID *string `json:"project_id,omitempty"`
 	// Limits is the quota shared by every slot of this connection.
 	Limits *Limits `json:"limits,omitempty"`
 	Slots  []Slot  `json:"slots,omitempty"`
@@ -123,6 +125,9 @@ type Route struct {
 	Revision       int       `json:"revision,omitempty"`
 	PublishedAt    time.Time `json:"published_at,omitempty"`
 	Policy         *Policy   `json:"policy,omitempty"`
+	ProjectID      *string   `json:"project_id,omitempty"`
+
+	ContentPolicy *contentpolicy.Policy `json:"content_policy,omitempty"`
 }
 
 // Snapshot is the complete immutable serving configuration.

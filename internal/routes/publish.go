@@ -1,6 +1,7 @@
 package routes
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -12,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/contentpolicy"
 	"github.com/tyk-swe/olp/internal/runtime"
 )
 
@@ -61,6 +63,9 @@ func (s *Server) validateDraft(r *http.Request) (access.Reply, error) {
 	if err != nil {
 		return access.Reply{}, err
 	}
+	if err := access.ProjectAccess(p, current.ProjectID, true); err != nil {
+		return access.Reply{}, err
+	}
 	if err = access.Match(r, current.ETag); err != nil {
 		return access.Reply{}, err
 	}
@@ -70,6 +75,15 @@ func (s *Server) validateDraft(r *http.Request) (access.Reply, error) {
 	}
 	if err = check(current, live); err != nil {
 		return access.Reply{}, err
+	}
+	if len(current.ContentPolicy) > 0 {
+		var policy contentpolicy.Policy
+		if err = json.Unmarshal(current.ContentPolicy, &policy); err != nil {
+			return access.Reply{}, err
+		}
+		if _, err = contentpolicy.Compile(&policy); err != nil {
+			return access.Reply{}, access.Invalid("content_policy", err.Error())
+		}
 	}
 	etag := access.NewID()
 	if _, err = tx.Exec(r.Context(), "UPDATE olp_go.route_drafts SET state='validated',etag=$2,updated_at=now() WHERE id=$1", id, etag); err != nil {
@@ -108,6 +122,9 @@ func (s *Server) activateDraft(r *http.Request) (access.Reply, error) {
 	if err != nil {
 		return access.Reply{}, err
 	}
+	if err := access.ProjectAccess(p, current.ProjectID, true); err != nil {
+		return access.Reply{}, err
+	}
 	if err = access.Match(r, current.ETag); err != nil {
 		return access.Reply{}, err
 	}
@@ -126,22 +143,25 @@ func (s *Server) activateDraft(r *http.Request) (access.Reply, error) {
 	}
 	var routeID string
 	var revision int
-	err = tx.QueryRow(r.Context(), "SELECT id::text,latest_revision FROM olp_go.routes WHERE slug=$1 FOR UPDATE", current.Slug).Scan(&routeID, &revision)
+	var routeProject *string
+	err = tx.QueryRow(r.Context(), "SELECT id::text,latest_revision,project_id::text FROM olp_go.routes WHERE slug=$1 FOR UPDATE", current.Slug).Scan(&routeID, &revision, &routeProject)
 	revisionID := access.NewID()
 	switch {
 	case errors.Is(err, pgx.ErrNoRows):
 		routeID, revision = access.NewID(), 1
-		if _, err = tx.Exec(r.Context(), "INSERT INTO olp_go.routes(id,slug,created_by,latest_revision,latest_revision_id) VALUES($1,$2,$3,1,$4)", routeID, current.Slug, p.ID, revisionID); err != nil {
+		if _, err = tx.Exec(r.Context(), "INSERT INTO olp_go.routes(id,slug,created_by,latest_revision,latest_revision_id,etag,project_id) VALUES($1,$2,$3,1,$4,$5,$6)", routeID, current.Slug, p.UserID(), revisionID, access.NewID(), current.ProjectID); err != nil {
 			return access.Reply{}, err
 		}
 	case err != nil:
 		return access.Reply{}, err
+	case !sameProject(routeProject, current.ProjectID):
+		return access.Reply{}, access.Fail(409, "route_project_mismatch", "An existing route with this slug belongs to a different project.")
 	default:
 		revision++
 	}
 	operations, _ := json.Marshal(current.Operations)
 	targets, _ := json.Marshal(current.Targets)
-	if _, err = tx.Exec(r.Context(), "INSERT INTO olp_go.route_revisions(id,route_id,revision,slug,operations,overall_timeout_ms,max_attempts,targets,source_draft_id,activated_by) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)", revisionID, routeID, revision, current.Slug, operations, current.OverallTimeoutMS, current.MaxAttempts, targets, current.ID, p.ID); err != nil {
+	if _, err = tx.Exec(r.Context(), "INSERT INTO olp_go.route_revisions(id,route_id,revision,slug,operations,overall_timeout_ms,max_attempts,targets,source_draft_id,activated_by,content_policy) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)", revisionID, routeID, revision, current.Slug, operations, current.OverallTimeoutMS, current.MaxAttempts, targets, current.ID, p.UserID(), current.ContentPolicy); err != nil {
 		return access.Reply{}, err
 	}
 	policy, _, err := loadPolicy(r.Context(), tx, "route-draft", current.ID, false)
@@ -152,14 +172,14 @@ func (s *Server) activateDraft(r *http.Request) (access.Reply, error) {
 	if _, err = tx.Exec(r.Context(), "UPDATE olp_go.route_revisions SET routing_policy=$2 WHERE id=$1", revisionID, encodedPolicy); err != nil {
 		return access.Reply{}, err
 	}
-	if _, err = tx.Exec(r.Context(), "UPDATE olp_go.routes SET latest_revision=$2,latest_revision_id=$3 WHERE id=$1", routeID, revision, revisionID); err != nil {
+	if _, err = tx.Exec(r.Context(), "UPDATE olp_go.routes SET latest_revision=$2,latest_revision_id=$3,state='active',retired_at=NULL,retired_by=NULL,etag=$4 WHERE id=$1", routeID, revision, revisionID, access.NewID()); err != nil {
 		return access.Reply{}, err
 	}
 	etag := access.NewID()
 	if _, err = tx.Exec(r.Context(), "UPDATE olp_go.route_drafts SET state='validated',targets=$2,etag=$3,based_on_revision_id=$4,updated_at=now() WHERE id=$1", id, targets, etag, revisionID); err != nil {
 		return access.Reply{}, err
 	}
-	generation, err := runtime.Publish(r.Context(), tx, p.ID)
+	generation, err := runtime.Publish(r.Context(), tx, p.UserID())
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -182,18 +202,19 @@ type revisionRow struct {
 	OverallTimeoutMS int
 	MaxAttempts      int
 	Targets          []runtime.PublishedTarget
+	ContentPolicy    []byte
 	SourceDraftID    string
 	ActivatedBy      string
 	ActivatedAt      time.Time
 	Policy           *runtime.Policy
 }
 
-const revisionColumns = "v.id::text,v.route_id::text,v.revision,v.slug,v.operations,v.overall_timeout_ms,v.max_attempts,v.targets,v.source_draft_id::text,v.activated_by::text,v.activated_at,v.routing_policy"
+const revisionColumns = "v.id::text,v.route_id::text,v.revision,v.slug,v.operations,v.overall_timeout_ms,v.max_attempts,v.targets,v.content_policy,v.source_draft_id::text,v.activated_by::text,v.activated_at,v.routing_policy"
 
 func scanRevision(row pgx.Row) (*revisionRow, error) {
 	var v revisionRow
 	var operations, targets, policy []byte
-	if err := row.Scan(&v.ID, &v.RouteID, &v.Revision, &v.Slug, &operations, &v.OverallTimeoutMS, &v.MaxAttempts, &targets, &v.SourceDraftID, &v.ActivatedBy, &v.ActivatedAt, &policy); err != nil {
+	if err := row.Scan(&v.ID, &v.RouteID, &v.Revision, &v.Slug, &operations, &v.OverallTimeoutMS, &v.MaxAttempts, &targets, &v.ContentPolicy, &v.SourceDraftID, &v.ActivatedBy, &v.ActivatedAt, &policy); err != nil {
 		return nil, err
 	}
 	if err := json.Unmarshal(operations, &v.Operations); err != nil {
@@ -223,15 +244,21 @@ func loadRevision(ctx context.Context, q access.Queryer, routeID, ref string) (*
 }
 
 func (v *revisionRow) json(live map[string]*resolved) map[string]any {
-	return map[string]any{"id": v.ID, "route_id": v.RouteID, "revision": v.Revision, "slug": v.Slug, "overall_timeout_ms": v.OverallTimeoutMS, "max_attempts": v.MaxAttempts, "source_draft_id": v.SourceDraftID, "activated_by": v.ActivatedBy, "activated_at": v.ActivatedAt, "operations": v.Operations, "targets": targetsJSON(v.Targets, live), "routing_policy": policyOrDefault(v.Policy)}
+	return map[string]any{"id": v.ID, "route_id": v.RouteID, "revision": v.Revision, "slug": v.Slug, "overall_timeout_ms": v.OverallTimeoutMS, "max_attempts": v.MaxAttempts, "source_draft_id": v.SourceDraftID, "activated_by": v.ActivatedBy, "activated_at": v.ActivatedAt, "operations": v.Operations, "targets": targetsJSON(v.Targets, live), "routing_policy": policyOrDefault(v.Policy), "content_policy": json.RawMessage(v.ContentPolicy)}
 }
 
 type routeRow struct {
 	ID             string
 	Slug           string
+	State          string
+	ETag           string
+	RetiredAt      *time.Time
+	RetiredBy      *string
 	CreatedAt      time.Time
 	RevisionCount  int
 	CreatedByEmail *string
+	ProjectID      *string
+	ProjectName    *string
 	Latest         *revisionRow
 }
 
@@ -240,16 +267,27 @@ func (s *Server) routeJSON(ctx context.Context, q access.Queryer, row *routeRow)
 	if err != nil {
 		return nil, err
 	}
-	return map[string]any{"id": row.ID, "slug": row.Slug, "created_at": row.CreatedAt.UTC(), "revision_count": row.RevisionCount, "latest_revision": row.Latest.json(live), "created_by_email": row.CreatedByEmail}, nil
+	var retiredAt any
+	if row.RetiredAt != nil {
+		retiredAt = row.RetiredAt.UTC()
+	}
+	return map[string]any{"id": row.ID, "slug": row.Slug, "state": row.State, "etag": row.ETag, "retired_at": retiredAt, "retired_by": row.RetiredBy, "created_at": row.CreatedAt.UTC(), "revision_count": row.RevisionCount, "latest_revision": row.Latest.json(live), "created_by_email": row.CreatedByEmail, "project_id": row.ProjectID, "project_name": row.ProjectName}, nil
 }
 
-const routeColumns = "r.id::text,r.slug,r.created_at,r.latest_revision,u.email," + revisionColumns
+const routeColumns = "r.id::text,r.slug,r.state,r.etag::text,r.retired_at,r.retired_by::text,r.created_at,r.latest_revision,u.email,r.project_id::text,pr.name," + revisionColumns
+const routeFrom = " FROM olp_go.routes r JOIN olp_go.users u ON u.id=r.created_by JOIN olp_go.route_revisions v ON v.id=r.latest_revision_id LEFT JOIN olp_go.projects pr ON pr.id=r.project_id"
+
+func routeProject(ctx context.Context, q access.Queryer, id string) (*string, error) {
+	var project *string
+	err := q.QueryRow(ctx, "SELECT project_id::text FROM olp_go.routes WHERE id=$1", id).Scan(&project)
+	return project, err
+}
 
 func scanRoute(row pgx.Row) (*routeRow, error) {
 	var r routeRow
 	var v revisionRow
 	var operations, targets, policy []byte
-	if err := row.Scan(&r.ID, &r.Slug, &r.CreatedAt, &r.RevisionCount, &r.CreatedByEmail, &v.ID, &v.RouteID, &v.Revision, &v.Slug, &operations, &v.OverallTimeoutMS, &v.MaxAttempts, &targets, &v.SourceDraftID, &v.ActivatedBy, &v.ActivatedAt, &policy); err != nil {
+	if err := row.Scan(&r.ID, &r.Slug, &r.State, &r.ETag, &r.RetiredAt, &r.RetiredBy, &r.CreatedAt, &r.RevisionCount, &r.CreatedByEmail, &r.ProjectID, &r.ProjectName, &v.ID, &v.RouteID, &v.Revision, &v.Slug, &operations, &v.OverallTimeoutMS, &v.MaxAttempts, &targets, &v.ContentPolicy, &v.SourceDraftID, &v.ActivatedBy, &v.ActivatedAt, &policy); err != nil {
 		return nil, err
 	}
 	if err := json.Unmarshal(operations, &v.Operations); err != nil {
@@ -269,14 +307,15 @@ func scanRoute(row pgx.Row) (*routeRow, error) {
 }
 
 func (s *Server) routes(r *http.Request) (access.Reply, error) {
-	if _, err := s.Access.Principal(r, s.Access.Pool, "read"); err != nil {
+	p, err := s.Access.Principal(r, s.Access.Pool, "read")
+	if err != nil {
 		return access.Reply{}, err
 	}
 	page, err := access.Page(r)
 	if err != nil {
 		return access.Reply{}, err
 	}
-	rows, err := s.Access.Pool.Query(r.Context(), "SELECT "+routeColumns+" FROM olp_go.routes r JOIN olp_go.users u ON u.id=r.created_by JOIN olp_go.route_revisions v ON v.id=r.latest_revision_id WHERE r.id<$1 ORDER BY r.id DESC LIMIT $2", page.Before, page.Limit+1)
+	rows, err := s.Access.Pool.Query(r.Context(), "SELECT "+routeColumns+routeFrom+" WHERE r.id<$1 AND ($2 OR r.project_id=ANY($3::uuid[])) ORDER BY r.id DESC LIMIT $4", page.Before, p.AllProjects, p.ProjectIDs(), page.Limit+1)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -305,16 +344,20 @@ func (s *Server) routes(r *http.Request) (access.Reply, error) {
 }
 
 func (s *Server) route(r *http.Request) (access.Reply, error) {
-	if _, err := s.Access.Principal(r, s.Access.Pool, "read"); err != nil {
+	p, err := s.Access.Principal(r, s.Access.Pool, "read")
+	if err != nil {
 		return access.Reply{}, err
 	}
 	id, err := access.IDParam(r, "route_id")
 	if err != nil {
 		return access.Reply{}, err
 	}
-	row, err := scanRoute(s.Access.Pool.QueryRow(r.Context(), "SELECT "+routeColumns+" FROM olp_go.routes r JOIN olp_go.users u ON u.id=r.created_by JOIN olp_go.route_revisions v ON v.id=r.latest_revision_id WHERE r.id=$1", id))
+	row, err := scanRoute(s.Access.Pool.QueryRow(r.Context(), "SELECT "+routeColumns+routeFrom+" WHERE r.id=$1", id))
 	if err != nil {
 		return access.Reply{}, err
+	}
+	if !p.CanProject(row.ProjectID, false) {
+		return access.Reply{}, pgx.ErrNoRows
 	}
 	item, err := s.routeJSON(r.Context(), s.Access.Pool, row)
 	if err != nil {
@@ -324,7 +367,8 @@ func (s *Server) route(r *http.Request) (access.Reply, error) {
 }
 
 func (s *Server) revisions(r *http.Request) (access.Reply, error) {
-	if _, err := s.Access.Principal(r, s.Access.Pool, "read"); err != nil {
+	p, err := s.Access.Principal(r, s.Access.Pool, "read")
+	if err != nil {
 		return access.Reply{}, err
 	}
 	id, err := access.IDParam(r, "route_id")
@@ -335,11 +379,11 @@ func (s *Server) revisions(r *http.Request) (access.Reply, error) {
 	if err != nil {
 		return access.Reply{}, err
 	}
-	var exists bool
-	if err = s.Access.Pool.QueryRow(r.Context(), "SELECT EXISTS(SELECT 1 FROM olp_go.routes WHERE id=$1)", id).Scan(&exists); err != nil {
+	project, err := routeProject(r.Context(), s.Access.Pool, id)
+	if err != nil {
 		return access.Reply{}, err
 	}
-	if !exists {
+	if !p.CanProject(project, false) {
 		return access.Reply{}, pgx.ErrNoRows
 	}
 	rows, err := s.Access.Pool.Query(r.Context(), "SELECT "+revisionColumns+" FROM olp_go.route_revisions v WHERE v.route_id=$1 AND v.id<$2 ORDER BY v.id DESC LIMIT $3", id, page.Before, page.Limit+1)
@@ -373,12 +417,20 @@ func (s *Server) revisions(r *http.Request) (access.Reply, error) {
 }
 
 func (s *Server) revision(r *http.Request) (access.Reply, error) {
-	if _, err := s.Access.Principal(r, s.Access.Pool, "read"); err != nil {
+	p, err := s.Access.Principal(r, s.Access.Pool, "read")
+	if err != nil {
 		return access.Reply{}, err
 	}
 	id, err := access.IDParam(r, "route_id")
 	if err != nil {
 		return access.Reply{}, err
+	}
+	project, err := routeProject(r.Context(), s.Access.Pool, id)
+	if err != nil {
+		return access.Reply{}, err
+	}
+	if !p.CanProject(project, false) {
+		return access.Reply{}, pgx.ErrNoRows
 	}
 	v, err := loadRevision(r.Context(), s.Access.Pool, id, r.PathValue("revision_id"))
 	if err != nil {
@@ -391,13 +443,75 @@ func (s *Server) revision(r *http.Request) (access.Reply, error) {
 	return access.OK(v.json(live)), nil
 }
 
+func (s *Server) retireRoute(r *http.Request) (access.Reply, error) {
+	a := s.Access
+	id, err := access.IDParam(r, "route_id")
+	if err != nil {
+		return access.Reply{}, err
+	}
+	tx, err := a.Begin(r)
+	if err != nil {
+		return access.Reply{}, err
+	}
+	defer tx.Rollback(r.Context())
+	p, err := a.Principal(r, tx, "configure")
+	if err != nil {
+		return access.Reply{}, err
+	}
+	claim, replayed, err := a.Replay(r, tx, p, nil)
+	if err != nil {
+		return access.Reply{}, err
+	}
+	if replayed != nil {
+		return access.Commit(r, tx, *replayed)
+	}
+	var state, current string
+	var project *string
+	if err = tx.QueryRow(r.Context(), "SELECT state,etag::text,project_id::text FROM olp_go.routes WHERE id=$1 FOR UPDATE", id).Scan(&state, &current, &project); err != nil {
+		return access.Reply{}, err
+	}
+	if err := access.ProjectAccess(p, project, true); err != nil {
+		return access.Reply{}, err
+	}
+	if err = access.Match(r, current); err != nil {
+		return access.Reply{}, err
+	}
+	if state == "retired" {
+		return access.Reply{}, access.Fail(409, "route_retired", "This route is already retired.")
+	}
+	etag := access.NewID()
+	if _, err = tx.Exec(r.Context(), "UPDATE olp_go.routes SET state='retired',retired_at=now(),retired_by=$2,etag=$3 WHERE id=$1", id, p.UserID(), etag); err != nil {
+		return access.Reply{}, err
+	}
+	generation, err := runtime.Publish(r.Context(), tx, p.UserID())
+	if err != nil {
+		return access.Reply{}, err
+	}
+	if err = access.Audit(r.Context(), tx, r, p.ID, "route.retire", "route", id, "success"); err != nil {
+		return access.Reply{}, err
+	}
+	result := access.Detail(map[string]any{"etag": etag, "runtime_generation": generation}, etag)
+	if err = a.CompleteReplay(r, tx, claim, result); err != nil {
+		return access.Reply{}, err
+	}
+	return access.Commit(r, tx, result)
+}
+
 func (s *Server) revisionDiff(r *http.Request) (access.Reply, error) {
-	if _, err := s.Access.Principal(r, s.Access.Pool, "read"); err != nil {
+	p, err := s.Access.Principal(r, s.Access.Pool, "read")
+	if err != nil {
 		return access.Reply{}, err
 	}
 	id, err := access.IDParam(r, "route_id")
 	if err != nil {
 		return access.Reply{}, err
+	}
+	project, err := routeProject(r.Context(), s.Access.Pool, id)
+	if err != nil {
+		return access.Reply{}, err
+	}
+	if !p.CanProject(project, false) {
+		return access.Reply{}, pgx.ErrNoRows
 	}
 	from, err := loadRevision(r.Context(), s.Access.Pool, id, r.URL.Query().Get("from"))
 	if err != nil {
@@ -451,6 +565,7 @@ func (s *Server) revisionDiff(r *http.Request) (access.Reply, error) {
 		"operations_added": opsAdded, "operations_removed": opsRemoved,
 		"targets_added": added, "targets_removed": removed, "targets_changed": changed,
 		"routing_policy_changed": !samePolicy(from.Policy, to.Policy), "routing_policy_before": policyOrDefault(from.Policy), "routing_policy_after": policyOrDefault(to.Policy),
+		"content_policy_changed": !bytes.Equal(bytes.TrimSpace(from.ContentPolicy), bytes.TrimSpace(to.ContentPolicy)),
 	}), nil
 }
 
@@ -477,6 +592,13 @@ func (s *Server) restoreRevision(r *http.Request) (access.Reply, error) {
 	if replayed != nil {
 		return access.Commit(r, tx, *replayed)
 	}
+	project, err := routeProject(r.Context(), tx, id)
+	if err != nil {
+		return access.Reply{}, err
+	}
+	if err := access.ProjectAccess(p, project, true); err != nil {
+		return access.Reply{}, err
+	}
 	v, err := loadRevision(r.Context(), tx, id, ref)
 	if err != nil {
 		return access.Reply{}, err
@@ -488,12 +610,12 @@ func (s *Server) restoreRevision(r *http.Request) (access.Reply, error) {
 		targets[i].ID = access.NewID()
 	}
 	encoded, _ := json.Marshal(targets)
-	if _, err = tx.Exec(r.Context(), "INSERT INTO olp_go.route_drafts(id,slug,state,operations,overall_timeout_ms,max_attempts,targets,based_on_revision_id,etag,created_by) VALUES($1,$2,'draft',$3,$4,$5,$6,$7,$8,$9)", draftID, v.Slug, operations, v.OverallTimeoutMS, v.MaxAttempts, encoded, v.ID, etag, p.ID); err != nil {
+	if _, err = tx.Exec(r.Context(), "INSERT INTO olp_go.route_drafts(id,slug,state,operations,overall_timeout_ms,max_attempts,targets,content_policy,based_on_revision_id,etag,created_by,project_id) VALUES($1,$2,'draft',$3,$4,$5,$6,$7,$8,$9,$10,$11)", draftID, v.Slug, operations, v.OverallTimeoutMS, v.MaxAttempts, encoded, v.ContentPolicy, v.ID, etag, p.UserID(), project); err != nil {
 		return access.Reply{}, err
 	}
 	if v.Policy != nil {
 		policy, _ := json.Marshal(v.Policy)
-		if _, err = tx.Exec(r.Context(), "INSERT INTO olp_go.routing_policies(scope,scope_id,policy,etag,updated_by) VALUES('route-draft',$1,$2,$3,$4)", draftID, policy, etag, p.ID); err != nil {
+		if _, err = tx.Exec(r.Context(), "INSERT INTO olp_go.routing_policies(scope,scope_id,policy,etag,updated_by) VALUES('route-draft',$1,$2,$3,$4)", draftID, policy, etag, p.UserID()); err != nil {
 			return access.Reply{}, err
 		}
 	}

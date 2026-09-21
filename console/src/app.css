@@ -275,6 +275,7 @@ body {
 .data-table tbody tr:hover {
   background: var(--surface-hover);
   color: var(--foreground-hover);
+  --foreground-muted: var(--foreground-subtle);
 }
 
 /* Status tag: mono caption, hairline outline, a 6px dot carrying the tone. */

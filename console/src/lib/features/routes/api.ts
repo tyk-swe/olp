@@ -16,6 +16,7 @@ export type RouteSimulationInput = Schemas['SimulateRouteRequest'];
 export type RouteRevision = Schemas['RouteRevisionResponse'];
 export type RouteRevisionDiff = Schemas['RouteRevisionDiffResponse'];
 export type RouteActivation = Schemas['RouteActivationResponse'];
+export type RouteRetire = Schemas['RouteRetireResponse'];
 export type ActiveRoute = Schemas['RouteDetailResponse'];
 
 export async function listRouteDraftPage(
@@ -190,6 +191,22 @@ export async function activateRoute(
       }
     }
   );
+  return result(response.data, response.error, response.response);
+}
+
+export async function retireRoute(
+  routeID: string,
+  etag: string
+): Promise<RouteRetire> {
+  const response = await apiClient.POST('/api/v3/routes/{route_id}/retire', {
+    params: {
+      path: { route_id: routeID },
+      header: {
+        'If-Match': etag,
+        'Idempotency-Key': crypto.randomUUID()
+      }
+    }
+  });
   return result(response.data, response.error, response.response);
 }
 

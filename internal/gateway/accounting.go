@@ -63,6 +63,9 @@ func accountingEvent(e Envelope) *usage.Event {
 		RequestID:           e.AccountingID,
 		RuntimeGenerationID: e.RuntimeGenerationID,
 		APIKeyID:            e.KeyID,
+		Attribution:         e.Attribution,
+		PolicyDecisions:     e.PolicyDecisions,
+		BudgetGroupID:       e.BudgetGroupID,
 		RouteSlug:           e.Route,
 		Operation:           e.Operation,
 		Surface:             e.Surface,
@@ -90,6 +93,7 @@ func accountingEvent(e Envelope) *usage.Event {
 		event.UsageComplete = fact.UsageObserved && fact.UsageComplete
 		if fact.UsageObserved {
 			event.InputTokens, event.OutputTokens, event.CachedInputTokens = accountingTokens(fact)
+			event.CacheWriteInputTokens, event.CacheWrite5MInputTokens, event.CacheWrite1HInputTokens = accountingCacheWrites(fact)
 			event.MediaUnits = accountingMediaUnits(fact)
 			if e.Operation == "embeddings" {
 				event.OutputTokens = nil
@@ -140,6 +144,7 @@ func accountingAttempt(e Envelope, index int) usage.Attempt {
 	}
 	if fact.UsageObserved {
 		attempt.Usage.InputTokens, attempt.Usage.OutputTokens, attempt.Usage.CachedInputTokens = accountingTokens(fact)
+		attempt.Usage.CacheWriteInputTokens, attempt.Usage.CacheWrite5MInputTokens, attempt.Usage.CacheWrite1HInputTokens = accountingCacheWrites(fact)
 		attempt.Usage.MediaUnits = accountingMediaUnits(fact)
 		attempt.Routing.StreamedOutputTokens = streamedTokens(fact)
 		if e.Operation == "embeddings" {
@@ -167,6 +172,14 @@ func accountingTokens(fact *AttemptFact) (input, output, cached *int64) {
 		cached = &hit
 	}
 	return &in, &out, cached
+}
+
+func accountingCacheWrites(fact *AttemptFact) (write, write5m, write1h *int64) {
+	if fact.Usage == nil {
+		return nil, nil, nil
+	}
+	return fact.Usage.CacheWriteInputTokens, fact.Usage.CacheWrite5MInputTokens,
+		fact.Usage.CacheWrite1HInputTokens
 }
 
 // accountingMediaUnits is the media quantity an attempt disclosed, carried as

@@ -250,7 +250,7 @@ func TestGatewayEnforcesKeyBudgets(t *testing.T) {
 		}
 		windows := limits.BudgetWindows(time.Now().UTC())
 		snapshot := limits.CostSnapshot{
-			APIKeyID: id, DailyWindowID: windows.DailyID, DailyAccrued: "0.00",
+			CostOwnerID: id, DailyWindowID: windows.DailyID, DailyAccrued: "0.00",
 			MonthlyWindowID: windows.MonthlyID, MonthlyAccrued: "0.00",
 		}
 		if _, _, err := f.limiter.ApplyCostSnapshot(t.Context(), snapshot); err != nil {

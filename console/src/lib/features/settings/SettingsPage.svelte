@@ -2,6 +2,8 @@
   import { useServiceCapabilities } from '$lib/features/access/session/serviceCapabilities.svelte';
   const services = useServiceCapabilities();
   import RoutingPolicyEditor from '$lib/features/routes/RoutingPolicyEditor.svelte';
+  import ConfigurationPanel from '$lib/features/configuration/ConfigurationPanel.svelte';
+  import PricingSourcesPanel from '$lib/features/usage/PricingSourcesPanel.svelte';
   import { providerKeys } from '$lib/features/providers/providerKeys';
   import { settingsKeys } from '$lib/features/settings/settingsKeys';
   import { pricingKeys } from '$lib/features/usage/pricingKeys';
@@ -84,6 +86,9 @@
   let operation = $state<(typeof operationKinds)[number]>('generation');
   let inputPrice = $state('');
   let cachedInputPrice = $state('');
+  let cacheWritePrice = $state('');
+  let cacheWrite5mPrice = $state('');
+  let cacheWrite1hPrice = $state('');
   let outputPrice = $state('');
   let unitPrice = $state('');
   let currency = $state('USD');
@@ -208,6 +213,9 @@
       operation,
       inputPrice,
       cachedInputPrice,
+      cacheWritePrice,
+      cacheWrite5mPrice,
+      cacheWrite1hPrice,
       outputPrice,
       unitPrice,
       currency,
@@ -223,6 +231,15 @@
         operation: submitted.operation,
         input_per_million: optionalDecimal(submitted.inputPrice),
         cached_input_per_million: optionalDecimal(submitted.cachedInputPrice),
+        cache_write_input_per_million: optionalDecimal(
+          submitted.cacheWritePrice
+        ),
+        cache_write_5m_input_per_million: optionalDecimal(
+          submitted.cacheWrite5mPrice
+        ),
+        cache_write_1h_input_per_million: optionalDecimal(
+          submitted.cacheWrite1hPrice
+        ),
         output_per_million: optionalDecimal(submitted.outputPrice),
         unit_price: optionalDecimal(submitted.unitPrice),
         currency: submitted.currency.trim().toUpperCase()
@@ -243,6 +260,11 @@
       if (inputPrice === submitted.inputPrice) inputPrice = '';
       if (cachedInputPrice === submitted.cachedInputPrice)
         cachedInputPrice = '';
+      if (cacheWritePrice === submitted.cacheWritePrice) cacheWritePrice = '';
+      if (cacheWrite5mPrice === submitted.cacheWrite5mPrice)
+        cacheWrite5mPrice = '';
+      if (cacheWrite1hPrice === submitted.cacheWrite1hPrice)
+        cacheWrite1hPrice = '';
       if (outputPrice === submitted.outputPrice) outputPrice = '';
       if (unitPrice === submitted.unitPrice) unitPrice = '';
       if (providerId === submitted.providerId) providerId = '';
@@ -396,6 +418,7 @@
 </section>
 
 {#if services.gatewayAvailable}
+  <PricingSourcesPanel />
   <section class="settings-section" aria-labelledby="pricing-title">
     <div class="section-heading">
       <div>
@@ -492,6 +515,37 @@
           >
         </div>
         <div class="form-field">
+          <label for="cache-write-price">Cache write / million</label><input
+            id="cache-write-price"
+            bind:value={cacheWritePrice}
+            inputmode="decimal"
+            placeholder="3.00"
+            disabled={!canEditPricing}
+          /><small
+            >Leave empty to bill cache writes at the full input rate.</small
+          >
+        </div>
+        <div class="form-field">
+          <label for="cache-write-5m-price">Cache write 5m / million</label
+          ><input
+            id="cache-write-5m-price"
+            bind:value={cacheWrite5mPrice}
+            inputmode="decimal"
+            placeholder="3.00"
+            disabled={!canEditPricing}
+          /><small>Defaults to the cache write rate, then input.</small>
+        </div>
+        <div class="form-field">
+          <label for="cache-write-1h-price">Cache write 1h / million</label
+          ><input
+            id="cache-write-1h-price"
+            bind:value={cacheWrite1hPrice}
+            inputmode="decimal"
+            placeholder="6.00"
+            disabled={!canEditPricing}
+          /><small>Defaults to the cache write rate, then input.</small>
+        </div>
+        <div class="form-field">
           <label for="output-price">Output / million</label><input
             id="output-price"
             bind:value={outputPrice}
@@ -585,7 +639,10 @@
                 ><small
                   >Created {formatDate(revision.created_at)} by
                   <span class="mono">{revision.created_by}</span></small
-                ></span
+                >{#if revision.source_name}<small
+                    >Published from
+                    <span class="mono">{revision.source_name}</span></small
+                  >{/if}</span
               ><span class="badge">{revision.prices.length} entries</span
               ></summary
             >
@@ -606,9 +663,11 @@
                       >Operation</th
                     ><th scope="col">Input / million</th><th scope="col"
                       >Cached input / million</th
-                    ><th scope="col">Output / million</th><th scope="col"
-                      >Unit</th
-                    ><th scope="col">Currency</th></tr
+                    ><th scope="col">Cache write / million</th><th scope="col"
+                      >Write 5m / million</th
+                    ><th scope="col">Write 1h / million</th><th scope="col"
+                      >Output / million</th
+                    ><th scope="col">Unit</th><th scope="col">Currency</th></tr
                   ></thead
                 >
                 <tbody
@@ -624,6 +683,11 @@
                       ><td
                         >{price.cached_input_per_million ??
                           'Billed as input'}</td
+                      ><td
+                        >{price.cache_write_input_per_million ??
+                          'Billed as input'}</td
+                      ><td>{price.cache_write_5m_input_per_million ?? '—'}</td
+                      ><td>{price.cache_write_1h_input_per_million ?? '—'}</td
                       ><td>{price.output_per_million ?? '—'}</td><td
                         >{price.unit_price ?? '—'}</td
                       ><td>{price.currency}</td></tr
@@ -646,6 +710,10 @@
     id="00000000-0000-0000-0000-000000000000"
     canManage={canEditSettings}
   />
+{/if}
+
+{#if access.globalScope && access.can('providers.manage')}
+  <ConfigurationPanel />
 {/if}
 
 <style>

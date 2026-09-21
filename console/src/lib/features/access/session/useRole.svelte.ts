@@ -9,6 +9,7 @@ import type { AuthenticatedUser } from '$lib/features/access/session/state';
 export type RoleAccess = {
   readonly user: AuthenticatedUser | null;
   readonly role: FixedRole | null;
+  readonly globalScope: boolean;
   can(capability: Capability): boolean;
 };
 
@@ -33,6 +34,9 @@ export function useRole(): RoleAccess {
     },
     get role() {
       return snapshot.user?.role ?? null;
+    },
+    get globalScope() {
+      return snapshot.user?.access_scope !== 'assigned';
     },
     can(capability: Capability) {
       return can(snapshot.user?.role, capability);

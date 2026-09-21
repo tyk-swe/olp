@@ -18,7 +18,8 @@ import (
 const maxSlots = 64
 
 func (s *Server) credentials(r *http.Request) (access.Reply, error) {
-	if _, err := s.Access.Principal(r, s.Access.Pool, "read"); err != nil {
+	p, err := s.Access.Principal(r, s.Access.Pool, "read")
+	if err != nil {
 		return access.Reply{}, err
 	}
 	id, err := access.IDParam(r, "provider_id")
@@ -29,7 +30,7 @@ func (s *Server) credentials(r *http.Request) (access.Reply, error) {
 	if err != nil {
 		return access.Reply{}, err
 	}
-	if _, err = load(r.Context(), s.Access.Pool, id, false); err != nil {
+	if _, err = checkProvider(r.Context(), s.Access.Pool, p, id, false); err != nil {
 		return access.Reply{}, err
 	}
 	rows, err := s.Access.Pool.Query(r.Context(), `SELECT jsonb_build_object(
@@ -67,7 +68,7 @@ func (s *Server) rotate(r *http.Request) (access.Reply, error) {
 	if err = access.Decode(r, &input); err != nil {
 		return access.Reply{}, err
 	}
-	if err = validCredential(input.Credential); err != nil {
+	if err = ValidCredential(input.Credential); err != nil {
 		return access.Reply{}, err
 	}
 	tx, err := a.Begin(r)
@@ -90,13 +91,16 @@ func (s *Server) rotate(r *http.Request) (access.Reply, error) {
 	if err != nil {
 		return access.Reply{}, err
 	}
+	if err := access.ProjectAccess(p, current.ProjectID, true); err != nil {
+		return access.Reply{}, err
+	}
 	if err = access.Match(r, current.ETag); err != nil {
 		return access.Reply{}, err
 	}
-	if !current.Configuration.credentialRequired() {
+	if !current.Configuration.CredentialRequired() {
 		return access.Reply{}, access.Fail(422, "credential_forbidden", "This authentication mode takes no stored credential.")
 	}
-	if err = current.Configuration.validate(s.Egress); err != nil {
+	if err = current.Configuration.Validate(s.Egress); err != nil {
 		return access.Reply{}, err
 	}
 	models, err := loadModels(r.Context(), tx, id, true)
@@ -154,7 +158,7 @@ func (s *Server) rotate(r *http.Request) (access.Reply, error) {
 	if locked.ETag != current.ETag {
 		return access.Reply{}, access.Fail(412, "etag_mismatch", "The connection changed during validation; reload and retry.")
 	}
-	credentialID, version, err := s.storeCredential(r.Context(), tx, id, input.Credential)
+	credentialID, version, err := s.StoreCredential(r.Context(), tx, id, input.Credential)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -350,14 +354,15 @@ func (s *Server) quotaUnavailable(err error) {
 }
 
 func (s *Server) slots(r *http.Request) (access.Reply, error) {
-	if _, err := s.Access.Principal(r, s.Access.Pool, "read"); err != nil {
+	p, err := s.Access.Principal(r, s.Access.Pool, "read")
+	if err != nil {
 		return access.Reply{}, err
 	}
 	id, err := access.IDParam(r, "provider_id")
 	if err != nil {
 		return access.Reply{}, err
 	}
-	current, err := load(r.Context(), s.Access.Pool, id, false)
+	current, err := checkProvider(r.Context(), s.Access.Pool, p, id, false)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -397,11 +402,11 @@ func validSlot(in *slotInput, slotID string) error {
 		}
 	}
 	for _, model := range in.AllowedModels {
-		if err := validModelName("slot.allowed_models", model); err != nil {
+		if err := ValidModelName("slot.allowed_models", model); err != nil {
 			return err
 		}
 	}
-	if !validQuota(Limits{MaxConcurrency: in.MaxConcurrency, RequestsPerMinute: in.RequestsPerMinute, TokensPerMinute: in.TokensPerMinute}) {
+	if !ValidQuota(Limits{MaxConcurrency: in.MaxConcurrency, RequestsPerMinute: in.RequestsPerMinute, TokensPerMinute: in.TokensPerMinute}) {
 		return access.Invalid("slot", "Use positive limits: requests and concurrency at most 2147483647, tokens at most 9007199254740991.")
 	}
 	if in.CredentialVersionID != nil {
@@ -432,7 +437,7 @@ func (s *Server) writeSlot(r *http.Request) (access.Reply, error) {
 		return access.Reply{}, err
 	}
 	if input.Credential != nil {
-		if err = validCredential(*input.Credential); err != nil {
+		if err = ValidCredential(*input.Credential); err != nil {
 			return access.Reply{}, err
 		}
 	}
@@ -454,6 +459,9 @@ func (s *Server) writeSlot(r *http.Request) (access.Reply, error) {
 	}
 	current, err := load(r.Context(), tx, id, true)
 	if err != nil {
+		return access.Reply{}, err
+	}
+	if err := access.ProjectAccess(p, current.ProjectID, true); err != nil {
 		return access.Reply{}, err
 	}
 	if err = access.Match(r, current.SlotsETag); err != nil {
@@ -485,10 +493,10 @@ func (s *Server) writeSlot(r *http.Request) (access.Reply, error) {
 	var credentialID *string
 	switch {
 	case input.Credential != nil:
-		if !current.Configuration.credentialRequired() {
+		if !current.Configuration.CredentialRequired() {
 			return access.Reply{}, access.Fail(422, "credential_forbidden", "This authentication mode takes no stored credential.")
 		}
-		stored, _, err := s.storeCredential(r.Context(), tx, id, *input.Credential)
+		stored, _, err := s.StoreCredential(r.Context(), tx, id, *input.Credential)
 		if err != nil {
 			return access.Reply{}, err
 		}
@@ -546,7 +554,8 @@ func (s *Server) writeSlot(r *http.Request) (access.Reply, error) {
 
 func (s *Server) validateSlot(r *http.Request) (access.Reply, error) {
 	a := s.Access
-	if _, err := a.Principal(r, a.Pool, "configure"); err != nil {
+	p, err := a.Principal(r, a.Pool, "configure")
+	if err != nil {
 		return access.Reply{}, err
 	}
 	id, err := access.IDParam(r, "provider_id")
@@ -564,6 +573,9 @@ func (s *Server) validateSlot(r *http.Request) (access.Reply, error) {
 	defer tx.Rollback(r.Context())
 	current, err := load(r.Context(), tx, id, false)
 	if err != nil {
+		return access.Reply{}, err
+	}
+	if err := access.ProjectAccess(p, current.ProjectID, true); err != nil {
 		return access.Reply{}, err
 	}
 	slots, err := loadSlots(r.Context(), tx, id)
@@ -584,7 +596,7 @@ func (s *Server) validateSlot(r *http.Request) (access.Reply, error) {
 		return access.Reply{}, err
 	}
 	var credential []byte
-	if current.Configuration.credentialRequired() {
+	if current.Configuration.CredentialRequired() {
 		if slot.CredentialID == nil {
 			return access.Reply{}, access.Fail(422, "credential_required", "This slot has no credential to validate.")
 		}
@@ -598,7 +610,7 @@ func (s *Server) validateSlot(r *http.Request) (access.Reply, error) {
 	if err = tx.Rollback(r.Context()); err != nil {
 		return access.Reply{}, err
 	}
-	if err = current.Configuration.validate(s.Egress); err != nil {
+	if err = current.Configuration.Validate(s.Egress); err != nil {
 		return access.Reply{}, err
 	}
 	probeErr := s.validateModelAccess(r.Context(), &current.Configuration, credential, slot, models)

@@ -25,6 +25,12 @@ export function useServiceCapabilities() {
           capabilities.data.limits_enforced !== false)
       );
     },
+    get notificationsActive() {
+      return (
+        capabilities.isSuccess &&
+        capabilities.data.notifications_active === true
+      );
+    },
     get retentionEnforced() {
       return (
         capabilities.isSuccess &&

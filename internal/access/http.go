@@ -14,6 +14,7 @@ import (
 	"net"
 	"net/http"
 	"net/mail"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -23,6 +24,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/secrets"
 )
 
@@ -56,9 +58,12 @@ type Server struct {
 	// uses it to say whether stored retention policies are applied at all, not
 	// whether a pass ran. It is set during composition, before the first
 	// request is served, and never changes afterwards.
-	RetentionEnforced bool
-	passwordSlots     chan struct{}
-	dummyPassword     string
+	RetentionEnforced   bool
+	NotificationsActive bool
+
+	Egress        *egress.Policy
+	passwordSlots chan struct{}
+	dummyPassword string
 }
 
 func New(ctx context.Context, pool *pgxpool.Pool, installation, origin string, auth *secrets.AuthKey, keys *secrets.KeyRing, bootstrap string) (*Server, error) {
@@ -154,32 +159,42 @@ func (s *Server) HandleWith(maxBody int64, fn func(*http.Request) (Reply, error)
 	return s.HandleTimeout(maxBody, 15*time.Second, fn)
 }
 
+func (s *Server) guard(w http.ResponseWriter, r *http.Request, maxBody int64, timeout time.Duration) (*http.Request, context.CancelFunc, error) {
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("Referrer-Policy", "no-referrer")
+	w.Header().Set("Cross-Origin-Resource-Policy", "same-origin")
+	ctx, cancel := context.WithTimeout(r.Context(), timeout)
+	deadline, _ := ctx.Deadline()
+	if err := http.NewResponseController(w).SetReadDeadline(deadline); err != nil {
+		cancel()
+		return r, cancel, err
+	}
+	r = r.WithContext(ctx)
+	r.Body = http.MaxBytesReader(w, r.Body, maxBody)
+	_, machine := managementBearer(r)
+	if machine {
+		return r, cancel, nil
+	}
+	if err := checkCookies(r); err != nil {
+		return r, cancel, err
+	}
+	if r.Method != "GET" && r.Method != "HEAD" && r.Header.Get("Origin") != s.Origin {
+		return r, cancel, Fail(403, "origin_denied", "Use the configured console origin.")
+	}
+	if r.Header.Get("Sec-Fetch-Site") == "cross-site" && r.URL.Path != "/api/v3/oidc/callback" {
+		return r, cancel, Fail(403, "origin_denied", "Cross-site access is not allowed.")
+	}
+	return r, cancel, nil
+}
+
 // HandleTimeout is HandleWith with an explicit request deadline for
 // operations that legitimately outlive the default management budget.
 func (s *Server) HandleTimeout(maxBody int64, timeout time.Duration, fn func(*http.Request) (Reply, error)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Cache-Control", "no-store")
-		w.Header().Set("X-Content-Type-Options", "nosniff")
-		w.Header().Set("Referrer-Policy", "no-referrer")
-		w.Header().Set("Cross-Origin-Resource-Policy", "same-origin")
-		ctx, cancel := context.WithTimeout(r.Context(), timeout)
+		r, cancel, err := s.guard(w, r, maxBody, timeout)
 		defer cancel()
-		// Context cancellation cannot interrupt a blocked request-body read.
-		deadline, _ := ctx.Deadline()
-		if err := http.NewResponseController(w).SetReadDeadline(deadline); err != nil {
-			WriteProblem(w, err)
-			return
-		}
-		r = r.WithContext(ctx)
-		r.Body = http.MaxBytesReader(w, r.Body, maxBody)
 		var result Reply
-		err := checkCookies(r)
-		if err == nil && r.Method != "GET" && r.Method != "HEAD" && r.Header.Get("Origin") != s.Origin {
-			err = Fail(403, "origin_denied", "Use the configured console origin.")
-		}
-		if err == nil && r.Header.Get("Sec-Fetch-Site") == "cross-site" && r.URL.Path != "/api/v3/oidc/callback" {
-			err = Fail(403, "origin_denied", "Cross-site access is not allowed.")
-		}
 		if err == nil {
 			result, err = fn(r)
 		}
@@ -210,6 +225,39 @@ func (s *Server) HandleTimeout(maxBody int64, timeout time.Duration, fn func(*ht
 			json.NewEncoder(w).Encode(result.Body)
 		}
 	}
+}
+
+func (s *Server) HandleStream(maxBody int64, timeout time.Duration, fn func(http.ResponseWriter, *http.Request) error) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		r, cancel, err := s.guard(w, r, maxBody, timeout)
+		defer cancel()
+		tracker := &streamWriter{ResponseWriter: w}
+		if err == nil {
+			err = fn(tracker, r)
+		}
+		if err != nil && !tracker.committed {
+			WriteProblem(w, err)
+		}
+	}
+}
+
+type streamWriter struct {
+	http.ResponseWriter
+	committed bool
+}
+
+func (w *streamWriter) WriteHeader(status int) {
+	w.committed = true
+	w.ResponseWriter.WriteHeader(status)
+}
+
+func (w *streamWriter) Write(data []byte) (int, error) {
+	w.committed = true
+	return w.ResponseWriter.Write(data)
+}
+
+func (w *streamWriter) Unwrap() http.ResponseWriter {
+	return w.ResponseWriter
 }
 
 func WriteProblem(w http.ResponseWriter, err error) {
@@ -326,7 +374,7 @@ func Permission(role, operation string) bool {
 	if !validRole(role) {
 		return false
 	}
-	if role == "owner" || operation == "read" {
+	if role == "owner" || operation == "read" || operation == "usage" {
 		return true
 	}
 	switch operation {
@@ -348,39 +396,185 @@ type User struct {
 	DisplayName string    `json:"display_name"`
 	Role        string    `json:"role"`
 	Active      bool      `json:"active"`
+	AccessScope string    `json:"access_scope"`
 	ETag        string    `json:"etag"`
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
 }
 type Principal struct {
 	User
+	Kind             string
+	Creator          string
+	AllProjects      bool
+	Projects         map[string]string
 	SessionID, Token string
 }
 
-const userColumns = "u.id::text,u.email,u.display_name,u.role,u.active,u.etag::text,u.created_at,u.updated_at"
+func (p Principal) UserID() string {
+	if p.Kind == "machine" {
+		return p.Creator
+	}
+	return p.ID
+}
+
+const userColumns = "u.id::text,u.email,u.display_name,u.role,u.active,u.access_scope,u.etag::text,u.created_at,u.updated_at"
 
 func scanUser(row pgx.Row) (User, error) {
 	var u User
-	err := row.Scan(&u.ID, &u.Email, &u.DisplayName, &u.Role, &u.Active, &u.ETag, &u.CreatedAt, &u.UpdatedAt)
+	err := row.Scan(&u.ID, &u.Email, &u.DisplayName, &u.Role, &u.Active, &u.AccessScope, &u.ETag, &u.CreatedAt, &u.UpdatedAt)
 	return u, err
 }
 func (s *Server) Principal(r *http.Request, q Queryer, operation string) (Principal, error) {
+	if secret, ok := managementBearer(r); ok {
+		return s.machinePrincipal(r, q, secret, operation)
+	}
 	var p Principal
+	p.Kind = "user"
 	p.Token = cookieValue(r, sessionCookie)
-	err := q.QueryRow(r.Context(), "SELECT "+userColumns+",s.id::text FROM olp_go.sessions s JOIN olp_go.users u ON u.id=s.user_id WHERE s.digest=$1 AND s.expires_at>now() AND u.active AND u.oidc_authorized", s.Auth.Digest("session", p.Token)).Scan(&p.ID, &p.Email, &p.DisplayName, &p.Role, &p.Active, &p.ETag, &p.CreatedAt, &p.UpdatedAt, &p.SessionID)
+	err := q.QueryRow(r.Context(), "SELECT "+userColumns+",s.id::text FROM olp_go.sessions s JOIN olp_go.users u ON u.id=s.user_id WHERE s.digest=$1 AND s.expires_at>now() AND u.active AND u.oidc_authorized", s.Auth.Digest("session", p.Token)).Scan(&p.ID, &p.Email, &p.DisplayName, &p.Role, &p.Active, &p.AccessScope, &p.ETag, &p.CreatedAt, &p.UpdatedAt, &p.SessionID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return p, Fail(401, "authentication_required", "Sign in to continue.")
 	}
 	if err != nil {
 		return p, err
 	}
+	p.AllProjects = p.AccessScope == "global"
+	if err = p.loadProjects(r.Context(), q); err != nil {
+		return p, err
+	}
 	if !Permission(p.Role, operation) {
 		return p, Forbidden()
+	}
+	if err = restrictInstallation(p, operation); err != nil {
+		return p, err
 	}
 	if r.Method != "GET" && !hmac.Equal([]byte(r.Header.Get(csrfHeader)), []byte(s.csrf(p.Token))) {
 		return p, Fail(403, "csrf_invalid", "Reload the console before trying again.")
 	}
 	return p, nil
+}
+func (p *Principal) loadProjects(ctx context.Context, q Queryer) error {
+	rows, err := q.Query(ctx, "SELECT project_id::text,role FROM olp_go.project_members WHERE user_id=$1", p.ID)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id, role string
+		if err = rows.Scan(&id, &role); err != nil {
+			return err
+		}
+		if p.Projects == nil {
+			p.Projects = map[string]string{}
+		}
+		p.Projects[id] = role
+	}
+	return rows.Err()
+}
+func restrictInstallation(p Principal, operation string) error {
+	if !p.AllProjects && (operation == "access" || operation == "access_read" || operation == "settings") {
+		return Forbidden()
+	}
+	return nil
+}
+func (p Principal) CanProject(projectID *string, write bool) bool {
+	if p.AllProjects {
+		return true
+	}
+	if projectID == nil {
+		return false
+	}
+	role, ok := p.Projects[*projectID]
+	return ok && (!write || role == "manager")
+}
+func ProjectAccess(p Principal, projectID *string, write bool) error {
+	if !p.CanProject(projectID, false) {
+		return pgx.ErrNoRows
+	}
+	if write && !p.CanProject(projectID, true) {
+		return Forbidden()
+	}
+	return nil
+}
+func (p Principal) ProjectIDs() []string {
+	ids := make([]string, 0, len(p.Projects))
+	for id := range p.Projects {
+		ids = append(ids, id)
+	}
+	slices.Sort(ids)
+	return ids
+}
+func (s *Server) RequireProject(ctx context.Context, q Queryer, p Principal, projectID *string, write bool) error {
+	if projectID == nil {
+		if p.AllProjects {
+			return nil
+		}
+		return Forbidden()
+	}
+	var exists bool
+	if err := q.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM olp_go.projects WHERE id=$1)", *projectID).Scan(&exists); err != nil {
+		return err
+	}
+	if !exists {
+		return Fail(404, "not_found", "The resource was not found.")
+	}
+	if !p.CanProject(projectID, write) {
+		return Fail(403, "project_scope_denied", "This project is outside the caller's scope.")
+	}
+	return nil
+}
+func managementBearer(r *http.Request) (string, bool) {
+	const prefix = "Bearer olpm_"
+	header := r.Header.Get("Authorization")
+	if !strings.HasPrefix(header, prefix) {
+		return "", false
+	}
+	return strings.TrimPrefix(header, "Bearer "), true
+}
+func (s *Server) machinePrincipal(r *http.Request, q Queryer, secret, operation string) (Principal, error) {
+	var p Principal
+	p.Kind = "machine"
+	parts := strings.Split(secret, "_")
+	if len(parts) != 3 {
+		return p, Fail(401, "authentication_required", "Sign in to continue.")
+	}
+	var digest, data, projectData []byte
+	var live bool
+	err := q.QueryRow(r.Context(), "SELECT id::text,name,scopes,digest,created_by::text,expires_at>now() AND revoked_at IS NULL,all_projects,project_ids FROM olp_go.management_tokens WHERE lookup_id=$1", parts[1]).Scan(&p.ID, &p.DisplayName, &data, &digest, &p.Creator, &live, &p.AllProjects, &projectData)
+	if errors.Is(err, pgx.ErrNoRows) || err == nil && (!live || !hmac.Equal(digest, s.Auth.Digest("management_token", secret))) {
+		return p, Fail(401, "authentication_required", "Sign in to continue.")
+	}
+	if err != nil {
+		return p, err
+	}
+	if p.AllProjects {
+		p.AccessScope = "global"
+	} else {
+		p.AccessScope = "assigned"
+		var projectIDs []string
+		if err = json.Unmarshal(projectData, &projectIDs); err != nil {
+			return p, err
+		}
+		p.Projects = map[string]string{}
+		for _, id := range projectIDs {
+			p.Projects[id] = "manager"
+		}
+	}
+	var scopes []string
+	if err = json.Unmarshal(data, &scopes); err != nil {
+		return p, err
+	}
+	if !slices.Contains(scopes, operation) {
+		return p, Forbidden()
+	}
+	return p, restrictInstallation(p, operation)
+}
+func (s *Server) sessionPrincipal(r *http.Request, q Queryer, operation string) (Principal, error) {
+	p, err := s.Principal(r, q, operation)
+	if err == nil && p.Kind != "user" {
+		err = Forbidden()
+	}
+	return p, err
 }
 func (s *Server) csrf(token string) string {
 	return base64.RawURLEncoding.EncodeToString(s.Auth.Digest("csrf", token))
@@ -406,11 +600,23 @@ func Audit(ctx context.Context, tx pgx.Tx, r *http.Request, actor, action, resou
 			break
 		}
 	}
-	var actorID any
+	var userID, tokenID any
 	if actor != "" {
-		actorID = actor
+		var kind string
+		err := tx.QueryRow(ctx, `SELECT CASE WHEN EXISTS(SELECT 1 FROM olp_go.users WHERE id=$1) THEN 'user' WHEN EXISTS(SELECT 1 FROM olp_go.management_tokens WHERE id=$1) THEN 'management_token' ELSE '' END`, actor).Scan(&kind)
+		if err != nil {
+			return err
+		}
+		switch kind {
+		case "user":
+			userID = actor
+		case "management_token":
+			tokenID = actor
+		default:
+			return errors.New("audit actor is not a known principal")
+		}
 	}
-	_, err := tx.Exec(ctx, "INSERT INTO olp_go.Audit(id,actor_user_id,action,resource_type,resource_id,outcome,source_ip,user_agent_family) VALUES($1,$2,$3,$4,$5,$6,$7,$8)", NewID(), actorID, action, resource, id, outcome, source, family)
+	_, err := tx.Exec(ctx, "INSERT INTO olp_go.Audit(id,actor_user_id,actor_management_token_id,action,resource_type,resource_id,outcome,source_ip,user_agent_family) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)", NewID(), userID, tokenID, action, resource, id, outcome, source, family)
 	return err
 }
 func Commit(r *http.Request, tx pgx.Tx, result Reply) (Reply, error) {

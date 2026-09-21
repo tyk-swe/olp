@@ -27,6 +27,7 @@ export type ProviderDraft = ProviderEditValues & {
   kind: ProviderKind;
   credential: string;
   model: string;
+  projectId: string;
   /** Console-only selection; creation persists the resolved ordinary fields. */
   presetId: string;
   credentialHeaders?: string;
@@ -79,6 +80,7 @@ export function createProviderDraft(
     authMode: spec.default_auth_mode,
     credential: '',
     model: '',
+    projectId: '',
     presetId: ''
   };
 }
@@ -238,6 +240,7 @@ export function buildCreateProviderInput(
 ): CreateProviderInput {
   return {
     name: draft.name.trim(),
+    project_id: draft.projectId || null,
     configuration: {
       kind: draft.kind,
       options: {

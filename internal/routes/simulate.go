@@ -18,11 +18,30 @@ import (
 )
 
 type simulateDraftRequest struct {
-	Operation   string       `json:"operation"`
-	Surface     string       `json:"surface"`
-	Mode        string       `json:"mode"`
-	Seed        string       `json:"seed"`
-	Preferences *Preferences `json:"preferences"`
+	Operation            string       `json:"operation"`
+	Surface              string       `json:"surface"`
+	Mode                 string       `json:"mode"`
+	Seed                 string       `json:"seed"`
+	Preferences          *Preferences `json:"preferences"`
+	EstimatedInputTokens *int64       `json:"estimated_input_tokens"`
+	MaxOutputTokens      *int64       `json:"max_output_tokens"`
+}
+
+func tokenDemand(estimated, output *int64) (*runtime.TokenDemand, error) {
+	if estimated != nil && *estimated < 0 {
+		return nil, access.Invalid("estimated_input_tokens", "Use a non-negative token estimate.")
+	}
+	if output != nil && *output < 0 {
+		return nil, access.Invalid("max_output_tokens", "Use a non-negative output bound.")
+	}
+	if estimated == nil && output == nil {
+		return nil, nil
+	}
+	demand := &runtime.TokenDemand{MaxOutputTokens: output}
+	if estimated != nil {
+		demand.EstimatedInputTokens = *estimated
+	}
+	return demand, nil
 }
 
 func validTuple(operation, surface, mode string) error {
@@ -39,7 +58,8 @@ func validTuple(operation, surface, mode string) error {
 }
 
 func (s *Server) simulateDraft(r *http.Request) (access.Reply, error) {
-	if _, err := s.Access.Principal(r, s.Access.Pool, "read"); err != nil {
+	p, err := s.Access.Principal(r, s.Access.Pool, "read")
+	if err != nil {
 		return access.Reply{}, err
 	}
 	id, err := access.IDParam(r, "draft_id")
@@ -62,6 +82,9 @@ func (s *Server) simulateDraft(r *http.Request) (access.Reply, error) {
 	d, err := loadDraft(r.Context(), s.Access.Pool, id, false)
 	if err != nil {
 		return access.Reply{}, err
+	}
+	if !p.CanProject(d.ProjectID, false) {
+		return access.Reply{}, pgx.ErrNoRows
 	}
 	live, err := resolve(r.Context(), s.Access.Pool, d.Targets)
 	if err != nil {
@@ -94,7 +117,11 @@ func (s *Server) simulateDraft(r *http.Request) (access.Reply, error) {
 	if err != nil {
 		return access.Reply{}, err
 	}
-	plan, err := runtime.PlanRequest(snapshot, d.Slug, input.Operation, input.Surface, input.Mode, []byte(input.Seed), runtime.SelectionOptions{Preferences: input.Preferences, Inputs: inputs, CheckSlots: true, CredentialRevoked: revoked})
+	demand, err := tokenDemand(input.EstimatedInputTokens, input.MaxOutputTokens)
+	if err != nil {
+		return access.Reply{}, err
+	}
+	plan, err := runtime.PlanRequest(snapshot, d.Slug, input.Operation, input.Surface, input.Mode, []byte(input.Seed), runtime.SelectionOptions{Preferences: input.Preferences, Inputs: inputs, TokenDemand: demand, CheckSlots: true, CredentialRevoked: revoked})
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -118,18 +145,21 @@ func (s *Server) simulateDraft(r *http.Request) (access.Reply, error) {
 func isNoRows(err error) bool { return errors.Is(err, pgx.ErrNoRows) }
 
 type simulationRequest struct {
-	Operation   map[string]json.RawMessage `json:"operation"`
-	Surface     string                     `json:"surface"`
-	Mode        string                     `json:"mode"`
-	Preferences *Preferences               `json:"preferences"`
-	APIKeyID    *string                    `json:"api_key_id"`
-	Seed        string                     `json:"seed"`
+	Operation            map[string]json.RawMessage `json:"operation"`
+	Surface              string                     `json:"surface"`
+	Mode                 string                     `json:"mode"`
+	Preferences          *Preferences               `json:"preferences"`
+	APIKeyID             *string                    `json:"api_key_id"`
+	Seed                 string                     `json:"seed"`
+	EstimatedInputTokens *int64                     `json:"estimated_input_tokens"`
+	MaxOutputTokens      *int64                     `json:"max_output_tokens"`
 }
 
 // simulateRouting answers the console's routing simulator against the routes
 // as currently published.
 func (s *Server) simulateRouting(r *http.Request) (access.Reply, error) {
-	if _, err := s.Access.Principal(r, s.Access.Pool, "read"); err != nil {
+	p, err := s.Access.Principal(r, s.Access.Pool, "read")
+	if err != nil {
 		return access.Reply{}, err
 	}
 	var input simulationRequest
@@ -169,6 +199,7 @@ func (s *Server) simulateRouting(r *http.Request) (access.Reply, error) {
 	}
 	var keyReason string
 	var keyID string
+	var keyProject *string
 	if input.APIKeyID != nil {
 		var err error
 		keyID, err = access.ParseUUID(*input.APIKeyID)
@@ -177,8 +208,11 @@ func (s *Server) simulateRouting(r *http.Request) (access.Reply, error) {
 		}
 		var authority access.Authority
 		var raw []byte
-		if err = s.Access.Pool.QueryRow(r.Context(), "SELECT policy,expires_at,revoked_at FROM olp_go.api_keys WHERE id=$1", keyID).Scan(&raw, &authority.ExpiresAt, &authority.RevokedAt); err != nil {
+		if err = s.Access.Pool.QueryRow(r.Context(), "SELECT policy,expires_at,revoked_at,project_id::text FROM olp_go.api_keys WHERE id=$1", keyID).Scan(&raw, &authority.ExpiresAt, &authority.RevokedAt, &keyProject); err != nil {
 			return access.Reply{}, err
+		}
+		if !p.CanProject(keyProject, false) {
+			return access.Reply{}, pgx.ErrNoRows
 		}
 		if err = json.Unmarshal(raw, &authority.Policy); err != nil {
 			return access.Reply{}, err
@@ -199,6 +233,14 @@ func (s *Server) simulateRouting(r *http.Request) (access.Reply, error) {
 	if err != nil {
 		return access.Reply{}, err
 	}
+	if route, ok := snapshot.Routes[slug]; ok {
+		if !p.CanProject(route.ProjectID, false) {
+			return access.Reply{}, pgx.ErrNoRows
+		}
+		if input.APIKeyID != nil && !sameProject(keyProject, route.ProjectID) {
+			return access.Reply{}, access.Invalid("api_key_id", "The API key and route must belong to the same project.")
+		}
+	}
 	inputs, err := s.routingInputs(r, tx)
 	if err != nil {
 		return access.Reply{}, err
@@ -208,6 +250,10 @@ func (s *Server) simulateRouting(r *http.Request) (access.Reply, error) {
 		return access.Reply{}, err
 	}
 	options := runtime.SelectionOptions{KeyID: keyID, Preferences: input.Preferences, Inputs: inputs, CheckSlots: true, CredentialRevoked: revoked}
+	options.TokenDemand, err = tokenDemand(input.EstimatedInputTokens, input.MaxOutputTokens)
+	if err != nil {
+		return access.Reply{}, err
+	}
 	parsed, err := protocols.SimulationRequest(input.Operation["request"], operation, input.Surface, input.Mode, slug)
 	if err != nil {
 		return access.Reply{}, access.Invalid("operation.request", err.Error())
@@ -247,6 +293,7 @@ func (s *Server) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v3/route-drafts/{draft_id}/simulate", h(s.simulateDraft))
 	mux.HandleFunc("GET /api/v3/routes", h(s.routes))
 	mux.HandleFunc("GET /api/v3/routes/{route_id}", h(s.route))
+	mux.HandleFunc("POST /api/v3/routes/{route_id}/retire", h(s.retireRoute))
 	mux.HandleFunc("GET /api/v3/routes/{route_id}/revisions", h(s.revisions))
 	mux.HandleFunc("GET /api/v3/routes/{route_id}/revisions/diff", h(s.revisionDiff))
 	mux.HandleFunc("GET /api/v3/routes/{route_id}/revisions/{revision_id}", h(s.revision))

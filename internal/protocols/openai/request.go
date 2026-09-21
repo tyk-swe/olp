@@ -33,6 +33,12 @@ const (
 	FamilyGemini         Family = "gemini"
 	FamilyGeminiStream   Family = "gemini_stream"
 	FamilyGeminiCount    Family = "gemini_count"
+
+	FamilyGeminiEmbeddings      Family = "gemini_embeddings"
+	FamilyGeminiEmbeddingsBatch Family = "gemini_embeddings_batch"
+	FamilyVertexEmbeddings      Family = "vertex_embeddings"
+	FamilyBedrockEmbeddings     Family = "bedrock_embeddings"
+	FamilyRerank                Family = "rerank"
 	// Media families name their operation tag directly so the accounting
 	// envelope and selection registry agree on the operation string.
 	FamilyImageGeneration Family = "image_generation"
@@ -45,19 +51,29 @@ const (
 	FamilyVideoGet        Family = "video_get"
 	FamilyVideoContent    Family = "video_content"
 	FamilyVideoDelete     Family = "video_delete"
+
+	FamilyFile          Family = "file"
+	FamilyBatch         Family = "batch"
+	FamilyRealtime      Family = "realtime"
+	FamilyBedrock       Family = "bedrock"
+	FamilyBedrockInvoke Family = "bedrock_invoke"
 )
 
 func (f Family) Operation() string {
 	switch f {
 	case FamilyInputTokens, FamilyAnthropicCount, FamilyGeminiCount:
 		return "token_count"
-	case FamilyEmbeddings:
+	case FamilyEmbeddings, FamilyGeminiEmbeddings, FamilyGeminiEmbeddingsBatch,
+		FamilyVertexEmbeddings, FamilyBedrockEmbeddings:
 		return "embeddings"
 	case FamilyModeration:
 		return "moderation"
+	case FamilyRerank:
+		return "rerank"
 	case FamilyImageGeneration, FamilyImageEdit, FamilyImageVariation, FamilySpeech,
 		FamilyTranscription, FamilyVideoCreate, FamilyVideoList, FamilyVideoGet,
-		FamilyVideoContent, FamilyVideoDelete:
+		FamilyVideoContent, FamilyVideoDelete, FamilyFile, FamilyBatch,
+		FamilyRealtime, FamilyBedrockInvoke:
 		return string(f)
 	}
 	return OperationGeneration
@@ -69,6 +85,8 @@ func (f Family) Surface() string {
 		return "anthropic"
 	case FamilyGemini, FamilyGeminiStream, FamilyGeminiCount:
 		return "gemini"
+	case FamilyBedrock, FamilyBedrockInvoke:
+		return "bedrock"
 	}
 	return "openai"
 }
@@ -103,6 +121,8 @@ type Request struct {
 
 // Field returns a top-level field verbatim, or nil when absent.
 func (r *Request) Field(name string) json.RawMessage { return r.fields[name] }
+
+func (r *Request) SetField(name string, value json.RawMessage) { r.fields[name] = value }
 
 // Document returns a copy of the source envelope for a codec to rewrite.
 func (r *Request) Document() map[string]json.RawMessage {
@@ -170,6 +190,8 @@ func parseFields(family Family, fields map[string]json.RawMessage) (*Request, er
 				}
 			}
 		}
+	case FamilyRerank:
+		err = r.validateRerank()
 	default:
 		return nil, errors.New("unknown request family")
 	}
@@ -256,13 +278,21 @@ func validateResponses(fields map[string]json.RawMessage) error {
 			}
 		}
 	}
-	for _, name := range []string{"previous_response_id", "conversation"} {
-		if raw, present := fields[name]; present && !isNull(raw) {
-			return &RequestError{Code: "unsupported_stateful_reference", Message: "The gateway does not hold prior responses; " + name + " is not supported.", Param: name}
+	if raw, present := fields["previous_response_id"]; present && !isNull(raw) {
+		if _, ok := stringField(fields, "previous_response_id"); !ok {
+			return invalid("previous_response_id", "previous_response_id must be a string.")
 		}
 	}
-	if raw, present := fields["background"]; present && bytes.Equal(bytes.TrimSpace(raw), []byte("true")) {
-		return &RequestError{Code: "unsupported_parameter", Message: "Background responses require stateful polling, which the gateway does not provide.", Param: "background"}
+	if raw, present := fields["conversation"]; present && !isNull(raw) {
+		return &RequestError{Code: "unsupported_stateful_reference", Message: "The gateway does not hold prior conversations; conversation is not supported.", Param: "conversation"}
+	}
+	for _, name := range []string{"background", "store"} {
+		if raw, present := fields[name]; present && !isNull(raw) {
+			var flag bool
+			if json.Unmarshal(raw, &flag) != nil {
+				return invalid(name, name+" must be a boolean.")
+			}
+		}
 	}
 	if raw, present := fields["instructions"]; present && !isNull(raw) {
 		if _, ok := stringField(fields, "instructions"); !ok {
@@ -423,6 +453,16 @@ func (r *Request) Encode(upstreamModel string, defaults map[string]json.RawMessa
 		}
 		if _, present := r.fields["max_completion_tokens"]; present {
 			delete(out, "max_tokens")
+		}
+	}
+
+	if r.Family == FamilyResponses || r.Family == FamilyInputTokens {
+		for _, name := range []string{"previous_response_id", "conversation", "background", "store"} {
+			if _, injected := defaults[name]; injected {
+				if _, caller := r.fields[name]; !caller {
+					return nil, &RequestError{Code: "unsupported_stateful_reference", Message: "Provider defaults cannot supply " + name + ".", Param: name}
+				}
+			}
 		}
 	}
 	// Defaults are request fields too. Validate the merged envelope before

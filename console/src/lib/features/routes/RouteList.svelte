@@ -2,12 +2,17 @@
   import { routeKeys } from '$lib/features/routes/routeKeys';
 
   import { resolve } from '$app/paths';
-  import { createQuery } from '@tanstack/svelte-query';
+  import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { errorMessage as message } from '$lib/api/http';
   import CursorPagination from '$lib/components/CursorPagination.svelte';
   import NavIcon from '$lib/components/NavIcon.svelte';
   import ReadOnlyNote from '$lib/components/ReadOnlyNote.svelte';
-  import { listRouteDraftPage, listRoutePage } from '$lib/features/routes/api';
+  import {
+    listRouteDraftPage,
+    listRoutePage,
+    retireRoute,
+    type ActiveRoute
+  } from '$lib/features/routes/api';
   import { cursorPaginationProps } from '$lib/lists/pagination';
   import { useRole } from '$lib/features/access/session/useRole.svelte';
   import { formatDate, formatInteger } from '$lib/format';
@@ -16,6 +21,9 @@
   let { listState = $bindable() }: { listState: RouteListState } = $props();
   const access = useRole();
   const canManage = $derived(access.can('routes.manage'));
+  const queryClient = useQueryClient();
+  let retiring = $state<string | null>(null);
+  let retireError = $state<string | null>(null);
 
   const drafts = createQuery(() => {
     const cursor = listState.draft.cursor;
@@ -33,6 +41,20 @@
       placeholderData: (previous) => previous
     };
   });
+
+  async function retire(item: ActiveRoute) {
+    if (retiring !== null) return;
+    retiring = item.id;
+    retireError = null;
+    try {
+      await retireRoute(item.id, item.etag);
+      await queryClient.invalidateQueries({ queryKey: routeKeys.lists });
+    } catch (error) {
+      retireError = `${item.slug}: ${message(error)}`;
+    } finally {
+      retiring = null;
+    }
+  }
 </script>
 
 <svelte:head><title>Routes · OpenLLMProxy</title></svelte:head>
@@ -69,19 +91,22 @@
     </div>
   </section>
 {:else}
-  <section class="route-section" aria-labelledby="active-routes-heading">
+  <section class="route-section" aria-labelledby="published-routes-heading">
     <div class="list-heading">
       <div>
         <p class="eyebrow">Published runtime</p>
-        <h2 id="active-routes-heading">Active routes</h2>
+        <h2 id="published-routes-heading">Published routes</h2>
       </div>
       <span class="badge success"
         >{activeRoutes.data?.items.length ?? 0} on this page</span
       >
     </div>
     <!-- Active routes and drafts come from separate endpoints; one failing must not hide the other. -->
+    {#if retireError}
+      <div class="inline-problem" role="alert">{retireError}</div>
+    {/if}
     {#if activeRoutes.isPending}
-      <div class="loading-state" role="status">Loading active routes…</div>
+      <div class="loading-state" role="status">Loading published routes…</div>
     {:else if activeRoutes.isError}
       <div class="inline-problem" role="alert">
         {message(activeRoutes.error)}
@@ -93,7 +118,7 @@
       </div>
     {:else if !activeRoutes.data?.items.length}
       <div class="card empty-state compact">
-        <p>No active routes on this page.</p>
+        <p>No published routes on this page.</p>
       </div>
     {:else}
       {#if activeRoutes.isPlaceholderData}
@@ -104,20 +129,29 @@
         class="table-shell"
         tabindex="0"
         role="region"
-        aria-label="Active routes table"
+        aria-label="Published routes table"
         aria-busy={activeRoutes.isPlaceholderData}
       >
         <table class="data-table">
           <thead
             ><tr
-              ><th>Public slug</th><th>Latest revision</th><th>Operations</th
+              ><th>Public slug</th><th>Status</th><th>Latest revision</th><th
+                >Operations</th
               ><th>Targets</th><th>Activated</th><th>Created by</th><th
                 ><span class="sr-only">Actions</span></th
               ></tr
             ></thead
           ><tbody
             >{#each activeRoutes.data.items as item (item.id)}<tr
-                ><td><strong><code>{item.slug}</code></strong></td><td
+                ><td
+                  ><strong><code>{item.slug}</code></strong><br /><small
+                    >{item.project_name ?? 'Installation-wide'}</small
+                  ></td
+                ><td
+                  ><span class="badge" class:success={item.state === 'active'}
+                    >{item.state}</span
+                  ></td
+                ><td
                   >Revision {item.latest_revision.revision}<br /><small
                     >{item.revision_count} total</small
                   ></td
@@ -125,12 +159,18 @@
                   >{item.latest_revision.targets.length}</td
                 ><td>{formatDate(item.latest_revision.activated_at)}</td><td
                   >{item.created_by_email ?? 'A removed account'}</td
-                ><td
+                ><td class="row-actions"
                   ><a
                     class="button button-secondary"
                     href={resolve(`/routes/${item.id}/revisions`)}
                     >History & restore</a
-                  ></td
+                  >{#if canManage && item.state === 'active'}<button
+                      class="button button-secondary"
+                      type="button"
+                      disabled={retiring !== null}
+                      onclick={() => retire(item)}
+                      >{retiring === item.id ? 'Retiring…' : 'Retire'}</button
+                    >{/if}</td
                 ></tr
               >{/each}</tbody
           >
@@ -142,7 +182,7 @@
           listState.route,
           activeRoutes.isPlaceholderData ? null : activeRoutes.data?.nextCursor
         )}
-        label="Active route pages"
+        label="Published route pages"
       />{/if}
   </section>
   <section class="route-section" aria-labelledby="draft-routes-heading">
@@ -193,6 +233,8 @@
                 ><td
                   ><a class="route-link" href={resolve(`/routes/${item.id}`)}
                     >{item.slug}</a
+                  ><br /><small
+                    >{item.project_name ?? 'Installation-wide'}</small
                   ></td
                 ><td
                   ><span
@@ -267,6 +309,11 @@
   }
   .route-link:hover {
     text-decoration-color: currentColor;
+  }
+  .row-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
   }
   td small {
     color: var(--foreground-muted);

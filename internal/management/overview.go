@@ -19,16 +19,19 @@ func (o *Overview) Register(mux *http.ServeMux) {
 }
 
 func (o *Overview) summary(r *http.Request) (access.Reply, error) {
-	if _, err := o.Access.Principal(r, o.Access.Pool, "read"); err != nil {
+	p, err := o.Access.Principal(r, o.Access.Pool, "read")
+	if err != nil {
 		return access.Reply{}, err
 	}
 	var response contract.OverviewResponse
-	err := o.Access.Pool.QueryRow(r.Context(),
+	err = o.Access.Pool.QueryRow(r.Context(),
 		"SELECT "+
-			"(SELECT count(*) FROM olp_go.providers WHERE active_revision IS NOT NULL),"+
-			"(SELECT count(*) FROM olp_go.routes),"+
-			"(SELECT count(*) FROM olp_go.provider_models WHERE enabled),"+
-			"EXISTS(SELECT 1 FROM olp_go.api_keys WHERE revoked_at IS NULL)").
+			"(SELECT count(*) FROM olp_go.providers WHERE active_revision IS NOT NULL AND ($1 OR project_id = ANY($2::uuid[]))),"+
+			"(SELECT count(*) FROM olp_go.routes WHERE ($1 OR project_id = ANY($2::uuid[]))),"+
+			"(SELECT count(*) FROM olp_go.provider_models WHERE enabled AND ($1 OR provider_id IN"+
+			" (SELECT id FROM olp_go.providers WHERE project_id = ANY($2::uuid[])))),"+
+			"EXISTS(SELECT 1 FROM olp_go.api_keys WHERE revoked_at IS NULL AND ($1 OR project_id = ANY($2::uuid[])))",
+		p.AllProjects, p.ProjectIDs()).
 		Scan(&response.ActiveProviders, &response.ActiveRoutes, &response.EnabledModels, &response.UsableApiKey)
 	if err != nil {
 		return access.Reply{}, err

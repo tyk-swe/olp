@@ -237,9 +237,26 @@ test.describe('Go-hosted console integration', () => {
     await expect(page).toHaveURL(/\/login\?return_to=%2Fproviders$/);
     await expect(page.getByRole('heading', { name: 'Sign in' })).toBeVisible();
 
-    await page.getByLabel('Email').fill(owner.email);
-    await page.getByLabel('Password').fill(owner.password);
-    await page.getByRole('button', { name: 'Sign in' }).click();
+    const signInDeadline = Date.now() + 75_000;
+    while (true) {
+      await page.getByLabel('Email').fill(owner.email);
+      await page.getByLabel('Password').fill(owner.password);
+      const completed = page.waitForResponse(
+        (response) =>
+          response.request().method() === 'POST' &&
+          new URL(response.url()).pathname === '/api/v3/sessions'
+      );
+      await page.getByRole('button', { name: 'Sign in' }).click();
+      const response = await completed;
+      if (response.status() !== 429 || Date.now() >= signInDeadline) {
+        expect(response.status()).toBe(201);
+        break;
+      }
+      const seconds = Number(response.headers()['retry-after'] ?? '1');
+      await new Promise((resolve) =>
+        setTimeout(resolve, Math.min(60, Math.max(1, seconds)) * 1000)
+      );
+    }
     await expect(page).toHaveURL(/\/providers$/);
     await expect(
       page.getByRole('heading', { name: 'Providers', exact: true })
@@ -673,13 +690,14 @@ test.describe('Go-hosted console integration', () => {
     await created.getByRole('button', { name: 'I have saved the key' }).click();
 
     await expect(page).toHaveURL(/\/api-keys$/);
-    await expect(page.getByText(keyName)).toBeVisible();
+    const inventory = page.getByRole('region', { name: 'API keys' });
+    await expect(inventory.getByText(keyName)).toBeVisible();
     await expect(page.getByText(secret)).toHaveCount(0);
 
     // A reload goes back to the server: if the secret came back on a listing,
     // "returned only by this creation response" would be false.
     await page.reload();
-    await expect(page.getByText(keyName)).toBeVisible();
+    await expect(inventory.getByText(keyName)).toBeVisible();
     await expectSecretGone(page, secret, 'the created secret');
 
     const row = page.getByRole('row').filter({ hasText: keyName });

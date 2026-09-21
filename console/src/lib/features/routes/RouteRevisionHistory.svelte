@@ -148,7 +148,8 @@
             revisionDiff.slug_changed && 'slug',
             revisionDiff.timeout_changed && 'deadline',
             revisionDiff.max_attempts_changed && 'attempts',
-            revisionDiff.routing_policy_changed && 'routing policy'
+            revisionDiff.routing_policy_changed && 'routing policy',
+            revisionDiff.content_policy_changed && 'content policy'
           ]
             .filter(Boolean)
             .join(', ') || 'unchanged'}</strong
@@ -236,7 +237,11 @@
               <details>
                 <summary>Routing policy</summary>
                 <pre>{JSON.stringify(revision.routing_policy, null, 2)}</pre>
-              </details></td
+              </details>
+              {#if revision.content_policy}<details>
+                  <summary>Content policy</summary>
+                  <pre>{JSON.stringify(revision.content_policy, null, 2)}</pre>
+                </details>{/if}</td
             ><td data-label="Activated"
               >{formatDate(revision.activated_at)}<br /><small
                 >By {revision.activated_by}</small

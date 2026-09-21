@@ -4,12 +4,12 @@
   "frozenRustReference": "6c21dfb917c9019161348ea24b532a77b6612e6e",
   "contract": {
     "path": "openapi/management.json",
-    "sha256": "9625d33b8faf5ea206973a328ec6e4f32ce75730be73ad7e473599a85565aa54",
-    "operations": 101
+    "sha256": "8911d0ef8df0cd92d1e0f30e2057e96d598b6dd38f20b6447f183cc47ff87e07",
+    "operations": 144
   },
   "behaviorMapping": {
     "path": "tests/release-behaviors.json",
-    "sha256": "089abbd8183bc026c9411b4512a78791db76c359d3e5026d56b00470d11df4b4"
+    "sha256": "6e312225879700e303a4876027f350d6742d3176ae3aecd545d52d0adf694fd7"
   },
   "capabilityCheck": "internal/providers/frozen_capabilities_test.go#TestFrozenCertificationMatrix",
   "management": [
@@ -3052,6 +3052,27 @@
       ]
     },
     {
+      "provider": "Gemini",
+      "operation": "Embeddings",
+      "surface": "OpenAi",
+      "transport": "Unary",
+      "owner": "M5",
+      "status": "implemented",
+      "source": "https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/tests/conformance/provider_connectors/matrix.rs",
+      "behaviors": [
+        "selected-operations"
+      ],
+      "tests": [
+        "internal/providers/frozen_capabilities_test.go#TestFrozenCertificationMatrix",
+        "internal/protocols/openai/openai_test.go#TestSelectedOperationFamilies",
+        "internal/protocols/parity_test.go#TestMaintainedNonMediaRequestMatrix",
+        "internal/protocols/stream_parity_test.go#TestRefusalAndEmbeddingEncodingArePreserved",
+        "internal/media/wire_test.go#TestDecodeImageGenerationValidation",
+        "internal/media/wire_test.go#TestDecodeSpeechValidation",
+        "internal/media/wire_test.go#TestDecodeVideoCreateValidation"
+      ]
+    },
+    {
       "provider": "VertexAi",
       "operation": "Generation",
       "surface": "OpenAi",
@@ -3223,6 +3244,52 @@
       ]
     },
     {
+      "provider": "VertexAi",
+      "operation": "Embeddings",
+      "surface": "OpenAi",
+      "transport": "Unary",
+      "owner": "M5",
+      "status": "implemented",
+      "source": "https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/tests/conformance/provider_connectors/matrix.rs",
+      "behaviors": [
+        "selected-operations"
+      ],
+      "tests": [
+        "internal/providers/frozen_capabilities_test.go#TestFrozenCertificationMatrix",
+        "internal/protocols/openai/openai_test.go#TestSelectedOperationFamilies",
+        "internal/protocols/parity_test.go#TestMaintainedNonMediaRequestMatrix",
+        "internal/protocols/stream_parity_test.go#TestRefusalAndEmbeddingEncodingArePreserved",
+        "internal/media/wire_test.go#TestDecodeImageGenerationValidation",
+        "internal/media/wire_test.go#TestDecodeSpeechValidation",
+        "internal/media/wire_test.go#TestDecodeVideoCreateValidation"
+      ]
+    },
+    {
+      "provider": "VertexAi",
+      "operation": "ImageGeneration",
+      "surface": "OpenAi",
+      "transport": "Unary",
+      "owner": "M5",
+      "status": "implemented",
+      "source": "https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/tests/conformance/provider_connectors/matrix.rs",
+      "behaviors": [
+        "media-inference"
+      ],
+      "tests": [
+        "internal/providers/frozen_capabilities_test.go#TestFrozenCertificationMatrix",
+        "internal/gateway/media_test.go#TestMediaStreamCompletesBeforeAttemptSettlement",
+        "internal/gateway/media_test.go#TestMediaStreamRejectsIncompleteAndOversizedResponses",
+        "internal/gateway/media_test.go#TestMediaSpeechMissingUsageRemainsUncertain",
+        "internal/gateway/media_test.go#TestMediaMultipartBoundsAndAdmission",
+        "internal/gateway/media_failure_test.go#TestMediaStreamCancellationAndDeadline",
+        "internal/gateway/media_failure_test.go#TestMediaImageDeliveryFailureCleansEveryArtifact",
+        "internal/media/upstream_test.go#TestTransportDecodesJSONImageResponse",
+        "internal/media/upstream_test.go#TestTransportStagesBinaryResponse",
+        "internal/media/upstream_test.go#TestTransportBoundsOversizedResponse",
+        "internal/media/capacity_system_test.go#TestMediaCapacityWithSlowReadersAndMassDisconnects"
+      ]
+    },
+    {
       "provider": "Bedrock",
       "operation": "Generation",
       "surface": "OpenAi",
@@ -3391,6 +3458,52 @@
         "internal/protocols/parity_test.go#TestMaintainedNonMediaRequestMatrix",
         "internal/protocols/parity_test.go#TestExplicitTranslationRefusals",
         "internal/connectors/auth_test.go#TestNativeCloudURLAndAuthentication"
+      ]
+    },
+    {
+      "provider": "Bedrock",
+      "operation": "Embeddings",
+      "surface": "OpenAi",
+      "transport": "Unary",
+      "owner": "M5",
+      "status": "implemented",
+      "source": "https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/tests/conformance/provider_connectors/matrix.rs",
+      "behaviors": [
+        "selected-operations"
+      ],
+      "tests": [
+        "internal/providers/frozen_capabilities_test.go#TestFrozenCertificationMatrix",
+        "internal/protocols/openai/openai_test.go#TestSelectedOperationFamilies",
+        "internal/protocols/parity_test.go#TestMaintainedNonMediaRequestMatrix",
+        "internal/protocols/stream_parity_test.go#TestRefusalAndEmbeddingEncodingArePreserved",
+        "internal/media/wire_test.go#TestDecodeImageGenerationValidation",
+        "internal/media/wire_test.go#TestDecodeSpeechValidation",
+        "internal/media/wire_test.go#TestDecodeVideoCreateValidation"
+      ]
+    },
+    {
+      "provider": "Bedrock",
+      "operation": "ImageGeneration",
+      "surface": "OpenAi",
+      "transport": "Unary",
+      "owner": "M5",
+      "status": "implemented",
+      "source": "https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/tests/conformance/provider_connectors/matrix.rs",
+      "behaviors": [
+        "media-inference"
+      ],
+      "tests": [
+        "internal/providers/frozen_capabilities_test.go#TestFrozenCertificationMatrix",
+        "internal/gateway/media_test.go#TestMediaStreamCompletesBeforeAttemptSettlement",
+        "internal/gateway/media_test.go#TestMediaStreamRejectsIncompleteAndOversizedResponses",
+        "internal/gateway/media_test.go#TestMediaSpeechMissingUsageRemainsUncertain",
+        "internal/gateway/media_test.go#TestMediaMultipartBoundsAndAdmission",
+        "internal/gateway/media_failure_test.go#TestMediaStreamCancellationAndDeadline",
+        "internal/gateway/media_failure_test.go#TestMediaImageDeliveryFailureCleansEveryArtifact",
+        "internal/media/upstream_test.go#TestTransportDecodesJSONImageResponse",
+        "internal/media/upstream_test.go#TestTransportStagesBinaryResponse",
+        "internal/media/upstream_test.go#TestTransportBoundsOversizedResponse",
+        "internal/media/capacity_system_test.go#TestMediaCapacityWithSlowReadersAndMassDisconnects"
       ]
     },
     {
@@ -3703,6 +3816,152 @@
         "internal/media/wire_test.go#TestDecodeImageGenerationValidation",
         "internal/media/wire_test.go#TestDecodeSpeechValidation",
         "internal/media/wire_test.go#TestDecodeVideoCreateValidation"
+      ]
+    },
+    {
+      "provider": "OpenAi",
+      "operation": "Batch",
+      "surface": "OpenAi",
+      "transport": "Unary",
+      "owner": "M6",
+      "status": "implemented",
+      "source": "https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/tests/conformance/provider_connectors/matrix.rs",
+      "behaviors": [
+        "provider-surfaces"
+      ],
+      "tests": [
+        "internal/providers/frozen_capabilities_test.go#TestFrozenCertificationMatrix",
+        "tests/integration/provider_resources_test.go#TestBatchLifecycle",
+        "tests/integration/provider_resources_test.go#TestBedrockIngress",
+        "tests/integration/provider_resources_test.go#TestRealtimeIngress"
+      ]
+    },
+    {
+      "provider": "OpenAi",
+      "operation": "Realtime",
+      "surface": "OpenAi",
+      "transport": "Realtime",
+      "owner": "M6",
+      "status": "implemented",
+      "source": "https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/tests/conformance/provider_connectors/matrix.rs",
+      "behaviors": [
+        "provider-surfaces"
+      ],
+      "tests": [
+        "internal/providers/frozen_capabilities_test.go#TestFrozenCertificationMatrix",
+        "tests/integration/provider_resources_test.go#TestBatchLifecycle",
+        "tests/integration/provider_resources_test.go#TestBedrockIngress",
+        "tests/integration/provider_resources_test.go#TestRealtimeIngress"
+      ]
+    },
+    {
+      "provider": "AzureOpenAi",
+      "operation": "Batch",
+      "surface": "OpenAi",
+      "transport": "Unary",
+      "owner": "M6",
+      "status": "implemented",
+      "source": "https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/tests/conformance/provider_connectors/matrix.rs",
+      "behaviors": [
+        "provider-surfaces"
+      ],
+      "tests": [
+        "internal/providers/frozen_capabilities_test.go#TestFrozenCertificationMatrix",
+        "tests/integration/provider_resources_test.go#TestBatchLifecycle",
+        "tests/integration/provider_resources_test.go#TestBedrockIngress",
+        "tests/integration/provider_resources_test.go#TestRealtimeIngress"
+      ]
+    },
+    {
+      "provider": "AzureOpenAi",
+      "operation": "Realtime",
+      "surface": "OpenAi",
+      "transport": "Realtime",
+      "owner": "M6",
+      "status": "implemented",
+      "source": "https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/tests/conformance/provider_connectors/matrix.rs",
+      "behaviors": [
+        "provider-surfaces"
+      ],
+      "tests": [
+        "internal/providers/frozen_capabilities_test.go#TestFrozenCertificationMatrix",
+        "tests/integration/provider_resources_test.go#TestBatchLifecycle",
+        "tests/integration/provider_resources_test.go#TestBedrockIngress",
+        "tests/integration/provider_resources_test.go#TestRealtimeIngress"
+      ]
+    },
+    {
+      "provider": "Bedrock",
+      "operation": "Generation",
+      "surface": "Bedrock",
+      "transport": "Unary",
+      "owner": "M6",
+      "status": "implemented",
+      "source": "https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/tests/conformance/provider_connectors/matrix.rs",
+      "behaviors": [
+        "connector-generation"
+      ],
+      "tests": [
+        "internal/providers/frozen_capabilities_test.go#TestFrozenCertificationMatrix",
+        "tests/integration/provider_parity_test.go#TestProviderAndNativeSurfaceParity",
+        "internal/protocols/parity_test.go#TestMaintainedNonMediaRequestMatrix",
+        "internal/protocols/parity_test.go#TestExplicitTranslationRefusals",
+        "internal/connectors/auth_test.go#TestNativeCloudURLAndAuthentication"
+      ]
+    },
+    {
+      "provider": "Bedrock",
+      "operation": "Generation",
+      "surface": "Bedrock",
+      "transport": "Streaming",
+      "owner": "M6",
+      "status": "implemented",
+      "source": "https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/tests/conformance/provider_connectors/matrix.rs",
+      "behaviors": [
+        "connector-generation"
+      ],
+      "tests": [
+        "internal/providers/frozen_capabilities_test.go#TestFrozenCertificationMatrix",
+        "tests/integration/provider_parity_test.go#TestProviderAndNativeSurfaceParity",
+        "internal/protocols/parity_test.go#TestMaintainedNonMediaRequestMatrix",
+        "internal/protocols/parity_test.go#TestExplicitTranslationRefusals",
+        "internal/connectors/auth_test.go#TestNativeCloudURLAndAuthentication"
+      ]
+    },
+    {
+      "provider": "Bedrock",
+      "operation": "BedrockInvoke",
+      "surface": "Bedrock",
+      "transport": "Unary",
+      "owner": "M6",
+      "status": "implemented",
+      "source": "https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/tests/conformance/provider_connectors/matrix.rs",
+      "behaviors": [
+        "provider-surfaces"
+      ],
+      "tests": [
+        "internal/providers/frozen_capabilities_test.go#TestFrozenCertificationMatrix",
+        "tests/integration/provider_resources_test.go#TestBatchLifecycle",
+        "tests/integration/provider_resources_test.go#TestBedrockIngress",
+        "tests/integration/provider_resources_test.go#TestRealtimeIngress"
+      ]
+    },
+    {
+      "provider": "Bedrock",
+      "operation": "BedrockInvoke",
+      "surface": "Bedrock",
+      "transport": "Streaming",
+      "owner": "M6",
+      "status": "implemented",
+      "source": "https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/tests/conformance/provider_connectors/matrix.rs",
+      "behaviors": [
+        "provider-surfaces"
+      ],
+      "tests": [
+        "internal/providers/frozen_capabilities_test.go#TestFrozenCertificationMatrix",
+        "tests/integration/provider_resources_test.go#TestBatchLifecycle",
+        "tests/integration/provider_resources_test.go#TestBedrockIngress",
+        "tests/integration/provider_resources_test.go#TestRealtimeIngress"
       ]
     }
   ],
@@ -3933,7 +4192,7 @@
     },
     {
       "path": "tests/fixtures/protocols/selected-operation-families.json",
-      "sha256": "4ea32094a4d4efad5025ca746747337f032bfa43ab2d595c884b5aa3333c8ae4",
+      "sha256": "1bf2837f4f24ea51a22c04abba6001b9f5e30ab12c8acc11b658221e0b583d20",
       "reference": "https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/tests/fixtures/protocols/selected-operation-families.json",
       "goCoverage": "retained byte-for-byte; semantic protocol/routing/egress suites"
     },
@@ -3945,7 +4204,7 @@
     },
     {
       "path": "tests/fixtures/routing/retry-taxonomy.json",
-      "sha256": "034a813126ec7614689dbda2d62e02a3667005c80f37ee01c3ee823d9e169ba0",
+      "sha256": "2188eb510fa56ead1fc24c88374d726143cc965255635c772bd6d79b2b8e260e",
       "reference": "https://github.com/tyk-swe/olp/blob/6c21dfb917c9019161348ea24b532a77b6612e6e/tests/fixtures/routing/retry-taxonomy.json",
       "goCoverage": "retained byte-for-byte; semantic protocol/routing/egress suites"
     },
@@ -6025,13 +6284,18 @@
     "internal/access/oidc_transport_test.go",
     "internal/access/pagination_test.go",
     "internal/access/policy_test.go",
+    "internal/access/projects_test.go",
+    "internal/access/tokens_test.go",
     "internal/config/config_test.go",
     "internal/config/release_test.go",
+    "internal/configuration/artifact_test.go",
     "internal/connectors/auth_test.go",
+    "internal/connectors/azure_test.go",
     "internal/connectors/bedrock_endpoint_test.go",
     "internal/connectors/custom_headers_test.go",
     "internal/connectors/live_test.go",
     "internal/console/handler_test.go",
+    "internal/contentpolicy/policy_test.go",
     "internal/coordination/client_test.go",
     "internal/database/database_test.go",
     "internal/egress/credentials_test.go",
@@ -6039,6 +6303,7 @@
     "internal/gateway/accounting_test.go",
     "internal/gateway/body_test.go",
     "internal/gateway/boundaries_test.go",
+    "internal/gateway/context_window_test.go",
     "internal/gateway/cors_test.go",
     "internal/gateway/counting_reader_test.go",
     "internal/gateway/credential_redaction_test.go",
@@ -6053,23 +6318,29 @@
     "internal/gateway/limits_test.go",
     "internal/gateway/media_delivery_test.go",
     "internal/gateway/media_failure_test.go",
+    "internal/gateway/media_parity_system_test.go",
     "internal/gateway/media_quota_system_test.go",
     "internal/gateway/media_restore_test.go",
+    "internal/gateway/media_routing_test.go",
     "internal/gateway/media_system_test.go",
     "internal/gateway/media_test.go",
+    "internal/gateway/policy_test.go",
     "internal/gateway/revocation_test.go",
     "internal/gateway/stream_limits_test.go",
     "internal/gateway/stream_terminal_test.go",
     "internal/gateway/stream_test.go",
     "internal/gateway/stream_usage_test.go",
+    "internal/gateway/structured_output_test.go",
     "internal/gateway/unary_choices_test.go",
     "internal/gateway/unary_test.go",
     "internal/limits/limits_test.go",
     "internal/management/contract/types_test.go",
     "internal/media/capacity_system_test.go",
+    "internal/media/jobs_claim_test.go",
     "internal/media/jobs_test.go",
     "internal/media/multipart_order_test.go",
     "internal/media/multipart_test.go",
+    "internal/media/native_image_test.go",
     "internal/media/spool_recovery_test.go",
     "internal/media/spool_test.go",
     "internal/media/upstream_rejection_test.go",
@@ -6079,10 +6350,14 @@
     "internal/process/health_test.go",
     "internal/process/listener_test.go",
     "internal/process/listeners_test.go",
+    "internal/process/maintenance_test.go",
     "internal/process/secrets_test.go",
     "internal/protocols/bedrock_test.go",
+    "internal/protocols/cache_usage_test.go",
     "internal/protocols/canonical_test.go",
+    "internal/protocols/content_test.go",
     "internal/protocols/inline_media_test.go",
+    "internal/protocols/native_operations_test.go",
     "internal/protocols/openai/boundaries_test.go",
     "internal/protocols/openai/metadata_test.go",
     "internal/protocols/openai/openai_test.go",
@@ -6097,6 +6372,7 @@
     "internal/protocols/profiles_parity_test.go",
     "internal/protocols/sse/decoder_test.go",
     "internal/protocols/stream_parity_test.go",
+    "internal/protocols/structured_output_test.go",
     "internal/providers/boundaries_test.go",
     "internal/providers/deployment_parity_test.go",
     "internal/providers/discovery_parity_test.go",
@@ -6112,6 +6388,8 @@
     "internal/routes/media_test.go",
     "internal/routes/policy_test.go",
     "internal/routes/simulate_test.go",
+    "internal/runtime/capabilities_test.go",
+    "internal/runtime/capacity_test.go",
     "internal/runtime/ordering_test.go",
     "internal/runtime/plan_parity_test.go",
     "internal/runtime/selection_test.go",
@@ -6124,6 +6402,7 @@
     "internal/usage/epochs_test.go",
     "internal/usage/event_test.go",
     "internal/usage/http_test.go",
+    "internal/usage/notifications_test.go",
     "internal/usage/pricing_test.go",
     "internal/usage/protocol_test.go",
     "internal/usage/reports_test.go",
@@ -6134,8 +6413,14 @@
     "tests/integration/access_test.go",
     "tests/integration/accounting_regression_test.go",
     "tests/integration/accounting_test.go",
+    "tests/integration/attribution_test.go",
+    "tests/integration/authentication_policy_test.go",
     "tests/integration/authority_lifecycle_test.go",
+    "tests/integration/budget_alerts_test.go",
+    "tests/integration/cache_billing_test.go",
+    "tests/integration/configuration_test.go",
     "tests/integration/consumer_test.go",
+    "tests/integration/content_policy_test.go",
     "tests/integration/contracts_test.go",
     "tests/integration/credential_pool_replay_test.go",
     "tests/integration/credential_routing_test.go",
@@ -6151,10 +6436,13 @@
     "tests/integration/m4_isolation_test.go",
     "tests/integration/m4_process_test.go",
     "tests/integration/m4_recovery_test.go",
+    "tests/integration/management_automation_test.go",
     "tests/integration/master_key_rotation_test.go",
     "tests/integration/master_key_startup_test.go",
+    "tests/integration/media_management_test.go",
     "tests/integration/migration_recovery_test.go",
     "tests/integration/mounted_parity_test.go",
+    "tests/integration/native_operations_test.go",
     "tests/integration/oidc_client_change_test.go",
     "tests/integration/oidc_discovery_test.go",
     "tests/integration/oidc_owner_protection_test.go",
@@ -6164,21 +6452,27 @@
     "tests/integration/oidc_test.go",
     "tests/integration/oidc_unlink_test.go",
     "tests/integration/overview_test.go",
+    "tests/integration/playground_test.go",
+    "tests/integration/pricing_sources_test.go",
     "tests/integration/process_test.go",
     "tests/integration/provider_noauth_test.go",
     "tests/integration/provider_parity_test.go",
     "tests/integration/provider_regressions_test.go",
+    "tests/integration/provider_resources_test.go",
     "tests/integration/provider_state_test.go",
     "tests/integration/provider_validation_test.go",
     "tests/integration/recovery_test.go",
     "tests/integration/release_contract_test.go",
     "tests/integration/reports_test.go",
+    "tests/integration/resource_scope_test.go",
     "tests/integration/responses_fixture_test.go",
+    "tests/integration/route_lifecycle_test.go",
     "tests/integration/routing_measurements_test.go",
     "tests/integration/routing_policy_parity_test.go",
     "tests/integration/routing_preferences_test.go",
     "tests/integration/services_test.go",
     "tests/integration/session_expiry_test.go",
+    "tests/integration/shared_budgets_test.go",
     "tests/integration/simulation_authorization_test.go"
   ],
   "browserJourneys": [

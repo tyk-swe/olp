@@ -167,6 +167,7 @@
               ><td
                 ><a class="table-link" href={resolve(`/providers/${item.id}`)}
                   >{item.name}</a
+                ><br /><small>{item.project_name ?? 'Installation-wide'}</small
                 ></td
               ><td
                 >{item.vendor_id ?? 'Custom'}<small class="connector-name"

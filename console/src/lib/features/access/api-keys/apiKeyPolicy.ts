@@ -9,6 +9,8 @@ export type ApiKeyPolicyInput = CreateApiKeyInput & UpdateApiKeyInput;
 
 export type ApiKeyFormState = {
   name: string;
+  projectId: string;
+  budgetGroupId: string;
   scopes: string[];
   allowedRoutes: string[];
   requestsPerMinute: string;
@@ -17,6 +19,8 @@ export type ApiKeyFormState = {
   dailyCostLimit: string;
   monthlyCostLimit: string;
   expiresAt: string;
+  allowProviderState: boolean;
+  allowedAttributionKeys: string[];
 };
 
 export function createApiKeyFormState(
@@ -24,6 +28,8 @@ export function createApiKeyFormState(
 ): ApiKeyFormState {
   return {
     name: editing?.name ?? '',
+    projectId: '',
+    budgetGroupId: editing?.budget_group_id ?? '',
     scopes: editing ? [...editing.scopes] : ['inference'],
     allowedRoutes: editing ? [...editing.allowed_routes] : [],
     requestsPerMinute: editing?.requests_per_minute?.toString() ?? '',
@@ -31,7 +37,11 @@ export function createApiKeyFormState(
     maxConcurrency: editing?.max_concurrency?.toString() ?? '',
     dailyCostLimit: editing?.budget.daily.limit ?? '',
     monthlyCostLimit: editing?.budget.monthly.limit ?? '',
-    expiresAt: editing?.expires_at ? dateTimeLocalValue(editing.expires_at) : ''
+    expiresAt: editing?.expires_at
+      ? dateTimeLocalValue(editing.expires_at)
+      : '',
+    allowProviderState: editing?.allow_provider_state ?? false,
+    allowedAttributionKeys: editing ? [...editing.allowed_attribution_keys] : []
   };
 }
 
@@ -48,6 +58,8 @@ export function buildApiKeyPolicyInput(
 ): ApiKeyPolicyInput {
   return {
     name: state.name.trim(),
+    project_id: state.projectId || null,
+    budget_group_id: state.budgetGroupId || null,
     scopes: state.scopes,
     allowed_routes: state.allowedRoutes,
     requests_per_minute: optionalWholeNumber(state.requestsPerMinute),
@@ -55,6 +67,10 @@ export function buildApiKeyPolicyInput(
     max_concurrency: optionalWholeNumber(state.maxConcurrency),
     daily_cost_limit: optionalDecimal(state.dailyCostLimit),
     monthly_cost_limit: optionalDecimal(state.monthlyCostLimit),
-    expires_at: state.expiresAt ? new Date(state.expiresAt).toISOString() : null
+    expires_at: state.expiresAt
+      ? new Date(state.expiresAt).toISOString()
+      : null,
+    allow_provider_state: state.allowProviderState,
+    allowed_attribution_keys: state.allowedAttributionKeys
   };
 }

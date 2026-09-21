@@ -35,6 +35,7 @@ const profile: UserProfile = {
   email: 'owner@example.com',
   display_name: 'Original owner',
   role: 'owner',
+  access_scope: 'global',
   active: true,
   etag: 'profile-v1',
   created_at: '2026-09-15T12:00:00Z',

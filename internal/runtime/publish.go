@@ -96,7 +96,7 @@ func Publish(ctx context.Context, tx pgx.Tx, actor string) (Published, error) {
 // their latest published revision.
 func Compile(ctx context.Context, tx pgx.Tx) (*Snapshot, error) {
 	snapshot := &Snapshot{Providers: map[string]Provider{}, Routes: map[string]Route{}}
-	rows, err := tx.Query(ctx, "SELECT p.id::text,p.state,r.id::text,r.name,r.configuration,r.models,r.slots FROM olp_go.providers p JOIN olp_go.provider_revisions r ON r.id=p.active_revision_id WHERE p.state IN ('active','disabled')")
+	rows, err := tx.Query(ctx, "SELECT p.id::text,p.state,r.id::text,r.name,r.configuration,r.models,r.slots,p.project_id::text FROM olp_go.providers p JOIN olp_go.provider_revisions r ON r.id=p.active_revision_id WHERE p.state IN ('active','disabled')")
 	if err != nil {
 		return nil, err
 	}
@@ -104,7 +104,7 @@ func Compile(ctx context.Context, tx pgx.Tx) (*Snapshot, error) {
 		var state string
 		var configuration, models, slots []byte
 		provider := Provider{Capabilities: []Capability{}}
-		if err = rows.Scan(&provider.ID, &state, &provider.RevisionID, &provider.Name, &configuration, &models, &slots); err != nil {
+		if err = rows.Scan(&provider.ID, &state, &provider.RevisionID, &provider.Name, &configuration, &models, &slots, &provider.ProjectID); err != nil {
 			rows.Close()
 			return nil, err
 		}
@@ -151,15 +151,15 @@ func Compile(ctx context.Context, tx pgx.Tx) (*Snapshot, error) {
 	if err = rows.Err(); err != nil {
 		return nil, err
 	}
-	rows, err = tx.Query(ctx, "SELECT r.id::text,r.slug,v.id::text,v.revision,v.operations,v.overall_timeout_ms,v.max_attempts,v.targets,v.activated_at,v.routing_policy FROM olp_go.routes r JOIN olp_go.route_revisions v ON v.id=r.latest_revision_id")
+	rows, err = tx.Query(ctx, "SELECT r.id::text,r.slug,v.id::text,v.revision,v.operations,v.overall_timeout_ms,v.max_attempts,v.targets,v.activated_at,v.routing_policy,r.project_id::text,v.content_policy FROM olp_go.routes r JOIN olp_go.route_revisions v ON v.id=r.latest_revision_id WHERE r.state='active'")
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	for rows.Next() {
-		var operations, targets, policy []byte
+		var operations, targets, policy, contentPolicy []byte
 		route := Route{}
-		if err = rows.Scan(&route.ID, &route.Slug, &route.RevisionID, &route.Revision, &operations, &route.OverallTimeout, &route.MaxAttempts, &targets, &route.PublishedAt, &policy); err != nil {
+		if err = rows.Scan(&route.ID, &route.Slug, &route.RevisionID, &route.Revision, &operations, &route.OverallTimeout, &route.MaxAttempts, &targets, &route.PublishedAt, &policy, &route.ProjectID, &contentPolicy); err != nil {
 			return nil, err
 		}
 		var published []PublishedTarget
@@ -172,6 +172,11 @@ func Compile(ctx context.Context, tx pgx.Tx) (*Snapshot, error) {
 		if len(policy) > 0 {
 			if err = json.Unmarshal(policy, &route.Policy); err != nil {
 				return nil, err
+			}
+		}
+		if len(contentPolicy) > 0 {
+			if err = json.Unmarshal(contentPolicy, &route.ContentPolicy); err != nil {
+				return nil, fmt.Errorf("route %s content policy: %w", route.Slug, err)
 			}
 		}
 		route.RoutingID = route.ID

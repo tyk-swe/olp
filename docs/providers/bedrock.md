@@ -6,6 +6,32 @@ partition-aware endpoint resolution and event-stream decoding. Native
 OLP's bounded HTTP transport. Model IDs and supported ARNs pass through
 unchanged.
 
+Beyond Converse, two InvokeModel families qualify by model prefix:
+`amazon.titan-embed-text-*` models serve single-input embeddings and
+`amazon.titan-image-generator-*` models serve `image_generation` with the
+`TEXT_IMAGE` task. Both normalize to the OpenAI surface and are described in
+[the compatibility matrix](../compatibility.md).
+
+## Bedrock SDK ingress
+
+AWS SDK clients can also call the gateway's Bedrock surface directly under
+`/bedrock/model/{route}/converse`, `converse-stream`, `invoke`, and
+`invoke-with-response-stream`, where `{route}` is an OLP route slug rather
+than a provider model ID. Incoming SigV4 signatures are never trusted as
+gateway authentication: send `X-OLP-API-Key` (or an ordinary bearer key that
+is not a SigV4 header), and CORS preflights must allow `X-OLP-API-Key`. The
+gateway strips all inbound `Authorization` and `X-Amz-*` headers, rewrites
+only the URL's route slug to the upstream model, and re-signs with the
+configured Bedrock credential. Converse targets must hold a certified
+`bedrock`/unary-or-streaming generation tuple; InvokeModel passes through
+only for the qualified model families above. Capability certification
+refuses an unqualified Invoke model first (`capability_unavailable`), so the
+data plane's explicit 422 for other model IDs is defense-in-depth rather
+than the reachable boundary. Event-stream responses are CRC- and
+size-validated frame by
+frame and re-encoded, so malformed or oversized frames terminate the stream
+instead of forwarding unchecked bytes.
+
 ## Authentication
 
 | Mode | Credentials |

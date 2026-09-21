@@ -307,7 +307,7 @@ func TestRequestValidationRejectsBypassableLimits(t *testing.T) {
 	const key = "0192cf87-d4ab-7f2e-a8b1-c2d3e4f50607"
 	base := func() Request {
 		return Request{
-			APIKeyID:          key,
+			CostOwnerID:       key,
 			LookupID:          "lookup_one_abc",
 			RequestsPerMinute: pointer(int64(10)),
 			TokensPerMinute:   pointer(int64(1000)),
@@ -335,7 +335,7 @@ func TestRequestValidationRejectsBypassableLimits(t *testing.T) {
 		{"lookup too short", func(r *Request) { r.LookupID = "short" }},
 		{"lookup too long", func(r *Request) { r.LookupID = strings.Repeat("a", 41) }},
 		{"lookup with a dash", func(r *Request) { r.LookupID = "lookup-one-abc" }},
-		{"API key that is not a UUID", func(r *Request) { r.APIKeyID = "not-a-uuid" }},
+		{"API key that is not a UUID", func(r *Request) { r.CostOwnerID = "not-a-uuid" }},
 		{"zero daily cost limit", func(r *Request) { r.DailyCostLimit = pointer("0.000") }},
 		{"negative monthly cost limit", func(r *Request) { r.MonthlyCostLimit = pointer("-1") }},
 		{"cost limit in scientific notation", func(r *Request) { r.DailyCostLimit = pointer("1e3") }},
@@ -488,7 +488,7 @@ func TestDecimalValidation(t *testing.T) {
 func TestCostSnapshotValidation(t *testing.T) {
 	t.Parallel()
 	base := CostSnapshot{
-		APIKeyID:         "0192cf87-d4ab-7f2e-a8b1-c2d3e4f50607",
+		CostOwnerID:      "0192cf87-d4ab-7f2e-a8b1-c2d3e4f50607",
 		DailyWindowID:    20_000,
 		DailyAccrued:     "1.500000000000",
 		MonthlyWindowID:  24_000,
@@ -502,7 +502,7 @@ func TestCostSnapshotValidation(t *testing.T) {
 		name   string
 		mutate func(*CostSnapshot)
 	}{
-		{"key is not a UUID", func(s *CostSnapshot) { s.APIKeyID = "key" }},
+		{"key is not a UUID", func(s *CostSnapshot) { s.CostOwnerID = "key" }},
 		{"negative daily window", func(s *CostSnapshot) { s.DailyWindowID = -1 }},
 		{"monthly window beyond the Lua range", func(s *CostSnapshot) { s.MonthlyWindowID = maxLuaInteger + 1 }},
 		{"daily accrued is not a decimal", func(s *CostSnapshot) { s.DailyAccrued = "1,5" }},

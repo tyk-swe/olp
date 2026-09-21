@@ -111,7 +111,7 @@ func TestM4SharedValkeyIsolatesInstallations(t *testing.T) {
 	firstLimiter := limLimiter(t, first.valkey, first.namespace)
 	secondLimiter := limLimiter(t, second.valkey, second.namespace)
 	lookup := "identical_lookup_01"
-	request := limits.Request{APIKeyID: limNilUUID, LookupID: lookup,
+	request := limits.Request{CostOwnerID: limNilUUID, LookupID: lookup,
 		RequestsPerMinute: limPointer(int64(1)), TokensPerMinute: limPointer(int64(10)),
 		MaxConcurrency: limPointer(int64(1)), RequestedTokens: 10, LeaseTTL: 30 * time.Second}
 	if _, err := firstLimiter.Reserve(t.Context(), request); err != nil {

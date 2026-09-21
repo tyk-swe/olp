@@ -166,7 +166,15 @@
               <td
                 ><strong>{request.route}</strong><small
                   >{request.operation} · {request.surface}</small
-                ></td
+                >{#if request.policy_decisions.length}<small
+                    >Policy: {[
+                      ...new Set(
+                        request.policy_decisions.map(
+                          (decision) => decision.outcome
+                        )
+                      )
+                    ].join(', ')}</small
+                  >{/if}</td
               >
               <td
                 ><span
@@ -190,7 +198,9 @@
                 >{formatInteger(request.input_tokens)} in<br />{formatInteger(
                   request.output_tokens
                 )} out<small
-                  >{formatInteger(request.cached_input_tokens)} cached</small
+                  >{formatInteger(request.cached_input_tokens)} cached · {formatInteger(
+                    request.cache_write_input_tokens
+                  )} write</small
                 ></td
               >
               <td
@@ -257,7 +267,9 @@
               <dd>
                 {formatInteger(request.input_tokens)} in · {formatInteger(
                   request.output_tokens
-                )} out · {formatInteger(request.cached_input_tokens)} cached
+                )} out · {formatInteger(request.cached_input_tokens)} cached · {formatInteger(
+                  request.cache_write_input_tokens
+                )} cache write
               </dd>
             </div>
             <div>

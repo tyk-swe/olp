@@ -19,6 +19,8 @@
   } from '$lib/features/access/api-keys/api';
   import ApiKeyInventory from '$lib/features/access/api-keys/ApiKeyInventory.svelte';
   import ApiKeyPolicyForm from '$lib/features/access/api-keys/ApiKeyPolicyForm.svelte';
+  import BudgetGroupsPanel from '$lib/features/access/budget-groups/BudgetGroupsPanel.svelte';
+  import NotificationsPanel from '$lib/features/access/notifications/NotificationsPanel.svelte';
   import ApiKeySecretDialog from '$lib/features/access/api-keys/ApiKeySecretDialog.svelte';
   import type { ApiKeyListState } from '$lib/features/access/api-keys/apiKeyListState';
   import type { ApiKeyPolicyInput } from '$lib/features/access/api-keys/apiKeyPolicy';
@@ -142,6 +144,8 @@
     onEdit={edit}
     onSecret={showRotatedSecret}
   />
+  <BudgetGroupsPanel />
+  <NotificationsPanel />
 {/if}
 
 {#if editing && services.gatewayAvailable}<RoutingPolicyEditor

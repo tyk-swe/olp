@@ -96,14 +96,15 @@ type ProviderHealthPage struct {
 
 // ReadProviderHealth pages providers in descending id order for the management API. The
 // window bounds the attempt rollup; pageSize bounds the page.
-func ReadProviderHealth(ctx context.Context, q access.Queryer, windowMinutes int, cursor *string, pageSize int) (ProviderHealthPage, error) {
+func ReadProviderHealth(ctx context.Context, q access.Queryer, windowMinutes int, cursor *string, pageSize int, allProjects bool, allowedProjects []string) (ProviderHealthPage, error) {
 	minutes := min(max(windowMinutes, 1), 1440)
 	size := min(max(pageSize, 1), 200)
 	rows, err := q.Query(ctx, providerHealthSelect+`
 		WHERE ($2::uuid IS NULL OR p.id < $2)
+		  AND ($3 OR p.project_id = ANY($4::uuid[]))
 		GROUP BY p.id, p.name, p.kind, p.state, p.last_probe_at,
 			p.last_probe_status, p.last_probe_detail
-		ORDER BY p.id DESC LIMIT $3`, minutes, cursor, size+1)
+		ORDER BY p.id DESC LIMIT $5`, minutes, cursor, allProjects, allowedProjects, size+1)
 	if err != nil {
 		return ProviderHealthPage{}, fmt.Errorf("read provider health: %w", err)
 	}
@@ -160,7 +161,7 @@ func ReadProviderHealthMetrics(ctx context.Context, q access.Queryer) ([]Provide
 	var records []ProviderHealthRecord
 	var cursor *string
 	for {
-		page, err := ReadProviderHealth(ctx, q, 15, cursor, 200)
+		page, err := ReadProviderHealth(ctx, q, 15, cursor, 200, true, nil)
 		if err != nil {
 			return nil, false, err
 		}

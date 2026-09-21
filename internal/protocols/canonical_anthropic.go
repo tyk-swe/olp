@@ -111,9 +111,18 @@ func decodeAnthropicGeneration(r *reader) error {
 
 func encodeAnthropicGeneration(c *Generation, model string, count bool) (Object, error) {
 	f := Object{"model": raw(model)}
-	for _, k := range []string{"seed", "response_format"} {
+	for _, k := range []string{"seed"} {
 		if present(c.Parameters[k]) {
 			return nil, unsupported(k)
+		}
+	}
+	if v := c.Parameters["response_format"]; present(v) {
+		spec, e := jsonSchemaFormat(v)
+		if e != nil {
+			return nil, e
+		}
+		if spec != nil {
+			f["output_config"] = raw(Object{"format": raw(Object{"type": raw("json_schema"), "schema": spec["schema"]})})
 		}
 	}
 	if n := c.Parameters["n"]; present(n) && string(n) != "1" {

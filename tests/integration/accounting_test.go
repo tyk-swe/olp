@@ -98,6 +98,9 @@ type acctPrice struct {
 	Output     *string
 	Cached     *string
 	Unit       *string
+	Write      *string
+	Write5M    *string
+	Write1H    *string
 }
 
 func acctPricing(t *testing.T, fixture acctFixture, revision int,
@@ -109,11 +112,15 @@ func acctPricing(t *testing.T, fixture acctFixture, revision int,
 	for _, price := range prices {
 		acctExec(t, fixture.Pool, `INSERT INTO olp_go.prices
                 (pricing_revision_id, provider_kind, model, operation, input_per_million,
-                 output_per_million, cached_input_per_million, unit_price, currency, provider_id, vendor_id)
+                 output_per_million, cached_input_per_million, cache_write_input_per_million,
+                 cache_write_5m_input_per_million, cache_write_1h_input_per_million,
+                 unit_price, currency, provider_id, vendor_id)
             VALUES ($1::uuid, $2, $3, $4, $5::text::numeric, $6::text::numeric, $7::text::numeric,
-                    $8::text::numeric, 'USD', $9::uuid, $10)`,
+                    $8::text::numeric, $9::text::numeric, $10::text::numeric,
+                    $11::text::numeric, 'USD', $12::uuid, $13)`,
 			id, price.Kind, price.Model, price.Operation, price.Input, price.Output,
-			price.Cached, price.Unit, price.ProviderID, price.VendorID)
+			price.Cached, price.Write, price.Write5M, price.Write1H,
+			price.Unit, price.ProviderID, price.VendorID)
 	}
 	return id
 }
@@ -298,13 +305,13 @@ func TestAccountingPersistsPricedAttemptsAndIsReplaySafe(t *testing.T) {
 	if result.Outcome != usage.PersistOutcomePersisted {
 		t.Fatalf("outcome = %v, want persisted", result.Outcome)
 	}
-	if result.CostSnapshot == nil {
+	if len(result.CostSnapshots) == 0 {
 		t.Fatal("persisted attempts reported no spend")
 	}
-	acctSameMoney(t, fixture, &result.CostSnapshot.DailyAccrued, "0.0116")
-	acctSameMoney(t, fixture, &result.CostSnapshot.MonthlyAccrued, "0.0116")
-	if result.CostSnapshot.UnpricedAttempts != 0 {
-		t.Fatalf("unpriced attempts = %d, want 0", result.CostSnapshot.UnpricedAttempts)
+	acctSameMoney(t, fixture, &result.CostSnapshots[0].DailyAccrued, "0.0116")
+	acctSameMoney(t, fixture, &result.CostSnapshots[0].MonthlyAccrued, "0.0116")
+	if result.CostSnapshots[0].UnpricedAttempts != 0 {
+		t.Fatalf("unpriced attempts = %d, want 0", result.CostSnapshots[0].UnpricedAttempts)
 	}
 
 	// The provider scoped price outbids the vendor wide one for the same model.
@@ -365,7 +372,7 @@ func TestAccountingPersistsPricedAttemptsAndIsReplaySafe(t *testing.T) {
 	if replay.Outcome != usage.PersistOutcomeDuplicate {
 		t.Fatalf("replay outcome = %v, want duplicate", replay.Outcome)
 	}
-	if replay.CostSnapshot != nil {
+	if len(replay.CostSnapshots) != 0 {
 		t.Fatal("a duplicate reported spend")
 	}
 	daily, _ = acctWindow(t, fixture, "day")
@@ -559,8 +566,8 @@ func TestAccountingPricingProvenance(t *testing.T) {
 		}
 		// The snapshot carries the window totals, which now hold this attempt
 		// and the pin that could not be honoured.
-		if result.CostSnapshot == nil || result.CostSnapshot.UnpricedAttempts != 2 {
-			t.Fatalf("snapshot = %+v, want two unpriced attempts so far", result.CostSnapshot)
+		if len(result.CostSnapshots) == 0 || result.CostSnapshots[0].UnpricedAttempts != 2 {
+			t.Fatalf("snapshot = %+v, want two unpriced attempts so far", result.CostSnapshots[0])
 		}
 	})
 
@@ -589,8 +596,8 @@ func TestAccountingPricingProvenance(t *testing.T) {
 		if !failed.RequestPartial {
 			t.Fatal("the request was not marked as incomplete")
 		}
-		if result.CostSnapshot == nil || result.CostSnapshot.UnpricedAttempts != 3 {
-			t.Fatalf("snapshot = %+v, want three unpriced attempts so far", result.CostSnapshot)
+		if len(result.CostSnapshots) == 0 || result.CostSnapshots[0].UnpricedAttempts != 3 {
+			t.Fatalf("snapshot = %+v, want three unpriced attempts so far", result.CostSnapshots[0])
 		}
 	})
 
@@ -604,7 +611,7 @@ func TestAccountingPricingProvenance(t *testing.T) {
 	}
 }
 
-func TestAccountingRefusesToPriceCachedTokensWithoutTheirTotal(t *testing.T) {
+func TestAccountingRejectsCachedTokensWithoutTheirTotal(t *testing.T) {
 	t.Parallel()
 	fixture := acctSeed(t, acctPool(t))
 	observed := time.Now().UTC().Add(-time.Minute)
@@ -613,10 +620,6 @@ func TestAccountingRefusesToPriceCachedTokensWithoutTheirTotal(t *testing.T) {
 			Operation: "generation", Input: acctPtr("3"), Output: acctPtr("15"),
 			Cached: acctPtr("0.75")})
 
-	// Cached input tokens are a subset of the input count, so without that
-	// count the uncached remainder is unknown and no part of the input can be
-	// billed. Charging the cached tier alone would invent a total nobody
-	// reported, and calling the attempt priced would hide it from completeness.
 	event := acctEvent(t, fixture, acctEventOptions{ObservedAt: observed,
 		Attempts: []usage.Attempt{
 			acctAttempt(t, fixture.Provider, 1, "gpt-4o", 200, &usage.AttemptUsage{
@@ -624,17 +627,7 @@ func TestAccountingRefusesToPriceCachedTokensWithoutTheirTotal(t *testing.T) {
 				OutputTokens: acctPtr(int64(500)), CachedInputTokens: acctPtr(int64(400)),
 			}),
 		}})
-	result := acctPersist(t, fixture, event)
-	fact := acctLoadFact(t, fixture, event.RequestID, 1)
-	if fact.Cost != nil || !fact.Unpriced {
-		t.Fatalf("fact = %+v, want an unpriced attempt rather than a charge for its cached tier", fact)
+	if _, err := acctPersistErr(t, fixture, event); !errors.Is(err, usage.ErrInvalidEvent) {
+		t.Fatalf("persist err = %v, want ErrInvalidEvent", err)
 	}
-	if fact.ChargeStatus != "billable" || !fact.RequestUnpriced {
-		t.Fatalf("fact = %+v, want a billable attempt the request reports as unpriced", fact)
-	}
-	if result.CostSnapshot == nil || result.CostSnapshot.UnpricedAttempts != 1 {
-		t.Fatalf("snapshot = %+v, want the attempt counted as unpriced", result.CostSnapshot)
-	}
-	daily, _ := acctWindow(t, fixture, "day")
-	acctSameMoney(t, fixture, &daily, "0")
 }

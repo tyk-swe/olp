@@ -11,16 +11,16 @@ import (
 
 func TestConfigurationRejectsInvalidDefaults(t *testing.T) {
 	for _, raw := range []string{
-		`{"previous_response_id":"resp_other"}`, `{"conversation":"conv_other"}`,
-		`{"background":true}`, `{"max_tokens":1,"max_completion_tokens":2}`,
+		`{"conversation":"conv_other"}`,
+		`{"max_tokens":1,"max_completion_tokens":2}`,
 		`{"max_output_tokens":"10"}`, `{"stream":true}`, `{"input":"hidden"}`,
 	} {
 		cfg := Configuration{Kind: KindOpenAICompatible, AuthMode: AuthNone, Endpoint: new("https://example.com/v1")}
-		cfg.normalize()
+		cfg.Normalize()
 		if err := json.Unmarshal([]byte(raw), &cfg.Options.ParameterDefaults); err != nil {
 			t.Fatal(err)
 		}
-		if err := cfg.validate(&egress.Policy{}); err == nil {
+		if err := cfg.Validate(&egress.Policy{}); err == nil {
 			t.Errorf("accepted defaults %s", raw)
 		}
 	}

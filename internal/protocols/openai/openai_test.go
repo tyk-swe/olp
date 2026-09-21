@@ -92,8 +92,9 @@ func TestRequestRejections(t *testing.T) {
 		"missing messages":   {FamilyChat, `{"model":"r"}`, "missing_required_parameter", "messages"},
 		"stream type":        {FamilyChat, `{"model":"r","messages":[{"role":"user","content":"x"}],"stream":"yes"}`, "invalid_value", "stream"},
 		"trailing document":  {FamilyChat, `{"model":"r","messages":[{"role":"user","content":"x"}]} {}`, "invalid_json", ""},
-		"stateful reference": {FamilyResponses, `{"model":"r","input":"hi","previous_response_id":"resp_1"}`, "unsupported_stateful_reference", "previous_response_id"},
-		"background":         {FamilyResponses, `{"model":"r","input":"hi","background":true}`, "unsupported_parameter", "background"},
+		"stateful reference": {FamilyResponses, `{"model":"r","input":"hi","previous_response_id":1}`, "invalid_value", "previous_response_id"},
+		"conversation":       {FamilyResponses, `{"model":"r","input":"hi","conversation":"conv_1"}`, "unsupported_stateful_reference", "conversation"},
+		"background":         {FamilyResponses, `{"model":"r","input":"hi","background":"yes"}`, "invalid_value", "background"},
 		"empty input":        {FamilyResponses, `{"model":"r","input":[]}`, "invalid_value", "input"},
 	}
 	for name, c := range cases {

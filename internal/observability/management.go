@@ -43,7 +43,8 @@ func (m *Management) ready(r *http.Request) (access.Reply, error) {
 }
 
 func (m *Management) providerHealth(r *http.Request) (access.Reply, error) {
-	if _, err := m.Access.Principal(r, m.Access.Pool, "read"); err != nil {
+	p, err := m.Access.Principal(r, m.Access.Pool, "read")
+	if err != nil {
 		return access.Reply{}, err
 	}
 	query := r.URL.Query()
@@ -59,7 +60,8 @@ func (m *Management) providerHealth(r *http.Request) (access.Reply, error) {
 	if err != nil {
 		return access.Reply{}, err
 	}
-	page, err := ReadProviderHealth(r.Context(), m.Pool, window, &pagination.Before, pagination.Limit)
+	page, err := ReadProviderHealth(r.Context(), m.Pool, window, &pagination.Before, pagination.Limit,
+		p.AllProjects, p.ProjectIDs())
 	if err != nil {
 		return access.Reply{}, err
 	}

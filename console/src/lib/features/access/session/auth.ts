@@ -29,7 +29,8 @@ function sessionResult(
     typeof user?.id !== 'string' ||
     typeof user?.email !== 'string' ||
     typeof user?.display_name !== 'string' ||
-    !isFixedRole(user?.role)
+    !isFixedRole(user?.role) ||
+    (user?.access_scope !== 'global' && user?.access_scope !== 'assigned')
   ) {
     throw new ApiProblem({
       type: 'urn:olp:problem:invalid-api-response',

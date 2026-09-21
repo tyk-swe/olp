@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -54,6 +55,92 @@ func TestAccessBodyReadDeadline(t *testing.T) {
 				t.Fatalf("incomplete body status: %d", resp.StatusCode)
 			}
 		})
+	}
+}
+
+func TestHandleStreamProblemBeforeCommit(t *testing.T) {
+	s := &Server{Origin: "https://console.test"}
+	server := httptest.NewServer(s.HandleStream(1024, time.Minute, func(w http.ResponseWriter, r *http.Request) error {
+		return Fail(http.StatusConflict, "media_job_busy", "The media job is being reconciled by another worker; retry shortly.")
+	}))
+	defer server.Close()
+	resp, err := http.Get(server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != http.StatusConflict {
+		t.Fatalf("pre-commit error status: %d", resp.StatusCode)
+	}
+	if !strings.Contains(string(body), "media_job_busy") {
+		t.Fatalf("pre-commit error body: %s", body)
+	}
+}
+
+func TestHandleStreamErrorAfterCommit(t *testing.T) {
+	s := &Server{Origin: "https://console.test"}
+	server := httptest.NewServer(s.HandleStream(1024, time.Minute, func(w http.ResponseWriter, r *http.Request) error {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		if _, err := fmt.Fprintf(w, "event: frame\ndata: {}\n\n"); err != nil {
+			t.Error(err)
+		}
+		return Fail(http.StatusInternalServerError, "upstream_failed", "The provider stream failed.")
+	}))
+	defer server.Close()
+	resp, err := http.Get(server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("post-commit status: %d", resp.StatusCode)
+	}
+	if string(body) != "event: frame\ndata: {}\n\n" {
+		t.Fatalf("post-commit body altered: %q", body)
+	}
+}
+
+func TestHandleStreamResponseController(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	tracker := &streamWriter{ResponseWriter: recorder}
+	if tracker.Unwrap() != recorder {
+		t.Fatal("Unwrap did not return the underlying writer")
+	}
+	if err := http.NewResponseController(tracker).Flush(); err != nil {
+		t.Fatalf("flush through the tracker failed: %v", err)
+	}
+	if !recorder.Flushed {
+		t.Fatal("flush did not reach the underlying writer")
+	}
+	s := &Server{Origin: "https://console.test"}
+	var flushed atomic.Bool
+	server := httptest.NewServer(s.HandleStream(1024, time.Minute, func(w http.ResponseWriter, r *http.Request) error {
+		if _, err := fmt.Fprintf(w, "event: frame\ndata: {}\n\n"); err != nil {
+			return err
+		}
+		if err := http.NewResponseController(w).Flush(); err != nil {
+			return err
+		}
+		flushed.Store(true)
+		return nil
+	}))
+	defer server.Close()
+	resp, err := http.Get(server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if !flushed.Load() {
+		t.Fatal("ResponseController flush did not reach the underlying writer")
 	}
 }
 

@@ -35,13 +35,14 @@ const (
 // in-flight publication changes.
 type vendor struct {
 	*httptest.Server
-	mu      sync.Mutex
-	secrets map[string]bool
-	fail    atomic.Bool
-	delay   atomic.Int64
-	chats   atomic.Int64
-	models  atomic.Int64
-	cancels atomic.Int64
+	mu       sync.Mutex
+	secrets  map[string]bool
+	fail     atomic.Bool
+	truncate atomic.Bool
+	delay    atomic.Int64
+	chats    atomic.Int64
+	models   atomic.Int64
+	cancels  atomic.Int64
 }
 
 func newVendor(t *testing.T) *vendor {
@@ -85,6 +86,17 @@ func newVendor(t *testing.T) *vendor {
 		}
 		w.Header().Set("Content-Type", "text/event-stream")
 		flusher := w.(http.Flusher)
+		if v.truncate.Load() {
+			fmt.Fprintf(w, "data: {\"id\":\"chatcmpl-1\",\"object\":\"chat.completion.chunk\",\"created\":1,\"model\":%q,\"choices\":[{\"index\":0,\"delta\":{\"content\":\"partial \"},\"finish_reason\":null}]}\n\n", vendorModel)
+			flusher.Flush()
+			if hj, ok := w.(http.Hijacker); ok {
+				conn, _, err := hj.Hijack()
+				if err == nil {
+					conn.Close()
+				}
+			}
+			return
+		}
 		delay := time.Duration(v.delay.Load())
 		for _, word := range strings.SplitAfter(vendorAnswer, " ") {
 			fmt.Fprintf(w, "data: {\"id\":\"chatcmpl-1\",\"object\":\"chat.completion.chunk\",\"created\":1,\"model\":%q,\"choices\":[{\"index\":0,\"delta\":{\"content\":%q},\"finish_reason\":null}]}\n\n", vendorModel, word)
@@ -99,6 +111,45 @@ func newVendor(t *testing.T) *vendor {
 			}
 		}
 		fmt.Fprintf(w, "data: {\"id\":\"chatcmpl-1\",\"object\":\"chat.completion.chunk\",\"created\":1,\"model\":%q,\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":4,\"completion_tokens\":6,\"total_tokens\":10}}\n\ndata: [DONE]\n\n", vendorModel)
+	})
+	mux.HandleFunc("POST /v1/embeddings", func(w http.ResponseWriter, r *http.Request) {
+		if !v.authorized(r) {
+			http.Error(w, `{"error":{"message":"bad key","code":"invalid_api_key"}}`, http.StatusUnauthorized)
+			return
+		}
+		var input struct {
+			Model string `json:"model"`
+		}
+		if json.NewDecoder(r.Body).Decode(&input) != nil || input.Model != vendorModel {
+			http.Error(w, "unknown model", http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprintf(w, `{"object":"list","data":[{"object":"embedding","index":0,"embedding":[0.25,0.5]}],"model":%q,"usage":{"prompt_tokens":3,"total_tokens":3}}`, vendorModel)
+	})
+	mux.HandleFunc("POST /v1/moderations", func(w http.ResponseWriter, r *http.Request) {
+		if !v.authorized(r) {
+			http.Error(w, `{"error":{"message":"bad key","code":"invalid_api_key"}}`, http.StatusUnauthorized)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprintf(w, `{"id":"mod-1","model":%q,"results":[{"flagged":true,"categories":{"harassment":true},"category_scores":{"harassment":0.9}}]}`, vendorModel)
+	})
+	mux.HandleFunc("POST /v1/rerank", func(w http.ResponseWriter, r *http.Request) {
+		if !v.authorized(r) {
+			http.Error(w, `{"error":{"message":"bad key","code":"invalid_api_key"}}`, http.StatusUnauthorized)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		io.WriteString(w, `{"id":"rr-1","results":[{"index":1,"relevance_score":0.9,"document":"b"},{"index":0,"relevance_score":0.4,"document":"a"}],"meta":{"billed_units":{"search_units":1.5}}}`)
+	})
+	mux.HandleFunc("POST /v1/responses/input_tokens", func(w http.ResponseWriter, r *http.Request) {
+		if !v.authorized(r) {
+			http.Error(w, `{"error":{"message":"bad key","code":"invalid_api_key"}}`, http.StatusUnauthorized)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		io.WriteString(w, `{"object":"response.input_tokens","input_tokens":42}`)
 	})
 	mux.HandleFunc("POST /v1/responses", func(w http.ResponseWriter, r *http.Request) {
 		if !v.authorized(r) {

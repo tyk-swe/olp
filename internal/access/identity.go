@@ -32,9 +32,29 @@ func (s *Server) Register(mux *http.ServeMux) {
 		"GET /api/v3/api-keys":                s.apiKeys, "POST /api/v3/api-keys": s.createAPIKey,
 		"GET /api/v3/api-keys/{api_key_id}": s.apiKey, "PATCH /api/v3/api-keys/{api_key_id}": s.updateAPIKey,
 		"POST /api/v3/api-keys/{api_key_id}/revoke": s.revokeAPIKey, "POST /api/v3/api-keys/{api_key_id}/rotate": s.rotateAPIKey,
+		"GET /api/v3/budget-groups": s.budgetGroups, "POST /api/v3/budget-groups": s.createBudgetGroup,
+		"GET /api/v3/budget-groups/{budget_group_id}": s.budgetGroup, "PATCH /api/v3/budget-groups/{budget_group_id}": s.updateBudgetGroup,
 		"GET /api/v3/settings": s.settings, "GET /api/v3/settings/{key}": s.setting, "PUT /api/v3/settings/{key}": s.updateSetting,
-		"GET /api/v3/audit":              s.auditEvents,
-		"GET /api/v3/oidc/configuration": s.oidcConfiguration, "PUT /api/v3/oidc/configuration": s.putOIDCConfiguration,
+		"GET /api/v3/notifications/destinations": s.notificationDestinations, "POST /api/v3/notifications/destinations": s.createNotificationDestination,
+		"GET /api/v3/notifications/destinations/{notification_destination_id}":   s.notificationDestination,
+		"PATCH /api/v3/notifications/destinations/{notification_destination_id}": s.updateNotificationDestination,
+		"GET /api/v3/notifications/rules":                                        s.notificationRules, "POST /api/v3/notifications/rules": s.createNotificationRule,
+		"GET /api/v3/notifications/rules/{budget_alert_rule_id}":   s.notificationRule,
+		"PATCH /api/v3/notifications/rules/{budget_alert_rule_id}": s.updateNotificationRule,
+		"GET /api/v3/notifications/deliveries":                     s.notificationDeliveries,
+		"GET /api/v3/audit":                                        s.auditEvents,
+		"GET /api/v3/projects":                                     s.projects, "POST /api/v3/projects": s.createProject,
+		"GET /api/v3/project-memberships":   s.projectMemberships,
+		"GET /api/v3/projects/{project_id}": s.project, "PATCH /api/v3/projects/{project_id}": s.updateProject,
+		"GET /api/v3/projects/{project_id}/members":              s.projectMembers,
+		"PUT /api/v3/projects/{project_id}/members/{user_id}":    s.putProjectMember,
+		"DELETE /api/v3/projects/{project_id}/members/{user_id}": s.deleteProjectMember,
+		"GET /api/v3/management-tokens":                          s.managementTokens, "POST /api/v3/management-tokens": s.createManagementToken,
+		"GET /api/v3/management-tokens/{management_token_id}":         s.managementToken,
+		"POST /api/v3/management-tokens/{management_token_id}/revoke": s.revokeManagementToken,
+		"PUT /api/v3/provisioning/{source}/users/{external_id}":       s.provisionUser,
+		"DELETE /api/v3/provisioning/{source}/users/{external_id}":    s.deprovisionUser,
+		"GET /api/v3/oidc/configuration":                              s.oidcConfiguration, "PUT /api/v3/oidc/configuration": s.putOIDCConfiguration,
 		"GET /api/v3/oidc/login": s.beginOIDCLogin, "POST /api/v3/oidc/login": s.beginOIDCLogin,
 		"POST /api/v3/oidc/link": s.beginOIDCLink, "POST /api/v3/oidc/reauthenticate": s.beginOIDCReauthentication,
 		"GET /api/v3/oidc/callback": s.oidcCallback, "GET /api/v3/oidc/identities": s.oidcIdentities,
@@ -53,7 +73,7 @@ func (s *Server) setupStatus(r *http.Request) (Reply, error) {
 func (s *Server) capabilities(r *http.Request) (Reply, error) {
 	var local, oidc bool
 	err := s.Pool.QueryRow(r.Context(), `SELECT COALESCE((SELECT value='true' FROM olp_go.settings WHERE key='auth.local_login_enabled'),true),COALESCE((SELECT (document->>'enabled')::boolean FROM olp_go.oidc_configuration WHERE singleton),false)`).Scan(&local, &oidc)
-	return OK(map[string]bool{"local_login_enabled": local && !s.LocalLoginDisabled, "oidc_login_enabled": oidc, "gateway_available": true, "limits_enforced": s.LimitsEnforced, "retention_enforced": s.RetentionEnforced}), err
+	return OK(map[string]bool{"local_login_enabled": local && !s.LocalLoginDisabled, "oidc_login_enabled": oidc, "gateway_available": true, "limits_enforced": s.LimitsEnforced, "retention_enforced": s.RetentionEnforced, "notifications_active": s.NotificationsActive}), err
 }
 
 func (s *Server) passwordWork(r *http.Request, work func()) error {
@@ -223,17 +243,21 @@ func (s *Server) user(r *http.Request) (Reply, error) {
 }
 func (s *Server) updateUser(r *http.Request) (Reply, error) {
 	var input struct {
-		Role   *string `json:"role"`
-		Active *bool   `json:"active"`
+		Role        *string `json:"role"`
+		Active      *bool   `json:"active"`
+		AccessScope *string `json:"access_scope"`
 	}
 	if err := Decode(r, &input); err != nil {
 		return Reply{}, err
 	}
-	if input.Role == nil && input.Active == nil {
+	if input.Role == nil && input.Active == nil && input.AccessScope == nil {
 		return Reply{}, Invalid("user", "Provide a role or active status.")
 	}
 	if input.Role != nil && !validRole(*input.Role) {
 		return Reply{}, Invalid("role", "Use owner, operator, developer, or viewer.")
+	}
+	if input.AccessScope != nil && *input.AccessScope != "global" && *input.AccessScope != "assigned" {
+		return Reply{}, Invalid("access_scope", "Use global or assigned.")
 	}
 	id, err := IDParam(r, "user_id")
 	if err != nil {
@@ -261,11 +285,14 @@ func (s *Server) updateUser(r *http.Request) (Reply, error) {
 	if input.Active != nil {
 		u.Active = *input.Active
 	}
-	if id == p.ID && (!u.Active || u.Role != p.Role) {
+	if input.AccessScope != nil {
+		u.AccessScope = *input.AccessScope
+	}
+	if id == p.ID && (!u.Active || u.Role != p.Role || u.AccessScope != p.AccessScope) {
 		return Reply{}, Fail(409, "cannot_change_current_user_access", "Ask another owner to change your access.")
 	}
 	u.ETag = NewID()
-	if _, err = tx.Exec(r.Context(), "UPDATE olp_go.users SET role=$1,active=$2,etag=$3,updated_at=now() WHERE id=$4", u.Role, u.Active, u.ETag, id); err != nil {
+	if _, err = tx.Exec(r.Context(), "UPDATE olp_go.users SET role=$1,active=$2,access_scope=$3,etag=$4,updated_at=now(),role_management=CASE WHEN role_management='provisioned' THEN 'local' ELSE role_management END WHERE id=$5", u.Role, u.Active, u.AccessScope, u.ETag, id); err != nil {
 		return Reply{}, err
 	}
 	if err = s.usableOwner(r, tx); err != nil {
@@ -275,7 +302,7 @@ func (s *Server) updateUser(r *http.Request) (Reply, error) {
 		return Reply{}, err
 	}
 	if !u.Active || u.Role != "owner" {
-		if err = retireIssuedInvitations(r, tx, id, p.ID); err != nil {
+		if err = retireIssuedInvitations(r, tx, id, p.ID, p.UserID()); err != nil {
 			return Reply{}, err
 		}
 	}
@@ -297,7 +324,7 @@ func (s *Server) updateUser(r *http.Request) (Reply, error) {
 func (s *Server) usableOwner(r *http.Request, tx pgx.Tx) error {
 	var exists bool
 	err := tx.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM olp_go.users WHERE active AND oidc_authorized AND role='owner'
-        AND password_hash IS NOT NULL AND $1 AND COALESCE((SELECT value='true' FROM olp_go.settings WHERE key='auth.local_login_enabled'),true))`, !s.LocalLoginDisabled).Scan(&exists)
+        AND access_scope='global' AND password_hash IS NOT NULL AND $1 AND COALESCE((SELECT value='true' FROM olp_go.settings WHERE key='auth.local_login_enabled'),true))`, !s.LocalLoginDisabled).Scan(&exists)
 	if err != nil {
 		return err
 	}
@@ -314,7 +341,7 @@ func (s *Server) usableOwner(r *http.Request, tx pgx.Tx) error {
 	}
 	rows, err := tx.Query(r.Context(), `SELECT u.role_management='local',i.role_claims
         FROM olp_go.users u JOIN olp_go.oidc_identities i ON i.user_id=u.id
-        WHERE u.active AND u.oidc_authorized AND u.role='owner' AND i.issuer=$1`, c.Issuer)
+        WHERE u.active AND u.oidc_authorized AND u.role='owner' AND u.access_scope='global' AND i.issuer=$1`, c.Issuer)
 	if err != nil {
 		return err
 	}
@@ -341,10 +368,10 @@ func (s *Server) usableOwner(r *http.Request, tx pgx.Tx) error {
 
 // Invitations are outstanding access grants and cannot outlive the issuer's
 // membership-management authority. Call inside the authority change transaction.
-func retireIssuedInvitations(r *http.Request, tx pgx.Tx, issuer, actor string) error {
+func retireIssuedInvitations(r *http.Request, tx pgx.Tx, issuer, actor, revokedBy string) error {
 	result, err := tx.Exec(r.Context(), `UPDATE olp_go.invitations
         SET revoked_at=now(),revoked_by=NULLIF($2::text,'')::uuid
-        WHERE invited_by=$1 AND accepted_at IS NULL AND revoked_at IS NULL AND expires_at>now()`, issuer, actor)
+        WHERE invited_by=$1 AND accepted_at IS NULL AND revoked_at IS NULL AND expires_at>now()`, issuer, revokedBy)
 	if err != nil {
 		return err
 	}
@@ -427,10 +454,10 @@ func (s *Server) createInvitation(r *http.Request) (Reply, error) {
 		return Reply{}, Fail(409, "user_exists", "This email already belongs to a member.")
 	}
 	id, token := NewID(), secrets.Token()
-	if _, err = tx.Exec(r.Context(), "UPDATE olp_go.invitations SET revoked_at=now(),revoked_by=$2 WHERE email=$1 AND accepted_at IS NULL AND revoked_at IS NULL", address, p.ID); err != nil {
+	if _, err = tx.Exec(r.Context(), "UPDATE olp_go.invitations SET revoked_at=now(),revoked_by=$2 WHERE email=$1 AND accepted_at IS NULL AND revoked_at IS NULL", address, p.UserID()); err != nil {
 		return Reply{}, err
 	}
-	if _, err = tx.Exec(r.Context(), "INSERT INTO olp_go.invitations(id,email,role,digest,invited_by,expires_at) VALUES($1,$2,$3,$4,$5,$6)", id, address, input.Role, s.Auth.Digest("invitation", token), p.ID, time.Now().Add(time.Duration(hours)*time.Hour)); err != nil {
+	if _, err = tx.Exec(r.Context(), "INSERT INTO olp_go.invitations(id,email,role,digest,invited_by,expires_at) VALUES($1,$2,$3,$4,$5,$6)", id, address, input.Role, s.Auth.Digest("invitation", token), p.UserID(), time.Now().Add(time.Duration(hours)*time.Hour)); err != nil {
 		return Reply{}, err
 	}
 	body, err := invitation(r, tx, id)
@@ -475,7 +502,7 @@ func (s *Server) retireInvitation(r *http.Request) (Reply, error) {
 		return Reply{}, Fail(409, "invitation_accepted", "An accepted invitation cannot be revoked.")
 	}
 	if revoked == nil {
-		if _, err = tx.Exec(r.Context(), "UPDATE olp_go.invitations SET revoked_at=now(),revoked_by=$2 WHERE id=$1", id, p.ID); err != nil {
+		if _, err = tx.Exec(r.Context(), "UPDATE olp_go.invitations SET revoked_at=now(),revoked_by=$2 WHERE id=$1", id, p.UserID()); err != nil {
 			return Reply{}, err
 		}
 		if err = Audit(r.Context(), tx, r, p.ID, "invitation.revoke", "invitation", id, "success"); err != nil {

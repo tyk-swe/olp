@@ -1,6 +1,7 @@
 <script lang="ts">
   import { createQuery } from '@tanstack/svelte-query';
   import ProviderConnectionFields from './ProviderConnectionFields.svelte';
+  import ProjectScopeField from '$lib/features/access/projects/ProjectScopeField.svelte';
   import NavIcon from '$lib/components/NavIcon.svelte';
   import { stateLabel } from '$lib/format';
   import { listProviderVendors } from '$lib/features/providers/api';
@@ -141,6 +142,11 @@
     {/if}
   </fieldset>
   <div class="form-grid">
+    <ProjectScopeField
+      id="provider-project"
+      bind:value={draft.projectId}
+      disabled={Boolean(busy) || lockKind}
+    />
     <ProviderConnectionFields
       bind:values={draft}
       spec={selectedSpec}

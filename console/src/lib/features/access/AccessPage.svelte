@@ -4,16 +4,26 @@
   import OidcConfigurationPanel from '$lib/features/access/oidc/OidcConfigurationPanel.svelte';
   import SessionsPanel from '$lib/features/access/sessions/SessionsPanel.svelte';
   import MembersPanel from '$lib/features/access/users/MembersPanel.svelte';
+  import ManagementTokensPanel from '$lib/features/access/tokens/ManagementTokensPanel.svelte';
+  import ProjectsPanel from '$lib/features/access/projects/ProjectsPanel.svelte';
 
-  type Tab = 'members' | 'invitations' | 'sessions' | 'oidc';
-  const tabs: ReadonlyArray<{ id: Tab; label: string }> = [
-    { id: 'members', label: 'Members' },
-    { id: 'invitations', label: 'Invitations' },
-    { id: 'sessions', label: 'Sessions' },
-    { id: 'oidc', label: 'OIDC' }
-  ];
+  type Tab =
+    'members' | 'invitations' | 'sessions' | 'projects' | 'tokens' | 'oidc';
   const access = useRole();
   const canManage = $derived(access.can('users.manage'));
+  const tabs = $derived.by((): ReadonlyArray<{ id: Tab; label: string }> => {
+    const items: { id: Tab; label: string }[] = [
+      { id: 'members', label: 'Members' },
+      { id: 'invitations', label: 'Invitations' },
+      { id: 'sessions', label: 'Sessions' }
+    ];
+    if (access.role === 'owner') {
+      items.push({ id: 'projects', label: 'Projects' });
+      items.push({ id: 'tokens', label: 'Tokens' });
+    }
+    items.push({ id: 'oidc', label: 'OIDC' });
+    return items;
+  });
   let tab = $state<Tab>('members');
 </script>
 
@@ -54,6 +64,10 @@
   <InvitationsPanel />
 {:else if tab === 'sessions'}
   <SessionsPanel />
+{:else if tab === 'projects'}
+  <ProjectsPanel />
+{:else if tab === 'tokens'}
+  <ManagementTokensPanel />
 {:else}
   <OidcConfigurationPanel />
 {/if}

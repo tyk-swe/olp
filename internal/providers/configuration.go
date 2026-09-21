@@ -47,7 +47,7 @@ type Configuration struct {
 
 // normalize applies defaults and canonical forms so equal configurations
 // compare equal and every stored document is complete.
-func (c *Configuration) normalize() {
+func (c *Configuration) Normalize() {
 	if c.Endpoint == nil || *c.Endpoint == "" {
 		if endpoint := connectors.DefaultEndpoint(c.Kind, value(c.CloudRegion), value(c.CloudProject)); endpoint != "" {
 			c.Endpoint = new(endpoint)
@@ -76,7 +76,7 @@ func (c *Configuration) VendorMissing() bool {
 }
 
 // validate rejects configurations this gateway cannot serve.
-func (c *Configuration) validate(policy *egress.Policy) error {
+func (c *Configuration) Validate(policy *egress.Policy) error {
 	options, err := json.Marshal(c.Options)
 	if err != nil || len(options) > 1<<20 {
 		return access.Invalid("configuration.options", "Connection options must fit within 1 MiB")
@@ -140,7 +140,7 @@ func (c *Configuration) validate(policy *egress.Policy) error {
 		return access.Invalid("configuration.options.parameter_defaults", err.Error())
 	}
 	if c.Options.Limits != nil {
-		if !validQuota(*c.Options.Limits) {
+		if !ValidQuota(*c.Options.Limits) {
 			return access.Invalid("configuration.options.limits", "Use positive limits: requests and concurrency at most 2147483647, tokens at most 9007199254740991.")
 		}
 	}
@@ -149,7 +149,7 @@ func (c *Configuration) validate(policy *egress.Policy) error {
 
 // validQuota uses the same integer bounds as the shared limiter and reference
 // contract. Absence, not zero, disables a dimension.
-func validQuota(q Limits) bool {
+func ValidQuota(q Limits) bool {
 	for _, bound := range []struct {
 		value *int64
 		max   int64
@@ -174,7 +174,7 @@ func validHeaderName(name string) bool {
 }
 
 // credentialRequired reports whether the auth mode needs a secret.
-func (c *Configuration) credentialRequired() bool { return connectors.SecretRequired(c.AuthMode) }
+func (c *Configuration) CredentialRequired() bool { return connectors.SecretRequired(c.AuthMode) }
 
 // transportFingerprint identifies everything that affects how the gateway
 // reaches the upstream. Certification evidence is retained only while it is
