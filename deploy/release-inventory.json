@@ -9,7 +9,7 @@
   },
   "behaviorMapping": {
     "path": "tests/release-behaviors.json",
-    "sha256": "6e312225879700e303a4876027f350d6742d3176ae3aecd545d52d0adf694fd7"
+    "sha256": "c720371cc3304c331e48f858612fa423812c58556cab9552ecb5ba2693593dc0"
   },
   "capabilityCheck": "internal/providers/frozen_capabilities_test.go#TestFrozenCertificationMatrix",
   "management": [
@@ -4640,7 +4640,7 @@
       "tests": [
         "tests/integration/accounting_test.go#TestAccountingPersistsPricedAttemptsAndIsReplaySafe",
         "tests/integration/accounting_test.go#TestAccountingPricingProvenance",
-        "tests/integration/accounting_test.go#TestAccountingRefusesToPriceCachedTokensWithoutTheirTotal",
+        "tests/integration/accounting_test.go#TestAccountingRejectsCachedTokensWithoutTheirTotal",
         "tests/integration/accounting_regression_test.go#TestAccountingRejectsConcurrentIdentityReuse",
         "tests/integration/accounting_regression_test.go#TestAccountingDoesNotHideChangedPayloadBehindFacts",
         "tests/integration/accounting_regression_test.go#TestReceiptsProtectRequestsWithNoRemainingFacts",
@@ -4931,7 +4931,7 @@
       "tests": [
         "tests/integration/accounting_test.go#TestAccountingPersistsPricedAttemptsAndIsReplaySafe",
         "tests/integration/accounting_test.go#TestAccountingPricingProvenance",
-        "tests/integration/accounting_test.go#TestAccountingRefusesToPriceCachedTokensWithoutTheirTotal",
+        "tests/integration/accounting_test.go#TestAccountingRejectsCachedTokensWithoutTheirTotal",
         "tests/integration/accounting_regression_test.go#TestAccountingRejectsConcurrentIdentityReuse",
         "tests/integration/accounting_regression_test.go#TestAccountingDoesNotHideChangedPayloadBehindFacts",
         "tests/integration/accounting_regression_test.go#TestReceiptsProtectRequestsWithNoRemainingFacts",
@@ -5235,7 +5235,7 @@
       "tests": [
         "tests/integration/accounting_test.go#TestAccountingPersistsPricedAttemptsAndIsReplaySafe",
         "tests/integration/accounting_test.go#TestAccountingPricingProvenance",
-        "tests/integration/accounting_test.go#TestAccountingRefusesToPriceCachedTokensWithoutTheirTotal",
+        "tests/integration/accounting_test.go#TestAccountingRejectsCachedTokensWithoutTheirTotal",
         "tests/integration/accounting_regression_test.go#TestAccountingRejectsConcurrentIdentityReuse",
         "tests/integration/accounting_regression_test.go#TestAccountingDoesNotHideChangedPayloadBehindFacts",
         "tests/integration/accounting_regression_test.go#TestReceiptsProtectRequestsWithNoRemainingFacts",
@@ -5252,7 +5252,7 @@
       "tests": [
         "tests/integration/accounting_test.go#TestAccountingPersistsPricedAttemptsAndIsReplaySafe",
         "tests/integration/accounting_test.go#TestAccountingPricingProvenance",
-        "tests/integration/accounting_test.go#TestAccountingRefusesToPriceCachedTokensWithoutTheirTotal",
+        "tests/integration/accounting_test.go#TestAccountingRejectsCachedTokensWithoutTheirTotal",
         "tests/integration/accounting_regression_test.go#TestAccountingRejectsConcurrentIdentityReuse",
         "tests/integration/accounting_regression_test.go#TestAccountingDoesNotHideChangedPayloadBehindFacts",
         "tests/integration/accounting_regression_test.go#TestReceiptsProtectRequestsWithNoRemainingFacts",
