@@ -21,17 +21,18 @@ reject relative overrides because shell commands and Compose files resolve
 relative paths from different directories. When unset, the directory remains
 `deploy/secrets`.
 
-3.0 uses a JSON master-key ring and a separate authentication HMAC key. Provision
-new 3.0 storage independently of 2.x. Preserve these files when restoring a 3.0
-backup or rotating keys within an installation.
+3.0 uses a JSON master-key ring and a separate authentication HMAC key.
+Provision fresh Go storage independently of Rust 2.x and 3.x. Preserve these
+files when restoring a 3.0 backup or rotating keys within an installation.
 
 ## Bootstrap token lifecycle
 
 `olp_bootstrap_token` is a one-time first-owner setup token. Start a new
-installation with `deploy/compose.yaml` and
-`deploy/compose.bootstrap.yaml`, paste its value into the setup form, and
-verify the owner. Recreate the initialized application without the bootstrap
-overlay, then retire the token:
+installation with `deploy/compose.yaml` and `deploy/compose.bootstrap.yaml`,
+paste its value into the setup form, and verify the owner. Recreate the
+initialized application without the bootstrap overlay, then retire the token.
+Retain any build or production overlays and environment files used by your
+installation; for the base stack:
 
 ```sh
 docker compose --env-file .env -f deploy/compose.yaml up -d --force-recreate olp
@@ -39,29 +40,19 @@ docker compose --env-file .env -f deploy/compose.yaml up -d --force-recreate olp
 ```
 
 The helper deletes the token and records retirement so preparation cannot
-recreate it. Use the base Compose file for all later restarts/upgrades. To
+recreate it. Omit the bootstrap overlay on later restarts and upgrades. To
 intentionally bootstrap a fresh database, remove
 `deploy/secrets/.olp_bootstrap_retired`, prepare again, and include the overlay.
 
 ## Master-key rotation
 
-Use a versioned keyring, retaining the old key until all encrypted rows are
-rewritten and verified:
-
-```json
-{
-  "active_version": 2,
-  "keys": [
-    { "version": 1, "key": "<old-base64-key>" },
-    { "version": 2, "key": "<new-base64-key>" }
-  ]
-}
-```
-
-Add the new key and restart every replica, select it as active and restart
-again, then run `olp master-key reencrypt` and
-`olp master-key verify-retirement --version 1`. Remove the old key only after
-retirement verification succeeds.
+Follow the
+[master-key rotation procedure](../../docs/access.md#master-key-rotation-and-recovery)
+in a controlled maintenance window. Retain every referenced key version and keep
+the authentication HMAC key unchanged. Reencrypt and authenticate records before
+removing an old version; the retirement command takes a positional version, for
+example `olp master-key verify-retirement 1`. Backup retention may require
+keeping that version longer.
 
 ## File-backed connectors
 
@@ -71,26 +62,9 @@ read-only JSON file; every `provider_id` must match the active runtime. Start
 from [`deploy/connectors.example.json`](../connectors.example.json); unknown
 fields are rejected.
 
-The top-level `providers` array contains entries with `provider_id`, a nested
-`configuration` matching the management API, and an optional `credential_file`.
-Vertex entries also select a probe `model`. Authentication mode is explicit:
-Vertex `adc` and Bedrock `default_chain` omit stored credentials;
-`service_account` and `static` require them. Separate vendor arrays are not
-accepted by 3.0. See the
-[mounted connector reference](../../docs/configuration.md#mounted-connectors).
-
-Mount the configuration and credential files read-only (`0600` for credentials).
-Prefer workload identity. A static Bedrock file is:
-
-```json
-{
-  "access_key_id": "AKIA...",
-  "secret_access_key": "...",
-  "session_token": "<optional>"
-}
-```
-
-Bedrock discovery needs `bedrock:ListFoundationModels`; inference needs
-`bedrock:InvokeModel`, `bedrock:InvokeModelWithResponseStream`, and, when
-used, `bedrock:CountTokens`. Scope permissions to configured resources where
-AWS supports resource-level grants.
+Mount configuration and credential files read-only (`0600` for credentials). The
+[mounted connector reference](../../docs/configuration.md#mounted-connectors)
+defines the `providers` format and default-slot requirements. The
+[Bedrock](../../docs/providers/bedrock.md#authentication) and
+[Azure](../../docs/providers/azure.md#authentication) guides describe cloud
+authentication; prefer workload identity where available.

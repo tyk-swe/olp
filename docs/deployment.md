@@ -1,46 +1,46 @@
 # Production deployment
 
-The bundled Helm chart deploys one immutable image in gateway, control,
-worker, and migration modes. This guide covers production topology;
+The bundled Helm chart deploys one immutable image in gateway, control, worker,
+and migration modes. This guide covers production topology;
 [`operations.md`](operations.md) covers monitoring, recovery, upgrades, and
 incidents.
 
 ## Prerequisites and secrets
 
 The example renders are checked for Kubernetes 1.33–1.35. Use a supported
-cluster release, PostgreSQL 18, and durable Valkey 9.1. Pin an approved
-OCI image digest; do not deploy a mutable development tag. Create these
-Secrets before installing (names and keys are configurable through `config`):
+cluster release, PostgreSQL 18, and durable Valkey 9.1. Pin an approved OCI
+image digest; do not deploy a mutable development tag. Create these Secrets
+before installing (names and keys are configurable through `config`):
 
 | Purpose | Default Secret/key |
-|---|---|
+| --- | --- |
 | PostgreSQL URL | `olp-postgresql` / `url` |
 | Valkey URL | `olp-valkey` / `url` |
 | Master keyring | `olp-master-key` / `key` |
 | Authentication HMAC key | `olp-auth-hmac-key` / `key` |
 | OTLP exporter headers (optional) | none / `headers`; set the name with `tracing.headersSecretName` |
 
-Provision fresh 3.0 PostgreSQL storage and a JSON master-key ring. Rust 2.x and Rust 3.x
-storage cannot be upgraded in place; use isolated Valkey state as well.
-New installations also need a 32-byte base64 bootstrap-token Secret mounted
-only into control pods. Keep all secret values out of values files and shell
-history; the chart schema validates configured names and keys.
+Provision fresh 3.0 PostgreSQL storage and a JSON master-key ring. Rust 2.x and
+Rust 3.x storage cannot be upgraded in place; use isolated Valkey state as well.
+New installations also need a 32-byte base64 bootstrap-token Secret mounted only
+into control pods. Keep all secret values out of values files and shell history;
+the chart schema validates configured names and keys.
 
 ### Shared Valkey and workers
 
 The PostgreSQL installation UUID supplies the Valkey namespace, so independent
 installations may share a logical database without key collisions. A restored
 database retains its identity and is a replacement, not a clone; use a fresh
-Valkey service for rehearsals; never let source and replacement share streams
-or leases. A writable independent clone is unsupported.
+Valkey service for rehearsals; never let source and replacement share streams or
+leases. A writable independent clone is unsupported.
 
 The chart defaults to one worker for a small footprint. Production should use
 three replicas, a PodDisruptionBudget, and failure-domain spreading. Workers
 consume work concurrently; PostgreSQL advisory locks serialize maintenance and
 cost reconciliation, and Valkey consumer groups reclaim metadata ownership.
 Runtime releases publish transactionally with their activating mutation, not
-through a worker outbox. The worker Deployment uses `Recreate`: mixed-version workers are not supported
-during schema changes.
+through a worker outbox. The worker Deployment uses `Recreate`: mixed-version
+workers are not supported during schema changes.
 
 ## Release artifacts
 
@@ -61,7 +61,7 @@ Route the shared origin as follows, preserving prefixes, streaming, and client
 disconnects:
 
 | Prefix | Service |
-|---|---|
+| --- | --- |
 | `/v1`, `/v1beta`, `/anthropic`, `/gemini` | gateway |
 | `/api`, `/`, and console deep links | control |
 
@@ -86,22 +86,27 @@ ingress:
     secretName: olp-tls
 ```
 
-`config.publicOrigin` and `ingress.host` must identify the same trusted
-origin. Production uses OIDC and sets `config.localLoginEnabled: false` after
-the OIDC login path has been verified. Local login remains available for
-bootstrap and small installations; MFA for that surface is deferred until a
-deployment requests it. For Gateway API or a mesh, leave
-chart Ingress disabled and reproduce the same routing table.
-Disable buffering for SSE and do not lower request-size or idle-timeout
-bounds.
+`config.publicOrigin` and `ingress.host` must identify the same trusted origin.
+Production uses OIDC and sets `config.localLoginEnabled: false` after the OIDC
+login path has been verified. Local login remains available for bootstrap and
+small installations; MFA for that surface is deferred until a deployment
+requests it. For Gateway API or a mesh, leave chart Ingress disabled and
+reproduce the same routing table. Disable buffering for SSE and do not lower
+request-size or idle-timeout bounds. Enable WebSocket upgrades for
+`/v1/realtime` when realtime is used.
+
+The checked-in chart Ingress routes the prefixes above but does not include
+`/bedrock`. Add an edge route for `/bedrock` to the gateway service before using
+native Bedrock clients. Vite also lacks this prefix and WebSocket proxying; use
+the Go listener directly for those local clients.
 
 ## Observability and capacity
 
 `OLP_OBSERVABILITY_LISTEN_ADDR` exposes only `/health/live`, `/health/ready`,
-and `/metrics` on the pod network. The chart creates internal
-`*-observability` ClusterIP Services on port 9090; the public Ingress has no
-health or metrics route. [Network policy](#network-policy) below closes the
-port to everything except the installation's Prometheus topology.
+and `/metrics` on the pod network. The chart creates internal `*-observability`
+ClusterIP Services on port 9090; the public Ingress has no health or metrics
+route. [Network policy](#network-policy) below closes the port to everything
+except the installation's Prometheus topology.
 
 The binary's `OLP_HTTP_MAX_CONNECTIONS` default remains 1,024. The chart raises
 the gateway per-pod TCP cap to 16,384 and keeps the control cap at 1,024.
@@ -128,26 +133,27 @@ tracing:
   acceptInbound: true
 ```
 
-The chart mounts the selected key at
-`/run/secrets/otlp-headers/headers` and configures both gateway and control
-pods. `propagateUpstream` and `acceptInbound` set `OLP_TRACE_PROPAGATE_UPSTREAM`
-and `OLP_TRACE_ACCEPT_INBOUND`; they apply only when `endpoint` is set. Worker and migration pods do not receive tracing configuration. Keep the
-Secret value out of Helm values and use TLS for production collectors. The
-tracing exporter sends no OpenTelemetry metrics or logs. The collector is an
-operator-controlled endpoint and may be private or in-cluster; unlike provider
-endpoints, it is not subject to OLP's public-HTTPS provider egress policy. This
-explicit exception does not widen `config.providerEgressAllowCidrs` or
+The chart mounts the selected key at `/run/secrets/otlp-headers/headers` and
+configures both gateway and control pods. `propagateUpstream` and
+`acceptInbound` set `OLP_TRACE_PROPAGATE_UPSTREAM` and
+`OLP_TRACE_ACCEPT_INBOUND`; they apply only when `endpoint` is set. Worker and
+migration pods do not receive tracing configuration. Keep the Secret value out
+of Helm values and use TLS for production collectors. The tracing exporter sends
+no OpenTelemetry metrics or logs. The collector is an operator-controlled
+endpoint and may be private or in-cluster; unlike provider endpoints, it is not
+subject to OLP's public-HTTPS provider egress policy. This explicit exception
+does not widen `config.providerEgressAllowCidrs` or
 `config.providerEgressAllowHttpHosts`, and provider endpoint checks are
 unchanged.
 
 ## Network policy
 
-`networkPolicy.enabled: true` renders one NetworkPolicy per enabled
-component. Rules target the container ports — 8080 for the public listener
-and 9090 for observability — not `gateway.service.port`, so changing a
-Service port does not change what the policy admits. The chart refuses to
-render without at least one edge peer, because an empty peer list would
-silently deny all traffic to the gateway.
+`networkPolicy.enabled: true` renders one NetworkPolicy per enabled component.
+Rules target the container ports — 8080 for the public listener and 9090 for
+observability — not `gateway.service.port`, so changing a Service port does not
+change what the policy admits. The chart refuses to render without at least one
+edge peer, because an empty peer list would silently deny all traffic to the
+gateway.
 
 ```yaml
 networkPolicy:
@@ -167,14 +173,15 @@ networkPolicy:
 `edge.cidrs` adds raw peers for an edge load balancer or node range, and some
 CNIs need the kubelet probe CIDRs there as well. The `prometheus` block is
 separate from `monitoring.*`, which only places the ServiceMonitor object:
-leaving both `prometheus` maps empty denies every scrape of 9090. Workers expose only private health/metrics on 9090; the Prometheus peer may
-reach that port. Migration pods have no listener and deny ingress.
+leaving both `prometheus` maps empty denies every scrape of 9090. Workers expose
+only private health/metrics on 9090; the Prometheus peer may reach that port.
+Migration pods have no listener and deny ingress.
 
 Egress defaults to allow-all. Provider endpoints are arbitrary public HTTPS
 hosts, and the chart never sees the PostgreSQL or Valkey addresses —
-`config.databaseSecretName` and `config.valkeySecretName` hold opaque
-connection URLs — so a restrictive default would break every installation on
-first upgrade. Harden it once those addresses are known:
+`config.databaseSecretName` and `config.valkeySecretName` hold opaque connection
+URLs — so a restrictive default would break every installation on first upgrade.
+Harden it once those addresses are known:
 
 ```yaml
 networkPolicy:
@@ -228,17 +235,19 @@ helm upgrade --install olp \
 
 Before issuing a proxy key or sending traffic, require a successful migration
 Job, ready pods, runtime-generation convergence, and healthy observability
-targets. With replicated workers also require all five
-`olp_worker_task_healthy` series and zero request-metadata pending/lag.
-`runtime_outbox` is `not_configured`, not a drainage requirement. Continue with
-the monitoring and recovery checks in [`operations.md`](operations.md).
+targets. With Valkey-backed workers, require all six `olp_worker_task_healthy`
+task series and zero request-metadata pending/lag; see
+[worker health](operations.md#replicated-worker-health). `runtime_outbox` is
+`not_configured`, not a drainage requirement. Continue with the monitoring and
+recovery checks in [`operations.md`](operations.md).
 
 ## Production example and connection budget
 
 Start with `deploy/helm/values.production.yaml`, set real public origin, TLS
 Secret, trusted proxy ranges and network-policy namespace selectors, and pass
-`--set-string image.digest="$QUALIFIED_IMAGE_DIGEST"`. That variable must contain
-the qualified `sha256:...` value, not an example hash. Before installing, verify:
+`--set-string image.digest="$QUALIFIED_IMAGE_DIGEST"`. That variable must
+contain the qualified `sha256:...` value, not an example hash. Before
+installing, verify:
 
 ```sh
 gh attestation verify "oci://ghcr.io/tyk-swe/olp@$QUALIFIED_IMAGE_DIGEST" \
@@ -247,40 +256,41 @@ helm upgrade --install olp deploy/helm -f deploy/helm/values.production.yaml \
   --set-string image.digest="$QUALIFIED_IMAGE_DIGEST"
 ```
 
-The example runs three gateways, two control replicas and three workers with
-10 pooled connections per process: 80 pooled connections. Reserve two additional
+The example runs three gateways, two control replicas and three workers with 10
+pooled connections per process: 80 pooled connections. Reserve two additional
 connections per worker: cost reconciliation detaches a session and holds its
 advisory lock between passes; maintenance detaches another for each pass and
 closes it afterward. Both cease counting against pool capacity. Reserving both
 for every replica conservatively covers leaders, contenders, and overlapping
-passes: 86 planned connections. With the chart's
-one-pod surge for each HTTP deployment and a ten-connection migration job, budget
-116 application connections during rollout. Reserve at least 20 more for
-monitoring, administrators, closing/orphaned sessions and recovery (round the
-minimum planned database limit up to 140).
-Do not run a second full fleet concurrently within that budget. Workers use
-Recreate, and the database/Valkey service, ingress, storage and DNS still need
-independent redundancy. Verify topology and failure behavior on the actual
-cluster; a successful Helm render is not a node-failure qualification.
+passes: 86 planned connections. With the chart's one-pod surge for each HTTP
+deployment and a ten-connection migration job, budget 116 application
+connections during rollout. Reserve at least 20 more for monitoring,
+administrators, closing/orphaned sessions and recovery (round the minimum
+planned database limit up to 140). Do not run a second full fleet concurrently
+within that budget. Workers use Recreate, and the database/Valkey service,
+ingress, storage and DNS still need independent redundancy. Verify topology and
+failure behavior on the actual cluster; a successful Helm render is not a
+node-failure qualification.
 
 For a single-host production Compose installation, run
 `scripts/prepare-compose-production.sh`, then supply
 `--env-file deploy/secrets/production.env -f deploy/compose.yaml -f deploy/compose.production.yaml`
-to Compose, together with the documented bootstrap overlay for first setup.
-Set a real HTTPS public origin, qualified image digest and non-root UID/GID.
-The command creates a database password once and constructs its encoded URL;
+to Compose, together with the documented bootstrap overlay for first setup. Set
+a real HTTPS public origin, qualified image digest and non-root UID/GID. The
+command creates a database password once and constructs its encoded URL;
 PostgreSQL reads the raw value from a mounted secret. For an externally chosen
-password, place it in `deploy/secrets/olp_database_password` with mode 0600 before
-running the command. Existing database passwords must not be regenerated without
-an explicit database rotation. The overlay increases memory to include tmpfs
-spooling but remains a single-host deployment, not an HA profile.
+password, place it in `deploy/secrets/olp_database_password` with mode 0600
+before running the command. Existing database passwords must not be regenerated
+without an explicit database rotation. The overlay increases memory to include
+tmpfs spooling but remains a single-host deployment, not an HA profile.
 
 The operational assumptions and evidence are in
 [production-guarantees.md](production-guarantees.md).
 
 The image includes SPDX attestations for the runtime plus Go and console build
-stages. Inspect them with `docker buildx imagetools inspect IMAGE@DIGEST --format
-'{{json .SBOM}}'`. Candidate qualification and the weekly release scan evaluate
-both the image and those inventories; missing inventory is a failure. Downloaded
-chart archives can be checked with `gh attestation verify CHART.tgz --repo
-tyk-swe/olp` before installation.
+stages. Inspect them with
+`docker buildx imagetools inspect IMAGE@DIGEST --format '{{json .SBOM}}'`.
+Candidate qualification and the weekly release scan evaluate both the image and
+those inventories; missing inventory is a failure. Downloaded chart archives can
+be checked with `gh attestation verify CHART.tgz --repo tyk-swe/olp` before
+installation.

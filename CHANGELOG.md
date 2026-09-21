@@ -9,11 +9,19 @@ semantic versioning and take their source from root `package.json`;
 
 ### Changed
 
-- The console adopts a dark, single-theme "Factory" design: Geist and Geist
-  Mono type, bone-on-obsidian surfaces with orange and green reserved for live
-  status and data, and a sticky top navigation bar with contextual
-  sub-navigation in place of the sidebar. The light theme and theme toggle are
-  removed.
+- Project-scoped membership and resources, shared budget groups, and bounded
+  usage-attribution labels. Budget threshold notifications use signed webhooks
+  when a signing secret is configured.
+- Scoped management tokens, identity provisioning, configuration export/plan/apply,
+  and managed pricing sources with reviewed snapshot publication.
+- Qualified Files, Batch, realtime WebSocket, and provider-retained Responses
+  workflows for OpenAI and Azure; native Bedrock ingress; reviewed rerank and
+  expanded embedding/image operations. Support remains provider/model-specific.
+- Azure Entra authentication and route content policies that inspect supported
+  text in memory without persisting request or response content.
+- The console uses the dark "Factory" theme with Geist fonts, a sticky top
+  navigation bar, and contextual sub-navigation. The sidebar, light theme,
+  and theme toggle are removed.
 - 3.0 requires a fresh installation. Rust 2.x and Rust 3.x storage is refused
   before modification; PostgreSQL uses `olp_go` and Valkey keys use
   `olp:go:v1:<installation UUID>:`. Provision fresh PostgreSQL storage and
@@ -37,6 +45,10 @@ semantic versioning and take their source from root `package.json`;
   contributor documentation records when that exception can be removed.
 - Management list responses carry one `items` array; the duplicate `data`
   array is removed.
+- Gateway authorization and realtime leases respect current key authority;
+  stored-response accounting settles observed final usage once.
+- Documentation follows current capabilities, commands, and deployment limits,
+  with shorter cross-linked guides and preserved historical qualification.
 
 ### Removed
 

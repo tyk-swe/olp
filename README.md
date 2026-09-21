@@ -1,71 +1,65 @@
 # OpenLLMProxy
 
 OpenLLMProxy is a self-hosted AI gateway and control plane built with Go,
-SvelteKit, PostgreSQL, and Valkey. It routes native OpenAI, Anthropic, and Gemini
-SDK requests across OpenAI, Anthropic, Gemini, Vertex AI, Amazon Bedrock, Azure
-OpenAI, and reviewed OpenAI-compatible endpoints.
+SvelteKit, PostgreSQL, and Valkey. It routes OpenAI, Anthropic, Gemini, and
+Bedrock client requests across certified provider models. Providers include
+OpenAI, Anthropic, Gemini, Vertex AI, Amazon Bedrock, Azure OpenAI, and reviewed
+OpenAI-compatible endpoints.
 
-The Go release requires a fresh installation. Rust 2.x and 3.x databases
-are rejected before any migration runs. Storage uses `olp_go`; there is no
-Rust-to-Go data migration. Provision a separate database and keep the old
-installation and its backups until you have verified the replacement.
+The Go release requires fresh PostgreSQL storage and isolated Valkey state. Rust
+2.x and 3.x databases are rejected before migration; there is no Rust-to-Go data
+migration. Keep the old installation and its backups until you have verified the
+replacement.
 
 ## Develop locally
 
-Install Go 1.27.1, a C compiler/linker and glibc headers, Node.js 26, pnpm 11,
-Docker Compose, and PostgreSQL 18 client tools, then run:
+Install the [development prerequisites](CONTRIBUTING.md), then run:
 
 ```sh
 make setup
 make dev
 ```
 
-Open http://127.0.0.1:5173. Use the token in `.local/go-secrets/bootstrap.token` to
-create the first owner. Vite serves the console with hot reload and proxies API,
-OIDC callback, and streaming requests through that same origin. PostgreSQL and
-Valkey use isolated development volumes and loopback ports 54321 and 63791.
+Open http://127.0.0.1:5173 and use `.local/go-secrets/bootstrap.token` to create
+the first owner. Vite serves the console with hot reload and proxies the
+configured API paths to Go. Restart after backend edits.
 
-`make test` runs Go, console, and script tests without containers. `make check`
-adds contract generation and static checks; `make test-race` checks Go races.
-`make integration` runs the service, recovery, SDK, and Chromium journey suites. CI also qualifies
-dependencies. See
-[CONTRIBUTING.md](CONTRIBUTING.md) for commands and the TypeScript 6.0 support
-exception, and [the architecture map](docs/architecture.md) for feature ownership.
+`make test` runs local Go, console, and script tests. `make check` adds contract
+generation and static checks; `make integration` runs service, SDK, browser, and
+recovery suites. See [Contributing](CONTRIBUTING.md) for the full workflow.
 
 ## Install
 
-Build the image locally, or select a published 3.x image through `OLP_IMAGE`.
-Use fresh PostgreSQL and Valkey storage; do not reuse Rust storage volumes.
+Build the image locally with Compose:
 
 ```sh
 cp .env.example .env
 ./scripts/prepare-compose-secrets.sh
-docker compose --env-file .env -f deploy/compose.yaml -f deploy/compose.build.yaml -f deploy/compose.bootstrap.yaml up --build -d
+docker compose --env-file .env \
+  -f deploy/compose.yaml -f deploy/compose.build.yaml \
+  -f deploy/compose.bootstrap.yaml up --build -d
 ```
 
 Visit the configured `OLP_PUBLIC_ORIGIN` and use
-`deploy/secrets/olp_bootstrap_token` for first-owner setup. After setup, recreate
-the application without the bootstrap overlay and run
-`./scripts/retire-compose-bootstrap-secret.sh`.
+`deploy/secrets/olp_bootstrap_token` for first-owner setup. After setup,
+[recreate the application without the bootstrap overlay and retire the token](deploy/secrets/README.md#bootstrap-token-lifecycle).
+To use a published 3.x image, set `OLP_IMAGE` and omit the build overlay and
+`--build`.
 
-The console walks through connection, model discovery and capability
-certification, then activation. Create a route targeting activated provider
-models, publish it, and issue an API key with the required scope and route
-allowlist. Credentials are write-only. Provider and route changes use ETags,
-immutable revisions, and explicit activation. [Provider routing](docs/provider-routing.md)
-adds vendor-based connections, credential pools, bulk model validation and route
-creation, and bounded price, latency, throughput, and privacy preferences.
+In the console, connect a provider, discover and certify models, and activate
+it. Create and publish a route targeting those models, then issue an API key in
+the same project with the required scopes and route access. See
+[provider routing](docs/provider-routing.md) for credential pools, bulk
+workflows, and price, latency, throughput, and privacy preferences.
 
-For production, see [deployment](docs/deployment.md),
-[configuration](docs/configuration.md), and [operations](docs/operations.md).
-Gateway, control, and worker modes can run as separate processes and replicas.
-PostgreSQL owns durable state; Valkey coordinates distributed limits and event
-delivery. Workers recover accounting and media jobs after dependency failures.
+For production, follow [deployment](docs/deployment.md) and
+[configuration](docs/configuration.md). Gateway, control, and worker modes can
+run separately; workers persist accounting and reconcile media jobs and budgets.
 
 ## Make an SDK request
 
-The OpenAI base URL is the deployment origin plus `/v1`. The model is a
-published route slug:
+Install the `openai` JavaScript package and set `OLP_API_KEY` to a key with
+`inference` scope. The model is a published route slug:
 
 ```javascript
 import OpenAI from 'openai';
@@ -82,60 +76,51 @@ console.log(response.output_text);
 ```
 
 Use `/anthropic` as the Anthropic SDK base URL and `/gemini` as the Gemini SDK
-base URL. Native SDK authentication, unary responses, and streaming are
-preserved. `/openai/v1` and `x-litellm-api-key` are retired.
+base URL. Bedrock uses `/bedrock` and separate gateway authentication; see the
+[Bedrock guide](docs/providers/bedrock.md#bedrock-sdk-ingress), including proxy
+requirements. `/openai/v1` and `x-litellm-api-key` are retired.
 
 | Interface | Path |
 | --- | --- |
-| Management API | `/api/v3` |
-| Management OpenAPI | `/api/v3/openapi.json` |
+| Management API and OpenAPI | `/api/v3` and `/api/v3/openapi.json` |
 | OpenAI | `/v1` |
 | Anthropic | `/anthropic/v1` |
 | Gemini | `/gemini/v1beta` and `/gemini/v1` |
-| Private liveness and readiness | Separate observability listener on port 9090 |
+| Bedrock | `/bedrock` |
+| Private health and metrics | Separate observability listener on port 9090 |
 
-Supported operations include generation and token counting, embeddings,
-moderation, image generation and editing, speech and transcription, and durable
-video jobs, subject to the selected provider's certified capabilities. Routes
-control eligibility, priorities, weighted selection, attempt limits, and
-timeouts. API keys control permissions, rate limits, concurrency, and exact
-daily and monthly accrued-cost budgets.
-
-The console includes provider and route history, access and OIDC management,
-usage and pricing, request metadata, media jobs, and health. Persisted telemetry
-excludes prompts, outputs, credentials, and uploaded content.
+The [compatibility matrix](docs/compatibility.md) lists generation, token
+counting, embeddings, rerank, moderation, media, and qualified file, batch,
+realtime, and stored-response operations. Support depends on the provider,
+model, and certified capability. Persisted telemetry excludes prompts, outputs,
+credentials, and uploaded content; opt-in provider state may retain content
+upstream.
 
 ## Documentation
 
 | Guide | Covers |
 | --- | --- |
-| [Provider routing](docs/provider-routing.md) | Vendors, credential pools, model facts, policies, and coordinated upgrade |
-| [Concepts](docs/concepts.md) | Routes, provider revisions, keys, usage, and privacy |
-| [Compatibility](docs/compatibility.md) | Supported endpoints and translation limits |
-| [Deployment](docs/deployment.md) | Production topology, secrets, and capacity |
-| [Configuration](docs/configuration.md) | Environment variables and CLI settings |
+| [Concepts](docs/concepts.md) | Projects, routes, revisions, keys, budgets, and privacy |
+| [Provider routing](docs/provider-routing.md) | Onboarding, credential pools, model facts, and selection policy |
+| [Compatibility](docs/compatibility.md) | Endpoints, supported providers, and translation limits |
+| [Deployment](docs/deployment.md) | Production topology, secrets, capacity, and edge routing |
+| [Configuration](docs/configuration.md) | Variables, CLI settings, and configuration promotion |
+| [Access control](docs/access.md) | Identity, projects, management tokens, and account recovery |
+| [Gateway execution](docs/gateway.md) | Admission, attempts, content policies, and durable media |
 | [Operations](docs/operations.md) | Monitoring, recovery, and upgrades |
 | [Production contracts](docs/production-guarantees.md) | Guarantees, assumptions, and qualification limits |
-| [Gateway execution](docs/gateway.md) | Request execution, limits, and durable media |
-| [Access control](docs/access.md) | Installation, identity, and access control |
-| [Completion record](docs/roadmap/README.md) | Dated rewrite qualification and immutable historical evidence |
-| [Contributing](CONTRIBUTING.md) | Development, checks, and releases |
+| [Contributing](CONTRIBUTING.md) | Setup, tests, architecture, and releases |
+| [Completion record](docs/roadmap/README.md) | Historical rewrite qualification and evidence |
 
 ## Operations
 
-Back up a drained 3.0 installation and restore into an empty database:
-
-```sh
-OLP_DATABASE_URL=postgres://... OLP_BACKUP_TRAFFIC_QUIESCED=true ./scripts/backup.sh backups
-OLP_RESTORE_DATABASE_URL=postgres://... OLP_RESTORE_VALKEY_ISOLATED=true ./scripts/restore.sh /path/printed/by/backup.sh
-```
-
-Pass the dump path printed by the backup script to restore. Backups include a
-checksum and manifest and preserve the installation identity.
-Mount the original master-key ring and authentication HMAC key, configure a
-separate empty Valkey service, and use a database role with CREATEDB for restore
-validation. Retain the keys separately from the backup.
-See [operations](docs/operations.md) for quiescing, recovery, and key rotation.
+Follow the [backup and restore procedure](docs/operations.md#backup-and-restore)
+for drained backups, original-key recovery, and isolated replacement storage.
+See [spend recovery](docs/spend-budget-recovery.md) for budget initialization
+and reconciliation, and
+[key rotation](docs/access.md#master-key-rotation-and-recovery) for
+encryption-key maintenance.
 
 OpenLLMProxy is licensed under AGPL-3.0-only. Report vulnerabilities through
-[SECURITY.md](SECURITY.md).
+[the security policy](SECURITY.md); community participation follows the
+[Code of Conduct](CODE_OF_CONDUCT.md).

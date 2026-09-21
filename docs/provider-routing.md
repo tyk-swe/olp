@@ -1,10 +1,10 @@
 # Provider connections and routing
 
-OLP keeps published route names as the public model API. A vendor identifies
-an upstream organization; a connection (the existing provider ID) identifies
-an endpoint, account, region, or deployment. Several connections can use the
-same vendor and different credentials. A connector identifies the wire
-protocol and authentication mechanism.
+OLP keeps published route names as the public model API. A vendor identifies an
+upstream organization; a connection (the existing provider ID) identifies an
+endpoint, account, region, or deployment. Several connections can use the same
+vendor and different credentials. A connector identifies the wire protocol and
+authentication mechanism.
 
 ## Connect and qualify models
 
@@ -32,28 +32,30 @@ protocol and authentication mechanism.
 
 ![Reviewed models grouped under one published route name](assets/screenshots/provider-model-comparison.png)
 
-The vendor catalog is `GET /api/v3/provider-vendors`. The additional profiles
-are DeepSeek, Fireworks, DeepInfra, Hugging Face, Perplexity, Cohere, and
-Voyage. The first six cover generation and streaming; Cohere and Voyage cover
-embeddings. These are bounded connector contracts, not a claim that every
-model or credential supports every operation.
+`GET /api/v3/provider-vendors` lists the vendor catalog. DeepSeek, Fireworks,
+DeepInfra, Hugging Face, Perplexity, and Cohere profiles support generation;
+Cohere and Voyage support embeddings and rerank. Each model and credential still
+needs certification for the requested operation.
 
 The generation profiles use Chat Completions upstream, including lossless
-translation of supported Responses requests. Hugging Face's compatible API
-is [chat-only](https://huggingface.co/docs/inference-providers/en/index).
-Voyage maps dimensions to `output_dimension`, converts float encoding to its
-native default, disables implicit truncation, and normalizes usage.
-See the [Voyage contract](https://docs.voyageai.com/reference/embeddings-api).
-Cohere's documented unsupported parameters are rejected before selection;
-its compatible embeddings endpoint does not support dimensions.
-See [Cohere compatibility](https://docs.cohere.com/docs/compatibility-api).
+translation of supported Responses requests. OLP's Hugging Face profile uses
+Chat Completions upstream; this describes the gateway profile, not every API
+available from
+[Hugging Face](https://huggingface.co/docs/inference-providers/en/index). Voyage
+maps dimensions to `output_dimension`, converts float encoding to its native
+default, disables implicit truncation, and normalizes usage. See the
+[Voyage contract](https://docs.voyageai.com/reference/embeddings-api). Cohere's
+documented unsupported parameters are rejected before selection; its compatible
+embeddings endpoint does not support dimensions. See
+[Cohere compatibility](https://docs.cohere.com/docs/compatibility-api).
 Paid-provider qualification remains an operator activity scoped to the actual
 account, model, region, and credential.
 
 ## Provider lifecycle
 
-A provider is created as a draft with its configuration and, unless the
-authentication mode is `none`, `adc`, or `default_chain`, a credential. The console wizard then:
+A provider is created as a draft with its configuration and a credential unless
+the authentication mode is `none`, `adc`, `default_chain`, or `azure_default`.
+The console wizard then:
 
 1. **Probes** the connection (`POST /providers/{id}/probe`), which lists
    upstream models or proves a configured deployment/model when that vendor
@@ -69,7 +71,8 @@ authentication mode is `none`, `adc`, or `default_chain`, a credential. The cons
    which proves each operation/surface/mode tuple and marks successful tuples
    as *certified*. An OpenAI-surface generation capability proves both Chat
    and Responses unless the vendor profile explicitly translates Responses
-   through Chat. Each probe has a 15-second budget, within a one-minute
+   through Chat. Review at most 64 tuples per model. Each probe has a 15-second
+   budget, with at most eight concurrent probes and a one-minute
    model-certification deadline. Only certified tuples of enabled
    models are published to the runtime and are eligible for routes.
 5. **Activates** the draft (`POST /providers/{id}/activate`), which validates
@@ -82,9 +85,12 @@ pending activation, and the runtime keeps using the active revision. Changing
 transport or semantic details (kind, authentication mode, endpoint, cloud
 addressing, credential headers, parameter defaults, model facts, vendor)
 invalidates certification evidence and slot validation, so tuples must be
-certified again before the next activation. Revisions can be listed, read,
-compared, and restored as a new draft; restoring copies the recorded models
-and evidence but never a historical credential.
+certified again before activation. Re-reviewing capabilities preserves unchanged
+tuples, removes evidence for deleted tuples, and starts new tuples as declared.
+Renaming and credential rotation preserve model certification; rotation still
+requires fresh slot validation. Revisions can be listed, read, compared, and
+restored as a new draft; restoring copies the recorded models and evidence but
+never a historical credential.
 
 Disabling a provider (`POST /providers/{id}/disable`) publishes a generation in
 which the provider is not selectable; streams that already started keep the
@@ -95,16 +101,16 @@ snapshot they were admitted with.
 OpenAI, OpenAI-compatible, Anthropic, and Gemini connectors accept custom
 endpoints. Set `auth_mode` to `none` for an explicitly unauthenticated endpoint
 or to `headers` for encrypted custom authentication. Custom authentication
-requires an explicit endpoint. Private addresses and HTTP additionally need
-the existing [egress allowlists](configuration.md#provider-egress-policy).
-DNS pinning, redirect refusal, and response limits still apply.
+requires an explicit endpoint. Private addresses and HTTP additionally need the
+existing [egress allowlists](configuration.md#provider-egress-policy). DNS
+pinning, redirect refusal, and response limits still apply.
 
 For header authentication, put only lowercase header names in
 `options.credential_headers`, for example `["authorization","x-account-id"]`.
-The write-only `credential` is a JSON **string** containing exactly those
-names and their values. Include the complete Authorization value when needed.
-Reserved transport and OLP headers cannot be configured. Header values never
-appear in management reads or error responses.
+The write-only `credential` is a JSON **string** containing exactly those names
+and their values. Include the complete Authorization value when needed. Reserved
+transport and OLP headers cannot be configured. Header values never appear in
+management reads or error responses.
 
 `options.parameter_defaults` contains provider-wire JSON defaults. Explicit
 request values take precedence, including nested generation configuration.
@@ -177,23 +183,23 @@ rotated pool slots need their own validation. Disabling the default does not
 prevent an independently validated named slot from serving.
 
 Set `requests_per_minute`, `tokens_per_minute`, and `max_concurrency` on a slot
-or in `configuration.options.limits` for the whole connection. Both scopes
-apply to every attempt. Valkey supplies the UTC minute and distributed
-concurrency leases. Rotation preserves the logical slot's quota identity.
-Tokens are reserved conservatively and reconciled when complete usage is
-available; cancellation releases concurrency. Configured provider quotas fail
-closed when the distributed limiter is unavailable.
-New requests use current published connection and slot quotas, including when
-a gateway retains an older runtime release.
+or in `configuration.options.limits` for the whole connection. Both scopes apply
+to every attempt. Valkey supplies the UTC minute and distributed concurrency
+leases. Rotation preserves the logical slot's quota identity. Tokens are
+reserved conservatively and reconciled when complete usage is available;
+cancellation releases concurrency. Configured provider quotas fail closed when
+the distributed limiter is unavailable. New requests use current published
+connection and slot quotas, including when a gateway retains an older runtime
+release.
 
-Activation snapshots options, model contracts, and selected secret versions.
-An attempt pins its exact slot, credential version, and pricing revision.
-Authentication failures cool down that version; HTTP 429 honors Retry-After
-for the logical slot, so rotation does not reset an account cooldown. Successful
+Activation snapshots options, model contracts, and selected secret versions. An
+attempt pins its exact slot, credential version, and pricing revision.
+Authentication failures cool down that version; HTTP 429 honors Retry-After for
+the logical slot, so rotation does not reset an account cooldown. Successful
 credential validation can clear the cooldown. Connection/transport and server
 failures affect endpoint health; a credential failure does not disable other
 slots. While an endpoint is recovering, a credential-only outcome (401, 429, a
-local slot quota) completes the half-open probe without penalising the endpoint,
+local slot quota) completes the half-open probe without penalizing the endpoint,
 so a sibling slot can probe immediately. Explicit credential-version revocation
 is authority, not routing: it reaches every retained release on the next
 authority poll, including a gateway that cannot install a newer release, and
@@ -209,12 +215,16 @@ when another replica has reclaimed the job.
 
 ## Routes
 
-Route drafts carry a slug, allowed operations (default `generation`; explicit
-`token_count`, `embeddings`, `moderation`, `image_generation`, `image_edit`,
-`image_variation`, `speech`, `transcription`, `video_create`, `video_list`,
-`video_get`, `video_content`, and `video_delete` are also supported), an overall
-deadline, a maximum attempt count, and ordered targets with priority, weight,
-and per-attempt timeout. Every target must reference a published model with
+Route drafts carry a slug, allowed operations (default `generation`), an overall
+deadline, an attempt budget, and 1–64 targets with priority, weight, and
+timeout. Supported operations also include `token_count`, `embeddings`,
+`rerank`, `moderation`, `image_generation`, `image_edit`, `image_variation`,
+`speech`, `transcription`, the `video_*` operations, `batch`, `realtime`, and
+`bedrock_invoke`; see the [compatibility matrix](compatibility.md).
+
+The overall deadline is 1–3,600,000 milliseconds; target timeouts cannot exceed
+it. The attempt budget is 1–32,767 and counts credential attempts, so it can
+exceed the target count. Every target must reference a published model with
 certified support for each allowed operation; validation and activation reject
 unknown, inactive, unpublished, or uncertified targets. Drafts are versioned
 with ETags, so stale edits return `412` and the console offers a reload.
@@ -228,8 +238,8 @@ provider.
 
 ## Policies and caller preferences
 
-Policies live at installation, route revision, and gateway-key scopes.
-Use **Settings**, the route draft editor, and the API-key editor, or
+Policies live at installation, route revision, and gateway-key scopes. Use
+**Settings**, the route draft editor, and the API-key editor, or
 `GET/PUT /api/v3/routing-policies/{scope}/{id}`. Scopes are `installation`,
 `route-draft`, and `api-key`; the installation ID is the nil UUID. Installation
 and key changes publish immediately. Route policy changes are staged and
@@ -238,17 +248,17 @@ permission and current ETag.
 
 Hard constraints intersect across all scopes and the request. They include
 `only`, `ignore`, `regions`, `quantizations`, `deny_data_collection`,
-`require_zero_data_retention`, `require_parameters`, and `max_price`.
-Selectors are `vendor:<catalog-id>` or `provider:<connection-uuid>`.
-Unknown facts cannot satisfy a required constraint. Constraints placed inside
-policy defaults also narrow eligibility. They do not grant additional access.
+`require_zero_data_retention`, `require_parameters`, and `max_price`. Selectors
+are `vendor:<catalog-id>` or `provider:<connection-uuid>`. Unknown facts cannot
+satisfy a required constraint. Constraints placed inside policy defaults also
+narrow eligibility. They do not grant additional access.
 
 Ordering and strategy preferences use request → key → route → installation
 precedence. A policy can restrict `allowed_strategies`. `order` precedes the
 strategy inside an operator priority tier. With `allow_fallbacks: false`, an
-explicit order restricts attempts to that list; without an order, only the
-first eligible attempt is selected. Requests cannot add published targets,
-raise deadlines or attempt limits, or broaden policy constraints.
+explicit order restricts attempts to that list; without an order, only the first
+eligible attempt is selected. Requests cannot add published targets, raise
+deadlines or attempt limits, or broaden policy constraints.
 
 All native inference surfaces accept one optional `X-OLP-Routing` header:
 
@@ -259,36 +269,34 @@ X-OLP-Routing: {"only":["vendor:deepseek"],"strategy":"price","max_price":{"inpu
 Malformed JSON, unknown controls, and invalid selectors are rejected before
 dispatch. The header is never forwarded upstream. Existing header-size limits
 apply. Strict parameter filtering additionally requires affirmative model
-support for supplied canonical parameters and semantic extensions. Semantic
-loss checks always apply, even when strict parameter filtering is off.
-Media controls include `n`, `size`, `mask`, `voice`, `response_format`,
-`language`, `prompt`, and `input_reference`; internal cleanup markers are excluded.
+support for supplied canonical parameters and semantic extensions. Semantic loss
+checks always apply, even when strict parameter filtering is off. Media controls
+include `n`, `size`, `mask`, `voice`, `response_format`, `language`, `prompt`,
+and `input_reference`; internal cleanup markers are excluded.
 
 | Strategy | Ordering within a priority and preferred-order tier |
-|---|---|
+| --- | --- |
 | `weighted` | Deterministic weighted rendezvous; the default |
 | `price` | Exact decimal rates; generation compares input plus output per million, embeddings use input, other units use their unit rate |
 | `latency` | Median time to first meaningful output for streams, total attempt latency for unary operations |
 | `throughput` | Median generated output tokens per second after first meaningful output; reasoning tokens are excluded |
 
-Prices resolve connection scope before vendor scope before connector-kind
-scope, then the latest effective revision. Future rates become eligible at
-their effective time. Missing required price components fail a price ceiling;
-unknown prices rank after known prices. Routing and accounting preserve the
-selected revision, including an explicit unpriced decision.
+Prices resolve connection scope before vendor scope before connector-kind scope,
+then the latest effective revision. Future rates become eligible at their
+effective time. Missing required price components fail a price ceiling; unknown
+prices rank after known prices. Routing and accounting preserve the selected
+revision, including an explicit unpriced decision.
 
 Performance aggregates use five minutes of persisted successful attempts,
 partitioned by connection, model, operation, and mode. At least 20 samples are
 required; snapshots refresh every ten seconds and expire after 60 seconds.
-Unknown measurements rank after known measurements and use weighted order
-when all are unknown. `preferred_max_latency_ms` and
-`preferred_min_throughput` favor matching observations; they are preferences,
-not response guarantees.
+Unknown measurements rank after known measurements and use weighted order when
+all are unknown. `preferred_max_latency_ms` and `preferred_min_throughput` favor
+matching observations; they are preferences, not response guarantees.
 
 Eligibility filtering precedes ordering and `max_attempts`. Each actual
-credential attempt consumes the route's budget, which can exceed target
-count. Fallback never restarts a committed stream or an ambiguously created
-media job.
+credential attempt consumes the route's budget, which can exceed target count.
+Fallback never restarts a committed stream or an ambiguously created media job.
 
 ## Explain and observe
 
@@ -298,14 +306,14 @@ The route editor's dry run and playground use the execution selection engine.
 `POST /api/v3/routing/simulate` accepts a canonical operation, surface, mode,
 preferences, optional API-key ID, and seed. It returns exclusions even when
 nothing is eligible, attempt order, slot IDs, prices, and measurement freshness.
-The playground accepts the same preferences in its `routing` field and shows
-the resulting decision. Runtime health and available capacity can change
-between a preview and a dispatch.
+The playground accepts the same preferences in its `routing` field and shows the
+resulting decision. Runtime health and available capacity can change between a
+preview and a dispatch.
 
 Request history records connection, slot/version, provider revision, policy
-digest, selected price revision, fallback failure classes, and meaningful
-output timing. Prompts, outputs, secret header values, and raw preference
-payloads are absent from persisted routing telemetry.
+digest, selected price revision, fallback failure classes, and meaningful output
+timing. Prompts, outputs, secret header values, and raw preference payloads are
+absent from persisted routing telemetry.
 
 ## Coordinated 3.x upgrade
 
@@ -321,6 +329,6 @@ payloads are absent from persisted routing telemetry.
    previews, and one request per required client surface.
 
 This is a coordinated upgrade, not a rolling mixed-version deployment. Old
-processes must be drained, including those holding snapshots in memory.
-Rollback requires restoring the pre-upgrade database backup and matching
-binaries and keys; migrations are forward-only.
+processes must be drained, including those holding snapshots in memory. Rollback
+requires restoring the pre-upgrade database backup and matching binaries and
+keys; migrations are forward-only.

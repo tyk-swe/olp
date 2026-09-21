@@ -1,6 +1,6 @@
 # Test fixtures
 
-`vertex/test_only_private_key.pem` is a throwaway keypair generated for
-unit tests in `src/providers/connectors/vertex/tests.rs`. It is not a
-secret, grants no access, and is never used outside `cfg(test)`; secret
-scanners may allowlist this path.
+`vertex/test_only_private_key.pem` is a throwaway keypair retained from the Rust
+connector tests. It grants no access and is not referenced by current Go tests.
+Secret scanners may allowlist this fixture path; never use it as an application
+credential.

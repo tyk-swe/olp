@@ -1,197 +1,148 @@
 # Concepts
 
 Routes give callers stable model names; provider revisions determine where
-requests run. This guide covers publication, authorization, accounting, and
+requests run. This guide introduces publication, authorization, accounting, and
 privacy. See [compatibility](compatibility.md) for supported operations and
 [configuration](configuration.md) for installation settings.
 
 ## Routes and slugs
 
-The `model` field of every gateway request is a route slug, never a provider
-model identifier. Direct provider/model addressing is intentionally
-unavailable: an installation publishes stable names, and the mapping from a
-name to providers and upstream models stays configuration that operators
-change without touching callers.
+Generation requests name a published route slug in the `model` field or native
+URL path. File uploads use `X-OLP-Route`; retained-resource operations resolve
+the route through their stored mapping. Callers never select an upstream
+provider/model directly. Operators can change that mapping without changing the
+caller's model name.
 
-A slug is at most 63 bytes of lowercase ASCII letters, digits, and single
-internal hyphens. It starts and ends with a letter or digit, and it never
-contains two consecutive hyphens. Uppercase letters, underscores, dots, and
-slashes are rejected.
+A slug contains at most 63 bytes of lowercase ASCII letters, digits, and single
+internal hyphens. It starts and ends with a letter or digit. Uppercase,
+underscores, dots, slashes, and consecutive hyphens are rejected.
 
-A route binds its slug to the operations it serves and to one or more
-targets. A target names a provider, the upstream model to call on that
-provider, a priority, a weight, and its own timeout. The route itself
-carries an overall timeout that no target timeout may exceed, and a bounded
-maximum attempt count that cannot exceed the number of targets. A route with
-no targets, a zero timeout, or a duplicated target is refused at
-configuration time rather than at request time.
+A route defines allowed operations, an overall deadline, an attempt budget, and
+targets with provider models, priorities, weights, and timeouts. Target timeouts
+cannot exceed the overall deadline. Credential pools can produce several
+attempts per target, so the attempt budget may exceed the target count. See
+[route configuration](provider-routing.md#routes) for bounds and publication.
 
-Visibility is default-deny. A capability is advertised only when the
-endpoint policy exposes it and the calling key holds the matching route
-permission, and model listing applies the same policy. A provider or model
-that is configured but not explicitly made visible cannot become an
-accidental discovery or routing path.
-
-The slugs a key may use are listed by `GET /v1/models`, filtered by that
-key's permissions, and in the console under Routes.
+Keys can use only routes in their own project; a key without a project can use
+only routes without one. Scope and route allowlists further restrict access.
+`GET /v1/models` lists the routes visible to the calling key, not upstream
+provider models. Configured but unpublished models are not discoverable.
 
 ## Providers: drafts, revisions, certification
 
-A provider is edited as a draft, and draft edits never affect the revision
-that is serving traffic. Activation turns the draft into an immutable,
-numbered revision holding the endpoint and cloud context, the credential
-pool with exact secret versions, the enabled models, and the certified capabilities as they stood at
-that moment. Between two activations, nothing a running request sees about a
-provider changes.
+Provider edits remain drafts until activation publishes an immutable revision:
+connection settings, enabled models, certified capabilities, and exact
+credential versions. Requests keep the revision they started with.
 
-Certification is server-owned. Native-provider activation requires a
-certification for every exact provider/model/operation tuple, and a tuple
-becomes certified only when a bounded probe through the production
-connectors, deadlines, encoders, streaming decoders, and response codecs
-succeeds. Probes store no prompt and no response content. Only an exact
-successful probe earns a certified source and a certification timestamp;
-generic OpenAI-compatible providers keep reviewed tuples as merely declared
-until a per-model certification succeeds. At most 64 reviewed tuples and
-eight concurrent probe requests are allowed, and unsafe media, video,
-asynchronous, and cross-protocol claims fail closed.
+Certification belongs to the server. A successful bounded probe earns evidence
+for an exact provider/model/operation/surface/mode tuple; a declaration or
+successful model listing alone does not certify inference. Probes use production
+connectors and codecs and retain no prompt or response content.
 
-Re-reviewing a set of tuples is a per-tuple diff: removed tuples lose their
-evidence, unchanged tuples keep it, and newly added tuples start as
-declared. Only transport edits — endpoint, region, project, deployment, API
-version, authentication mode, and connection options — reset every tuple to declared and clear the
-stored probe. Renaming a provider and rotating its credential do not,
-although a rotation still requires a fresh probe before the next activation.
-
-For vendor identity, credential selection, model metadata, routing constraints,
-and performance strategies, see [provider routing](provider-routing.md).
+Transport and semantic edits invalidate certification and credential-slot
+validation. Renaming a provider or rotating a credential preserves model
+certification, but rotation still requires validation before activation. See
+[provider lifecycle](provider-routing.md#provider-lifecycle) for the full probe,
+discovery, review, certification, and activation workflow.
 
 ## Runtime generations and pinning
 
-Activating a change compiles the installation's configuration into a
-byte-stable generation with a digest. Gateways verify that digest and
-replace their snapshot atomically, so a half-applied generation is never
-observable, and a repeated publication is harmless.
+Activation compiles the installation configuration into a numbered runtime
+generation with a digest. Gateways verify it and replace their snapshot
+atomically. A failed installation leaves the previous complete generation
+active.
 
-Each request pins one generation at admission, and its attempts use the
-provider and credential revisions in that snapshot, including during a stream
-that outlives several activations. A configuration change therefore never lands
-mid-stream: it governs requests admitted after it, while a request already
-in flight finishes against the configuration it started with.
+Each request pins one generation and its provider/credential revisions, even
+when a stream outlives later activations. Key and credential revocation refresh
+independently of generation installation; a failed activation cannot preserve
+revoked authority. See
+[runtime publication and authority](gateway.md#runtime-publication-and-authority).
 
 ## Keys, permissions, expiry, limits
 
-Gateway keys belong to the installation. The secret is shown once, when the
-key is created; the installation stores only its hash, so a lost secret is
-replaced rather than recovered. Revocation reaches gateways through authority
-refresh. Gateways poll every five seconds and refuse new admissions when
-authority is 60 seconds old; already admitted streams may finish. See
-[production contracts](production-guarantees.md).
+An API-key secret is shown once; only its HMAC digest is stored. Replace a lost
+secret. Revocation reaches gateways through authority refresh: polls run every
+five seconds and new admissions stop when authority is 60 seconds old. Already
+admitted ordinary streams may finish; realtime sessions recheck the key during
+the session. See [production contracts](production-guarantees.md).
 
-Two scopes exist. `inference` permits the operations that call a provider:
-generation, embeddings, moderation, image generation, editing and variation,
-speech, transcription, token counting, and the video operations.
-`models_read` permits listing and retrieving models. The mapping from
-operation to required scope is exhaustive and positive, so a new operation
-never inherits authorization merely by not being a model read, and neither
-scope implies the other.
+`inference` authorizes provider operations, including generation, token
+counting, embeddings, rerank, moderation, media, batches, and realtime.
+`models_read` authorizes model discovery. Neither scope implies the other. An
+empty route allowlist permits all routes within the key's project boundary; a
+non-empty list narrows that set. Expired keys are refused.
 
-A key may carry a route allowlist. An empty allowlist places no route
-restriction on the key; a non-empty one refuses any request naming a slug
-outside it. A key may also carry an expiry, after which it is refused.
+Optional limits cover requests per minute, tokens per minute, concurrency, and
+daily/monthly accrued cost. A key can also join one **budget group** in the same
+project, sharing daily/monthly spend thresholds across its member keys. Group
+and individual limits both apply. Changing membership does not reassign past
+usage: accounting retains the group captured for the request. Manage groups
+through [Access](access.md#projects-and-budget-groups).
 
-Hard limits are optional and independent of each other: requests per minute,
-tokens per minute, a maximum number of requests in flight at once, and exact
-decimal cost budgets for the current UTC day and UTC month. Cost budgets use
-the installation's pricing currency. A key with no hard limit is admitted
-without consulting the shared limit store at all.
+Valkey server time defines fixed UTC minute, day, and calendar-month windows,
+lease expiry, and rejection hints. Bursts across boundaries are possible. Tokens
+are estimated before dispatch and reconciled against reported usage; concurrency
+leases release on completion and expire after abandoned work.
 
-Enforcement uses the shared limit store's server time — never a gateway
-process clock — for the windows, for lease expiry, and for the `Retry-After`
-hint returned with a rejection. The request and token windows are fixed UTC
-minutes; cost windows are fixed UTC days and calendar months. A burst
-straddling any boundary is possible by design. The token dimension is charged
-an estimate computed before the request reaches a provider.
+Cost limits compare previously attributed spend with the threshold. Concurrent
+accepted work can exceed it. Exhausted windows return HTTP 429
+`budget_exhausted` with `Retry-After` to the UTC boundary. Missing, malformed,
+or wrong-window spend state returns HTTP 503 until an authoritative PostgreSQL
+snapshot initializes it. A key or group cost budget always fails closed.
+Unpriced attempts accrue no money and remain visible separately.
 
-Cost admission compares each configured budget with the price already
-attributed to completed attempts in that window. Pricing is known only on the
-terminal accounting path, so an admitted attempt, or several concurrent
-attempts, can carry the final accrued value past the limit. Once attributed
-spend is at or above a budget, the next request is rejected with HTTP 429,
-`budget_exhausted`, and `Retry-After` set to the end of that UTC window. A
-rejection consumes nothing in any other dimension.
-
-PostgreSQL usage facts are the authority for spend. Terminal accounting
-advances durable window totals and applies their cumulative snapshots to
-Valkey; the worker monotonically rebuilds and reconciles those snapshots from
-PostgreSQL, including after Valkey loss. An attempt with no observed usage or
-no applicable pricing revision remains unpriced:
-unpriced attempts accrue 0 and increment the key's separate current-month
-`unpriced_attempts` count. The API-key detail and list responses expose each
-window's limit, accrued cost, and end time.
-
-A key with either cost budget always fails closed when Valkey is unreachable
-or its state is malformed. For keys limited only by rate or concurrency, the
-explicit installation-wide `fail_open` override described in
-[Configuration](configuration.md) can bypass those dimensions during an
-outage. Concurrency leases are released idempotently, and an abandoned lease
-expires on server time.
+For rate/concurrency-only keys, an explicit `fail_open` setting can bypass
+limits during a configured Valkey outage. See
+[gateway limits](gateway.md#limits-and-budgets) and
+[spend recovery](spend-budget-recovery.md) for enforcement and initialization.
 
 ## Attempts, usage, pricing
 
-Admission creates exactly one request identity. Every call to a provider is
-an attempt with its own identity and a monotonic position within that
-request, carrying the pinned generation, the provider revision, the model,
-the operation, its deadline, and its outcome classification. Failover
-appends the next attempt and never rewrites the previous one, so the record
-of a request is the whole ordered sequence that was tried, not just the call
-that happened to succeed.
+Every admitted request has one identity; each provider call has an ordered
+attempt identity with its pinned revisions, deadline, and outcome. Failover
+appends attempts rather than replacing earlier failures.
 
-Usage and cost attach to the exact attempt that produced them, which keeps
-retries, provider changes, and partial streams auditable without storing any
-request content. Missing upstream usage is recorded as incomplete and
-unpriced, never as zero: a successful billable attempt with no observed usage
-stays unpriced rather than free, and a failed attempt is retained without
-inventing usage or cost for it. For spend controls, unpriced attempts accrue 0
-and remain visible through `unpriced_attempts`; provider-side quotas are still
-needed when pricing coverage is incomplete.
+Usage and cost attach to the attempt that produced them. Missing usage or a
+missing applicable price stays incomplete or unpriced; the gateway never invents
+usage or cost. Unpriced work contributes zero to accrued budgets, so incomplete
+pricing coverage still requires provider-side quotas.
 
-Every request ends in exactly one terminal envelope, bounded independently
-of how large the response was: status, timing, transport and error
-classification, the full attempt list, usage completeness, and pricing
-provenance. Cancellation takes the same terminal path — leases are released,
-provider streams are closed, and the attempt facts already known are
-persisted. A late provider callback cannot create a second terminal record,
-because request and attempt uniqueness is enforced in storage.
+The terminal envelope records status, timing, cancellation, attempts, usage
+completeness, and pricing provenance. Cancellation closes upstream work and
+releases leases through the same completion path. Storage uniqueness prevents
+duplicate request/attempt facts. Stored background responses settle final usage
+once it is observed; see
+[stored response accounting](gateway.md#stored-response-accounting).
+
+Caller attribution labels can help filter and group usage. Keys explicitly allow
+label names, and values must be bounded machine tokens. Labels never grant
+access or change routing; see [request attribution](gateway.md#request-path).
 
 ## What is stored — and what never is
 
-Durable request, attempt, and usage records contain identifiers, timing,
-token or media units, status, error classification, and pricing provenance.
-They are enough to answer what was called, when, how it ended, how much it
-consumed, and what it cost.
+Durable diagnostics contain identifiers, timing, token/media units, status,
+error classification, pricing provenance, and allowed attribution labels. They
+exclude prompts, outputs, reasoning, tool payloads, uploads, raw request
+headers, and credentials. Keep secrets out of operator names and labels too.
 
-They never contain prompts, responses, reasoning, tool arguments or results,
-uploads, raw request headers, or credentials. Provider fields the canonical
-model does not recognize stay in memory for the life of the request instead
-of reaching storage, and certification probes store no prompt or response
-content either. Nothing in the request or response body is recoverable from
-an installation's own records after the request has finished.
+Uploaded media may occupy a bounded temporary spool during execution. Files,
+batches, and opt-in stored Responses may retain content at the upstream
+provider; OLP stores their ownership mappings and accounting metadata. This is
+separate from telemetry privacy. See
+[provider-retained state](compatibility.md#files-batches-realtime-and-provider-retained-state).
 
-Route content policies ([content policy](gateway.md#content-policy)) inspect
-request text before dispatch and buffered unary response text after
-accounting, entirely in memory: a redacted variant exists only as the copy
-sent to the provider or client, and a blocked payload is never written
-down. The only durable trace is a bounded list of
-`{rule_id, phase, action, outcome}` decisions on the request record — no
-matched text, offsets, patterns, or replacement strings.
+[Content policies](gateway.md#content-policy) inspect supported text in memory.
+Only `{rule_id, phase, action, outcome}` decisions persist, without matched
+text, offsets, patterns, or replacement strings. Unsupported surfaces refuse a
+policy rather than bypassing it.
 
 ## Request lifecycle
 
-1. Authenticate the key, check scope, route permission, and expiry, and enforce
-   admission limits. Assign one request identity and a bounded deadline.
-2. Select eligible targets from the pinned generation by priority, then weight.
-   Cap the attempt plan at the route's maximum attempt count.
-3. Call each selected provider within its target timeout and the route deadline.
-   Failover adds an attempt with its own usage, pricing, and outcome.
-4. Complete one terminal envelope, including on cancellation. Release leases,
-   close streams, and persist metadata and accounting without request content.
+1. Authenticate and check scope, project, route access, and expiry. Pin runtime
+   configuration and enforce admission limits before calling a provider.
+2. Select eligible targets and credential slots under the published policy and
+   attempt budget.
+3. Execute within target and route deadlines. Record each attempt; never fail
+   over a committed stream or ambiguously created resource.
+4. Complete accounting, release leases, and close streams, including on
+   cancellation. Persist metadata without request or response content.

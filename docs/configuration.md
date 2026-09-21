@@ -1,17 +1,16 @@
 # Configuration reference
 
-Application configuration is environment-driven; each application setting
-also has a CLI flag in `olp <subcommand> --help`. Logging uses `OLP_LOG_LEVEL` (`debug`, `info`, `warn`, `error`); the retired
-`RUST_LOG` filter no longer applies. The source of truth is `internal/config/config.go`. Secrets are file
-paths, never inline values. Secret files may use modes `0400`, `0440`, `0600`,
-or `0640`; group-write and world permissions are rejected. A configured bootstrap
-file may be absent after installation setup completes. Workers require both the
-authentication key and master key, including with mounted connector configuration.
+Runtime settings come from environment variables or CLI flags; flags take
+precedence. Use `olp <subcommand> --help` and the source in
+[`internal/config/config.go`](../internal/config/config.go) for accepted flags.
+Credential secrets use mounted files; database and Valkey URLs support either
+inline or file-based settings. Invalid configuration fails before listeners
+bind.
 
 ## Runtime variables
 
 | Variable | Default | Purpose |
-|---|---|---|
+| --- | --- | --- |
 | `OLP_DATABASE_URL` | required | PostgreSQL URL. |
 | `OLP_DATABASE_MAX_CONNECTIONS` | `20` | Pool size (1–10000), excluding detached worker sessions; see [connection budget](deployment.md#production-example-and-connection-budget). |
 | `OLP_DATABASE_URL_FILE`, `OLP_VALKEY_URL_FILE` | unset | Read the corresponding URL from a mounted file; mutually exclusive with its inline setting. |
@@ -51,86 +50,82 @@ authentication key and master key, including with mounted connector configuratio
 | `OLP_DEPENDENCY_REQUEST_TIMEOUT` | `2s` | Per-request dependency deadline (1ms–1m). |
 | `OLP_STARTUP_TIMEOUT` | `10s` | Startup and ordinary maintenance deadline (1ms–1m). |
 
-At maximum connection age the server stops admitting requests on that
-connection and sends HTTP/2 GOAWAY. Existing streams have the configured drain
-interval to finish; expiration closes the connection. SIGTERM stops admission
-and gives HTTP, metadata delivery and workers one shared shutdown budget.
-Keep `OLP_SHUTDOWN_TIMEOUT` below the deployment termination grace minus its
-pre-stop delay. Forced termination can leave accounting completeness gaps.
+At maximum connection age the server stops admitting requests on that connection
+and sends HTTP/2 GOAWAY. Existing streams have the configured drain interval to
+finish; expiration closes the connection. SIGTERM stops admission and gives
+HTTP, metadata delivery and workers one shared shutdown budget. Keep
+`OLP_SHUTDOWN_TIMEOUT` below the deployment termination grace minus its pre-stop
+delay. Forced termination can leave accounting completeness gaps.
 
 The CLI loopback default is intentional; Compose and Helm set their container
 listener explicitly. Keep the observability listener private and set trusted
 proxy CIDRs only to peers that append a trustworthy forwarding chain.
 
-Tracing is installed only when `OLP_OTLP_TRACES_ENDPOINT` is set. The value is
-used without path rewriting, so an OTLP/HTTP collector normally needs a full
-URL such as `https://collector.example.com/v1/traces`. With the endpoint unset,
-OLP constructs no exporter or OpenTelemetry layer and does no tracing work on
-the request path. Tracing exports spans only; Prometheus metrics and JSON logs
-keep their existing destinations. Endpoint userinfo and fragments are rejected;
-put collector credentials in the headers file.
+Tracing is enabled only when `OLP_OTLP_TRACES_ENDPOINT` is set. Supply the full
+URL, such as `https://collector.example.com/v1/traces`; OLP does not rewrite its
+path. Endpoint userinfo and fragments are rejected. Tracing exports spans only;
+Prometheus metrics and JSON logs keep their existing destinations.
 
-The optional headers file must be UTF-8 JSON whose top level is an object and
-whose property names and values are valid HTTP header strings, for example
-`{"x-scope-orgid":"tenant-a"}`. Inline header values are not accepted. The
-file follows the same secret-permission policy as the master and HMAC keys and
-must grant no permissions to other users on Unix. Helm mounts it at
-`/run/secrets/otlp-headers/headers`. Invalid endpoints, ratios, headers, or
-secret permissions fail startup before a listener binds. The standard
-`OTEL_EXPORTER_OTLP_TRACES_HEADERS` and `OTEL_EXPORTER_OTLP_HEADERS` variables
-are rejected when tracing is enabled; exporter headers must come from the file.
+Exporter credentials belong in `OLP_OTLP_HEADERS_FILE`, a UTF-8 JSON object of
+valid HTTP header names and values, for example `{"x-scope-orgid":"tenant-a"}`.
+The file uses the secret permissions below. Inline
+`OTEL_EXPORTER_OTLP_TRACES_HEADERS` and `OTEL_EXPORTER_OTLP_HEADERS` are
+rejected when tracing is enabled. Invalid endpoints, ratios, or header files
+fail startup.
 
-Inbound `traceparent` is used only when tracing and inbound acceptance are both
-enabled; invalid context starts a local trace. Caller-supplied `tracestate` is
-discarded. Upstream propagation derives fresh headers from the current span
-instead of forwarding raw client values. Exporter headers are never sent to
-providers. Spans contain
-only the documented identifier, classification, timing, usage, and pricing
-attributes—never prompts, outputs, tool data, raw headers, credentials, or raw
-provider errors. Only canonical lowercase hyphenated UUID `x-request-id`
-values are eligible for the request identifier attribute; other caller values
-are omitted.
+Inbound `traceparent` is accepted only when tracing and inbound acceptance are
+enabled; invalid context starts a local trace. Caller `tracestate` is discarded.
+Upstream propagation uses fresh span headers, never exporter credentials. Spans
+contain only allowed identifiers, classification, timing, usage, and pricing,
+without prompts, outputs, tool data, raw headers, or provider errors. Only
+canonical lowercase hyphenated UUID `x-request-id` values enter the trace
+attribute. See [tracing operations](operations.md#distributed-tracing) for
+sampling, monitoring, and local exploration.
 
-All HTTP modes (`all`, `gateway`, and `control`) require PostgreSQL and the
-authentication HMAC key. Configure Valkey for production gateway traffic:
-without it, runtime hints fall back to PostgreSQL polling and keys with hard
-limits fail closed. When Valkey is configured but unreachable, the
-`limits.valkey_unavailable` installation setting decides what keys limited
-only by rate or concurrency get: `fail_closed` (default) rejects them with
-`503 distributed_limits_unavailable`; `fail_open` admits them without those
-dimensions, logs a warning per request, and counts
-`olp_limits_fail_open_total`. A key with a daily or monthly cost budget always
-fails closed, regardless of this setting. Gateways poll the setting every 15
-seconds and load it once before binding the listener; an unconfigured Valkey
-never fails open, and over-limit rejections are unaffected. The master key is
-required wherever database-managed
-provider or OIDC credentials and encrypted management replays are used.
-`worker` requires Valkey and exposes only the private health/metrics listener.
-`migrate` and `doctor` expose no listener; doctor checks Valkey when configured. CLI flags override environment values. CLI-required settings
-fail during startup before a listener is bound; database-managed credentials require the master key before startup.
+All HTTP modes (`all`, `gateway`, `control`) require PostgreSQL and the
+authentication HMAC key. Configure Valkey for production: without it, runtime
+hints fall back to polling and hard-limited keys fail closed. `worker` requires
+Valkey and exposes only private health/metrics; `migrate` and `doctor` expose no
+listener. Doctor checks Valkey when configured. See
+[process modes](gateway.md#process-modes) for worker and connector requirements.
+
+`limits.valkey_unavailable` is a database-managed installation setting. Its
+`fail_closed` default rejects unenforceable limits; `fail_open` can bypass
+rate/concurrency-only key limits during a configured Valkey outage. Key and
+group cost budgets always fail closed. See
+[limit enforcement](gateway.md#limits-and-budgets) for polling, error codes, and
+provider quotas.
 
 ## File-based secrets
 
+Use regular files with mode `0400`, `0440`, `0600`, or `0640`; group-write and
+world permissions are rejected. A configured bootstrap file may be absent after
+setup. Workers require both the HMAC and master keys, including with mounted
+connectors. Inline `OLP_AUTH_HMAC_KEY`, `OLP_MASTER_KEY`, and
+`OLP_BOOTSTRAP_TOKEN` values are rejected.
+
 | Variable | Required by | Purpose |
-|---|---|---|
+| --- | --- | --- |
 | `OLP_MASTER_KEY_FILE` | `all`, `control`, `worker`, a `gateway` loading database-encrypted credentials, `doctor`, `master-key` | Versioned envelope-encryption keyring. |
 | `OLP_AUTH_HMAC_KEY_FILE` | `all`, `gateway`, `control`, `worker`, `doctor`, `master-key` | Session and authentication HMAC key. |
 | `OLP_BOOTSTRAP_TOKEN_FILE` | first `all` or `control` run | One-time owner-setup token. |
 | `OLP_OTLP_HEADERS_FILE` | traced `all`, `gateway`, `control`, or `worker` | Optional JSON object of OTLP exporter headers. |
 
-Generate and rotate these through
-[`deploy/secrets/README.md`](../deploy/secrets/README.md). Preserve the HMAC key
-when restoring an installation; replacing it invalidates stored API-key and
-bootstrap-token digests.
+Generate Compose files with the [secret helper](../deploy/secrets/README.md);
+follow [Access](access.md#master-key-rotation-and-recovery) for rotation.
+Preserve the HMAC key when restoring an installation; replacing it invalidates
+stored API-key and bootstrap-token digests.
 
 ## Compose-only variables
 
 Compose accepts `OLP_IMAGE`, defaulting to the versioned release image used by
 the quick start. `.env.example` also defines `OLP_HOST_PORT`,
 `POSTGRES_PASSWORD`, `POSTGRES_PASSWORD_URL_ENCODED`, `OLP_UID`, and `OLP_GID`.
-They configure the Compose wrapper, not the binary. The encoded password is
-used in the database URL; PostgreSQL receives the raw password. The tracing
-overlay `deploy/compose.tracing.yaml` reads `OLP_TRACE_SAMPLE_RATIO`,
+`OLP_COMPOSE_SECRETS_DIR` selects an absolute secret-directory override for
+Compose and its preparation/retirement helpers. These settings configure the
+wrapper rather than the binary. The encoded password is used in the database
+URL; PostgreSQL receives the raw password. The tracing overlay
+`deploy/compose.tracing.yaml` reads `OLP_TRACE_SAMPLE_RATIO`,
 `OLP_TRACE_PROPAGATE_UPSTREAM`, and `OLP_TRACE_ACCEPT_INBOUND` from the same
 file; leave them empty to keep the binary defaults.
 
@@ -141,7 +136,7 @@ The release-owned wizard catalog resolves a reviewed HTTPS endpoint and
 stores the vendor ID separately from its editable resolved connection values:
 
 | ID | Provider | Endpoint |
-|---|---|---|
+| --- | --- | --- |
 | `groq` | Groq | `https://api.groq.com/openai/v1` |
 | `mistral_ai` | Mistral AI | `https://api.mistral.ai/v1` |
 | `together_ai` | Together AI | `https://api.together.ai/v1` |
@@ -156,41 +151,40 @@ stores the vendor ID separately from its editable resolved connection values:
 | `cohere` | Cohere | `https://api.cohere.ai/compatibility/v1` |
 | `voyage` | Voyage | `https://api.voyageai.com/v1` |
 
-A preset is not provider or model certification. Creation and edits still
-run HTTPS, public-egress, SSRF, and reachability checks unless the host or
-address is exempted by the egress allowlists below; only live exact-tuple
-certification makes a capability eligible for activation. Use **Custom
-endpoint** for another compatible service, including explicitly configured
-private HTTP and unauthenticated endpoints. See [provider routing](provider-routing.md)
-for encrypted custom headers, defaults, model facts, credential pools, quotas,
-and installation/route/key/request policies.
+A preset is not provider or model certification. Creation and edits still run
+HTTPS, public-egress, SSRF, and reachability checks unless the host or address
+is exempted by the egress allowlists below; only live exact-tuple certification
+makes a capability eligible for activation. Use **Custom endpoint** for another
+compatible service, including explicitly configured private HTTP and
+unauthenticated endpoints. See [provider routing](provider-routing.md) for
+encrypted custom headers, defaults, model facts, credential pools, quotas, and
+installation/route/key/request policies.
 
 ## Body size caps
 
-The JSON, media, and inline-media caps are validated together at startup:
-an inline item must fit inside the inline total, both stay within 64 MiB,
-and the media cap must not exceed half of
-`OLP_MEDIA_SPOOL_CAPACITY_BYTES`. Multipart admission budgets half the spool
-for untrusted parsers, so a larger media cap would make every multipart
-request fail with `503`. Raise the spool capacity (and its volume) before
-raising the media cap. Per-endpoint multipart reservations scale with the
-media cap: image edits reserve the full cap, image variations 55/64,
-transcriptions 30/64, and video creation 25/64 of it. Header count and size
-caps stay fixed.
+The JSON, media, and inline-media caps are validated together at startup: an
+inline item must fit inside the inline total, both stay within 64 MiB, and the
+media cap must not exceed half of `OLP_MEDIA_SPOOL_CAPACITY_BYTES`. Multipart
+admission budgets half the spool for untrusted parsers, so a larger media cap
+would make every multipart request fail with `503`. Raise the spool capacity
+(and its volume) before raising the media cap. Per-endpoint multipart
+reservations scale with the media cap: image edits reserve the full cap, image
+variations 55/64, transcriptions 30/64, and video creation 25/64 of it. Header
+count and size caps stay fixed.
 
-The provider response caps apply to OpenAI-compatible, Anthropic, Gemini,
-Azure OpenAI, Vertex AI and Bedrock connectors. The response cap also bounds the events buffered while collecting
-a non-streaming generation.
+The provider response caps apply to OpenAI-compatible, Anthropic, Gemini, Azure
+OpenAI, Vertex AI and Bedrock connectors. The response cap also bounds buffered
+events when collecting a non-streaming generation.
 
 ## Provider egress policy
 
-Provider endpoints must be absolute HTTPS URLs without credentials, query strings,
-or fragments, and resolve only to public addresses:
-literal hosts are checked before DNS, and every address in each DNS answer is
-checked again before a pinned client is built, on every revalidation. Two
-allowlists widen that policy for private or on-premises upstreams such as a
-VPC-hosted vLLM server or an Azure private endpoint. Both default to empty,
-which keeps the public-only behaviour.
+Provider endpoints must be absolute HTTPS URLs without credentials, query
+strings, or fragments, and resolve only to public addresses: literal hosts are
+checked before DNS, and every address in each DNS answer is checked again before
+a pinned client is built, on every revalidation. Two allowlists widen that
+policy for private or on-premises upstreams such as a VPC-hosted vLLM server or
+an Azure private endpoint. Both default to empty, which keeps the public-only
+behavior.
 
 - `OLP_PROVIDER_EGRESS_ALLOW_CIDRS` lists CIDRs (for example
   `10.0.0.0/8,fd00::/8`) exempt from the non-public denylist. The exemption
@@ -202,18 +196,19 @@ which keeps the public-only behaviour.
   `http://`. The scheme check is host-keyed because it runs synchronously,
   before DNS, on every management write.
 
-A plain-HTTP endpoint on a private literal address needs both lists: the host
-in the HTTP allowlist and the address inside an allowed CIDR. The `all`,
-`gateway`, `control`, and `doctor` commands accept the settings; startup logs a
-warning whenever either list is non-empty. Transports refuse redirects, use TLS 1.2 or newer, bound dial and handshake
-timeouts, and cap response headers at 32 KiB. Probes and inference use the same
-normalized endpoint and egress policy. The allowlists never relax OIDC issuer or
-Vertex token endpoint checks.
+A plain-HTTP endpoint on a private literal address needs both lists: the host in
+the HTTP allowlist and the address inside an allowed CIDR. The `all`, `gateway`,
+`control`, and `doctor` commands accept the settings; startup logs a warning
+whenever either list is non-empty. Transports refuse redirects, use TLS 1.2 or
+newer, bound dial and handshake timeouts, and cap response headers at 32 KiB.
+Probes and inference use the same normalized endpoint and egress policy. The
+allowlists never relax OIDC issuer or Vertex token endpoint checks.
 
 ## Test and harness variables
 
-Loopback OIDC is available only in an explicitly compiled `-tags=oidctest`
-test binary. Release binaries contain no environment-controlled OIDC bypass.
+Loopback OIDC is available only in an explicitly compiled `-tags=oidctest` test
+binary. Release binaries reject `OLP_OIDC_ALLOW_INSECURE_TEST_ISSUER` and
+`OLP_OIDC_ALLOW_PRIVATE_NETWORK`; there is no environment-controlled bypass.
 
 The e2e and console integration harnesses point providers at loopback mock
 upstreams through the ordinary egress allowlists
@@ -224,12 +219,11 @@ compiled-in escape hatch.
 Script and harness families are intentionally not runtime settings:
 `OLP_TEST_DATABASE_*`, optional `OLP_VALKEY_URL`, and `OLP_CONSOLE_E2E_*`
 support local suites; `OLP_E2E_*` supports the HA contract harness;
-`OLP_BACKUP_*`, `OLP_RESTORE_*`, `OLP_PG_*`, and `OLP_PSQL`
-support operations scripts; `OLP_SDK_SMOKE_*` supports SDK smoke; and
-`OLP_LIVE_*`, `OLP_VERTEX_LIVE_*`, `OLP_AZURE_OPENAI_LIVE_*`, and
-`OLP_BEDROCK_LIVE_*` opt into live-provider tests. See
-[`CONTRIBUTING.md`](../CONTRIBUTING.md) and [`docs/operations.md`](operations.md)
-for command-specific requirements.
+`OLP_BACKUP_*`, `OLP_RESTORE_*`, `OLP_PG_*`, and `OLP_PSQL` support operations
+scripts; `OLP_SDK_SMOKE_*` supports SDK smoke; and `OLP_LIVE_*`,
+`OLP_VERTEX_LIVE_*`, `OLP_AZURE_OPENAI_LIVE_*`, and `OLP_BEDROCK_LIVE_*` opt
+into live-provider tests. See [`CONTRIBUTING.md`](../CONTRIBUTING.md) and
+[`docs/operations.md`](operations.md) for command-specific requirements.
 
 ## Mounted connectors
 
@@ -253,35 +247,34 @@ Production Compose can generate database credentials and their encoded URL using
 
 ## Configuration promotion artifacts
 
-`GET /api/v3/configuration/export` returns a secret-free desired-state
-artifact (`openllmproxy.dev/config/v1`) and its canonical digest: SHA-256
-lowercase hex of the canonical JSON with `exported_at` blanked and every
-collection sorted deterministically. Projects, providers, routes, and targets
-are identified by natural names — never UUIDs — and `project` carries a
-project name or `null` for installation-wide resources. Export reads the
-active provider revision when a provider is active and the current draft
-otherwise, the latest revision of every published route (including retired
-routes, marked `retired: true`), and the latest effective pricing revision.
-It never contains credential IDs, ciphertext, API keys, users, management
-tokens, usage, audit, request or media data, certification evidence, runtime
-IDs, or secret values. Slots that hold credential authority export a stable
-`credential_ref` of `provider-name/slot-name-or-default`; credentialless
-authentication modes export `null`. Slot `allowed_api_keys` restrictions are
-not portable — API keys are installation-local — so export always emits an
-empty list and import rejects a non-empty one; re-establish them on the
-destination after creating keys.
+`GET /api/v3/configuration/export` returns a secret-free desired-state artifact
+(`openllmproxy.dev/config/v1`) and its canonical digest: SHA-256 lowercase hex
+of the canonical JSON with `exported_at` blanked and every collection sorted
+deterministically. Projects, providers, routes, and targets are identified by
+natural names — never UUIDs — and `project` carries a project name or `null` for
+installation-wide resources. Export reads the active provider revision when a
+provider is active and the current draft otherwise, the latest revision of every
+published route (including retired routes, marked `retired: true`), and the
+latest effective pricing revision. It never contains credential IDs, ciphertext,
+API keys, users, management tokens, usage, audit, request or media data,
+certification evidence, runtime IDs, or secret values. Slots that hold
+credential authority export a stable `credential_ref` of
+`provider-name/slot-name-or-default`; credentialless authentication modes export
+`null`. Slot `allowed_api_keys` restrictions are not portable — API keys are
+installation-local — so export always emits an empty list and import rejects a
+non-empty one; re-establish them on the destination after creating keys.
 
 `POST /api/v3/configuration/plan` validates an artifact and reports
 `{digest, actions, conflicts, blockers}` without mutating. Validation rejects
 unknown fields, oversized collections, duplicate natural identities
 (case-insensitive for projects and providers, exact for routes, models, and
-credential references), cross-project targets, bindings for refs the
-artifact does not declare, and secrets over 64 KiB. Plan reports
+credential references), cross-project targets, bindings for refs the artifact
+does not declare, and secrets over 64 KiB. Plan reports
 `secret_binding_required` blockers for credential refs that do not already
 resolve to a current same-named slot credential on the destination.
 
-`POST /api/v3/configuration/apply` requires an Idempotency-Key and stages
-the desired state in one installation-serialized transaction:
+`POST /api/v3/configuration/apply` requires an Idempotency-Key and stages the
+desired state in one installation-serialized transaction:
 
 - Missing projects are created; existing case-insensitive names are reused.
 - Missing providers become drafts; existing providers get their draft
@@ -301,13 +294,13 @@ the desired state in one installation-serialized transaction:
   one is rebased to apply time (`effective_at_rebased`). Provider and route
   drafts never alter runtime.
 
-`secret_bindings` maps `credential_ref` to the environment-specific secret.
-It is write-only: never echoed in responses, audited, logged, or replayed in
-plaintext — the replay fingerprint stores only the document digest plus
-sorted binding names and SHA-256 digests of their values. `expected_digest`
-compares against the destination's current export digest; a mismatch is a
-`configuration_changed` conflict. Apply returns `409
-configuration_not_applicable` with the same plan body whenever conflicts or
+`secret_bindings` maps `credential_ref` to the environment-specific secret. It
+is write-only: never echoed in responses, audited, logged, or replayed in
+plaintext — the replay fingerprint stores only the document digest plus sorted
+binding names and SHA-256 digests of their values. `expected_digest` compares
+against the destination's current export digest; a mismatch is a
+`configuration_changed` conflict. Apply returns
+`409 configuration_not_applicable` with the same plan body whenever conflicts or
 blockers remain, and rolls back every write. A successful apply records one
 `configuration.apply` audit event with the artifact digest as its resource.
 
