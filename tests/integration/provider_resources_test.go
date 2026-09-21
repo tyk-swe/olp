@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -28,6 +29,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/tyk-swe/olp/internal/gateway"
+	"github.com/tyk-swe/olp/internal/limits"
 )
 
 type captureSink struct {
@@ -999,5 +1001,206 @@ func TestHistoricalResourceModel(t *testing.T) {
 	}
 	if upstream, _ := fixture.lastPath.Load().(string); !strings.Contains(upstream, "/openai/deployments/"+modelB+"/") {
 		t.Fatalf("historical pin resolved the wrong model: %s", upstream)
+	}
+}
+
+func TestResponseRetrievalAccounting(t *testing.T) {
+	for _, background := range []bool{false, true} {
+		t.Run(fmt.Sprintf("background=%t", background), func(t *testing.T) {
+			fixture := newOpenAIFixture(t, "")
+			h := newAccessHarness(t)
+			owner, _, slug, _ := provisionOpenAI(t, h, fixture.URL,
+				[]any{map[string]any{"operation": "generation", "surface": "openai", "mode": "unary"}},
+				[]string{"generation"})
+			h.want(owner, "POST", "/api/v3/pricing/revisions", map[string]any{
+				"effective_at": time.Now().UTC().Format(time.RFC3339Nano),
+				"prices":       []any{repPrice("azure_openai", vendorModel, "generation")},
+			}, idem("response-prices"), 201)
+			key := stateKey(t, h, owner, slug, true)
+			// Runtime pricing refreshes independently of publication.
+			time.Sleep(time.Until(h.Runtime.RoutingInputs().RefreshedAt.Add(10*time.Second + 10*time.Millisecond)))
+			h.refresh()
+			if len(h.Runtime.RoutingInputs().Prices) == 0 {
+				t.Fatal("pricing was not installed")
+			}
+			sink := &captureSink{}
+			h.Gateway.Sink = sink
+			if background {
+				fixture.resps["resp-up-1"]["status"] = "in_progress"
+				fixture.resps["resp-up-1"]["usage"] = nil
+			}
+			status, created, _ := h.gateway("POST", "/v1/responses", key, map[string]any{"model": slug, "input": "hi", "store": true, "background": background})
+			if status != 200 {
+				t.Fatalf("create: %d %v", status, created)
+			}
+			original := sink.last()
+			local := created["id"].(string)
+			if background {
+				status, _, _ = h.gateway("GET", "/v1/responses/"+local, key, nil)
+				if status != 200 {
+					t.Fatal("pending poll failed", status)
+				}
+				fixture.resps["resp-up-1"]["status"] = "completed"
+				fixture.resps["resp-up-1"]["usage"] = map[string]any{"input_tokens": 4, "output_tokens": 6, "total_tokens": 10}
+			}
+			var wg sync.WaitGroup
+			for range 3 {
+				wg.Go(func() {
+					status, out, _ := h.gateway("GET", "/v1/responses/"+local, key, nil)
+					if status != 200 {
+						t.Errorf("poll: %d %v", status, out)
+					}
+				})
+			}
+			wg.Wait()
+			status, out, _ := h.gateway("POST", "/v1/responses/"+local+"/cancel", key, nil)
+			if status != 200 {
+				t.Fatalf("cancel: %d %v", status, out)
+			}
+			for _, ev := range sink.all()[1:] {
+				for _, attempt := range ev.Attempts {
+					if attempt.UsageObserved || attempt.BillingUncertain || attempt.Usage != nil {
+						t.Fatalf("resource operation carried generation usage: %+v", attempt)
+					}
+				}
+			}
+			if background {
+				var count, input, output int64
+				var costCorrect bool
+				if err := h.Pool.QueryRow(t.Context(), "SELECT count(*), coalesce(sum(input_tokens),0), coalesce(sum(output_tokens),0), sum(estimated_cost)=0.000024 FROM olp_go.attempt_usage_facts WHERE request_id=$1", original.AccountingID).Scan(&count, &input, &output, &costCorrect); err != nil {
+					t.Fatal(err)
+				}
+				if count != 1 || input != 4 || output != 6 || !costCorrect {
+					t.Fatalf("background usage: count=%d input=%d output=%d", count, input, output)
+				}
+			} else if !original.Attempts[0].UsageObserved {
+				t.Fatal("generation lost its usage")
+			}
+		})
+	}
+}
+
+func TestRealtimeConcurrencyLeasesOutliveRouteTimeout(t *testing.T) {
+	for _, scope := range []string{"provider", "slot"} {
+		t.Run(scope, func(t *testing.T) {
+			fixture := newRealtimeFixture(t)
+			h := newAccessHarness(t)
+			owner, detail, slug, secret := provisionOpenAI(t, h, fixture.URL,
+				[]any{map[string]any{"operation": "realtime", "surface": "openai", "mode": "realtime"}}, []string{"realtime"})
+			path := "/api/v3/providers/" + detail["id"].(string)
+			detail = h.want(owner, "GET", path, nil, nil, 200)
+			if scope == "provider" {
+				cfg := detail["configuration"].(map[string]any)
+				options, _ := cfg["options"].(map[string]any)
+				if options == nil {
+					options = map[string]any{}
+					cfg["options"] = options
+				}
+				options["limits"] = map[string]any{"max_concurrency": 1}
+				h.want(owner, "PATCH", path, map[string]any{"name": "Realtime limited", "configuration": cfg}, etagHeader(detail), 200)
+			} else {
+				slots := h.want(owner, "GET", path+"/credential-slots", nil, nil, 200)
+				slot := slots["items"].([]any)[0].(map[string]any)
+				h.want(owner, "PUT", path+"/credential-slots/"+slot["id"].(string), map[string]any{"slot": map[string]any{"name": "default", "max_concurrency": 1}}, withMatch(slots, idem("limit-slot")), 200)
+			}
+			detail = h.want(owner, "GET", path, nil, nil, 200)
+			h.want(owner, "POST", path+"/activate", nil, withMatch(detail, idem("activate-limit")), 200)
+			c := limClient(t)
+			h.Gateway.Admission = gateway.NewAdmission(limLimiter(t, c, limNamespace(t, c, "realtime-"+scope)), func() limits.OutagePolicy { return limits.FailClosed }, slog.New(slog.DiscardHandler))
+			h.refresh()
+			ctx, cancel := context.WithTimeout(t.Context(), 25*time.Second)
+			defer cancel()
+			endpoint := strings.Replace(h.HTTP.URL, "http://", "ws://", 1) + "/v1/realtime?model=" + slug
+			opts := &websocket.DialOptions{HTTPHeader: http.Header{"Authorization": {"Bearer " + secret}}}
+			first, _, err := websocket.Dial(ctx, endpoint, opts)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer first.CloseNow()
+			// The published route timeout is ten seconds; the socket stays active.
+			timer := time.NewTimer(11 * time.Second)
+			defer timer.Stop()
+			select {
+			case <-timer.C:
+			case <-ctx.Done():
+				t.Fatal(ctx.Err())
+			}
+			if err = first.Write(ctx, websocket.MessageText, []byte("still alive")); err != nil {
+				t.Fatal(err)
+			}
+			if _, _, err = first.Read(ctx); err != nil {
+				t.Fatal(err)
+			}
+			second, resp, err := websocket.Dial(ctx, endpoint, opts)
+			if err == nil {
+				second.CloseNow()
+				t.Fatal("second session exceeded concurrency limit")
+			}
+			if resp == nil || resp.StatusCode != 429 {
+				t.Fatalf("second session: response=%v err=%v", resp, err)
+			}
+			first.Close(websocket.StatusNormalClosure, "")
+			glEventually(t, "realtime lease release", func() bool {
+				next, _, err := websocket.Dial(ctx, endpoint, opts)
+				if err != nil {
+					return false
+				}
+				next.Close(websocket.StatusNormalClosure, "")
+				return true
+			})
+		})
+	}
+}
+
+func TestBackgroundResponseStreamAccounting(t *testing.T) {
+	fixture := newOpenAIFixture(t, "")
+	h := newAccessHarness(t)
+	owner, _, slug, _ := provisionOpenAI(t, h, fixture.URL,
+		[]any{map[string]any{"operation": "generation", "surface": "openai", "mode": "unary"}, map[string]any{"operation": "generation", "surface": "openai", "mode": "streaming"}}, []string{"generation"})
+	key := stateKey(t, h, owner, slug, true)
+	h.refresh()
+	sink := &captureSink{}
+	h.Gateway.Sink = sink
+	status, raw, _ := h.gatewayRaw("POST", "/v1/responses", key, strings.NewReader(`{"model":"`+slug+`","input":"hi","store":true,"background":true,"stream":true}`),
+		map[string]string{"Content-Type": "application/json", "X-Request-Id": "client-request-id"})
+	if status != 200 {
+		t.Fatalf("stream: %d %s", status, raw)
+	}
+	var local string
+	for line := range strings.SplitSeq(string(raw), "\n") {
+		if !strings.HasPrefix(line, "data: ") {
+			continue
+		}
+		var event struct {
+			Response struct {
+				ID string `json:"id"`
+			} `json:"response"`
+		}
+		if json.Unmarshal([]byte(strings.TrimPrefix(line, "data: ")), &event) == nil && event.Response.ID != "" {
+			local = event.Response.ID
+		}
+	}
+	if local == "" {
+		t.Fatalf("no resource in stream: %s", raw)
+	}
+	original := sink.last()
+	var count, input, output int64
+	if err := h.Pool.QueryRow(t.Context(), "SELECT count(*),coalesce(sum(input_tokens),0),coalesce(sum(output_tokens),0) FROM olp_go.attempt_usage_facts WHERE request_id=$1", original.AccountingID).Scan(&count, &input, &output); err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 || input != 4 || output != 6 {
+		t.Fatalf("stream usage: count=%d input=%d output=%d; %s", count, input, output, raw)
+	}
+	if original.Attempts[0].UsageObserved || !original.Attempts[0].ResponseUsageDeferred {
+		t.Fatal("background stream emitted duplicate billing evidence")
+	}
+	for range 3 {
+		status, out, _ := h.gateway("GET", "/v1/responses/"+local, key, nil)
+		if status != 200 {
+			t.Fatalf("poll: %d %v", status, out)
+		}
+	}
+	if err := h.Pool.QueryRow(t.Context(), "SELECT count(*) FROM olp_go.attempt_usage_facts WHERE request_id=$1", original.AccountingID).Scan(&count); err != nil || count != 1 {
+		t.Fatalf("duplicate stream billing: count=%d err=%v", count, err)
 	}
 }

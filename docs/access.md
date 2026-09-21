@@ -190,7 +190,9 @@ operation scopes (`read`, `access_read`, `access`, `settings`, `configure`,
 ahead. The `olpm_` secret is displayed once; only its HMAC digest is stored.
 Bearer authentication authorizes exactly the operations in scope: a token with
 `read` and `configure` can read state and manage providers and routes but
-cannot mutate keys, members, settings, or pricing. Requests carrying an
+cannot mutate keys, members, settings, or pricing. Configuration imports that
+change pricing also require `settings`; imports with unchanged pricing or only
+provider and route changes require `configure`. Requests carrying an
 `olpm_` bearer credential are non-browser traffic: they do not send Origin or
 CSRF proofs and are authenticated by token digest, expiry, and revocation.
 Every other bearer or cookie request keeps the full browser defenses.

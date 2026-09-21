@@ -198,16 +198,29 @@ const (
 // bytes, fingerprinted so a replay is recognised even if this build serializes
 // the event differently than the one that wrote it.
 func PersistEvent(ctx context.Context, pool *pgxpool.Pool, ev *Event, payload []byte) (Persisted, error) {
-	validated, err := Validate(ev)
-	if err != nil {
-		return Persisted{}, err
-	}
-	digest := sha256.Sum256(payload)
 	tx, err := pool.Begin(ctx)
 	if err != nil {
 		return Persisted{}, fmt.Errorf("persist request metadata event: %w", err)
 	}
 	defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
+	result, err := PersistEventTx(ctx, tx, ev, payload)
+	if err != nil {
+		return Persisted{}, err
+	}
+	if err = tx.Commit(ctx); err != nil {
+		return Persisted{}, fmt.Errorf("persist request metadata event: %w", err)
+	}
+	return result, nil
+}
+
+// PersistEventTx records accounting in the caller's transaction, allowing a
+// resource's reconciliation marker and its usage to commit atomically.
+func PersistEventTx(ctx context.Context, tx pgx.Tx, ev *Event, payload []byte) (Persisted, error) {
+	validated, err := Validate(ev)
+	if err != nil {
+		return Persisted{}, err
+	}
+	digest := sha256.Sum256(payload)
 
 	admission, err := admitReceipt(ctx, tx, ev, digest[:])
 	if err != nil {
@@ -219,9 +232,6 @@ func PersistEvent(ctx context.Context, pool *pgxpool.Pool, ev *Event, payload []
 		return Persisted{Outcome: PersistOutcomeDuplicate}, nil
 	case receiptRejected:
 		// The rejection and its gap are the record of this delivery.
-		if err = tx.Commit(ctx); err != nil {
-			return Persisted{}, fmt.Errorf("persist request metadata event: %w", err)
-		}
 		return Persisted{Outcome: PersistOutcomeRejectedOutsideReplayWindow}, nil
 	}
 
@@ -233,9 +243,6 @@ func PersistEvent(ctx context.Context, pool *pgxpool.Pool, ev *Event, payload []
 		// worth remembering, but there is no usage to price or roll up.
 		if err = markReceiptPersisted(ctx, tx, ev); err != nil {
 			return Persisted{}, err
-		}
-		if err = tx.Commit(ctx); err != nil {
-			return Persisted{}, fmt.Errorf("persist request metadata event: %w", err)
 		}
 		return Persisted{Outcome: PersistOutcomePersisted}, nil
 	}
@@ -257,9 +264,6 @@ func PersistEvent(ctx context.Context, pool *pgxpool.Pool, ev *Event, payload []
 	}
 	if err = markReceiptPersisted(ctx, tx, ev); err != nil {
 		return Persisted{}, err
-	}
-	if err = tx.Commit(ctx); err != nil {
-		return Persisted{}, fmt.Errorf("persist request metadata event: %w", err)
 	}
 	return Persisted{Outcome: PersistOutcomePersisted, CostSnapshots: snapshots}, nil
 }

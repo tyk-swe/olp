@@ -417,3 +417,42 @@ func TestProjectScopedMachineTokens(t *testing.T) {
 		t.Fatal("an all-project token with settings scope must read settings", status)
 	}
 }
+
+func TestGatewayKeyProjectIsolation(t *testing.T) {
+	h := newAccessHarness(t)
+	owner := h.owner()
+	up := newVendor(t)
+	projects := []string{createProject(h, owner, "Alpha"), createProject(h, owner, "Beta")}
+	for i, project := range projects {
+		slug := []string{"alpha", "beta"}[i]
+		provider := createScopedProvider(h, owner, slug, up.URL+"/v1", project, 201)
+		activateScopedProvider(h, owner, provider)
+		draft := h.want(owner, "POST", "/api/v3/route-drafts", map[string]any{
+			"slug": slug, "project_id": project, "operations": []string{"generation"}, "overall_timeout_ms": 5000, "max_attempts": 1,
+			"targets": []any{map[string]any{"provider_id": provider["id"], "provider_model": vendorModel, "priority": 0, "weight": 1, "timeout_ms": 2000}},
+		}, idem("draft-"+slug), 201)
+		h.want(owner, "POST", "/api/v3/route-drafts/"+draft["id"].(string)+"/activate", nil, withMatch(draft, idem("activate-"+slug)), 200)
+	}
+	key := h.want(owner, "POST", "/api/v3/api-keys", map[string]any{
+		"name": "no allowlist", "project_id": projects[0], "scopes": []string{"inference", "models_read"},
+	}, idem("key-no-allowlist"), 201)["secret"].(string)
+	h.refresh()
+	status, out, _ := h.gateway("GET", "/v1/models", key, nil)
+	if status != 200 || len(out["data"].([]any)) != 1 || out["data"].([]any)[0].(map[string]any)["id"] != "alpha" {
+		t.Fatalf("model list escaped project: %d %v", status, out)
+	}
+	status, out, _ = h.gateway("GET", "/v1/models/beta", key, nil)
+	if status != 404 {
+		t.Fatalf("foreign model visible: %d %v", status, out)
+	}
+	for _, slug := range []string{"alpha", "beta"} {
+		status, out, _ = h.gateway("POST", "/v1/chat/completions", key, map[string]any{"model": slug, "messages": []any{map[string]any{"role": "user", "content": "hi"}}})
+		want := 200
+		if slug == "beta" {
+			want = 403
+		}
+		if status != want {
+			t.Fatalf("%s inference: %d %v", slug, status, out)
+		}
+	}
+}

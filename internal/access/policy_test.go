@@ -10,24 +10,24 @@ import (
 func TestIndependentKeyScopesAndRouteRestrictions(t *testing.T) {
 	a := Authority{Policy: KeyPolicy{Scopes: []string{"models_read"}, AllowedRoutes: []string{"private"}}}
 	now := time.Now()
-	if !a.Allows("models_read", "private", now) || a.Allows("inference", "private", now) || a.Allows("models_read", "other", now) || a.Allows("future_scope", "private", now) {
+	if !a.Allows("models_read", "private", nil, now) || a.Allows("inference", "private", nil, now) || a.Allows("models_read", "other", nil, now) || a.Allows("future_scope", "private", nil, now) {
 		t.Fatal("scope or allowlist escaped")
 	}
-	if a.Allows("models_read", "", now) {
+	if a.Allows("models_read", "", nil, now) {
 		t.Fatal("a missing route bypassed the allowlist")
 	}
 	a.Policy.AllowedRoutes = nil
-	if !a.Allows("models_read", "", now) {
+	if !a.Allows("models_read", "", nil, now) {
 		t.Fatal("an unrestricted models-read key must permit model discovery")
 	}
 	expired := now.Add(-time.Second)
 	a.ExpiresAt = &expired
-	if a.Allows("models_read", "private", now) {
+	if a.Allows("models_read", "private", nil, now) {
 		t.Fatal("accepted expired key")
 	}
 	a.ExpiresAt = nil
 	a.RevokedAt = &now
-	if a.Allows("models_read", "private", now) {
+	if a.Allows("models_read", "private", nil, now) {
 		t.Fatal("accepted revoked key")
 	}
 }
@@ -110,5 +110,28 @@ func TestProductionOIDCEgressCannotReachPrivateOrInsecureEndpoints(t *testing.T)
 		if oidcURL(raw) == nil {
 			t.Fatal("accepted unsafe issuer URL")
 		}
+	}
+}
+
+func TestKeyRouteProjectIsolation(t *testing.T) {
+	a, b := "project-a", "project-b"
+	for _, scope := range []string{"inference", "models_read"} {
+		for _, allowlist := range [][]string{nil, {"route"}} {
+			for _, keyProject := range []*string{nil, &a, &b} {
+				for _, routeProject := range []*string{nil, &a, &b} {
+					authority := Authority{ProjectID: keyProject, Policy: KeyPolicy{Scopes: []string{scope}, AllowedRoutes: allowlist}}
+					want := keyProject == routeProject
+					if got := authority.Allows(scope, "route", routeProject, time.Now()); got != want {
+						t.Fatalf("scope=%s allowlist=%v key=%v route=%v: got %v, want %v", scope, allowlist, keyProject, routeProject, got, want)
+					}
+				}
+			}
+		}
+	}
+	// UUID equality is by value, not pointer identity.
+	copyA := a
+	authority := Authority{ProjectID: &a, Policy: KeyPolicy{Scopes: []string{"inference"}}}
+	if !authority.Allows("inference", "route", &copyA, time.Now()) {
+		t.Fatal("same project rejected")
 	}
 }

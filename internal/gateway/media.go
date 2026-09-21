@@ -240,7 +240,7 @@ func (s *Server) prepareMedia(x *execution, authority access.Authority) *Error {
 		return modelNotFound(request.Route)
 	}
 	x.route = &route
-	if !authority.Allows("inference", route.Slug, s.now()) {
+	if !authority.Allows("inference", route.Slug, route.ProjectID, s.now()) {
 		return permissionError("route_forbidden", "This API key is not allowed to use the model `"+route.Slug+"`.")
 	}
 	if request.Op == media.OpVideoCreate && !videoLifecycleRoute(route.Operations) {

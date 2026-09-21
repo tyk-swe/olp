@@ -28,7 +28,15 @@ func decode(wire, target openai.Family, body []byte, route, encoding string, req
 	case openai.FamilyChat:
 		c, err = openai.DecodeChat(body, route)
 	case openai.FamilyResponses:
-		c, err = openai.DecodeResponse(body, route)
+		var background bool
+		if request != nil && target == openai.FamilyResponses {
+			_ = json.Unmarshal(request.Field("background"), &background)
+		}
+		if background {
+			c, err = openai.DecodeBackgroundResponse(body, route)
+		} else {
+			c, err = openai.DecodeResponse(body, route)
+		}
 	case openai.FamilyAnthropic:
 		c, err = decodeAnthropic(body, route)
 	case openai.FamilyGemini:

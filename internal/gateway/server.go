@@ -140,7 +140,8 @@ var requestIDPattern = regexp.MustCompile(`^[A-Za-z0-9._-]{1,128}$`)
 
 // request carries per-request identity shared by handlers.
 type request struct {
-	id string
+	id        string
+	durableID string
 	// minted records that this gateway chose the request id. A caller may name
 	// its own, and nothing stops two callers from naming the same one.
 	minted    bool
@@ -153,11 +154,14 @@ type request struct {
 
 // accountingID is the identity durable records are stored under: the request
 // id when this gateway minted it, and a fresh one when the caller named it.
-func (r request) accountingID() string {
+func (r *request) accountingID() string {
 	if r.minted {
 		return r.id
 	}
-	return uuid.Must(uuid.NewV7()).String()
+	if r.durableID == "" {
+		r.durableID = uuid.Must(uuid.NewV7()).String()
+	}
+	return r.durableID
 }
 
 // begin assigns the request identity, pins the release, and sets the
@@ -474,7 +478,9 @@ func (s *Server) inference(family openai.Family) http.HandlerFunc {
 			writeError(w, e)
 			return
 		}
-		if e := s.prepare(r.Context(), x, func(slug string) bool { return authority.Allows("inference", slug, s.now()) }); e != nil {
+		if e := s.prepare(r.Context(), x, func(slug string) bool {
+			return authority.Allows("inference", slug, x.request.release.Snapshot.Routes[slug].ProjectID, s.now())
+		}); e != nil {
 			x.failure, status = e, e.Status
 			writeError(w, e)
 			return
@@ -648,7 +654,7 @@ func (s *Server) models(w http.ResponseWriter, r *http.Request) {
 	now := s.now()
 	data := []map[string]any{}
 	for _, slug := range slices.Sorted(mapsKeys(req.release.Snapshot.Routes)) {
-		if authority.Allows("models_read", slug, now) {
+		if authority.Allows("models_read", slug, req.release.Snapshot.Routes[slug].ProjectID, now) {
 			route := req.release.Snapshot.Routes[slug]
 			data = append(data, modelObject(req.release.Snapshot, &route))
 		}
@@ -665,7 +671,7 @@ func (s *Server) model(w http.ResponseWriter, r *http.Request) {
 	}
 	slug := r.PathValue("model")
 	route, ok := req.release.Snapshot.Routes[slug]
-	if !ok || !authority.Allows("models_read", slug, s.now()) {
+	if !ok || !authority.Allows("models_read", slug, route.ProjectID, s.now()) {
 		writeError(w, modelNotFound(slug))
 		return
 	}

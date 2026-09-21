@@ -369,7 +369,7 @@ func TestAccessTransactionsReplayAndSecretSafety(t *testing.T) {
 		t.Fatal("patch did not preserve omitted values and clear explicit null")
 	}
 	authority, err := h.Server.LookupAuthority(t.Context(), first["secret"].(string))
-	if err != nil || !authority.Allows("models_read", "private", time.Now()) || authority.Allows("inference", "private", time.Now()) {
+	if err != nil || !authority.Allows("models_read", "private", nil, time.Now()) || authority.Allows("inference", "private", nil, time.Now()) {
 		t.Fatal("invalid authority", err)
 	}
 	rotateHeaders := etagHeader(record)
@@ -387,7 +387,7 @@ func TestAccessTransactionsReplayAndSecretSafety(t *testing.T) {
 	revocation["Idempotency-Key"] = "revoke-one"
 	h.want(owner, "POST", path+"/revoke", nil, revocation, 200)
 	authority, err = h.Server.LookupAuthority(t.Context(), rotated["secret"].(string))
-	if err != nil || authority.Allows("models_read", "private", time.Now()) {
+	if err != nil || authority.Allows("models_read", "private", nil, time.Now()) {
 		t.Fatal("revoked key admitted", err)
 	}
 	profile := h.want(developer, "GET", "/api/v3/profile", nil, nil, 200)

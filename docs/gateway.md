@@ -57,7 +57,10 @@ requests already admitted keep the snapshot and policy they were pinned to.
 Requests authenticate with `Authorization: Bearer <key>`, Anthropic
 `X-Api-Key`, or Gemini `X-Goog-Api-Key` (the Gemini query-key form is also
 accepted). Every inference operation needs `inference`; model reads need
-`models_read`. A route allowlist restricts both. The body model, or Gemini
+`models_read`. A key may use only routes in its own project; a key without a
+project may use only routes without a project. A route allowlist restricts
+both scopes further. An empty allowlist permits every route within that
+project boundary. The body model, or Gemini
 URL model, must be a published route slug. Model list/get expose only those
 routes the key may use.
 
@@ -296,3 +299,17 @@ on the private listener. `olp health-probe` exits nonzero unless readiness passe
 
 See [tests/README.md](../tests/README.md) for deterministic protocol, SDK,
 service, and browser checks. Paid provider qualification is separate.
+
+## Stored response accounting
+
+Retrieving, cancelling, deleting, or listing input items for a stored response
+does not generate new usage. Background responses retain a content-free
+accounting record with the original request identity, attribution, and pricing.
+A terminal stream event, retrieval, or cancellation carrying final usage settles
+that record once, including when several replicas poll concurrently. Until
+final usage is observed, the record remains pending; clients must poll responses
+that finish after their creation connection closes.
+
+Stored mappings created before this accounting record was introduced cannot
+safely recover the original generation identity. Retrieval does not rebill
+those mappings.

@@ -57,6 +57,9 @@ func accountingEvent(e Envelope) *usage.Event {
 	if e.KeyID == "" || e.Route == "" || e.RuntimeGenerationID == "" {
 		return nil
 	}
+	if len(e.Attempts) > 0 && e.Attempts[len(e.Attempts)-1].ResponseUsageDeferred {
+		return nil
+	}
 	event := &usage.Event{
 		Version:             usage.WireVersion,
 		EventID:             uuid.Must(uuid.NewV7()).String(),

@@ -28,7 +28,7 @@ func TestExpiredKeyCreationStillReplaysItsOriginalResult(t *testing.T) {
 		t.Fatal("expiry changed the original creation replay", status)
 	}
 	authority, err := h.Server.LookupAuthority(t.Context(), created["secret"].(string))
-	if err != nil || authority.Allows("inference", "", time.Now()) {
+	if err != nil || authority.Allows("inference", "", nil, time.Now()) {
 		t.Fatal("replay must not extend the key's authority")
 	}
 	h.want(owner, "POST", "/api/v3/api-keys", input, map[string]string{"Idempotency-Key": "new-expired-create"}, 422)

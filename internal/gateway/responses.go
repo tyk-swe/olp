@@ -150,6 +150,7 @@ func (s *Server) mapStoredResponse(ctx context.Context, x *execution, authority 
 			expires = &at
 		}
 	}
+	deferred := s.pendingResponseUsage(x, &fact, metadata)
 	encoded, _ := json.Marshal(metadata)
 	res, err := s.Resources.GetByUpstream(ctx, resources.KindResponse, authority.ID, fact.ProviderID, upstreamID)
 	if errors.Is(err, resources.ErrNotFound) {
@@ -170,6 +171,14 @@ func (s *Server) mapStoredResponse(ctx context.Context, x *execution, authority 
 	}
 	if err != nil {
 		return nil, serverError(http.StatusInternalServerError, "internal_error", "The stored response mapping could not be recorded.")
+	}
+	if deferred {
+		last := &x.facts[len(x.facts)-1]
+		last.ResponseUsageDeferred = true
+		last.recordEvidence(false)
+		if e := s.reconcileResponse(ctx, res.ID, body); e != nil {
+			return nil, e
+		}
 	}
 	out, err := rewriteID(body, "id", res.ID)
 	if err != nil {
@@ -197,16 +206,6 @@ func responseUsage(body []byte) *openai.Usage {
 		usage.CachedInputTokens = &cached
 	}
 	return usage
-}
-
-func (s *Server) recordResponseUsage(x *execution, body []byte) {
-	usage := responseUsage(body)
-	if usage == nil || len(x.facts) == 0 {
-		return
-	}
-	fact := &x.facts[len(x.facts)-1]
-	fact.Usage = usage
-	fact.UsageObserved, fact.UsageComplete, fact.BillingUncertain = true, true, false
 }
 
 func (s *Server) responseCall(w http.ResponseWriter, r *http.Request, op func(context.Context, *execution, access.Authority, *resources.Resource, *pin, *runtime.Route) *Error) {
@@ -270,7 +269,9 @@ func (s *Server) responseUpstream(ctx context.Context, x *execution, res *resour
 	if err != nil {
 		return serverError(http.StatusBadGateway, "upstream_error", "The provider response could not be read.")
 	}
-	s.recordResponseUsage(x, result)
+	if e := s.reconcileResponse(ctx, res.ID, result); e != nil {
+		return e
+	}
 	if status, ok := upstreamString(result, "status"); ok {
 		_ = s.Resources.Update(ctx, res.ID, status, nil, nil)
 	}
@@ -404,7 +405,13 @@ func (s *Server) mapStreamResponseFrame(ctx context.Context, x *execution, fact 
 			return nil, errResponseMapping
 		}
 		local = res.ID
+		fact.ResponseUsageDeferred = backgroundResponseRequested(x.parsed)
 		x.responseMap[upstreamID] = local
+	}
+	if fact.ResponseUsageDeferred {
+		if e := s.reconcileResponse(ctx, local, raw); e != nil {
+			return nil, errResponseMapping
+		}
 	}
 	encoded, err := json.Marshal(local)
 	if err != nil {
@@ -456,8 +463,9 @@ func (s *Server) putStreamResponse(ctx context.Context, x *execution, fact *Atte
 	if fact.CredentialID != "" {
 		credential = &fact.CredentialID
 	}
+	deferred := s.pendingResponseUsage(x, fact, metadata)
 	encoded, _ := json.Marshal(metadata)
-	return s.Resources.Put(ctx, &resources.Resource{
+	res, err := s.Resources.Put(ctx, &resources.Resource{
 		Kind:               resources.KindResponse,
 		APIKeyID:           x.keyID,
 		RouteSlug:          x.route.Slug,
@@ -471,4 +479,8 @@ func (s *Server) putStreamResponse(ctx context.Context, x *execution, fact *Atte
 		Metadata:           encoded,
 		ExpiresAt:          expires,
 	})
+	if err == nil && deferred {
+		fact.ResponseUsageDeferred = true
+	}
+	return res, err
 }

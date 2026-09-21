@@ -90,3 +90,19 @@ func TestResponsesStreamRejectsInvalidEventsBeforeCommit(t *testing.T) {
 		}
 	}
 }
+
+func TestBackgroundResponsesAcceptPendingStates(t *testing.T) {
+	for _, status := range []string{"queued", "in_progress"} {
+		body := []byte(`{"id":"resp-1","object":"response","output":[],"usage":null,"model":"upstream","status":"` + status + `"}`)
+		completion, err := DecodeBackgroundResponse(body, "route")
+		if err != nil || completion.Usage != nil {
+			t.Fatalf("%s: completion=%+v err=%v", status, completion, err)
+		}
+		if _, err := DecodeResponse(body, "route"); err == nil {
+			t.Fatal("synchronous request accepted pending response")
+		}
+	}
+	if _, err := DecodeBackgroundResponse([]byte(`{"output":[],"status":"in_progress","error":{}}`), "route"); err == nil {
+		t.Fatal("accepted pending response with an error")
+	}
+}

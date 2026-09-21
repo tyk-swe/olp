@@ -326,7 +326,13 @@ func (s *Server) ownedJob(ctx context.Context, authority access.Authority, video
 	default:
 		return nil, serverError(http.StatusServiceUnavailable, "media_job_reconciliation_pending", "The video job is being reconciled; retry shortly.")
 	}
-	if !authority.Allows("inference", record.RouteSlug, s.now()) {
+	// Retired routes can still own live jobs, so read the durable project
+	// rather than requiring the route to remain in the active snapshot.
+	var projectID *string
+	if err := s.Media.Jobs.Pool.QueryRow(ctx, "SELECT project_id::text FROM olp_go.routes WHERE slug=$1", record.RouteSlug).Scan(&projectID); err != nil {
+		return nil, serverError(http.StatusServiceUnavailable, "route_unavailable", "The video job's route could not be read.")
+	}
+	if !authority.Allows("inference", record.RouteSlug, projectID, s.now()) {
 		return nil, permissionError("route_forbidden", "This API key is not allowed to use the model `"+record.RouteSlug+"`.")
 	}
 	return &record, nil

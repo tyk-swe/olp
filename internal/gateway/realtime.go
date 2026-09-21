@@ -80,7 +80,7 @@ func (s *Server) realtime(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	x.route = &route
-	if !authority.Allows("inference", route.Slug, s.now()) {
+	if !authority.Allows("inference", route.Slug, route.ProjectID, s.now()) {
 		fail(permissionError("route_forbidden", "This API key is not allowed to use the model `"+route.Slug+"`."))
 		return
 	}
@@ -92,13 +92,15 @@ func (s *Server) realtime(w http.ResponseWriter, r *http.Request) {
 		fail(e)
 		return
 	}
-	p, e := s.selectPin(r.Context(), x, &route, "realtime", "realtime")
+	ctx, cancel := context.WithTimeout(r.Context(), realtimeSession)
+	defer cancel()
+	p, e := s.selectPin(ctx, x, &route, "realtime", "realtime")
 	if e != nil {
 		fail(e)
 		return
 	}
 	defer s.resourceSettle(r.Context(), x, p)
-	if e := s.reserveState(r.Context(), x, authority, realtimeSession); e != nil {
+	if e := s.reserveState(ctx, x, authority, realtimeSession); e != nil {
 		fail(e)
 		return
 	}
@@ -126,8 +128,6 @@ func (s *Server) realtime(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer client.Close(websocket.StatusNormalClosure, "")
-	ctx, cancel := context.WithTimeout(r.Context(), realtimeSession)
-	defer cancel()
 	conn, e := realtimeDial(ctx, s, x, p, upstream)
 	if e != nil {
 
@@ -331,7 +331,7 @@ loop:
 			break loop
 		case <-reauth.C:
 			authority, err := s.Runtime.Authenticate(token)
-			if err != nil || authority.ID != keyID || !authority.Allows("inference", x.route.Slug, s.now()) {
+			if err != nil || authority.ID != keyID || !authority.Allows("inference", x.route.Slug, x.route.ProjectID, s.now()) {
 				first = errors.New("key authority revoked")
 				client.Close(websocket.StatusPolicyViolation, "key revoked")
 				break loop

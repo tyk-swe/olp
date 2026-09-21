@@ -79,7 +79,7 @@ func TestOverviewCountsReadinessAggregates(t *testing.T) {
 	}
 	want(overview(), 1, 1, 1, true)
 	authority, err := h.Server.LookupAuthority(t.Context(), key["secret"].(string))
-	if err != nil || authority.Allows("inference", "overview-chat", time.Now()) {
+	if err != nil || authority.Allows("inference", "overview-chat", nil, time.Now()) {
 		t.Fatal("setup completion must not authorize an expired key", err)
 	}
 	keyRecord := h.want(owner, http.MethodGet, "/api/v3/api-keys/"+key["id"].(string), nil, nil, 200)

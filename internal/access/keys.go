@@ -505,7 +505,10 @@ func (s *Server) LookupAuthority(ctx context.Context, secret string) (Authority,
 	}
 	return a, nil
 }
-func (a Authority) Allows(scope, route string, now time.Time) bool {
+func (a Authority) Allows(scope, route string, projectID *string, now time.Time) bool {
+	if (a.ProjectID == nil) != (projectID == nil) || (a.ProjectID != nil && *a.ProjectID != *projectID) {
+		return false
+	}
 	if scope != "inference" && scope != "models_read" {
 		return false
 	}

@@ -224,12 +224,28 @@ func nestedCount(fields map[string]json.RawMessage, parent, name string) *int64 
 
 // DecodeResponse validates a unary Responses API document and rewrites its model.
 func DecodeResponse(body []byte, route string) (*Completion, error) {
+	return decodeResponse(body, route, false)
+}
+
+// DecodeBackgroundResponse also accepts the queued and in-progress objects
+// returned by a provider after accepting an explicitly background request.
+func DecodeBackgroundResponse(body []byte, route string) (*Completion, error) {
+	return decodeResponse(body, route, true)
+}
+
+func decodeResponse(body []byte, route string, background bool) (*Completion, error) {
 	fields, err := object(body)
 	if err != nil {
 		return nil, &ProtocolError{Detail: "response is not a JSON object"}
 	}
-	if err := terminalResponseError(fields); err != nil {
-		return nil, err
+	status, _ := stringField(fields, "status")
+	pending := background && (status == "queued" || status == "in_progress")
+	if !pending {
+		if err := terminalResponseError(fields); err != nil {
+			return nil, err
+		}
+	} else if raw, present := fields["error"]; present && !isNull(raw) {
+		return nil, &ProtocolError{Detail: "pending response contains an error"}
 	}
 	c, err := responseSummary(fields)
 	if err != nil {

@@ -84,7 +84,7 @@ func (s *Server) nativeModels(w http.ResponseWriter, r *http.Request) {
 	}
 	if slug := r.PathValue("model"); slug != "" {
 		route, ok := req.release.Snapshot.Routes[slug]
-		if !ok || !authority.Allows("models_read", slug, s.now()) {
+		if !ok || !authority.Allows("models_read", slug, route.ProjectID, s.now()) {
 			writeSurfaceError(w, modelNotFound(slug), surface)
 			return
 		}
@@ -93,7 +93,7 @@ func (s *Server) nativeModels(w http.ResponseWriter, r *http.Request) {
 	}
 	rows := []map[string]any{}
 	for _, slug := range slices.Sorted(mapsKeys(req.release.Snapshot.Routes)) {
-		if authority.Allows("models_read", slug, s.now()) {
+		if authority.Allows("models_read", slug, req.release.Snapshot.Routes[slug].ProjectID, s.now()) {
 			rows = append(rows, nativeModel(req.release.Snapshot, req.release.Snapshot.Routes[slug], surface))
 		}
 	}

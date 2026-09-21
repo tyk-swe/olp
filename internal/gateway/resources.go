@@ -146,7 +146,7 @@ func (s *Server) resolveResource(ctx context.Context, x *execution, authority ac
 	if err != nil {
 		return nil, nil, serverError(http.StatusInternalServerError, "internal_error", "The stored target could not be rebuilt.")
 	}
-	if !authority.Allows("inference", route.Slug, s.now()) {
+	if !authority.Allows("inference", route.Slug, route.ProjectID, s.now()) {
 		return nil, nil, notFoundError("not_found", "No "+res.Kind+" with this identifier exists for this key.")
 	}
 	var target *runtime.Target
@@ -230,6 +230,13 @@ func (s *Server) selectPinSurface(ctx context.Context, x *execution, route *runt
 	x.budget = 1
 	x.attempts = plan.Attempts[:1]
 	deadline := s.now().Add(time.Duration(route.OverallTimeout) * time.Millisecond)
+	if mode == "realtime" {
+		var ok bool
+		deadline, ok = ctx.Deadline()
+		if !ok {
+			return nil, serverError(http.StatusInternalServerError, "internal_error", "Realtime admission requires a session deadline.")
+		}
+	}
 	for i := range provider.Slots {
 		slot := &provider.Slots[i]
 		if !s.slotAvailable(x, attempt, slot) || s.cooling(ctx, provider.ID, slot) {
@@ -259,7 +266,8 @@ func (s *Server) pinnedDo(ctx context.Context, x *execution, p *pin, method, end
 		fact.Class = class
 		fact.Committed = f.committed
 		fact.Duration = s.now().Sub(fact.StartedAt)
-		fact.recordEvidence(true)
+		// Stored-response lifecycle calls do not generate billable work.
+		fact.recordEvidence(x.family != openai.FamilyResponses)
 		x.facts = append(x.facts, fact)
 		return f
 	}
@@ -309,7 +317,8 @@ func (s *Server) pinnedDo(ctx context.Context, x *execution, p *pin, method, end
 		fact.Class = "success"
 		fact.Committed = true
 		fact.Duration = s.now().Sub(fact.StartedAt)
-		fact.recordEvidence(true)
+		// Stored-response lifecycle calls do not generate billable work.
+		fact.recordEvidence(x.family != openai.FamilyResponses)
 		x.facts = append(x.facts, fact)
 		return resp, nil
 	}
@@ -578,7 +587,7 @@ func (s *Server) uploadFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	x.route = &route
-	if !authority.Allows("inference", route.Slug, s.now()) {
+	if !authority.Allows("inference", route.Slug, route.ProjectID, s.now()) {
 		s.stateFail(x, w, permissionError("route_forbidden", "This API key is not allowed to use the model `"+route.Slug+"`."), x.family)
 		return
 	}

@@ -85,6 +85,9 @@ type AttemptFact struct {
 	// RetryAfter is the delay the upstream asked for; nil unless it sent one.
 	RetryAfter *time.Duration
 	Usage      *openai.Usage
+	// ResponseUsageDeferred delegates accounting to the durable background
+	// resource, which retains this generation request until final usage arrives.
+	ResponseUsageDeferred bool
 	// UsageObserved reports that the upstream told this gateway what the
 	// attempt consumed, UsageComplete that no further consumption can be
 	// attributed to it, and BillingUncertain that the upstream may have
@@ -100,6 +103,9 @@ type AttemptFact struct {
 // the upstream may still have billed for work that was never reported.
 func (a *AttemptFact) recordEvidence(uncertain bool) {
 	switch {
+	case a.ResponseUsageDeferred:
+		a.Usage = nil
+		a.UsageObserved, a.UsageComplete, a.BillingUncertain = false, true, false
 	case a.Usage != nil:
 		a.UsageObserved, a.UsageComplete, a.BillingUncertain = true, true, false
 	case uncertain:

@@ -368,3 +368,26 @@ func TestConfigurationPromotion(t *testing.T) {
 		t.Fatal("the changed artifact must update draft models", models)
 	}
 }
+
+func TestConfigurationPricingRequiresSettings(t *testing.T) {
+	h := newAccessHarness(t)
+	owner := h.owner()
+	_, configure := createToken(h, owner, "configure-only", []string{"configure"})
+	_, settings := createToken(h, owner, "configure-settings", []string{"configure", "settings"})
+	doc := h.want(owner, "GET", "/api/v3/configuration/export", nil, nil, 200)["document"].(map[string]any)
+	doc["projects"] = []any{map[string]any{"name": "imported"}}
+	body := map[string]any{"document": doc}
+	h.machineWant(configure, "POST", "/api/v3/configuration/apply", body, idem("no-pricing"), 200)
+	doc["projects"] = []any{map[string]any{"name": "must-rollback"}}
+	doc["pricing"] = map[string]any{"effective_at": time.Now().Add(time.Hour).UTC().Format(time.RFC3339),
+		"prices": []any{repPrice("openai_compatible", vendorModel, "generation")}}
+	h.machineWant(configure, "POST", "/api/v3/configuration/apply", body, idem("denied-pricing"), 403)
+	var count int
+	if err := h.Pool.QueryRow(t.Context(), "SELECT count(*) FROM olp_go.projects WHERE name='must-rollback'").Scan(&count); err != nil || count != 0 {
+		t.Fatalf("rejected import mutated projects: count=%d err=%v", count, err)
+	}
+	h.machineWant(settings, "POST", "/api/v3/configuration/apply", body, idem("authorized-pricing"), 200)
+	// An unchanged pricing section does not require settings.
+	exported := h.want(owner, "GET", "/api/v3/configuration/export", nil, nil, 200)["document"]
+	h.machineWant(configure, "POST", "/api/v3/configuration/apply", map[string]any{"document": exported}, idem("unchanged-pricing"), 200)
+}

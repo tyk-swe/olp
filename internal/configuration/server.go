@@ -122,6 +122,17 @@ func (s *Server) applyEndpoint(r *http.Request) (access.Reply, error) {
 		}
 		return access.Reply{Status: 409, Body: body}, nil
 	}
+	if doc.Pricing != nil {
+		changed, err := s.pricingChanged(r.Context(), tx, doc)
+		if err != nil {
+			return access.Reply{}, err
+		}
+		if changed {
+			if _, err := s.Access.Principal(r, tx, "settings"); err != nil {
+				return access.Reply{}, err
+			}
+		}
+	}
 	if err = s.applyDocument(r.Context(), tx, p, doc, input.SecretBindings); err != nil {
 		return access.Reply{}, err
 	}

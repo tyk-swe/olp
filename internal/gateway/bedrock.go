@@ -105,7 +105,7 @@ func (s *Server) bedrockServe(w http.ResponseWriter, r *http.Request, family ope
 		return
 	}
 	x.route = &route
-	if !authority.Allows("inference", route.Slug, s.now()) {
+	if !authority.Allows("inference", route.Slug, route.ProjectID, s.now()) {
 		fail(permissionError("route_forbidden", "This API key is not allowed to use the model `"+route.Slug+"`."))
 		return
 	}

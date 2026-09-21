@@ -217,7 +217,8 @@ func (s *Server) simulateRouting(r *http.Request) (access.Reply, error) {
 		if err = json.Unmarshal(raw, &authority.Policy); err != nil {
 			return access.Reply{}, err
 		}
-		if !authority.Allows("inference", slug, time.Now()) {
+		authority.ProjectID = keyProject
+		if !authority.Allows("inference", slug, keyProject, time.Now()) {
 			keyReason = "api_key_not_authorized"
 			if len(authority.Policy.AllowedRoutes) > 0 && !slices.Contains(authority.Policy.AllowedRoutes, slug) {
 				keyReason = "route_not_allowed_for_key"

@@ -317,3 +317,16 @@ func TestAccountingEventFromServedRequests(t *testing.T) {
 		t.Fatalf("second request is not accountable: %v", err)
 	}
 }
+
+func TestDeferredResponseAccountingDoesNotEmitOrSettleGenerationUsage(t *testing.T) {
+	env := accountingEnvelope(t)
+	fact := &env.Attempts[len(env.Attempts)-1]
+	fact.ResponseUsageDeferred = true
+	fact.recordEvidence(true)
+	if fact.Usage != nil || fact.UsageObserved || fact.BillingUncertain {
+		t.Fatal("deferred generation retained inline billing evidence")
+	}
+	if accountingEvent(env) != nil {
+		t.Fatal("pending resource emitted duplicate generation accounting")
+	}
+}
