@@ -303,6 +303,34 @@ func TestNativeConfigurationForwardMigrationPreservesHistoryAndDigests(t *testin
 		t.Fatal("migration fixture did not preserve multiple prior releases")
 	}
 	previousDigest := h.Runtime.Release().Digest
+	// Fail on the second source-column alteration, after the first alteration
+	// has run, so rollback must restore both data types and migration history.
+	if _, err := pool.Exec(t.Context(), `CREATE FUNCTION public.fail_native_source_migration() RETURNS event_trigger
+		LANGUAGE plpgsql AS $$ DECLARE command record; BEGIN
+		  FOR command IN SELECT * FROM pg_event_trigger_ddl_commands() LOOP
+		    IF command.objid='olp_go.provider_revisions'::regclass THEN
+		      RAISE EXCEPTION 'injected native source migration failure';
+		    END IF;
+		  END LOOP;
+		END $$;
+		CREATE EVENT TRIGGER fail_native_source_migration ON ddl_command_end
+		WHEN TAG IN ('ALTER TABLE') EXECUTE FUNCTION public.fail_native_source_migration()`); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.Migrate(t.Context(), pool); err == nil {
+		t.Fatal("injected source migration failure did not abort the transaction")
+	}
+	var rolledBack bool
+	if err := pool.QueryRow(t.Context(), `SELECT
+		NOT EXISTS(SELECT 1 FROM olp_go.migrations WHERE version >= '0024_native_configuration_sources.sql')
+		AND (SELECT data_type='jsonb' FROM information_schema.columns WHERE table_schema='olp_go' AND table_name='providers' AND column_name='configuration')
+		AND (SELECT data_type='jsonb' FROM information_schema.columns WHERE table_schema='olp_go' AND table_name='provider_revisions' AND column_name='configuration')
+		AND (SELECT data_type='jsonb' FROM information_schema.columns WHERE table_schema='olp_go' AND table_name='runtime_releases' AND column_name='snapshot')`).Scan(&rolledBack); err != nil || !rolledBack {
+		t.Fatal("failed source migration left partial schema or history", err)
+	}
+	if _, err := pool.Exec(t.Context(), "DROP EVENT TRIGGER fail_native_source_migration; DROP FUNCTION public.fail_native_source_migration()"); err != nil {
+		t.Fatal(err)
+	}
 	if err := database.Migrate(t.Context(), pool); err != nil {
 		t.Fatal(err)
 	}
