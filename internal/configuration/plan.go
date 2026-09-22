@@ -309,6 +309,12 @@ func (s *Server) validateDocument(doc *Document) error {
 		if p.NetworkCredentialRef != nil && (p.Configuration.Options.Network == nil || *p.NetworkCredentialRef != networkRef(p.Name) || len(*p.NetworkCredentialRef) > maxCredentialRef) {
 			return access.Invalid(prefix+".network_credential_ref", "Use the provider name followed by /network and configure network options.")
 		}
+		if p.NetworkCredentialRef != nil {
+			if refs[*p.NetworkCredentialRef] {
+				return access.Invalid(prefix+".network_credential_ref", "Credential references must be distinct.")
+			}
+			refs[*p.NetworkCredentialRef] = true
+		}
 		if err := p.Configuration.Validate(s.Egress); err != nil {
 			return err
 		}
@@ -481,6 +487,9 @@ func (s *Server) validateDocument(doc *Document) error {
 func validateBindings(doc *Document, bindings map[string]string) error {
 	refs := map[string]bool{}
 	for _, p := range doc.Providers {
+		if p.NetworkCredentialRef != nil {
+			refs[*p.NetworkCredentialRef] = true
+		}
 		for _, slot := range p.Slots {
 			if slot.CredentialRef != nil {
 				refs[*slot.CredentialRef] = true
