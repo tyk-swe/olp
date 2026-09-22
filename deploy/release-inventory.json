@@ -6442,6 +6442,7 @@
     "tests/integration/configuration_test.go",
     "tests/integration/consumer_test.go",
     "tests/integration/content_policy_test.go",
+    "tests/integration/continuation_barrier_benchmark_test.go",
     "tests/integration/contracts_test.go",
     "tests/integration/credential_pool_replay_test.go",
     "tests/integration/credential_routing_test.go",
