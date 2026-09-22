@@ -36,34 +36,17 @@ type Context struct {
 	AllowProviderState bool
 	RequiredServing    *ServingIdentity
 }
-type ServingIdentity struct {
-	ProviderID, RevisionID, Model, ProfileID, ProfileRevision string
-	PrincipalID, Snapshot, Region, ResourceScope              string
-}
-type Error struct{ Code, Field, Requirement, Message string }
+type ServingIdentity = oif.ServingIdentity
+type Error = oif.Incompatibility
 
-func (e *Error) Error() string { return e.Message }
-func (e *Error) Incompatibility() (string, string, string, string) {
-	return e.Code, e.Field, e.Requirement, e.Message
-}
 func incompatible(code, field, requirement, message string) *Error {
 	return &Error{code, field, requirement, message}
 }
 
-type Disposition struct{ Field, Disposition, Rule, Evidence string }
-type Obligations struct {
-	Delivery, Lifetime, Submission, Continuation, Retry string
-	Effects                                             []string
-	MaxBodyBytes, MaxEventBytes                         int
-	RejectAmbiguousFailover, GuardResults               bool
-}
-type Receipt struct {
-	Class, Operation, SourceDialect, TargetDialect, ProfileID, ProfileRevision string
-	Serving                                                                    ServingIdentity
-	Dispositions                                                               []Disposition
-	Obligations                                                                Obligations
-	Evidence                                                                   []string
-}
+type Disposition = oif.Disposition
+type Obligations = oif.Obligations
+type Receipt = oif.Receipt
+
 type Template struct {
 	config   Config
 	profile  connectors.Profile
