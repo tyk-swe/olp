@@ -39,7 +39,31 @@ export type ReadyTurn = {
   assistant: Assistant;
   observations: Observation[];
   finish: string;
+  nativeUsageRaw?: string;
 };
+
+function nested(
+  value: NativeValue,
+  ...path: string[]
+): NativeValue | undefined {
+  let current: NativeValue | undefined = value;
+  for (const name of path) {
+    if (!nativeObject(current) || !Object.hasOwn(current, name))
+      return undefined;
+    current = current[name];
+  }
+  return current;
+}
+
+function nativeUsage(value: NativeValue): string | undefined {
+  const usage = nested(value, 'olp', 'native_usage');
+  if (usage === undefined) return undefined;
+  if (!nativeObject(usage))
+    throw new Error(
+      'Invalid native usage categories in continuation delivery.'
+    );
+  return stringifyNativeJSON(usage);
+}
 
 function record(value: unknown): Record<string, unknown> {
   if (!nativeObject(value))
@@ -201,6 +225,7 @@ type Chunk = {
     handle?: unknown;
   };
   choices?: unknown;
+  nativeUsageRaw?: string;
 };
 
 function parseChunk(source: string): Chunk {
@@ -209,7 +234,10 @@ function parseChunk(source: string): Chunk {
   const chunk = record(decodeDelivery(source));
   if (record(chunk.olp).version !== continuationVersion)
     throw new Error('The route returned another continuation version.');
-  return chunk as Chunk;
+  return {
+    ...chunk,
+    nativeUsageRaw: nativeUsage(parseNativeJSON(source))
+  } as Chunk;
 }
 
 function assemble(frames: Chunk[]): {
@@ -217,6 +245,7 @@ function assemble(frames: Chunk[]): {
   observations: Observation[];
   handle: string;
   finish: string;
+  nativeUsageRaw?: string;
 } {
   const observations: Observation[] = [];
   const calls = new Map<number, ToolCall>();
@@ -224,7 +253,10 @@ function assemble(frames: Chunk[]): {
   let handle = '';
   let finish = '';
   let terminal = false;
+  let nativeUsageRaw: string | undefined;
   for (const chunk of frames) {
+    if (chunk.nativeUsageRaw !== undefined)
+      nativeUsageRaw = chunk.nativeUsageRaw;
     const extension = record(chunk.olp);
     const choices = chunk.choices;
     if (!Array.isArray(choices) || choices.length > 1)
@@ -310,7 +342,8 @@ function assemble(frames: Chunk[]): {
     },
     observations,
     handle,
-    finish
+    finish,
+    nativeUsageRaw
   };
 }
 
@@ -429,7 +462,8 @@ export function nextTurn(
 function completedUnary(
   source: unknown,
   request: NativeObject,
-  submission: string
+  submission: string,
+  nativeUsageRaw?: string
 ): ReadyTurn {
   const payload = record(source);
   const extension = record(payload.olp);
@@ -450,7 +484,8 @@ function completedUnary(
     request,
     assistant,
     observations,
-    finish: string(selected.finish_reason)
+    finish: string(selected.finish_reason),
+    nativeUsageRaw
   };
 }
 
@@ -478,7 +513,12 @@ export async function unaryTurn(
   const source = await response.text();
   if (source.length > maxStreamBytes)
     throw new Error('The continuation result exceeds the client limit.');
-  return completedUnary(decodeDelivery(source), request, submission);
+  return completedUnary(
+    decodeDelivery(source),
+    request,
+    submission,
+    nativeUsage(parseNativeJSON(source))
+  );
 }
 
 /** Recovery reads committed delivery only. It never creates a fresh attempt. */
@@ -505,20 +545,31 @@ export async function recoverTurn(
   if (source.length > maxStreamBytes)
     throw new Error('Recovery result exceeds the client limit.');
   const recovery = record(decodeDelivery(source));
+  const nativeRecovery = parseNativeJSON(source);
   if (recovery.version !== continuationVersion || recovery.state !== 'ready')
     throw new Error('The submission has no ready delivery.');
   const delivery = record(recovery.delivery);
+  const nativeDelivery = nested(nativeRecovery, 'delivery');
+  const nativeFrames = nativeDelivery && nested(nativeDelivery, 'frames');
+  const nativeBody = nativeDelivery && nested(nativeDelivery, 'body');
   const completed =
     delivery.stream === true && Array.isArray(delivery.frames)
       ? {
           submission,
           request,
           ...assemble(
-            delivery.frames.map((frame) => parseChunk(JSON.stringify(frame)))
+            (Array.isArray(nativeFrames) ? nativeFrames : []).map((frame) =>
+              parseChunk(stringifyNativeJSON(frame))
+            )
           )
         }
       : delivery.stream === false && delivery.body !== undefined
-        ? completedUnary(delivery.body, request, submission)
+        ? completedUnary(
+            delivery.body,
+            request,
+            submission,
+            nativeBody ? nativeUsage(nativeBody) : undefined
+          )
         : null;
   if (!completed)
     throw new Error('This submission has another delivery shape.');

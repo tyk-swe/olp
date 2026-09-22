@@ -189,6 +189,29 @@ describe('browser negotiated tool client', () => {
     ).rejects.toThrow(/ready continuation/);
   });
 
+  it('retains exact native cache-usage categories on a ready stream', async () => {
+    const terminal = JSON.stringify(recorded.at(-1)).replace(
+      '"ready":true}',
+      '"ready":true,"native_usage":{"cache_read_input_tokens":9007199254740993,"cache_write_input_tokens":-0}}'
+    );
+    const streamSource =
+      recorded
+        .slice(0, -1)
+        .map((item) => `data: ${JSON.stringify(item)}\n\n`)
+        .join('') + `data: ${terminal}\n\ndata: [DONE]\n\n`;
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(streamSource, { status: 200 })
+    );
+    const turn = await streamTurn(
+      'olp_secret',
+      nativeChatRequest(source, 'route'),
+      submission
+    );
+    expect(turn.nativeUsageRaw).toBe(
+      '{"cache_read_input_tokens":9007199254740993,"cache_write_input_tokens":-0}'
+    );
+  });
+
   it('recovers only the committed delivery under the same key and submission', async () => {
     const assistant = {
       role: 'assistant',

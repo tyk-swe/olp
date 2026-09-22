@@ -115,21 +115,21 @@ func inspectStructure(root oif.Value) ([]inspectedTurn, int) {
 				case "function_call_output":
 					appendPart(&turn, "tool_result", inspectionString(item, "call_id"), false)
 				default:
-					if value, ok := item.Lookup("content"); ok {
-						appendContent(&turn, value)
-					}
-					if value, ok := item.Lookup("parts"); ok {
-						appendContent(&turn, value)
-					}
-					if calls, ok := item.Lookup("tool_calls"); ok {
-						for _, call := range calls.Elements() {
-							appendPart(&turn, "tool_call", inspectionString(call, "id"), true)
+					if id := inspectionString(item, "tool_call_id"); turn.Role == "tool" && id != "" {
+						// A Chat tool message's content is the result, not a
+						// separate text block preceding the result.
+						appendPart(&turn, "tool_result", id, false)
+					} else {
+						if value, ok := item.Lookup("content"); ok {
+							appendContent(&turn, value)
 						}
-					}
-					if turn.Role == "tool" {
-						id := inspectionString(item, "tool_call_id")
-						if id != "" {
-							appendPart(&turn, "tool_result", id, false)
+						if value, ok := item.Lookup("parts"); ok {
+							appendContent(&turn, value)
+						}
+						if calls, ok := item.Lookup("tool_calls"); ok {
+							for _, call := range calls.Elements() {
+								appendPart(&turn, "tool_call", inspectionString(call, "id"), true)
+							}
 						}
 					}
 				}

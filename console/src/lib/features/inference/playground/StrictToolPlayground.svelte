@@ -275,6 +275,12 @@
       <h3>Assistant text</h3>
       <pre>{active.assistant.content || 'No ordinary text'}</pre>
       <p>Finish reason: {active.finish}</p>
+      {#if active.nativeUsageRaw}
+        <details>
+          <summary>Native provider usage categories</summary>
+          <pre>{active.nativeUsageRaw}</pre>
+        </details>
+      {/if}
     </div>
     {#if calls.length}
       <div>
