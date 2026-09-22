@@ -23,6 +23,7 @@ const handleHeader = "X-OLP-Continuation-Handle"
 type continuationExecution struct {
 	version, submission string
 	parent              *resources.Resource
+	parentState         *storedContinuation
 	prior               *interaction.Continuation
 	resource            *resources.Resource
 	stored              *storedContinuation
@@ -123,10 +124,10 @@ func (s *Server) prepareContinuation(ctx context.Context, x *execution) *Error {
 	if err != nil || state.Interaction == nil || res.RouteSlug != x.parsed.Route {
 		return continuationError("continuation_mismatch", "The continuation handle does not belong to this route and contract.")
 	}
-	if e := s.authorizeContinuation(ctx, x, res, state); e != nil {
-		return e
-	}
-	c.parent, c.prior = res, state.Interaction
+	// The pinned planning boundary resolves and authorizes this historical
+	// provider once, after the owner-scoped encrypted handle has been read.
+	// Delivery replay and public recovery still authorize directly below.
+	c.parent, c.parentState, c.prior = res, state, state.Interaction
 	x.pin = res
 	x.serving = &state.Receipt.Serving
 	x.servingSlot = res.SlotID
@@ -138,6 +139,9 @@ func (s *Server) authorizeContinuation(ctx context.Context, x *execution, res *r
 	if e != nil {
 		return e
 	}
+	return s.authorizeContinuationPin(ctx, x, res, state, p)
+}
+func (s *Server) authorizeContinuationPin(ctx context.Context, x *execution, res *resources.Resource, state *storedContinuation, p *pin) *Error {
 	if !p.provider.Enabled || !p.slot.Allows(p.model, res.RouteSlug, x.keyID) {
 		return pinUnavailable()
 	}

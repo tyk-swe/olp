@@ -126,6 +126,11 @@ func (s *Server) pinAttempts(ctx context.Context, x *execution) *Error {
 	if e != nil {
 		return e
 	}
+	if x.continuation != nil && x.continuation.parentState != nil {
+		if e := s.authorizeContinuationPin(ctx, x, x.continuation.parent, x.continuation.parentState, p); e != nil {
+			return e
+		}
+	}
 	if !p.provider.Supports(p.model, x.family.Operation(), x.family.Surface(), x.mode) {
 		return serverError(http.StatusConflict, "provider_resource_credential_unavailable",
 			"The provider that owns this object can no longer serve this operation.")
