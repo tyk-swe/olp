@@ -77,4 +77,17 @@ describe('lossless native JSON', () => {
     );
     query.clear();
   });
+  it('keeps native operation scores and vector metadata exact in playground results', () => {
+    const source =
+      '{"id":"request","model":"route","output_text":"","tool_calls":[],"routing":[],"latency_ms":4,"response":{"data":[{"index":0,"embedding":[-0,0.1000000000000000000001]}],"metadata":{"count":9007199254740993,"__proto__":{"inert":true}}}}';
+    const decoded = parseManagementJSON(source) as {
+      latency_ms: number;
+      response: unknown;
+    };
+    expect(decoded.latency_ms).toBe(4);
+    expect(stringifyNativeJSON(decoded.response)).toBe(
+      source.slice(source.indexOf('"response":') + 11, -1)
+    );
+    expect(Object.prototype).not.toHaveProperty('inert');
+  });
 });

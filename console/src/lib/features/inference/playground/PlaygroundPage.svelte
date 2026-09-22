@@ -2,15 +2,12 @@
   import RoutingPreferencesForm from '$lib/features/routes/RoutingPreferencesForm.svelte';
   import RoutingDecisions from '$lib/features/routes/RoutingDecisions.svelte';
   import { decisionRows } from '$lib/features/routes/routingExplanation';
+  import { inspectionDialects } from '$lib/features/routes/inspectionDialects';
   let routing = $state('{}');
   import { routeKeys } from '$lib/features/routes/routeKeys';
 
   import { createMutation, createQuery } from '@tanstack/svelte-query';
-  import {
-    listRoutes,
-    simulateRouting,
-    type RoutingSimulationInput
-  } from '$lib/features/routes/api';
+  import { listRoutes, simulateRouting } from '$lib/features/routes/api';
   import { hasOutputRules } from '$lib/features/routes/routeEditor';
   import { listApiKeys } from '$lib/features/access/api-keys/api';
   import { apiKeyQueries } from '$lib/features/access/api-keys/apiKeyQueries';
@@ -21,6 +18,12 @@
     type PlaygroundRequest,
     type PlaygroundStreamDone
   } from '$lib/features/inference/playground/api';
+  import {
+    inspectRouting,
+    type InspectRoutingInput
+  } from '$lib/features/inference/playground/inspection';
+  import { nativeObject, parseNativeJSON } from '$lib/json/nativeJson';
+  import OperationResult from './OperationResult.svelte';
   import {
     playgroundTemplates,
     templateFor
@@ -65,6 +68,7 @@
     '{\n  "type": "object",\n  "properties": {\n    "answer": { "type": "string" }\n  },\n  "required": ["answer"],\n  "additionalProperties": false\n}'
   );
   let validationError = $state('');
+  let completedRequest = $state<PlaygroundRequest | null>(null);
   const routes = createQuery(() => ({
     queryKey: routeKeys.all(),
     queryFn: ({ signal }) => listRoutes(signal)
@@ -178,6 +182,7 @@
     streamDone = null;
     streamProblem = null;
     mutation.reset();
+    completedRequest = null;
   }
 
   onDestroy(() => {
@@ -185,22 +190,46 @@
   });
   const simulation = createMutation(() => ({
     // Wrapped so the mutation context is not passed as the abort signal.
-    mutationFn: (input: RoutingSimulationInput) => simulateRouting(input)
+    mutationFn: (input: InspectRoutingInput) => inspectRouting(input)
   }));
 
   let simulateKeyId = $state('');
   let simulateSeed = $state('');
+  let inspectDialect = $state('');
+  let inspectedInputs = $state('');
   let simulationError = $state('');
 
   // A dry run is always the most recent action when it has data, because
   // submitting a real test resets it.
   const explanation = $derived(
-    simulation.data?.length
+    simulation.data?.length && inspectedInputs === inspectionInputs()
       ? { dryRun: true, decisions: simulation.data }
       : mutation.data?.routing?.length
         ? { dryRun: false, decisions: mutation.data.routing }
         : null
   );
+
+  function inspectionInputs() {
+    return JSON.stringify([
+      model,
+      surface,
+      operation,
+      composer,
+      rawJson,
+      streamEnabled,
+      routing,
+      simulateKeyId,
+      simulateSeed,
+      inspectDialect
+    ]);
+  }
+
+  function advancedRequest(): Record<string, unknown> {
+    const raw = parseNativeJSON(rawJson);
+    if (!nativeObject(raw))
+      throw new Error('The request document must be a JSON object.');
+    return raw;
+  }
 
   function requestControls() {
     return {
@@ -219,16 +248,25 @@
       return;
     }
     try {
-      await simulation.mutateAsync({
+      const version = inspectionInputs();
+      const input: InspectRoutingInput = {
         route: model.trim(),
+        operation: composer === 'advanced' ? operation : 'generation',
         surface,
-        // Match the unary operation used by the playground endpoint.
-        mode: 'unary',
+        mode: streamEnabled ? 'streaming' : 'unary',
         preferences: JSON.parse(routing),
-        ...requestControls(),
         apiKeyId: simulateKeyId || null,
-        seed: simulateSeed
-      });
+        seed: simulateSeed,
+        ...(composer === 'advanced'
+          ? {
+              request: advancedRequest(),
+              dialect: (inspectDialect || undefined) as
+                InspectRoutingInput['dialect'] | undefined
+            }
+          : {})
+      };
+      await simulation.mutateAsync(input);
+      inspectedInputs = version;
     } catch (error) {
       simulationError = errorMessage(
         error,
@@ -248,6 +286,7 @@
     streamFrames = [];
     streamDone = null;
     streamProblem = null;
+    completedRequest = request;
     try {
       await streamPlayground(
         request,
@@ -296,17 +335,12 @@
     let request: PlaygroundRequest;
     try {
       if (composer === 'advanced') {
-        const raw: unknown = JSON.parse(rawJson);
-        if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
-          validationError = 'The request document must be a JSON object.';
-          return;
-        }
         request = {
           routing: JSON.parse(routing),
           model: model.trim(),
           surface,
           operation,
-          request: raw as Record<string, unknown>,
+          request: advancedRequest(),
           stream: streamEnabled ? true : undefined
         };
       } else {
@@ -577,12 +611,28 @@
         {validationError}
       </p>{/if}
     <details class="dry-run">
-      <summary>Explain routing without running</summary>
+      <summary>Inspect effective plan without running</summary>
       <p class="dry-run-help">
-        Ranks the attempts the published runtime would make for a generation on
-        this route, honouring circuit-breaker state, without sending a request
-        to any provider. Nothing is billed and no prompt is needed.
+        Shows current target eligibility and, in Advanced mode, the native
+        request the interaction planner would prepare. Basic mode checks target
+        eligibility only. No provider inference, job, or tool is started, and
+        nothing is billed.
       </p>
+      {#if composer === 'advanced'}
+        <div class="form-field">
+          <label for="playground-inspect-dialect">Native request dialect</label>
+          <select id="playground-inspect-dialect" bind:value={inspectDialect}>
+            <option value="">Default for operation and surface</option>
+            {#each inspectionDialects(operation, surface) as dialect (dialect)}
+              <option value={dialect}>{dialect}</option>
+            {/each}
+          </select>
+          <small
+            >The request JSON above must name this route when its native dialect
+            carries a model field.</small
+          >
+        </div>
+      {/if}
       <div class="route-grid">
         <div class="form-field">
           <label for="playground-simulate-key">Evaluate as API key</label
@@ -591,7 +641,7 @@
             bind:value={simulateKeyId}
             aria-describedby="simulate-key-help"
           >
-            <option value="">No key restriction</option>
+            <option value="">No API key authority</option>
             {#each apiKeys.data ?? [] as key (key.id)}
               {#if !key.revoked_at}<option value={key.id}>{key.name}</option
                 >{/if}
@@ -621,7 +671,7 @@
         type="button"
         disabled={simulation.isPending}
         onclick={explain}
-        >{simulation.isPending ? 'Explaining…' : 'Explain routing'}</button
+        >{simulation.isPending ? 'Inspecting…' : 'Inspect plan'}</button
       >
     </details>
     <div class="run-actions">
@@ -716,8 +766,12 @@
           </div>
         </div>{/if}
       {#if mutation.data.response !== undefined}<div class="output">
-          <h3>Operation result</h3>
-          <pre>{JSON.stringify(mutation.data.response, null, 2)}</pre>
+          <OperationResult
+            operation={completedRequest?.operation ?? 'generation'}
+            response={mutation.data.response}
+            responseRaw={mutation.data.response_raw}
+            request={completedRequest?.request}
+          />
         </div>{/if}
       {#if mutation.data.output_text}<div class="output">
           <h3>Text</h3>

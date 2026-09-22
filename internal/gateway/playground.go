@@ -335,9 +335,11 @@ func (p *Playground) response(x *execution, out *outcome, in playgroundRequest) 
 			"latency_ms":  p.Gateway.now().Sub(x.request.startedAt).Milliseconds(),
 			"routing":     routing,
 		}
-		var document any
-		if json.Unmarshal(c.Body, &document) == nil {
-			res["response"] = document
+		if json.Valid(c.Body) {
+			// Keep the operation-owned native result intact. Decoding to any
+			// rounds scores, vector values and large integer metadata to float64.
+			res["response"] = json.RawMessage(c.Body)
+			res["response_raw"] = string(c.Body)
 		}
 		if c.Usage != nil {
 			res["usage"] = c.Usage

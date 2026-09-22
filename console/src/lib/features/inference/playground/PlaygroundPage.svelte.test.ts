@@ -14,6 +14,8 @@ import {
   type PlaygroundResponse,
   type PlaygroundStreamHandlers
 } from './api';
+import { inspectRouting } from './inspection';
+import { stringifyNativeJSON } from '$lib/json/nativeJson';
 import PlaygroundProbe from './test/PlaygroundProbe.svelte';
 
 vi.mock('$lib/features/routes/api', async (original) => ({
@@ -30,6 +32,7 @@ vi.mock('./api', async (original) => ({
   runPlayground: vi.fn(),
   streamPlayground: vi.fn()
 }));
+vi.mock('./inspection', () => ({ inspectRouting: vi.fn() }));
 
 const SERVER_DELAY = 40;
 
@@ -242,6 +245,86 @@ describe('advanced composer', () => {
     flushSync();
     await settle(0);
     expect(host.textContent).toContain('Operation result');
+  });
+
+  it('inspects the exact native request without running inference or exposing prompt content', async () => {
+    vi.mocked(inspectRouting).mockResolvedValue([
+      {
+        ...eligibleDecision,
+        interaction: {
+          status: 'admitted',
+          fidelity: 'strict',
+          evidence: ['native-identity/1'],
+          class: 'native_identity',
+          operation: 'generation',
+          ingress_dialect: 'openai-chat',
+          egress_dialect: 'openai-chat',
+          return_dialect: 'openai-chat',
+          representation: 'oif',
+          effective_request: {
+            redacted_native_fields: 0,
+            omitted_turns: 0,
+            structure: [
+              {
+                scope: 'messages',
+                index: 0,
+                role: 'user',
+                parts: [{ kind: 'text' }],
+                omitted_parts: 0
+              }
+            ],
+            fields: [
+              {
+                field: '/seed',
+                kind: 'number',
+                origin: 'caller',
+                redacted: false,
+                value_json: '9007199254740993'
+              },
+              {
+                field: '/messages',
+                kind: 'array',
+                origin: 'caller',
+                redacted: true
+              }
+            ]
+          }
+        }
+      }
+    ]);
+    await establish();
+    const advanced = [
+      ...host.querySelectorAll<HTMLInputElement>('input[type="radio"]')
+    ].find((radio) => radio.value === 'advanced')!;
+    advanced.click();
+    flushSync();
+    fill('#playground-model', 'chat-route');
+    fill(
+      '#playground-raw',
+      '{"model":"chat-route","messages":[{"role":"user","content":"private-prompt-marker"}],"seed":9007199254740993}'
+    );
+    host.querySelector<HTMLDetailsElement>('details.dry-run')!.open = true;
+    [...host.querySelectorAll('button')]
+      .find((button) => button.textContent?.trim() === 'Inspect plan')!
+      .click();
+    flushSync();
+    await settle(0);
+    expect(runPlayground).not.toHaveBeenCalled();
+    expect(inspectRouting).toHaveBeenCalledOnce();
+    const request = vi.mocked(inspectRouting).mock.calls[0]![0].request;
+    expect(stringifyNativeJSON(request)).toContain('"seed":9007199254740993');
+    expect(
+      host.querySelector('[aria-label="Effective interaction plan"]')
+    ).not.toBeNull();
+    expect(host.textContent).toContain('native identity');
+    expect(host.textContent).not.toContain('private-prompt-marker');
+    const details = host.querySelector<HTMLDetailsElement>(
+      '[aria-label="Effective interaction plan"] details'
+    )!;
+    details.open = true;
+    flushSync();
+    expect(host.textContent).toContain('9007199254740993');
+    expect(host.textContent).toMatch(/messages\s+1 · user/);
   });
 });
 

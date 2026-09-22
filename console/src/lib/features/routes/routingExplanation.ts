@@ -24,6 +24,8 @@ export type ExplanationRow = {
   price: RoutingDecision['price'];
   performance: RoutingDecision['performance'];
   metadataObservedAt: string | null;
+  interaction: RoutingDecision['interaction'];
+  incompatibility: RoutingDecision['incompatibility'];
 };
 
 function decisionRow(
@@ -44,7 +46,9 @@ function decisionRow(
     credentialSlotId: decision.credential_slot_id ?? null,
     price: decision.price,
     performance: decision.performance,
-    metadataObservedAt: decision.metadata_observed_at ?? null
+    metadataObservedAt: decision.metadata_observed_at ?? null,
+    interaction: decision.interaction,
+    incompatibility: decision.incompatibility
   };
 }
 
@@ -97,7 +101,9 @@ export function simulationRows(targets: SimulationTarget[]): ExplanationRow[] {
       credentialSlotId: null,
       price: null,
       performance: null,
-      metadataObservedAt: null
+      metadataObservedAt: null,
+      interaction: undefined,
+      incompatibility: undefined
     };
   });
 }

@@ -11,8 +11,8 @@
   >
     <div class="section-heading">
       <div>
-        <p class="eyebrow">Deterministic dry run</p>
-        <h2 id="simulation-heading">Attempt explanation</h2>
+        <p class="eyebrow">Plan only · no provider request</p>
+        <h2 id="simulation-heading">Effective interaction and attempt order</h2>
       </div>
       <code
         >{editor.simulation.operation} · {editor.simulation.surface} · {editor

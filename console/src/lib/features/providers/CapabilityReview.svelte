@@ -10,7 +10,8 @@
     MAX_REVIEWED_CAPABILITIES
   } from '$lib/features/providers/providerEditor';
   import ConflictNotice from '$lib/components/ConflictNotice.svelte';
-  import { formatDate, stateLabel } from '$lib/format';
+  import { stateLabel } from '$lib/format';
+  import CapabilityEvidence from './CapabilityEvidence.svelte';
   import {
     beginReload,
     conflictNotice,
@@ -277,21 +278,7 @@
       </div>
     {/each}
   </div>
-  {#if model.capabilities.length}
-    <div class="evidence" aria-label="Stored capability evidence">
-      {#each model.capabilities as capability (`${capability.operation}-${capability.surface}-${capability.mode}`)}
-        <span class:certified={capability.source === 'certified'}
-          ><code
-            >{capability.operation}/{capability.surface}/{capability.mode}</code
-          >
-          · {capability.source}{#if capability.certified_at}
-            · <time datetime={capability.certified_at}
-              >{formatDate(capability.certified_at)}</time
-            >{/if}</span
-        >
-      {/each}
-    </div>
-  {/if}
+  <CapabilityEvidence {model} />
   {#if failedCertifications.length}
     <ul class="certification-results" aria-label="Failed certification tuples">
       {#each failedCertifications as item (`${item.operation}-${item.surface}-${item.mode}`)}<li
@@ -350,25 +337,6 @@
     border: 1px solid var(--danger);
     background: var(--danger-soft);
     color: var(--danger);
-  }
-  .evidence {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.35rem;
-  }
-  .evidence span {
-    padding: 0.3rem 0.45rem;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-control);
-    color: var(--warning);
-    font-family: var(--font-mono);
-    font-size: var(--text-caption);
-    font-weight: 400;
-    letter-spacing: -0.02em;
-    text-transform: uppercase;
-  }
-  .evidence span.certified {
-    color: var(--success);
   }
   .certification-results {
     margin: 0;
