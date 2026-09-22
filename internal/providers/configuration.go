@@ -8,6 +8,8 @@ import (
 	"net/textproto"
 	"strings"
 
+	"github.com/google/uuid"
+
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/egress"
@@ -24,6 +26,7 @@ type Limits struct {
 
 // Options carries connector options and per-model metadata.
 type Options struct {
+	Network           *egress.ConnectionOptions        `json:"network,omitempty"`
 	SemanticHeaders   map[string]string                `json:"semantic_headers,omitempty"`
 	QuerySettings     map[string]string                `json:"query_settings,omitempty"`
 	OperationDefaults map[string]connectors.DefaultSet `json:"operation_defaults,omitempty"`
@@ -38,6 +41,7 @@ type Options struct {
 // Configuration is the stored connection configuration; it is the contract's
 // ProviderConfiguration verbatim.
 type Configuration struct {
+	ProviderID      string   `json:"-"`
 	ProfileID       string   `json:"profile_id,omitempty"`
 	ProfileRevision string   `json:"profile_revision,omitempty"`
 	ProbeModels     []string `json:"-"`
@@ -89,6 +93,12 @@ func (c *Configuration) Validate(policy *egress.Policy) error {
 	options, err := json.Marshal(c.Options)
 	if err != nil || len(options) > 1<<20 {
 		return access.Invalid("configuration.options", "Connection options must fit within 1 MiB")
+	}
+	if c.Options.Network != nil && c.Options.Network.CredentialID != "" {
+		id, err := uuid.Parse(c.Options.Network.CredentialID)
+		if err != nil || id.String() != c.Options.Network.CredentialID {
+			return access.Invalid("configuration.options.network.credential_id", "Use a canonical network credential UUID.")
+		}
 	}
 	kind := kindByName(c.Kind)
 	if kind == nil {
@@ -197,6 +207,9 @@ func (c *Configuration) transportFingerprint() string {
 	if c.ProfileID != "" {
 		parts = append(parts, c.ProfileID, c.ProfileRevision, c.Options.SemanticHeaders, c.Options.QuerySettings, c.Options.OperationDefaults, c.Options.Bindings)
 	}
+	if c.Options.Network != nil {
+		parts = append(parts, c.Options.Network)
+	}
 	encoded, _ := json.Marshal(parts)
 	h.Write(encoded)
 	return hex.EncodeToString(h.Sum(nil))[:32]
@@ -220,7 +233,7 @@ func value(v *string) string {
 	return *v
 }
 func (c *Configuration) transport() connectors.Config {
-	return connectors.Config{ProfileID: c.ProfileID, ProfileRevision: c.ProfileRevision, SemanticHeaders: c.Options.SemanticHeaders, QuerySettings: c.Options.QuerySettings, OperationDefaults: c.Options.OperationDefaults, Bindings: c.Options.Bindings, Kind: c.Kind, AuthMode: c.AuthMode, Endpoint: value(c.Endpoint), CloudRegion: value(c.CloudRegion), CloudProject: value(c.CloudProject), Deployment: value(c.Deployment), APIVersion: value(c.APIVersion), VendorID: value(c.Options.VendorID), CredentialHeaders: c.Options.CredentialHeaders, Models: c.Options.Models}
+	return connectors.Config{Network: c.Options.Network, ProfileID: c.ProfileID, ProfileRevision: c.ProfileRevision, SemanticHeaders: c.Options.SemanticHeaders, QuerySettings: c.Options.QuerySettings, OperationDefaults: c.Options.OperationDefaults, Bindings: c.Options.Bindings, Kind: c.Kind, AuthMode: c.AuthMode, Endpoint: value(c.Endpoint), CloudRegion: value(c.CloudRegion), CloudProject: value(c.CloudProject), Deployment: value(c.Deployment), APIVersion: value(c.APIVersion), VendorID: value(c.Options.VendorID), CredentialHeaders: c.Options.CredentialHeaders, Models: c.Options.Models}
 }
 func reservedHeader(h string) bool {
 	h = strings.ToLower(h)

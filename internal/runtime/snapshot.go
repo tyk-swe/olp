@@ -16,6 +16,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/contentpolicy"
+	"github.com/tyk-swe/olp/internal/egress"
 )
 
 // RouteSlug is the published-route identifier carried in model fields.
@@ -75,6 +76,7 @@ type Limits struct {
 
 // Provider is the serving view of one active provider revision.
 type Provider struct {
+	Network           *egress.ConnectionOptions        `json:"network,omitempty"`
 	ProfileID         string                           `json:"profile_id,omitempty"`
 	ProfileRevision   string                           `json:"profile_revision,omitempty"`
 	SemanticHeaders   map[string]string                `json:"semantic_headers,omitempty"`
@@ -182,6 +184,12 @@ func (s *Snapshot) Validate() error {
 		if id != p.ID || !validUUID(p.ID) || p.RevisionID == "" || p.Name == "" || p.Kind == "" {
 			return fmt.Errorf("provider %q is malformed", id)
 		}
+		if err := p.Connector().ValidateProfile(); err != nil {
+			return fmt.Errorf("provider %q profile: %w", id, err)
+		}
+		if p.Network != nil && p.Network.CredentialID != "" && !validUUID(p.Network.CredentialID) {
+			return fmt.Errorf("provider %q network credential reference is malformed", id)
+		}
 		if p.ActiveCredential != nil && !validUUID(*p.ActiveCredential) {
 			return fmt.Errorf("provider %q credential reference is malformed", id)
 		}
@@ -227,5 +235,5 @@ func (p *Provider) Connector() connectors.Config {
 	if mode == "" {
 		mode = "api_key"
 	}
-	return connectors.Config{ProfileID: p.ProfileID, ProfileRevision: p.ProfileRevision, SemanticHeaders: p.SemanticHeaders, QuerySettings: p.QuerySettings, OperationDefaults: p.OperationDefaults, Bindings: p.Bindings, Kind: p.Kind, AuthMode: mode, Endpoint: p.Endpoint, CloudRegion: p.CloudRegion, CloudProject: p.CloudProject, Deployment: p.Deployment, APIVersion: p.APIVersion, VendorID: p.VendorID, CredentialHeaders: p.CredentialHeaders, Models: p.Models}
+	return connectors.Config{Network: p.Network, ProfileID: p.ProfileID, ProfileRevision: p.ProfileRevision, SemanticHeaders: p.SemanticHeaders, QuerySettings: p.QuerySettings, OperationDefaults: p.OperationDefaults, Bindings: p.Bindings, Kind: p.Kind, AuthMode: mode, Endpoint: p.Endpoint, CloudRegion: p.CloudRegion, CloudProject: p.CloudProject, Deployment: p.Deployment, APIVersion: p.APIVersion, VendorID: p.VendorID, CredentialHeaders: p.CredentialHeaders, Models: p.Models}
 }

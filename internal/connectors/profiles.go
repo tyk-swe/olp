@@ -1,14 +1,17 @@
 package connectors
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"net/http"
 	"net/textproto"
 	"net/url"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/tyk-swe/olp/internal/protocols/openai"
@@ -18,22 +21,26 @@ import (
 // Revision is OLP's immutable composition revision, not a provider model revision.
 // Omitted profiles retain legacy configuration and published snapshot semantics.
 type Profile struct {
-	ID              string   `json:"id"`
-	Revision        string   `json:"revision"`
-	Label           string   `json:"label"`
-	Kind            string   `json:"kind"`
-	Dialect         string   `json:"dialect"`
-	DialectRevision string   `json:"dialect_revision"`
-	Hosting         string   `json:"hosting"`
-	Authentication  []string `json:"authentication"`
-	Transport       string   `json:"transport"`
-	Operations      []string `json:"operations"`
-	SemanticHeaders []string `json:"semantic_headers"`
-	QuerySettings   []string `json:"query_settings"`
-	Documentation   string   `json:"documentation"`
+	OperationDialects map[string]string          `json:"operation_dialects"`
+	DefaultSchemas    map[string]json.RawMessage `json:"default_schemas"`
+	ID                string                     `json:"id"`
+	Revision          string                     `json:"revision"`
+	Label             string                     `json:"label"`
+	Kind              string                     `json:"kind"`
+	Dialect           string                     `json:"dialect"`
+	DialectRevision   string                     `json:"dialect_revision"`
+	Hosting           string                     `json:"hosting"`
+	Authentication    []string                   `json:"authentication"`
+	Transport         string                     `json:"transport"`
+	Operations        []string                   `json:"operations"`
+	SemanticHeaders   []string                   `json:"semantic_headers"`
+	QuerySettings     []string                   `json:"query_settings"`
+	Documentation     string                     `json:"documentation"`
 }
 
 const ProfileRevision = "1"
+
+var profileMu sync.RWMutex
 
 var profileRegistry = []Profile{
 	{ID: "openai-chat", Label: "OpenAI Chat Completions", Kind: "openai", Dialect: "openai-chat", Hosting: "direct-openai"},
@@ -68,6 +75,9 @@ func init() {
 			p.Operations = []string{"generation", "token_count", "embeddings", "moderation", "image_generation", "image_edit", "image_variation", "speech", "transcription", "video_create", "video_list", "video_get", "video_content", "video_delete"}
 			p.SemanticHeaders = []string{"Openai-Beta"}
 			p.Documentation = "https://developers.openai.com/api/docs/guides/migrate-to-responses"
+			if p.Kind == "openai_compatible" {
+				p.Operations = append(p.Operations, "rerank")
+			}
 			if p.Kind != "openai_compatible" {
 				p.Operations = append(p.Operations, "batch", "realtime")
 			}
@@ -106,12 +116,15 @@ func init() {
 				p.Documentation = "https://docs.aws.amazon.com/bedrock/latest/APIReference/API_runtime_InvokeModel.html"
 			}
 		}
+		completeProfileMetadata(p)
 	}
 }
 
 // Profiles returns detached catalogue metadata; registering a new hosting profile
 // using these components does not require a generation-kernel provider switch.
 func Profiles() []Profile {
+	profileMu.RLock()
+	defer profileMu.RUnlock()
 	out := make([]Profile, len(profileRegistry))
 	for i, p := range profileRegistry {
 		out[i] = cloneProfile(p)
@@ -120,6 +133,12 @@ func Profiles() []Profile {
 }
 
 func cloneProfile(p Profile) Profile {
+	p.OperationDialects = maps.Clone(p.OperationDialects)
+	schemas := make(map[string]json.RawMessage, len(p.DefaultSchemas))
+	for name, schema := range p.DefaultSchemas {
+		schemas[name] = bytes.Clone(schema)
+	}
+	p.DefaultSchemas = schemas
 	p.Authentication = slices.Clone(p.Authentication)
 	p.Operations = slices.Clone(p.Operations)
 	p.SemanticHeaders = slices.Clone(p.SemanticHeaders)
@@ -128,6 +147,8 @@ func cloneProfile(p Profile) Profile {
 }
 
 func LookupProfile(id, revision string) (Profile, error) {
+	profileMu.RLock()
+	defer profileMu.RUnlock()
 	for _, p := range profileRegistry {
 		if p.ID == id && p.Revision == revision {
 			return cloneProfile(p), nil
@@ -248,6 +269,8 @@ func (c Config) TargetFamily(source openai.Family) (openai.Family, error) {
 		}
 	case "moderation":
 		return openai.FamilyModeration, nil
+	case "rerank":
+		return openai.FamilyRerank, nil
 	}
 	return "", errors.New("operation has no codec in the selected profile")
 }
@@ -365,4 +388,97 @@ func (c Config) WrapBody(body []byte, wire openai.Family) ([]byte, error) {
 		delete(fields, "stream")
 	}
 	return json.Marshal(fields)
+}
+
+// OperationDialect names the operation schema instead of making non-generation
+// defaults inherit a generation-shaped intermediate representation.
+func (p Profile) OperationDialect(operation string) string {
+	if operation == "generation" {
+		return p.Dialect
+	}
+	switch operation {
+	case "embeddings":
+		switch p.Hosting {
+		case "direct-gemini":
+			return "gemini-embeddings"
+		case "vertex-google":
+			return "vertex-predict-embeddings"
+		case "bedrock-converse":
+			return "bedrock-invoke-embeddings"
+		}
+		return "openai-embeddings"
+	case "token_count":
+		return p.Dialect + "-token-count"
+	case "rerank":
+		return "native-rerank"
+	case "bedrock_invoke":
+		return "bedrock-invoke"
+	}
+	return p.Hosting + "/" + operation
+}
+
+func completeProfileMetadata(p *Profile) {
+	p.OperationDialects = map[string]string{}
+	p.DefaultSchemas = map[string]json.RawMessage{}
+	for _, operation := range p.Operations {
+		dialect := p.OperationDialect(operation)
+		p.OperationDialects[operation] = dialect
+		fields := map[string]any{}
+		for _, name := range defaultFields(dialect, operation) {
+			fields[name] = map[string]any{"title": name}
+		}
+		p.DefaultSchemas[operation], _ = json.Marshal(map[string]any{"type": "object", "additionalProperties": false, "required": []string{"dialect"}, "properties": map[string]any{
+			"dialect": map[string]any{"const": dialect}, "values": map[string]any{"type": "object", "additionalProperties": false, "properties": fields}, "native_options": map[string]any{"type": "object", "description": "Operation payload extensions; routing, credentials and resource references are reserved."},
+		}})
+	}
+}
+
+// RegisterProfile extends an existing trusted component composition at startup.
+// A new provider using an existing dialect needs a profile, bindings and fixtures,
+// not a provider case in the operation kernel. This is not a runtime plugin API.
+func RegisterProfile(p Profile) error {
+	if p.ID == "" || len(p.ID) > 128 || p.Revision == "" || p.Label == "" {
+		return errors.New("profile identity, revision and label are required")
+	}
+	profileMu.Lock()
+	defer profileMu.Unlock()
+	var template *Profile
+	for i := range profileRegistry {
+		existing := &profileRegistry[i]
+		if existing.ID == p.ID && existing.Revision == p.Revision {
+			return errors.New("profile revision already registered")
+		}
+		if existing.Kind == p.Kind && existing.Dialect == p.Dialect && existing.Hosting == p.Hosting && existing.DialectRevision == p.DialectRevision {
+			template = existing
+		}
+	}
+	if template == nil || len(profileRegistry) >= 4096 {
+		return errors.New("profile components do not form an existing qualified composition")
+	}
+	for _, auth := range p.Authentication {
+		if !slices.Contains(template.Authentication, auth) {
+			return errors.New("profile authentication is incompatible")
+		}
+	}
+	for _, operation := range p.Operations {
+		if !slices.Contains(template.Operations, operation) {
+			return errors.New("profile operation is incompatible")
+		}
+	}
+	for _, header := range p.SemanticHeaders {
+		if !slices.Contains(template.SemanticHeaders, header) {
+			return errors.New("profile semantic header is incompatible")
+		}
+	}
+	for _, query := range p.QuerySettings {
+		if !slices.Contains(template.QuerySettings, query) {
+			return errors.New("profile query setting is incompatible")
+		}
+	}
+	if p.Transport != template.Transport || len(p.Authentication) == 0 || len(p.Operations) == 0 {
+		return errors.New("profile transport and capabilities are required")
+	}
+	completeProfileMetadata(&p)
+	profileRegistry = append(profileRegistry, cloneProfile(p))
+	return nil
 }

@@ -286,7 +286,7 @@ func (s *Server) prepareMedia(x *execution, authority access.Authority) *Error {
 // connectorsSupports mirrors the connector capability check against the
 // matrix in connectors.
 func connectorsSupports(p runtime.Provider, op, mode string) bool {
-	return connectors.Supports(p.Kind, p.VendorID, op, "openai", mode)
+	return p.Connector().Supports(op,"openai",mode)
 }
 
 func videoLifecycleRoute(operations []string) bool {
@@ -444,7 +444,11 @@ func (s *Server) mediaAttempt(ctx context.Context, w http.ResponseWriter, x *exe
 		call.Inject = http.Header{}
 		atr.InjectUpstream(call.Inject, true)
 	}
-	target := media.Target{Config: cfg, Model: cfg.Model(a.UpstreamModel), Secret: secret}
+	networkSecret, err := s.providerNetworkSecret(actx, x.request.release, provider)
+	if err != nil {
+		return fail(classCredential, nil)
+	}
+	target := media.Target{Config: cfg, Model: cfg.Model(a.UpstreamModel), Secret: secret, NetworkSecret: networkSecret, ConnectionScope: providerConnectionScope(provider, slot)}
 	result, failure := s.Media.Jobs.Transport.Do(actx, target, call, x.media)
 	if failure != nil {
 		fact.Status = failure.Status

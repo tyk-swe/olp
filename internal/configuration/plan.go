@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/providers"
 	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/internal/usage"
@@ -78,12 +79,13 @@ type existingSlot struct {
 }
 
 type existingProvider struct {
-	ID        string
-	Name      string
-	Kind      string
-	State     string
-	ProjectID *string
-	Slots     map[string]existingSlot
+	NetworkCredentialID *string
+	ID                  string
+	Name                string
+	Kind                string
+	State               string
+	ProjectID           *string
+	Slots               map[string]existingSlot
 }
 
 type existingRoute struct {
@@ -137,14 +139,14 @@ func loadState(ctx context.Context, q access.Queryer) (*stateView, error) {
 	if err = rows.Err(); err != nil {
 		return nil, err
 	}
-	providers, err := q.Query(ctx, "SELECT id::text,name,kind,state,project_id::text FROM olp_go.providers")
+	providers, err := q.Query(ctx, "SELECT p.id::text,p.name,p.kind,p.state,p.project_id::text,(SELECT c.id::text FROM olp_go.provider_network_credentials c WHERE c.id::text=p.configuration#>>'{options,network,credential_id}' AND c.provider_id=p.id AND c.revoked_at IS NULL) FROM olp_go.providers p")
 	if err != nil {
 		return nil, err
 	}
 	defer providers.Close()
 	for providers.Next() {
 		var p existingProvider
-		if err = providers.Scan(&p.ID, &p.Name, &p.Kind, &p.State, &p.ProjectID); err != nil {
+		if err = providers.Scan(&p.ID, &p.Name, &p.Kind, &p.State, &p.ProjectID, &p.NetworkCredentialID); err != nil {
 			return nil, err
 		}
 		p.Slots = map[string]existingSlot{}
@@ -227,6 +229,7 @@ func normalizeDocument(doc *Document) {
 			m.UpstreamModel = strings.TrimSpace(m.UpstreamModel)
 			m.DisplayName = strings.TrimSpace(m.DisplayName)
 		}
+
 		for j := range p.Slots {
 			slot := &p.Slots[j]
 			slot.Name = strings.TrimSpace(slot.Name)
@@ -300,6 +303,12 @@ func (s *Server) validateDocument(doc *Document) error {
 			}
 		}
 		p.Configuration.Normalize()
+		if p.Configuration.Options.Network != nil && p.Configuration.Options.Network.CredentialID != "" {
+			return access.Invalid(prefix+".configuration.options.network.credential_id", "Configuration artifacts use network_credential_ref instead of environment-specific credential IDs.")
+		}
+		if p.NetworkCredentialRef != nil && (p.Configuration.Options.Network == nil || *p.NetworkCredentialRef != networkRef(p.Name) || len(*p.NetworkCredentialRef) > maxCredentialRef) {
+			return access.Invalid(prefix+".network_credential_ref", "Use the provider name followed by /network and configure network options.")
+		}
 		if err := p.Configuration.Validate(s.Egress); err != nil {
 			return err
 		}
@@ -479,6 +488,13 @@ func validateBindings(doc *Document, bindings map[string]string) error {
 		}
 	}
 	for name, secret := range bindings {
+		for _, provider := range doc.Providers {
+			if provider.NetworkCredentialRef != nil && *provider.NetworkCredentialRef == name {
+				if err := egress.ValidateConnectionSecret([]byte(secret)); err != nil {
+					return access.Invalid("secret_bindings."+name, err.Error())
+				}
+			}
+		}
 		if !refs[name] {
 			return access.Invalid("secret_bindings", "Secret binding "+name+" is not referenced by the document.")
 		}
@@ -563,6 +579,16 @@ func (s *Server) plan(ctx context.Context, q access.Queryer, doc *Document, bind
 				result.item("provider", p.Name, "noop", "")
 			} else {
 				result.item("provider", p.Name, "replace", "draft")
+			}
+		}
+		if p.NetworkCredentialRef != nil {
+			ref := *p.NetworkCredentialRef
+			if _, supplied := bindings[ref]; supplied {
+				result.item("network_credential", ref, "bind", "")
+			} else if ok && existing.NetworkCredentialID != nil {
+				result.item("network_credential", ref, "reuse", "")
+			} else {
+				result.blocker("network_credential", ref, "secret_binding_required")
 			}
 		}
 		for j := range p.Slots {
@@ -740,6 +766,7 @@ func (s *Server) currentProviderEntry(ctx context.Context, q access.Queryer, p *
 	}
 	entry.Models = models
 	entry.Slots = slots
+	portableNetwork(entry)
 	return entry, nil
 }
 

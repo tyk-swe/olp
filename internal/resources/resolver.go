@@ -60,6 +60,10 @@ func (r *Resolver) Resolve(ctx context.Context, tx pgx.Tx, res *Resource, operat
 	if err != nil {
 		return nil, nil, nil, nil, fmt.Errorf("provider %s revision: %w", providerID, err)
 	}
+	provider.Network = cfg.Options.Network
+	provider.ProfileID, provider.ProfileRevision = cfg.ProfileID, cfg.ProfileRevision
+	provider.SemanticHeaders, provider.QuerySettings = cfg.Options.SemanticHeaders, cfg.Options.QuerySettings
+	provider.OperationDefaults, provider.Bindings = cfg.Options.OperationDefaults, cfg.Options.Bindings
 	provider.Kind = cfg.Kind
 	provider.AuthMode = cfg.AuthMode
 	provider.Endpoint = cfg.Endpoint
@@ -148,4 +152,19 @@ func (r *Resolver) Resolve(ctx context.Context, tx pgx.Tx, res *Resource, operat
 		}
 	}
 	return provider, route, slot, secret, nil
+}
+
+// NetworkCredential resolves a retained provider revision's network identity
+// under current ownership and revocation; retained revisions are not authority.
+func (r *Resolver) NetworkCredential(ctx context.Context, providerID, credentialID string) ([]byte, error) {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback(ctx)
+	var valid bool
+	if err := tx.QueryRow(ctx, "SELECT revoked_at IS NULL FROM olp_go.provider_network_credentials WHERE id=$1 AND provider_id=$2", credentialID, providerID).Scan(&valid); err != nil || !valid {
+		return nil, ErrUnavailable
+	}
+	return r.keys.Read(ctx, tx, r.installation, credentialID, "provider_credential")
 }

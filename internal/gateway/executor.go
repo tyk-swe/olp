@@ -20,6 +20,7 @@ import (
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/media"
 	"github.com/tyk-swe/olp/internal/protocols"
+"github.com/tyk-swe/olp/internal/providerinvoke"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/runtime"
@@ -419,7 +420,7 @@ func (s *Server) attempt(ctx context.Context, x *execution, a runtime.Attempt, p
 		return fail(classConnect, nil)
 	}
 	cfg := provider.Connector()
-	body, wire, err := protocols.Encode(x.parsed, provider.Kind, provider.VendorID, cfg.Model(a.UpstreamModel), provider.ParameterDefaults)
+	body, wire, err := providerinvoke.Encode(x.parsed,cfg,a.UpstreamModel,provider.ParameterDefaults)
 	if err != nil {
 		return fail(classProtocol, nil)
 	}
@@ -449,7 +450,7 @@ func (s *Server) attempt(ctx context.Context, x *execution, a runtime.Attempt, p
 	req.Header.Set("Accept", "application/json")
 	if x.parsed.Stream {
 		req.Header.Set("Accept", "text/event-stream")
-		if wire == "bedrock" {
+		if wire == "bedrock" || cfg.EventStream() {
 			req.Header.Set("Accept", "application/vnd.amazon.eventstream")
 		}
 	}
@@ -468,7 +469,11 @@ func (s *Server) attempt(ctx context.Context, x *execution, a runtime.Attempt, p
 		return fail(classCredential, nil)
 	}
 
-	resp, err := s.client.Do(req)
+	client, err := s.providerClient(actx, x.request.release, provider, slot)
+	if err != nil {
+		return fail(classCredential, nil)
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		return fail(st.classify(err, false), nil)
 	}
@@ -501,7 +506,7 @@ func (s *Server) attempt(ctx context.Context, x *execution, a runtime.Attempt, p
 	committed := false
 	if x.parsed.Stream {
 		mediaType, _, _ := mime.ParseMediaType(resp.Header.Get("Content-Type"))
-		if mediaType != "text/event-stream" && !(wire == "bedrock" && mediaType == "application/vnd.amazon.eventstream") {
+		if mediaType != "text/event-stream" && !((wire == "bedrock" || cfg.EventStream()) && mediaType == "application/vnd.amazon.eventstream") {
 			return fail(classProtocol, &attemptFailure{status: resp.StatusCode})
 		}
 		streamCap := time.AfterFunc(maxStreamDuration, func() { st.reason.CompareAndSwap(0, 3); cancel() })
@@ -537,7 +542,7 @@ func (s *Server) attempt(ctx context.Context, x *execution, a runtime.Attempt, p
 			}
 			return err
 		}
-		completion, err = protocols.Stream(wire, x.family, resp.Body, int(s.cfg.MaxEventBytes), x.route.Slug, x.parsed.IncludeUsage, emit)
+		completion, err = protocols.Stream(wire, x.family, cfg.StreamPayload(resp.Body,int(s.cfg.MaxEventBytes)), int(s.cfg.MaxEventBytes), x.route.Slug, x.parsed.IncludeUsage, emit)
 	} else {
 		limited := &countingReader{r: resp.Body, limit: s.cfg.MaxResponseBytes}
 		raw, readErr := io.ReadAll(limited)

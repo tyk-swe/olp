@@ -44,9 +44,10 @@ func registerManagement(mux *http.ServeMux, control *access.Server, policy *egre
 	// its catch-all, which answers everything no surface claims.
 	(&usage.Server{Access: control, VendorKind: providers.VendorKind, Egress: policy}).Register(mux)
 	(&configuration.Server{
-		Access:     control,
-		Egress:     policy,
-		VendorKind: providers.VendorKind,
+		Access:                 control,
+		Egress:                 policy,
+		VendorKind:             providers.VendorKind,
+		StoreNetworkCredential: catalogue.StoreNetworkCredential,
 		StoreCredential: func(ctx context.Context, tx pgx.Tx, providerID, secret string) (string, error) {
 			id, _, err := catalogue.StoreCredential(ctx, tx, providerID, secret)
 			return id, err

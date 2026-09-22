@@ -79,6 +79,7 @@ func (s *Server) exportDocument(ctx context.Context, q access.Queryer) (*Documen
 				}
 				entry.Slots = append(entry.Slots, slot)
 			}
+			portableNetwork(&entry)
 			doc.Providers = append(doc.Providers, entry)
 			continue
 		}
@@ -105,6 +106,7 @@ func (s *Server) exportDocument(ctx context.Context, q access.Queryer) (*Documen
 			return nil, err
 		}
 		pp.entry.Slots = slots
+		portableNetwork(pp.entry)
 		doc.Providers = append(doc.Providers, *pp.entry)
 	}
 	routes, err := q.Query(ctx, `SELECT r.slug,pr.name,r.state='retired',v.operations,v.overall_timeout_ms,v.max_attempts,v.targets,v.routing_policy,v.content_policy

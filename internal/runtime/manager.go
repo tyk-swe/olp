@@ -212,7 +212,7 @@ func (m *Manager) refreshAuthority(ctx context.Context) error {
 	if err = rows.Err(); err != nil {
 		return fmt.Errorf("authority: %w", err)
 	}
-	rows, err = tx.Query(ctx, "SELECT id::text FROM olp_go.provider_credentials WHERE revoked_at IS NOT NULL")
+	rows, err = tx.Query(ctx, "SELECT id::text FROM olp_go.provider_credentials WHERE revoked_at IS NOT NULL UNION SELECT id::text FROM olp_go.provider_network_credentials WHERE revoked_at IS NOT NULL")
 	if err != nil {
 		return fmt.Errorf("authority: %w", err)
 	}
@@ -312,6 +312,18 @@ func (m *Manager) install(ctx context.Context, id string, sequence int64, digest
 	}
 	defer tx.Rollback(ctx)
 	for _, provider := range snapshot.Providers {
+		if provider.Network != nil && provider.Network.CredentialID != "" {
+			id := provider.Network.CredentialID
+			var owner string
+			if err := tx.QueryRow(ctx, "SELECT provider_id::text FROM olp_go.provider_network_credentials WHERE id=$1", id).Scan(&owner); err != nil || owner != provider.ID {
+				return nil, fmt.Errorf("provider %s network credential unavailable", provider.ID)
+			}
+			secret, err := m.keys.Read(ctx, tx, m.installation, id, "provider_credential")
+			if err != nil {
+				return nil, fmt.Errorf("provider %s network credential unavailable", provider.ID)
+			}
+			release.credentials[id] = secret
+		}
 		for _, slot := range provider.Slots {
 			if slot.CredentialID == nil {
 				continue

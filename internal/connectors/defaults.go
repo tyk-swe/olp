@@ -83,7 +83,7 @@ func reservedOption(name string) bool {
 }
 
 func validateDefaultSet(p Profile, operation string, defaults DefaultSet) error {
-	if !slices.Contains(p.Operations, operation) || defaults.Dialect != p.Dialect {
+	if !slices.Contains(p.Operations, operation) || defaults.Dialect != p.OperationDialect(operation) {
 		return errors.New("defaults must name an operation and dialect owned by the selected profile")
 	}
 	if len(defaults.Values)+len(defaults.NativeOptions) > 64 {
@@ -223,7 +223,7 @@ func (c Config) DefaultsFor(operation, model string) (map[string]json.RawMessage
 	provenance := make([]DefaultProvenance, 0, len(names))
 	for _, name := range names {
 		pointer := "/" + strings.ReplaceAll(strings.ReplaceAll(name, "~", "~0"), "/", "~1")
-		provenance = append(provenance, DefaultProvenance{Pointer: pointer, Source: origins[name], Dialect: p.Dialect})
+		provenance = append(provenance, DefaultProvenance{Pointer: pointer, Source: origins[name], Dialect: p.OperationDialect(operation)})
 	}
 	return out, provenance, nil
 }

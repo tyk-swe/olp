@@ -145,6 +145,9 @@ func (s *Server) Register(mux *http.ServeMux) {
 	// another management budget for preparation, queueing, and persistence.
 	certifyTimeout := time.Duration(len(CapabilityOptions)+1) * probeTimeout
 	mux.HandleFunc("POST /api/v3/providers/{provider_id}/models/{model_id}/certify", s.Access.HandleTimeout(65536, certifyTimeout, s.certify))
+	mux.HandleFunc("GET /api/v3/providers/{provider_id}/network-credentials", h(s.networkCredentials))
+	mux.HandleFunc("POST /api/v3/providers/{provider_id}/network-credentials", s.Access.HandleWith(256<<10, s.createNetworkCredential))
+	mux.HandleFunc("POST /api/v3/providers/{provider_id}/network-credentials/{credential_id}/revoke", h(s.revokeNetworkCredential))
 	mux.HandleFunc("GET /api/v3/providers/{provider_id}/credentials", h(s.credentials))
 	mux.HandleFunc("POST /api/v3/providers/{provider_id}/credentials", s.Access.HandleTimeout(65536, certifyTimeout, s.rotate))
 	mux.HandleFunc("POST /api/v3/providers/{provider_id}/credentials/{credential_id}/revoke", h(s.revoke))

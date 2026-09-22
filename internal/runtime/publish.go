@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/tyk-swe/olp/internal/connectors"
+	"github.com/tyk-swe/olp/internal/egress"
 )
 
 // RevisionModel is the published shape of one enabled model inside a provider
@@ -48,6 +49,7 @@ type Configuration struct {
 	Deployment      string `json:"deployment"`
 	APIVersion      string `json:"api_version"`
 	Options         struct {
+		Network           *egress.ConnectionOptions        `json:"network,omitempty"`
 		SemanticHeaders   map[string]string                `json:"semantic_headers,omitempty"`
 		QuerySettings     map[string]string                `json:"query_settings,omitempty"`
 		OperationDefaults map[string]connectors.DefaultSet `json:"operation_defaults,omitempty"`
@@ -130,6 +132,7 @@ func Compile(ctx context.Context, tx pgx.Tx) (*Snapshot, error) {
 			return nil, fmt.Errorf("provider %s revision: %w", provider.ID, err)
 		}
 		provider.Enabled = state == "active"
+		provider.Network = cfg.Options.Network
 		provider.ProfileID, provider.ProfileRevision = cfg.ProfileID, cfg.ProfileRevision
 		provider.SemanticHeaders, provider.QuerySettings = cfg.Options.SemanticHeaders, cfg.Options.QuerySettings
 		provider.OperationDefaults, provider.Bindings = cfg.Options.OperationDefaults, cfg.Options.Bindings

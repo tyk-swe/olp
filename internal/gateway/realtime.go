@@ -190,29 +190,10 @@ func bearerToken(r *http.Request) string {
 	return strings.TrimSpace(header[7:])
 }
 
-func realtimeURL(p *pin) (string, *Error) {
-	cfg := p.provider.Connector()
-	base := strings.TrimRight(cfg.Endpoint, "/")
-	switch {
-	case strings.HasPrefix(base, "https://"):
-		base = "wss://" + strings.TrimPrefix(base, "https://")
-	case strings.HasPrefix(base, "http://"):
-		base = "ws://" + strings.TrimPrefix(base, "http://")
-	default:
-		return "", serverError(http.StatusBadGateway, "upstream_error", "The provider endpoint cannot serve realtime sessions.")
-	}
-	query := url.Values{}
-	if cfg.Kind == "azure_openai" {
-		deployment := cfg.Model(p.model)
-		if deployment == "" {
-			return "", serverError(http.StatusBadGateway, "upstream_error", "The model has no configured Azure deployment.")
-		}
-		query.Set("api-version", cfg.APIVersion)
-		query.Set("deployment", deployment)
-		return base + "/openai/realtime?" + query.Encode(), nil
-	}
-	query.Set("model", cfg.Model(p.model))
-	return base + "/realtime?" + query.Encode(), nil
+func realtimeURL(p *pin) (string,*Error){
+ endpoint,err:=p.provider.Connector().RealtimeURL(p.model)
+ if err!=nil{return "",serverError(http.StatusBadGateway,"upstream_error","The provider profile cannot address this realtime model.")}
+ return endpoint,nil
 }
 
 func realtimeDial(ctx context.Context, s *Server, x *execution, p *pin, endpoint string) (*websocket.Conn, *Error) {
@@ -240,7 +221,11 @@ func realtimeDial(ctx context.Context, s *Server, x *execution, p *pin, endpoint
 	for name, values := range probe.Header {
 		headers[name] = append([]string{}, values...)
 	}
-	conn, resp, err := websocket.Dial(ctx, endpoint, &websocket.DialOptions{HTTPClient: s.client, HTTPHeader: headers})
+	client, err := s.providerClient(ctx, x.request.release, &p.provider, p.slot)
+	if err != nil {
+		return nil, finish(classCredential, serverError(http.StatusBadGateway, "upstream_error", "The provider network credential is unavailable."))
+	}
+	conn, resp, err := websocket.Dial(ctx, probe.URL.String(), &websocket.DialOptions{HTTPClient: client, HTTPHeader: headers})
 	if err != nil {
 		status := 0
 		if resp != nil {

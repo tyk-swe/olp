@@ -43,19 +43,20 @@ type QuotaSource interface {
 
 // Server serves the provider management surface.
 type Server struct {
-	Access *access.Server
-	Egress *egress.Policy
-	Quotas QuotaSource
-	Log    *slog.Logger
-	client *http.Client
-	auth   *connectors.Auth
-	probes chan struct{}
+	Access      *access.Server
+	Egress      *egress.Policy
+	Quotas      QuotaSource
+	Log         *slog.Logger
+	client      *http.Client
+	connections *egress.ConnectionClientCache
+	auth        *connectors.Auth
+	probes      chan struct{}
 }
 
 // New prepares the provider surface with a bounded upstream client and at
 // most four concurrent probes.
 func New(a *access.Server, policy *egress.Policy) *Server {
-	return &Server{Access: a, Egress: policy, client: policy.Client(probeTimeout), auth: connectors.NewAuth(policy), probes: make(chan struct{}, 4)}
+	return &Server{connections: egress.NewConnectionClientCache(128), Access: a, Egress: policy, client: policy.Client(probeTimeout), auth: connectors.NewAuth(policy), probes: make(chan struct{}, 4)}
 }
 
 type record struct {
@@ -91,6 +92,7 @@ func scanRecord(row pgx.Row) (*record, error) {
 		return nil, err
 	}
 	p.Configuration.Normalize()
+	p.Configuration.ProviderID = p.ID
 	return &p, nil
 }
 
@@ -189,6 +191,7 @@ func (s *Server) scanDetail(row pgx.Row) (*detail, error) {
 		return nil, err
 	}
 	p.Configuration.Normalize()
+	p.Configuration.ProviderID = p.ID
 	d.ID, d.Name, d.Kind, d.State, d.ETag = p.ID, p.Name, p.Kind, p.State, p.ETag
 	d.ProjectID = p.ProjectID
 	d.VendorID = p.Configuration.Options.VendorID

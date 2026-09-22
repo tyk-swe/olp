@@ -2,6 +2,8 @@ package providers
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"net/http"
 
@@ -58,7 +60,7 @@ func (s *Server) networkCredentials(r *http.Request) (access.Reply, error) {
 
 func (s *Server) createNetworkCredential(r *http.Request) (access.Reply, error) {
 	var input rotateRequest
-	if err := access.Decode(r, &input); err != nil {
+	if err := access.DecodeUnique(r, &input,1<<20); err != nil {
 		return access.Reply{}, err
 	}
 	id, err := access.IDParam(r, "provider_id")
@@ -158,13 +160,18 @@ func (s *Server) networkSecret(ctx context.Context, cfg *Configuration) ([]byte,
 	return s.Access.Keys.Read(ctx, tx, s.Access.Installation, cfg.Options.Network.CredentialID, "provider_credential")
 }
 
-func (s *Server) connectionClient(ctx context.Context, cfg *Configuration) (*http.Client, error) {
-	if cfg.Options.Network == nil {
+func (s *Server) connectionClient(ctx context.Context, cfg *Configuration, credential []byte) (*http.Client, error) {
+	if cfg.Options.Network == nil && cfg.ProfileID == "" {
 		return s.client, nil
 	}
 	secret, err := s.networkSecret(ctx, cfg)
 	if err != nil {
 		return nil, err
 	}
-	return s.connections.Client(*s.Egress, cfg.Options.Network, secret, probeTimeout)
+	if cfg.ProviderID == "" {
+		return nil, errors.New("provider identity is required for configured connections")
+	}
+	digest := sha256.Sum256(credential)
+	scope := cfg.ProviderID + "/" + cfg.transportFingerprint() + "/" + hex.EncodeToString(digest[:])
+	return s.connections.ClientScoped(scope, *s.Egress, cfg.Options.Network, secret, probeTimeout)
 }
