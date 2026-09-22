@@ -128,8 +128,9 @@ func TestPricingUsesTheRecordedRevisionVendor(t *testing.T) {
 	attempt.Routing = &usage.Routing{ProviderRevisionID: revision}
 	event := acctEvent(t, f, acctEventOptions{Attempts: []usage.Attempt{attempt}})
 	acctExec(t, f.Pool, `UPDATE olp_go.providers
-		SET configuration=jsonb_set(configuration,'{options,vendor_id}','"openrouter"')
-		WHERE id=$1`, provider)
+		SET configuration=$2::json
+		WHERE id=$1`, provider,
+		`{"kind":"openai_compatible","auth_mode":"none","endpoint":"https://example.com/v1","options":{"vendor_id":"openrouter"}}`)
 	acctPersist(t, f, event)
 	fact := acctLoadFact(t, f, event.RequestID, 1)
 	acctSameMoney(t, f, fact.Cost, "0.000012")
