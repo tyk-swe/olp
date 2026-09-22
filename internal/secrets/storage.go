@@ -12,7 +12,10 @@ import (
 
 func (k *KeyRing) Store(ctx context.Context, tx pgx.Tx, installation, id, purpose string, data []byte, expires *time.Time) error {
 	var active int
-	if err := tx.QueryRow(ctx, "SELECT active_key_version FROM olp_go.installation WHERE singleton FOR UPDATE").Scan(&active); err != nil {
+	// Shared writers may seal independent records concurrently. Rotation takes
+	// FOR UPDATE on this row, so it still waits for every in-flight write and
+	// fences the active version before changing key material.
+	if err := tx.QueryRow(ctx, "SELECT active_key_version FROM olp_go.installation WHERE singleton FOR SHARE").Scan(&active); err != nil {
 		return err
 	}
 	if active != k.Active {
