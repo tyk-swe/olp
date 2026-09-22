@@ -525,3 +525,35 @@ func TestConnectionEvictionDoesNotRetainLateOrActiveIdlePools(t *testing.T) {
 		})
 	}
 }
+
+func TestConnectionCacheIsolatesEqualConfigurationsByAuthorityScope(t *testing.T) {
+	var accepted atomic.Int64
+	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { io.WriteString(w, "scoped") }))
+	server.Config.ConnState = func(_ net.Conn, state http.ConnState) {
+		if state == http.StateNew {
+			accepted.Add(1)
+		}
+	}
+	server.Start()
+	defer server.Close()
+	cache := NewConnectionClientCache(4)
+	defer cache.CloseIdleConnections()
+	policy := loopbackConnections()
+	for _, scope := range []string{"tenant-a/provider-a/revision-1/slot-a/version-1", "tenant-b/provider-b/revision-1/slot-b/version-1", "tenant-a/provider-a/revision-1/slot-a/version-1"} {
+		client, err := cache.ClientScoped(scope, policy, nil, nil, time.Second)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := connectionResponse(t, client, server.URL); got != "scoped" {
+			t.Fatal(got)
+		}
+	}
+	if accepted.Load() != 2 {
+		t.Fatalf("different authority scopes shared a connection or the same scope failed to reuse it: %d connections", accepted.Load())
+	}
+	for _, scope := range []string{"", " ", "identity\nother", strings.Repeat("x", 1025)} {
+		if _, err := cache.ClientScoped(scope, policy, nil, nil, time.Second); err == nil {
+			t.Fatal("invalid authority scope accepted")
+		}
+	}
+}
