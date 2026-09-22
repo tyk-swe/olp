@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { expect, test, type Page } from '../playwright';
+import { waitForRoutePublication } from '../journeys/fixtures';
 
 const fixture = 'http://127.0.0.1:4188';
 const providerSecret = 'anthropic-browser-fixture-secret';
@@ -203,6 +204,7 @@ test('strict inspector has zero inference effects and browser tool continuation 
   );
   const secret = key.secret as string;
   expect(secret).toMatch(/^olp_/);
+  await waitForRoutePublication(page, secret, slug);
 
   expect((await request.post(`${fixture}/__test__/reset`)).status()).toBe(204);
   await page.goto('/playground');
