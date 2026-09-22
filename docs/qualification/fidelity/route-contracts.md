@@ -34,8 +34,9 @@ output redaction fail validation and activation with `fidelity_policy_conflict`.
 Pure blocking policies pass that policy check. Configuration promotion checks
 both explicit and inherited fidelity before writing draft state; a conflicting
 import cannot evade validation by omitting the field. Transformed routes retain
-the existing intentional transformation behavior, and legacy routes retain
-their historical policy behavior.
+intentional transformation behavior, and legacy routes keep their legacy fidelity
+class. Input policy covers effective configured defaults as well as caller text,
+so configured tool/schema content cannot bypass the declared policy.
 
 The initial foundation refused strict execution with
 `strict_execution_unavailable`. The [compiled planner](strict-planning.md) now

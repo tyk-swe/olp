@@ -211,13 +211,23 @@ func (t *Template) bindSemantic(request *openai.Request, context Context) (conne
 		if !known[name] {
 			continue
 		}
-		if seen[name] || len(values) != 1 || !native || !slices.Contains(t.profile.SemanticHeaders, name) {
+		if seen[name] || len(values) != 1 || !native {
 			return connectors.Config{}, nil, incompatible("target_capability", "/headers", "semantic_header", "A caller semantic header has no unambiguous mapping in the selected profile.")
 		}
-		if len(values[0]) > 2048 || !httpguts.ValidHeaderFieldValue(values[0]) || name == "Anthropic-Version" && values[0] != t.profile.DialectRevision {
+		if len(values[0]) > 2048 || !httpguts.ValidHeaderFieldValue(values[0]) {
 			return connectors.Config{}, nil, incompatible("target_capability", "/headers", "semantic_configuration", "Caller semantic settings are malformed or outside the profile revision.")
 		}
 		seen[name] = true
+		if handled, err := t.profile.BindIngressSemanticHeader(name, values[0]); handled {
+			if err != nil {
+				return connectors.Config{}, nil, incompatible("target_capability", "/headers/Anthropic-Version", "hosting_api_revision", "The caller API revision has no qualified binding to the selected hosting profile.")
+			}
+			receipts = append(receipts, Disposition{"/headers/Anthropic-Version", "mapped", "hosting_api_revision", evidenceNative})
+			continue
+		}
+		if !slices.Contains(t.profile.SemanticHeaders, name) || name == "Anthropic-Version" && values[0] != t.profile.DialectRevision {
+			return connectors.Config{}, nil, incompatible("target_capability", "/headers", "semantic_header", "A caller semantic header has no unambiguous mapping in the selected profile.")
+		}
 		for configured, value := range config.SemanticHeaders {
 			if strings.EqualFold(configured, name) {
 				if value != values[0] {

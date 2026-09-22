@@ -282,6 +282,28 @@ func TestNativeStateOmissionAndResourceAffinityAreExplicit(t *testing.T) {
 	assertReason(t, err, "resource_affinity")
 }
 
+func TestNativeCloudAnthropicRevisionHeaderBindsToBody(t *testing.T) {
+	for _, id := range []string{"vertex-anthropic", "bedrock-anthropic-invoke"} {
+		t.Run(id, func(t *testing.T) {
+			compiled := template(t, configuration(t, id))
+			source := request(t, openai.FamilyAnthropic, `{"model":"route","max_tokens":32,"messages":[{"role":"user","content":"native"}]}`)
+			plan := bind(t, compiled, source, Context{Headers: http.Header{"Anthropic-Version": {"2023-06-01"}}})
+			if len(field(t, plan.Body(), "anthropic_version")) == 0 || plan.Config().SemanticHeaders["Anthropic-Version"] != "" {
+				t.Fatal("cloud API revision was not bound into the hosting body")
+			}
+			mapped := false
+			for _, entry := range plan.Receipt().Dispositions {
+				mapped = mapped || entry.Field == "/headers/Anthropic-Version" && entry.Rule == "hosting_api_revision" && entry.Disposition == "mapped"
+			}
+			if !mapped {
+				t.Fatal("cloud API revision mapping missing from receipt")
+			}
+			_, err := compiled.Bind(source, Context{Headers: http.Header{"Anthropic-Version": {"2099-01-01"}}})
+			assertReason(t, err, "target_capability")
+		})
+	}
+}
+
 func TestEffectivePolicyChecksDefaultsAndRejectsOpaqueCoverage(t *testing.T) {
 	policy := &contentpolicy.Policy{Rules: []contentpolicy.Rule{{ID: "block_secret", Phase: contentpolicy.PhaseInput, Action: contentpolicy.ActionBlock, Pattern: "classified"}}}
 	config := configuration(t, "openai-chat")

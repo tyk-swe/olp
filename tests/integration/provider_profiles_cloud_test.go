@@ -224,7 +224,11 @@ func testPublishedProviderProfilesPreserveCloudInvocation(t *testing.T, strict b
 			case "bedrock-anthropic-invoke":
 				expectedPath = "/model/" + model + "/invoke"
 			}
-			status, result, _ := h.gatewayRaw("POST", path, key["secret"].(string), strings.NewReader(body), map[string]string{"Content-Type": "application/json"})
+			headers := map[string]string{"Content-Type": "application/json"}
+			if strict && profile.Dialect == "anthropic-messages" {
+				headers["Anthropic-Version"] = "2023-06-01"
+			}
+			status, result, _ := h.gatewayRaw("POST", path, key["secret"].(string), strings.NewReader(body), headers)
 			if status != 200 {
 				t.Fatalf("published invocation: %d %s", status, result)
 			}
@@ -273,6 +277,9 @@ func testPublishedProviderProfilesPreserveCloudInvocation(t *testing.T, strict b
 				t.Fatal("completed Bedrock invocation was not signed")
 			}
 			if profile.Hosting == "vertex-anthropic" || profile.Hosting == "bedrock-anthropic-invoke" {
+				if strict && actual.headers.Get("Anthropic-Version") != "" {
+					t.Fatal("cloud API version was sent in an unsupported header instead of its native body binding")
+				}
 				if _, found := actual.body["model"]; found {
 					t.Fatal("cloud model left in body")
 				}
@@ -289,6 +296,19 @@ func testPublishedProviderProfilesPreserveCloudInvocation(t *testing.T, strict b
 				}
 				if !bytes.Contains(actual.body["input"], []byte(`"text":"capture"`)) {
 					t.Fatal("Responses input changed")
+				}
+			}
+			if strict && profile.Dialect == "anthropic-messages" {
+				mu.Lock()
+				before := len(calls)
+				mu.Unlock()
+				headers["Anthropic-Version"] = "2099-01-01"
+				status, reply, _ := h.gatewayRaw("POST", path, key["secret"].(string), strings.NewReader(body), headers)
+				mu.Lock()
+				after := len(calls)
+				mu.Unlock()
+				if status != 400 || !bytes.Contains(reply, []byte(`"code":"target_capability"`)) || before != after {
+					t.Fatalf("unknown ingress API revision dispatched: %d %s", status, reply)
 				}
 			}
 		})

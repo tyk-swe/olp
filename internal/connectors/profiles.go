@@ -41,6 +41,7 @@ type Profile struct {
 }
 
 const ProfileRevision = "1"
+const anthropicMessagesRevision = "2023-06-01"
 
 var profileMu sync.RWMutex
 
@@ -49,7 +50,7 @@ var profileRegistry = []Profile{
 	{ID: "openai-responses", Label: "OpenAI Responses", Kind: "openai", Dialect: "openai-responses", Hosting: "direct-openai"},
 	{ID: "compatible-chat", Label: "Compatible Chat Completions", Kind: "openai_compatible", Dialect: "openai-chat", Hosting: "direct-compatible"},
 	{ID: "compatible-responses", Label: "Compatible Responses", Kind: "openai_compatible", Dialect: "openai-responses", Hosting: "direct-compatible"},
-	{ID: "anthropic-messages", Label: "Anthropic Messages", Kind: "anthropic", Dialect: "anthropic-messages", DialectRevision: "2023-06-01", Hosting: "direct-anthropic"},
+	{ID: "anthropic-messages", Label: "Anthropic Messages", Kind: "anthropic", Dialect: "anthropic-messages", DialectRevision: anthropicMessagesRevision, Hosting: "direct-anthropic"},
 	{ID: "gemini-generation", Label: "Gemini GenerateContent", Kind: "gemini", Dialect: "gemini-generate-content", DialectRevision: "v1beta", Hosting: "direct-gemini"},
 	{ID: "azure-legacy-chat", Label: "Azure deployment Chat Completions", Kind: "azure_openai", Dialect: "openai-chat", Hosting: "azure-deployment"},
 	{ID: "azure-legacy-responses", Label: "Azure legacy Responses", Kind: "azure_openai", Dialect: "openai-responses", Hosting: "azure-responses-legacy"},
@@ -320,6 +321,19 @@ func (c Config) ApplySemantic(req *http.Request) error {
 	}
 	req.URL.RawQuery = query.Encode()
 	return nil
+}
+
+// BindIngressSemanticHeader validates the reviewed change of location from
+// Anthropic's direct revision header to a cloud anthropic_version body tag.
+// WrapBody writes the selected cloud tag before authentication/signing.
+func (p Profile) BindIngressSemanticHeader(name, value string) (bool, error) {
+	if !strings.EqualFold(name, "Anthropic-Version") || (p.Hosting != "vertex-anthropic" && p.Hosting != "bedrock-anthropic-invoke") {
+		return false, nil
+	}
+	if value != anthropicMessagesRevision {
+		return true, errors.New("the ingress API revision has no qualified hosting binding")
+	}
+	return true, nil
 }
 
 func (c Config) AzureScope() string {

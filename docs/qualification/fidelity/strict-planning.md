@@ -33,6 +33,10 @@ remain intact where authorization and policy permit them. A restrictive content
 policy rejects unknown/opaque areas it cannot inspect. Incoming semantic headers
 and query values either match the admitted profile or fail before dispatch;
 gateway authentication selectors never enter upstream semantic settings.
+For Vertex and Bedrock Anthropic hosting, the supported direct API revision header
+is explicitly bound to the profile's native `anthropic_version` body tag before
+signing. Unknown source revisions fail before dispatch; the inspector records the
+hosting revision mapping without displaying header values.
 
 ## Failures and Attempts
 
@@ -109,6 +113,9 @@ Validation executed on 2026-09-22 with Go 1.27.1, Node 26.8.2 and pnpm 11.24.0:
 - The two pre-merge review regressions first reproduced unsafe alias-default
   Failover and incomplete output-policy coverage. The corrected alias test and
   public native output-policy/usage tests passed with race detection.
+- The final hosting-header followup passed interaction/connector race tests and
+  Go vet. Public direct/Vertex/Bedrock Anthropic cases passed with the standard
+  SDK revision header and a zero-dispatch unknown-revision control in 5.680 s.
 
 With the disposable service environment from the testing guide configured:
 
