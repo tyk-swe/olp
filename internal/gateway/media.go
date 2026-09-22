@@ -246,6 +246,10 @@ func (s *Server) prepareMedia(x *execution, authority access.Authority) *Error {
 		return invalidRequest("invalid_request", "The model `"+route.Slug+"` does not allow video lifecycle operations.", nil)
 	}
 	var semantic error
+	// Candidate defaults are part of the actual provider request. Inspect each
+	// encoded call for the metadata check so require_parameters cannot overlook
+	// a default or an explicit native null.
+	candidates := make(map[string][]string, len(route.Targets))
 	plan, err := runtime.PlanRequest(snapshot, route.Slug, request.Op, "openai", x.mode, x.affinity, runtime.SelectionOptions{
 		KeyID: x.keyID, Preferences: x.preferences, Parameters: mediaParameterNames(request), Inputs: s.routingInputs(), Now: s.now(),
 		CheckSlots: true, CredentialRevoked: s.Runtime.Revoked,
@@ -256,11 +260,32 @@ func (s *Server) prepareMedia(x *execution, authority access.Authority) *Error {
 			if request.Op == media.OpVideoCreate && !videoLifecycleProvider(&p, t.ProviderModel) {
 				return errors.New("video lifecycle capabilities unavailable")
 			}
-			if _, _, e := media.EncodeConfigured(request, p.Connector(), t.ProviderModel); e != nil {
+			call, effective, e := media.EncodeConfigured(request, p.Connector(), t.ProviderModel)
+			if e != nil {
 				semantic = errors.New(e.Message)
 				return semantic
 			}
+			if p.ProfileID != "" {
+				parameters, err := mediaOutboundParameterNames(call, effective)
+				if err != nil {
+					semantic = err
+					return err
+				}
+				candidates[t.ID] = parameters
+			}
 			return nil
+		},
+		Effective: func(p runtime.Provider, t runtime.Target) ([]string, *runtime.TokenDemand) {
+			if p.ProfileID == "" {
+				// Legacy codecs have their historical null/default wire behavior;
+				// only explicit profiles define an exact effective native source.
+				return mediaParameterNames(request), nil
+			}
+			parameters, ok := candidates[t.ID]
+			if !ok {
+				return nil, nil
+			}
+			return parameters, nil
 		}})
 	if err != nil {
 		var se *runtime.SelectionError
@@ -280,6 +305,52 @@ func (s *Server) prepareMedia(x *execution, authority access.Authority) *Error {
 		return selectionError(&runtime.SelectionError{Code: runtime.NoEligibleTargets}, route.Slug)
 	}
 	return nil
+}
+
+// mediaOutboundParameterNames inspects the same encoded body/field list sent
+// upstream, including native null and absent-only defaults. Route identity and
+// delivery controls are not model capability parameters.
+func mediaOutboundParameterNames(call *media.UpstreamCall, request *media.Request) ([]string, error) {
+	if call == nil {
+		return mediaParameterNames(request), nil
+	}
+	if call.Native != "" {
+		// Cloud image envelopes use qualified wrapper fields; the caller's
+		// effective controls, not instances/parameters, are capabilities.
+		return mediaParameterNames(request), nil
+	}
+	names := map[string]struct{}{}
+	add := func(name string) {
+		name = strings.TrimSuffix(name, "[]")
+		if name == "" || name == "model" || name == "stream" || name == "stream_format" || strings.HasPrefix(name, "__olp_") {
+			return
+		}
+		names[name] = struct{}{}
+	}
+	if call.JSON != nil {
+		var fields map[string]json.RawMessage
+		if err := json.Unmarshal(call.JSON, &fields); err != nil || fields == nil {
+			return nil, errors.New("configured media body is not a JSON object")
+		}
+		for name := range fields {
+			add(name)
+		}
+	} else if len(call.Fields) != 0 {
+		for _, field := range call.Fields {
+			if field.File != nil && field.Name != "mask" && field.Name != "input_reference" {
+				continue
+			}
+			add(field.Name)
+		}
+	} else {
+		return mediaParameterNames(request), nil
+	}
+	out := make([]string, 0, len(names))
+	for name := range names {
+		out = append(out, name)
+	}
+	slices.Sort(out)
+	return out, nil
 }
 
 // connectorsSupports mirrors the connector capability check against the
