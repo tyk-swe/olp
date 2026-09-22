@@ -1,0 +1,2631 @@
+{
+  "schema": "openllmproxy.dev/continuation-barrier-performance/v1",
+  "contract": "native-wire-with-reference-side-encrypted-barrier/1",
+  "started_at": "2026-09-22T15:08:39.820Z",
+  "completed_at": "2026-09-22T15:09:13.893Z",
+  "source_revision": "29e18268ac23f7290d1881cbda3af2cc2ccab018",
+  "working_tree": "",
+  "harness_sha256": "e1791ea2f6981b9f370edc0be9107967f02aefe8310e8d6d1c7c7e70716644ff",
+  "runner_sha256": "3c2a39d8e518cbd79e62edc846ea4d6d9d7c2a12e26ed0ba917b926890fb4d8d",
+  "dependency_sha256": {
+    "tests/integration/fidelity_lifecycle_performance_test.go": "635559ec6eb6eb66388eed150f1fe188b9ad3350184f0cebcfe93f61efabadf6",
+    "tests/integration/access_test.go": "8cca6ed71d86b9b75d184ad25c9f984a3c48a58342eef804bb02b0446cff90ff",
+    "tests/integration/strict_generation_test.go": "6947dc73d17397a7cd19f9135fcbc2feaa8ee223674a1bd5a063f69e04458875",
+    "tests/fidelity/reference.go": "3dab7efcfbc34c3e64e925a97064201003114da628d90f90356b7214dc93ee0f",
+    "tests/fixtures/fidelity/v1/anthropic-tool-next-request.json": "81062860b3b9d324f122027adaa141280a665e710df452277cb3cb4ebbb08c07",
+    "tests/fixtures/fidelity/v1/anthropic-tool-workflow.sse": "8989d7c7b79e0cf1a79b84bef0e9a023b176cb58259df6aabc37a0de3a8197ac"
+  },
+  "command": [
+    "go",
+    "test",
+    "-mod=readonly",
+    "-tags=integration",
+    "-run",
+    "^TestContinuationBarrierReference$",
+    "-count=1",
+    "-v",
+    "-timeout=10m",
+    "./tests/integration"
+  ],
+  "runtime_environment": {
+    "GOMAXPROCS": "4",
+    "GOGC": "100",
+    "GOMEMLIMIT": "off",
+    "GODEBUG": "",
+    "OLP_BARRIER_MEASURE": "1"
+  },
+  "toolchain": "go version go1.27.1 linux/amd64",
+  "go_build_environment": "v1\namd64\nlinux",
+  "hardware": {
+    "os": "linux",
+    "architecture": "x64",
+    "kernel": "7.0.0-31-generic",
+    "cpu": "Intel Core Processor (Haswell, no TSX)",
+    "logical_cpus": 8,
+    "total_memory_bytes": 24598122496,
+    "cpu_quota": null,
+    "memory_limit": null
+  },
+  "system_load": {
+    "before": "1.68 2.82 3.28 8/605 1076414",
+    "after": "2.66 2.93 3.30 2/605 1078329"
+  },
+  "storage": {
+    "postgresql_server_version": "180006",
+    "postgresql_tls": false
+  },
+  "conditions": {
+    "network": "IPv4 loopback; two warm HTTP/1.1 inference hops; authorized fixed relay destination; no inference TLS",
+    "authority": "Publicly provisioned strict Anthropic Messages profile; actual isolated PostgreSQL; API-key state permission; existing KeyRing secret/resource transactions; no distributed quotas",
+    "workflow": "Go native-wire client; fixed separately SDK-qualified Anthropic corpus: thinking/signature, text, two tool calls, text; all 19 events and complete second request verified independently; two dispatches and two enabled fixture actions per workflow",
+    "history": "Original user turn, or original user turn plus 262144 ASCII history bytes, present in both requests and retained encrypted dependencies",
+    "reference": "Reference-side encrypted submission claim, dispatch journal before HTTP, atomic ready payload/state after complete native stream, then independent committed-state decryption before tool action and second request. This is not the production translated carrier.",
+    "observation": "wire-tool is first native tool-use start frame. action-ready is complete validated history and, for reference, separately readable encrypted ready state; only action-ready is comparable to a durable translated tool-action barrier.",
+    "resources": "Process CPU, allocations and 1ms sampled heap growth include client, provider, gateway/relay, oracle and instrumentation; exclude separate PostgreSQL process; not isolated gateway RSS",
+    "ordering": "Fixed size/concurrency/path order; one warmup per repetition; three repetitions of 24 complete workflows; local fixture tool results only",
+    "scope": "Native gateway plus an independent minimal persistence reference; no production translated carrier, actual SDK process, recovery fault injection, WAN or live-model quality measurement"
+  },
+  "repetitions": 3,
+  "samples_per_repetition": 24,
+  "concurrency": [
+    1,
+    8
+  ],
+  "runs": [
+    {
+      "name": "small/c1/relay",
+      "repetition": 0,
+      "samples": 24,
+      "dispatches": 48,
+      "first_requests": 24,
+      "next_requests": 24,
+      "events": 456,
+      "actions": 48,
+      "history_bytes": 0,
+      "state_bytes": 904,
+      "metrics": {
+        "B/op": 294521.3333333333,
+        "action-ready-p50-us": 1321.143,
+        "action-ready-p95-us": 2021.747,
+        "action-ready-p99-us": 2060.471,
+        "allocs/op": 4853,
+        "elapsed_ns": 57033291,
+        "first-event-p50-us": 559.586,
+        "first-event-p95-us": 795.489,
+        "first-event-p99-us": 921.922,
+        "ns/op": 2376387.125,
+        "process-cpu-ns/op": 3636125,
+        "sampled-heap-growth-B": 5533776,
+        "wire-tool-p50-us": 660.117,
+        "wire-tool-p95-us": 928.836,
+        "wire-tool-p99-us": 1145.934,
+        "workflow-p50-us": 2229.212,
+        "workflow-p95-us": 2822.839,
+        "workflow-p99-us": 4007.107
+      }
+    },
+    {
+      "name": "small/c1/relay",
+      "repetition": 1,
+      "samples": 24,
+      "dispatches": 48,
+      "first_requests": 24,
+      "next_requests": 24,
+      "events": 456,
+      "actions": 48,
+      "history_bytes": 0,
+      "state_bytes": 904,
+      "metrics": {
+        "B/op": 294794.3333333333,
+        "action-ready-p50-us": 1531.894,
+        "action-ready-p95-us": 2050.9,
+        "action-ready-p99-us": 2206.211,
+        "allocs/op": 4851.916666666667,
+        "elapsed_ns": 60507217,
+        "first-event-p50-us": 578.761,
+        "first-event-p95-us": 812.869,
+        "first-event-p99-us": 903.55,
+        "ns/op": 2521134.0416666665,
+        "process-cpu-ns/op": 4179083.3333333335,
+        "sampled-heap-growth-B": 5614920,
+        "wire-tool-p50-us": 704.971,
+        "wire-tool-p95-us": 922.384,
+        "wire-tool-p99-us": 1012.117,
+        "workflow-p50-us": 2392.819,
+        "workflow-p95-us": 3029.719,
+        "workflow-p99-us": 3219.363
+      }
+    },
+    {
+      "name": "small/c1/relay",
+      "repetition": 2,
+      "samples": 24,
+      "dispatches": 48,
+      "first_requests": 24,
+      "next_requests": 24,
+      "events": 456,
+      "actions": 48,
+      "history_bytes": 0,
+      "state_bytes": 904,
+      "metrics": {
+        "B/op": 294732.3333333333,
+        "action-ready-p50-us": 1701.88,
+        "action-ready-p95-us": 2663.983,
+        "action-ready-p99-us": 3326.298,
+        "allocs/op": 4852.291666666667,
+        "elapsed_ns": 74986757,
+        "first-event-p50-us": 689.142,
+        "first-event-p95-us": 933.14,
+        "first-event-p99-us": 1613.48,
+        "ns/op": 3124448.2083333335,
+        "process-cpu-ns/op": 4557458.333333333,
+        "sampled-heap-growth-B": 5596720,
+        "wire-tool-p50-us": 803.106,
+        "wire-tool-p95-us": 1727.121,
+        "wire-tool-p99-us": 1865.084,
+        "workflow-p50-us": 2829.791,
+        "workflow-p95-us": 4621.976,
+        "workflow-p99-us": 4965.608
+      }
+    },
+    {
+      "name": "small/c1/gateway",
+      "repetition": 0,
+      "samples": 24,
+      "dispatches": 48,
+      "first_requests": 24,
+      "next_requests": 24,
+      "events": 456,
+      "actions": 48,
+      "history_bytes": 0,
+      "state_bytes": 904,
+      "metrics": {
+        "B/op": 768371,
+        "action-ready-p50-us": 3231.882,
+        "action-ready-p95-us": 5872.258,
+        "action-ready-p99-us": 6147.059,
+        "allocs/op": 10556.375,
+        "elapsed_ns": 158288408,
+        "first-event-p50-us": 1277.763,
+        "first-event-p95-us": 1908.31,
+        "first-event-p99-us": 2094.958,
+        "ns/op": 6595350.333333333,
+        "process-cpu-ns/op": 8860250,
+        "sampled-heap-growth-B": 8218600,
+        "wire-tool-p50-us": 1878.398,
+        "wire-tool-p95-us": 3318.901,
+        "wire-tool-p99-us": 4144.662,
+        "workflow-p50-us": 5994.806,
+        "workflow-p95-us": 8466.86,
+        "workflow-p99-us": 9654.382
+      }
+    },
+    {
+      "name": "small/c1/gateway",
+      "repetition": 1,
+      "samples": 24,
+      "dispatches": 48,
+      "first_requests": 24,
+      "next_requests": 24,
+      "events": 456,
+      "actions": 48,
+      "history_bytes": 0,
+      "state_bytes": 904,
+      "metrics": {
+        "B/op": 767248.3333333334,
+        "action-ready-p50-us": 3039.175,
+        "action-ready-p95-us": 3617.445,
+        "action-ready-p99-us": 3789.988,
+        "allocs/op": 10553.375,
+        "elapsed_ns": 143825290,
+        "first-event-p50-us": 1267.718,
+        "first-event-p95-us": 1720.196,
+        "first-event-p99-us": 1759.454,
+        "ns/op": 5992720.416666667,
+        "process-cpu-ns/op": 8089375,
+        "sampled-heap-growth-B": 8050856,
+        "wire-tool-p50-us": 1893.976,
+        "wire-tool-p95-us": 2295.499,
+        "wire-tool-p99-us": 2418.465,
+        "workflow-p50-us": 5763.992,
+        "workflow-p95-us": 7372.135,
+        "workflow-p99-us": 7544.432
+      }
+    },
+    {
+      "name": "small/c1/gateway",
+      "repetition": 2,
+      "samples": 24,
+      "dispatches": 48,
+      "first_requests": 24,
+      "next_requests": 24,
+      "events": 456,
+      "actions": 48,
+      "history_bytes": 0,
+      "state_bytes": 904,
+      "metrics": {
+        "B/op": 766038.6666666666,
+        "action-ready-p50-us": 3182.91,
+        "action-ready-p95-us": 4288.693,
+        "action-ready-p99-us": 4294.88,
+        "allocs/op": 10542.75,
+        "elapsed_ns": 144758186,
+        "first-event-p50-us": 1249.422,
+        "first-event-p95-us": 2355.157,
+        "first-event-p99-us": 2539.062,
+        "ns/op": 6031591.083333333,
+        "process-cpu-ns/op": 8023000,
+        "sampled-heap-growth-B": 8304448,
+        "wire-tool-p50-us": 1944.432,
+        "wire-tool-p95-us": 3088.433,
+        "wire-tool-p99-us": 3547.311,
+        "workflow-p50-us": 5642.058,
+        "workflow-p95-us": 7510.232,
+        "workflow-p99-us": 7654.438
+      }
+    },
+    {
+      "name": "small/c1/reference",
+      "repetition": 0,
+      "samples": 24,
+      "dispatches": 48,
+      "first_requests": 24,
+      "next_requests": 24,
+      "events": 456,
+      "actions": 48,
+      "history_bytes": 0,
+      "state_bytes": 904,
+      "metrics": {
+        "B/op": 815255.6666666666,
+        "action-ready-p50-us": 8899.015,
+        "action-ready-p95-us": 10427.383,
+        "action-ready-p99-us": 10514.756,
+        "allocs/op": 11289.041666666666,
+        "claim-commit-p50-us": 2067.717,
+        "claim-commit-p95-us": 2434.848,
+        "claim-commit-p99-us": 3051.916,
+        "dispatch-journal-p50-us": 655.472,
+        "dispatch-journal-p95-us": 821.93,
+        "dispatch-journal-p99-us": 835.532,
+        "elapsed_ns": 278107911,
+        "first-event-p50-us": 4099.253,
+        "first-event-p95-us": 4847.277,
+        "first-event-p99-us": 5432.332,
+        "ns/op": 11587829.625,
+        "process-cpu-ns/op": 10096291.666666666,
+        "ready-commit-p50-us": 2016.614,
+        "ready-commit-p95-us": 2521.21,
+        "ready-commit-p99-us": 2570.026,
+        "sampled-heap-growth-B": 6788352,
+        "wire-tool-p50-us": 4658.889,
+        "wire-tool-p95-us": 5856.015,
+        "wire-tool-p99-us": 6371.701,
+        "workflow-p50-us": 11593.486,
+        "workflow-p95-us": 12988.431,
+        "workflow-p99-us": 13148.668
+      }
+    },
+    {
+      "name": "small/c1/reference",
+      "repetition": 1,
+      "samples": 24,
+      "dispatches": 48,
+      "first_requests": 24,
+      "next_requests": 24,
+      "events": 456,
+      "actions": 48,
+      "history_bytes": 0,
+      "state_bytes": 904,
+      "metrics": {
+        "B/op": 823584,
+        "action-ready-p50-us": 9730.455,
+        "action-ready-p95-us": 12670.723,
+        "action-ready-p99-us": 13759.518,
+        "allocs/op": 11303.916666666666,
+        "claim-commit-p50-us": 2318.516,
+        "claim-commit-p95-us": 3105.669,
+        "claim-commit-p99-us": 3362.496,
+        "dispatch-journal-p50-us": 645.751,
+        "dispatch-journal-p95-us": 809.827,
+        "dispatch-journal-p99-us": 849.738,
+        "elapsed_ns": 322972459,
+        "first-event-p50-us": 4665.992,
+        "first-event-p95-us": 7397.271,
+        "first-event-p99-us": 7579.792,
+        "ns/op": 13457185.791666666,
+        "process-cpu-ns/op": 12253041.666666666,
+        "ready-commit-p50-us": 2203.163,
+        "ready-commit-p95-us": 2832.272,
+        "ready-commit-p99-us": 2882.895,
+        "sampled-heap-growth-B": 7112880,
+        "wire-tool-p50-us": 5154.246,
+        "wire-tool-p95-us": 8104.899,
+        "wire-tool-p99-us": 8318.105,
+        "workflow-p50-us": 13572.879,
+        "workflow-p95-us": 15465.782,
+        "workflow-p99-us": 17013.746
+      }
+    },
+    {
+      "name": "small/c1/reference",
+      "repetition": 2,
+      "samples": 24,
+      "dispatches": 48,
+      "first_requests": 24,
+      "next_requests": 24,
+      "events": 456,
+      "actions": 48,
+      "history_bytes": 0,
+      "state_bytes": 904,
+      "metrics": {
+        "B/op": 821280.6666666666,
+        "action-ready-p50-us": 8709.68,
+        "action-ready-p95-us": 10091.57,
+        "action-ready-p99-us": 11017.805,
+        "allocs/op": 11295.875,
+        "claim-commit-p50-us": 1866.469,
+        "claim-commit-p95-us": 2294.876,
+        "claim-commit-p99-us": 2350.768,
+        "dispatch-journal-p50-us": 594.162,
+        "dispatch-journal-p95-us": 714.272,
+        "dispatch-journal-p99-us": 729.703,
+        "elapsed_ns": 279097429,
+        "first-event-p50-us": 3897.428,
+        "first-event-p95-us": 4842.949,
+        "first-event-p99-us": 4868.283,
+        "ns/op": 11629059.541666666,
+        "process-cpu-ns/op": 11081958.333333334,
+        "ready-commit-p50-us": 1918.288,
+        "ready-commit-p95-us": 2568.599,
+        "ready-commit-p99-us": 2701.786,
+        "sampled-heap-growth-B": 7693744,
+        "wire-tool-p50-us": 4531.832,
+        "wire-tool-p95-us": 5392.407,
+        "wire-tool-p99-us": 5829.522,
+        "workflow-p50-us": 11500.084,
+        "workflow-p95-us": 13001.912,
+        "workflow-p99-us": 13140.003
+      }
+    },
+    {
+      "name": "small/c8/relay",
+      "repetition": 0,
+      "samples": 24,
+      "dispatches": 48,
+      "first_requests": 24,
+      "next_requests": 24,
+      "events": 456,
+      "actions": 48,
+      "history_bytes": 0,
+      "state_bytes": 904,
+      "metrics": {
+        "B/op": 306315,
+        "action-ready-p50-us": 2662.572,
+        "action-ready-p95-us": 4858.926,
+        "action-ready-p99-us": 5419.954,
+        "allocs/op": 4887.708333333333,
+        "elapsed_ns": 17050710,
+        "first-event-p50-us": 2023.719,
+        "first-event-p95-us": 3792.464,
+        "first-event-p99-us": 4513.668,
+        "ns/op": 710446.25,
+        "process-cpu-ns/op": 2553291.6666666665,
+        "sampled-heap-growth-B": 7351560,
+        "wire-tool-p50-us": 2059.251,
+        "wire-tool-p95-us": 4195.292,
+        "wire-tool-p99-us": 4888.516,
+        "workflow-p50-us": 4597.889,
+        "workflow-p95-us": 7371.563,
+        "workflow-p99-us": 8365.831
+      }
+    },
+    {
+      "name": "small/c8/relay",
+      "repetition": 1,
+      "samples": 24,
+      "dispatches": 48,
+      "first_requests": 24,
+      "next_requests": 24,
+      "events": 456,
+      "actions": 48,
+      "history_bytes": 0,
+      "state_bytes": 904,
+      "metrics": {
+        "B/op": 302132.3333333333,
+        "action-ready-p50-us": 2953.775,
+        "action-ready-p95-us": 4138.433,
+        "action-ready-p99-us": 4224.418,
+        "allocs/op": 4853.166666666667,
+        "elapsed_ns": 14902962,
+        "first-event-p50-us": 2169.286,
+        "first-event-p95-us": 3256.267,
+        "first-event-p99-us": 3306.332,
+        "ns/op": 620956.75,
+        "process-cpu-ns/op": 2305916.6666666665,
+        "sampled-heap-growth-B": 7251176,
+        "wire-tool-p50-us": 2249.34,
+        "wire-tool-p95-us": 3357.716,
+        "wire-tool-p99-us": 3445.97,
+        "workflow-p50-us": 4686.99,
+        "workflow-p95-us": 5889.991,
+        "workflow-p99-us": 5976.483
+      }
+    },
+    {
+      "name": "small/c8/relay",
+      "repetition": 2,
+      "samples": 24,
+      "dispatches": 48,
+      "first_requests": 24,
+      "next_requests": 24,
+      "events": 456,
+      "actions": 48,
+      "history_bytes": 0,
+      "state_bytes": 904,
+      "metrics": {
+        "B/op": 302232,
+        "action-ready-p50-us": 2461.543,
+        "action-ready-p95-us": 3388.833,
+        "action-ready-p99-us": 3450.343,
+        "allocs/op": 4852.458333333333,
+        "elapsed_ns": 14726103,
+        "first-event-p50-us": 1665.181,
+        "first-event-p95-us": 2516.748,
+        "first-event-p99-us": 2885.418,
+        "ns/op": 613587.625,
+        "process-cpu-ns/op": 2135541.6666666665,
+        "sampled-heap-growth-B": 7253568,
+        "wire-tool-p50-us": 1772.914,
+        "wire-tool-p95-us": 2526.518,
+        "wire-tool-p99-us": 2892.522,
+        "workflow-p50-us": 4206.043,
+        "workflow-p95-us": 6123.994,
+        "workflow-p99-us": 6622.302
+      }
+    },
+    {
+      "name": "small/c8/gateway",
+      "repetition": 0,
+      "samples": 24,
+      "dispatches": 48,
+      "first_requests": 24,
+      "next_requests": 24,
+      "events": 456,
+      "actions": 48,
+      "history_bytes": 0,
+      "state_bytes": 904,
+      "metrics": {
+        "B/op": 784970,
+        "action-ready-p50-us": 7302.923,
+        "action-ready-p95-us": 10001.864,
+        "action-ready-p99-us": 10851.111,
+        "allocs/op": 10584.291666666666,
+        "elapsed_ns": 42241340,
+        "first-event-p50-us": 5455.948,
+        "first-event-p95-us": 9554.483,
+        "first-event-p99-us": 10235.274,
+        "ns/op": 1760055.8333333333,
+        "process-cpu-ns/op": 5843083.333333333,
+        "sampled-heap-growth-B": 12061128,
+        "wire-tool-p50-us": 5866.385,
+        "wire-tool-p95-us": 9558.148,
+        "wire-tool-p99-us": 10244.227,
+        "workflow-p50-us": 11629.531,
+        "workflow-p95-us": 16253.82,
+        "workflow-p99-us": 19334.29
+      }
+    },
+    {
+      "name": "small/c8/gateway",
+      "repetition": 1,
+      "samples": 24,
+      "dispatches": 48,
+      "first_requests": 24,
+      "next_requests": 24,
+      "events": 456,
+      "actions": 48,
+      "history_bytes": 0,
+      "state_bytes": 904,
+      "metrics": {
+        "B/op": 764991.6666666666,
+        "action-ready-p50-us": 7315.12,
+        "action-ready-p95-us": 12232.293,
+        "action-ready-p99-us": 13103.245,
+        "allocs/op": 10537.625,
+        "elapsed_ns": 46594494,
+        "first-event-p50-us": 5236.876,
+        "first-event-p95-us": 9774.183,
+        "first-event-p99-us": 10734.618,
+        "ns/op": 1941437.25,
+        "process-cpu-ns/op": 6632708.333333333,
+        "sampled-heap-growth-B": 11908552,
+        "wire-tool-p50-us": 6376.762,
+        "wire-tool-p95-us": 10745.152,
+        "wire-tool-p99-us": 12539.32,
+        "workflow-p50-us": 12668.29,
+        "workflow-p95-us": 18873.905,
+        "workflow-p99-us": 19478.946
+      }
+    },
+    {
+      "name": "small/c8/gateway",
+      "repetition": 2,
+      "samples": 24,
+      "dispatches": 48,
+      "first_requests": 24,
+      "next_requests": 24,
+      "events": 456,
+      "actions": 48,
+      "history_bytes": 0,
+      "state_bytes": 904,
+      "metrics": {
+        "B/op": 767772.3333333334,
+        "action-ready-p50-us": 5307.022,
+        "action-ready-p95-us": 8265.804,
+        "action-ready-p99-us": 8400.46,
+        "allocs/op": 10553.458333333334,
+        "elapsed_ns": 36112680,
+        "first-event-p50-us": 3371.32,
+        "first-event-p95-us": 6753.535,
+        "first-event-p99-us": 7450.285,
+        "ns/op": 1504695,
+        "process-cpu-ns/op": 5459916.666666667,
+        "sampled-heap-growth-B": 12469408,
+        "wire-tool-p50-us": 3924.263,
+        "wire-tool-p95-us": 7461.307,
+        "wire-tool-p99-us": 7867.22,
+        "workflow-p50-us": 10183.452,
+        "workflow-p95-us": 15807.894,
+        "workflow-p99-us": 16155.404
+      }
+    },
+    {
+      "name": "small/c8/reference",
+      "repetition": 0,
+      "samples": 24,
+      "dispatches": 48,
+      "first_requests": 24,
+      "next_requests": 24,
+      "events": 456,
+      "actions": 48,
+      "history_bytes": 0,
+      "state_bytes": 904,
+      "metrics": {
+        "B/op": 845837,
+        "action-ready-p50-us": 32678.124,
+        "action-ready-p95-us": 77431.741,
+        "action-ready-p99-us": 79504.511,
+        "allocs/op": 11396.541666666666,
+        "claim-commit-p50-us": 13673.892,
+        "claim-commit-p95-us": 44540.313,
+        "claim-commit-p99-us": 49873.745,
+        "dispatch-journal-p50-us": 998.869,
+        "dispatch-journal-p95-us": 2001.856,
+        "dispatch-journal-p99-us": 2168.578,
+        "elapsed_ns": 146844324,
+        "first-event-p50-us": 16858.634,
+        "first-event-p95-us": 48711.826,
+        "first-event-p99-us": 52496.919,
+        "ns/op": 6118513.5,
+        "process-cpu-ns/op": 10004000,
+        "ready-commit-p50-us": 14164.751,
+        "ready-commit-p95-us": 26296.488,
+        "ready-commit-p99-us": 27509.03,
+        "sampled-heap-growth-B": 9220272,
+        "wire-tool-p50-us": 17476.092,
+        "wire-tool-p95-us": 48725.018,
+        "wire-tool-p99-us": 53109.775,
+        "workflow-p50-us": 35999.239,
+        "workflow-p95-us": 79261.557,
+        "workflow-p99-us": 81689.949
+      }
+    },
+    {
+      "name": "small/c8/reference",
+      "repetition": 1,
+      "samples": 24,
+      "dispatches": 48,
+      "first_requests": 24,
+      "next_requests": 24,
+      "events": 456,
+      "actions": 48,
+      "history_bytes": 0,
+      "state_bytes": 904,
+      "metrics": {
+        "B/op": 815200.6666666666,
+        "action-ready-p50-us": 29425.64,
+        "action-ready-p95-us": 33195.786,
+        "action-ready-p99-us": 33597.345,
+        "allocs/op": 11286.875,
+        "claim-commit-p50-us": 12328.315,
+        "claim-commit-p95-us": 15284.127,
+        "claim-commit-p99-us": 15564.791,
+        "dispatch-journal-p50-us": 759.093,
+        "dispatch-journal-p95-us": 1186.214,
+        "dispatch-journal-p99-us": 1201.389,
+        "elapsed_ns": 101476092,
+        "first-event-p50-us": 15638.909,
+        "first-event-p95-us": 17661.438,
+        "first-event-p99-us": 18267.755,
+        "ns/op": 4228170.5,
+        "process-cpu-ns/op": 8889583.333333334,
+        "ready-commit-p50-us": 11168.702,
+        "ready-commit-p95-us": 13085.242,
+        "ready-commit-p99-us": 13237.398,
+        "sampled-heap-growth-B": 9206704,
+        "wire-tool-p50-us": 16124.108,
+        "wire-tool-p95-us": 18703.084,
+        "wire-tool-p99-us": 18886.889,
+        "workflow-p50-us": 31689.798,
+        "workflow-p95-us": 36577.732,
+        "workflow-p99-us": 38069.238
+      }
+    },
+    {
+      "name": "small/c8/reference",
+      "repetition": 2,
+      "samples": 24,
+      "dispatches": 48,
+      "first_requests": 24,
+      "next_requests": 24,
+      "events": 456,
+      "actions": 48,
+      "history_bytes": 0,
+      "state_bytes": 904,
+      "metrics": {
+        "B/op": 814727.6666666666,
+        "action-ready-p50-us": 28156.915,
+        "action-ready-p95-us": 35720.111,
+        "action-ready-p99-us": 37095.855,
+        "allocs/op": 11285.458333333334,
+        "claim-commit-p50-us": 10702.611,
+        "claim-commit-p95-us": 16124.977,
+        "claim-commit-p99-us": 17102.82,
+        "dispatch-journal-p50-us": 702.644,
+        "dispatch-journal-p95-us": 1190.933,
+        "dispatch-journal-p99-us": 1251.755,
+        "elapsed_ns": 102886736,
+        "first-event-p50-us": 12944.963,
+        "first-event-p95-us": 18951.145,
+        "first-event-p99-us": 19698.949,
+        "ns/op": 4286947.333333333,
+        "process-cpu-ns/op": 8784208.333333334,
+        "ready-commit-p50-us": 11875.297,
+        "ready-commit-p95-us": 14798.794,
+        "ready-commit-p99-us": 15586.59,
+        "sampled-heap-growth-B": 10884696,
+        "wire-tool-p50-us": 13404.35,
+        "wire-tool-p95-us": 19519.629,
+        "wire-tool-p99-us": 20575.099,
+        "workflow-p50-us": 30920.681,
+        "workflow-p95-us": 39432.865,
+        "workflow-p99-us": 40396.273
+      }
+    },
+    {
+      "name": "large/c1/relay",
+      "repetition": 0,
+      "samples": 24,
+      "dispatches": 48,
+      "first_requests": 24,
+      "next_requests": 24,
+      "events": 456,
+      "actions": 48,
+      "history_bytes": 262144,
+      "state_bytes": 263050,
+      "metrics": {
+        "B/op": 19122006.333333332,
+        "action-ready-p50-us": 9985.26,
+        "action-ready-p95-us": 11891.826,
+        "action-ready-p99-us": 12169.973,
+        "allocs/op": 6697.333333333333,
+        "elapsed_ns": 546527073,
+        "first-event-p50-us": 9030.849,
+        "first-event-p95-us": 11031.26,
+        "first-event-p99-us": 11304.958,
+        "ns/op": 22771961.375,
+        "process-cpu-ns/op": 41043666.666666664,
+        "sampled-heap-growth-B": 21555808,
+        "wire-tool-p50-us": 9097.35,
+        "wire-tool-p95-us": 11239.128,
+        "wire-tool-p99-us": 11471.555,
+        "workflow-p50-us": 22452.435,
+        "workflow-p95-us": 25943.954,
+        "workflow-p99-us": 26953.871
+      }
+    },
+    {
+      "name": "large/c1/relay",
+      "repetition": 1,
+      "samples": 24,
+      "dispatches": 48,
+      "first_requests": 24,
+      "next_requests": 24,
+      "events": 456,
+      "actions": 48,
+      "history_bytes": 262144,
+      "state_bytes": 263050,
+      "metrics": {
+        "B/op": 19136073,
+        "action-ready-p50-us": 9531.283,
+        "action-ready-p95-us": 12040.854,
+        "action-ready-p99-us": 12538.985,
+        "allocs/op": 6706.583333333333,
+        "elapsed_ns": 524495057,
+        "first-event-p50-us": 8559.241,
+        "first-event-p95-us": 11228.62,
+        "first-event-p99-us": 11752.835,
+        "ns/op": 21853960.708333332,
+        "process-cpu-ns/op": 40748583.333333336,
+        "sampled-heap-growth-B": 18548344,
+        "wire-tool-p50-us": 8757.062,
+        "wire-tool-p95-us": 11477.606,
+        "wire-tool-p99-us": 11795.02,
+        "workflow-p50-us": 21196.901,
+        "workflow-p95-us": 24047.187,
+        "workflow-p99-us": 25148.411
+      }
+    },
+    {
+      "name": "large/c1/relay",
+      "repetition": 2,
+      "samples": 24,
+      "dispatches": 48,
+      "first_requests": 24,
+      "next_requests": 24,
+      "events": 456,
+      "actions": 48,
+      "history_bytes": 262144,
+      "state_bytes": 263050,
+      "metrics": {
+        "B/op": 19170131.333333332,
+        "action-ready-p50-us": 10616.144,
+        "action-ready-p95-us": 12151.223,
+        "action-ready-p99-us": 12882.271,
+        "allocs/op": 6710.208333333333,
+        "elapsed_ns": 584611589,
+        "first-event-p50-us": 9764.482,
+        "first-event-p95-us": 10967.788,
+        "first-event-p99-us": 12245.178,
+        "ns/op": 24358816.208333332,
+        "process-cpu-ns/op": 45673666.666666664,
+        "sampled-heap-growth-B": 19627352,
+        "wire-tool-p50-us": 9798.368,
+        "wire-tool-p95-us": 11142.507,
+        "wire-tool-p99-us": 12269.755,
+        "workflow-p50-us": 24431.527,
+        "workflow-p95-us": 27669.594,
+        "workflow-p99-us": 28395.645
+      }
+    },
+    {
+      "name": "large/c1/gateway",
+      "repetition": 0,
+      "samples": 24,
+      "dispatches": 48,
+      "first_requests": 24,
+      "next_requests": 24,
+      "events": 456,
+      "actions": 48,
+      "history_bytes": 262144,
+      "state_bytes": 263050,
+      "metrics": {
+        "B/op": 51719431.333333336,
+        "action-ready-p50-us": 41893.18,
+        "action-ready-p95-us": 47777.965,
+        "action-ready-p99-us": 49012.177,
+        "allocs/op": 12807.458333333334,
+        "elapsed_ns": 2123017339,
+        "first-event-p50-us": 40350.662,
+        "first-event-p95-us": 45905.413,
+        "first-event-p99-us": 47083.018,
+        "ns/op": 88459055.79166667,
+        "process-cpu-ns/op": 143721500,
+        "sampled-heap-growth-B": 18892816,
+        "wire-tool-p50-us": 40760.079,
+        "wire-tool-p95-us": 46583.006,
+        "wire-tool-p99-us": 47587.677,
+        "workflow-p50-us": 88725.424,
+        "workflow-p95-us": 97679.174,
+        "workflow-p99-us": 99164.914
+      }
+    },
+    {
+      "name": "large/c1/gateway",
+      "repetition": 1,
+      "samples": 24,
+      "dispatches": 48,
+      "first_requests": 24,
+      "next_requests": 24,
+      "events": 456,
+      "actions": 48,
+      "history_bytes": 262144,
+      "state_bytes": 263050,
+      "metrics": {
+        "B/op": 51737422.666666664,
+        "action-ready-p50-us": 41979.98,
+        "action-ready-p95-us": 45626.828,
+        "action-ready-p99-us": 46991.325,
+        "allocs/op": 12811.041666666666,
+        "elapsed_ns": 2089331172,
+        "first-event-p50-us": 40235.296,
+        "first-event-p95-us": 43967.293,
+        "first-event-p99-us": 45127.342,
+        "ns/op": 87055465.5,
+        "process-cpu-ns/op": 144299791.66666666,
+        "sampled-heap-growth-B": 19088704,
+        "wire-tool-p50-us": 40947.753,
+        "wire-tool-p95-us": 44971.771,
+        "wire-tool-p99-us": 45790.747,
+        "workflow-p50-us": 85990.986,
+        "workflow-p95-us": 94576.97,
+        "workflow-p99-us": 97219.839
+      }
+    },
+    {
+      "name": "large/c1/gateway",
+      "repetition": 2,
+      "samples": 24,
+      "dispatches": 48,
+      "first_requests": 24,
+      "next_requests": 24,
+      "events": 456,
+      "actions": 48,
+      "history_bytes": 262144,
+      "state_bytes": 263050,
+      "metrics": {
+        "B/op": 51726519.666666664,
+        "action-ready-p50-us": 41314.203,
+        "action-ready-p95-us": 51863.011,
+        "action-ready-p99-us": 54120.74,
+        "allocs/op": 12838.25,
+        "elapsed_ns": 2120414947,
+        "first-event-p50-us": 39479.589,
+        "first-event-p95-us": 50290.603,
+        "first-event-p99-us": 51502.839,
+        "ns/op": 88350622.79166667,
+        "process-cpu-ns/op": 148697125,
+        "sampled-heap-growth-B": 19432320,
+        "wire-tool-p50-us": 40091.554,
+        "wire-tool-p95-us": 50836.209,
+        "wire-tool-p99-us": 52476.269,
+        "workflow-p50-us": 86586.444,
+        "workflow-p95-us": 100481.131,
+        "workflow-p99-us": 109559.318
+      }
+    },
+    {
+      "name": "large/c1/reference",
+      "repetition": 0,
+      "samples": 24,
+      "dispatches": 48,
+      "first_requests": 24,
+      "next_requests": 24,
+      "events": 456,
+      "actions": 48,
+      "history_bytes": 262144,
+      "state_bytes": 263050,
+      "metrics": {
+        "B/op": 59051507,
+        "action-ready-p50-us": 62460.603,
+        "action-ready-p95-us": 78582.253,
+        "action-ready-p99-us": 83417.85,
+        "allocs/op": 13619.208333333334,
+        "claim-commit-p50-us": 5757.722,
+        "claim-commit-p95-us": 7779.774,
+        "claim-commit-p99-us": 8126.866,
+        "dispatch-journal-p50-us": 695.545,
+        "dispatch-journal-p95-us": 1006.913,
+        "dispatch-journal-p99-us": 1040.822,
+        "elapsed_ns": 2670962781,
+        "first-event-p50-us": 47671.38,
+        "first-event-p95-us": 58176.218,
+        "first-event-p99-us": 60613.378,
+        "ns/op": 111290115.875,
+        "process-cpu-ns/op": 162251583.33333334,
+        "ready-commit-p50-us": 6105.198,
+        "ready-commit-p95-us": 9797.326,
+        "ready-commit-p99-us": 14413.517,
+        "sampled-heap-growth-B": 21704744,
+        "wire-tool-p50-us": 48127.663,
+        "wire-tool-p95-us": 58736.799,
+        "wire-tool-p99-us": 61244.474,
+        "workflow-p50-us": 106197.188,
+        "workflow-p95-us": 132491.018,
+        "workflow-p99-us": 133220.57
+      }
+    },
+    {
+      "name": "large/c1/reference",
+      "repetition": 1,
+      "samples": 24,
+      "dispatches": 48,
+      "first_requests": 24,
+      "next_requests": 24,
+      "events": 456,
+      "actions": 48,
+      "history_bytes": 262144,
+      "state_bytes": 263050,
+      "metrics": {
+        "B/op": 59142762.666666664,
+        "action-ready-p50-us": 65141.007,
+        "action-ready-p95-us": 79745.152,
+        "action-ready-p99-us": 82214.102,
+        "allocs/op": 13627.666666666666,
+        "claim-commit-p50-us": 5971.809,
+        "claim-commit-p95-us": 9641.725,
+        "claim-commit-p99-us": 10422.912,
+        "dispatch-journal-p50-us": 734.902,
+        "dispatch-journal-p95-us": 1176.434,
+        "dispatch-journal-p99-us": 1199.878,
+        "elapsed_ns": 2769133490,
+        "first-event-p50-us": 50120.074,
+        "first-event-p95-us": 61048.713,
+        "first-event-p99-us": 65320.387,
+        "ns/op": 115380562.08333333,
+        "process-cpu-ns/op": 168266833.33333334,
+        "ready-commit-p50-us": 6365.494,
+        "ready-commit-p95-us": 7564.793,
+        "ready-commit-p99-us": 8018.893,
+        "sampled-heap-growth-B": 23223000,
+        "wire-tool-p50-us": 50709.649,
+        "wire-tool-p95-us": 61737.805,
+        "wire-tool-p99-us": 65987.368,
+        "workflow-p50-us": 111983.01,
+        "workflow-p95-us": 130173.677,
+        "workflow-p99-us": 131538.109
+      }
+    },
+    {
+      "name": "large/c1/reference",
+      "repetition": 2,
+      "samples": 24,
+      "dispatches": 48,
+      "first_requests": 24,
+      "next_requests": 24,
+      "events": 456,
+      "actions": 48,
+      "history_bytes": 262144,
+      "state_bytes": 263050,
+      "metrics": {
+        "B/op": 59225877.333333336,
+        "action-ready-p50-us": 67622.707,
+        "action-ready-p95-us": 80362.72,
+        "action-ready-p99-us": 83693.369,
+        "allocs/op": 13620.625,
+        "claim-commit-p50-us": 5862.002,
+        "claim-commit-p95-us": 7804.592,
+        "claim-commit-p99-us": 11358.191,
+        "dispatch-journal-p50-us": 733.613,
+        "dispatch-journal-p95-us": 955.168,
+        "dispatch-journal-p99-us": 966.041,
+        "elapsed_ns": 2847427932,
+        "first-event-p50-us": 50831.611,
+        "first-event-p95-us": 62813.946,
+        "first-event-p99-us": 66274.902,
+        "ns/op": 118642830.5,
+        "process-cpu-ns/op": 171883875,
+        "ready-commit-p50-us": 6327.544,
+        "ready-commit-p95-us": 7523.213,
+        "ready-commit-p99-us": 7597.11,
+        "sampled-heap-growth-B": 22244208,
+        "wire-tool-p50-us": 51386.787,
+        "wire-tool-p95-us": 63794.216,
+        "wire-tool-p99-us": 67017.657,
+        "workflow-p50-us": 116501.954,
+        "workflow-p95-us": 132891.194,
+        "workflow-p99-us": 141673.484
+      }
+    },
+    {
+      "name": "large/c8/relay",
+      "repetition": 0,
+      "samples": 24,
+      "dispatches": 48,
+      "first_requests": 24,
+      "next_requests": 24,
+      "events": 456,
+      "actions": 48,
+      "history_bytes": 262144,
+      "state_bytes": 263050,
+      "metrics": {
+        "B/op": 19048401,
+        "action-ready-p50-us": 27954.894,
+        "action-ready-p95-us": 49131.999,
+        "action-ready-p99-us": 50559.699,
+        "allocs/op": 6682.291666666667,
+        "elapsed_ns": 211107321,
+        "first-event-p50-us": 25682.063,
+        "first-event-p95-us": 48313.458,
+        "first-event-p99-us": 49857.623,
+        "ns/op": 8796138.375,
+        "process-cpu-ns/op": 31391291.666666668,
+        "sampled-heap-growth-B": 42828000,
+        "wire-tool-p50-us": 25690.771,
+        "wire-tool-p95-us": 48323.173,
+        "wire-tool-p99-us": 49869.067,
+        "workflow-p50-us": 61881.424,
+        "workflow-p95-us": 86421.117,
+        "workflow-p99-us": 94366.536
+      }
+    },
+    {
+      "name": "large/c8/relay",
+      "repetition": 1,
+      "samples": 24,
+      "dispatches": 48,
+      "first_requests": 24,
+      "next_requests": 24,
+      "events": 456,
+      "actions": 48,
+      "history_bytes": 262144,
+      "state_bytes": 263050,
+      "metrics": {
+        "B/op": 19010475,
+        "action-ready-p50-us": 34257.172,
+        "action-ready-p95-us": 45413.125,
+        "action-ready-p99-us": 45469.262,
+        "allocs/op": 6677.083333333333,
+        "elapsed_ns": 220662168,
+        "first-event-p50-us": 31531.694,
+        "first-event-p95-us": 43394.998,
+        "first-event-p99-us": 44627.09,
+        "ns/op": 9194257,
+        "process-cpu-ns/op": 33197000,
+        "sampled-heap-growth-B": 41912344,
+        "wire-tool-p50-us": 31543.572,
+        "wire-tool-p95-us": 43405.385,
+        "wire-tool-p99-us": 44640.777,
+        "workflow-p50-us": 69320.373,
+        "workflow-p95-us": 89399.653,
+        "workflow-p99-us": 90821.093
+      }
+    },
+    {
+      "name": "large/c8/relay",
+      "repetition": 2,
+      "samples": 24,
+      "dispatches": 48,
+      "first_requests": 24,
+      "next_requests": 24,
+      "events": 456,
+      "actions": 48,
+      "history_bytes": 262144,
+      "state_bytes": 263050,
+      "metrics": {
+        "B/op": 18960420.333333332,
+        "action-ready-p50-us": 28820.783,
+        "action-ready-p95-us": 41038.136,
+        "action-ready-p99-us": 44913.886,
+        "allocs/op": 6675.541666666667,
+        "elapsed_ns": 215306466,
+        "first-event-p50-us": 26783.034,
+        "first-event-p95-us": 40074.167,
+        "first-event-p99-us": 44229.188,
+        "ns/op": 8971102.75,
+        "process-cpu-ns/op": 32706000,
+        "sampled-heap-growth-B": 45817192,
+        "wire-tool-p50-us": 26787.826,
+        "wire-tool-p95-us": 40085.597,
+        "wire-tool-p99-us": 44237.796,
+        "workflow-p50-us": 62621.865,
+        "workflow-p95-us": 84209.168,
+        "workflow-p99-us": 86189.747
+      }
+    },
+    {
+      "name": "large/c8/gateway",
+      "repetition": 0,
+      "samples": 24,
+      "dispatches": 48,
+      "first_requests": 24,
+      "next_requests": 24,
+      "events": 456,
+      "actions": 48,
+      "history_bytes": 262144,
+      "state_bytes": 263050,
+      "metrics": {
+        "B/op": 51603358,
+        "action-ready-p50-us": 107770.879,
+        "action-ready-p95-us": 140322.177,
+        "action-ready-p99-us": 151585.757,
+        "allocs/op": 12648.75,
+        "elapsed_ns": 685119025,
+        "first-event-p50-us": 99954.073,
+        "first-event-p95-us": 137668.547,
+        "first-event-p99-us": 142228.121,
+        "ns/op": 28546626.041666668,
+        "process-cpu-ns/op": 101754875,
+        "sampled-heap-growth-B": 55577784,
+        "wire-tool-p50-us": 102900.098,
+        "wire-tool-p95-us": 137680.463,
+        "wire-tool-p99-us": 142240.339,
+        "workflow-p50-us": 212536.93,
+        "workflow-p95-us": 273251.842,
+        "workflow-p99-us": 278918.706
+      }
+    },
+    {
+      "name": "large/c8/gateway",
+      "repetition": 1,
+      "samples": 24,
+      "dispatches": 48,
+      "first_requests": 24,
+      "next_requests": 24,
+      "events": 456,
+      "actions": 48,
+      "history_bytes": 262144,
+      "state_bytes": 263050,
+      "metrics": {
+        "B/op": 51508189.666666664,
+        "action-ready-p50-us": 87573.948,
+        "action-ready-p95-us": 117053.258,
+        "action-ready-p99-us": 130354.985,
+        "allocs/op": 12634.916666666666,
+        "elapsed_ns": 588663460,
+        "first-event-p50-us": 85778.909,
+        "first-event-p95-us": 116448.192,
+        "first-event-p99-us": 129294.271,
+        "ns/op": 24527644.166666668,
+        "process-cpu-ns/op": 90599625,
+        "sampled-heap-growth-B": 54302008,
+        "wire-tool-p50-us": 85803.22,
+        "wire-tool-p95-us": 116460.551,
+        "wire-tool-p99-us": 129307.507,
+        "workflow-p50-us": 186306.488,
+        "workflow-p95-us": 225730.366,
+        "workflow-p99-us": 229976.464
+      }
+    },
+    {
+      "name": "large/c8/gateway",
+      "repetition": 2,
+      "samples": 24,
+      "dispatches": 48,
+      "first_requests": 24,
+      "next_requests": 24,
+      "events": 456,
+      "actions": 48,
+      "history_bytes": 262144,
+      "state_bytes": 263050,
+      "metrics": {
+        "B/op": 51568165,
+        "action-ready-p50-us": 91230.169,
+        "action-ready-p95-us": 125976.855,
+        "action-ready-p99-us": 134493.98,
+        "allocs/op": 12638.833333333334,
+        "elapsed_ns": 628735958,
+        "first-event-p50-us": 90140.372,
+        "first-event-p95-us": 119144.051,
+        "first-event-p99-us": 124896.881,
+        "ns/op": 26197331.583333332,
+        "process-cpu-ns/op": 96465541.66666667,
+        "sampled-heap-growth-B": 59449248,
+        "wire-tool-p50-us": 90150.531,
+        "wire-tool-p95-us": 119152.809,
+        "wire-tool-p99-us": 124908.2,
+        "workflow-p50-us": 179603.208,
+        "workflow-p95-us": 236709.171,
+        "workflow-p99-us": 267823.105
+      }
+    },
+    {
+      "name": "large/c8/reference",
+      "repetition": 0,
+      "samples": 24,
+      "dispatches": 48,
+      "first_requests": 24,
+      "next_requests": 24,
+      "events": 456,
+      "actions": 48,
+      "history_bytes": 262144,
+      "state_bytes": 263050,
+      "metrics": {
+        "B/op": 58629358,
+        "action-ready-p50-us": 194618.332,
+        "action-ready-p95-us": 262008.664,
+        "action-ready-p99-us": 269162.832,
+        "allocs/op": 13445.875,
+        "claim-commit-p50-us": 44328.491,
+        "claim-commit-p95-us": 78948.475,
+        "claim-commit-p99-us": 88169.407,
+        "dispatch-journal-p50-us": 3448.66,
+        "dispatch-journal-p95-us": 9037.804,
+        "dispatch-journal-p99-us": 10072.746,
+        "elapsed_ns": 882920375,
+        "first-event-p50-us": 124889.841,
+        "first-event-p95-us": 175279.38,
+        "first-event-p99-us": 190362.647,
+        "ns/op": 36788348.958333336,
+        "process-cpu-ns/op": 122465541.66666667,
+        "ready-commit-p50-us": 53222.592,
+        "ready-commit-p95-us": 72246.545,
+        "ready-commit-p99-us": 74268.684,
+        "sampled-heap-growth-B": 56352744,
+        "wire-tool-p50-us": 124899.187,
+        "wire-tool-p95-us": 175301.792,
+        "wire-tool-p99-us": 190370.458,
+        "workflow-p50-us": 263474.885,
+        "workflow-p95-us": 352232.352,
+        "workflow-p99-us": 362866.452
+      }
+    },
+    {
+      "name": "large/c8/reference",
+      "repetition": 1,
+      "samples": 24,
+      "dispatches": 48,
+      "first_requests": 24,
+      "next_requests": 24,
+      "events": 456,
+      "actions": 48,
+      "history_bytes": 262144,
+      "state_bytes": 263050,
+      "metrics": {
+        "B/op": 58698954.333333336,
+        "action-ready-p50-us": 203075.39,
+        "action-ready-p95-us": 239090.062,
+        "action-ready-p99-us": 251272.118,
+        "allocs/op": 13429.791666666666,
+        "claim-commit-p50-us": 50406.956,
+        "claim-commit-p95-us": 71327.39,
+        "claim-commit-p99-us": 76594.041,
+        "dispatch-journal-p50-us": 3433.131,
+        "dispatch-journal-p95-us": 8994.99,
+        "dispatch-journal-p99-us": 12714.485,
+        "elapsed_ns": 891636868,
+        "first-event-p50-us": 126600.086,
+        "first-event-p95-us": 150437.742,
+        "first-event-p99-us": 162874.845,
+        "ns/op": 37151536.166666664,
+        "process-cpu-ns/op": 117116750,
+        "ready-commit-p50-us": 51855.117,
+        "ready-commit-p95-us": 67534.181,
+        "ready-commit-p99-us": 69857.616,
+        "sampled-heap-growth-B": 55772016,
+        "wire-tool-p50-us": 128075.326,
+        "wire-tool-p95-us": 152889.868,
+        "wire-tool-p99-us": 163321.418,
+        "workflow-p50-us": 272172.016,
+        "workflow-p95-us": 308874.593,
+        "workflow-p99-us": 346666.545
+      }
+    },
+    {
+      "name": "large/c8/reference",
+      "repetition": 2,
+      "samples": 24,
+      "dispatches": 48,
+      "first_requests": 24,
+      "next_requests": 24,
+      "events": 456,
+      "actions": 48,
+      "history_bytes": 262144,
+      "state_bytes": 263050,
+      "metrics": {
+        "B/op": 58617308.666666664,
+        "action-ready-p50-us": 186235.963,
+        "action-ready-p95-us": 229088.442,
+        "action-ready-p99-us": 242236.917,
+        "allocs/op": 13424.291666666666,
+        "claim-commit-p50-us": 38747.122,
+        "claim-commit-p95-us": 80785.021,
+        "claim-commit-p99-us": 90005.693,
+        "dispatch-journal-p50-us": 1679.179,
+        "dispatch-journal-p95-us": 5467.168,
+        "dispatch-journal-p99-us": 6007.879,
+        "elapsed_ns": 878536858,
+        "first-event-p50-us": 122932.46,
+        "first-event-p95-us": 147900.301,
+        "first-event-p99-us": 160512.834,
+        "ns/op": 36605702.416666664,
+        "process-cpu-ns/op": 118019958.33333333,
+        "ready-commit-p50-us": 51518.292,
+        "ready-commit-p95-us": 72942.575,
+        "ready-commit-p99-us": 73146.673,
+        "sampled-heap-growth-B": 63354536,
+        "wire-tool-p50-us": 122940.844,
+        "wire-tool-p95-us": 147911.03,
+        "wire-tool-p99-us": 160524.792,
+        "workflow-p50-us": 286181.815,
+        "workflow-p95-us": 332976.395,
+        "workflow-p99-us": 349820.941
+      }
+    }
+  ],
+  "summary": {
+    "small/c1/relay": {
+      "elapsed_ns": {
+        "median": 60507217,
+        "maximum": 74986757,
+        "minimum": 57033291
+      },
+      "ns/op": {
+        "median": 2521134.0416666665,
+        "maximum": 3124448.2083333335,
+        "minimum": 2376387.125
+      },
+      "process-cpu-ns/op": {
+        "median": 4179083.3333333335,
+        "maximum": 4557458.333333333,
+        "minimum": 3636125
+      },
+      "B/op": {
+        "median": 294732.3333333333,
+        "maximum": 294794.3333333333,
+        "minimum": 294521.3333333333
+      },
+      "allocs/op": {
+        "median": 4852.291666666667,
+        "maximum": 4853,
+        "minimum": 4851.916666666667
+      },
+      "sampled-heap-growth-B": {
+        "median": 5596720,
+        "maximum": 5614920,
+        "minimum": 5533776
+      },
+      "workflow-p50-us": {
+        "median": 2392.819,
+        "maximum": 2829.791,
+        "minimum": 2229.212
+      },
+      "workflow-p95-us": {
+        "median": 3029.719,
+        "maximum": 4621.976,
+        "minimum": 2822.839
+      },
+      "workflow-p99-us": {
+        "median": 4007.107,
+        "maximum": 4965.608,
+        "minimum": 3219.363
+      },
+      "first-event-p50-us": {
+        "median": 578.761,
+        "maximum": 689.142,
+        "minimum": 559.586
+      },
+      "first-event-p95-us": {
+        "median": 812.869,
+        "maximum": 933.14,
+        "minimum": 795.489
+      },
+      "first-event-p99-us": {
+        "median": 921.922,
+        "maximum": 1613.48,
+        "minimum": 903.55
+      },
+      "wire-tool-p50-us": {
+        "median": 704.971,
+        "maximum": 803.106,
+        "minimum": 660.117
+      },
+      "wire-tool-p95-us": {
+        "median": 928.836,
+        "maximum": 1727.121,
+        "minimum": 922.384
+      },
+      "wire-tool-p99-us": {
+        "median": 1145.934,
+        "maximum": 1865.084,
+        "minimum": 1012.117
+      },
+      "action-ready-p50-us": {
+        "median": 1531.894,
+        "maximum": 1701.88,
+        "minimum": 1321.143
+      },
+      "action-ready-p95-us": {
+        "median": 2050.9,
+        "maximum": 2663.983,
+        "minimum": 2021.747
+      },
+      "action-ready-p99-us": {
+        "median": 2206.211,
+        "maximum": 3326.298,
+        "minimum": 2060.471
+      }
+    },
+    "small/c1/gateway": {
+      "elapsed_ns": {
+        "median": 144758186,
+        "maximum": 158288408,
+        "minimum": 143825290
+      },
+      "ns/op": {
+        "median": 6031591.083333333,
+        "maximum": 6595350.333333333,
+        "minimum": 5992720.416666667
+      },
+      "process-cpu-ns/op": {
+        "median": 8089375,
+        "maximum": 8860250,
+        "minimum": 8023000
+      },
+      "B/op": {
+        "median": 767248.3333333334,
+        "maximum": 768371,
+        "minimum": 766038.6666666666
+      },
+      "allocs/op": {
+        "median": 10553.375,
+        "maximum": 10556.375,
+        "minimum": 10542.75
+      },
+      "sampled-heap-growth-B": {
+        "median": 8218600,
+        "maximum": 8304448,
+        "minimum": 8050856
+      },
+      "workflow-p50-us": {
+        "median": 5763.992,
+        "maximum": 5994.806,
+        "minimum": 5642.058
+      },
+      "workflow-p95-us": {
+        "median": 7510.232,
+        "maximum": 8466.86,
+        "minimum": 7372.135
+      },
+      "workflow-p99-us": {
+        "median": 7654.438,
+        "maximum": 9654.382,
+        "minimum": 7544.432
+      },
+      "first-event-p50-us": {
+        "median": 1267.718,
+        "maximum": 1277.763,
+        "minimum": 1249.422
+      },
+      "first-event-p95-us": {
+        "median": 1908.31,
+        "maximum": 2355.157,
+        "minimum": 1720.196
+      },
+      "first-event-p99-us": {
+        "median": 2094.958,
+        "maximum": 2539.062,
+        "minimum": 1759.454
+      },
+      "wire-tool-p50-us": {
+        "median": 1893.976,
+        "maximum": 1944.432,
+        "minimum": 1878.398
+      },
+      "wire-tool-p95-us": {
+        "median": 3088.433,
+        "maximum": 3318.901,
+        "minimum": 2295.499
+      },
+      "wire-tool-p99-us": {
+        "median": 3547.311,
+        "maximum": 4144.662,
+        "minimum": 2418.465
+      },
+      "action-ready-p50-us": {
+        "median": 3182.91,
+        "maximum": 3231.882,
+        "minimum": 3039.175
+      },
+      "action-ready-p95-us": {
+        "median": 4288.693,
+        "maximum": 5872.258,
+        "minimum": 3617.445
+      },
+      "action-ready-p99-us": {
+        "median": 4294.88,
+        "maximum": 6147.059,
+        "minimum": 3789.988
+      }
+    },
+    "small/c1/reference": {
+      "elapsed_ns": {
+        "median": 279097429,
+        "maximum": 322972459,
+        "minimum": 278107911
+      },
+      "ns/op": {
+        "median": 11629059.541666666,
+        "maximum": 13457185.791666666,
+        "minimum": 11587829.625
+      },
+      "process-cpu-ns/op": {
+        "median": 11081958.333333334,
+        "maximum": 12253041.666666666,
+        "minimum": 10096291.666666666
+      },
+      "B/op": {
+        "median": 821280.6666666666,
+        "maximum": 823584,
+        "minimum": 815255.6666666666
+      },
+      "allocs/op": {
+        "median": 11295.875,
+        "maximum": 11303.916666666666,
+        "minimum": 11289.041666666666
+      },
+      "sampled-heap-growth-B": {
+        "median": 7112880,
+        "maximum": 7693744,
+        "minimum": 6788352
+      },
+      "workflow-p50-us": {
+        "median": 11593.486,
+        "maximum": 13572.879,
+        "minimum": 11500.084
+      },
+      "workflow-p95-us": {
+        "median": 13001.912,
+        "maximum": 15465.782,
+        "minimum": 12988.431
+      },
+      "workflow-p99-us": {
+        "median": 13148.668,
+        "maximum": 17013.746,
+        "minimum": 13140.003
+      },
+      "first-event-p50-us": {
+        "median": 4099.253,
+        "maximum": 4665.992,
+        "minimum": 3897.428
+      },
+      "first-event-p95-us": {
+        "median": 4847.277,
+        "maximum": 7397.271,
+        "minimum": 4842.949
+      },
+      "first-event-p99-us": {
+        "median": 5432.332,
+        "maximum": 7579.792,
+        "minimum": 4868.283
+      },
+      "wire-tool-p50-us": {
+        "median": 4658.889,
+        "maximum": 5154.246,
+        "minimum": 4531.832
+      },
+      "wire-tool-p95-us": {
+        "median": 5856.015,
+        "maximum": 8104.899,
+        "minimum": 5392.407
+      },
+      "wire-tool-p99-us": {
+        "median": 6371.701,
+        "maximum": 8318.105,
+        "minimum": 5829.522
+      },
+      "action-ready-p50-us": {
+        "median": 8899.015,
+        "maximum": 9730.455,
+        "minimum": 8709.68
+      },
+      "action-ready-p95-us": {
+        "median": 10427.383,
+        "maximum": 12670.723,
+        "minimum": 10091.57
+      },
+      "action-ready-p99-us": {
+        "median": 11017.805,
+        "maximum": 13759.518,
+        "minimum": 10514.756
+      },
+      "claim-commit-p50-us": {
+        "median": 2067.717,
+        "maximum": 2318.516,
+        "minimum": 1866.469
+      },
+      "claim-commit-p95-us": {
+        "median": 2434.848,
+        "maximum": 3105.669,
+        "minimum": 2294.876
+      },
+      "claim-commit-p99-us": {
+        "median": 3051.916,
+        "maximum": 3362.496,
+        "minimum": 2350.768
+      },
+      "dispatch-journal-p50-us": {
+        "median": 645.751,
+        "maximum": 655.472,
+        "minimum": 594.162
+      },
+      "dispatch-journal-p95-us": {
+        "median": 809.827,
+        "maximum": 821.93,
+        "minimum": 714.272
+      },
+      "dispatch-journal-p99-us": {
+        "median": 835.532,
+        "maximum": 849.738,
+        "minimum": 729.703
+      },
+      "ready-commit-p50-us": {
+        "median": 2016.614,
+        "maximum": 2203.163,
+        "minimum": 1918.288
+      },
+      "ready-commit-p95-us": {
+        "median": 2568.599,
+        "maximum": 2832.272,
+        "minimum": 2521.21
+      },
+      "ready-commit-p99-us": {
+        "median": 2701.786,
+        "maximum": 2882.895,
+        "minimum": 2570.026
+      }
+    },
+    "small/c8/relay": {
+      "elapsed_ns": {
+        "median": 14902962,
+        "maximum": 17050710,
+        "minimum": 14726103
+      },
+      "ns/op": {
+        "median": 620956.75,
+        "maximum": 710446.25,
+        "minimum": 613587.625
+      },
+      "process-cpu-ns/op": {
+        "median": 2305916.6666666665,
+        "maximum": 2553291.6666666665,
+        "minimum": 2135541.6666666665
+      },
+      "B/op": {
+        "median": 302232,
+        "maximum": 306315,
+        "minimum": 302132.3333333333
+      },
+      "allocs/op": {
+        "median": 4853.166666666667,
+        "maximum": 4887.708333333333,
+        "minimum": 4852.458333333333
+      },
+      "sampled-heap-growth-B": {
+        "median": 7253568,
+        "maximum": 7351560,
+        "minimum": 7251176
+      },
+      "workflow-p50-us": {
+        "median": 4597.889,
+        "maximum": 4686.99,
+        "minimum": 4206.043
+      },
+      "workflow-p95-us": {
+        "median": 6123.994,
+        "maximum": 7371.563,
+        "minimum": 5889.991
+      },
+      "workflow-p99-us": {
+        "median": 6622.302,
+        "maximum": 8365.831,
+        "minimum": 5976.483
+      },
+      "first-event-p50-us": {
+        "median": 2023.719,
+        "maximum": 2169.286,
+        "minimum": 1665.181
+      },
+      "first-event-p95-us": {
+        "median": 3256.267,
+        "maximum": 3792.464,
+        "minimum": 2516.748
+      },
+      "first-event-p99-us": {
+        "median": 3306.332,
+        "maximum": 4513.668,
+        "minimum": 2885.418
+      },
+      "wire-tool-p50-us": {
+        "median": 2059.251,
+        "maximum": 2249.34,
+        "minimum": 1772.914
+      },
+      "wire-tool-p95-us": {
+        "median": 3357.716,
+        "maximum": 4195.292,
+        "minimum": 2526.518
+      },
+      "wire-tool-p99-us": {
+        "median": 3445.97,
+        "maximum": 4888.516,
+        "minimum": 2892.522
+      },
+      "action-ready-p50-us": {
+        "median": 2662.572,
+        "maximum": 2953.775,
+        "minimum": 2461.543
+      },
+      "action-ready-p95-us": {
+        "median": 4138.433,
+        "maximum": 4858.926,
+        "minimum": 3388.833
+      },
+      "action-ready-p99-us": {
+        "median": 4224.418,
+        "maximum": 5419.954,
+        "minimum": 3450.343
+      }
+    },
+    "small/c8/gateway": {
+      "elapsed_ns": {
+        "median": 42241340,
+        "maximum": 46594494,
+        "minimum": 36112680
+      },
+      "ns/op": {
+        "median": 1760055.8333333333,
+        "maximum": 1941437.25,
+        "minimum": 1504695
+      },
+      "process-cpu-ns/op": {
+        "median": 5843083.333333333,
+        "maximum": 6632708.333333333,
+        "minimum": 5459916.666666667
+      },
+      "B/op": {
+        "median": 767772.3333333334,
+        "maximum": 784970,
+        "minimum": 764991.6666666666
+      },
+      "allocs/op": {
+        "median": 10553.458333333334,
+        "maximum": 10584.291666666666,
+        "minimum": 10537.625
+      },
+      "sampled-heap-growth-B": {
+        "median": 12061128,
+        "maximum": 12469408,
+        "minimum": 11908552
+      },
+      "workflow-p50-us": {
+        "median": 11629.531,
+        "maximum": 12668.29,
+        "minimum": 10183.452
+      },
+      "workflow-p95-us": {
+        "median": 16253.82,
+        "maximum": 18873.905,
+        "minimum": 15807.894
+      },
+      "workflow-p99-us": {
+        "median": 19334.29,
+        "maximum": 19478.946,
+        "minimum": 16155.404
+      },
+      "first-event-p50-us": {
+        "median": 5236.876,
+        "maximum": 5455.948,
+        "minimum": 3371.32
+      },
+      "first-event-p95-us": {
+        "median": 9554.483,
+        "maximum": 9774.183,
+        "minimum": 6753.535
+      },
+      "first-event-p99-us": {
+        "median": 10235.274,
+        "maximum": 10734.618,
+        "minimum": 7450.285
+      },
+      "wire-tool-p50-us": {
+        "median": 5866.385,
+        "maximum": 6376.762,
+        "minimum": 3924.263
+      },
+      "wire-tool-p95-us": {
+        "median": 9558.148,
+        "maximum": 10745.152,
+        "minimum": 7461.307
+      },
+      "wire-tool-p99-us": {
+        "median": 10244.227,
+        "maximum": 12539.32,
+        "minimum": 7867.22
+      },
+      "action-ready-p50-us": {
+        "median": 7302.923,
+        "maximum": 7315.12,
+        "minimum": 5307.022
+      },
+      "action-ready-p95-us": {
+        "median": 10001.864,
+        "maximum": 12232.293,
+        "minimum": 8265.804
+      },
+      "action-ready-p99-us": {
+        "median": 10851.111,
+        "maximum": 13103.245,
+        "minimum": 8400.46
+      }
+    },
+    "small/c8/reference": {
+      "elapsed_ns": {
+        "median": 102886736,
+        "maximum": 146844324,
+        "minimum": 101476092
+      },
+      "ns/op": {
+        "median": 4286947.333333333,
+        "maximum": 6118513.5,
+        "minimum": 4228170.5
+      },
+      "process-cpu-ns/op": {
+        "median": 8889583.333333334,
+        "maximum": 10004000,
+        "minimum": 8784208.333333334
+      },
+      "B/op": {
+        "median": 815200.6666666666,
+        "maximum": 845837,
+        "minimum": 814727.6666666666
+      },
+      "allocs/op": {
+        "median": 11286.875,
+        "maximum": 11396.541666666666,
+        "minimum": 11285.458333333334
+      },
+      "sampled-heap-growth-B": {
+        "median": 9220272,
+        "maximum": 10884696,
+        "minimum": 9206704
+      },
+      "workflow-p50-us": {
+        "median": 31689.798,
+        "maximum": 35999.239,
+        "minimum": 30920.681
+      },
+      "workflow-p95-us": {
+        "median": 39432.865,
+        "maximum": 79261.557,
+        "minimum": 36577.732
+      },
+      "workflow-p99-us": {
+        "median": 40396.273,
+        "maximum": 81689.949,
+        "minimum": 38069.238
+      },
+      "first-event-p50-us": {
+        "median": 15638.909,
+        "maximum": 16858.634,
+        "minimum": 12944.963
+      },
+      "first-event-p95-us": {
+        "median": 18951.145,
+        "maximum": 48711.826,
+        "minimum": 17661.438
+      },
+      "first-event-p99-us": {
+        "median": 19698.949,
+        "maximum": 52496.919,
+        "minimum": 18267.755
+      },
+      "wire-tool-p50-us": {
+        "median": 16124.108,
+        "maximum": 17476.092,
+        "minimum": 13404.35
+      },
+      "wire-tool-p95-us": {
+        "median": 19519.629,
+        "maximum": 48725.018,
+        "minimum": 18703.084
+      },
+      "wire-tool-p99-us": {
+        "median": 20575.099,
+        "maximum": 53109.775,
+        "minimum": 18886.889
+      },
+      "action-ready-p50-us": {
+        "median": 29425.64,
+        "maximum": 32678.124,
+        "minimum": 28156.915
+      },
+      "action-ready-p95-us": {
+        "median": 35720.111,
+        "maximum": 77431.741,
+        "minimum": 33195.786
+      },
+      "action-ready-p99-us": {
+        "median": 37095.855,
+        "maximum": 79504.511,
+        "minimum": 33597.345
+      },
+      "claim-commit-p50-us": {
+        "median": 12328.315,
+        "maximum": 13673.892,
+        "minimum": 10702.611
+      },
+      "claim-commit-p95-us": {
+        "median": 16124.977,
+        "maximum": 44540.313,
+        "minimum": 15284.127
+      },
+      "claim-commit-p99-us": {
+        "median": 17102.82,
+        "maximum": 49873.745,
+        "minimum": 15564.791
+      },
+      "dispatch-journal-p50-us": {
+        "median": 759.093,
+        "maximum": 998.869,
+        "minimum": 702.644
+      },
+      "dispatch-journal-p95-us": {
+        "median": 1190.933,
+        "maximum": 2001.856,
+        "minimum": 1186.214
+      },
+      "dispatch-journal-p99-us": {
+        "median": 1251.755,
+        "maximum": 2168.578,
+        "minimum": 1201.389
+      },
+      "ready-commit-p50-us": {
+        "median": 11875.297,
+        "maximum": 14164.751,
+        "minimum": 11168.702
+      },
+      "ready-commit-p95-us": {
+        "median": 14798.794,
+        "maximum": 26296.488,
+        "minimum": 13085.242
+      },
+      "ready-commit-p99-us": {
+        "median": 15586.59,
+        "maximum": 27509.03,
+        "minimum": 13237.398
+      }
+    },
+    "large/c1/relay": {
+      "elapsed_ns": {
+        "median": 546527073,
+        "maximum": 584611589,
+        "minimum": 524495057
+      },
+      "ns/op": {
+        "median": 22771961.375,
+        "maximum": 24358816.208333332,
+        "minimum": 21853960.708333332
+      },
+      "process-cpu-ns/op": {
+        "median": 41043666.666666664,
+        "maximum": 45673666.666666664,
+        "minimum": 40748583.333333336
+      },
+      "B/op": {
+        "median": 19136073,
+        "maximum": 19170131.333333332,
+        "minimum": 19122006.333333332
+      },
+      "allocs/op": {
+        "median": 6706.583333333333,
+        "maximum": 6710.208333333333,
+        "minimum": 6697.333333333333
+      },
+      "sampled-heap-growth-B": {
+        "median": 19627352,
+        "maximum": 21555808,
+        "minimum": 18548344
+      },
+      "workflow-p50-us": {
+        "median": 22452.435,
+        "maximum": 24431.527,
+        "minimum": 21196.901
+      },
+      "workflow-p95-us": {
+        "median": 25943.954,
+        "maximum": 27669.594,
+        "minimum": 24047.187
+      },
+      "workflow-p99-us": {
+        "median": 26953.871,
+        "maximum": 28395.645,
+        "minimum": 25148.411
+      },
+      "first-event-p50-us": {
+        "median": 9030.849,
+        "maximum": 9764.482,
+        "minimum": 8559.241
+      },
+      "first-event-p95-us": {
+        "median": 11031.26,
+        "maximum": 11228.62,
+        "minimum": 10967.788
+      },
+      "first-event-p99-us": {
+        "median": 11752.835,
+        "maximum": 12245.178,
+        "minimum": 11304.958
+      },
+      "wire-tool-p50-us": {
+        "median": 9097.35,
+        "maximum": 9798.368,
+        "minimum": 8757.062
+      },
+      "wire-tool-p95-us": {
+        "median": 11239.128,
+        "maximum": 11477.606,
+        "minimum": 11142.507
+      },
+      "wire-tool-p99-us": {
+        "median": 11795.02,
+        "maximum": 12269.755,
+        "minimum": 11471.555
+      },
+      "action-ready-p50-us": {
+        "median": 9985.26,
+        "maximum": 10616.144,
+        "minimum": 9531.283
+      },
+      "action-ready-p95-us": {
+        "median": 12040.854,
+        "maximum": 12151.223,
+        "minimum": 11891.826
+      },
+      "action-ready-p99-us": {
+        "median": 12538.985,
+        "maximum": 12882.271,
+        "minimum": 12169.973
+      }
+    },
+    "large/c1/gateway": {
+      "elapsed_ns": {
+        "median": 2120414947,
+        "maximum": 2123017339,
+        "minimum": 2089331172
+      },
+      "ns/op": {
+        "median": 88350622.79166667,
+        "maximum": 88459055.79166667,
+        "minimum": 87055465.5
+      },
+      "process-cpu-ns/op": {
+        "median": 144299791.66666666,
+        "maximum": 148697125,
+        "minimum": 143721500
+      },
+      "B/op": {
+        "median": 51726519.666666664,
+        "maximum": 51737422.666666664,
+        "minimum": 51719431.333333336
+      },
+      "allocs/op": {
+        "median": 12811.041666666666,
+        "maximum": 12838.25,
+        "minimum": 12807.458333333334
+      },
+      "sampled-heap-growth-B": {
+        "median": 19088704,
+        "maximum": 19432320,
+        "minimum": 18892816
+      },
+      "workflow-p50-us": {
+        "median": 86586.444,
+        "maximum": 88725.424,
+        "minimum": 85990.986
+      },
+      "workflow-p95-us": {
+        "median": 97679.174,
+        "maximum": 100481.131,
+        "minimum": 94576.97
+      },
+      "workflow-p99-us": {
+        "median": 99164.914,
+        "maximum": 109559.318,
+        "minimum": 97219.839
+      },
+      "first-event-p50-us": {
+        "median": 40235.296,
+        "maximum": 40350.662,
+        "minimum": 39479.589
+      },
+      "first-event-p95-us": {
+        "median": 45905.413,
+        "maximum": 50290.603,
+        "minimum": 43967.293
+      },
+      "first-event-p99-us": {
+        "median": 47083.018,
+        "maximum": 51502.839,
+        "minimum": 45127.342
+      },
+      "wire-tool-p50-us": {
+        "median": 40760.079,
+        "maximum": 40947.753,
+        "minimum": 40091.554
+      },
+      "wire-tool-p95-us": {
+        "median": 46583.006,
+        "maximum": 50836.209,
+        "minimum": 44971.771
+      },
+      "wire-tool-p99-us": {
+        "median": 47587.677,
+        "maximum": 52476.269,
+        "minimum": 45790.747
+      },
+      "action-ready-p50-us": {
+        "median": 41893.18,
+        "maximum": 41979.98,
+        "minimum": 41314.203
+      },
+      "action-ready-p95-us": {
+        "median": 47777.965,
+        "maximum": 51863.011,
+        "minimum": 45626.828
+      },
+      "action-ready-p99-us": {
+        "median": 49012.177,
+        "maximum": 54120.74,
+        "minimum": 46991.325
+      }
+    },
+    "large/c1/reference": {
+      "elapsed_ns": {
+        "median": 2769133490,
+        "maximum": 2847427932,
+        "minimum": 2670962781
+      },
+      "ns/op": {
+        "median": 115380562.08333333,
+        "maximum": 118642830.5,
+        "minimum": 111290115.875
+      },
+      "process-cpu-ns/op": {
+        "median": 168266833.33333334,
+        "maximum": 171883875,
+        "minimum": 162251583.33333334
+      },
+      "B/op": {
+        "median": 59142762.666666664,
+        "maximum": 59225877.333333336,
+        "minimum": 59051507
+      },
+      "allocs/op": {
+        "median": 13620.625,
+        "maximum": 13627.666666666666,
+        "minimum": 13619.208333333334
+      },
+      "sampled-heap-growth-B": {
+        "median": 22244208,
+        "maximum": 23223000,
+        "minimum": 21704744
+      },
+      "workflow-p50-us": {
+        "median": 111983.01,
+        "maximum": 116501.954,
+        "minimum": 106197.188
+      },
+      "workflow-p95-us": {
+        "median": 132491.018,
+        "maximum": 132891.194,
+        "minimum": 130173.677
+      },
+      "workflow-p99-us": {
+        "median": 133220.57,
+        "maximum": 141673.484,
+        "minimum": 131538.109
+      },
+      "first-event-p50-us": {
+        "median": 50120.074,
+        "maximum": 50831.611,
+        "minimum": 47671.38
+      },
+      "first-event-p95-us": {
+        "median": 61048.713,
+        "maximum": 62813.946,
+        "minimum": 58176.218
+      },
+      "first-event-p99-us": {
+        "median": 65320.387,
+        "maximum": 66274.902,
+        "minimum": 60613.378
+      },
+      "wire-tool-p50-us": {
+        "median": 50709.649,
+        "maximum": 51386.787,
+        "minimum": 48127.663
+      },
+      "wire-tool-p95-us": {
+        "median": 61737.805,
+        "maximum": 63794.216,
+        "minimum": 58736.799
+      },
+      "wire-tool-p99-us": {
+        "median": 65987.368,
+        "maximum": 67017.657,
+        "minimum": 61244.474
+      },
+      "action-ready-p50-us": {
+        "median": 65141.007,
+        "maximum": 67622.707,
+        "minimum": 62460.603
+      },
+      "action-ready-p95-us": {
+        "median": 79745.152,
+        "maximum": 80362.72,
+        "minimum": 78582.253
+      },
+      "action-ready-p99-us": {
+        "median": 83417.85,
+        "maximum": 83693.369,
+        "minimum": 82214.102
+      },
+      "claim-commit-p50-us": {
+        "median": 5862.002,
+        "maximum": 5971.809,
+        "minimum": 5757.722
+      },
+      "claim-commit-p95-us": {
+        "median": 7804.592,
+        "maximum": 9641.725,
+        "minimum": 7779.774
+      },
+      "claim-commit-p99-us": {
+        "median": 10422.912,
+        "maximum": 11358.191,
+        "minimum": 8126.866
+      },
+      "dispatch-journal-p50-us": {
+        "median": 733.613,
+        "maximum": 734.902,
+        "minimum": 695.545
+      },
+      "dispatch-journal-p95-us": {
+        "median": 1006.913,
+        "maximum": 1176.434,
+        "minimum": 955.168
+      },
+      "dispatch-journal-p99-us": {
+        "median": 1040.822,
+        "maximum": 1199.878,
+        "minimum": 966.041
+      },
+      "ready-commit-p50-us": {
+        "median": 6327.544,
+        "maximum": 6365.494,
+        "minimum": 6105.198
+      },
+      "ready-commit-p95-us": {
+        "median": 7564.793,
+        "maximum": 9797.326,
+        "minimum": 7523.213
+      },
+      "ready-commit-p99-us": {
+        "median": 8018.893,
+        "maximum": 14413.517,
+        "minimum": 7597.11
+      }
+    },
+    "large/c8/relay": {
+      "elapsed_ns": {
+        "median": 215306466,
+        "maximum": 220662168,
+        "minimum": 211107321
+      },
+      "ns/op": {
+        "median": 8971102.75,
+        "maximum": 9194257,
+        "minimum": 8796138.375
+      },
+      "process-cpu-ns/op": {
+        "median": 32706000,
+        "maximum": 33197000,
+        "minimum": 31391291.666666668
+      },
+      "B/op": {
+        "median": 19010475,
+        "maximum": 19048401,
+        "minimum": 18960420.333333332
+      },
+      "allocs/op": {
+        "median": 6677.083333333333,
+        "maximum": 6682.291666666667,
+        "minimum": 6675.541666666667
+      },
+      "sampled-heap-growth-B": {
+        "median": 42828000,
+        "maximum": 45817192,
+        "minimum": 41912344
+      },
+      "workflow-p50-us": {
+        "median": 62621.865,
+        "maximum": 69320.373,
+        "minimum": 61881.424
+      },
+      "workflow-p95-us": {
+        "median": 86421.117,
+        "maximum": 89399.653,
+        "minimum": 84209.168
+      },
+      "workflow-p99-us": {
+        "median": 90821.093,
+        "maximum": 94366.536,
+        "minimum": 86189.747
+      },
+      "first-event-p50-us": {
+        "median": 26783.034,
+        "maximum": 31531.694,
+        "minimum": 25682.063
+      },
+      "first-event-p95-us": {
+        "median": 43394.998,
+        "maximum": 48313.458,
+        "minimum": 40074.167
+      },
+      "first-event-p99-us": {
+        "median": 44627.09,
+        "maximum": 49857.623,
+        "minimum": 44229.188
+      },
+      "wire-tool-p50-us": {
+        "median": 26787.826,
+        "maximum": 31543.572,
+        "minimum": 25690.771
+      },
+      "wire-tool-p95-us": {
+        "median": 43405.385,
+        "maximum": 48323.173,
+        "minimum": 40085.597
+      },
+      "wire-tool-p99-us": {
+        "median": 44640.777,
+        "maximum": 49869.067,
+        "minimum": 44237.796
+      },
+      "action-ready-p50-us": {
+        "median": 28820.783,
+        "maximum": 34257.172,
+        "minimum": 27954.894
+      },
+      "action-ready-p95-us": {
+        "median": 45413.125,
+        "maximum": 49131.999,
+        "minimum": 41038.136
+      },
+      "action-ready-p99-us": {
+        "median": 45469.262,
+        "maximum": 50559.699,
+        "minimum": 44913.886
+      }
+    },
+    "large/c8/gateway": {
+      "elapsed_ns": {
+        "median": 628735958,
+        "maximum": 685119025,
+        "minimum": 588663460
+      },
+      "ns/op": {
+        "median": 26197331.583333332,
+        "maximum": 28546626.041666668,
+        "minimum": 24527644.166666668
+      },
+      "process-cpu-ns/op": {
+        "median": 96465541.66666667,
+        "maximum": 101754875,
+        "minimum": 90599625
+      },
+      "B/op": {
+        "median": 51568165,
+        "maximum": 51603358,
+        "minimum": 51508189.666666664
+      },
+      "allocs/op": {
+        "median": 12638.833333333334,
+        "maximum": 12648.75,
+        "minimum": 12634.916666666666
+      },
+      "sampled-heap-growth-B": {
+        "median": 55577784,
+        "maximum": 59449248,
+        "minimum": 54302008
+      },
+      "workflow-p50-us": {
+        "median": 186306.488,
+        "maximum": 212536.93,
+        "minimum": 179603.208
+      },
+      "workflow-p95-us": {
+        "median": 236709.171,
+        "maximum": 273251.842,
+        "minimum": 225730.366
+      },
+      "workflow-p99-us": {
+        "median": 267823.105,
+        "maximum": 278918.706,
+        "minimum": 229976.464
+      },
+      "first-event-p50-us": {
+        "median": 90140.372,
+        "maximum": 99954.073,
+        "minimum": 85778.909
+      },
+      "first-event-p95-us": {
+        "median": 119144.051,
+        "maximum": 137668.547,
+        "minimum": 116448.192
+      },
+      "first-event-p99-us": {
+        "median": 129294.271,
+        "maximum": 142228.121,
+        "minimum": 124896.881
+      },
+      "wire-tool-p50-us": {
+        "median": 90150.531,
+        "maximum": 102900.098,
+        "minimum": 85803.22
+      },
+      "wire-tool-p95-us": {
+        "median": 119152.809,
+        "maximum": 137680.463,
+        "minimum": 116460.551
+      },
+      "wire-tool-p99-us": {
+        "median": 129307.507,
+        "maximum": 142240.339,
+        "minimum": 124908.2
+      },
+      "action-ready-p50-us": {
+        "median": 91230.169,
+        "maximum": 107770.879,
+        "minimum": 87573.948
+      },
+      "action-ready-p95-us": {
+        "median": 125976.855,
+        "maximum": 140322.177,
+        "minimum": 117053.258
+      },
+      "action-ready-p99-us": {
+        "median": 134493.98,
+        "maximum": 151585.757,
+        "minimum": 130354.985
+      }
+    },
+    "large/c8/reference": {
+      "elapsed_ns": {
+        "median": 882920375,
+        "maximum": 891636868,
+        "minimum": 878536858
+      },
+      "ns/op": {
+        "median": 36788348.958333336,
+        "maximum": 37151536.166666664,
+        "minimum": 36605702.416666664
+      },
+      "process-cpu-ns/op": {
+        "median": 118019958.33333333,
+        "maximum": 122465541.66666667,
+        "minimum": 117116750
+      },
+      "B/op": {
+        "median": 58629358,
+        "maximum": 58698954.333333336,
+        "minimum": 58617308.666666664
+      },
+      "allocs/op": {
+        "median": 13429.791666666666,
+        "maximum": 13445.875,
+        "minimum": 13424.291666666666
+      },
+      "sampled-heap-growth-B": {
+        "median": 56352744,
+        "maximum": 63354536,
+        "minimum": 55772016
+      },
+      "workflow-p50-us": {
+        "median": 272172.016,
+        "maximum": 286181.815,
+        "minimum": 263474.885
+      },
+      "workflow-p95-us": {
+        "median": 332976.395,
+        "maximum": 352232.352,
+        "minimum": 308874.593
+      },
+      "workflow-p99-us": {
+        "median": 349820.941,
+        "maximum": 362866.452,
+        "minimum": 346666.545
+      },
+      "first-event-p50-us": {
+        "median": 124889.841,
+        "maximum": 126600.086,
+        "minimum": 122932.46
+      },
+      "first-event-p95-us": {
+        "median": 150437.742,
+        "maximum": 175279.38,
+        "minimum": 147900.301
+      },
+      "first-event-p99-us": {
+        "median": 162874.845,
+        "maximum": 190362.647,
+        "minimum": 160512.834
+      },
+      "wire-tool-p50-us": {
+        "median": 124899.187,
+        "maximum": 128075.326,
+        "minimum": 122940.844
+      },
+      "wire-tool-p95-us": {
+        "median": 152889.868,
+        "maximum": 175301.792,
+        "minimum": 147911.03
+      },
+      "wire-tool-p99-us": {
+        "median": 163321.418,
+        "maximum": 190370.458,
+        "minimum": 160524.792
+      },
+      "action-ready-p50-us": {
+        "median": 194618.332,
+        "maximum": 203075.39,
+        "minimum": 186235.963
+      },
+      "action-ready-p95-us": {
+        "median": 239090.062,
+        "maximum": 262008.664,
+        "minimum": 229088.442
+      },
+      "action-ready-p99-us": {
+        "median": 251272.118,
+        "maximum": 269162.832,
+        "minimum": 242236.917
+      },
+      "claim-commit-p50-us": {
+        "median": 44328.491,
+        "maximum": 50406.956,
+        "minimum": 38747.122
+      },
+      "claim-commit-p95-us": {
+        "median": 78948.475,
+        "maximum": 80785.021,
+        "minimum": 71327.39
+      },
+      "claim-commit-p99-us": {
+        "median": 88169.407,
+        "maximum": 90005.693,
+        "minimum": 76594.041
+      },
+      "dispatch-journal-p50-us": {
+        "median": 3433.131,
+        "maximum": 3448.66,
+        "minimum": 1679.179
+      },
+      "dispatch-journal-p95-us": {
+        "median": 8994.99,
+        "maximum": 9037.804,
+        "minimum": 5467.168
+      },
+      "dispatch-journal-p99-us": {
+        "median": 10072.746,
+        "maximum": 12714.485,
+        "minimum": 6007.879
+      },
+      "ready-commit-p50-us": {
+        "median": 51855.117,
+        "maximum": 53222.592,
+        "minimum": 51518.292
+      },
+      "ready-commit-p95-us": {
+        "median": 72246.545,
+        "maximum": 72942.575,
+        "minimum": 67534.181
+      },
+      "ready-commit-p99-us": {
+        "median": 73146.673,
+        "maximum": 74268.684,
+        "minimum": 69857.616
+      }
+    }
+  },
+  "unmeasured": [
+    "production translated continuation carrier",
+    "actual SDK process CPU",
+    "recovery fault injection",
+    "WAN/TLS inference",
+    "isolated gateway RSS",
+    "live-model quality"
+  ],
+  "raw_output": "=== RUN   TestContinuationBarrierReference\n    continuation_barrier_benchmark_test.go:438: BARRIER_SETUP {\"postgresql_server_version\":\"180006\",\"postgresql_tls\":false}\n    continuation_barrier_benchmark_test.go:541: BARRIER_MEASUREMENT {\"name\":\"small/c1/relay\",\"repetition\":0,\"samples\":24,\"dispatches\":48,\"first_requests\":24,\"next_requests\":24,\"events\":456,\"actions\":48,\"history_bytes\":0,\"state_bytes\":904,\"metrics\":{\"B/op\":294521.3333333333,\"action-ready-p50-us\":1321.143,\"action-ready-p95-us\":2021.747,\"action-ready-p99-us\":2060.471,\"allocs/op\":4853,\"elapsed_ns\":57033291,\"first-event-p50-us\":559.586,\"first-event-p95-us\":795.489,\"first-event-p99-us\":921.922,\"ns/op\":2376387.125,\"process-cpu-ns/op\":3636125,\"sampled-heap-growth-B\":5533776,\"wire-tool-p50-us\":660.117,\"wire-tool-p95-us\":928.836,\"wire-tool-p99-us\":1145.934,\"workflow-p50-us\":2229.212,\"workflow-p95-us\":2822.839,\"workflow-p99-us\":4007.107}}\n    continuation_barrier_benchmark_test.go:541: BARRIER_MEASUREMENT {\"name\":\"small/c1/relay\",\"repetition\":1,\"samples\":24,\"dispatches\":48,\"first_requests\":24,\"next_requests\":24,\"events\":456,\"actions\":48,\"history_bytes\":0,\"state_bytes\":904,\"metrics\":{\"B/op\":294794.3333333333,\"action-ready-p50-us\":1531.894,\"action-ready-p95-us\":2050.9,\"action-ready-p99-us\":2206.211,\"allocs/op\":4851.916666666667,\"elapsed_ns\":60507217,\"first-event-p50-us\":578.761,\"first-event-p95-us\":812.869,\"first-event-p99-us\":903.55,\"ns/op\":2521134.0416666665,\"process-cpu-ns/op\":4179083.3333333335,\"sampled-heap-growth-B\":5614920,\"wire-tool-p50-us\":704.971,\"wire-tool-p95-us\":922.384,\"wire-tool-p99-us\":1012.117,\"workflow-p50-us\":2392.819,\"workflow-p95-us\":3029.719,\"workflow-p99-us\":3219.363}}\n    continuation_barrier_benchmark_test.go:541: BARRIER_MEASUREMENT {\"name\":\"small/c1/relay\",\"repetition\":2,\"samples\":24,\"dispatches\":48,\"first_requests\":24,\"next_requests\":24,\"events\":456,\"actions\":48,\"history_bytes\":0,\"state_bytes\":904,\"metrics\":{\"B/op\":294732.3333333333,\"action-ready-p50-us\":1701.88,\"action-ready-p95-us\":2663.983,\"action-ready-p99-us\":3326.298,\"allocs/op\":4852.291666666667,\"elapsed_ns\":74986757,\"first-event-p50-us\":689.142,\"first-event-p95-us\":933.14,\"first-event-p99-us\":1613.48,\"ns/op\":3124448.2083333335,\"process-cpu-ns/op\":4557458.333333333,\"sampled-heap-growth-B\":5596720,\"wire-tool-p50-us\":803.106,\"wire-tool-p95-us\":1727.121,\"wire-tool-p99-us\":1865.084,\"workflow-p50-us\":2829.791,\"workflow-p95-us\":4621.976,\"workflow-p99-us\":4965.608}}\n    continuation_barrier_benchmark_test.go:541: BARRIER_MEASUREMENT {\"name\":\"small/c1/gateway\",\"repetition\":0,\"samples\":24,\"dispatches\":48,\"first_requests\":24,\"next_requests\":24,\"events\":456,\"actions\":48,\"history_bytes\":0,\"state_bytes\":904,\"metrics\":{\"B/op\":768371,\"action-ready-p50-us\":3231.882,\"action-ready-p95-us\":5872.258,\"action-ready-p99-us\":6147.059,\"allocs/op\":10556.375,\"elapsed_ns\":158288408,\"first-event-p50-us\":1277.763,\"first-event-p95-us\":1908.31,\"first-event-p99-us\":2094.958,\"ns/op\":6595350.333333333,\"process-cpu-ns/op\":8860250,\"sampled-heap-growth-B\":8218600,\"wire-tool-p50-us\":1878.398,\"wire-tool-p95-us\":3318.901,\"wire-tool-p99-us\":4144.662,\"workflow-p50-us\":5994.806,\"workflow-p95-us\":8466.86,\"workflow-p99-us\":9654.382}}\n    continuation_barrier_benchmark_test.go:541: BARRIER_MEASUREMENT {\"name\":\"small/c1/gateway\",\"repetition\":1,\"samples\":24,\"dispatches\":48,\"first_requests\":24,\"next_requests\":24,\"events\":456,\"actions\":48,\"history_bytes\":0,\"state_bytes\":904,\"metrics\":{\"B/op\":767248.3333333334,\"action-ready-p50-us\":3039.175,\"action-ready-p95-us\":3617.445,\"action-ready-p99-us\":3789.988,\"allocs/op\":10553.375,\"elapsed_ns\":143825290,\"first-event-p50-us\":1267.718,\"first-event-p95-us\":1720.196,\"first-event-p99-us\":1759.454,\"ns/op\":5992720.416666667,\"process-cpu-ns/op\":8089375,\"sampled-heap-growth-B\":8050856,\"wire-tool-p50-us\":1893.976,\"wire-tool-p95-us\":2295.499,\"wire-tool-p99-us\":2418.465,\"workflow-p50-us\":5763.992,\"workflow-p95-us\":7372.135,\"workflow-p99-us\":7544.432}}\n    continuation_barrier_benchmark_test.go:541: BARRIER_MEASUREMENT {\"name\":\"small/c1/gateway\",\"repetition\":2,\"samples\":24,\"dispatches\":48,\"first_requests\":24,\"next_requests\":24,\"events\":456,\"actions\":48,\"history_bytes\":0,\"state_bytes\":904,\"metrics\":{\"B/op\":766038.6666666666,\"action-ready-p50-us\":3182.91,\"action-ready-p95-us\":4288.693,\"action-ready-p99-us\":4294.88,\"allocs/op\":10542.75,\"elapsed_ns\":144758186,\"first-event-p50-us\":1249.422,\"first-event-p95-us\":2355.157,\"first-event-p99-us\":2539.062,\"ns/op\":6031591.083333333,\"process-cpu-ns/op\":8023000,\"sampled-heap-growth-B\":8304448,\"wire-tool-p50-us\":1944.432,\"wire-tool-p95-us\":3088.433,\"wire-tool-p99-us\":3547.311,\"workflow-p50-us\":5642.058,\"workflow-p95-us\":7510.232,\"workflow-p99-us\":7654.438}}\n    continuation_barrier_benchmark_test.go:541: BARRIER_MEASUREMENT {\"name\":\"small/c1/reference\",\"repetition\":0,\"samples\":24,\"dispatches\":48,\"first_requests\":24,\"next_requests\":24,\"events\":456,\"actions\":48,\"history_bytes\":0,\"state_bytes\":904,\"metrics\":{\"B/op\":815255.6666666666,\"action-ready-p50-us\":8899.015,\"action-ready-p95-us\":10427.383,\"action-ready-p99-us\":10514.756,\"allocs/op\":11289.041666666666,\"claim-commit-p50-us\":2067.717,\"claim-commit-p95-us\":2434.848,\"claim-commit-p99-us\":3051.916,\"dispatch-journal-p50-us\":655.472,\"dispatch-journal-p95-us\":821.93,\"dispatch-journal-p99-us\":835.532,\"elapsed_ns\":278107911,\"first-event-p50-us\":4099.253,\"first-event-p95-us\":4847.277,\"first-event-p99-us\":5432.332,\"ns/op\":11587829.625,\"process-cpu-ns/op\":10096291.666666666,\"ready-commit-p50-us\":2016.614,\"ready-commit-p95-us\":2521.21,\"ready-commit-p99-us\":2570.026,\"sampled-heap-growth-B\":6788352,\"wire-tool-p50-us\":4658.889,\"wire-tool-p95-us\":5856.015,\"wire-tool-p99-us\":6371.701,\"workflow-p50-us\":11593.486,\"workflow-p95-us\":12988.431,\"workflow-p99-us\":13148.668}}\n    continuation_barrier_benchmark_test.go:541: BARRIER_MEASUREMENT {\"name\":\"small/c1/reference\",\"repetition\":1,\"samples\":24,\"dispatches\":48,\"first_requests\":24,\"next_requests\":24,\"events\":456,\"actions\":48,\"history_bytes\":0,\"state_bytes\":904,\"metrics\":{\"B/op\":823584,\"action-ready-p50-us\":9730.455,\"action-ready-p95-us\":12670.723,\"action-ready-p99-us\":13759.518,\"allocs/op\":11303.916666666666,\"claim-commit-p50-us\":2318.516,\"claim-commit-p95-us\":3105.669,\"claim-commit-p99-us\":3362.496,\"dispatch-journal-p50-us\":645.751,\"dispatch-journal-p95-us\":809.827,\"dispatch-journal-p99-us\":849.738,\"elapsed_ns\":322972459,\"first-event-p50-us\":4665.992,\"first-event-p95-us\":7397.271,\"first-event-p99-us\":7579.792,\"ns/op\":13457185.791666666,\"process-cpu-ns/op\":12253041.666666666,\"ready-commit-p50-us\":2203.163,\"ready-commit-p95-us\":2832.272,\"ready-commit-p99-us\":2882.895,\"sampled-heap-growth-B\":7112880,\"wire-tool-p50-us\":5154.246,\"wire-tool-p95-us\":8104.899,\"wire-tool-p99-us\":8318.105,\"workflow-p50-us\":13572.879,\"workflow-p95-us\":15465.782,\"workflow-p99-us\":17013.746}}\n    continuation_barrier_benchmark_test.go:541: BARRIER_MEASUREMENT {\"name\":\"small/c1/reference\",\"repetition\":2,\"samples\":24,\"dispatches\":48,\"first_requests\":24,\"next_requests\":24,\"events\":456,\"actions\":48,\"history_bytes\":0,\"state_bytes\":904,\"metrics\":{\"B/op\":821280.6666666666,\"action-ready-p50-us\":8709.68,\"action-ready-p95-us\":10091.57,\"action-ready-p99-us\":11017.805,\"allocs/op\":11295.875,\"claim-commit-p50-us\":1866.469,\"claim-commit-p95-us\":2294.876,\"claim-commit-p99-us\":2350.768,\"dispatch-journal-p50-us\":594.162,\"dispatch-journal-p95-us\":714.272,\"dispatch-journal-p99-us\":729.703,\"elapsed_ns\":279097429,\"first-event-p50-us\":3897.428,\"first-event-p95-us\":4842.949,\"first-event-p99-us\":4868.283,\"ns/op\":11629059.541666666,\"process-cpu-ns/op\":11081958.333333334,\"ready-commit-p50-us\":1918.288,\"ready-commit-p95-us\":2568.599,\"ready-commit-p99-us\":2701.786,\"sampled-heap-growth-B\":7693744,\"wire-tool-p50-us\":4531.832,\"wire-tool-p95-us\":5392.407,\"wire-tool-p99-us\":5829.522,\"workflow-p50-us\":11500.084,\"workflow-p95-us\":13001.912,\"workflow-p99-us\":13140.003}}\n    continuation_barrier_benchmark_test.go:541: BARRIER_MEASUREMENT {\"name\":\"small/c8/relay\",\"repetition\":0,\"samples\":24,\"dispatches\":48,\"first_requests\":24,\"next_requests\":24,\"events\":456,\"actions\":48,\"history_bytes\":0,\"state_bytes\":904,\"metrics\":{\"B/op\":306315,\"action-ready-p50-us\":2662.572,\"action-ready-p95-us\":4858.926,\"action-ready-p99-us\":5419.954,\"allocs/op\":4887.708333333333,\"elapsed_ns\":17050710,\"first-event-p50-us\":2023.719,\"first-event-p95-us\":3792.464,\"first-event-p99-us\":4513.668,\"ns/op\":710446.25,\"process-cpu-ns/op\":2553291.6666666665,\"sampled-heap-growth-B\":7351560,\"wire-tool-p50-us\":2059.251,\"wire-tool-p95-us\":4195.292,\"wire-tool-p99-us\":4888.516,\"workflow-p50-us\":4597.889,\"workflow-p95-us\":7371.563,\"workflow-p99-us\":8365.831}}\n    continuation_barrier_benchmark_test.go:541: BARRIER_MEASUREMENT {\"name\":\"small/c8/relay\",\"repetition\":1,\"samples\":24,\"dispatches\":48,\"first_requests\":24,\"next_requests\":24,\"events\":456,\"actions\":48,\"history_bytes\":0,\"state_bytes\":904,\"metrics\":{\"B/op\":302132.3333333333,\"action-ready-p50-us\":2953.775,\"action-ready-p95-us\":4138.433,\"action-ready-p99-us\":4224.418,\"allocs/op\":4853.166666666667,\"elapsed_ns\":14902962,\"first-event-p50-us\":2169.286,\"first-event-p95-us\":3256.267,\"first-event-p99-us\":3306.332,\"ns/op\":620956.75,\"process-cpu-ns/op\":2305916.6666666665,\"sampled-heap-growth-B\":7251176,\"wire-tool-p50-us\":2249.34,\"wire-tool-p95-us\":3357.716,\"wire-tool-p99-us\":3445.97,\"workflow-p50-us\":4686.99,\"workflow-p95-us\":5889.991,\"workflow-p99-us\":5976.483}}\n    continuation_barrier_benchmark_test.go:541: BARRIER_MEASUREMENT {\"name\":\"small/c8/relay\",\"repetition\":2,\"samples\":24,\"dispatches\":48,\"first_requests\":24,\"next_requests\":24,\"events\":456,\"actions\":48,\"history_bytes\":0,\"state_bytes\":904,\"metrics\":{\"B/op\":302232,\"action-ready-p50-us\":2461.543,\"action-ready-p95-us\":3388.833,\"action-ready-p99-us\":3450.343,\"allocs/op\":4852.458333333333,\"elapsed_ns\":14726103,\"first-event-p50-us\":1665.181,\"first-event-p95-us\":2516.748,\"first-event-p99-us\":2885.418,\"ns/op\":613587.625,\"process-cpu-ns/op\":2135541.6666666665,\"sampled-heap-growth-B\":7253568,\"wire-tool-p50-us\":1772.914,\"wire-tool-p95-us\":2526.518,\"wire-tool-p99-us\":2892.522,\"workflow-p50-us\":4206.043,\"workflow-p95-us\":6123.994,\"workflow-p99-us\":6622.302}}\n    continuation_barrier_benchmark_test.go:541: BARRIER_MEASUREMENT {\"name\":\"small/c8/gateway\",\"repetition\":0,\"samples\":24,\"dispatches\":48,\"first_requests\":24,\"next_requests\":24,\"events\":456,\"actions\":48,\"history_bytes\":0,\"state_bytes\":904,\"metrics\":{\"B/op\":784970,\"action-ready-p50-us\":7302.923,\"action-ready-p95-us\":10001.864,\"action-ready-p99-us\":10851.111,\"allocs/op\":10584.291666666666,\"elapsed_ns\":42241340,\"first-event-p50-us\":5455.948,\"first-event-p95-us\":9554.483,\"first-event-p99-us\":10235.274,\"ns/op\":1760055.8333333333,\"process-cpu-ns/op\":5843083.333333333,\"sampled-heap-growth-B\":12061128,\"wire-tool-p50-us\":5866.385,\"wire-tool-p95-us\":9558.148,\"wire-tool-p99-us\":10244.227,\"workflow-p50-us\":11629.531,\"workflow-p95-us\":16253.82,\"workflow-p99-us\":19334.29}}\n    continuation_barrier_benchmark_test.go:541: BARRIER_MEASUREMENT {\"name\":\"small/c8/gateway\",\"repetition\":1,\"samples\":24,\"dispatches\":48,\"first_requests\":24,\"next_requests\":24,\"events\":456,\"actions\":48,\"history_bytes\":0,\"state_bytes\":904,\"metrics\":{\"B/op\":764991.6666666666,\"action-ready-p50-us\":7315.12,\"action-ready-p95-us\":12232.293,\"action-ready-p99-us\":13103.245,\"allocs/op\":10537.625,\"elapsed_ns\":46594494,\"first-event-p50-us\":5236.876,\"first-event-p95-us\":9774.183,\"first-event-p99-us\":10734.618,\"ns/op\":1941437.25,\"process-cpu-ns/op\":6632708.333333333,\"sampled-heap-growth-B\":11908552,\"wire-tool-p50-us\":6376.762,\"wire-tool-p95-us\":10745.152,\"wire-tool-p99-us\":12539.32,\"workflow-p50-us\":12668.29,\"workflow-p95-us\":18873.905,\"workflow-p99-us\":19478.946}}\n    continuation_barrier_benchmark_test.go:541: BARRIER_MEASUREMENT {\"name\":\"small/c8/gateway\",\"repetition\":2,\"samples\":24,\"dispatches\":48,\"first_requests\":24,\"next_requests\":24,\"events\":456,\"actions\":48,\"history_bytes\":0,\"state_bytes\":904,\"metrics\":{\"B/op\":767772.3333333334,\"action-ready-p50-us\":5307.022,\"action-ready-p95-us\":8265.804,\"action-ready-p99-us\":8400.46,\"allocs/op\":10553.458333333334,\"elapsed_ns\":36112680,\"first-event-p50-us\":3371.32,\"first-event-p95-us\":6753.535,\"first-event-p99-us\":7450.285,\"ns/op\":1504695,\"process-cpu-ns/op\":5459916.666666667,\"sampled-heap-growth-B\":12469408,\"wire-tool-p50-us\":3924.263,\"wire-tool-p95-us\":7461.307,\"wire-tool-p99-us\":7867.22,\"workflow-p50-us\":10183.452,\"workflow-p95-us\":15807.894,\"workflow-p99-us\":16155.404}}\n    continuation_barrier_benchmark_test.go:541: BARRIER_MEASUREMENT {\"name\":\"small/c8/reference\",\"repetition\":0,\"samples\":24,\"dispatches\":48,\"first_requests\":24,\"next_requests\":24,\"events\":456,\"actions\":48,\"history_bytes\":0,\"state_bytes\":904,\"metrics\":{\"B/op\":845837,\"action-ready-p50-us\":32678.124,\"action-ready-p95-us\":77431.741,\"action-ready-p99-us\":79504.511,\"allocs/op\":11396.541666666666,\"claim-commit-p50-us\":13673.892,\"claim-commit-p95-us\":44540.313,\"claim-commit-p99-us\":49873.745,\"dispatch-journal-p50-us\":998.869,\"dispatch-journal-p95-us\":2001.856,\"dispatch-journal-p99-us\":2168.578,\"elapsed_ns\":146844324,\"first-event-p50-us\":16858.634,\"first-event-p95-us\":48711.826,\"first-event-p99-us\":52496.919,\"ns/op\":6118513.5,\"process-cpu-ns/op\":10004000,\"ready-commit-p50-us\":14164.751,\"ready-commit-p95-us\":26296.488,\"ready-commit-p99-us\":27509.03,\"sampled-heap-growth-B\":9220272,\"wire-tool-p50-us\":17476.092,\"wire-tool-p95-us\":48725.018,\"wire-tool-p99-us\":53109.775,\"workflow-p50-us\":35999.239,\"workflow-p95-us\":79261.557,\"workflow-p99-us\":81689.949}}\n    continuation_barrier_benchmark_test.go:541: BARRIER_MEASUREMENT {\"name\":\"small/c8/reference\",\"repetition\":1,\"samples\":24,\"dispatches\":48,\"first_requests\":24,\"next_requests\":24,\"events\":456,\"actions\":48,\"history_bytes\":0,\"state_bytes\":904,\"metrics\":{\"B/op\":815200.6666666666,\"action-ready-p50-us\":29425.64,\"action-ready-p95-us\":33195.786,\"action-ready-p99-us\":33597.345,\"allocs/op\":11286.875,\"claim-commit-p50-us\":12328.315,\"claim-commit-p95-us\":15284.127,\"claim-commit-p99-us\":15564.791,\"dispatch-journal-p50-us\":759.093,\"dispatch-journal-p95-us\":1186.214,\"dispatch-journal-p99-us\":1201.389,\"elapsed_ns\":101476092,\"first-event-p50-us\":15638.909,\"first-event-p95-us\":17661.438,\"first-event-p99-us\":18267.755,\"ns/op\":4228170.5,\"process-cpu-ns/op\":8889583.333333334,\"ready-commit-p50-us\":11168.702,\"ready-commit-p95-us\":13085.242,\"ready-commit-p99-us\":13237.398,\"sampled-heap-growth-B\":9206704,\"wire-tool-p50-us\":16124.108,\"wire-tool-p95-us\":18703.084,\"wire-tool-p99-us\":18886.889,\"workflow-p50-us\":31689.798,\"workflow-p95-us\":36577.732,\"workflow-p99-us\":38069.238}}\n    continuation_barrier_benchmark_test.go:541: BARRIER_MEASUREMENT {\"name\":\"small/c8/reference\",\"repetition\":2,\"samples\":24,\"dispatches\":48,\"first_requests\":24,\"next_requests\":24,\"events\":456,\"actions\":48,\"history_bytes\":0,\"state_bytes\":904,\"metrics\":{\"B/op\":814727.6666666666,\"action-ready-p50-us\":28156.915,\"action-ready-p95-us\":35720.111,\"action-ready-p99-us\":37095.855,\"allocs/op\":11285.458333333334,\"claim-commit-p50-us\":10702.611,\"claim-commit-p95-us\":16124.977,\"claim-commit-p99-us\":17102.82,\"dispatch-journal-p50-us\":702.644,\"dispatch-journal-p95-us\":1190.933,\"dispatch-journal-p99-us\":1251.755,\"elapsed_ns\":102886736,\"first-event-p50-us\":12944.963,\"first-event-p95-us\":18951.145,\"first-event-p99-us\":19698.949,\"ns/op\":4286947.333333333,\"process-cpu-ns/op\":8784208.333333334,\"ready-commit-p50-us\":11875.297,\"ready-commit-p95-us\":14798.794,\"ready-commit-p99-us\":15586.59,\"sampled-heap-growth-B\":10884696,\"wire-tool-p50-us\":13404.35,\"wire-tool-p95-us\":19519.629,\"wire-tool-p99-us\":20575.099,\"workflow-p50-us\":30920.681,\"workflow-p95-us\":39432.865,\"workflow-p99-us\":40396.273}}\n    continuation_barrier_benchmark_test.go:541: BARRIER_MEASUREMENT {\"name\":\"large/c1/relay\",\"repetition\":0,\"samples\":24,\"dispatches\":48,\"first_requests\":24,\"next_requests\":24,\"events\":456,\"actions\":48,\"history_bytes\":262144,\"state_bytes\":263050,\"metrics\":{\"B/op\":19122006.333333332,\"action-ready-p50-us\":9985.26,\"action-ready-p95-us\":11891.826,\"action-ready-p99-us\":12169.973,\"allocs/op\":6697.333333333333,\"elapsed_ns\":546527073,\"first-event-p50-us\":9030.849,\"first-event-p95-us\":11031.26,\"first-event-p99-us\":11304.958,\"ns/op\":22771961.375,\"process-cpu-ns/op\":41043666.666666664,\"sampled-heap-growth-B\":21555808,\"wire-tool-p50-us\":9097.35,\"wire-tool-p95-us\":11239.128,\"wire-tool-p99-us\":11471.555,\"workflow-p50-us\":22452.435,\"workflow-p95-us\":25943.954,\"workflow-p99-us\":26953.871}}\n    continuation_barrier_benchmark_test.go:541: BARRIER_MEASUREMENT {\"name\":\"large/c1/relay\",\"repetition\":1,\"samples\":24,\"dispatches\":48,\"first_requests\":24,\"next_requests\":24,\"events\":456,\"actions\":48,\"history_bytes\":262144,\"state_bytes\":263050,\"metrics\":{\"B/op\":19136073,\"action-ready-p50-us\":9531.283,\"action-ready-p95-us\":12040.854,\"action-ready-p99-us\":12538.985,\"allocs/op\":6706.583333333333,\"elapsed_ns\":524495057,\"first-event-p50-us\":8559.241,\"first-event-p95-us\":11228.62,\"first-event-p99-us\":11752.835,\"ns/op\":21853960.708333332,\"process-cpu-ns/op\":40748583.333333336,\"sampled-heap-growth-B\":18548344,\"wire-tool-p50-us\":8757.062,\"wire-tool-p95-us\":11477.606,\"wire-tool-p99-us\":11795.02,\"workflow-p50-us\":21196.901,\"workflow-p95-us\":24047.187,\"workflow-p99-us\":25148.411}}\n    continuation_barrier_benchmark_test.go:541: BARRIER_MEASUREMENT {\"name\":\"large/c1/relay\",\"repetition\":2,\"samples\":24,\"dispatches\":48,\"first_requests\":24,\"next_requests\":24,\"events\":456,\"actions\":48,\"history_bytes\":262144,\"state_bytes\":263050,\"metrics\":{\"B/op\":19170131.333333332,\"action-ready-p50-us\":10616.144,\"action-ready-p95-us\":12151.223,\"action-ready-p99-us\":12882.271,\"allocs/op\":6710.208333333333,\"elapsed_ns\":584611589,\"first-event-p50-us\":9764.482,\"first-event-p95-us\":10967.788,\"first-event-p99-us\":12245.178,\"ns/op\":24358816.208333332,\"process-cpu-ns/op\":45673666.666666664,\"sampled-heap-growth-B\":19627352,\"wire-tool-p50-us\":9798.368,\"wire-tool-p95-us\":11142.507,\"wire-tool-p99-us\":12269.755,\"workflow-p50-us\":24431.527,\"workflow-p95-us\":27669.594,\"workflow-p99-us\":28395.645}}\n    continuation_barrier_benchmark_test.go:541: BARRIER_MEASUREMENT {\"name\":\"large/c1/gateway\",\"repetition\":0,\"samples\":24,\"dispatches\":48,\"first_requests\":24,\"next_requests\":24,\"events\":456,\"actions\":48,\"history_bytes\":262144,\"state_bytes\":263050,\"metrics\":{\"B/op\":51719431.333333336,\"action-ready-p50-us\":41893.18,\"action-ready-p95-us\":47777.965,\"action-ready-p99-us\":49012.177,\"allocs/op\":12807.458333333334,\"elapsed_ns\":2123017339,\"first-event-p50-us\":40350.662,\"first-event-p95-us\":45905.413,\"first-event-p99-us\":47083.018,\"ns/op\":88459055.79166667,\"process-cpu-ns/op\":143721500,\"sampled-heap-growth-B\":18892816,\"wire-tool-p50-us\":40760.079,\"wire-tool-p95-us\":46583.006,\"wire-tool-p99-us\":47587.677,\"workflow-p50-us\":88725.424,\"workflow-p95-us\":97679.174,\"workflow-p99-us\":99164.914}}\n    continuation_barrier_benchmark_test.go:541: BARRIER_MEASUREMENT {\"name\":\"large/c1/gateway\",\"repetition\":1,\"samples\":24,\"dispatches\":48,\"first_requests\":24,\"next_requests\":24,\"events\":456,\"actions\":48,\"history_bytes\":262144,\"state_bytes\":263050,\"metrics\":{\"B/op\":51737422.666666664,\"action-ready-p50-us\":41979.98,\"action-ready-p95-us\":45626.828,\"action-ready-p99-us\":46991.325,\"allocs/op\":12811.041666666666,\"elapsed_ns\":2089331172,\"first-event-p50-us\":40235.296,\"first-event-p95-us\":43967.293,\"first-event-p99-us\":45127.342,\"ns/op\":87055465.5,\"process-cpu-ns/op\":144299791.66666666,\"sampled-heap-growth-B\":19088704,\"wire-tool-p50-us\":40947.753,\"wire-tool-p95-us\":44971.771,\"wire-tool-p99-us\":45790.747,\"workflow-p50-us\":85990.986,\"workflow-p95-us\":94576.97,\"workflow-p99-us\":97219.839}}\n    continuation_barrier_benchmark_test.go:541: BARRIER_MEASUREMENT {\"name\":\"large/c1/gateway\",\"repetition\":2,\"samples\":24,\"dispatches\":48,\"first_requests\":24,\"next_requests\":24,\"events\":456,\"actions\":48,\"history_bytes\":262144,\"state_bytes\":263050,\"metrics\":{\"B/op\":51726519.666666664,\"action-ready-p50-us\":41314.203,\"action-ready-p95-us\":51863.011,\"action-ready-p99-us\":54120.74,\"allocs/op\":12838.25,\"elapsed_ns\":2120414947,\"first-event-p50-us\":39479.589,\"first-event-p95-us\":50290.603,\"first-event-p99-us\":51502.839,\"ns/op\":88350622.79166667,\"process-cpu-ns/op\":148697125,\"sampled-heap-growth-B\":19432320,\"wire-tool-p50-us\":40091.554,\"wire-tool-p95-us\":50836.209,\"wire-tool-p99-us\":52476.269,\"workflow-p50-us\":86586.444,\"workflow-p95-us\":100481.131,\"workflow-p99-us\":109559.318}}\n    continuation_barrier_benchmark_test.go:541: BARRIER_MEASUREMENT {\"name\":\"large/c1/reference\",\"repetition\":0,\"samples\":24,\"dispatches\":48,\"first_requests\":24,\"next_requests\":24,\"events\":456,\"actions\":48,\"history_bytes\":262144,\"state_bytes\":263050,\"metrics\":{\"B/op\":59051507,\"action-ready-p50-us\":62460.603,\"action-ready-p95-us\":78582.253,\"action-ready-p99-us\":83417.85,\"allocs/op\":13619.208333333334,\"claim-commit-p50-us\":5757.722,\"claim-commit-p95-us\":7779.774,\"claim-commit-p99-us\":8126.866,\"dispatch-journal-p50-us\":695.545,\"dispatch-journal-p95-us\":1006.913,\"dispatch-journal-p99-us\":1040.822,\"elapsed_ns\":2670962781,\"first-event-p50-us\":47671.38,\"first-event-p95-us\":58176.218,\"first-event-p99-us\":60613.378,\"ns/op\":111290115.875,\"process-cpu-ns/op\":162251583.33333334,\"ready-commit-p50-us\":6105.198,\"ready-commit-p95-us\":9797.326,\"ready-commit-p99-us\":14413.517,\"sampled-heap-growth-B\":21704744,\"wire-tool-p50-us\":48127.663,\"wire-tool-p95-us\":58736.799,\"wire-tool-p99-us\":61244.474,\"workflow-p50-us\":106197.188,\"workflow-p95-us\":132491.018,\"workflow-p99-us\":133220.57}}\n    continuation_barrier_benchmark_test.go:541: BARRIER_MEASUREMENT {\"name\":\"large/c1/reference\",\"repetition\":1,\"samples\":24,\"dispatches\":48,\"first_requests\":24,\"next_requests\":24,\"events\":456,\"actions\":48,\"history_bytes\":262144,\"state_bytes\":263050,\"metrics\":{\"B/op\":59142762.666666664,\"action-ready-p50-us\":65141.007,\"action-ready-p95-us\":79745.152,\"action-ready-p99-us\":82214.102,\"allocs/op\":13627.666666666666,\"claim-commit-p50-us\":5971.809,\"claim-commit-p95-us\":9641.725,\"claim-commit-p99-us\":10422.912,\"dispatch-journal-p50-us\":734.902,\"dispatch-journal-p95-us\":1176.434,\"dispatch-journal-p99-us\":1199.878,\"elapsed_ns\":2769133490,\"first-event-p50-us\":50120.074,\"first-event-p95-us\":61048.713,\"first-event-p99-us\":65320.387,\"ns/op\":115380562.08333333,\"process-cpu-ns/op\":168266833.33333334,\"ready-commit-p50-us\":6365.494,\"ready-commit-p95-us\":7564.793,\"ready-commit-p99-us\":8018.893,\"sampled-heap-growth-B\":23223000,\"wire-tool-p50-us\":50709.649,\"wire-tool-p95-us\":61737.805,\"wire-tool-p99-us\":65987.368,\"workflow-p50-us\":111983.01,\"workflow-p95-us\":130173.677,\"workflow-p99-us\":131538.109}}\n    continuation_barrier_benchmark_test.go:541: BARRIER_MEASUREMENT {\"name\":\"large/c1/reference\",\"repetition\":2,\"samples\":24,\"dispatches\":48,\"first_requests\":24,\"next_requests\":24,\"events\":456,\"actions\":48,\"history_bytes\":262144,\"state_bytes\":263050,\"metrics\":{\"B/op\":59225877.333333336,\"action-ready-p50-us\":67622.707,\"action-ready-p95-us\":80362.72,\"action-ready-p99-us\":83693.369,\"allocs/op\":13620.625,\"claim-commit-p50-us\":5862.002,\"claim-commit-p95-us\":7804.592,\"claim-commit-p99-us\":11358.191,\"dispatch-journal-p50-us\":733.613,\"dispatch-journal-p95-us\":955.168,\"dispatch-journal-p99-us\":966.041,\"elapsed_ns\":2847427932,\"first-event-p50-us\":50831.611,\"first-event-p95-us\":62813.946,\"first-event-p99-us\":66274.902,\"ns/op\":118642830.5,\"process-cpu-ns/op\":171883875,\"ready-commit-p50-us\":6327.544,\"ready-commit-p95-us\":7523.213,\"ready-commit-p99-us\":7597.11,\"sampled-heap-growth-B\":22244208,\"wire-tool-p50-us\":51386.787,\"wire-tool-p95-us\":63794.216,\"wire-tool-p99-us\":67017.657,\"workflow-p50-us\":116501.954,\"workflow-p95-us\":132891.194,\"workflow-p99-us\":141673.484}}\n    continuation_barrier_benchmark_test.go:541: BARRIER_MEASUREMENT {\"name\":\"large/c8/relay\",\"repetition\":0,\"samples\":24,\"dispatches\":48,\"first_requests\":24,\"next_requests\":24,\"events\":456,\"actions\":48,\"history_bytes\":262144,\"state_bytes\":263050,\"metrics\":{\"B/op\":19048401,\"action-ready-p50-us\":27954.894,\"action-ready-p95-us\":49131.999,\"action-ready-p99-us\":50559.699,\"allocs/op\":6682.291666666667,\"elapsed_ns\":211107321,\"first-event-p50-us\":25682.063,\"first-event-p95-us\":48313.458,\"first-event-p99-us\":49857.623,\"ns/op\":8796138.375,\"process-cpu-ns/op\":31391291.666666668,\"sampled-heap-growth-B\":42828000,\"wire-tool-p50-us\":25690.771,\"wire-tool-p95-us\":48323.173,\"wire-tool-p99-us\":49869.067,\"workflow-p50-us\":61881.424,\"workflow-p95-us\":86421.117,\"workflow-p99-us\":94366.536}}\n    continuation_barrier_benchmark_test.go:541: BARRIER_MEASUREMENT {\"name\":\"large/c8/relay\",\"repetition\":1,\"samples\":24,\"dispatches\":48,\"first_requests\":24,\"next_requests\":24,\"events\":456,\"actions\":48,\"history_bytes\":262144,\"state_bytes\":263050,\"metrics\":{\"B/op\":19010475,\"action-ready-p50-us\":34257.172,\"action-ready-p95-us\":45413.125,\"action-ready-p99-us\":45469.262,\"allocs/op\":6677.083333333333,\"elapsed_ns\":220662168,\"first-event-p50-us\":31531.694,\"first-event-p95-us\":43394.998,\"first-event-p99-us\":44627.09,\"ns/op\":9194257,\"process-cpu-ns/op\":33197000,\"sampled-heap-growth-B\":41912344,\"wire-tool-p50-us\":31543.572,\"wire-tool-p95-us\":43405.385,\"wire-tool-p99-us\":44640.777,\"workflow-p50-us\":69320.373,\"workflow-p95-us\":89399.653,\"workflow-p99-us\":90821.093}}\n    continuation_barrier_benchmark_test.go:541: BARRIER_MEASUREMENT {\"name\":\"large/c8/relay\",\"repetition\":2,\"samples\":24,\"dispatches\":48,\"first_requests\":24,\"next_requests\":24,\"events\":456,\"actions\":48,\"history_bytes\":262144,\"state_bytes\":263050,\"metrics\":{\"B/op\":18960420.333333332,\"action-ready-p50-us\":28820.783,\"action-ready-p95-us\":41038.136,\"action-ready-p99-us\":44913.886,\"allocs/op\":6675.541666666667,\"elapsed_ns\":215306466,\"first-event-p50-us\":26783.034,\"first-event-p95-us\":40074.167,\"first-event-p99-us\":44229.188,\"ns/op\":8971102.75,\"process-cpu-ns/op\":32706000,\"sampled-heap-growth-B\":45817192,\"wire-tool-p50-us\":26787.826,\"wire-tool-p95-us\":40085.597,\"wire-tool-p99-us\":44237.796,\"workflow-p50-us\":62621.865,\"workflow-p95-us\":84209.168,\"workflow-p99-us\":86189.747}}\n    continuation_barrier_benchmark_test.go:541: BARRIER_MEASUREMENT {\"name\":\"large/c8/gateway\",\"repetition\":0,\"samples\":24,\"dispatches\":48,\"first_requests\":24,\"next_requests\":24,\"events\":456,\"actions\":48,\"history_bytes\":262144,\"state_bytes\":263050,\"metrics\":{\"B/op\":51603358,\"action-ready-p50-us\":107770.879,\"action-ready-p95-us\":140322.177,\"action-ready-p99-us\":151585.757,\"allocs/op\":12648.75,\"elapsed_ns\":685119025,\"first-event-p50-us\":99954.073,\"first-event-p95-us\":137668.547,\"first-event-p99-us\":142228.121,\"ns/op\":28546626.041666668,\"process-cpu-ns/op\":101754875,\"sampled-heap-growth-B\":55577784,\"wire-tool-p50-us\":102900.098,\"wire-tool-p95-us\":137680.463,\"wire-tool-p99-us\":142240.339,\"workflow-p50-us\":212536.93,\"workflow-p95-us\":273251.842,\"workflow-p99-us\":278918.706}}\n    continuation_barrier_benchmark_test.go:541: BARRIER_MEASUREMENT {\"name\":\"large/c8/gateway\",\"repetition\":1,\"samples\":24,\"dispatches\":48,\"first_requests\":24,\"next_requests\":24,\"events\":456,\"actions\":48,\"history_bytes\":262144,\"state_bytes\":263050,\"metrics\":{\"B/op\":51508189.666666664,\"action-ready-p50-us\":87573.948,\"action-ready-p95-us\":117053.258,\"action-ready-p99-us\":130354.985,\"allocs/op\":12634.916666666666,\"elapsed_ns\":588663460,\"first-event-p50-us\":85778.909,\"first-event-p95-us\":116448.192,\"first-event-p99-us\":129294.271,\"ns/op\":24527644.166666668,\"process-cpu-ns/op\":90599625,\"sampled-heap-growth-B\":54302008,\"wire-tool-p50-us\":85803.22,\"wire-tool-p95-us\":116460.551,\"wire-tool-p99-us\":129307.507,\"workflow-p50-us\":186306.488,\"workflow-p95-us\":225730.366,\"workflow-p99-us\":229976.464}}\n    continuation_barrier_benchmark_test.go:541: BARRIER_MEASUREMENT {\"name\":\"large/c8/gateway\",\"repetition\":2,\"samples\":24,\"dispatches\":48,\"first_requests\":24,\"next_requests\":24,\"events\":456,\"actions\":48,\"history_bytes\":262144,\"state_bytes\":263050,\"metrics\":{\"B/op\":51568165,\"action-ready-p50-us\":91230.169,\"action-ready-p95-us\":125976.855,\"action-ready-p99-us\":134493.98,\"allocs/op\":12638.833333333334,\"elapsed_ns\":628735958,\"first-event-p50-us\":90140.372,\"first-event-p95-us\":119144.051,\"first-event-p99-us\":124896.881,\"ns/op\":26197331.583333332,\"process-cpu-ns/op\":96465541.66666667,\"sampled-heap-growth-B\":59449248,\"wire-tool-p50-us\":90150.531,\"wire-tool-p95-us\":119152.809,\"wire-tool-p99-us\":124908.2,\"workflow-p50-us\":179603.208,\"workflow-p95-us\":236709.171,\"workflow-p99-us\":267823.105}}\n    continuation_barrier_benchmark_test.go:541: BARRIER_MEASUREMENT {\"name\":\"large/c8/reference\",\"repetition\":0,\"samples\":24,\"dispatches\":48,\"first_requests\":24,\"next_requests\":24,\"events\":456,\"actions\":48,\"history_bytes\":262144,\"state_bytes\":263050,\"metrics\":{\"B/op\":58629358,\"action-ready-p50-us\":194618.332,\"action-ready-p95-us\":262008.664,\"action-ready-p99-us\":269162.832,\"allocs/op\":13445.875,\"claim-commit-p50-us\":44328.491,\"claim-commit-p95-us\":78948.475,\"claim-commit-p99-us\":88169.407,\"dispatch-journal-p50-us\":3448.66,\"dispatch-journal-p95-us\":9037.804,\"dispatch-journal-p99-us\":10072.746,\"elapsed_ns\":882920375,\"first-event-p50-us\":124889.841,\"first-event-p95-us\":175279.38,\"first-event-p99-us\":190362.647,\"ns/op\":36788348.958333336,\"process-cpu-ns/op\":122465541.66666667,\"ready-commit-p50-us\":53222.592,\"ready-commit-p95-us\":72246.545,\"ready-commit-p99-us\":74268.684,\"sampled-heap-growth-B\":56352744,\"wire-tool-p50-us\":124899.187,\"wire-tool-p95-us\":175301.792,\"wire-tool-p99-us\":190370.458,\"workflow-p50-us\":263474.885,\"workflow-p95-us\":352232.352,\"workflow-p99-us\":362866.452}}\n    continuation_barrier_benchmark_test.go:541: BARRIER_MEASUREMENT {\"name\":\"large/c8/reference\",\"repetition\":1,\"samples\":24,\"dispatches\":48,\"first_requests\":24,\"next_requests\":24,\"events\":456,\"actions\":48,\"history_bytes\":262144,\"state_bytes\":263050,\"metrics\":{\"B/op\":58698954.333333336,\"action-ready-p50-us\":203075.39,\"action-ready-p95-us\":239090.062,\"action-ready-p99-us\":251272.118,\"allocs/op\":13429.791666666666,\"claim-commit-p50-us\":50406.956,\"claim-commit-p95-us\":71327.39,\"claim-commit-p99-us\":76594.041,\"dispatch-journal-p50-us\":3433.131,\"dispatch-journal-p95-us\":8994.99,\"dispatch-journal-p99-us\":12714.485,\"elapsed_ns\":891636868,\"first-event-p50-us\":126600.086,\"first-event-p95-us\":150437.742,\"first-event-p99-us\":162874.845,\"ns/op\":37151536.166666664,\"process-cpu-ns/op\":117116750,\"ready-commit-p50-us\":51855.117,\"ready-commit-p95-us\":67534.181,\"ready-commit-p99-us\":69857.616,\"sampled-heap-growth-B\":55772016,\"wire-tool-p50-us\":128075.326,\"wire-tool-p95-us\":152889.868,\"wire-tool-p99-us\":163321.418,\"workflow-p50-us\":272172.016,\"workflow-p95-us\":308874.593,\"workflow-p99-us\":346666.545}}\n    continuation_barrier_benchmark_test.go:541: BARRIER_MEASUREMENT {\"name\":\"large/c8/reference\",\"repetition\":2,\"samples\":24,\"dispatches\":48,\"first_requests\":24,\"next_requests\":24,\"events\":456,\"actions\":48,\"history_bytes\":262144,\"state_bytes\":263050,\"metrics\":{\"B/op\":58617308.666666664,\"action-ready-p50-us\":186235.963,\"action-ready-p95-us\":229088.442,\"action-ready-p99-us\":242236.917,\"allocs/op\":13424.291666666666,\"claim-commit-p50-us\":38747.122,\"claim-commit-p95-us\":80785.021,\"claim-commit-p99-us\":90005.693,\"dispatch-journal-p50-us\":1679.179,\"dispatch-journal-p95-us\":5467.168,\"dispatch-journal-p99-us\":6007.879,\"elapsed_ns\":878536858,\"first-event-p50-us\":122932.46,\"first-event-p95-us\":147900.301,\"first-event-p99-us\":160512.834,\"ns/op\":36605702.416666664,\"process-cpu-ns/op\":118019958.33333333,\"ready-commit-p50-us\":51518.292,\"ready-commit-p95-us\":72942.575,\"ready-commit-p99-us\":73146.673,\"sampled-heap-growth-B\":63354536,\"wire-tool-p50-us\":122940.844,\"wire-tool-p95-us\":147911.03,\"wire-tool-p99-us\":160524.792,\"workflow-p50-us\":286181.815,\"workflow-p95-us\":332976.395,\"workflow-p99-us\":349820.941}}\n--- PASS: TestContinuationBarrierReference (26.10s)\nPASS\nok  \tgithub.com/tyk-swe/olp/tests/integration\t26.136s\n"
+}

@@ -69,3 +69,17 @@ of this reference only. Ciphertext corruption, non-ready state, lost assistant
 history, signature loss, tool correlation changes and missing terminal events
 must fail. Production restart, replay, partial delivery and revocation checks
 belong to the continuation implementation's independent qualification.
+
+## Captured result
+
+The clean reference source `29e18268ac23f7290d1881cbda3af2cc2ccab018`
+produced [baseline.json](baseline.json); [budgets.json](budgets.json) freezes the
+predeclared criteria. All 36 repetitions completed: 864 workflows, 1,728 provider
+dispatches, 16,416 native events and 1,728 enabled fixture actions. The Go test
+completed in 26.136 s. The baseline passes its frozen self-comparison.
+
+Correctness checks passed separately: the full race smoke in 42.865 s, storage
+corruption checks with race detection in 3.178 s, Go vet, and all five runner
+mutation tests. Captured timings are from the ordinary non-race binary. These
+results establish reference integrity; no translated candidate is measured or
+qualified by this artifact.
