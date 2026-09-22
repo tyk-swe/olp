@@ -180,9 +180,8 @@ test('configuration forms retain native source through real saves, conflicts and
     .get('http://127.0.0.1:4187/__test__/requests')
     .then((response) => response.json());
   expect(beforeProbe.requests).toEqual([]);
-  await page.screenshot({
+  await page.locator('.profile-editor').screenshot({
     path: info.outputPath('native-configuration-editor.png'),
-    fullPage: true,
     animations: 'disabled'
   });
 
@@ -289,8 +288,7 @@ test('configuration forms retain native source through real saves, conflicts and
     .getByRole('button', { name: 'Activate route', exact: true })
     .click();
   await expect(page.getByText('Revision 1 active')).toBeVisible();
-  await page.getByLabel('Fidelity mode').scrollIntoViewIfNeeded();
-  await page.screenshot({
+  await page.locator('.fidelity-editor').screenshot({
     path: info.outputPath('strict-route-migration.png'),
     animations: 'disabled'
   });
@@ -417,11 +415,13 @@ test('profile migration, schema fields and write-only network credentials share 
     .getByRole('button', { name: 'Revoke version 1', exact: true })
     .click();
   await expect(page.getByText(/Version 1 · .* · revoked/)).toBeVisible();
-  await page.screenshot({
-    path: info.outputPath('profile-network-forms.png'),
-    fullPage: true,
-    animations: 'disabled'
-  });
+  await page
+    .locator('.configuration-group')
+    .filter({ has: page.getByText('Network connection', { exact: true }) })
+    .screenshot({
+      path: info.outputPath('profile-network-forms.png'),
+      animations: 'disabled'
+    });
   const upstream = await request
     .get('http://127.0.0.1:4187/__test__/requests')
     .then((response) => response.json());

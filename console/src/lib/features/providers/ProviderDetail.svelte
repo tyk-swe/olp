@@ -321,7 +321,10 @@
   {#if !canManage}<ReadOnlyNote>
       Your role can view this provider but not change, test, or activate it.
     </ReadOnlyNote>{/if}
-  {#if current.pending_activation}<div class="pending-banner" role="status">
+  {#if current.pending_activation && current.active_revision != null}<div
+      class="pending-banner"
+      role="status"
+    >
       <strong>Revision {current.active_revision} remains live.</strong><span
         >Draft configuration and the draft-selected credential are not serving
         traffic. Test, certify, and activate to replace the runtime revision

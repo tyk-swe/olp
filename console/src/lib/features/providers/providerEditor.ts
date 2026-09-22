@@ -519,7 +519,7 @@ export function disableNotice(generation: number | null): string {
 
 export function providerStatus(current: ProviderStatusValue): string {
   if (providerDisabled(current)) return 'disabled · not serving';
-  if (current.pending_activation)
+  if (current.pending_activation && current.active_revision != null)
     return `revision ${current.active_revision} live · changes pending`;
   if (current.active_revision != null)
     return `revision ${current.active_revision} active`;

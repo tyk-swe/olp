@@ -500,6 +500,13 @@ describe('provider editor activation policy', () => {
     expect(
       providerStatus({
         ...readyDraft,
+        active_revision: null,
+        pending_activation: true
+      })
+    ).toBe('draft');
+    expect(
+      providerStatus({
+        ...readyDraft,
         active_revision: 2,
         pending_activation: true
       })
