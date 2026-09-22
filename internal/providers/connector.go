@@ -22,8 +22,8 @@ import (
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/media"
 	"github.com/tyk-swe/olp/internal/protocols"
-"github.com/tyk-swe/olp/internal/providerinvoke"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
+	"github.com/tyk-swe/olp/internal/providerinvoke"
 )
 
 // Probe bounds: one upstream call, one response body, four in flight.
@@ -93,7 +93,7 @@ func (s *Server) call(ctx context.Context, cfg *Configuration, credential []byte
 		return 0, nil, err
 	}
 	req.Header.Set("Accept", "application/json, text/event-stream")
-	if cfg.Kind == KindBedrock && (strings.HasSuffix(path, "/converse-stream") || strings.HasSuffix(path,"/invoke-with-response-stream")) {
+	if cfg.Kind == KindBedrock && (strings.HasSuffix(path, "/converse-stream") || strings.HasSuffix(path, "/invoke-with-response-stream")) {
 		req.Header.Set("Accept", "application/vnd.amazon.eventstream")
 	}
 	req.Header.Set("User-Agent", "olp-go/probe")
@@ -177,7 +177,9 @@ func (s *Server) listModelFacts(ctx context.Context, cfg *Configuration, credent
 		for name := range cfg.Options.Models {
 			names = append(names, name)
 		}
-		for name := range cfg.Options.Bindings {names=append(names,name)}
+		for name := range cfg.Options.Bindings {
+			names = append(names, name)
+		}
 		slices.Sort(names)
 		if len(names) == 0 {
 			return nil, &probeError{Code: "model_required", Detail: "Declare a model before probing this vendor."}
@@ -324,7 +326,7 @@ func decodeModels(body []byte) ([]string, error) {
 
 // certifyTuple uses a bounded live probe or authenticated native media discovery.
 func (s *Server) certifyTuple(ctx context.Context, cfg *Configuration, credential []byte, model string, tuple CapabilityInput, maxEventBytes int) error {
-	if !certifiable(cfg.Kind, value(cfg.Options.VendorID), tuple) || !cfg.transport().Supports(tuple.Operation,tuple.Surface,tuple.Mode) {
+	if !certifiable(cfg.Kind, value(cfg.Options.VendorID), tuple) || !cfg.transport().Supports(tuple.Operation, tuple.Surface, tuple.Mode) {
 		return &probeError{Code: "capability_unavailable", Detail: "This connector cannot certify the requested tuple."}
 	}
 	switch {
@@ -383,8 +385,11 @@ func (s *Server) certifyTuple(ctx context.Context, cfg *Configuration, credentia
 		}
 	}
 	families := []openai.Family{family}
-	if cfg.ProfileID!="" && tuple.Operation=="generation" && tuple.Surface=="openai" {
-		profile,_:=cfg.transport().Profile();if profile.Dialect=="openai-responses"{families=[]openai.Family{openai.FamilyResponses}}
+	if cfg.ProfileID != "" && tuple.Operation == "generation" && tuple.Surface == "openai" {
+		profile, _ := cfg.transport().Profile()
+		if profile.Dialect == "openai-responses" {
+			families = []openai.Family{openai.FamilyResponses}
+		}
 	}
 	if cfg.ProfileID == "" && tuple.Operation == "generation" && tuple.Surface == "openai" && !protocols.ChatOnly(value(cfg.Options.VendorID)) && (cfg.Kind == KindOpenAI || cfg.Kind == KindAzure || cfg.Kind == KindOpenAICompatible) {
 		families = append(families, openai.FamilyResponses)
@@ -400,7 +405,7 @@ func (s *Server) certifyTuple(ctx context.Context, cfg *Configuration, credentia
 			return err
 		}
 		transport := cfg.transport()
-		body, wire, err := providerinvoke.Encode(parsed,transport,model,cfg.Options.ParameterDefaults)
+		body, wire, err := providerinvoke.Encode(parsed, transport, model, cfg.Options.ParameterDefaults)
 		if err != nil {
 			return err
 		}
@@ -416,7 +421,7 @@ func (s *Server) certifyTuple(ctx context.Context, cfg *Configuration, credentia
 			return statusError(status)
 		}
 		if tuple.Mode == ModeStreaming {
-			_, err = protocols.Stream(wire, family, transport.StreamPayload(bytes.NewReader(data),maxEventBytes), maxEventBytes, "certification", true, func([]byte) error { return nil })
+			_, err = protocols.Stream(wire, family, transport.StreamPayload(bytes.NewReader(data), maxEventBytes), maxEventBytes, "certification", true, func([]byte) error { return nil })
 		} else {
 			_, err = protocols.DecodeRequest(wire, family, data, "certification", protocols.EmbeddingEncoding(parsed, cfg.Options.ParameterDefaults), parsed)
 		}
@@ -428,8 +433,11 @@ func (s *Server) certifyTuple(ctx context.Context, cfg *Configuration, credentia
 }
 
 func (s *Server) certifyBatch(ctx context.Context, cfg *Configuration, credential []byte) error {
-	for _,resource:=range []string{"files","batches"}{
-  path,err:=cfg.transport().ResourceURL("",resource,url.Values{"limit":[]string{"1"}});if err!=nil{return err}
+	for _, resource := range []string{"files", "batches"} {
+		path, err := cfg.transport().ResourceURL("", resource, url.Values{"limit": []string{"1"}})
+		if err != nil {
+			return err
+		}
 		status, data, err := s.call(ctx, cfg, credential, http.MethodGet, path, nil)
 		if err != nil {
 			return err
@@ -449,8 +457,10 @@ func (s *Server) certifyBatch(ctx context.Context, cfg *Configuration, credentia
 
 func (s *Server) certifyRealtime(ctx context.Context, cfg *Configuration, credential []byte, model string) error {
 	transport := cfg.transport()
-	endpoint,err:=transport.RealtimeURL(model)
- if err!=nil{return &probeError{Code:"invalid_endpoint",Detail:"The selected profile cannot address this realtime model."}}
+	endpoint, err := transport.RealtimeURL(model)
+	if err != nil {
+		return &probeError{Code: "invalid_endpoint", Detail: "The selected profile cannot address this realtime model."}
+	}
 	check := strings.Replace(endpoint, "wss://", "https://", 1)
 	check = strings.Replace(check, "ws://", "http://", 1)
 	u, err := url.Parse(check)

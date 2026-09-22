@@ -60,7 +60,7 @@ func (s *Server) networkCredentials(r *http.Request) (access.Reply, error) {
 
 func (s *Server) createNetworkCredential(r *http.Request) (access.Reply, error) {
 	var input rotateRequest
-	if err := access.DecodeUnique(r, &input,1<<20); err != nil {
+	if err := access.DecodeUnique(r, &input, 1<<20); err != nil {
 		return access.Reply{}, err
 	}
 	id, err := access.IDParam(r, "provider_id")

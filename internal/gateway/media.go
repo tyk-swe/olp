@@ -256,7 +256,7 @@ func (s *Server) prepareMedia(x *execution, authority access.Authority) *Error {
 			if request.Op == media.OpVideoCreate && !videoLifecycleProvider(&p, t.ProviderModel) {
 				return errors.New("video lifecycle capabilities unavailable")
 			}
-			if _, e := media.Encode(request, p.Kind, p.Connector().Model(t.ProviderModel)); e != nil {
+			if _, _, e := media.EncodeConfigured(request, p.Connector(), t.ProviderModel); e != nil {
 				semantic = errors.New(e.Message)
 				return semantic
 			}
@@ -285,7 +285,7 @@ func (s *Server) prepareMedia(x *execution, authority access.Authority) *Error {
 // connectorsSupports mirrors the connector capability check against the
 // matrix in connectors.
 func connectorsSupports(p runtime.Provider, op, mode string) bool {
-	return p.Connector().Supports(op,"openai",mode)
+	return p.Connector().Supports(op, "openai", mode)
 }
 
 func videoLifecycleRoute(operations []string) bool {
@@ -422,7 +422,7 @@ func (s *Server) mediaAttempt(ctx context.Context, w http.ResponseWriter, x *exe
 		return fact, nil, f
 	}
 	cfg := provider.Connector()
-	call, mErr := media.Encode(x.media, cfg.Kind, cfg.Model(a.UpstreamModel))
+	call, effective, mErr := media.EncodeConfigured(x.media, cfg, a.UpstreamModel)
 	if mErr != nil {
 		return fail(classProtocol, nil)
 	}
@@ -448,7 +448,7 @@ func (s *Server) mediaAttempt(ctx context.Context, w http.ResponseWriter, x *exe
 		return fail(classCredential, nil)
 	}
 	target := media.Target{Config: cfg, Model: cfg.Model(a.UpstreamModel), Secret: secret, NetworkSecret: networkSecret, ConnectionScope: providerConnectionScope(provider, slot)}
-	result, failure := s.Media.Jobs.Transport.Do(actx, target, call, x.media)
+	result, failure := s.Media.Jobs.Transport.Do(actx, target, call, effective)
 	if failure != nil {
 		fact.Status = failure.Status
 		return fail(mediaClass(failure), &attemptFailure{
@@ -462,7 +462,7 @@ func (s *Server) mediaAttempt(ctx context.Context, w http.ResponseWriter, x *exe
 	fb := result.FirstByte
 	fact.FirstByte = &fb
 	fact.Class = "success"
-	fact.Usage = mediaUsage(x.media, result)
+	fact.Usage = mediaUsage(effective, result)
 	fact.Committed = true
 	if result.Kind == media.ResponseSSE {
 		var streamFailure *attemptFailure

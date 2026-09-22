@@ -48,7 +48,7 @@ func (s *Server) bedrockAuthenticate(r *http.Request) (access.Authority, *Error)
 
 func bedrockQualified(p *runtime.Provider, model, operation, mode string) bool {
 	return p.Kind == "bedrock" &&
-		p.Connector().Supports(operation,"bedrock",mode) &&
+		p.Connector().Supports(operation, "bedrock", mode) &&
 		p.Supports(model, operation, "bedrock", mode)
 }
 

@@ -190,10 +190,12 @@ func bearerToken(r *http.Request) string {
 	return strings.TrimSpace(header[7:])
 }
 
-func realtimeURL(p *pin) (string,*Error){
- endpoint,err:=p.provider.Connector().RealtimeURL(p.model)
- if err!=nil{return "",serverError(http.StatusBadGateway,"upstream_error","The provider profile cannot address this realtime model.")}
- return endpoint,nil
+func realtimeURL(p *pin) (string, *Error) {
+	endpoint, err := p.provider.Connector().RealtimeURL(p.model)
+	if err != nil {
+		return "", serverError(http.StatusBadGateway, "upstream_error", "The provider profile cannot address this realtime model.")
+	}
+	return endpoint, nil
 }
 
 func realtimeDial(ctx context.Context, s *Server, x *execution, p *pin, endpoint string) (*websocket.Conn, *Error) {

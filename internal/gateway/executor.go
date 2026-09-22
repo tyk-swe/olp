@@ -20,8 +20,8 @@ import (
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/media"
 	"github.com/tyk-swe/olp/internal/protocols"
-"github.com/tyk-swe/olp/internal/providerinvoke"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
+	"github.com/tyk-swe/olp/internal/providerinvoke"
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/runtime"
 )
@@ -57,24 +57,25 @@ const (
 
 // execution is one inference request flowing through the attempt loop.
 type execution struct {
-	request       request
-	family        openai.Family
-	parsed        *openai.Request
-	media         *media.Request
-	actor         string
-	keyID         string
-	budgetGroupID *string
-	attribution   map[string]string
-	userID        string
-	affinity      []byte
-	authority     access.Authority
-	route         *runtime.Route
-	mode          string
-	attempts      []runtime.Attempt
-	budget        int
-	preferences   *runtime.Preferences
-	decisions     []runtime.Decision
-	policy        runtime.EffectivePolicy
+	preparedProviders map[string]preparedProvider
+	request           request
+	family            openai.Family
+	parsed            *openai.Request
+	media             *media.Request
+	actor             string
+	keyID             string
+	budgetGroupID     *string
+	attribution       map[string]string
+	userID            string
+	affinity          []byte
+	authority         access.Authority
+	route             *runtime.Route
+	mode              string
+	attempts          []runtime.Attempt
+	budget            int
+	preferences       *runtime.Preferences
+	decisions         []runtime.Decision
+	policy            runtime.EffectivePolicy
 
 	policyDecisions []contentpolicy.Decision
 	emit            openai.Emit
@@ -242,7 +243,7 @@ func (s *Server) execute(ctx context.Context, x *execution) *outcome {
 	defer cancel()
 	out := runAttempts(ctx, s, x, attemptAdapter[*openai.Completion]{
 		estimate: func(provider *runtime.Provider) int64 {
-			return estimateTokens(x.parsed, provider.ParameterDefaults)
+			return x.providerEstimate(provider)
 		},
 		dispatch: func(ctx context.Context, attempt runtime.Attempt, provider *runtime.Provider, slot runtime.Slot, ordinal int) (AttemptFact, *openai.Completion, *attemptFailure) {
 			return s.attempt(ctx, x, attempt, provider, slot, ordinal)
@@ -420,7 +421,17 @@ func (s *Server) attempt(ctx context.Context, x *execution, a runtime.Attempt, p
 		return fail(classConnect, nil)
 	}
 	cfg := provider.Connector()
-	body, wire, err := providerinvoke.Encode(x.parsed,cfg,a.UpstreamModel,provider.ParameterDefaults)
+	var body []byte
+	var wire openai.Family
+	if provider.ProfileID != "" {
+		prepared, prepareErr := x.preparedProvider(provider, a.UpstreamModel)
+		err = prepareErr
+		if err == nil {
+			body, wire = prepared.invocation.Prepared.Document().Bytes(), prepared.invocation.Wire
+		}
+	} else {
+		body, wire, err = providerinvoke.Encode(x.parsed, cfg, a.UpstreamModel, provider.ParameterDefaults)
+	}
 	if err != nil {
 		return fail(classProtocol, nil)
 	}
@@ -542,7 +553,7 @@ func (s *Server) attempt(ctx context.Context, x *execution, a runtime.Attempt, p
 			}
 			return err
 		}
-		completion, err = protocols.Stream(wire, x.family, cfg.StreamPayload(resp.Body,int(s.cfg.MaxEventBytes)), int(s.cfg.MaxEventBytes), x.route.Slug, x.parsed.IncludeUsage, emit)
+		completion, err = protocols.Stream(wire, x.family, cfg.StreamPayload(resp.Body, int(s.cfg.MaxEventBytes)), int(s.cfg.MaxEventBytes), x.route.Slug, x.parsed.IncludeUsage, emit)
 	} else {
 		limited := &countingReader{r: resp.Body, limit: s.cfg.MaxResponseBytes}
 		raw, readErr := io.ReadAll(limited)

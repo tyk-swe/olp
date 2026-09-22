@@ -77,7 +77,7 @@ func readBounded(r io.Reader, limit int64) ([]byte, error) {
 }
 
 func stateQualified(p *runtime.Provider, model, operation, mode string) bool {
-	if !p.Connector().Supports(operation,"openai",mode) {
+	if !p.Connector().Supports(operation, "openai", mode) {
 		return false
 	}
 	if !p.Supports(model, operation, "openai", mode) {
@@ -97,7 +97,9 @@ func officialOpenAIEndpoint(endpoint string) bool {
 	return endpoint == "" || endpoint == "https://api.openai.com/v1"
 }
 
-func resourceURL(cfg connectors.Config, model,path string,query url.Values)(string,error){return cfg.ResourceURL(model,path,query)}
+func resourceURL(cfg connectors.Config, model, path string, query url.Values) (string, error) {
+	return cfg.ResourceURL(model, path, query)
+}
 
 func pinUnavailable() *Error {
 	return serverError(http.StatusConflict, "provider_resource_credential_unavailable",

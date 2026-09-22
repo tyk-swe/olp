@@ -7,7 +7,7 @@ import (
 	"errors"
 	"net/url"
 	"regexp"
-"slices"
+	"slices"
 	"strings"
 	"time"
 
@@ -143,12 +143,16 @@ func (c Config) Model(model string) string {
 	return strings.TrimPrefix(model, "models/")
 }
 func (c Config) URL(wire openai.Family, model string, stream bool) (string, error) {
- if c.ProfileID != "" {
-  if err:=c.ValidateProfile();err!=nil{return "",err}
-  expected,err:=c.TargetFamily(wire)
-  batch:=wire==openai.FamilyGeminiEmbeddingsBatch&&expected==openai.FamilyGeminiEmbeddings
-  if err!=nil||wire!=expected&&!batch{return "",errors.New("wire dialect does not match the selected provider profile")}
- }
+	if c.ProfileID != "" {
+		if err := c.ValidateProfile(); err != nil {
+			return "", err
+		}
+		expected, err := c.TargetFamily(wire)
+		batch := wire == openai.FamilyGeminiEmbeddingsBatch && expected == openai.FamilyGeminiEmbeddings
+		if err != nil || wire != expected && !batch {
+			return "", errors.New("wire dialect does not match the selected provider profile")
+		}
+	}
 	model = c.Model(model)
 	base := c.profileBase()
 	if !ModelValid(c.Kind, model) {
@@ -295,27 +299,59 @@ func (c Config) hasDeployment(model string) bool {
 }
 
 // ResourceURL resolves resources independently from generation endpoint choice.
-func (c Config) ResourceURL(model,path string,query url.Values)(string,error){
- if strings.Contains(path,"..")||strings.ContainsAny(path,"\\?#"){return "",errors.New("invalid upstream resource path")}
- base:=c.profileBase()
- if c.Kind=="azure_openai"&&c.Hosting()!="azure-v1"{
-  if strings.HasPrefix(path,"deployments/"){
-   deployment:=c.Model(model);if deployment==""{return "",errors.New("model has no configured Azure deployment")}
-   base+="/openai/deployments/"+url.PathEscape(deployment);path=strings.TrimPrefix(path,"deployments/")
-  }else{base+="/openai"}
- }
- merged:=url.Values{}
- if c.Kind=="azure_openai"&&c.Hosting()!="azure-v1"{merged.Set("api-version",c.APIVersion)}
- for name,values:=range query{if existing,ok:=merged[name];ok&&!slices.Equal(existing,values){return "",errors.New("query collides with hosting API revision")};merged[name]=append([]string(nil),values...)}
- endpoint:=base+"/"+strings.TrimPrefix(path,"/");if len(merged)>0{endpoint+="?"+merged.Encode()};return endpoint,nil
+func (c Config) ResourceURL(model, path string, query url.Values) (string, error) {
+	if strings.Contains(path, "..") || strings.ContainsAny(path, "\\?#") {
+		return "", errors.New("invalid upstream resource path")
+	}
+	base := c.profileBase()
+	if c.Kind == "azure_openai" && c.Hosting() != "azure-v1" {
+		if strings.HasPrefix(path, "deployments/") {
+			deployment := c.Model(model)
+			if deployment == "" {
+				return "", errors.New("model has no configured Azure deployment")
+			}
+			base += "/openai/deployments/" + url.PathEscape(deployment)
+			path = strings.TrimPrefix(path, "deployments/")
+		} else {
+			base += "/openai"
+		}
+	}
+	merged := url.Values{}
+	if c.Kind == "azure_openai" && c.Hosting() != "azure-v1" {
+		merged.Set("api-version", c.APIVersion)
+	}
+	for name, values := range query {
+		if existing, ok := merged[name]; ok && !slices.Equal(existing, values) {
+			return "", errors.New("query collides with hosting API revision")
+		}
+		merged[name] = append([]string(nil), values...)
+	}
+	endpoint := base + "/" + strings.TrimPrefix(path, "/")
+	if len(merged) > 0 {
+		endpoint += "?" + merged.Encode()
+	}
+	return endpoint, nil
 }
 
-func (c Config) RealtimeURL(model string)(string,error){
- if c.ProfileID!=""&&!c.Supports("realtime","openai","realtime"){return "",errors.New("profile does not support realtime")}
- query:=url.Values{}
- if c.Kind=="azure_openai"&&c.Hosting()!="azure-v1"{query.Set("deployment",c.Model(model))}else{query.Set("model",c.Model(model))}
- endpoint,err:=c.ResourceURL(model,"realtime",query);if err!=nil{return "",err}
- if strings.HasPrefix(endpoint,"https://"){return "wss://"+strings.TrimPrefix(endpoint,"https://"),nil}
- if strings.HasPrefix(endpoint,"http://"){return "ws://"+strings.TrimPrefix(endpoint,"http://"),nil}
- return "",errors.New("realtime endpoint requires HTTP(S) hosting")
+func (c Config) RealtimeURL(model string) (string, error) {
+	if c.ProfileID != "" && !c.Supports("realtime", "openai", "realtime") {
+		return "", errors.New("profile does not support realtime")
+	}
+	query := url.Values{}
+	if c.Kind == "azure_openai" && c.Hosting() != "azure-v1" {
+		query.Set("deployment", c.Model(model))
+	} else {
+		query.Set("model", c.Model(model))
+	}
+	endpoint, err := c.ResourceURL(model, "realtime", query)
+	if err != nil {
+		return "", err
+	}
+	if strings.HasPrefix(endpoint, "https://") {
+		return "wss://" + strings.TrimPrefix(endpoint, "https://"), nil
+	}
+	if strings.HasPrefix(endpoint, "http://") {
+		return "ws://" + strings.TrimPrefix(endpoint, "http://"), nil
+	}
+	return "", errors.New("realtime endpoint requires HTTP(S) hosting")
 }
