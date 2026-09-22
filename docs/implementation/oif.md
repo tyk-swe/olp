@@ -34,7 +34,7 @@ Tickets become ready for implementation when their blockers are integrated into 
 
 | Ticket | Scope | Status | Evidence |
 | --- | --- | --- | --- |
-| [#210](https://github.com/tyk-swe/olp/issues/210) Freeze independent fidelity fixtures and performance baseline | D23; T01, T07, T08, T09 | Pending | — |
+| [#210](https://github.com/tyk-swe/olp/issues/210) Freeze independent fidelity fixtures and performance baseline | D23; T01, T07, T08, T09 | Fixtures integrated; performance baseline pending | Fixture commit `a541fd31`; [baseline validation](../qualification/fidelity/baseline-validation.md) |
 | [#211](https://github.com/tyk-swe/olp/issues/211) Introduce source-preserving OIF and registered identity plans | D01-D07, D14, D19-D20; T01, T07, T10 | Pending | — |
 | [#212](https://github.com/tyk-swe/olp/issues/212) Implement typed provider profiles and secure connection configuration | D06-D07, D16-D17; T05 | Pending | — |
 | [#213](https://github.com/tyk-swe/olp/issues/213) Admit complete strict interaction plans and expose safe inspection | D02,D08-D10,D13,D18,D21,D23; T01,T03,T05 | Pending | — |
