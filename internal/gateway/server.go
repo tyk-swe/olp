@@ -385,14 +385,22 @@ func attemptBudget(r *http.Request, route *runtime.Route) (int, *Error) {
 }
 
 func requestError(err error) *Error {
+	if gatewayError, ok := errors.AsType[*Error](err); ok {
+		return gatewayError
+	}
 	var contract interface {
 		Incompatibility() (code, field, requirement, message string)
 	}
 	if errors.As(err, &contract) {
-		code, field, _, message := contract.Incompatibility()
+		code, field, requirement, message := contract.Incompatibility()
 		var param *string
 		if field != "" {
 			param = &field
+		}
+		if code == "target_capability" && requirement == "source_control_mapping" {
+			// Preserve the established ingress error for an unmapped control;
+			// the planner and inspector retain its precise requirement/category.
+			return invalidRequest("unsupported_parameter", message, param)
 		}
 		return invalidRequest(code, message, param)
 	}
@@ -641,6 +649,20 @@ func (s *Server) prepare(ctx context.Context, x *execution, permitted func(slug 
 	var policyDecisions []contentpolicy.Decision
 	plan, err := runtime.PlanRequest(snapshot, route.Slug, x.family.Operation(), x.family.Surface(), x.mode, x.affinity, runtime.SelectionOptions{
 		KeyID: x.keyID, Preferences: x.preferences, Parameters: protocols.ParameterNames(x.parsed), Inputs: s.routingInputs(), TokenDemand: requestDemand(x.parsed), Now: s.now(), CheckSlots: true, CredentialRevoked: s.Runtime.Revoked,
+		Effective: func(p runtime.Provider, t runtime.Target) ([]string, *runtime.TokenDemand) {
+			if p.ProfileID == "" && !x.strict() && route.ContentPolicy == nil {
+				return protocols.ParameterNames(x.parsed), requestDemand(x.parsed)
+			}
+			prepared, err := x.preparedProvider(&p, t.ProviderModel)
+			if err != nil {
+				return nil, nil
+			}
+			native := openai.NewSourceEnvelope(prepared.invocation.Wire, x.parsed.Route, x.parsed.Stream, prepared.invocation.Prepared.Document())
+			if prepared.plan != nil {
+				native = prepared.plan.EffectiveRequest()
+			}
+			return protocols.ParameterNames(native), requestDemand(native)
+		},
 		Accept: func(p runtime.Provider, t runtime.Target) error {
 			cfg := p.Connector()
 			if p.Network != nil && p.Network.CredentialID != "" && s.Runtime.Revoked(p.Network.CredentialID) {
@@ -662,7 +684,7 @@ func (s *Server) prepare(ctx context.Context, x *execution, permitted func(slug 
 				}
 			}
 			var e error
-			if p.ProfileID != "" || x.strict() {
+			if p.ProfileID != "" || x.strict() || route.ContentPolicy != nil {
 				var prepared preparedProvider
 				prepared, e = x.preparedProvider(&p, t.ProviderModel)
 				if e != nil {
@@ -693,6 +715,13 @@ func (s *Server) prepare(ctx context.Context, x *execution, permitted func(slug 
 				recordDecision(x, decision)
 			}
 			return requestError(semantic)
+		}
+		if x.strict() {
+			for _, decision := range plan.Decisions {
+				if decision.Reason != nil && (*decision.Reason == "max_output_tokens_exceeded" || *decision.Reason == "context_length_exceeded") {
+					return invalidRequest(*decision.Reason, "The effective invocation exceeds a declared model limit; its controls were not reduced.", nil)
+				}
+			}
 		}
 		return selectionError(&runtime.SelectionError{Code: runtime.NoEligibleTargets}, route.Slug)
 	}

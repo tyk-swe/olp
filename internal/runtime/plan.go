@@ -27,6 +27,7 @@ type SelectionOptions struct {
 	CheckSlots        bool
 	CredentialRevoked func(string) bool
 	Accept            func(Provider, Target) error
+	Effective         func(Provider, Target) ([]string, *TokenDemand)
 }
 type Decision struct {
 	Incompatibility       *Incompatibility    `json:"incompatibility,omitempty"`
@@ -168,6 +169,18 @@ func PlanRequest(s *Snapshot, slug, operation, surface, mode string, affinity []
 					row.decision.Incompatibility = &Incompatibility{Code: code, Field: field, Requirement: requirement, Message: message}
 					reason = code
 				}
+			}
+		}
+		if reason == "" && options.Effective != nil {
+			parameters, demand := options.Effective(provider, target)
+			reason = capacityReason(metadata, demand)
+			if reason == "" {
+				reason = constraintReason(policy, provider, metadata, row.decision.Price, parameters)
+			}
+			if demand != nil {
+				input := demand.EstimatedInputTokens
+				row.decision.EstimatedInputTokens = &input
+				row.decision.RequestedOutputTokens = demand.MaxOutputTokens
 			}
 		}
 		targetID, e := uuid.Parse(target.RoutingID)

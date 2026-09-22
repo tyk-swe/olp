@@ -2,9 +2,11 @@ package runtime
 
 import (
 	"fmt"
+	"strconv"
 
 	"github.com/tyk-swe/olp/internal/contentpolicy"
 	"github.com/tyk-swe/olp/internal/interaction"
+	"github.com/tyk-swe/olp/internal/protocols/openai"
 )
 
 // CompileRouteExecution validates the complete configured links of a route.
@@ -53,3 +55,25 @@ func (s *Snapshot) InteractionTemplate(slug, target string) (*interaction.Templa
 }
 
 func (r *Route) CompiledContentPolicy() *contentpolicy.Compiled { return r.compiledContentPolicy }
+
+// EffectiveOutputLimit reads the dialect-owned bound after omission defaults.
+// It does not assert equivalence between reasoning and generation token scopes.
+func EffectiveOutputLimit(request *openai.Request) *int64 {
+	paths := []string{"/max_completion_tokens", "/max_tokens"}
+	switch request.Family {
+	case openai.FamilyResponses:
+		paths = []string{"/max_output_tokens"}
+	case openai.FamilyBedrock:
+		paths = []string{"/inferenceConfig/maxTokens"}
+	case openai.FamilyGemini, openai.FamilyGeminiStream:
+		paths = []string{"/generationConfig/maxOutputTokens"}
+	}
+	for _, path := range paths {
+		if value, ok := request.OIF().Document().Lookup(path); ok {
+			if number, err := strconv.ParseInt(value.Raw(), 10, 64); err == nil && number >= 0 {
+				return &number
+			}
+		}
+	}
+	return nil
+}

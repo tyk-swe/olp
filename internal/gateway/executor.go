@@ -451,10 +451,13 @@ func (s *Server) attempt(ctx context.Context, x *execution, a runtime.Attempt, p
 	var body []byte
 	var wire openai.Family
 	var contract *interaction.Plan
-	if provider.ProfileID != "" || x.strict() {
+	if provider.ProfileID != "" || x.strict() || x.route.ContentPolicy != nil {
 		prepared, prepareErr := x.preparedProvider(provider, a.UpstreamModel)
 		err = prepareErr
 		if err == nil {
+			for _, decision := range prepared.policyDecisions {
+				recordDecision(x, decision)
+			}
 			body, wire = prepared.invocation.Prepared.Document().Bytes(), prepared.invocation.Wire
 			contract = prepared.plan
 			if contract != nil {

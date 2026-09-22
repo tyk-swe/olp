@@ -57,7 +57,7 @@ func (s *Server) enforceContentPolicy(x *execution) *Error {
 			return policyUnavailable("content_policy_surface_unavailable", "The model `"+x.route.Slug+"` enforces an output content policy that cannot be applied to provider-retained responses; send the request without stateful options.")
 		}
 	}
-	if x.strict() {
+	if x.strict() || len(x.preparedProviders) > 0 {
 		// The compiled interaction inspected the effective destination after
 		// defaults while filtering candidates. Inspecting the caller projection
 		// again would not establish coverage of that actual invocation.

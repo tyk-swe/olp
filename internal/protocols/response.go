@@ -37,6 +37,11 @@ func decode(wire, target openai.Family, body []byte, route, encoding string, req
 	c, err := decodeLegacy(wire, target, result.Source().Bytes(), route, encoding, request)
 	if c != nil {
 		c.Native = result
+		if wire == openai.FamilyBedrock && target == wire {
+			// Converse's model belongs to the URL; native output needs no
+			// model rewrite. Keep every validated source member verbatim.
+			c.Body = result.Source().Bytes()
+		}
 	}
 	return c, err
 }
