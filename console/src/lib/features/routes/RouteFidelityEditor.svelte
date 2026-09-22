@@ -45,9 +45,10 @@
     >
   </div>
   {#if changed}<p class="migration-note" role="status">
-      Migration selected: {saved ?? 'implicit legacy'} → {editor.fidelity
-        ?.mode ?? 'implicit legacy'}. Save and validate the draft before
-      activation; the published revision remains the serving contract.
+      Draft contract: {saved ?? 'implicit legacy'} → {editor.fidelity?.mode ??
+        'implicit legacy'}. A published slug cannot cross the strict boundary.
+      Use “Create strict migration draft” on the Routes page to review that
+      change under a new slug.
     </p>{/if}
   {#if editor.fidelity?.mode === 'strict'}<p class="muted">
       Strict targets require versioned provider profiles and qualified

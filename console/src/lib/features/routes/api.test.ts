@@ -2,7 +2,10 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { authLifecycle } from '$lib/features/access/session/lifecycle';
 import { clearCsrfToken } from '$lib/features/access/session/api';
 import { captureRequests, jsonResponse } from '$lib/api/test/requestCapture';
-import { simulateRouting } from '$lib/features/routes/api';
+import {
+  createRouteMigrationDraft,
+  simulateRouting
+} from '$lib/features/routes/api';
 
 afterEach(async () => {
   await authLifecycle.principalInvalidated();
@@ -23,6 +26,29 @@ function captureSimulation() {
   });
   return captureRequests(() => jsonResponse([]));
 }
+
+describe('createRouteMigrationDraft', () => {
+  it('sends an explicit strict target with source ETag and idempotency', async () => {
+    const requests = captureSimulation();
+    await createRouteMigrationDraft(
+      { id: 'route-1', etag: '019b036f-fcad-72a0-9a35-734fa53adf5f' },
+      'new-route'
+    );
+    const request = requests[0];
+    expect(request.method).toBe('POST');
+    expect(new URL(request.url).pathname).toBe(
+      '/api/v3/routes/route-1/migration-draft'
+    );
+    expect(request.headers.get('If-Match')).toBe(
+      '"019b036f-fcad-72a0-9a35-734fa53adf5f"'
+    );
+    expect(request.headers.get('Idempotency-Key')).toBeTruthy();
+    expect(await request.json()).toEqual({
+      slug: 'new-route',
+      fidelity: { mode: 'strict' }
+    });
+  });
+});
 
 describe('simulateRouting', () => {
   it('sends configured controls with a synthetic user message for provider validation', async () => {

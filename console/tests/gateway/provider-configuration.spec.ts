@@ -275,7 +275,7 @@ test('configuration forms retain native source through real saves, conflicts and
   expect(saved.request().postData()).not.toContain('fidelity');
   await page.getByLabel('Fidelity mode').selectOption('strict');
   await expect(
-    page.getByText(/Migration selected: implicit legacy → strict/)
+    page.getByText(/Draft contract: implicit legacy → strict/)
   ).toBeVisible();
   await expect(
     page.getByRole('button', { name: 'Activate route', exact: true })
@@ -300,6 +300,60 @@ test('configuration forms retain native source through real saves, conflicts and
     animations: 'disabled',
     style: screenshotStyle
   });
+  // A published legacy route migrates through the reviewed new-slug action.
+  const legacySlug = `native-legacy-${info.project.name}`;
+  const legacyRoute = await management(
+    page,
+    'POST',
+    '/api/v3/route-drafts',
+    `{"slug":"${legacySlug}","operations":["generation"],"overall_timeout_ms":10000,"max_attempts":1,"targets":[{"provider_id":"${id}","provider_model":"${model}","priority":0,"weight":1,"timeout_ms":5000}]}`
+  );
+  expect(legacyRoute.status, legacyRoute.source).toBe(201);
+  const legacyDraftId = JSON.parse(legacyRoute.source).id as string;
+  const legacyActivated = await management(
+    page,
+    'POST',
+    `/api/v3/route-drafts/${legacyDraftId}/activate`,
+    undefined,
+    `/api/v3/route-drafts/${legacyDraftId}`
+  );
+  expect(legacyActivated.status, legacyActivated.source).toBe(200);
+  const providerCallsBefore = await request
+    .get('http://127.0.0.1:4187/__test__/requests')
+    .then((response) => response.json());
+  await page.goto('/routes');
+  await page
+    .getByRole('row', { name: new RegExp(legacySlug) })
+    .getByRole('button', { name: 'Create strict migration draft' })
+    .click();
+  const reviewedSlug = `${legacySlug}-reviewed`;
+  await page.getByLabel('New route slug').fill(reviewedSlug);
+  await page.locator('.migration-form').screenshot({
+    path: info.outputPath('strict-route-review-draft.png'),
+    animations: 'disabled',
+    style: screenshotStyle
+  });
+  const submitted = page.waitForResponse(
+    (response) =>
+      response.request().method() === 'POST' &&
+      new URL(response.url()).pathname.endsWith('/migration-draft')
+  );
+  await page.getByRole('button', { name: 'Create review draft' }).click();
+  const review = await submitted;
+  expect(review.status(), await review.text()).toBe(201);
+  expect(review.request().headers()['if-match']).toMatch(/^"[0-9a-f-]+"$/);
+  expect(JSON.parse(review.request().postData()!)).toEqual({
+    slug: reviewedSlug,
+    fidelity: { mode: 'strict' }
+  });
+  await expect(page.getByLabel('Fidelity mode')).toHaveValue('strict');
+  expect(await page.getByLabel('Public model slug').inputValue()).toBe(
+    reviewedSlug
+  );
+  const providerCallsAfter = await request
+    .get('http://127.0.0.1:4187/__test__/requests')
+    .then((response) => response.json());
+  expect(providerCallsAfter.requests).toEqual(providerCallsBefore.requests);
   await page.goto('/routes/new');
   await expect(page.getByLabel('Fidelity mode')).toHaveValue('strict');
 });

@@ -1,7 +1,12 @@
 import { flushSync, mount, unmount } from 'svelte';
 import { QueryClient } from '@tanstack/svelte-query';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { listRouteDraftPage, listRoutePage, retireRoute } from './api';
+import {
+  createRouteMigrationDraft,
+  listRouteDraftPage,
+  listRoutePage,
+  retireRoute
+} from './api';
 import { draft } from '$lib/forms/test/draftFixtures';
 import type { ActiveRoute, RouteDraft } from './api';
 import RouteListProbe from './test/RouteListProbe.svelte';
@@ -9,10 +14,14 @@ import RouteListProbe from './test/RouteListProbe.svelte';
 vi.mock('$lib/features/access/session/useRole.svelte', () => ({
   useRole: () => ({ can: () => true })
 }));
+vi.mock('$app/navigation', () => ({
+  goto: vi.fn().mockResolvedValue(undefined)
+}));
 vi.mock('./api', async (original) => ({
   ...(await original<typeof import('./api')>()),
   listRoutePage: vi.fn(),
   listRouteDraftPage: vi.fn(),
+  createRouteMigrationDraft: vi.fn(),
   retireRoute: vi.fn()
 }));
 
@@ -153,6 +162,37 @@ function button(label: string, section?: string) {
     (button) => button.textContent?.trim() === label
   )!;
 }
+
+describe('strict route migration', () => {
+  it('creates a review draft under a new slug with the selected published route ETag', async () => {
+    const published = {
+      ...activeRoute,
+      latest_revision: { ...activeRoute.latest_revision, fidelity: null }
+    };
+    vi.mocked(createRouteMigrationDraft).mockResolvedValue({
+      ...draft,
+      id: 'migrated-draft'
+    });
+    await establish([published], null, []);
+    button('Create strict migration draft').click();
+    flushSync();
+    const input = host.querySelector<HTMLInputElement>('#migration-slug')!;
+    expect(input.value).toBe('active-route-strict');
+    input.value = 'reviewed-strict';
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSync();
+    const form = host.querySelector<HTMLFormElement>('.migration-form')!;
+    form.dispatchEvent(
+      new Event('submit', { bubbles: true, cancelable: true })
+    );
+    await vi.waitFor(() => {
+      expect(createRouteMigrationDraft).toHaveBeenCalledWith(
+        expect.objectContaining({ id: published.id, etag: published.etag }),
+        'reviewed-strict'
+      );
+    });
+  });
+});
 
 describe('updating state', () => {
   it('keeps the active routes visible while a replacement page loads', async () => {
