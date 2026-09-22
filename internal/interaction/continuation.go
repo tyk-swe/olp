@@ -75,7 +75,7 @@ func (t *Template) prepareTools(request *openai.Request, context Context, receip
 			switch name {
 			case "max_tokens", "thinking", "temperature", "top_p", "top_k", "stop_sequences", "tools", "tool_choice":
 				fields[name] = bytes.Clone(t.defaults[name])
-				receipt.Dispositions = append(receipt.Dispositions, Disposition{safeField(name), "introduced", "declared_native_tool_default", evidenceTools})
+				receipt.Dispositions = append(receipt.Dispositions, Disposition{Field: safeField(name), Disposition: "introduced", Rule: "declared_native_tool_default", Evidence: evidenceTools})
 			default:
 				return oif.Prepared{}, incompatible("target_capability", safeField(name), "qualified_default_control", "A target default is outside the negotiated native tool contract.")
 			}
@@ -113,7 +113,10 @@ func (t *Template) prepareTools(request *openai.Request, context Context, receip
 	receipt.Obligations.Actionability = "encrypted_native_dependency_before_tool_bytes"
 	receipt.Obligations.Submission = "client_submission_identity"
 	receipt.Obligations.Retry = "recover_same_delivery_never_replay_unknown_work"
-	receipt.Dispositions = append(receipt.Dispositions, Disposition{"/messages", "mapped", "ordered_native_dependency_reconstruction", evidenceTools}, Disposition{"/tools", "mapped", "exact_function_schema", evidenceTools}, Disposition{"/result", "guarded", "ordered_observations_and_durable_actionability", evidenceTools})
+	receipt.Dispositions = append(receipt.Dispositions,
+		Disposition{Field: "/messages", Disposition: "mapped", Rule: "ordered_native_dependency_reconstruction", Evidence: evidenceTools},
+		Disposition{Field: "/tools", Disposition: "mapped", Rule: "exact_function_schema", Evidence: evidenceTools},
+		Disposition{Field: "/result", Disposition: "guarded", Rule: "ordered_observations_and_durable_actionability", Evidence: evidenceTools})
 	return prepared, err
 }
 
