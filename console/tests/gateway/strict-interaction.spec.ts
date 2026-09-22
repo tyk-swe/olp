@@ -196,7 +196,7 @@ test('strict inspector has zero inference effects and browser tool continuation 
   const key = success(
     await management(page, 'POST', '/api/v3/api-keys', {
       name: `Browser continuation ${info.project.name}`,
-      scopes: ['inference'],
+      scopes: ['inference', 'models_read'],
       allowed_routes: [slug],
       allow_provider_state: true
     }),
