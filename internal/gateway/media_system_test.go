@@ -162,6 +162,7 @@ type mediaFixture struct {
 	gateway      *Server
 	sink         *capture
 	log          *slog.Logger
+	completed    atomic.Int64 // HTTP handlers that returned after deferred settlement
 }
 
 const mediaVideoModel = "upstream-video-model"
@@ -372,7 +373,10 @@ func seedMediaFixture(t *testing.T, authMode string, withCredential bool) *media
 	gw.Sink = f.sink
 	mux := http.NewServeMux()
 	gw.Register(mux)
-	f.server = httptest.NewServer(mux)
+	f.server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer f.completed.Add(1)
+		mux.ServeHTTP(w, r)
+	}))
 	t.Cleanup(f.server.Close)
 	return f
 }
