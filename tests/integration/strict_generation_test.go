@@ -50,7 +50,14 @@ func newStrictProviderFixture(t *testing.T, profile string) *strictProviderFixtu
 			}
 			return
 		}
-		raw, err := io.ReadAll(r.Body)
+		var raw []byte
+		var err error
+		if f.failure.Load() == 3 {
+			raw = make([]byte, 1)
+			_, err = io.ReadFull(r.Body, raw)
+		} else {
+			raw, err = io.ReadAll(r.Body)
+		}
 		if err != nil {
 			t.Error(err)
 			return
@@ -193,12 +200,18 @@ func TestStrictPublicAmbiguousWorkNeverReplaysOrSubstitutes(t *testing.T) {
 	h.refresh()
 	sink := make(strictOutcomeSink, 2)
 	h.Gateway.Sink = sink
-	for _, failure := range []int32{1, 2} {
+	for _, failure := range []int32{1, 2, 3} {
 		first.failure.Store(failure)
 		beforeFirst, beforeSecond := len(first.captured()), len(second.captured())
-		status, response, _ := h.gatewayRaw("POST", "/v1/chat/completions", key, strings.NewReader(fmt.Sprintf(`{"model":%q,"messages":[{"role":"user","content":"accepted work"}]}`, slug)), map[string]string{"Content-Type": "application/json"})
-		if status != 502 || !bytes.Contains(response, []byte(`"code":"ambiguous_upstream_result"`)) || len(first.captured()) != beforeFirst+1 || len(second.captured()) != beforeSecond {
+		status, response, headers := h.gatewayRaw("POST", "/v1/chat/completions", key, strings.NewReader(fmt.Sprintf(`{"model":%q,"messages":[{"role":"user","content":"accepted work"}]}`, slug)), map[string]string{"Content-Type": "application/json"})
+		if status != 502 || headers.Get("X-Should-Retry") != "false" || !bytes.Contains(response, []byte(`"code":"ambiguous_upstream_result"`)) || len(first.captured()) != beforeFirst+1 || len(second.captured()) != beforeSecond {
 			t.Fatalf("ambiguous work replayed or substituted: %d %s", status, response)
+		}
+		if failure == 3 {
+			calls := first.captured()
+			if len(calls[len(calls)-1].body) != 1 {
+				t.Fatal("fixture did not interrupt the upload after its first byte")
+			}
 		}
 		select {
 		case envelope := <-sink:
@@ -238,11 +251,19 @@ func TestStrictPublicResponsesPreserveScalarAndArrayInputs(t *testing.T) {
 	if status != 400 || !bytes.Contains(response, []byte(`"param":"store"`)) || !bytes.Contains(response, []byte(`"code":"policy_conflict"`)) || len(f.captured()) != before {
 		t.Fatalf("native retention default bypassed policy: %d %s", status, response)
 	}
+	status, response, _ = h.gatewayRaw("POST", "/v1/responses", key, strings.NewReader(`{"model":"`+slug+`","input":"explicit retention","store":true}`), map[string]string{"Content-Type": "application/json"})
+	if status != 400 || !bytes.Contains(response, []byte(`"code":"policy_conflict"`)) || len(f.captured()) != before {
+		t.Fatalf("explicit native retention bypassed strict policy: %d %s", status, response)
+	}
 	statefulKey := stateKey(t, h, owner, slug, true)
 	h.refresh()
 	status, response, _ = h.gatewayRaw("POST", "/v1/responses", statefulKey, strings.NewReader(`{"model":"`+slug+`","input":"native default retention"}`), map[string]string{"Content-Type": "application/json"})
 	if status != 400 || !bytes.Contains(response, []byte(`"code":"state_carrier"`)) || len(f.captured()) != before {
 		t.Fatalf("unqualified retained continuation dispatched: %d %s", status, response)
+	}
+	status, response, _ = h.gatewayRaw("POST", "/v1/responses", statefulKey, strings.NewReader(`{"model":"`+slug+`","input":"explicit retention","store":true}`), map[string]string{"Content-Type": "application/json"})
+	if status != 400 || !bytes.Contains(response, []byte(`"code":"state_carrier"`)) || len(f.captured()) != before {
+		t.Fatalf("explicit unqualified retained continuation dispatched: %d %s", status, response)
 	}
 	status, response, _ = h.gatewayRaw("POST", "/v1/responses", key, strings.NewReader(`{"model":"`+slug+`","store":false,"input":[{"role":"user","content":[{"type":"input_file","file_id":"unowned-native-file"}]}]}`), map[string]string{"Content-Type": "application/json"})
 	if status != 400 || !bytes.Contains(response, []byte(`"code":"unsupported_stateful_reference"`)) || len(f.captured()) != before {
@@ -344,6 +365,10 @@ func TestStrictPublicCallerSemanticHeadersArePreservedOrRejected(t *testing.T) {
 	if status != 400 || !bytes.Contains(response, []byte(`"code":"target_capability"`)) || len(f.captured()) != before || bytes.Contains(response, []byte("conflicting-native-feature")) {
 		t.Fatalf("conflicting semantic header dispatched or leaked: %d %s", status, response)
 	}
+	status, response, _ = h.gatewayRaw("POST", "/anthropic/v1/messages", key, strings.NewReader(body), map[string]string{"Content-Type": "application/json", "Idempotency-Key": "unqualified-private-key"})
+	if status != 400 || !bytes.Contains(response, []byte(`"code":"target_capability"`)) || len(f.captured()) != before || bytes.Contains(response, []byte("unqualified-private-key")) {
+		t.Fatalf("unqualified idempotency was dropped or leaked: %d %s", status, response)
+	}
 	asset := fmt.Sprintf(`{"model":%q,"max_tokens":32,"messages":[{"role":"user","content":[{"type":"document","source":{"type":"file","file_id":"unowned-native-file"}}]}]}`, slug)
 	status, response, _ = h.gatewayRaw("POST", "/anthropic/v1/messages", key, strings.NewReader(asset), map[string]string{"Content-Type": "application/json"})
 	if status != 400 || !bytes.Contains(response, []byte(`"code":"resource_affinity"`)) || len(f.captured()) != before {
@@ -429,8 +454,8 @@ func TestStrictPublicOutputPolicyRejectsUninspectedNativeExtensions(t *testing.T
 			h.Gateway.Sink = sink
 			f.extraOutput.Store(true)
 			before := len(f.captured())
-			status, response, _ = h.gatewayRaw("POST", path, key, strings.NewReader(body), map[string]string{"Content-Type": "application/json"})
-			if status != 502 || bytes.Contains(response, []byte("private-marker")) || bytes.Contains(response, []byte("private_text")) || len(f.captured()) != before+1 {
+			status, response, headers := h.gatewayRaw("POST", path, key, strings.NewReader(body), map[string]string{"Content-Type": "application/json"})
+			if status != 502 || headers.Get("X-Should-Retry") != "false" || bytes.Contains(response, []byte("private-marker")) || bytes.Contains(response, []byte("private_text")) || len(f.captured()) != before+1 {
 				t.Fatalf("native output bypassed policy: %d %s", status, response)
 			}
 			select {

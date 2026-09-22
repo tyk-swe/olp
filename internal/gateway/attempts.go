@@ -48,7 +48,9 @@ func runAttempts[Result any](ctx context.Context, s *Server, x *execution, adapt
 			if used >= x.budget || ctx.Err() != nil {
 				break
 			}
-			if !x.servingAllowed(&provider, attempt.UpstreamModel, slot, false) { continue }
+			if !x.servingAllowed(&provider, attempt.UpstreamModel, slot, false) {
+				continue
+			}
 			gate := s.gateSlot(ctx, &provider, &slot, adapter.estimate(&provider), deadline)
 			switch gate.verdict {
 			case gateExpired:

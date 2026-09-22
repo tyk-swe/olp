@@ -430,8 +430,15 @@ const requestBodyTimeout = 15 * time.Second
 
 func (s *Server) inference(family openai.Family) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		writeError := func(w http.ResponseWriter, e *Error) { writeSurfaceError(w, e, family.Surface()) }
 		x := &execution{request: s.begin(w, r), family: family, actor: "api_key"}
+		writeError := func(w http.ResponseWriter, e *Error) {
+			if x.strict() && x.dispatched && e.Status >= 500 {
+				copy := *e
+				copy.NoRetry = true
+				e = &copy
+			}
+			writeSurfaceError(w, e, family.Surface())
+		}
 		x.semanticHeaders = r.Header.Clone()
 		query, queryErr := url.ParseQuery(r.URL.RawQuery)
 		x.semanticQuery, x.semanticQueryInvalid = query, queryErr != nil

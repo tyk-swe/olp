@@ -20,6 +20,7 @@ type Error struct {
 	Message    string
 	Param      *string
 	RetryAfter time.Duration
+	NoRetry    bool
 }
 
 func (e *Error) Error() string { return e.Code + ": " + e.Message }
@@ -70,6 +71,9 @@ func writeSurfaceError(w http.ResponseWriter, e *Error, surface string) {
 	http.NewResponseController(w).SetWriteDeadline(time.Now().Add(responseWriteTimeout))
 	h := w.Header()
 	h.Set("Content-Type", "application/json")
+	if e.NoRetry {
+		h.Set("X-Should-Retry", "false")
+	}
 	if surface == "bedrock" {
 		h.Set("X-Amzn-Errortype", e.Code)
 	}

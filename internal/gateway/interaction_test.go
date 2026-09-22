@@ -5,10 +5,13 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
 	"github.com/tyk-swe/olp/internal/connectors"
+	"github.com/tyk-swe/olp/internal/protocols/openai"
 	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/internal/usage"
 )
@@ -178,5 +181,34 @@ func TestStrictFailoverCannotChangeDefaultsThroughModelAlias(t *testing.T) {
 	resp, body := h.chat(fullKey, nil)
 	if resp.StatusCode != 400 || errorCode(t, body) != "upstream_rejected" || h.mock.count("a") != 1 {
 		t.Fatalf("strict defaults substituted: %d %v calls=%d", resp.StatusCode, body, h.mock.count("a"))
+	}
+}
+
+type strictPartialWriter struct{ *unaryResponseWriter }
+
+func (w *strictPartialWriter) Write(data []byte) (int, error) {
+	count := len(data) / 2
+	_, _ = w.ResponseRecorder.Write(data[:count])
+	return count, io.ErrClosedPipe
+}
+
+func TestStrictPartialToolDeliveryRemainsPotentiallyActionable(t *testing.T) {
+	h := strictHarness(t, nil)
+	h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprint(w, "data: {\"id\":\"chunk\",\"object\":\"chat.completion.chunk\",\"created\":1,\"model\":\"model-a\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"tool_calls\":[{\"index\":0,\"id\":\"call-1\",\"type\":\"function\",\"function\":{\"name\":\"lookup\",\"arguments\":\"{}\"}}]},\"finish_reason\":null}]}\n\n")
+	})
+	req := httptest.NewRequest("POST", "/v1/chat/completions", strings.NewReader(`{"model":"team-chat","messages":[{"role":"user","content":"tool"}],"stream":true,"tools":[{"type":"function","function":{"name":"lookup","parameters":{"type":"object"}}}]}`))
+	req.Header.Set("Authorization", "Bearer "+fullKey)
+	req.Header.Set("Content-Type", "application/json")
+	writer := &strictPartialWriter{&unaryResponseWriter{ResponseRecorder: httptest.NewRecorder(), beforeDelivery: func() {}}}
+	h.gateway.inference(openai.FamilyChat)(writer, req)
+	envelope := h.sink.last(t)
+	if len(envelope.Attempts) != 1 || h.mock.count("b") != 0 {
+		t.Fatalf("partial tool delivery replayed: %+v", envelope)
+	}
+	fact := envelope.Attempts[0]
+	if !fact.Committed || fact.Interaction == nil || fact.Interaction.ClientState != usage.ClientActionable || fact.Interaction.UpstreamState != usage.UpstreamAccepted {
+		t.Fatalf("partial actionable evidence: %+v / %+v", fact, fact.Interaction)
 	}
 }

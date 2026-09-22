@@ -164,6 +164,7 @@ type attemptFailure struct {
 	dispatched   bool   // the request reached the upstream before the failure
 	quota        string // a quota this gateway enforces rejected the attempt
 	contractCode string // safe runtime interaction guard violation
+	noRetry      bool   // strict outcome uncertainty must not suggest client retries
 }
 
 // The quotas that can reject an attempt before it is dispatched.
@@ -191,7 +192,12 @@ func (f *attemptFailure) billingUncertain() bool {
 	return f.dispatched
 }
 
-func (f *attemptFailure) toError() *Error {
+func (f *attemptFailure) toError() (result *Error) {
+	defer func() {
+		if result != nil && result.Status >= 500 && f.noRetry {
+			result.NoRetry = true
+		}
+	}()
 	if f.contractCode != "" {
 		return serverError(http.StatusBadGateway, f.contractCode, "The provider result did not satisfy the admitted interaction contract.")
 	}
@@ -199,7 +205,9 @@ func (f *attemptFailure) toError() *Error {
 	case classLimitsUnavailable:
 		return limitsUnavailable()
 	case classAmbiguous:
-		return serverError(http.StatusBadGateway, "ambiguous_upstream_result", "The upstream provider may have applied this request; its result could not be confirmed.")
+		err := serverError(http.StatusBadGateway, "ambiguous_upstream_result", "The upstream provider may have applied this request; its result could not be confirmed.")
+		err.NoRetry = f.noRetry
+		return err
 	case classCancelled:
 		return &Error{Status: 0, Code: "client_cancelled", Message: "The client went away."}
 	case classTimeout:
@@ -426,9 +434,11 @@ func (s *Server) attempt(ctx context.Context, x *execution, a runtime.Attempt, p
 		}
 		f.dispatched = st.dispatched.Load()
 		if fact.Interaction != nil {
+			f.noRetry = f.dispatched
 			fact.Interaction.UpstreamState = st.upstreamState()
 			if f.dispatched && st.upstream.Load() != 3 && (class == classConnect || class == classTimeout || class == classUpstreamServer) {
 				class = classAmbiguous
+				f.noRetry = true
 			}
 		}
 		f.class = class
@@ -592,7 +602,9 @@ func (s *Server) attempt(ctx context.Context, x *execution, a runtime.Attempt, p
 				if fact.Interaction.ClientState == usage.ClientUnobserved {
 					fact.Interaction.ClientState = usage.ClientPartial
 				}
-				if actionable && err == nil {
+				if actionable {
+					// A failed write can have exposed a complete call before losing
+					// the remaining frame. Do not infer non-actionability from error.
 					fact.Interaction.ClientState = usage.ClientActionable
 				}
 			}

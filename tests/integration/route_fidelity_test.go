@@ -165,7 +165,7 @@ func TestRouteFidelityDraftsRemainExplicitAndStrictActivationFailsClosed(t *test
 func TestRouteFidelityConfigurationPromotionPreservesOmittedContracts(t *testing.T) {
 	h := newAccessHarness(t)
 	fixture := newOpenAIFixture(t, "")
-	owner, _, slug, _ := provisionOpenAIWith(t, h, fixture.URL, []any{map[string]any{"operation": "generation", "surface": "openai", "mode": "unary"}}, []string{"generation"}, map[string]any{"fidelity": map[string]any{"mode": "transformed"}, "content_policy": fidelityPolicy("redact", "input")})
+	owner, provider, slug, _ := provisionOpenAIWith(t, h, fixture.URL, []any{map[string]any{"operation": "generation", "surface": "openai", "mode": "unary"}}, []string{"generation"}, map[string]any{"fidelity": map[string]any{"mode": "transformed"}, "content_policy": fidelityPolicy("redact", "input")})
 	export := h.want(owner, "GET", "/api/v3/configuration/export", nil, nil, 200)
 	document := export["document"].(map[string]any)
 	route := document["routes"].([]any)[0].(map[string]any)
@@ -205,6 +205,14 @@ func TestRouteFidelityConfigurationPromotionPreservesOmittedContracts(t *testing
 	if problemCode(t, h.want(owner, "POST", path+"/activate", nil, withMatch(draft, idem(uuid.NewString())), 422)) != "target_capability" {
 		t.Fatal("imported strict draft activated")
 	}
+	// Explicitly migrate the provider profile so this draft can be validated by
+	// the real strict compiler while leaving the published route unchanged.
+	providerPath := "/api/v3/providers/" + provider["id"].(string)
+	currentProvider := h.want(owner, "GET", providerPath, nil, nil, 200)
+	config := currentProvider["configuration"].(map[string]any)
+	config["profile_id"], config["profile_revision"] = "azure-legacy-chat", "1"
+	h.want(owner, "PATCH", providerPath, map[string]any{"name": currentProvider["name"], "configuration": config}, etagHeader(currentProvider), 200)
+	certifyProfileNetworkProvider(t, h, owner, provider["id"].(string))
 	// Validating an unpublished draft must not make promotion forget its mode
 	// and stage another draft under the published route's older contract.
 	h.want(owner, "POST", path+"/validate", nil, etagHeader(draft), 200)
