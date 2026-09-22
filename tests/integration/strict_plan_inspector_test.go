@@ -5,6 +5,7 @@ package integration_test
 import (
 	"encoding/json"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -23,6 +24,12 @@ func inspectorProvider(t *testing.T, h *accessHarness, owner *browser, kind, pro
 				w.WriteHeader(401)
 				return
 			}
+		} else if kind == "gemini" {
+			if r.Header.Get("X-Goog-Api-Key") != vendorSecret {
+				t.Error("inspector fixture Gemini credential differs")
+				w.WriteHeader(401)
+				return
+			}
 		} else if r.Header.Get("Authorization") != "Bearer "+vendorSecret {
 			t.Error("inspector fixture provider authentication differs")
 			w.WriteHeader(401)
@@ -31,6 +38,10 @@ func inspectorProvider(t *testing.T, h *accessHarness, owner *browser, kind, pro
 		w.Header().Set("Content-Type", "application/json")
 		switch r.Method + " " + r.URL.Path {
 		case "GET /v1/models":
+			if kind == "gemini" {
+				io.WriteString(w, `{"models":[{"name":"models/fixture-model","displayName":"Fixture","supportedGenerationMethods":["generateContent"]}]}`)
+				return
+			}
 			io.WriteString(w, `{"data":[{"id":"fixture-model","object":"model","type":"model","display_name":"Fixture","created_at":"2026-01-01T00:00:00Z"}],"has_more":false,"first_id":"fixture-model","last_id":"fixture-model"}`)
 		case "POST /v1/messages":
 			io.WriteString(w, `{"id":"msg-inspector","type":"message","role":"assistant","model":"fixture-model","content":[{"type":"text","text":"fixture answer"}],"stop_reason":"end_turn","stop_sequence":null,"usage":{"input_tokens":3,"output_tokens":2}}`)
@@ -38,6 +49,8 @@ func inspectorProvider(t *testing.T, h *accessHarness, owner *browser, kind, pro
 			io.WriteString(w, `{"id":"resp_inspector","object":"response","created_at":1,"status":"completed","model":"fixture-model","output":[{"id":"msg_inspector","type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":"fixture answer","annotations":[]}]}],"usage":{"input_tokens":3,"output_tokens":2,"total_tokens":5}}`)
 		case "POST /v1/chat/completions":
 			io.WriteString(w, `{"id":"chat-inspector","object":"chat.completion","created":1,"model":"fixture-model","choices":[{"index":0,"message":{"role":"assistant","content":"fixture answer"},"finish_reason":"stop"}],"usage":{"prompt_tokens":3,"completion_tokens":2,"total_tokens":5}}`)
+		case "POST /v1/models/fixture-model:generateContent":
+			io.WriteString(w, `{"modelVersion":"fixture-model","candidates":[{"index":0,"content":{"role":"model","parts":[{"text":"fixture answer"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":3,"candidatesTokenCount":2,"totalTokenCount":5}}`)
 		default:
 			t.Errorf("unexpected fixture provider path: %s %s", r.Method, r.URL.Path)
 			w.WriteHeader(404)
@@ -51,6 +64,50 @@ func inspectorProvider(t *testing.T, h *accessHarness, owner *browser, kind, pro
 	providerID := created["id"].(string)
 	certifyProfileNetworkProvider(t, h, owner, providerID)
 	return providerID, calls
+}
+
+func TestStrictPlanInspectorAcceptsNativeQueryWithoutInventingBodyFields(t *testing.T) {
+	h := newAccessHarness(t)
+	owner := h.owner()
+	providerID, calls := inspectorProvider(t, h, owner, "gemini", "gemini-generation", map[string]any{})
+	path := "/api/v3/providers/" + providerID
+	models := h.want(owner, "GET", path+"/models", nil, nil, 200)["items"].([]any)
+	modelID := models[0].(map[string]any)["id"].(string)
+	detail := h.want(owner, "GET", path, nil, nil, 200)
+	detail = h.want(owner, "PATCH", path+"/models/"+modelID, map[string]any{"enabled": true, "capabilities": []any{map[string]any{"operation": "generation", "surface": "gemini", "mode": "unary"}}}, etagHeader(detail), 200)
+	certified := h.want(owner, "POST", path+"/models/"+modelID+"/certify", nil, etagHeader(detail), 200)
+	if certified["status"] != "certified" {
+		t.Fatal("native Gemini fixture certification failed")
+	}
+	detail = h.want(owner, "GET", path, nil, nil, 200)
+	h.want(owner, "POST", path+"/activate", nil, withMatch(detail, idem("activate-native-gemini-inspector")), 200)
+	draft := inspectorDraft(t, h, owner, providerID, "query-inspection", nil)
+	before := calls.Load()
+	h.want(owner, "POST", "/api/v3/route-drafts/"+draft["id"].(string)+"/activate", nil, withMatch(draft, idem("activate-query-inspection")), 200)
+	request := map[string]any{"contents": []any{map[string]any{"role": "user", "parts": []any{map[string]any{"text": "private-query-input"}}}}}
+	for _, published := range []bool{false, true} {
+		input := map[string]any{"operation": "generation", "surface": "gemini", "mode": "unary", "seed": "query", "dialect": "gemini-generate-content", "request": request, "query_settings": map[string]any{"$xgafv": "2"}}
+		var decision map[string]any
+		if published {
+			delete(input, "request")
+			input["operation"] = map[string]any{"operation": "generation", "route": "query-inspection", "request": request}
+			decision = h.list(owner, "POST", "/api/v3/routing/simulate", input, nil, 200)[0].(map[string]any)
+		} else {
+			response := h.want(owner, "POST", "/api/v3/route-drafts/"+draft["id"].(string)+"/simulate", input, nil, 200)
+			decision = response["targets"].([]any)[0].(map[string]any)["decision"].(map[string]any)
+		}
+		inspection := decision["interaction"].(map[string]any)
+		if decision["eligible"] != true || inspection["status"] != "admitted" || inspectorFields(t, decision)["/model"] != nil {
+			t.Fatalf("native URL-bound request was changed by inspection: %v", decision)
+		}
+		context := inspection["semantic_context"].([]any)
+		if len(context) != 1 || context[0].(map[string]any)["field"] != "/query/$xgafv" || context[0].(map[string]any)["origin"] != "caller" || context[0].(map[string]any)["redacted"] != true || context[0].(map[string]any)["value_json"] != nil {
+			t.Fatal("semantic query was omitted, invented or exposed")
+		}
+	}
+	if calls.Load() != before {
+		t.Fatal("native query inspection contacted the provider")
+	}
 }
 
 func inspectorDraft(t *testing.T, h *accessHarness, owner *browser, providerID, slug string, policy any) map[string]any {
@@ -165,14 +222,35 @@ func TestStrictPlanInspectorPreservesNativeSettingsAndRedactsContent(t *testing.
 		if inspection["obligations"].(map[string]any)["continuation"] != "client_native_history" {
 			t.Fatal("ordinary native inspection invented a state store or client helper")
 		}
+		obligations := inspection["obligations"].(map[string]any)
+		effects := obligations["effects"].([]any)
+		if obligations["submission"] != "immediate" || len(effects) != 2 || effects[0] != "inference" || effects[1] != "client_tool_call" {
+			t.Fatal("native tool inspection omitted its execution dimensions")
+		}
 		tuple := inspectorSimulation(t, h, owner, draft, published, nil, nil)["interaction"].(map[string]any)
 		if tuple["status"] != "not_inspected" || tuple["class"] != nil || len(tuple["evidence"].([]any)) != 0 {
 			t.Fatal("tuple-only simulation fabricated request qualification")
 		}
+		conflicting := map[string]any{}
+		for name, value := range request {
+			conflicting[name] = value
+		}
+		conflicting["max_tokens"], conflicting["max_completion_tokens"] = 32, 32
+		invalidInput := map[string]any{"operation": "generation", "surface": "openai", "mode": "unary", "seed": "invalid-native", "request": conflicting}
+		invalidPath := "/api/v3/route-drafts/" + draft["id"].(string) + "/simulate"
+		if published {
+			invalidInput["operation"] = map[string]any{"operation": "generation", "request": conflicting}
+			delete(invalidInput, "request")
+			invalidPath = "/api/v3/routing/simulate"
+		}
+		h.want(owner, "POST", invalidPath, invalidInput, nil, 422)
 	}
-	for _, value := range []string{"bad\x01value", "bad\x7fvalue"} {
+	for _, headers := range []map[string]any{
+		{"OpenAI-Beta": "bad\x01value"}, {"OpenAI-Beta": "bad\x7fvalue"},
+		{"Authorization": "private-credential-marker"}, {"OpenAI-Beta": "", "openai-beta": "duplicate"},
+	} {
 		for _, path := range []string{"/api/v3/route-drafts/" + draft["id"].(string) + "/simulate", "/api/v3/routing/simulate"} {
-			input := map[string]any{"operation": "generation", "surface": "openai", "mode": "unary", "seed": "headers", "request": request, "semantic_headers": map[string]any{"OpenAI-Beta": value}}
+			input := map[string]any{"operation": "generation", "surface": "openai", "mode": "unary", "seed": "headers", "request": request, "semantic_headers": headers}
 			if path == "/api/v3/routing/simulate" {
 				input["operation"] = map[string]any{"operation": "generation", "request": request}
 				delete(input, "request")
@@ -238,10 +316,11 @@ func TestStrictPlanInspectorChecksProviderStatePolicyAndCurrentRevocation(t *tes
 			decision := inspectorSimulation(t, h, owner, draft, published, request, map[string]any{"dialect": "openai-responses", "api_key_id": key["id"]})
 			if !allowed {
 				assertInspectorRejection(t, decision, "policy_conflict")
-			} else if decision["eligible"] != true || decision["interaction"].(map[string]any)["status"] != "admitted" {
-				t.Fatal("authorized native provider state was not admitted")
-			} else if inspectorFields(t, decision)["/store"] != nil {
-				t.Fatal("inspector silently changed omitted native store semantics")
+			} else {
+				assertInspectorRejection(t, decision, "state_carrier")
+				if decision["incompatibility"].(map[string]any)["requirement"] != "historical_resource_contract" {
+					t.Fatal("authorized retained state hid its unqualified historical reconstruction obligation")
+				}
 			}
 		}
 	}
@@ -266,9 +345,39 @@ func TestStrictPlanInspectorChecksProviderStatePolicyAndCurrentRevocation(t *tes
 
 func TestStrictPlanInspectorChecksNetworkRevocationWithoutDialing(t *testing.T) {
 	f := newProfileNetworkFixture(t, true)
+	proxyCalls := &atomic.Int64{}
+	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		proxyCalls.Add(1)
+		host, _, err := net.SplitHostPort(r.Host)
+		if err != nil || r.Method != http.MethodConnect || !net.ParseIP(host).IsLoopback() {
+			t.Error("fixture proxy only accepts local CONNECT destinations")
+			w.WriteHeader(400)
+			return
+		}
+		upstream, err := net.Dial("tcp", r.Host)
+		if err != nil {
+			t.Error(err)
+			w.WriteHeader(502)
+			return
+		}
+		defer upstream.Close()
+		client, buffered, err := w.(http.Hijacker).Hijack()
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		defer client.Close()
+		if _, err = buffered.WriteString("HTTP/1.1 200 Connection Established\r\n\r\n"); err != nil || buffered.Flush() != nil {
+			return
+		}
+		go func() { _, _ = io.Copy(upstream, buffered) }()
+		_, _ = io.Copy(client, upstream)
+	}))
+	t.Cleanup(proxy.Close)
 	h := newAccessHarness(t)
 	owner := h.owner()
 	config := profileNetworkConfiguration(f)
+	config["options"].(map[string]any)["network"].(map[string]any)["proxy_url"] = proxy.URL
 	created := createProfileNetworkProvider(t, h, owner, "Inspector mTLS", config)
 	providerID := created["id"].(string)
 	path := "/api/v3/providers/" + providerID
@@ -279,6 +388,10 @@ func TestStrictPlanInspectorChecksNetworkRevocationWithoutDialing(t *testing.T) 
 	certifyProfileNetworkProvider(t, h, owner, providerID)
 	draft := inspectorDraft(t, h, owner, providerID, "network-inspection", nil)
 	before := len(f.captured())
+	beforeProxy := proxyCalls.Load()
+	if beforeProxy == 0 {
+		t.Fatal("provider certification did not exercise the configured proxy")
+	}
 	h.want(owner, "POST", "/api/v3/route-drafts/"+draft["id"].(string)+"/activate", nil, withMatch(draft, idem("activate-network-inspection")), 200)
 	request := map[string]any{"model": "network-inspection", "messages": []any{map[string]any{"role": "user", "content": "private-network-input"}}}
 	if decision := inspectorSimulation(t, h, owner, draft, true, request, nil); decision["eligible"] != true {
@@ -292,8 +405,33 @@ func TestStrictPlanInspectorChecksNetworkRevocationWithoutDialing(t *testing.T) 
 			t.Fatal("inspection ignored current network credential revocation")
 		}
 	}
-	if len(f.captured()) != before {
-		t.Fatal("network inspection dialed the configured TLS provider")
+	if len(f.captured()) != before || proxyCalls.Load() != beforeProxy {
+		t.Fatal("network inspection contacted the configured proxy or TLS provider")
+	}
+}
+
+func TestStrictPlanInspectorChecksDefaultedOutputCapacity(t *testing.T) {
+	h := newAccessHarness(t)
+	owner := h.owner()
+	providerID, calls := inspectorProvider(t, h, owner, "openai_compatible", "compatible-chat", map[string]any{
+		"models":             map[string]any{vendorModel: map[string]any{"max_output_tokens": 8}},
+		"operation_defaults": map[string]any{"generation": map[string]any{"dialect": "openai-chat", "values": map[string]any{"max_tokens": 16}}},
+	})
+	draft := inspectorDraft(t, h, owner, providerID, "capacity-inspection", nil)
+	before := calls.Load()
+	h.want(owner, "POST", "/api/v3/route-drafts/"+draft["id"].(string)+"/activate", nil, withMatch(draft, idem("activate-capacity-inspection")), 200)
+	request := map[string]any{"model": "capacity-inspection", "messages": []any{map[string]any{"role": "user", "content": "input"}}}
+	for _, published := range []bool{false, true} {
+		decision := inspectorSimulation(t, h, owner, draft, published, request, nil)
+		if decision["eligible"] != false || decision["reason"] != "max_output_tokens_exceeded" || decision["requested_output_tokens"] != float64(16) {
+			t.Fatalf("configured output default evaded target capacity: %v", decision)
+		}
+		if inspectorFields(t, decision)["/max_tokens"]["value_json"] != "16" {
+			t.Fatal("inspector omitted the effective default that caused ineligibility")
+		}
+	}
+	if calls.Load() != before {
+		t.Fatal("effective output capacity inspection performed inference")
 	}
 }
 

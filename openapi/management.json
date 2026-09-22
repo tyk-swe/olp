@@ -9856,7 +9856,8 @@
           },
           "value_json": {
             "type": "string",
-            "description": "Exact original JSON spelling of an allowlisted scalar setting. Kept as text so JSON clients cannot round integers or erase numeric precision. Omitted for redacted content."
+            "description": "Exact original JSON spelling of an allowlisted scalar setting. Kept as text so JSON clients cannot round integers or erase numeric precision. Omitted for redacted content.",
+            "maxLength": 256
           }
         },
         "required": [
@@ -9984,6 +9985,20 @@
               "legacy",
               "admitted"
             ]
+          },
+          "representation": {
+            "type": "string",
+            "enum": [
+              "oif"
+            ]
+          },
+          "serving": {
+            "$ref": "#/components/schemas/InspectedServingIdentity"
+          },
+          "omitted_dispositions": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Count collapsed by safe-pointer redaction or omitted by the 64-entry display bound. The execution planner retains its complete receipt."
           }
         },
         "required": [
@@ -10022,6 +10037,16 @@
           },
           "retry": {
             "type": "string"
+          },
+          "submission": {
+            "type": "string"
+          },
+          "effects": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Effect obligations such as inference, client_tool_call, resource_read and resource_mutation; no effect is executed by inspection."
           }
         },
         "required": [
@@ -10032,7 +10057,9 @@
           "max_body_bytes",
           "max_event_bytes",
           "reject_ambiguous_failover",
-          "guard_results"
+          "guard_results",
+          "submission",
+          "effects"
         ],
         "description": "Planner upper bounds and client continuation obligations. Installed transport/body limits may be tighter; simulation does not run inference, tools or authentication exchanges."
       },
@@ -10063,11 +10090,12 @@
             "type": "object",
             "additionalProperties": true,
             "description": "Native request for complete inspection. A route/model-only object selects tuple-only inspection and does not establish an interaction contract."
+          },
+          "route": {
+            "type": "string",
+            "description": "Explicit route selector outside the native request, required for URL-bound dialect bodies that omit model. Existing request.model and tuple-only request.route selectors remain supported."
           }
-        },
-        "required": [
-          "request"
-        ]
+        }
       },
       "SimulationQuerySettings": {
         "type": "object",
@@ -10086,6 +10114,40 @@
           "maxLength": 2048
         },
         "description": "Profile-owned semantic headers for the hypothetical inference request. Authentication, credentials, routing and arbitrary transport headers are rejected. Values are always redacted in inspection output."
+      },
+      "InspectedServingIdentity": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "provider_revision_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "model": {
+            "type": "string"
+          },
+          "principal_declared": {
+            "type": "boolean"
+          },
+          "snapshot_declared": {
+            "type": "boolean"
+          },
+          "region_declared": {
+            "type": "boolean"
+          },
+          "resource_scope_declared": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "provider_revision_id",
+          "model",
+          "principal_declared",
+          "snapshot_declared",
+          "region_declared",
+          "resource_scope_declared"
+        ],
+        "description": "Selected model and immutable provider revision, with presence-only serving declarations. Account/resource/snapshot strings are not exposed, and declarations do not establish empirical verification."
       }
     },
     "securitySchemes": {

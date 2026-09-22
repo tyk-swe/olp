@@ -60,3 +60,14 @@ func TestInspectionDiagnosticsCannotExposeArbitraryPointerNames(t *testing.T) {
 		}
 	}
 }
+
+func TestInspectionBoundsExactScalarDisplayWithoutRounding(t *testing.T) {
+	document, err := oif.ParseJSON([]byte(`{"temperature":0.`+strings.Repeat("0", 512)+`}`), oif.Limits{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := inspectRequest(document, nil)
+	if len(result.Fields) != 1 || result.Fields[0].Kind != "number" || !result.Fields[0].Redacted || result.Fields[0].ValueJSON != nil {
+		t.Fatal("overlong numeric lexeme was exposed or silently rounded instead of remaining redacted")
+	}
+}

@@ -153,10 +153,11 @@ func (s *Server) simulateDraft(r *http.Request) (access.Reply, error) {
 	if err != nil {
 		return access.Reply{}, err
 	}
-	accept, inspections := inspectionAccept(route, parsed, context)
-	options := runtime.SelectionOptions{KeyID: key.id, Preferences: input.Preferences, Inputs: inputs, TokenDemand: demand, CheckSlots: true, CredentialRevoked: revoked, Accept: accept}
+	accept, effective, inspections := inspectionAccept(route, parsed, context, demand)
+	options := runtime.SelectionOptions{KeyID: key.id, Preferences: input.Preferences, Inputs: inputs, TokenDemand: demand, CheckSlots: true, CredentialRevoked: revoked, Accept: accept, Effective: effective}
 	if key.reason != "" {
 		options.Accept = nil
+		options.Effective = nil
 	}
 	if parsed != nil {
 		options.Parameters = protocols.ParameterNames(parsed)
@@ -234,7 +235,15 @@ func (s *Server) simulateRouting(r *http.Request) (access.Reply, error) {
 			return access.Reply{}, access.Invalid("operation.request", "Use a request object.")
 		}
 	}
-	slug := request.Route
+	var slug string
+	if raw, present := input.Operation["route"]; present {
+		if json.Unmarshal(raw, &slug) != nil {
+			return access.Reply{}, access.Invalid("operation.route", "Name the route to simulate.")
+		}
+	}
+	if slug == "" {
+		slug = request.Route
+	}
 	if slug == "" {
 		slug = request.Model
 	}
@@ -284,10 +293,12 @@ func (s *Server) simulateRouting(r *http.Request) (access.Reply, error) {
 	if parsed != nil {
 		options.Parameters = protocols.ParameterNames(parsed)
 	}
-	accept, inspections := inspectionAccept(route, parsed, context)
+	accept, effective, inspections := inspectionAccept(route, parsed, context, options.TokenDemand)
 	options.Accept = accept
+	options.Effective = effective
 	if key.reason != "" {
 		options.Accept = nil
+		options.Effective = nil
 	}
 
 	plan, err := runtime.PlanRequest(snapshot, slug, operation, input.Surface, input.Mode, []byte(input.Seed), options)

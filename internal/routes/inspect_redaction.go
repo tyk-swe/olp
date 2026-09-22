@@ -49,12 +49,12 @@ func inspectRequest(document oif.Document, provenance []oif.Provenance) inspecte
 			field.Empty = &empty
 		}
 		for _, item := range provenance {
-			if item.Pointer == field.Field {
+			if item.Pointer == field.Field || (item.Pointer == "" || item.Pointer == "/") && (item.Origin == oif.QualifiedMapping || item.Origin == oif.LegacyMapping || item.Origin == oif.ExplicitTransform) {
 				field.Origin = inspectionOrigin(item.Origin)
 			}
 		}
 		if safeInspectionValue(field.Field, member.Value) {
-			value := member.Value.Raw()
+			value := strings.Clone(member.Value.Raw())
 			field.ValueJSON = &value
 			field.Redacted = false
 		}
@@ -70,7 +70,7 @@ func inspectRequest(document oif.Document, provenance []oif.Provenance) inspecte
 				}
 				child := inspectedField{Field: pointer, Kind: inspectionKind(setting.Value.Kind()), Origin: field.Origin, Redacted: true}
 				if safeInspectionValue(pointer, setting.Value) {
-					value := setting.Value.Raw()
+					value := strings.Clone(setting.Value.Raw())
 					child.ValueJSON, child.Redacted = &value, false
 				}
 				result.Fields = append(result.Fields, child)
@@ -116,6 +116,9 @@ func knownInspectionSetting(pointer string) bool {
 }
 
 func safeInspectionValue(pointer string, value oif.Value) bool {
+	if len(value.Raw()) > 256 {
+		return false
+	}
 	if slices.Contains(strings.Fields("/temperature /top_p /top_k /max_tokens /max_completion_tokens /max_output_tokens /frequency_penalty /presence_penalty /seed /n /candidateCount /top_logprobs /thinking/budget_tokens /generationConfig/temperature /generationConfig/topP /generationConfig/topK /generationConfig/maxOutputTokens /generationConfig/candidateCount /inferenceConfig/temperature /inferenceConfig/topP /inferenceConfig/maxTokens"), pointer) {
 		return value.Kind() == oif.Number || value.Kind() == oif.Null
 	}

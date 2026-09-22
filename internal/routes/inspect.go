@@ -26,20 +26,32 @@ type inspectedDecision struct {
 }
 
 type interactionInspection struct {
-	Status           string                 `json:"status"`
-	Fidelity         string                 `json:"fidelity"`
-	Class            string                 `json:"class,omitempty"`
-	Operation        string                 `json:"operation,omitempty"`
-	IngressDialect   string                 `json:"ingress_dialect,omitempty"`
-	EgressDialect    string                 `json:"egress_dialect,omitempty"`
-	ReturnDialect    string                 `json:"return_dialect,omitempty"`
-	ProfileID        string                 `json:"profile_id,omitempty"`
-	ProfileRevision  string                 `json:"profile_revision,omitempty"`
-	EffectiveRequest *inspectedRequest      `json:"effective_request,omitempty"`
-	SemanticContext  []inspectedField       `json:"semantic_context,omitempty"`
-	Dispositions     []inspectedDisposition `json:"dispositions,omitempty"`
-	Obligations      *inspectedObligations  `json:"obligations,omitempty"`
-	Evidence         []string               `json:"evidence"`
+	Status              string                 `json:"status"`
+	Fidelity            string                 `json:"fidelity"`
+	Class               string                 `json:"class,omitempty"`
+	Operation           string                 `json:"operation,omitempty"`
+	IngressDialect      string                 `json:"ingress_dialect,omitempty"`
+	EgressDialect       string                 `json:"egress_dialect,omitempty"`
+	ReturnDialect       string                 `json:"return_dialect,omitempty"`
+	Representation      string                 `json:"representation,omitempty"`
+	ProfileID           string                 `json:"profile_id,omitempty"`
+	ProfileRevision     string                 `json:"profile_revision,omitempty"`
+	EffectiveRequest    *inspectedRequest      `json:"effective_request,omitempty"`
+	SemanticContext     []inspectedField       `json:"semantic_context,omitempty"`
+	Dispositions        []inspectedDisposition `json:"dispositions,omitempty"`
+	OmittedDispositions int                    `json:"omitted_dispositions,omitempty"`
+	Obligations         *inspectedObligations  `json:"obligations,omitempty"`
+	Evidence            []string               `json:"evidence"`
+	Serving             *inspectedServing      `json:"serving,omitempty"`
+}
+
+type inspectedServing struct {
+	ProviderRevisionID    string `json:"provider_revision_id"`
+	Model                 string `json:"model"`
+	PrincipalDeclared     bool   `json:"principal_declared"`
+	SnapshotDeclared      bool   `json:"snapshot_declared"`
+	RegionDeclared        bool   `json:"region_declared"`
+	ResourceScopeDeclared bool   `json:"resource_scope_declared"`
 }
 
 type inspectedDisposition struct {
@@ -50,14 +62,16 @@ type inspectedDisposition struct {
 }
 
 type inspectedObligations struct {
-	Delivery                string `json:"delivery"`
-	Lifetime                string `json:"lifetime"`
-	Continuation            string `json:"continuation"`
-	Retry                   string `json:"retry"`
-	MaxBodyBytes            int    `json:"max_body_bytes"`
-	MaxEventBytes           int    `json:"max_event_bytes"`
-	RejectAmbiguousFailover bool   `json:"reject_ambiguous_failover"`
-	GuardResults            bool   `json:"guard_results"`
+	Delivery                string   `json:"delivery"`
+	Lifetime                string   `json:"lifetime"`
+	Submission              string   `json:"submission"`
+	Effects                 []string `json:"effects"`
+	Continuation            string   `json:"continuation"`
+	Retry                   string   `json:"retry"`
+	MaxBodyBytes            int      `json:"max_body_bytes"`
+	MaxEventBytes           int      `json:"max_event_bytes"`
+	RejectAmbiguousFailover bool     `json:"reject_ambiguous_failover"`
+	GuardResults            bool     `json:"guard_results"`
 }
 
 type inspectionDiagnostic struct{ code, field, requirement, message string }
@@ -167,13 +181,36 @@ func inspectorRequest(raw json.RawMessage, operation, surface, mode, dialect, sl
 	return parsed, nil
 }
 
-func inspectionAccept(route runtime.Route, parsed *openai.Request, context interaction.Context) (func(runtime.Provider, runtime.Target) error, map[string]*interactionInspection) {
+func inspectionAccept(route runtime.Route, parsed *openai.Request, context interaction.Context, demand *runtime.TokenDemand) (func(runtime.Provider, runtime.Target) error, func(runtime.Provider, runtime.Target) ([]string, *runtime.TokenDemand), map[string]*interactionInspection) {
 	inspections := map[string]*interactionInspection{}
 	if parsed == nil {
-		return nil, inspections
+		return nil, nil, inspections
 	}
 	fidelity := runtime.FidelityMode(route.Fidelity)
-	return func(provider runtime.Provider, target runtime.Target) error {
+	effectiveRequests := map[string]*openai.Request{}
+	var effective func(runtime.Provider, runtime.Target) ([]string, *runtime.TokenDemand)
+	if fidelity == runtime.FidelityStrict {
+		effective = func(_ runtime.Provider, target runtime.Target) ([]string, *runtime.TokenDemand) {
+			request := effectiveRequests[target.ID]
+			delete(effectiveRequests, target.ID)
+			if request == nil {
+				return nil, demand
+			}
+			output := runtime.EffectiveOutputLimit(request)
+			var resolved *runtime.TokenDemand
+			if demand != nil || output != nil {
+				resolved = &runtime.TokenDemand{MaxOutputTokens: output}
+				if demand != nil {
+					resolved.EstimatedInputTokens = demand.EstimatedInputTokens
+					if output == nil {
+						resolved.MaxOutputTokens = demand.MaxOutputTokens
+					}
+				}
+			}
+			return protocols.ParameterNames(request), resolved
+		}
+	}
+	accept := func(provider runtime.Provider, target runtime.Target) error {
 		result := &interactionInspection{Status: "incompatible", Fidelity: fidelity, Evidence: []string{}}
 		inspections[target.ID] = result
 		config := provider.Connector()
@@ -192,6 +229,7 @@ func inspectionAccept(route runtime.Route, parsed *openai.Request, context inter
 			result.IngressDialect = openai.Descriptor(parsed.Family, parsed.Stream).Dialect.ID
 			result.EgressDialect = openai.Descriptor(invocation.Wire, parsed.Stream).Dialect.ID
 			result.ReturnDialect = result.IngressDialect
+			result.Representation = "oif"
 			summary := inspectRequest(invocation.Prepared.Document(), invocation.Prepared.Provenance())
 			result.EffectiveRequest = &summary
 			return nil
@@ -207,10 +245,14 @@ func inspectionAccept(route runtime.Route, parsed *openai.Request, context inter
 		receipt, obligations := plan.Receipt(), plan.Obligations()
 		result.Class, result.Operation = receipt.Class, receipt.Operation
 		result.IngressDialect, result.EgressDialect, result.ReturnDialect = receipt.SourceDialect, receipt.TargetDialect, receipt.SourceDialect
+		result.Representation = "oif"
 		result.ProfileID, result.ProfileRevision = receipt.ProfileID, receipt.ProfileRevision
+		serving := plan.Serving()
+		result.Serving = &inspectedServing{ProviderRevisionID: serving.RevisionID, Model: serving.Model, PrincipalDeclared: serving.PrincipalID != "", SnapshotDeclared: serving.Snapshot != "", RegionDeclared: serving.Region != "", ResourceScopeDeclared: serving.ResourceScope != ""}
 		result.Evidence = append([]string{}, receipt.Evidence...)
 		result.Obligations = &inspectedObligations{
 			Delivery: obligations.Delivery, Lifetime: obligations.Lifetime, Continuation: obligations.Continuation, Retry: obligations.Retry,
+			Submission: obligations.Submission, Effects: append([]string{}, obligations.Effects...),
 			MaxBodyBytes: obligations.MaxBodyBytes, MaxEventBytes: obligations.MaxEventBytes, RejectAmbiguousFailover: obligations.RejectAmbiguousFailover, GuardResults: obligations.GuardResults,
 		}
 		seen := map[inspectedDisposition]bool{}
@@ -219,9 +261,12 @@ func inspectionAccept(route runtime.Route, parsed *openai.Request, context inter
 			if !seen[entry] && len(result.Dispositions) < 64 {
 				result.Dispositions = append(result.Dispositions, entry)
 				seen[entry] = true
+			} else {
+				result.OmittedDispositions++
 			}
 		}
-		summary := inspectRequest(plan.EffectiveRequest().OIF().Document(), plan.Prepared().Provenance())
+		effectiveRequest := plan.EffectiveRequest()
+		summary := inspectRequest(effectiveRequest.OIF().Document(), plan.Prepared().Provenance())
 		result.EffectiveRequest = &summary
 		preparedConfig := plan.Config()
 		for name := range preparedConfig.SemanticHeaders {
@@ -247,8 +292,10 @@ func inspectionAccept(route runtime.Route, parsed *openai.Request, context inter
 			return safe
 		}
 		result.Status = "admitted"
+		effectiveRequests[target.ID] = effectiveRequest
 		return nil
-	}, inspections
+	}
+	return accept, effective, inspections
 }
 
 func inspectedDecisions(decisions []runtime.Decision, route runtime.Route, parsed *openai.Request, details map[string]*interactionInspection) []inspectedDecision {

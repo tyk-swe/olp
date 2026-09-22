@@ -384,6 +384,21 @@ func (e InteractionInspectionFidelity) Valid() bool {
 	}
 }
 
+// Defines values for InteractionInspectionRepresentation.
+const (
+	Oif InteractionInspectionRepresentation = "oif"
+)
+
+// Valid indicates whether the value is a known member of the InteractionInspectionRepresentation enum.
+func (e InteractionInspectionRepresentation) Valid() bool {
+	switch e {
+	case Oif:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for InteractionInspectionStatus.
 const (
 	InteractionInspectionStatusAdmitted     InteractionInspectionStatus = "admitted"
@@ -1972,6 +1987,16 @@ type InspectedRequestField struct {
 // InspectedRequestFieldKind defines model for InspectedRequestField.Kind.
 type InspectedRequestFieldKind string
 
+// InspectedServingIdentity Selected model and immutable provider revision, with presence-only serving declarations. Account/resource/snapshot strings are not exposed, and declarations do not establish empirical verification.
+type InspectedServingIdentity struct {
+	Model                 string             `json:"model"`
+	PrincipalDeclared     bool               `json:"principal_declared"`
+	ProviderRevisionId    openapi_types.UUID `json:"provider_revision_id"`
+	RegionDeclared        bool               `json:"region_declared"`
+	ResourceScopeDeclared bool               `json:"resource_scope_declared"`
+	SnapshotDeclared      bool               `json:"snapshot_declared"`
+}
+
 // InteractionDisposition defines model for InteractionDisposition.
 type InteractionDisposition struct {
 	Disposition string `json:"disposition"`
@@ -1999,31 +2024,45 @@ type InteractionInspection struct {
 	IngressDialect   *string                       `json:"ingress_dialect,omitempty"`
 
 	// Obligations Planner upper bounds and client continuation obligations. Installed transport/body limits may be tighter; simulation does not run inference, tools or authentication exchanges.
-	Obligations     *InteractionObligations     `json:"obligations,omitempty"`
-	Operation       *string                     `json:"operation,omitempty"`
-	ProfileId       *string                     `json:"profile_id,omitempty"`
-	ProfileRevision *string                     `json:"profile_revision,omitempty"`
-	ReturnDialect   *string                     `json:"return_dialect,omitempty"`
-	SemanticContext *[]InspectedRequestField    `json:"semantic_context,omitempty"`
-	Status          InteractionInspectionStatus `json:"status"`
+	Obligations *InteractionObligations `json:"obligations,omitempty"`
+
+	// OmittedDispositions Count collapsed by safe-pointer redaction or omitted by the 64-entry display bound. The execution planner retains its complete receipt.
+	OmittedDispositions *int                                 `json:"omitted_dispositions,omitempty"`
+	Operation           *string                              `json:"operation,omitempty"`
+	ProfileId           *string                              `json:"profile_id,omitempty"`
+	ProfileRevision     *string                              `json:"profile_revision,omitempty"`
+	Representation      *InteractionInspectionRepresentation `json:"representation,omitempty"`
+	ReturnDialect       *string                              `json:"return_dialect,omitempty"`
+	SemanticContext     *[]InspectedRequestField             `json:"semantic_context,omitempty"`
+
+	// Serving Selected model and immutable provider revision, with presence-only serving declarations. Account/resource/snapshot strings are not exposed, and declarations do not establish empirical verification.
+	Serving *InspectedServingIdentity   `json:"serving,omitempty"`
+	Status  InteractionInspectionStatus `json:"status"`
 }
 
 // InteractionInspectionFidelity defines model for InteractionInspection.Fidelity.
 type InteractionInspectionFidelity string
+
+// InteractionInspectionRepresentation defines model for InteractionInspection.Representation.
+type InteractionInspectionRepresentation string
 
 // InteractionInspectionStatus defines model for InteractionInspection.Status.
 type InteractionInspectionStatus string
 
 // InteractionObligations Planner upper bounds and client continuation obligations. Installed transport/body limits may be tighter; simulation does not run inference, tools or authentication exchanges.
 type InteractionObligations struct {
-	Continuation            string `json:"continuation"`
-	Delivery                string `json:"delivery"`
-	GuardResults            bool   `json:"guard_results"`
-	Lifetime                string `json:"lifetime"`
-	MaxBodyBytes            int    `json:"max_body_bytes"`
-	MaxEventBytes           int    `json:"max_event_bytes"`
-	RejectAmbiguousFailover bool   `json:"reject_ambiguous_failover"`
-	Retry                   string `json:"retry"`
+	Continuation string `json:"continuation"`
+	Delivery     string `json:"delivery"`
+
+	// Effects Effect obligations such as inference, client_tool_call, resource_read and resource_mutation; no effect is executed by inspection.
+	Effects                 []string `json:"effects"`
+	GuardResults            bool     `json:"guard_results"`
+	Lifetime                string   `json:"lifetime"`
+	MaxBodyBytes            int      `json:"max_body_bytes"`
+	MaxEventBytes           int      `json:"max_event_bytes"`
+	RejectAmbiguousFailover bool     `json:"reject_ambiguous_failover"`
+	Retry                   string   `json:"retry"`
+	Submission              string   `json:"submission"`
 }
 
 // InvitationListResponse defines model for InvitationListResponse.
@@ -3690,7 +3729,10 @@ type SimulationOperation struct {
 	Operation *string `json:"operation,omitempty"`
 
 	// Request Native request for complete inspection. A route/model-only object selects tuple-only inspection and does not establish an interaction contract.
-	Request map[string]interface{} `json:"request"`
+	Request *map[string]interface{} `json:"request,omitempty"`
+
+	// Route Explicit route selector outside the native request, required for URL-bound dialect bodies that omit model. Existing request.model and tuple-only request.route selectors remain supported.
+	Route *string `json:"route,omitempty"`
 }
 
 // SimulationQuerySettings Profile-owned semantic query settings. This performs no provider, token, proxy or metadata request. Values are always redacted in inspection output.
