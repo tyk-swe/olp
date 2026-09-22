@@ -24,8 +24,8 @@ import (
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/observability"
 	"github.com/tyk-swe/olp/internal/protocols"
-"github.com/tyk-swe/olp/internal/providerinvoke"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
+	"github.com/tyk-swe/olp/internal/providerinvoke"
 	"github.com/tyk-swe/olp/internal/providers"
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/runtime"
@@ -613,7 +613,12 @@ func (s *Server) prepare(ctx context.Context, x *execution, permitted func(slug 
 					return semantic
 				}
 			}
-			_, _, e := providerinvoke.Encode(x.parsed,cfg,t.ProviderModel,p.ParameterDefaults)
+			var e error
+			if p.ProfileID != "" {
+				_, e = x.preparedProvider(&p, t.ProviderModel)
+			} else {
+				_, _, e = providerinvoke.Encode(x.parsed, cfg, t.ProviderModel, p.ParameterDefaults)
+			}
 			if e != nil {
 				semantic = e
 			}

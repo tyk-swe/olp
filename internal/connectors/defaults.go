@@ -56,7 +56,15 @@ func defaultFields(dialect, operation string) []string {
 			return strings.Fields("inferenceConfig additionalModelRequestFields toolConfig additionalModelResponseFieldPaths")
 		}
 	case "embeddings":
-		return strings.Fields("dimensions encoding_format output_dimension output_dtype input_type truncate truncation task_type taskType title autoTruncate outputDimensionality parameters normalize embeddingTypes")
+		switch dialect {
+		case "gemini-embeddings":
+			return strings.Fields("outputDimensionality taskType title")
+		case "vertex-predict-embeddings":
+			return []string{"parameters"}
+		case "bedrock-invoke-embeddings":
+			return strings.Fields("dimensions normalize embeddingTypes")
+		}
+		return strings.Fields("dimensions encoding_format")
 	case "rerank":
 		return strings.Fields("top_n return_documents max_chunks_per_doc truncation")
 	case "image_generation", "image_edit", "image_variation":
@@ -71,8 +79,10 @@ func defaultFields(dialect, operation string) []string {
 	return nil
 }
 
-func reservedOption(operation,name string) bool {
-	if name=="background" && (operation=="image_generation"||operation=="image_edit") {return false}
+func reservedOption(operation, name string) bool {
+	if name == "background" && (operation == "image_generation" || operation == "image_edit") {
+		return false
+	}
 	if name == "" || len(name) > 128 || strings.HasPrefix(name, "/") || strings.ContainsAny(name, "\x00\r\n") {
 		return true
 	}
@@ -97,12 +107,12 @@ func validateDefaultSet(p Profile, operation string, defaults DefaultSet) error 
 		if _, collision := defaults.NativeOptions[name]; collision {
 			return fmt.Errorf("control %s collides with native_options", name)
 		}
-		if err := validateDefaultValue(operation,name, raw); err != nil {
+		if err := validateDefaultValue(operation, name, raw); err != nil {
 			return err
 		}
 	}
 	for name, raw := range defaults.NativeOptions {
-		if err := validateDefaultValue(operation,name, raw); err != nil {
+		if err := validateDefaultValue(operation, name, raw); err != nil {
 			return err
 		}
 	}
@@ -116,20 +126,25 @@ func validateDefaultSet(p Profile, operation string, defaults DefaultSet) error 
 	return nil
 }
 
-func validateDefaultValue(operation,name string, raw json.RawMessage) error {
-	if reservedOption(operation,name) || len(raw) == 0 || len(raw) > 256<<10 || !json.Valid(raw) {
+func validateDefaultValue(operation, name string, raw json.RawMessage) error {
+	if reservedOption(operation, name) || len(raw) == 0 || len(raw) > 256<<10 || !json.Valid(raw) {
 		return fmt.Errorf("default %s is reserved, malformed or exceeds 256 KiB", name)
 	}
 	if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
 		return nil
 	}
-	if name=="response_format" && operation!="generation" {
-		var format string;if json.Unmarshal(raw,&format)!=nil{return errors.New("media response_format must be a string or native null")};return nil
+	if name == "response_format" && operation != "generation" {
+		var format string
+		if json.Unmarshal(raw, &format) != nil {
+			return errors.New("media response_format must be a string or native null")
+		}
+		return nil
 	}
 	switch name {
 	case "temperature", "top_p", "frequency_penalty", "presence_penalty", "speed":
 		var number json.Number
-		if json.Unmarshal(raw, &number) != nil {
+		first := bytes.TrimSpace(raw)[0]
+		if (first < '0' || first > '9') && first != '-' || json.Unmarshal(raw, &number) != nil {
 			return fmt.Errorf("default %s must be a number or native null", name)
 		}
 	case "max_tokens", "max_completion_tokens", "max_output_tokens", "dimensions", "output_dimension", "n", "top_n", "top_k":
@@ -188,6 +203,34 @@ func (c Config) validateDefaultsAndBindings(p Profile) error {
 				return err
 			}
 		}
+		var metadata struct {
+			Deployment string `json:"deployment"`
+		}
+		_ = json.Unmarshal(c.Models[name], &metadata)
+		if metadata.Deployment != "" && (binding.Model != "" || binding.Deployment != "") {
+			return errors.New("serving binding collides with legacy model deployment metadata")
+		}
+		operations := map[string]bool{}
+		for op := range c.OperationDefaults {
+			operations[op] = true
+		}
+		for op := range binding.Defaults {
+			operations[op] = true
+		}
+		for op := range operations {
+			provider, model := c.OperationDefaults[op], binding.Defaults[op]
+			for key := range provider.Values {
+				if _, exists := model.NativeOptions[key]; exists {
+					return fmt.Errorf("native option %s collides with a provider control", key)
+				}
+			}
+			for key := range provider.NativeOptions {
+				if _, exists := model.Values[key]; exists {
+					return fmt.Errorf("binding control %s collides with a provider native option", key)
+				}
+			}
+		}
+
 	}
 	return nil
 }

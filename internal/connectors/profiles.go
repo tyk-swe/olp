@@ -425,7 +425,7 @@ func completeProfileMetadata(p *Profile) {
 		p.OperationDialects[operation] = dialect
 		fields := map[string]any{}
 		for _, name := range defaultFields(dialect, operation) {
-			fields[name] = map[string]any{"title": name}
+			fields[name] = defaultControlSchema(operation, name)
 		}
 		p.DefaultSchemas[operation], _ = json.Marshal(map[string]any{"type": "object", "additionalProperties": false, "required": []string{"dialect"}, "properties": map[string]any{
 			"dialect": map[string]any{"const": dialect}, "values": map[string]any{"type": "object", "additionalProperties": false, "properties": fields}, "native_options": map[string]any{"type": "object", "description": "Operation payload extensions; routing, credentials and resource references are reserved."},
@@ -453,7 +453,7 @@ func RegisterProfile(p Profile) error {
 		}
 	}
 	if template == nil || len(profileRegistry) >= 4096 {
-		return errors.New("profile components do not form an existing qualified composition")
+		return errors.New("profile components do not form an existing registered composition")
 	}
 	for _, auth := range p.Authentication {
 		if !slices.Contains(template.Authentication, auth) {
@@ -481,4 +481,31 @@ func RegisterProfile(p Profile) error {
 	completeProfileMetadata(&p)
 	profileRegistry = append(profileRegistry, cloneProfile(p))
 	return nil
+}
+
+func defaultControlSchema(operation, name string) map[string]any {
+	kind := "string"
+	switch name {
+	case "temperature", "top_p", "frequency_penalty", "presence_penalty", "speed":
+		kind = "number"
+	case "max_tokens", "max_completion_tokens", "max_output_tokens", "dimensions", "output_dimension", "n", "top_n", "top_k":
+		kind = "integer"
+	case "parallel_tool_calls", "logprobs", "return_documents", "autoTruncate", "normalize":
+		kind = "boolean"
+	case "tools", "safetySettings", "stop_sequences", "embeddingTypes", "additionalModelResponseFieldPaths", "timestamp_granularities":
+		kind = "array"
+	case "response_format", "reasoning", "text", "thinking", "output_config", "generationConfig", "toolConfig", "inferenceConfig", "additionalModelRequestFields", "parameters", "stream_options":
+		kind = "object"
+	}
+	if name == "response_format" && operation != "generation" {
+		kind = "string"
+	}
+	schema := map[string]any{"title": name, "type": []string{kind, "null"}}
+	if kind == "array" || kind == "object" {
+		schema["description"] = "Replaced atomically; never recursively merged."
+	}
+	if kind == "integer" {
+		schema["minimum"] = 1
+	}
+	return schema
 }

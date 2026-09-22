@@ -99,7 +99,7 @@ func (s *Server) provider(r *http.Request) (access.Reply, error) {
 func (s *Server) createProvider(r *http.Request) (access.Reply, error) {
 	a := s.Access
 	var input createRequest
-	if err := access.DecodeUnique(r, &input,1<<20); err != nil {
+	if err := access.DecodeUnique(r, &input, 1<<20); err != nil {
 		return access.Reply{}, err
 	}
 	tx, err := a.Begin(r)
@@ -230,7 +230,7 @@ func (s *Server) updateProvider(r *http.Request) (access.Reply, error) {
 		return access.Reply{}, err
 	}
 	var input updateRequest
-	if err = access.DecodeUnique(r, &input,1<<20); err != nil {
+	if err = access.DecodeUnique(r, &input, 1<<20); err != nil {
 		return access.Reply{}, err
 	}
 	tx, err := a.Begin(r)
