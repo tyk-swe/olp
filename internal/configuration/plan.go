@@ -197,7 +197,7 @@ func loadState(ctx context.Context, q access.Queryer) (*stateView, error) {
 	if err = routes.Err(); err != nil {
 		return nil, err
 	}
-	drafts, err := q.Query(ctx, "SELECT id::text,slug,project_id::text FROM olp_go.route_drafts WHERE state='draft' AND based_on_revision_id IS NULL ORDER BY created_at DESC,id DESC")
+	drafts, err := q.Query(ctx, "SELECT id::text,slug,project_id::text FROM olp_go.route_drafts WHERE state IN ('draft','validated') AND based_on_revision_id IS NULL ORDER BY created_at DESC,id DESC")
 	if err != nil {
 		return nil, err
 	}

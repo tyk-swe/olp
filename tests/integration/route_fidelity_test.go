@@ -93,6 +93,9 @@ func TestRouteFidelityDraftsRemainExplicitAndStrictActivationFailsClosed(t *test
 	if problemCode(t, problem) != "strict_execution_unavailable" {
 		t.Fatal("strict route reached the legacy dispatcher", problem)
 	}
+	if problemCode(t, h.want(owner, "POST", path+"/simulate", map[string]any{"operation": "generation", "surface": "openai", "mode": "unary", "seed": "strict-preview"}, nil, 422)) != "strict_execution_unavailable" {
+		t.Fatal("strict draft simulation reported a legacy plan")
+	}
 	h.refresh()
 	if h.Runtime.Release().Digest != originalDigest || h.Runtime.Release().Sequence != sequence {
 		t.Fatal("failed strict activation published a runtime revision")
@@ -197,6 +200,9 @@ func TestRouteFidelityConfigurationPromotionPreservesOmittedContracts(t *testing
 	if problemCode(t, h.want(owner, "POST", path+"/activate", nil, withMatch(draft, idem(uuid.NewString())), 422)) != "strict_execution_unavailable" {
 		t.Fatal("imported strict draft activated")
 	}
+	// Validating an unpublished draft must not make promotion forget its mode
+	// and stage another draft under the published route's older contract.
+	h.want(owner, "POST", path+"/validate", nil, etagHeader(draft), 200)
 	delete(route, "fidelity")
 	route["max_attempts"] = 2
 	h.want(owner, "POST", "/api/v3/configuration/apply", map[string]any{"document": document}, idem(uuid.NewString()), 200)
