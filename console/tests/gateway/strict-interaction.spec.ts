@@ -361,7 +361,7 @@ test('native vector and rerank presentation keeps storage and score representati
   const result = page.locator('.operation-result');
   await expect(result.getByText('Base64 storage · ubinary')).toBeVisible();
   await expect(result.getByText('2 stored bytes')).toBeVisible();
-  await result.getByText('Native result JSON').click();
+  await result.locator('summary').click();
   await expect(
     result.locator('[data-testid="native-operation-result"]')
   ).toContainText('9007199254740993');
