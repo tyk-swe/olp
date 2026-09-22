@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
-import { metricNames, validateRuns, parseRuns, compareCandidate, referenceEvidence, sharedSources, commandArgs, runtimeEnvironment, conditions, comparisonScope } from './continuation-candidate-benchmark.mjs';
+import { metricNames, validateRuns, parseRuns, compareCandidate, referenceEvidence, verifyHistoricalSources, historicalHash, sharedSources, commandArgs, runtimeEnvironment, conditions, comparisonScope } from './continuation-candidate-benchmark.mjs';
 
 const hash = (path) => createHash('sha256').update(readFileSync(path)).digest('hex');
 const baselinePath = 'docs/evidence/fidelity-performance/barrier-v1/baseline.json';
@@ -108,4 +108,11 @@ test('frozen runtime identity and source inventory are required before compariso
     change(evidence);
     assert.throws(() => compareCandidate(evidence, baseline, budgets));
   }
+});
+test('missing history and corrupt historical source fail closed', () => {
+  const source = 'tests/integration/fidelity_lifecycle_performance_test.go';
+  assert.throws(() => historicalHash('0'.repeat(40), source), /Frozen source is unavailable/);
+  const corrupt = structuredClone(baseline);
+  corrupt.dependency_sha256[source] = '0'.repeat(64);
+  assert.throws(() => verifyHistoricalSources(corrupt), /Frozen historical source changed/);
 });
