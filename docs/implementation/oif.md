@@ -74,8 +74,8 @@ Tickets become ready for implementation when their blockers are integrated into 
 | [#221](https://github.com/tyk-swe/olp/issues/221) Qualify native reasoning/tool SDK continuation | T02 native seam | Native SDK slice integrated; strict/translated/recovery qualification remains #214 | SDK branch `d62b0eb1`, merge `04396de3`; [native SDK qualification](../qualification/fidelity/native-sdk.md) |
 | [#214](https://github.com/tyk-swe/olp/issues/214) Preserve streaming reasoning and recoverable tool continuation | D04,D08,D10-D14,D19; T02-T03,T07 | Active; #213, #221 and #224 integrated | Forward schema 0025 integrated for the #225 reference; production continuation/resource guards remain pending implementation and qualification |
 | [#215](https://github.com/tyk-swe/olp/issues/215) Implement independent non-generation operation fidelity | D03-D05,D14-D15; T04,T07,T10 | Integrated; public extensibility and final G3/G7 qualification remain #218 | Operation branch `ebfd6d88`; [registered unary operation contracts and public qualification](../qualification/fidelity/unary-operations.md); forward schema 0026 |
-| [#227](https://github.com/tyk-swe/olp/issues/227) Bind native media JSON inputs to OIF source parser | D03-D04,D15; T04,T07 | Active; #211, #212 and #224 integrated | Native image/speech request source parser and public ambiguity/precision qualification pending |
-| [#216](https://github.com/tyk-swe/olp/issues/216) Integrate media durable resources and duplex interaction contracts | D11-D15,D19,D23; T03-T05,T10 | Pending #214 continuation and #227 native media source | #215 registered unary operations are integrated; media resource, Gemini Interactions/Live, and duplex/durable lifecycle behavior still need their own qualification |
+| [#227](https://github.com/tyk-swe/olp/issues/227) Bind native media JSON inputs to OIF source parser | D03-D04,D15; T04,T07 | Source foundation integrated; full strict media plans remain #216 | Media source branch `ad5558e5`, merge `22738e0d`; [native image/speech source parser and public ambiguity qualification](../qualification/fidelity/media-source-foundation.md) |
+| [#216](https://github.com/tyk-swe/olp/issues/216) Integrate media durable resources and duplex interaction contracts | D11-D15,D19,D23; T03-T05,T10 | Pending #214 continuation | #215 operations and #227 native media source are integrated; media resources, Gemini Interactions/Live, and duplex/durable lifecycle behavior still need their own qualification |
 | [#224](https://github.com/tyk-swe/olp/issues/224) Preserve native JSON configuration and release storage | D03-D04, D16 | Integrated; backend blockers for #223 and #214 resolved | Storage branch `3e5d5358`, merge `3b35c1fb`; forward migration 0024; [native configuration conservation and migration qualification](../qualification/fidelity/native-configuration-storage.md) |
 | [#223](https://github.com/tyk-swe/olp/issues/223) Implement lossless schema-driven configuration editors | D16, D21; T05-T06 | Integrated; inspector, evidence and operation playgrounds remain #217 | Console branch `a406b4b5`, merge `7c322cf6`; [native configuration browser qualification and reviewed screenshots](../qualification/fidelity/console-configuration.md) |
 | [#217](https://github.com/tyk-swe/olp/issues/217) Expose schema-driven configuration fidelity evidence and operation playgrounds | D16,D21-D22; T05-T06 | Ready; #213 and #223 integrated | Inspector, evidence presentation and operation playgrounds remain pending implementation and qualification |
@@ -198,6 +198,26 @@ race detection in 3.991 s. Current inventory regeneration introduced no changes.
 These checks establish reference integrity only: no candidate was timed, no
 budgets were reset, and translated continuation performance and full G6 remain
 pending in #214/#218.
+
+The #226 migration branch `39bf2792` merged in `1b8c1a0a`, preserving the
+existing 0025 schema byte for byte and adding the operation-label 0026 and
+strict-identity 0027 migrations in order. The #215 operation branch `ebfd6d88`
+merged in `d97035fd`; its 0025 and 0026 schemas match the already integrated
+files. The combined OpenAPI contract contains both route migration drafts and
+registered operation dialects, with regenerated Go/TypeScript types and current
+release inventory. The combined tree passed `make check`, including Go vet,
+local Go tests, 632 console tests and 24 script tests. Selected disposable-service
+race tests passed in 97.860 s, covering populated forward migration, actual
+old/new gateway route separation, rollback and writer fences, public unary
+operations and pinned SDK storage, and original cloud profile controls. These
+results do not complete the full #218 migration, extensibility or G3/G7 audit.
+
+The #227 media source branch `ad5558e5` merged in `22738e0d`. Its native
+image/speech source parser checks passed the media unit race suite in 4.247 s,
+and public native image/source tests passed with race detection in 6.125 s.
+Integration-tagged Go vet and current release inventory regeneration also
+passed. Strict media request/result/event plans and lifecycle recovery remain
+#216 scope; no frozen fixture or performance artifact changed.
 
 - Preserve the frozen reference inventory; add versioned independent evidence.
 - Retain the denominator and report admitted, incompatible, incomplete, ambiguous and unknown outcomes separately.
