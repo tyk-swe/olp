@@ -30,6 +30,11 @@ graph TD
   lifecycle["#216 lifecycle"]
   continuation --> lifecycle
   operations --> lifecycle
+  media_source_foundation["#227 media JSON source"]
+  oif --> media_source_foundation
+  profiles --> media_source_foundation
+  native_config_storage --> media_source_foundation
+  media_source_foundation --> lifecycle
   console["#217 console"]
   planning --> console
   console_forms["#223 console forms"]
@@ -69,6 +74,7 @@ Tickets become ready for implementation when their blockers are integrated into 
 | [#221](https://github.com/tyk-swe/olp/issues/221) Qualify native reasoning/tool SDK continuation | T02 native seam | Native SDK slice integrated; strict/translated/recovery qualification remains #214 | SDK branch `d62b0eb1`, merge `04396de3`; [native SDK qualification](../qualification/fidelity/native-sdk.md) |
 | [#214](https://github.com/tyk-swe/olp/issues/214) Preserve streaming reasoning and recoverable tool continuation | D04,D08,D10-D14,D19; T02-T03,T07 | Active; #213, #221 and #224 integrated | Forward schema 0025 integrated for the #225 reference; production continuation/resource guards remain pending implementation and qualification |
 | [#215](https://github.com/tyk-swe/olp/issues/215) Implement independent non-generation operation fidelity | D03-D05,D14-D15; T04,T07,T10 | Active; #213 integrated | Operation/profile exploration started from `06523391`; no #215 implementation integrated yet |
+| [#227](https://github.com/tyk-swe/olp/issues/227) Bind native media JSON inputs to OIF source parser | D03-D04,D15; T04,T07 | Active; #211, #212 and #224 integrated | Native image/speech request source parser and public ambiguity/precision qualification pending |
 | [#216](https://github.com/tyk-swe/olp/issues/216) Integrate media durable resources and duplex interaction contracts | D11-D15,D19,D23; T03-T05,T10 | Pending | — |
 | [#224](https://github.com/tyk-swe/olp/issues/224) Preserve native JSON configuration and release storage | D03-D04, D16 | Integrated; backend blockers for #223 and #214 resolved | Storage branch `3e5d5358`, merge `3b35c1fb`; forward migration 0024; [native configuration conservation and migration qualification](../qualification/fidelity/native-configuration-storage.md) |
 | [#223](https://github.com/tyk-swe/olp/issues/223) Implement lossless schema-driven configuration editors | D16, D21; T05-T06 | Integrated; inspector, evidence and operation playgrounds remain #217 | Console branch `a406b4b5`, merge `7c322cf6`; [native configuration browser qualification and reviewed screenshots](../qualification/fidelity/console-configuration.md) |
