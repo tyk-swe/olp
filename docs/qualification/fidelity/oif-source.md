@@ -55,7 +55,33 @@ native stream sources before rewriting. Public gateway tests assert precise
 zero-dispatch input rejection and provider/client conservation. The common
 management-provisioned integration baseline remains unchanged.
 
-Validation for the implementation commit is recorded below after execution.
-These checks establish deterministic source conservation only. SDK reasoning
-continuation, durable recovery, empirical quality and complete-interaction
-qualification remain their separate specification gates.
+Validation executed on 2026-09-22 for runtime revision
+`291d4b23a3fa14cdf60f684f8c5a0e3f9a584ff1`:
+
+- `make check`: passed contract generation, formatting, Go vet/local tests,
+  console checks and 617 tests in 68 files, and 14 script tests.
+- Source, protocol, SSE, gateway and independent fidelity tests with `-race`:
+  passed, including invalid constructor/default/overlay/dialect controls for
+  validation reuse. Source fuzzing executed 43,368 cases without a failure.
+- Official JavaScript and Python OpenAI, Anthropic and Gemini SDK smoke suites:
+  passed native success/stream/error contracts. These are the existing smoke
+  workflows, not reasoning-tool continuation qualification.
+- Disposable-service `TestFidelityPublicNativeAndTranslatedConservationControls`
+  and `TestResponseLifecycle` with `-race`: passed through management provisioned
+  public APIs, including ownership, historical mappings and credential revocation.
+- The unchanged frozen benchmark ran twice from clean committed revisions.
+  The [initial capture](../../evidence/fidelity-performance/oif-source-v1/initial.json)
+  failed the native-asset sample floor. Removing redundant validation and
+  serialize/parse work produced the
+  [optimized capture](../../evidence/fidelity-performance/oif-source-v1/optimized.json),
+  which passed every gateway workload and the sample floor. Its overall comparison
+  **did not pass**: the unchanged slow-relay control's p99 inter-event-gap metric
+  was 3,943 µs against a frozen 3,544 µs limit. Both results remain in the
+  [comparison record](../../evidence/fidelity-performance/oif-source-v1/comparisons.json).
+  No harness, workload, baseline or budget was changed. Full performance
+  qualification remains open for the integrated runtime under
+  [#218](https://github.com/tyk-swe/olp/issues/218).
+
+These checks establish deterministic source conservation only. Reasoning-tool
+continuation, durable continuation recovery, empirical quality and complete
+interaction qualification remain their separate specification gates.
