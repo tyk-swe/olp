@@ -25,6 +25,7 @@ import (
 	"github.com/tyk-swe/olp/internal/observability"
 	"github.com/tyk-swe/olp/internal/protocols"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
+	"github.com/tyk-swe/olp/internal/providerinvoke"
 	"github.com/tyk-swe/olp/internal/providers"
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/runtime"
@@ -72,14 +73,15 @@ type Server struct {
 
 	Resolver *resources.Resolver
 
-	log       *slog.Logger
-	cfg       Config
-	egress    *egress.Policy
-	client    *http.Client
-	auth      *connectors.Auth
-	admission *observability.Pool
-	health    *healthTracker
-	now       func() time.Time
+	log         *slog.Logger
+	cfg         Config
+	egress      *egress.Policy
+	client      *http.Client
+	connections *egress.ConnectionClientCache
+	auth        *connectors.Auth
+	admission   *observability.Pool
+	health      *healthTracker
+	now         func() time.Time
 }
 
 // upstreamHeaderTimeout caps the wait for upstream response headers; the
@@ -98,16 +100,17 @@ func New(rt Runtime, policy *egress.Policy, cfg Config, log *slog.Logger) *Serve
 		pool = observability.NewPool(max(cfg.MaxInFlight, 1))
 	}
 	return &Server{
-		Runtime:   rt,
-		Sink:      LogSink{Log: log},
-		log:       log,
-		cfg:       cfg,
-		egress:    policy,
-		client:    policy.Client(upstreamHeaderTimeout),
-		auth:      connectors.NewAuth(policy),
-		admission: pool,
-		health:    newHealthTracker(time.Now),
-		now:       time.Now,
+		Runtime:     rt,
+		Sink:        LogSink{Log: log},
+		log:         log,
+		cfg:         cfg,
+		egress:      policy,
+		client:      policy.Client(upstreamHeaderTimeout),
+		connections: egress.NewConnectionClientCache(128),
+		auth:        connectors.NewAuth(policy),
+		admission:   pool,
+		health:      newHealthTracker(time.Now),
+		now:         time.Now,
 	}
 }
 
@@ -592,7 +595,10 @@ func (s *Server) prepare(ctx context.Context, x *execution, permitted func(slug 
 		KeyID: x.keyID, Preferences: x.preferences, Parameters: protocols.ParameterNames(x.parsed), Inputs: s.routingInputs(), TokenDemand: requestDemand(x.parsed), Now: s.now(), CheckSlots: true, CredentialRevoked: s.Runtime.Revoked,
 		Accept: func(p runtime.Provider, t runtime.Target) error {
 			cfg := p.Connector()
-			if !connectors.Supports(p.Kind, p.VendorID, x.family.Operation(), x.family.Surface(), x.mode) {
+			if p.Network != nil && p.Network.CredentialID != "" && s.Runtime.Revoked(p.Network.CredentialID) {
+				return errors.New("provider network credential unavailable")
+			}
+			if !cfg.Supports(x.family.Operation(), x.family.Surface(), x.mode) {
 				return errors.New("connector capability unavailable")
 			}
 			if x.providerState && !stateQualified(&p, t.ProviderModel, x.family.Operation(), x.mode) {
@@ -607,7 +613,12 @@ func (s *Server) prepare(ctx context.Context, x *execution, permitted func(slug 
 					return semantic
 				}
 			}
-			_, _, e := protocols.Encode(x.parsed, p.Kind, p.VendorID, cfg.Model(t.ProviderModel), p.ParameterDefaults)
+			var e error
+			if p.ProfileID != "" {
+				_, e = x.preparedProvider(&p, t.ProviderModel)
+			} else {
+				_, _, e = providerinvoke.Encode(x.parsed, cfg, t.ProviderModel, p.ParameterDefaults)
+			}
 			if e != nil {
 				semantic = e
 			}

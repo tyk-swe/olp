@@ -159,6 +159,7 @@ func newAccessHarnessOn(t *testing.T, pool *pgxpool.Pool, dbURL string) *accessH
 	routes.New(server).Register(mux)
 	(&configuration.Server{
 		Access: server, Egress: &policy, VendorKind: providers.VendorKind,
+		StoreNetworkCredential: catalogue.StoreNetworkCredential,
 		StoreCredential: func(ctx context.Context, tx pgx.Tx, providerID, secret string) (string, error) {
 			id, _, err := catalogue.StoreCredential(ctx, tx, providerID, secret)
 			return id, err

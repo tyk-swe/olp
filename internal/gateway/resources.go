@@ -77,7 +77,7 @@ func readBounded(r io.Reader, limit int64) ([]byte, error) {
 }
 
 func stateQualified(p *runtime.Provider, model, operation, mode string) bool {
-	if !connectors.Supports(p.Kind, p.VendorID, operation, "openai", mode) {
+	if !p.Connector().Supports(operation, "openai", mode) {
 		return false
 	}
 	if !p.Supports(model, operation, "openai", mode) {
@@ -98,31 +98,7 @@ func officialOpenAIEndpoint(endpoint string) bool {
 }
 
 func resourceURL(cfg connectors.Config, model, path string, query url.Values) (string, error) {
-	base := strings.TrimRight(cfg.Endpoint, "/")
-	if cfg.Kind == "azure_openai" {
-		if strings.HasPrefix(path, "deployments/") {
-			deployment := cfg.Model(model)
-			if deployment == "" {
-				return "", errors.New("model has no configured Azure deployment")
-			}
-			base += "/openai/deployments/" + url.PathEscape(deployment)
-			path = strings.TrimPrefix(path, "deployments/")
-		} else {
-			base += "/openai"
-		}
-	}
-	u := base + "/" + strings.TrimPrefix(path, "/")
-	merged := url.Values{}
-	if cfg.Kind == "azure_openai" {
-		merged.Set("api-version", cfg.APIVersion)
-	}
-	for name, values := range query {
-		merged[name] = append([]string{}, values...)
-	}
-	if len(merged) > 0 {
-		u += "?" + merged.Encode()
-	}
-	return u, nil
+	return cfg.ResourceURL(model, path, query)
 }
 
 func pinUnavailable() *Error {
@@ -299,7 +275,11 @@ func (s *Server) pinnedDo(ctx context.Context, x *execution, p *pin, method, end
 		}
 		return nil, finish(classCredential, nil)
 	}
-	resp, err := s.client.Do(req)
+	client, err := s.providerClient(ctx, x.request.release, &p.provider, p.slot)
+	if err != nil {
+		return nil, finish(classCredential, nil)
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		class := classConnect
 		if ctx.Err() != nil {
@@ -770,7 +750,12 @@ func (s *Server) uploadMultipart(ctx context.Context, x *execution, p *pin, endp
 		pipeR.CloseWithError(err)
 		return nil, finish(classCredential, nil)
 	}
-	resp, err := s.client.Do(req)
+	client, err := s.providerClient(ctx, x.request.release, &p.provider, p.slot)
+	if err != nil {
+		pipeR.CloseWithError(err)
+		return nil, finish(classCredential, nil)
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		pipeR.CloseWithError(err)
 		class := classConnect

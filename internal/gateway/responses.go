@@ -18,7 +18,7 @@ import (
 )
 
 func responsePath(cfg connectors.Config, suffix string) string {
-	if cfg.Kind == "azure_openai" {
+	if cfg.Kind == "azure_openai" && cfg.Hosting() != "azure-v1" && cfg.Hosting() != "azure-responses-legacy" {
 		return "deployments/responses" + suffix
 	}
 	return "responses" + suffix

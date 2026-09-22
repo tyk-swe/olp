@@ -14,6 +14,7 @@ import (
 	"net/textproto"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -50,17 +51,21 @@ type Failure struct {
 
 // Target is one resolved upstream destination for a media call.
 type Target struct {
-	Config connectors.Config
-	Model  string // upstream model identifier
-	Secret []byte
+	ConnectionScope string
+	NetworkSecret   []byte
+	Config          connectors.Config
+	Model           string // upstream model identifier
+	Secret          []byte
 }
 
 // Transport executes media calls against provider endpoints.
 type Transport struct {
-	Client *http.Client
-	Auth   *connectors.Auth
-	Egress *egress.Policy
-	Spool  *Spool
+	connectionsOnce sync.Once
+	connections     *egress.ConnectionClientCache
+	Client          *http.Client
+	Auth            *connectors.Auth
+	Egress          *egress.Policy
+	Spool           *Spool
 	// MaxResponseBytes bounds every collected JSON body and every staged
 	// binary response.
 	MaxResponseBytes int64
@@ -168,7 +173,20 @@ func (t *Transport) Do(ctx context.Context, target Target, call *UpstreamCall, r
 	}
 
 	started := t.now()
-	resp, err := t.Client.Do(req)
+	client := t.Client
+	if target.Config.Network != nil || target.Config.ProfileID != "" {
+		t.connectionsOnce.Do(func() { t.connections = egress.NewConnectionClientCache(128) })
+		var err error
+		client, err = t.connections.ClientScoped(target.ConnectionScope, *t.Egress, target.Config.Network, target.NetworkSecret, 5*time.Minute)
+		if err != nil {
+			if pipe != nil {
+				pipe.CloseWithError(err)
+				<-multipartDone
+			}
+			return nil, &Failure{Class: ClassCredential, Detail: "provider network connection unavailable"}
+		}
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		if pipe != nil {
 			pipe.Close()

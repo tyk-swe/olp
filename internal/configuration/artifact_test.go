@@ -264,7 +264,7 @@ func TestPlanProviderKindConflict(t *testing.T) {
 	s := testServer()
 	doc := testDocument()
 	stubs := []queryStub{
-		{match: "FROM olp_go.providers", rows: [][]any{{"provider-id", "acme", "openai", "active", nil}}},
+		{match: "FROM olp_go.providers", rows: [][]any{{"provider-id", "acme", "openai", "active", nil, nil}}},
 	}
 	result, err := s.plan(context.Background(), mapQueryer{t: t, stub: stubs}, doc, map[string]string{"acme/primary": "s"}, nil)
 	if err != nil {
@@ -282,7 +282,7 @@ func TestPlanProviderProjectMismatch(t *testing.T) {
 	s := testServer()
 	doc := testDocument()
 	stubs := []queryStub{
-		{match: "FROM olp_go.providers", rows: [][]any{{"provider-id", "acme", "openai_compatible", "active", "other-id"}}},
+		{match: "FROM olp_go.providers", rows: [][]any{{"provider-id", "acme", "openai_compatible", "active", "other-id", nil}}},
 		{match: "FROM olp_go.projects", rows: [][]any{{"other-id", "Core"}, {"edge-id", "Edge"}}},
 	}
 	result, err := s.plan(context.Background(), mapQueryer{t: t, stub: stubs}, doc, map[string]string{"acme/primary": "s"}, nil)
@@ -389,7 +389,7 @@ func TestPlanNoopProviderAndRoute(t *testing.T) {
 	})
 	stubs := []queryStub{
 		{match: "FROM olp_go.providers WHERE", row: []any{configuration}},
-		{match: "FROM olp_go.providers", rows: [][]any{{"provider-id", "acme", "openai_compatible", "draft", "edge-id"}}},
+		{match: "FROM olp_go.providers", rows: [][]any{{"provider-id", "acme", "openai_compatible", "draft", "edge-id", nil}}},
 		{match: "provider_slots s LEFT JOIN", rows: [][]any{{"provider-id", "primary", "slot-id", "cred-id"}}},
 		{match: "provider_slots WHERE", rows: [][]any{{"primary", true, 0, true, 0, 1, "cred-id", []byte(`{"allowed_api_keys":[],"allowed_models":[],"allowed_routes":[]}`), []byte(`{}`)}}},
 		{match: "FROM olp_go.provider_models", rows: [][]any{{"gpt-x", "gpt-x", true, capabilities}}},

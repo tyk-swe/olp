@@ -1278,6 +1278,9 @@ type ConfigurationProviderEntry struct {
 	Models        []ConfigurationModelEntry `json:"models"`
 	Name          string                    `json:"name"`
 
+	// NetworkCredentialRef Portable secret binding name, conventionally provider name followed by /network. Export omits runtime network credential UUIDs; supply this reference through secret_bindings when applying the artifact.
+	NetworkCredentialRef *string `json:"network_credential_ref,omitempty"`
+
 	// Project Project name, or null for an installation-wide provider
 	Project nullable.Nullable[string] `json:"project"`
 	Slots   []ConfigurationSlotEntry  `json:"slots"`
@@ -1346,12 +1349,27 @@ type ConnectionLimits struct {
 
 // ConnectionOptions defines model for ConnectionOptions.
 type ConnectionOptions struct {
+	// Bindings Serving bindings keyed by configured upstream model.
+	Bindings *map[string]ProviderServingBinding `json:"bindings,omitempty"`
+
 	// CredentialHeaders Header names whose values are supplied in the encrypted credential JSON.
 	CredentialHeaders *[]string                           `json:"credential_headers,omitempty"`
 	Limits            nullable.Nullable[ConnectionLimits] `json:"limits,omitempty"`
 	Models            *map[string]ModelMetadata           `json:"models,omitempty"`
-	ParameterDefaults *map[string]interface{}             `json:"parameter_defaults,omitempty"`
-	VendorId          nullable.Nullable[string]           `json:"vendor_id,omitempty"`
+
+	// Network Public per-provider transport configuration. max_idle_conns_per_host must not exceed either explicitly configured total idle or per-host active connection limits. Redirects and environment proxies are refused.
+	Network *ProviderNetworkOptions `json:"network,omitempty"`
+
+	// OperationDefaults Defaults keyed by operation; each set names its owning profile dialect.
+	OperationDefaults *map[string]ProviderOperationDefaults `json:"operation_defaults,omitempty"`
+	ParameterDefaults *map[string]interface{}               `json:"parameter_defaults,omitempty"`
+
+	// QuerySettings Profile-allowlisted semantic query settings; cannot replace operation addressing or authentication.
+	QuerySettings *map[string]string `json:"query_settings,omitempty"`
+
+	// SemanticHeaders Profile-allowlisted semantic and version headers, separate from encrypted credential headers.
+	SemanticHeaders *map[string]string        `json:"semantic_headers,omitempty"`
+	VendorId        nullable.Nullable[string] `json:"vendor_id,omitempty"`
 }
 
 // ContentPolicy Route content policy: ordered RE2 rules enforced on inspectable request and unary response text. Absent or null disables enforcement.
@@ -1499,6 +1517,12 @@ type CreateManagementTokenResponse struct {
 
 	// Secret Returned only by this creation response.
 	Secret string `json:"secret"`
+}
+
+// CreateNetworkCredentialRequest defines model for CreateNetworkCredentialRequest.
+type CreateNetworkCredentialRequest struct {
+	// Credential UTF-8 JSON containing proxy_username/proxy_password and/or client_certificate_pem/client_key_pem. Stored encrypted; both client certificate and private key must be supplied together.
+	Credential *string `json:"credential,omitempty"`
 }
 
 // CreateNotificationDestinationRequest defines model for CreateNotificationDestinationRequest.
@@ -1788,6 +1812,27 @@ type ModelMetadata struct {
 	// SupportedParameters None means unknown, an empty set means no optional parameters are supported.
 	SupportedParameters nullable.Nullable[[]string] `json:"supported_parameters,omitempty"`
 	ZeroDataRetention   nullable.Nullable[bool]     `json:"zero_data_retention,omitempty"`
+}
+
+// NetworkCredentialListResponse defines model for NetworkCredentialListResponse.
+type NetworkCredentialListResponse struct {
+	Items      []NetworkCredentialResponse `json:"items"`
+	NextCursor nullable.Nullable[string]   `json:"next_cursor,omitempty"`
+}
+
+// NetworkCredentialMutationResponse defines model for NetworkCredentialMutationResponse.
+type NetworkCredentialMutationResponse struct {
+	CredentialId openapi_types.UUID `json:"credential_id"`
+	Etag         openapi_types.UUID `json:"etag"`
+	ProviderId   openapi_types.UUID `json:"provider_id"`
+}
+
+// NetworkCredentialResponse Network credential metadata only; plaintext is never returned.
+type NetworkCredentialResponse struct {
+	CreatedAt time.Time                    `json:"created_at"`
+	Id        openapi_types.UUID           `json:"id"`
+	RevokedAt nullable.Nullable[time.Time] `json:"revoked_at"`
+	Version   int32                        `json:"version"`
 }
 
 // NotificationDestination defines model for NotificationDestination.
@@ -2292,6 +2337,12 @@ type ProviderConfiguration struct {
 	Endpoint     nullable.Nullable[string] `json:"endpoint,omitempty"`
 	Kind         ProviderKind              `json:"kind"`
 	Options      *ConnectionOptions        `json:"options,omitempty"`
+
+	// ProfileId Versioned provider profile identity. Omit together with profile_revision to retain legacy configuration semantics.
+	ProfileId *string `json:"profile_id,omitempty"`
+
+	// ProfileRevision Immutable provider profile composition revision selected with profile_id.
+	ProfileRevision *string `json:"profile_revision,omitempty"`
 }
 
 // ProviderConfigurationField defines model for ProviderConfigurationField.
@@ -2431,6 +2482,38 @@ type ProviderMutationResponse struct {
 	RuntimeGeneration nullable.Nullable[RuntimeGenerationResponse] `json:"runtime_generation,omitempty"`
 }
 
+// ProviderNetworkOptions Public per-provider transport configuration. max_idle_conns_per_host must not exceed either explicitly configured total idle or per-host active connection limits. Redirects and environment proxies are refused.
+type ProviderNetworkOptions struct {
+	ConnectTimeoutMs *int64 `json:"connect_timeout_ms,omitempty"`
+
+	// CredentialId Unrevoked network credential owned by this provider. Secret proxy authentication and client certificate/key material remain encrypted and are never returned here.
+	CredentialId        *openapi_types.UUID `json:"credential_id,omitempty"`
+	IdleConnTimeoutMs   *int64              `json:"idle_conn_timeout_ms,omitempty"`
+	MaxConnsPerHost     *int32              `json:"max_conns_per_host,omitempty"`
+	MaxIdleConns        *int32              `json:"max_idle_conns,omitempty"`
+	MaxIdleConnsPerHost *int32              `json:"max_idle_conns_per_host,omitempty"`
+
+	// ProxyUrl HTTP, HTTPS or SOCKS5 proxy origin without credentials, query, fragment or path. Both proxy and destination resolve locally under the egress policy; remote proxy DNS is unsupported.
+	ProxyUrl                *string `json:"proxy_url,omitempty"`
+	ResponseHeaderTimeoutMs *int64  `json:"response_header_timeout_ms,omitempty"`
+	TlsHandshakeTimeoutMs   *int64  `json:"tls_handshake_timeout_ms,omitempty"`
+
+	// TrustRootsPem Public PEM certificates augmenting system trust. Private keys and other PEM blocks are forbidden.
+	TrustRootsPem *string `json:"trust_roots_pem,omitempty"`
+}
+
+// ProviderOperationDefaults Typed defaults for one operation and dialect. At most 64 total values and native_options; client-supplied members always take precedence.
+type ProviderOperationDefaults struct {
+	// Dialect Dialect owned by the selected profile for this operation.
+	Dialect string `json:"dialect"`
+
+	// NativeOptions Explicit dialect-native extension defaults. May not collide with values or reserved routing, identity, resource or authentication fields.
+	NativeOptions *map[string]interface{} `json:"native_options,omitempty"`
+
+	// Values Omission fillers validated against the operation default schema. Each value, including null, arrays and objects, is atomic.
+	Values *map[string]interface{} `json:"values,omitempty"`
+}
+
 // ProviderPresetResponse defines model for ProviderPresetResponse.
 type ProviderPresetResponse struct {
 	AuthMode           ProviderAuthMode `json:"auth_mode"`
@@ -2447,6 +2530,34 @@ type ProviderPresetResponse struct {
 
 	// Maintainer Organization maintaining the official documentation used for review.
 	Maintainer string `json:"maintainer"`
+}
+
+// ProviderProfile Immutable composition of independently owned dialect, hosting, authentication and transport contracts. Profile registration does not establish interaction fidelity qualification.
+type ProviderProfile struct {
+	Authentication []string `json:"authentication"`
+
+	// DefaultSchemas Operation-owned JSON Schema objects for supported default controls.
+	DefaultSchemas  map[string]map[string]interface{} `json:"default_schemas"`
+	Dialect         string                            `json:"dialect"`
+	DialectRevision string                            `json:"dialect_revision"`
+	Documentation   string                            `json:"documentation"`
+	Hosting         string                            `json:"hosting"`
+	Id              string                            `json:"id"`
+	Kind            string                            `json:"kind"`
+	Label           string                            `json:"label"`
+
+	// OperationDialects Dialect identity for each supported operation.
+	OperationDialects map[string]string `json:"operation_dialects"`
+	Operations        []string          `json:"operations"`
+	QuerySettings     []string          `json:"query_settings"`
+	Revision          string            `json:"revision"`
+	SemanticHeaders   []string          `json:"semantic_headers"`
+	Transport         string            `json:"transport"`
+}
+
+// ProviderProfileListResponse defines model for ProviderProfileListResponse.
+type ProviderProfileListResponse struct {
+	Items []ProviderProfile `json:"items"`
 }
 
 // ProviderQuotaUsage Storage-independent distributed limiter used by the inference engine.
@@ -2496,20 +2607,24 @@ type ProviderResponse struct {
 
 // ProviderRevisionDiffResponse defines model for ProviderRevisionDiffResponse.
 type ProviderRevisionDiffResponse struct {
-	ApiVersionChanged   bool     `json:"api_version_changed"`
-	CapabilitiesAdded   []string `json:"capabilities_added"`
-	CapabilitiesRemoved []string `json:"capabilities_removed"`
-	CloudContextChanged bool     `json:"cloud_context_changed"`
-	ConnectorChanged    bool     `json:"connector_changed"`
-	CredentialChanged   bool     `json:"credential_changed"`
-	DeploymentChanged   bool     `json:"deployment_changed"`
-	EndpointChanged     bool     `json:"endpoint_changed"`
-	FromRevision        int32    `json:"from_revision"`
-	ModelsAdded         []string `json:"models_added"`
-	ModelsChanged       []string `json:"models_changed"`
-	ModelsRemoved       []string `json:"models_removed"`
-	NameChanged         bool     `json:"name_changed"`
-	ToRevision          int32    `json:"to_revision"`
+	ApiVersionChanged            bool     `json:"api_version_changed"`
+	CapabilitiesAdded            []string `json:"capabilities_added"`
+	CapabilitiesRemoved          []string `json:"capabilities_removed"`
+	CloudContextChanged          bool     `json:"cloud_context_changed"`
+	ConnectorChanged             bool     `json:"connector_changed"`
+	CredentialChanged            bool     `json:"credential_changed"`
+	DeploymentChanged            bool     `json:"deployment_changed"`
+	EndpointChanged              bool     `json:"endpoint_changed"`
+	FromRevision                 int32    `json:"from_revision"`
+	ModelsAdded                  []string `json:"models_added"`
+	ModelsChanged                []string `json:"models_changed"`
+	ModelsRemoved                []string `json:"models_removed"`
+	NameChanged                  bool     `json:"name_changed"`
+	NetworkConfigurationChanged  bool     `json:"network_configuration_changed"`
+	ProfileChanged               bool     `json:"profile_changed"`
+	SemanticConfigurationChanged bool     `json:"semantic_configuration_changed"`
+	ServingBindingChanged        bool     `json:"serving_binding_changed"`
+	ToRevision                   int32    `json:"to_revision"`
 }
 
 // ProviderRevisionListResponse defines model for ProviderRevisionListResponse.
@@ -2568,6 +2683,18 @@ type ProviderRevisionSummaryResponse struct {
 	Name                        string                   `json:"name"`
 	ProviderId                  openapi_types.UUID       `json:"provider_id"`
 	Revision                    int32                    `json:"revision"`
+}
+
+// ProviderServingBinding Serving environment identity independent of credentials. A binding may select a model or Azure deployment, never both. Region must match the provider connection.
+type ProviderServingBinding struct {
+	// Defaults Operation defaults overriding the provider defaults by whole member.
+	Defaults      *map[string]ProviderOperationDefaults `json:"defaults,omitempty"`
+	Deployment    *string                               `json:"deployment,omitempty"`
+	Model         *string                               `json:"model,omitempty"`
+	PrincipalId   *string                               `json:"principal_id,omitempty"`
+	Region        *string                               `json:"region,omitempty"`
+	ResourceScope *string                               `json:"resource_scope,omitempty"`
+	Snapshot      *string                               `json:"snapshot,omitempty"`
 }
 
 // ProviderSummaryResponse defines model for ProviderSummaryResponse.
@@ -2771,6 +2898,14 @@ type RequestSummary struct {
 	TotalLatencyMs      nullable.Nullable[int64] `json:"total_latency_ms,omitempty"`
 	Unpriced            nullable.Nullable[bool]  `json:"unpriced,omitempty"`
 	UsageComplete       nullable.Nullable[bool]  `json:"usage_complete,omitempty"`
+}
+
+// RevokeNetworkCredentialResponse defines model for RevokeNetworkCredentialResponse.
+type RevokeNetworkCredentialResponse struct {
+	CredentialId      openapi_types.UUID        `json:"credential_id"`
+	Etag              openapi_types.UUID        `json:"etag"`
+	ProviderId        openapi_types.UUID        `json:"provider_id"`
+	RuntimeGeneration RuntimeGenerationResponse `json:"runtime_generation"`
 }
 
 // RotateApiKeyRequest defines model for RotateApiKeyRequest.
@@ -3927,6 +4062,27 @@ type CertifyProviderModelParams struct {
 	IfMatch string `json:"If-Match"`
 }
 
+// ListProviderNetworkCredentialsParams defines parameters for ListProviderNetworkCredentials.
+type ListProviderNetworkCredentialsParams struct {
+	// Cursor Opaque cursor returned by the previous page.
+	Cursor *string `form:"cursor,omitempty" json:"cursor,omitempty"`
+
+	// Limit Page size, from 1 to 200. Defaults to 50.
+	Limit *int32 `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
+// CreateProviderNetworkCredentialParams defines parameters for CreateProviderNetworkCredential.
+type CreateProviderNetworkCredentialParams struct {
+	IfMatch        string `json:"If-Match"`
+	IdempotencyKey string `json:"Idempotency-Key"`
+}
+
+// RevokeProviderNetworkCredentialParams defines parameters for RevokeProviderNetworkCredential.
+type RevokeProviderNetworkCredentialParams struct {
+	IfMatch        string `json:"If-Match"`
+	IdempotencyKey string `json:"Idempotency-Key"`
+}
+
 // ProbeProviderParams defines parameters for ProbeProvider.
 type ProbeProviderParams struct {
 	// IfMatch Exact provider draft ETag being probed
@@ -4304,6 +4460,9 @@ type DiscoverProviderModelsJSONRequestBody = DiscoverModelsRequest
 
 // SetProviderModelJSONRequestBody defines body for SetProviderModel for application/json ContentType.
 type SetProviderModelJSONRequestBody = SetModelRequest
+
+// CreateProviderNetworkCredentialJSONRequestBody defines body for CreateProviderNetworkCredential for application/json ContentType.
+type CreateProviderNetworkCredentialJSONRequestBody = CreateNetworkCredentialRequest
 
 // ProvisionUserJSONRequestBody defines body for ProvisionUser for application/json ContentType.
 type ProvisionUserJSONRequestBody = ProvisionUserRequest

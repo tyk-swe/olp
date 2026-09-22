@@ -60,11 +60,12 @@ type SlotEntry struct {
 }
 
 type ProviderEntry struct {
-	Name          string                  `json:"name"`
-	Project       *string                 `json:"project"`
-	Configuration providers.Configuration `json:"configuration"`
-	Models        []ModelEntry            `json:"models"`
-	Slots         []SlotEntry             `json:"slots"`
+	NetworkCredentialRef *string                 `json:"network_credential_ref,omitempty"`
+	Name                 string                  `json:"name"`
+	Project              *string                 `json:"project"`
+	Configuration        providers.Configuration `json:"configuration"`
+	Models               []ModelEntry            `json:"models"`
+	Slots                []SlotEntry             `json:"slots"`
 }
 
 type TargetEntry struct {

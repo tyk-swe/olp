@@ -137,7 +137,7 @@ func (s *Server) discover(r *http.Request) (access.Reply, error) {
 		return access.Reply{}, err
 	}
 	var input discoverRequest
-	if err = access.Decode(r, &input); err != nil {
+	if err = access.DecodeUnique(r, &input, 1<<20); err != nil {
 		return access.Reply{}, err
 	}
 	if len(input.Models) > 2000 {
@@ -341,7 +341,7 @@ func (s *Server) setModel(r *http.Request) (access.Reply, error) {
 		return access.Reply{}, err
 	}
 	var input setModelRequest
-	if err = access.Decode(r, &input); err != nil {
+	if err = access.DecodeUnique(r, &input, 1<<20); err != nil {
 		return access.Reply{}, err
 	}
 	tx, err := a.Begin(r)

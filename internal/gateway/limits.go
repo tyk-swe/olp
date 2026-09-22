@@ -485,6 +485,11 @@ func estimateParts(parsed *openai.Request, defaults ...map[string]json.RawMessag
 			break
 		}
 	}
+	if parsed != nil && parsed.Family == openai.FamilyBedrock {
+		if value, ok := integerValue(jsonObject(field("inferenceConfig"))["maxTokens"]); ok {
+			output = &value
+		}
+	}
 	if parsed != nil && parsed.Family.Surface() == "gemini" {
 		config := jsonObject(field("generationConfig"))
 		if v, ok := integerValue(config["maxOutputTokens"]); ok {
@@ -662,7 +667,7 @@ func requestEstimate(x *execution) int64 {
 	var estimate int64
 	for _, attempt := range x.attempts {
 		provider := x.request.release.Snapshot.Providers[attempt.ProviderID]
-		estimate = max(estimate, estimateTokens(x.parsed, provider.ParameterDefaults))
+		estimate = max(estimate, x.providerEstimate(&provider))
 	}
 	return max(estimate, 1)
 }

@@ -309,3 +309,13 @@ principal, so assigned users and project-scoped machine tokens receive 403;
 all-project machine tokens with `read` and `configure` scopes can automate
 export, plan, and apply. The console exposes the workflow to global
 owner/operator sessions under **Settings → Configuration promotion**.
+
+### Versioned provider profiles and per-connection networking
+
+Provider drafts can select explicit API/hosting profiles, operation/dialect defaults,
+semantic headers, serving bindings and secure per-connection proxy/TLS settings.
+Network secrets use provider-owned encrypted references, independently from API
+credential slots. See [provider profiles](provider-profiles.md) for the public
+configuration shape, cloud endpoint differences, inheritance rules, network bounds,
+credential lifecycle and qualification scope. Omitting the new configuration fields
+preserves existing published legacy behavior and snapshot digests.

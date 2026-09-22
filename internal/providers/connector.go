@@ -23,6 +23,7 @@ import (
 	"github.com/tyk-swe/olp/internal/media"
 	"github.com/tyk-swe/olp/internal/protocols"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
+	"github.com/tyk-swe/olp/internal/providerinvoke"
 )
 
 // Probe bounds: one upstream call, one response body, four in flight.
@@ -92,7 +93,7 @@ func (s *Server) call(ctx context.Context, cfg *Configuration, credential []byte
 		return 0, nil, err
 	}
 	req.Header.Set("Accept", "application/json, text/event-stream")
-	if cfg.Kind == KindBedrock && strings.HasSuffix(path, "/converse-stream") {
+	if cfg.Kind == KindBedrock && (strings.HasSuffix(path, "/converse-stream") || strings.HasSuffix(path, "/invoke-with-response-stream")) {
 		req.Header.Set("Accept", "application/vnd.amazon.eventstream")
 	}
 	req.Header.Set("User-Agent", "olp-go/probe")
@@ -102,7 +103,11 @@ func (s *Server) call(ctx context.Context, cfg *Configuration, credential []byte
 	if _, err := s.auth.Apply(ctx, req, cfg.transport(), credential, body); err != nil {
 		return 0, nil, &probeError{Code: "credential_invalid", Detail: err.Error()}
 	}
-	resp, err := s.client.Do(req)
+	client, err := s.connectionClient(ctx, cfg, credential)
+	if err != nil {
+		return 0, nil, &probeError{Code: "network_credential_invalid", Detail: "The configured provider network connection is unavailable."}
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		return 0, nil, classify(err)
 	}
@@ -172,6 +177,9 @@ func (s *Server) listModelFacts(ctx context.Context, cfg *Configuration, credent
 		for name := range cfg.Options.Models {
 			names = append(names, name)
 		}
+		for name := range cfg.Options.Bindings {
+			names = append(names, name)
+		}
 		slices.Sort(names)
 		if len(names) == 0 {
 			return nil, &probeError{Code: "model_required", Detail: "Declare a model before probing this vendor."}
@@ -184,7 +192,7 @@ func (s *Server) listModelFacts(ctx context.Context, cfg *Configuration, credent
 			}
 			previous = name
 			operation := "generation"
-			if cfg.Kind == KindVertex {
+			if cfg.Kind == KindVertex && cfg.transport().Hosting() != "vertex-anthropic" {
 				operation = "token_count"
 			}
 			if value(cfg.Options.VendorID) == "voyage" {
@@ -318,7 +326,7 @@ func decodeModels(body []byte) ([]string, error) {
 
 // certifyTuple uses a bounded live probe or authenticated native media discovery.
 func (s *Server) certifyTuple(ctx context.Context, cfg *Configuration, credential []byte, model string, tuple CapabilityInput, maxEventBytes int) error {
-	if !certifiable(cfg.Kind, value(cfg.Options.VendorID), tuple) {
+	if !certifiable(cfg.Kind, value(cfg.Options.VendorID), tuple) || !cfg.transport().Supports(tuple.Operation, tuple.Surface, tuple.Mode) {
 		return &probeError{Code: "capability_unavailable", Detail: "This connector cannot certify the requested tuple."}
 	}
 	switch {
@@ -377,7 +385,13 @@ func (s *Server) certifyTuple(ctx context.Context, cfg *Configuration, credentia
 		}
 	}
 	families := []openai.Family{family}
-	if tuple.Operation == "generation" && tuple.Surface == "openai" && !protocols.ChatOnly(value(cfg.Options.VendorID)) && (cfg.Kind == KindOpenAI || cfg.Kind == KindAzure || cfg.Kind == KindOpenAICompatible) {
+	if cfg.ProfileID != "" && tuple.Operation == "generation" && tuple.Surface == "openai" {
+		profile, _ := cfg.transport().Profile()
+		if profile.Dialect == "openai-responses" {
+			families = []openai.Family{openai.FamilyResponses}
+		}
+	}
+	if cfg.ProfileID == "" && tuple.Operation == "generation" && tuple.Surface == "openai" && !protocols.ChatOnly(value(cfg.Options.VendorID)) && (cfg.Kind == KindOpenAI || cfg.Kind == KindAzure || cfg.Kind == KindOpenAICompatible) {
 		families = append(families, openai.FamilyResponses)
 	}
 	for _, family := range families {
@@ -391,7 +405,7 @@ func (s *Server) certifyTuple(ctx context.Context, cfg *Configuration, credentia
 			return err
 		}
 		transport := cfg.transport()
-		body, wire, err := protocols.Encode(parsed, cfg.Kind, value(cfg.Options.VendorID), transport.Model(model), cfg.Options.ParameterDefaults)
+		body, wire, err := providerinvoke.Encode(parsed, transport, model, cfg.Options.ParameterDefaults)
 		if err != nil {
 			return err
 		}
@@ -407,7 +421,7 @@ func (s *Server) certifyTuple(ctx context.Context, cfg *Configuration, credentia
 			return statusError(status)
 		}
 		if tuple.Mode == ModeStreaming {
-			_, err = protocols.Stream(wire, family, bytes.NewReader(data), maxEventBytes, "certification", true, func([]byte) error { return nil })
+			_, err = protocols.Stream(wire, family, transport.StreamPayload(bytes.NewReader(data), maxEventBytes), maxEventBytes, "certification", true, func([]byte) error { return nil })
 		} else {
 			_, err = protocols.DecodeRequest(wire, family, data, "certification", protocols.EmbeddingEncoding(parsed, cfg.Options.ParameterDefaults), parsed)
 		}
@@ -419,13 +433,11 @@ func (s *Server) certifyTuple(ctx context.Context, cfg *Configuration, credentia
 }
 
 func (s *Server) certifyBatch(ctx context.Context, cfg *Configuration, credential []byte) error {
-	prefix := ""
-	query := "?limit=1"
-	if cfg.Kind == KindAzure {
-		prefix = "/openai"
-		query = "?api-version=" + url.QueryEscape(value(cfg.APIVersion)) + "&limit=1"
-	}
-	for _, path := range []string{prefix + "/files" + query, prefix + "/batches" + query} {
+	for _, resource := range []string{"files", "batches"} {
+		path, err := cfg.transport().ResourceURL("", resource, url.Values{"limit": []string{"1"}})
+		if err != nil {
+			return err
+		}
 		status, data, err := s.call(ctx, cfg, credential, http.MethodGet, path, nil)
 		if err != nil {
 			return err
@@ -445,32 +457,9 @@ func (s *Server) certifyBatch(ctx context.Context, cfg *Configuration, credentia
 
 func (s *Server) certifyRealtime(ctx context.Context, cfg *Configuration, credential []byte, model string) error {
 	transport := cfg.transport()
-	base := strings.TrimRight(transport.Endpoint, "/")
-	query := url.Values{}
-	var endpoint string
-	if cfg.Kind == KindAzure {
-		deployment := transport.Model(model)
-		if deployment == "" {
-			return &probeError{Code: "model_required", Detail: "Realtime certification requires a configured deployment."}
-		}
-		query.Set("api-version", value(cfg.APIVersion))
-		query.Set("deployment", deployment)
-		endpoint = base + "/openai/realtime?" + query.Encode()
-	} else {
-		upstream := transport.Model(model)
-		if upstream == "" {
-			return &probeError{Code: "model_required", Detail: "Realtime certification requires a configured model."}
-		}
-		query.Set("model", upstream)
-		endpoint = base + "/realtime?" + query.Encode()
-	}
-	switch {
-	case strings.HasPrefix(endpoint, "https://"):
-		endpoint = "wss://" + strings.TrimPrefix(endpoint, "https://")
-	case strings.HasPrefix(endpoint, "http://"):
-		endpoint = "ws://" + strings.TrimPrefix(endpoint, "http://")
-	default:
-		return &probeError{Code: "invalid_endpoint", Detail: "The endpoint cannot serve realtime sessions."}
+	endpoint, err := transport.RealtimeURL(model)
+	if err != nil {
+		return &probeError{Code: "invalid_endpoint", Detail: "The selected profile cannot address this realtime model."}
 	}
 	check := strings.Replace(endpoint, "wss://", "https://", 1)
 	check = strings.Replace(check, "ws://", "http://", 1)
@@ -497,7 +486,11 @@ func (s *Server) certifyRealtime(ctx context.Context, cfg *Configuration, creden
 	if _, err := s.auth.Apply(ctx, req, transport, credential, nil); err != nil {
 		return &probeError{Code: "credential_invalid", Detail: err.Error()}
 	}
-	conn, resp, err := websocket.Dial(ctx, endpoint, &websocket.DialOptions{HTTPClient: s.client, HTTPHeader: req.Header})
+	client, err := s.connectionClient(ctx, cfg, credential)
+	if err != nil {
+		return &probeError{Code: "network_credential_invalid", Detail: "The configured provider network connection is unavailable."}
+	}
+	conn, resp, err := websocket.Dial(ctx, req.URL.String(), &websocket.DialOptions{HTTPClient: client, HTTPHeader: req.Header})
 	if err != nil {
 		if resp != nil && resp.StatusCode != 0 {
 			return statusError(resp.StatusCode)

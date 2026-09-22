@@ -99,7 +99,7 @@ func (s *Server) provider(r *http.Request) (access.Reply, error) {
 func (s *Server) createProvider(r *http.Request) (access.Reply, error) {
 	a := s.Access
 	var input createRequest
-	if err := access.Decode(r, &input); err != nil {
+	if err := access.DecodeUnique(r, &input, 1<<20); err != nil {
 		return access.Reply{}, err
 	}
 	tx, err := a.Begin(r)
@@ -151,6 +151,9 @@ func (s *Server) createProvider(r *http.Request) (access.Reply, error) {
 		return access.Reply{}, err
 	}
 	id, etag := access.NewID(), access.NewID()
+	if err := s.validateNetworkReference(r.Context(), tx, id, &input.Configuration); err != nil {
+		return access.Reply{}, err
+	}
 	configuration, err := json.Marshal(input.Configuration)
 	if err != nil {
 		return access.Reply{}, err
@@ -176,6 +179,19 @@ func (s *Server) createProvider(r *http.Request) (access.Reply, error) {
 			surface = "anthropic"
 		case KindGemini, KindVertex:
 			surface = "gemini"
+		}
+		if input.Configuration.ProfileID != "" {
+			profile, _ := input.Configuration.transport().Profile()
+			switch profile.Dialect {
+			case "anthropic-messages":
+				surface = "anthropic"
+			case "gemini-generate-content":
+				surface = "gemini"
+			case "bedrock-converse":
+				surface = "bedrock"
+			case "bedrock-invoke":
+				surface, operation = "bedrock", "bedrock_invoke"
+			}
 		}
 		if value(input.Configuration.Options.VendorID) == "voyage" {
 			operation = "embeddings"
@@ -214,7 +230,7 @@ func (s *Server) updateProvider(r *http.Request) (access.Reply, error) {
 		return access.Reply{}, err
 	}
 	var input updateRequest
-	if err = access.Decode(r, &input); err != nil {
+	if err = access.DecodeUnique(r, &input, 1<<20); err != nil {
 		return access.Reply{}, err
 	}
 	tx, err := a.Begin(r)
@@ -247,6 +263,9 @@ func (s *Server) updateProvider(r *http.Request) (access.Reply, error) {
 		if err = invalidateEvidence(r.Context(), tx, id); err != nil {
 			return access.Reply{}, err
 		}
+	}
+	if err := s.validateNetworkReference(r.Context(), tx, id, &input.Configuration); err != nil {
+		return access.Reply{}, err
 	}
 	configuration, err := json.Marshal(input.Configuration)
 	if err != nil {
@@ -417,6 +436,9 @@ func (row *slotRow) published(authMode string) runtime.RevisionSlot {
 func (s *Server) activateProvider(r *http.Request) (access.Reply, error) {
 	return s.mutation(r, "provider.activate", func(ctx context.Context, tx pgx.Tx, p access.Principal, current *record) (access.Reply, error) {
 		if err := current.Configuration.Validate(s.Egress); err != nil {
+			return access.Reply{}, err
+		}
+		if err := s.validateNetworkReference(ctx, tx, current.ID, &current.Configuration); err != nil {
 			return access.Reply{}, err
 		}
 		if _, _, err := s.credentialFor(ctx, tx, current); err != nil {
@@ -739,14 +761,18 @@ func (s *Server) revisionDiff(r *http.Request) (access.Reply, error) {
 	}
 	return access.OK(map[string]any{
 		"from_revision": from.Revision, "to_revision": to.Revision,
-		"name_changed":          from.Name != to.Name,
-		"endpoint_changed":      deref(a.Endpoint) != deref(b.Endpoint),
-		"cloud_context_changed": deref(a.CloudRegion) != deref(b.CloudRegion) || deref(a.CloudProject) != deref(b.CloudProject),
-		"deployment_changed":    deref(a.Deployment) != deref(b.Deployment),
-		"api_version_changed":   deref(a.APIVersion) != deref(b.APIVersion),
-		"connector_changed":     a.Kind != b.Kind || a.AuthMode != b.AuthMode || !slices.Equal(a.Options.CredentialHeaders, b.Options.CredentialHeaders),
-		"credential_changed":    deref(from.CredentialVersion) != deref(to.CredentialVersion),
-		"models_added":          added, "models_removed": removed, "models_changed": changed,
+		"network_configuration_changed":  !sameJSON(a.Options.Network, b.Options.Network),
+		"profile_changed":                a.ProfileID != b.ProfileID || a.ProfileRevision != b.ProfileRevision,
+		"semantic_configuration_changed": !sameJSON(a.Options.SemanticHeaders, b.Options.SemanticHeaders) || !sameJSON(a.Options.QuerySettings, b.Options.QuerySettings) || !sameJSON(a.Options.OperationDefaults, b.Options.OperationDefaults),
+		"serving_binding_changed":        !sameJSON(a.Options.Bindings, b.Options.Bindings),
+		"name_changed":                   from.Name != to.Name,
+		"endpoint_changed":               deref(a.Endpoint) != deref(b.Endpoint),
+		"cloud_context_changed":          deref(a.CloudRegion) != deref(b.CloudRegion) || deref(a.CloudProject) != deref(b.CloudProject),
+		"deployment_changed":             deref(a.Deployment) != deref(b.Deployment),
+		"api_version_changed":            deref(a.APIVersion) != deref(b.APIVersion),
+		"connector_changed":              a.Kind != b.Kind || a.AuthMode != b.AuthMode || !slices.Equal(a.Options.CredentialHeaders, b.Options.CredentialHeaders),
+		"credential_changed":             deref(from.CredentialVersion) != deref(to.CredentialVersion),
+		"models_added":                   added, "models_removed": removed, "models_changed": changed,
 		"capabilities_added": capsAdded, "capabilities_removed": capsRemoved,
 	}), nil
 }
@@ -847,4 +873,10 @@ func (s *Server) restoreRevisionAsDraft(r *http.Request) (access.Reply, error) {
 		}
 		return access.Detail(map[string]any{"provider": d, "credential_restored": false}, d.ETag), nil
 	})
+}
+
+func sameJSON(a, b any) bool {
+	left, _ := json.Marshal(a)
+	right, _ := json.Marshal(b)
+	return string(left) == string(right)
 }

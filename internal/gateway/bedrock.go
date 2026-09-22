@@ -14,7 +14,6 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream"
 
 	"github.com/tyk-swe/olp/internal/access"
-	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/protocols"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
 	"github.com/tyk-swe/olp/internal/runtime"
@@ -49,7 +48,7 @@ func (s *Server) bedrockAuthenticate(r *http.Request) (access.Authority, *Error)
 
 func bedrockQualified(p *runtime.Provider, model, operation, mode string) bool {
 	return p.Kind == "bedrock" &&
-		connectors.Supports(p.Kind, p.VendorID, operation, "bedrock", mode) &&
+		p.Connector().Supports(operation, "bedrock", mode) &&
 		p.Supports(model, operation, "bedrock", mode)
 }
 
@@ -209,7 +208,11 @@ func (s *Server) bedrockCall(ctx context.Context, x *execution, p *pin, endpoint
 		}
 		return nil, finish(classCredential, nil)
 	}
-	resp, err := s.client.Do(req)
+	client, err := s.providerClient(ctx, x.request.release, &p.provider, p.slot)
+	if err != nil {
+		return nil, finish(classCredential, nil)
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		class := classConnect
 		if ctx.Err() != nil {

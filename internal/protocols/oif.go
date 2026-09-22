@@ -72,6 +72,12 @@ func PrepareTarget(r *openai.Request, wire openai.Family, kind, vendor, model st
 	if err != nil {
 		return oif.Prepared{}, wire, err
 	}
+	// An operation codec may select a documented collection form such as
+	// Gemini batch embeddings. The result descriptor must name that actual wire.
+	destination = openai.Descriptor(wire, r.Stream)
+	if _, err := contracts.Binding(destination.Dialect, destination.Operation); err != nil {
+		return oif.Prepared{}, wire, unsupported("operation")
+	}
 	doc, err := oif.ParseJSON(body, r.OIF().Document().Limits())
 	if err != nil {
 		return oif.Prepared{}, wire, err
