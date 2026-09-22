@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"errors"
+	"github.com/tyk-swe/olp/internal/oif"
 	"io"
 	"regexp"
 	"strings"
@@ -329,10 +330,14 @@ func ReadBedrockEvent(r io.Reader, limit int) (eventstream.Message, error) {
 	return eventstream.NewDecoder().Decode(io.MultiReader(bytes.NewReader(prelude[:]), io.LimitReader(r, int64(size)-12)), nil)
 }
 func streamBedrock(r io.Reader, limit int, route string, emit openai.Emit) (*openai.Completion, error) {
+	return streamBedrockEvents(r, limit, route, emit, nil)
+}
+func streamBedrockEvents(r io.Reader, limit int, route string, emit openai.Emit, observe func(oif.Event) error) (*openai.Completion, error) {
 	c := &openai.Completion{ProviderModel: route}
 	started, stopped := false, false
 	blocks := map[int64]*contentBlock{}
 	retained := 0
+	sequence := uint64(0)
 	for {
 		message, e := ReadBedrockEvent(r, limit)
 		if errors.Is(e, io.EOF) {
@@ -360,8 +365,18 @@ func streamBedrock(r io.Reader, limit int, route string, emit openai.Emit) (*ope
 			return c, &openai.UpstreamError{Code: header(":exception-type"), Message: "Bedrock stream failed"}
 		}
 		kind := header(":event-type")
-		f, e := object(message.Payload)
+		event, e := openai.LiftEvent(openai.FamilyBedrock, string(message.Payload), kind, sequence, limit)
 		if e != nil {
+			return c, e
+		}
+		sequence++
+		if observe != nil {
+			if e := observe(event); e != nil {
+				return c, e
+			}
+		}
+		f := event.Source().Fields()
+		if f == nil {
 			return c, protocolError("invalid AWS event payload")
 		}
 		switch kind {

@@ -30,3 +30,27 @@ skipped because they are revoked, cooled or unmeterable do not consume it.
 Another attempt to serve the same inference request after an eligible failure,
 permitted only before response commitment and when the upstream outcome is not
 classified as ambiguous.
+
+**OIF (OpenLLMProxy Internal Format)**:
+The source-preserving representation of an operation's request, result, or event,
+including its native meaning and the obligations required to preserve it.
+
+**Dialect**:
+A versioned API language defining an operation's requests, results, events, and
+continuation rules, independently of the environment that hosts it.
+
+**Provider profile**:
+A versioned, compatible combination of dialect, hosting, authentication, and
+transport for a provider-model binding.
+
+**Serving identity**:
+The selected model and its serving environment, including the API profile,
+upstream principal, region, resource scope, and observable revisions.
+
+**Interaction contract**:
+The scoped promise that execution, client observation, permitted continuation,
+and effects are preserved for a particular operation and client behavior.
+
+**Continuation**:
+A permitted next interaction whose retained native dependencies correspond to
+the client's visible history and selected branch.

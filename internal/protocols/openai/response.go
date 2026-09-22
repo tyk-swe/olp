@@ -2,6 +2,7 @@ package openai
 
 import (
 	"encoding/json"
+	"github.com/tyk-swe/olp/internal/oif"
 	"strings"
 )
 
@@ -32,6 +33,9 @@ type ToolCall struct {
 // Completion summarises an observed generation, which may be partial on stream
 // failure. Body is the rewritten unary document and is nil for streams.
 type Completion struct {
+	// Native retains the immutable upstream result before projection. Streams
+	// use incremental OIF events instead of accumulating a result document.
+	Native        oif.Result `json:"-"`
 	Body          []byte
 	UpstreamID    string
 	ProviderModel string
@@ -89,8 +93,12 @@ func errorObject(raw json.RawMessage) *UpstreamError {
 
 // DecodeChat validates a unary chat completion and rewrites its model to the route.
 func DecodeChat(body []byte, route string) (*Completion, error) {
-	fields, err := object(body)
+	source, err := liftResult(FamilyChat, body)
 	if err != nil {
+		return nil, err
+	}
+	fields := source.Source().Fields()
+	if fields == nil {
 		return nil, &ProtocolError{Detail: "chat completion is not a JSON object"}
 	}
 	if raw, present := fields["error"]; present && !isNull(raw) {
@@ -105,7 +113,7 @@ func DecodeChat(body []byte, route string) (*Completion, error) {
 	if !ok || len(choices) == 0 {
 		return nil, &ProtocolError{Detail: "chat completion has no choices"}
 	}
-	c := &Completion{}
+	c := &Completion{Native: source}
 	c.UpstreamID, _ = stringField(fields, "id")
 	c.ProviderModel, _ = stringField(fields, "model")
 	seen := make(map[int64]bool, len(choices))
@@ -234,8 +242,12 @@ func DecodeBackgroundResponse(body []byte, route string) (*Completion, error) {
 }
 
 func decodeResponse(body []byte, route string, background bool) (*Completion, error) {
-	fields, err := object(body)
+	source, err := liftResult(FamilyResponses, body)
 	if err != nil {
+		return nil, err
+	}
+	fields := source.Source().Fields()
+	if fields == nil {
 		return nil, &ProtocolError{Detail: "response is not a JSON object"}
 	}
 	status, _ := stringField(fields, "status")
@@ -250,6 +262,10 @@ func decodeResponse(body []byte, route string, background bool) (*Completion, er
 	c, err := responseSummary(fields)
 	if err != nil {
 		return nil, err
+	}
+	c.Native = source
+	if pending {
+		c.Native, _ = oif.NewResult(source.Descriptor(), source.Source(), oif.Pending)
 	}
 	if fields["model"], err = json.Marshal(route); err != nil {
 		return nil, err

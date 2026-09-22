@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
+	"github.com/tyk-swe/olp/internal/oif"
 	"math"
 	"strconv"
 	"strings"
@@ -22,6 +23,24 @@ func DecodeRequest(wire, target openai.Family, body []byte, route, encoding stri
 }
 
 func decode(wire, target openai.Family, body []byte, route, encoding string, request *openai.Request) (*openai.Completion, error) {
+	if wire == openai.FamilyChat || wire == openai.FamilyResponses {
+		return decodeLegacy(wire, target, body, route, encoding, request)
+	}
+	doc, err := oif.ParseJSON(body, oif.Limits{})
+	if err != nil {
+		return nil, protocolError(err.Error())
+	}
+	result, err := contracts.Result(openai.Descriptor(wire, false), doc, oif.Complete)
+	if err != nil {
+		return nil, protocolError("unregistered result contract")
+	}
+	c, err := decodeLegacy(wire, target, result.Source().Bytes(), route, encoding, request)
+	if c != nil {
+		c.Native = result
+	}
+	return c, err
+}
+func decodeLegacy(wire, target openai.Family, body []byte, route, encoding string, request *openai.Request) (*openai.Completion, error) {
 	var c *openai.Completion
 	var err error
 	switch wire {

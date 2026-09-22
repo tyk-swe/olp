@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"github.com/tyk-swe/olp/internal/oif"
 
 	"github.com/tyk-swe/olp/internal/protocols/openai"
 )
@@ -50,9 +51,7 @@ func InspectInputText(r *openai.Request, fn TextSlot) *openai.Request {
 			w.geminiFields(fields)
 		}
 	}
-	out := openai.NewEnvelope(r.Family, r.Route, r.Stream, fields)
-	out.IncludeUsage = r.IncludeUsage
-	return out
+	return r.WithFields(fields, oif.ExplicitTransform)
 }
 
 func InspectOutputText(family openai.Family, body []byte, fn TextSlot) ([]byte, error) {

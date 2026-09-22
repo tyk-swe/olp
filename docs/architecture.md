@@ -14,7 +14,9 @@ PostgreSQL migrations live under `internal/database/migrations/`.
 | Content-policy validation and matching | `internal/contentpolicy/` |
 | Provider-resource mappings and stored-response accounting | `internal/resources/` and `internal/gateway/` |
 | Admission, request execution, retries, cancellation | `internal/gateway/` |
-| Canonical operations and OpenAI, Anthropic, Gemini, Bedrock codecs | `internal/protocols/` |
+| Immutable operation sources, envelopes, provenance and codec linking | `internal/oif/` |
+| Ordered generation views and independent operation contracts | `internal/operations/` |
+| OpenAI, Anthropic, Gemini, Bedrock codecs and legacy adapters | `internal/protocols/` |
 | Immutable runtime publication, activation, authority refresh | `internal/runtime/` |
 | Distributed reservations, rates, concurrency, cost budgets | `internal/limits/` |
 | Accounting, pricing, request history, ingestion, retention, notification delivery | `internal/usage/` and `console/src/lib/features/usage/` |
@@ -37,6 +39,33 @@ their transport deadlines, streaming commitment and delivery; adjacent resource,
 video, Bedrock, and realtime paths handle their specific lifecycles. Protocol
 codecs live in `internal/protocols/`. Independent key-authority refresh prevents
 a failed activation from retaining revoked access.
+
+OIF is an in-process contract, not a public API or another request authority.
+`internal/oif` owns immutable JSON source spans, exact presence and numeric
+representations, request/result/event envelopes, bounded blob references, and
+explicit provenance. It imports no provider, transport, storage, or generation
+implementation. `internal/operations/generation` owns ordered messages, nodes,
+tool dependencies, candidate branches, and native control scopes. Dialect
+adapters in `internal/protocols` derive those views from source and link them
+through a trusted build-time registry; a non-generation operation does not
+extend generation types.
+
+Ingress rejects duplicate decoded keys and malformed UTF-8 or surrogate escapes
+before dispatch. Compatibility request accessors return copies; resource and
+content-policy changes create overlays without replacing the caller source.
+Unary results retain their native source before model rewriting. Stream codecs
+lift bounded native events before projection, including framing metadata, and
+keep no unbounded event history. Existing protocol validators continue to own
+terminal grammar, while the gateway retains cancellation and response commitment.
+
+`protocols.PrepareTarget` records the existing legacy mapper's destination and
+the defaults it actually applied. Explicit destination dialects cannot fall
+back to another API. `protocols.PrepareIdentity` preserves native subtrees and
+allows only registered model/resource/transport changes; it does not normalize
+Responses input strings, rename token controls, or qualify an interaction by
+itself. The planner still owns policy coverage, profile compatibility, source
+requirements and client continuation. See [the source decision](adr/0001-immutable-operation-sources.md)
+and [OIF conservation checks](qualification/fidelity/oif-source.md).
 
 PostgreSQL owns durable state. Valkey coordinates limits, hints, and accounting
 events; retries and deduplication support recovery. Durable media jobs and
