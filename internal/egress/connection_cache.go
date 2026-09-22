@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 )
@@ -36,16 +37,31 @@ func NewConnectionClientCache(capacity int) *ConnectionClientCache {
 	return &ConnectionClientCache{capacity: capacity, entries: make(map[[32]byte]*list.Element)}
 }
 
+// Client reuses connections within a standalone, single-authority cache.
+// Provider-serving call sites must use ClientScoped to isolate their providers,
+// revisions and credential principals even when network options are identical.
 func (c *ConnectionClientCache) Client(policy Policy, options *ConnectionOptions, secret []byte, defaultResponseHeaderTimeout time.Duration) (*http.Client, error) {
+	return c.ClientScoped("standalone", policy, options, secret, defaultResponseHeaderTimeout)
+}
+
+// ClientScoped reuses a connection pool only within the caller's authority
+// scope. The scope must include provider/tenant ownership, serving revision and
+// credential principal identity as applicable; it must not contain secrets.
+// Credential resolution and current revocation checks remain with the caller.
+func (c *ConnectionClientCache) ClientScoped(scope string, policy Policy, options *ConnectionOptions, secret []byte, defaultResponseHeaderTimeout time.Duration) (*http.Client, error) {
+	if scope == "" || len(scope) > 1024 || strings.TrimSpace(scope) != scope || strings.ContainsAny(scope, "\r\n\x00") {
+		return nil, errors.New("connection client scope must be a nonempty opaque identity of at most 1024 bytes")
+	}
 	if c == nil {
 		return nil, errors.New("connection client cache is unavailable")
 	}
 	keyDocument, err := json.Marshal(struct {
+		Scope                 string
 		Policy                Policy
 		Options               *ConnectionOptions
 		SecretDigest          [32]byte
 		ResponseHeaderTimeout time.Duration
-	}{policy, options, sha256.Sum256(secret), defaultResponseHeaderTimeout})
+	}{scope, policy, options, sha256.Sum256(secret), defaultResponseHeaderTimeout})
 	if err != nil {
 		return nil, errors.New("invalid connection cache configuration")
 	}
