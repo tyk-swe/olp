@@ -373,6 +373,7 @@
     streamFrames = [];
     streamDone = null;
     streamProblem = null;
+    completedRequest = request;
     if (streamEnabled) {
       await runStream(request);
       return;

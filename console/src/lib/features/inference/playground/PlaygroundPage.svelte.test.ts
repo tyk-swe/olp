@@ -245,6 +245,8 @@ describe('advanced composer', () => {
     flushSync();
     await settle(0);
     expect(host.textContent).toContain('Operation result');
+    expect(host.textContent).toContain('embeddings');
+    expect(host.textContent).toContain('Dense array');
   });
 
   it('inspects the exact native request without running inference or exposing prompt content', async () => {
