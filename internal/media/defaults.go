@@ -3,14 +3,14 @@ package media
 import (
 	"bytes"
 	"encoding/json"
-	"fmt"
-	"io"
+	"errors"
 	"maps"
 	"slices"
 	"strconv"
 	"strings"
 
 	"github.com/tyk-swe/olp/internal/connectors"
+	"github.com/tyk-swe/olp/internal/oif"
 )
 
 // EncodeConfigured fills omitted operation members from the selected profile
@@ -131,40 +131,18 @@ func configuredFailure(name, detail string) *Error {
 	return Fail(400, "unsupported_parameter", "The configured media field "+strconv.Quote(name)+" "+detail+".")
 }
 
-// sourceMediaFields owns raw member bytes independently of caller input buffers.
-// Ambiguous duplicate names and trailing documents cannot preserve one request.
+// sourceMediaFields owns exact native member bytes independently of the caller.
+// The shared OIF parser rejects ambiguity anywhere in the document, including
+// nested duplicate names and malformed Unicode that encoding/json would repair.
 func sourceMediaFields(body []byte) (map[string]json.RawMessage, error) {
-	decoder := json.NewDecoder(bytes.NewReader(body))
-	token, err := decoder.Token()
-	if err != nil || token != json.Delim('{') {
-		return nil, fmt.Errorf("expected media object")
-	}
-	fields := map[string]json.RawMessage{}
-	for decoder.More() {
-		token, err := decoder.Token()
-		if err != nil {
-			return nil, err
-		}
-		name, ok := token.(string)
-		if !ok {
-			return nil, fmt.Errorf("expected media member")
-		}
-		if _, duplicate := fields[name]; duplicate {
-			return nil, fmt.Errorf("duplicate media member")
-		}
-		var raw json.RawMessage
-		if err := decoder.Decode(&raw); err != nil {
-			return nil, err
-		}
-		fields[name] = raw
-	}
-	if _, err := decoder.Token(); err != nil {
+	doc, err := oif.ParseJSON(body, oif.Limits{})
+	if err != nil {
 		return nil, err
 	}
-	if _, err := decoder.Token(); err != io.EOF {
-		return nil, fmt.Errorf("expected one media object")
+	if doc.Root().Kind() != oif.Object {
+		return nil, errors.New("expected media object")
 	}
-	return fields, nil
+	return doc.Fields(), nil
 }
 
 func configuredFields(r *Request) (map[string]json.RawMessage, *Error) {
