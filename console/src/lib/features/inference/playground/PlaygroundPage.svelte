@@ -23,6 +23,7 @@
     type InspectRoutingInput
   } from '$lib/features/inference/playground/inspection';
   import { nativeObject, parseNativeJSON } from '$lib/json/nativeJson';
+  import RealtimeTrace from './RealtimeTrace.svelte';
   import OperationResult from './OperationResult.svelte';
   import StrictToolPlayground from './StrictToolPlayground.svelte';
   import NativeOperationPlayground from './NativeOperationPlayground.svelte';
@@ -112,7 +113,8 @@
     { value: 'moderation', label: 'Moderation' },
     { value: 'rerank', label: 'Rerank' },
     { value: 'classification', label: 'Classification' },
-    { value: 'scoring', label: 'Scoring' }
+    { value: 'scoring', label: 'Scoring' },
+    { value: 'realtime', label: 'Realtime event trace' }
   ];
   const composerModes = [
     { value: 'basic', label: 'Basic' },
@@ -280,11 +282,14 @@
         route: model.trim(),
         operation: composer === 'advanced' ? operation : 'generation',
         surface: registeredNative ? 'native' : surface,
-        mode: registeredNative
-          ? 'unary'
-          : streamEnabled
-            ? 'streaming'
-            : 'unary',
+        mode:
+          operation === 'realtime'
+            ? 'realtime'
+            : registeredNative
+              ? 'unary'
+              : streamEnabled
+                ? 'streaming'
+                : 'unary',
         preferences: JSON.parse(routing),
         apiKeyId: simulateKeyId || null,
         seed: simulateSeed,
@@ -292,7 +297,7 @@
           registeredNative && operation === 'embeddings'
             ? 'raw-vector-storage/1'
             : undefined,
-        ...(composer === 'advanced'
+        ...(composer === 'advanced' && operation !== 'realtime'
           ? {
               request: registeredNative
                 ? nativeOperationRequest(
@@ -376,6 +381,11 @@
     if (strictSelected) {
       validationError =
         'Use the qualified public client below for this strict route.';
+      return;
+    }
+    if (operation === 'realtime') {
+      validationError =
+        'Use the local realtime event viewer below; it does not open a provider session.';
       return;
     }
     if (operation === 'classification' || operation === 'scoring') {
@@ -488,19 +498,26 @@
               entered — the route enforces the final decision.</small
             >{/if}
         </div>
-        <div class="form-field">
-          <label for="playground-template">Template</label><select
-            id="playground-template"
-            value={templateKey}
-            onchange={(event) => applyTemplate(event.currentTarget.value)}
-          >
-            {#each playgroundTemplates as template (template.key)}<option
-                value={template.key}>{template.label}</option
-              >{/each}
-          </select><small
-            >Loads a request document; tools are never executed.</small
-          >
-        </div>
+        {#if operation === 'realtime'}
+          <p class="policy-note">
+            The local trace viewer below does not use a route or request
+            template and starts no session.
+          </p>
+        {:else}
+          <div class="form-field">
+            <label for="playground-template">Template</label><select
+              id="playground-template"
+              value={templateKey}
+              onchange={(event) => applyTemplate(event.currentTarget.value)}
+            >
+              {#each playgroundTemplates as template (template.key)}<option
+                  value={template.key}>{template.label}</option
+                >{/each}
+            </select><small
+              >Loads a request document; tools are never executed.</small
+            >
+          </div>
+        {/if}
       </div>
     {:else}
       <SegmentedRadioGroup
@@ -622,7 +639,7 @@
             class="mono"
             spellcheck="false"></textarea>
         </div>{/if}
-    {:else}
+    {:else if operation !== 'realtime'}
       <div class="form-field">
         <label for="playground-raw">Request JSON</label><textarea
           id="playground-raw"
@@ -662,7 +679,10 @@
     {#if validationError}<p class="field-error" role="alert">
         {validationError}
       </p>{/if}
-    {#if strictSelected}<p class="policy-note" role="status">
+    {#if strictSelected && operation !== 'realtime'}<p
+        class="policy-note"
+        role="status"
+      >
         This route requires a client that retains its native observation and
         continuation contract. Use the public strict client below with an
         authorized inference key.
@@ -748,6 +768,7 @@
         disabled={mutation.isPending ||
           streaming ||
           strictSelected ||
+          operation === 'realtime' ||
           (composer === 'advanced' && !operationKnown)}
         >{mutation.isPending || streaming ? 'Running…' : 'Run test'}</button
       >
@@ -919,13 +940,17 @@
         bind:dialect={nativeDialect}
       />
     {/key}
-  {:else}
+  {:else if operation !== 'realtime'}
     <section class="card strict-client-unavailable" role="status">
       This route needs a native or negotiated public client. Choose Advanced,
       Generation, OpenAI and the negotiated tool template for the currently
       qualified tool workflow.
     </section>
   {/if}
+{/if}
+
+{#if composer === 'advanced' && operation === 'realtime'}
+  <RealtimeTrace />
 {/if}
 
 {#if explanation}<section class="card composer">

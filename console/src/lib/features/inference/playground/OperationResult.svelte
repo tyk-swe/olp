@@ -147,6 +147,7 @@
   .operation-result {
     display: grid;
     gap: 0.7rem;
+    min-width: 0;
   }
   h3,
   .scope-note {
@@ -175,6 +176,18 @@
   }
   details {
     margin-top: 0.5rem;
+    min-width: 0;
+  }
+  .table-shell {
+    min-width: 0;
+    max-width: 100%;
+  }
+  .data-table {
+    table-layout: fixed;
+  }
+  .data-table :is(th, td) {
+    padding: 0.65rem 0.55rem;
+    font-size: var(--text-caption);
   }
   summary {
     cursor: pointer;

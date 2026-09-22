@@ -17,7 +17,8 @@ export type PlaygroundOperation =
   | 'moderation'
   | 'rerank'
   | 'classification'
-  | 'scoring';
+  | 'scoring'
+  | 'realtime';
 
 export type PlaygroundStreamDone = {
   id?: string;

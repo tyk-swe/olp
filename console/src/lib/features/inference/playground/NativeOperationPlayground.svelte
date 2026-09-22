@@ -153,6 +153,7 @@
 <style>
   .native-client {
     display: grid;
+    min-width: 0;
     gap: 0.8rem;
     padding: 1.5rem;
     margin-top: 1rem;

@@ -619,3 +619,45 @@ test('strict native operation client preserves packed vectors and rerank scores 
   expect(JSON.stringify(rankCalls)).not.toContain(rankKey);
   await rank.screenshot({ path: info.outputPath('strict-native-rerank.png') });
 });
+
+test('realtime trace view keeps VAD and interruption order without opening inference', async ({
+  page
+}, info) => {
+  await signIn(page);
+  const publicRequests: string[] = [];
+  page.on('request', (request) => {
+    const path = new URL(request.url()).pathname;
+    if (
+      request.method() === 'POST' &&
+      ['/v1/', '/native/', '/api/v3/playground'].some((prefix) =>
+        path.startsWith(prefix)
+      )
+    )
+      publicRequests.push(path);
+  });
+  await page.goto('/playground');
+  await page.getByRole('radio', { name: 'Advanced' }).check();
+  await page.getByLabel('Operation').selectOption('realtime');
+  await expect(page.getByRole('button', { name: 'Run test' })).toBeDisabled();
+  await page
+    .getByLabel('Native event JSON')
+    .fill(
+      '[{"type":"input_audio_buffer.speech_started","audio_start_ms":120,"audio":"private-audio"},{"type":"input_audio_buffer.speech_stopped","audio_end_ms":840},{"type":"response.created"},{"type":"conversation.item.truncated","offset_ms":-0,"item_id":"private-item"},{"type":"response.done"}]'
+    );
+  await page
+    .getByRole('button', { name: 'Inspect event order locally' })
+    .click();
+  const sequence = page.getByLabel('Realtime event sequence');
+  await expect(sequence.getByText(/VAD speech start/)).toBeVisible();
+  await expect(sequence.getByText(/VAD speech stop/)).toBeVisible();
+  await expect(sequence.getByText(/Interruption \/ truncation/)).toBeVisible();
+  await expect(sequence).toContainText('offset_ms: -0');
+  await expect(sequence).not.toContainText('private-');
+  expect(publicRequests).toEqual([]);
+  await page
+    .getByRole('heading', { name: 'Realtime event timeline' })
+    .locator('..')
+    .screenshot({
+      path: info.outputPath('realtime-event-timeline.png')
+    });
+});
