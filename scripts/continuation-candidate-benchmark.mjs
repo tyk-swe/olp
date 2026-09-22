@@ -14,7 +14,7 @@ const runner = 'scripts/continuation-candidate-benchmark.mjs';
 const harness = 'tests/integration/continuation_candidate_benchmark_test.go';
 const reference = 'docs/evidence/fidelity-performance/barrier-v1/baseline.json';
 const frozenBudgets = 'docs/evidence/fidelity-performance/barrier-v1/budgets.json';
-const sharedSources = [
+export const sharedSources = [
   'tests/integration/continuation_barrier_benchmark_test.go',
   'tests/integration/fidelity_lifecycle_performance_test.go',
   'tests/integration/access_test.go',
@@ -24,19 +24,19 @@ const sharedSources = [
   'tests/fixtures/fidelity/v1/anthropic-tool-workflow.sse'
 ];
 const names = ['small', 'large'].flatMap((size) => [1, 8].map((c) => `${size}/c${c}/translated`));
-const commandArgs = ['test', '-mod=readonly', '-tags=integration', '-run', '^TestNegotiatedContinuationCandidateBenchmark$', '-count=1', '-v', '-timeout=10m', './tests/integration'];
-const runtimeEnvironment = { GOMAXPROCS: '4', GOGC: '100', GOMEMLIMIT: 'off', GODEBUG: '', OLP_CONTINUATION_CANDIDATE_MEASURE: '1' };
-const conditions = {
+export const commandArgs = ['test', '-mod=readonly', '-tags=integration', '-run', '^TestNegotiatedContinuationCandidateBenchmark$', '-count=1', '-v', '-timeout=10m', './tests/integration'];
+export const runtimeEnvironment = { GOMAXPROCS: '4', GOGC: '100', GOMEMLIMIT: 'off', GODEBUG: '', OLP_CONTINUATION_CANDIDATE_MEASURE: '1' };
+export const conditions = {
   network: 'IPv4 loopback, two warm HTTP/1.1 inference hops, no inference TLS',
   authority: 'Public strict Anthropic Messages profile, same disposable PostgreSQL release and provider fixture, state-enabled API key and existing encrypted resource authority',
   workflow: 'Go SDK-equivalent parser of the versioned OpenAI Chat chunks and standard assistant/tool history; pinned JavaScript/Python official SDKs qualified separately with the same native oracle',
   history: 'Original user turn or the same additional 262144 ASCII bytes in both provider requests and the encrypted complete dependency',
   reference_relation: 'Same frozen native first/next request and 19-event provider oracle. Candidate action-ready means first actionable projected tool chunk followed by a separate authenticated public GET that decrypts committed ready state, before either fixture action. Native wire-tool is earlier and is not a candidate observation.',
-  outcomes: '24 complete two-turn workflows, 48 provider dispatches, 456 native events, 312 projected observations, 48 fixture actions and 24 ready checks per repetition. Any unexpected provider request or response fails the test.',
+  outcomes: '24 complete two-turn workflows, 48 provider dispatches, 456 native events, 312 ordered first-turn projected observations, 48 final-turn observations, 48 fixture actions and 24 ready checks per repetition. Any unexpected provider request or response fails the test.',
   resources: 'Process CPU, allocations and 1ms sampled heap growth include Go client, provider, gateway, oracle and instrumentation; exclude separate PostgreSQL process; no actual SDK process CPU or isolated gateway RSS',
   ordering: 'Fixed size/concurrency order, one warmup per repetition, three repetitions of 24 successful workflows at concurrency 1/8'
 };
-const comparisonScope = [
+export const comparisonScope = [
   'ns/op', 'process-cpu-ns/op', 'B/op', 'allocs/op', 'sampled-heap-growth-B',
   ...[50, 95, 99].flatMap((p) => [`workflow-p${p}-us`, `action-ready-p${p}-us`])
 ];
@@ -72,7 +72,7 @@ export function validateRuns(runs) {
   for (const run of runs) {
     if (!names.includes(run.name) || ![0, 1, 2].includes(run.repetition) || seen.has(`${run.name}/${run.repetition}`) || run.contract !== contract) throw new Error('Unknown or duplicate candidate workload');
     seen.add(`${run.name}/${run.repetition}`);
-    if (run.samples !== 24 || run.dispatches !== 48 || run.first_requests !== 24 || run.next_requests !== 24 || run.native_events !== 456 || run.observations !== 312 || run.actions !== 48 || run.ready_checks !== 24 || run.rejected !== 0) throw new Error('Candidate accepted work or semantic inventory changed');
+    if (run.samples !== 24 || run.dispatches !== 48 || run.first_requests !== 24 || run.next_requests !== 24 || run.native_events !== 456 || run.first_turn_observations !== 312 || run.final_observations !== 48 || run.actions !== 48 || run.ready_checks !== 24 || run.rejected !== 0) throw new Error('Candidate accepted work or semantic inventory changed');
     const large = run.name.startsWith('large/');
     if (run.history_bytes !== (large ? 262144 : 0) || !Number.isSafeInteger(run.state_bytes) || run.state_bytes <= run.history_bytes || run.state_bytes > (5 << 20)) throw new Error('Candidate encrypted state is missing or unbounded');
     if (sizes.has(large) && sizes.get(large) !== run.state_bytes) throw new Error('Candidate state size varies across repetitions');
@@ -134,9 +134,11 @@ export function compareCandidate(candidate, baseline, budgets) {
   if (candidate.schema !== schema || candidate.contract !== contract || candidate.working_tree !== '') throw new Error('Unknown or dirty candidate evidence');
   if (candidate.reference_sha256 !== hash(reference) || candidate.frozen_budget_sha256 !== hash(frozenBudgets) || candidate.reference_revision !== baseline.source_revision) throw new Error('Candidate compared to a changed reference');
   if (candidate.harness_sha256 !== hash(harness) || candidate.runner_sha256 !== hash(runner)) throw new Error('Candidate harness or runner changed');
+  if (!isDeepStrictEqual(Object.keys(candidate.shared_source_sha256 ?? {}).sort(), [...sharedSources].sort())) throw new Error('Candidate dependency inventory changed');
   for (const [source, digest] of Object.entries(candidate.shared_source_sha256)) if (hash(source) !== digest) throw new Error(`Candidate dependency changed: ${source}`);
   if (!isDeepStrictEqual(candidate.conditions, conditions) || !isDeepStrictEqual(candidate.runtime_environment, runtimeEnvironment) || !isDeepStrictEqual(candidate.command, ['go', ...commandArgs])) throw new Error('Candidate method changed');
-  if (candidate.toolchain !== baseline.toolchain || !isDeepStrictEqual(candidate.storage, baseline.storage) || candidate.hardware.cpu !== baseline.hardware.cpu || candidate.hardware.logical_cpus !== baseline.hardware.logical_cpus) throw new Error('Reference and candidate runtime conditions differ');
+  if (candidate.repetitions !== 3 || candidate.samples_per_repetition !== 24 || !isDeepStrictEqual(candidate.concurrency, [1, 8])) throw new Error('Candidate run configuration changed');
+  if (candidate.toolchain !== baseline.toolchain || candidate.go_build_environment !== baseline.go_build_environment || !isDeepStrictEqual(candidate.storage, baseline.storage) || !isDeepStrictEqual(candidate.hardware, baseline.hardware)) throw new Error('Reference and candidate runtime conditions differ');
   if (!isDeepStrictEqual(candidate.comparison_scope, comparisonScope)) throw new Error('Candidate comparison scope changed');
   const summary = validateRuns(candidate.runs);
   const failures = [];

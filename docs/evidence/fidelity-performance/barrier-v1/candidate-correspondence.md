@@ -40,8 +40,9 @@ no candidate metric because production code does not expose those internal
 timers.
 
 Each candidate repetition requires 24 complete workflows, 48 exact provider
-dispatches, 456 served native events, 312 ordered projected observations, 48
-enabled tool actions, 24 independently decrypted ready reads and zero rejected
+dispatches, 456 served native events, 312 ordered first-turn projected
+observations, 48 final-turn text boundary observations, 48 enabled tool actions,
+24 independently decrypted ready reads and zero rejected
 requests. Three repetitions run for each small/large and concurrency 1/8
 combination. The runner checks the baseline self-comparison, immutable source
 hashes, complete counters and observation order before it compares candidate

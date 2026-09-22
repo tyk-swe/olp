@@ -29,26 +29,27 @@ import (
 const candidateContract = "negotiated-chat-anthropic-tools-v1/go-sdk-equivalent/1"
 
 type candidateSample struct {
-	workflow, firstEvent, toolVisible, actionReady   time.Duration
-	observations, nativeEvents, actions, readyChecks int
-	submission                                       string
+	workflow, firstEvent, toolVisible, actionReady                      time.Duration
+	observations, finalObservations, nativeEvents, actions, readyChecks int
+	submission                                                          string
 }
 type candidateRun struct {
-	Name          string             `json:"name"`
-	Repetition    int                `json:"repetition"`
-	Samples       int                `json:"samples"`
-	Dispatches    int64              `json:"dispatches"`
-	FirstRequests int64              `json:"first_requests"`
-	NextRequests  int64              `json:"next_requests"`
-	NativeEvents  int                `json:"native_events"`
-	Observations  int                `json:"observations"`
-	Actions       int                `json:"actions"`
-	ReadyChecks   int                `json:"ready_checks"`
-	Rejected      int                `json:"rejected"`
-	HistoryBytes  int                `json:"history_bytes"`
-	StateBytes    int                `json:"state_bytes"`
-	Contract      string             `json:"contract"`
-	Metrics       map[string]float64 `json:"metrics"`
+	Name                  string             `json:"name"`
+	Repetition            int                `json:"repetition"`
+	Samples               int                `json:"samples"`
+	Dispatches            int64              `json:"dispatches"`
+	FirstRequests         int64              `json:"first_requests"`
+	NextRequests          int64              `json:"next_requests"`
+	NativeEvents          int                `json:"native_events"`
+	FirstTurnObservations int                `json:"first_turn_observations"`
+	FinalObservations     int                `json:"final_observations"`
+	Actions               int                `json:"actions"`
+	ReadyChecks           int                `json:"ready_checks"`
+	Rejected              int                `json:"rejected"`
+	HistoryBytes          int                `json:"history_bytes"`
+	StateBytes            int                `json:"state_bytes"`
+	Contract              string             `json:"contract"`
+	Metrics               map[string]float64 `json:"metrics"`
 }
 
 func candidateSource(d barrierDocuments, slug string) ([]byte, error) {
@@ -316,21 +317,60 @@ func candidateWorkflow(ctx context.Context, d barrierDocuments, client *http.Cli
 	if err != nil || response.StatusCode != http.StatusOK {
 		return sample, fmt.Errorf("translated next status %d: %s; %v", response.StatusCode, body, err)
 	}
+	var direct struct {
+		ID         string `json:"id"`
+		Model      string `json:"model"`
+		StopReason string `json:"stop_reason"`
+		Content    []struct {
+			Type string `json:"type"`
+			Text string `json:"text"`
+		} `json:"content"`
+		Usage struct {
+			InputTokens  int64 `json:"input_tokens"`
+			OutputTokens int64 `json:"output_tokens"`
+		} `json:"usage"`
+	}
+	if err := json.Unmarshal(d.final, &direct); err != nil {
+		return sample, err
+	}
 	var final struct {
+		ID      string `json:"id"`
+		Model   string `json:"model"`
 		Choices []struct {
 			Message struct {
-				Content string `json:"content"`
+				Role      string            `json:"role"`
+				Content   string            `json:"content"`
+				ToolCalls []json.RawMessage `json:"tool_calls"`
 			} `json:"message"`
 			Finish string `json:"finish_reason"`
 		} `json:"choices"`
+		Usage struct {
+			PromptTokens     int64 `json:"prompt_tokens"`
+			CompletionTokens int64 `json:"completion_tokens"`
+			TotalTokens      int64 `json:"total_tokens"`
+		} `json:"usage"`
 		OLP struct {
-			Ready   bool   `json:"ready"`
-			Version string `json:"version"`
+			Ready        bool              `json:"ready"`
+			Version      string            `json:"version"`
+			Handle       string            `json:"handle"`
+			Observations []json.RawMessage `json:"observations"`
 		} `json:"olp"`
 	}
-	if json.Unmarshal(body, &final) != nil || len(final.Choices) != 1 || final.Choices[0].Message.Content != "Weather: sunny. Time: 14:00." || final.Choices[0].Finish != "stop" || !final.OLP.Ready || final.OLP.Version != continuationClientVersion {
+	if json.Unmarshal(body, &final) != nil || len(direct.Content) != 1 || direct.Content[0].Type != "text" || direct.StopReason != "end_turn" || direct.Model != "fixture-model" || direct.Usage.InputTokens != 64 || direct.Usage.OutputTokens != 8 || len(final.Choices) != 1 || final.ID != direct.ID || final.Model != slug || final.Choices[0].Message.Role != "assistant" || final.Choices[0].Message.Content != direct.Content[0].Text || len(final.Choices[0].Message.ToolCalls) != 0 || final.Choices[0].Finish != "stop" || final.Usage.PromptTokens != direct.Usage.InputTokens || final.Usage.CompletionTokens != direct.Usage.OutputTokens || final.Usage.TotalTokens != direct.Usage.InputTokens+direct.Usage.OutputTokens || !final.OLP.Ready || final.OLP.Version != continuationClientVersion || final.OLP.Handle == "" || len(final.OLP.Observations) != 2 || bytes.Contains(body, []byte("opaque-fixture-signature-do-not-log")) {
 		return sample, fmt.Errorf("incomplete final SDK result")
 	}
+	for i, raw := range final.OLP.Observations {
+		var observation struct {
+			Index int    `json:"index"`
+			Type  string `json:"type"`
+			Phase string `json:"phase"`
+			Text  string `json:"text"`
+		}
+		if json.Unmarshal(raw, &observation) != nil || observation.Index != 0 || observation.Type != "text" || observation.Phase != []string{"start", "end"}[i] || i == 0 && observation.Text != direct.Content[0].Text || i == 1 && observation.Text != "" {
+			return sample, fmt.Errorf("final SDK observations lost native text boundary")
+		}
+	}
+	sample.finalObservations = len(final.OLP.Observations)
 	sample.nativeEvents = 19 // Fixed provider stream; ready requires its terminal.
 	sample.workflow = time.Since(start)
 	return sample, nil
@@ -435,7 +475,8 @@ func TestNegotiatedContinuationCandidateBenchmark(t *testing.T) {
 				values := map[string][]time.Duration{"workflow": {}, "first-event": {}, "tool-visible": {}, "action-ready": {}}
 				for _, sample := range results {
 					run.NativeEvents += sample.nativeEvents
-					run.Observations += sample.observations
+					run.FirstTurnObservations += sample.observations
+					run.FinalObservations += sample.finalObservations
 					run.Actions += sample.actions
 					run.ReadyChecks += sample.readyChecks
 					values["workflow"] = append(values["workflow"], sample.workflow)
@@ -443,7 +484,7 @@ func TestNegotiatedContinuationCandidateBenchmark(t *testing.T) {
 					values["tool-visible"] = append(values["tool-visible"], sample.toolVisible)
 					values["action-ready"] = append(values["action-ready"], sample.actionReady)
 				}
-				if run.NativeEvents != samples*19 || run.Observations != samples*13 || run.Actions != samples*2 || run.ReadyChecks != samples {
+				if run.NativeEvents != samples*19 || run.FirstTurnObservations != samples*13 || run.FinalObservations != samples*2 || run.Actions != samples*2 || run.ReadyChecks != samples {
 					t.Fatal("candidate semantic coverage changed")
 				}
 				for name, observations := range values {

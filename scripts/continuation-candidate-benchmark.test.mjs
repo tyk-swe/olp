@@ -1,6 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { metricNames, validateRuns, parseRuns } from './continuation-candidate-benchmark.mjs';
+import { readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { metricNames, validateRuns, parseRuns, compareCandidate, sharedSources, commandArgs, runtimeEnvironment, conditions, comparisonScope } from './continuation-candidate-benchmark.mjs';
+
+const hash = (path) => createHash('sha256').update(readFileSync(path)).digest('hex');
+const baselinePath = 'docs/evidence/fidelity-performance/barrier-v1/baseline.json';
+const budgetPath = 'docs/evidence/fidelity-performance/barrier-v1/budgets.json';
+const baseline = JSON.parse(readFileSync(baselinePath, 'utf8'));
+const budgets = JSON.parse(readFileSync(budgetPath, 'utf8'));
 
 function completeRuns() {
   const runs = [];
@@ -15,13 +23,32 @@ function completeRuns() {
     runs.push({
       name: `${size}/c${concurrency}/translated`, repetition, samples: 24,
       dispatches: 48, first_requests: 24, next_requests: 24,
-      native_events: 456, observations: 312, actions: 48, ready_checks: 24, rejected: 0,
+      native_events: 456, first_turn_observations: 312, final_observations: 48,
+      actions: 48, ready_checks: 24, rejected: 0,
       history_bytes: size === 'large' ? 262144 : 0,
       state_bytes: size === 'large' ? 527000 : 2100,
       contract: 'negotiated-chat-anthropic-tools-v1/go-sdk-equivalent/1', metrics
     });
   }
   return runs;
+}
+
+function completeEvidence() {
+  return {
+    schema: 'openllmproxy.dev/continuation-candidate-performance/v1',
+    contract: 'negotiated-chat-anthropic-tools-v1/go-sdk-equivalent/1',
+    working_tree: '',
+    reference_sha256: hash(baselinePath), frozen_budget_sha256: hash(budgetPath),
+    reference_revision: baseline.source_revision,
+    harness_sha256: hash('tests/integration/continuation_candidate_benchmark_test.go'),
+    runner_sha256: hash('scripts/continuation-candidate-benchmark.mjs'),
+    shared_source_sha256: Object.fromEntries(sharedSources.map((source) => [source, hash(source)])),
+    conditions, runtime_environment: runtimeEnvironment, command: ['go', ...commandArgs],
+    repetitions: 3, samples_per_repetition: 24, concurrency: [1, 8],
+    toolchain: baseline.toolchain, go_build_environment: baseline.go_build_environment,
+    storage: structuredClone(baseline.storage), hardware: structuredClone(baseline.hardware),
+    comparison_scope: comparisonScope, runs: completeRuns()
+  };
 }
 
 test('complete candidate observations have a fixed comparison inventory', () => {
@@ -46,7 +73,8 @@ test('changed history, state, observations or metric inventory fail', () => {
   for (const change of [
     (runs) => { runs[6].history_bytes--; },
     (runs) => { runs[6].state_bytes = 262144; },
-    (runs) => { runs[0].observations--; },
+    (runs) => { runs[0].first_turn_observations--; },
+    (runs) => { runs[0].final_observations--; },
     (runs) => { delete runs[0].metrics['process-cpu-ns/op']; },
     (runs) => { runs[0].metrics['action-ready-p99-us'] = -1; }
   ]) {
@@ -62,4 +90,21 @@ test('first observation, projected tool, recoverable action and workflow stay or
 });
 test('candidate parser accepts only recorded measurement markers', () => {
   assert.deepEqual(parseRuns('other {"x":1}\nCANDIDATE_MEASUREMENT {"name":"small"}\n'), [{ name: 'small' }]);
+});
+test('frozen runtime identity and source inventory are required before comparison', () => {
+  assert.deepEqual(compareCandidate(completeEvidence(), baseline, budgets), []);
+  for (const change of [
+    (evidence) => { evidence.hardware.total_memory_bytes--; },
+    (evidence) => { evidence.hardware.kernel = 'other'; },
+    (evidence) => { evidence.go_build_environment += '\n'; },
+    (evidence) => { delete evidence.shared_source_sha256[sharedSources[0]]; },
+    (evidence) => { evidence.shared_source_sha256['unfrozen-oracle'] = 'x'; },
+    (evidence) => { evidence.repetitions = 2; },
+    (evidence) => { evidence.samples_per_repetition = 8; },
+    (evidence) => { evidence.concurrency = [8, 1]; }
+  ]) {
+    const evidence = completeEvidence();
+    change(evidence);
+    assert.throws(() => compareCandidate(evidence, baseline, budgets));
+  }
 });
