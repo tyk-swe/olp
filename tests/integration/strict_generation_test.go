@@ -258,13 +258,14 @@ func TestStrictPublicResponsesPreserveScalarAndArrayInputs(t *testing.T) {
 	statefulKey := stateKey(t, h, owner, slug, true)
 	h.refresh()
 	status, response, _ = h.gatewayRaw("POST", "/v1/responses", statefulKey, strings.NewReader(`{"model":"`+slug+`","input":"native default retention"}`), map[string]string{"Content-Type": "application/json"})
-	if status != 400 || !bytes.Contains(response, []byte(`"code":"state_carrier"`)) || len(f.captured()) != before {
-		t.Fatalf("unqualified retained continuation dispatched: %d %s", status, response)
+	if status != 200 || !bytes.Contains(response, []byte(`"id":"strict_response_`)) || len(f.captured()) != before+1 {
+		t.Fatalf("native retained continuation failed: %d %s", status, response)
 	}
 	status, response, _ = h.gatewayRaw("POST", "/v1/responses", statefulKey, strings.NewReader(`{"model":"`+slug+`","input":"explicit retention","store":true}`), map[string]string{"Content-Type": "application/json"})
-	if status != 400 || !bytes.Contains(response, []byte(`"code":"state_carrier"`)) || len(f.captured()) != before {
-		t.Fatalf("explicit unqualified retained continuation dispatched: %d %s", status, response)
+	if status != 200 || !bytes.Contains(response, []byte(`"id":"strict_response_`)) || len(f.captured()) != before+2 {
+		t.Fatalf("explicit native retained continuation failed: %d %s", status, response)
 	}
+	before = len(f.captured())
 	status, response, _ = h.gatewayRaw("POST", "/v1/responses", key, strings.NewReader(`{"model":"`+slug+`","store":false,"input":[{"role":"user","content":[{"type":"input_file","file_id":"unowned-native-file"}]}]}`), map[string]string{"Content-Type": "application/json"})
 	if status != 400 || !bytes.Contains(response, []byte(`"code":"unsupported_stateful_reference"`)) || len(f.captured()) != before {
 		t.Fatalf("unowned provider asset dispatched: %d %s", status, response)

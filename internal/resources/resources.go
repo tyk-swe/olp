@@ -200,7 +200,8 @@ func (s *Store) Update(ctx context.Context, localID, state string, metadata json
 	tag, err := s.pool.Exec(ctx, `UPDATE olp_go.provider_resources
 		SET state=COALESCE($2,state), metadata=metadata||COALESCE($3,'{}'::jsonb),
 			expires_at=COALESCE($4,expires_at), updated_at=now()
-		WHERE id=$1 AND state<>$5 AND (expires_at IS NULL OR expires_at>now())`,
+		WHERE id=$1 AND state<>$5 AND (expires_at IS NULL OR expires_at>now())
+ AND kind<>'continuation' AND (kind<>'strict_response' OR ($3::jsonb IS NULL AND $4::timestamptz IS NULL))`,
 		id, nilIfEmpty(state), nilIfEmpty(string(metadata)), expiresAt, StateDeleted)
 	if err != nil {
 		return fmt.Errorf("provider resource update: %w", err)

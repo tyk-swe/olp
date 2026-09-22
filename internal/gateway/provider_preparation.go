@@ -41,7 +41,7 @@ func (x *execution) preparedProvider(provider *runtime.Provider, model string) (
 		if template == nil {
 			return preparedProvider{}, &interaction.Error{Code: "target_capability", Requirement: "compiled_interaction", Message: "The selected target has no compiled strict interaction contract."}
 		}
-		binding := interaction.Context{Headers: x.semanticHeaders, Query: x.semanticQuery, AllowProviderState: x.authority.Policy.AllowProviderState, RequiredServing: x.serving}
+		binding := interaction.Context{Headers: x.semanticHeaders, Query: x.semanticQuery, AllowProviderState: x.authority.Policy.AllowProviderState, RequiredServing: x.serving, RetainedResponses: x.providerState}
 		if x.continuation != nil {
 			binding.ContinuationVersion = x.continuation.version
 			binding.DurableContinuation = true

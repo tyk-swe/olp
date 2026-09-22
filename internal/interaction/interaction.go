@@ -37,6 +37,7 @@ type Context struct {
 	RequiredServing     *ServingIdentity
 	ContinuationVersion string
 	DurableContinuation bool
+	RetainedResponses   bool
 	Continuation        *Continuation
 }
 type ServingIdentity = oif.ServingIdentity

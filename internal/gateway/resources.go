@@ -40,6 +40,10 @@ func (s *Server) registerState(mux *http.ServeMux) {
 		mux.HandleFunc("GET /v1/batches/{id}", s.getBatch)
 		mux.HandleFunc("POST /v1/batches/{id}/cancel", s.cancelBatch)
 	}
+	if s.Resources.Encrypted() {
+		mux.HandleFunc("GET /v1/continuations/{id}", s.recoverContinuation)
+		mux.HandleFunc("GET /v1/continuation-submissions/{submission}", s.recoverContinuation)
+	}
 	mux.HandleFunc("GET /v1/responses/{id}", s.getResponse)
 	mux.HandleFunc("DELETE /v1/responses/{id}", s.deleteResponse)
 	mux.HandleFunc("POST /v1/responses/{id}/cancel", s.cancelResponse)

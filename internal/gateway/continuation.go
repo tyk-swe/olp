@@ -224,3 +224,55 @@ func (s *Server) validateToolDelivery(delivery interaction.Delivery) error {
 	}
 	return nil
 }
+
+// recoverContinuation serves already committed client delivery only. It performs
+// current authority checks and never enters admission, provider dispatch or a
+// second inference retry engine.
+func (s *Server) recoverContinuation(w http.ResponseWriter, r *http.Request) {
+	x, authority, done := s.stateBegin(w, r, openai.FamilyChat)
+	if done {
+		return
+	}
+	defer s.release(r.Context())
+	x.authority = authority
+	if values := r.Header.Values(continuationHeader); len(values) != 1 || values[0] != interaction.ContinuationV1 {
+		s.stateFail(x, w, invalidRequest("state_carrier", "Recovery requires the tested chat-anthropic-tools-v1 client contract.", nil), x.family)
+		return
+	}
+	var res *resources.Resource
+	var payload []byte
+	var err error
+	if submission := r.PathValue("submission"); submission != "" {
+		res, payload, err = s.Resources.FindSubmission(r.Context(), authority.ID, submission)
+	} else {
+		res, payload, err = s.Resources.ReadContract(r.Context(), resources.KindContinuation, authority.ID, r.PathValue("id"))
+	}
+	if err != nil {
+		s.stateFail(x, w, notFoundError("continuation_unavailable", "No unexpired continuation with this identity is available to this key."), x.family)
+		return
+	}
+	route, exists := x.request.release.Snapshot.Routes[res.RouteSlug]
+	if !exists || !authority.Allows("inference", route.Slug, route.ProjectID, s.now()) {
+		s.stateFail(x, w, notFoundError("continuation_unavailable", "The continuation is unavailable to this key."), x.family)
+		return
+	}
+	x.route = &route
+	state, err := decodeStoredContinuation(payload)
+	if err != nil {
+		s.stateFail(x, w, continuationError("continuation_unavailable", "The stored contract is unavailable."), x.family)
+		return
+	}
+	if e := s.authorizeContinuation(r.Context(), x, res, state); e != nil {
+		s.stateFail(x, w, e, x.family)
+		return
+	}
+	if res.State != resources.StateReady || state.Interaction == nil {
+		s.stateFail(x, w, continuationError("continuation_outcome_unknown", "This submission reserved provider work but has no committed ready delivery; fresh inference will not run."), x.family)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("X-Should-Retry", "false")
+	_ = json.NewEncoder(w).Encode(map[string]any{"version": state.Version, "handle": res.ID, "state": "ready", "assistant": state.Interaction.Assistant, "delivery": state.Delivery})
+	s.finish(x, nil, http.StatusOK)
+}

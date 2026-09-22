@@ -92,6 +92,7 @@ type execution struct {
 	estimate        int64
 
 	historicalSnapshot *runtime.Snapshot
+	responseContract   *storedResponseContract
 	continuation       *continuationExecution
 	pin                *resources.Resource
 	pinnedSlot         *runtime.Slot

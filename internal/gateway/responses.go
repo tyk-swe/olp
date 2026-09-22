@@ -41,7 +41,7 @@ func (s *Server) responsesStateGate(ctx context.Context, x *execution, authority
 		_ = json.Unmarshal(raw, &store)
 	}
 	if route, ok := x.request.release.Snapshot.Routes[parsed.Route]; ok && runtime.FidelityMode(route.Fidelity) == runtime.FidelityStrict {
-		if parsed.Field("store") == nil {
+		if parsed.Field("store") == nil || bytes.Equal(bytes.TrimSpace(parsed.Field("store")), []byte("null")) {
 			// Native Responses omission requests provider retention. Strict admission
 			// cannot silently inject store:false to avoid the caller's state policy.
 			store = true
@@ -76,11 +76,14 @@ func (s *Server) responsesStateGate(ctx context.Context, x *execution, authority
 	if s.Resources == nil {
 		return serverError(http.StatusServiceUnavailable, "provider_state_unavailable", "Provider state is not configured on this installation.")
 	}
+	if route, ok := x.request.release.Snapshot.Routes[parsed.Route]; ok && runtime.FidelityMode(route.Fidelity) == runtime.FidelityStrict && !s.Resources.Encrypted() {
+		return serverError(http.StatusServiceUnavailable, "provider_state_unavailable", "Strict retained Responses requires encrypted resource authority.")
+	}
 	x.providerState = true
 	if previous == "" {
 		return nil
 	}
-	res, err := s.Resources.Get(ctx, resources.KindResponse, authority.ID, previous)
+	res, contract, err := s.readResponseResource(ctx, authority.ID, previous)
 	if errors.Is(err, resources.ErrNotFound) {
 		param := "previous_response_id"
 		return invalidRequest("invalid_previous_response_id", "previous_response_id must name a stored response owned by this key.", &param)
@@ -91,6 +94,18 @@ func (s *Server) responsesStateGate(ctx context.Context, x *execution, authority
 	if res.RouteSlug != parsed.Route {
 		param := "previous_response_id"
 		return invalidRequest("invalid_previous_response_id", "previous_response_id must reference a response created under this model.", &param)
+	}
+	if route, ok := x.request.release.Snapshot.Routes[parsed.Route]; ok && runtime.FidelityMode(route.Fidelity) == runtime.FidelityStrict && contract == nil {
+		return invalidRequest("state_carrier", "This retained response has no historical strict interaction contract.", nil)
+	}
+	if contract != nil {
+		if e := s.authorizeResponseContract(ctx, x, authority, res, contract); e != nil {
+			return e
+		}
+		x.responseContract = contract
+		x.serving = &contract.Receipt.Serving
+		x.servingSlot = res.SlotID
+		x.servingBinding = contract.Binding
 	}
 	x.pin = res
 	x.providerState = true
@@ -136,7 +151,7 @@ func (s *Server) pinAttempts(ctx context.Context, x *execution) *Error {
 
 func responseStoreRequested(parsed *openai.Request) bool {
 	raw := parsed.Field("store")
-	if raw == nil {
+	if raw == nil || bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
 		return true
 	}
 	var store bool
@@ -180,6 +195,18 @@ func (s *Server) mapStoredResponse(ctx context.Context, x *execution, authority 
 			at := time.Unix(seconds, 0).UTC()
 			expires = &at
 		}
+	}
+	if x.strict() {
+		encoded, _ := json.Marshal(metadata)
+		res, err := s.putStrictResponse(ctx, x, &fact, upstreamID, state, encoded, expires)
+		if err != nil {
+			return nil, serverError(http.StatusInternalServerError, "continuation_unavailable", "The strict response contract could not be committed.")
+		}
+		out, err := rewriteID(body, "id", res.ID)
+		if err != nil {
+			return nil, serverError(http.StatusBadGateway, "upstream_error", "The provider returned a malformed response object.")
+		}
+		return out, nil
 	}
 	deferred := s.pendingResponseUsage(x, &fact, metadata)
 	encoded, _ := json.Marshal(metadata)
@@ -249,7 +276,7 @@ func (s *Server) responseCall(w http.ResponseWriter, r *http.Request, op func(co
 		s.stateFail(x, w, providerStateForbidden(), x.family)
 		return
 	}
-	res, err := s.Resources.Get(r.Context(), resources.KindResponse, authority.ID, r.PathValue("id"))
+	res, contract, err := s.readResponseResource(r.Context(), authority.ID, r.PathValue("id"))
 	if errors.Is(err, resources.ErrNotFound) {
 		s.stateFail(x, w, notFoundError("not_found", "No stored response with this identifier exists for this key."), x.family)
 		return
@@ -257,6 +284,13 @@ func (s *Server) responseCall(w http.ResponseWriter, r *http.Request, op func(co
 	if err != nil {
 		s.stateFail(x, w, serverError(http.StatusInternalServerError, "internal_error", "The stored response could not be read."), x.family)
 		return
+	}
+	x.authority = authority
+	if contract != nil {
+		if e := s.authorizeResponseContract(r.Context(), x, authority, res, contract); e != nil {
+			s.stateFail(x, w, e, x.family)
+			return
+		}
 	}
 	p, route, e := s.resolveResource(r.Context(), x, authority, res, "generation")
 	if e != nil {
@@ -428,7 +462,7 @@ func (s *Server) mapStreamResponseFrame(ctx context.Context, x *execution, fact 
 	}
 	local, ok := x.responseMap[upstreamID]
 	if !ok {
-		res, err := s.Resources.GetByUpstream(ctx, resources.KindResponse, x.keyID, fact.ProviderID, upstreamID)
+		res, err := s.Resources.GetByUpstream(ctx, responseResourceKind(x), x.keyID, fact.ProviderID, upstreamID)
 		if errors.Is(err, resources.ErrNotFound) {
 			res, err = s.putStreamResponse(ctx, x, fact, upstreamID, response)
 		}
@@ -496,6 +530,9 @@ func (s *Server) putStreamResponse(ctx context.Context, x *execution, fact *Atte
 	}
 	deferred := s.pendingResponseUsage(x, fact, metadata)
 	encoded, _ := json.Marshal(metadata)
+	if x.strict() {
+		return s.putStrictResponse(ctx, x, fact, upstreamID, state, encoded, expires)
+	}
 	res, err := s.Resources.Put(ctx, &resources.Resource{
 		Kind:               resources.KindResponse,
 		APIKeyID:           x.keyID,
