@@ -42,6 +42,10 @@ func TestActiveContinuationKeepsCompatibleHistoricalRevisionAcrossRestart(t *tes
 			parityGeneration(w, "anthropic", string(probe["stream"]) == "true")
 			return
 		}
+		if r.Header.Get("X-Api-Key") != vendorSecret || r.Header.Get("Anthropic-Version") != "2023-06-01" {
+			http.Error(w, "historical API credential or revision changed", 400)
+			return
+		}
 		historicalCalls.Add(1)
 		var input map[string]json.RawMessage
 		_ = json.Unmarshal(body, &input)
@@ -106,6 +110,8 @@ func TestActiveContinuationKeepsCompatibleHistoricalRevisionAcrossRestart(t *tes
 	detail := h.want(owner, "GET", providerPath, nil, nil, 200)
 	slots := h.want(owner, "GET", providerPath+"/credential-slots", nil, nil, 200)
 	historicalCredential := slots["items"].([]any)[0].(map[string]any)["credential_version_id"].(string)
+	h.want(owner, "POST", providerPath+"/credentials", map[string]any{"credential": "rotated-fixture-secret"}, withMatch(detail, idem(uuid.NewString())), 201)
+	detail = h.want(owner, "GET", providerPath, nil, nil, 200)
 	configuration := detail["configuration"].(map[string]any)
 	configuration["endpoint"] = replacement.URL + "/v1"
 	configuration["options"].(map[string]any)["operation_defaults"].(map[string]any)["generation"].(map[string]any)["values"].(map[string]any)["max_tokens"] = 999
